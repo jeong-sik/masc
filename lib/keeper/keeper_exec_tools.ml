@@ -286,7 +286,8 @@ let execute_keeper_tool_call_with_outcome
     | "keeper_broadcast"
     | "keeper_task_claim"
     | "keeper_task_create"
-    | "keeper_task_done" ->
+    | "keeper_task_done"
+    | "keeper_task_submit_for_verification" ->
       make_executed_tool_result
         (Keeper_exec_task.handle_keeper_task_tool ~config ~meta ~name ~args)
     | n when String.starts_with ~prefix:"masc_autoresearch_" n ->

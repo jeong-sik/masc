@@ -8,7 +8,9 @@ import { toolsData } from './tool-state'
 // ── State signals ────────────────────────────
 
 const policyMode = signal<'preset' | 'custom'>('preset')
-const preset = signal<'minimal' | 'messaging' | 'coding' | 'research' | 'full'>('full')
+const preset = signal<
+  'minimal' | 'social' | 'messaging' | 'dispatch' | 'coding' | 'research' | 'delivery' | 'full'
+>('full')
 const alsoAllowItems = signal<string[]>([])
 const customAllowItems = signal<string[]>([])
 const denyItems = signal<string[]>([])
@@ -24,9 +26,12 @@ const textInputBuffer = signal('')
 
 const PRESET_DESCRIPTIONS: Record<string, string> = {
   minimal: 'base + status, tool_help',
+  social: 'minimal + direct messages and social relay',
   messaging: 'base + board, coordination, voice, governance',
+  dispatch: 'goal/task routing, keeper ping, code read, board + shell read',
   coding: 'base + filesystem, library, shell, coding shards',
   research: 'base + filesystem, library, board, autoresearch',
+  delivery: 'research + coding + delivery surfaces',
   full: '전체 후보 도구',
 }
 
@@ -77,7 +82,14 @@ function resetEditorState(params: {
   policyMode.value = params.mode === 'custom' ? 'custom' : 'preset'
   const pv = params.preset
   preset.value =
-    pv === 'minimal' || pv === 'messaging' || pv === 'coding' || pv === 'research' || pv === 'full'
+    pv === 'minimal'
+    || pv === 'social'
+    || pv === 'messaging'
+    || pv === 'dispatch'
+    || pv === 'coding'
+    || pv === 'research'
+    || pv === 'delivery'
+    || pv === 'full'
       ? pv : 'full'
   alsoAllowItems.value = [...(params.alsoAllow ?? [])]
   customAllowItems.value = [...(params.customAllowlist ?? [])]

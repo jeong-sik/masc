@@ -85,10 +85,8 @@ let model_map_of_keeper_rows keepers =
     (function
       | `Assoc _ as keeper_json -> (
           match member "name" keeper_json, member "active_model" keeper_json with
-          | `String name, `String model when String.trim model <> "" ->
-              Hashtbl.replace model_map name model
-          | _ -> ())
-      | _ -> ())
+          | `String _, `String _ | `String _, _ | _, `String _ | _, _ -> ())
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> ())
     keepers;
   model_map
 

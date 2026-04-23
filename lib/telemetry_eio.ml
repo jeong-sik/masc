@@ -164,7 +164,8 @@ let summarize_tool_usage ?fs config : tool_usage_summary =
         incr total_calls;
         update_tool_usage stats_by_tool ~tool_name ~success
           ~timestamp:record.timestamp
-    | _ -> ()
+    | Agent_joined _ | Agent_left _ | Task_started _ | Task_completed _
+    | Handoff_triggered _ | Error_occurred _ | Tool_assigned _ -> ()
   ) records;
   {
     telemetry_path;
@@ -205,12 +206,14 @@ let summarize_agent_activity ?fs config ~since : agent_activity list =
               first_seen = min current.first_seen record.timestamp;
               last_seen = max current.last_seen record.timestamp;
             }
+      | Tool_called { agent_id = None; _ } -> ()
       | Agent_joined { agent_id; _ } ->
           if not (Hashtbl.mem by_agent agent_id) then
             Hashtbl.replace by_agent agent_id
               { agent_id; tool_calls = 0; success_count = 0; failure_count = 0;
                 first_seen = record.timestamp; last_seen = record.timestamp }
-      | _ -> ()
+      | Agent_left _ | Task_started _ | Task_completed _ | Handoff_triggered _
+      | Error_occurred _ | Tool_assigned _ -> ()
   ) records;
   Hashtbl.fold (fun _ v acc -> v :: acc) by_agent []
   |> List.sort (fun a b -> compare b.tool_calls a.tool_calls)

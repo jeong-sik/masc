@@ -247,6 +247,48 @@ describe('Governance surface', () => {
     expect(judgeStatus?.textContent).toContain('cascade failed')
   }, 20000)
 
+  it('renders stale-visible judge status without collapsing to offline error', async () => {
+    const staleVisible: DashboardGovernanceResponse = {
+      generated_at: '2026-04-23T00:00:00Z',
+      summary: { cases_open: 0, pending_ruling: 0, ready_auto_execute: 0, needs_human_gate: 0, executed: 0 },
+      items: [],
+      activity: [],
+      judge: {
+        judge_online: true,
+        refreshing: false,
+        status: 'stale_visible',
+        degraded_reason: 'timeout',
+        cached_judgments_visible: true,
+        last_error: 'Execution timed out after 60.0s',
+        keeper_name: 'governance-judge',
+        model_used: 'glm:test',
+        generated_at: '2026-04-23T00:00:00Z',
+      },
+      judgments: [],
+      pending_actions: [],
+      approval_queue: [],
+    }
+
+    const { Governance } = await loadComponentWithApi({
+      decideGovernanceExecutionOrder: Vitest.vi.fn().mockResolvedValue(undefined),
+      fetchDashboardGovernance: Vitest.vi.fn().mockResolvedValue(staleVisible),
+      fetchGovernanceCaseStatus: Vitest.vi.fn().mockResolvedValue(governanceBundle()),
+      resolveGovernanceApproval: Vitest.vi.fn().mockResolvedValue({ ok: true, id: 'appr-1', decision: 'approve' }),
+      submitGovernanceCaseBrief: Vitest.vi.fn().mockResolvedValue(governanceBundle()),
+      submitGovernancePetition: Vitest.vi.fn().mockResolvedValue({ case: { id: 'gov-case-1' } }),
+    })
+
+    render(html`<${Governance} />`, container)
+    await flushUi()
+
+    const judgeStatus = container.querySelector('[data-testid="judge-status"]')
+    expect(judgeStatus).toBeTruthy()
+    expect(judgeStatus?.textContent).toContain('캐시 유지')
+    expect(judgeStatus?.textContent).toContain('Execution timed out')
+    expect(container.textContent).toContain('fresh judgment 캐시')
+    expect(container.textContent).not.toContain('AI Judge 오프라인')
+  }, 20000)
+
   it('renders keeper approval queue and resolves approval from the dashboard', async () => {
     const withApprovalQueue: DashboardGovernanceResponse = {
       generated_at: '2026-04-09T00:00:00Z',

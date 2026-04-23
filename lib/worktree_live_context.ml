@@ -12,17 +12,18 @@ let clear_git_capture_hook_for_tests () =
 
 (* `git status --porcelain` timeout budget.
 
-   The 5.0s default hit its ceiling 30x in a 45-minute fleet window on
-   2026-04-20 when the workdir was a Second Brain root with many
-   worktrees, thousands of untracked files, and concurrent indexer
-   activity. Each timeout falls through to stale cache (live context
-   goes quiet for the keeper) and emits a WARN.
+   The original 5.0s default hit its ceiling 30x in a 45-minute fleet
+   window on 2026-04-20 when the workdir was a Second Brain root with
+   many worktrees, thousands of untracked files, and concurrent indexer
+   activity. On 2026-04-23, the 15.0s follow-up budget still timed out
+   in `/Users/dancer/me` with 64 worktrees, which left operator
+   snapshots stale and generated recurring WARN noise (#9628).
 
-   15.0s covers p99 for large working trees without meaningfully
-   stretching keeper turn latency — the call is cached (see
-   [status_cache_ttl_sec] below) so the full budget is paid at most
+   30.0s keeps the capture bounded while giving large repos enough head
+   room for a cached status refresh. The call is still cached (see
+   [status_cache_ttl_sec] below), so the full budget is paid at most
    once per TTL window per repo. Env var stays the escape hatch for
-   unusually slow hosts. *)
+   unusually slow or unusually fast hosts. *)
 let default_git_status_timeout_sec = 15.0
 
 let git_status_timeout_sec () =
@@ -88,7 +89,7 @@ let status_cache : (string, status_cache_entry) Hashtbl.t =
 let status_cache_mu = Stdlib.Mutex.create ()
 
 let status_cache_ttl_sec () =
-  Env_config_core.get_float ~default:1.0 "MASC_WORKTREE_STATUS_CACHE_TTL_S"
+  Env_config_core.get_float ~default:5.0 "MASC_WORKTREE_STATUS_CACHE_TTL_S"
 
 let status_cache_lookup repo_root ~now ~ttl =
   if ttl <= 0.0 then None
@@ -120,7 +121,7 @@ let clear_status_cache_for_tests () =
 
 let current_status_lines_uncached ~repo_root =
   run_git_capture_lines ~workdir:repo_root
-    [ "--no-optional-locks"; "status"; "--porcelain" ]
+    [ "--no-optional-locks"; "status"; "--porcelain"; "--untracked-files=no" ]
   |> Option.value ~default:[]
   |> List.map String.trim
   |> List.filter (fun line -> line <> "")

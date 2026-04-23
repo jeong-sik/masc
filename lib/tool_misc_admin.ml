@@ -70,7 +70,7 @@ let auth_snapshot_json ctx =
            `Assoc
              [
                ("agent_name", `String cred.agent_name);
-               ("role", `String (Types.agent_role_to_string cred.role));
+               ("admin", `Bool (cred.role = Types.Admin));
                ("created_at", `String cred.created_at);
                ("expires_at", json_string_option cred.expires_at);
              ])
@@ -79,7 +79,6 @@ let auth_snapshot_json ctx =
     [
       ("enabled", `Bool cfg.enabled);
       ("require_token", `Bool cfg.require_token);
-      ("default_role", `String (Types.agent_role_to_string cfg.default_role));
       ("token_expiry_hours", `Int cfg.token_expiry_hours);
       ("tool_auth_strict", `Bool (Auth.is_tool_auth_strict_enabled ()));
       ("http_auth_strict", `Bool http_auth_strict);
@@ -273,29 +272,24 @@ let handle_tool_admin_update ctx args =
   match section with
   | "auth" ->
       let current = Auth.load_auth_config ctx.config.base_path in
+      if U.member "default_role" args <> `Null then
+        (false, "❌ default_role is no longer supported")
+      else
       let require_token =
         match bool_arg_opt args "require_token" with
         | Some value -> value
         | None -> current.require_token
       in
       let enabled_opt = bool_arg_opt args "enabled" in
-      let default_role_result =
-        match get_string_opt args "default_role" with
-        | None -> Ok current.default_role
-        | Some raw -> (
-            match Types.agent_role_of_string (String.lowercase_ascii (String.trim raw)) with
-            | Ok role -> Ok role
-            | Error err -> Error err)
-      in
       let expiry_hours =
         match int_arg_opt args "token_expiry_hours" with
         | Some value when value > 0 -> Ok value
         | Some _ -> Error "token_expiry_hours must be > 0"
         | None -> Ok current.token_expiry_hours
       in
-      (match default_role_result, expiry_hours with
-      | Error err, _ | _, Error err -> (false, "❌ " ^ err)
-      | Ok default_role, Ok token_expiry_hours ->
+      (match expiry_hours with
+      | Error err -> (false, "❌ " ^ err)
+      | Ok token_expiry_hours ->
           let room_secret =
             match enabled_opt with
             | Some true when not current.enabled ->
@@ -313,7 +307,6 @@ let handle_tool_admin_update ctx args =
             {
               refreshed with
               require_token;
-              default_role;
               token_expiry_hours;
               enabled =
                 (match enabled_opt with Some value -> value | None -> refreshed.enabled);

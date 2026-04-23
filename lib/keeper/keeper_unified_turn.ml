@@ -195,13 +195,15 @@ type cascade_execution = {
 let next_fail_open_cascade_for_turn
     ~(base_cascade : string)
     ~(effective_cascade : string)
+    ~(tool_requirement : string)
     ~(attempted_cascades : string list)
-    (err : Oas.Error.sdk_error) : string option =
+    (err : Oas.Error.sdk_error) : EC.degraded_retry option =
+  let _ = base_cascade in
   match
-    EC.fail_open_cascade_after_auto_recoverable_error
-      ~base_cascade ~effective_cascade err
+    EC.degraded_retry_after_recoverable_error
+      ~effective_cascade ~tool_requirement err
   with
-  | Some next_cascade
+  | Some { next_cascade; _ }
     when List.exists (String.equal next_cascade) attempted_cascades ->
       None
   | next -> next
@@ -703,6 +705,9 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
            No dynamic_context needed here. *)
         { system_prompt; dynamic_context = "" }
       in
+      let turn_affordances =
+        Keeper_unified_metrics.observed_affordances_of_observation ~meta observation
+      in
       (* 5. Run via OAS Agent.run() with transient-error retry *)
       (* Track whether side-effecting tool calls have been executed.
          If a board_post/comment/shell/file edit succeeded and then a
@@ -868,6 +873,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
              Keeper_registry.Decision_guard_ok
        | _ -> ());
       let last_execution = ref initial_execution in
+      let degraded_retry_info = ref None in
       let run_result, latency_ms =
         Fun.protect ~finally:(fun () ->
           unsubscribe_event_bus ();
@@ -889,20 +895,52 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           let keeper_profile =
             Keeper_types_profile.load_keeper_profile_defaults meta.name
           in
+          let max_idle_turns, max_turns =
+            match channel with
+            | Keeper_world_observation.Reactive ->
+                ( Keeper_runtime_resolved.reactive_max_idle_turns (),
+                  Keeper_types_profile.effective_max_turns_per_call
+                    keeper_profile )
+            | Keeper_world_observation.Scheduled_autonomous ->
+                ( Keeper_runtime_resolved.autonomous_max_idle_turns (),
+                  Keeper_types_profile
+                  .effective_max_turns_per_call_scheduled_autonomous
+                    keeper_profile )
+          in
+          let initial_tool_requirement =
+            if
+              Keeper_agent_run.should_require_tools_for_initial_turn
+                ~max_turns ~turn_affordances
+            then "required"
+            else "optional"
+          in
+          let initial_execution_result =
+            if not (String.equal initial_tool_requirement "required") then
+              Ok initial_execution
+            else
+              let routed =
+                Keeper_cascade_routing.route_effective_cascade_for_tool_requirement
+                  ~effective_cascade:initial_execution.cascade_name
+                  ~tool_requirement:"required"
+              in
+              if String.equal routed.effective_cascade initial_execution.cascade_name
+              then
+                Ok initial_execution
+              else
+                match build_cascade_execution ~cascade_name:routed.effective_cascade with
+                | Ok routed_execution ->
+                    Log.Keeper.info
+                      "%s: tool-required turn rerouted %s -> %s (%s)"
+                      meta.name initial_execution.cascade_name
+                      routed_execution.cascade_name routed.reason;
+                    Ok routed_execution
+                | Error err -> Error err
+          in
+          match initial_execution_result with
+          | Error err -> Error err
+          | Ok initial_execution ->
           let do_run ~(execution : cascade_execution) ~run_meta ~run_generation ~is_retry
               ~oas_timeout_s =
-            let max_idle_turns, max_turns =
-              match channel with
-              | Keeper_world_observation.Reactive ->
-                  ( Keeper_runtime_resolved.reactive_max_idle_turns (),
-                    Keeper_types_profile.effective_max_turns_per_call
-                      keeper_profile )
-              | Keeper_world_observation.Scheduled_autonomous ->
-                  ( Keeper_runtime_resolved.autonomous_max_idle_turns (),
-                    Keeper_types_profile
-                    .effective_max_turns_per_call_scheduled_autonomous
-                      keeper_profile )
-            in
             last_execution := execution;
             Otel_genai.with_keeper_turn_span
               ~keeper_name:run_meta.name
@@ -922,14 +960,22 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 Keeper_agent_run.run_turn ~config ~meta:run_meta ~base_dir
                   ~max_context:execution.max_context ~build_turn_prompt
                   ~user_message ~cascade_name:execution.cascade_name
-                  ~turn_affordances:
-                    (Keeper_unified_metrics.observed_affordances_of_observation ~meta:run_meta observation)
+                  ~turn_affordances
                   ?provider_filter:(Env_config_keeper.KeeperCascade.provider_allowlist ())
                   ~generation:run_generation
                   ~max_turns
                   ~max_idle_turns
                   ~history_user_source:"world_state_prompt"
                   ~history_assistant_source:"internal_assistant"
+                  ~degraded_retry_applied:(Option.is_some !degraded_retry_info)
+                  ?degraded_retry_cascade:
+                    (Option.map
+                       (fun (retry : EC.degraded_retry) -> retry.next_cascade)
+                       !degraded_retry_info)
+                  ?fallback_reason:
+                    (Option.map
+                       (fun (retry : EC.degraded_retry) -> retry.fallback_reason)
+                       !degraded_retry_info)
                   ~temperature:execution.temperature
                   ~max_tokens:execution.max_tokens
                   ~oas_timeout_s
@@ -1073,23 +1119,31 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                     next_fail_open_cascade_for_turn
                       ~base_cascade:meta.cascade_name
                       ~effective_cascade:execution.cascade_name
+                      ~tool_requirement:initial_tool_requirement
                       ~attempted_cascades
                       err
                   with
-                  | Some next_cascade -> (
-                      match build_cascade_execution ~cascade_name:next_cascade with
+                  | Some degraded_retry -> (
+                      match
+                        build_cascade_execution
+                          ~cascade_name:degraded_retry.next_cascade
+                      with
                       | Error fail_open_err ->
                           Log.Keeper.warn
-                            "%s: auto-recoverable cascade failure in %s suggested fail-open to %s, but retry setup failed: %s"
-                            meta.name execution.cascade_name next_cascade
+                            "%s: recoverable cascade failure in %s suggested degraded retry to %s (reason=%s), but retry setup failed: %s"
+                            meta.name execution.cascade_name
+                            degraded_retry.next_cascade
+                            degraded_retry.fallback_reason
                             (short_preview (Oas.Error.to_string fail_open_err));
                           mark_terminal_error fail_open_err;
                           Error fail_open_err
                       | Ok next_execution ->
+                          degraded_retry_info := Some degraded_retry;
                           Log.Keeper.warn
-                            "%s: auto-recoverable cascade failure in %s; fail-open retry on cascade=%s max_context=%d context_budget=%d primary_budget=%d requested_override=%s: %s"
+                            "%s: recoverable cascade failure in %s; degraded retry on cascade=%s reason=%s max_context=%d context_budget=%d primary_budget=%d requested_override=%s: %s"
                             meta.name execution.cascade_name
                             next_execution.cascade_name
+                            degraded_retry.fallback_reason
                             next_execution.max_context
                             next_execution.max_context_resolution.effective_budget
                             next_execution.max_context_resolution.primary_budget
@@ -1300,6 +1354,18 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
              ~base_path:config.base_path meta.name
              correlation_id
        | None -> ());
+      let degraded_retry_info = !degraded_retry_info in
+      let degraded_retry_applied = Option.is_some degraded_retry_info in
+      let degraded_retry_cascade =
+        Option.map
+          (fun (retry : EC.degraded_retry) -> retry.next_cascade)
+          degraded_retry_info
+      in
+      let fallback_reason =
+        Option.map
+          (fun (retry : EC.degraded_retry) -> retry.fallback_reason)
+          degraded_retry_info
+      in
       match run_result with
       | Error err ->
           let final_execution = !last_execution in
@@ -1412,6 +1478,9 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           Keeper_unified_metrics.append_decision_record ~config ~meta:updated_meta ~observation
             ~latency_ms ~semaphore_wait_ms
             ~outcome:(if is_ambiguous_partial then "partial" else "error")
+            ~degraded_retry_applied
+            ?degraded_retry_cascade
+            ?fallback_reason
             ~social_state
             ~error:e_str ();
           (match write_meta config updated_meta with
@@ -1558,6 +1627,13 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           let turn_mode_label =
             Keeper_unified_metrics.turn_mode_to_string turn_mode
           in
+          let wall_tokens_per_second =
+            if result.usage_reported && latency_ms > 0 then
+              Some
+                (float_of_int result.usage.output_tokens
+                 /. (float_of_int latency_ms /. 1000.0))
+            else None
+          in
           (* Emit turn-completed event to Activity Graph for timeline token visibility *)
           (try
             let event =
@@ -1578,12 +1654,20 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                     ("context_ratio", `Float lifecycle.context_ratio);
                     ("tools_used", `List (List.map (fun s -> `String s) result.tools_used));
                   ]
+                  @ (match wall_tokens_per_second with
+                     | Some v -> [("tokens_per_second", `Float v)]
+                     | None -> [])
                   @ (match result.inference_telemetry with
                      | Some t ->
                        (match t.reasoning_tokens with Some n -> [("reasoning_tokens", `Int n)] | None -> [])
                        @ (match t.timings with
                           | Some ti ->
-                            (match ti.predicted_per_second with Some v -> [("tokens_per_second", `Float v)] | None -> [])
+                            (match ti.prompt_per_second with
+                             | Some v -> [("prompt_per_second", `Float v)]
+                             | None -> [])
+                            @ (match ti.predicted_per_second with
+                               | Some v -> [("hw_decode_tokens_per_second", `Float v)]
+                               | None -> [])
                           | None -> [])
                      | None -> [])))
                 ~tags:["keeper"; "turn"; "metrics"]
@@ -1606,6 +1690,9 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             ~handoff_json:lifecycle.handoff_json;
           Keeper_unified_metrics.append_decision_record ~config ~meta:updated_meta ~observation
             ~latency_ms ~semaphore_wait_ms ~outcome:"success"
+            ~degraded_retry_applied
+            ?degraded_retry_cascade
+            ?fallback_reason
             ~turn_mode
             ~social_state
             ~result:(Some result) ();

@@ -64,6 +64,26 @@ let test_snapshot_exposes_keeper_and_social_actions () =
             Yojson.Safe.Util.(keeper_recover |> member "target_type" |> to_string);
           Alcotest.(check bool) "keeper_recover confirm false" false
             Yojson.Safe.Util.(keeper_recover |> member "confirm_required" |> to_bool);
+          let keeper_identity_login_prepare =
+            match find_action "keeper_github_identity_login_prepare" with
+            | Some row -> row
+            | None ->
+                Alcotest.fail
+                  "expected keeper_github_identity_login_prepare in available_actions"
+          in
+          Alcotest.(check bool) "keeper identity login requires confirm" true
+            Yojson.Safe.Util.(
+              keeper_identity_login_prepare |> member "confirm_required" |> to_bool);
+          let keeper_identity_status =
+            match find_action "keeper_github_identity_status" with
+            | Some row -> row
+            | None ->
+                Alcotest.fail
+                  "expected keeper_github_identity_status in available_actions"
+          in
+          Alcotest.(check bool) "keeper identity status confirm false" false
+            Yojson.Safe.Util.(
+              keeper_identity_status |> member "confirm_required" |> to_bool);
           let task_inject =
             match find_action "task_inject" with
             | Some row -> row
@@ -443,7 +463,29 @@ let test_keeper_status_exposes_model_observability () =
         (runtime_trust |> member "runtime_contract" |> member "backend"
        |> to_string);
       Alcotest.(check int) "runtime trust pending approvals empty" 0
-        (runtime_trust |> member "pending_approval_count" |> to_int))
+        (runtime_trust |> member "pending_approval_count" |> to_int);
+      Alcotest.(check string) "runtime trust disposition pass" "Pass"
+        (runtime_trust |> member "disposition" |> to_string);
+      Alcotest.(check bool) "runtime trust attention false" false
+        (runtime_trust |> member "needs_attention" |> to_bool);
+      Alcotest.(check string) "runtime trust approval idle" "idle"
+        (runtime_trust |> member "approval" |> member "state" |> to_string);
+      let sandbox_summary =
+        runtime_trust |> member "execution" |> member "sandbox_summary"
+        |> to_string
+      in
+      Alcotest.(check bool) "runtime trust execution sandbox summary mentions local"
+        true (contains_substring sandbox_summary "local");
+      let latest_causal_kind =
+        runtime_trust |> member "latest_causal_event" |> member "kind"
+        |> to_string
+      in
+      Alcotest.(check bool)
+        "runtime trust latest causal event reflects persisted audit"
+        true
+        (List.mem latest_causal_kind [ "execution_receipt"; "transition" ]);
+      Alcotest.(check bool) "runtime trust causal timeline non-empty" true
+        (runtime_trust |> member "causal_timeline" |> to_list <> []))
 
 let test_keeper_status_ignores_stale_cascade_observation () =
   Eio_main.run @@ fun env ->
@@ -1118,6 +1160,12 @@ proactive_enabled = true
         expected_default_models
         (json |> member "execution" |> member "models" |> to_list
        |> List.map to_string);
+      Alcotest.(check bool) "per-provider timeout is null by default" true
+        (json |> member "execution" |> member "per_provider_timeout_sec" = `Null);
+      Alcotest.(check string) "per-provider timeout mode uses heuristic"
+        "turn_budget_heuristic"
+        (json |> member "execution" |> member "per_provider_timeout_mode"
+       |> to_string);
       Alcotest.(check string) "cascade catalog source kind" "json"
         (json |> member "sources" |> member "cascade_catalog_source_kind"
        |> to_string);

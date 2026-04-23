@@ -4,6 +4,7 @@ import { fetchTelemetry, type TelemetryEntry } from './api/dashboard'
 import { OAS_TELEMETRY_REPLAY_LIMIT } from './config/constants'
 import {
   oasTotalEvents,
+  noteOasReplayWindow,
   pushOasAgentEvent,
   recordOasError,
   recordOasLlmCall,
@@ -22,6 +23,7 @@ type OasRuntimeEnvelope = Record<string, unknown> & {
 
 type IngestOptions = {
   includeLiveTrace?: boolean
+  origin?: 'live' | 'replay'
 }
 
 const seenOasEventKeys = new Set<string>()
@@ -426,8 +428,12 @@ export function applyOasRuntimeEvent(raw: unknown, opts?: IngestOptions): boolea
     return false
   }
   seenOasEventKeys.add(key)
-  oasTotalEvents.value = seenOasEventKeys.size
   ingestRuntimeProjection(event, opts)
+  if (opts?.origin === 'replay') {
+    oasTotalEvents.value = seenOasEventKeys.size
+  } else {
+    oasTotalEvents.value = Math.max(seenOasEventKeys.size, oasTotalEvents.value + 1)
+  }
   return true
 }
 
@@ -440,8 +446,13 @@ export function hydrateOasRuntimeFromTelemetryEntries(entries: TelemetryEntry[])
     return (left ? (eventReportedUnixSeconds(left) ?? 0) : 0) - (right ? (eventReportedUnixSeconds(right) ?? 0) : 0)
   })
   for (const entry of ordered) {
-    applyOasRuntimeEvent(entry)
+    applyOasRuntimeEvent(entry, { origin: 'replay' })
   }
+  noteOasReplayWindow({
+    loadedEvents: oasTotalEvents.value,
+    totalMatchingEvents: oasTotalEvents.value,
+    truncated: false,
+  })
 }
 
 export async function replayOasRuntimeTelemetry(signal?: AbortSignal): Promise<void> {
@@ -453,4 +464,9 @@ export async function replayOasRuntimeTelemetry(signal?: AbortSignal): Promise<v
   })
   if (generation !== replayGeneration) return
   hydrateOasRuntimeFromTelemetryEntries(response.entries)
+  noteOasReplayWindow({
+    loadedEvents: oasTotalEvents.value,
+    totalMatchingEvents: response.total_matching_entries ?? response.count,
+    truncated: response.truncated ?? false,
+  })
 }

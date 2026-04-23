@@ -444,6 +444,215 @@ let test_blocked_diagnosis_both_rewrite_and_tool () =
   check string "tool_suggestion" "keeper_shell"
     (d |> member "tool_suggestion" |> to_string)
 
+(* --- P10: structured output tests --- *)
+
+let test_git_status_structured () =
+  let json =
+    Masc_mcp.Exec_core.process_result_json
+      ~base_path:"/tmp"
+      ~keeper_name:"p10-test"
+      ~cmd:"git status --porcelain"
+      ~status:(Unix.WEXITED 0)
+      ~output:" M lib/foo.ml\n?? new_file.txt\n"
+      ()
+  in
+  let so = json |> member "structured_output" in
+  let staged = so |> member "staged" |> to_list in
+  let unstaged = so |> member "unstaged" |> to_list in
+  let untracked = so |> member "untracked" |> to_list in
+  check int "staged empty" 0 (List.length staged);
+  check int "unstaged 1" 1 (List.length unstaged);
+  check int "untracked 1" 1 (List.length untracked)
+
+let test_git_status_with_global_option_structured () =
+  let json =
+    Masc_mcp.Exec_core.process_result_json
+      ~base_path:"/tmp"
+      ~keeper_name:"p10-test"
+      ~cmd:"git -C /tmp/repo status --porcelain"
+      ~status:(Unix.WEXITED 0)
+      ~output:" M lib/foo.ml\n"
+      ()
+  in
+  let so = json |> member "structured_output" in
+  let unstaged = so |> member "unstaged" |> to_list in
+  check int "unstaged via git -C" 1 (List.length unstaged)
+
+let test_git_log_structured () =
+  let json =
+    Masc_mcp.Exec_core.process_result_json
+      ~base_path:"/tmp"
+      ~keeper_name:"p10-test"
+      ~cmd:"git log --oneline -5"
+      ~status:(Unix.WEXITED 0)
+      ~output:"abc1234 fix bug\ndef5678 add feature\n"
+      ()
+  in
+  let so = json |> member "structured_output" in
+  let commits = so |> member "commits" |> to_list in
+  check int "commits count" 2 (List.length commits)
+
+let test_failed_git_status_has_no_structured_output () =
+  let json =
+    Masc_mcp.Exec_core.process_result_json
+      ~base_path:"/tmp"
+      ~keeper_name:"p10-test"
+      ~cmd:"git status --porcelain"
+      ~status:(Unix.WEXITED 128)
+      ~output:"fatal: not a git repository (or any of the parent directories): .git\n"
+      ()
+  in
+  check bool "no structured_output on failed git status" true
+    (match json |> member "structured_output" with
+     | `Null -> true
+     | _ -> false)
+
+let test_failed_git_log_has_no_structured_output () =
+  let json =
+    Masc_mcp.Exec_core.process_result_json
+      ~base_path:"/tmp"
+      ~keeper_name:"p10-test"
+      ~cmd:"git log --oneline -5"
+      ~status:(Unix.WEXITED 128)
+      ~output:"fatal: not a git repository (or any of the parent directories): .git\n"
+      ()
+  in
+  check bool "no structured_output on failed git log" true
+    (match json |> member "structured_output" with
+     | `Null -> true
+     | _ -> false)
+
+let test_wc_structured () =
+  let json =
+    Masc_mcp.Exec_core.process_result_json
+      ~base_path:"/tmp"
+      ~keeper_name:"p10-test"
+      ~cmd:"wc -l lib/foo.ml"
+      ~status:(Unix.WEXITED 0)
+      ~output:"     120 lib/foo.ml"
+      ()
+  in
+  let so = json |> member "structured_output" in
+  check int "lines" 120 (so |> member "lines" |> to_int)
+
+let test_git_diff_stat_structured () =
+  let json =
+    Masc_mcp.Exec_core.process_result_json
+      ~base_path:"/tmp"
+      ~keeper_name:"p10-test"
+      ~cmd:"git diff --stat"
+      ~status:(Unix.WEXITED 0)
+      ~output:" lib/foo.ml | 3 ++-\n 1 file changed, 2 insertions(+), 1 deletion(-)\n"
+      ()
+  in
+  let so = json |> member "structured_output" in
+  check int "files_changed" 1 (so |> member "files_changed" |> to_int);
+  check int "insertions" 2 (so |> member "insertions" |> to_int);
+  check int "deletions" 1 (so |> member "deletions" |> to_int)
+
+let test_git_diff_stat_structured_plural () =
+  let json =
+    Masc_mcp.Exec_core.process_result_json
+      ~base_path:"/tmp"
+      ~keeper_name:"p10-test"
+      ~cmd:"git diff --stat"
+      ~status:(Unix.WEXITED 0)
+      ~output:
+        " lib/foo.ml | 3 ++-\n lib/bar.ml | 2 +-\n\
+         2 files changed, 3 insertions(+), 2 deletions(-)\n"
+      ()
+  in
+  let so = json |> member "structured_output" in
+  check int "files_changed" 2 (so |> member "files_changed" |> to_int);
+  check int "insertions" 3 (so |> member "insertions" |> to_int);
+  check int "deletions" 2 (so |> member "deletions" |> to_int)
+
+let test_unknown_cmd_no_structured () =
+  let json =
+    Masc_mcp.Exec_core.process_result_json
+      ~base_path:"/tmp"
+      ~keeper_name:"p10-test"
+      ~cmd:"echo hello world"
+      ~status:(Unix.WEXITED 0)
+      ~output:"hello world"
+      ()
+  in
+  check bool "no structured_output for unknown" true
+    (match json |> member "structured_output" with
+     | `Null -> true
+     | _ -> false)
+
+let test_dune_test_structured () =
+  let output =
+    "Test src/foo.ml: OK\nTest test/bar.ml: FAILED\nTest test/baz.ml: OK\n"
+  in
+  let json =
+    Masc_mcp.Exec_core.process_result_json
+      ~base_path:"/tmp"
+      ~keeper_name:"p10-test"
+      ~cmd:"dune runtest"
+      ~status:(Unix.WEXITED 1)
+      ~output
+      ()
+  in
+  let so = json |> member "structured_output" in
+  check int "passed" 2 (so |> member "passed" |> to_int);
+  check int "failed" 1 (so |> member "failed" |> to_int)
+
+(* --- P11: command history tests --- *)
+
+let with_p11_base_path f =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_path)
+    (fun () -> f base_path)
+
+let test_history_append_and_read () =
+  with_p11_base_path @@ fun base_path ->
+  let module H = Masc_exec.Bash_history in
+  H.append ~base_path ~keeper_name:"test-keeper"
+    { ts = 1000.0; cmd_hash = "abc123"; cmd_prefix = "git status";
+      semantic_kind = "Read"; duration_ms = 50; success = true };
+  H.append ~base_path ~keeper_name:"test-keeper"
+    { ts = 2000.0; cmd_hash = "def456"; cmd_prefix = "dune build";
+      semantic_kind = "Build"; duration_ms = 5000; success = false };
+  let results =
+    H.suggest ~base_path ~keeper_name:"test-keeper" ~pattern:"git" ~limit:10
+  in
+  check int "found 1 git entry" 1 (List.length results);
+  let e = List.hd results in
+  check string "cmd_prefix" "git status" e.cmd_prefix;
+  check bool "success" true e.success
+
+let test_history_suggest_empty () =
+  with_p11_base_path @@ fun base_path ->
+  let module H = Masc_exec.Bash_history in
+  let results =
+    H.suggest ~base_path ~keeper_name:"no-keeper" ~pattern:"x" ~limit:5
+  in
+  check int "empty for nonexistent" 0 (List.length results)
+
+let test_history_cmd_hash () =
+  let module H = Masc_exec.Bash_history in
+  let h = H.cmd_hash "git status" in
+  check int "hash length 12" 12 (String.length h)
+
+let test_history_compaction () =
+  with_p11_base_path @@ fun base_path ->
+  let module H = Masc_exec.Bash_history in
+  for i = 1 to 15 do
+    H.append ~base_path ~keeper_name:"compact-test"
+      { ts = float_of_int i; cmd_hash = string_of_int i;
+        cmd_prefix = "cmd" ^ string_of_int i;
+        semantic_kind = "Unknown"; duration_ms = 10; success = true }
+  done;
+  (* 15 entries is below max_entries (10000), so compact is a no-op *)
+  H.compact ~base_path ~keeper_name:"compact-test";
+  let results =
+    H.suggest ~base_path ~keeper_name:"compact-test" ~pattern:"cmd" ~limit:100
+  in
+  check int "all 15 preserved" 15 (List.length results)
+
 
 let () =
   run "exec_core"
@@ -511,5 +720,39 @@ let () =
             test_blocked_with_tool_suggestion;
           test_case "diag with both rewrite and tool" `Quick
             test_blocked_diagnosis_both_rewrite_and_tool;
+        ] );
+      ( "p10_structured_output",
+        [
+          test_case "git status --porcelain produces structured fields"
+            `Quick test_git_status_structured;
+          test_case "git status with global option produces structured fields"
+            `Quick test_git_status_with_global_option_structured;
+          test_case "git log --oneline produces commits array" `Quick
+            test_git_log_structured;
+          test_case "failed git status has no structured_output" `Quick
+            test_failed_git_status_has_no_structured_output;
+          test_case "failed git log has no structured_output" `Quick
+            test_failed_git_log_has_no_structured_output;
+          test_case "wc -l produces lines count" `Quick
+            test_wc_structured;
+          test_case "git diff --stat produces summary counts" `Quick
+            test_git_diff_stat_structured;
+          test_case "git diff --stat plural summary counts" `Quick
+            test_git_diff_stat_structured_plural;
+          test_case "unknown cmd has no structured_output" `Quick
+            test_unknown_cmd_no_structured;
+          test_case "dune runtest produces passed/failed counts" `Quick
+            test_dune_test_structured;
+        ] );
+      ( "p11_command_history",
+        [
+          test_case "append and read history entries" `Quick
+            test_history_append_and_read;
+          test_case "suggest returns empty for nonexistent" `Quick
+            test_history_suggest_empty;
+          test_case "cmd_hash produces 12-char hex" `Quick
+            test_history_cmd_hash;
+          test_case "compaction preserves entries below threshold"
+            `Quick test_history_compaction;
         ] );
     ]

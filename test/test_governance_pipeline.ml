@@ -186,6 +186,21 @@ let test_risk_low_transition_done () =
   Alcotest.(check string) "transition done is low"
     "low" (Gp.risk_level_to_string risk)
 
+let test_risk_high_goal_upsert () =
+  let risk = Gp.assess_risk ~tool_name:"masc_goal_upsert" ~input:no_args in
+  Alcotest.(check string) "goal_upsert is high"
+    "high" (Gp.risk_level_to_string risk)
+
+let test_risk_high_goal_transition () =
+  let risk = Gp.assess_risk ~tool_name:"masc_goal_transition" ~input:no_args in
+  Alcotest.(check string) "goal_transition is high"
+    "high" (Gp.risk_level_to_string risk)
+
+let test_risk_low_keeper_msg () =
+  let risk = Gp.assess_risk ~tool_name:"masc_keeper_msg" ~input:no_args in
+  Alcotest.(check string) "keeper_msg is low"
+    "low" (Gp.risk_level_to_string risk)
+
 let test_risk_medium_transition_start () =
   let risk =
     Gp.assess_risk ~tool_name:generic_transition_tool ~input:transition_start_input
@@ -837,8 +852,12 @@ let () =
       Alcotest.test_case "medium: resume" `Quick test_risk_medium_resume;
       Alcotest.test_case "medium: transition start" `Quick
         test_risk_medium_transition_start;
+      Alcotest.test_case "high: goal upsert" `Quick test_risk_high_goal_upsert;
+      Alcotest.test_case "high: goal transition" `Quick
+        test_risk_high_goal_transition;
       Alcotest.test_case "low: transition" `Quick test_risk_low_transition;
       Alcotest.test_case "low: transition done" `Quick test_risk_low_transition_done;
+      Alcotest.test_case "low: keeper msg" `Quick test_risk_low_keeper_msg;
       Alcotest.test_case "low: status" `Quick test_risk_low_status;
       Alcotest.test_case "low: list" `Quick test_risk_low_list;
       Alcotest.test_case "low: query" `Quick test_risk_low_query;

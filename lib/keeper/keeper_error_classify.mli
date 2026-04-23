@@ -45,20 +45,27 @@ val is_context_overflow : Oas.Error.sdk_error -> bool
     final accept-rejected result from the MASC OAS boundary. *)
 val is_cascade_exhausted_error : Oas.Error.sdk_error -> bool
 
-(** Opportunistically fail open to a broader cascade after a hard-quota or
-    fully-filtered exhaustion event. Returns [Some cascade] for a one-shot
-    same-turn retry target, or [None] when the current cascade should remain
-    authoritative. *)
+type degraded_retry =
+  { next_cascade : string
+  ; fallback_reason : string
+  }
+
+(** Opportunistically fail open to a broader cascade when the current
+    effective cascade is temporarily unavailable (for example cooldown /
+    local-only bootstrap fallback). *)
 val fallback_cascade_for_unavailable_profile :
   base_cascade:string ->
   effective_cascade:string ->
   string option
 
-val fail_open_cascade_after_auto_recoverable_error :
-  base_cascade:string ->
+(** Returns the one-shot degraded retry lane for recoverable whole-cascade
+    failures. Required-tool turns stay terminal, and already-degraded lanes
+    do not broaden further. *)
+val degraded_retry_after_recoverable_error :
   effective_cascade:string ->
+  tool_requirement:string ->
   Oas.Error.sdk_error ->
-  string option
+  degraded_retry option
 
 val max_transient_retries : int
 

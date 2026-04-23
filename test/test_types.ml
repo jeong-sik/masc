@@ -129,8 +129,7 @@ let test_status_strings_match_variant_witness () =
   witness (Claimed { assignee = "a"; claimed_at = "t" });
   witness (InProgress { assignee = "a"; started_at = "t" });
   witness (AwaitingVerification {
-    assignee = "a"; submitted_at = "t"; verification_id = "v";
-    required_verifier_role = Reviewer; deadline = None });
+    assignee = "a"; submitted_at = "t"; verification_id = "v"; deadline = None });
   witness (Done { assignee = "a"; completed_at = "t"; notes = None });
   witness (Cancelled { cancelled_by = "a"; cancelled_at = "t"; reason = None });
   Alcotest.(check int) "count" 6 (List.length valid_task_status_strings)
@@ -138,65 +137,6 @@ let test_status_strings_match_variant_witness () =
 let test_awaiting_verification_in_enum () =
   Alcotest.(check bool) "awaiting_verification present"
     true (List.mem "awaiting_verification" valid_task_status_strings)
-
-(* Issue #8615: AwaitingVerification.required_verifier_role decoder
-   used to fall through [role_of_string] which silently maps unknown
-   input to [Unassigned]. [role_satisfies ~required:Unassigned _] is
-   always true, which silently bypassed the verification gate. The
-   fix routes [Some s] through [role_of_string_opt] with an explicit
-   [Reviewer] fail-closed default. These regression tests pin the
-   contract: typo + fabricated value -> Reviewer, never Unassigned. *)
-let test_required_verifier_role_typo_decodes_to_reviewer () =
-  let json =
-    `Assoc [
-      ("status", `String "awaiting_verification");
-      ("assignee", `String "alice");
-      ("submitted_at", `String "2026-04-19T12:00:00Z");
-      ("verification_id", `String "v-1");
-      (* "Reviewer" capitalised — invalid wire format *)
-      ("required_verifier_role", `String "Reviewer");
-    ]
-  in
-  match task_status_of_yojson json with
-  | Ok (AwaitingVerification { required_verifier_role; _ }) ->
-      Alcotest.(check bool) "typo defaults to Reviewer (not Unassigned)"
-        true (required_verifier_role = Reviewer)
-  | Ok _ -> Alcotest.fail "expected AwaitingVerification"
-  | Error e -> Alcotest.fail e
-
-let test_required_verifier_role_unknown_decodes_to_reviewer () =
-  let json =
-    `Assoc [
-      ("status", `String "awaiting_verification");
-      ("assignee", `String "alice");
-      ("submitted_at", `String "2026-04-19T12:00:00Z");
-      ("verification_id", `String "v-1");
-      ("required_verifier_role", `String "fabricated_role");
-    ]
-  in
-  match task_status_of_yojson json with
-  | Ok (AwaitingVerification { required_verifier_role; _ }) ->
-      Alcotest.(check bool) "fabricated -> Reviewer (not Unassigned)"
-        true (required_verifier_role = Reviewer)
-  | Ok _ -> Alcotest.fail "expected AwaitingVerification"
-  | Error e -> Alcotest.fail e
-
-let test_required_verifier_role_canonical_still_works () =
-  let json =
-    `Assoc [
-      ("status", `String "awaiting_verification");
-      ("assignee", `String "alice");
-      ("submitted_at", `String "2026-04-19T12:00:00Z");
-      ("verification_id", `String "v-1");
-      ("required_verifier_role", `String "admin");
-    ]
-  in
-  match task_status_of_yojson json with
-  | Ok (AwaitingVerification { required_verifier_role; _ }) ->
-      Alcotest.(check bool) "canonical 'admin' decodes to Admin"
-        true (required_verifier_role = Admin)
-  | Ok _ -> Alcotest.fail "expected AwaitingVerification"
-  | Error e -> Alcotest.fail e
 
 let test_actions_enum_has_verification_actions () =
   let must = ["submit_for_verification"; "approve"; "reject"] in
@@ -369,14 +309,6 @@ let () =
       Alcotest.test_case "awaiting_verification in enum" `Quick test_awaiting_verification_in_enum;
       Alcotest.test_case "actions enum has verification actions" `Quick test_actions_enum_has_verification_actions;
     ];
-    "required_verifier_role_strict", [
-      Alcotest.test_case "typo (capitalised) -> Reviewer (#8615)" `Quick
-        test_required_verifier_role_typo_decodes_to_reviewer;
-      Alcotest.test_case "fabricated value -> Reviewer (#8615)" `Quick
-        test_required_verifier_role_unknown_decodes_to_reviewer;
-      Alcotest.test_case "canonical 'admin' still decodes (#8615)" `Quick
-        test_required_verifier_role_canonical_still_works;
-    ];
     "agent_role_ssot", [
       Alcotest.test_case "witness covers all variants" `Quick (fun () ->
         let open Types_auth in
@@ -385,17 +317,17 @@ let () =
           if not (List.mem actual valid_agent_role_strings) then
             Alcotest.failf "agent_role_to_string %S not in valid_agent_role_strings" actual
         in
-        witness Reader; witness Worker; witness Admin;
-        Alcotest.(check int) "count" 3 (List.length valid_agent_role_strings));
-      Alcotest.test_case "all 3 strings present" `Quick (fun () ->
+        witness Worker; witness Admin;
+        Alcotest.(check int) "count" 2 (List.length valid_agent_role_strings));
+      Alcotest.test_case "all 2 strings present" `Quick (fun () ->
         let open Types_auth in
         List.iter (fun expected ->
           Alcotest.(check bool) (Printf.sprintf "%s present" expected) true
             (List.mem expected valid_agent_role_strings)
-        ) ["reader"; "worker"; "admin"]);
+        ) ["worker"; "admin"]);
     ];
     "tool_preset_ssot", [
-      (* Issue #8430: witness covers all 7 variants — adding an 8th
+      (* Issue #8430: witness covers all 8 variants — adding a 9th
          constructor will fail to compile here AND in
          tool_preset_to_string. *)
       Alcotest.test_case "witness covers all variants" `Quick (fun () ->
@@ -405,9 +337,9 @@ let () =
           if not (List.mem actual valid_tool_preset_strings) then
             Alcotest.failf "tool_preset_to_string %S not in valid_tool_preset_strings" actual
         in
-        witness Minimal; witness Social; witness Messaging; witness Coding;
+        witness Minimal; witness Social; witness Messaging; witness Dispatch; witness Coding;
         witness Research; witness Delivery; witness Full;
-        Alcotest.(check int) "count" 7 (List.length valid_tool_preset_strings));
+        Alcotest.(check int) "count" 8 (List.length valid_tool_preset_strings));
       Alcotest.test_case "schema mirror stays in sync" `Quick (fun () ->
         (* Keeper_schema.tool_preset_enum_strings is a hand-mirrored copy
            of Keeper_types.valid_tool_preset_strings (cycle-avoidance).
@@ -416,10 +348,38 @@ let () =
         Alcotest.(check (list string)) "schema mirror == variant SSOT"
           Masc_mcp.Keeper_types.valid_tool_preset_strings
           Masc_mcp.Keeper_schema.tool_preset_enum_strings);
-      Alcotest.test_case "Social and Delivery present" `Quick (fun () ->
+      Alcotest.test_case "TOML parser mirror stays in sync" `Quick (fun () ->
+        (* Keeper_types_profile cannot depend on Keeper_types because
+           Keeper_types includes it, so the raw TOML allow-list is mirrored
+           there and guarded here. *)
+        Alcotest.(check (list string)) "profile mirror == variant SSOT"
+          Masc_mcp.Keeper_types.valid_tool_preset_strings
+          Masc_mcp.Keeper_types_profile.valid_tool_preset_raw_strings);
+      Alcotest.test_case "tool_access schema mirror stays in sync" `Quick (fun () ->
+        let open Yojson.Safe.Util in
+        let schema = Masc_mcp.Keeper_schema.tool_access_schema "test" in
+        let preset_shape =
+          match schema |> member "oneOf" |> to_list with
+          | preset_shape :: _ -> preset_shape
+          | [] -> Alcotest.fail "missing tool_access preset schema"
+        in
+        let enum =
+          preset_shape
+          |> member "properties"
+          |> member "preset"
+          |> member "enum"
+          |> to_list
+          |> List.map to_string
+        in
+        Alcotest.(check (list string)) "tool_access enum == variant SSOT"
+          Masc_mcp.Keeper_types.valid_tool_preset_strings
+          enum);
+      Alcotest.test_case "Social, Dispatch, and Delivery present" `Quick (fun () ->
         let open Masc_mcp.Keeper_types in
         Alcotest.(check bool) "social present" true
           (List.mem "social" valid_tool_preset_strings);
+        Alcotest.(check bool) "dispatch present" true
+          (List.mem "dispatch" valid_tool_preset_strings);
         Alcotest.(check bool) "delivery present" true
           (List.mem "delivery" valid_tool_preset_strings));
     ];
@@ -462,8 +422,8 @@ let () =
           if not (List.mem actual valid_sandbox_profile_strings) then
             Alcotest.failf "sandbox_profile_to_string %S not in valid_sandbox_profile_strings" actual
         in
-        witness Local; witness Docker; witness Docker;
-        Alcotest.(check int) "count" 3 (List.length valid_sandbox_profile_strings));
+        witness Local; witness Docker;
+        Alcotest.(check int) "count" 2 (List.length valid_sandbox_profile_strings));
       Alcotest.test_case "cmd_targets_git_or_gh dispatch predicate" `Quick (fun () ->
         let p = Masc_mcp.Keeper_exec_shell.cmd_targets_git_or_gh in
         Alcotest.(check bool) "git status" true (p "git status");
@@ -557,8 +517,7 @@ let () =
           InProgress { assignee = "a"; started_at = "" };
           AwaitingVerification {
             assignee = "a"; submitted_at = "";
-            verification_id = "v"; required_verifier_role = Reviewer;
-            deadline = None;
+            verification_id = "v"; deadline = None;
           };
           Done { assignee = "a"; completed_at = ""; notes = None };
           Cancelled { cancelled_by = "a"; cancelled_at = ""; reason = None };
@@ -1235,8 +1194,6 @@ let () =
             task_status = ts; priority = 5;
             worktree = None;
             created_by = None;
-            required_role = Types_core.Unassigned;
-            required_preset = None;
             stage = None; contract = None; handoff_context = None;
             cycle_count = 0;
             do_not_reclaim_reason = None; }
@@ -1254,7 +1211,7 @@ let () =
           (S.task_is_claim_pool_candidate
              (dummy_task (Types.AwaitingVerification {
                 assignee = "a"; submitted_at = "t"; verification_id = "v";
-                required_verifier_role = Types.Reviewer; deadline = None })));
+                deadline = None })));
         Alcotest.(check bool) "Done -> NOT claim pool" false
           (S.task_is_claim_pool_candidate
              (dummy_task (Types.Done { assignee = "a"; completed_at = "t"; notes = None })));

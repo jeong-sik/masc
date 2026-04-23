@@ -14,7 +14,8 @@
       cfg coverage (see {!Dashboard_tla_specs}).
     - [POST /api/v1/verification/resolve] — dashboard-initiated approve/reject
       for a pending verification request. Requires bearer token auth; the
-      verifier identity is derived from the request's actor hint and
+      verifier identity is derived from the authenticated dashboard actor
+      when present (otherwise the request hint) and
       namespaced under "operator:" to distinguish from peer-agent verdicts. *)
 
 open Server_auth
@@ -31,10 +32,11 @@ let verification_error_json msg : Yojson.Safe.t =
 
 (* Compose the operator verifier identity. We always prefix with
    "operator:" so attribution/audit can distinguish dashboard verdicts
-   from peer-agent verdicts. The actor hint is already sanitised by
-   [operator_actor_hint] (alnum + '_' + '-' only). *)
-let verifier_of_request request =
-  match Server_dashboard_http_core.operator_actor_hint request with
+   from peer-agent verdicts. The actor is canonicalized to the bearer
+   owner for authenticated dashboard requests, then sanitized
+   (alnum + '_' + '-' only). *)
+let verifier_of_request ~base_path request =
+  match sanitized_dashboard_actor_for_request ~base_path request with
   | Some hint -> "operator:" ^ hint
   | None -> "operator:dashboard"
 
@@ -77,8 +79,8 @@ let add_routes router =
            Http.Request.read_body_async reqd (fun body_str ->
              try
                let args = Yojson.Safe.from_string body_str in
-               let verifier = verifier_of_request req in
                let config = state.Mcp_server.room_config in
+               let verifier = verifier_of_request ~base_path:config.base_path req in
                match
                  Server_dashboard_http.dashboard_verification_resolve_http_json
                    ~config ~verifier ~args

@@ -412,8 +412,10 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   in
 
   (* Auto-register session for non-read-only tools *)
-  if agent_name <> "unknown" && not is_read_only then
+  if agent_name <> "unknown" && not is_read_only then begin
     let (_ : Session.session) = Session.register registry ~agent_name in
+    ()
+  end;
 
   (* Log tool call *)
   Log.Mcp.debug "[%s] %s" agent_name name;
@@ -430,14 +432,16 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
          | Tool_catalog.Real | Tool_catalog.Adapter | Tool_catalog.Placeholder ->
              false
     in
-    if (not skip_heartbeat) && !room_init_cached then
+    if (not skip_heartbeat) && !room_init_cached then begin
       try
         let (_ : string) = Coord.heartbeat config ~agent_name in
+        ()
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
           Log.Misc.warn "heartbeat update skipped for %s on %s: %s"
             agent_name name (Printexc.to_string exn)
+    end
   end;
 
   (* Check if agent must join first — Fix 3: use cached value *)
@@ -464,7 +468,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       (false, Printf.sprintf
          "❌ Join required: Call masc_join first before using %s.\n\n💡 Workflow: masc_join → masc_status → %s\n📚 See: @~/me/instructions/masc-workflow.md\n[DEBUG] agent_name=%s is_joined=%b"
          name name agent_name is_joined)
-  else
+  else (
 
   (* === Fix 1: Tag-based lazy context dispatch ===
      O(1) tag lookup determines which module handles this tool.
@@ -570,4 +574,4 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
            Log.Mcp.warn "registry inconsistency: %s minted but no tag" name;
            with_system_internal_audit ~agent_name
              (false,
-              Printf.sprintf "Unknown tool: %s (registry inconsistency)" name))
+              Printf.sprintf "Unknown tool: %s (registry inconsistency)" name)))

@@ -164,8 +164,9 @@ let parse_tool_access_input (args : Yojson.Safe.t) :
               | None ->
                   Error
                     (Printf.sprintf
-                       "invalid tool_preset '%s' (allowed: minimal, social, messaging, coding, research, delivery, full)"
-                       raw))
+                       "invalid tool_preset '%s' (allowed: %s)"
+                       raw
+                       (String.concat ", " valid_tool_preset_strings)))
           | Some `Null -> Error "tool_preset must not be null"
           | Some _ -> Error "tool_preset must be a string"
         in
@@ -415,11 +416,28 @@ let sandbox_allowed_path_within_private_root
 let validate_sandbox_settings
     ~(config : Coord.config)
     ~keeper_name
+    ~github_identity
     ~sandbox_profile
     ~network_mode
     ~allowed_paths =
   if allowed_paths = [ "*" ] then
     Error "allowed_paths=[\"*\"] is not supported; enumerate explicit paths instead"
+  else if Env_config_keeper.KeeperSandbox.hard_mode ()
+          && sandbox_profile <> Docker then
+    Error
+      "MASC_KEEPER_SANDBOX_HARD_MODE requires sandbox_profile=docker"
+  else if Env_config_keeper.KeeperSandbox.hard_mode ()
+          && network_mode <> Network_none then
+    Error
+      "MASC_KEEPER_SANDBOX_HARD_MODE requires network_mode=none; git/gh egress is brokered by structured tools"
+  else if Env_config_keeper.KeeperSandbox.hard_mode ()
+          && github_identity = None then
+    Error
+      "MASC_KEEPER_SANDBOX_HARD_MODE requires github_identity in keeper profile"
+  else if Env_config_keeper.KeeperSandbox.hard_mode ()
+          && Env_config_keeper.KeeperSandbox.relax_fs () then
+    Error
+      "MASC_KEEPER_SANDBOX_HARD_MODE requires MASC_KEEPER_SANDBOX_RELAX_FS=false"
   else
   match sandbox_profile with
   | Local -> (

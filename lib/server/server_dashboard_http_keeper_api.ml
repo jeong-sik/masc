@@ -185,8 +185,11 @@ let handle_keeper_tools_post state req reqd =
                              | None ->
                                  Error
                                    (Printf.sprintf
-                                      "invalid tool_preset '%s' (allowed: minimal, social, messaging, coding, research, delivery, full)"
-                                      raw)
+                                      "invalid tool_preset '%s' (allowed: %s)"
+                                      raw
+                                      (String.concat
+                                         ", "
+                                         Keeper_types.valid_tool_preset_strings))
                              | Some preset ->
                                  Ok
                                    (Keeper_types.Preset
@@ -675,7 +678,12 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
       | None -> (
           match Keeper_types.read_meta config name with
           | Ok (Some meta) -> Some meta.agent_name
-          | Ok None | Error _ -> None)
+          | Ok None -> None
+          | Error err ->
+              Log.Keeper.warn
+                "resolve_keeper_agent_name %s: read_meta failed: %s"
+                name err;
+              None)
     in
     let persist_keeper_paused_state paused =
       match Keeper_types.read_meta config name with
@@ -867,7 +875,11 @@ let handle_keeper_directive_post state _agent_name req reqd body_str =
         let meta_opt =
           match read_result with
           | Ok (Some meta) -> Some meta
-          | Ok None | Error _ -> None
+          | Ok None -> None
+          | Error err ->
+              Log.Keeper.warn "directive %s %s: read_meta failed: %s"
+                action_str name err;
+              None
         in
         let persist_paused_state paused =
           match meta_opt with
@@ -891,10 +903,10 @@ let handle_keeper_directive_post state _agent_name req reqd body_str =
         in
         let proceed () =
           (match action_str with
-           | "pause" -> persist_paused_state true
            | "resume" -> persist_paused_state false
-           | "wakeup"
-           | _ -> ());
+           | "wakeup" -> ()
+           | _ ->
+               Log.Server.warn "Unknown keeper directive: %s" action_str);
           let resolved_agent_name =
             match Keeper_registry.find_by_name name with
             | Some entry -> entry.meta.agent_name

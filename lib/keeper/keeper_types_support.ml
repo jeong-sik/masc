@@ -137,13 +137,13 @@ let maybe_rotate_file path =
             let src = Printf.sprintf "%s.%d" path (i - 1) in
             let dst = Printf.sprintf "%s.%d" path i in
             try Fs_compat.rename src dst with
-            | Sys_error msg when String.contains msg "No such file" -> ()
+            | Sys_error msg when String_util.contains_substring msg "No such file" -> ()
             | Sys_error msg ->
               Log.Misc.warn "rotate: cannot rename %s -> %s: %s" src dst msg
           done;
           let rotated = Printf.sprintf "%s.1" path in
           try Fs_compat.rename path rotated with
-          | Sys_error msg when String.contains msg "No such file" -> ()
+          | Sys_error msg when String_util.contains_substring msg "No such file" -> ()
           | Sys_error msg ->
             Log.Misc.warn "rotate: cannot rename %s -> %s: %s" path rotated msg
         end

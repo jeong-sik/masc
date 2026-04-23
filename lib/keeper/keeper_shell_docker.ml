@@ -45,7 +45,9 @@ let docker_private_workspace_cwd ~(config : Coord.config) ~(meta : keeper_meta)
 (* ── Profile resolution ────────────────────────────────── *)
 
 let effective_sandbox_profile ~(meta : keeper_meta) ~in_playground =
-  if meta.sandbox_profile = Local
+  if Env_config_keeper.KeeperSandbox.hard_mode () then
+    (meta.sandbox_profile, meta.network_mode)
+  else if meta.sandbox_profile = Local
      && Env_config_keeper.DockerPlayground.enabled
      && in_playground
   then
@@ -122,12 +124,21 @@ let run_docker_shell_command_with_status
   =
   let timeout_sec = max timeout_sec docker_run_min_timeout_sec in
   let image = Env_config_keeper.KeeperSandbox.docker_image () in
+  let network_mode =
+    if Env_config_keeper.KeeperSandbox.hard_mode () then
+      Network_none
+    else
+      network_mode
+  in
   let sandbox_error message =
     Keeper_registry.record_error ~base_path:config.base_path meta.name message;
     Error message
   in
   if String.trim image = "" then
     sandbox_error "keeper sandbox docker image is not configured"
+  else if git_creds_enabled && Env_config_keeper.KeeperSandbox.hard_mode () then
+    sandbox_error
+      "sandbox hard mode forbids Docker git credential dispatch; use keeper_shell op=git_clone or op=gh so git/gh egress is brokered outside the container"
   else if command_uses_nested_container_runtime cmd then
     sandbox_error
       (if git_creds_enabled then
@@ -156,23 +167,29 @@ let run_docker_shell_command_with_status
           | Network_none -> ([ "--network"; "none" ], "none")
           | Network_inherit -> ([], network_mode_to_string network_mode)
       in
-      let gh_creds =
-        match Keeper_gh_env.config_dir config with
-        | Some dir -> dir
-        | None -> Env_config_keeper.KeeperSandbox.gh_creds_host_path ()
-      in
-      let gitconfig = Env_config_keeper.KeeperSandbox.gitconfig_host_path () in
-      let ssh_dir = Env_config_keeper.KeeperSandbox.ssh_dir_host_path () in
-      let gh_token = Env_config_keeper.KeeperSandbox.gh_token () in
       let cred_mounts =
         if not git_creds_enabled then
           []
         else
+          let gh_creds =
+            match Keeper_gh_env.keeper_config_dir config ~keeper_name:meta.name with
+            | Ok (Some dir) -> dir
+            | Ok None -> Env_config_keeper.KeeperSandbox.gh_creds_host_path ()
+            | Error err -> raise (Failure err)
+          in
+          let gitconfig = Env_config_keeper.KeeperSandbox.gitconfig_host_path () in
+          let ssh_dir = Env_config_keeper.KeeperSandbox.ssh_dir_host_path () in
           optional_ro_mount ~host:gh_creds ~container:"/root/.config/gh"
           @ optional_ro_mount ~host:gitconfig ~container:"/root/.gitconfig"
           @ optional_ro_mount ~host:ssh_dir ~container:"/root/.ssh"
       in
       let token_env =
+        let gh_token =
+          if git_creds_enabled then
+            Env_config_keeper.KeeperSandbox.gh_token ()
+          else
+            ""
+        in
         if (not git_creds_enabled) || gh_token = "" then
           []
         else
@@ -211,20 +228,23 @@ let run_docker_shell_command_with_status
         @ network_args
         @ cred_mounts
         @ token_env
-        @ [ image; "bash"; "-lc"; cmd ^ " 2>&1" ]
+        @ [ image; "bash"; "-lc"; cmd ]
       in
-      let status, output =
-        Process_eio.run_argv_with_status
-          ~cwd:(Sys.getcwd ()) ~timeout_sec argv
-      in
-      if status <> Unix.WEXITED 0 then
-        Keeper_registry.record_error ~base_path:config.base_path meta.name
-          (Printf.sprintf "sandbox docker exec failed (%s): %s"
-             image
-             (Worker_dev_tools.truncate_for_log output))
-      else
-        Keeper_registry.clear_error ~base_path:config.base_path meta.name;
-      Ok { status; output; image; network_label }
+      (try
+         let status, output =
+           Process_eio.run_argv_with_status
+             ~cwd:(Sys.getcwd ()) ~timeout_sec argv
+         in
+         if status <> Unix.WEXITED 0 then
+           Keeper_registry.record_error ~base_path:config.base_path meta.name
+             (Printf.sprintf "sandbox docker exec failed (%s): %s"
+                image
+                (Worker_dev_tools.truncate_for_log output))
+         else
+           Keeper_registry.clear_error ~base_path:config.base_path meta.name;
+         Ok { status; output; image; network_label }
+       with
+       | Failure err -> sandbox_error err)
 
 let run_docker_with_git_bash
     ~(turn_sandbox_runtime : Keeper_turn_sandbox_runtime.t option)
@@ -240,6 +260,9 @@ let run_docker_with_git_bash
   in
   if String.trim image = "" then
     sandbox_error_json "keeper sandbox docker image is not configured"
+  else if Env_config_keeper.KeeperSandbox.hard_mode () then
+    sandbox_error_json
+      "sandbox hard mode forbids Docker git credential dispatch; use keeper_shell op=git_clone or op=gh so git/gh egress is brokered outside the container"
   else if command_uses_nested_container_runtime cmd then
     sandbox_error_json
       "sandbox_profile=docker+git_creds blocks nested container runtimes and host socket references"
@@ -348,17 +371,17 @@ let run_docker_hardened_bash
       with
       | Error message -> error_json message
       | Ok result ->
-    Yojson.Safe.to_string
-      (`Assoc
-         [
-           ("ok", `Bool (result.status = Unix.WEXITED 0));
-           ("via", `String "docker");
-           ("cwd", `String cwd);
-           ("sandbox_profile", `String "docker");
-           ("git_creds_enabled", `Bool false);
-           ("network_mode", `String result.network_label);
-           ("effective_sandbox_image", `String result.image);
-           ( "status",
-             Keeper_alerting_path.process_status_to_json result.status );
-           ("output", `String result.output);
-         ])
+        Yojson.Safe.to_string
+          (`Assoc
+             [
+               ("ok", `Bool (result.status = Unix.WEXITED 0));
+               ("via", `String "docker");
+               ("cwd", `String cwd);
+               ("sandbox_profile", `String "docker");
+               ("git_creds_enabled", `Bool false);
+               ("network_mode", `String result.network_label);
+               ("effective_sandbox_image", `String result.image);
+               ( "status",
+                 Keeper_alerting_path.process_status_to_json result.status );
+               ("output", `String result.output);
+             ])

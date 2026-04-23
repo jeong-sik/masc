@@ -38,6 +38,7 @@ import { groupByKey } from './components/common/collection'
 import { setArrayByKeyIfChanged } from './signal-utils'
 import { FetchScheduler } from './lib/fetch-scheduler'
 import { isRecord, asString, asNumber } from './components/common/normalize'
+import { setCanonicalDashboardActor } from './lib/dashboard-session-actor'
 import {
   normalizeAgent, normalizeTask, normalizeMessage,
   normalizeExecutionWorkerSupportBrief,
@@ -132,6 +133,9 @@ export const oasAgentEvents = signal<OasAgentEvent[]>([])
 export const oasKeeperSnapshots = signal<Map<string, OasKeeperSnapshot>>(new Map())
 export const oasLastKeeperTick = signal<number | null>(null)
 export const oasTotalEvents = signal(0)
+export const oasReplayLoadedEvents = signal(0)
+export const oasReplayTotalMatchingEvents = signal(0)
+export const oasReplayTruncated = signal(false)
 export const oasTotalLlmCalls = signal(0)
 export const oasTotalErrors = signal(0)
 export const oasLastLlmCallTs = signal<number | null>(null)
@@ -143,10 +147,27 @@ export function resetOasRuntimeSignals(): void {
   oasKeeperSnapshots.value = new Map()
   oasLastKeeperTick.value = null
   oasTotalEvents.value = 0
+  oasReplayLoadedEvents.value = 0
+  oasReplayTotalMatchingEvents.value = 0
+  oasReplayTruncated.value = false
   oasTotalLlmCalls.value = 0
   oasTotalErrors.value = 0
   oasLastLlmCallTs.value = null
   oasLastErrorTs.value = null
+}
+
+export function noteOasReplayWindow(input: {
+  loadedEvents: number
+  totalMatchingEvents: number
+  truncated: boolean
+}): void {
+  const loadedEvents = Math.max(0, Math.floor(input.loadedEvents))
+  const totalMatchingEvents = Math.max(loadedEvents, Math.floor(input.totalMatchingEvents))
+  const truncated = input.truncated && totalMatchingEvents > loadedEvents
+  oasReplayLoadedEvents.value = loadedEvents
+  oasReplayTotalMatchingEvents.value = totalMatchingEvents
+  oasReplayTruncated.value = truncated
+  oasTotalEvents.value = totalMatchingEvents
 }
 
 function sameOasAgentEvent(left: OasAgentEvent, right: OasAgentEvent): boolean {
@@ -254,6 +275,9 @@ export const oasHealthSummary: ReadonlySignal<OasHealthSummary> = computed(() =>
   keeperSnapshotsCount: oasKeeperSnapshots.value.size,
   lastKeeperTick: oasLastKeeperTick.value,
   totalEvents: oasTotalEvents.value,
+  replayLoadedEvents: oasReplayLoadedEvents.value,
+  replayTotalMatchingEvents: oasReplayTotalMatchingEvents.value,
+  replayTruncated: oasReplayTruncated.value,
   totalLlmCalls: oasTotalLlmCalls.value,
   totalErrors: oasTotalErrors.value,
   lastLlmCallTs: oasLastLlmCallTs.value,
@@ -416,9 +440,13 @@ function normalizeShellAuthSummary(raw: unknown): DashboardShellAuthSummary | nu
     require_token: raw.require_token === true,
     default_role: asString(raw.default_role) ?? null,
     token_present: raw.token_present === true,
+    token_valid: raw.token_valid === true,
+    token_agent: asString(raw.token_agent) ?? null,
     requested_agent: asString(raw.requested_agent) ?? null,
     effective_agent: asString(raw.effective_agent) ?? null,
     effective_role: asString(raw.effective_role) ?? null,
+    auth_error_code: asString(raw.auth_error_code) as DashboardShellAuthSummary['auth_error_code'],
+    auth_error_detail: asString(raw.auth_error_detail) ?? null,
     can_keeper_msg: raw.can_keeper_msg === true,
     keeper_msg_error: asString(raw.keeper_msg_error) ?? null,
   }
@@ -430,6 +458,12 @@ export async function refreshShell(opts?: RefreshOptions): Promise<void> {
   inflightShellRefresh = (async () => {
     try {
       const data = await fetchDashboardShell()
+      const normalizedAuth = normalizeShellAuthSummary(data.auth)
+      setCanonicalDashboardActor(
+        normalizedAuth?.token_valid
+          ? normalizedAuth.effective_agent ?? normalizedAuth.token_agent ?? null
+          : null,
+      )
       const normalizedStatus = normalizeServerStatus(data.status, data.generated_at)
       if (normalizedStatus) {
         serverStatus.value = mergeServerStatus(serverStatus.value, normalizedStatus)
@@ -445,11 +479,13 @@ export async function refreshShell(opts?: RefreshOptions): Promise<void> {
         }
       }
       shellMetaCognition.value = normalizeShellMetaCognitionSummary(data.meta_cognition)
-      shellAuthSummary.value = normalizeShellAuthSummary(data.auth)
+      shellAuthSummary.value = normalizedAuth
       shellConfigResolution.value = normalizeDashboardConfigResolution(data.config_resolution)
       shellRuntimeResolution.value = normalizeDashboardRuntimeResolution(data.runtime_resolution)
       lastShellRefreshAt = Date.now()
     } catch (err) {
+      setCanonicalDashboardActor(null)
+      shellAuthSummary.value = null
       console.warn('[Dashboard] shell fetch error:', err)
       showToast('서버 연결 실패 — 데이터를 불러올 수 없습니다', 'error', 6000)
     } finally {

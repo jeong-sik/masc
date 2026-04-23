@@ -1637,6 +1637,43 @@ let test_execute_tool_explicit_generated_alias_transition_not_rewritten_by_token
   check_task_still_todo state.room_config "task-001";
   cleanup_dir base_path
 
+let test_execute_tool_hyphenated_generated_alias_claim_next_reuses_base_token () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  ignore (Masc_mcp.Coord.init state.room_config ~agent_name:None);
+  ignore (Masc_mcp.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
+  let raw_token =
+    match Masc_mcp.Auth.create_token base_path ~agent_name:"qa-king" ~role:Types.Admin with
+    | Ok (token, _cred) -> token
+    | Error e -> Alcotest.fail (Types.masc_error_to_string e)
+  in
+  ignore
+    (Masc_mcp.Coord.add_task state.room_config ~title:"hyphenated-generated-alias-claim-next"
+       ~priority:2 ~description:"");
+  let ok, msg =
+    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:"sid-hyphenated-generated-alias"
+      ~auth_token:raw_token state
+      ~name:"masc_claim_next"
+      ~arguments:(`Assoc [ ("agent_name", `String "qa-king-warm-heron") ])
+  in
+  if not ok then Alcotest.failf "claim_next failed: %s" msg;
+  Alcotest.(check bool) "claim_next reports claimed task" true
+    (contains_substring msg "task-001");
+  Alcotest.(check (option string)) "current task set after claim_next"
+    (Some "task-001")
+    (Masc_mcp.Planning_eio.get_current_task state.room_config);
+  Alcotest.(check bool) "explicit alias joined" true
+    (Masc_mcp.Coord.is_agent_joined state.room_config
+       ~agent_name:"qa-king-warm-heron");
+  cleanup_dir base_path
+
 let test_execute_tool_claim_next_requires_auth_before_mutation () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -2783,6 +2820,8 @@ let eio_tests = [
     test_execute_tool_explicit_generated_alias_claim_next_not_rewritten_by_token;
   "explicit generated alias transition not rewritten by token", `Quick,
     test_execute_tool_explicit_generated_alias_transition_not_rewritten_by_token;
+  "hyphenated generated alias claim_next reuses base token", `Quick,
+    test_execute_tool_hyphenated_generated_alias_claim_next_reuses_base_token;
   "claim_next auth preflight blocks mutation", `Quick,
     test_execute_tool_claim_next_requires_auth_before_mutation;
   "transition auth preflight blocks mutation", `Quick,

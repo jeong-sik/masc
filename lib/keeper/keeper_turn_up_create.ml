@@ -96,6 +96,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       validate_sandbox_settings
         ~config:ctx.config
         ~keeper_name:p.name
+        ~github_identity:p.profile_defaults.github_identity
         ~sandbox_profile
         ~network_mode
         ~allowed_paths
@@ -332,6 +333,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         shared_memory_scope;
         allowed_paths;
         tool_access;
+        tool_preset_source = p.profile_defaults.tool_preset_source;
         tool_denylist;
         voice_enabled;
         voice_channel;
@@ -366,7 +368,8 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         updated_at = now_iso ();
         max_context_override = p.max_context_override_opt;
         continuity_summary = "";
-        active_goal_ids = [];
+        active_goal_ids =
+          Option.value ~default:[] p.profile_defaults.active_goal_ids;
         paused = false;
         autoboot_enabled;
         current_task_id = None;
@@ -376,6 +379,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         work_discovery_guidance = p.profile_defaults.work_discovery_guidance;
         telemetry_feedback_enabled = p.profile_defaults.telemetry_feedback_enabled;
         telemetry_feedback_window_hours = p.profile_defaults.telemetry_feedback_window_hours;
+        per_provider_timeout_s = p.profile_defaults.per_provider_timeout;
         runtime = {
           usage = {
             total_turns = 0;

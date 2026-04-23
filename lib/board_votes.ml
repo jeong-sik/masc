@@ -149,7 +149,7 @@ let vote store ~voter ~post_id ~direction : (int, board_error) result =
               ~kind:Earn_upvote ~reason:"upvote on post" () with
             | Ok _ -> ()
             | Error e ->
-                Log.Board.warn "board_votes: economy earn failed for %s: %s" author_name e);
+                Log.BoardLog.warn "board_votes: economy earn failed for %s: %s" author_name e);
            Ok delta
        | Ok { delta; earn_upvote_for = None } -> Ok delta
        | Error _ as e -> e)

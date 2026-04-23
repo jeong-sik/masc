@@ -26,7 +26,7 @@ let make_closing_client ~sw ~net ~https =
   in
   let close_flow flow =
     try Eio.Resource.close flow
-    with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ()
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Printf.eprintf "[masc_http_client] close flow failed: %s\n%!" (Printexc.to_string exn)
   in
   let connect ~sw:conn_sw uri =
     let service =

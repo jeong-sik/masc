@@ -229,6 +229,11 @@ export function normalizeGovernanceJudgeSummary(raw: unknown): GovernanceJudgeSu
   return {
     judge_online: typeof raw.judge_online === 'boolean' ? raw.judge_online : undefined,
     refreshing: typeof raw.refreshing === 'boolean' ? raw.refreshing : undefined,
+    status: asNullableString(raw.status) ?? undefined,
+    degraded_reason: asNullableString(raw.degraded_reason),
+    cached_judgments_visible: typeof raw.cached_judgments_visible === 'boolean'
+      ? raw.cached_judgments_visible
+      : undefined,
     generated_at: asNullableIsoTimestamp(raw.generated_at),
     expires_at: asNullableIsoTimestamp(raw.expires_at),
     model_used: asNullableString(raw.model_used),

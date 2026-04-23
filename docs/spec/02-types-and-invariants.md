@@ -54,17 +54,9 @@ end
 
 **소스**: `lib/types/types_core.ml`
 
-### 2.1 Role (task assignment)
+### 2.1 Legacy Task Role (removed)
 
-```ocaml
-type role =
-  | Writer      (* Produces artifacts: code, docs, designs *)
-  | Reviewer    (* Reviews artifacts: code review, QA, ethics *)
-  | Admin       (* Administrative: orchestration, assignment *)
-  | Unassigned  (* No specific role (legacy/default) *)
-```
-
-`role_satisfies ~required ~agent_role`로 역할 충족 여부를 판정한다. `Admin`은 모든 요구를 충족하고, `Unassigned` 요구는 모든 역할이 충족한다.
+`Writer`/`Reviewer`/`Unassigned` 기반 task assignment role 시스템은 제거되었다. task claim은 더 이상 role 매칭에 의존하지 않고, 상태와 owner 유무만 검사하는 열린 규칙을 사용한다.
 
 ### 2.2 Agent Status
 
@@ -154,7 +146,6 @@ type task = {
   files : string list;
   created_at : string;
   worktree : worktree_info option;
-  required_role : role;        (* 기본값 Unassigned *)
 }
 ```
 
@@ -413,7 +404,6 @@ type masc_error =
   | TaskAlreadyClaimed of { task_id: string; by: string }
   | TaskNotClaimed of string
   | TaskInvalidState of string
-  | TaskRoleMismatch of { task_id: string; required: string; actual: string }
   | PortalNotOpen of string
   | PortalAlreadyOpen of { agent: string; target: string }
   | PortalClosed of string
@@ -606,10 +596,10 @@ MAGI 3인 체제(Melchior/Balthasar/Casper)에 Athena와 Generalist를 추가한
 ### 9.1 Agent Role (auth)
 
 ```ocaml
-type agent_role = Reader | Worker | Admin
+type agent_role = Worker | Admin
 ```
 
-`role`(Section 2.1)과는 별개의 타입이다. `role`은 task assignment 용도, `agent_role`은 인증/인가 용도다.
+인증/인가 역할은 `Worker`와 `Admin` 두 단계만 남긴다. task assignment 전용 role 타입은 제거되었다.
 
 ### 9.2 Permission
 
@@ -628,9 +618,8 @@ type permission =
 
 | Role | Permissions |
 |------|------------|
-| Reader | `CanReadState`, `CanJoin`, `CanLeave` (3개) |
-| Worker | Reader + `CanAddTask`, `CanClaimTask`, `CanCompleteTask`, `CanBroadcast`, `CanOpenPortal`, `CanSendPortal`, `CanCreateWorktree`, `CanRemoveWorktree`, `CanVote` (12개) |
-| Admin | Worker + `CanInit`, `CanReset`, `CanInterrupt`, `CanApprove`, `CanAdmin` (17개, 전체) |
+| Worker | `CanReadState`, `CanJoin`, `CanLeave`, `CanAddTask`, `CanClaimTask`, `CanCompleteTask`, `CanBroadcast`, `CanOpenPortal`, `CanSendPortal`, `CanCreateWorktree`, `CanRemoveWorktree`, `CanVote` |
+| Admin | Worker + `CanInit`, `CanReset`, `CanInterrupt`, `CanApprove`, `CanAdmin` (전체) |
 
 ### 9.3 Agent Credential
 
@@ -644,6 +633,8 @@ type agent_credential = {
 }
 ```
 
+직렬화 포맷은 `role` 문자열 대신 `admin: bool`을 사용하고, 런타임에서 `Worker/Admin`으로 복원한다.
+
 ### 9.4 Auth Config
 
 ```ocaml
@@ -651,7 +642,6 @@ type auth_config = {
   enabled : bool;
   room_secret_hash : string option;
   require_token : bool;
-  default_role : agent_role;    (* 기본값: Worker *)
   token_expiry_hours : int;     (* 기본값: 24 *)
 }
 ```
@@ -663,7 +653,6 @@ type rate_limit_config = {
   per_minute : int;
   burst_allowed : int;
   priority_agents : string list;
-  reader_multiplier : float;    (* 0.5x *)
   worker_multiplier : float;    (* 1.0x *)
   admin_multiplier : float;     (* 2.0x *)
   broadcast_per_minute : int;
@@ -748,9 +737,9 @@ type rate_limit_error = {
 | INV-TYPE-018 | `swarm_envelope`도 roundtrip 무손실이다: `roundtrip_envelope env = Ok env`. | `roundtrip_envelope` 단위 테스트 |
 | INV-TYPE-019 | 모든 `_to_yojson`/`_of_yojson` 쌍은 roundtrip 호환이다. JSON 직렬화 후 역직렬화하면 원본과 동일한 값을 복원한다. | 주요 타입별 roundtrip 테스트 |
 
-### Role System
+### Auth Role System
 
 | ID | 불변식 | 검증 방법 |
 |----|--------|----------|
-| INV-TYPE-020 | `role`(task assignment)과 `agent_role`(auth)은 별개의 타입 시스템이다. 컴파일 타임에 혼용이 차단된다. | 컴파일러가 강제 |
-| INV-TYPE-021 | `role_satisfies ~required:Unassigned ~agent_role:_`는 항상 `true`다. `role_satisfies ~required:_ ~agent_role:Admin`도 항상 `true`다. | `role_satisfies` 단위 테스트 |
+| INV-TYPE-020 | `agent_role`은 `Worker | Admin` 두 단계만 가진다. | `agent_role` witness 테스트 |
+| INV-TYPE-021 | `Admin`은 모든 권한을 가지며, `Worker`는 `CanAdmin`을 포함하지 않는다. | permission 단위 테스트 |

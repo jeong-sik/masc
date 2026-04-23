@@ -3,6 +3,9 @@ open Yojson.Safe.Util
 type runtime_snapshot = {
   judge_online : bool;
   refreshing : bool;
+  status : string;
+  degraded_reason : string option;
+  cached_judgments_visible : bool;
   generated_at : string option;
   generated_at_unix : float option;
   expires_at : string option;
@@ -17,6 +20,8 @@ type state = {
   mutable started : bool;
   mutable refreshing : bool;
   mutable judge_online : bool;
+  mutable runtime_status : string;
+  mutable degraded_reason : string option;
   mutable generated_at_unix : float option;
   mutable expires_at_unix : float option;
   mutable generated_at : string option;
@@ -80,6 +85,53 @@ let enabled () = Env_config.Dashboard_config.governance_judge_enabled
 let keeper_name = "governance-judge"
 let backoff_status = "Backoff: local slots saturated"
 
+let status_online = "online"
+let status_refreshing = "refreshing"
+let status_stale_visible = "stale_visible"
+let status_offline = "offline"
+let status_backoff = "backoff"
+
+let contains_substring haystack needle =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  if needle_len = 0 then true
+  else if needle_len > haystack_len then false
+  else
+    let rec loop index =
+      if index + needle_len > haystack_len then false
+      else if String.sub haystack index needle_len = needle then true
+      else loop (index + 1)
+    in
+    loop 0
+
+let degraded_reason_of_error message =
+  let lower = String.lowercase_ascii message in
+  if
+    contains_substring lower "timeout"
+    || contains_substring lower "timed out"
+    || contains_substring lower "deadline"
+  then
+    "timeout"
+  else
+    "error"
+
+let cached_judgments_still_fresh ~now_ts (st : state) =
+  match st.expires_at_unix with
+  | Some expires_at -> expires_at > now_ts
+  | None -> false
+
+let mark_refresh_failure ~now_ts (st : state) ~message =
+  st.refreshing <- false;
+  (* Preserve the last good snapshot while its TTL is still valid. A slow
+     or timing-out judge should degrade to stale-but-visible rather than
+     immediately flipping the dashboard offline. *)
+  let cache_fresh = cached_judgments_still_fresh ~now_ts st in
+  st.judge_online <- cache_fresh;
+  st.runtime_status <-
+    (if cache_fresh then status_stale_visible else status_offline);
+  st.degraded_reason <- Some (degraded_reason_of_error message);
+  st.last_error <- Some message
+
 let get_state base_path =
   with_outer_rw (fun () ->
     match Hashtbl.find_opt states base_path with
@@ -91,6 +143,8 @@ let get_state base_path =
             started = false;
             refreshing = false;
             judge_online = false;
+            runtime_status = status_offline;
+            degraded_reason = None;
             generated_at_unix = None;
             expires_at_unix = None;
             generated_at = None;
@@ -222,14 +276,42 @@ let fresh_judgments_json ~base_path ~limit =
 let runtime_status_at ~now_ts base_path =
   let st = get_state base_path in
   with_lock st (fun () ->
+      let cache_fresh = cached_judgments_still_fresh ~now_ts st in
+      let status =
+        if st.refreshing then status_refreshing
+        else
+          match st.runtime_status with
+          | value when value = status_online && cache_fresh -> status_online
+          | value when value = status_stale_visible && cache_fresh ->
+              status_stale_visible
+          | value when value = status_backoff -> status_backoff
+          | _ when st.judge_online && cache_fresh -> status_online
+          | _ -> status_offline
+      in
+      let judge_online =
+        match status with
+        | value when value = status_online || value = status_stale_visible -> true
+        | value when value = status_refreshing -> st.judge_online && cache_fresh
+        | _ -> false
+      in
+      let degraded_reason =
+        match status with
+        | value when value = status_backoff -> Some "backoff"
+        | value when value = status_stale_visible || value = status_offline ->
+            (match st.degraded_reason, st.last_error with
+             | Some reason, _ -> Some reason
+             | None, Some message -> Some (degraded_reason_of_error message)
+             | None, None -> None)
+        | _ -> None
+      in
       {
-        judge_online =
-          st.judge_online
-          &&
-          (match st.expires_at_unix with
-          | Some expires_at -> now_ts < expires_at
-          | None -> false);
+        judge_online;
         refreshing = st.refreshing;
+        status;
+        degraded_reason;
+        cached_judgments_visible =
+          cache_fresh
+          && (status = status_stale_visible || status = status_backoff);
         generated_at = st.generated_at;
         generated_at_unix = st.generated_at_unix;
         expires_at = st.expires_at;
@@ -365,7 +447,7 @@ let compute_judgments
   let timeout_s = Float.of_int Env_config.Inference.dashboard_governance_judge_timeout_seconds in
   match
     (* build_facts() is moved inside the bridge so a deadlock in
-       factual_snapshot_json / get_agents_status is bounded by [timeout_s]
+       get_agents_status is bounded by [timeout_s]
        rather than hanging the daemon fiber indefinitely (#8319). *)
     Masc_oas_bridge.run_safe ~timeout_s (fun () ->
       let factual_json = build_facts () in
@@ -445,6 +527,8 @@ let refresh_once ~sw ~net
           let was_online = st.judge_online in
           st.refreshing <- false;
           st.judge_online <- false;
+          st.runtime_status <- status_backoff;
+          st.degraded_reason <- Some "backoff";
           st.last_error <- Some backoff_status;
           was_online)
     in
@@ -454,7 +538,10 @@ let refresh_once ~sw ~net
       Log.Governance.debug "backoff: local slots saturated (first cycle)"
   end
   else begin
-    with_lock st (fun () -> st.refreshing <- true);
+    with_lock st (fun () ->
+        st.refreshing <- true;
+        st.runtime_status <- status_refreshing;
+        st.degraded_reason <- None);
     match compute_judgments ~masc_tools ~dispatch ~build_facts with
     | Ok (model_used, generated_at, expires_at, judgments) ->
         Log.Governance.info
@@ -464,6 +551,8 @@ let refresh_once ~sw ~net
         with_lock st (fun () ->
             st.refreshing <- false;
             st.judge_online <- true;
+            st.runtime_status <- status_online;
+            st.degraded_reason <- None;
             st.generated_at <- Some generated_at;
             st.generated_at_unix <- Some (Types.parse_iso8601 generated_at);
             st.expires_at <- Some expires_at;
@@ -479,9 +568,7 @@ let refresh_once ~sw ~net
           "refresh_once: compute_judgments failed: %s"
           message;
         with_lock st (fun () ->
-            st.refreshing <- false;
-            st.judge_online <- false;
-            st.last_error <- Some message)
+            mark_refresh_failure ~now_ts:(Unix.gettimeofday ()) st ~message)
   end
 
 let start ~sw ~clock ~net ~base_path

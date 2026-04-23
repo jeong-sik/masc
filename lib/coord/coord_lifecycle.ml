@@ -101,10 +101,10 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
            let agents = nickname :: List.filter ((<>) nickname) s.active_agents in
            { s with active_agents = agents }
          ) in
-         (match broadcast config ~from_agent:nickname
-          ~content:(Printf.sprintf "👋 %s rejoined the namespace" nickname) with
-         | Ok _ -> ()
-         | Error e -> Log.Coord.warn "broadcast failed on rejoin for %s: %s" nickname e);
+         let _ =
+           broadcast config ~from_agent:nickname
+             ~content:(Printf.sprintf "👋 %s rejoined the namespace" nickname)
+         in
          log_event config (Printf.sprintf
            "{\"type\":\"agent_join\",\"agent\":\"%s\",\"agent_type\":\"%s\",\"session_id\":\"%s\",\"rejoin\":true,\"ts\":\"%s\"}"
            nickname agent_type new_session_id (now_iso ()));
@@ -162,9 +162,10 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
   ) in
 
   (* Broadcast join *)
-  (match broadcast config ~from_agent:nickname ~content:(Printf.sprintf "👋 %s joined the namespace" nickname) with
-  | Ok _ -> ()
-  | Error e -> Log.Coord.warn "broadcast failed on join for %s: %s" nickname e);
+  let _ =
+    broadcast config ~from_agent:nickname
+      ~content:(Printf.sprintf "👋 %s joined the namespace" nickname)
+  in
 
   (* Log event with metadata *)
   log_event config (Printf.sprintf
@@ -226,9 +227,10 @@ let leave config ~agent_name =
       { s with active_agents = List.filter ((<>) actual_name) s.active_agents }
     ) in
 
-    (match broadcast config ~from_agent:"system" ~content:(Printf.sprintf "👋 %s left the namespace" actual_name) with
-    | Ok _ -> ()
-    | Error e -> Log.Coord.warn "broadcast failed on leave for %s: %s" actual_name e);
+    let _ =
+      broadcast config ~from_agent:"system"
+        ~content:(Printf.sprintf "👋 %s left the namespace" actual_name)
+    in
 
     (* Log event *)
     log_event config (Printf.sprintf

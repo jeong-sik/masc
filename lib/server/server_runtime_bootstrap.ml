@@ -570,19 +570,26 @@ let sync_admin_token_env (state : Mcp_server.server_state) =
              "startup minted %s for %s because env was unset"
              Env_config_core.admin_token_env_key admin_agent_name
        | Error err ->
-           Log.Server.error
+          Log.Server.error
              "startup admin token mint failed for %s: %s"
              admin_agent_name
              (Types.masc_error_to_string err))
 
-let sync_client_token_file ~base_path ~agent_name ~default_role =
+let sync_internal_keeper_token_env (state : Mcp_server.server_state) =
+  let base_path = state.Mcp_server.room_config.base_path in
+  let raw_token = Auth.ensure_internal_keeper_token base_path in
+  Unix.putenv "MASC_INTERNAL_MCP_TOKEN" raw_token;
+  Log.Server.info
+    "startup internal keeper MCP token synced via MASC_INTERNAL_MCP_TOKEN"
+
+let sync_client_token_file ~base_path ~agent_name ~role =
   let token_file =
     Filename.concat (Auth.auth_dir base_path) (agent_name ^ ".token")
   in
   let existing_role =
     match Auth.load_credential base_path agent_name with
     | Some cred -> cred.role
-    | None -> default_role
+    | None -> role
   in
   let persist_raw_token raw_token =
     Fs_compat.mkdir_p (Auth.auth_dir base_path);
@@ -641,6 +648,34 @@ let sync_client_token_file ~base_path ~agent_name ~default_role =
       | Ok _ -> normalize_existing raw_token
       | Error _ -> create_and_persist ~reason:"repaired")
   | None -> create_and_persist ~reason:"created"
+
+let sync_bootable_keeper_credentials (state : Mcp_server.server_state) =
+  let base_path = state.Mcp_server.room_config.base_path in
+  let keeper_names =
+    Keeper_runtime.bootable_keeper_names state.Mcp_server.room_config
+  in
+  let synced_count, failed =
+    List.fold_left
+      (fun (synced_count, failed) keeper_name ->
+        let agent_name =
+          Keeper_types_profile.keeper_agent_name keeper_name
+        in
+        match Auth.ensure_keeper_credential base_path ~agent_name with
+        | Ok _ -> (synced_count + 1, failed)
+        | Error err ->
+            ( synced_count,
+              (keeper_name, Types.masc_error_to_string err) :: failed ))
+      (0, []) keeper_names
+  in
+  if synced_count > 0 then
+    Log.Server.info
+      "startup verified %d bootable keeper credential(s)"
+      synced_count;
+  List.rev failed
+  |> List.iter (fun (keeper_name, detail) ->
+         Log.Server.error
+           "startup keeper credential sync failed for %s: %s"
+           keeper_name detail)
 
 let bootstrap_prompt_state (state : Mcp_server.server_state) =
   Config_dir_resolver.log_warnings ~context:"ServerBootstrap" ();
@@ -948,8 +983,9 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       Log.Server.info "State created (runtime state) in %.1fs" (t1 -. t0);
       bootstrap_server_state_blocking state;
       sync_admin_token_env state;
+      sync_internal_keeper_token_env state;
       sync_client_token_file ~base_path ~agent_name:"codex-mcp-client"
-        ~default_role:Types.Worker;
+        ~role:Types.Worker;
       let path_diagnostics =
         runtime_path_diagnostics ~input_base_path:base_path state
       in
@@ -1077,7 +1113,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
               Log.Server.warn "gRPC keeper client init failed: %s"
                 (Printexc.to_string exn))
-       | _ -> ());
+       | Http | Ws | Webrtc | Local -> ());
       (* Standalone WebSocket transport (enabled by default, opt-out via MASC_WS_ENABLED=0) *)
       Server_ws_standalone.start ~sw ~env
         ~on_message:(fun ws_session_id body_str ->

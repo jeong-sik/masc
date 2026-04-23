@@ -379,7 +379,6 @@ let find_duplicate_task (backlog : backlog) ~(title : string) ~(goal_id : string
 let add_task
       ?contract
       ?goal_id
-      ?required_preset
       ?created_by
       config
       ~title
@@ -416,8 +415,6 @@ let add_task
              ; created_at = now_iso ()
              ; created_by
              ; worktree = None
-             ; required_role = Types_core.Unassigned
-             ; required_preset
              ; stage = None
              ; contract
              ; handoff_context = None
@@ -456,115 +453,13 @@ let add_task
                           | None -> false) )
                    ]);
            (Atomic.get Coord_hooks.on_task_mutation_fn) ();
-           (match broadcast
+           let _ =
+             broadcast
                config
                ~from_agent:actor
                ~content:(Printf.sprintf "📋 New quest: %s" title)
-            with
-            | Ok _ -> ()
-            | Error e -> Log.Coord.warn "broadcast failed on add_task: %s" e);
+           in
            Printf.sprintf "✅ Added %s: %s" task_id title))
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | e -> Printf.sprintf "❌ Error: %s" (Printexc.to_string e)
-;;
-
-(** Add task with a required role constraint — file-locked.
-    Same dedup guard as [add_task]. *)
-let add_task_with_role
-      ?contract
-      ?goal_id
-      ?created_by
-      config
-      ~title
-      ~priority
-      ~description
-      ~required_role
-  =
-  ensure_initialized config;
-  let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
-  let actor = Option.value ~default:"system" created_by in
-  let goal_id = trim_opt goal_id in
-  try
-    with_file_lock config backlog_path (fun () ->
-      match read_backlog_r config with
-      | Error msg -> Printf.sprintf "❌ Error: %s" msg
-      | Ok backlog ->
-        (match find_duplicate_task backlog ~title ~goal_id with
-         | Some existing_id ->
-           Printf.sprintf
-             "⚠️ Duplicate rejected: '%s' matches existing %s. Use that task instead."
-             title
-             existing_id
-         | None ->
-           let task_id = Printf.sprintf "task-%03d" (next_task_number config backlog) in
-           let contract = Option.map normalize_task_contract contract in
-           let new_task =
-             { id = task_id
-             ; title
-             ; description
-             ; goal_id
-             ; task_status = Todo
-             ; priority
-             ; files = []
-             ; created_at = now_iso ()
-             ; created_by
-             ; worktree = None
-             ; required_role
-             ; required_preset = None
-             ; stage = None
-             ; contract
-             ; handoff_context = None
-             ; cycle_count = 0
-             ; do_not_reclaim_reason = None
-             }
-           in
-           let new_backlog =
-             { tasks = backlog.tasks @ [ new_task ]
-             ; last_updated = now_iso ()
-             ; version = backlog.version + 1
-             }
-           in
-           write_backlog config new_backlog;
-           let created_by_json =
-             match created_by with
-             | Some value -> `String value
-             | None -> `Null
-           in
-           let goal_id_json =
-             match goal_id with
-             | Some value -> `String value
-             | None -> `Null
-           in
-           emit_task_activity
-             config
-             ~agent_name:actor
-             ~task_id
-             ~kind:(Event_kind.Task.to_string Event_kind.Task.Created)
-             ~payload:
-               (`Assoc
-                   [ "task_id", `String task_id
-                   ; "title", `String title
-                   ; "priority", `Int priority
-                   ; "created_by", created_by_json
-                   ; "goal_id", goal_id_json
-                   ; "required_role", `String (Types_core.role_to_string required_role)
-                   ; ( "strict_contract"
-                     , `Bool
-                         (match contract with
-                          | Some contract -> contract.strict
-                          | None -> false) )
-                   ]);
-           (Atomic.get Coord_hooks.on_task_mutation_fn) ();
-           let role_str = Types_core.role_to_string required_role in
-           (match broadcast
-               config
-               ~from_agent:actor
-               ~content:(Printf.sprintf "📋 New quest: %s (requires: %s)" title role_str)
-            with
-            | Ok _ -> ()
-            | Error e -> Log.Coord.warn "broadcast failed on add_task_with_role: %s" e);
-           Printf.sprintf "✅ Added %s: %s (required_role: %s)" task_id title role_str))
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | e -> Printf.sprintf "❌ Error: %s" (Printexc.to_string e)
@@ -597,8 +492,6 @@ let batch_add_tasks_internal ?created_by config tasks =
                 ; created_at = now_iso ()
                 ; created_by
                 ; worktree = None
-                ; required_role = Types_core.Unassigned
-                ; required_preset = None
                 ; stage = None
                 ; contract
                 ; handoff_context = None
@@ -650,9 +543,7 @@ let batch_add_tasks_internal ?created_by config tasks =
              (List.length added_tasks)
              summary
          in
-         (match broadcast config ~from_agent:actor ~content:msg with
-          | Ok _ -> ()
-          | Error e -> Log.Coord.warn "broadcast failed on add_batch_tasks: %s" e);
+         let _ = broadcast config ~from_agent:actor ~content:msg in
          Printf.sprintf "✅ Added %d tasks: %s" (List.length added_tasks) summary
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
@@ -736,13 +627,12 @@ let claim_task config ~agent_name ~task_id =
                   write_backlog config new_backlog;
                   update_local_agent_state config ~agent_name (fun agent ->
                     { agent with status = Busy; current_task = Some task_id });
-                  (match broadcast
+                  let _ =
+                    broadcast
                       config
                       ~from_agent:agent_name
                       ~content:(Printf.sprintf "📋 Claimed %s" task_id)
-                   with
-                   | Ok _ -> ()
-                   | Error e -> Log.Coord.warn "broadcast failed on claim: %s" e);
+                  in
                   emit_task_activity
                     config
                     ~agent_name
@@ -777,10 +667,8 @@ let claim_task config ~agent_name ~task_id =
          | e -> Printf.sprintf "❌ Error: %s" (Printexc.to_string e)))
 ;;
 
-(** Result-returning version of claim_task for type-safe error handling.
-    When [agent_role] is provided and the task has a [required_role],
-    the claim is rejected if the roles do not match. *)
-let claim_task_r config ~agent_name ~task_id ?(agent_role = Types_core.Unassigned) ()
+(** Result-returning version of claim_task for type-safe error handling. *)
+let claim_task_r config ~agent_name ~task_id ()
   : string Types.masc_result
   =
   let open Result.Syntax in
@@ -811,17 +699,6 @@ let claim_task_r config ~agent_name ~task_id ?(agent_role = Types_core.Unassigne
            match target_task with
            | None -> Error (Types.TaskNotFound task_id)
            | Some task -> Ok task
-         in
-         let* () =
-           if not (Types_core.role_satisfies ~required:task.required_role ~agent_role)
-           then
-             Error
-               (Types.TaskRoleMismatch
-                  { task_id
-                  ; required = Types_core.role_to_string task.required_role
-                  ; actual = Types_core.role_to_string agent_role
-                  })
-           else Ok ()
          in
          (* Cycle-prevention gate: refuse claim when do_not_reclaim_reason is set.
          The reason can come from cancel/release hard-stop logic or be applied
@@ -880,13 +757,12 @@ let claim_task_r config ~agent_name ~task_id ?(agent_role = Types_core.Unassigne
            write_backlog config new_backlog;
            update_local_agent_state config ~agent_name (fun agent ->
              { agent with status = Busy; current_task = Some task_id });
-           (match broadcast
+           let _ =
+             broadcast
                config
                ~from_agent:agent_name
                ~content:(Printf.sprintf "📋 Claimed %s" task_id)
-            with
-            | Ok _ -> ()
-            | Error e -> Log.Coord.warn "broadcast failed on claim: %s" e);
+           in
            emit_task_activity
              config
              ~agent_name
@@ -1156,10 +1032,14 @@ let transition_task_r
               (e.g. confused the target of a multi-task release) can
               still detect the no-op without seeing it as an error. *)
            Log.RoomTask.debug "release on already-todo task %s — no-op" task_id
-         | _ -> ());
-        if new_status = task.task_status && set_current = None
-        then
-          (* Idempotent no-op: status unchanged, skip write/events.
+       | Types.Claim, _ | Types.Start, _ | Types.Done_action, _ | Types.Cancel, _
+       | Types.Submit_for_verification, _ | Types.Approve_verification, _
+       | Types.Reject_verification, _
+       | Types.Release, Types.Claimed _ | Types.Release, Types.InProgress _
+       | Types.Release, Types.AwaitingVerification _ | Types.Release, Types.Done _
+       | Types.Release, Types.Cancelled _ -> ());
+      if new_status = task.task_status && set_current = None then
+        (* Idempotent no-op: status unchanged, skip write/events.
            Match None explicitly so set_current=Some is never silently dropped. *)
           Ok
             (Printf.sprintf
@@ -1515,9 +1395,7 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result
                  then Printf.sprintf "🚫 Cancelled %s" task_id
                  else Printf.sprintf "🚫 Cancelled %s - %s" task_id reason
                in
-               (match broadcast config ~from_agent:agent_name ~content:msg with
-                | Ok _ -> ()
-                | Error e -> Log.Coord.warn "broadcast failed on cancel: %s" e);
+               let _ = broadcast config ~from_agent:agent_name ~content:msg in
                emit_task_activity
                  config
                  ~agent_name
@@ -1597,10 +1475,7 @@ type claim_next_result = Types.claim_next_result =
       ; message : string
       }
   | Claim_next_no_unclaimed
-  | Claim_next_no_eligible of
-      { excluded_count : int
-      ; preset_filtered : int
-      }
+  | Claim_next_no_eligible of { excluded_count : int }
   | Claim_next_error of string
 
 let link_task_execution_artifacts_r

@@ -142,7 +142,8 @@ let cleanup_zombies
                  log_event config (Printf.sprintf
                    "{\"type\":\"zombie_cascade_error\",\"task_id\":\"%s\",\"agent\":\"%s\",\"error\":\"%s\",\"ts\":\"%s\"}"
                    task.id assignee (Types.masc_error_to_string e) (now_iso ())))
-        | _ -> ()
+        | Types.Claimed _ | Types.InProgress _
+        | Todo | AwaitingVerification _ | Done _ | Cancelled _ -> ()
       ) backlog.tasks;
 
       (* Phase 4: Delete files — skip agents with release failures *)
@@ -275,7 +276,7 @@ let gc config ?(days=7) () =
               Sys.remove path;
               incr old_msg_count
             end
-        | _ -> ()
+        | None | Some _ -> ()
       end
     )
   end;

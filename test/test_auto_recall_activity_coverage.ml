@@ -316,6 +316,38 @@ let test_recent_activity_skips_malformed_jsonl_lines () =
       check (float 0.01) "timestamp preserved" 123.0 item.created_at
   | _ -> fail "expected one activity item"
 
+let test_recent_activity_accepts_iso_string_created_at_for_board_posts () =
+  with_temp_dir "activity-feed-jsonl-iso" @@ fun base_path ->
+  let config = Coord.default_config base_path in
+  let masc_dir = Coord.masc_dir config in
+  Fs_compat.mkdir_p masc_dir;
+  let board_posts_path = Filename.concat masc_dir "board_posts.jsonl" in
+  let iso_created_at = "2026-04-22T13:01:48Z" in
+  write_file board_posts_path
+    (Yojson.Safe.to_string
+       (`Assoc
+         [
+           ("id", `String "post-iso");
+           ("author", `String "alice");
+           ("title", `String "Hello");
+           ("content", `String "body");
+           ("created_at", `String iso_created_at);
+         ]) ^ "\n");
+  let stderr_output =
+    capture_stderr (fun () ->
+        ignore (Activity_feed.recent_activity config ~limit:10 ()))
+  in
+  check bool "does not warn for ISO created_at" false
+    (str_contains stderr_output "board post missing/invalid created_at");
+  let items = Activity_feed.recent_activity config ~limit:10 () in
+  check int "valid ISO board post survives" 1 (List.length items);
+  match items, Types.parse_iso8601_opt iso_created_at with
+  | [item], Some expected_ts ->
+      check string "summary preserved" "Posted: Hello" item.summary;
+      check (float 0.01) "ISO timestamp preserved" expected_ts item.created_at
+  | [ _ ], None -> fail "expected ISO fixture to parse"
+  | _ -> fail "expected one activity item"
+
 let test_recent_activity_skips_bad_task_file () =
   with_temp_dir "activity-feed-task" @@ fun base_path ->
   let config = Coord.default_config base_path in
@@ -441,6 +473,8 @@ let () =
     "activity_feed_fs", [
       test_case "skips malformed jsonl lines" `Quick
         test_recent_activity_skips_malformed_jsonl_lines;
+      test_case "accepts ISO string created_at for board posts" `Quick
+        test_recent_activity_accepts_iso_string_created_at_for_board_posts;
       test_case "skips bad task file" `Quick
         test_recent_activity_skips_bad_task_file;
       test_case "falls back from bad task timestamp" `Quick

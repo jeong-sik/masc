@@ -5,10 +5,6 @@
 import { html } from 'htm/preact'
 import { useMemo, useState } from 'preact/hooks'
 import type { Agent, Keeper } from '../types'
-import type {
-  DashboardMissionAgentBrief,
-  DashboardMissionKeeperBrief,
-} from '../types/dashboard-mission'
 import {
   agents,
   keepers,
@@ -18,7 +14,6 @@ import {
   executionError,
   shellCounts,
 } from '../store'
-import { missionKeeperBriefs, missionAgentBriefs } from '../mission-signals'
 import { FilterChips } from './common/filter-chips'
 import { TextInput } from './common/input'
 import { EmptyState } from './common/empty-state'
@@ -132,16 +127,12 @@ export function rosterContextMeta(
 export function rosterStateNote(
   keeper: {
     runtime_blocker_summary?: string | null
-    last_blocker?: string | null
     diagnostic?: { last_error?: string | null } | null
   } | null | undefined,
   monitoringHint?: string | null,
 ): { label: string; text: string } | null {
   const runtimeBlocker = keeper?.runtime_blocker_summary?.trim()
-  if (runtimeBlocker) return { label: '최근 차단', text: runtimeBlocker }
-
-  const lastBlocker = keeper?.last_blocker?.trim()
-  if (lastBlocker) return { label: '최근 차단', text: lastBlocker }
+  if (runtimeBlocker) return { label: '현재 차단', text: runtimeBlocker }
 
   const diagnosticError = keeper?.diagnostic?.last_error?.trim()
   if (diagnosticError) return { label: '최근 오류', text: diagnosticError }
@@ -151,22 +142,7 @@ export function rosterStateNote(
   return null
 }
 
-interface KeeperInfo {
-  name?: string
-  agent_name?: string | null
-  generation?: number | null
-  context_ratio?: number | null
-  model?: string | null
-  current_work?: string | null
-  last_turn_ago_s?: number | null
-  last_autonomous_action_at?: string | null
-  recent_tool_names?: string[]
-  latest_tool_names?: string[]
-  latest_tool_call_count?: number | null
-  tool_audit_at?: string | null
-}
-
-function registerKeeperLookup<T extends Pick<KeeperInfo, 'name' | 'agent_name'>>(
+function registerKeeperLookup<T extends Pick<Keeper, 'name' | 'agent_name'>>(
   lookup: Map<string, T>,
   source: T,
 ) {
@@ -178,49 +154,17 @@ function registerKeeperLookup<T extends Pick<KeeperInfo, 'name' | 'agent_name'>>
   }
 }
 
-function buildKeeperInfoLookup(
-  keeperList: Keeper[],
-  keeperBriefs: DashboardMissionKeeperBrief[],
-): Map<string, KeeperInfo> {
-  const lookup = new Map<string, KeeperInfo>()
-  for (const brief of keeperBriefs) registerKeeperLookup(lookup, brief)
-  for (const keeper of keeperList) registerKeeperLookup(lookup, keeper)
-  return lookup
-}
-
 function buildKeeperRuntimeLookup(keeperList: Keeper[]): Map<string, Keeper> {
   const lookup = new Map<string, Keeper>()
   for (const keeper of keeperList) registerKeeperLookup(lookup, keeper)
   return lookup
 }
 
-function findKeeper(agentName: string, keeperList: Keeper[], keeperBriefs: DashboardMissionKeeperBrief[]): KeeperInfo | null {
-  // Try keeper briefs first (richer data from mission snapshot)
-  for (const kb of keeperBriefs) {
-    if (kb.name === agentName || kb.agent_name === agentName
-        || agentName.includes(kb.name) || kb.name?.includes(agentName)) {
-      return kb
-    }
-  }
-  // Fallback to keeper signal store
+function findKeeperRuntime(agentName: string, keeperList: Keeper[]): Keeper | null {
   for (const k of keeperList) {
     if (k.name === agentName || k.agent_name === agentName
         || agentName.includes(k.name) || k.name?.includes(agentName)) {
       return k
-    }
-  }
-  return null
-}
-
-function findKeeperRuntime(agentName: string, keeperList: Keeper[]): Keeper | null {
-  for (const keeper of keeperList) {
-    if (
-      keeper.name === agentName
-      || keeper.agent_name === agentName
-      || agentName.includes(keeper.name)
-      || keeper.name.includes(agentName)
-    ) {
-      return keeper
     }
   }
   return null
@@ -305,51 +249,54 @@ export function uniqueToolNames(...groups: Array<string[] | null | undefined>): 
 function matchesKeeperFilter(
   agentName: string,
   keeperList: Keeper[],
-  keeperBriefs: DashboardMissionKeeperBrief[],
   keeperFilter: KeeperFilterMode,
 ): boolean {
   if (keeperFilter === 'all') return true
-  const isKeeper = findKeeper(agentName, keeperList, keeperBriefs) != null
+  const isKeeper = findKeeperRuntime(agentName, keeperList) != null
   return keeperFilter === 'keeper-only' ? isKeeper : !isKeeper
 }
 
 function scopeAgentsByKeeperFilter(
   agentList: Agent[],
   keeperList: Keeper[],
-  keeperBriefs: DashboardMissionKeeperBrief[],
   keeperFilter: KeeperFilterMode,
 ): Agent[] {
   return agentList.filter((agent: Agent) =>
-    matchesKeeperFilter(agent.name, keeperList, keeperBriefs, keeperFilter))
+    matchesKeeperFilter(agent.name, keeperList, keeperFilter))
 }
 
-export function keeperRuntimeName(source: Pick<Keeper, 'name' | 'agent_name'> | DashboardMissionKeeperBrief): string {
+export function keeperRuntimeName(source: Pick<Keeper, 'name' | 'agent_name'>): string {
   const runtimeName = source.agent_name?.trim()
   return runtimeName && runtimeName.length > 0 ? runtimeName : source.name
 }
 
-function synthesizeAgentFromKeeper(source: Keeper | DashboardMissionKeeperBrief): Agent | null {
+function synthesizeAgentFromKeeper(source: Keeper): Agent | null {
   const runtimeName = keeperRuntimeName(source)
   if (!runtimeName) return null
 
-  const typed = source as Keeper & DashboardMissionKeeperBrief
-  const linkedAgent = typed.agent
+  const linkedAgent = source.agent
+  const liveCurrentTask =
+    source.recent_output_preview
+    ?? source.recent_input_preview
+    ?? source.short_goal
+    ?? source.goal
+    ?? null
 
   return {
     name: runtimeName,
     agent_type: linkedAgent?.agent_type,
-    status: (linkedAgent?.status as Agent['status'] | undefined) ?? (typed.status as Agent['status'] | undefined),
-    current_task: linkedAgent?.current_task ?? typed.current_work ?? null,
-    context_ratio: typed.context_ratio ?? undefined,
+    status: (linkedAgent?.status as Agent['status'] | undefined) ?? (source.status as Agent['status'] | undefined),
+    current_task: linkedAgent?.current_task ?? liveCurrentTask,
+    context_ratio: source.context_ratio ?? undefined,
     joined_at: linkedAgent?.joined_at,
     last_seen: linkedAgent?.last_seen,
     capabilities: linkedAgent?.capabilities,
-    emoji: typed.emoji,
-    koreanName: typed.koreanName,
-    model: typed.model,
-    traits: typed.traits,
-    activityLevel: typed.activityLevel,
-    primaryValue: typed.primaryValue,
+    emoji: source.emoji,
+    koreanName: source.koreanName,
+    model: source.model,
+    traits: source.traits,
+    activityLevel: source.activityLevel,
+    primaryValue: source.primaryValue,
     synthetic: true,
   }
 }
@@ -377,7 +324,6 @@ export function mergeRosterAgent(existing: Agent | undefined, next: Agent): Agen
 function buildAgentRoster(
   agentList: Agent[],
   keeperList: Keeper[],
-  keeperBriefs: DashboardMissionKeeperBrief[],
 ): Agent[] {
   const roster = new Map<string, Agent>()
 
@@ -385,7 +331,7 @@ function buildAgentRoster(
     roster.set(agent.name, agent)
   }
 
-  for (const source of [...keeperList, ...keeperBriefs]) {
+  for (const source of keeperList) {
     const synthetic = synthesizeAgentFromKeeper(source)
     if (!synthetic) continue
     roster.set(synthetic.name, mergeRosterAgent(roster.get(synthetic.name), synthetic))
@@ -418,11 +364,10 @@ function countAgentsByStatus(
 export function countRuntimeKinds(
   agentList: Agent[],
   keeperList: Keeper[],
-  keeperBriefs: DashboardMissionKeeperBrief[],
 ): { agents: number; keepers: number; totalRuntimes: number } {
-  const rosterAgents = buildAgentRoster(agentList, keeperList, keeperBriefs)
-  const keeperCount = scopeAgentsByKeeperFilter(rosterAgents, keeperList, keeperBriefs, 'keeper-only').length
-  const agentCount = scopeAgentsByKeeperFilter(rosterAgents, keeperList, keeperBriefs, 'agent-only').length
+  const rosterAgents = buildAgentRoster(agentList, keeperList)
+  const keeperCount = scopeAgentsByKeeperFilter(rosterAgents, keeperList, 'keeper-only').length
+  const agentCount = scopeAgentsByKeeperFilter(rosterAgents, keeperList, 'agent-only').length
 
   return {
     agents: agentCount,
@@ -437,17 +382,13 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
   const agentList = agents.value
   const keeperList = keepers.value
-  const briefs = missionAgentBriefs.value
-  const keeperBriefs = missionKeeperBriefs.value
 
-  // Memoize roster and lookup Maps — these iterate full keeper/agent arrays
+  // Memoize roster and lookup Maps — these iterate full keeper/agent arrays.
+  // Directory cards are live-only: cached mission briefs are intentionally
+  // excluded so one card never mixes multiple freshness levels.
   const rosterAgents = useMemo(
-    () => buildAgentRoster(agentList, keeperList, keeperBriefs),
-    [agentList, keeperList, keeperBriefs],
-  )
-  const keeperInfoLookup = useMemo(
-    () => buildKeeperInfoLookup(keeperList, keeperBriefs),
-    [keeperList, keeperBriefs],
+    () => buildAgentRoster(agentList, keeperList),
+    [agentList, keeperList],
   )
   const keeperRuntimeLookup = useMemo(
     () => buildKeeperRuntimeLookup(keeperList),
@@ -456,10 +397,10 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
   // Derive runtime kind counts from memoized roster (avoids duplicate buildAgentRoster call)
   const liveRuntimeCounts = useMemo(() => {
-    const keeperCount = scopeAgentsByKeeperFilter(rosterAgents, keeperList, keeperBriefs, 'keeper-only').length
-    const agentCount = scopeAgentsByKeeperFilter(rosterAgents, keeperList, keeperBriefs, 'agent-only').length
+    const keeperCount = scopeAgentsByKeeperFilter(rosterAgents, keeperList, 'keeper-only').length
+    const agentCount = scopeAgentsByKeeperFilter(rosterAgents, keeperList, 'agent-only').length
     return { agents: agentCount, keepers: keeperCount, totalRuntimes: rosterAgents.length }
-  }, [rosterAgents, keeperList, keeperBriefs])
+  }, [rosterAgents, keeperList])
 
   const runtimeCounts = resolveRuntimeCounts({
     executionLoaded: executionLoaded.value,
@@ -475,15 +416,9 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
   const namespaceStatus = namespaceTruth.value?.root.status ?? serverStatus.value
   const namespaceName = namespaceStatus?.project ?? 'default'
 
-  const briefMap = useMemo(
-    () => new Map<string, DashboardMissionAgentBrief>(
-      briefs.map(brief => [brief.agent_name, brief] as const),
-    ),
-    [briefs],
-  )
   const scopedAgents = useMemo(
-    () => scopeAgentsByKeeperFilter(rosterAgents, keeperList, keeperBriefs, keeperFilter),
-    [rosterAgents, keeperList, keeperBriefs, keeperFilter],
+    () => scopeAgentsByKeeperFilter(rosterAgents, keeperList, keeperFilter),
+    [rosterAgents, keeperList, keeperFilter],
   )
   const bandByAgent = useMemo(
     () => new Map(
@@ -501,7 +436,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
   const searchTermsByAgent = useMemo(
     () => new Map(
       scopedAgents.map(agent => {
-        const keeper = keeperInfoLookup.get(agent.name) ?? findKeeper(agent.name, keeperList, keeperBriefs)
+        const keeper = keeperRuntimeLookup.get(agent.name) ?? findKeeperRuntime(agent.name, keeperList)
         return [
           agent.name,
           keeperIdentitySearchTerms(
@@ -511,13 +446,13 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
         ] as const
       }),
     ),
-    [scopedAgents, keeperInfoLookup, keeperList, keeperBriefs],
+    [scopedAgents, keeperRuntimeLookup, keeperList],
   )
   const pageDescription = keeperFilter === 'keeper-only'
-    ? '주 이름을 먼저 보고, 필요할 때만 상태와 최근 근거를 확인합니다.'
+    ? 'live runtime 기준으로 주 이름과 현재 상태를 먼저 훑습니다.'
     : keeperFilter === 'agent-only'
-      ? '키퍼가 연결되지 않은 일반 에이전트만 따로 봅니다.'
-      : '주 이름 기준으로 훑고, 최근 활동과 운영 상태가 필요한 카드만 열어봅니다.'
+      ? 'live execution 기준으로 키퍼가 연결되지 않은 일반 에이전트만 따로 봅니다.'
+      : 'live execution/runtime 기준으로 현재 상태를 보고, cached 조율 정보는 이 화면에 섞지 않습니다.'
 
   const filtered = scopedAgents
     .filter((a: Agent) => {
@@ -626,7 +561,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div class="flex flex-col gap-1">
                 <div class="text-2xs font-semibold tracking-1 text-[var(--text-strong)] uppercase">운영 상태</div>
-                <p class="m-0 text-xs leading-normal text-[var(--text-muted)]">먼저 운영 상태로 걸러 보고, 필요할 때만 세부 상태와 최근 근거를 확인합니다.</p>
+                <p class="m-0 text-xs leading-normal text-[var(--text-muted)]">live runtime 신호로 먼저 걸러 보고, 필요할 때만 세부 상태와 최근 근거를 확인합니다.</p>
               </div>
               <${FilterChips}
                 chips=${statusChips}
@@ -660,31 +595,30 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
       <div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
         ${filtered.map((agent: Agent) => {
-          const brief = briefMap.get(agent.name)
-          const keeper = keeperInfoLookup.get(agent.name) ?? findKeeper(agent.name, keeperList, keeperBriefs)
           const keeperRuntime = keeperRuntimeLookup.get(agent.name) ?? findKeeperRuntime(agent.name, keeperList)
           const band = bandByAgent.get(agent.name) ?? runtimeBandMeta('attention')
           const keeperMonitoring = keeperRuntime ? summarizeKeeperMonitoring(keeperRuntime) : null
           const monitoringEvidence = keeperMonitoring ? summarizeMonitoringEvidence(keeperMonitoring) : null
           const fsmPhase = keeperRuntime ? keeperPhaseForDisplay(keeperRuntime) : null
-          const isKeeper = keeper != null
-          const currentWork = keeper?.current_work ?? brief?.current_work ?? agent.current_task ?? null
-          const lastActivityAge = keeperRuntime?.last_activity_ago_s ?? keeper?.last_turn_ago_s ?? brief?.last_activity_age_sec ?? null
+          const isKeeper = keeperRuntime != null
+          const goalSummary = keeperRuntime?.short_goal ?? keeperRuntime?.goal ?? agent.current_task ?? null
+          const currentWork =
+            keeperRuntime?.recent_output_preview
+            ?? keeperRuntime?.recent_input_preview
+            ?? goalSummary
+            ?? null
+          const lastActivityAge = keeperRuntime?.last_activity_ago_s ?? null
           const lastActivityAt =
-            brief?.last_activity_at
-            ?? keeper?.last_autonomous_action_at
-            ?? keeperRuntime?.last_autonomous_action_at
+            keeperRuntime?.last_autonomous_action_at
             ?? keeperRuntime?.last_heartbeat
             ?? agent.last_seen
             ?? null
           const contextMeta =
-            rosterContextMeta(keeperRuntime ?? keeper ?? null)
+            rosterContextMeta(keeperRuntime ?? null)
           const workPreview =
-            trimText(currentWork, 140)
-            ?? trimText(brief?.recent_output_preview, 140)
-            ?? trimText(keeperRuntime?.recent_output_preview, 140)
-            ?? trimText(brief?.recent_input_preview, 140)
+            trimText(keeperRuntime?.recent_output_preview, 140)
             ?? trimText(keeperRuntime?.recent_input_preview, 140)
+            ?? trimText(goalSummary, 140)
             ?? '최근 활동 요약 없음'
           const summaryText = workPreview
           const stateNote =
@@ -692,33 +626,23 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
               ? rosterStateNote(keeperRuntime, band.key === 'active' ? null : keeperMonitoring?.hint ?? null)
               : null
           const recentTools = uniqueToolNames(
-            brief?.recent_tool_names,
-            brief?.latest_tool_names,
             keeperRuntime?.recent_tool_names,
             keeperRuntime?.latest_tool_names,
-            keeper?.recent_tool_names,
-            keeper?.latest_tool_names,
           )
           const visibleTools = recentTools.slice(0, 2)
           const primaryTool = visibleTools[0] ?? null
           const extraToolCount = Math.max(0, recentTools.length - (primaryTool ? 1 : 0))
           const toolCallCount =
-            brief?.latest_tool_call_count
-            ?? keeper?.latest_tool_call_count
-            ?? keeperRuntime?.latest_tool_call_count
+            keeperRuntime?.latest_tool_call_count
             ?? null
-          const toolAuditAt =
-            brief?.tool_audit_at
-            ?? keeper?.tool_audit_at
-            ?? keeperRuntime?.tool_audit_at
-            ?? null
+          const toolAuditAt = keeperRuntime?.tool_audit_at ?? null
           const displayName =
             keeperPrimaryName(
-              keeperRuntime?.name ?? keeper?.name ?? null,
-              keeperRuntime?.agent_name ?? keeper?.agent_name ?? agent.name,
+              keeperRuntime?.name ?? null,
+              keeperRuntime?.agent_name ?? agent.name,
             )
             ?? agent.name
-          const modelMeta = rosterModelMeta(keeperRuntime ?? keeper ?? null)
+          const modelMeta = rosterModelMeta(keeperRuntime ?? agent)
           const compactModel = compactModelLabel(modelMeta?.value)
           const fsmPhaseKey =
             keeperMonitoring?.phase.key && keeperMonitoring.phase.key !== 'unknown'

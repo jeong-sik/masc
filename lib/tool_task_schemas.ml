@@ -34,7 +34,7 @@ Example: masc_add_task({title: 'Fix login bug', priority: 1, description: 'Users
         ]);
         ("required_preset", `Assoc [
           ("type", `String "string");
-          ("description", `String "Tool preset required to claim this task. Must match a preset name from tool_policy.toml (e.g., 'delivery', 'coding'). Only keepers whose preset covers the required tools can claim. Omit for any agent.");
+          ("description", `String "Tool preset required to claim this task. Must match a preset name from tool_policy.toml (e.g., 'dispatch', 'delivery', 'coding'). Only keepers whose preset covers the required tools can claim. Omit for any agent.");
         ]);
         ("contract", `Assoc [
           ("type", `String "object");

@@ -1,9 +1,12 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import {
   sanitizeDashboardActorName,
   readStoredDashboardActorName,
   resolveDashboardActorName,
   persistDashboardActorName,
+  hasDashboardActorQueryParam,
+  replaceDashboardActorQueryParam,
+  syncDashboardActorName,
   DASHBOARD_AGENT_NAME_KEY,
 } from './dashboard-actor'
 
@@ -109,5 +112,56 @@ describe('persistDashboardActorName', () => {
   it('handles null storage gracefully', () => {
     const result = persistDashboardActorName('janitor', null)
     expect(result).toBe('janitor')
+  })
+})
+
+describe('actor query helpers', () => {
+  it('detects actor query params', () => {
+    expect(hasDashboardActorQueryParam('?agent=janitor')).toBe(true)
+    expect(hasDashboardActorQueryParam('?agent_name=janitor')).toBe(true)
+    expect(hasDashboardActorQueryParam('?token=abc')).toBe(false)
+  })
+
+  it('rewrites actor query params to the canonical agent key', () => {
+    const history = { replaceState: vi.fn() }
+    const location = {
+      pathname: '/dashboard',
+      search: '?agent_name=dashboard&tab=tools',
+      hash: '#pane',
+    }
+    const result = replaceDashboardActorQueryParam(
+      'codex',
+      location as unknown as Location,
+      history as unknown as History,
+    )
+
+    expect(result).toBe('codex')
+    expect(history.replaceState).toHaveBeenCalledTimes(1)
+    const [, , nextUrl] = history.replaceState.mock.calls[0] as [null, string, string]
+    expect(nextUrl).toContain('/dashboard?')
+    expect(nextUrl).toContain('agent=codex')
+    expect(nextUrl).toContain('tab=tools')
+    expect(nextUrl).toContain('#pane')
+    expect(nextUrl).not.toContain('agent_name=')
+  })
+
+  it('syncs storage and query params together when requested', () => {
+    const storage = mockStorage()
+    const history = { replaceState: vi.fn() }
+    const location = {
+      pathname: '/dashboard',
+      search: '?agent=dashboard',
+      hash: '',
+    }
+    const result = syncDashboardActorName('codex', {
+      storage,
+      rewriteQuery: true,
+      location: location as unknown as Location,
+      history: history as unknown as History,
+    })
+
+    expect(result).toBe('codex')
+    expect(storage.getItem(DASHBOARD_AGENT_NAME_KEY)).toBe('codex')
+    expect(history.replaceState).toHaveBeenCalledWith(null, '', '/dashboard?agent=codex')
   })
 })

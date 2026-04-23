@@ -132,6 +132,32 @@ let upsert_http_header ~key ~value headers =
   in
   (key, value) :: retained
 
+let trim_nonempty value =
+  match value with
+  | Some raw ->
+      let trimmed = String.trim raw in
+      if String.equal trimmed "" then None else Some trimmed
+  | None -> None
+
+let first_nonempty_env names =
+  List.find_map (fun name -> Sys.getenv_opt name |> trim_nonempty) names
+
+let keeper_name_of_agent_name agent_name =
+  let prefix = "keeper-" in
+  let suffix = "-agent" in
+  let value = String.trim agent_name in
+  let vlen = String.length value in
+  let plen = String.length prefix in
+  let slen = String.length suffix in
+  if
+    vlen > plen + slen
+    && String.sub value 0 plen = prefix
+    && String.sub value (vlen - slen) slen = suffix
+  then
+    Some (String.sub value plen (vlen - plen - slen))
+  else
+    None
+
 let runtime_mcp_policy_with_masc_agent_name
     ~(agent_name : string)
     (policy : Llm_provider.Llm_transport.runtime_mcp_policy) =
@@ -143,32 +169,67 @@ let runtime_mcp_policy_with_masc_agent_name
         (function
           | Llm_provider.Llm_transport.Http_server ({ name; headers; _ } as server)
             when String.equal name "masc" ->
+              let headers =
+                upsert_http_header
+                  ~key:"x-masc-agent-name"
+                  ~value:agent_name headers
+              in
+              let headers =
+                match first_nonempty_env [ "MASC_INTERNAL_MCP_TOKEN" ] with
+                | Some token ->
+                    upsert_http_header
+                      ~key:"x-masc-internal-token"
+                      ~value:token headers
+                | None -> headers
+              in
+              let headers =
+                match keeper_name_of_agent_name agent_name with
+                | Some keeper_name ->
+                    upsert_http_header
+                      ~key:"x-masc-keeper-name"
+                      ~value:keeper_name headers
+                | None -> headers
+              in
               Llm_provider.Llm_transport.Http_server
                 {
                   server with
-                  headers =
-                    upsert_http_header
-                      ~key:"x-masc-agent-name"
-                      ~value:agent_name headers;
+                  headers;
                 }
           | server -> server)
         policy.servers
     in
     { policy with servers }
 
+let runtime_mcp_policy_without_http_headers
+    (policy : Llm_provider.Llm_transport.runtime_mcp_policy) =
+  let servers =
+    List.map
+      (function
+        | Llm_provider.Llm_transport.Http_server server ->
+            Llm_provider.Llm_transport.Http_server { server with headers = [] }
+        | server -> server)
+      policy.servers
+  in
+  { policy with servers }
+
 let runtime_mcp_policy_for_provider
     ~(provider_cfg : Llm_provider.Provider_config.t)
     ~(agent_name : string)
     (policy_opt : Llm_provider.Llm_transport.runtime_mcp_policy option) =
-  match policy_opt, provider_cfg.kind with
-  | Some policy, Llm_provider.Provider_config.Codex_cli ->
-      (* Codex CLI runtime MCP currently rejects inline HTTP headers, so
-         keep the runtime policy untouched until that transport supports
-         carrying per-request headers. *)
-      Some policy
-  | Some policy, _ ->
+  let agent_name =
+    let trimmed = String.trim agent_name in
+    if String.equal trimmed "" then None else Some trimmed
+  in
+  match policy_opt, provider_cfg.kind, agent_name with
+  | Some policy, Llm_provider.Provider_config.Codex_cli, _ ->
+      (* Codex CLI runtime MCP currently rejects per-request HTTP headers.
+         Keep the runtime lane, but strip request-scoped headers so ambient
+         env auth continues to work. *)
+      Some (runtime_mcp_policy_without_http_headers policy)
+  | Some policy, _, Some agent_name ->
       Some (runtime_mcp_policy_with_masc_agent_name ~agent_name policy)
-  | None, _ -> None
+  | Some policy, _, None -> Some policy
+  | None, _, _ -> None
 
 let kimi_cli_runtime_mcp_jsons
     ~(base : string list)
@@ -191,26 +252,29 @@ let public_mcp_tools_of_oas_tools (tools : Oas.Tool.t list) =
 let tool_names_are_public_mcp (tool_names : string list) =
   tool_names <> [] && List.for_all Tool_catalog.is_public_mcp tool_names
 
+let trim_nonempty_string raw =
+  let trimmed = String.trim raw in
+  if String.equal trimmed "" then None else Some trimmed
+
 let trim_nonempty value =
-  match value with
-  | Some raw ->
-      let trimmed = String.trim raw in
-      if String.equal trimmed "" then None else Some trimmed
-  | None -> None
+  Option.bind value trim_nonempty_string
 
 let first_nonempty_env names =
   List.find_map (fun name -> Sys.getenv_opt name |> trim_nonempty) names
 
-let public_mcp_runtime_policy_of_tool_names (tool_names : string list) :
+let public_mcp_runtime_policy_of_tool_names ?agent_name:_ (tool_names : string list) :
     Llm_provider.Llm_transport.runtime_mcp_policy option =
   let tool_names = dedupe_preserve_order tool_names in
   if not (tool_names_are_public_mcp tool_names) then
     None
   else
     let masc_headers =
-      match first_nonempty_env [ "MASC_MCP_TOKEN" ] with
-      | Some token -> [ ("Authorization", "Bearer " ^ token) ]
-      | None -> []
+      match first_nonempty_env [ "MASC_INTERNAL_MCP_TOKEN" ] with
+      | Some token -> [ ("x-masc-internal-token", token) ]
+      | None ->
+          (match first_nonempty_env [ "MASC_MCP_TOKEN" ] with
+           | Some token -> [ ("Authorization", "Bearer " ^ token) ]
+           | None -> [])
     in
     Some
       {
@@ -291,6 +355,7 @@ let kimi_cli_extra_env (provider_cfg : Llm_provider.Provider_config.t) =
 
 let resolve_tool_lane_for_oas_tools
     ?agent_name
+    ?(tool_requirement = `Required)
     ~(provider_cfg : Llm_provider.Provider_config.t)
     ~(tools : Oas.Tool.t list)
     ()
@@ -300,17 +365,14 @@ let resolve_tool_lane_for_oas_tools
     result =
   let public_tools = public_mcp_tools_of_oas_tools tools in
   let public_tool_names = public_mcp_tool_names_of_oas_tools public_tools in
+  let requested_agent_name =
+    Option.bind agent_name trim_nonempty_string
+  in
   let runtime_mcp_policy =
-    match public_mcp_runtime_policy_of_tool_names public_tool_names with
-    | Some policy ->
-        let agent_name =
-          match agent_name with
-          | Some agent_name -> String.trim agent_name
-          | None -> ""
-        in
-        if agent_name = "" then Some policy
-        else Some (runtime_mcp_policy_with_masc_agent_name ~agent_name policy)
-    | None -> None
+    public_mcp_runtime_policy_of_tool_names
+      ?agent_name:requested_agent_name public_tool_names
+    |> runtime_mcp_policy_for_provider ~provider_cfg
+         ~agent_name:(Option.value ~default:"" requested_agent_name)
   in
   match runtime_mcp_policy with
   | Some runtime_mcp_policy
@@ -321,6 +383,8 @@ let resolve_tool_lane_for_oas_tools
       Ok (tools, None)
   | _ when provider_supports_inline_tools provider_cfg ->
       Ok (tools, None)
+  | _ when tool_requirement = `Optional ->
+      Ok ([], None)
   | _ ->
       let detail =
         let runtime_mcp_requires_http_headers =
@@ -409,7 +473,7 @@ module Kimi_cli_transport_local = struct
      | None -> ());
     (match config.cwd with
      | Some dir when String.trim dir <> "" -> add [ "--work-dir"; dir ]
-     | _ -> ());
+     | None | Some _ -> ());
     List.iter (fun json -> add [ "--mcp-config"; json ]) mcp_config_json;
     (match req_config.enable_thinking with
      | Some true -> add [ "--thinking" ]
@@ -593,6 +657,28 @@ module Kimi_cli_transport_local = struct
     String.length text >= prefix_len
     && String.sub text 0 prefix_len = prefix
 
+  let resumable_session_detail =
+    "kimi_cli session limit exceeded (exit 75). Resumable session available via -r."
+
+  let resume_hint_marker = "to resume this session:"
+  let resumable_session_public_marker = "resumable session available via -r."
+  let legacy_resumable_session_public_marker =
+    "the session is resumable with -r flag."
+
+  let is_resume_hint_line line =
+    let trimmed = String.trim line in
+    trimmed <> ""
+    && String_util.contains_substring_ci trimmed resume_hint_marker
+
+  let should_log_stderr_line line =
+    let trimmed = String.trim line in
+    trimmed <> ""
+    && not (is_resume_hint_line trimmed)
+
+  let on_stderr_line line =
+    if should_log_stderr_line line then
+      Llm_provider.Cli_common_subprocess.default_on_stderr_line
+        ~name:"kimi" line
   let exit_code_of_message message =
     let prefix = "kimi exited with code " in
     if not (starts_with message prefix) then None
@@ -606,6 +692,29 @@ module Kimi_cli_transport_local = struct
             |> String.trim
           in
           int_of_string_opt raw
+
+  let text_looks_like_resumable_session text =
+    let trimmed = String.trim text in
+    let has_raw_resume_hint =
+      match exit_code_of_message trimmed with
+      | Some 75 -> is_resume_hint_line trimmed
+      | _ -> false
+    in
+    trimmed <> ""
+    &&
+    (has_raw_resume_hint
+    || String_util.contains_substring_ci trimmed resumable_session_public_marker
+    || String_util.contains_substring_ci trimmed legacy_resumable_session_public_marker)
+
+  let resumable_session_detail_of_text text =
+    if text_looks_like_resumable_session text then resumable_session_detail
+    else String.trim text
+
+  let resumable_session_exit_code_of_text text =
+    match exit_code_of_message text with
+    | Some 75 -> Some 75
+    | _ when text_looks_like_resumable_session text -> Some 75
+    | _ -> None
 
   let classify_cli_error = function
     | Error (Llm_provider.Http_client.NetworkError { message; _ }) as err -> (
@@ -623,12 +732,7 @@ module Kimi_cli_transport_local = struct
         | Some 75 ->
             Error
               (Llm_provider.Http_client.AcceptRejected
-                 {
-                   reason =
-                     "kimi_cli session limit exceeded (exit 75). "
-                     ^ "The session is resumable with -r flag. "
-                     ^ message;
-                 })
+                 { reason = resumable_session_detail })
         | _ -> err)
     | other -> other
 
@@ -680,6 +784,7 @@ module Kimi_cli_transport_local = struct
           match
             Llm_provider.Cli_common_subprocess.run_stream_lines ~sw ~mgr
               ~name:"kimi" ~cwd:config.cwd ~extra_env:config.extra_env
+              ~on_stderr_line
               ?stdin_content:(stdin_for_prompt prompt)
               ~on_line ?cancel:config.cancel argv
           with
@@ -741,6 +846,7 @@ module Kimi_cli_transport_local = struct
             classify_cli_error
               (Llm_provider.Cli_common_subprocess.run_stream_lines ~sw ~mgr
                  ~name:"kimi" ~cwd:config.cwd ~extra_env:config.extra_env
+                 ~on_stderr_line
                  ?stdin_content:(stdin_for_prompt prompt)
                  ~on_line ?cancel:config.cancel argv)
           with

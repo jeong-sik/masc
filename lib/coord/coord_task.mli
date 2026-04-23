@@ -69,16 +69,8 @@ val observe_task_transition :
 val add_task :
   ?contract:Types.task_contract ->
   ?goal_id:string ->
-  ?required_preset:string ->
   ?created_by:string ->
   config -> title:string -> priority:int -> description:string -> string
-
-val add_task_with_role :
-  ?contract:Types.task_contract ->
-  ?goal_id:string ->
-  ?created_by:string ->
-  config -> title:string -> priority:int -> description:string ->
-  required_role:Types_core.role -> string
 
 val batch_add_tasks :
   ?created_by:string ->
@@ -96,8 +88,7 @@ val claim_task :
   config -> agent_name:string -> task_id:string -> string
 
 val claim_task_r :
-  config -> agent_name:string -> task_id:string ->
-  ?agent_role:Types_core.role -> unit -> string Types.masc_result
+  config -> agent_name:string -> task_id:string -> unit -> string Types.masc_result
 
 (** {1 Task transitions} *)
 
@@ -142,5 +133,5 @@ type claim_next_result = Types.claim_next_result =
       message : string;
     }
   | Claim_next_no_unclaimed
-  | Claim_next_no_eligible of { excluded_count : int; preset_filtered : int }
+  | Claim_next_no_eligible of { excluded_count : int }
   | Claim_next_error of string

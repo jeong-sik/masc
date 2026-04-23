@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { topKeepers, describeAgentEvent } from './oas-health-chip'
-import type { OasAgentEvent, OasKeeperSnapshot } from '../types/oas'
+import {
+  topKeepers,
+  describeAgentEvent,
+  describeSampleWindow,
+  describeTotalEventsDetail,
+} from './oas-health-chip'
+import type { OasAgentEvent, OasHealthSummary, OasKeeperSnapshot } from '../types/oas'
 
 function snap(name: string, ts: number, extras: Partial<OasKeeperSnapshot> = {}): OasKeeperSnapshot {
   return {
@@ -132,5 +137,31 @@ describe('describeAgentEvent', () => {
       expect(rendered.length).toBeGreaterThan(0)
       expect(/^[a-zA-Z]+$/.test(rendered)).toBe(false)
     }
+  })
+})
+
+describe('describeTotalEventsDetail', () => {
+  it('marks truncated replay windows explicitly', () => {
+    const summary = {
+      totalEvents: 1842,
+      replayLoadedEvents: 500,
+      replayTotalMatchingEvents: 1842,
+      replayTruncated: true,
+    } satisfies Pick<OasHealthSummary, 'totalEvents' | 'replayLoadedEvents' | 'replayTotalMatchingEvents' | 'replayTruncated'>
+
+    expect(describeTotalEventsDetail(summary)).toBe('replay 500/1842 + live')
+    expect(describeSampleWindow(summary)).toBe('sample 500/1842')
+  })
+
+  it('falls back to durable replay when no truncation happened', () => {
+    const summary = {
+      totalEvents: 42,
+      replayLoadedEvents: 42,
+      replayTotalMatchingEvents: 42,
+      replayTruncated: false,
+    } satisfies Pick<OasHealthSummary, 'totalEvents' | 'replayLoadedEvents' | 'replayTotalMatchingEvents' | 'replayTruncated'>
+
+    expect(describeTotalEventsDetail(summary)).toBe('durable replay + live')
+    expect(describeSampleWindow(summary)).toBeNull()
   })
 })

@@ -232,21 +232,10 @@ let dashboard_batch_json ?(compact = false) (config : Coord.config) : Yojson.Saf
     ("keepers", keepers_dashboard_json ~compact config);
   ]
 
-(** Strip non-ASCII characters from actor string.
-    Prevents IME artifacts (e.g. Korean ㅊ) from polluting cache keys. *)
-let sanitize_actor s =
-  let buf = Buffer.create (String.length s) in
-  String.iter (fun c ->
-    match c with
-    | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '-' -> Buffer.add_char buf c
-    | _ -> ()
-  ) s;
-  Buffer.contents buf
-
 let operator_actor_hint request =
   match agent_from_request request with
   | Some raw ->
-      let sanitized = sanitize_actor (String.trim raw) in
+      let sanitized = sanitize_dashboard_actor_name raw in
       if sanitized = "" then None else Some sanitized
   | None -> None
 
@@ -393,7 +382,10 @@ let start_operator_digest_refresh_loop ~state ~sw ~clock =
 
 let operator_snapshot_http_json ~state ~sw ~clock request =
   let net, mono_clock = state_dashboard_runtime_caps state in
-  let actor = operator_actor_hint request in
+  let actor =
+    dashboard_actor_for_request ~base_path:state.Mcp_server.room_config.base_path
+      request
+  in
   let view = query_param request "view" in
   let default_summary_request =
     actor = None
@@ -465,7 +457,10 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
 
 let operator_digest_http_json ~state ~sw ~clock request =
   let net, mono_clock = state_dashboard_runtime_caps state in
-  let actor = operator_actor_hint request in
+  let actor =
+    dashboard_actor_for_request ~base_path:state.Mcp_server.room_config.base_path
+      request
+  in
   let target_type = query_param request "target_type" in
   let target_id = query_param request "target_id" in
   let include_workers =
@@ -602,7 +597,10 @@ let start_mission_refresh_loop ~state ~sw ~clock =
 
 let dashboard_mission_http_json ~state ~sw ~clock request =
   let net, mono_clock = state_dashboard_runtime_caps state in
-  let actor = operator_actor_hint request in
+  let actor =
+    dashboard_actor_for_request ~base_path:state.Mcp_server.room_config.base_path
+      request
+  in
   let compute ?actor () =
     let started_at = Unix.gettimeofday () in
     run_dashboard_compute ~mode:Offloaded_readonly ?net ?mono_clock ~sw
@@ -639,7 +637,10 @@ let dashboard_mission_http_json ~state ~sw ~clock request =
 let dashboard_session_http_json ~state ~sw ~clock request =
   match query_param request "session_id" with
   | Some session_id when String.trim session_id <> "" ->
-      Dashboard_mission.session_json ?actor:(operator_actor_hint request)
+      Dashboard_mission.session_json
+        ?actor:
+          (dashboard_actor_for_request
+             ~base_path:state.Mcp_server.room_config.base_path request)
         ~session_id:(String.trim session_id)
         ~config:state.Mcp_server.room_config ~sw ~clock
         ~proc_mgr:state.Mcp_server.proc_mgr ()
@@ -657,7 +658,10 @@ let dashboard_session_http_json ~state ~sw ~clock request =
         ]
 
 let dashboard_mission_briefing_http_json ~state ~sw ~clock request =
-  let actor = operator_actor_hint request in
+  let actor =
+    dashboard_actor_for_request ~base_path:state.Mcp_server.room_config.base_path
+      request
+  in
   let force = bool_query_param request "force" ~default:false in
   let compute () =
     Dashboard_mission_briefing.json ?actor ~force
@@ -1034,31 +1038,63 @@ let dashboard_shell_payload_json (config : Coord.config) : Yojson.Safe.t =
 
 let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Coord.config) :
     Yojson.Safe.t =
+  let contains_substring haystack needle =
+    let haystack_len = String.length haystack in
+    let needle_len = String.length needle in
+    let rec loop idx =
+      idx + needle_len <= haystack_len
+      && (String.sub haystack idx needle_len = needle || loop (idx + 1))
+    in
+    needle_len > 0 && loop 0
+  in
+  let dashboard_auth_error_code = function
+    | Types.InvalidToken _ -> Some "invalid_token"
+    | Types.TokenExpired _ -> Some "token_expired"
+    | Types.Forbidden { agent = "browser"; action = "cross-origin HTTP mutation" } ->
+        Some "same_origin_blocked"
+    | Types.Forbidden _ -> Some "insufficient_role"
+    | Types.Unauthorized reason ->
+        let normalized = String.lowercase_ascii reason in
+        if contains_substring normalized "bearer token belongs to" then
+          Some "actor_mismatch"
+        else if
+          contains_substring normalized "token required"
+          || contains_substring normalized "authentication required"
+        then
+          Some "missing_token"
+        else
+          Some "unknown"
+    | _ -> Some "unknown"
+  in
   let auth_cfg = Auth.load_auth_config config.base_path in
   let token = auth_token_from_request request in
-  let requested_agent =
-    match agent_from_request request with
-    | Some raw ->
-        let value = String.trim raw in
-        if String.equal value "" then None else Some value
+  let token_credential_result =
+    match token with
     | None -> None
+    | Some raw_token -> Some (Auth.find_credential_by_token config.base_path ~token:raw_token)
   in
+  let requested_agent = request_actor_hint request in
   let token_present = Option.is_some token in
-  let resolved_agent_result =
-    resolve_agent_name_for_auth ~base_path:config.base_path request ~token
+  let token_valid =
+    match token_credential_result with
+    | Some (Ok _) -> true
+    | _ -> false
+  in
+  let token_agent =
+    match token_credential_result with
+    | Some (Ok cred) -> Some cred.Types.agent_name
+    | _ -> None
   in
   let resolved_agent_name_result =
-    match resolved_agent_result with
-    | Error err -> Error err
-    | Ok agent_name_opt ->
-        if auth_cfg.enabled && auth_cfg.require_token && token_present
-           && Option.is_none agent_name_opt
-        then
+    match dashboard_actor_for_request ~base_path:config.base_path request with
+    | Some agent_name -> Ok agent_name
+    | None ->
+        if auth_cfg.enabled && auth_cfg.require_token && token_present then
           Error
             (Types.Unauthorized
                "Agent name required (X-Gate-Agent / X-MASC-Agent or token-bound credential)")
         else
-          Ok (Option.value ~default:"dashboard" agent_name_opt)
+          Ok "dashboard"
   in
   let effective_agent =
     match resolved_agent_name_result with
@@ -1086,35 +1122,63 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Coord.conf
         | Ok _ -> Ok ()
         | Error msg -> Error (Types.Unauthorized msg))
   in
-  let can_keeper_msg, keeper_msg_error =
+  let keeper_authorization_result =
     match endpoint_gate_result with
-    | Error err -> (false, Some (Types.masc_error_to_string err))
+    | Error err -> Error err
     | Ok () -> (
         match resolved_agent_name_result, effective_role_result with
-        | Error err, _ | _, Error err ->
-            (false, Some (Types.masc_error_to_string err))
-        | Ok agent_name, Ok role -> (
-            match
-              Auth.authorize_tool_for_role ~agent_name ~role
-                ~tool_name:"masc_keeper_msg"
-            with
-            | Ok () -> (true, None)
-            | Error err -> (false, Some (Types.masc_error_to_string err))))
+        | Error err, _ | _, Error err -> Error err
+        | Ok agent_name, Ok role ->
+            Auth.authorize_tool_for_role ~agent_name ~role
+              ~tool_name:"masc_keeper_msg")
+  in
+  let can_keeper_msg, keeper_msg_error =
+    match keeper_authorization_result with
+    | Ok () -> (true, None)
+    | Error err -> (false, Some (Types.masc_error_to_string err))
+  in
+  let effective_admin =
+    match effective_role_result with
+    | Ok role -> Some (role = Types.Admin)
+    | Error _ -> None
   in
   let effective_role =
     match effective_role_result with
     | Ok role -> Some (Types.agent_role_to_string role)
     | Error _ -> None
   in
+  let auth_error =
+    match token_credential_result with
+    | Some (Error (Types.InvalidToken _ as err)) -> Some err
+    | Some (Error (Types.TokenExpired _ as err)) -> Some err
+    | Some (Error err) -> Some err
+    | _ -> (
+        match keeper_authorization_result with
+        | Error err -> Some err
+        | Ok () -> None)
+  in
   `Assoc
     [
       ("enabled", `Bool auth_cfg.enabled);
       ("require_token", `Bool auth_cfg.require_token);
-      ("default_role", `String (Types.agent_role_to_string auth_cfg.default_role));
       ("token_present", `Bool token_present);
+      ("token_valid", `Bool token_valid);
+      ("token_agent", Json_util.string_opt_to_json token_agent);
       ("requested_agent", Json_util.string_opt_to_json requested_agent);
       ("effective_agent", Json_util.string_opt_to_json effective_agent);
       ("effective_role", Json_util.string_opt_to_json effective_role);
+      ( "auth_error_code",
+        match auth_error with
+        | Some err -> (
+            match dashboard_auth_error_code err with
+            | Some code -> `String code
+            | None -> `Null )
+        | None -> `Null );
+      ( "auth_error_detail",
+        match auth_error with
+        | Some err -> `String (Types.masc_error_to_string err)
+        | None -> `Null );
+      ("effective_admin", Json_util.bool_opt_to_json effective_admin);
       ("can_keeper_msg", `Bool can_keeper_msg);
       ("keeper_msg_error", Json_util.string_opt_to_json keeper_msg_error);
     ]

@@ -59,7 +59,34 @@ For dashboard-side keeper lifecycle control, the target shape is:
 }
 ```
 
-## 3. Supported Local Start
+## 3. Run `doctor auth`
+
+Use the auth doctor before editing tokens or role files:
+
+```bash
+BASE_PATH="${MASC_BASE_PATH:-$HOME}"
+./_build/default/bin/main_eio.exe doctor auth --base-path "$BASE_PATH"
+```
+
+Useful interpretations:
+
+- `codex is role=worker, so requests authenticated as codex cannot satisfy CanAdmin.`
+  - your bearer is valid, but it is the wrong role for admin-only routes
+- `codex-mcp-client is role=worker, so dashboard save flows using that bearer will fail on admin-only routes such as POST /api/v1/cascade/config/raw.`
+  - the dashboard is presenting a worker bearer, so raw cascade save is expected to 403
+- `token_bound_admin_http_ready: no`
+  - room auth may be enabled, but no usable admin bearer source was found
+- `dashboard_dev_token: available=yes`
+  - the easiest local bootstrap path is `GET /api/v1/dashboard/dev-token`
+
+If you want structured output for automation:
+
+```bash
+./_build/default/bin/main_eio.exe doctor auth --base-path "$BASE_PATH" --json \
+  | jq '{status,warnings,next_actions}'
+```
+
+## 4. Supported Local Start
 
 When running from a worktree but using a shared local coordination root, start the server with an explicit base path:
 
@@ -74,11 +101,20 @@ MASC_BASE_PATH="$BASE_PATH" \
 
 Then run `./_build/default/bin/main_eio.exe doctor --base-path "$BASE_PATH"` and re-check `/health` to confirm the effective base path is the path you intended.
 
-## 4. Bootstrap an Admin Bearer
+## 5. Bootstrap an Admin Bearer
 
-If you already have an admin bearer, skip to step 5.
+If you already have an admin bearer, skip to step 6.
 
-If you do not, the reliable local fallback is to seed the auth store directly.
+If `doctor auth` says `dashboard_dev_token: available=yes`, the easiest local path is the dev-token bootstrap:
+
+```bash
+TOKEN="$(curl -sS http://127.0.0.1:8935/api/v1/dashboard/dev-token | jq -r '.token')"
+printf 'token=%s\n' "$TOKEN"
+```
+
+This endpoint is loopback-only and disabled when HTTP strict auth is enabled.
+
+If you do not have that path, the reliable local fallback is to seed the auth store directly.
 
 1. Back up the auth config:
 
@@ -122,8 +158,7 @@ Path:
 ```json
 {
   "enabled": true,
-  "require_token": true,
-  "default_role": "worker"
+  "require_token": true
 }
 ```
 
@@ -139,13 +174,15 @@ Notes:
 - keep the raw bearer outside the repo
 - this is for trusted local operator use, not a remote/public bootstrap path
 
-## 5. Open the Dashboard as Admin
+## 6. Open the Dashboard as Admin
 
 Pass the token once via query string. The dashboard moves it into `sessionStorage` and removes it from the URL.
 
 ```text
 http://127.0.0.1:8935/dashboard?agent=codex-tool-matrix&token=<raw-token>
 ```
+
+For a dev-token bootstrap, use `agent=dashboard-dev` instead.
 
 You can verify the session with:
 
@@ -162,9 +199,30 @@ Expected:
 - `effective_agent="codex-tool-matrix"`
 - `effective_role="admin"`
 
-## 6. Verify Keeper Lifecycle Routes
+## 7. Verify Admin-Only Routes
 
 Use a low-risk keeper first.
+
+Raw cascade save:
+
+```bash
+curl -sS -X POST http://127.0.0.1:8935/api/v1/cascade/config/raw \
+  -H "Authorization: Bearer <raw-token>" \
+  -H "X-MASC-Agent: <admin-agent>" \
+  -H "Content-Type: application/json" \
+  -d @payload.json
+```
+
+`payload.json`:
+
+```json
+{
+  "source_text": "{ ...raw cascade json... }"
+}
+```
+
+If the request is authenticated as `codex` or `codex-mcp-client` with `role=worker`,
+this route should fail with a `CanAdmin` error by design.
 
 Boot:
 
@@ -191,7 +249,7 @@ curl -sS http://127.0.0.1:8935/api/v1/dashboard/execution \
   | jq '.keepers[] | select(.name=="<keeper>") | {name,status,paused,trace_id,active_model}'
 ```
 
-## 7. Rollback
+## 8. Rollback
 
 If you need to go back to anonymous loopback behavior:
 
@@ -207,7 +265,9 @@ mv "$BASE_PATH/.masc/auth/config.json.bak" "$BASE_PATH/.masc/auth/config.json"
 rm -f "$BASE_PATH/.masc/auth/agents/codex-tool-matrix.json"
 ```
 
-## 8. Known Failure Modes
+If you used only `dashboard-dev` dev-token bootstrap, there may be no auth files to roll back.
+
+## 9. Known Failure Modes
 
 - `effective_base_path` points somewhere else:
   you edited the wrong `.masc/auth` tree
@@ -215,5 +275,7 @@ rm -f "$BASE_PATH/.masc/auth/agents/codex-tool-matrix.json"
   dashboard keeper boot/config/shutdown remains blocked even with auth enabled
 - `effective_role=worker`:
   your bearer is valid but not admin
+- `codex cannot CanAdmin` or `codex-mcp-client is role=worker`:
+  the request is authenticated with a worker bearer; rerun `doctor auth` and switch to an admin bearer
 - `{"error":"not found"}` on keeper boot/shutdown:
   you may still be running an older server build without the fixed route classifier

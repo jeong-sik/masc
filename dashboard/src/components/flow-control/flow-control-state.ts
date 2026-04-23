@@ -1,8 +1,9 @@
 import { signal, effect } from '@preact/signals'
 import { callMcpTool } from '../../api/mcp'
 import { namespaceTruth, namespaceTruthInitializing } from '../../namespace-truth-store'
-import { serverStatus } from '../../store'
+import { serverStatus, shellAuthSummary } from '../../store'
 import { showToast } from '../common/toast'
+import { dashboardAuthAccess } from '../../lib/dashboard-auth-access'
 
 type FlowState = 'unknown' | 'initializing' | 'running' | 'paused'
 export const flowState = signal<FlowState>('unknown')
@@ -61,6 +62,11 @@ export async function fetchPauseStatus(): Promise<void> {
 }
 
 export async function pauseRoom(): Promise<void> {
+  const access = dashboardAuthAccess(shellAuthSummary.value, 'worker')
+  if (!access.allowed) {
+    showToast(access.reason ?? '프로젝트 일시정지 권한이 없습니다.', 'error', 6000)
+    return
+  }
   flowLoading.value = true
   try { await callMcpTool('masc_pause', {}); flowState.value = 'paused'; showToast('프로젝트 일시정지', 'success') }
   catch (err) { showToast(`일시정지 실패: ${err instanceof Error ? err.message : String(err)}`, 'error') }
@@ -68,6 +74,11 @@ export async function pauseRoom(): Promise<void> {
 }
 
 export async function resumeRoom(): Promise<void> {
+  const access = dashboardAuthAccess(shellAuthSummary.value, 'worker')
+  if (!access.allowed) {
+    showToast(access.reason ?? '프로젝트 재개 권한이 없습니다.', 'error', 6000)
+    return
+  }
   flowLoading.value = true
   try { await callMcpTool('masc_resume', {}); flowState.value = 'running'; showToast('프로젝트 재개', 'success') }
   catch (err) { showToast(`재개 실패: ${err instanceof Error ? err.message : String(err)}`, 'error') }
@@ -77,6 +88,11 @@ export async function resumeRoom(): Promise<void> {
 // ── Maintenance ─────────────────────────────────
 
 export async function runGarbageCollection(): Promise<void> {
+  const access = dashboardAuthAccess(shellAuthSummary.value, 'worker')
+  if (!access.allowed) {
+    showToast(access.reason ?? 'GC 실행 권한이 없습니다.', 'error', 6000)
+    return
+  }
   maintenanceLoading.value = true
   try {
     const raw = await callMcpTool('masc_gc', {})
@@ -88,6 +104,11 @@ export async function runGarbageCollection(): Promise<void> {
 }
 
 export async function cleanupZombies(): Promise<void> {
+  const access = dashboardAuthAccess(shellAuthSummary.value, 'worker')
+  if (!access.allowed) {
+    showToast(access.reason ?? '좀비 정리 권한이 없습니다.', 'error', 6000)
+    return
+  }
   maintenanceLoading.value = true
   try {
     const raw = await callMcpTool('masc_cleanup_zombies', {})

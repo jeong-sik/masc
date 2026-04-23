@@ -422,6 +422,13 @@ let test_runtime_git_cache_returns_stale_and_refreshes ~clock () =
           Alcotest.(check int) "single background probe" 1
             (Atomic.get probes)))
 
+let test_runtime_git_probe_argv_disables_optional_locks () =
+  let module Runtime = Server_dashboard_http_runtime_info in
+  Alcotest.(check (list string))
+    "runtime git probe argv uses no-optional-locks"
+    [ "git"; "-C"; "/tmp/demo"; "--no-optional-locks"; "rev-parse"; "--short"; "HEAD" ]
+    (Runtime.git_rev_parse_short_probe_argv "/tmp/demo")
+
 (* -- Harness ---------------------------------------------------------------- *)
 
 let () =
@@ -461,6 +468,8 @@ let () =
           test_case "stampede protection" `Quick test_stampede;
           test_case "runtime git cache stale-first refresh" `Quick
             (test_runtime_git_cache_returns_stale_and_refreshes ~clock);
+          test_case "runtime git probe disables optional locks" `Quick
+            test_runtime_git_probe_argv_disables_optional_locks;
         ] );
       ( "timeout",
         [

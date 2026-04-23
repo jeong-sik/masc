@@ -73,7 +73,8 @@ let runtime_mcp_policy_for_tools ~(keeper_name : string) (tools : Oas.Tool.t lis
     |> Oas_worker_exec.public_mcp_tool_names_of_oas_tools
   in
   match
-    Oas_worker_exec.public_mcp_runtime_policy_of_tool_names public_tool_names,
+    Oas_worker_exec.public_mcp_runtime_policy_of_tool_names
+      ?agent_name:(keeper_agent_name_opt keeper_name) public_tool_names,
     keeper_agent_name_opt keeper_name
   with
   | Some policy, Some agent_name ->
@@ -82,6 +83,48 @@ let runtime_mcp_policy_for_tools ~(keeper_name : string) (tools : Oas.Tool.t lis
            ~agent_name policy)
   | Some policy, None -> Some policy
   | None, _ -> None
+
+let runtime_mcp_policy_for_provider
+    ~(keeper_name : string)
+    ~(provider_cfg : Llm_provider.Provider_config.t)
+    (policy_opt : Llm_provider.Llm_transport.runtime_mcp_policy option) =
+  let agent_name =
+    keeper_agent_name_opt keeper_name |> Option.value ~default:""
+  in
+  Oas_worker_exec.runtime_mcp_policy_for_provider
+    ~provider_cfg ~agent_name policy_opt
+
+let filter_candidate_providers_for_tool_support
+    ~(keeper_name : string)
+    ?runtime_mcp_policy
+    ~require_tool_choice_support
+    ~require_tool_support
+    ~label
+    (provider_cfgs : Llm_provider.Provider_config.t list) =
+  if not require_tool_choice_support && not require_tool_support then
+    provider_cfgs
+  else
+    let filtered =
+      List.filter
+        (fun provider_cfg ->
+           let normalized_runtime_mcp_policy =
+             runtime_mcp_policy_for_provider
+               ~keeper_name ~provider_cfg runtime_mcp_policy
+           in
+           Provider_tool_support.supports_required_tool_use
+             ?runtime_mcp_policy:normalized_runtime_mcp_policy
+             ~require_tool_choice_support
+             ~require_tool_support
+             provider_cfg)
+        provider_cfgs
+    in
+    if filtered = [] && provider_cfgs <> [] then
+      Log.Misc.warn
+        "cascade %s: provider-normalized tool-use gate removed all providers (providers=[%s])"
+        label
+        (String.concat ", "
+           (List.map Provider_tool_support.provider_debug_label provider_cfgs));
+    filtered
 
 type masc_internal_error =
   | Cascade_exhausted of {
@@ -691,10 +734,16 @@ let exit_code_of_message (message : string) : int option =
               int_of_string_opt raw
 
 let message_looks_like_resumable_cli_session (message : string) : bool =
-  match exit_code_of_message message with
-  | Some 75 ->
-      String_util.contains_substring_ci message "to resume this session:"
-  | _ -> false
+  Oas_worker_exec.Kimi_cli_transport_local.text_looks_like_resumable_session
+    message
+
+let resumable_cli_session_detail (message : string) : string =
+  Oas_worker_exec.Kimi_cli_transport_local.resumable_session_detail_of_text
+    message
+
+let resumable_cli_session_exit_code (message : string) : int option =
+  Oas_worker_exec.Kimi_cli_transport_local.resumable_session_exit_code_of_text
+    message
 
 let sdk_error_is_hard_quota (err : Oas.Error.sdk_error) : bool =
   match err with
@@ -778,13 +827,16 @@ let run_named
     ?event_bus
     ?sw
     ?net
+    ?per_provider_timeout_s
     ()
   : (Oas_worker_exec.run_result, Oas.Error.sdk_error) result =
   match require_eio ?sw ?net () with
   | Error e -> Error (eio_context_error_to_sdk_error e)
   | Ok (sw, net) ->
   let cascade_name =
-    Keeper_cascade_profile.normalize_declared_name cascade_name
+    let trimmed = String.trim cascade_name in
+    if Option.is_some model_strings && trimmed <> "" then trimmed
+    else Keeper_cascade_profile.normalize_declared_name cascade_name
   in
   let runtime_mcp_policy = runtime_mcp_policy_for_tools ~keeper_name tools in
   let configured_labels_result, candidate_cfgs_result =
@@ -795,12 +847,10 @@ let run_named
       ( Ok ms,
         Ok
           (resolve_providers_from_model_strings ?provider_filter
-             ?runtime_mcp_policy
              ~require_tool_choice_support ~require_tool_support ms) )
     | _ ->
       ( Cascade_runtime.models_of_cascade_name_result cascade_name,
         resolve_cascade_providers ?provider_filter
-          ?runtime_mcp_policy
           ~require_tool_choice_support ~require_tool_support ~cascade_name ()
       )
   in
@@ -809,6 +859,15 @@ let run_named
        Log.Misc.error "cascade %s: %s" cascade_name detail;
        Error (cascade_catalog_error_to_sdk_error detail)
    | Ok configured_labels, Ok candidate_cfgs ->
+  let candidate_cfgs =
+    filter_candidate_providers_for_tool_support
+      ~keeper_name
+      ?runtime_mcp_policy
+      ~require_tool_choice_support
+      ~require_tool_support
+      ~label:cascade_name
+      candidate_cfgs
+  in
   let capture, _metrics = Oas_worker_cascade.cascade_metrics_for_candidates ~candidate_cfgs () in
   let name = Printf.sprintf "oas-%s" cascade_name in
   match candidate_cfgs with
@@ -844,10 +903,14 @@ let run_named
      Immutable checkpoint threading: try_provider returns both the result
      and the agent's checkpoint (if progress was made). try_cascade
      threads this checkpoint to the next provider without mutable state. *)
-  let try_provider ?resume_checkpoint (provider_cfg : Llm_provider.Provider_config.t) =
+  let try_provider ?resume_checkpoint ?per_provider_timeout_s (provider_cfg : Llm_provider.Provider_config.t) =
     let config_result =
       Oas_worker_exec.resolve_tool_lane_for_oas_tools
         ?agent_name:(keeper_agent_name_opt keeper_name)
+        ~tool_requirement:
+          (if require_tool_choice_support || require_tool_support
+           then `Required
+           else `Optional)
         ~provider_cfg ~tools ()
       |> Result.map
            (fun (effective_tools, runtime_mcp_policy) ->
@@ -918,11 +981,33 @@ let run_named
               | Some _ -> resume_checkpoint
               | None -> oas_checkpoint
             in
-            let result =
+            let run_fn () =
               Oas_worker_exec.run ~sw ~net ~config
                 ?oas_checkpoint:effective_checkpoint ?on_event
                 ?on_yield ?on_resume ~agent_ref:local_agent_ref ?proof_ref
                 ?contract goal
+            in
+            let result =
+              match per_provider_timeout_s with
+              | None -> run_fn ()
+              | Some t ->
+                  let clock_opt =
+                    match Masc_eio_env.get_opt () with
+                    | Some env -> (
+                        match env.clock with
+                        | Some _ as clock_opt -> clock_opt
+                        | None -> Eio_context.get_clock_opt ())
+                    | None -> Eio_context.get_clock_opt ()
+                  in
+                  (match clock_opt with
+                   | Some clock ->
+                       (try Eio.Time.with_timeout_exn clock t run_fn
+                        with Eio.Time.Timeout ->
+                          Log.Misc.info
+                            "[cascade-fallback] cascade %s: provider %s per-provider timeout after %.1fs, falling back"
+                            cascade_name provider_cfg.model_id t;
+                          Error (Oas.Error.Api (Timeout { message = Printf.sprintf "Per-provider timeout after %.1fs" t })))
+                   | None -> run_fn ())
             in
             Ok result)
     with
@@ -950,7 +1035,7 @@ let run_named
   in
   let rec try_cascade
       ?(on_success = fun ~provider_key:_ -> ())
-      ?resume_checkpoint remaining last_err =
+      ?resume_checkpoint ?per_provider_timeout_s remaining last_err =
     match remaining with
     | [] ->
       let reason : Keeper_types.cascade_exhaustion_reason = match last_err with
@@ -984,8 +1069,17 @@ let run_named
               (Resumable_cli_session
                  {
                    cascade_name;
-                   detail = message;
-                   exit_code = exit_code_of_message message;
+                   detail = resumable_cli_session_detail message;
+                   exit_code = resumable_cli_session_exit_code message;
+                 })
+        | Some (Llm_provider.Http_client.AcceptRejected { reason })
+          when message_looks_like_resumable_cli_session reason ->
+            sdk_error_of_masc_internal_error
+              (Resumable_cli_session
+                 {
+                   cascade_name;
+                   detail = resumable_cli_session_detail reason;
+                   exit_code = resumable_cli_session_exit_code reason;
                  })
         | _ ->
             sdk_error_of_masc_internal_error
@@ -1000,7 +1094,8 @@ let run_named
     | (provider_cfg : Llm_provider.Provider_config.t) :: rest ->
       let is_last = rest = [] in
       Log.Misc.debug "cascade %s: trying %s (is_last=%b)" cascade_name provider_cfg.model_id is_last;
-      let (result, checkpoint_after) = try_provider ?resume_checkpoint provider_cfg in
+      let pp_timeout = if is_last then None else per_provider_timeout_s in
+      let (result, checkpoint_after) = try_provider ?resume_checkpoint ?per_provider_timeout_s:pp_timeout provider_cfg in
       (* Thread checkpoint forward: if this provider made progress,
          the next provider can resume from where this one left off. *)
       let next_resume = match checkpoint_after with
@@ -1290,7 +1385,7 @@ let run_named
       let on_success ~provider_key =
         Cascade_strategy.record_choice strategy ~ctx:signal_ctx ~provider_key
       in
-      (match try_cascade ~on_success ordered None with
+      (match try_cascade ~on_success ?per_provider_timeout_s ordered None with
        | Ok _ as ok -> ok
        | Error _ as err when last_cycle -> err
        | Error _ ->

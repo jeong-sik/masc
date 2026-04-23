@@ -47,6 +47,11 @@ function makeRawGoalNode(overrides: Record<string, unknown> = {}) {
     infra_risk_count: 0,
     linkage_source: 'none',
     linkage_warning_count: 0,
+    blocking_source: 'none',
+    blocking_reason: '',
+    latest_keeper_ref: null,
+    latest_turn_ref: null,
+    stalled_since: null,
     created_at: '2026-04-23T00:00:00Z',
     updated_at: '2026-04-23T00:00:00Z',
     ...overrides,
@@ -265,6 +270,214 @@ describe('dashboard goals decoding', () => {
       remaining_possible: 0,
     })
   })
+
+  it('retains goal blocker metadata on tree payloads', async () => {
+    const rawResponse = {
+      tree: [
+        makeRawGoalNode({
+          blocking_source: 'keeper_runtime',
+          blocking_reason: 'Pause until the keeper approval queue is resolved.',
+          latest_keeper_ref: 'keeper-sangsu',
+          latest_turn_ref: 42,
+          stalled_since: '2026-04-22T22:00:00Z',
+        }),
+      ],
+      summary: {},
+    }
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(rawResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchDashboardGoalsTree()
+
+    expect(result.tree[0]).toMatchObject({
+      blocking_source: 'keeper_runtime',
+      blocking_reason: 'Pause until the keeper approval queue is resolved.',
+      latest_keeper_ref: 'keeper-sangsu',
+      latest_turn_ref: 42,
+      stalled_since: '2026-04-22T22:00:00Z',
+    })
+  })
+
+  it('retains keeper trust summary and latest event on goal detail payloads', async () => {
+    const rawResponse = {
+      goal: makeRawGoalNode(),
+      linked_tasks: [],
+      linked_keepers: [
+        {
+          name: 'keeper-sangsu',
+          agent_name: 'sangsu',
+          current_task_id: 'task-1',
+          active_goal_ids: ['goal-1'],
+          sandbox_profile: 'docker',
+          network_mode: 'none',
+          cascade_name: 'keeper_unified',
+          approval_profile: 'strict',
+          cascade_outcome: 'passed_to_next_model',
+          latest_execution_outcome: 'completed',
+          latest_execution_at: '2026-04-23T00:10:00Z',
+          latest_receipt: { outcome: 'completed' },
+          runtime_trust: {
+            disposition: 'Pause',
+            disposition_reason: 'approval_waiting',
+            needs_attention: true,
+            attention_reason: 'approval_pending',
+            next_human_action: 'resolve_approval',
+            approval: {
+              state: 'pending',
+              summary: '1 approval request is waiting for an operator.',
+              pending_count: 1,
+            },
+            execution: {
+              tool_contract_result: 'unknown',
+              sandbox_summary: 'docker / none',
+              mutation_guard_summary: 'mutation_contract_not_observed',
+              latest_receipt_at: '2026-04-23T00:10:00Z',
+            },
+            latest_causal_event: {
+              kind: 'approval_pending',
+              ts: '2026-04-23T00:11:00Z',
+              ts_unix: 1776903060,
+              keeper_turn_id: 42,
+              task_id: 'task-1',
+              goal_ids: ['goal-1'],
+              title: 'Approval pending',
+              summary: 'Waiting for operator approval before resuming.',
+              severity: 'warn',
+              next_human_action: 'resolve_approval',
+            },
+          },
+          latest_causal_event: {
+            kind: 'approval_pending',
+            ts: '2026-04-23T00:11:00Z',
+            ts_unix: 1776903060,
+            keeper_turn_id: 42,
+            task_id: 'task-1',
+            goal_ids: ['goal-1'],
+            title: 'Approval pending',
+            summary: 'Waiting for operator approval before resuming.',
+            severity: 'warn',
+            next_human_action: 'resolve_approval',
+          },
+        },
+      ],
+      approvals: [],
+      execution_receipts: [],
+      timeline: [],
+    }
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(rawResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchDashboardGoalDetail('goal-1')
+
+    expect(result.linked_keepers[0]).toMatchObject({
+      runtime_trust: {
+        disposition: 'Pause',
+        disposition_reason: 'approval_waiting',
+        needs_attention: true,
+        attention_reason: 'approval_pending',
+        next_human_action: 'resolve_approval',
+        approval_state: {
+          state: 'pending',
+          summary: '1 approval request is waiting for an operator.',
+          pending_count: 1,
+        },
+        execution_summary: {
+          tool_contract_result: 'unknown',
+          sandbox_summary: 'docker / none',
+          mutation_guard_summary: 'mutation_contract_not_observed',
+          latest_receipt_at: '2026-04-23T00:10:00Z',
+        },
+        latest_causal_event: {
+          kind: 'approval_pending',
+          keeper_turn_id: 42,
+          title: 'Approval pending',
+        },
+      },
+      latest_causal_event: {
+        kind: 'approval_pending',
+        summary: 'Waiting for operator approval before resuming.',
+        next_human_action: 'resolve_approval',
+      },
+    })
+  })
+
+  it('accepts raw runtime_trust approval/execution keys on goal detail payloads', async () => {
+    const rawResponse = {
+      goal: makeRawGoalNode(),
+      linked_tasks: [],
+      linked_keepers: [
+        {
+          name: 'keeper-sangsu',
+          agent_name: 'sangsu',
+          current_task_id: null,
+          active_goal_ids: ['goal-1'],
+          sandbox_profile: 'docker',
+          network_mode: 'none',
+          cascade_name: 'keeper_unified',
+          approval_profile: null,
+          cascade_outcome: null,
+          latest_execution_outcome: null,
+          latest_execution_at: null,
+          latest_receipt: null,
+          runtime_trust: {
+            disposition: 'Pass',
+            approval: {
+              state: 'matched_by_always_rule',
+              summary: 'Matched by stored allow rule.',
+              pending_count: 0,
+            },
+            execution: {
+              tool_contract_result: 'allowed_in_sandbox',
+              sandbox_summary: 'docker / none',
+              mutation_guard_summary: 'allowed_in_sandbox',
+              latest_receipt_at: '2026-04-23T00:10:00Z',
+            },
+          },
+          latest_causal_event: null,
+        },
+      ],
+      approvals: [],
+      execution_receipts: [],
+      timeline: [],
+    }
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(rawResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchDashboardGoalDetail('goal-1')
+
+    expect(result.linked_keepers[0]?.runtime_trust).toMatchObject({
+      disposition: 'Pass',
+      approval_state: {
+        state: 'matched_by_always_rule',
+        summary: 'Matched by stored allow rule.',
+        pending_count: 0,
+      },
+      execution_summary: {
+        tool_contract_result: 'allowed_in_sandbox',
+        sandbox_summary: 'docker / none',
+        mutation_guard_summary: 'allowed_in_sandbox',
+        latest_receipt_at: '2026-04-23T00:10:00Z',
+      },
+    })
+  })
 })
 
 describe('fetchKeeperConfig', () => {
@@ -312,6 +525,8 @@ describe('fetchKeeperConfig', () => {
       execution: {
         models: 'llama:test-balanced',
         active_model: 'llama:test-balanced',
+        per_provider_timeout_sec: 12.5,
+        per_provider_timeout_mode: 'override',
         verify: 'true',
         selected_cascade_name: 'keeper_unified',
         selected_cascade_canonical: 'keeper_unified',
@@ -444,6 +659,8 @@ describe('fetchKeeperConfig', () => {
     expect(result.execution.verify).toBe(true)
     expect(result.execution.selected_cascade_name).toBe('keeper_unified')
     expect(result.execution.selected_cascade_canonical).toBe('keeper_unified')
+    expect(result.execution.per_provider_timeout_sec).toBe(12.5)
+    expect(result.execution.per_provider_timeout_mode).toBe('override')
     expect(result.hooks?.destructive_check_tools).toEqual(['dynamic_boundary (Tool_dispatch.is_destructive)'])
     expect(result.hooks?.slots.pre_tool_use?.gates).toEqual(['keeper_deny_list'])
     expect(result.tools.tool_also_allow).toEqual(['keeper_board_post'])

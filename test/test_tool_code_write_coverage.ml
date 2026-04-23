@@ -146,6 +146,17 @@ let test_disallowed_org () =
   | Error _ -> ()
   | Ok () -> fail "expected error for disallowed org"
 
+let test_disallowed_org_mentions_workspace_path_hint () =
+  let bp = project_base_path () in
+  match Tool_code_write.validate_clone_url ~base_path:bp
+    "https://github.com/yousleepwhen/masc-mcp.git" with
+  | Error reason ->
+      check bool "error hints against workspace path inference" true
+        (msg_contains
+           ~needle:"do not infer an org from local workspace path segments"
+           reason)
+  | Ok () -> fail "expected error for disallowed org"
+
 let test_non_github_rejected () =
   let bp = project_base_path () in
   match Tool_code_write.validate_clone_url ~base_path:bp
@@ -472,6 +483,8 @@ let () =
     ("validate_clone_url", [
       test_case "allowed org" `Quick test_allowed_org;
       test_case "disallowed org" `Quick test_disallowed_org;
+      test_case "disallowed org hints against workspace path inference" `Quick
+        test_disallowed_org_mentions_workspace_path_hint;
       test_case "non-github rejected" `Quick test_non_github_rejected;
       test_case "ssh allowed" `Quick test_ssh_allowed;
       test_case "missing config fails closed" `Quick test_missing_base_path_without_config_fails_closed;

@@ -2,7 +2,7 @@ import { html } from 'htm/preact'
 import { useSignal } from '@preact/signals'
 import { AlertTriangle } from 'lucide-preact'
 import { useEffect, useMemo } from 'preact/hooks'
-import type { KeeperApprovalQueueItem, KeeperApprovalRule } from '../types'
+import type { GovernanceJudgeSummary, KeeperApprovalQueueItem, KeeperApprovalRule } from '../types'
 import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
 import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { Card } from './common/card'
@@ -26,6 +26,47 @@ import { formatAgeSummary } from './governance-utils'
 // Re-export for consumers that import from './governance'
 export { refreshGovernance } from './governance-store'
 
+function judgeRuntimeStatus(
+  judge?: GovernanceJudgeSummary,
+  summary?: { judge_online?: boolean },
+): string {
+  const status = judge?.status?.trim()
+  if (status) return status
+  if (judge?.refreshing) return 'refreshing'
+  const online = judge?.judge_online ?? summary?.judge_online
+  return online === true ? 'online' : 'offline'
+}
+
+function judgeStatusLabel(status: string, judge?: GovernanceJudgeSummary): string {
+  switch (status) {
+    case 'online':
+      return '온라인'
+    case 'refreshing':
+      return '갱신 중'
+    case 'stale_visible':
+      return '캐시 유지'
+    case 'backoff':
+      return 'backoff'
+    case 'offline':
+      return judge?.last_error ? '오류' : '오프라인'
+    default:
+      return status
+  }
+}
+
+function degradedReasonLabel(reason?: string | null): string {
+  switch (reason) {
+    case 'timeout':
+      return 'timeout'
+    case 'error':
+      return '오류'
+    case 'backoff':
+      return 'backoff'
+    default:
+      return reason?.trim() || 'degraded'
+  }
+}
+
 function GovernanceSummaryStrip() {
   const data = governanceData.value
   const summary = data?.summary
@@ -39,13 +80,11 @@ function GovernanceSummaryStrip() {
     approvalCount > 0
       ? `judge-only / 최근 판단 ${judgmentCount}건 / 승인 ${approvalCount}건`
       : `judge-only / 최근 판단 ${judgmentCount}건`
-  const liveJudgeState =
-    judge?.judge_online === true
-      ? (judge.refreshing ? '갱신 중' : '온라인')
-      : (judge?.last_error ? '오류' : '오프라인')
+  const status = judgeRuntimeStatus(judge, summary)
+  const liveJudgeState = judgeStatusLabel(status, judge)
   const liveJudgeModel = judge?.model_used?.trim() || judge?.keeper_name?.trim() || '-'
-  const judgeHealthy = judge?.judge_online === true && !judge?.last_error?.trim()
-  const judgeUnhealthy = judge?.judge_online === false || Boolean(judge?.last_error?.trim())
+  const judgeHealthy = status === 'online' || status === 'refreshing'
+  const judgeUnhealthy = status === 'offline' || status === 'stale_visible' || status === 'backoff'
 
   return html`
     ${isStale ? html`
@@ -105,11 +144,17 @@ function GovernanceSummaryStrip() {
 function JudgeStatusBar() {
   const judge = governanceData.value?.judge
   if (!judge) return null
-  const online = judge.judge_online === true
-  const dotClass = online ? 'bg-ok' : 'bg-text-dim'
-  const label = online
-    ? (judge.refreshing ? '갱신 중' : '온라인')
-    : (judge.last_error ? '오류' : '오프라인')
+  const status = judgeRuntimeStatus(judge, governanceData.value?.summary)
+  const dotClass =
+    status === 'online' || status === 'refreshing'
+      ? 'bg-ok'
+      : status === 'stale_visible' || status === 'backoff'
+        ? 'bg-warn'
+        : 'bg-text-dim'
+  const label = judgeStatusLabel(status, judge)
+  const errorTone = status === 'stale_visible' || status === 'backoff'
+    ? 'text-warn'
+    : 'text-bad/80'
   return html`
     <div class="mb-4 flex items-center gap-3 rounded border border-white/5 bg-white/3 px-3.5 py-2 text-xs" data-testid="judge-status">
       <span class="flex items-center gap-1.5">
@@ -124,7 +169,7 @@ function JudgeStatusBar() {
                 ? html`<span class="text-text-dim"><${TimeAgo} timestamp=${judge.generated_at} /></span>`
                 : null}
               ${judge.last_error
-                ? html`<span class="text-bad/80 truncate max-w-75">${judge.last_error}</span>`
+                ? html`<span class="${errorTone} truncate max-w-75">${judge.last_error}</span>`
                 : null}
             </span>
           `
@@ -136,12 +181,21 @@ function JudgeStatusBar() {
 function judgmentsEmptyStateMessage(): { message: string; tone: 'warn' | 'default' } {
   const judge = governanceData.value?.judge
   const summary = governanceData.value?.summary
+  const status = judgeRuntimeStatus(judge, summary)
+  if (status === 'stale_visible') {
+    return {
+      message: `AI Judge ${degradedReasonLabel(judge?.degraded_reason)} 이후 fresh judgment 캐시를 유지 중입니다. 새 판단은 복구 후 갱신됩니다.`,
+      tone: 'warn',
+    }
+  }
+  if (status === 'backoff') {
+    return { message: 'AI Judge backoff: local slots saturated. 새 판단은 local slot 확보 후 재개됩니다.', tone: 'warn' }
+  }
   const lastError = judge?.last_error?.trim()
   if (lastError) {
     return { message: `AI Judge 오류: ${lastError}`, tone: 'warn' }
   }
-  const judgeOnline = judge?.judge_online ?? summary?.judge_online
-  if (judgeOnline === false) {
+  if (status === 'offline') {
     return { message: 'AI Judge 오프라인 — keeper 기동 여부를 확인하세요.', tone: 'warn' }
   }
   const lastSeen = judge?.generated_at ?? summary?.judge_last_seen_at
@@ -357,6 +411,23 @@ function keeperHitlEmptyContext(): {
 } {
   const judge = governanceData.value?.judge
   const summary = governanceData.value?.summary
+  const status = judgeRuntimeStatus(judge, summary)
+  if (status === 'stale_visible') {
+    return {
+      primary: `AI Judge ${degradedReasonLabel(judge?.degraded_reason)} 이후 fresh judgment 캐시를 유지 중입니다.`,
+      secondary: '새 HITL 판정은 judge 복구 후 갱신됩니다.',
+      lastActivity: judge?.generated_at ?? summary?.judge_last_seen_at ?? null,
+      tone: 'warn',
+    }
+  }
+  if (status === 'backoff') {
+    return {
+      primary: 'AI Judge backoff: local slots saturated.',
+      secondary: 'local slot이 확보되면 HITL 판정 생성이 재개됩니다.',
+      lastActivity: judge?.generated_at ?? summary?.judge_last_seen_at ?? null,
+      tone: 'warn',
+    }
+  }
   const lastError = judge?.last_error?.trim()
   if (lastError) {
     return {
@@ -366,8 +437,7 @@ function keeperHitlEmptyContext(): {
       tone: 'warn',
     }
   }
-  const judgeOnline = judge?.judge_online ?? summary?.judge_online
-  if (judgeOnline === false) {
+  if (status === 'offline') {
     return {
       primary: 'AI Judge 오프라인 — HITL 판정 생성이 중단되었습니다.',
       secondary: 'keeper 기동 여부를 먼저 확인하세요.',

@@ -95,25 +95,6 @@ let add_routes ~sw ~clock router =
          in
          Http.Response.json (Yojson.Safe.to_string json) reqd
        ) request reqd)
-  |> Http.Router.get "/api/v1/governance/cases" (fun request reqd ->
-       with_public_read (fun state req reqd ->
-         let base_path = state.Mcp_server.room_config.base_path in
-         let json = governance_cases_json req ~base_path in
-         Http.Response.json (Yojson.Safe.to_string json) reqd
-       ) request reqd)
-  |> Http.Router.prefix_get "/api/v1/governance/cases/" (fun request reqd ->
-       with_public_read (fun state _req reqd ->
-         let base_path = state.Mcp_server.room_config.base_path in
-         let path = Http.Request.path request in
-         (match extract_path_param ~prefix:"/api/v1/governance/cases/" path with
-          | None ->
-              Http.Response.json
-                (Yojson.Safe.to_string (`Assoc [("error", `String "case_id is required")]))
-                ~status:`Bad_request reqd
-          | Some case_id ->
-              let (status, json) = governance_case_detail_json ~base_path ~case_id in
-              respond_json_with_cors ~status request reqd (Yojson.Safe.to_string json))
-       ) request reqd)
   |> Http.Router.get "/api/v1/governance/params" (fun request reqd ->
        with_public_read (fun _state _req reqd ->
          let params = Runtime_params.registry () in
@@ -500,8 +481,10 @@ let add_routes ~sw ~clock router =
            try
              let args = Yojson.Safe.from_string body_str in
              let base_path = state.Mcp_server.room_config.base_path in
-             let actor = agent_from_request request
-               |> Option.value ~default:"dashboard" in
+             let actor =
+               sanitized_dashboard_actor_for_request ~base_path request
+               |> Option.value ~default:"dashboard"
+             in
              let param_key = Yojson.Safe.Util.(member "param_key" args
                |> to_string_option) |> Option.value ~default:"" |> String.trim in
              let value_json = match Yojson.Safe.Util.member "value" args with
@@ -579,8 +562,10 @@ let add_routes ~sw ~clock router =
              let param_key = Yojson.Safe.Util.(member "param_key" args
                |> to_string_option) |> Option.value ~default:"" in
              let base_path = state.Mcp_server.room_config.base_path in
-             let actor = agent_from_request request
-               |> Option.value ~default:"dashboard" in
+             let actor =
+               sanitized_dashboard_actor_for_request ~base_path request
+               |> Option.value ~default:"dashboard"
+             in
              if param_key = "" then
                respond_json_with_cors ~status:`Bad_request request reqd
                  (Yojson.Safe.to_string (`Assoc [

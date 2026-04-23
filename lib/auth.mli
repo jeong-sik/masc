@@ -27,6 +27,7 @@ val agents_dir : string -> string
 val room_secret_file : string -> string
 val auth_config_file : string -> string
 val credential_file : string -> string -> string
+val internal_keeper_token_hash_file : string -> string
 
 (** {1 Auth Config} *)
 
@@ -63,11 +64,17 @@ val save_raw_token_credential :
 (** [save_raw_token_credential config ~agent_name ~role ~raw_token] hashes the
     raw token and persists the credential. *)
 
+val verify_internal_keeper_token :
+  string -> token:string -> bool
+
+val ensure_internal_keeper_token :
+  string -> string
+
 val ensure_keeper_credential :
   string -> agent_name:string ->
   (string * agent_credential, masc_error) result
 (** [ensure_keeper_credential config ~agent_name] returns a valid credential,
-    reusing [MASC_MCP_TOKEN] env or creating a new one. *)
+    backed by the shared internal keeper token. *)
 
 (** {1 Token Lifecycle} *)
 

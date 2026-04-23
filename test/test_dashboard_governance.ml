@@ -85,6 +85,12 @@ let test_empty_governance_structure () =
       let judge = json |> member "judge" in
       check bool "judge_online is false when no judge started" false
         (judge |> member "judge_online" |> to_bool);
+      check string "judge status is offline when no judge started" "offline"
+        (judge |> member "status" |> to_string);
+      check bool "cached judgments are not visible initially" false
+        (judge |> member "cached_judgments_visible" |> to_bool);
+      check bool "degraded_reason is null initially" true
+        (judge |> member "degraded_reason" = `Null);
       check string "keeper_name is governance-judge" "governance-judge"
         (judge |> member "keeper_name" |> to_string);
       check bool "model_used is null when no judge started" true
@@ -157,6 +163,8 @@ let test_runtime_status_and_judgments_are_live () =
       let judge = json |> member "judge" in
       check bool "judge section online" true
         (judge |> member "judge_online" |> to_bool);
+      check string "judge status is online" "online"
+        (judge |> member "status" |> to_string);
       check string "judge model uses runtime" "llama:qwen3.5"
         (judge |> member "model_used" |> to_string);
       let judgments = json |> member "judgments" |> to_list in
@@ -246,6 +254,101 @@ let test_runtime_timestamps_fallback_to_unix_values () =
         (judge |> member "generated_at" |> to_string);
       check string "judge expires_at falls back to unix" expires_at
         (judge |> member "expires_at" |> to_string))
+
+let test_refresh_failure_keeps_fresh_cache_online () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      with_test_fs env @@ fun () ->
+      let st = Lib.Dashboard_governance_judge.get_state dir in
+      let now = Unix.gettimeofday () in
+      let generated_at = iso8601_of_unix now in
+      let expires_at = iso8601_of_unix (now +. 300.0) in
+      Lib.Dashboard_governance_judge.with_lock st (fun () ->
+        st.refreshing <- true;
+        st.judge_online <- true;
+        st.generated_at <- Some generated_at;
+        st.generated_at_unix <- Some now;
+        st.expires_at <- Some expires_at;
+        st.expires_at_unix <- Some (now +. 300.0);
+        st.model_used <- Some "glm:test";
+        st.last_error <- None;
+        Lib.Dashboard_governance_judge.mark_refresh_failure
+          ~now_ts:now st ~message:"Execution timed out after 60.0s");
+      let status =
+        Lib.Dashboard_governance_judge.runtime_status_at ~now_ts:now dir
+      in
+      check bool "judge remains online while cache fresh" true
+        status.judge_online;
+      check bool "refreshing cleared" false status.refreshing;
+      check string "runtime status is stale_visible" "stale_visible"
+        status.status;
+      check (option string) "degraded_reason is timeout" (Some "timeout")
+        status.degraded_reason;
+      check bool "cached judgments remain visible" true
+        status.cached_judgments_visible;
+      check (option string) "last_error recorded"
+        (Some "Execution timed out after 60.0s") status.last_error;
+      check (option string) "model preserved" (Some "glm:test")
+        status.model_used)
+
+let test_refresh_failure_marks_expired_cache_offline () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      with_test_fs env @@ fun () ->
+      let st = Lib.Dashboard_governance_judge.get_state dir in
+      let now = Unix.gettimeofday () in
+      Lib.Dashboard_governance_judge.with_lock st (fun () ->
+        st.refreshing <- true;
+        st.judge_online <- true;
+        st.expires_at_unix <- Some (now -. 1.0);
+        st.last_error <- None;
+        Lib.Dashboard_governance_judge.mark_refresh_failure
+          ~now_ts:now st ~message:"Execution timed out after 60.0s");
+      let status =
+        Lib.Dashboard_governance_judge.runtime_status_at ~now_ts:now dir
+      in
+      check bool "judge goes offline when cache expired" false
+        status.judge_online;
+      check string "runtime status is offline" "offline"
+        status.status;
+      check (option string) "degraded_reason is timeout" (Some "timeout")
+        status.degraded_reason;
+      check bool "cached judgments are hidden after expiry" false
+        status.cached_judgments_visible;
+      check (option string) "last_error recorded"
+        (Some "Execution timed out after 60.0s") status.last_error)
+
+let test_backoff_runtime_status_is_structured () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      with_test_fs env @@ fun () ->
+      let st = Lib.Dashboard_governance_judge.get_state dir in
+      let now = Unix.gettimeofday () in
+      Lib.Dashboard_governance_judge.with_lock st (fun () ->
+        st.refreshing <- false;
+        st.judge_online <- false;
+        st.runtime_status <- "backoff";
+        st.degraded_reason <- Some "backoff";
+        st.expires_at_unix <- Some (now +. 300.0);
+        st.last_error <- Some "Backoff: local slots saturated");
+      let status =
+        Lib.Dashboard_governance_judge.runtime_status_at ~now_ts:now dir
+      in
+      check bool "backoff is not reported online" false status.judge_online;
+      check string "runtime status is backoff" "backoff" status.status;
+      check (option string) "degraded_reason is backoff" (Some "backoff")
+        status.degraded_reason;
+      check bool "fresh cached judgments remain visible during backoff" true
+        status.cached_judgments_visible)
 
 let test_governance_monitoring_uses_live_runtime () =
   let dir = test_dir () in
@@ -510,6 +613,12 @@ let () =
             test_empty_judgment_disk_scan_uses_cooldown;
           test_case "runtime timestamps fallback to unix values" `Quick
             test_runtime_timestamps_fallback_to_unix_values;
+          test_case "refresh failure keeps fresh cache online" `Quick
+            test_refresh_failure_keeps_fresh_cache_online;
+          test_case "refresh failure marks expired cache offline" `Quick
+            test_refresh_failure_marks_expired_cache_offline;
+          test_case "backoff runtime status is structured" `Quick
+            test_backoff_runtime_status_is_structured;
           test_case "monitoring uses live runtime" `Quick
             test_governance_monitoring_uses_live_runtime;
           test_case "dashboard exposes keeper approval queue" `Quick

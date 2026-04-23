@@ -212,4 +212,4 @@ let install_from_env () =
        | Error msg ->
            Printf.eprintf "[exec_tap] disabled: cannot open %s \xe2\x80\x94 %s\n%!"
              out_path msg)
-  | _ -> ()
+  | None | Some _ -> ()

@@ -19,6 +19,7 @@ import {
 } from '../../workflow-context'
 import type { OperatorActionLogEntry, OperatorReviewDecision } from '../../types'
 import { QuickIntervene } from './quick-intervene'
+import { KeeperUtilitiesPanel } from './keeper-utilities'
 import {
   actionTypeLabel,
   formatMessageContent,
@@ -233,6 +234,7 @@ export function Ops() {
       <section class="grid grid-cols-2 gap-4 max-[1200px]:grid-cols-1">
         <div class="grid gap-4 order-1 max-[1200px]:order-2">
           <${QuickIntervene} />
+          <${KeeperUtilitiesPanel} />
         </div>
 
         <section class="${CARD_STANDARD} grid gap-3 order-2 max-[1200px]:order-1">

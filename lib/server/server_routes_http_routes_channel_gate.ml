@@ -390,7 +390,8 @@ let handle_bind_for_connector ~sw ~clock state request reqd
                  (Channel_gate.error_json ("unknown keeper: " ^ keeper_name)))
         | Ok true -> (
             let actor_name =
-              agent_from_request request
+              sanitized_dashboard_actor_for_request
+                ~base_path:state.Mcp_server.room_config.base_path request
               |> Option.value ~default:"dashboard"
               |> String.trim
             in
@@ -407,7 +408,7 @@ let handle_bind_for_connector ~sw ~clock state request reqd
         (Yojson.Safe.to_string (Channel_gate.error_json "invalid json")))
 
 (** Shared unbind handler: parse body, dispatch to connector. *)
-let handle_unbind_for_connector request reqd
+let handle_unbind_for_connector state request reqd
     ~(unbind_fn :
        channel_id:string ->
        actor_name:string ->
@@ -427,7 +428,8 @@ let handle_unbind_for_connector request reqd
              (Channel_gate.error_json "channel_id is required"))
       else
         let actor_name =
-          agent_from_request request
+          sanitized_dashboard_actor_for_request
+            ~base_path:state.Mcp_server.room_config.base_path request
           |> Option.value ~default:"dashboard"
           |> String.trim
         in
@@ -490,7 +492,7 @@ let handle_gate_connector_unbind _state request reqd =
              (Channel_gate.error_json
                 ("unknown connector: " ^ connector_name)))
     | Some (module C) ->
-        handle_unbind_for_connector request reqd
+        handle_unbind_for_connector _state request reqd
           ~unbind_fn:C.unbind
 
 (** Register all gate routes on the router. *)

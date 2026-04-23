@@ -9,13 +9,6 @@ open Server_h2_gateway_helpers
 let dispatch ~h2_reqd ~httpun_request ~cors ~path
     (httpun_meth : [ `GET | `POST | `DELETE | `OPTIONS | `PUT | `HEAD
                     | `CONNECT | `TRACE | `Other of string ]) =
-  let with_server_state f =
-    match get_server_state_result () with
-    | Ok state -> f state
-    | Error message ->
-        h2_respond_json h2_reqd (server_state_error_json message)
-          ~status:`Internal_server_error ~extra_headers:cors
-  in
   match httpun_meth, path with
   | `GET, "/api/v1/voice/config" ->
       let status, json = voice_config_payload () in
@@ -24,24 +17,6 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path
       in
       h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~status
         ~extra_headers:cors;
-      true
-
-  | `GET, "/api/v1/governance/cases" ->
-      with_server_state (fun state ->
-        let base_path = state.Mcp_server.room_config.base_path in
-        let json = governance_cases_json httpun_request ~base_path in
-        h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors);
-      true
-
-  | `GET, p
-    when String.length p > 23
-         && String.sub p 0 23 = "/api/v1/governance/cases/" ->
-      with_server_state (fun state ->
-        let case_id = String.sub p 23 (String.length p - 23) in
-        let base_path = state.Mcp_server.room_config.base_path in
-        let (status, json) = governance_case_detail_json ~base_path ~case_id in
-        h2_respond_json h2_reqd (Yojson.Safe.to_string json)
-          ~status ~extra_headers:cors);
       true
 
   | `GET, "/api/v1/board" ->

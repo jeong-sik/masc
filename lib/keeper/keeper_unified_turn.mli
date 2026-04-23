@@ -100,15 +100,16 @@ val fail_open_local_only_when_unavailable :
   string
 
 (** Resolve the next cascade to try after an auto-recoverable failure.
-    Uses the keeper's declared base cascade plus the current effective
-    cascade, then suppresses suggestions that would loop back to a cascade
-    already attempted during the current turn. Exposed for targeted tests. *)
+    Uses the current effective cascade plus the turn tool requirement, then
+    suppresses suggestions that would loop back to a cascade already
+    attempted during the current turn. Exposed for targeted tests. *)
 val next_fail_open_cascade_for_turn :
   base_cascade:string ->
   effective_cascade:string ->
+  tool_requirement:string ->
   attempted_cascades:string list ->
   Oas.Error.sdk_error ->
-  string option
+  Keeper_error_classify.degraded_retry option
 
 val run_keeper_cycle :
   config:Coord.config ->

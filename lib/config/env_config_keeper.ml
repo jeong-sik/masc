@@ -532,6 +532,13 @@ module DockerPlayground = struct
 end
 
 module KeeperSandbox = struct
+  (** Opt-in strict sandbox policy for Docker keepers.
+
+      Hard mode forces rootless/userns runtime checks, disables Docker-side
+      git/gh credential dispatch, and removes host credential fallbacks. *)
+  let hard_mode () =
+    get_bool ~default:false "MASC_KEEPER_SANDBOX_HARD_MODE"
+
   (** Ephemeral Docker image used by sandbox_profile=docker.
       Must contain bash and the CLI tools the keeper needs. *)
   let docker_image () =
@@ -588,11 +595,13 @@ module KeeperSandbox = struct
 
   (** Fail closed unless Docker reports rootless mode support. *)
   let require_rootless () =
-    get_bool ~default:false "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS"
+    hard_mode ()
+    || get_bool ~default:false "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS"
 
   (** Fail closed unless Docker reports userns support. *)
   let require_userns () =
-    get_bool ~default:false "MASC_KEEPER_SANDBOX_REQUIRE_USERNS"
+    hard_mode ()
+    || get_bool ~default:false "MASC_KEEPER_SANDBOX_REQUIRE_USERNS"
 
   (** Docker git-credential dispatch: when true, keeper_bash commands
       beginning with "git " or "gh " run in a Docker container with
@@ -601,43 +610,56 @@ module KeeperSandbox = struct
       single [sandbox_profile=docker] keeper run network-bound git/gh ops
       without granting wholesale network for all bash. *)
   let with_git_dispatch_enabled () =
-    get_bool ~default:true "MASC_KEEPER_SANDBOX_GIT_DISPATCH"
+    (not (hard_mode ()))
+    && get_bool ~default:true "MASC_KEEPER_SANDBOX_GIT_DISPATCH"
 
   (** Host path mounted read-only at /root/.config/gh inside the docker
       git-creds execution path. Default $HOME/.config/gh. Empty string
       disables the mount (no gh auth). *)
   let gh_creds_host_path () =
-    let default =
-      match Sys.getenv_opt "HOME" with
-      | Some home -> Filename.concat home ".config/gh"
-      | None -> ""
-    in
-    get_string ~default "MASC_KEEPER_SANDBOX_GH_CREDS"
+    if hard_mode () then
+      ""
+    else
+      let default =
+        match Sys.getenv_opt "HOME" with
+        | Some home -> Filename.concat home ".config/gh"
+        | None -> ""
+      in
+      get_string ~default "MASC_KEEPER_SANDBOX_GH_CREDS"
 
   (** Host path mounted read-only at /root/.gitconfig. Default $HOME/.gitconfig. *)
   let gitconfig_host_path () =
-    let default =
-      match Sys.getenv_opt "HOME" with
-      | Some home -> Filename.concat home ".gitconfig"
-      | None -> ""
-    in
-    get_string ~default "MASC_KEEPER_SANDBOX_GITCONFIG"
+    if hard_mode () then
+      ""
+    else
+      let default =
+        match Sys.getenv_opt "HOME" with
+        | Some home -> Filename.concat home ".gitconfig"
+        | None -> ""
+      in
+      get_string ~default "MASC_KEEPER_SANDBOX_GITCONFIG"
 
   (** SSH directory mount (~/.ssh). OFF by default — gh + HTTPS covers most
       flows; SSH is opt-in to keep the mount surface minimal. *)
   let ssh_dir_host_path () =
-    get_string ~default:"" "MASC_KEEPER_SANDBOX_SSH_DIR"
+    if hard_mode () then
+      ""
+    else
+      get_string ~default:"" "MASC_KEEPER_SANDBOX_SSH_DIR"
 
   (** Optional GitHub token forwarded as GH_TOKEN env into the docker
       git-creds execution path. Defaults to the host GH_TOKEN; empty
       disables forwarding. *)
   let gh_token () =
-    let default =
-      match Sys.getenv_opt "GH_TOKEN" with
-      | Some token -> token
-      | None -> ""
-    in
-    get_string ~default "MASC_KEEPER_SANDBOX_GH_TOKEN"
+    if hard_mode () then
+      ""
+    else
+      let default =
+        match Sys.getenv_opt "GH_TOKEN" with
+        | Some token -> token
+        | None -> ""
+      in
+      get_string ~default "MASC_KEEPER_SANDBOX_GH_TOKEN"
 
   (** Legacy RFC-0006 Phase B-1 flag.
 

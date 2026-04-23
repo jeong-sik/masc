@@ -798,6 +798,11 @@ let outcome_to_json ?(extra = []) ?(env_snapshot = None) = function
            ]
          @ hint_fields
          @ semantic_fields_of_executed result
+         @ (match Masc_exec.Output_parse.try_parse ~cmd:result.command
+                                                 ~status:result.process_status
+                                                 ~output:result.output with
+            | None -> []
+            | Some json -> [ ("structured_output", json) ])
          @ env_field)
   | Blocked_result result ->
       let alternatives_field =

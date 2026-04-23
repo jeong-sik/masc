@@ -80,7 +80,7 @@ let spawn_post_sse_keepalive ~sw ~clock info =
              Eio.Time.sleep clock post_sse_keepalive_interval_s
            with
           | Eio.Cancel.Cancelled _ as e -> raise e
-          | _ -> ());
+          | exn -> Printf.eprintf "[server_mcp_transport_http] keepalive sleep failed: %s\n%!" (Printexc.to_string exn));
           if info.closed then
             close_sse_conn info
           else if not !(info.stop) then
@@ -108,11 +108,12 @@ let should_stream_post_tools_call request body_str accept_mode =
   | Some ("tools/call", true) -> true
   | _ -> false
 
-(** Inject _agent_name into MCP tools/call arguments if not already present.
-    This propagates the HTTP-resolved actor identity into the MCP protocol
-    so that tool execution uses the correct agent name instead of an
-    ephemeral session-derived identity. *)
-let inject_agent_name_into_body ~agent_name body_str =
+(** Inject or replace [_agent_name] in MCP [tools/call] arguments.
+    For authenticated dashboard sessions, the HTTP-layer token owner is the
+    canonical caller identity, so a stale browser-supplied [_agent_name]
+    must be overwritten. Legacy [agent_name] is left untouched because some
+    tools use it as a domain argument rather than caller identity. *)
+let inject_agent_name_into_body ?(rewrite_existing = false) ~agent_name body_str =
   try
     let json = Yojson.Safe.from_string body_str in
     let open Yojson.Safe.Util in
@@ -135,14 +136,27 @@ let inject_agent_name_into_body ~agent_name body_str =
                let trimmed = String.trim value in
                if String.equal trimmed "" then None else Some trimmed)
         in
-        if Option.is_some existing_agent || Option.is_some existing_legacy_agent
-        then body_str
-        else
-          let new_args = match args with
-            | `Assoc fields ->
-                `Assoc (("_agent_name", `String agent_name) :: fields)
-            | _ -> args
-          in
+        let new_args =
+          match args with
+          | `Assoc fields ->
+              let normalized_fields =
+                if rewrite_existing then
+                  List.filter (fun (key, _) -> not (String.equal key "_agent_name")) fields
+                else
+                  fields
+              in
+              let should_inject =
+                rewrite_existing
+                || (Option.is_none existing_agent
+                    && Option.is_none existing_legacy_agent)
+              in
+              if should_inject then
+                `Assoc (("_agent_name", `String agent_name) :: normalized_fields)
+              else
+                args
+          | _ -> args
+        in
+        if new_args = args then body_str else
           let new_params = match params with
             | `Assoc fields ->
                 `Assoc (List.map (fun (k, v) ->
@@ -172,10 +186,12 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
     | None -> Mcp_session.generate ()
   in
   let auth_token = deps.auth_token_from_request request in
-  let http_agent_name = Server_auth.agent_from_request request in
   let protocol_version = get_protocol_version_for_session ~session_id request in
   let origin = deps.get_origin request in
   let base_path = deps.get_base_path () in
+  let http_agent_name =
+    Server_auth.dashboard_actor_for_request ~base_path request
+  in
   let auth_result =
     match profile with
     | Full | Managed_agent ->
@@ -327,7 +343,9 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                 match http_agent_name with
                                 | None -> body_str
                                 | Some agent ->
-                                    inject_agent_name_into_body ~agent_name:agent body_str
+                                    inject_agent_name_into_body
+                                      ~rewrite_existing:(Option.is_some auth_token)
+                                      ~agent_name:agent body_str
                               in
                               let response_json =
                                 runtime.handle_request ?auth_token ~profile

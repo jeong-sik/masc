@@ -8,7 +8,11 @@ import type {
   OperatorSnapshot,
 } from '../types'
 import { parseOperatorActionResult } from './schemas/operator-action'
-import { resolveDashboardActorName, sanitizeDashboardActorName } from '../lib/dashboard-actor'
+import { sanitizeDashboardActorName } from '../lib/dashboard-actor'
+import {
+  currentDashboardActorName,
+  setCanonicalDashboardActor,
+} from '../lib/dashboard-session-actor'
 
 // --- Auth ---
 // Token is read from ?token= on first load, moved to sessionStorage,
@@ -19,12 +23,36 @@ function getQueryParams(): URLSearchParams {
 }
 
 const TOKEN_STORAGE_KEY = 'masc_bearer_token'
+const TOKEN_META_STORAGE_KEY = 'masc_bearer_token_meta'
+
+type StoredTokenSource = 'dev' | 'manual' | 'url'
+
+export interface StoredTokenMeta {
+  source: StoredTokenSource
+  actor?: string | null
+  scope?: string | null
+}
+
+function normalizeStoredTokenMeta(value: unknown): StoredTokenMeta | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
+  const record = value as Record<string, unknown>
+  const source = typeof record.source === 'string' ? record.source : null
+  if (source !== 'dev' && source !== 'manual' && source !== 'url') return null
+  const actor = sanitizeDashboardActorName(
+    typeof record.actor === 'string' ? record.actor : null,
+  )
+  const scope =
+    typeof record.scope === 'string' && record.scope.trim() !== ''
+      ? record.scope.trim()
+      : null
+  return { source, actor, scope }
+}
 
 function initTokenFromUrl(): void {
   const params = new URLSearchParams(window.location.search)
   const urlToken = params.get('token')
   if (urlToken) {
-    sessionStorage.setItem(TOKEN_STORAGE_KEY, urlToken)
+    setStoredToken(urlToken, { source: 'url' })
     params.delete('token')
     const cleaned = params.toString()
     const newUrl = window.location.pathname + (cleaned ? `?${cleaned}` : '') + window.location.hash
@@ -35,15 +63,51 @@ function initTokenFromUrl(): void {
 initTokenFromUrl()
 
 export function getStoredToken(): string | null {
-  return sessionStorage.getItem(TOKEN_STORAGE_KEY)
+  try {
+    const token = sessionStorage.getItem(TOKEN_STORAGE_KEY)
+    return typeof token === 'string' && token.trim() !== '' ? token : null
+  } catch {
+    return null
+  }
 }
 
-export function setStoredToken(token: string): void {
-  sessionStorage.setItem(TOKEN_STORAGE_KEY, token)
+export function getStoredTokenMeta(): StoredTokenMeta | null {
+  try {
+    const raw = sessionStorage.getItem(TOKEN_META_STORAGE_KEY)
+    if (!raw) return null
+    return normalizeStoredTokenMeta(JSON.parse(raw))
+  } catch {
+    return null
+  }
+}
+
+export function setStoredToken(
+  token: string,
+  meta: Partial<StoredTokenMeta> & { source?: StoredTokenSource } = {},
+): void {
+  const normalizedToken = token.trim()
+  if (!normalizedToken) {
+    clearStoredToken()
+    return
+  }
+  const nextMeta = normalizeStoredTokenMeta({
+    source: meta.source ?? 'manual',
+    actor: meta.actor ?? null,
+    scope: meta.scope ?? null,
+  })
+  sessionStorage.setItem(TOKEN_STORAGE_KEY, normalizedToken)
+  if (nextMeta) {
+    sessionStorage.setItem(TOKEN_META_STORAGE_KEY, JSON.stringify(nextMeta))
+  } else {
+    sessionStorage.removeItem(TOKEN_META_STORAGE_KEY)
+  }
+  setCanonicalDashboardActor(null)
 }
 
 export function clearStoredToken(): void {
   sessionStorage.removeItem(TOKEN_STORAGE_KEY)
+  sessionStorage.removeItem(TOKEN_META_STORAGE_KEY)
+  setCanonicalDashboardActor(null)
 }
 
 export function isRemoteAccess(): boolean {
@@ -52,7 +116,12 @@ export function isRemoteAccess(): boolean {
 }
 
 export function currentDashboardActor(): string {
-  return resolveDashboardActorName() || 'dashboard'
+  const meta = getStoredTokenMeta()
+  const managedActor = meta?.source === 'dev'
+    ? sanitizeDashboardActorName(meta.actor)
+    : null
+  if (managedActor) return managedActor
+  return currentDashboardActorName()
 }
 
 type HeaderOptions = {
@@ -65,7 +134,7 @@ export function authHeaders(options: HeaderOptions = {}): Record<string, string>
   const token = getStoredToken()
   const agent = options.actorName !== undefined
     ? sanitizeDashboardActorName(options.actorName)
-    : resolveDashboardActorName(window.location.search)
+    : currentDashboardActor()
   if (token) headers['Authorization'] = `Bearer ${token}`
   if (options.includeActor !== false && agent) {
     headers['X-MASC-Agent'] = agent
@@ -564,16 +633,14 @@ export async function postRaw(
 
 // --- Operator ---
 
+const OPERATOR_ACTION_TIMEOUT_MS: Record<string, number> = {
+  keeper_message: KEEPER_MESSAGE_TIMEOUT_MS,
+  keeper_recover: KEEPER_MESSAGE_TIMEOUT_MS,
+  social_sweep: SOCIAL_SWEEP_TIMEOUT_MS,
+}
+
 function operatorActionTimeoutMs(body: OperatorActionRequest): number {
-  switch (body.action_type) {
-    case 'keeper_message':
-    case 'keeper_recover':
-      return KEEPER_MESSAGE_TIMEOUT_MS
-    case 'social_sweep':
-      return SOCIAL_SWEEP_TIMEOUT_MS
-    default:
-      return DEFAULT_POST_TIMEOUT_MS
-  }
+  return OPERATOR_ACTION_TIMEOUT_MS[body.action_type] ?? DEFAULT_POST_TIMEOUT_MS
 }
 
 export async function runOperatorAction(body: OperatorActionRequest): Promise<OperatorActionResult> {

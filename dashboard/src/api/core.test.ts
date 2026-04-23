@@ -1,17 +1,30 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   ApiRequestError,
+  authHeaders,
+  clearStoredToken,
   confirmOperatorAction,
+  currentDashboardActor,
   defaultBoardVoter,
   extractApiError,
   get,
+  getStoredToken,
+  getStoredTokenMeta,
   post,
   runOperatorAction,
+  setStoredToken,
 } from './core'
 import { OperatorActionSchemaDriftError } from './schemas/operator-action'
+import {
+  currentCanonicalDashboardActor,
+  resetDashboardSessionActorForTests,
+  setCanonicalDashboardActor,
+} from '../lib/dashboard-session-actor'
 
 afterEach(() => {
+  resetDashboardSessionActorForTests()
   vi.unstubAllGlobals()
+  window.sessionStorage?.clear?.()
   try {
     window.history.replaceState({}, '', 'http://localhost/')
   } catch {
@@ -19,7 +32,53 @@ afterEach(() => {
   }
 })
 
+describe('stored token metadata', () => {
+  it('persists token metadata and prefers the managed dev actor', () => {
+    setStoredToken('loopback-dev-token', {
+      source: 'dev',
+      actor: 'dashboard-dev!!!',
+      scope: 'admin',
+    })
+
+    expect(getStoredToken()).toBe('loopback-dev-token')
+    expect(getStoredTokenMeta()).toEqual({
+      source: 'dev',
+      actor: 'dashboard-dev',
+      scope: 'admin',
+    })
+    expect(currentDashboardActor()).toBe('dashboard-dev')
+    expect(authHeaders()).toMatchObject({
+      Authorization: 'Bearer loopback-dev-token',
+      'X-MASC-Agent': 'dashboard-dev',
+    })
+  })
+
+  it('clears both the token and metadata together', () => {
+    setStoredToken('manual-token', { source: 'manual', actor: 'dashboard-user' })
+    clearStoredToken()
+
+    expect(getStoredToken()).toBeNull()
+    expect(getStoredTokenMeta()).toBeNull()
+  })
+})
+
 describe('post', () => {
+  it('clears the canonical actor immediately when replacing a stored token', () => {
+    setCanonicalDashboardActor('codex')
+
+    setStoredToken('next-token')
+
+    expect(currentCanonicalDashboardActor()).toBeNull()
+  })
+
+  it('clears the canonical actor immediately when clearing a stored token', () => {
+    setCanonicalDashboardActor('codex')
+
+    clearStoredToken()
+
+    expect(currentCanonicalDashboardActor()).toBeNull()
+  })
+
   it('sends a sanitized actor header without URL encoding', async () => {
     window.history.replaceState({}, '', '/?agent=dashboard-eager-manta%E3%85%8A')
 

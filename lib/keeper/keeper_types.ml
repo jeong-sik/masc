@@ -39,6 +39,7 @@ type tool_preset =
   | Minimal
   | Social
   | Messaging
+  | Dispatch
   | Coding
   | Research
   | Delivery
@@ -112,6 +113,18 @@ let blocker_class_to_string = function
   | Turn_timeout -> "turn_timeout"
   | Completion_contract_violation -> "completion_contract_violation"
   | No_tool_capable_provider -> "no_tool_capable_provider"
+
+let blocker_class_of_serialized_string = function
+  | "cascade_exhausted" -> Some (Cascade_exhausted (Other_detail "cascade_exhausted"))
+  | "ambiguous_post_commit_timeout" -> Some Ambiguous_post_commit_timeout
+  | "ambiguous_post_commit_failure" -> Some Ambiguous_post_commit_failure
+  | "autonomous_slot_wait_timeout" -> Some Autonomous_slot_wait_timeout
+  | "admission_queue_wait_timeout" -> Some Admission_queue_wait_timeout
+  | "turn_timeout_after_queue_wait" -> Some Turn_timeout_after_queue_wait
+  | "turn_timeout" -> Some Turn_timeout
+  | "completion_contract_violation" -> Some Completion_contract_violation
+  | "no_tool_capable_provider" -> Some No_tool_capable_provider
+  | _ -> None
 
 let cascade_exhaustion_summary = function
   | Connection_refused ->
@@ -215,6 +228,7 @@ type keeper_meta =
   ; shared_memory_scope : shared_memory_scope
   ; allowed_paths : string list
   ; tool_access : tool_access
+  ; tool_preset_source : string option
   ; tool_denylist : string list
   ; mention_targets : string list
   ; room_signal_prompt_enabled : bool
@@ -249,6 +263,7 @@ type keeper_meta =
   ; work_discovery_guidance : string option
   ; telemetry_feedback_enabled : bool option
   ; telemetry_feedback_window_hours : int option
+  ; per_provider_timeout_s : float option
   ; (* -- Agent runtime state (usage, tracing, autonomy metrics) -- *)
     runtime : agent_runtime_state
   }
@@ -287,6 +302,7 @@ let tool_preset_to_string = function
   | Minimal -> "minimal"
   | Social -> "social"
   | Messaging -> "messaging"
+  | Dispatch -> "dispatch"
   | Coding -> "coding"
   | Research -> "research"
   | Delivery -> "delivery"
@@ -301,7 +317,7 @@ let tool_preset_to_string = function
     Adding an 8th constructor will fail compilation in
     [tool_preset_to_string] and in the witness test. *)
 let all_tool_presets =
-  [ Minimal; Social; Messaging; Coding; Research; Delivery; Full ]
+  [ Minimal; Social; Messaging; Dispatch; Coding; Research; Delivery; Full ]
 let valid_tool_preset_strings = List.map tool_preset_to_string all_tool_presets
 
 let tool_preset_of_string raw =
@@ -309,6 +325,7 @@ let tool_preset_of_string raw =
   | "minimal" -> Some Minimal
   | "social" -> Some Social
   | "messaging" -> Some Messaging
+  | "dispatch" -> Some Dispatch
   | "coding" -> Some Coding
   | "research" -> Some Research
   | "delivery" -> Some Delivery
@@ -797,6 +814,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "shared_memory_scope", `String (shared_memory_scope_to_string m.shared_memory_scope)
     ; "allowed_paths", `List (List.map (fun s -> `String s) m.allowed_paths)
     ; "tool_access", tool_access_to_json m.tool_access
+    ; "tool_preset_source", Json_util.string_opt_to_json m.tool_preset_source
     ; "tool_denylist", `List (List.map (fun s -> `String s) m.tool_denylist)
     ; "mention_targets", `List (List.map (fun s -> `String s) m.mention_targets)
     ; "room_signal_prompt_enabled", `Bool m.room_signal_prompt_enabled
@@ -883,6 +901,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "work_discovery_guidance", Json_util.string_opt_to_json m.work_discovery_guidance
     ; "telemetry_feedback_enabled", Json_util.bool_opt_to_json m.telemetry_feedback_enabled
     ; "telemetry_feedback_window_hours", Json_util.int_opt_to_json m.telemetry_feedback_window_hours
+    ; "per_provider_timeout_s", Json_util.float_opt_to_json m.per_provider_timeout_s
     ]
 ;;
 
@@ -925,6 +944,7 @@ type parsed_keeper_policy =
   ; pp_voice_enabled : bool
   ; pp_voice_channel : string
   ; pp_voice_agent_id : string
+  ; pp_per_provider_timeout_s : float option
   }
 
 type parsed_keeper_state =
@@ -1141,6 +1161,12 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
         "voice_agent_id"
         json
     in
+    let pp_per_provider_timeout_s =
+      normalize_per_provider_timeout_json_field
+        ~source:(Printf.sprintf "keeper meta %s" keeper_name)
+        ~field:"per_provider_timeout_s"
+        json
+    in
     Ok
       { pp_policy_voice_enabled
       ; pp_sandbox_profile
@@ -1173,6 +1199,7 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
       ; pp_voice_enabled
       ; pp_voice_channel
       ; pp_voice_agent_id
+      ; pp_per_provider_timeout_s
       }
 ;;
 
@@ -1297,7 +1324,11 @@ let parse_keeper_state
   let last_blocker =
     cap_loaded (Safe_ops.json_string ~default:"" "last_blocker" json)
   in
-  let last_blocker_class = None in
+  let last_blocker_class =
+    match Safe_ops.json_string_opt "last_blocker_class" json with
+    | Some raw -> blocker_class_of_serialized_string raw
+    | None -> None
+  in
   let last_need =
     cap_loaded (Safe_ops.json_string ~default:"" "last_need" json)
   in
@@ -1392,6 +1423,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
              ; shared_memory_scope = policy.pp_shared_memory_scope
              ; allowed_paths = policy.pp_allowed_paths
              ; tool_access = policy.pp_tool_access
+             ; tool_preset_source = Safe_ops.json_string_opt "tool_preset_source" json
              ; tool_denylist = policy.pp_tool_denylist
              ; mention_targets = policy.pp_mention_targets
              ; room_signal_prompt_enabled = policy.pp_room_signal_prompt_enabled
@@ -1405,6 +1437,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
              ; voice_enabled = policy.pp_voice_enabled
              ; voice_channel = policy.pp_voice_channel
              ; voice_agent_id = policy.pp_voice_agent_id
+             ; per_provider_timeout_s = policy.pp_per_provider_timeout_s
              ; created_at =
                  (if state.ps_created_at_raw = ""
                   then now_iso ()
@@ -1538,6 +1571,7 @@ let fallback_canonical_keeper_meta_key_names =
   ; "work_discovery_guidance"
   ; "telemetry_feedback_enabled"
   ; "telemetry_feedback_window_hours"
+  ; "per_provider_timeout_s"
   ]
 ;;
 

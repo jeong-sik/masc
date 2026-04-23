@@ -57,6 +57,7 @@ Worked examples (assuming a single allowed org `jeong-sik` and a single denied r
 Reading the policy:
 - `allowed_orgs` names the orgs you are *entitled to* clone from, not orgs you must ask permission for. If the task you claim names a repo under ALLOWED (and not in DENIED), clone it directly.
 - Only ask the board when the task does not name a repo and you cannot infer one from context. Do NOT post a "may I clone?" board question when the task already names a repo that passes the ALLOWED/DENIED check.
+- Never infer the GitHub owner from local workspace folders such as `workspace/<name>/...`; only trust the actual clone URL or a confirmed remote origin slug.
 
 Never invent an org or repo that is not in ALLOWED.
 

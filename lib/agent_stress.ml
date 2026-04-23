@@ -57,7 +57,7 @@ let ensure_dir path =
   let dir = Filename.dirname path in
   if not (Sys.file_exists dir) then
     try Sys.mkdir dir 0o755 with
-    | Sys_error msg when String.contains msg "exists" -> ()
+    | Sys_error msg when String_util.contains_substring msg "exists" -> ()
     | Sys_error msg ->
       Log.warn ~ctx:"agent_stress" "cannot mkdir %s: %s" dir msg
 

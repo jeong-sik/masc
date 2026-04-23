@@ -111,6 +111,17 @@ let test_extract_agent_type_unique () =
   | Some at -> check string "extracted codex" "codex" at
   | None -> fail "should extract from unique"
 
+let test_extract_agent_type_hyphenated_manual () =
+  match Nickname.extract_agent_type "qa-king-warm-heron" with
+  | Some at -> check string "extracted qa-king" "qa-king" at
+  | None -> fail "should extract hyphenated stable prefix"
+
+let test_extract_agent_type_hyphenated_unique () =
+  let nick = Nickname.generate_unique "qa-king" in
+  match Nickname.extract_agent_type nick with
+  | Some at -> check string "extracted qa-king from unique" "qa-king" at
+  | None -> fail "should extract hyphenated stable prefix from unique"
+
 (* ============================================================
    Test Runners
    ============================================================ *)
@@ -140,5 +151,7 @@ let () =
       test_case "legacy" `Quick test_extract_agent_type_legacy;
       test_case "empty" `Quick test_extract_agent_type_empty;
       test_case "unique" `Quick test_extract_agent_type_unique;
+      test_case "hyphenated manual" `Quick test_extract_agent_type_hyphenated_manual;
+      test_case "hyphenated unique" `Quick test_extract_agent_type_hyphenated_unique;
     ];
   ]

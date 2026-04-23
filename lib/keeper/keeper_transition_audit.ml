@@ -41,6 +41,12 @@ let completed_turn_outcome_to_json = function
   | Turn_failed -> `String "failed"
   | Turn_gate_rejected -> `String "gate_rejected"
 
+let completed_turn_outcome_of_json = function
+  | `String "substantive" -> Some Turn_substantive
+  | `String "failed" -> Some Turn_failed
+  | `String "gate_rejected" -> Some Turn_gate_rejected
+  | _ -> None
+
 let completed_turn_to_json (r : completed_turn_record) : Yojson.Safe.t =
   `Assoc
     [
@@ -49,6 +55,34 @@ let completed_turn_to_json (r : completed_turn_record) : Yojson.Safe.t =
       "ended_at", `Float r.ended_at;
       "outcome", completed_turn_outcome_to_json r.outcome;
     ]
+
+let completed_turn_of_json = function
+  | `Assoc fields -> (
+      match
+        List.assoc_opt "turn_id" fields,
+        List.assoc_opt "started_at" fields,
+        List.assoc_opt "ended_at" fields,
+        List.assoc_opt "outcome" fields
+      with
+      | Some (`Int turn_id), Some (`Float started_at), Some (`Float ended_at),
+        Some outcome_json -> (
+          match completed_turn_outcome_of_json outcome_json with
+          | Some outcome -> Some { turn_id; started_at; ended_at; outcome }
+          | None -> None)
+      | Some (`Int turn_id), Some (`Int started_at), Some (`Int ended_at),
+        Some outcome_json -> (
+          match completed_turn_outcome_of_json outcome_json with
+          | Some outcome ->
+              Some
+                {
+                  turn_id;
+                  started_at = float_of_int started_at;
+                  ended_at = float_of_int ended_at;
+                  outcome;
+                }
+          | None -> None)
+      | _ -> None)
+  | _ -> None
 
 (* ================================================================ *)
 (* In-memory ring buffer for recent transitions                     *)
@@ -107,6 +141,25 @@ let get_or_create_completed_turn_ring name =
     upper bound, so the cost is negligible. *)
 let sink_path () = Sys.getenv_opt "MASC_KEEPER_TRANSITION_LOG"
 
+let default_store_ref : Dated_jsonl.t option ref = ref None
+
+let get_default_store () =
+  match !default_store_ref with
+  | Some store -> Some store
+  | None ->
+      let dir =
+        Filename.concat (Env_config_core.base_path ()) ".masc/transition-audit"
+      in
+      (match Dated_jsonl.create ~base_dir:dir () with
+       | store ->
+           default_store_ref := Some store;
+           Some store
+       | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+       | exception exn ->
+           Log.Keeper.warn "transition_audit default store failed: %s"
+             (Printexc.to_string exn);
+           None)
+
 (** Append a single jsonl line for the given transition. Wraps the record
     json with the keeper name so a single sink file can mux multiple
     keepers. Any IO error is swallowed: the in-memory ring is the
@@ -132,12 +185,43 @@ let append_to_sink ~keeper_name (rec_ : transition_record) =
            close_out_noerr oc)
          (fun () -> output_string oc (line ^ "\n")))
 
+let append_to_default_store ~keeper_name (rec_ : transition_record) =
+  match get_default_store () with
+  | None -> ()
+  | Some store ->
+      let json =
+        `Assoc
+          [
+            "keeper", `String keeper_name;
+            "record", to_json rec_;
+          ]
+      in
+      Safe_ops.protect ~default:() (fun () ->
+          Dated_jsonl.append store json)
+
+let append_completed_turn_to_default_store ~keeper_name
+    (rec_ : completed_turn_record) =
+  match get_default_store () with
+  | None -> ()
+  | Some store ->
+      let json =
+        `Assoc
+          [
+            "keeper", `String keeper_name;
+            "completed_turn", completed_turn_to_json rec_;
+          ]
+      in
+      Safe_ops.protect ~default:() (fun () ->
+          Dated_jsonl.append store json)
+
 let record_transition ~keeper_name (rec_ : transition_record) =
   let ring = get_or_create_ring keeper_name in
   ring.buf.(ring.pos) <- Some rec_;
   ring.pos <- (ring.pos + 1) mod ring_capacity;
   ring.count <- ring.count + 1;
-  append_to_sink ~keeper_name rec_
+  (match sink_path () with
+   | Some _ -> append_to_sink ~keeper_name rec_
+   | None -> append_to_default_store ~keeper_name rec_)
 
 let recent_transitions ~keeper_name ~limit : transition_record list =
   match Hashtbl.find_opt rings keeper_name with
@@ -154,7 +238,25 @@ let recent_transitions ~keeper_name ~limit : transition_record list =
     !result
 
 let recent_transitions_json ~keeper_name ~limit : Yojson.Safe.t =
-  `List (List.map to_json (recent_transitions ~keeper_name ~limit))
+  let recent = recent_transitions ~keeper_name ~limit in
+  if recent <> [] then
+    `List (List.map to_json recent)
+  else
+    match sink_path (), get_default_store () with
+    | Some _, _ | _, None -> `List []
+    | None, Some store ->
+        let items =
+          Dated_jsonl.read_recent store (max limit 1 * 8)
+          |> List.filter_map (function
+               | `Assoc fields -> (
+                   match List.assoc_opt "keeper" fields, List.assoc_opt "record" fields with
+                   | Some (`String name), Some record
+                     when String.equal name keeper_name -> Some record
+                   | _ -> None)
+               | _ -> None)
+          |> List.filteri (fun idx _ -> idx < limit)
+        in
+        `List items
 
 let record_completed_turn ~keeper_name (rec_ : completed_turn_record) =
   let ring = get_or_create_completed_turn_ring keeper_name in
@@ -162,7 +264,7 @@ let record_completed_turn ~keeper_name (rec_ : completed_turn_record) =
   ring.pos <- (ring.pos + 1) mod ring_capacity;
   ring.count <- ring.count + 1;
   match sink_path () with
-  | None -> ()
+  | None -> append_completed_turn_to_default_store ~keeper_name rec_
   | Some path ->
       Safe_ops.protect ~default:() (fun () ->
           let line =
@@ -181,16 +283,47 @@ let record_completed_turn ~keeper_name (rec_ : completed_turn_record) =
               close_out_noerr oc)
             (fun () -> output_string oc (line ^ "\n")))
 
+let recent_completed_turns_from_store ~keeper_name ~limit =
+  match sink_path (), get_default_store () with
+  | Some _, _ | _, None -> []
+  | None, Some store ->
+      Dated_jsonl.read_recent store (max limit 1 * 8)
+      |> List.filter_map (function
+           | `Assoc fields -> (
+               match
+                 List.assoc_opt "keeper" fields,
+                 List.assoc_opt "completed_turn" fields
+               with
+               | Some (`String name), Some record
+                 when String.equal name keeper_name ->
+                   completed_turn_of_json record
+               | _ -> None)
+           | _ -> None)
+      |> List.rev
+      |> List.filteri (fun idx _ -> idx < limit)
+
 let recent_completed_turns ~keeper_name ~limit : completed_turn_record list =
   match Hashtbl.find_opt completed_turn_rings keeper_name with
-  | None -> []
+  | None -> recent_completed_turns_from_store ~keeper_name ~limit
   | Some ring ->
       let n = min limit (min ring.count ring_capacity) in
       let result = ref [] in
       for i = 0 to n - 1 do
         let idx = (ring.pos - 1 - i + ring_capacity) mod ring_capacity in
         match ring.buf.(idx) with
-        | Some r -> result := r :: !result
+        | Some r -> result := !result @ [ r ]
         | None -> ()
       done;
-      !result
+      match !result with
+      | [] -> recent_completed_turns_from_store ~keeper_name ~limit
+      | turns -> turns
+
+module For_testing = struct
+  let reset_state () =
+    Hashtbl.clear rings;
+    Hashtbl.clear completed_turn_rings;
+    default_store_ref := None
+
+  let clear_completed_turn_ring ~keeper_name =
+    Hashtbl.remove completed_turn_rings keeper_name
+end

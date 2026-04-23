@@ -393,7 +393,10 @@ let make_tool_bundle
   let turn_sandbox_runtime_git =
     match meta.sandbox_profile with
     | Keeper_types.Docker ->
-      Some (Keeper_turn_sandbox_runtime.create ~config ~meta ~network_mode:Network_inherit ())
+      if Env_config_keeper.KeeperSandbox.hard_mode () then
+        None
+      else
+        Some (Keeper_turn_sandbox_runtime.create ~config ~meta ~network_mode:Network_inherit ())
     | Keeper_types.Local -> None
   in
   (* Build Tool.t for the full universe so BM25 and Tool_op can

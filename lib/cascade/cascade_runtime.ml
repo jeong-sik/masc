@@ -81,7 +81,8 @@ let refresh_local_discovery_if_possible ?sw ?net (labels : string list) : bool =
             | None, Some next ->
                 Log.info ~ctx:"CascadeRuntime"
                   "refreshed local runtime context: unset -> %d" next
-            | _ -> ());
+            | Some _, Some _ -> ()
+            | Some _, None | None, None -> ());
            true
          with
          | Eio.Cancel.Cancelled _ as exn -> raise exn

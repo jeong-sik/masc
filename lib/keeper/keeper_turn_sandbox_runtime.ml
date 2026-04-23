@@ -29,6 +29,12 @@ let normalize_path path =
 
 let create ~(config : Coord.config) ~(meta : keeper_meta)
     ?(network_mode = Network_none) () =
+  let network_mode =
+    if Env_config_keeper.KeeperSandbox.hard_mode () then
+      Network_none
+    else
+      network_mode
+  in
   {
     config;
     meta;

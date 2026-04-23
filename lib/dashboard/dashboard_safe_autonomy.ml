@@ -187,7 +187,7 @@ let approval_stats_of_pending_json pending_json : (string, approval_stats) Hasht
            in
            if keeper_name <> "" then add_entry keeper_name item)
          items
-   | _ -> ());
+   | `Assoc _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> ());
   table
 
 let activity_stats_by_keeper

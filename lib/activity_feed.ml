@@ -100,6 +100,21 @@ let parse_created_at_or_fallback ~kind ~path raw =
           (Printexc.to_string exn);
         fallback ()
 
+let json_created_at_or_fallback ~kind ~path json =
+  match Safe_ops.json_float_opt "created_at" json with
+  | Some ts -> ts
+  | None ->
+      (match Safe_ops.json_string_opt "created_at" json with
+       | Some raw -> (
+           match Types.parse_iso8601_opt (String.trim raw) with
+           | Some ts -> ts
+           | None ->
+               Log.Feed.warn "%s missing/invalid created_at for %s" kind path;
+               timestamp_fallback)
+       | None ->
+           Log.Feed.warn "%s missing/invalid created_at for %s" kind path;
+           timestamp_fallback)
+
 (** {1 Source Readers} *)
 
 (** Read task activity from `.masc/tasks/` directory. *)
@@ -159,11 +174,7 @@ let board_post_activities (config : Coord.config) : activity_item list =
       let title = Safe_ops.json_string ~default:"" "title" json in
       let content = Safe_ops.json_string ~default:"" "content" json in
       let created_at =
-        match Safe_ops.json_float_opt "created_at" json with
-        | Some ts -> ts
-        | None ->
-            Log.Feed.warn "board post missing/invalid created_at for %s" path;
-            timestamp_fallback
+        json_created_at_or_fallback ~kind:"board post" ~path json
       in
       if id = "" then None
       else
@@ -192,11 +203,7 @@ let board_comment_activities (config : Coord.config) : activity_item list =
       let author = Safe_ops.json_string ~default:"" "author" json in
       let content = Safe_ops.json_string ~default:"" "content" json in
       let created_at =
-        match Safe_ops.json_float_opt "created_at" json with
-        | Some ts -> ts
-        | None ->
-            Log.Feed.warn "board comment missing/invalid created_at for %s" path;
-            timestamp_fallback
+        json_created_at_or_fallback ~kind:"board comment" ~path json
       in
       if id = "" then None
       else
@@ -224,11 +231,7 @@ let mention_activities (config : Coord.config) : activity_item list =
       let target_agent = Safe_ops.json_string ~default:"" "target_agent" json in
       let content_preview = Safe_ops.json_string ~default:"" "content_preview" json in
       let created_at =
-        match Safe_ops.json_float_opt "created_at" json with
-        | Some ts -> ts
-        | None ->
-            Log.Feed.warn "mention inbox missing/invalid created_at for %s" path;
-            timestamp_fallback
+        json_created_at_or_fallback ~kind:"mention inbox" ~path json
       in
       if id = "" then None
       else Some {

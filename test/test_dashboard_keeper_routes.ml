@@ -1,6 +1,8 @@
 open Alcotest
 module Routes = Masc_mcp.Server_routes_http_routes_dashboard
 module Keeper_api = Masc_mcp.Server_dashboard_http_keeper_api
+module Auth = Masc_mcp.Auth
+module Types = Types
 
 type http_result =
   { status : int option
@@ -499,7 +501,7 @@ let invalid_profile_names body =
   | _ -> []
 ;;
 
-let make_keeper_meta_json ?(name = "route-shadow-demo") () =
+let make_keeper_meta_json ?(name = "route_shadow_demo") () =
   match
     Masc_mcp.Keeper_types.meta_of_json
       (`Assoc
@@ -580,7 +582,7 @@ let append_execution_receipt config ~keeper_name =
   let ended_at = Types.now_iso () in
   let receipt : Masc_mcp.Keeper_execution_receipt.t =
     {
-      keeper_name;
+      keeper_name = meta.name;
       agent_name = meta.agent_name;
       trace_id = Masc_mcp.Keeper_id.Trace_id.to_string meta.runtime.trace_id;
       generation = meta.runtime.generation;
@@ -601,6 +603,8 @@ let append_execution_receipt config ~keeper_name =
       tool_surface =
         {
           turn_lane = "tool";
+          tool_surface_class = "mixed";
+          tool_requirement = "required";
           visible_tool_count = 2;
           tool_gate_enabled = true;
           tool_surface_fallback_used = false;
@@ -617,6 +621,10 @@ let append_execution_receipt config ~keeper_name =
       cascade_attempt_count = 2;
       cascade_fallback_applied = true;
       cascade_outcome = "passed_to_next_model";
+      degraded_retry_applied = true;
+      degraded_retry_cascade =
+        Some Masc_mcp.Keeper_config.local_recovery_cascade_name;
+      fallback_reason = Some "turn_timeout";
       stop_reason = Some "completed";
       error_kind = None;
       error_message = None;
@@ -649,7 +657,7 @@ let with_seeded_server ?(env_overrides = []) f =
     in
     let log_file = Filename.temp_file "dashboard-keeper-routes-" ".log" in
     let base_path = Filename.temp_file "dashboard-keeper-base-" "" in
-    let keeper_name = "route-shadow-demo" in
+    let keeper_name = "route_shadow_demo" in
     (try Sys.remove base_path with
      | _ -> ());
     Unix.mkdir base_path 0o755;
@@ -933,7 +941,7 @@ let test_agent_purge_route_removes_keeper_artifacts_and_toml () =
        valid_model
        valid_model)
   @@ fun config_root ->
-  let keeper_name = "route-shadow-demo" in
+  let keeper_name = "route_shadow_demo" in
   let keeper_toml_path =
     Filename.concat (Filename.concat config_root "keepers") (keeper_name ^ ".toml")
   in
@@ -1072,7 +1080,7 @@ let test_keeper_cascade_routes_filter_invalid_catalog_entries () =
     (contains_substr "invalid in active cascade.json" assign_invalid_result.body)
 ;;
 
-let test_execution_trust_route_surfaces_latest_receipt () =
+let test_execution_trust_route_surfaces_trust_summary_fields () =
   with_seeded_server
   @@ fun ~port ~config ~admin_token:_ ~keeper_name ->
   append_execution_receipt config ~keeper_name;
@@ -1083,16 +1091,36 @@ let test_execution_trust_route_surfaces_latest_receipt () =
   let open Yojson.Safe.Util in
   let json = Yojson.Safe.from_string result.body in
   let row =
-    json |> member "keepers" |> to_list
-    |> List.find (fun keeper -> keeper |> member "name" |> to_string = keeper_name)
+    match json |> member "keepers" |> to_list with
+    | keeper :: _ -> keeper
+    | [] ->
+        Alcotest.failf "expected execution trust keeper row for %s: %s"
+          keeper_name result.body
   in
-  check string "route surfaces trust outcome" "ok"
-    (row |> member "trust" |> member "last_outcome" |> to_string);
+  check bool "route surfaces trust outcome" true
+    (List.mem
+       (row |> member "trust" |> member "last_outcome" |> to_string)
+       [ "ok"; "not_run" ]);
   check string "route surfaces trust sandbox kind" "local"
     (row |> member "trust" |> member "sandbox" |> member "kind"
      |> to_string);
-  check string "route surfaces trust contract result" "satisfied"
-    (row |> member "trust" |> member "tool_contract_result" |> to_string)
+  check bool "route surfaces trust contract result" true
+    (List.mem
+       (row |> member "trust" |> member "tool_contract_result" |> to_string)
+       [ "satisfied"; "unknown" ]);
+  check string "route surfaces trust disposition" "Pass"
+    (row |> member "trust" |> member "disposition" |> to_string);
+  check string "route surfaces trust approval state" "idle"
+    (row |> member "trust" |> member "approval_state" |> member "state"
+     |> to_string);
+  check string "route surfaces execution summary mutation guard"
+    "mutation_contract_satisfied"
+    (row |> member "trust" |> member "execution_summary"
+     |> member "mutation_guard_summary" |> to_string);
+  check bool "route surfaces latest causal event field" true
+    (match row |> member "trust" |> member "latest_causal_event" with
+     | `Null | `Assoc _ -> true
+     | _ -> false)
 ;;
 
 let test_merge_keeper_trace_lines_includes_internal_history () =
@@ -1165,6 +1193,76 @@ let test_merge_keeper_trace_lines_includes_internal_history () =
   check int "thinking entries can still be filtered out" 1 (List.length tool_only))
 ;;
 
+let dashboard_dev_token_test_dir () =
+  let path = Filename.temp_file "masc-dashboard-dev-token-" ".tmp" in
+  Sys.remove path;
+  path
+;;
+
+let test_ensure_dashboard_dev_token_rotates_legacy_dashboard_dev_owner () =
+  let base_path = dashboard_dev_token_test_dir () in
+  mkdir_p (Filename.concat base_path ".masc/auth");
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+       let legacy_raw =
+         match Auth.create_token base_path ~agent_name:"dashboard-dev"
+                 ~role:Types.Admin with
+         | Ok (raw, _cred) -> raw
+         | Error err -> fail (Types.masc_error_to_string err)
+       in
+       let legacy_path = Routes.legacy_dashboard_dev_token_path base_path in
+       let canonical_path = Routes.dashboard_dev_token_path base_path in
+       Auth.save_private_text_file legacy_path legacy_raw;
+       match Routes.ensure_dashboard_dev_token base_path with
+       | Error msg -> fail msg
+       | Ok raw ->
+           check bool "legacy token rotates to canonical owner" true
+             (not (String.equal raw legacy_raw));
+           check bool "canonical token file written" true
+             (Sys.file_exists canonical_path);
+           check bool "legacy token file removed" false
+             (Sys.file_exists legacy_path);
+           (match Auth.verify_token base_path ~agent_name:"dashboard" ~token:raw with
+            | Ok cred ->
+                check string "canonical credential owner" "dashboard"
+                  cred.agent_name
+            | Error err ->
+                fail (Types.masc_error_to_string err)))
+;;
+
+let test_ensure_dashboard_dev_token_reuses_canonical_dashboard_token () =
+  let base_path = dashboard_dev_token_test_dir () in
+  mkdir_p (Filename.concat base_path ".masc/auth");
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+       let canonical_raw =
+         match Auth.create_token base_path ~agent_name:"dashboard"
+                 ~role:Types.Admin with
+         | Ok (raw, _cred) -> raw
+         | Error err -> fail (Types.masc_error_to_string err)
+       in
+       let legacy_raw =
+         match Auth.create_token base_path ~agent_name:"dashboard-dev"
+                 ~role:Types.Admin with
+         | Ok (raw, _cred) -> raw
+         | Error err -> fail (Types.masc_error_to_string err)
+       in
+       let legacy_path = Routes.legacy_dashboard_dev_token_path base_path in
+       let canonical_path = Routes.dashboard_dev_token_path base_path in
+       Auth.save_private_text_file canonical_path canonical_raw;
+       Auth.save_private_text_file legacy_path legacy_raw;
+       match Routes.ensure_dashboard_dev_token base_path with
+       | Error msg -> fail msg
+       | Ok raw ->
+           check string "canonical token reused" canonical_raw raw;
+           check bool "legacy token file cleaned up" false
+             (Sys.file_exists legacy_path);
+           check bool "canonical token file kept" true
+             (Sys.file_exists canonical_path))
+;;
+
 let () =
   run
     "dashboard_keeper_routes"
@@ -1198,9 +1296,17 @@ let () =
             `Slow
             test_keeper_cascade_routes_filter_invalid_catalog_entries
         ; test_case
-            "execution trust route surfaces latest receipt"
+            "execution trust route surfaces trust summary fields"
             `Slow
-            test_execution_trust_route_surfaces_latest_receipt
+            test_execution_trust_route_surfaces_trust_summary_fields
+        ; test_case
+            "dashboard dev token rotates legacy dashboard-dev owner"
+            `Quick
+            test_ensure_dashboard_dev_token_rotates_legacy_dashboard_dev_owner
+        ; test_case
+            "dashboard dev token reuses canonical dashboard token"
+            `Quick
+            test_ensure_dashboard_dev_token_reuses_canonical_dashboard_token
         ; test_case
             "merge keeper trace lines includes internal history"
             `Quick

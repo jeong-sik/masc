@@ -106,7 +106,6 @@ let decide
               { assignee
               ; submitted_at = now
               ; verification_id = new_verification_id ()
-              ; required_verifier_role = Types.Reviewer
               ; deadline = None
               })
     else Error Invalid_transition

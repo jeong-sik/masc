@@ -7,7 +7,7 @@ import { oasHealthSummary, oasAgentEvents, oasKeeperSnapshots } from '../store'
 import { Card } from './common/card'
 import { StatCell } from './common/stat-cell'
 import { EmptyState } from './common/empty-state'
-import type { OasAgentEvent, OasKeeperSnapshot } from '../types/oas'
+import type { OasAgentEvent, OasHealthSummary, OasKeeperSnapshot } from '../types/oas'
 
 const STALE_MS = 60_000
 
@@ -69,6 +69,25 @@ export function topKeepers(
     .slice(0, limit)
 }
 
+export function describeTotalEventsDetail(summary: Pick<OasHealthSummary,
+  'replayLoadedEvents' | 'replayTotalMatchingEvents' | 'replayTruncated' | 'totalEvents'
+>): string {
+  if (summary.replayTruncated) {
+    return `replay ${summary.replayLoadedEvents}/${summary.replayTotalMatchingEvents} + live`
+  }
+  if (summary.replayLoadedEvents === 0 && summary.totalEvents > 0) {
+    return 'live only'
+  }
+  return 'durable replay + live'
+}
+
+export function describeSampleWindow(summary: Pick<OasHealthSummary,
+  'replayLoadedEvents' | 'replayTotalMatchingEvents' | 'replayTruncated'
+>): string | null {
+  if (!summary.replayTruncated) return null
+  return `sample ${summary.replayLoadedEvents}/${summary.replayTotalMatchingEvents}`
+}
+
 export function OasHealthChip() {
   const summary = useComputed(() => oasHealthSummary.value)
   const recentEvents = useComputed(() => oasAgentEvents.value.slice(0, 3))
@@ -86,27 +105,33 @@ export function OasHealthChip() {
     `
   }
 
+  const sampleWindow = describeSampleWindow(summary.value)
+  const llmDetail =
+    summary.value.lastLlmCallTs != null
+      ? `최근 ${formatLastTick(summary.value.lastLlmCallTs)}`
+      : 'durable journal'
+  const errorDetail =
+    summary.value.lastErrorTs != null
+      ? `최근 ${formatLastTick(summary.value.lastErrorTs)}`
+      : 'Api/agent 실패'
+
   return html`
     <${Card} title="OAS 런타임">
       <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
         <${StatCell}
           label="총 이벤트"
           value=${summary.value.totalEvents}
-          detail="durable replay + live"
+          detail=${describeTotalEventsDetail(summary.value)}
         />
         <${StatCell}
           label="LLM 호출"
           value=${summary.value.totalLlmCalls}
-          detail=${summary.value.lastLlmCallTs != null
-            ? `최근 ${formatLastTick(summary.value.lastLlmCallTs)}`
-            : 'durable journal'}
+          detail=${sampleWindow ? `${llmDetail} · ${sampleWindow}` : llmDetail}
         />
         <${StatCell}
           label="에러"
           value=${summary.value.totalErrors}
-          detail=${summary.value.lastErrorTs != null
-            ? `최근 ${formatLastTick(summary.value.lastErrorTs)}`
-            : 'Api/agent 실패'}
+          detail=${sampleWindow ? `${errorDetail} · ${sampleWindow}` : errorDetail}
           tone=${summary.value.totalErrors > 0 ? 'text-[var(--bad)]' : undefined}
         />
         <${StatCell}

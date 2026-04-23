@@ -1,18 +1,5 @@
 open Masc_exec
 
-let substring_contains ~haystack ~needle =
-  let hl = String.length haystack in
-  let nl = String.length needle in
-  if nl = 0 then true
-  else if nl > hl then false
-  else
-    let rec find i =
-      if i + nl > hl then false
-      else if String.sub haystack i nl = needle then true
-      else find (i + 1)
-    in
-    find 0
-
 let with_env name value f =
   let old = Sys.getenv_opt name in
   (match value with
@@ -34,7 +21,7 @@ let with_tap_capture f =
 
 let find_gate_line lines =
   List.find_opt
-    (fun line -> substring_contains ~haystack:line ~needle:"\"kind\":\"Exec_gate.decision\"")
+    (fun line -> String_util.contains_substring line "\"kind\":\"Exec_gate.decision\"")
     lines
 
 let test_enforced_strict_safe_blocks () =
@@ -48,7 +35,7 @@ let test_enforced_strict_safe_blocks () =
         [ "pwd" ]
     in
     assert (status = Unix.WEXITED 126);
-    assert (substring_contains ~haystack:out ~needle:"ask_required"))
+    assert (String_util.contains_substring out "ask_required"))
 
 let test_parallel_records_shadow_and_executes () =
   with_tap_capture (fun captured ->
@@ -65,9 +52,9 @@ let test_parallel_records_shadow_and_executes () =
       match find_gate_line !captured with
       | None -> assert false
       | Some line ->
-        assert (substring_contains ~haystack:line ~needle:"\"gate_mode\":\"parallel\"");
-        assert (substring_contains ~haystack:line ~needle:"\"gate_verdict\":\"ask\"");
-        assert (substring_contains ~haystack:line ~needle:"\"gate_enforced\":false")))
+        assert (String_util.contains_substring line "\"gate_mode\":\"parallel\"");
+        assert (String_util.contains_substring line "\"gate_verdict\":\"ask\"");
+        assert (String_util.contains_substring line "\"gate_enforced\":false")))
 
 let test_enforced_internal_audited_allows () =
   with_env "MASC_EXEC_GATE" (Some "enforced") (fun () ->
@@ -80,7 +67,7 @@ let test_enforced_internal_audited_allows () =
         [ "git"; "--version" ]
     in
     assert (status = Unix.WEXITED 0);
-    assert (substring_contains ~haystack:out ~needle:"git version"))
+    assert (String_util.contains_substring out "git version"))
 
 let test_enforced_internal_stdin_allows () =
   with_env "MASC_EXEC_GATE" (Some "enforced") (fun () ->
@@ -94,7 +81,7 @@ let test_enforced_internal_stdin_allows () =
         [ "cat" ]
     in
     assert (status = Unix.WEXITED 0);
-    assert (substring_contains ~haystack:out ~needle:"hello"))
+    assert (String_util.contains_substring out "hello"))
 
 let () =
   test_enforced_strict_safe_blocks ();

@@ -222,5 +222,5 @@ let handle_stream ~deps ~state request reqd =
           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
             if not (is_cancelled exn) then close_stream info;
             Activity_graph.unregister_if_current info.session_id info.client_id)
-  | _ -> ());
+  | None, _ | Some _, None -> ());
   ()

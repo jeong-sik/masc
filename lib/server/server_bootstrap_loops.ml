@@ -111,8 +111,8 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
                 | Some event, Some keeper_name ->
                     Server_dashboard_http.patch_keeper_dependent_caches
                       ~keeper_name ~event
-                | _ -> ())
-            | _ -> ())
+                | None, _ | Some _, None -> ())
+            | _ -> Log.Dashboard.debug "ignored non-lifecycle event")
           events;
         if events <> [] then begin
           Log.Dashboard.info
@@ -280,8 +280,13 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
       ~base_path:state.room_config.base_path
       ~masc_tools:judge_masc_tools ~dispatch:governance_judge_dispatch
       ~build_facts:(fun () ->
-        let base = Dashboard_governance.factual_snapshot_json
-          ~base_path:state.room_config.base_path in
+        let base = `Assoc
+          [
+            ("generated_at", `String (Types.now_iso ()));
+            ("items", `List []);
+            ("activity", `List []);
+          ]
+        in
         let agents = Coord.get_agents_status state.room_config in
         Operator_control_snapshot.merge_json_objects base
           (`Assoc [("agents", agents)]))

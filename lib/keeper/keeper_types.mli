@@ -41,6 +41,7 @@ type tool_preset =
   | Minimal
   | Social
   | Messaging
+  | Dispatch
   | Coding
   | Research
   | Delivery
@@ -169,6 +170,7 @@ type keeper_meta = {
   shared_memory_scope: shared_memory_scope;
   allowed_paths: string list;
   tool_access: tool_access;
+  tool_preset_source: string option;
   tool_denylist: string list;
   mention_targets: string list;
   room_signal_prompt_enabled: bool;
@@ -197,6 +199,7 @@ type keeper_meta = {
   work_discovery_guidance : string option;
   telemetry_feedback_enabled : bool option;
   telemetry_feedback_window_hours : int option;
+  per_provider_timeout_s : float option;
   runtime: agent_runtime_state;
 }
 

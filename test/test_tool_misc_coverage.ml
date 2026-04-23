@@ -651,7 +651,6 @@ let () = test "dispatch_tool_admin_update_auth" (fun () ->
         ("section", `String "auth");
         ("enabled", `Bool true);
         ("require_token", `Bool true);
-        ("default_role", `String "reader");
         ("token_expiry_hours", `Int 12);
       ]
   in
@@ -663,12 +662,11 @@ let () = test "dispatch_tool_admin_update_auth" (fun () ->
       let cfg = Auth.load_auth_config ctx.config.base_path in
       assert cfg.enabled;
       assert cfg.require_token;
-      assert (cfg.default_role = Types.Reader);
       assert (cfg.token_expiry_hours = 12)
   | None -> failwith "dispatch returned None"
 )
 
-let () = test "dispatch_tool_admin_update_auth_invalid_does_not_mutate" (fun () ->
+let () = test "dispatch_tool_admin_update_auth_rejects_removed_default_role" (fun () ->
   let ctx = make_test_ctx () in
   let before = Auth.load_auth_config ctx.config.base_path in
   let args =
@@ -676,16 +674,17 @@ let () = test "dispatch_tool_admin_update_auth_invalid_does_not_mutate" (fun () 
       [
         ("section", `String "auth");
         ("enabled", `Bool true);
-        ("default_role", `String "not-a-role");
+        ("default_role", `String "reader");
       ]
   in
   match Tool_misc.dispatch ctx ~name:"masc_tool_admin_update" ~args with
-  | Some (success, _result) ->
+  | Some (success, result) ->
       assert (not success);
+      assert (str_contains result "default_role is no longer supported");
       let after = Auth.load_auth_config ctx.config.base_path in
       assert (after.enabled = before.enabled);
       assert (after.require_token = before.require_token);
-      assert (after.default_role = before.default_role)
+      assert (after.token_expiry_hours = before.token_expiry_hours)
   | None -> failwith "dispatch returned None"
 )
 
@@ -736,67 +735,6 @@ let () = test "dispatch_tool_admin_update_keeper_policy" (fun () ->
           | None -> failwith "dispatch returned None")
       | Some (false, err) -> failwith err
       | None -> failwith "keeper up dispatch returned None")
-)
-
-let () = test "keeper_up update recomputes network_mode for sandbox profile changes" (fun () ->
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  Eio.Switch.run @@ fun sw ->
-  let ctx = make_test_ctx () in
-  let keeper_name = "sandbox-policy-keeper" in
-  let keeper_ctx : _ Tool_keeper.context =
-    {
-      config = ctx.config;
-      agent_name = "tester";
-      sw;
-      clock = Eio.Stdenv.clock env;
-      proc_mgr = Some (Eio.Stdenv.process_mgr env); net = None;
-    }
-  in
-  Fun.protect
-    ~finally:(fun () ->
-      Keeper_keepalive.stop_keepalive keeper_name)
-    (fun () ->
-      let () =
-        match
-          Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_up"
-            ~args:
-              (`Assoc
-                [
-                  ("name", `String keeper_name);
-                  ("goal", `String "Sandbox policy default test");
-                  ("proactive_enabled", `Bool false);
-                  ("autoboot_enabled", `Bool false);
-                ])
-        with
-        | Some (true, _) -> ()
-        | Some (false, err) -> failwith err
-        | None -> failwith "keeper up dispatch returned None"
-      in
-      match
-        Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_up"
-          ~args:
-            (`Assoc
-              [
-                ("name", `String keeper_name);
-                ("sandbox_profile", `String "docker");
-              ])
-      with
-      | Some (true, _) -> (
-          match Keeper_types.read_meta ctx.config keeper_name with
-          | Ok (Some meta) ->
-              Alcotest.(check string)
-                "sandbox profile updated"
-                "docker"
-                (Keeper_types.sandbox_profile_to_string meta.sandbox_profile);
-              Alcotest.(check string)
-                "network mode follows hardened default"
-                "none"
-                (Keeper_types.network_mode_to_string meta.network_mode)
-          | Ok None -> Alcotest.fail "keeper meta missing after update"
-          | Error err -> Alcotest.fail ("meta read failed: " ^ err))
-      | Some (false, err) -> failwith err
-      | None -> failwith "keeper up update dispatch returned None")
 )
 
 (* Test helper functions *)

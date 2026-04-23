@@ -26,6 +26,9 @@ let agents_dir config = Filename.concat (auth_dir config) "agents"
 let room_secret_file config = Filename.concat (auth_dir config) "room_secret.hash"
 let auth_config_file config = Filename.concat (auth_dir config) "config.json"
 let initial_admin_file config = Filename.concat (auth_dir config) "initial_admin"
+let internal_keeper_token_hash_file config =
+  Filename.concat (auth_dir config) "internal_keeper.token.hash"
+let internal_keeper_token_env_key = "MASC_INTERNAL_MCP_TOKEN"
 
 let run_blocking_io f = Eio_guard.run_in_systhread f
 let file_exists path = run_blocking_io (fun () -> Sys.file_exists path)
@@ -61,6 +64,44 @@ let save_private_text_file path content =
           output_string oc content));
   chmod path 0o600
 
+let load_internal_keeper_token_hash config =
+  let file = internal_keeper_token_hash_file config in
+  if file_exists file then
+    try
+      let hash = String.trim (read_text_file file) in
+      if hash = "" then None else Some hash
+    with Sys_error _ -> None
+  else
+    None
+
+let save_internal_keeper_token_hash config ~raw_token =
+  ensure_auth_dirs config;
+  let file = internal_keeper_token_hash_file config in
+  save_private_text_file file (sha256_hash raw_token)
+
+let verify_internal_keeper_token config ~token =
+  match load_internal_keeper_token_hash config with
+  | Some stored_hash -> String.equal stored_hash (sha256_hash token)
+  | None -> false
+
+let ensure_internal_keeper_token config =
+  let existing_env =
+    match Sys.getenv_opt internal_keeper_token_env_key with
+    | Some raw ->
+        let trimmed = String.trim raw in
+        if trimmed = "" then None else Some trimmed
+    | None -> None
+  in
+  match existing_env with
+  | Some raw_token ->
+      save_internal_keeper_token_hash config ~raw_token;
+      raw_token
+  | None ->
+      let raw_token = generate_token () in
+      save_internal_keeper_token_hash config ~raw_token;
+      Unix.putenv internal_keeper_token_env_key raw_token;
+      raw_token
+
 (** Read the initial admin agent name, if set. *)
 let read_initial_admin config : string option =
   let file = initial_admin_file config in
@@ -76,6 +117,12 @@ let read_initial_admin config : string option =
 (* Auth config management                       *)
 (* ============================================ *)
 
+let persist_auth_config config (auth_cfg : auth_config) =
+  ensure_auth_dirs config;
+  let file = auth_config_file config in
+  let json = auth_config_to_yojson auth_cfg in
+  save_private_text_file file (Yojson.Safe.pretty_to_string json)
+
 (** Load auth config *)
 let load_auth_config config : auth_config =
   let file = auth_config_file config in
@@ -86,18 +133,15 @@ let load_auth_config config : auth_config =
       match auth_config_of_yojson json with
       | Ok cfg -> cfg
       | Error msg ->
-        Log.Auth.warn "[load_auth_config] parse error for %s: %s" file msg;
-        default_auth_config
+          Log.Auth.warn "[load_auth_config] parse error for %s: %s" file msg;
+          default_auth_config
     with Sys_error _ | Yojson.Json_error _ -> default_auth_config
   else
     default_auth_config
 
 (** Save auth config *)
 let save_auth_config config (auth_cfg : auth_config) =
-  ensure_auth_dirs config;
-  let file = auth_config_file config in
-  let json = auth_config_to_yojson auth_cfg in
-  save_private_text_file file (Yojson.Safe.pretty_to_string json)
+  persist_auth_config config auth_cfg
 
 (* ============================================ *)
 (* Credential management                        *)
@@ -111,11 +155,65 @@ let trim_nonempty value =
   let trimmed = String.trim value in
   if trimmed = "" then None else Some trimmed
 
+let nickname_adjectives = [|
+  "swift"; "brave"; "calm"; "eager"; "fierce";
+  "gentle"; "happy"; "jolly"; "keen"; "lucky";
+  "merry"; "noble"; "proud"; "quick"; "witty";
+  "bold"; "cool"; "deft"; "fair"; "grand";
+  "hale"; "jade"; "kind"; "lean"; "neat";
+  "pale"; "rare"; "sage"; "tame"; "warm";
+|]
+
+let nickname_animals = [|
+  "fox"; "bear"; "wolf"; "hawk"; "lion";
+  "tiger"; "eagle"; "otter"; "panda"; "koala";
+  "raven"; "falcon"; "badger"; "beaver"; "whale";
+  "shark"; "crane"; "heron"; "moose"; "viper";
+  "cobra"; "gecko"; "lemur"; "llama"; "manta";
+  "orca"; "rhino"; "sloth"; "tapir"; "zebra";
+|]
+
+let array_contains arr value =
+  let rec loop idx =
+    idx < Array.length arr
+    && (String.equal arr.(idx) value || loop (idx + 1))
+  in
+  loop 0
+
+let is_hex4 value =
+  String.length value = 4
+  && String.for_all
+       (function
+         | '0' .. '9' | 'a' .. 'f' -> true
+         | _ -> false)
+       value
+
+let extract_generated_nickname_prefix name =
+  let parts = String.split_on_char '-' name in
+  let join_prefix prefix_rev =
+    match List.rev prefix_rev with
+    | [] -> None
+    | prefix -> String.concat "-" prefix |> trim_nonempty
+  in
+  match List.rev parts with
+  | animal :: adjective :: prefix_rev
+    when array_contains nickname_animals animal
+         && array_contains nickname_adjectives adjective ->
+      join_prefix prefix_rev
+  | suffix :: animal :: adjective :: prefix_rev
+    when is_hex4 suffix
+         && array_contains nickname_animals animal
+         && array_contains nickname_adjectives adjective ->
+      join_prefix prefix_rev
+  | prefix :: _ when prefix <> "" -> Some prefix
+  | _ -> None
+
 (* Inline copy of Nickname.is_generated_nickname / extract_agent_type.
    Auth lives below masc_coord in the module graph and cannot depend on
-   it. The nickname pattern — three or more hyphen-separated segments,
-   first segment is the agent type — is small enough to duplicate here
-   without drift risk. Keeper aliases use a different canonical shape
+   it. The nickname pattern — stable-prefix + adjective + animal
+   [+ hex4] — is duplicated here so auth can canonicalize generated
+   aliases without depending on Nickname. Keeper aliases use a
+   different canonical shape
    (keeper-<name>-agent) and must resolve to the middle segment so
    keeper-scoped credentials can be stored under the stable keeper name
    rather than the transport alias. Covered by the nickname fallback
@@ -132,14 +230,23 @@ let extract_agent_type_prefix name =
           |> String.concat "-"
           |> trim_nonempty
       | _ -> Some "keeper")
-  | prefix :: _ when prefix <> "" -> Some prefix
-  | _ -> None
+  | _ -> extract_generated_nickname_prefix name
 
 let credential_agent_name agent_name =
   match extract_agent_type_prefix agent_name with
   | Some prefix when prefix <> agent_name -> prefix
   | _ -> agent_name
 
+let raw_token_file config agent_name =
+  Filename.concat (auth_dir config) (agent_name ^ ".token")
+
+(* Dashboard loopback dev-token was historically issued under
+   [dashboard-dev] while the UI defaults to [dashboard]. Keep the old
+   credential valid for [dashboard] requests so already-open browser
+   sessions survive restarts and token-file migration. *)
+let legacy_credential_aliases = function
+  | "dashboard" -> [ "dashboard-dev" ]
+  | _ -> []
 let load_credential_from_path config agent_name path : agent_credential option =
   if file_exists path then
     try
@@ -148,8 +255,8 @@ let load_credential_from_path config agent_name path : agent_credential option =
       match agent_credential_of_yojson json with
       | Ok cred -> Some cred
       | Error msg ->
-        Log.Auth.warn "[load_credential] parse error for %s: %s" agent_name msg;
-        None
+          Log.Auth.warn "[load_credential] parse error for %s: %s" agent_name msg;
+          None
     with Sys_error _ | Yojson.Json_error _ -> None
   else
     None
@@ -179,12 +286,32 @@ let load_credential config agent_name : agent_credential option =
       | _ -> None
     else None
 
+let load_credential_with_aliases config agent_name : agent_credential option =
+  match load_credential config agent_name with
+  | Some _ as c -> c
+  | None ->
+      legacy_credential_aliases agent_name
+      |> List.find_map (load_credential config)
+
 (** Save agent credential *)
 let save_credential config (cred : agent_credential) =
   ensure_auth_dirs config;
   let file = credential_file config cred.agent_name in
   let json = agent_credential_to_yojson cred in
   save_private_text_file file (Yojson.Safe.pretty_to_string json)
+
+let load_raw_token config ~agent_name =
+  let file = raw_token_file config agent_name in
+  if file_exists file then
+    try
+      read_text_file file |> trim_nonempty
+    with Sys_error _ -> None
+  else
+    None
+
+let persist_raw_token config ~agent_name raw_token =
+  ensure_auth_dirs config;
+  save_private_text_file (raw_token_file config agent_name) raw_token
 
 (** Delete agent credential *)
 let delete_credential config agent_name =
@@ -279,7 +406,7 @@ let missing_credential_error config ~agent_name ~token : masc_error =
 
 (** Verify a token *)
 let verify_token config ~agent_name ~token : (agent_credential, masc_error) result =
-  match load_credential config agent_name with
+  match load_credential_with_aliases config agent_name with
   | None -> Error (missing_credential_error config ~agent_name ~token)
   | Some cred ->
       let token_hash = sha256_hash token in
@@ -299,27 +426,24 @@ let verify_token config ~agent_name ~token : (agent_credential, masc_error) resu
 
 let ensure_keeper_credential config ~agent_name :
     (string * agent_credential, masc_error) result =
+  let raw_token = ensure_internal_keeper_token config in
   let target_agent_name = credential_agent_name agent_name in
-  let env_token =
-    match Sys.getenv_opt "MASC_MCP_TOKEN" with
-    | Some raw -> trim_nonempty raw
-    | None -> None
-  in
-  match env_token with
-  | Some raw_token -> (
-      match verify_token config ~agent_name ~token:raw_token with
-      | Ok cred -> Ok (raw_token, cred)
-      | Error _ ->
-          create_token config ~agent_name:target_agent_name ~role:Admin)
-  | None ->
-      create_token config ~agent_name:target_agent_name ~role:Admin
+  Ok
+    ( raw_token,
+      {
+        agent_name = target_agent_name;
+        token = sha256_hash raw_token;
+        role = Worker;
+        created_at = now_iso ();
+        expires_at = None;
+      } )
 
 (** Refresh a token (generate new one, update credential) *)
 let refresh_token config ~agent_name ~old_token : (string * agent_credential, masc_error) result =
   match verify_token config ~agent_name ~token:old_token with
   | Error (TokenExpired _) ->
       (* Allow refresh even if expired *)
-      (match load_credential config agent_name with
+      (match load_credential_with_aliases config agent_name with
        | None -> Error (Unauthorized ("No credential found for " ^ agent_name))
        | Some old_cred -> create_token config ~agent_name ~role:old_cred.role)
   | Error e -> Error e
@@ -349,6 +473,15 @@ let check_permission config ~agent_name ~token ~permission : (unit, masc_error) 
            | None -> false) then
     (* Bootstrap grace: the agent who enabled auth always has full access *)
     (ignore permission; Ok ())
+  else if
+    match token with
+    | Some raw -> verify_internal_keeper_token config ~token:raw
+    | None -> false
+  then
+    if has_permission Worker permission then
+      Ok ()
+    else
+      Error (Forbidden { agent = agent_name; action = show_permission permission })
   else
     match verify_optional_token config ~agent_name ~token with
     | Error e -> Error e
@@ -359,9 +492,9 @@ let check_permission config ~agent_name ~token ~permission : (unit, masc_error) 
           Error (Forbidden { agent = agent_name; action = show_permission permission })
     | Ok None ->
         if not auth_cfg.require_token then
-          (* Optional-token mode: fall back to the room's default role only
-             when no token was presented. *)
-          if has_permission auth_cfg.default_role permission then
+          (* Optional-token mode: anonymous callers are always treated as
+             non-admin workers. *)
+          if has_permission Worker permission then
             Ok ()
           else
             Error (Forbidden { agent = agent_name; action = show_permission permission })
@@ -412,6 +545,12 @@ let resolve_role_with_auth_config config ~auth_cfg ~agent_name ~token :
            | Some admin -> String.equal agent_name admin
            | None -> false) then
     Ok Admin  (* Bootstrap admin = full access *)
+  else if
+    match token with
+    | Some raw -> verify_internal_keeper_token config ~token:raw
+    | None -> false
+  then
+    Ok Worker
   else
     match verify_optional_token config ~agent_name ~token with
     | Error e -> Error e
@@ -420,7 +559,7 @@ let resolve_role_with_auth_config config ~auth_cfg ~agent_name ~token :
         if auth_cfg.require_token then
           Error (Unauthorized "Token required")
         else
-          Ok auth_cfg.default_role
+          Ok Worker
 
 let resolve_role config ~agent_name ~token : (agent_role, masc_error) result =
   let auth_cfg = load_auth_config config in

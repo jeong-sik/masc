@@ -97,7 +97,7 @@ let compute_outcomes_rollup
     | Compaction_failed _ -> incr fail_compaction
     | Handoff_completed _ -> incr succ_handoffs
     | Handoff_failed _ -> incr fail_handoff
-    | _ -> ()
+    | _ -> Log.Dashboard.debug "ignored transition event"
   ) transitions;
   let observed_turns = List.length completed_turns in
   let restarts, consecutive_fail =
@@ -246,6 +246,9 @@ let json_string_list_member key json =
 let keeper_trust_json ?(include_receipt = false)
     (config : Coord.config) (meta : Keeper_types.keeper_meta) =
   let latest_receipt = Keeper_execution_receipt.latest_json config meta.name in
+  let runtime_trust =
+    Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta
+  in
   let sandbox_json =
     match latest_receipt with
     | Some receipt -> Yojson.Safe.Util.member "sandbox" receipt
@@ -311,6 +314,15 @@ let keeper_trust_json ?(include_receipt = false)
       ("sandbox", sandbox_json);
       ("approval", approval_json);
       ("cascade", cascade_json);
+      ("disposition", Yojson.Safe.Util.member "disposition" runtime_trust);
+      ( "disposition_reason",
+        Yojson.Safe.Util.member "disposition_reason" runtime_trust );
+      ("needs_attention", Yojson.Safe.Util.member "needs_attention" runtime_trust);
+      ("attention_reason", Yojson.Safe.Util.member "attention_reason" runtime_trust);
+      ("next_human_action", Yojson.Safe.Util.member "next_human_action" runtime_trust);
+      ("approval_state", Yojson.Safe.Util.member "approval" runtime_trust);
+      ("execution_summary", Yojson.Safe.Util.member "execution" runtime_trust);
+      ("latest_causal_event", Yojson.Safe.Util.member "latest_causal_event" runtime_trust);
       ( "last_receipt_at",
         match latest_receipt with
         | Some receipt -> Yojson.Safe.Util.member "ended_at" receipt
@@ -1229,6 +1241,13 @@ let keeper_config_json (config : Coord.config) (name : string)
           ("active_model", `String active_model);
           ("active_model_label", Json_util.string_opt_to_json active_model_label);
           ("last_model_used_label", Json_util.string_opt_to_json last_model_used_label);
+          ( "per_provider_timeout_sec",
+            Json_util.float_opt_to_json m.per_provider_timeout_s );
+          ( "per_provider_timeout_mode",
+            `String
+              (match m.per_provider_timeout_s with
+               | Some _ -> "override"
+               | None -> "turn_budget_heuristic") );
           ("verify", `Bool false);
         ]
       in
@@ -1344,6 +1363,10 @@ let keeper_config_json (config : Coord.config) (name : string)
             match tool_preset with
             | Some preset -> `String (Keeper_types.tool_preset_to_string preset)
             | None -> `Null);
+          ("tool_preset_source",
+            match m.tool_preset_source with
+            | Some src -> `String src
+            | None -> `Null);
           ("tool_also_allow", `List (List.map (fun s -> `String s) tool_also_allow));
           ("tool_custom_allowlist",
             `List
@@ -1399,6 +1422,18 @@ let keeper_config_json (config : Coord.config) (name : string)
           ("container_playground_root",
             string_or_null
               Env_config_keeper.DockerPlayground.container_playground_root);
+          ("hard_mode",
+            `Bool (Env_config_keeper.KeeperSandbox.hard_mode ()));
+          ("git_egress",
+            `String
+              (if Env_config_keeper.KeeperSandbox.hard_mode () then
+                 "brokered_structured_tools"
+               else if Env_config_keeper.KeeperSandbox.with_git_dispatch_enabled () then
+                 "docker_git_dispatch"
+               else
+                 "container_network_policy"));
+          ("credential_fallbacks_disabled",
+            `Bool (Env_config_keeper.KeeperSandbox.hard_mode ()));
           ("docker_image",
             string_or_null (Env_config_keeper.KeeperSandbox.docker_image ()));
           ("pids_limit", `Int (Env_config_keeper.KeeperSandbox.pids_limit ()));

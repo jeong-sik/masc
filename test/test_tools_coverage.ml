@@ -346,7 +346,13 @@ let test_remote_operator_action_schema_is_strict () =
                 Alcotest.(check bool) "remote includes keeper_recover" true
                   (List.mem (`String "keeper_recover") enums);
                 Alcotest.(check bool) "remote includes keeper_message" true
-                  (List.mem (`String "keeper_message") enums)
+                  (List.mem (`String "keeper_message") enums);
+                Alcotest.(check bool)
+                  "remote includes keeper_github_identity_login_prepare" true
+                  (List.mem (`String "keeper_github_identity_login_prepare") enums);
+                Alcotest.(check bool)
+                  "remote includes keeper_github_identity_status" true
+                  (List.mem (`String "keeper_github_identity_status") enums)
             | _ -> Alcotest.fail "remote action_type missing enum")
        | _ -> Alcotest.fail "remote action_type missing")
   | None -> Alcotest.fail "remote masc_operator_action missing properties"

@@ -1326,6 +1326,8 @@ let sample_ctx_composition ?(system_prompt = "You are a keeper.")
 let sample_tool_surface_metrics () : Masc_mcp.Keeper_agent_run.tool_surface_metrics =
   {
     turn_lane = "tool_optional";
+    tool_surface_class = "mixed";
+    tool_requirement = "optional";
     visible_tool_count = 0;
     tool_gate_enabled = false;
     tool_surface_fallback_used = false;
@@ -2123,6 +2125,9 @@ let test_append_decision_record_persists_tool_calls () =
             ~observation:base_observation
             ~latency_ms:42
             ~outcome:"success"
+            ~degraded_retry_applied:true
+            ~degraded_retry_cascade:KC.local_recovery_cascade_name
+            ~fallback_reason:"turn_timeout"
             ~turn_mode:UM.Tool_use
             ~result:(Some result)
             ());
@@ -2156,6 +2161,15 @@ let test_append_decision_record_persists_tool_calls () =
         Yojson.Safe.Util.(json |> member "tools_used" |> to_list |> List.map to_string);
       check (option string) "turn mode persisted" (Some "tool_use")
         Yojson.Safe.Util.(json |> member "turn_mode" |> to_string_option);
+      check bool "degraded retry flag persisted" true
+        Yojson.Safe.Util.(json |> member "degraded_retry_applied" |> to_bool);
+      check (option string) "degraded retry cascade persisted"
+        (Some KC.local_recovery_cascade_name)
+        Yojson.Safe.Util.(
+          json |> member "degraded_retry_cascade" |> to_string_option);
+      check (option string) "fallback reason persisted"
+        (Some "turn_timeout")
+        Yojson.Safe.Util.(json |> member "fallback_reason" |> to_string_option);
       check bool "selected_mode removed from decision log" true
         (match Yojson.Safe.Util.(json |> member "selected_mode") with
          | `Null -> true
@@ -2389,45 +2403,95 @@ let wrapped_claude_limit_error () =
          kind = Llm_provider.Http_client.Unknown;
        })
 
-let test_fail_open_cascade_after_auto_recoverable_error_falls_back_to_default () =
-  let fallback =
-    EC.fail_open_cascade_after_auto_recoverable_error
-      ~base_cascade:"underdog"
+let expect_degraded_retry label expected_cascade expected_reason = function
+  | Some (retry : EC.degraded_retry) ->
+      check string (label ^ " cascade") expected_cascade retry.next_cascade;
+      check string (label ^ " reason") expected_reason retry.fallback_reason
+  | None -> fail (label ^ ": expected degraded retry")
+
+let test_degraded_retry_after_recoverable_error_uses_local_recovery_for_hard_quota () =
+  let degraded_retry =
+    EC.degraded_retry_after_recoverable_error
       ~effective_cascade:"underdog"
+      ~tool_requirement:"optional"
       (wrapped_claude_limit_error ())
   in
-  check (option string) "non-default cascade broadens to default"
-    (Some KC.default_cascade_name) fallback
+  expect_degraded_retry "hard quota degraded retry"
+    KC.local_recovery_cascade_name "hard_quota" degraded_retry
 
-let test_fail_open_cascade_after_auto_recoverable_error_returns_base_after_phase_override () =
-  let fallback =
-    EC.fail_open_cascade_after_auto_recoverable_error
-      ~base_cascade:"underdog"
-      ~effective_cascade:KC.local_recovery_cascade_name
+let test_degraded_retry_after_recoverable_error_uses_local_recovery_for_resumable_session () =
+  let degraded_retry =
+    EC.degraded_retry_after_recoverable_error
+      ~effective_cascade:"underdog"
+      ~tool_requirement:"optional"
+      (Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
+         (Masc_mcp.Oas_worker_named.Resumable_cli_session
+            {
+              cascade_name = "kimi_cli_keeper";
+              detail =
+                "kimi exited with code 75: \nTo resume this session: kimi -r ff37febe-2adb-4ac6-9dc6-cae23e672fbc";
+              exit_code = Some 75;
+            }))
+  in
+  expect_degraded_retry "resumable session degraded retry"
+    KC.local_recovery_cascade_name "resumable_cli_session" degraded_retry
+
+let test_degraded_retry_after_recoverable_error_includes_admission_queue_timeout () =
+  let degraded_retry =
+    EC.degraded_retry_after_recoverable_error
+      ~effective_cascade:"underdog"
+      ~tool_requirement:"optional"
+      (Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
+         (Masc_mcp.Oas_worker_named.Admission_queue_timeout
+            {
+              keeper_name = "nick0cave";
+              cascade_name = "big_three";
+              wait_sec = 90.0;
+            }))
+  in
+  expect_degraded_retry "admission queue timeout degraded retry"
+    KC.local_recovery_cascade_name "admission_queue_timeout" degraded_retry
+
+let test_degraded_retry_after_recoverable_error_includes_turn_timeout () =
+  let degraded_retry =
+    EC.degraded_retry_after_recoverable_error
+      ~effective_cascade:"underdog"
+      ~tool_requirement:"optional"
+      (Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
+         (Masc_mcp.Oas_worker_named.Turn_timeout { elapsed_sec = 180.0 }))
+  in
+  expect_degraded_retry "turn timeout degraded retry"
+    KC.local_recovery_cascade_name "turn_timeout" degraded_retry
+
+let test_degraded_retry_after_recoverable_error_blocks_required_tools () =
+  let degraded_retry =
+    EC.degraded_retry_after_recoverable_error
+      ~effective_cascade:"underdog"
+      ~tool_requirement:"required"
       (wrapped_claude_limit_error ())
   in
-  check (option string) "phase override returns to keeper base"
-    (Some "underdog") fallback
+  check bool "required tool turn stays terminal" true
+    (Option.is_none degraded_retry)
 
-let test_fail_open_cascade_after_auto_recoverable_error_preserves_explicit_local_only () =
-  let fallback =
-    EC.fail_open_cascade_after_auto_recoverable_error
-      ~base_cascade:KC.local_only_cascade_name
+let test_degraded_retry_after_recoverable_error_does_not_broaden_local_only () =
+  let degraded_retry =
+    EC.degraded_retry_after_recoverable_error
       ~effective_cascade:KC.local_only_cascade_name
+      ~tool_requirement:"optional"
       (wrapped_claude_limit_error ())
   in
-  check (option string) "explicit local_only stays authoritative" None
-    fallback
+  check bool "local_only does not broaden further" true
+    (Option.is_none degraded_retry)
 
-let test_fail_open_cascade_after_auto_recoverable_error_skips_default_cascade () =
-  let fallback =
-    EC.fail_open_cascade_after_auto_recoverable_error
-      ~base_cascade:KC.default_cascade_name
-      ~effective_cascade:KC.default_cascade_name
+let test_degraded_retry_after_recoverable_error_does_not_broaden_local_recovery () =
+  let degraded_retry =
+    EC.degraded_retry_after_recoverable_error
+      ~effective_cascade:KC.local_recovery_cascade_name
+      ~tool_requirement:"optional"
       (wrapped_claude_limit_error ())
   in
-  check (option string) "default cascade has no broader fallback" None
-    fallback
+  check bool "local_recovery does not broaden further" true
+    (Option.is_none degraded_retry)
 
 let test_fallback_cascade_for_unavailable_profile_prefers_default () =
   let fallback =
@@ -2447,26 +2511,30 @@ let test_fallback_cascade_for_unavailable_profile_prefers_base_after_phase_overr
   check (option string) "phase override fallback target is base cascade"
     (Some "underdog") fallback
 
-let test_next_fail_open_cascade_for_turn_returns_untried_fallback () =
-  let fallback =
+let test_next_fail_open_cascade_for_turn_returns_untried_local_recovery () =
+  let degraded_retry =
     UT.next_fail_open_cascade_for_turn
       ~base_cascade:"underdog"
       ~effective_cascade:"underdog"
+      ~tool_requirement:"optional"
       ~attempted_cascades:[ "underdog" ]
       (wrapped_claude_limit_error ())
   in
-  check (option string) "untried fallback returned"
-    (Some KC.default_cascade_name) fallback
+  expect_degraded_retry "next degraded retry"
+    KC.local_recovery_cascade_name "hard_quota" degraded_retry
 
-let test_next_fail_open_cascade_for_turn_suppresses_attempted_fallback () =
-  let fallback =
+let test_next_fail_open_cascade_for_turn_suppresses_attempted_local_recovery () =
+  let degraded_retry =
     UT.next_fail_open_cascade_for_turn
       ~base_cascade:"underdog"
       ~effective_cascade:"underdog"
-      ~attempted_cascades:[ "underdog"; KC.default_cascade_name ]
+      ~tool_requirement:"optional"
+      ~attempted_cascades:
+        [ "underdog"; KC.local_recovery_cascade_name ]
       (wrapped_claude_limit_error ())
   in
-  check (option string) "attempted fallback suppressed" None fallback
+  check bool "attempted local_recovery suppressed" true
+    (Option.is_none degraded_retry)
 
 (* context_overflow_limit is now in OAS as Retry.extract_context_limit.
    These tests verify the OAS SSOT API is accessible from MASC. *)
@@ -2660,6 +2728,46 @@ let test_metrics_failure_response () =
      found);
   check string "failure transition reason tracked" "failure:run_error"
     updated.runtime.last_social_transition_reason
+
+let test_metrics_failure_response_redacts_resumable_cli_session_detail () =
+  let raw_reason =
+    "kimi exited with code 75: \nTo resume this session: kimi -r ff37febe-2adb-4ac6-9dc6-cae23e672fbc"
+  in
+  let canonical_detail =
+    Masc_mcp.Oas_worker_exec.Kimi_cli_transport_local.resumable_session_detail
+  in
+  let sdk_error =
+    Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
+      (Masc_mcp.Oas_worker_named.Resumable_cli_session
+         {
+           cascade_name = "kimi_cli_keeper";
+           detail = canonical_detail;
+           exit_code = Some 75;
+         })
+  in
+  let updated =
+    UM.update_metrics_from_failure minimal_meta ~latency_ms:250
+      ~observation:base_observation ~reason:raw_reason ~sdk_error
+      ~social_transition_reason:"failure:run_error" ()
+  in
+  check string "last reason is redacted"
+    ("unified:error:" ^ canonical_detail)
+    updated.runtime.proactive_rt.last_reason;
+  check string "last preview is redacted"
+    canonical_detail
+    updated.runtime.proactive_rt.last_preview;
+  check string "last blocker is redacted"
+    canonical_detail
+    updated.runtime.last_blocker;
+  check bool "raw resume hint removed from last blocker" false
+    (contains_substring updated.runtime.last_blocker "To resume this session:");
+  check bool "raw session token removed from last reason" false
+    (contains_substring updated.runtime.proactive_rt.last_reason "kimi -r");
+  match updated.runtime.last_blocker_class with
+  | Some (Keeper_types.Cascade_exhausted (Keeper_types.Other_detail detail)) ->
+      check string "blocker class detail preserved as canonical detail"
+        canonical_detail detail
+  | _ -> fail "expected resumable CLI session blocker class"
 
 let test_prompt_includes_board_activity_section () =
   let obs =
@@ -3095,7 +3203,7 @@ let test_auto_recoverable_turn_error_includes_resumable_cli_session_error () =
          {
            cascade_name = "kimi_cli_keeper";
            detail =
-             "kimi exited with code 75: \nTo resume this session: kimi -r ff37febe-2adb-4ac6-9dc6-cae23e672fbc";
+             Masc_mcp.Oas_worker_exec.Kimi_cli_transport_local.resumable_session_detail;
            exit_code = Some 75;
          })
   in
@@ -3109,7 +3217,7 @@ let test_cascade_exhausted_error_includes_resumable_cli_session_error () =
          {
            cascade_name = "kimi_cli_keeper";
            detail =
-             "kimi exited with code 75: \nTo resume this session: kimi -r ff37febe-2adb-4ac6-9dc6-cae23e672fbc";
+             Masc_mcp.Oas_worker_exec.Kimi_cli_transport_local.resumable_session_detail;
            exit_code = Some 75;
          })
   in
@@ -3990,6 +4098,15 @@ let test_keeper_allowed_tools_exclude_heartbeat () =
   check bool "masc_heartbeat hidden from keeper tool surface" false
     (List.mem "masc_heartbeat" allowed)
 
+let test_should_require_tools_for_initial_turn_matches_first_turn_gate () =
+  let affordances = [ "task_claim"; "board_post" ] in
+  check bool "two-turn call reserves final turn without forcing strict lane" false
+    (KAR.should_require_tools_for_initial_turn ~max_turns:2 ~turn_affordances:affordances);
+  check bool "three-turn call can require initial tools" true
+    (KAR.should_require_tools_for_initial_turn ~max_turns:3 ~turn_affordances:affordances);
+  check bool "no tool-required affordance stays optional" false
+    (KAR.should_require_tools_for_initial_turn ~max_turns:3 ~turn_affordances:[ "observe" ])
+
 (* ---------- render_inline_skip_reason tests ---------- *)
 
 let str_contains s sub =
@@ -4330,6 +4447,8 @@ let () =
           test_case "social fields" `Quick
             test_metrics_persist_social_state_fields;
           test_case "failure response" `Quick test_metrics_failure_response;
+          test_case "failure response redacts resumable session detail" `Quick
+            test_metrics_failure_response_redacts_resumable_cli_session_detail;
           test_case "mixed response" `Quick test_metrics_mixed_response;
           test_case "normalize passthrough" `Quick
             test_normalize_response_text_passthrough;
@@ -4577,74 +4696,44 @@ let () =
             test_fail_open_local_only_preserves_explicit_local_only_base;
           test_case "healthy local_only stays selected" `Quick
             test_fail_open_local_only_preserves_healthy_local_only;
-          test_case "strict quota fail-open broadens to default cascade" `Quick
-            test_fail_open_cascade_after_auto_recoverable_error_falls_back_to_default;
-          test_case "phase override fail-open returns to base cascade" `Quick
-            test_fail_open_cascade_after_auto_recoverable_error_returns_base_after_phase_override;
-          test_case "explicit local_only keeps fail-open disabled" `Quick
-            test_fail_open_cascade_after_auto_recoverable_error_preserves_explicit_local_only;
-          test_case "default cascade has no broader fail-open target" `Quick
-            test_fail_open_cascade_after_auto_recoverable_error_skips_default_cascade;
+          test_case "hard quota degraded retry uses local_recovery" `Quick
+            test_degraded_retry_after_recoverable_error_uses_local_recovery_for_hard_quota;
+          test_case "resumable session degraded retry uses local_recovery"
+            `Quick
+            test_degraded_retry_after_recoverable_error_uses_local_recovery_for_resumable_session;
+          test_case "admission queue timeout is degraded-retry eligible"
+            `Quick
+            test_degraded_retry_after_recoverable_error_includes_admission_queue_timeout;
+          test_case "turn timeout is degraded-retry eligible" `Quick
+            test_degraded_retry_after_recoverable_error_includes_turn_timeout;
+          test_case "required tool turns block degraded retry" `Quick
+            test_degraded_retry_after_recoverable_error_blocks_required_tools;
+          test_case "local_only stays terminal for degraded retry" `Quick
+            test_degraded_retry_after_recoverable_error_does_not_broaden_local_only;
+          test_case "local_recovery stays terminal for degraded retry" `Quick
+            test_degraded_retry_after_recoverable_error_does_not_broaden_local_recovery;
           test_case "unavailable profile fallback prefers default" `Quick
             test_fallback_cascade_for_unavailable_profile_prefers_default;
           test_case "unavailable phase override fallback prefers base" `Quick
             test_fallback_cascade_for_unavailable_profile_prefers_base_after_phase_override;
-          test_case "next fail-open returns untried fallback" `Quick
-            test_next_fail_open_cascade_for_turn_returns_untried_fallback;
-          test_case "next fail-open suppresses attempted fallback" `Quick
-            test_next_fail_open_cascade_for_turn_suppresses_attempted_fallback;
+          test_case "next degraded retry returns untried local_recovery"
+            `Quick
+            test_next_fail_open_cascade_for_turn_returns_untried_local_recovery;
+          test_case "next degraded retry suppresses attempted local_recovery"
+            `Quick
+            test_next_fail_open_cascade_for_turn_suppresses_attempted_local_recovery;
         ] );
       ( "tool_classification",
         [
           test_case "keeper allowed tools exclude heartbeat" `Quick
             test_keeper_allowed_tools_exclude_heartbeat;
+          test_case "initial tool requirement mirrors first-turn gate" `Quick
+            test_should_require_tools_for_initial_turn_matches_first_turn_gate;
         ] );
-      ( "verifier_role",
+      ( "verification_surface",
         [
-          test_case "is_verifier_role_keeper detects english token" `Quick
-            (fun () ->
-              let meta =
-                { minimal_meta with mention_targets = [ "verifier" ] }
-              in
-              check bool "verifier token matches" true
-                (UM.is_verifier_role_keeper meta));
-          test_case "is_verifier_role_keeper detects korean token" `Quick
-            (fun () ->
-              let meta =
-                { minimal_meta with mention_targets = [ "검증자" ] }
-              in
-              check bool "korean token matches" true
-                (UM.is_verifier_role_keeper meta));
-          test_case "is_verifier_role_keeper rejects non-verifier persona"
+          test_case "affordance: keeper sees task_verify when pending>0"
             `Quick (fun () ->
-              let meta =
-                {
-                  minimal_meta with
-                  mention_targets = [ "analyst"; "scholar" ];
-                }
-              in
-              check bool "non-verifier mention targets" false
-                (UM.is_verifier_role_keeper meta));
-          test_case "is_verifier_role_keeper empty mention targets" `Quick
-            (fun () ->
-              check bool "empty mention_targets" false
-                (UM.is_verifier_role_keeper
-                   { minimal_meta with mention_targets = [] }));
-          test_case "affordance: verifier sees task_verify when pending>0"
-            `Quick (fun () ->
-              let meta =
-                { minimal_meta with mention_targets = [ "verifier" ] }
-              in
-              let obs =
-                { base_observation with pending_verification_count = 3 }
-              in
-              let affordances =
-                UM.observed_affordances_of_observation ~meta obs
-              in
-              check bool "task_verify present for verifier" true
-                (List.mem "task_verify" affordances));
-          test_case "affordance: non-verifier gated off task_verify" `Quick
-            (fun () ->
               let meta =
                 { minimal_meta with mention_targets = [ "analyst" ] }
               in
@@ -4654,7 +4743,21 @@ let () =
               let affordances =
                 UM.observed_affordances_of_observation ~meta obs
               in
-              check bool "task_verify absent for non-verifier" false
+              check bool "task_verify present for keeper" true
+                (List.mem "task_verify" affordances));
+          test_case "affordance: verifier-tagged keeper also sees task_verify"
+            `Quick
+            (fun () ->
+              let meta =
+                { minimal_meta with mention_targets = [ "verifier" ] }
+              in
+              let obs =
+                { base_observation with pending_verification_count = 3 }
+              in
+              let affordances =
+                UM.observed_affordances_of_observation ~meta obs
+              in
+              check bool "task_verify present for verifier-tagged keeper" true
                 (List.mem "task_verify" affordances));
           test_case "affordance: no meta keeps legacy surface-to-all" `Quick
             (fun () ->
@@ -4666,7 +4769,7 @@ let () =
               in
               check bool "task_verify present without meta" true
                 (List.mem "task_verify" affordances));
-          test_case "trigger: non-verifier gated off pending_verification"
+          test_case "trigger: keeper sees pending_verification"
             `Quick (fun () ->
               let meta =
                 { minimal_meta with mention_targets = [ "scholar" ] }
@@ -4677,9 +4780,10 @@ let () =
               let triggers =
                 UM.observed_triggers_of_observation ~meta obs
               in
-              check bool "pending_verification absent for non-verifier" false
+              check bool "pending_verification present for keeper" true
                 (List.mem "pending_verification" triggers));
-          test_case "trigger: verifier sees pending_verification" `Quick
+          test_case "trigger: verifier-tagged keeper also sees pending_verification"
+            `Quick
             (fun () ->
               let meta =
                 { minimal_meta with mention_targets = [ "검증자" ] }
@@ -4690,7 +4794,8 @@ let () =
               let triggers =
                 UM.observed_triggers_of_observation ~meta obs
               in
-              check bool "pending_verification present for verifier" true
+              check bool "pending_verification present for verifier-tagged keeper"
+                true
                 (List.mem "pending_verification" triggers));
         ] );
     ]

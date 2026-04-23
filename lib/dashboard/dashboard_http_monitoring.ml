@@ -255,7 +255,9 @@ let executor_outcomes_json (config : Coord.config) : Yojson.Safe.t =
           && String.sub tool_name 0 9 = "executor:" ->
         incr total;
         if success then incr successes
-      | _ -> ()
+      | Telemetry_eio.Tool_called _ -> ()
+      | Agent_joined _ | Agent_left _ | Task_started _ | Task_completed _
+      | Handoff_triggered _ | Error_occurred _ | Tool_assigned _ -> ()
     ) events;
     `Assoc [
       ("total_24h", `Int !total);

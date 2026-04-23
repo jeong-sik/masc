@@ -55,7 +55,7 @@ let record_tool_skipped ~keeper_name ~tool_name ~reason_code =
       ring := truncated)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
-  | _ -> ()
+  | exn -> ()
 
 (** Reset the ring. Test-only helper — exposed because the alcotest cases
     need to start from a clean state regardless of test order. *)

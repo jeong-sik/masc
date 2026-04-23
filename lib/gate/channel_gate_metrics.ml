@@ -291,7 +291,7 @@ let record_attempt ~channel ~room_id ~keeper ~duration_ms outcome =
            binding.total_dur_ms <- binding.total_dur_ms + duration_ms;
            binding.timed_count <- binding.timed_count + 1;
            binding.max_dur_ms <- max binding.max_dur_ms duration_ms
-       | _ -> ());
+       | Some _ | None -> ());
       (match outcome with
       | Success ->
           acc.success_count <- acc.success_count + 1;

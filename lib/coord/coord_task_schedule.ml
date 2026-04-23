@@ -95,13 +95,21 @@ let reconcile_agent_current_task_with_backlog config ~agent_name backlog =
           Log.Misc.error "agent state reconcile failed: %s" msg)
 
 (** Claim next highest priority unclaimed task.
-    Optional [exclude_task_ids] prevents re-claiming known bad tasks in the same loop run.
+    Optional [exclude_task_ids] prevents re-claiming known bad tasks in the
+    same loop run.  Optional [task_filter] lets callers scope eligible work
+    while the backlog lock is held.
 
     Scheduling logic:
     - Auto-releases any previous claim held by this agent (BUG-004)
     - Applies starvation prevention: tasks waiting >24h get priority boost
     - Within same effective priority, prefers older tasks (FIFO) *)
-let claim_next_r config ~agent_name ?(exclude_task_ids=[]) ?(task_filter=fun (_:Types.task) -> true) () =
+let claim_next_r
+      config
+      ~agent_name
+      ?(exclude_task_ids = [])
+      ?(task_filter = fun _ -> true)
+      ()
+  =
   ensure_initialized config;
 
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
@@ -204,17 +212,16 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) ?(task_filter=fun (_:
         | Some rid -> rid :: (blocked_ids @ exclude_task_ids)
         | None -> blocked_ids @ exclude_task_ids
       in
-      let eligible =
-        List.filter (fun t -> not (List.mem t.id all_excluded)) unclaimed
+      let task_filter_excluded =
+        List.filter
+          (fun t -> (not (List.mem t.id all_excluded)) && not (task_filter t))
+          unclaimed
       in
-
-      (* Preset-aware filtering *)
-      let preset_ok = List.filter task_filter eligible in
-      let preset_filtered = List.length eligible - List.length preset_ok in
-      if preset_filtered > 0 then
-        log_event config (Printf.sprintf
-          "{\"type\":\"task_claim_preset_skip\",\"agent\":\"%s\",\"skipped\":%d,\"ts\":\"%s\"}"
-          agent_name preset_filtered (now_iso ()));
+      let eligible =
+        List.filter
+          (fun t -> (not (List.mem t.id all_excluded)) && task_filter t)
+          unclaimed
+      in
 
       (* Helper: clear agent current_task and reset status after auto-release
          when no replacement task can be claimed.  Delegates to
@@ -229,7 +236,7 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) ?(task_filter=fun (_:
         | None -> ()
       in
 
-      match all_todo, preset_ok with
+      match all_todo, eligible with
       | [], _ ->
           (* Even if we released a task, there may be nothing else to claim.
              Write the release if it happened. *)
@@ -258,7 +265,10 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) ?(task_filter=fun (_:
            | None -> ());
           clear_agent_state_after_release ();
           Claim_next_no_eligible
-            { excluded_count = List.length all_excluded; preset_filtered }
+            {
+              excluded_count =
+                List.length all_excluded + List.length task_filter_excluded;
+            }
       | _ :: _, task :: _ ->
           (* Claim this task *)
           let new_tasks = List.map (fun t ->
@@ -342,10 +352,10 @@ let claim_next config ~agent_name =
   match claim_next_r config ~agent_name () with
   | Claim_next_claimed { message; _ } -> message
   | Claim_next_no_unclaimed -> "📋 No unclaimed tasks. ACTION: Stop task-checking — nothing to claim."
-  | Claim_next_no_eligible { excluded_count; preset_filtered } ->
+  | Claim_next_no_eligible { excluded_count } ->
       Printf.sprintf
-        "📋 No eligible unclaimed tasks. ACTION: Stop task-checking — blocked/excluded=%d, preset_filtered=%d."
-        excluded_count preset_filtered
+        "📋 No eligible unclaimed tasks. ACTION: Stop task-checking — blocked/excluded=%d."
+        excluded_count
   | Claim_next_error e -> Printf.sprintf "❌ Error: %s" e
 
 (** Release stale task claims older than [ttl_seconds].

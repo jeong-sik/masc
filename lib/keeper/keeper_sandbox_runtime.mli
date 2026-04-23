@@ -18,6 +18,9 @@ type required_command_check =
 type docker_preflight =
   {
     ok : bool;
+    hard_mode : bool;
+    credential_fallbacks_disabled : bool;
+    git_egress : string;
     image : string;
     docker_runtime_ok : bool;
     docker_runtime_error : string option;

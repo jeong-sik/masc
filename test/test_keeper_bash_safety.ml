@@ -553,6 +553,69 @@ let test_rewrite_turn_runtime_paths_to_host_is_noop_without_container_path () =
   Alcotest.(check string) "unrelated paths untouched" input
     (Keeper_exec_shell.rewrite_turn_runtime_paths_to_host ~config ~meta input)
 
+(* ── Negative / error-path tests (task-034) ──────────────────────── *)
+
+let test_bash_missing_cmd_field () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_docker_meta "missing-cmd" in
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash
+      ~turn_sandbox_runtime:None
+      ~turn_sandbox_runtime_git:None
+      ~config ~meta
+      ~args:(`Assoc [ ("run_in_background", `Bool false) ]) ()
+  in
+  match parse_error_field raw with
+  | Some err ->
+      Alcotest.(check bool) "error mentions cmd is required" true
+        (String_util.contains_substring err "cmd is required")
+  | None ->
+      Alcotest.fail ("expected error json for missing cmd field, got: " ^ raw)
+
+let test_shell_missing_op_field () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_readonly_meta "missing-op" in
+  let raw =
+    Keeper_exec_shell.handle_keeper_shell
+      ~turn_sandbox_runtime:None
+      ~config ~meta
+      ~args:(`Assoc [ ("path", `String "/some/path") ])
+  in
+  match parse_error_field raw with
+  | Some err ->
+      Alcotest.(check bool) "error mentions unsupported op" true
+        (String_util.contains_substring err "unsupported_op")
+  | None ->
+      Alcotest.fail ("expected error json for missing op field, got: " ^ raw)
+
+let test_shell_unsupported_op () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_readonly_meta "bad-op" in
+  let raw =
+    Keeper_exec_shell.handle_keeper_shell
+      ~turn_sandbox_runtime:None
+      ~config ~meta
+      ~args:(`Assoc [
+        ("op", `String "definitely_not_a_real_op");
+        ("path", `String "/some/path");
+      ])
+  in
+  match parse_error_field raw with
+  | Some err ->
+      Alcotest.(check bool) "error mentions unsupported op" true
+        (String_util.contains_substring err "unsupported_op")
+  | None ->
+      Alcotest.fail ("expected error json for unsupported op, got: " ^ raw)
+
 let () =
   Alcotest.run "Keeper bash safety" [
     ("allowlist", [
@@ -606,5 +669,10 @@ let () =
         test_rewrite_turn_runtime_paths_to_host;
       Alcotest.test_case "unrelated paths remain unchanged" `Quick
         test_rewrite_turn_runtime_paths_to_host_is_noop_without_container_path;
+    ]);
+    ("negative_path", [
+      Alcotest.test_case "missing cmd field" `Quick test_bash_missing_cmd_field;
+      Alcotest.test_case "missing op field" `Quick test_shell_missing_op_field;
+      Alcotest.test_case "unsupported op" `Quick test_shell_unsupported_op;
     ]);
   ]

@@ -253,7 +253,7 @@ let summary_json ?recent () : Yojson.Safe.t =
     | "pending" -> incr pending
     | "approved" -> incr approved
     | "rejected" -> incr rejected
-    | _ -> ()
+    | _ -> assert false
   ) all;
   let recent_rejections =
     all

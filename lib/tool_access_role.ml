@@ -5,8 +5,8 @@
     falling back to legacy auth mappings.
 
     Each tool's required permission determines which role tier it belongs to:
-    - Reader tier: CanReadState, CanJoin, CanLeave
-    - Worker tier: CanAddTask, CanClaimTask, CanCompleteTask, CanBroadcast,
+    - Worker tier: CanReadState, CanJoin, CanLeave, CanAddTask, CanClaimTask,
+                   CanCompleteTask, CanBroadcast,
                    CanOpenPortal, CanSendPortal, CanCreateWorktree,
                    CanRemoveWorktree
     - Admin tier:  CanInit, CanReset, CanAdmin
@@ -14,7 +14,6 @@
     @since 2.204.0 *)
 
 type required_role =
-  | Reader_role
   | Worker_role
   | Admin_role
 
@@ -24,7 +23,7 @@ let all_surface_tools () =
 
 let required_role_of_permission = function
   | Types.CanInit | Types.CanReset | Types.CanAdmin -> Admin_role
-  | Types.CanReadState | Types.CanJoin | Types.CanLeave -> Reader_role
+  | Types.CanReadState | Types.CanJoin | Types.CanLeave
   | Types.CanAddTask
   | Types.CanClaimTask
   | Types.CanCompleteTask
@@ -69,16 +68,5 @@ let policy_for_role : Types.agent_role -> Tool_access_policy.t = function
       {
         allow =
           Diff { base = All; exclude = Names (admin_only_tools ()) };
-        deny = Empty;
-      }
-  | Reader ->
-      {
-        allow =
-          Diff
-            {
-              base = All;
-              exclude =
-                Union [ Names (admin_only_tools ()); Names (worker_only_tools ()) ];
-            };
         deny = Empty;
       }

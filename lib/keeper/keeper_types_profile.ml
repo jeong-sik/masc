@@ -630,7 +630,10 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         match str "cascade_name" with
         | None -> Ok ()
         | Some raw ->
-            let normalized = String.trim raw |> String.lowercase_ascii in
+            let normalized =
+              Keeper_cascade_profile.normalize_declared_name raw
+              |> String.lowercase_ascii
+            in
             let compile_known = Keeper_cascade_profile.known_cascades in
             let phase_routing = [ "local_only"; "local_recovery" ] in
             let catalog =
@@ -1231,7 +1234,8 @@ let resolved_persona_name ~keeper_name
   | Some name when String.trim name <> "" -> name
   | _ -> keeper_name
 
-let load_keeper_profile_defaults name : keeper_profile_defaults =
+let load_keeper_profile_defaults_result name :
+    (keeper_profile_defaults, string) result =
   (* Priority: TOML config/keepers/<name>.toml > persona profile.json.
      If TOML sets [persona_name], load that persona first and treat TOML as a
      thin overlay instead of duplicating the full keeper profile. *)
@@ -1244,12 +1248,22 @@ let load_keeper_profile_defaults name : keeper_profile_defaults =
              let persona_defaults =
                load_keeper_profile_defaults_from_persona persona_name
              in
-             merge_keeper_profile_defaults ~agent_name:name ~base:persona_defaults ~overlay:defaults
-         | None -> defaults)
-     | Error e ->
-       Log.Keeper.warn "toml config for %s failed (%s), falling back to persona" name e;
-       load_keeper_profile_defaults_from_persona name)
+             Ok
+               (merge_keeper_profile_defaults ~agent_name:name
+                  ~base:persona_defaults ~overlay:defaults)
+         | None -> Ok defaults)
+     | Error e -> Error e)
   | None ->
+    Ok (load_keeper_profile_defaults_from_persona name)
+
+let load_keeper_profile_defaults name : keeper_profile_defaults =
+  match load_keeper_profile_defaults_result name with
+  | Ok defaults -> defaults
+  | Error e ->
+    (match keeper_toml_path_opt name with
+     | Some _ ->
+       Log.Keeper.warn "toml config for %s failed (%s), falling back to persona" name e
+     | None -> ());
     load_keeper_profile_defaults_from_persona name
 
 (** Clamp a profile-provided max-turns override to [1, 50] — the same range

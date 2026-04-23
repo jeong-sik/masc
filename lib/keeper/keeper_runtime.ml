@@ -26,6 +26,25 @@ let apply_default opt current = match opt with Some v -> v | None -> current
 (** Same as [apply_default] but both TOML and meta are option-typed. *)
 let apply_default_opt opt current = match opt with Some _ -> opt | None -> current
 
+let contains_substring haystack needle =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  let rec loop idx =
+    if needle_len = 0 then true
+    else if idx + needle_len > haystack_len then false
+    else if String.sub haystack idx needle_len = needle then true
+    else loop (idx + 1)
+  in
+  loop 0
+
+let invalid_profile_defaults_error ~keeper_name detail =
+  if contains_substring detail "cascade_name" then
+    Printf.sprintf
+      "invalid profile.cascade_name for keeper %s: unknown cascade_name: %s"
+      keeper_name detail
+  else
+    Printf.sprintf "invalid keeper profile for keeper %s: %s" keeper_name detail
+
 let effective_declarative_cascade_name
     (defaults : Keeper_types_profile.keeper_profile_defaults)
     (meta : keeper_meta) =
@@ -66,7 +85,13 @@ let ensure_keeper_meta config name =
        Persisted meta may have stale values from a previous session;
        persona config (TOML) plus explicit env overrides are the source of truth.
        Fields where TOML has [Some v] are overwritten; [None] keeps runtime value. *)
-    let defaults = Keeper_types_profile.load_keeper_profile_defaults meta.name in
+    let defaults_result =
+      Keeper_types_profile.load_keeper_profile_defaults_result meta.name
+    in
+    match defaults_result with
+    | Error detail ->
+        Error (invalid_profile_defaults_error ~keeper_name:meta.name detail)
+    | Ok defaults ->
 
     (* --- Proactive --- *)
     let target_proactive =

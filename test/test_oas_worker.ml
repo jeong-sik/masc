@@ -1825,6 +1825,20 @@ let test_kimi_cli_model_for_provider_keeps_explicit_model () =
     (Some "kimi-k2.5")
     (Oas_worker_exec.kimi_cli_model_for_provider provider_cfg)
 
+let test_kimi_cli_should_log_stderr_line_filters_resume_noise () =
+  let should_log =
+    Oas_worker_exec.Kimi_cli_transport_local.should_log_stderr_line
+  in
+  Alcotest.(check bool) "blank stderr line suppressed" false (should_log "");
+  Alcotest.(check bool) "whitespace stderr line suppressed" false
+    (should_log "   ");
+  Alcotest.(check bool) "resume hint suppressed" false
+    (should_log "To resume this session: kimi -r ff37febe");
+  Alcotest.(check bool) "unexpected stderr remains visible" true
+    (should_log "fatal: kimi auth missing");
+  Alcotest.(check bool) "other stderr guidance remains visible" true
+    (should_log "warning: upstream endpoint is slow")
+
 let test_codex_cli_prompt_preflight_uses_pipeline_context_window_fallback () =
   let provider_cfg = make_codex_cli_provider_cfg () in
   let config =
@@ -3122,6 +3136,8 @@ let () =
         test_kimi_cli_model_for_provider_keeps_transport_default_on_auto;
       Alcotest.test_case "kimi explicit model is preserved" `Quick
         test_kimi_cli_model_for_provider_keeps_explicit_model;
+      Alcotest.test_case "kimi stderr resume noise is filtered" `Quick
+        test_kimi_cli_should_log_stderr_line_filters_resume_noise;
       Alcotest.test_case "worker build_agent installs retry policy" `Quick
         test_worker_build_agent_uses_default_internal_retry_policy;
       Alcotest.test_case "resume config propagates retry policy" `Quick

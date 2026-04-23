@@ -333,6 +333,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         shared_memory_scope;
         allowed_paths;
         tool_access;
+        tool_preset_source = p.profile_defaults.tool_preset_source;
         tool_denylist;
         voice_enabled;
         voice_channel;

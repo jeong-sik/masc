@@ -228,6 +228,7 @@ type keeper_meta =
   ; shared_memory_scope : shared_memory_scope
   ; allowed_paths : string list
   ; tool_access : tool_access
+  ; tool_preset_source : string option
   ; tool_denylist : string list
   ; mention_targets : string list
   ; room_signal_prompt_enabled : bool
@@ -813,6 +814,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "shared_memory_scope", `String (shared_memory_scope_to_string m.shared_memory_scope)
     ; "allowed_paths", `List (List.map (fun s -> `String s) m.allowed_paths)
     ; "tool_access", tool_access_to_json m.tool_access
+    ; "tool_preset_source", Json_util.string_opt_to_json m.tool_preset_source
     ; "tool_denylist", `List (List.map (fun s -> `String s) m.tool_denylist)
     ; "mention_targets", `List (List.map (fun s -> `String s) m.mention_targets)
     ; "room_signal_prompt_enabled", `Bool m.room_signal_prompt_enabled
@@ -1421,6 +1423,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
              ; shared_memory_scope = policy.pp_shared_memory_scope
              ; allowed_paths = policy.pp_allowed_paths
              ; tool_access = policy.pp_tool_access
+             ; tool_preset_source = Safe_ops.json_string_opt "tool_preset_source" json
              ; tool_denylist = policy.pp_tool_denylist
              ; mention_targets = policy.pp_mention_targets
              ; room_signal_prompt_enabled = policy.pp_room_signal_prompt_enabled

@@ -18,6 +18,9 @@
 
    tool_schemas_inline_infra
    tool_schemas_inline_episodes
-   tool_schemas_inline)
+   tool_schemas_inline
+
+   tool_schemas_run
+   tool_schemas_code)
  (wrapped false)
  (libraries masc_types))

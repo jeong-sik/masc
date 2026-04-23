@@ -35,6 +35,7 @@ type call_stats = {
   keeper_internal_count : int Atomic.t;
   inline_dispatch_count : int Atomic.t;
   deprecated_alias_count : int Atomic.t;
+  last_assignment_id : string option Atomic.t;
 }
 
 (** Global registry — process-lifetime. Protected by [registry_mu] against
@@ -91,11 +92,12 @@ let get_or_create_stats tool_name =
               keeper_internal_count = Atomic.make 0;
               inline_dispatch_count = Atomic.make 0;
               deprecated_alias_count = Atomic.make 0;
+              last_assignment_id = Atomic.make None;
             } in
             Hashtbl.replace registry tool_name s;
             s)
 
-let record_call ?(source = External_mcp) ~tool_name ~success ~duration_ms () =
+let record_call ?(source = External_mcp) ?assignment_id ~tool_name ~success ~duration_ms () =
   let stats = get_or_create_stats tool_name in
   Atomic.incr stats.call_count;
   (match source with
@@ -108,11 +110,14 @@ let record_call ?(source = External_mcp) ~tool_name ~success ~duration_ms () =
   else
     Atomic.incr stats.failure_count;
   Atomic.set stats.last_called_at (Time_compat.now ());
-  ignore (Atomic.fetch_and_add stats.total_duration_ms duration_ms)
+  ignore (Atomic.fetch_and_add stats.total_duration_ms duration_ms);
+  (match assignment_id with
+   | Some _ as aid -> Atomic.set stats.last_assignment_id aid
+   | None -> ())
 
-let record_call_if_known ?(source = External_mcp) ~tool_name ~success ~duration_ms () =
+let record_call_if_known ?(source = External_mcp) ?assignment_id ~tool_name ~success ~duration_ms () =
   if is_known_tool tool_name then
-    record_call ~source ~tool_name ~success ~duration_ms ()
+    record_call ~source ?assignment_id ~tool_name ~success ~duration_ms ()
 
 (** Get all stats as a sorted list (by call_count descending).
 
@@ -180,6 +185,10 @@ let stats_to_json (name, (stats : call_stats)) : Yojson.Safe.t =
            then (Atomic.get stats.total_duration_ms) / calls
            else 0));
     ("last_called_at", `Float (Atomic.get stats.last_called_at));
+    ("last_assignment_id",
+     match Atomic.get stats.last_assignment_id with
+     | Some aid -> `String aid
+     | None -> `Null);
     ("by_source", `Assoc [
        ("external_mcp", `Int (Atomic.get stats.external_mcp_count));
        ("keeper_internal", `Int (Atomic.get stats.keeper_internal_count));
@@ -234,6 +243,7 @@ let warm_up (summary : Telemetry_eio.tool_usage_summary) : int =
               keeper_internal_count = Atomic.make 0;
               inline_dispatch_count = Atomic.make 0;
               deprecated_alias_count = Atomic.make 0;
+              last_assignment_id = Atomic.make None;
             };
           incr count))
       summary.stats_by_tool);

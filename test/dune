@@ -40,6 +40,7 @@
         test_dashboard
         test_dashboard_perf
         test_dashboard_tool_host_events
+        test_tool_assignment_telemetry
         test_dashboard_link_preview
         test_gate_keeper_backend
         test_transport_read_model
@@ -153,6 +154,7 @@
           test_dashboard
           test_dashboard_perf
           test_dashboard_tool_host_events
+          test_tool_assignment_telemetry
           test_dashboard_link_preview
           test_gate_keeper_backend
           test_transport_read_model

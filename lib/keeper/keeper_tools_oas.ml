@@ -404,6 +404,26 @@ let make_tool_bundle
   let tool_defs =
     Keeper_exec_tools.keeper_universe_model_tools meta
   in
+  (* Record tool assignment telemetry for causal tracing.
+     assignment_id links Assigned → Called → Completed events. *)
+  let (_assignment_id : Tool_assignment_telemetry.assignment_id) =
+    let lookup = Keeper_tool_policy.tool_access_lookup_of_meta meta in
+    let preset =
+      match meta.tool_access with
+      | Preset { preset; _ } ->
+          Some (Keeper_tool_policy.preset_name_of_tool_preset preset)
+      | Custom _ -> None
+    in
+    Tool_assignment_telemetry.emit_assigned
+      ~agent_id:meta.agent_name
+      ~profile:"keeper"
+      ?preset
+      ~tool_list:universe_names
+      ~allow_set:(Keeper_tool_policy.StringSet.elements lookup.allow_set)
+      ~deny_set:(Keeper_tool_policy.StringSet.elements lookup.deny_set)
+      ~reason:"keeper tool bundle assembly"
+      ()
+  in
   let failure_counts : (string, int) Hashtbl.t = Hashtbl.create 16 in
   (* No mutex: Hashtbl ops are non-yielding, single domain. *)
   (* Pass A: existing internal tools. Behavior unchanged from pre-A.2. *)

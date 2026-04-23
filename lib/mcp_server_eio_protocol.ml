@@ -194,6 +194,7 @@ let public_tool_help_schemas () =
 
 let handle_list_tools_eio ?(profile = Full) ?names ?(include_hidden = false)
     ?(include_deprecated = false) ?(include_usage = false) ?cursor
+    ?agent_id
     state id =
   let usage_summary =
     if include_usage then
@@ -212,6 +213,23 @@ let handle_list_tools_eio ?(profile = Full) ?names ?(include_hidden = false)
     |> List.sort (fun (a : Types.tool_schema) (b : Types.tool_schema) ->
            String.compare a.name b.name)
   in
+  (match agent_id with
+   | Some aid ->
+       let tool_names = List.map (fun (s : Types.tool_schema) -> s.name) tools in
+       let profile_str =
+         match profile with
+         | Full -> "full"
+         | Managed_agent -> "managed_agent"
+         | Operator_remote -> "operator_remote"
+       in
+       ignore
+         (Tool_assignment_telemetry.emit_assigned
+            ~agent_id:aid
+            ~profile:profile_str
+            ~tool_list:tool_names
+            ~reason:"mcp tools/list response"
+            ())
+   | None -> ());
   let total_count = List.length tools in
   match TP.page_items_with_cursor ~kind:"tools" tools cursor with
   | Error msg -> make_error ~id (-32602) msg
@@ -454,7 +472,7 @@ let handle_request
                            in
                            handle_list_tools_eio ~profile:list_profile ?names
                              ~include_hidden ~include_deprecated ~include_usage
-                             ?cursor state id)
+                             ?cursor ?agent_id:auth_token state id)
                    | "tools/call" ->
                        (match req.params with
                        | Some params ->

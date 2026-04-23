@@ -23,15 +23,16 @@ type call_stats = {
   keeper_internal_count : int Atomic.t;
   inline_dispatch_count : int Atomic.t;
   deprecated_alias_count : int Atomic.t;
+  last_assignment_id : string option Atomic.t;
 }
 
 (** {1 Recording} *)
 
 val string_of_source : call_source -> string
 val record_call :
-  ?source:call_source -> tool_name:string -> success:bool -> duration_ms:int -> unit -> unit
+  ?source:call_source -> ?assignment_id:string -> tool_name:string -> success:bool -> duration_ms:int -> unit -> unit
 val record_call_if_known :
-  ?source:call_source -> tool_name:string -> success:bool -> duration_ms:int -> unit -> unit
+  ?source:call_source -> ?assignment_id:string -> tool_name:string -> success:bool -> duration_ms:int -> unit -> unit
 
 (** {1 Queries} *)
 

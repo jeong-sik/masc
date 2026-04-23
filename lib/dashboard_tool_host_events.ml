@@ -132,3 +132,21 @@ let record ?fs config (report : report) =
       ~context:
         (Printf.sprintf "client=%s tool=%s transport=%s"
            report.client_name report.tool_name report.transport)
+
+(** Assignment event snapshot for dashboard visibility. *)
+type assignment_snapshot = {
+  agent_name : string;
+  profile : string;
+  preset : string option;
+  tool_count : int;
+  assignment_id : string;
+}
+
+let record_assignment ?fs config (snapshot : assignment_snapshot) =
+  Telemetry_eio.track_tool_assigned ?fs config
+    ~agent_id:snapshot.agent_name
+    ~profile:snapshot.profile
+    ?preset:snapshot.preset
+    ~tool_count:snapshot.tool_count
+    ~assignment_id:snapshot.assignment_id
+    ()

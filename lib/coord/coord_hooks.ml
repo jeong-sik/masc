@@ -140,3 +140,18 @@ let on_task_mutation_fn
 let subscribe_messages_fn
   : (subscriber:string -> unit) Atomic.t
   = Atomic.make (fun ~subscriber:_ -> ())
+
+(** Tool assignment telemetry — wraps Tool_assignment_telemetry.emit_assigned.
+    Wired at startup to record which tools were provisioned to which agent. *)
+let tool_assigned_fn
+  : (agent_id:string ->
+     profile:string ->
+     ?preset:string ->
+     tool_list:string list ->
+     ?allow_set:string list ->
+     ?deny_set:string list ->
+     ?config_hash:string ->
+     ?reason:string ->
+     unit ->
+     string) Atomic.t
+  = Atomic.make (fun ~agent_id:_ ~profile:_ ?preset:_ ~tool_list:_ ?allow_set:_ ?deny_set:_ ?config_hash:_ ?reason:_ () -> "")

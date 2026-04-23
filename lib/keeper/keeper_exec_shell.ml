@@ -75,6 +75,11 @@ let user_timeout_max_sec = env_float "MASC_KEEPER_USER_TIMEOUT_MAX_SEC" 180.0
    sub-network-latency timeout without masking genuine hangs. *)
 let gh_min_timeout_sec = 15.0
 
+(* Ceiling for lightweight git metadata commands (rev-parse, log --oneline).
+   These are local disk ops that should complete in <1s; 5s is generous
+   without masking genuine repository corruption or NFS hangs. *)
+let git_meta_timeout_sec = env_float "MASC_KEEPER_GIT_META_TIMEOUT_SEC" 5.0
+
 let clamp_shell_timeout ?(min_sec = 1.0) ~default args =
   Safe_ops.json_float ~default "timeout_sec" args
   |> fun n -> max min_sec (min user_timeout_max_sec n)
@@ -339,12 +344,12 @@ let update_playground_repo_cache
       ~(action : string) ~(shallow : bool) : unit =
   try
     let branch =
-      let st, s = Process_eio.run_argv_with_status ~timeout_sec:5.0
+      let st, s = Process_eio.run_argv_with_status ~timeout_sec:git_meta_timeout_sec
         [ "git"; "-C"; repo_path; "rev-parse"; "--abbrev-ref"; "HEAD" ] in
       if st = Unix.WEXITED 0 then String.trim s else "unknown"
     in
     let commit =
-      let st, s = Process_eio.run_argv_with_status ~timeout_sec:5.0
+      let st, s = Process_eio.run_argv_with_status ~timeout_sec:git_meta_timeout_sec
         [ "git"; "-C"; repo_path; "log"; "--oneline"; "-1" ] in
       if st = Unix.WEXITED 0 then String.trim s else ""
     in
@@ -1869,10 +1874,10 @@ let handle_keeper_shell
                 ~cwd
                 ~command_argv:[ "git"; "worktree"; "list"; "--porcelain" ]
                 ~max_bytes:1_000_000
-                ~timeout_sec:5.0 ()
+                ~timeout_sec:git_meta_timeout_sec ()
             | None ->
               let _st, wt_out =
-                run_argv_with_status_retry_eintr ~timeout_sec:5.0
+                run_argv_with_status_retry_eintr ~timeout_sec:git_meta_timeout_sec
                   [ "git"; "-C"; cwd; "worktree"; "list"; "--porcelain" ]
               in
               Ok wt_out

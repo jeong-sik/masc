@@ -60,6 +60,15 @@ let file_exists path =
   try Sys.file_exists path with
   | Sys_error _ -> false
 
+let read_nonempty_text_file path =
+  if not (file_exists path) then
+    None
+  else
+    try
+      let value = String.trim (Fs_compat.load_file path) in
+      if value = "" then None else Some value
+    with Sys_error _ -> None
+
 let dedupe_keep_order values =
   let seen = Hashtbl.create (List.length values) in
   List.filter
@@ -149,7 +158,19 @@ let role_counts_of_credentials credentials =
          else
            Some (agent_role_to_string role, count))
 
-let admin_bearer_sources ~auth_dir ~dashboard_dev_token_available
+let live_admin_token_file_source ~base_path ~auth_dir (cred : agent_credential) =
+  let token_file = raw_token_file_path ~auth_dir cred.agent_name in
+  match read_nonempty_text_file token_file with
+  | None -> None
+  | Some raw_token -> (
+      match Auth.find_credential_by_token base_path ~token:raw_token with
+      | Ok owner
+        when String.equal owner.agent_name cred.agent_name
+             && has_permission owner.role CanAdmin ->
+          Some (Printf.sprintf "token_file:%s" cred.agent_name)
+      | Ok _ | Error _ -> None)
+
+let admin_bearer_sources ~base_path ~auth_dir ~dashboard_dev_token_available
     ~admin_token_env_state (credentials : agent_credential list) =
   let env_sources =
     match admin_token_env_state with
@@ -168,14 +189,7 @@ let admin_bearer_sources ~auth_dir ~dashboard_dev_token_available
     credentials
     |> List.filter (fun (cred : agent_credential) ->
            has_permission cred.role CanAdmin)
-    |> List.filter_map (fun (cred : agent_credential) ->
-           let token_file =
-             raw_token_file_path ~auth_dir cred.agent_name
-           in
-           if file_exists token_file then
-             Some (Printf.sprintf "token_file:%s" cred.agent_name)
-           else
-             None)
+    |> List.filter_map (live_admin_token_file_source ~base_path ~auth_dir)
   in
   env_sources @ dashboard_sources @ token_file_sources
   |> dedupe_keep_order
@@ -211,8 +225,8 @@ let analyze ~base_path_input ~default_base_path () =
     file_exists (Filename.concat auth_dir "dashboard-dev.token")
   in
   let admin_bearer_sources =
-    admin_bearer_sources ~auth_dir ~dashboard_dev_token_available
-      ~admin_token_env_state credentials
+    admin_bearer_sources ~base_path ~auth_dir
+      ~dashboard_dev_token_available ~admin_token_env_state credentials
   in
   let token_bound_admin_http_ready =
     auth_cfg.enabled && auth_cfg.require_token && admin_bearer_sources <> []

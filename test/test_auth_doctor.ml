@@ -51,6 +51,9 @@ let save_credential_or_fail base_path ~agent_name ~role ~raw_token =
       failf "failed to seed credential for %s: %s"
         agent_name (Types.masc_error_to_string err)
 
+let raw_token_file base_path agent_name =
+  Filename.concat (Auth.auth_dir base_path) (agent_name ^ ".token")
+
 let test_warns_for_codex_worker_admin_route_mismatch () =
   with_temp_dir "auth-doctor-warn" @@ fun base_path ->
   let auth_cfg =
@@ -133,6 +136,42 @@ let test_errors_when_no_admin_bearer_source_exists () =
        ~needle:"LOCAL-DASHBOARD-AUTH-RUNBOOK"
        report.next_actions)
 
+let test_ignores_stale_admin_raw_token_file () =
+  with_temp_dir "auth-doctor-stale" @@ fun base_path ->
+  let auth_cfg =
+    Types.
+      {
+        enabled = true;
+        room_secret_hash = None;
+        require_token = true;
+        default_role = Worker;
+        token_expiry_hours = 24;
+      }
+  in
+  Auth.save_auth_config base_path auth_cfg;
+  save_credential_or_fail base_path ~agent_name:"admin" ~role:Types.Admin
+    ~raw_token:"live-admin-token";
+  Auth.save_private_text_file (raw_token_file base_path "admin")
+    "stale-admin-token";
+  with_env "MASC_HOST" "0.0.0.0" @@ fun () ->
+  with_env "MASC_HTTP_AUTH_STRICT" "1" @@ fun () ->
+  with_env "MASC_ADMIN_TOKEN" "" @@ fun () ->
+  let report =
+    Auth_doctor.analyze ~base_path_input:base_path
+      ~default_base_path:base_path ()
+  in
+  check string "status" "error"
+    (Auth_doctor.status_to_string report.status);
+  check bool "stale token file not counted as ready" false
+    report.token_bound_admin_http_ready;
+  check bool "stale token file omitted from admin bearer sources" false
+    (list_contains_substring ~needle:"token_file:admin"
+       report.admin_bearer_sources);
+  check bool "warns about missing usable admin bearer" true
+    (list_contains_substring
+       ~needle:"No usable admin bearer source was detected"
+       report.warnings)
+
 let () =
   run "auth_doctor"
     [
@@ -142,5 +181,7 @@ let () =
             test_warns_for_codex_worker_admin_route_mismatch;
           test_case "errors when no admin bearer source exists" `Quick
             test_errors_when_no_admin_bearer_source_exists;
+          test_case "ignores stale admin raw token file" `Quick
+            test_ignores_stale_admin_raw_token_file;
         ] );
     ]

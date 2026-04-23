@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.12.6] - 2026-04-24
+
+### Changed
+- Bump version to 0.12.6.
+
 ## [0.12.3] - 2026-04-21
 
 ### Added

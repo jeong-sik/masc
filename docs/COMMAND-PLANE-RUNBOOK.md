@@ -264,7 +264,7 @@ Content-Type: application/json
 
 실제 기능 개발을 `MASC` swarm으로 굴릴 때의 delivery 표준은 별도 문서를 본다:
 
-- [SWARM-DELIVERY-RUNBOOK.md](./SWARM-DELIVERY-RUNBOOK.md)
+- ~[SWARM-DELIVERY-RUNBOOK.md](./SWARM-DELIVERY-RUNBOOK.md) (removed)~
 
 1. `masc_operator_snapshot`
 2. `masc_operator_digest`
@@ -349,4 +349,4 @@ Removed. `masc_team_session_*` tool family, `team_session_swarm_runner.ml`, and 
 
 - [BENCHMARK-RUNBOOK.md](./BENCHMARK-RUNBOOK.md)
 - [SUPERVISOR-MODE.md](./SUPERVISOR-MODE.md)
-- [QUICKSTART.md](./QUICKSTART.md)
+- ~[QUICKSTART.md](./QUICKSTART.md) (removed)~

@@ -315,11 +315,6 @@ module Rest = struct
       String.equal name "decision_create"
       || String.equal name "decision_finalize"
       || String.equal name "decision_status"
-      || String.equal name "masc_petition_submit"
-      || String.equal name "masc_case_brief_submit"
-      || String.equal name "masc_cases"
-      || String.equal name "masc_case_status"
-      || String.equal name "masc_ruling_status"
       || String.equal name "masc_execution_orders"
     then
       [ "decision" ]

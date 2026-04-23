@@ -50,6 +50,7 @@ let keeper_internal_tools =
     "keeper_bash";
     "keeper_bash_output";
     "keeper_bash_kill";
+    "masc_worktree_create";
     "keeper_voice_speak";
     (* keeper_voice_listen is keeper-only; there is no public masc_voice_listen
        counterpart on MCP surfaces. *)
@@ -135,7 +136,7 @@ let public_mcp_surface_tools =
     "masc_board_post"; "masc_board_list"; "masc_board_get";
     "masc_board_comment"; "masc_board_vote";
     (* Agent discovery *)
-    "masc_agents"; "masc_dashboard"; "masc_agent_card";
+    "masc_agents"; "masc_dashboard"; "masc_agent_card"; "masc_collaboration_graph";
     (* Utility *)
     "masc_tool_help"; "masc_web_search"; "masc_check";
     (* HITL approval queue *)

@@ -251,11 +251,6 @@ let core_remote_operation_names =
         "decision_create";
         "decision_finalize";
         "decision_status";
-        "masc_petition_submit";
-        "masc_case_brief_submit";
-        "masc_cases";
-        "masc_case_status";
-        "masc_ruling_status";
         "masc_execution_orders";
       ])
 

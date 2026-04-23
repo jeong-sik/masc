@@ -267,7 +267,7 @@ let direct_adapters =
          if m = "" || m = "explicit-model-required" then None else Some m);
       model_policy =
         {
-          default_model_env = Some "OLLAMA_DEFAULT_MODEL";
+          default_model_env = Some "LLAMA_DEFAULT_MODEL";
           default_model_fallback = None;
           auto_models = No_auto_models;
           expand_auto = false;
@@ -502,7 +502,7 @@ let direct_adapters =
       default_model_id = Some "auto";
       model_policy =
         {
-          default_model_env = Some "MOONSHOT_DEFAULT_MODEL";
+          default_model_env = Some "KIMI_DEFAULT_MODEL";
           default_model_fallback = Some "kimi-k2.5";
           auto_models = No_auto_models;
           expand_auto = false;

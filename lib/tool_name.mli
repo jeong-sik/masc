@@ -101,26 +101,19 @@ module Masc : sig
     | Complete_task
     | Dashboard
     | Deliver
-    | Dispatch_assign
     | Dispatch_plan
     | Goal_list
     | Goal_review
     | Goal_transition
     | Goal_upsert
     | Goal_verify
-    | Find_by_capability
-    | Governance_feed
-    | Governance_status
     | Heartbeat
     | Join
     | Leave
     | List_tasks
     | Messages
     | Note_add
-    | Operation_checkpoint
-    | Operation_finalize
     | Operation_pause
-    | Operation_resume
     | Operation_start
     | Operation_status
     | Operation_stop
@@ -154,7 +147,21 @@ module Masc : sig
     | Worktree_create
     | Worktree_list
     | Worktree_remove
-    | Worktree_status
+    | Approval_get
+    | Collaboration_graph
+    | Config
+    | Gc
+    | Get_metrics
+    | Mcp_session
+    | Pause
+    | Resume
+    | Spawn
+    | Start
+    | Tool_admin_snapshot
+    | Tool_admin_update
+    | Tool_stats
+    | Webrtc_answer
+    | Webrtc_offer
 
   val to_string : t -> string
   val of_string : string -> t option

@@ -157,6 +157,7 @@ contains four sections: `tts`, `stt`, `session`, `local_playback`.
 | `MASC_GEMINI_CLI_AUTO_MODELS` | csv string | `"gemini-3-flash-preview,gemini-3.1-flash-lite-preview,gemini-2.5-flash,gemini-2.5-flash-lite,gemini-3.1-pro-preview,gemini-2.5-pro"` | `gemini_cli:auto`를 여러 concrete model 후보로 확장하는 순서. 설정 시 `GEMINI_DEFAULT_MODEL`보다 우선 |
 | `MASC_CODEX_CLI_AUTO_MODELS` | csv string | `"gpt-5.2,gpt-5.3-codex-spark,gpt-5.3-codex,gpt-5.4-mini,gpt-5.4"` | `codex_cli:auto` 확장 순서. 기본은 ChatGPT-backed Codex에서 실제 호출 성공이 확인된 후보만 포함하며, 필요하면 env override로 후보를 직접 재지정 |
 | `MASC_CLAUDE_CODE_AUTO_MODELS` | csv string | `"auto"` | `claude_code:auto` 확장 순서. 기본은 Claude Code의 사용자 기본 모델에 위임 |
+| `KIMI_DEFAULT_MODEL` | string | `"kimi-k2.5"` | `kimi` provider `auto` 기본 모델 (lib/provider_adapter.ml:505) |
 | `ANTHROPIC_DEFAULT_MODEL` | string | `"claude-sonnet-4-6-20250514"` | `claude` provider `auto` 기본 모델 (lib/cascade/cascade_model_resolve.ml:70) |
 | `OPENAI_DEFAULT_MODEL` | string | `"gpt-4.1"` | `openai` provider `auto` 기본 모델 (lib/cascade/cascade_model_resolve.ml:73) |
 | `OLLAMA_DEFAULT_MODEL` | string | `""` | `ollama` provider `auto` 기본 모델 (lib/config/env_config_runtime.ml:181) |

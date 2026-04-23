@@ -24,18 +24,18 @@ let all_masc : Tool_name.Masc.t list =
   ; Board_stats; Board_vote; Broadcast; Cancel_task; Check; Claim_next
   ; Claim_task; Cleanup_zombies; Code_delete; Code_edit; Code_git; Code_read
   ; Code_search; Code_shell; Code_symbols; Code_write; Complete_task
-  ; Dashboard; Deliver; Dispatch_assign; Dispatch_plan; Find_by_capability
-  ; Governance_feed; Governance_status
+  ; Dashboard; Deliver; Dispatch_plan
   ; Heartbeat; Join; Leave; List_tasks; Messages; Note_add
-  ; Operation_checkpoint; Operation_finalize; Operation_pause
-  ; Operation_resume; Operation_start; Operation_status; Operation_stop
+  ; Operation_pause; Operation_start; Operation_status; Operation_stop
   ; Operator_action; Operator_confirm; Operator_digest; Operator_snapshot
   ; Plan_clear_task; Plan_get; Plan_get_task; Plan_init; Plan_set_task
   ; Plan_update; Register_capabilities; Release_task; Reset; Coord_status
   ; Set_current_task; Status; Task_history; Tasks; Tool_grant; Tool_help
   ; Tool_list; Tool_revoke; Transition; Update_priority; Web_search; Who
   ; Workflow_guide; Worktree_create; Worktree_list; Worktree_remove
-  ; Worktree_status ]
+  ; Approval_get; Collaboration_graph; Config; Gc; Get_metrics; Mcp_session
+  ; Pause; Resume; Spawn; Start; Tool_admin_snapshot; Tool_admin_update
+  ; Tool_stats; Webrtc_answer; Webrtc_offer ]
 
 let all_masc_keeper : Tool_name.Masc_keeper.t list =
   [ Clear; Compact; Create_from_persona; Down; List; Msg; Repair; Reset

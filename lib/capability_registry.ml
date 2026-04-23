@@ -395,9 +395,7 @@ let keeper_wrapped_server_tools : string list =
     "masc_tasks"; "masc_broadcast";
     "masc_worktree_create"; "masc_worktree_list";
     "masc_code_search"; "masc_code_symbols"; "masc_code_read";
-    "masc_cases"; "masc_case_status"; "masc_ruling_status";
-    "masc_governance_status"; "masc_governance_feed";
-    "masc_case_brief_submit"; "masc_petition_submit" ]
+  ]
 
 let keeper_wrapped_internal_tools : string list =
   keeper_all_tool_names

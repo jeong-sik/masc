@@ -72,9 +72,6 @@ let build_keeper_index () =
     "masc_code_symbols", "코드 심볼 함수 클래스 정의";
     "masc_code_shell", "코드 명령어 쉘 실행";
     "masc_code_git", "깃 커밋 브랜치 로그 이력";
-    "masc_governance_status", "거버넌스 상태 규칙 정책";
-    "masc_governance_feed", "거버넌스 피드 이벤트 로그";
-    "masc_governance_set", "거버넌스 설정 규칙 변경";
     "masc_autoresearch_start", "자동연구 리서치 시작";
     "masc_autoresearch_status", "자동연구 리서치 상태";
     "masc_autoresearch_stop", "자동연구 리서치 중지";
@@ -128,7 +125,6 @@ let build_keeper_index () =
 
       else if String.starts_with ~prefix:"masc_worktree_" name then Some "masc_worktree"
       else if String.starts_with ~prefix:"masc_code_" name then Some "masc_code"
-      else if String.starts_with ~prefix:"masc_governance_" name then Some "masc_governance"
       else if String.starts_with ~prefix:"masc_autoresearch_" name then Some "masc_autoresearch"
       else if String.starts_with ~prefix:"masc_agent_" name
            || name = "masc_agents" then Some "masc_agent"

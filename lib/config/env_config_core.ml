@@ -194,6 +194,7 @@ let cluster_name () =
     Defined here (above [masc_http_base_url]) so the constant is in scope
     before first use. *)
 let http_base_url_env_key = "MASC_HTTP_BASE_URL"
+let mcp_url_env_key = "MASC_MCP_URL"
 
 let rec masc_http_base_url () =
   match masc_http_base_url_result () with
@@ -409,5 +410,10 @@ let keeper_needs () =
 (** Default keeper desires (drive statement). Default: "". *)
 let keeper_desires () =
   get_string ~default:"" "MASC_KEEPER_DESIRES"
+
+(** Default sandbox profile for keepers. Default: "local".
+    Set to "docker" to default all keepers to containerized execution. *)
+let keeper_default_sandbox_profile_raw () =
+  get_string ~default:"local" "MASC_KEEPER_DEFAULT_SANDBOX_PROFILE"
 
 (** {1 Zombie Detection / Cleanup Configuration} *)

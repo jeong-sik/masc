@@ -5,16 +5,17 @@
     SSOT for the active keeper cascade profile and the legacy aliases that must
     continue to resolve to it.
 
-    Three keeper-assignable profiles and one system-only profile (Tool_rerank).
+    One keeper-assignable bootstrap profile (Big_three) and one system-only
+    profile (Tool_rerank).
     Phase-routing names ("local_only", "local_recovery") are NOT variants —
     they pass through [canonicalize_with_catalog] as catalog names.
 
     @since 0.9.5 *)
 
-(** SSOT variant for the 3+1 cascade model.
+(** SSOT variant for the 1+1 cascade model.
 
-    Three keeper-assignable profiles ({!Big_three}, {!Underdog}, {!Local}) and
-    one system-only profile ({!Tool_rerank}).
+    One keeper-assignable bootstrap profile ({!Big_three}) and one system-only
+    profile ({!Tool_rerank}).
 
     Adding a new profile is a compile-time event: add a variant here, then
     exhaustive [match] sites flag every consumer that needs to handle it.
@@ -22,8 +23,6 @@
     [$MASC_BASE_PATH/.masc/playground/.../cascade.json] only. *)
 type t =
   | Big_three
-  | Underdog
-  | Local
   | Tool_rerank
 
 val all : t list

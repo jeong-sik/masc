@@ -25,11 +25,11 @@ let synonyms : (string * string list) list =
     ("masc_broadcast",
      [ "notify"; "announce"; "tell"; "inform"; "alert"; "everyone"; "let know" ]);
     ("masc_claim_next",
-     [ "pick up"; "grab"; "assign me"; "next task"; "give me work"; "take task" ]);
+     [ "claim next task"; "pick up task"; "assign me"; "next task"; "give me work"; "take task" ]);
     ("masc_add_task",
      [ "create task"; "new task"; "make task"; "register task" ]);
     ("masc_leave",
-     [ "disconnect"; "go offline"; "exit room"; "sign off" ]);
+     [ "disconnect"; "go offline"; "exit room"; "sign off"; "leave room" ]);
     ("masc_messages",
      [ "chat"; "conversation"; "history"; "log"; "what was said" ]);
     ("masc_agents",
@@ -161,11 +161,6 @@ let synonyms : (string * string list) list =
      [ "code shell"; "run code command"; "execute in code"; "code exec" ]);
     ("masc_code_git",
      [ "code git"; "git in code"; "code commit"; "code branch"; "code log" ]);
-    (* masc_governance_* — policy and rules *)
-    ("masc_governance_status",
-     [ "governance status"; "policy status"; "rules check"; "compliance check" ]);
-    ("masc_governance_feed",
-     [ "governance feed"; "policy events"; "rule changes"; "governance log" ]);
     (* masc_autoresearch_* — automated research *)
     ("masc_autoresearch_start",
      [ "start research"; "begin research"; "auto research"; "autoresearch start" ]);
@@ -220,42 +215,6 @@ let synonyms : (string * string list) list =
      [ "compact keeper"; "shrink context"; "reduce context"; "context overflow fix" ]);
     ("masc_keeper_clear",
      [ "clear keeper"; "reset keeper context"; "wipe keeper history"; "emergency clear" ]);
-    (* masc core — room operations *)
-    ("masc_claim_next",
-     [ "claim next task"; "pick up task"; "assign me"; "next task"; "give me work"; "take task" ]);
-    ("masc_leave",
-     [ "disconnect"; "go offline"; "exit room"; "sign off"; "leave room" ]);
-    ("masc_dashboard",
-     [ "happening"; "activity"; "overview"; "summary"; "monitor"; "big picture" ]);
-    ("masc_broadcast",
-     [ "notify"; "announce"; "tell"; "inform"; "alert"; "everyone"; "let know" ]);
-    ("masc_messages",
-     [ "chat"; "conversation"; "history"; "log"; "what was said" ]);
-    (* masc plan — clear task *)
-    ("masc_plan_clear_task",
-     [ "clear plan task"; "remove plan task"; "unassign plan task" ]);
-    (* masc agent fitness *)
-    ("masc_agent_fitness",
-     [ "agent fitness"; "agent evaluation"; "agent score"; "rate agent" ]);
-    (* keeper voice listen *)
-    ("keeper_voice_listen",
-     [ "listen"; "microphone"; "speech to text"; "transcribe"; "hear"; "voice input"; "record speech" ]);
-    (* keeper stay silent *)
-    ("keeper_stay_silent",
-     [ "do nothing"; "skip turn"; "no action"; "stay quiet"; "no response"; "silent" ]);
-    (* keeper write *)
-    ("keeper_write",
-     [ "write file"; "create file"; "save file"; "new file" ]);
-    (* keeper board search/delete/stats *)
-    ("keeper_board_search",
-     [ "search board"; "find post"; "search discussion"; "keyword search board" ]);
-    ("keeper_board_delete",
-     [ "delete post"; "remove post"; "trash post" ]);
-    ("keeper_board_stats",
-     [ "board statistics"; "activity stats"; "engagement"; "post count" ]);
-    (* keeper tool search *)
-    ("keeper_tool_search",
-     [ "find tool"; "discover tool"; "search tools"; "what tool"; "tool for"; "which tool" ]);
   ]
 
 let synonym_lookup : string list StringMap.t =

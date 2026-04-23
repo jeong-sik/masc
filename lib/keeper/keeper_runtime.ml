@@ -167,14 +167,17 @@ let ensure_keeper_meta config name =
       match defaults.mention_targets with [] -> meta.mention_targets | xs -> xs in
     let target_active_goal_ids =
       apply_default defaults.active_goal_ids meta.active_goal_ids in
+    (* Infrastructure fields use system defaults when TOML is silent,
+       so removing a key from TOML actually reverts the runtime value. *)
     let target_sandbox_profile =
-      apply_default defaults.sandbox_profile meta.sandbox_profile in
+      apply_default defaults.sandbox_profile Keeper_types_profile.default_sandbox_profile in
     let target_network_mode =
-      apply_default defaults.network_mode meta.network_mode in
+      apply_default defaults.network_mode
+        (Keeper_types_profile.default_network_mode_for_profile target_sandbox_profile) in
     let target_shared_memory_scope =
-      apply_default defaults.shared_memory_scope meta.shared_memory_scope in
+      apply_default defaults.shared_memory_scope Keeper_types_profile.default_shared_memory_scope in
     let target_allowed_paths =
-      apply_default defaults.allowed_paths meta.allowed_paths in
+      apply_default defaults.allowed_paths [] in
 
     (* --- Work Discovery --- *)
     let target_wd_enabled =

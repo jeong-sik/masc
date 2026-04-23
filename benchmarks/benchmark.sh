@@ -450,7 +450,7 @@ bench_locking() {
 }
 
 bench_a2a() {
-  collect_tool_samples "mcp_capability_lookup" "masc_find_by_capability" '{"capability":"code-review"}' "$ITERATIONS" "capability routing"
+  :
 }
 
 bench_runtime() {

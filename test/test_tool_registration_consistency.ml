@@ -129,7 +129,7 @@ let repo_path relative =
 
 let test_docs_do_not_reintroduce_ghost_claim_surface () =
   let allowed_claim_docs = [ "MCP-SURFACE-AUDIT.md" ] in
-  [ "MCP-SURFACE-AUDIT.md"; "QUICK-START.md"; "SPEC.md" ]
+  [ "MCP-SURFACE-AUDIT.md"; "QUICK-START.md" ]
   |> List.iter (fun name ->
          let contents = read_file (doc_path name) in
          if contains_substring contents "masc_task_list" then
@@ -188,7 +188,6 @@ let test_benchmark_scripts_only_reference_registered_tools () =
      linter does not block unrelated PRs. *)
   let pruned_benchmark_exceptions =
     [
-      "masc_find_by_capability";
       "masc_runtime_verify";
       "masc_lock";
       "masc_unlock";

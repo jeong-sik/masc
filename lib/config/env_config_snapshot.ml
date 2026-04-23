@@ -161,6 +161,8 @@ let server_entries =
     entry ~default:Masc_network_defaults.masc_http_default_port_s Env_config_core.http_port_env_key "HTTP server port";
     entry ~default:Env_config_core.default_host Env_config_core.host_env_key "Server bind host";
     entry ~default:"(derived)" Env_config_core.http_base_url_env_key "Public HTTP base URL";
+    entry ~default:"(derived)" Env_config_core.mcp_url_env_key
+      "MASC MCP endpoint URL (derived from base URL when unset)";
     entry ~default:"" "MASC_CLUSTER_NAME" "Cluster name for multi-instance";
     entry ~default:"(cwd)" Env_config_core.base_path_env_key "Base storage directory";
     entry ~default:"(none)" "MASC_BUILD_GIT_COMMIT" "Build git commit hash";
@@ -179,6 +181,8 @@ let auth_entries =
       "Require auth for all tool calls";
     entry ~default:"false" "MASC_HTTP_AUTH_STRICT"
       "Require auth for HTTP endpoints";
+    entry ~default:"production" Env_config_core.governance_level_env_key
+      "Governance level (production|development)";
   ]
 
 let runtime_entries =
@@ -934,6 +938,12 @@ let task_entries =
 
 let telemetry_entries =
   [
+    entry ~default:"true" Env_config_core.telemetry_enabled_env_key
+      "Whether telemetry tracking is enabled";
+    entry ~default:"(none)" Env_config_core.log_level_env_key
+      "Log level string (debug|info|warn|error)";
+    entry ~default:"false" Env_config_core.parse_warn_env_key
+      "Whether to log parse warnings";
     entry ~default:"(none)" "MASC_OTEL_ENABLED"
       "Enable OpenTelemetry span collection";
   ]

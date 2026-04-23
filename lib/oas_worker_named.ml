@@ -621,7 +621,7 @@ let is_moonshot_provider (provider_cfg : Llm_provider.Provider_config.t) =
   || String.starts_with ~prefix:"kimi" provider_cfg.model_id
 
 let resolve_kimi_api_key_env_name ~cascade_name =
-  let fallback_env = "MOONSHOT_API_KEY" in
+  let fallback_env = "KIMI_API_KEY_SB" in
   let resolve_from_overrides overrides =
     let find_non_empty key =
       match List.assoc_opt key overrides with

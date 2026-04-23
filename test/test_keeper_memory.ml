@@ -509,7 +509,8 @@ let test_memory_candidates_capture_next_summary () =
       next_summary = Some "verify harness output and update docs";
     }
   in
-  let candidates = Keeper_memory_bank.memory_candidates_from_snapshot snapshot in
+  let selection = Keeper_memory_bank.memory_candidates_from_snapshot snapshot in
+  let candidates = selection.selected in
   check bool "next summary becomes a next candidate" true
     (List.exists
        (fun (kind, text, _) ->
@@ -1017,6 +1018,137 @@ let test_memory_search_source_all () =
     let match_count = Yojson.Safe.Util.(json |> member "match_count" |> to_int) in
     check bool "found matches from both sources" true (match_count >= 2))
 
+(* ── Memory Quality Filter Tests ────────────────────────── *)
+
+let test_quality_rejects_empty () =
+  check bool "empty rejected" false (Keeper_memory_bank.is_meaningful_memory_text "")
+
+let test_quality_rejects_none () =
+  check bool "none rejected" false (Keeper_memory_bank.is_meaningful_memory_text "none")
+
+let test_quality_rejects_korean_none () =
+  check bool "없음 rejected" false (Keeper_memory_bank.is_meaningful_memory_text "없음")
+
+let test_quality_rejects_korean_none_formal () =
+  check bool "없습니다 rejected" false (Keeper_memory_bank.is_meaningful_memory_text "없습니다")
+
+let test_quality_rejects_korean_dont_know () =
+  check bool "모르겠음 rejected" false (Keeper_memory_bank.is_meaningful_memory_text "모르겠음")
+
+let test_quality_rejects_synthetic () =
+  check bool "[SYNTHETIC] rejected" false
+    (Keeper_memory_bank.is_meaningful_memory_text "some [SYNTHETIC] note")
+
+let test_quality_rejects_consensus_spam () =
+  check bool "1234567ep rejected" false
+    (Keeper_memory_bank.is_meaningful_memory_text "1234567ep")
+
+let test_quality_rejects_long_text () =
+  let long = String.make 5000 'a' in
+  check bool "5000 char rejected" false (Keeper_memory_bank.is_meaningful_memory_text long)
+
+let test_quality_accepts_meaningful () =
+  check bool "meaningful accepted" true
+    (Keeper_memory_bank.is_meaningful_memory_text "Fix the authentication bug in login flow")
+
+(* ── Memory Row Validation Tests ───────────────────────── *)
+
+let test_priority_clamp_low () =
+  let line =
+    {|{"kind":"goal","text":"test","priority":-5,"ts_unix":1.0,"schema_version":2}|}
+  in
+  match Keeper_memory_bank.parse_memory_bank_row line with
+  | Some row -> check int "clamped to 1" 1 row.priority
+  | None -> fail "expected Some row"
+
+let test_priority_clamp_high () =
+  let line =
+    {|{"kind":"goal","text":"test","priority":999,"ts_unix":1.0,"schema_version":2}|}
+  in
+  match Keeper_memory_bank.parse_memory_bank_row line with
+  | Some row -> check int "clamped to 100" 100 row.priority
+  | None -> fail "expected Some row"
+
+let test_priority_valid_preserved () =
+  let line =
+    {|{"kind":"goal","text":"test","priority":42,"ts_unix":1.0,"schema_version":2}|}
+  in
+  match Keeper_memory_bank.parse_memory_bank_row line with
+  | Some row -> check int "preserved 42" 42 row.priority
+  | None -> fail "expected Some row"
+
+let test_schema_version_mismatch () =
+  let line =
+    {|{"kind":"goal","text":"test","priority":1,"ts_unix":1.0,"schema_version":99}|}
+  in
+  check bool "mismatch rejected" true (Keeper_memory_bank.parse_memory_bank_row line = None)
+
+let test_schema_version_match () =
+  let line =
+    {|{"kind":"goal","text":"test","priority":1,"ts_unix":1.0,"schema_version":2}|}
+  in
+  check bool "match accepted" true (Keeper_memory_bank.parse_memory_bank_row line <> None)
+
+(* ── Memory Dedup Tests ────────────────────────────────── *)
+
+let test_dedup_exact () =
+  let items = [
+    ("goal", "Fix bug", 10);
+    ("goal", "Fix bug", 20);
+    ("next", "Deploy", 30);
+  ] in
+  let result = Keeper_memory_bank.dedup_memory_candidates items in
+  check int "exact dedup leaves 2" 2 (List.length result)
+
+let test_dedup_semantic () =
+  let items = [
+    ("goal", "Fix the login bug", 10);
+    ("next", "Fix the login bug", 20);
+  ] in
+  let result = Keeper_memory_bank.dedup_memory_candidates items in
+  check int "semantic dedup leaves 1" 1 (List.length result)
+
+let test_dedup_semantic_preserves_distinct () =
+  let items = [
+    ("goal", "Fix the login bug", 10);
+    ("goal", "Refactor the database schema", 20);
+  ] in
+  let result = Keeper_memory_bank.dedup_memory_candidates items in
+  check int "distinct preserved" 2 (List.length result)
+
+(* ── Memory Cap Telemetry Tests ────────────────────────── *)
+
+let test_cap_dropped_by_kind () =
+  let rows = [
+    ("goal", "Goal A", 10);
+    ("goal", "Goal B", 9);
+    ("goal", "Goal C", 8);
+    ("progress", "Progress A", 7);
+  ] in
+  let result = Keeper_memory_bank.select_memory_candidates rows in
+  let goal_dropped = List.assoc_opt "goal" result.dropped_by_kind in
+  check (option int) "goal cap drops tracked" (Some 1) goal_dropped;
+  let total = result.dropped_by_total_cap in
+  check int "total cap drops 0 when under cap" 0 total
+
+let test_cap_dropped_by_total () =
+  let rows =
+    List.init 2 (fun i -> ("constraints", "C" ^ string_of_int i, 100))
+    @ List.init 2 (fun i -> ("decision", "D" ^ string_of_int i, 99))
+    @ List.init 2 (fun i -> ("next", "N" ^ string_of_int i, 98))
+    @ List.init 2 (fun i -> ("goal", "G" ^ string_of_int i, 97))
+    @ List.init 2 (fun i -> ("progress", "P" ^ string_of_int i, 96))
+    @ List.init 2 (fun i -> ("open_question", "Q" ^ string_of_int i, 95))
+    @ List.init 4 (fun i -> ("long_term", "L" ^ string_of_int i, 94))
+    @ List.init 4 (fun i -> ("long_term", "Extra " ^ string_of_int i, 1))
+  in
+  let result = Keeper_memory_bank.select_memory_candidates rows in
+  let selected_count = List.length result.selected in
+  let total_cap = Keeper_memory_bank.total_cap () in
+  check int "selected within total cap" total_cap selected_count;
+  let dropped = result.dropped_by_total_cap in
+  check int "total drops 8" 8 dropped
+
 let () =
   run "Keeper_memory"
     [
@@ -1116,5 +1248,36 @@ let () =
             test_memory_search_source_history;
           test_case "source=all merges bank and history" `Quick
             test_memory_search_source_all;
+        ] );
+      ( "memory_quality_filter",
+        [
+          test_case "placeholder rejects empty" `Quick test_quality_rejects_empty;
+          test_case "placeholder rejects none" `Quick test_quality_rejects_none;
+          test_case "placeholder rejects korean 없음" `Quick test_quality_rejects_korean_none;
+          test_case "placeholder rejects korean 없습니다" `Quick test_quality_rejects_korean_none_formal;
+          test_case "placeholder rejects korean 모르겠음" `Quick test_quality_rejects_korean_dont_know;
+          test_case "synthetic marker rejected" `Quick test_quality_rejects_synthetic;
+          test_case "consensus spam rejected" `Quick test_quality_rejects_consensus_spam;
+          test_case "max text length gate rejects long text" `Quick test_quality_rejects_long_text;
+          test_case "meaningful text accepted" `Quick test_quality_accepts_meaningful;
+        ] );
+      ( "memory_row_validation",
+        [
+          test_case "priority clamped to 1 on low" `Quick test_priority_clamp_low;
+          test_case "priority clamped to 100 on high" `Quick test_priority_clamp_high;
+          test_case "valid priority preserved" `Quick test_priority_valid_preserved;
+          test_case "schema version mismatch rejected" `Quick test_schema_version_mismatch;
+          test_case "schema version match accepted" `Quick test_schema_version_match;
+        ] );
+      ( "memory_dedup",
+        [
+          test_case "exact dedup removes duplicates" `Quick test_dedup_exact;
+          test_case "semantic dedup removes near-duplicates" `Quick test_dedup_semantic;
+          test_case "semantic dedup preserves distinct" `Quick test_dedup_semantic_preserves_distinct;
+        ] );
+      ( "memory_cap_telemetry",
+        [
+          test_case "cap enforcement reports dropped_by_kind" `Quick test_cap_dropped_by_kind;
+          test_case "total cap reports dropped_by_total_cap" `Quick test_cap_dropped_by_total;
         ] );
     ]

@@ -4,25 +4,53 @@ open Keeper_types
 
 include Keeper_memory_policy
 
+type candidate_selection_result = {
+  selected: (string * string * int) list;
+  dropped_by_kind: (string * int) list;
+  dropped_by_total_cap: int;
+}
+
 let select_memory_candidates
-    (rows : (string * string * int) list) : (string * string * int) list =
+    (rows : (string * string * int) list) : candidate_selection_result =
   let total_cap = total_cap () in
   let kind_caps = kind_caps () in
   let used_by_kind : (string, int) Hashtbl.t = Hashtbl.create 16 in
-  let rec go acc = function
-    | [] -> List.rev acc
-    | _ when List.length acc >= total_cap -> List.rev acc
-    | (kind, text, pr) :: rest ->
+  let dropped_by_kind : (string, int) Hashtbl.t = Hashtbl.create 16 in
+  let rec go acc dropped_total rest =
+    match rest with
+    | [] ->
+        {
+          selected = List.rev acc;
+          dropped_by_kind =
+            Hashtbl.to_seq dropped_by_kind
+            |> List.of_seq
+            |> List.sort (fun (a, _) (b, _) -> String.compare a b);
+          dropped_by_total_cap = dropped_total;
+        }
+    | _ when List.length acc >= total_cap ->
+        {
+          selected = List.rev acc;
+          dropped_by_kind =
+            Hashtbl.to_seq dropped_by_kind
+            |> List.of_seq
+            |> List.sort (fun (a, _) (b, _) -> String.compare a b);
+          dropped_by_total_cap = dropped_total + List.length rest;
+        }
+    | (kind, text, pr) :: rest' ->
         let cap = cap_for_kind kind_caps kind in
         let used = Option.value ~default:0 (Hashtbl.find_opt used_by_kind kind) in
-        if cap <= 0 || used >= cap then
-          go acc rest
-        else begin
+        if cap <= 0 || used >= cap then begin
+          let cur =
+            Option.value ~default:0 (Hashtbl.find_opt dropped_by_kind kind)
+          in
+          Hashtbl.replace dropped_by_kind kind (cur + 1);
+          go acc dropped_total rest'
+        end else begin
           Hashtbl.replace used_by_kind kind (used + 1);
-          go ((kind, text, pr) :: acc) rest
+          go ((kind, text, pr) :: acc) dropped_total rest'
         end
   in
-  go [] rows
+  go [] 0 rows
 
 (** Filter a list to unique items by a key function.
     Empty keys are skipped (treated as duplicates). *)
@@ -37,12 +65,40 @@ let dedup_by_key (key_of : 'a -> string) (items : 'a list) : 'a list =
   in
   go SS.empty [] items
 
+let jaccard_similarity = Text_similarity.jaccard_similarity
+
+let semantic_dedup_similarity_threshold () =
+  match Sys.getenv_opt "MASC_KEEPER_MEMORY_DEDUP_SIMILARITY_THRESHOLD" with
+  | None -> 0.85
+  | Some raw ->
+      (match float_of_string_opt (String.trim raw) with
+       | Some f when f >= 0.0 && f <= 1.0 -> f
+       | _ -> 0.85)
+
 let dedup_memory_candidates
     (items : (string * string * int) list) : (string * string * int) list =
-  dedup_by_key
-    (fun (kind, text, _) ->
-      String.lowercase_ascii (String.trim kind ^ ":" ^ String.trim text))
-    items
+  let exact =
+    dedup_by_key
+      (fun (kind, text, _) ->
+        String.lowercase_ascii (String.trim kind ^ ":" ^ String.trim text))
+      items
+  in
+  let threshold = semantic_dedup_similarity_threshold () in
+  if threshold >= 1.0 then exact
+  else
+    let rec go kept = function
+      | [] -> List.rev kept
+      | (kind, text, pr) :: rest ->
+          let is_dup =
+            List.exists
+              (fun (_, kept_text, _) ->
+                jaccard_similarity text kept_text >= threshold)
+              kept
+          in
+          if is_dup then go kept rest
+          else go ((kind, text, pr) :: kept) rest
+    in
+    go [] exact
 
 let normalize_memory_text_key (s : string) : string =
   s
@@ -50,32 +106,67 @@ let normalize_memory_text_key (s : string) : string =
   |> String.lowercase_ascii
   |> Re.replace_string (Re.Pcre.re {re|[ \t\n\r!"#$%&'()*+,\-./:;<=>?@\[\]^_`{|}~]+|re} |> Re.compile) ~by:""
 
+let consensus_re () =
+  let default = Re.Pcre.re {|\d{6,}ep\+?|} |> Re.compile in
+  match Sys.getenv_opt "MASC_KEEPER_MEMORY_CONSENSUS_PATTERN" with
+  | None -> default
+  | Some raw ->
+      let pat = String.trim raw in
+      if pat = "" then default
+      else Re.Pcre.re pat |> Re.compile
+
 let has_inflated_consensus_marker (s : string) : bool =
-  Re.execp (Re.Pcre.re {|\d{6,}ep\+?|} |> Re.compile) s
+  Re.execp (consensus_re ()) s
+
+let memory_placeholders () =
+  let base =
+    [
+      "";
+      "none";
+      "null";
+      "na";
+      "nil";
+      "없음";
+      "없다";
+      "없어요";
+      "없습니다";
+      "해당없음";
+      "해당 사항 없음";
+      "모르겠음";
+      "무";
+      "미정";
+    ]
+  in
+  match Sys.getenv_opt "MASC_KEEPER_MEMORY_PLACEHOLDERS" with
+  | None -> base
+  | Some raw ->
+      let extra =
+        String.split_on_char ',' raw
+        |> List.map String.trim
+        |> List.filter (fun s -> s <> "")
+      in
+      base @ extra
+
+let max_memory_text_length () =
+  match Sys.getenv_opt "MASC_KEEPER_MEMORY_MAX_LENGTH" with
+  | None -> 4096
+  | Some raw ->
+      (match int_of_string_opt (String.trim raw) with
+       | Some n when n > 0 -> n
+       | _ -> 4096)
 
 let is_meaningful_memory_text (s : string) : bool =
   let key = normalize_memory_text_key s in
-  let placeholders = [
-    "";
-    "none";
-    "null";
-    "na";
-    "nil";
-    "없음";
-    "없다";
-    "없어요";
-    "해당없음";
-    "무";
-    "미정";
-  ] in
+  let placeholders = memory_placeholders () in
   not (List.mem key placeholders)
   && not (String_util.contains_substring s "[SYNTHETIC]")
   && not (String.equal (String.trim s) "No tools used this generation")
   && not (has_inflated_consensus_marker s)
   && not (String_util.contains_substring s "[turn budget exhausted")
+  && String.length s <= max_memory_text_length ()
 
 let memory_candidates_from_snapshot
-    (snapshot : keeper_state_snapshot) : (string * string * int) list =
+    (snapshot : keeper_state_snapshot) : candidate_selection_result =
   let add_opt kind value acc =
     match value with
     | None -> acc
@@ -135,12 +226,19 @@ type keeper_memory_row_raw = {
 let parse_memory_bank_row (line : string) : keeper_memory_row_raw option =
   try
     let j = Yojson.Safe.from_string line in
+    let schema_version = Safe_ops.json_int ~default:0 "schema_version" j in
+    if schema_version <> 0 && schema_version <> keeper_memory_schema_version then
+      None
+    else
     let kind = Safe_ops.json_string ~default:"" "kind" j |> String.trim in
     let horizon = memory_horizon_of_json ~kind j in
     let source = Safe_ops.json_string ~default:"" "source" j |> String.trim in
     let generation = Safe_ops.json_int ~default:0 "generation" j in
     let text = Safe_ops.json_string ~default:"" "text" j |> String.trim in
-    let priority = Safe_ops.json_int ~default:0 "priority" j in
+    let priority =
+      let raw = Safe_ops.json_int ~default:1 "priority" j in
+      if raw < 1 then 1 else if raw > 100 then 100 else raw
+    in
     let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" j in
     if kind = "" || text = "" || not (is_meaningful_memory_text text) then
       None
@@ -426,6 +524,7 @@ let compact_memory_bank_if_needed
               in
               let kind_used : (string, int) Hashtbl.t = Hashtbl.create 16 in
               let selected_keys : (string, unit) Hashtbl.t = Hashtbl.create 1024 in
+              let kind_dropped_keys : (string, string) Hashtbl.t = Hashtbl.create 256 in
               let selected_rev = ref [] in
               let selected_count = ref 0 in
               let fallback_kind_cap = max 8 (target_notes / 8) in
@@ -445,11 +544,13 @@ let compact_memory_bank_if_needed
                         (Hashtbl.find_opt kind_caps row.kind)
                     in
                     if ignore_kind_cap || used < cap then begin
+                      Hashtbl.remove kind_dropped_keys key;
                       Hashtbl.add selected_keys key ();
                       Hashtbl.replace kind_used row.kind (used + 1);
                       selected_rev := row :: !selected_rev;
                       incr selected_count
-                    end
+                    end else
+                      Hashtbl.replace kind_dropped_keys key row.kind
               in
               let recent_floor = max 16 (min 64 (target_notes / 5)) in
               by_recency
@@ -479,6 +580,17 @@ let compact_memory_bank_if_needed
               in
               let after_notes = List.length selected in
               let dropped_notes = max 0 (before_notes - after_notes) in
+              let dropped_by_kind =
+                Hashtbl.to_seq kind_dropped_keys
+                |> Seq.fold_left
+                     (fun acc (_, kind) ->
+                       let cur =
+                         Option.value ~default:0 (List.assoc_opt kind acc)
+                       in
+                       (kind, cur + 1) :: List.remove_assoc kind acc)
+                     []
+                |> List.sort (fun (a, _) (b, _) -> String.compare a b)
+              in
               if dropped_notes = 0 && invalid = 0 then
                 { no_memory_bank_compaction with
                   target_notes;
@@ -508,6 +620,7 @@ let compact_memory_bank_if_needed
                       dropped_notes;
                       dedup_dropped;
                       invalid_dropped = invalid;
+                      dropped_by_kind;
                     }
 
 let append_memory_notes_from_reply
@@ -540,9 +653,14 @@ let append_memory_notes_from_reply
           },
           "meta_goal_fallback" ))
   in
-  let notes =
-    memory_candidates_from_snapshot snapshot
-  in
+  let selection = memory_candidates_from_snapshot snapshot in
+  let notes = selection.selected in
+  if selection.dropped_by_total_cap > 0 || selection.dropped_by_kind <> [] then
+    Eio.traceln "[keeper_memory] %s: memory_candidates dropped total_cap=%d kind=%s"
+      meta.name
+      selection.dropped_by_total_cap
+      (String.concat ","
+         (List.map (fun (k, c) -> Printf.sprintf "%s:%d" k c) selection.dropped_by_kind));
   if notes = [] then
     (0, [])
   else
@@ -590,7 +708,7 @@ let summarize_memory_bank_lines
            let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" j in
            let kind = String.trim kind in
            let text = String.trim text in
-           if kind = "" || text = "" then None
+           if kind = "" || text = "" || not (is_meaningful_memory_text text) then None
            else Some { kind; text; priority; ts_unix }
          with Yojson.Json_error _ -> None)
   in

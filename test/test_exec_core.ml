@@ -444,6 +444,146 @@ let test_blocked_diagnosis_both_rewrite_and_tool () =
   check string "tool_suggestion" "keeper_shell"
     (d |> member "tool_suggestion" |> to_string)
 
+(* --- P10: structured output tests --- *)
+
+let test_git_status_structured () =
+  let json =
+    Masc_mcp.Exec_core.process_result_json
+      ~base_path:"/tmp"
+      ~keeper_name:"p10-test"
+      ~cmd:"git status --porcelain"
+      ~status:(Unix.WEXITED 0)
+      ~output:" M lib/foo.ml\n?? new_file.txt\n"
+      ()
+  in
+  let so = json |> member "structured_output" in
+  let staged = so |> member "staged" |> to_list in
+  let unstaged = so |> member "unstaged" |> to_list in
+  let untracked = so |> member "untracked" |> to_list in
+  check int "staged empty" 0 (List.length staged);
+  check int "unstaged 1" 1 (List.length unstaged);
+  check int "untracked 1" 1 (List.length untracked)
+
+let test_git_log_structured () =
+  let json =
+    Masc_mcp.Exec_core.process_result_json
+      ~base_path:"/tmp"
+      ~keeper_name:"p10-test"
+      ~cmd:"git log --oneline -5"
+      ~status:(Unix.WEXITED 0)
+      ~output:"abc1234 fix bug\ndef5678 add feature\n"
+      ()
+  in
+  let so = json |> member "structured_output" in
+  let commits = so |> member "commits" |> to_list in
+  check int "commits count" 2 (List.length commits)
+
+let test_wc_structured () =
+  let json =
+    Masc_mcp.Exec_core.process_result_json
+      ~base_path:"/tmp"
+      ~keeper_name:"p10-test"
+      ~cmd:"wc -l lib/foo.ml"
+      ~status:(Unix.WEXITED 0)
+      ~output:"     120 lib/foo.ml"
+      ()
+  in
+  let so = json |> member "structured_output" in
+  check int "lines" 120 (so |> member "lines" |> to_int)
+
+let test_unknown_cmd_no_structured () =
+  let json =
+    Masc_mcp.Exec_core.process_result_json
+      ~base_path:"/tmp"
+      ~keeper_name:"p10-test"
+      ~cmd:"echo hello world"
+      ~status:(Unix.WEXITED 0)
+      ~output:"hello world"
+      ()
+  in
+  check bool "no structured_output for unknown" true
+    (try
+       let _ = json |> member "structured_output" in
+       false
+     with _ -> true)
+
+let test_dune_test_structured () =
+  let output =
+    "Test src/foo.ml: OK\nTest test/bar.ml: FAILED\nTest test/baz.ml: OK\n"
+  in
+  let json =
+    Masc_mcp.Exec_core.process_result_json
+      ~base_path:"/tmp"
+      ~keeper_name:"p10-test"
+      ~cmd:"dune runtest"
+      ~status:(Unix.WEXITED 1)
+      ~output
+      ()
+  in
+  let so = json |> member "structured_output" in
+  check int "passed" 2 (so |> member "passed" |> to_int);
+  check int "failed" 1 (so |> member "failed" |> to_int)
+
+(* --- P11: command history tests --- *)
+
+let tmp_dir_for_p11 = Filename.concat (Filename.get_temp_dir_name ()) "p11_test"
+
+let setup_p11 () =
+  if Sys.file_exists tmp_dir_for_p11 then
+    Array.iter (fun f ->
+      if Filename.check_suffix f ".jsonl" then
+        Sys.remove (Filename.concat tmp_dir_for_p11 f)
+    ) (Sys.readdir tmp_dir_for_p11)
+
+let test_history_append_and_read () =
+  setup_p11 ();
+  let module H = Masc_exec.Bash_history in
+  H.append ~base_path:tmp_dir_for_p11 ~keeper_name:"test-keeper"
+    { ts = 1000.0; cmd_hash = "abc123"; cmd_prefix = "git status";
+      semantic_kind = "Read"; duration_ms = 50; success = true };
+  H.append ~base_path:tmp_dir_for_p11 ~keeper_name:"test-keeper"
+    { ts = 2000.0; cmd_hash = "def456"; cmd_prefix = "dune build";
+      semantic_kind = "Build"; duration_ms = 5000; success = false };
+  let results =
+    H.suggest ~base_path:tmp_dir_for_p11 ~keeper_name:"test-keeper"
+      ~pattern:"git" ~limit:10
+  in
+  check int "found 1 git entry" 1 (List.length results);
+  let e = List.hd results in
+  check string "cmd_prefix" "git status" e.cmd_prefix;
+  check bool "success" true e.success
+
+let test_history_suggest_empty () =
+  setup_p11 ();
+  let module H = Masc_exec.Bash_history in
+  let results =
+    H.suggest ~base_path:tmp_dir_for_p11 ~keeper_name:"no-keeper"
+      ~pattern:"x" ~limit:5
+  in
+  check int "empty for nonexistent" 0 (List.length results)
+
+let test_history_cmd_hash () =
+  let module H = Masc_exec.Bash_history in
+  let h = H.cmd_hash "git status" in
+  check int "hash length 12" 12 (String.length h)
+
+let test_history_compaction () =
+  setup_p11 ();
+  let module H = Masc_exec.Bash_history in
+  for i = 1 to 15 do
+    H.append ~base_path:tmp_dir_for_p11 ~keeper_name:"compact-test"
+      { ts = float_of_int i; cmd_hash = string_of_int i;
+        cmd_prefix = "cmd" ^ string_of_int i;
+        semantic_kind = "Unknown"; duration_ms = 10; success = true }
+  done;
+  (* 15 entries is below max_entries (10000), so compact is a no-op *)
+  H.compact ~base_path:tmp_dir_for_p11 ~keeper_name:"compact-test";
+  let results =
+    H.suggest ~base_path:tmp_dir_for_p11 ~keeper_name:"compact-test"
+      ~pattern:"cmd" ~limit:100
+  in
+  check int "all 15 preserved" 15 (List.length results)
+
 
 let () =
   run "exec_core"
@@ -511,5 +651,29 @@ let () =
             test_blocked_with_tool_suggestion;
           test_case "diag with both rewrite and tool" `Quick
             test_blocked_diagnosis_both_rewrite_and_tool;
+        ] );
+      ( "p10_structured_output",
+        [
+          test_case "git status --porcelain produces structured fields"
+            `Quick test_git_status_structured;
+          test_case "git log --oneline produces commits array" `Quick
+            test_git_log_structured;
+          test_case "wc -l produces lines count" `Quick
+            test_wc_structured;
+          test_case "unknown cmd has no structured_output" `Quick
+            test_unknown_cmd_no_structured;
+          test_case "dune runtest produces passed/failed counts" `Quick
+            test_dune_test_structured;
+        ] );
+      ( "p11_command_history",
+        [
+          test_case "append and read history entries" `Quick
+            test_history_append_and_read;
+          test_case "suggest returns empty for nonexistent" `Quick
+            test_history_suggest_empty;
+          test_case "cmd_hash produces 12-char hex" `Quick
+            test_history_cmd_hash;
+          test_case "compaction preserves entries below threshold"
+            `Quick test_history_compaction;
         ] );
     ]

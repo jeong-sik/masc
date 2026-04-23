@@ -401,10 +401,10 @@ let should_attempt_generate_probe ~before_status ~before_error ~run_generate
   if not run_generate then
     false
   else
-  match before_status, before_error with
-  | Some 200, _ -> generate_when_unloaded || effective_model_loaded_before
-  | _, Some _ -> false
-  | _ -> generate_when_unloaded || effective_model_loaded_before
+  match before_error, before_status with
+  | Some _, _ -> false
+  | None, Some 200 -> generate_when_unloaded || effective_model_loaded_before
+  | None, _ -> generate_when_unloaded || effective_model_loaded_before
 
 let request_body_json ~think_enabled ~keep_alive ~model_id ~prompt ~max_tokens =
   let fields =

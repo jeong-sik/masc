@@ -205,6 +205,11 @@ let test_generate_probe_is_skipped_after_failed_preflight () =
        ~before_status:None ~before_error:(Some "curl exit code 28")
        ~run_generate:true
        ~generate_when_unloaded:true ~effective_model_loaded_before:true);
+  check bool "ps preflight error dominates successful status" false
+    (Masc_mcp.Tool_local_runtime_probe.should_attempt_generate_probe
+       ~before_status:(Some 200) ~before_error:(Some "invalid ps payload")
+       ~run_generate:true
+       ~generate_when_unloaded:true ~effective_model_loaded_before:true);
   check bool "successful ps allows generate" true
     (Masc_mcp.Tool_local_runtime_probe.should_attempt_generate_probe
        ~before_status:(Some 200) ~before_error:None
@@ -224,7 +229,17 @@ let test_generate_probe_is_skipped_after_failed_preflight () =
     (Masc_mcp.Tool_local_runtime_probe.should_attempt_generate_probe
        ~before_status:(Some 200) ~before_error:None
        ~run_generate:false
-       ~generate_when_unloaded:true ~effective_model_loaded_before:true)
+       ~generate_when_unloaded:true ~effective_model_loaded_before:true);
+  check bool "default path with no status allows generate when enabled" true
+    (Masc_mcp.Tool_local_runtime_probe.should_attempt_generate_probe
+       ~before_status:None ~before_error:None
+       ~run_generate:true
+       ~generate_when_unloaded:true ~effective_model_loaded_before:false);
+  check bool "default path blocks when disabled and not resident" false
+    (Masc_mcp.Tool_local_runtime_probe.should_attempt_generate_probe
+       ~before_status:None ~before_error:None
+       ~run_generate:true
+       ~generate_when_unloaded:false ~effective_model_loaded_before:false)
 
 let () =
   run "tool_local_runtime_probe"

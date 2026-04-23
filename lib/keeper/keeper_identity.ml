@@ -105,6 +105,18 @@ let canonical_keeper_name raw_name =
     | None ->
         if Keeper_config.validate_name trimmed then Some trimmed else None
 
+let explicit_keeper_name raw_name =
+  let trimmed = String.trim raw_name in
+  let prefix = "keeper-" in
+  let plen = String.length prefix in
+  let alen = String.length trimmed in
+  if trimmed = "" then None
+  else if alen > plen && String.sub trimmed 0 plen = prefix then
+    let candidate = String.sub trimmed plen (alen - plen) in
+    if Keeper_config.validate_name candidate then Some candidate else None
+  else if Keeper_config.validate_name trimmed then Some trimmed
+  else None
+
 type parsed_identity = {
   keeper_name : string;
   agent_name : string;
@@ -122,7 +134,7 @@ let parse_json_identity json =
   let keeper_name =
     match raw_keeper_name with
     | Some value when String.trim value <> "" ->
-        (match canonical_keeper_name value with
+        (match explicit_keeper_name value with
          | Some name -> name
          | None -> String.trim value)
     | _ ->

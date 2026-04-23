@@ -21,6 +21,21 @@ let test_valid_trace_id () =
       check string "agent_name" "keeper-alice-agent" meta.agent_name
   | Error e -> fail ("expected Ok, got Error: " ^ e)
 
+let test_explicit_keeper_name_is_not_nickname_canonicalized () =
+  let json =
+    `Assoc
+      [ ("name", `String "personality-resync-test")
+      ; ("agent_name", `String "personality-resync-test")
+      ; ("trace_id", `String "personality-resync-test-001")
+      ; ("goal", `String "test")
+      ]
+  in
+  match Keeper_types.meta_of_json json with
+  | Ok meta ->
+      check string "explicit keeper name"
+        "personality-resync-test" meta.name
+  | Error e -> fail ("expected Ok, got Error: " ^ e)
+
 let test_legacy_keeper_cascade_alias_preserved_raw () =
   (* Parse should preserve the raw cascade_name as declared in JSON so the
      dashboard can surface config drift between the declared value and its
@@ -113,6 +128,8 @@ let () =
   run "keeper_identity_parse"
     [ ( "parse_keeper_identity"
       , [ test_case "valid trace_id" `Quick test_valid_trace_id
+        ; test_case "explicit keeper name is not nickname-canonicalized" `Quick
+            test_explicit_keeper_name_is_not_nickname_canonicalized
         ; test_case "legacy keeper cascade alias preserved raw" `Quick
             test_legacy_keeper_cascade_alias_preserved_raw
         ; test_case "unknown cascade name preserved raw" `Quick

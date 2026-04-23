@@ -66,6 +66,13 @@ type executed_result = {
   recovery_hint : string option;
 }
 
+type diagnosis = {
+  rule_id : string;
+  explanation : string;
+  rewrite : string option;
+  tool_suggestion : string option;
+}
+
 type blocked_result = {
   command : string;
   error : string;
@@ -75,6 +82,7 @@ type blocked_result = {
   classification : classification;
   retryability : retryability;
   summary : string;
+  diagnosis : diagnosis option;
 }
 
 type outcome =
@@ -574,7 +582,7 @@ let build_process_outcome ~artifact_policy ~base_path ~keeper_name ~cmd ~status
     }
 
 let build_blocked_outcome ~cmd ~error ~reason ?hint
-    ?(alternatives = []) ?(retryability = Self_correct) () =
+    ?(alternatives = []) ?(retryability = Self_correct) ?(diag = None) () =
   let classification = classify_command ~cmd in
   let summary = summary_of_status classification Blocked in
   let recovery_hint =
@@ -595,6 +603,7 @@ let build_blocked_outcome ~cmd ~error ~reason ?hint
       classification;
       retryability;
       summary;
+      diagnosis = diag;
     }
 
 let semantic_payload_to_yojson (key, value) =
@@ -794,6 +803,23 @@ let outcome_to_json ?(extra = []) ?(env_snapshot = None) = function
         | [] -> []
         | alts -> [ ("alternatives", `List (List.map (fun a -> `String a) alts)) ]
       in
+      let diagnosis_field =
+        match result.diagnosis with
+        | None -> []
+        | Some d ->
+            let rewrite_field = match d.rewrite with
+              | None -> [] | Some r -> [ ("rewrite", `String r) ]
+            in
+            let tool_field = match d.tool_suggestion with
+              | None -> [] | Some t -> [ ("tool_suggestion", `String t) ]
+            in
+            [ ( "diagnosis",
+                `Assoc
+                  ([ ("rule_id", `String d.rule_id)
+                   ; ("explanation", `String d.explanation)
+                   ]
+                   @ rewrite_field @ tool_field) ) ]
+      in
       let env_field = match env_snapshot with
         | None -> []
         | Some snap -> [ ("environment", env_snapshot_to_json snap) ]
@@ -813,6 +839,7 @@ let outcome_to_json ?(extra = []) ?(env_snapshot = None) = function
              ("hint", `String result.hint);
              ("recovery_hint", `String result.hint);
            ]
+         @ diagnosis_field
          @ alternatives_field
          @ env_field)
 
@@ -823,6 +850,8 @@ let process_result_json ?(artifact_policy = Persist_if_large) ~base_path
   |> outcome_to_json ~extra ~env_snapshot
 
 let blocked_result_json ~cmd ~error ~reason ?hint ?(alternatives = [])
-    ?(retryability = Self_correct) ?(extra = []) ?(env_snapshot = None) () =
-  build_blocked_outcome ~cmd ~error ~reason ?hint ~alternatives ~retryability ()
+    ?(retryability = Self_correct) ?(diag = None) ?(extra = [])
+    ?(env_snapshot = None) () =
+  build_blocked_outcome ~cmd ~error ~reason ?hint ~alternatives ~retryability
+    ~diag ()
   |> outcome_to_json ~extra ~env_snapshot

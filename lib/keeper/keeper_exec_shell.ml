@@ -166,6 +166,116 @@ let readonly_hint_of_category = function
        not accept destructive commands)."
   | _ -> "This operation is not allowed in readonly shell."
 
+(* P8: Structured diagnosis per readonly category.  The hint field is
+   human-oriented prose; the diagnosis field is machine-parseable so
+   small-LLM keepers can extract rule_id + rewrite without regex. *)
+let diagnosis_of_readonly_category category =
+  match category with
+  | "chaining" ->
+      Some { Exec_core.rule_id = "readonly_chaining_blocked"
+            ; explanation =
+                "&&, ||, and ; chain multiple commands; the readonly shell \
+                 validates one command per call."
+            ; rewrite =
+                Some "Split into two calls: keeper_shell op='custom' \
+                      command='git status' then keeper_shell op='custom' \
+                      command='git log -1'."
+            ; tool_suggestion = None }
+  | "redirect" ->
+      Some { Exec_core.rule_id = "readonly_redirect_blocked"
+            ; explanation =
+                "> and >> modify the filesystem; readonly shell forbids writes."
+            ; rewrite = None
+            ; tool_suggestion =
+                Some "keeper_fs_edit" }
+  | "git_write" ->
+      Some { Exec_core.rule_id = "readonly_git_write_blocked"
+            ; explanation =
+                "git commit/push/checkout modify state; readonly shell only \
+                 allows read-only git subcommands (log, diff, status, show)."
+            ; rewrite =
+                Some "Use keeper_bash with coding preset: keeper_bash \
+                      cmd='git add lib/foo.ml && git commit -m \"msg\"'."
+            ; tool_suggestion = None }
+  | "package_install" ->
+      Some { Exec_core.rule_id = "readonly_package_install_blocked"
+            ; explanation =
+                "opam install / npm install mutate the global environment; \
+                 readonly shell forbids package mutations."
+            ; rewrite =
+                Some "Use keeper_bash with coding preset: keeper_bash \
+                      cmd='opam install -y eio'."
+            ; tool_suggestion = None }
+  | "destructive" ->
+      Some { Exec_core.rule_id = "readonly_destructive_blocked"
+            ; explanation =
+                "rm, curl -o, and similar destructive commands modify or \
+                 delete state; readonly shell forbids them."
+            ; rewrite =
+                Some "Use keeper_bash with coding preset: keeper_bash \
+                      cmd='rm .tmp/scratch.log'."
+            ; tool_suggestion = None }
+  | _ -> None
+
+let diagnosis_of_block_reason reason =
+  match reason with
+  | Worker_dev_tools.Chain_or_redirect ->
+      Some { Exec_core.rule_id = "command_chaining_blocked"
+            ; explanation =
+                "Pipe | and chain && or ; combine multiple commands; the \
+                 keeper validates one command per call."
+            ; rewrite =
+                Some "Split into two keeper_bash calls, or use keeper_shell \
+                      with a specific op (rg, ls, find)."
+            ; tool_suggestion = None }
+  | Worker_dev_tools.Pipes_not_allowed ->
+      Some { Exec_core.rule_id = "command_pipe_blocked"
+            ; explanation =
+                "Pipes (|) connect two processes; each needs separate \
+                 validation in the keeper security model."
+            ; rewrite =
+                Some "Run the first command, then pipe the output into \
+                      the second keeper_bash call."
+            ; tool_suggestion = None }
+  | Worker_dev_tools.Unsafe_redirect ->
+      Some { Exec_core.rule_id = "command_redirect_blocked"
+            ; explanation =
+                "> and >> redirect output to files; use a dedicated write tool."
+            ; rewrite = None
+            ; tool_suggestion = Some "keeper_fs_edit" }
+  | Worker_dev_tools.Injection ->
+      Some { Exec_core.rule_id = "command_injection_blocked"
+            ; explanation =
+                "Shell metacharacters ($(), ``, eval) can inject arbitrary \
+                 commands; they are blocked for safety."
+            ; rewrite =
+                Some "Compute the value first, then pass it as a literal \
+                      argument in a second keeper_bash call."
+            ; tool_suggestion = None }
+  | Worker_dev_tools.Process_substitution ->
+      Some { Exec_core.rule_id = "command_process_subst_blocked"
+            ; explanation =
+                "<() and >() process substitutions create sub-processes; \
+                 they are blocked for safety."
+            ; rewrite =
+                Some "Write the intermediate result to a temp file, then \
+                      reference it in the second command."
+            ; tool_suggestion = None }
+  | Worker_dev_tools.Command_not_allowed name ->
+      Some { Exec_core.rule_id = "command_not_allowed"
+            ; explanation =
+                Printf.sprintf
+                  "'%s' is not on the allowed command list for this preset."
+                  name
+            ; rewrite = None
+            ; tool_suggestion = Some "keeper_shell" }
+  | Worker_dev_tools.Empty_command ->
+      Some { Exec_core.rule_id = "command_empty"
+            ; explanation = "The command string is empty."
+            ; rewrite =
+                Some "Provide a command: keeper_bash cmd='ls -la lib/'."
+            ; tool_suggestion = None }
+
 let process_status_is_timeout = function
   | Unix.WSIGNALED sig_num -> sig_num = Sys.sigterm
   | Unix.WEXITED 124 -> true  (* Process_eio returns 124 on Eio.Time.Timeout *)
@@ -591,6 +701,17 @@ let handle_keeper_bash
              ; "Ask a human operator to perform this destructive action."
              ]
            ~retryability:Exec_core.Operator_required
+           ~diag:
+             (Some { Exec_core.rule_id = "destructive_operation_blocked"
+                    ; explanation =
+                        "force push, rm -rf, and similar destructive \
+                         commands are blocked for all presets to protect \
+                         shared state."
+                    ; rewrite =
+                        Some "For git: use 'git push' without --force. \
+                              For cleanup: target specific files (rm file) \
+                              instead of rm -rf."
+                    ; tool_suggestion = None })
            ~extra:[ "cmd", `String cmd_for_log; "execution_time_ms", `Int 0 ]
            ~env_snapshot:env_snap
            ()))
@@ -665,6 +786,7 @@ let handle_keeper_bash
              ~reason:reason_str
              ~hint
              ~alternatives
+             ~diag:(diagnosis_of_block_reason reason)
              ~extra:[ "execution_time_ms", `Int 0 ]
              ~env_snapshot:env_snap
              ())
@@ -697,6 +819,15 @@ let handle_keeper_bash
                  ; "Use keeper_shell op=git op_cmd='branch -a' to list available branches."
                  ]
                ~retryability:Exec_core.Operator_required
+               ~diag:
+                 (Some { Exec_core.rule_id = "branch_switch_blocked"
+                        ; explanation =
+                            "git checkout/switch/branch mutations need a                              write-enabled preset and a sandbox clone."
+                        ; rewrite =
+                            Some (Printf.sprintf
+                              "First: keeper_shell op=git_clone.                                Then: set cwd=%srepos/REPO/.worktrees/TASK"
+                              sandbox_root)
+                        ; tool_suggestion = None })
                ~extra:[ "cmd", `String cmd_for_log; "execution_time_ms", `Int 0 ]
                ()))
         (* Write gate — preset layer *)
@@ -716,6 +847,13 @@ let handle_keeper_bash
                  ; "If you need write access, ask the operator to assign a Coding/Delivery/Full preset."
                  ]
                ~retryability:Exec_core.Operator_required
+               ~diag:
+                 (Some { Exec_core.rule_id = "write_operation_gated"
+                        ; explanation =
+                            "This command modifies state but the current preset                              is read-only. Write operations require Coding,                              Delivery, or Full preset."
+                        ; rewrite = None
+                        ; tool_suggestion =
+                            Some "Ask the operator for a write-enabled preset" })
                ~extra:[ "cmd", `String cmd_for_log; "execution_time_ms", `Int 0 ]
                ~env_snapshot:env_snap
                ()))
@@ -759,6 +897,15 @@ let handle_keeper_bash
                  ; "Use keeper_bash with a cwd pointing to your sandbox worktree."
                  ]
                ~retryability:Exec_core.Operator_required
+               ~diag:
+                 (Some { Exec_core.rule_id = "write_outside_playground_blocked"
+                        ; explanation =
+                            "Write operations must run inside the keeper sandbox.                              The current cwd is outside the sandbox root."
+                        ; rewrite =
+                            Some (Printf.sprintf
+                              "Clone into sandbox: keeper_shell op=git_clone,                                then set cwd=%srepos/REPO/.worktrees/TASK"
+                              sandbox_root)
+                        ; tool_suggestion = None })
                ~extra:[ "cmd", `String cmd_for_log; "cwd", `String cwd; "execution_time_ms", `Int 0 ]
                ()))
         else (
@@ -1802,6 +1949,7 @@ let handle_keeper_shell
                   "Readonly shell blocked pattern '%s' in category '%s'."
                   pat category)
              ~hint
+             ~diag:(diagnosis_of_readonly_category category)
              ~extra:
                [
                  "op", `String op;

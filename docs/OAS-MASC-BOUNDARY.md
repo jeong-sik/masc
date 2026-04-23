@@ -1,6 +1,6 @@
 ---
 status: reference
-last_verified: 2026-04-17
+last_verified: 2026-04-23
 code_refs:
   - lib/oas.ml
   - lib/oas_worker.ml

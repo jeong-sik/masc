@@ -467,10 +467,10 @@ let persona_profile_path_opt name =
 (* ================================================================ *)
 
 (** Scan a flat TOML doc for keys under [[keeper.oas_env]].  Only keys
-    matching ^OAS_(CLAUDE|CODEX|GEMINI)_.+ are accepted — any other
-    entries are dropped silently.  This guards against arbitrary
-    process env injection via keeper TOML.  Values are coerced to
-    strings via [string_of_toml_value_for_env] (bool → "1"/"0"), so
+    matching ^(OAS_(CLAUDE|CODEX|GEMINI)_|MASC_KEEPER_OAS_) are accepted
+    — any other entries are dropped silently.  This guards against
+    arbitrary process env injection via keeper TOML.  Values are coerced
+    to strings via [string_of_toml_value_for_env] (bool → "1"/"0"), so
     integers and booleans in TOML map to the string shapes the OAS
     transport build_args already understand. *)
 let string_of_toml_value_for_env = function
@@ -484,7 +484,9 @@ let string_of_toml_value_for_env = function
 let oas_env_key_prefix = "keeper.oas_env."
 
 let oas_env_key_is_allowed suffix =
-  let allowed_prefixes = [ "OAS_CLAUDE_"; "OAS_CODEX_"; "OAS_GEMINI_" ] in
+  let allowed_prefixes =
+    [ "OAS_CLAUDE_"; "OAS_CODEX_"; "OAS_GEMINI_"; "MASC_KEEPER_OAS_" ]
+  in
   String.length suffix
     > (List.fold_left (fun acc p -> max acc (String.length p)) 0 allowed_prefixes)
   && List.exists (fun p ->

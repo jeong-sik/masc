@@ -38,72 +38,6 @@ let parse_iso8601 ?(default_time = Time_compat.now () -. 60.0) timestamp =
   | Some unix_ts -> unix_ts
   | None -> default_time
 
-(* ============================================ *)
-(* Agent Role - task assignment roles           *)
-(* ============================================ *)
-
-(** Agent role for task assignment. *)
-type role =
-  | Writer     (** Produces artifacts: code, docs, designs *)
-  | Reviewer   (** Reviews artifacts: code review, QA, ethics *)
-  | Admin      (** Administrative: orchestration, assignment *)
-  | Unassigned (** No specific role (legacy/default) *)
-
-let pp_role fmt r =
-  Format.fprintf fmt "%s"
-    (match r with
-     | Writer -> "Writer"
-     | Reviewer -> "Reviewer"
-     | Admin -> "Admin"
-     | Unassigned -> "Unassigned")
-
-let equal_role a b =
-  match a, b with
-  | Writer, Writer | Reviewer, Reviewer | Admin, Admin | Unassigned, Unassigned -> true
-  | _ -> false
-
-let show_role r =
-  Format.asprintf "%a" pp_role r
-
-let role_to_string = function
-  | Writer -> "writer"
-  | Reviewer -> "reviewer"
-  | Admin -> "admin"
-  | Unassigned -> "unassigned"
-
-let role_of_string_opt = function
-  | "writer" | "write" | "author" | "implementer" -> Some Writer
-  | "reviewer" | "review" | "qa" | "auditor" -> Some Reviewer
-  | "admin" | "administrator" | "orchestrator" -> Some Admin
-  | "unassigned" -> Some Unassigned
-  | _ -> None
-
-let role_of_string s =
-  role_of_string_opt s |> Option.value ~default:Unassigned
-
-let role_to_yojson r = `String (role_to_string r)
-
-let role_of_yojson = function
-  | `String s ->
-    (match role_of_string_opt s with
-     | Some r -> Ok r
-     | None -> Error (Printf.sprintf "role_of_yojson: unknown role %S" s))
-  | _ -> Error "role_of_yojson: expected string"
-
-(** Check if agent role satisfies a required role.
-    Admin can satisfy any requirement. Unassigned requirement is satisfied by any role. *)
-let role_satisfies ~(required : role) ~(agent_role : role) : bool =
-  match required, agent_role with
-  | Unassigned, _ -> true
-  | _, Admin -> true
-  | Writer, Writer -> true
-  | Reviewer, Reviewer -> true
-  | Admin, _ -> false
-  | Writer, Reviewer -> false
-  | Writer, Unassigned -> false
-  | Reviewer, Writer -> false
-  | Reviewer, Unassigned -> false
-
 (** Agent status - compile-time state machine *)
 type agent_status =
   | Active
@@ -343,7 +277,6 @@ type task_status =
       assignee: string;
       submitted_at: string;
       verification_id: string;
-      required_verifier_role: role;
       deadline: string option;
     }
   | Done of { assignee: string; completed_at: string; notes: string option }
@@ -448,13 +381,12 @@ let task_status_to_yojson = function
         ("notes", Json_util.string_opt_to_json notes);
       ]
   | AwaitingVerification { assignee; submitted_at; verification_id;
-                           required_verifier_role; deadline } ->
+                           deadline; _ } ->
       `Assoc [
         ("status", `String "awaiting_verification");
         ("assignee", `String assignee);
         ("submitted_at", `String submitted_at);
         ("verification_id", `String verification_id);
-        ("required_verifier_role", `String (role_to_string required_verifier_role));
         ("deadline", Json_util.string_opt_to_json deadline);
       ]
   | Cancelled { cancelled_by; cancelled_at; reason } ->
@@ -488,21 +420,8 @@ let task_status_of_yojson json =
         let assignee = json |> member "assignee" |> to_string in
         let submitted_at = json |> member "submitted_at" |> to_string in
         let verification_id = json |> member "verification_id" |> to_string in
-        let required_verifier_role =
-          (* Issue #8615: was [role_of_string s] (lossy default to
-             [Unassigned]). [role_satisfies ~required:Unassigned]
-             returns true for ANY agent role — that silently bypasses
-             the verification gate when the JSON value is a typo or
-             a fabricated role string. Fail closed to [Reviewer] (the
-             same default the [None] arm uses) so an unrecognised
-             value at least demands the strictest sane interpretation. *)
-          match json |> member "required_verifier_role" |> to_string_option with
-          | Some s ->
-              role_of_string_opt s |> Option.value ~default:Reviewer
-          | None -> Reviewer in
         let deadline = json |> member "deadline" |> to_string_option in
-        Ok (AwaitingVerification { assignee; submitted_at; verification_id;
-                                   required_verifier_role; deadline })
+        Ok (AwaitingVerification { assignee; submitted_at; verification_id; deadline })
     | "cancelled" ->
         let cancelled_by = json |> member "cancelled_by" |> to_string in
         let cancelled_at = json |> member "cancelled_at" |> to_string in
@@ -693,8 +612,6 @@ type task = {
   created_at: string;
   created_by: string option; [@default None]
   worktree: worktree_info option; [@default None]  (* linked worktree info *)
-  required_role: role; [@default Unassigned]  (** Role required to claim this task *)
-  required_preset: string option; [@default None]  (** Tool preset required to claim this task *)
   goal_id: string option; [@default None]  (** Structured goal linkage SSOT *)
   stage: Task_stage.t option; [@default None]  (** Coding task stage gate *)
   contract: task_contract option; [@default None]
@@ -723,19 +640,9 @@ let task_to_yojson t =
     | None -> with_created_by
     | Some wt -> with_created_by @ [("worktree", worktree_info_to_yojson wt)]
   in
-  (* Add required_role if not Unassigned *)
-  let with_role = match t.required_role with
-    | Unassigned -> with_worktree
-    | role -> with_worktree @ [("required_role", role_to_yojson role)]
-  in
-  (* Add required_preset if present *)
-  let with_preset = match t.required_preset with
-    | None -> with_role
-    | Some p -> with_role @ [("required_preset", `String p)]
-  in
   let with_goal_id = match t.goal_id with
-    | None -> with_preset
-    | Some goal_id -> with_preset @ [("goal_id", `String goal_id)]
+    | None -> with_worktree
+    | Some goal_id -> with_worktree @ [("goal_id", `String goal_id)]
   in
   (* Add stage if present *)
   let with_stage = match t.stage with
@@ -764,11 +671,10 @@ let task_to_yojson t =
     | None -> with_cycle_count
     | Some r -> with_cycle_count @ [("do_not_reclaim_reason", `String r)]
   in
-  let with_role = with_do_not_reclaim in
   (* Merge status fields into task *)
   match status_json with
-  | `Assoc status_fields -> `Assoc (with_role @ status_fields)
-  | _ -> `Assoc with_role
+  | `Assoc status_fields -> `Assoc (with_do_not_reclaim @ status_fields)
+  | _ -> `Assoc with_do_not_reclaim
 
 let task_of_yojson json =
   let open Yojson.Safe.Util in
@@ -788,12 +694,6 @@ let task_of_yojson json =
           | Ok wt -> Some wt
           | Error _ -> None  (* Graceful fallback for backwards compat *)
     in
-    (* Parse optional required_role field — defaults to Unassigned for backward compat *)
-    let required_role = match json |> member "required_role" |> to_string_option with
-      | Some s -> role_of_string s
-      | None -> Unassigned
-    in
-    let required_preset = json |> member "required_preset" |> to_string_option in
     let goal_id = json |> member "goal_id" |> to_string_option in
     (* Parse optional stage field *)
     let stage = match json |> member "stage" |> to_string_option with
@@ -833,8 +733,6 @@ let task_of_yojson json =
             created_at;
             created_by;
             worktree;
-            required_role;
-            required_preset;
             goal_id;
             stage;
             contract;
@@ -1154,5 +1052,5 @@ type claim_next_result =
       message : string;
     }
   | Claim_next_no_unclaimed
-  | Claim_next_no_eligible of { excluded_count : int; preset_filtered : int }
+  | Claim_next_no_eligible of { excluded_count : int }
   | Claim_next_error of string

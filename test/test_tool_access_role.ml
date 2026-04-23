@@ -68,35 +68,9 @@ let test_equivalence_worker () =
       old_result new_result
   ) tools
 
-let test_equivalence_reader () =
-  let tools = all_surface_tools () in
-  List.iter (fun tool_name ->
-    let old_result = old_allows Reader tool_name in
-    let new_result =
-      Tool_access_policy.allows_name
-        (Tool_access_role.policy_for_role Reader) tool_name
-    in
-    check bool
-      (Printf.sprintf "Reader/%s" tool_name)
-      old_result new_result
-  ) tools
-
 (* ================================================================ *)
 (* Hierarchy tests                                                   *)
 (* ================================================================ *)
-
-let test_reader_subset_of_worker () =
-  let tools = all_surface_tools () in
-  let reader_policy = Tool_access_role.policy_for_role Reader in
-  let worker_policy = Tool_access_role.policy_for_role Worker in
-  List.iter (fun tool_name ->
-    let reader_allows = Tool_access_policy.allows_name reader_policy tool_name in
-    let worker_allows = Tool_access_policy.allows_name worker_policy tool_name in
-    if reader_allows then
-      check bool
-        (Printf.sprintf "Reader allows %s, Worker must too" tool_name)
-        true worker_allows
-  ) tools
 
 let test_worker_subset_of_admin () =
   let tools = all_surface_tools () in
@@ -114,15 +88,6 @@ let test_worker_subset_of_admin () =
 (* ================================================================ *)
 (* Admin surface denial tests                                        *)
 (* ================================================================ *)
-
-let test_reader_denies_admin_only_tools () =
-  let reader_policy = Tool_access_role.policy_for_role Reader in
-  List.iter (fun tool_name ->
-    check bool
-      (Printf.sprintf "Reader denies %s" tool_name)
-      false
-      (Tool_access_policy.allows_name reader_policy tool_name)
-  ) (Tool_access_role.admin_only_tools ())
 
 let test_worker_denies_admin_only_tools () =
   let worker_policy = Tool_access_role.policy_for_role Worker in
@@ -142,15 +107,6 @@ let test_admin_allows_admin_only_tools () =
       (Tool_access_policy.allows_name admin_policy tool_name)
   ) (Tool_access_role.admin_only_tools ())
 
-let test_reader_denies_worker_only_tools () =
-  let reader_policy = Tool_access_role.policy_for_role Reader in
-  List.iter (fun tool_name ->
-    check bool
-      (Printf.sprintf "Reader denies %s" tool_name)
-      false
-      (Tool_access_policy.allows_name reader_policy tool_name)
-  ) (Tool_access_role.worker_only_tools ())
-
 let test_worker_allows_worker_only_tools () =
   let worker_policy = Tool_access_role.policy_for_role Worker in
   List.iter (fun tool_name ->
@@ -161,21 +117,13 @@ let test_worker_allows_worker_only_tools () =
   ) (Tool_access_role.worker_only_tools ())
 
 let test_channel_gate_requires_worker () =
-  let reader_policy = Tool_access_role.policy_for_role Reader in
   let worker_policy = Tool_access_role.policy_for_role Worker in
-  check bool "Reader denies channel_gate" false
-    (Tool_access_policy.allows_name reader_policy "channel_gate");
   check bool "Worker allows channel_gate" true
     (Tool_access_policy.allows_name worker_policy "channel_gate")
 
 let test_portal_tools_require_worker () =
-  let reader_policy = Tool_access_role.policy_for_role Reader in
   let worker_policy = Tool_access_role.policy_for_role Worker in
   List.iter (fun tool_name ->
-    check bool
-      (Printf.sprintf "Reader denies %s" tool_name)
-      false
-      (Tool_access_policy.allows_name reader_policy tool_name);
     check bool
       (Printf.sprintf "Worker allows %s" tool_name)
       true
@@ -233,7 +181,7 @@ let test_unregistered_tool_allowed_all_roles () =
       (Printf.sprintf "%s: unregistered tool allowed (fail-open)" role_name)
       true
       (Tool_access_policy.allows_name policy unknown)
-  ) [("Admin", Admin); ("Worker", Worker); ("Reader", Reader)]
+  ) [("Admin", Admin); ("Worker", Worker)]
 
 let test_empty_string_tool_allowed () =
   let policy = Tool_access_role.policy_for_role Worker in
@@ -280,23 +228,17 @@ let () =
         [
           test_case "Admin: old == new" `Quick test_equivalence_admin;
           test_case "Worker: old == new" `Quick test_equivalence_worker;
-          test_case "Reader: old == new" `Quick test_equivalence_reader;
         ] );
       ( "hierarchy",
         [
-          test_case "Reader ⊂ Worker" `Quick test_reader_subset_of_worker;
           test_case "Worker ⊂ Admin" `Quick test_worker_subset_of_admin;
         ] );
       ( "role_boundaries",
         [
-          test_case "Reader denies admin_only" `Quick
-            test_reader_denies_admin_only_tools;
           test_case "Worker denies admin_only" `Quick
             test_worker_denies_admin_only_tools;
           test_case "Admin allows admin_only" `Quick
             test_admin_allows_admin_only_tools;
-          test_case "Reader denies worker_only" `Quick
-            test_reader_denies_worker_only_tools;
           test_case "Worker allows worker_only" `Quick
             test_worker_allows_worker_only_tools;
           test_case "channel_gate requires worker" `Quick

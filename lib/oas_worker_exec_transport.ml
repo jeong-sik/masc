@@ -132,6 +132,32 @@ let upsert_http_header ~key ~value headers =
   in
   (key, value) :: retained
 
+let trim_nonempty value =
+  match value with
+  | Some raw ->
+      let trimmed = String.trim raw in
+      if String.equal trimmed "" then None else Some trimmed
+  | None -> None
+
+let first_nonempty_env names =
+  List.find_map (fun name -> Sys.getenv_opt name |> trim_nonempty) names
+
+let keeper_name_of_agent_name agent_name =
+  let prefix = "keeper-" in
+  let suffix = "-agent" in
+  let value = String.trim agent_name in
+  let vlen = String.length value in
+  let plen = String.length prefix in
+  let slen = String.length suffix in
+  if
+    vlen > plen + slen
+    && String.sub value 0 plen = prefix
+    && String.sub value (vlen - slen) slen = suffix
+  then
+    Some (String.sub value plen (vlen - plen - slen))
+  else
+    None
+
 let runtime_mcp_policy_with_masc_agent_name
     ~(agent_name : string)
     (policy : Llm_provider.Llm_transport.runtime_mcp_policy) =
@@ -143,13 +169,31 @@ let runtime_mcp_policy_with_masc_agent_name
         (function
           | Llm_provider.Llm_transport.Http_server ({ name; headers; _ } as server)
             when String.equal name "masc" ->
+              let headers =
+                upsert_http_header
+                  ~key:"x-masc-agent-name"
+                  ~value:agent_name headers
+              in
+              let headers =
+                match first_nonempty_env [ "MASC_INTERNAL_MCP_TOKEN" ] with
+                | Some token ->
+                    upsert_http_header
+                      ~key:"x-masc-internal-token"
+                      ~value:token headers
+                | None -> headers
+              in
+              let headers =
+                match keeper_name_of_agent_name agent_name with
+                | Some keeper_name ->
+                    upsert_http_header
+                      ~key:"x-masc-keeper-name"
+                      ~value:keeper_name headers
+                | None -> headers
+              in
               Llm_provider.Llm_transport.Http_server
                 {
                   server with
-                  headers =
-                    upsert_http_header
-                      ~key:"x-masc-agent-name"
-                      ~value:agent_name headers;
+                  headers;
                 }
           | server -> server)
         policy.servers
@@ -218,36 +262,19 @@ let trim_nonempty value =
 let first_nonempty_env names =
   List.find_map (fun name -> Sys.getenv_opt name |> trim_nonempty) names
 
-let bearer_token_headers token =
-  [ ("Authorization", "Bearer " ^ token) ]
-
-let fallback_public_mcp_headers () =
-  match first_nonempty_env [ "MASC_MCP_TOKEN" ] with
-  | Some token -> bearer_token_headers token
-  | None -> []
-
-let keeper_public_mcp_headers ~agent_name =
-  match Env_config_core.base_path_opt () with
-  | Some base_path -> (
-      match Auth.ensure_keeper_credential base_path ~agent_name with
-      | Ok (token, _) -> bearer_token_headers token
-      | Error err ->
-          Log.warn ~ctx:"oas_worker_exec"
-            "keeper MCP credential provisioning failed for %s: %s; falling back to MASC_MCP_TOKEN"
-            agent_name (Types.masc_error_to_string err);
-          fallback_public_mcp_headers ())
-  | None -> fallback_public_mcp_headers ()
-
-let public_mcp_runtime_policy_of_tool_names ?agent_name (tool_names : string list) :
+let public_mcp_runtime_policy_of_tool_names ?agent_name:_ (tool_names : string list) :
     Llm_provider.Llm_transport.runtime_mcp_policy option =
   let tool_names = dedupe_preserve_order tool_names in
   if not (tool_names_are_public_mcp tool_names) then
     None
   else
     let masc_headers =
-      match Option.bind agent_name trim_nonempty_string with
-      | Some agent_name -> keeper_public_mcp_headers ~agent_name
-      | None -> fallback_public_mcp_headers ()
+      match first_nonempty_env [ "MASC_INTERNAL_MCP_TOKEN" ] with
+      | Some token -> [ ("x-masc-internal-token", token) ]
+      | None ->
+          (match first_nonempty_env [ "MASC_MCP_TOKEN" ] with
+           | Some token -> [ ("Authorization", "Bearer " ^ token) ]
+           | None -> [])
     in
     Some
       {

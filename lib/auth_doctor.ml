@@ -146,7 +146,7 @@ let admin_token_env_fields = function
       ("admin", Some cred.agent_name, Some (agent_role_to_string cred.role))
 
 let role_counts_of_credentials credentials =
-  [ Reader; Worker; Admin ]
+  [ Worker; Admin ]
   |> List.filter_map (fun role ->
          let count =
            List.fold_left
@@ -356,7 +356,7 @@ let analyze ~base_path_input ~default_base_path () =
     auth_config_path = Auth.auth_config_file base_path;
     auth_enabled = auth_cfg.enabled;
     require_token = auth_cfg.require_token;
-    default_role = agent_role_to_string auth_cfg.default_role;
+    default_role = agent_role_to_string Worker;
     initial_admin;
     bind_host;
     bind_is_loopback;

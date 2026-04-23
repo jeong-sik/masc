@@ -234,15 +234,6 @@ will be added here when their handlers land.";
           ("type", `String "boolean");
           ("description", `String "Require tokens for section=auth");
         ]);
-        ("default_role", `Assoc [
-          ("type", `String "string");
-          (* Issue #8386: derived from Types.agent_role Variant SSOT.
-             Hand-rolled enum risks dropping a constructor on extension. *)
-          ("enum", `List (List.map (fun s -> `String s) Types.valid_agent_role_strings));
-          ("description", `String
-            (Printf.sprintf "Default role for unauthenticated agents (%s)"
-               (String.concat " | " Types.valid_agent_role_strings)));
-        ]);
         ("token_expiry_hours", `Assoc [
           ("type", `String "integer");
           ("description", `String "Token expiry in hours for section=auth");

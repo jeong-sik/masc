@@ -1137,6 +1137,11 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Coord.conf
     | Ok () -> (true, None)
     | Error err -> (false, Some (Types.masc_error_to_string err))
   in
+  let effective_admin =
+    match effective_role_result with
+    | Ok role -> Some (role = Types.Admin)
+    | Error _ -> None
+  in
   let effective_role =
     match effective_role_result with
     | Ok role -> Some (Types.agent_role_to_string role)
@@ -1156,7 +1161,6 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Coord.conf
     [
       ("enabled", `Bool auth_cfg.enabled);
       ("require_token", `Bool auth_cfg.require_token);
-      ("default_role", `String (Types.agent_role_to_string auth_cfg.default_role));
       ("token_present", `Bool token_present);
       ("token_valid", `Bool token_valid);
       ("token_agent", Json_util.string_opt_to_json token_agent);
@@ -1174,6 +1178,7 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Coord.conf
         match auth_error with
         | Some err -> `String (Types.masc_error_to_string err)
         | None -> `Null );
+      ("effective_admin", Json_util.bool_opt_to_json effective_admin);
       ("can_keeper_msg", `Bool can_keeper_msg);
       ("keeper_msg_error", Json_util.string_opt_to_json keeper_msg_error);
     ]

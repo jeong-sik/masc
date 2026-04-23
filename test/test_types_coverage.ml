@@ -562,7 +562,7 @@ let test_backlog_to_yojson_with_tasks () =
     created_at = "2024-01-15T12:00:00Z";
     worktree = None;
     created_by = None;
-    required_role = Types_core.Unassigned; required_preset = None; stage = None;
+    stage = None;
     contract = None; handoff_context = None; cycle_count = 0; do_not_reclaim_reason = None;
   } in
   let b : Types.backlog = { tasks = [task]; last_updated = "2024-01-15T12:00:00Z"; version = 2 } in
@@ -767,19 +767,11 @@ let test_masc_error_rate_limit () =
    agent_role Tests
    ============================================================ *)
 
-let test_agent_role_to_string_reader () =
-  check string "reader" "reader" (Types.agent_role_to_string Types.Reader)
-
 let test_agent_role_to_string_worker () =
   check string "worker" "worker" (Types.agent_role_to_string Types.Worker)
 
 let test_agent_role_to_string_admin () =
   check string "admin" "admin" (Types.agent_role_to_string Types.Admin)
-
-let test_agent_role_of_string_reader () =
-  match Types.agent_role_of_string "reader" with
-  | Ok Types.Reader -> ()
-  | _ -> fail "expected Ok Reader"
 
 let test_agent_role_of_string_worker () =
   match Types.agent_role_of_string "worker" with
@@ -828,7 +820,7 @@ let test_agent_credential_to_yojson () =
   | `Assoc fields ->
     check bool "has agent_name" true (List.mem_assoc "agent_name" fields);
     check bool "has token" true (List.mem_assoc "token" fields);
-    check bool "has role" true (List.mem_assoc "role" fields)
+    check bool "has admin" true (List.mem_assoc "admin" fields)
   | _ -> fail "expected Assoc"
 
 let test_agent_credential_to_yojson_with_expiry () =
@@ -848,13 +840,13 @@ let test_agent_credential_of_yojson_ok () =
   let json = `Assoc [
     ("agent_name", `String "gemini");
     ("token", `String "xyz");
-    ("role", `String "reader");
+    ("admin", `Bool false);
     ("created_at", `String "2024-01-15T12:00:00Z");
   ] in
   match Types.agent_credential_of_yojson json with
   | Ok cred ->
     check string "agent_name" "gemini" cred.agent_name;
-    check bool "is reader" true (cred.role = Types.Reader)
+    check bool "admin=false maps to worker" true (cred.role = Types.Worker)
   | Error e -> fail ("expected Ok, got: " ^ e)
 
 let test_agent_credential_of_yojson_error () =
@@ -873,7 +865,7 @@ let test_auth_config_to_yojson () =
   match json with
   | `Assoc fields ->
     check bool "has enabled" true (List.mem_assoc "enabled" fields);
-    check bool "has default_role" true (List.mem_assoc "default_role" fields)
+    check bool "omits default_role" false (List.mem_assoc "default_role" fields)
   | _ -> fail "expected Assoc"
 
 let test_auth_config_of_yojson_ok () =
@@ -881,7 +873,6 @@ let test_auth_config_of_yojson_ok () =
     ("enabled", `Bool true);
     ("room_secret_hash", `Null);
     ("require_token", `Bool false);
-    ("default_role", `String "admin");
     ("token_expiry_hours", `Int 48);
   ] in
   match Types.auth_config_of_yojson json with
@@ -900,13 +891,9 @@ let test_auth_config_of_yojson_error () =
    permissions Tests
    ============================================================ *)
 
-let test_permissions_for_role_reader () =
-  let perms = Types.permissions_for_role Types.Reader in
-  check bool "has CanReadState" true (List.mem Types.CanReadState perms);
-  check bool "no CanInit" false (List.mem Types.CanInit perms)
-
 let test_permissions_for_role_worker () =
   let perms = Types.permissions_for_role Types.Worker in
+  check bool "has CanReadState" true (List.mem Types.CanReadState perms);
   check bool "has CanClaimTask" true (List.mem Types.CanClaimTask perms);
   check bool "has CanBroadcast" true (List.mem Types.CanBroadcast perms)
 
@@ -915,11 +902,8 @@ let test_permissions_for_role_admin () =
   check bool "has CanInit" true (List.mem Types.CanInit perms);
   check bool "has CanReset" true (List.mem Types.CanReset perms)
 
-let test_has_permission_reader () =
-  check bool "reader can read" true (Types.has_permission Types.Reader Types.CanReadState);
-  check bool "reader cannot init" false (Types.has_permission Types.Reader Types.CanInit)
-
 let test_has_permission_worker () =
+  check bool "worker can read" true (Types.has_permission Types.Worker Types.CanReadState);
   check bool "worker can broadcast" true (Types.has_permission Types.Worker Types.CanBroadcast);
   check bool "worker cannot reset" false (Types.has_permission Types.Worker Types.CanReset)
 
@@ -936,13 +920,11 @@ let test_multiplier_for_role () =
     per_minute = 60;
     burst_allowed = 10;
     priority_agents = [];
-    reader_multiplier = 0.5;
     worker_multiplier = 1.0;
     admin_multiplier = 2.0;
     broadcast_per_minute = 30;
     task_ops_per_minute = 100;
   } in
-  check (float 0.01) "reader mult" 0.5 (Types.multiplier_for_role config Types.Reader);
   check (float 0.01) "worker mult" 1.0 (Types.multiplier_for_role config Types.Worker);
   check (float 0.01) "admin mult" 2.0 (Types.multiplier_for_role config Types.Admin)
 
@@ -951,13 +933,12 @@ let test_effective_limit () =
     per_minute = 60;
     burst_allowed = 10;
     priority_agents = [];
-    reader_multiplier = 0.5;
     worker_multiplier = 1.0;
     admin_multiplier = 2.0;
     broadcast_per_minute = 30;
     task_ops_per_minute = 100;
   } in
-  check int "reader general" 30 (Types.effective_limit config ~role:Types.Reader ~category:Types.GeneralLimit);
+  check int "worker general" 60 (Types.effective_limit config ~role:Types.Worker ~category:Types.GeneralLimit);
   check int "admin general" 120 (Types.effective_limit config ~role:Types.Admin ~category:Types.GeneralLimit)
 
 (* ============================================================
@@ -969,7 +950,6 @@ let test_limit_for_category_general () =
     per_minute = 60;
     burst_allowed = 10;
     priority_agents = [];
-    reader_multiplier = 1.0;
     worker_multiplier = 1.0;
     admin_multiplier = 1.0;
     broadcast_per_minute = 30;
@@ -982,7 +962,6 @@ let test_limit_for_category_broadcast () =
     per_minute = 60;
     burst_allowed = 10;
     priority_agents = [];
-    reader_multiplier = 1.0;
     worker_multiplier = 1.0;
     admin_multiplier = 1.0;
     broadcast_per_minute = 30;
@@ -995,7 +974,6 @@ let test_limit_for_category_task_ops () =
     per_minute = 60;
     burst_allowed = 10;
     priority_agents = [];
-    reader_multiplier = 1.0;
     worker_multiplier = 1.0;
     admin_multiplier = 1.0;
     broadcast_per_minute = 30;
@@ -1167,7 +1145,6 @@ let test_default_rate_limit_burst () =
 
 let test_default_rate_limit_multipliers () =
   let c = Types.default_rate_limit in
-  check (float 0.01) "reader" 0.5 c.reader_multiplier;
   check (float 0.01) "worker" 1.0 c.worker_multiplier;
   check (float 0.01) "admin" 2.0 c.admin_multiplier
 
@@ -1180,7 +1157,6 @@ let test_rate_limit_config_to_yojson () =
     per_minute = 60;
     burst_allowed = 10;
     priority_agents = ["claude"; "gemini"];
-    reader_multiplier = 0.5;
     worker_multiplier = 1.0;
     admin_multiplier = 2.0;
     broadcast_per_minute = 30;
@@ -1198,7 +1174,6 @@ let test_rate_limit_config_of_yojson_ok () =
     ("per_minute", `Int 120);
     ("burst_allowed", `Int 20);
     ("priority_agents", `List [`String "admin"]);
-    ("reader_multiplier", `Float 0.25);
     ("worker_multiplier", `Float 1.5);
     ("admin_multiplier", `Float 3.0);
     ("broadcast_per_minute", `Int 60);
@@ -1262,7 +1237,7 @@ let test_task_to_yojson () =
     created_at = "2024-01-15T12:00:00Z";
     worktree = None;
     created_by = None;
-    required_role = Types_core.Unassigned; required_preset = None; stage = None;
+    stage = None;
     contract = None; handoff_context = None; cycle_count = 0; do_not_reclaim_reason = None;
   } in
   let json = Types.task_to_yojson t in
@@ -1291,7 +1266,7 @@ let test_task_to_yojson_with_worktree () =
     created_at = "2024-01-15T12:00:00Z";
     worktree = Some wt;
     created_by = None;
-    required_role = Types_core.Unassigned; required_preset = None; stage = None;
+    stage = None;
     contract = None; handoff_context = None; cycle_count = 0; do_not_reclaim_reason = None;
   } in
   let json = Types.task_to_yojson t in
@@ -1622,12 +1597,10 @@ let () =
       test_case "rate limit" `Quick test_masc_error_rate_limit;
     ];
     "agent_role_to_string", [
-      test_case "reader" `Quick test_agent_role_to_string_reader;
       test_case "worker" `Quick test_agent_role_to_string_worker;
       test_case "admin" `Quick test_agent_role_to_string_admin;
     ];
     "agent_role_of_string", [
-      test_case "reader" `Quick test_agent_role_of_string_reader;
       test_case "worker" `Quick test_agent_role_of_string_worker;
       test_case "admin" `Quick test_agent_role_of_string_admin;
       test_case "unknown" `Quick test_agent_role_of_string_unknown;
@@ -1649,10 +1622,8 @@ let () =
       test_case "of_yojson error" `Quick test_auth_config_of_yojson_error;
     ];
     "permissions", [
-      test_case "for_role reader" `Quick test_permissions_for_role_reader;
       test_case "for_role worker" `Quick test_permissions_for_role_worker;
       test_case "for_role admin" `Quick test_permissions_for_role_admin;
-      test_case "has_permission reader" `Quick test_has_permission_reader;
       test_case "has_permission worker" `Quick test_has_permission_worker;
       test_case "has_permission admin" `Quick test_has_permission_admin;
     ];

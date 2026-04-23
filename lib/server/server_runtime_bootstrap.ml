@@ -570,19 +570,26 @@ let sync_admin_token_env (state : Mcp_server.server_state) =
              "startup minted %s for %s because env was unset"
              Env_config_core.admin_token_env_key admin_agent_name
        | Error err ->
-           Log.Server.error
+          Log.Server.error
              "startup admin token mint failed for %s: %s"
              admin_agent_name
              (Types.masc_error_to_string err))
 
-let sync_client_token_file ~base_path ~agent_name ~default_role =
+let sync_internal_keeper_token_env (state : Mcp_server.server_state) =
+  let base_path = state.Mcp_server.room_config.base_path in
+  let raw_token = Auth.ensure_internal_keeper_token base_path in
+  Unix.putenv "MASC_INTERNAL_MCP_TOKEN" raw_token;
+  Log.Server.info
+    "startup internal keeper MCP token synced via MASC_INTERNAL_MCP_TOKEN"
+
+let sync_client_token_file ~base_path ~agent_name ~role =
   let token_file =
     Filename.concat (Auth.auth_dir base_path) (agent_name ^ ".token")
   in
   let existing_role =
     match Auth.load_credential base_path agent_name with
     | Some cred -> cred.role
-    | None -> default_role
+    | None -> role
   in
   let persist_raw_token raw_token =
     Fs_compat.mkdir_p (Auth.auth_dir base_path);
@@ -976,9 +983,9 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       Log.Server.info "State created (runtime state) in %.1fs" (t1 -. t0);
       bootstrap_server_state_blocking state;
       sync_admin_token_env state;
+      sync_internal_keeper_token_env state;
       sync_client_token_file ~base_path ~agent_name:"codex-mcp-client"
-        ~default_role:Types.Worker;
-      sync_bootable_keeper_credentials state;
+        ~role:Types.Worker;
       let path_diagnostics =
         runtime_path_diagnostics ~input_base_path:base_path state
       in

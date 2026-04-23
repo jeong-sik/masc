@@ -173,6 +173,14 @@ let inject_agent_name_into_body ?(rewrite_existing = false) ~agent_name body_str
     | _ -> body_str
   with Eio.Cancel.Cancelled _ as e -> raise e | _ -> body_str
 
+let body_with_canonical_http_actor ~base_path ~auth_token request body_str =
+  match Server_auth.dashboard_actor_for_request ~base_path request with
+  | None -> body_str
+  | Some agent ->
+      inject_agent_name_into_body
+        ~rewrite_existing:(Option.is_some auth_token)
+        ~agent_name:agent body_str
+
 let handle_post_mcp ~deps ?(profile = Full) request reqd =
   (* Readiness gate: reject before session/auth if server state is not ready *)
   if not (deps.is_ready ()) then
@@ -189,9 +197,6 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
   let protocol_version = get_protocol_version_for_session ~session_id request in
   let origin = deps.get_origin request in
   let base_path = deps.get_base_path () in
-  let http_agent_name =
-    Server_auth.dashboard_actor_for_request ~base_path request
-  in
   let auth_result =
     match profile with
     | Full | Managed_agent ->
@@ -340,12 +345,8 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                 inline_sse := Some info;
                                 spawn_post_sse_keepalive ~sw ~clock info);
                               let body_with_agent =
-                                match http_agent_name with
-                                | None -> body_str
-                                | Some agent ->
-                                    inject_agent_name_into_body
-                                      ~rewrite_existing:(Option.is_some auth_token)
-                                      ~agent_name:agent body_str
+                                body_with_canonical_http_actor ~base_path
+                                  ~auth_token request body_str
                               in
                               let response_json =
                                 runtime.handle_request ?auth_token ~profile
@@ -715,9 +716,13 @@ let handle_post_messages ~deps request reqd =
               | Ok runtime ->
                   let sw = runtime.sw in
                   Eio.Fiber.fork ~sw (fun () ->
+                  let body_with_agent =
+                    body_with_canonical_http_actor ~base_path ~auth_token
+                      request body_str
+                  in
                   let response_json =
                     runtime.handle_request ~mcp_session_id:session_id
-                      ?auth_token body_str
+                      ?auth_token body_with_agent
                   in
                   (match response_json with
                   | `Null -> ()

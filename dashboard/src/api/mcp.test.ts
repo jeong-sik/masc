@@ -292,6 +292,28 @@ describe('callMcpTool', () => {
     })
   }, 60_000)
 
+  it('omits implicit dashboard actor for token-bound sessions without actor metadata', async () => {
+    getStoredToken.mockReturnValue('codex-token')
+    getStoredTokenMeta.mockReturnValue(null)
+    isRemoteAccess.mockReturnValue(true)
+    authHeaders.mockImplementation((opts?: { actorName?: string | null }) => ({
+      Authorization: 'Bearer codex-token',
+      ...(opts?.actorName ? { 'X-MASC-Agent': opts.actorName } : {}),
+    }))
+    setupMcpSessionMocks('sess-token-owner')
+
+    const { callMcpTool } = await import('./mcp')
+    await callMcpTool('masc_persona_list', {})
+
+    const toolCall = findCallByMethod('tools/call')
+    expect(toolCall).toBeDefined()
+    const body = JSON.parse(toolCall![1].body as string)
+    expect(body.params.arguments).toEqual({})
+    const headers = toolCall![1].headers as Record<string, string>
+    expect(headers.Authorization).toBe('Bearer codex-token')
+    expect(headers['X-MASC-Agent']).toBeUndefined()
+  }, 60_000)
+
   it('treats legacy agent_name as payload when the session is token-authenticated', async () => {
     authHeaders.mockImplementation((opts?: { actorName?: string | null }) => (
       opts?.actorName ? { 'X-MASC-Agent': opts.actorName } : {}

@@ -160,6 +160,15 @@ function explicitToolActor(args: Record<string, unknown>): string | null {
     : null
 }
 
+function implicitToolActor(): string | null {
+  const actor = currentDashboardActor()
+  if (!actor) return null
+  if (!getStoredToken()) return actor
+  const meta = getStoredTokenMeta()
+  if (meta?.source === 'dev' || meta?.actor) return actor
+  return null
+}
+
 function mcpHeadersForActor(
   actorName?: string | null,
   extra?: Record<string, string>,
@@ -314,7 +323,7 @@ async function callMcpToolInternal(
     await ensureSession()
     phase = 'tools/call'
     const explicitActor = explicitToolActor(args)
-    const actor = explicitActor ?? currentDashboardActor()
+    const actor = explicitActor ?? implicitToolActor()
     const toolArgs =
       explicitActor == null && actor
         ? { ...args, _agent_name: actor }

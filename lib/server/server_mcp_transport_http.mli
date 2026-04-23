@@ -45,6 +45,12 @@ val validate_mcp_session_delete_profile :
 val method_from_body : string -> string option
 val inject_agent_name_into_body :
   ?rewrite_existing:bool -> agent_name:string -> string -> string
+val body_with_canonical_http_actor :
+  base_path:string ->
+  auth_token:string option ->
+  Httpun.Request.t ->
+  string ->
+  string
 val validate_session_requirement :
   session_was_provided:bool -> string -> (unit, string) result
 val protocol_version_from_body : string -> string option

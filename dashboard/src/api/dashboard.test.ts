@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   fetchDashboardGovernance,
+  fetchDashboardGoalDetail,
+  fetchDashboardGoalsTree,
   fetchDashboardTools,
   fetchKeeperConfig,
   fetchRuntimeModelMetrics,
@@ -10,6 +12,46 @@ import {
 afterEach(() => {
   vi.unstubAllGlobals()
 })
+
+function makeRawGoalNode(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'goal-1',
+    title: 'Goal 1',
+    horizon: 'quarterly',
+    status: 'active',
+    status_color: '#fff',
+    phase: 'executing',
+    phase_color: '#0ea5e9',
+    health: 'on_track',
+    health_color: '#4ade80',
+    badges: [],
+    status_reason: 'working',
+    priority: 1,
+    metric: null,
+    target_value: null,
+    due_date: null,
+    parent_goal_id: null,
+    convergence: 0.5,
+    convergence_pct: 50,
+    tasks: [],
+    task_count: 0,
+    task_done_count: 0,
+    pending_verification_count: 0,
+    timeline_events: [],
+    children: [],
+    child_count: 0,
+    last_activity_at: '2026-04-23T00:00:00Z',
+    stagnation_seconds: 0,
+    linked_keeper_names: [],
+    pending_approval_count: 0,
+    infra_risk_count: 0,
+    linkage_source: 'none',
+    linkage_warning_count: 0,
+    created_at: '2026-04-23T00:00:00Z',
+    updated_at: '2026-04-23T00:00:00Z',
+    ...overrides,
+  }
+}
 
 describe('fetchDashboardTools', () => {
   it('fills missing category and tier with defaults', async () => {
@@ -166,6 +208,62 @@ describe('fetchDashboardGovernance', () => {
       errorCode: 'computation_timeout',
     })
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('dashboard goals decoding', () => {
+  it('fills a missing verification_summary on goal tree payloads', async () => {
+    const rawResponse = {
+      tree: [makeRawGoalNode()],
+      summary: {},
+    }
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(rawResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchDashboardGoalsTree()
+
+    expect(result.tree[0]?.verification_summary).toEqual({
+      effective_policy: null,
+      open_request: null,
+      approve_count: 0,
+      reject_count: 0,
+      remaining_possible: 0,
+    })
+  })
+
+  it('fills a missing verification_summary on goal detail payloads', async () => {
+    const rawResponse = {
+      goal: makeRawGoalNode(),
+      linked_tasks: [],
+      linked_keepers: [],
+      approvals: [],
+      execution_receipts: [],
+      timeline: [],
+    }
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(rawResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchDashboardGoalDetail('goal-1')
+
+    expect(result.goal.verification_summary).toEqual({
+      effective_policy: null,
+      open_request: null,
+      approve_count: 0,
+      reject_count: 0,
+      remaining_possible: 0,
+    })
   })
 })
 

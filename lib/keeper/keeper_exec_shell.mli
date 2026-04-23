@@ -43,7 +43,10 @@ val cmd_targets_git_or_gh : string -> bool
     the trimmed command's first whitespace-separated word is exactly
     "git" or "gh". Under sandbox_profile=docker this upgrades the
     container to network=inherit with gh/git credential mounts for
-    the duration of that one command. Exposed for unit testing. *)
+    the duration of that one command unless
+    [MASC_KEEPER_SANDBOX_HARD_MODE=true], where dispatch is disabled and
+    structured git/gh tools use brokered host execution instead. Exposed
+    for unit testing. *)
 
 val handle_keeper_bash :
   turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t option ->

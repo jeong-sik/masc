@@ -1418,6 +1418,18 @@ let keeper_config_json (config : Coord.config) (name : string)
           ("container_playground_root",
             string_or_null
               Env_config_keeper.DockerPlayground.container_playground_root);
+          ("hard_mode",
+            `Bool (Env_config_keeper.KeeperSandbox.hard_mode ()));
+          ("git_egress",
+            `String
+              (if Env_config_keeper.KeeperSandbox.hard_mode () then
+                 "brokered_structured_tools"
+               else if Env_config_keeper.KeeperSandbox.with_git_dispatch_enabled () then
+                 "docker_git_dispatch"
+               else
+                 "container_network_policy"));
+          ("credential_fallbacks_disabled",
+            `Bool (Env_config_keeper.KeeperSandbox.hard_mode ()));
           ("docker_image",
             string_or_null (Env_config_keeper.KeeperSandbox.docker_image ()));
           ("pids_limit", `Int (Env_config_keeper.KeeperSandbox.pids_limit ()));

@@ -39,6 +39,16 @@ let with_temp_dir prefix f =
       rm path)
     (fun () -> f path)
 
+let with_env key value f =
+  let prior = Sys.getenv_opt key in
+  Unix.putenv key value;
+  Fun.protect
+    ~finally:(fun () ->
+      match prior with
+      | Some v -> Unix.putenv key v
+      | None -> Unix.putenv key "")
+    f
+
 let with_temp_config f =
   with_temp_dir "keeper_allowed_paths_" (fun dir ->
     Eio_main.run @@ fun env ->
@@ -71,6 +81,7 @@ let test_validate_rejects_star_wildcard () =
       KTU.validate_sandbox_settings
         ~config
         ~keeper_name:"keeper"
+        ~github_identity:None
         ~sandbox_profile:KT.Local
         ~network_mode:KT.Network_inherit
         ~allowed_paths:["*"]
@@ -87,6 +98,7 @@ let test_validate_local_rejects_network_none () =
       KTU.validate_sandbox_settings
         ~config
         ~keeper_name:"keeper"
+        ~github_identity:None
         ~sandbox_profile:KT.Local
         ~network_mode:KT.Network_none
         ~allowed_paths:[]
@@ -109,6 +121,7 @@ let test_validate_docker_allows_private_root_paths () =
       KTU.validate_sandbox_settings
         ~config
         ~keeper_name:"keeper"
+        ~github_identity:None
         ~sandbox_profile:KT.Docker
         ~network_mode:KT.Network_none
         ~allowed_paths:allowed
@@ -122,6 +135,7 @@ let test_validate_docker_rejects_paths_outside_private_root () =
       KTU.validate_sandbox_settings
         ~config
         ~keeper_name:"keeper"
+        ~github_identity:None
         ~sandbox_profile:KT.Docker
         ~network_mode:KT.Network_inherit
         ~allowed_paths:["workspace/outside"]
@@ -130,6 +144,53 @@ let test_validate_docker_rejects_paths_outside_private_root () =
     | Error err ->
         check bool "error mentions rejected path" true
           (String.contains err 'w'))
+
+let test_hard_mode_requires_docker_none_identity () =
+  with_env "MASC_KEEPER_SANDBOX_HARD_MODE" "true" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_RELAX_FS" "false" @@ fun () ->
+  with_temp_config (fun config ->
+    let validate ~github_identity ~sandbox_profile ~network_mode () =
+      KTU.validate_sandbox_settings
+        ~config
+        ~keeper_name:"keeper"
+        ~github_identity
+        ~sandbox_profile
+        ~network_mode
+        ~allowed_paths:[]
+    in
+    (match
+       validate ~github_identity:None
+         ~sandbox_profile:KT.Local ~network_mode:KT.Network_inherit ()
+     with
+     | Ok () -> fail "expected hard mode to reject local profile"
+     | Error err ->
+         check string "requires docker"
+           "MASC_KEEPER_SANDBOX_HARD_MODE requires sandbox_profile=docker"
+           err);
+    (match
+       validate ~github_identity:(Some "anyang-keepers")
+         ~sandbox_profile:KT.Docker ~network_mode:KT.Network_inherit ()
+     with
+     | Ok () -> fail "expected hard mode to reject network inherit"
+     | Error err ->
+         check string "requires network none"
+           "MASC_KEEPER_SANDBOX_HARD_MODE requires network_mode=none; git/gh egress is brokered by structured tools"
+           err);
+    (match
+       validate ~github_identity:None
+         ~sandbox_profile:KT.Docker ~network_mode:KT.Network_none ()
+     with
+     | Ok () -> fail "expected hard mode to reject missing github_identity"
+     | Error err ->
+         check string "requires github_identity"
+           "MASC_KEEPER_SANDBOX_HARD_MODE requires github_identity in keeper profile"
+           err);
+    (match
+       validate ~github_identity:(Some "anyang-keepers")
+         ~sandbox_profile:KT.Docker ~network_mode:KT.Network_none ()
+     with
+     | Ok () -> ()
+     | Error err -> fail ("expected hard mode settings to validate: " ^ err)))
 
 let () =
   run "Keeper_allowed_paths"
@@ -153,5 +214,7 @@ let () =
             test_validate_docker_allows_private_root_paths;
           test_case "docker rejects paths outside private root" `Quick
             test_validate_docker_rejects_paths_outside_private_root;
+          test_case "hard mode requires docker none identity" `Quick
+            test_hard_mode_requires_docker_none_identity;
         ] );
     ]

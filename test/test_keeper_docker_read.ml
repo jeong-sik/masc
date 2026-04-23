@@ -556,6 +556,42 @@ let test_relaxed_fs_helpers () =
        (Env_config_keeper.KeeperSandbox.tmpfs_mount ())
        "/tmp:rw,nosuid,nodev,size=")
 
+let test_hard_mode_forces_policy_helpers () =
+  with_env "MASC_KEEPER_SANDBOX_HARD_MODE" "true" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_GIT_DISPATCH" "true" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_GH_CREDS" "/tmp/host-gh" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_GITCONFIG" "/tmp/host-gitconfig" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SSH_DIR" "/tmp/host-ssh" @@ fun () ->
+  with_env "GH_TOKEN" "host-token" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_GH_TOKEN" "explicit-token" @@ fun () ->
+  Alcotest.(check bool) "hard mode forces rootless" true
+    (Env_config_keeper.KeeperSandbox.require_rootless ());
+  Alcotest.(check bool) "hard mode forces userns" true
+    (Env_config_keeper.KeeperSandbox.require_userns ());
+  Alcotest.(check bool) "hard mode disables docker git dispatch" false
+    (Env_config_keeper.KeeperSandbox.with_git_dispatch_enabled ());
+  Alcotest.(check string) "hard mode drops gh config mount" ""
+    (Env_config_keeper.KeeperSandbox.gh_creds_host_path ());
+  Alcotest.(check string) "hard mode drops gitconfig mount" ""
+    (Env_config_keeper.KeeperSandbox.gitconfig_host_path ());
+  Alcotest.(check string) "hard mode drops ssh mount" ""
+    (Env_config_keeper.KeeperSandbox.ssh_dir_host_path ());
+  Alcotest.(check string) "hard mode drops GH_TOKEN forwarding" ""
+    (Env_config_keeper.KeeperSandbox.gh_token ())
+
+let test_hard_mode_rejects_relaxed_fs_without_docker () =
+  with_env "MASC_KEEPER_SANDBOX_HARD_MODE" "true" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_RELAX_FS" "true" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  match Keeper_sandbox_runtime.ensure_keeper_sandbox_runtime ~timeout_sec:5.0 with
+  | Ok _ -> Alcotest.fail "expected hard mode to reject RELAX_FS"
+  | Error msg ->
+      Alcotest.(check string) "hard mode relax fs error"
+        "sandbox hard mode requires MASC_KEEPER_SANDBOX_RELAX_FS=false"
+        msg
+
 let test_turn_runtime_relaxed_fs_omits_readonly_and_noexec () =
   with_fake_docker fake_docker_turn_runtime_script @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
@@ -641,6 +677,10 @@ let () =
             test_default_fs_hardening_helpers;
           Alcotest.test_case "relaxed fs helpers" `Quick
             test_relaxed_fs_helpers;
+          Alcotest.test_case "hard mode forces policy helpers" `Quick
+            test_hard_mode_forces_policy_helpers;
+          Alcotest.test_case "hard mode rejects relaxed fs without docker"
+            `Quick test_hard_mode_rejects_relaxed_fs_without_docker;
           Alcotest.test_case "turn runtime reuses single container" `Quick
             test_turn_runtime_reuses_single_container;
           Alcotest.test_case

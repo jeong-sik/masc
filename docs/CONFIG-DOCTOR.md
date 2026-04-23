@@ -89,7 +89,10 @@ Core fields:
 - `keeper_runtime_toml_present`: whether active runtime tuning exists at
   `<active_config_root>/keeper_runtime.toml`
 - `sandbox_preflight`: Docker keeper sandbox readiness (`docker` daemon,
-  local image presence, required commands, hardening checks)
+  local image presence, required commands, hardening checks). The JSON also
+  exposes `hard_mode`, `credential_fallbacks_disabled`, and `git_egress` so
+  operators can confirm whether git/gh traffic is legacy Docker dispatch or
+  hard-mode brokered structured tools.
 
 Important interpretation:
 
@@ -101,6 +104,9 @@ Important interpretation:
 - `sandbox_preflight` is independent of config init state. Even when no live
   config root exists yet, `doctor` still reports whether the default Docker
   keeper sandbox image can actually run.
+- In `MASC_KEEPER_SANDBOX_HARD_MODE=true`, `sandbox_preflight` fails unless
+  the Docker runtime reports both rootless and userns support and
+  `MASC_KEEPER_SANDBOX_RELAX_FS=false`.
 
 ## Secondary Proof Surfaces
 

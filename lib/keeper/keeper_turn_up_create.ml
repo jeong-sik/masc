@@ -96,6 +96,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       validate_sandbox_settings
         ~config:ctx.config
         ~keeper_name:p.name
+        ~github_identity:p.profile_defaults.github_identity
         ~sandbox_profile
         ~network_mode
         ~allowed_paths

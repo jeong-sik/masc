@@ -38,13 +38,19 @@ let keeper_binding (config : Coord.config) ~(keeper_name : string) :
   in
   match defaults.github_identity with
   | None ->
-      Ok
-        {
-          github_identity = None;
-          git_identity_mode;
-          bundle_root = None;
-          gh_config_dir = config_dir config;
-        }
+      if Env_config_keeper.KeeperSandbox.hard_mode () then
+        Error
+          (Printf.sprintf
+             "keeper %s has no github_identity configured; MASC_KEEPER_SANDBOX_HARD_MODE requires keeper-scoped GitHub identity"
+             keeper_name)
+      else
+        Ok
+          {
+            github_identity = None;
+            git_identity_mode;
+            bundle_root = None;
+            gh_config_dir = config_dir config;
+          }
   | Some github_identity ->
       let bundle_root = bundle_root config ~github_identity in
       let gh_config_dir = gh_config_dir_of_bundle bundle_root in

@@ -137,12 +137,12 @@ persona_name = "analyst"
 | --- | --- | --- | --- |
 | `persona_name` | Required | Which persona blueprint this keeper uses | Primary field in the target model. |
 | `name` | Optional | Override keeper handle | Usually redundant because filename is already the keeper name. |
-| `sandbox_profile` | Optional | Process/filesystem sandbox profile | `local` runs on the host with fs scoped to the keeper playground. `docker` runs in a hardened ephemeral container; the internal git/gh dispatcher upgrades network+credential mounts per-command. |
-| `network_mode` | Optional | Sandbox network policy | `docker` defaults to `none` (promoted to `inherit` for git/gh commands by the dispatcher); `local` defaults to `inherit`. |
+| `sandbox_profile` | Optional | Process/filesystem sandbox profile | `local` runs on the host with fs scoped to the keeper playground. `docker` runs in a hardened ephemeral container; the basic-mode git/gh dispatcher can upgrade network+credential mounts per-command. Hard mode requires `docker`. |
+| `network_mode` | Optional | Sandbox network policy | `docker` defaults to `none` (basic-mode git/gh dispatcher can promote to `inherit`); `local` defaults to `inherit`. Hard mode requires `none`. |
 | `shared_memory_scope` | Optional | Typed shared-memory lane | `room` enables keeper-authorized `masc_team_memory_*` exchange on the flattened `default` namespace. |
 | `cascade_name` | Optional | Deployment-specific cascade override | Only when not using the default cascade. |
 | `tool_preset` | Optional | Deployment-specific policy override | Only when intentionally overriding persona default. |
-| `github_identity` | Optional | Bound GitHub CLI identity bundle | Resolves to `.masc/github-identities/<identity>/gh` for keeper-scoped `gh` auth. |
+| `github_identity` | Optional | Bound GitHub CLI identity bundle | Resolves to `.masc/github-identities/<identity>/gh` for keeper-scoped `gh` auth. Required when `MASC_KEEPER_SANDBOX_HARD_MODE=true`. |
 | `git_identity_mode` | Optional | Commit identity policy | `keeper_alias` keeps git author separate from GitHub auth; `github_identity` is reserved for future explicit coupling. |
 | `active_goal_ids` | Optional | Goal-scoped claim filter | When set, `keeper_task_claim` only considers tasks linked to these goals. |
 
@@ -204,6 +204,7 @@ Operational intent:
 - no arbitrary shared writable shell directory
 - `sandbox_profile=docker`는 `allowed_paths=["*"]`를 거부하고, private sandbox root 밖 경로도 허용하지 않는다
 - `github_identity`가 설정된 keeper는 `.masc/github-identities/<identity>/gh`가 없으면 fail-closed 된다. operator 개인 `gh` config로는 fallback 하지 않는다.
+- `MASC_KEEPER_SANDBOX_HARD_MODE=true`에서는 `github_identity`가 없는 keeper도 fail-closed 된다. 이 모드에서는 Docker container의 git/gh network dispatch와 host credential fallback이 꺼지고, `keeper_shell op=gh` / `op=git_clone`만 host-side broker가 keeper-scoped `GH_CONFIG_DIR`로 실행한다.
 
 ### Removed / forbidden fields (hard-rejected)
 

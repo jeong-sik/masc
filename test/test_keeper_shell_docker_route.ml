@@ -302,6 +302,32 @@ let test_git_clone_routes_through_docker () =
     (response_mentions raw "path"
        (Filename.concat playground "repos/masc-mcp"))
 
+let test_hard_mode_git_clone_uses_brokered_route () =
+  with_tool_policy_config @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_HARD_MODE" "true" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_RELAX_FS" "false" @@ fun () ->
+  setup ~sandbox:Keeper_types.Docker
+  @@ fun ~config ~meta ~playground ->
+  let raw =
+    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_runtime:None ~config ~meta
+      ~args:
+        (`Assoc
+          [
+            ("op", `String "git_clone");
+            ("url", `String "https://github.com/jeong-sik/masc-mcp.git");
+          ])
+  in
+  Alcotest.(check (option bool)) "git_clone fails before host git without identity"
+    (Some false)
+    (parse_bool_field raw "ok");
+  Alcotest.(check (option string)) "via=brokered" (Some "brokered")
+    (parse_string_field raw "via");
+  Alcotest.(check bool) "output mentions missing github_identity" true
+    (response_mentions raw "output" "github_identity");
+  Alcotest.(check bool) "clone path stays inside keeper repos" true
+    (response_mentions raw "path"
+       (Filename.concat playground "repos/masc-mcp"))
+
 let test_bash_routes_through_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
   setup ~sandbox:Keeper_types.Docker
@@ -348,6 +374,22 @@ let test_bash_git_creds_routes_through_docker () =
     "bash git cmd surfaces docker image config error (git-creds route fired)"
     true
     (response_mentions raw "error" "docker image")
+
+let test_hard_mode_blocks_raw_gh_bash () =
+  with_env "MASC_KEEPER_SANDBOX_HARD_MODE" "true" @@ fun () ->
+  setup ~sandbox:Keeper_types.Docker
+  @@ fun ~config ~meta ~playground:_ ->
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash ~turn_sandbox_runtime:None
+      ~turn_sandbox_runtime_git:None ~config ~meta
+      ~args:(`Assoc [ ("cmd", `String "gh pr list") ])
+      ()
+  in
+  Alcotest.(check (option string)) "raw gh hard-mode error"
+    (Some "gh_requires_brokered_structured_tool")
+    (parse_string_field raw "error");
+  Alcotest.(check bool) "hint mentions structured op=gh" true
+    (response_mentions raw "hint" "keeper_shell op=gh")
 
 let fake_docker_echo_script =
   "#!/bin/sh\n\
@@ -403,6 +445,9 @@ let () =
             "docker keeper bash git cmd routes through git-creds docker"
             `Quick test_bash_git_creds_routes_through_docker;
           Alcotest.test_case
+            "hard mode blocks raw gh keeper_bash"
+            `Quick test_hard_mode_blocks_raw_gh_bash;
+          Alcotest.test_case
             "docker keeper bash executes through fake docker"
             `Quick test_bash_fake_docker_executes;
         ] );
@@ -419,5 +464,7 @@ let () =
             test_rg_no_match_remains_successful_in_docker_route;
           Alcotest.test_case "git_clone routes through docker" `Quick
             test_git_clone_routes_through_docker;
+          Alcotest.test_case "hard mode git_clone uses brokered route" `Quick
+            test_hard_mode_git_clone_uses_brokered_route;
         ] );
     ]

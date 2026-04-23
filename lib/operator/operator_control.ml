@@ -406,7 +406,10 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
       let git_identity_mode =
         Option.value ~default:"keeper_alias" defaults.git_identity_mode
       in
-      let legacy_gh_config_dir = Keeper_gh_env.config_dir ctx.config in
+      let hard_mode = Env_config_keeper.KeeperSandbox.hard_mode () in
+      let legacy_gh_config_dir =
+        if hard_mode then None else Keeper_gh_env.config_dir ctx.config
+      in
       let bundle_root =
         Option.map
           (fun identity -> Keeper_gh_env.bundle_root ctx.config ~github_identity:identity)
@@ -461,6 +464,7 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
                   ("gh_config_dir_exists", `Bool gh_config_dir_exists);
                   ("legacy_gh_config_dir",
                     (match legacy_gh_config_dir with Some value -> `String value | None -> `Null));
+                  ("hard_mode", `Bool hard_mode);
                   ("authenticated", `Bool authenticated);
                   ("auth_status", auth_status_json);
                 ] );

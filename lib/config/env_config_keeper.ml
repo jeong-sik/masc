@@ -603,6 +603,23 @@ module KeeperSandbox = struct
     hard_mode ()
     || get_bool ~default:false "MASC_KEEPER_SANDBOX_REQUIRE_USERNS"
 
+  (** Best-effort cleanup for stale keeper-owned Docker containers.
+      Containers are removed only when they carry the MASC keeper sandbox
+      labels, so this never prunes arbitrary operator containers. *)
+  let cleanup_enabled () =
+    get_bool ~default:true "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED"
+
+  (** Stale running containers older than this threshold are eligible for
+      cleanup even if the recorded owner pid appears alive. *)
+  let cleanup_stale_after_sec () =
+    float_of_int
+      (max 60 (get_int ~default:21600 "MASC_KEEPER_SANDBOX_CLEANUP_STALE_AFTER_SEC"))
+
+  (** Minimum interval between automatic cleanup sweeps in one server process. *)
+  let cleanup_interval_sec () =
+    float_of_int
+      (max 10 (get_int ~default:300 "MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC"))
+
   (** Docker git-credential dispatch: when true, keeper_bash commands
       beginning with "git " or "gh " run in a Docker container with
       network_mode=inherit and read-only mounts of ~/.config/gh and

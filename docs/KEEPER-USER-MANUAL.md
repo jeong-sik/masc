@@ -280,6 +280,9 @@ spawn 시 인자로 직접 설정하는 필드.
 | `sandbox_profile` | string | `local` | 실행 샌드박스 프로필 (`local`, `docker`). 기본 모드의 `docker` 프로필은 git/gh 명령에 대해서만 런타임에 network+credential 마운트를 올릴 수 있다. hard mode에서는 `docker`만 허용된다. | `masc_keeper_up`의 `sandbox_profile` 인자 |
 | `network_mode` | string | `inherit` 또는 `none` | 샌드박스 네트워크 정책. `docker`는 기본 `none` (기본 모드의 git/gh dispatch만 `inherit`으로 승격). hard mode에서는 `none`만 허용된다. | `masc_keeper_up`의 `network_mode` 인자 |
 | `shared_memory_scope` | string | `disabled` | typed shared-memory lane. `room`이면 keeper-authorized `masc_team_memory_*`를 flattened `default` namespace에서 사용 가능 | `masc_keeper_up`의 `shared_memory_scope` 인자 |
+| `github_identity` | string | 없음 | keeper에 바인딩된 GitHub CLI identity 이름. `.masc/github-identities/<identity>/gh` bundle을 사용한다. | `keeper.toml` 선언 |
+| `git_identity_mode` | string | `keeper_alias` | git author를 keeper alias로 유지할지, 향후 GitHub identity와 결합할지 결정 | `keeper.toml` 선언 |
+| `active_goal_ids` | string[] | 없음 | 설정 시 `keeper_task_claim`이 해당 goal에 링크된 task만 claim | `keeper.toml` 선언 |
 
 ### 3.1.1 Sandbox Core V1 사용법
 
@@ -301,10 +304,11 @@ spawn 시 인자로 직접 설정하는 필드.
 - keeper shell write는 자기 sandbox 안에서만 허용된다. 현재 local/docker backend의 디스크 구현은 `.masc/playground/<keeper>/`이지만 keeper-facing 경로는 `.` / `mind` / `repos`이다.
 - `sandbox_profile=docker`는 keeper identity 전체에 적용된다. `keeper_bash`뿐 아니라 `keeper_fs_read`, `keeper_fs_edit`, `keeper_shell`의 read/write/git/gh 흐름도 Docker로 라우팅된다. 기본은 read-only rootfs, tmpfs `/tmp`, `cap-drop=ALL`, `no-new-privileges`, `pids-limit`, memory limit, private sandbox mount, network=`none`이다.
 - Docker 내부에서 더 자유로운 부트스트랩/설치가 필요하면 `MASC_KEEPER_SANDBOX_RELAX_FS=true`로 rootfs writable + executable `/tmp` 조합을 켤 수 있다. 이 경우에도 host mount 범위, `cap-drop=ALL`, `no-new-privileges`, pids/memory limit은 유지된다. hard mode에서는 이 완화가 거부된다.
-- 기본 모드의 git/gh dispatch: `sandbox_profile=docker` 에서 network가 필요한 `git`/`gh` 계열 명령(`keeper_bash`, `keeper_shell op=gh`, `keeper_shell op=git_clone`)은 한 명령 단위로 network=bridge + keeper-scoped `GH_CONFIG_DIR` 또는 legacy `~/.config/gh` / `~/.gitconfig` read-only mount + `GH_TOKEN` env forward 경로를 사용할 수 있다. 그 외 명령은 계속 network=none 의 hardened container 또는 turn-scoped `docker exec` runtime 으로 실행된다. Docker 라우트 응답에는 `via: "docker"`가 들어오고, git credential dispatch가 켜진 경우 `git_creds_enabled: true`도 함께 들어온다. 비활성화하려면 `MASC_KEEPER_SANDBOX_GIT_DISPATCH=false`. `~/.ssh` mount 는 `MASC_KEEPER_SANDBOX_SSH_DIR` 환경 변수로 명시 opt-in 시에만 활성화된다.
+- 기본 모드의 git/gh dispatch: `sandbox_profile=docker`에서 network가 필요한 `git`/`gh` 계열 명령(`keeper_bash`, `keeper_shell op=gh`, `keeper_shell op=git_clone`)은 한 명령 단위로 network=bridge + read-only credential mount 경로를 사용할 수 있다. `github_identity`가 바인딩된 keeper는 `.masc/github-identities/<identity>/gh`만 사용하고, bundle이 없으면 fail-closed 된다. 바인딩이 없는 keeper만 legacy `.masc/gh-auth` / sandbox env fallback 경로를 쓴다. 그 외 명령은 계속 network=none의 hardened container 또는 turn-scoped `docker exec` runtime으로 실행된다. Docker 라우트 응답에는 `via: "docker"`가 들어오고, git credential dispatch가 켜진 경우 `git_creds_enabled: true`도 함께 들어온다. 비활성화하려면 `MASC_KEEPER_SANDBOX_GIT_DISPATCH=false`. `~/.ssh` mount는 `MASC_KEEPER_SANDBOX_SSH_DIR` 환경 변수로 명시 opt-in 시에만 활성화된다.
 - hard mode: `MASC_KEEPER_SANDBOX_HARD_MODE=true`는 `sandbox_profile=docker`, `network_mode=none`, `github_identity`를 강제한다. Docker container는 `git`/`gh` 때문에 bridge/host network로 승격되지 않고, host `~/.config/gh`, `~/.gitconfig`, `~/.ssh`, `GH_TOKEN` fallback도 비활성화된다. `keeper_bash`에서 raw `gh ...`는 구조화 오류로 막히며, `keeper_shell op=gh`와 `keeper_shell op=git_clone`만 host-side broker가 keeper-scoped `GH_CONFIG_DIR=$base_path/.masc/github-identities/<identity>/gh`로 검증 후 실행한다. hard mode 라우트 응답은 `via: "brokered"`를 노출한다.
 - hard mode runtime preflight는 Docker `SecurityOptions`에서 `rootless`와 `userns`를 모두 요구한다. 현재 Docker Desktop/rootful daemon처럼 둘 중 하나라도 없으면 `doctor`와 keeper startup에서 fail-closed 된다.
 - 기본 sandbox 이미지는 `masc-keeper-sandbox:local`이다. Docker keeper를 올리기 전에 `scripts/build-keeper-sandbox-image.sh`를 실행해 이미지를 만들고, smoke 검증은 `scripts/keeper-sandbox-smoke.sh`를 사용한다.
+- keeper Docker 컨테이너에는 `masc.mcp.component=keeper-sandbox`와 base path hash 라벨이 붙는다. 새 컨테이너 시작 전 같은 base path 범위의 오래된 MASC keeper 컨테이너만 best-effort로 정리한다. 조정값은 `MASC_KEEPER_SANDBOX_CLEANUP_ENABLED`, `MASC_KEEPER_SANDBOX_CLEANUP_STALE_AFTER_SEC`, `MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC`이다.
 - `shared_memory_scope=room`은 공용 writable mount가 아니라 flattened `default` namespace typed lane만 연다.
 - team memory 도구는 keeper tool surface에도 노출되어야 하므로 preset에 없다면 `tool_also_allow` 또는 `tool_access.also_allow`로 명시해야 한다.
 
@@ -823,8 +827,8 @@ materialize될 수 있지만, 정식 edit surface는 `profile.json`과 `keeper.t
 [`docs/KEEPER-FILE-MODEL.md` §2 Keeper Declaration](./KEEPER-FILE-MODEL.md#2-keeper-declaration)을 참조한다. 요약:
 
 - **Canonical minimal**: `[keeper]` 테이블에 `persona_name`만. 나머지는 persona 기본값에서 해석.
-- **Overlay fields**: `goal`, `tool_preset`, `tool_also_allow`, `cascade_name`, `sandbox_profile`, `network_mode`, `shared_memory_scope` 등 배치별 override 전용.
-- **Allowed value sets**: `tool_preset ∈ {minimal, social, messaging, coding, research, delivery, full}`, `sandbox_profile ∈ {local, docker}`, `network_mode ∈ {none, inherit}`, `shared_memory_scope ∈ {disabled, room}`, `social_model ∈ {bdi_speech_v1, magentic_ledger_v1}`, `cascade_name`은 `cascade.json`에 `<name>_models` 키로 존재해야 함.
+- **Overlay fields**: `goal`, `tool_preset`, `tool_also_allow`, `cascade_name`, `sandbox_profile`, `network_mode`, `shared_memory_scope`, `github_identity`, `git_identity_mode`, `active_goal_ids` 등 배치별 override 전용.
+- **Allowed value sets**: `tool_preset ∈ {minimal, social, messaging, coding, research, delivery, full}`, `sandbox_profile ∈ {local, docker}`, `network_mode ∈ {none, inherit}`, `shared_memory_scope ∈ {disabled, room}`, `git_identity_mode ∈ {keeper_alias, github_identity}`, `social_model ∈ {bdi_speech_v1, magentic_ledger_v1}`, `cascade_name`은 `cascade.json`에 `<name>_models` 키로 존재해야 함.
 - **Removed / hard-rejected**: `also_allow` (top-level TOML alias), `models`, `allowed_models`, `active_model`, `presence_keepalive*`, `trigger_mode`, `initiative_*`, `policy_mode`, `policy_shell_mode`. 로드 시 에러로 실패한다.
 - **Unknown keys**: canonical/removed 둘 다 아닌 key는 **boot 시 warning** 후 무시된다 (`keeper TOML <path> has unknown keys: ...`). 과거에 `legacy_scope`/`scope_kind` 같은 dead config가 축적된 적이 있으므로 warning을 발견하면 정리한다.
 

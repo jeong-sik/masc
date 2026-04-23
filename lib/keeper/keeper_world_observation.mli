@@ -72,6 +72,11 @@ type world_observation = {
   pending_verification_count : int;
   (** Number of tasks awaiting cross-agent verification. *)
 
+  backlog_updated_since_last_scheduled_autonomous : bool;
+  (** [true] when the backlog changed after the keeper's last scheduled
+      autonomous attempt. Lets task-triggered wakeups bypass cooldown once
+      so newly added work is not delayed behind the previous turn's timer. *)
+
   active_agent_count : int;
   (** Number of agents currently active in the room. *)
 

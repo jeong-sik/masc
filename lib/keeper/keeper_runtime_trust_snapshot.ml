@@ -1,9 +1,12 @@
 open Keeper_types
 
 let json_int_opt_member key json =
-  match Yojson.Safe.Util.member key json with
-  | `Int n -> Some n
-  | `Intlit raw -> int_of_string_opt raw
+  match json with
+  | `Assoc _ -> (
+      match Yojson.Safe.Util.member key json with
+      | `Int n -> Some n
+      | `Intlit raw -> int_of_string_opt raw
+      | _ -> None)
   | _ -> None
 
 let json_float_opt_member key json =
@@ -14,8 +17,11 @@ let json_float_opt_member key json =
   | _ -> None
 
 let json_string_opt_member key json =
-  match Yojson.Safe.Util.member key json with
-  | `String value when String.trim value <> "" -> Some value
+  match json with
+  | `Assoc _ -> (
+      match Yojson.Safe.Util.member key json with
+      | `String value when String.trim value <> "" -> Some value
+      | _ -> None)
   | _ -> None
 
 let json_string_opt_value = function

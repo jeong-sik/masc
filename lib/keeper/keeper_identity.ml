@@ -96,14 +96,15 @@ let canonical_keeper_name raw_name =
   let plen = String.length prefix in
   let alen = String.length trimmed in
   if trimmed = "" then None
+  else if is_keeper_agent_alias trimmed then
+    canonical_keeper_name_from_agent_name trimmed
+  else if alen > plen && String.sub trimmed 0 plen = prefix then
+    let candidate = String.sub trimmed plen (alen - plen) in
+    if Keeper_config.validate_name candidate then Some candidate else None
+  else if Keeper_config.validate_name trimmed then
+    Some trimmed
   else
-    match canonical_keeper_name_from_agent_name trimmed with
-    | Some _ as canonical -> canonical
-    | None when alen > plen && String.sub trimmed 0 plen = prefix ->
-        let candidate = String.sub trimmed plen (alen - plen) in
-        if Keeper_config.validate_name candidate then Some candidate else None
-    | None ->
-        if Keeper_config.validate_name trimmed then Some trimmed else None
+    canonical_keeper_name_from_agent_name trimmed
 
 let explicit_keeper_name raw_name =
   let trimmed = String.trim raw_name in

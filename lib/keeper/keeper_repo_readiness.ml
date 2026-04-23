@@ -126,18 +126,52 @@ let inspect
     in
     (match workspace_matches with
      | [ source_root ] ->
-         common_fields "auto_provisionable" true
-           (Printf.sprintf
-              "Call masc_worktree_create with repo_name=%S; the sandbox clone \
-               will be auto-provisioned from workspace repo %s."
-              derived_repo_name source_root)
-           [
-             "exists", `Bool false;
-             "is_git_repo", `Bool false;
-             "has_origin", `Bool false;
-             "workspace_repo_match", `String source_root;
-             "auto_provision_on_worktree_create", `Bool true;
-           ]
+         (match Coord_worktree.git_origin_url source_root with
+          | Some origin_url -> (
+              match
+                Tool_code_write.validate_clone_url
+                  ~base_path:config.base_path origin_url
+              with
+              | Ok () ->
+                  common_fields "auto_provisionable" true
+                    (Printf.sprintf
+                       "Call masc_worktree_create with repo_name=%S; the sandbox clone \
+                        will be auto-provisioned from origin %s discovered via workspace repo %s."
+                       derived_repo_name origin_url source_root)
+                    [
+                      "exists", `Bool false;
+                      "is_git_repo", `Bool false;
+                      "has_origin", `Bool false;
+                      "workspace_repo_match", `String source_root;
+                      "workspace_repo_origin", `String origin_url;
+                      "auto_provision_on_worktree_create", `Bool true;
+                    ]
+              | Error err ->
+                  common_fields "workspace_origin_not_allowed" false
+                    (Printf.sprintf
+                       "Workspace repo %s points at origin %s, but clone policy rejected it: %s. \
+                        Update allowlist or use an approved repo."
+                       source_root origin_url err)
+                    [
+                      "exists", `Bool false;
+                      "is_git_repo", `Bool false;
+                      "has_origin", `Bool true;
+                      "workspace_repo_match", `String source_root;
+                      "workspace_repo_origin", `String origin_url;
+                      "auto_provision_on_worktree_create", `Bool false;
+                    ])
+          | None ->
+              common_fields "workspace_origin_unavailable" false
+                (Printf.sprintf
+                   "Workspace repo %s has no origin remote. Sandbox auto-provision requires cloning from origin."
+                   source_root)
+                [
+                  "exists", `Bool false;
+                  "is_git_repo", `Bool false;
+                  "has_origin", `Bool false;
+                  "workspace_repo_match", `String source_root;
+                  "auto_provision_on_worktree_create", `Bool false;
+                ])
      | _ :: _ as matches ->
          common_fields "ambiguous_workspace_repo" false
            (Printf.sprintf

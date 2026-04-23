@@ -99,6 +99,7 @@ let run_argv_with_status_retry_eintr ~timeout_sec argv =
   let rec loop attempts_left =
     let st, out =
       Process_eio.run_argv_with_status
+        ~env:(Unix.environment ())
         ~cwd:(Sys.getcwd ()) ~timeout_sec argv
     in
     match st with
@@ -115,6 +116,7 @@ let run_argv_with_stdin_and_status_retry_eintr ~timeout_sec ~stdin_content argv 
   let rec loop attempts_left =
     let st, out =
       Process_eio.run_argv_with_stdin_and_status
+        ~env:(Unix.environment ())
         ~cwd:(Sys.getcwd ()) ~timeout_sec ~stdin_content argv
     in
     match st with
@@ -131,18 +133,30 @@ let start_container (t : t) ~(timeout_sec : float) =
   if String.trim image = "" then
     Error "keeper sandbox docker image is not configured"
   else
+    let _cleanup =
+      Keeper_sandbox_runtime.maybe_cleanup_stale_containers
+        ~base_path:t.config.base_path ~timeout_sec:2.0 ()
+    in
     match Keeper_sandbox_runtime.ensure_keeper_sandbox_runtime ~timeout_sec with
     | Error _ as err -> err
     | Ok seccomp_args ->
         let container_name = container_name_of t in
+        let network_label = network_mode_to_string t.network_mode in
         let argv =
           [
-            "docker";
+            Keeper_sandbox_runtime.docker_command ();
             "run";
             "-d";
             "--rm";
             "--name";
             container_name;
+          ]
+          @ Keeper_sandbox_runtime.docker_label_args
+              ~base_path:t.config.base_path
+              ~keeper_name:t.meta.name
+              ~container_kind:"turn"
+              ~network_label ()
+          @ [
             "--user";
             Printf.sprintf "%d:%d" t.uid t.gid;
           ]
@@ -165,7 +179,7 @@ let start_container (t : t) ~(timeout_sec : float) =
               "--workdir";
               t.container_root;
               "--network";
-              network_mode_to_string t.network_mode;
+              network_label;
               image;
               "sh";
               "-lc";
@@ -199,7 +213,7 @@ let run_exec_with_status_once
       let container_cwd = container_cwd_of_host t ~host_cwd:cwd in
       let argv =
         [
-          "docker";
+          Keeper_sandbox_runtime.docker_command ();
           "exec";
           "--user";
           Printf.sprintf "%d:%d" t.uid t.gid;
@@ -301,6 +315,8 @@ let cleanup (t : t) =
   | Not_started -> ()
   | Running { container_name } ->
       t.state <- Not_started;
-      let argv = [ "docker"; "rm"; "-f"; container_name ] in
+      let argv =
+        [ Keeper_sandbox_runtime.docker_command (); "rm"; "-f"; container_name ]
+      in
       let _st, _out = run_argv_with_status_retry_eintr ~timeout_sec:5.0 argv in
       ()

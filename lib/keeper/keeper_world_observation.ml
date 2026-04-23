@@ -39,6 +39,7 @@ type world_observation = {
   unclaimed_task_count : int;
   failed_task_count : int;
   pending_verification_count : int;
+  backlog_updated_since_last_scheduled_autonomous : bool;
   active_agent_count : int;
   last_turn_budget : (int * int) option;
   last_tools_used : string list;
@@ -208,8 +209,19 @@ let apply_message_cursor_updates (meta : keeper_meta)
     (fun acc (room_id, seq) -> set_room_cursor acc room_id seq)
     meta updates
 
+let backlog_updated_since_last_scheduled_autonomous
+    ~(meta : keeper_meta)
+    ~(backlog : Types.backlog) : bool =
+  let last_ts = meta.runtime.proactive_rt.last_ts in
+  if last_ts <= 0.0 then backlog.tasks <> []
+  else
+    match Resilience.Time.parse_iso8601_opt backlog.last_updated with
+    | Some updated_at -> updated_at > last_ts
+    | None -> false
+
 (** Read room backlog counts. *)
-let read_backlog_counts ~(config : Coord.config) : int * int * int =
+let read_backlog_counts ~(config : Coord.config) ~(meta : keeper_meta) :
+    int * int * int * bool =
   try
     let backlog = Coord.read_backlog config in
     let unclaimed =
@@ -238,12 +250,18 @@ let read_backlog_counts ~(config : Coord.config) : int * int * int =
              | Types.Done _ | Types.Cancelled _ -> false)
            backlog.tasks)
     in
-    (unclaimed, failed, pending_verification)
+    let backlog_updated_since_last_scheduled_autonomous =
+      backlog_updated_since_last_scheduled_autonomous ~meta ~backlog
+    in
+    ( unclaimed,
+      failed,
+      pending_verification,
+      backlog_updated_since_last_scheduled_autonomous )
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | ex ->
       Log.Keeper.warn "read_backlog_counts failed: %s" (Printexc.to_string ex);
-      (0, 0, 0)
+      (0, 0, 0, false)
 
 (** Count active agents in room. *)
 let count_active_agents ~(config : Coord.config) : int =
@@ -673,8 +691,11 @@ let observe ~(pending_board_events : pending_board_event list option)
   let pending_mentions, pending_scope_messages, message_cursor_updates =
     collect_message_scope ~config ~meta
   in
-  let unclaimed_task_count, failed_task_count, pending_verification_count =
-    read_backlog_counts ~config
+  let ( unclaimed_task_count,
+        failed_task_count,
+        pending_verification_count,
+        backlog_updated_since_last_scheduled_autonomous ) =
+    read_backlog_counts ~config ~meta
   in
   let active_agent_count = count_active_agents ~config in
   let idle_seconds = compute_idle_seconds ~meta in
@@ -729,6 +750,7 @@ let observe ~(pending_board_events : pending_board_event list option)
     unclaimed_task_count;
     failed_task_count;
     pending_verification_count;
+    backlog_updated_since_last_scheduled_autonomous;
     active_agent_count;
     last_turn_budget = None;
     last_tools_used = [];
@@ -932,6 +954,10 @@ let keeper_cycle_decision
           has_actionable_tasks
           && since_last_scheduled_autonomous >= task_reactive_cooldown
         in
+        let backlog_fresh =
+          has_actionable_tasks
+          && observation.backlog_updated_since_last_scheduled_autonomous
+        in
         let proactive_work_ready =
           proactive_work_signal_present ~meta observation
         in
@@ -943,7 +969,8 @@ let keeper_cycle_decision
            is ready to fire. Ref: #7226 claim-first + idle_gate observation. *)
         let should_run =
           proactive_work_ready
-          && (backlog_elapsed
+          && (backlog_fresh
+              || backlog_elapsed
               || (idle_gate_elapsed && cooldown_elapsed))
         in
         let provider_cooldown_remaining_sec =
@@ -987,7 +1014,7 @@ let keeper_cycle_decision
                  then Some (Task_backlog
                               { unclaimed = observation.unclaimed_task_count;
                                 failed = observation.failed_task_count }) else None);
-                (if backlog_elapsed
+                (if backlog_fresh || backlog_elapsed
                  then Some Task_reactive_cooldown_elapsed else None);
               ]
               |> List.filter_map Fun.id

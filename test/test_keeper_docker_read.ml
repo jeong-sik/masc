@@ -373,6 +373,96 @@ esac\n\
 printf 'unexpected docker invocation\\n' >&2\n\
 exit 2\n"
 
+let fake_docker_cleanup_script =
+  "#!/bin/sh\n\
+log_file=${KEEPER_DOCKER_LOG:-}\n\
+if [ -n \"$log_file\" ]; then\n\
+  printf '%s\\n' \"$*\" >> \"$log_file\"\n\
+fi\n\
+case \"$1\" in\n\
+  ps)\n\
+    printf 'old-container\\nfresh-container\\n'\n\
+    exit 0\n\
+    ;;\n\
+  inspect)\n\
+    last=''\n\
+    for arg in \"$@\"; do last=\"$arg\"; done\n\
+    case \"$last\" in\n\
+      old-container)\n\
+        printf '999999\\t100.000\\ttrue\\n'\n\
+        exit 0\n\
+        ;;\n\
+      fresh-container)\n\
+        printf '%s\\t990.000\\ttrue\\n' \"${KEEPER_TEST_PID:-1}\"\n\
+        exit 0\n\
+        ;;\n\
+    esac\n\
+    printf 'unexpected inspect target: %s\\n' \"$last\" >&2\n\
+    exit 2\n\
+    ;;\n\
+  rm)\n\
+    if [ \"$2\" = \"-f\" ] && [ \"$3\" = \"old-container\" ]; then\n\
+      printf 'old-container\\n'\n\
+      exit 0\n\
+    fi\n\
+    printf 'unexpected rm target\\n' >&2\n\
+    exit 2\n\
+    ;;\n\
+esac\n\
+printf 'unexpected docker invocation\\n' >&2\n\
+exit 2\n"
+
+let test_sandbox_container_label_args_include_owner_scope () =
+  let args =
+    Keeper_sandbox_runtime.docker_label_args
+      ~base_path:"/tmp/masc"
+      ~keeper_name:"min/jae"
+      ~container_kind:"turn"
+      ~network_label:"none" ()
+  in
+  let has_label value = List.mem value args in
+  let has_label_prefix prefix =
+    List.exists (String.starts_with ~prefix) args
+  in
+  Alcotest.(check bool) "component label" true
+    (has_label "masc.mcp.component=keeper-sandbox");
+  Alcotest.(check bool) "base path hash label" true
+    (has_label_prefix "masc.mcp.base_path_hash=");
+  Alcotest.(check bool) "sanitized keeper label" true
+    (has_label "masc.mcp.keeper=min_jae");
+  Alcotest.(check bool) "kind label" true
+    (has_label "masc.mcp.kind=turn");
+  Alcotest.(check bool) "owner pid label" true
+    (has_label
+       ("masc.mcp.owner_pid=" ^ string_of_int (Unix.getpid ())));
+  Alcotest.(check bool) "started_at label" true
+    (has_label_prefix "masc.mcp.started_at=");
+  Alcotest.(check bool) "network label" true
+    (has_label "masc.mcp.network=none")
+
+let test_cleanup_stale_containers_removes_only_stale_masc_scope () =
+  with_fake_docker fake_docker_cleanup_script @@ fun () ->
+  let base = temp_dir () in
+  let log_path = Filename.concat base "docker.log" in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  with_env "KEEPER_TEST_PID" (string_of_int (Unix.getpid ())) @@ fun () ->
+  let result =
+    Keeper_sandbox_runtime.cleanup_stale_containers
+      ~now:1000.0
+      ~max_age_sec:60.0
+      ~base_path:base
+      ~timeout_sec:5.0 ()
+  in
+  Alcotest.(check int) "scanned labeled containers" 2 result.scanned;
+  Alcotest.(check int) "removed stale container" 1 result.removed;
+  Alcotest.(check (list string)) "no cleanup errors" [] result.errors;
+  let log = read_file log_path in
+  Alcotest.(check bool) "removes old container" true
+    (contains_substring log "rm -f old-container");
+  Alcotest.(check bool) "keeps fresh container" false
+    (contains_substring log "rm -f fresh-container")
+
 let test_docker_preflight_reports_ready_image () =
   with_fake_docker fake_docker_preflight_ok_script @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "true" @@ fun () ->
@@ -693,5 +783,12 @@ let () =
             test_docker_preflight_reports_ready_image;
           Alcotest.test_case "missing image surfaces remediation" `Quick
             test_docker_preflight_surfaces_missing_image_actions;
+        ] );
+      ( "docker_cleanup",
+        [
+          Alcotest.test_case "label args include owner scope" `Quick
+            test_sandbox_container_label_args_include_owner_scope;
+          Alcotest.test_case "cleanup removes stale scoped containers" `Quick
+            test_cleanup_stale_containers_removes_only_stale_masc_scope;
         ] );
     ]

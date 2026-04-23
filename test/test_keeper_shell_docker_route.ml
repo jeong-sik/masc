@@ -136,6 +136,7 @@ let with_fake_docker script f =
     | _ -> dir
   in
   Fun.protect ~finally:(fun () -> cleanup_dir dir) @@ fun () ->
+  with_env "MASC_TEST_FAKE_DOCKER_PATH" docker_path @@ fun () ->
   with_env "PATH" path f
 
 let with_tool_policy_config f =
@@ -456,6 +457,10 @@ let test_hard_mode_blocks_raw_gh_bash () =
 
 let fake_docker_echo_script =
   "#!/bin/sh\n\
+log_file=${KEEPER_DOCKER_LOG:-}\n\
+if [ -n \"$log_file\" ]; then\n\
+  printf '%s\\n' \"$*\" >> \"$log_file\"\n\
+fi\n\
 if [ \"$1\" = \"info\" ]; then\n\
   printf '[]\\n'\n\
   exit 0\n\
@@ -475,32 +480,6 @@ done\n\
 printf 'stdout:%s\\n' \"$*\"\n\
 exit 0\n"
 
-let fake_docker_log_args_script =
-  "#!/bin/sh\n\
-log_file=${KEEPER_DOCKER_LOG:-}\n\
-if [ -n \"$log_file\" ]; then\n\
-  printf '%s\\n' \"$*\" >> \"$log_file\"\n\
-fi\n\
-case \"$1\" in\n\
-  info)\n\
-    printf '[]\\n'\n\
-    exit 0\n\
-    ;;\n\
-  ps)\n\
-    exit 0\n\
-    ;;\n\
-  image)\n\
-    printf '[]\\n'\n\
-    exit 0\n\
-    ;;\n\
-  run)\n\
-    printf 'ok\\n'\n\
-    exit 0\n\
-    ;;\n\
-esac\n\
-printf 'unexpected docker invocation: %s\\n' \"$1\" >&2\n\
-exit 2\n"
-
 let docker_run_line log_path =
   read_file log_path
   |> String.split_on_char '\n'
@@ -516,6 +495,11 @@ let run_git_creds_docker_shell ~config ~meta ~playground ~log_path =
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "false" @@ fun () ->
+  (match Sys.getenv_opt "MASC_TEST_FAKE_DOCKER_PATH" with
+   | Some expected ->
+       Alcotest.(check string) "fake docker command selected" expected
+         (Masc_mcp.Keeper_sandbox_runtime.docker_command ())
+   | None -> ());
   match
     Keeper_shell_docker.run_docker_shell_command_with_status
       ~config ~meta ~cwd:playground ~timeout_sec:5.0
@@ -525,16 +509,20 @@ let run_git_creds_docker_shell ~config ~meta ~playground ~log_path =
   | Error msg ->
       Alcotest.failf "expected fake docker git-creds run, got %s" msg
   | Ok result ->
-      Alcotest.(check (pair string int)) "fake docker exits cleanly"
-        ("exit", 0)
-        (match result.Keeper_shell_docker.status with
-         | Unix.WEXITED code -> ("exit", code)
-         | Unix.WSIGNALED code -> ("signaled", code)
-         | Unix.WSTOPPED code -> ("stopped", code));
+      let observed =
+        match result.Keeper_shell_docker.status with
+        | Unix.WEXITED code -> ("exit", code)
+        | Unix.WSIGNALED code -> ("signaled", code)
+        | Unix.WSTOPPED code -> ("stopped", code)
+      in
+      if observed <> ("exit", 0) then
+        Alcotest.failf "expected fake docker exit 0, got %s %d; log=%S; output=%S"
+          (fst observed) (snd observed) (read_file log_path)
+          result.Keeper_shell_docker.output;
       docker_run_line log_path
 
 let test_git_creds_skips_missing_ssh_auth_sock () =
-  with_fake_docker fake_docker_log_args_script @@ fun () ->
+  with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types.Docker
   @@ fun ~config ~meta ~playground ->
   Masc_mcp.Config_dir_resolver.reset ();
@@ -552,7 +540,7 @@ let test_git_creds_skips_missing_ssh_auth_sock () =
     (contains_substring line "SSH_AUTH_SOCK=/tmp/keeper-creds/ssh-agent.sock")
 
 let test_git_creds_respects_keeper_alias_identity_mode () =
-  with_fake_docker fake_docker_log_args_script @@ fun () ->
+  with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types.Docker
   @@ fun ~config ~meta ~playground ->
   with_keeper_identity_toml ~config ~keeper_name:meta.name
@@ -568,7 +556,7 @@ let test_git_creds_respects_keeper_alias_identity_mode () =
     (contains_substring line "GIT_AUTHOR_NAME=anyang-keepers")
 
 let test_git_creds_uses_github_identity_mode () =
-  with_fake_docker fake_docker_log_args_script @@ fun () ->
+  with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types.Docker
   @@ fun ~config ~meta ~playground ->
   with_keeper_identity_toml ~config ~keeper_name:meta.name

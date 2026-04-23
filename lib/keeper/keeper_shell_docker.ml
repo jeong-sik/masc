@@ -167,10 +167,11 @@ let run_docker_shell_command_with_status
           | Network_none -> ([ "--network"; "none" ], "none")
           | Network_inherit -> ([], network_mode_to_string network_mode)
       in
-      let cred_mounts =
+      let cred_mounts, cred_envs =
         if not git_creds_enabled then
-          []
+          [], []
         else
+          let cred_root = "/tmp/keeper-creds" in
           let gh_creds =
             match Keeper_gh_env.keeper_config_dir config ~keeper_name:meta.name with
             | Ok (Some dir) -> dir
@@ -179,9 +180,26 @@ let run_docker_shell_command_with_status
           in
           let gitconfig = Env_config_keeper.KeeperSandbox.gitconfig_host_path () in
           let ssh_dir = Env_config_keeper.KeeperSandbox.ssh_dir_host_path () in
-          optional_ro_mount ~host:gh_creds ~container:"/root/.config/gh"
-          @ optional_ro_mount ~host:gitconfig ~container:"/root/.gitconfig"
-          @ optional_ro_mount ~host:ssh_dir ~container:"/root/.ssh"
+          let mounts =
+            optional_ro_mount ~host:gh_creds
+              ~container:(Filename.concat cred_root ".config/gh")
+            @ optional_ro_mount ~host:gitconfig
+                ~container:(Filename.concat cred_root ".gitconfig")
+            @ optional_ro_mount ~host:ssh_dir
+                ~container:(Filename.concat cred_root ".ssh")
+          in
+          let envs =
+            [
+              "-e"; "HOME=" ^ cred_root;
+              "-e"; "GH_CONFIG_DIR=" ^ Filename.concat cred_root ".config/gh";
+              "-e"; "GIT_CONFIG_GLOBAL=" ^ Filename.concat cred_root ".gitconfig";
+              "-e"; "GIT_AUTHOR_NAME=MASC Keeper";
+              "-e"; "GIT_AUTHOR_EMAIL=keeper@masc.local";
+              "-e"; "GIT_COMMITTER_NAME=MASC Keeper";
+              "-e"; "GIT_COMMITTER_EMAIL=keeper@masc.local";
+            ]
+          in
+          mounts, envs
       in
       let token_env =
         let gh_token =
@@ -227,6 +245,7 @@ let run_docker_shell_command_with_status
         ]
         @ network_args
         @ cred_mounts
+        @ cred_envs
         @ token_env
         @ [ image; "bash"; "-lc"; cmd ]
       in

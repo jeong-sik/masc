@@ -74,21 +74,17 @@ let preset_name_of_tool_preset = function
   | Delivery -> "delivery"
   | Full -> "full"
 
-(* ── Workflow permission (config-driven) ─────────────────────── *)
+(* ── Privileged operation gates ------------------------------------ *)
+
+let preset_allows_privileged_operations = function
+  | Coding | Delivery | Full -> true
+  | Minimal | Social | Messaging | Research -> false
 
 let allows_workflow_for_preset (preset : tool_preset) : bool =
-  match !policy_config with
-  | None -> false
-  | Some cfg ->
-    Keeper_tool_policy_config.allows_workflow cfg
-      (preset_name_of_tool_preset preset)
+  preset_allows_privileged_operations preset
 
 let allows_shell_write_for_preset (preset : tool_preset) : bool =
-  match !policy_config with
-  | None -> false
-  | Some cfg ->
-    Keeper_tool_policy_config.allows_shell_write cfg
-      (preset_name_of_tool_preset preset)
+  preset_allows_privileged_operations preset
 
 (* ── Git clone config accessors (config-driven) ──────────────── *)
 

@@ -2000,7 +2000,7 @@ let bootstrap_live_keeper_meta ~(ctx : _ context) (m : keeper_meta) : keeper_met
       let (_init_msg : string) = Coord.init ctx.config ~agent_name:None in
       ());
     let synced = ensure_keeper_room_presence ctx.config m in
-    (match write_meta ctx.config synced with
+    (match write_meta ~force:true ctx.config synced with
      | Ok () -> ()
      | Error e ->
        Prometheus.inc_counter Prometheus.metric_keeper_write_meta_failures

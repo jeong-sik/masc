@@ -244,7 +244,7 @@ proposed_action -> verifier_core: risk_level 분류 (Safe/Moderate/Dangerous)
 
 ### 5.6 Keeper Contract (RETIRED)
 
-`lib/keeper/keeper_contract.ml`는 keeper 정책/런타임 enum의 typed 표현(예: `room_scope = Current | All (legacy)`)을 제공했고, single-room 통합 과정에서 `room_scope` 타입과 함께 제거됐다 (`grep -rn 'type room_scope' lib/` → 0 hits; 남은 `room_scope_*` 식별자는 캐시 helper 함수 이름일 뿐 타입 정의가 아님).
+`lib/keeper/keeper_contract.ml`는 keeper 정책/런타임 enum의 typed 표현(예: room-targeting enum legacy variant)을 제공했고, single-room 통합 과정에서 해당 타입이 제거됐다 (`grep -rn 'type .*scope' lib/keeper` 기준 legacy scope enum hit 없음).
 
 Keeper 관련 enum의 현재 typed boundary는 05-keeper-agent 스펙의 §2 module table을 따른다.
 

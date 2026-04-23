@@ -54,7 +54,7 @@ val with_dashboard_timeout :
 
 (** {1 Cache Key Helpers} *)
 
-val room_scoped_cache_key : Coord.config -> string -> string -> string
+val dashboard_cache_key : Coord.config -> string -> string -> string
 
 (** {1 Projection Diagnostics} *)
 

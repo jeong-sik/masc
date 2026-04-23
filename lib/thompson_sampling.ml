@@ -498,7 +498,8 @@ let select_with_feedback ~agents ~max_n ~pending_triggers ~tick_interval_s =
           final_score = priority_score ~trigger ~signal;
           ticks_since_selection = ticks;
         }
-    | _ -> ()
+    | Mentioned _ | ContentAlert _ -> ()
+    | Scheduled | Starved | Thompson -> ()
   ) priority_triggers;
 
   (* 2. Starvation rescue: force include agents who haven't been selected too long *)

@@ -559,9 +559,11 @@ let handle_goal_transition (ctx : context) args =
                                          ("status", `String "cancelled");
                                        ])
                              | Error msg ->
-                                 Log.Misc.warn "goal verification cancel_request failed for %s: %s"
+                                 Log.Misc.warn
+                                   "goal verification cancel_request failed for %s: %s"
                                    request_id msg)
-                        | _ -> ()
+                        | None, _ -> ()
+                        | Some _, _ -> ()
                       in
                       match
                         update_goal_phase ctx goal ~phase:next_phase ?note

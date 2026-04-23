@@ -648,7 +648,7 @@ let batch_add_tasks_internal ?created_by config tasks =
              (List.length added_tasks)
              summary
          in
-         let _ = broadcast config ~from_agent:actor ~content:msg in
+         ignore (broadcast config ~from_agent:actor ~content:msg);
          Printf.sprintf "✅ Added %d tasks: %s" (List.length added_tasks) summary
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
@@ -732,12 +732,11 @@ let claim_task config ~agent_name ~task_id =
                   write_backlog config new_backlog;
                   update_local_agent_state config ~agent_name (fun agent ->
                     { agent with status = Busy; current_task = Some task_id });
-                  let _ =
-                    broadcast
-                      config
-                      ~from_agent:agent_name
-                      ~content:(Printf.sprintf "📋 Claimed %s" task_id)
-                  in
+                  ignore
+                    (broadcast
+                       config
+                       ~from_agent:agent_name
+                       ~content:(Printf.sprintf "📋 Claimed %s" task_id));
                   emit_task_activity
                     config
                     ~agent_name
@@ -875,12 +874,11 @@ let claim_task_r config ~agent_name ~task_id ?(agent_role = Types_core.Unassigne
            write_backlog config new_backlog;
            update_local_agent_state config ~agent_name (fun agent ->
              { agent with status = Busy; current_task = Some task_id });
-           let _ =
-             broadcast
-               config
-               ~from_agent:agent_name
-               ~content:(Printf.sprintf "📋 Claimed %s" task_id)
-           in
+           ignore
+             (broadcast
+                config
+                ~from_agent:agent_name
+                ~content:(Printf.sprintf "📋 Claimed %s" task_id));
            emit_task_activity
              config
              ~agent_name
@@ -1509,7 +1507,7 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result
                  then Printf.sprintf "🚫 Cancelled %s" task_id
                  else Printf.sprintf "🚫 Cancelled %s - %s" task_id reason
                in
-               let _ = broadcast config ~from_agent:agent_name ~content:msg in
+               ignore (broadcast config ~from_agent:agent_name ~content:msg);
                emit_task_activity
                  config
                  ~agent_name

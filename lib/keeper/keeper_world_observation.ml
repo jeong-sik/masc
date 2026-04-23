@@ -187,7 +187,7 @@ let collect_message_scope ~(config : Coord.config) ~(meta : keeper_meta) :
           | Eio.Cancel.Cancelled _ as e -> raise e
           | _ -> []
         in
-        let status, remaining, last_processed, room_mentions, room_scope_messages =
+        let status, remaining, last_processed, room_mentions, scoped_messages =
           consume_room_messages remaining since_seq [] [] messages
         in
         let cursor_acc =
@@ -195,7 +195,7 @@ let collect_message_scope ~(config : Coord.config) ~(meta : keeper_meta) :
           else cursor_acc
         in
         let mentions_acc = mentions_acc @ room_mentions in
-        let scope_acc = scope_acc @ room_scope_messages in
+        let scope_acc = scope_acc @ scoped_messages in
         match status with
         | `Done -> consume_rooms remaining mentions_acc scope_acc cursor_acc rest
         | `Saturated -> (mentions_acc, scope_acc, List.rev cursor_acc)

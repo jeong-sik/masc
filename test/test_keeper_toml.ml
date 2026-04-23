@@ -987,6 +987,9 @@ cascade_name = "big_three"
 github_identity = "anyang-keepers"
 git_identity_mode = "keeper_alias"
 active_goal_ids = ["goal-runtime"]
+[keeper.tool_access]
+kind = "preset"
+preset = "coding"
 |} in
   match TL.parse_toml input with
   | Error e -> fail e

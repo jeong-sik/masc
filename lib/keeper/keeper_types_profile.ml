@@ -774,6 +774,14 @@ let parsed_field_key_names =
   ; "cascade_name"
   ]
 
+(** Accepted TOML keys that are not materialized by
+    [profile_defaults_of_toml], but are intentionally not treated as unknown
+    config drift. *)
+let accepted_non_materialized_key_names =
+  [ "tool_access.kind"
+  ; "tool_access.preset"
+  ]
+
 (** Canonical TOML key names used by [detect_unknown_keeper_toml_keys].
     Keys outside this set under [[keeper]] (or any other table) are silently
     ignored by the loader, which historically let dead config accumulate
@@ -781,8 +789,9 @@ let parsed_field_key_names =
     uses this list to surface drift on boot, symmetric with
     [warn_unknown_keeper_meta_keys] on the JSON side.
 
-    Must be kept in sync with [parsed_field_key_names] — the assertion below
-    catches drift at compile time. *)
+    Must be kept in sync with [parsed_field_key_names] plus
+    [accepted_non_materialized_key_names] — the assertion below catches drift at
+    compile time. *)
 let canonical_keeper_toml_key_names =
   [ "name"
   ; "persona_name"
@@ -830,7 +839,8 @@ let canonical_keeper_toml_key_names =
 let () =
   assert (
     List.sort String.compare canonical_keeper_toml_key_names
-    = List.sort String.compare parsed_field_key_names)
+    = List.sort String.compare
+        (parsed_field_key_names @ accepted_non_materialized_key_names))
 
 (** Pure detector: returns TOML keys that [profile_defaults_of_toml] does not
     consume.  Exposed separately from the logging wrapper so tests can

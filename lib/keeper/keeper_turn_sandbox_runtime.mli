@@ -10,6 +10,7 @@ val create :
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->
   ?network_mode:Keeper_types.network_mode ->
+  unit ->
   t
 
 val cleanup : t -> unit

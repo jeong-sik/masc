@@ -208,12 +208,27 @@ describe('metricCoverageText', () => {
     expect(
       metricCoverageText(
         makeMetric({
+          coverage_status: 'partial',
+          primary_coverage_stage: 'oas',
+          primary_coverage_reason: 'missing_usage',
           success_count: 5,
           usage_sample_count: 0,
           telemetry_sample_count: 2,
         }),
       ),
-    ).toBe('usage 0/5 · telemetry 2/5')
+    ).toBe('coverage partial · OAS · usage missing · usage 0/5 · telemetry 2/5')
+  })
+
+  it('renders error-only windows explicitly', () => {
+    expect(
+      metricCoverageText(
+        makeMetric({
+          coverage_status: 'error_only',
+          success_count: 0,
+          error_count: 3,
+        }),
+      ),
+    ).toBe('error-only window')
   })
 })
 
@@ -298,6 +313,16 @@ describe('sortModelMetricsByUrgency', () => {
     ]
     const result = sortModelMetricsByUrgency(sample)
     expect(result.map(m => m.model_id)).toEqual(['busy', 'medium', 'idle'])
+  })
+
+  it('prioritizes coverage gaps ahead of healthy full-coverage models', () => {
+    const sample = [
+      makeMetric({ model_id: 'full', entry_count: 100, success_count: 100, coverage_status: 'full' }),
+      makeMetric({ model_id: 'partial', entry_count: 5, success_count: 5, coverage_status: 'partial' }),
+      makeMetric({ model_id: 'missing', entry_count: 2, success_count: 2, coverage_status: 'none' }),
+    ]
+    const result = sortModelMetricsByUrgency(sample)
+    expect(result.map(m => m.model_id)).toEqual(['missing', 'partial', 'full'])
   })
 
   it('falls back to model_id alpha order when everything else is equal', () => {

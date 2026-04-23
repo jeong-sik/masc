@@ -2215,7 +2215,17 @@ let test_append_decision_record_nulls_unreported_usage () =
       check bool "cost_usd null when usage unreported" true
         (match telemetry |> member "cost_usd" with `Null -> true | _ -> false);
       check bool "tokens_per_second null when usage unreported" true
-        (match telemetry |> member "tokens_per_second" with `Null -> true | _ -> false))
+        (match telemetry |> member "tokens_per_second" with `Null -> true | _ -> false);
+      check string "outcome persisted" "success"
+        (telemetry |> member "outcome" |> to_string);
+      check bool "usage_reported false persisted" false
+        (telemetry |> member "usage_reported" |> to_bool);
+      check bool "telemetry_reported false persisted" false
+        (telemetry |> member "telemetry_reported" |> to_bool);
+      check string "coverage stage persisted" "oas"
+        (telemetry |> member "coverage_stage" |> to_string);
+      check string "coverage reason persisted" "missing_usage_and_inference"
+        (telemetry |> member "coverage_reason" |> to_string))
 
 let test_run_keeper_cycle_skips_non_executable_phase () =
   Eio_main.run @@ fun env ->

@@ -593,6 +593,12 @@ export interface DashboardRuntimeModelMetric {
   total_reasoning_tokens?: number | null
   usage_sample_count?: number | null
   telemetry_sample_count?: number | null
+  usage_missing_count?: number | null
+  telemetry_missing_count?: number | null
+  coverage_status?: 'full' | 'partial' | 'none' | 'error_only' | null
+  primary_coverage_stage?: string | null
+  primary_coverage_reason?: string | null
+  coverage_reason_counts?: Array<{ reason: string; count: number }> | null
   fallback_count?: number | null
   success_count?: number | null
   error_count?: number | null
@@ -602,6 +608,9 @@ export interface DashboardRuntimeModelMetric {
   top_tools?: Array<{ tool: string; count: number }> | null
   recent_entries?: Array<{
     ts_unix: number
+    outcome?: string | null
+    stop_reason?: string | null
+    turn_lane?: string | null
     input_tokens: number | null
     output_tokens: number | null
     latency_ms: number | null
@@ -609,6 +618,10 @@ export interface DashboardRuntimeModelMetric {
     peak_memory_gb?: number | null
     cost_usd: number | null
     tools_count: number
+    usage_reported?: boolean | null
+    telemetry_reported?: boolean | null
+    coverage_reason?: string | null
+    coverage_stage?: string | null
   }> | null
   buckets?: BucketMetric[] | null
 }
@@ -701,6 +714,17 @@ function decodeRuntimeModelMetric(raw: unknown): DashboardRuntimeModelMetric | n
     total_reasoning_tokens: asNumber(raw.total_reasoning_tokens) ?? null,
     usage_sample_count: asNumber(raw.usage_sample_count) ?? null,
     telemetry_sample_count: asNumber(raw.telemetry_sample_count) ?? null,
+    usage_missing_count: asNumber(raw.usage_missing_count) ?? null,
+    telemetry_missing_count: asNumber(raw.telemetry_missing_count) ?? null,
+    coverage_status: asNullableString(raw.coverage_status) as DashboardRuntimeModelMetric['coverage_status'],
+    primary_coverage_stage: asNullableString(raw.primary_coverage_stage),
+    primary_coverage_reason: asNullableString(raw.primary_coverage_reason),
+    coverage_reason_counts: Array.isArray(raw.coverage_reason_counts)
+      ? (raw.coverage_reason_counts as unknown[])
+          .filter(isRecord)
+          .map(item => ({ reason: asString(item.reason) ?? '', count: asNumber(item.count) ?? 0 }))
+          .filter(item => item.reason.length > 0)
+      : null,
     fallback_count: asNumber(raw.fallback_count) ?? null,
     success_count: asNumber(raw.success_count) ?? null,
     error_count: asNumber(raw.error_count) ?? null,
@@ -718,6 +742,9 @@ function decodeRuntimeModelMetric(raw: unknown): DashboardRuntimeModelMetric | n
           .filter(isRecord)
           .map(r => ({
             ts_unix: asNumber(r.ts_unix) ?? 0,
+            outcome: asNullableString(r.outcome),
+            stop_reason: asNullableString(r.stop_reason),
+            turn_lane: asNullableString(r.turn_lane),
             input_tokens: asNumber(r.input_tokens) ?? null,
             output_tokens: asNumber(r.output_tokens) ?? null,
             latency_ms: asNumber(r.latency_ms) ?? null,
@@ -725,6 +752,10 @@ function decodeRuntimeModelMetric(raw: unknown): DashboardRuntimeModelMetric | n
             peak_memory_gb: asNumber(r.peak_memory_gb) ?? null,
             cost_usd: asNumber(r.cost_usd) ?? null,
             tools_count: asNumber(r.tools_count) ?? 0,
+            usage_reported: asBoolean(r.usage_reported),
+            telemetry_reported: asBoolean(r.telemetry_reported),
+            coverage_reason: asNullableString(r.coverage_reason),
+            coverage_stage: asNullableString(r.coverage_stage),
           }))
       : null,
     buckets: Array.isArray(raw.buckets)

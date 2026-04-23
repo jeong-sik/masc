@@ -173,7 +173,6 @@ describe('fetchKeeperConfig', () => {
   it('normalizes singleton string, numeric string, and boolean string fields', async () => {
     const rawResponse = {
       name: 'keeper-sangsu',
-      execution_scope: 'workspace',
       sandbox_profile: 'docker',
       network_mode: 'none',
       shared_memory_scope: 'room',

@@ -1181,7 +1181,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
 
   return {
     name: asNullableString(data.name) ?? requestedName,
-    execution_scope: asNullableString(data.execution_scope) ?? 'workspace',
     sandbox_profile: asNullableString(data.sandbox_profile) ?? 'local',
     network_mode: asNullableString(data.network_mode) ?? 'inherit',
     shared_memory_scope: asNullableString(data.shared_memory_scope) ?? 'disabled',
@@ -1345,8 +1344,6 @@ export type SandboxNetworkMode = 'none' | 'inherit'
 export type SharedMemoryScope = 'disabled' | 'room'
 
 export type KeeperConfigUpdatePayload = {
-  // Scope
-  execution_scope?: 'observe_only' | 'workspace' | 'local'
   allowed_paths?: string[]
   // Sandbox
   sandbox_profile?: SandboxProfile

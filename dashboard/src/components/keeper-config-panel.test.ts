@@ -26,7 +26,6 @@ function makeSlot(overrides: Partial<KeeperHookSlot> = {}): KeeperHookSlot {
 function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
   return {
     name: 'keeper-sangsu',
-    execution_scope: 'workspace',
     sandbox_profile: 'local',
     network_mode: 'inherit',
     shared_memory_scope: 'disabled',
@@ -254,7 +253,6 @@ describe('sandbox coerce helpers', () => {
 function makeKeeperConfigForSandbox(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
   const base: KeeperConfig = {
     name: 'test-keeper',
-    execution_scope: 'workspace',
     sandbox_profile: 'local',
     network_mode: 'inherit',
     shared_memory_scope: 'disabled',

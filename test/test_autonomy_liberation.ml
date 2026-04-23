@@ -31,26 +31,6 @@ let test_lifecycle_no_strict () =
   Alcotest.(check bool) "contains 'capabilities'" true
     (contains_s suffix "capabilities")
 
-let test_autonomous_scope_roundtrip () =
-  let scope = Worker_types.Autonomous in
-  let s = Worker_types.execution_scope_to_string scope in
-  Alcotest.(check string) "to_string" "autonomous" s;
-  (* Issue #8605: opt version returns Some for valid strings. *)
-  match Worker_types.execution_scope_of_string_opt s with
-  | None -> Alcotest.fail "expected Some for valid string"
-  | Some back ->
-    let back_s = Worker_types.execution_scope_to_string back in
-    Alcotest.(check string) "roundtrip" "autonomous" back_s
-
-let test_scope_unknown_returns_none () =
-  (* Issue #8605: was test_scope_default_is_limited — asserted that
-     unknown input silently produced [Limited_code_change]. That was
-     the bug: silent privilege miscategorization. The opt version
-     correctly returns [None] so callers must apply an explicit
-     default at their layer. *)
-  Alcotest.(check bool) "unknown -> None" true
-    (Worker_types.execution_scope_of_string_opt "unknown_value" = None)
-
 (* ── Phase 2: Tool Discovery ──────────────────────────────────── *)
 
 let test_build_tool_catalog_worker () =
@@ -258,12 +238,6 @@ let test_team_context_build_renders_findings_without_goal () =
         (contains_s section "render me"))
 
 let test_scope_default_unchanged () =
-  (* Issue #8605: Variant SSOT semantics — unknown input returns
-     [None]; callers (e.g. worker_container.execution_scope_or_default)
-     supply the explicit default. The bug was the silent default at
-     the parsing layer. *)
-  Alcotest.(check bool) "unknown -> None" true
-    (Worker_types.execution_scope_of_string_opt "whatever" = None);
   (* Worker tools should remain a small focused set *)
   let worker_tools =
     Agent_tool_surfaces.build_tool_catalog ~role:"worker" ()
@@ -280,10 +254,6 @@ let () =
         [
           Alcotest.test_case "lifecycle no strict/MUST" `Quick
             test_lifecycle_no_strict;
-          Alcotest.test_case "autonomous scope roundtrip" `Quick
-            test_autonomous_scope_roundtrip;
-          Alcotest.test_case "unknown scope returns None (#8605)" `Quick
-            test_scope_unknown_returns_none;
         ] );
       ( "phase2_tool_discovery",
         [

@@ -1244,7 +1244,6 @@ let handle_keeper_status ctx args : tool_result =
              ("playground_path", `String playground_rel);
              ("default_cwd", `String playground_abs);
              ("private_workspace_root", `String playground_abs);
-             ("execution_scope", `String (Keeper_execution_scope.to_string m.execution_scope));
              ("sandbox_profile", `String (sandbox_profile_to_string m.sandbox_profile));
              ("network_mode", `String (network_mode_to_string m.network_mode));
              ("shared_memory_scope",

@@ -302,7 +302,6 @@ let append_decision_record
       , turn_id_opt
       , task_id_opt
       , turn_goal_ids_opt
-      , _execution_scope
       , _sandbox_profile
       , _network_mode
       , _shared_memory_scope

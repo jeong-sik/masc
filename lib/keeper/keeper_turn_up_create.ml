@@ -46,11 +46,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
     | Some paths -> paths
     | None -> Option.value ~default:[] p.profile_defaults.allowed_paths
   in
-  let execution_scope =
-    p.execution_scope_opt
-    |> first_some p.profile_defaults.execution_scope
-    |> Option.value ~default:default_execution_scope
-  in
   let sandbox_profile =
     resolve_sandbox_profile
       ~preferred:p.sandbox_profile_opt
@@ -332,7 +327,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         desires;
         instructions;
         policy_voice_enabled;
-        execution_scope;
         sandbox_profile;
         network_mode;
         shared_memory_scope;

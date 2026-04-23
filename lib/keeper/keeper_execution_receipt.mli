@@ -27,7 +27,6 @@ type t =
   ; tool_surface : tool_surface
   ; sandbox_configured_kind : string
   ; sandbox_effective_kind : string
-  ; execution_scope : string
   ; sandbox_root : string option
   ; network_mode : string
   ; approval_profile : string option

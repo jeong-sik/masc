@@ -321,6 +321,7 @@ let test_docker_blocks_nested_docker_command () =
   let raw =
     Keeper_exec_shell.handle_keeper_bash
       ~turn_sandbox_runtime:None
+      ~turn_sandbox_runtime_git:None
       ~config ~meta
       ~args:(`Assoc [ ("cmd", `String "docker run --rm alpine true") ])
   in
@@ -341,6 +342,7 @@ let test_docker_blocks_docker_socket_reference () =
   let raw =
     Keeper_exec_shell.handle_keeper_bash
       ~turn_sandbox_runtime:None
+      ~turn_sandbox_runtime_git:None
       ~config ~meta
       ~args:(`Assoc [ ("cmd", `String "cat /var/run/docker.sock") ])
   in
@@ -364,6 +366,7 @@ let test_docker_missing_seccomp_profile_fails_closed () =
       let raw =
         Keeper_exec_shell.handle_keeper_bash
           ~turn_sandbox_runtime:None
+          ~turn_sandbox_runtime_git:None
           ~config ~meta
           ~args:(`Assoc [ ("cmd", `String "pwd") ])
       in

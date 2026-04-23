@@ -37,7 +37,7 @@ let resolved_keeper_args_to_json
     ~name ~persona_name ~goal ~short_goal ~mid_goal ~long_goal
     ~instructions ~will ~needs ~desires ~policy_voice_enabled
     ~mention_targets
-    ~execution_scope_opt ~allowed_paths_opt
+    ~allowed_paths_opt
     ~autoboot_enabled_opt
     ~tool_access_opt
     ~tool_preset ~tool_also_allow ~tool_denylist
@@ -64,12 +64,6 @@ let resolved_keeper_args_to_json
       ("handoff_cooldown_sec", `Int handoff_cooldown_sec);
     ]
   in
-  let execution_scope_field =
-    match execution_scope_opt with
-    | Some scope ->
-        [ ("execution_scope", `String (Keeper_execution_scope.to_string scope)) ]
-    | None -> []
-  in
   let allowed_paths_field =
     match allowed_paths_opt with
     | Some paths -> [("allowed_paths", string_list_to_json paths)]
@@ -95,7 +89,7 @@ let resolved_keeper_args_to_json
     | None -> []
   in
   `Assoc
-    ( base @ execution_scope_field @ allowed_paths_field @ autoboot_field
+    ( base @ allowed_paths_field @ autoboot_field
     @ tool_policy_field @ shards_field )
 
 let validate_resolved_keeper_create_json (json : Yojson.Safe.t) : string list =
@@ -202,18 +196,6 @@ let resolved_keeper_args_from_persona args :
               |> first_some defaults.proactive_enabled
               |> Option.value ~default:false
             in
-            let execution_scope =
-              get_string_opt args "execution_scope"
-              |> Option.map (fun s ->
-                     match Keeper_execution_scope.of_string s with
-                     | Ok v -> v
-                     | Error (`Unknown_scope raw) ->
-                         Log.Keeper.warn
-                           "masc_keeper_create_from_persona: unknown execution_scope %S, using default"
-                           raw;
-                         Keeper_execution_scope.default)
-              |> first_some defaults.execution_scope
-            in
             let autoboot_enabled = get_bool_opt args "autoboot_enabled" in
             (match
                Keeper_turn_up_args.parse_tool_access_input args,
@@ -275,7 +257,6 @@ let resolved_keeper_args_from_persona args :
                      ~instructions  ~will ~needs ~desires
                      ~policy_voice_enabled
                      ~mention_targets
-                     ~execution_scope_opt:execution_scope
                      ~allowed_paths_opt:allowed_paths
                      ~autoboot_enabled_opt:autoboot_enabled
                      ~tool_access_opt

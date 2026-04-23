@@ -34,7 +34,6 @@ type turn_context = {
   keeper_turn_id: int option;
   task_id: string option;
   goal_ids: string list option;
-  execution_scope: string option;
   sandbox_profile: string option;
   network_mode: string option;
   shared_memory_scope: string option;
@@ -53,7 +52,6 @@ let empty_turn_context = {
   keeper_turn_id = None;
   task_id = None;
   goal_ids = None;
-  execution_scope = None;
   sandbox_profile = None;
   network_mode = None;
   shared_memory_scope = None;
@@ -72,7 +70,7 @@ let consume_truncation_info ~keeper_name () =
 
 let set_turn_context ~keeper_name ?lane ?tool_choice ?thinking_enabled
     ?thinking_budget ?prompt_fingerprint ?trace_id ?session_id ?turn
-    ?keeper_turn_id ?task_id ?goal_ids ?execution_scope ?sandbox_profile
+    ?keeper_turn_id ?task_id ?goal_ids ?sandbox_profile
     ?network_mode ?shared_memory_scope ?approval_mode () =
   Hashtbl.replace pending_turn_context keeper_name
     {
@@ -87,7 +85,6 @@ let set_turn_context ~keeper_name ?lane ?tool_choice ?thinking_enabled
       keeper_turn_id;
       task_id;
       goal_ids;
-      execution_scope;
       sandbox_profile;
       network_mode;
       shared_memory_scope;
@@ -111,7 +108,6 @@ let get_turn_context ~keeper_name () =
   , ctx.keeper_turn_id
   , ctx.task_id
   , ctx.goal_ids
-  , ctx.execution_scope
   , ctx.sandbox_profile
   , ctx.network_mode
   , ctx.shared_memory_scope
@@ -185,7 +181,7 @@ let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
     ~(output_text : string) ~(success : bool) ~(duration_ms : float)
     ?(model : string = "") ?lane ?tool_choice ?thinking_enabled
     ?thinking_budget ?prompt_fingerprint ?trace_id ?session_id ?turn
-    ?keeper_turn_id ?task_id ?goal_ids ?execution_scope ?sandbox_profile
+    ?keeper_turn_id ?task_id ?goal_ids ?sandbox_profile
     ?network_mode ?shared_memory_scope ?approval_mode ?result_bytes
     ?truncated_to () =
   if Observability_redact.is_denied_tool ~tool_name then ()
@@ -204,7 +200,6 @@ let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
           , ctx_keeper_turn_id
           , ctx_task_id
           , ctx_goal_ids
-          , ctx_execution_scope
           , ctx_sandbox_profile
           , ctx_network_mode
           , ctx_shared_memory_scope
@@ -243,11 +238,6 @@ let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
       let task_id = match task_id with Some _ -> task_id | None -> ctx_task_id in
       let goal_ids =
         match goal_ids with Some _ -> goal_ids | None -> ctx_goal_ids
-      in
-      let execution_scope =
-        match execution_scope with
-        | Some _ -> execution_scope
-        | None -> ctx_execution_scope
       in
       let sandbox_profile =
         match sandbox_profile with
@@ -325,10 +315,6 @@ let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
             [("goal_ids", `List (List.map (fun value -> `String value) values))]
         | None -> []
       in
-      let execution_scope_field = match execution_scope with
-        | Some value -> [("execution_scope", `String value)]
-        | None -> []
-      in
       let sandbox_profile_field = match sandbox_profile with
         | Some value -> [("sandbox_profile", `String value)]
         | None -> []
@@ -363,7 +349,7 @@ let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
            @ prompt_fingerprint_field
            @ trace_id_field @ session_id_field @ turn_field
            @ keeper_turn_id_field @ task_id_field @ goal_ids_field
-           @ execution_scope_field @ sandbox_profile_field @ network_mode_field
+           @ sandbox_profile_field @ network_mode_field
            @ shared_memory_scope_field @ approval_mode_field
            @ result_bytes_field @ truncated_to_field)
       in

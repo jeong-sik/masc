@@ -19,9 +19,6 @@ type docker_config = {
 
 type worker_spawn = {
   backend : Worker_execution_backend.t;
-  docker_scopes : Worker_types.execution_scope list;
-      (** Execution scopes routed through the Docker backend when
-          [backend = Docker]. Other scopes fall back to [Local]. *)
   docker : docker_config;
 }
 
@@ -31,14 +28,8 @@ type t = {
 
 (** {1 Public API} *)
 
-(** [backend_for_scope scope] returns the effective runtime backend
-    for [scope]:
-
-    - [Observe_only] → always [Local].
-    - Otherwise: [config.worker_spawn.backend]; [Docker] only when
-      [scope] is listed in [docker_scopes], else [Local]. *)
-val backend_for_scope :
-  Worker_types.execution_scope -> Worker_execution_backend.t
+(** Effective worker runtime backend after file + env resolution. *)
+val backend : unit -> Worker_execution_backend.t
 
 (** Effective docker image, after file + env resolution. *)
 val docker_image : unit -> string

@@ -845,7 +845,6 @@ let make_worker_meta ?(effective_model = "local-qwen") () :
     workspace_path = "/tmp/workspace";
     role = Some "executor";
     selection_note = Some "resume";
-    execution_scope = Worker_types.Limited_code_change;
     thinking_enabled = Some true;
     max_turns_override = None;
     timeout_seconds = Some 240;

@@ -457,8 +457,6 @@ let append_execution_receipt config ~keeper_name =
         Lib.Keeper_types.sandbox_profile_to_string meta.sandbox_profile;
       sandbox_effective_kind =
         Lib.Keeper_execution_receipt.effective_sandbox_kind_of_meta meta;
-      execution_scope =
-        Lib.Keeper_execution_scope.to_string meta.execution_scope;
       sandbox_root = Some config.base_path;
       network_mode = Lib.Keeper_types.network_mode_to_string meta.network_mode;
       approval_profile = Some "trusted_local";

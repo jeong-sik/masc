@@ -39,7 +39,6 @@ val set_turn_context :
   ?keeper_turn_id:int ->
   ?task_id:string ->
   ?goal_ids:string list ->
-  ?execution_scope:string ->
   ?sandbox_profile:string ->
   ?network_mode:string ->
   ?shared_memory_scope:string ->
@@ -55,11 +54,11 @@ val get_turn_context :
   string option * string option * bool option * int option
   * string option * string option * string option * int option
   * int option * string option * string list option * string option
-  * string option * string option * string option * string option
+  * string option * string option * string option
 (** Returns [(lane, tool_choice, thinking_enabled, thinking_budget, trace_id,
     prompt_fingerprint, session_id, turn, keeper_turn_id, task_id, goal_ids,
-    execution_scope, sandbox_profile, network_mode, shared_memory_scope,
-    approval_mode)] for the keeper, or [None] values when no turn context has
+    sandbox_profile, network_mode, shared_memory_scope, approval_mode)] for
+    the keeper, or [None] values when no turn context has
     been recorded. *)
 
 val init : ?cluster_name:string -> base_path:string -> unit -> unit
@@ -85,7 +84,6 @@ val log_call :
   ?keeper_turn_id:int ->
   ?task_id:string ->
   ?goal_ids:string list ->
-  ?execution_scope:string ->
   ?sandbox_profile:string ->
   ?network_mode:string ->
   ?shared_memory_scope:string ->

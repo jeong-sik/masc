@@ -247,7 +247,8 @@ let execute_keeper_tool_call_with_outcome
         (Keeper_exec_fs.handle_keeper_fs_edit ~turn_sandbox_runtime ~config ~meta ~args)
     | "keeper_bash" ->
       make_executed_tool_result
-        (Keeper_exec_shell.handle_keeper_bash ~turn_sandbox_runtime ?turn_sandbox_runtime_git ~config ~meta ~args)
+        (Keeper_exec_shell.handle_keeper_bash
+           ~turn_sandbox_runtime ~turn_sandbox_runtime_git ~config ~meta ~args)
     | "keeper_bash_output" ->
       make_executed_tool_result
         (Keeper_exec_shell.handle_keeper_bash_output ~config ~meta ~args)
@@ -354,6 +355,7 @@ let execute_keeper_tool_call
       ~(meta : keeper_meta)
       ~(ctx_work : working_context)
       ?turn_sandbox_runtime
+      ?turn_sandbox_runtime_git
       ?search_fn
       ~(name : string)
       ~(input : Yojson.Safe.t)
@@ -362,6 +364,7 @@ let execute_keeper_tool_call
   =
   let result =
     execute_keeper_tool_call_with_outcome
-      ~config ~meta ~ctx_work ?turn_sandbox_runtime ?search_fn ~name ~input ()
+      ~config ~meta ~ctx_work ?turn_sandbox_runtime ?turn_sandbox_runtime_git
+      ?search_fn ~name ~input ()
   in
   result.raw_output

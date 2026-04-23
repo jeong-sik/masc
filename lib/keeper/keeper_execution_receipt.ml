@@ -27,7 +27,6 @@ type t =
   ; tool_surface : tool_surface
   ; sandbox_configured_kind : string
   ; sandbox_effective_kind : string
-  ; execution_scope : string
   ; sandbox_root : string option
   ; network_mode : string
   ; approval_profile : string option
@@ -58,11 +57,7 @@ let stop_reason_to_string = function
 let effective_sandbox_kind_of_meta (meta : Keeper_types.keeper_meta) =
   match meta.sandbox_profile with
   | Keeper_types.Docker -> "docker"
-  | Keeper_types.Local ->
-    (match meta.execution_scope with
-     | Keeper_execution_scope.Local -> "local_playground"
-     | Keeper_execution_scope.Workspace -> "worktree"
-     | Keeper_execution_scope.Observe_only -> "observe_only")
+  | Keeper_types.Local -> "local"
 
 let list_json values =
   `List (List.map (fun value -> `String value) values)
@@ -129,7 +124,6 @@ let to_json (receipt : t) =
           [
             ("configured_kind", `String receipt.sandbox_configured_kind);
             ("effective_kind", `String receipt.sandbox_effective_kind);
-            ("execution_scope", `String receipt.execution_scope);
             ( "sandbox_root",
               match receipt.sandbox_root with
               | Some value -> `String value

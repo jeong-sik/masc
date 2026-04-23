@@ -13,19 +13,17 @@ type sandbox = {
   task_id : string;
   worktree_path : string;
   branch_name : string;
-  execution_scope : Worker_types.execution_scope;
   created_at : float;
 }
 
 val create :
   config:Coord_utils_backend_setup.config ->
   task_id:string ->
-  ?scope:Worker_types.execution_scope ->
   ?base_branch:string ->
   agent_name:string ->
   unit ->
   (sandbox, string) result
-(** Create sandbox: worktree + [.masc/] symlink + scope config.
+(** Create sandbox: worktree + [.masc/] symlink.
     Returns [Ok sandbox] on success or [Error reason] on failure. *)
 
 val cleanup :
@@ -39,7 +37,6 @@ val cleanup :
 val with_sandbox :
   config:Coord_utils_backend_setup.config ->
   task_id:string ->
-  ?scope:Worker_types.execution_scope ->
   ?base_branch:string ->
   agent_name:string ->
   (sandbox -> 'a) ->

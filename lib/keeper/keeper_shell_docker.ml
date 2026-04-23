@@ -221,7 +221,7 @@ let run_docker_shell_command_with_status
       Ok { status; output; image; network_label }
 
 let run_docker_with_git_bash
-    ?(turn_sandbox_runtime : Keeper_turn_sandbox_runtime.t option)
+    ~(turn_sandbox_runtime : Keeper_turn_sandbox_runtime.t option)
     ~(config : Coord.config)
     ~(meta : keeper_meta)
     ~(cwd : string)

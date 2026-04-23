@@ -876,36 +876,6 @@ let test_persona_resolver_preserves_autoboot_enabled_arg () =
          | `Bool value -> Some value
          | _ -> None)
 
-let test_persona_resolver_preserves_execution_scope_from_persona_defaults () =
-  with_personas_dir @@ fun personas_dir ->
-  let persona_dir = Filename.concat personas_dir "probe" in
-  mkdir_p persona_dir;
-  write_file
-    (Filename.concat persona_dir "profile.json")
-    {|
-{
-  "name": "Probe",
-  "keeper": {
-    "goal": "test persona keeper",
-    "execution_scope": "observe_only"
-  }
-}
-|};
-  match
-    Masc_mcp.Keeper_exec_persona.resolved_keeper_args_from_persona
-      (`Assoc
-        [
-          ("persona_name", `String "probe");
-          ("name", `String "probe-shadow");
-        ])
-  with
-  | Error e -> fail ("resolver failed: " ^ e)
-  | Ok (_, resolved) ->
-      check (option string) "execution_scope preserved" (Some "observe_only")
-        (match Yojson.Safe.Util.member "execution_scope" resolved with
-         | `String value -> Some value
-         | _ -> None)
-
 let test_persona_resolver_preserves_canonical_tool_access_and_allowed_paths () =
   with_personas_dir @@ fun personas_dir ->
   let persona_dir = Filename.concat personas_dir "probe" in
@@ -1249,8 +1219,6 @@ let () =
             test_persona_resolver_rejects_non_public_social_model_arg;
           test_case "persona resolver preserves autoboot_enabled arg" `Quick
             test_persona_resolver_preserves_autoboot_enabled_arg;
-          test_case "persona resolver preserves execution_scope from persona defaults" `Quick
-            test_persona_resolver_preserves_execution_scope_from_persona_defaults;
           test_case "persona resolver preserves canonical tool_access and allowed_paths" `Quick
             test_persona_resolver_preserves_canonical_tool_access_and_allowed_paths;
         ] );

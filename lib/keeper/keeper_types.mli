@@ -164,7 +164,6 @@ type keeper_meta = {
   desires: string;
   instructions: string;
   policy_voice_enabled: bool;
-  execution_scope: Keeper_execution_scope.t;
   sandbox_profile: sandbox_profile;
   network_mode: network_mode;
   shared_memory_scope: shared_memory_scope;

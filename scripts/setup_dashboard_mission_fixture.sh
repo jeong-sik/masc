@@ -144,7 +144,6 @@ function seedExecutionSession() {
     room_id: roomId,
     status: 'interrupted',
     duration_seconds: 2700,
-    execution_scope: 'observe_only',
     checkpoint_interval_sec: 60,
     min_agents: 1,
     scale_profile: 'local64',

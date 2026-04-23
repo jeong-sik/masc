@@ -210,7 +210,6 @@ type keeper_meta =
   ; instructions : string
   ; (* -- Policy -- *)
     policy_voice_enabled : bool
-  ; execution_scope : Keeper_execution_scope.t
   ; sandbox_profile : sandbox_profile
   ; network_mode : network_mode
   ; shared_memory_scope : shared_memory_scope
@@ -795,7 +794,6 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "desires", `String m.desires
     ; "instructions", `String m.instructions
     ; "policy_voice_enabled", `Bool m.policy_voice_enabled
-    ; "execution_scope", `String (Keeper_execution_scope.to_string m.execution_scope)
     ; "sandbox_profile", `String (sandbox_profile_to_string m.sandbox_profile)
     ; "network_mode", `String (network_mode_to_string m.network_mode)
     ; "shared_memory_scope", `String (shared_memory_scope_to_string m.shared_memory_scope)
@@ -911,7 +909,6 @@ type parsed_keeper_identity =
 
 type parsed_keeper_policy =
   { pp_policy_voice_enabled : bool
-  ; pp_execution_scope : Keeper_execution_scope.t
   ; pp_sandbox_profile : sandbox_profile
   ; pp_network_mode : network_mode
   ; pp_shared_memory_scope : shared_memory_scope
@@ -1036,10 +1033,6 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
     let pp_policy_voice_enabled =
       Safe_ops.json_bool ~default:voice_enabled_default "policy_voice_enabled" json
     in
-    let pp_execution_scope =
-      Safe_ops.json_string ~default:(Keeper_execution_scope.to_string default_execution_scope) "execution_scope" json
-      |> Keeper_execution_scope.of_string_lossy
-    in
     let pp_sandbox_profile =
       let raw =
         Safe_ops.json_string
@@ -1152,7 +1145,6 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
     in
     Ok
       { pp_policy_voice_enabled
-      ; pp_execution_scope
       ; pp_sandbox_profile
       ; pp_network_mode
       ; pp_shared_memory_scope
@@ -1397,7 +1389,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
              ; desires = identity.pk_desires
              ; instructions = identity.pk_instructions
              ; policy_voice_enabled = policy.pp_policy_voice_enabled
-             ; execution_scope = policy.pp_execution_scope
              ; sandbox_profile = policy.pp_sandbox_profile
              ; network_mode = policy.pp_network_mode
              ; shared_memory_scope = policy.pp_shared_memory_scope
@@ -1469,7 +1460,6 @@ let fallback_canonical_keeper_meta_key_names =
   ; "desires"
   ; "instructions"
   ; "policy_voice_enabled"
-  ; "execution_scope"
   ; "allowed_paths"
   ; "tool_access"
   ; "tool_denylist"

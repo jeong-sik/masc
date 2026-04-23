@@ -133,10 +133,6 @@ let keeper_schemas : tool_schema list = [
         ("auto_handoff", `Assoc [("type", `String "boolean")]);
         ("handoff_threshold", `Assoc [("type", `String "number")]);
         ("handoff_cooldown_sec", `Assoc [("type", `String "integer")]);
-        ("execution_scope", `Assoc [
-          ("type", `String "string");
-          ("enum", `List (Keeper_execution_scope.all |> List.map (fun s -> `String (Keeper_execution_scope.to_string s))));
-        ]);
         ("allowed_paths", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
@@ -273,11 +269,6 @@ let keeper_schemas : tool_schema list = [
           ("type", `String "integer");
           ("description", `String "Minimum seconds between handoffs (default: 300).");
         ]);
-        ("execution_scope", `Assoc [
-          ("type", `String "string");
-          ("enum", `List (Keeper_execution_scope.all |> List.map (fun s -> `String (Keeper_execution_scope.to_string s))));
-          ("description", `String "Execution scope. 'observe_only' blocks all writes. 'workspace'/'local' enable writes within playground (.masc/playground/<name>/). Extra paths must be listed explicitly in allowed_paths. Default: workspace.");
-        ]);
         ("sandbox_profile", `Assoc [
           ("type", `String "string");
           ("enum", `List (List.map (fun s -> `String s) sandbox_profile_enum_strings));
@@ -296,7 +287,7 @@ let keeper_schemas : tool_schema list = [
         ("allowed_paths", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Restrict file writes to these path prefixes. Empty list means playground-only (.masc/playground/<name>/). Use [\"*\"] for explicit full access.");
+          ("description", `String "Restrict file writes to these path prefixes. Empty list means playground-only (.masc/playground/<name>/).");
         ]);
         ("tool_access",
           tool_access_schema

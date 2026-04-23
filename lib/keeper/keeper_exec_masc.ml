@@ -47,21 +47,7 @@ let keeper_masc_path_blocked
     then keeper_effective_allowed_paths ~meta
     else keeper_effective_write_allowed_paths ~meta
   in
-  if effective_paths = [] && meta.execution_scope <> Keeper_execution_scope.Observe_only
-  then None
-  else if meta.execution_scope = Keeper_execution_scope.Observe_only
-          && effective_paths = []
-          && not is_read_only
-  then (
-    let has_path_arg =
-      List.exists
-        (fun key ->
-           match Yojson.Safe.Util.member key args with
-           | `String p when String.trim p <> "" -> true
-           | _ -> false)
-        [ "path"; "file_path"; "target_path" ]
-    in
-    if has_path_arg then Some "observe_only_scope: write paths blocked" else None)
+  if effective_paths = [] then None
   else (
     let candidates =
       List.filter_map

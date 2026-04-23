@@ -12,15 +12,11 @@ let resolve_net ?net () =
       | Some net -> Ok net
       | None -> Error "Eio net not initialized")
 
-let default_shell_tool_names execution_scope =
-  match execution_scope with
-  | Some Worker_types.Observe_only ->
-      [ "file_read"; "shell_exec" ]
-  | _ ->
-      [ "file_read"; "file_write"; "shell_exec" ]
+let default_shell_tool_names () =
+  [ "file_read"; "file_write"; "shell_exec" ]
 
 let build_execution_spec ~base_path ~worker_name ~model_label
-    ?working_dir ?worker_class ?execution_scope
+    ?working_dir ?worker_class
     ?thinking_enabled ~max_turns ?worker_run_id
     ?allowed_shell_tools ~role ~selection_note
     ~(prompt : string) ~(allowed_tools : string list) ~(timeout_sec : int) () =
@@ -30,7 +26,6 @@ let build_execution_spec ~base_path ~worker_name ~model_label
     model_label;
     working_dir;
     worker_class;
-    execution_scope;
     thinking_enabled;
     max_turns;
     worker_run_id;
@@ -39,7 +34,7 @@ let build_execution_spec ~base_path ~worker_name ~model_label
     prompt;
     allowed_tools;
     allowed_shell_tools =
-      Option.value ~default:(default_shell_tool_names execution_scope)
+      Option.value ~default:(default_shell_tool_names ())
         allowed_shell_tools;
     timeout_sec;
   }
@@ -95,9 +90,6 @@ let run_worker_oas ~sw ?net ~room_config
     (spec : Worker_execution_spec.t) : unit -> (run_result, string) result =
   fun () ->
     let* net = resolve_net ?net () in
-    let execution_scope =
-      resolve_execution_scope ?execution_scope:spec.execution_scope ()
-    in
     let worker_name = spec.worker_name in
     let base_path = spec.base_path in
     let workspace_path = workspace_path_of_spec spec in
@@ -117,7 +109,7 @@ let run_worker_oas ~sw ?net ~room_config
       make_worker_meta ~base_path ~workspace_path ~worker_name
         ~mcp_session_id ~role:spec.role
         ~selection_note:spec.selection_note
-        ~execution_scope ~worker_class:spec.worker_class
+        ~worker_class:spec.worker_class
         ~effective_model ~thinking_enabled:spec.thinking_enabled
         ~max_turns_override:(Some spec.max_turns)
         ~timeout_seconds:(Some spec.timeout_sec)
@@ -131,8 +123,7 @@ let run_worker_oas ~sw ?net ~room_config
         ~allowed_tools:spec.allowed_tools
     in
     let* shell_tools =
-      build_local_shell_tools ~room_config ~worker_name ~execution_scope
-        ~workdir:workspace_path
+      build_local_shell_tools ~room_config ~worker_name ~workdir:workspace_path
     in
     let shell_tools =
       filter_tools_by_name spec.allowed_shell_tools shell_tools
@@ -153,9 +144,7 @@ let run_worker_oas ~sw ?net ~room_config
             ?role:spec.role
             ?selection_note:spec.selection_note ()
         in
-        let gate_config =
-          Worker_oas.gate_config_of_execution_scope execution_scope
-        in
+        let gate_config = Worker_oas.default_gate_config () in
         Worker_oas.run_worker_via_oas ~sw ~net ~base_path ~auth_token
           ~meta:{ meta with effective_model = model_id }
           ~provider ~system_prompt ~prompt:spec.prompt ~tools
@@ -164,27 +153,22 @@ let run_worker_oas ~sw ?net ~room_config
 
 
 let preflight_spawn_batch ?clock_opt specs =
-  let docker_specs =
-    specs
-    |> List.filter (fun (spec : Worker_execution_spec.t) ->
-           match spec.execution_scope with
-           | Some scope ->
-               Worker_runtime_config.backend_for_scope scope
-               = Worker_execution_backend.Docker
-           | None -> false)
-    |> List.map (fun (spec : Worker_execution_spec.t) ->
-           {
-             Worker_runtime_docker.worker_name = spec.worker_name;
-             model_label = spec.model_label;
-           })
-  in
-  match docker_specs with
-  | [] -> Ok ()
-  | _ -> Worker_runtime_docker.preflight_batch ?clock_opt docker_specs
+  match Worker_runtime_config.backend () with
+  | Worker_execution_backend.Local -> Ok ()
+  | Worker_execution_backend.Docker ->
+      let docker_specs =
+        specs
+        |> List.map (fun (spec : Worker_execution_spec.t) ->
+               {
+                 Worker_runtime_docker.worker_name = spec.worker_name;
+                 model_label = spec.model_label;
+               })
+      in
+      Worker_runtime_docker.preflight_batch ?clock_opt docker_specs
 
 let run_worker ~sw ?net ~backend ~base_path ~worker_name ~model_label
     ~room_config ?working_dir ?worker_class
-    ?execution_scope ?thinking_enabled ?allowed_shell_tools ?max_turns
+    ?thinking_enabled ?allowed_shell_tools ?max_turns
     ?worker_run_id ~role ~selection_note
     ~(prompt : string) ~(allowed_tools : string list) ~(timeout_sec : int) :
     unit -> (run_result, string) result =
@@ -192,7 +176,7 @@ let run_worker ~sw ?net ~backend ~base_path ~worker_name ~model_label
   let spec =
     build_execution_spec ~base_path ~worker_name ~model_label
       ?working_dir ?worker_class
-      ?execution_scope ?thinking_enabled ~max_turns ?worker_run_id
+      ?thinking_enabled ~max_turns ?worker_run_id
       ?allowed_shell_tools ~role ~selection_note ~prompt
       ~allowed_tools ~timeout_sec ()
   in

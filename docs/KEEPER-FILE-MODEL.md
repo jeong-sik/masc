@@ -104,7 +104,6 @@ These may still be parsed today, but they are **not** the preferred place to enc
 
 | Field | Status | Preferred owner |
 | --- | --- | --- |
-| `execution_scope` | Compatibility-only | `keeper.toml` |
 | `allowed_paths` | Ignored by design | nowhere in persona |
 | `cascade_name` | Compatibility-only | `keeper.toml` |
 | `work_discovery_*` | Compatibility-only | `keeper.toml` or runtime policy |
@@ -139,7 +138,6 @@ persona_name = "analyst"
 | --- | --- | --- | --- |
 | `persona_name` | Required | Which persona blueprint this keeper uses | Primary field in the target model. |
 | `name` | Optional | Override keeper handle | Usually redundant because filename is already the keeper name. |
-| `execution_scope` | Optional | Deployment-specific execution scope | Only when different from the default. |
 | `sandbox_profile` | Optional | Process/filesystem sandbox profile | `local` runs on the host with fs scoped to the keeper playground. `docker` runs in a hardened ephemeral container; the internal git/gh dispatcher upgrades network+credential mounts per-command. |
 | `network_mode` | Optional | Sandbox network policy | `docker` defaults to `none` (promoted to `inherit` for git/gh commands by the dispatcher); `local` defaults to `inherit`. |
 | `shared_memory_scope` | Optional | Typed shared-memory lane | `room` enables keeper-authorized `masc_team_memory_*` exchange on the flattened `default` namespace. |
@@ -178,7 +176,6 @@ Enumerated fields only accept the values below. The loader rejects invalid input
 
 | Field | Allowed values |
 | --- | --- |
-| `execution_scope` | `observe_only`, `workspace`, `local` |
 | `sandbox_profile` | `local`, `docker` |
 | `network_mode` | `none`, `inherit` |
 | `shared_memory_scope` | `disabled`, `room` |
@@ -191,7 +188,6 @@ Enumerated fields only accept the values below. The loader rejects invalid input
 ```toml
 [keeper]
 persona_name = "analyst"
-execution_scope = "workspace"
 sandbox_profile = "docker"
 network_mode = "none"
 shared_memory_scope = "room"
@@ -275,7 +271,7 @@ These are the fields that define the durable runtime snapshot itself.
 ### Important compatibility note
 
 Current implementation may still materialize some authored fields into `keeper.json`
-for compatibility (`goal`, `instructions`, `execution_scope`, etc.).
+for compatibility (`goal`, `instructions`, etc.).
 
 Those fields are **not** the preferred edit surface.
 

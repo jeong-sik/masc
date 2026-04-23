@@ -116,9 +116,7 @@ let receipt_has_error json =
 
 let receipt_has_sandbox_risk json =
   match receipt_sandbox_effective_kind json with
-  | Some "observe_only" -> true
-  | Some "local_playground" -> false
-  | Some "worktree" -> false
+  | Some "local" -> false
   | Some "docker" -> false
   | Some _ | None -> false
 
@@ -723,8 +721,6 @@ let goal_detail_keeper_json (detail : goal_detail_keeper) =
         `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids) );
       ( "sandbox_profile",
         `String (Keeper_types.sandbox_profile_to_string meta.sandbox_profile) );
-      ( "execution_scope",
-        `String (Keeper_execution_scope.to_string meta.execution_scope) );
       ("network_mode", `String (Keeper_types.network_mode_to_string meta.network_mode));
       ("cascade_name", `String meta.cascade_name);
       ( "approval_profile",

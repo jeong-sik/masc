@@ -137,7 +137,6 @@ let test_turn_context_fields_stored () =
       ~keeper_turn_id:7
       ~task_id:"task-runtime-trust"
       ~goal_ids:["goal-short"; "goal-long"]
-      ~execution_scope:"workspace"
       ~sandbox_profile:"docker"
       ~network_mode:"inherit"
       ~shared_memory_scope:"team"
@@ -181,9 +180,6 @@ let test_turn_context_fields_stored () =
     Alcotest.(check (list string)) "goal_ids field"
       ["goal-short"; "goal-long"]
       Yojson.Safe.Util.(entry |> member "goal_ids" |> to_list |> List.map to_string);
-    Alcotest.(check (option string)) "execution_scope field"
-      (Some "workspace")
-      (Safe_ops.json_string_opt "execution_scope" entry);
     Alcotest.(check (option string)) "sandbox_profile field"
       (Some "docker")
       (Safe_ops.json_string_opt "sandbox_profile" entry);

@@ -260,7 +260,6 @@ type keeper_profile_defaults = {
   room_signal_prompt_enabled : bool option;
   shards : string list option;
   allowed_paths : string list option;
-  execution_scope : Keeper_execution_scope.t option;
   sandbox_profile : sandbox_profile option;
   network_mode : network_mode option;
   shared_memory_scope : shared_memory_scope option;
@@ -320,7 +319,6 @@ let empty_keeper_profile_defaults = {
   room_signal_prompt_enabled = None;
   shards = None;
   allowed_paths = None;
-  execution_scope = None;
   sandbox_profile = None;
   network_mode = None;
   shared_memory_scope = None;
@@ -543,9 +541,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         allowed_paths =
           if has "allowed_paths" then Some (strs "allowed_paths")
           else None;
-        execution_scope =
-          Option.map Keeper_execution_scope.of_string_lossy
-            (str "execution_scope");
         sandbox_profile =
           Option.bind (str "sandbox_profile") sandbox_profile_of_string;
         network_mode =
@@ -615,7 +610,6 @@ let canonical_keeper_toml_key_names =
   ; "room_signal_prompt_enabled"
   ; "shards"
   ; "allowed_paths"
-  ; "execution_scope"
   ; "sandbox_profile"
   ; "network_mode"
   ; "shared_memory_scope"
@@ -756,9 +750,6 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                 (* Persona profiles are not allowed to own execution allowlists.
                    Keep these in keeper TOML / runtime config only. *)
                 allowed_paths = None;
-                execution_scope =
-                  Option.map Keeper_execution_scope.of_string_lossy
-                    (Safe_ops.json_string_opt "execution_scope" keeper_json);
                 sandbox_profile = None;
                 network_mode = None;
                 shared_memory_scope = None;
@@ -861,7 +852,6 @@ let merge_keeper_profile_defaults
       prefer overlay.room_signal_prompt_enabled base.room_signal_prompt_enabled;
     shards = prefer overlay.shards base.shards;
     allowed_paths = prefer overlay.allowed_paths base.allowed_paths;
-    execution_scope = prefer overlay.execution_scope base.execution_scope;
     sandbox_profile = prefer overlay.sandbox_profile base.sandbox_profile;
     network_mode = prefer overlay.network_mode base.network_mode;
     shared_memory_scope =

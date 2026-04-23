@@ -463,7 +463,7 @@ let run_docker_hardened_bash = Keeper_shell_docker.run_docker_hardened_bash
 
 let handle_keeper_bash
       ~(turn_sandbox_runtime : Keeper_turn_sandbox_runtime.t option)
-      ?(turn_sandbox_runtime_git : Keeper_turn_sandbox_runtime.t option)
+      ~(turn_sandbox_runtime_git : Keeper_turn_sandbox_runtime.t option)
       ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)

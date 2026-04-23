@@ -227,19 +227,10 @@ let dispatch (ctx : context) ~(name : string) : tool_result option =
         | `String s when s <> "" -> Some s
         | _ -> None
       in
-      let execution_scope =
-        (* Issue #8605: was [Some (execution_scope_of_string s)] —
-           silently downgraded typos to [Limited_code_change]. The opt
-           version returns [None] for unknown input. *)
-        match arguments |> U.member "execution_scope" with
-        | `String s when s <> "" ->
-            Worker_types.execution_scope_of_string_opt s
-        | _ -> None
-      in
        (match runtime_model_valid with
        | Error e -> Some (false, e)
        | Ok () ->
-           ignore (sw, state, execution_scope);
+           ignore (sw, state);
            let result =
              Spawn.spawn ~agent_name:spawn_agent_name
                ~prompt ~timeout_seconds ?working_dir ()

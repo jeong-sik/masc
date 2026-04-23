@@ -1,6 +1,6 @@
 ---
 status: runbook
-last_verified: 2026-04-17
+last_verified: 2026-04-23
 code_refs:
   - lib/provider_adapter.ml
   - lib/provider_adapter.mli
@@ -31,6 +31,7 @@ code_refs:
 | `claude` | `cli_agent` | `cli_cached_login` | Claude Code / CLI runtime |
 | `codex` | `cli_agent` | `cli_cached_login` | Codex CLI runtime |
 | `gemini` | `cli_agent` | `cli_cached_login` | Gemini CLI runtime |
+| `kimi` | `cli_agent` | `cli_cached_login` | Kimi CLI runtime |
 
 ## Direct API Policy
 
@@ -71,11 +72,17 @@ Current canonical CLI contracts:
   - prompt via `-p`
   - stdout JSON `response` is the worker output
   - stderr is non-authoritative noise/logging only
+- `kimi`
+  - `--output-format stream-json`
+  - prompt via `-p`
+  - `--print`
+  - stdout is JSON Lines (`assistant` and `tool` role lines)
+  - stderr is non-authoritative noise/logging only
 
 ## Default Swarm Policy
 
 - default worker substrate: managed by cascade
-- `claude`, `codex`, `gemini` are explicit opt-in workers
+- `claude`, `codex`, `gemini`, `kimi` are explicit opt-in workers
 - direct API adapters are for:
   - keeper/always-on/MDAL/direct reasoning paths
   - not the default swarm substrate
@@ -90,3 +97,4 @@ Current canonical CLI contracts:
   - `claude`
   - `codex`
   - `gemini`
+  - `kimi`

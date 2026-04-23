@@ -1158,22 +1158,6 @@ also_allow = ["x"]
     check (list string) "also_allow alias is stale drift"
       ["keeper.also_allow"] unknown
 
-let test_detect_unknown_keys_flags_unparsed_tool_access_table () =
-  let input = {|
-[keeper]
-goal = "g"
-[keeper.tool_access]
-kind = "preset"
-preset = "coding"
-|} in
-  match TL.parse_toml input with
-  | Error e -> fail e
-  | Ok doc ->
-    let unknown = KTP.detect_unknown_keeper_toml_keys doc in
-    check (list string) "tool_access table is not a parsed TOML surface"
-      [ "keeper.tool_access.kind"; "keeper.tool_access.preset" ]
-      unknown
-
 (* ================================================================ *)
 (* Test suite                                                        *)
 (* ================================================================ *)
@@ -1271,8 +1255,6 @@ let () =
             test_detect_unknown_keys_flags_unparsed_tool_access_table;
           test_case "also_allow alias flagged" `Quick
             test_detect_unknown_keys_flags_also_allow_alias;
-          test_case "unparsed tool_access table flagged" `Quick
-            test_detect_unknown_keys_flags_unparsed_tool_access_table;
           test_case "oas_env keys not flagged as unknown" `Quick
             test_oas_env_not_flagged_as_unknown;
         ] );

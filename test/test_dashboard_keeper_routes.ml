@@ -1,6 +1,8 @@
 open Alcotest
 module Routes = Masc_mcp.Server_routes_http_routes_dashboard
 module Keeper_api = Masc_mcp.Server_dashboard_http_keeper_api
+module Auth = Masc_mcp.Auth
+module Types = Types
 
 type http_result =
   { status : int option
@@ -1165,6 +1167,76 @@ let test_merge_keeper_trace_lines_includes_internal_history () =
   check int "thinking entries can still be filtered out" 1 (List.length tool_only))
 ;;
 
+let dashboard_dev_token_test_dir () =
+  let path = Filename.temp_file "masc-dashboard-dev-token-" ".tmp" in
+  Sys.remove path;
+  path
+;;
+
+let test_ensure_dashboard_dev_token_rotates_legacy_dashboard_dev_owner () =
+  let base_path = dashboard_dev_token_test_dir () in
+  mkdir_p (Filename.concat base_path ".masc/auth");
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+       let legacy_raw =
+         match Auth.create_token base_path ~agent_name:"dashboard-dev"
+                 ~role:Types.Admin with
+         | Ok (raw, _cred) -> raw
+         | Error err -> fail (Types.masc_error_to_string err)
+       in
+       let legacy_path = Routes.legacy_dashboard_dev_token_path base_path in
+       let canonical_path = Routes.dashboard_dev_token_path base_path in
+       Auth.save_private_text_file legacy_path legacy_raw;
+       match Routes.ensure_dashboard_dev_token base_path with
+       | Error msg -> fail msg
+       | Ok raw ->
+           check bool "legacy token rotates to canonical owner" true
+             (not (String.equal raw legacy_raw));
+           check bool "canonical token file written" true
+             (Sys.file_exists canonical_path);
+           check bool "legacy token file removed" false
+             (Sys.file_exists legacy_path);
+           (match Auth.verify_token base_path ~agent_name:"dashboard" ~token:raw with
+            | Ok cred ->
+                check string "canonical credential owner" "dashboard"
+                  cred.agent_name
+            | Error err ->
+                fail (Types.masc_error_to_string err)))
+;;
+
+let test_ensure_dashboard_dev_token_reuses_canonical_dashboard_token () =
+  let base_path = dashboard_dev_token_test_dir () in
+  mkdir_p (Filename.concat base_path ".masc/auth");
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+       let canonical_raw =
+         match Auth.create_token base_path ~agent_name:"dashboard"
+                 ~role:Types.Admin with
+         | Ok (raw, _cred) -> raw
+         | Error err -> fail (Types.masc_error_to_string err)
+       in
+       let legacy_raw =
+         match Auth.create_token base_path ~agent_name:"dashboard-dev"
+                 ~role:Types.Admin with
+         | Ok (raw, _cred) -> raw
+         | Error err -> fail (Types.masc_error_to_string err)
+       in
+       let legacy_path = Routes.legacy_dashboard_dev_token_path base_path in
+       let canonical_path = Routes.dashboard_dev_token_path base_path in
+       Auth.save_private_text_file canonical_path canonical_raw;
+       Auth.save_private_text_file legacy_path legacy_raw;
+       match Routes.ensure_dashboard_dev_token base_path with
+       | Error msg -> fail msg
+       | Ok raw ->
+           check string "canonical token reused" canonical_raw raw;
+           check bool "legacy token file cleaned up" false
+             (Sys.file_exists legacy_path);
+           check bool "canonical token file kept" true
+             (Sys.file_exists canonical_path))
+;;
+
 let () =
   run
     "dashboard_keeper_routes"
@@ -1201,6 +1273,14 @@ let () =
             "execution trust route surfaces latest receipt"
             `Slow
             test_execution_trust_route_surfaces_latest_receipt
+        ; test_case
+            "dashboard dev token rotates legacy dashboard-dev owner"
+            `Quick
+            test_ensure_dashboard_dev_token_rotates_legacy_dashboard_dev_owner
+        ; test_case
+            "dashboard dev token reuses canonical dashboard token"
+            `Quick
+            test_ensure_dashboard_dev_token_reuses_canonical_dashboard_token
         ; test_case
             "merge keeper trace lines includes internal history"
             `Quick

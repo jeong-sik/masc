@@ -147,8 +147,8 @@ let env_url_or ~env ~default =
   | None -> default
 
 let kimi_provider_name = "kimi"
-let moonshot_base_url_env = "MOONSHOT_BASE_URL"
-let moonshot_api_key_env = "MOONSHOT_API_KEY"
+let moonshot_base_url_env = "KIMI_BASE_URL"
+let moonshot_api_key_env = "KIMI_API_KEY_SB"
 let moonshot_default_base_url = "https://api.moonshot.ai/v1"
 let kimi_default_max_context = 256_000
 
@@ -173,6 +173,7 @@ let kimi_is_available ~api_key_env_overrides =
   match resolve_kimi_api_key_env ~api_key_env_overrides with
   | "" -> false
   | env_name -> Option.is_some (nonempty_env env_name)
+    || Option.is_some (nonempty_env "KIMI_API_KEY")
 
 let make_kimi_config ~temperature ~max_tokens ?system_prompt
     ?(api_key_env_overrides = []) ?supports_tool_choice_override model_id =
@@ -182,7 +183,10 @@ let make_kimi_config ~temperature ~max_tokens ?system_prompt
   let api_key =
     match nonempty_env effective_api_key_env with
     | Some value -> value
-    | None -> ""
+    | None ->
+      (match nonempty_env "KIMI_API_KEY" with
+       | Some value -> value
+       | None -> "")
   in
   let headers = headers_with_auth ~kind:OpenAI_compat ~api_key in
   let resolved_model_id =

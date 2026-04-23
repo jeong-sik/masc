@@ -173,12 +173,15 @@ jobs:
           if [ "${ci_core}" = true ]; then
             build=true
             lint=true
+            health=true
+            health_snapshot=true
             lib_deps=true
             doc_truth=true
             oas_pin=true
-            # Note: dashboard/health/spec_refs/tla stay path-scoped. Pure CI
-            # workflow/action edits should still validate the OCaml/repo guard
-            # lanes, but they should not fan out into every feature surface.
+            # Note: dashboard/spec_refs/tla stay path-scoped. Pure CI
+            # workflow/action edits should still validate the core OCaml/repo
+            # guard lanes and Health, but they should not fan out into every
+            # feature surface.
           fi
 
           echo "build=${build}" >> "$GITHUB_OUTPUT"
@@ -293,8 +296,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
 
       - name: Install health shell dependencies
         run: |

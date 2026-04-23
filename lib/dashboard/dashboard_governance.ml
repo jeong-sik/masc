@@ -115,4 +115,3 @@ let dashboard_json ~base_path ~limit ~offset:_ ~status_filter:_ =
       ("cases", `List []);
       ("anomaly_profiles", anomaly_profiles_json ~base_path);
     ]
-

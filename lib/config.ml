@@ -3,15 +3,15 @@
 module StringSet = Set.Make (String)
 
 let dedupe_schemas (schemas : Types.tool_schema list) =
-  let seen = ref StringSet.empty in
-  List.filter
-    (fun (schema : Types.tool_schema) ->
-      if StringSet.mem schema.name !seen then
-        false
-      else (
-        seen := StringSet.add schema.name !seen;
-        true))
-    schemas
+  let unique, _ =
+    List.fold_left
+      (fun (acc, seen) (schema : Types.tool_schema) ->
+        if StringSet.mem schema.name seen then (acc, seen)
+        else (schema :: acc, StringSet.add schema.name seen))
+      ([], StringSet.empty)
+      schemas
+  in
+  List.rev unique
 
 let retired_front_door_schema_names =
   [

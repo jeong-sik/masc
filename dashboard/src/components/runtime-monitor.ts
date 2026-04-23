@@ -452,11 +452,12 @@ export function RuntimeMonitor() {
                   metric.coverage_status === 'none'
                   || metric.coverage_status === 'partial'
                   || metric.coverage_status === 'error_only'
-                const articleClass = isFailing
-                  ? 'p-4 rounded border border-[var(--status-bad)] bg-[var(--status-bad)]/5 backdrop-blur-sm shadow-sm flex flex-col gap-2'
-                  : hasCoverageGap
-                    ? 'p-4 rounded border border-[var(--status-warn)] bg-[var(--status-warn)]/5 backdrop-blur-sm shadow-sm flex flex-col gap-2'
-                  : 'p-4 rounded border border-card-border bg-card/40 backdrop-blur-sm shadow-sm flex flex-col gap-2'
+                let articleClass = 'p-4 rounded border border-card-border bg-card/40 backdrop-blur-sm shadow-sm flex flex-col gap-2'
+                if (isFailing) {
+                  articleClass = 'p-4 rounded border border-[var(--status-bad)] bg-[var(--status-bad)]/5 backdrop-blur-sm shadow-sm flex flex-col gap-2'
+                } else if (hasCoverageGap) {
+                  articleClass = 'p-4 rounded border border-[var(--status-warn)] bg-[var(--status-warn)]/5 backdrop-blur-sm shadow-sm flex flex-col gap-2'
+                }
                 const ariaLabel = isFailing
                   ? `Provider failing: ${metric.model_id}, ${metric.error_count ?? 0} errors out of ${metric.entry_count ?? 0}`
                   : undefined

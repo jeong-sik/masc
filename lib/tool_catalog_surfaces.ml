@@ -33,6 +33,7 @@ let keeper_internal_tools =
     "keeper_task_claim";
     "keeper_task_create";
     "keeper_task_done";
+    "keeper_task_submit_for_verification";
     "keeper_task_force_release";
     "keeper_task_force_done";
     "keeper_broadcast";

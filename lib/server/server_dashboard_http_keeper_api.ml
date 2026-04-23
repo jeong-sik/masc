@@ -675,7 +675,12 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
       | None -> (
           match Keeper_types.read_meta config name with
           | Ok (Some meta) -> Some meta.agent_name
-          | Ok None | Error _ -> None)
+          | Ok None -> None
+          | Error err ->
+              Log.Keeper.warn
+                "resolve_keeper_agent_name %s: read_meta failed: %s"
+                name err;
+              None)
     in
     let persist_keeper_paused_state paused =
       match Keeper_types.read_meta config name with
@@ -867,7 +872,11 @@ let handle_keeper_directive_post state _agent_name req reqd body_str =
         let meta_opt =
           match read_result with
           | Ok (Some meta) -> Some meta
-          | Ok None | Error _ -> None
+          | Ok None -> None
+          | Error err ->
+              Log.Keeper.warn "directive %s %s: read_meta failed: %s"
+                action_str name err;
+              None
         in
         let persist_paused_state paused =
           match meta_opt with

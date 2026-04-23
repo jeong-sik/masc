@@ -159,6 +159,21 @@ let agent_from_request request =
   first_some [ hdr "x-gate-agent"; hdr "x-masc-agent"; hdr "x-masc-agent-name"; qp "agent"; qp "agent_name" ]
   |> Option.map Uri.pct_decode
 
+let request_actor_hint request =
+  match agent_from_request request with
+  | Some raw ->
+      let agent_name = String.trim raw in
+      if String.equal agent_name "" then None else Some agent_name
+  | None -> None
+
+let dashboard_actor_for_request ~base_path request =
+  match auth_token_from_request request with
+  | Some token -> (
+      match Auth.resolve_agent_from_token base_path ~token with
+      | Ok agent_name -> Some agent_name
+      | Error _ -> request_actor_hint request)
+  | None -> request_actor_hint request
+
 let is_transient_actor_name name =
   let normalized = String.trim name in
   normalized <> ""

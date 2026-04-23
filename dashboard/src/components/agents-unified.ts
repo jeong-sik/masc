@@ -7,7 +7,6 @@ import { computed } from '@preact/signals'
 import { FilterChips } from './common/filter-chips'
 import { navigate, route } from '../router'
 import { agents, keepers, executionLoaded, shellCounts } from '../store'
-import { missionKeeperBriefs } from '../mission-signals'
 import { AgentRoster, countRuntimeKinds } from './agent-roster'
 import { AgentProfile } from './agent-profile'
 import { KeeperDetailPage } from './keeper-detail'
@@ -53,7 +52,7 @@ export function AgentsUnified() {
   const currentView = activeView.value
 
   // Compute counts for chip badges.
-  const liveRuntimeCounts = countRuntimeKinds(agents.value, keepers.value, missionKeeperBriefs.value)
+  const liveRuntimeCounts = countRuntimeKinds(agents.value, keepers.value)
   const runtimeCounts = resolveRuntimeCounts({
     executionLoaded: executionLoaded.value,
     agentsCount: liveRuntimeCounts.agents,
@@ -95,7 +94,7 @@ export function AgentsUnified() {
       ${currentView !== 'fsm' ? html`
         <div class="monitor-muted-panel flex flex-wrap items-center gap-2 px-4 py-3 text-xs text-[var(--text-muted)]">
           <span class="text-2xs font-semibold uppercase tracking-1 text-[var(--text-muted)]">이 화면 밖</span>
-          <span>이벤트 로그, 도구 품질, 거버넌스</span>
+          <span>cached 조율 스냅샷, 이벤트 로그, 도구 품질, 거버넌스</span>
           <${RouteLink}
             tab="monitoring"
             params=${{ section: 'fleet-health' }}

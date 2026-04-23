@@ -80,6 +80,19 @@ let enabled () = Env_config.Dashboard_config.governance_judge_enabled
 let keeper_name = "governance-judge"
 let backoff_status = "Backoff: local slots saturated"
 
+let cached_judgments_still_fresh ~now_ts (st : state) =
+  match st.expires_at_unix with
+  | Some expires_at -> expires_at > now_ts
+  | None -> false
+
+let mark_refresh_failure ~now_ts (st : state) ~message =
+  st.refreshing <- false;
+  (* Preserve the last good snapshot while its TTL is still valid. A slow
+     or timing-out judge should degrade to stale-but-visible rather than
+     immediately flipping the dashboard offline. *)
+  st.judge_online <- cached_judgments_still_fresh ~now_ts st;
+  st.last_error <- Some message
+
 let get_state base_path =
   with_outer_rw (fun () ->
     match Hashtbl.find_opt states base_path with
@@ -479,9 +492,7 @@ let refresh_once ~sw ~net
           "refresh_once: compute_judgments failed: %s"
           message;
         with_lock st (fun () ->
-            st.refreshing <- false;
-            st.judge_online <- false;
-            st.last_error <- Some message)
+            mark_refresh_failure ~now_ts:(Unix.gettimeofday ()) st ~message)
   end
 
 let start ~sw ~clock ~net ~base_path

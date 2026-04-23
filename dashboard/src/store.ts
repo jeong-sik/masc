@@ -38,6 +38,7 @@ import { groupByKey } from './components/common/collection'
 import { setArrayByKeyIfChanged } from './signal-utils'
 import { FetchScheduler } from './lib/fetch-scheduler'
 import { isRecord, asString, asNumber } from './components/common/normalize'
+import { setCanonicalDashboardActor } from './lib/dashboard-session-actor'
 import {
   normalizeAgent, normalizeTask, normalizeMessage,
   normalizeExecutionWorkerSupportBrief,
@@ -439,9 +440,13 @@ function normalizeShellAuthSummary(raw: unknown): DashboardShellAuthSummary | nu
     require_token: raw.require_token === true,
     default_role: asString(raw.default_role) ?? null,
     token_present: raw.token_present === true,
+    token_valid: raw.token_valid === true,
+    token_agent: asString(raw.token_agent) ?? null,
     requested_agent: asString(raw.requested_agent) ?? null,
     effective_agent: asString(raw.effective_agent) ?? null,
     effective_role: asString(raw.effective_role) ?? null,
+    auth_error_code: asString(raw.auth_error_code) as DashboardShellAuthSummary['auth_error_code'],
+    auth_error_detail: asString(raw.auth_error_detail) ?? null,
     can_keeper_msg: raw.can_keeper_msg === true,
     keeper_msg_error: asString(raw.keeper_msg_error) ?? null,
   }
@@ -453,6 +458,12 @@ export async function refreshShell(opts?: RefreshOptions): Promise<void> {
   inflightShellRefresh = (async () => {
     try {
       const data = await fetchDashboardShell()
+      const normalizedAuth = normalizeShellAuthSummary(data.auth)
+      setCanonicalDashboardActor(
+        normalizedAuth?.token_valid
+          ? normalizedAuth.effective_agent ?? normalizedAuth.token_agent ?? null
+          : null,
+      )
       const normalizedStatus = normalizeServerStatus(data.status, data.generated_at)
       if (normalizedStatus) {
         serverStatus.value = mergeServerStatus(serverStatus.value, normalizedStatus)
@@ -468,7 +479,7 @@ export async function refreshShell(opts?: RefreshOptions): Promise<void> {
         }
       }
       shellMetaCognition.value = normalizeShellMetaCognitionSummary(data.meta_cognition)
-      shellAuthSummary.value = normalizeShellAuthSummary(data.auth)
+      shellAuthSummary.value = normalizedAuth
       shellConfigResolution.value = normalizeDashboardConfigResolution(data.config_resolution)
       shellRuntimeResolution.value = normalizeDashboardRuntimeResolution(data.runtime_resolution)
       lastShellRefreshAt = Date.now()

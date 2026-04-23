@@ -189,6 +189,21 @@ let start_multi_mock ~sw ~net ~port (responses : string list) =
       Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
   Printf.sprintf "http://127.0.0.1:%d" port
 
+let start_delayed_mock ~sw ~net ~clock ~port ~delay_s response =
+  let handler _conn _req body =
+    let _ = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
+    if delay_s > 0.0 then Eio.Time.sleep clock delay_s;
+    Cohttp_eio.Server.respond_string ~status:`OK ~body:response ()
+  in
+  let socket =
+    Eio.Net.listen net ~sw ~backlog:8 ~reuse_addr:true
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, port))
+  in
+  let server = Cohttp_eio.Server.make ~callback:handler () in
+  Eio.Fiber.fork ~sw (fun () ->
+      Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
+  Printf.sprintf "http://127.0.0.1:%d" port
+
 let find_free_port () =
   let socket = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
   Fun.protect
@@ -835,6 +850,81 @@ let test_default_config_preserves_custom_local_request_path () =
     Alcotest.fail
       "custom local OpenAI-compatible provider should stay OpenAICompat"
 
+let test_run_named_per_provider_timeout_uses_clock_fallback_and_exempts_last_provider () =
+  Alcotest.(check bool) "test requires no global Masc_eio_env"
+    true
+    (Option.is_none (Masc_eio_env.get_opt ()));
+  try
+    Eio.Switch.run @@ fun sw ->
+    let clock =
+      match Process_eio.get_clock () with
+      | Ok clock -> clock
+      | Error err -> Alcotest.fail err
+    in
+    Eio_context.set_clock clock;
+    let first_port =
+      match find_free_port () with Some port -> port | None -> Alcotest.skip ()
+    in
+    let second_port =
+      match find_free_port () with Some port -> port | None -> Alcotest.skip ()
+    in
+    let first_url =
+      try
+        start_delayed_mock
+          ~sw
+          ~net:(require_test_net ())
+          ~clock
+          ~port:first_port
+          ~delay_s:0.2
+          (openai_text_response "first provider should timeout")
+      with
+      | Unix.Unix_error (Unix.EPERM, "bind", _)
+      | Unix.Unix_error (Unix.EACCES, "bind", _) ->
+          Alcotest.skip ()
+    in
+    let second_url =
+      try
+        start_delayed_mock
+          ~sw
+          ~net:(require_test_net ())
+          ~clock
+          ~port:second_port
+          ~delay_s:0.2
+          (openai_text_response "last provider survived timeout")
+      with
+      | Unix.Unix_error (Unix.EPERM, "bind", _)
+      | Unix.Unix_error (Unix.EACCES, "bind", _) ->
+          Alcotest.skip ()
+    in
+    with_temp_masc_config
+      (Printf.sprintf
+         {|{
+  "timeout_probe_models": [
+    "custom:slow@%s",
+    "custom:last@%s"
+  ]
+}|}
+         first_url
+         second_url)
+    @@ fun () ->
+    match
+      Oas_worker_named.run_named
+        ~cascade_name:"timeout_probe"
+        ~goal:"say hello"
+        ~system_prompt:"system"
+        ~sw
+        ~net:(require_test_net ())
+        ~per_provider_timeout_s:0.05
+        ()
+    with
+    | Ok result ->
+        Alcotest.(check string) "last provider succeeds without timeout"
+          "last provider survived timeout"
+          (response_text result.response);
+        Eio.Switch.fail sw Exit
+    | Error err -> Alcotest.fail (Oas.Error.to_string err)
+  with Exit -> ()
+
 let make_worker_meta ?(effective_model = "local-qwen") () :
     Worker_container_types.worker_container_meta =
   {
@@ -1277,16 +1367,20 @@ let test_classify_masc_internal_error_roundtrip () =
       (Oas_worker_named.Resumable_cli_session
          {
            cascade_name = "kimi_cli_keeper";
-           detail =
-             "kimi exited with code 75: \nTo resume this session: kimi -r ff37febe-2adb-4ac6-9dc6-cae23e672fbc";
+           detail = Oas_worker_exec.Kimi_cli_transport_local.resumable_session_detail;
            exit_code = Some 75;
          })
   in
   match Oas_worker_named.classify_masc_internal_error resumable_err with
   | Some (Oas_worker_named.Resumable_cli_session { cascade_name; detail; exit_code }) ->
       Alcotest.(check string) "resumable cascade" "kimi_cli_keeper" cascade_name;
-      Alcotest.(check bool) "resumable detail preserved" true
+      Alcotest.(check string) "resumable detail redacted"
+        Oas_worker_exec.Kimi_cli_transport_local.resumable_session_detail
+        detail;
+      Alcotest.(check bool) "resumable detail hides raw resume hint" false
         (contains_substring ~needle:"To resume this session:" detail);
+      Alcotest.(check bool) "resumable detail hides session token" false
+        (contains_substring ~needle:"kimi -r" detail);
       Alcotest.(check (option int)) "resumable exit code" (Some 75) exit_code
   | _ -> Alcotest.fail "expected structured resumable CLI session error"
 
@@ -1825,6 +1919,44 @@ let test_kimi_cli_model_for_provider_keeps_explicit_model () =
     (Some "kimi-k2.5")
     (Oas_worker_exec.kimi_cli_model_for_provider provider_cfg)
 
+let test_kimi_cli_should_log_stderr_line_filters_resume_noise () =
+  let should_log =
+    Oas_worker_exec.Kimi_cli_transport_local.should_log_stderr_line
+  in
+  Alcotest.(check bool) "blank stderr line suppressed" false (should_log "");
+  Alcotest.(check bool) "whitespace stderr line suppressed" false
+    (should_log "   ");
+  Alcotest.(check bool) "resume hint suppressed" false
+    (should_log "To resume this session: kimi -r ff37febe");
+  Alcotest.(check bool) "case-insensitive resume hint suppressed" false
+    (should_log "  TO RESUME THIS SESSION: kimi -r ff37febe");
+  Alcotest.(check bool) "unexpected stderr remains visible" true
+    (should_log "fatal: kimi auth missing");
+  Alcotest.(check bool) "other stderr guidance remains visible" true
+    (should_log "warning: upstream endpoint is slow")
+
+let test_kimi_cli_classify_cli_error_redacts_resumable_session_detail () =
+  let raw_message =
+    "kimi exited with code 75: \nTo resume this session: kimi -r ff37febe-2adb-4ac6-9dc6-cae23e672fbc"
+  in
+  match
+    Oas_worker_exec.Kimi_cli_transport_local.classify_cli_error
+      (Error
+         (Llm_provider.Http_client.NetworkError
+            {
+              message = raw_message;
+              kind = Llm_provider.Http_client.Unknown;
+            }))
+  with
+  | Error (Llm_provider.Http_client.AcceptRejected { reason }) ->
+      Alcotest.(check string) "canonical detail"
+        Oas_worker_exec.Kimi_cli_transport_local.resumable_session_detail
+        reason;
+      Alcotest.(check bool) "raw resume hint removed" false
+        (contains_substring ~needle:"To resume this session:" reason);
+      Alcotest.(check bool) "raw session id removed" false
+        (contains_substring ~needle:"ff37febe-2adb-4ac6-9dc6-cae23e672fbc" reason)
+  | _ -> Alcotest.fail "expected resumable session to map to AcceptRejected"
 let test_codex_cli_prompt_preflight_uses_pipeline_context_window_fallback () =
   let provider_cfg = make_codex_cli_provider_cfg () in
   let config =
@@ -3048,6 +3180,8 @@ let () =
         test_enrich_sdk_error_for_openai_not_found_includes_endpoint_hint;
       Alcotest.test_case "default_config preserves custom local request_path" `Quick
         test_default_config_preserves_custom_local_request_path;
+      Alcotest.test_case "per-provider timeout uses context clock and exempts last provider" `Quick
+        test_run_named_per_provider_timeout_uses_clock_fallback_and_exempts_last_provider;
     ];
     "resume_config", [
       Alcotest.test_case "checkpoint model wins" `Quick
@@ -3122,6 +3256,10 @@ let () =
         test_kimi_cli_model_for_provider_keeps_transport_default_on_auto;
       Alcotest.test_case "kimi explicit model is preserved" `Quick
         test_kimi_cli_model_for_provider_keeps_explicit_model;
+      Alcotest.test_case "kimi stderr resume noise is filtered" `Quick
+        test_kimi_cli_should_log_stderr_line_filters_resume_noise;
+      Alcotest.test_case "kimi exit 75 detail is redacted" `Quick
+        test_kimi_cli_classify_cli_error_redacts_resumable_session_detail;
       Alcotest.test_case "worker build_agent installs retry policy" `Quick
         test_worker_build_agent_uses_default_internal_retry_policy;
       Alcotest.test_case "resume config propagates retry policy" `Quick

@@ -692,10 +692,16 @@ let exit_code_of_message (message : string) : int option =
               int_of_string_opt raw
 
 let message_looks_like_resumable_cli_session (message : string) : bool =
-  match exit_code_of_message message with
-  | Some 75 ->
-      String_util.contains_substring_ci message "to resume this session:"
-  | _ -> false
+  Oas_worker_exec.Kimi_cli_transport_local.text_looks_like_resumable_session
+    message
+
+let resumable_cli_session_detail (message : string) : string =
+  Oas_worker_exec.Kimi_cli_transport_local.resumable_session_detail_of_text
+    message
+
+let resumable_cli_session_exit_code (message : string) : int option =
+  Oas_worker_exec.Kimi_cli_transport_local.resumable_session_exit_code_of_text
+    message
 
 let sdk_error_is_hard_quota (err : Oas.Error.sdk_error) : bool =
   match err with
@@ -779,6 +785,7 @@ let run_named
     ?event_bus
     ?sw
     ?net
+    ?per_provider_timeout_s
     ()
   : (Oas_worker_exec.run_result, Oas.Error.sdk_error) result =
   match require_eio ?sw ?net () with
@@ -845,7 +852,7 @@ let run_named
      Immutable checkpoint threading: try_provider returns both the result
      and the agent's checkpoint (if progress was made). try_cascade
      threads this checkpoint to the next provider without mutable state. *)
-  let try_provider ?resume_checkpoint (provider_cfg : Llm_provider.Provider_config.t) =
+  let try_provider ?resume_checkpoint ?per_provider_timeout_s (provider_cfg : Llm_provider.Provider_config.t) =
     let config_result =
       Oas_worker_exec.resolve_tool_lane_for_oas_tools
         ?agent_name:(keeper_agent_name_opt keeper_name)
@@ -919,11 +926,33 @@ let run_named
               | Some _ -> resume_checkpoint
               | None -> oas_checkpoint
             in
-            let result =
+            let run_fn () =
               Oas_worker_exec.run ~sw ~net ~config
                 ?oas_checkpoint:effective_checkpoint ?on_event
                 ?on_yield ?on_resume ~agent_ref:local_agent_ref ?proof_ref
                 ?contract goal
+            in
+            let result =
+              match per_provider_timeout_s with
+              | None -> run_fn ()
+              | Some t ->
+                  let clock_opt =
+                    match Masc_eio_env.get_opt () with
+                    | Some env -> (
+                        match env.clock with
+                        | Some _ as clock_opt -> clock_opt
+                        | None -> Eio_context.get_clock_opt ())
+                    | None -> Eio_context.get_clock_opt ()
+                  in
+                  (match clock_opt with
+                   | Some clock ->
+                       (try Eio.Time.with_timeout_exn clock t run_fn
+                        with Eio.Time.Timeout ->
+                          Log.Misc.info
+                            "[cascade-fallback] cascade %s: provider %s per-provider timeout after %.1fs, falling back"
+                            cascade_name provider_cfg.model_id t;
+                          Error (Oas.Error.Api (Timeout { message = Printf.sprintf "Per-provider timeout after %.1fs" t })))
+                   | None -> run_fn ())
             in
             Ok result)
     with
@@ -951,7 +980,7 @@ let run_named
   in
   let rec try_cascade
       ?(on_success = fun ~provider_key:_ -> ())
-      ?resume_checkpoint remaining last_err =
+      ?resume_checkpoint ?per_provider_timeout_s remaining last_err =
     match remaining with
     | [] ->
       let reason : Keeper_types.cascade_exhaustion_reason = match last_err with
@@ -985,8 +1014,17 @@ let run_named
               (Resumable_cli_session
                  {
                    cascade_name;
-                   detail = message;
-                   exit_code = exit_code_of_message message;
+                   detail = resumable_cli_session_detail message;
+                   exit_code = resumable_cli_session_exit_code message;
+                 })
+        | Some (Llm_provider.Http_client.AcceptRejected { reason })
+          when message_looks_like_resumable_cli_session reason ->
+            sdk_error_of_masc_internal_error
+              (Resumable_cli_session
+                 {
+                   cascade_name;
+                   detail = resumable_cli_session_detail reason;
+                   exit_code = resumable_cli_session_exit_code reason;
                  })
         | _ ->
             sdk_error_of_masc_internal_error
@@ -1001,7 +1039,8 @@ let run_named
     | (provider_cfg : Llm_provider.Provider_config.t) :: rest ->
       let is_last = rest = [] in
       Log.Misc.debug "cascade %s: trying %s (is_last=%b)" cascade_name provider_cfg.model_id is_last;
-      let (result, checkpoint_after) = try_provider ?resume_checkpoint provider_cfg in
+      let pp_timeout = if is_last then None else per_provider_timeout_s in
+      let (result, checkpoint_after) = try_provider ?resume_checkpoint ?per_provider_timeout_s:pp_timeout provider_cfg in
       (* Thread checkpoint forward: if this provider made progress,
          the next provider can resume from where this one left off. *)
       let next_resume = match checkpoint_after with
@@ -1291,7 +1330,7 @@ let run_named
       let on_success ~provider_key =
         Cascade_strategy.record_choice strategy ~ctx:signal_ctx ~provider_key
       in
-      (match try_cascade ~on_success ordered None with
+      (match try_cascade ~on_success ?per_provider_timeout_s ordered None with
        | Ok _ as ok -> ok
        | Error _ as err when last_cycle -> err
        | Error _ ->

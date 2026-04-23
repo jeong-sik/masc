@@ -146,7 +146,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'agents',
       label: '에이전트 디렉터리',
-      description: '누가 살아 있고 어떤 프로세스 위에 떠 있는지 빠르게 훑어봅니다. 이벤트, 도구, 거버넌스는 플릿 텔레메트리에서 봅니다.',
+      description: '누가 살아 있고 어떤 프로세스 위에 떠 있는지 live runtime 기준으로 빠르게 훑어봅니다. cached 조율 정보와 이벤트, 도구, 거버넌스는 다른 화면에서 봅니다.',
       params: { section: 'agents' },
     },
     {

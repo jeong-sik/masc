@@ -42,10 +42,11 @@ function shouldRefreshDevToken(): boolean {
   const meta = getStoredTokenMeta()
   if (!token) return true
   if (meta?.source === 'dev') return true
-  // Legacy sessions only stored the raw token string. On loopback with the
-  // default dashboard actor, treat them as managed-token candidates so
-  // frequent restarts or base_path flips self-heal without manual clearing.
-  return meta == null && !isRemoteAccess() && currentDashboardActor() === 'dashboard'
+  const actor = currentDashboardActor()
+  if (isRemoteAccess() || actor !== 'dashboard') return false
+  // Loopback dashboard sessions should self-heal if they are still holding
+  // a borrowed non-dashboard token (for example an old codex paste/URL token).
+  return meta == null || meta.actor == null || meta.actor !== actor
 }
 
 /** Fetch the loopback-only dev token once per page load and stash it so
@@ -298,14 +299,17 @@ function extractMcpText(res: McpCallResponse): string {
   return res.result?.content?.[0]?.text ?? ''
 }
 
-export async function callMcpTool(toolName: string, args: Record<string, unknown>): Promise<string> {
+async function callMcpToolInternal(
+  toolName: string,
+  args: Record<string, unknown>,
+): Promise<string> {
   const requestId = String(Math.floor(Date.now() % 1000000))
   let phase = mcpSessionId ? 'tools/call' : 'initialize'
+  const explicitActor = explicitToolActor(args)
+  const actor = explicitActor ?? currentDashboardActor()
   try {
     await ensureSession()
     phase = 'tools/call'
-    const explicitActor = explicitToolActor(args)
-    const actor = explicitActor ?? currentDashboardActor()
     const toolArgs =
       explicitActor == null && actor
         ? { ...args, _agent_name: actor }
@@ -334,6 +338,10 @@ export async function callMcpTool(toolName: string, args: Record<string, unknown
     }
     throw err
   }
+}
+
+export async function callMcpTool(toolName: string, args: Record<string, unknown>): Promise<string> {
+  return callMcpToolInternal(toolName, args)
 }
 
 // --- MCP tools/list — fetch tool schemas with inputSchema ---

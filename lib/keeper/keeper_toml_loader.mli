@@ -27,6 +27,7 @@ val parse_toml : string -> (toml_doc, string) result
 
 val toml_string_opt : toml_doc -> string -> string option
 val toml_int_opt : toml_doc -> string -> int option
+val toml_float_opt : toml_doc -> string -> float option
 val toml_bool_opt : toml_doc -> string -> bool option
 val toml_string_list : toml_doc -> string -> string list
 

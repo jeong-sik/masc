@@ -177,6 +177,14 @@ let normalize_cascade_name_opt = function
   | None -> None
   | Some raw -> Some (Keeper_cascade_profile.normalize_declared_name raw)
 
+let normalize_git_identity_mode_opt = function
+  | None -> None
+  | Some raw -> (
+      match String.trim (String.lowercase_ascii raw) with
+      | "keeper_alias" -> Some "keeper_alias"
+      | "github_identity" -> Some "github_identity"
+      | _ -> None)
+
 let normalize_social_model_opt = function
   | None -> None
   | Some raw -> (
@@ -263,9 +271,12 @@ type keeper_profile_defaults = {
   sandbox_profile : sandbox_profile option;
   network_mode : network_mode option;
   shared_memory_scope : shared_memory_scope option;
+  github_identity : string option;
+  git_identity_mode : string option;
   tool_preset : string option;
   tool_also_allow : string list option;
   tool_denylist : string list option;
+  active_goal_ids : string list option;
   (* Work Discovery — config-driven proactive work scanning *)
   work_discovery_enabled : bool option;
   work_discovery_sources : string list option;
@@ -274,6 +285,9 @@ type keeper_profile_defaults = {
   (* Telemetry Feedback — inject behavioral stats into keeper context *)
   telemetry_feedback_enabled : bool option;
   telemetry_feedback_window_hours : int option;
+  per_provider_timeout_state : per_provider_timeout_state;
+  (* Per-provider timeout for cascade fallback. None = use turn budget heuristic. *)
+  per_provider_timeout : float option;
   social_model : string option;
   cascade_name : string option;
   models : string list option;
@@ -289,6 +303,11 @@ type keeper_profile_defaults = {
      build_args picks them up.  Empty list = no overrides. *)
   oas_env : (string * string) list;
 }
+
+and per_provider_timeout_state =
+  | Per_provider_timeout_unset
+  | Per_provider_timeout_invalid
+  | Per_provider_timeout_set
 
 type persona_summary = {
   persona_name : string;
@@ -322,15 +341,20 @@ let empty_keeper_profile_defaults = {
   sandbox_profile = None;
   network_mode = None;
   shared_memory_scope = None;
+  github_identity = None;
+  git_identity_mode = None;
   tool_preset = None;
   tool_also_allow = None;
   tool_denylist = None;
+  active_goal_ids = None;
   work_discovery_enabled = None;
   work_discovery_sources = None;
   work_discovery_interval_sec = None;
   work_discovery_guidance = None;
   telemetry_feedback_enabled = None;
   telemetry_feedback_window_hours = None;
+  per_provider_timeout_state = Per_provider_timeout_unset;
+  per_provider_timeout = None;
   social_model = None;
   max_turns_per_call = None;
   max_turns_per_call_scheduled_autonomous = None;
@@ -338,6 +362,69 @@ let empty_keeper_profile_defaults = {
   models = None;
   oas_env = [];
 }
+
+let normalize_per_provider_timeout_opt ~(source : string)
+    (value : float option) : float option =
+  match value with
+  | Some f when Float.is_finite f && f > 0.0 -> Some f
+  | Some f when not (Float.is_finite f) ->
+      Log.Keeper.warn
+        "%s per_provider_timeout=%s is non-finite; ignoring"
+        source (string_of_float f);
+      None
+  | Some f ->
+      Log.Keeper.warn
+        "%s per_provider_timeout=%s is non-positive; ignoring"
+        source (string_of_float f);
+      None
+  | None -> None
+;;
+
+let per_provider_timeout_of_declared_float_opt ~(source : string)
+    ~(declared : bool)
+    (value : float option)
+    : per_provider_timeout_state * float option =
+  if not declared then
+    Per_provider_timeout_unset, None
+  else
+    match value with
+    | None ->
+        Log.Keeper.warn
+          "%s per_provider_timeout has invalid type; ignoring"
+          source;
+        Per_provider_timeout_invalid, None
+    | Some _ ->
+        (match normalize_per_provider_timeout_opt ~source value with
+         | Some f -> Per_provider_timeout_set, Some f
+         | None -> Per_provider_timeout_invalid, None)
+;;
+
+let per_provider_timeout_of_toml ~(source : string)
+    (doc : Keeper_toml_loader.toml_doc)
+    (key : string)
+    : per_provider_timeout_state * float option =
+  per_provider_timeout_of_declared_float_opt
+    ~source
+    ~declared:(List.mem_assoc key doc)
+    (Keeper_toml_loader.toml_float_opt doc key)
+;;
+
+let per_provider_timeout_of_json_field ~(source : string)
+    ~(field : string)
+    (json : Yojson.Safe.t)
+    : per_provider_timeout_state * float option =
+  per_provider_timeout_of_declared_float_opt
+    ~source
+    ~declared:(Option.is_some (Safe_ops.json_member_opt field json))
+    (Safe_ops.json_float_opt field json)
+;;
+
+let normalize_per_provider_timeout_json_field ~(source : string)
+    ~(field : string)
+    (json : Yojson.Safe.t)
+    : float option =
+  per_provider_timeout_of_json_field ~source ~field json |> snd
+;;
 
 let personas_root_opt () =
   try
@@ -421,6 +508,12 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
   let int_ key = Keeper_toml_loader.toml_int_opt doc (k key) in
   let strs key = Keeper_toml_loader.toml_string_list doc (k key) in
   let has key = List.mem_assoc (k key) doc in
+  let per_provider_timeout_state, per_provider_timeout =
+    per_provider_timeout_of_toml
+      ~source:"keeper TOML"
+      doc
+      (k "per_provider_timeout")
+  in
   let removed_present =
     ("also_allow" :: removed_keeper_input_key_names)
     |> List.map k
@@ -441,6 +534,26 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         | Some raw when not (validate_name raw) ->
             Error (Printf.sprintf "invalid persona_name '%s'" raw)
         | _ -> Ok ())
+  in
+  let result =
+    Result.bind result (fun () ->
+        match str "github_identity" with
+        | Some raw when not (validate_name raw) ->
+            Error (Printf.sprintf "invalid github_identity '%s'" raw)
+        | _ -> Ok ())
+  in
+  let result =
+    Result.bind result (fun () ->
+        match str "git_identity_mode" with
+        | Some raw -> (
+            match normalize_git_identity_mode_opt (Some raw) with
+            | Some _ -> Ok ()
+            | None ->
+                Error
+                  (Printf.sprintf
+                     "invalid git_identity_mode '%s' (allowed: keeper_alias, github_identity)"
+                     raw))
+        | None -> Ok ())
   in
   let result =
     Result.bind result (fun () ->
@@ -508,6 +621,28 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
                      raw))
         | None -> Ok ())
   in
+  let result =
+    Result.bind result (fun () ->
+        match str "cascade_name" with
+        | None -> Ok ()
+        | Some raw ->
+            let normalized = String.trim raw |> String.lowercase_ascii in
+            let compile_known = Keeper_cascade_profile.known_cascades in
+            let phase_routing = [ "local_only"; "local_recovery" ] in
+            let catalog =
+              try Keeper_cascade_profile.catalog_names ()
+              with _ -> []
+            in
+            let all_valid = compile_known @ phase_routing @ catalog in
+            if List.mem normalized all_valid then Ok ()
+            else
+              Error
+                (Printf.sprintf
+                   "invalid cascade_name '%s' (known: %s)"
+                   raw
+                   (String.concat ", "
+                      (compile_known @ phase_routing))))
+  in
   Result.map
     (fun () ->
       {
@@ -548,12 +683,19 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         shared_memory_scope =
           Option.bind (str "shared_memory_scope")
             shared_memory_scope_of_string;
+        github_identity = str "github_identity";
+        git_identity_mode =
+          normalize_git_identity_mode_opt (str "git_identity_mode");
         tool_preset =
           (match str "tool_preset" with
            | None -> None
            | Some raw -> normalize_tool_preset_raw raw);
         tool_also_allow = normalize_name_list_opt (strs "tool_also_allow");
         tool_denylist = normalize_name_list_opt (strs "tool_denylist");
+        active_goal_ids =
+          if has "active_goal_ids" then
+            Some (normalize_name_list (strs "active_goal_ids"))
+          else None;
         work_discovery_enabled = bool_ "work_discovery_enabled";
         work_discovery_sources =
           (match strs "work_discovery_sources" with
@@ -563,6 +705,8 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         work_discovery_guidance = str "work_discovery_guidance";
         telemetry_feedback_enabled = bool_ "telemetry_feedback_enabled";
         telemetry_feedback_window_hours = int_ "telemetry_feedback_window_hours";
+        per_provider_timeout_state;
+        per_provider_timeout;
         max_turns_per_call = int_ "max_turns_per_call";
         max_turns_per_call_scheduled_autonomous =
           int_ "max_turns_per_call_scheduled_autonomous";
@@ -573,12 +717,60 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
       })
     result
 
-(** Canonical TOML key names recognized by [profile_defaults_of_toml].
+(** Fields actually read by [profile_defaults_of_toml] from the [[keeper]]
+    TOML table.  Keep this in sync with the record construction above — the
+    compile-time assertion below will fail if the two lists diverge. *)
+let parsed_field_key_names =
+  [ "name"
+  ; "persona_name"
+  ; "goal"
+  ; "short_goal"
+  ; "mid_goal"
+  ; "long_goal"
+  ; "will"
+  ; "needs"
+  ; "desires"
+  ; "instructions"
+  ; "policy_voice_enabled"
+  ; "autoboot_enabled"
+  ; "mention_targets"
+  ; "proactive_enabled"
+  ; "proactive_idle_sec"
+  ; "proactive_cooldown_sec"
+  ; "room_signal_prompt_enabled"
+  ; "shards"
+  ; "allowed_paths"
+  ; "sandbox_profile"
+  ; "network_mode"
+  ; "shared_memory_scope"
+  ; "github_identity"
+  ; "git_identity_mode"
+  ; "tool_preset"
+  ; "tool_also_allow"
+  ; "tool_denylist"
+  ; "active_goal_ids"
+  ; "work_discovery_enabled"
+  ; "work_discovery_sources"
+  ; "work_discovery_interval_sec"
+  ; "work_discovery_guidance"
+  ; "telemetry_feedback_enabled"
+  ; "telemetry_feedback_window_hours"
+  ; "per_provider_timeout"
+  ; "max_turns_per_call"
+  ; "max_turns_per_call_scheduled_autonomous"
+  ; "social_model"
+  ; "cascade_name"
+  ]
+
+(** Canonical TOML key names used by [detect_unknown_keeper_toml_keys].
     Keys outside this set under [[keeper]] (or any other table) are silently
     ignored by the loader, which historically let dead config accumulate
     (e.g. legacy [legacy_scope], [scope_kind]).  [warn_unknown_keeper_toml_keys]
     uses this list to surface drift on boot, symmetric with
-    [warn_unknown_keeper_meta_keys] on the JSON side. *)
+    [warn_unknown_keeper_meta_keys] on the JSON side.
+
+    Must be kept in sync with [parsed_field_key_names] — the assertion below
+    catches drift at compile time. *)
 let canonical_keeper_toml_key_names =
   [ "name"
   ; "persona_name"
@@ -602,11 +794,12 @@ let canonical_keeper_toml_key_names =
   ; "sandbox_profile"
   ; "network_mode"
   ; "shared_memory_scope"
+  ; "github_identity"
+  ; "git_identity_mode"
   ; "tool_preset"
-  ; "tool_access.kind"
-  ; "tool_access.preset"
   ; "tool_also_allow"
   ; "tool_denylist"
+  ; "active_goal_ids"
   ; "work_discovery_enabled"
   ; "work_discovery_sources"
   ; "work_discovery_interval_sec"
@@ -616,9 +809,13 @@ let canonical_keeper_toml_key_names =
   ; "max_turns_per_call"
   ; "max_turns_per_call_scheduled_autonomous"
   ; "social_model"
-  ; "execution_scope"
   ; "cascade_name"
   ]
+
+let () =
+  assert (
+    List.sort String.compare canonical_keeper_toml_key_names
+    = List.sort String.compare parsed_field_key_names)
 
 (** Pure detector: returns TOML keys that [profile_defaults_of_toml] does not
     consume.  Exposed separately from the logging wrapper so tests can
@@ -702,6 +899,12 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
       | None -> empty_keeper_profile_defaults
       | Some json ->
           let keeper_json = Yojson.Safe.Util.member "keeper" json in
+          let per_provider_timeout_state, per_provider_timeout =
+            per_provider_timeout_of_json_field
+              ~source:(Printf.sprintf "persona profile %s" path)
+              ~field:"per_provider_timeout"
+              keeper_json
+          in
           match keeper_json with
           | `Assoc _ ->
               {
@@ -742,6 +945,8 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                 sandbox_profile = None;
                 network_mode = None;
                 shared_memory_scope = None;
+                github_identity = None;
+                git_identity_mode = None;
                 tool_preset =
                   (match Safe_ops.json_string_opt "tool_preset" keeper_json with
                   | None -> None
@@ -759,6 +964,7 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                 tool_denylist =
                   normalize_name_list_opt
                     (Safe_ops.json_string_list "tool_denylist" keeper_json);
+                active_goal_ids = None;
                 work_discovery_enabled =
                   Safe_ops.json_bool_opt "work_discovery_enabled" keeper_json;
                 work_discovery_sources =
@@ -773,6 +979,8 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                   Safe_ops.json_bool_opt "telemetry_feedback_enabled" keeper_json;
                 telemetry_feedback_window_hours =
                   Safe_ops.json_int_opt "telemetry_feedback_window_hours" keeper_json;
+                per_provider_timeout_state;
+                per_provider_timeout;
                 max_turns_per_call =
                   Safe_ops.json_int_opt "max_turns_per_call" keeper_json;
                 max_turns_per_call_scheduled_autonomous =
@@ -817,6 +1025,15 @@ let merge_keeper_profile_defaults
   let prefer overlay_value base_value =
     match overlay_value with Some _ -> overlay_value | None -> base_value
   in
+  let per_provider_timeout_state, per_provider_timeout =
+    match overlay.per_provider_timeout_state with
+    | Per_provider_timeout_unset ->
+        base.per_provider_timeout_state, base.per_provider_timeout
+    | Per_provider_timeout_invalid ->
+        Per_provider_timeout_invalid, None
+    | Per_provider_timeout_set ->
+        Per_provider_timeout_set, overlay.per_provider_timeout
+  in
   {
     manifest_path = prefer overlay.manifest_path base.manifest_path;
     persona_name = prefer overlay.persona_name base.persona_name;
@@ -845,9 +1062,13 @@ let merge_keeper_profile_defaults
     network_mode = prefer overlay.network_mode base.network_mode;
     shared_memory_scope =
       prefer overlay.shared_memory_scope base.shared_memory_scope;
+    github_identity = prefer overlay.github_identity base.github_identity;
+    git_identity_mode =
+      prefer overlay.git_identity_mode base.git_identity_mode;
     tool_preset = prefer overlay.tool_preset base.tool_preset;
     tool_also_allow = prefer overlay.tool_also_allow base.tool_also_allow;
     tool_denylist = prefer overlay.tool_denylist base.tool_denylist;
+    active_goal_ids = prefer overlay.active_goal_ids base.active_goal_ids;
     work_discovery_enabled =
       prefer overlay.work_discovery_enabled base.work_discovery_enabled;
     work_discovery_sources =
@@ -861,6 +1082,8 @@ let merge_keeper_profile_defaults
     telemetry_feedback_window_hours =
       prefer overlay.telemetry_feedback_window_hours
         base.telemetry_feedback_window_hours;
+    per_provider_timeout_state;
+    per_provider_timeout;
     social_model = prefer overlay.social_model base.social_model;
     cascade_name = prefer overlay.cascade_name base.cascade_name;
     models = prefer overlay.models base.models;

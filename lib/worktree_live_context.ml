@@ -24,7 +24,7 @@ let clear_git_capture_hook_for_tests () =
    [status_cache_ttl_sec] below), so the full budget is paid at most
    once per TTL window per repo. Env var stays the escape hatch for
    unusually slow or unusually fast hosts. *)
-let default_git_status_timeout_sec = 30.0
+let default_git_status_timeout_sec = 15.0
 
 let git_status_timeout_sec () =
   Env_config_core.get_float ~default:default_git_status_timeout_sec
@@ -89,7 +89,7 @@ let status_cache : (string, status_cache_entry) Hashtbl.t =
 let status_cache_mu = Stdlib.Mutex.create ()
 
 let status_cache_ttl_sec () =
-  Env_config_core.get_float ~default:1.0 "MASC_WORKTREE_STATUS_CACHE_TTL_S"
+  Env_config_core.get_float ~default:5.0 "MASC_WORKTREE_STATUS_CACHE_TTL_S"
 
 let status_cache_lookup repo_root ~now ~ttl =
   if ttl <= 0.0 then None
@@ -121,7 +121,7 @@ let clear_status_cache_for_tests () =
 
 let current_status_lines_uncached ~repo_root =
   run_git_capture_lines ~workdir:repo_root
-    [ "--no-optional-locks"; "status"; "--porcelain" ]
+    [ "--no-optional-locks"; "status"; "--porcelain"; "--untracked-files=no" ]
   |> Option.value ~default:[]
   |> List.map String.trim
   |> List.filter (fun line -> line <> "")

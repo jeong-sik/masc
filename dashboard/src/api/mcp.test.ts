@@ -49,12 +49,17 @@ vi.mock('./dashboard', () => ({
   reportToolHostFailure,
 }))
 
+vi.mock('../components/common/toast', () => ({
+  showActionToast: vi.fn(),
+}))
+
 beforeEach(() => {
   // Re-assert default return values because vi.clearAllMocks() in afterEach
   // wipes any per-test `.mockReturnValueOnce` queue and can clash with
   // mocks whose `vi.hoisted` defaults have been overwritten by an earlier
   // test (e.g. authHeaders). The dev-token bootstrap must stay inert unless
   // a test explicitly exercises it.
+  currentDashboardActor.mockReturnValue('dashboard')
   getStoredToken.mockReturnValue('test-stored-token')
   getStoredTokenMeta.mockReturnValue({
     source: 'manual',
@@ -170,6 +175,66 @@ describe('dev-token bootstrap', () => {
     expect(calls[1]?.[0]).toBe('/mcp')
   }, 60_000)
 
+  it('replaces a borrowed loopback token when the default dashboard actor is active', async () => {
+    getStoredToken.mockReturnValue('borrowed-codex-token')
+    getStoredTokenMeta.mockReturnValue({
+      source: 'manual',
+      actor: null,
+      scope: null,
+    })
+    fetchWithTimeout
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          token: 'loopback-dev-token',
+          actor: 'dashboard',
+          scope: 'admin',
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response('{}', { status: 200, headers: { 'Mcp-Session-Id': 'sess-borrowed' } }),
+      )
+      .mockResolvedValueOnce(new Response('', { status: 202 }))
+      .mockResolvedValueOnce(
+        new Response('data: {"result":{"content":[{"type":"text","text":"ok"}]}}\n', { status: 200 }),
+      )
+
+    const { callMcpTool } = await import('./mcp')
+    await callMcpTool('masc_status', {})
+
+    expect(setStoredToken).toHaveBeenCalledWith('loopback-dev-token', {
+      source: 'dev',
+      actor: 'dashboard',
+      scope: 'admin',
+    })
+    const calls = fetchWithTimeout.mock.calls as Array<[string, RequestInit]>
+    expect(calls[0]?.[0]).toBe('/api/v1/dashboard/dev-token')
+  }, 60_000)
+
+  it('keeps manual tokens for non-default dashboard actors', async () => {
+    currentDashboardActor.mockReturnValue('dashboard-manual-actor')
+    authHeaders.mockReturnValue({
+      'Authorization': 'Bearer manual-actor-token',
+      'X-MASC-Agent': 'dashboard-manual-actor',
+    })
+    getStoredToken.mockReturnValue('manual-actor-token')
+    getStoredTokenMeta.mockReturnValue({
+      source: 'manual',
+      actor: null,
+      scope: null,
+    })
+    setupMcpSessionMocks('sess-manual-actor')
+
+    const { callMcpTool } = await import('./mcp')
+    await callMcpTool('masc_status', {})
+
+    expect(setStoredToken).not.toHaveBeenCalled()
+    const calls = fetchWithTimeout.mock.calls as Array<[string, RequestInit]>
+    expect(calls[0]?.[0]).toBe('/mcp')
+  }, 60_000)
+
   it('swallows dev-token fetch failures so strict-auth servers still reach the 401 path', async () => {
     getStoredToken.mockReturnValue(null)
     fetchWithTimeout
@@ -273,6 +338,52 @@ describe('callMcpTool', () => {
         session_id: 'sess-1',
         timeout_ms: 30000,
       }),
+    )
+  })
+
+  it('does not retry implicit actor mismatches', async () => {
+    fetchWithTimeout
+      .mockResolvedValueOnce(
+        new Response('{}', {
+          status: 200,
+          headers: { 'Mcp-Session-Id': 'sess-mismatch-1' },
+        }),
+      )
+      .mockResolvedValueOnce(new Response('', { status: 202 }))
+      .mockResolvedValueOnce(
+        new Response('data: {"result":{"isError":true,"content":[{"type":"text","text":"🔐 Unauthorized: No credential found for dashboard (bearer token belongs to codex)"}]}}\n', { status: 200 }),
+      )
+
+    const { callMcpTool } = await import('./mcp')
+
+    await expect(callMcpTool('masc_persona_list', {})).rejects.toThrow(
+      'No credential found for dashboard',
+    )
+    const toolCalls = (fetchWithTimeout.mock.calls as Array<[string, RequestInit]>)
+      .filter(([, init]) => typeof init.body === 'string' && JSON.parse(init.body as string).method === 'tools/call')
+    expect(toolCalls).toHaveLength(1)
+  })
+
+  it('does not retry explicit actor mismatches', async () => {
+    authHeaders.mockImplementation((opts?: { actorName?: string | null }) => (
+      opts?.actorName ? { 'X-MASC-Agent': opts.actorName } : {}
+    ))
+    fetchWithTimeout
+      .mockResolvedValueOnce(
+        new Response('{}', {
+          status: 200,
+          headers: { 'Mcp-Session-Id': 'sess-explicit-mismatch' },
+        }),
+      )
+      .mockResolvedValueOnce(new Response('', { status: 202 }))
+      .mockResolvedValueOnce(
+        new Response('data: {"result":{"isError":true,"content":[{"type":"text","text":"🔐 Unauthorized: No credential found for dashboard (bearer token belongs to codex)"}]}}\n', { status: 200 }),
+      )
+
+    const { callMcpTool } = await import('./mcp')
+
+    await expect(callMcpTool('masc_join', { agent_name: 'dashboard' })).rejects.toThrow(
+      'No credential found for dashboard',
     )
   })
 

@@ -172,10 +172,12 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
     | None -> Mcp_session.generate ()
   in
   let auth_token = deps.auth_token_from_request request in
-  let http_agent_name = Server_auth.agent_from_request request in
   let protocol_version = get_protocol_version_for_session ~session_id request in
   let origin = deps.get_origin request in
   let base_path = deps.get_base_path () in
+  let http_agent_name =
+    Server_auth.dashboard_actor_for_request ~base_path request
+  in
   let auth_result =
     match profile with
     | Full | Managed_agent ->

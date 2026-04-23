@@ -1627,6 +1627,51 @@ let test_main_eio_self_heals_codex_mcp_token_file () =
               Alcotest.failf "repaired raw token should verify: %s"
                 (Types.masc_error_to_string err)))
 
+let test_sync_bootable_keeper_credentials_mints_keeper_alias_token () =
+  with_temp_dir "startup-keeper-credential-sync" (fun dir ->
+      with_env "MASC_CONFIG_DIR" None @@ fun () ->
+      with_env "MASC_PERSONAS_DIR" None @@ fun () ->
+      with_cwd (project_root ()) @@ fun () ->
+      Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path:dir;
+      write_basepath_keeper_toml dir "masc-improver";
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let clock, mono_clock, net, _domain_mgr, proc_mgr, fs =
+        Server_runtime_bootstrap.init_runtime_context env
+      in
+      Eio.Switch.run @@ fun sw ->
+      let state =
+        Server_runtime_bootstrap.create_server_state ~sw ~base_path:dir ~clock
+          ~mono_clock ~net ~proc_mgr ~fs
+      in
+      Server_runtime_bootstrap.bootstrap_server_state_blocking state;
+      Server_runtime_bootstrap.sync_bootable_keeper_credentials state;
+      let token_path =
+        Filename.concat (Auth.auth_dir dir) "masc-improver.token"
+      in
+      let raw_token = String.trim (read_file token_path) in
+      let credential =
+        match Auth.load_credential dir "masc-improver" with
+        | Some cred -> cred
+        | None -> Alcotest.fail "missing masc-improver credential after startup sync"
+      in
+      Alcotest.(check bool) "keeper token file created" true
+        (Sys.file_exists token_path);
+      Alcotest.(check int) "keeper token file private" 0o600
+        ((Unix.stat token_path).Unix.st_perm land 0o777);
+      Alcotest.(check string) "raw token hashes to keeper credential"
+        credential.token (Auth.sha256_hash raw_token);
+      match
+        Auth.verify_token dir ~agent_name:"keeper-masc-improver-agent"
+          ~token:raw_token
+      with
+      | Ok alias_cred ->
+          Alcotest.(check string) "keeper alias resolves stored credential"
+            "masc-improver" alias_cred.agent_name
+      | Error err ->
+          Alcotest.failf "bootable keeper token should verify via alias: %s"
+            (Types.masc_error_to_string err))
+
 let test_main_eio_rejects_same_base_path_on_second_server () =
   with_temp_dir "startup-base-path-owner-lock" (fun dir ->
       let exe = find_main_eio_exe () in
@@ -2125,6 +2170,9 @@ let () =
           Alcotest.test_case
             "main_eio self-heals codex mcp token file"
             `Slow test_main_eio_self_heals_codex_mcp_token_file;
+          Alcotest.test_case
+            "startup sync mints bootable keeper credentials"
+            `Quick test_sync_bootable_keeper_credentials_mints_keeper_alias_token;
           Alcotest.test_case
             "main_eio rejects second server on same base path"
             `Slow test_main_eio_rejects_same_base_path_on_second_server;

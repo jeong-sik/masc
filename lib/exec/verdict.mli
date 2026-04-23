@@ -1,4 +1,4 @@
-(** Verdict — three-way outcome of the approval policy.
+(** Verdict — four-way outcome of the approval policy.
 
     [Trusted_argv.t] is a [private] record whose only constructor is
     [Verdict.trust], which lives in [Approval_policy].  Downstream code
@@ -24,6 +24,13 @@ module Trusted_argv : sig
   val redirects : t -> Redirect_scope.t list
 end
 
+type confirm_token = {
+  risk_class : Bin.risk_class;
+  ttl_sec : float;
+}
+(** Opaque token for future HITL confirmation flow.
+    The [risk_class] identifies which trust level triggered the suggestion. *)
+
 type request = {
   caps : Capability.t list;
   summary : string;
@@ -41,8 +48,13 @@ type deny_reason =
 
 type t =
   | Allow of Trusted_argv.t
+  | Suggest_confirm of Trusted_argv.t * confirm_token
   | Ask of request
   | Deny of { caps : Capability.t list; reason : deny_reason }
+(** Four-way verdict.  [Suggest_confirm] auto-allows but marks the
+    decision as "suggested for confirmation" in telemetry.  When the
+    approval trust level is [Suggest], the policy produces this variant
+    instead of a plain [Allow] so the gate can log the suggestion. *)
 
 val trust :
   caps:Capability.t list ->

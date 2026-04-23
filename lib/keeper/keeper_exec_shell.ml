@@ -2250,11 +2250,13 @@ let handle_keeper_shell
               | Ok result -> Ok (result.status, result.output)
               | Error msg -> Error msg
             else
-              let env = Keeper_gh_env.process_env config in
-              let gh_argv =
-                "gh" :: Keeper_gh_shared.gh_simple_command_argv parsed_command
-              in
-              Ok (Process_eio.run_argv_with_status ?env ~cwd ~timeout_sec gh_argv)
+              (match Keeper_gh_env.keeper_process_env config ~keeper_name:meta.name with
+               | Error err -> Error err
+               | Ok env ->
+                   let gh_argv =
+                     "gh" :: Keeper_gh_shared.gh_simple_command_argv parsed_command
+                   in
+                   Ok (Process_eio.run_argv_with_status ?env ~cwd ~timeout_sec gh_argv))
           in
           match gh_process with
           | Error msg ->

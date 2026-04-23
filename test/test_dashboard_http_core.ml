@@ -1,4 +1,5 @@
 module Lib = Masc_mcp
+module Auth = Masc_mcp.Auth
 
 open Alcotest
 
@@ -31,6 +32,9 @@ let with_env key value f =
 
 let request target =
   Httpun.Request.create ~headers:(Httpun.Headers.of_list []) `GET target
+
+let request_with_headers target headers =
+  Httpun.Request.create ~headers:(Httpun.Headers.of_list headers) `GET target
 
 let with_test_env f =
   let dir = test_dir () in
@@ -245,6 +249,61 @@ let test_dashboard_shell_http_json_prefers_last_good_while_prewarming () =
       check int "last-good counts reused" 7
         (json |> member "counts" |> member "agents" |> to_int))
 
+let test_dashboard_shell_auth_json_canonicalizes_token_owner () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let cfg =
+    { Types.default_auth_config with enabled = true; require_token = true; default_role = Types.Worker }
+  in
+  Auth.save_auth_config config.base_path cfg;
+  match Auth.create_token config.base_path ~agent_name:"codex" ~role:Types.Worker with
+  | Error e -> fail (Types.masc_error_to_string e)
+  | Ok (raw_token, _) ->
+      let json =
+        Lib.Server_dashboard_http_core.dashboard_shell_http_json
+          ~request:
+            (request_with_headers "/api/v1/dashboard/shell"
+               [
+                 ("authorization", "Bearer " ^ raw_token);
+                 ("x-masc-agent", "dashboard");
+               ])
+          config
+      in
+      let open Yojson.Safe.Util in
+      let auth = json |> member "auth" in
+      check bool "token_valid true" true (auth |> member "token_valid" |> to_bool);
+      check string "requested actor surfaced" "dashboard"
+        (auth |> member "requested_agent" |> to_string);
+      check string "token owner surfaced" "codex"
+        (auth |> member "token_agent" |> to_string);
+      check string "effective actor canonicalized to token owner" "codex"
+        (auth |> member "effective_agent" |> to_string);
+      check bool "auth error cleared after canonicalization" true
+        (match auth |> member "auth_error_code" with `Null -> true | _ -> false);
+      check bool "keeper message allowed for canonicalized worker" true
+        (auth |> member "can_keeper_msg" |> to_bool)
+
+let test_dashboard_shell_auth_json_reports_missing_token () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let cfg =
+    { Types.default_auth_config with enabled = true; require_token = true; default_role = Types.Worker }
+  in
+  Auth.save_auth_config config.base_path cfg;
+  let json =
+    Lib.Server_dashboard_http_core.dashboard_shell_http_json
+      ~request:
+        (request_with_headers "/api/v1/dashboard/shell"
+           [
+             ("origin", "http://localhost:5173");
+             ("host", "localhost:5173");
+           ])
+      config
+  in
+  let open Yojson.Safe.Util in
+  let auth = json |> member "auth" in
+  check bool "token_valid false" false (auth |> member "token_valid" |> to_bool);
+  check string "missing token code surfaced" "missing_token"
+    (auth |> member "auth_error_code" |> to_string)
+
 let () =
   run "dashboard_http_core"
     [
@@ -262,5 +321,9 @@ let () =
             test_dashboard_shell_http_json_uses_bootstrap_payload_while_prewarming;
           test_case "shell reuses last good payload while prewarming" `Quick
             test_dashboard_shell_http_json_prefers_last_good_while_prewarming;
+          test_case "shell auth canonicalizes token owner" `Quick
+            test_dashboard_shell_auth_json_canonicalizes_token_owner;
+          test_case "shell auth reports missing token" `Quick
+            test_dashboard_shell_auth_json_reports_missing_token;
         ] );
     ]

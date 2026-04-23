@@ -16,7 +16,7 @@ let default =
   {
     worker_spawn =
       {
-        backend = Worker_execution_backend.Local;
+        backend = Worker_execution_backend.Local_playground;
         docker =
           {
             image = "masc-worker-runtime:dev";

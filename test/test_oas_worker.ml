@@ -845,12 +845,9 @@ let make_worker_meta ?(effective_model = "local-qwen") () :
     workspace_path = "/tmp/workspace";
     role = Some "executor";
     selection_note = Some "resume";
+    runtime_backend = Worker_execution_backend.Local_playground;
     thinking_enabled = Some true;
-    max_turns_override = None;
     timeout_seconds = Some 240;
-    tool_profile = Worker_container_types.Profile_session_min;
-    shell_profile = Worker_container_types.Shell_readonly;
-    worker_class = Some Worker_types.Worker_executor;
     effective_model;
     checkpoint_path = "/tmp/checkpoint.json";
     turn_log_path = "/tmp/turns.jsonl";

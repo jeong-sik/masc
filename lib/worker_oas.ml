@@ -7,7 +7,7 @@
     Key mappings:
     - worker_container_meta fields -> OAS agent_config + Builder options
     - MASC heartbeat -> OAS periodic_callback
-    - MASC tool_profile/shell_profile -> OAS Tool.t list filtering
+    - runtime_backend -> worker description metadata
     - MASC worker metadata -> OAS Builder.with_description metadata
 
     @since Phase 5 — OAS Agent.run adapter for workers *)
@@ -32,19 +32,17 @@ let oas_model_of_effective_model (model_id : string) : string =
 let proof_result_status_to_string =
   Oas_worker_exec.proof_result_status_to_string
 
-(** Derive max_turns from worker meta.
-    When max_turns_override is set, it is clamped to [1, max_int].
-    When absent, timeout_seconds / 20 is used as a heuristic. *)
+let worker_max_turns_cap = 20
+
+(** Derive max_turns from worker meta timeout budget.
+    Worker runtime no longer stores a separate max_turns contract. *)
 let effective_max_turns (meta : Worker_container_types.worker_container_meta) : int =
-  match meta.max_turns_override with
-  | Some value -> max 1 value
-  | None ->
-      let from_timeout =
+  let from_timeout =
       match meta.timeout_seconds with
       | Some sec -> max 2 (sec / 20)
       | None -> 8
-      in
-      max 2 from_timeout
+  in
+  max 2 (min worker_max_turns_cap from_timeout)
 
 (** Convert MASC worker_container_meta to OAS agent_config.
     Maps worker_name, model, thinking, max_turns, and temperature. *)
@@ -77,7 +75,7 @@ let agent_config_of_worker_meta
 (* ================================================================ *)
 
 (** Encode MASC-specific worker metadata as a human-readable description
-    string. This preserves context (role, worker class) that has
+    string. This preserves context (role, runtime backend) that has
     no direct OAS equivalent. *)
 let description_of_meta (meta : Worker_container_types.worker_container_meta) : string =
   let lines = ref [] in
@@ -94,10 +92,9 @@ let description_of_meta (meta : Worker_container_types.worker_container_meta) : 
   (match meta.selection_note with
    | Some n -> add "selection_note" n
    | None -> ());
+  add "runtime_backend"
+    (Worker_execution_backend.to_string meta.runtime_backend);
   add "effective_model" meta.effective_model;
-  (match meta.worker_class with
-   | Some cls -> add "worker_class" (Worker_types.worker_class_to_string cls)
-   | None -> ());
   String.concat "\n" (List.rev !lines)
 
 (* ================================================================ *)

@@ -4,26 +4,6 @@ open Printf
 
 include Worker_container_types
 
-let tool_profile_to_string = function
-  | Profile_session_min -> "session_min"
-  | Profile_session_dev -> "session_dev"
-
-let tool_profile_of_string = function
-  | "session_min" -> Some Profile_session_min
-  | "session_dev" -> Some Profile_session_dev
-  | _ -> None
-
-let shell_profile_to_string = function
-  | Shell_none -> "none"
-  | Shell_readonly -> "readonly"
-  | Shell_dev -> "dev"
-
-let shell_profile_of_string = function
-  | "none" -> Some Shell_none
-  | "readonly" -> Some Shell_readonly
-  | "dev" -> Some Shell_dev
-  | _ -> None
-
 let worker_container_root ~base_path =
   Filename.concat (Common.masc_dir_from_base_path ~base_path) "local-workers"
 
@@ -94,11 +74,42 @@ let evidence_session_id_of_worker_run = function
 let session_min_tool_names =
   Tool_catalog.tools_for_surface Tool_catalog.Session_min
 
-(* Model tier inference removed (#4505). Cascade handles model selection
-   without hardcoded name→tier mapping. *)
+let worker_meta_allowed_fields =
+  [
+    "version";
+    "worker_name";
+    "mcp_session_id";
+    "workspace_path";
+    "role";
+    "selection_note";
+    "runtime_backend";
+    "thinking_enabled";
+    "timeout_seconds";
+    "effective_model";
+    "checkpoint_path";
+    "turn_log_path";
+    "last_run_at";
+  ]
 
-let default_tool_profile = Profile_session_dev
-let default_shell_profile = Shell_dev
+let worker_meta_removed_fields =
+  [ "max_turns_override"; "tool_profile"; "shell_profile"; "worker_class" ]
+
+let validate_worker_meta_fields fields =
+  let field_names = List.map fst fields in
+  match List.find_opt (fun name -> List.mem name worker_meta_removed_fields) field_names with
+  | Some field ->
+      Error
+        (Printf.sprintf
+           "worker meta field %S has been removed; worker runtime state is now backend-only"
+           field)
+  | None -> (
+      match List.find_opt
+              (fun name -> not (List.mem name worker_meta_allowed_fields))
+              field_names
+      with
+      | Some field ->
+          Error (Printf.sprintf "unknown worker meta field %S" field)
+      | None -> Ok ())
 
 let worker_meta_to_yojson (meta : worker_container_meta) =
   `Assoc
@@ -111,16 +122,9 @@ let worker_meta_to_yojson (meta : worker_container_meta) =
       ( "selection_note",
         Option.fold ~none:`Null ~some:(fun s -> `String s) meta.selection_note
       );
+      ("runtime_backend", Worker_execution_backend.to_yojson meta.runtime_backend);
       ("thinking_enabled", Option.fold ~none:`Null ~some:(fun v -> `Bool v) meta.thinking_enabled);
-      ("max_turns_override", Option.fold ~none:`Null ~some:(fun n -> `Int n) meta.max_turns_override);
       ("timeout_seconds", Option.fold ~none:`Null ~some:(fun n -> `Int n) meta.timeout_seconds);
-      ("tool_profile", `String (tool_profile_to_string meta.tool_profile));
-      ("shell_profile", `String (shell_profile_to_string meta.shell_profile));
-      ( "worker_class",
-        Option.fold ~none:`Null
-          ~some:(fun kind ->
-            `String (Worker_types.worker_class_to_string kind))
-          meta.worker_class );
       ("effective_model", `String meta.effective_model);
       ("checkpoint_path", `String meta.checkpoint_path);
       ("turn_log_path", `String meta.turn_log_path);
@@ -131,69 +135,58 @@ let worker_meta_to_yojson (meta : worker_container_meta) =
 let worker_meta_of_yojson json =
   let open Yojson.Safe.Util in
   match json with
-  | `Assoc _ -> (
-      match json |> member "worker_name" |> to_string_option with
-      | None -> None
-      | Some worker_name ->
-          Some
-            {
-              version =
-                json |> member "version" |> to_int_option
-                |> Option.value ~default:worker_container_version;
-              worker_name;
-              mcp_session_id =
-                json |> member "mcp_session_id" |> to_string_option
-                |> Option.value ~default:(stable_worker_session_id worker_name);
-              workspace_path =
-                json |> member "workspace_path" |> to_string_option
-                |> Option.value ~default:"";
-              role = json |> member "role" |> to_string_option;
-              selection_note =
-                json |> member "selection_note" |> to_string_option;
-              thinking_enabled =
-                json |> member "thinking_enabled" |> to_bool_option;
-              max_turns_override =
-                json |> member "max_turns_override" |> to_int_option;
-              timeout_seconds =
-                json |> member "timeout_seconds" |> to_int_option;
-              tool_profile =
-                (match json |> member "tool_profile" |> to_string_option with
-                | Some value -> (
-                    match tool_profile_of_string value with
-                    | Some profile -> profile
-                    | None -> default_tool_profile)
-                | None -> default_tool_profile);
-              shell_profile =
-                (match json |> member "shell_profile" |> to_string_option with
-                | Some value -> (
-                    match shell_profile_of_string value with
-                    | Some profile -> profile
-                    | None -> default_shell_profile)
-                | None -> default_shell_profile);
-              worker_class =
-                (match json |> member "worker_class" |> to_string_option with
-                | Some value ->
-                    Worker_types.worker_class_of_string
-                      (String.lowercase_ascii (String.trim value))
-                | None -> None);
-              effective_model =
-                json |> member "effective_model" |> to_string_option
-                |> Option.value ~default:"";
-              checkpoint_path =
-                json |> member "checkpoint_path" |> to_string_option
-                |> Option.value ~default:"";
-              turn_log_path =
-                json |> member "turn_log_path" |> to_string_option
-                |> Option.value ~default:"";
-              last_run_at = json |> member "last_run_at" |> to_float_option;
-            })
-  | _ -> None
+  | `Assoc fields -> (
+      match validate_worker_meta_fields fields with
+      | Error _ as err -> err
+      | Ok () -> (
+          match json |> member "worker_name" |> to_string_option with
+          | None -> Error "worker meta missing worker_name"
+          | Some worker_name -> (
+              match Worker_execution_backend.of_yojson (json |> member "runtime_backend") with
+              | Error _ as err -> err
+              | Ok runtime_backend ->
+                  Ok
+                    {
+                      version =
+                        json |> member "version" |> to_int_option
+                        |> Option.value ~default:worker_container_version;
+                      worker_name;
+                      mcp_session_id =
+                        json |> member "mcp_session_id" |> to_string_option
+                        |> Option.value ~default:(stable_worker_session_id worker_name);
+                      workspace_path =
+                        json |> member "workspace_path" |> to_string_option
+                        |> Option.value ~default:"";
+                      role = json |> member "role" |> to_string_option;
+                      selection_note =
+                        json |> member "selection_note" |> to_string_option;
+                      runtime_backend;
+                      thinking_enabled =
+                        json |> member "thinking_enabled" |> to_bool_option;
+                      timeout_seconds =
+                        json |> member "timeout_seconds" |> to_int_option;
+                      effective_model =
+                        json |> member "effective_model" |> to_string_option
+                        |> Option.value ~default:"";
+                      checkpoint_path =
+                        json |> member "checkpoint_path" |> to_string_option
+                        |> Option.value ~default:"";
+                      turn_log_path =
+                        json |> member "turn_log_path" |> to_string_option
+                        |> Option.value ~default:"";
+                      last_run_at = json |> member "last_run_at" |> to_float_option;
+                    })))
+  | _ -> Error "worker meta must be a JSON object"
 
 let load_worker_meta ~base_path ~worker_name =
   let path = worker_meta_path ~base_path ~worker_name in
   if Sys.file_exists path then
     try
-      Safe_ops.read_json_eio path |> worker_meta_of_yojson
+      match Safe_ops.read_json_eio path |> worker_meta_of_yojson with
+      | Ok meta -> Some meta
+      | Error msg ->
+          Log.LocalWorker.warn "invalid worker meta for %s: %s" worker_name msg;
+          None
     with Yojson.Json_error _ | Sys_error _ | Eio.Io _ -> None
   else
     None
@@ -293,13 +286,8 @@ let start_worker_heartbeat ~sw ~(auth_token : string option) ~session_id
               worker_name (Printexc.to_string exn));
       fun () -> active := false
 
-let build_oas_mcp_tools ~sw ~auth_token ~session_id ~worker_name ~prompt:_
-    ~allowed_tools =
-  let allowed_names =
-    match allowed_tools |> List.map strip_mcp_prefix |> unique_preserve_order with
-    | [] -> session_min_tool_names
-    | names -> names
-  in
+let build_oas_mcp_tools ~sw ~auth_token ~session_id ~worker_name =
+  let allowed_names = session_min_tool_names in
   let listed_schemas =
     list_masc_tools ~sw ~auth_token ~session_id ~names:(Some allowed_names) ()
   in
@@ -380,8 +368,8 @@ let oas_tool_names (tools : Oas.Tool.t list) =
   List.map (fun (tool : Oas.Tool.t) -> tool.schema.name) tools
 
 let make_worker_meta ~base_path ~workspace_path ~worker_name
-    ~mcp_session_id ~role ~selection_note ~worker_class
-    ~effective_model ~thinking_enabled ~max_turns_override
+    ~mcp_session_id ~role ~selection_note ~runtime_backend
+    ~effective_model ~thinking_enabled
     ~timeout_seconds =
   {
     version = worker_container_version;
@@ -390,12 +378,9 @@ let make_worker_meta ~base_path ~workspace_path ~worker_name
     workspace_path;
     role;
     selection_note;
+    runtime_backend;
     thinking_enabled;
-    max_turns_override;
     timeout_seconds;
-    tool_profile = default_tool_profile;
-    shell_profile = default_shell_profile;
-    worker_class;
     effective_model;
     checkpoint_path =
       worker_checkpoint_path ~base_path ~worker_name;

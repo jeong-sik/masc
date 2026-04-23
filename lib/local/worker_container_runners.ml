@@ -16,26 +16,20 @@ let default_shell_tool_names () =
   [ "file_read"; "file_write"; "shell_exec" ]
 
 let build_execution_spec ~base_path ~worker_name ~model_label
-    ?working_dir ?worker_class
-    ?thinking_enabled ~max_turns ?worker_run_id
-    ?allowed_shell_tools ~role ~selection_note
-    ~(prompt : string) ~(allowed_tools : string list) ~(timeout_sec : int) () =
+    ~runtime_backend ?working_dir
+    ?thinking_enabled ?worker_run_id ~role ~selection_note
+    ~(prompt : string) ~(timeout_sec : int) () =
   {
     Worker_execution_spec.base_path;
     worker_name;
     model_label;
     working_dir;
-    worker_class;
+    runtime_backend;
     thinking_enabled;
-    max_turns;
     worker_run_id;
     role;
     selection_note;
     prompt;
-    allowed_tools;
-    allowed_shell_tools =
-      Option.value ~default:(default_shell_tool_names ())
-        allowed_shell_tools;
     timeout_sec;
   }
 
@@ -51,14 +45,6 @@ let effective_model_of_resume ~existing_meta spec =
   | _ ->
       resolve_oas_provider_of_label spec.Worker_execution_spec.model_label
       |> Result.map snd
-
-let filter_tools_by_name names (tools : Oas.Tool.t list) =
-  match unique_preserve_order names with
-  | [] -> tools
-  | allowed ->
-      List.filter
-        (fun (tool : Oas.Tool.t) -> List.mem tool.schema.name allowed)
-        tools
 
 let dedupe_tools_by_name (tools : Oas.Tool.t list) =
   let rec loop seen acc = function
@@ -109,9 +95,8 @@ let run_worker_oas ~sw ?net ~room_config
       make_worker_meta ~base_path ~workspace_path ~worker_name
         ~mcp_session_id ~role:spec.role
         ~selection_note:spec.selection_note
-        ~worker_class:spec.worker_class
+        ~runtime_backend:spec.runtime_backend
         ~effective_model ~thinking_enabled:spec.thinking_enabled
-        ~max_turns_override:(Some spec.max_turns)
         ~timeout_seconds:(Some spec.timeout_sec)
     in
     let* auth_token =
@@ -119,14 +104,10 @@ let run_worker_oas ~sw ?net ~room_config
     in
     let* masc_tools =
       build_oas_mcp_tools ~sw ~auth_token ~session_id:mcp_session_id
-        ~worker_name ~prompt:spec.prompt
-        ~allowed_tools:spec.allowed_tools
+        ~worker_name
     in
     let* shell_tools =
       build_local_shell_tools ~room_config ~worker_name ~workdir:workspace_path
-    in
-    let shell_tools =
-      filter_tools_by_name spec.allowed_shell_tools shell_tools
     in
     let tools = dedupe_tools_by_name (masc_tools @ shell_tools) in
     let* raw_trace = create_raw_trace ~base_path ~worker_name in
@@ -154,10 +135,12 @@ let run_worker_oas ~sw ?net ~room_config
 
 let preflight_spawn_batch ?clock_opt specs =
   match Worker_runtime_config.backend () with
-  | Worker_execution_backend.Local -> Ok ()
+  | Worker_execution_backend.Local_playground -> Ok ()
   | Worker_execution_backend.Docker ->
       let docker_specs =
         specs
+        |> List.filter (fun (spec : Worker_execution_spec.t) ->
+               spec.runtime_backend = Worker_execution_backend.Docker)
         |> List.map (fun (spec : Worker_execution_spec.t) ->
                {
                  Worker_runtime_docker.worker_name = spec.worker_name;
@@ -166,22 +149,20 @@ let preflight_spawn_batch ?clock_opt specs =
       in
       Worker_runtime_docker.preflight_batch ?clock_opt docker_specs
 
-let run_worker ~sw ?net ~backend ~base_path ~worker_name ~model_label
-    ~room_config ?working_dir ?worker_class
-    ?thinking_enabled ?allowed_shell_tools ?max_turns
+let run_worker ~sw ?net ~runtime_backend ~base_path ~worker_name ~model_label
+    ~room_config ?working_dir
+    ?thinking_enabled
     ?worker_run_id ~role ~selection_note
-    ~(prompt : string) ~(allowed_tools : string list) ~(timeout_sec : int) :
+    ~(prompt : string) ~(timeout_sec : int) :
     unit -> (run_result, string) result =
-  let max_turns = Option.value ~default:10 max_turns in
   let spec =
     build_execution_spec ~base_path ~worker_name ~model_label
-      ?working_dir ?worker_class
-      ?thinking_enabled ~max_turns ?worker_run_id
-      ?allowed_shell_tools ~role ~selection_note ~prompt
-      ~allowed_tools ~timeout_sec ()
+      ~runtime_backend ?working_dir
+      ?thinking_enabled ?worker_run_id ~role ~selection_note ~prompt
+      ~timeout_sec ()
   in
-  match backend with
-  | Worker_execution_backend.Local ->
+  match runtime_backend with
+  | Worker_execution_backend.Local_playground ->
       run_worker_oas ~sw ?net ~room_config spec
   | Worker_execution_backend.Docker ->
       let spec = Worker_runtime_docker.rewrite_spec_for_container spec in

@@ -104,10 +104,10 @@ let test_worker_runtime_config_prefers_env_override () =
   check string "file config enables docker backend" "docker"
     (Lib.Worker_execution_backend.to_string
        (Lib.Worker_runtime_config.backend ()));
-  with_env "MASC_WORKER_RUNTIME_BACKEND" (Some "local") @@ fun () ->
+  with_env "MASC_WORKER_RUNTIME_BACKEND" (Some "local_playground") @@ fun () ->
   Lib.Config_dir_resolver.reset ();
   Lib.Worker_runtime_config.reset ();
-  check string "env override forces local backend" "local"
+  check string "env override forces local backend" "local_playground"
     (Lib.Worker_execution_backend.to_string
        (Lib.Worker_runtime_config.backend ()))
 
@@ -193,15 +193,12 @@ let test_run_worker_oas_rejects_invalid_explicit_model_label () =
           worker_name = "worker-local";
           model_label = "not-a-model-label";
           working_dir = None;
-          worker_class = Some Masc_mcp.Worker_types.Worker_executor;
+          runtime_backend = Masc_mcp.Worker_execution_backend.Local_playground;
           thinking_enabled = Some false;
-          max_turns = 2;
           worker_run_id = Some "run-local";
           role = Some "worker";
           selection_note = Some "invalid label";
           prompt = "Say hello.";
-          allowed_tools = [];
-          allowed_shell_tools = [];
           timeout_sec = 30;
         }
       in
@@ -219,6 +216,25 @@ let test_run_worker_oas_rejects_invalid_explicit_model_label () =
             (Astring.String.is_infix
                ~affix:"Worker_run_once removed (team session layer)"
                err))
+
+let test_worker_execution_spec_rejects_removed_fields () =
+  let json =
+    Yojson.Safe.from_string
+      {|{
+  "base_path": "/tmp/base",
+  "worker_name": "worker",
+  "model_label": "custom:qwen@http://127.0.0.1:19001",
+  "runtime_backend": "docker",
+  "prompt": "hello",
+  "timeout_sec": 30,
+  "allowed_tools": ["masc_status"]
+}|}
+  in
+  match Lib.Worker_execution_spec.of_yojson json with
+  | Ok _ -> fail "expected removed worker spec field to be rejected"
+  | Error msg ->
+      check bool "mentions removed field" true
+        (Astring.String.is_infix ~affix:"allowed_tools" msg)
 
 let () =
   Alcotest.run "worker_runtime"
@@ -245,4 +261,7 @@ let () =
         [ test_case "invalid explicit model label fails before local worker execution"
             `Quick
             test_run_worker_oas_rejects_invalid_explicit_model_label ] );
+      ( "spec_schema",
+        [ test_case "removed worker spec fields are rejected" `Quick
+            test_worker_execution_spec_rejects_removed_fields ] );
     ]

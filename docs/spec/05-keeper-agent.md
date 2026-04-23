@@ -95,7 +95,7 @@ Keeper의 전체 상태를 담는 레코드. `lib/keeper/keeper_types.ml`에 정
 - **Goal (3-horizon)**: `goal`, `short_goal`, `mid_goal`, `long_goal`
 - **Model**: `cascade_name`, `last_model_used`, derived `active_model`
 - **Capability**: `policy_voice_enabled`, `allowed_paths`
-- **Scope**: `room_scope` (`current` only compatibility field), `mention_targets`
+- **Scope**: `mention_targets`, `joined_room_ids`
 - **Proactive**: `proactive_enabled`, `proactive_idle_sec`, `proactive_cooldown_sec`
 - **Compaction**: `compaction_profile`, `compaction_ratio_gate`, `compaction_message_gate`
 - **Handoff**: `auto_handoff`, `handoff_threshold`, `handoff_cooldown_sec`
@@ -146,14 +146,11 @@ type session_context = {
 
 세션당 최대 3개 체크포인트가 유지된다(`max_checkpoints_retained = 3`). 세션 메시지는 `history.jsonl`에 영속화.
 
-### 3.4 Typed Coordination Enums (keeper_contract.ml)
+### 3.4 Coordination Boundary
 
-```ocaml
-type room_scope = Current | All  (* legacy alias retained, effective value is Current *)
-```
-
+Legacy `room_scope` typed aliases were removed during single-room flattening.
+JSON/MCP 경계에는 `mention_targets`, `joined_room_ids` 같은 coordination 값만 남고, 별도 scope enum은 더 이상 유지하지 않는다.
 `policy_mode`, `policy_shell_mode`, `trigger_mode`, `initiative_*`는 제거되었다.
-JSON/MCP 경계에는 `room_scope` 같은 coordination 값만 남는다. 다만 현재 room 모델은 single-room으로 평탄화되어 `room_scope`의 실효값은 항상 `current`다.
 
 ### 3.5 fiber_health
 

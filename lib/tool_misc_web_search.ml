@@ -750,7 +750,7 @@ let enforce_rate_limit now =
       while Queue.length request_times > 0
             && now -. Queue.peek request_times > window
       do
-        ignore (Queue.pop request_times)
+        let (_ : float) = Queue.pop request_times in ()
       done;
       if Queue.length request_times >= max_calls then
         Error "web search rate limit exceeded; retry shortly"

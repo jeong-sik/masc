@@ -149,9 +149,11 @@ let git_tag_best ~workdir ~cycle ~score =
   else
   let tag = Printf.sprintf "ar-best-c%d-%.4f" cycle score in
   (try
-     ignore
-       (run_git_with_status ~timeout_sec:10.0 ~workdir
-          [ "tag"; "-f"; tag ])
+     let (_status, _output) =
+       run_git_with_status ~timeout_sec:10.0 ~workdir
+         [ "tag"; "-f"; tag ]
+     in
+     ()
    with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Autoresearch.warn "git tag failed in %s: %s" workdir (Printexc.to_string exn))
 
 (** Get the git top-level directory for a workdir. *)

@@ -230,6 +230,9 @@ let contains needle haystack =
     in
     loop 0
 
+let check_contains label needle haystack =
+  check bool label true (contains needle haystack)
+
 let test_dispatch_worktree_create_spoofed_agent_blocked () =
   let ctx = make_ctx () in
   let args = `Assoc [
@@ -562,6 +565,145 @@ let test_dispatch_worktree_create_repairs_existing_sandbox_clone_checkout () =
       check bool "docker worktree created after repair" true
         (Sys.file_exists docker_worktree)
 
+let test_dispatch_worktree_create_cleans_failed_auto_clone () =
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  init_process_eio env;
+  run_ok ~cwd:base_path "git init -q -b main";
+  let broken_source =
+    Filename.concat base_path "workspace/yousleepwhen/masc-mcp"
+  in
+  ensure_dir (Filename.concat broken_source ".git");
+  let config = Masc_mcp.Coord.default_config base_path in
+  ignore (Masc_mcp.Coord.init config ~agent_name:(Some "test-agent"));
+  let ctx : Tool_worktree.context = { config; agent_name = "test-agent" } in
+  let args = `Assoc [
+    ("task_id", `String "task-clone-fail");
+    ("repo_name", `String "masc-mcp");
+    ("base_branch", `String "main");
+  ] in
+  let sandbox_clone =
+    Filename.concat base_path ".masc/playground/test-agent/repos/masc-mcp"
+  in
+  match Tool_worktree.dispatch ctx ~name:"masc_worktree_create" ~args with
+  | None -> fail "dispatch returned None for masc_worktree_create"
+  | Some (true, msg) ->
+      fail
+        (Printf.sprintf
+           "expected auto-provision clone failure, got success: %s"
+           msg)
+  | Some (false, msg) ->
+      check_contains "message mentions auto-provision failure"
+        "auto_provision_clone_failed" msg;
+      check bool "partial sandbox clone was cleaned" false
+        (Sys.file_exists sandbox_clone)
+
+let test_dispatch_worktree_create_rejects_invalid_sandbox_clone () =
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  init_process_eio env;
+  run_ok ~cwd:base_path "git init -q -b main";
+  let sandbox_clone =
+    Filename.concat base_path ".masc/playground/test-agent/repos/masc-mcp"
+  in
+  ensure_dir (Filename.concat sandbox_clone ".git");
+  let config = Masc_mcp.Coord.default_config base_path in
+  ignore (Masc_mcp.Coord.init config ~agent_name:(Some "test-agent"));
+  let ctx : Tool_worktree.context = { config; agent_name = "test-agent" } in
+  let args = `Assoc [
+    ("task_id", `String "task-invalid-clone");
+    ("repo_name", `String "masc-mcp");
+    ("base_branch", `String "main");
+  ] in
+  match Tool_worktree.dispatch ctx ~name:"masc_worktree_create" ~args with
+  | None -> fail "dispatch returned None for masc_worktree_create"
+  | Some (true, msg) ->
+      fail
+        (Printf.sprintf
+           "expected invalid sandbox clone failure, got success: %s"
+           msg)
+  | Some (false, msg) ->
+      check_contains "message mentions invalid sandbox clone"
+        "sandbox_clone_invalid" msg;
+      check bool "invalid sandbox clone was preserved" true
+        (Sys.file_exists sandbox_clone)
+
+let test_worktree_path_rejects_traversal_name () =
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  let root = Filename.concat base_path "repo" in
+  ensure_dir root;
+  match Masc_mcp.Coord.ensure_worktree_path root "../escape" with
+  | Ok (worktree_path, _) ->
+      fail ("expected invalid worktree path, got: " ^ worktree_path)
+  | Error (Types.IoError msg) ->
+      check_contains "message mentions invalid worktree path"
+        "Invalid worktree path" msg
+  | Error err ->
+      fail ("expected IoError, got: " ^ Types.masc_error_to_string err)
+
+let test_worktree_create_concurrent_same_name_converges () =
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  init_process_eio env;
+  run_ok ~cwd:base_path "git init -q -b main";
+  let source_repo =
+    setup_nested_repo_with_remote ~base_path
+      ~repo_rel:"workspace/yousleepwhen/masc-mcp"
+  in
+  let sandbox_repos =
+    Filename.concat base_path ".masc/playground/race-agent/repos"
+  in
+  ensure_dir sandbox_repos;
+  let sandbox_clone = Filename.concat sandbox_repos "masc-mcp" in
+  run_ok ~cwd:base_path
+    (Printf.sprintf "git clone -q %s %s"
+       (Filename.quote source_repo) (Filename.quote sandbox_clone));
+  let config = Masc_mcp.Coord.default_config base_path in
+  ignore (Masc_mcp.Coord.init config ~agent_name:(Some "race-agent"));
+  let task_id = "task-race-create" in
+  let create_once () =
+    Masc_mcp.Coord.worktree_create_r ~link_task:false ~repo_name:"masc-mcp"
+      config ~agent_name:"race-agent" ~task_id ~base_branch:"main"
+  in
+  let left = ref None in
+  let right = ref None in
+  Eio.Fiber.both
+    (fun () -> left := Some (create_once ()))
+    (fun () -> right := Some (create_once ()));
+  let unwrap label = function
+    | Some (Ok msg) -> msg
+    | Some (Error err) ->
+        fail
+          (Printf.sprintf "%s failed: %s" label
+             (Types.masc_error_to_string err))
+    | None -> fail (label ^ " did not run")
+  in
+  let left_msg = unwrap "left create" !left in
+  let right_msg = unwrap "right create" !right in
+  let messages = [ left_msg; right_msg ] in
+  let count_matching needle =
+    List.fold_left
+      (fun count msg -> if contains needle msg then count + 1 else count)
+      0 messages
+  in
+  let worktree_path =
+    Filename.concat sandbox_clone
+      (Filename.concat ".worktrees"
+         (Playground_paths.worktree_dir_name "race-agent" task_id))
+  in
+  check bool "concurrent worktree exists" true
+    (Sys.file_exists worktree_path);
+  check int "one create wins" 1 (count_matching "Worktree created");
+  check int "one create observes existing" 1
+    (count_matching "Worktree already exists")
+
 (* ============================================================
    Test Runners
    ============================================================ *)
@@ -608,5 +750,13 @@ let () =
         test_dispatch_worktree_create_and_remove_use_docker_keeper_lane;
       test_case "broken sandbox clone checkout is restored" `Quick
         test_dispatch_worktree_create_repairs_existing_sandbox_clone_checkout;
+      test_case "failed auto-provision clone is cleaned" `Quick
+        test_dispatch_worktree_create_cleans_failed_auto_clone;
+      test_case "invalid sandbox clone is rejected" `Quick
+        test_dispatch_worktree_create_rejects_invalid_sandbox_clone;
+      test_case "worktree path traversal is rejected" `Quick
+        test_worktree_path_rejects_traversal_name;
+      test_case "concurrent same-name worktree create converges" `Quick
+        test_worktree_create_concurrent_same_name_converges;
     ];
   ]

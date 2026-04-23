@@ -316,6 +316,10 @@ let test_extract_agent_type_prefix_keeper_aliases () =
     (Auth.extract_agent_type_prefix "keeper-masc-improver-agent");
   check (option string) "generated nickname" (Some "adversary")
     (Auth.extract_agent_type_prefix "adversary-fair-tapir");
+  check (option string) "hyphenated generated nickname" (Some "qa-king")
+    (Auth.extract_agent_type_prefix "qa-king-warm-heron");
+  check (option string) "hyphenated generated nickname unique" (Some "qa-king")
+    (Auth.extract_agent_type_prefix "qa-king-warm-heron-a3b2");
   check (option string) "plain name stays plain" (Some "sangsu")
     (Auth.extract_agent_type_prefix "sangsu");
   check (option string) "two segment keeper fallback unchanged" (Some "keeper")
@@ -336,6 +340,23 @@ let test_verify_token_keeper_alias_fallback () =
       fail
         (Printf.sprintf
            "keeper alias should verify via fallback credential: %s"
+           (Types.masc_error_to_string e))
+
+let test_verify_token_hyphenated_generated_nickname_fallback () =
+  let dir = setup_test_room () in
+  let result =
+    match Auth.create_token dir ~agent_name:"qa-king" ~role:Types.Admin with
+    | Ok (raw_token, _) ->
+        Auth.verify_token dir ~agent_name:"qa-king-warm-heron" ~token:raw_token
+    | Error e -> Error e
+  in
+  cleanup_test_room dir;
+  match result with
+  | Ok cred -> check string "fallback credential owner" "qa-king" cred.agent_name
+  | Error e ->
+      fail
+        (Printf.sprintf
+           "hyphenated generated alias should verify via fallback credential: %s"
            (Types.masc_error_to_string e))
 
 let test_load_credential_missing_keeper_alias_stays_quiet () =
@@ -727,6 +748,8 @@ let () =
         test_extract_agent_type_prefix_keeper_aliases;
       test_case "verify_token keeper alias fallback" `Quick
         test_verify_token_keeper_alias_fallback;
+      test_case "verify_token hyphenated generated nickname fallback" `Quick
+        test_verify_token_hyphenated_generated_nickname_fallback;
       test_case "load_credential missing keeper alias stays quiet" `Quick
         test_load_credential_missing_keeper_alias_stays_quiet;
       test_case "verify_token dashboard legacy alias fallback" `Quick

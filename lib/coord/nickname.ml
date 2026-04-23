@@ -30,6 +30,21 @@ let nickname_rng_mutex = Eio.Mutex.create ()
 let with_nickname_rng f =
   Eio.Mutex.use_ro nickname_rng_mutex (fun () -> f nickname_rng)
 
+let array_contains arr value =
+  let rec loop idx =
+    idx < Array.length arr
+    && (String.equal arr.(idx) value || loop (idx + 1))
+  in
+  loop 0
+
+let is_hex4 value =
+  String.length value = 4
+  && String.for_all
+       (function
+         | '0' .. '9' | 'a' .. 'f' -> true
+         | _ -> false)
+       value
+
 (** Generate a short random suffix (4 hex chars) for uniqueness *)
 let random_suffix () =
   Printf.sprintf "%04x"
@@ -59,11 +74,25 @@ let is_generated_nickname name =
   let parts = String.split_on_char '-' name in
   List.length parts >= 3
 
-(** Extract agent_type from a generated nickname.
+(** Extract the stable agent prefix from a generated nickname.
     "claude-swift-fox" -> Some "claude"
+    "qa-king-warm-heron" -> Some "qa-king"
     "claude" -> Some "claude" (legacy) *)
 let extract_agent_type name =
   let parts = String.split_on_char '-' name in
-  match parts with
+  let join_prefix prefix_rev =
+    match List.rev prefix_rev with
+    | [] -> None
+    | prefix -> Some (String.concat "-" prefix)
+  in
+  match List.rev parts with
+  | animal :: adjective :: prefix_rev
+    when array_contains animals animal && array_contains adjectives adjective ->
+      join_prefix prefix_rev
+  | suffix :: animal :: adjective :: prefix_rev
+    when is_hex4 suffix
+         && array_contains animals animal
+         && array_contains adjectives adjective ->
+      join_prefix prefix_rev
   | agent_type :: _ -> Some agent_type
   | [] -> None

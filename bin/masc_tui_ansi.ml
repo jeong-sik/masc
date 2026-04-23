@@ -69,16 +69,19 @@ let fit_width s width =
   if len >= width then String.sub s 0 (max 0 (width - 1)) ^ (if len > width then "~" else "")
   else s ^ String.make (width - len) ' '
 
+let is_keeper name =
+  String.length name >= 7 && String.sub name 0 7 = "keeper-"
+
 (** Agent icon — deterministic by name hash, vendor-agnostic *)
 let agent_icon name =
   let icons = [| "\xf0\x9f\x9f\xa3"; "\xf0\x9f\x94\xb5"; "\xf0\x9f\x9f\xa2"; "\xf0\x9f\x9f\xa1"; "\xf0\x9f\x94\xb4" |] in
-  if String.length name >= 7 && String.sub name 0 7 = "keeper-" then "\xf0\x9f\x9b\xa1"  (* shield for keepers *)
+  if is_keeper name then "\xf0\x9f\x9b\xa1"  (* shield for keepers *)
   else icons.(Hashtbl.hash name mod Array.length icons)
 
 (** Agent color — deterministic by name hash, vendor-agnostic *)
 let agent_color name =
   let colors = [| Ansi.magenta; Ansi.blue; Ansi.green; Ansi.yellow; Ansi.cyan |] in
-  if String.length name >= 7 && String.sub name 0 7 = "keeper-" then Ansi.white
+  if is_keeper name then Ansi.white
   else colors.(Hashtbl.hash name mod Array.length colors)
 
 (** Status color *)

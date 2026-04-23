@@ -630,7 +630,6 @@ let canonical_keeper_toml_key_names =
   ; "social_model"
   ; "cascade_name"
   ; "models"
-  ; "autoboot_enabled"
   ]
 
 (** Pure detector: returns TOML keys that [profile_defaults_of_toml] does not

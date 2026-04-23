@@ -108,7 +108,6 @@ let write_basepath_keeper_toml base_path name =
     (Filename.concat keepers_dir (name ^ ".toml"))
     {|[keeper]
 goal = "example"
-room_scope = "current"
 proactive_enabled = false
 |}
 let find_free_port_from start =

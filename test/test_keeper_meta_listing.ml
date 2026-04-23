@@ -70,7 +70,6 @@ let write_keeper_toml_exn ?autoboot_enabled config ~name =
        "[keeper]\n\
         goal = \"test keeper\"\n\
         %s\
-        room_scope = \"current\"\n\
         proactive_enabled = false\n"
        autoboot_line)
 

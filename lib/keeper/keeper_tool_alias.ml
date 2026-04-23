@@ -58,8 +58,20 @@ let to_public internal =
   | Some public -> public
   | None -> internal
 
+let strip_mcp_masc_prefix name =
+  let prefix = "mcp__masc__" in
+  let prefix_len = String.length prefix in
+  if String.length name >= prefix_len && String.sub name 0 prefix_len = prefix then
+    String.sub name prefix_len (String.length name - prefix_len)
+  else
+    name
+
 let canonicalize_observed names =
-  List.map (fun n -> match to_internal n with Some i -> i | None -> n) names
+  List.map
+    (fun n ->
+      let stripped = strip_mcp_masc_prefix n in
+      match to_internal stripped with Some i -> i | None -> stripped)
+    names
 
 let hallucinated_set =
   let t = Hashtbl.create (List.length hallucinated_builtins) in

@@ -124,8 +124,8 @@ let has_background_capacity () =
       | Eio.Cancel.Cancelled _ as ex -> raise ex
       | ex ->
         Log.Autoresearch.warn "capacity check failed: %s" (Printexc.to_string ex);
-        true)
-  | _ -> true
+        false)
+  | _ -> false
 
 (** Generate code change via Cascade "autoresearch" profile.
     Returns Ok (hypothesis, new_code) or Error reason. *)

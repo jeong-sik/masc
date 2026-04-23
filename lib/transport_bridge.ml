@@ -16,7 +16,7 @@ end
 
 (* Providers stored in registration order.
    The registry is mutable only during bootstrap (single fiber).
-   After [seal] is called, further registration raises [Failure].
+   After [seal] is called, further registration raises [Invalid_argument].
    Reads from multiple fibers are safe because OCaml ref reads are
    atomic at the word level, and the list is never mutated post-seal. *)
 let registry : (module PROVIDER) list ref = ref []

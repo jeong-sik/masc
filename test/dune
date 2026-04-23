@@ -1088,6 +1088,11 @@
  (libraries alcotest unix))
 
 (test
+ (name test_git_fetch_retry_script)
+ (modules test_git_fetch_retry_script)
+ (libraries alcotest unix))
+
+(test
  (name test_pr_open_script)
  (modules test_pr_open_script)
  (libraries alcotest unix))

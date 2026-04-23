@@ -444,6 +444,86 @@ let test_blocked_diagnosis_both_rewrite_and_tool () =
   check string "tool_suggestion" "keeper_shell"
     (d |> member "tool_suggestion" |> to_string)
 
+(* --- P10: structured output tests --- *)
+
+let test_git_status_structured () =
+  let json =
+    Masc_mcp.Exec_core.process_result_json
+      ~base_path:"/tmp"
+      ~keeper_name:"p10-test"
+      ~cmd:"git status --porcelain"
+      ~status:(Unix.WEXITED 0)
+      ~output:" M lib/foo.ml\n?? new_file.txt\n"
+      ()
+  in
+  let so = json |> member "structured_output" in
+  let staged = so |> member "staged" |> to_list in
+  let unstaged = so |> member "unstaged" |> to_list in
+  let untracked = so |> member "untracked" |> to_list in
+  check int "staged empty" 0 (List.length staged);
+  check int "unstaged 1" 1 (List.length unstaged);
+  check int "untracked 1" 1 (List.length untracked)
+
+let test_git_log_structured () =
+  let json =
+    Masc_mcp.Exec_core.process_result_json
+      ~base_path:"/tmp"
+      ~keeper_name:"p10-test"
+      ~cmd:"git log --oneline -5"
+      ~status:(Unix.WEXITED 0)
+      ~output:"abc1234 fix bug\ndef5678 add feature\n"
+      ()
+  in
+  let so = json |> member "structured_output" in
+  let commits = so |> member "commits" |> to_list in
+  check int "commits count" 2 (List.length commits)
+
+let test_wc_structured () =
+  let json =
+    Masc_mcp.Exec_core.process_result_json
+      ~base_path:"/tmp"
+      ~keeper_name:"p10-test"
+      ~cmd:"wc -l lib/foo.ml"
+      ~status:(Unix.WEXITED 0)
+      ~output:"     120 lib/foo.ml"
+      ()
+  in
+  let so = json |> member "structured_output" in
+  check int "lines" 120 (so |> member "lines" |> to_int)
+
+let test_unknown_cmd_no_structured () =
+  let json =
+    Masc_mcp.Exec_core.process_result_json
+      ~base_path:"/tmp"
+      ~keeper_name:"p10-test"
+      ~cmd:"echo hello world"
+      ~status:(Unix.WEXITED 0)
+      ~output:"hello world"
+      ()
+  in
+  check bool "no structured_output for unknown" true
+    (try
+       let _ = json |> member "structured_output" in
+       false
+     with _ -> true)
+
+let test_dune_test_structured () =
+  let output =
+    "Test src/foo.ml: OK\nTest test/bar.ml: FAILED\nTest test/baz.ml: OK\n"
+  in
+  let json =
+    Masc_mcp.Exec_core.process_result_json
+      ~base_path:"/tmp"
+      ~keeper_name:"p10-test"
+      ~cmd:"dune runtest"
+      ~status:(Unix.WEXITED 1)
+      ~output
+      ()
+  in
+  let so = json |> member "structured_output" in
+  check int "passed" 2 (so |> member "passed" |> to_int);
+  check int "failed" 1 (so |> member "failed" |> to_int)
+
 
 let () =
   run "exec_core"
@@ -511,5 +591,18 @@ let () =
             test_blocked_with_tool_suggestion;
           test_case "diag with both rewrite and tool" `Quick
             test_blocked_diagnosis_both_rewrite_and_tool;
+        ] );
+      ( "p10_structured_output",
+        [
+          test_case "git status --porcelain produces structured fields"
+            `Quick test_git_status_structured;
+          test_case "git log --oneline produces commits array" `Quick
+            test_git_log_structured;
+          test_case "wc -l produces lines count" `Quick
+            test_wc_structured;
+          test_case "unknown cmd has no structured_output" `Quick
+            test_unknown_cmd_no_structured;
+          test_case "dune runtest produces passed/failed counts" `Quick
+            test_dune_test_structured;
         ] );
     ]

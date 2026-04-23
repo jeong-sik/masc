@@ -21,3 +21,16 @@ module Task_id : sig
   val to_string : t -> string
   val equal : t -> t -> bool
 end
+
+module Uid : sig
+  (** Stable unique identifier for a keeper.  Format: "keeper-<uuidv4>". *)
+  type t = private string
+  val generate : unit -> t
+  val of_string : string -> (t, string) result
+  val to_string : t -> string
+  val equal : t -> t -> bool
+  val compare : t -> t -> int
+end
+
+val uid_to_yojson : Uid.t -> [> `String of string ]
+val uid_of_yojson : [ `String of string | `Null ] -> (Uid.t, string) result

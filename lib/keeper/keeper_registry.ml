@@ -180,6 +180,8 @@ let decr_running_count_clamped () =
     Pattern follows #7011 (executor_pool) and #7013 (runtime_state). *)
 
 let registry_key ~base_path name =
+  if String.contains name '\x1f' then
+    invalid_arg (Printf.sprintf "keeper name contains unit separator: %s" name);
   base_path ^ "\x1f" ^ name
 
 let put_entry key entry =
@@ -726,6 +728,17 @@ let find_by_agent_name agent_name =
       | Some _ -> acc
       | None ->
         if String.equal v.meta.agent_name agent_name then Some v else None)
+    (Atomic.get registry) None
+
+let find_by_id (uid : Keeper_id.Uid.t) =
+  StringMap.fold
+    (fun _k v acc ->
+      match acc with
+      | Some _ -> acc
+      | None ->
+        (match v.meta.keeper_id with
+         | Some id when Keeper_id.Uid.equal id uid -> Some v
+         | _ -> None))
     (Atomic.get registry) None
 
 let tool_usage_of_by_name name =

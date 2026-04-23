@@ -266,6 +266,9 @@ type keeper_meta =
   ; per_provider_timeout_s : float option
   ; (* -- Agent runtime state (usage, tracing, autonomy metrics) -- *)
     runtime : agent_runtime_state
+  ; (* -- Identity & concurrency -- *)
+    keeper_id : Keeper_id.Uid.t option
+  ; meta_version : int
   }
 
 let normalize_tool_names names =
@@ -902,6 +905,10 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "telemetry_feedback_enabled", Json_util.bool_opt_to_json m.telemetry_feedback_enabled
     ; "telemetry_feedback_window_hours", Json_util.int_opt_to_json m.telemetry_feedback_window_hours
     ; "per_provider_timeout_s", Json_util.float_opt_to_json m.per_provider_timeout_s
+    ; "keeper_id", (match m.keeper_id with
+      | Some uid -> Keeper_id.uid_to_yojson uid
+      | None -> `Null)
+    ; "meta_version", `Int m.meta_version
     ]
 ;;
 
@@ -1467,6 +1474,17 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
              ; telemetry_feedback_enabled = Safe_ops.json_bool_opt "telemetry_feedback_enabled" json
              ; telemetry_feedback_window_hours = Safe_ops.json_int_opt "telemetry_feedback_window_hours" json
              ; runtime = state.ps_runtime
+             ; keeper_id =
+                 (match Safe_ops.json_string_opt "keeper_id" json with
+                  | Some s ->
+                      (match Keeper_id.uid_of_yojson (`String s) with
+                       | Ok uid -> Some uid
+                       | Error _ -> None)
+                  | None -> None)
+             ; meta_version =
+                 (match Safe_ops.json_int_opt "meta_version" json with
+                  | Some v -> v
+                  | None -> 0)
              })
       )
   with
@@ -1731,29 +1749,55 @@ let persistent_agent_names config =
            as non-persistent: %s" name msg;
         None)
 
-let fresher_meta config (meta : keeper_meta) : keeper_meta =
-  match read_meta_file_path (keeper_meta_path config meta.name) with
-  | Ok (Some existing) ->
-    let existing_ts =
-      Resilience.Time.parse_iso8601_opt existing.updated_at |> Option.value ~default:0.0
-    in
-    let incoming_ts =
-      Resilience.Time.parse_iso8601_opt meta.updated_at |> Option.value ~default:0.0
-    in
-    if existing_ts > incoming_ts then existing else meta
-  | Ok None | Error _ -> meta
-;;
-
 let write_meta ?(force = false) config (m : keeper_meta) : (unit, string) result =
-  let persisted = if force then m else fresher_meta config m in
-  let path = keeper_meta_path config persisted.name in
-  let json = meta_to_json persisted in
-  match Keeper_fs.save_json_atomic path json with
-  | Ok () ->
-    !runtime_meta_write_sync_hook config persisted;
-    Ok ()
-  | Error msg ->
-    Error (Printf.sprintf "failed to write meta %s: %s" path msg)
+  (* Assign UUID on first write for legacy keepers lacking keeper_id *)
+  let m =
+    match m.keeper_id with
+    | Some _ -> m
+    | None -> { m with keeper_id = Some (Keeper_id.Uid.generate ()) }
+  in
+  let path = keeper_meta_path config m.name in
+  if force then
+    let persisted = { m with meta_version = m.meta_version + 1 } in
+    let json = meta_to_json persisted in
+    match Keeper_fs.save_json_atomic path json with
+    | Ok () ->
+      !runtime_meta_write_sync_hook config persisted;
+      Ok ()
+    | Error msg ->
+      Error (Printf.sprintf "failed to write meta %s: %s" path msg)
+  else
+    (* Version CAS: reject writes whose version doesn't match what's on disk *)
+    let on_disk : (keeper_meta option, string) result =
+      read_meta_file_path path
+    in
+    match on_disk with
+    | Ok (Some existing) ->
+      if existing.meta_version <> m.meta_version then
+        Error (Printf.sprintf
+          "meta version conflict for %s: expected %d, disk has %d"
+          m.name m.meta_version existing.meta_version)
+      else
+        let persisted = { m with meta_version = m.meta_version + 1 } in
+        let json = meta_to_json persisted in
+        (match Keeper_fs.save_json_atomic path json with
+        | Ok () ->
+          !runtime_meta_write_sync_hook config persisted;
+          Ok ()
+        | Error msg ->
+          Error (Printf.sprintf "failed to write meta %s: %s" path msg))
+    | Ok None ->
+      (* No existing file — initial write *)
+      let persisted = { m with meta_version = 1 } in
+      let json = meta_to_json persisted in
+      (match Keeper_fs.save_json_atomic path json with
+      | Ok () ->
+        !runtime_meta_write_sync_hook config persisted;
+        Ok ()
+      | Error msg ->
+        Error (Printf.sprintf "failed to write meta %s: %s" path msg))
+    | Error msg ->
+      Error (Printf.sprintf "failed to read existing meta for CAS %s: %s" path msg)
 ;;
 
 let keeper_name_from_agent_name = Keeper_identity.keeper_name_from_agent_name

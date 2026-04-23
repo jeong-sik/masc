@@ -573,6 +573,15 @@ let resolve_keeper_shell_read_path
    reference Keeper_exec_shell.* directly (tests, doc refs). *)
 let effective_sandbox_profile = Keeper_shell_docker.effective_sandbox_profile
 let cmd_targets_git_or_gh = Keeper_shell_docker.cmd_targets_git_or_gh
+let cmd_targets_gh cmd =
+  let trimmed = String.trim cmd in
+  let first_word =
+    match String.index_opt trimmed ' ' with
+    | Some i -> String.sub trimmed 0 i
+    | None -> trimmed
+  in
+  String.equal first_word "gh"
+
 let ensure_keeper_sandbox_runtime = Keeper_shell_docker.ensure_keeper_sandbox_runtime
 let command_uses_nested_container_runtime = Keeper_shell_docker.command_uses_nested_container_runtime
 let run_docker_shell_command_with_status = Keeper_shell_docker.run_docker_shell_command_with_status
@@ -606,6 +615,11 @@ let handle_keeper_bash
   in
   if cmd = ""
   then error_json "cmd is required. Good: cmd='ls -la lib/'. Bad: cmd=''."
+  else if Env_config_keeper.KeeperSandbox.hard_mode ()
+          && meta.sandbox_profile <> Docker
+  then
+    error_json
+      "MASC_KEEPER_SANDBOX_HARD_MODE requires sandbox_profile=docker"
 
   else begin
     (* Tick 22: dark-launch shadow logger.  Runs
@@ -725,6 +739,23 @@ let handle_keeper_bash
            ~extra:[ "cmd", `String cmd_for_log; "execution_time_ms", `Int 0 ]
            ~env_snapshot:env_snap
            ()))
+    else if base_profile = Docker
+            && Env_config_keeper.KeeperSandbox.hard_mode ()
+            && cmd_targets_gh cmd
+    then (
+      Log.Keeper.warn
+        "keeper_bash gh blocked by hard mode: keeper=%s cmd=%s"
+        meta.name cmd_for_log;
+      Yojson.Safe.to_string
+        (`Assoc
+           [ "ok", `Bool false
+           ; "error", `String "gh_requires_brokered_structured_tool"
+           ; "reason", `String
+               "MASC_KEEPER_SANDBOX_HARD_MODE keeps Docker containers on network=none and forbids host credential mounts"
+           ; "hint", `String
+               "Use keeper_shell op=gh cmd=\"...\"; hard mode runs validated gh commands through the host broker with keeper-scoped GH_CONFIG_DIR."
+           ; "cmd", `String cmd_for_log
+           ]))
     else if sandbox_profile = Docker && git_creds_enabled then (
       Log.Keeper.info
         "DOCKER_GIT_EXEC: keeper=%s cwd=%s cmd=%s"
@@ -1337,6 +1368,13 @@ let handle_keeper_shell
     else
       Keeper_docker_read.container_path_of_host ~config ~meta ~host_path
   in
+  if Env_config_keeper.KeeperSandbox.hard_mode ()
+     && meta.sandbox_profile <> Docker
+  then
+    error_json
+      ~fields:[ "op", `String op ]
+      "MASC_KEEPER_SANDBOX_HARD_MODE requires sandbox_profile=docker"
+  else
   match op with
   | "pwd" ->
     (match cwd_target () with
@@ -2071,10 +2109,30 @@ let handle_keeper_shell
            if safe = "" || safe = "." || safe = ".." then "repo" else safe
          in
          let clone_path = Filename.concat repos_dir repo_name in
+         let docker_hard_mode_brokered =
+           meta.sandbox_profile = Docker
+           && Env_config_keeper.KeeperSandbox.hard_mode ()
+         in
+         let route_fields =
+           if meta.sandbox_profile = Docker then
+             [ "via", `String
+                 (if docker_hard_mode_brokered then "brokered" else "docker") ]
+           else
+             []
+         in
+         let run_brokered_git ~cwd ~timeout_sec argv =
+           match Keeper_gh_env.keeper_process_env config ~keeper_name:meta.name with
+           | Error err -> (Unix.WEXITED 127, err)
+           | Ok env ->
+               Process_eio.run_argv_with_status ?env ~cwd ~timeout_sec argv
+         in
          if Fs_compat.file_exists clone_path then
            (* Already cloned — pull latest instead *)
            let st, out =
-             if meta.sandbox_profile = Docker then
+             if docker_hard_mode_brokered then
+               run_brokered_git ~cwd:repos_dir ~timeout_sec:60.0
+                 [ "git"; "-C"; clone_path; "pull"; "--ff-only" ]
+             else if meta.sandbox_profile = Docker then
                match
                  run_docker_shell_command_with_status ~config ~meta ~cwd:repos_dir
                    ~timeout_sec:60.0
@@ -2101,11 +2159,7 @@ let handle_keeper_shell
                   ; "status", Keeper_alerting_path.process_status_to_json st
                   ; "output", `String out
                   ]
-                 @
-                 (if meta.sandbox_profile = Docker then
-                    [ "via", `String "docker" ]
-                  else
-                    [])))
+                 @ route_fields))
          else
            let depth = Keeper_tool_policy.clone_depth () |> max 0 in
            let depth_args =
@@ -2113,7 +2167,11 @@ let handle_keeper_shell
            in
            let shallow = depth > 0 in
            let st, out =
-             if meta.sandbox_profile = Docker then
+             if docker_hard_mode_brokered then
+               run_brokered_git ~cwd:repos_dir
+                 ~timeout_sec:(Keeper_tool_policy.clone_timeout_sec ())
+                 ("git" :: "clone" :: depth_args @ [ url; clone_path ])
+             else if meta.sandbox_profile = Docker then
                let clone_cmd =
                  String.concat " "
                    (List.map Filename.quote
@@ -2145,11 +2203,7 @@ let handle_keeper_shell
                   ; "status", Keeper_alerting_path.process_status_to_json st
                   ; "output", `String out
                   ]
-                 @
-                 (if meta.sandbox_profile = Docker then
-                    [ "via", `String "docker" ]
-                  else
-                    []))))
+                 @ route_fields)))
   | "gh" ->
     let raw_cmd_str = Safe_ops.json_string ~default:"" "cmd" args in
     (* gh runs against remote network. Prior floors (1s, then 5s) kept
@@ -2209,9 +2263,14 @@ let handle_keeper_shell
             (Keeper_gh_shared.render_simple_gh_command cmd)
         in
         let gh_base ~ok ~cwd ~command extras =
+          let docker_hard_mode_brokered =
+            meta.sandbox_profile = Docker
+            && Env_config_keeper.KeeperSandbox.hard_mode ()
+          in
           let route_fields =
             if meta.sandbox_profile = Docker then
-              [ "via", `String "docker" ]
+              [ "via", `String
+                  (if docker_hard_mode_brokered then "brokered" else "docker") ]
             else
               []
           in
@@ -2245,7 +2304,9 @@ let handle_keeper_shell
             | None -> []
           in
           let gh_process =
-            if meta.sandbox_profile = Docker then
+            if meta.sandbox_profile = Docker
+               && not (Env_config_keeper.KeeperSandbox.hard_mode ())
+            then
               match
                 run_docker_shell_command_with_status ~config ~meta ~cwd
                   ~timeout_sec ~cmd:display_command

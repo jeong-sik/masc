@@ -525,6 +525,8 @@ let docker_playground_entries =
 
 let keeper_sandbox_entries =
   [
+    entry ~default:"false" "MASC_KEEPER_SANDBOX_HARD_MODE"
+      "Strict Docker keeper mode: rootless/userns required, network=none, brokered git/gh only";
     entry
       ~default:
         "ubuntu:24.04@sha256:cdb5fd928fced577cfecf12c8966e830fcdf42ee481fb0b91904eeddc2fe5eff"
@@ -544,6 +546,8 @@ let keeper_sandbox_entries =
       "Fail closed unless Docker reports rootless mode";
     entry ~default:"false" "MASC_KEEPER_SANDBOX_REQUIRE_USERNS"
       "Fail closed unless Docker reports userns support";
+    entry ~default:"true" "MASC_KEEPER_SANDBOX_GIT_DISPATCH"
+      "Enable legacy Docker git/gh bridge dispatch when hard mode is off";
   ]
 
 let economy_entries =

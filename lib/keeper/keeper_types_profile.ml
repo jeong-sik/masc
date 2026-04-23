@@ -508,6 +508,28 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
                      raw))
         | None -> Ok ())
   in
+  let result =
+    Result.bind result (fun () ->
+        match str "cascade_name" with
+        | None -> Ok ()
+        | Some raw ->
+            let normalized = String.trim raw |> String.lowercase_ascii in
+            let compile_known = Keeper_cascade_profile.known_cascades in
+            let phase_routing = [ "local_only"; "local_recovery" ] in
+            let catalog =
+              try Keeper_cascade_profile.catalog_names ()
+              with _ -> []
+            in
+            let all_valid = compile_known @ phase_routing @ catalog in
+            if List.mem normalized all_valid then Ok ()
+            else
+              Error
+                (Printf.sprintf
+                   "invalid cascade_name '%s' (known: %s)"
+                   raw
+                   (String.concat ", "
+                      (compile_known @ phase_routing))))
+  in
   Result.map
     (fun () ->
       {
@@ -573,12 +595,56 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
       })
     result
 
-(** Canonical TOML key names recognized by [profile_defaults_of_toml].
+(** Fields actually read by [profile_defaults_of_toml] from the [[keeper]]
+    TOML table.  Keep this in sync with the record construction above — the
+    compile-time assertion below will fail if the two lists diverge. *)
+let parsed_field_key_names =
+  [ "name"
+  ; "persona_name"
+  ; "goal"
+  ; "short_goal"
+  ; "mid_goal"
+  ; "long_goal"
+  ; "will"
+  ; "needs"
+  ; "desires"
+  ; "instructions"
+  ; "policy_voice_enabled"
+  ; "autoboot_enabled"
+  ; "mention_targets"
+  ; "proactive_enabled"
+  ; "proactive_idle_sec"
+  ; "proactive_cooldown_sec"
+  ; "room_signal_prompt_enabled"
+  ; "shards"
+  ; "allowed_paths"
+  ; "sandbox_profile"
+  ; "network_mode"
+  ; "shared_memory_scope"
+  ; "tool_preset"
+  ; "tool_also_allow"
+  ; "tool_denylist"
+  ; "work_discovery_enabled"
+  ; "work_discovery_sources"
+  ; "work_discovery_interval_sec"
+  ; "work_discovery_guidance"
+  ; "telemetry_feedback_enabled"
+  ; "telemetry_feedback_window_hours"
+  ; "max_turns_per_call"
+  ; "max_turns_per_call_scheduled_autonomous"
+  ; "social_model"
+  ; "cascade_name"
+  ]
+
+(** Canonical TOML key names used by [detect_unknown_keeper_toml_keys].
     Keys outside this set under [[keeper]] (or any other table) are silently
     ignored by the loader, which historically let dead config accumulate
     (e.g. legacy [legacy_scope], [scope_kind]).  [warn_unknown_keeper_toml_keys]
     uses this list to surface drift on boot, symmetric with
-    [warn_unknown_keeper_meta_keys] on the JSON side. *)
+    [warn_unknown_keeper_meta_keys] on the JSON side.
+
+    Must be kept in sync with [parsed_field_key_names] — the assertion below
+    catches drift at compile time. *)
 let canonical_keeper_toml_key_names =
   [ "name"
   ; "persona_name"
@@ -603,8 +669,6 @@ let canonical_keeper_toml_key_names =
   ; "network_mode"
   ; "shared_memory_scope"
   ; "tool_preset"
-  ; "tool_access.kind"
-  ; "tool_access.preset"
   ; "tool_also_allow"
   ; "tool_denylist"
   ; "work_discovery_enabled"
@@ -616,9 +680,13 @@ let canonical_keeper_toml_key_names =
   ; "max_turns_per_call"
   ; "max_turns_per_call_scheduled_autonomous"
   ; "social_model"
-  ; "execution_scope"
   ; "cascade_name"
   ]
+
+let () =
+  assert (
+    List.sort String.compare canonical_keeper_toml_key_names
+    = List.sort String.compare parsed_field_key_names)
 
 (** Pure detector: returns TOML keys that [profile_defaults_of_toml] does not
     consume.  Exposed separately from the logging wrapper so tests can

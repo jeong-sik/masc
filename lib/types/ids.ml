@@ -138,14 +138,8 @@ end = struct
   let equal = String.equal
   let pp fmt t = Format.fprintf fmt "%s" t
   let generate ~name ~path =
-    (* DNS namespace UUID from RFC 4122; used as the v5 namespace seed. *)
-    let namespace =
-      match Uuidm.of_string "6ba7b810-9dad-11d1-80b4-00c04fd430c8" with
-      | Some ns -> ns
-      | None -> failwith "Invalid DNS namespace UUID"
-    in
     let input = Printf.sprintf "masc-keeper:%s:%s" name path in
-    Uuidm.v5 namespace input |> Uuidm.to_string |> of_string
+    Uuidm.v5 Uuidm.ns_dns input |> Uuidm.to_string |> of_string
   let to_yojson t = `String t
   let of_yojson = function
     | `String s -> Ok s

@@ -548,6 +548,12 @@ let keeper_sandbox_entries =
       "Fail closed unless Docker reports userns support";
     entry ~default:"true" "MASC_KEEPER_SANDBOX_GIT_DISPATCH"
       "Enable legacy Docker git/gh bridge dispatch when hard mode is off";
+    entry ~default:"true" "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED"
+      "Best-effort cleanup for stale MASC keeper sandbox containers";
+    entry ~default:"21600" "MASC_KEEPER_SANDBOX_CLEANUP_STALE_AFTER_SEC"
+      "Age threshold for stale keeper sandbox container cleanup";
+    entry ~default:"300" "MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC"
+      "Minimum seconds between automatic keeper sandbox cleanup sweeps";
   ]
 
 let economy_entries =

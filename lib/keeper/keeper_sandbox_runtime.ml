@@ -102,6 +102,259 @@ let dedupe_keep_order values =
         true))
     values
 
+type cleanup_result =
+  {
+    scanned : int;
+    removed : int;
+    errors : string list;
+  }
+
+let sandbox_component_label_key = "masc.mcp.component"
+let sandbox_component_label_value = "keeper-sandbox"
+let sandbox_base_path_hash_label_key = "masc.mcp.base_path_hash"
+let sandbox_keeper_label_key = "masc.mcp.keeper"
+let sandbox_kind_label_key = "masc.mcp.kind"
+let sandbox_owner_pid_label_key = "masc.mcp.owner_pid"
+let sandbox_started_at_label_key = "masc.mcp.started_at"
+let sandbox_network_label_key = "masc.mcp.network"
+
+let strip_trailing_slashes path =
+  let rec loop i =
+    if i > 0 && path.[i - 1] = '/' then loop (i - 1) else i
+  in
+  let len = loop (String.length path) in
+  if len = String.length path then path else String.sub path 0 len
+
+let normalize_base_path_for_hash base_path =
+  let abs =
+    if Filename.is_relative base_path then
+      Filename.concat (Sys.getcwd ()) base_path
+    else
+      base_path
+  in
+  strip_trailing_slashes abs
+
+let base_path_hash base_path =
+  Digest.to_hex (Digest.string (normalize_base_path_for_hash base_path))
+
+let sanitize_label_value value =
+  String.map
+    (function
+      | 'a' .. 'z'
+      | 'A' .. 'Z'
+      | '0' .. '9'
+      | '_'
+      | '-'
+      | '.' as c ->
+          c
+      | _ -> '_')
+    value
+
+let docker_label_args ~base_path ~keeper_name ~container_kind ~network_label () =
+  let label key value = [ "--label"; key ^ "=" ^ value ] in
+  label sandbox_component_label_key sandbox_component_label_value
+  @ label sandbox_base_path_hash_label_key (base_path_hash base_path)
+  @ label sandbox_keeper_label_key (sanitize_label_value keeper_name)
+  @ label sandbox_kind_label_key (sanitize_label_value container_kind)
+  @ label sandbox_owner_pid_label_key (string_of_int (Unix.getpid ()))
+  @ label sandbox_started_at_label_key
+      (Printf.sprintf "%.3f" (Unix.gettimeofday ()))
+  @ label sandbox_network_label_key (sanitize_label_value network_label)
+
+type inspected_container =
+  {
+    owner_pid : int option;
+    started_at : float option;
+    running : bool option;
+  }
+
+let nonempty_lines out =
+  out
+  |> String.split_on_char '\n'
+  |> List.map String.trim
+  |> List.filter (fun line -> line <> "")
+
+let int_opt text =
+  try Some (int_of_string (String.trim text)) with
+  | Failure _ -> None
+
+let float_opt text =
+  try Some (float_of_string (String.trim text)) with
+  | Failure _ -> None
+
+let bool_opt text =
+  match String.lowercase_ascii (String.trim text) with
+  | "true" -> Some true
+  | "false" -> Some false
+  | _ -> None
+
+let parse_inspect_line line =
+  match String.split_on_char '\t' line with
+  | [ owner_pid; started_at; running ] ->
+      Ok
+        {
+          owner_pid = int_opt owner_pid;
+          started_at = float_opt started_at;
+          running = bool_opt running;
+        }
+  | _ ->
+      Error
+        (Printf.sprintf "unexpected docker inspect cleanup payload: %s"
+           (Worker_dev_tools.truncate_for_log line))
+
+let pid_alive pid =
+  if pid <= 0 then
+    false
+  else
+    try
+      Unix.kill pid 0;
+      true
+    with
+    | Unix.Unix_error (Unix.ESRCH, _, _) -> false
+    | Unix.Unix_error (Unix.EPERM, _, _) -> true
+    | Unix.Unix_error _ -> false
+
+let should_remove_container ~now ~max_age_sec inspected =
+  let stopped =
+    match inspected.running with
+    | Some false -> true
+    | Some true | None -> false
+  in
+  let owner_dead =
+    match inspected.owner_pid with
+    | Some pid -> not (pid_alive pid)
+    | None -> false
+  in
+  let expired =
+    match inspected.started_at with
+    | Some started_at -> now -. started_at > max_age_sec
+    | None -> false
+  in
+  stopped || owner_dead || expired
+
+let inspect_cleanup_container ~container_id ~timeout_sec =
+  let format =
+    "{{ index .Config.Labels \""
+    ^ sandbox_owner_pid_label_key
+    ^ "\" }}\t{{ index .Config.Labels \""
+    ^ sandbox_started_at_label_key
+    ^ "\" }}\t{{ .State.Running }}"
+  in
+  let st, out =
+    Process_eio.run_argv_with_status
+      ~cwd:(Sys.getcwd ())
+      ~timeout_sec
+      [ "docker"; "inspect"; "--format"; format; container_id ]
+  in
+  if st <> Unix.WEXITED 0 then
+    Error
+      (Printf.sprintf "docker inspect failed for cleanup container %s: %s"
+         container_id
+         (Worker_dev_tools.truncate_for_log out))
+  else
+    match nonempty_lines out with
+    | line :: _ -> parse_inspect_line line
+    | [] ->
+        Error
+          (Printf.sprintf
+             "docker inspect returned no cleanup metadata for container %s"
+             container_id)
+
+let remove_cleanup_container ~container_id ~timeout_sec =
+  let st, out =
+    Process_eio.run_argv_with_status
+      ~cwd:(Sys.getcwd ())
+      ~timeout_sec
+      [ "docker"; "rm"; "-f"; container_id ]
+  in
+  if st = Unix.WEXITED 0 then
+    Ok ()
+  else
+    Error
+      (Printf.sprintf "docker rm -f failed for cleanup container %s: %s"
+         container_id
+         (Worker_dev_tools.truncate_for_log out))
+
+let cleanup_stale_containers ?(now = Unix.gettimeofday ())
+    ?(max_age_sec = Env_config_keeper.KeeperSandbox.cleanup_stale_after_sec ())
+    ~base_path ~timeout_sec () =
+  try
+    let st, out =
+      Process_eio.run_argv_with_status
+        ~cwd:(Sys.getcwd ())
+        ~timeout_sec
+        [
+          "docker";
+          "ps";
+          "-aq";
+          "--filter";
+          "label="
+          ^ sandbox_component_label_key
+          ^ "="
+          ^ sandbox_component_label_value;
+          "--filter";
+          "label="
+          ^ sandbox_base_path_hash_label_key
+          ^ "="
+          ^ base_path_hash base_path;
+        ]
+    in
+    if st <> Unix.WEXITED 0 then
+      {
+        scanned = 0;
+        removed = 0;
+        errors =
+          [
+            Printf.sprintf "docker ps failed during keeper sandbox cleanup: %s"
+              (Worker_dev_tools.truncate_for_log out);
+          ];
+      }
+    else
+      let container_ids = nonempty_lines out in
+      let scanned = List.length container_ids in
+      let removed, errors =
+        List.fold_left
+          (fun (removed, errors) container_id ->
+            match inspect_cleanup_container ~container_id ~timeout_sec with
+            | Error err -> (removed, err :: errors)
+            | Ok inspected ->
+                if should_remove_container ~now ~max_age_sec inspected then
+                  match remove_cleanup_container ~container_id ~timeout_sec with
+                  | Ok () -> (removed + 1, errors)
+                  | Error err -> (removed, err :: errors)
+                else
+                  (removed, errors))
+          (0, [])
+          container_ids
+      in
+      { scanned; removed; errors = List.rev errors }
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+      {
+        scanned = 0;
+        removed = 0;
+        errors =
+          [
+            Printf.sprintf "keeper sandbox cleanup failed: %s"
+              (Printexc.to_string exn);
+          ];
+      }
+
+let last_cleanup_at = ref 0.0
+
+let maybe_cleanup_stale_containers ~base_path ~timeout_sec () =
+  if not (Env_config_keeper.KeeperSandbox.cleanup_enabled ()) then
+    None
+  else
+    let now = Unix.gettimeofday () in
+    let interval = Env_config_keeper.KeeperSandbox.cleanup_interval_sec () in
+    if now -. !last_cleanup_at < interval then
+      None
+    else (
+      last_cleanup_at := now;
+      Some (cleanup_stale_containers ~now ~base_path ~timeout_sec ()))
+
 let docker_image_present ~image ~timeout_sec =
   if String.trim image = "" then
     Error "keeper sandbox docker image is not configured"

@@ -33,6 +33,38 @@ type docker_preflight =
     next_actions : string list;
   }
 
+type cleanup_result =
+  {
+    scanned : int;
+    removed : int;
+    errors : string list;
+  }
+
+val docker_label_args :
+  base_path:string ->
+  keeper_name:string ->
+  container_kind:string ->
+  network_label:string ->
+  unit ->
+  string list
+(** Docker [--label] argv fragment for containers owned by the keeper
+    sandbox runtime. *)
+
+val cleanup_stale_containers :
+  ?now:float ->
+  ?max_age_sec:float ->
+  base_path:string ->
+  timeout_sec:float ->
+  unit ->
+  cleanup_result
+(** Best-effort cleanup for stale MASC keeper sandbox containers under the
+    same base path. Only containers with the keeper sandbox labels are
+    considered. *)
+
+val maybe_cleanup_stale_containers :
+  base_path:string -> timeout_sec:float -> unit -> cleanup_result option
+(** Throttled wrapper used before launching keeper Docker containers. *)
+
 val docker_preflight :
   timeout_sec:float -> unit -> docker_preflight option
 (** Global keeper sandbox preflight used by [doctor], keeper startup,

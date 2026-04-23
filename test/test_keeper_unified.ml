@@ -134,6 +134,7 @@ let base_observation : WO.world_observation =
     unclaimed_task_count = 0;
     failed_task_count = 0;
     pending_verification_count = 0;
+    backlog_updated_since_last_scheduled_autonomous = false;
     active_agent_count = 0;
     last_turn_budget = None;
     last_tools_used = [];
@@ -837,6 +838,56 @@ let test_task_reactive_cooldown_floor_never_hits_zero () =
     let decision = WO.keeper_cycle_decision ~meta obs in
     check (option int) "task reactive cooldown clamps to positive floor" (Some 300)
       decision.task_reactive_cooldown)
+
+let test_scheduled_turn_decision_runs_immediately_on_fresh_backlog_update () =
+  let meta =
+    {
+      minimal_meta with
+      proactive =
+        { enabled = true; idle_sec = 60; cooldown_sec = 60 };
+      runtime =
+        {
+          minimal_meta.runtime with
+          proactive_rt =
+            { minimal_meta.runtime.proactive_rt with
+              last_ts = Time_compat.now ();
+            };
+        };
+    }
+  in
+  let obs =
+    {
+      base_observation with
+      unclaimed_task_count = 1;
+      backlog_updated_since_last_scheduled_autonomous = true;
+    }
+  in
+  let decision = WO.keeper_cycle_decision ~meta obs in
+  check bool "fresh backlog bypasses cooldown" true decision.should_run;
+  check bool "backlog emits reactive cooldown tag" true
+    (match decision.verdict with
+     | WO.Run { reasons = (first, rest) } ->
+         List.mem WO.Task_reactive_cooldown_elapsed (first :: rest)
+     | WO.Skip _ -> false)
+
+let test_runtime_trust_snapshot_tolerates_null_telemetry () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      let keeper_name = "runtime-trust-null-telemetry" in
+      let meta = { minimal_meta with name = keeper_name } in
+      let decision_path = Keeper_types.keeper_decision_log_path config keeper_name in
+      Keeper_types.mkdir_p (Filename.dirname decision_path);
+      Masc_mcp.Keeper_types_support.append_jsonl_line
+        decision_path
+        (`Assoc [ ("telemetry", `Null) ]);
+      let snapshot =
+        Masc_mcp.Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta
+      in
+      check bool "selected model stays null" true
+        Yojson.Safe.Util.(snapshot |> member "selected_model" = `Null))
 
 let test_prompt_contains_identity () =
   let sys, _user = UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:base_observation () in
@@ -4330,6 +4381,10 @@ let () =
             test_pending_approval_blocks_turns_until_resolved;
           test_case "task reactive cooldown floor never hits zero" `Quick
             test_task_reactive_cooldown_floor_never_hits_zero;
+          test_case "fresh backlog update bypasses cooldown" `Quick
+            test_scheduled_turn_decision_runs_immediately_on_fresh_backlog_update;
+          test_case "runtime trust snapshot tolerates null telemetry" `Quick
+            test_runtime_trust_snapshot_tolerates_null_telemetry;
           test_case "with goals" `Quick test_observation_with_goals;
           test_case "economic modes" `Quick test_observation_economic_modes;
         ] );

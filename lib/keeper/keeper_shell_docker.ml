@@ -146,6 +146,10 @@ let run_docker_shell_command_with_status
        else
          "sandbox_profile=docker blocks nested container runtimes and host socket references")
   else
+    let _cleanup =
+      Keeper_sandbox_runtime.maybe_cleanup_stale_containers
+        ~base_path:config.base_path ~timeout_sec:2.0 ()
+    in
     match ensure_keeper_sandbox_runtime ~timeout_sec with
     | Error err -> sandbox_error err
     | Ok seccomp_args ->
@@ -202,6 +206,13 @@ let run_docker_shell_command_with_status
           "--rm";
           "--name";
           container_name;
+        ]
+        @ Keeper_sandbox_runtime.docker_label_args
+            ~base_path:config.base_path
+            ~keeper_name:meta.name
+            ~container_kind:"oneshot"
+            ~network_label ()
+        @ [
           "-i";
           "--user";
           Printf.sprintf "%d:%d" uid gid;

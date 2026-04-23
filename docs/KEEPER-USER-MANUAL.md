@@ -308,6 +308,7 @@ spawn 시 인자로 직접 설정하는 필드.
 - hard mode: `MASC_KEEPER_SANDBOX_HARD_MODE=true`는 `sandbox_profile=docker`, `network_mode=none`, `github_identity`를 강제한다. Docker container는 `git`/`gh` 때문에 bridge/host network로 승격되지 않고, host `~/.config/gh`, `~/.gitconfig`, `~/.ssh`, `GH_TOKEN` fallback도 비활성화된다. `keeper_bash`에서 raw `gh ...`는 구조화 오류로 막히며, `keeper_shell op=gh`와 `keeper_shell op=git_clone`만 host-side broker가 keeper-scoped `GH_CONFIG_DIR=$base_path/.masc/github-identities/<identity>/gh`로 검증 후 실행한다. hard mode 라우트 응답은 `via: "brokered"`를 노출한다.
 - hard mode runtime preflight는 Docker `SecurityOptions`에서 `rootless`와 `userns`를 모두 요구한다. 현재 Docker Desktop/rootful daemon처럼 둘 중 하나라도 없으면 `doctor`와 keeper startup에서 fail-closed 된다.
 - 기본 sandbox 이미지는 `masc-keeper-sandbox:local`이다. Docker keeper를 올리기 전에 `scripts/build-keeper-sandbox-image.sh`를 실행해 이미지를 만들고, smoke 검증은 `scripts/keeper-sandbox-smoke.sh`를 사용한다.
+- keeper Docker 컨테이너에는 `masc.mcp.component=keeper-sandbox`와 base path hash 라벨이 붙는다. 새 컨테이너 시작 전 같은 base path 범위의 오래된 MASC keeper 컨테이너만 best-effort로 정리한다. 조정값은 `MASC_KEEPER_SANDBOX_CLEANUP_ENABLED`, `MASC_KEEPER_SANDBOX_CLEANUP_STALE_AFTER_SEC`, `MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC`이다.
 - `shared_memory_scope=room`은 공용 writable mount가 아니라 flattened `default` namespace typed lane만 연다.
 - team memory 도구는 keeper tool surface에도 노출되어야 하므로 preset에 없다면 `tool_also_allow` 또는 `tool_access.also_allow`로 명시해야 한다.
 

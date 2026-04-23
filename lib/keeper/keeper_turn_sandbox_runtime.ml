@@ -131,10 +131,15 @@ let start_container (t : t) ~(timeout_sec : float) =
   if String.trim image = "" then
     Error "keeper sandbox docker image is not configured"
   else
+    let _cleanup =
+      Keeper_sandbox_runtime.maybe_cleanup_stale_containers
+        ~base_path:t.config.base_path ~timeout_sec:2.0 ()
+    in
     match Keeper_sandbox_runtime.ensure_keeper_sandbox_runtime ~timeout_sec with
     | Error _ as err -> err
     | Ok seccomp_args ->
         let container_name = container_name_of t in
+        let network_label = network_mode_to_string t.network_mode in
         let argv =
           [
             "docker";
@@ -143,6 +148,13 @@ let start_container (t : t) ~(timeout_sec : float) =
             "--rm";
             "--name";
             container_name;
+          ]
+          @ Keeper_sandbox_runtime.docker_label_args
+              ~base_path:t.config.base_path
+              ~keeper_name:t.meta.name
+              ~container_kind:"turn"
+              ~network_label ()
+          @ [
             "--user";
             Printf.sprintf "%d:%d" t.uid t.gid;
           ]
@@ -165,7 +177,7 @@ let start_container (t : t) ~(timeout_sec : float) =
               "--workdir";
               t.container_root;
               "--network";
-              network_mode_to_string t.network_mode;
+              network_label;
               image;
               "sh";
               "-lc";

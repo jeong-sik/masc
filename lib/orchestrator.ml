@@ -185,8 +185,8 @@ let make_zero_zombie_consumer ~sw ~room_config
           if String.length status_trimmed > 0 then begin
             let has_zombie_indicator =
               try
-                String.sub status_trimmed 0 (min 4 (String.length status_trimmed)) = "\xf0\x9f\xa7\x9f" ||
-                String.length status_trimmed >= 7 && String.sub status_trimmed 0 7 = "Cleaned"
+                Base.String.is_prefix status_trimmed ~prefix:"\xf0\x9f\xa7\x9f" ||
+                Base.String.is_prefix status_trimmed ~prefix:"Cleaned"
               with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                 Log.Orchestrator.warn "zombie indicator check failed: %s" (Printexc.to_string exn);
                 false

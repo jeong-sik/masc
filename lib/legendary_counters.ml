@@ -47,7 +47,7 @@ let bare_reason s =
     else s
   in
   strip "too_complex:" |> fun s ->
-  if String.length s >= 14 && String.sub s 0 14 = "parse_aborted:"
+  if Base.String.is_prefix s ~prefix:"parse_aborted:"
   then "__parse_aborted__"
   else s
 

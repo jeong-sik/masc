@@ -80,14 +80,9 @@ let local_worker_compat_passthrough_schemas : Types.tool_schema list =
     local_worker_compat_passthrough_tool_names
 
 let local_worker_internal_schemas : Types.tool_schema list =
-  [
-    { Types.name = "masc_heartbeat";
-      description =
-        "Update the worker heartbeat timestamp so long-running local tasks are not reaped as zombies.";
-      input_schema =
-        `Assoc [ ("type", `String "object"); ("properties", `Assoc []) ];
-    };
-  ]
+  List.filter
+    (fun (schema : Types.tool_schema) -> schema.name = "masc_heartbeat")
+    Tool_schemas_coord_core.schemas
 
 let local_worker_code_schemas : Types.tool_schema list =
   [

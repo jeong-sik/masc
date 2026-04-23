@@ -60,7 +60,7 @@ type adapter = {
   runtime_kind : runtime_kind;
   auth_mode : auth_mode;
   aliases : string list;
-  spawn_key : string option;       (** Key into Spawn.default_configs. None = not spawnable via CLI. *)
+  spawn_key : string option;       (** Key for CLI spawn lookup in Spawn.spawn_config_of_key. None = not spawnable via CLI. *)
   cascade_prefix : string;         (** MASC cascade model prefix (e.g. "claude", "openai").
                                        CONTRACT: Must match the prefix used by the local
                                        [Cascade_config] parser and Provider_registry-compatible

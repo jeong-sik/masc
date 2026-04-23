@@ -14,6 +14,7 @@ import {
   keeperRuntimeName,
   mergeRosterAgent,
   filterAgentRoster,
+  countRuntimeKinds,
 } from './agent-roster'
 import type { Agent, Keeper } from '../types'
 import {
@@ -323,6 +324,36 @@ describe('keeperRuntimeName', () => {
 
   it('falls back to name when agent_name is undefined', () => {
     expect(keeperRuntimeName({ name: 'keeper1' })).toBe('keeper1')
+  })
+})
+
+describe('countRuntimeKinds', () => {
+  it('does not classify generated taskmaster nicknames as the taskmaster keeper', () => {
+    const result = countRuntimeKinds(
+      [
+        makeAgent({
+          name: 'keeper-taskmaster-agent',
+          agent_type: 'agent',
+        }),
+        makeAgent({
+          name: 'taskmaster-proud-bear',
+          agent_type: 'taskmaster',
+        }),
+      ],
+      [
+        {
+          name: 'taskmaster',
+          agent_name: 'keeper-taskmaster-agent',
+          status: 'active',
+        } as Keeper,
+      ],
+    )
+
+    expect(result).toEqual({
+      agents: 1,
+      keepers: 1,
+      totalRuntimes: 2,
+    })
   })
 })
 

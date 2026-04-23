@@ -161,9 +161,12 @@ function buildKeeperRuntimeLookup(keeperList: Keeper[]): Map<string, Keeper> {
 }
 
 function findKeeperRuntime(agentName: string, keeperList: Keeper[]): Keeper | null {
+  const target = agentName.trim()
+  if (!target) return null
   for (const k of keeperList) {
-    if (k.name === agentName || k.agent_name === agentName
-        || agentName.includes(k.name) || k.name?.includes(agentName)) {
+    const keeperName = k.name?.trim()
+    const keeperAgentName = k.agent_name?.trim()
+    if (keeperName === target || keeperAgentName === target) {
       return k
     }
   }

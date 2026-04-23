@@ -1909,7 +1909,7 @@ let run_turn
                         work. Three escape hatches, in priority order: \
                         (1) call extend_turns if the task is almost finished and more \
                         turns will close it out; \
-                        (2) call masc_board_post to hand off the current task and ask \
+                        (2) call keeper_board_post to hand off the current task and ask \
                         another keeper or operator for judgment when the work needs a \
                         decision you cannot make alone; \
                         (3) if you claimed a task, close it NOW before session ends \
@@ -1936,7 +1936,7 @@ let run_turn
                         [STATE] block. If more turns will genuinely finish the task, \
                         call extend_turns. If you are blocked on a decision or \
                         external input, post a question to the board via \
-                        masc_board_post rather than burning turns retrying — that is \
+                        keeper_board_post rather than burning turns retrying — that is \
                         the intended judgment-escalation path."
                        computed_surface.per_call_turn
                        computed_surface.per_call_max_turns)

@@ -50,15 +50,7 @@ val group_names : t -> string list
     Config-derived — no hardcoded hierarchy. *)
 val preset_can_satisfy : t -> agent_preset:string -> required_preset:string -> bool
 
-(** Check if a preset is allowed to execute workflow mutations
-    (pr merge, pr close, etc.) as configured in [permissions.workflow_presets]. *)
-val allows_workflow : t -> string -> bool
-
-(** Check if a preset allows shell write operations
-    as configured in [permissions.shell_write_presets]. *)
-val allows_shell_write : t -> string -> bool
-
-(** GH cache TTL in seconds. From [gh_cache.cache_ttl_sec], default 120.0. *)
+(** GH cache TTL in seconds. From [gh_cache.cache_ttl_sec], default 120.0. **)
 val gh_cache_ttl_sec : t -> float
 
 (** Page size for gh API fetch. From [gh_cache.fetch_page_size], default 100. *)

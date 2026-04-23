@@ -42,8 +42,6 @@ type t = {
   groups : (string, group_source) Hashtbl.t;
   masc_groups : (string, string list) Hashtbl.t;
   presets : (string, preset_def) Hashtbl.t;
-  workflow_presets : string list;
-  shell_write_presets : string list;
   gh_cache : gh_cache_config;
   git_clone : git_clone_config;
 }
@@ -227,12 +225,6 @@ let load ~base_path : (t, string) result =
       | Ok groups ->
         let masc_groups = parse_masc_groups doc in
         let presets = parse_presets doc in
-        let workflow_presets =
-          toml_string_list_at doc "permissions" "workflow_presets"
-        in
-        let shell_write_presets =
-          toml_string_list_at doc "permissions" "shell_write_presets"
-        in
         (* Validate that each preset's group references are defined *)
         let ref_errors =
           Hashtbl.fold (fun preset_name (def : preset_def) acc ->
@@ -249,19 +241,7 @@ let load ~base_path : (t, string) result =
             List.rev_append bad_groups (List.rev_append bad_masc_groups acc)
           ) presets []
         in
-        (* Validate that permission preset names reference defined presets *)
-        let validate_perm_presets label perm_list =
-          List.filter_map (fun name ->
-            if Hashtbl.mem presets name then None
-            else Some (Printf.sprintf
-              "permissions.%s: preset '%s' has no [presets.%s] entry" label name name)
-          ) perm_list
-        in
-        let perm_errors =
-          validate_perm_presets "workflow_presets" workflow_presets
-          @ validate_perm_presets "shell_write_presets" shell_write_presets
-        in
-        let all_errors = ref_errors @ perm_errors in
+        let all_errors = ref_errors in
         (match all_errors with
         | _ :: _ -> Error (Printf.sprintf "in %s: %s" path (String.concat "; " all_errors))
         | [] ->
@@ -269,7 +249,7 @@ let load ~base_path : (t, string) result =
           let git_clone = parse_git_clone doc in
           Log.Keeper.info "tool_policy_config: loaded %d groups, %d masc_groups, %d presets from %s"
             (Hashtbl.length groups) (Hashtbl.length masc_groups) (Hashtbl.length presets) path;
-          Ok { groups; masc_groups; presets; workflow_presets; shell_write_presets; gh_cache; git_clone })
+          Ok { groups; masc_groups; presets; gh_cache; git_clone })
 
 (* ── Resolution ───────────────────────────────────────────────────── *)
 
@@ -355,12 +335,6 @@ let preset_can_satisfy (config : t) ~(agent_preset : string) ~(required_preset :
     | _, `Full -> false                    (* required is full, agent isn't *)
     | `Tools agent_tools, `Tools req_tools ->
       List.for_all (fun t -> List.mem t agent_tools) req_tools
-
-let allows_workflow (config : t) (preset_name : string) : bool =
-  List.mem preset_name config.workflow_presets
-
-let allows_shell_write (config : t) (preset_name : string) : bool =
-  List.mem preset_name config.shell_write_presets
 
 (* ── GH cache config accessors ───────────────────────────────────── *)
 

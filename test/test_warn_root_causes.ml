@@ -68,8 +68,36 @@ let filter_core_by_preset (meta : Keeper_types.keeper_meta) =
 let write_only_tools = [ "keeper_fs_edit" ]
 
 (* keeper_bash stays visible across presets for read-only shell usage.
-   Mutating shell commands are gated separately by shell_write_presets. *)
+   Mutating shell commands are gated separately by privileged presets. *)
 let shell_bridge_tools = [ "keeper_bash" ]
+
+let privileged_presets =
+  [ Keeper_types.Coding; Keeper_types.Delivery; Keeper_types.Full ]
+
+let unprivileged_presets =
+  [
+    Keeper_types.Minimal;
+    Keeper_types.Social;
+    Keeper_types.Messaging;
+    Keeper_types.Dispatch;
+    Keeper_types.Research;
+  ]
+
+let test_privileged_preset_write_gates () =
+  List.iter
+    (fun preset ->
+      check bool "privileged preset allows shell write" true
+        (Keeper_tool_policy.allows_shell_write_for_preset preset);
+      check bool "privileged preset allows workflow" true
+        (Keeper_tool_policy.allows_workflow_for_preset preset))
+    privileged_presets;
+  List.iter
+    (fun preset ->
+      check bool "unprivileged preset blocks shell write" false
+        (Keeper_tool_policy.allows_shell_write_for_preset preset);
+      check bool "unprivileged preset blocks workflow" false
+        (Keeper_tool_policy.allows_workflow_for_preset preset))
+    unprivileged_presets
 
 (* ── Test 1: Core discovery tools respect preset ──────────────── *)
 
@@ -236,6 +264,8 @@ let () =
             test_core_tools_filtered_by_social_preset;
           test_case "coding preset includes shell + write tools" `Quick
             test_core_tools_include_write_for_coding_preset;
+          test_case "privileged presets gate shell write and workflow" `Quick
+            test_privileged_preset_write_gates;
         ] );
       ( "atomic_agent_json",
         [

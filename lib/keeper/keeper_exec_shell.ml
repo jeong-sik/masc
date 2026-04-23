@@ -607,7 +607,8 @@ let handle_keeper_bash
   let run_in_background =
     Safe_ops.json_bool ~default:false "run_in_background" args
   in
-  (* Write access is config-driven via permissions.shell_write_presets *)
+  (* Keep read-only shell broadly visible; mutating shell is limited to
+     privileged tool presets. *)
   let write_enabled =
     match Keeper_types.tool_access_preset meta.tool_access with
     | Some preset -> Keeper_tool_policy.allows_shell_write_for_preset preset

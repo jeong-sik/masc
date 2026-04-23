@@ -252,13 +252,7 @@ let keeper_trust_json ?(include_receipt = false)
     | None ->
       `Assoc
         [
-          ( "configured_kind",
-            `String
-              (Keeper_types.sandbox_profile_to_string meta.sandbox_profile) );
-          ( "effective_kind",
-            `String
-              (Keeper_execution_receipt.effective_sandbox_kind_of_meta meta)
-          );
+          ("kind", `String (Keeper_types.sandbox_profile_to_string meta.sandbox_profile));
           ("sandbox_root", `String config.base_path);
           ("network_mode", `String (Keeper_types.network_mode_to_string meta.network_mode));
         ]

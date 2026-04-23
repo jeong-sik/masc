@@ -81,8 +81,8 @@ let receipt_error_kind json =
 let receipt_error_message json =
   json |> member "error" |> member "message" |> to_string_option
 
-let receipt_sandbox_effective_kind json =
-  json |> member "sandbox" |> member "effective_kind" |> to_string_option
+let receipt_sandbox_kind json =
+  json |> member "sandbox" |> member "kind" |> to_string_option
 
 let receipt_approval_profile json =
   json |> member "approval" |> member "profile" |> to_string_option
@@ -115,7 +115,7 @@ let receipt_has_error json =
        | Some _ -> false)
 
 let receipt_has_sandbox_risk json =
-  match receipt_sandbox_effective_kind json with
+  match receipt_sandbox_kind json with
   | Some "local" -> false
   | Some "docker" -> false
   | Some _ | None -> false
@@ -728,13 +728,6 @@ let goal_detail_keeper_json (detail : goal_detail_keeper) =
         | Some receipt ->
             (match receipt_approval_profile receipt with
              | Some profile -> `String profile
-             | None -> `Null)
-        | None -> `Null );
-      ( "sandbox_effective_kind",
-        match latest_receipt with
-        | Some receipt ->
-            (match receipt_sandbox_effective_kind receipt with
-             | Some effective_kind -> `String effective_kind
              | None -> `Null)
         | None -> `Null );
       ( "cascade_outcome",

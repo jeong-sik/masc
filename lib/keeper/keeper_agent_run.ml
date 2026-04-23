@@ -2859,10 +2859,7 @@ let run_turn
             tool_surface_fallback_used =
               (!tool_surface_ref).tool_surface_fallback_used;
           };
-        sandbox_configured_kind =
-          Keeper_types.sandbox_profile_to_string meta.sandbox_profile;
-        sandbox_effective_kind =
-          Keeper_execution_receipt.effective_sandbox_kind_of_meta meta;
+        sandbox_kind = Keeper_execution_receipt.sandbox_kind_of_meta meta;
         sandbox_root = Some config.base_path;
         network_mode = Keeper_types.network_mode_to_string meta.network_mode;
         approval_profile = (!tool_surface_ref).approval_mode_effective;

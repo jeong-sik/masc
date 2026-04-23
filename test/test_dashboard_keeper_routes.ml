@@ -605,10 +605,8 @@ let append_execution_receipt config ~keeper_name =
           tool_gate_enabled = true;
           tool_surface_fallback_used = false;
         };
-      sandbox_configured_kind =
-        Masc_mcp.Keeper_types.sandbox_profile_to_string meta.sandbox_profile;
-      sandbox_effective_kind =
-        Masc_mcp.Keeper_execution_receipt.effective_sandbox_kind_of_meta meta;
+      sandbox_kind =
+        Masc_mcp.Keeper_execution_receipt.sandbox_kind_of_meta meta;
       sandbox_root = Some config.base_path;
       network_mode =
         Masc_mcp.Keeper_types.network_mode_to_string meta.network_mode;
@@ -1090,8 +1088,8 @@ let test_execution_trust_route_surfaces_latest_receipt () =
   in
   check string "route surfaces trust outcome" "ok"
     (row |> member "trust" |> member "last_outcome" |> to_string);
-  check string "route surfaces trust sandbox kind" "worktree"
-    (row |> member "trust" |> member "sandbox" |> member "effective_kind"
+  check string "route surfaces trust sandbox kind" "local"
+    (row |> member "trust" |> member "sandbox" |> member "kind"
      |> to_string);
   check string "route surfaces trust contract result" "satisfied"
     (row |> member "trust" |> member "tool_contract_result" |> to_string)

@@ -573,7 +573,6 @@ export interface GoalDetailKeeper {
   network_mode: string
   cascade_name: string
   approval_profile: string | null
-  sandbox_effective_kind: string | null
   cascade_outcome: string | null
   latest_execution_outcome: string | null
   latest_execution_at: string | null

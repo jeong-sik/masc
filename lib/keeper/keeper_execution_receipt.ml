@@ -25,8 +25,7 @@ type t =
   ; tools_used : string list
   ; tool_contract_result : string
   ; tool_surface : tool_surface
-  ; sandbox_configured_kind : string
-  ; sandbox_effective_kind : string
+  ; sandbox_kind : string
   ; sandbox_root : string option
   ; network_mode : string
   ; approval_profile : string option
@@ -54,7 +53,7 @@ let stop_reason_to_string = function
      | None ->
        Printf.sprintf "mutation_boundary:%d" turns_used)
 
-let effective_sandbox_kind_of_meta (meta : Keeper_types.keeper_meta) =
+let sandbox_kind_of_meta (meta : Keeper_types.keeper_meta) =
   match meta.sandbox_profile with
   | Keeper_types.Docker -> "docker"
   | Keeper_types.Local -> "local"
@@ -122,8 +121,7 @@ let to_json (receipt : t) =
       ( "sandbox",
         `Assoc
           [
-            ("configured_kind", `String receipt.sandbox_configured_kind);
-            ("effective_kind", `String receipt.sandbox_effective_kind);
+            ("kind", `String receipt.sandbox_kind);
             ( "sandbox_root",
               match receipt.sandbox_root with
               | Some value -> `String value

@@ -501,7 +501,7 @@ let invalid_profile_names body =
   | _ -> []
 ;;
 
-let make_keeper_meta_json ?(name = "route-shadow-demo") () =
+let make_keeper_meta_json ?(name = "route_shadow_demo") () =
   match
     Masc_mcp.Keeper_types.meta_of_json
       (`Assoc
@@ -657,7 +657,7 @@ let with_seeded_server ?(env_overrides = []) f =
     in
     let log_file = Filename.temp_file "dashboard-keeper-routes-" ".log" in
     let base_path = Filename.temp_file "dashboard-keeper-base-" "" in
-    let keeper_name = "route-shadow-demo" in
+    let keeper_name = "route_shadow_demo" in
     (try Sys.remove base_path with
      | _ -> ());
     Unix.mkdir base_path 0o755;
@@ -941,7 +941,7 @@ let test_agent_purge_route_removes_keeper_artifacts_and_toml () =
        valid_model
        valid_model)
   @@ fun config_root ->
-  let keeper_name = "route-shadow-demo" in
+  let keeper_name = "route_shadow_demo" in
   let keeper_toml_path =
     Filename.concat (Filename.concat config_root "keepers") (keeper_name ^ ".toml")
   in
@@ -1114,7 +1114,7 @@ let test_execution_trust_route_surfaces_trust_summary_fields () =
     (row |> member "trust" |> member "approval_state" |> member "state"
      |> to_string);
   check string "route surfaces execution summary mutation guard"
-    "mutation_contract_not_observed"
+    "mutation_contract_satisfied"
     (row |> member "trust" |> member "execution_summary"
      |> member "mutation_guard_summary" |> to_string);
   check bool "route surfaces latest causal event field" true

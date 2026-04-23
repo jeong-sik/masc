@@ -23,6 +23,7 @@ import {
   BuildIdentityBadge,
   ConnectionStatus,
   DashboardMain,
+  ErrorCounterBadge,
   SideRail,
 } from './components/dashboard-shell'
 import { ThemeSwitch } from './components/theme-switch'
@@ -32,6 +33,7 @@ import { ToastContainer } from './components/common/toast'
 import { ConfirmDialogOverlay } from './components/common/confirm-dialog'
 import { CommandPalette } from './components/common/command-palette'
 import { AuthStatus, RemoteWarningBanner } from './components/auth-status'
+import { startErrorCleanup, stopErrorCleanup } from './components/common/error-notification'
 import { DASHBOARD_NAV_ITEMS, currentSectionForRoute } from './config/navigation'
 import { Menu, X } from 'lucide-preact'
 
@@ -85,11 +87,15 @@ export function App() {
     // Periodic refresh for keeper heartbeats (no SSE events)
     startPeriodicRefresh()
 
+    // Error notification cleanup (removes old acknowledged errors)
+    startErrorCleanup()
+
     return () => {
       cancelled = true
       disconnectSSE()
       unsubSSE()
       stopPeriodicRefresh()
+      stopErrorCleanup()
       disposeNamespaceTruthScheduler()
     }
   }, [])
@@ -144,6 +150,7 @@ export function App() {
           <div class="flex shrink-0 flex-wrap items-center justify-end gap-2">
             <${AuthStatus} />
             <${ConnectionStatus} />
+            <${ErrorCounterBadge} />
             <${ThemeSwitch} />
             <${BuildIdentityBadge} />
           </div>

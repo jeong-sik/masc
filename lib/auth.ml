@@ -428,15 +428,22 @@ let ensure_keeper_credential config ~agent_name :
     (string * agent_credential, masc_error) result =
   let raw_token = ensure_internal_keeper_token config in
   let target_agent_name = credential_agent_name agent_name in
-  Ok
-    ( raw_token,
-      {
-        agent_name = target_agent_name;
-        token = sha256_hash raw_token;
-        role = Worker;
-        created_at = now_iso ();
-        expires_at = None;
-      } )
+  let cred =
+    {
+      agent_name = target_agent_name;
+      token = sha256_hash raw_token;
+      role = Worker;
+      created_at = now_iso ();
+      expires_at = None;
+    }
+  in
+  let file = credential_file config target_agent_name in
+  if not (file_exists file) then (
+    Log.Auth.info "[ensure_keeper_credential] auto-generating credential file for %s"
+      target_agent_name;
+    save_credential config cred
+  );
+  Ok (raw_token, cred)
 
 (** Refresh a token (generate new one, update credential) *)
 let refresh_token config ~agent_name ~old_token : (string * agent_credential, masc_error) result =

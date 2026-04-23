@@ -1198,6 +1198,21 @@ let keeper_config_json (config : Coord.config) (name : string)
         |> Keeper_types_profile.load_persona_extended
         |> Option.value ~default:""
       in
+      let active_goals =
+        List.filter_map
+          (fun goal_id ->
+             match Goal_store.get_goal config ~goal_id with
+             | Some { Goal_store.id; title; horizon } ->
+                 let horizon_str =
+                   match horizon with
+                   | Goal_store.Short -> "short"
+                   | Goal_store.Mid -> "mid"
+                   | Goal_store.Long -> "long"
+                 in
+                 Some (id, title, horizon_str)
+             | None -> None)
+          m.active_goal_ids
+      in
       let effective_system_prompt =
         Keeper_prompt.build_keeper_system_prompt
           ~goal:m.goal ~short_goal:m.short_goal ~mid_goal:m.mid_goal
@@ -1206,6 +1221,7 @@ let keeper_config_json (config : Coord.config) (name : string)
           ~persona_extended ~keeper_name:m.name
           ~allowed_orgs:(Keeper_tool_policy.git_clone_allowed_orgs ())
           ~denied_repos:(Keeper_tool_policy.git_clone_denied_repos ())
+          ~active_goals
           ()
       in
       let prompt =

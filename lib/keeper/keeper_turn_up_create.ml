@@ -291,6 +291,24 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           |> Keeper_types_profile.load_persona_extended
           |> Option.value ~default:""
         in
+        let active_goal_ids =
+          Option.value ~default:[] p.profile_defaults.active_goal_ids
+        in
+        let active_goals =
+          List.filter_map
+            (fun goal_id ->
+               match Goal_store.get_goal ctx.config ~goal_id with
+               | Some { Goal_store.id; title; horizon } ->
+                   let horizon_str =
+                     match horizon with
+                     | Goal_store.Short -> "short"
+                     | Goal_store.Mid -> "mid"
+                     | Goal_store.Long -> "long"
+                   in
+                   Some (id, title, horizon_str)
+               | None -> None)
+            active_goal_ids
+        in
         let system_prompt =
           build_keeper_system_prompt
             ~goal
@@ -305,6 +323,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             ~keeper_name:p.name
             ~allowed_orgs:(Keeper_tool_policy.git_clone_allowed_orgs ())
             ~denied_repos:(Keeper_tool_policy.git_clone_denied_repos ())
+            ~active_goals
             ()
       in
       let ctx0 = Keeper_exec_context.create ~system_prompt ~max_tokens:primary_max_context in
@@ -472,6 +491,14 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       | Ok () ->
         Log.Keeper.debug "create_keeper: metadata written for name=%s trace_id=%s"
           p.name (Keeper_id.Trace_id.to_string meta.runtime.trace_id);
+        (* Auto-generate credential file if missing (#A10) *)
+        let agent_name = keeper_agent_name p.name in
+        (match Auth.ensure_keeper_credential ctx.config.base_path ~agent_name with
+         | Ok _ ->
+             Log.Keeper.debug "create_keeper: credential ensured for %s" agent_name
+         | Error err ->
+             Log.Keeper.warn "create_keeper: credential ensure failed for %s: %s"
+               agent_name (Types.show_masc_error err));
         Progress.Tracker.step tracker ~message:"Starting keepalive loop" ();
         Log.Keeper.info "create_keeper: starting keepalive for name=%s" p.name;
         start_keepalive ctx meta;

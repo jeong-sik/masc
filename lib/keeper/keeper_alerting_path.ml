@@ -389,18 +389,23 @@ let resolve_keeper_read_path ~(config : Coord.config)
                 (if allowed_norms = [] then [root_norm] else allowed_norms)))
 
 let process_status_to_json (st : Unix.process_status) : Yojson.Safe.t =
-  match st with
-  | Unix.WEXITED 124 ->
-      (* Process_eio returns exit code 124 on Eio.Time.Timeout *)
-      `Assoc [("kind", `String "timeout")]
-  | Unix.WEXITED code ->
-      `Assoc [("kind", `String "exit"); ("code", `Int code)]
-  | Unix.WSIGNALED sig_num when sig_num = Sys.sigterm ->
-      `Assoc [("kind", `String "timeout")]
-  | Unix.WSIGNALED sig_num ->
-      `Assoc [("kind", `String "signaled"); ("signal", `Int sig_num)]
-  | Unix.WSTOPPED sig_num ->
-      `Assoc [("kind", `String "stopped"); ("signal", `Int sig_num)]
+  let sem = Masc_exec.Exit_code.of_process_status st in
+  let base = match st with
+    | Unix.WEXITED 124 ->
+        (* Process_eio returns exit code 124 on Eio.Time.Timeout *)
+        [("kind", `String "timeout")]
+    | Unix.WEXITED _code ->
+        [("kind", `String "exit"); ("code", `Int sem.code)]
+    | Unix.WSIGNALED sig_num when sig_num = Sys.sigterm ->
+        [("kind", `String "timeout")]
+    | Unix.WSIGNALED sig_num ->
+        [("kind", `String "signaled"); ("signal", `Int sig_num)]
+    | Unix.WSTOPPED sig_num ->
+        [("kind", `String "stopped"); ("signal", `Int sig_num)]
+  in
+  let with_label = ("label", `String sem.label) :: base in
+  if sem.hint = "" then `Assoc with_label
+  else `Assoc (("hint", `String sem.hint) :: with_label)
 
 let extract_user_messages (ctx_work : Keeper_types.working_context) : string list =
   Keeper_exec_context.messages_of_context ctx_work

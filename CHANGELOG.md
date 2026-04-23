@@ -56,6 +56,12 @@
 
 ### Changed
 
+- **OAS pin bump → `main@8b5bf30a` (`v0.170.4`).**
+  `scripts/oas-agent-sdk-pin.sh` now tracks the merged OAS Kimi CLI session
+  reuse fix on upstream `main`, and the dependency floor in `dune-project` /
+  `masc_mcp.opam` is raised to `agent_sdk >= 0.170.4`. Generated keeper OAS
+  pin docs are re-synced from the shared pin script so the declared base
+  version, runtime SHA, and floor stay aligned.
 - **OAS pin refresh → `main@09a19698` (`v0.170.3`).**
   `scripts/oas-agent-sdk-pin.sh` no longer tracks the deleted
   `fix/pipeline-message-constructor` branch. It now pins upstream OAS `main`

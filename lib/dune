@@ -352,6 +352,7 @@
    tool_inline_dispatch_extra
    tool_unified
    tool_help_registry
+   tool_assignment_telemetry
    tool_registry
    tool_registration_check
    tool_code

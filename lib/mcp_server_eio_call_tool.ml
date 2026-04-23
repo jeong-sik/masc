@@ -327,7 +327,46 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     Prometheus.record_error ~error_type:name ();
 
   (* Track in-memory call counter for all declared tool names (including hidden). *)
-  Tool_registry.record_call_if_known ~source ~tool_name:name ~success ~duration_ms ();
+  (* Tool assignment telemetry: Called → Completed causal chain.
+     Lookup latest assignment for this agent, emit Called at start
+     and Completed after result is known. *)
+  let assignment_id_opt =
+    Tool_assignment_telemetry.find_latest_assignment_id ~agent_id:agent_name
+  in
+  let called_assignment_id_opt =
+    match assignment_id_opt with
+    | Some aid ->
+        let args_hash =
+          Digestif.SHA256.(digest_string (Yojson.Safe.to_string arguments) |> to_hex)
+        in
+        Tool_assignment_telemetry.emit_called
+          ~agent_id:agent_name
+          ~tool_name:name
+          ~arguments_hash:args_hash
+          ~source:(Tool_registry.string_of_source source)
+          ()
+    | None -> None
+  in
+  (match called_assignment_id_opt with
+   | Some aid ->
+       let error_kind =
+         if not success then
+           if !timeout_hit then Some "timeout"
+           else Some "tool_failure"
+         else None
+       in
+       Tool_assignment_telemetry.emit_completed
+         ~assignment_id:aid
+         ~tool_name:name
+         ~success
+         ~duration_ms:(float_of_int duration_ms)
+         ?error_kind
+         ()
+   | None -> ());
+
+  (* Track in-memory call counter for all declared tool names (including hidden). *)
+  Tool_registry.record_call_if_known ~source ?assignment_id:called_assignment_id_opt
+    ~tool_name:name ~success ~duration_ms ();
 
   let tool_args_preview =
     Observability_redact.redact_tool_input ~tool_name:name arguments

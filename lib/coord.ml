@@ -295,6 +295,9 @@ let () = Atomic.set Coord_hooks.subscribe_messages_fn (fun ~subscriber ->
   let _ = Subscriptions.SubscriptionStore.subscribe
     ~subscriber ~resource:Subscriptions.Messages () in ())
 
+(* Tool assignment telemetry — record tool provision events *)
+let () = Atomic.set Coord_hooks.tool_assigned_fn Tool_assignment_telemetry.emit_assigned
+
 (* Agent status, capability registration, discovery *)
 include Coord_agent
 

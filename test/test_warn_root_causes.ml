@@ -38,6 +38,10 @@ let file_contains_pattern file_rel pattern =
 let file_not_contains_pattern file_rel pattern =
   not (file_contains_pattern file_rel pattern)
 
+let require_write_ok label = function
+  | Ok () -> ()
+  | Error msg -> failf "%s: %s" label msg
+
 let make_meta ?(name = "test-keeper") () : Keeper_types.keeper_meta =
   match Keeper_types.meta_of_json
     (`Assoc [("name", `String name); ("agent_name", `String name);
@@ -133,8 +137,7 @@ let test_atomic_write_not_empty () =
   let json =
     `Assoc [ ("name", `String "test"); ("status", `String "ok") ]
   in
-  check bool "write_json_local ok" true
-    (Result.is_ok (Coord_utils.write_json_local path json));
+  require_write_ok "atomic write" (Coord_utils.write_json_local path json);
   let content = Fs_compat.load_file path in
   check bool "file not empty after atomic write" true
     (String.length content > 0);
@@ -155,10 +158,9 @@ let test_concurrent_atomic_writes_never_empty () =
   (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
   let path = Filename.concat dir "agent.json" in
   (* Seed with initial content *)
-  check bool "seed write ok" true
-    (Result.is_ok
-       (Coord_utils.write_json_local path
-          (`Assoc [ ("name", `String "init") ])));
+  require_write_ok "seed write"
+    (Coord_utils.write_json_local path
+       (`Assoc [ ("name", `String "init") ]));
   let empty_seen = ref false in
   let iterations = 200 in
   Eio.Switch.run @@ fun sw ->
@@ -168,7 +170,7 @@ let test_concurrent_atomic_writes_never_empty () =
       let json =
         `Assoc [ ("name", `String (Printf.sprintf "v%d" i)) ]
       in
-      ignore (Coord_utils.write_json_local path json);
+      require_write_ok "concurrent write" (Coord_utils.write_json_local path json);
       Eio.Fiber.yield ()
     done);
   (* Reader fiber: read concurrently *)

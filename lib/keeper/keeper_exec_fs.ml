@@ -171,6 +171,11 @@ let apply_patch ~old_string ~new_string ~replace_all text =
       loop 0;
       Ok (Buffer.contents buf, occurrences)
 
+exception Fs_edit_error of string
+
+let raise_fs_edit_error ?fields message =
+  raise (Fs_edit_error (error_json ?fields message))
+
 let handle_keeper_fs_edit
       ~(turn_sandbox_runtime : Keeper_turn_sandbox_runtime.t option)
       ~(config : Coord.config)
@@ -235,24 +240,25 @@ let handle_keeper_fs_edit
                 in
                 (match write_result with
                  | Error msg ->
-                   error_json ~fields:[ "path", `String target ] msg
+                     raise_fs_edit_error ~fields:[ "path", `String target ] msg
                  | Ok () ->
-                   Log.Keeper.info
-                     "WRITE_AUDIT: keeper=%s fs_edit path=%s mode=patch \
-                      replace_all=%b occurrences=%d bytes=%d"
-                     meta.name target replace_all occurrences
-                     (String.length updated);
-                   Yojson.Safe.to_string
-                     (`Assoc
-                         ([ "ok", `Bool true
-                          ; "path", `String target
-                          ; "mode", `String "patch"
-                          ; "replace_all", `Bool replace_all
-                          ; "occurrences", `Int occurrences
-                          ; "bytes_written", `Int (String.length updated)
-                          ]
-                         @ via_field)))
+                     Log.Keeper.info
+                       "WRITE_AUDIT: keeper=%s fs_edit path=%s mode=patch \
+                        replace_all=%b occurrences=%d bytes=%d"
+                       meta.name target replace_all occurrences
+                       (String.length updated);
+                     Yojson.Safe.to_string
+                       (`Assoc
+                           ([ "ok", `Bool true
+                            ; "path", `String target
+                            ; "mode", `String "patch"
+                            ; "replace_all", `Bool replace_all
+                            ; "occurrences", `Int occurrences
+                            ; "bytes_written", `Int (String.length updated)
+                            ]
+                           @ via_field)))
           with
+          | Fs_edit_error json -> json
           | Invalid_argument e ->
             error_json ~fields:[ "path", `String target ] e
           | Sys_error e -> error_json ~fields:[ "path", `String target ] e
@@ -291,21 +297,23 @@ let handle_keeper_fs_edit
             | Patch -> Ok ())
        in
        match write_result with
-       | Error msg -> error_json ~fields:[ "path", `String target ] msg
+       | Error msg ->
+           raise_fs_edit_error ~fields:[ "path", `String target ] msg
        | Ok () ->
-         Log.Keeper.info "WRITE_AUDIT: keeper=%s fs_edit path=%s mode=%s bytes=%d"
-           meta.name target mode_label
-           (String.length content);
-         Yojson.Safe.to_string
-           (`Assoc
-               ([ "ok", `Bool true
-                ; "path", `String target
-                ; "mode", `String mode_label
-                ; "bytes_written", `Int (String.length content)
-                ]
-               @ via_field))
-     with
-     | Invalid_argument e -> error_json ~fields:[ "path", `String target ] e
+           Log.Keeper.info "WRITE_AUDIT: keeper=%s fs_edit path=%s mode=%s bytes=%d"
+             meta.name target mode_label
+             (String.length content);
+           Yojson.Safe.to_string
+             (`Assoc
+                 ([ "ok", `Bool true
+                  ; "path", `String target
+                  ; "mode", `String mode_label
+                  ; "bytes_written", `Int (String.length content)
+                  ]
+                 @ via_field))
+    with
+    | Fs_edit_error json -> json
+    | Invalid_argument e -> error_json ~fields:[ "path", `String target ] e
      | Sys_error e -> error_json ~fields:[ "path", `String target ] e
      | Unix.Unix_error (err, _, _) ->
        error_json ~fields:[ "path", `String target ] (Unix.error_message err))

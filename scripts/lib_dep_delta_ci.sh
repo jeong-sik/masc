@@ -18,7 +18,7 @@ baseline_tree=""
 if [[ -n "${GITHUB_BASE_REF:-}" && "${GITHUB_EVENT_NAME:-}" == "pull_request" ]]; then
   baseline_tree=$(mktemp -d)
   rm -rf "$baseline_tree"
-  git fetch origin "$GITHUB_BASE_REF" --depth=200
+  bash scripts/ci/git-fetch-retry.sh origin "$GITHUB_BASE_REF" --depth=200
   base_ref="origin/$GITHUB_BASE_REF"
   if ! git rev-parse --verify "$base_ref" >/dev/null 2>&1; then
     base_ref="FETCH_HEAD"

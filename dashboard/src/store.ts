@@ -484,6 +484,8 @@ export async function refreshShell(opts?: RefreshOptions): Promise<void> {
       shellRuntimeResolution.value = normalizeDashboardRuntimeResolution(data.runtime_resolution)
       lastShellRefreshAt = Date.now()
     } catch (err) {
+      setCanonicalDashboardActor(null)
+      shellAuthSummary.value = null
       console.warn('[Dashboard] shell fetch error:', err)
       showToast('서버 연결 실패 — 데이터를 불러올 수 없습니다', 'error', 6000)
     } finally {

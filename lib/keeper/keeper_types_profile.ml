@@ -630,7 +630,10 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         match str "cascade_name" with
         | None -> Ok ()
         | Some raw ->
-            let normalized = String.trim raw |> String.lowercase_ascii in
+            let normalized =
+              Keeper_cascade_profile.normalize_declared_name raw
+              |> String.lowercase_ascii
+            in
             let compile_known = Keeper_cascade_profile.known_cascades in
             let phase_routing = [ "local_only"; "local_recovery" ] in
             let catalog =

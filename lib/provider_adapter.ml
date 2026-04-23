@@ -714,7 +714,7 @@ let resolve_direct_canonical_name label =
   Option.map (fun (adapter : adapter) -> adapter.canonical_name) (resolve_direct_adapter label)
 
 (** Resolve spawn_key for an agent label.
-    Returns the key to look up in Spawn.default_configs. *)
+    Returns the key to look up in Spawn.spawn_config_of_key. *)
 let resolve_spawn_key label =
   match resolve_direct_adapter label with
   | Some adapter -> adapter.spawn_key

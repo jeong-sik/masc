@@ -171,15 +171,19 @@ let run_docker_shell_command_with_status
           | Network_none -> ([ "--network"; "none" ], "none")
           | Network_inherit -> ([], network_mode_to_string network_mode)
       in
+      let cred_root = "/tmp/keeper-creds" in
       let cred_mounts, cred_envs =
         if not git_creds_enabled then
           [], []
         else
-          let cred_root = "/tmp/keeper-creds" in
+          let binding_result =
+            Keeper_gh_env.keeper_binding config ~keeper_name:meta.name
+          in
           let gh_creds =
-            match Keeper_gh_env.keeper_config_dir config ~keeper_name:meta.name with
-            | Ok (Some dir) -> dir
-            | Ok None -> Env_config_keeper.KeeperSandbox.gh_creds_host_path ()
+            match binding_result with
+            | Ok { gh_config_dir = Some dir; _ } -> dir
+            | Ok { gh_config_dir = None; _ } ->
+                Env_config_keeper.KeeperSandbox.gh_creds_host_path ()
             | Error err -> raise (Failure err)
           in
           let gitconfig = Env_config_keeper.KeeperSandbox.gitconfig_host_path () in
@@ -192,18 +196,51 @@ let run_docker_shell_command_with_status
             @ optional_ro_mount ~host:ssh_dir
                 ~container:(Filename.concat cred_root ".ssh")
           in
+          let git_author_name, git_author_email =
+            match binding_result with
+            | Ok { github_identity = Some id; git_identity_mode = "github_identity"; _ } ->
+                id, id ^ "@users.noreply.github.com"
+            | _ ->
+                ( Keeper_identity.keeper_git_author
+                    ~keeper_name:meta.name,
+                  Keeper_identity.keeper_git_email
+                    ~keeper_name:meta.name )
+          in
+          let git_identity_env ~name ~email =
+            [
+              "-e"; "GIT_AUTHOR_NAME=" ^ name;
+              "-e"; "GIT_AUTHOR_EMAIL=" ^ email;
+              "-e"; "GIT_COMMITTER_NAME=" ^ name;
+              "-e"; "GIT_COMMITTER_EMAIL=" ^ email;
+            ]
+          in
           let envs =
             [
               "-e"; "HOME=" ^ cred_root;
               "-e"; "GH_CONFIG_DIR=" ^ Filename.concat cred_root ".config/gh";
               "-e"; "GIT_CONFIG_GLOBAL=" ^ Filename.concat cred_root ".gitconfig";
-              "-e"; "GIT_AUTHOR_NAME=MASC Keeper";
-              "-e"; "GIT_AUTHOR_EMAIL=keeper@masc.local";
-              "-e"; "GIT_COMMITTER_NAME=MASC Keeper";
-              "-e"; "GIT_COMMITTER_EMAIL=keeper@masc.local";
+              "-e"; "GIT_CONFIG_COUNT=1";
+              "-e"; "GIT_CONFIG_KEY_0=safe.directory";
+              "-e"; "GIT_CONFIG_VALUE_0=*";
             ]
+            @ git_identity_env ~name:git_author_name ~email:git_author_email
           in
           mounts, envs
+      in
+      let ssh_auth_sock = Sys.getenv_opt "SSH_AUTH_SOCK" in
+      let ssh_auth_mount, ssh_auth_env =
+        let empty = ([], []) in
+        if not git_creds_enabled then empty
+        else
+          match ssh_auth_sock with
+          | None -> empty
+          | Some path when Sys.file_exists path ->
+              let container_path =
+                Filename.concat cred_root "ssh-agent.sock"
+              in
+              ( [ "-v"; path ^ ":" ^ container_path ],
+                [ "-e"; "SSH_AUTH_SOCK=" ^ container_path ] )
+          | Some _ -> empty
       in
       let token_env =
         let gh_token =
@@ -257,6 +294,8 @@ let run_docker_shell_command_with_status
         @ network_args
         @ cred_mounts
         @ cred_envs
+        @ ssh_auth_mount
+        @ ssh_auth_env
         @ token_env
         @ [ image; "bash"; "-lc"; cmd ]
       in

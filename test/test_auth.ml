@@ -300,6 +300,116 @@ let test_load_credential_redirect_stub () =
    | Some loaded when loaded.agent_name = "adversary" -> ()
    | _ -> fail "direct UUID lookup should resolve")
 
+let test_delete_uuid_backed_credential_removes_redirect_target () =
+  let dir = setup_test_room () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_room dir)
+    (fun () ->
+      let id = Types.Credential_id.generate () in
+      let raw_token = "uuid-backed-secret" in
+      let cred : Types.agent_credential =
+        {
+          id = Some id;
+          agent_id = None;
+          agent_name = "adversary";
+          token = Auth.sha256_hash raw_token;
+          role = Types.Worker;
+          created_at = "2026-01-01T00:00:00Z";
+          expires_at = None;
+        }
+      in
+      Auth.save_credential dir cred;
+      (match Auth.verify_token dir ~agent_name:"adversary" ~token:raw_token with
+       | Ok _ -> ()
+       | Error e ->
+           fail
+             (Printf.sprintf
+                "uuid-backed credential should verify before delete: %s"
+                (Types.masc_error_to_string e)));
+      Auth.delete_credential dir "adversary";
+      check bool "agent stub removed" true
+        (Option.is_none (Auth.load_credential dir "adversary"));
+      check bool "uuid target removed" true
+        (Option.is_none
+           (Auth.load_credential dir (Types.Credential_id.to_string id)));
+      (match Auth.find_credential_by_token dir ~token:raw_token with
+       | Error (Types.InvalidToken _) -> ()
+       | Error e ->
+           fail
+             (Printf.sprintf
+                "expected deleted token to be invalid: %s"
+                (Types.masc_error_to_string e))
+       | Ok cred ->
+           fail (Printf.sprintf "deleted token still resolves to %s" cred.agent_name));
+      check int "0 credentials after uuid-backed delete" 0
+        (List.length (Auth.list_credentials dir)))
+
+let test_plain_credential_replaces_uuid_redirect_target () =
+  let dir = setup_test_room () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_room dir)
+    (fun () ->
+      let id = Types.Credential_id.generate () in
+      let old_token = "old-uuid-backed-secret" in
+      let new_token = "new-plain-secret" in
+      let uuid_file =
+        Filename.concat
+          (Filename.concat (Auth.auth_dir dir) "agents")
+          (Types.Credential_id.to_string id ^ ".json")
+      in
+      let cred : Types.agent_credential =
+        {
+          id = Some id;
+          agent_id = None;
+          agent_name = "adversary";
+          token = Auth.sha256_hash old_token;
+          role = Types.Worker;
+          created_at = "2026-01-01T00:00:00Z";
+          expires_at = None;
+        }
+      in
+      Auth.save_credential dir cred;
+      check bool "uuid target exists before replacement" true
+        (Sys.file_exists uuid_file);
+      let save_result =
+        Auth.save_raw_token_credential dir ~agent_name:"adversary"
+          ~role:Types.Admin ~raw_token:new_token
+      in
+      let old_token_result = Auth.find_credential_by_token dir ~token:old_token in
+      let new_token_result =
+        Auth.verify_token dir ~agent_name:"adversary" ~token:new_token
+      in
+      check bool "old uuid target removed after replacement" false
+        (Sys.file_exists uuid_file);
+      (match save_result with
+       | Ok _ -> ()
+       | Error e ->
+           fail
+             (Printf.sprintf
+                "replacement credential should save: %s"
+                (Types.masc_error_to_string e)));
+      (match old_token_result with
+       | Error (Types.InvalidToken _) -> ()
+       | Error e ->
+           fail
+             (Printf.sprintf
+                "expected old token mismatch after replacement: %s"
+                (Types.masc_error_to_string e))
+       | Ok stale ->
+           fail
+             (Printf.sprintf
+                "old token should not resolve after replacement, got %s"
+                stale.agent_name));
+      (match new_token_result with
+       | Ok loaded ->
+           check bool "replacement credential role is admin" true
+             (loaded.role = Types.Admin)
+       | Error e ->
+           fail
+             (Printf.sprintf
+                "replacement token should verify: %s"
+                (Types.masc_error_to_string e))))
+
 let test_load_credential_exact_wins_over_fallback () =
   (* If both the nickname file and the prefix file exist, the exact
      match wins so a per-nickname override remains possible. *)
@@ -720,6 +830,10 @@ let () =
       test_case "delete credential" `Quick test_delete_credential;
       test_case "load_credential redirect stub resolves" `Quick
         test_load_credential_redirect_stub;
+      test_case "delete uuid-backed credential removes target" `Quick
+        test_delete_uuid_backed_credential_removes_redirect_target;
+      test_case "plain credential replaces uuid redirect target" `Quick
+        test_plain_credential_replaces_uuid_redirect_target;
       test_case "load_credential exact match wins over fallback" `Quick
         test_load_credential_exact_wins_over_fallback;
       test_case "extract_agent_type_prefix keeper aliases" `Quick

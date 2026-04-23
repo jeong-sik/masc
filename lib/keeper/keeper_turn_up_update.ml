@@ -156,19 +156,19 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
       Option.value
         ~default:
           (if String.trim old.will <> "" then old.will
-           else Option.value ~default:default_keeper_will p.profile_defaults.will)
+           else Option.value ~default:(Env_config_core.keeper_will ()) p.profile_defaults.will)
         p.will_opt;
     needs =
       Option.value
         ~default:
           (if String.trim old.needs <> "" then old.needs
-           else Option.value ~default:default_keeper_needs p.profile_defaults.needs)
+           else Option.value ~default:(Env_config_core.keeper_needs ()) p.profile_defaults.needs)
         p.needs_opt;
     desires =
       Option.value
         ~default:
           (if String.trim old.desires <> "" then old.desires
-           else Option.value ~default:default_keeper_desires p.profile_defaults.desires)
+           else Option.value ~default:(Env_config_core.keeper_desires ()) p.profile_defaults.desires)
         p.desires_opt;
     instructions =
       Option.value

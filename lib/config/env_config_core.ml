@@ -392,4 +392,22 @@ let auto_respond_opt () =
 let pubsub_max_messages () =
   get_int ~default:1000 "MASC_PUBSUB_MAX_MESSAGES"
 
+(** {1 Keeper Defaults} *)
+
+(** Default social model for keepers. Default: "bdi_speech_v1". *)
+let keeper_social_model () =
+  get_string ~default:"bdi_speech_v1" "MASC_KEEPER_SOCIAL_MODEL"
+
+(** Default keeper will (long-term intent). Default: "". *)
+let keeper_will () =
+  get_string ~default:"" "MASC_KEEPER_WILL"
+
+(** Default keeper needs (operational requirements). Default: "". *)
+let keeper_needs () =
+  get_string ~default:"" "MASC_KEEPER_NEEDS"
+
+(** Default keeper desires (drive statement). Default: "". *)
+let keeper_desires () =
+  get_string ~default:"" "MASC_KEEPER_DESIRES"
+
 (** {1 Zombie Detection / Cleanup Configuration} *)

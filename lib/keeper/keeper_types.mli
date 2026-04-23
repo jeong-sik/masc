@@ -200,8 +200,6 @@ type keeper_meta = {
   runtime: agent_runtime_state;
 }
 
-val default_social_model : string
-
 val now_iso : unit -> string
 
 val tool_preset_to_string : tool_preset -> string

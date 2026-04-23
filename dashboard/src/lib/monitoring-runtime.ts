@@ -226,7 +226,6 @@ function keeperBand(keeper: Keeper, phaseKey: string, lifecycleKey: string): Run
     ATTENTION_PHASES.has(phaseKey)
     || Boolean(keeper.runtime_blocker_class)
     || keeper.social_model_recognized === false
-    || Boolean(keeper.last_blocker?.trim())
     || isHeartbeatStale(keeper)
     || (typeof keeper.context_ratio === 'number' && keeper.context_ratio >= contextAttentionRatio(keeper))
   ) {
@@ -246,8 +245,6 @@ function keeperHint(keeper: Keeper, band: RuntimeBand, stage: StageMeta): string
     if (fallback) return `소셜 모델 fallback이 ${fallback}로 설정돼 있습니다.`
     return '미인식 소셜 모델 설정이 감지됐습니다.'
   }
-  const blocker = keeper.last_blocker?.trim()
-  if (blocker) return blocker
   if (band === 'paused') return '운영자가 멈춰 둔 상태입니다.'
   if (isHeartbeatStale(keeper)) return '오래 응답이 없어 실제 상태 확인이 필요합니다.'
   if (typeof keeper.context_ratio === 'number' && keeper.context_ratio >= contextAttentionRatio(keeper)) {

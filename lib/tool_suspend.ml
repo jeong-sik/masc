@@ -70,7 +70,6 @@ let force_leave config ~agent_id ~reason =
   in
   try
     let _ = Coord.broadcast config ~from_agent:"system" ~content:message in
-    ()
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn -> Log.Misc.error "broadcast (force leave) exception: %s" (Printexc.to_string exn)

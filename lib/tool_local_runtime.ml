@@ -172,6 +172,11 @@ let handle_runtime_ollama_probe _ctx args : tool_result =
     | `Bool flag -> flag
     | _ -> true
   in
+  let run_generate =
+    match member "run_generate" args with
+    | `Bool flag -> flag
+    | _ -> true
+  in
   match think_mode with
   | Error msg -> (false, json_error msg)
   | Ok think_mode ->
@@ -181,7 +186,7 @@ let handle_runtime_ollama_probe _ctx args : tool_result =
             ( "result",
               runtime_ollama_probe_json ?server_url ?model ?prompt ?keep_alive
                 ~probe_runs ~max_tokens ~think_mode ~timeout_sec
-                ~generate_when_unloaded () );
+                ~generate_when_unloaded ~run_generate () );
           ] )
 
 let dispatch ctx ~name ~args : tool_result option =
@@ -249,6 +254,7 @@ let schemas : tool_schema list =
                       ] );
                   ("timeout_sec", `Assoc [ ("type", `String "integer") ]);
                   ("generate_when_unloaded", `Assoc [ ("type", `String "boolean") ]);
+                  ("run_generate", `Assoc [ ("type", `String "boolean") ]);
                 ] );
           ];
     };

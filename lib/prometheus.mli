@@ -84,6 +84,10 @@ val metric_keeper_tool_call_duration : string
 val metric_keeper_write_meta_failures : string
 val metric_keeper_lifecycle_dispatch_rejections : string
 val metric_keeper_paused_state_persist_errors : string
+val metric_keeper_unexpected_tool_partial_tolerance : string
+val metric_keeper_tool_alias_canonicalizations : string
+val metric_keeper_profile_config_conflicts : string
+val metric_keeper_oas_timeout_classifications : string
 val metric_persistence_read_drops : string
 val metric_oas_sse_relay_retries : string
 val metric_oas_sse_relay_drops : string
@@ -123,6 +127,7 @@ val metric_keeper_invariant_violations : string
 val metric_oas_bus_subscriber_stream_depth : string
 val metric_oas_bus_publish_block_seconds : string
 val metric_oas_bus_publish : string
+val metric_runtime_ollama_probe_generate_skips : string
 
 (** {1 Transport metrics} *)
 

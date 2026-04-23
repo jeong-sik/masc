@@ -48,12 +48,47 @@ let test_to_public_pass_through () =
     "anything" (Alias.to_public "anything")
 
 let test_canonicalize_observed () =
-  let input = [ "Bash"; "keeper_board_post"; "Read"; "Skill"; "Write" ] in
+  let input =
+    [ "Bash"; "keeper_board_post"; "masc_board_post"; "Read"; "Skill"; "Write" ]
+  in
   let expected =
-    [ "keeper_bash"; "keeper_board_post"; "keeper_fs_read"; "Skill"; "keeper_fs_edit" ]
+    [
+      "keeper_bash";
+      "keeper_board_post";
+      "keeper_board_post";
+      "keeper_fs_read";
+      "Skill";
+      "keeper_fs_edit";
+    ]
   in
   Alcotest.(check (list string)) "mixed list canonicalizes only known aliases"
     expected (Alias.canonicalize_observed input)
+
+let test_canonicalize_observed_with_telemetry_records_public_masc () =
+  let labels =
+    [
+      ("alias_kind", "public_masc");
+      ("public_tool", "masc_board_post");
+      ("canonical_tool", "keeper_board_post");
+    ]
+  in
+  let before =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Prometheus.metric_keeper_tool_alias_canonicalizations
+      ~labels ()
+  in
+  let canonical =
+    Alias.canonicalize_observed_with_telemetry [ "masc_board_post" ]
+  in
+  let after =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Prometheus.metric_keeper_tool_alias_canonicalizations
+      ~labels ()
+  in
+  Alcotest.(check (list string)) "public MASC tool canonicalized"
+    [ "keeper_board_post" ] canonical;
+  Alcotest.(check (float 0.001)) "telemetry counter incremented"
+    (before +. 1.0) after
 
 let test_hallucinated_builtins () =
   Alcotest.(check bool) "Skill is hallucinated"
@@ -436,6 +471,8 @@ let () =
           Alcotest.test_case "to_public round-trip" `Quick test_to_public_round_trip;
           Alcotest.test_case "to_public pass-through" `Quick test_to_public_pass_through;
           Alcotest.test_case "canonicalize_observed" `Quick test_canonicalize_observed;
+          Alcotest.test_case "canonicalize_observed telemetry" `Quick
+            test_canonicalize_observed_with_telemetry_records_public_masc;
           Alcotest.test_case "hallucinated builtins" `Quick test_hallucinated_builtins;
           Alcotest.test_case "no overlap" `Quick test_no_overlap_alias_and_hallucinated;
           Alcotest.test_case "table is stable" `Quick test_alias_table_is_stable;

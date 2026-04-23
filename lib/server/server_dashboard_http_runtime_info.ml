@@ -279,7 +279,7 @@ let run_dashboard_runtime_probe () =
   | None ->
       Tool_local_runtime.runtime_ollama_probe_json ~probe_runs:2 ~max_tokens:8
         ~timeout_sec:dashboard_runtime_probe_timeout_sec ~ps_timeout_sec:2
-        ~generate_when_unloaded:false ()
+        ~generate_when_unloaded:false ~run_generate:false ()
 
 let dashboard_runtime_probe_cached_value () =
   match Atomic.get dashboard_runtime_probe_cache with

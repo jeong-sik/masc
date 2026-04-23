@@ -9,6 +9,10 @@
     Uses structured [Oas.Error.sdk_error] pattern matching. *)
 val is_transient_network_error : Oas.Error.sdk_error -> bool
 
+(** [true] when an OAS timeout message describes an execution budget expiry,
+    not a transport-level timeout. *)
+val is_structural_oas_timeout_message : string -> bool
+
 (** Detect server-side request body parse errors (e.g. Ollama yyjson
     rejecting a malformed request body).  The LLM never
     processed the request, so committed tool results are not at risk

@@ -4612,6 +4612,11 @@ let () =
             check bool "timeout" true
               (EC.is_transient_network_error
                  (Agent_sdk.Error.Api (Timeout { message = "connection timed out" }))));
+          test_case "structural OAS timeout is not network transient" `Quick (fun () ->
+            check bool "oas budget timeout" false
+              (EC.is_transient_network_error
+                 (Agent_sdk.Error.Api
+                    (Timeout { message = "Timeout after 573.2s (budget=573s)" }))));
           test_case "Overloaded detected" `Quick (fun () ->
             check bool "overloaded" true
               (EC.is_transient_network_error

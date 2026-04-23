@@ -207,6 +207,14 @@ let metric_keeper_lifecycle_dispatch_rejections =
   "masc_keeper_lifecycle_dispatch_rejections_total"
 let metric_keeper_paused_state_persist_errors =
   "masc_keeper_paused_state_persist_errors_total"
+let metric_keeper_unexpected_tool_partial_tolerance =
+  "masc_keeper_unexpected_tool_partial_tolerance_total"
+let metric_keeper_tool_alias_canonicalizations =
+  "masc_keeper_tool_alias_canonicalizations_total"
+let metric_keeper_profile_config_conflicts =
+  "masc_keeper_profile_config_conflicts_total"
+let metric_keeper_oas_timeout_classifications =
+  "masc_keeper_oas_timeout_classifications_total"
 let metric_persistence_read_drops =
   "masc_persistence_read_drops_total"
 
@@ -292,6 +300,8 @@ let metric_keeper_invariant_violations = "masc_keeper_invariant_violations_total
 let metric_oas_bus_subscriber_stream_depth = "masc_oas_bus_subscriber_stream_depth"
 let metric_oas_bus_publish_block_seconds = "masc_oas_bus_publish_block_seconds_total"
 let metric_oas_bus_publish = "masc_oas_bus_publish_total"
+let metric_runtime_ollama_probe_generate_skips =
+  "masc_runtime_ollama_probe_generate_skips_total"
 
 (** {1 Built-in Metrics} *)
 
@@ -388,6 +398,23 @@ let init () =
     "Total keeper paused-state persistence failures, labeled by phase \
      (boot_resume_check|boot_resume_persist) and reason (read_meta_error|meta_missing)"
     Counter;
+  add metric_keeper_unexpected_tool_partial_tolerance
+    "Total keeper turns that tolerated unexpected tool names because at least \
+     one valid keeper tool call was present. Labeled by keeper_name and \
+     logged=true|false so WARN suppression remains observable."
+    Counter;
+  add metric_keeper_tool_alias_canonicalizations
+    "Total observed LLM-facing tool names canonicalized to keeper internal \
+     tool names. Labeled by alias_kind, public_tool, and canonical_tool."
+    Counter;
+  add metric_keeper_profile_config_conflicts
+    "Total keeper profile config conflicts between persona defaults and TOML \
+     overlays. Labeled by field, resolution, and logged=true|false."
+    Counter;
+  add metric_keeper_oas_timeout_classifications
+    "Total keeper OAS timeout classifications. Labeled by \
+     classification=transient_network|structural_budget|other_timeout."
+    Counter;
   add metric_persistence_read_drops
     "Total persisted read-model entries dropped during filesystem scans, \
      labeled by surface and reason"
@@ -475,6 +502,10 @@ let init () =
   add metric_oas_bus_publish
     "Total Oas.Event_bus.publish calls routed through \
      Oas_bus_instrument.publish."
+    Counter;
+  add metric_runtime_ollama_probe_generate_skips
+    "Total Ollama runtime probes that intentionally skipped /api/generate. \
+     Labeled by reason=status_only|model_unloaded|ps_error|no_effective_model|policy_skip."
     Counter;
   (* Transport metrics — registered here so transport_metrics.ml can use
      module constants instead of string literals. *)

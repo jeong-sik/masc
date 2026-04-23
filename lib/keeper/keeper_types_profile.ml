@@ -1039,6 +1039,21 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
 let merge_string_list ~base overlay =
   match overlay with [] -> base | xs -> xs
 
+let profile_conflict_warned : (string, unit) Hashtbl.t = Hashtbl.create 32
+let profile_conflict_warn_mu = Eio.Mutex.create ()
+
+let should_log_profile_conflict_once ~agent_name ~field ~base_value
+    ~overlay_value =
+  let key =
+    String.concat "\000" [ agent_name; field; base_value; overlay_value ]
+  in
+  Eio_guard.with_mutex profile_conflict_warn_mu (fun () ->
+      if Hashtbl.mem profile_conflict_warned key then
+        false
+      else (
+        Hashtbl.replace profile_conflict_warned key ();
+        true))
+
 let merge_keeper_profile_defaults
     ~agent_name
     ~(base : keeper_profile_defaults)
@@ -1049,10 +1064,23 @@ let merge_keeper_profile_defaults
   let warn_on_conflict ~field ~base_value ~overlay_value =
     match base_value, overlay_value with
     | Some b, Some o when b <> o ->
-        Log.Keeper.warn
-          "keeper %s config conflict: %s differs between persona (%S) and TOML (%S). \
-           TOML wins."
-          agent_name field b o
+        let should_log =
+          should_log_profile_conflict_once ~agent_name ~field ~base_value:b
+            ~overlay_value:o
+        in
+        Prometheus.inc_counter Prometheus.metric_keeper_profile_config_conflicts
+          ~labels:
+            [
+              ("field", field);
+              ("resolution", "toml_wins");
+              ("logged", string_of_bool should_log);
+            ]
+          ();
+        if should_log then
+          Log.Keeper.warn
+            "keeper %s config conflict: %s differs between persona (%S) and TOML (%S). \
+             TOML wins."
+            agent_name field b o
     | _ -> ()
   in
   warn_on_conflict ~field:"tool_preset"

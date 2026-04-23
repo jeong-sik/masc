@@ -97,12 +97,14 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
        write_json config agent_file_dedup (agent_to_yojson updated);
        if is_inactive then begin
          (* Restore to active_agents on rejoin *)
-         let _ = update_state config (fun s ->
+         let _state = update_state config (fun s ->
            let agents = nickname :: List.filter ((<>) nickname) s.active_agents in
            { s with active_agents = agents }
          ) in
-         let _ = broadcast config ~from_agent:nickname
-          ~content:(Printf.sprintf "👋 %s rejoined the namespace" nickname) in
+         (match broadcast config ~from_agent:nickname
+          ~content:(Printf.sprintf "👋 %s rejoined the namespace" nickname) with
+         | Ok _ -> ()
+         | Error e -> Log.Coord.warn "broadcast failed on rejoin for %s: %s" nickname e);
          log_event config (Printf.sprintf
            "{\"type\":\"agent_join\",\"agent\":\"%s\",\"agent_type\":\"%s\",\"session_id\":\"%s\",\"rejoin\":true,\"ts\":\"%s\"}"
            nickname agent_type new_session_id (now_iso ()));
@@ -154,13 +156,15 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
   write_json config agent_file agent_json;
 
   (* Update state *)
-  let _ = update_state config (fun s ->
+  let _state = update_state config (fun s ->
     let agents = nickname :: (List.filter ((<>) nickname) s.active_agents) in
     { s with active_agents = agents }
   ) in
 
   (* Broadcast join *)
-  let _ = broadcast config ~from_agent:nickname ~content:(Printf.sprintf "👋 %s joined the namespace" nickname) in
+  (match broadcast config ~from_agent:nickname ~content:(Printf.sprintf "👋 %s joined the namespace" nickname) with
+  | Ok _ -> ()
+  | Error e -> Log.Coord.warn "broadcast failed on join for %s: %s" nickname e);
 
   (* Log event with metadata *)
   log_event config (Printf.sprintf
@@ -218,11 +222,13 @@ let leave config ~agent_name =
     (* Capture active agents before removal for relationship materialization *)
     let peers_before_leave = (read_state config).active_agents in
 
-    let _ = update_state config (fun s ->
+    let _state = update_state config (fun s ->
       { s with active_agents = List.filter ((<>) actual_name) s.active_agents }
     ) in
 
-    let _ = broadcast config ~from_agent:"system" ~content:(Printf.sprintf "👋 %s left the namespace" actual_name) in
+    (match broadcast config ~from_agent:"system" ~content:(Printf.sprintf "👋 %s left the namespace" actual_name) with
+    | Ok _ -> ()
+    | Error e -> Log.Coord.warn "broadcast failed on leave for %s: %s" actual_name e);
 
     (* Log event *)
     log_event config (Printf.sprintf

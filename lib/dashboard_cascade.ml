@@ -225,26 +225,23 @@ let config_json () =
           "dashboard cascade config: validated catalog unavailable: %s"
           detail;
         let invalid_names = invalid_name_set config_path in
-        let seen = ref StringSet.empty in
-        let add_profile_name acc name =
+        let add_profile_name (acc, seen) name =
           let canonical = Keeper_cascade_profile.canonicalize name in
-          if StringSet.mem canonical invalid_names || StringSet.mem canonical !seen
-          then acc
-          else (
-            seen := StringSet.add canonical !seen;
-            canonical :: acc)
+          if StringSet.mem canonical invalid_names || StringSet.mem canonical seen
+          then (acc, seen)
+          else (canonical :: acc, StringSet.add canonical seen)
         in
-        let acc_after_catalog =
-          List.fold_left add_profile_name [] (live_profiles ?config_path ())
+        let acc_after_catalog, seen_after_catalog =
+          List.fold_left add_profile_name ([], StringSet.empty) (live_profiles ?config_path ())
         in
-        let names =
+        let names, _ =
           List.fold_left
-            (fun acc (e : Keeper_registry.registry_entry) ->
-               add_profile_name acc e.meta.cascade_name)
-            acc_after_catalog
+            (fun (acc, seen) (e : Keeper_registry.registry_entry) ->
+               add_profile_name (acc, seen) e.meta.cascade_name)
+            (acc_after_catalog, seen_after_catalog)
             keeper_entries
-          |> List.rev
         in
+        let names = List.rev names in
         List.map
           (profile_json_raw ~config_path ~keeper_assignable_names)
           names

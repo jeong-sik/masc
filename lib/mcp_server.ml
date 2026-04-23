@@ -523,8 +523,7 @@ let create_state ~base_path =
 let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
   let config =
     Coord.default_config_eio ~sw
-      ~on_backend_ready:(fun backend ->
-        ignore backend;
+      ~on_backend_ready:(fun _backend ->
         Log.Backend.info "Board: JSONL default backend";
         Board_dispatch.init_jsonl ())
       base_path

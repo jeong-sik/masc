@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.13.0] - 2026-04-24
+
+### Added
+- Keeper `always_approve` flag bypasses rule-based approval gates for non-destructive, non-critical tools. Destructive operations (shell, git, critical risk) remain blocked regardless of the flag.
+- `goal_id` is now a required parameter in `masc_add_task` and `masc_batch_add_tasks`. Tasks without a goal_id can no longer be created, closing the goal-task orphanage gap.
+
+### Changed
+- Approval gate audit events now log `auto_approved_always` disposition when `always_approve` is enabled, with full keeper/task/goal context.
+
 ## [0.12.3] - 2026-04-21
 
 ### Added

@@ -136,13 +136,20 @@ let is_git_clone candidate =
   | `Directory | `File -> true
   | `Missing -> false
 
+let same_realpath a b =
+  try String.equal (Unix.realpath a) (Unix.realpath b) with
+  | Unix.Unix_error _ -> String.equal a b
+
 let is_usable_git_worktree path =
   safe_is_dir path
   &&
   match run_argv_with_status
-          [ "git"; "-C"; path; "rev-parse"; "--is-inside-work-tree" ]
+          [ "git"; "-C"; path; "rev-parse"; "--show-toplevel" ]
   with
-  | Unix.WEXITED 0, output -> String.trim output = "true"
+  | Unix.WEXITED 0, output -> (
+      match first_nonempty_line output with
+      | Some top -> same_realpath top path
+      | None -> false)
   | _ -> false
 
 let run_git_in_clone clone_path args =
@@ -164,10 +171,6 @@ type sandbox_clone_state =
   | Ready
   | Needs_checkout of string
   | Broken_git of string
-
-let same_realpath a b =
-  try String.equal (Unix.realpath a) (Unix.realpath b) with
-  | Unix.Unix_error _ -> String.equal a b
 
 let inspect_sandbox_clone candidate =
   let inside_status, inside_output =

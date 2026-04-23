@@ -140,6 +140,9 @@ let credential_agent_name agent_name =
   | Some prefix when prefix <> agent_name -> prefix
   | _ -> agent_name
 
+let raw_token_file config agent_name =
+  Filename.concat (auth_dir config) (agent_name ^ ".token")
+
 let load_credential_from_path config agent_name path : agent_credential option =
   if file_exists path then
     try
@@ -185,6 +188,19 @@ let save_credential config (cred : agent_credential) =
   let file = credential_file config cred.agent_name in
   let json = agent_credential_to_yojson cred in
   save_private_text_file file (Yojson.Safe.pretty_to_string json)
+
+let load_raw_token config ~agent_name =
+  let file = raw_token_file config agent_name in
+  if file_exists file then
+    try
+      read_text_file file |> trim_nonempty
+    with Sys_error _ -> None
+  else
+    None
+
+let persist_raw_token config ~agent_name raw_token =
+  ensure_auth_dirs config;
+  save_private_text_file (raw_token_file config agent_name) raw_token
 
 (** Delete agent credential *)
 let delete_credential config agent_name =
@@ -300,19 +316,54 @@ let verify_token config ~agent_name ~token : (agent_credential, masc_error) resu
 let ensure_keeper_credential config ~agent_name :
     (string * agent_credential, masc_error) result =
   let target_agent_name = credential_agent_name agent_name in
+  let persist_verified_raw_token raw_token =
+    try persist_raw_token config ~agent_name:target_agent_name raw_token
+    with Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+           Log.Auth.warn
+             "[ensure_keeper_credential] failed to persist raw token for %s: %s"
+             target_agent_name (Printexc.to_string exn)
+  in
+  let verify_candidate raw_token =
+    match verify_token config ~agent_name ~token:raw_token with
+    | Ok cred ->
+        persist_verified_raw_token raw_token;
+        Ok (raw_token, cred)
+    | Error e -> Error e
+  in
+  let mint_and_persist () =
+    match create_token config ~agent_name:target_agent_name ~role:Admin with
+    | Ok (raw_token, cred) ->
+        persist_verified_raw_token raw_token;
+        Ok (raw_token, cred)
+    | Error e -> Error e
+  in
   let env_token =
     match Sys.getenv_opt "MASC_MCP_TOKEN" with
     | Some raw -> trim_nonempty raw
     | None -> None
   in
+  let persisted_token =
+    load_raw_token config ~agent_name:target_agent_name
+  in
   match env_token with
   | Some raw_token -> (
-      match verify_token config ~agent_name ~token:raw_token with
-      | Ok cred -> Ok (raw_token, cred)
-      | Error _ ->
-          create_token config ~agent_name:target_agent_name ~role:Admin)
-  | None ->
-      create_token config ~agent_name:target_agent_name ~role:Admin
+      match verify_candidate raw_token with
+      | Ok _ as ok -> ok
+      | Error _ -> (
+          match persisted_token with
+          | Some persisted_raw -> (
+              match verify_candidate persisted_raw with
+              | Ok _ as ok -> ok
+              | Error _ -> mint_and_persist ())
+          | None -> mint_and_persist ()))
+  | None -> (
+      match persisted_token with
+      | Some persisted_raw -> (
+          match verify_candidate persisted_raw with
+          | Ok _ as ok -> ok
+          | Error _ -> mint_and_persist ())
+      | None -> mint_and_persist ())
 
 (** Refresh a token (generate new one, update credential) *)
 let refresh_token config ~agent_name ~old_token : (string * agent_credential, masc_error) result =

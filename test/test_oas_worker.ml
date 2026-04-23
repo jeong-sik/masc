@@ -1363,6 +1363,7 @@ let test_cascade_provider_labels_detect_kimi_from_model_and_base_url () =
 
 let test_resolve_tool_lane_for_codex_cli_public_tools_uses_runtime_mcp_policy () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
+  with_env "MASC_MCP_TOKEN" "shared-codex-token" @@ fun () ->
   let tools =
     [ make_named_noop_tool "masc_status"; make_named_noop_tool "masc_tasks" ]
   in
@@ -1372,6 +1373,14 @@ let test_resolve_tool_lane_for_codex_cli_public_tools_uses_runtime_mcp_policy ()
       ~tools ()
   with
   | Ok (effective_tools, Some policy) ->
+      let masc_headers =
+        List.find_map
+          (function
+            | Llm_provider.Llm_transport.Http_server server
+              when String.equal server.name "masc" -> Some server.headers
+            | _ -> None)
+          policy.servers
+      in
       Alcotest.(check int) "runtime lane strips inline tools" 0
         (List.length effective_tools);
       Alcotest.(check (list string)) "allowed tool names preserve public MCP set"
@@ -1382,13 +1391,16 @@ let test_resolve_tool_lane_for_codex_cli_public_tools_uses_runtime_mcp_policy ()
         [ "masc" ]
         (List.map Llm_provider.Llm_transport.runtime_mcp_server_name policy.servers);
       Alcotest.(check bool) "strict runtime policy" true policy.strict;
-      Alcotest.(check bool) "builtins disabled" true policy.disable_builtin_tools
+      Alcotest.(check bool) "builtins disabled" true policy.disable_builtin_tools;
+      Alcotest.(check (option string)) "codex_cli runtime lane strips bearer header" None
+        (Option.bind masc_headers (List.assoc_opt "Authorization"))
   | Ok (_, None) ->
       Alcotest.fail "expected codex_cli public MCP tools to use runtime MCP lane"
   | Error err -> Alcotest.fail (Oas.Error.to_string err)
 
-let test_resolve_tool_lane_for_codex_cli_public_tools_with_agent_name_rejects_runtime_headers () =
+let test_resolve_tool_lane_for_codex_cli_public_tools_with_agent_name_strips_runtime_headers () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
+  with_env "MASC_MCP_TOKEN" "shared-codex-token" @@ fun () ->
   let tools =
     [ make_named_noop_tool "masc_status"; make_named_noop_tool "masc_tasks" ]
   in
@@ -1398,13 +1410,24 @@ let test_resolve_tool_lane_for_codex_cli_public_tools_with_agent_name_rejects_ru
       ~provider_cfg:(make_codex_cli_provider_cfg ())
       ~tools ()
   with
-  | Ok _ ->
+  | Ok (effective_tools, Some policy) ->
+      let masc_headers =
+        List.find_map
+          (function
+            | Llm_provider.Llm_transport.Http_server server
+              when String.equal server.name "masc" -> Some server.headers
+            | _ -> None)
+          policy.servers
+      in
+      Alcotest.(check int) "runtime lane strips inline tools" 0
+        (List.length effective_tools);
+      Alcotest.(check (option string)) "codex_cli strips agent header" None
+        (Option.bind masc_headers (List.assoc_opt "x-masc-agent-name"));
+      Alcotest.(check (option string)) "codex_cli strips bearer header" None
+        (Option.bind masc_headers (List.assoc_opt "Authorization"))
+  | Ok (_, None) ->
       Alcotest.fail
-        "expected codex_cli to reject public MCP runtime lane when keeper headers are required"
-  | Error (Oas.Error.Config (Oas.Error.InvalidConfig { field; detail })) ->
-      Alcotest.(check string) "field" "tool_support" field;
-      Alcotest.(check bool) "detail mentions runtime MCP HTTP headers" true
-        (contains_substring ~needle:"runtime MCP HTTP headers" detail)
+        "expected codex_cli public MCP tools with agent_name to use runtime MCP lane"
   | Error err -> Alcotest.fail (Oas.Error.to_string err)
 
 let test_resolve_tool_lane_for_kimi_cli_public_tools_uses_runtime_mcp_policy () =
@@ -1623,6 +1646,60 @@ let test_runtime_mcp_policy_with_masc_agent_name_upserts_header () =
         (List.assoc_opt "x-masc-agent-name" other_headers)
   | _ -> Alcotest.fail "expected both masc and other HTTP servers"
 
+let test_public_mcp_runtime_policy_of_tool_names_uses_keeper_bearer_token () =
+  let base_path = temp_dir "public_mcp_keeper_auth" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+      let shared_raw_token = "shared-codex-token" in
+      match
+        Auth.save_raw_token_credential base_path ~agent_name:"codex-mcp-client"
+          ~role:Types.Admin ~raw_token:shared_raw_token
+      with
+      | Error err -> Alcotest.fail (Types.masc_error_to_string err)
+      | Ok _ ->
+          with_env "MASC_BASE_PATH" base_path @@ fun () ->
+          with_env "MASC_MCP_TOKEN" shared_raw_token @@ fun () ->
+          with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
+          match
+            Oas_worker_exec.public_mcp_runtime_policy_of_tool_names
+              ~agent_name:"keeper-sangsu-agent" [ "masc_status" ]
+          with
+          | None -> Alcotest.fail "expected runtime MCP policy"
+          | Some policy ->
+              let masc_headers =
+                List.find_map
+                  (function
+                    | Llm_provider.Llm_transport.Http_server server
+                      when String.equal server.name "masc" -> Some server.headers
+                    | _ -> None)
+                  policy.servers
+              in
+              match Option.bind masc_headers (List.assoc_opt "Authorization") with
+              | None -> Alcotest.fail "expected keeper Authorization header"
+              | Some auth_header ->
+                  let prefix = "Bearer " in
+                  if not (String.starts_with ~prefix auth_header) then
+                    Alcotest.fail "expected Bearer auth header";
+                  let raw_token =
+                    String.sub auth_header (String.length prefix)
+                      (String.length auth_header - String.length prefix)
+                  in
+                  Alcotest.(check bool) "keeper token is not shared env token" true
+                    (raw_token <> shared_raw_token);
+                  match
+                    Auth.verify_token base_path
+                      ~agent_name:"keeper-sangsu-agent" ~token:raw_token
+                  with
+                  | Ok cred ->
+                      Alcotest.(check string) "keeper alias resolves minted credential"
+                        "sangsu" cred.agent_name
+                  | Error err ->
+                      Alcotest.fail
+                        (Printf.sprintf
+                           "expected keeper runtime bearer token to verify: %s"
+                           (Types.masc_error_to_string err)))
+
 let test_runtime_mcp_policy_for_provider_skips_codex_cli_header_injection () =
   let policy =
     {
@@ -1667,6 +1744,8 @@ let test_runtime_mcp_policy_for_provider_skips_codex_cli_header_injection () =
   | Some codex_headers, Some openai_headers ->
       Alcotest.(check (option string)) "codex_cli skips agent header" None
         (List.assoc_opt "x-masc-agent-name" codex_headers);
+      Alcotest.(check (option string)) "codex_cli strips bearer header" None
+        (List.assoc_opt "Authorization" codex_headers);
       Alcotest.(check (option string)) "openai_compat still injects agent header"
         (Some "keeper-sangsu-agent")
         (List.assoc_opt "x-masc-agent-name" openai_headers)
@@ -3010,9 +3089,9 @@ let () =
       Alcotest.test_case "public MCP tools on codex_cli use runtime MCP lane" `Quick
         test_resolve_tool_lane_for_codex_cli_public_tools_uses_runtime_mcp_policy;
       Alcotest.test_case
-        "public MCP tools on codex_cli reject unsupported runtime MCP headers"
+        "public MCP tools on codex_cli strip unsupported runtime MCP headers"
         `Quick
-        test_resolve_tool_lane_for_codex_cli_public_tools_with_agent_name_rejects_runtime_headers;
+        test_resolve_tool_lane_for_codex_cli_public_tools_with_agent_name_strips_runtime_headers;
       Alcotest.test_case "public MCP tools on kimi_cli use runtime MCP lane" `Quick
         test_resolve_tool_lane_for_kimi_cli_public_tools_uses_runtime_mcp_policy;
       Alcotest.test_case
@@ -3031,6 +3110,8 @@ let () =
         test_kimi_mcp_config_json_of_policy_filters_to_allowed_servers;
       Alcotest.test_case "runtime MCP policy injects keeper agent header for masc server" `Quick
         test_runtime_mcp_policy_with_masc_agent_name_upserts_header;
+      Alcotest.test_case "public MCP policy auto-mints keeper bearer token" `Quick
+        test_public_mcp_runtime_policy_of_tool_names_uses_keeper_bearer_token;
       Alcotest.test_case "provider-aware runtime MCP policy skips codex_cli agent header injection" `Quick
         test_runtime_mcp_policy_for_provider_skips_codex_cli_header_injection;
       Alcotest.test_case "kimi request runtime MCP config is merged" `Quick

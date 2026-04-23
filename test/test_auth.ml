@@ -362,6 +362,45 @@ let test_ensure_keeper_credential_uses_keeper_middle_name () =
            "ensure_keeper_credential should mint a keeper-scoped token: %s"
            (Types.masc_error_to_string e))
 
+let test_ensure_keeper_credential_reuses_persisted_raw_token_when_env_mismatched () =
+  let dir = setup_test_room () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_room dir)
+    (fun () ->
+      let first_result =
+        with_env "MASC_MCP_TOKEN" "" (fun () ->
+          Auth.ensure_keeper_credential dir ~agent_name:"keeper-masc-improver-agent")
+      in
+      let raw_token_path =
+        Filename.concat (Auth.auth_dir dir) "masc-improver.token"
+      in
+      let shared_raw_token = "shared-codex-token" in
+      let _ =
+        Auth.save_raw_token_credential dir ~agent_name:"codex-mcp-client"
+          ~role:Types.Admin ~raw_token:shared_raw_token
+      in
+      let reused_result =
+        with_env "MASC_MCP_TOKEN" shared_raw_token (fun () ->
+          Auth.ensure_keeper_credential dir ~agent_name:"keeper-masc-improver-agent")
+      in
+      match first_result, reused_result with
+      | Ok (first_raw_token, first_cred), Ok (reused_raw_token, reused_cred) ->
+          check bool "persisted raw token file created" true
+            (Sys.file_exists raw_token_path);
+          check int "persisted raw token file mode 0600" 0o600
+            (permission_bits raw_token_path);
+          check string "first credential uses keeper middle name" "masc-improver"
+            first_cred.agent_name;
+          check string "reused credential keeps keeper middle name" "masc-improver"
+            reused_cred.agent_name;
+          check string "persisted keeper raw token reused" first_raw_token
+            reused_raw_token
+      | Error e, _ | _, Error e ->
+          fail
+            (Printf.sprintf
+               "ensure_keeper_credential should reuse persisted keeper token: %s"
+               (Types.masc_error_to_string e)))
+
 (* ============================================ *)
 (* Permission tests                             *)
 (* ============================================ *)
@@ -631,6 +670,8 @@ let () =
         test_save_raw_token_credential_uses_provided_token;
       test_case "ensure_keeper_credential uses keeper middle name" `Quick
         test_ensure_keeper_credential_uses_keeper_middle_name;
+      test_case "ensure_keeper_credential reuses persisted raw token on env mismatch" `Quick
+        test_ensure_keeper_credential_reuses_persisted_raw_token_when_env_mismatched;
     ];
     "permissions", [
       test_case "reader permissions" `Quick test_reader_permissions;

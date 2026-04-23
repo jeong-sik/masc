@@ -73,7 +73,8 @@ let runtime_mcp_policy_for_tools ~(keeper_name : string) (tools : Oas.Tool.t lis
     |> Oas_worker_exec.public_mcp_tool_names_of_oas_tools
   in
   match
-    Oas_worker_exec.public_mcp_runtime_policy_of_tool_names public_tool_names,
+    Oas_worker_exec.public_mcp_runtime_policy_of_tool_names
+      ?agent_name:(keeper_agent_name_opt keeper_name) public_tool_names,
     keeper_agent_name_opt keeper_name
   with
   | Some policy, Some agent_name ->

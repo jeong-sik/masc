@@ -156,19 +156,36 @@ let runtime_mcp_policy_with_masc_agent_name
     in
     { policy with servers }
 
+let runtime_mcp_policy_without_http_headers
+    (policy : Llm_provider.Llm_transport.runtime_mcp_policy) =
+  let servers =
+    List.map
+      (function
+        | Llm_provider.Llm_transport.Http_server server ->
+            Llm_provider.Llm_transport.Http_server { server with headers = [] }
+        | server -> server)
+      policy.servers
+  in
+  { policy with servers }
+
 let runtime_mcp_policy_for_provider
     ~(provider_cfg : Llm_provider.Provider_config.t)
     ~(agent_name : string)
     (policy_opt : Llm_provider.Llm_transport.runtime_mcp_policy option) =
-  match policy_opt, provider_cfg.kind with
-  | Some policy, Llm_provider.Provider_config.Codex_cli ->
-      (* Codex CLI runtime MCP currently rejects inline HTTP headers, so
-         keep the runtime policy untouched until that transport supports
-         carrying per-request headers. *)
-      Some policy
-  | Some policy, _ ->
+  let agent_name =
+    let trimmed = String.trim agent_name in
+    if String.equal trimmed "" then None else Some trimmed
+  in
+  match policy_opt, provider_cfg.kind, agent_name with
+  | Some policy, Llm_provider.Provider_config.Codex_cli, _ ->
+      (* Codex CLI runtime MCP currently rejects per-request HTTP headers.
+         Keep the runtime lane, but strip request-scoped headers so ambient
+         env auth continues to work. *)
+      Some (runtime_mcp_policy_without_http_headers policy)
+  | Some policy, _, Some agent_name ->
       Some (runtime_mcp_policy_with_masc_agent_name ~agent_name policy)
-  | None, _ -> None
+  | Some policy, _, None -> Some policy
+  | None, _, _ -> None
 
 let kimi_cli_runtime_mcp_jsons
     ~(base : string list)
@@ -191,26 +208,46 @@ let public_mcp_tools_of_oas_tools (tools : Oas.Tool.t list) =
 let tool_names_are_public_mcp (tool_names : string list) =
   tool_names <> [] && List.for_all Tool_catalog.is_public_mcp tool_names
 
+let trim_nonempty_string raw =
+  let trimmed = String.trim raw in
+  if String.equal trimmed "" then None else Some trimmed
+
 let trim_nonempty value =
-  match value with
-  | Some raw ->
-      let trimmed = String.trim raw in
-      if String.equal trimmed "" then None else Some trimmed
-  | None -> None
+  Option.bind value trim_nonempty_string
 
 let first_nonempty_env names =
   List.find_map (fun name -> Sys.getenv_opt name |> trim_nonempty) names
 
-let public_mcp_runtime_policy_of_tool_names (tool_names : string list) :
+let bearer_token_headers token =
+  [ ("Authorization", "Bearer " ^ token) ]
+
+let fallback_public_mcp_headers () =
+  match first_nonempty_env [ "MASC_MCP_TOKEN" ] with
+  | Some token -> bearer_token_headers token
+  | None -> []
+
+let keeper_public_mcp_headers ~agent_name =
+  match Env_config_core.base_path_opt () with
+  | Some base_path -> (
+      match Auth.ensure_keeper_credential base_path ~agent_name with
+      | Ok (token, _) -> bearer_token_headers token
+      | Error err ->
+          Log.warn ~ctx:"oas_worker_exec"
+            "keeper MCP credential provisioning failed for %s: %s; falling back to MASC_MCP_TOKEN"
+            agent_name (Types.masc_error_to_string err);
+          fallback_public_mcp_headers ())
+  | None -> fallback_public_mcp_headers ()
+
+let public_mcp_runtime_policy_of_tool_names ?agent_name (tool_names : string list) :
     Llm_provider.Llm_transport.runtime_mcp_policy option =
   let tool_names = dedupe_preserve_order tool_names in
   if not (tool_names_are_public_mcp tool_names) then
     None
   else
     let masc_headers =
-      match first_nonempty_env [ "MASC_MCP_TOKEN" ] with
-      | Some token -> [ ("Authorization", "Bearer " ^ token) ]
-      | None -> []
+      match Option.bind agent_name trim_nonempty_string with
+      | Some agent_name -> keeper_public_mcp_headers ~agent_name
+      | None -> fallback_public_mcp_headers ()
     in
     Some
       {
@@ -300,17 +337,14 @@ let resolve_tool_lane_for_oas_tools
     result =
   let public_tools = public_mcp_tools_of_oas_tools tools in
   let public_tool_names = public_mcp_tool_names_of_oas_tools public_tools in
+  let requested_agent_name =
+    Option.bind agent_name trim_nonempty_string
+  in
   let runtime_mcp_policy =
-    match public_mcp_runtime_policy_of_tool_names public_tool_names with
-    | Some policy ->
-        let agent_name =
-          match agent_name with
-          | Some agent_name -> String.trim agent_name
-          | None -> ""
-        in
-        if agent_name = "" then Some policy
-        else Some (runtime_mcp_policy_with_masc_agent_name ~agent_name policy)
-    | None -> None
+    public_mcp_runtime_policy_of_tool_names
+      ?agent_name:requested_agent_name public_tool_names
+    |> runtime_mcp_policy_for_provider ~provider_cfg
+         ~agent_name:(Option.value ~default:"" requested_agent_name)
   in
   match runtime_mcp_policy with
   | Some runtime_mcp_policy

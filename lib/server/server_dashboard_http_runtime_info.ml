@@ -126,11 +126,14 @@ let git_rev_parse_short_cancel_refresh dir =
     ~finally:(fun () -> Stdlib.Mutex.unlock git_rev_parse_short_mu)
     (fun () -> Hashtbl.remove git_rev_parse_short_in_flight dir)
 
+let git_rev_parse_short_probe_argv dir =
+  [ "git"; "-C"; dir; "--no-optional-locks"; "rev-parse"; "--short"; "HEAD" ]
+
 let git_rev_parse_short_probe dir =
   match Atomic.get git_rev_parse_short_probe_hook_for_tests with
   | Some hook -> hook dir
   | None ->
-      let argv = [ "git"; "-C"; dir; "rev-parse"; "--short"; "HEAD" ] in
+      let argv = git_rev_parse_short_probe_argv dir in
       let raw_source = String.concat " " (List.map Filename.quote argv) in
       match
         Masc_exec.Exec_gate.run_argv_with_status

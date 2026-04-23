@@ -305,8 +305,10 @@ let validate_clone_url ~base_path url =
     | Some org ->
       let allowed_lc = List.map String.lowercase_ascii allowed in
       if not (List.mem org allowed_lc) then
-        Error (Printf.sprintf
-          "GitHub org '%s' not in allowed list: %s" org (String.concat ", " allowed))
+        Error
+          (Printf.sprintf
+             "GitHub org '%s' not in allowed list: %s. Use the actual GitHub owner from the clone URL; do not infer an org from local workspace path segments."
+             org (String.concat ", " allowed))
       else
         (* Check repo-level deny list *)
         let denied = load_clone_denied_repos ~base_path in

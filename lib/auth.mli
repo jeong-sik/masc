@@ -67,7 +67,8 @@ val ensure_keeper_credential :
   string -> agent_name:string ->
   (string * agent_credential, masc_error) result
 (** [ensure_keeper_credential config ~agent_name] returns a valid credential,
-    reusing [MASC_MCP_TOKEN] env or creating a new one. *)
+    reusing a valid [MASC_MCP_TOKEN], then any persisted raw token file, or
+    creating a new keeper-scoped token when neither is usable. *)
 
 (** {1 Token Lifecycle} *)
 

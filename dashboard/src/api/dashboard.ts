@@ -35,6 +35,10 @@ import type {
   DashboardGoalsTreeResponse,
   DashboardGoalDetailResponse,
   GoalDetailKeeper,
+  GoalKeeperTrustApprovalState,
+  GoalKeeperTrustExecutionSummary,
+  GoalKeeperTrustLatestEvent,
+  GoalKeeperTrustSummary,
   GoalDetailTimelineEvent,
   GoalTreeNode,
   GoalTreeSummary,
@@ -942,6 +946,65 @@ function decodeGoalTreeTask(raw: unknown): GoalTreeTask | null {
   }
 }
 
+function decodeGoalKeeperTrustLatestEvent(raw: unknown): GoalKeeperTrustLatestEvent | null {
+  if (!isRecord(raw)) return null
+  const kind = asString(raw.kind)
+  const ts = asString(raw.ts)
+  const title = asString(raw.title)
+  const summary = asString(raw.summary)
+  const severity = asString(raw.severity)
+  if (!kind || !ts || !title || !summary || !severity) return null
+  return {
+    kind,
+    ts,
+    ts_unix: asNumber(raw.ts_unix) ?? null,
+    keeper_turn_id: asInt(raw.keeper_turn_id) ?? null,
+    task_id: asNullableString(raw.task_id),
+    goal_ids: asStringArray(raw.goal_ids),
+    title,
+    summary,
+    severity,
+    next_human_action: asNullableString(raw.next_human_action),
+  }
+}
+
+function decodeGoalKeeperTrustApprovalState(raw: unknown): GoalKeeperTrustApprovalState | null {
+  if (!isRecord(raw)) return null
+  return {
+    state: asNullableString(raw.state),
+    summary: asNullableString(raw.summary),
+    pending_count: asInt(raw.pending_count) ?? null,
+  }
+}
+
+function decodeGoalKeeperTrustExecutionSummary(raw: unknown): GoalKeeperTrustExecutionSummary | null {
+  if (!isRecord(raw)) return null
+  return {
+    tool_contract_result: asNullableString(raw.tool_contract_result),
+    sandbox_summary: asNullableString(raw.sandbox_summary),
+    mutation_guard_summary: asNullableString(raw.mutation_guard_summary),
+    latest_receipt_at: asNullableString(raw.latest_receipt_at),
+  }
+}
+
+function decodeGoalKeeperTrustSummary(raw: unknown): GoalKeeperTrustSummary | null {
+  if (!isRecord(raw)) return null
+  return {
+    disposition: asNullableString(raw.disposition),
+    disposition_reason: asNullableString(raw.disposition_reason),
+    needs_attention:
+      typeof raw.needs_attention === 'boolean'
+        ? raw.needs_attention
+        : null,
+    attention_reason: asNullableString(raw.attention_reason),
+    next_human_action: asNullableString(raw.next_human_action),
+    approval_state: decodeGoalKeeperTrustApprovalState(raw.approval_state ?? raw.approval),
+    execution_summary:
+      decodeGoalKeeperTrustExecutionSummary(raw.execution_summary ?? raw.execution),
+    latest_causal_event: decodeGoalKeeperTrustLatestEvent(raw.latest_causal_event),
+  }
+}
+
 function decodeGoalTreeNode(raw: unknown): GoalTreeNode | null {
   if (!isRecord(raw)) return null
   const id = asString(raw.id)
@@ -989,6 +1052,11 @@ function decodeGoalTreeNode(raw: unknown): GoalTreeNode | null {
     infra_risk_count: asInt(raw.infra_risk_count) ?? 0,
     linkage_source: asString(raw.linkage_source, 'none'),
     linkage_warning_count: asInt(raw.linkage_warning_count) ?? 0,
+    blocking_source: asString(raw.blocking_source, 'none'),
+    blocking_reason: asString(raw.blocking_reason, ''),
+    latest_keeper_ref: asNullableString(raw.latest_keeper_ref),
+    latest_turn_ref: asInt(raw.latest_turn_ref) ?? null,
+    stalled_since: asNullableString(raw.stalled_since),
     created_at: asString(raw.created_at, ''),
     updated_at: asString(raw.updated_at, ''),
   }
@@ -1048,6 +1116,8 @@ function decodeGoalDetailKeeper(raw: unknown): GoalDetailKeeper | null {
     latest_execution_outcome: asNullableString(raw.latest_execution_outcome),
     latest_execution_at: asNullableString(raw.latest_execution_at),
     latest_receipt: isRecord(raw.latest_receipt) ? raw.latest_receipt : null,
+    runtime_trust: decodeGoalKeeperTrustSummary(raw.runtime_trust),
+    latest_causal_event: decodeGoalKeeperTrustLatestEvent(raw.latest_causal_event),
   }
 }
 

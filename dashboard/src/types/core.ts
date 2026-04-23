@@ -206,6 +206,43 @@ export interface KeeperMetricPoint {
   fallback_reason: string | null
 }
 
+export interface KeeperTrustLatestEvent {
+  kind: string
+  ts: string
+  ts_unix?: number | null
+  keeper_turn_id?: number | null
+  task_id?: string | null
+  goal_ids?: string[]
+  title: string
+  summary: string
+  severity: 'ok' | 'warn' | 'bad' | string
+  next_human_action?: string | null
+}
+
+export interface KeeperTrustApprovalState {
+  state?: string | null
+  summary?: string | null
+  pending_count?: number | null
+}
+
+export interface KeeperTrustExecutionSummary {
+  tool_contract_result?: string | null
+  sandbox_summary?: string | null
+  mutation_guard_summary?: string | null
+  latest_receipt_at?: string | null
+}
+
+export interface KeeperTrustSummary {
+  disposition?: string | null
+  disposition_reason?: string | null
+  needs_attention?: boolean | null
+  attention_reason?: string | null
+  next_human_action?: string | null
+  approval_state?: KeeperTrustApprovalState | null
+  execution_summary?: KeeperTrustExecutionSummary | null
+  latest_causal_event?: KeeperTrustLatestEvent | null
+}
+
 export type KeeperLifecycleState =
   | 'active'
   | 'compacting'
@@ -622,6 +659,7 @@ export interface Keeper {
   last_drift_reason?: string | null
   drift_count_total?: number
   runtime_warning_ctx_ratio?: number | null
+  trust?: KeeperTrustSummary | null
   generation?: number
   turn_count?: number
   total_turns?: number

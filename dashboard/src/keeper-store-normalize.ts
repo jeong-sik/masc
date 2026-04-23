@@ -4,6 +4,7 @@ import type {
   KeeperLifecycleState,
   KeeperMetricPoint,
   KeeperPhase,
+  KeeperTrustLatestEvent,
   PipelineStage,
   PromptTelemetry,
 } from './types'
@@ -138,6 +139,57 @@ function normalizeTurnBudget(raw: unknown): Keeper['turn_budget'] {
     manifest_path: asString(raw.manifest_path) ?? null,
     clamp_min: asNumber(raw.clamp_min) ?? 1,
     clamp_max: asNumber(raw.clamp_max) ?? 50,
+  }
+}
+
+function normalizeKeeperTrustLatestEvent(raw: unknown): KeeperTrustLatestEvent | null {
+  if (!isRecord(raw)) return null
+  const kind = asString(raw.kind)
+  const ts = asString(raw.ts)
+  const title = asString(raw.title)
+  const summary = asString(raw.summary)
+  const severity = asString(raw.severity)
+  if (!kind || !ts || !title || !summary || !severity) return null
+  return {
+    kind,
+    ts,
+    ts_unix: asNumber(raw.ts_unix) ?? null,
+    keeper_turn_id: asNumber(raw.keeper_turn_id) ?? null,
+    task_id: asString(raw.task_id) ?? null,
+    goal_ids: asStringArray(raw.goal_ids),
+    title,
+    summary,
+    severity,
+    next_human_action: asString(raw.next_human_action) ?? null,
+  }
+}
+
+function normalizeKeeperTrust(raw: unknown): Keeper['trust'] {
+  if (!isRecord(raw)) return null
+  return {
+    disposition: asString(raw.disposition) ?? null,
+    disposition_reason: asString(raw.disposition_reason) ?? null,
+    needs_attention:
+      typeof raw.needs_attention === 'boolean' ? raw.needs_attention : null,
+    attention_reason: asString(raw.attention_reason) ?? null,
+    next_human_action: asString(raw.next_human_action) ?? null,
+    approval_state: isRecord(raw.approval_state)
+      ? {
+          state: asString(raw.approval_state.state) ?? null,
+          summary: asString(raw.approval_state.summary) ?? null,
+          pending_count: asNumber(raw.approval_state.pending_count) ?? null,
+        }
+      : null,
+    execution_summary: isRecord(raw.execution_summary)
+      ? {
+          tool_contract_result: asString(raw.execution_summary.tool_contract_result) ?? null,
+          sandbox_summary: asString(raw.execution_summary.sandbox_summary) ?? null,
+          mutation_guard_summary:
+            asString(raw.execution_summary.mutation_guard_summary) ?? null,
+          latest_receipt_at: asString(raw.execution_summary.latest_receipt_at) ?? null,
+        }
+      : null,
+    latest_causal_event: normalizeKeeperTrustLatestEvent(raw.latest_causal_event),
   }
 }
 
@@ -415,6 +467,7 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
           typeof row.needs_attention === 'boolean' ? row.needs_attention : null,
         attention_reason: asString(row.attention_reason) ?? null,
         next_human_action: asString(row.next_human_action) ?? null,
+        trust: normalizeKeeperTrust(row.trust),
         active_goal_ids: asStringArray(row.active_goal_ids) ?? [],
         goal: asString(row.goal) ?? null,
         short_goal: asString(row.short_goal) ?? null,

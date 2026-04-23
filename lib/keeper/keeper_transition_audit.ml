@@ -107,6 +107,25 @@ let get_or_create_completed_turn_ring name =
     upper bound, so the cost is negligible. *)
 let sink_path () = Sys.getenv_opt "MASC_KEEPER_TRANSITION_LOG"
 
+let default_store_ref : Dated_jsonl.t option ref = ref None
+
+let get_default_store () =
+  match !default_store_ref with
+  | Some store -> Some store
+  | None ->
+      let dir =
+        Filename.concat (Env_config_core.base_path ()) ".masc/transition-audit"
+      in
+      (match Dated_jsonl.create ~base_dir:dir () with
+       | store ->
+           default_store_ref := Some store;
+           Some store
+       | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+       | exception exn ->
+           Log.Keeper.warn "transition_audit default store failed: %s"
+             (Printexc.to_string exn);
+           None)
+
 (** Append a single jsonl line for the given transition. Wraps the record
     json with the keeper name so a single sink file can mux multiple
     keepers. Any IO error is swallowed: the in-memory ring is the
@@ -132,12 +151,28 @@ let append_to_sink ~keeper_name (rec_ : transition_record) =
            close_out_noerr oc)
          (fun () -> output_string oc (line ^ "\n")))
 
+let append_to_default_store ~keeper_name (rec_ : transition_record) =
+  match get_default_store () with
+  | None -> ()
+  | Some store ->
+      let json =
+        `Assoc
+          [
+            "keeper", `String keeper_name;
+            "record", to_json rec_;
+          ]
+      in
+      Safe_ops.protect ~default:() (fun () ->
+          Dated_jsonl.append store json)
+
 let record_transition ~keeper_name (rec_ : transition_record) =
   let ring = get_or_create_ring keeper_name in
   ring.buf.(ring.pos) <- Some rec_;
   ring.pos <- (ring.pos + 1) mod ring_capacity;
   ring.count <- ring.count + 1;
-  append_to_sink ~keeper_name rec_
+  (match sink_path () with
+   | Some _ -> append_to_sink ~keeper_name rec_
+   | None -> append_to_default_store ~keeper_name rec_)
 
 let recent_transitions ~keeper_name ~limit : transition_record list =
   match Hashtbl.find_opt rings keeper_name with
@@ -154,7 +189,25 @@ let recent_transitions ~keeper_name ~limit : transition_record list =
     !result
 
 let recent_transitions_json ~keeper_name ~limit : Yojson.Safe.t =
-  `List (List.map to_json (recent_transitions ~keeper_name ~limit))
+  let recent = recent_transitions ~keeper_name ~limit in
+  if recent <> [] then
+    `List (List.map to_json recent)
+  else
+    match sink_path (), get_default_store () with
+    | Some _, _ | _, None -> `List []
+    | None, Some store ->
+        let items =
+          Dated_jsonl.read_recent store (max limit 1 * 8)
+          |> List.filter_map (function
+               | `Assoc fields -> (
+                   match List.assoc_opt "keeper" fields, List.assoc_opt "record" fields with
+                   | Some (`String name), Some record
+                     when String.equal name keeper_name -> Some record
+                   | _ -> None)
+               | _ -> None)
+          |> List.filteri (fun idx _ -> idx < limit)
+        in
+        `List items
 
 let record_completed_turn ~keeper_name (rec_ : completed_turn_record) =
   let ring = get_or_create_completed_turn_ring keeper_name in

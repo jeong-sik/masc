@@ -174,6 +174,13 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const goalLinkedTasks = keeper.goal_progress?.linked_task_count
   const goalConvergence = keeper.goal_progress?.convergence
   const blocker = keeper.last_blocker?.trim()
+  const trustDisposition = keeper.trust?.disposition?.trim() || null
+  const trustSummary =
+    keeper.trust?.attention_reason?.trim()
+    || keeper.trust?.disposition_reason?.trim()
+    || keeper.trust?.execution_summary?.mutation_guard_summary?.trim()
+    || null
+  const trustLatestEvent = keeper.trust?.latest_causal_event ?? null
   const hbTs = keeper.last_heartbeat ? Date.parse(keeper.last_heartbeat) : null
   const hbAgeMs = hbTs != null && !Number.isNaN(hbTs) ? Date.now() - hbTs : null
   const hbStale = hbAgeMs != null && hbAgeMs > 300_000 // 5 minutes
@@ -214,6 +221,14 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
         cascade_exhausted: 'Cascade exhausted',
       }[runtimeBlockerClass]
     : null
+  const trustToneClass =
+    trustDisposition === 'Alert'
+      ? 'bg-[var(--bad-soft)] text-[var(--bad)]'
+      : trustDisposition === 'Pause' || keeper.trust?.needs_attention
+        ? 'bg-[var(--warn-14)] text-[var(--warn)]'
+        : trustDisposition === 'Pass'
+          ? 'bg-[var(--ok-10)] text-[var(--ok)]'
+          : 'bg-[var(--white-6)] text-[var(--text-strong)]'
 
   return html`
     <div class="px-6 pt-4">
@@ -272,6 +287,25 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
           : null}
         ${nextHumanAction
           ? html`<span><strong class="text-[var(--text-strong)]">다음 액션</strong> · ${nextHumanAction}</span>`
+          : null}
+        ${trustDisposition
+          ? html`
+              <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-2xs font-semibold ${trustToneClass}">
+                Trust ${trustDisposition}
+              </span>
+            `
+          : null}
+        ${trustSummary
+          ? html`<span><strong class="text-[var(--text-strong)]">Trust</strong> · ${trustSummary}</span>`
+          : null}
+        ${trustLatestEvent
+          ? html`
+              <span>
+                <strong class="text-[var(--text-strong)]">최근 trust event</strong>
+                · ${trustLatestEvent.title}
+                · <${TimeAgo} timestamp=${trustLatestEvent.ts} />
+              </span>
+            `
           : null}
         ${sandboxTarget
           ? html`<span><strong class="text-[var(--text-strong)]">Sandbox</strong> · ${sandboxTarget}</span>`

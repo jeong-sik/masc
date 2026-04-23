@@ -815,11 +815,11 @@ let normalize_base_url value =
   else
     trimmed
 
-let legacy_voice_env_warning_emitted = ref false
+let legacy_voice_env_warning_emitted = Atomic.make false
 
 let warn_legacy_voice_env_once () =
-  if not !legacy_voice_env_warning_emitted then (
-    legacy_voice_env_warning_emitted := true;
+  if not (Atomic.get legacy_voice_env_warning_emitted) then (
+    Atomic.set legacy_voice_env_warning_emitted true;
     Log.Misc.warn
       "VOICE_MCP_HOST/PORT fallback is deprecated; prefer .masc/voice_config.json \
        session.endpoints or MASC_HTTP_* listener settings.")

@@ -4,6 +4,8 @@ import { requestConfirm } from '../common/confirm-dialog'
 import { SurfaceCard } from '../common/card'
 import { ActionButton } from '../common/button'
 import { CountBadge } from '../common/badge'
+import { shellAuthSummary } from '../../store'
+import { dashboardAuthAccess } from '../../lib/dashboard-auth-access'
 import {
   flowState, flowLoading, fetchPauseStatus, pauseRoom, resumeRoom,
   maintenanceResult, maintenanceLoading, runGarbageCollection, cleanupZombies,
@@ -30,16 +32,22 @@ export function FlowControlPanel() {
   const isPaused = state === 'paused'
   const isRunning = state === 'running'
   const isInitializing = state === 'initializing'
+  const mutationAccess = dashboardAuthAccess(shellAuthSummary.value, 'worker')
   return html`
     <${SurfaceCard} variant="compact" class="mb-4">
       <div class="flex items-center gap-3 mb-3">
         <h3 class="text-sm text-[var(--text-strong)] font-medium">흐름 제어</h3>
         <${CountBadge} tone=${stateTone(state)}>${stateLabel(state)}<//>
       </div>
+      ${mutationAccess.allowed ? null : html`
+        <p class="mb-3 text-2xs text-[var(--warn)]">
+          제어 차단: ${mutationAccess.reason ?? 'worker 권한이 필요합니다.'}
+        </p>
+      `}
       <div class="flex flex-wrap gap-2">
-        <${ActionButton} variant="ghost" size="md" disabled=${loading || isPaused || isInitializing} onClick=${() => void pauseRoom()}>
+        <${ActionButton} variant="ghost" size="md" disabled=${loading || isPaused || isInitializing || !mutationAccess.allowed} onClick=${() => void pauseRoom()}>
           ${loading && !isPaused ? '...' : '일시정지'}<//>
-        <${ActionButton} variant="primary" size="md" disabled=${loading || isRunning || isInitializing} onClick=${() => void resumeRoom()}>
+        <${ActionButton} variant="primary" size="md" disabled=${loading || isRunning || isInitializing || !mutationAccess.allowed} onClick=${() => void resumeRoom()}>
           ${loading && isPaused ? '...' : '재개'}<//>
       </div>
     <//>
@@ -49,13 +57,13 @@ export function FlowControlPanel() {
       <details>
         <summary class="cursor-pointer text-sm text-[var(--text-strong)] font-medium select-none py-1">유지보수</summary>
         <div class="mt-3 flex flex-wrap gap-2">
-          <${ActionButton} variant="ghost" size="md" disabled=${maintenanceLoading.value}
+          <${ActionButton} variant="ghost" size="md" disabled=${maintenanceLoading.value || !mutationAccess.allowed}
             onClick=${async () => {
               const confirmed = await requestConfirm({ title: '유지보수', message: 'GC를 실행합니까?' })
               if (confirmed) void runGarbageCollection()
             }}>
             ${maintenanceLoading.value ? '...' : 'GC 실행'}<//>
-          <${ActionButton} variant="danger" size="md" disabled=${maintenanceLoading.value}
+          <${ActionButton} variant="danger" size="md" disabled=${maintenanceLoading.value || !mutationAccess.allowed}
             onClick=${async () => {
               const confirmed = await requestConfirm({ title: '유지보수', message: '좀비 에이전트를 정리합니까?', tone: 'danger' })
               if (confirmed) void cleanupZombies()

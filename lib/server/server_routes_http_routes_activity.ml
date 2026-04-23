@@ -481,8 +481,10 @@ let add_routes ~sw ~clock router =
            try
              let args = Yojson.Safe.from_string body_str in
              let base_path = state.Mcp_server.room_config.base_path in
-             let actor = agent_from_request request
-               |> Option.value ~default:"dashboard" in
+             let actor =
+               sanitized_dashboard_actor_for_request ~base_path request
+               |> Option.value ~default:"dashboard"
+             in
              let param_key = Yojson.Safe.Util.(member "param_key" args
                |> to_string_option) |> Option.value ~default:"" |> String.trim in
              let value_json = match Yojson.Safe.Util.member "value" args with
@@ -560,8 +562,10 @@ let add_routes ~sw ~clock router =
              let param_key = Yojson.Safe.Util.(member "param_key" args
                |> to_string_option) |> Option.value ~default:"" in
              let base_path = state.Mcp_server.room_config.base_path in
-             let actor = agent_from_request request
-               |> Option.value ~default:"dashboard" in
+             let actor =
+               sanitized_dashboard_actor_for_request ~base_path request
+               |> Option.value ~default:"dashboard"
+             in
              if param_key = "" then
                respond_json_with_cors ~status:`Bad_request request reqd
                  (Yojson.Safe.to_string (`Assoc [

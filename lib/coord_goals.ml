@@ -545,28 +545,26 @@ let handle_goal_transition (ctx : context) args =
                                   effective_policy None );
                             ])
                   | Ok (Goal_phase.Move_to next_phase) ->
-                      let _ =
-                        match goal.active_verification_request_id, next_phase with
-                        | Some request_id, Goal_phase.Dropped
-                        | Some request_id, Goal_phase.Executing
-                          when goal.phase = Goal_phase.Awaiting_verification ->
-                            (match Goal_verification.cancel_request ctx.config ~request_id with
-                             | Ok _ ->
-                                 emit_goal_event ctx ~goal_id
-                                   ~event_type:"goal_verification_resolved"
-                                   ~payload:
-                                     (`Assoc
-                                       [
-                                         ("request_id", `String request_id);
-                                         ("status", `String "cancelled");
-                                       ])
-                             | Error msg ->
-                                 Log.Misc.warn
-                                   "goal verification cancel_request failed for %s: %s"
-                                   request_id msg)
-                        | None, _ -> ()
-                        | Some _, _ -> ()
-                      in
+                      (match goal.active_verification_request_id, next_phase with
+                       | Some request_id, Goal_phase.Dropped
+                       | Some request_id, Goal_phase.Executing
+                         when goal.phase = Goal_phase.Awaiting_verification ->
+                           (match Goal_verification.cancel_request ctx.config ~request_id with
+                            | Ok _ ->
+                                emit_goal_event ctx ~goal_id
+                                  ~event_type:"goal_verification_resolved"
+                                  ~payload:
+                                    (`Assoc
+                                      [
+                                        ("request_id", `String request_id);
+                                        ("status", `String "cancelled");
+                                      ])
+                            | Error msg ->
+                                Log.Misc.warn
+                                  "goal verification cancel_request failed for %s: %s"
+                                  request_id msg)
+                       | None, _ -> ()
+                       | Some _, _ -> ());
                       match
                         update_goal_phase ctx goal ~phase:next_phase ?note
                           ~clear_active_verification_request:

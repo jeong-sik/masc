@@ -404,10 +404,15 @@ let dashboard_goal_detail_http_json ~(config : Coord.config) ~goal_id :
         ]
 
 let operator_action_http_json ~state ~sw ~clock request ~args =
+  let actor =
+    Server_auth.dashboard_actor_for_request
+      ~base_path:state.Mcp_server.room_config.base_path
+      request
+  in
   let ctx : _ Operator_control.context =
     {
       config = state.Mcp_server.room_config;
-      agent_name = Option.value ~default:"dashboard" (operator_actor_hint request);
+      agent_name = Option.value ~default:"dashboard" actor;
       sw;
       clock;
       proc_mgr = state.Mcp_server.proc_mgr;
@@ -415,13 +420,18 @@ let operator_action_http_json ~state ~sw ~clock request ~args =
       mcp_session_id = None;
     }
   in
-  Operator_control.action_json ?actor_hint:(operator_actor_hint request) ctx args
+  Operator_control.action_json ?actor_hint:actor ctx args
 
 let operator_confirm_http_json ~state ~sw ~clock request ~args =
+  let actor =
+    Server_auth.dashboard_actor_for_request
+      ~base_path:state.Mcp_server.room_config.base_path
+      request
+  in
   let ctx : _ Operator_control.context =
     {
       config = state.Mcp_server.room_config;
-      agent_name = Option.value ~default:"dashboard" (operator_actor_hint request);
+      agent_name = Option.value ~default:"dashboard" actor;
       sw;
       clock;
       proc_mgr = state.Mcp_server.proc_mgr;
@@ -429,7 +439,7 @@ let operator_confirm_http_json ~state ~sw ~clock request ~args =
       mcp_session_id = None;
     }
   in
-  Operator_control.confirm_json ?actor_hint:(operator_actor_hint request) ctx args
+  Operator_control.confirm_json ?actor_hint:actor ctx args
 
 let operator_error_json message =
   `Assoc [ ("status", `String "error"); ("message", `String message) ]

@@ -8,7 +8,7 @@ import { ToolPicker } from './tool-picker'
 import { ToolResultDisplay } from './tool-result-display'
 import {
   selectedTool, formValues, validationErrors, executing, lastResult,
-  schemasLoading, schemasError, loadToolSchemas, updateFormValues, executeTool, clearSelection,
+  schemasLoading, schemasError, loadToolSchemas, updateFormValues, executeTool, clearSelection, selectedToolAccess,
 } from './tool-executor-state'
 
 function ConfirmDialog({ toolName, onConfirm, onCancel }: { toolName: string; onConfirm: () => void; onCancel: () => void }) {
@@ -30,6 +30,7 @@ function ToolDetail() {
 
   const isDestructive = tool.annotations?.destructiveHint === true
   const missing = validationErrors.value
+  const toolAccess = selectedToolAccess.value
   const handleExecute = () => { if (isDestructive) { showConfirm.value = true } else { void executeTool() } }
   const handleConfirmedExecute = () => { showConfirm.value = false; void executeTool() }
 
@@ -44,12 +45,17 @@ function ToolDetail() {
       <div class="border-t border-[var(--card-border)] pt-3">
         <${SchemaForm} schema=${tool.inputSchema} values=${formValues.value} onChange=${updateFormValues} />
       </div>
+      ${toolAccess.allowed ? null : html`
+        <p class="text-2xs text-[var(--warn)]">
+          실행 차단: ${toolAccess.reason ?? `${toolAccess.required_role} 권한이 필요합니다.`}
+        </p>
+      `}
       ${missing.length > 0 ? html`<p class="text-2xs text-[var(--bad)]">필수 필드 누락: ${missing.join(', ')}</p>` : null}
       ${showConfirm.value
         ? html`<${ConfirmDialog} toolName=${tool.name} onConfirm=${handleConfirmedExecute} onCancel=${() => { showConfirm.value = false }} />`
         : html`
           <div class="flex gap-2">
-            <${ActionButton} variant=${isDestructive ? 'danger' : 'primary'} size="md" disabled=${executing.value} onClick=${handleExecute}>
+            <${ActionButton} variant=${isDestructive ? 'danger' : 'primary'} size="md" disabled=${executing.value || !toolAccess.allowed} onClick=${handleExecute}>
               ${executing.value ? '실행 중...' : '실행'}<//>
             <${ActionButton} variant="ghost" size="md" onClick=${() => { clearSelection(); showConfirm.value = false }}>초기화<//>
           </div>`}

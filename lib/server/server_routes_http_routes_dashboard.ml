@@ -335,7 +335,10 @@ let rec add_routes ~sw ~clock router =
   |> Http.Router.post "/api/v1/dashboard/logs/tool-host-failures" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_broadcast" (fun state req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
-           let fallback_agent = agent_from_request request in
+           let fallback_agent =
+             dashboard_actor_for_request
+               ~base_path:state.Mcp_server.room_config.base_path request
+           in
            let report_result =
              try
                let json = Yojson.Safe.from_string body_str in
@@ -627,11 +630,13 @@ let rec add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/tools" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let json =
-           dashboard_tools_http_json
-             ?actor:(agent_from_request request)
+           let json =
+             dashboard_tools_http_json
+             ?actor:
+               (dashboard_actor_for_request
+                  ~base_path:state.Mcp_server.room_config.base_path request)
              state.Mcp_server.room_config
-         in
+           in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/mission/briefing" (fun request reqd ->
@@ -1066,8 +1071,12 @@ and add_autoresearch_routes router =
                    reqd
              | Ok () -> (
                  match
-                   Dashboard_http_autoresearch.delete_loop_json ~base_path ~loop_id ~requester_agent:(agent_from_request request)
-                 with                 | Ok result ->
+                   Dashboard_http_autoresearch.delete_loop_json ~base_path
+                     ~loop_id
+                     ~requester_agent:
+                       (dashboard_actor_for_request ~base_path request)
+                 with
+                 | Ok result ->
                      Http.Response.json ~compress:true ~request:req
                        (Yojson.Safe.to_string result) reqd
                  | Error message ->

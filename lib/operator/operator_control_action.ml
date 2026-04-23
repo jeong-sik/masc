@@ -121,6 +121,8 @@ let canonical_action_type action_type =
   | "keeper_message" -> "keeper_message"
   | "keeper_probe" -> "keeper_probe"
   | "keeper_recover" -> "keeper_recover"
+  | "keeper_github_identity_login_prepare" -> "keeper_github_identity_login_prepare"
+  | "keeper_github_identity_status" -> "keeper_github_identity_status"
   | other -> other
 
 let normalize_action_target_type target_type =
@@ -134,7 +136,8 @@ let normalize_action_target_type target_type =
 let default_target_type_for action_type =
   match action_type with
   | "broadcast" | "namespace_pause" | "namespace_resume" | "task_inject" | "social_sweep" -> "root"
-  | "keeper_message" | "keeper_probe" | "keeper_recover" -> "keeper"
+  | "keeper_message" | "keeper_probe" | "keeper_recover"
+  | "keeper_github_identity_login_prepare" | "keeper_github_identity_status" -> "keeper"
   | _ -> ""
 
 let generate_confirm_token ~(clock : _ Eio.Time.clock) config =
@@ -164,16 +167,11 @@ let generate_confirm_token ~(clock : _ Eio.Time.clock) config =
 let resolved_actor_for_args ?actor_hint ctx args =
   let payload_actor = get_string_opt args "actor" |> Option.map String.trim in
   let hinted_actor = actor_hint |> Option.map String.trim in
-  match (payload_actor, hinted_actor) with
-  | Some payload, Some hinted
-    when payload <> "" && hinted <> "" && not (String.equal payload hinted) ->
-      Error "actor mismatch: payload actor must match authenticated actor"
-  | _ ->
-      Ok
-        (normalized_actor ~context_actor:ctx.agent_name
-           (match hinted_actor with
-           | Some actor when actor <> "" -> Some actor
-           | _ -> payload_actor))
+  Ok
+    (normalized_actor ~context_actor:ctx.agent_name
+       (match hinted_actor with
+       | Some actor when actor <> "" -> Some actor
+       | _ -> payload_actor))
 
 let action_request_of_args ?actor_hint ctx args =
   let action_type =

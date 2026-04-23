@@ -62,7 +62,9 @@ let rec drain_queue_without_store dropped =
   | Some _ -> drain_queue_without_store (dropped + 1)
 
 let reset_for_testing () =
-  ignore (drain_queue_without_store 0);
+  let dropped = drain_queue_without_store 0 in
+  if dropped > 0 then
+    Log.Metrics.warn "tool_metrics_persist: reset dropped %d queued records" dropped;
   store_ref := None
 
 let get_or_create_store ~base_path : Dated_jsonl.t =

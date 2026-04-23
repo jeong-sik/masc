@@ -26,13 +26,13 @@ let get_env_int name default =
 (** {1 Random Number Generator} *)
 
 (** Initialize RNG with seed for reproducibility *)
-let rng_initialized = ref false
+let rng_initialized = Atomic.make false
 
 let ensure_rng_init () =
-  if not !rng_initialized then begin
+  if not (Atomic.get rng_initialized) then begin
     let seed = get_env_int "MASC_RANDOM_SEED" (int_of_float (Time_compat.now () *. 1000.0)) in
     Random.init seed;
-    rng_initialized := true
+    Atomic.set rng_initialized true
   end
 
 (** Get random float with guaranteed initialization *)

@@ -2,38 +2,60 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-void vi
+const {
+  fetchPauseStatus,
+  pauseRoom,
+  resumeRoom,
+  runGarbageCollection,
+  cleanupZombies,
+  flowState,
+  flowLoading,
+  maintenanceResult,
+  maintenanceLoading,
+  shellAuthSummary,
+} = vi.hoisted(() => ({
+  fetchPauseStatus: vi.fn().mockResolvedValue(undefined),
+  pauseRoom: vi.fn().mockResolvedValue(undefined),
+  resumeRoom: vi.fn().mockResolvedValue(undefined),
+  runGarbageCollection: vi.fn().mockResolvedValue(undefined),
+  cleanupZombies: vi.fn().mockResolvedValue(undefined),
+  flowState: { value: 'running' as 'running' | 'paused' | 'initializing' | 'unknown' },
+  flowLoading: { value: false },
+  maintenanceResult: { value: null as string | null },
+  maintenanceLoading: { value: false },
+  shellAuthSummary: { value: null },
+}))
 
-const fetchPauseStatus = vi.fn().mockResolvedValue(undefined)
-const pauseRoom = vi.fn().mockResolvedValue(undefined)
-const resumeRoom = vi.fn().mockResolvedValue(undefined)
-const runGarbageCollection = vi.fn().mockResolvedValue(undefined)
-const cleanupZombies = vi.fn().mockResolvedValue(undefined)
+vi.mock('./flow-control-state', () => ({
+  cleanupZombies,
+  fetchPauseStatus,
+  flowLoading,
+  flowState,
+  maintenanceLoading,
+  maintenanceResult,
+  pauseRoom,
+  resumeRoom,
+  runGarbageCollection,
+}))
 
-const flowState = { value: 'running' as 'running' | 'paused' | 'initializing' | 'unknown' }
-const flowLoading = { value: false }
-const maintenanceResult = { value: null as string | null }
-const maintenanceLoading = { value: false }
+vi.mock('../../store', () => ({
+  shellAuthSummary,
+}))
+
+vi.mock('../../lib/dashboard-auth-access', () => ({
+  dashboardAuthAccess: () => ({
+    allowed: true,
+    required_role: 'worker',
+    effective_role: 'worker',
+    reason: null,
+  }),
+}))
+
+import { FlowControlPanel } from './flow-control-panel'
 
 async function flushUi(): Promise<void> {
   await Promise.resolve()
   await Promise.resolve()
-}
-
-async function loadPanel() {
-  vi.resetModules()
-  vi.doMock('./flow-control-state', () => ({
-    cleanupZombies,
-    fetchPauseStatus,
-    flowLoading,
-    flowState,
-    maintenanceLoading,
-    maintenanceResult,
-    pauseRoom,
-    resumeRoom,
-    runGarbageCollection,
-  }))
-  return import('./flow-control-panel')
 }
 
 describe('FlowControlPanel', () => {
@@ -46,19 +68,16 @@ describe('FlowControlPanel', () => {
     flowLoading.value = false
     maintenanceResult.value = null
     maintenanceLoading.value = false
+    shellAuthSummary.value = null
   })
 
   afterEach(() => {
     render(null, container)
     container.remove()
-    vi.resetModules()
     vi.clearAllMocks()
-    vi.doUnmock('./flow-control-state')
   })
 
   it('shows core flow controls without a dedicated refresh button', async () => {
-    const { FlowControlPanel } = await loadPanel()
-
     render(html`<${FlowControlPanel} />`, container)
     await flushUi()
 
@@ -66,5 +85,5 @@ describe('FlowControlPanel', () => {
     expect(container.textContent).toContain('일시정지')
     expect(container.textContent).toContain('재개')
     expect(container.textContent).not.toContain('새로고침')
-  }, 60_000)
+  })
 })

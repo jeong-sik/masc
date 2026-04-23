@@ -124,10 +124,10 @@ let remove_temp_file_quietly path =
 
 let read_stderr_capture path =
   try In_channel.with_open_bin path In_channel.input_all with
-  | _exn ->
+  | Sys_error msg ->
       Printf.sprintf
-        "(stderr capture error) failed to read captured stderr file %s. Check temp-file permissions or available temp storage."
-        (Filename.basename path)
+        "(stderr capture error) %s: %s"
+        (Filename.basename path) msg
 
 let captured_stderr_or_empty path_opt =
   match path_opt with

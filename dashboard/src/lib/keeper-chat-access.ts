@@ -1,4 +1,5 @@
 import type { DashboardShellAuthSummary } from '../types'
+import { dashboardAuthAccess } from './dashboard-auth-access'
 
 interface KeeperDirectChatAccess {
   blocked: boolean
@@ -21,9 +22,11 @@ export function keeperDirectChatAccess(
     return { blocked: false, message: null }
   }
 
+  const mutationAccess = dashboardAuthAccess(summary, 'worker')
   const actor = summary.effective_agent ?? summary.requested_agent ?? 'dashboard'
   const role = summary.effective_role ?? summary.default_role ?? null
   const reason = cleanErrorMessage(summary.keeper_msg_error)
+    ?? mutationAccess.reason
     ?? `@${actor}는 masc_keeper_msg 권한이 없습니다.`
   const roleHint = role ? ` 현재 역할은 ${role}입니다.` : ''
   const tokenHint =

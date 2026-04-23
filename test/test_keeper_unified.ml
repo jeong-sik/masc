@@ -2661,6 +2661,46 @@ let test_metrics_failure_response () =
   check string "failure transition reason tracked" "failure:run_error"
     updated.runtime.last_social_transition_reason
 
+let test_metrics_failure_response_redacts_resumable_cli_session_detail () =
+  let raw_reason =
+    "kimi exited with code 75: \nTo resume this session: kimi -r ff37febe-2adb-4ac6-9dc6-cae23e672fbc"
+  in
+  let canonical_detail =
+    Masc_mcp.Oas_worker_exec.Kimi_cli_transport_local.resumable_session_detail
+  in
+  let sdk_error =
+    Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
+      (Masc_mcp.Oas_worker_named.Resumable_cli_session
+         {
+           cascade_name = "kimi_cli_keeper";
+           detail = canonical_detail;
+           exit_code = Some 75;
+         })
+  in
+  let updated =
+    UM.update_metrics_from_failure minimal_meta ~latency_ms:250
+      ~observation:base_observation ~reason:raw_reason ~sdk_error
+      ~social_transition_reason:"failure:run_error" ()
+  in
+  check string "last reason is redacted"
+    ("unified:error:" ^ canonical_detail)
+    updated.runtime.proactive_rt.last_reason;
+  check string "last preview is redacted"
+    canonical_detail
+    updated.runtime.proactive_rt.last_preview;
+  check string "last blocker is redacted"
+    canonical_detail
+    updated.runtime.last_blocker;
+  check bool "raw resume hint removed from last blocker" false
+    (contains_substring updated.runtime.last_blocker "To resume this session:");
+  check bool "raw session token removed from last reason" false
+    (contains_substring updated.runtime.proactive_rt.last_reason "kimi -r");
+  match updated.runtime.last_blocker_class with
+  | Some (Keeper_types.Cascade_exhausted (Keeper_types.Other_detail detail)) ->
+      check string "blocker class detail preserved as canonical detail"
+        canonical_detail detail
+  | _ -> fail "expected resumable CLI session blocker class"
+
 let test_prompt_includes_board_activity_section () =
   let obs =
     { base_observation with
@@ -3095,7 +3135,7 @@ let test_auto_recoverable_turn_error_includes_resumable_cli_session_error () =
          {
            cascade_name = "kimi_cli_keeper";
            detail =
-             "kimi exited with code 75: \nTo resume this session: kimi -r ff37febe-2adb-4ac6-9dc6-cae23e672fbc";
+             Masc_mcp.Oas_worker_exec.Kimi_cli_transport_local.resumable_session_detail;
            exit_code = Some 75;
          })
   in
@@ -3109,7 +3149,7 @@ let test_cascade_exhausted_error_includes_resumable_cli_session_error () =
          {
            cascade_name = "kimi_cli_keeper";
            detail =
-             "kimi exited with code 75: \nTo resume this session: kimi -r ff37febe-2adb-4ac6-9dc6-cae23e672fbc";
+             Masc_mcp.Oas_worker_exec.Kimi_cli_transport_local.resumable_session_detail;
            exit_code = Some 75;
          })
   in
@@ -4330,6 +4370,8 @@ let () =
           test_case "social fields" `Quick
             test_metrics_persist_social_state_fields;
           test_case "failure response" `Quick test_metrics_failure_response;
+          test_case "failure response redacts resumable session detail" `Quick
+            test_metrics_failure_response_redacts_resumable_cli_session_detail;
           test_case "mixed response" `Quick test_metrics_mixed_response;
           test_case "normalize passthrough" `Quick
             test_normalize_response_text_passthrough;

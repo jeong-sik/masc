@@ -1,5 +1,9 @@
-import { describe, it, expect } from 'vitest'
+import { html } from 'htm/preact'
+import { render } from 'preact'
+import { act } from 'preact/test-utils'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
+  AgentRoster,
   runtimeBadgeClass,
   stageBadgeClass,
   compactModelLabel,
@@ -12,6 +16,17 @@ import {
   filterAgentRoster,
 } from './agent-roster'
 import type { Agent, Keeper } from '../types'
+import {
+  agents,
+  keepers,
+  executionLoaded,
+  executionLoading,
+  executionError,
+  shellCounts,
+  serverStatus,
+} from '../store'
+import { missionSnapshot } from '../mission-signals'
+import { namespaceTruth } from '../namespace-truth-store'
 
 function makeAgent(overrides: Partial<Agent> = {}): Agent {
   return {
@@ -20,6 +35,12 @@ function makeAgent(overrides: Partial<Agent> = {}): Agent {
     current_task: null,
     ...overrides,
   }
+}
+
+async function flushUi(): Promise<void> {
+  await act(async () => {
+    await Promise.resolve()
+  })
 }
 
 describe('runtimeBadgeClass', () => {
@@ -207,7 +228,7 @@ describe('rosterStateNote', () => {
         runtime_blocker_summary: 'Turn wall-clock timeout after 1200s',
       } as Keeper, 'fallback hint'),
     ).toEqual({
-      label: '최근 차단',
+      label: '현재 차단',
       text: 'Turn wall-clock timeout after 1200s',
     })
   })
@@ -235,6 +256,17 @@ describe('rosterStateNote', () => {
       label: '상태 메모',
       text: '오래 응답이 없어 실제 상태 확인이 필요합니다.',
     })
+  })
+
+  it('ignores historical last_blocker text without a live runtime blocker', () => {
+    expect(
+      rosterStateNote(
+        {
+          last_blocker: 'old social-model blocker',
+        } as Keeper,
+        null,
+      ),
+    ).toBeNull()
   })
 
   it('returns null when no note source is available', () => {
@@ -343,6 +375,104 @@ describe('mergeRosterAgent', () => {
     const next: Agent = { ...nextAgent, capabilities: ['tool-b'] }
     const result = mergeRosterAgent(existing, next)
     expect(result.capabilities).toEqual(['tool-b'])
+  })
+})
+
+describe('AgentRoster live-only cards', () => {
+  let container: HTMLDivElement
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    agents.value = []
+    keepers.value = []
+    executionLoaded.value = true
+    executionLoading.value = false
+    executionError.value = null
+    shellCounts.value = null
+    serverStatus.value = null
+    namespaceTruth.value = null
+    missionSnapshot.value = null
+  })
+
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+    agents.value = []
+    keepers.value = []
+    executionLoaded.value = false
+    executionLoading.value = false
+    executionError.value = null
+    shellCounts.value = null
+    serverStatus.value = null
+    namespaceTruth.value = null
+    missionSnapshot.value = null
+  })
+
+  it('renders keeper cards from live runtime data and ignores stale mission brief fields', async () => {
+    agents.value = [
+      makeAgent({
+        name: 'codex-mcp-client',
+        current_task: 'agent fallback task',
+        model: 'gpt-5.4',
+      }),
+    ]
+    keepers.value = [
+      {
+        name: 'nick0cave',
+        agent_name: 'codex-mcp-client',
+        status: 'idle',
+        last_heartbeat: '2026-04-23T09:59:00Z',
+        last_autonomous_action_at: '2026-04-23T09:58:00Z',
+        last_activity_ago_s: 75,
+        recent_output_preview: 'live runtime output preview',
+        recent_input_preview: 'live runtime input preview',
+        recent_tool_names: ['keeper_task_claim'],
+        latest_tool_call_count: 1,
+        tool_audit_at: '2026-04-23T09:58:30Z',
+        last_blocker: 'old blocker that should stay out of the roster',
+      } as Keeper,
+    ]
+    missionSnapshot.value = {
+      generated_at: '2026-04-23T09:00:00Z',
+      summary: {},
+      incidents: [],
+      recommended_actions: [],
+      command_focus: {},
+      operator_targets: {},
+      attention_queue: [],
+      sessions: [],
+      agent_briefs: [
+        {
+          agent_name: 'codex-mcp-client',
+          current_work: 'stale mission work',
+          recent_output_preview: 'stale mission preview',
+          last_activity_at: '2026-04-23T06:00:00Z',
+        },
+      ],
+      keeper_briefs: [
+        {
+          name: 'nick0cave',
+          agent_name: 'codex-mcp-client',
+          current_work: 'stale keeper brief work',
+          latest_tool_names: ['stale_tool'],
+          last_autonomous_action_at: '2026-04-23T06:00:00Z',
+        },
+      ],
+      internal_signals: [],
+    } as any
+
+    await act(async () => {
+      render(html`<${AgentRoster} />`, container)
+    })
+    await flushUi()
+
+    expect(container.textContent).toContain('live runtime output preview')
+    expect(container.textContent).toContain('keeper_task_claim')
+    expect(container.textContent).not.toContain('stale mission preview')
+    expect(container.textContent).not.toContain('stale keeper brief work')
+    expect(container.textContent).not.toContain('stale_tool')
+    expect(container.textContent).not.toContain('old blocker that should stay out of the roster')
   })
 })
 

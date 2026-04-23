@@ -93,14 +93,14 @@ let test_transition_has_no_fixed_timeout () =
     true
     (Masc_mcp.Mcp_server_eio_call_tool.tool_timeout_sec_opt
        ~tool_name:"masc_transition"
-       ~arguments:(`Assoc [])
+       ~_arguments:(`Assoc [])
      = None)
 
 let test_regular_tool_uses_default_timeout () =
   match
     Masc_mcp.Mcp_server_eio_call_tool.tool_timeout_sec_opt
       ~tool_name:"masc_status"
-      ~arguments:(`Assoc [])
+      ~_arguments:(`Assoc [])
   with
   | Some timeout_sec -> check bool "default timeout remains enabled" true (timeout_sec >= 5.)
   | None -> fail "expected masc_status to keep fixed timeout"

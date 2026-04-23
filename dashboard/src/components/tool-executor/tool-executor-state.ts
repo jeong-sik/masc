@@ -3,6 +3,8 @@ import type { McpToolSchema, JsonSchema } from '../../types/json-schema'
 import { listAllMcpTools, callMcpTool } from '../../api/mcp'
 import { showToast } from '../common/toast'
 import { buildDefaults, stripEmptyOptionals, validateRequired } from './schema-form'
+import { shellAuthSummary } from '../../store'
+import { dashboardAuthAccess, type DashboardAuthRole } from '../../lib/dashboard-auth-access'
 
 const allToolSchemas = signal<McpToolSchema[]>([])
 export const schemasLoading = signal(false)
@@ -18,6 +20,14 @@ export const validationErrors = signal<string[]>([])
 
 export const executing = signal(false)
 export const lastResult = signal<{ success: boolean; text: string; toolName: string; timestamp: number } | null>(null)
+
+function selectedToolRequiredRole(tool: McpToolSchema | null): DashboardAuthRole {
+  return tool?.annotations?.readOnlyHint === true ? 'reader' : 'worker'
+}
+
+export const selectedToolAccess = computed(() => (
+  dashboardAuthAccess(shellAuthSummary.value, selectedToolRequiredRole(selectedTool.value))
+))
 
 export const filteredTools = computed(() => {
   let tools = allToolSchemas.value
@@ -82,6 +92,11 @@ export function updateFormValues(values: Record<string, unknown>): void {
 export async function executeTool(): Promise<void> {
   const tool = selectedTool.value
   if (!tool || executing.value) return
+  const access = dashboardAuthAccess(shellAuthSummary.value, selectedToolRequiredRole(tool))
+  if (!access.allowed) {
+    showToast(access.reason ?? `${tool.name} 실행 권한이 없습니다.`, 'error', 6000)
+    return
+  }
   const missing = validateRequired(formValues.value, tool.inputSchema)
   if (missing.length > 0) {
     validationErrors.value = missing

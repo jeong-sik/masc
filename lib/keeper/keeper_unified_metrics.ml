@@ -1138,8 +1138,18 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
   let is_scheduled_autonomous_cycle =
     is_scheduled_autonomous_cycle_of_observation observation
   in
+  let public_reason =
+    match sdk_error with
+    | Some err -> (
+        match Oas_worker_named.classify_masc_internal_error err with
+        | Some (Oas_worker_named.Resumable_cli_session { detail; _ }) ->
+            let trimmed = String.trim detail in
+            if trimmed = "" then reason else trimmed
+        | _ -> reason)
+    | None -> reason
+  in
   let preview =
-    let trimmed = String.trim reason in
+    let trimmed = String.trim public_reason in
     if trimmed = "" then "keeper cycle failed"
     else short_preview trimmed
   in
@@ -1170,7 +1180,7 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
           else meta.runtime.proactive_rt.last_outcome;
         last_reason =
           if is_scheduled_autonomous_cycle
-          then "unified:error:" ^ String.trim reason
+          then "unified:error:" ^ String.trim public_reason
           else meta.runtime.proactive_rt.last_reason;
         last_preview =
           if is_scheduled_autonomous_cycle then preview
@@ -1199,7 +1209,7 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
         (match social_state with
          | Some (state : Social.social_state) ->
              Option.value ~default:"" state.blocker
-         | None -> short_preview reason);
+         | None -> short_preview public_reason);
       last_blocker_class =
         (match sdk_error with
          | Some err ->

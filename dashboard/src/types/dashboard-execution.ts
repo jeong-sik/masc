@@ -44,9 +44,13 @@ export interface DashboardShellAuthSummary {
   require_token: boolean
   default_role?: string | null
   token_present: boolean
+  token_valid: boolean
+  token_agent?: string | null
   requested_agent?: string | null
   effective_agent?: string | null
   effective_role?: string | null
+  auth_error_code?: 'missing_token' | 'invalid_token' | 'token_expired' | 'actor_mismatch' | 'insufficient_role' | 'same_origin_blocked' | 'unknown' | null
+  auth_error_detail?: string | null
   can_keeper_msg: boolean
   keeper_msg_error?: string | null
 }
@@ -503,6 +507,43 @@ export interface GoalVerificationSummary {
   remaining_possible: number
 }
 
+export interface GoalKeeperTrustLatestEvent {
+  kind: string
+  ts: string
+  ts_unix?: number | null
+  keeper_turn_id?: number | null
+  task_id?: string | null
+  goal_ids?: string[]
+  title: string
+  summary: string
+  severity: 'ok' | 'warn' | 'bad' | string
+  next_human_action?: string | null
+}
+
+export interface GoalKeeperTrustApprovalState {
+  state?: string | null
+  summary?: string | null
+  pending_count?: number | null
+}
+
+export interface GoalKeeperTrustExecutionSummary {
+  tool_contract_result?: string | null
+  sandbox_summary?: string | null
+  mutation_guard_summary?: string | null
+  latest_receipt_at?: string | null
+}
+
+export interface GoalKeeperTrustSummary {
+  disposition?: string | null
+  disposition_reason?: string | null
+  needs_attention?: boolean | null
+  attention_reason?: string | null
+  next_human_action?: string | null
+  approval_state?: GoalKeeperTrustApprovalState | null
+  execution_summary?: GoalKeeperTrustExecutionSummary | null
+  latest_causal_event?: GoalKeeperTrustLatestEvent | null
+}
+
 export interface GoalTreeNode {
   id: string
   title: string
@@ -539,6 +580,11 @@ export interface GoalTreeNode {
   infra_risk_count: number
   linkage_source: 'explicit' | 'title_tag' | 'mixed' | 'none' | string
   linkage_warning_count: number
+  blocking_source: 'goal_phase' | 'child_goal' | 'approval' | 'keeper_runtime' | 'task_fsm' | 'stalled' | 'none' | string
+  blocking_reason: string
+  latest_keeper_ref?: string | null
+  latest_turn_ref?: number | null
+  stalled_since?: string | null
   created_at: string
   updated_at: string
 }
@@ -577,6 +623,8 @@ export interface GoalDetailKeeper {
   latest_execution_outcome: string | null
   latest_execution_at: string | null
   latest_receipt: Record<string, unknown> | null
+  runtime_trust: GoalKeeperTrustSummary | null
+  latest_causal_event: GoalKeeperTrustLatestEvent | null
 }
 
 export interface GoalDetailTimelineEvent {

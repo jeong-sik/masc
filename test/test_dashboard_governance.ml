@@ -247,6 +247,63 @@ let test_runtime_timestamps_fallback_to_unix_values () =
       check string "judge expires_at falls back to unix" expires_at
         (judge |> member "expires_at" |> to_string))
 
+let test_refresh_failure_keeps_fresh_cache_online () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      with_test_fs env @@ fun () ->
+      let st = Lib.Dashboard_governance_judge.get_state dir in
+      let now = Unix.gettimeofday () in
+      let generated_at = iso8601_of_unix now in
+      let expires_at = iso8601_of_unix (now +. 300.0) in
+      Lib.Dashboard_governance_judge.with_lock st (fun () ->
+        st.refreshing <- true;
+        st.judge_online <- true;
+        st.generated_at <- Some generated_at;
+        st.generated_at_unix <- Some now;
+        st.expires_at <- Some expires_at;
+        st.expires_at_unix <- Some (now +. 300.0);
+        st.model_used <- Some "glm:test";
+        st.last_error <- None;
+        Lib.Dashboard_governance_judge.mark_refresh_failure
+          ~now_ts:now st ~message:"Execution timed out after 60.0s");
+      let status =
+        Lib.Dashboard_governance_judge.runtime_status_at ~now_ts:now dir
+      in
+      check bool "judge remains online while cache fresh" true
+        status.judge_online;
+      check bool "refreshing cleared" false status.refreshing;
+      check (option string) "last_error recorded"
+        (Some "Execution timed out after 60.0s") status.last_error;
+      check (option string) "model preserved" (Some "glm:test")
+        status.model_used)
+
+let test_refresh_failure_marks_expired_cache_offline () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      with_test_fs env @@ fun () ->
+      let st = Lib.Dashboard_governance_judge.get_state dir in
+      let now = Unix.gettimeofday () in
+      Lib.Dashboard_governance_judge.with_lock st (fun () ->
+        st.refreshing <- true;
+        st.judge_online <- true;
+        st.expires_at_unix <- Some (now -. 1.0);
+        st.last_error <- None;
+        Lib.Dashboard_governance_judge.mark_refresh_failure
+          ~now_ts:now st ~message:"Execution timed out after 60.0s");
+      let status =
+        Lib.Dashboard_governance_judge.runtime_status_at ~now_ts:now dir
+      in
+      check bool "judge goes offline when cache expired" false
+        status.judge_online;
+      check (option string) "last_error recorded"
+        (Some "Execution timed out after 60.0s") status.last_error)
+
 let test_governance_monitoring_uses_live_runtime () =
   let dir = test_dir () in
   Fun.protect
@@ -510,6 +567,10 @@ let () =
             test_empty_judgment_disk_scan_uses_cooldown;
           test_case "runtime timestamps fallback to unix values" `Quick
             test_runtime_timestamps_fallback_to_unix_values;
+          test_case "refresh failure keeps fresh cache online" `Quick
+            test_refresh_failure_keeps_fresh_cache_online;
+          test_case "refresh failure marks expired cache offline" `Quick
+            test_refresh_failure_marks_expired_cache_offline;
           test_case "monitoring uses live runtime" `Quick
             test_governance_monitoring_uses_live_runtime;
           test_case "dashboard exposes keeper approval queue" `Quick

@@ -126,7 +126,15 @@ let handle_keeper_task_tool
       | Some p -> Some (Keeper_types.tool_preset_to_string p)
       | None -> None
     in
+    let goal_filter (task : Types.task) =
+      match meta.active_goal_ids with
+      | [] -> true
+      | goal_ids ->
+          Keeper_runtime_contract.task_is_linked_to_keeper_goals goal_ids task
+    in
     let task_filter (task : Types.task) =
+      goal_filter task
+      &&
       match task.required_preset, preset_name with
       | None, _ -> true
       | Some _required, None -> false  (* agent without preset cannot claim preset-required task *)
@@ -151,9 +159,17 @@ let handle_keeper_task_tool
         Printf.sprintf "📋 No eligible tasks (preset mismatch: %d tasks require different preset, you have '%s')"
           preset_filtered (Option.value ~default:"unknown" preset_name)
       | Coord.Claim_next_no_eligible { excluded_count; _ } ->
+        let scope_suffix =
+          match meta.active_goal_ids with
+          | [] -> ""
+          | goal_ids ->
+              Printf.sprintf
+                " within active_goal_ids=[%s]"
+                (String.concat ", " goal_ids)
+        in
         Printf.sprintf
-          "📋 No eligible tasks. ACTION: Stop task-checking — blocked/excluded=%d."
-          excluded_count
+          "📋 No eligible tasks%s. ACTION: Stop task-checking — blocked/excluded=%d."
+          scope_suffix excluded_count
       | Coord.Claim_next_error e -> Printf.sprintf "❌ Error: %s" e
     in
     Yojson.Safe.to_string
@@ -183,6 +199,32 @@ let handle_keeper_task_tool
                "task_id", `String task_id;
                "action", `String "done";
                "notes", `String result_text;
+             ])
+      in
+      keeper_tool_result_json ~ok ~message)
+  | "keeper_task_submit_for_verification" ->
+    let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
+    let notes = Safe_ops.json_string ~default:"" "notes" args |> String.trim in
+    let pr_url = Safe_ops.json_string ~default:"" "pr_url" args |> String.trim in
+    if task_id = ""
+    then error_json "task_id is required. Use the task_id you got from keeper_task_claim."
+    else if notes = ""
+    then error_json "notes is required. Include verification evidence and test summary."
+    else if pr_url = ""
+    then error_json "pr_url is required. Include the PR opened for this task."
+    else (
+      let ok, message =
+        Tool_task.handle_transition
+          {
+            Tool_task.config;
+            agent_name = keeper_agent_sender ~meta;
+            sw = Eio_context.get_switch_opt ();
+          }
+          (`Assoc
+             [
+               "task_id", `String task_id;
+               "action", `String "submit_for_verification";
+               "notes", `String (notes ^ "\nPR: " ^ pr_url);
              ])
       in
       keeper_tool_result_json ~ok ~message)

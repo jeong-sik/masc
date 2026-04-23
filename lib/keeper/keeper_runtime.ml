@@ -135,6 +135,8 @@ let ensure_keeper_meta config name =
       apply_default defaults.autoboot_enabled meta.autoboot_enabled in
     let target_mention_targets =
       match defaults.mention_targets with [] -> meta.mention_targets | xs -> xs in
+    let target_active_goal_ids =
+      apply_default defaults.active_goal_ids meta.active_goal_ids in
     let target_sandbox_profile =
       apply_default defaults.sandbox_profile meta.sandbox_profile in
     let target_network_mode =
@@ -159,6 +161,18 @@ let ensure_keeper_meta config name =
       apply_default_opt defaults.telemetry_feedback_enabled meta.telemetry_feedback_enabled in
     let target_tf_window =
       apply_default_opt defaults.telemetry_feedback_window_hours meta.telemetry_feedback_window_hours in
+
+    (* --- Per-Provider Timeout --- *)
+    let target_per_provider_timeout =
+      match defaults.per_provider_timeout_state with
+      | Keeper_types_profile.Per_provider_timeout_unset ->
+          normalize_per_provider_timeout_opt
+            ~source:(Printf.sprintf "keeper runtime %s" name)
+            meta.per_provider_timeout_s
+      | Keeper_types_profile.Per_provider_timeout_invalid -> None
+      | Keeper_types_profile.Per_provider_timeout_set ->
+          defaults.per_provider_timeout
+    in
 
     (* --- Change detection by category --- *)
     let proactive_changed =
@@ -191,6 +205,7 @@ let ensure_keeper_meta config name =
       meta.policy_voice_enabled <> target_policy_voice_enabled
       || meta.autoboot_enabled <> target_autoboot_enabled
       || meta.mention_targets <> target_mention_targets
+      || meta.active_goal_ids <> target_active_goal_ids
       || meta.tool_access <> target_tool_access
       || meta.sandbox_profile <> target_sandbox_profile
       || meta.network_mode <> target_network_mode
@@ -204,12 +219,14 @@ let ensure_keeper_meta config name =
     let telemetry_changed =
       meta.telemetry_feedback_enabled <> target_tf_enabled
       || meta.telemetry_feedback_window_hours <> target_tf_window in
+    let timeout_policy_changed =
+      meta.per_provider_timeout_s <> target_per_provider_timeout in
     let any_changed =
       proactive_changed || signal_changed || denylist_changed || models_changed
       || social_model_changed
       || cascade_changed
       || personality_changed || policy_changed || discovery_changed
-      || telemetry_changed in
+      || telemetry_changed || timeout_policy_changed in
 
     if any_changed then begin
       let cats = List.filter_map Fun.id [
@@ -223,6 +240,7 @@ let ensure_keeper_meta config name =
         (if policy_changed then Some "policy" else None);
         (if discovery_changed then Some "discovery" else None);
         (if telemetry_changed then Some "telemetry" else None);
+        (if timeout_policy_changed then Some "timeout_policy" else None);
       ] in
       Log.Keeper.info
         "ensure_keeper_meta: re-syncing [%s] for %s"
@@ -257,6 +275,7 @@ let ensure_keeper_meta config name =
         policy_voice_enabled = target_policy_voice_enabled;
         autoboot_enabled = target_autoboot_enabled;
         mention_targets = target_mention_targets;
+        active_goal_ids = target_active_goal_ids;
         tool_access = target_tool_access;
         sandbox_profile = target_sandbox_profile;
         network_mode = target_network_mode;
@@ -268,6 +287,7 @@ let ensure_keeper_meta config name =
         work_discovery_guidance = target_wd_guidance;
         telemetry_feedback_enabled = target_tf_enabled;
         telemetry_feedback_window_hours = target_tf_window;
+        per_provider_timeout_s = target_per_provider_timeout;
         updated_at = now_iso ();
       } in
       match write_meta config updated with

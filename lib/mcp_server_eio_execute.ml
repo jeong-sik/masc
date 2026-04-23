@@ -464,7 +464,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       (false, Printf.sprintf
          "❌ Join required: Call masc_join first before using %s.\n\n💡 Workflow: masc_join → masc_status → %s\n📚 See: @~/me/instructions/masc-workflow.md\n[DEBUG] agent_name=%s is_joined=%b"
          name name agent_name is_joined)
-  else
+  else (
 
   (* === Fix 1: Tag-based lazy context dispatch ===
      O(1) tag lookup determines which module handles this tool.
@@ -570,4 +570,4 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
            Log.Mcp.warn "registry inconsistency: %s minted but no tag" name;
            with_system_internal_audit ~agent_name
              (false,
-              Printf.sprintf "Unknown tool: %s (registry inconsistency)" name))
+              Printf.sprintf "Unknown tool: %s (registry inconsistency)" name)))

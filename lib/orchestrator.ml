@@ -29,7 +29,7 @@ let load_config () =
 let default_config = load_config ()
 
 (** Check if orchestration is needed *)
-let should_orchestrate room_config =
+let should_orchestrate ~min_priority room_config =
   (* Check if room is paused first *)
   if Coord.is_paused room_config then begin
     Log.Orchestrator.debug "room is paused, skipping";
@@ -43,7 +43,7 @@ let should_orchestrate room_config =
   | Ok backlog ->
       (* Get unclaimed tasks with priority <= min_priority *)
       let unclaimed_important = List.filter (fun (task: Types.task) ->
-        task.task_status = Types.Todo && task.priority <= 2
+        task.task_status = Types.Todo && task.priority <= min_priority
       ) backlog.tasks in
 
       (* Get active (non-zombie) agents *)
@@ -54,7 +54,7 @@ let should_orchestrate room_config =
 
       (* Need orchestration if: important tasks exist AND no active agents *)
       let needs_orchestration =
-        List.length unclaimed_important > 0 && List.length active_agents = 0
+        unclaimed_important <> [] && active_agents = []
       in
 
       if needs_orchestration then
@@ -154,10 +154,13 @@ let make_orchestrator_check_consumer ~sw ~proc_mgr ?domain_mgr ~config ~room_con
     let should_act _beat = config.enabled
     let on_beat _beat =
       try
-        if should_orchestrate room_config then
+        if should_orchestrate ~min_priority:config.min_priority room_config then
           Eio.Fiber.fork ~sw (fun () ->
             try
-              ignore (spawn_orchestrator ~sw ~proc_mgr ?domain_mgr config room_config)
+              let (_ : Spawn.spawn_result) =
+                spawn_orchestrator ~sw ~proc_mgr ?domain_mgr config room_config
+              in
+              ()
             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
               Log.Orchestrator.error "spawn failed: %s" (Printexc.to_string exn));
         Ok ()

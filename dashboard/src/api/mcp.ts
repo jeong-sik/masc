@@ -42,10 +42,11 @@ function shouldRefreshDevToken(): boolean {
   const meta = getStoredTokenMeta()
   if (!token) return true
   if (meta?.source === 'dev') return true
-  // Legacy sessions only stored the raw token string. On loopback with the
-  // default dashboard actor, treat them as managed-token candidates so
-  // frequent restarts or base_path flips self-heal without manual clearing.
-  return meta == null && !isRemoteAccess() && currentDashboardActor() === 'dashboard'
+  const actor = currentDashboardActor()
+  if (isRemoteAccess() || actor !== 'dashboard') return false
+  // Loopback dashboard sessions should self-heal if they are still holding
+  // a borrowed non-dashboard token (for example an old codex paste/URL token).
+  return meta == null || meta.actor == null || meta.actor !== actor
 }
 
 /** Fetch the loopback-only dev token once per page load and stash it so
@@ -148,10 +149,15 @@ function mcpHeaders(extra?: Record<string, string>): Record<string, string> {
 }
 
 function explicitToolActor(args: Record<string, unknown>): string | null {
-  const raw =
-    (typeof args._agent_name === 'string' && args._agent_name.trim() !== '' ? args._agent_name : null)
-    ?? (typeof args.agent_name === 'string' && args.agent_name.trim() !== '' ? args.agent_name : null)
-  return raw?.trim() ?? null
+  const internalActor =
+    typeof args._agent_name === 'string' && args._agent_name.trim() !== ''
+      ? args._agent_name.trim()
+      : null
+  if (internalActor) return internalActor
+  if (getStoredToken()) return null
+  return typeof args.agent_name === 'string' && args.agent_name.trim() !== ''
+    ? args.agent_name.trim()
+    : null
 }
 
 function mcpHeadersForActor(
@@ -298,7 +304,10 @@ function extractMcpText(res: McpCallResponse): string {
   return res.result?.content?.[0]?.text ?? ''
 }
 
-export async function callMcpTool(toolName: string, args: Record<string, unknown>): Promise<string> {
+async function callMcpToolInternal(
+  toolName: string,
+  args: Record<string, unknown>,
+): Promise<string> {
   const requestId = String(Math.floor(Date.now() % 1000000))
   let phase = mcpSessionId ? 'tools/call' : 'initialize'
   try {
@@ -334,6 +343,10 @@ export async function callMcpTool(toolName: string, args: Record<string, unknown
     }
     throw err
   }
+}
+
+export async function callMcpTool(toolName: string, args: Record<string, unknown>): Promise<string> {
+  return callMcpToolInternal(toolName, args)
 }
 
 // --- MCP tools/list — fetch tool schemas with inputSchema ---

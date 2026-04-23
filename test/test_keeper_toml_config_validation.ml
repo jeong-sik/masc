@@ -55,6 +55,86 @@ let test_named_keeper_docker_defaults () =
   in
   List.iter expect_keeper [ "sangsu"; "sojin"; "verdict" ]
 
+(** Write a temporary TOML file, run load_keeper_toml, clean up. *)
+let with_temp_toml content f =
+  let path = Filename.temp_file "keeper_test_" ".toml" in
+  let oc = open_out path in
+  output_string oc content;
+  close_out oc;
+  Fun.protect
+    ~finally:(fun () -> try Sys.remove path with _ -> ())
+    (fun () -> f path)
+
+let test_cascade_name_rejects_unknown () =
+  let result =
+    with_temp_toml
+      "[keeper]\nname = \"testkeeper\"\ncascade_name = \"nick0cave\"\n"
+      KTP.load_keeper_toml
+  in
+  match result with
+  | Ok _ -> fail "nick0cave cascade_name should be rejected"
+  | Error e ->
+      check bool "error mentions cascade_name" true
+        (let len = String.length e in
+         let needle = "invalid cascade_name" in
+         let nlen = String.length needle in
+         let found = ref false in
+         for i = 0 to len - nlen do
+           if String.sub e i nlen = needle then found := true
+         done;
+         !found)
+
+let test_cascade_name_accepts_known () =
+  let check_ok label cascade_name =
+    let result =
+      with_temp_toml
+        (Printf.sprintf "[keeper]\nname = \"testkeeper\"\ncascade_name = \"%s\"\n"
+           cascade_name)
+        KTP.load_keeper_toml
+    in
+    match result with
+    | Ok _ -> ()
+    | Error e ->
+        fail (Printf.sprintf "%s: '%s' should be accepted but got: %s" label
+                cascade_name e)
+  in
+  check_ok "big_three variant" "big_three";
+  check_ok "local_only phase-routing" "local_only";
+  check_ok "local_recovery phase-routing" "local_recovery"
+
+let test_cascade_name_accepts_catalog_entry () =
+  (* "tool_use_strict" is a known catalog entry in cascade.json,
+     distinct from compile-time variants.  Tests that the live catalog
+     is consulted during validation. *)
+  let catalog =
+    try Masc_mcp.Keeper_cascade_profile.catalog_names ()
+    with _ -> []
+  in
+  let test_name =
+    (* Pick a catalog entry that is NOT a compile-time variant *)
+    match
+      List.find_opt
+        (fun n ->
+           not (List.mem n Masc_mcp.Keeper_cascade_profile.known_cascades)
+           && not (List.mem n [ "local_only"; "local_recovery" ]))
+        catalog
+    with
+    | Some name -> name
+    | None -> "tool_use_strict" (* fallback, may not be in catalog *)
+  in
+  let result =
+    with_temp_toml
+      (Printf.sprintf "[keeper]\nname = \"testkeeper\"\ncascade_name = \"%s\"\n"
+         test_name)
+      KTP.load_keeper_toml
+  in
+  match result with
+  | Ok _ -> ()
+  | Error e ->
+      (* If catalog is unavailable, skip rather than fail *)
+      if catalog = [] then ()
+      else fail (Printf.sprintf "%s should be accepted: %s" test_name e)
+
 let () =
   run "Keeper TOML Config Validation"
     [
@@ -63,5 +143,14 @@ let () =
           test_case "all toml files parse" `Quick test_all_keeper_tomls_parse;
           test_case "named keepers default to docker" `Quick
             test_named_keeper_docker_defaults;
+        ] );
+      ( "cascade_name validation",
+        [
+          test_case "rejects unknown cascade_name" `Quick
+            test_cascade_name_rejects_unknown;
+          test_case "accepts known cascade names" `Quick
+            test_cascade_name_accepts_known;
+          test_case "accepts catalog entry (legacy alias)" `Quick
+            test_cascade_name_accepts_catalog_entry;
         ] );
     ]

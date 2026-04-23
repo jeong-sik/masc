@@ -144,9 +144,12 @@ let vote store ~voter ~post_id ~direction : (int, board_error) result =
          contention with every other reader/writer. *)
       (match board_result with
        | Ok { delta; earn_upvote_for = Some author_name } ->
-           ignore (Agent_economy.earn
-             ~base_path:(board_base_path ()) ~agent_name:author_name
-             ~kind:Earn_upvote ~reason:"upvote on post" ());
+           (match Agent_economy.earn
+              ~base_path:(board_base_path ()) ~agent_name:author_name
+              ~kind:Earn_upvote ~reason:"upvote on post" () with
+            | Ok _ -> ()
+            | Error e ->
+                Log.BoardLog.warn "board_votes: economy earn failed for %s: %s" author_name e);
            Ok delta
        | Ok { delta; earn_upvote_for = None } -> Ok delta
        | Error _ as e -> e)

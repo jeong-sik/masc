@@ -8,7 +8,11 @@ import type {
   OperatorSnapshot,
 } from '../types'
 import { parseOperatorActionResult } from './schemas/operator-action'
-import { resolveDashboardActorName, sanitizeDashboardActorName } from '../lib/dashboard-actor'
+import { sanitizeDashboardActorName } from '../lib/dashboard-actor'
+import {
+  currentDashboardActorName,
+  setCanonicalDashboardActor,
+} from '../lib/dashboard-session-actor'
 
 // --- Auth ---
 // Token is read from ?token= on first load, moved to sessionStorage,
@@ -97,11 +101,13 @@ export function setStoredToken(
   } else {
     sessionStorage.removeItem(TOKEN_META_STORAGE_KEY)
   }
+  setCanonicalDashboardActor(null)
 }
 
 export function clearStoredToken(): void {
   sessionStorage.removeItem(TOKEN_STORAGE_KEY)
   sessionStorage.removeItem(TOKEN_META_STORAGE_KEY)
+  setCanonicalDashboardActor(null)
 }
 
 export function isRemoteAccess(): boolean {
@@ -115,7 +121,7 @@ export function currentDashboardActor(): string {
     ? sanitizeDashboardActorName(meta.actor)
     : null
   if (managedActor) return managedActor
-  return resolveDashboardActorName() || 'dashboard'
+  return currentDashboardActorName()
 }
 
 type HeaderOptions = {

@@ -1,9 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import {
   runtimeBandMeta,
+  summarizeKeeperMonitoring,
   summarizeMonitoringEvidence,
 } from './monitoring-runtime'
 import type { KeeperMonitoringSummary } from './monitoring-runtime'
+import type { Keeper } from '../types'
 
 function makeSummary(overrides: Partial<KeeperMonitoringSummary> = {}): KeeperMonitoringSummary {
   return {
@@ -105,5 +107,34 @@ describe('summarizeMonitoringEvidence', () => {
       phase: { key: 'unknown', label: '확인 필요', description: 'unknown' },
     }))
     expect(evidence.phase).toBeNull()
+  })
+})
+
+describe('summarizeKeeperMonitoring', () => {
+  it('ignores stale last_blocker text when no live runtime blocker is present', () => {
+    const summary = summarizeKeeperMonitoring({
+      name: 'keeper-a',
+      status: 'idle',
+      phase: 'Running',
+      last_heartbeat: new Date().toISOString(),
+      last_blocker: 'old blocker',
+    } as Keeper)
+
+    expect(summary.band.key).toBe('active')
+    expect(summary.hint).toBeNull()
+  })
+
+  it('keeps runtime blockers as live attention signals', () => {
+    const summary = summarizeKeeperMonitoring({
+      name: 'keeper-a',
+      status: 'idle',
+      phase: 'Running',
+      last_heartbeat: new Date().toISOString(),
+      runtime_blocker_class: 'turn_timeout',
+      runtime_blocker_summary: 'turn timed out after queue wait',
+    } as Keeper)
+
+    expect(summary.band.key).toBe('attention')
+    expect(summary.hint).toBe('turn timed out after queue wait')
   })
 })

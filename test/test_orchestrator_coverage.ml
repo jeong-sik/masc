@@ -201,7 +201,7 @@ let with_initialized_room f =
 let test_should_orchestrate_empty_room () =
   with_initialized_room @@ fun config ->
   (* Empty room with no tasks and no agents should return false *)
-  let result = Orchestrator.should_orchestrate config in
+  let result = Orchestrator.should_orchestrate ~min_priority:2 config in
   check bool "no orchestration needed" false result
 
 let test_should_orchestrate_with_task_no_agent () =
@@ -209,7 +209,7 @@ let test_should_orchestrate_with_task_no_agent () =
   (* Add a high priority task *)
   let _ = Coord.add_task config ~title:"Important Task" ~priority:1 ~description:"Test" in
   (* No active agents → should return true *)
-  let result = Orchestrator.should_orchestrate config in
+  let result = Orchestrator.should_orchestrate ~min_priority:2 config in
   check bool "orchestration needed" true result
 
 let test_should_orchestrate_with_task_and_agent () =
@@ -218,7 +218,7 @@ let test_should_orchestrate_with_task_and_agent () =
   let _ = Coord.add_task config ~title:"Task" ~priority:1 ~description:"Test" in
   let _ = Coord.join config ~agent_name:"active-agent" ~capabilities:[] () in
   (* Active agent exists → should return false *)
-  let result = Orchestrator.should_orchestrate config in
+  let result = Orchestrator.should_orchestrate ~min_priority:2 config in
   check bool "no orchestration with active agent" false result
 
 let test_should_orchestrate_paused_room () =
@@ -228,7 +228,7 @@ let test_should_orchestrate_paused_room () =
   (* Pause the room *)
   let _ = Coord.pause config ~by:"test" ~reason:"Testing" in
   (* Paused room should return false *)
-  let result = Orchestrator.should_orchestrate config in
+  let result = Orchestrator.should_orchestrate ~min_priority:2 config in
   check bool "no orchestration when paused" false result
 
 let test_should_orchestrate_low_priority_task () =
@@ -236,7 +236,7 @@ let test_should_orchestrate_low_priority_task () =
   (* Add low priority task (priority 5 > threshold 2) *)
   let _ = Coord.add_task config ~title:"Low Priority" ~priority:5 ~description:"Test" in
   (* Low priority tasks don't trigger orchestration *)
-  let result = Orchestrator.should_orchestrate config in
+  let result = Orchestrator.should_orchestrate ~min_priority:2 config in
   check bool "no orchestration for low priority" false result
 
 (* ============================================================

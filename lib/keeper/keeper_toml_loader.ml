@@ -479,6 +479,12 @@ let toml_int_opt (doc : toml_doc) (key : string) : int option =
   | _ -> None
 ;;
 
+let toml_float_opt (doc : toml_doc) (key : string) : float option =
+  match List.assoc_opt key doc with
+  | Some (Toml_float f) -> Some f
+  | _ -> None
+;;
+
 let toml_bool_opt (doc : toml_doc) (key : string) : bool option =
   match List.assoc_opt key doc with
   | Some (Toml_bool b) -> Some b

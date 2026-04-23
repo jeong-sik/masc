@@ -172,7 +172,7 @@ let set_session_push_fn (fn : Yojson.Safe.t -> int) =
 let push_event_to_sessions (event : Yojson.Safe.t) : unit =
   match !session_registry_ref with
   | Some push_fn ->
-      (try ignore (push_fn event)
+      (try let _ = push_fn event in ()
        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Sub.error "push_event failed: %s" (Printexc.to_string exn))
   | None ->
       if Atomic.compare_and_set unwired_warned false true then
@@ -207,7 +207,7 @@ let notify_change ~(resource : resource_type) ~(change : change_type)
          ("data", data);
          ("timestamp", `Float now);
        ] in
-       (try ignore (push_fn event)
+       (try let _ = push_fn event in ()
         with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Sub.error "push_sub_event failed: %s" (Printexc.to_string exn))
    | None -> ());
   List.length subs

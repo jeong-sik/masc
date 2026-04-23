@@ -59,7 +59,7 @@ let force_leave config ~agent_id ~reason =
   ) in
   (* Broadcast the forced leave *)
   let message = Printf.sprintf "[SYSTEM] Agent '%s' forcibly removed: %s" agent_id reason in
-  (try ignore (Coord.broadcast config ~from_agent:"system" ~content:message)
+  (try let _ = Coord.broadcast config ~from_agent:"system" ~content:message in ()
    with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Misc.error "broadcast (force leave) failed: %s" (Printexc.to_string exn))
 
 (** masc_suspend removed: pruned from surfaces. *)

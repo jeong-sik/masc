@@ -77,7 +77,7 @@ let start_flusher_actor ~sw store =
           (try Board.flush_dirty store
            with exn -> Log.BoardLog.error "Flush failed: %s" (Printexc.to_string exn))
       | Board_types.Sweep ->
-          (try ignore (Board.sweep store)
+          (try let _ = Board.sweep store in ()
            with exn -> Log.BoardLog.error "Sweep failed: %s" (Printexc.to_string exn))
     done
   )

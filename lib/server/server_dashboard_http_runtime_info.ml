@@ -160,7 +160,7 @@ let maybe_refresh_git_rev_parse_short_in_background dir =
   | Some sw ->
       if git_rev_parse_short_try_begin_refresh dir then
         Eio.Fiber.fork ~sw (fun () ->
-          try ignore (git_rev_parse_short_refresh dir) with
+          try let _ = git_rev_parse_short_refresh dir in () with
           | Eio.Cancel.Cancelled _ as e -> raise e
           | exn ->
               Log.Dashboard.warn

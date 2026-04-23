@@ -653,7 +653,7 @@ and handle_cancel_task ctx args =
          handoff_from = None;
          handoff_to = None;
        } in
-       (try ignore (Metrics_store_eio.record ctx.config metric)
+       (try let _ = Metrics_store_eio.record ctx.config metric in ()
         with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Task.error "Metrics_store_eio.record(cancel) failed: %s" (Printexc.to_string exn));
        (* Feed failure into Thompson Sampling quality signal *)
        Thompson_sampling.record_vote ~agent_name:ctx.agent_name ~direction:`Down;
@@ -954,7 +954,7 @@ and handle_transition ctx args =
          handoff_from = None;
          handoff_to = None;
        } in
-       (try ignore (Metrics_store_eio.record ctx.config metric)
+       (try let _ = Metrics_store_eio.record ctx.config metric in ()
         with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Task.error "Metrics_store_eio.record(transition-done) failed: %s" (Printexc.to_string exn));
        Thompson_sampling.record_vote ~agent_name:ctx.agent_name ~direction:`Up;
        Prometheus.record_task_completed ()
@@ -971,7 +971,7 @@ and handle_transition ctx args =
          handoff_from = None;
          handoff_to = None;
        } in
-       (try ignore (Metrics_store_eio.record ctx.config metric)
+       (try let _ = Metrics_store_eio.record ctx.config metric in ()
         with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Task.error "Metrics_store_eio.record(transition-cancel) failed: %s" (Printexc.to_string exn));
        Thompson_sampling.record_vote ~agent_name:ctx.agent_name ~direction:`Down;
        Prometheus.record_task_failed ()

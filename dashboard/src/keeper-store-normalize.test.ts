@@ -322,6 +322,69 @@ describe('normalizeKeepers lifecycle metrics', () => {
     })
   })
 
+  it('preserves trust summary and latest causal event fields', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'trust-keeper',
+        status: 'active',
+        trust: {
+          disposition: 'Pause',
+          disposition_reason: 'approval_waiting',
+          needs_attention: true,
+          attention_reason: 'approval_pending',
+          next_human_action: 'resolve_approval',
+          approval_state: {
+            state: 'pending',
+            summary: '1 approval request waiting',
+            pending_count: 1,
+          },
+          execution_summary: {
+            tool_contract_result: 'unknown',
+            sandbox_summary: 'docker / none',
+            mutation_guard_summary: 'mutation_contract_not_observed',
+            latest_receipt_at: '2026-04-23T00:10:00Z',
+          },
+          latest_causal_event: {
+            kind: 'approval_pending',
+            ts: '2026-04-23T00:11:00Z',
+            ts_unix: 1776903060,
+            keeper_turn_id: 42,
+            task_id: 'task-1',
+            goal_ids: ['goal-1'],
+            title: 'Approval pending',
+            summary: 'Waiting for operator approval before resuming.',
+            severity: 'warn',
+            next_human_action: 'resolve_approval',
+          },
+        },
+      },
+    ])
+
+    expect(keeper?.trust).toMatchObject({
+      disposition: 'Pause',
+      disposition_reason: 'approval_waiting',
+      needs_attention: true,
+      attention_reason: 'approval_pending',
+      next_human_action: 'resolve_approval',
+      approval_state: {
+        state: 'pending',
+        summary: '1 approval request waiting',
+        pending_count: 1,
+      },
+      execution_summary: {
+        tool_contract_result: 'unknown',
+        sandbox_summary: 'docker / none',
+        mutation_guard_summary: 'mutation_contract_not_observed',
+      },
+      latest_causal_event: {
+        kind: 'approval_pending',
+        keeper_turn_id: 42,
+        title: 'Approval pending',
+        summary: 'Waiting for operator approval before resuming.',
+      },
+    })
+  })
+
   it('normalizes ctx composition telemetry from keeper metric points', () => {
     const [keeper] = normalizeKeepers([
       {

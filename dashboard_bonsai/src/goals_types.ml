@@ -29,6 +29,11 @@ type node =
   ; tasks : task list
   ; task_count : int
   ; task_done_count : int
+  ; blocking_source : string
+  ; blocking_reason : string
+  ; latest_keeper_ref : string option
+  ; latest_turn_ref : int option
+  ; stalled_since : string option
   ; children : node list
   ; child_count : int
   }
@@ -129,6 +134,15 @@ let rec node_of_yojson json : node =
   ; tasks
   ; task_count = int_field json "task_count"
   ; task_done_count = int_field json "task_done_count"
+  ; blocking_source = string_field ~default:"none" json "blocking_source"
+  ; blocking_reason = string_field ~default:"" json "blocking_reason"
+  ; latest_keeper_ref = string_opt_field json "latest_keeper_ref"
+  ; latest_turn_ref =
+      (match Yojson.Safe.Util.member "latest_turn_ref" json with
+       | `Int i -> Some i
+       | `Intlit s -> (try Some (Int.of_string s) with _ -> None)
+       | _ -> None)
+  ; stalled_since = string_opt_field json "stalled_since"
   ; children
   ; child_count = int_field json "child_count"
   }

@@ -201,6 +201,36 @@ stylesheet
   .task_dot_done { color: var(--status-ok); }
   .task_dot_run { color: var(--status-warn); }
   .task_title { color: var(--text-primary); }
+
+  .blocker {
+    border: 1px solid rgba(160,106,26,0.28);
+    background: rgba(160,106,26,0.08);
+    padding: 8px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .blocker_k {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 9px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--status-warn);
+  }
+
+  .blocker_v {
+    font-family: 'Noto Sans KR', sans-serif;
+    font-size: 12px;
+    line-height: 1.45;
+    color: var(--text-primary);
+  }
+
+  .blocker_meta {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10px;
+    color: var(--text-dim);
+  }
 |}]
 
 let status_pill_color (s : string) : Pill.color =
@@ -242,6 +272,25 @@ let truncate ~max_len s =
   else String.sub s ~pos:0 ~len:(max_len - 1) ^ "…"
 ;;
 
+let blocker_label source =
+  match String.lowercase source with
+  | "goal_phase" -> "goal phase"
+  | "child_goal" -> "child goal"
+  | "approval" -> "approval"
+  | "keeper_runtime" -> "keeper runtime"
+  | "task_fsm" -> "task fsm"
+  | "stalled" -> "stalled"
+  | _ -> source
+;;
+
+let truth_meta_items (n : Goals_types.node) =
+  List.filter_opt
+    [ Option.map n.latest_keeper_ref ~f:(fun keeper -> "keeper " ^ keeper)
+    ; Option.map n.latest_turn_ref ~f:(fun turn -> "turn " ^ Int.to_string turn)
+    ; Option.map n.stalled_since ~f:(fun ts -> "since " ^ ts)
+    ]
+;;
+
 let rec view_node ~(depth : int) (n : Goals_types.node) : Node.t =
   let bar_fill_style =
     Attr.create "style"
@@ -279,6 +328,45 @@ let rec view_node ~(depth : int) (n : Goals_types.node) : Node.t =
     if List.is_empty n.children
     then []
     else List.map n.children ~f:(view_node ~depth:(depth + 1))
+  in
+  let truth_meta = truth_meta_items n in
+  let blocker_box =
+    if String.equal n.blocking_source "none" || String.is_empty (String.strip n.blocking_reason)
+    then []
+    else
+      [ Node.div
+          ~attrs:[ Style.blocker ]
+          ([ Node.div
+              ~attrs:[ Style.blocker_k ]
+              [ Node.text (blocker_label n.blocking_source) ]
+          ; Node.div
+              ~attrs:[ Style.blocker_v ]
+              [ Node.text n.blocking_reason ]
+           ]
+           @
+           if List.is_empty truth_meta
+           then []
+           else
+             [ Node.div
+                 ~attrs:[ Style.blocker_meta ]
+                 [ Node.text (String.concat ~sep:" · " truth_meta) ]
+             ])
+      ]
+  in
+  let truth_refs_box =
+    if (not (List.is_empty blocker_box)) || List.is_empty truth_meta
+    then []
+    else
+      [ Node.div
+          ~attrs:[ Style.blocker ]
+          [ Node.div
+              ~attrs:[ Style.blocker_k ]
+              [ Node.text "truth refs" ]
+          ; Node.div
+              ~attrs:[ Style.blocker_meta ]
+              [ Node.text (String.concat ~sep:" · " truth_meta) ]
+          ]
+      ]
   in
   Node.div
     ~attrs:(Style.goal :: indent_attr)
@@ -341,6 +429,8 @@ let rec view_node ~(depth : int) (n : Goals_types.node) : Node.t =
              ]
          ]
        ; task_chips
+       ; blocker_box
+       ; truth_refs_box
        ; children
        ])
 ;;

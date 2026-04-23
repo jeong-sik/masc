@@ -22,12 +22,7 @@ let trim_opt = function
       if trimmed = "" then None else Some trimmed
   | None -> None
 
-let read_backlog_or_raise config =
-  match read_backlog_r config with
-  | Ok backlog -> backlog
-  | Error msg -> raise (Invalid_argument msg)
-
-(** Agents who currently hold a Claimed or InProgress task.
+/** Agents who currently hold a Claimed or InProgress task.
     Used by the Hebbian hook to strengthen only against agents who are
     actively working, not everyone who happens to be joined.
     Falls back to active_agents if the backlog cannot be read. *)
@@ -343,9 +338,11 @@ let add_task ?contract ?goal_id ?required_preset ?created_by config ~title
   let goal_id = trim_opt goal_id in
   try
     with_file_lock config backlog_path (fun () ->
-      let backlog = read_backlog_or_raise config in
+      match read_backlog_r config with
+      | Error msg -> Printf.sprintf "❌ Error: %s" msg
+      | Ok backlog ->
       (* Dedup guard: reject if an active task with the same normalized title exists *)
-      (match find_duplicate_task backlog ~title ~goal_id with
+      match find_duplicate_task backlog ~title ~goal_id with
       | Some existing_id ->
         Printf.sprintf "⚠️ Duplicate rejected: '%s' matches existing %s. Use that task instead."
           title existing_id
@@ -402,7 +399,7 @@ let add_task ?contract ?goal_id ?required_preset ?created_by config ~title
 
       (Atomic.get Coord_hooks.on_task_mutation_fn) ();
       ignore (broadcast config ~from_agent:actor ~content:(Printf.sprintf "📋 New quest: %s" title));
-      Printf.sprintf "✅ Added %s: %s" task_id title))
+      Printf.sprintf "✅ Added %s: %s" task_id title)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | e ->
@@ -418,7 +415,9 @@ let add_task_with_role ?contract ?goal_id ?created_by config ~title ~priority
   let goal_id = trim_opt goal_id in
   try
     with_file_lock config backlog_path (fun () ->
-      let backlog = read_backlog_or_raise config in
+      match read_backlog_r config with
+      | Error msg -> Printf.sprintf "❌ Error: %s" msg
+      | Ok backlog ->
       (match find_duplicate_task backlog ~title ~goal_id with
       | Some existing_id ->
         Printf.sprintf "⚠️ Duplicate rejected: '%s' matches existing %s. Use that task instead."
@@ -484,7 +483,7 @@ let add_task_with_role ?contract ?goal_id ?created_by config ~title ~priority
       let role_str = Types_core.role_to_string required_role in
       ignore (broadcast config ~from_agent:actor
         ~content:(Printf.sprintf "📋 New quest: %s (requires: %s)" title role_str));
-      Printf.sprintf "✅ Added %s: %s (required_role: %s)" task_id title role_str))
+      Printf.sprintf "✅ Added %s: %s (required_role: %s)" task_id title role_str)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | e ->
@@ -496,8 +495,10 @@ let batch_add_tasks_internal ?created_by config tasks =
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
   let actor = Option.value ~default:"system" created_by in
   with_file_lock config backlog_path (fun () ->
+    match read_backlog_r config with
+    | Error msg -> Printf.sprintf "❌ Error adding batch tasks: %s" msg
+    | Ok backlog ->
     try
-      let backlog = read_backlog_or_raise config in
       let next_num = ref (next_task_number config backlog) in
       let added_tasks =
         List.map
@@ -588,8 +589,10 @@ let claim_task config ~agent_name ~task_id =
 
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
   with_file_lock config backlog_path (fun () ->
+    match read_backlog_r config with
+    | Error msg -> Printf.sprintf "❌ Error: %s" msg
+    | Ok backlog ->
     try
-      let backlog = read_backlog_or_raise config in
       let found = ref false in
       let already_claimed = ref None in
       let blocked_reason = ref None in
@@ -678,8 +681,10 @@ let claim_task_r config ~agent_name ~task_id
   in
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
   with_file_lock config backlog_path (fun () ->
+    match read_backlog_r config with
+    | Error msg -> Error (Types.IoError msg)
+    | Ok backlog ->
     try
-      let backlog = read_backlog_or_raise config in
       (* Check role constraint before attempting claim *)
       let target_task = List.find_opt (fun t -> t.id = task_id) backlog.tasks in
       let* task =
@@ -853,7 +858,9 @@ let transition_task_r config ~agent_name ~task_id ~action
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
   with_file_lock config backlog_path (fun () ->
     try
-      let backlog = read_backlog_or_raise config in
+      match read_backlog_r config with
+      | Error msg -> Error (Types.IoError msg)
+      | Ok backlog ->
       let* () =
         match expected_version with
         | Some v when backlog.version <> v ->
@@ -1180,7 +1187,9 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result
     let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
     with_file_lock config backlog_path (fun () ->
       try
-        let backlog = read_backlog_or_raise config in
+        match read_backlog_r config with
+        | Error msg -> Error (Types.IoError msg)
+        | Ok backlog ->
         let task_opt = List.find_opt (fun t -> t.id = task_id) backlog.tasks in
         match task_opt with
         | None -> Error (Types.TaskNotFound task_id)
@@ -1315,7 +1324,9 @@ let link_task_execution_artifacts_r config ~task_id ?session_id ?operation_id
     let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
     with_file_lock config backlog_path (fun () ->
         try
-          let backlog = read_backlog_or_raise config in
+          match read_backlog_r config with
+          | Error msg -> Error (Types.IoError msg)
+          | Ok backlog ->
           match List.find_opt (fun task -> task.id = task_id) backlog.tasks with
           | None -> Error (Types.TaskNotFound task_id)
           | Some task ->

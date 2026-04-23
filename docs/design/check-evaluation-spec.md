@@ -107,6 +107,7 @@ It is limited to the artifacts selected by the active phase-1A checks.
 | `manifest.json` | yes | yes | base proof input |
 | `contract.json` | yes | yes | required for contract snapshot integrity and propagation checks |
 | `evidence/mode_violations.json` | no in Phase-1A judge | no | not required by active phase-1A checks; used in Phase-1B friction |
+| `evidence/effects.json` | no | no | advisory effect decision ledger; not counted as a mode violation artifact |
 | `evidence/token_usage.json` | no | no | advisory / annotation only |
 | `evidence/review_warning.json` | conditional | yes when `runtime.review_requirement` is declared | warning-only bridge artifact that routes the run into the verification FSM |
 | `tool_traces/*.jsonl` | no by default | no | only selected when a later active check explicitly consumes them |

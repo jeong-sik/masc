@@ -1391,6 +1391,7 @@ let sample_tool_surface_metrics () : Masc_mcp.Keeper_agent_run.tool_surface_metr
 let make_run_result ~text ~tools ~model ~input_tok ~output_tok
     ?(usage_reported = true)
     ?(tool_calls = [])
+    ?proof
     ?trace_ref
     ?run_validation
     ?cascade_observation
@@ -1408,12 +1409,44 @@ let make_run_result ~text ~tools ~model ~input_tok ~output_tok
     tools_used = tools;
     tool_calls;
     checkpoint = None;
-    proof = None;
+    proof;
     trace_ref;
     run_validation;
     stop_reason = Masc_mcp.Oas_worker.Completed;
     inference_telemetry = None;
     tool_surface = sample_tool_surface_metrics ();
+  }
+
+let sample_cdal_proof ?(raw_evidence_refs = []) () : Agent_sdk.Cdal_proof.t =
+  {
+    schema_version = Agent_sdk.Cdal_proof.schema_version_current;
+    run_id = "keeper-metrics-proof-test";
+    contract_id = "md5:test";
+    requested_execution_mode = Execute;
+    effective_execution_mode = Execute;
+    mode_decision_source = "passthrough";
+    risk_class = Agent_sdk.Risk_class.Low;
+    provider_snapshot =
+      {
+        provider_name = "test";
+        model_id = "test-model";
+        api_version = None;
+      };
+    capability_snapshot =
+      {
+        tools = [ "read"; "write" ];
+        mcp_servers = [];
+        max_turns = 10;
+        max_tokens = Some 4096;
+        thinking_enabled = None;
+      };
+    tool_trace_refs = [];
+    raw_evidence_refs;
+    checkpoint_ref = None;
+    result_status = Completed;
+    started_at = 1000.0;
+    ended_at = 1001.0;
+    scope = None;
   }
 
 let test_prompt_metrics_fingerprint_is_deterministic () =
@@ -2051,6 +2084,78 @@ let test_append_metrics_snapshot_treats_validated_evidence_as_tool_use () =
         "tool_use"
         Yojson.Safe.Util.(
           json |> member "scheduled_autonomous_outcome" |> to_string))
+
+let test_append_metrics_snapshot_counts_only_mode_violation_refs () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      let proof =
+        sample_cdal_proof
+          ~raw_evidence_refs:
+            [
+              "proof-store://keeper-metrics-proof-test/evidence/effects.json";
+              "proof-store://keeper-metrics-proof-test/evidence/mode_violations.json";
+              "proof-store://keeper-metrics-proof-test/evidence/review_warning.json";
+            ]
+          ()
+      in
+      let result =
+        make_run_result
+          ~text:""
+          ~tools:[]
+          ~model:"openai:qwen3.5-35b"
+          ~input_tok:40
+          ~output_tok:20
+          ~proof
+          ()
+      in
+      UM.append_metrics_snapshot
+        ~config
+        ~meta:minimal_meta
+        ~observation:base_observation
+        ~result
+        ~latency_ms:123
+        ~turn_cost:0.01
+        ~turn_generation:1
+        ~channel:"turn"
+        ~snapshot_source:"test"
+        ~context_ratio:0.1
+        ~context_tokens:10
+        ~context_max:100
+        ~message_count:2
+        ~compaction:
+          {
+            Masc_mcp.Keeper_exec_context.applied = false;
+            attempted = false;
+            failure_reason = None;
+            trigger = None;
+            decision = "no_compaction";
+            before_tokens = 0;
+            after_tokens = 0;
+            saved_tokens = 0;
+          }
+        ~handoff_json:None
+        ();
+      let metrics_store =
+        Masc_mcp.Keeper_types.keeper_metrics_store config minimal_meta.name
+      in
+      let line =
+        match Dated_jsonl.read_recent_lines metrics_store 1 with
+        | [ line ] -> line
+        | _ -> fail "expected one metrics line"
+      in
+      let cdal_proof =
+        Yojson.Safe.Util.(Yojson.Safe.from_string line |> member "cdal_proof")
+      in
+      check int "only mode_violations refs count as violations" 1
+        Yojson.Safe.Util.(cdal_proof |> member "violation_count" |> to_int);
+      check int "raw evidence refs are counted separately" 3
+        Yojson.Safe.Util.(
+          cdal_proof |> member "raw_evidence_ref_count" |> to_int))
 
 let test_append_metrics_snapshot_nulls_unreported_usage () =
   Eio_main.run @@ fun env ->
@@ -4493,6 +4598,8 @@ let () =
             test_append_metrics_snapshot_includes_cascade_observation;
           test_case "snapshot treats validated evidence as tool use" `Quick
             test_append_metrics_snapshot_treats_validated_evidence_as_tool_use;
+          test_case "snapshot counts only mode violation refs" `Quick
+            test_append_metrics_snapshot_counts_only_mode_violation_refs;
           test_case "snapshot nulls unreported usage" `Quick
             test_append_metrics_snapshot_nulls_unreported_usage;
           test_case "decision record persists tool call details" `Quick

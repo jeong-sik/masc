@@ -41,6 +41,16 @@ let string_contains_substring_ci ~(needle : string) (haystack : string) : bool =
       ~needle:(String.lowercase_ascii needle)
     (String.lowercase_ascii haystack)
 
+let cdal_mode_violations_ref_suffix = "evidence/mode_violations.json"
+
+let cdal_raw_evidence_ref_count (proof : Oas.Cdal_proof.t) : int =
+  List.length proof.raw_evidence_refs
+
+let cdal_violation_ref_count (proof : Oas.Cdal_proof.t) : int =
+  proof.raw_evidence_refs
+  |> List.filter (String.ends_with ~suffix:cdal_mode_violations_ref_suffix)
+  |> List.length
+
 (* ── Observation / decision helpers ─────────────── *)
 
 let decision_channel_of_observation
@@ -1037,7 +1047,9 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
              ("result_status",
               Oas.Cdal_proof.result_status_to_yojson p.result_status);
              ("violation_count",
-              `Int (List.length p.raw_evidence_refs));
+              `Int (cdal_violation_ref_count p));
+             ("raw_evidence_ref_count",
+              `Int (cdal_raw_evidence_ref_count p));
              ("tool_trace_count",
               `Int (List.length p.tool_trace_refs));
              ("mode_source", `String p.mode_decision_source);

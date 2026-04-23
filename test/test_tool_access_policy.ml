@@ -609,6 +609,39 @@ let test_preset_universe_sizes () =
     (Printf.sprintf "Coding(%d) <= Full(%d)" coding_size full_size)
     true (coding_size <= full_size)
 
+let test_dispatch_preset_routes_pm_tools () =
+  init_keeper_tool_registry ();
+  let base = make_gate_test_meta ~name:"test-dispatch" () in
+  let meta = { base with
+    tool_access = Preset { preset = Dispatch; also_allow = [] };
+    tool_denylist = [];
+  } in
+  let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  check bool "dispatch includes goal list" true
+    (List.mem "masc_goal_list" allowed);
+  check bool "dispatch includes goal upsert" true
+    (List.mem "masc_goal_upsert" allowed);
+  check bool "dispatch includes keeper list" true
+    (List.mem "masc_keeper_list" allowed);
+  check bool "dispatch includes keeper status" true
+    (List.mem "masc_keeper_status" allowed);
+  check bool "dispatch includes keeper msg" true
+    (List.mem "masc_keeper_msg" allowed);
+  check bool "dispatch includes keeper msg result" true
+    (List.mem "masc_keeper_msg_result" allowed);
+  check bool "dispatch keeps session-bound messages filtered" false
+    (List.mem "masc_messages" allowed);
+  check bool "dispatch includes code read" true
+    (List.mem "masc_code_read" allowed);
+  check bool "dispatch includes code search" true
+    (List.mem "masc_code_search" allowed);
+  check bool "dispatch excludes fs edit" false
+    (List.mem "keeper_fs_edit" allowed);
+  check bool "dispatch excludes code write" false
+    (List.mem "masc_code_write" allowed);
+  check bool "dispatch excludes code git" false
+    (List.mem "masc_code_git" allowed)
+
 let test_preset_universe_superset_of_policy () =
   init_keeper_tool_registry ();
   let base = make_gate_test_meta () in
@@ -751,6 +784,11 @@ let () =
             test_resolve_diff;
           test_case "resolve disjoint is base" `Quick
             test_resolve_diff_disjoint_is_base;
+        ] );
+      ( "preset_scope",
+        [
+          test_case "dispatch routes PM tools" `Quick
+            test_dispatch_preset_routes_pm_tools;
         ] );
       ( "inter_diff_composition",
         [

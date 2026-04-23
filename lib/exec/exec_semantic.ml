@@ -16,21 +16,10 @@ let is_git_argv = function
 
 let stderr_hints_oom stderr =
   let lower = String.lowercase_ascii stderr in
-  let contains s sub =
-    let ls = String.length s and lb = String.length sub in
-    if lb = 0 || lb > ls then false
-    else
-      let rec loop i =
-        if i + lb > ls then false
-        else if String.sub s i lb = sub then true
-        else loop (i + 1)
-      in
-      loop 0
-  in
-  contains lower "out of memory"
-  || contains lower "oom-killer"
-  || contains lower "killed (oom)"
-  || contains lower "cannot allocate memory"
+  String_util.contains_substring lower "out of memory"
+  || String_util.contains_substring lower "oom-killer"
+  || String_util.contains_substring lower "killed (oom)"
+  || String_util.contains_substring lower "cannot allocate memory"
 
 let first_token s =
   let len = String.length s in

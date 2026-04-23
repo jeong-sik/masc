@@ -9,7 +9,8 @@
     layer turns common outputs into typed JSON that the agent can
     consume directly. *)
 
-val try_parse : cmd:string -> output:string -> Yojson.Safe.t option
+val try_parse :
+  cmd:string -> status:Unix.process_status -> output:string -> Yojson.Safe.t option
 (** Top-level dispatcher.  Examines [cmd] to select a parser, then
     feeds [output] through it.  Returns [None] when no parser matches
     or when the output does not conform to the expected format. *)

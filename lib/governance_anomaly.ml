@@ -71,10 +71,15 @@ let tool_name_of_action = function
 let batch_span_hours entries =
   match entries with
   | [] -> 1.0
-  | _ ->
-      let times = List.map (fun e -> e.Audit_log.timestamp) entries in
-      let min_t = List.fold_left min (List.hd times) (List.tl times) in
-      let max_t = List.fold_left max (List.hd times) (List.tl times) in
+  | first :: rest ->
+      let first_t = first.Audit_log.timestamp in
+      let min_t, max_t =
+        List.fold_left
+          (fun (min_t, max_t) e ->
+            let t = e.Audit_log.timestamp in
+            (min min_t t, max max_t t))
+          (first_t, first_t) rest
+      in
       let span_h = (max_t -. min_t) /. 3600.0 in
       max span_h 0.0167
 

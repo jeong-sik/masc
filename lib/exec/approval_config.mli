@@ -9,25 +9,29 @@
     names matching [Approval_context.t.actor].  Missing agent keys
     fall through to [defaults]. *)
 
+type trust_level =
+  | Observe      (** Allow all in the risk class, log telemetry. *)
+  | Suggest      (** Auto-allow with confirmation suggestion telemetry. *)
+  | Auto_safe    (** Auto-allow for the given risk class. *)
+  | Enforced     (** Strict ask/deny — fail-closed default. *)
+(** Progressive trust spectrum.  [Enforced] preserves current strict
+    behavior.  Lower levels auto-allow with increasing telemetry. *)
+
+val trust_level_to_string : trust_level -> string
+
 type agent_overlay = {
-  allow_safe_in_worktree : bool;
-  (** If true, Safe bins whose write caps stay [Inside_worktree] or
-      [Inside_sandbox] short-circuit to [Verdict.Allow] without asking.
-      Set false for strict agents that should Ask even on Safe bins. *)
+  safe_trust : trust_level;
+  (** Trust level for [Safe] bins ([ls], [cat], [rg]). *)
 
-  ask_audited : bool;
-  (** If true, [Audited] bins produce [Verdict.Ask].
-      If false, they produce [Verdict.Allow] (for experienced agents
-      the operator has granted broader trust). *)
+  audited_trust : trust_level;
+  (** Trust level for [Audited] bins ([git], [curl]). *)
 
-  deny_destructive_git : bool;
-  (** If true, [Git_op.Destructive _] emits [Verdict.Deny] outright.
-      If false, the hard deny is removed and the command falls through
-      to the normal risk-class rules.  Default true; a future operator
-      UI may flip this per-session for planned history rewrites. *)
+  privileged_trust : trust_level;
+  (** Trust level for [Privileged] bins ([rm], [sudo]).
+      Also governs destructive git ops. *)
 }
-(** Per-agent knobs.  Intentionally narrow — add fields only when a
-    policy rule actually reads them, not "for future flexibility". *)
+(** Per-agent knobs.  Each risk class has an independent trust level,
+    allowing fine-grained escalation without all-or-nothing overrides. *)
 
 type t = {
   defaults : agent_overlay;
@@ -38,15 +42,15 @@ type t = {
     tests.  Lookup is linear but the list is tiny (one entry per
     keeper / worker). *)
 
+val enforced_all : agent_overlay
+(** All risk classes at [Enforced].  The safest default. *)
+
 val strict_default : agent_overlay
-(** Strictest possible overlay: never allows Safe in worktree, always
-    asks on Audited, always denies Destructive git.  The safe landing
-    pad for agents we have not yet profiled. *)
+(** Alias for [enforced_all].  Backward-compatible name. *)
 
 val permissive_default : agent_overlay
-(** Conventional default for well-trusted keeper agents in a dev
-    worktree.  [allow_safe_in_worktree = true], [ask_audited = true],
-    [deny_destructive_git = true]. *)
+(** [safe_trust = Auto_safe], audited/privileged at [Enforced].
+    For well-trusted keeper agents in a dev worktree. *)
 
 val empty : t
 (** [empty] has [defaults = strict_default] and no per-agent entries.

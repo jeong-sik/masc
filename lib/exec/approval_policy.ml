@@ -79,24 +79,48 @@ let ask_of policy ~caps ~bin : Verdict.t =
       raw_source = policy.raw_source;
     }
 
+let trust_dispatch ~trust_level ~caps ~policy ~bin ~simple : Verdict.t =
+  match trust_level with
+  | Approval_config.Enforced -> ask_of policy ~caps ~bin
+  | Approval_config.Auto_safe -> Verdict.Allow (Verdict.trust ~caps simple)
+  | Approval_config.Suggest ->
+    let token : Verdict.confirm_token =
+      { risk_class = Bin.risk_class simple.Shell_ir.bin; ttl_sec = 60.0 }
+    in
+    Verdict.Suggest_confirm (Verdict.trust ~caps simple, token)
+  | Approval_config.Observe -> Verdict.Allow (Verdict.trust ~caps simple)
+
 let decide (policy : t)
     ~(overlay : Approval_config.agent_overlay)
     ~(caps : Capability.t list)
     ~(simple : Shell_ir.simple) : Verdict.t =
   match find_destructive_git caps with
-  | Some g when overlay.deny_destructive_git ->
-    Verdict.Deny { caps; reason = Destructive_git g }
-  | Some _ | None ->
+  | Some g ->
+    (* Destructive git: trust level decides *)
+    (match overlay.privileged_trust with
+     | Approval_config.Enforced ->
+       Verdict.Deny { caps; reason = Destructive_git g }
+     | Approval_config.Auto_safe ->
+       Verdict.Allow (Verdict.trust ~caps simple)
+     | Approval_config.Suggest ->
+       let token : Verdict.confirm_token =
+         { risk_class = `Privileged; ttl_sec = 60.0 }
+       in
+       Verdict.Suggest_confirm (Verdict.trust ~caps simple, token)
+     | Approval_config.Observe ->
+       Verdict.Allow (Verdict.trust ~caps simple))
+  | None ->
     match find_write_escape caps with
     | Some ps ->
       Verdict.Deny { caps; reason = Path_escape ps }
     | None ->
       match max_risk caps with
-      | `Privileged -> ask_of policy ~caps ~bin:simple.bin
+      | `Privileged ->
+        trust_dispatch ~trust_level:overlay.privileged_trust
+          ~caps ~policy ~bin:simple.bin ~simple
       | `Audited ->
-        if overlay.ask_audited then ask_of policy ~caps ~bin:simple.bin
-        else Verdict.Allow (Verdict.trust ~caps simple)
+        trust_dispatch ~trust_level:overlay.audited_trust
+          ~caps ~policy ~bin:simple.bin ~simple
       | `Safe ->
-        if overlay.allow_safe_in_worktree then
-          Verdict.Allow (Verdict.trust ~caps simple)
-        else ask_of policy ~caps ~bin:simple.bin
+        trust_dispatch ~trust_level:overlay.safe_trust
+          ~caps ~policy ~bin:simple.bin ~simple

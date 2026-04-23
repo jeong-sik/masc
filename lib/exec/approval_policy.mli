@@ -1,5 +1,5 @@
 (** A3 — pure decide function from a walked capability list to a
-    three-way [Verdict.t].
+    four-way [Verdict.t].
 
     The policy is intentionally conservative (fail-closed).  Any
     capability it does not recognise maps to [Ask], never to [Allow].
@@ -25,15 +25,14 @@ val decide :
   Verdict.t
 (** Pure policy decision.  The rule cascade (checked top to bottom):
 
-    - [Destructive] git op anywhere in the cap list + overlay deny on →
-      [Deny Destructive_git].
+    - [Destructive] git op anywhere in the cap list:
+      [Enforced] → [Deny Destructive_git].
+      [Auto_safe]/[Observe] → [Allow].
+      [Suggest] → [Suggest_confirm].
     - [Write_path] whose scope is [Outside_worktree] or
-      [Absolute_unknown] → [Deny Path_escape].
-    - [Exec_bin] on a [Privileged] [Bin.t] (also the unknown-bin path) →
-      [Ask].
-    - [Exec_bin] on an [Audited] [Bin.t] →
-      [Ask] when [overlay.ask_audited], otherwise [Allow].
-    - Any construct we explicitly match but do not have a rule for →
-      [Ask] (never [Allow]).
-    - Otherwise (all-Safe caps under the worktree) →
-      [Allow] when [overlay.allow_safe_in_worktree], otherwise [Ask]. *)
+      [Absolute_unknown] → [Deny Path_escape] (always, regardless of
+      trust level).
+    - [Exec_bin] on a [Privileged]/[Audited]/[Safe] [Bin.t] →
+      dispatch to the corresponding [overlay.*_trust] level:
+      [Enforced] → [Ask], [Auto_safe]/[Observe] → [Allow],
+      [Suggest] → [Suggest_confirm]. *)

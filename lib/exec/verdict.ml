@@ -14,6 +14,11 @@ module Trusted_argv = struct
   let redirects t = t.redirects
 end
 
+type confirm_token = {
+  risk_class : Bin.risk_class;
+  ttl_sec : float;
+}
+
 type request = {
   caps : Capability.t list;
   summary : string;
@@ -31,6 +36,7 @@ type deny_reason =
 
 type t =
   | Allow of Trusted_argv.t
+  | Suggest_confirm of Trusted_argv.t * confirm_token
   | Ask of request
   | Deny of { caps : Capability.t list; reason : deny_reason }
 

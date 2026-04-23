@@ -14,23 +14,23 @@ type mode =
 
 let internal_git_admin_overlay : Approval_config.agent_overlay =
   {
-    allow_safe_in_worktree = true;
-    ask_audited = false;
-    deny_destructive_git = false;
+    safe_trust = Auto_safe;
+    audited_trust = Auto_safe;
+    privileged_trust = Auto_safe;
   }
 
 let notify_overlay : Approval_config.agent_overlay =
   {
-    allow_safe_in_worktree = true;
-    ask_audited = false;
-    deny_destructive_git = true;
+    safe_trust = Auto_safe;
+    audited_trust = Auto_safe;
+    privileged_trust = Enforced;
   }
 
 let internal_observer_overlay : Approval_config.agent_overlay =
   {
-    allow_safe_in_worktree = true;
-    ask_audited = false;
-    deny_destructive_git = true;
+    safe_trust = Auto_safe;
+    audited_trust = Auto_safe;
+    privileged_trust = Enforced;
   }
 
 let rollout_config : Approval_config.t =
@@ -105,6 +105,7 @@ let simple_of_argv ?env ?cwd (argv : string list) =
 
 let verdict_to_string = function
   | Verdict.Allow _ -> "allow"
+  | Verdict.Suggest_confirm _ -> "suggest_confirm"
   | Verdict.Ask _ -> "ask"
   | Verdict.Deny _ -> "deny"
 
@@ -170,6 +171,7 @@ let with_verdict ~actor ~raw_source ~summary ~argv ?env ?cwd
       ?cwd ();
     match verdict with
     | Verdict.Allow _trusted -> on_allow ()
+    | Verdict.Suggest_confirm (_trusted, _token) -> on_allow ()
     | Verdict.Ask request ->
       let gate_error = (`Ask_required request : error) in
       (match mode with
@@ -183,6 +185,7 @@ let with_verdict ~actor ~raw_source ~summary ~argv ?env ?cwd
 
 let run : Verdict.t -> (Verdict.Trusted_argv.t, error) result = function
   | Verdict.Allow trusted -> Ok trusted
+  | Verdict.Suggest_confirm (trusted, _) -> Ok trusted
   | Verdict.Ask request -> Error (`Ask_required request)
   | Verdict.Deny { reason; _ } -> Error (`Denied reason)
 

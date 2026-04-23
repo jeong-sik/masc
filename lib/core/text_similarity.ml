@@ -33,11 +33,15 @@ let normalize_for_similarity (s : string) : string list =
     |> String.split_on_char ' '
     |> List.filter (fun w -> String.length w >= 2)
   in
-  let seen = ref StringSet.empty in
-  List.filter (fun w ->
-    if StringSet.mem w !seen then false
-    else (seen := StringSet.add w !seen; true)
-  ) words
+  let unique, _ =
+    List.fold_left
+      (fun (acc, seen) w ->
+        if StringSet.mem w seen then (acc, seen)
+        else (w :: acc, StringSet.add w seen))
+      ([], StringSet.empty)
+      words
+  in
+  List.rev unique
 
 (** Extract character n-grams from a cleaned string.
     For multibyte strings (Korean, CJK), each "character" may be multiple bytes.
@@ -55,16 +59,17 @@ let char_ngrams ~(n : int) (s : string) : string list =
   let len = String.length compact in
   if len < n then (if len > 0 then [compact] else [])
   else
-    let seen = ref StringSet.empty in
-    let acc = ref [] in
-    for i = 0 to len - n do
-      let gram = String.sub compact i n in
-      if not (StringSet.mem gram !seen) then begin
-        seen := StringSet.add gram !seen;
-        acc := gram :: !acc
-      end
-    done;
-    List.rev !acc
+    let indices = List.init (len - n + 1) Fun.id in
+    let acc, _ =
+      List.fold_left
+        (fun (acc, seen) i ->
+          let gram = String.sub compact i n in
+          if StringSet.mem gram seen then (acc, seen)
+          else (gram :: acc, StringSet.add gram seen))
+        ([], StringSet.empty)
+        indices
+    in
+    List.rev acc
 
 (** Jaccard similarity over a combined feature set: word tokens + character n-grams.
     Word tokens capture exact matches; n-grams capture partial/morphological overlap.

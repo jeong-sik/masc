@@ -10,4 +10,4 @@ val generate_unique : string -> string
 (** [generate_unique agent_type] returns a nickname with a random hex suffix. *)
 
 val extract_agent_type : string -> string option
-(** [extract_agent_type name] extracts the agent_type prefix from a generated nickname. *)
+(** [extract_agent_type name] extracts the stable agent prefix from a generated nickname. *)

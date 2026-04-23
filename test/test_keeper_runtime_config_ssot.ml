@@ -43,6 +43,18 @@ let write_persisted_meta_file config meta =
   write_file path (Yojson.Safe.pretty_to_string (Keeper_types.meta_to_json meta));
   path
 
+let seed_persisted_meta config meta =
+  let path = write_persisted_meta_file config meta in
+  Fs_compat.clear_fs ();
+  match Keeper_types.read_meta_file_path path with
+  | Ok (Some _) -> (
+      match Keeper_types.read_meta config meta.Keeper_types.name with
+      | Ok (Some _) -> ()
+      | Ok None -> fail ("persisted meta fixture not found via read_meta: " ^ path)
+      | Error e -> fail ("persisted meta fixture read_meta failed: " ^ e))
+  | Ok None -> fail ("persisted meta fixture was not readable: " ^ path)
+  | Error e -> fail ("persisted meta fixture read failed: " ^ e)
+
 let contains_substring haystack needle =
   let haystack_len = String.length haystack in
   let needle_len = String.length needle in
@@ -126,9 +138,7 @@ instructions = "TOML instructions"
     | Ok meta -> meta
     | Error e -> fail ("meta_of_json failed: " ^ e)
   in
-  (match Keeper_types.write_meta ~force:true config initial_meta with
-  | Error e -> fail ("write_meta failed: " ^ e)
-  | Ok () -> ());
+  seed_persisted_meta config initial_meta;
   match Keeper_runtime.ensure_keeper_meta config keeper_name with
   | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
   | Ok updated ->
@@ -172,9 +182,7 @@ policy_voice_enabled = false
     | Ok meta -> meta
     | Error e -> fail ("meta_of_json failed: " ^ e)
   in
-  (match Keeper_types.write_meta ~force:true config initial_meta with
-  | Error e -> fail ("write_meta failed: " ^ e)
-  | Ok () -> ());
+  seed_persisted_meta config initial_meta;
   match Keeper_runtime.ensure_keeper_meta config keeper_name with
   | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
   | Ok updated ->
@@ -214,9 +222,7 @@ shared_memory_scope = "room"
     | Ok meta -> meta
     | Error e -> fail ("meta_of_json failed: " ^ e)
   in
-  (match Keeper_types.write_meta ~force:true config initial_meta with
-  | Error e -> fail ("write_meta failed: " ^ e)
-  | Ok () -> ());
+  seed_persisted_meta config initial_meta;
   match Keeper_runtime.ensure_keeper_meta config keeper_name with
   | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
   | Ok updated ->
@@ -326,9 +332,7 @@ tool_also_allow = ["keeper_bash", "keeper_shell"]
     | Ok meta -> meta
     | Error e -> fail ("meta_of_json failed: " ^ e)
   in
-  (match Keeper_types.write_meta ~force:true config initial_meta with
-  | Error e -> fail ("write_meta failed: " ^ e)
-  | Ok () -> ());
+  seed_persisted_meta config initial_meta;
   match Keeper_runtime.ensure_keeper_meta config keeper_name with
   | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
   | Ok updated ->
@@ -504,9 +508,7 @@ allowed_paths = []
     | Ok meta -> meta
     | Error e -> fail ("meta_of_json failed: " ^ e)
   in
-  (match Keeper_types.write_meta ~force:true config initial_meta with
-  | Error e -> fail ("write_meta failed: " ^ e)
-  | Ok () -> ());
+  seed_persisted_meta config initial_meta;
   match Keeper_runtime.ensure_keeper_meta config keeper_name with
   | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
   | Ok updated ->
@@ -548,9 +550,7 @@ let test_persona_allowed_paths_is_ignored () =
     | Ok meta -> meta
     | Error e -> fail ("meta_of_json failed: " ^ e)
   in
-  (match Keeper_types.write_meta ~force:true config initial_meta with
-  | Error e -> fail ("write_meta failed: " ^ e)
-  | Ok () -> ());
+  seed_persisted_meta config initial_meta;
   match Keeper_runtime.ensure_keeper_meta config keeper_name with
   | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
   | Ok updated ->
@@ -593,9 +593,7 @@ allowed_paths = ["workspace/example/project"]
     | Ok meta -> meta
     | Error e -> fail ("meta_of_json failed: " ^ e)
   in
-  (match Keeper_types.write_meta ~force:true config initial_meta with
-  | Error e -> fail ("write_meta failed: " ^ e)
-  | Ok () -> ());
+  seed_persisted_meta config initial_meta;
   match Keeper_runtime.ensure_keeper_meta config keeper_name with
   | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
   | Ok updated ->
@@ -678,9 +676,7 @@ tool_preset = "delivery"
     | Ok meta -> meta
     | Error e -> fail ("meta_of_json failed: " ^ e)
   in
-  (match Keeper_types.write_meta ~force:true config initial_meta with
-  | Error e -> fail ("write_meta failed: " ^ e)
-  | Ok () -> ());
+  seed_persisted_meta config initial_meta;
   match Keeper_runtime.ensure_keeper_meta config keeper_name with
   | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
   | Ok updated ->
@@ -738,9 +734,7 @@ per_provider_timeout = 0
     | Ok meta -> meta
     | Error e -> fail ("meta_of_json failed: " ^ e)
   in
-  (match Keeper_types.write_meta ~force:true config initial_meta with
-  | Error e -> fail ("write_meta failed: " ^ e)
-  | Ok () -> ());
+  seed_persisted_meta config initial_meta;
   match Keeper_runtime.ensure_keeper_meta config keeper_name with
   | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
   | Ok updated ->
@@ -782,9 +776,7 @@ let test_persona_invalid_per_provider_timeout_clears_stale_runtime () =
     | Ok meta -> meta
     | Error e -> fail ("meta_of_json failed: " ^ e)
   in
-  (match Keeper_types.write_meta ~force:true config initial_meta with
-  | Error e -> fail ("write_meta failed: " ^ e)
-  | Ok () -> ());
+  seed_persisted_meta config initial_meta;
   match Keeper_runtime.ensure_keeper_meta config keeper_name with
   | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
   | Ok updated ->
@@ -840,9 +832,7 @@ goal = "minimal TOML"
     | Ok meta -> meta
     | Error e -> fail ("meta_of_json failed: " ^ e)
   in
-  (match Keeper_types.write_meta ~force:true config initial_meta with
-  | Error e -> fail ("write_meta failed: " ^ e)
-  | Ok () -> ());
+  seed_persisted_meta config initial_meta;
   match Keeper_runtime.ensure_keeper_meta config keeper_name with
   | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
   | Ok updated ->
@@ -888,9 +878,7 @@ work_discovery_guidance = "TOML guidance"
     | Ok meta -> meta
     | Error e -> fail ("meta_of_json failed: " ^ e)
   in
-  (match Keeper_types.write_meta ~force:true config initial_meta with
-  | Error e -> fail ("write_meta failed: " ^ e)
-  | Ok () -> ());
+  seed_persisted_meta config initial_meta;
   match Keeper_runtime.ensure_keeper_meta config keeper_name with
   | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
   | Ok updated ->
@@ -934,9 +922,7 @@ tool_preset = "social"
     | Ok meta -> meta
     | Error e -> fail ("meta_of_json failed: " ^ e)
   in
-  (match Keeper_types.write_meta ~force:true config initial_meta with
-  | Error e -> fail ("write_meta failed: " ^ e)
-  | Ok () -> ());
+  seed_persisted_meta config initial_meta;
   match Keeper_runtime.ensure_keeper_meta config keeper_name with
   | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
   | Ok updated ->
@@ -975,9 +961,7 @@ social_model = "magentic_ledger_v1"
     | Ok meta -> meta
     | Error e -> fail ("meta_of_json failed: " ^ e)
   in
-  (match Keeper_types.write_meta ~force:true config initial_meta with
-  | Error e -> fail ("write_meta failed: " ^ e)
-  | Ok () -> ());
+  seed_persisted_meta config initial_meta;
   match Keeper_runtime.ensure_keeper_meta config keeper_name with
   | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
   | Ok updated ->
@@ -1016,9 +1000,7 @@ cascade_name = "missing_profile"
     | Ok meta -> meta
     | Error e -> fail ("meta_of_json failed: " ^ e)
   in
-  (match Keeper_types.write_meta ~force:true config initial_meta with
-  | Error e -> fail ("write_meta failed: " ^ e)
-  | Ok () -> ());
+  seed_persisted_meta config initial_meta;
   match Keeper_runtime.ensure_keeper_meta config keeper_name with
   | Ok updated ->
       failf "expected unknown cascade_name to be rejected, got %s"
@@ -1058,9 +1040,7 @@ let test_room_presence_syncs_capabilities () =
     | Ok meta -> meta
     | Error e -> fail ("meta_of_json failed: " ^ e)
   in
-  (match Keeper_types.write_meta ~force:true config initial_meta with
-  | Error e -> fail ("write_meta failed: " ^ e)
-  | Ok () -> ());
+  seed_persisted_meta config initial_meta;
   ignore
     (Coord.join config ~agent_name ~capabilities:[ "keeper"; "preset:minimal" ] ());
   let _synced = Keeper_exec_context.ensure_keeper_room_presence config initial_meta in

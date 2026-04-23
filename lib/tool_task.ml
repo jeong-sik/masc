@@ -161,6 +161,13 @@ let can_review_completion ~(task_opt : Types.task option) ~(agent_name : string)
        | Types.Cancelled _ -> false)
   | None -> false
 
+let persisted_completion_contract ~(task_opt : Types.task option) =
+  match task_opt with
+  | Some ({ contract = Some contract; _ } : Types.task)
+    when contract.completion_contract <> [] ->
+      Some contract.completion_contract
+  | _ -> None
+
 (* Concrete example handed to the keeper when the anti-rationalization
    gate rejects a completion. Prior form said only "describe actual
    work"; small-LLM keepers retried the same perfunctory notes
@@ -709,15 +716,31 @@ and handle_transition ctx args =
   let completion_owned_by_caller =
     force || can_review_completion ~task_opt ~agent_name:ctx.agent_name
   in
-  let gate_rejection =
+  let persisted_gate_rejection =
     if action = Types.Done_action && not force then
       if not completion_owned_by_caller then
         None
       else if task_has_persisted_contract task_opt then
         persisted_contract_rejection ~ctx ~task_opt ~notes
+      else
+        None
+    else
+      None
+  in
+  match persisted_gate_rejection with
+  | Some reason ->
+    (false, reason)
+  | None ->
+  let review_gate_rejection =
+    if action = Types.Done_action && not force then
+      if not completion_owned_by_caller then
+        None
       else if can_review_completion ~task_opt ~agent_name:ctx.agent_name then
         review_completion_notes
-          ~completion_contract
+          ~completion_contract:
+            (match persisted_completion_contract ~task_opt with
+             | Some persisted -> Some persisted
+             | None -> completion_contract)
           ~evaluator_cascade
           ~ctx
           ~task_opt
@@ -728,12 +751,9 @@ and handle_transition ctx args =
     else
       None
   in
-  match gate_rejection with
+  match review_gate_rejection with
   | Some reason ->
-    if task_has_persisted_contract task_opt then
-      (false, reason)
-    else
-      (false, completion_rejection_message ~allow_force:true reason)
+    (false, completion_rejection_message ~allow_force:true reason)
   | None ->
   (* Verifier gate: if the task has a completion_contract and the
      verification FSM is enabled, redirect Done → Submit_for_verification

@@ -312,6 +312,60 @@ let () = test "handle_add_task_persists_contract" (fun () ->
   | _ -> failwith "expected exactly one task"
 )
 
+let () = test "handle_add_task_injects_default_verification_contract" (fun () ->
+  let ctx = make_test_ctx () in
+  let (success, result) =
+    Tool_task.handle_add_task ctx
+      (`Assoc
+        [
+          ("title", `String "Default verification task");
+          ("description", `String "Need verifier-visible evidence.");
+        ])
+  in
+  if not success then failwith result;
+  match Coord.get_tasks_raw ctx.config with
+  | [ task ] -> (
+      match task.contract with
+      | Some contract ->
+          assert (not contract.strict);
+          assert (contract.completion_contract <> []);
+          assert (List.mem "completion_notes" contract.required_evidence);
+          assert (List.mem "pr_url_or_artifact_ref" contract.required_evidence);
+          assert (List.mem "completion_notes" contract.verify_gate_evidence);
+          assert (List.mem "pr_url_or_artifact_ref" contract.verify_gate_evidence);
+          assert (str_contains (List.hd contract.completion_contract)
+                    "Default verification task")
+      | None -> failwith "expected default verification contract")
+  | _ -> failwith "expected exactly one task"
+)
+
+let () = test "handle_batch_add_tasks_injects_default_verification_contracts" (fun () ->
+  let ctx = make_test_ctx () in
+  let (success, result) =
+    Tool_task.handle_batch_add_tasks ctx
+      (`Assoc
+        [
+          ( "tasks",
+            `List
+              [
+                `Assoc [ ("title", `String "Batch task A") ];
+                `Assoc [ ("title", `String "Batch task B") ];
+              ] );
+        ])
+  in
+  if not success then failwith result;
+  let tasks = Coord.get_tasks_raw ctx.config in
+  assert (List.length tasks = 2);
+  List.iter
+    (fun (task : Types.task) ->
+       match task.contract with
+       | Some contract ->
+           assert (contract.completion_contract <> []);
+           assert (contract.verify_gate_evidence <> [])
+       | None -> failwith "expected default verification contract for batch task")
+    tasks
+)
+
 let () = test "handle_done_uses_persisted_contract_gate" (fun () ->
   (* MASC_CDAL_GATE_ENABLED default flipped to [true] in v0.9.5 (PR #7579).
      With gate enabled + strict contract + no persisted verdict, handle_done
@@ -807,7 +861,7 @@ let () = test "transition_release_clears_planning_current_task" (fun () ->
   assert (Planning_eio.get_current_task ctx.config = None)
 )
 
-let () = test "transition_done_clears_planning_current_task" (fun () ->
+let () = test "transition_done_redirects_to_verification_and_keeps_planning_current_task" (fun () ->
   let ctx = make_test_ctx () in
   let _ = Tool_task.handle_add_task ctx (`Assoc [("title", `String "Transition done")]) in
   let (success_claim, _result) =
@@ -826,7 +880,13 @@ let () = test "transition_done_clears_planning_current_task" (fun () ->
   in
   assert success_done;
   assert (not (str_contains result "rejected"));
-  assert (Planning_eio.get_current_task ctx.config = None)
+  assert (Planning_eio.get_current_task ctx.config = Some "task-001");
+  match Coord.get_tasks_raw ctx.config with
+  | [ task ] -> (
+      match task.task_status with
+      | Types.AwaitingVerification _ -> ()
+      | _ -> failwith "expected task to be awaiting_verification after done")
+  | _ -> failwith "expected exactly one task after done transition"
 )
 
 let () = test "transition_accepts_underscore_prefixed_internal_markers" (fun () ->

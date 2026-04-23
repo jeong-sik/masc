@@ -41,6 +41,7 @@ import { hydrateTransportHealthFromSSE } from './components/transport-health'
 import { activeKeeperName, hydrateKeeperStatus } from './keeper-runtime'
 import { showToast } from './components/common/toast'
 import { handleAgentFailed } from './components/common/error-notification'
+import type { ErrorCode } from './types/error'
 import { route } from './router'
 import {
   PERIODIC_REFRESH_DEV_MS,
@@ -382,10 +383,12 @@ export function setupSSEReaction(): () => void {
     // 0d. Agent error notification — signal + toast, no fetch
     if (event.type === 'oas:agent_failed') {
       const p = (event.payload ?? {}) as Record<string, unknown>
+      const rawCode = typeof p.error_code === 'string' ? p.error_code : undefined
       handleAgentFailed({
         agentName: typeof p.agent_name === 'string' ? p.agent_name
           : event.agent_name ?? 'unknown',
         taskId: typeof p.task_id === 'string' ? p.task_id : undefined,
+        errorCode: rawCode as ErrorCode | undefined,
         error: typeof p.error === 'string' ? p.error
           : event.error_text ?? '알 수 없는 오류',
       })

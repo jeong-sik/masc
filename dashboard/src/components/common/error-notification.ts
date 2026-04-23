@@ -2,7 +2,8 @@
 
 import { signal, computed } from '@preact/signals'
 import { showToast } from './toast'
-import type { DashboardError } from '../../types/error'
+import type { DashboardError, ErrorCode } from '../../types/error'
+import { classifyErrorCode, severityForCode } from '../../types/error'
 
 const DEDUP_WINDOW_MS = 5 * 60 * 1000 // 5 minutes
 const CLEANUP_INTERVAL_MS = 60 * 1000
@@ -23,9 +24,12 @@ function generateFingerprint(agentName: string, message: string): string {
 export function handleAgentFailed(params: {
   agentName: string
   taskId?: string
+  errorCode?: ErrorCode
   error: string
 }): void {
   const { agentName, taskId, error } = params
+  const errorCode = params.errorCode ?? classifyErrorCode(error)
+  const severity = severityForCode(errorCode)
   const fingerprint = generateFingerprint(agentName, error)
   const now = Date.now()
 
@@ -49,7 +53,7 @@ export function handleAgentFailed(params: {
         : e,
     )
     const taskLabel = taskId ? ` (${taskId})` : ''
-    showToast(`${agentName}${taskLabel}: ${error}`, 'error')
+    showToast(`${agentName}${taskLabel}: ${error}`, severity === 'info' ? 'warning' : 'error')
     return
   }
 
@@ -59,6 +63,8 @@ export function handleAgentFailed(params: {
     agentName,
     taskId: taskId ?? null,
     message: error,
+    errorCode,
+    severity,
     timestamp: now,
     acknowledged: false,
     count: 1,
@@ -68,7 +74,7 @@ export function handleAgentFailed(params: {
   errors.value = [...errors.value, newError]
 
   const taskLabel = taskId ? ` (${taskId})` : ''
-  showToast(`${agentName}${taskLabel}: ${error}`, 'error')
+  showToast(`${agentName}${taskLabel}: ${error}`, severity === 'info' ? 'warning' : 'error')
 }
 
 export function acknowledgeError(id: string): void {

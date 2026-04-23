@@ -34,6 +34,8 @@ describe('error-notification', () => {
     expect(errors.value[0]!.message).toBe('Connection timeout')
     expect(errors.value[0]!.count).toBe(1)
     expect(errors.value[0]!.acknowledged).toBe(false)
+    expect(errors.value[0]!.errorCode).toBe('timeout')
+    expect(errors.value[0]!.severity).toBe('warning')
     expect(unacknowledgedCount.value).toBe(1)
   })
 
@@ -143,6 +145,50 @@ describe('error-notification', () => {
       handleAgentFailed({ agentName: 'agent', error: base + 'Y' })
 
       expect(errors.value).toHaveLength(2)
+    })
+  })
+
+  describe('error classification', () => {
+    it('classifies timeout errors', () => {
+      handleAgentFailed({ agentName: 'k', error: 'Connection timed out after 30s' })
+      expect(errors.value[0]!.errorCode).toBe('timeout')
+      expect(errors.value[0]!.severity).toBe('warning')
+    })
+
+    it('classifies not_found errors as info', () => {
+      handleAgentFailed({ agentName: 'k', error: 'Task not found: task-001' })
+      expect(errors.value[0]!.errorCode).toBe('not_found')
+      expect(errors.value[0]!.severity).toBe('info')
+    })
+
+    it('classifies auth errors as critical', () => {
+      handleAgentFailed({ agentName: 'k', error: 'Unauthorized: invalid token' })
+      expect(errors.value[0]!.errorCode).toBe('auth_required')
+      expect(errors.value[0]!.severity).toBe('critical')
+    })
+
+    it('classifies internal errors as critical', () => {
+      handleAgentFailed({ agentName: 'k', error: 'Unexpected internal failure' })
+      expect(errors.value[0]!.errorCode).toBe('internal_error')
+      expect(errors.value[0]!.severity).toBe('critical')
+    })
+
+    it('classifies unknown messages', () => {
+      handleAgentFailed({ agentName: 'k', error: 'Something weird happened' })
+      expect(errors.value[0]!.errorCode).toBe('unknown')
+      expect(errors.value[0]!.severity).toBe('warning')
+    })
+
+    it('uses explicit errorCode when provided', () => {
+      handleAgentFailed({ agentName: 'k', error: 'Something happened', errorCode: 'rate_limited' })
+      expect(errors.value[0]!.errorCode).toBe('rate_limited')
+      expect(errors.value[0]!.severity).toBe('warning')
+    })
+
+    it('explicit errorCode overrides message classification', () => {
+      handleAgentFailed({ agentName: 'k', error: 'Connection timeout', errorCode: 'auth_required' })
+      expect(errors.value[0]!.errorCode).toBe('auth_required')
+      expect(errors.value[0]!.severity).toBe('critical')
     })
   })
 })

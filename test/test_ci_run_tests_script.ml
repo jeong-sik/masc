@@ -98,7 +98,7 @@ exit 0
   Unix.chmod dune_path 0o755;
   bin_dir
 
-let make_fake_dune_flaky_then_interface_mismatch dir =
+let make_fake_dune_flaky_then_agent_sdk_artifact_failure dir =
   let bin_dir = Filename.concat dir "bin-interface" in
   Unix.mkdir bin_dir 0o755;
   let dune_path = Filename.concat bin_dir "dune" in
@@ -119,15 +119,38 @@ if [ -z "${DUNE_BUILD_DIR:-}" ] || [ "${DUNE_BUILD_DIR}" = "_build" ]; then
   exit 1
 fi
 if [ "${DUNE_BUILD_DIR}" = ".ci_build_flaky" ] && [ "${DUNE_CACHE:-}" != "disabled" ]; then
-  printf 'Error: Files lib/autoresearch/masc_autoresearch.cmxa\n' >&2
-  printf '       and /tmp/agent_sdk.cmxa\n' >&2
-  printf '       make inconsistent assumptions over interface Agent_sdk__Event_bus\n' >&2
+  printf 'Error: File unavailable:\n' >&2
+  printf '/tmp/opam/lib/agent_sdk/llm_provider/llm_provider.cmxa\n' >&2
+  printf 'Error: Unbound module Llm_provider\n' >&2
   exit 1
 fi
 mkdir -p "${DUNE_BUILD_DIR}/default/test/_build/_tests"
 printf 'fake ok\n' > "${DUNE_BUILD_DIR}/default/test/_build/_tests/fake.output"
 printf 'Testing `fake`.\n'
 exit 0
+|}
+  ;
+  Unix.chmod dune_path 0o755;
+  bin_dir
+
+let make_fake_dune_disk_full dir =
+  let bin_dir = Filename.concat dir "bin-disk-full" in
+  Unix.mkdir bin_dir 0o755;
+  let dune_path = Filename.concat bin_dir "dune" in
+  write_file dune_path
+    {|#!/bin/sh
+set -eu
+log_file="${FAKE_DUNE_LOG:?}"
+printf '%s|%s|%s\n' "${1:-}" "${DUNE_BUILD_DIR:-}" "$(pwd)" >>"$log_file"
+if [ "${1:-}" = "--version" ]; then
+  printf '3.21.0\n'
+  exit 0
+fi
+if [ "${1:-}" = "clean" ]; then
+  exit 0
+fi
+printf 'Error: dune_trace_write(): No space left on device\n' >&2
+exit 1
 |}
   ;
   Unix.chmod dune_path 0o755;
@@ -193,13 +216,13 @@ let test_rpc_retry_uses_isolated_build_dir () =
           failf "expected exactly two dune invocations, got:\n%s"
             (String.concat "\n" log_lines))
 
-let test_interface_mismatch_after_flaky_retry_disables_cache () =
+let test_agent_sdk_artifact_failure_after_flaky_retry_disables_cache () =
   with_temp_dir "ci-run-tests-interface" (fun dir ->
       let repo_dir = Filename.concat dir "repo" in
       Unix.mkdir repo_dir 0o755;
       let fake_log = Filename.concat dir "fake-dune.log" in
       let ci_log = Filename.concat dir "ci-run-tests.log" in
-      let fake_bin = make_fake_dune_flaky_then_interface_mismatch dir in
+      let fake_bin = make_fake_dune_flaky_then_agent_sdk_artifact_failure dir in
       let path =
         Printf.sprintf "%s:%s" fake_bin
           (match Sys.getenv_opt "PATH" with Some p -> p | None -> "")
@@ -231,9 +254,9 @@ let test_interface_mismatch_after_flaky_retry_disables_cache () =
       check bool "flaky retry warning present" true
         (contains_substring observed_output
            "test failed (exit=1); retrying once with isolated build dir .ci_build_flaky");
-      check bool "interface mismatch warning present" true
+      check bool "agent sdk artifact warning present" true
         (contains_substring observed_output
-           "detected Agent_sdk interface mismatch; running dune clean and retrying once with DUNE_CACHE=disabled");
+           "detected Agent_sdk/OAS artifact or interface mismatch; running dune clean and retrying once with DUNE_CACHE=disabled");
       check bool "retry command disables cache" true
         (contains_substring observed_output
            "retry_command: export DUNE_CACHE=disabled; export DUNE_BUILD_DIR=.ci_build_flaky; unset DUNE_RPC;");
@@ -258,6 +281,62 @@ let test_interface_mismatch_after_flaky_retry_disables_cache () =
             fourth
       | _ ->
           failf "expected exactly four dune invocations, got:\n%s"
+            (String.concat "\n" log_lines))
+
+let test_disk_full_failure_skips_flaky_retry () =
+  with_temp_dir "ci-run-tests-disk-full" (fun dir ->
+      let repo_dir = Filename.concat dir "repo" in
+      Unix.mkdir repo_dir 0o755;
+      let fake_log = Filename.concat dir "fake-dune.log" in
+      let ci_log = Filename.concat dir "ci-run-tests.log" in
+      let fake_bin = make_fake_dune_disk_full dir in
+      let path =
+        Printf.sprintf "%s:%s" fake_bin
+          (match Sys.getenv_opt "PATH" with Some p -> p | None -> "")
+      in
+      let env =
+        [
+          ("PATH", path);
+          ("DUNE_BUILD_DIR", "");
+          ("FAKE_DUNE_LOG", fake_log);
+          ("CI_TEST_HEARTBEAT_SEC", "1");
+          ("CI_TEST_TIMEOUT_SEC", "30");
+          ("CI_TEST_LOG_FILE", ci_log);
+          ("CI_CONTRACT_HARNESS_ENABLED", "0");
+          ("CI_TEST_ALLOW_FLAKY_RETRY", "1");
+        ]
+      in
+      let code, stdout, stderr =
+        run_shell ~cwd:dir ~env
+          (Printf.sprintf "%s %s" (quote (script_path ()))
+             (quote
+                (Printf.sprintf "cd %s && dune test --root ." (quote repo_dir))))
+      in
+      check int "disk full exit code" 1 code;
+      let ci_log_contents = read_file ci_log in
+      let observed_output =
+        String.concat "\n" [ ci_log_contents; stdout; stderr ]
+      in
+      check bool "disk guidance present" true
+        (contains_substring observed_output
+           "detected disk exhaustion during dune build");
+      check bool "disk hygiene repair present" true
+        (contains_substring observed_output
+           "bash scripts/disk-hygiene.sh --fix");
+      check bool "flaky retry skipped" false
+        (contains_substring observed_output "flaky-test mitigation");
+      let log_lines =
+        read_file fake_log
+        |> String.split_on_char '\n'
+        |> List.filter (fun line -> String.trim line <> "")
+      in
+      match log_lines with
+      | [ first ] ->
+          check string "single attempt uses repo cwd"
+            (Printf.sprintf "test||%s" repo_dir)
+            first
+      | _ ->
+          failf "expected exactly one dune invocation, got:\n%s"
             (String.concat "\n" log_lines))
 
 let test_timeout_diagnostics_capture_active_process_group () =
@@ -301,9 +380,11 @@ let () =
         [
           test_case "rpc retry uses isolated build dir" `Quick
             test_rpc_retry_uses_isolated_build_dir;
-          test_case "interface mismatch after flaky retry disables cache"
+          test_case "agent sdk artifact failure after flaky retry disables cache"
             `Quick
-            test_interface_mismatch_after_flaky_retry_disables_cache;
+            test_agent_sdk_artifact_failure_after_flaky_retry_disables_cache;
+          test_case "disk full failure skips flaky retry" `Quick
+            test_disk_full_failure_skips_flaky_retry;
           test_case "timeout diagnostics capture active process group" `Quick
             test_timeout_diagnostics_capture_active_process_group;
         ] );

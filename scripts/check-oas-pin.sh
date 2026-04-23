@@ -180,6 +180,63 @@ version_gte() {
   return 0
 }
 
+ocamlfind_query_dir() {
+  local package="$1"
+  if command -v ocamlfind >/dev/null 2>&1; then
+    ocamlfind query "${package}" 2>/dev/null
+  elif command -v opam >/dev/null 2>&1; then
+    opam exec -- ocamlfind query "${package}" 2>/dev/null
+  else
+    return 127
+  fi
+}
+
+agent_sdk_artifact_repair_guidance() {
+  echo "repair: df -h . \"\${OPAM_SWITCH_PREFIX:-\${HOME}/.opam}\" /tmp" >&2
+  echo "repair: bash scripts/disk-hygiene.sh --fix" >&2
+  echo "repair: bash scripts/opam-pin-external-deps.sh --install" >&2
+  echo "repair: opam reinstall agent_sdk -y" >&2
+}
+
+verify_agent_sdk_artifact() {
+  local package="$1"
+  local package_dir="$2"
+  local artifact="$3"
+  local artifact_path="${package_dir%/}/${artifact}"
+
+  if [[ ! -r "${artifact_path}" ]]; then
+    echo "agent_sdk opam switch artifact missing: ${artifact_path}" >&2
+    echo "  package: ${package}" >&2
+    echo "  likely cause: interrupted opam rebuild/install or a full disk during native archive installation" >&2
+    agent_sdk_artifact_repair_guidance
+    exit 1
+  fi
+}
+
+verify_agent_sdk_switch_artifacts() {
+  local agent_sdk_dir
+  local llm_provider_dir
+
+  if ! agent_sdk_dir="$(ocamlfind_query_dir agent_sdk)"; then
+    echo "agent_sdk findlib package is unavailable in the current opam switch" >&2
+    agent_sdk_artifact_repair_guidance
+    exit 1
+  fi
+
+  if ! llm_provider_dir="$(ocamlfind_query_dir agent_sdk.llm_provider)"; then
+    echo "agent_sdk.llm_provider findlib package is unavailable in the current opam switch" >&2
+    agent_sdk_artifact_repair_guidance
+    exit 1
+  fi
+
+  verify_agent_sdk_artifact "agent_sdk" "${agent_sdk_dir}" "agent_sdk.cmi"
+  verify_agent_sdk_artifact "agent_sdk" "${agent_sdk_dir}" "agent_sdk.cmxa"
+  verify_agent_sdk_artifact "agent_sdk" "${agent_sdk_dir}" "agent_sdk.a"
+  verify_agent_sdk_artifact "agent_sdk.llm_provider" "${llm_provider_dir}" "llm_provider.cmi"
+  verify_agent_sdk_artifact "agent_sdk.llm_provider" "${llm_provider_dir}" "llm_provider.cmxa"
+  verify_agent_sdk_artifact "agent_sdk.llm_provider" "${llm_provider_dir}" "llm_provider.a"
+}
+
 if command -v opam >/dev/null 2>&1; then
   # Refresh switch environment — opam install may have changed the switch
   # state on disk without updating the current shell's env vars.
@@ -206,6 +263,7 @@ if command -v opam >/dev/null 2>&1; then
     echo "repair: bash scripts/opam-pin-external-deps.sh && opam install . --deps-only --with-test -y" >&2
     exit 1
   fi
+  verify_agent_sdk_switch_artifacts
 
   pin_list_output="$(OPAMCOLOR=never opam pin list 2>/dev/null || true)"
   pin_line="$(awk '$1 ~ /^agent_sdk\./ { print }' <<<"${pin_list_output}")"

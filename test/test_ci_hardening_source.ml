@@ -75,6 +75,18 @@ let test_health_and_ci_runner_diagnostics () =
   check bool "ci runner retries dune rpc lock failures in isolated build dir" true
     (file_contains_pattern "scripts/ci-run-tests.sh"
        "detected dune RPC/lock failure; retrying once with isolated build dir");
+  check bool "ci runner detects native archive loss" true
+    (file_contains_pattern "scripts/ci-run-tests.sh" "Unbound module Llm_provider");
+  check bool "ci runner detects disk full failures" true
+    (file_contains_pattern "scripts/ci-run-tests.sh" "No space left on device");
+  check bool "ci runner prints disk hygiene repair guidance" true
+    (file_contains_pattern "scripts/ci-run-tests.sh"
+       "bash scripts/disk-hygiene.sh --fix");
+  check bool "ci runner avoids recursive tmpdir du in diagnostics" true
+    (file_not_contains_pattern "scripts/ci-run-tests.sh"
+       "du -sh \"${TMPDIR:-/tmp}\"");
+  check bool "ci runner avoids process substitution in clean retry" true
+    (file_not_contains_pattern "scripts/ci-run-tests.sh" "> >(tee");
   check bool "ci runner tracks active build dir for diagnostics" true
     (file_contains_pattern "scripts/ci-run-tests.sh" "ACTIVE_TEST_BUILD_DIR");
   check bool "quick suite excludes operator control from monolithic dune test" true
@@ -152,7 +164,16 @@ let test_oas_pin_source_contracts () =
        "local_pin_path_from_source()");
   check bool "oas pin check accepts both git file pins and plain file pins" true
     (file_contains_pattern "scripts/check-oas-pin.sh"
-       "git+file://*|file://*)")
+       "git+file://*|file://*)");
+  check bool "oas pin check validates findlib artifact directories" true
+    (file_contains_pattern "scripts/check-oas-pin.sh" "ocamlfind query");
+  check bool "oas pin check validates agent sdk native archive" true
+    (file_contains_pattern "scripts/check-oas-pin.sh" "agent_sdk.cmxa");
+  check bool "oas pin check validates llm provider native archive" true
+    (file_contains_pattern "scripts/check-oas-pin.sh" "llm_provider.cmxa");
+  check bool "oas pin check gives rebuild guidance" true
+    (file_contains_pattern "scripts/check-oas-pin.sh"
+       "scripts/opam-pin-external-deps.sh --install")
 
 let test_doc_truth_guard_contracts () =
   check bool "doc truth script protects spec index front door wording" true

@@ -670,4 +670,9 @@ let () =
       Alcotest.test_case "unrelated paths remain unchanged" `Quick
         test_rewrite_turn_runtime_paths_to_host_is_noop_without_container_path;
     ]);
+    ("negative_path", [
+      Alcotest.test_case "missing cmd field" `Quick test_bash_missing_cmd_field;
+      Alcotest.test_case "missing op field" `Quick test_shell_missing_op_field;
+      Alcotest.test_case "unsupported op" `Quick test_shell_unsupported_op;
+    ]);
   ]

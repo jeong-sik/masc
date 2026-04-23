@@ -37,6 +37,16 @@ let with_eio_runtime f =
 
 let quote = Filename.quote
 
+let with_env name value f =
+  let previous = Sys.getenv_opt name in
+  Unix.putenv name value;
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some v -> Unix.putenv name v
+      | None -> Unix.putenv name "")
+    f
+
 let run_ok ~cwd cmd =
   let wrapped = Printf.sprintf "cd %s && %s > /dev/null 2>&1" (quote cwd) cmd in
   let code = Sys.command wrapped in
@@ -146,6 +156,16 @@ let test_current_status_lines_caches_clean_status () =
         (Wlc.current_status_lines ~repo_root:"/tmp/repo");
       check int "clean status is cached" 1 !calls)
 
+let test_git_status_timeout_defaults_to_30_seconds () =
+  with_env "MASC_WORKTREE_GIT_STATUS_TIMEOUT_SEC" "" (fun () ->
+      check (float 0.01) "default git status timeout" 30.0
+        (Wlc.git_status_timeout_sec ()))
+
+let test_git_status_timeout_honors_env_override () =
+  with_env "MASC_WORKTREE_GIT_STATUS_TIMEOUT_SEC" "12.5" (fun () ->
+      check (float 0.01) "env override" 12.5
+        (Wlc.git_status_timeout_sec ()))
+
 let () =
   run "Worktree_live_context"
     [
@@ -160,5 +180,9 @@ let () =
             test_current_status_lines_uses_short_cache_and_no_optional_locks;
           test_case "status cache keeps clean status" `Quick
             test_current_status_lines_caches_clean_status;
+          test_case "git status timeout defaults to 30s" `Quick
+            test_git_status_timeout_defaults_to_30_seconds;
+          test_case "git status timeout honors env override" `Quick
+            test_git_status_timeout_honors_env_override;
         ] );
     ]

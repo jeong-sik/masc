@@ -627,6 +627,16 @@ module Kimi_cli_transport_local = struct
     String.length text >= prefix_len
     && String.sub text 0 prefix_len = prefix
 
+  let should_log_stderr_line line =
+    let trimmed = String.trim line in
+    trimmed <> ""
+    && not (starts_with trimmed "To resume this session:")
+
+  let on_stderr_line line =
+    if should_log_stderr_line line then
+      Llm_provider.Cli_common_subprocess.default_on_stderr_line
+        ~name:"kimi" line
+
   let exit_code_of_message message =
     let prefix = "kimi exited with code " in
     if not (starts_with message prefix) then None
@@ -714,6 +724,7 @@ module Kimi_cli_transport_local = struct
           match
             Llm_provider.Cli_common_subprocess.run_stream_lines ~sw ~mgr
               ~name:"kimi" ~cwd:config.cwd ~extra_env:config.extra_env
+              ~on_stderr_line
               ?stdin_content:(stdin_for_prompt prompt)
               ~on_line ?cancel:config.cancel argv
           with
@@ -775,6 +786,7 @@ module Kimi_cli_transport_local = struct
             classify_cli_error
               (Llm_provider.Cli_common_subprocess.run_stream_lines ~sw ~mgr
                  ~name:"kimi" ~cwd:config.cwd ~extra_env:config.extra_env
+                 ~on_stderr_line
                  ?stdin_content:(stdin_for_prompt prompt)
                  ~on_line ?cancel:config.cancel argv)
           with

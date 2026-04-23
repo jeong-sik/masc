@@ -160,12 +160,6 @@ let semaphore_wait_timeout_sec =
     ~default:60.0 ~min_v:5.0 ~max_v:600.0
 ;;
 
-(** Raised by [with_keeper_turn_slot] when [semaphore_wait_timeout_sec]
-    elapses before both turn semaphores could be acquired. The caller
-    should treat this as "skip this turn, retry on next heartbeat"; it is
-    not a keeper failure in the unified-turn sense. *)
-exception Semaphore_wait_timeout of float
-
 (** Per-keeper record of the last autonomous turn completion timestamp.
     Used by the fairness cooldown to prevent a fast-cycling keeper from
     monopolizing the autonomous slot when peers are waiting.
@@ -273,9 +267,9 @@ let maybe_yield_for_fairness ~(keeper_name : string) : unit =
   end
 
 let rec wait_for_autonomous_queue_head ~(keeper_name : string) ~(ticket : int)
-    ~(started_at : float) : unit =
+    ~(started_at : float) : (unit, [> `Semaphore_wait_timeout of float ]) result =
   if Option.equal Int.equal (autonomous_waiter_head_ticket ()) (Some ticket)
-  then ()
+  then Ok ()
   else
     let waited_sec = Time_compat.now () -. started_at in
     if waited_sec >= semaphore_wait_timeout_sec
@@ -294,7 +288,7 @@ let rec wait_for_autonomous_queue_head ~(keeper_name : string) ~(ticket : int)
       Log.Keeper.info
         "semaphore_wait: autonomous fairness queue wait exceeded %.0fs (keeper=%s ahead=%d), skipping turn"
         semaphore_wait_timeout_sec keeper_name ahead;
-      raise (Semaphore_wait_timeout semaphore_wait_timeout_sec)
+      Error (`Semaphore_wait_timeout semaphore_wait_timeout_sec)
     else (
       (match Eio_context.get_clock_opt () with
        | Some clock -> Eio.Time.sleep clock autonomous_queue_poll_sec
@@ -329,10 +323,10 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
     (Eio.Semaphore.get_value turn_semaphore)
     queue_depth;
   (* Track acquisitions in mutable flags so the outer Fun.protect can
-     release exactly the slots we hold — regardless of which exception
-     path fires (Semaphore_wait_timeout, Eio.Cancel.Cancelled, or any
-     other). This keeps resource cleanup independent of Eio.Semaphore's
-     internal cancel-race handling. *)
+     release exactly the slots we hold — regardless of which result or
+     exception path fires (Eio.Cancel.Cancelled or any other). This
+     keeps resource cleanup independent of Eio.Semaphore's internal
+     cancel-race handling. *)
   let slot_state =
     {
       acquired_autonomous = ref false;
@@ -345,7 +339,8 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
     | Some clock ->
       (try
         Eio.Time.with_timeout_exn clock semaphore_wait_timeout_sec (fun () ->
-          Eio.Semaphore.acquire sem)
+          Eio.Semaphore.acquire sem);
+        Ok ()
       with Eio.Time.Timeout ->
         (* INFO not WARN: see commentary above — keeper skips this turn
            and the next heartbeat re-queues it. Per-event noise hurts
@@ -355,7 +350,7 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
            skipping turn"
           label semaphore_wait_timeout_sec
           channel_label;
-        raise (Semaphore_wait_timeout semaphore_wait_timeout_sec))
+        Error (`Semaphore_wait_timeout semaphore_wait_timeout_sec))
     | None ->
       (* No Eio clock available: we are running outside an Eio main loop
          (e.g. Alcotest without [Eio_main.run]). Production masc-mcp
@@ -365,7 +360,8 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
       Log.Keeper.warn
         "semaphore_wait: no Eio clock available — %s acquire will be unbounded (environment drift?)"
         label;
-      Eio.Semaphore.acquire sem
+      Eio.Semaphore.acquire sem;
+      Ok ()
   in
   Fun.protect
     ~finally:(fun () -> release_keeper_turn_slot ~keeper_name slot_state)
@@ -378,17 +374,23 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
         maybe_yield_for_fairness ~keeper_name;
         let ticket = enqueue_autonomous_waiter ~keeper_name in
         slot_state.autonomous_ticket := Some ticket;
-        wait_for_autonomous_queue_head ~keeper_name ~ticket ~started_at:t0;
-        acquire_bounded ~label:"autonomous" autonomous_turn_semaphore;
-        slot_state.acquired_autonomous := true;
-        drop_autonomous_waiter ~ticket;
-        slot_state.autonomous_ticket := None
+        match wait_for_autonomous_queue_head ~keeper_name ~ticket ~started_at:t0 with
+        | Error _ as e -> e
+        | Ok () ->
+          match acquire_bounded ~label:"autonomous" autonomous_turn_semaphore with
+          | Error _ as e -> e
+          | Ok () ->
+            slot_state.acquired_autonomous := true;
+            drop_autonomous_waiter ~ticket;
+            slot_state.autonomous_ticket := None
       end;
-      acquire_bounded ~label:"turn" turn_semaphore;
-      slot_state.acquired_turn := true;
-      let semaphore_wait_ms =
-        int_of_float ((Time_compat.now () -. t0) *. 1000.0) in
-      f ~semaphore_wait_ms)
+      match acquire_bounded ~label:"turn" turn_semaphore with
+      | Error _ as e -> e
+      | Ok () ->
+        slot_state.acquired_turn := true;
+        let semaphore_wait_ms =
+          int_of_float ((Time_compat.now () -. t0) *. 1000.0) in
+        Ok (f ~semaphore_wait_ms))
 ;;
 
 let with_keeper_turn_slot_for_test ~keeper_name ~channel f =
@@ -1195,53 +1197,65 @@ let run_keepalive_unified_turn
       then meta_after_triage
       else if should_run_turn
       then (
-        with_keeper_turn_slot ~keeper_name:meta_after_triage.name
-          ~channel:turn_decision.channel (fun ~semaphore_wait_ms ->
-          match
-            Keeper_unified_turn.run_keeper_cycle
-              ~config:ctx.config
-              ~meta:meta_after_observe
-              ~observation:obs
-              ~generation:meta_after_observe.runtime.generation
-              ~channel:turn_decision.channel
-              ~semaphore_wait_ms:semaphore_wait_ms
-              ~shared_context
-              ()
-          with
-          | Error err ->
-            let e_str = Oas.Error.to_string err in
-            (* The inner [run_keeper_cycle] already emits a detailed ERROR
-               ("keeper cycle FAILED cascade=... max_context=... error=...")
-               for every Error path, so re-logging at ERROR here duplicates
-               the line for the same event. Keep a debug trace for local
-               readers; escalate to ERROR only on the fatal-environment
-               branch, which is the real signal this layer owns. *)
-            Log.Keeper.debug "%s: keeper cycle failed: %s"
-              meta_after_observe.name e_str;
-            if String_util.contains_substring e_str "Eio switch not available"
-               || String_util.contains_substring e_str "Eio net not available"
-            then begin
-              Log.Keeper.error
-                "%s: fatal environment error — promoting to Keeper_fiber_crash: %s"
+        match
+          with_keeper_turn_slot ~keeper_name:meta_after_triage.name
+            ~channel:turn_decision.channel (fun ~semaphore_wait_ms ->
+            match
+              Keeper_unified_turn.run_keeper_cycle
+                ~config:ctx.config
+                ~meta:meta_after_observe
+                ~observation:obs
+                ~generation:meta_after_observe.runtime.generation
+                ~channel:turn_decision.channel
+                ~semaphore_wait_ms:semaphore_wait_ms
+                ~shared_context
+                ()
+            with
+            | Error err ->
+              let e_str = Oas.Error.to_string err in
+              (* The inner [run_keeper_cycle] already emits a detailed ERROR
+                 ("keeper cycle FAILED cascade=... max_context=... error=...")
+                 for every Error path, so re-logging at ERROR here duplicates
+                 the line for the same event. Keep a debug trace for local
+                 readers; escalate to ERROR only on the fatal-environment
+                 branch, which is the real signal this layer owns. *)
+              Log.Keeper.debug "%s: keeper cycle failed: %s"
                 meta_after_observe.name e_str;
-              Keeper_registry.set_failure_reason
-                ~base_path:ctx.config.base_path meta_after_observe.name
-                (Some (Keeper_registry.Exception
-                  (Printf.sprintf "fatal environment error: %s" e_str)));
-              raise Keeper_registry.Keeper_fiber_crash
-            end;
-            (match read_meta ctx.config meta_after_observe.name with
-             | Ok (Some latest) -> latest
-             | Ok None ->
-               Log.Keeper.error "keeper:%s read_meta returned None after turn failure, using stale meta"
-                 meta_after_observe.name;
-               meta_after_observe
-             | Error e ->
-               Log.Keeper.error "keeper:%s read_meta failed after turn failure (%s), using stale meta"
-                 meta_after_observe.name e;
-               meta_after_observe)
-          | Ok updated ->
-            updated))
+              if String_util.contains_substring e_str "Eio switch not available"
+                 || String_util.contains_substring e_str "Eio net not available"
+              then begin
+                Log.Keeper.error
+                  "%s: fatal environment error — promoting to Keeper_fiber_crash: %s"
+                  meta_after_observe.name e_str;
+                Keeper_registry.set_failure_reason
+                  ~base_path:ctx.config.base_path meta_after_observe.name
+                  (Some (Keeper_registry.Exception
+                    (Printf.sprintf "fatal environment error: %s" e_str)));
+                raise Keeper_registry.Keeper_fiber_crash
+              end;
+              (match read_meta ctx.config meta_after_observe.name with
+               | Ok (Some latest) -> latest
+               | Ok None ->
+                 Log.Keeper.error "keeper:%s read_meta returned None after turn failure, using stale meta"
+                   meta_after_observe.name;
+                 meta_after_observe
+               | Error e ->
+                 Log.Keeper.error "keeper:%s read_meta failed after turn failure (%s), using stale meta"
+                   meta_after_observe.name e;
+                 meta_after_observe)
+            | Ok updated ->
+              updated)
+        with
+        | Ok meta -> meta
+        | Error (`Semaphore_wait_timeout wait_sec) ->
+          (* Peers held the turn semaphore longer than the wait cap — not a
+             keeper failure. Skip this cycle and let the next heartbeat retry
+             once a slot opens up. Meta is left untouched so failure counters
+             do not tick. *)
+          Log.Keeper.warn
+            "%s: skipping turn (semaphore wait > %.0fs, peers holding slot)"
+            meta_after_triage.name wait_sec;
+          meta_after_triage)
       else if (not has_message_signal) && obs.message_cursor_updates <> [] then
         meta_after_observe
       else
@@ -1249,15 +1263,6 @@ let run_keepalive_unified_turn
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | Keeper_registry.Keeper_fiber_crash as e -> raise e
-    | Semaphore_wait_timeout wait_sec ->
-      (* Peers held the turn semaphore longer than the wait cap — not a
-         keeper failure. Skip this cycle and let the next heartbeat retry
-         once a slot opens up. Meta is left untouched so failure counters
-         do not tick. *)
-      Log.Keeper.warn
-        "%s: skipping turn (semaphore wait > %.0fs, peers holding slot)"
-        meta_after_triage.name wait_sec;
-      meta_after_triage
     | exn ->
       Log.Keeper.error "%s: keeper cycle exception: %s"
         meta_after_triage.name (Printexc.to_string exn);

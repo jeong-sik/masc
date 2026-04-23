@@ -109,7 +109,9 @@ let flush_now () =
     if dropped > 0 then
       Log.Metrics.warn "tool_metrics_persist: flush_now called before init, dropped %d records"
         dropped
-  | Some (_, store) -> ignore (drain_to_store store)
+  | Some (_, store) ->
+    let flushed = drain_to_store store in
+    Log.Metrics.debug "tool_metrics_persist: flushed %d records" flushed
 
 let start_flush_fiber ~sw ~clock ~base_path =
   let store = get_or_create_store ~base_path in

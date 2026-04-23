@@ -201,7 +201,7 @@ let run_docker_shell_command_with_status
       in
       let argv =
         [
-          "docker";
+          Keeper_sandbox_runtime.docker_command ();
           "run";
           "--rm";
           "--name";
@@ -244,6 +244,7 @@ let run_docker_shell_command_with_status
       (try
          let status, output =
            Process_eio.run_argv_with_status
+             ~env:(Unix.environment ())
              ~cwd:(Sys.getcwd ()) ~timeout_sec argv
          in
          if status <> Unix.WEXITED 0 then

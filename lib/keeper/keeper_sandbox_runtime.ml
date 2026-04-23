@@ -6,12 +6,31 @@
     configured hardening requirements without forming a module
     dependency cycle. *)
 
+let docker_command () =
+  let bin = "docker" in
+  match Sys.getenv_opt "PATH" with
+  | None -> bin
+  | Some path ->
+      let rec loop = function
+        | [] -> bin
+        | dir :: rest ->
+            let dir = if dir = "" then "." else dir in
+            let candidate = Filename.concat dir bin in
+            (try
+               Unix.access candidate [ Unix.X_OK ];
+               candidate
+             with
+             | Unix.Unix_error _ -> loop rest)
+      in
+      loop (String.split_on_char ':' path)
+
 let docker_info_security_options ~timeout_sec =
   let st, out =
     Process_eio.run_argv_with_status
+      ~env:(Unix.environment ())
       ~cwd:(Sys.getcwd ())
       ~timeout_sec
-      [ "docker"; "info"; "--format"; "{{json .SecurityOptions}}" ]
+      [ docker_command (); "info"; "--format"; "{{json .SecurityOptions}}" ]
   in
   if st <> Unix.WEXITED 0 then
     Error
@@ -242,9 +261,10 @@ let inspect_cleanup_container ~container_id ~timeout_sec =
   in
   let st, out =
     Process_eio.run_argv_with_status
+      ~env:(Unix.environment ())
       ~cwd:(Sys.getcwd ())
       ~timeout_sec
-      [ "docker"; "inspect"; "--format"; format; container_id ]
+      [ docker_command (); "inspect"; "--format"; format; container_id ]
   in
   if st <> Unix.WEXITED 0 then
     Error
@@ -263,9 +283,10 @@ let inspect_cleanup_container ~container_id ~timeout_sec =
 let remove_cleanup_container ~container_id ~timeout_sec =
   let st, out =
     Process_eio.run_argv_with_status
+      ~env:(Unix.environment ())
       ~cwd:(Sys.getcwd ())
       ~timeout_sec
-      [ "docker"; "rm"; "-f"; container_id ]
+      [ docker_command (); "rm"; "-f"; container_id ]
   in
   if st = Unix.WEXITED 0 then
     Ok ()
@@ -281,10 +302,11 @@ let cleanup_stale_containers ?(now = Unix.gettimeofday ())
   try
     let st, out =
       Process_eio.run_argv_with_status
+        ~env:(Unix.environment ())
         ~cwd:(Sys.getcwd ())
         ~timeout_sec
         [
-          "docker";
+          docker_command ();
           "ps";
           "-aq";
           "--filter";
@@ -361,9 +383,10 @@ let docker_image_present ~image ~timeout_sec =
   else
     let st, out =
       Process_eio.run_argv_with_status
+        ~env:(Unix.environment ())
         ~cwd:(Sys.getcwd ())
         ~timeout_sec
-        [ "docker"; "image"; "inspect"; image ]
+        [ docker_command (); "image"; "inspect"; image ]
     in
     if st = Unix.WEXITED 0 then
       Ok ()
@@ -385,9 +408,10 @@ let docker_image_required_commands ~image ~timeout_sec =
   in
   let st, out =
     Process_eio.run_argv_with_status
+      ~env:(Unix.environment ())
       ~cwd:(Sys.getcwd ())
       ~timeout_sec
-      [ "docker"; "run"; "--rm"; "--network"; "none"; "--entrypoint"; "sh";
+      [ docker_command (); "run"; "--rm"; "--network"; "none"; "--entrypoint"; "sh";
         image; "-lc"; script ]
   in
   if st = Unix.WEXITED 0 then

@@ -40,6 +40,11 @@ type cleanup_result =
     errors : string list;
   }
 
+val docker_command : unit -> string
+(** Resolve the Docker CLI from the current [PATH]. This keeps Docker
+    calls deterministic after the Eio process manager has been
+    initialized and tests inject a fake [docker] binary. *)
+
 val docker_label_args :
   base_path:string ->
   keeper_name:string ->

@@ -60,7 +60,7 @@ let container_path_of_host ~config ~(meta : keeper_meta) ~host_path
 let build_docker_argv ~image ~container_name ~host_root ~croot
     ~uid ~gid ~seccomp_args ~command_argv =
   [
-    "docker";
+    Keeper_sandbox_runtime.docker_command ();
     "run";
     "--rm";
     "--name"; container_name;
@@ -123,6 +123,7 @@ let run_command_in_container_with_status ?turn_sandbox_runtime
         in
         let st, out =
           Process_eio.run_argv_with_status
+            ~env:(Unix.environment ())
             ~cwd:(Sys.getcwd ()) ~timeout_sec argv
         in
         let head_program =

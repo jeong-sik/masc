@@ -131,7 +131,10 @@ capture="${FAKE_CAPTURE_FILE:?}"
   printf 'FAKE_EXE_MARKER=%s\n' '%s'
   printf 'PWD=%%s\n' "$(pwd)"
   printf 'MASC_STORAGE_TYPE=%%s\n' "${MASC_STORAGE_TYPE:-}"
+  printf 'MASC_POSTGRES_URL=%%s\n' "${MASC_POSTGRES_URL:-}"
+  printf 'DATABASE_URL=%%s\n' "${DATABASE_URL:-}"
   printf 'SUPABASE_DB_URL=%%s\n' "${SUPABASE_DB_URL:-}"
+  printf 'SB_PG_URL=%%s\n' "${SB_PG_URL:-}"
   printf 'MASC_BASE_PATH=%%s\n' "${MASC_BASE_PATH:-}"
   printf 'MASC_SIDECAR_ROOT=%%s\n' "${MASC_SIDECAR_ROOT:-}"
   printf 'MASC_CONFIG_DIR=%%s\n' "${MASC_CONFIG_DIR:-}"
@@ -578,6 +581,45 @@ let test_explicit_base_path_ignores_repo_local_config_from_zshenv () =
       check bool "stderr explains repo-local personas ignore" true
         (contains_substring stderr "Ignoring repo-local MASC_PERSONAS_DIR"))
 
+let test_zshenv_retired_pg_envs_are_scrubbed_before_exec () =
+  with_temp_dir "start-masc-script" (fun dir ->
+      let parent = Filename.concat dir "parent-root" in
+      let repo = Filename.concat parent "workspace/yousleepwhen/masc-mcp" in
+      let home_dir = Filename.concat dir "home" in
+      mkdir_p repo;
+      mkdir_p home_dir;
+      mkdir_p (Filename.concat parent ".masc");
+      write_file (Filename.concat home_dir ".zshenv")
+        "export SUPABASE_DB_URL=postgres://legacy/supabase\nexport SB_PG_URL=postgres://legacy/sb\n";
+      let script = Filename.concat repo "start-masc-mcp.sh" in
+      copy_script (script_path ()) script;
+      make_fake_eio_exe repo;
+      let capture = Filename.concat dir "captured-retired-pg-envs.txt" in
+      let code, stdout, stderr =
+        run_shell ~cwd:repo
+          ~env:
+            [
+              ("FAKE_CAPTURE_FILE", capture);
+              ("HOME", home_dir);
+            ]
+          (Printf.sprintf "%s --http --port 9969 --base-path %s"
+             (quote script) (quote parent))
+      in
+      if code <> 0 then
+        failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
+          stderr;
+      let captured = read_file capture in
+      check bool "filesystem storage is reasserted after env file load" true
+        (contains_substring captured "MASC_STORAGE_TYPE=filesystem");
+      check bool "SUPABASE_DB_URL scrubbed before exec" true
+        (contains_substring captured "SUPABASE_DB_URL=");
+      check bool "SB_PG_URL scrubbed before exec" true
+        (contains_substring captured "SB_PG_URL=");
+      check bool "MASC_POSTGRES_URL remains scrubbed before exec" true
+        (contains_substring captured "MASC_POSTGRES_URL=");
+      check bool "DATABASE_URL remains scrubbed before exec" true
+        (contains_substring captured "DATABASE_URL="))
+
 let test_explicit_base_path_ignores_repo_local_config_from_parent_env () =
   with_temp_dir "start-masc-script" (fun dir ->
       let parent = Filename.concat dir "parent-root" in
@@ -744,6 +786,10 @@ let () =
             "explicit base path ignores repo-local config from zshenv"
             `Quick
             test_explicit_base_path_ignores_repo_local_config_from_zshenv;
+          test_case
+            "zshenv retired pg envs are scrubbed before exec"
+            `Quick
+            test_zshenv_retired_pg_envs_are_scrubbed_before_exec;
           test_case
             "explicit base path ignores repo-local config from parent env"
             `Quick

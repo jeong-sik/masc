@@ -16,18 +16,20 @@ let emit_activity config ~kind ~actor ?subject ?(tags = []) ~payload () =
         (Printexc.to_string exn)
 
 let extract_board_post_id (message : string) =
-  try
-    let idx = String.index message '{' in
-    let json =
-      Yojson.Safe.from_string
-        (String.sub message idx (String.length message - idx))
-    in
-    match Yojson.Safe.Util.member "id" json with
-    | `String id when String.trim id <> "" -> Some id
-    | _ -> None
-  with
-  | Not_found | Invalid_argument _
-  | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
+  match String.index_opt message '{' with
+  | None -> None
+  | Some idx ->
+      try
+        let json =
+          Yojson.Safe.from_string
+            (String.sub message idx (String.length message - idx))
+        in
+        match Yojson.Safe.Util.member "id" json with
+        | `String id when String.trim id <> "" -> Some id
+        | _ -> None
+      with
+      | Invalid_argument _
+      | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
 
 (** Fill [author] from the caller's agent identity when the arg is absent or
     blank. Keepers, the HTTP surface, and autonomous callers routinely omit

@@ -1268,14 +1268,31 @@ let test_classify_masc_internal_error_roundtrip () =
            reason = "response rejected by accept (model=mock-model)";
          })
   in
-  match Oas_worker_named.classify_masc_internal_error accept_err with
-  | Some (Oas_worker_named.Accept_rejected { scope; model; reason }) ->
-      Alcotest.(check string) "accept scope" Masc_mcp.Keeper_config.default_cascade_name scope;
-      Alcotest.(check (option string)) "accept model"
-        (Some "mock-model") model;
-      Alcotest.(check bool) "accept reason preserved" true
-        (contains_substring ~needle:"response rejected by accept" reason)
-  | _ -> Alcotest.fail "expected structured accept rejection"
+  (match Oas_worker_named.classify_masc_internal_error accept_err with
+   | Some (Oas_worker_named.Accept_rejected { scope; model; reason }) ->
+       Alcotest.(check string) "accept scope" Masc_mcp.Keeper_config.default_cascade_name scope;
+       Alcotest.(check (option string)) "accept model"
+         (Some "mock-model") model;
+       Alcotest.(check bool) "accept reason preserved" true
+         (contains_substring ~needle:"response rejected by accept" reason)
+   | _ -> Alcotest.fail "expected structured accept rejection");
+  let resumable_err =
+    Oas_worker_named.sdk_error_of_masc_internal_error
+      (Oas_worker_named.Resumable_cli_session
+         {
+           cascade_name = "kimi_cli_keeper";
+           detail =
+             "kimi exited with code 75: \nTo resume this session: kimi -r ff37febe-2adb-4ac6-9dc6-cae23e672fbc";
+           exit_code = Some 75;
+         })
+  in
+  match Oas_worker_named.classify_masc_internal_error resumable_err with
+  | Some (Oas_worker_named.Resumable_cli_session { cascade_name; detail; exit_code }) ->
+      Alcotest.(check string) "resumable cascade" "kimi_cli_keeper" cascade_name;
+      Alcotest.(check bool) "resumable detail preserved" true
+        (contains_substring ~needle:"To resume this session:" detail);
+      Alcotest.(check (option int)) "resumable exit code" (Some 75) exit_code
+  | _ -> Alcotest.fail "expected structured resumable CLI session error"
 
 let make_codex_cli_provider_cfg ?(model_id = "codex") () =
   Llm_provider.Provider_config.make

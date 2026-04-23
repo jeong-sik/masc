@@ -35,11 +35,6 @@ type model_resolution = {
   provenance : model_resolution_provenance;
 }
 
-type provider_default_spec = {
-  env_var : string;
-  hardcoded_default : string option;
-}
-
 let env_value_opt ?(getenv = Sys.getenv_opt) var =
   match getenv var with
   | Some v ->
@@ -47,81 +42,41 @@ let env_value_opt ?(getenv = Sys.getenv_opt) var =
       if String.equal trimmed "" then None else Some trimmed
   | None -> None
 
-let provider_default_spec = function
-  | "glm" ->
-      Some { env_var = "ZAI_DEFAULT_MODEL"; hardcoded_default = Some "glm-5.1" }
-  | "glm-coding" ->
-      Some
-        {
-          env_var = "ZAI_CODING_DEFAULT_MODEL";
-          hardcoded_default = Some "glm-5.1";
-        }
-  | "llama" | "ollama" ->
-      Some { env_var = "OLLAMA_DEFAULT_MODEL"; hardcoded_default = None }
-  | "gemini" | "gemini_cli" ->
-      Some
-        {
-          env_var = "GEMINI_DEFAULT_MODEL";
-          hardcoded_default = Some "gemini-3-flash-preview";
-        }
-  | "claude" ->
-      Some
-        {
-          env_var = "ANTHROPIC_DEFAULT_MODEL";
-          hardcoded_default = Some "claude-sonnet-4-6-20250514";
-        }
-  | "openai" ->
-      Some { env_var = "OPENAI_DEFAULT_MODEL"; hardcoded_default = Some "gpt-4.1" }
-  | "openrouter" ->
-      Some { env_var = "OPENROUTER_DEFAULT_MODEL"; hardcoded_default = None }
-  | "kimi" ->
-      Some
-        {
-          env_var = "MOONSHOT_DEFAULT_MODEL";
-          hardcoded_default = Some "kimi-k2.5";
-        }
-  | _ -> None
-
 let explicit_resolution requested_model_id resolved_model_id =
   { requested_model_id; resolved_model_id; provenance = Explicit_input }
 
-let default_resolution ?getenv provider_name ~requested_model_id =
-  match provider_default_spec provider_name with
-  | Some { env_var; hardcoded_default } -> (
+let unresolved_auto requested_model_id =
+  {
+    requested_model_id;
+    resolved_model_id = requested_model_id;
+    provenance = Unresolved_auto;
+  }
+
+let default_resolution_from_policy
+    ?getenv
+    (policy : Provider_adapter.model_policy)
+    ~requested_model_id =
+  match policy.default_model_env with
+  | Some env_var -> (
       match env_value_opt ?getenv env_var with
       | Some resolved_model_id ->
           { requested_model_id; resolved_model_id; provenance = Env_default env_var }
       | None -> (
-          match hardcoded_default with
+          match policy.default_model_fallback with
           | Some resolved_model_id ->
               { requested_model_id; resolved_model_id; provenance = Hardcoded_default }
-          | None ->
-              {
-                requested_model_id;
-                resolved_model_id = requested_model_id;
-                provenance = Unresolved_auto;
-              }))
-  | None ->
-      {
-        requested_model_id;
-        resolved_model_id = requested_model_id;
-        provenance = Unresolved_auto;
-      }
+          | None -> unresolved_auto requested_model_id))
+  | None -> (
+      match policy.default_model_fallback with
+      | Some resolved_model_id ->
+          { requested_model_id; resolved_model_id; provenance = Hardcoded_default }
+      | None -> unresolved_auto requested_model_id)
 
-let csv_items raw =
-  raw
-  |> String.split_on_char ','
-  |> List.filter_map (fun item ->
-         let item = String.trim item in
-         if item = "" then None else Some item)
-
-let env_csv_or default var =
-  match env_value_opt var with
-  | Some raw -> (
-      match csv_items raw with
-      | [] -> default
-      | items -> items)
-  | None -> default
+let default_resolution ?getenv provider_name ~requested_model_id =
+  match Provider_adapter.resolve_adapter_by_cascade_prefix provider_name with
+  | Some adapter ->
+      default_resolution_from_policy ?getenv adapter.model_policy ~requested_model_id
+  | None -> unresolved_auto requested_model_id
 
 (** Default GLM auto-cascade order: quality-first, then speed.
     glm-5.1 = best quality (reasoning), glm-5-turbo = fast tool calling,
@@ -130,50 +85,21 @@ let env_csv_or default var =
 let glm_auto_models = Llm_provider.Zai_catalog.glm_auto_models
 let glm_coding_auto_models = Llm_provider.Zai_catalog.glm_coding_auto_models
 
-let gemini_cli_default_auto_models = [
-  "gemini-3-flash-preview";
-  "gemini-3.1-flash-lite-preview";
-  "gemini-2.5-flash";
-  "gemini-2.5-flash-lite";
-  "gemini-3.1-pro-preview";
-  "gemini-2.5-pro";
-]
-
 let gemini_cli_auto_models () =
-  match env_value_opt "MASC_GEMINI_CLI_AUTO_MODELS" with
-  | Some raw -> (
-      match csv_items raw with
-      | [] -> gemini_cli_default_auto_models
-      | items -> items)
-  | None -> (
-      match env_value_opt "GEMINI_DEFAULT_MODEL" with
-      | Some model -> [ model ]
-      | None -> gemini_cli_default_auto_models)
-
-(* Mirrors the Codex CLI models observed locally on 2026-04-20, reordered
-   light-to-heavy by generation (5.1 -> 5.4). Keep this operator-tunable
-   because hosted model menus drift.
-
-   2026-04-21: probe the ChatGPT-backed Codex CLI (v0.122.0) before setting
-   defaults. gpt-5.1-codex-mini, gpt-5.1-codex-max, and gpt-5.2-codex all
-   returned runtime 400 unsupported-model errors, while gpt-5.2,
-   gpt-5.3-codex-spark, gpt-5.3-codex, gpt-5.4-mini, and gpt-5.4 executed
-   successfully. Keep the default rotation to the supported set; operators can
-   still opt into a different list explicitly through
-   MASC_CODEX_CLI_AUTO_MODELS when their environment supports it. *)
-let codex_cli_default_auto_models = [
-  "gpt-5.2";
-  "gpt-5.3-codex-spark";
-  "gpt-5.3-codex";
-  "gpt-5.4-mini";
-  "gpt-5.4";
-]
+  Provider_adapter.auto_models_for_cascade_prefix "gemini_cli"
+  |> Option.value ~default:[]
 
 let codex_cli_auto_models () =
-  env_csv_or codex_cli_default_auto_models "MASC_CODEX_CLI_AUTO_MODELS"
+  Provider_adapter.auto_models_for_cascade_prefix "codex_cli"
+  |> Option.value ~default:[]
 
 let claude_code_auto_models () =
-  env_csv_or [ "auto" ] "MASC_CLAUDE_CODE_AUTO_MODELS"
+  Provider_adapter.auto_models_for_cascade_prefix "claude_code"
+  |> Option.value ~default:[]
+
+let kimi_cli_auto_models () =
+  Provider_adapter.auto_models_for_cascade_prefix "kimi_cli"
+  |> Option.value ~default:[]
 
 let resolve_glm_model ?getenv model_id =
   let default_model = default_resolution ?getenv "glm" ~requested_model_id:model_id in
@@ -237,56 +163,27 @@ let resolve_auto_model
     ?getenv
     ?(discover = Llm_provider.Discovery.first_discovered_model_id)
     provider_name model_id =
-  match provider_name with
-  | "llama" | "ollama" ->
+  match Provider_adapter.resolve_adapter_by_cascade_prefix provider_name with
+  | Some { runtime_kind = Provider_adapter.Local; _ } ->
       if String.equal model_id "auto" then
         match discover () with
         | Some resolved_model_id ->
             { requested_model_id = model_id; resolved_model_id; provenance = Discovery }
         | None -> default_resolution ?getenv provider_name ~requested_model_id:model_id
       else explicit_resolution model_id model_id
-  | "glm" -> resolve_glm_model ?getenv model_id
-  | "glm-coding" -> resolve_glm_coding_model ?getenv model_id
-  | "kimi" -> resolve_kimi_model ?getenv model_id
-  | "gemini" | "gemini_cli" ->
-      (* Default bumped from gemini-2.5-flash to gemini-3-flash-preview on
-         2026-04-16 (PR C Cadd follow-up). Capabilities are inherited via
-         the `starts_with "gemini-3"` prefix matcher in
-         oas/lib/llm_provider/capabilities.ml:269 (1M context, tools,
-         parallel tool calls). Override with GEMINI_DEFAULT_MODEL if you
-         still need the 2.5 line.
-
-         2026-04-20: `gemini_cli` joined the same branch. Without this,
-         `gemini_cli:auto` fell through to the wildcard tail and was
-         forwarded as the literal string "auto" into OAS.
-         `oas/lib/llm_provider/transport_gemini_cli.build_args` then
-         omits `--model`, so the gemini CLI chose its internal default —
-         `gemini-3.1-pro-preview` — whose quota is small enough that every
-         fleet call 429'd with `MODEL_CAPACITY_EXHAUSTED`. Mapping to
-         `gemini-3-flash-preview` (higher quota, 1M context, tool calls)
-         restores throughput. *)
+  | Some { model_policy = { family = Provider_adapter.Glm_general; _ }; _ } ->
+      resolve_glm_model ?getenv model_id
+  | Some { model_policy = { family = Provider_adapter.Glm_coding; _ }; _ } ->
+      resolve_glm_coding_model ?getenv model_id
+  | Some { model_policy = { family = Provider_adapter.Kimi_api_family; _ }; _ } ->
+      resolve_kimi_model ?getenv model_id
+  | Some _ ->
       if String.equal model_id "auto" then
         default_resolution ?getenv provider_name ~requested_model_id:model_id
-      else explicit_resolution model_id model_id
-  | "claude" ->
-      if String.equal model_id "auto" then
-        default_resolution ?getenv provider_name ~requested_model_id:model_id
-      else explicit_resolution model_id model_id
-  | "openai" ->
-      if String.equal model_id "auto" then
-        default_resolution ?getenv provider_name ~requested_model_id:model_id
-      else explicit_resolution model_id model_id
-  | "openrouter" ->
-      if String.equal model_id "auto" then
-        default_resolution ?getenv provider_name ~requested_model_id:model_id
-      else explicit_resolution model_id model_id
-  | _ ->
-      if String.equal model_id "auto" then
-        {
-          requested_model_id = model_id;
-          resolved_model_id = model_id;
-          provenance = Unresolved_auto;
-        }
+      else
+        explicit_resolution model_id model_id
+  | None ->
+      if String.equal model_id "auto" then unresolved_auto model_id
       else explicit_resolution model_id model_id
 
 let resolve_auto_model_id provider_name model_id =

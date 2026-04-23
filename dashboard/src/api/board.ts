@@ -51,13 +51,42 @@ export function normalizeKeeperApprovalQueueItem(raw: unknown): KeeperApprovalQu
   const toolName = asString(raw.tool_name, '').trim()
   const riskLevel = asString(raw.risk_level, '').trim()
   if (!id || !keeperName || !toolName || !riskLevel) return null
+  const runtimeContract = isRecord(raw.runtime_contract)
+    ? {
+        execution_scope: asNullableString(raw.runtime_contract.execution_scope),
+        sandbox_profile: asNullableString(raw.runtime_contract.sandbox_profile),
+        network_mode: asNullableString(raw.runtime_contract.network_mode),
+        shared_memory_scope: asNullableString(raw.runtime_contract.shared_memory_scope),
+        backend: asNullableString(raw.runtime_contract.backend),
+        task_id: asNullableString(raw.runtime_contract.task_id),
+        goal_id: asNullableString(raw.runtime_contract.goal_id),
+        goal_ids: asStringList(raw.runtime_contract.goal_ids),
+      }
+    : null
+  const ruleMatch = isRecord(raw.rule_match)
+    ? {
+        rule_id: asNullableString(raw.rule_match.rule_id),
+        matched_by: asNullableString(raw.rule_match.matched_by),
+      }
+    : null
   return {
     id,
     keeper_name: keeperName,
     tool_name: toolName,
+    action_key: asNullableString(raw.action_key),
+    sandbox_target: asNullableString(raw.sandbox_target),
     risk_level: riskLevel,
     requested_at: asNullableIsoTimestamp(raw.requested_at_iso ?? raw.requested_at),
     waiting_s: asNumber(raw.waiting_s),
+    turn_id: asInt(raw.turn_id),
+    task_id: asNullableString(raw.task_id),
+    goal_id: asNullableString(raw.goal_id),
+    goal_ids: asStringList(raw.goal_ids),
+    runtime_contract: runtimeContract,
+    selected_model: asNullableString(raw.selected_model),
+    disposition: asNullableString(raw.disposition),
+    disposition_reason: asNullableString(raw.disposition_reason),
+    rule_match: ruleMatch,
     input: raw.input,
     input_preview: asNullableString(raw.input_preview),
   }

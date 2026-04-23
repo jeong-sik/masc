@@ -41,11 +41,13 @@ let float_option_of_yojson = function
   | `Float value -> Ok (Some value)
   | `Int value -> Ok (Some (float_of_int value))
   | `Intlit value -> (
-      try Ok (Some (float_of_string value))
-      with Failure _ -> Error "invalid float option in worker helper payload")
+      match float_of_string_opt value with
+      | Some f -> Ok (Some f)
+      | None -> Error "invalid float option in worker helper payload")
   | `String value -> (
-      try Ok (Some (float_of_string value))
-      with Failure _ -> Error "invalid float option in worker helper payload")
+      match float_of_string_opt value with
+      | Some f -> Ok (Some f)
+      | None -> Error "invalid float option in worker helper payload")
   | _ -> Error "invalid float option in worker helper payload"
 
 let string_list_of_yojson = function

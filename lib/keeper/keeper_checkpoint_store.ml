@@ -159,7 +159,7 @@ let oas_history_snapshot_id_of_checkpoint (ckpt : Oas.Checkpoint.t) : string =
     | Some (`Assoc fields) -> (
         match List.assoc_opt "keeper_generation" fields with
         | Some (`Int n) -> n
-        | Some (`Intlit raw) -> (try int_of_string raw with _ -> 0)
+        | Some (`Intlit raw) -> Option.value ~default:0 (int_of_string_opt raw)
         | _ -> 0)
     | _ -> 0
   in
@@ -332,7 +332,7 @@ let result_all items =
 
 let content_block_of_json_strict json =
   try
-    match Agent_sdk.Api.content_block_of_json json with
+    match Oas.Api.content_block_of_json json with
     | Some block -> Ok block
     | None ->
         let open Yojson.Safe.Util in
@@ -340,7 +340,7 @@ let content_block_of_json_strict json =
           json |> member "type" |> to_string_option |> Option.value ~default:"<missing>"
         in
         Error
-          (Agent_sdk.Error.Serialization
+          (Oas.Error.Serialization
              (JsonParseError
                 {
                   detail =
@@ -349,29 +349,29 @@ let content_block_of_json_strict json =
   with
   | Yojson.Safe.Util.Type_error (msg, _) ->
       Error
-        (Agent_sdk.Error.Serialization
+        (Oas.Error.Serialization
            (JsonParseError
               { detail = Printf.sprintf "Invalid content block: %s" msg }))
   | Yojson.Json_error msg ->
       Error
-        (Agent_sdk.Error.Serialization
+        (Oas.Error.Serialization
            (JsonParseError
               { detail = Printf.sprintf "Invalid content block: %s" msg }))
   | Failure msg ->
       Error
-        (Agent_sdk.Error.Serialization
+        (Oas.Error.Serialization
            (JsonParseError
               { detail = Printf.sprintf "Invalid content block: %s" msg }))
 
 let role_of_string_compat raw =
   match String.lowercase_ascii (String.trim raw) with
-  | "system" -> Ok Agent_sdk.Types.System
-  | "user" -> Ok Agent_sdk.Types.User
-  | "assistant" -> Ok Agent_sdk.Types.Assistant
-  | "tool" -> Ok Agent_sdk.Types.Tool
+  | "system" -> Ok Oas.Types.System
+  | "user" -> Ok Oas.Types.User
+  | "assistant" -> Ok Oas.Types.Assistant
+  | "tool" -> Ok Oas.Types.Tool
   | other ->
       Error
-        (Agent_sdk.Error.Serialization
+        (Oas.Error.Serialization
            (UnknownVariant { type_name = "role"; value = other }))
 
 let message_of_json_compat json =
@@ -387,7 +387,7 @@ let message_of_json_compat json =
     | Ok role, Ok content ->
         Ok
           {
-            Agent_sdk.Types.role;
+            Oas.Types.role;
             content;
             name = json |> member "name" |> to_string_option;
             tool_call_id = json |> member "tool_call_id" |> to_string_option;
@@ -398,12 +398,12 @@ let message_of_json_compat json =
   with
   | Yojson.Safe.Util.Type_error (msg, _) ->
       Error
-        (Agent_sdk.Error.Serialization
+        (Oas.Error.Serialization
            (JsonParseError
               { detail = Printf.sprintf "Invalid checkpoint message: %s" msg }))
   | Yojson.Json_error msg ->
       Error
-        (Agent_sdk.Error.Serialization
+        (Oas.Error.Serialization
            (JsonParseError
               { detail = Printf.sprintf "Invalid checkpoint message: %s" msg }))
 
@@ -443,23 +443,23 @@ let checkpoint_of_json_compat json =
     match messages with
     | Error e -> Error e
     | Ok messages -> (
-        match Agent_sdk.Checkpoint.of_json (normalize_checkpoint_json_for_sdk json) with
+        match Oas.Checkpoint.of_json (normalize_checkpoint_json_for_sdk json) with
         | Ok checkpoint -> Ok { checkpoint with messages }
         | Error e -> Error e)
   with
   | Yojson.Safe.Util.Type_error (msg, _) ->
       Error
-        (Agent_sdk.Error.Serialization
+        (Oas.Error.Serialization
            (JsonParseError
               { detail = Printf.sprintf "Checkpoint.of_json compat: %s" msg }))
   | Yojson.Json_error msg ->
       Error
-        (Agent_sdk.Error.Serialization
+        (Oas.Error.Serialization
            (JsonParseError
               { detail = Printf.sprintf "Checkpoint.of_json compat: %s" msg }))
 
 let checkpoint_of_string_compat raw =
-  match Agent_sdk.Checkpoint.of_string raw with
+  match Oas.Checkpoint.of_string raw with
   | Ok checkpoint -> Ok checkpoint
   | Error _ ->
       let json =

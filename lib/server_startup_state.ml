@@ -20,14 +20,12 @@ type t = {
 
 let backend_phase_of_string s =
   match String.lowercase_ascii s with
-  | "postgresql" | "pg" -> Some Server_state_product.Backend.PostgreSQL
   | "filesystem" | "fs" -> Some Server_state_product.Backend.Filesystem
   | "degraded" -> Some Server_state_product.Backend.Degraded
   | "uninitialized" | "unknown" -> Some Server_state_product.Backend.Uninitialized
   | _ -> None
 
 let backend_phase_to_string = function
-  | Server_state_product.Backend.PostgreSQL -> "postgresql"
   | Server_state_product.Backend.Filesystem -> "filesystem"
   | Server_state_product.Backend.Degraded -> "degraded"
   | Server_state_product.Backend.Uninitialized -> "unknown"
@@ -201,7 +199,6 @@ let mark_state_ready ~backend_mode =
         | Backend.Uninitialized ->
             let event =
               match String.lowercase_ascii backend_mode with
-              | "postgresql" | "pg" -> Some Backend.Resolve_pg
               | "filesystem" | "fs" -> Some Backend.Resolve_fs
               | _ -> None
             in
@@ -244,7 +241,6 @@ let activate_lazy ~backend_mode ~tasks =
         | Backend.Uninitialized ->
             let event =
               match String.lowercase_ascii backend_mode with
-              | "postgresql" | "pg" -> Some Backend.Resolve_pg
               | "filesystem" | "fs" -> Some Backend.Resolve_fs
               | _ -> None
             in

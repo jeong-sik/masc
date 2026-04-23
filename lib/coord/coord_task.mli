@@ -68,23 +68,27 @@ val observe_task_transition :
 
 val add_task :
   ?contract:Types.task_contract ->
+  ?goal_id:string ->
   ?required_preset:string ->
   ?created_by:string ->
   config -> title:string -> priority:int -> description:string -> string
 
 val add_task_with_role :
   ?contract:Types.task_contract ->
+  ?goal_id:string ->
   ?created_by:string ->
   config -> title:string -> priority:int -> description:string ->
   required_role:Types_core.role -> string
 
 val batch_add_tasks :
   ?created_by:string ->
-  config -> (string * int * string) list -> string
+  config -> (string * int * string * string option) list -> string
 
 val batch_add_tasks_with_contracts :
   ?created_by:string ->
-  config -> (string * int * string * Types.task_contract option) list -> string
+  config ->
+  (string * int * string * Types.task_contract option * string option) list ->
+  string
 
 (** {1 Task claiming} *)
 

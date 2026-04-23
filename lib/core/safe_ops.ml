@@ -89,9 +89,7 @@ let int_of_string_with_default ~default str =
   | None -> default
 
 (** Safe float parsing *)
-let float_of_string_safe str =
-  try Some (float_of_string str)
-  with Failure _ -> None
+let float_of_string_safe str = float_of_string_opt str
 
 (** Float parsing with default *)
 let float_of_string_with_default ~default str =

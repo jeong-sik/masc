@@ -229,10 +229,9 @@ module Request = struct
   let default_max_body_bytes = 20 * 1024 * 1024
 
   let parse_positive_int value =
-    try
-      let v = int_of_string value in
-      if v > 0 then Some v else None
-    with Failure _ -> None
+    match int_of_string_opt value with
+    | Some v when v > 0 -> Some v
+    | _ -> None
 
   let max_body_bytes =
     let from_env name =

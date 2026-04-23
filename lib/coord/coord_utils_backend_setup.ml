@@ -140,12 +140,11 @@ let logged_lines_mutex = Mutex.create ()
 
 let log_once_info fmt =
   Format.kasprintf (fun msg ->
-    Mutex.lock logged_lines_mutex;
     let fresh =
-      if Hashtbl.mem logged_lines msg then false
-      else begin Hashtbl.add logged_lines msg (); true end
+      Stdlib.Mutex.protect logged_lines_mutex (fun () ->
+        if Hashtbl.mem logged_lines msg then false
+        else begin Hashtbl.add logged_lines msg (); true end)
     in
-    Mutex.unlock logged_lines_mutex;
     if fresh then Log.Coord.info "%s" msg) fmt
 
 let resolve_requested_base_path path =
@@ -280,7 +279,7 @@ let backend_config_for base_path =
           other;
         Backend_types.FileSystem
   in
-  let masc_root = Filename.concat base_path ".masc" in
+  let masc_root = Common.masc_dir_from_base_path ~base_path in
   let cluster_segment =
     match cluster_name with
     | "" | "default" -> None

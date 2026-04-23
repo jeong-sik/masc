@@ -29,8 +29,8 @@ module SMap = Map.Make(String)
 
 let rec atomic_update atomic f =
   let old_val = Atomic.get atomic in
-  let new_val = f old_val in
-  if Atomic.compare_and_set atomic old_val new_val then ()
+  let (result, new_val) = f old_val in
+  if Atomic.compare_and_set atomic old_val new_val then result
   else atomic_update atomic f
 
 let token_counter = Atomic.make 0
@@ -148,20 +148,16 @@ let wait_poll_interval_sec = 0.25
 let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
   let stale_grace = ttl *. stale_factor in
   let rec try_get ~waited ~watching_token =
-    let action = ref None in
-    atomic_update table (fun map ->
+    let action = atomic_update table (fun map ->
       let map = maybe_evict map in
       match SMap.find_opt key map with
       | Some (Ready entry) when entry.expires_at > now () ->
-        action := Some (`Hit entry.value);
-        map
+        (`Hit entry.value, map)
       | Some (Ready entry) when entry.stale_until > now () ->
         let token = next_token () in
-        action := Some (`Stale (entry.value, token));
-        SMap.add key (Computing { token; started_at = now (); stale = Some entry.value }) map
+        (`Stale (entry.value, token), SMap.add key (Computing { token; started_at = now (); stale = Some entry.value }) map)
       | Some (Computing { stale = Some stale_value; _ }) ->
-        action := Some (`Hit stale_value);
-        map
+        (`Hit stale_value, map)
       | Some (Computing { token; started_at; stale = None }) ->
         let waited =
           match watching_token with
@@ -174,27 +170,21 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
           | Some timeout_sec -> waited >= timeout_sec
           | None -> false
         in
-        if timed_out_waiter then begin
-          action := Some `Timed_out;
-          map
-        end else if elapsed > max_wait_sec || waited > max_wait_sec then begin
+        if timed_out_waiter then
+          (`Timed_out, map)
+        else if elapsed > max_wait_sec || waited > max_wait_sec then begin
           Log.Dashboard.warn "cache: evicting stale Computing slot for %s (%.1fs elapsed)" key elapsed;
-          action := Some `Retry;
-          SMap.remove key map
-        end else begin
-          action := Some (`Wait token);
-          map
-        end
+          (`Retry, SMap.remove key map)
+        end else
+          (`Wait token, map)
       | Some (Ready entry) ->
         let token = next_token () in
-        action := Some (`Compute token);
-        SMap.add key (Computing { token; started_at = now (); stale = Some entry.value }) map
+        (`Compute token, SMap.add key (Computing { token; started_at = now (); stale = Some entry.value }) map)
       | None ->
         let token = next_token () in
-        action := Some (`Compute token);
-        SMap.add key (Computing { token; started_at = now (); stale = None }) map
-    );
-    match Option.get !action with
+        (`Compute token, SMap.add key (Computing { token; started_at = now (); stale = None }) map)
+    ) in
+    match action with
     | `Hit v -> v
     | `Timed_out -> raise (Compute_timeout (key, true))
     | `Wait token ->
@@ -208,10 +198,10 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
           atomic_update table (fun map ->
             match SMap.find_opt key map with
             | Some (Computing { token = c; _ }) when c = token ->
-              SMap.add key (Ready { value; expires_at = ts +. ttl; stale_until = ts +. ttl +. stale_grace }) map
+              ((), SMap.add key (Ready { value; expires_at = ts +. ttl; stale_until = ts +. ttl +. stale_grace }) map)
             | _ ->
               Log.Dashboard.info "cache: bg-revalidate discarded for %s (slot replaced)" key;
-              map
+              ((), map)
           )
         | exception exn ->
           (match exn with
@@ -223,8 +213,8 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
             | Some (Computing { token = c; _ }) when c = token ->
               let ts = now () in
               let backoff_grace = stale_grace *. bg_revalidate_backoff_factor in
-              SMap.add key (Ready { value = stale_value; expires_at = ts; stale_until = ts +. backoff_grace }) map
-            | _ -> map
+              ((), SMap.add key (Ready { value = stale_value; expires_at = ts; stale_until = ts +. backoff_grace }) map)
+            | _ -> ((), map)
           )
       and restore_stale_ready () =
         atomic_update table (fun map ->
@@ -232,10 +222,10 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
           | Some (Computing { token = c; _ }) when c = token ->
               let ts = now () in
               let backoff_grace = stale_grace *. bg_revalidate_backoff_factor in
-              SMap.add key
+              ((), SMap.add key
                 (Ready { value = stale_value; expires_at = ts; stale_until = ts +. backoff_grace })
-                map
-          | _ -> map
+                map)
+          | _ -> ((), map)
         )
       in
       (match Eio_context.get_switch_opt () with
@@ -283,10 +273,10 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
            atomic_update table (fun map ->
              match SMap.find_opt key map with
              | Some (Computing { token = c; _ }) when c = token ->
-               SMap.add key (Ready { value; expires_at = ts +. ttl; stale_until = ts +. ttl +. stale_grace }) map
+               ((), SMap.add key (Ready { value; expires_at = ts +. ttl; stale_until = ts +. ttl +. stale_grace }) map)
              | _ ->
                Log.Dashboard.info "cache: compute result discarded for %s (slot replaced)" key;
-               map
+               ((), map)
            );
            value
        | Some (Error exn) ->
@@ -298,12 +288,12 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
              | Some (Computing { token = c; stale = Some stale_value; _ }) when c = token ->
                  fallback_val := Some stale_value;
                  let backoff_grace = stale_grace *. bg_revalidate_backoff_factor in
-                 SMap.add key
+                 ((), SMap.add key
                    (Ready { value = stale_value; expires_at = ts; stale_until = ts +. backoff_grace })
-                   map
+                   map)
              | Some (Computing { token = c; stale = None; _ }) when c = token ->
-                 SMap.remove key map
-             | _ -> map
+                 ((), SMap.remove key map)
+             | _ -> ((), map)
            );
            if should_restore_stale_after_failure exn then
              match !fallback_val with
@@ -320,15 +310,15 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
                   | Some s ->
                       fallback_val := Some s;
                       let cooldown = { value = s; expires_at = ts +. 5.0; stale_until = ts +. 10.0 } in
-                      SMap.add key (Ready cooldown) map
+                      ((), SMap.add key (Ready cooldown) map)
                   | None ->
                       let err_json =
                         timeout_json ~key ~timeout_sec:max_wait_sec ~timeout_kind:"compute"
                       in
                       fallback_val := Some err_json;
                       let cooldown = { value = err_json; expires_at = ts +. 5.0; stale_until = ts +. 5.0 } in
-                      SMap.add key (Ready cooldown) map)
-             | _ -> map
+                      ((), SMap.add key (Ready cooldown) map))
+             | _ -> ((), map)
            );
            (match !fallback_val with
             | Some v -> v
@@ -340,19 +330,15 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
 let get_or_compute_simple key ~ttl compute =
   let ts = now () in
   let stale_grace = ttl *. stale_factor in
-  let action = ref None in
-  atomic_update table (fun map ->
+  match atomic_update table (fun map ->
     let map = maybe_evict map in
     match SMap.find_opt key map with
     | Some (Ready entry) when entry.stale_until > ts ->
-      action := Some (`Hit entry.value);
-      map
+      (`Hit entry.value, map)
     | _ ->
       let token = next_token () in
-      action := Some (`Compute token);
-      SMap.add key (Computing { token; started_at = ts; stale = None }) map
-  );
-  match Option.get !action with
+      (`Compute token, SMap.add key (Computing { token; started_at = ts; stale = None }) map)
+  ) with
   | `Hit v -> v
   | `Compute token ->
     (match compute () with
@@ -361,15 +347,15 @@ let get_or_compute_simple key ~ttl compute =
        atomic_update table (fun map ->
          match SMap.find_opt key map with
          | Some (Computing { token = c; _ }) when c = token ->
-           SMap.add key (Ready { value; expires_at = ts_after +. ttl; stale_until = ts_after +. ttl +. stale_grace }) map
-         | _ -> map
+           ((), SMap.add key (Ready { value; expires_at = ts_after +. ttl; stale_until = ts_after +. ttl +. stale_grace }) map)
+         | _ -> ((), map)
        );
        value
      | exception exn ->
        atomic_update table (fun map ->
          match SMap.find_opt key map with
-         | Some (Computing { token = c; _ }) when c = token -> SMap.remove key map
-         | _ -> map
+         | Some (Computing { token = c; _ }) when c = token -> ((), SMap.remove key map)
+         | _ -> ((), map)
        );
        raise exn)
 
@@ -434,18 +420,18 @@ let seed_stale_if_missing key ~stale_for value =
   let ts = now () in
   atomic_update table (fun map ->
       match SMap.find_opt key map with
-      | Some _ -> map
+      | Some _ -> ((), map)
       | None ->
-          SMap.add key
+          ((), SMap.add key
             (Ready { value; expires_at = ts; stale_until = ts +. stale_for })
-            map)
+            map))
 
 let invalidate key =
-  atomic_update table (fun map -> SMap.remove key map)
+  atomic_update table (fun map -> ((), SMap.remove key map))
 
 let invalidate_prefix prefix =
   atomic_update table (fun map ->
-    SMap.filter (fun k _ -> not (String.starts_with ~prefix k)) map)
+    ((), SMap.filter (fun k _ -> not (String.starts_with ~prefix k)) map))
 
 let invalidate_all () =
   Atomic.set table SMap.empty

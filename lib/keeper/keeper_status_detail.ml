@@ -964,6 +964,9 @@ let handle_keeper_status ctx args : tool_result =
          let runtime_blocker_fields =
           runtime_blocker_fields_json ctx.config m
          in
+         let attention_fields =
+           attention_fields_json ctx.config m
+         in
          let latest_metrics =
            latest_metrics_json ~metrics_store ~metrics_path ~tail_bytes
          in
@@ -975,6 +978,24 @@ let handle_keeper_status ctx args : tool_result =
          let runtime_trust =
            Keeper_runtime_trust_snapshot.snapshot_json
              ~config:ctx.config ~meta:m
+         in
+         let disposition =
+           json_string_opt_member runtime_trust "disposition"
+         in
+         let disposition_reason =
+           json_string_opt_member runtime_trust "disposition_reason"
+         in
+         let model_observability =
+           match model_observability with
+           | `Assoc fields ->
+               `Assoc
+                 (fields
+                 @ [
+                     ("disposition", Json_util.string_opt_to_json disposition);
+                     ( "disposition_reason",
+                       Json_util.string_opt_to_json disposition_reason );
+                   ])
+           | other -> other
          in
 
          let json = `Assoc ([
@@ -1007,6 +1028,8 @@ let handle_keeper_status ctx args : tool_result =
            ("last_proactive_ago_s", `Float last_proactive_ago_s);
            ("last_visible_proactive_ago_s", `Float last_visible_proactive_ago_s);
            ("active_model", `String active_model);
+           ("disposition", Json_util.string_opt_to_json disposition);
+           ("disposition_reason", Json_util.string_opt_to_json disposition_reason);
            ("next_model_hint", Json_util.string_opt_to_json next_model_hint);
            ("runtime_cascade_metrics", runtime_cascade_metrics);
            ("trace_history_count", `Int trace_history_count);
@@ -1140,7 +1163,7 @@ let handle_keeper_status ctx args : tool_result =
                then `Null
                else `String m.runtime.last_need);
           ]);
-        ] @ runtime_blocker_fields @ [
+        ] @ runtime_blocker_fields @ attention_fields @ [
            ("compaction_policy", `Assoc [
              ("profile", `String m.compaction.profile);
              ("ratio_gate", `Float compact_ratio_gate);

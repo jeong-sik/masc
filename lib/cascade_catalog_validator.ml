@@ -145,7 +145,7 @@ let diagnose_profile ~config_path ~profile =
     model_specs
     |> Cascade_config.expand_auto_models
     |> List.filter_map (fun spec ->
-           match Cascade_config.parse_model_string_exn spec with
+           match Cascade_config.parse_model_string_result spec with
            | Ok _ -> None
            | Error msg when is_provider_unavailable_error msg -> None
            | Error msg -> Some (spec, msg))

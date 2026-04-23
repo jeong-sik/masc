@@ -31,6 +31,9 @@ val runtime_blocker_surface_of_typed_class :
 val runtime_blocker_surface_of_failure_reason :
   Keeper_registry.failure_reason -> runtime_blocker_surface option
 
+val runtime_blocker_surface_opt :
+  Coord_utils.config -> keeper_meta -> runtime_blocker_surface option
+
 val string_list_to_json : string list -> Yojson.Safe.t
 
 val drift_surface_json : unit -> Yojson.Safe.t
@@ -49,6 +52,9 @@ val runtime_keepalive_started_at :
   Coord_utils.config -> keeper_meta -> float option
 
 val runtime_blocker_fields_json :
+  Coord_utils.config -> keeper_meta -> (string * Yojson.Safe.t) list
+
+val attention_fields_json :
   Coord_utils.config -> keeper_meta -> (string * Yojson.Safe.t) list
 
 val social_model_resolution_fields_json :

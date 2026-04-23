@@ -98,13 +98,11 @@ let handle_keeper_preflight_check
       if repo_name_arg <> "" then repo_name_arg
       else Keeper_repo_readiness.repo_name_of_repo_arg ~project_root:root repo
     in
-    Filename.concat
-      (Keeper_alerting_path.playground_repos_path meta.name)
-      repo_name
+    Filename.concat "repos" repo_name
   in
   (* Check 6: sandbox repo readiness *)
   let repo_readiness =
-    Keeper_repo_readiness.inspect ~config ~keeper_name:meta.name
+    Keeper_repo_readiness.inspect ~config ~meta
       ?repo_name:(if repo_name_arg = "" then None else Some repo_name_arg)
       ~repo ~default_branch:!default_branch ()
   in

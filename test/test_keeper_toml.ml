@@ -449,6 +449,7 @@ mention_targets = ["sherlock", "log-analyzer"]
 proactive_enabled = true
 room_signal_prompt_enabled = true
 policy_voice_enabled = false
+autoboot_enabled = false
 |} in
   match TL.parse_toml input with
   | Error e -> fail e
@@ -465,7 +466,8 @@ policy_voice_enabled = false
       check (option bool) "proactive" (Some true) d.proactive_enabled;
       check (option bool) "room signal prompt" (Some true)
         d.room_signal_prompt_enabled;
-      check (option bool) "policy_voice" (Some false) d.policy_voice_enabled
+      check (option bool) "policy_voice" (Some false) d.policy_voice_enabled;
+      check (option bool) "autoboot_enabled" (Some false) d.autoboot_enabled
 
 let test_profile_rejects_invalid_social_model () =
   let input = {|
@@ -845,6 +847,114 @@ let test_persona_resolver_rejects_non_public_social_model_arg () =
          || contains_substring e "non-public keeper args");
       check bool "mentions social_model" true (contains_substring e "social_model")
 
+let test_persona_resolver_preserves_autoboot_enabled_arg () =
+  with_personas_dir @@ fun personas_dir ->
+  let persona_dir = Filename.concat personas_dir "probe" in
+  mkdir_p persona_dir;
+  write_file
+    (Filename.concat persona_dir "profile.json")
+    {|
+{
+  "name": "Probe",
+  "keeper": {
+    "goal": "test persona keeper"
+  }
+}
+|};
+  match
+    Masc_mcp.Keeper_exec_persona.resolved_keeper_args_from_persona
+      (`Assoc
+        [
+          ("persona_name", `String "probe");
+          ("autoboot_enabled", `Bool false);
+        ])
+  with
+  | Error e -> fail ("resolver failed: " ^ e)
+  | Ok (_, resolved) ->
+      check (option bool) "autoboot_enabled preserved" (Some false)
+        (match Yojson.Safe.Util.member "autoboot_enabled" resolved with
+         | `Bool value -> Some value
+         | _ -> None)
+
+let test_persona_resolver_preserves_execution_scope_from_persona_defaults () =
+  with_personas_dir @@ fun personas_dir ->
+  let persona_dir = Filename.concat personas_dir "probe" in
+  mkdir_p persona_dir;
+  write_file
+    (Filename.concat persona_dir "profile.json")
+    {|
+{
+  "name": "Probe",
+  "keeper": {
+    "goal": "test persona keeper",
+    "execution_scope": "observe_only"
+  }
+}
+|};
+  match
+    Masc_mcp.Keeper_exec_persona.resolved_keeper_args_from_persona
+      (`Assoc
+        [
+          ("persona_name", `String "probe");
+          ("name", `String "probe-shadow");
+        ])
+  with
+  | Error e -> fail ("resolver failed: " ^ e)
+  | Ok (_, resolved) ->
+      check (option string) "execution_scope preserved" (Some "observe_only")
+        (match Yojson.Safe.Util.member "execution_scope" resolved with
+         | `String value -> Some value
+         | _ -> None)
+
+let test_persona_resolver_preserves_canonical_tool_access_and_allowed_paths () =
+  with_personas_dir @@ fun personas_dir ->
+  let persona_dir = Filename.concat personas_dir "probe" in
+  mkdir_p persona_dir;
+  write_file
+    (Filename.concat persona_dir "profile.json")
+    {|
+{
+  "name": "Probe",
+  "keeper": {
+    "goal": "test persona keeper"
+  }
+}
+|};
+  let expected_tool_access =
+    Masc_mcp.Keeper_types.tool_access_to_json
+      (Masc_mcp.Keeper_types.Custom [ "masc_status" ])
+  in
+  match
+    Masc_mcp.Keeper_exec_persona.resolved_keeper_args_from_persona
+      (`Assoc
+        [
+          ("persona_name", `String "probe");
+          ("allowed_paths", `List [ `String "/tmp/demo" ]);
+          ( "tool_access",
+            `Assoc
+              [
+                ("kind", `String "custom");
+                ("tools", `List [ `String "masc_status" ]);
+              ] );
+        ])
+  with
+  | Error e -> fail ("resolver failed: " ^ e)
+  | Ok (_, resolved) ->
+      check string "tool_access preserved"
+        (Yojson.Safe.to_string expected_tool_access)
+        (Yojson.Safe.to_string (Yojson.Safe.Util.member "tool_access" resolved));
+      check (list string) "allowed_paths preserved" [ "/tmp/demo" ]
+        (match Yojson.Safe.Util.member "allowed_paths" resolved with
+         | `List items ->
+             List.filter_map
+               (function `String value -> Some value | _ -> None)
+               items
+         | _ -> []);
+      check bool "tool_preset omitted with canonical tool_access" false
+        (match Yojson.Safe.Util.member "tool_preset" resolved with
+         | `String _ -> true
+         | _ -> false)
+
 (* ================================================================ *)
 (* Unknown-key detection                                             *)
 (* ================================================================ *)
@@ -856,6 +966,7 @@ goal = "canonical"
 mention_targets = ["a", "b"]
 tool_preset = "coding"
 tool_also_allow = ["x"]
+autoboot_enabled = false
 cascade_name = "big_three"
 |} in
   match TL.parse_toml input with
@@ -1136,5 +1247,11 @@ let () =
             test_persona_resolver_defaults_to_research_tool_preset;
           test_case "persona resolver rejects non-public social_model arg" `Quick
             test_persona_resolver_rejects_non_public_social_model_arg;
+          test_case "persona resolver preserves autoboot_enabled arg" `Quick
+            test_persona_resolver_preserves_autoboot_enabled_arg;
+          test_case "persona resolver preserves execution_scope from persona defaults" `Quick
+            test_persona_resolver_preserves_execution_scope_from_persona_defaults;
+          test_case "persona resolver preserves canonical tool_access and allowed_paths" `Quick
+            test_persona_resolver_preserves_canonical_tool_access_and_allowed_paths;
         ] );
     ]

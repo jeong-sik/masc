@@ -55,7 +55,7 @@ OAS  ──does not know──→ MASC
 - cascade schema, parsing, label semantics, selection policy의 owner는 MASC다.
 - MASC는 repo-level default와 keeper별 `cascade_name` override를 해석해 concrete provider/model 후보를 고른다.
 - OAS는 MASC가 선택한 concrete provider/model config를 실행하는 단일-provider runtime으로 남는다.
-- 따라서 checked-in repo defaults는 review 안정성을 위해 explicit `provider:model_id`를 선호한다.
+- 따라서 checked-in repo defaults는 review-stable pinning이 중요할 때 explicit `provider:model_id`를 쓰고, adapter default 자체를 계약으로 삼을 때만 `provider:auto`를 쓴다.
 - legacy `allowed_providers` keeper TOML/meta fields는 compatibility input일 뿐이며, active runtime policy로 취급하지 않는다.
 - persisted legacy keeper meta tool-policy fields are scrubbed into canonical `tool_access` on read; direct `meta_of_json` callers must use canonical keeper meta keys.
 
@@ -141,7 +141,7 @@ Use this checklist when reviewing boundary-touching PRs:
 3. **문서 truth가 코드 truth와 일치하는가?**
    - 특히 cascade labels, runtime-health semantics, boundary-audit snapshot은 구현과 SSOT 문서가 함께 갱신되어야 한다.
 4. **Checked-in cascade labels are explicit enough for stable review**
-   - repository-default `config/cascade.json` entries should prefer explicit `provider:model_id` labels; runtime discovery/failsafe may still resolve local defaults elsewhere, but checked-in defaults should avoid ambiguous `provider:auto` labels.
+   - repository-default `config/cascade.json` entries should pin explicit `provider:model_id` labels when review stability depends on an exact model. `provider:auto` is acceptable only when the adapter-level default is itself the intended checked-in contract.
 
 ## Boundary Rules for Future Work
 

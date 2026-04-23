@@ -43,7 +43,9 @@ let make_goal id title =
   {
     Goal_store.id; horizon = Short; title;
     metric = None; target_value = None; due_date = None;
-    priority = 3; status = Active; parent_goal_id = None;
+    priority = 3; status = Active; phase = Goal_phase.Executing;
+    verifier_policy = None; require_completion_approval = false;
+    active_verification_request_id = None; parent_goal_id = None;
     last_review_note = None; last_review_at = None;
     created_at = ts; updated_at = ts;
   }
@@ -98,6 +100,89 @@ let test_updated_at_also_refreshed () =
   let after = Goal_store.read_state config in
   check bool "updated_at refreshed" true (after.updated_at <> stale_ts)
 
+let test_legacy_status_defaults_phase () =
+  with_room @@ fun config ->
+  Coord.write_json config (Goal_store.goals_path config)
+    (`Assoc
+      [
+        ("version", `Int 1);
+        ("updated_at", `String (iso_now ()));
+        ( "goals",
+          `List
+            [
+              `Assoc
+                [
+                  ("id", `String "legacy-1");
+                  ("horizon", `String "short");
+                  ("title", `String "Legacy Goal");
+                  ("metric", `Null);
+                  ("target_value", `Null);
+                  ("due_date", `Null);
+                  ("priority", `Int 3);
+                  ("status", `String "active");
+                  ("parent_goal_id", `Null);
+                  ("last_review_note", `Null);
+                  ("last_review_at", `Null);
+                  ("created_at", `String (iso_now ()));
+                  ("updated_at", `String (iso_now ()));
+                ];
+            ] );
+      ]);
+  let state = Goal_store.read_state config in
+  match state.goals with
+  | [ goal ] ->
+      check string "legacy active becomes executing" "executing"
+        (Goal_phase.to_string goal.phase);
+      check string "legacy active status preserved" "active"
+        (match goal.status with Active -> "active" | _ -> "other")
+  | _ -> fail "expected one legacy goal"
+
+let test_blocked_phase_projects_legacy_status () =
+  with_room @@ fun config ->
+  let goal, _kind =
+    match Goal_store.upsert_goal config ~title:"Blocked goal"
+            ~phase:Goal_phase.Blocked ()
+    with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  check string "blocked phase stored" "blocked" (Goal_phase.to_string goal.phase);
+  check string "blocked phase projects to paused status" "paused"
+    (match goal.status with Paused -> "paused" | _ -> "other")
+
+let test_list_goals_filters_by_phase () =
+  with_room @@ fun config ->
+  let make title phase =
+    match Goal_store.upsert_goal config ~title ~phase () with
+    | Ok _ -> ()
+    | Error msg -> fail msg
+  in
+  make "Executing goal" Goal_phase.Executing;
+  make "Approval goal" Goal_phase.Awaiting_approval;
+  make "Blocked goal" Goal_phase.Blocked;
+  let goals =
+    Goal_store.list_goals config ~phase:Goal_phase.Awaiting_approval ()
+  in
+  check int "one goal in awaiting approval" 1 (List.length goals);
+  match goals with
+  | [ goal ] ->
+      check string "filtered phase preserved" "awaiting_approval"
+        (Goal_phase.to_string goal.phase)
+  | _ -> fail "expected one filtered goal"
+
+let test_update_missing_goal_does_not_bump () =
+  with_room @@ fun config ->
+  let goal = make_goal "exists" "one goal" in
+  Goal_store.write_state config
+    { version = 9; updated_at = iso_now (); goals = [ goal ] };
+  let before = Goal_store.read_state config in
+  (match Goal_store.update_goal config ~goal_id:"ghost" Fun.id with
+   | Error _ -> ()
+   | Ok _ -> fail "expected missing goal error");
+  let after = Goal_store.read_state config in
+  check int "version unchanged on missing update" before.version after.version;
+  check string "updated_at unchanged on missing update" before.updated_at after.updated_at
+
 let () =
   run "Goal_store.delete_goal"
     [ ( "regression-7690",
@@ -107,4 +192,12 @@ let () =
           test_case "missing goal: no bump" `Quick
             test_delete_nonexistent_does_not_bump;
           test_case "updated_at also refreshed" `Quick
-            test_updated_at_also_refreshed ] ) ]
+            test_updated_at_also_refreshed;
+          test_case "legacy status defaults phase" `Quick
+            test_legacy_status_defaults_phase;
+          test_case "blocked phase projects legacy status" `Quick
+            test_blocked_phase_projects_legacy_status;
+          test_case "list_goals filters by phase" `Quick
+            test_list_goals_filters_by_phase;
+          test_case "missing update: no bump" `Quick
+            test_update_missing_goal_does_not_bump ] ) ]

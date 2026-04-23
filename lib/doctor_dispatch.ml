@@ -15,7 +15,7 @@ let aggregate_exit_code rcs =
   List.fold_left (fun acc rc -> max acc (normalise rc)) 0 rcs
 
 let python_bin () =
-  try Sys.getenv "MASC_PYTHON" with Not_found -> "python3"
+  Sys.getenv_opt "MASC_PYTHON" |> Option.value ~default:"python3"
 
 let capture_sidecar_json name =
   match sidecar_dir name with

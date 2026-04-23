@@ -141,14 +141,14 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
           else
             let term_session_id = Option.value ~default:"" (Sys.getenv_opt "TERM_SESSION_ID") in
             let term_file = Printf.sprintf "/tmp/.masc_agent_%s" term_session_id in
-            (try
-              let name = Fs_compat.load_file term_file |> String.trim in
-              if name <> "" then begin
-                Log.Mcp.warn "[deprecated] agent name resolved via /tmp TERM file — migrate to Agent_identity";
-                name
-              end else raise Not_found
-            with Sys_error _ | Not_found ->
-              generated_fallback_agent_name)
+            (match Safe_ops.protect ~default:None (fun () ->
+               let name = Fs_compat.load_file term_file |> String.trim in
+               if name <> "" then Some name else None)
+             with
+             | Some name ->
+                 Log.Mcp.warn "[deprecated] agent name resolved via /tmp TERM file — migrate to Agent_identity";
+                 name
+             | None -> generated_fallback_agent_name)
   in
 
   let token =
@@ -310,9 +310,12 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         done;
         !idx + String.length prefix
       in
-      let end_idx = String.index_from result start_idx '\n' in
+      let end_idx = match String.index_from_opt result start_idx '\n' with
+        | Some idx -> idx
+        | None -> String.length result
+      in
       String.sub result start_idx (end_idx - start_idx)
-    with Not_found | Invalid_argument _ -> fallback
+    with Invalid_argument _ -> fallback
   in
 
   let write_term_session_agent nickname =
@@ -401,10 +404,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         (* Persist nickname so subsequent calls can use it. *)
         write_mcp_session_agent nickname;
         write_term_session_agent nickname;
-        (try ignore (Session.register registry ~agent_name:nickname)
-         with
-         | Eio.Cancel.Cancelled _ as e -> raise e
-         | exn -> log_mcp_exn ~label:"session register (nickname) failed" exn);
+        ignore (Session.register registry ~agent_name:nickname);
         nickname
       end
     end else
@@ -413,10 +413,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
 
   (* Auto-register session for non-read-only tools *)
   if agent_name <> "unknown" && not is_read_only then
-    (try ignore (Session.register registry ~agent_name)
-     with
-     | Eio.Cancel.Cancelled _ as e -> raise e
-     | exn -> log_mcp_exn ~label:"session register (tool) failed" exn);
+    ignore (Session.register registry ~agent_name);
 
   (* Log tool call *)
   Log.Mcp.debug "[%s] %s" agent_name name;

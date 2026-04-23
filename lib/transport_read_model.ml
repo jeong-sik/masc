@@ -105,7 +105,7 @@ let tcp_port_reachable port =
   try
     let sock = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
     Fun.protect
-      ~finally:(fun () -> try Unix.close sock with _ -> ())
+      ~finally:(fun () -> try Unix.close sock with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ())
       (fun () ->
         Unix.connect sock
           (Unix.ADDR_INET

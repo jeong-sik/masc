@@ -5,8 +5,24 @@ open Server_routes_http
 module Mcp_server = Mcp_server
 module Mcp_eio = Mcp_server_eio
 
+let retired_pg_env_keys =
+  [ "MASC_POSTGRES_URL"; "DATABASE_URL"; "SUPABASE_DB_URL"; "SB_PG_URL" ]
+
+let clear_retired_pg_envs () =
+  List.iter
+    (fun key ->
+      match Sys.getenv_opt key |> Env_config_core.trim_opt with
+      | Some _ ->
+          Log.Server.warn
+            "Ignoring retired PG runtime env %s; filesystem-only bootstrap is enforced."
+            key;
+          Unix.putenv key ""
+      | None -> Unix.putenv key "")
+    retired_pg_env_keys
+
 let force_jsonl_fallback_env () =
-  Unix.putenv Env_config_core.storage_type_env_key "filesystem"
+  Unix.putenv Env_config_core.storage_type_env_key "filesystem";
+  clear_retired_pg_envs ()
 
 let requested_backend_mode () =
   Env_config_core.storage_type ()
@@ -106,36 +122,78 @@ let rec copy_missing_tree ~src ~dst =
   else
     copy_file_if_missing ~src ~dst
 
+let config_bootstrap_mode () =
+  match Sys.getenv_opt "MASC_CONFIG_BOOTSTRAP" |> Env_config_core.trim_opt with
+  | Some ("empty" | "EMPTY") -> `Empty
+  | Some ("skip" | "SKIP") -> `Skip
+  | _ -> `Auto
+
+let ensure_config_root_scaffold config_root =
+  Fs_compat.mkdir_p config_root;
+  [ "prompts"; "keepers"; "personas" ]
+  |> List.iter (fun name -> Fs_compat.mkdir_p (Filename.concat config_root name))
+
+(* Explicit base-path workspaces should inherit shared config defaults
+   without silently importing repo keeper manifests into the live root. *)
+let copy_missing_config_root_seed ~src ~dst =
+  Fs_compat.mkdir_p dst;
+  Sys.readdir src
+  |> Array.iter (fun name ->
+         if String.equal name "keepers" then
+           ()
+         else
+           copy_missing_tree
+             ~src:(Filename.concat src name)
+             ~dst:(Filename.concat dst name));
+  Fs_compat.mkdir_p (Filename.concat dst "keepers")
 let bootstrap_base_path_config_root ~base_path =
   let base_path = Env_config_core.normalize_masc_base_path_input base_path in
   if Option.is_some (Config_dir_resolver.current_env_config_dir_opt ()) then
     ()
-  else
+  else begin
+    let mode = config_bootstrap_mode () in
     let config_root =
-      Filename.concat (Filename.concat base_path ".masc") "config"
+      Filename.concat (Common.masc_dir_from_base_path ~base_path) "config"
     in
-    let source_root =
-      versioned_config_root_candidates () |> List.find_opt Sys.file_exists
-    in
-    (match source_root with
-     | Some source ->
-         copy_missing_tree ~src:source ~dst:config_root;
-         Log.Server.info
-           "bootstrapped base-path config root: %s <- %s"
-           config_root source
-     | None ->
-         Fs_compat.mkdir_p (Filename.concat config_root "prompts");
-         Fs_compat.mkdir_p (Filename.concat config_root "keepers");
-         Fs_compat.mkdir_p (Filename.concat config_root "personas");
-         let cascade_path =
-           Filename.concat config_root Config_dir_resolver.cascade_json_filename
-         in
-         if not (Sys.file_exists cascade_path) then
-           Fs_compat.save_file cascade_path "{}";
-         Log.Server.warn
-           "bootstrapped minimal base-path config root without versioned source: %s"
-           config_root);
+    if mode = `Skip then
+      Log.Server.info "config bootstrap skipped via MASC_CONFIG_BOOTSTRAP=skip"
+    else if Sys.file_exists config_root then
+      if Sys.is_directory config_root then begin
+        ensure_config_root_scaffold config_root;
+        Log.Server.info
+          "preserved existing base-path config root without refilling missing entries: %s"
+          config_root
+      end else
+        Log.Server.warn
+          "base-path config root exists but is not a directory; skipping bootstrap: %s"
+          config_root
+    else if mode = `Empty then begin
+      ensure_config_root_scaffold config_root;
+      Log.Server.info
+        "bootstrapped empty config root (MASC_CONFIG_BOOTSTRAP=empty): %s"
+        config_root
+    end else
+      let source_root =
+        versioned_config_root_candidates () |> List.find_opt Sys.file_exists
+      in
+      (match source_root with
+       | Some source ->
+           copy_missing_config_root_seed ~src:source ~dst:config_root;
+           Log.Server.info
+             "bootstrapped base-path config root: %s <- %s"
+             config_root source
+       | None ->
+           ensure_config_root_scaffold config_root;
+           let cascade_path =
+             Filename.concat config_root Config_dir_resolver.cascade_json_filename
+           in
+           if not (Sys.file_exists cascade_path) then
+             Fs_compat.save_file cascade_path "{}";
+           Log.Server.warn
+             "bootstrapped minimal base-path config root without versioned source: %s"
+             config_root);
     Config_dir_resolver.reset ()
+  end
 
 let startup_config_resolution ~base_path =
   Config_dir_resolver.resolve_with
@@ -193,6 +251,7 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
   Eio_context.set_net net;
   Eio_context.set_clock clock;
   Eio_context.set_mono_clock mono_clock;
+  force_jsonl_fallback_env ();
   ensure_default_oas_cascade_timeout_env ();
   Process_eio.init ~cwd_default:Eio.Path.(fs / base_path) ~proc_mgr ~clock;
   Exec_tap.install_from_env ();
@@ -698,8 +757,8 @@ let startup_migrate_keeper_histories (state : Mcp_server.server_state) =
 
 (* bootstrap_keepers removed: the keeper_autoboot subsystem in
    start_keeper_loops now handles keeper startup in a dedicated
-   fiber with a 5-second delay, avoiding PG pool contention with
-   the 7+ dashboard refresh loops that share the same pool. *)
+   fiber with a 5-second delay, avoiding runtime bootstrap contention with
+   the 7+ dashboard refresh loops that start alongside it. *)
 
 let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
     ~make_h2_request_handler ~make_h2_error_handler =
@@ -745,6 +804,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
     | Env_config.Transport.Unknown_h2_mode _ -> `Auto
   in
   let socket = Server_bootstrap_http.listen_socket ~sw ~net config in
+  force_jsonl_fallback_env ();
   let initial_backend_mode = requested_backend_mode () in
   server_state := None;
   Server_startup_state.reset ~backend_mode:initial_backend_mode ();
@@ -818,7 +878,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
              detail
        | None -> ());
       let t1 = Eio.Time.now clock in
-      Log.Server.info "State created (PG pool) in %.1fs" (t1 -. t0);
+      Log.Server.info "State created (runtime state) in %.1fs" (t1 -. t0);
       bootstrap_server_state_blocking state;
       sync_admin_token_env state;
       let path_diagnostics =
@@ -891,7 +951,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
             fun () -> startup_prune_keeper_checkpoints state );
           (* keeper_bootstrap removed: keeper_autoboot subsystem in
              start_keeper_loops handles this in a dedicated fiber,
-             avoiding PG pool contention with dashboard refresh loops. *)
+             avoiding bootstrap contention with dashboard refresh loops. *)
         ]
       in
       let task_names = List.map fst tasks in

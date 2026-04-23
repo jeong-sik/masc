@@ -31,7 +31,10 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         p.profile_defaults.goal |> Option.value ~default:""
         |> normalize_goal_horizon_text
   in
-  let autoboot_enabled = Option.value ~default:true p.autoboot_enabled_opt in
+  let autoboot_enabled =
+    first_some p.autoboot_enabled_opt p.profile_defaults.autoboot_enabled
+    |> Option.value ~default:true
+  in
   let policy_voice_enabled =
     first_some
       p.policy_voice_enabled_opt
@@ -279,8 +282,9 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                   (* Ensure full session dir tree, not just base_dir (issue #3019) *)
                   ignore (Keeper_fs.ensure_dir (Filename.concat base_dir trace_id));
                   ignore
-                    (Keeper_alerting_path.ensure_playground_bundle ~config:ctx.config
-                       ~name:p.name);
+                    (Keeper_alerting_path.ensure_sandbox_bundle_for_profile
+                       ~config:ctx.config ~name:p.name
+                       ~sandbox_profile);
                   let session =
                     Keeper_exec_context.create_session ~session_id:trace_id
                       ~base_dir

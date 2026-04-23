@@ -118,6 +118,7 @@ let make_task ~id ~status : Types.task = {
   id;
   title = "Test Task";
   description = "";
+  goal_id = None;
   task_status = status;
   priority = 3;
   files = [];
@@ -157,6 +158,7 @@ let make_task_with_priority ~id ~priority : Types.task = {
   title = "Task";
   description = "";
   task_status = Types.Todo;
+  goal_id = None;
   priority;
   files = [];
   created_at = "2024-01-01T00:00:00Z";

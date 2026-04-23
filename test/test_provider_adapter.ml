@@ -280,6 +280,60 @@ let test_stt_request_mcp_rejected () =
   | Ok _ -> fail "expected Error for voice_mcp endpoint"
   | Error _ -> ()
 
+let test_auto_models_use_declared_policy () =
+  with_env "MASC_KIMI_CLI_AUTO_MODELS" None (fun () ->
+      check (option (list string)) "kimi cli declared default"
+        (Some [ "kimi-for-coding" ])
+        (Adapter.auto_models_for_cascade_prefix "kimi_cli");
+      with_env "MASC_GEMINI_CLI_AUTO_MODELS" None (fun () ->
+          with_env "GEMINI_DEFAULT_MODEL" (Some "gemini-2.5-flash") (fun () ->
+              check (option (list string)) "gemini cli prefers explicit default model env"
+                (Some [ "gemini-2.5-flash" ])
+                (Adapter.auto_models_for_cascade_prefix "gemini_cli"))))
+
+let test_runtime_mcp_header_support_uses_declared_policy () =
+  let kimi_cli_cfg =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.Kimi_cli
+      ~model_id:"kimi-for-coding"
+      ~base_url:""
+      ()
+  in
+  let codex_cli_cfg =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.Codex_cli
+      ~model_id:"gpt-5.4"
+      ~base_url:""
+      ()
+  in
+  check bool "kimi cli supports runtime MCP headers" true
+    (Adapter.supports_runtime_mcp_http_headers_for_config kimi_cli_cfg);
+  check bool "codex cli does not support runtime MCP headers" false
+    (Adapter.supports_runtime_mcp_http_headers_for_config codex_cli_cfg)
+
+let test_provider_label_of_config_preserves_cli_vs_api_identity () =
+  let kimi_api_cfg =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.OpenAI_compat
+      ~model_id:"kimi-k2.5"
+      ~base_url:"https://api.moonshot.ai/v1"
+      ~request_path:"/chat/completions"
+      ()
+  in
+  let kimi_cli_cfg =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.Kimi_cli
+      ~model_id:"kimi-for-coding"
+      ~base_url:""
+      ()
+  in
+  check string "kimi api label" "kimi"
+    (Adapter.provider_label_of_config kimi_api_cfg);
+  check string "kimi cli label" "kimi_cli"
+    (Adapter.provider_label_of_config kimi_cli_cfg);
+  check string "kimi cli model label" "kimi_cli:kimi-for-coding"
+    (Adapter.model_label_of_config kimi_cli_cfg)
+
 let () =
   run "Provider Adapter"
     [
@@ -308,6 +362,12 @@ let () =
             test_default_model_provider_prefix_result;
           test_case "default override label" `Quick
             test_default_model_override_label_result;
+          test_case "declared auto model policy" `Quick
+            test_auto_models_use_declared_policy;
+          test_case "declared runtime MCP header policy" `Quick
+            test_runtime_mcp_header_support_uses_declared_policy;
+          test_case "provider label keeps cli vs api identity" `Quick
+            test_provider_label_of_config_preserves_cli_vs_api_identity;
           test_case "resolve voice aliases" `Quick test_resolve_voice_aliases;
           test_case "voice auth env resolution" `Quick
             test_voice_auth_env_resolution;

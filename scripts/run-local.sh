@@ -14,6 +14,7 @@ PORT_EXPLICIT=0
 PRINT_PORT_ONLY=0
 BOOTSTRAP_ONLY=0
 BUILD_DASHBOARD=0
+BOOTSTRAP_KEEPERS=0
 DUNE_JOBS="${MASC_DUNE_JOBS:-8}"
 
 git_common_root() {
@@ -33,7 +34,7 @@ git_common_root() {
 
 usage() {
   cat >&2 <<'EOF'
-Usage: scripts/run-local.sh [--target-dir PATH] [--host HOST] [--port PORT] [--print-port] [--bootstrap-only] [--build-dashboard]
+Usage: scripts/run-local.sh [--target-dir PATH] [--host HOST] [--port PORT] [--print-port] [--bootstrap-only] [--build-dashboard] [--bootstrap-keepers]
 
 Dir-local local-dev launcher:
   - runtime data root defaults to <target>/.masc/
@@ -41,6 +42,7 @@ Dir-local local-dev launcher:
   - personas root defaults to <target>/.masc/config/personas
   - gRPC / WS / WebRTC are disabled by default
   - --bootstrap-only materializes local config/build state but does not start the server
+  - checked-in keeper manifests are excluded by default; pass --bootstrap-keepers to seed config/keepers
 
 For shared repo/full-runtime startup, use ./start-masc-mcp.sh instead.
 EOF
@@ -107,6 +109,8 @@ bootstrap_local_config() {
   local target="$1"
   local local_masc_dir="$target/.masc"
   local local_config_dir="$local_masc_dir/config"
+  local item=""
+  local name=""
   if [ "${MASC_CONFIG_DIR+x}" = "x" ]; then
     return 0
   fi
@@ -116,8 +120,27 @@ bootstrap_local_config() {
 
   mkdir -p "$local_masc_dir"
   if [ -d "$REPO_ROOT/config" ]; then
-    cp -R "$REPO_ROOT/config" "$local_config_dir"
-    echo "[local-run] Bootstrapped config into $local_config_dir" >&2
+    mkdir -p "$local_config_dir"
+    for item in "$REPO_ROOT/config"/*; do
+      if [ ! -e "$item" ]; then
+        continue
+      fi
+      name="$(basename "$item")"
+      if [ "$name" = "keepers" ]; then
+        if [ "$BOOTSTRAP_KEEPERS" = "1" ]; then
+          cp -R "$item" "$local_config_dir/$name"
+        else
+          mkdir -p "$local_config_dir/keepers"
+        fi
+      else
+        cp -R "$item" "$local_config_dir/$name"
+      fi
+    done
+    if [ "$BOOTSTRAP_KEEPERS" = "1" ]; then
+      echo "[local-run] Bootstrapped config into $local_config_dir (keepers included)" >&2
+    else
+      echo "[local-run] Bootstrapped config into $local_config_dir (keepers excluded; pass --bootstrap-keepers to include)" >&2
+    fi
   else
     mkdir -p "$local_config_dir"
     echo "[local-run] Repo config/ missing; created empty $local_config_dir" >&2
@@ -179,6 +202,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --build-dashboard)
       BUILD_DASHBOARD=1
+      shift
+      ;;
+    --bootstrap-keepers)
+      BOOTSTRAP_KEEPERS=1
       shift
       ;;
     -h|--help)

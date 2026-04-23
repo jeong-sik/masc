@@ -1,3 +1,12 @@
+# MASC Keeper Sandbox
+# Runtime environment for keeper agents executing Bash/Read/Edit tools.
+#
+# Hardening notes:
+# - When docker_hardened is enabled, override at runtime:
+#     MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS=false
+#     REQUIRE_USERNS=false
+# - The host docker socket is typically mounted for DinD operations.
+
 FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -7,6 +16,7 @@ RUN apt-get update \
       bash \
       ca-certificates \
       coreutils \
+      curl \
       findutils \
       git \
       gh \

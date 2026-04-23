@@ -187,7 +187,7 @@ let metric_of_block
            | None -> 0)
     | _ -> 0
   in
-  let msg : Agent_sdk.Types.message =
+  let msg : Oas.Types.message =
     {
       Oas.Types.role;
       content = [block];
@@ -303,6 +303,10 @@ type tool_surface_metrics =
 
 type computed_tool_surface =
   { all_allowed : string list
+  ; absolute_turn : int
+  ; checkpoint_start_turn : int
+  ; per_call_turn : int
+  ; per_call_max_turns : int
   ; core_count : int
   ; deterministic_prefilter_count : int
   ; discovered_count : int
@@ -333,6 +337,7 @@ type run_result =
   ; turn_count : int
   ; tool_calls_made : int
   ; usage : Oas.Types.api_usage
+  ; usage_reported : bool
   ; tools_used : string list
   ; tool_calls : tool_call_detail list
   ; checkpoint : Oas.Checkpoint.t option
@@ -607,7 +612,9 @@ let run_turn
         ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
     with
     | Ok cp -> Some cp
-    | Error _ -> None
+    | Error _ ->
+        Eio.traceln "[KeeperAgentRun] load_oas checkpoint failed";
+        None
   in
   (* Starting turn count for per-call budget calculation in hooks.
      With Agent.resume, turn count is cumulative from checkpoint. *)
@@ -740,8 +747,9 @@ let run_turn
   let decay_turns =
     match Sys.getenv_opt "MASC_KEEPER_TOOL_DECAY_TURNS" with
     | Some s ->
-      (try max 1 (int_of_string s) with
-       | Failure _ ->
+      (match int_of_string_opt s with
+       | Some n -> max 1 n
+       | None ->
          Log.Keeper.warn
            "keeper: MASC_KEEPER_TOOL_DECAY_TURNS=%S is not a valid integer, using default 5"
            s;
@@ -1513,6 +1521,10 @@ let run_turn
     in
     {
       all_allowed;
+      absolute_turn = turn;
+      checkpoint_start_turn = start_turn_count;
+      per_call_turn;
+      per_call_max_turns = max_turns;
       core_count;
       deterministic_prefilter_count = List.length deterministic_prefilter;
       discovered_count;
@@ -1585,7 +1597,8 @@ let run_turn
   let discover_work_nudge () : string option =
     let meta = !meta_ref in
     match meta.work_discovery_enabled with
-    | Some true ->
+    | Some false -> None
+    | _ ->
       let interval =
         Option.value ~default:600 meta.work_discovery_interval_sec in
       let since_last =
@@ -1687,7 +1700,6 @@ let run_turn
               Do not print fenced pseudo-calls. Pick the smallest viable \
               action and emit one or more structured tool calls now."
              interval (String.concat "\n\n" sections)))
-    | _ -> None
   in
   let base_hooks =
     (* Issue #8597 #3-5: dropped ~config / ~session / ~ctx_snapshot —
@@ -1851,7 +1863,8 @@ let run_turn
                   append_ctx
                     ctx
                     (Printf.sprintf
-                       "[LAST TURN] Turn %d/%d. This is your final turn. You MUST emit a \
+                       "[LAST TURN] Per-call turn %d/%d. This is your final turn in this \
+                        Agent.run call. You MUST emit a \
                         [STATE]...[/STATE] block now summarizing what you accomplished \
                         and what the next generation should do. Do NOT start new tool \
                         work. Three escape hatches, in priority order: \
@@ -1862,8 +1875,8 @@ let run_turn
                         decision you cannot make alone; \
                         (3) if you claimed a task, call keeper_task_done NOW before \
                        session ends."
-                       turn
-                       max_turns)
+                       computed_surface.per_call_turn
+                       computed_surface.per_call_max_turns)
                 else if is_retry
                 then
                   append_ctx
@@ -1879,23 +1892,27 @@ let run_turn
                   append_ctx
                     ctx
                     (Printf.sprintf
-                       "[BUDGET] %d/%d turns used. Wrap up current work and emit a \
+                       "[BUDGET] %d/%d turns used in this Agent.run call. Wrap up current \
+                        work and emit a \
                         [STATE] block. If more turns will genuinely finish the task, \
                         call extend_turns. If you are blocked on a decision or \
                         external input, post a question to the board via \
                         masc_board_post rather than burning turns retrying — that is \
                         the intended judgment-escalation path."
-                       turn
-                       max_turns)
+                       computed_surface.per_call_turn
+                       computed_surface.per_call_max_turns)
                 else ctx
               in
               if computed_surface.is_warning_zone
               then
                 Log.Keeper.info
-                  "keeper:%s turn_budget turn=%d/%d last_turn=%b"
+                  "keeper:%s per_call_turn_budget absolute_turn=%d checkpoint_start_turn=%d \
+                   per_call_turn=%d/%d last_turn=%b"
                   meta.name
-                  turn
-                  max_turns
+                  computed_surface.absolute_turn
+                  computed_surface.checkpoint_start_turn
+                  computed_surface.per_call_turn
+                  computed_surface.per_call_max_turns
                   computed_surface.is_last_turn;
               let all_allowed = computed_surface.all_allowed in
               let tool_filter = Oas.Guardrails.AllowList all_allowed in
@@ -1984,6 +2001,9 @@ let run_turn
                    ; "event", `String "tool_disclosure"
                    ; "keeper_name", `String meta.name
                    ; "turn", `Int turn
+                   ; "checkpoint_start_turn", `Int computed_surface.checkpoint_start_turn
+                   ; "per_call_turn", `Int computed_surface.per_call_turn
+                   ; "per_call_max_turns", `Int computed_surface.per_call_max_turns
                    ; "selection_mode", `String computed_surface.selection_mode
                    ; "core_count", `Int computed_surface.core_count
                    ; "deterministic_prefilter_count", `Int computed_surface.deterministic_prefilter_count
@@ -2097,7 +2117,7 @@ let run_turn
     then Some (Keeper_runtime_resolved.admission_wait_timeout_sec ())
     else None
   in
-  ignore (Keeper_alerting_path.ensure_playground_bundle ~config ~name:meta.name);
+  ignore (Keeper_alerting_path.ensure_sandbox_bundle ~config ~meta);
   let effective_allowed_paths = Keeper_alerting_path.effective_allowed_paths ~meta in
   match
     Keeper_alerting_path.absolute_allowed_paths_result
@@ -2228,6 +2248,7 @@ let run_turn
            ~context:shared_context
            ?slot_id:(Keeper_config.keeper_slot_id meta.name)
            ~approval:(Governance_pipeline.to_oas_approval_callback
+                        ~config
                         ~governance_level:(Env_config_core.governance_level ())
                         ~keeper_name:meta.name
                         ~meta
@@ -2483,15 +2504,15 @@ let run_turn
            in
            receipt_response_text_present_ref := true;
            let assistant_msg =
-             Agent_sdk.Types.make_message
-               ~role:Agent_sdk.Types.Assistant
+             Oas.Types.make_message
+               ~role:Oas.Types.Assistant
                ~metadata:
                  [
                    ( Keeper_memory_policy.replay_metadata_key,
                      Keeper_memory_policy.replay_metadata_of_snapshot
                        state_snapshot );
                  ]
-               [ Agent_sdk.Types.Text response_text ]
+               [ Oas.Types.Text response_text ]
            in
            Keeper_exec_context.persist_message
              ~source:history_assistant_source
@@ -2763,6 +2784,7 @@ let run_turn
              ; turn_count = result.turns
              ; tool_calls_made = List.length actual_keeper_tool_names
              ; usage
+             ; usage_reported = Option.is_some result.response.usage
              ; tools_used = actual_keeper_tool_names
              ; tool_calls = List.rev !tool_calls_ref
              ; checkpoint = saved_checkpoint

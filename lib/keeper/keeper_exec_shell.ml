@@ -197,7 +197,7 @@ let rewrite_turn_runtime_paths_to_host
   =
   replace_all_substrings
     ~needle:(Keeper_sandbox.container_root meta.name)
-    ~replacement:(Keeper_sandbox.host_root_abs ~config meta.name)
+    ~replacement:(Keeper_sandbox.host_root_abs_of_meta ~config meta)
     text
 
 let run_argv_with_status_retry_eintr ?cwd ~timeout_sec argv =
@@ -366,7 +366,7 @@ let _docker_playground_cwd ~(config : Coord.config) ~(meta : keeper_meta) host_c
 let auto_correct_path ~(meta : keeper_meta) (raw : string) : string option =
   (* bundle_root yields ".masc/playground/<safe>/" — strip the trailing
      slash so we can append "/repos/..." cleanly. *)
-  let playground_bundle = Playground_paths.bundle_root meta.name in
+  let playground_bundle = Keeper_sandbox.allowed_root_rel_of_meta ~meta in
   let playground =
     if String.length playground_bundle > 0
        && playground_bundle.[String.length playground_bundle - 1] = '/'
@@ -463,6 +463,7 @@ let run_docker_hardened_bash = Keeper_shell_docker.run_docker_hardened_bash
 
 let handle_keeper_bash
       ~(turn_sandbox_runtime : Keeper_turn_sandbox_runtime.t option)
+      ?(turn_sandbox_runtime_git : Keeper_turn_sandbox_runtime.t option)
       ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
@@ -533,6 +534,10 @@ let handle_keeper_bash
     match resolve_keeper_shell_write_cwd ~config ~meta ~args with
     | Error e -> error_json e
     | Ok cwd ->
+    let env_snap =
+      try Some (Exec_core.snapshot_env ~cwd)
+      with _ -> None
+    in
     let normalize_path_for_containment path =
       Keeper_alerting_path.normalize_path_for_check path
       |> Keeper_alerting_path.strip_trailing_slashes
@@ -541,7 +546,7 @@ let handle_keeper_bash
       normalize_path_for_containment cwd
     in
     let playground_rel =
-      Keeper_alerting_path.playground_path_of_keeper meta.name
+      Keeper_sandbox.allowed_root_rel_of_meta ~meta
     in
     let playground_abs =
       normalize_path_for_containment (Filename.concat root playground_rel)
@@ -579,15 +584,21 @@ let handle_keeper_bash
            ~reason:
              "This command is destructive (force push, push to main, rm -rf, \
               etc.) and is blocked for all presets."
+           ~alternatives:
+             [ "Use `git push` without --force for normal pushes."
+             ; "For cleanup, target specific files instead of rm -rf."
+             ; "Ask a human operator to perform this destructive action."
+             ]
            ~retryability:Exec_core.Operator_required
-           ~extra:[ "cmd", `String cmd_for_log ]
+           ~extra:[ "cmd", `String cmd_for_log; "execution_time_ms", `Int 0 ]
+           ~env_snapshot:env_snap
            ()))
     else if sandbox_profile = Docker && git_creds_enabled then (
       Log.Keeper.info
         "DOCKER_GIT_EXEC: keeper=%s cwd=%s cmd=%s"
         meta.name cwd cmd_for_log;
       run_docker_with_git_bash
-        ~config ~meta ~cwd ~timeout_sec ~cmd)
+        ?turn_sandbox_runtime:turn_sandbox_runtime_git ~config ~meta ~cwd ~timeout_sec ~cmd)
     else if sandbox_profile = Docker then (
       Log.Keeper.info
         "DOCKER_EXEC: keeper=%s cwd=%s cmd=%s network=%s"
@@ -621,15 +632,43 @@ let handle_keeper_bash
           | Empty_command ->
             "Provide a non-empty command string."
         in
+        let alternatives =
+          match reason with
+          | Worker_dev_tools.Command_not_allowed name
+            when String.lowercase_ascii name = "gh" ->
+            [ "Use keeper_shell with op=\"gh\" for GitHub CLI operations."
+            ; "Example: keeper_shell op=gh cmd=\"pr list --state open\"."
+            ]
+          | Chain_or_redirect | Pipes_not_allowed | Unsafe_redirect ->
+            [ "Break the pipeline into separate keeper_bash calls."
+            ; "Save intermediate output to a file, then process it in the next call."
+            ]
+          | Injection | Process_substitution ->
+            [ "Use keeper_shell with a specific op (rg, find, ls) for structured queries."
+            ; "Avoid $(...) and backtick substitution in commands."
+            ]
+          | Command_not_allowed _ ->
+            [ "Use keeper_shell for structured ops (rg, ls, find)."
+            ; "Check if the command is available under a different name or op."
+            ]
+          | Empty_command ->
+            [ "Provide a non-empty command string."
+            ; "Example: keeper_bash cmd='ls -la lib/'."
+            ]
+        in
         Yojson.Safe.to_string
           (Exec_core.blocked_result_json
              ~cmd
              ~error:"command_blocked"
              ~reason:reason_str
              ~hint
+             ~alternatives
+             ~extra:[ "execution_time_ms", `Int 0 ]
+             ~env_snapshot:env_snap
              ())
       | Ok () ->
         (* Branch-switch guard *)
+        let sandbox_root = Keeper_sandbox.allowed_root_rel_of_meta ~meta in
         if Worker_dev_tools.is_git_branch_switch cmd
                 && not (write_enabled && in_playground)
         then (
@@ -648,9 +687,15 @@ let handle_keeper_bash
                   under repos/<repo>/.worktrees/<task>."
                ~hint:(Printf.sprintf
                         "Use cwd=%srepos/REPO/.worktrees/TASK"
-                        (Playground_paths.bundle_root meta.name))
+                        sandbox_root)
+               ~alternatives:
+                 [ Printf.sprintf
+                     "Clone the repo first: keeper_shell op=git_clone, then use cwd=%srepos/REPO/.worktrees/TASK."
+                     sandbox_root
+                 ; "Use keeper_shell op=git op_cmd='branch -a' to list available branches."
+                 ]
                ~retryability:Exec_core.Operator_required
-               ~extra:[ "cmd", `String cmd_for_log ]
+               ~extra:[ "cmd", `String cmd_for_log; "execution_time_ms", `Int 0 ]
                ()))
         (* Write gate — preset layer *)
         else if (not write_enabled) && Worker_dev_tools.is_write_operation cmd
@@ -664,8 +709,13 @@ let handle_keeper_bash
                ~reason:
                  "This command modifies state (git push/commit, make deploy, etc.). \
                   A write-enabled preset (Coding/Delivery/Full) is required."
+               ~alternatives:
+                 [ "Read-only alternatives: use keeper_bash for git log, git diff, git status."
+                 ; "If you need write access, ask the operator to assign a Coding/Delivery/Full preset."
+                 ]
                ~retryability:Exec_core.Operator_required
-               ~extra:[ "cmd", `String cmd_for_log ]
+               ~extra:[ "cmd", `String cmd_for_log; "execution_time_ms", `Int 0 ]
+               ~env_snapshot:env_snap
                ()))
         (* Write gate — playground containment layer (#6527 iter 3).
            A write-enabled keeper still must not mutate anything outside
@@ -694,13 +744,20 @@ let handle_keeper_bash
                      Open a sandbox clone first with keeper_shell op=git_clone \
                      if needed, then use masc_worktree_create and set cwd to \
                      the returned worktree path."
-                    (Playground_paths.bundle_root meta.name))
+                    sandbox_root)
                ~hint:(Printf.sprintf
                         "cwd must start with %s and usually looks like %srepos/REPO/.worktrees/TASK"
-                        (Playground_paths.bundle_root meta.name)
-                        (Playground_paths.bundle_root meta.name))
+                        sandbox_root
+                        sandbox_root)
+               ~alternatives:
+                 [ Printf.sprintf
+                     "Clone into your sandbox: keeper_shell op=git_clone, then cd to %srepos/REPO/."
+                     sandbox_root
+                 ; "Create a worktree inside your sandbox with masc_worktree_create."
+                 ; "Use keeper_bash with a cwd pointing to your sandbox worktree."
+                 ]
                ~retryability:Exec_core.Operator_required
-               ~extra:[ "cmd", `String cmd_for_log; "cwd", `String cwd ]
+               ~extra:[ "cmd", `String cmd_for_log; "cwd", `String cwd; "execution_time_ms", `Int 0 ]
                ()))
         else (
             (match Worker_dev_tools.validate_command_paths ~workdir:cwd cmd with
@@ -792,23 +849,19 @@ let handle_keeper_bash
                    else None
                  with
                  | None ->
-                   let t0 =
-                     if auto_bg_observe_enabled && not auto_bg_enabled
-                     then Unix.gettimeofday ()
-                     else 0.0
-                   in
+                   let t0 = Unix.gettimeofday () in
                    let st, out =
                      Process_eio.run_argv_with_status
                        ~cwd ~timeout_sec argv_merged
                    in
-                   (if auto_bg_observe_enabled && not auto_bg_enabled then begin
-                      let duration_ms =
-                        int_of_float ((Unix.gettimeofday () -. t0) *. 1000.)
-                      in
+                   let elapsed_ms =
+                     int_of_float ((Unix.gettimeofday () -. t0) *. 1000.)
+                   in
+                   (if auto_bg_observe_enabled then begin
                       let budget_ms =
                         Masc_exec.Exec_run.default_budget_ms ()
                       in
-                      let promoted_candidate = duration_ms >= budget_ms in
+                      let promoted_candidate = elapsed_ms >= budget_ms in
                       Legendary_counters.incr_auto_bg_observed
                         ~promoted_candidate;
                       if promoted_candidate then
@@ -817,7 +870,7 @@ let handle_keeper_bash
                            cmd_hash=%s duration_ms=%d budget_ms=%d"
                           meta.name
                           (Worker_dev_tools.cmd_hash_for_log cmd)
-                          duration_ms
+                          elapsed_ms
                           budget_ms
                     end);
                    Yojson.Safe.to_string
@@ -825,12 +878,17 @@ let handle_keeper_bash
                         ~base_path:root
                         ~keeper_name:meta.name
                         ~cmd
-                        ~extra:[ "cwd", `String cwd ]
+                        ~extra:[
+                          "cwd", `String cwd;
+                          "execution_time_ms", `Int elapsed_ms;
+                        ]
                         ~status:st
                         ~output:out
+                        ~env_snapshot:env_snap
                         ())
                  | Some clock ->
                    let budget_ms = Masc_exec.Exec_run.default_budget_ms () in
+                   let t0_bg = Unix.gettimeofday () in
                    let outcome =
                      Masc_exec.Exec_run.run_with_auto_bg
                        ~clock
@@ -845,16 +903,26 @@ let handle_keeper_bash
                    in
                    (match outcome with
                     | Masc_exec.Exec_run.Completed r ->
+                      let elapsed_ms =
+                        int_of_float ((Unix.gettimeofday () -. t0_bg) *. 1000.)
+                      in
                       Yojson.Safe.to_string
                         (Exec_core.process_result_json
                            ~base_path:root
                            ~keeper_name:meta.name
                            ~cmd
-                           ~extra:[ "cwd", `String cwd ]
+                           ~extra:[
+                             "cwd", `String cwd;
+                             "execution_time_ms", `Int elapsed_ms;
+                           ]
                            ~status:r.status
                            ~output:r.stdout
+                           ~env_snapshot:env_snap
                            ())
                     | Masc_exec.Exec_run.Promoted p ->
+                      let elapsed_ms =
+                        int_of_float ((Unix.gettimeofday () -. t0_bg) *. 1000.)
+                      in
                       Log.Keeper.info
                         "BG_PROMOTE: keeper=%s task_id=%s budget_ms=%d cmd=%s"
                         meta.name
@@ -875,6 +943,7 @@ let handle_keeper_bash
                             ( "bytes_dropped",
                               `Int p.bytes_dropped_stdout );
                             ("budget_ms", `Int budget_ms);
+                            ("execution_time_ms", `Int elapsed_ms);
                             ( "hint",
                               `String
                                 (Printf.sprintf
@@ -988,7 +1057,7 @@ let handle_keeper_shell
   (* Actionable error: Samchon/Claude Code validateInput pattern.
      Returns structured JSON with tried path, playground root, and concrete next action. *)
   let path_error e =
-    actionable_path_error ~op ~keeper_name:meta.name ~raw_path ~error:e
+    actionable_path_error ~op ~meta ~raw_path ~error:e
   in
   let render_process_result ?cwd ~cmd argv =
     let st, out =
@@ -1813,11 +1882,9 @@ let handle_keeper_shell
                ; "url", `String url
                ])
        | Ok () ->
-         ignore (Keeper_alerting_path.ensure_playground_bundle ~config ~name:meta.name);
-         let playground = Filename.concat root
-           (Keeper_alerting_path.playground_path_of_keeper meta.name) in
-         let repos_dir = Filename.concat root
-           (Keeper_alerting_path.playground_repos_path meta.name) in
+         ignore (Keeper_alerting_path.ensure_sandbox_bundle ~config ~meta);
+         let playground = keeper_playground_root ~config ~meta in
+         let repos_dir = Filename.concat playground "repos" in
          Fs_compat.mkdir_p repos_dir;
          (* Derive repo name from URL: strip trailing slash, .git, then basename.
             Guard against empty/traversal names (e.g. url ending with "/" or ".."). *)

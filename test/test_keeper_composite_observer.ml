@@ -6,6 +6,10 @@ open Alcotest
 
 module Obs = Masc_mcp.Keeper_composite_observer
 module P = Masc_mcp.Prometheus
+module Json = Yojson.Safe.Util
+module Reg = Masc_mcp.Keeper_registry
+module Ksm = Masc_mcp.Keeper_state_machine
+module Keeper_types = Masc_mcp.Keeper_types
 
 let counter_name = "masc_keeper_invariant_violations_total"
 
@@ -28,6 +32,26 @@ let all_violated : Obs.invariants_check = {
   compaction_atomicity = false;
   event_priority_monotone = false;
 }
+
+let make_meta name =
+  match Keeper_types.meta_of_json
+          (`Assoc
+             [
+               ("name", `String name);
+               ("agent_name", `String ("agent-" ^ name));
+               ("trace_id", `String ("trace-" ^ name));
+             ])
+  with
+  | Ok meta -> meta
+  | Error err -> fail ("make_meta failed: " ^ err)
+
+let with_registry f =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Reg.clear ();
+  Fun.protect
+    ~finally:(fun () -> Reg.clear ())
+    f
 
 (* --- bump: no-op when all satisfied ------------------------------- *)
 
@@ -103,6 +127,38 @@ let test_all_invariant_keys_mapped () =
       "CompactionAtomicity"; "EventPriorityMonotone" ]
     strings
 
+let test_snapshot_reports_collapsed_from_for_stable_phase () =
+  with_registry (fun () ->
+    let base_path = "/tmp/keeper-composite-collapsed-from" in
+    let keeper_name = "stable-paused" in
+    ignore (Reg.register ~base_path keeper_name (make_meta keeper_name));
+    ignore (Reg.dispatch_event ~base_path keeper_name Ksm.Operator_pause);
+    let entry =
+      match Reg.get ~base_path keeper_name with
+      | Some entry -> entry
+      | None -> fail "expected paused keeper entry"
+    in
+    let snapshot = Obs.observe entry |> Obs.snapshot_to_json in
+    check (option string) "stable snapshot exposes raw paused phase"
+      (Some "paused")
+      (Json.member "collapsed_from" snapshot |> Json.to_string_option);
+    check (option string) "collapsed snapshot stays on Stable composite phase"
+      (Some "Stable")
+      (Json.member "phase" snapshot |> Json.to_string_option))
+
+let test_snapshot_omits_collapsed_from_for_active_phase () =
+  with_registry (fun () ->
+    let base_path = "/tmp/keeper-composite-active-phase" in
+    let keeper_name = "still-running" in
+    let entry = Reg.register ~base_path keeper_name (make_meta keeper_name) in
+    let snapshot = Obs.observe entry |> Obs.snapshot_to_json in
+    check (option string) "active composite phase does not expose raw collapse"
+      None
+      (Json.member "collapsed_from" snapshot |> Json.to_string_option);
+    check (option string) "running phase preserved"
+      (Some "Running")
+      (Json.member "phase" snapshot |> Json.to_string_option))
+
 let () =
   run "keeper_composite_observer" [
     "bump_invariant_violations",
@@ -113,4 +169,8 @@ let () =
     ];
     "invariant_key mapping",
     [ test_case "all keys present and named" `Quick test_all_invariant_keys_mapped ];
+    "snapshot projection",
+    [ test_case "stable phase exposes collapsed_from" `Quick test_snapshot_reports_collapsed_from_for_stable_phase
+    ; test_case "active phase leaves collapsed_from null" `Quick test_snapshot_omits_collapsed_from_for_active_phase
+    ];
   ]

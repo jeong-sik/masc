@@ -98,10 +98,7 @@ let test_docker_keeper_allows_inside_playground () =
   with_tmp_base @@ fun base ->
   let config = Coord.default_config base in
   let meta = make_meta ~name:"minjae" ~sandbox:Keeper_types.Docker in
-  let bundle =
-    Filename.concat base
-      (Keeper_alerting_path.playground_path_of_keeper meta.name)
-  in
+  let bundle = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   let inside = Filename.concat bundle "mind/scratch.md" in
   Alcotest.(check bool) "playground-internal path is allowed"
     true
@@ -127,10 +124,8 @@ let test_path_just_outside_playground_blocked () =
   (* Sibling directory with a name that LOOKS like a prefix of the playground
      path; must still be blocked (prevents the classic prefix-without-slash
      containment bypass). *)
-  let project_root = Keeper_alerting_path.project_root_of_config config in
-  let bundle = Keeper_alerting_path.playground_path_of_keeper meta.name in
   let bundle_normalized =
-    Filename.concat project_root bundle
+    Keeper_sandbox.host_root_abs_of_meta ~config meta
     |> Keeper_alerting_path.normalize_path_for_check
     |> Keeper_alerting_path.strip_trailing_slashes
   in

@@ -327,7 +327,9 @@ let append_decision_record
     | value :: _ -> Some value
     | [] -> None
   in
-  let runtime_contract = Keeper_runtime_contract.runtime_contract_json meta in
+  let runtime_contract =
+    Keeper_runtime_contract.runtime_contract_json ~config meta
+  in
   let pending_approval_count =
     Keeper_approval_queue.pending_count_for_keeper ~keeper_name:meta.name
   in
@@ -539,20 +541,36 @@ let append_decision_record
                     ] @ timings_fields
                 | None -> []
               in
+              let usage_fields =
+                if r.usage_reported then
+                  [
+                    ("input_tokens", `Int r.usage.input_tokens);
+                    ("output_tokens", `Int r.usage.output_tokens);
+                    ("cache_creation_tokens", `Int r.usage.cache_creation_input_tokens);
+                    ("cache_read_tokens", `Int r.usage.cache_read_input_tokens);
+                    ("cost_usd", match r.usage.cost_usd with Some c -> `Float c | None -> `Null);
+                    ( "tokens_per_second",
+                      if latency_ms > 0 then
+                        `Float
+                          (float_of_int r.usage.output_tokens
+                           /. (float_of_int latency_ms /. 1000.0))
+                      else `Null );
+                  ]
+                else
+                  [
+                    ("input_tokens", `Null);
+                    ("output_tokens", `Null);
+                    ("cache_creation_tokens", `Null);
+                    ("cache_read_tokens", `Null);
+                    ("cost_usd", `Null);
+                    ("tokens_per_second", `Null);
+                  ]
+              in
               `Assoc ([
                 ("model_used", `String surface_model_used);
                 ("turn_count", `Int r.turn_count);
                 ("stop_reason", `String stop_reason_str);
-                ("input_tokens", `Int r.usage.input_tokens);
-                ("output_tokens", `Int r.usage.output_tokens);
-                ("cache_creation_tokens", `Int r.usage.cache_creation_input_tokens);
-                ("cache_read_tokens", `Int r.usage.cache_read_input_tokens);
-                ("cost_usd", match r.usage.cost_usd with Some c -> `Float c | None -> `Null);
-                ("tokens_per_second",
-                  if latency_ms > 0 then
-                    `Float (float_of_int r.usage.output_tokens /. (float_of_int latency_ms /. 1000.0))
-                  else `Null);
-              ] @ thinking_enabled_field @ inference_fields @ cascade_fields @ tool_surface_fields)
+              ] @ usage_fields @ thinking_enabled_field @ inference_fields @ cascade_fields @ tool_surface_fields)
           | None ->
               (* Partial telemetry for error turns: record what we know.
                  Without this, 90%+ of turns have no telemetry at all. *)
@@ -830,6 +848,26 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
     else None
   in
   let metrics_store = keeper_metrics_store config meta.name in
+  let usage_json =
+    if result.usage_reported then
+      `Assoc
+        [
+          ("input_tokens", `Int result.usage.input_tokens);
+          ("output_tokens", `Int result.usage.output_tokens);
+          ("total_tokens",
+           `Int (Keeper_exec_context.total_tokens result.usage));
+        ]
+    else
+      `Assoc
+        [
+          ("input_tokens", `Null);
+          ("output_tokens", `Null);
+          ("total_tokens", `Null);
+        ]
+  in
+  let cost_json =
+    if result.usage_reported then `Float turn_cost else `Null
+  in
   let snapshot =
     `Assoc
       [
@@ -844,16 +882,9 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
         ("prompt_fingerprint", `String result.prompt_metrics.fingerprint);
         ("prompt", Keeper_agent_run.prompt_metrics_to_json result.prompt_metrics);
         ("ctx_composition", Keeper_agent_run.ctx_composition_to_json result.ctx_composition);
-        ( "usage",
-          `Assoc
-            [
-              ("input_tokens", `Int result.usage.input_tokens);
-              ("output_tokens", `Int result.usage.output_tokens);
-              ("total_tokens",
-               `Int (Keeper_exec_context.total_tokens result.usage));
-            ] );
+        ("usage", usage_json);
         ("latency_ms", `Int latency_ms);
-        ("cost_usd", `Float turn_cost);
+        ("cost_usd", cost_json);
         ("context_ratio", `Float context_ratio);
         ("context_tokens", `Int context_tokens);
         ("context_max", `Int context_max);

@@ -73,7 +73,7 @@ let create_process_env ?cwd prog argv env stdin_fd stdout_fd stderr_fd =
       let original_dir = Sys.getcwd () in
       Fun.protect
         ~finally:(fun () ->
-          (try Sys.chdir original_dir with _ -> ());
+          Safe_ops.protect ~default:() (fun () -> Sys.chdir original_dir);
           Stdlib.Mutex.unlock unix_cwd_mutex)
         (fun () ->
           Sys.chdir dir;
@@ -407,7 +407,7 @@ let spawn_and_drain_stdout ~sw pm ~cwd ?env ?stdin_source argv stdout_buf =
      Eio.Flow.copy stdout_r (Eio.Flow.buffer_sink stdout_buf);
      Eio.Flow.close stdout_r
    with Eio.Cancel.Cancelled _ as e ->
-     (try Eio.Flow.close stdout_r with _ -> ());
+     (try Eio.Flow.close stdout_r with Eio.Cancel.Cancelled _ as ce -> raise ce | _ -> ());
      raise e);
   ignore (Eio.Process.await proc : Eio.Process.exit_status)
 
@@ -437,8 +437,8 @@ let spawn_and_drain_both ~sw pm ~cwd ?env ?stdin_source argv stdout_buf
          Eio.Flow.copy stderr_r (Eio.Flow.buffer_sink stderr_buf);
          Eio.Flow.close stderr_r)
    with Eio.Cancel.Cancelled _ as e ->
-     (try Eio.Flow.close stdout_r with _ -> ());
-     (try Eio.Flow.close stderr_r with _ -> ());
+     (try Eio.Flow.close stdout_r with Eio.Cancel.Cancelled _ as ce -> raise ce | _ -> ());
+     (try Eio.Flow.close stderr_r with Eio.Cancel.Cancelled _ as ce -> raise ce | _ -> ());
      raise e);
   let status = Eio.Process.await proc in
   match status with
@@ -692,7 +692,7 @@ let spawn_detached ~argv ~env ~cwd =
               guarantee a new group.  Side effect: the child detaches
               from the parent's controlling terminal, which matches
               the "background shell" semantics we want. *)
-           (try ignore (Unix.setsid ()) with _ -> ());
+           Safe_ops.protect ~default:() (fun () -> ignore (Unix.setsid ()));
            (try
               if cwd <> "" then Unix.chdir cwd
             with _ -> Unix._exit 126);
@@ -759,7 +759,7 @@ let tree_kill ~pgid ~signal ~grace_sec =
       else if Unix.gettimeofday () >= deadline then
         safe_kill Sys.sigkill
       else begin
-        (try ignore (Unix.select [] [] [] step) with _ -> ());
+        Safe_ops.protect ~default:() (fun () -> ignore (Unix.select [] [] [] step));
         wait_loop ()
       end
     in

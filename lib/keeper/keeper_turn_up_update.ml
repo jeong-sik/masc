@@ -198,14 +198,27 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     room_signal_prompt_enabled;
     proactive = {
       enabled =
-        Option.value
-          ~default:old.proactive.enabled
-          p.proactive_enabled_opt;
+        (match p.proactive_enabled_opt with
+         | Some v -> v
+         | None ->
+             (match p.profile_defaults.proactive_enabled with
+              | Some v -> v
+              | None -> old.proactive.enabled));
       idle_sec =
-        Option.value ~default:old.proactive.idle_sec p.proactive_idle_sec_opt
+        (match p.proactive_idle_sec_opt with
+         | Some v -> v
+         | None ->
+             (match p.profile_defaults.proactive_idle_sec with
+              | Some v -> v
+              | None -> old.proactive.idle_sec))
         |> normalize_proactive_idle_sec;
       cooldown_sec =
-        Option.value ~default:old.proactive.cooldown_sec p.proactive_cooldown_sec_opt
+        (match p.proactive_cooldown_sec_opt with
+         | Some v -> v
+         | None ->
+             (match p.profile_defaults.proactive_cooldown_sec with
+              | Some v -> v
+              | None -> old.proactive.cooldown_sec))
         |> normalize_proactive_cooldown_sec;
     };
     compaction = {

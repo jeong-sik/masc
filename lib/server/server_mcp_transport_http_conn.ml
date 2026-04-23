@@ -34,7 +34,7 @@ let env_float_or ~name ~default =
   match Sys.getenv_opt name with
   | None -> default
   | Some raw -> (
-      try float_of_string raw with Failure _ -> default)
+      Option.value ~default (float_of_string_opt raw))
 
 let env_int_or ~name ~default =
   match Sys.getenv_opt name with

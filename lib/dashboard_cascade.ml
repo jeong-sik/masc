@@ -274,6 +274,14 @@ let load_raw_config_string path =
   else
     default_raw_config_json
 
+let invalidate_cascade_config config_path =
+  Cascade_config_loader.invalidate_cache_entry config_path;
+  Cascade_catalog_runtime.invalidate_path config_path
+
+let save_config_file path content =
+  Fs_compat.mkdir_p (Filename.dirname path);
+  Fs_compat.save_file_atomic path content
+
 let raw_config_json () =
   Config_dir_resolver.log_warnings ~context:"DashboardCascade" ();
   let source : Cascade_toml_materializer.source_info = source_info () in
@@ -281,6 +289,15 @@ let raw_config_json () =
   let _ =
     Cascade_toml_materializer.ensure_materialized_json
       ~config_path:source.json_path
+  in
+  let source_text =
+    try load_raw_config_string source.source_path with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | Sys_error msg ->
+        Log.Keeper.warn
+          "dashboard cascade source config: failed to read %s: %s"
+          source.source_path msg;
+        ""
   in
   let raw_json =
     match config_path with
@@ -302,6 +319,8 @@ let raw_config_json () =
         `String
           (Cascade_toml_materializer.source_kind_to_string source.kind) );
       ("source_path", `String source.source_path);
+      ("source_editable", `Bool true);
+      ("source_text", `String source_text);
       ("raw_json_editable", `Bool source.raw_json_editable);
       ("raw_json", `String raw_json);
     ]
@@ -310,37 +329,52 @@ let save_raw_config_json raw_json =
   Config_dir_resolver.log_warnings ~context:"DashboardCascade" ();
   let source : Cascade_toml_materializer.source_info = source_info () in
   let config_path = source.json_path in
-  if not source.raw_json_editable then
-    Error
-      (Printf.sprintf
-         "active cascade source is TOML: edit %s instead of %s"
-         source.source_path source.json_path)
-  else
-    let parse_result =
-      try
-        ignore (Yojson.Safe.from_string raw_json);
-        Ok ()
-      with
-      | Yojson.Json_error msg ->
-          Error (Printf.sprintf "invalid JSON: %s" msg)
-      | exn ->
-          Error
-            (Printf.sprintf "failed to parse JSON: %s" (Printexc.to_string exn))
-    in
-    match parse_result with
-    | Error _ as err -> err
-    | Ok () -> (
+  match source.kind with
+  | Cascade_toml_materializer.Json ->
+      let parse_result =
         try
-          Fs_compat.mkdir_p (Filename.dirname config_path);
-          match Fs_compat.save_file_atomic config_path raw_json with
-          | Error msg -> Error msg
-          | Ok () ->
-              Cascade_config_loader.invalidate_cache_entry config_path;
-              Cascade_catalog_runtime.invalidate_path config_path;
-              Ok (config_json ())
+          ignore (Yojson.Safe.from_string raw_json);
+          Ok ()
         with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | Sys_error msg -> Error msg)
+        | Yojson.Json_error msg ->
+            Error (Printf.sprintf "invalid JSON: %s" msg)
+        | exn ->
+            Error
+              (Printf.sprintf "failed to parse JSON: %s" (Printexc.to_string exn))
+      in
+      (match parse_result with
+       | Error _ as err -> err
+       | Ok () -> (
+           try
+             match save_config_file config_path raw_json with
+             | Error msg -> Error msg
+             | Ok () ->
+                 invalidate_cascade_config config_path;
+                 Ok (config_json ())
+           with
+           | Eio.Cancel.Cancelled _ as exn -> raise exn
+           | Sys_error msg -> Error msg))
+  | Cascade_toml_materializer.Toml -> (
+      match Cascade_toml_materializer.render_toml_string_to_json_string raw_json with
+      | Error msg ->
+          Error (Printf.sprintf "invalid TOML: %s" msg)
+      | Ok _rendered_json -> (
+          try
+            match save_config_file source.source_path raw_json with
+            | Error msg -> Error msg
+            | Ok () -> (
+                match
+                  Cascade_toml_materializer.ensure_materialized_json
+                    ~config_path:config_path
+                with
+                | Error msg -> Error msg
+                | Ok _ ->
+                    invalidate_cascade_config config_path;
+                    Ok (config_json ()))
+          with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | Sys_error msg -> Error msg))
 
 (* ── Health projection ──────────────────────────────── *)
 

@@ -12,6 +12,44 @@ type auth_mode =
       location_env : string;
     }
 
+type model_family =
+  | Generic
+  | Glm_general
+  | Glm_coding
+  | Kimi_api_family
+
+type auto_models_source =
+  | No_auto_models
+  | Env_csv_or_default of {
+      env_var : string;
+      defaults : string list;
+      prefer_default_model_env : bool;
+    }
+  | Zai_general_auto_models
+  | Zai_coding_auto_models
+
+type reporting_policy =
+  | Reported
+  | Missing_by_design
+  | Unknown
+
+type model_policy = {
+  default_model_env : string option;
+  default_model_fallback : string option;
+  auto_models : auto_models_source;
+  expand_auto : bool;
+  family : model_family;
+}
+
+type tool_policy = {
+  supports_runtime_mcp_http_headers : bool;
+}
+
+type telemetry_policy = {
+  usage_reporting : reporting_policy;
+  runtime_reporting : reporting_policy;
+}
+
 type voice_transport =
   | Voice_openai_compat
   | Voice_elevenlabs_direct
@@ -31,6 +69,9 @@ type adapter = {
   default_voice : string option;   (** Default TTS voice name. None = no voice assignment. *)
   endpoint_url : string option;    (** Base URL for the provider API. *)
   default_model_id : string option; (** Default model ID for the provider. *)
+  model_policy : model_policy;
+  tool_policy : tool_policy;
+  telemetry_policy : telemetry_policy;
 }
 
 type voice_adapter = {
@@ -83,6 +124,26 @@ let string_of_voice_transport = function
   | Voice_mcp -> "voice_mcp"
 
 let normalize_label label = String.trim label |> String.lowercase_ascii
+
+let env_value_opt ?(getenv = Sys.getenv_opt) name =
+  match getenv name with
+  | Some raw ->
+      let trimmed = String.trim raw in
+      if trimmed = "" then None else Some trimmed
+  | None -> None
+
+let csv_items raw =
+  raw
+  |> String.split_on_char ','
+  |> List.map String.trim
+  |> List.filter (fun s -> s <> "")
+
+let no_tool_http_headers = { supports_runtime_mcp_http_headers = false }
+let runtime_mcp_http_headers = { supports_runtime_mcp_http_headers = true }
+let telemetry_reported = { usage_reporting = Reported; runtime_reporting = Reported }
+let telemetry_unknown = { usage_reporting = Unknown; runtime_reporting = Unknown }
+let telemetry_usage_missing =
+  { usage_reporting = Missing_by_design; runtime_reporting = Unknown }
 
 (* ── Canonical adapter names (single definition point) ──────── *)
 
@@ -204,6 +265,16 @@ let direct_adapters =
       default_model_id =
         (let m = Env_config_runtime.Llama.default_model in
          if m = "" || m = "explicit-model-required" then None else Some m);
+      model_policy =
+        {
+          default_model_env = Some "OLLAMA_DEFAULT_MODEL";
+          default_model_fallback = None;
+          auto_models = No_auto_models;
+          expand_auto = false;
+          family = Generic;
+        };
+      tool_policy = no_tool_http_headers;
+      telemetry_policy = telemetry_reported;
     };
     {
       canonical_name = cn_ollama;
@@ -217,6 +288,16 @@ let direct_adapters =
       default_model_id =
         (let m = Env_config_runtime.Ollama.default_model in
          if m = "" then None else Some m);
+      model_policy =
+        {
+          default_model_env = Some "OLLAMA_DEFAULT_MODEL";
+          default_model_fallback = None;
+          auto_models = No_auto_models;
+          expand_auto = false;
+          family = Generic;
+        };
+      tool_policy = no_tool_http_headers;
+      telemetry_policy = telemetry_reported;
     };
     {
       canonical_name = cn_claude;
@@ -228,6 +309,22 @@ let direct_adapters =
       default_voice = Some "Sarah";
       endpoint_url = None;
       default_model_id = Some "auto";
+      model_policy =
+        {
+          default_model_env = None;
+          default_model_fallback = Some "auto";
+          auto_models =
+            Env_csv_or_default
+              {
+                env_var = "MASC_CLAUDE_CODE_AUTO_MODELS";
+                defaults = [ "auto" ];
+                prefer_default_model_env = false;
+              };
+          expand_auto = true;
+          family = Generic;
+        };
+      tool_policy = runtime_mcp_http_headers;
+      telemetry_policy = telemetry_reported;
     };
     {
       canonical_name = cn_codex;
@@ -239,6 +336,29 @@ let direct_adapters =
       default_voice = Some "George";
       endpoint_url = None;
       default_model_id = Some "auto";
+      model_policy =
+        {
+          default_model_env = None;
+          default_model_fallback = Some "auto";
+          auto_models =
+            Env_csv_or_default
+              {
+                env_var = "MASC_CODEX_CLI_AUTO_MODELS";
+                defaults =
+                  [
+                    "gpt-5.2";
+                    "gpt-5.3-codex-spark";
+                    "gpt-5.3-codex";
+                    "gpt-5.4-mini";
+                    "gpt-5.4";
+                  ];
+                prefer_default_model_env = false;
+              };
+          expand_auto = true;
+          family = Generic;
+        };
+      tool_policy = no_tool_http_headers;
+      telemetry_policy = telemetry_reported;
     };
     {
       canonical_name = cn_gemini;
@@ -250,6 +370,30 @@ let direct_adapters =
       default_voice = Some "Roger";
       endpoint_url = None;
       default_model_id = Some "auto";
+      model_policy =
+        {
+          default_model_env = Some "GEMINI_DEFAULT_MODEL";
+          default_model_fallback = Some "gemini-3-flash-preview";
+          auto_models =
+            Env_csv_or_default
+              {
+                env_var = "MASC_GEMINI_CLI_AUTO_MODELS";
+                defaults =
+                  [
+                    "gemini-3-flash-preview";
+                    "gemini-3.1-flash-lite-preview";
+                    "gemini-2.5-flash";
+                    "gemini-2.5-flash-lite";
+                    "gemini-3.1-pro-preview";
+                    "gemini-2.5-pro";
+                  ];
+                prefer_default_model_env = true;
+              };
+          expand_auto = true;
+          family = Generic;
+        };
+      tool_policy = no_tool_http_headers;
+      telemetry_policy = telemetry_reported;
     };
     {
       canonical_name = cn_kimi;
@@ -261,6 +405,22 @@ let direct_adapters =
       default_voice = None;
       endpoint_url = None;
       default_model_id = Some "auto";
+      model_policy =
+        {
+          default_model_env = None;
+          default_model_fallback = Some "kimi-for-coding";
+          auto_models =
+            Env_csv_or_default
+              {
+                env_var = "MASC_KIMI_CLI_AUTO_MODELS";
+                defaults = [ "kimi-for-coding" ];
+                prefer_default_model_env = false;
+              };
+          expand_auto = true;
+          family = Generic;
+        };
+      tool_policy = runtime_mcp_http_headers;
+      telemetry_policy = telemetry_usage_missing;
     };
     {
       canonical_name = cn_claude_api;
@@ -272,6 +432,16 @@ let direct_adapters =
       default_voice = Some "Sarah";
       endpoint_url = Some (anthropic_api_url ());
       default_model_id = Some "auto";
+      model_policy =
+        {
+          default_model_env = Some "ANTHROPIC_DEFAULT_MODEL";
+          default_model_fallback = Some "claude-sonnet-4-6-20250514";
+          auto_models = No_auto_models;
+          expand_auto = false;
+          family = Generic;
+        };
+      tool_policy = no_tool_http_headers;
+      telemetry_policy = telemetry_reported;
     };
     {
       canonical_name = cn_codex_api;
@@ -283,6 +453,16 @@ let direct_adapters =
       default_voice = Some "George";
       endpoint_url = Some (openai_api_url ());
       default_model_id = Some "auto";
+      model_policy =
+        {
+          default_model_env = Some "OPENAI_DEFAULT_MODEL";
+          default_model_fallback = Some "gpt-4.1";
+          auto_models = No_auto_models;
+          expand_auto = false;
+          family = Generic;
+        };
+      tool_policy = no_tool_http_headers;
+      telemetry_policy = telemetry_reported;
     };
     {
       canonical_name = cn_gemini_api;
@@ -299,6 +479,16 @@ let direct_adapters =
       default_voice = Some "Roger";
       endpoint_url = None; (** Resolved dynamically for Gemini *)
       default_model_id = Some "auto";
+      model_policy =
+        {
+          default_model_env = Some "GEMINI_DEFAULT_MODEL";
+          default_model_fallback = Some "gemini-3-flash-preview";
+          auto_models = No_auto_models;
+          expand_auto = false;
+          family = Generic;
+        };
+      tool_policy = no_tool_http_headers;
+      telemetry_policy = telemetry_reported;
     };
     {
       canonical_name = cn_kimi_api;
@@ -310,6 +500,16 @@ let direct_adapters =
       default_voice = None;
       endpoint_url = Some (kimi_api_url ());
       default_model_id = Some "auto";
+      model_policy =
+        {
+          default_model_env = Some "MOONSHOT_DEFAULT_MODEL";
+          default_model_fallback = Some "kimi-k2.5";
+          auto_models = No_auto_models;
+          expand_auto = false;
+          family = Kimi_api_family;
+        };
+      tool_policy = no_tool_http_headers;
+      telemetry_policy = telemetry_reported;
     };
     {
       canonical_name = cn_glm;
@@ -321,6 +521,16 @@ let direct_adapters =
       default_voice = None;
       endpoint_url = Some (glm_api_url ());
       default_model_id = Some "auto";
+      model_policy =
+        {
+          default_model_env = Some "ZAI_DEFAULT_MODEL";
+          default_model_fallback = Some "glm-5.1";
+          auto_models = Zai_general_auto_models;
+          expand_auto = true;
+          family = Glm_general;
+        };
+      tool_policy = no_tool_http_headers;
+      telemetry_policy = telemetry_reported;
     };
     {
       canonical_name = cn_glm_coding_plan;
@@ -332,6 +542,16 @@ let direct_adapters =
       default_voice = None;
       endpoint_url = Some (glm_coding_api_url ());
       default_model_id = Some "auto";
+      model_policy =
+        {
+          default_model_env = Some "ZAI_CODING_DEFAULT_MODEL";
+          default_model_fallback = Some "glm-5.1";
+          auto_models = Zai_coding_auto_models;
+          expand_auto = true;
+          family = Glm_coding;
+        };
+      tool_policy = no_tool_http_headers;
+      telemetry_policy = telemetry_reported;
     };
     {
       canonical_name = cn_openrouter;
@@ -343,8 +563,79 @@ let direct_adapters =
       default_voice = None;
       endpoint_url = Some (openrouter_api_url ());
       default_model_id = None;
+      model_policy =
+        {
+          default_model_env = Some "OPENROUTER_DEFAULT_MODEL";
+          default_model_fallback = None;
+          auto_models = No_auto_models;
+          expand_auto = false;
+          family = Generic;
+        };
+      tool_policy = no_tool_http_headers;
+      telemetry_policy = telemetry_reported;
     };
   ]
+
+let find_direct_adapter_by_alias label =
+  let normalized = normalize_label label in
+  List.find_opt
+    (fun (adapter : adapter) ->
+      List.exists (fun alias -> normalize_label alias = normalized) adapter.aliases)
+    direct_adapters
+
+let resolve_adapter_by_cascade_prefix label =
+  let normalized = normalize_label label in
+  List.find_opt
+    (fun (adapter : adapter) ->
+      normalize_label adapter.cascade_prefix = normalized)
+    direct_adapters
+
+let resolve_model_policy_default ?getenv (policy : model_policy) =
+  match policy.default_model_env with
+  | Some env_name -> (
+      match env_value_opt ?getenv env_name with
+      | Some _ as value -> value
+      | None -> policy.default_model_fallback)
+  | None -> policy.default_model_fallback
+
+let resolve_auto_models ?getenv (policy : model_policy) =
+  match policy.auto_models with
+  | No_auto_models -> None
+  | Zai_general_auto_models -> Some (Llm_provider.Zai_catalog.glm_auto_models ())
+  | Zai_coding_auto_models -> Some (Llm_provider.Zai_catalog.glm_coding_auto_models ())
+  | Env_csv_or_default { env_var; defaults; prefer_default_model_env } -> (
+      match env_value_opt ?getenv env_var with
+      | Some raw -> (
+          match csv_items raw with
+          | [] -> Some defaults
+          | items -> Some items)
+      | None when prefer_default_model_env -> (
+          match policy.default_model_env with
+          | Some default_env -> (
+              match env_value_opt ?getenv default_env with
+              | Some model_id -> Some [ model_id ]
+              | None -> Some defaults)
+          | None -> Some defaults)
+      | None -> Some defaults)
+
+let default_model_id_for_cascade_prefix ?getenv provider_name =
+  match resolve_adapter_by_cascade_prefix provider_name with
+  | Some adapter -> resolve_model_policy_default ?getenv adapter.model_policy
+  | None -> None
+
+let auto_models_for_provider ?getenv provider_name =
+  match find_direct_adapter_by_alias provider_name with
+  | Some adapter when adapter.model_policy.expand_auto ->
+      resolve_auto_models ?getenv adapter.model_policy
+  | Some _ -> None
+  | None -> None
+
+let auto_models_for_cascade_prefix ?getenv provider_name =
+  match resolve_adapter_by_cascade_prefix provider_name with
+  | Some adapter when adapter.model_policy.expand_auto ->
+      resolve_auto_models ?getenv adapter.model_policy
+  | Some _ -> None
+  | None -> None
 
 let voice_openai_compat_adapter =
   {
@@ -417,11 +708,7 @@ let default_local_fallback_label () =
   | None -> "auto"
 
 let resolve_direct_adapter label =
-  let normalized = normalize_label label in
-  List.find_opt
-    (fun (adapter : adapter) ->
-      List.exists (fun alias -> normalize_label alias = normalized) adapter.aliases)
-    direct_adapters
+  find_direct_adapter_by_alias label
 
 let resolve_direct_canonical_name label =
   Option.map (fun (adapter : adapter) -> adapter.canonical_name) (resolve_direct_adapter label)
@@ -915,7 +1202,9 @@ let auto_label_for_adapter (adapter : adapter) =
   else
     match default_model_label_for_adapter adapter with
     | Ok label -> Some label
-    | Error _ -> None
+    | Error msg ->
+        Eio.traceln "[ProviderAdapter] default_model_label_for_adapter failed: %s" msg;
+        None
 
 (** Cloud adapters that participate in auto-detection (excludes llama
     which requires explicit model config, and openrouter which requires
@@ -1027,6 +1316,67 @@ let gemini_vertex_openai_base_url ~project ~location =
   Printf.sprintf
     "https://aiplatform.googleapis.com/v1/projects/%s/locations/%s/endpoints/openapi"
     project location
+
+let starts_with ~prefix s =
+  let plen = String.length prefix in
+  String.length s >= plen && String.sub s 0 plen = prefix
+
+let is_kimi_model_id model_id =
+  let normalized = String.trim model_id |> String.lowercase_ascii in
+  starts_with ~prefix:"kimi-" normalized
+  || starts_with ~prefix:"moonshot-" normalized
+
+let is_moonshot_base_url base_url =
+  match Uri.host (Uri.of_string base_url) with
+  | Some host -> String.equal (String.lowercase_ascii host) "api.moonshot.ai"
+  | None -> false
+
+let provider_label_from_registry (cfg : Llm_provider.Provider_config.t) =
+  if cfg.kind = Llm_provider.Provider_config.OpenAI_compat
+     && (is_kimi_model_id cfg.model_id || is_moonshot_base_url cfg.base_url)
+  then
+    "kimi"
+  else
+    Llm_provider.Provider_registry.provider_name_of_config cfg
+
+let adapter_of_provider_config (cfg : Llm_provider.Provider_config.t) =
+  match cfg.kind with
+  | Llm_provider.Provider_config.Claude_code ->
+      resolve_direct_adapter cn_claude
+  | Codex_cli ->
+      resolve_direct_adapter cn_codex
+  | Gemini_cli ->
+      resolve_direct_adapter cn_gemini
+  | Kimi_cli ->
+      resolve_direct_adapter cn_kimi
+  | Anthropic ->
+      resolve_direct_adapter cn_claude_api
+  | Gemini ->
+      resolve_direct_adapter cn_gemini_api
+  | Kimi ->
+      resolve_direct_adapter cn_kimi_api
+  | Ollama ->
+      resolve_direct_adapter cn_ollama
+  | Glm
+  | OpenAI_compat ->
+      resolve_adapter_by_cascade_prefix (provider_label_from_registry cfg)
+
+let provider_label_of_config (cfg : Llm_provider.Provider_config.t) =
+  match adapter_of_provider_config cfg with
+  | Some adapter -> adapter.cascade_prefix
+  | None -> provider_label_from_registry cfg
+
+let display_provider_name_of_config (cfg : Llm_provider.Provider_config.t) =
+  display_provider_name (provider_label_of_config cfg)
+
+let model_label_of_config (cfg : Llm_provider.Provider_config.t) =
+  Printf.sprintf "%s:%s" (display_provider_name_of_config cfg) cfg.model_id
+
+let supports_runtime_mcp_http_headers_for_config
+    (cfg : Llm_provider.Provider_config.t) =
+  match adapter_of_provider_config cfg with
+  | Some adapter -> adapter.tool_policy.supports_runtime_mcp_http_headers
+  | None -> false
 
 (* ── Generic provider auth detail ─────────────────────────────── *)
 

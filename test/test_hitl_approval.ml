@@ -39,6 +39,12 @@ let contains_substring s needle =
   in
   n_len = 0 || loop 0
 
+let rec yield_until ?(attempts = 50) predicate =
+  if predicate () || attempts <= 0 then ()
+  else (
+    Eio.Fiber.yield ();
+    yield_until ~attempts:(attempts - 1) predicate)
+
 let execute_approval_get args =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -53,6 +59,18 @@ let execute_approval_get args =
       let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
       Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:"approval-get-test"
         state ~name:"masc_approval_get" ~arguments:args)
+
+let with_test_config f =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+      let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+      f state.room_config)
 
 (* ── 1. Risk classification ──────────────────────────────── *)
 
@@ -367,6 +385,35 @@ let test_background_pending_reuses_existing_entry () =
   Alcotest.(check bool) "second callback not attached to duplicate submit" true
     (Option.is_none !second_callback)
 
+let test_background_pending_distinct_inputs_do_not_reuse_entry () =
+  let initial_count = AQ.pending_count () in
+  let callback_result = ref [] in
+  let id1 =
+    AQ.submit_pending
+      ~keeper_name:"gate-keeper"
+      ~tool_name:"keeper_shell"
+      ~input:(`Assoc [("op", `String "gh"); ("cmd", `String "pr view 123")])
+      ~risk_level:AQ.Medium
+      ~on_resolution:(fun decision -> callback_result := decision :: !callback_result)
+      ()
+  in
+  let id2 =
+    AQ.submit_pending
+      ~keeper_name:"gate-keeper"
+      ~tool_name:"keeper_shell"
+      ~input:(`Assoc [("op", `String "gh"); ("cmd", `String "pr comment 123 --body hi")])
+      ~risk_level:AQ.High
+      ~on_resolution:(fun decision -> callback_result := decision :: !callback_result)
+      ()
+  in
+  Alcotest.(check bool) "distinct pending ids" true (id1 <> id2);
+  Alcotest.(check int) "two entries created"
+    (initial_count + 2) (AQ.pending_count ());
+  ignore (AQ.resolve ~id:id1 ~decision:Agent_sdk.Hooks.Approve);
+  ignore (AQ.resolve ~id:id2 ~decision:(Agent_sdk.Hooks.Reject "cleanup"));
+  Alcotest.(check int) "cleanup restores count"
+    initial_count (AQ.pending_count ())
+
 let test_approval_queue_get_pending_detail () =
   Eio_main.run @@ fun _env ->
   let initial_count = AQ.pending_count () in
@@ -403,6 +450,10 @@ let test_approval_queue_get_pending_detail () =
     (detail |> member "keeper_name" |> to_string);
   Alcotest.(check string) "detail tool" "masc_code_delete"
     (detail |> member "tool_name" |> to_string);
+  Alcotest.(check string) "detail action key" "tool:masc_code_delete"
+    (detail |> member "action_key" |> to_string);
+  Alcotest.(check string) "detail sandbox target" "docker"
+    (detail |> member "sandbox_target" |> to_string);
   Alcotest.(check string) "detail risk" "critical"
     (detail |> member "risk_level" |> to_string);
   Alcotest.(check int) "detail turn id" 7
@@ -469,6 +520,66 @@ let test_approval_get_dispatch_success () =
   Alcotest.(check bool) "cleanup rejects callback" true
     (match !callback_result with Some (Agent_sdk.Hooks.Reject _) -> true | _ -> false)
 
+let test_resolve_with_policy_remembers_medium_allow () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+      let id =
+        AQ.submit_pending
+          ~keeper_name:"remember-keeper"
+          ~tool_name:"masc_claim_task"
+          ~input:(`Assoc [])
+          ~risk_level:AQ.Medium
+          ~on_resolution:(fun _ -> ())
+          ()
+      in
+      match
+        AQ.resolve_with_policy ~base_path ~id
+          ~decision:Agent_sdk.Hooks.Approve ~remember_rule:true ()
+      with
+      | Ok { remembered_rule = Some _ } ->
+          let open Yojson.Safe.Util in
+          let summary =
+            AQ.policy_summary_json ~base_path ~keeper_name:"remember-keeper"
+          in
+          Alcotest.(check int) "allow rules persisted" 1
+            (summary |> member "allow_rules" |> to_int)
+      | Ok { remembered_rule = None } ->
+          Alcotest.fail "expected remembered_rule for medium allow"
+      | Error err ->
+          Alcotest.fail ("resolve_with_policy failed: " ^ AQ.resolve_error_to_string err))
+
+let test_resolve_with_policy_does_not_remember_high_allow () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+      let id =
+        AQ.submit_pending
+          ~keeper_name:"remember-keeper"
+          ~tool_name:"keeper_fs_edit"
+          ~input:(`Assoc [("path", `String "lib/example.ml")])
+          ~risk_level:AQ.High
+          ~on_resolution:(fun _ -> ())
+          ()
+      in
+      match
+        AQ.resolve_with_policy ~base_path ~id
+          ~decision:Agent_sdk.Hooks.Approve ~remember_rule:true ()
+      with
+      | Ok { remembered_rule = None } ->
+          let open Yojson.Safe.Util in
+          let summary =
+            AQ.policy_summary_json ~base_path ~keeper_name:"remember-keeper"
+          in
+          Alcotest.(check int) "no persisted rules for high allow" 0
+            (summary |> member "persisted_rules" |> to_int)
+      | Ok { remembered_rule = Some _ } ->
+          Alcotest.fail "high-risk allow should not be remembered"
+      | Error err ->
+          Alcotest.fail ("resolve_with_policy failed: " ^ AQ.resolve_error_to_string err))
+
 let test_approval_get_dispatch_missing_id () =
   let ok, msg = execute_approval_get (`Assoc [("id", `String "")]) in
   Alcotest.(check bool) "missing id fails" false ok;
@@ -501,8 +612,9 @@ let test_approval_get_rejects_reader_role () =
 
 let test_callback_approves_low_risk () =
   (* development level: no confirmation needed *)
+  with_test_config @@ fun config ->
   let cb = GP.to_oas_approval_callback
-    ~governance_level:"development" ~keeper_name:"test" () in
+    ~config ~governance_level:"development" ~keeper_name:"test" () in
   let decision = cb ~tool_name:"masc_status" ~input:(`Assoc []) in
   match decision with
   | Agent_sdk.Hooks.Approve -> ()
@@ -511,14 +623,23 @@ let test_callback_approves_low_risk () =
   | _ -> Alcotest.fail "unexpected decision"
 
 let test_callback_production_keeper_write_requires_approval () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
   Eio.Switch.run @@ fun sw ->
   let initial_pending = AQ.pending_count () in
   let result = ref None in
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let config = state.room_config in
   Eio.Fiber.fork ~sw (fun () ->
     let cb =
       GP.to_oas_approval_callback
-        ~governance_level:"production" ~keeper_name:"test" () in
+        ~config ~governance_level:"production" ~keeper_name:"test" () in
     let decision =
       cb
         ~tool_name:"keeper_fs_edit"
@@ -529,7 +650,7 @@ let test_callback_production_keeper_write_requires_approval () =
     in
     result := Some decision
   );
-  Eio.Fiber.yield ();
+  yield_until (fun () -> AQ.pending_count () = initial_pending + 1);
   Alcotest.(check int) "one pending approval"
     (initial_pending + 1) (AQ.pending_count ());
   let pending_json = AQ.list_pending_json () in
@@ -544,16 +665,17 @@ let test_callback_production_keeper_write_requires_approval () =
   (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
    | Ok () -> ()
    | Error err -> Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
-  Eio.Fiber.yield ();
+  yield_until (fun () -> Option.is_some !result);
   match !result with
   | Some Agent_sdk.Hooks.Approve -> ()
   | Some _ -> Alcotest.fail "expected Approve after operator resolution"
-  | None -> Alcotest.fail "keeper write callback did not suspend for approval"
+  | None -> Alcotest.fail "keeper write callback did not suspend for approval")
 
 let test_callback_production_keeper_shell_gh_read_only_auto_approved () =
+  with_test_config @@ fun config ->
   let cb =
     GP.to_oas_approval_callback
-      ~governance_level:"production" ~keeper_name:"test" () in
+      ~config ~governance_level:"production" ~keeper_name:"test" () in
   let decision =
     cb ~tool_name:"keeper_shell"
       ~input:(`Assoc [("op", `String "gh"); ("cmd", `String "pr view 123")])
@@ -563,6 +685,47 @@ let test_callback_production_keeper_shell_gh_read_only_auto_approved () =
   | Agent_sdk.Hooks.Reject r ->
     Alcotest.fail ("expected Approve for read-only keeper_shell op=gh, got Reject: " ^ r)
   | _ -> Alcotest.fail "unexpected decision"
+
+let test_callback_paranoid_medium_risk_uses_remembered_policy () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+      let id =
+        AQ.submit_pending
+          ~keeper_name:"remember-keeper"
+          ~tool_name:"masc_claim_task"
+          ~input:(`Assoc [])
+          ~risk_level:AQ.Medium
+          ~on_resolution:(fun _ -> ())
+          ()
+      in
+      (match
+         AQ.resolve_with_policy ~base_path ~id
+           ~decision:Agent_sdk.Hooks.Approve ~remember_rule:true ()
+       with
+       | Ok { remembered_rule = Some _ } -> ()
+       | Ok { remembered_rule = None } ->
+           Alcotest.fail "expected medium allow to be remembered"
+       | Error err ->
+           Alcotest.fail
+             ("resolve_with_policy failed: " ^ AQ.resolve_error_to_string err));
+      let pending_before = AQ.pending_count () in
+      let config = Masc_mcp.Coord.default_config base_path in
+      let cb =
+        GP.to_oas_approval_callback
+          ~governance_level:"paranoid" ~keeper_name:"remember-keeper"
+          ~config ()
+      in
+      let decision = cb ~tool_name:"masc_claim_task" ~input:(`Assoc []) in
+      match decision with
+      | Agent_sdk.Hooks.Approve ->
+          Alcotest.(check int) "remembered policy bypasses queue"
+            pending_before (AQ.pending_count ())
+      | Agent_sdk.Hooks.Reject reason ->
+          Alcotest.fail ("expected remembered approve, got reject: " ^ reason)
+      | Agent_sdk.Hooks.Edit _ ->
+          Alcotest.fail "expected remembered approve, got edit")
 
 (* ── Test runner ──────────────────────────────────────────── *)
 
@@ -593,6 +756,8 @@ let () =
         test_background_pending_callback_and_keeper_lookup;
       Alcotest.test_case "background pending reuses existing entry" `Quick
         test_background_pending_reuses_existing_entry;
+      Alcotest.test_case "background pending distinct inputs do not reuse entry" `Quick
+        test_background_pending_distinct_inputs_do_not_reuse_entry;
       Alcotest.test_case "get pending detail includes full input" `Quick
         test_approval_queue_get_pending_detail;
       Alcotest.test_case "dispatch approval_get success" `Quick
@@ -603,6 +768,10 @@ let () =
         test_approval_get_dispatch_not_found;
       Alcotest.test_case "approval_get rejects reader role" `Quick
         test_approval_get_rejects_reader_role;
+      Alcotest.test_case "resolve_with_policy remembers medium allow" `Quick
+        test_resolve_with_policy_remembers_medium_allow;
+      Alcotest.test_case "resolve_with_policy skips high allow memory" `Quick
+        test_resolve_with_policy_does_not_remember_high_allow;
     ]);
     ("callback_integration", [
       Alcotest.test_case "low risk auto-approved" `Quick test_callback_approves_low_risk;
@@ -610,5 +779,7 @@ let () =
         test_callback_production_keeper_write_requires_approval;
       Alcotest.test_case "production keeper_shell op=gh read-only auto-approved" `Quick
         test_callback_production_keeper_shell_gh_read_only_auto_approved;
+      Alcotest.test_case "paranoid medium risk uses remembered policy" `Quick
+        test_callback_paranoid_medium_risk_uses_remembered_policy;
     ]);
   ]

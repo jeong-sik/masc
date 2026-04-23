@@ -33,7 +33,7 @@ let make_loop_memory (ctx : Tool_autoresearch_context.t)
     let mem =
       Memory_oas_bridge.create_memory
         ~agent_name:autoresearch_lesson_agent_name
-        ~base_dir:(Filename.concat ctx.base_path ".masc")
+        ~base_dir:(Common.masc_dir_from_base_path ~base_path:ctx.base_path)
         ~session_id:("autoresearch-" ^ state.loop_id)
         ()
     in

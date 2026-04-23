@@ -323,7 +323,7 @@ describe('Governance surface', () => {
     approveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await flushUi()
 
-    expect(resolveGovernanceApproval).toHaveBeenCalledWith('appr-1', 'approve')
+    expect(resolveGovernanceApproval).toHaveBeenCalledWith('appr-1', 'approve', false)
     expect(fetchDashboardGovernance).toHaveBeenCalledTimes(2)
   }, 20000)
 

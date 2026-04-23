@@ -191,7 +191,7 @@ let flush_if_needed ~base_path ~keeper_name =
               | Some r -> gather (i + 1) ((Yojson.Safe.to_string (to_json r) ^ "\n") :: acc)
               | None -> gather (i + 1) acc
           in
-          String.concat "" (gather 0 [])
+          List.fold_left (fun acc s -> acc ^ s) "" (gather 0 [])
         in
         (try
           Fs_compat.append_file dir flush_lines;
@@ -322,7 +322,7 @@ let cascade_fsm_to_mermaid
     match provider_health with
     | None -> `Unknown
     | Some pairs ->
-      (try List.assoc label pairs with Not_found -> `Unknown)
+      List.assoc_opt label pairs |> Option.value ~default:`Unknown
   in
   p "stateDiagram-v2\n";
   p "    [*] --> SelectProvider: AdmitKeeper\n";

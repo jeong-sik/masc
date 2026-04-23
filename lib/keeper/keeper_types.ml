@@ -359,10 +359,7 @@ let () =
      | Proactive_mixed_response
      | Proactive_error -> ());
     let s = proactive_cycle_outcome_to_string v in
-    if proactive_cycle_outcome_of_string s <> v then
-      failwith
-        (Printf.sprintf
-           "keeper_types: proactive round-trip broken for label %S" s)
+    assert (proactive_cycle_outcome_of_string s = v)
   in
   List.iter
     assert_roundtrip
@@ -1657,6 +1654,12 @@ let keeper_names config =
   persisted_keeper_names config
 ;;
 
+let declarative_autoboot_enabled_by_default name =
+  match (load_keeper_profile_defaults name).autoboot_enabled with
+  | Some false -> false
+  | Some true | None -> true
+;;
+
 let keepalive_keeper_names config =
   configured_keeper_names config
   |> List.filter_map (fun name ->
@@ -1664,7 +1667,8 @@ let keepalive_keeper_names config =
     | Ok (Some meta) when not meta.paused && meta.autoboot_enabled ->
         Some meta.name
     | Ok (Some _) -> None  (* paused or autoboot disabled *)
-    | Ok None -> Some name
+    | Ok None ->
+        if declarative_autoboot_enabled_by_default name then Some name else None
     | Error msg ->
         (* Issue #8377: was [_ -> None] which collapsed read/parse
            failures silently into "name disappeared". Discovery would

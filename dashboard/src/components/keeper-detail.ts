@@ -3,7 +3,6 @@
 // Uses route-driven full-screen detail inside monitoring/agents.
 
 import { html } from 'htm/preact'
-import type { ComponentChildren } from 'preact'
 import { isOfflineStatus } from '../lib/status-utils'
 import { keeperDisplayStatus, keeperRuntimeBlockerHint } from '../lib/keeper-runtime-display'
 import { signal } from '@preact/signals'
@@ -22,7 +21,6 @@ import {
 import { TimeAgo } from './common/time-ago'
 import type { Keeper } from '../types'
 import { invalidateDashboardCache, refreshDashboard } from '../store'
-import { fetchCascadeProfiles, updateKeeperCascade } from '../api/dashboard'
 import { selectKeeper } from '../keeper-runtime'
 import { keeperStatusDetails } from '../keeper-state'
 import { findKeeper } from '../lib/keeper-utils'
@@ -32,6 +30,7 @@ import {
   KeeperRuntimeActions,
 } from './keeper-shared'
 import { showToast } from './common/toast'
+import { purgeAgent } from '../api/actions'
 import {
   ContextChart,
   CtxCompositionPanel,
@@ -53,11 +52,9 @@ import {
 import {
   KeeperConfigPanel,
   loadKeeperConfig,
-  peekLoadedKeeperConfig,
   resetKeeperConfig,
 } from './keeper-config-panel'
 import { PipelineStageBar } from './keeper-pipeline-stage'
-import { KeeperPhaseAndStage } from './keeper-phase-indicator'
 import { KeeperConditionsDivergent } from './keeper-conditions-divergent'
 import { KeeperStateDiagramPanel } from './keeper-state-diagram'
 import { KeeperMemoryTierPanel } from './keeper-memory-tier-panel'
@@ -69,6 +66,12 @@ import { KeeperToolCallInspector } from './keeper-tool-call-inspector'
 import { SupervisorDiagnosticsPanel } from './keeper-supervisor-diagnostics'
 import { KeeperEvalQualityPanel } from './keeper-eval-quality'
 import { KeeperDetailSectionCard as SectionCard } from './keeper-detail-layout'
+import {
+  KeeperDetailHeaderInfo,
+  KeeperDetailMissingState,
+  KeeperDetailOverviewSidebar,
+  KeeperDetailSection,
+} from './keeper-detail-shell'
 import {
   GenerationLineagePanel,
   KeeperCheckpointPanel,
@@ -146,6 +149,7 @@ async function refreshAfterRuntimeAction(): Promise<void> {
 }
 
 function keeperNeedsDiagnosticAttention(keeper: Keeper): boolean {
+  if (typeof keeper.needs_attention === 'boolean') return keeper.needs_attention
   const runtimeBlocker = keeperRuntimeBlockerHint(keeper)
   const blocker = keeper.last_blocker?.trim()
   const hbTs = keeper.last_heartbeat ? Date.parse(keeper.last_heartbeat) : null
@@ -163,6 +167,12 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const runtimeBlocker = keeperRuntimeBlockerHint(keeper)
   const continueGate = keeper.runtime_blocker_continue_gate === true
   const socialFallbackActive = keeper.social_model_recognized === false
+  const attentionReason = keeper.attention_reason?.trim() || null
+  const nextHumanAction = keeper.next_human_action?.trim() || null
+  const sandboxTarget = keeper.sandbox_target?.trim() || keeper.sandbox_profile?.trim() || null
+  const persistedPolicyCount = keeper.approval_policy_effective?.persisted_rules
+  const goalLinkedTasks = keeper.goal_progress?.linked_task_count
+  const goalConvergence = keeper.goal_progress?.convergence
   const blocker = keeper.last_blocker?.trim()
   const hbTs = keeper.last_heartbeat ? Date.parse(keeper.last_heartbeat) : null
   const hbAgeMs = hbTs != null && !Number.isNaN(hbTs) ? Date.now() - hbTs : null
@@ -256,6 +266,24 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
           : null}
         ${keeper.last_need
           ? html`<span><strong class="text-[var(--text-strong)]">최근 필요</strong> · ${keeper.last_need}</span>`
+          : null}
+        ${attentionReason
+          ? html`<span><strong class="text-[var(--text-strong)]">주의 사유</strong> · ${attentionReason}</span>`
+          : null}
+        ${nextHumanAction
+          ? html`<span><strong class="text-[var(--text-strong)]">다음 액션</strong> · ${nextHumanAction}</span>`
+          : null}
+        ${sandboxTarget
+          ? html`<span><strong class="text-[var(--text-strong)]">Sandbox</strong> · ${sandboxTarget}</span>`
+          : null}
+        ${typeof persistedPolicyCount === 'number'
+          ? html`<span><strong class="text-[var(--text-strong)]">Always</strong> · ${persistedPolicyCount} rules</span>`
+          : null}
+        ${typeof goalLinkedTasks === 'number'
+          ? html`<span><strong class="text-[var(--text-strong)]">Goal Tasks</strong> · ${goalLinkedTasks}</span>`
+          : null}
+        ${typeof goalConvergence === 'number'
+          ? html`<span><strong class="text-[var(--text-strong)]">Goal Progress</strong> · ${Math.round(goalConvergence * 100)}%</span>`
           : null}
         ${keeper.last_autonomous_action_at
           ? html`<span><strong class="text-[var(--text-strong)]">마지막 행동</strong> · <${TimeAgo} timestamp=${keeper.last_autonomous_action_at} /></span>`
@@ -563,104 +591,6 @@ function PlaygroundReposPanel({ keeperName }: { keeperName: string }) {
   `
 }
 
-type KeeperDetailSectionId =
-  | 'keeper-summary'
-  | 'keeper-comms'
-  | 'keeper-runtime'
-  | 'keeper-identity'
-  | 'keeper-config'
-  | 'keeper-debug'
-
-const KEEPER_DETAIL_SECTIONS: Array<{
-  id: KeeperDetailSectionId
-  label: string
-  summary: string
-}> = [
-  {
-    id: 'keeper-summary',
-    label: '상태 개요',
-    summary: 'phase, KPI, 컨텍스트와 추론 신호를 한 번에 봅니다.',
-  },
-  {
-    id: 'keeper-comms',
-    label: '대화 / 활동',
-    summary: '직접 대화와 세션 이벤트를 같은 맥락에서 확인합니다.',
-  },
-  {
-    id: 'keeper-runtime',
-    label: '진단 / 운영',
-    summary: '복구, supervisor, tool audit, 품질 시그널을 모읍니다.',
-  },
-  {
-    id: 'keeper-identity',
-    label: '정체성 / 세대',
-    summary: '프로필, 관계, lineage, checkpoints를 묶어 봅니다.',
-  },
-  {
-    id: 'keeper-config',
-    label: '설정 / 작업 방식',
-    summary: 'tool policy, repos, config를 한 곳에서 조정합니다.',
-  },
-  {
-    id: 'keeper-debug',
-    label: '디버그',
-    summary: '저널과 원시 데이터를 마지막에 몰아 둡니다.',
-  },
-]
-
-function scrollToKeeperDetailSection(sectionId: KeeperDetailSectionId): void {
-  document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-}
-
-function KeeperDetailQuickFact({
-  label,
-  children,
-}: {
-  label: string
-  children: ComponentChildren
-}) {
-  return html`
-    <div class="rounded-2xl border border-[var(--white-8)] bg-[rgba(255,255,255,0.03)] px-3.5 py-3">
-      <div class="text-3xs font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">${label}</div>
-      <div class="mt-1 text-sm font-medium leading-snug text-[var(--text-strong)]">${children}</div>
-    </div>
-  `
-}
-
-function KeeperDetailSection({
-  id,
-  eyebrow,
-  title,
-  description,
-  children,
-}: {
-  id: KeeperDetailSectionId
-  eyebrow: string
-  title: string
-  description: string
-  children: ComponentChildren
-}) {
-  return html`
-    <section
-      id=${id}
-      class="scroll-mt-24 rounded-[28px] border border-[var(--card-border)] bg-[linear-gradient(180deg,rgba(12,19,34,0.94),rgba(8,13,24,0.98))] shadow-[0_24px_48px_rgba(0,0,0,0.22)]"
-    >
-      <div class="border-b border-[var(--white-8)] px-5 py-4 sm:px-6">
-        <div class="text-3xs font-semibold uppercase tracking-[0.22em] text-[var(--text-muted)]">${eyebrow}</div>
-        <div class="mt-1 flex flex-col gap-1 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <h3 class="m-0 text-lg font-semibold text-[var(--text-strong)]">${title}</h3>
-            <p class="m-0 mt-1 text-sm leading-relaxed text-[var(--text-secondary)]">${description}</p>
-          </div>
-        </div>
-      </div>
-      <div class="flex flex-col gap-4 px-5 py-5 sm:px-6">
-        ${children}
-      </div>
-    </section>
-  `
-}
-
 // ── Main Detail Page ─────────────────────────────────────
 
 export function KeeperDetailPage() {
@@ -674,26 +604,7 @@ export function KeeperDetailPage() {
   const keeper = findKeeper(keeperName)
     ?? (fallback && (fallback.name === keeperName || fallback.agent_name === keeperName) ? fallback : null)
   if (!keeper) {
-    return html`
-      <div class="mx-auto flex w-full max-w-[1100px] flex-col gap-4">
-        <div class="rounded-[28px] border border-[var(--card-border)] bg-[rgba(9,14,24,0.92)] px-6 py-6 shadow-[0_24px_48px_rgba(0,0,0,0.24)]">
-          <div class="text-3xs font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">Keeper Detail</div>
-          <h2 class="m-0 mt-2 text-xl font-semibold text-[var(--text-strong)]">${keeperName}</h2>
-          <p class="m-0 mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">
-            현재 스냅샷에서 keeper를 찾지 못했습니다. 목록으로 돌아가서 다시 선택하거나, 최신 dashboard refresh 이후 다시 열어 보세요.
-          </p>
-          <div class="mt-4">
-            <button
-              type="button"
-              class="inline-flex items-center gap-2 rounded-full border border-[var(--white-10)] bg-[var(--white-4)] px-4 py-2 text-sm font-medium text-[var(--text-strong)] transition-colors hover:bg-[var(--white-8)]"
-              onClick=${closeKeeperDetail}
-            >
-              목록으로 돌아가기
-            </button>
-          </div>
-        </div>
-      </div>
-    `
+    return html`<${KeeperDetailMissingState} keeperName=${keeperName} onClose=${closeKeeperDetail} />`
   }
 
   const titleId = `keeper-detail-title-${keeper.name}`
@@ -704,6 +615,7 @@ export function KeeperDetailPage() {
   const [clearReason, setClearReason] = useState('')
   const [preserveSystemPrompt, setPreserveSystemPrompt] = useState(true)
   const [clearPending, setClearPending] = useState(false)
+  const [purgePending, setPurgePending] = useState(false)
   const [checkpointRefreshToken, setCheckpointRefreshToken] = useState(0)
   // Latest transition's wall_clock_at_decision, in unix seconds.  Used by
   // the header KeeperPhaseAndStage to render "현재 phase에 머문 시간" without
@@ -789,132 +701,51 @@ export function KeeperDetailPage() {
     })()
   }
 
+  const submitPurgeKeeper = () => {
+    void (async () => {
+      const confirmed = await requestConfirm({
+        title: '키퍼 완전 삭제',
+        message: `${keeper.name}를 완전 삭제합니다.\n런타임 상태, 세션 trace, 인증, metrics와 config/keepers/${keeper.name}.toml까지 함께 제거됩니다.`,
+        tone: 'danger',
+        confirmText: '완전 삭제',
+      })
+      if (!confirmed) return
+      setPurgePending(true)
+      try {
+        await purgeAgent(keeper.name)
+        closeKeeperDetail()
+        showToast(`${keeper.name} 완전 삭제됨`, 'success')
+        await refreshAfterRuntimeAction()
+      } catch (err) {
+        showToast(err instanceof Error ? err.message : '키퍼 삭제 실패', 'error')
+      } finally {
+        setPurgePending(false)
+      }
+    })()
+  }
+
   return html`
     <div class="mx-auto flex w-full max-w-[1600px] flex-col gap-5 pb-8">
       <div class="sticky top-0 z-20 overflow-hidden rounded-[28px] border border-[var(--card-border)] bg-[rgba(13,21,38,0.96)] shadow-[0_24px_64px_rgba(0,0,0,0.22)] backdrop-blur-xl">
         <div class="flex items-center justify-between gap-4 border-b border-[var(--card-border)] px-5 py-4 sm:px-6">
-          <div class="flex min-w-0 items-start gap-4">
-            <button
-              type="button"
-              onClick=${closeKeeperDetail}
-              class="inline-flex shrink-0 items-center gap-2 rounded-full border border-[var(--white-10)] bg-[var(--white-4)] px-3.5 py-2 text-sm font-medium text-[var(--text-strong)] transition-colors hover:bg-[var(--white-8)]"
-            >
-              <span aria-hidden="true">←</span>
-              목록
-            </button>
-            <div class="size-12 shrink-0 rounded bg-[var(--white-5)] border border-[var(--white-8)] flex items-center justify-center text-2xl">${keeper.emoji}</div>
-            <div class="flex flex-col gap-0.5">
-              <div class="text-3xs font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">Monitoring / Agents / Keeper Detail</div>
-              <div class="mt-1 flex flex-wrap items-center gap-2.5">
-                <h2 id=${titleId} class="m-0 text-lg font-semibold text-[var(--text-strong)]">${keeper.name}</h2>
-                <${KeeperPhaseAndStage} phase=${keeper.phase} pipelineStage=${keeper.pipeline_stage} phaseEnteredAtSec=${phaseEnteredAtSec} />
-                ${(() => {
-                  const series = keeper.metrics_series ?? []
-                  const lastUsed = series.length > 0 ? series[series.length - 1]?.model_used : null
-                  const display = lastUsed || keeper.active_model || keeper.model
-                  return display ? html`
-                    <span class="inline-flex items-center py-0.5 px-2 rounded text-3xs font-mono bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-20)]"
-                      title=${lastUsed && keeper.model ? `마지막 호출: ${lastUsed}\n설정: ${keeper.model}` : ''}
-                    >${display}</span>
-                  ` : null
-                })()}
-                ${(() => {
-                  const preset = peekLoadedKeeperConfig(keeper.name)?.tools?.tool_preset
-                  if (!preset) return null
-                  // SSOT: config/tool_policy.toml [git_clone.workflow_presets]
-                  const canPR = ['coding', 'delivery', 'full'].includes(preset)
-                  return html`
-                    <span class="inline-flex items-center py-0.5 px-2 rounded text-3xs font-semibold uppercase tracking-wide
-                      ${canPR
-                        ? 'bg-[var(--ok-10)] text-[var(--ok)] border border-[var(--ok-20)]'
-                        : 'bg-[var(--white-5)] text-[var(--text-muted)] border border-[var(--white-8)]'
-                      }"
-                      title=${`Tool preset: ${preset}${canPR ? ' (clone/PR 가능)' : ''}`}
-                    >${preset}</span>
-                  `
-                })()}
-                ${(() => {
-                  const [cascadeProfiles, setCascadeProfiles] = useState<{
-                    profiles: string[]
-                    invalid_profiles: { name: string; errors: string[] }[]
-                  } | null>(null)
-                  const [currentCascade, setCurrentCascade] = useState(keeper.cascade_name || 'default')
-                  if (!cascadeProfiles) {
-                    fetchCascadeProfiles().then(setCascadeProfiles).catch(() => {})
-                  }
-                  const profiles = cascadeProfiles?.profiles ?? []
-                  const invalidProfiles = cascadeProfiles?.invalid_profiles ?? []
-                  if (profiles.length + invalidProfiles.length <= 1) return null
-                  const invalidSummary = invalidProfiles
-                    .map((profile) => `${profile.name}: ${profile.errors.join(' | ')}`)
-                    .join('\n')
-                  const knownValues = new Set([
-                    ...profiles,
-                    ...invalidProfiles.map((profile) => profile.name),
-                  ])
-                  return html`
-                    <div class="flex items-center gap-1.5">
-                      <select
-                        class="py-0.5 px-1 rounded text-3xs font-mono bg-[var(--white-5)] text-[var(--text-muted)] border border-[var(--white-8)] cursor-pointer"
-                        title=${invalidProfiles.length > 0
-                          ? `Cascade profile\n\nDisabled invalid presets:\n${invalidSummary}`
-                          : 'Cascade profile'}
-                        value=${currentCascade}
-                        onChange=${(e: Event) => {
-                          const val = (e.target as HTMLSelectElement).value
-                          setCurrentCascade(val)
-                          updateKeeperCascade(keeper.name, val)
-                            .then(() => {
-                              refreshDashboard()
-                            })
-                            .catch((err) => {
-                              setCurrentCascade(keeper.cascade_name || 'default')
-                              const msg = err instanceof Error ? err.message : 'Cascade 변경 실패'
-                              showToast(msg, 'error')
-                            })
-                        }}
-                      >
-                        ${!knownValues.has(currentCascade) && currentCascade
-                          ? html`<option value=${currentCascade}>${currentCascade} (current)</option>`
-                          : null}
-                        ${profiles.map((p) => html`<option value=${p}>${p}</option>`)}
-                        ${invalidProfiles.length > 0
-                          ? html`<option disabled>──────── invalid ────────</option>`
-                          : null}
-                        ${invalidProfiles.map((profile) => html`
-                          <option
-                            value=${profile.name}
-                            disabled
-                            title=${profile.errors.join(' | ')}
-                          >${profile.name} (invalid)</option>
-                        `)}
-                      </select>
-                      ${invalidProfiles.length > 0
-                        ? html`
-                            <span
-                              class="inline-flex items-center py-0.5 px-1.5 rounded text-3xs font-semibold bg-[var(--bad-10)] text-[var(--rose-light)] border border-[var(--bad-30)]"
-                              title=${invalidSummary}
-                            >${invalidProfiles.length} invalid</span>
-                          `
-                        : null}
-                    </div>
-                  `
-                })()}
-              </div>
-              ${keeper.koreanName || keeper.created_at ? html`
-                <div class="flex flex-wrap items-center gap-2 text-xs text-[var(--text-muted)]">
-                  ${keeper.koreanName ? html`<span>${keeper.koreanName}</span>` : null}
-                  ${keeper.created_at ? html`<span class="font-mono tabular-nums opacity-60"><${TimeAgo} timestamp=${keeper.created_at} /></span>` : null}
-                </div>
-              ` : null}
-            </div>
-          </div>
+          <${KeeperDetailHeaderInfo}
+            keeper=${keeper}
+            titleId=${titleId}
+            phaseEnteredAtSec=${phaseEnteredAtSec}
+            onClose=${closeKeeperDetail}
+          />
           <div class="flex items-center gap-2">
             <button
               type="button"
               class="py-1 px-3 rounded text-2xs font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--rose-light)] hover:bg-[var(--bad-soft)] transition-colors"
               onClick=${() => setClearDialogOpen(true)}
             >비우기</button>
+            <button
+              type="button"
+              disabled=${purgePending}
+              class="py-1 px-3 rounded text-2xs font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--rose-light)] hover:bg-[var(--bad-soft)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick=${submitPurgeKeeper}
+            >${purgePending ? '삭제 중...' : '완전 삭제'}</button>
             <${KeeperLifecycleButtons} keeper=${keeper} effectiveStatus=${effectiveStatus} />
             <button
               type="button"
@@ -929,41 +760,12 @@ export function KeeperDetailPage() {
       </div>
 
       <div class="grid gap-5 xl:grid-cols-[280px_minmax(0,1fr)]">
-        <aside class="order-2 xl:order-1 xl:sticky xl:top-[104px] xl:self-start">
-          <div class="flex flex-col gap-4 rounded-[28px] border border-[var(--card-border)] bg-[rgba(9,14,24,0.84)] p-4 shadow-[0_20px_48px_rgba(0,0,0,0.18)]">
-            <div>
-              <div class="text-3xs font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">Overview</div>
-              <p class="m-0 mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">
-                긴 단일 모달 대신 keeper 상세를 별도 화면으로 펼쳤습니다. 운영자가 자주 오가는 맥락 단위로 나눠서 바로 점프할 수 있습니다.
-              </p>
-            </div>
-
-            <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-              <${KeeperDetailQuickFact} label="상태">${effectiveStatus}</${KeeperDetailQuickFact}>
-              <${KeeperDetailQuickFact} label="컨텍스트">${contextRatioPct}</${KeeperDetailQuickFact}>
-              <${KeeperDetailQuickFact} label="현재 모델">${effectiveModel}</${KeeperDetailQuickFact}>
-              <${KeeperDetailQuickFact} label="최근 활동">
-                ${lastActivity ? html`<${TimeAgo} timestamp=${lastActivity} />` : '정보 없음'}
-              </${KeeperDetailQuickFact}>
-            </div>
-
-            <div class="rounded-2xl border border-[var(--white-8)] bg-[rgba(255,255,255,0.03)] p-3.5">
-              <div class="text-3xs font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">빠른 이동</div>
-              <div class="mt-3 flex flex-col gap-2">
-                ${KEEPER_DETAIL_SECTIONS.map((section) => html`
-                  <button
-                    type="button"
-                    class="rounded-2xl border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-left transition-colors hover:bg-[var(--white-6)]"
-                    onClick=${() => scrollToKeeperDetailSection(section.id)}
-                  >
-                    <div class="text-sm font-medium text-[var(--text-strong)]">${section.label}</div>
-                    <div class="mt-1 text-2xs leading-relaxed text-[var(--text-muted)]">${section.summary}</div>
-                  </button>
-                `)}
-              </div>
-            </div>
-          </div>
-        </aside>
+        <${KeeperDetailOverviewSidebar}
+          effectiveStatus=${effectiveStatus}
+          contextRatioPct=${contextRatioPct}
+          effectiveModel=${effectiveModel}
+          lastActivity=${lastActivity}
+        />
 
         <div class="order-1 xl:order-2 flex flex-col gap-5">
           <${KeeperRuntimeAlertStrip} keeper=${keeper} />

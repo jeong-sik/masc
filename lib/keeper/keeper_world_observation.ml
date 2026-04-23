@@ -129,8 +129,7 @@ type board_signal_match = {
 }
 
 let scope_message_feed_enabled (meta : keeper_meta) : bool =
-  let _ = meta in
-  true
+  meta.room_signal_prompt_enabled
 
 let message_feed_targets (meta : keeper_meta) =
   if meta.mention_targets <> [] then meta.mention_targets else [ meta.name ]
@@ -242,14 +241,18 @@ let read_backlog_counts ~(config : Coord.config) : int * int * int =
     (unclaimed, failed, pending_verification)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
-  | _ -> (0, 0, 0)
+  | ex ->
+      Log.Keeper.warn "read_backlog_counts failed: %s" (Printexc.to_string ex);
+      (0, 0, 0)
 
 (** Count active agents in room. *)
 let count_active_agents ~(config : Coord.config) : int =
   try List.length (Coord.get_agents_raw config)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
-  | _ -> 0
+  | ex ->
+      Log.Keeper.warn "count_active_agents failed: %s" (Printexc.to_string ex);
+      0
 
 (** Compute idle seconds from keeper timestamps. *)
 let compute_idle_seconds ~(meta : keeper_meta) : int =
@@ -470,6 +473,27 @@ let check_self_comment_status ~self_tokens ~(post_id : string)
               Board.Agent_id.to_string latest.author,
               short_preview ~max_len:60 latest.content )
 
+let board_signal_wake_reason
+    ~continuity_summary
+    ~(meta : keeper_meta)
+    ~(signal : Board_dispatch.keeper_board_signal) : string option =
+  let matched = board_signal_match ~continuity_summary ~meta ~signal in
+  if matched.explicit_mention then
+    Some "explicit_mention"
+  else if scope_message_feed_enabled meta then
+    Some "board_activity"
+  else
+    let self_tokens =
+      [ meta.name; meta.agent_name ]
+      |> List.map (fun value -> String.lowercase_ascii (String.trim value))
+    in
+    match signal.kind with
+    | Board_dispatch.Board_comment_added ->
+        (match check_self_comment_status ~self_tokens ~post_id:signal.post_id with
+         | `New_external _ -> Some "thread_reply_after_self_comment"
+         | `Never | `No_new_external -> None)
+    | Board_dispatch.Board_post_created -> None
+
 (** Collect recent board activity using cursor-based tracking.
     Cursor state lives in Keeper_registry as [(updated_at, post_id)].
     Returns (structured events, new post count, mention count).
@@ -673,10 +697,16 @@ let observe ~(pending_board_events : pending_board_event list option)
         in
         events
   in
-  (* Work Discovery: check if scan interval has elapsed *)
+  (* Work Discovery: check if scan interval has elapsed.
+     None means "not explicitly configured" — default to enabled so
+     keepers that lack explicit work_discovery_enabled in their profile
+     still discover work autonomously.  Only Some false explicitly
+     disables the mechanism.  Ref: P0 keeper activity investigation,
+     15/16 keepers had None → idle forever. *)
   let work_discovery_due =
     match meta.work_discovery_enabled with
-    | Some true ->
+    | Some false -> false
+    | _ ->
       let interval =
         Option.value ~default:600 meta.work_discovery_interval_sec
       in
@@ -684,7 +714,6 @@ let observe ~(pending_board_events : pending_board_event list option)
         Time_compat.now () -. meta.runtime.proactive_rt.last_work_discovery_ts
       in
       since_last >= float_of_int interval
-    | _ -> false
   in
   {
     pending_mentions;

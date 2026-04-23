@@ -374,6 +374,20 @@ let wait_for_health ~pid ~port ~timeout_s =
   in
   loop ()
 
+let wait_for_process_exit ~pid ~timeout_s =
+  let deadline = Unix.gettimeofday () +. timeout_s in
+  let rec loop () =
+    if not (process_alive pid) then
+      true
+    else if Unix.gettimeofday () >= deadline then
+      false
+    else begin
+      Unix.sleepf 0.1;
+      loop ()
+    end
+  in
+  loop ()
+
 let wait_for_startup_phase ~pid ~port ~timeout_s expected_phase =
   let deadline = Unix.gettimeofday () +. timeout_s in
   let rec loop () =
@@ -411,6 +425,8 @@ let wait_for_startup_phase ~pid ~port ~timeout_s expected_phase =
 let write_invalid_local_only_cascade base_path =
   let config_root = Filename.concat base_path ".masc/config" in
   mkdir_p config_root;
+  let toml_path = Filename.concat config_root "cascade.toml" in
+  if Sys.file_exists toml_path then Sys.remove toml_path;
   write_file
     (Filename.concat config_root "cascade.json")
     {|{
@@ -420,6 +436,8 @@ let write_invalid_local_only_cascade base_path =
 let write_partially_invalid_cascade ~base_path ~valid_model =
   let config_root = Filename.concat base_path ".masc/config" in
   mkdir_p config_root;
+  let toml_path = Filename.concat config_root "cascade.toml" in
+  if Sys.file_exists toml_path then Sys.remove toml_path;
   write_file
     (Filename.concat config_root "cascade.json")
     (Printf.sprintf
@@ -432,6 +450,8 @@ let write_partially_invalid_cascade ~base_path ~valid_model =
 let write_partially_invalid_default_cascade ~base_path ~valid_model =
   let config_root = Filename.concat base_path ".masc/config" in
   mkdir_p config_root;
+  let toml_path = Filename.concat config_root "cascade.toml" in
+  if Sys.file_exists toml_path then Sys.remove toml_path;
   write_file
     (Filename.concat config_root "cascade.json")
     (Printf.sprintf
@@ -488,7 +508,7 @@ let test_default_oas_cascade_timeout_keeps_explicit_override () =
   Alcotest.(check string) "explicit override wins" "45"
     (Sys.getenv "OAS_CASCADE_MODEL_TIMEOUT_SEC")
 
-let test_bootstrap_base_path_config_root_copies_versioned_config () =
+let test_bootstrap_base_path_config_root_copies_shared_seed_but_not_keepers () =
   with_temp_dir "startup-config-bootstrap" (fun dir ->
       let repo = Filename.concat dir "repo" in
       mkdir_p repo;
@@ -507,11 +527,13 @@ let test_bootstrap_base_path_config_root_copies_versioned_config () =
       Alcotest.(check bool) "prompt copied" true
         (Sys.file_exists
            (Filename.concat config_root "prompts/keeper.unified.system.md"));
-      Alcotest.(check bool) "keeper TOML copied" true
+      Alcotest.(check bool) "keepers dir created" true
+        (Sys.file_exists (Filename.concat config_root "keepers"));
+      Alcotest.(check bool) "repo keeper TOML not copied" false
         (Sys.file_exists (Filename.concat config_root "keepers/example.toml")))
 
-let test_bootstrap_base_path_config_root_repairs_partial_root () =
-  with_temp_dir "startup-config-repair" (fun dir ->
+let test_bootstrap_base_path_config_root_preserves_existing_root_without_refill () =
+  with_temp_dir "startup-config-preserve" (fun dir ->
       let repo = Filename.concat dir "repo" in
       mkdir_p repo;
       ignore (make_config_root repo);
@@ -525,11 +547,16 @@ let test_bootstrap_base_path_config_root_repairs_partial_root () =
       Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path;
       Alcotest.(check string) "existing cascade preserved" "{\"seed\":\"local\"}"
         (read_file (Filename.concat config_root "cascade.json"));
-      Alcotest.(check bool) "keepers repaired" true
+      Alcotest.(check bool) "keepers dir scaffolded" true
         (Sys.is_directory (Filename.concat config_root "keepers"));
-      Alcotest.(check bool) "prompts repaired" true
+      Alcotest.(check bool) "prompts dir scaffolded" true
         (Sys.is_directory (Filename.concat config_root "prompts"));
-      Alcotest.(check bool) "tool policy repaired" true
+      Alcotest.(check bool) "versioned keeper not resurrected" false
+        (Sys.file_exists (Filename.concat config_root "keepers/example.toml"));
+      Alcotest.(check bool) "versioned prompt not resurrected" false
+        (Sys.file_exists
+           (Filename.concat config_root "prompts/keeper.unified.system.md"));
+      Alcotest.(check bool) "tool policy not backfilled" false
         (Sys.file_exists (Filename.concat config_root "tool_policy.toml")))
 
 let test_bootstrap_base_path_config_root_skips_explicit_config_override () =
@@ -598,6 +625,63 @@ let test_bootstrap_base_path_config_root_collapses_masc_input () =
       Alcotest.(check bool) "nested .masc/.masc config not created" false
         (Sys.file_exists
            (Filename.concat base_path ".masc/.masc/config/cascade.json")))
+let test_config_bootstrap_mode_parses_env () =
+  let check expected value =
+    with_env "MASC_CONFIG_BOOTSTRAP" value @@ fun () ->
+    Alcotest.(check string) (Printf.sprintf "mode for %s" (Option.value ~default:"<unset>" value))
+      expected
+      (match Server_runtime_bootstrap.config_bootstrap_mode () with
+       | `Auto -> "auto" | `Empty -> "empty" | `Skip -> "skip")
+  in
+  check "auto" None;
+  check "auto" (Some "");
+  check "auto" (Some "auto");
+  check "empty" (Some "empty");
+  check "empty" (Some "EMPTY");
+  check "skip" (Some "skip");
+  check "skip" (Some "SKIP")
+
+let test_bootstrap_empty_mode_creates_scaffold_without_files () =
+  with_temp_dir "startup-empty-mode" (fun dir ->
+      let repo = Filename.concat dir "repo" in
+      mkdir_p repo;
+      ignore (make_config_root repo);
+      let base_path = Filename.concat dir "base" in
+      mkdir_p base_path;
+      with_env "MASC_CONFIG_DIR" None @@ fun () ->
+      with_env "MASC_CONFIG_BOOTSTRAP" (Some "empty") @@ fun () ->
+      with_cwd repo @@ fun () ->
+      Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path;
+      let config_root = Filename.concat base_path ".masc/config" in
+      Alcotest.(check bool) "config root created" true (Sys.is_directory config_root);
+      Alcotest.(check bool) "keepers dir scaffolded" true
+        (Sys.is_directory (Filename.concat config_root "keepers"));
+      Alcotest.(check bool) "personas dir scaffolded" true
+        (Sys.is_directory (Filename.concat config_root "personas"));
+      Alcotest.(check bool) "prompts dir scaffolded" true
+        (Sys.is_directory (Filename.concat config_root "prompts"));
+      Alcotest.(check bool) "cascade not copied" false
+        (Sys.file_exists (Filename.concat config_root "cascade.json"));
+      Alcotest.(check bool) "tool policy not copied" false
+        (Sys.file_exists (Filename.concat config_root "tool_policy.toml"));
+      Alcotest.(check bool) "keeper not copied" false
+        (Sys.file_exists (Filename.concat config_root "keepers/example.toml")))
+
+let test_bootstrap_skip_mode_creates_nothing () =
+  with_temp_dir "startup-skip-mode" (fun dir ->
+      let repo = Filename.concat dir "repo" in
+      mkdir_p repo;
+      ignore (make_config_root repo);
+      let base_path = Filename.concat dir "base" in
+      mkdir_p base_path;
+      with_env "MASC_CONFIG_DIR" None @@ fun () ->
+      with_env "MASC_CONFIG_BOOTSTRAP" (Some "skip") @@ fun () ->
+      with_cwd repo @@ fun () ->
+      Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path;
+      let config_root = Filename.concat base_path ".masc/config" in
+      Alcotest.(check bool) "config root not created" false
+        (Sys.file_exists config_root))
+
 let test_constructor_is_pure () =
   with_temp_dir "startup-pure" (fun dir ->
       let agents_dir = Coord.agents_dir (Coord.default_config dir) in
@@ -1456,6 +1540,93 @@ let test_main_eio_fresh_bootstrap_and_mcp_handshake () =
           Alcotest.(check bool) "canonical tool present" true
             (List.mem "masc_status" tool_names)))
 
+let test_main_eio_rejects_same_base_path_on_second_server () =
+  with_temp_dir "startup-base-path-owner-lock" (fun dir ->
+      let exe = find_main_eio_exe () in
+      let primary_port = find_free_port () in
+      let secondary_port = find_free_port_from (primary_port + 1) in
+      let primary_log = Filename.concat dir "primary.log" in
+      let secondary_log = Filename.concat dir "secondary.log" in
+      let open_log path =
+        Unix.openfile path [ Unix.O_CREAT; Unix.O_WRONLY; Unix.O_TRUNC ] 0o644
+      in
+      with_env "MASC_CONFIG_DIR" None @@ fun () ->
+      with_env "MASC_PERSONAS_DIR" None @@ fun () ->
+      with_cwd (project_root ()) @@ fun () ->
+      Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path:dir;
+      let env =
+        merge_env_overrides
+          [
+            ("MASC_BASE_PATH", dir);
+            ("MASC_STORAGE_TYPE", "filesystem");
+            ("GRAPHQL_API_KEY", "");
+            ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
+            ("MASC_AUTONOMY_ENABLED", "0");
+            ("MASC_ORCHESTRATOR_ENABLED", "0");
+            ("MASC_KEEPER_BOOTSTRAP_ENABLED", "false");
+            ("MASC_USE_H2", "0");
+            ("DUNE_SOURCEROOT", project_root ());
+          ]
+      in
+      let primary_fd = open_log primary_log in
+      let primary_pid =
+        Unix.create_process_env exe
+          [|
+            exe;
+            "--host";
+            "127.0.0.1";
+            "--port";
+            string_of_int primary_port;
+            "--base-path";
+            dir;
+          |]
+          env Unix.stdin primary_fd primary_fd
+      in
+      Unix.close primary_fd;
+      let secondary_pid = ref None in
+      Fun.protect
+        ~finally:(fun () ->
+          (match !secondary_pid with
+           | Some pid -> stop_process pid
+           | None -> ());
+          stop_process primary_pid)
+        (fun () ->
+          if not (wait_for_health ~pid:primary_pid ~port:primary_port ~timeout_s:5.0)
+          then begin
+            prerr_endline
+              (Printf.sprintf
+                 "primary main_eio did not expose /health within timeout in this environment.\nlog:\n%s"
+                 (read_file primary_log));
+            Alcotest.skip ()
+          end;
+          let secondary_fd = open_log secondary_log in
+          let pid =
+            Unix.create_process_env exe
+              [|
+                exe;
+                "--host";
+                "127.0.0.1";
+                "--port";
+                string_of_int secondary_port;
+                "--base-path";
+                dir;
+              |]
+              env Unix.stdin secondary_fd secondary_fd
+          in
+          secondary_pid := Some pid;
+          Unix.close secondary_fd;
+          if not (wait_for_process_exit ~pid ~timeout_s:5.0) then
+            Alcotest.failf
+              "secondary main_eio stayed alive despite shared base path\nlog:\n%s"
+              (read_file secondary_log);
+          let secondary_text = read_file secondary_log in
+          Alcotest.(check bool) "secondary log mentions base-path owner" true
+            (contains_substring secondary_text "already owns base path");
+          Alcotest.(check bool) "secondary log mentions primary pid" true
+            (contains_substring secondary_text (string_of_int primary_pid));
+          Alcotest.(check bool) "primary server stays healthy" true
+            (wait_for_health ~pid:primary_pid ~port:primary_port ~timeout_s:1.0)))
+
 let test_main_eio_invalid_cascade_stays_degraded_but_serves_dashboard () =
   with_temp_dir "startup-invalid-cascade" (fun dir ->
       let exe = find_main_eio_exe () in
@@ -1698,12 +1869,24 @@ let test_main_eio_invalid_default_partial_catalog_stays_degraded () =
           let startup_error =
             Yojson.Safe.Util.(startup |> member "last_error" |> to_string)
           in
-          Alcotest.(check bool) "last error mentions default-profile gate" true
-            (contains_substring startup_error
-               "startup catalog validation failed:"
-             &&
-             contains_substring startup_error
-               "required default profile \"big_three\" failed validation");
+          let rejection_prefix = "startup catalog validation failed: " in
+          if not (String.starts_with ~prefix:rejection_prefix startup_error) then
+            Alcotest.failf
+              "last error missing catalog rejection prefix: %S"
+              startup_error;
+          let rejection_json =
+            String.sub startup_error (String.length rejection_prefix)
+              (String.length startup_error - String.length rejection_prefix)
+            |> Yojson.Safe.from_string
+          in
+          let rejection_errors =
+            Yojson.Safe.Util.(rejection_json |> member "errors" |> to_list)
+            |> List.map Yojson.Safe.Util.to_string
+          in
+          Alcotest.(check bool) "last error includes default-profile failure" true
+            (List.mem
+               "required default profile \"big_three\" failed validation"
+               rejection_errors);
           let config_headers, config_body =
             curl_request_capture ~output_dir:dir ~name:"cascade-config-default-invalid"
               ~method_:"GET"
@@ -1738,11 +1921,13 @@ let () =
             "default OAS cascade timeout keeps explicit override"
             `Quick test_default_oas_cascade_timeout_keeps_explicit_override;
           Alcotest.test_case
-            "bootstrap base-path config copies versioned config"
-            `Quick test_bootstrap_base_path_config_root_copies_versioned_config;
+            "bootstrap base-path config copies shared seed only"
+            `Quick
+            test_bootstrap_base_path_config_root_copies_shared_seed_but_not_keepers;
           Alcotest.test_case
-            "bootstrap base-path config repairs partial root"
-            `Quick test_bootstrap_base_path_config_root_repairs_partial_root;
+            "bootstrap base-path config preserves existing root without refill"
+            `Quick
+            test_bootstrap_base_path_config_root_preserves_existing_root_without_refill;
           Alcotest.test_case
             "bootstrap base-path config skips explicit override"
             `Quick
@@ -1756,6 +1941,13 @@ let () =
           Alcotest.test_case
             "bootstrap base-path config collapses .masc input path"
             `Quick test_bootstrap_base_path_config_root_collapses_masc_input;
+          Alcotest.test_case "config_bootstrap_mode parses env var" `Quick
+            test_config_bootstrap_mode_parses_env;
+          Alcotest.test_case
+            "bootstrap empty mode creates scaffold without files"
+            `Quick test_bootstrap_empty_mode_creates_scaffold_without_files;
+          Alcotest.test_case "bootstrap skip mode creates nothing" `Quick
+            test_bootstrap_skip_mode_creates_nothing;
           Alcotest.test_case "constructors stay pure" `Quick
             test_constructor_is_pure;
           Alcotest.test_case "restore_persisted_sessions uses flat agents dir"
@@ -1843,6 +2035,9 @@ let () =
           Alcotest.test_case
             "main_eio fresh bootstrap and MCP handshake"
             `Slow test_main_eio_fresh_bootstrap_and_mcp_handshake;
+          Alcotest.test_case
+            "main_eio rejects second server on same base path"
+            `Slow test_main_eio_rejects_same_base_path_on_second_server;
           Alcotest.test_case
             "main_eio partial catalog stays ready and surfaces rejections"
             `Slow

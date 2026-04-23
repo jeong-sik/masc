@@ -10,6 +10,7 @@
 import { html } from 'htm/preact'
 import { useEffect, useRef } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
+import { fetchGateKeepers, type GateKeeperInfo } from '../api/gate'
 import {
   fetchCascadeClientCapacity,
   fetchCascadeClientCapacityHistory,
@@ -19,6 +20,7 @@ import {
   fetchCascadeConfigRaw,
   fetchCascadeHealth,
   updateCascadeConfigRaw,
+  updateKeeperCascade,
   type CascadeCandidate,
   type CascadeCapacityEventKind,
   type CascadeClientCapacityEntry,
@@ -50,6 +52,7 @@ import { createManagedAsyncResource, type ManagedAsyncResource } from '../lib/as
 interface CascadeData {
   config: CascadeConfigResponse | null
   rawConfig: CascadeRawConfigResponse | null
+  gateKeepers: GateKeeperInfo[]
   health: CascadeHealthResponse | null
   capacity: CascadeClientCapacityResponse | null
   history: CascadeClientCapacityHistoryResponse | null
@@ -59,16 +62,23 @@ interface CascadeData {
 
 async function loadCascadeData(resource: ManagedAsyncResource<CascadeData>) {
   await resource.load(async (signal) => {
-    const [config, rawConfig, health, capacity, history, trace, slo] = await Promise.all([
+    const gateKeepersPromise = fetchGateKeepers(signal)
+      .then(data => data.keepers)
+      .catch((error) => {
+        if (signal.aborted) throw error
+        return []
+      })
+    const [config, rawConfig, gateKeepers, health, capacity, history, trace, slo] = await Promise.all([
       fetchCascadeConfig({ signal }),
       fetchCascadeConfigRaw({ signal }),
+      gateKeepersPromise,
       fetchCascadeHealth({ signal }),
       fetchCascadeClientCapacity({ signal }),
       fetchCascadeClientCapacityHistory({ limit: 50, signal }),
       fetchCascadeStrategyTrace({ limit: 50, signal }),
       fetchCascadeSlo({ signal }),
     ])
-    return { config, rawConfig, health, capacity, history, trace, slo }
+    return { config, rawConfig, gateKeepers, health, capacity, history, trace, slo }
   })
 }
 
@@ -116,33 +126,38 @@ interface RawConfigModeSummary {
   primary: string
   secondary: string
   saveLabel: string
+  previewTitle: string | null
 }
 
 export function rawConfigModeSummary(
-  raw: Pick<CascadeRawConfigResponse, 'raw_json_editable' | 'source_path' | 'config_path'> | null,
+  raw: Pick<
+    CascadeRawConfigResponse,
+    'source_kind' | 'source_path' | 'config_path'
+  > | null,
 ): RawConfigModeSummary {
-  const rawEditable = raw?.raw_json_editable !== false
   const sourcePath = raw?.source_path ?? raw?.config_path ?? 'unresolved'
   const jsonPath = raw?.config_path ?? 'unresolved'
-  if (rawEditable) {
+  if (raw?.source_kind !== 'toml') {
     return {
-      title: 'Raw cascade.json Editor',
+      title: 'Active Cascade Source Editor',
       primary:
-        `dashboard에서 직접 cascade.json을 수정합니다. 저장 경로는 ${jsonPath} 이고, ` +
+        `dashboard에서 직접 ${sourcePath} 를 수정합니다. 저장 경로는 ${jsonPath} 이고, ` +
         '저장 후 current cascade snapshot 을 다시 읽습니다.',
       secondary:
         'semantics invalid profile 도 저장은 허용됩니다. 저장 후 위의 validation banner 에서 invalid/last-known-good 상태를 바로 확인하면 됩니다.',
       saveLabel: 'Save cascade.json',
+      previewTitle: null,
     }
   }
   return {
-    title: 'Generated cascade.json View (TOML SSOT)',
+    title: 'Active Cascade Source Editor (TOML SSOT)',
     primary:
-      `현재 active source는 ${sourcePath} 의 cascade.toml SSOT 라서 이 editor는 read-only 입니다. ` +
-      '아래 내용은 generated cascade.json runtime artifact 입니다.',
+      `현재 active source는 ${sourcePath} 이고, 이 editor에서 직접 cascade.toml SSOT 를 수정합니다. ` +
+      '저장 시 TOML parse 검증 뒤 generated runtime JSON을 다시 materialize 합니다.',
     secondary:
-      '수정은 cascade.toml source에서 하고, 여기서는 materialized runtime JSON만 확인합니다.',
-    saveLabel: 'TOML-backed (read-only)',
+      `아래 preview는 ${jsonPath} 에 기록되는 generated cascade.json runtime artifact 입니다.`,
+    saveLabel: 'Save cascade.toml',
+    previewTitle: 'Generated cascade.json Preview',
   }
 }
 
@@ -170,6 +185,30 @@ export function profileKeeperAssignmentNote(
   }
   if (keepers.length === 0) return 'no keepers assigned'
   return null
+}
+
+export function availableKeeperAssignments(
+  keeperNames: readonly string[],
+  keepers: readonly KeeperCascadeRow[],
+): string[] {
+  const assigned = new Set(keepers.map(keeper => keeper.keeper))
+  return Array.from(
+    new Set(
+      keeperNames
+        .map(name => name.trim())
+        .filter(Boolean)
+        .filter(name => !assigned.has(name)),
+    ),
+  ).sort((left, right) => left.localeCompare(right))
+}
+
+export function validateSourceConfigText(
+  raw: Pick<CascadeRawConfigResponse, 'source_kind'> | null,
+  sourceText: string,
+): string | null {
+  if (!raw) return null
+  if (raw?.source_kind === 'toml') return null
+  return validateJsonText(sourceText)
 }
 
 function validationTone(status: CascadeValidationStatus): 'ok' | 'warn' | 'bad' {
@@ -294,9 +333,41 @@ function KeeperChip({ row }: { row: KeeperCascadeRow }) {
 function ProfileCard({
   profile,
   keepers,
-}: { profile: CascadeProfile; keepers: readonly KeeperCascadeRow[] }) {
+  keeperNames,
+  onAssignKeeper,
+}: {
+  profile: CascadeProfile
+  keepers: readonly KeeperCascadeRow[]
+  keeperNames: readonly string[]
+  onAssignKeeper: (keeperName: string, cascadeName: string) => Promise<void>
+}) {
   const driftCount = keepers.reduce((n, k) => n + (k.drift ? 1 : 0), 0)
   const assignmentNote = profileKeeperAssignmentNote(profile, keepers)
+  const availableKeepers = availableKeeperAssignments(keeperNames, keepers)
+  const selectedKeeper = useSignal(availableKeepers[0] ?? '')
+  const assignmentMessage = useSignal<string | null>(null)
+  const assigning = useSignal(false)
+
+  useEffect(() => {
+    if (availableKeepers.includes(selectedKeeper.value)) return
+    selectedKeeper.value = availableKeepers[0] ?? ''
+  }, [profile.name, availableKeepers.join('\u0000')])
+
+  const handleAssignKeeper = async (event: Event) => {
+    event.preventDefault()
+    if (!profile.keeper_assignable || !selectedKeeper.value) return
+    assigning.value = true
+    assignmentMessage.value = null
+    try {
+      await onAssignKeeper(selectedKeeper.value, profile.name)
+      assignmentMessage.value = `${selectedKeeper.value} → ${profile.name}`
+    } catch (error) {
+      assignmentMessage.value = `Failed to assign: ${errorMessage(error)}`
+    } finally {
+      assigning.value = false
+    }
+  }
+
   return html`
     <article class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] p-3">
       <header class="flex items-center gap-2 mb-2 flex-wrap">
@@ -322,6 +393,64 @@ function ProfileCard({
           <div class="flex flex-wrap gap-1 mb-2">
             ${keepers.map(k => html`<${KeeperChip} row=${k} />`)}
           </div>
+        `
+        : null}
+      ${profile.keeper_assignable
+        ? html`
+          <form
+            class="rounded border border-[var(--card-border)] bg-[var(--bg-panel)] p-2 mb-3"
+            onSubmit=${handleAssignKeeper}
+          >
+            <div class="flex items-center gap-2 flex-wrap mb-2">
+              <span class="text-xs font-medium text-[var(--text-strong)]">Keeper assignment</span>
+              <span class="text-xs text-[var(--text-muted)]">
+                current profile로 keeper를 이동합니다.
+              </span>
+            </div>
+            ${availableKeepers.length > 0
+              ? html`
+                <div class="flex items-center gap-2 flex-wrap">
+                  <select
+                    class="min-w-44 rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--text-strong)]"
+                    value=${selectedKeeper.value}
+                    disabled=${assigning.value}
+                    onChange=${(event: Event) => {
+                      selectedKeeper.value = (event.target as HTMLSelectElement).value
+                      assignmentMessage.value = null
+                    }}
+                  >
+                    ${availableKeepers.map(name => html`
+                      <option value=${name}>${name}</option>
+                    `)}
+                  </select>
+                  <button
+                    type="submit"
+                    class="rounded border border-[var(--accent-primary)] bg-[var(--accent-primary)] px-3 py-1 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
+                    disabled=${assigning.value || selectedKeeper.value === ''}
+                  >
+                    ${assigning.value ? 'Assigning...' : 'Assign keeper'}
+                  </button>
+                </div>
+              `
+              : html`
+                <div class="text-xs text-[var(--text-muted)]">
+                  currently known keepers are already assigned to this profile.
+                </div>
+              `}
+            ${assignmentMessage.value
+              ? html`
+                <div
+                  class=${`mt-2 text-xs ${
+                    assignmentMessage.value.startsWith('Failed')
+                      ? 'text-[var(--bad-light)]'
+                      : 'text-[var(--text-muted)]'
+                  }`}
+                >
+                  ${assignmentMessage.value}
+                </div>
+              `
+              : null}
+          </form>
         `
         : null}
       ${profile.candidates.length === 0
@@ -824,34 +953,34 @@ function CascadeRawConfigEditor({
   raw: CascadeRawConfigResponse | null
   onRefresh: () => Promise<void>
 }) {
-  const editorText = useSignal(raw?.raw_json ?? '')
+  const editorText = useSignal(raw?.source_text ?? raw?.raw_json ?? '')
   const editorDirty = useSignal(false)
   const saving = useSignal(false)
   const saveMessage = useSignal<string | null>(null)
   const mode = rawConfigModeSummary(raw)
-  const rawEditable = raw?.raw_json_editable !== false
+  const sourceEditable = raw?.source_editable !== false
 
   useEffect(() => {
     if (!raw || editorDirty.value) return
-    editorText.value = raw.raw_json
-  }, [raw?.config_path, raw?.updated_at, raw?.raw_json])
+    editorText.value = raw.source_text
+  }, [raw?.config_path, raw?.updated_at, raw?.source_path, raw?.source_text])
 
-  const syntaxError = validateJsonText(editorText.value)
+  const syntaxError = validateSourceConfigText(raw, editorText.value)
   const saveDisabled = saving.value
     || !editorDirty.value
-    || !rawEditable
+    || !sourceEditable
     || raw?.config_path == null
     || syntaxError != null
 
   const handleReset = () => {
-    editorText.value = raw?.raw_json ?? ''
+    editorText.value = raw?.source_text ?? raw?.raw_json ?? ''
     editorDirty.value = false
-    saveMessage.value = 'Latest disk snapshot restored in the editor.'
+    saveMessage.value = 'Latest source snapshot restored in the editor.'
   }
 
   const handleSave = async (event: Event) => {
     event.preventDefault()
-    const currentSyntaxError = validateJsonText(editorText.value)
+    const currentSyntaxError = validateSourceConfigText(raw, editorText.value)
     if (currentSyntaxError) {
       saveMessage.value = `Invalid JSON: ${currentSyntaxError}`
       return
@@ -860,8 +989,8 @@ function CascadeRawConfigEditor({
       saveMessage.value = 'Resolved cascade config path is unavailable.'
       return
     }
-    if (!rawEditable) {
-      saveMessage.value = `Active source is TOML: edit ${raw?.source_path ?? raw?.config_path ?? 'unresolved'}`
+    if (!sourceEditable) {
+      saveMessage.value = `Active source is not editable: ${raw?.source_path ?? raw?.config_path ?? 'unresolved'}`
       return
     }
     saving.value = true
@@ -895,7 +1024,7 @@ function CascadeRawConfigEditor({
           <textarea
             class="h-96 w-full rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-3 py-2 font-mono text-xs text-[var(--text-strong)]"
             spellcheck="false"
-            readonly=${!rawEditable}
+            readonly=${!sourceEditable}
             value=${editorText.value}
             onInput=${(event: Event) => {
               editorText.value = (event.target as HTMLTextAreaElement).value
@@ -910,7 +1039,11 @@ function CascadeRawConfigEditor({
             </span>
             ${syntaxError
               ? html`<span class="text-[var(--bad-light)]">syntax: ${syntaxError}</span>`
-              : html`<span class="text-[var(--ok)]">syntax: valid JSON</span>`}
+              : html`
+                <span class="text-[var(--ok)]">
+                  ${raw?.source_kind === 'toml' ? 'syntax: validated on save (TOML)' : 'syntax: valid JSON'}
+                </span>
+              `}
             ${saveMessage.value
               ? html`
                 <span class=${saveMessage.value.startsWith('Failed') || saveMessage.value.startsWith('Invalid')
@@ -949,6 +1082,24 @@ function CascadeRawConfigEditor({
             </button>
           </div>
         </form>
+        ${mode.previewTitle
+          ? html`
+            <div class="flex flex-col gap-2">
+              <div class="text-xs font-medium text-[var(--text-strong)]">
+                ${mode.previewTitle}
+              </div>
+              <div class="text-xs text-[var(--text-muted)]">
+                ${raw?.config_path ?? 'unresolved'}
+              </div>
+              <textarea
+                class="h-72 w-full rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-3 py-2 font-mono text-xs text-[var(--text-strong)]"
+                spellcheck="false"
+                readonly
+                value=${raw?.raw_json ?? ''}
+              />
+            </div>
+          `
+          : null}
       </div>
     <//>
   `
@@ -972,6 +1123,7 @@ export function CascadeConfigPanel() {
   const current = resource.state.value
   const config = current.data?.config ?? null
   const rawConfig = current.data?.rawConfig ?? null
+  const gateKeepers = current.data?.gateKeepers ?? []
   const health = current.data?.health ?? null
   const capacity = current.data?.capacity ?? null
   const history = current.data?.history ?? null
@@ -1004,6 +1156,10 @@ export function CascadeConfigPanel() {
           ? (() => {
               const keeperGroups = groupKeepersByCanonicalCascade(config.keeper_profiles)
               const orphans = keepersWithUnknownCanonical(config.profiles, config.keeper_profiles)
+              const keeperNames = Array.from(new Set([
+                ...gateKeepers.map(keeper => keeper.name),
+                ...config.keeper_profiles.map(keeper => keeper.keeper),
+              ])).sort((left, right) => left.localeCompare(right))
               const driftTotal = config.keeper_profiles.reduce(
                 (n, k) => n + (k.cascade_name !== k.canonical ? 1 : 0),
                 0,
@@ -1032,7 +1188,15 @@ export function CascadeConfigPanel() {
                   : html`
                     <div class="grid gap-3 md:grid-cols-2 mb-3">
                       ${config.profiles.map(p => html`
-                        <${ProfileCard} profile=${p} keepers=${keeperGroups.get(p.name) ?? []} />
+                        <${ProfileCard}
+                          profile=${p}
+                          keepers=${keeperGroups.get(p.name) ?? []}
+                          keeperNames=${keeperNames}
+                          onAssignKeeper=${async (keeperName: string, cascadeName: string) => {
+                            await updateKeeperCascade(keeperName, cascadeName)
+                            await loadCascadeData(resource)
+                          }}
+                        />
                       `)}
                     </div>
                   `}

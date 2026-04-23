@@ -303,6 +303,13 @@ let test_canonical_keeper_name_from_generated_nickname () =
     "generated nickname resolves to canonical keeper" (Some "claude")
     (Keeper_types.canonical_keeper_name_from_agent_name "claude-swift-fox")
 
+let test_canonical_keeper_name_from_keeper_agent_alias_preserves_full_name () =
+  Alcotest.(check (option string))
+    "keeper agent alias keeps hyphenated keeper name"
+    (Some "kimi-null-canary")
+    (Keeper_types.canonical_keeper_name_from_agent_name
+       "keeper-kimi-null-canary-agent")
+
 let test_canonical_keeper_name_from_legacy_keeper_name () =
   Alcotest.(check (option string))
     "legacy keeper-prefixed name normalizes" (Some "sangsu")
@@ -360,6 +367,8 @@ let () =
         test_keeper_name_from_agent_name_rejects_plain_name;
       Alcotest.test_case "generated nickname canonicalizes" `Quick
         test_canonical_keeper_name_from_generated_nickname;
+      Alcotest.test_case "keeper agent alias preserves full name" `Quick
+        test_canonical_keeper_name_from_keeper_agent_alias_preserves_full_name;
       Alcotest.test_case "legacy keeper name canonicalizes" `Quick
         test_canonical_keeper_name_from_legacy_keeper_name;
     ]);

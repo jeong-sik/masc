@@ -146,6 +146,7 @@ Notes:
 
 - Check the default port for a target: `scripts/run-local.sh --print-port --target-dir /path/to/project`
 - To use a fixed port: `scripts/run-local.sh --target-dir /path/to/project --port 94xx`
+- Dir-local bootstrap excludes checked-in `config/keepers/*.toml` by default; add `--bootstrap-keepers` only when you explicitly want that seed copied into `<target>/.masc/config/keepers`
 - For shared repo/full-runtime paths, continue using `./start-masc-mcp.sh --http`
 - For a full boot/path/state inventory, see [docs/BOOT-ENV-STATE-INVENTORY.md](docs/BOOT-ENV-STATE-INVENTORY.md)
 - For active config/init diagnosis, use [docs/CONFIG-DOCTOR.md](docs/CONFIG-DOCTOR.md)
@@ -246,11 +247,13 @@ See [docs/ENV-CONTRACT.md](docs/ENV-CONTRACT.md) and
 
 ## Model Cascade
 
+- Authoring manual: [docs/CASCADE-TOML.md](docs/CASCADE-TOML.md)
 - `config/cascade.toml` is the supported human-authored cascade catalog when present.
 - `config/cascade.json` remains the runtime contract and generated artifact served to existing consumers.
 - MASC owns cascade schema, parsing, and selection policy; OAS only sees the resolved concrete provider/model choice passed per call.
 - Each keeper can override the repo default via `cascade_name` in its TOML.
-- For committed defaults, prefer explicit `provider:model_id` labels instead of convenience labels.
+- The checked-in seed deliberately exposes only `big_three` as a normal keeper choice; `default`, `local_only`, `local_recovery`, and `tool_rerank` are system-only plumbing profiles.
+- For committed defaults, use explicit `provider:model_id` labels when review-stable pinning matters; use `provider:auto` only when the adapter default is the intended checked-in contract.
 - Checked-in defaults must stay limited to providers that the currently pinned OAS runtime can actually execute once selected.
 - For copy-paste local/private examples, see [docs/CASCADE-COOKBOOK.md](docs/CASCADE-COOKBOOK.md).
 - See [docs/OAS-MASC-BOUNDARY.md](docs/OAS-MASC-BOUNDARY.md), [docs/spec/13-oas-integration.md](docs/spec/13-oas-integration.md), and [docs/spec/14-configuration.md](docs/spec/14-configuration.md).
@@ -301,6 +304,7 @@ The dashboard should learn connector type and status from the gate descriptor
 surface instead of hardcoding vendor-specific assumptions.
 
 - `scripts/run-local.sh` does not build the dashboard automatically. Append `--build-dashboard` only when needed.
+- `scripts/run-local.sh` also excludes checked-in keeper manifests during bootstrap unless `--bootstrap-keepers` is passed.
 - `start-masc-mcp.sh` automatically builds the dashboard SPA if `pnpm` or `corepack pnpm` is available.
 - To run the dev server separately, use:
 

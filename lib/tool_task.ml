@@ -352,6 +352,11 @@ let handle_add_task ctx args =
   let title = get_string args "title" "" in
   let priority = get_int args "priority" 3 in
   let description = get_string args "description" "" in
+  let goal_id =
+    match Safe_ops.json_string_opt "goal_id" args with
+    | Some s when String.trim s <> "" -> Some (String.trim s)
+    | _ -> None
+  in
   let required_preset =
     match Safe_ops.json_string_opt "required_preset" args with
     | Some s when String.trim s <> "" -> Some (String.trim s)
@@ -364,6 +369,13 @@ let handle_add_task ctx args =
     (false, "Task title cannot be empty or whitespace-only")
   else if priority < 1 || priority > 5 then
     (false, Printf.sprintf "Priority must be between 1 and 5, got %d" priority)
+  else if Option.is_some goal_id
+          && not
+               (Goal_store.list_goals ctx.config ()
+                |> List.exists (fun (goal : Goal_store.goal) ->
+                       String.equal goal.id (Option.value ~default:"" goal_id)))
+  then
+    (false, Printf.sprintf "Unknown goal_id '%s'" (Option.value ~default:"" goal_id))
   else
     (* Validate required_preset against configured preset names *)
     let preset_valid = match required_preset with
@@ -380,7 +392,7 @@ let handle_add_task ctx args =
     | Error error -> (false, error)
     | Ok contract ->
         ( true,
-          Coord.add_task ?contract ?required_preset
+          Coord.add_task ?contract ?goal_id ?required_preset
             ~created_by:ctx.agent_name ctx.config ~title:trimmed_title
             ~priority ~description )
 
@@ -396,6 +408,11 @@ let handle_batch_add_tasks ctx args =
     let title = String.trim (t |> member "title" |> to_string) in
     let priority = t |> member "priority" |> to_int_option |> Option.value ~default:3 in
     let description = t |> member "description" |> to_string_option |> Option.value ~default:"" in
+    let goal_id =
+      match t |> member "goal_id" |> to_string_option with
+      | Some s when String.trim s <> "" -> Some (String.trim s)
+      | _ -> None
+    in
     let contract =
       match t |> member "contract" with
       | `Null -> Ok None
@@ -414,7 +431,7 @@ let handle_batch_add_tasks ctx args =
       Error (Printf.sprintf "item[%d]: priority must be 1-5, got %d" idx priority)
     else
       match contract with
-      | Ok contract -> Ok (title, priority, description, contract)
+      | Ok contract -> Ok (title, priority, description, contract, goal_id)
       | Error error -> Error error
   ) tasks_json in
   let errors = List.filter_map (function Error e -> Some e | Ok _ -> None) validated in
@@ -1022,7 +1039,7 @@ let dispatch ctx ~name ~args : tool_result option =
 (* ================================================================ *)
 
 let _tool_spec_read_only = [ "masc_task_history"; "masc_tasks" ]
-let _tool_spec_requires_join = [ "masc_claim_next"; "masc_transition" ]
+let _tool_spec_requires_join = [ "masc_transition" ]
 
 let tool_required_permission = function
   | "masc_tasks" | "masc_task_history" ->

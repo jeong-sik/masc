@@ -103,3 +103,17 @@ export async function deleteTask(taskId: string): Promise<boolean> {
   const resp = await post<{ ok: boolean }>('/api/v1/dashboard/tasks/delete', { task_id: taskId })
   return resp.ok
 }
+
+export interface PurgeAgentResponse {
+  ok: boolean
+  target_kind: 'agent' | 'keeper' | string
+  agent_name: string
+  keeper_name?: string
+  removed_keeper_toml?: boolean
+}
+
+export async function purgeAgent(agentName: string): Promise<PurgeAgentResponse> {
+  return post<PurgeAgentResponse>('/api/v1/dashboard/agents/purge', {
+    agent_name: agentName,
+  })
+}

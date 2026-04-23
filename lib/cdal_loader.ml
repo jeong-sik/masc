@@ -43,6 +43,7 @@ let read_json_file path =
   try Ok (Yojson.Safe.from_file path)
   with
   | Sys_error _ -> Error File_not_found
+  | Eio.Cancel.Cancelled _ as e -> raise e
   | exn -> Error (Parse_error (Printexc.to_string exn))
 
 (* ================================================================ *)

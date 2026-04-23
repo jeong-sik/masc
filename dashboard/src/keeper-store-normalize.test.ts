@@ -278,6 +278,50 @@ describe('normalizeKeepers lifecycle metrics', () => {
     })
   })
 
+  it('preserves backend attention, sandbox, and goal progress fields', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'attention-keeper',
+        status: 'active',
+        needs_attention: true,
+        attention_reason: 'approval_pending',
+        next_human_action: 'resolve_approval',
+        sandbox_target: 'docker',
+        blocked_task_count: 2,
+        goal_progress: {
+          active_goal_count: 1,
+          linked_task_count: 4,
+          done_task_count: 1,
+          open_task_count: 3,
+          blocked_task_count: 2,
+          convergence: 0.25,
+        },
+        approval_policy_effective: {
+          allow_rules: 1,
+          deny_rules: 0,
+          persisted_rules: 1,
+        },
+      },
+    ])
+
+    expect(keeper).toMatchObject({
+      needs_attention: true,
+      attention_reason: 'approval_pending',
+      next_human_action: 'resolve_approval',
+      sandbox_target: 'docker',
+      blocked_task_count: 2,
+      goal_progress: {
+        linked_task_count: 4,
+        blocked_task_count: 2,
+        convergence: 0.25,
+      },
+      approval_policy_effective: {
+        allow_rules: 1,
+        persisted_rules: 1,
+      },
+    })
+  })
+
   it('normalizes ctx composition telemetry from keeper metric points', () => {
     const [keeper] = normalizeKeepers([
       {

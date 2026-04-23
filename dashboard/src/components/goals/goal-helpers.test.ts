@@ -4,7 +4,8 @@ import {
   horizonLabel,
   horizonColor,
   priorityLabel,
-  statusFilterLabel,
+  phaseFilterLabel,
+  matchesGoalPhaseFilter,
   sortByPriority,
   sortByTimeDesc,
   filterTasksByQuery,
@@ -112,28 +113,60 @@ describe('priorityLabel', () => {
 })
 
 // ================================================================
-// statusFilterLabel
+// phaseFilterLabel
 // ================================================================
 
-describe('statusFilterLabel', () => {
+describe('phaseFilterLabel', () => {
   it('returns 전체 for all', () => {
-    expect(statusFilterLabel('all')).toBe('전체')
+    expect(phaseFilterLabel('all')).toBe('전체')
   })
 
-  it('returns 진행 중 for active', () => {
-    expect(statusFilterLabel('active')).toBe('진행 중')
+  it('returns 실행 중 for executing', () => {
+    expect(phaseFilterLabel('executing')).toBe('실행 중')
   })
 
-  it('returns 완료 for completed', () => {
-    expect(statusFilterLabel('completed')).toBe('완료')
+  it('returns Goal 검증 대기 for awaiting_verification', () => {
+    expect(phaseFilterLabel('awaiting_verification')).toBe('Goal 검증 대기')
+  })
+
+  it('returns 승인 대기 for awaiting_approval', () => {
+    expect(phaseFilterLabel('awaiting_approval')).toBe('승인 대기')
+  })
+
+  it('returns 차단됨 for blocked', () => {
+    expect(phaseFilterLabel('blocked')).toBe('차단됨')
   })
 
   it('returns 일시정지 for paused', () => {
-    expect(statusFilterLabel('paused')).toBe('일시정지')
+    expect(phaseFilterLabel('paused')).toBe('일시정지')
+  })
+
+  it('returns 완료 for completed', () => {
+    expect(phaseFilterLabel('completed')).toBe('완료')
+  })
+
+  it('returns 중단 for dropped', () => {
+    expect(phaseFilterLabel('dropped')).toBe('중단')
   })
 
   it('returns 전체 for unknown', () => {
-    expect(statusFilterLabel('custom' as any)).toBe('전체')
+    expect(phaseFilterLabel('custom' as any)).toBe('전체')
+  })
+})
+
+// ================================================================
+// matchesGoalPhaseFilter
+// ================================================================
+
+describe('matchesGoalPhaseFilter', () => {
+  it('matches every phase when filter is all', () => {
+    expect(matchesGoalPhaseFilter('blocked', 'all')).toBe(true)
+    expect(matchesGoalPhaseFilter('completed', 'all')).toBe(true)
+  })
+
+  it('matches only the requested phase', () => {
+    expect(matchesGoalPhaseFilter('awaiting_approval', 'awaiting_approval')).toBe(true)
+    expect(matchesGoalPhaseFilter('executing', 'awaiting_approval')).toBe(false)
   })
 })
 

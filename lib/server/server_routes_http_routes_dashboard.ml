@@ -437,6 +437,26 @@ let rec add_routes ~sw ~clock router =
                   (operator_error_json (Printf.sprintf "invalid json: %s" msg)))
          )
        ) request reqd)
+  |> Http.Router.post "/api/v1/dashboard/governance/approvals/rules/delete" (fun request reqd ->
+       with_tool_auth ~tool_name:"masc_operator_confirm" (fun _state _req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let args = Yojson.Safe.from_string body_str in
+             match
+               dashboard_governance_approval_rule_delete_http_json ~args
+             with
+             | Ok json ->
+                 respond_json_with_cors request reqd (Yojson.Safe.to_string json)
+             | Error message ->
+                 respond_json_with_cors ~status:`Bad_request request reqd
+                   (Yojson.Safe.to_string
+                      (operator_error_json message))
+           with Yojson.Json_error msg ->
+             respond_json_with_cors ~status:`Bad_request request reqd
+               (Yojson.Safe.to_string
+                  (operator_error_json (Printf.sprintf "invalid json: %s" msg)))
+         )
+       ) request reqd)
 
   (* Operator surface restored after cp-purge (#7349): handlers existed in
      server_dashboard_http_core/.ml but their Router.get/post registrations
@@ -504,6 +524,24 @@ let rec add_routes ~sw ~clock router =
          let json = dashboard_goals_tree_http_json ~config:state.Mcp_server.room_config in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/goals/detail" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let goal_id =
+           Server_utils.query_param req "goal_id"
+           |> Option.map String.trim
+           |> Option.value ~default:""
+         in
+         if goal_id = "" then
+           respond_json_with_cors ~status:`Bad_request req reqd
+             {|{"ok":false,"error":"goal_id query param is required"}|}
+         else
+           let json =
+             dashboard_goal_detail_http_json
+               ~config:state.Mcp_server.room_config ~goal_id
+           in
+           Http.Response.json ~compress:true ~request:req
+             (Yojson.Safe.to_string json) reqd
+       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/tasks/history" (fun request reqd ->
        with_public_read (fun state req reqd ->
          handle_dashboard_task_history state req reqd
@@ -543,7 +581,7 @@ let rec add_routes ~sw ~clock router =
        with_public_read (fun _state req reqd ->
          let n =
            let raw = match Server_utils.query_param req "n" with
-             | Some s -> (try int_of_string s with Eio.Cancel.Cancelled _ as e -> raise e | _ -> 5000)
+             | Some s -> int_of_string_opt s |> Option.value ~default:5000
              | None -> 5000
            in
            max 1 (min 50000 raw)
@@ -551,12 +589,9 @@ let rec add_routes ~sw ~clock router =
          let window_hours =
            match Server_utils.query_param req "window_hours" with
            | Some s ->
-             (try
-                let value = float_of_string s in
-                Some (max 0.1 (min 168.0 value))
-              with
-              | Eio.Cancel.Cancelled _ as e -> raise e
-              | _ -> None)
+             (match float_of_string_opt s with
+              | Some value -> Some (max 0.1 (min 168.0 value))
+              | None -> None)
            | None -> None
          in
          let json = Dashboard_http_tool_quality.aggregate ~n ?window_hours () in

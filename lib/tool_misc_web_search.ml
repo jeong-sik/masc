@@ -94,21 +94,15 @@ let decode_html_entities text =
   let buf = Buffer.create len in
   let decode_numeric entity =
     let body = String.sub entity 2 (String.length entity - 3) in
-    Safe_ops.protect ~default:None (fun () ->
+    let maybe_n =
       if String.length body > 1
          && (body.[0] = 'x' || body.[0] = 'X')
-      then
-        Some
-          (int_of_string ("0" ^ body)
-           |> Uchar.of_int
-           |> Buffer.add_utf_8_uchar buf;
-           "")
-      else
-        Some
-          (int_of_string body
-           |> Uchar.of_int
-           |> Buffer.add_utf_8_uchar buf;
-           ""))
+      then int_of_string_opt ("0" ^ body)
+      else int_of_string_opt body
+    in
+    match maybe_n with
+    | Some n -> Uchar.of_int n |> Buffer.add_utf_8_uchar buf; Some ""
+    | None -> None
   in
   let rec loop index =
     if index >= len then

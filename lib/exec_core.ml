@@ -71,6 +71,7 @@ type blocked_result = {
   error : string;
   reason : string;
   hint : string;
+  alternatives : string list;
   classification : classification;
   retryability : retryability;
   summary : string;
@@ -79,6 +80,84 @@ type blocked_result = {
 type outcome =
   | Executed of executed_result
   | Blocked_result of blocked_result
+
+type project_kind =
+  | OCaml_dune
+  | Node_js
+  | Python
+  | Rust_cargo
+  | Go_module
+  | Unknown_project
+
+type exec_env_snapshot = {
+  cwd : string;
+  git_repo : bool;
+  git_branch : string option;
+  project_kind : project_kind;
+  project_name : string option;
+}
+
+let string_of_project_kind = function
+  | OCaml_dune -> "ocaml_dune"
+  | Node_js -> "node_js"
+  | Python -> "python"
+  | Rust_cargo -> "rust_cargo"
+  | Go_module -> "go_module"
+  | Unknown_project -> "unknown"
+
+let detect_project_kind cwd =
+  if Sys.file_exists (cwd ^ "/dune-project") then OCaml_dune
+  else if Sys.file_exists (cwd ^ "/package.json") then Node_js
+  else if Sys.file_exists (cwd ^ "/pyproject.toml")
+        || Sys.file_exists (cwd ^ "/setup.py")
+        || Sys.file_exists (cwd ^ "/requirements.txt")
+  then Python
+  else if Sys.file_exists (cwd ^ "/Cargo.toml") then Rust_cargo
+  else if Sys.file_exists (cwd ^ "/go.mod") then Go_module
+  else Unknown_project
+
+let detect_project_name cwd =
+  let basename = Filename.basename cwd in
+  if basename = "" || basename = "." then None
+  else Some basename
+
+let snapshot_env ~cwd =
+  let git_dir = cwd ^ "/.git" in
+  let git_repo = Sys.file_exists git_dir || Sys.is_directory git_dir in
+  let git_branch =
+    if not git_repo then None
+    else
+      let head_file = cwd ^ "/.git/HEAD" in
+      if not (Sys.file_exists head_file) then None
+      else
+        try
+          let ic = open_in head_file in
+          Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+            let line = input_line ic in
+            let prefix = "ref: refs/heads/" in
+            if String.starts_with ~prefix line then
+              Some (String.sub line (String.length prefix)
+                      (String.length line - String.length prefix))
+            else Some (String.sub line 0 8))
+        with _ -> None
+  in
+  let project_kind = detect_project_kind cwd in
+  let project_name = detect_project_name cwd in
+  { cwd; git_repo; git_branch; project_kind; project_name }
+
+let env_snapshot_to_json (snap : exec_env_snapshot) : Yojson.Safe.t =
+  let branch_field = match snap.git_branch with
+    | None -> [] | Some b -> [ ("git_branch", `String b) ]
+  in
+  let name_field = match snap.project_name with
+    | None -> [] | Some n -> [ ("project_name", `String n) ]
+  in
+  `Assoc
+    ([ ("cwd", `String snap.cwd)
+     ; ("git_repo", `Bool snap.git_repo)
+     ; ("project_kind", `String (string_of_project_kind snap.project_kind))
+    ]
+    @ branch_field @ name_field)
 
 let env_int name default =
   match Sys.getenv_opt name with
@@ -494,7 +573,8 @@ let build_process_outcome ~artifact_policy ~base_path ~keeper_name ~cmd ~status
       recovery_hint;
     }
 
-let build_blocked_outcome ~cmd ~error ~reason ?hint ?(retryability = Self_correct) () =
+let build_blocked_outcome ~cmd ~error ~reason ?hint
+    ?(alternatives = []) ?(retryability = Self_correct) () =
   let classification = classify_command ~cmd in
   let summary = summary_of_status classification Blocked in
   let recovery_hint =
@@ -511,6 +591,7 @@ let build_blocked_outcome ~cmd ~error ~reason ?hint ?(retryability = Self_correc
       error;
       reason;
       hint = recovery_hint;
+      alternatives;
       classification;
       retryability;
       summary;
@@ -585,8 +666,17 @@ let semantic_fields_of_executed (result : executed_result) :
       | None -> []
       | Some h -> [ "hint", `String h ]
     in
+    let alternatives_field =
+      match Masc_exec.Exec_semantic.to_alternatives sem with
+      | [] -> []
+      | alts ->
+          [ ( "alternatives",
+              `List (List.map (fun a -> `String a) alts) ) ]
+    in
     let semantic_obj : Yojson.Safe.t =
-      `Assoc (("kind", `String kind) :: payload_fields @ hint_field)
+      `Assoc
+        (("kind", `String kind) :: payload_fields @ hint_field
+       @ alternatives_field)
     in
     let rci_field =
       match Masc_exec.Exec_semantic.to_hint sem with
@@ -625,7 +715,7 @@ let default_tail_cap = 512 * 1024
 let env_int key =
   match Sys.getenv_opt key with
   | None | Some "" -> None
-  | Some s -> (try Some (int_of_string (String.trim s)) with _ -> None)
+  | Some s -> int_of_string_opt (String.trim s)
 
 let output_cap_enabled () =
   match Sys.getenv_opt "MASC_BASH_OUTPUT_CAP" with
@@ -658,7 +748,7 @@ let cap_output_for_json output =
     in
     (rendered, Some meta)
 
-let outcome_to_json ?(extra = []) = function
+let outcome_to_json ?(extra = []) ?(env_snapshot = None) = function
   | Executed result ->
       let hint_fields =
         match result.recovery_hint with
@@ -671,6 +761,10 @@ let outcome_to_json ?(extra = []) = function
         match output_cap_field with
         | None -> []
         | Some meta -> [ ("output_cap", meta) ]
+      in
+      let env_field = match env_snapshot with
+        | None -> []
+        | Some snap -> [ ("environment", env_snapshot_to_json snap) ]
       in
       `Assoc
         ([
@@ -692,8 +786,18 @@ let outcome_to_json ?(extra = []) = function
              ("artifact_refs", `List (List.map artifact_ref_to_json result.artifact_refs));
            ]
          @ hint_fields
-         @ semantic_fields_of_executed result)
+         @ semantic_fields_of_executed result
+         @ env_field)
   | Blocked_result result ->
+      let alternatives_field =
+        match result.alternatives with
+        | [] -> []
+        | alts -> [ ("alternatives", `List (List.map (fun a -> `String a) alts)) ]
+      in
+      let env_field = match env_snapshot with
+        | None -> []
+        | Some snap -> [ ("environment", env_snapshot_to_json snap) ]
+      in
       `Assoc
         ([
            ("ok", `Bool false);
@@ -708,15 +812,17 @@ let outcome_to_json ?(extra = []) = function
              ("summary", `String result.summary);
              ("hint", `String result.hint);
              ("recovery_hint", `String result.hint);
-           ])
+           ]
+         @ alternatives_field
+         @ env_field)
 
 let process_result_json ?(artifact_policy = Persist_if_large) ~base_path
-    ~keeper_name ~cmd ?(extra = []) ~status ~output () =
+    ~keeper_name ~cmd ?(extra = []) ?(env_snapshot = None) ~status ~output () =
   build_process_outcome ~artifact_policy ~base_path ~keeper_name ~cmd ~status
     ~output
-  |> outcome_to_json ~extra
+  |> outcome_to_json ~extra ~env_snapshot
 
-let blocked_result_json ~cmd ~error ~reason ?hint ?(retryability = Self_correct)
-    ?(extra = []) () =
-  build_blocked_outcome ~cmd ~error ~reason ?hint ~retryability ()
-  |> outcome_to_json ~extra
+let blocked_result_json ~cmd ~error ~reason ?hint ?(alternatives = [])
+    ?(retryability = Self_correct) ?(extra = []) ?(env_snapshot = None) () =
+  build_blocked_outcome ~cmd ~error ~reason ?hint ~alternatives ~retryability ()
+  |> outcome_to_json ~extra ~env_snapshot

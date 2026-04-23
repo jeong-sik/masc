@@ -22,12 +22,7 @@ let trim_opt = function
       if trimmed = "" then None else Some trimmed
   | None -> None
 
-let read_backlog_or_raise config =
-  match read_backlog_r config with
-  | Ok backlog -> backlog
-  | Error msg -> raise (Invalid_argument msg)
-
-(** Agents who currently hold a Claimed or InProgress task.
+(* Agents who currently hold a Claimed or InProgress task.
     Used by the Hebbian hook to strengthen only against agents who are
     actively working, not everyone who happens to be joined.
     Falls back to active_agents if the backlog cannot be read. *)
@@ -319,28 +314,35 @@ let normalize_title_for_dedup (title : string) : string =
 (** Check if a task with a similar title already exists in the backlog.
     Returns [Some existing_task_id] if a duplicate is found, [None] otherwise.
     Uses normalized title comparison — deterministic, no fuzzy matching. *)
-let find_duplicate_task (backlog : backlog) (title : string) : string option =
+let find_duplicate_task (backlog : backlog) ~(title : string)
+    ~(goal_id : string option) : string option =
   let norm = normalize_title_for_dedup title in
   if norm = "" then None
   else
     List.find_opt (fun (t : task) ->
       let t_norm = normalize_title_for_dedup t.title in
-      t_norm = norm && not (Types.task_status_is_terminal t.task_status)
+      t_norm = norm
+      && Option.equal String.equal t.goal_id goal_id
+      && not (Types.task_status_is_terminal t.task_status)
     ) backlog.tasks
     |> Option.map (fun t -> t.id)
 
 (** Add task — file-locked to prevent task ID collision under concurrency.
     Rejects tasks with duplicate titles (exact match after normalization)
     to prevent the same work from being created multiple times. *)
-let add_task ?contract ?required_preset ?created_by config ~title ~priority ~description =
+let add_task ?contract ?goal_id ?required_preset ?created_by config ~title
+    ~priority ~description =
   ensure_initialized config;
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
   let actor = Option.value ~default:"system" created_by in
+  let goal_id = trim_opt goal_id in
   try
     with_file_lock config backlog_path (fun () ->
-      let backlog = read_backlog_or_raise config in
+      match read_backlog_r config with
+      | Error msg -> Printf.sprintf "❌ Error: %s" msg
+      | Ok backlog ->
       (* Dedup guard: reject if an active task with the same normalized title exists *)
-      (match find_duplicate_task backlog title with
+      match find_duplicate_task backlog ~title ~goal_id with
       | Some existing_id ->
         Printf.sprintf "⚠️ Duplicate rejected: '%s' matches existing %s. Use that task instead."
           title existing_id
@@ -352,6 +354,7 @@ let add_task ?contract ?required_preset ?created_by config ~title ~priority ~des
         id = task_id;
         title;
         description;
+        goal_id;
         task_status = Todo;
         priority;
         files = [];
@@ -384,6 +387,7 @@ let add_task ?contract ?required_preset ?created_by config ~title ~priority ~des
             [
               ("task_id", `String task_id);
               ("title", `String title);
+              ("goal_id", Json_util.string_opt_to_json goal_id);
               ("priority", `Int priority);
               ("created_by", created_by_json);
               ( "strict_contract",
@@ -395,7 +399,7 @@ let add_task ?contract ?required_preset ?created_by config ~title ~priority ~des
 
       (Atomic.get Coord_hooks.on_task_mutation_fn) ();
       ignore (broadcast config ~from_agent:actor ~content:(Printf.sprintf "📋 New quest: %s" title));
-      Printf.sprintf "✅ Added %s: %s" task_id title))
+      Printf.sprintf "✅ Added %s: %s" task_id title)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | e ->
@@ -403,15 +407,18 @@ let add_task ?contract ?required_preset ?created_by config ~title ~priority ~des
 
 (** Add task with a required role constraint — file-locked.
     Same dedup guard as [add_task]. *)
-let add_task_with_role ?contract ?created_by config ~title ~priority ~description
-    ~required_role =
+let add_task_with_role ?contract ?goal_id ?created_by config ~title ~priority
+    ~description ~required_role =
   ensure_initialized config;
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
   let actor = Option.value ~default:"system" created_by in
+  let goal_id = trim_opt goal_id in
   try
     with_file_lock config backlog_path (fun () ->
-      let backlog = read_backlog_or_raise config in
-      (match find_duplicate_task backlog title with
+      match read_backlog_r config with
+      | Error msg -> Printf.sprintf "❌ Error: %s" msg
+      | Ok backlog ->
+      (match find_duplicate_task backlog ~title ~goal_id with
       | Some existing_id ->
         Printf.sprintf "⚠️ Duplicate rejected: '%s' matches existing %s. Use that task instead."
           title existing_id
@@ -423,6 +430,7 @@ let add_task_with_role ?contract ?created_by config ~title ~priority ~descriptio
         id = task_id;
         title;
         description;
+        goal_id;
         task_status = Todo;
         priority;
         files = [];
@@ -449,6 +457,11 @@ let add_task_with_role ?contract ?created_by config ~title ~priority ~descriptio
         | Some value -> `String value
         | None -> `Null
       in
+      let goal_id_json =
+        match goal_id with
+        | Some value -> `String value
+        | None -> `Null
+      in
       emit_task_activity config ~agent_name:actor ~task_id ~kind:(Event_kind.Task.to_string Event_kind.Task.Created)
         ~payload:
           (`Assoc
@@ -457,6 +470,7 @@ let add_task_with_role ?contract ?created_by config ~title ~priority ~descriptio
               ("title", `String title);
               ("priority", `Int priority);
               ("created_by", created_by_json);
+              ("goal_id", goal_id_json);
               ( "required_role",
                 `String (Types_core.role_to_string required_role) );
               ( "strict_contract",
@@ -469,7 +483,7 @@ let add_task_with_role ?contract ?created_by config ~title ~priority ~descriptio
       let role_str = Types_core.role_to_string required_role in
       ignore (broadcast config ~from_agent:actor
         ~content:(Printf.sprintf "📋 New quest: %s (requires: %s)" title role_str));
-      Printf.sprintf "✅ Added %s: %s (required_role: %s)" task_id title role_str))
+      Printf.sprintf "✅ Added %s: %s (required_role: %s)" task_id title role_str)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | e ->
@@ -481,32 +495,38 @@ let batch_add_tasks_internal ?created_by config tasks =
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
   let actor = Option.value ~default:"system" created_by in
   with_file_lock config backlog_path (fun () ->
+    match read_backlog_r config with
+    | Error msg -> Printf.sprintf "❌ Error adding batch tasks: %s" msg
+    | Ok backlog ->
     try
-      let backlog = read_backlog_or_raise config in
       let next_num = ref (next_task_number config backlog) in
-      let added_tasks = List.map (fun (title, priority, description, contract) ->
-        let task_id = Printf.sprintf "task-%03d" !next_num in
-        incr next_num;
-        let contract = Option.map normalize_task_contract contract in
-        {
-          id = task_id;
-          title;
-          description;
-          task_status = Todo;
-          priority;
-          files = [];
-          created_at = now_iso ();
-          created_by;
-          worktree = None;
-          required_role = Types_core.Unassigned;
-          required_preset = None;
-          stage = None;
-          contract;
-          handoff_context = None;
-          cycle_count = 0;
-          do_not_reclaim_reason = None;
-        }
-      ) tasks in
+      let added_tasks =
+        List.map
+          (fun (title, priority, description, contract, goal_id) ->
+            let task_id = Printf.sprintf "task-%03d" !next_num in
+            incr next_num;
+            let contract = Option.map normalize_task_contract contract in
+            {
+              id = task_id;
+              title;
+              description;
+              goal_id;
+              task_status = Todo;
+              priority;
+              files = [];
+              created_at = now_iso ();
+              created_by;
+              worktree = None;
+              required_role = Types_core.Unassigned;
+              required_preset = None;
+              stage = None;
+              contract;
+              handoff_context = None;
+              cycle_count = 0;
+              do_not_reclaim_reason = None;
+            })
+          tasks
+      in
       let new_backlog = {
         tasks = backlog.tasks @ added_tasks;
         last_updated = now_iso ();
@@ -527,6 +547,7 @@ let batch_add_tasks_internal ?created_by config tasks =
                 [
                   ("task_id", `String task.id);
                   ("title", `String task.title);
+                  ("goal_id", Json_util.string_opt_to_json task.goal_id);
                   ("priority", `Int task.priority);
                   ("created_by", created_by_json);
                   ( "strict_contract",
@@ -549,8 +570,8 @@ let batch_add_tasks_internal ?created_by config tasks =
 
 let batch_add_tasks ?created_by config tasks =
   batch_add_tasks_internal ?created_by config
-    (List.map (fun (title, priority, description) ->
-         (title, priority, description, None))
+    (List.map (fun (title, priority, description, goal_id) ->
+         (title, priority, description, None, goal_id))
        tasks)
 
 let batch_add_tasks_with_contracts ?created_by config tasks =
@@ -568,8 +589,10 @@ let claim_task config ~agent_name ~task_id =
 
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
   with_file_lock config backlog_path (fun () ->
+    match read_backlog_r config with
+    | Error msg -> Printf.sprintf "❌ Error: %s" msg
+    | Ok backlog ->
     try
-      let backlog = read_backlog_or_raise config in
       let found = ref false in
       let already_claimed = ref None in
       let blocked_reason = ref None in
@@ -658,8 +681,10 @@ let claim_task_r config ~agent_name ~task_id
   in
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
   with_file_lock config backlog_path (fun () ->
+    match read_backlog_r config with
+    | Error msg -> Error (Types.IoError msg)
+    | Ok backlog ->
     try
-      let backlog = read_backlog_or_raise config in
       (* Check role constraint before attempting claim *)
       let target_task = List.find_opt (fun t -> t.id = task_id) backlog.tasks in
       let* task =
@@ -833,7 +858,9 @@ let transition_task_r config ~agent_name ~task_id ~action
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
   with_file_lock config backlog_path (fun () ->
     try
-      let backlog = read_backlog_or_raise config in
+      match read_backlog_r config with
+      | Error msg -> Error (Types.IoError msg)
+      | Ok backlog ->
       let* () =
         match expected_version with
         | Some v when backlog.version <> v ->
@@ -1160,7 +1187,9 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result
     let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
     with_file_lock config backlog_path (fun () ->
       try
-        let backlog = read_backlog_or_raise config in
+        match read_backlog_r config with
+        | Error msg -> Error (Types.IoError msg)
+        | Ok backlog ->
         let task_opt = List.find_opt (fun t -> t.id = task_id) backlog.tasks in
         match task_opt with
         | None -> Error (Types.TaskNotFound task_id)
@@ -1295,7 +1324,9 @@ let link_task_execution_artifacts_r config ~task_id ?session_id ?operation_id
     let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
     with_file_lock config backlog_path (fun () ->
         try
-          let backlog = read_backlog_or_raise config in
+          match read_backlog_r config with
+          | Error msg -> Error (Types.IoError msg)
+          | Ok backlog ->
           match List.find_opt (fun task -> task.id = task_id) backlog.tasks with
           | None -> Error (Types.TaskNotFound task_id)
           | Some task ->

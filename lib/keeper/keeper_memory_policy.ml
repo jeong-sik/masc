@@ -579,7 +579,7 @@ let progress_generation_of_text (text : string) : int option =
   |> List.find_map (fun line ->
          match strip_prefix_ci ~prefix:"Generation:" line with
          | None -> None
-         | Some raw -> (try Some (int_of_string (String.trim raw)) with _ -> None))
+         | Some raw -> int_of_string_opt (String.trim raw))
 
 let progress_snapshot_cache_of_text (text : string) : progress_snapshot_cache option =
   match state_snapshot_of_summary_text text with
@@ -748,8 +748,8 @@ let snapshot_of_replay_metadata
   | Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> None
 
 let with_snapshot_metadata
-    (msg : Agent_sdk.Types.message)
-    (snapshot : keeper_state_snapshot) : Agent_sdk.Types.message =
+    (msg : Oas.Types.message)
+    (snapshot : keeper_state_snapshot) : Oas.Types.message =
   let metadata =
     (replay_metadata_key, replay_metadata_of_snapshot snapshot)
     :: List.remove_assoc replay_metadata_key msg.metadata
@@ -757,17 +757,17 @@ let with_snapshot_metadata
   { msg with metadata }
 
 let snapshot_of_message_metadata
-    (msg : Agent_sdk.Types.message) : keeper_state_snapshot option =
+    (msg : Oas.Types.message) : keeper_state_snapshot option =
   match List.assoc_opt replay_metadata_key msg.metadata with
   | Some json -> snapshot_of_replay_metadata json
   | None -> None
 
 let snapshot_of_message
-    (msg : Agent_sdk.Types.message) : keeper_state_snapshot option =
+    (msg : Oas.Types.message) : keeper_state_snapshot option =
   match snapshot_of_message_metadata msg with
   | Some _ as snapshot -> snapshot
   | None ->
-      parse_state_snapshot_from_reply (Agent_sdk.Types.text_of_message msg)
+      parse_state_snapshot_from_reply (Oas.Types.text_of_message msg)
 
 (** Extract a [keeper_state_snapshot] from the structured JSON stored in
     [Checkpoint.working_context].  Returns [None] if the JSON does not

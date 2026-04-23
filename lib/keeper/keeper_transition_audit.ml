@@ -129,7 +129,7 @@ let append_to_sink ~keeper_name (rec_ : transition_record) =
        in
        Fun.protect
          ~finally:(fun () ->
-           Safe_ops.protect ~default:() (fun () -> close_out oc))
+           close_out_noerr oc)
          (fun () -> output_string oc (line ^ "\n")))
 
 let record_transition ~keeper_name (rec_ : transition_record) =
@@ -178,7 +178,7 @@ let record_completed_turn ~keeper_name (rec_ : completed_turn_record) =
           in
           Fun.protect
             ~finally:(fun () ->
-              Safe_ops.protect ~default:() (fun () -> close_out oc))
+              close_out_noerr oc)
             (fun () -> output_string oc (line ^ "\n")))
 
 let recent_completed_turns ~keeper_name ~limit : completed_turn_record list =

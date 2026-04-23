@@ -28,6 +28,10 @@ Example: masc_add_task({title: 'Fix login bug', priority: 1, description: 'Users
           ("type", `String "string");
           ("description", `String "Task description");
         ]);
+        ("goal_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional explicit goal link. Preferred over embedding [goal:<id>] in the title; the title-tag fallback remains for legacy tasks.");
+        ]);
         ("required_preset", `Assoc [
           ("type", `String "string");
           ("description", `String "Tool preset required to claim this task. Must match a preset name from tool_policy.toml (e.g., 'delivery', 'coding'). Only keepers whose preset covers the required tools can claim. Omit for any agent.");
@@ -82,6 +86,10 @@ Example: masc_batch_add_tasks({tasks: [{title: 'Task A', priority: 2}, {title: '
               ("description", `Assoc [
                 ("type", `String "string");
                 ("description", `String "Task description");
+              ]);
+              ("goal_id", `Assoc [
+                ("type", `String "string");
+                ("description", `String "Optional goal ID to link this task to a goal as typed metadata.");
               ]);
               ("contract", `Assoc [
                 ("type", `String "object");

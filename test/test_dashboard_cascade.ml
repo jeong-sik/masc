@@ -278,6 +278,7 @@ let test_raw_config_shape () =
     (fun cascade_path ->
       let j = Masc_mcp.Dashboard_cascade.raw_config_json () in
       let raw_json = Yojson.Safe.Util.(j |> member "raw_json" |> to_string) in
+      let source_text = Yojson.Safe.Util.(j |> member "source_text" |> to_string) in
       (match member "updated_at" j with
        | `String _ -> ()
        | _ -> fail "updated_at should be string");
@@ -288,8 +289,12 @@ let test_raw_config_shape () =
         Yojson.Safe.Util.(j |> member "source_kind" |> to_string);
       check string "json source path" cascade_path
         Yojson.Safe.Util.(j |> member "source_path" |> to_string);
+      check bool "source remains editable" true
+        Yojson.Safe.Util.(j |> member "source_editable" |> to_bool);
       check bool "json raw is editable" true
         Yojson.Safe.Util.(j |> member "raw_json_editable" |> to_bool);
+      check bool "source_text includes current file contents" true
+        (contains_substring source_text "big_three_models");
       check bool "raw_json includes current file contents" true
         (contains_substring raw_json "big_three_models"))
 
@@ -303,11 +308,14 @@ let test_raw_config_defaults_when_file_missing () =
         Yojson.Safe.Util.(j |> member "config_path" |> to_string_option);
       check bool "still editable in json mode" true
         Yojson.Safe.Util.(j |> member "raw_json_editable" |> to_bool);
+      check string "missing source file seeds default object"
+        "{}\n"
+        Yojson.Safe.Util.(j |> member "source_text" |> to_string);
       check string "missing file seeds default object"
         "{}\n"
         Yojson.Safe.Util.(j |> member "raw_json" |> to_string))
 
-let test_raw_config_toml_source_is_read_only () =
+let test_raw_config_toml_source_exposes_editable_source_and_preview () =
   let toml =
     {|
 comment = "test"
@@ -329,8 +337,14 @@ models = ["ollama:qwen3.5:35b-a3b-nvfp4"]
         Yojson.Safe.Util.(j |> member "source_kind" |> to_string);
       check string "toml source path" toml_path
         Yojson.Safe.Util.(j |> member "source_path" |> to_string);
-      check bool "read-only when toml active" false
+      check bool "source stays editable in toml mode" true
+        Yojson.Safe.Util.(j |> member "source_editable" |> to_bool);
+      check bool "generated json preview stays read-only" false
         Yojson.Safe.Util.(j |> member "raw_json_editable" |> to_bool);
+      check bool "source text surfaces toml contents" true
+        (contains_substring
+           Yojson.Safe.Util.(j |> member "source_text" |> to_string)
+           "[big_three]");
       check bool "generated runtime json visible" true
         (contains_substring
            Yojson.Safe.Util.(j |> member "raw_json" |> to_string)
@@ -376,7 +390,7 @@ let test_save_raw_config_json_persists_and_refreshes_projection () =
             next_raw
             (read_file cascade_path))
 
-let test_save_raw_config_json_rejects_toml_source () =
+let test_save_raw_config_json_rejects_invalid_toml () =
   let toml =
     {|
 [big_three]
@@ -388,12 +402,48 @@ models = ["ollama:qwen3.5:35b-a3b-nvfp4"]
     (fun _dir ->
       match
         Masc_mcp.Dashboard_cascade.save_raw_config_json
-          {|{"beta_models":["ollama:qwen3.5:35b-a3b-nvfp4"]}|}
+          {|
+[broken
+models = ["ollama:qwen3.5:35b-a3b-nvfp4"]
+|}
       with
-      | Ok _ -> fail "toml-backed source should reject raw json save"
+      | Ok _ -> fail "invalid TOML should be rejected"
       | Error msg ->
-          check bool "error mentions TOML source" true
-            (contains_substring msg "active cascade source is TOML"))
+          check bool "error mentions invalid TOML" true
+            (contains_substring msg "invalid TOML"))
+
+let test_save_raw_config_json_persists_toml_source_and_materializes_json () =
+  let toml =
+    {|
+[alpha]
+models = ["ollama:qwen3.5:35b-a3b-nvfp4"]
+|}
+  in
+  with_temp_config_root_setup
+    (fun dir -> write_file (Filename.concat dir "cascade.toml") toml)
+    (fun dir ->
+      let toml_path = Filename.concat dir "cascade.toml" in
+      let json_path = Filename.concat dir "cascade.json" in
+      let next_toml =
+        {|
+comment = "edited in dashboard"
+
+[beta_editor]
+models = ["ollama:qwen3.5:35b-a3b-nvfp4"]
+|}
+      in
+      match Masc_mcp.Dashboard_cascade.save_raw_config_json next_toml with
+      | Error msg -> fail ("save_raw_config_json failed for TOML source: " ^ msg)
+      | Ok saved_config ->
+          check bool "new profile visible immediately after save" true
+            (List.mem "beta_editor" (profile_names saved_config));
+          check bool "old profile removed after save" false
+            (List.mem "alpha" (profile_names saved_config));
+          check string "toml source persisted verbatim"
+            next_toml
+            (read_file toml_path);
+          check bool "materialized json refreshed" true
+            (contains_substring (read_file json_path) "beta_editor_models"))
 
 (* ── health_json ───────────────────────────────────── *)
 
@@ -625,14 +675,16 @@ let () =
       test_case "top-level shape" `Quick test_raw_config_shape;
       test_case "missing file seeds default object" `Quick
         test_raw_config_defaults_when_file_missing;
-      test_case "toml source is read-only" `Quick
-        test_raw_config_toml_source_is_read_only;
+      test_case "toml source exposes editable source + preview" `Quick
+        test_raw_config_toml_source_exposes_editable_source_and_preview;
       test_case "invalid JSON is rejected" `Quick
         test_save_raw_config_json_rejects_invalid_json;
-      test_case "toml source rejects save" `Quick
-        test_save_raw_config_json_rejects_toml_source;
+      test_case "invalid TOML is rejected" `Quick
+        test_save_raw_config_json_rejects_invalid_toml;
       test_case "save persists and refreshes config projection" `Quick
         test_save_raw_config_json_persists_and_refreshes_projection;
+      test_case "toml source save persists + materializes json" `Quick
+        test_save_raw_config_json_persists_toml_source_and_materializes_json;
     ];
     "health_json", [
       test_case "top-level shape" `Quick test_health_shape;

@@ -19,18 +19,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Copy pre-built binary (built by GitHub Actions)
-COPY masc-mcp-linux-x64 /app/masc-mcp
+# Binary path configurable via build arg for local dev vs CI.
+# Local:  dune build --release bin/main_eio.exe && \
+#         docker build --build-arg BINARY_PATH=_build/default/bin/main_eio.exe .
+ARG BINARY_PATH=masc-mcp-linux-x64
+COPY ${BINARY_PATH} /app/masc-mcp
 RUN chmod +x /app/masc-mcp
 
 # Create non-root user for runtime
-RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
+RUN groupadd --system appgroup && useradd --system --gid appgroup appuser
 
 # Create data directory for JSONL fallback
 RUN mkdir -p /app/.masc && chown -R appuser:appgroup /app/.masc
 
-# Cascade config (GLM-only for Railway, no local llama-server)
-COPY config/cascade.json /app/config/cascade.json
+# Copy all config files. CI may generate additional JSON alongside tracked files.
+COPY config/ /app/config/
 
 ENV PORT=8080
 ENV MASC_BASE_PATH=/app
@@ -38,6 +41,10 @@ ENV MASC_CONFIG_DIR=/app/config
 
 EXPOSE 8080
 
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD curl -fsS http://localhost:${PORT}/health || exit 1
+
 USER appuser
 
-CMD ["/app/masc-mcp", "--port", "8080", "--base-path", "/app"]
+# --base-path is already set via MASC_BASE_PATH; avoid duplication.
+CMD ["/app/masc-mcp", "--port", "8080"]

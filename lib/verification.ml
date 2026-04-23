@@ -174,7 +174,9 @@ let request_of_yojson = function
                  List.filter_map (fun j ->
                    match criterion_of_yojson j with
                    | Ok c -> Some c
-                   | Error _ -> None
+                   | Error msg ->
+                     Eio.traceln "[Verification] dropping invalid criterion: %s" msg;
+                     None
                  ) l
              | _ -> []
            in
@@ -189,7 +191,9 @@ let request_of_yojson = function
            let status = match List.assoc_opt "status" fields with
              | Some json -> (match request_status_of_yojson json with
                  | Ok s -> s
-                 | Error _ -> Pending)
+                 | Error msg ->
+                   Eio.traceln "[Verification] unparseable status, falling back to Pending: %s" msg;
+                   Pending)
              | None -> Pending
            in
            Ok { id; task_id; output; criteria; worker; verifier; created_at; status }

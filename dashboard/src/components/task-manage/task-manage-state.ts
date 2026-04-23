@@ -6,7 +6,12 @@ import { refreshExecution } from '../../store'
 export const showTaskCreate = signal(false)
 export const taskCreating = signal(false)
 
-interface TaskCreateInput { title: string; description: string; priority?: number }
+interface TaskCreateInput {
+  title: string
+  description: string
+  priority?: number
+  goal_id?: string | null
+}
 
 export async function createTask(input: TaskCreateInput): Promise<boolean> {
   if (!input.title.trim()) { showToast('제목을 입력하세요', 'error'); return false }
@@ -14,6 +19,7 @@ export async function createTask(input: TaskCreateInput): Promise<boolean> {
   try {
     const args: Record<string, unknown> = { title: input.title.trim(), description: input.description.trim() }
     if (input.priority) args.priority = input.priority
+    if (input.goal_id?.trim()) args.goal_id = input.goal_id.trim()
     await callMcpTool('masc_add_task', args)
     showToast('태스크 생성 완료', 'success')
     showTaskCreate.value = false
@@ -26,4 +32,3 @@ export async function createTask(input: TaskCreateInput): Promise<boolean> {
     taskCreating.value = false
   }
 }
-

@@ -53,20 +53,20 @@ let with_fs_or_fallback ~path ~fallback f =
 
 let load_file_unix (path : string) : string =
   let ic = open_in path in
-  Fun.protect ~finally:(fun () -> close_in ic) (fun () ->
+  Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
     let len = in_channel_length ic in
     really_input_string ic len
   )
 
 let save_file_unix (path : string) (content : string) : unit =
   let oc = open_out path in
-  Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
+  Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
     output_string oc content
   )
 
 let append_file_unix (path : string) (content : string) : unit =
   let oc = open_out_gen [Open_append; Open_creat] 0o644 path in
-  Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
+  Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
     output_string oc content
   )
 
@@ -104,7 +104,7 @@ let save_file (path : string) (content : string) : unit =
 let fsync_path path =
   let fd = Unix.openfile path [ Unix.O_RDONLY ] 0 in
   Fun.protect
-    ~finally:(fun () -> try Unix.close fd with _ -> ())
+    ~finally:(fun () -> try Unix.close fd with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ())
     (fun () ->
       try Unix.fsync fd
       with Unix.Unix_error ((Unix.EINVAL | Unix.EOPNOTSUPP), _, _) ->

@@ -485,7 +485,7 @@ let apply_self_preservation ~keepers_dir ~total_keepers to_restart =
     (* Group by failure_reason ADT variant (not string prefix) *)
     let insert_cohort acc (entry : Keeper_registry.registry_entry) _msg =
       let key = cohort_key_of_reason entry.last_failure_reason in
-      let prev = try StringMap.find key acc with Not_found -> [] in
+      let prev = StringMap.find_opt key acc |> Option.value ~default:[] in
       StringMap.add key ((entry, _msg) :: prev) acc
     in
     let cohorts = List.fold_left (fun acc ((e, m) : _ * string) -> insert_cohort acc e m) StringMap.empty to_restart in

@@ -1230,7 +1230,7 @@ let () =
       Alcotest.test_case "Todo is the only claim pool candidate" `Quick (fun () ->
         let module S = Coord_task_schedule in
         let dummy_task ts : Types.task =
-          { id = "t-1"; title = "x"; description = "";
+          { id = "t-1"; title = "x"; description = ""; goal_id = None;
             files = []; created_at = "2026-04-19T00:00:00Z";
             task_status = ts; priority = 5;
             worktree = None;

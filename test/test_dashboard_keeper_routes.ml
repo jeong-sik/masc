@@ -516,6 +516,16 @@ let make_keeper_meta_json ?(name = "route-shadow-demo") () =
   | Error err -> fail ("keeper meta fixture parse failed: " ^ err)
 ;;
 
+let write_keeper_toml_fixture ~config_root ~keeper_name =
+  let keepers_dir = Filename.concat config_root "keepers" in
+  mkdir_p keepers_dir;
+  write_file
+    (Filename.concat keepers_dir (keeper_name ^ ".toml"))
+    (Printf.sprintf
+       "[keeper]\npersona_name = %S\nsandbox_profile = \"local\"\n"
+       keeper_name)
+;;
+
 let seed_auth_and_keeper ~base_path ~keeper_name =
   let config = Masc_mcp.Coord.default_config base_path in
   ignore (Masc_mcp.Coord.init config ~agent_name:(Some "bootstrap-admin"));
@@ -536,6 +546,27 @@ let seed_auth_and_keeper ~base_path ~keeper_name =
     | Error err -> fail (Types.masc_error_to_string err)
   in
   config, admin_token
+;;
+
+let seed_agent_file ?(agent_type = "worker") ?(capabilities = []) config agent_name =
+  let timestamp = Types.now_iso () in
+  let agent : Types.agent =
+    {
+      name = agent_name;
+      agent_type;
+      status = Types.Active;
+      capabilities;
+      current_task = None;
+      joined_at = timestamp;
+      last_seen = timestamp;
+      meta = None;
+    }
+  in
+  let agent_file =
+    Filename.concat (Masc_mcp.Coord.agents_dir config)
+      (Masc_mcp.Coord.safe_filename agent_name ^ ".json")
+  in
+  Masc_mcp.Coord.write_json config agent_file (Types.agent_to_yojson agent)
 ;;
 
 let append_execution_receipt config ~keeper_name =
@@ -867,6 +898,115 @@ let test_keeper_directive_resume_updates_paused_meta () =
       fail ("failed to read keeper meta after directive resume: " ^ err)
 ;;
 
+let test_agent_purge_route_removes_plain_agent_artifacts () =
+  with_seeded_server
+  @@ fun ~port ~config ~admin_token ~keeper_name:_ ->
+  let agent_name = "worker-swift-fox" in
+  seed_agent_file ~capabilities:[ "coding" ] config agent_name;
+  ignore
+    (Masc_mcp.Auth.create_token config.base_path ~agent_name ~role:Types.Admin);
+  let metrics_dir = Masc_mcp.Metrics_store_eio.agent_metrics_dir config agent_name in
+  Fs_compat.mkdir_p metrics_dir;
+  write_file (Filename.concat metrics_dir "2026-04.jsonl") "{}\n";
+  let purge_result =
+    run_curl_post
+      ~body:(Printf.sprintf {|{"agent_name":"%s"}|} agent_name)
+      ~token:admin_token
+      ~port
+      ~path:"/api/v1/dashboard/agents/purge"
+      ()
+  in
+  require_status "agent purge route returns 200" 200 purge_result;
+  check bool "agent purge identifies plain agent" true
+    (contains_substr {|"target_kind":"agent"|} purge_result.body);
+  check bool "agent file removed" false
+    (Sys.file_exists
+       (Filename.concat (Masc_mcp.Coord.agents_dir config)
+          (Masc_mcp.Coord.safe_filename agent_name ^ ".json")));
+  check bool "agent credential removed" false
+    (Sys.file_exists
+       (Masc_mcp.Auth.credential_file config.base_path agent_name));
+  check bool "agent metrics removed" false (Sys.file_exists metrics_dir)
+;;
+
+let test_agent_purge_route_removes_keeper_artifacts_and_toml () =
+  with_mock_model @@ fun valid_model ->
+  with_temp_config_root
+    (Printf.sprintf
+       {|{"default_models":["%s"],"keeper_unified_models":["%s"]}|}
+       valid_model
+       valid_model)
+  @@ fun config_root ->
+  let keeper_name = "route-shadow-demo" in
+  let keeper_toml_path =
+    Filename.concat (Filename.concat config_root "keepers") (keeper_name ^ ".toml")
+  in
+  write_keeper_toml_fixture ~config_root ~keeper_name;
+  with_seeded_server
+    ~env_overrides:[ "MASC_CONFIG_DIR", config_root ]
+  @@ fun ~port ~config ~admin_token ~keeper_name ->
+  let meta =
+    match Masc_mcp.Keeper_types.read_meta config keeper_name with
+    | Ok (Some meta) -> meta
+    | Ok None -> fail "keeper meta missing before purge"
+    | Error err -> fail ("failed to read keeper meta before purge: " ^ err)
+  in
+  seed_agent_file
+    ~agent_type:"keeper"
+    ~capabilities:[ "keeper" ]
+    config
+    meta.agent_name;
+  ignore
+    (Masc_mcp.Auth.create_token config.base_path ~agent_name:keeper_name
+       ~role:Types.Admin);
+  ignore
+    (Masc_mcp.Auth.create_token config.base_path ~agent_name:meta.agent_name
+       ~role:Types.Admin);
+  let agent_metrics_dir =
+    Masc_mcp.Metrics_store_eio.agent_metrics_dir config meta.agent_name
+  in
+  Fs_compat.mkdir_p agent_metrics_dir;
+  write_file (Filename.concat agent_metrics_dir "2026-04.jsonl") "{}\n";
+  append_execution_receipt config ~keeper_name;
+  let purge_result =
+    run_curl_post
+      ~body:(Printf.sprintf {|{"agent_name":"%s"}|} keeper_name)
+      ~token:admin_token
+      ~port
+      ~path:"/api/v1/dashboard/agents/purge"
+      ()
+  in
+  require_status "keeper purge route returns 200" 200 purge_result;
+  check bool "keeper purge identifies keeper target" true
+    (contains_substr {|"target_kind":"keeper"|} purge_result.body);
+  check bool "keeper purge reports toml deletion" true
+    (contains_substr {|"removed_keeper_toml":true|} purge_result.body);
+  (match Masc_mcp.Keeper_types.read_meta config keeper_name with
+   | Ok None -> ()
+   | Ok (Some _) -> fail "keeper meta should be removed after purge"
+   | Error err -> fail ("failed to read keeper meta after purge: " ^ err));
+  check bool "keeper toml removed" false (Sys.file_exists keeper_toml_path);
+  check bool "keeper agent file removed" false
+    (Sys.file_exists
+       (Filename.concat (Masc_mcp.Coord.agents_dir config)
+          (Masc_mcp.Coord.safe_filename meta.agent_name ^ ".json")));
+  check bool "keeper credential removed" false
+    (Sys.file_exists
+       (Masc_mcp.Auth.credential_file config.base_path keeper_name));
+  check bool "keeper agent credential removed" false
+    (Sys.file_exists
+       (Masc_mcp.Auth.credential_file config.base_path meta.agent_name));
+  check bool "keeper agent metrics removed" false
+    (Sys.file_exists agent_metrics_dir);
+  check bool "keeper runtime directory removed" false
+    (Sys.file_exists
+       (Filename.concat (Masc_mcp.Keeper_types.keeper_dir config) keeper_name));
+  check bool "keeper session trace removed" false
+    (Sys.file_exists
+       (Masc_mcp.Keeper_types.keeper_session_dir config
+          (Masc_mcp.Keeper_id.Trace_id.to_string meta.runtime.trace_id)))
+;;
+
 let test_available_cascade_profiles_filter_invalid_catalog_entries () =
   with_mock_model @@ fun valid_model ->
   with_temp_config_root
@@ -1045,6 +1185,14 @@ let () =
             "directive resume updates paused meta"
             `Slow
             test_keeper_directive_resume_updates_paused_meta
+        ; test_case
+            "agent purge removes plain agent artifacts"
+            `Slow
+            test_agent_purge_route_removes_plain_agent_artifacts
+        ; test_case
+            "agent purge removes keeper artifacts and keeper toml"
+            `Slow
+            test_agent_purge_route_removes_keeper_artifacts_and_toml
         ; test_case
             "available cascade profiles filter invalid catalog entries"
             `Quick

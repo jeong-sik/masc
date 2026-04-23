@@ -35,11 +35,33 @@ let test_all_keeper_tomls_parse () =
         fail (Printf.sprintf "%s: %s" f e)
     ) files
 
+let test_named_keeper_docker_defaults () =
+  let config_dir =
+    match Sys.getenv_opt "DUNE_SOURCEROOT" with
+    | Some repo_root -> Filename.concat repo_root "config/keepers"
+    | None -> "config/keepers"
+  in
+  let expect_keeper name =
+    let path = Filename.concat config_dir (name ^ ".toml") in
+    match KTP.load_keeper_toml path with
+    | Error e -> fail (Printf.sprintf "%s: %s" name e)
+    | Ok (_loaded_name, defaults) ->
+        check (option string) (name ^ " persona_name") (Some name)
+          defaults.persona_name;
+        check (option string) (name ^ " sandbox_profile") (Some "docker")
+          (Option.map KTP.sandbox_profile_to_string defaults.sandbox_profile);
+        check (option string) (name ^ " network_mode") (Some "none")
+          (Option.map KTP.network_mode_to_string defaults.network_mode)
+  in
+  List.iter expect_keeper [ "sangsu"; "sojin"; "verdict" ]
+
 let () =
   run "Keeper TOML Config Validation"
     [
       ( "config/keepers",
         [
           test_case "all toml files parse" `Quick test_all_keeper_tomls_parse;
+          test_case "named keepers default to docker" `Quick
+            test_named_keeper_docker_defaults;
         ] );
     ]

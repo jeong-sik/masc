@@ -15,16 +15,21 @@ module AQ = Masc_mcp.Admission_queue
 
 let test_with_permit_runs () =
   Eio_main.run (fun _env ->
-    let result = AQ.with_permit ~priority:Interactive
-      ~keeper_name:"test" ~cascade_name:"test" (fun () -> 42) in
-    check int "runs and returns" 42 result)
+    match AQ.with_permit ~priority:Interactive
+      ~keeper_name:"test" ~cascade_name:"test" (fun () -> 42) with
+    | Ok result -> check int "runs and returns" 42 result
+    | Error _ -> fail "unexpected error")
 
 let test_with_permit_propagates_exception () =
   Eio_main.run (fun _env ->
-    (try AQ.with_permit ~priority:Interactive
-       ~keeper_name:"test" ~cascade_name:"test"
-       (fun () -> failwith "boom")
-     with Failure msg -> check string "exception propagates" "boom" msg))
+    match
+      AQ.with_permit ~priority:Interactive
+        ~keeper_name:"test" ~cascade_name:"test"
+        (fun () -> failwith "boom")
+    with
+    | Ok _ -> fail "should raise"
+    | exception Failure msg -> check string "exception propagates" "boom" msg
+    | Error _ -> fail "unexpected error")
 
 let test_try_always_succeeds () =
   Eio_main.run (fun _env ->
@@ -36,11 +41,14 @@ let test_concurrent_all_run () =
   Eio_main.run (fun _env ->
     let count = Atomic.make 0 in
     let run_one name =
-      AQ.with_permit ~priority:Proactive
+      match AQ.with_permit ~priority:Proactive
         ~keeper_name:name ~cascade_name:"test"
         (fun () ->
           ignore (Atomic.fetch_and_add count 1);
           Eio.Fiber.yield ())
+      with
+      | Ok () -> ()
+      | Error _ -> fail "unexpected error"
     in
     Eio.Fiber.all [
       (fun () -> run_one "k1");
@@ -82,10 +90,12 @@ let test_wait_timeout_passthrough_no_leak () =
   Eio_main.run (fun _env ->
     AQ.reset_for_test ~max_slots:1;
     let ran = ref false in
-    AQ.with_permit ~wait_timeout_sec:0.01 ~priority:Background
+    (match AQ.with_permit ~wait_timeout_sec:0.01 ~priority:Background
       ~keeper_name:"timed-out" ~cascade_name:"test"
-      (fun () -> ran := true);
-    check bool "wait timeout ignored in passthrough" true !ran;
+      (fun () -> ran := true)
+    with
+    | Ok () -> check bool "wait timeout ignored in passthrough" true !ran
+    | Error _ -> fail "unexpected error");
     let s = AQ.snapshot () in
     check int "no leaked slots" 0 s.active;
     check int "queue cleared" 0 s.queue_depth)
@@ -149,9 +159,12 @@ let test_with_permit_releases_inflight_gauge () =
       Masc_mcp.Prometheus.metric_value_or_zero
         "masc_inference_queue_inflight" ()
     in
-    AQ.with_permit ~priority:Interactive
+    (match AQ.with_permit ~priority:Interactive
       ~keeper_name:"metric-test" ~cascade_name:"test"
-      (fun () -> ());
+      (fun () -> ())
+    with
+    | Ok () -> ()
+    | Error _ -> fail "unexpected error");
     let after =
       Masc_mcp.Prometheus.metric_value_or_zero
         "masc_inference_queue_inflight" ()
@@ -164,11 +177,14 @@ let test_with_permit_releases_on_exception () =
       Masc_mcp.Prometheus.metric_value_or_zero
         "masc_inference_queue_inflight" ()
     in
-    (try
+    (match
        AQ.with_permit ~priority:Interactive
          ~keeper_name:"metric-test-exn" ~cascade_name:"test"
          (fun () -> failwith "boom")
-     with Failure _ -> ());
+     with
+     | Ok _ -> fail "should raise"
+     | exception Failure _ -> ()
+     | Error _ -> fail "unexpected error");
     let after =
       Masc_mcp.Prometheus.metric_value_or_zero
         "masc_inference_queue_inflight" ()
@@ -181,9 +197,12 @@ let test_with_permit_increments_acquired_counter () =
       Masc_mcp.Prometheus.metric_value_or_zero
         "masc_inference_queue_acquired_total" ()
     in
-    AQ.with_permit ~priority:Interactive
+    (match AQ.with_permit ~priority:Interactive
       ~keeper_name:"counter-test" ~cascade_name:"test"
-      (fun () -> ());
+      (fun () -> ())
+    with
+    | Ok () -> ()
+    | Error _ -> fail "unexpected error");
     let after =
       Masc_mcp.Prometheus.metric_value_or_zero
         "masc_inference_queue_acquired_total" ()

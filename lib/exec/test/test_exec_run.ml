@@ -109,7 +109,7 @@ let test_slow_command_promotes () =
     ()
 
 let test_default_budget_env () =
-  let prior = try Some (Sys.getenv "MASC_BLOCKING_BUDGET_MS") with Not_found -> None in
+  let prior = Sys.getenv_opt "MASC_BLOCKING_BUDGET_MS" in
   Unix.putenv "MASC_BLOCKING_BUDGET_MS" "777";
   let v = Exec_run.default_budget_ms () in
   check int "env honoured" 777 v;

@@ -52,19 +52,7 @@ let oas_capabilities_of_config (provider_cfg : Llm_provider.Provider_config.t) =
 
 let supports_runtime_mcp_http_headers
     (provider_cfg : Llm_provider.Provider_config.t) =
-  match provider_cfg.kind with
-  | Llm_provider.Provider_config.Claude_code
-  | Kimi_cli ->
-      true
-  | Codex_cli
-  | Gemini_cli
-  | Anthropic
-  | OpenAI_compat
-  | Ollama
-  | Gemini
-  | Glm
-  | Kimi ->
-      false
+  Provider_adapter.supports_runtime_mcp_http_headers_for_config provider_cfg
 
 let capabilities_of_config (provider_cfg : Llm_provider.Provider_config.t) =
   let caps = oas_capabilities_of_config provider_cfg in

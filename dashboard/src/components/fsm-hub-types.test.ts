@@ -86,6 +86,8 @@ describe('displayState', () => {
     expect(displayState('executing')).toBe('실행 중')
     expect(displayState('Crashed')).toBe('비정상 종료')
     expect(displayState('Paused')).toBe('일시 중지')
+    expect(displayState('paused')).toBe('일시 중지')
+    expect(displayState('crashed')).toBe('비정상 종료')
   })
 
   it('returns raw value for unknown states', () => {

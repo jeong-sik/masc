@@ -236,7 +236,11 @@ let load_catalog ~config_path =
 let load_profile_weighted ~config_path ~name =
   let key = name ^ "_models" in
   match load_json config_path with
-  | Error _ -> []
+  | Error msg ->
+      Eio.traceln
+        "[CascadeConfig] load_profile_weighted: %s (profile=%s, path=%s)"
+        msg name config_path;
+      []
   | Ok json ->
     let open Yojson.Safe.Util in
     match json |> member key with
@@ -270,7 +274,11 @@ let read_int_field json key =
 
 let resolve_inference_params ~config_path ~name =
   match load_json config_path with
-  | Error _ -> { temperature = None; max_tokens = None }
+  | Error msg ->
+      Eio.traceln
+        "[CascadeConfig] resolve_inference_params: %s (name=%s, path=%s)"
+        msg name config_path;
+      { temperature = None; max_tokens = None }
   | Ok json ->
     let temp =
       match read_float_field json (name ^ "_temperature") with
@@ -311,7 +319,11 @@ let read_api_key_env_field json key =
 
 let resolve_api_key_env ~config_path ~name =
   match load_json config_path with
-  | Error _ -> []
+  | Error msg ->
+      Eio.traceln
+        "[CascadeConfig] resolve_api_key_env: %s (name=%s, path=%s)"
+        msg name config_path;
+      []
   | Ok json ->
     match read_api_key_env_field json (name ^ "_api_key_env") with
     | [] -> read_api_key_env_field json "default_api_key_env"
@@ -373,7 +385,11 @@ let empty_strategy_config = {
 
 let resolve_strategy_config ~config_path ~name =
   match load_json config_path with
-  | Error _ -> empty_strategy_config
+  | Error msg ->
+      Eio.traceln
+        "[CascadeConfig] resolve_strategy_config: %s (name=%s, path=%s)"
+        msg name config_path;
+      empty_strategy_config
   | Ok json ->
     {
       kind = read_string_field json (name ^ "_strategy");

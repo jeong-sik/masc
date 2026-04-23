@@ -46,8 +46,8 @@ let lookup_schemas_by_name_exn ~label all_schemas values =
     invalid_arg
       (Printf.sprintf "%s: unknown tool schema(s): %s" label
          (String.concat ", " missing));
-  (* Guard above ensures all names exist — use List.map to preserve _exn contract *)
-  requested |> List.map (Hashtbl.find by_name)
+  (* Guard above ensures all names exist *)
+  requested |> List.filter_map (Hashtbl.find_opt by_name)
 
 let spawned_agent_public_tool_names : string list =
   Tool_catalog.tools_for_surface Tool_catalog.Spawned_agent
@@ -423,4 +423,8 @@ let local_worker_resolvable_tool_names () : string list =
   match local_worker_tool_schemas () with
   | Ok schemas ->
       List.map (fun (s : Types.tool_schema) -> s.name) schemas
-  | Error _ -> []
+  | Error msg ->
+      Eio.traceln
+        "[AgentToolSurfaces] local_worker_tool_schemas failed: %s"
+        msg;
+      []

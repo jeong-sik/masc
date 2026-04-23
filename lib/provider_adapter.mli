@@ -22,6 +22,44 @@ type auth_mode =
       location_env : string;
     }
 
+type model_family =
+  | Generic
+  | Glm_general
+  | Glm_coding
+  | Kimi_api_family
+
+type auto_models_source =
+  | No_auto_models
+  | Env_csv_or_default of {
+      env_var : string;
+      defaults : string list;
+      prefer_default_model_env : bool;
+    }
+  | Zai_general_auto_models
+  | Zai_coding_auto_models
+
+type reporting_policy =
+  | Reported
+  | Missing_by_design
+  | Unknown
+
+type model_policy = {
+  default_model_env : string option;
+  default_model_fallback : string option;
+  auto_models : auto_models_source;
+  expand_auto : bool;
+  family : model_family;
+}
+
+type tool_policy = {
+  supports_runtime_mcp_http_headers : bool;
+}
+
+type telemetry_policy = {
+  usage_reporting : reporting_policy;
+  runtime_reporting : reporting_policy;
+}
+
 type voice_transport =
   | Voice_openai_compat
   | Voice_elevenlabs_direct
@@ -37,6 +75,9 @@ type adapter = {
   default_voice : string option;
   endpoint_url : string option;
   default_model_id : string option;
+  model_policy : model_policy;
+  tool_policy : tool_policy;
+  telemetry_policy : telemetry_policy;
 }
 
 type voice_adapter = {
@@ -142,6 +183,9 @@ val all_auth_env_keys : unit -> string list
 (** Resolve an adapter by canonical name or alias. *)
 val resolve_direct_adapter : string -> adapter option
 
+(** Resolve an adapter by cascade prefix (e.g. ["gemini_cli"], ["kimi"]). *)
+val resolve_adapter_by_cascade_prefix : string -> adapter option
+
 (** Resolve the canonical name for a provider label. *)
 val resolve_direct_canonical_name : string -> string option
 
@@ -156,6 +200,18 @@ val is_spawnable_agent : string -> bool
 
 (** Return canonical names of all spawnable adapters. *)
 val spawnable_canonical_names : unit -> string list
+
+(** Resolve the declared default model id for a cascade prefix. *)
+val default_model_id_for_cascade_prefix :
+  ?getenv:(string -> string option) -> string -> string option
+
+(** Resolve declared auto-model expansion for a provider canonical name/alias. *)
+val auto_models_for_provider :
+  ?getenv:(string -> string option) -> string -> string list option
+
+(** Resolve declared auto-model expansion for a cascade prefix. *)
+val auto_models_for_cascade_prefix :
+  ?getenv:(string -> string option) -> string -> string list option
 
 (** Returns true if the provider uses runtime discovery (e.g. live /props probe). *)
 val requires_discovery : string -> bool
@@ -288,6 +344,26 @@ val resolve_gemini_direct_auth : unit -> gemini_direct_auth
 
 (** Compute the Vertex AI OpenAI-compatible endpoint URL. *)
 val gemini_vertex_openai_base_url : project:string -> location:string -> string
+
+(** Resolve the concrete provider adapter for a provider config. *)
+val adapter_of_provider_config :
+  Llm_provider.Provider_config.t -> adapter option
+
+(** Stable provider label/cascade prefix for a provider config. *)
+val provider_label_of_config :
+  Llm_provider.Provider_config.t -> string
+
+(** User-facing provider label for a provider config. *)
+val display_provider_name_of_config :
+  Llm_provider.Provider_config.t -> string
+
+(** Build the stable "provider:model" label for a provider config. *)
+val model_label_of_config :
+  Llm_provider.Provider_config.t -> string
+
+(** Whether the resolved adapter declares runtime MCP HTTP header support. *)
+val supports_runtime_mcp_http_headers_for_config :
+  Llm_provider.Provider_config.t -> bool
 
 (** {1 Misc} *)
 

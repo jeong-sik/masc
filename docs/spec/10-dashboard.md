@@ -1,6 +1,6 @@
 ---
 status: reference
-last_verified: 2026-04-17
+last_verified: 2026-04-22
 code_refs:
   - lib/dashboard/
   - lib/dashboard.ml
@@ -546,7 +546,51 @@ Journal: 최대 200개 항목 보관. agent/text/kind/timestamp.
 - `operator-store.ts`: Operator actions/digest
 - `pending-confirm.ts`: Pending confirmations
 
-### 4.6. Build Pipeline
+### 4.6. Planning / Goal Tree Contract
+
+Workspace `planning`은 Goal Store projection을 goal-first tree로 렌더링한다. 이 surface에서 lifecycle source of truth는 legacy `status`가 아니라 explicit Goal FSM `phase`다.
+
+Goal Tree / goal detail contract:
+- phase badge는 `executing`, `awaiting_verification`, `awaiting_approval`, `blocked`, `paused`, `completed`, `dropped`를 직접 표시
+- coarse `status`는 historical rollup / compatibility 용도만 가진다
+- Goal filter는 `phase` 기준으로 작동해야 하며, `status=active|paused|done|dropped` 같은 coarse bucket에 의존하지 않는다
+- goal verification과 task verification은 분리해서 보여준다
+  - goal-level: `Goal 검증 대기`, quorum summary, open request
+  - task-level: `Task 검증 대기`
+- `awaiting_approval`는 generic `FSM` badge가 아니라 explicit approval badge로 노출한다
+
+Goal Tree recursive filtering rule:
+- matching goal은 자신의 subtree를 유지하되, children도 같은 phase filter로 다시 prune한다
+- non-matching ancestor는 matching descendant의 context로만 유지하고 own task rows는 숨긴다
+
+### 4.7. Keeper Composite / FSM Hub Contract
+
+FSM Hub는 keeper raw lifecycle 전체를 그대로 노출하지 않고 reduced composite KSM (`Running | Failing | Overflowed | Compacting | HandingOff | Draining | Stable`)을 사용한다.
+
+`Stable`은 단순 idle이 아니다. 다음 raw keeper phases가 composite에서 collapse될 수 있다:
+- `offline`
+- `paused`
+- `stopped`
+- `crashed`
+- `restarting`
+- `dead`
+
+따라서 `/api/v1/keepers/:name/composite` snapshot은 optional `collapsed_from` field를 함께 보낸다.
+
+```json
+{
+  "phase": "Stable",
+  "collapsed_from": "paused"
+}
+```
+
+운영자 surface 규칙:
+- `phase`는 TLA-aligned reduced composite state로 유지
+- `collapsed_from`은 `phase="Stable"`일 때 raw keeper phase를 설명하는 보조 필드다
+- dashboard는 `Stable`을 generic calm state로 처리하지 말고, `collapsed_from`이 있으면 `Stable <- paused/crashed/...` 식으로 의미를 풀어줘야 한다
+- backend가 아직 이 field를 보내지 않는 pinned rollout도 있으므로 frontend schema는 missing `collapsed_from`을 허용해야 한다
+
+### 4.8. Build Pipeline
 
 ```bash
 cd dashboard && pnpm run dev    # Vite dev server :5173 (HMR)

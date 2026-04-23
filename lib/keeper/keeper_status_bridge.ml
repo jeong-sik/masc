@@ -184,12 +184,16 @@ let blocker_class_of_sdk_error (err : Oas.Error.sdk_error) : blocker_class optio
   match Oas_worker_named.classify_masc_internal_error err with
   | Some (Oas_worker_named.Cascade_exhausted { reason; _ }) ->
       Some (Cascade_exhausted reason)
+  | Some (Oas_worker_named.Resumable_cli_session { detail; _ }) ->
+      Some (Cascade_exhausted (Other_detail detail))
   | Some (Oas_worker_named.No_tool_capable_provider _) ->
       Some No_tool_capable_provider
   | Some (Oas_worker_named.Accept_rejected _) ->
       None
   | Some (Oas_worker_named.Admission_queue_timeout _) ->
       Some Admission_queue_wait_timeout
+  | Some (Oas_worker_named.Admission_queue_rejected _) ->
+      None
   | Some (Oas_worker_named.Turn_timeout _) ->
       Some Turn_timeout
   | Some (Oas_worker_named.Ambiguous_post_commit { is_timeout; _ }) ->
@@ -245,7 +249,7 @@ let proactive_runtime_reason_is_current (meta : keeper_meta) =
   proactive_ts > 0.0
   && (last_turn_ts <= 0.0 || proactive_ts >= last_turn_ts)
 
-let runtime_blocker_fields_json (config : Coord_utils.config)
+let runtime_blocker_surface_opt (config : Coord_utils.config)
     (meta : keeper_meta) =
   let derived =
     match meta.runtime.last_blocker_class with
@@ -276,11 +280,15 @@ let runtime_blocker_fields_json (config : Coord_utils.config)
              | Some cls ->
                  Some
                    (runtime_blocker_surface_of_typed_class
-                      ~summary:meta.runtime.proactive_rt.last_reason cls)
+                     ~summary:meta.runtime.proactive_rt.last_reason cls)
              | None -> None)
         | None -> None)
   in
-  match derived with
+  derived
+
+let runtime_blocker_fields_json (config : Coord_utils.config)
+    (meta : keeper_meta) =
+  match runtime_blocker_surface_opt config meta with
   | Some blocker ->
       [
         ("runtime_blocker_class", `String blocker.blocker_class);
@@ -293,6 +301,38 @@ let runtime_blocker_fields_json (config : Coord_utils.config)
         ("runtime_blocker_summary", `Null);
         ("runtime_blocker_continue_gate", `Bool false);
       ]
+
+let attention_fields_json (config : Coord_utils.config) (meta : keeper_meta) =
+  let pending_approval_count =
+    Keeper_approval_queue.pending_count_for_keeper ~keeper_name:meta.name
+  in
+  let runtime_blocker = runtime_blocker_surface_opt config meta in
+  let social_model_recognized =
+    Keeper_social_model.is_known_social_model meta.social_model
+  in
+  let needs_attention, attention_reason, next_human_action =
+    if pending_approval_count > 0 then
+      (true, Some "approval_pending", Some "resolve_approval")
+    else
+      match runtime_blocker with
+      | Some blocker when blocker.continue_gate ->
+          (true, Some "continue_gate_required", Some "approve_or_reject_continue")
+      | Some _ when meta.paused ->
+          (true, Some "paused_blocked", Some "inspect_runtime_blocker")
+      | Some _ ->
+          (true, Some "runtime_blocked", Some "inspect_runtime_blocker")
+      | None when meta.paused ->
+          (true, Some "paused", Some "resume_or_review")
+      | None when not social_model_recognized ->
+          (true, Some "social_model_fallback", Some "review_social_model")
+      | None ->
+          (false, None, None)
+  in
+  [
+    ("needs_attention", `Bool needs_attention);
+    ("attention_reason", Json_util.string_opt_to_json attention_reason);
+    ("next_human_action", Json_util.string_opt_to_json next_human_action);
+  ]
 
 let trimmed_string_json value =
   let trimmed = String.trim value in
@@ -372,7 +412,8 @@ let runtime_surface_json config (meta : keeper_meta) =
          `String (Keeper_exec_status.string_of_fiber_health fiber_health) );
      ]
      @ social_runtime_fields_json meta
-     @ runtime_blocker_fields_json config meta)
+     @ runtime_blocker_fields_json config meta
+     @ attention_fields_json config meta)
 
 let existing_path_json ?source path =
   let fields =

@@ -68,7 +68,7 @@ let list_month_dirs base_dir =
   |> List.filter (fun d ->
     String.length d = 7
     && d.[4] = '-'
-    && (try ignore (int_of_string (String.sub d 0 4)); true with Failure _ -> false))
+    && Option.is_some (int_of_string_opt (String.sub d 0 4)))
 
 (** Day files matching [DD.jsonl], newest first. *)
 let list_day_files month_path =

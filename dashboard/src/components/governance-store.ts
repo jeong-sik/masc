@@ -23,4 +23,5 @@ export {
   submitBrief,
   respondToExecutionOrder,
   respondToKeeperApproval,
+  deleteKeeperApprovalRule,
 } from './governance-actions'

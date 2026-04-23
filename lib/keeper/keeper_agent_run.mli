@@ -75,6 +75,7 @@ type run_result =
   ; turn_count : int
   ; tool_calls_made : int
   ; usage : Oas.Types.api_usage
+  ; usage_reported : bool
   ; tools_used : string list
   ; tool_calls : tool_call_detail list
   ; checkpoint : Oas.Checkpoint.t option

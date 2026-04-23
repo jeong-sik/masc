@@ -88,6 +88,11 @@ type masc_internal_error =
       cascade_name : string;
       reason : Keeper_types.cascade_exhaustion_reason;
     }
+  | Resumable_cli_session of {
+      cascade_name : string;
+      detail : string;
+      exit_code : int option;
+    }
   | No_tool_capable_provider of {
       cascade_name : string;
       configured_labels : string list;
@@ -101,6 +106,10 @@ type masc_internal_error =
       keeper_name : string;
       cascade_name : string;
       wait_sec : float;
+    }
+  | Admission_queue_rejected of {
+      keeper_name : string;
+      reason : string;
     }
   | Turn_timeout of {
       elapsed_sec : float;
@@ -128,6 +137,14 @@ let masc_internal_error_to_json = function
         ("cascade_name", `String cascade_name);
         ("reason", Keeper_types.cascade_exhaustion_reason_to_json reason);
       ]
+  | Resumable_cli_session { cascade_name; detail; exit_code } ->
+    `Assoc
+      [
+        ("kind", `String "resumable_cli_session");
+        ("cascade_name", `String cascade_name);
+        ("detail", `String detail);
+        ("exit_code", Json_util.int_opt_to_json exit_code);
+      ]
   | No_tool_capable_provider { cascade_name; configured_labels } ->
     `Assoc
       [
@@ -151,6 +168,13 @@ let masc_internal_error_to_json = function
         ("keeper_name", `String keeper_name);
         ("cascade_name", `String cascade_name);
         ("wait_sec", `Float wait_sec);
+      ]
+  | Admission_queue_rejected { keeper_name; reason } ->
+    `Assoc
+      [
+        ("kind", `String "admission_queue_rejected");
+        ("keeper_name", `String keeper_name);
+        ("reason", `String reason);
       ]
   | Turn_timeout { elapsed_sec } ->
     `Assoc
@@ -190,6 +214,14 @@ let admission_wait_timeout_error
 
 let classify_masc_internal_error (err : Oas.Error.sdk_error) :
     masc_internal_error option =
+  let int_opt_of_assoc key = function
+    | `Assoc fields -> (
+        match List.assoc_opt key fields with
+        | Some (`Int value) -> Some value
+        | Some (`Intlit value) -> int_of_string_opt value
+        | _ -> None)
+    | _ -> None
+  in
   match err with
   | Oas.Error.Internal msg when String.starts_with ~prefix:masc_internal_error_prefix msg ->
     let payload =
@@ -219,6 +251,17 @@ let classify_masc_internal_error (err : Oas.Error.sdk_error) :
                         reason;
                       })
                | None -> None)
+           | Some (`String "resumable_cli_session") -> (
+               match string_opt_of_assoc "cascade_name" json, string_opt_of_assoc "detail" json with
+               | Some cascade_name, Some detail ->
+                 Some
+                   (Resumable_cli_session
+                      {
+                        cascade_name;
+                        detail;
+                        exit_code = int_opt_of_assoc "exit_code" json;
+                      })
+               | _ -> None)
            | Some (`String "no_tool_capable_provider") -> (
                match string_opt_of_assoc "cascade_name" json with
                | Some cascade_name ->
@@ -266,6 +309,13 @@ let classify_masc_internal_error (err : Oas.Error.sdk_error) :
                    | _ -> 0.0
                  in
                  Some (Admission_queue_timeout { keeper_name; cascade_name; wait_sec })
+               | _ -> None)
+           | Some (`String "admission_queue_rejected") -> (
+               match string_opt_of_assoc "keeper_name" json,
+                     string_opt_of_assoc "reason" json
+               with
+               | Some keeper_name, Some reason ->
+                 Some (Admission_queue_rejected { keeper_name; reason })
                | _ -> None)
            | Some (`String "turn_timeout") -> (
                match json with
@@ -617,6 +667,35 @@ let message_looks_like_cli_wrapped_hard_quota (message : string) : bool =
    && contains "\"api_error_status\":429"
    && contains "you've hit your limit")
 
+let exit_code_of_message (message : string) : int option =
+  let prefix = "exited with code " in
+  match String.index_opt message ' ' with
+  | None -> None
+  | Some first_space ->
+      let search_from = first_space + 1 in
+      if search_from >= String.length message then None
+      else
+        let suffix =
+          String.sub message search_from (String.length message - search_from)
+        in
+        if not (String.starts_with ~prefix suffix) then None
+        else
+          match String.index_from_opt suffix (String.length prefix) ':' with
+          | None -> None
+          | Some colon ->
+              let raw =
+                String.sub suffix (String.length prefix)
+                  (colon - String.length prefix)
+                |> String.trim
+              in
+              int_of_string_opt raw
+
+let message_looks_like_resumable_cli_session (message : string) : bool =
+  match exit_code_of_message message with
+  | Some 75 ->
+      String_util.contains_substring_ci message "to resume this session:"
+  | _ -> false
+
 let sdk_error_is_hard_quota (err : Oas.Error.sdk_error) : bool =
   match err with
   | Oas.Error.Api api_err ->
@@ -897,13 +976,27 @@ let run_named
           ~candidate_cfgs ~selected_model_raw:None ~capture
       in
       Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Failure ~observation:(Some observation);
+      let terminal_error =
+        match last_err with
+        | Some (Llm_provider.Http_client.NetworkError { message; _ })
+          when message_looks_like_resumable_cli_session message ->
+            sdk_error_of_masc_internal_error
+              (Resumable_cli_session
+                 {
+                   cascade_name;
+                   detail = message;
+                   exit_code = exit_code_of_message message;
+                 })
+        | _ ->
+            sdk_error_of_masc_internal_error
+              (Cascade_exhausted
+                 {
+                   cascade_name;
+                   reason;
+                 })
+      in
       Error
-        (sdk_error_of_masc_internal_error
-           (Cascade_exhausted
-              {
-                cascade_name;
-                reason;
-              }))
+        terminal_error
     | (provider_cfg : Llm_provider.Provider_config.t) :: rest ->
       let is_last = rest = [] in
       Log.Misc.debug "cascade %s: trying %s (is_last=%b)" cascade_name provider_cfg.model_id is_last;
@@ -1207,14 +1300,14 @@ let run_named
          do_backoff (n + 1);
          cycle_loop (n + 1))
   in
-  try
-    Admission_queue.with_permit ?wait_timeout_sec
-      ~priority:queue_priority ~keeper_name:name ~cascade_name
-      (fun () -> cycle_loop 0)
-  with
-  | Admission_queue.Wait_timeout wait_ms ->
-      admission_wait_timeout_error ~keeper_name:name ~cascade_name
-        ~priority:queue_priority wait_ms)
+  match Admission_queue.with_permit ?wait_timeout_sec
+    ~priority:queue_priority ~keeper_name:name ~cascade_name
+    (fun () -> cycle_loop 0) with
+  | Ok result -> result
+  | Error (`Host_resource_saturated reason) ->
+      Error
+        (sdk_error_of_masc_internal_error
+           (Admission_queue_rejected { keeper_name = name; reason })))
 
 (** Run a single Agent.run() using a model label string (e.g. "llama:qwen3.5").
     Validates the label parses before attempting execution. *)
@@ -1263,7 +1356,7 @@ let run_model_by_label
         | None -> Masc_grpc_transport.from_env ()
       in
       let config = { config with transport = transport_resolved } in
-      try
+      match
         Admission_queue.with_permit ?wait_timeout_sec
           ~priority:Llm_provider.Request_priority.Proactive
           ~keeper_name:"oas-label-model"
@@ -1289,10 +1382,11 @@ let run_model_by_label
                             }))
                 | Error e -> Error e))
       with
-      | Admission_queue.Wait_timeout wait_ms ->
-          admission_wait_timeout_error ~keeper_name:"oas-label-model"
-            ~cascade_name:model_label
-            ~priority:Llm_provider.Request_priority.Proactive wait_ms
+      | Ok result -> result
+      | Error (`Host_resource_saturated reason) ->
+          Error
+            (sdk_error_of_masc_internal_error
+               (Admission_queue_rejected { keeper_name = "oas-label-model"; reason }))
 
 let run_named_with_masc_tools
     ~cascade_name
@@ -1384,7 +1478,7 @@ let run_model_with_masc_tools
         | None -> Masc_grpc_transport.from_env ()
       in
       let config = { config with raw_trace; transport = transport_resolved } in
-      try
+      match
         Admission_queue.with_permit ?wait_timeout_sec
           ~priority:Llm_provider.Request_priority.Proactive
           ~keeper_name:"oas-explicit-model"
@@ -1397,7 +1491,8 @@ let run_model_with_masc_tools
                 Oas_worker_exec.run_with_masc_tools ~sw ~net ~config ~masc_tools ~dispatch ?contract ?on_event
                   goal))
       with
-      | Admission_queue.Wait_timeout wait_ms ->
-          admission_wait_timeout_error ~keeper_name:"oas-explicit-model"
-            ~cascade_name:model_label
-            ~priority:Llm_provider.Request_priority.Proactive wait_ms
+      | Ok result -> result
+      | Error (`Host_resource_saturated reason) ->
+          Error
+            (sdk_error_of_masc_internal_error
+               (Admission_queue_rejected { keeper_name = "oas-explicit-model"; reason }))

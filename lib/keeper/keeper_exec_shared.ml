@@ -17,9 +17,9 @@ let tool_result_or_error (ok, msg) = if ok then msg else error_json msg
     Follows Samchon harness pattern: field-level diagnostics with
     exact path, expected constraint, and concrete next action.
     Claude Code pattern: validateInput returns actionable guidance. *)
-let actionable_path_error ~(op : string) ~(keeper_name : string)
+let actionable_path_error ~(op : string) ~(meta : keeper_meta)
       ~(raw_path : string) ~(error : string) =
-  let playground = Printf.sprintf ".masc/playground/%s/" keeper_name in
+  let playground = Keeper_sandbox.allowed_root_rel_of_meta ~meta in
   let contains sub = String_util.contains_substring error sub in
   let action = match () with
     | () when String.length raw_path = 0 ->
@@ -103,8 +103,8 @@ let keeper_effective_write_allowed_paths ~(meta : keeper_meta) =
 ;;
 
 let keeper_playground_root ~(config : Coord.config) ~(meta : keeper_meta) =
-  ignore (Keeper_alerting_path.ensure_playground_bundle ~config ~name:meta.name);
-  Keeper_sandbox.host_root_abs ~config meta.name
+  ignore (Keeper_alerting_path.ensure_sandbox_bundle ~config ~meta);
+  Keeper_sandbox.host_root_abs_of_meta ~config meta
 ;;
 
 let keeper_default_write_root ~(config : Coord.config) ~(meta : keeper_meta) =
@@ -168,14 +168,20 @@ let strip_keeper_playground_prefix ~(meta : keeper_meta) (raw : string) =
       Some (if rest = "" then "." else rest)
     else None
   in
-  let bundle_root = Playground_paths.bundle_root meta.name in
+  let sandbox_root = Keeper_sandbox.allowed_root_rel_of_meta ~meta in
+  let legacy_bundle_root = Playground_paths.bundle_root meta.name in
   let short_root =
-    "playground/" ^ Playground_paths.sanitize_keeper_name meta.name
+    let rel = Keeper_alerting_path.strip_trailing_slashes sandbox_root in
+    if String.starts_with ~prefix:".masc/" rel then
+      String.sub rel 6 (String.length rel - 6)
+    else rel
   in
   let prefixes =
     [
-      bundle_root;
-      Keeper_alerting_path.strip_trailing_slashes bundle_root;
+      sandbox_root;
+      Keeper_alerting_path.strip_trailing_slashes sandbox_root;
+      legacy_bundle_root;
+      Keeper_alerting_path.strip_trailing_slashes legacy_bundle_root;
       short_root ^ "/";
       short_root;
     ]
@@ -267,7 +273,7 @@ let playground_relative_unless_allowed_root ~(config : Coord.config)
         keeper_playground_root ~config ~meta
         |> Keeper_alerting_path.strip_trailing_slashes
       in
-      let pg_bundle = Playground_paths.bundle_root meta.name in
+      let pg_bundle = Keeper_sandbox.allowed_root_rel_of_meta ~meta in
       let doubled_prefix = pg_root ^ "/" ^ pg_bundle in
       if String.starts_with ~prefix:doubled_prefix trimmed then
         let rest = String.sub trimmed
@@ -388,7 +394,7 @@ let keeper_tools_list_json ~(meta : keeper_meta) =
   let map =
     List.fold_left (fun acc n ->
       let cat = categorize n in
-      let list = try StringMap.find cat acc with Not_found -> [] in
+      let list = StringMap.find_opt cat acc |> Option.value ~default:[] in
       StringMap.add cat (n :: list) acc)
       StringMap.empty names
   in

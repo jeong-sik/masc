@@ -69,6 +69,12 @@ val interpret_cmd :
 val to_hint : t -> string option
 (** Human-readable operator hint for LLM consumption. None for [`Ok]. *)
 
+val to_alternatives : t -> string list
+(** Self-correction alternatives for each semantic exit kind.
+    Each string is a complete, actionable suggestion that an LLM agent
+    can execute directly. Empty list means no auto-correction is
+    possible (operator intervention required). *)
+
 type payload_value =
   [ `String of string
   | `Int of int

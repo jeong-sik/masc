@@ -597,6 +597,25 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
+      | `GET, "/api/v1/dashboard/goals/detail" ->
+          let state = get_server_state () in
+          let goal_id =
+            match Server_utils.query_param httpun_request "goal_id" with
+            | Some value -> String.trim value
+            | None -> ""
+          in
+          if goal_id = "" then
+            h2_respond_json h2_reqd
+              {|{"ok":false,"error":"goal_id query param is required"}|}
+              ~status:`Bad_request ~extra_headers:cors
+          else
+            let json =
+              dashboard_goal_detail_http_json
+                ~config:state.Mcp_server.room_config ~goal_id
+            in
+            h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+              ~extra_headers:cors
+
       | `GET, "/api/v1/dashboard/tasks/history" ->
           let state = get_server_state () in
           let task_id =

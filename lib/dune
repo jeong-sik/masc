@@ -108,7 +108,6 @@
    server_dashboard_http_execution_surfaces
    server_dashboard_http_namespace_truth_support
    server_dashboard_http_namespace_truth
-   server_meta_cognition_feedback
    server_dashboard_http
    server_dashboard_http_cache
    server_dashboard_http_link_preview
@@ -203,7 +202,6 @@
    worker_dev_tools
    legendary_counters
    worker_tool_input
-   worker_verification
    prompt_defaults
    prompt_composer
    oas_response
@@ -266,11 +264,10 @@
    provider_kind_resolver
    progress
    relay
+   goal_phase
+   goal_verification
    goal_store
-   goal_guard
    goal_janitor
-   goal_orchestrator
-   goal_scheduler
    convergence
    coord
    run_eio
@@ -417,11 +414,8 @@
    cdal_friction_projection
    cdal_verdict_gate
    verification_protocol
-   artifact_store
-   golden_set
    adversarial_eval
    labeling
-   keeper_telemetry_feedback
    keeper_deliberation
    keeper_id
    keeper_types_profile
@@ -469,7 +463,6 @@
    keeper_exec_memory
    keeper_exec_tools
    keeper_voice_local
-   keeper_voice_loop
    keeper_exec_status_metrics
    keeper_exec_status
    keeper_exec_persona
@@ -501,12 +494,9 @@
    keeper_agent_run
    keeper_world_observation
    keeper_decision_audit
-   keeper_decision_pipeline_contract
-   keeper_turn_cycle_contract
    keeper_composite_observer
    keeper_behavioral_regime
    keeper_behavioral_regime_observer
-   keeper_campaign_fsm
    keeper_unified_prompt
    keeper_unified_metrics
    keeper_error_classify
@@ -532,7 +522,6 @@
    keeper_transition_audit
    keeper_invariant_check
    keeper_trace_emit
-   keeper_trace_validate
    keeper_supervisor
    keeper_runtime
    keeper_turn_setup

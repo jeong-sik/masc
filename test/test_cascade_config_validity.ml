@@ -93,7 +93,7 @@ let test_profile_parses_non_empty profile () =
     (Printf.sprintf "%s has entries" profile)
     true
     (strings <> []);
-  (* Use parse_model_string_exn per entry so we can distinguish
+  (* Use parse_model_string_result per entry so we can distinguish
      "unknown provider / invalid spec" (hard failure — real typo) from
      "provider unavailable" (soft — just means the API key env var is
      unset in this test run). The former must fail the test; the latter
@@ -120,7 +120,7 @@ let test_profile_parses_non_empty profile () =
   in
   List.iter
     (fun s ->
-      match Masc_mcp.Cascade_config.parse_model_string_exn s with
+      match Masc_mcp.Cascade_config.parse_model_string_result s with
       | Ok (cfg : Llm_provider.Provider_config.t) ->
         check bool
           (Printf.sprintf "%s: %S has non-empty model_id" profile s)

@@ -220,7 +220,7 @@ let path_from_local_masc (inputs : inputs) =
         |> Env_config_core.normalize_masc_base_path_input
         |> absolute_path_from ~cwd:inputs.cwd
       in
-      let candidate = Filename.concat (Filename.concat base_path ".masc") "config" in
+      let candidate = Filename.concat (Common.masc_dir_from_base_path ~base_path) "config" in
       if config_signature_exists candidate then Some candidate else None
 
 let default_missing_root (inputs : inputs) =

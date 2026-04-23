@@ -528,7 +528,7 @@ let test_rewrite_turn_runtime_paths_to_host () =
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
   let meta = make_docker_meta "minjae" in
   let container_root = Keeper_sandbox.container_root meta.name in
-  let host_root = Keeper_sandbox.host_root_abs ~config meta.name in
+  let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   let input =
     Printf.sprintf "worktree %s/repos/masc-mcp\npwd=%s/repos/masc-mcp\n"
       container_root container_root

@@ -44,14 +44,18 @@ let parse_iso_timestamp (s : string) : float option =
             let hh = String.sub raw 1 2 in
             let mm = String.sub raw 4 2 in
             if all_digits hh && all_digits mm then
-              Some (sign * ((int_of_string hh * 3600) + (int_of_string mm * 60)))
+              match int_of_string_opt hh, int_of_string_opt mm with
+              | Some h, Some m -> Some (sign * ((h * 3600) + (m * 60)))
+              | _ -> None
             else
               None
         | 5 ->
             let hh = String.sub raw 1 2 in
             let mm = String.sub raw 3 2 in
             if all_digits hh && all_digits mm then
-              Some (sign * ((int_of_string hh * 3600) + (int_of_string mm * 60)))
+              match int_of_string_opt hh, int_of_string_opt mm with
+              | Some h, Some m -> Some (sign * ((h * 3600) + (m * 60)))
+              | _ -> None
             else
               None
         | _ -> None

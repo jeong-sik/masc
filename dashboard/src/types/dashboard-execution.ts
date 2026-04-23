@@ -1,6 +1,6 @@
 import type { Agent, BoardPost } from './core'
 import type { OperatorAttentionItem, OperatorRecommendedAction } from './dashboard-mission'
-import type { BoardMonitoring, GovernanceMonitoring, GovernanceDecisionItem, GovernanceTimelineEvent, GovernanceJudgeSummary, GovernanceJudgment, KeeperApprovalQueueItem, PendingConfirmation, PendingConfirmSummary } from './governance'
+import type { BoardMonitoring, GovernanceMonitoring, GovernanceDecisionItem, GovernanceTimelineEvent, GovernanceJudgeSummary, GovernanceJudgment, KeeperApprovalQueueItem, KeeperApprovalRule, PendingConfirmation, PendingConfirmSummary } from './governance'
 
 // --- Dashboard projection responses ---
 
@@ -431,6 +431,7 @@ export interface DashboardGovernanceResponse {
   judgments?: GovernanceJudgment[]
   pending_actions?: PendingConfirmation[]
   approval_queue?: KeeperApprovalQueueItem[]
+  approval_rules?: KeeperApprovalRule[]
 }
 
 export interface DashboardPlanningResponse {
@@ -455,8 +456,51 @@ export interface GoalTreeTask {
   status_color: string
   priority: number
   assignee: string | null
+  goal_id: string | null
+  linkage_source: 'explicit' | 'title_tag' | 'mixed' | 'none' | string
   is_terminal: boolean
   created_at: string
+  updated_at: string
+}
+
+export interface GoalVerificationVote {
+  principal: {
+    kind: string
+    id: string
+    display_name?: string | null
+  }
+  decision: 'approve' | 'reject' | string
+  note?: string | null
+  evidence_refs?: string[]
+  submitted_at: string
+}
+
+export interface GoalVerificationRequest {
+  id: string
+  goal_id: string
+  target_phase: string
+  requested_by: {
+    kind: string
+    id: string
+    display_name?: string | null
+  }
+  policy_snapshot: {
+    principals: Array<{ kind: string; id: string; display_name?: string | null }>
+    eligible_principals: Array<{ kind: string; id: string; display_name?: string | null }>
+    required_verdicts: number
+  }
+  votes: GoalVerificationVote[]
+  status: string
+  created_at: string
+  resolved_at?: string | null
+}
+
+export interface GoalVerificationSummary {
+  effective_policy?: GoalVerificationRequest['policy_snapshot'] | null
+  open_request?: GoalVerificationRequest | null
+  approve_count: number
+  reject_count: number
+  remaining_possible: number
 }
 
 export interface GoalTreeNode {
@@ -465,6 +509,12 @@ export interface GoalTreeNode {
   horizon: string
   status: string
   status_color: string
+  phase: string
+  phase_color: string
+  health: 'done' | 'paused' | 'blocked' | 'at_risk' | 'on_track' | string
+  health_color: string
+  badges: string[]
+  status_reason: string
   priority: number
   metric: string | null
   target_value: string | null
@@ -475,8 +525,20 @@ export interface GoalTreeNode {
   tasks: GoalTreeTask[]
   task_count: number
   task_done_count: number
+  verification_summary: GoalVerificationSummary
+  effective_verifier_policy?: GoalVerificationRequest['policy_snapshot'] | null
+  active_verification_request?: GoalVerificationRequest | null
+  pending_verification_count: number
+  timeline_events: unknown[]
   children: GoalTreeNode[]
   child_count: number
+  last_activity_at: string
+  stagnation_seconds: number
+  linked_keeper_names: string[]
+  pending_approval_count: number
+  infra_risk_count: number
+  linkage_source: 'explicit' | 'title_tag' | 'mixed' | 'none' | string
+  linkage_warning_count: number
   created_at: string
   updated_at: string
 }
@@ -484,8 +546,14 @@ export interface GoalTreeNode {
 export interface GoalTreeSummary {
   total_goals: number
   active_goals: number
+  done_goals: number
+  paused_goals: number
+  at_risk_goals: number
+  blocked_goals: number
   total_tasks: number
   done_tasks: number
+  pending_approvals: number
+  infra_risk_count: number
   overall_convergence: number
   overall_convergence_pct: number
 }
@@ -494,6 +562,42 @@ export interface DashboardGoalsTreeResponse {
   generated_at?: string
   tree: GoalTreeNode[]
   summary: GoalTreeSummary
+}
+
+export interface GoalDetailKeeper {
+  name: string
+  agent_name: string
+  current_task_id: string | null
+  active_goal_ids: string[]
+  sandbox_profile: string
+  execution_scope: string
+  network_mode: string
+  cascade_name: string
+  approval_profile: string | null
+  sandbox_effective_kind: string | null
+  cascade_outcome: string | null
+  latest_execution_outcome: string | null
+  latest_execution_at: string | null
+  latest_receipt: Record<string, unknown> | null
+}
+
+export interface GoalDetailTimelineEvent {
+  ts: string
+  kind: string
+  lane: string
+  title: string
+  summary: string
+  severity: 'ok' | 'warn' | 'bad' | string
+}
+
+export interface DashboardGoalDetailResponse {
+  generated_at?: string
+  goal: GoalTreeNode
+  linked_tasks: GoalTreeTask[]
+  linked_keepers: GoalDetailKeeper[]
+  approvals: Array<Record<string, unknown>>
+  execution_receipts: Array<Record<string, unknown>>
+  timeline: GoalDetailTimelineEvent[]
 }
 
 

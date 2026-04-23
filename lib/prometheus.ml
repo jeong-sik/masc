@@ -62,19 +62,19 @@ let with_lock f =
 (** {1 Metric Registration} *)
 
 let register_counter ~name ~help ?(labels=[]) () =
-  let key = name ^ (String.concat "" (List.map (fun (k, v) -> k ^ v) labels)) in
+  let key = name ^ (List.fold_left (fun acc (k, v) -> acc ^ k ^ v) "" labels) in
   with_lock (fun () ->
     if not (Hashtbl.mem metrics key) then
       Hashtbl.add metrics key { name; help; metric_type = Counter; value = 0.0; labels })
 
 let register_gauge ~name ~help ?(labels=[]) () =
-  let key = name ^ (String.concat "" (List.map (fun (k, v) -> k ^ v) labels)) in
+  let key = name ^ (List.fold_left (fun acc (k, v) -> acc ^ k ^ v) "" labels) in
   with_lock (fun () ->
     if not (Hashtbl.mem metrics key) then
       Hashtbl.add metrics key { name; help; metric_type = Gauge; value = 0.0; labels })
 
 let register_histogram ~name ~help ?(labels=[]) () =
-  let key = name ^ (String.concat "" (List.map (fun (k, v) -> k ^ v) labels)) in
+  let key = name ^ (List.fold_left (fun acc (k, v) -> acc ^ k ^ v) "" labels) in
   with_lock (fun () ->
     if not (Hashtbl.mem metrics key) then
       Hashtbl.add metrics key { name; help; metric_type = Histogram; value = 0.0; labels })
@@ -82,7 +82,7 @@ let register_histogram ~name ~help ?(labels=[]) () =
 (** {1 Metric Updates} *)
 
 let inc_counter name ?(labels=[]) ?(delta=1.0) () =
-  let key = name ^ (String.concat "" (List.map (fun (k, v) -> k ^ v) labels)) in
+  let key = name ^ (List.fold_left (fun acc (k, v) -> acc ^ k ^ v) "" labels) in
   with_lock (fun () ->
     match Hashtbl.find_opt metrics key with
     | Some m -> m.value <- m.value +. delta
@@ -96,7 +96,7 @@ let inc_counter name ?(labels=[]) ?(delta=1.0) () =
         })
 
 let set_gauge name ?(labels=[]) value =
-  let key = name ^ (String.concat "" (List.map (fun (k, v) -> k ^ v) labels)) in
+  let key = name ^ (List.fold_left (fun acc (k, v) -> acc ^ k ^ v) "" labels) in
   with_lock (fun () ->
     match Hashtbl.find_opt metrics key with
     | Some m -> m.value <- value
@@ -110,7 +110,7 @@ let set_gauge name ?(labels=[]) value =
         })
 
 let inc_gauge name ?(labels=[]) ?(delta=1.0) () =
-  let key = name ^ (String.concat "" (List.map (fun (k, v) -> k ^ v) labels)) in
+  let key = name ^ (List.fold_left (fun acc (k, v) -> acc ^ k ^ v) "" labels) in
   with_lock (fun () ->
     match Hashtbl.find_opt metrics key with
     | Some m -> m.value <- m.value +. delta
@@ -128,7 +128,7 @@ let dec_gauge name ?(labels=[]) ?(delta=1.0) () =
 
 (** Get current metric value by name + labels (if any). *)
 let get_metric_value name ?(labels=[]) () =
-  let key = name ^ (String.concat "" (List.map (fun (k, v) -> k ^ v) labels)) in
+  let key = name ^ (List.fold_left (fun acc (k, v) -> acc ^ k ^ v) "" labels) in
   with_lock (fun () ->
     Hashtbl.find_opt metrics key |> Option.map (fun m -> m.value))
 
@@ -146,8 +146,8 @@ let metric_total name =
     Tracks cumulative sum in the metric value; a matching _count counter
     is auto-created for computing averages. *)
 let observe_histogram name ?(labels=[]) value =
-  let key = name ^ (String.concat "" (List.map (fun (k, v) -> k ^ v) labels)) in
-  let count_key = name ^ "_count" ^ (String.concat "" (List.map (fun (k, v) -> k ^ v) labels)) in
+  let key = name ^ (List.fold_left (fun acc (k, v) -> acc ^ k ^ v) "" labels) in
+  let count_key = name ^ "_count" ^ (List.fold_left (fun acc (k, v) -> acc ^ k ^ v) "" labels) in
   with_lock (fun () ->
     (match Hashtbl.find_opt metrics key with
      | Some m -> m.value <- m.value +. value
@@ -508,7 +508,7 @@ let to_prometheus_text () =
     ) ms
   ) by_name;
   let label_key labels =
-    String.concat "" (List.map (fun (k, v) -> k ^ v) labels)
+    List.fold_left (fun acc (k, v) -> acc ^ k ^ v) "" labels
   in
   Hashtbl.iter (fun name ms ->
     let is_histogram_count =

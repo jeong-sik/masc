@@ -543,10 +543,10 @@ let resolved_max_context_for_turn
         meta.name resolution.primary_budget resolution.cascade_budget
     end
   end;
-  (match resolution.requested_override with
-   | Some requested ->
+   (match resolution.requested_override with
+    | Some requested ->
      Log.Keeper.debug
-       "%s: using max_context_override=%d turn_budget=%d primary_budget=%d effective_budget=%d"
+       "%s: using max_context_override=%d context_budget=%d primary_budget=%d effective_budget=%d"
        meta.name requested resolution.turn_budget resolution.primary_budget
        resolution.effective_budget
    | None -> ());
@@ -1088,7 +1088,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                           Error fail_open_err
                       | Ok next_execution ->
                           Log.Keeper.warn
-                            "%s: auto-recoverable cascade failure in %s; fail-open retry on cascade=%s max_context=%d turn_budget=%d primary_budget=%d requested_override=%s: %s"
+                            "%s: auto-recoverable cascade failure in %s; fail-open retry on cascade=%s max_context=%d context_budget=%d primary_budget=%d requested_override=%s: %s"
                             meta.name execution.cascade_name
                             next_execution.cascade_name
                             next_execution.max_context
@@ -1112,7 +1112,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                               && attempt <= EC.max_transient_retries ->
                       let delay = EC.transient_backoff_sec attempt in
                       Log.Keeper.warn
-                        "%s: transient network error cascade=%s max_context=%d turn_budget=%d primary_budget=%d requested_override=%s retry=%d/%d backoff=%.0fs: %s"
+                        "%s: transient network error cascade=%s max_context=%d context_budget=%d primary_budget=%d requested_override=%s retry=%d/%d backoff=%.0fs: %s"
                         meta.name execution.cascade_name
                         execution.max_context_resolution.effective_budget
                         execution.max_context
@@ -1314,7 +1314,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           Prometheus.inc_counter Prometheus.metric_keeper_turns
             ~labels:[("keeper_name", meta.name); ("outcome", "failure")] ();
           Log.Keeper.error
-            "%s: keeper cycle FAILED cascade=%s max_context=%d turn_budget=%d primary_budget=%d requested_override=%s latency=%dms%s error=%s"
+            "%s: keeper cycle FAILED cascade=%s max_context=%d context_budget=%d primary_budget=%d requested_override=%s latency=%dms%s error=%s"
             meta.name final_execution.cascade_name
             final_execution.max_context_resolution.effective_budget
             final_execution.max_context
@@ -1569,11 +1569,11 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 ~payload:(`Assoc
                   ([
                     ("keeper_name", `String updated_meta.name);
-                    ("input_tokens", `Int result.usage.input_tokens);
-                    ("output_tokens", `Int result.usage.output_tokens);
-                    ("cache_creation_tokens", `Int result.usage.cache_creation_input_tokens);
-                    ("cache_read_tokens", `Int result.usage.cache_read_input_tokens);
-                    ("cost_usd", `Float turn_cost);
+                    ("input_tokens", (if result.usage_reported then `Int result.usage.input_tokens else `Null));
+                    ("output_tokens", (if result.usage_reported then `Int result.usage.output_tokens else `Null));
+                    ("cache_creation_tokens", (if result.usage_reported then `Int result.usage.cache_creation_input_tokens else `Null));
+                    ("cache_read_tokens", (if result.usage_reported then `Int result.usage.cache_read_input_tokens else `Null));
+                    ("cost_usd", (if result.usage_reported then `Float turn_cost else `Null));
                     ("latency_ms", `Int latency_ms);
                     ("model_used", `String (Keeper_agent_run.surface_model_used result));
                     ("work_kind", `String (Keeper_unified_metrics.work_kind_of_selected_mode (Keeper_unified_metrics.selected_mode_of_result result)));

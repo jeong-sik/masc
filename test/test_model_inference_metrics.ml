@@ -95,6 +95,22 @@ let error_entry ~cascade_name ~ts ?provider () =
     ]);
   ]
 
+let success_entry_without_usage ~model ~ts ?provider () =
+  let extra_fields =
+    match provider with
+    | Some value -> [ ("provider", `String value) ]
+    | None -> []
+  in
+  `Assoc [
+    ("ts_unix", `Float ts);
+    ("tool_call_count", `Int 0);
+    ("tools_used", `List []);
+    ("telemetry", `Assoc ([
+      ("model_used", `String model);
+      ("fallback_applied", `Bool false);
+    ] @ extra_fields));
+  ]
+
 (* ── Tests ───────────────────────────────────────── *)
 
 let test_empty_dir () =
@@ -128,13 +144,18 @@ let test_single_model_success () =
     check int "entry_count" 2 s.entry_count;
     check int "success_count" 2 s.success_count;
     check int "error_count" 0 s.error_count;
-    check int "total_input_tokens" 350 s.total_input_tokens;
-    check int "total_output_tokens" 180 s.total_output_tokens;
+    check (option int) "total_input_tokens" (Some 350) s.total_input_tokens;
+    check (option int) "total_output_tokens" (Some 180) s.total_output_tokens;
+    check int "usage samples" 2 s.usage_sample_count;
+    check int "telemetry samples" 2 s.telemetry_sample_count;
     check int "total_tool_calls" 3 s.total_tool_calls;
-    check bool "cost > 0" true (s.total_cost_usd > 0.0);
+    check bool "cost > 0" true
+      (Option.value ~default:0.0 s.total_cost_usd > 0.0);
     check bool "avg_tool_calls > 0" true (s.avg_tool_calls_per_turn > 0.0);
-    check bool "latency > 0" true (s.avg_latency_ms > 0.0);
-    check bool "tok/s > 0" true (s.avg_tok_per_sec > 0.0))
+    check bool "latency > 0" true
+      (Option.value ~default:0.0 s.avg_latency_ms > 0.0);
+    check bool "tok/s > 0" true
+      (Option.value ~default:0.0 s.avg_tok_per_sec > 0.0))
 
 let test_error_turns_counted () =
   let base = test_dir () in
@@ -155,7 +176,10 @@ let test_error_turns_counted () =
     let em = Option.get error_model in
     check (option string) "error provider unresolved" None em.provider;
     check int "error_count" 1 em.error_count;
-    check int "success_count" 0 em.success_count)
+    check int "success_count" 0 em.success_count;
+    check (option (float 0.001)) "error model latency unknown" None em.avg_latency_ms;
+    check (option int) "error model input unknown" None em.total_input_tokens;
+    check (option (float 0.001)) "error model cost unknown" None em.total_cost_usd)
 
 let test_multi_model () =
   let base = test_dir () in
@@ -245,6 +269,8 @@ let test_json_roundtrip () =
     check bool "provider unresolved -> null" true
       (match m |> member "provider" with `Null -> true | _ -> false);
     check int "success_count" 1 (m |> member "success_count" |> to_int);
+    check int "usage_sample_count" 1
+      (m |> member "usage_sample_count" |> to_int);
     check bool "total_cost_usd = 0.05" true
       (Float.abs (m |> member "total_cost_usd" |> to_float) -. 0.05 < 0.001);
     check bool "has top_tools list" true
@@ -297,6 +323,37 @@ let test_prompt_tps_and_peak_memory_aggregates () =
       (recent |> member "prompt_tok_per_sec" |> to_float);
     check (float 0.001) "recent peak mem json" 20.25
       (recent |> member "peak_memory_gb" |> to_float))
+
+let test_missing_usage_serializes_unknowns () =
+  let base = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let path = make_keeper_dir base "missing_usage" in
+    let ts = now_unix () in
+    write_decisions path [
+      success_entry_without_usage ~model:"kimi-for-coding" ~ts:(ts -. 5.0)
+        ~provider:"kimi_cli" ();
+    ];
+    let agg = M.compute ~base_path:base ~window_minutes:60 in
+    let s = List.hd agg.models in
+    check int "success_count" 1 s.success_count;
+    check int "usage samples" 0 s.usage_sample_count;
+    check int "telemetry samples" 0 s.telemetry_sample_count;
+    check (option int) "input unknown" None s.total_input_tokens;
+    check (option (float 0.001)) "latency unknown" None s.avg_latency_ms;
+    check (option (float 0.001)) "cost unknown" None s.total_cost_usd;
+    let recent = List.hd s.recent_entries in
+    check (option int) "recent input unknown" None recent.re_input_tokens;
+    check (option (float 0.001)) "recent latency unknown" None recent.re_latency_ms;
+    let json = M.to_json agg in
+    let open Yojson.Safe.Util in
+    let m = json |> member "models" |> to_list |> List.hd in
+    check bool "json input null" true
+      (match m |> member "total_input_tokens" with `Null -> true | _ -> false);
+    check bool "json latency null" true
+      (match m |> member "avg_latency_ms" with `Null -> true | _ -> false);
+    let recent_json = m |> member "recent_entries" |> to_list |> List.hd in
+    check bool "recent json input null" true
+      (match recent_json |> member "input_tokens" with `Null -> true | _ -> false))
 
 (* ── thinking_fraction tests ─────────────────────── *)
 
@@ -454,10 +511,11 @@ let test_buckets_cache_hit_ratio_zero_denom () =
     check int "one model" 1 (List.length result);
     let m = List.hd result in
     let b = List.hd m.mb_buckets in
+    check bool "cache_hit_ratio present" true (Option.is_some b.b_cache_hit_ratio);
     check bool "cache_hit_ratio not NaN" true
-      (not (Float.is_nan b.b_cache_hit_ratio));
-    check (float 0.001) "cache_hit_ratio = 0.0 when both tokens=0"
-      0.0 b.b_cache_hit_ratio)
+      (not (Float.is_nan (Option.value ~default:0.0 b.b_cache_hit_ratio)));
+    check (option (float 0.001)) "cache_hit_ratio = 0.0 when both tokens=0"
+      (Some 0.0) b.b_cache_hit_ratio)
 
 let test_buckets_with_compute () =
   let dir = test_dir () in
@@ -489,6 +547,7 @@ let () =
       test_case "top tools per model" `Quick test_top_tools_per_model;
       test_case "recent entries capped" `Quick test_recent_entries;
       test_case "prompt tps and peak memory aggregates" `Quick test_prompt_tps_and_peak_memory_aggregates;
+      test_case "missing usage serializes unknowns" `Quick test_missing_usage_serializes_unknowns;
       test_case "json roundtrip" `Quick test_json_roundtrip;
     ];
     "thinking_fraction", [

@@ -123,23 +123,31 @@ let task_activities (config : Coord.config) : activity_item list =
             Log.Feed.warn "task activity JSON read failed for %s: %s" path msg;
             None
         | Ok json ->
-          let id = Safe_ops.json_string ~default:"" "id" json in
-          let status = Safe_ops.json_string ~default:"" "status" json in
-          let assignee = Safe_ops.json_string ~default:"" "assignee" json in
-          let title = Safe_ops.json_string ~default:"" "title" json in
-          let created_at_str = Safe_ops.json_string ~default:"" "created_at" json in
-          let created_at = parse_created_at_or_fallback ~kind:"task activity" ~path created_at_str in
-          let agent = if assignee <> "" then assignee else "system" in
-          let summary = Printf.sprintf "Task %s: %s (%s)" id title status in
-          if id = "" then None
-          else Some {
-            id = "act-task-" ^ id;
-            kind = "task";
-            agent_name = agent;
-            summary;
-            detail_json = json;
-            created_at;
-          })
+            let id = Safe_ops.json_string ~default:"" "id" json in
+            if id = "" then None
+            else
+              let status = Safe_ops.json_string ~default:"" "status" json in
+              let assignee = Safe_ops.json_string ~default:"" "assignee" json in
+              let title = Safe_ops.json_string ~default:"" "title" json in
+              let created_at_str =
+                Safe_ops.json_string ~default:"" "created_at" json
+              in
+              let created_at =
+                parse_created_at_or_fallback ~kind:"task activity" ~path
+                  created_at_str
+              in
+              let agent = if assignee <> "" then assignee else "system" in
+              let summary =
+                Printf.sprintf "Task %s: %s (%s)" id title status
+              in
+              Some {
+                id = "act-task-" ^ id;
+                kind = "task";
+                agent_name = agent;
+                summary;
+                detail_json = json;
+                created_at;
+              })
 
 (** Read board post activity from `.masc/board_posts.jsonl`. *)
 let board_post_activities (config : Coord.config) : activity_item list =

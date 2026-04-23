@@ -276,7 +276,7 @@ let pair_events rows : pair_result list =
         | Start s -> s.compaction_id
         | Complete c -> c.compaction_id
       in
-      let existing = try Hashtbl.find tbl id with Not_found -> [] in
+      let existing = Hashtbl.find_opt tbl id |> Option.value ~default:[] in
       Hashtbl.replace tbl id (r :: existing))
     rows;
   let out = ref [] in

@@ -334,7 +334,7 @@ let autoresearch_loops_csv ~(base_path : string) : string =
       ] ^ "\n"
     ) sorted
   in
-  headers ^ String.concat "" rows
+  List.fold_left (fun acc r -> acc ^ r) headers rows
 
 (** Build the loop detail JSON for GET /api/v1/autoresearch/loops/:loopId.
     Includes full cycle history. *)
@@ -649,8 +649,8 @@ let start_loop_json ~(base_path : string) ~(args : Yojson.Safe.t) :
   match result with
   | `Assoc fields when List.mem_assoc "error" fields ->
       let error_msg =
-        match List.assoc "error" fields with
-        | `String msg -> msg
+        match List.assoc_opt "error" fields with
+        | Some (`String msg) -> msg
         | _ -> "unknown error"
       in
       Error error_msg

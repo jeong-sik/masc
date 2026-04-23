@@ -59,17 +59,18 @@ let sweep_goals ~(config : sweep_config) (goals : Goal_store.goal list)
   let result =
     goals |> List.filter_map (fun (g : Goal_store.goal) ->
       let age = days_since_update g ~now in
-      match g.status, age with
-      | Goal_store.Dropped, Some d when d >= config.dropped_ttl_days ->
+      match g.phase, age with
+      | Goal_phase.Dropped, Some d when d >= config.dropped_ttl_days ->
         incr purged;
         Log.Misc.info "[GoalJanitor] purge: %s (%s, dropped %d days ago)"
           g.id g.title d;
         None
-      | Goal_store.Active, Some d when d >= config.stagnant_days ->
+      | Goal_phase.Executing, Some d when d >= config.stagnant_days ->
         incr stagnated;
         Log.Misc.info "[GoalJanitor] stagnate: %s (%s, no update for %d days)"
           g.id g.title d;
         Some { g with
+               phase = Goal_phase.Dropped;
                status = Goal_store.Dropped;
                last_review_note = Some (Printf.sprintf "auto-dropped: no update for %d days" d);
                last_review_at = Some iso_now;

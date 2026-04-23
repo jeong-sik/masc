@@ -57,8 +57,8 @@ let first_sentence (s : string) =
   let s = String.trim s in
   let max_len = 120 in
   let cut_at =
-    let period = try Some (String.index s '.') with Not_found -> None in
-    let newline = try Some (String.index s '\n') with Not_found -> None in
+    let period = String.index_opt s '.' in
+    let newline = String.index_opt s '\n' in
     match period, newline with
     | Some p, Some n -> Some (min p n + 1)
     | Some p, None -> Some (p + 1)

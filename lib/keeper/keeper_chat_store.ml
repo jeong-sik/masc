@@ -12,7 +12,7 @@ let sanitize_name name =
   Coord_utils_backend_setup.sanitize_namespace_segment name
 
 let chat_dir base_dir =
-  Filename.concat (Filename.concat base_dir ".masc") "keeper_chat"
+  Filename.concat (Common.masc_dir_from_base_path ~base_path:base_dir) "keeper_chat"
 
 let chat_path ~base_dir ~keeper_name =
   Filename.concat (chat_dir base_dir) (sanitize_name keeper_name ^ ".jsonl")

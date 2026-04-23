@@ -29,9 +29,6 @@ type snapshot = {
   waiters : waiter_info list;
 }
 
-exception Wait_timeout of int
-(** Raised when [with_permit] exceeds [wait_timeout_sec]. Carries [wait_ms]. *)
-
 val initial_max_concurrent_of_env : (string -> string option) -> int
 (** Resolve the startup queue capacity from environment variables.
 
@@ -45,11 +42,10 @@ val with_permit :
   keeper_name:string ->
   cascade_name:string ->
   (unit -> 'a) ->
-  'a
+  ('a, [> `Host_resource_saturated of string ]) result
 (** Acquire a permit, run [f], release permit on exit (normal or exception).
-    Blocks if at capacity unless [wait_timeout_sec] is reached.
-    Cancel-safe: Eio fiber cancellation releases the waiter from the queue
-    without leaking permits.
+    Returns [Error (`Host_resource_saturated msg)] if host FD count exceeds
+    the safety threshold. Otherwise returns [Ok (f ())].
 
     Emits Prometheus metrics via [Admission_queue_metrics] on
     enqueue/dequeue/acquire/release. *)
@@ -60,7 +56,7 @@ val try_with_permit :
   cascade_name:string ->
   (unit -> 'a) ->
   'a option
-(** Non-blocking variant. Returns [None] if queue is at capacity. *)
+(** Non-blocking variant. Returns [None] if host resources are saturated. *)
 
 val snapshot : unit -> snapshot
 (** Current queue state for observability. Non-blocking. *)

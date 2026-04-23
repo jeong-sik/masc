@@ -98,6 +98,11 @@ let make_config_root root =
   write_file (Filename.concat config "cascade.json") "{\"seed\":\"repo\"}";
   config
 
+let write_keeper_seed repo_root =
+  write_file
+    (Filename.concat repo_root "config/keepers/sangsu.toml")
+    "[keeper]\npersona_name = \"sangsu\"\n"
+
 let write_fake_eio_exe exe_path =
   mkdir_p (Filename.dirname exe_path);
   let content =
@@ -132,6 +137,7 @@ let setup_fake_repo root =
 let test_bootstraps_local_config_and_sets_http_only_env () =
   with_temp_dir "run-local-script" (fun dir ->
       let repo_root = setup_fake_repo dir in
+      write_keeper_seed repo_root;
       let target = Filename.concat dir "target" in
       mkdir_p target;
       let capture = Filename.concat dir "captured-env.txt" in
@@ -150,6 +156,9 @@ let test_bootstraps_local_config_and_sets_http_only_env () =
       let captured = read_file capture in
       check bool "bootstrapped cascade" true
         (Sys.file_exists (Filename.concat target_abs ".masc/config/cascade.json"));
+      check bool "bootstrapped keepers excluded by default" false
+        (Sys.file_exists
+           (Filename.concat target_abs ".masc/config/keepers/sangsu.toml"));
       check bool "base path set" true
         (contains_substring captured ("MASC_BASE_PATH=" ^ target_abs));
       check bool "config dir set" true
@@ -164,6 +173,28 @@ let test_bootstraps_local_config_and_sets_http_only_env () =
         (contains_substring captured "MASC_WEBRTC_ENABLED=0");
       check bool "port passed through" true
         (contains_substring captured "ARGS=--host=127.0.0.1 --port=9955"))
+
+let test_bootstrap_keepers_flag_is_opt_in () =
+  with_temp_dir "run-local-script" (fun dir ->
+      let repo_root = setup_fake_repo dir in
+      write_keeper_seed repo_root;
+      let target = Filename.concat dir "target" in
+      mkdir_p target;
+      let script = Filename.concat repo_root "scripts/run-local.sh" in
+      let code, stdout, stderr =
+        run_shell ~cwd:repo_root
+          ~unset_env:
+            [ "MASC_BASE_PATH"; "MASC_CONFIG_DIR"; "MASC_PERSONAS_DIR" ]
+          (Printf.sprintf "%s --target-dir %s --port 9956 --bootstrap-only --bootstrap-keepers"
+             (quote script) (quote target))
+      in
+      if code <> 0 then
+        failf "run-local bootstrap-keepers failed (%d)\nstdout:\n%s\nstderr:\n%s"
+          code stdout stderr;
+      check bool "bootstrapped keeper copied with flag" true
+        (Sys.file_exists (Filename.concat target ".masc/config/keepers/sangsu.toml"));
+      check bool "keepers included message" true
+        (contains_substring stderr "keepers included"))
 
 let test_print_port_is_stable_for_target_dir () =
   with_temp_dir "run-local-script" (fun dir ->
@@ -339,6 +370,8 @@ let () =
             test_print_port_is_stable_for_target_dir;
           test_case "build-dashboard flag is opt-in" `Quick
             test_build_dashboard_flag_is_opt_in;
+          test_case "bootstrap-keepers flag is opt-in" `Quick
+            test_bootstrap_keepers_flag_is_opt_in;
           test_case "existing target config is not overwritten" `Quick
             test_existing_target_config_is_not_overwritten;
           test_case "explicit config env is preserved without bootstrap" `Quick

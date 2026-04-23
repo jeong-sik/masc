@@ -32,10 +32,12 @@ let convergence_signal_to_yojson = function
           ("iterations_without_progress", `Int iterations_without_progress);
         ]
 
-(** A task belongs to a goal when its title contains the goal tag [goal:<id>]. *)
-let task_matches_goal ~goal_id (task : Types.task) =
-  let tag = Printf.sprintf "[goal:%s]" goal_id in
-  let title_lower = String.lowercase_ascii task.title in
+let goal_title_marker goal_id =
+  Printf.sprintf "[goal:%s]" goal_id
+
+let title_has_goal_marker ~goal_id title =
+  let tag = goal_title_marker goal_id in
+  let title_lower = String.lowercase_ascii title in
   let tag_lower = String.lowercase_ascii tag in
   (* Simple substring search *)
   let tag_len = String.length tag_lower in
@@ -48,6 +50,13 @@ let task_matches_goal ~goal_id (task : Types.task) =
         if String.sub title_lower i tag_len = tag_lower then found := true
     done;
     !found
+
+(** A task belongs to a goal when its structured goal_id matches or its title
+    carries the legacy [goal:<id>] marker. *)
+let task_matches_goal ~goal_id (task : Types.task) =
+  match task.goal_id with
+  | Some linked_goal_id -> String.equal linked_goal_id goal_id
+  | None -> title_has_goal_marker ~goal_id task.title
 
 let is_terminal (task : Types.task) =
   Types.task_status_is_terminal task.task_status

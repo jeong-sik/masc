@@ -75,6 +75,17 @@ let contains_substring haystack needle =
   in
   needle_len = 0 || loop 0
 
+let substring_index haystack needle =
+  let hay_len = String.length haystack in
+  let needle_len = String.length needle in
+  let rec loop i =
+    if needle_len = 0 then Some 0
+    else if i + needle_len > hay_len then None
+    else if String.sub haystack i needle_len = needle then Some i
+    else loop (i + 1)
+  in
+  loop 0
+
 let source_file_contains file_rel needle =
   let path = Filename.concat (repo_root ()) file_rel in
   let ic = open_in path in
@@ -264,7 +275,38 @@ let test_collect_board_events_keeps_non_mentions_as_followup_signal () =
           ~continuity_summary:"goal test-keeper"
           ~meta:minimal_meta
       in
-      check int "keeps non-mention events" 1 (List.length events);
+      check int "default keepers ignore unmatched non-mention events" 0
+        (List.length events);
+      check int "new count includes non-mention" 1 new_count;
+      check int "mention count stays zero" 0 mention_count)
+
+let test_collect_board_events_keeps_non_mentions_for_room_signal_keepers () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Unix.putenv "MASC_BASE_PATH" base_dir;
+      Masc_mcp.Board.reset_global_for_test ();
+      Masc_mcp.Board_dispatch.reset_for_test ();
+      Masc_mcp.Board_dispatch.init_jsonl ();
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
+      (match
+         Masc_mcp.Board_dispatch.create_post ~author:"alice"
+           ~title:"General update" ~content:"No direct mention here"
+           ~post_kind:Masc_mcp.Board.Human_post ()
+       with
+      | Ok _ -> ()
+      | Error e -> fail ("create_post failed: " ^ Masc_mcp.Board.show_board_error e));
+      let events, new_count, mention_count =
+        WO.collect_board_events ~base_path:base_dir
+          ~continuity_summary:"goal test-keeper"
+          ~meta:room_signal_meta
+      in
+      check int "room-signal keepers keep non-mention events" 1
+        (List.length events);
       check int "new count includes non-mention" 1 new_count;
       check int "mention count stays zero" 0 mention_count;
       check bool "event is not explicit mention" false
@@ -322,6 +364,46 @@ let test_collect_board_events_keeps_external_replies_after_self_comment () =
           check string "latest external author" "bob"
             (Option.value ~default:"" event.latest_external_author)
       | _ -> fail "expected one follow-up board event")
+
+let test_observe_ignores_scope_messages_without_room_signal_opt_in () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Unix.putenv "MASC_BASE_PATH" base_dir;
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
+      ignore (Masc_mcp.Coord.broadcast config ~from_agent:"alice" ~content:"general room update");
+      let meta = { minimal_meta with joined_room_ids = [ "default" ] } in
+      let obs =
+        WO.observe ~pending_board_events:(Some [])
+          ~config ~meta
+      in
+      check int "mentions stay empty" 0 (List.length obs.pending_mentions);
+      check int "scope messages stay empty" 0
+        (List.length obs.pending_scope_messages))
+
+let test_observe_collects_scope_messages_for_room_signal_keepers () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Unix.putenv "MASC_BASE_PATH" base_dir;
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
+      ignore (Masc_mcp.Coord.broadcast config ~from_agent:"alice" ~content:"general room update");
+      let meta = { room_signal_meta with joined_room_ids = [ "default" ] } in
+      let obs =
+        WO.observe ~pending_board_events:(Some [])
+          ~config ~meta
+      in
+      check int "mentions stay empty" 0 (List.length obs.pending_mentions);
+      check bool "scope messages collected" true
+        (List.length obs.pending_scope_messages >= 1))
 
 let test_scheduled_turn_uses_cooldown_only () =
   let meta =
@@ -1037,6 +1119,38 @@ let test_prompt_includes_worktree_delta () =
        with Not_found -> false
      in found)
 
+let test_prompt_orders_stable_sections_before_reactive_sections () =
+  let obs =
+    {
+      base_observation with
+      active_goals = [ "goal-abc" ];
+      continuity_summary =
+        "Goal: structural quality improvement\nNext: verify latest runtime state";
+      pending_mentions = [ ("alice", "hello keeper") ];
+      pending_board_events = [ sample_board_event ];
+      worktree_change_summary =
+        Some "<git_status_change>\n M lib/example.ml\n</git_status_change>";
+      context_ratio = 0.42;
+      idle_seconds = 45;
+      unclaimed_task_count = 2;
+      active_agent_count = 3;
+    }
+  in
+  let _sys, user =
+    UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:obs ()
+  in
+  let idx needle =
+    match substring_index user needle with
+    | Some i -> i
+    | None -> fail ("missing section: " ^ needle)
+  in
+  check bool "active goals precede pending mentions" true
+    (idx "### Active Goals" < idx "### Pending Mentions");
+  check bool "continuity precedes board activity" true
+    (idx "### Continuity" < idx "### Board Activity");
+  check bool "context precedes live worktree delta" true
+    (idx "### Context" < idx "### Live Worktree Delta")
+
 let test_prompt_room_state_section () =
   let obs =
     { base_observation with
@@ -1222,6 +1336,7 @@ let sample_tool_surface_metrics () : Masc_mcp.Keeper_agent_run.tool_surface_metr
     approval_mode_derived = false;
   }
 let make_run_result ~text ~tools ~model ~input_tok ~output_tok
+    ?(usage_reported = true)
     ?(tool_calls = [])
     ?trace_ref
     ?run_validation
@@ -1236,6 +1351,7 @@ let make_run_result ~text ~tools ~model ~input_tok ~output_tok
     turn_count = 1;
     tool_calls_made = List.length tools;
     usage = { input_tokens = input_tok; output_tokens = output_tok; cache_creation_input_tokens = 0; cache_read_input_tokens = 0; cost_usd = None };
+    usage_reported;
     tools_used = tools;
     tool_calls;
     checkpoint = None;
@@ -1879,6 +1995,71 @@ let test_append_metrics_snapshot_treats_validated_evidence_as_tool_use () =
         Yojson.Safe.Util.(
           json |> member "scheduled_autonomous_outcome" |> to_string))
 
+let test_append_metrics_snapshot_nulls_unreported_usage () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      let result =
+        make_run_result
+          ~text:"Kimi replied without usage."
+          ~tools:[]
+          ~model:"kimi_cli:kimi-for-coding"
+          ~input_tok:0
+          ~output_tok:0
+          ~usage_reported:false
+          ()
+      in
+      UM.append_metrics_snapshot
+        ~config
+        ~meta:minimal_meta
+        ~observation:base_observation
+        ~result
+        ~latency_ms:321
+        ~turn_cost:0.42
+        ~turn_generation:1
+        ~channel:"turn"
+        ~snapshot_source:"test"
+        ~context_ratio:0.1
+        ~context_tokens:10
+        ~context_max:100
+        ~message_count:2
+        ~compaction:
+          {
+            Masc_mcp.Keeper_exec_context.applied = false;
+            attempted = false;
+            failure_reason = None;
+            trigger = None;
+            decision = "no_compaction";
+            before_tokens = 0;
+            after_tokens = 0;
+            saved_tokens = 0;
+          }
+        ~handoff_json:None
+        ();
+      let metrics_store =
+        Masc_mcp.Keeper_types.keeper_metrics_store config minimal_meta.name
+      in
+      let line =
+        match Dated_jsonl.read_recent_lines metrics_store 1 with
+        | [ line ] -> line
+        | _ -> fail "expected one metrics line"
+      in
+      let json = Yojson.Safe.from_string line in
+      let open Yojson.Safe.Util in
+      let usage = json |> member "usage" in
+      check bool "snapshot input_tokens null when usage unreported" true
+        (match usage |> member "input_tokens" with `Null -> true | _ -> false);
+      check bool "snapshot output_tokens null when usage unreported" true
+        (match usage |> member "output_tokens" with `Null -> true | _ -> false);
+      check bool "snapshot total_tokens null when usage unreported" true
+        (match usage |> member "total_tokens" with `Null -> true | _ -> false);
+      check bool "snapshot cost_usd null when usage unreported" true
+        (match json |> member "cost_usd" with `Null -> true | _ -> false))
+
 let test_append_decision_record_persists_tool_calls () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1981,6 +2162,50 @@ let test_append_decision_record_persists_tool_calls () =
         Yojson.Safe.Util.(List.nth recorded_tool_calls 1 |> member "outcome" |> to_string);
       check (float 0.001) "second latency" 3.0
         Yojson.Safe.Util.(List.nth recorded_tool_calls 1 |> member "latency_ms" |> to_float))
+
+let test_append_decision_record_nulls_unreported_usage () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
+      let result =
+        make_run_result
+          ~text:"Kimi replied without usage."
+          ~tools:[]
+          ~model:"kimi_cli:kimi-for-coding"
+          ~input_tok:0
+          ~output_tok:0
+          ~usage_reported:false
+          ()
+      in
+      UM.append_decision_record
+        ~config
+        ~meta:minimal_meta
+        ~observation:base_observation
+        ~latency_ms:420
+        ~outcome:"normal"
+        ~selected_mode:"normal"
+        ~result:(Some result)
+        ();
+      let json =
+        read_jsonl_line (Keeper_types.keeper_decision_log_path config minimal_meta.name)
+      in
+      let open Yojson.Safe.Util in
+      let telemetry = json |> member "telemetry" in
+      check bool "input_tokens null when usage unreported" true
+        (match telemetry |> member "input_tokens" with `Null -> true | _ -> false);
+      check bool "output_tokens null when usage unreported" true
+        (match telemetry |> member "output_tokens" with `Null -> true | _ -> false);
+      check bool "cache_read_tokens null when usage unreported" true
+        (match telemetry |> member "cache_read_tokens" with `Null -> true | _ -> false);
+      check bool "cost_usd null when usage unreported" true
+        (match telemetry |> member "cost_usd" with `Null -> true | _ -> false);
+      check bool "tokens_per_second null when usage unreported" true
+        (match telemetry |> member "tokens_per_second" with `Null -> true | _ -> false))
 
 let test_run_keeper_cycle_skips_non_executable_phase () =
   Eio_main.run @@ fun env ->
@@ -2782,7 +3007,7 @@ let test_cascade_exhausted_error_detected_from_structured_internal_error () =
       (Masc_mcp.Oas_worker_named.Cascade_exhausted
          {
            cascade_name = Masc_mcp.Keeper_config.default_cascade_name;
-           reason = Keeper_types.All_providers_failed;
+           reason = Masc_mcp.Keeper_types.All_providers_failed;
          })
   in
   check bool "structured cascade exhausted error detected" true
@@ -2842,6 +3067,34 @@ let test_auto_recoverable_turn_error_includes_filtered_candidates_cascade_exhaus
   in
   check bool "filtered candidates cascade exhaustion is auto-recoverable" true
     (EC.is_auto_recoverable_turn_error err)
+
+let test_auto_recoverable_turn_error_includes_resumable_cli_session_error () =
+  let err =
+    Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
+      (Masc_mcp.Oas_worker_named.Resumable_cli_session
+         {
+           cascade_name = "kimi_cli_keeper";
+           detail =
+             "kimi exited with code 75: \nTo resume this session: kimi -r ff37febe-2adb-4ac6-9dc6-cae23e672fbc";
+           exit_code = Some 75;
+         })
+  in
+  check bool "resumable CLI session error is auto-recoverable" true
+    (EC.is_auto_recoverable_turn_error err)
+
+let test_cascade_exhausted_error_includes_resumable_cli_session_error () =
+  let err =
+    Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
+      (Masc_mcp.Oas_worker_named.Resumable_cli_session
+         {
+           cascade_name = "kimi_cli_keeper";
+           detail =
+             "kimi exited with code 75: \nTo resume this session: kimi -r ff37febe-2adb-4ac6-9dc6-cae23e672fbc";
+           exit_code = Some 75;
+         })
+  in
+  check bool "resumable CLI session error is treated as cascade exhaustion surface" true
+    (EC.is_cascade_exhausted_error err)
 
 let test_bounded_oas_timeout_uses_adaptive_when_budget_is_large () =
   let expected =
@@ -3884,10 +4137,16 @@ let () =
           test_case "with mentions" `Quick test_observation_with_mentions;
           test_case "uses precollected board events" `Quick
             test_observe_uses_precollected_board_events;
-          test_case "keeps non-mention board events as follow-up signal" `Quick
+          test_case "default keepers ignore unmatched non-mention board events" `Quick
             test_collect_board_events_keeps_non_mentions_as_followup_signal;
+          test_case "room-signal keepers keep unmatched non-mention board events" `Quick
+            test_collect_board_events_keeps_non_mentions_for_room_signal_keepers;
           test_case "keeps external replies after self comment" `Quick
             test_collect_board_events_keeps_external_replies_after_self_comment;
+          test_case "default keepers ignore scope messages" `Quick
+            test_observe_ignores_scope_messages_without_room_signal_opt_in;
+          test_case "room-signal keepers collect scope messages" `Quick
+            test_observe_collects_scope_messages_for_room_signal_keepers;
           test_case "scheduled turn uses cooldown only when work exists" `Quick
             test_scheduled_turn_uses_cooldown_only;
           test_case "scheduled turn skips without structured work signal" `Quick
@@ -3967,6 +4226,8 @@ let () =
           test_case "frugal economy" `Quick test_prompt_frugal_economy;
           test_case "hustle economy" `Quick test_prompt_hustle_economy;
           test_case "includes worktree delta" `Quick test_prompt_includes_worktree_delta;
+          test_case "orders stable sections before reactive sections" `Quick
+            test_prompt_orders_stable_sections_before_reactive_sections;
           test_case "room state section" `Quick test_prompt_room_state_section;
           test_case "claim first guidance" `Quick
             test_prompt_includes_claim_first_guidance;
@@ -4040,8 +4301,12 @@ let () =
             test_append_metrics_snapshot_includes_cascade_observation;
           test_case "snapshot treats validated evidence as tool use" `Quick
             test_append_metrics_snapshot_treats_validated_evidence_as_tool_use;
+          test_case "snapshot nulls unreported usage" `Quick
+            test_append_metrics_snapshot_nulls_unreported_usage;
           test_case "decision record persists tool call details" `Quick
             test_append_decision_record_persists_tool_calls;
+          test_case "decision record nulls unreported usage" `Quick
+            test_append_decision_record_nulls_unreported_usage;
           test_case "social fields" `Quick
             test_metrics_persist_social_state_fields;
           test_case "failure response" `Quick test_metrics_failure_response;
@@ -4233,6 +4498,10 @@ let () =
             test_auto_recoverable_turn_error_includes_wrapped_cascade_exhausted_hard_quota;
           test_case "auto-recoverable includes filtered candidates cascade exhaustion" `Quick
             test_auto_recoverable_turn_error_includes_filtered_candidates_cascade_exhaustion;
+          test_case "auto-recoverable includes resumable CLI session error" `Quick
+            test_auto_recoverable_turn_error_includes_resumable_cli_session_error;
+          test_case "cascade exhausted surface includes resumable CLI session error" `Quick
+            test_cascade_exhausted_error_includes_resumable_cli_session_error;
           test_case "bounded OAS timeout keeps adaptive timeout under full budget" `Quick
             test_bounded_oas_timeout_uses_adaptive_when_budget_is_large;
           test_case "bounded OAS timeout caps to remaining turn budget" `Quick

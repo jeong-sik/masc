@@ -224,9 +224,9 @@ let command_blocked_hint name =
   let looks_like_source_code s =
     (* Contains '.' at a non-boundary position (A.B), or starts with a
        reserved OCaml keyword that no shell command uses. *)
-    (String.contains s '.'
-     && (String.index s '.' > 0)
-     && (String.index s '.' < String.length s - 1))
+    (match String.index_opt s '.' with
+     | Some i -> i > 0 && i < String.length s - 1
+     | None -> false)
     || List.mem s
          [ "let"; "match"; "if"; "then"; "else"; "fun"; "rec"; "in";
            "module"; "open"; "type"; "def"; "class"; "import"; "from" ]
@@ -950,7 +950,7 @@ let make_shell_exec_with_allowlist ~workdir ~on_exec ~proc_mgr ~clock ~allowed_c
                         Eio.Flow.copy stdout_r (Eio.Flow.buffer_sink buf);
                         Eio.Flow.close stdout_r
                       with Eio.Cancel.Cancelled _ as e ->
-                        (try Eio.Flow.close stdout_r with _ -> ());
+                        (try Eio.Flow.close stdout_r with Eio.Cancel.Cancelled _ as ce -> raise ce | _ -> ());
                         raise e);
                      let status = Eio.Process.await proc in
                      (status, Buffer.contents buf))

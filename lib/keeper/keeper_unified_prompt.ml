@@ -231,29 +231,17 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
      removed in #6814; telemetry preserved in decision_audit and independent paths. *)
   let ubuf = Buffer.create 1024 in
   Buffer.add_string ubuf "## Current World State\n\n";
-  (* 1. Pending mentions — reactive trigger *)
-  if observation.pending_mentions <> [] then (
-    Buffer.add_string ubuf
-      (Printf.sprintf "### Pending Mentions (%d)\n"
-         (List.length observation.pending_mentions));
-    Buffer.add_string ubuf (format_mentions observation.pending_mentions);
-    Buffer.add_string ubuf "\n\n");
-  (* 2. Scope messages — reactive trigger *)
-  if observation.pending_scope_messages <> [] then (
-    Buffer.add_string ubuf
-      (Printf.sprintf "### Scope Messages (%d recent)\n"
-         (List.length observation.pending_scope_messages));
-    Buffer.add_string ubuf
-      (format_scope_messages observation.pending_scope_messages);
-    Buffer.add_string ubuf "\n\n");
-  (* 3. Active goals — turn context *)
+  (* Prefix-cache ordering: emit larger, more stable sections first so
+     providers can reuse a longer shared prefix across cycles. Highly
+     volatile reactive signals stay later in the same user message. *)
+  (* 1. Active goals — stable turn context *)
   if observation.active_goals <> [] then (
     Buffer.add_string ubuf
       (Printf.sprintf "### Active Goals (%d)\n"
          (List.length observation.active_goals));
     Buffer.add_string ubuf (format_goals observation.active_goals);
     Buffer.add_string ubuf "\n\n");
-  (* 4. Namespace state — minimal counts *)
+  (* 2. Namespace state — usually lower churn than inbox/board detail *)
   if
     observation.unclaimed_task_count > 0
     || observation.failed_task_count > 0
@@ -270,24 +258,7 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
     Buffer.add_string ubuf
       (Printf.sprintf "- Active agents: %d\n" observation.active_agent_count);
     Buffer.add_string ubuf "\n");
-  if show_claim_guidance then (
-    Buffer.add_string ubuf "### Immediate Task Move\n";
-    Buffer.add_string ubuf
-      "- Call keeper_task_claim with {} to claim the next eligible unclaimed task.\n";
-    Buffer.add_string ubuf
-      "- Do not wait for keeper_tasks_list unless the claim call says no eligible task.\n";
-    Buffer.add_string ubuf
-      "- Prefer keeper_task_claim before keeper_board_list or keeper_shell when you have no claimed task.\n";
-    Buffer.add_string ubuf
-      "- If you need keeper_shell op=gh, claim first so gh can derive repo context from your active task worktree/current_task_id.\n\n");
-  (* 5. Board activity — reactive trigger *)
-  if observation.pending_board_events <> [] then (
-    Buffer.add_string ubuf
-      (Printf.sprintf "### Board Activity (%d new)\n"
-         (List.length observation.pending_board_events));
-    Buffer.add_string ubuf (format_board_events observation.pending_board_events);
-    Buffer.add_string ubuf "\n\n");
-  (* 6. Context health — resource awareness *)
+  (* 3. Context health — stable resource framing *)
   Buffer.add_string ubuf
     (Printf.sprintf "### Context\n- Utilization: %.0f%%\n- Idle: %ds\n"
        (observation.context_ratio *. 100.0)
@@ -304,7 +275,7 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
    | Hustle ->
         Buffer.add_string ubuf
           "- Economy: Hustle (minimize actions, conserve budget)\n");
-  (* 7. Autonomous trigger — why this turn was scheduled *)
+  (* 4. Autonomous trigger — lower churn than reactive inboxes *)
   let turn_decision =
     Keeper_world_observation.keeper_cycle_decision ~meta observation
   in
@@ -315,7 +286,8 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
     Buffer.add_string ubuf "\n### Autonomous Trigger\n";
     Buffer.add_string ubuf (String.concat "\n" autonomous_trigger);
     Buffer.add_string ubuf "\n");
-  (* 8. Continuity — state across turns.
+  (* 5. Continuity — usually large and moderately stable, so keep it
+     before highly volatile reactive sections for better prefix reuse.
      Inject only forward-looking fields (Goal, Next plan, Next, OpenQuestions,
      Constraints). Backward-looking fields (Done, Progress, Decisions) are
      stripped to avoid a prose-level echo loop where the LLM re-reads its own
@@ -336,7 +308,40 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
       "- If this turn was still scheduled or backlog/worktree signals remain, investigate that mismatch instead of echoing the prior idle conclusion.\n";
     Buffer.add_string ubuf continuity_for_prompt;
     Buffer.add_string ubuf "\n");
-  (* 9. Live worktree delta — actionable change signal *)
+  (* 6. Pending mentions — reactive trigger *)
+  if observation.pending_mentions <> [] then (
+    Buffer.add_string ubuf
+      (Printf.sprintf "### Pending Mentions (%d)\n"
+         (List.length observation.pending_mentions));
+    Buffer.add_string ubuf (format_mentions observation.pending_mentions);
+    Buffer.add_string ubuf "\n\n");
+  (* 7. Scope messages — reactive trigger *)
+  if observation.pending_scope_messages <> [] then (
+    Buffer.add_string ubuf
+      (Printf.sprintf "### Scope Messages (%d recent)\n"
+         (List.length observation.pending_scope_messages));
+    Buffer.add_string ubuf
+      (format_scope_messages observation.pending_scope_messages);
+    Buffer.add_string ubuf "\n\n");
+  (* 8. Immediate task move — reactive operational guidance *)
+  if show_claim_guidance then (
+    Buffer.add_string ubuf "### Immediate Task Move\n";
+    Buffer.add_string ubuf
+      "- Call keeper_task_claim with {} to claim the next eligible unclaimed task.\n";
+    Buffer.add_string ubuf
+      "- Do not wait for keeper_tasks_list unless the claim call says no eligible task.\n";
+    Buffer.add_string ubuf
+      "- Prefer keeper_task_claim before keeper_board_list or keeper_shell when you have no claimed task.\n";
+    Buffer.add_string ubuf
+      "- If you need keeper_shell op=gh, claim first so gh can derive repo context from your active task worktree/current_task_id.\n\n");
+  (* 9. Board activity — reactive trigger *)
+  if observation.pending_board_events <> [] then (
+    Buffer.add_string ubuf
+      (Printf.sprintf "### Board Activity (%d new)\n"
+         (List.length observation.pending_board_events));
+    Buffer.add_string ubuf (format_board_events observation.pending_board_events);
+    Buffer.add_string ubuf "\n\n");
+  (* 10. Live worktree delta — actionable change signal *)
   (match observation.worktree_change_summary with
    | Some summary when String.trim summary <> "" ->
        Buffer.add_string ubuf "\n### Live Worktree Delta\n";

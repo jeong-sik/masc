@@ -135,6 +135,11 @@ type snapshot = {
   run_id : string;
   ts : float;
   ksm_phase : ksm_phase;
+  collapsed_from : Keeper_state_machine.phase option;
+      (** Raw keeper phase collapsed into [Ksm_stable], when applicable.
+          [None] for active composite phases or older payload readers.
+          Lets operator surfaces distinguish "quiet" from terminal or
+          operator-paused raw phases without widening the composite enum. *)
   ktc_turn_phase : turn_phase;
   kdp_decision : decision_stage;
   kcl_cascade_state : cascade_state;

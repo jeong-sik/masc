@@ -9,12 +9,12 @@
 type recent_entry = {
   re_ts_unix : float;
   re_provider : string option;
-  re_input_tokens : int;
-  re_output_tokens : int;
-  re_latency_ms : float;
+  re_input_tokens : int option;
+  re_output_tokens : int option;
+  re_latency_ms : float option;
   re_prompt_tok_per_sec : float option;
   re_peak_memory_gb : float option;
-  re_cost_usd : float;
+  re_cost_usd : float option;
   re_tools_count : int;
 }
 
@@ -24,14 +24,15 @@ type bucket_metric = {
   b_entry_count : int;
   b_success_count : int;
   b_error_count : int;
-  b_p50_latency_ms : float;
-  b_p95_latency_ms : float;
+  b_p50_latency_ms : float option;
+  b_p95_latency_ms : float option;
   b_error_rate : float;
     (** error_count / entry_count; 0.0 when bucket is empty. *)
-  b_total_cost_usd : float;
-  b_cache_hit_ratio : float;
-    (** cache_read_tokens / (cache_read_tokens + input_tokens); 0.0 when
-        denominator is zero (do not return NaN). *)
+  b_total_cost_usd : float option;
+  b_cache_hit_ratio : float option;
+    (** cache_read_tokens / (cache_read_tokens + input_tokens); [Some 0.0]
+        when the denominator is explicitly zero, [None] when no bucket entry
+        reported either field. *)
 }
 
 type model_bucketed = {
@@ -44,9 +45,9 @@ type model_stats = {
   model_id : string;
   provider : string option;
   entry_count : int;
-  avg_tok_per_sec : float;
-  p50_tok_per_sec : float;
-  p95_tok_per_sec : float;
+  avg_tok_per_sec : float option;
+  p50_tok_per_sec : float option;
+  p95_tok_per_sec : float option;
   prompt_avg_tok_per_sec : float option;
   prompt_p50_tok_per_sec : float option;
   prompt_p95_tok_per_sec : float option;
@@ -60,17 +61,19 @@ type model_stats = {
         [None] when no entry in the window reported [thinking_enabled]
         (older jsonl rows predating the field, or providers that don't
         expose it). Denominator = count of reporting entries. *)
-  avg_latency_ms : float;
-  p50_latency_ms : float;
-  p95_latency_ms : float;
-  total_input_tokens : int;
-  total_output_tokens : int;
-  total_cache_read_tokens : int;
-  total_reasoning_tokens : int;
+  avg_latency_ms : float option;
+  p50_latency_ms : float option;
+  p95_latency_ms : float option;
+  total_input_tokens : int option;
+  total_output_tokens : int option;
+  total_cache_read_tokens : int option;
+  total_reasoning_tokens : int option;
+  usage_sample_count : int;
+  telemetry_sample_count : int;
   fallback_count : int;
   success_count : int;
   error_count : int;
-  total_cost_usd : float;
+  total_cost_usd : float option;
   avg_tool_calls_per_turn : float;
   total_tool_calls : int;
   top_tools : (string * int) list;

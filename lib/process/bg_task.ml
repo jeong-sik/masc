@@ -89,16 +89,15 @@ let rec ensure_dir path =
   end
 
 let try_write_pid_file path ~pid ~pgid ~started_at =
-  try
+  Safe_ops.protect ~default:() (fun () ->
     ensure_dir (Filename.dirname path);
     let oc = open_out_gen [ Open_wronly; Open_creat; Open_trunc ] 0o644 path in
     Printf.fprintf oc "%d\n%d\n%f\n" pid pgid started_at;
-    close_out oc
-  with _ -> ()
+    close_out_noerr oc)
 
 let try_delete_pid_file = function
   | None -> ()
-  | Some path -> (try Unix.unlink path with _ -> ())
+  | Some path -> Safe_ops.protect ~default:() (fun () -> Unix.unlink path)
 
 let registry : (string, state) Hashtbl.t = Hashtbl.create 16
 let registry_mu = Mutex.create ()
@@ -118,7 +117,7 @@ let fresh_id () =
       !id_counter
       (Unix.getpid ()))
 
-let try_set_nonblock fd = try Unix.set_nonblock fd with _ -> ()
+let try_set_nonblock fd = Safe_ops.protect ~default:() (fun () -> Unix.set_nonblock fd)
 
 (* [drain_fd_to_buf buf fd] reads every byte currently available on
    [fd] without blocking. Returns [true] if EOF was observed. *)
@@ -126,10 +125,9 @@ let drain_fd_to_buf buf fd =
   let chunk = Bytes.create 4096 in
   let rec loop () =
     let readable =
-      try
+      Safe_ops.protect ~default:[] (fun () ->
         let r, _, _ = Unix.select [ fd ] [] [] 0.0 in
-        r
-      with _ -> []
+        r)
     in
     if readable = [] then false
     else
@@ -177,8 +175,8 @@ let poll_state st =
     end;
     if st.status <> None && st.stdout_eof && st.stderr_eof then begin
       st.closed <- true;
-      (try Unix.close st.handle.stdout_fd with _ -> ());
-      (try Unix.close st.handle.stderr_fd with _ -> ());
+      Safe_ops.protect ~default:() (fun () -> Unix.close st.handle.stdout_fd);
+      Safe_ops.protect ~default:() (fun () -> Unix.close st.handle.stderr_fd);
       try_delete_pid_file st.pid_file
     end
   end
@@ -274,18 +272,19 @@ let list_with_started_at ~keeper =
 (* Directory walk helpers — avoid Filename.Infix / extra deps. *)
 
 let safe_readdir dir =
-  try Array.to_list (Sys.readdir dir) with _ -> []
+  Safe_ops.protect ~default:[] (fun () -> Array.to_list (Sys.readdir dir))
 
-let is_dir p = try Sys.is_directory p with _ -> false
+let is_dir p = Safe_ops.protect ~default:false (fun () -> Sys.is_directory p)
 
 let read_pid_file path =
-  try
+  Safe_ops.protect ~default:None (fun () ->
     let ic = open_in path in
     Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
-      let pid = int_of_string (String.trim (input_line ic)) in
-      let pgid = int_of_string (String.trim (input_line ic)) in
-      Some (pid, pgid))
-  with _ -> None
+      match int_of_string_opt (String.trim (input_line ic)),
+            int_of_string_opt (String.trim (input_line ic))
+      with
+      | Some pid, Some pgid -> Some (pid, pgid)
+      | _ -> None))
 
 let pid_is_live pid =
   try Unix.kill pid 0; true
@@ -332,7 +331,7 @@ let reap_orphans ~base_path =
                      Process_eio.tree_kill ~pgid
                        ~signal:Sys.sigterm ~grace_sec:1.0
                  | _ -> ());
-                (try Unix.unlink path with _ -> ());
+                Safe_ops.protect ~default:() (fun () -> Unix.unlink path);
                 incr reaped
               end
             end)

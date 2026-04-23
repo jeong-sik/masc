@@ -98,7 +98,7 @@ let warm_execution_cache () =
 
 let warm_meta_cognition_summary (config : Lib.Coord.config) =
   let key =
-    Lib.Server_dashboard_http.room_scoped_cache_key config
+    Lib.Server_dashboard_http.dashboard_cache_key config
       "meta_cognition_summary" "dashboard_shell"
   in
   ignore

@@ -576,7 +576,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
 (** Canonical TOML key names recognized by [profile_defaults_of_toml].
     Keys outside this set under [[keeper]] (or any other table) are silently
     ignored by the loader, which historically let dead config accumulate
-    (e.g. legacy [room_scope], [scope_kind]).  [warn_unknown_keeper_toml_keys]
+    (e.g. legacy [legacy_scope], [scope_kind]).  [warn_unknown_keeper_toml_keys]
     uses this list to surface drift on boot, symmetric with
     [warn_unknown_keeper_meta_keys] on the JSON side. *)
 let canonical_keeper_toml_key_names =

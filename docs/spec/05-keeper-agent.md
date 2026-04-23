@@ -148,7 +148,7 @@ type session_context = {
 
 ### 3.4 Coordination Boundary
 
-Legacy `room_scope` typed aliases were removed during single-room flattening.
+Legacy room-targeting typed aliases were removed during single-room flattening.
 JSON/MCP 경계에는 `mention_targets`, `joined_room_ids` 같은 coordination 값만 남고, 별도 scope enum은 더 이상 유지하지 않는다.
 `policy_mode`, `policy_shell_mode`, `trigger_mode`, `initiative_*`는 제거되었다.
 

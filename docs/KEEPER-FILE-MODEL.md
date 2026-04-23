@@ -219,10 +219,10 @@ Definitive list: `removed_keeper_input_key_names` in [`lib/keeper/keeper_config.
 Keys under `[keeper]` that are neither canonical (above) nor hard-rejected are **silently ignored by the loader, but a warning is emitted**:
 
 ```text
-keeper TOML <path> has unknown keys: keeper.room_scope, keeper.scope_kind
+keeper TOML <path> has unknown keys: keeper.legacy_scope, keeper.scope_kind
 ```
 
-Historically, dead config like `room_scope` and `scope_kind` accumulated here. Treat these warnings as drift signals and clean up the TOML. The warning does not block boot.
+Historically, dead config like `legacy_scope` and `scope_kind` accumulated here. Treat these warnings as drift signals and clean up the TOML. The warning does not block boot.
 
 Definitive canonical list: `canonical_keeper_toml_key_names` in [`lib/keeper/keeper_types_profile.ml`](../lib/keeper/keeper_types_profile.ml).
 

@@ -69,11 +69,11 @@ let with_dashboard_timeout ~clock compute =
         ("generated_at", `String (Types.now_iso ()));
       ]
 
-let room_scope_cache_segment (_config : Coord.config) = "default"
+let cache_partition_segment (_config : Coord.config) = "default"
 
-let room_scoped_cache_key (config : Coord.config) prefix suffix =
+let dashboard_cache_key (config : Coord.config) prefix suffix =
   Printf.sprintf "%s:%s:%s:%s" prefix config.base_path
-    (room_scope_cache_segment config) suffix
+    (cache_partition_segment config) suffix
 
 let dashboard_mission_timeout_s = 25.0
 
@@ -628,7 +628,7 @@ let dashboard_mission_http_json ~state ~sw ~clock request =
     | Some _ ->
       (* Actor-parameterized: on-demand with SWR cache. *)
       let cache_key =
-        room_scoped_cache_key state.Mcp_server.room_config "mission"
+        dashboard_cache_key state.Mcp_server.room_config "mission"
           (Option.value ~default:"" actor)
       in
       Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:120.0
@@ -667,7 +667,7 @@ let dashboard_mission_briefing_http_json ~state ~sw ~clock request =
   if force then with_dashboard_timeout ~clock compute
   else
     let cache_key =
-      room_scoped_cache_key state.Mcp_server.room_config "mission_briefing"
+      dashboard_cache_key state.Mcp_server.room_config "mission_briefing"
         (Option.value ~default:"" actor)
     in
     Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:5.0
@@ -807,7 +807,7 @@ let dashboard_shell_cache_key (config : Coord.config) =
     config.workspace_path
 
 let meta_cognition_summary_key (config : Coord.config) =
-  room_scoped_cache_key config "meta_cognition_summary" "dashboard_shell"
+  dashboard_cache_key config "meta_cognition_summary" "dashboard_shell"
 
 let store_last_good_meta_cognition_summary key json =
   Eio_guard.with_mutex meta_cognition_last_good_mu (fun () ->

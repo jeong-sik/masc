@@ -970,7 +970,7 @@ let test_detect_unknown_keys_flags_legacy_dead_config () =
   let input = {|
 [keeper]
 goal = "g"
-room_scope = "current"
+legacy_scope = "current"
 scope_kind = "local"
 mention_targets = ["a"]
 |} in
@@ -979,7 +979,7 @@ mention_targets = ["a"]
   | Ok doc ->
     let unknown = KTP.detect_unknown_keeper_toml_keys doc in
     check (list string) "surfaces dead config"
-      ["keeper.room_scope"; "keeper.scope_kind"] unknown
+      ["keeper.legacy_scope"; "keeper.scope_kind"] unknown
 
 let test_oas_env_parses_allowed_keys () =
   let input = {|

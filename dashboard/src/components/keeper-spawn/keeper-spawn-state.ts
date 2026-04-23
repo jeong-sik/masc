@@ -3,6 +3,8 @@ import { callMcpTool } from '../../api/mcp'
 import { asString, extractArray, isRecord } from '../common/normalize'
 import { showToast } from '../common/toast'
 import { createAsyncResource, getData } from '../../lib/async-state'
+import { shellAuthSummary } from '../../store'
+import { dashboardAuthAccess } from '../../lib/dashboard-auth-access'
 
 export interface PersonaSummary {
   name: string
@@ -64,6 +66,13 @@ function formatKeeperSpawnError(message: string): string {
 }
 
 export async function spawnKeeperFromPersona(personaName: string, opts?: { dryRun?: boolean }): Promise<void> {
+  const access = dashboardAuthAccess(shellAuthSummary.value, 'worker')
+  if (!access.allowed) {
+    const message = access.reason ?? '키퍼 생성 권한이 없습니다.'
+    spawnResult.value = { success: false, message }
+    showToast(message, 'error', 6000)
+    return
+  }
   spawning.value = true
   spawnResult.value = null
   try {
@@ -82,6 +91,11 @@ export async function spawnKeeperFromPersona(personaName: string, opts?: { dryRu
 }
 
 export async function shutdownKeeper(keeperName: string): Promise<void> {
+  const access = dashboardAuthAccess(shellAuthSummary.value, 'worker')
+  if (!access.allowed) {
+    showToast(access.reason ?? '키퍼 종료 권한이 없습니다.', 'error', 6000)
+    return
+  }
   try {
     await callMcpTool('masc_keeper_down', { name: keeperName })
     showToast(`${keeperName} 키퍼 종료 완료`, 'success')

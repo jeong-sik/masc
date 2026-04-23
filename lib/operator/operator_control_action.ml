@@ -167,16 +167,11 @@ let generate_confirm_token ~(clock : _ Eio.Time.clock) config =
 let resolved_actor_for_args ?actor_hint ctx args =
   let payload_actor = get_string_opt args "actor" |> Option.map String.trim in
   let hinted_actor = actor_hint |> Option.map String.trim in
-  match (payload_actor, hinted_actor) with
-  | Some payload, Some hinted
-    when payload <> "" && hinted <> "" && not (String.equal payload hinted) ->
-      Error "actor mismatch: payload actor must match authenticated actor"
-  | _ ->
-      Ok
-        (normalized_actor ~context_actor:ctx.agent_name
-           (match hinted_actor with
-           | Some actor when actor <> "" -> Some actor
-           | _ -> payload_actor))
+  Ok
+    (normalized_actor ~context_actor:ctx.agent_name
+       (match hinted_actor with
+       | Some actor when actor <> "" -> Some actor
+       | _ -> payload_actor))
 
 let action_request_of_args ?actor_hint ctx args =
   let action_type =

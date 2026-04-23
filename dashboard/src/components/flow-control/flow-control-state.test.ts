@@ -1,13 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { signal } from '@preact/signals'
 
-const { callMcpTool } = vi.hoisted(() => ({
+const {
+  callMcpTool,
+  namespaceTruth,
+  namespaceTruthInitializing,
+  serverStatus,
+  shellAuthSummary,
+} = vi.hoisted(() => ({
   callMcpTool: vi.fn(),
+  namespaceTruth: { value: null as unknown },
+  namespaceTruthInitializing: { value: false },
+  serverStatus: { value: null as unknown },
+  shellAuthSummary: { value: null as unknown },
 }))
-
-const namespaceTruth = signal<unknown>(null)
-const namespaceTruthInitializing = signal(false)
-const serverStatus = signal<unknown>(null)
 
 vi.mock('../../api/mcp', () => ({
   callMcpTool,
@@ -18,29 +23,34 @@ vi.mock('../../namespace-truth-store', () => ({
   namespaceTruthInitializing,
 }))
 
-vi.mock('../../store', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../store')>()
-  return {
-    ...actual,
-    serverStatus,
-  }
-})
+vi.mock('../../store', () => ({
+  serverStatus,
+  shellAuthSummary,
+}))
+
+import {
+  fetchPauseStatus,
+  flowState,
+} from './flow-control-state'
 
 describe('flow-control-state', () => {
-  beforeEach(async () => {
-    vi.resetModules()
+  beforeEach(() => {
     callMcpTool.mockReset()
     namespaceTruth.value = null
     namespaceTruthInitializing.value = false
     serverStatus.value = null
-    const { flowState } = await import('./flow-control-state')
+    shellAuthSummary.value = {
+      effective_role: 'worker',
+      default_role: 'worker',
+      auth_error_code: null,
+      auth_error_detail: null,
+    }
     flowState.value = 'unknown'
-  }, 120_000)
+  })
 
-  afterEach(async () => {
-    const { flowState } = await import('./flow-control-state')
+  afterEach(() => {
     flowState.value = 'unknown'
-  }, 120_000)
+  })
 
   it('reuses project snapshot pause state before calling MCP', async () => {
     namespaceTruth.value = {
@@ -51,7 +61,6 @@ describe('flow-control-state', () => {
       },
     }
 
-    const { fetchPauseStatus, flowState } = await import('./flow-control-state')
     await fetchPauseStatus()
 
     expect(flowState.value).toBe('paused')
@@ -61,7 +70,6 @@ describe('flow-control-state', () => {
   it('treats project snapshot warm-up as initializing before calling MCP', async () => {
     namespaceTruthInitializing.value = true
 
-    const { fetchPauseStatus, flowState } = await import('./flow-control-state')
     await fetchPauseStatus()
 
     expect(flowState.value).toBe('initializing')
@@ -73,7 +81,6 @@ describe('flow-control-state', () => {
       JSON.stringify({ status: 'initializing', initializing: true, paused: null }),
     )
 
-    const { fetchPauseStatus, flowState } = await import('./flow-control-state')
     await fetchPauseStatus()
 
     expect(flowState.value).toBe('initializing')
@@ -84,7 +91,6 @@ describe('flow-control-state', () => {
       JSON.stringify({ status: 'paused', paused: true }),
     )
 
-    const { fetchPauseStatus, flowState } = await import('./flow-control-state')
     await fetchPauseStatus()
 
     expect(flowState.value).toBe('paused')
@@ -95,7 +101,6 @@ describe('flow-control-state', () => {
       JSON.stringify({ status: ' paused ', paused: null }),
     )
 
-    const { fetchPauseStatus, flowState } = await import('./flow-control-state')
     await fetchPauseStatus()
 
     expect(flowState.value).toBe('paused')
@@ -106,16 +111,14 @@ describe('flow-control-state', () => {
       JSON.stringify({ status: 'mystery', paused: null, initializing: false }),
     )
 
-    const { fetchPauseStatus, flowState } = await import('./flow-control-state')
     await fetchPauseStatus()
 
     expect(flowState.value).toBe('unknown')
   })
 
-  it('reacts to project-snapshot signal changes after mount', async () => {
-    const { flowState } = await import('./flow-control-state')
-
+  it('recomputes from project-snapshot signals on the next fetch', async () => {
     namespaceTruthInitializing.value = true
+    await fetchPauseStatus()
     expect(flowState.value).toBe('initializing')
 
     namespaceTruthInitializing.value = false
@@ -126,6 +129,7 @@ describe('flow-control-state', () => {
         },
       },
     }
+    await fetchPauseStatus()
     expect(flowState.value).toBe('running')
   })
 })

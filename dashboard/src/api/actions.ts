@@ -20,9 +20,8 @@ function isNotInitializedEnvelope(raw: unknown): boolean {
 
 // --- Control Dock ---
 
-export async function sendBroadcast(agentName: string, message: string): Promise<void> {
+export async function sendBroadcast(_actorHint: string, message: string): Promise<void> {
   await callMcpTool('masc_broadcast', {
-    agent_name: agentName,
     message,
   })
 }

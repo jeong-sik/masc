@@ -1,4 +1,18 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+
+vi.mock('../../store', () => ({
+  shellAuthSummary: { value: null },
+}))
+
+vi.mock('../../lib/dashboard-auth-access', () => ({
+  dashboardAuthAccess: () => ({
+    allowed: true,
+    required_role: 'worker',
+    effective_role: 'worker',
+    reason: null,
+  }),
+}))
+
 import { filterPersonas } from './persona-browser'
 import type { PersonaSummary } from './keeper-spawn-state'
 

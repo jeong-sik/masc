@@ -299,14 +299,17 @@ function extractMcpText(res: McpCallResponse): string {
   return res.result?.content?.[0]?.text ?? ''
 }
 
-export async function callMcpTool(toolName: string, args: Record<string, unknown>): Promise<string> {
+async function callMcpToolInternal(
+  toolName: string,
+  args: Record<string, unknown>,
+): Promise<string> {
   const requestId = String(Math.floor(Date.now() % 1000000))
   let phase = mcpSessionId ? 'tools/call' : 'initialize'
+  const explicitActor = explicitToolActor(args)
+  const actor = explicitActor ?? currentDashboardActor()
   try {
     await ensureSession()
     phase = 'tools/call'
-    const explicitActor = explicitToolActor(args)
-    const actor = explicitActor ?? currentDashboardActor()
     const toolArgs =
       explicitActor == null && actor
         ? { ...args, _agent_name: actor }
@@ -335,6 +338,10 @@ export async function callMcpTool(toolName: string, args: Record<string, unknown
     }
     throw err
   }
+}
+
+export async function callMcpTool(toolName: string, args: Record<string, unknown>): Promise<string> {
+  return callMcpToolInternal(toolName, args)
 }
 
 // --- MCP tools/list — fetch tool schemas with inputSchema ---

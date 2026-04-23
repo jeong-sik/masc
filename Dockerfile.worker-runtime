@@ -8,7 +8,7 @@ RUN sudo apt-get update \
  && sudo apt-get install -y --no-install-recommends pkg-config libssl-dev libsqlite3-dev zlib1g-dev curl git libgmp-dev libprotobuf-dev protobuf-compiler libffi-dev \
  && sudo rm -rf /var/lib/apt/lists/*
 
-RUN opam exec -- bash -lc "scripts/opam-pin-external-deps.sh && opam install . --deps-only -y && dune build bin/masc_worker_run.exe"
+RUN opam exec -- bash -lc "scripts/opam-pin-external-deps.sh && opam install . --deps-only -y && dune build @install"
 
 FROM debian:12-slim AS runtime
 
@@ -28,6 +28,6 @@ RUN apt-get update \
       zlib1g \
  && rm -rf /var/lib/apt/lists/*
 
-COPY --from=build /src/_build/default/bin/masc_worker_run.exe /usr/local/bin/masc-worker-run
+COPY --from=build /src/_build/install/default/bin/masc-worker-run /usr/local/bin/masc-worker-run
 
 ENTRYPOINT ["/usr/local/bin/masc-worker-run", "--spec-stdin"]

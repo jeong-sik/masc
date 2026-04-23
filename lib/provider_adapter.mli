@@ -300,15 +300,10 @@ val default_model_provider_prefix_result : unit -> (string, string) result
 (** Override the model portion of the default model label. *)
 val default_model_override_label_result : string -> (string, string) result
 
-(** Default local model label; raises [Invalid_arg] if unconfigured. *)
-val default_local_model_label : unit -> string
-
 (** {1 Llama Model Resolution} *)
 
 val explicit_llama_model_id_result : unit -> (string, string) result
-val explicit_llama_model_id : unit -> string
 val explicit_llama_model_label_result : unit -> (string, string) result
-val explicit_llama_model_label : unit -> string
 
 (** {1 Ollama} *)
 

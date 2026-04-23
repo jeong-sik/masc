@@ -133,8 +133,10 @@ let test_default_cli_agent_name () =
 let test_default_local_model_label () =
   with_env "MASC_DEFAULT_PROVIDER" (Some "test-provider") (fun () ->
       with_env "MASC_DEFAULT_MODEL" (Some "test-model") (fun () ->
-          check string "default local label" "test-provider:test-model"
-            (Adapter.default_local_model_label ())))
+          match Adapter.default_model_label_result () with
+          | Ok label ->
+              check string "default local label" "test-provider:test-model" label
+          | Error msg -> fail msg))
 
 let test_default_model_provider_prefix_result () =
   with_env "MASC_DEFAULT_PROVIDER" (Some "test-provider") (fun () ->

@@ -495,7 +495,9 @@ let get_server_state_result () =
 let get_server_state () =
   match get_server_state_result () with
   | Ok s -> s
-  | Error message -> invalid_arg message
+  | Error message ->
+      Log.Misc.error "server state not initialized: %s" message;
+      raise (Failure message)
 
 let server_state_error_json message =
   Yojson.Safe.to_string (`Assoc [ ("error", `String message) ])

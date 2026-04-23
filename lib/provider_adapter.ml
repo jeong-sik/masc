@@ -1121,18 +1121,8 @@ let explicit_llama_model_id_result () =
           Error
             "LLAMA_DEFAULT_MODEL is not set; configure LLAMA_DEFAULT_MODEL or MASC_DEFAULT_PROVIDER=llama with MASC_DEFAULT_MODEL")
 
-let explicit_llama_model_id () =
-  match explicit_llama_model_id_result () with
-  | Ok model_id -> model_id
-  | Error msg -> invalid_arg msg
-
 let explicit_llama_model_label_result () =
   Result.map make_local_label (explicit_llama_model_id_result ())
-
-let explicit_llama_model_label () =
-  match explicit_llama_model_label_result () with
-  | Ok label -> label
-  | Error msg -> invalid_arg msg
 
 let gemini_direct_available () =
   env_present google_cloud_project_env || env_present gemini_api_key_env
@@ -1284,11 +1274,6 @@ let default_model_override_label_result model_id =
     match default_model_provider_prefix_result () with
     | Ok provider -> Ok (provider ^ ":" ^ model_id)
     | Error _ as e -> e
-
-let default_local_model_label () =
-  match default_model_label_result () with
-  | Ok label -> label
-  | Error msg -> invalid_arg msg
 
 let vertex_location () =
   match Sys.getenv_opt google_cloud_location_env with

@@ -80,14 +80,9 @@ let local_worker_compat_passthrough_schemas : Types.tool_schema list =
     local_worker_compat_passthrough_tool_names
 
 let local_worker_internal_schemas : Types.tool_schema list =
-  [
-    { Types.name = "masc_heartbeat";
-      description =
-        "Update the worker heartbeat timestamp so long-running local tasks are not reaped as zombies.";
-      input_schema =
-        `Assoc [ ("type", `String "object"); ("properties", `Assoc []) ];
-    };
-  ]
+  List.filter
+    (fun (schema : Types.tool_schema) -> schema.name = "masc_heartbeat")
+    Tool_schemas_coord_core.schemas
 
 let local_worker_code_schemas : Types.tool_schema list =
   [
@@ -145,47 +140,7 @@ let local_worker_code_schemas : Types.tool_schema list =
   ]
 
 let local_worker_worktree_schemas : Types.tool_schema list =
-  [
-    {
-      Types.name = "masc_worktree_create";
-      description = "Create an isolated Git worktree under .worktrees/{agent}-{task}/ with a new branch. Use when starting a task that modifies files, so other agents' work is not affected.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ( "properties",
-              `Assoc
-                [
-                  ("agent_name", `Assoc [ ("type", `String "string") ]);
-                  ("task_id", `Assoc [ ("type", `String "string") ]);
-                  ("base_branch", `Assoc [ ("type", `String "string") ]);
-                ] );
-            ("required", `List [ `String "agent_name"; `String "task_id" ]);
-          ];
-    };
-    {
-      Types.name = "masc_worktree_remove";
-      description = "Remove a worktree and its local branch after your work is merged. Use when your PR has been merged and the isolated worktree is no longer needed.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ( "properties",
-              `Assoc
-                [
-                  ("agent_name", `Assoc [ ("type", `String "string") ]);
-                  ("task_id", `Assoc [ ("type", `String "string") ]);
-                ] );
-            ("required", `List [ `String "agent_name"; `String "task_id" ]);
-          ];
-    };
-    {
-      Types.name = "masc_worktree_list";
-      description = "List all active worktrees in the project with agent and task mappings. Use when checking for stale worktrees or seeing who is working in parallel.";
-      input_schema =
-        `Assoc [ ("type", `String "object"); ("properties", `Assoc []) ];
-    };
-  ]
+  Tool_schemas_worktree.schemas
 
 let local_worker_run_schemas : Types.tool_schema list =
   [

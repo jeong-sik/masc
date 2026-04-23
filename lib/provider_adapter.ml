@@ -60,7 +60,7 @@ type adapter = {
   runtime_kind : runtime_kind;
   auth_mode : auth_mode;
   aliases : string list;
-  spawn_key : string option;       (** Key into Spawn.default_configs. None = not spawnable via CLI. *)
+  spawn_key : string option;       (** Key for CLI spawn lookup in Spawn.spawn_config_of_key. None = not spawnable via CLI. *)
   cascade_prefix : string;         (** MASC cascade model prefix (e.g. "claude", "openai").
                                        CONTRACT: Must match the prefix used by the local
                                        [Cascade_config] parser and Provider_registry-compatible
@@ -714,7 +714,7 @@ let resolve_direct_canonical_name label =
   Option.map (fun (adapter : adapter) -> adapter.canonical_name) (resolve_direct_adapter label)
 
 (** Resolve spawn_key for an agent label.
-    Returns the key to look up in Spawn.default_configs. *)
+    Returns the key to look up in Spawn.spawn_config_of_key. *)
 let resolve_spawn_key label =
   match resolve_direct_adapter label with
   | Some adapter -> adapter.spawn_key
@@ -1409,7 +1409,7 @@ let auth_detail_of_provider provider =
   | Some adapter ->
     let auth_kind_base =
       if adapter.canonical_name = cn_kimi_api then
-        "api_key:KIMI_API_KEY_SB|KIMI_API_KEY"
+        "api_key:KIMI_API_KEY"
       else
         string_of_auth_mode adapter.auth_mode
     in

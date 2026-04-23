@@ -770,7 +770,7 @@ let test_enrich_sdk_error_for_moonshot_auth_includes_env_hint () =
   with_temp_masc_config
     {|{
   "default_api_key_env": {
-    "kimi": "KIMI_API_KEY_SB"
+    "kimi": "KIMI_API_KEY"
   }
 }|}
   @@ fun () ->
@@ -794,7 +794,7 @@ let test_enrich_sdk_error_for_moonshot_auth_includes_env_hint () =
     |> Oas.Error.to_string
   in
   Alcotest.(check bool) "env hint included" true
-    (contains_substring ~needle:"KIMI_API_KEY_SB" rendered);
+    (contains_substring ~needle:"KIMI_API_KEY" rendered);
   Alcotest.(check bool) "key presence hint included" true
     (contains_substring ~needle:"auth header was populated" rendered)
 

@@ -912,7 +912,8 @@ let expand_model_strings_for_execution ?rotation_scope (items : string list) =
   |> dedupe_stable
 
 (* Filter providers by kind name (exact, case-insensitive).
-   Valid filter values: "ollama", "glm", "anthropic", "gemini", "openai_compat", "claude_code".
+   Valid filter values: "ollama", "glm", "anthropic", "gemini", "openai_compat",
+   "claude_code", "kimi", "kimi_cli", "gemini_cli", "codex_cli".
    Empty/None filter passes through unchanged. No-match falls back to unfiltered. *)
 let apply_provider_filter ~provider_filter ~label providers =
   match provider_filter with

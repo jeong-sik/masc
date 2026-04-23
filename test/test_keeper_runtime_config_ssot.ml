@@ -287,7 +287,7 @@ let test_tool_policy_resync () =
 goal = "test"
 allowed_paths = ["workspace/example/project"]
 tool_preset = "social"
-also_allow = ["keeper_bash", "keeper_shell"]
+tool_also_allow = ["keeper_bash", "keeper_shell"]
 |};
   let config = Coord.default_config room_dir in
   let initial_meta =

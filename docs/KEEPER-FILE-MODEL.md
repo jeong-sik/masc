@@ -109,7 +109,6 @@ These may still be parsed today, but they are **not** the preferred place to enc
 | `work_discovery_*` | Compatibility-only | `keeper.toml` or runtime policy |
 | `telemetry_feedback_*` | Compatibility-only | `keeper.toml` or runtime policy |
 | `max_turns_per_call*` | Compatibility-only | `keeper.toml` |
-| `models` | Legacy / avoid | cascade config, not persona |
 
 ## 2. Keeper Declaration
 
@@ -159,7 +158,6 @@ These are still accepted by the loader, but for consistency they should be used 
 | `room_signal_prompt_enabled` | bool | Override room-signal prompt behavior |
 | `allowed_paths` | string array | Exceptional path override only; prefer empty and rely on the single sandbox root |
 | `tool_also_allow` | string array | Extra tool names added to the preset surface |
-| `also_allow` | string array | Backward-compat alias for `tool_also_allow` (will warn as "unknown key" after deprecation) |
 | `tool_denylist` | string array | Tool names blocked regardless of preset |
 | `work_discovery_enabled` | bool | Enable work discovery loop |
 | `work_discovery_sources` | string array | e.g. `["github_issues", "stale_tasks"]` |
@@ -207,6 +205,7 @@ These keys are **rejected at load time** with an `Error`. They are retained only
 
 | Field | Replacement / rationale |
 | --- | --- |
+| `also_allow` | Renamed to `tool_also_allow` in `keeper.toml`. Use `tool_access.also_allow` only inside the JSON `tool_access` object. |
 | `models`, `allowed_models`, `active_model` | Models are resolved at runtime from `cascade_name` → `cascade.json`. Do not pin per-keeper. |
 | `presence_keepalive`, `presence_keepalive_sec` | Use `paused` in runtime JSON; keepalive is managed by the keepalive fiber. |
 | `trigger_mode`, `policy_action_budget` | Removed with the legacy policy engine. |

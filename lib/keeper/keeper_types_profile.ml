@@ -422,7 +422,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
   let strs key = Keeper_toml_loader.toml_string_list doc (k key) in
   let has key = List.mem_assoc (k key) doc in
   let removed_present =
-    removed_keeper_input_key_names
+    ("also_allow" :: removed_keeper_input_key_names)
     |> List.map k
     |> List.filter (fun key -> List.mem_assoc key doc)
   in
@@ -552,12 +552,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
           (match str "tool_preset" with
            | None -> None
            | Some raw -> normalize_tool_preset_raw raw);
-        tool_also_allow =
-          (match normalize_name_list_opt (strs "tool_also_allow") with
-           | Some _ as explicit -> explicit
-           | None ->
-               (* Backward-compat alias kept in some live keeper TOMLs. *)
-               normalize_name_list_opt (strs "also_allow"));
+        tool_also_allow = normalize_name_list_opt (strs "tool_also_allow");
         tool_denylist = normalize_name_list_opt (strs "tool_denylist");
         work_discovery_enabled = bool_ "work_discovery_enabled";
         work_discovery_sources =
@@ -573,10 +568,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
           int_ "max_turns_per_call_scheduled_autonomous";
         social_model = normalize_social_model_opt (str "social_model");
         cascade_name = normalize_cascade_name_opt (str "cascade_name");
-        models =
-          (match strs "models" with
-           | [] -> None
-           | xs -> Some xs);
+        models = None;
         oas_env = extract_oas_env_from_doc doc;
       })
     result
@@ -586,10 +578,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
     ignored by the loader, which historically let dead config accumulate
     (e.g. legacy [room_scope], [scope_kind]).  [warn_unknown_keeper_toml_keys]
     uses this list to surface drift on boot, symmetric with
-    [warn_unknown_keeper_meta_keys] on the JSON side.
-
-    [also_allow] is retained as a backward-compat alias for
-    [tool_also_allow] — see the fallback in [profile_defaults_of_toml]. *)
+    [warn_unknown_keeper_meta_keys] on the JSON side. *)
 let canonical_keeper_toml_key_names =
   [ "name"
   ; "persona_name"
@@ -617,7 +606,6 @@ let canonical_keeper_toml_key_names =
   ; "tool_access.kind"
   ; "tool_access.preset"
   ; "tool_also_allow"
-  ; "also_allow"
   ; "tool_denylist"
   ; "work_discovery_enabled"
   ; "work_discovery_sources"
@@ -629,7 +617,6 @@ let canonical_keeper_toml_key_names =
   ; "max_turns_per_call_scheduled_autonomous"
   ; "social_model"
   ; "cascade_name"
-  ; "models"
   ]
 
 (** Pure detector: returns TOML keys that [profile_defaults_of_toml] does not

@@ -114,7 +114,6 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
       presence_keepalive_sec: 30,
     },
     coordination: {
-      room_scope: 'global',
       mention_targets: ['sangsu'],
       joined_room_ids: ['default'],
     },

@@ -953,7 +953,6 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         <span class="text-2xs text-text-body">이 keeper는 task completion_contract를 독립 실측하는 검증자 역할입니다.</span>
       </div>
       ` : null}
-      <${ConfigRow} label="프로젝트 범위" value=${c.coordination.room_scope || '--'} />
       ${c.coordination.mention_targets.length > 0 ? html`
       <div class="mt-1.5">
         <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">멘션 대상</div>

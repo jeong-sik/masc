@@ -879,7 +879,6 @@ interface KeeperConfigRuntime {
 }
 
 interface KeeperConfigCoordination {
-  room_scope: string
   mention_targets: string[]
   joined_room_ids: string[]
 }

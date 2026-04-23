@@ -1279,7 +1279,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
               : null),
     },
     coordination: {
-      room_scope: asNullableString(coordination.room_scope) ?? 'current',
       mention_targets: normalizeStringList(coordination.mention_targets),
       joined_room_ids: normalizeStringList(coordination.joined_room_ids),
     },

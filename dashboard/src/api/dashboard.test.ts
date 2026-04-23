@@ -268,7 +268,6 @@ describe('fetchKeeperConfig', () => {
         runtime_blocker_continue_gate: 'false',
       },
       coordination: {
-        room_scope: 'global',
         mention_targets: 'sangsu',
         joined_room_ids: 'default',
       },

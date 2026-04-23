@@ -104,34 +104,58 @@ jobs:
             }
 
             const actions = [];
+            const failedActions = [];
+            const summarizeError = (error) => {
+              const messages = [];
+              if (error?.message) messages.push(error.message);
+              if (Array.isArray(error?.errors)) {
+                for (const item of error.errors) {
+                  if (item?.message) messages.push(item.message);
+                }
+              }
+              return [...new Set(messages)].join("; ") || String(error);
+            };
+            const recordFailure = (actionName, error) => {
+              const summary = summarizeError(error);
+              failedActions.push(`${actionName}: ${summary}`);
+              core.warning(`Draft PR guard failed to ${actionName}: ${summary}`);
+            };
 
             if (current.autoMergeRequest) {
-              await github.graphql(`
-                mutation($pullRequestId: ID!) {
-                  disablePullRequestAutoMerge(input: {pullRequestId: $pullRequestId}) {
-                    pullRequest {
-                      id
+              try {
+                await github.graphql(`
+                  mutation($pullRequestId: ID!) {
+                    disablePullRequestAutoMerge(input: {pullRequestId: $pullRequestId}) {
+                      pullRequest {
+                        id
+                      }
                     }
                   }
-                }
-              `, { pullRequestId: current.id });
-              actions.push("disabled auto-merge");
+                `, { pullRequestId: current.id });
+                actions.push("disabled auto-merge");
+              } catch (error) {
+                recordFailure("disable auto-merge", error);
+              }
             }
 
             if (!current.isDraft) {
-              await github.graphql(`
-                mutation($pullRequestId: ID!) {
-                  convertPullRequestToDraft(input: {pullRequestId: $pullRequestId}) {
-                    pullRequest {
-                      id
+              try {
+                await github.graphql(`
+                  mutation($pullRequestId: ID!) {
+                    convertPullRequestToDraft(input: {pullRequestId: $pullRequestId}) {
+                      pullRequest {
+                        id
+                      }
                     }
                   }
-                }
-              `, { pullRequestId: current.id });
-              actions.push("converted PR back to draft");
+                `, { pullRequestId: current.id });
+                actions.push("converted PR back to draft");
+              } catch (error) {
+                recordFailure("convert PR back to draft", error);
+              }
             }
 
-            if (actions.length === 0) {
+            if (actions.length === 0 && failedActions.length === 0) {
               core.info("Guarded PR is already draft-only.");
               return;
             }
@@ -139,11 +163,27 @@ jobs:
             const marker = "<!-- masc-agent-draft-guard -->";
             const bypassLabelList =
               bypassLabels.length > 0 ? bypassLabels.join(", ") : "(no configured bypass labels)";
+            const statusLine =
+              failedActions.length > 0
+                ? "Draft PR guard could not fully reapply protection."
+                : `Draft PR guard reapplied: ${actions.join(", ")}.`;
+            const actionLines = [
+              actions.length > 0 ? `Completed actions: ${actions.join(", ")}.` : "",
+              failedActions.length > 0 ? `Failed actions: ${failedActions.join("; ")}.` : ""
+            ].filter(Boolean);
             const body = [
               marker,
-              `Draft PR guard reapplied: ${actions.join(", ")}.`,
+              statusLine,
               "",
-              `This repository treats draft PRs as draft-only until a human explicitly opts in by adding one of these labels: ${bypassLabelList}.`
+              ...actionLines,
+              "",
+              `This repository treats draft PRs as draft-only until a human explicitly opts in by adding one of these labels: ${bypassLabelList}.`,
+              ...(failedActions.length > 0
+                ? [
+                    "",
+                    "Manual action required: restore draft state or disable auto-merge, or add a bypass label only after explicit human approval."
+                  ]
+                : [])
             ].join("\n");
             const comments = await github.paginate(github.rest.issues.listComments, {
               owner,
@@ -171,7 +211,11 @@ jobs:
             }
 
             if (action === "ready_for_review" || action === "auto_merge_enabled") {
-              core.setFailed(`Draft PR guard blocked ${action}: ${actions.join(", ")}.`);
+              const summary = [
+                actions.length > 0 ? actions.join(", ") : "",
+                failedActions.length > 0 ? `manual recovery required after failed automation: ${failedActions.join("; ")}` : ""
+              ].filter(Boolean).join("; ");
+              core.setFailed(`Draft PR guard blocked ${action}: ${summary}.`);
             }
 
   label-and-review:

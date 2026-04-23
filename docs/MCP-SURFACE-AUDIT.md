@@ -1,6 +1,6 @@
 ---
 status: reference
-last_verified: 2026-04-17
+last_verified: 2026-04-23
 code_refs:
   - lib/mcp_server.ml
   - lib/mcp_server_eio.ml
@@ -160,6 +160,7 @@ flowchart TD
 | Type | Examples | Status |
 |------|----------|--------|
 | Intentional compatibility | `masc_claim`, `experiment_start`, `masc_trpg_*` | Deprecated/default-off aliases; keep if compatibility matters |
+| Retired front-door | `masc_collaboration_graph` | Removed from `raw_all_tool_schemas` in `config.ml` but still cited in spec docs |
 | Intentional internal-only | `Prompt_registry`, `data/prompts/*.json`, `config/prompts/*.md` | Real runtime feature, not public MCP surface |
 | Experimental but documented | `SWARM-RISC`, `GAME-VIEW-PROTOCOL` draft | Keep clearly labeled as non-canonical or draft |
 | Placeholder / review-needed | none | Dead hidden placeholder removed from the MCP schema inventory |

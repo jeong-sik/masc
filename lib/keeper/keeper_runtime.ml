@@ -61,8 +61,7 @@ let resynced_tool_access
 let ensure_keeper_meta config name =
   match read_meta config name with
   | Ok (Some meta) ->
-    let exception Invalid_cascade_name of string in
-    (try
+    (
     (* Re-sync ALL declarative keeper fields from profile/env defaults on bootstrap.
        Persisted meta may have stale values from a previous session;
        persona config (TOML) plus explicit env overrides are the source of truth.
@@ -91,34 +90,32 @@ let ensure_keeper_meta config name =
     let target_cascade_name =
       effective_declarative_cascade_name defaults meta
     in
-    let resolved_target_cascade_name =
-      match
-        Cascade_catalog_runtime.resolve_declared_name
-          ~raw_name:target_cascade_name
-          ()
-      with
-      | Ok cascade_name -> cascade_name
-      | Error detail ->
-          let field =
-            match defaults.cascade_name, defaults.manifest_path with
-            | Some _, _ -> "profile.cascade_name"
-            | None, Some _ -> "manifest.default_cascade_name"
-            | None, None -> "meta.cascade_name"
-          in
-          let raw_value =
-            match defaults.cascade_name, defaults.manifest_path with
-            | Some cascade_name, _ -> cascade_name
-            | None, Some _ -> Keeper_config.default_cascade_name
-            | None, None -> meta.cascade_name
-          in
-          let msg =
-            Printf.sprintf
-              "invalid %s %S for keeper %s: %s"
-              field raw_value meta.name detail
-          in
-          Log.Keeper.error "%s" msg;
-          raise (Invalid_cascade_name msg)
-    in
+    match
+      Cascade_catalog_runtime.resolve_declared_name
+        ~raw_name:target_cascade_name
+        ()
+    with
+    | Error detail ->
+        let field =
+          match defaults.cascade_name, defaults.manifest_path with
+          | Some _, _ -> "profile.cascade_name"
+          | None, Some _ -> "manifest.default_cascade_name"
+          | None, None -> "meta.cascade_name"
+        in
+        let raw_value =
+          match defaults.cascade_name, defaults.manifest_path with
+          | Some cascade_name, _ -> cascade_name
+          | None, Some _ -> Keeper_config.default_cascade_name
+          | None, None -> meta.cascade_name
+        in
+        let msg =
+          Printf.sprintf
+            "invalid %s %S for keeper %s: %s"
+            field raw_value meta.name detail
+        in
+        Log.Keeper.error "%s" msg;
+        Error msg
+    | Ok resolved_target_cascade_name ->
     let target_tool_access = resynced_tool_access defaults meta in
 
     (* --- Personality --- *)
@@ -279,9 +276,7 @@ let ensure_keeper_meta config name =
         Log.Keeper.warn "ensure_keeper_meta: write_meta re-sync failed: %s" e;
         Ok meta
     end
-    else Ok meta
-    with
-    | Invalid_cascade_name msg -> Error msg)
+    else Ok meta)
   | Ok None ->
     Log.Keeper.warn
       "ensure_keeper_meta: no persistent meta for %s — run keeper_up to initialize" name;

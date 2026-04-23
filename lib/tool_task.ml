@@ -1042,7 +1042,7 @@ let dispatch ctx ~name ~args : tool_result option =
 (* ================================================================ *)
 
 let _tool_spec_read_only = [ "masc_task_history"; "masc_tasks" ]
-let _tool_spec_requires_join = [ "masc_transition" ]
+let _tool_spec_requires_join = [ "masc_claim_next"; "masc_transition" ]
 
 let tool_required_permission = function
   | "masc_tasks" | "masc_task_history" ->

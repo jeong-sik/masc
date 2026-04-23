@@ -78,8 +78,9 @@ let handle_broadcast state agent_name reqd body_str =
     match Yojson.Safe.Util.member "message" json with
     | `String message ->
         let config = state.Mcp_server.room_config in
-        let _ = Coord.broadcast config ~from_agent:agent_name ~content:message in
-        reply true None
+        (match Coord.broadcast config ~from_agent:agent_name ~content:message with
+         | Ok _ -> reply true None
+         | Error err -> reply false (Some err))
     | `Null -> reply false (Some "missing required field: message")
     | _ -> reply false (Some "field 'message' must be a string")
   with

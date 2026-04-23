@@ -45,7 +45,8 @@ let parse_iso_date s =
         tm_wday = 0; tm_yday = 0; tm_isdst = false
       } in
       fst (Unix.mktime tm))
-  with _ -> 0.0
+  with
+  | Scanf.Scan_failure _ | Failure _ | Invalid_argument _ | Unix.Unix_error _ -> 0.0
 
 (** Ensure MASC directory exists *)
 let ensure_masc_dir () =
@@ -63,9 +64,10 @@ let log_cost ~agent ~task_id ~model ~input_tokens ~output_tokens ~cost_usd =
     model input_tokens output_tokens cost_usd (now_iso ())
   in
   let oc = open_out_gen [Open_append; Open_creat] 0o644 (costs_file ()) in
-  output_string oc (entry ^ "\n");
-  close_out oc;
-  printf "✅ Cost logged: %s → $%.4f\n" agent cost_usd
+  Fun.protect
+    ~finally:(fun () -> close_out oc)
+    (fun () -> output_string oc (entry ^ "\n"));
+  printf "Cost logged: %s → $%.4f\n" agent cost_usd
 
 (** Parse a JSON line into cost entry *)
 let parse_cost_line line =
@@ -80,28 +82,29 @@ let parse_cost_line line =
       cost_usd = get_float json "cost_usd" |> Option.value ~default:0.0;
       timestamp = get_string json "timestamp" |> Option.value ~default:"";
     }
-  with _ -> None
+  with
+  | Yojson.Json_error _ | Failure _ | Invalid_argument _ -> None
 
 (** Read all cost entries *)
 let read_costs () =
   let file = costs_file () in
   if not (Sys.file_exists file) then []
-  else begin
+  else
     let ic = open_in file in
-    let rec read_lines acc =
-      match input_line ic with
-      | line ->
-          let acc' = match parse_cost_line line with
-            | Some e -> e :: acc
-            | None -> acc
-          in
-          read_lines acc'
-      | exception End_of_file ->
-          close_in ic;
-          List.rev acc
-    in
-    read_lines []
-  end
+    Fun.protect
+      ~finally:(fun () -> close_in ic)
+      (fun () ->
+        let rec read_lines acc =
+          match input_line ic with
+          | line ->
+              let acc' = match parse_cost_line line with
+                | Some e -> e :: acc
+                | None -> acc
+              in
+              read_lines acc'
+          | exception End_of_file -> List.rev acc
+        in
+        read_lines [])
 
 (** Filter entries by time period *)
 let filter_by_period period entries =

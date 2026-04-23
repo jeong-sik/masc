@@ -63,13 +63,12 @@ function formatKeeperSpawnError(message: string): string {
   return `${actor} 세션은 현재 키퍼 생성 권한이 없습니다. 이 프로젝트의 auth가 읽기 전용(default_role=reader)으로 열려 있거나 reader 토큰을 사용 중일 때 생기는 오류입니다. worker/admin Bearer token을 설정하거나 프로젝트 기본 권한을 올린 뒤 다시 시도하세요.`
 }
 
-export async function spawnKeeperFromPersona(personaName: string, opts?: { dryRun?: boolean; roomScope?: string }): Promise<void> {
+export async function spawnKeeperFromPersona(personaName: string, opts?: { dryRun?: boolean }): Promise<void> {
   spawning.value = true
   spawnResult.value = null
   try {
     const args: Record<string, unknown> = { persona_name: personaName }
     if (opts?.dryRun) args.dry_run = true
-    if (opts?.roomScope) args.room_scope = opts.roomScope
     const result = await callMcpTool('masc_keeper_create_from_persona', args)
     spawnResult.value = { success: true, message: result }
     if (!opts?.dryRun) showToast(`${personaName} 키퍼 생성 완료`, 'success')

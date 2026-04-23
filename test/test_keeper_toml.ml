@@ -511,6 +511,27 @@ models = ["llama:test"]
                 true
               with Not_found -> false))
 
+let test_profile_rejects_removed_also_allow_alias () =
+  let input = {|
+[keeper]
+goal = "test"
+also_allow = ["keeper_shell"]
+|} in
+  match TL.parse_toml input with
+  | Error e -> fail e
+  | Ok doc ->
+      (match KTP.profile_defaults_of_toml doc with
+       | Ok _ -> fail "expected removed TOML alias error"
+       | Error msg ->
+           check bool "mentions removed also_allow alias" true
+             (try
+                ignore
+                  (Str.search_forward
+                     (Str.regexp_string "keeper.also_allow")
+                     msg 0);
+                true
+              with Not_found -> false))
+
 let test_profile_rejects_removed_initiative_keys () =
   let input = {|
 [keeper]
@@ -1080,7 +1101,7 @@ OAS_CODEX_SKIP_GIT = false
       check string "false → 0" "0"
         (List.assoc "OAS_CODEX_SKIP_GIT" d.oas_env)
 
-let test_detect_unknown_keys_accepts_also_allow_alias () =
+let test_detect_unknown_keys_flags_also_allow_alias () =
   let input = {|
 [keeper]
 goal = "g"
@@ -1090,7 +1111,8 @@ also_allow = ["x"]
   | Error e -> fail e
   | Ok doc ->
     let unknown = KTP.detect_unknown_keeper_toml_keys doc in
-    check (list string) "also_allow is recognized alias" [] unknown
+    check (list string) "also_allow alias is stale drift"
+      ["keeper.also_allow"] unknown
 
 (* ================================================================ *)
 (* Test suite                                                        *)
@@ -1160,8 +1182,10 @@ let () =
           test_case "full" `Quick test_profile_full;
           test_case "rejects invalid social_model" `Quick
             test_profile_rejects_invalid_social_model;
-          test_case "musician soul_profile maps to relationship" `Quick
+          test_case "rejects removed model keys" `Quick
             test_profile_rejects_removed_model_keys;
+          test_case "rejects removed also_allow alias" `Quick
+            test_profile_rejects_removed_also_allow_alias;
           test_case "rejects removed initiative keys" `Quick
             test_profile_rejects_removed_initiative_keys;
           test_case "legacy allowed_providers ignored" `Quick
@@ -1181,8 +1205,8 @@ let () =
             test_detect_unknown_keys_empty_when_all_canonical;
           test_case "flags legacy dead config" `Quick
             test_detect_unknown_keys_flags_legacy_dead_config;
-          test_case "also_allow alias accepted" `Quick
-            test_detect_unknown_keys_accepts_also_allow_alias;
+          test_case "also_allow alias flagged" `Quick
+            test_detect_unknown_keys_flags_also_allow_alias;
           test_case "oas_env keys not flagged as unknown" `Quick
             test_oas_env_not_flagged_as_unknown;
         ] );

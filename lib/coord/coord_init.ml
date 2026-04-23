@@ -120,8 +120,8 @@ let pause config ~by ~reason =
     paused_at = Some (now_iso ());
   }) in
   (* Broadcast pause notification *)
-  ignore (broadcast config ~from_agent:"system"
-        ~content:(Printf.sprintf "⏸️ Coord PAUSED by %s: %s" by reason));
+  let _ = broadcast config ~from_agent:"system"
+        ~content:(Printf.sprintf "⏸️ Coord PAUSED by %s: %s" by reason) in
   ()
 
 (** Resume the room *)
@@ -138,8 +138,8 @@ let resume config ~by =
       paused_at = None;
     }) in
     (* Broadcast resume notification *)
-    ignore (broadcast config ~from_agent:"system"
-        ~content:(Printf.sprintf "▶️ Coord RESUMED by %s" by));
+    let _ = broadcast config ~from_agent:"system"
+        ~content:(Printf.sprintf "▶️ Coord RESUMED by %s" by) in
     `Resumed
   end
 

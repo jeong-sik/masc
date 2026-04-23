@@ -398,7 +398,7 @@ let add_task ?contract ?goal_id ?required_preset ?created_by config ~title
             ]);
 
       (Atomic.get Coord_hooks.on_task_mutation_fn) ();
-      ignore (broadcast config ~from_agent:actor ~content:(Printf.sprintf "📋 New quest: %s" title));
+      let _ = broadcast config ~from_agent:actor ~content:(Printf.sprintf "📋 New quest: %s" title) in
       Printf.sprintf "✅ Added %s: %s" task_id title)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -480,8 +480,8 @@ let add_task_with_role ?contract ?goal_id ?created_by config ~title ~priority
                 ]);
           (Atomic.get Coord_hooks.on_task_mutation_fn) ();
           let role_str = Types_core.role_to_string required_role in
-          ignore (broadcast config ~from_agent:actor
-            ~content:(Printf.sprintf "📋 New quest: %s (requires: %s)" title role_str));
+          let _ = broadcast config ~from_agent:actor
+             ~content:(Printf.sprintf "📋 New quest: %s (requires: %s)" title role_str) in
           Printf.sprintf "✅ Added %s: %s (required_role: %s)" task_id title role_str)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -559,7 +559,7 @@ let batch_add_tasks_internal ?created_by config tasks =
       let summary = String.concat ", " (List.map (fun (t : Types.task) -> t.id) added_tasks) in
       (Atomic.get Coord_hooks.on_task_mutation_fn) ();
       let msg = Printf.sprintf "📋 New batch of %d quests added: %s" (List.length added_tasks) summary in
-      ignore (broadcast config ~from_agent:actor ~content:msg);
+      let _ = broadcast config ~from_agent:actor ~content:msg in
       Printf.sprintf "✅ Added %d tasks: %s" (List.length added_tasks) summary
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
@@ -745,7 +745,7 @@ let claim_task_r config ~agent_name ~task_id
             write_backlog config new_backlog;
             update_local_agent_state config ~agent_name (fun agent ->
               { agent with status = Busy; current_task = Some task_id });
-            ignore (broadcast config ~from_agent:agent_name ~content:(Printf.sprintf "📋 Claimed %s" task_id));
+            let _ = broadcast config ~from_agent:agent_name ~content:(Printf.sprintf "📋 Claimed %s" task_id) in
             emit_task_activity config ~agent_name ~task_id ~kind:(Event_kind.Task.to_string Event_kind.Task.Claimed)
               ~payload:(`Assoc [ ("task_id", `String task_id) ]);
             log_event config

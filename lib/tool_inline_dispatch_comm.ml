@@ -34,10 +34,7 @@ let handle_broadcast (ctx : context) : tool_result option =
     Some (false, Printf.sprintf "Rate limited. %d sec remaining." wait_secs)
   else begin
     let trace_context = Otel_trace_context.from_ambient () in
-    match Coord.broadcast ?trace_context config ~from_agent:agent_name ~content:message with
-    | Error err ->
-        Some (false, Printf.sprintf "Broadcast failed: %s" err)
-    | Ok _broadcast_id ->
+    let _ = Coord.broadcast ?trace_context config ~from_agent:agent_name ~content:message in
         let mention = Mention.extract message in
         let _ = Session.push_message registry ~from_agent:agent_name ~content:message ~mention in
         let notification_fields = [

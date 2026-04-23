@@ -162,8 +162,6 @@ let semaphore_wait_timeout_sec =
     ~default:60.0 ~min_v:5.0 ~max_v:600.0
 ;;
 
-exception Semaphore_wait_timeout of float
-
 (** Per-keeper record of the last autonomous turn completion timestamp.
     Used by the fairness cooldown to prevent a fast-cycling keeper from
     monopolizing the autonomous slot when peers are waiting.

@@ -861,6 +861,8 @@ interface KeeperConfigExecution {
   active_model: string
   active_model_label?: string | null
   last_model_used_label?: string | null
+  per_provider_timeout_sec?: number | null
+  per_provider_timeout_mode: 'override' | 'turn_budget_heuristic' | string
   verify: boolean
   selected_cascade_name: string
   selected_cascade_canonical: string

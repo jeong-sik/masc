@@ -64,6 +64,10 @@ export function actionTypeLabel(value?: string | null): string {
       return '키퍼 점검'
     case 'keeper_recover':
       return '키퍼 복구'
+    case 'keeper_github_identity_status':
+      return 'GitHub 인증 상태'
+    case 'keeper_github_identity_login_prepare':
+      return 'GitHub 로그인 준비'
     default:
       return value?.trim() || '액션'
   }
@@ -162,8 +166,8 @@ export function workflowTargetReady(
 }
 
 export async function executeAction(input: {
-  action_type: 'broadcast' | 'namespace_pause' | 'namespace_resume' | 'room_pause' | 'room_resume' | 'social_sweep' | 'task_inject' | 'keeper_message' | 'keeper_probe' | 'keeper_recover'
-  target_type: 'root' | 'namespace' | 'room' | 'keeper'
+  action_type: string
+  target_type: 'root' | 'namespace' | 'room' | 'keeper' | string
   target_id?: string
   payload: Record<string, unknown>
   successMessage: string

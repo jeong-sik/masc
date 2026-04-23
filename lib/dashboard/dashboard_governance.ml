@@ -17,6 +17,9 @@ let judge_json_of_runtime (runtime : Dashboard_governance_judge.runtime_snapshot
     [
       ("judge_online", `Bool runtime.judge_online);
       ("refreshing", `Bool runtime.refreshing);
+      ("status", `String runtime.status);
+      ("degraded_reason", string_option_json runtime.degraded_reason);
+      ("cached_judgments_visible", `Bool runtime.cached_judgments_visible);
       ("generated_at", timestamp_option_json runtime.generated_at runtime.generated_at_unix);
       ("expires_at", timestamp_option_json runtime.expires_at runtime.expires_at_unix);
       ("model_used", string_option_json runtime.model_used);

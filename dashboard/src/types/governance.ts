@@ -147,6 +147,9 @@ export interface GovernanceTimelineEvent {
 export interface GovernanceJudgeSummary {
   judge_online?: boolean
   refreshing?: boolean
+  status?: 'online' | 'refreshing' | 'stale_visible' | 'offline' | 'backoff' | string
+  degraded_reason?: 'timeout' | 'error' | 'backoff' | string | null
+  cached_judgments_visible?: boolean
   generated_at?: string | null
   expires_at?: string | null
   model_used?: string | null

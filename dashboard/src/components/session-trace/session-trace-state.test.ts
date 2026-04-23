@@ -201,6 +201,132 @@ describe('buildTraceEvents', () => {
     expect(kinds).toEqual(['broadcast', 'tool_call'])
   })
 
+  it('maps timeline tool_call activity into tool_call traces', () => {
+    const events = buildTraceEvents(
+      {
+        agent: 'test',
+        period: { from: '', to: '' },
+        events: [{
+          type: 'tool_call',
+          ts: '2024-04-06T10:00:00Z',
+          detail: {
+            tool_name: 'keeper_fs_read',
+            duration_ms: 42,
+            tool_args_preview: '{"path":"/tmp/test.txt"}',
+          },
+        }],
+        summary: { tasks_completed: 0, tasks_claimed: 0, messages_sent: 0, active_duration_minutes: 0, total_events: 1 },
+      },
+      null,
+    )
+    expect(events).toHaveLength(1)
+    expect(events[0]!.kind).toBe('tool_call')
+    expect(events[0]!.summary).toBe('keeper_fs_read')
+    expect(events[0]!.toolArgs).toBe('{"path":"/tmp/test.txt"}')
+  })
+
+  it('enriches trajectory rows from tool-call log and suppresses shallow timeline duplicates', () => {
+    const events = buildTraceEvents(
+      {
+        agent: 'test',
+        period: { from: '', to: '' },
+        events: [{
+          type: 'tool_call',
+          ts: '2024-04-06T10:01:40Z',
+          detail: {
+            tool_name: 'keeper_fs_read',
+            success: true,
+            duration_ms: 50,
+            tool_args_preview: '{"path":"/tmp/preview.txt"}',
+          },
+        }],
+        summary: { tasks_completed: 0, tasks_claimed: 0, messages_sent: 0, active_duration_minutes: 0, total_events: 1 },
+      },
+      {
+        keeper: 'test',
+        trace_id: 'trace-1',
+        generation: 1,
+        total_entries: 1,
+        showing: 1,
+        entries: [{
+          ts: 1712397700,
+          ts_iso: '2024-04-06T10:01:40Z',
+          turn: 1,
+          round: 1,
+          tool_name: 'keeper_fs_read',
+          args: { file_path: '/tmp/trajectory.txt' },
+          result: 'trajectory result',
+          duration_ms: 50,
+          gate: { status: 'pass' },
+          cost_usd: 0.001,
+          error: null,
+        }],
+      },
+      {
+        keeper: 'test',
+        count: 1,
+        entries: [{
+          ts: 1712397700,
+          keeper: 'test',
+          tool: 'keeper_fs_read',
+          input: { file_path: '/tmp/full.txt' },
+          output: 'full file contents',
+          success: true,
+          duration_ms: 50,
+          trace_id: 'trace-1',
+          session_id: 'trace-1',
+          turn: 1,
+          keeper_turn_id: 1,
+          task_id: 'task-1',
+          lane: 'runtime_mcp',
+        }],
+      },
+    )
+    const toolEvents = events.filter(e => e.kind === 'tool_call')
+    expect(toolEvents).toHaveLength(1)
+    expect(toolEvents[0]!.toolArgs).toEqual({ file_path: '/tmp/full.txt' })
+    expect(toolEvents[0]!.toolResult).toBe('full file contents')
+    expect(toolEvents[0]!.detail.trace_origin).toBe('trajectory+tool_call_log')
+    expect(toolEvents[0]!.detail.lane).toBe('runtime_mcp')
+  })
+
+  it('creates synthetic tool_call rows from tool-call log when trajectory is missing', () => {
+    const events = buildTraceEvents(
+      {
+        agent: 'test',
+        period: { from: '', to: '' },
+        events: [],
+        summary: { tasks_completed: 0, tasks_claimed: 0, messages_sent: 0, active_duration_minutes: 0, total_events: 0 },
+      },
+      null,
+      {
+        keeper: 'test',
+        count: 1,
+        entries: [{
+          ts: 1712397700,
+          keeper: 'test',
+          tool: 'keeper_bash',
+          input: { cmd: 'false' },
+          output: 'command exited 1',
+          success: false,
+          duration_ms: 120,
+          trace_id: 'trace-2',
+          session_id: 'trace-2',
+          turn: 3,
+          keeper_turn_id: 3,
+          task_id: 'task-2',
+          lane: 'runtime_mcp',
+        }],
+      },
+    )
+    expect(events).toHaveLength(1)
+    expect(events[0]!.kind).toBe('tool_call')
+    expect(events[0]!.toolName).toBe('keeper_bash')
+    expect(events[0]!.error).toBe('command exited 1')
+    expect(events[0]!.detail.trace_origin).toBe('tool_call_log')
+    expect(events[0]!.detail.lane).toBe('runtime_mcp')
+  })
+
   it('maps keeper contract verdict activity into lifecycle trace events', () => {
     const events = buildTraceEvents(
       {

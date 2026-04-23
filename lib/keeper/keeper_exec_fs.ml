@@ -232,7 +232,7 @@ let handle_keeper_fs_edit
                         ~timeout_sec:30.0 ()
                     with
                     | Ok () -> ()
-                    | Error msg -> raise (Sys_error msg))
+                    | Error msg -> error_json ~fields:[ "path", `String target ] msg)
                  | None ->
                    Fs_compat.save_file target updated);
                 Log.Keeper.info
@@ -275,14 +275,14 @@ let handle_keeper_fs_edit
                   ~host_path:target ~content ~timeout_sec:30.0 ()
               with
               | Ok () -> ()
-              | Error msg -> raise (Sys_error msg))
+              | Error msg -> error_json ~fields:[ "path", `String target ] msg)
            | Overwrite ->
              (match
                 Keeper_turn_sandbox_runtime.overwrite_file runtime
                   ~host_path:target ~content ~timeout_sec:30.0 ()
               with
               | Ok () -> ()
-              | Error msg -> raise (Sys_error msg))
+              | Error msg -> error_json ~fields:[ "path", `String target ] msg)
            | Patch -> ())
         | None ->
           let parent = Filename.dirname target in

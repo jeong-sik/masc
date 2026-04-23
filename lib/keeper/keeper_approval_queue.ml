@@ -248,13 +248,11 @@ let load_rules_unlocked ?base_path () =
       entries |> List.filter_map approval_rule_of_yojson
   | _ -> []
 
-let save_rules_unlocked ?base_path rules =
+let save_rules_unlocked ?base_path rules : (unit, string) result =
   let path = rules_path ?base_path () in
   Fs_compat.mkdir_p (Filename.dirname path);
   let json = `List (List.map approval_rule_to_yojson rules) in
-  match Fs_compat.save_file_atomic path (Yojson.Safe.pretty_to_string json) with
-  | Ok () -> ()
-  | Error msg -> raise (Sys_error msg)
+  Fs_compat.save_file_atomic path (Yojson.Safe.pretty_to_string json)
 
 let list_rules ?base_path () =
   with_rules_lock (fun () -> load_rules_unlocked ?base_path ())
@@ -315,7 +313,10 @@ let upsert_rule ?base_path ~keeper_name ~tool_name ~input ~risk_level
     match List.find_opt (fun rule -> rule_identity_matches rule candidate) rules with
     | Some existing -> (existing, false)
     | None ->
-        save_rules_unlocked ?base_path (candidate :: rules);
+        (match save_rules_unlocked ?base_path (candidate :: rules) with
+         | Ok () -> ()
+         | Error msg ->
+           Log.Keeper.warn "upsert_rule: save failed: %s" msg);
         (candidate, true))
 
 let delete_rule ~id =
@@ -327,8 +328,9 @@ let delete_rule ~id =
         let remaining =
           List.filter (fun rule -> not (String.equal rule.id id)) rules
         in
-        save_rules_unlocked remaining;
-        Ok deleted)
+        (match save_rules_unlocked remaining with
+         | Ok () -> Ok deleted
+         | Error msg -> Error msg))
 
 let find_matching_rule ?base_path ~keeper_name ~tool_name ~input ~risk_level
     ?runtime_contract () =
@@ -363,7 +365,10 @@ let find_matching_rule ?base_path ~keeper_name ~tool_name ~input ~risk_level
               else current)
             rules
         in
-        save_rules_unlocked ?base_path updated_rules;
+        (match save_rules_unlocked ?base_path updated_rules with
+         | Ok () -> ()
+         | Error msg ->
+           Log.Keeper.warn "find_matching_rule: save failed: %s" msg);
         Some { rule_id = rule.id; matched_by = "always_rule" })
 
 (* ── Persistent audit log ────────────────────────────────── *)

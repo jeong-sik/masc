@@ -126,12 +126,20 @@ let test_kv_cache_assessment_requires_two_successful_runs () =
 let test_generate_probe_is_skipped_after_failed_preflight () =
   check bool "ps preflight error skips generate" false
     (Masc_mcp.Tool_local_runtime_probe.should_attempt_generate_probe
-       ~before_status:None
-       ~before_error:(Some "curl exit code 28"));
+       ~before_status:None ~before_error:(Some "curl exit code 28")
+       ~generate_when_unloaded:true ~effective_model_loaded_before:true);
   check bool "successful ps allows generate" true
     (Masc_mcp.Tool_local_runtime_probe.should_attempt_generate_probe
-       ~before_status:(Some 200)
-       ~before_error:None)
+       ~before_status:(Some 200) ~before_error:None
+       ~generate_when_unloaded:true ~effective_model_loaded_before:false);
+  check bool "successful ps skips cold model when disabled" false
+    (Masc_mcp.Tool_local_runtime_probe.should_attempt_generate_probe
+       ~before_status:(Some 200) ~before_error:None
+       ~generate_when_unloaded:false ~effective_model_loaded_before:false);
+  check bool "resident model can still be probed when cold load disabled" true
+    (Masc_mcp.Tool_local_runtime_probe.should_attempt_generate_probe
+       ~before_status:(Some 200) ~before_error:None
+       ~generate_when_unloaded:false ~effective_model_loaded_before:true)
 
 let () =
   run "tool_local_runtime_probe"

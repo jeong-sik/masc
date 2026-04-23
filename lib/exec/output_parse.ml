@@ -3,60 +3,19 @@
    JSON.  No side effects, no I/O.  Each parser returns [Some json] on a
    confident match or [None] to decline (fail-open). *)
 
-(* --- helpers --- *)
+(* --- module-level regexes for git diff --stat --- *)
 
-let split_lines s =
-  let len = String.length s in
-  if len = 0 then []
-  else
-    let buf = Buffer.create 64 in
-    let lines = ref [] in
-    String.iter
-      (fun ch ->
-        if ch = '\n' then (
-          lines := Buffer.contents buf :: !lines;
-          Buffer.clear buf)
-        else Buffer.add_char buf ch)
-      s;
-    let last = Buffer.contents buf in
-    if last <> "" then lines := last :: !lines;
-    List.rev !lines
-
-let trim s =
-  let len = String.length s in
-  let start = ref 0 in
-  while !start < len && (s.[!start] = ' ' || s.[!start] = '\t') do
-    incr start
-  done;
-  let stop = ref (len - 1) in
-  while !stop >= !start && (s.[!stop] = ' ' || s.[!stop] = '\t') do
-    decr stop
-  done;
-  String.sub s !start (!stop - !start + 1)
-
-let starts_with s prefix =
-  String.length s >= String.length prefix
-  && String.sub s 0 (String.length prefix) = prefix
-
-let contains_substring s sub =
-  let sub_len = String.length sub in
-  let s_len = String.length s in
-  if sub_len = 0 then true
-  else if sub_len > s_len then false
-  else
-    let found = ref false in
-    for i = 0 to s_len - sub_len do
-      if not !found
-         && String.sub s i sub_len = sub
-      then found := true
-    done;
-    !found
+let files_changed_re = Re.Pcre.re {|\b(\d+) file|} |> Re.compile
+let insertions_re = Re.Pcre.re {|\b(\d+) insertion|} |> Re.compile
+let deletions_re = Re.Pcre.re {|\b(\d+) deletion|} |> Re.compile
 
 (* --- git status --porcelain --- *)
 
-let parse_git_status_porcelean output =
+let parse_git_status_porcelain output =
   let lines =
-    split_lines output |> List.filter (fun line -> trim line <> "")
+    String.split_on_char '\n' output
+    |> List.map String.trim
+    |> List.filter (fun line -> line <> "")
   in
   if lines = [] then None
   else
@@ -66,7 +25,7 @@ let parse_git_status_porcelean output =
         if String.length line < 2 then ()
         else
           let xy = String.sub line 0 2 in
-          let path = trim (String.sub line 2 (String.length line - 2)) in
+          let path = String.trim (String.sub line 2 (String.length line - 2)) in
           (* XY format: X=index, Y=worktree *)
           match xy.[0], xy.[1] with
           | '?', '?' -> untracked := path :: !untracked
@@ -94,7 +53,7 @@ let parse_git_status_porcelean output =
 (* --- git log --oneline --- *)
 
 let parse_git_log_oneline output =
-  let lines = split_lines (trim output) in
+  let lines = String.split_on_char '\n' (String.trim output) in
   if lines = [] then None
   else
     let commits = ref [] in
@@ -114,7 +73,7 @@ let parse_git_log_oneline output =
           if sp = 0 || sp >= len then ()
           else
             let hash = String.sub line 0 sp in
-            let msg = trim (String.sub line (sp + 1) (len - sp - 1)) in
+            let msg = String.trim (String.sub line (sp + 1) (len - sp - 1)) in
             commits := `Assoc [ ("hash", `String hash); ("message", `String msg) ]
                        :: !commits)
       lines;
@@ -125,7 +84,7 @@ let parse_git_log_oneline output =
 (* --- git diff --stat --- *)
 
 let parse_git_diff_stat output =
-  let lines = split_lines (trim output) in
+  let lines = String.split_on_char '\n' (String.trim output) in
   if lines = [] then None
   else
     match List.rev lines with
@@ -133,59 +92,42 @@ let parse_git_diff_stat output =
     | last :: _ ->
         (* last line: " N files changed, M insertions(+), D deletions(-)" *)
         let lower = String.lowercase_ascii last in
-        if not (contains_substring lower " file changed"
-                || contains_substring lower " files changed")
-        then
-          None
+        if not (String_util.contains_substring lower " file changed")
+        then None
         else
-          let files_changed = ref 0 and insertions = ref 0 and deletions = ref 0 in
-          let update_if_found target re =
-            try
-              ignore (Str.search_forward re last 0);
-              target := int_of_string (Str.matched_group 1 last)
-            with
-            | Not_found
-            | Failure _ -> ()
+          let extract re =
+            match Re.exec_opt re lower with
+            | Some g -> (try int_of_string (Re.Group.get g 1) with _ -> 0)
+            | None -> 0
           in
-          (* parse "N file(s) changed" *)
-          update_if_found files_changed (Str.regexp {|\([0-9]+\) file|});
-          (* parse "M insertion(s)(+)" *)
-          update_if_found insertions (Str.regexp {|\([0-9]+\) insertion|});
-          (* parse "D deletion(s)(-)" *)
-          update_if_found deletions (Str.regexp {|\([0-9]+\) deletion|});
-          Some
-            (`Assoc
-               [
-                 ("files_changed", `Int !files_changed);
-                 ("insertions", `Int !insertions);
-                 ("deletions", `Int !deletions);
-               ])
+          let files_changed = extract files_changed_re in
+          let insertions = extract insertions_re in
+          let deletions = extract deletions_re in
+          if files_changed = 0 && insertions = 0 && deletions = 0 then None
+          else
+            Some
+              (`Assoc
+                 [
+                   ("files_changed", `Int files_changed);
+                   ("insertions", `Int insertions);
+                   ("deletions", `Int deletions);
+                 ])
 
 (* --- wc -l --- *)
 
 let parse_wc_lines output =
-  let line = trim output in
+  let line = String.trim output in
   if line = "" then None
   else
     (* format: "    1234 filename" or just "1234" *)
-    let tokens = split_lines line in
+    let tokens = String.split_on_char '\n' line in
     match tokens with
     | [] -> None
     | first :: _ ->
         let words =
-          let parts = ref [] in
-          let buf = Buffer.create 16 in
-          String.iter
-            (fun ch ->
-              if ch = ' ' || ch = '\t' then (
-                if Buffer.length buf > 0 then (
-                  parts := Buffer.contents buf :: !parts;
-                  Buffer.clear buf))
-              else Buffer.add_char buf ch)
-            first;
-          let last = Buffer.contents buf in
-          if last <> "" then parts := last :: !parts;
-          List.rev !parts
+          String.split_on_char ' ' first
+          |> List.map String.trim
+          |> List.filter (fun s -> s <> "")
         in
         match words with
         | [] -> None
@@ -196,15 +138,15 @@ let parse_wc_lines output =
 (* --- ls -la --- *)
 
 let parse_ls_long output =
-  let lines = split_lines (trim output) in
+  let lines = String.split_on_char '\n' (String.trim output) in
   if lines = [] then None
   else
     let entries = ref [] in
     List.iter
       (fun line ->
-        let line = trim line in
+        let line = String.trim line in
         (* skip "total N" line *)
-        if starts_with line "total" then ()
+        if String.starts_with ~prefix:"total" line then ()
         else
           (* format: "drwxr-xr-x  2 user group  4096 Jan 1 12:00 dirname" *)
           let len = String.length line in
@@ -214,31 +156,23 @@ let parse_ls_long output =
             (* skip if perms doesn't look like drwx... or -rw... *)
             if perms.[0] <> 'd' && perms.[0] <> '-' && perms.[0] <> 'l' then ()
             else
-              let rest = trim (String.sub line 10 (len - 10)) in
-              let parts = ref [] in
-              let buf = Buffer.create 32 in
-              String.iter
-                (fun ch ->
-                  if ch = ' ' || ch = '\t' then (
-                    if Buffer.length buf > 0 then (
-                      parts := Buffer.contents buf :: !parts;
-                      Buffer.clear buf))
-                  else Buffer.add_char buf ch)
-                rest;
-              let last = Buffer.contents buf in
-              if last <> "" then parts := last :: !parts;
-              let parts = List.rev !parts in
+              let rest = String.trim (String.sub line 10 (len - 10)) in
+              let parts =
+                String.split_on_char ' ' rest
+                |> List.map String.trim
+                |> List.filter (fun s -> s <> "")
+              in
               (* parts: [nlink, user, group, size, month, day, time/year, name...] *)
               (match parts with
               | _nlink :: _user :: _group :: size_str :: _m :: _d :: _t :: name_parts ->
                   let name = String.concat " " name_parts in
                   (try
-                    entries :=
-                      `Assoc
-                        [ ("perms", `String perms); ("size", `Int (int_of_string size_str))
-                        ; ("name", `String name) ]
-                      :: !entries
-                  with _ -> ())
+                     entries :=
+                       `Assoc
+                         [ ("perms", `String perms); ("size", `Int (int_of_string size_str))
+                         ; ("name", `String name) ]
+                       :: !entries
+                   with _ -> ())
               | _ -> ()))
       lines;
     let n = List.length !entries in
@@ -251,27 +185,27 @@ let parse_dune_test output =
   (* dune runtest outputs like:
      "Test src/...: ok" or "...FAILED..."
      Summary line may not exist, so count individual results. *)
-  let lines = split_lines (trim output) in
+  let lines = String.split_on_char '\n' (String.trim output) in
   let passed = ref 0 and failed = ref 0 and skipped = ref 0 in
   List.iter
     (fun line ->
-      let trimmed = trim line in
+      let trimmed = String.trim line in
       let l = String.lowercase_ascii trimmed in
-      if starts_with l "test " && (starts_with (trim (String.sub l 5 (String.length l - 5))) "src/"
-                                   || starts_with (trim (String.sub l 5 (String.length l - 5))) "test/") then
-        if starts_with l "test " then
-          (* check for ok/failed at end *)
+      if String.starts_with ~prefix:"test " l then
+        let rest = String.trim (String.sub l 5 (String.length l - 5)) in
+        if String.starts_with ~prefix:"src/" rest
+           || String.starts_with ~prefix:"test/" rest
+        then
           let len = String.length l in
           if len >= 3 && String.sub l (len - 2) 2 = "ok" then incr passed
-          else if starts_with l "test " && String.length trimmed > 5 then begin
+          else if String.length trimmed > 5 then begin
             (* look for FAILED or ERROR in the line *)
-            if contains_substring l "failed" then incr failed
-            else if contains_substring l "error" then incr failed
+            if String_util.contains_substring l "failed" then incr failed
+            else if String_util.contains_substring l "error" then incr failed
           end
-      else if starts_with l "  " then ()
-      else if starts_with l "error:" then incr failed
-      else ()
-    )
+      else if String.starts_with ~prefix:"  " l then ()
+      else if String.starts_with ~prefix:"error:" l then incr failed
+      else ())
     lines;
   let total = !passed + !failed + !skipped in
   if total = 0 then None
@@ -294,21 +228,12 @@ type parser_kind =
   | Ls_long
   | Dune_test
 
-let classify_for_parsing ~cmd ~output =
+let classify_for_parsing ~cmd ~_output =
   let tokens =
-    let parts = ref [] in
-    let buf = Buffer.create 32 in
-    String.iter
-      (fun ch ->
-        if ch = ' ' || ch = '\t' then (
-          if Buffer.length buf > 0 then (
-            parts := Buffer.contents buf :: !parts;
-            Buffer.clear buf))
-        else Buffer.add_char buf ch)
-      (trim cmd);
-    let last = Buffer.contents buf in
-    if last <> "" then parts := last :: !parts;
-    List.rev !parts
+    String.trim cmd
+    |> String.split_on_char ' '
+    |> List.map String.trim
+    |> List.filter (fun s -> s <> "")
   in
   match tokens with
   | [] -> None
@@ -327,7 +252,9 @@ let classify_for_parsing ~cmd ~output =
             Some Wc_lines
           else None
       | "ls" ->
-          if List.exists (fun t -> t = "-l" || t = "-la" || t = "-al" || t = "-lah" || t = "-lha") rest then
+          if List.exists (fun t ->
+            t = "-l" || t = "-la" || t = "-al" || t = "-lah" || t = "-lha"
+          ) rest then
             Some Ls_long
           else None
       | "dune" ->
@@ -337,9 +264,9 @@ let classify_for_parsing ~cmd ~output =
       | _ -> None
 
 let try_parse ~cmd ~output =
-  match classify_for_parsing ~cmd ~output with
+  match classify_for_parsing ~cmd ~_output:output with
   | None -> None
-  | Some Git_status -> parse_git_status_porcelean output
+  | Some Git_status -> parse_git_status_porcelain output
   | Some Git_log_oneline -> parse_git_log_oneline output
   | Some Git_diff_stat -> parse_git_diff_stat output
   | Some Wc_lines -> parse_wc_lines output

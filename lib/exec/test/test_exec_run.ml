@@ -92,17 +92,11 @@ let test_slow_command_promotes () =
     (* We saw "early" but not "late" — budget fires before sleep 5
        resolves.  Killing cleans up the long sleep. *)
     let saw_early =
-      try
-        let _ = Str.search_forward (Str.regexp "early") p.partial_stdout 0 in
-        true
-      with Not_found -> false
+      Base.String.is_substring p.partial_stdout ~substring:"early"
     in
     check bool "saw early output" true saw_early;
     let saw_late =
-      try
-        let _ = Str.search_forward (Str.regexp "late") p.partial_stdout 0 in
-        true
-      with Not_found -> false
+      Base.String.is_substring p.partial_stdout ~substring:"late"
     in
     check bool "did not see late output" false saw_late;
     let _ = Bg_task.kill p.task_id ~signal:Sys.sigterm ~grace_sec:0.2 in

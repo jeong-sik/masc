@@ -313,19 +313,17 @@ let pair_events rows : pair_result list =
    Needed because OAS events don't carry a compaction-scoped correlation. *)
 module Pending = struct
   let tbl : (string, string * float) Hashtbl.t = Hashtbl.create 16
-  let mu = Mutex.create ()
+  let mu = Eio.Mutex.create ()
 
   let stash ~keeper_name ~compaction_id ~ts =
-    Mutex.lock mu;
-    Hashtbl.replace tbl keeper_name (compaction_id, ts);
-    Mutex.unlock mu
+    Eio.Mutex.use_rw ~protect:true mu (fun () ->
+      Hashtbl.replace tbl keeper_name (compaction_id, ts))
 
   let take ~keeper_name =
-    Mutex.lock mu;
-    let r = Hashtbl.find_opt tbl keeper_name in
-    (match r with Some _ -> Hashtbl.remove tbl keeper_name | None -> ());
-    Mutex.unlock mu;
-    r
+    Eio.Mutex.use_rw ~protect:true mu (fun () ->
+      let r = Hashtbl.find_opt tbl keeper_name in
+      (match r with Some _ -> Hashtbl.remove tbl keeper_name | None -> ());
+      r)
 end
 
 (* Translate one OAS event into zero or one persist_* effect. *)

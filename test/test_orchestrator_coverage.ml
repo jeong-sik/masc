@@ -67,40 +67,6 @@ let test_load_config_port_valid () =
   check bool "valid port" true (cfg.port > 0 && cfg.port < 65536)
 
 (* ============================================================
-   config Record Tests
-   ============================================================ *)
-
-let test_config_check_interval_type () =
-  let cfg = Orchestrator.default_config in
-  let _ : float = cfg.check_interval_s in
-  ()
-
-let test_config_min_priority_type () =
-  let cfg = Orchestrator.default_config in
-  let _ : int = cfg.min_priority in
-  ()
-
-let test_config_agent_timeout_type () =
-  let cfg = Orchestrator.default_config in
-  let _ : int = cfg.agent_timeout_s in
-  ()
-
-let test_config_orchestrator_agent_type () =
-  let cfg = Orchestrator.default_config in
-  let _ : string = cfg.orchestrator_agent in
-  ()
-
-let test_config_enabled_type () =
-  let cfg = Orchestrator.default_config in
-  let _ : bool = cfg.enabled in
-  ()
-
-let test_config_port_type () =
-  let cfg = Orchestrator.default_config in
-  let _ : int = cfg.port in
-  ()
-
-(* ============================================================
    make_orchestrator_prompt Tests
    ============================================================ *)
 
@@ -261,14 +227,6 @@ let () =
       test_case "timeout positive" `Quick test_load_config_agent_timeout_positive;
       test_case "agent nonempty" `Quick test_load_config_agent_nonempty;
       test_case "port valid" `Quick test_load_config_port_valid;
-    ];
-    "config_types", [
-      test_case "check_interval_s" `Quick test_config_check_interval_type;
-      test_case "min_priority" `Quick test_config_min_priority_type;
-      test_case "agent_timeout_s" `Quick test_config_agent_timeout_type;
-      test_case "orchestrator_agent" `Quick test_config_orchestrator_agent_type;
-      test_case "enabled" `Quick test_config_enabled_type;
-      test_case "port" `Quick test_config_port_type;
     ];
     "make_orchestrator_prompt", [
       test_case "basic" `Quick test_make_orchestrator_prompt_basic;

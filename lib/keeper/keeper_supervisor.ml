@@ -144,10 +144,18 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
            Keeper_keepalive.run_heartbeat_loop ~proactive_warmup_sec
              ctx meta reg.fiber_stop ~wakeup:reg.fiber_wakeup;
            (* Normal exit: stop flag was set — dispatch typed events *)
-           ignore (Keeper_registry.dispatch_event ~base_path meta.name
-             Keeper_state_machine.Stop_requested);
-           ignore (Keeper_registry.dispatch_event ~base_path meta.name
-             Keeper_state_machine.Drain_complete);
+           (match Keeper_registry.dispatch_event ~base_path meta.name
+              Keeper_state_machine.Stop_requested with
+            | Ok _ -> ()
+            | Error e ->
+                Log.Keeper.warn "supervisor: Stop_requested dispatch failed: %s"
+                  (Keeper_state_machine.transition_error_to_string e));
+           (match Keeper_registry.dispatch_event ~base_path meta.name
+              Keeper_state_machine.Drain_complete with
+            | Ok _ -> ()
+            | Error e ->
+                Log.Keeper.warn "supervisor: Drain_complete dispatch failed: %s"
+                  (Keeper_state_machine.transition_error_to_string e));
            if resolve_done `Stopped then
              publish_phase_lifecycle ~phase:Keeper_state_machine.Stopped
                meta.name "normal exit" ()
@@ -171,8 +179,12 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
              in
              let reason = Keeper_registry.failure_reason_to_string fr in
              Keeper_registry.set_failure_reason ~base_path meta.name (Some fr);
-             ignore (Keeper_registry.dispatch_event ~base_path meta.name
-               (Keeper_state_machine.Fiber_terminated { outcome = reason }));
+             (match Keeper_registry.dispatch_event ~base_path meta.name
+                (Keeper_state_machine.Fiber_terminated { outcome = reason }) with
+              | Ok _ -> ()
+              | Error e ->
+                  Log.Keeper.warn "supervisor: Fiber_terminated dispatch failed: %s"
+                    (Keeper_state_machine.transition_error_to_string e));
              let ts = Time_compat.now () in
              Keeper_registry.record_crash ~base_path
                meta.name ts reason;

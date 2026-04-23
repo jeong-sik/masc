@@ -149,19 +149,18 @@ type provider_state = {
 
 type t = {
   providers: (string, provider_state) Hashtbl.t;
-  mu: Mutex.t;
+  mu: Eio.Mutex.t;
 }
 
 (* ── Constructor ──────────────────────────────── *)
 
 let create () : t = {
   providers = Hashtbl.create 8;
-  mu = Mutex.create ();
+  mu = Eio.Mutex.create ();
 }
 
 let with_lock t f =
-  Mutex.lock t.mu;
-  Fun.protect ~finally:(fun () -> Mutex.unlock t.mu) f
+  Eio.Mutex.use_rw ~protect:true t.mu (fun () -> f ())
 
 let get_or_create_state t key =
   match Hashtbl.find_opt t.providers key with

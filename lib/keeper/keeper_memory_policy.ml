@@ -137,6 +137,7 @@ type memory_bank_compaction = {
   dropped_notes: int;
   dedup_dropped: int;
   invalid_dropped: int;
+  dropped_by_kind: (string * int) list;
 }
 
 let no_memory_bank_compaction = {
@@ -148,6 +149,7 @@ let no_memory_bank_compaction = {
   dropped_notes = 0;
   dedup_dropped = 0;
   invalid_dropped = 0;
+  dropped_by_kind = [];
 }
 
 let keeper_memory_schema_version = 2

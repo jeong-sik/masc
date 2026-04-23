@@ -458,6 +458,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           last_need = "";
         };
       keeper_id = None;
+      oas_env = p.profile_defaults.oas_env;
       meta_version = 0;
       } in
       Progress.Tracker.step tracker ~message:"Saving initial checkpoint" ();
@@ -552,5 +553,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           ("max_context_override", Json_util.int_opt_to_json meta.max_context_override);
           ("auto_handoff", `Bool meta.auto_handoff);
           ("handoff_threshold", `Float meta.handoff_threshold);
+          ("oas_env", `Assoc (List.map (fun (k, v) -> (k, `String v)) meta.oas_env));
         ] in
         (true, Yojson.Safe.to_string json)

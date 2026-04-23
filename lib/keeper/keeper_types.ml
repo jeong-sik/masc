@@ -270,6 +270,7 @@ type keeper_meta =
     runtime : agent_runtime_state
   ; (* -- Identity & concurrency -- *)
     keeper_id : Keeper_id.Uid.t option
+  ; oas_env : (string * string) list
   ; meta_version : int
   }
 
@@ -911,6 +912,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "keeper_id", (match m.keeper_id with
       | Some uid -> Keeper_id.uid_to_yojson uid
       | None -> `Null)
+    ; "oas_env", `Assoc (List.map (fun (k, v) -> (k, `String v)) m.oas_env)
     ; "meta_version", `Int m.meta_version
     ]
 ;;
@@ -1484,6 +1486,13 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
              ; telemetry_feedback_enabled = Safe_ops.json_bool_opt "telemetry_feedback_enabled" json
              ; telemetry_feedback_window_hours = Safe_ops.json_int_opt "telemetry_feedback_window_hours" json
              ; runtime = state.ps_runtime
+             ; oas_env =
+                 (match Yojson.Safe.Util.member "oas_env" json with
+                  | `Assoc fields ->
+                    List.filter_map (function
+                      | (k, `String v) -> Some (k, v)
+                      | _ -> None) fields
+                  | _ -> [])
              ; keeper_id =
                  (match Safe_ops.json_string_opt "keeper_id" json with
                   | Some s ->
@@ -1600,6 +1609,7 @@ let fallback_canonical_keeper_meta_key_names =
   ; "telemetry_feedback_enabled"
   ; "telemetry_feedback_window_hours"
   ; "per_provider_timeout_s"
+  ; "oas_env"
   ]
 ;;
 

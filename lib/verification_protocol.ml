@@ -238,8 +238,9 @@ let check_timeouts ~(config : Coord.config) =
                ("assignee", `String assignee);
                ("timestamp", `Float now);
              ])
-           | _ -> ())
-        | _ -> ()
+           | Some _ -> ()
+           | None -> ())
+        | Todo | Claimed _ | InProgress _ | AwaitingVerification { deadline = None; _ } | Done _ | Cancelled _ -> ()
       ) backlog.tasks
     with
     | Eio.Cancel.Cancelled _ as e -> raise e

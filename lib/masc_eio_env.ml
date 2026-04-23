@@ -19,6 +19,6 @@ let init ~sw ~net ?clock () = Atomic.set env (Some { sw; net; clock })
 let get () =
   match Atomic.get env with
   | Some e -> e
-  | None -> raise (Failure "Masc_eio_env not initialized: call init at server startup")
+  | None -> invalid_arg "Masc_eio_env.get: not initialized. Call init at server startup."
 
 let get_opt () = Atomic.get env

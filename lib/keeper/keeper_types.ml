@@ -358,7 +358,10 @@ let () =
      | Proactive_mixed_response
      | Proactive_error -> ());
     let s = proactive_cycle_outcome_to_string v in
-    assert (proactive_cycle_outcome_of_string s = v)
+    if proactive_cycle_outcome_of_string s <> v then
+      invalid_arg
+        (Printf.sprintf
+           "keeper_types: proactive round-trip broken for label %S" s)
   in
   List.iter
     assert_roundtrip

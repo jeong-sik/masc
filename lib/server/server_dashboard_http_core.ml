@@ -373,7 +373,7 @@ let start_operator_digest_refresh_loop ~state ~sw ~clock =
           | Ok json ->
               with_projection_diagnostics ~surface:"operator_digest" ~started_at
                 ~extra:(operator_snapshot_extra ()) json
-          | Error err -> raise (Failure err))
+          | Error err -> invalid_arg ("server_dashboard_http_core: operator digest failed: " ^ err))
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->

@@ -40,7 +40,7 @@ let make_closing_client ~sw ~net ~https =
           (Uri.host_with_default ~default:"localhost" uri)
       with
       | ip :: _ -> ip
-      | [] -> raise (Failure "failed to resolve hostname")
+      | [] -> raise (Invalid_argument "masc_http_client: failed to resolve hostname")
     in
     let sock = Eio.Net.connect ~sw:conn_sw net addr in
     (* Return type must include `Close for cohttp-eio make_generic. *)
@@ -62,7 +62,7 @@ let make_closing_client ~sw ~net ~https =
                 :> [ `Close | `Flow | `R | `Shutdown | `W ] Eio.Resource.t)
               :: !tracked_flows;
             (wrapped :> [ `Close | `Flow | `R | `Shutdown | `W ] Eio.Resource.t))
-        | None -> raise (Failure "HTTPS requested but not enabled"))
+        | None -> raise (Invalid_argument "masc_http_client: HTTPS requested but not enabled"))
     | _ ->
         register_flow
           (sock :> [ `Close | `Flow | `R | `Shutdown | `W ] Eio.Resource.t)

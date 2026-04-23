@@ -710,15 +710,14 @@ let migrate_session_history_logs
       (match Fs_compat.save_file_atomic main_path (render_jsonl_lines kept_lines) with
        | Ok () -> ()
        | Error detail ->
-           raise (Failure (Printf.sprintf "save main history failed: %s" detail)));
+           invalid_arg (Printf.sprintf "keeper_context_core: save main history failed: %s" detail));
       (match
          Fs_compat.save_file_atomic internal_path
            (render_jsonl_lines merged_internal)
        with
        | Ok () -> ()
        | Error detail ->
-           raise (Failure
-                    (Printf.sprintf "save internal history failed: %s" detail)));
+           invalid_arg (Printf.sprintf "keeper_context_core: save internal history failed: %s" detail));
       {
         moved_lines = List.length moved_lines;
         dropped_lines = total_dropped;

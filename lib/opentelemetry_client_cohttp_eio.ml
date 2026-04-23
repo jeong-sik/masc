@@ -118,12 +118,12 @@ end = struct
     match Ca_certs.authenticator () with
     | Ok x -> x
     | Error (`Msg m) ->
-        Fmt.kstr (fun s -> raise (Failure s)) "Failed to create system store X509 authenticator: %s" m
+        invalid_arg (Printf.sprintf "opentelemetry_client: failed to create X509 authenticator: %s" m)
 
   let https ~authenticator =
     let tls_config =
       match Tls.Config.client ~authenticator () with
-      | Error (`Msg msg) -> raise (Failure ("tls configuration problem: " ^ msg))
+      | Error (`Msg msg) -> invalid_arg ("opentelemetry_client: tls configuration problem: " ^ msg)
       | Ok tls_config -> tls_config
     in
     fun uri raw ->

@@ -224,7 +224,7 @@ let send_notification ?(sound=false) ?focus_cmd ~title ~subtitle ~message () =
     send_via_terminal_notifier ~title ~subtitle ~message ~sound ~focus_cmd
   else begin
     send_via_osascript ~title ~subtitle ~message;
-    (try ignore (focus_on_osascript ())
+    (try let _ = focus_on_osascript () in ()
      with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Misc.error "focus_on_osascript failed: %s" (Printexc.to_string exn));
     (* NOTE: For osascript fallback, we intentionally do not execute focus_cmd.
        focus_cmd can contain arbitrary shell snippets (user-configured) and would

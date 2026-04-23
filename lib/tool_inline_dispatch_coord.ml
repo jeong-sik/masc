@@ -129,7 +129,7 @@ let handle_join (ctx : context) : tool_result option =
   let caps = arg_get_string_list ctx "capabilities" in
   let result = Coord.join config ~agent_name ~capabilities:caps () in
   (* GC: reap zombie agents on join. Best-effort. *)
-  (try ignore (Coord.cleanup_zombies config)
+  (try let _ = Coord.cleanup_zombies config in ()
    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
      Log.Gc.warn "[sid=%s] join GC failed: %s" sid (Printexc.to_string exn));
   (* Extract nickname from join result (format: "  Nickname: xxx\n...") *)

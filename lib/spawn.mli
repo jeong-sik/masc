@@ -54,7 +54,6 @@ type spawn_result = {
 
 val masc_mcp_tools : string list
 val masc_lifecycle_suffix : string
-val default_configs : (string * spawn_config) list
 val get_config : string -> spawn_config option
 
 (** {1 Output Parsing} *)

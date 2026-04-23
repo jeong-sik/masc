@@ -20,7 +20,9 @@ let wait_for_message_eio ~clock (registry : Session.registry) ~agent_name ~timeo
   (match Hashtbl.find_opt registry.Session.sessions agent_name with
    | Some _ -> ()
    | None ->
-       (try ignore (Session.register registry ~agent_name)
+       (try
+          let _session = Session.register registry ~agent_name in
+          ()
         with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_mcp_exn ~label:"session register (SSE) failed" exn));
   Session.update_activity registry ~agent_name ~is_listening:(Some true) ();
   let rec wait_loop () =

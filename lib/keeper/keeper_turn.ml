@@ -392,8 +392,10 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
             match run_result with
             | Error err ->
               let e_str = Oas.Error.to_string err in
-              (try ignore (Trajectory.finalize trajectory_acc
-                 (Trajectory.Failed e_str))
+              (try
+                 let _ = Trajectory.finalize trajectory_acc
+                   (Trajectory.Failed e_str) in
+                 ()
                with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_keeper_exn
                  ~label:"trajectory finalize (agent_run error)" exn);
               start_keepalive ctx meta;
@@ -403,8 +405,10 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
               let explicit_accountability_claim =
                 Keeper_social_model.extract_accountability_claim result
               in
-              (try ignore (Trajectory.finalize trajectory_acc
-                 Trajectory.Completed)
+              (try
+                 let _ = Trajectory.finalize trajectory_acc
+                   Trajectory.Completed in
+                 ()
                with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_keeper_exn
                  ~label:"trajectory finalize (agent_run ok)" exn);
               let lifecycle =

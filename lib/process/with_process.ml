@@ -14,7 +14,7 @@
     channels.  The close is best-effort; the primary contract is fd reclaim. *)
 
 let close_best_effort ic =
-  try ignore (Unix.close_process_in ic : Unix.process_status)
+  try let _ = (Unix.close_process_in ic : Unix.process_status) in ()
   with Unix.Unix_error _ | Sys_error _ | Failure _ -> ()
 
 let with_process_in cmd f =

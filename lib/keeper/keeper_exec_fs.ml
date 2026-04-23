@@ -176,6 +176,13 @@ exception Fs_edit_error of string
 let raise_fs_edit_error ?fields message =
   raise (Fs_edit_error (error_json ?fields message))
 
+let validate_write_target ~config ~meta ~target =
+  match
+    Keeper_sandbox_containment.check_write_target ~config ~meta ~target
+  with
+  | Ok () -> Ok ()
+  | Error e -> Error (error_json ~fields:[ "path", `String target ] e)
+
 let handle_keeper_fs_edit
       ~(turn_sandbox_runtime : Keeper_turn_sandbox_runtime.t option)
       ~(config : Coord.config)
@@ -213,6 +220,9 @@ let handle_keeper_fs_edit
       (match resolve_keeper_path ~config ~meta ~raw_path:path with
        | Error e -> error_json e
        | Ok target ->
+         (match validate_write_target ~config ~meta ~target with
+          | Error json -> json
+          | Ok () ->
          (try
             let current =
               try Fs_compat.load_file target
@@ -266,7 +276,7 @@ let handle_keeper_fs_edit
           | Sys_error e -> error_json ~fields:[ "path", `String target ] e
           | Unix.Unix_error (err, _, _) ->
             error_json ~fields:[ "path", `String target ]
-              (Unix.error_message err)))
+              (Unix.error_message err))))
   | Some ((Overwrite | Append) as mode) ->
   let mode_label = fs_write_mode_to_string mode in
   if String.trim content = "" then
@@ -275,6 +285,9 @@ let handle_keeper_fs_edit
   match resolve_keeper_path ~config ~meta ~raw_path:path with
   | Error e -> error_json e
   | Ok target ->
+    (match validate_write_target ~config ~meta ~target with
+     | Error json -> json
+     | Ok () ->
     (try
        let write_result =
          match turn_sandbox_runtime with
@@ -318,5 +331,5 @@ let handle_keeper_fs_edit
     | Invalid_argument e -> error_json ~fields:[ "path", `String target ] e
      | Sys_error e -> error_json ~fields:[ "path", `String target ] e
      | Unix.Unix_error (err, _, _) ->
-       error_json ~fields:[ "path", `String target ] (Unix.error_message err))
+       error_json ~fields:[ "path", `String target ] (Unix.error_message err)))
 ;;

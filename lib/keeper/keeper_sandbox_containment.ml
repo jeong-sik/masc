@@ -21,7 +21,7 @@ let is_hardened_profile = function
   | Keeper_types.Docker -> true
   | Keeper_types.Local -> false
 
-let check_read_target ~config ~meta ~target =
+let check_target ~operation ~config ~meta ~target =
   if not (is_hardened_profile meta.Keeper_types.sandbox_profile) then
     Ok ()
   else
@@ -32,7 +32,13 @@ let check_read_target ~config ~meta ~target =
       Error
         (Printf.sprintf
            "symmetric_sandbox_blocked: target %s is outside keeper playground \
-            %s. Keepers with sandbox_profile=docker may only read inside \
+            %s. Keepers with sandbox_profile=docker may only %s inside \
             their playground. Clone the source into your playground via \
             keeper_shell op=git_clone, or operate inside %s/repos/."
-           target_norm playground playground)
+           target_norm playground operation playground)
+
+let check_read_target ~config ~meta ~target =
+  check_target ~operation:"read" ~config ~meta ~target
+
+let check_write_target ~config ~meta ~target =
+  check_target ~operation:"write" ~config ~meta ~target

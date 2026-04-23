@@ -45,26 +45,78 @@ let test_ollama_generate_parser_computes_tok_per_second () =
 let test_request_body_omits_keep_alive_by_default () =
   let json =
     Masc_mcp.Tool_local_runtime_probe.request_body_json
-      ~keep_alive:None ~model_id:"qwen3.5:35b-a3b-coding-nvfp4" ~prompt:"READY"
-      ~max_tokens:8
+      ~think_enabled:false ~keep_alive:None
+      ~model_id:"qwen3.5:35b-a3b-coding-nvfp4" ~prompt:"READY" ~max_tokens:8
     |> Yojson.Safe.from_string
   in
   let open Yojson.Safe.Util in
   check (option string) "keep_alive omitted"
     None
-    (json |> member "keep_alive" |> to_string_option)
+    (json |> member "keep_alive" |> to_string_option);
+  check bool "thinking disabled by default" false
+    (json |> member "think" |> to_bool)
+
+let test_request_body_can_enable_thinking () =
+  let json =
+    Masc_mcp.Tool_local_runtime_probe.request_body_json ~think_enabled:true
+      ~keep_alive:None ~model_id:"qwen3.5:35b-a3b-coding-nvfp4" ~prompt:"READY"
+      ~max_tokens:8
+    |> Yojson.Safe.from_string
+  in
+  let open Yojson.Safe.Util in
+  check bool "thinking can be requested" true
+    (json |> member "think" |> to_bool)
 
 let test_request_body_keeps_explicit_keep_alive () =
   let json =
     Masc_mcp.Tool_local_runtime_probe.request_body_json
-      ~keep_alive:(Some "90s") ~model_id:"qwen3.5:35b-a3b-coding-nvfp4"
-      ~prompt:"READY" ~max_tokens:8
+      ~think_enabled:false ~keep_alive:(Some "90s")
+      ~model_id:"qwen3.5:35b-a3b-coding-nvfp4" ~prompt:"READY" ~max_tokens:8
     |> Yojson.Safe.from_string
   in
   let open Yojson.Safe.Util in
   check (option string) "keep_alive included"
     (Some "90s")
     (json |> member "keep_alive" |> to_string_option)
+
+let test_think_mode_parses_adaptive_policy () =
+  let parse raw =
+    Masc_mcp.Tool_local_runtime_probe.ollama_probe_think_mode_of_string raw
+    |> Option.map
+         Masc_mcp.Tool_local_runtime_probe.ollama_probe_think_mode_to_string
+  in
+  check (option string) "auto parsed" (Some "auto") (parse " auto ");
+  check (option string) "disabled alias parsed" (Some "disabled")
+    (parse "off");
+  check (option string) "enabled alias parsed" (Some "enabled")
+    (parse "YES");
+  check (option string) "invalid rejected" None (parse "maybe")
+
+let test_auto_think_policy_prioritizes_response () =
+  check bool "auto disables thinking for readiness" false
+    (Masc_mcp.Tool_local_runtime_probe.effective_think_enabled
+       Masc_mcp.Tool_local_runtime_probe.Think_auto);
+  check bool "enabled opts into thinking" true
+    (Masc_mcp.Tool_local_runtime_probe.effective_think_enabled
+       Masc_mcp.Tool_local_runtime_probe.Think_enabled)
+
+let test_runtime_probe_reports_effective_think_mode () =
+  let open Yojson.Safe.Util in
+  let run mode =
+    Masc_mcp.Tool_local_runtime_probe.runtime_ollama_probe_json
+      ~server_url:"http://127.0.0.1:1" ~model:"dummy-probe-model"
+      ~think_mode:mode ~timeout_sec:3 ~ps_timeout_sec:1 ()
+  in
+  let auto = run Masc_mcp.Tool_local_runtime_probe.Think_auto in
+  check string "auto mode reported" "auto"
+    (auto |> member "think_mode" |> to_string);
+  check bool "auto effective think false" false
+    (auto |> member "think" |> to_bool);
+  let enabled = run Masc_mcp.Tool_local_runtime_probe.Think_enabled in
+  check string "enabled mode reported" "enabled"
+    (enabled |> member "think_mode" |> to_string);
+  check bool "enabled effective think true" true
+    (enabled |> member "think" |> to_bool)
 
 let test_normalize_server_url_strips_trailing_slashes () =
   check string "normalizes trailing slash" "http://127.0.0.1:11434"
@@ -159,8 +211,16 @@ let () =
             test_ollama_ps_non_200_is_reported_as_error;
           test_case "omits keep_alive by default" `Quick
             test_request_body_omits_keep_alive_by_default;
+          test_case "can enable thinking explicitly" `Quick
+            test_request_body_can_enable_thinking;
           test_case "keeps explicit keep_alive when requested" `Quick
             test_request_body_keeps_explicit_keep_alive;
+          test_case "parses adaptive think policy" `Quick
+            test_think_mode_parses_adaptive_policy;
+          test_case "auto think policy prioritizes response" `Quick
+            test_auto_think_policy_prioritizes_response;
+          test_case "runtime probe reports effective think mode" `Quick
+            test_runtime_probe_reports_effective_think_mode;
           test_case "computes tok per second from generate response" `Quick
             test_ollama_generate_parser_computes_tok_per_second;
         ] );

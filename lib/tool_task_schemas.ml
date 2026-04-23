@@ -30,7 +30,7 @@ Example: masc_add_task({title: 'Fix login bug', priority: 1, description: 'Users
         ]);
         ("goal_id", `Assoc [
           ("type", `String "string");
-          ("description", `String "Optional explicit goal link. Preferred over embedding [goal:<id>] in the title; the title-tag fallback remains for legacy tasks.");
+          ("description", `String "REQUIRED for goal rollup visibility. Set this to one of the active_goal_ids from your system prompt <available_goals> block. Tasks without a goal_id are orphaned and do not contribute to goal progress tracking.");
         ]);
         ("required_preset", `Assoc [
           ("type", `String "string");
@@ -89,7 +89,7 @@ Example: masc_batch_add_tasks({tasks: [{title: 'Task A', priority: 2}, {title: '
               ]);
               ("goal_id", `Assoc [
                 ("type", `String "string");
-                ("description", `String "Optional goal ID to link this task to a goal as typed metadata.");
+                ("description", `String "REQUIRED for goal rollup visibility. Set this to one of the active_goal_ids from your system prompt <available_goals> block. Tasks without a goal_id are orphaned and do not contribute to goal progress tracking.");
               ]);
               ("contract", `Assoc [
                 ("type", `String "object");

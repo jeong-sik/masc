@@ -297,6 +297,7 @@ val build_keeper_system_prompt :
   ?keeper_name:string ->
   ?allowed_orgs:string list ->
   ?denied_repos:string list ->
+  ?active_goals:(string * string * string) list ->
   unit ->
   string
 

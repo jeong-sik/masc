@@ -46,7 +46,8 @@ let render_world_prompt ~allowed_orgs ~denied_repos : string =
 let build_keeper_system_prompt
     ~goal ~short_goal ~mid_goal ~long_goal ~will ~needs ~desires
     ~instructions ?(persona_extended = "") ?(keeper_name = "")
-    ?(allowed_orgs = []) ?(denied_repos = []) () =
+    ?(allowed_orgs = []) ?(denied_repos = [])
+    ?(active_goals = []) () =
   let goal = normalize_goal_horizon_text goal in
   let short_goal, mid_goal, long_goal =
     resolve_goal_horizons ~goal ~short_goal_opt:(Some short_goal)
@@ -84,6 +85,19 @@ let build_keeper_system_prompt
     let s = String.trim persona_extended in
     if s = "" then ""
     else Printf.sprintf "<persona>\n%s\n</persona>\n\n" s
+  in
+  let active_goals_block =
+    match active_goals with
+    | [] -> ""
+    | goals ->
+        let lines =
+          List.map
+            (fun (id, title, horizon) ->
+               Printf.sprintf "- %s [%s] %s" id horizon title)
+            goals
+        in
+        Printf.sprintf "\n<available_goals>\n%s\n</available_goals>\n"
+          (String.concat "\n" lines)
   in
   (* Prefix ordering: common blocks first for LLM KV cache sharing.
      All keepers share the same autonomous-behavior, policy, continuity,
@@ -151,8 +165,8 @@ let build_keeper_system_prompt
       "\n\
        ";
       custom;
-      "\n\
-       </identity>";
+      active_goals_block;
+      "</identity>";
     ]
 
 (* XML wrapping stays in code — it is structure, not prompt content. *)

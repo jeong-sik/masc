@@ -663,6 +663,21 @@ let run_turn
     |> Keeper_types_profile.load_persona_extended
     |> Option.value ~default:""
   in
+  let active_goals =
+    List.filter_map
+      (fun goal_id ->
+         match Goal_store.get_goal config ~goal_id with
+         | Some { Goal_store.id; title; horizon } ->
+             let horizon_str =
+               match horizon with
+               | Goal_store.Short -> "short"
+               | Goal_store.Mid -> "mid"
+               | Goal_store.Long -> "long"
+             in
+             Some (id, title, horizon_str)
+         | None -> None)
+      meta.active_goal_ids
+  in
   let base_system_prompt =
     Keeper_prompt.build_keeper_system_prompt
       ~goal:meta.goal
@@ -677,6 +692,7 @@ let run_turn
       ~keeper_name:meta.name
       ~allowed_orgs:(Keeper_tool_policy.git_clone_allowed_orgs ())
       ~denied_repos:(Keeper_tool_policy.git_clone_denied_repos ())
+      ~active_goals
       ()
   in
   (* 4. Create or restore working context, re-apply current prompt *)

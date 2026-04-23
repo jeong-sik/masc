@@ -342,6 +342,23 @@ let empty_keeper_profile_defaults = {
   oas_env = [];
 }
 
+let normalize_per_provider_timeout_opt ~(source : string)
+    (value : float option) : float option =
+  match value with
+  | Some f when Float.is_finite f && f > 0.0 -> Some f
+  | Some f when not (Float.is_finite f) ->
+      Log.Keeper.warn
+        "%s per_provider_timeout=%s is non-finite; ignoring"
+        source (string_of_float f);
+      None
+  | Some f ->
+      Log.Keeper.warn
+        "%s per_provider_timeout=%s is non-positive; ignoring"
+        source (string_of_float f);
+      None
+  | None -> None
+;;
+
 let personas_root_opt () =
   try
     Config_dir_resolver.log_warnings ~context:"KeeperTypesProfile" ();
@@ -567,13 +584,9 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         telemetry_feedback_enabled = bool_ "telemetry_feedback_enabled";
         telemetry_feedback_window_hours = int_ "telemetry_feedback_window_hours";
         per_provider_timeout =
-          (match Keeper_toml_loader.toml_float_opt doc (k "per_provider_timeout") with
-           | Some f when f > 0.0 -> Some f
-           | Some f when f <= 0.0 ->
-               Log.Keeper.warn
-                 "keeper TOML per_provider_timeout=%.1f is non-positive; ignoring" f;
-               None
-           | _ -> None);
+          normalize_per_provider_timeout_opt
+            ~source:"keeper TOML"
+            (Keeper_toml_loader.toml_float_opt doc (k "per_provider_timeout"));
         max_turns_per_call = int_ "max_turns_per_call";
         max_turns_per_call_scheduled_autonomous =
           int_ "max_turns_per_call_scheduled_autonomous";
@@ -786,7 +799,9 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                 telemetry_feedback_window_hours =
                   Safe_ops.json_int_opt "telemetry_feedback_window_hours" keeper_json;
                 per_provider_timeout =
-                  Safe_ops.json_float_opt "per_provider_timeout" keeper_json;
+                  normalize_per_provider_timeout_opt
+                    ~source:(Printf.sprintf "persona profile %s" path)
+                    (Safe_ops.json_float_opt "per_provider_timeout" keeper_json);
                 max_turns_per_call =
                   Safe_ops.json_int_opt "max_turns_per_call" keeper_json;
                 max_turns_per_call_scheduled_autonomous =

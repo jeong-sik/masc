@@ -162,7 +162,10 @@ let ensure_keeper_meta config name =
 
     (* --- Per-Provider Timeout --- *)
     let target_per_provider_timeout =
-      apply_default_opt defaults.per_provider_timeout meta.per_provider_timeout_s in
+      normalize_per_provider_timeout_opt
+        ~source:(Printf.sprintf "keeper runtime %s" name)
+        (apply_default_opt defaults.per_provider_timeout meta.per_provider_timeout_s)
+    in
 
     (* --- Change detection by category --- *)
     let proactive_changed =

@@ -15,6 +15,8 @@ open Keeper_types
 open Keeper_memory
 open Keeper_execution
 
+exception Semaphore_wait_timeout of float
+
 let keepalive_interval_sec () =
   Runtime_params.get Governance_registry.keeper_keepalive_interval_sec
 ;;
@@ -375,10 +377,10 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
         let ticket = enqueue_autonomous_waiter ~keeper_name in
         slot_state.autonomous_ticket := Some ticket;
         match wait_for_autonomous_queue_head ~keeper_name ~ticket ~started_at:t0 with
-        | Error _ as e -> e
+        | Error _ -> ()
         | Ok () ->
           match acquire_bounded ~label:"autonomous" autonomous_turn_semaphore with
-          | Error _ as e -> e
+          | Error _ -> ()
           | Ok () ->
             slot_state.acquired_autonomous := true;
             drop_autonomous_waiter ~ticket;
@@ -394,7 +396,9 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
 ;;
 
 let with_keeper_turn_slot_for_test ~keeper_name ~channel f =
-  with_keeper_turn_slot ~keeper_name ~channel f
+  match with_keeper_turn_slot ~keeper_name ~channel f with
+  | Ok x -> x
+  | Error (`Semaphore_wait_timeout sec) -> raise (Semaphore_wait_timeout sec)
 ;;
 
 (** Optional gRPC client + env — WORM Atomic: set at server bootstrap

@@ -245,6 +245,8 @@ let init () =
     "AfterTurn responses where telemetry was present but request_latency_ms was 0." Counter;
   add "masc_tasks_total" "Total tasks processed" Counter;
   add "masc_errors_total" "Total errors" Counter;
+  add "masc_error_events_total"
+    "Error events by type (parsing, missing_config, etc.)" Counter;
   add "masc_active_agents" "Currently active agents" Gauge;
   add "masc_pending_tasks" "Tasks waiting to be claimed" Gauge;
   add "masc_uptime_seconds" "Server uptime in seconds" Gauge;

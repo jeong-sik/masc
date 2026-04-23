@@ -1254,6 +1254,31 @@ let handle_keeper_shell
     let st, out =
       run_argv_with_status_retry_eintr ?cwd ~timeout_sec:io_timeout_sec argv
     in
+    (* P16: Record execution in history for failure pattern detection *)
+    let success = st = Unix.WEXITED 0 in
+    let cmd_prefix =
+      match String.split_on_char ' ' cmd with
+      | [] -> cmd | w :: _ -> w
+    in
+    let entry = Masc_exec.Bash_history.{
+      ts = Unix.time ();
+      cmd_hash = Masc_exec.Bash_history.cmd_hash cmd;
+      cmd_prefix;
+      semantic_kind = op;
+      duration_ms = 0;
+      success;
+    } in
+    Masc_exec.Bash_history.append ~base_path:root ~keeper_name:meta.name entry;
+    let insight_extra =
+      let patterns = Masc_exec.Bash_history.failure_insight
+        ~base_path:root ~keeper_name:meta.name
+      in
+      if patterns = [] then []
+      else [
+        "failure_insight", `List (
+          List.map Masc_exec.Bash_history.failure_pattern_to_json patterns)
+      ]
+    in
     Yojson.Safe.to_string
       (Exec_core.process_result_json
          ~artifact_policy:Exec_core.Inline_only
@@ -1261,19 +1286,51 @@ let handle_keeper_shell
          ~keeper_name:meta.name
          ~cmd
          ~extra:
-           [
+           ([
              "op", `String op;
              "cmd", `String cmd;
              ( "cwd",
                match cwd with
                | Some dir -> `String dir
                | None -> `Null );
-           ]
+           ] @ insight_extra)
          ~status:st
          ~output:out
          ())
   in
   let render_completed_process_result ?cwd ~cmd ?(extra = []) st out =
+    (* P16: Record execution in history for failure pattern detection *)
+    let success = st = Unix.WEXITED 0 in
+    let cmd_prefix =
+      match String.split_on_char ' ' cmd with
+      | [] -> cmd | w :: _ -> w
+    in
+    let elapsed_ms =
+      List.find_map (fun (k, v) ->
+        if k = "execution_time_ms" then
+          match v with `Int n -> Some n | _ -> None
+        else None) extra
+      |> Option.value ~default:0
+    in
+    let entry = Masc_exec.Bash_history.{
+      ts = Unix.time ();
+      cmd_hash = Masc_exec.Bash_history.cmd_hash cmd;
+      cmd_prefix;
+      semantic_kind = op;
+      duration_ms = elapsed_ms;
+      success;
+    } in
+    Masc_exec.Bash_history.append ~base_path:root ~keeper_name:meta.name entry;
+    let insight_extra =
+      let patterns = Masc_exec.Bash_history.failure_insight
+        ~base_path:root ~keeper_name:meta.name
+      in
+      if patterns = [] then []
+      else [
+        "failure_insight", `List (
+          List.map Masc_exec.Bash_history.failure_pattern_to_json patterns)
+      ]
+    in
     Yojson.Safe.to_string
       (Exec_core.process_result_json
          ~artifact_policy:Exec_core.Inline_only
@@ -1287,7 +1344,7 @@ let handle_keeper_shell
                match cwd with
                | Some dir -> `String dir
                | None -> `Null );
-           ] @ extra)
+           ] @ extra @ insight_extra)
          ~status:st
          ~output:out
          ())

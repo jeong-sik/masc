@@ -245,6 +245,7 @@ let make_keeper_tool_handler
                 "duration_ms", `Int duration_ms;
                 "result_bytes", `Int (String.length normalized_error);
                 "ok", `Bool false;
+                "error_preview", `String detail;
               ])
           with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
           Keeper_tool_call_log.set_truncation_info

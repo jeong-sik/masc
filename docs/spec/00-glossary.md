@@ -28,7 +28,7 @@ code_refs:
 에이전트 협업의 조율 범위(scope). 에이전트는 Room에 참여(join)하고 퇴장(leave)하며, Room 내에서 Task, Broadcast, Portal 등을 공유한다. 다수의 Room이 동시에 존재할 수 있으며 각 Room은 독립적인 상태를 가진다. `-> lib/coord/` (구 `lib/room/`)
 
 **Task**
-에이전트에게 할당되는 작업 단위. 고유 ID, 제목, 설명, 우선순위(1-5), 상태 머신(`Todo -> Claimed -> InProgress -> Done | Cancelled`)을 가진다. `required_role` 필드로 특정 역할의 에이전트만 claim할 수 있도록 제약한다. `-> lib/types/types_core.ml`
+에이전트에게 할당되는 작업 단위. 고유 ID, 제목, 설명, 우선순위(1-5), 상태 머신(`Todo -> Claimed -> InProgress -> Done | Cancelled`)을 가진다. claim은 역할 기반 제약 없이 열린 규칙으로 처리한다. `-> lib/types/types_core.ml`
 
 **Task Status**
 Task의 상태를 나타내는 ADT. `Todo`, `Claimed`, `InProgress`, `Done`, `Cancelled` 5개 variant로 구성된다. 각 variant는 assignee, timestamp 등의 메타데이터를 포함한다. 상태 전이는 타입 시스템으로 강제된다. `-> lib/types/types_core.ml`

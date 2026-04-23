@@ -429,6 +429,16 @@ let test_http_auth_rejects_query_token_fallback () =
   check (option string) "query token ignored" None
     (Server_auth.auth_token_from_request request)
 
+let test_http_auth_accepts_internal_keeper_header () =
+  let module Server_auth = Masc_mcp.Server_auth in
+  let headers =
+    Httpun.Headers.of_list [ ("x-masc-internal-token", "internal-keeper-token") ]
+  in
+  let request = Httpun.Request.create ~headers `POST "/mcp" in
+  check (option string) "internal keeper token extracted"
+    (Some "internal-keeper-token")
+    (Server_auth.auth_token_from_request request)
+
 let test_observer_sse_auth_accepts_query_token_fallback () =
   let module Server_auth = Masc_mcp.Server_auth in
   let dir = setup_test_room () in
@@ -446,10 +456,8 @@ let test_observer_sse_auth_accepts_query_token_fallback () =
           ("/mcp?sse_kind=observer&session_id=dash_test&token=" ^ raw_token)
       in
       match Server_auth.verify_mcp_observer_stream_auth ~base_path:dir request with
-      | Ok (Some cred) ->
-          check string "observer query token resolves credential" "stable-admin"
-            cred.Types.agent_name
-      | Ok None -> fail "expected observer SSE auth credential"
+      | Ok None -> ()
+      | Ok (Some _cred) -> fail "observer SSE auth should not surface credential details"
       | Error e -> fail e)
 
 let test_observer_sse_auth_rejects_query_token_on_non_observer_path () =
@@ -779,6 +787,48 @@ let test_resolve_agent_name_preserves_explicit_stable_actor () =
       | Ok None -> fail "expected explicit stable actor"
       | Error e -> fail (Types.masc_error_to_string e))
 
+let test_resolve_agent_name_uses_internal_keeper_header () =
+  let module SA = Masc_mcp.Server_auth in
+  let dir = setup_test_room () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_room dir)
+    (fun () ->
+      ignore (Auth.enable_auth dir ~require_token:true ~agent_name:"bootstrap-admin");
+      let raw_token = Auth.ensure_internal_keeper_token dir in
+      let headers =
+        Httpun.Headers.of_list
+          [
+            ("x-masc-internal-token", raw_token);
+            ("x-masc-keeper-name", "sangsu");
+          ]
+      in
+      let request = Httpun.Request.create ~headers `POST "/mcp" in
+      match SA.resolve_agent_name_for_auth ~base_path:dir request ~token:(Some raw_token) with
+      | Ok (Some agent_name) ->
+          check string "internal keeper resolves canonical agent"
+            "keeper-sangsu-agent" agent_name
+      | Ok None -> fail "expected resolved internal keeper agent"
+      | Error e -> fail (Types.masc_error_to_string e))
+
+let test_resolve_agent_name_rejects_internal_keeper_without_name () =
+  let module SA = Masc_mcp.Server_auth in
+  let dir = setup_test_room () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_room dir)
+    (fun () ->
+      ignore (Auth.enable_auth dir ~require_token:true ~agent_name:"bootstrap-admin");
+      let raw_token = Auth.ensure_internal_keeper_token dir in
+      let headers =
+        Httpun.Headers.of_list [ ("x-masc-internal-token", raw_token) ]
+      in
+      let request = Httpun.Request.create ~headers `POST "/mcp" in
+      match SA.resolve_agent_name_for_auth ~base_path:dir request ~token:(Some raw_token) with
+      | Ok _ -> fail "expected missing keeper name header to be rejected"
+      | Error (Types.Unauthorized msg) ->
+          check bool "mentions keeper header" true
+            (Astring.String.is_infix ~affix:"x-masc-keeper-name" msg)
+      | Error e -> fail (Types.masc_error_to_string e))
+
 (* ============================================================
    Test Runners
    ============================================================ *)
@@ -871,6 +921,8 @@ let () =
     ];
     "http_auth", [
       test_case "header token only" `Quick test_http_auth_token_from_header_only;
+      test_case "accept internal keeper header" `Quick
+        test_http_auth_accepts_internal_keeper_header;
       test_case "reject query token fallback" `Quick
         test_http_auth_rejects_query_token_fallback;
       test_case "observer sse accepts query token fallback" `Quick
@@ -881,6 +933,10 @@ let () =
         test_resolve_agent_name_prefers_token_for_generated_actor;
       test_case "stable actor preserved" `Quick
         test_resolve_agent_name_preserves_explicit_stable_actor;
+      test_case "internal keeper header resolves canonical agent" `Quick
+        test_resolve_agent_name_uses_internal_keeper_header;
+      test_case "internal keeper without name is rejected" `Quick
+        test_resolve_agent_name_rejects_internal_keeper_without_name;
       test_case "same-origin rejects missing origin without token" `Quick
         test_same_origin_browser_request_rejects_missing_origin;
       test_case "same-origin allows matching origin" `Quick

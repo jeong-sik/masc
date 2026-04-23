@@ -155,9 +155,6 @@ let handle_keeper_task_tool
     let message = match result with
       | Coord.Claim_next_claimed { message; _ } -> message
       | Coord.Claim_next_no_unclaimed -> "📋 No unclaimed tasks. ACTION: Stop task-checking — nothing to claim."
-      | Coord.Claim_next_no_eligible { preset_filtered; _ } when preset_filtered > 0 ->
-        Printf.sprintf "📋 No eligible tasks (preset mismatch: %d tasks require different preset, you have '%s')"
-          preset_filtered (Option.value ~default:"unknown" preset_name)
       | Coord.Claim_next_no_eligible { excluded_count; _ } ->
         let scope_suffix =
           match meta.active_goal_ids with

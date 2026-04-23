@@ -393,17 +393,17 @@ let make_routes ~port ~host ~sw ~clock =
 
 ```
 .masc/auth/
-  config.json          -- auth_config (enabled, require_token, default_role, token_expiry_hours)
+  config.json          -- auth_config (enabled, require_token, token_expiry_hours)
   room_secret.hash     -- room-level secret (SHA256 해시)
   initial_admin        -- 최초 admin agent 이름
   agents/
-    claude.json        -- agent_credential (agent_name, token_hash, role, expires_at)
+    claude.json        -- credential JSON (agent_name, token_hash, admin, expires_at)
     gemini.json
 ```
 
 ### 7.2 인증 흐름
 
-1. **토큰 생성**: `Auth.create_token ~agent_name ~role` -> (raw_token, credential). raw_token은 한 번만 반환, 서버는 SHA256 해시만 저장.
+1. **토큰 생성**: agent 이름과 admin 여부를 바탕으로 raw token과 credential을 만든다. raw token은 한 번만 반환, 서버는 SHA256 해시만 저장한다.
 2. **요청 인증**: `Authorization: Bearer <raw_token>` 헤더로 전달. 서버가 해시 비교.
 3. **만료 검사**: `expires_at` ISO 문자열 비교 (`now > exp_str`).
 
@@ -412,7 +412,7 @@ let make_routes ~port ~host ~sw ~clock =
 | 계층 | 조건 | 검증 함수 |
 |------|------|----------|
 | **비활성** | auth disabled | 모든 요청 허용 |
-| **토큰 선택** | auth enabled, `require_token=false` | 토큰 있으면 검증, 없으면 `default_role` 적용 |
+| **선택 토큰** | auth enabled, `require_token=false` | 토큰 있으면 검증, 없으면 anonymous worker 권한으로 처리 |
 | **토큰 필수** | auth enabled, `require_token=true` | 토큰 없으면 401 |
 | **Strict HTTP** | `MASC_HTTP_AUTH_STRICT=1` 또는 non-loopback bind | `/mcp` 등 경로에 토큰 필수 |
 

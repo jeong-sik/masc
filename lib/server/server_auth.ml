@@ -72,9 +72,15 @@ let bearer_token_from_header value =
   else None
 
 let auth_token_from_request request =
-  Option.bind
-    (Httpun.Headers.get request.Httpun.Request.headers "authorization")
-    bearer_token_from_header
+  match
+    Option.bind
+      (Httpun.Headers.get request.Httpun.Request.headers "authorization")
+      bearer_token_from_header
+  with
+  | Some _ as token -> token
+  | None ->
+      trim_opt
+        (Httpun.Headers.get request.Httpun.Request.headers "x-masc-internal-token")
 
 let observer_sse_query_token_from_request request =
   let path = Http_server_eio.Request.path request in
@@ -96,6 +102,87 @@ let observer_sse_auth_token_from_request request =
   | Some _ as token -> token
   | None -> observer_sse_query_token_from_request request
 
+let agent_from_request request =
+  let hdr key = Httpun.Headers.get request.Httpun.Request.headers key in
+  let qp key = query_param request key in
+  let first_some xs = List.find_map Fun.id xs in
+  first_some [ hdr "x-gate-agent"; hdr "x-masc-agent"; hdr "x-masc-agent-name"; qp "agent"; qp "agent_name" ]
+  |> Option.map Uri.pct_decode
+
+let strip_prefix ~prefix value =
+  let prefix_len = String.length prefix in
+  if String.length value > prefix_len
+     && String.starts_with ~prefix value
+  then
+    String.sub value prefix_len (String.length value - prefix_len)
+  else value
+
+let strip_suffix ~suffix value =
+  let suffix_len = String.length suffix in
+  let value_len = String.length value in
+  if value_len > suffix_len
+     && String.ends_with ~suffix value
+  then
+    String.sub value 0 (value_len - suffix_len)
+  else value
+
+let internal_keeper_agent_from_request request =
+  match Httpun.Headers.get request.Httpun.Request.headers "x-masc-keeper-name" with
+  | None -> None
+  | Some raw ->
+      let normalized =
+        raw
+        |> Uri.pct_decode
+        |> String.trim
+        |> String.lowercase_ascii
+        |> strip_prefix ~prefix:"keeper-"
+        |> strip_suffix ~suffix:"-agent"
+      in
+      if normalized = ""
+      then None
+      else Some (Printf.sprintf "keeper-%s-agent" normalized)
+
+let is_transient_actor_name name =
+  let normalized = String.trim name in
+  normalized <> ""
+  && (String.starts_with ~prefix:"agent-" normalized
+      || Nickname.is_generated_nickname normalized)
+
+let resolve_agent_name_for_auth_raw ~base_path request ~token :
+    (string option, Types.masc_error) result =
+  match token with
+  | Some t when Auth.verify_internal_keeper_token base_path ~token:t ->
+      (match internal_keeper_agent_from_request request with
+       | Some agent_name -> Ok (Some agent_name)
+       | None ->
+           Error
+             (Types.Unauthorized
+                "Internal keeper auth requires x-masc-keeper-name header."))
+  | _ ->
+      (match agent_from_request request with
+       | Some raw when String.trim raw <> "" ->
+           let agent_name = String.trim raw in
+           if is_transient_actor_name agent_name then
+             (match token with
+              | Some t ->
+                  (match Auth.resolve_agent_from_token base_path ~token:t with
+                   | Ok resolved -> Ok (Some resolved)
+                   | Error (Types.InvalidToken _ as e) -> Error e
+                   | Error (Types.TokenExpired _ as e) -> Error e
+                   | Error _ -> Ok (Some agent_name))
+              | None -> Ok (Some agent_name))
+           else
+             Ok (Some agent_name)
+       | _ ->
+           (match token with
+            | None -> Ok None
+            | Some t ->
+                (match Auth.resolve_agent_from_token base_path ~token:t with
+                 | Ok agent_name -> Ok (Some agent_name)
+                 | Error (Types.InvalidToken _ as e) -> Error e
+                 | Error (Types.TokenExpired _ as e) -> Error e
+                 | Error _ -> Ok None)))
+
 (** Verify Bearer token for MCP endpoints *)
 let verify_mcp_auth ~base_path request =
   let auth_config = Auth.load_auth_config base_path in
@@ -112,9 +199,16 @@ let verify_mcp_auth ~base_path request =
             Error
               "Authentication required. Use 'Authorization: Bearer <token>' header."
         | Some token -> (
-            match Auth.find_credential_by_token base_path ~token with
-            | Ok cred -> Ok (Some cred)
-            | Error err -> Error (Types.masc_error_to_string err))
+            match resolve_agent_name_for_auth_raw ~base_path request ~token:(Some token) with
+            | Error err -> Error (Types.masc_error_to_string err)
+            | Ok agent_name_opt ->
+                let agent_name = Option.value ~default:"dashboard" agent_name_opt in
+                match
+                  Auth.check_permission base_path ~agent_name ~token:(Some token)
+                    ~permission:Types.CanReadState
+                with
+                | Ok () -> Ok None
+                | Error err -> Error (Types.masc_error_to_string err))
 
 let verify_mcp_observer_stream_auth ~base_path request =
   let auth_config = Auth.load_auth_config base_path in
@@ -132,9 +226,16 @@ let verify_mcp_observer_stream_auth ~base_path request =
               "Authentication required. Use 'Authorization: Bearer <token>' header \
                or 'token' query param for the observer SSE stream."
         | Some token -> (
-            match Auth.find_credential_by_token base_path ~token with
-            | Ok cred -> Ok (Some cred)
-            | Error err -> Error (Types.masc_error_to_string err))
+            match resolve_agent_name_for_auth_raw ~base_path request ~token:(Some token) with
+            | Error err -> Error (Types.masc_error_to_string err)
+            | Ok agent_name_opt ->
+                let agent_name = Option.value ~default:"dashboard" agent_name_opt in
+                match
+                  Auth.check_permission base_path ~agent_name ~token:(Some token)
+                    ~permission:Types.CanReadState
+                with
+                | Ok () -> Ok None
+                | Error err -> Error (Types.masc_error_to_string err))
 
 let verify_operator_mcp_auth ~base_path request =
   let auth_config = Auth.load_auth_config base_path in
@@ -148,37 +249,16 @@ let verify_operator_mcp_auth ~base_path request =
     | None ->
         Error "Authentication required. Use 'Authorization: Bearer <token>' header."
     | Some token -> (
-        match Auth.find_credential_by_token base_path ~token with
-        | Ok cred -> Ok (Some cred)
-        | Error err -> Error (Types.masc_error_to_string err))
-
-let agent_from_request request =
-  let hdr key = Httpun.Headers.get request.Httpun.Request.headers key in
-  let qp key = query_param request key in
-  let first_some xs = List.find_map Fun.id xs in
-  first_some [ hdr "x-gate-agent"; hdr "x-masc-agent"; hdr "x-masc-agent-name"; qp "agent"; qp "agent_name" ]
-  |> Option.map Uri.pct_decode
-
-let request_actor_hint request =
-  match agent_from_request request with
-  | Some raw ->
-      let agent_name = String.trim raw in
-      if String.equal agent_name "" then None else Some agent_name
-  | None -> None
-
-let dashboard_actor_for_request ~base_path request =
-  match auth_token_from_request request with
-  | Some token -> (
-      match Auth.resolve_agent_from_token base_path ~token with
-      | Ok agent_name -> Some agent_name
-      | Error _ -> request_actor_hint request)
-  | None -> request_actor_hint request
-
-let is_transient_actor_name name =
-  let normalized = String.trim name in
-  normalized <> ""
-  && (String.starts_with ~prefix:"agent-" normalized
-      || Nickname.is_generated_nickname normalized)
+        match resolve_agent_name_for_auth_raw ~base_path request ~token:(Some token) with
+        | Error err -> Error (Types.masc_error_to_string err)
+        | Ok agent_name_opt ->
+            let agent_name = Option.value ~default:"dashboard" agent_name_opt in
+            match
+              Auth.check_permission base_path ~agent_name ~token:(Some token)
+                ~permission:Types.CanAdmin
+            with
+            | Ok () -> Ok None
+            | Error err -> Error (Types.masc_error_to_string err))
 
 (** Extract host and explicit port only.
     Host header carries no scheme, so inferring a default port from scheme
@@ -460,29 +540,7 @@ let is_public_read_path path =
 
 let resolve_agent_name_for_auth ~base_path request ~token :
     (string option, Types.masc_error) result =
-  match agent_from_request request with
-  | Some raw when String.trim raw <> "" ->
-      let agent_name = String.trim raw in
-      if is_transient_actor_name agent_name then
-        (match token with
-         | Some t ->
-             (match Auth.resolve_agent_from_token base_path ~token:t with
-              | Ok resolved -> Ok (Some resolved)
-              | Error (Types.InvalidToken _ as e) -> Error e
-              | Error (Types.TokenExpired _ as e) -> Error e
-              | Error _ -> Ok (Some agent_name))
-         | None -> Ok (Some agent_name))
-      else
-        Ok (Some agent_name)
-  | _ ->
-      (match token with
-       | None -> Ok None
-       | Some t ->
-           (match Auth.resolve_agent_from_token base_path ~token:t with
-            | Ok agent_name -> Ok (Some agent_name)
-            | Error (Types.InvalidToken _ as e) -> Error e
-            | Error (Types.TokenExpired _ as e) -> Error e
-            | Error _ -> Ok None))
+  resolve_agent_name_for_auth_raw ~base_path request ~token
 
 let authorize_permission_request ~base_path ~permission request :
     (unit, Types.masc_error) result =

@@ -306,23 +306,6 @@ let to_display_string identity =
 let same_agent a b =
   a.session_key = b.session_key || a.agent_name = b.agent_name
 
-(** {1 Role System} *)
-
-(** Agent role - canonical definition moved to Types_core (masc_types sub-library).
-    Use Types_core.role, Types_core.role_satisfies, etc. directly.
-    get_role/set_role kept here as they depend on identity type. *)
-
-(** Get role from identity metadata *)
-let get_role identity : Types_core.role =
-  match List.assoc_opt "role" identity.metadata with
-  | Some s -> Types_core.role_of_string s
-  | None -> Types_core.Unassigned
-
-(** Set role in identity metadata *)
-let set_role identity (role : Types_core.role) =
-  let filtered = List.filter (fun (k, _) -> k <> "role") identity.metadata in
-  { identity with metadata = ("role", Types_core.role_to_string role) :: filtered }
-
 (** {1 MAGI Archetype System} *)
 
 (** MAGI archetypes for agent specialization *)

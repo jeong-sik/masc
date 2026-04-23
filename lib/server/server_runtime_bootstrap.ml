@@ -575,6 +575,67 @@ let sync_admin_token_env (state : Mcp_server.server_state) =
              admin_agent_name
              (Types.masc_error_to_string err))
 
+let sync_client_token_file ~base_path ~agent_name ~default_role =
+  let token_file =
+    Filename.concat (Auth.auth_dir base_path) (agent_name ^ ".token")
+  in
+  let existing_role =
+    match Auth.load_credential base_path agent_name with
+    | Some cred -> cred.role
+    | None -> default_role
+  in
+  let persist_raw_token raw_token =
+    Fs_compat.mkdir_p (Auth.auth_dir base_path);
+    Auth.save_private_text_file token_file raw_token
+  in
+  let create_and_persist ~reason =
+    match Auth.create_token base_path ~agent_name ~role:existing_role with
+    | Ok (raw_token, _cred) ->
+        (try
+           persist_raw_token raw_token;
+           Log.Server.warn
+             "startup %s raw bearer token file for %s at %s"
+             reason agent_name token_file
+         with exn ->
+           Log.Server.error
+             "startup failed to persist raw bearer token file for %s at %s: %s"
+             agent_name token_file (Printexc.to_string exn))
+    | Error err ->
+        Log.Server.error
+          "startup failed to mint raw bearer token for %s: %s"
+          agent_name (Types.masc_error_to_string err)
+  in
+  let normalize_existing raw_token =
+    try
+      persist_raw_token raw_token;
+      Log.Server.info
+        "startup verified raw bearer token file for %s at %s"
+        agent_name token_file
+    with exn ->
+      Log.Server.error
+        "startup failed to normalize raw bearer token file for %s at %s: %s"
+        agent_name token_file (Printexc.to_string exn)
+  in
+  let current_raw =
+    if Fs_compat.file_exists token_file then
+      try
+        let raw = String.trim (Fs_compat.load_file token_file) in
+        if raw = "" then None else Some raw
+      with exn ->
+        Log.Server.warn
+          "startup failed to read raw bearer token file for %s at %s: %s"
+          agent_name token_file (Printexc.to_string exn);
+        None
+    else
+      None
+  in
+  match current_raw with
+  | Some raw_token -> (
+      match Auth.verify_token base_path ~agent_name ~token:raw_token with
+      | Ok _ -> normalize_existing raw_token
+      | Error _ -> create_and_persist ~reason:"repaired")
+  | None -> create_and_persist ~reason:"created"
+
 let bootstrap_prompt_state (state : Mcp_server.server_state) =
   Config_dir_resolver.log_warnings ~context:"ServerBootstrap" ();
   Config_dir_resolver.log_resolution ~context:"ServerBootstrap" ();
@@ -881,6 +942,8 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       Log.Server.info "State created (runtime state) in %.1fs" (t1 -. t0);
       bootstrap_server_state_blocking state;
       sync_admin_token_env state;
+      sync_client_token_file ~base_path ~agent_name:"codex-mcp-client"
+        ~default_role:Types.Worker;
       let path_diagnostics =
         runtime_path_diagnostics ~input_base_path:base_path state
       in

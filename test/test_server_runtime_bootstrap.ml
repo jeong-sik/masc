@@ -1540,6 +1540,94 @@ let test_main_eio_fresh_bootstrap_and_mcp_handshake () =
           Alcotest.(check bool) "canonical tool present" true
             (List.mem "masc_status" tool_names)))
 
+let test_main_eio_self_heals_codex_mcp_token_file () =
+  with_temp_dir "startup-codex-token-selfheal" (fun dir ->
+      let exe = find_main_eio_exe () in
+      let port = find_free_port () in
+      let log_file = Filename.concat dir "server.log" in
+      let log_fd =
+        Unix.openfile log_file [ Unix.O_CREAT; Unix.O_WRONLY; Unix.O_TRUNC ] 0o644
+      in
+      with_env "MASC_CONFIG_DIR" None @@ fun () ->
+      with_env "MASC_PERSONAS_DIR" None @@ fun () ->
+      with_cwd (project_root ()) @@ fun () ->
+      Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path:dir;
+      let auth_dir = Filename.concat dir ".masc/auth" in
+      let token_path = Filename.concat auth_dir "codex-mcp-client.token" in
+      Fs_compat.mkdir_p auth_dir;
+      let stale_hash =
+        match
+          Auth.save_raw_token_credential dir
+            ~agent_name:"codex-mcp-client" ~role:Types.Worker
+            ~raw_token:"stale-codex-raw-token"
+        with
+        | Ok cred -> cred.token
+        | Error err ->
+            Alcotest.failf "failed to seed stale codex credential: %s"
+              (Types.masc_error_to_string err)
+      in
+      write_file token_path stale_hash;
+      let env =
+        merge_env_overrides
+          [
+            ("MASC_BASE_PATH", dir);
+            ("MASC_STORAGE_TYPE", "filesystem");
+            ("GRAPHQL_API_KEY", "");
+            ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
+            ("MASC_AUTONOMY_ENABLED", "0");
+            ("MASC_ORCHESTRATOR_ENABLED", "0");
+            ("MASC_KEEPER_BOOTSTRAP_ENABLED", "false");
+            ("MASC_USE_H2", "0");
+            ("DUNE_SOURCEROOT", project_root ());
+          ]
+      in
+      let pid =
+        Unix.create_process_env exe
+          [|
+            exe;
+            "--host";
+            "127.0.0.1";
+            "--port";
+            string_of_int port;
+            "--base-path";
+            dir;
+          |]
+          env Unix.stdin log_fd log_fd
+      in
+      Unix.close log_fd;
+      Fun.protect
+        ~finally:(fun () -> stop_process pid)
+        (fun () ->
+          if not (wait_for_startup_phase ~pid ~port ~timeout_s:10.0 "ready") then begin
+            prerr_endline
+              (Printf.sprintf
+                 "main_eio codex token self-heal did not reach startup.phase=ready within timeout in this environment.\nlog:\n%s"
+                 (read_file log_file));
+            Alcotest.skip ()
+          end;
+          let repaired_raw = String.trim (read_file token_path) in
+          let repaired_mode = (Unix.stat token_path).Unix.st_perm land 0o777 in
+          Alcotest.(check bool) "startup replaced hashed token file" true
+            (repaired_raw <> stale_hash);
+          Alcotest.(check int) "token file is private" 0o600 repaired_mode;
+          let credential =
+            match Auth.load_credential dir "codex-mcp-client" with
+            | Some cred -> cred
+            | None -> Alcotest.fail "missing codex-mcp-client credential after startup"
+          in
+          Alcotest.(check bool) "existing role preserved" true
+            (credential.role = Types.Worker);
+          Alcotest.(check string) "raw token hashes to stored credential"
+            credential.token (Auth.sha256_hash repaired_raw);
+          match
+            Auth.verify_token dir ~agent_name:"codex-mcp-client"
+              ~token:repaired_raw
+          with
+          | Ok _ -> ()
+          | Error err ->
+              Alcotest.failf "repaired raw token should verify: %s"
+                (Types.masc_error_to_string err)))
+
 let test_main_eio_rejects_same_base_path_on_second_server () =
   with_temp_dir "startup-base-path-owner-lock" (fun dir ->
       let exe = find_main_eio_exe () in
@@ -2035,6 +2123,9 @@ let () =
           Alcotest.test_case
             "main_eio fresh bootstrap and MCP handshake"
             `Slow test_main_eio_fresh_bootstrap_and_mcp_handshake;
+          Alcotest.test_case
+            "main_eio self-heals codex mcp token file"
+            `Slow test_main_eio_self_heals_codex_mcp_token_file;
           Alcotest.test_case
             "main_eio rejects second server on same base path"
             `Slow test_main_eio_rejects_same_base_path_on_second_server;

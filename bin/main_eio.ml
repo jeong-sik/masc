@@ -661,7 +661,7 @@ let doctor_sidecar_exit name as_json =
     end
     else begin
       let python =
-        try Sys.getenv "MASC_PYTHON" with Not_found -> "python3"
+        Option.value (Sys.getenv_opt "MASC_PYTHON") ~default:"python3"
       in
       let args =
         if as_json

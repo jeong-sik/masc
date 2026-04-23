@@ -122,19 +122,30 @@ let subscribe t ~sw ~env ~agent_name ~session_id ~event_types ~since_seq =
       match Grpc_eio.Stream.take raw_stream with
       | Ok bytes ->
         (try
-          ignore (push_typed (Ok (T.Event.of_bytes bytes)))
+          match push_typed (Ok (T.Event.of_bytes bytes)) with
+          | `Added -> ()
+          | `Closed ->
+             Log.Transport.debug "gRPC subscribe: typed stream closed, skipping event"
+          | `Failed exn ->
+             Log.Transport.error "gRPC subscribe: push_typed failed: %s"
+               (Printexc.to_string exn)
         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-          ignore
-            (push_error
-               (Printf.sprintf "event decode error: %s"
-                  (Printexc.to_string exn))));
+          match push_error
+            (Printf.sprintf "event decode error: %s"
+               (Printexc.to_string exn)) with
+          | `Added -> ()
+          | `Closed | `Failed _ -> ());
         loop ()
       | Error status ->
         if not (Grpc_core.Status.is_ok status) then
-          ignore
-            (push_error
-               (Printf.sprintf "subscribe stream error: %s"
-                  (Grpc_core.Status.to_string status)));
+          (match push_error
+             (Printf.sprintf "subscribe stream error: %s"
+                (Grpc_core.Status.to_string status)) with
+           | `Added -> ()
+           | `Closed -> ()
+           | `Failed exn ->
+             Log.Transport.error "gRPC subscribe: push_error failed: %s"
+               (Printexc.to_string exn));
         close_typed ()
       | exception End_of_file ->
         close_typed ()

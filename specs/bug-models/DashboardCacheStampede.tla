@@ -9,9 +9,9 @@
 \*   - Result: permanent zombie slot returning stale data forever
 \*
 \* Actual code (verified 2026-04-20):
-\*   lib/dashboard/dashboard_cache.ml:maybe_evict
-\*   lib/dashboard/dashboard_cache.ml:get_or_compute_eio
-\*   lib/dashboard/dashboard_cache.ml:should_restore_stale_after_failure
+\*   lib/dashboard/dashboard_cache.ml:60   let maybe_evict map
+\*   lib/dashboard/dashboard_cache.ml:148  let get_or_compute_eio
+\*   lib/dashboard/dashboard_cache.ml:237  | Eio.Cancel.Cancelled _ as e -> ...
 \*
 \* (Path drift: lib/dashboard_cache.ml -> lib/dashboard/dashboard_cache.ml.
 \*  Line drift: 265 -> 216. Recorded for cross-reference.)

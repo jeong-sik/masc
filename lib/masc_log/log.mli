@@ -100,6 +100,7 @@ val client_tool_host_error :
     [M.name] controls the env-var key MASC_LOG_{NAME}_LEVEL
     and the context prefix in log output. *)
 module Make (_ : sig val name : string end) : sig
+  val emit : level -> ?details:Yojson.Safe.t -> string -> unit
   val debug : ('a, unit, string, unit) format4 -> 'a
   val info : ('a, unit, string, unit) format4 -> 'a
   val warn : ('a, unit, string, unit) format4 -> 'a
@@ -109,7 +110,7 @@ end
 (** {1 Pre-defined module loggers} *)
 
 module Coord : sig val debug : ('a, unit, string, unit) format4 -> 'a val info : ('a, unit, string, unit) format4 -> 'a val warn : ('a, unit, string, unit) format4 -> 'a val error : ('a, unit, string, unit) format4 -> 'a end
-module Mcp : sig val debug : ('a, unit, string, unit) format4 -> 'a val info : ('a, unit, string, unit) format4 -> 'a val warn : ('a, unit, string, unit) format4 -> 'a val error : ('a, unit, string, unit) format4 -> 'a end
+module Mcp : sig val emit : level -> ?details:Yojson.Safe.t -> string -> unit val debug : ('a, unit, string, unit) format4 -> 'a val info : ('a, unit, string, unit) format4 -> 'a val warn : ('a, unit, string, unit) format4 -> 'a val error : ('a, unit, string, unit) format4 -> 'a end
 module Auth : sig val debug : ('a, unit, string, unit) format4 -> 'a val info : ('a, unit, string, unit) format4 -> 'a val warn : ('a, unit, string, unit) format4 -> 'a val error : ('a, unit, string, unit) format4 -> 'a end
 module Retry : sig val debug : ('a, unit, string, unit) format4 -> 'a val info : ('a, unit, string, unit) format4 -> 'a val warn : ('a, unit, string, unit) format4 -> 'a val error : ('a, unit, string, unit) format4 -> 'a end
 module Backend : sig val debug : ('a, unit, string, unit) format4 -> 'a val info : ('a, unit, string, unit) format4 -> 'a val warn : ('a, unit, string, unit) format4 -> 'a val error : ('a, unit, string, unit) format4 -> 'a end

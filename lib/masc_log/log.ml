@@ -152,7 +152,10 @@ module Ring = struct
     details : Yojson.Safe.t;
   }
 
-  let capacity = 5000
+  (* Dashboard operators commonly inspect tool-call history over hours, not
+     minutes.  5k entries was too small for high-volume keeper/MCP traffic and
+     made recent MCP calls appear to disappear despite JSONL persistence. *)
+  let capacity = 50000
   let buf : entry array = Array.make capacity
     {
       seq = 0;
@@ -512,6 +515,16 @@ module Make (M : sig val name : string end) = struct
           ~module_name:M.name ~message:msg ()
       end
     ) fmt
+
+  let emit level ?(details = `Null) message =
+    if should_log_module level then begin
+      let level_str = level_to_string level in
+      let prefix = Printf.sprintf "[%s] [%s] [%s]"
+        (timestamp ()) level_str M.name in
+      Printf.eprintf "%s %s\n%!" prefix message;
+      Ring.push ~raw_level:level_str ~normalized_level:level_str
+        ~module_name:M.name ~message ~details ()
+    end
 
   let debug fmt = log_module Debug fmt
   let info fmt = log_module Info fmt

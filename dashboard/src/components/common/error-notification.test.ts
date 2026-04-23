@@ -30,10 +30,10 @@ describe('error-notification', () => {
     })
 
     expect(errors.value).toHaveLength(1)
-    expect(errors.value[0].agentName).toBe('keeper-1')
-    expect(errors.value[0].message).toBe('Connection timeout')
-    expect(errors.value[0].count).toBe(1)
-    expect(errors.value[0].acknowledged).toBe(false)
+    expect(errors.value[0]!.agentName).toBe('keeper-1')
+    expect(errors.value[0]!.message).toBe('Connection timeout')
+    expect(errors.value[0]!.count).toBe(1)
+    expect(errors.value[0]!.acknowledged).toBe(false)
     expect(unacknowledgedCount.value).toBe(1)
   })
 
@@ -42,7 +42,7 @@ describe('error-notification', () => {
     handleAgentFailed({ agentName: 'keeper-1', error: 'Connection timeout' })
 
     expect(errors.value).toHaveLength(1)
-    expect(errors.value[0].count).toBe(2)
+    expect(errors.value[0]!.count).toBe(2)
     expect(unacknowledgedCount.value).toBe(1)
   })
 
@@ -64,23 +64,23 @@ describe('error-notification', () => {
   it('stores taskId when provided', () => {
     handleAgentFailed({ agentName: 'keeper-1', error: 'err', taskId: 'task-001' })
 
-    expect(errors.value[0].taskId).toBe('task-001')
+    expect(errors.value[0]!.taskId).toBe('task-001')
   })
 
   it('sets taskId to null when not provided', () => {
     handleAgentFailed({ agentName: 'keeper-1', error: 'err' })
 
-    expect(errors.value[0].taskId).toBeNull()
+    expect(errors.value[0]!.taskId).toBeNull()
   })
 
   describe('acknowledgeError', () => {
     it('marks an error as acknowledged', () => {
       handleAgentFailed({ agentName: 'keeper-1', error: 'err' })
-      const id = errors.value[0].id
+      const id = errors.value[0]!.id
 
       acknowledgeError(id)
 
-      expect(errors.value[0].acknowledged).toBe(true)
+      expect(errors.value[0]!.acknowledged).toBe(true)
       expect(unacknowledgedCount.value).toBe(0)
     })
 
@@ -88,10 +88,10 @@ describe('error-notification', () => {
       handleAgentFailed({ agentName: 'keeper-1', error: 'err1' })
       handleAgentFailed({ agentName: 'keeper-2', error: 'err2' })
 
-      acknowledgeError(errors.value[0].id)
+      acknowledgeError(errors.value[0]!.id)
 
       expect(unacknowledgedCount.value).toBe(1)
-      expect(unacknowledgedErrors.value[0].agentName).toBe('keeper-2')
+      expect(unacknowledgedErrors.value[0]!.agentName).toBe('keeper-2')
     })
   })
 
@@ -122,7 +122,7 @@ describe('error-notification', () => {
 
       // Should have been updated (not a new entry) but with fresh lastSeen
       expect(errors.value).toHaveLength(1)
-      expect(errors.value[0].lastSeen).toBeGreaterThan(now - 1000)
+      expect(errors.value[0]!.lastSeen).toBeGreaterThan(now - 1000)
     })
   })
 
@@ -134,7 +134,7 @@ describe('error-notification', () => {
 
       // Same fingerprint → dedup
       expect(errors.value).toHaveLength(1)
-      expect(errors.value[0].count).toBe(2)
+      expect(errors.value[0]!.count).toBe(2)
     })
 
     it('differentiates messages that differ after 100 chars', () => {

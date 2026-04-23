@@ -68,8 +68,7 @@ export function handleAgentFailed(params: {
   errors.value = [...errors.value, newError]
 
   const taskLabel = taskId ? ` (${taskId})` : ''
-  const countSuffix = existing ? ` [${existing.count + 1}회]` : ''
-  showToast(`${agentName}${taskLabel}: ${error}${countSuffix}`, 'error')
+  showToast(`${agentName}${taskLabel}: ${error}`, 'error')
 }
 
 export function acknowledgeError(id: string): void {

@@ -686,10 +686,12 @@ let snapshot_json ~(config : Coord.config) ~(meta : keeper_meta) =
   in
   let selected_model =
     Option.bind latest_decision (fun json ->
-        let telemetry = Yojson.Safe.Util.member "telemetry" json in
-        match json_string_opt_member "selected_model" telemetry with
-        | Some _ as value -> value
-        | None -> json_string_opt_member "model_used" telemetry)
+        match Yojson.Safe.Util.member "telemetry" json with
+        | `Assoc _ as telemetry ->
+            (match json_string_opt_member "selected_model" telemetry with
+             | Some _ as value -> value
+             | None -> json_string_opt_member "model_used" telemetry)
+        | _ -> None)
   in
   let runtime_contract =
     Keeper_runtime_contract.runtime_contract_json ~config meta

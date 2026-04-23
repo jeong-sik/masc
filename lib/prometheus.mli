@@ -91,6 +91,35 @@ val metric_oas_sse_relay_queue_depth : string
 val metric_mcp_tool_schema_count : string
 val metric_mcp_tool_schema_tokens_approx : string
 
+(** {1 Transport metrics} *)
+
+val metric_sse_sessions : string
+val metric_sse_broadcast_duration : string
+val metric_sse_broadcast_events : string
+val metric_sse_stream_queue_depth : string
+val metric_sse_queue_depth_avg : string
+val metric_sse_queue_depth_max : string
+val metric_sse_external_subscribers : string
+val metric_grpc_active_streams : string
+val metric_grpc_heartbeat_latency : string
+val metric_grpc_subscribers : string
+val metric_grpc_events_delivered : string
+val metric_ws_sessions : string
+
+(** {1 Admission queue metrics} *)
+
+val metric_inference_queue_depth : string
+val metric_inference_queue_inflight : string
+val metric_inference_queue_acquired : string
+val metric_inference_queue_wait : string
+val metric_inference_queue_cancelled : string
+val metric_inference_queue_max_concurrent : string
+
+(** {1 Agent health metrics} *)
+
+val metric_agent_heartbeat_age_seconds : string
+val metric_agent_stale_total : string
+
 (** {1 Process monitoring} *)
 
 val approximate_open_fd_count : unit -> int

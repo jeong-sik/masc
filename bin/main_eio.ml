@@ -451,7 +451,6 @@ let run_cmd host port base_path =
 
   (* Enable Eio-aware locking globally (single call replaces per-module enable_eio) *)
   Eio_guard.enable ();
-  Masc_mcp.Transport_metrics.init ();
 
   (* Set global clock for Time_compat (Eio-native timestamps).
      Dashboard_cache.now() reads from Time_compat directly. *)

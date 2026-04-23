@@ -25,4 +25,5 @@ let decode_from_oas s =
         "[masc:blob sha256=%s@ bytes=%d mime=%s@ preview=%S]"
         (fun sha256 bytes mime preview ->
           Stored { sha256; bytes; preview; mime })
-    with _ -> Inline s
+    with
+    | Scanf.Scan_failure _ | Failure _ | Invalid_argument _ -> Inline s

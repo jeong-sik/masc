@@ -2,24 +2,15 @@
 
     @since 3.0.0 *)
 
-let on_enqueue ~keeper_name:_ ~cascade_name:_ =
-  Prometheus.inc_gauge "masc_inference_queue_depth" ()
-
-let on_dequeue ~keeper_name:_ ~cascade_name:_ =
-  Prometheus.dec_gauge "masc_inference_queue_depth" ()
-
 let on_acquire ~keeper_name:_ ~cascade_name:_ ~wait_ms =
-  Prometheus.inc_gauge "masc_inference_queue_inflight" ();
-  Prometheus.inc_counter "masc_inference_queue_acquired_total" ();
+  Prometheus.inc_gauge Prometheus.metric_inference_queue_inflight ();
+  Prometheus.inc_counter Prometheus.metric_inference_queue_acquired ();
   let wait_sec = Float.of_int wait_ms /. 1000.0 in
-  Prometheus.observe_histogram "masc_inference_queue_wait_seconds" wait_sec
+  Prometheus.observe_histogram Prometheus.metric_inference_queue_wait wait_sec
 
 let on_release ~keeper_name:_ ~cascade_name:_ =
-  Prometheus.dec_gauge "masc_inference_queue_inflight" ()
-
-let on_cancelled ~keeper_name:_ ~cascade_name:_ =
-  Prometheus.inc_counter "masc_inference_queue_cancelled_total" ()
+  Prometheus.dec_gauge Prometheus.metric_inference_queue_inflight ()
 
 let set_max_concurrent value =
-  Prometheus.set_gauge "masc_inference_queue_max_concurrent"
+  Prometheus.set_gauge Prometheus.metric_inference_queue_max_concurrent
     (float_of_int value)

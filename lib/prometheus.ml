@@ -224,6 +224,32 @@ let metric_mcp_tool_schema_count = "masc_mcp_tool_schema_count"
 let metric_mcp_tool_schema_tokens_approx =
   "masc_mcp_tool_schema_tokens_approx"
 
+(* Transport metrics — used in transport_metrics.ml. *)
+let metric_sse_sessions = "masc_sse_sessions_total"
+let metric_sse_broadcast_duration = "masc_sse_broadcast_duration_seconds"
+let metric_sse_broadcast_events = "masc_sse_broadcast_events_total"
+let metric_sse_stream_queue_depth = "masc_sse_stream_queue_depth"
+let metric_sse_queue_depth_avg = "masc_sse_queue_depth_avg"
+let metric_sse_queue_depth_max = "masc_sse_queue_depth_max"
+let metric_sse_external_subscribers = "masc_sse_external_subscribers_total"
+let metric_grpc_active_streams = "masc_grpc_active_streams_total"
+let metric_grpc_heartbeat_latency = "masc_grpc_heartbeat_latency_seconds"
+let metric_grpc_subscribers = "masc_grpc_subscribers_total"
+let metric_grpc_events_delivered = "masc_grpc_events_delivered_total"
+let metric_ws_sessions = "masc_ws_sessions_total"
+
+(* Admission queue metrics — used in admission_queue_metrics.ml. *)
+let metric_inference_queue_depth = "masc_inference_queue_depth"
+let metric_inference_queue_inflight = "masc_inference_queue_inflight"
+let metric_inference_queue_acquired = "masc_inference_queue_acquired_total"
+let metric_inference_queue_wait = "masc_inference_queue_wait_seconds"
+let metric_inference_queue_cancelled = "masc_inference_queue_cancelled_total"
+let metric_inference_queue_max_concurrent = "masc_inference_queue_max_concurrent"
+
+(* Agent health metrics — used in transport_metrics.ml. *)
+let metric_agent_heartbeat_age_seconds = "masc_agent_heartbeat_age_seconds"
+let metric_agent_stale_total = "masc_agent_stale_total"
+
 (* Process-level FD gauges — used in init() and update_fd_gauges. *)
 let metric_open_fds = "masc_process_open_fds"
 let metric_fd_warn_threshold = "masc_process_fd_warn_threshold"
@@ -339,10 +365,10 @@ let init () =
   add "masc_board_truncated_posts_total"
     "Total board posts truncated due to size limits"
     Counter;
-  add "masc_agent_heartbeat_age_seconds"
+  add metric_agent_heartbeat_age_seconds
     "Maximum observed heartbeat age across active agents (seconds)"
     Gauge;
-  add "masc_agent_stale_total"
+  add metric_agent_stale_total
     "Total agents marked stale due to missed heartbeats"
     Counter;
   register_histogram ~name:"masc_llm_provider_request_latency_seconds"
@@ -359,7 +385,6 @@ let init () =
      (derived from /dev/fd). Ramp indicates a socket/file leak." Gauge;
   add metric_fd_warn_threshold
     "Threshold above which open_fds triggers a one-shot WARN log." Gauge;
-  set_gauge metric_fd_warn_threshold (float_of_int fd_warn_threshold);
   (* Per-keeper turn outcome + token counters.  Labels are populated
      dynamically via inc_counter; no upfront registration needed.
      Covers issues #7495 (cost/token attribution) and #7519 (SLO). *)
@@ -411,7 +436,27 @@ let init () =
   add "masc_oas_bus_publish_total"
     "Total Oas.Event_bus.publish calls routed through \
      Oas_bus_instrument.publish."
-    Counter
+    Counter;
+  (* Transport metrics — registered here so transport_metrics.ml can use
+     module constants instead of string literals. *)
+  add metric_sse_sessions "Active SSE sessions by kind" Gauge;
+  register_histogram ~name:metric_sse_broadcast_duration
+    ~help:"Time to fan-out a broadcast to all SSE clients" ();
+  add metric_sse_broadcast_events "Total SSE broadcast events emitted" Counter;
+  add metric_sse_stream_queue_depth
+    "Per-session SSE event stream queue depth" Gauge;
+  add metric_sse_queue_depth_avg
+    "Average SSE event queue depth across live sessions" Gauge;
+  add metric_sse_queue_depth_max
+    "Maximum SSE event queue depth across live sessions" Gauge;
+  add metric_sse_external_subscribers
+    "Active non-SSE subscribers bridged from the SSE fanout path" Gauge;
+  add metric_grpc_active_streams "Active gRPC bidirectional streams" Gauge;
+  register_histogram ~name:metric_grpc_heartbeat_latency
+    ~help:"gRPC heartbeat round-trip latency" ();
+  add metric_grpc_subscribers "Active gRPC Subscribe stream subscribers" Gauge;
+  add metric_grpc_events_delivered "Total events delivered via gRPC streams" Counter;
+  add metric_ws_sessions "Active standalone WebSocket sessions" Gauge
 
 let start_time = Time_compat.now ()
 
@@ -420,6 +465,8 @@ let update_uptime () =
 
 let fd_warn_threshold =
   Env_config_core.get_int ~default:3000 "MASC_FD_WARN_THRESHOLD" |> max 1
+
+let () = set_gauge metric_fd_warn_threshold (float_of_int fd_warn_threshold)
 
 let fd_warned_once = ref false
 

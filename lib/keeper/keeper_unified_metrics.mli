@@ -5,11 +5,6 @@
 
     @since 0.120.0 *)
 
-(** Cheap persona-derived predicate: returns [true] when the keeper's
-    [mention_targets] include one of the verifier role tokens
-    (["verifier"; "검증자"]). *)
-val is_verifier_role_keeper : Keeper_types.keeper_meta -> bool
-
 (** Derive the trigger list from the observation. *)
 val observed_triggers_of_observation :
   ?meta:Keeper_types.keeper_meta ->

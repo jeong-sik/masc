@@ -4,7 +4,6 @@ type rate_limit_config = {
   burst_allowed: int;
   priority_agents: string list;
   (* Role-based multipliers *)
-  reader_multiplier: float;
   worker_multiplier: float;
   admin_multiplier: float;
   (* Tool category limits *)
@@ -16,7 +15,6 @@ let default_rate_limit = {
   per_minute = 10;
   burst_allowed = 5;
   priority_agents = [];
-  reader_multiplier = 0.5;   (* Readers get 50% of base *)
   worker_multiplier = 1.0;   (* Workers get 100% *)
   admin_multiplier = 2.0;    (* Admins get 200% *)
   broadcast_per_minute = 15;
@@ -28,7 +26,6 @@ let rate_limit_config_to_yojson c =
     ("per_minute", `Int c.per_minute);
     ("burst_allowed", `Int c.burst_allowed);
     ("priority_agents", `List (List.map (fun s -> `String s) c.priority_agents));
-    ("reader_multiplier", `Float c.reader_multiplier);
     ("worker_multiplier", `Float c.worker_multiplier);
     ("admin_multiplier", `Float c.admin_multiplier);
     ("broadcast_per_minute", `Int c.broadcast_per_minute);
@@ -46,12 +43,11 @@ let rate_limit_config_of_yojson json =
       | `List items -> List.map to_string items
       | _ -> raise (Type_error ("priority_agents must be a list", json))
     in
-    let reader_multiplier = json |> member "reader_multiplier" |> to_float_option |> Option.value ~default:0.5 in
     let worker_multiplier = json |> member "worker_multiplier" |> to_float_option |> Option.value ~default:1.0 in
     let admin_multiplier = json |> member "admin_multiplier" |> to_float_option |> Option.value ~default:2.0 in
     let broadcast_per_minute = json |> member "broadcast_per_minute" |> to_int_option |> Option.value ~default:15 in
     let task_ops_per_minute = json |> member "task_ops_per_minute" |> to_int_option |> Option.value ~default:30 in
-    Ok { per_minute; burst_allowed; priority_agents; reader_multiplier; worker_multiplier; admin_multiplier;
+    Ok { per_minute; burst_allowed; priority_agents; worker_multiplier; admin_multiplier;
          broadcast_per_minute; task_ops_per_minute }
   with e -> Error (Printexc.to_string e)
 
@@ -123,7 +119,6 @@ type masc_error =
   | TaskAlreadyClaimed of { task_id: string; by: string }
   | TaskNotClaimed of string
   | TaskInvalidState of string  (* For cancelled tasks or invalid state transitions *)
-  | TaskRoleMismatch of { task_id: string; required: string; actual: string }
   | PortalNotOpen of string
   | PortalAlreadyOpen of { agent: string; target: string }
   | PortalClosed of string
@@ -171,8 +166,6 @@ let rec masc_error_to_string = function
         "❌ Task %s is still todo. Claim/start it first, then mark it done."
         id
   | TaskInvalidState msg -> Printf.sprintf "❌ Invalid task state: %s" msg
-  | TaskRoleMismatch { task_id; required; actual } ->
-      Printf.sprintf "❌ Role mismatch for %s: requires %s, agent has %s" task_id required actual
   | PortalNotOpen agent -> Printf.sprintf "❌ No portal open for %s. Use masc_portal_open first." agent
   | PortalAlreadyOpen { agent; target } -> Printf.sprintf "⚠ Portal already open: %s ↔ %s" agent target
   | PortalClosed agent -> Printf.sprintf "❌ Portal is closed for %s. Use masc_portal_open to reopen." agent
@@ -208,18 +201,15 @@ type 'a masc_result = ('a, masc_error) result
 
 (** Agent role - enforced permission levels *)
 type agent_role =
-  | Reader    (* Can read state, cannot modify *)
   | Worker    (* Can claim tasks, lock files, broadcast *)
   | Admin     (* Full access: init, reset, manage agents *)
 [@@deriving show { with_path = false }]
 
 let agent_role_to_string = function
-  | Reader -> "reader"
   | Worker -> "worker"
   | Admin -> "admin"
 
 let agent_role_of_string = function
-  | "reader" -> Ok Reader
   | "worker" -> Ok Worker
   | "admin" -> Ok Admin
   | s -> Error ("Unknown agent role: " ^ s)
@@ -230,7 +220,7 @@ let agent_role_of_string = function
     nullary across all constructors so the simple [List.map] trick
     works. Adding a 4th constructor will fail compilation in
     [agent_role_to_string] and in the test asserts. *)
-let all_agent_roles = [ Reader; Worker; Admin ]
+let all_agent_roles = [ Worker; Admin ]
 let valid_agent_role_strings = List.map agent_role_to_string all_agent_roles
 
 let agent_role_to_yojson r = `String (agent_role_to_string r)
@@ -252,7 +242,7 @@ let agent_credential_to_yojson c =
   let base = [
     ("agent_name", `String c.agent_name);
     ("token", `String c.token);
-    ("role", agent_role_to_yojson c.role);
+    ("admin", `Bool (c.role = Admin));
     ("created_at", `String c.created_at);
   ] in
   match c.expires_at with
@@ -264,12 +254,15 @@ let agent_credential_of_yojson json =
   try
     let agent_name = json |> member "agent_name" |> to_string in
     let token = json |> member "token" |> to_string in
-    let role_str = json |> member "role" |> to_string in
     let created_at = json |> member "created_at" |> to_string in
     let expires_at = json |> member "expires_at" |> to_string_option in
-    match agent_role_of_string role_str with
-    | Ok role -> Ok { agent_name; token; role; created_at; expires_at }
-    | Error e -> Error e
+    let role =
+      match json |> member "admin" |> to_bool_option with
+      | Some true -> Admin
+      | Some false -> Worker
+      | None -> Worker
+    in
+    Ok { agent_name; token; role; created_at; expires_at }
   with e -> Error (Printexc.to_string e)
 
 (** Auth config - room-level settings *)
@@ -277,7 +270,6 @@ type auth_config = {
   enabled: bool;
   room_secret_hash: string option; [@default None]  (* SHA256 of room secret *)
   require_token: bool; [@default false]
-  default_role: agent_role; [@default Worker]
   token_expiry_hours: int; [@default 24]
 } [@@deriving show]
 
@@ -285,7 +277,6 @@ let default_auth_config = {
   enabled = false;
   room_secret_hash = None;
   require_token = false;
-  default_role = Worker;
   token_expiry_hours = 24;
 }
 
@@ -294,7 +285,6 @@ let auth_config_to_yojson c =
     ("enabled", `Bool c.enabled);
     ("room_secret_hash", Json_util.string_opt_to_json c.room_secret_hash);
     ("require_token", `Bool c.require_token);
-    ("default_role", agent_role_to_yojson c.default_role);
     ("token_expiry_hours", `Int c.token_expiry_hours);
   ]
 
@@ -304,11 +294,14 @@ let auth_config_of_yojson json =
     let enabled = json |> member "enabled" |> to_bool in
     let room_secret_hash = json |> member "room_secret_hash" |> to_string_option in
     let require_token = json |> member "require_token" |> to_bool_option |> Option.value ~default:false in
-    let default_role_str = json |> member "default_role" |> to_string_option |> Option.value ~default:"worker" in
     let token_expiry_hours = json |> member "token_expiry_hours" |> to_int_option |> Option.value ~default:24 in
-    match agent_role_of_string default_role_str with
-    | Ok default_role -> Ok { enabled; room_secret_hash; require_token; default_role; token_expiry_hours }
-    | Error e -> Error e
+    Ok
+      {
+        enabled;
+        room_secret_hash;
+        require_token;
+        token_expiry_hours;
+      }
   with e -> Error (Printexc.to_string e)
 
 (** Permission matrix - what each role can do *)
@@ -332,7 +325,6 @@ type permission =
 
 (** Get permissions for a role *)
 let permissions_for_role = function
-  | Reader -> [CanReadState; CanJoin; CanLeave]
   | Worker -> [
       CanReadState; CanJoin; CanLeave;
       CanAddTask; CanClaimTask; CanCompleteTask;
@@ -362,7 +354,6 @@ let has_permission role permission =
 
 (** Get role multiplier for rate limits *)
 let multiplier_for_role config = function
-  | Reader -> config.reader_multiplier
   | Worker -> config.worker_multiplier
   | Admin -> config.admin_multiplier
 

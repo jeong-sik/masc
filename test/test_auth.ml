@@ -260,7 +260,7 @@ let test_list_credentials () =
   let dir = setup_test_room () in
   let _ = Auth.create_token dir ~agent_name:"claude" ~role:Types.Admin in
   let _ = Auth.create_token dir ~agent_name:"gemini" ~role:Types.Worker in
-  let _ = Auth.create_token dir ~agent_name:"codex" ~role:Types.Reader in
+  let _ = Auth.create_token dir ~agent_name:"codex" ~role:Types.Worker in
   let creds = Auth.list_credentials dir in
   cleanup_test_room dir;
   check int "3 credentials" 3 (List.length creds)
@@ -298,15 +298,14 @@ let test_load_credential_exact_wins_over_fallback () =
      match wins so a per-nickname override remains possible. *)
   let dir = setup_test_room () in
   let _ = Auth.create_token dir ~agent_name:"adversary" ~role:Types.Worker in
-  let _ = Auth.create_token dir ~agent_name:"adversary-fair-tapir" ~role:Types.Reader in
+  let _ = Auth.create_token dir ~agent_name:"adversary-fair-tapir" ~role:Types.Admin in
   let resolved = Auth.load_credential dir "adversary-fair-tapir" in
   cleanup_test_room dir;
   match resolved with
-  | Some cred when cred.agent_name = "adversary-fair-tapir" && cred.role = Types.Reader -> ()
+  | Some cred when cred.agent_name = "adversary-fair-tapir" && cred.role = Types.Admin -> ()
   | Some cred ->
       fail (Printf.sprintf "unexpected resolution: %s/%s" cred.agent_name
-              (match cred.role with Types.Reader -> "Reader" | Worker -> "Worker"
-               | Admin -> "Admin"))
+              (match cred.role with Worker -> "Worker" | Admin -> "Admin"))
   | None -> fail "exact match should resolve"
 
 let test_extract_agent_type_prefix_keeper_aliases () =
@@ -419,30 +418,32 @@ let test_save_raw_token_credential_uses_provided_token () =
            "provided raw token should verify after save_raw_token_credential: %s"
            (Types.masc_error_to_string e))
 
-let test_ensure_keeper_credential_uses_keeper_middle_name () =
+let test_ensure_keeper_credential_uses_shared_internal_token () =
   let dir = setup_test_room () in
-  let ensure_result =
-    with_env "MASC_MCP_TOKEN" "" (fun () ->
-      Auth.ensure_keeper_credential dir ~agent_name:"keeper-masc-improver-agent")
-  in
-  let verify_result =
-    match ensure_result with
-    | Ok (raw_token, _) ->
-        Auth.verify_token dir ~agent_name:"keeper-masc-improver-agent"
-          ~token:raw_token
-    | Error e -> Error e
-  in
-  cleanup_test_room dir;
-  match ensure_result, verify_result with
-  | Ok (_raw_token, cred), Ok alias_cred ->
-      check string "stored under keeper middle" "masc-improver" cred.agent_name;
-      check string "alias resolves same credential" "masc-improver"
-        alias_cred.agent_name
-  | Error e, _ | _, Error e ->
-      fail
-        (Printf.sprintf
-           "ensure_keeper_credential should mint a keeper-scoped token: %s"
-           (Types.masc_error_to_string e))
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_room dir)
+    (fun () ->
+      let ensure_result =
+        with_env "MASC_MCP_TOKEN" "" (fun () ->
+          Auth.ensure_keeper_credential dir ~agent_name:"keeper-masc-improver-agent")
+      in
+      match ensure_result with
+      | Ok (raw_token, cred) ->
+          check string "normalized keeper name" "masc-improver" cred.agent_name;
+          check bool "keeper credential is worker" true (cred.role = Types.Worker);
+          check bool "shared internal token verifies" true
+            (Auth.verify_internal_keeper_token dir ~token:raw_token);
+          check bool "internal keeper token hash persisted" true
+            (Sys.file_exists (Auth.internal_keeper_token_hash_file dir));
+          check bool "no per-keeper external credential persisted" true
+            (Option.is_none (Auth.load_credential dir "keeper-masc-improver-agent"));
+          check bool "no normalized keeper credential persisted" true
+            (Option.is_none (Auth.load_credential dir "masc-improver"))
+      | Error e ->
+          fail
+            (Printf.sprintf
+               "ensure_keeper_credential should mint a shared internal token: %s"
+               (Types.masc_error_to_string e)))
 
 let test_ensure_keeper_credential_reuses_persisted_raw_token_when_env_mismatched () =
   let dir = setup_test_room () in
@@ -486,14 +487,6 @@ let test_ensure_keeper_credential_reuses_persisted_raw_token_when_env_mismatched
 (* ============================================ *)
 (* Permission tests                             *)
 (* ============================================ *)
-
-let test_reader_permissions () =
-  check bool "reader can read" true
-    (Types.has_permission Types.Reader Types.CanReadState);
-  check bool "reader cannot claim" false
-    (Types.has_permission Types.Reader Types.CanClaimTask);
-  check bool "reader cannot init" false
-    (Types.has_permission Types.Reader Types.CanInit)
 
 let test_worker_permissions () =
   check bool "worker can read" true
@@ -550,63 +543,20 @@ let test_auth_enabled_with_valid_token () =
   | Ok () -> ()
   | Error e -> fail (Types.masc_error_to_string e)
 
-let test_permission_denied_for_reader () =
+let test_permission_denied_for_worker_admin_action () =
   let dir = setup_test_room () in
   let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
-  let create_result = Auth.create_token dir ~agent_name:"reader_agent" ~role:Types.Reader in
+  let create_result = Auth.create_token dir ~agent_name:"worker_agent" ~role:Types.Worker in
   let check_result = match create_result with
     | Ok (raw_token, _) ->
-        Auth.check_permission dir ~agent_name:"reader_agent" ~token:(Some raw_token) ~permission:Types.CanClaimTask
+        Auth.check_permission dir ~agent_name:"worker_agent" ~token:(Some raw_token) ~permission:Types.CanInit
     | Error e -> Error e
   in
   cleanup_test_room dir;
   match check_result with
-  | Ok () -> fail "reader should not claim"
+  | Ok () -> fail "worker should not get admin action"
   | Error (Types.Forbidden _) -> ()
   | Error e -> fail (Printf.sprintf "wrong error: %s" (Types.masc_error_to_string e))
-
-let test_optional_token_overrides_reader_default_role () =
-  let dir = setup_test_room () in
-  let _ = Auth.enable_auth dir ~require_token:false ~agent_name:"test-admin" in
-  let cfg = Auth.load_auth_config dir in
-  Auth.save_auth_config dir { cfg with default_role = Types.Reader };
-  let result =
-    match Auth.create_token dir ~agent_name:"worker_agent" ~role:Types.Worker with
-    | Ok (raw_token, _) ->
-        Auth.check_permission dir ~agent_name:"worker_agent"
-          ~token:(Some raw_token) ~permission:Types.CanClaimTask
-    | Error e -> Error e
-  in
-  cleanup_test_room dir;
-  match result with
-  | Ok () -> ()
-  | Error e ->
-      fail
-        (Printf.sprintf
-           "optional worker token should override reader default_role: %s"
-           (Types.masc_error_to_string e))
-
-let test_optional_token_authorizes_keeper_tool_when_default_role_reader () =
-  let dir = setup_test_room () in
-  let _ = Auth.enable_auth dir ~require_token:false ~agent_name:"test-admin" in
-  let cfg = Auth.load_auth_config dir in
-  Auth.save_auth_config dir { cfg with default_role = Types.Reader };
-  let result =
-    match Auth.create_token dir ~agent_name:"worker_agent" ~role:Types.Worker with
-    | Ok (raw_token, _) ->
-        Auth.authorize_tool_v2 dir ~agent_name:"worker_agent"
-          ~token:(Some raw_token)
-          ~tool_name:"masc_keeper_create_from_persona"
-    | Error e -> Error e
-  in
-  cleanup_test_room dir;
-  match result with
-  | Ok () -> ()
-  | Error e ->
-      fail
-        (Printf.sprintf
-           "optional worker token should authorize keeper spawn tool: %s"
-           (Types.masc_error_to_string e))
 
 let test_authorize_unknown_masc_tool_strict_worker_allowed () =
   let dir = setup_test_room () in
@@ -624,24 +574,6 @@ let test_authorize_unknown_masc_tool_strict_worker_allowed () =
   match result with
   | Ok () -> ()
   | Error e -> fail (Types.masc_error_to_string e)
-
-let test_authorize_unknown_masc_tool_strict_reader_denied () =
-  let dir = setup_test_room () in
-  let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
-  let create_result = Auth.create_token dir ~agent_name:"reader_agent" ~role:Types.Reader in
-  let result =
-    match create_result with
-    | Ok (raw_token, _) ->
-        with_env "MASC_TOOL_AUTH_STRICT" "1" (fun () ->
-            Auth.authorize_tool dir ~agent_name:"reader_agent" ~token:(Some raw_token)
-              ~tool_name:"masc_unknown_tool")
-    | Error e -> Error e
-  in
-  cleanup_test_room dir;
-  match result with
-  | Ok () -> fail "reader should be denied in strict mode for unknown masc tool"
-  | Error (Types.Forbidden _) -> ()
-  | Error e -> fail (Printf.sprintf "wrong error: %s" (Types.masc_error_to_string e))
 
 let test_authorize_unknown_non_masc_tool_strict_denied () =
   let dir = setup_test_room () in
@@ -756,13 +688,10 @@ let () =
         test_verify_token_dashboard_legacy_alias_fallback;
       test_case "save_raw_token_credential uses provided token" `Quick
         test_save_raw_token_credential_uses_provided_token;
-      test_case "ensure_keeper_credential uses keeper middle name" `Quick
-        test_ensure_keeper_credential_uses_keeper_middle_name;
-      test_case "ensure_keeper_credential reuses persisted raw token on env mismatch" `Quick
-        test_ensure_keeper_credential_reuses_persisted_raw_token_when_env_mismatched;
+      test_case "ensure_keeper_credential uses shared internal token" `Quick
+        test_ensure_keeper_credential_uses_shared_internal_token;
     ];
     "permissions", [
-      test_case "reader permissions" `Quick test_reader_permissions;
       test_case "worker permissions" `Quick test_worker_permissions;
       test_case "admin permissions" `Quick test_admin_permissions;
     ];
@@ -770,15 +699,10 @@ let () =
       test_case "auth disabled allows all" `Quick test_auth_disabled_allows_all;
       test_case "auth enabled requires token" `Quick test_auth_enabled_requires_token;
       test_case "auth enabled with valid token" `Quick test_auth_enabled_with_valid_token;
-      test_case "permission denied for reader" `Quick test_permission_denied_for_reader;
-      test_case "optional token overrides reader default role"
-        `Quick test_optional_token_overrides_reader_default_role;
-      test_case "optional token authorizes keeper tool"
-        `Quick test_optional_token_authorizes_keeper_tool_when_default_role_reader;
+      test_case "permission denied for worker admin action" `Quick
+        test_permission_denied_for_worker_admin_action;
       test_case "strict unknown masc tool allows worker"
         `Quick test_authorize_unknown_masc_tool_strict_worker_allowed;
-      test_case "strict unknown masc tool denies reader"
-        `Quick test_authorize_unknown_masc_tool_strict_reader_denied;
       test_case "strict unknown non-masc tool denied"
         `Quick test_authorize_unknown_non_masc_tool_strict_denied;
       test_case "strict unknown canonical tool allows worker"

@@ -197,6 +197,18 @@ let parse_task_contract args =
             (Printf.sprintf "Invalid contract payload: %s" error))
   | _ -> Error "contract must be an object when provided"
 
+let is_internal_marker key =
+  String.length key > 0 && key.[0] = '_'
+
+let unknown_args ~valid_keys args =
+  match args with
+  | `Assoc kvs ->
+      kvs
+      |> List.filter (fun (key, _) ->
+             (not (is_internal_marker key)) && not (List.mem key valid_keys))
+      |> List.map fst
+  | _ -> []
+
 (* Synthesize a summary from sibling [notes] / [reason] transition args
    when [handoff_context.summary] is empty. Keeper LLMs frequently send
    a non-empty [reason] or [notes] but forget the nested summary field —
@@ -349,16 +361,20 @@ let persisted_contract_rejection ~(ctx : context)
 (* Handlers *)
 
 let handle_add_task ctx args =
+  let valid_keys = [ "title"; "priority"; "description"; "goal_id"; "contract" ] in
+  let unknown = unknown_args ~valid_keys args in
+  if unknown <> [] then
+    ( false
+    , Printf.sprintf
+        "Unknown argument(s): %s. Valid: %s"
+        (String.concat ", " unknown)
+        (String.concat ", " valid_keys) )
+  else
   let title = get_string args "title" "" in
   let priority = get_int args "priority" 3 in
   let description = get_string args "description" "" in
   let goal_id =
     match Safe_ops.json_string_opt "goal_id" args with
-    | Some s when String.trim s <> "" -> Some (String.trim s)
-    | _ -> None
-  in
-  let required_preset =
-    match Safe_ops.json_string_opt "required_preset" args with
     | Some s when String.trim s <> "" -> Some (String.trim s)
     | _ -> None
   in
@@ -377,22 +393,11 @@ let handle_add_task ctx args =
   then
     (false, Printf.sprintf "Unknown goal_id '%s'" (Option.value ~default:"" goal_id))
   else
-    (* Validate required_preset against configured preset names *)
-    let preset_valid = match required_preset with
-      | None -> true
-      | Some name ->
-        let known = Keeper_tool_policy.configured_preset_names () in
-        known = [] (* config not loaded yet — accept *) || List.mem name known
-    in
-    if not preset_valid then
-      (false, Printf.sprintf "Unknown required_preset '%s'. Must match a preset in tool_policy.toml."
-        (Option.value ~default:"" required_preset))
-    else
     match contract_result with
     | Error error -> (false, error)
     | Ok contract ->
         ( true,
-          Coord.add_task ?contract ?goal_id ?required_preset
+          Coord.add_task ?contract ?goal_id
             ~created_by:ctx.agent_name ctx.config ~title:trimmed_title
             ~priority ~description )
 
@@ -431,7 +436,21 @@ let handle_batch_add_tasks ctx args =
       Error (Printf.sprintf "item[%d]: priority must be 1-5, got %d" idx priority)
     else
       match contract with
-      | Ok contract -> Ok (title, priority, description, contract, goal_id)
+      | Ok contract ->
+          let has_removed_field name =
+            match t |> member name with
+            | `Null -> false
+            | _ -> true
+          in
+          if has_removed_field "required_preset" then
+            Error (Printf.sprintf "item[%d]: required_preset is no longer supported" idx)
+          else if has_removed_field "required_role" then
+            Error (Printf.sprintf "item[%d]: required_role is no longer supported" idx)
+          else if has_removed_field "required_verifier_role" then
+            Error
+              (Printf.sprintf "item[%d]: required_verifier_role is no longer supported" idx)
+          else
+            Ok (title, priority, description, contract, goal_id)
       | Error error -> Error error
   ) tasks_json in
   let errors = List.filter_map (function Error e -> Some e | Ok _ -> None) validated in
@@ -444,99 +463,19 @@ let handle_batch_add_tasks ctx args =
     (true, Coord.batch_add_tasks_with_contracts
       ~created_by:ctx.agent_name ctx.config tasks)
 
-(** Extract preset token from capabilities (e.g., ["keeper"; "preset:delivery"]). *)
-let preset_from_capabilities caps =
-  List.find_map
-    (fun c ->
-      let prefix = "preset:" in
-      let plen = String.length prefix in
-      if String.length c > plen && String.sub c 0 plen = prefix
-      then Some (String.sub c plen (String.length c - plen))
-      else None)
-    caps
-
-let resolve_keeper_preset config agent_name =
-  match Keeper_types.keeper_name_from_agent_name agent_name with
-  | None -> None
-  | Some keeper_name -> (
-      match Keeper_types.read_meta config keeper_name with
-      | Ok (Some meta) ->
-          Keeper_types.tool_access_preset meta.tool_access
-          |> Option.map Keeper_types.tool_preset_to_string
-      | Ok None | Error _ -> None)
-
-(** Resolve an agent preset.
-    Keepers read from live keeper meta first so claim_next follows the
-    reconciled runtime/declarative SSOT rather than a stale join snapshot. *)
-let resolve_agent_preset config agent_name =
-  match resolve_keeper_preset config agent_name with
-  | Some _ as preset -> preset
-  | None ->
-      let agent_file =
-        Filename.concat (Coord.agents_dir config)
-          (Coord.safe_filename agent_name ^ ".json")
-      in
-      try
-        let json = Coord.read_json config agent_file in
-        let caps =
-          Yojson.Safe.Util.(
-            json |> member "capabilities" |> to_list |> List.map to_string)
-        in
-        preset_from_capabilities caps
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | _ -> None
-
-(** Evaluate whether an agent's preset satisfies a task's requirement.
-    Returns [Ok ()] on match or no requirement, [Error reason] on mismatch.
-    SSOT for preset-fit logic — used by both claim and claim_next. *)
-let evaluate_preset_fit ~(agent_preset : string option)
-    ~(required_preset : string option) : (unit, string) result =
-  match required_preset, agent_preset with
-  | None, _ -> Ok ()
-  | Some required, None ->
-      Error (Printf.sprintf
-        "requires preset '%s' but agent has no preset" required)
-  | Some required, Some preset ->
-      if Keeper_tool_policy.preset_can_satisfy ~agent_preset:preset ~required_preset:required
-      then Ok ()
-      else Error (Printf.sprintf
-        "requires preset '%s' but agent has '%s'" required preset)
-
-(** Build a task_filter closure that checks required_preset against the agent's preset. *)
-let preset_task_filter ~agent_preset (task : Types.task) =
-  evaluate_preset_fit ~agent_preset ~required_preset:task.required_preset
-  |> Result.is_ok
-
 let handle_claim ctx args =
   if not (try Coord.is_agent_joined ctx.config ~agent_name:ctx.agent_name with Sys_error _ | Not_found -> false) then
     result_to_response (Error (Types.AgentNotJoined ctx.agent_name))
+  else if args |> member "agent_role" <> `Null then
+    (false, "agent_role is no longer supported")
   else
   let task_id = get_string args "task_id" "" in
   match validate_task_id task_id with
   | Error e -> result_to_response (Error e)
   | Ok task_id ->
-  let agent_role = match get_string args "agent_role" "" with
-    | "" -> Types_core.Unassigned
-    | s -> Types_core.role_of_string s
-  in
-  let preset_warning =
-    let agent_preset = resolve_agent_preset ctx.config ctx.agent_name in
-    let tasks = Coord.get_tasks_raw ctx.config in
-    match List.find_opt (fun (t : Types.task) -> t.id = task_id) tasks with
-    | None -> None
-    | Some task ->
-        match evaluate_preset_fit ~agent_preset ~required_preset:task.required_preset with
-        | Ok () -> None
-        | Error reason ->
-            Some (Printf.sprintf "preset_mismatch: task %s %s" task_id reason)
-  in
-  let result = Coord.claim_task_r ctx.config ~agent_name:ctx.agent_name ~task_id ~agent_role () in
+  let result = Coord.claim_task_r ctx.config ~agent_name:ctx.agent_name ~task_id () in
   (match result with
    | Ok _ ->
-       (match preset_warning with
-        | Some warning -> Log.Task.warn "%s (agent=%s)" warning ctx.agent_name
-        | None -> ());
        sync_planning_current_task_with_owned_task ctx;
        Subscriptions.push_event_to_sessions (`Assoc [
          ("type", `String "masc/task_claimed");
@@ -545,25 +484,18 @@ let handle_claim ctx args =
          ("timestamp", `Float (Time_compat.now ()));
        ])
    | Error e -> Log.Task.debug "task claim failed for %s: %s" task_id (Types.masc_error_to_string e));
-  let (ok, msg) = result_to_response result in
-  match preset_warning, ok with
-  | Some warning, true -> (true, msg ^ "\n⚠️ " ^ warning)
-  | _ -> (ok, msg)
+  result_to_response result
 
 let handle_claim_next ctx _args =
   if not (try Coord.is_agent_joined ctx.config ~agent_name:ctx.agent_name with Sys_error _ | Not_found -> false) then
     (false, Printf.sprintf "Agent '%s' is not a member of this room" ctx.agent_name)
   else
-  let agent_preset = resolve_agent_preset ctx.config ctx.agent_name in
-  let task_filter = preset_task_filter ~agent_preset in
-  let result = Coord.claim_next_r ctx.config ~agent_name:ctx.agent_name ~task_filter () in
+  let result = Coord.claim_next_r ctx.config ~agent_name:ctx.agent_name () in
   let message = match result with
     | Coord.Claim_next_claimed { message; _ } ->
         sync_planning_current_task_with_owned_task ctx;
         message
     | Coord.Claim_next_no_unclaimed -> "📋 No unclaimed tasks available"
-    | Coord.Claim_next_no_eligible { preset_filtered; _ } when preset_filtered > 0 ->
-        Printf.sprintf "📋 No eligible tasks (preset mismatch: %d tasks require different preset)" preset_filtered
     | Coord.Claim_next_no_eligible { excluded_count; _ } ->
         Printf.sprintf "📋 No eligible tasks available (blocked/excluded: %d)" excluded_count
     | Coord.Claim_next_error e -> Printf.sprintf "❌ Error: %s" e

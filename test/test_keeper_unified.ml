@@ -4641,52 +4641,10 @@ let () =
           test_case "keeper allowed tools exclude heartbeat" `Quick
             test_keeper_allowed_tools_exclude_heartbeat;
         ] );
-      ( "verifier_role",
+      ( "verification_surface",
         [
-          test_case "is_verifier_role_keeper detects english token" `Quick
-            (fun () ->
-              let meta =
-                { minimal_meta with mention_targets = [ "verifier" ] }
-              in
-              check bool "verifier token matches" true
-                (UM.is_verifier_role_keeper meta));
-          test_case "is_verifier_role_keeper detects korean token" `Quick
-            (fun () ->
-              let meta =
-                { minimal_meta with mention_targets = [ "검증자" ] }
-              in
-              check bool "korean token matches" true
-                (UM.is_verifier_role_keeper meta));
-          test_case "is_verifier_role_keeper rejects non-verifier persona"
+          test_case "affordance: keeper sees task_verify when pending>0"
             `Quick (fun () ->
-              let meta =
-                {
-                  minimal_meta with
-                  mention_targets = [ "analyst"; "scholar" ];
-                }
-              in
-              check bool "non-verifier mention targets" false
-                (UM.is_verifier_role_keeper meta));
-          test_case "is_verifier_role_keeper empty mention targets" `Quick
-            (fun () ->
-              check bool "empty mention_targets" false
-                (UM.is_verifier_role_keeper
-                   { minimal_meta with mention_targets = [] }));
-          test_case "affordance: verifier sees task_verify when pending>0"
-            `Quick (fun () ->
-              let meta =
-                { minimal_meta with mention_targets = [ "verifier" ] }
-              in
-              let obs =
-                { base_observation with pending_verification_count = 3 }
-              in
-              let affordances =
-                UM.observed_affordances_of_observation ~meta obs
-              in
-              check bool "task_verify present for verifier" true
-                (List.mem "task_verify" affordances));
-          test_case "affordance: non-verifier gated off task_verify" `Quick
-            (fun () ->
               let meta =
                 { minimal_meta with mention_targets = [ "analyst" ] }
               in
@@ -4696,7 +4654,21 @@ let () =
               let affordances =
                 UM.observed_affordances_of_observation ~meta obs
               in
-              check bool "task_verify absent for non-verifier" false
+              check bool "task_verify present for keeper" true
+                (List.mem "task_verify" affordances));
+          test_case "affordance: verifier-tagged keeper also sees task_verify"
+            `Quick
+            (fun () ->
+              let meta =
+                { minimal_meta with mention_targets = [ "verifier" ] }
+              in
+              let obs =
+                { base_observation with pending_verification_count = 3 }
+              in
+              let affordances =
+                UM.observed_affordances_of_observation ~meta obs
+              in
+              check bool "task_verify present for verifier-tagged keeper" true
                 (List.mem "task_verify" affordances));
           test_case "affordance: no meta keeps legacy surface-to-all" `Quick
             (fun () ->
@@ -4708,7 +4680,7 @@ let () =
               in
               check bool "task_verify present without meta" true
                 (List.mem "task_verify" affordances));
-          test_case "trigger: non-verifier gated off pending_verification"
+          test_case "trigger: keeper sees pending_verification"
             `Quick (fun () ->
               let meta =
                 { minimal_meta with mention_targets = [ "scholar" ] }
@@ -4719,9 +4691,10 @@ let () =
               let triggers =
                 UM.observed_triggers_of_observation ~meta obs
               in
-              check bool "pending_verification absent for non-verifier" false
+              check bool "pending_verification present for keeper" true
                 (List.mem "pending_verification" triggers));
-          test_case "trigger: verifier sees pending_verification" `Quick
+          test_case "trigger: verifier-tagged keeper also sees pending_verification"
+            `Quick
             (fun () ->
               let meta =
                 { minimal_meta with mention_targets = [ "검증자" ] }
@@ -4732,7 +4705,8 @@ let () =
               let triggers =
                 UM.observed_triggers_of_observation ~meta obs
               in
-              check bool "pending_verification present for verifier" true
+              check bool "pending_verification present for verifier-tagged keeper"
+                true
                 (List.mem "pending_verification" triggers));
         ] );
     ]

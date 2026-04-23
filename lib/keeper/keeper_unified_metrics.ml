@@ -237,24 +237,6 @@ let work_kind_of_json (json : Yojson.Safe.t) : string option =
            if value = "" then None else Some value
        | None -> None)
 
-(* A keeper acts as a verification authority when its persona wires the
-   "verifier"/"검증자" mention targets. The dashboard and prompt builder
-   need a cheap predicate to pick verifier keepers out of the fleet
-   without reloading the persona profile. *)
-let verifier_role_mention_tokens = [ "verifier"; "검증자" ]
-
-let is_verifier_role_keeper (meta : Keeper_types.keeper_meta) : bool =
-  List.exists
-    (fun token -> List.mem token meta.mention_targets)
-    verifier_role_mention_tokens
-
-(* Verification signals (pending_verification trigger / task_verify
-   affordance) are only surfaced to keepers whose persona declares the
-   verifier role. Non-verifier keepers would otherwise steal verification
-   work that their persona is not configured to perform.  When [meta] is
-   omitted the legacy surface-to-all behaviour is kept for backwards
-   compatibility with callers that have no keeper context (e.g. dashboard
-   snapshots, diagnostics). *)
 let observed_triggers_of_observation
     ?meta
     (observation : Keeper_world_observation.world_observation) : string list =
@@ -265,12 +247,8 @@ let observed_triggers_of_observation
   if observation.pending_scope_messages <> [] then add "scope_message";
   if observation.unclaimed_task_count > 0 then add "new_unclaimed_task";
   if observation.failed_task_count > 0 then add "failed_task";
-  let verifier_eligible =
-    match meta with
-    | None -> true
-    | Some m -> is_verifier_role_keeper m
-  in
-  if verifier_eligible && observation.pending_verification_count > 0 then
+  let _ = meta in
+  if observation.pending_verification_count > 0 then
     add "pending_verification";
   if observation.active_goals <> [] && observation.idle_seconds > 0 then
     add "idle_timeout_candidate";
@@ -287,12 +265,8 @@ let observed_affordances_of_observation
   if observation.pending_scope_messages <> [] then add "message_sweep";
   if observation.unclaimed_task_count > 0 then add "task_claim";
   if observation.failed_task_count > 0 then add "task_audit";
-  let verifier_eligible =
-    match meta with
-    | None -> true
-    | Some m -> is_verifier_role_keeper m
-  in
-  if verifier_eligible && observation.pending_verification_count > 0 then
+  let _ = meta in
+  if observation.pending_verification_count > 0 then
     add "task_verify";
   if Option.is_some observation.worktree_change_summary then add "inspect_worktree_delta";
   List.rev !affordances
@@ -480,7 +454,6 @@ let append_decision_record
               ("pending_verification_count", `Int observation.pending_verification_count);
               ("active_agent_count", `Int observation.active_agent_count);
               ("worktree_change_detected", `Bool (Option.is_some observation.worktree_change_summary));
-              ("verifier_role_keeper", `Bool (is_verifier_role_keeper meta));
             ] );
         ("tool_call_count", `Int tool_call_count);
         ("tools_used", `List (List.map (fun s -> `String s) tools_used));

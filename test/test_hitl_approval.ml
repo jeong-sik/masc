@@ -596,17 +596,17 @@ let test_approval_get_dispatch_not_found () =
   Alcotest.(check bool) "not found next action" true
     (contains_substring msg "Refresh with masc_approval_pending")
 
-let test_approval_get_rejects_reader_role () =
+let test_approval_get_rejects_worker_role () =
   match
-    Masc_mcp.Auth.authorize_tool_for_role ~agent_name:"reader"
-      ~role:Types.Reader ~tool_name:"masc_approval_get"
+    Masc_mcp.Auth.authorize_tool_for_role ~agent_name:"worker"
+      ~role:Types.Worker ~tool_name:"masc_approval_get"
   with
   | Error (Types.Forbidden _) -> ()
   | Error err ->
       Alcotest.fail
         (Printf.sprintf "expected forbidden, got %s"
            (Types.masc_error_to_string err))
-  | Ok () -> Alcotest.fail "reader should not be allowed to call approval_get"
+  | Ok () -> Alcotest.fail "worker should not be allowed to call approval_get"
 
 (* ── 4. Approval callback integration ────────────────────── *)
 
@@ -766,8 +766,8 @@ let () =
         test_approval_get_dispatch_missing_id;
       Alcotest.test_case "dispatch approval_get not found" `Quick
         test_approval_get_dispatch_not_found;
-      Alcotest.test_case "approval_get rejects reader role" `Quick
-        test_approval_get_rejects_reader_role;
+      Alcotest.test_case "approval_get rejects worker role" `Quick
+        test_approval_get_rejects_worker_role;
       Alcotest.test_case "resolve_with_policy remembers medium allow" `Quick
         test_resolve_with_policy_remembers_medium_allow;
       Alcotest.test_case "resolve_with_policy skips high allow memory" `Quick

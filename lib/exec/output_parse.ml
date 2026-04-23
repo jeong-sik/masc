@@ -229,6 +229,29 @@ type parser_kind =
   | Ls_long
   | Dune_test
 
+let git_option_requires_arg = function
+  | "-C" | "-c" | "--git-dir" | "--work-tree" | "--namespace" | "--exec-path"
+  | "--super-prefix" | "--config-env" ->
+      true
+  | _ -> false
+
+let git_option_has_inline_arg opt =
+  starts_with opt "--git-dir=" || starts_with opt "--work-tree="
+  || starts_with opt "--namespace=" || starts_with opt "--exec-path="
+  || starts_with opt "--super-prefix=" || starts_with opt "--config-env="
+  || (String.length opt > 2 && (starts_with opt "-C" || starts_with opt "-c"))
+
+let git_subcommand tokens =
+  let rec loop = function
+    | [] -> None
+    | "--" :: _ -> None
+    | opt :: _value :: rest when git_option_requires_arg opt -> loop rest
+    | opt :: rest when git_option_has_inline_arg opt -> loop rest
+    | opt :: rest when starts_with opt "-" -> loop rest
+    | sub :: _ -> Some sub
+  in
+  loop tokens
+
 let classify_for_parsing ~cmd ~_output =
   let tokens =
     String.trim cmd
@@ -242,7 +265,7 @@ let classify_for_parsing ~cmd ~_output =
       let base = Filename.basename bin |> String.lowercase_ascii in
       match base with
       | "git" ->
-          let sub = match rest with s :: _ -> Some s | _ -> None in
+          let sub = git_subcommand rest in
           (match sub with
           | Some "status" -> Some Git_status
           | Some "log" -> Some Git_log_oneline

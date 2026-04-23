@@ -70,8 +70,8 @@ let append_archive_tasks config (tasks : task list) =
       ] in
       write_json config arch_path archive_json)
 
-let next_task_number config backlog =
-  let backlog_ids = List.filter_map (fun task -> task_id_to_int task.id) backlog.tasks in
+let next_task_number config (backlog : backlog) =
+  let backlog_ids = List.filter_map (fun (task : task) -> task_id_to_int task.id) backlog.tasks in
   let archive_ids = read_archive_task_ids config in
   let max_id = List.fold_left max 0 (backlog_ids @ archive_ids) in
   max_id + 1

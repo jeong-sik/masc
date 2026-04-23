@@ -214,12 +214,12 @@ let claim_next_r
       in
       let task_filter_excluded =
         List.filter
-          (fun t -> (not (List.mem t.id all_excluded)) && not (task_filter t))
+          (fun (t : task) -> (not (List.mem t.id all_excluded)) && not (task_filter t))
           unclaimed
       in
       let eligible =
         List.filter
-          (fun t -> (not (List.mem t.id all_excluded)) && task_filter t)
+          (fun (t : task) -> (not (List.mem t.id all_excluded)) && task_filter t)
           unclaimed
       in
 
@@ -271,7 +271,7 @@ let claim_next_r
             }
       | _ :: _, task :: _ ->
           (* Claim this task *)
-          let new_tasks = List.map (fun t ->
+          let new_tasks = List.map (fun (t : task) ->
             if t.id = task.id then
               { t with task_status = Claimed {
                   assignee = agent_name;

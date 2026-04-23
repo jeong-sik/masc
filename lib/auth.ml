@@ -273,18 +273,37 @@ let load_credential_from_path config agent_name path : agent_credential option =
     Without this fallback, Coord.join's nickname output caused a
     chronic "No credential found for <type>-<adj>-<animal>" noise band
     at ~0.3/min on the live fleet (2026-04-20). *)
+let load_credential_from_path_raw config agent_name path : agent_credential option =
+  if file_exists path then
+    try
+      let content = read_text_file path in
+      let json = Yojson.Safe.from_string content in
+      match agent_credential_of_yojson json with
+      | Ok cred -> Some cred
+      | Error msg ->
+          Log.Auth.warn "[load_credential] parse error for %s: %s" agent_name msg;
+          None
+    with Sys_error _ | Yojson.Json_error _ -> None
+  else
+    None
+
 let load_credential config agent_name : agent_credential option =
   let file = credential_file config agent_name in
-  match load_credential_from_path config agent_name file with
-  | Some _ as c -> c
-  | None ->
-    if is_generated_nickname_shape agent_name then
-      match extract_agent_type_prefix agent_name with
-      | Some prefix when prefix <> agent_name ->
-        let fallback = credential_file config prefix in
-        load_credential_from_path config prefix fallback
-      | _ -> None
-    else None
+  if not (file_exists file) then None
+  else
+    try
+      let content = read_text_file file in
+      let json = Yojson.Safe.from_string content in
+      (* Redirect stub: { "redirect_to": "<uuid>.json" } *)
+      match json with
+      | `Assoc fields when List.mem_assoc "redirect_to" fields -> (
+          match List.assoc "redirect_to" fields with
+          | `String target ->
+              let redirect_path = Filename.concat (agents_dir config) target in
+              load_credential_from_path_raw config agent_name redirect_path
+          | _ -> None)
+      | _ -> load_credential_from_path_raw config agent_name file
+    with Sys_error _ | Yojson.Json_error _ -> None
 
 let load_credential_with_aliases config agent_name : agent_credential option =
   match load_credential config agent_name with
@@ -293,12 +312,25 @@ let load_credential_with_aliases config agent_name : agent_credential option =
       legacy_credential_aliases agent_name
       |> List.find_map (load_credential config)
 
-(** Save agent credential *)
+(** Save agent credential.
+
+    When [cred.id] is present the credential is stored under
+    [{uuid}.json] and a redirect stub [{agent_name}.json] is written so
+    legacy lookup paths still resolve. *)
 let save_credential config (cred : agent_credential) =
   ensure_auth_dirs config;
-  let file = credential_file config cred.agent_name in
   let json = agent_credential_to_yojson cred in
-  save_private_text_file file (Yojson.Safe.pretty_to_string json)
+  let json_str = Yojson.Safe.pretty_to_string json in
+  (match cred.id with
+  | Some cid ->
+      let uuid_file = Filename.concat (agents_dir config) (Credential_id.to_string cid ^ ".json") in
+      save_private_text_file uuid_file json_str;
+      let stub = `Assoc [("redirect_to", `String (Credential_id.to_string cid ^ ".json"))] in
+      let stub_file = credential_file config cred.agent_name in
+      save_private_text_file stub_file (Yojson.Safe.pretty_to_string stub)
+  | None ->
+      let file = credential_file config cred.agent_name in
+      save_private_text_file file json_str)
 
 let load_raw_token config ~agent_name =
   let file = raw_token_file config agent_name in
@@ -318,7 +350,10 @@ let delete_credential config agent_name =
   let file = credential_file config agent_name in
   if file_exists file then remove_file file
 
-(** List all credentials *)
+(** List all credentials.
+
+    De-duplicates by [agent_name] so that a UUID-backed credential
+    plus its redirect stub do not appear twice in the result. *)
 let list_credentials config : agent_credential list =
   let dir = agents_dir config in
   if file_exists dir then
@@ -327,8 +362,15 @@ let list_credentials config : agent_credential list =
     |> List.filter (fun f -> Filename.check_suffix f ".json")
     |> List.filter_map (fun f ->
         let name = Filename.chop_suffix f ".json" in
-        load_credential config name
-      )
+        load_credential config name)
+    |> List.fold_left
+         (fun acc cred ->
+            if List.exists (fun c -> c.agent_name = cred.agent_name) acc then
+              acc
+            else
+              cred :: acc)
+         []
+    |> List.rev
   else
     []
 
@@ -366,6 +408,8 @@ let save_raw_token_credential config ~agent_name ~role ~raw_token :
   let auth_cfg = load_auth_config config in
   let cred =
     {
+      id = None;
+      agent_id = None;
       agent_name;
       token = sha256_hash raw_token;
       role;
@@ -404,9 +448,22 @@ let missing_credential_error config ~agent_name ~token : masc_error =
            agent_name owner.agent_name)
   | _ -> Unauthorized ("No credential found for " ^ agent_name)
 
-(** Verify a token *)
+(** Verify a token.
+
+    Looks up the credential by exact [agent_name] match first.  Only
+    hard-coded legacy aliases (dashboard → dashboard-dev) are accepted
+    as a fallback.  The old nickname-prefix collapse
+    ([extract_agent_type_prefix]) has been removed from the verify
+    path entirely — UUID-based storage makes it unnecessary. *)
 let verify_token config ~agent_name ~token : (agent_credential, masc_error) result =
-  match load_credential_with_aliases config agent_name with
+  let cred_opt =
+    match load_credential config agent_name with
+    | Some _ as c -> c
+    | None ->
+        legacy_credential_aliases agent_name
+        |> List.find_map (load_credential config)
+  in
+  match cred_opt with
   | None -> Error (missing_credential_error config ~agent_name ~token)
   | Some cred ->
       let token_hash = sha256_hash token in
@@ -427,23 +484,28 @@ let verify_token config ~agent_name ~token : (agent_credential, masc_error) resu
 let ensure_keeper_credential config ~agent_name :
     (string * agent_credential, masc_error) result =
   let raw_token = ensure_internal_keeper_token config in
-  let target_agent_name = credential_agent_name agent_name in
+  let id = Credential_id.generate () in
   let cred =
     {
-      agent_name = target_agent_name;
+      id = Some id;
+      agent_id = None;
+      agent_name;
       token = sha256_hash raw_token;
       role = Worker;
       created_at = now_iso ();
       expires_at = None;
     }
   in
-  let file = credential_file config target_agent_name in
-  if not (file_exists file) then (
-    Log.Auth.info "[ensure_keeper_credential] auto-generating credential file for %s"
-      target_agent_name;
-    save_credential config cred
-  );
-  Ok (raw_token, cred)
+  try
+    save_credential config cred;
+    Ok (raw_token, cred)
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+    let msg =
+      Printf.sprintf "Failed to save keeper credential: %s"
+        (Printexc.to_string exn)
+    in
+    Log.Auth.error "%s" msg;
+    Error (IoError msg)
 
 (** Refresh a token (generate new one, update credential) *)
 let refresh_token config ~agent_name ~old_token : (string * agent_credential, masc_error) result =

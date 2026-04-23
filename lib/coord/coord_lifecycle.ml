@@ -142,6 +142,7 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
 
   let agent_file = Filename.concat (agents_dir config) (safe_filename nickname ^ ".json") in
   let agent = {
+    id = None;
     name = nickname;
     agent_type;
     status = Active;

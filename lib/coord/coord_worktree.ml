@@ -641,7 +641,7 @@ let link_worktree_to_task config ~task_id ~worktree_info =
         Error (IoError "Backlog not found")
       else
         let found = ref false in
-        let new_tasks = List.map (fun task ->
+        let new_tasks = List.map (fun (task : task) ->
           if task.id = task_id then begin
             found := true;
             { task with worktree = Some worktree_info }

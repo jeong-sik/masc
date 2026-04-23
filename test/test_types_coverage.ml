@@ -809,6 +809,8 @@ let test_agent_role_of_yojson_wrong_type () =
 
 let test_agent_credential_to_yojson () =
   let cred : Types.agent_credential = {
+    id = None;
+    agent_id = None;
     agent_name = "claude";
     token = "abc123";
     role = Types.Worker;
@@ -825,6 +827,8 @@ let test_agent_credential_to_yojson () =
 
 let test_agent_credential_to_yojson_with_expiry () =
   let cred : Types.agent_credential = {
+    id = None;
+    agent_id = None;
     agent_name = "claude";
     token = "abc123";
     role = Types.Admin;

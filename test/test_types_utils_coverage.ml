@@ -573,6 +573,8 @@ let test_tool_result_no_data () =
 
 let test_agent_credential_roundtrip () =
   let cred = Types.{
+    id = None;
+    agent_id = None;
     agent_name = "claude-secure";
     token = "sha256:abc123";
     role = Admin;
@@ -585,6 +587,8 @@ let test_agent_credential_roundtrip () =
 
 let test_agent_credential_no_expiry () =
   let cred = Types.{
+    id = None;
+    agent_id = None;
     agent_name = "worker-1";
     token = "sha256:xyz789";
     role = Worker;

@@ -203,6 +203,7 @@ let test_classify_inactive_is_offline () =
   let now = Unix.gettimeofday () in
   let agent : Types.agent =
     {
+      id = None;
       name = "test-agent";
       agent_type = "test";
       status = Types.Inactive;
@@ -221,6 +222,7 @@ let test_classify_listening_is_idle () =
   let now = Unix.gettimeofday () in
   let agent : Types.agent =
     {
+      id = None;
       name = "test-agent";
       agent_type = "test";
       status = Types.Listening;
@@ -240,6 +242,7 @@ let test_classify_uses_stuck_threshold_override () =
   let (now, stuck_iso) = make_timestamp_pair 120.0 in
   let agent : Types.agent =
     {
+      id = None;
       name = "test-agent";
       agent_type = "test";
       status = Types.Active;

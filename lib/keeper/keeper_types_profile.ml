@@ -250,6 +250,7 @@ let room_seq_map_of_json (json : Yojson.Safe.t) : (string * int) list =
 
 
 type keeper_profile_defaults = {
+  id : Ids.Keeper_id.t option; [@default None]
   manifest_path : string option;
   persona_name : string option;
   goal : string option;
@@ -321,6 +322,7 @@ type persona_summary = {
 }
 
 let empty_keeper_profile_defaults = {
+  id = None;
   manifest_path = None;
   persona_name = None;
   goal = None;
@@ -653,6 +655,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
   Result.map
     (fun () ->
       {
+        id = None;
         manifest_path = None;
         persona_name = str "persona_name";
         goal = str "goal";
@@ -881,7 +884,8 @@ let load_keeper_toml (path : string)
         if not (validate_name name) then
           Error (Printf.sprintf "%s: invalid keeper name '%s'" path name)
         else
-          Ok (name, { defaults with manifest_path = Some path })
+          let id = Ids.Keeper_id.generate ~name ~path in
+          Ok (name, { defaults with manifest_path = Some path; id = Some id })
 
 let discover_keepers_toml (dir : string)
     : (string * keeper_profile_defaults) list =
@@ -921,6 +925,7 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
           match keeper_json with
           | `Assoc _ ->
               {
+                id = Some (Ids.Keeper_id.generate ~name ~path);
                 manifest_path = Some path;
                 persona_name = Some name;
                 goal = Safe_ops.json_string_opt "goal" keeper_json;
@@ -1096,6 +1101,7 @@ let merge_keeper_profile_defaults
         Per_provider_timeout_set, overlay.per_provider_timeout
   in
   {
+    id = prefer overlay.id base.id;
     manifest_path = prefer overlay.manifest_path base.manifest_path;
     persona_name = prefer overlay.persona_name base.persona_name;
     goal = prefer overlay.goal base.goal;

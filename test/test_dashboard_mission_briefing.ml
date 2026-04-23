@@ -220,6 +220,7 @@ let test_compact_keeper_json_normalizes_missing_fields () =
 let test_compact_agent_json_uses_current_focus () =
   let agent : Types.agent =
     {
+      id = None;
       name = "worker-1";
       agent_type = "codex";
       capabilities = [ "ops"; "review"; "debug" ];
@@ -309,6 +310,7 @@ let test_collect_metadata_gaps_separates_null_like_inputs () =
   in
   let agent : Types.agent =
     {
+      id = None;
       name = "agent-gap";
       agent_type = "codex";
       capabilities = [];
@@ -328,6 +330,7 @@ let test_collect_metadata_gaps_separates_null_like_inputs () =
 let test_collect_metadata_gaps_ignores_inactive_agents () =
   let inactive_agent : Types.agent =
     {
+      id = None;
       name = "agent-idle";
       agent_type = "codex";
       capabilities = [];

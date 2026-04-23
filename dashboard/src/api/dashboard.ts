@@ -34,6 +34,14 @@ import type {
   DashboardPlanningResponse,
   DashboardGoalsTreeResponse,
   DashboardGoalDetailResponse,
+  GoalDetailKeeper,
+  GoalDetailTimelineEvent,
+  GoalTreeNode,
+  GoalTreeSummary,
+  GoalTreeTask,
+  GoalVerificationRequest,
+  GoalVerificationSummary,
+  GoalVerificationVote,
   DashboardNamespaceTruthResponse,
   DashboardShellResponse,
   BoardSortMode,
@@ -781,12 +789,302 @@ export function fetchDashboardPlanning(): Promise<DashboardPlanningResponse> {
   return get('/api/v1/dashboard/planning')
 }
 
-export function fetchDashboardGoalsTree(): Promise<DashboardGoalsTreeResponse> {
-  return get('/api/v1/dashboard/goals')
+function decodeGoalVerificationPrincipal(
+  raw: unknown,
+): GoalVerificationRequest['requested_by'] | null {
+  if (!isRecord(raw)) return null
+  const kind = asString(raw.kind)
+  const id = asString(raw.id)
+  if (!kind || !id) return null
+  return {
+    kind,
+    id,
+    display_name: asNullableString(raw.display_name),
+  }
 }
 
-export function fetchDashboardGoalDetail(goalId: string): Promise<DashboardGoalDetailResponse> {
-  return get(`/api/v1/dashboard/goals/detail?goal_id=${encodeURIComponent(goalId)}`)
+function decodeGoalVerificationPolicySnapshot(
+  raw: unknown,
+): GoalVerificationRequest['policy_snapshot'] | null {
+  if (!isRecord(raw)) return null
+  const principals = asRecordArray(raw.principals)
+    .map(decodeGoalVerificationPrincipal)
+    .filter(
+      (
+        principal,
+      ): principal is NonNullable<GoalVerificationRequest['policy_snapshot']>['principals'][number] =>
+        principal !== null,
+    )
+  const eligiblePrincipals = asRecordArray(raw.eligible_principals)
+    .map(decodeGoalVerificationPrincipal)
+    .filter(
+      (
+        principal,
+      ): principal is NonNullable<GoalVerificationRequest['policy_snapshot']>['eligible_principals'][number] =>
+        principal !== null,
+    )
+  return {
+    principals,
+    eligible_principals: eligiblePrincipals,
+    required_verdicts: asInt(raw.required_verdicts) ?? 0,
+  }
+}
+
+function decodeGoalVerificationVote(raw: unknown): GoalVerificationVote | null {
+  if (!isRecord(raw)) return null
+  const principal = decodeGoalVerificationPrincipal(raw.principal)
+  const decision = asString(raw.decision)
+  const submittedAt = asString(raw.submitted_at)
+  if (!principal || !decision || !submittedAt) return null
+  return {
+    principal,
+    decision,
+    note: asNullableString(raw.note),
+    evidence_refs: asStringArray(raw.evidence_refs),
+    submitted_at: submittedAt,
+  }
+}
+
+function decodeGoalVerificationRequest(raw: unknown): GoalVerificationRequest | null {
+  if (!isRecord(raw)) return null
+  const id = asString(raw.id)
+  const goalId = asString(raw.goal_id)
+  const targetPhase = asString(raw.target_phase)
+  const requestedBy = decodeGoalVerificationPrincipal(raw.requested_by)
+  const policySnapshot = decodeGoalVerificationPolicySnapshot(raw.policy_snapshot)
+  const status = asString(raw.status)
+  const createdAt = asString(raw.created_at)
+  if (!id || !goalId || !targetPhase || !requestedBy || !policySnapshot || !status || !createdAt) {
+    return null
+  }
+  return {
+    id,
+    goal_id: goalId,
+    target_phase: targetPhase,
+    requested_by: requestedBy,
+    policy_snapshot: policySnapshot,
+    votes: asRecordArray(raw.votes)
+      .map(decodeGoalVerificationVote)
+      .filter((vote): vote is GoalVerificationVote => vote !== null),
+    status,
+    created_at: createdAt,
+    resolved_at: asNullableString(raw.resolved_at),
+  }
+}
+
+function decodeGoalVerificationSummary(raw: unknown): GoalVerificationSummary {
+  if (!isRecord(raw)) {
+    return {
+      effective_policy: null,
+      open_request: null,
+      approve_count: 0,
+      reject_count: 0,
+      remaining_possible: 0,
+    }
+  }
+  return {
+    effective_policy: decodeGoalVerificationPolicySnapshot(raw.effective_policy),
+    open_request: decodeGoalVerificationRequest(raw.open_request),
+    approve_count: asInt(raw.approve_count) ?? 0,
+    reject_count: asInt(raw.reject_count) ?? 0,
+    remaining_possible: asInt(raw.remaining_possible) ?? 0,
+  }
+}
+
+function decodeGoalTreeTask(raw: unknown): GoalTreeTask | null {
+  if (!isRecord(raw)) return null
+  const id = asString(raw.id)
+  const title = asString(raw.title)
+  if (!id || !title) return null
+  return {
+    id,
+    title,
+    status: asString(raw.status, 'unknown'),
+    status_color: asString(raw.status_color, ''),
+    priority: asInt(raw.priority) ?? 0,
+    assignee: asNullableString(raw.assignee),
+    goal_id: asNullableString(raw.goal_id),
+    linkage_source: asString(raw.linkage_source, 'none'),
+    is_terminal: asBoolean(raw.is_terminal, false),
+    created_at: asString(raw.created_at, ''),
+    updated_at: asString(raw.updated_at, ''),
+  }
+}
+
+function decodeGoalTreeNode(raw: unknown): GoalTreeNode | null {
+  if (!isRecord(raw)) return null
+  const id = asString(raw.id)
+  const title = asString(raw.title)
+  if (!id || !title) return null
+  const tasks = asRecordArray(raw.tasks)
+    .map(decodeGoalTreeTask)
+    .filter((task): task is GoalTreeTask => task !== null)
+  const children = asRecordArray(raw.children)
+    .map(decodeGoalTreeNode)
+    .filter((node): node is GoalTreeNode => node !== null)
+  return {
+    id,
+    title,
+    horizon: asString(raw.horizon, 'unknown'),
+    status: asString(raw.status, 'unknown'),
+    status_color: asString(raw.status_color, ''),
+    phase: asString(raw.phase, 'unknown'),
+    phase_color: asString(raw.phase_color, ''),
+    health: asString(raw.health, 'on_track'),
+    health_color: asString(raw.health_color, ''),
+    badges: asStringArray(raw.badges),
+    status_reason: asString(raw.status_reason, ''),
+    priority: asInt(raw.priority) ?? 0,
+    metric: asNullableString(raw.metric),
+    target_value: asNullableString(raw.target_value),
+    due_date: asNullableString(raw.due_date),
+    parent_goal_id: asNullableString(raw.parent_goal_id),
+    convergence: asNumber(raw.convergence, 0),
+    convergence_pct: asInt(raw.convergence_pct) ?? 0,
+    tasks,
+    task_count: asInt(raw.task_count) ?? tasks.length,
+    task_done_count: asInt(raw.task_done_count) ?? 0,
+    verification_summary: decodeGoalVerificationSummary(raw.verification_summary),
+    effective_verifier_policy: decodeGoalVerificationPolicySnapshot(raw.effective_verifier_policy),
+    active_verification_request: decodeGoalVerificationRequest(raw.active_verification_request),
+    pending_verification_count: asInt(raw.pending_verification_count) ?? 0,
+    timeline_events: Array.isArray(raw.timeline_events) ? raw.timeline_events : [],
+    children,
+    child_count: asInt(raw.child_count) ?? children.length,
+    last_activity_at: asString(raw.last_activity_at, ''),
+    stagnation_seconds: asInt(raw.stagnation_seconds) ?? 0,
+    linked_keeper_names: asStringArray(raw.linked_keeper_names),
+    pending_approval_count: asInt(raw.pending_approval_count) ?? 0,
+    infra_risk_count: asInt(raw.infra_risk_count) ?? 0,
+    linkage_source: asString(raw.linkage_source, 'none'),
+    linkage_warning_count: asInt(raw.linkage_warning_count) ?? 0,
+    created_at: asString(raw.created_at, ''),
+    updated_at: asString(raw.updated_at, ''),
+  }
+}
+
+function decodeGoalTreeSummary(raw: unknown): GoalTreeSummary {
+  if (!isRecord(raw)) {
+    return {
+      total_goals: 0,
+      active_goals: 0,
+      done_goals: 0,
+      paused_goals: 0,
+      at_risk_goals: 0,
+      blocked_goals: 0,
+      total_tasks: 0,
+      done_tasks: 0,
+      pending_approvals: 0,
+      infra_risk_count: 0,
+      overall_convergence: 0,
+      overall_convergence_pct: 0,
+    }
+  }
+  return {
+    total_goals: asInt(raw.total_goals) ?? 0,
+    active_goals: asInt(raw.active_goals) ?? 0,
+    done_goals: asInt(raw.done_goals) ?? 0,
+    paused_goals: asInt(raw.paused_goals) ?? 0,
+    at_risk_goals: asInt(raw.at_risk_goals) ?? 0,
+    blocked_goals: asInt(raw.blocked_goals) ?? 0,
+    total_tasks: asInt(raw.total_tasks) ?? 0,
+    done_tasks: asInt(raw.done_tasks) ?? 0,
+    pending_approvals: asInt(raw.pending_approvals) ?? 0,
+    infra_risk_count: asInt(raw.infra_risk_count) ?? 0,
+    overall_convergence: asNumber(raw.overall_convergence, 0),
+    overall_convergence_pct: asInt(raw.overall_convergence_pct) ?? 0,
+  }
+}
+
+function decodeGoalDetailKeeper(raw: unknown): GoalDetailKeeper | null {
+  if (!isRecord(raw)) return null
+  const name = asString(raw.name)
+  const agentName = asString(raw.agent_name)
+  const sandboxProfile = asString(raw.sandbox_profile)
+  const networkMode = asString(raw.network_mode)
+  const cascadeName = asString(raw.cascade_name)
+  if (!name || !agentName || !sandboxProfile || !networkMode || !cascadeName) return null
+  return {
+    name,
+    agent_name: agentName,
+    current_task_id: asNullableString(raw.current_task_id),
+    active_goal_ids: asStringArray(raw.active_goal_ids),
+    sandbox_profile: sandboxProfile,
+    network_mode: networkMode,
+    cascade_name: cascadeName,
+    approval_profile: asNullableString(raw.approval_profile),
+    cascade_outcome: asNullableString(raw.cascade_outcome),
+    latest_execution_outcome: asNullableString(raw.latest_execution_outcome),
+    latest_execution_at: asNullableString(raw.latest_execution_at),
+    latest_receipt: isRecord(raw.latest_receipt) ? raw.latest_receipt : null,
+  }
+}
+
+function decodeGoalDetailTimelineEvent(raw: unknown): GoalDetailTimelineEvent | null {
+  if (!isRecord(raw)) return null
+  const ts = asString(raw.ts)
+  const kind = asString(raw.kind)
+  const lane = asString(raw.lane)
+  const title = asString(raw.title)
+  const summary = asString(raw.summary)
+  const severity = asString(raw.severity)
+  if (!ts || !kind || !lane || !title || !summary || !severity) return null
+  return {
+    ts,
+    kind,
+    lane,
+    title,
+    summary,
+    severity,
+  }
+}
+
+function decodeDashboardGoalsTreeResponse(raw: unknown): DashboardGoalsTreeResponse | null {
+  if (!isRecord(raw)) return null
+  const tree = asRecordArray(raw.tree)
+    .map(decodeGoalTreeNode)
+    .filter((node): node is GoalTreeNode => node !== null)
+  const summary = decodeGoalTreeSummary(raw.summary)
+  const generatedAt = asString(raw.generated_at)
+  return generatedAt
+    ? { generated_at: generatedAt, tree, summary }
+    : { tree, summary }
+}
+
+function decodeDashboardGoalDetailResponse(raw: unknown): DashboardGoalDetailResponse | null {
+  if (!isRecord(raw)) return null
+  const goal = decodeGoalTreeNode(raw.goal)
+  if (!goal) return null
+  const generatedAt = asString(raw.generated_at)
+  const decoded: DashboardGoalDetailResponse = {
+    goal,
+    linked_tasks: asRecordArray(raw.linked_tasks)
+      .map(decodeGoalTreeTask)
+      .filter((task): task is GoalTreeTask => task !== null),
+    linked_keepers: asRecordArray(raw.linked_keepers)
+      .map(decodeGoalDetailKeeper)
+      .filter((keeper): keeper is GoalDetailKeeper => keeper !== null),
+    approvals: asRecordArray(raw.approvals),
+    execution_receipts: asRecordArray(raw.execution_receipts),
+    timeline: asRecordArray(raw.timeline)
+      .map(decodeGoalDetailTimelineEvent)
+      .filter((event): event is GoalDetailTimelineEvent => event !== null),
+  }
+  return generatedAt ? { ...decoded, generated_at: generatedAt } : decoded
+}
+
+export async function fetchDashboardGoalsTree(): Promise<DashboardGoalsTreeResponse> {
+  const raw = await get<unknown>('/api/v1/dashboard/goals')
+  const decoded = decodeDashboardGoalsTreeResponse(raw)
+  if (!decoded) throw new Error('invalid dashboard goals payload')
+  return decoded
+}
+
+export async function fetchDashboardGoalDetail(goalId: string): Promise<DashboardGoalDetailResponse> {
+  const raw = await get<unknown>(`/api/v1/dashboard/goals/detail?goal_id=${encodeURIComponent(goalId)}`)
+  const decoded = decodeDashboardGoalDetailResponse(raw)
+  if (!decoded) throw new Error('invalid dashboard goal detail payload')
+  return decoded
 }
 
 // --- Tool metrics (P4 Phase 4.5) ---

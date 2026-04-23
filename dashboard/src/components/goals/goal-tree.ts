@@ -18,6 +18,7 @@ import type {
   GoalTreeNode,
   GoalTreeTask,
   GoalTreeSummary,
+  GoalVerificationSummary,
 } from '../../types'
 import {
   horizonLabel,
@@ -199,6 +200,14 @@ const detailError = signal<string | null>(null)
 const detailTab = signal<GoalDetailTab>('summary')
 let detailRequestSeq = 0
 
+const EMPTY_GOAL_VERIFICATION_SUMMARY: GoalVerificationSummary = {
+  effective_policy: null,
+  open_request: null,
+  approve_count: 0,
+  reject_count: 0,
+  remaining_possible: 0,
+}
+
 function toggleNode(id: string) {
   const next = new Set(expandedNodes.value)
   if (next.has(id)) next.delete(id)
@@ -371,6 +380,7 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
   const isExpanded = expandedNodes.value.has(node.id)
   const hasContent = node.children.length > 0 || node.tasks.length > 0
   const isSelected = selectedGoalId.value === node.id
+  const verificationSummary = node.verification_summary ?? EMPTY_GOAL_VERIFICATION_SUMMARY
   const indent = depth * 20
   const headerBase = isSelected
     ? 'group flex items-start gap-3 rounded border border-accent/35 bg-[rgba(11,18,32,0.94)] p-3 transition-colors w-full text-left shadow-[0_0_0_1px_rgba(110,231,255,0.08)]'
@@ -429,8 +439,8 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
               </span>
             ` : null}
             ${node.child_count > 0 ? html`<span>${node.child_count} 하위 목표</span>` : null}
-            ${node.verification_summary.effective_policy ? html`
-              <span>quorum ${node.verification_summary.approve_count}/${node.verification_summary.effective_policy.required_verdicts}</span>
+            ${verificationSummary.effective_policy ? html`
+              <span>quorum ${verificationSummary.approve_count}/${verificationSummary.effective_policy.required_verdicts}</span>
             ` : null}
             ${node.pending_approval_count > 0 ? html`
               <span class="rounded border border-warn/30 bg-warn/10 px-2 py-0.5 text-3xs font-medium text-warn">
@@ -467,14 +477,14 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
 
       ${isExpanded ? html`
         <div class="mt-1.5 flex flex-col gap-1.5">
-          ${node.verification_summary.open_request ? html`
+          ${verificationSummary.open_request ? html`
             <div class="ml-6 rounded border border-amber-400/20 bg-amber-400/8 p-2 text-xs text-amber-100">
               <div class="mb-1 text-3xs font-semibold uppercase tracking-widest text-amber-200/80">Goal Verification</div>
-              <div>request ${node.verification_summary.open_request.id}</div>
+              <div>request ${verificationSummary.open_request.id}</div>
               <div>
-                quorum ${node.verification_summary.approve_count}/${node.verification_summary.open_request.policy_snapshot.required_verdicts},
-                reject ${node.verification_summary.reject_count},
-                remaining ${node.verification_summary.remaining_possible}
+                quorum ${verificationSummary.approve_count}/${verificationSummary.open_request.policy_snapshot.required_verdicts},
+                reject ${verificationSummary.reject_count},
+                remaining ${verificationSummary.remaining_possible}
               </div>
             </div>
           ` : null}
@@ -612,6 +622,7 @@ function GoalDetailPanel({
   }
 
   const detail = data?.goal.id === selectedNode.id ? data : null
+  const verificationSummary = selectedNode.verification_summary ?? EMPTY_GOAL_VERIFICATION_SUMMARY
 
   return html`
     <section class="flex flex-col gap-4 rounded border border-card-border/70 bg-[rgba(9,14,24,0.88)] p-5">
@@ -660,27 +671,27 @@ function GoalDetailPanel({
           <${DetailMetric} label="Last Activity" value=${selectedNode.stagnation_seconds > 0 ? `${Math.floor(selectedNode.stagnation_seconds / 3600)}h idle` : 'now'} tone=${selectedNode.badges.includes('stalled') ? 'warn' : 'default'} />
         </div>
 
-        ${selectedNode.verification_summary.effective_policy ? html`
+        ${verificationSummary.effective_policy ? html`
           <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
             <div class="mb-2 text-2xs font-semibold uppercase tracking-widest text-text-muted">Goal Verification</div>
             <div class="flex flex-wrap items-center gap-2 text-xs text-text-body">
               <span class="rounded border border-amber-400/20 bg-amber-400/8 px-2 py-1 text-amber-100">
-                quorum ${selectedNode.verification_summary.approve_count}/${selectedNode.verification_summary.effective_policy.required_verdicts}
+                quorum ${verificationSummary.approve_count}/${verificationSummary.effective_policy.required_verdicts}
               </span>
-              <span>reject ${selectedNode.verification_summary.reject_count}</span>
-              <span>remaining ${selectedNode.verification_summary.remaining_possible}</span>
+              <span>reject ${verificationSummary.reject_count}</span>
+              <span>remaining ${verificationSummary.remaining_possible}</span>
             </div>
             <div class="mt-3 flex flex-wrap gap-1.5">
-              ${selectedNode.verification_summary.effective_policy.eligible_principals.map(principal => html`
+              ${verificationSummary.effective_policy.eligible_principals.map(principal => html`
                 <span key=${`${principal.kind}:${principal.id}`} class="rounded border border-card-border/60 bg-white/4 px-2 py-0.5 text-3xs font-medium text-text-body">
                   ${principal.kind}:${principal.display_name ?? principal.id}
                 </span>
               `)}
             </div>
-            ${selectedNode.verification_summary.open_request ? html`
+            ${verificationSummary.open_request ? html`
               <div class="mt-3 rounded border border-amber-400/20 bg-amber-400/8 p-3 text-xs text-amber-100">
-                <div>request ${selectedNode.verification_summary.open_request.id}</div>
-                <div class="mt-1">status ${selectedNode.verification_summary.open_request.status}</div>
+                <div>request ${verificationSummary.open_request.id}</div>
+                <div class="mt-1">status ${verificationSummary.open_request.status}</div>
               </div>
             ` : null}
           </div>

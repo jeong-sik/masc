@@ -60,12 +60,9 @@ let to_public internal =
   | None -> internal
 
 let strip_mcp_masc_prefix name =
-  let prefix = "mcp__masc__" in
-  let prefix_len = String.length prefix in
-  if String.length name >= prefix_len && String.sub name 0 prefix_len = prefix then
-    String.sub name prefix_len (String.length name - prefix_len)
-  else
-    name
+  match Base.String.chop_prefix name ~prefix:"mcp__masc__" with
+  | Some rest -> rest
+  | None -> name
 
 let canonicalize_observed names =
   List.map

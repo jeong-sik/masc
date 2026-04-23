@@ -118,7 +118,7 @@ module FileSystem = struct
               Error (InvalidKey "Consecutive colons not allowed")
             else if seg = "." || seg = ".." then
               Error (InvalidKey "Path traversal detected")
-            else if String.length seg >= 2 && String.sub seg 0 2 = ".." then
+            else if Base.String.is_prefix seg ~prefix:".." then
               Error (InvalidKey "Path traversal detected")
             else
               (* Blocklist: reject only dangerous characters, allow UTF-8 *)
@@ -195,7 +195,7 @@ module FileSystem = struct
   let _decompress = Compression.decompress_auto
 
   let has_zstd_header content =
-    String.length content >= 4 && String.sub content 0 4 = "ZSTD"
+    Base.String.is_prefix content ~prefix:"ZSTD"
 
   let decompress_with_context ~context content =
     let had_header = has_zstd_header content in

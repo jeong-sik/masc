@@ -5,8 +5,7 @@ let project_root_of_config (config : Coord.config) : string =
   if Filename.basename base = ".masc" then Filename.dirname base else base
 
 let starts_with ~(prefix : string) (s : string) : bool =
-  let lp = String.length prefix in
-  String.length s >= lp && String.sub s 0 lp = prefix
+  Base.String.is_prefix s ~prefix
 
 let strip_trailing_slashes = Env_config_core.strip_trailing_slashes
 

@@ -136,7 +136,7 @@ let public_mcp_surface_tools =
     "masc_board_post"; "masc_board_list"; "masc_board_get";
     "masc_board_comment"; "masc_board_vote";
     (* Agent discovery *)
-    "masc_agents"; "masc_dashboard"; "masc_agent_card";
+    "masc_agents"; "masc_dashboard"; "masc_agent_card"; "masc_collaboration_graph";
     (* Utility *)
     "masc_tool_help"; "masc_web_search"; "masc_check";
     (* HITL approval queue *)

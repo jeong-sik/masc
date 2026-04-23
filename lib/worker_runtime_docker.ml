@@ -73,7 +73,7 @@ let docker_http_base_url () =
   | None -> rewrite_loopback_url (Env_config.masc_http_base_url ())
 
 let docker_mcp_url () =
-  match Sys.getenv_opt Env_config_runtime.Local_runtime.mcp_url_env_key with
+  match Sys.getenv_opt Env_config_core.mcp_url_env_key with
   | Some value when String.trim value <> "" -> rewrite_loopback_url value
   | _ -> docker_http_base_url () ^ "/mcp"
 
@@ -118,7 +118,7 @@ let allowlisted_env_pairs () =
     [
       (Env_config_core.base_path_env_key, "");
       (Env_config_core.http_base_url_env_key, docker_http_base_url ());
-      (Env_config_runtime.Local_runtime.mcp_url_env_key, docker_mcp_url ());
+      (Env_config_core.mcp_url_env_key, docker_mcp_url ());
       ("LLAMA_SERVER_URL", docker_llama_server_url ());
     ]
   in

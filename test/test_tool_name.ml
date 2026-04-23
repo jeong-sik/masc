@@ -25,7 +25,6 @@ let all_masc : Tool_name.Masc.t list =
   ; Claim_task; Cleanup_zombies; Code_delete; Code_edit; Code_git; Code_read
   ; Code_search; Code_shell; Code_symbols; Code_write; Complete_task
   ; Dashboard; Deliver; Dispatch_assign; Dispatch_plan; Find_by_capability
-  ; Governance_feed; Governance_status
   ; Heartbeat; Join; Leave; List_tasks; Messages; Note_add
   ; Operation_checkpoint; Operation_finalize; Operation_pause
   ; Operation_resume; Operation_start; Operation_status; Operation_stop

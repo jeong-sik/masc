@@ -10,6 +10,9 @@ let make_test_meta ?(name = "test-keeper") () : Keeper_types.keeper_meta =
   | Ok meta -> meta
   | Error e -> failwith (Printf.sprintf "make_test_meta failed: %s" e)
 
+let make_goal_scoped_meta goal_ids =
+  { (make_test_meta ()) with active_goal_ids = goal_ids }
+
 let make_ctx_work () =
   Keeper_exec_context.create ~system_prompt:"test" ~max_tokens:4000
 
@@ -106,6 +109,16 @@ let parse_json s =
   try Yojson.Safe.from_string s
   with _ -> failwith (Printf.sprintf "invalid JSON: %s" s)
 
+let contains_substring s needle =
+  let s_len = String.length s in
+  let n_len = String.length needle in
+  let rec loop i =
+    if i + n_len > s_len then false
+    else if String.sub s i n_len = needle then true
+    else loop (i + 1)
+  in
+  if n_len = 0 then true else loop 0
+
 (* --- keeper_task_claim tests --- *)
 
 let test_claim_returns_result () =
@@ -131,6 +144,27 @@ let test_claim_empty_room () =
       match Yojson.Safe.Util.member "error" json with
       | `String _ -> () (* also ok *)
       | _ -> fail "expected result or error in empty room claim")
+
+let test_claim_respects_active_goal_ids () =
+  with_room (fun config ->
+    let meta = make_goal_scoped_meta [ "goal-masc" ] in
+    let _ =
+      Coord_task.add_task ~goal_id:"goal-other" config
+        ~title:"Other goal task" ~priority:1 ~description:"desc"
+    in
+    let _ =
+      Coord_task.add_task ~goal_id:"goal-masc" config
+        ~title:"Masc goal task" ~priority:5 ~description:"desc"
+    in
+    let _result = call_tool config meta "keeper_task_claim" (`Assoc []) in
+    let claimed_task =
+      Coord.get_tasks_raw config
+      |> List.find_opt (fun (task : Types.task) ->
+           Types.task_assignee_of_status task.task_status = Some meta.agent_name)
+    in
+    match claimed_task with
+    | Some task -> check string "claimed scoped task" "Masc goal task" task.title
+    | None -> fail "expected a claimed task")
 
 (* --- keeper_task_done tests --- *)
 
@@ -242,6 +276,59 @@ let test_done_redirects_to_verification_fsm () =
                   (Types.string_of_task_status status)))
         | _ -> fail "expected keeper_task_done to redirect into verification FSM")))
 
+let test_submit_for_verification_requires_pr_url () =
+  with_room (fun config ->
+    let meta = make_test_meta () in
+    let result =
+      call_tool config meta "keeper_task_submit_for_verification"
+        (`Assoc
+           [
+             ("task_id", `String "T-1");
+             ("notes", `String "tests pass");
+             ("pr_url", `String "");
+           ])
+    in
+    let json = parse_json result in
+    match Yojson.Safe.Util.member "error" json with
+    | `String msg ->
+        check bool "mentions pr_url" true (contains_substring msg "pr_url")
+    | _ -> fail "expected error for empty pr_url")
+
+let test_submit_for_verification_transitions_task () =
+  ensure_rng ();
+  with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
+    with_env "MASC_CDAL_GATE_ENABLED" (Some "false") (fun () ->
+      with_room (fun config ->
+        let meta = make_test_meta () in
+        let contract = strict_contract ~verify_gate_evidence:[ "pr_url" ] () in
+        let _ =
+          Coord.add_task ~contract config ~title:"Verification submit task"
+            ~priority:1 ~description:"should enter awaiting verification"
+        in
+        let task_id = (only_task config).id in
+        ignore (call_tool config meta "keeper_task_claim" (`Assoc []));
+        let result =
+          call_tool config meta "keeper_task_submit_for_verification"
+            (`Assoc
+               [
+                 ("task_id", `String task_id);
+                 ("notes", `String "tests pass locally");
+                 ("pr_url", `String "https://github.com/jeong-sik/masc-mcp/pull/1");
+               ])
+        in
+        let json = parse_json result in
+        match Yojson.Safe.Util.member "ok" json with
+        | `Bool true ->
+            let task = only_task config in
+            (match task.task_status with
+             | Types.AwaitingVerification _ -> ()
+             | status ->
+                 fail
+                   (Printf.sprintf
+                      "expected awaiting_verification, got %s"
+                      (Types.string_of_task_status status)))
+        | _ -> fail "expected keeper_task_submit_for_verification to succeed")))
+
 (* --- keeper_tool_search tests --- *)
 
 let test_tool_search_empty_query_returns_error () =
@@ -336,6 +423,8 @@ let () =
     "claim", [
       test_case "claim returns result" `Quick test_claim_returns_result;
       test_case "claim empty room" `Quick test_claim_empty_room;
+      test_case "claim respects active_goal_ids" `Quick
+        test_claim_respects_active_goal_ids;
     ];
     "done", [
       test_case "empty task_id returns error" `Quick test_done_with_empty_task_id;
@@ -345,6 +434,12 @@ let () =
         test_done_respects_persisted_cdal_gate;
       test_case "done redirects to verification FSM" `Quick
         test_done_redirects_to_verification_fsm;
+    ];
+    "submit_for_verification", [
+      test_case "requires pr_url" `Quick
+        test_submit_for_verification_requires_pr_url;
+      test_case "transitions task" `Quick
+        test_submit_for_verification_transitions_task;
     ];
     "keeper_tool_search", [
       test_case "empty query returns error" `Quick test_tool_search_empty_query_returns_error;

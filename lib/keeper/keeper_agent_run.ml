@@ -864,6 +864,7 @@ let run_turn
     ; "keeper_task_claim", "태스크 가져오기 할당"
     ; "keeper_task_create", "태스크 생성 만들기 일감"
     ; "keeper_task_done", "태스크 완료 마감"
+    ; "keeper_task_submit_for_verification", "태스크 검증제출 리뷰요청 PR검토"
     ; "keeper_task_force_release", "태스크 강제해제 반환"
     ; "keeper_task_force_done", "태스크 강제완료"
     ; "keeper_voice_speak", "음성 말하기 보이스"
@@ -1692,7 +1693,8 @@ let run_turn
               Then inspect with `keeper_shell op=gh`; \
               if code change is needed, `masc_worktree_create` -> edit -> \
               `keeper_bash` for `git add` / `git commit` / `git push` -> \
-              `keeper_shell op=gh` with `cmd=\"pr create --draft ...\"`.\n\n\
+              `keeper_shell op=gh` with `cmd=\"pr create --draft ...\"` -> \
+              `keeper_task_submit_for_verification` with notes and `pr_url`.\n\n\
               Anti-pattern: `Bash`, `Read`, `Skill`, `Agent` are NOT \
               registered tools. Calling them is a hallucination — the \
               call fails silently and the turn is wasted. Use the \
@@ -1873,8 +1875,8 @@ let run_turn
                         (2) call masc_board_post to hand off the current task and ask \
                         another keeper or operator for judgment when the work needs a \
                         decision you cannot make alone; \
-                        (3) if you claimed a task, call keeper_task_done NOW before \
-                       session ends."
+                        (3) if you claimed a task, close it NOW before session ends \
+                        with keeper_task_done or keeper_task_submit_for_verification."
                        computed_surface.per_call_turn
                        computed_surface.per_call_max_turns)
                 else if is_retry

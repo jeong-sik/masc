@@ -47,7 +47,7 @@ function AuthPopover({ authenticated }: { authenticated: boolean }) {
   const handleSetToken = () => {
     const value = tokenInput.value.trim()
     if (!value) return
-    setStoredToken(value)
+    setStoredToken(value, { source: 'manual' })
     resetMcpClientState()
     tokenInput.value = ''
     popoverOpen.value = false

@@ -1,22 +1,59 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   ApiRequestError,
+  authHeaders,
+  clearStoredToken,
   confirmOperatorAction,
+  currentDashboardActor,
   defaultBoardVoter,
   extractApiError,
   get,
+  getStoredToken,
+  getStoredTokenMeta,
   post,
   runOperatorAction,
+  setStoredToken,
 } from './core'
 import { OperatorActionSchemaDriftError } from './schemas/operator-action'
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  window.sessionStorage?.clear?.()
   try {
     window.history.replaceState({}, '', 'http://localhost/')
   } catch {
     // Ignore cleanup failures in the test environment.
   }
+})
+
+describe('stored token metadata', () => {
+  it('persists token metadata and prefers the managed dev actor', () => {
+    setStoredToken('loopback-dev-token', {
+      source: 'dev',
+      actor: 'dashboard-dev!!!',
+      scope: 'admin',
+    })
+
+    expect(getStoredToken()).toBe('loopback-dev-token')
+    expect(getStoredTokenMeta()).toEqual({
+      source: 'dev',
+      actor: 'dashboard-dev',
+      scope: 'admin',
+    })
+    expect(currentDashboardActor()).toBe('dashboard-dev')
+    expect(authHeaders()).toMatchObject({
+      Authorization: 'Bearer loopback-dev-token',
+      'X-MASC-Agent': 'dashboard-dev',
+    })
+  })
+
+  it('clears both the token and metadata together', () => {
+    setStoredToken('manual-token', { source: 'manual', actor: 'dashboard-user' })
+    clearStoredToken()
+
+    expect(getStoredToken()).toBeNull()
+    expect(getStoredTokenMeta()).toBeNull()
+  })
 })
 
 describe('post', () => {

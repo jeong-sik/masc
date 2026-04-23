@@ -179,6 +179,45 @@ function healthClass(health: GoalTreeNode['health']): string {
   }
 }
 
+function blockerSourceLabel(source: GoalTreeNode['blocking_source']): string {
+  switch (source) {
+    case 'goal_phase': return 'Goal phase'
+    case 'child_goal': return 'Child goal'
+    case 'approval': return 'Approval'
+    case 'keeper_runtime': return 'Keeper runtime'
+    case 'task_fsm': return 'Task FSM'
+    case 'stalled': return 'Stalled'
+    default: return source
+  }
+}
+
+function blockerSourceClass(source: GoalTreeNode['blocking_source']): string {
+  switch (source) {
+    case 'goal_phase':
+    case 'keeper_runtime':
+      return 'border-bad/25 bg-bad/10 text-bad'
+    case 'child_goal':
+    case 'approval':
+    case 'task_fsm':
+    case 'stalled':
+      return 'border-warn/25 bg-warn/10 text-warn'
+    default:
+      return 'border-card-border/60 bg-white/4 text-text-body'
+  }
+}
+
+function keeperTrustDispositionClass(
+  trust: GoalDetailKeeper['runtime_trust'],
+): string {
+  const disposition = trust?.disposition
+  if (disposition === 'Alert') return 'border-bad/25 bg-bad/10 text-bad'
+  if (disposition === 'Pause' || trust?.needs_attention) {
+    return 'border-warn/25 bg-warn/10 text-warn'
+  }
+  if (disposition === 'Pass') return 'border-ok/25 bg-ok/10 text-ok'
+  return 'border-card-border/60 bg-white/4 text-text-body'
+}
+
 function timelineSeverityClass(severity: GoalDetailTimelineEvent['severity']): string {
   switch (severity) {
     case 'bad': return 'border-bad/25 bg-bad/10 text-bad'
@@ -447,9 +486,22 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
                 approval ${node.pending_approval_count}
               </span>
             ` : null}
+            ${node.blocking_source !== 'none' ? html`
+              <span
+                class="rounded border px-2 py-0.5 text-3xs font-medium ${blockerSourceClass(node.blocking_source)}"
+                title=${node.blocking_reason}
+              >
+                ${blockerSourceLabel(node.blocking_source)}
+              </span>
+            ` : null}
             ${node.infra_risk_count > 0 ? html`
               <span class="rounded border border-bad/25 bg-bad/10 px-2 py-0.5 text-3xs font-medium text-bad">
                 infra ${node.infra_risk_count}
+              </span>
+            ` : null}
+            ${node.latest_keeper_ref ? html`
+              <span class="rounded border border-card-border/60 bg-white/4 px-2 py-0.5 text-3xs font-medium text-text-body">
+                ${node.latest_keeper_ref}${node.latest_turn_ref != null ? ` · turn ${node.latest_turn_ref}` : ''}
               </span>
             ` : null}
           </div>
@@ -457,6 +509,12 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
           <div class="mt-2 max-w-110">
             <${ConvergenceBar} pct=${node.convergence_pct} size="sm" />
           </div>
+
+          ${node.blocking_source !== 'none' && node.blocking_reason ? html`
+            <div class="mt-2 text-xs leading-relaxed text-text-muted">
+              ${node.blocking_reason}
+            </div>
+          ` : null}
 
           ${node.badges.length > 0 ? html`
             <div class="mt-2">
@@ -549,6 +607,15 @@ function DetailTabs({ active }: { active: GoalDetailTab }) {
 }
 
 function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
+  const trust = keeper.runtime_trust
+  const latestEvent = keeper.latest_causal_event ?? trust?.latest_causal_event ?? null
+  const trustSummary =
+    trust?.attention_reason
+    ?? trust?.disposition_reason
+    ?? trust?.execution_summary?.mutation_guard_summary
+    ?? trust?.execution_summary?.sandbox_summary
+    ?? null
+
   return html`
     <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-3">
       <div class="flex items-start justify-between gap-3">
@@ -556,22 +623,69 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
           <div class="text-sm font-semibold text-text-strong">${keeper.name}</div>
           <div class="mt-1 text-2xs text-text-muted">${keeper.agent_name}</div>
         </div>
-        ${keeper.latest_execution_outcome ? html`
-          <span class="rounded border border-card-border/60 bg-white/4 px-2 py-0.5 text-3xs font-semibold text-text-body">
-            ${keeper.latest_execution_outcome}
-          </span>
-        ` : null}
+        <div class="flex flex-wrap justify-end gap-1.5">
+          ${trust?.disposition ? html`
+            <span class="rounded border px-2 py-0.5 text-3xs font-semibold ${keeperTrustDispositionClass(trust)}">
+              Trust ${trust.disposition}
+            </span>
+          ` : null}
+          ${keeper.latest_execution_outcome ? html`
+            <span class="rounded border border-card-border/60 bg-white/4 px-2 py-0.5 text-3xs font-semibold text-text-body">
+              ${keeper.latest_execution_outcome}
+            </span>
+          ` : null}
+        </div>
       </div>
       <div class="mt-3 grid grid-cols-2 gap-2 text-2xs text-text-muted">
         <div>Sandbox</div>
         <div class="text-right text-text-body">${keeper.sandbox_profile}</div>
         <div>Approval</div>
-        <div class="text-right text-text-body">${keeper.approval_profile ?? '-'}</div>
+        <div class="text-right text-text-body">${trust?.approval_state?.summary ?? keeper.approval_profile ?? '-'}</div>
         <div>Cascade</div>
         <div class="text-right text-text-body">${keeper.cascade_name}</div>
         <div>Outcome</div>
         <div class="text-right text-text-body">${keeper.cascade_outcome ?? '-'}</div>
       </div>
+      ${trustSummary || trust?.approval_state?.state || trust?.next_human_action ? html`
+        <div class="mt-3 rounded border border-card-border/50 bg-white/3 p-3">
+          <div class="text-3xs font-semibold uppercase tracking-widest text-text-muted">Trust Summary</div>
+          ${trustSummary ? html`
+            <div class="mt-2 text-xs leading-relaxed text-text-body">${trustSummary}</div>
+          ` : null}
+          <div class="mt-2 flex flex-wrap gap-2 text-3xs text-text-muted">
+            ${trust?.approval_state?.state ? html`
+              <span>approval ${trust.approval_state.state}</span>
+            ` : null}
+            ${trust?.execution_summary?.tool_contract_result ? html`
+              <span>contract ${trust.execution_summary.tool_contract_result}</span>
+            ` : null}
+            ${trust?.next_human_action ? html`
+              <span>next ${trust.next_human_action}</span>
+            ` : null}
+          </div>
+        </div>
+      ` : null}
+      ${latestEvent ? html`
+        <div class="mt-3 rounded border border-card-border/50 bg-white/3 p-3">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div class="text-3xs font-semibold uppercase tracking-widest text-text-muted">Latest Keeper Event</div>
+            <div class="text-3xs text-text-dim">
+              <${TimeAgo} timestamp=${latestEvent.ts} />
+            </div>
+          </div>
+          <div class="mt-2 text-xs font-semibold text-text-strong">${latestEvent.title}</div>
+          <div class="mt-1 text-2xs leading-relaxed text-text-body">${latestEvent.summary}</div>
+          <div class="mt-2 flex flex-wrap gap-2 text-3xs text-text-muted">
+            <span>${latestEvent.kind}</span>
+            ${latestEvent.keeper_turn_id != null ? html`
+              <span>turn ${latestEvent.keeper_turn_id}</span>
+            ` : null}
+            ${latestEvent.next_human_action ? html`
+              <span>next ${latestEvent.next_human_action}</span>
+            ` : null}
+          </div>
+        </div>
+      ` : null}
       ${keeper.latest_execution_at ? html`
         <div class="mt-3 text-3xs text-text-dim">
           최근 실행 <${TimeAgo} timestamp=${keeper.latest_execution_at} />
@@ -661,6 +775,29 @@ function GoalDetailPanel({
       ${loading && !detail ? html`<${LoadingState}>goal detail 로드 중...<//>` : null}
 
       ${activeTab === 'summary' ? html`
+        ${selectedNode.blocking_source !== 'none' ? html`
+          <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
+            <div class="mb-2 flex flex-wrap items-center gap-2">
+              <span class="text-2xs font-semibold uppercase tracking-widest text-text-muted">Blocking Context</span>
+              <span class="rounded border px-2 py-0.5 text-3xs font-semibold ${blockerSourceClass(selectedNode.blocking_source)}">
+                ${blockerSourceLabel(selectedNode.blocking_source)}
+              </span>
+            </div>
+            <div class="text-sm leading-relaxed text-text-body">${selectedNode.blocking_reason || selectedNode.status_reason}</div>
+            <div class="mt-3 flex flex-wrap gap-2 text-3xs text-text-muted">
+              ${selectedNode.latest_keeper_ref ? html`
+                <span>keeper ${selectedNode.latest_keeper_ref}</span>
+              ` : null}
+              ${selectedNode.latest_turn_ref != null ? html`
+                <span>turn ${selectedNode.latest_turn_ref}</span>
+              ` : null}
+              ${selectedNode.stalled_since ? html`
+                <span>since <${TimeAgo} timestamp=${selectedNode.stalled_since} /></span>
+              ` : null}
+            </div>
+          </div>
+        ` : null}
+
         <div class="grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-3">
           <${DetailMetric} label="Task" value=${`${selectedNode.task_done_count}/${selectedNode.task_count}`} tone=${selectedNode.task_done_count === selectedNode.task_count && selectedNode.task_count > 0 ? 'ok' : 'default'} />
           <${DetailMetric} label="Linked Keepers" value=${selectedNode.linked_keeper_names.length} />

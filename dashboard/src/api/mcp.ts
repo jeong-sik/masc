@@ -149,10 +149,15 @@ function mcpHeaders(extra?: Record<string, string>): Record<string, string> {
 }
 
 function explicitToolActor(args: Record<string, unknown>): string | null {
-  const raw =
-    (typeof args._agent_name === 'string' && args._agent_name.trim() !== '' ? args._agent_name : null)
-    ?? (typeof args.agent_name === 'string' && args.agent_name.trim() !== '' ? args.agent_name : null)
-  return raw?.trim() ?? null
+  const internalActor =
+    typeof args._agent_name === 'string' && args._agent_name.trim() !== ''
+      ? args._agent_name.trim()
+      : null
+  if (internalActor) return internalActor
+  if (getStoredToken()) return null
+  return typeof args.agent_name === 'string' && args.agent_name.trim() !== ''
+    ? args.agent_name.trim()
+    : null
 }
 
 function mcpHeadersForActor(
@@ -305,11 +310,11 @@ async function callMcpToolInternal(
 ): Promise<string> {
   const requestId = String(Math.floor(Date.now() % 1000000))
   let phase = mcpSessionId ? 'tools/call' : 'initialize'
-  const explicitActor = explicitToolActor(args)
-  const actor = explicitActor ?? currentDashboardActor()
   try {
     await ensureSession()
     phase = 'tools/call'
+    const explicitActor = explicitToolActor(args)
+    const actor = explicitActor ?? currentDashboardActor()
     const toolArgs =
       explicitActor == null && actor
         ? { ...args, _agent_name: actor }

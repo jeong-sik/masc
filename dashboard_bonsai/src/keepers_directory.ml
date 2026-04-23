@@ -530,29 +530,99 @@ let model_meta (runtime : Directory_execution_types.keeper option) =
                   ~raw:(Option.value row.model ~default:"")))))
 ;;
 
+let trust_disposition (runtime : Directory_execution_types.keeper option) =
+  Option.bind runtime ~f:(fun row ->
+    Option.bind row.disposition ~f:present)
+;;
+
+let trust_disposition_reason (runtime : Directory_execution_types.keeper option) =
+  Option.bind runtime ~f:(fun row ->
+    Option.bind row.disposition_reason ~f:present)
+;;
+
+let trust_badge (runtime : Directory_execution_types.keeper option) =
+  Option.map (trust_disposition runtime) ~f:(fun label ->
+    let color =
+      if normalized_eq label "pass"
+      then `Ok
+      else if is_one_of label [ "pause"; "paused" ]
+      then `Warn
+      else `Bad
+    in
+    label, color)
+;;
+
+let latest_causal_event_text (runtime : Directory_execution_types.keeper option) =
+  Option.bind runtime ~f:(fun row ->
+    Option.bind row.latest_causal_event ~f:(fun event ->
+      let text =
+        match present event.title, present event.summary with
+        | Some title, Some summary when not (String.equal title summary) ->
+          Some (title ^ " · " ^ summary)
+        | Some title, _ -> Some title
+        | None, Some summary -> Some summary
+        | None, None -> present event.kind
+      in
+      Option.map text ~f:(fun value ->
+        match present event.ts with
+        | Some ts -> value ^ " · " ^ short_hhmmss ts
+        | None -> value)))
+;;
+
+let next_human_action (runtime : Directory_execution_types.keeper option) =
+  Option.first_some
+    (Option.bind runtime ~f:(fun row ->
+       Option.bind row.next_human_action ~f:present))
+    (Option.bind runtime ~f:(fun row ->
+       Option.bind row.latest_causal_event ~f:(fun event ->
+         Option.bind event.next_human_action ~f:present)))
+;;
+
+let note_entries
+      (runtime : Directory_execution_types.keeper option)
+      (mission : Directory_mission_types.keeper_brief option)
+      (agent : Directory_mission_types.agent_brief option)
+  =
+  let trust_note =
+    Option.map (trust_disposition runtime) ~f:(fun label ->
+      let text =
+        match trust_disposition_reason runtime with
+        | Some reason -> label ^ " · " ^ reason
+        | None -> label
+      in
+      { label = "Trust"; text })
+  in
+  List.filter_opt
+    [ trust_note
+    ; Option.map (next_human_action runtime) ~f:(fun text ->
+        { label = "Next action"; text })
+    ; Option.map (latest_causal_event_text runtime) ~f:(fun text ->
+        { label = "Causal event"; text })
+    ; Option.bind runtime ~f:(fun row ->
+        Option.map (present (Option.value row.runtime_blocker_summary ~default:""))
+          ~f:(fun text -> { label = "최근 차단"; text }))
+    ; Option.bind runtime ~f:(fun row ->
+        Option.map (present (Option.value row.last_blocker ~default:""))
+          ~f:(fun text -> { label = "최근 차단"; text }))
+    ; Option.bind runtime ~f:(fun row ->
+        Option.bind row.diagnostic ~f:(fun diagnostic ->
+          Option.map (present (Option.value diagnostic.last_error ~default:""))
+            ~f:(fun text -> { label = "최근 오류"; text })))
+    ; Option.bind mission ~f:(fun row ->
+        Option.map (present (Option.value row.current_work ~default:""))
+          ~f:(fun text -> { label = "현재 작업"; text }))
+    ; Option.bind agent ~f:(fun row ->
+        Option.map (present (Option.value row.recent_output_preview ~default:""))
+          ~f:(fun text -> { label = "최근 출력"; text }))
+    ]
+;;
+
 let note_meta
       (runtime : Directory_execution_types.keeper option)
       (mission : Directory_mission_types.keeper_brief option)
       (agent : Directory_mission_types.agent_brief option)
   =
-  let first_some_note entries =
-    List.find_map entries ~f:(fun (label, value) ->
-      Option.map (present (Option.value value ~default:"")) ~f:(fun text ->
-        { label; text }))
-  in
-  first_some_note
-    [ "최근 차단"
-    , Option.bind runtime ~f:(fun row -> row.runtime_blocker_summary)
-    ; "최근 차단"
-    , Option.bind runtime ~f:(fun row -> row.last_blocker)
-    ; "최근 오류"
-    , Option.bind runtime ~f:(fun row ->
-        Option.bind row.diagnostic ~f:(fun diagnostic -> diagnostic.last_error))
-    ; "현재 작업"
-    , Option.bind mission ~f:(fun row -> row.current_work)
-    ; "최근 출력"
-    , Option.bind agent ~f:(fun row -> row.recent_output_preview)
-    ]
+  List.hd (note_entries runtime mission agent)
 ;;
 
 let recent_meta
@@ -634,7 +704,17 @@ let runtime_has_attention (runtime : Directory_execution_types.keeper) =
     Option.value_map runtime.context_ratio ~default:false ~f:(fun ratio ->
       Float.(ratio >= 0.95))
   in
-  phase_attention || stage_attention || degraded || has_blocker || high_ctx
+  let trust_attention =
+    Option.exists runtime.disposition ~f:(fun value ->
+      not (normalized_eq value "pass"))
+    || Option.is_some (next_human_action (Some runtime))
+  in
+  phase_attention
+  || stage_attention
+  || degraded
+  || has_blocker
+  || high_ctx
+  || trust_attention
 ;;
 
 let runtime_is_offline
@@ -711,6 +791,9 @@ let status_meta
         ]
         ~f:Option.is_some)
   in
+  let trust_label =
+    Option.map (trust_badge runtime) ~f:(fun (label, _color) -> label)
+  in
   let status_label, status_color =
     match band with
     | `Paused -> "일시정지", `Paused
@@ -740,7 +823,7 @@ let status_meta
       let label =
         if has_error_note
         then "활동 오류"
-        else Option.value phase_label ~default:"주의 필요"
+        else Option.value (Option.first_some trust_label phase_label) ~default:"주의 필요"
       in
       let color = if has_error_note then `Bad else `Warn in
       label, color
@@ -1107,6 +1190,10 @@ let view
                       | Some { raw_value = Some _; _ } ->
                         Pill.view ~size:`Sm ~color:`Warn ~label:"raw" ()
                       | _ -> Node.span [])
+                   ; (match trust_badge row.runtime with
+                      | Some (label, color) ->
+                        Pill.view ~size:`Sm ~color ~label ()
+                      | None -> Node.span [])
                    ]
                ; Node.div
                    ~attrs:[ Style.subline ]
@@ -1174,6 +1261,14 @@ let focus_card row =
        | None -> model.display_value)
     | None -> "—"
   in
+  let trust_value =
+    match trust_disposition row.runtime with
+    | Some label ->
+      (match trust_disposition_reason row.runtime with
+       | Some reason -> label ^ " · " ^ reason
+       | None -> label)
+    | None -> "—"
+  in
   Node.div
     [ Shell_view.aside_title ~right:(row.status_label ^ " · " ^ source_short row.source) "Focus"
     ; Node.div
@@ -1221,6 +1316,7 @@ let focus_card row =
                 ; stat_cell
                     ~label:"Stage"
                     ~value:(Option.value row.stage_label ~default:"—")
+                ; stat_cell ~label:"Trust" ~value:trust_value
                 ; stat_cell ~label:"모델" ~value:model_value
                 ; stat_cell ~label:"Source" ~value:(source_label row.source)
                 ]
@@ -1231,10 +1327,8 @@ let focus_card row =
 
 let note_section row =
   let notes =
-    List.filter_opt
-      [ Option.map row.note ~f:(fun note -> note.label, note.text)
-      ; Option.map row.current_work ~f:(fun text -> "현재 작업", text)
-      ]
+    note_entries row.runtime row.mission row.agent
+    |> List.map ~f:(fun note -> note.label, note.text)
   in
   Node.div
     [ Shell_view.aside_title "Note"
@@ -1242,7 +1336,7 @@ let note_section row =
        | [] ->
          Node.div
            ~attrs:[ Style.quiet ]
-           [ Node.text "note/current_work evidence가 아직 없습니다." ]
+           [ Node.text "trust/note/current_work evidence가 아직 없습니다." ]
        | entries ->
          Node.div
            ~attrs:[ Style.list ]
@@ -1279,12 +1373,29 @@ let data_section row execution mission =
          let truth =
            Option.value agent.signal_truth ~default:"unknown"
          in
-         let source =
+       let source =
            Option.value agent.evidence_source ~default:"none"
          in
          truth ^ " via " ^ source
        | None -> "agent brief 없음")
     ]
+    @
+    (match trust_disposition row.runtime with
+     | Some label ->
+       [ ( "trust",
+           match trust_disposition_reason row.runtime with
+           | Some reason -> label ^ " · " ^ reason
+           | None -> label )
+       ]
+     | None -> [])
+    @
+    (match next_human_action row.runtime with
+     | Some action -> [ "next action", action ]
+     | None -> [])
+    @
+    (match latest_causal_event_text row.runtime with
+     | Some event -> [ "causal event", event ]
+     | None -> [])
     @
     match row.model with
     | Some { raw_value = Some raw; _ } -> [ "raw model", raw ]

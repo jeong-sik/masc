@@ -111,8 +111,8 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
                 | Some event, Some keeper_name ->
                     Server_dashboard_http.patch_keeper_dependent_caches
                       ~keeper_name ~event
-                | _ -> ())
-            | _ -> ())
+                | None, _ | Some _, None -> ())
+            | _ -> Log.Dashboard.debug "ignored non-lifecycle event")
           events;
         if events <> [] then begin
           Log.Dashboard.info

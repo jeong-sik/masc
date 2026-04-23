@@ -283,8 +283,9 @@ let patch_execution_cache_for_keeper ~keeper_name ~event ~keepalive_running =
               (upsert_assoc_field "keepers"
                  (`List (patch_keeper_rows ~keeper_name ~event ~keepalive_running rows))
                  fields)
-      | _ -> ())
-  | _ -> ()
+      | Some _ -> ()
+      | None -> ())
+  | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> ()
 
 let patch_operator_snapshot_cache_for_keeper ~keeper_name ~event ~keepalive_running =
   match _operator_snapshot_cache.json with
@@ -301,9 +302,11 @@ let patch_operator_snapshot_cache_for_keeper ~keeper_name ~event ~keepalive_runn
               _operator_snapshot_cache.json <-
                 `Assoc
                   (upsert_assoc_field "keepers" (`Assoc keeper_fields) fields)
-          | _ -> ())
-      | _ -> ())
-  | _ -> ()
+          | Some _ -> ()
+          | None -> ())
+      | Some _ -> ()
+      | None -> ())
+  | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> ()
 
 let patch_keeper_dependent_caches ~keeper_name ~event =
   match keepalive_running_of_lifecycle_event event with

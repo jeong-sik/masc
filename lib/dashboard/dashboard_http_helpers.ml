@@ -92,7 +92,7 @@ let parse_tool_call_detail (detail_opt : string option)
                | Some n -> duration_ms := Some (max 0 n)
                | None ->
                  Log.Dashboard.warn "invalid duration_ms value: %s" v)
-          | _ -> ())
+          | Some (_, _) | None -> ())
         tags;
       (tool_name, !timeout, !duration_ms)
 

@@ -194,7 +194,7 @@ let update_plan (config : Coord.config) ~task_id ~content : (planning_context, s
         (match parsed with
          | Some { deliverable = Some value; _ } ->
              write_file_content (Filename.concat dir "deliverable.md") value
-         | _ -> ());
+         | None | Some _ -> ());
         write_file_content (Filename.concat dir "context.json")
           (Yojson.Safe.pretty_to_string (planning_context_to_yojson updated));
         Ok updated

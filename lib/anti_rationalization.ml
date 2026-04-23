@@ -411,7 +411,7 @@ let review
      | Some gc when gc = evaluator_cascade ->
        Log.Task.warn "[anti-rationalization] same cascade for generator (%s) and evaluator (%s) — cross-model separation not active"
          gc evaluator_cascade
-     | _ -> ());
+     | None | Some _ -> ());
     let verdict_ref = ref None in
     let dispatch ~name:_ ~args =
       match parse_review_verdict_from_json args with

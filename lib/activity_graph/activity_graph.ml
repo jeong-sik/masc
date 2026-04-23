@@ -487,7 +487,7 @@ let agent_spans_json config ?(limit = 500) ?since_ms () =
                     label;
                     span_status = status;
                   } :: !closed_spans
-              | _ -> ())
+              | None | Some _ -> ())
          | None -> ())
   ) events;
   Hashtbl.iter (fun (aid, _subj) (start_ms, sk, label) ->

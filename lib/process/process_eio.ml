@@ -223,7 +223,7 @@ let with_unix_capture ?env ?cwd ?stdin_content ?(capture_stderr = false)
                     write_all (off + n)
                 in
                 write_all 0)
-        | _ -> ());
+        | (None, _) | (Some _, None) -> ());
        (match !stdout_r_ref with
         | None ->
             (* stdout pipe already consumed — treat as error *)
@@ -411,7 +411,7 @@ let spawn_and_drain_stdout ~sw pm ~cwd ?env ?stdin_source argv stdout_buf =
      Eio.Flow.copy stdout_r (Eio.Flow.buffer_sink stdout_buf);
      Eio.Flow.close stdout_r
    with Eio.Cancel.Cancelled _ as e ->
-     (try Eio.Flow.close stdout_r with Eio.Cancel.Cancelled _ as ce -> raise ce | _ -> ());
+     (try Eio.Flow.close stdout_r with Eio.Cancel.Cancelled _ as ce -> raise ce | exn -> Log.Misc.warn "spawn_and_drain_stdout: flow close failed: %s" (Printexc.to_string exn));
      raise e);
   let status = Eio.Process.await proc in
   match status with
@@ -444,8 +444,8 @@ let spawn_and_drain_both ~sw pm ~cwd ?env ?stdin_source argv stdout_buf
          Eio.Flow.copy stderr_r (Eio.Flow.buffer_sink stderr_buf);
          Eio.Flow.close stderr_r)
    with Eio.Cancel.Cancelled _ as e ->
-     (try Eio.Flow.close stdout_r with Eio.Cancel.Cancelled _ as ce -> raise ce | _ -> ());
-     (try Eio.Flow.close stderr_r with Eio.Cancel.Cancelled _ as ce -> raise ce | _ -> ());
+     (try Eio.Flow.close stdout_r with Eio.Cancel.Cancelled _ as ce -> raise ce | exn -> Log.Misc.warn "spawn_and_drain_both: stdout flow close failed: %s" (Printexc.to_string exn));
+     (try Eio.Flow.close stderr_r with Eio.Cancel.Cancelled _ as ce -> raise ce | exn -> Log.Misc.warn "spawn_and_drain_both: stderr flow close failed: %s" (Printexc.to_string exn));
      raise e);
   let status = Eio.Process.await proc in
   match status with

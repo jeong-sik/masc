@@ -374,7 +374,7 @@ let handle_event ~base_path ~retention_days (evt : Oas.Event_bus.event)
      | Ok () -> ()
      | Error (Io_failure m | Serialize_failure m) ->
        Printf.eprintf "keeper_compact_audit: persist_complete failed: %s\n%!" m)
-  | _ -> ()  (* Not a compaction event — ignore. *)
+  | _payload -> Log.Misc.debug "keeper_compact_audit: ignoring non-compaction event"
 
 (* Filter: accept only the two compaction payload variants. Keeps
    subscriber's stream tight. *)

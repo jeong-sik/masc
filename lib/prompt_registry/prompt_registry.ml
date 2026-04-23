@@ -483,7 +483,7 @@ let clear () : unit =
           if Filename.check_suffix file ".json" then
             Sys.remove (Filename.concat dir file)
         ) files
-    | _ -> ()
+    | None | Some _ -> ()
   )
 
 (** Count of registered prompts (all versions) *)
@@ -921,9 +921,9 @@ let restore_overrides base_path =
               | Error reason ->
                   Log.Misc.warn "prompt override restore: skipping %s: %s"
                     key reason)
-          | _ -> ()
+          | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ -> ()
         ) pairs
-      | _ -> ()
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> ()
     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       Log.Misc.warn "prompt override restore failed: %s" (Printexc.to_string exn)
   end

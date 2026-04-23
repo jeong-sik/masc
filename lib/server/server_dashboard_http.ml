@@ -346,7 +346,8 @@ let dashboard_verification_resolve_http_json
        | Types.Reject_verification ->
            Verification_protocol.on_reject_verification
              ~config ~task_id ~verifier ~verification_id ~reason
-       | _ -> ());
+       | Types.Claim | Types.Start | Types.Done_action | Types.Cancel
+       | Types.Release | Types.Submit_for_verification -> ());
       Ok (`Assoc [
         ("ok", `Bool true);
         ("task_id", `String task_id);

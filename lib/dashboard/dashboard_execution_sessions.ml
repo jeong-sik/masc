@@ -228,7 +228,7 @@ let session_operation_links operation_contexts =
       | Some session_id when not (Hashtbl.mem table session_id) ->
           Hashtbl.add table session_id
             (Some operation.operation_id, operation.linked_detachment_id)
-      | _ -> ())
+      | Some _ | None -> ())
     operation_contexts;
   table
 

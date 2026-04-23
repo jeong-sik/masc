@@ -150,7 +150,8 @@ let register_pid_cleanup ~path ~pid =
       match parsed_pid path with
       | Some current when current = pid ->
           Safe_ops.protect ~default:() (fun () -> Sys.remove path)
-      | _ -> ())
+      | Some _ -> ()
+      | None -> ())
 
 let write_pid_file path pid =
   let oc = open_out path in

@@ -80,7 +80,7 @@ let spawn_post_sse_keepalive ~sw ~clock info =
              Eio.Time.sleep clock post_sse_keepalive_interval_s
            with
           | Eio.Cancel.Cancelled _ as e -> raise e
-          | _ -> ());
+          | exn -> Printf.eprintf "[server_mcp_transport_http] keepalive sleep failed: %s\n%!" (Printexc.to_string exn));
           if info.closed then
             close_sse_conn info
           else if not !(info.stop) then

@@ -2191,6 +2191,7 @@ let run_turn
     else None
   in
   ignore (Keeper_alerting_path.ensure_sandbox_bundle ~config ~meta);
+  let keeper_sandbox_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   let effective_allowed_paths = Keeper_alerting_path.effective_allowed_paths ~meta in
   match
     Keeper_alerting_path.absolute_allowed_paths_result
@@ -2215,7 +2216,7 @@ let run_turn
     let cli_transport_overrides =
       Some
         ({
-          cwd = None;
+          cwd = Some keeper_sandbox_root;
           claude_mcp_config = keeper_oas_context.claude_mcp_config;
           claude_allowed_tools = None;
           claude_permission_mode = None;
@@ -2955,7 +2956,7 @@ let run_turn
               (!tool_surface_ref).tool_surface_fallback_used;
           };
         sandbox_kind = Keeper_execution_receipt.sandbox_kind_of_meta meta;
-        sandbox_root = Some config.base_path;
+        sandbox_root = Some keeper_sandbox_root;
         network_mode = Keeper_types.network_mode_to_string meta.network_mode;
         approval_profile = (!tool_surface_ref).approval_mode_effective;
         approval_profile_derived = (!tool_surface_ref).approval_mode_derived;

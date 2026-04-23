@@ -1046,6 +1046,16 @@
  (libraries alcotest unix str))
 
 (test
+ (name test_keeper_agent_run_sandbox_source)
+ (modules test_keeper_agent_run_sandbox_source)
+ (libraries alcotest unix))
+
+(test
+ (name test_keeper_fs_write_containment)
+ (modules test_keeper_fs_write_containment)
+ (libraries masc_test_deps))
+
+(test
  (name test_channel_gate)
  (modules test_channel_gate)
  (libraries masc_test_deps))

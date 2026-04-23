@@ -3,14 +3,14 @@
 
     The keeper sandbox boundary historically followed the tool name:
     [keeper_bash] for [sandbox_profile=Docker] keepers ran in a
-    container, but [keeper_fs_read] / [keeper_shell] read directly
-    from the host. The result was a one-way leak — write was gated,
-    read was not.
+    container, but [keeper_fs_read] / [keeper_fs_edit] / [keeper_shell]
+    could touch the host directly. The result was a cross-tool leak:
+    different tools enforced different boundaries for the same keeper.
 
     This module enforces "whichever profile decides one tool, decides
     every tool" on the host side without spinning up a per-call
-    container. When the keeper's profile is [Docker], read targets
-    must lie within the keeper's playground bundle
+    container. When the keeper's profile is [Docker], read and write
+    targets must lie within the keeper's playground bundle
     ([.masc/playground/<keeper>/]).
 
     Phase B-2 will route the same tools through [docker exec] so the
@@ -27,6 +27,15 @@
 
     A no-op (always [Ok ()]) for local keepers. *)
 val check_read_target :
+  config:Coord.config ->
+  meta:Keeper_types.keeper_meta ->
+  target:string ->
+  (unit, string) result
+
+(** [check_write_target] is the write-side counterpart to
+    [check_read_target]. A no-op for local keepers; for Docker keepers,
+    host writes are limited to the keeper playground bundle. *)
+val check_write_target :
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->
   target:string ->

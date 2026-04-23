@@ -28,7 +28,7 @@ let cleanup () =
   end;
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  remove_path (Filename.concat _test_base_path ".masc");
+  remove_path (Filename.concat _test_base_path Common.masc_dirname);
   Board_dispatch.init_jsonl ()
 
 let dispatch name args =

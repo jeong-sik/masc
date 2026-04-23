@@ -411,13 +411,13 @@ let run_cmd host port base_path =
       resolution_source normalized_base_path;
     exit 1
   end;
-  let masc_dir = Filename.concat normalized_base_path ".masc" in
+  let masc_dir = Filename.concat normalized_base_path Common.masc_dirname in
   Fs_compat.mkdir_p masc_dir;
   acquire_pid_lock port;
   acquire_base_path_lock normalized_base_path;
   Log.init_from_env ();
   if stripped_base_path <> ""
-     && String.equal (Filename.basename stripped_base_path) ".masc"
+     && String.equal (Filename.basename stripped_base_path) Common.masc_dirname
   then
     Log.Server.warn
       "Normalizing --base-path from %s to %s because runtime base paths must point at the workspace root, not the .masc directory."
@@ -451,7 +451,6 @@ let run_cmd host port base_path =
 
   (* Enable Eio-aware locking globally (single call replaces per-module enable_eio) *)
   Eio_guard.enable ();
-  Masc_mcp.Transport_metrics.init ();
 
   (* Set global clock for Time_compat (Eio-native timestamps).
      Dashboard_cache.now() reads from Time_compat directly. *)
@@ -662,7 +661,7 @@ let doctor_sidecar_exit name as_json =
     end
     else begin
       let python =
-        try Sys.getenv "MASC_PYTHON" with Not_found -> "python3"
+        Option.value (Sys.getenv_opt "MASC_PYTHON") ~default:"python3"
       in
       let args =
         if as_json

@@ -59,7 +59,7 @@ let generate_node_id () =
 
 let default_config = {
   backend_type = FileSystem;
-  base_path = ".masc";
+  base_path = Common.masc_dirname;
   node_id = generate_node_id ();
   cluster_name = "default";
   pubsub_max_messages = pubsub_max_messages_from_env ();

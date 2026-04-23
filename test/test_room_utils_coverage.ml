@@ -137,7 +137,7 @@ let test_resolve_masc_base_path_collapses_requested_masc_dir () =
   let requested =
     Filename.concat
       (Filename.concat (Filename.get_temp_dir_name ()) "room-utils-collapse")
-      ".masc"
+      Common.masc_dirname
   in
   with_envs
     [ ("MASC_BASE_PATH", None);
@@ -151,7 +151,7 @@ let test_resolve_masc_base_path_collapses_explicit_env_masc_dir () =
   let requested =
     Filename.concat (Filename.get_temp_dir_name ()) "room-utils-explicit"
   in
-  let explicit = Filename.concat requested ".masc" in
+  let explicit = Filename.concat requested Common.masc_dirname in
   with_envs
     [ ("MASC_BASE_PATH", Some explicit);
       ("MASC_TEST_ALLOW_BASE_PATH_OVERRIDE", None) ]
@@ -178,8 +178,8 @@ let test_resolve_masc_base_path_ignores_base_path_override_with_local_masc_dir (
   let explicit = Filename.concat scratch "parent-root" in
   Unix.mkdir requested 0o755;
   Unix.mkdir explicit 0o755;
-  Unix.mkdir (Filename.concat requested ".masc") 0o755;
-  Unix.mkdir (Filename.concat explicit ".masc") 0o755;
+  Unix.mkdir (Filename.concat requested Common.masc_dirname) 0o755;
+  Unix.mkdir (Filename.concat explicit Common.masc_dirname) 0o755;
   Fun.protect
     ~finally:(fun () -> rm_rf scratch)
     (fun () ->
@@ -197,8 +197,8 @@ let test_resolve_masc_base_path_opt_in_preserves_base_path_override () =
   let explicit = Filename.concat scratch "parent-root" in
   Unix.mkdir requested 0o755;
   Unix.mkdir explicit 0o755;
-  Unix.mkdir (Filename.concat requested ".masc") 0o755;
-  Unix.mkdir (Filename.concat explicit ".masc") 0o755;
+  Unix.mkdir (Filename.concat requested Common.masc_dirname) 0o755;
+  Unix.mkdir (Filename.concat explicit Common.masc_dirname) 0o755;
   Fun.protect
     ~finally:(fun () -> rm_rf scratch)
     (fun () ->
@@ -221,8 +221,8 @@ let test_resolve_masc_base_path_ignores_ancestor_base_path_override_without_opt_
     end
   in
   mkdirs sub_repo;
-  Unix.mkdir (Filename.concat explicit ".masc") 0o755;
-  Unix.mkdir (Filename.concat sub_repo ".masc") 0o755;
+  Unix.mkdir (Filename.concat explicit Common.masc_dirname) 0o755;
+  Unix.mkdir (Filename.concat sub_repo Common.masc_dirname) 0o755;
   Fun.protect
     ~finally:(fun () -> rm_rf scratch)
     (fun () ->

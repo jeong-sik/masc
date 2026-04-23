@@ -112,7 +112,7 @@ let test_add_task_uses_archive_max_id () =
   let config = room_config tmp_dir in
   let _ = Coord.init config ~agent_name:None in
 
-  let archive_path = Filename.concat (Filename.concat tmp_dir ".masc") "tasks-archive.json" in
+  let archive_path = Filename.concat (Filename.concat tmp_dir Common.masc_dirname) "tasks-archive.json" in
   let archive_json =
     `Assoc [
       ("archived_at", `String "2026-01-01T00:00:00Z");
@@ -280,7 +280,7 @@ let test_worktree_project_root_for_masc_dir_base () =
   let _ = Coord.init config ~agent_name:(Some "claude") in
   let repo_root = config.base_path in
   Unix.mkdir (Filename.concat repo_root ".git") 0o755;
-  let masc_config = { config with base_path = Filename.concat repo_root ".masc" } in
+  let masc_config = { config with base_path = Filename.concat repo_root Common.masc_dirname } in
   Alcotest.(check string) ".masc base path resolves to repo root"
     repo_root
     (Coord.project_root masc_config);
@@ -351,7 +351,7 @@ let with_memory_test_env f =
   Unix.mkdir tmp_dir 0o755;
   let backend_config : Backend_types.config = {
     backend_type = Backend_types.Memory;
-    base_path = Filename.concat tmp_dir ".masc";
+    base_path = Filename.concat tmp_dir Common.masc_dirname;
     node_id = "test-node";
     cluster_name = "default";
     pubsub_max_messages = 1000;
@@ -1265,7 +1265,7 @@ let test_cleanup_zombies_releases_tasks () =
     let _ = Coord.claim_task config ~agent_name:test_agent_z ~task_id:"task-001" in
     (* Manually set agent's last_seen to a very old timestamp to make it a zombie *)
     let agents_path = Filename.concat
-      (Filename.concat config.base_path ".masc") "agents" in
+      (Filename.concat config.base_path Common.masc_dirname) "agents" in
     let agent_file = Filename.concat agents_path (test_agent_z ^ ".json") in
     let json = Coord.read_json config agent_file in
     let updated_json = match json with

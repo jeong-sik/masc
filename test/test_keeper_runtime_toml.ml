@@ -21,7 +21,7 @@ let with_base_path f =
   let dir = Filename.temp_file "keeper-runtime-toml" "" in
   Sys.remove dir;
   Unix.mkdir dir 0o755;
-  Unix.mkdir (Filename.concat dir ".masc") 0o755;
+  Unix.mkdir (Filename.concat dir Common.masc_dirname) 0o755;
   Unix.mkdir (Filename.concat dir ".masc/config") 0o755;
   let oc = open_out (Filename.concat dir ".masc/config/cascade.json") in
   output_string oc "{}\n";

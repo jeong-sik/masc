@@ -55,7 +55,7 @@ let rec ensure_dir path =
 
 let make_config () =
   let tmp = temp_dir () in
-  ensure_dir (Filename.concat tmp ".masc");
+  ensure_dir (Filename.concat tmp Common.masc_dirname);
   (tmp, Coord.default_config tmp)
 
 let make_meta ~name ~sandbox =

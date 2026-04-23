@@ -47,17 +47,17 @@ end
 
 (** Get terminal size (fallback to 80x24) *)
 let get_terminal_size () =
-  try
-    let read_tput arg =
+  let read_tput arg =
+    try
       let ic = Unix.open_process_args_in "tput" [| "tput"; arg |] in
       Fun.protect
         ~finally:(fun () -> ignore (Unix.close_process_in ic))
-        (fun () -> int_of_string (String.trim (input_line ic)))
-    in
-    let cols = read_tput "cols" in
-    let rows = read_tput "lines" in
-    (rows, cols)
-  with _ -> (24, 80)
+        (fun () -> int_of_string_opt (String.trim (input_line ic)))
+    with Unix.Unix_error _ | Sys_error _ | End_of_file -> None
+  in
+  match read_tput "cols", read_tput "lines" with
+  | Some cols, Some rows -> (rows, cols)
+  | _ -> (24, 80)
 
 (** Draw horizontal line *)
 let draw_hline width =
@@ -69,16 +69,19 @@ let fit_width s width =
   if len >= width then String.sub s 0 (max 0 (width - 1)) ^ (if len > width then "~" else "")
   else s ^ String.make (width - len) ' '
 
+let is_keeper name =
+  String.length name >= 7 && String.sub name 0 7 = "keeper-"
+
 (** Agent icon — deterministic by name hash, vendor-agnostic *)
 let agent_icon name =
   let icons = [| "\xf0\x9f\x9f\xa3"; "\xf0\x9f\x94\xb5"; "\xf0\x9f\x9f\xa2"; "\xf0\x9f\x9f\xa1"; "\xf0\x9f\x94\xb4" |] in
-  if String.length name >= 7 && String.sub name 0 7 = "keeper-" then "\xf0\x9f\x9b\xa1"  (* shield for keepers *)
+  if is_keeper name then "\xf0\x9f\x9b\xa1"  (* shield for keepers *)
   else icons.(Hashtbl.hash name mod Array.length icons)
 
 (** Agent color — deterministic by name hash, vendor-agnostic *)
 let agent_color name =
   let colors = [| Ansi.magenta; Ansi.blue; Ansi.green; Ansi.yellow; Ansi.cyan |] in
-  if String.length name >= 7 && String.sub name 0 7 = "keeper-" then Ansi.white
+  if is_keeper name then Ansi.white
   else colors.(Hashtbl.hash name mod Array.length colors)
 
 (** Status color *)

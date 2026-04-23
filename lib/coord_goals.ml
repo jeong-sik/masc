@@ -232,7 +232,9 @@ let parse_optional_string_list args field =
   | `Null -> Ok None
   | `List values -> (
       try Ok (Some (List.map Yojson.Safe.Util.to_string values))
-      with _ ->
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | _ ->
         Error
           (make_type_field_error ~field ~constraint_violated:Type_string
              ~expected:"string[]"

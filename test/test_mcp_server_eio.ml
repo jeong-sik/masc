@@ -2415,7 +2415,7 @@ let test_handle_request_resources_read_matrix () =
     if not (Sys.file_exists path) then Unix.mkdir path 0o755
   in
   let library_dir = Filename.concat base_path "docs/library" in
-  let masc_dir = Filename.concat base_path ".masc" in
+  let masc_dir = Filename.concat base_path Common.masc_dirname in
   ensure_dir (Filename.concat base_path "docs");
   ensure_dir library_dir;
   ensure_dir masc_dir;

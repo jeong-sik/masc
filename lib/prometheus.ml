@@ -224,6 +224,75 @@ let metric_mcp_tool_schema_count = "masc_mcp_tool_schema_count"
 let metric_mcp_tool_schema_tokens_approx =
   "masc_mcp_tool_schema_tokens_approx"
 
+(* Transport metrics — used in transport_metrics.ml. *)
+let metric_sse_sessions = "masc_sse_sessions_total"
+let metric_sse_broadcast_duration = "masc_sse_broadcast_duration_seconds"
+let metric_sse_broadcast_events = "masc_sse_broadcast_events_total"
+let metric_sse_stream_queue_depth = "masc_sse_stream_queue_depth"
+let metric_sse_queue_depth_avg = "masc_sse_queue_depth_avg"
+let metric_sse_queue_depth_max = "masc_sse_queue_depth_max"
+let metric_sse_external_subscribers = "masc_sse_external_subscribers_total"
+let metric_grpc_active_streams = "masc_grpc_active_streams_total"
+let metric_grpc_heartbeat_latency = "masc_grpc_heartbeat_latency_seconds"
+let metric_grpc_subscribers = "masc_grpc_subscribers_total"
+let metric_grpc_events_delivered = "masc_grpc_events_delivered_total"
+let metric_ws_sessions = "masc_ws_sessions_total"
+
+(* Admission queue metrics — used in admission_queue_metrics.ml. *)
+let metric_inference_queue_depth = "masc_inference_queue_depth"
+let metric_inference_queue_inflight = "masc_inference_queue_inflight"
+let metric_inference_queue_acquired = "masc_inference_queue_acquired_total"
+let metric_inference_queue_wait = "masc_inference_queue_wait_seconds"
+let metric_inference_queue_cancelled = "masc_inference_queue_cancelled_total"
+let metric_inference_queue_max_concurrent = "masc_inference_queue_max_concurrent"
+
+(* Agent health metrics — used in transport_metrics.ml. *)
+let metric_agent_heartbeat_age_seconds = "masc_agent_heartbeat_age_seconds"
+let metric_agent_stale_total = "masc_agent_stale_total"
+
+(* Process-level FD gauges — used in init() and update_fd_gauges. *)
+let metric_open_fds = "masc_process_open_fds"
+let metric_fd_warn_threshold = "masc_process_fd_warn_threshold"
+
+(* Core counters / gauges — used outside init. *)
+let metric_mcp_requests = "masc_mcp_requests_total"
+let metric_llm_inference_duration = "masc_llm_inference_duration_seconds"
+let metric_after_turn_hook = "masc_after_turn_hook_total"
+let metric_after_turn_telemetry_missing =
+  "masc_after_turn_telemetry_missing_total"
+let metric_after_turn_telemetry_zero_latency =
+  "masc_after_turn_telemetry_zero_latency_total"
+let metric_tasks = "masc_tasks_total"
+let metric_errors = "masc_errors_total"
+let metric_error_events = "masc_error_events_total"
+let metric_active_agents = "masc_active_agents"
+let metric_pending_tasks = "masc_pending_tasks"
+let metric_uptime_seconds = "masc_uptime_seconds"
+let metric_sse_connections_active = "masc_sse_connections_active"
+let metric_sse_reconnects = "masc_sse_reconnects_total"
+let metric_sse_idle_evictions = "masc_sse_idle_evictions_total"
+let metric_sse_capacity_evictions = "masc_sse_capacity_evictions_total"
+let metric_sse_write_failures = "masc_sse_write_failures_total"
+let metric_sse_rejects = "masc_sse_rejects_total"
+let metric_provider_prefix_cache_creation_tokens =
+  "masc_provider_prefix_cache_creation_tokens_total"
+let metric_provider_prefix_cache_read_tokens =
+  "masc_provider_prefix_cache_read_tokens_total"
+let metric_tool_call = "masc_tool_call_total"
+let metric_tool_call_duration = "masc_tool_call_duration_seconds"
+let metric_llm_provider_http_status = "masc_llm_provider_http_status_total"
+let metric_llm_provider_request_latency =
+  "masc_llm_provider_request_latency_seconds"
+
+(* Domain-specific counters not yet constant-ised. *)
+let metric_board_truncated_posts = "masc_board_truncated_posts_total"
+let metric_cascade_strategy_decisions = "masc_cascade_strategy_decisions_total"
+let metric_cascade_capacity_events = "masc_cascade_capacity_events_total"
+let metric_keeper_invariant_violations = "masc_keeper_invariant_violations_total"
+let metric_oas_bus_subscriber_stream_depth = "masc_oas_bus_subscriber_stream_depth"
+let metric_oas_bus_publish_block_seconds = "masc_oas_bus_publish_block_seconds_total"
+let metric_oas_bus_publish = "masc_oas_bus_publish_total"
+
 (** {1 Built-in Metrics} *)
 
 let init () =
@@ -234,28 +303,28 @@ let init () =
     if not (Hashtbl.mem metrics key) then
       Hashtbl.add metrics key { name; help; metric_type = mt; value = 0.0; labels = [] }
   in
-  add "masc_mcp_requests_total" "Total MCP requests received" Counter;
-  add "masc_llm_inference_duration_seconds" "LLM inference request duration in seconds" Histogram;
-  add "masc_after_turn_hook_total"
+  add metric_mcp_requests "Total MCP requests received" Counter;
+  add metric_llm_inference_duration "LLM inference request duration in seconds" Histogram;
+  add metric_after_turn_hook
     "Times the keeper AfterTurn hook ran (labeled by model). Divergence from \
      masc_llm_inference_duration_seconds_count identifies missing telemetry." Counter;
-  add "masc_after_turn_telemetry_missing_total"
+  add metric_after_turn_telemetry_missing
     "AfterTurn responses where response.telemetry was None." Counter;
-  add "masc_after_turn_telemetry_zero_latency_total"
+  add metric_after_turn_telemetry_zero_latency
     "AfterTurn responses where telemetry was present but request_latency_ms was 0." Counter;
-  add "masc_tasks_total" "Total tasks processed" Counter;
-  add "masc_errors_total" "Total errors" Counter;
-  add "masc_error_events_total"
+  add metric_tasks "Total tasks processed" Counter;
+  add metric_errors "Total errors" Counter;
+  add metric_error_events
     "Error events by type (parsing, missing_config, etc.)" Counter;
-  add "masc_active_agents" "Currently active agents" Gauge;
-  add "masc_pending_tasks" "Tasks waiting to be claimed" Gauge;
-  add "masc_uptime_seconds" "Server uptime in seconds" Gauge;
-  add "masc_sse_connections_active" "Active SSE connections" Gauge;
-  add "masc_sse_reconnects_total" "Total SSE reconnects (same session reattached)" Counter;
-  add "masc_sse_idle_evictions_total" "Total SSE clients evicted by idle reaper" Counter;
-  add "masc_sse_capacity_evictions_total" "Total SSE clients evicted due to max client capacity" Counter;
-  add "masc_sse_write_failures_total" "Total SSE write failures by reason" Counter;
-  add "masc_sse_rejects_total" "Total SSE connections rejected by storm guard" Counter;
+  add metric_active_agents "Currently active agents" Gauge;
+  add metric_pending_tasks "Tasks waiting to be claimed" Gauge;
+  add metric_uptime_seconds "Server uptime in seconds" Gauge;
+  add metric_sse_connections_active "Active SSE connections" Gauge;
+  add metric_sse_reconnects "Total SSE reconnects (same session reattached)" Counter;
+  add metric_sse_idle_evictions "Total SSE clients evicted by idle reaper" Counter;
+  add metric_sse_capacity_evictions "Total SSE clients evicted due to max client capacity" Counter;
+  add metric_sse_write_failures "Total SSE write failures by reason" Counter;
+  add metric_sse_rejects "Total SSE connections rejected by storm guard" Counter;
   (* Keeper compaction metrics — emitted by keeper_compact_policy.ml *)
   add metric_keeper_compactions
     "Total keeper compactions performed" Counter;
@@ -275,33 +344,33 @@ let init () =
     "Total keeper heartbeat failures" Counter;
   register_histogram ~name:metric_keeper_tool_call_duration
     ~help:"Keeper tool call latency in seconds, labeled by keeper, provider, tool, and outcome" ();
-  add "masc_provider_prefix_cache_creation_tokens_total"
+  add metric_provider_prefix_cache_creation_tokens
     "Total provider prefix cache creation tokens (Anthropic)" Counter;
-  add "masc_provider_prefix_cache_read_tokens_total"
+  add metric_provider_prefix_cache_read_tokens
     "Total provider prefix cache read tokens (Anthropic)" Counter;
-  add "masc_tool_call_total"
+  add metric_tool_call
     "Total keeper tool calls labeled by provider, tool, and outcome" Counter;
-  register_histogram ~name:"masc_tool_call_duration_seconds"
+  register_histogram ~name:metric_tool_call_duration
     ~help:"Tool call latency in seconds" ();
   (* Inference admission queue metrics *)
-  add "masc_inference_queue_inflight"
+  add metric_inference_queue_inflight
     "Concurrent inference calls holding an admission permit" Gauge;
-  add "masc_inference_queue_depth"
+  add metric_inference_queue_depth
     "Callers waiting in the admission queue" Gauge;
-  add "masc_inference_queue_max_concurrent"
+  add metric_inference_queue_max_concurrent
     "Configured max concurrent admission permits" Gauge;
-  add "masc_inference_queue_acquired_total"
+  add metric_inference_queue_acquired
     "Total admission permits acquired" Counter;
-  add "masc_inference_queue_cancelled_total"
+  add metric_inference_queue_cancelled
     "Total admission waits cancelled by fiber cancellation" Counter;
-  register_histogram ~name:"masc_inference_queue_wait_seconds"
+  register_histogram ~name:metric_inference_queue_wait
     ~help:"Time waiting in admission queue before exchanging for permit" ();
   (* LLM provider HTTP response counter — emitted by Llm_metric_bridge
      via the OAS Metrics.t on_http_status hook.  Labels are populated
      dynamically per call; no initial registration with zero-value rows
      is needed because inc_counter auto-creates the label series on
      first observation. *)
-  add "masc_llm_provider_http_status_total"
+  add metric_llm_provider_http_status
     "Total HTTP responses from LLM providers, labeled by provider, model, and status code"
     Counter;
   (* Orphan metrics — used via inc_counter/set_gauge but previously
@@ -332,16 +401,16 @@ let init () =
   add metric_oas_sse_relay_queue_depth
     "Current in-memory OAS SSE relay retry queue depth"
     Gauge;
-  add "masc_board_truncated_posts_total"
+  add metric_board_truncated_posts
     "Total board posts truncated due to size limits"
     Counter;
-  add "masc_agent_heartbeat_age_seconds"
+  add metric_agent_heartbeat_age_seconds
     "Maximum observed heartbeat age across active agents (seconds)"
     Gauge;
-  add "masc_agent_stale_total"
+  add metric_agent_stale_total
     "Total agents marked stale due to missed heartbeats"
     Counter;
-  register_histogram ~name:"masc_llm_provider_request_latency_seconds"
+  register_histogram ~name:metric_llm_provider_request_latency
     ~help:"Per-HTTP-request LLM latency from OAS on_request_end callback. \
            Independent from masc_llm_inference_duration_seconds (turn-scope) — \
            this fires per provider HTTP call regardless of keeper hook health." ();
@@ -350,15 +419,11 @@ let init () =
      time series before it crosses the OS limit and crashes the server.
      Evidence: 2026-04-16 production incident, 4029 CLOSE_WAIT sockets
      accumulated before the accept() path started failing. *)
-  let fd_open = "masc_process_open_fds" in
-  let fd_threshold = "masc_process_fd_warn_threshold" in
-  add fd_open
+  add metric_open_fds
     "Approximate count of open file descriptors for the server process \
      (derived from /dev/fd). Ramp indicates a socket/file leak." Gauge;
-  add fd_threshold
+  add metric_fd_warn_threshold
     "Threshold above which open_fds triggers a one-shot WARN log." Gauge;
-  set_gauge fd_threshold
-    (float_of_int (Env_config_core.get_int ~default:3000 "MASC_FD_WARN_THRESHOLD" |> max 1));
   (* Per-keeper turn outcome + token counters.  Labels are populated
      dynamically via inc_counter; no upfront registration needed.
      Covers issues #7495 (cost/token attribution) and #7519 (SLO). *)
@@ -394,33 +459,53 @@ let init () =
     Gauge;
   (* OAS Event_bus backpressure observability (see oas_bus_instrument.ml).
      Label series are populated dynamically per subscriber_purpose. *)
-  add "masc_oas_bus_subscriber_stream_depth"
+  add metric_oas_bus_subscriber_stream_depth
     "Estimated OAS Event_bus per-subscriber stream depth, labeled by \
      subscriber_purpose. Indirect measure: publishes_matching_filter - \
      events_drained, tracked MASC-side for subscriptions created via \
      Oas_bus_instrument. OAS uses bounded Eio.Stream (default 256); values \
      approaching this cap indicate impending publish blocking."
     Gauge;
-  add "masc_oas_bus_publish_block_seconds_total"
+  add metric_oas_bus_publish_block_seconds
     "Cumulative seconds spent inside Oas.Event_bus.publish when routed \
      through Oas_bus_instrument.publish. A sustained ramp indicates a \
      subscriber drain loop has fallen behind and publishers are blocking \
      on Eio.Stream.add."
     Counter;
-  add "masc_oas_bus_publish_total"
+  add metric_oas_bus_publish
     "Total Oas.Event_bus.publish calls routed through \
      Oas_bus_instrument.publish."
-    Counter
-
-let metric_open_fds = "masc_process_open_fds"
+    Counter;
+  (* Transport metrics — registered here so transport_metrics.ml can use
+     module constants instead of string literals. *)
+  add metric_sse_sessions "Active SSE sessions by kind" Gauge;
+  register_histogram ~name:metric_sse_broadcast_duration
+    ~help:"Time to fan-out a broadcast to all SSE clients" ();
+  add metric_sse_broadcast_events "Total SSE broadcast events emitted" Counter;
+  add metric_sse_stream_queue_depth
+    "Per-session SSE event stream queue depth" Gauge;
+  add metric_sse_queue_depth_avg
+    "Average SSE event queue depth across live sessions" Gauge;
+  add metric_sse_queue_depth_max
+    "Maximum SSE event queue depth across live sessions" Gauge;
+  add metric_sse_external_subscribers
+    "Active non-SSE subscribers bridged from the SSE fanout path" Gauge;
+  add metric_grpc_active_streams "Active gRPC bidirectional streams" Gauge;
+  register_histogram ~name:metric_grpc_heartbeat_latency
+    ~help:"gRPC heartbeat round-trip latency" ();
+  add metric_grpc_subscribers "Active gRPC Subscribe stream subscribers" Gauge;
+  add metric_grpc_events_delivered "Total events delivered via gRPC streams" Counter;
+  add metric_ws_sessions "Active standalone WebSocket sessions" Gauge
 
 let start_time = Time_compat.now ()
 
 let update_uptime () =
-  set_gauge "masc_uptime_seconds" (Time_compat.now () -. start_time)
+  set_gauge metric_uptime_seconds (Time_compat.now () -. start_time)
 
 let fd_warn_threshold =
   Env_config_core.get_int ~default:3000 "MASC_FD_WARN_THRESHOLD" |> max 1
+
+let () = set_gauge metric_fd_warn_threshold (float_of_int fd_warn_threshold)
 
 let fd_warned_once = ref false
 
@@ -559,19 +644,19 @@ let to_prometheus_text () =
 (** {1 Convenience Functions} *)
 
 let record_request () =
-  inc_counter "masc_mcp_requests_total" ()
+  inc_counter metric_mcp_requests ()
 
 let record_task_completed () =
-  inc_counter "masc_tasks_total" ~labels:[("status", "completed")] ()
+  inc_counter metric_tasks ~labels:[("status", "completed")] ()
 
 let record_task_failed () =
-  inc_counter "masc_tasks_total" ~labels:[("status", "failed")] ()
+  inc_counter metric_tasks ~labels:[("status", "failed")] ()
 
 let record_error ?(error_type="unknown") () =
-  inc_counter "masc_errors_total" ~labels:[("type", error_type)] ()
+  inc_counter metric_errors ~labels:[("type", error_type)] ()
 
 let set_active_agents count =
-  set_gauge "masc_active_agents" (float_of_int count)
+  set_gauge metric_active_agents (float_of_int count)
 
 let set_pending_tasks count =
   set_gauge "masc_pending_tasks" (float_of_int count)

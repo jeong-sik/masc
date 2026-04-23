@@ -216,7 +216,9 @@ let handle_keeper_fs_edit
          (try
             let current =
               try Fs_compat.load_file target
-              with _ -> ""
+              with
+              | Eio.Cancel.Cancelled _ as e -> raise e
+              | _ -> ""
             in
             if current = "" then
               error_json ~fields:[ "path", `String target ]

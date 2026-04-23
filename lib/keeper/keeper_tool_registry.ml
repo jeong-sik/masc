@@ -159,12 +159,11 @@ let gh_read_only_prefixes =
     - The subcommand is `graphql` (always POST)
     The input [cmd_lower] must already be lowercased and trimmed. *)
 let is_gh_api_read_only (cmd_lower : string) : bool =
-  if not (String.length cmd_lower >= 3
-          && String.sub cmd_lower 0 3 = "api") then false
+  if not (Base.String.is_prefix cmd_lower ~prefix:"api") then false
   else
     let rest = String.trim (String.sub cmd_lower 3 (String.length cmd_lower - 3)) in
     (* graphql subcommand is always POST *)
-    if String.length rest >= 7 && String.sub rest 0 7 = "graphql" then false
+    if Base.String.is_prefix rest ~prefix:"graphql" then false
     else
       let tokens = String.split_on_char ' ' cmd_lower in
       let has_method_flag =

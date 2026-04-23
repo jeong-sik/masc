@@ -172,7 +172,7 @@ let strip_keeper_playground_prefix ~(meta : keeper_meta) (raw : string) =
   let legacy_bundle_root = Playground_paths.bundle_root meta.name in
   let short_root =
     let rel = Keeper_alerting_path.strip_trailing_slashes sandbox_root in
-    if String.starts_with ~prefix:".masc/" rel then
+    if String.starts_with ~prefix:(Common.masc_dirname ^ "/") rel then
       String.sub rel 6 (String.length rel - 6)
     else rel
   in
@@ -200,7 +200,7 @@ let repo_relative_path_candidate ~(meta : keeper_meta) (raw : string) =
   && String.contains raw '/'
   && not (is_playground_lane_relative_path raw)
   && not (relative_path_targets_allowed_root ~meta raw)
-  && not (List.mem first_segment [ ".masc"; "playground"; "workspace"; ".worktrees" ])
+  && not (List.mem first_segment [ Common.masc_dirname; "playground"; "workspace"; ".worktrees" ])
 ;;
 
 let rewrite_single_repo_relative_path ~(config : Coord.config) ~(meta : keeper_meta)

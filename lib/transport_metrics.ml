@@ -20,75 +20,45 @@ type hot_queue_session = {
 
 let sse_hot_sessions : hot_queue_session list Atomic.t = Atomic.make []
 
-let register_sse_metrics () =
-  Prometheus.register_gauge ~name:"masc_sse_sessions_total"
-    ~help:"Active SSE sessions by kind" ();
-  Prometheus.register_histogram ~name:"masc_sse_broadcast_duration_seconds"
-    ~help:"Time to fan-out a broadcast to all SSE clients" ();
-  Prometheus.register_counter ~name:"masc_sse_broadcast_events_total"
-    ~help:"Total SSE broadcast events emitted" ();
-  Prometheus.register_gauge ~name:"masc_sse_stream_queue_depth"
-    ~help:"Per-session SSE event stream queue depth" ();
-  Prometheus.register_gauge ~name:"masc_sse_queue_depth_avg"
-    ~help:"Average SSE event queue depth across live sessions" ();
-  Prometheus.register_gauge ~name:"masc_sse_queue_depth_max"
-    ~help:"Maximum SSE event queue depth across live sessions" ();
-  Prometheus.register_gauge ~name:"masc_sse_external_subscribers_total"
-    ~help:"Active non-SSE subscribers bridged from the SSE fanout path" ()
-
 let set_sse_sessions ~kind count =
-  Prometheus.set_gauge "masc_sse_sessions_total"
+  Prometheus.set_gauge Prometheus.metric_sse_sessions
     ~labels:[("kind", kind)] (float_of_int count)
 
 let observe_broadcast_duration seconds =
-  Prometheus.observe_histogram "masc_sse_broadcast_duration_seconds" seconds;
-  Prometheus.inc_counter "masc_sse_broadcast_events_total" ()
+  Prometheus.observe_histogram Prometheus.metric_sse_broadcast_duration seconds;
+  Prometheus.inc_counter Prometheus.metric_sse_broadcast_events ()
 
 let set_sse_queue_depth ~session_id depth =
-  Prometheus.set_gauge "masc_sse_stream_queue_depth"
+  Prometheus.set_gauge Prometheus.metric_sse_stream_queue_depth
     ~labels:[("session_id", session_id)] (float_of_int depth)
 
 let set_sse_queue_snapshot ~avg_depth ~max_depth ~hot_sessions =
-  Prometheus.set_gauge "masc_sse_queue_depth_avg" avg_depth;
-  Prometheus.set_gauge "masc_sse_queue_depth_max" (float_of_int max_depth);
+  Prometheus.set_gauge Prometheus.metric_sse_queue_depth_avg avg_depth;
+  Prometheus.set_gauge Prometheus.metric_sse_queue_depth_max (float_of_int max_depth);
   Atomic.set sse_hot_sessions hot_sessions
 
 let set_sse_external_subscribers count =
-  Prometheus.set_gauge "masc_sse_external_subscribers_total" (float_of_int count)
+  Prometheus.set_gauge Prometheus.metric_sse_external_subscribers (float_of_int count)
 
 (** {1 gRPC Metrics} *)
 
-let register_grpc_metrics () =
-  Prometheus.register_gauge ~name:"masc_grpc_active_streams_total"
-    ~help:"Active gRPC bidirectional streams" ();
-  Prometheus.register_histogram ~name:"masc_grpc_heartbeat_latency_seconds"
-    ~help:"gRPC heartbeat round-trip latency" ();
-  Prometheus.register_gauge ~name:"masc_grpc_subscribers_total"
-    ~help:"Active gRPC Subscribe stream subscribers" ();
-  Prometheus.register_counter ~name:"masc_grpc_events_delivered_total"
-    ~help:"Total events delivered via gRPC streams" ()
-
 let set_grpc_active_streams count =
-  Prometheus.set_gauge "masc_grpc_active_streams_total" (float_of_int count)
+  Prometheus.set_gauge Prometheus.metric_grpc_active_streams (float_of_int count)
 
 let observe_grpc_heartbeat_latency seconds =
-  Prometheus.observe_histogram "masc_grpc_heartbeat_latency_seconds" seconds
+  Prometheus.observe_histogram Prometheus.metric_grpc_heartbeat_latency seconds
 
 let set_grpc_subscribers count =
-  Prometheus.set_gauge "masc_grpc_subscribers_total" (float_of_int count)
+  Prometheus.set_gauge Prometheus.metric_grpc_subscribers (float_of_int count)
 
 let inc_grpc_events_delivered ?(delta=1) () =
-  Prometheus.inc_counter "masc_grpc_events_delivered_total"
+  Prometheus.inc_counter Prometheus.metric_grpc_events_delivered
     ~delta:(float_of_int delta) ()
 
 (** {1 WebSocket Metrics} *)
 
-let register_ws_metrics () =
-  Prometheus.register_gauge ~name:"masc_ws_sessions_total"
-    ~help:"Active standalone WebSocket sessions" ()
-
 let set_ws_sessions count =
-  Prometheus.set_gauge "masc_ws_sessions_total" (float_of_int count)
+  Prometheus.set_gauge Prometheus.metric_ws_sessions (float_of_int count)
 
 (** {1 Environment-derived Transport Config} *)
 
@@ -122,30 +92,12 @@ let grpc_listening () =
 
 (** {1 Agent Health Metrics} *)
 
-let register_agent_metrics () =
-  Prometheus.register_gauge ~name:"masc_agent_heartbeat_age_seconds"
-    ~help:"Seconds since last heartbeat per agent" ();
-  Prometheus.register_counter ~name:"masc_agent_stale_total"
-    ~help:"Total agents that became stale (heartbeat age exceeded threshold)" ()
-
 let set_agent_heartbeat_age ~agent_name age_seconds =
-  Prometheus.set_gauge "masc_agent_heartbeat_age_seconds"
+  Prometheus.set_gauge Prometheus.metric_agent_heartbeat_age_seconds
     ~labels:[("agent_name", agent_name)] age_seconds
 
 let inc_agent_stale () =
-  Prometheus.inc_counter "masc_agent_stale_total" ()
-
-(** {1 Initialization} *)
-
-let init () =
-  register_sse_metrics ();
-  register_grpc_metrics ();
-  register_ws_metrics ();
-  register_agent_metrics ();
-  set_grpc_runtime_listening false;
-  set_grpc_listen_status "not_started";
-  set_ws_runtime_listening false;
-  set_ws_listen_status "not_started"
+  Prometheus.inc_counter Prometheus.metric_agent_stale_total ()
 
 (** {1 Transport Health JSON Snapshot} *)
 
@@ -212,7 +164,7 @@ let tcp_port_reachable port =
           (Unix.ADDR_INET
              (Unix.inet_addr_of_string Masc_network_defaults.masc_http_default_host, port));
         true)
-  with _ -> false
+  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> false
 
 let hot_session_json (session : hot_queue_session) =
   `Assoc
@@ -228,14 +180,14 @@ let transport_health_json ~config =
   let v name ?(labels=[]) () =
     Prometheus.metric_value_or_zero name ~labels ()
   in
-  let sse_observer = v "masc_sse_sessions_total" ~labels:[("kind", "observer")] () in
-  let sse_coordinator = v "masc_sse_sessions_total" ~labels:[("kind", "coordinator")] () in
+  let sse_observer = v Prometheus.metric_sse_sessions ~labels:[("kind", "observer")] () in
+  let sse_coordinator = v Prometheus.metric_sse_sessions ~labels:[("kind", "coordinator")] () in
   let sse_total = int_of_float (sse_observer +. sse_coordinator) in
   let sse_external_subscribers =
-    int_of_float (v "masc_sse_external_subscribers_total" ())
+    int_of_float (v Prometheus.metric_sse_external_subscribers ())
   in
-  let sse_queue_avg = v "masc_sse_queue_depth_avg" () in
-  let sse_queue_max = int_of_float (v "masc_sse_queue_depth_max" ()) in
+  let sse_queue_avg = v Prometheus.metric_sse_queue_depth_avg () in
+  let sse_queue_max = int_of_float (v Prometheus.metric_sse_queue_depth_max ()) in
   let relay_queue_depth =
     int_of_float (v Prometheus.metric_oas_sse_relay_queue_depth ())
   in
@@ -270,27 +222,27 @@ let transport_health_json ~config =
   let relay_drop_total =
     int_of_float (Prometheus.metric_total Prometheus.metric_oas_sse_relay_drops)
   in
-  let broadcast_sum = v "masc_sse_broadcast_duration_seconds" () in
+  let broadcast_sum = v Prometheus.metric_sse_broadcast_duration () in
   let broadcast_count = v "masc_sse_broadcast_duration_seconds_count" () in
   let broadcast_avg =
     if broadcast_count > 0.0 then broadcast_sum /. broadcast_count else 0.0
   in
-  let grpc_streams = v "masc_grpc_active_streams_total" () in
-  let grpc_subscribers = v "masc_grpc_subscribers_total" () in
-  let grpc_heartbeat_sum = v "masc_grpc_heartbeat_latency_seconds" () in
+  let grpc_streams = v Prometheus.metric_grpc_active_streams () in
+  let grpc_subscribers = v Prometheus.metric_grpc_subscribers () in
+  let grpc_heartbeat_sum = v Prometheus.metric_grpc_heartbeat_latency () in
   let grpc_heartbeat_count = v "masc_grpc_heartbeat_latency_seconds_count" () in
   let grpc_heartbeat_avg =
     if grpc_heartbeat_count > 0.0 then grpc_heartbeat_sum /. grpc_heartbeat_count
     else 0.0
   in
-  let grpc_events = v "masc_grpc_events_delivered_total" () in
-  let stale_agents = v "masc_agent_stale_total" () in
+  let grpc_events = v Prometheus.metric_grpc_events_delivered () in
+  let stale_agents = v Prometheus.metric_agent_stale_total () in
   let lifecycle_dispatch_rejections =
     int_of_float
       (Prometheus.metric_total
          Prometheus.metric_keeper_lifecycle_dispatch_rejections)
   in
-  let ws_sessions = int_of_float (v "masc_ws_sessions_total" ()) in
+  let ws_sessions = int_of_float (v Prometheus.metric_ws_sessions ()) in
   let grpc_configured = grpc_enabled () in
   let grpc_live = grpc_listening () in
   let grpc_reachable = grpc_live || tcp_port_reachable (grpc_port ()) in

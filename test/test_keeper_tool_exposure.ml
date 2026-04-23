@@ -674,7 +674,7 @@ let make_masc_path_test_dir () =
   in
   let git_dir = Filename.concat dir ".git" in
   create_dir git_dir;
-  let masc = Filename.concat dir ".masc" in
+  let masc = Filename.concat dir Common.masc_dirname in
   create_dir masc;
   let keepers = Filename.concat masc "keepers" in
   create_dir keepers;

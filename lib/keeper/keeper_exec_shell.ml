@@ -647,7 +647,9 @@ let handle_keeper_bash
     | Ok cwd ->
     let env_snap =
       try Some (Exec_core.snapshot_env ~cwd)
-      with _ -> None
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | _ -> None
     in
     let normalize_path_for_containment path =
       Keeper_alerting_path.normalize_path_for_check path

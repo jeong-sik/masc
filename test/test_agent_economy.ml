@@ -225,7 +225,7 @@ let test_ledger_file_created () =
         ~base_path:dir ~agent_name:"writer"
         ~kind:Earn_board_post ~reason:"test" ());
       let path = Filename.concat
-        (Filename.concat (Filename.concat dir ".masc") "economy")
+        (Filename.concat (Filename.concat dir Common.masc_dirname) "economy")
         "ledger.jsonl" in
       Alcotest.(check bool) "ledger file exists" true (Sys.file_exists path)));
   rm_rf dir

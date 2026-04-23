@@ -21,7 +21,7 @@ let setup_tmp_dir () =
   let dir = Filename.temp_dir "masc_mem_test" "" in
   Unix.putenv "MASC_DATA_DIR" dir;
   Unix.putenv "MASC_BASE_PATH" dir;
-  Fs_compat.mkdir_p (Filename.concat dir ".masc");
+  Fs_compat.mkdir_p (Filename.concat dir Common.masc_dirname);
   dir
 
 let cleanup_tmp_dir dir =

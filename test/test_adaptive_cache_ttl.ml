@@ -10,16 +10,14 @@ module TM = Masc_mcp.Transport_metrics
 
 let test_default_latency () =
   (* With no broadcast data, latency avg = 0. *)
-  TM.init ();
   let sum = Prometheus.metric_value_or_zero
-    "masc_sse_broadcast_duration_seconds" () in
+    Prometheus.metric_sse_broadcast_duration () in
   let count = Prometheus.metric_value_or_zero
     "masc_sse_broadcast_duration_seconds_count" () in
   let avg = if count > 0.0 then sum /. count else 0.0 in
   check bool "avg latency is a valid float" true (avg >= 0.0)
 
 let test_high_latency_detected () =
-  TM.init ();
   (* Inject high latency observations to push avg above 0.5s *)
   for _ = 1 to 10 do
     Prometheus.observe_histogram "masc_sse_broadcast_duration_seconds" 1.0

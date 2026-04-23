@@ -41,13 +41,12 @@ let incr_auto_bg_observed ~promoted_candidate =
    bare reason name. *)
 let bare_reason s =
   let strip prefix =
-    let n = String.length prefix in
-    if String.length s >= n && String.sub s 0 n = prefix
-    then String.sub s n (String.length s - n)
-    else s
+    match Base.String.chop_prefix s ~prefix with
+    | Some rest -> rest
+    | None -> s
   in
   strip "too_complex:" |> fun s ->
-  if String.length s >= 14 && String.sub s 0 14 = "parse_aborted:"
+  if Base.String.is_prefix s ~prefix:"parse_aborted:"
   then "__parse_aborted__"
   else s
 

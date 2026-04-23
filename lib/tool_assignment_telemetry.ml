@@ -284,7 +284,9 @@ let warm_up () : unit =
               Hashtbl.replace agent_index agent_id assignment_id
           | _ -> ())
         jsons)
-  with _ -> ()
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn -> Log.Telemetry.warn "warm_up failed: %s" (Printexc.to_string exn)
 
 let reset_for_testing () : unit =
   store_ref := None;

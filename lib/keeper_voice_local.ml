@@ -20,7 +20,7 @@ let resolved_base_path_opt () =
 let masc_base_dir () =
   match resolved_base_path_opt () with
   | Some base_path -> Coord_utils.masc_dir_from_base_path ~base_path
-  | None -> ".masc"
+  | None -> Common.masc_dirname
 
 (** Singleton session manager, lazily initialized.
     Thread-safety: safe under single Eio domain — all fibers share one

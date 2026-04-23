@@ -5,7 +5,7 @@ type acquire_result =
 let pid_lock_path port = Printf.sprintf "/tmp/masc-%d.pid" port
 
 let base_path_lock_path base_path =
-  Filename.concat (Filename.concat base_path ".masc") "server-owner.pid"
+  Filename.concat (Filename.concat base_path Common.masc_dirname) "server-owner.pid"
 
 let close_quietly fd =
   try Unix.close fd with

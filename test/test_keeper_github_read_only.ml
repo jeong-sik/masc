@@ -175,7 +175,7 @@ let with_repo_context_test_env f =
   with_eio_fs @@ fun () ->
   let base = temp_dir () in
   let config = Coord.default_config base in
-  ensure_dir (Filename.concat base ".masc");
+  ensure_dir (Filename.concat base Common.masc_dirname);
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   ignore (Coord.init config ~agent_name:None);
   let repo_dir = Filename.concat base "repo" in

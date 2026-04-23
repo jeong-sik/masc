@@ -75,10 +75,14 @@ let start_flusher_actor ~sw store =
       match Eio.Stream.take store.Board.flusher_inbox with
       | Board_types.Flush ->
           (try Board.flush_dirty store
-           with exn -> Log.BoardLog.error "Flush failed: %s" (Printexc.to_string exn))
+           with
+           | Eio.Cancel.Cancelled _ as e -> raise e
+           | exn -> Log.BoardLog.error "Flush failed: %s" (Printexc.to_string exn))
       | Board_types.Sweep ->
-          (try let _ = Board.sweep store in ()
-           with exn -> Log.BoardLog.error "Sweep failed: %s" (Printexc.to_string exn))
+          (try ignore (Board.sweep store)
+           with
+           | Eio.Cancel.Cancelled _ as e -> raise e
+           | exn -> Log.BoardLog.error "Sweep failed: %s" (Printexc.to_string exn))
     done
   )
 

@@ -83,6 +83,8 @@ type status_cache_entry = {
 let status_cache : (string, status_cache_entry) Hashtbl.t =
   Hashtbl.create 4
 
+(* Stdlib.Mutex: status_cache may be accessed from keepers on different
+   domains concurrently. *)
 let status_cache_mu = Stdlib.Mutex.create ()
 
 let status_cache_ttl_sec () =

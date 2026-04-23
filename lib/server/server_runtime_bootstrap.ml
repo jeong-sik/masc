@@ -278,7 +278,7 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
   (match Keeper_exec_tools.init_policy_config ~base_path with
    | Ok () -> ()
    | Error msg ->
-       Prometheus.inc_counter "masc_error_events_total" ~labels:[("type", "missing_config")] ();
+       Prometheus.inc_counter Prometheus.metric_error_events ~labels:[("type", "missing_config")] ();
       Log.Server.error "Fatal tool policy config load failure: %s" msg;
        exit 1);
   (* Validate Tool_spec <-> TOML coverage *)
@@ -596,7 +596,9 @@ let sync_client_token_file ~base_path ~agent_name ~default_role =
            Log.Server.warn
              "startup %s raw bearer token file for %s at %s"
              reason agent_name token_file
-         with exn ->
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
            Log.Server.error
              "startup failed to persist raw bearer token file for %s at %s: %s"
              agent_name token_file (Printexc.to_string exn))
@@ -611,7 +613,9 @@ let sync_client_token_file ~base_path ~agent_name ~default_role =
       Log.Server.info
         "startup verified raw bearer token file for %s at %s"
         agent_name token_file
-    with exn ->
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
       Log.Server.error
         "startup failed to normalize raw bearer token file for %s at %s: %s"
         agent_name token_file (Printexc.to_string exn)
@@ -621,7 +625,9 @@ let sync_client_token_file ~base_path ~agent_name ~default_role =
       try
         let raw = String.trim (Fs_compat.load_file token_file) in
         if raw = "" then None else Some raw
-      with exn ->
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
         Log.Server.warn
           "startup failed to read raw bearer token file for %s at %s: %s"
           agent_name token_file (Printexc.to_string exn);
@@ -653,7 +659,7 @@ let bootstrap_prompt_state (state : Mcp_server.server_state) =
   let missing_prompt_files = Prompt_registry.validate_required_prompt_files () in
   if missing_prompt_files <> [] then
     begin
-    Prometheus.inc_counter "masc_error_events_total" ~labels:[("type", "missing_config")] ();
+    Prometheus.inc_counter Prometheus.metric_error_events ~labels:[("type", "missing_config")] ();
     Log.Misc.error "required prompt files missing: %s"
       (missing_prompt_files
       |> List.map (fun (key, path) -> Printf.sprintf "%s -> %s" key path)
@@ -662,7 +668,7 @@ let bootstrap_prompt_state (state : Mcp_server.server_state) =
   let invalid_prompt_templates = Prompt_registry.validate_prompt_templates () in
   if invalid_prompt_templates <> [] then
     begin
-    Prometheus.inc_counter "masc_error_events_total" ~labels:[("type", "missing_config")] ();
+    Prometheus.inc_counter Prometheus.metric_error_events ~labels:[("type", "missing_config")] ();
     Log.Misc.error "prompt templates use unknown variables: %s"
       (invalid_prompt_templates
       |> List.map (fun (key, variable) -> Printf.sprintf "%s -> %s" key variable)

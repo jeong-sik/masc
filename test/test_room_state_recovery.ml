@@ -24,7 +24,7 @@ let write_text_file path content =
     (fun () -> output_string oc content)
 
 let state_path base_dir =
-  Filename.concat (Filename.concat base_dir ".masc") "state.json"
+  Filename.concat (Filename.concat base_dir Common.masc_dirname) "state.json"
 
 let agent_path config agent_name =
   Filename.concat (Coord.agents_dir config) (Coord.safe_filename agent_name ^ ".json")

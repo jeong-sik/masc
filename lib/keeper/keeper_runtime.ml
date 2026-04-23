@@ -457,7 +457,13 @@ let start_supervisor_sweep ctx =
               match entry.phase with
               | Keeper_state_machine.Running ->
                   (match ensure_keeper_meta ctx.config entry.name with
-                   | Ok _meta -> ()
+                   | Ok updated_meta ->
+                       (* Propagate the updated meta back into the registry so
+                          subsequent turns observe the new cascade_name (and
+                          any other reconciled fields) immediately.  Without
+                          this the file is updated but the in-memory
+                          [registry_entry.meta] stays stale until restart. *)
+                       Keeper_registry.update_meta ~base_path entry.name updated_meta
                    | Error e ->
                        Log.Keeper.warn "TOML reconcile failed for %s: %s"
                          entry.name e)

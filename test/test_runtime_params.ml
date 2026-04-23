@@ -140,7 +140,7 @@ let () =
 
   let test_persist_restore () =
     let tmp_dir = Filename.temp_dir "masc_test_" "" in
-    let masc_dir = Filename.concat tmp_dir ".masc" in
+    let masc_dir = Filename.concat tmp_dir Common.masc_dirname in
     (try Sys.mkdir masc_dir 0o755 with Sys_error _ -> ());
     let p =
       Runtime_params.register
@@ -171,7 +171,7 @@ let () =
 
   let test_audit () =
     let tmp_dir = Filename.temp_dir "masc_audit_" "" in
-    let masc_dir = Filename.concat tmp_dir ".masc" in
+    let masc_dir = Filename.concat tmp_dir Common.masc_dirname in
     (try Sys.mkdir masc_dir 0o755 with Sys_error _ -> ());
     Runtime_params.record_audit ~base_path:tmp_dir
       ~key:"test.key" ~old_value:(`Int 1) ~new_value:(`Int 2)
@@ -365,7 +365,7 @@ let () =
 
   let test_keeper_param_override_persist_restore () =
     let tmp_dir = Filename.temp_dir "masc_keeper_restore_" "" in
-    let masc_dir = Filename.concat tmp_dir ".masc" in
+    let masc_dir = Filename.concat tmp_dir Common.masc_dirname in
     (try Sys.mkdir masc_dir 0o755 with Sys_error _ -> ());
     (* Override a keeper param *)
     (match Runtime_params.set Governance_registry.keeper_max_hb_failures 7 with

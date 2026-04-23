@@ -1317,9 +1317,7 @@ let gemini_vertex_openai_base_url ~project ~location =
     "https://aiplatform.googleapis.com/v1/projects/%s/locations/%s/endpoints/openapi"
     project location
 
-let starts_with ~prefix s =
-  let plen = String.length prefix in
-  String.length s >= plen && String.sub s 0 plen = prefix
+let starts_with ~prefix s = Base.String.is_prefix s ~prefix
 
 let is_kimi_model_id model_id =
   let normalized = String.trim model_id |> String.lowercase_ascii in

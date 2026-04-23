@@ -191,7 +191,9 @@ let rec add_routes ~sw ~clock router =
            let raw_result : (string, string) result =
              if Fs_compat.file_exists token_file then
                try Ok (String.trim (Fs_compat.load_file token_file))
-               with exn ->
+               with
+               | Eio.Cancel.Cancelled _ as e -> raise e
+               | exn ->
                  Error
                    (Printf.sprintf "read dev-token: %s"
                       (Printexc.to_string exn))
@@ -205,7 +207,9 @@ let rec add_routes ~sw ~clock router =
                    (try
                       Auth.save_private_text_file token_file raw;
                       Ok raw
-                    with exn ->
+                    with
+                    | Eio.Cancel.Cancelled _ as e -> raise e
+                    | exn ->
                       Error
                         (Printf.sprintf "persist dev-token: %s"
                            (Printexc.to_string exn)))

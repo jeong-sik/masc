@@ -111,7 +111,7 @@ let tcp_port_reachable port =
           (Unix.ADDR_INET
              (Unix.inet_addr_of_string Masc_network_defaults.masc_http_default_host, port));
         true)
-  with _ -> false
+  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> false
 
 let websocket_discovery_json (ctx : http_context) =
   let enabled = Server_ws_standalone.is_enabled () in

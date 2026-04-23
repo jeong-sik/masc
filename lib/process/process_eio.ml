@@ -31,6 +31,8 @@ let is_initialized () = Option.is_some (Atomic.get runtime_state)
 let reset_for_testing () =
   Atomic.set runtime_state None
 
+let default_buffer_size = 1024
+
 let get_proc_mgr () =
   match Atomic.get runtime_state with
   | Some runtime -> Ok runtime.proc_mgr
@@ -250,7 +252,7 @@ let with_unix_capture ?env ?cwd ?stdin_content ?(capture_stderr = false)
               | Unix.Unix_error (Unix.EINTR, _, _) -> None
               | Unix.Unix_error (Unix.ECHILD, _, _) -> Some (Unix.WEXITED 127)
             in
-            let stdout_buf = Buffer.create 1024 in
+            let stdout_buf = Buffer.create default_buffer_size in
             let chunk = Bytes.create 4096 in
             let read_available () =
               let rec loop () =
@@ -459,7 +461,7 @@ let run_argv ?(timeout_sec = 60.0) ?env (argv : string list) : string =
     | Error _, _, _ | _, Error _, _ | _, _, Error _ ->
         run_unix_argv_fallback ~timeout_sec ?env argv
     | Ok pm, Ok clk, Ok cwd ->
-        let buf = Buffer.create 1024 in
+        let buf = Buffer.create default_buffer_size in
         let label = String.concat " " (List.map Filename.quote argv) in
         try
           Eio.Time.with_timeout_exn clk timeout_sec (fun () ->
@@ -493,7 +495,7 @@ let run_argv_with_stdin ?(timeout_sec = 60.0) ?env ~(stdin_content : string) (ar
     | Error _, _, _ | _, Error _, _ | _, _, Error _ ->
         run_unix_argv_with_stdin_fallback ~timeout_sec ?env ~stdin_content argv
     | Ok pm, Ok clk, Ok cwd ->
-        let buf = Buffer.create 1024 in
+        let buf = Buffer.create default_buffer_size in
         let label = String.concat " " (List.map Filename.quote argv) in
         let stdin_source = Eio.Flow.string_source stdin_content in
         try
@@ -540,8 +542,8 @@ let run_argv_with_stdin_and_status_split
           | None -> default_cwd
           | Some dir -> Eio.Path.(default_cwd / dir)
         in
-        let stdout_buf = Buffer.create 1024 in
-        let stderr_buf = Buffer.create 1024 in
+        let stdout_buf = Buffer.create default_buffer_size in
+        let stderr_buf = Buffer.create default_buffer_size in
         let label = String.concat " " (List.map Filename.quote argv) in
         let stdin_source = Eio.Flow.string_source stdin_content in
         try
@@ -609,7 +611,7 @@ let run_argv_with_status_split ?(timeout_sec = 60.0) ?env ?cwd
           | None -> default_cwd
           | Some dir -> Eio.Path.(default_cwd / dir)
         in
-        let stdout_buf = Buffer.create 1024 in
+        let stdout_buf = Buffer.create default_buffer_size in
         let stderr_buf = Buffer.create 256 in
         let label = String.concat " " (List.map Filename.quote argv) in
         try
@@ -700,14 +702,18 @@ let spawn_detached ~argv ~env ~cwd =
            Safe_ops.protect ~default:() (fun () -> ignore (Unix.setsid ()));
            (try
               if cwd <> "" then Unix.chdir cwd
-            with _ -> Unix._exit 126);
+            with
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | _ -> Unix._exit 126);
            Unix.dup2 devnull Unix.stdin;
            Unix.dup2 out_w Unix.stdout;
            Unix.dup2 err_w Unix.stderr;
            Unix.close out_r; Unix.close err_r;
            Unix.close out_w; Unix.close err_w; Unix.close devnull;
            (try Unix.execvpe bin (Array.of_list argv) env
-            with _ -> Unix._exit 127)
+            with
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | _ -> Unix._exit 127)
          end else begin
            (* --- PARENT --- *)
            Unix.close out_w;

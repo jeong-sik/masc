@@ -718,7 +718,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
       let paused_meta_override = ref None in
       let current_turn_overflow_blocker = ref None in
       let event_bus_drain_active = Atomic.make true in
-      let turn_event_bus_mu = Stdlib.Mutex.create () in
+      let turn_event_bus_mu = Eio.Mutex.create () in
       let mark_paused_after_overflow ~run_meta ~reason =
         let paused_meta =
           pause_keeper_for_overflow
@@ -748,10 +748,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
         Hashtbl.create 8
       in
       let with_turn_event_bus_lock f =
-        Stdlib.Mutex.lock turn_event_bus_mu;
-        Fun.protect
-          ~finally:(fun () -> Stdlib.Mutex.unlock turn_event_bus_mu)
-          f
+        Eio.Mutex.use_rw ~protect:true turn_event_bus_mu f
       in
       let push_pending_input tool_name input =
         let q =

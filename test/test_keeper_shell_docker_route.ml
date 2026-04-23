@@ -87,7 +87,7 @@ let with_eio_fs f =
 let setup ~sandbox f =
   with_eio_fs @@ fun () ->
   let base = temp_dir () in
-  ensure_dir (Filename.concat base ".masc");
+  ensure_dir (Filename.concat base Common.masc_dirname);
   let config = Coord.default_config base in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   Keeper_registry.clear ();

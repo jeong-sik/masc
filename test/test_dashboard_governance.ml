@@ -25,7 +25,7 @@ let iso8601_of_unix ts =
   Types.iso8601_of_unix_seconds ts
 
 let write_legacy_judgment ~base_path json =
-  let masc = Filename.concat base_path ".masc" in
+  let masc = Filename.concat base_path Common.masc_dirname in
   let governance = Filename.concat masc "governance" in
   Fs_compat.mkdir_p masc;
   Fs_compat.mkdir_p governance;
@@ -280,7 +280,7 @@ let test_pending_ruling_reflects_disk_truth () =
       Eio_main.run @@ fun env ->
       with_test_fs env @@ fun () ->
       let cases_dir =
-        Filename.concat (Filename.concat dir ".masc") "governance_v2/cases"
+        Filename.concat (Filename.concat dir Common.masc_dirname) "governance_v2/cases"
       in
       Fs_compat.mkdir_p cases_dir;
       let now = Unix.gettimeofday () in
@@ -333,7 +333,7 @@ let test_governance_dir_created_before_read () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
-      let masc = Filename.concat dir ".masc" in
+      let masc = Filename.concat dir Common.masc_dirname in
       let gov = Filename.concat masc "governance" in
       let judgments = Filename.concat gov "judgments" in
       (* Before ensure_dir: directories do not exist *)

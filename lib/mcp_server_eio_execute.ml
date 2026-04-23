@@ -16,7 +16,7 @@ let resolve_join_state ~room_initialized ~join_required ~agent_name ~check_join 
     false
 
 let is_ephemeral_agent_name name =
-  String.length name >= 6 && String.sub name 0 6 = "agent-"
+  Base.String.is_prefix name ~prefix:"agent-"
 
 let is_transient_agent_name name =
   is_ephemeral_agent_name name || Nickname.is_generated_nickname name

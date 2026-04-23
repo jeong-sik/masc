@@ -55,7 +55,7 @@ let ensure_initialised_locked () =
    mirror the JSON projection ({cascade, strategy, kind}) so Grafana can
    join on the same tuple surfaced to the dashboard card. *)
 let bump_prometheus_counter (ev : event) =
-  Prometheus.inc_counter "masc_cascade_strategy_decisions_total"
+  Prometheus.inc_counter Prometheus.metric_cascade_strategy_decisions
     ~labels:[
       "cascade", ev.cascade_name;
       "strategy", ev.strategy;

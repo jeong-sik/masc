@@ -43,7 +43,6 @@ let with_env name value_opt f =
    ============================================================ *)
 
 let test_init () =
-  TM.init ();
   let text = Prometheus.to_prometheus_text () in
   check bool "sse sessions metric registered" true
     (try
@@ -69,7 +68,6 @@ let test_init () =
    ============================================================ *)
 
 let test_sse_sessions () =
-  TM.init ();
   TM.set_sse_sessions ~kind:"observer" 10;
   TM.set_sse_sessions ~kind:"coordinator" 5;
   let obs = Prometheus.metric_value_or_zero "masc_sse_sessions_total"
@@ -80,7 +78,6 @@ let test_sse_sessions () =
   check (float 0.01) "coordinator sessions" 5.0 coord
 
 let test_broadcast_duration () =
-  TM.init ();
   TM.observe_broadcast_duration 0.05;
   TM.observe_broadcast_duration 0.15;
   let sum = Prometheus.metric_value_or_zero
@@ -91,7 +88,6 @@ let test_broadcast_duration () =
   check bool "broadcast count >= 2" true (count >= 2.0)
 
 let test_broadcast_events_counter () =
-  TM.init ();
   let before = Prometheus.metric_value_or_zero
     "masc_sse_broadcast_events_total" () in
   TM.observe_broadcast_duration 0.01;
@@ -104,14 +100,12 @@ let test_broadcast_events_counter () =
    ============================================================ *)
 
 let test_grpc_active_streams () =
-  TM.init ();
   TM.set_grpc_active_streams 3;
   let v = Prometheus.metric_value_or_zero
     "masc_grpc_active_streams_total" () in
   check (float 0.01) "grpc active streams" 3.0 v
 
 let test_grpc_heartbeat_latency () =
-  TM.init ();
   TM.observe_grpc_heartbeat_latency 0.002;
   TM.observe_grpc_heartbeat_latency 0.008;
   let sum = Prometheus.metric_value_or_zero
@@ -119,14 +113,12 @@ let test_grpc_heartbeat_latency () =
   check bool "heartbeat latency sum > 0" true (sum > 0.0)
 
 let test_grpc_subscribers () =
-  TM.init ();
   TM.set_grpc_subscribers 7;
   let v = Prometheus.metric_value_or_zero
     "masc_grpc_subscribers_total" () in
   check (float 0.01) "grpc subscribers" 7.0 v
 
 let test_grpc_events_delivered () =
-  TM.init ();
   let before = Prometheus.metric_value_or_zero
     "masc_grpc_events_delivered_total" () in
   TM.inc_grpc_events_delivered ~delta:5 ();
@@ -135,14 +127,12 @@ let test_grpc_events_delivered () =
   check (float 0.01) "grpc events delta" 5.0 (after -. before)
 
 let test_grpc_runtime_listening_cache () =
-  TM.init ();
   TM.set_grpc_runtime_listening true;
   check bool "grpc listening uses runtime cache" true (TM.grpc_listening ());
   TM.set_grpc_runtime_listening false;
   check bool "grpc listening resets" false (TM.grpc_listening ())
 
 let test_ws_sessions () =
-  TM.init ();
   TM.set_ws_sessions 4;
   let v = Prometheus.metric_value_or_zero
     "masc_ws_sessions_total" () in
@@ -163,7 +153,6 @@ let test_ws_enabled_normalized_env_matches_runtime () =
       (Masc_mcp.Server_ws_standalone.is_enabled ()))
 
 let test_ws_runtime_listening_cache () =
-  TM.init ();
   TM.set_ws_runtime_listening true;
   check bool "ws listening uses runtime cache" true (TM.ws_listening ());
   TM.set_ws_runtime_listening false;
@@ -174,7 +163,6 @@ let test_ws_runtime_listening_cache () =
    ============================================================ *)
 
 let test_agent_heartbeat_age () =
-  TM.init ();
   TM.set_agent_heartbeat_age ~agent_name:"dreamer" 42.5;
   let v = Prometheus.metric_value_or_zero
     "masc_agent_heartbeat_age_seconds"
@@ -182,7 +170,6 @@ let test_agent_heartbeat_age () =
   check (float 0.01) "dreamer heartbeat age" 42.5 v
 
 let test_agent_stale_counter () =
-  TM.init ();
   let before = Prometheus.metric_value_or_zero
     "masc_agent_stale_total" () in
   TM.inc_agent_stale ();
@@ -198,7 +185,6 @@ let test_agent_stale_counter () =
 let test_transport_health_json () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  TM.init ();
   ignore (Masc_mcp.Sse.close_all_clients ());
   let base_dir = temp_dir () in
   let config = Masc_mcp.Coord.default_config base_dir in
@@ -302,7 +288,6 @@ let test_transport_health_json () =
    ============================================================ *)
 
 let test_grpc_listen_status_lifecycle () =
-  TM.init ();
   check string "grpc status after init" "not_started"
     (Atomic.get TM.grpc_listen_status);
   TM.set_grpc_listen_status "listening";
@@ -317,7 +302,6 @@ let test_grpc_listen_status_lifecycle () =
   check bool "grpc listening returns false" false (TM.grpc_listening ())
 
 let test_ws_listen_status_lifecycle () =
-  TM.init ();
   check string "ws status after init" "not_started"
     (Atomic.get TM.ws_listen_status);
   TM.set_ws_listen_status "listening";
@@ -332,7 +316,6 @@ let test_ws_listen_status_lifecycle () =
   check bool "ws listening returns false" false (TM.ws_listening ())
 
 let test_listen_status_bind_failed () =
-  TM.init ();
   TM.set_grpc_listen_status "bind_failed";
   TM.set_grpc_runtime_listening false;
   TM.set_ws_listen_status "bind_failed";
@@ -345,7 +328,6 @@ let test_listen_status_bind_failed () =
     (Atomic.get TM.ws_listen_status)
 
 let test_listen_status_disabled () =
-  TM.init ();
   TM.set_grpc_listen_status "disabled";
   TM.set_ws_listen_status "disabled";
   check string "grpc status disabled" "disabled"

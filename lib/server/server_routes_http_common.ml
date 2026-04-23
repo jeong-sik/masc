@@ -145,9 +145,7 @@ let parse_host_port host_header default_host default_port =
         with Eio.Cancel.Cancelled _ as e -> raise e | _ -> (default_host, default_port))
 
 (** Utility: string prefix check *)
-let starts_with ~prefix s =
-  let plen = String.length prefix in
-  String.length s >= plen && String.sub s 0 plen = prefix
+let starts_with ~prefix s = Base.String.is_prefix s ~prefix
 
 (** Allowed origins for DNS rebinding protection.
     SSOT: [Masc_network_defaults.allowed_origins]. *)

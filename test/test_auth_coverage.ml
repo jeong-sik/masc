@@ -46,7 +46,7 @@ let setup_test_room () =
   in
   let tmp = Filename.concat (Filename.get_temp_dir_name ()) unique_id in
   Unix.mkdir tmp 0o755;
-  let masc_dir = Filename.concat tmp ".masc" in
+  let masc_dir = Filename.concat tmp Common.masc_dirname in
   Unix.mkdir masc_dir 0o755;
   tmp
 

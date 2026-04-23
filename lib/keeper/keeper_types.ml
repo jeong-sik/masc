@@ -39,6 +39,7 @@ type tool_preset =
   | Minimal
   | Social
   | Messaging
+  | Dispatch
   | Coding
   | Research
   | Delivery
@@ -288,6 +289,7 @@ let tool_preset_to_string = function
   | Minimal -> "minimal"
   | Social -> "social"
   | Messaging -> "messaging"
+  | Dispatch -> "dispatch"
   | Coding -> "coding"
   | Research -> "research"
   | Delivery -> "delivery"
@@ -302,7 +304,7 @@ let tool_preset_to_string = function
     Adding an 8th constructor will fail compilation in
     [tool_preset_to_string] and in the witness test. *)
 let all_tool_presets =
-  [ Minimal; Social; Messaging; Coding; Research; Delivery; Full ]
+  [ Minimal; Social; Messaging; Dispatch; Coding; Research; Delivery; Full ]
 let valid_tool_preset_strings = List.map tool_preset_to_string all_tool_presets
 
 let tool_preset_of_string raw =
@@ -310,6 +312,7 @@ let tool_preset_of_string raw =
   | "minimal" -> Some Minimal
   | "social" -> Some Social
   | "messaging" -> Some Messaging
+  | "dispatch" -> Some Dispatch
   | "coding" -> Some Coding
   | "research" -> Some Research
   | "delivery" -> Some Delivery

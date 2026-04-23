@@ -185,7 +185,7 @@ let handle_keeper_tools_post state req reqd =
                              | None ->
                                  Error
                                    (Printf.sprintf
-                                      "invalid tool_preset '%s' (allowed: minimal, social, messaging, coding, research, delivery, full)"
+                                      "invalid tool_preset '%s' (allowed: minimal, social, messaging, dispatch, coding, research, delivery, full)"
                                       raw)
                              | Some preset ->
                                  Ok

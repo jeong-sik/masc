@@ -8,7 +8,7 @@ open Types
     -> Keeper_schema), so the test in [test_types.ml :: tool_preset_ssot]
     asserts these two lists stay in sync. *)
 let tool_preset_enum_strings =
-  [ "minimal"; "social"; "messaging"; "coding"; "research"; "delivery"; "full" ]
+  [ "minimal"; "social"; "messaging"; "dispatch"; "coding"; "research"; "delivery"; "full" ]
 
 (** Issue #8467: canonical strings for [Keeper_types_profile.sandbox_profile],
     [network_mode], and [shared_memory_scope]. Same cycle constraint as
@@ -54,7 +54,7 @@ let tool_access_schema description =
           ("enum",
             `List
               [ `String "minimal"; `String "social"; `String "messaging"; `String "coding";
-                `String "research"; `String "delivery"; `String "full" ]);
+                `String "dispatch"; `String "research"; `String "delivery"; `String "full" ]);
         ]);
         ("also_allow", string_array_schema);
       ]);

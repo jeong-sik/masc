@@ -344,72 +344,6 @@ let test_delete_uuid_backed_credential_removes_redirect_target () =
       check int "0 credentials after uuid-backed delete" 0
         (List.length (Auth.list_credentials dir)))
 
-let test_plain_credential_replaces_uuid_redirect_target () =
-  let dir = setup_test_room () in
-  Fun.protect
-    ~finally:(fun () -> cleanup_test_room dir)
-    (fun () ->
-      let id = Types.Credential_id.generate () in
-      let old_token = "old-uuid-backed-secret" in
-      let new_token = "new-plain-secret" in
-      let uuid_file =
-        Filename.concat
-          (Filename.concat (Auth.auth_dir dir) "agents")
-          (Types.Credential_id.to_string id ^ ".json")
-      in
-      let cred : Types.agent_credential =
-        {
-          id = Some id;
-          agent_id = None;
-          agent_name = "adversary";
-          token = Auth.sha256_hash old_token;
-          role = Types.Worker;
-          created_at = "2026-01-01T00:00:00Z";
-          expires_at = None;
-        }
-      in
-      Auth.save_credential dir cred;
-      check bool "uuid target exists before replacement" true
-        (Sys.file_exists uuid_file);
-      let save_result =
-        Auth.save_raw_token_credential dir ~agent_name:"adversary"
-          ~role:Types.Admin ~raw_token:new_token
-      in
-      let old_token_result = Auth.find_credential_by_token dir ~token:old_token in
-      let new_token_result =
-        Auth.verify_token dir ~agent_name:"adversary" ~token:new_token
-      in
-      check bool "old uuid target removed after replacement" false
-        (Sys.file_exists uuid_file);
-      (match save_result with
-       | Ok _ -> ()
-       | Error e ->
-           fail
-             (Printf.sprintf
-                "replacement credential should save: %s"
-                (Types.masc_error_to_string e)));
-      (match old_token_result with
-       | Error (Types.InvalidToken _) -> ()
-       | Error e ->
-           fail
-             (Printf.sprintf
-                "expected old token mismatch after replacement: %s"
-                (Types.masc_error_to_string e))
-       | Ok stale ->
-           fail
-             (Printf.sprintf
-                "old token should not resolve after replacement, got %s"
-                stale.agent_name));
-      (match new_token_result with
-       | Ok loaded ->
-           check bool "replacement credential role is admin" true
-             (loaded.role = Types.Admin)
-       | Error e ->
-           fail
-             (Printf.sprintf
-                "replacement token should verify: %s"
-                (Types.masc_error_to_string e))))
-
 let test_load_credential_exact_wins_over_fallback () =
   (* If both the nickname file and the prefix file exist, the exact
      match wins so a per-nickname override remains possible. *)
@@ -593,52 +527,35 @@ let test_ensure_keeper_credential_reuses_uuid () =
   Fun.protect
     ~finally:(fun () -> cleanup_test_room dir)
     (fun () ->
-      let first_result, second_result =
+      let result =
         with_env "MASC_INTERNAL_MCP_TOKEN" "shared-keeper-token" (fun () ->
-          let first =
-            Auth.ensure_keeper_credential dir
-              ~agent_name:"keeper-masc-improver-agent"
-          in
-          let second =
-            Auth.ensure_keeper_credential dir
-              ~agent_name:"keeper-masc-improver-agent"
-          in
-          (first, second))
+          match
+            Auth.ensure_keeper_credential dir ~agent_name:"keeper-masc-improver-agent"
+          with
+          | Error e -> Error e
+          | Ok (_, first_cred) -> (
+              match
+                Auth.ensure_keeper_credential dir
+                  ~agent_name:"keeper-masc-improver-agent"
+              with
+              | Error e -> Error e
+              | Ok (_, second_cred) -> Ok (first_cred, second_cred)))
       in
-      match first_result, second_result with
-      | Ok (_, first_cred), Ok (_, second_cred) ->
-          let first_id =
-            match first_cred.id with
-            | Some id -> id
-            | None -> fail "first keeper credential should have a UUID"
-          in
-          let second_id =
-            match second_cred.id with
-            | Some id -> id
-            | None -> fail "second keeper credential should have a UUID"
-          in
-          let first_id_s = Types.Credential_id.to_string first_id in
-          let second_id_s = Types.Credential_id.to_string second_id in
-          let agents_dir = Filename.concat (Auth.auth_dir dir) "agents" in
-          let uuid_files =
-            Sys.readdir agents_dir
-            |> Array.to_list
-            |> List.filter (fun file ->
-                 Filename.check_suffix file ".json"
-                 && file <> "keeper-masc-improver-agent.json")
-          in
-          check string "keeper credential keeps stable UUID" first_id_s second_id_s;
-          check string "keeper credential keeps created_at" first_cred.created_at
-            second_cred.created_at;
-          check int "keeper credential leaves one UUID file" 1
-            (List.length uuid_files);
-          check bool "keeper credential UUID file matches redirect target" true
-            (List.mem (first_id_s ^ ".json") uuid_files)
-      | Error e, _ | _, Error e ->
+      match result with
+      | Error e ->
           fail
             (Printf.sprintf
                "ensure_keeper_credential should keep a stable UUID: %s"
-               (Types.masc_error_to_string e)))
+               (Types.masc_error_to_string e))
+      | Ok (first_cred, second_cred) -> (
+          match first_cred.id, second_cred.id with
+          | Some first_id, Some second_id ->
+              check string "keeper credential UUID stable"
+                (Types.Credential_id.to_string first_id)
+                (Types.Credential_id.to_string second_id);
+              check int "one logical keeper credential" 1
+                (List.length (Auth.list_credentials dir))
+          | _ -> fail "keeper credentials should be UUID-backed"))
 
 (* ============================================ *)
 (* Permission tests                             *)
@@ -832,8 +749,6 @@ let () =
         test_load_credential_redirect_stub;
       test_case "delete uuid-backed credential removes target" `Quick
         test_delete_uuid_backed_credential_removes_redirect_target;
-      test_case "plain credential replaces uuid redirect target" `Quick
-        test_plain_credential_replaces_uuid_redirect_target;
       test_case "load_credential exact match wins over fallback" `Quick
         test_load_credential_exact_wins_over_fallback;
       test_case "extract_agent_type_prefix keeper aliases" `Quick

@@ -523,32 +523,21 @@ let verify_token config ~agent_name ~token : (agent_credential, masc_error) resu
 let ensure_keeper_credential config ~agent_name :
     (string * agent_credential, masc_error) result =
   let raw_token = ensure_internal_keeper_token config in
-  let token = sha256_hash raw_token in
-  let cred =
+  let id =
     match load_credential config agent_name with
-    | Some existing ->
-        let id =
-          match existing.id with
-          | Some id -> id
-          | None -> Credential_id.generate ()
-        in
-        { existing with
-          id = Some id;
-          agent_name;
-          token;
-          role = Worker;
-          expires_at = None;
-        }
-    | None ->
-        {
-          id = Some (Credential_id.generate ());
-          agent_id = None;
-          agent_name;
-          token;
-          role = Worker;
-          created_at = now_iso ();
-          expires_at = None;
-        }
+    | Some { id = Some existing; _ } -> existing
+    | _ -> Credential_id.generate ()
+  in
+  let cred =
+    {
+      id = Some id;
+      agent_id = None;
+      agent_name;
+      token = sha256_hash raw_token;
+      role = Worker;
+      created_at = now_iso ();
+      expires_at = None;
+    }
   in
   try
     save_credential config cred;

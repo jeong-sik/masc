@@ -24,10 +24,14 @@ code_refs:
 | Canonical name | Runtime | Auth | Notes |
 |---|---|---|---|
 | `llama` | `local` | `none` | `LLAMA_SERVER_URL` OpenAI-compatible local runtime |
+| `ollama` | `local` | `none` | `OLLAMA_DEFAULT_MODEL` env; bare `ollama` requires explicit model |
 | `glm` | `direct_api` | `api_key` (`ZAI_API_KEY`) | current Z.ai direct path |
+| `glm-coding` | `direct_api` | `api_key` (`ZAI_API_KEY`) | Z.ai coding-plan direct path |
 | `claude-api` | `direct_api` | `api_key` (`ANTHROPIC_API_KEY`) | direct Anthropic API |
 | `codex-api` | `direct_api` | `api_key` (`OPENAI_API_KEY`) | direct OpenAI/Codex-family API |
 | `gemini-api` | `direct_api` | `vertex_adc` first, `GEMINI_API_KEY` fallback | canonical Gemini direct path |
+| `kimi-api` | `direct_api` | `api_key` (`KIMI_API_KEY_SB`, fallback `KIMI_API_KEY`) | direct Moonshot API |
+| `openrouter` | `direct_api` | `api_key` (`OPENROUTER_API_KEY`) | OpenRouter aggregation |
 | `claude` | `cli_agent` | `cli_cached_login` | Claude Code / CLI runtime |
 | `codex` | `cli_agent` | `cli_cached_login` | Codex CLI runtime |
 | `gemini` | `cli_agent` | `cli_cached_login` | Gemini CLI runtime |
@@ -46,6 +50,18 @@ code_refs:
     1. `GOOGLE_CLOUD_PROJECT` + ADC
     2. `GEMINI_API_KEY`
     3. actionable error
+- `kimi-api:<model>`
+  - direct Moonshot API path
+  - requires `KIMI_API_KEY_SB` (primary) or `KIMI_API_KEY` (fallback)
+- `openrouter:<model>`
+  - OpenRouter aggregation path
+  - requires `OPENROUTER_API_KEY`
+- `glm:<model>`
+  - Z.ai general direct path
+  - requires `ZAI_API_KEY`
+- `glm-coding:<model>`
+  - Z.ai coding-plan direct path
+  - requires `ZAI_API_KEY`
 
 `gemini-api` Vertex path uses:
 
@@ -93,6 +109,7 @@ Current canonical CLI contracts:
   - `anthropic:<model>` -> `claude-api`
   - `google:<model>` -> `gemini-api`
   - `gemini:<model>` -> `gemini-api`
+  - `moonshot:<model>` -> `kimi-api`
 - CLI names remain simple:
   - `claude`
   - `codex`

@@ -78,7 +78,7 @@ let string_of_kind = function
    name + labels match the dashboard projection (classify_key) so Grafana
    queries can join on the same {kind, key_type} tuple. *)
 let bump_prometheus_counter (ev : event) =
-  Prometheus.inc_counter "masc_cascade_capacity_events_total"
+  Prometheus.inc_counter Prometheus.metric_cascade_capacity_events
     ~labels:[
       "kind", string_of_kind ev.kind;
       "key_type", classify_key ev.key;

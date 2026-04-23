@@ -319,7 +319,7 @@ let handle_post_create args =
         | Some a when a <> "" -> a
         | _ -> "unknown"
       in
-      Prometheus.inc_counter "masc_board_truncated_posts_total"
+      Prometheus.inc_counter Prometheus.metric_board_truncated_posts
         ~labels:[("author", author_label)] ();
       Log.BoardLog.warn
         "board_post: detected truncated markdown (author=%s body_len=%d) — appending 잘림 marker"

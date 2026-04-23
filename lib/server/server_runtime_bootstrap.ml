@@ -278,7 +278,7 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
   (match Keeper_exec_tools.init_policy_config ~base_path with
    | Ok () -> ()
    | Error msg ->
-       Prometheus.inc_counter "masc_error_events_total" ~labels:[("type", "missing_config")] ();
+       Prometheus.inc_counter Prometheus.metric_error_events ~labels:[("type", "missing_config")] ();
       Log.Server.error "Fatal tool policy config load failure: %s" msg;
        exit 1);
   (* Validate Tool_spec <-> TOML coverage *)
@@ -659,7 +659,7 @@ let bootstrap_prompt_state (state : Mcp_server.server_state) =
   let missing_prompt_files = Prompt_registry.validate_required_prompt_files () in
   if missing_prompt_files <> [] then
     begin
-    Prometheus.inc_counter "masc_error_events_total" ~labels:[("type", "missing_config")] ();
+    Prometheus.inc_counter Prometheus.metric_error_events ~labels:[("type", "missing_config")] ();
     Log.Misc.error "required prompt files missing: %s"
       (missing_prompt_files
       |> List.map (fun (key, path) -> Printf.sprintf "%s -> %s" key path)
@@ -668,7 +668,7 @@ let bootstrap_prompt_state (state : Mcp_server.server_state) =
   let invalid_prompt_templates = Prompt_registry.validate_prompt_templates () in
   if invalid_prompt_templates <> [] then
     begin
-    Prometheus.inc_counter "masc_error_events_total" ~labels:[("type", "missing_config")] ();
+    Prometheus.inc_counter Prometheus.metric_error_events ~labels:[("type", "missing_config")] ();
     Log.Misc.error "prompt templates use unknown variables: %s"
       (invalid_prompt_templates
       |> List.map (fun (key, variable) -> Printf.sprintf "%s -> %s" key variable)

@@ -45,7 +45,7 @@ let parse_record (json : Yojson.Safe.t)
       |> List.filter_map (fun (field, is_missing) ->
         if is_missing then Some field else None)
     in
-    Prometheus.inc_counter "masc_error_events_total" ~labels:[("type", "parsing")] ();
+    Prometheus.inc_counter Prometheus.metric_error_events ~labels:[("type", "parsing")] ();
     Error
       (Printf.sprintf "missing required field(s): %s"
          (String.concat ", " missing))

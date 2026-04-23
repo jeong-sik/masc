@@ -101,8 +101,8 @@ let observe_agent_lifecycle config ~agent_id ~(event : Coord_hooks.agent_lifecyc
   in
   Log.emit level ~module_name:"Coord" ~details message;
   (match event with
-   | Lifecycle_leave -> Prometheus.dec_gauge "masc_active_agents" ()
-   | Lifecycle_join | Lifecycle_rejoin -> Prometheus.inc_gauge "masc_active_agents" ());
+   | Lifecycle_leave -> Prometheus.dec_gauge Prometheus.metric_active_agents ()
+   | Lifecycle_join | Lifecycle_rejoin -> Prometheus.inc_gauge Prometheus.metric_active_agents ());
   let audit_details =
     match event with
     | Lifecycle_rejoin -> merge_detail_fields [ ("rejoin", `Bool true) ] details

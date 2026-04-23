@@ -91,6 +91,39 @@ val metric_oas_sse_relay_queue_depth : string
 val metric_mcp_tool_schema_count : string
 val metric_mcp_tool_schema_tokens_approx : string
 
+(** {1 Core counters / gauges} *)
+
+val metric_mcp_requests : string
+val metric_llm_inference_duration : string
+val metric_after_turn_hook : string
+val metric_after_turn_telemetry_missing : string
+val metric_after_turn_telemetry_zero_latency : string
+val metric_tasks : string
+val metric_errors : string
+val metric_error_events : string
+val metric_active_agents : string
+val metric_pending_tasks : string
+val metric_uptime_seconds : string
+val metric_sse_connections_active : string
+val metric_sse_reconnects : string
+val metric_sse_idle_evictions : string
+val metric_sse_capacity_evictions : string
+val metric_sse_write_failures : string
+val metric_sse_rejects : string
+val metric_provider_prefix_cache_creation_tokens : string
+val metric_provider_prefix_cache_read_tokens : string
+val metric_tool_call : string
+val metric_tool_call_duration : string
+val metric_llm_provider_http_status : string
+val metric_llm_provider_request_latency : string
+val metric_board_truncated_posts : string
+val metric_cascade_strategy_decisions : string
+val metric_cascade_capacity_events : string
+val metric_keeper_invariant_violations : string
+val metric_oas_bus_subscriber_stream_depth : string
+val metric_oas_bus_publish_block_seconds : string
+val metric_oas_bus_publish : string
+
 (** {1 Transport metrics} *)
 
 val metric_sse_sessions : string

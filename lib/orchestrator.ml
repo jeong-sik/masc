@@ -157,7 +157,10 @@ let make_orchestrator_check_consumer ~sw ~proc_mgr ?domain_mgr ~config ~room_con
         if should_orchestrate ~min_priority:config.min_priority room_config then
           Eio.Fiber.fork ~sw (fun () ->
             try
-              let (_ : Spawn.spawn_result) = spawn_orchestrator ~sw ~proc_mgr ?domain_mgr config room_config in
+              let (_ : Spawn.spawn_result) =
+                spawn_orchestrator ~sw ~proc_mgr ?domain_mgr config room_config
+              in
+              ()
             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
               Log.Orchestrator.error "spawn failed: %s" (Printexc.to_string exn));
         Ok ()

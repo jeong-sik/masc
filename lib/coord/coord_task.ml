@@ -456,13 +456,12 @@ let add_task
                           | None -> false) )
                    ]);
            (Atomic.get Coord_hooks.on_task_mutation_fn) ();
-           (match broadcast
+           let _ =
+             broadcast
                config
                ~from_agent:actor
                ~content:(Printf.sprintf "📋 New quest: %s" title)
-            with
-            | Ok _ -> ()
-            | Error e -> Log.Coord.warn "broadcast failed on add_task: %s" e);
+           in
            Printf.sprintf "✅ Added %s: %s" task_id title))
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -557,13 +556,12 @@ let add_task_with_role
                    ]);
            (Atomic.get Coord_hooks.on_task_mutation_fn) ();
            let role_str = Types_core.role_to_string required_role in
-           (match broadcast
+           let _ =
+             broadcast
                config
                ~from_agent:actor
                ~content:(Printf.sprintf "📋 New quest: %s (requires: %s)" title role_str)
-            with
-            | Ok _ -> ()
-            | Error e -> Log.Coord.warn "broadcast failed on add_task_with_role: %s" e);
+           in
            Printf.sprintf "✅ Added %s: %s (required_role: %s)" task_id title role_str))
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -650,9 +648,7 @@ let batch_add_tasks_internal ?created_by config tasks =
              (List.length added_tasks)
              summary
          in
-         (match broadcast config ~from_agent:actor ~content:msg with
-          | Ok _ -> ()
-          | Error e -> Log.Coord.warn "broadcast failed on add_batch_tasks: %s" e);
+         let _ = broadcast config ~from_agent:actor ~content:msg in
          Printf.sprintf "✅ Added %d tasks: %s" (List.length added_tasks) summary
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
@@ -736,13 +732,12 @@ let claim_task config ~agent_name ~task_id =
                   write_backlog config new_backlog;
                   update_local_agent_state config ~agent_name (fun agent ->
                     { agent with status = Busy; current_task = Some task_id });
-                  (match broadcast
+                  let _ =
+                    broadcast
                       config
                       ~from_agent:agent_name
                       ~content:(Printf.sprintf "📋 Claimed %s" task_id)
-                   with
-                   | Ok _ -> ()
-                   | Error e -> Log.Coord.warn "broadcast failed on claim: %s" e);
+                  in
                   emit_task_activity
                     config
                     ~agent_name
@@ -880,13 +875,12 @@ let claim_task_r config ~agent_name ~task_id ?(agent_role = Types_core.Unassigne
            write_backlog config new_backlog;
            update_local_agent_state config ~agent_name (fun agent ->
              { agent with status = Busy; current_task = Some task_id });
-           (match broadcast
+           let _ =
+             broadcast
                config
                ~from_agent:agent_name
                ~content:(Printf.sprintf "📋 Claimed %s" task_id)
-            with
-            | Ok _ -> ()
-            | Error e -> Log.Coord.warn "broadcast failed on claim: %s" e);
+           in
            emit_task_activity
              config
              ~agent_name
@@ -1519,9 +1513,7 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result
                  then Printf.sprintf "🚫 Cancelled %s" task_id
                  else Printf.sprintf "🚫 Cancelled %s - %s" task_id reason
                in
-               (match broadcast config ~from_agent:agent_name ~content:msg with
-                | Ok _ -> ()
-                | Error e -> Log.Coord.warn "broadcast failed on cancel: %s" e);
+               let _ = broadcast config ~from_agent:agent_name ~content:msg in
                emit_task_activity
                  config
                  ~agent_name

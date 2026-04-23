@@ -54,12 +54,12 @@ let setup_exporter ~sw (env : Eio_unix.Stdenv.base) =
 (** Flush pending spans and remove the OTLP backend.
     Safe to call when disabled (no-op). *)
 let shutdown ?(enabled = Otel_config.enabled) () =
-  if enabled && !exporter_active then begin
+  if enabled && Atomic.get exporter_active then begin
     Opentelemetry_client_cohttp_eio.remove_backend ();
     Log.info ~ctx:"otel" "OTLP exporter stopped"
   end;
-  exporter_active := false;
-  initialized := false
+  Atomic.set exporter_active false;
+  Atomic.set initialized false
 
 (** Wrap a function in an OTel span. No-op when disabled.
     Returns the result of [f]. *)

@@ -1,30 +1,25 @@
 open Keeper_types
 
+let json_member_opt key = function
+  | `Assoc fields -> List.assoc_opt key fields
+  | _ -> None
+
 let json_int_opt_member key json =
-  match json with
-  | `Assoc _ -> (
-      match Yojson.Safe.Util.member key json with
-      | `Int n -> Some n
-      | `Intlit raw -> int_of_string_opt raw
-      | _ -> None)
+  match json_member_opt key json with
+  | Some (`Int n) -> Some n
+  | Some (`Intlit raw) -> int_of_string_opt raw
   | _ -> None
 
 let json_float_opt_member key json =
-  match json with
-  | `Assoc _ ->
-    (match Yojson.Safe.Util.member key json with
-     | `Float value -> Some value
-     | `Int value -> Some (float_of_int value)
-     | `Intlit raw -> float_of_string_opt raw
-     | _ -> None)
+  match json_member_opt key json with
+  | Some (`Float value) -> Some value
+  | Some (`Int value) -> Some (float_of_int value)
+  | Some (`Intlit raw) -> float_of_string_opt raw
   | _ -> None
 
 let json_string_opt_member key json =
-  match json with
-  | `Assoc _ -> (
-      match Yojson.Safe.Util.member key json with
-      | `String value when String.trim value <> "" -> Some value
-      | _ -> None)
+  match json_member_opt key json with
+  | Some (`String value) when String.trim value <> "" -> Some value
   | _ -> None
 
 let json_string_opt_value = function
@@ -32,19 +27,13 @@ let json_string_opt_value = function
   | _ -> None
 
 let json_bool_opt_member key json =
-  match json with
-  | `Assoc _ ->
-    (match Yojson.Safe.Util.member key json with
-     | `Bool value -> Some value
-     | _ -> None)
+  match json_member_opt key json with
+  | Some (`Bool value) -> Some value
   | _ -> None
 
 let json_list_member key json =
-  match json with
-  | `Assoc _ ->
-    (match Yojson.Safe.Util.member key json with
-     | `List items -> items
-     | _ -> [])
+  match json_member_opt key json with
+  | Some (`List items) -> items
   | _ -> []
 
 let json_string_list_member key json =

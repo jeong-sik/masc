@@ -24,15 +24,6 @@ type worker_container_state =
   | Worker_pending
   | Worker_ready
 
-type tool_profile =
-  | Profile_session_min
-  | Profile_session_dev
-
-type shell_profile =
-  | Shell_none
-  | Shell_readonly
-  | Shell_dev
-
 type worker_container_meta = {
   version : int;
   worker_name : string;
@@ -40,12 +31,9 @@ type worker_container_meta = {
   workspace_path : string;
   role : string option;
   selection_note : string option;
+  runtime_backend : Worker_execution_backend.t;
   thinking_enabled : bool option;
-  max_turns_override : int option;
   timeout_seconds : int option;
-  tool_profile : tool_profile;
-  shell_profile : shell_profile;
-  worker_class : Worker_types.worker_class option;
   effective_model : string;
   checkpoint_path : string;
   turn_log_path : string;

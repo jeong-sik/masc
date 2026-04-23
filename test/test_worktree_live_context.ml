@@ -58,7 +58,8 @@ let init_repo dir =
   run_ok ~cwd:dir "git config user.name tester";
   write_file (Filename.concat dir ".gitignore") ".masc/\n";
   write_file (Filename.concat dir "sample.ml") "let value = 1\n";
-  run_ok ~cwd:dir "git add .gitignore sample.ml && git -c core.hooksPath=/dev/null commit -q -m base"
+  write_file (Filename.concat dir "other.ml") "let other = 1\n";
+  run_ok ~cwd:dir "git add .gitignore sample.ml other.ml && git -c core.hooksPath=/dev/null commit -q -m base"
 
 let test_capture_only_on_change () =
   with_temp_dir "worktree-live-context" (fun dir ->
@@ -92,7 +93,7 @@ let test_capture_distinguishes_new_changes () =
       write_file (Filename.concat dir "sample.ml") "let value = 2\n";
       Wlc.clear_status_cache_for_tests ();
       ignore (Wlc.capture_change_block ~base_path:dir ~actor_key:"keeper-a");
-      write_file (Filename.concat dir "other.md") "new notes\n";
+      write_file (Filename.concat dir "other.ml") "let other = 2\n";
       Wlc.clear_status_cache_for_tests ();
       let second =
         Wlc.capture_change_block ~base_path:dir ~actor_key:"keeper-a"
@@ -103,7 +104,7 @@ let test_capture_distinguishes_new_changes () =
         (try
            ignore
              (Str.search_forward
-                (Str.regexp_string "other.md")
+                (Str.regexp_string "other.ml")
                 block 0);
            true
          with Not_found -> false))
@@ -136,7 +137,7 @@ let test_current_status_lines_uses_short_cache_and_no_optional_locks () =
       check (list string) "second status" [ "M sample.ml" ] second;
       check int "git status called once" 1 (List.length !calls);
       check (list string) "git status args"
-        [ "--no-optional-locks"; "status"; "--porcelain" ]
+        [ "--no-optional-locks"; "status"; "--porcelain"; "--untracked-files=no" ]
         (List.hd !calls))
 
 let test_current_status_lines_caches_clean_status () =
@@ -156,9 +157,9 @@ let test_current_status_lines_caches_clean_status () =
         (Wlc.current_status_lines ~repo_root:"/tmp/repo");
       check int "clean status is cached" 1 !calls)
 
-let test_git_status_timeout_defaults_to_30_seconds () =
+let test_git_status_timeout_defaults_to_15_seconds () =
   with_env "MASC_WORKTREE_GIT_STATUS_TIMEOUT_SEC" "" (fun () ->
-      check (float 0.01) "default git status timeout" 30.0
+      check (float 0.01) "default git status timeout" 15.0
         (Wlc.git_status_timeout_sec ()))
 
 let test_git_status_timeout_honors_env_override () =
@@ -180,8 +181,8 @@ let () =
             test_current_status_lines_uses_short_cache_and_no_optional_locks;
           test_case "status cache keeps clean status" `Quick
             test_current_status_lines_caches_clean_status;
-          test_case "git status timeout defaults to 30s" `Quick
-            test_git_status_timeout_defaults_to_30_seconds;
+          test_case "git status timeout defaults to 15s" `Quick
+            test_git_status_timeout_defaults_to_15_seconds;
           test_case "git status timeout honors env override" `Quick
             test_git_status_timeout_honors_env_override;
         ] );

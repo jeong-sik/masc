@@ -177,15 +177,9 @@ let docker_preflight_to_yojson (preflight : docker_preflight) =
 let docker_preflight_failure_message (preflight : docker_preflight) =
   let reasons =
     [
-      (match preflight.docker_runtime_error with
-       | Some message -> Some message
-       | None -> None);
-      (match preflight.hardening_error with
-       | Some message -> Some message
-       | None -> None);
-      (match preflight.image_error with
-       | Some message -> Some message
-       | None -> None);
+      preflight.docker_runtime_error;
+      preflight.hardening_error;
+      preflight.image_error;
       (if preflight.missing_commands = [] then
          None
        else

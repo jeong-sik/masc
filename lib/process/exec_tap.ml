@@ -193,19 +193,22 @@ let install_from_env () =
       (match result with
        | Ok fd ->
            let mu = Mutex.create () in
-           let rec write_all fd buf off remaining =
-             if remaining <= 0 then ()
-             else match Unix.write_substring fd buf off remaining with
-               | 0 -> raise (Unix.Unix_error (Unix.EIO, "write_substring", ""))
-               | n -> write_all fd buf (off + n) (remaining - n)
-           in
            let writer line =
              Mutex.lock mu;
              Fun.protect
                ~finally:(fun () -> Mutex.unlock mu)
                (fun () ->
                   let len = String.length line in
-                  write_all fd line 0 len)
+                  let rec write_all offset =
+                    if offset >= len then ()
+                    else
+                      let written = Unix.write_substring fd line offset (len - offset) in
+                      if written = 0 then
+                        raise (Failure "write_all: zero-byte write")
+                      else
+                        write_all (offset + written)
+                  in
+                  write_all 0)
            in
            enable ~writer;
            Printf.eprintf "[exec_tap] enabled \xe2\x86\x92 %s\n%!" out_path

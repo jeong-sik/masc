@@ -35,16 +35,30 @@ let run_argv_line argv =
   | [] -> ""
   | h :: _ -> String.trim h
 
+let string_of_process_status = function
+  | Unix.WEXITED n -> Printf.sprintf "exited %d" n
+  | Unix.WSIGNALED n -> Printf.sprintf "signaled %d" n
+  | Unix.WSTOPPED n -> Printf.sprintf "stopped %d" n
+
 let run_argv_ignore argv =
   (try
-     ignore
-       (Masc_exec.Exec_gate.run_argv_with_status
-          ~actor:"system/notify"
-          ~raw_source:(exec_gate_raw_source argv)
-          ~summary:"notify argv"
-          ~timeout_sec:60.0
-          argv)
-   with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Misc.error "run_argv_ignore failed: %s" (Printexc.to_string exn))
+     let status, _output =
+       Masc_exec.Exec_gate.run_argv_with_status
+         ~actor:"system/notify"
+         ~raw_source:(exec_gate_raw_source argv)
+         ~summary:"notify argv"
+         ~timeout_sec:60.0
+         argv
+     in
+     match status with
+     | Unix.WEXITED 0 -> ()
+     | _ ->
+         Log.Misc.warn "notify command exited with status %s: %s"
+           (string_of_process_status status)
+           (String.concat " " argv)
+   with
+   | Eio.Cancel.Cancelled _ as e -> raise e
+   | exn -> Log.Misc.error "run_argv_ignore failed: %s" (Printexc.to_string exn))
 
 (** Get non-empty environment variable *)
 let getenv_nonempty name =

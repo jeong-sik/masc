@@ -548,15 +548,19 @@ let handle_goal_transition (ctx : context) args =
                         | Some request_id, Goal_phase.Dropped
                         | Some request_id, Goal_phase.Executing
                           when goal.phase = Goal_phase.Awaiting_verification ->
-                            ignore (Goal_verification.cancel_request ctx.config ~request_id);
-                            emit_goal_event ctx ~goal_id
-                              ~event_type:"goal_verification_resolved"
-                              ~payload:
-                                (`Assoc
-                                  [
-                                    ("request_id", `String request_id);
-                                    ("status", `String "cancelled");
-                                  ])
+                            (match Goal_verification.cancel_request ctx.config ~request_id with
+                             | Ok _ ->
+                                 emit_goal_event ctx ~goal_id
+                                   ~event_type:"goal_verification_resolved"
+                                   ~payload:
+                                     (`Assoc
+                                       [
+                                         ("request_id", `String request_id);
+                                         ("status", `String "cancelled");
+                                       ])
+                             | Error msg ->
+                                 Log.Misc.warn "goal verification cancel_request failed for %s: %s"
+                                   request_id msg)
                         | _ -> ()
                       in
                       match

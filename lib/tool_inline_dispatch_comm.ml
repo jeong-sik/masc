@@ -34,41 +34,41 @@ let handle_broadcast (ctx : context) : tool_result option =
     Some (false, Printf.sprintf "Rate limited. %d sec remaining." wait_secs)
   else begin
     let trace_context = Otel_trace_context.from_ambient () in
-    let result = Coord.broadcast ?trace_context config ~from_agent:agent_name ~content:message in
-    let mention = Mention.extract message in
-    let _ = Session.push_message registry ~from_agent:agent_name ~content:message ~mention in
-    let notification_fields = [
-      ("type", `String "masc/broadcast");
-      ("from", `String agent_name);
-      ("content", `String message);
-      ("mention", Json_util.string_opt_to_json mention);
-      ("timestamp", `Float (Time_compat.now ()));
-    ] in
-    let notification = `Assoc (Otel_trace_context.inject_json notification_fields trace_context) in
-    Mcp_server.sse_broadcast state notification;
-    Subscriptions.push_event_to_sessions notification;
-    (match mention with
-     | Some target -> Notify.notify_mention ~from_agent:agent_name ~target_agent:target ~message ()
-     | None -> ());
-    A2a_tools.notify_event
-      ~event_type:A2a_tools.Broadcast
-      ~agent:agent_name
-      ~data:(`Assoc [
-        ("message", `String message);
-        ("mention", Json_util.string_opt_to_json mention);
-      ]);
-    let _ = Auto_responder.maybe_respond
-      ~sw
-      ~base_path:config.base_path
-      ~from_agent:agent_name
-      ~content:message
-      ~mention
-    in
-    (* Team_session_engine_eio removed — skip broadcast increment *)
-    ignore (config, agent_name);
-    Audit_log.log_broadcast config ~agent_id:agent_name
-      ~message_preview:message ();
-    Some (true, result)
+    let _ = Coord.broadcast ?trace_context config ~from_agent:agent_name ~content:message in
+        let mention = Mention.extract message in
+        let _ = Session.push_message registry ~from_agent:agent_name ~content:message ~mention in
+        let notification_fields = [
+          ("type", `String "masc/broadcast");
+          ("from", `String agent_name);
+          ("content", `String message);
+          ("mention", Json_util.string_opt_to_json mention);
+          ("timestamp", `Float (Time_compat.now ()));
+        ] in
+        let notification = `Assoc (Otel_trace_context.inject_json notification_fields trace_context) in
+        Mcp_server.sse_broadcast state notification;
+        Subscriptions.push_event_to_sessions notification;
+        (match mention with
+         | Some target -> Notify.notify_mention ~from_agent:agent_name ~target_agent:target ~message ()
+         | None -> ());
+        A2a_tools.notify_event
+          ~event_type:A2a_tools.Broadcast
+          ~agent:agent_name
+          ~data:(`Assoc [
+            ("message", `String message);
+            ("mention", Json_util.string_opt_to_json mention);
+          ]);
+        let _ = Auto_responder.maybe_respond
+          ~sw
+          ~base_path:config.base_path
+          ~from_agent:agent_name
+          ~content:message
+          ~mention
+        in
+        (* Team_session_engine_eio removed — skip broadcast increment *)
+        ignore (config, agent_name);
+        Audit_log.log_broadcast config ~agent_id:agent_name
+          ~message_preview:message ();
+        Some (true, "broadcast ok")
   end
 
 (** masc_messages — retrieve recent messages *)

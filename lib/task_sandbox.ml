@@ -166,7 +166,10 @@ let cleanup ~config ~agent_name sandbox =
         ["worktree"; "remove"; "--force"; sandbox.worktree_path]
     in
     if exit_code = 0 then begin
-      let _ = git_exit ~cwd:repo_root ["worktree"; "prune"] in
+      let prune_exit = git_exit ~cwd:repo_root ["worktree"; "prune"] in
+      if prune_exit <> 0 then
+        Log.Misc.warn "[task_sandbox] git worktree prune returned %d for %s"
+          prune_exit sandbox.task_id;
       Ok all_files
     end else
       Error (Printf.sprintf "cleanup failed for %s: %s"

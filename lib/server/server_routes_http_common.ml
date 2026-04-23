@@ -102,10 +102,6 @@ let state_net_opt = function
       | None -> Eio_context.get_net_opt ())
   | None -> Eio_context.get_net_opt ()
 
-let require_runtime label = function
-  | Some value -> value
-  | None -> invalid_arg (label ^ " not available")
-
 let contains_substring ~needle haystack =
   let needle_len = String.length needle in
   let haystack_len = String.length haystack in

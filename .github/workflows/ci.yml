@@ -134,7 +134,7 @@ jobs:
             build=true
           fi
 
-          if has_match '^(bin/|lib/|test/|proto/|config/|dune-project$|dune-workspace$|.*\.opam$|scripts/install\.sh$|scripts/check-eio-conventions\.sh$|scripts/check-feature-flag-consistency\.sh$|scripts/check-toml-syntax\.sh$|scripts/validate-prompt-paths\.sh$|scripts/check-boundary-guard\.sh$|scripts/check-ssot\.sh$|scripts/gen-grpc-descriptors\.sh$|scripts/lint/no-unknown-permissive-default\.sh$|scripts/lint/no-unknown-permissive-default\.allowlist$)'; then
+          if has_match '^(bin/|lib/|test/|proto/|config/|dune-project$|dune-workspace$|.*\.opam$|scripts/install\.sh$|scripts/check-eio-conventions\.sh$|scripts/check-feature-flag-consistency\.sh$|scripts/check-toml-syntax\.sh$|scripts/validate-prompt-paths\.sh$|scripts/check-boundary-guard\.sh$|scripts/check-ssot\.sh$|scripts/gen-grpc-descriptors\.sh$|scripts/lint/no-unknown-permissive-default\.sh$|scripts/lint/no-unknown-permissive-default\.allowlist$|scripts/ci/)'; then
             lint=true
           fi
 
@@ -269,6 +269,16 @@ jobs:
       - name: Validate spec line refs
         if: needs.changes.outputs.spec_refs == 'true'
         run: bash scripts/lint/spec-line-refs.sh
+
+      - name: Meta bug-class gates (SSOT, SIL, STR, BND)
+        continue-on-error: true
+        run: |
+          chmod +x scripts/ci/*.sh
+          echo "=== Running meta bug-class gates (see #9516 #9517 #9519 #9521) ==="
+          bash scripts/ci/check-ssot-spawn-drift.sh || true
+          bash scripts/ci/check-silent-failure-patterns.sh || true
+          bash scripts/ci/check-enum-string-safety.sh || true
+          bash scripts/ci/check-masc-oas-boundary.sh || true
 
   health:
     name: Health

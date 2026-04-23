@@ -122,12 +122,35 @@ let safe_repo_name name =
          || c = '.')
        name
 
+(* Git worktree mutations include Eio subprocess calls; use Eio.Mutex so
+   same-domain fibers serialize without blocking the scheduler. *)
+let worktree_mutation_mutex = Eio.Mutex.create ()
+
+let with_worktree_mutation_lock f =
+  Eio.Mutex.use_rw ~protect:true worktree_mutation_mutex f
+
 let is_git_clone candidate =
   safe_is_dir candidate
   &&
   match git_marker_kind (Filename.concat candidate ".git") with
   | `Directory | `File -> true
   | `Missing -> false
+
+let same_realpath a b =
+  try String.equal (Unix.realpath a) (Unix.realpath b) with
+  | Unix.Unix_error _ -> String.equal a b
+
+let is_usable_git_worktree path =
+  safe_is_dir path
+  &&
+  match run_argv_with_status
+          [ "git"; "-C"; path; "rev-parse"; "--show-toplevel" ]
+  with
+  | Unix.WEXITED 0, output -> (
+      match first_nonempty_line output with
+      | Some top -> same_realpath top path
+      | None -> false)
+  | _ -> false
 
 let run_git_in_clone clone_path args =
   run_argv_with_status ([ "git"; "-C"; clone_path; "--no-optional-locks" ] @ args)
@@ -158,19 +181,39 @@ let inspect_sandbox_clone candidate =
       (Printf.sprintf "git rev-parse failed: %s"
          (trim_output_detail inside_output))
   else
-    let tracked_status, tracked_output =
-      run_git_in_clone candidate [ "ls-files"; "-z" ]
+    let top_status, top_output =
+      run_git_in_clone candidate [ "rev-parse"; "--show-toplevel" ]
     in
-    if tracked_status <> Unix.WEXITED 0 then
+    if top_status <> Unix.WEXITED 0 then
       Broken_git
-        (Printf.sprintf "git ls-files failed: %s"
-           (trim_output_detail tracked_output))
+        (Printf.sprintf "git rev-parse --show-toplevel failed: %s"
+           (trim_output_detail top_output))
     else
-      match first_nul_field tracked_output with
-      | None -> Ready
-      | Some relpath ->
-          if safe_file_exists (Filename.concat candidate relpath) then Ready
-          else Needs_checkout relpath
+      match first_nonempty_line top_output with
+      | Some top ->
+          if not (same_realpath top candidate) then
+            Broken_git
+              (Printf.sprintf
+                 "git top-level mismatch: expected sandbox clone root %s but \
+                  git resolved %s"
+                 candidate top)
+          else
+            let tracked_status, tracked_output =
+              run_git_in_clone candidate [ "ls-files"; "-z" ]
+            in
+            if tracked_status <> Unix.WEXITED 0 then
+              Broken_git
+                (Printf.sprintf "git ls-files failed: %s"
+                   (trim_output_detail tracked_output))
+            else
+              (match first_nul_field tracked_output with
+              | None -> Ready
+              | Some relpath ->
+                  if safe_file_exists (Filename.concat candidate relpath) then
+                    Ready
+                  else Needs_checkout relpath)
+      | None ->
+          Broken_git "git rev-parse --show-toplevel returned no path"
 
 let restore_sandbox_clone_checkout candidate =
   let checkout_status, checkout_output =
@@ -511,6 +554,7 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
   | Error e, _ -> Error e
   | _, Error e -> Error e
   | Ok _, Ok _ ->
+    with_worktree_mutation_lock @@ fun () ->
     (* Prefer a keeper's sandbox repo clone under
        the keeper's backend-specific sandbox repo lane. If [repo_name]
        is supplied, target that clone directly; otherwise scan the
@@ -601,15 +645,36 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
             end else ""
           in
 
+          let existing_worktree_ok ?(created_concurrently=false) () =
+            update_agent_current_task ();
+            let race_note =
+              if created_concurrently then
+                "\n  Note: Worktree was created concurrently by another worker."
+              else ""
+            in
+            let link_note = maybe_link_task () in
+            Ok
+              (Printf.sprintf
+                 "✅ Worktree already exists:\n  Path: %s\n  Branch: %s\n  \
+                  Repo: %s%s%s\n\nNext: cd %s"
+                 worktree_path branch_name repo_name race_note link_note
+                 worktree_path)
+          in
+
           (* Create .worktrees directory if not exists *)
           Fs_compat.mkdir_p worktrees_dir;
 
           (* Check if worktree already exists *)
-          if Sys.file_exists worktree_path then begin
-            update_agent_current_task ();
-            let link_note = maybe_link_task () in
-            Ok (Printf.sprintf "✅ Worktree already exists:\n  Path: %s\n  Branch: %s\n  Repo: %s%s\n\nNext: cd %s"
-                worktree_path branch_name repo_name link_note worktree_path)
+          if safe_file_exists worktree_path then begin
+            if is_usable_git_worktree worktree_path then
+              existing_worktree_ok ()
+            else
+              Error
+                (IoError
+                   (Printf.sprintf
+                      "worktree_path_conflict: %s already exists but is not a \
+                       usable git worktree. Remove or repair it before retrying."
+                      worktree_path))
           end else begin
             (* Fetch origin first; stale remotes must be explicit, not hidden. *)
             let fetch_exit = run_argv_exit ["git"; "-C"; root; "fetch"; "origin"] in
@@ -674,10 +739,14 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
                       worktree_path branch_name repo_name note
                       (provision_note ^ link_note) worktree_path)
                 end
-                else
+                else if is_usable_git_worktree worktree_path then
+                  existing_worktree_ok ~created_concurrently:true ()
+                else begin
+                  rm_rf worktree_path;
                   let detail = String.trim git_output in
                   Error (IoError (Printf.sprintf "Failed to create worktree from origin/%s: %s"
                     resolved_base (if detail = "" then "(no output)" else detail)))
+                end
           end
   end
 

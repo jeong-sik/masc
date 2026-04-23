@@ -1373,6 +1373,18 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             (Trajectory.Failed (Oas.Error.to_string err));
           let e_str = Oas.Error.to_string err in
           let is_transient = EC.is_transient_network_error err in
+          (match err with
+           | Oas.Error.Api (Timeout { message }) ->
+               let classification =
+                 if is_transient then "transient_network"
+                 else if EC.is_structural_oas_timeout_message message then
+                   "structural_budget"
+                 else "other_timeout"
+               in
+               Prometheus.inc_counter
+                 Prometheus.metric_keeper_oas_timeout_classifications
+                 ~labels:[("classification", classification)] ()
+           | _ -> ());
           let is_server_parse_rejection = EC.is_server_rejected_parse_error err in
           let is_auto_recoverable = EC.is_auto_recoverable_turn_error err in
           let is_ambiguous_partial = EC.is_ambiguous_side_effect_error err in

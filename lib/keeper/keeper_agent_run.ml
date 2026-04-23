@@ -85,6 +85,22 @@ type ctx_composition_metrics =
   ; segments : (string * prompt_segment_metrics) list
   }
 
+let unexpected_tool_partial_warned : (string, unit) Hashtbl.t =
+  Hashtbl.create 32
+
+let unexpected_tool_partial_warn_mu = Eio.Mutex.create ()
+
+let should_log_unexpected_tool_partial_once ~keeper_name ~unexpected_tool_names =
+  let key =
+    String.concat "\000" (keeper_name :: List.sort String.compare unexpected_tool_names)
+  in
+  Eio_guard.with_mutex unexpected_tool_partial_warn_mu (fun () ->
+      if Hashtbl.mem unexpected_tool_partial_warned key then
+        false
+      else (
+        Hashtbl.replace unexpected_tool_partial_warned key ();
+        true))
+
 let empty_prompt_segment_metrics =
   { bytes = 0; estimated_tokens = 0; fingerprint = None }
 
@@ -2412,7 +2428,7 @@ let run_turn
           no cognate (Skill/Agent/WebSearch) remain unexpected and may
           still trigger a teaching error — see Keeper_tool_alias.is_hallucinated_builtin. *)
        let canonical_tool_names =
-         Keeper_tool_alias.canonicalize_observed tool_names
+         Keeper_tool_alias.canonicalize_observed_with_telemetry tool_names
        in
        canonical_tool_names_ref := canonical_tool_names;
        let unexpected_tool_names =
@@ -2446,7 +2462,21 @@ let run_turn
          Log.Keeper.error "keeper:%s %s" meta.name reason;
          Error (Oas.Error.Internal reason)
        else (
+         let should_log_unexpected_tool_partial =
+           unexpected_tool_names <> []
+           && should_log_unexpected_tool_partial_once ~keeper_name:meta.name
+                ~unexpected_tool_names
+         in
          if unexpected_tool_names <> [] then
+           Prometheus.inc_counter
+             Prometheus.metric_keeper_unexpected_tool_partial_tolerance
+             ~labels:
+               [
+                 ("keeper_name", meta.name);
+                 ("logged", string_of_bool should_log_unexpected_tool_partial);
+               ]
+             ();
+         if should_log_unexpected_tool_partial then
            Log.Keeper.warn
              "keeper:%s unexpected_tool_partial_tolerance tools=%s (cycle continues; valid tools present)"
              meta.name

@@ -59,16 +59,67 @@ let to_public internal =
   | Some public -> public
   | None -> internal
 
+let public_masc_to_internal_tbl =
+  let t = Hashtbl.create 16 in
+  List.iter
+    (fun internal ->
+      match Tool_catalog_surfaces.keeper_internal_replacement internal with
+      | Some public -> Hashtbl.replace t public internal
+      | None -> ())
+    Tool_catalog_surfaces.keeper_internal_tools;
+  t
+
+let public_masc_to_internal name =
+  Hashtbl.find_opt public_masc_to_internal_tbl name
+
 let strip_mcp_masc_prefix name =
   match Base.String.chop_prefix name ~prefix:"mcp__masc__" with
   | Some rest -> rest
   | None -> name
 
+let canonicalize_one_observed name =
+  let stripped = strip_mcp_masc_prefix name in
+  let was_mcp_prefixed = not (String.equal stripped name) in
+  match to_internal stripped with
+  | Some internal ->
+      ( internal,
+        Some
+          (if was_mcp_prefixed then "mcp_prefixed_anthropic_code"
+           else "anthropic_code") )
+  | None -> (
+      match public_masc_to_internal stripped with
+      | Some internal ->
+          ( internal,
+            Some
+              (if was_mcp_prefixed then "mcp_prefixed_public_masc"
+               else "public_masc") )
+      | None ->
+          (stripped, if was_mcp_prefixed then Some "mcp_prefix" else None))
+
 let canonicalize_observed names =
   List.map
     (fun n ->
-      let stripped = strip_mcp_masc_prefix n in
-      match to_internal stripped with Some i -> i | None -> stripped)
+      let canonical, _alias_kind = canonicalize_one_observed n in
+      canonical)
+    names
+
+let canonicalize_observed_with_telemetry names =
+  List.map
+    (fun n ->
+      let canonical, alias_kind = canonicalize_one_observed n in
+      (match alias_kind with
+       | Some kind when not (String.equal n canonical) ->
+           Prometheus.inc_counter
+             Prometheus.metric_keeper_tool_alias_canonicalizations
+             ~labels:
+               [
+                 ("alias_kind", kind);
+                 ("public_tool", n);
+                 ("canonical_tool", canonical);
+               ]
+             ()
+       | _ -> ());
+      canonical)
     names
 
 let hallucinated_set =

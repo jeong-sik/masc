@@ -52,10 +52,16 @@ let string_contains_substring ~(needle : string) (haystack : string) : bool =
 (** Detect transient network errors that warrant retry with short backoff.
     Uses structured [Oas.Error.sdk_error] pattern matching instead of
     substring matching on stringified error messages. *)
+let is_structural_oas_timeout_message message =
+  let lower = String.lowercase_ascii message in
+  string_contains_substring ~needle:"(budget=" lower
+  || string_contains_substring ~needle:"turn wall-clock budget exhausted" lower
+
 let is_transient_network_error (err : Oas.Error.sdk_error) : bool =
   match err with
   | Oas.Error.Api (NetworkError _) -> true
-  | Oas.Error.Api (Timeout _) -> true
+  | Oas.Error.Api (Timeout { message }) ->
+      not (is_structural_oas_timeout_message message)
   | Oas.Error.Api (Overloaded _) -> true
   | Oas.Error.Api (ServerError { status = 503; _ }) -> true
   | _ -> false

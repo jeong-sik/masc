@@ -24,6 +24,12 @@ val to_public : string -> string
     counting unexpected tools. *)
 val canonicalize_observed : string list -> string list
 
+(** [canonicalize_observed_with_telemetry names] is the runtime variant of
+    [canonicalize_observed]. It returns the same canonical names and increments
+    [masc_keeper_tool_alias_canonicalizations_total] for every observed public
+    or MCP-prefixed name rewritten to a keeper-facing name. *)
+val canonicalize_observed_with_telemetry : string list -> string list
+
 (** [hallucinated_builtins] lists the public names from the Anthropic
     Code surface that have **no** cognate in the keeper surface
     (e.g. [Skill], [Agent], [WebSearch]). These should be flagged with

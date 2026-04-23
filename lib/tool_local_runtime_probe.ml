@@ -396,8 +396,11 @@ let model_is_loaded model_id loaded_models =
       | None -> false)
     loaded_models
 
-let should_attempt_generate_probe ~before_status ~before_error
+let should_attempt_generate_probe ~before_status ~before_error ~run_generate
     ~generate_when_unloaded ~effective_model_loaded_before =
+  if not run_generate then
+    false
+  else
   match before_status, before_error with
   | Some 200, _ -> generate_when_unloaded || effective_model_loaded_before
   | _, Some _ -> false
@@ -463,7 +466,8 @@ let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
     ?keep_alive ?(max_tokens = 16) ?(think_mode = Think_auto)
     ?(timeout_sec = default_probe_timeout_sec)
     ?(ps_timeout_sec = default_ps_timeout_sec)
-    ?(generate_when_unloaded = true) () =
+    ?(generate_when_unloaded = true)
+    ?(run_generate = true) () =
   let server_url =
     Option.bind server_url trim_to_option
     |> Option.value ~default:Env_config_runtime.Ollama.server_url
@@ -497,6 +501,7 @@ let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
     | Some _ when
         not
           (should_attempt_generate_probe ~before_status ~before_error
+             ~run_generate
              ~generate_when_unloaded ~effective_model_loaded_before) ->
         let skipped_unloaded_model =
           match before_status, before_error with
@@ -518,6 +523,21 @@ let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
         in
         (completed_runs, run_errors, false)
   in
+  let generate_skip_reason =
+    match effective_model, runs with
+    | None, [] -> Some "no_effective_model"
+    | Some _, [] when not run_generate -> Some "status_only"
+    | Some _, [] when Option.is_some before_error -> Some "ps_error"
+    | Some _, [] when generate_skipped_unloaded_model -> Some "model_unloaded"
+    | Some _, [] -> Some "policy_skip"
+    | _ -> None
+  in
+  (match generate_skip_reason with
+   | Some reason ->
+       Prometheus.inc_counter
+         Prometheus.metric_runtime_ollama_probe_generate_skips
+         ~labels:[("reason", reason)] ()
+   | None -> ());
   let after_status, loaded_after, after_error =
     fetch_ollama_ps ~timeout_sec:ps_timeout_sec ~server_url ()
   in
@@ -543,6 +563,11 @@ let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
     |> (fun items ->
          if generate_skipped_unloaded_model then
            "Skipped /api/generate because the effective model was not resident; dashboard probes avoid cold-loading Ollama models."
+           :: items
+         else items)
+    |> (fun items ->
+         if not run_generate then
+           "Skipped /api/generate because run_generate=false; this is a status-only Ollama residency probe."
            :: items
          else items)
     |> (fun items ->
@@ -582,7 +607,9 @@ let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
       ("effective_model", string_opt_to_json effective_model);
       ("probe_runs_requested", `Int probe_runs);
       ("probe_runs_completed", `Int (List.length runs));
+      ("run_generate", `Bool run_generate);
       ("generate_when_unloaded", `Bool generate_when_unloaded);
+      ("generate_skip_reason", string_opt_to_json generate_skip_reason);
       ("generate_skipped_unloaded_model", `Bool generate_skipped_unloaded_model);
       ("keep_alive", string_opt_to_json (Option.bind keep_alive trim_to_option));
       ("max_tokens", `Int max_tokens);
@@ -610,5 +637,5 @@ let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
             `String
               "A repeated-prefix signal is inference from prompt_eval_duration_ms, not a stable Ollama-native cache metric.";
           ] );
-      ("probe_ok", `Bool (errors = [] && runs <> []));
+      ("probe_ok", `Bool (errors = [] && (runs <> [] || not run_generate)));
     ]

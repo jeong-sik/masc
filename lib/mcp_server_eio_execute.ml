@@ -404,7 +404,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         (* Persist nickname so subsequent calls can use it. *)
         write_mcp_session_agent nickname;
         write_term_session_agent nickname;
-        ignore (Session.register registry ~agent_name:nickname);
+        let (_ : Session.session) = Session.register registry ~agent_name:nickname in
         nickname
       end
     end else
@@ -413,7 +413,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
 
   (* Auto-register session for non-read-only tools *)
   if agent_name <> "unknown" && not is_read_only then
-    ignore (Session.register registry ~agent_name);
+    let (_ : Session.session) = Session.register registry ~agent_name in
 
   (* Log tool call *)
   Log.Mcp.debug "[%s] %s" agent_name name;
@@ -432,7 +432,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     in
     if (not skip_heartbeat) && !room_init_cached then
       try
-        ignore (Coord.heartbeat config ~agent_name)
+        let (_ : string) = Coord.heartbeat config ~agent_name in
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->

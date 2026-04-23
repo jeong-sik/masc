@@ -119,7 +119,7 @@ let on_submit_for_verification ~(config : Coord.config)
     ("evidence_refs", `List (List.map (fun s -> `String s) evidence_refs));
     ("timestamp", `Float (Time_compat.now ()));
   ]);
-  ignore base_path
+  ()
 
 let on_approve_verification ~(config : Coord.config)
     ~task_id ~verifier ~verification_id ~notes =

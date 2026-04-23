@@ -335,7 +335,7 @@ let save_raw_config_json raw_json =
   | Cascade_toml_materializer.Json ->
       let parse_result =
         try
-          ignore (Yojson.Safe.from_string raw_json);
+          let (_ : Yojson.Safe.t) = Yojson.Safe.from_string raw_json in
           Ok ()
         with
         | Eio.Cancel.Cancelled _ as exn -> raise exn

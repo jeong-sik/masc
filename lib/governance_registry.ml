@@ -640,17 +640,17 @@ let surfaces =
 (** Force module initialization to guarantee all params are registered
     before [Runtime_params.restore]. Call from server bootstrap. *)
 let ensure_init () =
-  ignore (Runtime_params.get message_max_count);
-  ignore (Runtime_params.get dashboard_max_path_length);
-  ignore (Runtime_params.get dashboard_max_message_length);
-  ignore (Runtime_params.get dashboard_max_pending_tasks);
-  ignore (Runtime_params.get dashboard_max_recent_messages);
-  ignore (Runtime_params.get dashboard_min_border_length);
-  ignore (Runtime_params.get dashboard_agent_quiet_threshold_sec);
-  ignore (Runtime_params.get dashboard_agent_stuck_threshold_sec);
-  ignore (Runtime_params.get drift_factual_coverage_floor);
-  ignore (Runtime_params.get drift_factual_size_ratio_floor);
-  ignore (Runtime_params.get drift_structural_divergence_threshold);
+  let (_ : _) = Runtime_params.get message_max_count in
+  let (_ : _) = Runtime_params.get dashboard_max_path_length in
+  let (_ : _) = Runtime_params.get dashboard_max_message_length in
+  let (_ : _) = Runtime_params.get dashboard_max_pending_tasks in
+  let (_ : _) = Runtime_params.get dashboard_max_recent_messages in
+  let (_ : _) = Runtime_params.get dashboard_min_border_length in
+  let (_ : _) = Runtime_params.get dashboard_agent_quiet_threshold_sec in
+  let (_ : _) = Runtime_params.get dashboard_agent_stuck_threshold_sec in
+  let (_ : _) = Runtime_params.get drift_factual_coverage_floor in
+  let (_ : _) = Runtime_params.get drift_factual_size_ratio_floor in
+  let (_ : _) = Runtime_params.get drift_structural_divergence_threshold in
   Keeper_config.ensure_runtime_params_init ()
 
 let surfaces_json () =

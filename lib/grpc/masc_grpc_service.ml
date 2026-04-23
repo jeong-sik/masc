@@ -251,7 +251,7 @@ let compute_directives
       let json = Yojson.Safe.from_string (read_file_safe agent_file) in
       (match Yojson.Safe.Util.member "paused" json with
        | `Bool true -> directives := "pause" :: !directives
-       | _ -> ())
+       | `Bool false | `Null | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _ -> ())
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
@@ -295,7 +295,7 @@ let handle_heartbeat
       (try Grpc_eio.Stream.close response_stream
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
-       | _ -> ())
+       | exn -> Log.Transport.warn "masc_grpc_service: stream close failed: %s" (Printexc.to_string exn))
     in
     let rec loop () =
       match Grpc_eio.Stream.take request_stream with

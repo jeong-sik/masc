@@ -894,7 +894,7 @@ let play_tone freq =
            Printf.sprintf "%.0f" freq ])
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
-  | _ -> ()
+  | exn -> Log.Transport.debug "play_tone failed: %s" (Printexc.to_string exn)
 
 let record_and_transcribe ~agent_id ?(timeout_sec = 15.0)
     ?language_code () =

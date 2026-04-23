@@ -374,7 +374,7 @@ let cascade_fsm_to_mermaid
        if label = r then
          p "    class P%d ok\n" i
      ) models
-   | _ -> ());
+   | Some _ | None -> ());
   p "\n";
   p "    note right of SelectProvider\n";
   p "      Models: %d\n" n;

@@ -354,7 +354,7 @@ let split_top_level delimiter (text : string) =
         match ch with
         | '\\' -> escaped := true
         | '"' -> in_string := false
-        | _ -> ())
+        | '\000' .. '\255' -> ())
     else
       match ch with
       | '"' ->
@@ -405,7 +405,7 @@ let find_top_level_char target (text : string) =
         match ch with
         | '\\' -> escaped := true
         | '"' -> in_string := false
-        | _ -> ()
+        | '\000' .. '\255' -> ()
     else
       match ch with
       | '"' -> in_string := true
@@ -417,7 +417,7 @@ let find_top_level_char target (text : string) =
       | '}' -> decr brace_depth
       | _ when ch = target && !paren_depth = 0 && !bracket_depth = 0 && !brace_depth = 0 ->
           result := Some !idx
-      | _ -> ();
+      | '\000' .. '\255' -> ();
     incr idx
   done;
   !result

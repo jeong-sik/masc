@@ -443,7 +443,7 @@ module Kimi_cli_transport_local = struct
      | None -> ());
     (match config.cwd with
      | Some dir when String.trim dir <> "" -> add [ "--work-dir"; dir ]
-     | _ -> ());
+     | None | Some _ -> ());
     List.iter (fun json -> add [ "--mcp-config"; json ]) mcp_config_json;
     (match req_config.enable_thinking with
      | Some true -> add [ "--thinking" ]

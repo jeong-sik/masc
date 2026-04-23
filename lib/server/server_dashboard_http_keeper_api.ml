@@ -891,10 +891,10 @@ let handle_keeper_directive_post state _agent_name req reqd body_str =
         in
         let proceed () =
           (match action_str with
-           | "pause" -> persist_paused_state true
            | "resume" -> persist_paused_state false
-           | "wakeup"
-           | _ -> ());
+           | "wakeup" -> ()
+           | _ ->
+               Log.Server.warn "Unknown keeper directive: %s" action_str);
           let resolved_agent_name =
             match Keeper_registry.find_by_name name with
             | Some entry -> entry.meta.agent_name

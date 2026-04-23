@@ -166,7 +166,7 @@ let find_agents_by_capability config ~capability =
               ("status", `String (agent_status_to_string agent.status));
               ("capabilities", `List (List.map (fun s -> `String s) agent.capabilities));
             ] :: !matching
-        | _ -> ()
+        | Ok _ | Error _ -> ()
       end
     );
     `Assoc [

@@ -199,8 +199,8 @@ let check_invariants (state : product) : (unit, string) result =
      (match state.lifecycle with
       | Lifecycle.Booting ->
         add "readiness=Ready but lifecycle=Booting (cannot be ready while booting)"
-      | _ -> ())
-   | _ -> ());
+      | Lifecycle.Serving | Lifecycle.Draining | Lifecycle.Stopped -> ())
+   | Readiness.NotReady -> ());
 
   (* I2: Stopped implies not ready *)
   (match state.lifecycle with
@@ -208,8 +208,8 @@ let check_invariants (state : product) : (unit, string) result =
      (match state.readiness with
       | Readiness.Ready ->
         add "lifecycle=Stopped but readiness=Ready (stopped server is never ready)"
-      | _ -> ())
-   | _ -> ());
+      | Readiness.NotReady -> ())
+   | Lifecycle.Booting | Lifecycle.Serving | Lifecycle.Draining -> ());
 
   (* I3: Pending tasks block stop *)
   (match state.lazy_tasks with
@@ -217,8 +217,8 @@ let check_invariants (state : product) : (unit, string) result =
      (match state.lifecycle with
       | Lifecycle.Stopped ->
         add "lazy_tasks=Pending but lifecycle=Stopped (cannot stop with pending tasks)"
-      | _ -> ())
-   | _ -> ());
+      | Lifecycle.Booting | Lifecycle.Serving | Lifecycle.Draining -> ())
+   | Lazy_task_queue.Complete -> ());
 
   (* I4: Degraded backend => not ready *)
   (match state.backend with
@@ -226,8 +226,8 @@ let check_invariants (state : product) : (unit, string) result =
      (match state.readiness with
       | Readiness.Ready ->
         add "backend=Degraded but readiness=Ready (degraded backend must not serve traffic)"
-      | _ -> ())
-   | _ -> ());
+      | Readiness.NotReady -> ())
+   | Backend.Uninitialized | Backend.Filesystem -> ());
 
   (* I5: Booting => backend uninitialized *)
   (match state.lifecycle with
@@ -237,7 +237,7 @@ let check_invariants (state : product) : (unit, string) result =
       | _ ->
         add (Printf.sprintf "lifecycle=Booting but backend=%s (expected Uninitialized)"
                (Backend.phase_to_string state.backend)))
-   | _ -> ());
+   | Lifecycle.Serving | Lifecycle.Draining | Lifecycle.Stopped -> ());
 
   match List.rev !violations with
   | [] -> Ok ()

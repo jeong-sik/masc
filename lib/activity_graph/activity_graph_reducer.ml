@@ -177,49 +177,49 @@ let reduce_event ~nodes ~edges (value : event) =
       | Some source, Some target ->
           ensure_edge edges ~source ~target ~kind:"hands_off_to" ~active:true
             ~ts_iso:value.ts_iso ~meta:value.payload
-      | _ -> ())
+      | (None, _) | (_, None) -> ())
   | "task.created" ->
       set_subject_status Todo;
       (match (actor_id, subject_id) with
       | Some source, Some target ->
           ensure_edge edges ~source ~target ~kind:"creates" ~active:false
             ~ts_iso:value.ts_iso ~meta:value.payload
-      | _ -> ())
+      | (None, _) | (_, None) -> ())
   | "task.claimed" ->
       set_subject_status Claimed;
       (match (actor_id, subject_id) with
       | Some source, Some target ->
           ensure_edge edges ~source ~target ~kind:"works_on" ~active:true
             ~ts_iso:value.ts_iso ~meta:value.payload
-      | _ -> ())
+      | (None, _) | (_, None) -> ())
   | "task.started" ->
       set_subject_status In_progress;
       (match (actor_id, subject_id) with
       | Some source, Some target ->
           ensure_edge edges ~source ~target ~kind:"works_on" ~active:true
             ~ts_iso:value.ts_iso ~meta:value.payload
-      | _ -> ())
+      | (None, _) | (_, None) -> ())
   | "task.released" ->
       set_subject_status Todo;
       (match (actor_id, subject_id) with
       | Some source, Some target ->
           ensure_edge edges ~source ~target ~kind:"works_on" ~active:false
             ~ts_iso:value.ts_iso ~meta:value.payload
-      | _ -> ())
+      | (None, _) | (_, None) -> ())
   | "task.done" ->
       set_subject_status Done;
       (match (actor_id, subject_id) with
       | Some source, Some target ->
           ensure_edge edges ~source ~target ~kind:"works_on" ~active:false
             ~ts_iso:value.ts_iso ~meta:value.payload
-      | _ -> ())
+      | (None, _) | (_, None) -> ())
   | "task.cancelled" ->
       set_subject_status Cancelled;
       (match (actor_id, subject_id) with
       | Some source, Some target ->
           ensure_edge edges ~source ~target ~kind:"works_on" ~active:false
             ~ts_iso:value.ts_iso ~meta:value.payload
-      | _ -> ())
+      | (None, _) | (_, None) -> ())
   | "message.broadcast" ->
       (match actor_id with
       | Some source ->
@@ -231,40 +231,40 @@ let reduce_event ~nodes ~edges (value : event) =
       | Some source, Some target ->
           ensure_edge edges ~source ~target ~kind:"mentions" ~active:false
             ~ts_iso:value.ts_iso ~meta:value.payload
-      | _ -> ())
+      | (None, _) | (_, None) -> ())
   | "board.posted" ->
       set_subject_status Posted;
       (match (actor_id, subject_id) with
       | Some source, Some target ->
           ensure_edge edges ~source ~target ~kind:"posts" ~active:false
             ~ts_iso:value.ts_iso ~meta:value.payload
-      | _ -> ())
+      | (None, _) | (_, None) -> ())
   | "board.commented" ->
       set_subject_status Discussed;
       (match (actor_id, subject_id) with
       | Some source, Some target ->
           ensure_edge edges ~source ~target ~kind:"comments_on" ~active:false
             ~ts_iso:value.ts_iso ~meta:value.payload
-      | _ -> ())
+      | (None, _) | (_, None) -> ())
   | "board.voted" ->
       (match (actor_id, subject_id) with
       | Some source, Some target ->
           ensure_edge edges ~source ~target ~kind:"votes_on" ~active:false
             ~ts_iso:value.ts_iso ~meta:value.payload
-      | _ -> ())
+      | (None, _) | (_, None) -> ())
   | "decision.opened" ->
       set_subject_status Open;
       (match (actor_id, subject_id) with
       | Some source, Some target ->
           ensure_edge edges ~source ~target ~kind:"opens" ~active:false
             ~ts_iso:value.ts_iso ~meta:value.payload
-      | _ -> ())
+      | (None, _) | (_, None) -> ())
   | "decision.voted" ->
       (match (actor_id, subject_id) with
       | Some source, Some target ->
           ensure_edge edges ~source ~target ~kind:"votes_on" ~active:false
             ~ts_iso:value.ts_iso ~meta:value.payload
-      | _ -> ())
+      | (None, _) | (_, None) -> ())
   | "decision.resolved" -> set_subject_status Resolved
   | "policy.approved" ->
       set_subject_status Approved;
@@ -272,21 +272,21 @@ let reduce_event ~nodes ~edges (value : event) =
       | Some source, Some target ->
           ensure_edge edges ~source ~target ~kind:"governs" ~active:false
             ~ts_iso:value.ts_iso ~meta:value.payload
-      | _ -> ())
+      | (None, _) | (_, None) -> ())
   | "policy.denied" ->
       set_subject_status Denied;
       (match (actor_id, subject_id) with
       | Some source, Some target ->
           ensure_edge edges ~source ~target ~kind:"governs" ~active:false
             ~ts_iso:value.ts_iso ~meta:value.payload
-      | _ -> ())
+      | (None, _) | (_, None) -> ())
   | "operation.started" ->
       set_subject_status Running;
       (match (actor_id, subject_id) with
       | Some source, Some target ->
           ensure_edge edges ~source ~target ~kind:"operates_on" ~active:true
             ~ts_iso:value.ts_iso ~meta:value.payload
-      | _ -> ())
+      | (None, _) | (_, None) -> ())
   | "operation.paused" -> set_subject_status Paused
   | "operation.resumed" -> set_subject_status Running
   | "operation.stopped" -> set_subject_status Stopped
@@ -296,13 +296,13 @@ let reduce_event ~nodes ~edges (value : event) =
       | Some source, Some target ->
           ensure_edge edges ~source ~target ~kind:"participates_in"
             ~active:true ~ts_iso:value.ts_iso ~meta:value.payload
-      | _ -> ())
+      | (None, _) | (_, None) -> ())
   | "team.turn_failed" ->
       (match (actor_id, subject_id) with
       | Some source, Some target ->
           ensure_edge edges ~source ~target ~kind:"participates_in"
             ~active:false ~ts_iso:value.ts_iso ~meta:value.payload
-      | _ -> ())
+      | (None, _) | (_, None) -> ())
   | "keeper.autonomy_started" -> set_actor_status Autonomy
   | "keeper.autonomy_completed" -> set_actor_status Active
   | "keeper.guardrail" -> set_actor_status Guardrail
@@ -312,5 +312,5 @@ let reduce_event ~nodes ~edges (value : event) =
       | Some source, Some target ->
           ensure_edge edges ~source ~target ~kind:"calls_tool" ~active:false
             ~ts_iso:value.ts_iso ~meta:value.payload
-      | _ -> ())
-  | _ -> ())
+      | (None, _) | (_, None) -> ())
+  | _kind -> Log.Misc.debug "reduce_event: unhandled kind=%s" _kind)

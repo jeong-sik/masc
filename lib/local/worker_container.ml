@@ -334,7 +334,7 @@ let build_local_shell_tools ~room_config ~worker_name ~workdir =
             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
               Log.LocalWorker.warn "telemetry error for %s/%s: %s"
                 worker_name tool_name (Printexc.to_string exn))
-        | _ -> ());
+        | Some _, None | None, Some _ | None, None -> ());
         ()
       in
       Ok

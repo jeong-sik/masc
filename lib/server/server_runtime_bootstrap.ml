@@ -1077,7 +1077,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
               Log.Server.warn "gRPC keeper client init failed: %s"
                 (Printexc.to_string exn))
-       | _ -> ());
+       | Http | Ws | Webrtc | Local -> ());
       (* Standalone WebSocket transport (enabled by default, opt-out via MASC_WS_ENABLED=0) *)
       Server_ws_standalone.start ~sw ~env
         ~on_message:(fun ws_session_id body_str ->

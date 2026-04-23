@@ -43,6 +43,16 @@ let mkdir_p path =
   in
   ensure path
 
+let write_tool_policy ~base_path =
+  let config_dir = Filename.concat base_path "config" in
+  mkdir_p config_dir;
+  let path = Filename.concat config_dir "tool_policy.toml" in
+  let oc = open_out path in
+  output_string oc
+    "[git_clone]\nallowed_orgs = [\"jeong-sik\"]\ndepth = 1\ndenied_repos = [\"jeong-sik/me\"]\n";
+  close_out oc;
+  Masc_mcp.Tool_code_write.reset_policy_config_cache ()
+
 let json_bool key json =
   Yojson.Safe.Util.(json |> member key |> to_bool)
 
@@ -120,8 +130,13 @@ let create_wide_workspace_storm ~base_path ~count =
     Unix.mkdir (Filename.concat root (Printf.sprintf "aa-%04d" i)) 0o755
   done
 
+let set_workspace_origin_to_github ~repo =
+  run_ok ~cwd:repo
+    "git remote set-url origin https://github.com/jeong-sik/masc-mcp.git"
+
 let test_auto_provisionable_workspace_repo () =
   let base_path = temp_dir "masc-repo-readiness" in
+  write_tool_policy ~base_path;
   let repo = Filename.concat base_path "workspace/yousleepwhen/masc-mcp" in
   let remote = Filename.concat base_path ".remote-masc-mcp.git" in
   mkdir_p (Filename.dirname repo);
@@ -140,6 +155,7 @@ let test_auto_provisionable_workspace_repo () =
   run_ok ~cwd:repo "git add README.md";
   run_ok ~cwd:repo "git commit -q -m init";
   run_ok ~cwd:repo "git push -q origin main";
+  set_workspace_origin_to_github ~repo;
   let config = Masc_mcp.Coord.default_config base_path in
   let meta = make_meta "keeper-one" in
   let json =
@@ -149,10 +165,18 @@ let test_auto_provisionable_workspace_repo () =
   check bool "ok" true (json_bool "ok" json);
   check string "state" "auto_provisionable" (json_string "state" json);
   check string "workspace repo match" repo
-    Yojson.Safe.Util.(json |> member "workspace_repo_match" |> to_string)
+    Yojson.Safe.Util.(json |> member "workspace_repo_match" |> to_string);
+  check string "workspace repo origin"
+    "jeong-sik/masc-mcp"
+    Yojson.Safe.Util.(
+      json |> member "workspace_repo_origin" |> to_string
+      |> fun url ->
+      Masc_mcp.Tool_code_write.extract_github_org_repo url
+      |> Option.value ~default:"")
 
 let test_auto_provisionable_workspace_repo_after_file_storm () =
   let base_path = temp_dir "masc-repo-readiness" in
+  write_tool_policy ~base_path;
   let repo = Filename.concat base_path "workspace/yousleepwhen/masc-mcp" in
   let remote = Filename.concat base_path ".remote-masc-mcp.git" in
   create_file_storm ~base_path ~count:4005;
@@ -172,6 +196,7 @@ let test_auto_provisionable_workspace_repo_after_file_storm () =
   run_ok ~cwd:repo "git add README.md";
   run_ok ~cwd:repo "git commit -q -m init";
   run_ok ~cwd:repo "git push -q origin main";
+  set_workspace_origin_to_github ~repo;
   let config = Masc_mcp.Coord.default_config base_path in
   let meta = make_meta "keeper-one" in
   let json =
@@ -185,6 +210,7 @@ let test_auto_provisionable_workspace_repo_after_file_storm () =
 
 let test_auto_provisionable_workspace_repo_before_hidden_dir_storm () =
   let base_path = temp_dir "masc-repo-readiness" in
+  write_tool_policy ~base_path;
   let repo = Filename.concat base_path "workspace/yousleepwhen/masc-mcp" in
   let remote = Filename.concat base_path ".remote-masc-mcp.git" in
   create_hidden_dir_storm ~base_path ~count:4005;
@@ -204,6 +230,7 @@ let test_auto_provisionable_workspace_repo_before_hidden_dir_storm () =
   run_ok ~cwd:repo "git add README.md";
   run_ok ~cwd:repo "git commit -q -m init";
   run_ok ~cwd:repo "git push -q origin main";
+  set_workspace_origin_to_github ~repo;
   let config = Masc_mcp.Coord.default_config base_path in
   let meta = make_meta "keeper-one" in
   let json =
@@ -217,6 +244,7 @@ let test_auto_provisionable_workspace_repo_before_hidden_dir_storm () =
 
 let test_auto_provisionable_workspace_repo_before_wide_workspace_storm () =
   let base_path = temp_dir "masc-repo-readiness" in
+  write_tool_policy ~base_path;
   let repo = Filename.concat base_path "workspace/yousleepwhen/masc-mcp" in
   let remote = Filename.concat base_path ".remote-masc-mcp.git" in
   create_wide_workspace_storm ~base_path ~count:4005;
@@ -236,6 +264,7 @@ let test_auto_provisionable_workspace_repo_before_wide_workspace_storm () =
   run_ok ~cwd:repo "git add README.md";
   run_ok ~cwd:repo "git commit -q -m init";
   run_ok ~cwd:repo "git push -q origin main";
+  set_workspace_origin_to_github ~repo;
   let config = Masc_mcp.Coord.default_config base_path in
   let meta = make_meta "keeper-one" in
   let json =

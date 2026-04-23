@@ -45,6 +45,131 @@ let first_nonempty_line output =
   |> List.map String.trim
   |> List.find_opt (fun s -> s <> "")
 
+let policy_string_array_of_line ~key line =
+  let trimmed = String.trim line in
+  let prefix = key ^ " =" in
+  if not (String.starts_with ~prefix trimmed) then
+    None
+  else
+    let raw =
+      String.sub trimmed (String.length prefix)
+        (String.length trimmed - String.length prefix)
+      |> String.trim
+    in
+    if String.length raw < 2 || raw.[0] <> '[' || raw.[String.length raw - 1] <> ']'
+    then
+      Some []
+    else
+      let body = String.sub raw 1 (String.length raw - 2) in
+      let items =
+        body
+        |> String.split_on_char ','
+        |> List.map String.trim
+        |> List.filter (fun s -> s <> "")
+        |> List.filter_map (fun token ->
+             let len = String.length token in
+             if len >= 2 && token.[0] = '"' && token.[len - 1] = '"' then
+               Some (String.sub token 1 (len - 2) |> String.lowercase_ascii)
+             else
+               None)
+      in
+      Some items
+
+let load_git_clone_policy ~base_path =
+  let path = Filename.concat (Filename.concat base_path "config") "tool_policy.toml" in
+  match Safe_ops.read_file_safe path with
+  | Error _ -> [], []
+  | Ok content ->
+      let rec loop in_git_clone allowed denied = function
+        | [] -> allowed, denied
+        | raw_line :: rest ->
+            let line = String.trim raw_line in
+            if line = "" || String.starts_with ~prefix:"#" line then
+              loop in_git_clone allowed denied rest
+            else if String.length line >= 2 && line.[0] = '[' && line.[String.length line - 1] = ']'
+            then
+              loop (String.equal line "[git_clone]") allowed denied rest
+            else if not in_git_clone then
+              loop in_git_clone allowed denied rest
+            else
+              let allowed =
+                match policy_string_array_of_line ~key:"allowed_orgs" line with
+                | Some items -> items
+                | None -> allowed
+              in
+              let denied =
+                match policy_string_array_of_line ~key:"denied_repos" line with
+                | Some items -> items
+                | None -> denied
+              in
+              loop in_git_clone allowed denied rest
+      in
+      loop false [] [] (String.split_on_char '\n' content)
+
+let extract_github_org_repo url =
+  let lc = String.lowercase_ascii (String.trim url) in
+  let prefixes =
+    [
+      "https://github.com/";
+      "git@github.com:";
+      "ssh://git@github.com/";
+    ]
+  in
+  let after_prefix =
+    List.find_map
+      (fun prefix ->
+         if String.starts_with ~prefix lc then
+           Some
+             (String.sub lc (String.length prefix)
+                (String.length lc - String.length prefix))
+         else None)
+      prefixes
+  in
+  match after_prefix with
+  | None -> None
+  | Some rest ->
+      let rest =
+        if String.ends_with ~suffix:"/" rest then
+          String.sub rest 0 (String.length rest - 1)
+        else rest
+      in
+      let stripped =
+        if String.ends_with ~suffix:".git" rest then
+          String.sub rest 0 (String.length rest - 4)
+        else rest
+      in
+      match String.split_on_char '/' stripped with
+      | [ org; repo ] when org <> "" && repo <> "" -> Some (org ^ "/" ^ repo)
+      | _ -> None
+
+let extract_github_org url =
+  match extract_github_org_repo url with
+  | Some org_repo -> (
+      match String.split_on_char '/' org_repo with
+      | org :: _ -> Some org
+      | [] -> None)
+  | None -> None
+
+let validate_clone_origin_url ~base_path url =
+  let allowed_orgs, denied_repos = load_git_clone_policy ~base_path in
+  if allowed_orgs = [] then
+    Error
+      "No allowed orgs configured for git clone (git_clone.allowed_orgs in tool_policy.toml)"
+  else
+    match extract_github_org url with
+    | None ->
+        Error (Printf.sprintf "Cannot parse GitHub org from URL: %s" url)
+    | Some org when not (List.mem org allowed_orgs) ->
+        Error
+          (Printf.sprintf
+             "GitHub org '%s' not in allowed list: %s. Use the actual GitHub owner from the clone URL; do not infer an org from local workspace path segments."
+             org (String.concat ", " allowed_orgs))
+    | Some _ -> (
+        match extract_github_org_repo url with
+        | Some org_repo when List.mem org_repo denied_repos ->
+            Error (Printf.sprintf "Repository '%s' is in the denied list" org_repo)
+        | _ -> Ok ())
+
 (** Check if directory is a git repository - delegates to Coord_git *)
 let is_git_repo config =
   Coord_git.is_git_repo ~base_path:config.base_path
@@ -463,52 +588,43 @@ let auto_provision_sandbox_clone ~config ~agent_name ~repos_dir ~repo_name =
                    op=git_clone explicitly."
                   repo_name repos_dir))
       else
-        let status, output =
-          run_argv_with_status [ "git"; "clone"; source_root; clone_path ]
-        in
-        if status <> Unix.WEXITED 0 then
-          Error
-            (partial_clone_error ~clone_path
-               ~msg:
-                 (Printf.sprintf
-                    "auto_provision_clone_failed: git clone from workspace repo %s \
-                     into %s failed: %s"
-                    source_root clone_path
-                    (let detail = String.trim output in
-                     if detail = "" then "(no output)" else detail)))
-        else (
-          match git_origin_url source_root with
-          | Some origin_url ->
-              let set_status, set_output =
-                run_argv_with_status
-                  [ "git"; "-C"; clone_path; "remote"; "set-url"; "origin";
-                    origin_url ]
-              in
-              if set_status <> Unix.WEXITED 0 then
-                Error
-                  (partial_clone_error ~clone_path
-                     ~msg:
-                       (Printf.sprintf
-                          "auto_provision_clone_failed: cloned %s into %s but \
-                           could not restore origin %s: %s"
-                          source_root clone_path origin_url
-                          (let detail = String.trim set_output in
-                           if detail = "" then "(no output)" else detail)))
-              else
-                Ok
-                  ( clone_path,
-                    Some
+        (match git_origin_url source_root with
+         | None ->
+             Error
+               (IoError
+                  (Printf.sprintf
+                     "auto_provision_clone_failed: workspace repo %s has no origin remote. \
+                      Sandbox auto-provision requires cloning from origin, not from the local checkout."
+                     source_root))
+         | Some origin_url -> (
+             match validate_clone_origin_url ~base_path:config.base_path origin_url with
+             | Error err ->
+                 Error
+                   (IoError
                       (Printf.sprintf
-                         "Sandbox clone auto-provisioned from workspace repo %s."
-                         source_root) )
-          | None ->
-              Ok
-                ( clone_path,
-                  Some
-                    (Printf.sprintf
-                       "Sandbox clone auto-provisioned from workspace repo %s \
-                        (origin remote unavailable on source clone)."
-                       source_root) ))
+                         "auto_provision_clone_failed: origin %s rejected by clone policy: %s"
+                         origin_url err))
+             | Ok () ->
+                 let status, output =
+                   run_argv_with_status [ "git"; "clone"; origin_url; clone_path ]
+                 in
+                 if status <> Unix.WEXITED 0 then
+                   Error
+                     (partial_clone_error ~clone_path
+                        ~msg:
+                          (Printf.sprintf
+                             "auto_provision_clone_failed: git clone from origin %s \
+                              into %s failed: %s"
+                             origin_url clone_path
+                             (let detail = String.trim output in
+                              if detail = "" then "(no output)" else detail)))
+                 else
+                   Ok
+                     ( clone_path,
+                       Some
+                         (Printf.sprintf
+                            "Sandbox clone auto-provisioned from origin %s (discovered via workspace repo %s)."
+                            origin_url source_root) )))
   | matches ->
       Error
         (workspace_repo_ambiguous_error ~repo_name ~search_root ~matches)

@@ -1882,9 +1882,15 @@ export type ToolCallEntry = {
   success: boolean
   duration_ms: number
   model?: string
+  trace_id?: string
+  session_id?: string
+  turn?: number
+  keeper_turn_id?: number
+  task_id?: string
+  lane?: string
 }
 
-type ToolCallsResponse = {
+export type ToolCallsResponse = {
   keeper: string
   count: number
   entries: ToolCallEntry[]
@@ -1926,6 +1932,12 @@ function decodeToolCallEntry(raw: unknown): ToolCallEntry | null {
     success: asBoolean(raw.success, false),
     duration_ms: asNumber(raw.duration_ms, 0),
     model: asString(raw.model),
+    trace_id: asString(raw.trace_id),
+    session_id: asString(raw.session_id),
+    turn: asNumber(raw.turn),
+    keeper_turn_id: asNumber(raw.keeper_turn_id),
+    task_id: asString(raw.task_id),
+    lane: asString(raw.lane),
   }
 }
 

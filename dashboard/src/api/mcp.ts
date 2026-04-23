@@ -42,10 +42,11 @@ function shouldRefreshDevToken(): boolean {
   const meta = getStoredTokenMeta()
   if (!token) return true
   if (meta?.source === 'dev') return true
-  // Legacy sessions only stored the raw token string. On loopback with the
-  // default dashboard actor, treat them as managed-token candidates so
-  // frequent restarts or base_path flips self-heal without manual clearing.
-  return meta == null && !isRemoteAccess() && currentDashboardActor() === 'dashboard'
+  const actor = currentDashboardActor()
+  if (isRemoteAccess() || actor !== 'dashboard') return false
+  // Loopback dashboard sessions should self-heal if they are still holding
+  // a borrowed non-dashboard token (for example an old codex paste/URL token).
+  return meta == null || meta.actor == null || meta.actor !== actor
 }
 
 /** Fetch the loopback-only dev token once per page load and stash it so

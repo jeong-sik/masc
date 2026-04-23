@@ -450,6 +450,9 @@ proactive_enabled = true
 room_signal_prompt_enabled = true
 policy_voice_enabled = false
 autoboot_enabled = false
+github_identity = "anyang-keepers"
+git_identity_mode = "keeper_alias"
+active_goal_ids = ["goal-runtime", "goal-masc-mcp"]
 |} in
   match TL.parse_toml input with
   | Error e -> fail e
@@ -467,7 +470,29 @@ autoboot_enabled = false
       check (option bool) "room signal prompt" (Some true)
         d.room_signal_prompt_enabled;
       check (option bool) "policy_voice" (Some false) d.policy_voice_enabled;
-      check (option bool) "autoboot_enabled" (Some false) d.autoboot_enabled
+      check (option bool) "autoboot_enabled" (Some false) d.autoboot_enabled;
+      check (option string) "github_identity" (Some "anyang-keepers")
+        d.github_identity;
+      check (option string) "git_identity_mode" (Some "keeper_alias")
+        d.git_identity_mode;
+      check (option (list string)) "active_goal_ids"
+        (Some [ "goal-runtime"; "goal-masc-mcp" ])
+        d.active_goal_ids
+
+let test_profile_rejects_invalid_git_identity_mode () =
+  let input = {|
+[keeper]
+goal = "test"
+git_identity_mode = "hot_switch"
+|} in
+  match TL.parse_toml input with
+  | Error e -> fail e
+  | Ok doc ->
+      (match KTP.profile_defaults_of_toml doc with
+       | Ok _ -> fail "expected invalid git_identity_mode error"
+       | Error msg ->
+           check bool "mentions invalid git_identity_mode" true
+             (contains_substring msg "invalid git_identity_mode"))
 
 let test_profile_rejects_invalid_social_model () =
   let input = {|
@@ -959,6 +984,9 @@ tool_preset = "coding"
 tool_also_allow = ["x"]
 autoboot_enabled = false
 cascade_name = "big_three"
+github_identity = "anyang-keepers"
+git_identity_mode = "keeper_alias"
+active_goal_ids = ["goal-runtime"]
 |} in
   match TL.parse_toml input with
   | Error e -> fail e
@@ -1182,6 +1210,8 @@ let () =
           test_case "full" `Quick test_profile_full;
           test_case "rejects invalid social_model" `Quick
             test_profile_rejects_invalid_social_model;
+          test_case "rejects invalid git_identity_mode" `Quick
+            test_profile_rejects_invalid_git_identity_mode;
           test_case "rejects removed model keys" `Quick
             test_profile_rejects_removed_model_keys;
           test_case "rejects removed also_allow alias" `Quick

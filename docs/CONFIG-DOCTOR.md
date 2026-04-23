@@ -1,6 +1,6 @@
 ---
 status: runbook
-last_verified: 2026-04-17
+last_verified: 2026-04-23
 code_refs:
   - bin/main_eio.ml
   - lib/config/
@@ -37,10 +37,13 @@ JSON output for automation:
 
 ```bash
 ./_build/default/bin/main_eio.exe doctor config --base-path "$PWD"
+./_build/default/bin/main_eio.exe doctor auth --base-path "$PWD"
 ./_build/default/bin/main_eio.exe doctor sidecar <discord|slack|telegram|imessage|cli>
 ```
 
 Sidecar dispatch 는 `docs/DOCTOR-ARCHITECTURE.md` 의 "Dispatch" 섹션 참조.
+`codex cannot CanAdmin` 같은 auth/bearer mismatch 는 이 문서 범위가 아니며,
+`doctor auth` + `docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md` 를 사용한다.
 
 Typical results:
 

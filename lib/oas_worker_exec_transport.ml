@@ -649,7 +649,6 @@ module Kimi_cli_transport_local = struct
     if should_log_stderr_line line then
       Llm_provider.Cli_common_subprocess.default_on_stderr_line
         ~name:"kimi" line
-
   let exit_code_of_message message =
     let prefix = "kimi exited with code " in
     if not (starts_with message prefix) then None

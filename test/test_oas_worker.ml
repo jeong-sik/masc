@@ -1867,7 +1867,6 @@ let test_kimi_cli_classify_cli_error_redacts_resumable_session_detail () =
       Alcotest.(check bool) "raw session id removed" false
         (contains_substring ~needle:"ff37febe-2adb-4ac6-9dc6-cae23e672fbc" reason)
   | _ -> Alcotest.fail "expected resumable session to map to AcceptRejected"
-
 let test_codex_cli_prompt_preflight_uses_pipeline_context_window_fallback () =
   let provider_cfg = make_codex_cli_provider_cfg () in
   let config =

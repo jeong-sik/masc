@@ -58,6 +58,31 @@ let with_eio_runtime f =
       Fs_compat.clear_fs ())
     f
 
+let capture_stderr f =
+  let pipe_read, pipe_write = Unix.pipe () in
+  let saved_stderr = Unix.dup Unix.stderr in
+  Unix.dup2 pipe_write Unix.stderr;
+  Unix.close pipe_write;
+  (try f () with _ -> ());
+  flush stderr;
+  Unix.dup2 saved_stderr Unix.stderr;
+  Unix.close saved_stderr;
+  Unix.set_nonblock pipe_read;
+  let buf = Buffer.create 256 in
+  let tmp = Bytes.create 256 in
+  let rec read_all () =
+    match Unix.read pipe_read tmp 0 256 with
+    | 0 -> ()
+    | n ->
+        Buffer.add_subbytes buf tmp 0 n;
+        read_all ()
+    | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK), _, _) -> ()
+    | exception _ -> ()
+  in
+  read_all ();
+  Unix.close pipe_read;
+  Buffer.contents buf
+
 (* ============================================ *)
 (* Token generation tests                       *)
 (* ============================================ *)
@@ -312,6 +337,24 @@ let test_verify_token_keeper_alias_fallback () =
         (Printf.sprintf
            "keeper alias should verify via fallback credential: %s"
            (Types.masc_error_to_string e))
+
+let test_load_credential_missing_keeper_alias_stays_quiet () =
+  let dir = setup_test_room () in
+  let resolved, stderr_output =
+    Fun.protect
+      ~finally:(fun () -> cleanup_test_room dir)
+      (fun () ->
+        let resolved = ref None in
+        let stderr_output =
+          capture_stderr (fun () ->
+            resolved := Auth.load_credential dir "keeper-sangsu-agent")
+        in
+        (!resolved, stderr_output))
+  in
+  check (option string) "missing keeper alias returns none" None
+    (Option.map (fun cred -> cred.Types.agent_name) resolved);
+  check string "missing keeper alias emits no parse noise" ""
+    (String.trim stderr_output)
 
 let test_verify_token_dashboard_legacy_alias_fallback () =
   let dir = setup_test_room () in
@@ -684,6 +727,8 @@ let () =
         test_extract_agent_type_prefix_keeper_aliases;
       test_case "verify_token keeper alias fallback" `Quick
         test_verify_token_keeper_alias_fallback;
+      test_case "load_credential missing keeper alias stays quiet" `Quick
+        test_load_credential_missing_keeper_alias_stays_quiet;
       test_case "verify_token dashboard legacy alias fallback" `Quick
         test_verify_token_dashboard_legacy_alias_fallback;
       test_case "save_raw_token_credential uses provided token" `Quick

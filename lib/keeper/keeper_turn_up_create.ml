@@ -366,7 +366,8 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         updated_at = now_iso ();
         max_context_override = p.max_context_override_opt;
         continuity_summary = "";
-        active_goal_ids = [];
+        active_goal_ids =
+          Option.value ~default:[] p.profile_defaults.active_goal_ids;
         paused = false;
         autoboot_enabled;
         current_task_id = None;

@@ -22,6 +22,7 @@
    auto_recall
    auto_responder
    auth
+   auth_doctor
    board
    board_core
    board_core_classify

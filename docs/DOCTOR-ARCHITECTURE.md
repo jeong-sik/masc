@@ -1,10 +1,11 @@
 ---
 status: design
-last_verified: 2026-04-19
+last_verified: 2026-04-23
 code_refs:
   - sidecars/shared/gate_shared/doctor.py
   - sidecars/discord-bot/src/doctor.py
   - bin/main_eio.ml
+  - lib/auth_doctor.ml
   - lib/doctor_dispatch.ml
   - lib/server/server_routes_http_routes_dashboard.ml
   - dashboard/src/components/doctor-panel.ts
@@ -129,6 +130,7 @@ class AutoFix:
 | 계층 | Doctor | 구현 상태 |
 |------|--------|-----------|
 | OCaml 서버 | `masc-mcp doctor config` — 베이스 경로 / 활성 config root | 운영 중 (`docs/CONFIG-DOCTOR.md`) |
+| OCaml 서버 | `masc-mcp doctor auth` — auth mode / admin bearer readiness / role mismatch | 운영 중 (`docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md`) |
 | Discord sidecar | `masc-mcp doctor sidecar discord` ↔ `python -m src doctor` | 운영 중 |
 | Slack sidecar | `masc-mcp doctor sidecar slack` ↔ `python -m src doctor` | 운영 중 |
 | Telegram sidecar | `masc-mcp doctor sidecar telegram` ↔ `python -m src doctor` | 운영 중 |
@@ -143,12 +145,17 @@ class AutoFix:
 ```
 masc-mcp doctor                     # default → config (backward-compat)
 masc-mcp doctor config              # base path / config root 진단
+masc-mcp doctor auth                # auth/bearer/role mismatch 진단
 masc-mcp doctor sidecar <name>      # python -m src doctor 를 해당 sidecar 디렉터리에서 실행
 masc-mcp doctor sidecar <name> --json
 masc-mcp doctor all                 # config + 5 sidecar 연쇄 실행 + aggregate 요약
 ```
 
 지원 sidecar 이름: `discord`, `slack`, `telegram`, `imessage`, `cli`.
+
+`doctor all` 은 현재 `config + registered sidecars` aggregate 만 포함한다.
+`auth` 는 로컬 operator 증상(`cannot CanAdmin`, dev-token bootstrap, worker/admin role drift)
+을 다루는 명시적 서브커맨드로 유지한다.
 
 구현은 `lib/doctor_dispatch.ml` (pure mapping + `aggregate_exit_code`) +
 `bin/main_eio.ml` 의 `doctor_sidecar_exit` / `doctor_all_exit`. Python 실행

@@ -100,6 +100,24 @@ let test_auto_think_policy_prioritizes_response () =
     (Masc_mcp.Tool_local_runtime_probe.effective_think_enabled
        Masc_mcp.Tool_local_runtime_probe.Think_enabled)
 
+let test_runtime_probe_reports_effective_think_mode () =
+  let open Yojson.Safe.Util in
+  let run mode =
+    Masc_mcp.Tool_local_runtime_probe.runtime_ollama_probe_json
+      ~server_url:"http://127.0.0.1:1" ~model:"dummy-probe-model"
+      ~think_mode:mode ~timeout_sec:3 ~ps_timeout_sec:1 ()
+  in
+  let auto = run Masc_mcp.Tool_local_runtime_probe.Think_auto in
+  check string "auto mode reported" "auto"
+    (auto |> member "think_mode" |> to_string);
+  check bool "auto effective think false" false
+    (auto |> member "think" |> to_bool);
+  let enabled = run Masc_mcp.Tool_local_runtime_probe.Think_enabled in
+  check string "enabled mode reported" "enabled"
+    (enabled |> member "think_mode" |> to_string);
+  check bool "enabled effective think true" true
+    (enabled |> member "think" |> to_bool)
+
 let test_normalize_server_url_strips_trailing_slashes () =
   check string "normalizes trailing slash" "http://127.0.0.1:11434"
     (Masc_mcp.Tool_local_runtime_probe.normalize_ollama_server_url
@@ -193,6 +211,8 @@ let () =
             test_think_mode_parses_adaptive_policy;
           test_case "auto think policy prioritizes response" `Quick
             test_auto_think_policy_prioritizes_response;
+          test_case "runtime probe reports effective think mode" `Quick
+            test_runtime_probe_reports_effective_think_mode;
           test_case "computes tok per second from generate response" `Quick
             test_ollama_generate_parser_computes_tok_per_second;
         ] );

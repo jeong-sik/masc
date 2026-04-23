@@ -120,6 +120,21 @@ let cached_judgments_still_fresh ~now_ts (st : state) =
   | Some expires_at -> expires_at > now_ts
   | None -> false
 
+let cached_result_still_fresh ~now_ts (st : state) =
+  cached_judgments_still_fresh ~now_ts st
+  && (Option.is_some st.generated_at
+      || Option.is_some st.generated_at_unix
+      || Option.is_some st.model_used)
+
+let mark_fresh_cache_served (st : state) =
+  st.refreshing <- false;
+  st.judge_online <- true;
+  if st.runtime_status <> status_stale_visible then begin
+    st.runtime_status <- status_online;
+    st.degraded_reason <- None;
+    st.last_error <- None
+  end
+
 let mark_refresh_failure ~now_ts (st : state) ~message =
   st.refreshing <- false;
   (* Preserve the last good snapshot while its TTL is still valid. A slow
@@ -521,7 +536,19 @@ let refresh_once ~sw ~net
      Previously every branch was silent in steady state — a hung daemon was
      indistinguishable from a healthy one producing zero events (#8319). *)
   Log.Governance.debug "refresh_once: cycle start";
-  if should_backoff ~sw ~net then begin
+  ignore (latest_judgments base_path);
+  let served_from_cache =
+    let now_ts = Unix.gettimeofday () in
+    with_lock st (fun () ->
+        if cached_result_still_fresh ~now_ts st then begin
+          mark_fresh_cache_served st;
+          true
+        end else
+          false)
+  in
+  if served_from_cache then
+    Log.Governance.debug "refresh_once: fresh cached result; skipping compute"
+  else if should_backoff ~sw ~net then begin
     let was_online =
       with_lock st (fun () ->
           let was_online = st.judge_online in

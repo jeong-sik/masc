@@ -324,6 +324,48 @@ let test_refresh_failure_marks_expired_cache_offline () =
       check (option string) "last_error recorded"
         (Some "Execution timed out after 60.0s") status.last_error)
 
+let test_refresh_once_skips_fresh_cached_result () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      with_test_fs env @@ fun () ->
+      let st = Lib.Dashboard_governance_judge.get_state dir in
+      let now = Unix.gettimeofday () in
+      let generated_at = iso8601_of_unix now in
+      let expires_at_unix = now +. 600.0 in
+      let expires_at = iso8601_of_unix expires_at_unix in
+      Lib.Dashboard_governance_judge.with_lock st (fun () ->
+        st.refreshing <- true;
+        st.judge_online <- true;
+        st.runtime_status <- "refreshing";
+        st.generated_at <- Some generated_at;
+        st.generated_at_unix <- Some now;
+        st.expires_at <- Some expires_at;
+        st.expires_at_unix <- Some expires_at_unix;
+        st.model_used <- Some "glm:cached";
+        st.last_error <- None);
+      let build_called = ref false in
+      Eio.Switch.run @@ fun sw ->
+      Lib.Dashboard_governance_judge.refresh_once ~sw
+        ~net:(Eio.Stdenv.net env)
+        ~masc_tools:[]
+        ~dispatch:(fun ~name:_ ~args:_ -> (false, "unused"))
+        ~base_path:dir
+        ~build_facts:(fun () ->
+          build_called := true;
+          `Assoc []);
+      check bool "fresh cached result skips build_facts" false !build_called;
+      let status =
+        Lib.Dashboard_governance_judge.runtime_status_at
+          ~now_ts:(Unix.gettimeofday ()) dir
+      in
+      check bool "judge remains online" true status.judge_online;
+      check bool "refreshing cleared" false status.refreshing;
+      check string "runtime status is online" "online" status.status;
+      check (option string) "last_error stays clear" None status.last_error)
+
 let test_backoff_runtime_status_is_structured () =
   let dir = test_dir () in
   Fun.protect
@@ -617,6 +659,8 @@ let () =
             test_refresh_failure_keeps_fresh_cache_online;
           test_case "refresh failure marks expired cache offline" `Quick
             test_refresh_failure_marks_expired_cache_offline;
+          test_case "refresh_once skips fresh cached result" `Quick
+            test_refresh_once_skips_fresh_cached_result;
           test_case "backoff runtime status is structured" `Quick
             test_backoff_runtime_status_is_structured;
           test_case "monitoring uses live runtime" `Quick

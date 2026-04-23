@@ -22,6 +22,8 @@ TOOL_TIMEOUT_SEC="${TOOL_TIMEOUT_SEC:-35}"
 EXPECT_KEEPERS="${EXPECT_KEEPERS:-1}"
 KEEP_SERVER="${KEEP_SERVER:-0}"
 EXPECT_HEALTH_MODE="${EXPECT_HEALTH_MODE:-auto}"
+# Probe only a small deterministic prefix from masc_keeper_list so repeated
+# runs stay stable without turning this read-path harness into an all-keepers sweep.
 KEEPER_STATUS_SAMPLE_LIMIT="${KEEPER_STATUS_SAMPLE_LIMIT:-3}"
 
 MASC_STATUS_FIRST_MAX_SEC="${MASC_STATUS_FIRST_MAX_SEC:-5}"
@@ -263,10 +265,10 @@ run_mode() {
   local execution_cache_state transport_cache_state
   local keeper_json keeper_status_json keeper_name transport_json execution_json
   local payload_contract_ok quiet_reason_contract_ok pending_lazy_ok health_mode_ok keeper_fiber_ok
-  local health_mode_check_enabled keeper_status_attempted_json
-  local keeper_candidate request_id keeper_status_attempt_count
+  local health_mode_check_enabled keeper_status_attempted_json keeper_status_sample_limit
+  local keeper_candidate request_id
   local result_pass="true"
-  local -a keeper_names=()
+  local -a keeper_names=() keeper_status_sample_names=()
 
   if [[ "$(normalize_bool "$START_SERVER")" = "1" ]]; then
     port="$(pick_port)"
@@ -352,16 +354,19 @@ run_mode() {
   mapfile -t keeper_names < <(printf '%s' "$keeper_json" | jq -r '.keepers[]?' 2>/dev/null || true)
   keeper_name=""
   keeper_status_attempted_json='[]'
+  keeper_status_sample_limit="$KEEPER_STATUS_SAMPLE_LIMIT"
 
   if [[ "$(normalize_bool "$EXPECT_KEEPERS")" = "1" ]]; then
     if [[ "${#keeper_names[@]}" -gt 0 ]]; then
+      if ! [[ "$keeper_status_sample_limit" =~ ^[0-9]+$ ]]; then
+        keeper_status_sample_limit="3"
+      fi
+      # masc_keeper_list names are sorted server-side. Sample only the first N
+      # names so the harness stays deterministic while still avoiding a hard
+      # dependency on one specific keeper.
+      keeper_status_sample_names=("${keeper_names[@]:0:$keeper_status_sample_limit}")
       request_id=15
-      keeper_status_attempt_count=0
-      for keeper_candidate in "${keeper_names[@]}"; do
-        if (( keeper_status_attempt_count >= KEEPER_STATUS_SAMPLE_LIMIT )); then
-          break
-        fi
-        keeper_status_attempt_count=$((keeper_status_attempt_count + 1))
+      for keeper_candidate in "${keeper_status_sample_names[@]}"; do
         keeper_status_attempted_json="$(
           printf '%s' "$keeper_status_attempted_json" \
             | jq -c --arg name "$keeper_candidate" '. + [$name]'
@@ -501,6 +506,7 @@ run_mode() {
       --arg keeper_status_json "$keeper_status_json" \
       --arg keeper_name "$keeper_name" \
       --arg keeper_status_attempted_json "$keeper_status_attempted_json" \
+      --arg keeper_status_sample_limit "$keeper_status_sample_limit" \
       --arg transport_status_json "$transport_json" \
       --arg execution_payload_json "$execution_json" \
       --arg execution_json_sample "$(printf '%s' "$execution_json" | jq -c '{projection_diagnostics, generated_at}')" \
@@ -564,6 +570,12 @@ run_mode() {
           health_transport_mode: ($health_mode_ok == "true"),
           execution_cache_state: $execution_cache_state,
           transport_cache_state: $transport_cache_state
+        },
+        keeper_status_sampling: {
+          strategy: "deterministic_sorted_name_prefix",
+          exhaustive: false,
+          sample_limit: ($keeper_status_sample_limit | num_or_zero),
+          attempted_count: ($keeper_status_attempted | length)
         },
         keeper_name: (if ($keeper_name | length) > 0 then $keeper_name else null end),
         keeper_list_names: (($keeper_list.keepers // [])[:5]),

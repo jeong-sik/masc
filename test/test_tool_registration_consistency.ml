@@ -188,7 +188,6 @@ let test_benchmark_scripts_only_reference_registered_tools () =
      linter does not block unrelated PRs. *)
   let pruned_benchmark_exceptions =
     [
-      "masc_find_by_capability";
       "masc_runtime_verify";
       "masc_lock";
       "masc_unlock";

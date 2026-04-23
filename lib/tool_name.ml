@@ -195,24 +195,19 @@ module Masc = struct
     | Complete_task
     | Dashboard
     | Deliver
-    | Dispatch_assign
     | Dispatch_plan
     | Goal_list
     | Goal_review
     | Goal_transition
     | Goal_upsert
     | Goal_verify
-    | Find_by_capability
     | Heartbeat
     | Join
     | Leave
     | List_tasks
     | Messages
     | Note_add
-    | Operation_checkpoint
-    | Operation_finalize
     | Operation_pause
-    | Operation_resume
     | Operation_start
     | Operation_status
     | Operation_stop
@@ -246,7 +241,6 @@ module Masc = struct
     | Worktree_create
     | Worktree_list
     | Worktree_remove
-    | Worktree_status
     | Approval_get
     | Collaboration_graph
     | Config
@@ -305,24 +299,19 @@ module Masc = struct
     | Complete_task -> "masc_complete_task"
     | Dashboard -> "masc_dashboard"
     | Deliver -> "masc_deliver"
-    | Dispatch_assign -> "masc_dispatch_assign"
     | Dispatch_plan -> "masc_dispatch_plan"
     | Goal_list -> "masc_goal_list"
     | Goal_review -> "masc_goal_review"
     | Goal_transition -> "masc_goal_transition"
     | Goal_upsert -> "masc_goal_upsert"
     | Goal_verify -> "masc_goal_verify"
-    | Find_by_capability -> "masc_find_by_capability"
     | Heartbeat -> "masc_heartbeat"
     | Join -> "masc_join"
     | Leave -> "masc_leave"
     | List_tasks -> "masc_list_tasks"
     | Messages -> "masc_messages"
     | Note_add -> "masc_note_add"
-    | Operation_checkpoint -> "masc_operation_checkpoint"
-    | Operation_finalize -> "masc_operation_finalize"
     | Operation_pause -> "masc_operation_pause"
-    | Operation_resume -> "masc_operation_resume"
     | Operation_start -> "masc_operation_start"
     | Operation_status -> "masc_operation_status"
     | Operation_stop -> "masc_operation_stop"
@@ -356,7 +345,6 @@ module Masc = struct
     | Worktree_create -> "masc_worktree_create"
     | Worktree_list -> "masc_worktree_list"
     | Worktree_remove -> "masc_worktree_remove"
-    | Worktree_status -> "masc_worktree_status"
     | Approval_get -> "masc_approval_get"
     | Collaboration_graph -> "masc_collaboration_graph"
     | Config -> "masc_config"
@@ -415,24 +403,19 @@ module Masc = struct
     | "masc_complete_task" -> Some Complete_task
     | "masc_dashboard" -> Some Dashboard
     | "masc_deliver" -> Some Deliver
-    | "masc_dispatch_assign" -> Some Dispatch_assign
     | "masc_dispatch_plan" -> Some Dispatch_plan
     | "masc_goal_list" -> Some Goal_list
     | "masc_goal_review" -> Some Goal_review
     | "masc_goal_transition" -> Some Goal_transition
     | "masc_goal_upsert" -> Some Goal_upsert
     | "masc_goal_verify" -> Some Goal_verify
-    | "masc_find_by_capability" -> Some Find_by_capability
     | "masc_heartbeat" -> Some Heartbeat
     | "masc_join" -> Some Join
     | "masc_leave" -> Some Leave
     | "masc_list_tasks" -> Some List_tasks
     | "masc_messages" -> Some Messages
     | "masc_note_add" -> Some Note_add
-    | "masc_operation_checkpoint" -> Some Operation_checkpoint
-    | "masc_operation_finalize" -> Some Operation_finalize
     | "masc_operation_pause" -> Some Operation_pause
-    | "masc_operation_resume" -> Some Operation_resume
     | "masc_operation_start" -> Some Operation_start
     | "masc_operation_status" -> Some Operation_status
     | "masc_operation_stop" -> Some Operation_stop
@@ -466,7 +449,6 @@ module Masc = struct
     | "masc_worktree_create" -> Some Worktree_create
     | "masc_worktree_list" -> Some Worktree_list
     | "masc_worktree_remove" -> Some Worktree_remove
-    | "masc_worktree_status" -> Some Worktree_status
     | "masc_approval_get" -> Some Approval_get
     | "masc_collaboration_graph" -> Some Collaboration_graph
     | "masc_config" -> Some Config

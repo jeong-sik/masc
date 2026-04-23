@@ -101,24 +101,19 @@ module Masc : sig
     | Complete_task
     | Dashboard
     | Deliver
-    | Dispatch_assign
     | Dispatch_plan
     | Goal_list
     | Goal_review
     | Goal_transition
     | Goal_upsert
     | Goal_verify
-    | Find_by_capability
     | Heartbeat
     | Join
     | Leave
     | List_tasks
     | Messages
     | Note_add
-    | Operation_checkpoint
-    | Operation_finalize
     | Operation_pause
-    | Operation_resume
     | Operation_start
     | Operation_status
     | Operation_stop
@@ -152,7 +147,6 @@ module Masc : sig
     | Worktree_create
     | Worktree_list
     | Worktree_remove
-    | Worktree_status
     | Approval_get
     | Collaboration_graph
     | Config

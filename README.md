@@ -315,6 +315,7 @@ cd dashboard && MASC_DASHBOARD_PROXY_TARGET="http://127.0.0.1:${PORT}" pnpm run 
 
 - For manual rebuilds, run `cd dashboard && pnpm run build`.
 - For local admin bearer bootstrap and dashboard keeper lifecycle control, see [docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md).
+- If dashboard save or keeper lifecycle calls fail with `Forbidden` or `cannot CanAdmin`, run `./_build/default/bin/main_eio.exe doctor auth --base-path "$PWD"` before editing auth files.
 
 ## Verification
 
@@ -346,6 +347,7 @@ CI_TEST_TIMEOUT_SEC=1200 CI_TEST_HEARTBEAT_SEC=30 \
 - Binding to `0.0.0.0` or `::` enables strict auth; local `/mcp` fails closed unless `require_token=true`.
 - `/mcp/operator` is bearer-token only with a remote-safe surface. Do not expose full `/mcp` externally.
 - Command-plane compatibility is retired from the supported product contract. Historical docs may still mention it, but new callers must not depend on it.
+- `doctor auth` is the first proof surface for role/bearer mismatches such as `codex cannot CanAdmin`.
 - See [docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md) and [docs/spec/09-server-transport.md](docs/spec/09-server-transport.md).
 
 ## Product and Planning Docs
@@ -371,7 +373,7 @@ CI_TEST_TIMEOUT_SEC=1200 CI_TEST_HEARTBEAT_SEC=30 \
 | [docs/KEEPER-USER-MANUAL.md](docs/KEEPER-USER-MANUAL.md) | Keeper lifecycle and troubleshooting |
 | [docs/SUPERVISOR-MODE.md](docs/SUPERVISOR-MODE.md) | Supervised execution / operator workflow |
 | [docs/OAS-MASC-BOUNDARY.md](docs/OAS-MASC-BOUNDARY.md) | OAS/MASC ownership boundary |
-| [docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md) | Dashboard auth bootstrap |
+| [docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md) | Dashboard auth bootstrap, `doctor auth`, and admin bearer runbook |
 | [docs/spec/SPEC-INDEX.md](docs/spec/SPEC-INDEX.md) | Spec suite (19 specs) |
 | [ROADMAP.md](ROADMAP.md) | Version, release truth, active tracks |
 | [docs/PRODUCT-OPERATING-PLAN.md](docs/PRODUCT-OPERATING-PLAN.md) | Product promise, execution tracks |

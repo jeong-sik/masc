@@ -29,6 +29,7 @@ module Dashboard_mission = Masc_mcp.Dashboard_mission
 module Dashboard_mission_briefing = Masc_mcp.Dashboard_mission_briefing
 module Build_identity = Masc_mcp.Build_identity
 module Config_doctor = Masc_mcp.Config_doctor
+module Auth_doctor = Masc_mcp.Auth_doctor
 module Graphql_api = Masc_mcp.Graphql_api
 module Types = Types
 module Tempo = Masc_mcp.Tempo
@@ -637,6 +638,22 @@ let doctor_cmd_exit base_path as_json =
   print_endline output;
   Config_doctor.exit_code report
 
+let doctor_auth_cmd_exit base_path as_json =
+  let report =
+    Auth_doctor.analyze
+      ~base_path_input:base_path
+      ~default_base_path:(default_base_path ())
+      ()
+  in
+  let output =
+    if as_json then
+      Auth_doctor.to_yojson report |> Yojson.Safe.pretty_to_string
+    else
+      Auth_doctor.render_text report
+  in
+  print_endline output;
+  Auth_doctor.exit_code report
+
 let doctor_sidecar_exit name as_json =
   match Masc_mcp.Doctor_dispatch.sidecar_dir name with
   | None ->
@@ -711,6 +728,13 @@ let doctor_config_cmd =
   in
   let info = Cmd.info "config" ~doc in
   Cmd.v info Term.(const doctor_cmd_exit $ base_path $ doctor_json)
+
+let doctor_auth_cmd =
+  let doc =
+    "Diagnose auth mode, bearer readiness, and role/permission mismatches"
+  in
+  let info = Cmd.info "auth" ~doc in
+  Cmd.v info Term.(const doctor_auth_cmd_exit $ base_path $ doctor_json)
 
 let doctor_sidecar_cmd =
   let doc =
@@ -867,7 +891,7 @@ let doctor_cmd =
   Cmd.group
     ~default:Term.(const doctor_cmd_exit $ base_path $ doctor_json)
     info
-    [ doctor_config_cmd; doctor_sidecar_cmd; doctor_all_cmd ]
+    [ doctor_config_cmd; doctor_auth_cmd; doctor_sidecar_cmd; doctor_all_cmd ]
 
 let init_force =
   let doc = "Overwrite existing config files instead of skipping them" in

@@ -274,6 +274,7 @@ type keeper_profile_defaults = {
   (* Telemetry Feedback — inject behavioral stats into keeper context *)
   telemetry_feedback_enabled : bool option;
   telemetry_feedback_window_hours : int option;
+  per_provider_timeout_state : per_provider_timeout_state;
   (* Per-provider timeout for cascade fallback. None = use turn budget heuristic. *)
   per_provider_timeout : float option;
   social_model : string option;
@@ -291,6 +292,11 @@ type keeper_profile_defaults = {
      build_args picks them up.  Empty list = no overrides. *)
   oas_env : (string * string) list;
 }
+
+and per_provider_timeout_state =
+  | Per_provider_timeout_unset
+  | Per_provider_timeout_invalid
+  | Per_provider_timeout_set
 
 type persona_summary = {
   persona_name : string;
@@ -333,6 +339,7 @@ let empty_keeper_profile_defaults = {
   work_discovery_guidance = None;
   telemetry_feedback_enabled = None;
   telemetry_feedback_window_hours = None;
+  per_provider_timeout_state = Per_provider_timeout_unset;
   per_provider_timeout = None;
   social_model = None;
   max_turns_per_call = None;
@@ -357,6 +364,52 @@ let normalize_per_provider_timeout_opt ~(source : string)
         source (string_of_float f);
       None
   | None -> None
+;;
+
+let per_provider_timeout_of_declared_float_opt ~(source : string)
+    ~(declared : bool)
+    (value : float option)
+    : per_provider_timeout_state * float option =
+  if not declared then
+    Per_provider_timeout_unset, None
+  else
+    match value with
+    | None ->
+        Log.Keeper.warn
+          "%s per_provider_timeout has invalid type; ignoring"
+          source;
+        Per_provider_timeout_invalid, None
+    | Some _ ->
+        (match normalize_per_provider_timeout_opt ~source value with
+         | Some f -> Per_provider_timeout_set, Some f
+         | None -> Per_provider_timeout_invalid, None)
+;;
+
+let per_provider_timeout_of_toml ~(source : string)
+    (doc : Keeper_toml_loader.toml_doc)
+    (key : string)
+    : per_provider_timeout_state * float option =
+  per_provider_timeout_of_declared_float_opt
+    ~source
+    ~declared:(List.mem_assoc key doc)
+    (Keeper_toml_loader.toml_float_opt doc key)
+;;
+
+let per_provider_timeout_of_json_field ~(source : string)
+    ~(field : string)
+    (json : Yojson.Safe.t)
+    : per_provider_timeout_state * float option =
+  per_provider_timeout_of_declared_float_opt
+    ~source
+    ~declared:(Option.is_some (Safe_ops.json_member_opt field json))
+    (Safe_ops.json_float_opt field json)
+;;
+
+let normalize_per_provider_timeout_json_field ~(source : string)
+    ~(field : string)
+    (json : Yojson.Safe.t)
+    : float option =
+  per_provider_timeout_of_json_field ~source ~field json |> snd
 ;;
 
 let personas_root_opt () =
@@ -441,6 +494,12 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
   let int_ key = Keeper_toml_loader.toml_int_opt doc (k key) in
   let strs key = Keeper_toml_loader.toml_string_list doc (k key) in
   let has key = List.mem_assoc (k key) doc in
+  let per_provider_timeout_state, per_provider_timeout =
+    per_provider_timeout_of_toml
+      ~source:"keeper TOML"
+      doc
+      (k "per_provider_timeout")
+  in
   let removed_present =
     ("also_allow" :: removed_keeper_input_key_names)
     |> List.map k
@@ -583,10 +642,8 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         work_discovery_guidance = str "work_discovery_guidance";
         telemetry_feedback_enabled = bool_ "telemetry_feedback_enabled";
         telemetry_feedback_window_hours = int_ "telemetry_feedback_window_hours";
-        per_provider_timeout =
-          normalize_per_provider_timeout_opt
-            ~source:"keeper TOML"
-            (Keeper_toml_loader.toml_float_opt doc (k "per_provider_timeout"));
+        per_provider_timeout_state;
+        per_provider_timeout;
         max_turns_per_call = int_ "max_turns_per_call";
         max_turns_per_call_scheduled_autonomous =
           int_ "max_turns_per_call_scheduled_autonomous";
@@ -727,6 +784,12 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
       | None -> empty_keeper_profile_defaults
       | Some json ->
           let keeper_json = Yojson.Safe.Util.member "keeper" json in
+          let per_provider_timeout_state, per_provider_timeout =
+            per_provider_timeout_of_json_field
+              ~source:(Printf.sprintf "persona profile %s" path)
+              ~field:"per_provider_timeout"
+              keeper_json
+          in
           match keeper_json with
           | `Assoc _ ->
               {
@@ -798,10 +861,8 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                   Safe_ops.json_bool_opt "telemetry_feedback_enabled" keeper_json;
                 telemetry_feedback_window_hours =
                   Safe_ops.json_int_opt "telemetry_feedback_window_hours" keeper_json;
-                per_provider_timeout =
-                  normalize_per_provider_timeout_opt
-                    ~source:(Printf.sprintf "persona profile %s" path)
-                    (Safe_ops.json_float_opt "per_provider_timeout" keeper_json);
+                per_provider_timeout_state;
+                per_provider_timeout;
                 max_turns_per_call =
                   Safe_ops.json_int_opt "max_turns_per_call" keeper_json;
                 max_turns_per_call_scheduled_autonomous =
@@ -845,6 +906,15 @@ let merge_keeper_profile_defaults
     ~(overlay : keeper_profile_defaults) : keeper_profile_defaults =
   let prefer overlay_value base_value =
     match overlay_value with Some _ -> overlay_value | None -> base_value
+  in
+  let per_provider_timeout_state, per_provider_timeout =
+    match overlay.per_provider_timeout_state with
+    | Per_provider_timeout_unset ->
+        base.per_provider_timeout_state, base.per_provider_timeout
+    | Per_provider_timeout_invalid ->
+        Per_provider_timeout_invalid, None
+    | Per_provider_timeout_set ->
+        Per_provider_timeout_set, overlay.per_provider_timeout
   in
   {
     manifest_path = prefer overlay.manifest_path base.manifest_path;
@@ -890,7 +960,8 @@ let merge_keeper_profile_defaults
     telemetry_feedback_window_hours =
       prefer overlay.telemetry_feedback_window_hours
         base.telemetry_feedback_window_hours;
-    per_provider_timeout = prefer overlay.per_provider_timeout base.per_provider_timeout;
+    per_provider_timeout_state;
+    per_provider_timeout;
     social_model = prefer overlay.social_model base.social_model;
     cascade_name = prefer overlay.cascade_name base.cascade_name;
     models = prefer overlay.models base.models;

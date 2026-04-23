@@ -162,9 +162,14 @@ let ensure_keeper_meta config name =
 
     (* --- Per-Provider Timeout --- *)
     let target_per_provider_timeout =
-      normalize_per_provider_timeout_opt
-        ~source:(Printf.sprintf "keeper runtime %s" name)
-        (apply_default_opt defaults.per_provider_timeout meta.per_provider_timeout_s)
+      match defaults.per_provider_timeout_state with
+      | Keeper_types_profile.Per_provider_timeout_unset ->
+          normalize_per_provider_timeout_opt
+            ~source:(Printf.sprintf "keeper runtime %s" name)
+            meta.per_provider_timeout_s
+      | Keeper_types_profile.Per_provider_timeout_invalid -> None
+      | Keeper_types_profile.Per_provider_timeout_set ->
+          defaults.per_provider_timeout
     in
 
     (* --- Change detection by category --- *)

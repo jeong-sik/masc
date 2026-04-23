@@ -930,7 +930,14 @@ let run_named
               match per_provider_timeout_s with
               | None -> run_fn ()
               | Some t ->
-                  let clock_opt = (Masc_eio_env.get ()).clock in
+                  let clock_opt =
+                    match Masc_eio_env.get_opt () with
+                    | Some env -> (
+                        match env.clock with
+                        | Some _ as clock_opt -> clock_opt
+                        | None -> Eio_context.get_clock_opt ())
+                    | None -> Eio_context.get_clock_opt ()
+                  in
                   (match clock_opt with
                    | Some clock ->
                        (try Eio.Time.with_timeout_exn clock t run_fn

@@ -1145,9 +1145,10 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
         json
     in
     let pp_per_provider_timeout_s =
-      normalize_per_provider_timeout_opt
+      normalize_per_provider_timeout_json_field
         ~source:(Printf.sprintf "keeper meta %s" keeper_name)
-        (Safe_ops.json_float_opt "per_provider_timeout_s" json)
+        ~field:"per_provider_timeout_s"
+        json
     in
     Ok
       { pp_policy_voice_enabled

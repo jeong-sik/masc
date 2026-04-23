@@ -189,6 +189,21 @@ let start_multi_mock ~sw ~net ~port (responses : string list) =
       Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
   Printf.sprintf "http://127.0.0.1:%d" port
 
+let start_delayed_mock ~sw ~net ~clock ~port ~delay_s response =
+  let handler _conn _req body =
+    let _ = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
+    if delay_s > 0.0 then Eio.Time.sleep clock delay_s;
+    Cohttp_eio.Server.respond_string ~status:`OK ~body:response ()
+  in
+  let socket =
+    Eio.Net.listen net ~sw ~backlog:8 ~reuse_addr:true
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, port))
+  in
+  let server = Cohttp_eio.Server.make ~callback:handler () in
+  Eio.Fiber.fork ~sw (fun () ->
+      Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
+  Printf.sprintf "http://127.0.0.1:%d" port
+
 let find_free_port () =
   let socket = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
   Fun.protect
@@ -834,6 +849,81 @@ let test_default_config_preserves_custom_local_request_path () =
   | _ ->
     Alcotest.fail
       "custom local OpenAI-compatible provider should stay OpenAICompat"
+
+let test_run_named_per_provider_timeout_uses_clock_fallback_and_exempts_last_provider () =
+  Alcotest.(check bool) "test requires no global Masc_eio_env"
+    true
+    (Option.is_none (Masc_eio_env.get_opt ()));
+  try
+    Eio.Switch.run @@ fun sw ->
+    let clock =
+      match Process_eio.get_clock () with
+      | Ok clock -> clock
+      | Error err -> Alcotest.fail err
+    in
+    Eio_context.set_clock clock;
+    let first_port =
+      match find_free_port () with Some port -> port | None -> Alcotest.skip ()
+    in
+    let second_port =
+      match find_free_port () with Some port -> port | None -> Alcotest.skip ()
+    in
+    let first_url =
+      try
+        start_delayed_mock
+          ~sw
+          ~net:(require_test_net ())
+          ~clock
+          ~port:first_port
+          ~delay_s:0.2
+          (openai_text_response "first provider should timeout")
+      with
+      | Unix.Unix_error (Unix.EPERM, "bind", _)
+      | Unix.Unix_error (Unix.EACCES, "bind", _) ->
+          Alcotest.skip ()
+    in
+    let second_url =
+      try
+        start_delayed_mock
+          ~sw
+          ~net:(require_test_net ())
+          ~clock
+          ~port:second_port
+          ~delay_s:0.2
+          (openai_text_response "last provider survived timeout")
+      with
+      | Unix.Unix_error (Unix.EPERM, "bind", _)
+      | Unix.Unix_error (Unix.EACCES, "bind", _) ->
+          Alcotest.skip ()
+    in
+    with_temp_masc_config
+      (Printf.sprintf
+         {|{
+  "timeout_probe_models": [
+    "custom:slow@%s",
+    "custom:last@%s"
+  ]
+}|}
+         first_url
+         second_url)
+    @@ fun () ->
+    match
+      Oas_worker_named.run_named
+        ~cascade_name:"timeout_probe"
+        ~goal:"say hello"
+        ~system_prompt:"system"
+        ~sw
+        ~net:(require_test_net ())
+        ~per_provider_timeout_s:0.05
+        ()
+    with
+    | Ok result ->
+        Alcotest.(check string) "last provider succeeds without timeout"
+          "last provider survived timeout"
+          (response_text result.response);
+        Eio.Switch.fail sw Exit
+    | Error err -> Alcotest.fail (Oas.Error.to_string err)
+  with Exit -> ()
 
 let make_worker_meta ?(effective_model = "local-qwen") () :
     Worker_container_types.worker_container_meta =
@@ -3048,6 +3138,8 @@ let () =
         test_enrich_sdk_error_for_openai_not_found_includes_endpoint_hint;
       Alcotest.test_case "default_config preserves custom local request_path" `Quick
         test_default_config_preserves_custom_local_request_path;
+      Alcotest.test_case "per-provider timeout uses context clock and exempts last provider" `Quick
+        test_run_named_per_provider_timeout_uses_clock_fallback_and_exempts_last_provider;
     ];
     "resume_config", [
       Alcotest.test_case "checkpoint model wins" `Quick

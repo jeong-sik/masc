@@ -878,7 +878,9 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             ~base_path:config.base_path meta.name)
         (fun () ->
         Keeper_exec_context.timed (fun () ->
-          let clock = Eio_context.get_clock () in
+          match Eio_context.get_clock () with
+          | Error msg -> Error (Oas.Error.Internal msg)
+          | Ok clock ->
           let timeout_sec =
             Keeper_runtime_resolved.turn_timeout_sec ()
           in

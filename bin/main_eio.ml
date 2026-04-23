@@ -215,16 +215,24 @@ let make_extended_handler routes =
                 reqd
             | Some state ->
               let config = state.Mcp_server.room_config in
-              let sw = Eio_context.get_switch () in
-              let clock = Eio_context.get_clock () in
-              let (status, resp_body) =
-                Server_openai_compat.handle_chat_completions
-                  ~config ~sw ~clock body
-              in
-              let origin = get_origin request in
-              Http.Response.json ~status
-                ~extra_headers:(cors_headers origin)
-                resp_body reqd)
+              (match state.Mcp_server.sw, state.Mcp_server.clock with
+              | Some sw, Some clock ->
+                  let (status, resp_body) =
+                    Server_openai_compat.handle_chat_completions
+                      ~config ~sw ~clock body
+                  in
+                  let origin = get_origin request in
+                  Http.Response.json ~status
+                    ~extra_headers:(cors_headers origin)
+                    resp_body reqd
+              | _ ->
+                  let origin = get_origin request in
+                  Http.Response.json ~status:`Internal_server_error
+                    ~extra_headers:(cors_headers origin)
+                    (Server_openai_compat.error_response
+                       ~status:"server_error"
+                       ~message:"Server runtime not fully initialized")
+                    reqd))
         | `DELETE, "/mcp" -> handle_delete_mcp request reqd
         | `DELETE, "/mcp/managed" ->
             handle_delete_mcp

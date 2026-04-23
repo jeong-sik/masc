@@ -279,6 +279,9 @@ jobs:
           bash scripts/ci/check-silent-failure-patterns.sh || true
           bash scripts/ci/check-enum-string-safety.sh || true
           bash scripts/ci/check-masc-oas-boundary.sh || true
+          bash scripts/ci/check-tla-variant-sync.sh || true
+          bash scripts/ci/check-telemetry-coverage.sh || true
+          bash scripts/ci/check-determinism-contract.sh || true
 
   health:
     name: Health

@@ -231,8 +231,7 @@ let handle_keeper_fs_edit
                       ~host_path:target ~content:updated
                       ~timeout_sec:30.0 ()
                   | None ->
-                    Fs_compat.save_file target updated;
-                    Ok ()
+                    Keeper_fs.save_atomic target updated
                 in
                 (match write_result with
                  | Error msg ->
@@ -245,14 +244,14 @@ let handle_keeper_fs_edit
                      (String.length updated);
                    Yojson.Safe.to_string
                      (`Assoc
-                        ([ "ok", `Bool true
-                         ; "path", `String target
-                         ; "mode", `String "patch"
-                         ; "replace_all", `Bool replace_all
-                         ; "occurrences", `Int occurrences
-                         ; "bytes_written", `Int (String.length updated)
-                         ]
-                        @ via_field)))
+                         ([ "ok", `Bool true
+                          ; "path", `String target
+                          ; "mode", `String "patch"
+                          ; "replace_all", `Bool replace_all
+                          ; "occurrences", `Int occurrences
+                          ; "bytes_written", `Int (String.length updated)
+                          ]
+                         @ via_field)))
           with
           | Invalid_argument e ->
             error_json ~fields:[ "path", `String target ] e
@@ -281,13 +280,15 @@ let handle_keeper_fs_edit
                 ~host_path:target ~content ~timeout_sec:30.0 ()
             | Patch -> Ok ())
          | None ->
-           let parent = Filename.dirname target in
-           Fs_compat.mkdir_p parent;
            (match mode with
-            | Append -> Fs_compat.append_file target content
-            | Overwrite -> Fs_compat.save_file target content
-            | Patch -> ());
-           Ok ()
+            | Append ->
+              let parent = Filename.dirname target in
+              Fs_compat.mkdir_p parent;
+              Fs_compat.append_file target content;
+              Ok ()
+            | Overwrite ->
+              Keeper_fs.save_atomic target content
+            | Patch -> Ok ())
        in
        match write_result with
        | Error msg -> error_json ~fields:[ "path", `String target ] msg

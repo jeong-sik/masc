@@ -9,7 +9,10 @@ import type {
 } from '../types'
 import { parseOperatorActionResult } from './schemas/operator-action'
 import { sanitizeDashboardActorName } from '../lib/dashboard-actor'
-import { currentDashboardActorName } from '../lib/dashboard-session-actor'
+import {
+  currentDashboardActorName,
+  setCanonicalDashboardActor,
+} from '../lib/dashboard-session-actor'
 
 // --- Auth ---
 // Token is read from ?token= on first load, moved to sessionStorage,
@@ -98,11 +101,13 @@ export function setStoredToken(
   } else {
     sessionStorage.removeItem(TOKEN_META_STORAGE_KEY)
   }
+  setCanonicalDashboardActor(null)
 }
 
 export function clearStoredToken(): void {
   sessionStorage.removeItem(TOKEN_STORAGE_KEY)
   sessionStorage.removeItem(TOKEN_META_STORAGE_KEY)
+  setCanonicalDashboardActor(null)
 }
 
 export function isRemoteAccess(): boolean {

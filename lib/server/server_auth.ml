@@ -166,6 +166,18 @@ let request_actor_hint request =
       if String.equal agent_name "" then None else Some agent_name
   | None -> None
 
+let sanitize_dashboard_actor_name raw =
+  let value = String.trim raw in
+  let buf = Buffer.create (String.length value) in
+  String.iter
+    (fun c ->
+      match c with
+      | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '-' ->
+          Buffer.add_char buf c
+      | _ -> ())
+    value;
+  Buffer.contents buf
+
 let dashboard_actor_for_request ~base_path request =
   match auth_token_from_request request with
   | Some token -> (
@@ -173,6 +185,13 @@ let dashboard_actor_for_request ~base_path request =
       | Ok agent_name -> Some agent_name
       | Error _ -> request_actor_hint request)
   | None -> request_actor_hint request
+
+let sanitized_dashboard_actor_for_request ~base_path request =
+  match dashboard_actor_for_request ~base_path request with
+  | Some raw ->
+      let sanitized = sanitize_dashboard_actor_name raw in
+      if String.equal sanitized "" then None else Some sanitized
+  | None -> None
 
 (** Extract host and explicit port only.
     Host header carries no scheme, so inferring a default port from scheme

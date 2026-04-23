@@ -779,6 +779,30 @@ let test_resolve_agent_name_preserves_explicit_stable_actor () =
       | Ok None -> fail "expected token-bound actor"
       | Error e -> fail (Types.masc_error_to_string e))
 
+let test_sanitized_dashboard_actor_for_request_uses_token_owner () =
+  let module SA = Masc_mcp.Server_auth in
+  let dir = setup_test_room () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_room dir)
+    (fun () ->
+      ignore (Auth.enable_auth dir ~require_token:true ~agent_name:"bootstrap-admin");
+      let raw_token =
+        match Auth.create_token dir ~agent_name:"stable-admin" ~role:Types.Admin with
+        | Ok (token, _cred) -> token
+        | Error e -> fail (Types.masc_error_to_string e)
+      in
+      let headers =
+        Httpun.Headers.of_list
+          [
+            ("authorization", "Bearer " ^ raw_token);
+            ("x-masc-agent", "dashboard-admin-ㅊ");
+          ]
+      in
+      let request = Httpun.Request.create ~headers `POST "/api/v1/gate/connector/bind" in
+      check (option string) "token owner wins and remains cache-safe"
+        (Some "stable-admin")
+        (SA.sanitized_dashboard_actor_for_request ~base_path:dir request))
+
 let test_resolve_agent_name_rejects_invalid_token () =
   let module SA = Masc_mcp.Server_auth in
   let dir = setup_test_room () in
@@ -960,6 +984,8 @@ let () =
         test_resolve_agent_name_prefers_token_for_generated_actor;
       test_case "stable actor canonicalizes to token owner" `Quick
         test_resolve_agent_name_preserves_explicit_stable_actor;
+      test_case "sanitized dashboard actor uses token owner" `Quick
+        test_sanitized_dashboard_actor_for_request_uses_token_owner;
       test_case "invalid token fails" `Quick
         test_resolve_agent_name_rejects_invalid_token;
       test_case "read request uses token owner" `Quick

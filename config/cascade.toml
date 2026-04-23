@@ -57,6 +57,15 @@ temperature = 0.1
 max_tokens = 8192
 keeper_assignable = false
 
+[ollama_only]
+comment = "Keeper-assignable ollama-only profile for local-only agents like ramarama."
+models = [
+  "ollama:auto",
+]
+temperature = 0.7
+max_tokens = 32768
+keeper_assignable = true
+
 [tool_rerank]
 comment = "inference-only override: tool_rerank has no _models of its own; callers reuse the default cascade's models and apply the short max_tokens here."
 temperature = 0.0

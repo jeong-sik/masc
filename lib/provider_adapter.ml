@@ -267,7 +267,7 @@ let direct_adapters =
          if m = "" || m = "explicit-model-required" then None else Some m);
       model_policy =
         {
-          default_model_env = Some "OLLAMA_DEFAULT_MODEL";
+          default_model_env = Some "LLAMA_DEFAULT_MODEL";
           default_model_fallback = None;
           auto_models = No_auto_models;
           expand_auto = false;

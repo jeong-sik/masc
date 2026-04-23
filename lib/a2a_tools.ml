@@ -24,7 +24,7 @@ type subscription = {
 let subscriptions : subscription SMap.t Atomic.t = Atomic.make SMap.empty
 
 (* Persistence file path - set by init *)
-let subscriptions_file = ref ""
+let subscriptions_file : string option ref = ref None
 
 (** Convert event_type to string for JSON *)
 let event_type_to_string = function
@@ -69,14 +69,15 @@ let subscription_of_json (json : Yojson.Safe.t) : subscription option =
 
 (** Save subscriptions to file *)
 let save_subscriptions () =
-  if !subscriptions_file = "" then ()
-  else
+  match !subscriptions_file with
+  | None -> ()
+  | Some path ->
     let subs =
       SMap.fold (fun _k v acc -> subscription_to_json v :: acc) (Atomic.get subscriptions) [] in
     let json = `Assoc [("subscriptions", `List subs)] in
     let content = Yojson.Safe.pretty_to_string json in
     try
-      Fs_compat.save_file !subscriptions_file content
+      Fs_compat.save_file path content
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | e ->
@@ -84,9 +85,11 @@ let save_subscriptions () =
 
 (** Load subscriptions from file *)
 let load_subscriptions () =
-  if !subscriptions_file = "" || not (Sys.file_exists !subscriptions_file) then ()
-  else
-    match Safe_ops.read_json_file_safe !subscriptions_file with
+  match !subscriptions_file with
+  | None -> ()
+  | Some path when not (Sys.file_exists path) -> ()
+  | Some path ->
+    match Safe_ops.read_json_file_safe path with
     | Error msg -> Log.Misc.warn "load_subscriptions: %s" msg
     | Ok json ->
       let module U = Yojson.Safe.Util in
@@ -101,7 +104,7 @@ let load_subscriptions () =
 
 (** Initialize A2A tools with MASC directory *)
 let init ~masc_dir =
-  subscriptions_file := Filename.concat masc_dir "subscriptions.json";
+  subscriptions_file := Some (Filename.concat masc_dir "subscriptions.json");
   load_subscriptions ()
 
 (** Event record for buffering *)
@@ -124,7 +127,9 @@ let uuid_rng_mutex = Stdlib.Mutex.create ()
 (** Generate stable UUIDv4 identifiers for subscriptions and delegated tasks.
     Uses a dedicated RNG so successive calls advance state instead of cloning
     the process-global Random state on every invocation.
-    Mutex-protected for fiber safety (Random.State is mutable). *)
+    [Stdlib.Mutex] (not [Eio.Mutex]) is required because [Random.State] is not
+    domain-safe; if keepers run on different domains the lock must be OS-level.
+    See feedback memory: OCaml5 Eio sync primitives — cross-domain = Stdlib.Mutex. *)
 let generate_uuid () =
   Stdlib.Mutex.protect uuid_rng_mutex (fun () ->
     let uuid = Uuidm.v4_gen uuid_rng () in

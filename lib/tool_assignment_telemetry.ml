@@ -269,7 +269,9 @@ let read_recent ~n : (tool_event list, string) result =
     in
     (* Dated_jsonl returns oldest-first; API promises newest-first. *)
     Ok (List.rev events)
-  with exn -> Error (Printexc.to_string exn)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn -> Error (Printexc.to_string exn)
 
 let warm_up () : unit =
   try

@@ -12,15 +12,15 @@ module SS = Set.Make (String)
 let unique_preserve_order = Json_util.dedupe_keep_order
 
 let dedupe_schemas (schemas : Types.tool_schema list) =
-  let seen = ref SS.empty in
-  List.filter
-    (fun (schema : Types.tool_schema) ->
-      if SS.mem schema.name !seen then
-        false
-      else (
-        seen := SS.add schema.name !seen;
-        true))
-    schemas
+  let unique, _ =
+    List.fold_left
+      (fun (acc, seen) (schema : Types.tool_schema) ->
+        if SS.mem schema.name seen then (acc, seen)
+        else (schema :: acc, SS.add schema.name seen))
+      ([], SS.empty)
+      schemas
+  in
+  List.rev unique
 
 let prefixed_tool_names names =
   names |> List.map (fun name -> "mcp__masc__" ^ name)

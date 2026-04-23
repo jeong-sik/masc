@@ -82,16 +82,24 @@ let on_submit_for_verification ~(config : Coord.config)
     (match task.contract with
      | Some c -> c.completion_contract
      | None -> []) in
-  let _req =
-    Verification.create_request ~base_path ~task_id:task.id ~request_id:verification_id
-      ~output:(`Assoc [
-        ("evidence_refs", `List (List.map (fun s -> `String s) evidence_refs));
-        ("task_title", `String task.title);
-        ("request_kind", `String request_kind);
-        ("request_summary", `String request_summary);
-        ("next_action", `String next_action);
-      ])
-      ~criteria ~worker:assignee () in
+  let () =
+    match
+      Verification.create_request ~base_path ~task_id:task.id ~request_id:verification_id
+        ~output:(`Assoc [
+          ("evidence_refs", `List (List.map (fun s -> `String s) evidence_refs));
+          ("task_title", `String task.title);
+          ("request_kind", `String request_kind);
+          ("request_summary", `String request_summary);
+          ("next_action", `String next_action);
+        ])
+        ~criteria ~worker:assignee ()
+    with
+    | Ok _ -> ()
+    | Error e ->
+      Log.Task.error
+        "verification create_request failed (task=%s vrf=%s): %s"
+        task.id verification_id e
+  in
   let meta_json = `Assoc [
     ("type", `String board_type);
     ("task_id", `String task.id);
@@ -102,15 +110,23 @@ let on_submit_for_verification ~(config : Coord.config)
     ("request_kind", `String request_kind);
     ("next_action", `String next_action);
   ] in
-  let _post = Board_dispatch.create_post
-    ~author:"system"
-    ~content:board_content
-    ~title:board_title
-    ~post_kind:Board.System_post
-    ~meta_json
-    ~visibility:Board.Internal
-    ~hearth:"verification"
-    () in
+  let () =
+    match Board_dispatch.create_post
+      ~author:"system"
+      ~content:board_content
+      ~title:board_title
+      ~post_kind:Board.System_post
+      ~meta_json
+      ~visibility:Board.Internal
+      ~hearth:"verification"
+      ()
+    with
+    | Ok _ -> ()
+    | Error e ->
+      Log.Task.error
+        "board post failed (task=%s vrf=%s): %s"
+        task.id verification_id (Board_types.show_board_error e)
+  in
   Subscriptions.push_event_to_sessions (`Assoc [
     ("type", `String "masc/verification/requested");
     ("task_id", `String task.id);
@@ -119,7 +135,7 @@ let on_submit_for_verification ~(config : Coord.config)
     ("evidence_refs", `List (List.map (fun s -> `String s) evidence_refs));
     ("timestamp", `Float (Time_compat.now ()));
   ]);
-  ignore base_path
+  ()
 
 let on_approve_verification ~(config : Coord.config)
     ~task_id ~verifier ~verification_id ~notes =
@@ -143,16 +159,24 @@ let on_approve_verification ~(config : Coord.config)
     ("verification_id", `String verification_id);
     ("verdict", `String "approved");
   ] in
-  let _post = Board_dispatch.create_post
-    ~author:verifier
-    ~content:(Printf.sprintf "Approved task %s (vrf:%s)%s"
-      task_id verification_id
-      (if notes = "" then "" else " — " ^ notes))
-    ~post_kind:Board.System_post
-    ~meta_json
-    ~visibility:Board.Internal
-    ~hearth:"verification"
-    () in
+  let () =
+    match Board_dispatch.create_post
+      ~author:verifier
+      ~content:(Printf.sprintf "Approved task %s (vrf:%s)%s"
+        task_id verification_id
+        (if notes = "" then "" else " — " ^ notes))
+      ~post_kind:Board.System_post
+      ~meta_json
+      ~visibility:Board.Internal
+      ~hearth:"verification"
+      ()
+    with
+    | Ok _ -> ()
+    | Error e ->
+      Log.Task.error
+        "board post failed (task=%s vrf=%s): %s"
+        task_id verification_id (Board_types.show_board_error e)
+  in
   Subscriptions.push_event_to_sessions (`Assoc [
     ("type", `String "masc/verification/verdict");
     ("task_id", `String task_id);
@@ -185,15 +209,23 @@ let on_reject_verification ~(config : Coord.config)
     ("verification_id", `String verification_id);
     ("verdict", `String "rejected");
   ] in
-  let _post = Board_dispatch.create_post
-    ~author:verifier
-    ~content:(Printf.sprintf "Rejected task %s (vrf:%s): %s"
-      task_id verification_id reason)
-    ~post_kind:Board.System_post
-    ~meta_json
-    ~visibility:Board.Internal
-    ~hearth:"verification"
-    () in
+  let () =
+    match Board_dispatch.create_post
+      ~author:verifier
+      ~content:(Printf.sprintf "Rejected task %s (vrf:%s): %s"
+        task_id verification_id reason)
+      ~post_kind:Board.System_post
+      ~meta_json
+      ~visibility:Board.Internal
+      ~hearth:"verification"
+      ()
+    with
+    | Ok _ -> ()
+    | Error e ->
+      Log.Task.error
+        "board post failed (task=%s vrf=%s): %s"
+        task_id verification_id (Board_types.show_board_error e)
+  in
   Subscriptions.push_event_to_sessions (`Assoc [
     ("type", `String "masc/verification/rejected");
     ("task_id", `String task_id);
@@ -214,23 +246,31 @@ let check_timeouts ~(config : Coord.config) =
         | Types.AwaitingVerification { assignee; verification_id; deadline = Some dl; _ } ->
           (match Types.parse_iso8601_opt dl with
            | Some deadline_ts when now > deadline_ts ->
-             let _post = Board_dispatch.create_post
-               ~author:"system"
-               ~content:(Printf.sprintf
-                 "Verification timeout: task %s (%s) by %s — no verifier responded within deadline %s"
-                 task.id task.title assignee dl)
-               ~title:(Printf.sprintf "Timeout: %s" task.title)
-               ~post_kind:Board.System_post
-               ~meta_json:(`Assoc [
-                 ("type", `String "verification_timeout");
-                 ("task_id", `String task.id);
-                 ("verification_id", `String verification_id);
-                 ("assignee", `String assignee);
-                 ("deadline", `String dl);
-               ])
-               ~visibility:Board.Internal
-               ~hearth:"verification"
-               () in
+             let () =
+               match Board_dispatch.create_post
+                 ~author:"system"
+                 ~content:(Printf.sprintf
+                   "Verification timeout: task %s (%s) by %s — no verifier responded within deadline %s"
+                   task.id task.title assignee dl)
+                 ~title:(Printf.sprintf "Timeout: %s" task.title)
+                 ~post_kind:Board.System_post
+                 ~meta_json:(`Assoc [
+                   ("type", `String "verification_timeout");
+                   ("task_id", `String task.id);
+                   ("verification_id", `String verification_id);
+                   ("assignee", `String assignee);
+                   ("deadline", `String dl);
+                 ])
+                 ~visibility:Board.Internal
+                 ~hearth:"verification"
+                 ()
+               with
+               | Ok _ -> ()
+               | Error e ->
+                 Log.Task.error
+                   "board post failed (task=%s vrf=%s): %s"
+                   task.id verification_id (Board_types.show_board_error e)
+             in
              Subscriptions.push_event_to_sessions (`Assoc [
                ("type", `String "masc/verification/timeout");
                ("task_id", `String task.id);

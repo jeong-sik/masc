@@ -20,12 +20,12 @@ end
    Reads from multiple fibers are safe because OCaml ref reads are
    atomic at the word level, and the list is never mutated post-seal. *)
 let registry : (module PROVIDER) list ref = ref []
-let sealed = ref false
+let sealed = Atomic.make false
 
-let seal () = sealed := true
+let seal () = Atomic.set sealed true
 
 let register_provider (p : (module PROVIDER)) =
-  if !sealed then
+  if Atomic.get sealed then
     invalid_arg "Transport_bridge.register_provider: registry sealed after bootstrap"
   else begin
     let module P = (val p : PROVIDER) in

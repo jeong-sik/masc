@@ -806,6 +806,7 @@ let canonical_keeper_toml_key_names =
   ; "work_discovery_guidance"
   ; "telemetry_feedback_enabled"
   ; "telemetry_feedback_window_hours"
+  ; "per_provider_timeout"
   ; "max_turns_per_call"
   ; "max_turns_per_call_scheduled_autonomous"
   ; "social_model"

@@ -96,6 +96,7 @@
         test_keeper_tool_affinity
         test_keeper_tool_alias
         test_keeper_sandbox_containment
+        test_keeper_transition_audit
         test_keeper_shell_containment
         test_keeper_shell_docker_route
         test_keeper_fs_edit_patch
@@ -212,6 +213,7 @@
           test_keeper_tool_affinity
           test_keeper_tool_alias
           test_keeper_sandbox_containment
+          test_keeper_transition_audit
           test_keeper_shell_containment
           test_keeper_shell_docker_route
           test_keeper_fs_edit_patch

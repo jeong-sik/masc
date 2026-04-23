@@ -91,7 +91,13 @@ let cmd_targets_git_or_gh cmd =
   in
   match first_word with
   | "git" | "gh" -> true
-  | _ -> false
+  | _ ->
+    (* Also detect git/gh after cd or other prefix commands.
+       LLMs frequently generate "cd <path> && gh pr view ..." which
+       has "cd" as the first word but the meaningful operation is
+       git/gh. *)
+    let tokens = String.split_on_char ' ' trimmed in
+    List.exists (fun tok -> tok = "git" || tok = "gh") tokens
 
 let optional_ro_mount ~host ~container =
   if host = "" then []

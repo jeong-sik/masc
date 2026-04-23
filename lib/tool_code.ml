@@ -63,6 +63,32 @@ let normalize_agent_relative_path ~(config : Coord.config) ~(agent_name : string
   let trimmed = String.trim raw_path in
   let own_bundle_rel = Keeper_alerting_path.playground_path_of_keeper agent_name in
   let trimmed =
+    (* Docker containers mount the playground at
+       /home/keeper/playground/<keeper-name>/ but the host side validates
+       against <base_path>/.masc/playground/docker/<keeper-name>/.  When a
+       keeper runs inside Docker, masc_code_read returns container paths;
+       masc_code_edit must translate them back. *)
+    if not (Filename.is_relative trimmed) then begin
+      let container_prefix =
+        Filename.concat
+          Env_config_keeper.DockerPlayground.container_playground_root
+          (Playground_paths.sanitize_keeper_name agent_name)
+      in
+      if String.starts_with ~prefix:(container_prefix ^ "/") trimmed then begin
+        let suffix =
+          String.sub trimmed
+            (String.length container_prefix + 1)
+            (String.length trimmed - String.length container_prefix - 1)
+        in
+        Filename.concat
+          (Filename.concat config.Coord.base_path own_bundle_rel)
+          suffix
+      end else
+        trimmed
+    end else
+      trimmed
+  in
+  let trimmed =
     if Filename.is_relative trimmed
        && String.length trimmed >= String.length own_bundle_rel
        && String.starts_with ~prefix:own_bundle_rel trimmed

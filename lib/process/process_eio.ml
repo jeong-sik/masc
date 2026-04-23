@@ -411,7 +411,10 @@ let spawn_and_drain_stdout ~sw pm ~cwd ?env ?stdin_source argv stdout_buf =
    with Eio.Cancel.Cancelled _ as e ->
      (try Eio.Flow.close stdout_r with Eio.Cancel.Cancelled _ as ce -> raise ce | _ -> ());
      raise e);
-  ignore (Eio.Process.await proc : Eio.Process.exit_status)
+  let status = Eio.Process.await proc in
+  match status with
+  | `Exited n -> Unix.WEXITED n
+  | `Signaled n -> Unix.WSIGNALED n
 
 (** Like [spawn_and_drain_stdout] but captures both stdout and stderr into
     separate buffers and returns the process exit status.
@@ -461,8 +464,8 @@ let run_argv ?(timeout_sec = 60.0) ?env (argv : string list) : string =
         try
           Eio.Time.with_timeout_exn clk timeout_sec (fun () ->
               Eio.Switch.run (fun sw ->
-                  spawn_and_drain_stdout ~sw pm ~cwd ?env argv buf);
-              Buffer.contents buf)
+                  let status = spawn_and_drain_stdout ~sw pm ~cwd ?env argv buf in
+                  output_for_status ~status ~stdout:(Buffer.contents buf) ~stderr:""))
         with
         | Eio.Time.Timeout ->
             Log.Misc.warn "[Process_eio] Timeout after %.0fs: %s"
@@ -496,8 +499,8 @@ let run_argv_with_stdin ?(timeout_sec = 60.0) ?env ~(stdin_content : string) (ar
         try
           Eio.Time.with_timeout_exn clk timeout_sec (fun () ->
               Eio.Switch.run (fun sw ->
-                  spawn_and_drain_stdout ~sw pm ~cwd ?env ~stdin_source argv buf);
-              Buffer.contents buf)
+                  let status = spawn_and_drain_stdout ~sw pm ~cwd ?env ~stdin_source argv buf in
+                  output_for_status ~status ~stdout:(Buffer.contents buf) ~stderr:""))
         with
         | Eio.Time.Timeout ->
             Log.Misc.warn "[Process_eio] Timeout after %.0fs: %s"

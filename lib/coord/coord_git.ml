@@ -230,9 +230,20 @@ let remove ~base_path ~agent_name ~task_id : string masc_result =
           run_argv_exit ["git"; "-C"; root; "worktree"; "remove"; worktree_path]
         in
         if exit_code = 0 then (
-          let _ = run_argv_exit ["git"; "-C"; root; "branch"; "-d"; branch_name] in
-          let _ = run_argv_exit ["git"; "-C"; root; "worktree"; "prune"] in
-          Ok (Printf.sprintf "✅ Worktree removed: %s\n   Branch: %s" worktree_path branch_name))
+          let branch_exit = run_argv_exit ["git"; "-C"; root; "branch"; "-d"; branch_name] in
+          let prune_exit = run_argv_exit ["git"; "-C"; root; "worktree"; "prune"] in
+          let warnings =
+            [ (if branch_exit <> 0 then Some "branch delete returned non-zero" else None)
+            ; (if prune_exit <> 0 then Some "worktree prune returned non-zero" else None)
+            ]
+            |> List.filter_map Fun.id
+          in
+          let msg =
+            Printf.sprintf "✅ Worktree removed: %s\n   Branch: %s" worktree_path branch_name
+          in
+          match warnings with
+          | [] -> Ok msg
+          | ws -> Ok (msg ^ "\n   ⚠️  Warnings: " ^ String.concat "; " ws))
         else Error (IoError "Failed to remove worktree. It may have uncommitted changes.")
 
 (** List all worktrees in the repository *)

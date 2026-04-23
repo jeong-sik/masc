@@ -287,6 +287,31 @@ let load_credential_from_path_raw config agent_name path : agent_credential opti
   else
     None
 
+let credential_uuid_file config cid =
+  Filename.concat (agents_dir config) (Credential_id.to_string cid ^ ".json")
+
+let redirect_target_file config target =
+  if Filename.basename target = target && Filename.check_suffix target ".json" then
+    Some (Filename.concat (agents_dir config) target)
+  else
+    None
+
+let load_redirect_target config path =
+  if not (file_exists path) then
+    None
+  else
+    try
+      match Yojson.Safe.from_string (read_text_file path) with
+      | `Assoc fields -> (
+          match List.assoc_opt "redirect_to" fields with
+          | Some (`String target) -> redirect_target_file config target
+          | _ -> None)
+      | _ -> None
+    with Sys_error _ | Yojson.Json_error _ -> None
+
+let remove_file_if_exists path =
+  if file_exists path then remove_file path
+
 let load_credential config agent_name : agent_credential option =
   let file = credential_file config agent_name in
   if not (file_exists file) then None
@@ -298,9 +323,11 @@ let load_credential config agent_name : agent_credential option =
       match json with
       | `Assoc fields when List.mem_assoc "redirect_to" fields -> (
           match List.assoc "redirect_to" fields with
-          | `String target ->
-              let redirect_path = Filename.concat (agents_dir config) target in
-              load_credential_from_path_raw config agent_name redirect_path
+          | `String target -> (
+              match redirect_target_file config target with
+              | Some redirect_path ->
+                  load_credential_from_path_raw config agent_name redirect_path
+              | None -> None)
           | _ -> None)
       | _ -> load_credential_from_path_raw config agent_name file
     with Sys_error _ | Yojson.Json_error _ -> None
@@ -321,16 +348,20 @@ let save_credential config (cred : agent_credential) =
   ensure_auth_dirs config;
   let json = agent_credential_to_yojson cred in
   let json_str = Yojson.Safe.pretty_to_string json in
+  let stub_file = credential_file config cred.agent_name in
+  let previous_target = load_redirect_target config stub_file in
   (match cred.id with
   | Some cid ->
-      let uuid_file = Filename.concat (agents_dir config) (Credential_id.to_string cid ^ ".json") in
+      let uuid_file = credential_uuid_file config cid in
+      (match previous_target with
+       | Some old_file when old_file <> uuid_file -> remove_file_if_exists old_file
+       | _ -> ());
       save_private_text_file uuid_file json_str;
       let stub = `Assoc [("redirect_to", `String (Credential_id.to_string cid ^ ".json"))] in
-      let stub_file = credential_file config cred.agent_name in
       save_private_text_file stub_file (Yojson.Safe.pretty_to_string stub)
   | None ->
-      let file = credential_file config cred.agent_name in
-      save_private_text_file file json_str)
+      Option.iter remove_file_if_exists previous_target;
+      save_private_text_file stub_file json_str)
 
 let load_raw_token config ~agent_name =
   let file = raw_token_file config agent_name in
@@ -348,7 +379,15 @@ let persist_raw_token config ~agent_name raw_token =
 (** Delete agent credential *)
 let delete_credential config agent_name =
   let file = credential_file config agent_name in
-  if file_exists file then remove_file file
+  let redirect_target = load_redirect_target config file in
+  let credential_target =
+    match load_credential config agent_name with
+    | Some { id = Some cid; _ } -> Some (credential_uuid_file config cid)
+    | _ -> None
+  in
+  remove_file_if_exists file;
+  Option.iter remove_file_if_exists redirect_target;
+  Option.iter remove_file_if_exists credential_target
 
 (** List all credentials.
 

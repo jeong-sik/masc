@@ -169,6 +169,82 @@ let test_check_agent_pipeline () =
           check string "overall risk low" "low"
             (Governance_pipeline_types.risk_level_to_string report.Governance_anomaly.overall_risk))
 
+let test_detect_deviations_empty_entries () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = make_tmpdir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tmpdir dir)
+    (fun () ->
+      let config = Coord.default_config dir in
+      let now = Unix.gettimeofday () in
+      let entries = gen_entries ~end_ts:now ~spacing_sec:3600.
+        ~count:10 ~tool_names:["read"] ~outcomes:[Audit_log.Success] ~token_counts:[100] in
+      write_entries config entries;
+      let profile =
+        match Governance_anomaly.build_profile ~config ~agent_id ~window_days:1 with
+        | None -> fail "expected profile"
+        | Some p -> p
+      in
+      let deviations = Governance_anomaly.detect_deviations ~profile ~entries:[] ~threshold:1.0 in
+      check bool "empty entries -> no deviations" true (deviations = []))
+
+let test_detect_deviations_no_token_volume () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = make_tmpdir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tmpdir dir)
+    (fun () ->
+      let config = Coord.default_config dir in
+      let now = Unix.gettimeofday () in
+      (* No token_count logged -> profile.token_volume = None *)
+      let entries = gen_entries ~end_ts:now ~spacing_sec:3600.
+        ~count:10 ~tool_names:["read"] ~outcomes:[Audit_log.Success] ~token_counts:[100] in
+      let entries = List.map (fun e -> { e with Audit_log.token_count = None }) entries in
+      write_entries config entries;
+      let profile =
+        match Governance_anomaly.build_profile ~config ~agent_id ~window_days:1 with
+        | None -> fail "expected profile"
+        | Some p -> p
+      in
+      check bool "token_volume is None" true (profile.Governance_anomaly.token_volume = None);
+      (* Even with wildly different recent entries, token_volume dimension is skipped. *)
+      let recent = gen_entries ~end_ts:now ~spacing_sec:180.
+        ~count:20 ~tool_names:["read"] ~outcomes:[Audit_log.Success] ~token_counts:[10000] in
+      let deviations = Governance_anomaly.detect_deviations ~profile ~entries:recent ~threshold:1.0 in
+      let has_token =
+        List.exists (fun d -> String.equal d.Governance_anomaly.dimension "token_volume") deviations
+      in
+      check bool "token_volume not checked when None" false has_token)
+
+let test_load_profile_missing () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = make_tmpdir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tmpdir dir)
+    (fun () ->
+      match Governance_anomaly.load_profile ~base_path:dir ~agent_id:"no-such-agent" with
+      | None -> ()
+      | Some _ -> fail "expected None for missing profile")
+
+let test_check_agent_insufficient_entries () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = make_tmpdir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tmpdir dir)
+    (fun () ->
+      let config = Coord.default_config dir in
+      let now = Unix.gettimeofday () in
+      let entries = gen_entries ~end_ts:now ~spacing_sec:3600.
+        ~count:2 ~tool_names:["read"] ~outcomes:[Audit_log.Success] ~token_counts:[100] in
+      write_entries config entries;
+      match Governance_anomaly.check_agent ~config ~agent_id ~window_days:1 ~threshold:1.5 with
+      | None -> ()
+      | Some _ -> fail "expected None with < 3 entries")
+
 let () =
   run "Governance_anomaly"
     [
@@ -181,13 +257,17 @@ let () =
       ( "deviation",
         [
           test_case "detect_deviations flags burst activity" `Quick test_detect_deviations;
+          test_case "detect_deviations empty entries" `Quick test_detect_deviations_empty_entries;
+          test_case "detect_deviations skips token_volume when None" `Quick test_detect_deviations_no_token_volume;
         ] );
       ( "persistence",
         [
           test_case "save/load profile roundtrip" `Quick test_save_load_profile_roundtrip;
+          test_case "load_profile returns None when missing" `Quick test_load_profile_missing;
         ] );
       ( "pipeline",
         [
           test_case "check_agent produces report" `Quick test_check_agent_pipeline;
+          test_case "check_agent returns None when insufficient entries" `Quick test_check_agent_insufficient_entries;
         ] );
     ]

@@ -365,7 +365,7 @@ let compute_judgments
   let timeout_s = Float.of_int Env_config.Inference.dashboard_governance_judge_timeout_seconds in
   match
     (* build_facts() is moved inside the bridge so a deadlock in
-       factual_snapshot_json / get_agents_status is bounded by [timeout_s]
+       get_agents_status is bounded by [timeout_s]
        rather than hanging the daemon fiber indefinitely (#8319). *)
     Masc_oas_bridge.run_safe ~timeout_s (fun () ->
       let factual_json = build_facts () in

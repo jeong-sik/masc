@@ -1,7 +1,5 @@
 (** Dashboard Governance — live judge status surface (case tracking retired). *)
 
-type detail_status = [ `OK | `Not_found ]
-
 let option_to_yojson = Json_util.option_to_yojson
 
 let string_option_json = option_to_yojson (fun value -> `String value)
@@ -53,14 +51,6 @@ let summary_json_of_runtime ?base_path
       ("last_activity_age_s", `Null);
       ("judge_online", `Bool runtime.judge_online);
       ("judge_last_seen_at", timestamp_option_json runtime.generated_at runtime.generated_at_unix);
-    ]
-
-let factual_snapshot_json ~base_path:_ =
-  `Assoc
-    [
-      ("generated_at", `String (Types.now_iso ()));
-      ("items", `List []);
-      ("activity", `List []);
     ]
 
 let baseline_dir base_path =
@@ -126,19 +116,3 @@ let dashboard_json ~base_path ~limit ~offset:_ ~status_filter:_ =
       ("anomaly_profiles", anomaly_profiles_json ~base_path);
     ]
 
-let cases_json ~base_path:_ ~limit ~offset ~status_filter:_ ~include_test:_ =
-  `Assoc
-    [
-      ("cases", `List []);
-      ("count", `Int 0);
-      ("limit", `Int limit);
-      ("offset", `Int offset);
-    ]
-
-let case_detail_json ~base_path:_ ~case_id =
-  ignore case_id;
-  ( `Not_found,
-    `Assoc
-      [
-        ("error", `String "Governance case tracking unavailable");
-      ] )

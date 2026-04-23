@@ -12,7 +12,7 @@ Tasks default to an advisory verification contract with completion/evidence requ
 Normal status flow is todo → claimed → awaiting_verification → done/cancelled when verification FSM is enabled. \
 Priority 1=urgent, 5=low (default 3). \
 Returns task-XXX ID for tracking. \
-Example: masc_add_task({title: 'Fix login bug', priority: 1, description: 'Users cannot login with SSO'})";
+Example: masc_add_task({title: 'Fix login bug', goal_id: 'g-123', priority: 1, description: 'Users cannot login with SSO'})";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -57,7 +57,7 @@ Example: masc_add_task({title: 'Fix login bug', priority: 1, description: 'Users
           ]);
         ]);
       ]);
-      ("required", `List [`String "title"]);
+      ("required", `List [`String "title"; `String "goal_id"]);
     ];
   };
   {
@@ -66,7 +66,7 @@ Example: masc_add_task({title: 'Fix login bug', priority: 1, description: 'Users
 Use when: loading sprint backlog, importing from JIRA, creating related tasks. \
 Tasks default to the same advisory verification contract/evidence requirements as masc_add_task. \
 Each task gets unique ID (task-XXX). Atomic: all succeed or all fail. \
-Example: masc_batch_add_tasks({tasks: [{title: 'Task A', priority: 2}, {title: 'Task B'}]})";
+Example: masc_batch_add_tasks({tasks: [{title: 'Task A', goal_id: 'g-123', priority: 2}, {title: 'Task B', goal_id: 'g-124'}]})";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -104,7 +104,7 @@ Example: masc_batch_add_tasks({tasks: [{title: 'Task A', priority: 2}, {title: '
                 ]);
               ]);
             ]);
-            ("required", `List [`String "title"]);
+            ("required", `List [`String "title"; `String "goal_id"]);
           ]);
           ("description", `String "List of tasks to add");
         ]);

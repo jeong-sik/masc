@@ -265,6 +265,7 @@ type keeper_meta =
   ; telemetry_feedback_enabled : bool option
   ; telemetry_feedback_window_hours : int option
   ; per_provider_timeout_s : float option
+  ; always_approve : bool option
   ; (* -- Agent runtime state (usage, tracing, autonomy metrics) -- *)
     runtime : agent_runtime_state
   ; (* -- Identity & concurrency -- *)
@@ -906,6 +907,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "telemetry_feedback_enabled", Json_util.bool_opt_to_json m.telemetry_feedback_enabled
     ; "telemetry_feedback_window_hours", Json_util.int_opt_to_json m.telemetry_feedback_window_hours
     ; "per_provider_timeout_s", Json_util.float_opt_to_json m.per_provider_timeout_s
+    ; "always_approve", Json_util.bool_opt_to_json m.always_approve
     ; "keeper_id", (match m.keeper_id with
       | Some uid -> Keeper_id.uid_to_yojson uid
       | None -> `Null)
@@ -953,6 +955,7 @@ type parsed_keeper_policy =
   ; pp_voice_channel : string
   ; pp_voice_agent_id : string
   ; pp_per_provider_timeout_s : float option
+  ; pp_always_approve : bool option
   }
 
 type parsed_keeper_state =
@@ -1175,6 +1178,9 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
         ~field:"per_provider_timeout_s"
         json
     in
+    let pp_always_approve =
+      Safe_ops.json_bool_opt "always_approve" json
+    in
     Ok
       { pp_policy_voice_enabled
       ; pp_sandbox_profile
@@ -1208,6 +1214,7 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
       ; pp_voice_channel
       ; pp_voice_agent_id
       ; pp_per_provider_timeout_s
+      ; pp_always_approve
       }
 ;;
 
@@ -1447,6 +1454,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
              ; voice_channel = policy.pp_voice_channel
              ; voice_agent_id = policy.pp_voice_agent_id
              ; per_provider_timeout_s = policy.pp_per_provider_timeout_s
+             ; always_approve = policy.pp_always_approve
              ; created_at =
                  (if state.ps_created_at_raw = ""
                   then now_iso ()

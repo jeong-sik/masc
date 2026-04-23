@@ -9,6 +9,7 @@
 
 module GP = Masc_mcp.Governance_pipeline
 module AQ = Masc_mcp.Keeper_approval_queue
+module KT = Masc_mcp.Keeper_types
 module Mcp_eio = Masc_mcp.Mcp_server_eio
 
 let check = Alcotest.(check string)
@@ -18,6 +19,11 @@ let temp_dir () =
   Unix.unlink dir;
   Unix.mkdir dir 0o755;
   dir
+
+let meta_from_json json =
+  match KT.meta_of_json json with
+  | Ok m -> m
+  | Error e -> Alcotest.fail ("meta parse failed: " ^ e)
 
 let cleanup_dir dir =
   let rec rm_rf path =
@@ -748,6 +754,84 @@ let test_callback_paranoid_medium_risk_uses_remembered_policy () =
       | Agent_sdk.Hooks.Edit _ ->
           Alcotest.fail "expected remembered approve, got edit")
 
+let test_callback_always_approve_bypasses_threshold () =
+  with_test_config @@ fun config ->
+  let meta =
+    meta_from_json
+      (`Assoc [
+        ("name", `String "test-keeper");
+        ("trace_id", `String "test-trace");
+        ("always_approve", `Bool true);
+      ])
+  in
+  let cb =
+    GP.to_oas_approval_callback
+      ~config ~governance_level:"production" ~keeper_name:"test-keeper" ~meta ()
+  in
+  let decision =
+    cb ~tool_name:"masc_create_task"
+      ~input:(`Assoc [("title", `String "test")])
+  in
+  match decision with
+  | Agent_sdk.Hooks.Approve -> ()
+  | Agent_sdk.Hooks.Reject r ->
+    Alcotest.fail ("expected Approve with always_approve, got Reject: " ^ r)
+  | _ -> Alcotest.fail "unexpected decision"
+
+let test_callback_always_approve_respects_forbidden () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  Eio.Switch.run @@ fun sw ->
+  let initial_pending = AQ.pending_count () in
+  let result = ref None in
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+      let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+      let config = state.room_config in
+      let meta =
+        meta_from_json
+          (`Assoc [
+            ("name", `String "test-keeper");
+            ("trace_id", `String "test-trace");
+            ("always_approve", `Bool true);
+          ])
+      in
+      Eio.Fiber.fork ~sw (fun () ->
+        let cb =
+          GP.to_oas_approval_callback
+            ~config ~governance_level:"production" ~keeper_name:"test-keeper" ~meta ()
+        in
+        let decision =
+          cb ~tool_name:"masc_code_delete"
+            ~input:(`Assoc [("path", `String "/dangerous")])
+        in
+        result := Some decision
+      );
+      yield_until (fun () -> AQ.pending_count () = initial_pending + 1);
+      Alcotest.(check int) "destructive tool still requires approval"
+        (initial_pending + 1) (AQ.pending_count ());
+      let pending_json = AQ.list_pending_json () in
+      let id =
+        match pending_json with
+        | `List (`Assoc kvs :: _) ->
+          (match List.assoc_opt "id" kvs with
+           | Some (`String id) -> id
+           | _ -> Alcotest.fail "missing approval id")
+        | _ -> Alcotest.fail "expected pending approval entry"
+      in
+      (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
+       | Ok () -> ()
+       | Error err -> Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
+      yield_until (fun () -> Option.is_some !result);
+      match !result with
+      | Some Agent_sdk.Hooks.Approve -> ()
+      | Some _ -> Alcotest.fail "expected Approve after operator resolution"
+      | None -> Alcotest.fail "destructive tool callback did not suspend for approval")
+
 let test_read_recent_audit_filters_after_wide_scan () =
   with_temp_masc_base @@ fun () ->
   let keeper_name = "audit-target-keeper" in
@@ -826,5 +910,9 @@ let () =
         test_callback_production_keeper_shell_gh_read_only_auto_approved;
       Alcotest.test_case "paranoid medium risk uses remembered policy" `Quick
         test_callback_paranoid_medium_risk_uses_remembered_policy;
+      Alcotest.test_case "always_approve bypasses threshold" `Quick
+        test_callback_always_approve_bypasses_threshold;
+      Alcotest.test_case "always_approve respects forbidden" `Quick
+        test_callback_always_approve_respects_forbidden;
     ]);
   ]

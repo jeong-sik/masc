@@ -507,7 +507,7 @@ let fd_warn_threshold =
 
 let () = set_gauge metric_fd_warn_threshold (float_of_int fd_warn_threshold)
 
-let fd_warned_once = ref false
+let fd_warned_once = Atomic.make false
 
 (** Returns 0 on non-Unix hosts where [/dev/fd] is unavailable. *)
 let approximate_open_fd_count () =
@@ -518,7 +518,7 @@ let approximate_open_fd_count () =
         (try Some (path, Sys.readdir path)
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
-         | _exn -> first_readable rest)
+         | Sys_error _ -> first_readable rest)
   in
   match first_readable candidates with
   | None -> 0
@@ -528,15 +528,15 @@ let approximate_open_fd_count () =
 let update_fd_gauges () =
   let count = approximate_open_fd_count () in
   set_gauge metric_open_fds (float_of_int count);
-  if count >= fd_warn_threshold && not !fd_warned_once then begin
-    fd_warned_once := true;
+  if count >= fd_warn_threshold && not (Atomic.get fd_warned_once) then begin
+    Atomic.set fd_warned_once true;
     Printf.eprintf
       "[WARN] [Server] process open fd count %d has reached warn \
        threshold %d — likely socket/file leak, investigate before \
        accept() starts failing with EMFILE.\n%!"
       count fd_warn_threshold
   end else if count < fd_warn_threshold / 2 then
-    fd_warned_once := false
+    Atomic.set fd_warned_once false
 
 let set_tool_schema_stats ~count ~approx_tokens =
   set_gauge metric_mcp_tool_schema_count (float_of_int count);

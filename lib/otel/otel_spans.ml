@@ -7,12 +7,12 @@
 
 module OT = Opentelemetry
 
-let initialized = ref false
-let exporter_active = ref false
+let initialized = Atomic.make false
+let exporter_active = Atomic.make false
 
 let init () =
-  if Otel_config.enabled && not !initialized then begin
-    initialized := true;
+  if Otel_config.enabled && not (Atomic.get initialized) then begin
+    Atomic.set initialized true;
     OT.Globals.service_name := Otel_config.service_name;
     (* ambient-context-eio storage is set automatically when the library is linked.
        Eio fiber-local context propagation works via Ambient_context_eio.storage. *)
@@ -23,19 +23,19 @@ let init () =
     metrics, and logs to the configured OTLP collector via HTTP/protobuf.
     Internally forks a 500ms tick fiber under [sw] for periodic batch flush.
     No-op when [MASC_OTEL_ENABLED] is not set. *)
-let is_exporter_active () = !exporter_active
+let is_exporter_active () = Atomic.get exporter_active
 
 let setup_exporter_with ?(enabled = Otel_config.enabled) ~endpoint ~setup () =
   if enabled then begin
     init ();
     try
       setup ();
-      exporter_active := true;
+      Atomic.set exporter_active true;
       Log.info ~ctx:"otel" "OTLP exporter started -> %s" endpoint
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
-        exporter_active := false;
+        Atomic.set exporter_active false;
         Log.warn ~ctx:"otel"
           "OTLP exporter unavailable, continuing without export (%s): %s"
           endpoint (Printexc.to_string exn)

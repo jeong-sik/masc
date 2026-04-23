@@ -22,7 +22,7 @@ jobs:
     name: Draft Auto-Merge Guard
     runs-on: ubuntu-latest
     steps:
-      - name: Keep agent PRs draft-only unless explicitly approved
+      - name: Keep draft PRs draft-only unless explicitly approved
         uses: actions/github-script@v9
         env:
           AGENT_DRAFT_GUARD_TITLE_RE: ${{ vars.AGENT_DRAFT_GUARD_TITLE_RE }}
@@ -50,15 +50,11 @@ jobs:
               .filter(Boolean);
             const labels = (pr.labels || []).map((label) => label.name.toLowerCase());
 
-            const guarded =
+            const looksAgentAuthored =
               titlePattern.test(pr.title || "") ||
               branchPattern.test(pr.head?.ref || "") ||
               labels.includes("agent-pr") ||
               labels.includes("codex");
-            if (!guarded) {
-              core.info("PR is not agent-guarded; skip draft auto-merge guard.");
-              return;
-            }
 
             const hasBypass = labels.some((label) => bypassLabels.includes(label));
             if (hasBypass) {
@@ -85,6 +81,20 @@ jobs:
               number: pullNumber
             });
             const current = result.repository.pullRequest;
+            const draftBoundaryAction =
+              action === "ready_for_review" ||
+              action === "auto_merge_enabled" ||
+              action === "converted_to_draft";
+            const guarded =
+              current.isDraft ||
+              Boolean(current.autoMergeRequest) ||
+              draftBoundaryAction ||
+              looksAgentAuthored;
+            if (!guarded) {
+              core.info("PR is not draft, auto-merge-enabled, draft-boundary, or agent-like; skip draft auto-merge guard.");
+              return;
+            }
+
             const actions = [];
 
             if (current.autoMergeRequest) {
@@ -114,16 +124,16 @@ jobs:
             }
 
             if (actions.length === 0) {
-              core.info("Guarded agent PR is already draft-only.");
+              core.info("Guarded PR is already draft-only.");
               return;
             }
 
             const marker = "<!-- masc-agent-draft-guard -->";
             const body = [
               marker,
-              `Agent draft guard reapplied: ${actions.join(", ")}.`,
+              `Draft PR guard reapplied: ${actions.join(", ")}.`,
               "",
-              `This repository treats agent-created PRs as draft-only until a human explicitly opts in by adding one of these labels: ${bypassLabels.join(", ")}.`
+              `This repository treats draft PRs as draft-only until a human explicitly opts in by adding one of these labels: ${bypassLabels.join(", ")}.`
             ].join("\n");
             const comments = await github.paginate(github.rest.issues.listComments, {
               owner,
@@ -151,7 +161,7 @@ jobs:
             }
 
             if (action === "ready_for_review" || action === "auto_merge_enabled") {
-              core.setFailed(`Agent draft guard blocked ${action}: ${actions.join(", ")}.`);
+              core.setFailed(`Draft PR guard blocked ${action}: ${actions.join(", ")}.`);
             }
 
   label-and-review:

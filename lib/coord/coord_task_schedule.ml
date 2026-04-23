@@ -387,8 +387,8 @@ let release_stale_claims config ~ttl_seconds =
                 { task with task_status = Todo }
               end else task
           | AwaitingVerification _ -> task  (* leave alone; awaiting verifier *)
-          | Todo | Done _ | Cancelled _ -> task
-        ) backlog.tasks in
+        | Todo | Done _ | Cancelled _ -> task
+      ) backlog.tasks in
         if !stale_tasks <> [] then begin
           let updated_backlog = { tasks = updated_tasks; last_updated = now_str; version = backlog.version + 1 } in
           write_backlog config updated_backlog

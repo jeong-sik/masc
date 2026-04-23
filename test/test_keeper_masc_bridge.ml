@@ -1,5 +1,6 @@
 (** Test keeper masc_* tool bridge under preset/custom tool policy. *)
 
+module Coord = Masc_mcp.Coord
 module KET = Masc_mcp.Keeper_exec_tools
 
 let init_keeper_tool_registry () =
@@ -28,6 +29,30 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
+let rec ensure_dir path =
+  if path = "" || path = "." || path = "/" then ()
+  else if Sys.file_exists path then ()
+  else (
+    let parent = Filename.dirname path in
+    if parent <> path then ensure_dir parent;
+    Unix.mkdir path 0o755)
+
+let write_text_file path content =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+
+let run_shell_ok ~cwd cmd =
+  let quoted_cwd = Filename.quote cwd in
+  let rc = Sys.command (Printf.sprintf "cd %s && %s" quoted_cwd cmd) in
+  Alcotest.(check int) ("shell command: " ^ cmd) 0 rc
+
+let run_with_fs f =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  f ()
+
 let write_json_file path json =
   let oc = open_out path in
   Fun.protect
@@ -37,7 +62,8 @@ let write_json_file path json =
 let read_json_file path = Yojson.Safe.from_file path
 
 
-let make_meta ?tool_access ?(tool_denylist = []) () =
+let make_meta ?(name = "keeper-bridge-test") ?tool_access ?(tool_denylist = [])
+    ?(sandbox_profile = Masc_mcp.Keeper_types.Local) () =
   let tool_access =
     match tool_access with
     | Some access -> access
@@ -48,9 +74,13 @@ let make_meta ?tool_access ?(tool_denylist = []) () =
   match Masc_mcp.Keeper_types.meta_of_json
     (`Assoc
       [
-        ("name", `String "keeper-bridge-test");
-        ("agent_name", `String "keeper-bridge-test");
-        ("trace_id", `String "keeper-bridge-trace");
+        ("name", `String name);
+        ("agent_name", `String name);
+        ("trace_id", `String (name ^ "-trace"));
+        ( "sandbox_profile",
+          `String
+            (Masc_mcp.Keeper_types.sandbox_profile_to_string sandbox_profile)
+        );
         ("tool_access", Masc_mcp.Keeper_types.tool_access_to_json tool_access);
         ("tool_denylist", `List (List.map (fun s -> `String s) tool_denylist));
       ])
@@ -536,6 +566,57 @@ let test_dispatch_unregistered () =
   in
   Alcotest.(check bool) "unregistered mint_token returns Error" true (Result.is_error result)
 
+let test_read_only_preflight_accepts_sandbox_relative_repo_path () =
+  let dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      run_shell_ok ~cwd:dir "git init --quiet";
+      let file_path =
+        Filename.concat dir
+          ".masc/playground/docker/masc-improver/repos/masc-mcp/lib/thompson_sampling.ml"
+      in
+      ensure_dir (Filename.dirname file_path);
+      write_text_file file_path "let alpha = 0.1\nlet beta = 0.2\n";
+      run_with_fs (fun () ->
+        let config = Coord.default_config dir in
+        ignore (Coord.init config ~agent_name:(Some "masc-improver"));
+        let meta =
+          make_meta
+            ~name:"masc-improver"
+            ~sandbox_profile:Masc_mcp.Keeper_types.Docker
+            ~tool_access:(Masc_mcp.Keeper_types.Custom [ "masc_code_read" ])
+            ()
+        in
+        let raw =
+          Masc_mcp.Keeper_exec_masc.handle_keeper_masc_tool
+            ~config
+            ~meta
+            ~name:"masc_code_read"
+            ~args:
+              (`Assoc
+                [
+                  ("path", `String "repos/masc-mcp/lib/thompson_sampling.ml");
+                  ("offset", `Int 0);
+                  ("limit", `Int 2);
+                ])
+        in
+        let json = Yojson.Safe.from_string raw in
+        let path =
+          Yojson.Safe.Util.member "path" json |> Yojson.Safe.Util.to_string
+        in
+        let lines =
+          Yojson.Safe.Util.member "lines" json
+          |> Yojson.Safe.Util.to_list
+          |> List.map Yojson.Safe.Util.to_string
+        in
+        Alcotest.(check string) "path preserved"
+          "repos/masc-mcp/lib/thompson_sampling.ml"
+          path;
+        Alcotest.(check (list string)) "reads expected lines"
+          [ "let alpha = 0.1"; "let beta = 0.2" ]
+          lines))
+
 let test_schemas_match_names () =
   prime_keeper_bridge ();
   let meta =
@@ -664,6 +745,9 @@ let () =
         [
           Alcotest.test_case "unregistered returns None" `Quick
             test_dispatch_unregistered;
+          Alcotest.test_case
+            "read preflight accepts sandbox-relative repo path" `Quick
+            test_read_only_preflight_accepts_sandbox_relative_repo_path;
         ] );
       ( "consistency",
         [

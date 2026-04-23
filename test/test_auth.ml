@@ -478,6 +478,58 @@ let test_ensure_keeper_credential_reuses_persisted_raw_token_when_env_mismatched
                "ensure_keeper_credential should reuse persisted keeper token: %s"
                (Types.masc_error_to_string e)))
 
+let test_ensure_keeper_credential_reuses_uuid () =
+  let dir = setup_test_room () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_room dir)
+    (fun () ->
+      let first_result, second_result =
+        with_env "MASC_INTERNAL_MCP_TOKEN" "shared-keeper-token" (fun () ->
+          let first =
+            Auth.ensure_keeper_credential dir
+              ~agent_name:"keeper-masc-improver-agent"
+          in
+          let second =
+            Auth.ensure_keeper_credential dir
+              ~agent_name:"keeper-masc-improver-agent"
+          in
+          (first, second))
+      in
+      match first_result, second_result with
+      | Ok (_, first_cred), Ok (_, second_cred) ->
+          let first_id =
+            match first_cred.id with
+            | Some id -> id
+            | None -> fail "first keeper credential should have a UUID"
+          in
+          let second_id =
+            match second_cred.id with
+            | Some id -> id
+            | None -> fail "second keeper credential should have a UUID"
+          in
+          let first_id_s = Types.Credential_id.to_string first_id in
+          let second_id_s = Types.Credential_id.to_string second_id in
+          let agents_dir = Filename.concat (Auth.auth_dir dir) "agents" in
+          let uuid_files =
+            Sys.readdir agents_dir
+            |> Array.to_list
+            |> List.filter (fun file ->
+                 Filename.check_suffix file ".json"
+                 && file <> "keeper-masc-improver-agent.json")
+          in
+          check string "keeper credential keeps stable UUID" first_id_s second_id_s;
+          check string "keeper credential keeps created_at" first_cred.created_at
+            second_cred.created_at;
+          check int "keeper credential leaves one UUID file" 1
+            (List.length uuid_files);
+          check bool "keeper credential UUID file matches redirect target" true
+            (List.mem (first_id_s ^ ".json") uuid_files)
+      | Error e, _ | _, Error e ->
+          fail
+            (Printf.sprintf
+               "ensure_keeper_credential should keep a stable UUID: %s"
+               (Types.masc_error_to_string e)))
+
 (* ============================================ *)
 (* Permission tests                             *)
 (* ============================================ *)
@@ -682,6 +734,8 @@ let () =
         test_save_raw_token_credential_uses_provided_token;
       test_case "ensure_keeper_credential uses shared internal token" `Quick
         test_ensure_keeper_credential_uses_shared_internal_token;
+      test_case "ensure_keeper_credential reuses uuid" `Quick
+        test_ensure_keeper_credential_reuses_uuid;
     ];
     "permissions", [
       test_case "worker permissions" `Quick test_worker_permissions;

@@ -9,6 +9,9 @@
 type recent_entry = {
   re_ts_unix : float;
   re_provider : string option;
+  re_outcome : string;
+  re_stop_reason : string option;
+  re_turn_lane : string option;
   re_input_tokens : int option;
   re_output_tokens : int option;
   re_latency_ms : float option;
@@ -16,6 +19,15 @@ type recent_entry = {
   re_peak_memory_gb : float option;
   re_cost_usd : float option;
   re_tools_count : int;
+  re_usage_reported : bool option;
+  re_telemetry_reported : bool option;
+  re_coverage_reason : string option;
+  re_coverage_stage : string option;
+}
+
+type coverage_reason_count = {
+  crc_reason : string;
+  crc_count : int;
 }
 
 type bucket_metric = {
@@ -70,6 +82,12 @@ type model_stats = {
   total_reasoning_tokens : int option;
   usage_sample_count : int;
   telemetry_sample_count : int;
+  usage_missing_count : int;
+  telemetry_missing_count : int;
+  coverage_status : string;
+  primary_coverage_stage : string option;
+  primary_coverage_reason : string option;
+  coverage_reason_counts : coverage_reason_count list;
   fallback_count : int;
   success_count : int;
   error_count : int;

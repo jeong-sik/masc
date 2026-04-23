@@ -39,16 +39,20 @@ export function filterModelMetrics(
 }
 
 /**
- * Sorts model metrics so failing providers surface first. Order:
- * 1. error_count desc (a model with 11 errors appears before one with 0)
- * 2. entry_count desc (more-exercised models appear above idle ones)
- * 3. model_id asc (stable tiebreaker)
+ * Sorts model metrics so coverage gaps and failures surface first. Order:
+ * 1. coverage_status urgency (error_only → none → partial → full)
+ * 2. error_count desc
+ * 3. entry_count desc
+ * 4. model_id asc
  * Returns a new array; does not mutate the input.
  */
 export function sortModelMetricsByUrgency(
   models: readonly DashboardRuntimeModelMetric[],
 ): readonly DashboardRuntimeModelMetric[] {
   return [...models].sort((a, b) => {
+    const aCoverage = COVERAGE_PRIORITY[a.coverage_status ?? 'full'] ?? 3
+    const bCoverage = COVERAGE_PRIORITY[b.coverage_status ?? 'full'] ?? 3
+    if (aCoverage !== bCoverage) return aCoverage - bCoverage
     const ae = a.error_count ?? 0
     const be = b.error_count ?? 0
     if (ae !== be) return be - ae
@@ -62,6 +66,36 @@ export function sortModelMetricsByUrgency(
 interface RuntimeData {
   providers: DashboardRuntimeProvidersResponse | null
   metrics: DashboardRuntimeModelMetricsResponse | null
+}
+
+const COVERAGE_PRIORITY: Record<string, number> = {
+  error_only: 0,
+  none: 1,
+  partial: 2,
+  full: 3,
+}
+
+const COVERAGE_LABELS: Record<string, string> = {
+  error_only: 'error-only',
+  none: 'coverage missing',
+  partial: 'coverage partial',
+  full: 'coverage full',
+}
+
+const COVERAGE_REASON_LABELS: Record<string, string> = {
+  error_turn: 'error turn',
+  missing_usage_and_inference: 'usage/inference missing',
+  missing_usage: 'usage missing',
+  missing_inference: 'inference missing',
+  text_only_unmetered: 'text-only n/a',
+  unknown: 'unknown reason',
+}
+
+const COVERAGE_STAGE_LABELS: Record<string, string> = {
+  oas: 'OAS',
+  keeper: 'keeper',
+  projection: 'projection',
+  unknown: 'unknown stage',
 }
 
 async function loadRuntimeData(resource: ManagedAsyncResource<RuntimeData>, windowMinutes: number) {
@@ -166,13 +200,116 @@ function sumNullable(values: Array<number | null | undefined>): number | null {
   return sawNumber ? total : null
 }
 
+function coverageStatusLabel(status?: DashboardRuntimeModelMetric['coverage_status']): string | null {
+  if (!status) return null
+  return COVERAGE_LABELS[status] ?? status
+}
+
+function coverageReasonLabel(reason?: string | null): string | null {
+  if (!reason) return null
+  return COVERAGE_REASON_LABELS[reason] ?? reason
+}
+
+function coverageStageLabel(stage?: string | null): string | null {
+  if (!stage) return null
+  return COVERAGE_STAGE_LABELS[stage] ?? stage
+}
+
+function metricCoverageTone(metric: DashboardRuntimeModelMetric): string {
+  switch (metric.coverage_status) {
+    case 'full':
+      return 'ok'
+    case 'partial':
+      return 'warn'
+    case 'none':
+    case 'error_only':
+      return 'bad'
+    default:
+      return 'warn'
+  }
+}
+
+function metricMissingLabel(metric: DashboardRuntimeModelMetric): string {
+  if (metric.coverage_status === 'error_only') return 'error-only'
+  if (metric.primary_coverage_reason === 'text_only_unmetered') return 'n/a'
+  if (metric.coverage_status === 'none') return 'missing'
+  if (metric.coverage_status === 'partial') return 'partial'
+  return '--'
+}
+
+function fmtCoverageAwareNumber(
+  metric: DashboardRuntimeModelMetric,
+  value?: number | null,
+  digits = 0,
+): string {
+  const formatted = fmtNumber(value, digits)
+  return formatted !== '--' ? formatted : metricMissingLabel(metric)
+}
+
+function fmtCoverageAwareCost(metric: DashboardRuntimeModelMetric, value?: number | null): string {
+  const formatted = fmtCost(value)
+  return formatted !== '--' ? formatted : metricMissingLabel(metric)
+}
+
+function recentEntryMissingLabel(
+  entry: NonNullable<DashboardRuntimeModelMetric['recent_entries']>[number],
+): string {
+  if (entry.outcome === 'error') return 'error-only'
+  if (entry.coverage_reason === 'text_only_unmetered') return 'n/a'
+  if (entry.coverage_reason) return 'missing'
+  return '--'
+}
+
+function fmtRecentEntryNumber(
+  entry: NonNullable<DashboardRuntimeModelMetric['recent_entries']>[number],
+  value?: number | null,
+  digits = 0,
+): string {
+  const formatted = fmtNumber(value, digits)
+  return formatted !== '--' ? formatted : recentEntryMissingLabel(entry)
+}
+
+function fmtRecentEntryCost(
+  entry: NonNullable<DashboardRuntimeModelMetric['recent_entries']>[number],
+  value?: number | null,
+): string {
+  const formatted = fmtCost(value)
+  return formatted !== '--' ? formatted : recentEntryMissingLabel(entry)
+}
+
+function recentEntryDetail(
+  entry: NonNullable<DashboardRuntimeModelMetric['recent_entries']>[number],
+): string | null {
+  const parts = [
+    entry.outcome?.trim(),
+    coverageStageLabel(entry.coverage_stage),
+    coverageReasonLabel(entry.coverage_reason),
+    entry.turn_lane?.trim(),
+    entry.stop_reason?.trim(),
+  ].filter((value): value is string => Boolean(value))
+  return parts.length > 0 ? parts.join(' · ') : null
+}
+
 export function metricCoverageText(metric: DashboardRuntimeModelMetric): string | null {
+  if (metric.coverage_status === 'full' && metric.primary_coverage_reason == null) return null
+  if (metric.coverage_status === 'error_only') return 'error-only window'
   const successCount = metric.success_count ?? 0
   if (successCount <= 0) return null
   const usageCount = metric.usage_sample_count ?? 0
   const telemetryCount = metric.telemetry_sample_count ?? 0
-  if (usageCount >= successCount && telemetryCount >= successCount) return null
-  return `usage ${fmtNumber(usageCount)}/${fmtNumber(successCount)} · telemetry ${fmtNumber(telemetryCount)}/${fmtNumber(successCount)}`
+  if (
+    metric.coverage_status == null
+    && usageCount >= successCount
+    && telemetryCount >= successCount
+  ) return null
+  const parts = [
+    coverageStatusLabel(metric.coverage_status),
+    coverageStageLabel(metric.primary_coverage_stage),
+    coverageReasonLabel(metric.primary_coverage_reason),
+    `usage ${fmtNumber(usageCount)}/${fmtNumber(successCount)}`,
+    `telemetry ${fmtNumber(telemetryCount)}/${fmtNumber(successCount)}`,
+  ].filter((value): value is string => Boolean(value))
+  return parts.length > 0 ? parts.join(' · ') : null
 }
 
 export function RuntimeMonitor() {
@@ -311,8 +448,14 @@ export function RuntimeMonitor() {
           ${(metrics?.models ?? []).length > 0
             ? sortModelMetricsByUrgency(filterModelMetrics(metrics?.models ?? [], modelSearch.value)).map(metric => {
                 const isFailing = (metric.error_count ?? 0) > 0
+                const hasCoverageGap =
+                  metric.coverage_status === 'none'
+                  || metric.coverage_status === 'partial'
+                  || metric.coverage_status === 'error_only'
                 const articleClass = isFailing
                   ? 'p-4 rounded border border-[var(--status-bad)] bg-[var(--status-bad)]/5 backdrop-blur-sm shadow-sm flex flex-col gap-2'
+                  : hasCoverageGap
+                    ? 'p-4 rounded border border-[var(--status-warn)] bg-[var(--status-warn)]/5 backdrop-blur-sm shadow-sm flex flex-col gap-2'
                   : 'p-4 rounded border border-card-border bg-card/40 backdrop-blur-sm shadow-sm flex flex-col gap-2'
                 const ariaLabel = isFailing
                   ? `Provider failing: ${metric.model_id}, ${metric.error_count ?? 0} errors out of ${metric.entry_count ?? 0}`
@@ -329,18 +472,26 @@ export function RuntimeMonitor() {
                       <strong class="text-sm text-text-strong">${metric.model_id}</strong>
                       <span class="text-xs text-text-muted">entries ${fmtNumber(metric.entry_count)} · fallback ${fmtNumber(metric.fallback_count)}</span>
                       ${metricCoverageText(metric)
-                        ? html`<span class="text-2xs text-[var(--text-muted)]">${metricCoverageText(metric)}</span>`
+                        ? html`<span class="text-2xs ${hasCoverageGap ? 'text-[var(--status-warn)]' : 'text-[var(--text-muted)]'}">${metricCoverageText(metric)}</span>`
                         : null}
                     </div>
                     <div class="flex gap-2 items-center">
+                      ${metric.coverage_status
+                        ? html`<${StatusChip}
+                            label=${coverageStatusLabel(metric.coverage_status) ?? metric.coverage_status}
+                            tone=${metricCoverageTone(metric)}
+                          />`
+                        : null}
                       <${StatusChip}
                         label=${`${fmtSuccessRate(metric)}`}
                         tone=${modelMetricTone(metric)}
                       />
-                      <${StatusChip}
-                        label=${`${fmtNumber(metric.avg_tok_per_sec, 1)} tok/s wall`}
-                        tone=${'ok'}
-                      />
+                      ${metric.avg_tok_per_sec != null
+                        ? html`<${StatusChip}
+                            label=${`${fmtNumber(metric.avg_tok_per_sec, 1)} tok/s wall`}
+                            tone=${'ok'}
+                          />`
+                        : null}
                       ${metric.hw_decode_avg_tok_per_sec != null
                         ? html`<${StatusChip}
                             label=${`${fmtNumber(metric.hw_decode_avg_tok_per_sec, 1)} tok/s hw`}
@@ -356,11 +507,11 @@ export function RuntimeMonitor() {
                     </div>
                   </div>
                   <div class="grid grid-cols-3 gap-3 text-xs text-text-body">
-                    <div>latency avg/p95 · ${fmtNumber(metric.avg_latency_ms, 1)} / ${fmtNumber(metric.p95_latency_ms, 1)} ms</div>
-                    <div>wall tok/s p50/p95 · ${fmtNumber(metric.p50_tok_per_sec, 1)} / ${fmtNumber(metric.p95_tok_per_sec, 1)}</div>
-                    <div>cost · ${fmtCost(metric.total_cost_usd)}</div>
-                    <div>input/output · ${fmtNumber(metric.total_input_tokens)} / ${fmtNumber(metric.total_output_tokens)}</div>
-                    <div>reasoning/cache · ${fmtNumber(metric.total_reasoning_tokens)} / ${fmtNumber(metric.total_cache_read_tokens)}</div>
+                    <div>latency avg/p95 · ${fmtCoverageAwareNumber(metric, metric.avg_latency_ms, 1)} / ${fmtCoverageAwareNumber(metric, metric.p95_latency_ms, 1)} ms</div>
+                    <div>wall tok/s p50/p95 · ${fmtCoverageAwareNumber(metric, metric.p50_tok_per_sec, 1)} / ${fmtCoverageAwareNumber(metric, metric.p95_tok_per_sec, 1)}</div>
+                    <div>cost · ${fmtCoverageAwareCost(metric, metric.total_cost_usd)}</div>
+                    <div>input/output · ${fmtCoverageAwareNumber(metric, metric.total_input_tokens)} / ${fmtCoverageAwareNumber(metric, metric.total_output_tokens)}</div>
+                    <div>reasoning/cache · ${fmtCoverageAwareNumber(metric, metric.total_reasoning_tokens)} / ${fmtCoverageAwareNumber(metric, metric.total_cache_read_tokens)}</div>
                     <div>tools · ${fmtNumber(metric.avg_tool_calls_per_turn, 1)}/turn (${fmtNumber(metric.total_tool_calls)})</div>
                     ${metric.hw_decode_p50_tok_per_sec != null
                       ? html`<div class="col-span-3 text-text-muted">hw tok/s p50/p95 · ${fmtNumber(metric.hw_decode_p50_tok_per_sec, 1)} / ${fmtNumber(metric.hw_decode_p95_tok_per_sec, 1)} (decode-only; excludes queue/prefill/thinking)</div>`
@@ -396,7 +547,7 @@ export function RuntimeMonitor() {
                         ? cacheRead + inputTokens
                         : null
                     return html`<div class="text-2xs text-[var(--text-muted)] mt-1">
-                      cost ${fmtCost(metric.total_cost_usd)} · cache savings ${fmtPct(cacheRatio)} (${fmtNumber(cacheRead)} / ${fmtNumber(totalIn)} tokens)
+                      cost ${fmtCoverageAwareCost(metric, metric.total_cost_usd)} · cache savings ${fmtPct(cacheRatio)} (${fmtCoverageAwareNumber(metric, cacheRead)} / ${fmtCoverageAwareNumber(metric, totalIn)} tokens)
                     </div>`
                   })()}
                   ${(metric.error_count ?? 0) > 0
@@ -424,16 +575,24 @@ export function RuntimeMonitor() {
                             <div class="grid grid-cols-6 gap-1 text-3xs text-[var(--text-muted)] font-medium mb-1">
                               <div>time</div><div>in tok</div><div>out tok</div><div>latency</div><div>cost</div><div>tools</div>
                             </div>
-                            ${metric.recent_entries?.map(re => html`
-                              <div class="grid grid-cols-6 gap-1 text-2xs text-[var(--text-body)]">
-                              <div>${fmtTime(re.ts_unix)}</div>
-                              <div>${fmtNumber(re.input_tokens)}</div>
-                              <div>${fmtNumber(re.output_tokens)}</div>
-                                <div>${re.latency_ms == null ? '--' : `${fmtNumber(re.latency_ms, 0)}ms`}</div>
-                                <div>${fmtCost(re.cost_usd)}</div>
-                                <div>${re.tools_count}</div>
-                              </div>
-                            `)}
+                            ${metric.recent_entries?.map(re => {
+                              const detail = recentEntryDetail(re)
+                              return html`
+                                <div class="mb-1">
+                                  <div class="grid grid-cols-6 gap-1 text-2xs text-[var(--text-body)]">
+                                    <div>${fmtTime(re.ts_unix)}</div>
+                                    <div>${fmtRecentEntryNumber(re, re.input_tokens)}</div>
+                                    <div>${fmtRecentEntryNumber(re, re.output_tokens)}</div>
+                                    <div>${re.latency_ms == null ? recentEntryMissingLabel(re) : `${fmtNumber(re.latency_ms, 0)}ms`}</div>
+                                    <div>${fmtRecentEntryCost(re, re.cost_usd)}</div>
+                                    <div>${re.tools_count}</div>
+                                  </div>
+                                  ${detail
+                                    ? html`<div class="text-3xs text-[var(--text-muted)]">${detail}</div>`
+                                    : null}
+                                </div>
+                              `
+                            })}
                           </div>`
                         : null}
                     `

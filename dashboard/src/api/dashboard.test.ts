@@ -472,17 +472,32 @@ describe('fetchRuntimeModelMetrics', () => {
           success_count: 1,
           usage_sample_count: 0,
           telemetry_sample_count: 0,
+          usage_missing_count: 1,
+          telemetry_missing_count: 1,
+          coverage_status: 'none',
+          primary_coverage_stage: 'oas',
+          primary_coverage_reason: 'missing_usage_and_inference',
+          coverage_reason_counts: [
+            { reason: 'missing_usage_and_inference', count: 1 },
+          ],
           avg_latency_ms: null,
           total_input_tokens: null,
           total_cost_usd: null,
           recent_entries: [
             {
               ts_unix: 1,
+              outcome: 'success',
+              stop_reason: 'turn_budget_exhausted(3/3)',
+              turn_lane: 'text_only',
               input_tokens: null,
               output_tokens: null,
               latency_ms: null,
               cost_usd: null,
               tools_count: 0,
+              usage_reported: false,
+              telemetry_reported: false,
+              coverage_reason: 'missing_usage_and_inference',
+              coverage_stage: 'oas',
             },
           ],
           buckets: [
@@ -515,10 +530,25 @@ describe('fetchRuntimeModelMetrics', () => {
 
     expect(metric.usage_sample_count).toBe(0)
     expect(metric.telemetry_sample_count).toBe(0)
+    expect(metric.usage_missing_count).toBe(1)
+    expect(metric.telemetry_missing_count).toBe(1)
+    expect(metric.coverage_status).toBe('none')
+    expect(metric.primary_coverage_stage).toBe('oas')
+    expect(metric.primary_coverage_reason).toBe('missing_usage_and_inference')
+    expect(metric.coverage_reason_counts).toEqual([
+      { reason: 'missing_usage_and_inference', count: 1 },
+    ])
     expect(metric.total_input_tokens).toBeNull()
     expect(metric.total_cost_usd).toBeNull()
+    expect(metric.recent_entries?.[0]?.outcome).toBe('success')
+    expect(metric.recent_entries?.[0]?.stop_reason).toBe('turn_budget_exhausted(3/3)')
+    expect(metric.recent_entries?.[0]?.turn_lane).toBe('text_only')
     expect(metric.recent_entries?.[0]?.input_tokens).toBeNull()
     expect(metric.recent_entries?.[0]?.latency_ms).toBeNull()
+    expect(metric.recent_entries?.[0]?.usage_reported).toBe(false)
+    expect(metric.recent_entries?.[0]?.telemetry_reported).toBe(false)
+    expect(metric.recent_entries?.[0]?.coverage_reason).toBe('missing_usage_and_inference')
+    expect(metric.recent_entries?.[0]?.coverage_stage).toBe('oas')
     expect(metric.buckets?.[0]?.p95_latency_ms).toBeNull()
     expect(metric.buckets?.[0]?.cache_hit_ratio).toBeNull()
   })

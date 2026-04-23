@@ -95,11 +95,32 @@ let error_entry ~cascade_name ~ts ?provider () =
     ]);
   ]
 
-let success_entry_without_usage ~model ~ts ?provider () =
+let success_entry_without_usage ~model ~ts ?provider
+    ?(telemetry_reported = false)
+    ?(coverage_reason = "missing_usage_and_inference")
+    ?(coverage_stage = "oas")
+    ?turn_lane
+    ?stop_reason
+    () =
   let extra_fields =
     match provider with
     | Some value -> [ ("provider", `String value) ]
     | None -> []
+  in
+  let diag_fields =
+    [ ("usage_reported", `Bool false)
+    ; ("telemetry_reported", `Bool telemetry_reported)
+    ; ("coverage_reason", `String coverage_reason)
+    ; ("coverage_stage", `String coverage_stage)
+    ]
+    @
+    (match turn_lane with
+     | Some value -> [ ("turn_lane", `String value) ]
+     | None -> [])
+    @
+    (match stop_reason with
+     | Some value -> [ ("stop_reason", `String value) ]
+     | None -> [])
   in
   `Assoc [
     ("ts_unix", `Float ts);
@@ -107,8 +128,9 @@ let success_entry_without_usage ~model ~ts ?provider () =
     ("tools_used", `List []);
     ("telemetry", `Assoc ([
       ("model_used", `String model);
+      ("outcome", `String "success");
       ("fallback_applied", `Bool false);
-    ] @ extra_fields));
+    ] @ extra_fields @ diag_fields));
   ]
 
 (* ── Tests ───────────────────────────────────────── *)
@@ -355,6 +377,75 @@ let test_missing_usage_serializes_unknowns () =
     check bool "recent json input null" true
       (match recent_json |> member "input_tokens" with `Null -> true | _ -> false))
 
+let test_coverage_diagnostics_survive_aggregation () =
+  let base = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let path = make_keeper_dir base "coverage_diag" in
+    let ts = now_unix () in
+    write_decisions path [
+      success_entry_without_usage ~model:"glm-coding-plan:glm-5"
+        ~ts:(ts -. 5.0)
+        ~provider:"glm-coding"
+        ~turn_lane:"text_only"
+        ~stop_reason:"turn_budget_exhausted(3/3)"
+        ();
+    ];
+    let agg = M.compute ~base_path:base ~window_minutes:60 in
+    let s = List.hd agg.models in
+    check string "coverage status" "none" s.coverage_status;
+    check int "usage missing count" 1 s.usage_missing_count;
+    check int "telemetry missing count" 1 s.telemetry_missing_count;
+    check (option string) "primary coverage reason"
+      (Some "missing_usage_and_inference")
+      s.primary_coverage_reason;
+    check (option string) "primary coverage stage"
+      (Some "oas")
+      s.primary_coverage_stage;
+    check int "coverage reason counts" 1 (List.length s.coverage_reason_counts);
+    let recent = List.hd s.recent_entries in
+    check string "recent outcome" "success" recent.re_outcome;
+    check (option string) "recent stop reason"
+      (Some "turn_budget_exhausted(3/3)")
+      recent.re_stop_reason;
+    check (option string) "recent turn lane"
+      (Some "text_only")
+      recent.re_turn_lane;
+    check (option bool) "recent usage_reported"
+      (Some false) recent.re_usage_reported;
+    check (option bool) "recent telemetry_reported"
+      (Some false) recent.re_telemetry_reported;
+    check (option string) "recent coverage reason"
+      (Some "missing_usage_and_inference")
+      recent.re_coverage_reason;
+    check (option string) "recent coverage stage"
+      (Some "oas")
+      recent.re_coverage_stage;
+    let json = M.to_json agg in
+    let open Yojson.Safe.Util in
+    let m = json |> member "models" |> to_list |> List.hd in
+    check string "json coverage status" "none"
+      (m |> member "coverage_status" |> to_string);
+    check int "json usage missing count" 1
+      (m |> member "usage_missing_count" |> to_int);
+    check int "json telemetry missing count" 1
+      (m |> member "telemetry_missing_count" |> to_int);
+    check string "json primary coverage reason"
+      "missing_usage_and_inference"
+      (m |> member "primary_coverage_reason" |> to_string);
+    check string "json primary coverage stage"
+      "oas"
+      (m |> member "primary_coverage_stage" |> to_string);
+    let reason_counts = m |> member "coverage_reason_counts" |> to_list in
+    check int "json reason count length" 1 (List.length reason_counts);
+    check string "json reason count reason"
+      "missing_usage_and_inference"
+      (List.hd reason_counts |> member "reason" |> to_string);
+    let recent_json = m |> member "recent_entries" |> to_list |> List.hd in
+    check string "recent json outcome" "success"
+      (recent_json |> member "outcome" |> to_string);
+    check string "recent json stage" "oas"
+      (recent_json |> member "coverage_stage" |> to_string))
+
 (* ── thinking_fraction tests ─────────────────────── *)
 
 let success_entry_with_thinking ~model ~ts ~thinking_enabled () =
@@ -548,6 +639,7 @@ let () =
       test_case "recent entries capped" `Quick test_recent_entries;
       test_case "prompt tps and peak memory aggregates" `Quick test_prompt_tps_and_peak_memory_aggregates;
       test_case "missing usage serializes unknowns" `Quick test_missing_usage_serializes_unknowns;
+      test_case "coverage diagnostics survive aggregation" `Quick test_coverage_diagnostics_survive_aggregation;
       test_case "json roundtrip" `Quick test_json_roundtrip;
     ];
     "thinking_fraction", [

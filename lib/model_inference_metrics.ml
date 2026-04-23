@@ -16,6 +16,9 @@ module IntMap = Map.Make (Int)
 type recent_entry = {
   re_ts_unix : float;
   re_provider : string option;
+  re_outcome : string;
+  re_stop_reason : string option;
+  re_turn_lane : string option;
   re_input_tokens : int option;
   re_output_tokens : int option;
   re_latency_ms : float option;
@@ -23,6 +26,15 @@ type recent_entry = {
   re_peak_memory_gb : float option;
   re_cost_usd : float option;
   re_tools_count : int;
+  re_usage_reported : bool option;
+  re_telemetry_reported : bool option;
+  re_coverage_reason : string option;
+  re_coverage_stage : string option;
+}
+
+type coverage_reason_count = {
+  crc_reason : string;
+  crc_count : int;
 }
 
 type bucket_metric = {
@@ -76,6 +88,12 @@ type model_stats = {
   total_reasoning_tokens : int option;
   usage_sample_count : int;
   telemetry_sample_count : int;
+  usage_missing_count : int;
+  telemetry_missing_count : int;
+  coverage_status : string;
+  primary_coverage_stage : string option;
+  primary_coverage_reason : string option;
+  coverage_reason_counts : coverage_reason_count list;
   fallback_count : int;
   success_count : int;
   error_count : int;
@@ -136,12 +154,27 @@ let json_int_field_opt key (fields : (string * Yojson.Safe.t) list) =
   | Some (`Int n) -> Some n
   | _ -> None
 
+let json_bool_field_opt key (fields : (string * Yojson.Safe.t) list) =
+  match List.assoc_opt key fields with
+  | Some (`Bool b) -> Some b
+  | _ -> None
+
+let json_string_field_opt key (fields : (string * Yojson.Safe.t) list) =
+  match List.assoc_opt key fields with
+  | Some (`String s) ->
+      let trimmed = String.trim s in
+      if trimmed = "" then None else Some trimmed
+  | _ -> None
+
 (* ── Parse telemetry from decisions.jsonl entries ────────── *)
 
 type raw_entry = {
   model : string;
   provider : string option;
   ts_unix : float;
+  outcome : string;
+  stop_reason : string option;
+  turn_lane : string option;
   tok_per_sec : float option;
   prompt_tok_per_sec : float option;
   (* Hardware decode rate when present in telemetry; None for legacy entries
@@ -160,6 +193,10 @@ type raw_entry = {
   cost_usd : float option;
   tool_call_count : int;
   tools_used : string list;
+  usage_reported : bool option;
+  telemetry_reported : bool option;
+  coverage_reason : string option;
+  coverage_stage : string option;
   is_error : bool;
 }
 
@@ -213,7 +250,11 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option 
                | _ -> "__error__"
            in
            let provider = provider_opt_of_fields ~model tfields in
-           Some { model; ts_unix = ts; tok_per_sec = None;
+           Some { model; ts_unix = ts;
+                  outcome = "error";
+                  stop_reason = json_string_field_opt "stop_reason" tfields;
+                  turn_lane = json_string_field_opt "turn_lane" tfields;
+                  tok_per_sec = None;
                   provider;
                   prompt_tok_per_sec = None;
                   hw_decode_tok_per_sec = None;
@@ -225,6 +266,10 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option 
                   fallback_applied = false; cost_usd = None;
                   tool_call_count = outer_tool_call_count;
                   tools_used = outer_tools_used;
+                  usage_reported = json_bool_field_opt "usage_reported" tfields;
+                  telemetry_reported = json_bool_field_opt "telemetry_reported" tfields;
+                  coverage_reason = json_string_field_opt "coverage_reason" tfields;
+                  coverage_stage = json_string_field_opt "coverage_stage" tfields;
                   is_error = true }
          else
            (* Success turns: full telemetry parsing *)
@@ -287,7 +332,38 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option 
              | Some (`Bool b) -> Some b
              | _ -> None
            in
-           Some { model; ts_unix = ts; tok_per_sec;
+           let usage_reported =
+             match json_bool_field_opt "usage_reported" tfields with
+             | Some _ as value -> value
+             | None ->
+                 if input_tokens <> None
+                    || output_tokens <> None
+                    || cache_read_tokens <> None
+                    || reasoning_tokens <> None
+                    || cost_usd <> None
+                 then Some true
+                 else None
+           in
+           let telemetry_reported =
+             match json_bool_field_opt "telemetry_reported" tfields with
+             | Some _ as value -> value
+             | None ->
+                 if tok_per_sec <> None
+                    || prompt_tok_per_sec <> None
+                    || hw_decode_tok_per_sec <> None
+                    || peak_memory_gb <> None
+                    || latency_ms <> None
+                 then Some true
+                 else None
+           in
+           Some { model; ts_unix = ts;
+                  outcome =
+                    Option.value
+                      ~default:"success"
+                      (json_string_field_opt "outcome" tfields);
+                  stop_reason = json_string_field_opt "stop_reason" tfields;
+                  turn_lane = json_string_field_opt "turn_lane" tfields;
+                  tok_per_sec;
                   provider;
                   prompt_tok_per_sec;
                   hw_decode_tok_per_sec;
@@ -297,7 +373,12 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option 
                   input_tokens; output_tokens;
                   cache_read_tokens; reasoning_tokens; fallback_applied;
                   cost_usd; tool_call_count = outer_tool_call_count;
-                  tools_used = outer_tools_used; is_error = false }
+                  tools_used = outer_tools_used;
+                  usage_reported;
+                  telemetry_reported;
+                  coverage_reason = json_string_field_opt "coverage_reason" tfields;
+                  coverage_stage = json_string_field_opt "coverage_stage" tfields;
+                  is_error = false }
        | _ -> None)
     | _ -> None
 
@@ -342,6 +423,107 @@ let read_all_decisions ~base_path ~since_unix : raw_entry list =
       | _ -> []
     ) files
 
+let usage_signal_present (entry : raw_entry) : bool =
+  entry.input_tokens <> None
+  || entry.output_tokens <> None
+  || entry.cache_read_tokens <> None
+  || entry.reasoning_tokens <> None
+  || entry.cost_usd <> None
+
+let telemetry_signal_present (entry : raw_entry) : bool =
+  entry.tok_per_sec <> None
+  || entry.prompt_tok_per_sec <> None
+  || entry.hw_decode_tok_per_sec <> None
+  || entry.peak_memory_gb <> None
+  || entry.latency_ms <> None
+
+let usage_reported_effective (entry : raw_entry) : bool =
+  match entry.usage_reported with
+  | Some reported -> reported
+  | None -> usage_signal_present entry
+
+let telemetry_reported_effective (entry : raw_entry) : bool =
+  match entry.telemetry_reported with
+  | Some reported -> reported
+  | None -> telemetry_signal_present entry
+
+let coverage_reason_of_entry (entry : raw_entry) : string option =
+  if entry.is_error then Some "error_turn"
+  else
+    match entry.coverage_reason with
+    | Some _ as reason -> reason
+    | None ->
+        let usage_reported = usage_reported_effective entry in
+        let telemetry_reported = telemetry_reported_effective entry in
+        match usage_reported, telemetry_reported with
+        | true, true -> None
+        | false, false -> Some "missing_usage_and_inference"
+        | false, true -> Some "missing_usage"
+        | true, false -> Some "missing_inference"
+
+let coverage_stage_of_entry (entry : raw_entry) : string option =
+  match entry.coverage_stage with
+  | Some _ as stage -> stage
+  | None ->
+      if entry.is_error then Some "unknown"
+      else
+        match entry.usage_reported, entry.telemetry_reported with
+        | Some false, _
+        | _, Some false -> Some "oas"
+        | _ ->
+            match coverage_reason_of_entry entry with
+            | Some _ -> Some "unknown"
+            | None -> None
+
+let coverage_reason_counts_of_entries
+    (entries : raw_entry list) : coverage_reason_count list =
+  let counts =
+    List.fold_left (fun acc entry ->
+      match coverage_reason_of_entry entry with
+      | Some reason when not entry.is_error ->
+          let prev =
+            match StringMap.find_opt reason acc with
+            | Some count -> count
+            | None -> 0
+          in
+          StringMap.add reason (prev + 1) acc
+      | _ -> acc
+    ) StringMap.empty entries
+  in
+  StringMap.bindings counts
+  |> List.map (fun (reason, count) ->
+       { crc_reason = reason; crc_count = count })
+  |> List.sort (fun a b ->
+       let by_count = compare b.crc_count a.crc_count in
+       if by_count <> 0 then by_count
+       else compare a.crc_reason b.crc_reason)
+
+let most_common_stage_of_entries (entries : raw_entry list) : string option =
+  let counts =
+    List.fold_left (fun acc entry ->
+      match coverage_stage_of_entry entry, coverage_reason_of_entry entry with
+      | Some stage, Some _ when not entry.is_error ->
+          let prev =
+            match StringMap.find_opt stage acc with
+            | Some count -> count
+            | None -> 0
+          in
+          StringMap.add stage (prev + 1) acc
+      | _ -> acc
+    ) StringMap.empty entries
+  in
+  match StringMap.bindings counts with
+  | [] -> None
+  | bindings ->
+      bindings
+      |> List.sort (fun (stage_a, count_a) (stage_b, count_b) ->
+           let by_count = compare count_b count_a in
+           if by_count <> 0 then by_count
+           else compare stage_a stage_b)
+      |> List.hd
+      |> fst
+      |> fun stage -> Some stage
+
 (* ── Aggregate by model ─────────────────────────────────── *)
 
 let aggregate_by_model (entries : raw_entry list) : model_stats list =
@@ -352,56 +534,78 @@ let aggregate_by_model (entries : raw_entry list) : model_stats list =
     ) StringMap.empty entries in
   StringMap.fold (fun model_id entries acc ->
     let n = List.length entries in
-    let tok_vals = List.filter_map (fun e -> e.tok_per_sec) entries |> Array.of_list in
+    let success_entries = List.filter (fun e -> not e.is_error) entries in
+    let tok_vals =
+      List.filter_map (fun e -> e.tok_per_sec) success_entries
+      |> Array.of_list
+    in
     Array.sort Float.compare tok_vals;
     let prompt_vals =
-      List.filter_map (fun e -> e.prompt_tok_per_sec) entries
+      List.filter_map (fun e -> e.prompt_tok_per_sec) success_entries
       |> Array.of_list
     in
     Array.sort Float.compare prompt_vals;
-    let hw_vals = List.filter_map (fun e -> e.hw_decode_tok_per_sec) entries
-                  |> Array.of_list in
+    let hw_vals =
+      List.filter_map (fun e -> e.hw_decode_tok_per_sec) success_entries
+      |> Array.of_list
+    in
     Array.sort Float.compare hw_vals;
     let peak_vals =
-      List.filter_map (fun e -> e.peak_memory_gb) entries
+      List.filter_map (fun e -> e.peak_memory_gb) success_entries
       |> Array.of_list
     in
     Array.sort Float.compare peak_vals;
-    let lat_vals = List.filter_map (fun e -> e.latency_ms) entries |> Array.of_list in
+    let lat_vals =
+      List.filter_map (fun e -> e.latency_ms) success_entries
+      |> Array.of_list
+    in
     Array.sort Float.compare lat_vals;
-    let success_count = List.length (List.filter (fun e -> not e.is_error) entries) in
+    let success_count = List.length success_entries in
     let error_count = List.length (List.filter (fun e -> e.is_error) entries) in
     let total_tool_calls = List.fold_left (fun acc e -> acc + e.tool_call_count) 0 entries in
     let usage_sample_count =
       List.fold_left
         (fun acc e ->
-          if e.input_tokens <> None
-             || e.output_tokens <> None
-             || e.cache_read_tokens <> None
-             || e.reasoning_tokens <> None
-             || e.cost_usd <> None
+          if usage_signal_present e
           then acc + 1
           else acc)
-        0 entries
+        0 success_entries
     in
     let telemetry_sample_count =
       List.fold_left
         (fun acc e ->
-          if e.tok_per_sec <> None
-             || e.prompt_tok_per_sec <> None
-             || e.hw_decode_tok_per_sec <> None
-             || e.peak_memory_gb <> None
-             || e.latency_ms <> None
+          if telemetry_signal_present e
           then acc + 1
           else acc)
-        0 entries
+        0 success_entries
+    in
+    let usage_missing_count = max 0 (success_count - usage_sample_count) in
+    let telemetry_missing_count = max 0 (success_count - telemetry_sample_count) in
+    let coverage_reason_counts =
+      coverage_reason_counts_of_entries success_entries
+    in
+    let primary_coverage_reason =
+      match coverage_reason_counts with
+      | first :: _ -> Some first.crc_reason
+      | [] -> None
+    in
+    let primary_coverage_stage =
+      most_common_stage_of_entries success_entries
+    in
+    let coverage_status =
+      if success_count = 0 && error_count > 0 then "error_only"
+      else if usage_missing_count = 0 && telemetry_missing_count = 0 then "full"
+      else if usage_sample_count = 0 && telemetry_sample_count = 0 then "none"
+      else "partial"
     in
     (* thinking_fraction: count of entries with thinking_enabled=true over
        entries that reported the field. Entries without the field (older jsonl
        rows, providers that don't expose it) are excluded from denominator —
        None when no reporter at all. *)
     let thinking_fraction =
-      let reported = List.filter_map (fun e -> e.thinking_enabled) entries in
+      let reported =
+        List.filter_map (fun e -> e.thinking_enabled) success_entries
+      in
       match reported with
       | [] -> None
       | xs ->
@@ -434,18 +638,27 @@ let aggregate_by_model (entries : raw_entry list) : model_stats list =
       avg_latency_ms = average_opt lat_vals;
       p50_latency_ms = percentile_opt lat_vals 50.0;
       p95_latency_ms = percentile_opt lat_vals 95.0;
-      total_input_tokens = sum_int_opt (List.filter_map (fun e -> e.input_tokens) entries);
-      total_output_tokens = sum_int_opt (List.filter_map (fun e -> e.output_tokens) entries);
+      total_input_tokens =
+        sum_int_opt (List.filter_map (fun e -> e.input_tokens) success_entries);
+      total_output_tokens =
+        sum_int_opt (List.filter_map (fun e -> e.output_tokens) success_entries);
       total_cache_read_tokens =
-        sum_int_opt (List.filter_map (fun e -> e.cache_read_tokens) entries);
+        sum_int_opt (List.filter_map (fun e -> e.cache_read_tokens) success_entries);
       total_reasoning_tokens =
-        sum_int_opt (List.filter_map (fun e -> e.reasoning_tokens) entries);
+        sum_int_opt (List.filter_map (fun e -> e.reasoning_tokens) success_entries);
       usage_sample_count;
       telemetry_sample_count;
+      usage_missing_count;
+      telemetry_missing_count;
+      coverage_status;
+      primary_coverage_stage;
+      primary_coverage_reason;
+      coverage_reason_counts;
       fallback_count = List.length (List.filter (fun e -> e.fallback_applied) entries);
       success_count;
       error_count;
-      total_cost_usd = sum_float_opt (List.filter_map (fun e -> e.cost_usd) entries);
+      total_cost_usd =
+        sum_float_opt (List.filter_map (fun e -> e.cost_usd) success_entries);
       total_tool_calls;
       avg_tool_calls_per_turn =
         if n = 0 then 0.0
@@ -463,13 +676,15 @@ let aggregate_by_model (entries : raw_entry list) : model_stats list =
         |> List.sort (fun (_, a) (_, b) -> compare b a)
         |> (fun l -> if List.length l > 10 then List.filteri (fun i _ -> i < 10) l else l));
       recent_entries =
-        entries
-        |> List.filter (fun e -> not e.is_error)
+        success_entries
         |> List.sort (fun a b -> Float.compare b.ts_unix a.ts_unix)
         |> (fun l -> if List.length l > 5 then List.filteri (fun i _ -> i < 5) l else l)
         |> List.map (fun e -> {
           re_ts_unix = e.ts_unix;
           re_provider = e.provider;
+          re_outcome = e.outcome;
+          re_stop_reason = e.stop_reason;
+          re_turn_lane = e.turn_lane;
           re_input_tokens = e.input_tokens;
           re_output_tokens = e.output_tokens;
           re_latency_ms = e.latency_ms;
@@ -477,6 +692,10 @@ let aggregate_by_model (entries : raw_entry list) : model_stats list =
           re_peak_memory_gb = e.peak_memory_gb;
           re_cost_usd = e.cost_usd;
           re_tools_count = e.tool_call_count;
+          re_usage_reported = e.usage_reported;
+          re_telemetry_reported = e.telemetry_reported;
+          re_coverage_reason = coverage_reason_of_entry e;
+          re_coverage_stage = coverage_stage_of_entry e;
         });
       buckets = [];
     } in
@@ -642,6 +861,17 @@ let model_stats_to_json (s : model_stats) : Yojson.Safe.t =
     ; ("total_reasoning_tokens", opt_int s.total_reasoning_tokens)
     ; ("usage_sample_count", `Int s.usage_sample_count)
     ; ("telemetry_sample_count", `Int s.telemetry_sample_count)
+    ; ("usage_missing_count", `Int s.usage_missing_count)
+    ; ("telemetry_missing_count", `Int s.telemetry_missing_count)
+    ; ("coverage_status", `String s.coverage_status)
+    ; ("primary_coverage_stage", opt_string s.primary_coverage_stage)
+    ; ("primary_coverage_reason", opt_string s.primary_coverage_reason)
+    ; ("coverage_reason_counts", `List (List.map (fun (c : coverage_reason_count) ->
+        `Assoc [
+          ("reason", `String c.crc_reason);
+          ("count", `Int c.crc_count);
+        ]
+      ) s.coverage_reason_counts))
     ; ("fallback_count", `Int s.fallback_count)
     ; ("success_count", `Int s.success_count)
     ; ("error_count", `Int s.error_count)
@@ -655,6 +885,9 @@ let model_stats_to_json (s : model_stats) : Yojson.Safe.t =
         `Assoc [
           ("ts_unix", `Float r.re_ts_unix);
           ("provider", opt_string r.re_provider);
+          ("outcome", `String r.re_outcome);
+          ("stop_reason", opt_string r.re_stop_reason);
+          ("turn_lane", opt_string r.re_turn_lane);
           ("input_tokens", opt_int r.re_input_tokens);
           ("output_tokens", opt_int r.re_output_tokens);
           ("latency_ms", opt_float r.re_latency_ms);
@@ -662,6 +895,12 @@ let model_stats_to_json (s : model_stats) : Yojson.Safe.t =
           ("peak_memory_gb", opt_float r.re_peak_memory_gb);
           ("cost_usd", opt_float r.re_cost_usd);
           ("tools_count", `Int r.re_tools_count);
+          ("usage_reported",
+            match r.re_usage_reported with Some value -> `Bool value | None -> `Null);
+          ("telemetry_reported",
+            match r.re_telemetry_reported with Some value -> `Bool value | None -> `Null);
+          ("coverage_reason", opt_string r.re_coverage_reason);
+          ("coverage_stage", opt_string r.re_coverage_stage);
         ]
       ) s.recent_entries))
     ; ("buckets", `List (List.map bucket_metric_to_json s.buckets))

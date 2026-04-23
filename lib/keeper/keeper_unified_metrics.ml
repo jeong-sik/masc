@@ -123,6 +123,38 @@ let visible_run_validation (result : Keeper_agent_run.run_result) :
   | Some v when v.ok && (v.evidence <> [] || v.has_file_write) -> Some v
   | _ -> None
 
+let telemetry_reported_of_result
+    (result : Keeper_agent_run.run_result) : bool =
+  Option.is_some result.inference_telemetry
+
+let structurally_unmetered_provider (provider : string) : bool =
+  List.mem provider [ "kimi_cli"; "codex_cli"; "gemini_cli" ]
+
+let coverage_reason_of_result
+    (result : Keeper_agent_run.run_result) : string option =
+  let telemetry_reported = telemetry_reported_of_result result in
+  if result.usage_reported && telemetry_reported then None
+  else
+    let provider =
+      Keeper_agent_run.surface_model_used result
+      |> Keeper_hooks_oas.provider_of_model
+    in
+    match result.usage_reported, telemetry_reported with
+    | false, false ->
+        if String.equal result.tool_surface.turn_lane "text_only"
+           && structurally_unmetered_provider provider
+        then Some "text_only_unmetered"
+        else Some "missing_usage_and_inference"
+    | false, true -> Some "missing_usage"
+    | true, false -> Some "missing_inference"
+    | true, true -> None
+
+let coverage_stage_of_result
+    (result : Keeper_agent_run.run_result) : string option =
+  if result.usage_reported && telemetry_reported_of_result result
+  then None
+  else Some "oas"
+
 let has_visible_tool_signal (result : Keeper_agent_run.run_result) : bool =
   has_substantive_tool_calls result.tools_used
   || Option.is_some (visible_run_validation result)
@@ -509,6 +541,9 @@ let append_decision_record
           match result with
           | Some r ->
               let surface_model_used = Keeper_agent_run.surface_model_used r in
+              let telemetry_reported = telemetry_reported_of_result r in
+              let coverage_reason = coverage_reason_of_result r in
+              let coverage_stage = coverage_stage_of_result r in
               let thinking_enabled_field =
                 match turn_thinking_enabled with
                 | Some b -> [("thinking_enabled", `Bool b)]
@@ -615,8 +650,19 @@ let append_decision_record
               in
               `Assoc ([
                 ("model_used", `String surface_model_used);
+                ("outcome", `String "success");
                 ("turn_count", `Int r.turn_count);
                 ("stop_reason", `String stop_reason_str);
+                ("usage_reported", `Bool r.usage_reported);
+                ("telemetry_reported", `Bool telemetry_reported);
+                ( "coverage_stage",
+                  match coverage_stage with
+                  | Some stage -> `String stage
+                  | None -> `Null );
+                ( "coverage_reason",
+                  match coverage_reason with
+                  | Some reason -> `String reason
+                  | None -> `Null );
               ] @ usage_fields @ thinking_enabled_field @ inference_fields @ cascade_fields @ tool_surface_fields)
           | None ->
               (* Partial telemetry for error turns: record what we know.
@@ -655,6 +701,10 @@ let append_decision_record
                 ("candidate_models", `List (List.map (fun s -> `String s) cascade_models));
                 ("error_category", `String error_category);
                 ("outcome", `String "error");
+                ("usage_reported", `Bool false);
+                ("telemetry_reported", `Bool false);
+                ("coverage_stage", `String "unknown");
+                ("coverage_reason", `String "error_turn");
               ] );
       ]
       @ social_fields)

@@ -81,6 +81,9 @@ let broadcast_cached_surface ~event_type (json : Yojson.Safe.t) : unit =
   end else
     Log.Dashboard.debug "%s: payload unchanged, skipping broadcast" event_type
 
+let execution_actor_for_request ~base_path request =
+  Server_auth.sanitized_dashboard_actor_for_request ~base_path request
+
 (* Wire operator broadcast refs now that Sse is in scope. *)
 let () =
   _operator_snapshot_broadcast_ref :=
@@ -398,7 +401,10 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
   let net = state.Mcp_server.net in
   let mono_clock = state.Mcp_server.mono_clock in
   let fixture = query_param request "fixture" in
-  let actor = operator_actor_hint request in
+  let actor =
+    execution_actor_for_request
+      ~base_path:state.Mcp_server.room_config.base_path request
+  in
   let full_mode = bool_query_param request "full" ~default:false in
   let light = not full_mode in
   let compute ?actor ?fixture ~light () =

@@ -463,7 +463,29 @@ let test_keeper_status_exposes_model_observability () =
         (runtime_trust |> member "runtime_contract" |> member "backend"
        |> to_string);
       Alcotest.(check int) "runtime trust pending approvals empty" 0
-        (runtime_trust |> member "pending_approval_count" |> to_int))
+        (runtime_trust |> member "pending_approval_count" |> to_int);
+      Alcotest.(check string) "runtime trust disposition pass" "Pass"
+        (runtime_trust |> member "disposition" |> to_string);
+      Alcotest.(check bool) "runtime trust attention false" false
+        (runtime_trust |> member "needs_attention" |> to_bool);
+      Alcotest.(check string) "runtime trust approval idle" "idle"
+        (runtime_trust |> member "approval" |> member "state" |> to_string);
+      let sandbox_summary =
+        runtime_trust |> member "execution" |> member "sandbox_summary"
+        |> to_string
+      in
+      Alcotest.(check bool) "runtime trust execution sandbox summary mentions local"
+        true (contains_substring sandbox_summary "local");
+      let latest_causal_kind =
+        runtime_trust |> member "latest_causal_event" |> member "kind"
+        |> to_string
+      in
+      Alcotest.(check bool)
+        "runtime trust latest causal event reflects persisted audit"
+        true
+        (List.mem latest_causal_kind [ "execution_receipt"; "transition" ]);
+      Alcotest.(check bool) "runtime trust causal timeline non-empty" true
+        (runtime_trust |> member "causal_timeline" |> to_list <> []))
 
 let test_keeper_status_ignores_stale_cascade_observation () =
   Eio_main.run @@ fun env ->

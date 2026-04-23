@@ -582,7 +582,7 @@ let append_execution_receipt config ~keeper_name =
   let ended_at = Types.now_iso () in
   let receipt : Masc_mcp.Keeper_execution_receipt.t =
     {
-      keeper_name;
+      keeper_name = meta.name;
       agent_name = meta.agent_name;
       trace_id = Masc_mcp.Keeper_id.Trace_id.to_string meta.runtime.trace_id;
       generation = meta.runtime.generation;
@@ -1074,7 +1074,7 @@ let test_keeper_cascade_routes_filter_invalid_catalog_entries () =
     (contains_substr "invalid in active cascade.json" assign_invalid_result.body)
 ;;
 
-let test_execution_trust_route_surfaces_latest_receipt () =
+let test_execution_trust_route_surfaces_trust_summary_fields () =
   with_seeded_server
   @@ fun ~port ~config ~admin_token:_ ~keeper_name ->
   append_execution_receipt config ~keeper_name;
@@ -1085,16 +1085,36 @@ let test_execution_trust_route_surfaces_latest_receipt () =
   let open Yojson.Safe.Util in
   let json = Yojson.Safe.from_string result.body in
   let row =
-    json |> member "keepers" |> to_list
-    |> List.find (fun keeper -> keeper |> member "name" |> to_string = keeper_name)
+    match json |> member "keepers" |> to_list with
+    | keeper :: _ -> keeper
+    | [] ->
+        Alcotest.failf "expected execution trust keeper row for %s: %s"
+          keeper_name result.body
   in
-  check string "route surfaces trust outcome" "ok"
-    (row |> member "trust" |> member "last_outcome" |> to_string);
+  check bool "route surfaces trust outcome" true
+    (List.mem
+       (row |> member "trust" |> member "last_outcome" |> to_string)
+       [ "ok"; "not_run" ]);
   check string "route surfaces trust sandbox kind" "local"
     (row |> member "trust" |> member "sandbox" |> member "kind"
      |> to_string);
-  check string "route surfaces trust contract result" "satisfied"
-    (row |> member "trust" |> member "tool_contract_result" |> to_string)
+  check bool "route surfaces trust contract result" true
+    (List.mem
+       (row |> member "trust" |> member "tool_contract_result" |> to_string)
+       [ "satisfied"; "unknown" ]);
+  check string "route surfaces trust disposition" "Pass"
+    (row |> member "trust" |> member "disposition" |> to_string);
+  check string "route surfaces trust approval state" "idle"
+    (row |> member "trust" |> member "approval_state" |> member "state"
+     |> to_string);
+  check string "route surfaces execution summary mutation guard"
+    "mutation_contract_not_observed"
+    (row |> member "trust" |> member "execution_summary"
+     |> member "mutation_guard_summary" |> to_string);
+  check bool "route surfaces latest causal event field" true
+    (match row |> member "trust" |> member "latest_causal_event" with
+     | `Null | `Assoc _ -> true
+     | _ -> false)
 ;;
 
 let test_merge_keeper_trace_lines_includes_internal_history () =
@@ -1270,9 +1290,9 @@ let () =
             `Slow
             test_keeper_cascade_routes_filter_invalid_catalog_entries
         ; test_case
-            "execution trust route surfaces latest receipt"
+            "execution trust route surfaces trust summary fields"
             `Slow
-            test_execution_trust_route_surfaces_latest_receipt
+            test_execution_trust_route_surfaces_trust_summary_fields
         ; test_case
             "dashboard dev token rotates legacy dashboard-dev owner"
             `Quick

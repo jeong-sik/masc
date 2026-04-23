@@ -446,6 +446,24 @@ let audit_rule_event ~event_type (rule : approval_rule) =
     ~keeper_name:rule.keeper_name ~tool_name:rule.tool_name
     ~risk_level:rule.max_risk ?source_approval_id:rule.source_approval_id ()
 
+let read_recent_audit ?keeper_name ?(n = 20) () : Yojson.Safe.t list =
+  if n <= 0 then []
+  else
+    match get_audit_store () with
+    | None -> []
+    | Some store ->
+        let raw = Dated_jsonl.read_recent store (max n 1 * 6) in
+        let filtered =
+          match keeper_name with
+          | None -> raw
+          | Some name ->
+              raw
+              |> List.filter (fun json ->
+                     String.equal name
+                       (Safe_ops.json_string ~default:"" "keeper" json))
+        in
+        filtered |> List.filteri (fun idx _ -> idx < n)
+
 let generate_id () =
   make_generated_id "appr"
 

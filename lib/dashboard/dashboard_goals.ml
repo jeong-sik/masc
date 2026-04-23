@@ -17,11 +17,17 @@ type tree_node = {
   infra_risk_count : int;
   linkage_source : string;
   status_reason : string;
+  blocking_source : string;
+  blocking_reason : string;
+  latest_keeper_ref : string option;
+  latest_turn_ref : int option;
+  stalled_since : string option;
 }
 
 type goal_detail_keeper = {
   meta : Keeper_types.keeper_meta;
   latest_receipt : Yojson.Safe.t option;
+  runtime_trust : Yojson.Safe.t;
 }
 
 let task_is_linked_to_goal (task : Types.task) goal_id =
@@ -76,10 +82,14 @@ let link_source_of_values values =
   | _ -> "mixed"
 
 let receipt_error_kind json =
-  json |> member "error" |> member "kind" |> to_string_option
+  match json |> member "error" with
+  | `Assoc _ as error -> error |> member "kind" |> to_string_option
+  | _ -> None
 
 let receipt_error_message json =
-  json |> member "error" |> member "message" |> to_string_option
+  match json |> member "error" with
+  | `Assoc _ as error -> error |> member "message" |> to_string_option
+  | _ -> None
 
 let receipt_sandbox_kind json =
   json |> member "sandbox" |> member "kind" |> to_string_option
@@ -105,6 +115,47 @@ let receipt_started_at json =
 
 let receipt_ended_at json =
   json |> member "ended_at" |> to_string_option
+
+let trust_disposition json =
+  json |> member "disposition" |> to_string_option
+
+let trust_disposition_reason json =
+  json |> member "disposition_reason" |> to_string_option
+
+let trust_attention_reason json =
+  json |> member "attention_reason" |> to_string_option
+
+let trust_needs_attention json =
+  json |> member "needs_attention" |> to_bool_option
+  |> Option.value ~default:false
+
+let trust_turn_id json =
+  json |> member "turn_id" |> to_int_option
+
+let trust_latest_event json =
+  match json |> member "latest_causal_event" with
+  | `Assoc _ as event -> Some event
+  | _ -> None
+
+let trust_latest_event_ts json =
+  Option.bind (trust_latest_event json) (fun event ->
+      event |> member "ts" |> to_string_option )
+
+let trust_latest_event_ts_unix json =
+  Option.bind (trust_latest_event json) (fun event ->
+      event |> member "ts_unix" |> to_float_option )
+
+let trust_sandbox_risk json =
+  String.equal
+    (json |> member "disposition_reason" |> to_string_option
+     |> Option.value ~default:"")
+    "sandbox_violation"
+
+let trust_cascade_risk json =
+  String.equal
+    (json |> member "disposition_reason" |> to_string_option
+     |> Option.value ~default:"")
+    "cascade_exhausted"
 
 let receipt_has_error json =
   match receipt_error_kind json with
@@ -272,6 +323,7 @@ type build_context = {
   pending_approvals : Yojson.Safe.t list;
   keeper_metas : Keeper_types.keeper_meta list;
   latest_receipts : (string * Yojson.Safe.t) list;
+  latest_runtime_trusts : (string * Yojson.Safe.t) list;
 }
 
 let rec build_tree context goals goal =
@@ -317,6 +369,12 @@ let rec build_tree context goals goal =
     |> List.filter_map (fun keeper_name ->
            List.assoc_opt keeper_name context.latest_receipts)
   in
+  let direct_runtime_trusts =
+    direct_linked_keeper_names
+    |> List.filter_map (fun keeper_name ->
+           List.assoc_opt keeper_name context.latest_runtime_trusts
+           |> Option.map (fun trust -> (keeper_name, trust)))
+  in
   let child_blocked =
     List.exists (fun (child : tree_node) -> String.equal child.health "blocked")
       children
@@ -336,6 +394,8 @@ let rec build_tree context goals goal =
        |> List.filter_map (fun json ->
               json |> member "requested_at_iso" |> to_string_option))
     @ (direct_receipts |> List.filter_map receipt_ended_at)
+    @ (direct_runtime_trusts
+       |> List.filter_map (fun (_, trust) -> trust_latest_event_ts trust))
   in
   let child_last_activity_values =
     children |> List.map (fun child -> child.last_activity_at)
@@ -354,12 +414,28 @@ let rec build_tree context goals goal =
   in
   let direct_sandbox_risk =
     List.exists receipt_has_sandbox_risk direct_receipts
+    || List.exists (fun (_, trust) -> trust_sandbox_risk trust) direct_runtime_trusts
   in
   let direct_cascade_risk =
     List.exists receipt_has_cascade_risk direct_receipts
+    || List.exists (fun (_, trust) -> trust_cascade_risk trust) direct_runtime_trusts
   in
   let blocked_by_receipt =
     List.exists receipt_has_error direct_receipts
+  in
+  let direct_runtime_blocking_reason =
+    direct_runtime_trusts
+    |> List.find_map (fun (_keeper_name, trust) ->
+           match trust_disposition trust with
+           | Some "Alert" ->
+               (match trust_attention_reason trust with
+                | Some _ as reason -> reason
+                | None -> trust_disposition_reason trust)
+           | Some "Pause" when trust_needs_attention trust ->
+               (match trust_attention_reason trust with
+                | Some _ as reason -> reason
+                | None -> trust_disposition_reason trust)
+           | _ -> None)
   in
   let direct_fsm_risk =
     List.exists
@@ -396,6 +472,14 @@ let rec build_tree context goals goal =
            receipt_has_error json || receipt_has_sandbox_risk json
            || receipt_has_cascade_risk json)
          direct_receipts)
+    + List.length
+        (List.filter
+           (fun (_, trust) ->
+             match trust_disposition trust with
+             | Some "Alert" -> true
+             | Some "Pause" -> trust_needs_attention trust
+             | _ -> false)
+           direct_runtime_trusts)
   in
   let infra_risk_count =
     direct_infra_risk_count
@@ -418,6 +502,7 @@ let rec build_tree context goals goal =
   let at_risk =
     pending_approval_count > 0
     || infra_risk_count > 0
+    || Option.is_some direct_runtime_blocking_reason
     || direct_fsm_risk
     || stalled
     || child_at_risk
@@ -432,6 +517,39 @@ let rec build_tree context goals goal =
       ~sandbox_risk:direct_sandbox_risk ~cascade_risk:direct_cascade_risk
       ~fsm_risk:direct_fsm_risk ~stalled
       ~stagnation_seconds ~child_at_risk
+  in
+  let blocking_source, blocking_reason =
+    match goal.Goal_store.phase with
+    | Goal_phase.Blocked | Goal_phase.Dropped ->
+        ("goal_phase", status_reason)
+    | Goal_phase.Completed | Goal_phase.Paused | Goal_phase.Executing
+    | Goal_phase.Awaiting_verification | Goal_phase.Awaiting_approval ->
+        if child_blocked then
+          ("child_goal", "A linked sub-goal is blocked.")
+        else if pending_approval_count > 0 then
+          ("approval", status_reason)
+        else if Option.is_some direct_runtime_blocking_reason then
+          ( "keeper_runtime",
+            Option.value direct_runtime_blocking_reason ~default:status_reason )
+        else if direct_fsm_risk then
+          ("task_fsm", status_reason)
+        else if stalled then
+          ("stalled", status_reason)
+        else
+          ("none", status_reason)
+  in
+  let latest_keeper_ref, latest_turn_ref =
+    direct_runtime_trusts
+    |> List.sort (fun (_, left) (_, right) ->
+           Float.compare
+             (Option.value ~default:0.0 (trust_latest_event_ts_unix right))
+             (Option.value ~default:0.0 (trust_latest_event_ts_unix left)))
+    |> function
+    | (keeper_name, trust) :: _ -> (Some keeper_name, trust_turn_id trust)
+    | [] -> (None, None)
+  in
+  let stalled_since =
+    if stalled then Some last_activity_at else None
   in
   let convergence = compute_convergence goal linked_tasks children in
   {
@@ -448,6 +566,11 @@ let rec build_tree context goals goal =
     infra_risk_count;
     linkage_source;
     status_reason;
+    blocking_source;
+    blocking_reason;
+    latest_keeper_ref;
+    latest_turn_ref;
+    stalled_since;
   }
 
 let build_forest ~(config : Coord.config) ~goals ~tasks =
@@ -481,6 +604,12 @@ let build_forest ~(config : Coord.config) ~goals ~tasks =
       pending_approvals;
       keeper_metas;
       latest_receipts;
+      latest_runtime_trusts =
+        keeper_metas
+        |> List.map (fun (meta : Keeper_types.keeper_meta) ->
+               ( meta.name,
+                 Keeper_runtime_trust_snapshot.snapshot_json
+                   ~config ~meta ));
     }
   in
   goals
@@ -692,6 +821,11 @@ let rec tree_node_to_json ?(effective_policy_for_goal = fun _ -> None)
       ("pending_approval_count", `Int node.pending_approval_count);
       ("infra_risk_count", `Int node.infra_risk_count);
       ("linkage_source", `String node.linkage_source);
+      ("blocking_source", `String node.blocking_source);
+      ("blocking_reason", `String node.blocking_reason);
+      ("latest_keeper_ref", Json_util.string_opt_to_json node.latest_keeper_ref);
+      ("latest_turn_ref", Json_util.int_opt_to_json node.latest_turn_ref);
+      ("stalled_since", Json_util.string_opt_to_json node.stalled_since);
       ("created_at", `String goal.created_at);
       ("updated_at", `String goal.updated_at);
     ]
@@ -704,6 +838,11 @@ let rec flatten_tree acc = function
 let goal_detail_keeper_json (detail : goal_detail_keeper) =
   let meta = detail.meta in
   let latest_receipt = detail.latest_receipt in
+  let latest_causal_event =
+    match detail.runtime_trust |> member "latest_causal_event" with
+    | `Assoc _ as event -> event
+    | _ -> `Null
+  in
   let latest_execution_outcome =
     match latest_receipt with
     | Some receipt -> receipt_outcome receipt
@@ -752,6 +891,8 @@ let goal_detail_keeper_json (detail : goal_detail_keeper) =
         match latest_receipt with
         | Some receipt -> receipt
         | None -> `Null );
+      ("runtime_trust", detail.runtime_trust);
+      ("latest_causal_event", latest_causal_event);
     ]
 
 let timeline_event_json ~ts ~kind ~lane ~title ~summary ~severity =
@@ -891,32 +1032,56 @@ let build_goal_timeline node linked_keepers approvals goal_events =
   let keeper_events =
     linked_keepers
     |> List.filter_map (fun (detail : goal_detail_keeper) ->
-           match detail.latest_receipt with
-           | None -> None
-           | Some receipt -> (
-               match receipt_ended_at receipt with
+           match trust_latest_event detail.runtime_trust with
+           | Some event ->
+               let title =
+                 event |> member "title" |> to_string_option
+                 |> Option.value ~default:(Printf.sprintf "Keeper · %s" detail.meta.name)
+               in
+               let summary =
+                 event |> member "summary" |> to_string_option
+                 |> Option.value ~default:"latest keeper event"
+               in
+               let severity =
+                 event |> member "severity" |> to_string_option
+                 |> Option.value ~default:"warn"
+               in
+               let ts =
+                 event |> member "ts" |> to_string_option
+                 |> Option.value ~default:(Types.now_iso ())
+               in
+               Some
+                 (timeline_event_json ~ts ~kind:"keeper_runtime"
+                    ~lane:("keeper:" ^ detail.meta.name)
+                    ~title:(Printf.sprintf "%s · %s" detail.meta.name title)
+                    ~summary ~severity)
+           | None ->
+               match detail.latest_receipt with
                | None -> None
-               | Some ended_at ->
-                   let outcome =
-                     receipt_outcome receipt |> Option.value ~default:"unknown"
-                   in
-                   let severity =
-                     if receipt_has_error receipt then "bad"
-                     else if receipt_has_sandbox_risk receipt
-                             || receipt_has_cascade_risk receipt
-                     then "warn"
-                     else "ok"
-                   in
-                   Some
-                     (timeline_event_json ~ts:ended_at ~kind:"keeper_receipt"
-                        ~lane:("keeper:" ^ detail.meta.name)
-                        ~title:(Printf.sprintf "Keeper · %s" detail.meta.name)
-                        ~summary:
-                          (Printf.sprintf "%s · %s"
-                             outcome
-                             (receipt_cascade_name receipt
-                              |> Option.value ~default:detail.meta.cascade_name))
-                        ~severity)))
+               | Some receipt -> (
+                   match receipt_ended_at receipt with
+                   | None -> None
+                   | Some ended_at ->
+                       let outcome =
+                         receipt_outcome receipt |> Option.value ~default:"unknown"
+                       in
+                       let severity =
+                         if receipt_has_error receipt then "bad"
+                         else if receipt_has_sandbox_risk receipt
+                                 || receipt_has_cascade_risk receipt
+                         then "warn"
+                         else "ok"
+                       in
+                       Some
+                         (timeline_event_json ~ts:ended_at ~kind:"keeper_receipt"
+                            ~lane:("keeper:" ^ detail.meta.name)
+                            ~title:(Printf.sprintf "Keeper · %s" detail.meta.name)
+                            ~summary:
+                              (Printf.sprintf "%s · %s"
+                                 outcome
+                                 (receipt_cascade_name receipt
+                                  |> Option.value ~default:detail.meta.cascade_name))
+                            ~severity)))
   in
   let goal_events = List.map goal_event_timeline_json goal_events in
   task_events @ approval_events @ keeper_events @ goal_events
@@ -949,6 +1114,9 @@ let goal_detail_json ~(config : Coord.config) ~goal_id :
                          List.assoc_opt meta.name
                            (Keeper_execution_receipt.latest_json_by_keeper
                               config node.linked_keeper_names);
+                       runtime_trust =
+                         Keeper_runtime_trust_snapshot.snapshot_json
+                           ~config ~meta;
                      }
                | Ok None | Error _ | Ok (Some _) -> None)
       in

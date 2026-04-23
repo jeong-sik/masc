@@ -246,6 +246,9 @@ let json_string_list_member key json =
 let keeper_trust_json ?(include_receipt = false)
     (config : Coord.config) (meta : Keeper_types.keeper_meta) =
   let latest_receipt = Keeper_execution_receipt.latest_json config meta.name in
+  let runtime_trust =
+    Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta
+  in
   let sandbox_json =
     match latest_receipt with
     | Some receipt -> Yojson.Safe.Util.member "sandbox" receipt
@@ -311,6 +314,15 @@ let keeper_trust_json ?(include_receipt = false)
       ("sandbox", sandbox_json);
       ("approval", approval_json);
       ("cascade", cascade_json);
+      ("disposition", Yojson.Safe.Util.member "disposition" runtime_trust);
+      ( "disposition_reason",
+        Yojson.Safe.Util.member "disposition_reason" runtime_trust );
+      ("needs_attention", Yojson.Safe.Util.member "needs_attention" runtime_trust);
+      ("attention_reason", Yojson.Safe.Util.member "attention_reason" runtime_trust);
+      ("next_human_action", Yojson.Safe.Util.member "next_human_action" runtime_trust);
+      ("approval_state", Yojson.Safe.Util.member "approval" runtime_trust);
+      ("execution_summary", Yojson.Safe.Util.member "execution" runtime_trust);
+      ("latest_causal_event", Yojson.Safe.Util.member "latest_causal_event" runtime_trust);
       ( "last_receipt_at",
         match latest_receipt with
         | Some receipt -> Yojson.Safe.Util.member "ended_at" receipt

@@ -79,6 +79,7 @@ let unprivileged_presets =
     Keeper_types.Minimal;
     Keeper_types.Social;
     Keeper_types.Messaging;
+    Keeper_types.Dispatch;
     Keeper_types.Research;
   ]
 

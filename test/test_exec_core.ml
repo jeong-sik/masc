@@ -536,6 +536,23 @@ let test_git_diff_stat_structured () =
   check int "insertions" 2 (so |> member "insertions" |> to_int);
   check int "deletions" 1 (so |> member "deletions" |> to_int)
 
+let test_git_diff_stat_structured_plural () =
+  let json =
+    Masc_mcp.Exec_core.process_result_json
+      ~base_path:"/tmp"
+      ~keeper_name:"p10-test"
+      ~cmd:"git diff --stat"
+      ~status:(Unix.WEXITED 0)
+      ~output:
+        " lib/foo.ml | 3 ++-\n lib/bar.ml | 2 +-\n\
+         2 files changed, 3 insertions(+), 2 deletions(-)\n"
+      ()
+  in
+  let so = json |> member "structured_output" in
+  check int "files_changed" 2 (so |> member "files_changed" |> to_int);
+  check int "insertions" 3 (so |> member "insertions" |> to_int);
+  check int "deletions" 2 (so |> member "deletions" |> to_int)
+
 let test_unknown_cmd_no_structured () =
   let json =
     Masc_mcp.Exec_core.process_result_json
@@ -710,6 +727,8 @@ let () =
             test_wc_structured;
           test_case "git diff --stat produces summary counts" `Quick
             test_git_diff_stat_structured;
+          test_case "git diff --stat plural summary counts" `Quick
+            test_git_diff_stat_structured_plural;
           test_case "unknown cmd has no structured_output" `Quick
             test_unknown_cmd_no_structured;
           test_case "dune runtest produces passed/failed counts" `Quick

@@ -91,7 +91,9 @@ let parse_git_diff_stat output =
     | last :: _ ->
         (* last line: " N files changed, M insertions(+), D deletions(-)" *)
         let lower = String.lowercase_ascii last in
-        if not (String_util.contains_substring lower " file changed")
+        if not
+             (String_util.contains_substring lower " file changed"
+              || String_util.contains_substring lower " files changed")
         then None
         else
           let extract re =

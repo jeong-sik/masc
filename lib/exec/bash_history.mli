@@ -7,6 +7,15 @@ type history_entry = {
   success : bool;
 }
 
+(** Detected failure pattern for P15: Repeated Failure Detection. *)
+type failure_pattern =
+  | Repeated_failure of { cmd_prefix : string; count : int }
+  | High_failure_rate of { recent : int; failures : int; rate : float }
+  | Timeout_cluster of { cmd_prefix : string; count : int }
+
+val failure_pattern_to_json : failure_pattern -> Yojson.Safe.t
+(** Serialize a failure pattern to JSON for consumption by the agent. *)
+
 val entry_to_json : history_entry -> Yojson.Safe.t
 
 val append :
@@ -33,6 +42,16 @@ val suggest :
   history_entry list
 (** Return the last [limit] entries whose [cmd_prefix] or [cmd_hash]
     starts with [pattern].  Returns [] when the file doesn't exist. *)
+
+val failure_insight :
+  base_path:string ->
+  keeper_name:string ->
+  failure_pattern list
+(** Analyze recent history for stuck-loop patterns:
+    - [Repeated_failure]: same command failed N times consecutively
+    - [High_failure_rate]: overall failure rate exceeds threshold
+    - [Timeout_cluster]: same command timed out N times consecutively
+    Returns [] when no patterns are detected or file doesn't exist. *)
 
 val cmd_hash : string -> string
 (** Truncated SHA-256 (12 hex chars) of a command string. *)

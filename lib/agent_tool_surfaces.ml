@@ -229,27 +229,9 @@ let local_worker_run_schemas : Types.tool_schema list =
   ]
 
 let local_worker_spawn_schemas : Types.tool_schema list =
-  [
-    {
-      Types.name = "masc_spawn";
-      description = "Spawn a new agent to execute a specific task with configurable model and prompt. Use when work decomposition requires parallel execution by a dedicated worker.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ( "properties",
-              `Assoc
-                [
-                  ("agent_name", `Assoc [ ("type", `String "string") ]);
-                  ("model", `Assoc [ ("type", `String "string") ]);
-                  ("prompt", `Assoc [ ("type", `String "string") ]);
-                  ("timeout_seconds", `Assoc [ ("type", `String "integer") ]);
-                  ("working_dir", `Assoc [ ("type", `String "string") ]);
-                ] );
-            ("required", `List [ `String "agent_name"; `String "prompt" ]);
-          ];
-    };
-  ]
+  List.filter
+    (fun (schema : Types.tool_schema) -> schema.name = "masc_spawn")
+    Tool_schemas_inline_infra.schemas
 
 let select_public_local_worker_schemas () =
   let wanted = local_worker_public_tool_names in

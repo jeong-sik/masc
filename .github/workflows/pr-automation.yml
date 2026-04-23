@@ -2,7 +2,15 @@ name: PR Automation
 
 on:
   pull_request_target:
-    types: [opened, reopened, synchronize, ready_for_review]
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+      - converted_to_draft
+      - auto_merge_enabled
+      - labeled
+      - unlabeled
 
 permissions:
   contents: read
@@ -10,8 +18,146 @@ permissions:
   pull-requests: write
 
 jobs:
+  draft-automerge-guard:
+    name: Draft Auto-Merge Guard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Keep agent PRs draft-only unless explicitly approved
+        uses: actions/github-script@v9
+        env:
+          AGENT_DRAFT_GUARD_TITLE_RE: ${{ vars.AGENT_DRAFT_GUARD_TITLE_RE }}
+          AGENT_DRAFT_GUARD_BRANCH_RE: ${{ vars.AGENT_DRAFT_GUARD_BRANCH_RE }}
+          AGENT_DRAFT_GUARD_BYPASS_LABELS: ${{ vars.AGENT_DRAFT_GUARD_BYPASS_LABELS }}
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const pr = context.payload.pull_request;
+            const action = context.payload.action;
+            const pullNumber = pr.number;
+
+            const titlePattern = new RegExp(
+              (process.env.AGENT_DRAFT_GUARD_TITLE_RE || String.raw`^\[codex\]`),
+              "i"
+            );
+            const branchPattern = new RegExp(
+              (process.env.AGENT_DRAFT_GUARD_BRANCH_RE || String.raw`^(codex[/-]|keeper[/-])`),
+              "i"
+            );
+            const bypassLabels = (process.env.AGENT_DRAFT_GUARD_BYPASS_LABELS || "human-approved-ready,allow-auto-merge")
+              .split(",")
+              .map((s) => s.trim().toLowerCase())
+              .filter(Boolean);
+            const labels = (pr.labels || []).map((label) => label.name.toLowerCase());
+
+            const guarded =
+              titlePattern.test(pr.title || "") ||
+              branchPattern.test(pr.head?.ref || "") ||
+              labels.includes("agent-pr") ||
+              labels.includes("codex");
+            if (!guarded) {
+              core.info("PR is not agent-guarded; skip draft auto-merge guard.");
+              return;
+            }
+
+            const hasBypass = labels.some((label) => bypassLabels.includes(label));
+            if (hasBypass) {
+              core.info("Human bypass label present; skip draft auto-merge guard.");
+              return;
+            }
+
+            const query = `
+              query($owner: String!, $repo: String!, $number: Int!) {
+                repository(owner: $owner, name: $repo) {
+                  pullRequest(number: $number) {
+                    id
+                    isDraft
+                    autoMergeRequest {
+                      enabledAt
+                    }
+                  }
+                }
+              }
+            `;
+            const result = await github.graphql(query, {
+              owner,
+              repo,
+              number: pullNumber
+            });
+            const current = result.repository.pullRequest;
+            const actions = [];
+
+            if (current.autoMergeRequest) {
+              await github.graphql(`
+                mutation($pullRequestId: ID!) {
+                  disablePullRequestAutoMerge(input: {pullRequestId: $pullRequestId}) {
+                    pullRequest {
+                      id
+                    }
+                  }
+                }
+              `, { pullRequestId: current.id });
+              actions.push("disabled auto-merge");
+            }
+
+            if (!current.isDraft) {
+              await github.graphql(`
+                mutation($pullRequestId: ID!) {
+                  convertPullRequestToDraft(input: {pullRequestId: $pullRequestId}) {
+                    pullRequest {
+                      id
+                    }
+                  }
+                }
+              `, { pullRequestId: current.id });
+              actions.push("converted PR back to draft");
+            }
+
+            if (actions.length === 0) {
+              core.info("Guarded agent PR is already draft-only.");
+              return;
+            }
+
+            const marker = "<!-- masc-agent-draft-guard -->";
+            const body = [
+              marker,
+              `Agent draft guard reapplied: ${actions.join(", ")}.`,
+              "",
+              `This repository treats agent-created PRs as draft-only until a human explicitly opts in by adding one of these labels: ${bypassLabels.join(", ")}.`
+            ].join("\n");
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number: pullNumber,
+              per_page: 100
+            });
+            const existing = comments.find((comment) =>
+              comment.user?.type === "Bot" && comment.body?.includes(marker)
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: pullNumber,
+                body
+              });
+            }
+
+            if (action === "ready_for_review" || action === "auto_merge_enabled") {
+              core.setFailed(`Agent draft guard blocked ${action}: ${actions.join(", ")}.`);
+            }
+
   label-and-review:
     runs-on: ubuntu-latest
+    needs: draft-automerge-guard
+    if: ${{ !cancelled() && needs.draft-automerge-guard.result == 'success' && contains(fromJSON('["opened","reopened","synchronize","ready_for_review"]'), github.event.action) }}
     steps:
       - name: Auto label and optional reviewer request
         uses: actions/github-script@v9

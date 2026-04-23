@@ -709,13 +709,13 @@ let start ?(config = default_config) ?(routes = default_routes) () =
   let clock = Eio.Stdenv.clock env in
 
   (* Graceful shutdown setup *)
-  let switch_ref = ref None in
-  let shutdown_initiated = ref false in
+  let switch_ref = Atomic.make None in
+  let shutdown_initiated = Atomic.make false in
   let initiate_shutdown signal_name =
-    if not !shutdown_initiated then begin
-      shutdown_initiated := true;
+    if not (Atomic.get shutdown_initiated) then begin
+      Atomic.set shutdown_initiated true;
       Log.Http.info "MASC MCP: Received %s, shutting down gracefully..." signal_name;
-      match !switch_ref with
+      match Atomic.get switch_ref with
       | Some sw -> Eio.Switch.fail sw Shutdown
       | None -> ()
     end
@@ -725,7 +725,7 @@ let start ?(config = default_config) ?(routes = default_routes) () =
 
   (try
     Eio.Switch.run @@ fun sw ->
-    switch_ref := Some sw;
+    Atomic.set switch_ref (Some sw);
     run ~sw ~net ~clock config routes
   with
   | Shutdown ->

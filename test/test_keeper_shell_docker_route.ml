@@ -302,6 +302,88 @@ let test_git_clone_routes_through_docker () =
     (response_mentions raw "path"
        (Filename.concat playground "repos/masc-mcp"))
 
+let test_bash_routes_through_docker () =
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
+  setup ~sandbox:Keeper_types.Docker
+  @@ fun ~config ~meta ~playground ->
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash ~turn_sandbox_runtime:None
+      ~turn_sandbox_runtime_git:None ~config ~meta
+      ~args:(`Assoc [ ("cmd", `String "echo hello"); ("cwd", `String playground) ])
+  in
+  Alcotest.(check bool)
+    "bash surfaces docker image config error (docker route fired)"
+    true
+    (response_mentions raw "error" "docker image")
+
+let test_bash_legacy_skips_docker () =
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
+  setup ~sandbox:Keeper_types.Local
+  @@ fun ~config ~meta ~playground ->
+  let outside_cwd = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir outside_cwd) @@ fun () ->
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash ~turn_sandbox_runtime:None
+      ~turn_sandbox_runtime_git:None ~config ~meta
+      ~args:(`Assoc [ ("cmd", `String "echo hello"); ("cwd", `String outside_cwd) ])
+  in
+  Alcotest.(check bool)
+    "legacy keeper bash does not surface docker image error"
+    false
+    (response_mentions raw "error" "docker image")
+
+let test_bash_git_creds_routes_through_docker () =
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
+  setup ~sandbox:Keeper_types.Docker
+  @@ fun ~config ~meta ~playground ->
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash ~turn_sandbox_runtime:None
+      ~turn_sandbox_runtime_git:None ~config ~meta
+      ~args:(`Assoc [ ("cmd", `String "git status"); ("cwd", `String playground) ])
+  in
+  Alcotest.(check bool)
+    "bash git cmd surfaces docker image config error (git-creds route fired)"
+    true
+    (response_mentions raw "error" "docker image")
+
+let fake_docker_echo_script =
+  "#!/bin/sh\n\
+if [ \"$1\" = \"info\" ]; then\n\
+  printf '[]\\n'\n\
+  exit 0\n\
+fi\n\
+if [ \"$1\" != \"run\" ]; then\n\
+  printf 'unexpected docker invocation: %s\\n' \"$1\" >&2\n\
+  exit 2\n\
+fi\n\
+shift\n\
+while [ \"$#\" -gt 0 ]; do\n\
+  if [ \"$1\" = \"alpine:test\" ]; then\n\
+    shift\n\
+    break\n\
+  fi\n\
+  shift\n\
+done\n\
+printf 'stdout:%s\\n' \"$*\"\n\
+exit 0\n"
+
+let test_bash_fake_docker_executes () =
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup ~sandbox:Keeper_types.Docker
+  @@ fun ~config ~meta ~playground ->
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash ~turn_sandbox_runtime:None
+      ~turn_sandbox_runtime_git:None ~config ~meta
+      ~args:(`Assoc [ ("cmd", `String "echo hello"); ("cwd", `String playground) ])
+  in
+  Alcotest.(check (option bool)) "bash via fake docker is ok" (Some true)
+    (parse_bool_field raw "ok");
+  Alcotest.(check (option string)) "bash via=docker" (Some "docker")
+    (parse_string_field raw "via");
+  Alcotest.(check bool) "bash output includes fake docker stdout" true
+    (response_mentions raw "output" "stdout:")
+
 let () =
   Alcotest.run "Keeper_shell_docker_route"
     [
@@ -310,11 +392,22 @@ let () =
           Alcotest.test_case
             "docker keeper shell ops route through docker"
             `Quick test_readonly_ops_route_through_docker;
+          Alcotest.test_case
+            "docker keeper bash routes through docker"
+            `Quick test_bash_routes_through_docker;
+          Alcotest.test_case
+            "docker keeper bash git cmd routes through git-creds docker"
+            `Quick test_bash_git_creds_routes_through_docker;
+          Alcotest.test_case
+            "docker keeper bash executes through fake docker"
+            `Quick test_bash_fake_docker_executes;
         ] );
       ( "docker_route_skipped",
         [
           Alcotest.test_case "legacy keeper skips docker route" `Quick
             test_cat_legacy_keeper_skips_docker;
+          Alcotest.test_case "legacy keeper bash skips docker route" `Quick
+            test_bash_legacy_skips_docker;
         ] );
       ( "docker_route_contract",
         [

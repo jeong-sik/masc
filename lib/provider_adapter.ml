@@ -1409,7 +1409,7 @@ let auth_detail_of_provider provider =
   | Some adapter ->
     let auth_kind_base =
       if adapter.canonical_name = cn_kimi_api then
-        "api_key:KIMI_API_KEY_SB|KIMI_API_KEY"
+        "api_key:KIMI_API_KEY"
       else
         string_of_auth_mode adapter.auth_mode
     in

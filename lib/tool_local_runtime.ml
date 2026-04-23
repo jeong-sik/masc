@@ -153,12 +153,17 @@ let handle_runtime_ollama_probe _ctx args : tool_result =
           (parse_int_opt value)
     | _ -> Tool_local_runtime_probe.default_probe_timeout_sec
   in
+  let generate_when_unloaded =
+    match member "generate_when_unloaded" args with
+    | `Bool flag -> flag
+    | _ -> true
+  in
   ( true,
     json_ok
       [
         ( "result",
           runtime_ollama_probe_json ?server_url ?model ?prompt ?keep_alive
-            ~probe_runs ~max_tokens ~timeout_sec () );
+            ~probe_runs ~max_tokens ~timeout_sec ~generate_when_unloaded () );
       ] )
 
 let dispatch ctx ~name ~args : tool_result option =
@@ -208,6 +213,7 @@ let schemas : tool_schema list =
                   ("probe_runs", `Assoc [ ("type", `String "integer") ]);
                   ("max_tokens", `Assoc [ ("type", `String "integer") ]);
                   ("timeout_sec", `Assoc [ ("type", `String "integer") ]);
+                  ("generate_when_unloaded", `Assoc [ ("type", `String "boolean") ]);
                 ] );
           ];
     };

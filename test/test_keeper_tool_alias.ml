@@ -78,7 +78,7 @@ let test_no_overlap_alias_and_hallucinated () =
 
 let test_alias_table_is_stable () =
   let pairs = Alias.all_aliases () in
-  Alcotest.(check int) "five canonical aliases" 5 (List.length pairs);
+  Alcotest.(check int) "six canonical aliases" 6 (List.length pairs);
   (* Round-trip: every alias should round-trip via to_internal then to_public,
      except where collapse happens (Write -> keeper_fs_edit -> Edit). *)
   List.iter

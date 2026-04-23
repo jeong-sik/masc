@@ -155,6 +155,12 @@ let make_fake_eio_exe repo_root =
   let exe_path = Filename.concat repo_root "_build/default/bin/main_eio.exe" in
   write_fake_eio_exe exe_path ~marker:"local"
 
+let make_fake_stdio_eio_exe repo_root =
+  let exe_path =
+    Filename.concat repo_root "_build/default/bin/main_stdio_eio.exe"
+  in
+  write_fake_eio_exe exe_path ~marker:"stdio"
+
 let make_fake_eio_exe_with_stderr repo_root =
   let exe_path = Filename.concat repo_root "_build/default/bin/main_eio.exe" in
   mkdir_p (Filename.dirname exe_path);
@@ -702,6 +708,55 @@ let test_grpc_direct_banner_is_preserved_in_stderr () =
       check bool "other stderr preserved" true
         (contains_substring stderr "stderr-keep"))
 
+let test_stdio_skips_dashboard_build_and_http_preflight () =
+  with_temp_dir "start-masc-script-stdio" (fun dir ->
+      let script = Filename.concat dir "start-masc-mcp.sh" in
+      let scripts_dir = Filename.concat dir "scripts" in
+      let fake_bin = Filename.concat dir "fake-bin" in
+      let dashboard_marker = Filename.concat dir "dashboard-build-ran.txt" in
+      let capture = Filename.concat dir "captured-stdio.txt" in
+      copy_script (script_path ()) script;
+      ignore (make_config_root dir);
+      mkdir_p scripts_dir;
+      mkdir_p fake_bin;
+      write_executable
+        (Filename.concat scripts_dir "build-dashboard-if-needed.sh")
+        (Printf.sprintf
+           {|
+#!/bin/sh
+set -eu
+echo ran > %s
+exit 0
+|} (quote dashboard_marker));
+      write_executable (Filename.concat fake_bin "lsof")
+        {|
+#!/bin/sh
+echo "4242"
+exit 0
+|};
+      make_fake_stdio_eio_exe dir;
+      let code, stdout, stderr =
+        run_shell ~cwd:dir
+          ~env:
+            [
+              ("FAKE_CAPTURE_FILE", capture);
+              ("MASC_BASE_PATH", dir);
+              ("PATH", fake_bin ^ ":" ^ Sys.getenv "PATH");
+            ]
+          (Printf.sprintf "%s --stdio --base-path %s"
+             (quote script) (quote dir))
+      in
+      if code <> 0 then
+        failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
+          stderr;
+      let captured = read_file capture in
+      check bool "stdio executable selected without HTTP build" true
+        (contains_substring captured "FAKE_EXE_MARKER=stdio");
+      check bool "dashboard helper not invoked in stdio mode" false
+        (Sys.file_exists dashboard_marker);
+      check bool "stderr explains stdio dashboard skip" true
+        (contains_substring stderr "Skipping SPA build in stdio mode."))
+
 let test_loopback_disables_keeper_autoboot_by_default_and_preserves_override ()
     =
   with_temp_dir "start-loopback-script" (fun dir ->
@@ -798,6 +853,8 @@ let () =
             test_explicit_http_port_derives_sidecar_ports;
           test_case "grpc-direct banner is preserved in stderr" `Quick
             test_grpc_direct_banner_is_preserved_in_stderr;
+          test_case "stdio skips dashboard build and HTTP preflight" `Quick
+            test_stdio_skips_dashboard_build_and_http_preflight;
           test_case "zshenv absolute base path is preserved" `Quick
             test_zshenv_absolute_base_path_is_preserved;
           test_case "shared-root env base path is preserved" `Quick

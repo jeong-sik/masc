@@ -226,7 +226,7 @@ let run_docker_with_git_bash
     ~(meta : keeper_meta)
     ~(cwd : string)
     ~(timeout_sec : float)
-    ~(cmd : string) =
+    ~(cmd : string) () =
   let image = Env_config_keeper.KeeperSandbox.docker_image () in
   let sandbox_error_json message =
     Keeper_registry.record_error ~base_path:config.base_path meta.name message;

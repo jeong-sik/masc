@@ -106,6 +106,11 @@ type docker_shell_result =
     network_label : string;
   }
 
+(* docker run --rm includes image layer pull + container creation cold start.
+   A 1s floor is insufficient even for trivial commands. This minimum applies
+   only to the run path, not to docker exec against a warm container. *)
+let docker_run_min_timeout_sec = 5.0
+
 let run_docker_shell_command_with_status
     ~(config : Coord.config)
     ~(meta : keeper_meta)
@@ -115,6 +120,7 @@ let run_docker_shell_command_with_status
     ~(git_creds_enabled : bool)
     ~(network_mode : network_mode)
   =
+  let timeout_sec = max timeout_sec docker_run_min_timeout_sec in
   let image = Env_config_keeper.KeeperSandbox.docker_image () in
   let sandbox_error message =
     Keeper_registry.record_error ~base_path:config.base_path meta.name message;

@@ -313,6 +313,24 @@ let test_verify_token_keeper_alias_fallback () =
            "keeper alias should verify via fallback credential: %s"
            (Types.masc_error_to_string e))
 
+let test_verify_token_dashboard_legacy_alias_fallback () =
+  let dir = setup_test_room () in
+  let result =
+    match Auth.create_token dir ~agent_name:"dashboard-dev" ~role:Types.Admin with
+    | Ok (raw_token, _) ->
+        Auth.verify_token dir ~agent_name:"dashboard" ~token:raw_token
+    | Error e -> Error e
+  in
+  cleanup_test_room dir;
+  match result with
+  | Ok cred ->
+      check string "legacy dashboard token owner" "dashboard-dev" cred.agent_name
+  | Error e ->
+      fail
+        (Printf.sprintf
+           "dashboard should accept legacy dashboard-dev credential: %s"
+           (Types.masc_error_to_string e))
+
 let test_save_raw_token_credential_uses_provided_token () =
   let dir = setup_test_room () in
   let raw_token = "fixed-admin-token" in
@@ -666,6 +684,8 @@ let () =
         test_extract_agent_type_prefix_keeper_aliases;
       test_case "verify_token keeper alias fallback" `Quick
         test_verify_token_keeper_alias_fallback;
+      test_case "verify_token dashboard legacy alias fallback" `Quick
+        test_verify_token_dashboard_legacy_alias_fallback;
       test_case "save_raw_token_credential uses provided token" `Quick
         test_save_raw_token_credential_uses_provided_token;
       test_case "ensure_keeper_credential uses keeper middle name" `Quick

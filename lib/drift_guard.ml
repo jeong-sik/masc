@@ -311,9 +311,9 @@ let get_drift_stats config ~days =
                 similarity_sum := !similarity_sum +. similarity;
                 (match List.assoc_opt "passed" result_fields with
                 | Some (`Bool false) -> incr drift_count
-                | _ -> ())
-            | _ -> ()))
-      | _ -> ()
+                | Some (`Bool true) | Some _ | None -> ())
+            | None | Some _ -> ()))
+      | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> ()
     ) rows;
     let avg_similarity =
       if !total = 0 then 0.0 else !similarity_sum /. float_of_int !total

@@ -1150,10 +1150,14 @@ let transition_task_r
               (e.g. confused the target of a multi-task release) can
               still detect the no-op without seeing it as an error. *)
            Log.RoomTask.debug "release on already-todo task %s — no-op" task_id
-         | _ -> ());
-        if new_status = task.task_status && set_current = None
-        then
-          (* Idempotent no-op: status unchanged, skip write/events.
+       | Types.Claim, _ | Types.Start, _ | Types.Done_action, _ | Types.Cancel, _
+       | Types.Submit_for_verification, _ | Types.Approve_verification, _
+       | Types.Reject_verification, _
+       | Types.Release, Types.Claimed _ | Types.Release, Types.InProgress _
+       | Types.Release, Types.AwaitingVerification _ | Types.Release, Types.Done _
+       | Types.Release, Types.Cancelled _ -> ());
+      if new_status = task.task_status && set_current = None then
+        (* Idempotent no-op: status unchanged, skip write/events.
            Match None explicitly so set_current=Some is never silently dropped. *)
           Ok
             (Printf.sprintf

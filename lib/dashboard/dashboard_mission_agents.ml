@@ -262,7 +262,7 @@ let keeper_alias_by_agent_name (keepers : Yojson.Safe.t list) =
       match keeper_name, agent_name with
       | Some keeper_name, Some agent_name ->
           Hashtbl.replace table agent_name keeper_name
-      | _ -> ())
+      | Some _, None | None, _ -> ())
     keepers;
   table
 

@@ -909,7 +909,8 @@ and handle_transition ctx args =
               | Types.AwaitingVerification { verification_id; assignee; _ } ->
                 Verification_protocol.on_submit_for_verification
                   ~config:ctx.config ~task ~assignee ~verification_id ~evidence_refs
-              | _ -> ())
+              | Types.Todo | Types.Claimed _ | Types.InProgress _
+              | Types.Done _ | Types.Cancelled _ -> ())
            | None -> ())
         | Types.Approve_verification ->
           let verification_id = Option.value ~default:"" verification_id_before in
@@ -936,7 +937,7 @@ and handle_transition ctx args =
             ~verification_id ~reason;
           if Env_config_runtime.Cdal.gate_enabled () then
             ignore (Cdal_verdict_gate.gate_check ~task_id ())
-        | _ -> ())
+        | Types.Claim | Types.Start | Types.Done_action | Types.Cancel | Types.Release -> ())
    | Error err ->
        Log.Task.error "task transition failed: %s" (Types.masc_error_to_string err));
   (* Record metrics *)
@@ -975,7 +976,9 @@ and handle_transition ctx args =
         with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Task.error "Metrics_store_eio.record(transition-cancel) failed: %s" (Printexc.to_string exn));
        Thompson_sampling.record_vote ~agent_name:ctx.agent_name ~direction:`Down;
        Prometheus.record_task_failed ()
-   | _ -> ());
+   | Ok _, (Types.Claim | Types.Start | Types.Submit_for_verification
+            | Types.Approve_verification | Types.Reject_verification | Types.Release)
+   | Error _, _ -> ());
   result_to_response result
 
 let handle_update_priority ctx args =

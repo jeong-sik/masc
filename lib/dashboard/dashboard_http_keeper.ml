@@ -97,7 +97,7 @@ let compute_outcomes_rollup
     | Compaction_failed _ -> incr fail_compaction
     | Handoff_completed _ -> incr succ_handoffs
     | Handoff_failed _ -> incr fail_handoff
-    | _ -> ()
+    | _ -> Log.Dashboard.debug "ignored transition event"
   ) transitions;
   let observed_turns = List.length completed_turns in
   let restarts, consecutive_fail =

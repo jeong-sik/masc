@@ -5,8 +5,11 @@ const {
   fetchWithTimeout,
   reportToolHostFailure,
   authHeaders,
+  clearStoredToken,
   currentDashboardActor,
   getStoredToken,
+  getStoredTokenMeta,
+  isRemoteAccess,
   setStoredToken,
 } = vi.hoisted(() => ({
   apiRequestErrorFromResponse: vi.fn(async (method: string, path: string, res: Response) =>
@@ -14,11 +17,18 @@ const {
   fetchWithTimeout: vi.fn(),
   reportToolHostFailure: vi.fn().mockResolvedValue({ ok: true }),
   authHeaders: vi.fn().mockReturnValue({}),
+  clearStoredToken: vi.fn(),
   currentDashboardActor: vi.fn().mockReturnValue('dashboard'),
   // Default to a non-empty stored token so ensureDevToken() short-circuits
   // without consuming a fetchWithTimeout mock. Individual tests that want
   // to exercise the dev-token bootstrap can override this.
   getStoredToken: vi.fn().mockReturnValue('test-stored-token'),
+  getStoredTokenMeta: vi.fn().mockReturnValue({
+    source: 'manual',
+    actor: 'dashboard',
+    scope: null,
+  }),
+  isRemoteAccess: vi.fn().mockReturnValue(false),
   setStoredToken: vi.fn(),
 }))
 
@@ -27,8 +37,11 @@ vi.mock('./core', () => ({
   fetchWithTimeout,
   DEFAULT_MCP_TIMEOUT_MS: 30000,
   authHeaders,
+  clearStoredToken,
   currentDashboardActor,
   getStoredToken,
+  getStoredTokenMeta,
+  isRemoteAccess,
   setStoredToken,
 }))
 
@@ -43,6 +56,12 @@ beforeEach(() => {
   // test (e.g. authHeaders). The dev-token bootstrap must stay inert unless
   // a test explicitly exercises it.
   getStoredToken.mockReturnValue('test-stored-token')
+  getStoredTokenMeta.mockReturnValue({
+    source: 'manual',
+    actor: 'dashboard',
+    scope: null,
+  })
+  isRemoteAccess.mockReturnValue(false)
   authHeaders.mockReturnValue({})
 })
 
@@ -119,7 +138,11 @@ describe('dev-token bootstrap', () => {
     getStoredToken.mockReturnValue(null)
     fetchWithTimeout
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ token: 'loopback-dev-token' }), {
+        new Response(JSON.stringify({
+          token: 'loopback-dev-token',
+          actor: 'dashboard',
+          scope: 'admin',
+        }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         }),
@@ -136,7 +159,11 @@ describe('dev-token bootstrap', () => {
     const { callMcpTool } = await import('./mcp')
     await callMcpTool('masc_status', {})
 
-    expect(setStoredToken).toHaveBeenCalledWith('loopback-dev-token')
+    expect(setStoredToken).toHaveBeenCalledWith('loopback-dev-token', {
+      source: 'dev',
+      actor: 'dashboard',
+      scope: 'admin',
+    })
     const calls = fetchWithTimeout.mock.calls as Array<[string, RequestInit]>
     expect(calls.length).toBeGreaterThanOrEqual(2)
     expect(calls[0]?.[0]).toBe('/api/v1/dashboard/dev-token')
@@ -161,6 +188,26 @@ describe('dev-token bootstrap', () => {
     expect(setStoredToken).not.toHaveBeenCalled()
     const initCall = findCallByMethod('initialize')
     expect(initCall).toBeDefined()
+  }, 60_000)
+
+  it('clears an old managed dev token when the loopback bootstrap endpoint disappears', async () => {
+    getStoredToken.mockReturnValue('stale-dev-token')
+    getStoredTokenMeta.mockReturnValue({ source: 'dev', actor: 'dashboard', scope: 'admin' })
+    fetchWithTimeout
+      .mockResolvedValueOnce(new Response('not found', { status: 404 }))
+      .mockResolvedValueOnce(
+        new Response('{}', { status: 200, headers: { 'Mcp-Session-Id': 'sess-dev-404' } }),
+      )
+      .mockResolvedValueOnce(new Response('', { status: 202 }))
+      .mockResolvedValueOnce(
+        new Response('data: {"result":{"content":[{"type":"text","text":"ok"}]}}\n', { status: 200 }),
+      )
+
+    const { callMcpTool } = await import('./mcp')
+    await callMcpTool('masc_status', {})
+
+    expect(clearStoredToken).toHaveBeenCalledTimes(1)
+    expect(setStoredToken).not.toHaveBeenCalled()
   }, 60_000)
 })
 

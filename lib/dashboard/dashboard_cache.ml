@@ -71,7 +71,8 @@ let maybe_evict map =
           (match !victim with
            | Some (_, true) -> ()
            | _ -> victim := Some (key, false))
-      | _ -> ()
+      | Ready _ -> ()
+      | Computing _ -> ()
     ) map;
     match !victim with
     | Some (key, _) -> SMap.remove key map

@@ -239,7 +239,7 @@ let sanitize_actor s =
   String.iter (fun c ->
     match c with
     | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '-' -> Buffer.add_char buf c
-    | _ -> ()
+    | '\000' .. '\255' -> ()
   ) s;
   Buffer.contents buf
 

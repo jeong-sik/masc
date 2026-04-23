@@ -222,7 +222,7 @@ module Reflection_bridge = struct
             | n when n = Wire.req_file_containing_symbol ->
                 result := FileContainingSymbol value
             | n when n = Wire.req_list_services -> result := ListServices
-            | _ -> ())
+            | _ -> Log.Server.warn "masc_grpc_server: unknown reflection field_num %d" field_num)
         | 0 ->
             let _ = decode_varint data pos in
             ()

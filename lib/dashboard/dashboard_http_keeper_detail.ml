@@ -326,7 +326,7 @@ let compute_metrics_window
             if memory_note_kinds = [] then
               (match memory_top_kind_now with
                | Some kind when String.trim kind <> "" -> count_table_incr memory_kind_counts_window kind
-               | _ -> ());
+               | Some _ | None -> ());
             
             let acc =
               if memory_performed then begin

@@ -53,7 +53,7 @@ let emit_message_activity config ~from_agent ~content ~mention
         ~subject:Coord_hooks.{ kind = "agent"; id = target }
         ~kind:(Event_kind.Message.to_string Event_kind.Message.Mentioned)
         ~tags:[ "message"; "mention" ] ()
-  | _ -> ()
+  | None | Some _ -> ()
 
 let broadcast_channel config =
   Printf.sprintf "broadcast:%s:default" (project_prefix config)

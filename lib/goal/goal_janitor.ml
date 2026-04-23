@@ -131,7 +131,7 @@ let run ?(config = default_config) (room_config : Coord.config) : sweep_result =
                    keeper=%s removed=%d: %s"
                   name removed e
           end
-        | _ -> ()
+        | Ok None | Ok (Some _) | Error _ -> ()
       end);
   let result = { partial with orphans = !total_orphans } in
   if result.purged > 0 || result.stagnated > 0 || result.orphans > 0 then

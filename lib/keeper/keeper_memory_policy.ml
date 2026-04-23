@@ -918,19 +918,19 @@ let render_state_block (snapshot : keeper_state_snapshot) : string =
   (match snapshot.done_summary with
    | Some d when String.trim d <> "" ->
      Buffer.add_string buf (Printf.sprintf "DONE: %s\n" d)
-   | _ ->
+   | Some _ | None ->
      (match snapshot.progress with
       | Some p when String.trim p <> "" ->
         Buffer.add_string buf (Printf.sprintf "DONE: %s\n" p)
-      | _ -> ()));
+      | Some _ | None -> ()));
   (match snapshot.next_summary with
    | Some n when String.trim n <> "" ->
      Buffer.add_string buf (Printf.sprintf "NEXT: %s\n" n)
-   | _ -> ());
+   | Some _ | None -> ());
   (match snapshot.goal with
    | Some g when String.trim g <> "" ->
      Buffer.add_string buf (Printf.sprintf "Goal: %s\n" g)
-   | _ -> ());
+   | Some _ | None -> ());
   (match snapshot.next_items with
    | [] -> ()
    | items ->

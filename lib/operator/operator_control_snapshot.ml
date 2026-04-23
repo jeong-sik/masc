@@ -1114,7 +1114,9 @@ let _maybe_evict_snapshot () =
       match slot, !victim with
       | Cached { expires_at; _ }, None when now_ts >= expires_at ->
         victim := Some key
-      | _ -> ()
+      | Cached _, None -> ()
+      | Cached _, Some _ -> ()
+      | Computing _, _ -> ()
     ) _snapshot_table;
     (match !victim with
      | Some key -> Hashtbl.remove _snapshot_table key
@@ -1128,7 +1130,7 @@ let _maybe_evict_snapshot () =
            (match !oldest_cached with
             | None -> oldest_cached := Some (key, expires_at)
             | Some (_, e) when expires_at < e -> oldest_cached := Some (key, expires_at)
-            | _ -> ())
+            | Some _ -> ())
          | Computing _ ->
            if !any_key = None then any_key := Some key
        ) _snapshot_table;
@@ -1233,7 +1235,9 @@ let snapshot_json ?actor ?view ?(include_messages = true)
                _maybe_evict_snapshot ();
                Hashtbl.replace _snapshot_table cache_key
                  (Cached { value = result; expires_at = ts +. _snapshot_ttl_s })
-             | _ -> ());
+             | Some (Cached _) -> ()
+             | Some (Computing _) -> ()
+             | None -> ());
            Eio.Condition.broadcast cond;
            result
          | exception exn ->
@@ -1242,7 +1246,9 @@ let snapshot_json ?actor ?view ?(include_messages = true)
              match Hashtbl.find_opt _snapshot_table cache_key with
              | Some (Computing { cond = c }) when c == cond ->
                Hashtbl.remove _snapshot_table cache_key
-             | _ -> ());
+             | Some (Cached _) -> ()
+             | Some (Computing _) -> ()
+             | None -> ());
            Eio.Condition.broadcast cond;
            Printexc.raise_with_backtrace exn bt)
   and compute_snapshot () =

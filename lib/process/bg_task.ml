@@ -330,7 +330,7 @@ let reap_orphans ~base_path =
                      (* Orphan: live pgroup, no registry entry. *)
                      Process_eio.tree_kill ~pgid
                        ~signal:Sys.sigterm ~grace_sec:1.0
-                 | _ -> ());
+                 | None | Some (_, _) -> ());
                 Safe_ops.protect ~default:() (fun () -> Unix.unlink path);
                 incr reaped
               end

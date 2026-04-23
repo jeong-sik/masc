@@ -63,6 +63,7 @@ let unregister_if_current session_id client_id =
       | Some client when client.client_id = client_id ->
           Hashtbl.remove clients session_id;
           Atomic.decr client_count_atomic
-      | _ -> ())
+      | Some _ -> ()
+      | None -> ())
 
 let client_count () = Atomic.get client_count_atomic

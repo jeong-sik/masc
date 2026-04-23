@@ -104,7 +104,7 @@ let save_file (path : string) (content : string) : unit =
 let fsync_path path =
   let fd = Unix.openfile path [ Unix.O_RDONLY ] 0 in
   Fun.protect
-    ~finally:(fun () -> try Unix.close fd with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ())
+    ~finally:(fun () -> try Unix.close fd with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Printf.eprintf "[fs_compat] fsync_path close failed: %s\n%!" (Printexc.to_string exn))
     (fun () ->
       try Unix.fsync fd
       with Unix.Unix_error ((Unix.EINVAL | Unix.EOPNOTSUPP), _, _) ->

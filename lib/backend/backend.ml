@@ -257,10 +257,10 @@ module FileSystem = struct
             Ok ()
           with
           | Eio.Cancel.Cancelled _ as exn ->
-              (try Eio.Path.unlink tmp_path with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
+              (try Eio.Path.unlink tmp_path with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Backend.warn "backend atomic write: unlink tmp failed: %s" (Printexc.to_string exn));
               raise exn
           | exn ->
-              (try Eio.Path.unlink tmp_path with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
+              (try Eio.Path.unlink tmp_path with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Backend.warn "backend atomic write: unlink tmp failed: %s" (Printexc.to_string exn));
               Error (IOError (Printexc.to_string exn))
     )
 

@@ -5,8 +5,11 @@ import {
   fetchWithTimeout,
   DEFAULT_MCP_TIMEOUT_MS,
   authHeaders,
+  clearStoredToken,
   currentDashboardActor,
   getStoredToken,
+  getStoredTokenMeta,
+  isRemoteAccess,
   setStoredToken,
 } from './core'
 import {
@@ -28,25 +31,65 @@ let initPromise: Promise<void> | null = null
 let initCooldownTimer: ReturnType<typeof setTimeout> | null = null
 let devTokenBootstrapPromise: Promise<void> | null = null
 
+interface DevTokenBootstrapPayload {
+  token?: unknown
+  actor?: unknown
+  scope?: unknown
+}
+
+function shouldRefreshDevToken(): boolean {
+  const token = getStoredToken()
+  const meta = getStoredTokenMeta()
+  if (!token) return true
+  if (meta?.source === 'dev') return true
+  // Legacy sessions only stored the raw token string. On loopback with the
+  // default dashboard actor, treat them as managed-token candidates so
+  // frequent restarts or base_path flips self-heal without manual clearing.
+  return meta == null && !isRemoteAccess() && currentDashboardActor() === 'dashboard'
+}
+
 /** Fetch the loopback-only dev token once per page load and stash it so
     subsequent `/mcp` requests include `Authorization: Bearer …`. The server
     only exposes `/api/v1/dashboard/dev-token` when bound to loopback with
     strict-auth overrides disabled; in every other case this quietly no-ops
     and existing flows (URL `?token=…`, manual paste) continue to work. */
 export async function ensureDevToken(): Promise<void> {
-  if (getStoredToken()) return
+  if (!shouldRefreshDevToken()) return
   if (devTokenBootstrapPromise) return devTokenBootstrapPromise
   devTokenBootstrapPromise = (async () => {
+    const storedMeta = getStoredTokenMeta()
+    const storedToken = getStoredToken()
     try {
       const res = await fetchWithTimeout(
         '/api/v1/dashboard/dev-token',
         { method: 'GET', headers: { Accept: 'application/json' } },
         DEV_TOKEN_FETCH_TIMEOUT_MS,
       )
-      if (!res.ok) return
-      const payload = (await res.json()) as { token?: unknown }
-      if (typeof payload.token === 'string' && payload.token.length > 0) {
-        setStoredToken(payload.token)
+      if (!res.ok) {
+        if (res.status === 404 && storedMeta?.source === 'dev') {
+          clearStoredToken()
+        }
+        return
+      }
+      const payload = (await res.json()) as DevTokenBootstrapPayload
+      const token = typeof payload.token === 'string' ? payload.token.trim() : ''
+      if (!token) return
+      const actor = typeof payload.actor === 'string' ? payload.actor.trim() : 'dashboard'
+      const scope =
+        typeof payload.scope === 'string' && payload.scope.trim() !== ''
+          ? payload.scope.trim()
+          : null
+      if (
+        token !== storedToken
+        || storedMeta?.source !== 'dev'
+        || storedMeta.actor !== actor
+        || (storedMeta.scope ?? null) !== scope
+      ) {
+        setStoredToken(token, {
+          source: 'dev',
+          actor,
+          scope,
+        })
       }
     } catch {
       /* Loopback endpoint unavailable (LAN bind, strict auth, offline).

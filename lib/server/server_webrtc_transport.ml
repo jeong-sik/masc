@@ -211,9 +211,9 @@ let add_remote_ice_candidate webrtc candidate_str =
             | None when should_warn ->
               Log.Server.warn "Ignoring invalid WebRTC ICE candidate: %s" candidate_str
             | None -> ())
-        | _ when should_warn ->
+        | [] | [_] | _ :: _ :: _ :: _ when should_warn ->
           Log.Server.warn "Ignoring invalid WebRTC ICE candidate: %s" candidate_str
-        | _ -> ()
+        | [] | [_] | _ :: _ :: _ :: _ -> ()
       else if should_warn then
         Log.Server.warn "Ignoring invalid WebRTC ICE candidate: %s" candidate_str
 

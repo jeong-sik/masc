@@ -43,7 +43,7 @@ let handle_read_resource_eio state id params =
                 | Ok msg when msg.Types.seq > since_seq ->
                     msgs := (Types.message_to_yojson msg) :: !msgs;
                     incr count
-                | _ -> ()
+                | Ok _ | Error _ -> ()
               end
             ) files;
             `List (List.rev !msgs)

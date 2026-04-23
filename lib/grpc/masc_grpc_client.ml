@@ -116,7 +116,7 @@ let subscribe t ~sw ~env ~agent_name ~session_id ~event_types ~since_seq =
       try Grpc_eio.Stream.close typed_stream
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
-      | _ -> ()
+      | exn -> Log.Misc.warn "masc_grpc_client: stream close failed: %s" (Printexc.to_string exn)
     in
     let rec loop () =
       match Grpc_eio.Stream.take raw_stream with

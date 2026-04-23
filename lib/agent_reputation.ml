@@ -104,7 +104,9 @@ let count_tasks_from_room (config : Coord.config) ~(agent_name : string)
          | Types.Done { assignee; _ } when assignee = agent_name ->
              incr claimed;
              incr completed
-         | _ -> ());
+         | Types.Todo
+         | Types.Claimed _ | Types.InProgress _ | Types.AwaitingVerification _
+         | Types.Done _ | Types.Cancelled _ -> ());
   (!claimed, !completed)
 
 (** {1 Board Counting} *)

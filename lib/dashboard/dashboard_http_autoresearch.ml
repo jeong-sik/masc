@@ -484,7 +484,7 @@ let ensure_managed_worktree ~base_path ~source_workdir ~loop_id =
       | Some branch
         when not (String.equal branch "main" || String.equal branch "master") ->
           warnings := ("source_branch:" ^ branch) :: !warnings
-      | _ -> ());
+      | Some _ | None -> ());
       let workdir =
         Autoresearch.managed_worktree_dir ~base_path loop_id
       in

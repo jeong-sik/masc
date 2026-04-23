@@ -143,6 +143,13 @@ let credential_agent_name agent_name =
 let raw_token_file config agent_name =
   Filename.concat (auth_dir config) (agent_name ^ ".token")
 
+(* Dashboard loopback dev-token was historically issued under
+   [dashboard-dev] while the UI defaults to [dashboard]. Keep the old
+   credential valid for [dashboard] requests so already-open browser
+   sessions survive restarts and token-file migration. *)
+let legacy_credential_aliases = function
+  | "dashboard" -> [ "dashboard-dev" ]
+  | _ -> []
 let load_credential_from_path config agent_name path : agent_credential option =
   if file_exists path then
     try
@@ -181,6 +188,13 @@ let load_credential config agent_name : agent_credential option =
         load_credential_from_path config prefix fallback
       | _ -> None
     else None
+
+let load_credential_with_aliases config agent_name : agent_credential option =
+  match load_credential config agent_name with
+  | Some _ as c -> c
+  | None ->
+      legacy_credential_aliases agent_name
+      |> List.find_map (load_credential config)
 
 (** Save agent credential *)
 let save_credential config (cred : agent_credential) =
@@ -295,7 +309,7 @@ let missing_credential_error config ~agent_name ~token : masc_error =
 
 (** Verify a token *)
 let verify_token config ~agent_name ~token : (agent_credential, masc_error) result =
-  match load_credential config agent_name with
+  match load_credential_with_aliases config agent_name with
   | None -> Error (missing_credential_error config ~agent_name ~token)
   | Some cred ->
       let token_hash = sha256_hash token in
@@ -370,7 +384,7 @@ let refresh_token config ~agent_name ~old_token : (string * agent_credential, ma
   match verify_token config ~agent_name ~token:old_token with
   | Error (TokenExpired _) ->
       (* Allow refresh even if expired *)
-      (match load_credential config agent_name with
+      (match load_credential_with_aliases config agent_name with
        | None -> Error (Unauthorized ("No credential found for " ^ agent_name))
        | Some old_cred -> create_token config ~agent_name ~role:old_cred.role)
   | Error e -> Error e

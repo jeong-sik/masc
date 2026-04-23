@@ -376,8 +376,11 @@ let update_playground_repo_cache
       "repos", `List updated;
       "last_updated", `String ts;
     ] in
-    ignore (Fs_compat.save_file_atomic cache_path
-      (Yojson.Safe.pretty_to_string json ^ "\n"))
+    (match Fs_compat.save_file_atomic cache_path
+       (Yojson.Safe.pretty_to_string json ^ "\n") with
+     | Ok () -> ()
+     | Error e ->
+         Logs.warn (fun f -> f "playground cache save failed: %s" e))
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
@@ -2034,7 +2037,8 @@ let handle_keeper_shell
                ; "url", `String url
                ])
        | Ok () ->
-         ignore (Keeper_alerting_path.ensure_sandbox_bundle ~config ~meta);
+         let _bundle_paths = Keeper_alerting_path.ensure_sandbox_bundle ~config ~meta in
+         ignore (_bundle_paths : string list);
          let playground = keeper_playground_root ~config ~meta in
          let repos_dir = Filename.concat playground "repos" in
          Fs_compat.mkdir_p repos_dir;

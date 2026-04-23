@@ -226,8 +226,8 @@ let handle_keeper_tools_post state req reqd =
                    (Printf.sprintf {|{"error":"%s"}|} (String.escaped msg)) reqd
              | Ok meta' ->
                  (* force: user-initiated tool config is authoritative.
-                    fresher_meta would discard this write if a concurrent
-                    keeper turn updated meta between our read and write. *)
+                    Skips version CAS since user intent overrides
+                    concurrent keeper turn updates. *)
                  (match Keeper_types.write_meta ~force:true config meta' with
                   | Ok () ->
                       Http.Response.json ~compress:true ~request:req

@@ -201,6 +201,8 @@ type keeper_meta = {
   telemetry_feedback_window_hours : int option;
   per_provider_timeout_s : float option;
   runtime: agent_runtime_state;
+  keeper_id : Keeper_id.Uid.t option;
+  meta_version : int;
 }
 
 val now_iso : unit -> string
@@ -275,7 +277,6 @@ val configured_keeper_names : Coord.config -> string list
 val keeper_names : Coord.config -> string list
 val keepalive_keeper_names : Coord.config -> string list
 val persistent_agent_names : Coord.config -> string list
-val fresher_meta : Coord.config -> keeper_meta -> keeper_meta
 val write_meta : ?force:bool -> Coord.config -> keeper_meta -> (unit, string) result
 val keeper_name_from_agent_name : string -> string option
 val canonical_keeper_name_from_agent_name : string -> string option

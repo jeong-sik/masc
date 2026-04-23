@@ -436,6 +436,8 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           last_blocker_class = None;
           last_need = "";
         };
+      keeper_id = None;
+      meta_version = 0;
       } in
       Progress.Tracker.step tracker ~message:"Saving initial checkpoint" ();
       let init_save_result =

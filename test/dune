@@ -86,6 +86,7 @@
         test_keeper_runtime_toml
         test_keeper_tool_policy_config
         test_keeper_toml_config_validation
+        test_keeper_id
         test_exec_core
         test_exec_dispatch
         test_keeper_bash_safety
@@ -201,6 +202,7 @@
           test_keeper_runtime_toml
           test_keeper_tool_policy_config
           test_keeper_toml_config_validation
+          test_keeper_id
           test_exec_core
           test_exec_dispatch
           test_keeper_bash_safety

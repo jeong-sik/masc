@@ -806,10 +806,8 @@ let test_runtime_precondition_contracts () =
   check bool "graphql routes expose result-based server state lookup" true
     (file_contains_pattern "lib/server/server_routes_http_pages.ml"
        "let get_server_state_result () =");
-  check bool "h2 governance routes use server state guard helper" true
-    (file_contains_pattern "lib/server/server_h2_gateway_routes_extra.ml"
-       "let with_server_state f =");
-  (* Executor contract check removed with governance tool retirement *)
+  (* with_server_state removed: h2 governance case routes retired,
+     remaining routes do not need server state guard. *)
   ()
 
 let () =

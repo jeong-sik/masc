@@ -136,24 +136,9 @@ OCaml 5.4 추가. 현재 keeper 우선순위 관리를 `List.sort`로 구현한 
 
 ## 3. 구체적 코드 수정안 (Tier 1 상세)
 
-### 3A. String-typed enum → variant 타입 (keeper_unified_turn.ml)
+### 3A. String-typed enum → variant 타입 (keeper_unified_metrics.ml)
 
 **현재** (line 750-761):
-```ocaml
-let selected_mode_of_result (result : Keeper_agent_run.run_result) : string =
-  (* ...returns "tool_use" | "noop" | "skip_text" | "text_response" *)
-
-let work_kind_of_selected_mode (selected_mode : string) : string =
-  match selected_mode with
-  | "tool_use" -> "tool_use"
-  | "noop" -> "noop"
-  | _ -> "text_turn"
-```
-
-**문제**: `selected_mode`와 `work_kind`가 string. 새 모드 추가 시 컴파일러가 완전성 검사 불가.
-`_ -> "text_turn"`은 unknown 입력을 text_turn으로 은밀히 분류.
-
-**수정안** — variant 타입 도입:
 ```ocaml
 type turn_mode =
   | Tool_use
@@ -161,19 +146,23 @@ type turn_mode =
   | Skip_text
   | Text_response
 
-type work_kind =
-  | Wk_tool_use
-  | Wk_noop
-  | Wk_text_turn
+let turn_mode_of_result (result : Keeper_agent_run.run_result) : turn_mode =
+  (* ...returns Tool_use | Noop | Skip_text | Text_response *)
 
 let work_kind_of_turn_mode = function
-  | Tool_use -> Wk_tool_use
-  | Noop -> Wk_noop
-  | Skip_text -> Wk_text_turn
-  | Text_response -> Wk_text_turn
+  | Tool_use -> "tool_use"
+  | Noop -> "noop"
+  | Skip_text -> "text_turn"
+  | Text_response -> "text_turn"
 ```
 
-**ROI**: 4개 call site 수정으로 컴파일러가 미래 variant 확장 시 반드시 모든 case 처리 보장.
+**문제**: `selected_mode`와 `work_kind`가 string이면 새 모드 추가 시 컴파일러가 완전성 검사를 못 한다.
+`_ -> "text_turn"` 같은 fallback은 unknown 입력을 text 계열로 은밀히 분류한다.
+
+**수정 결과**:
+- core/durable surface는 `turn_mode`만 저장
+- `work_kind`는 dashboard/timeline projection에서만 계산
+- future variant 추가 시 exhaustive match가 깨져서 컴파일 단계에서 바로 드러남
 
 ### 3B. post_commit_failure_kind_of_error — 재분류
 

@@ -22,6 +22,12 @@ val observed_affordances_of_observation :
   Keeper_world_observation.world_observation ->
   string list
 
+type turn_mode =
+  | Tool_use
+  | Text_response
+  | Skip_text
+  | Noop
+
 val update_metrics_from_result :
   Keeper_types.keeper_meta ->
   latency_ms:int ->
@@ -72,7 +78,7 @@ val append_decision_record :
   latency_ms:int ->
   ?semaphore_wait_ms:int ->
   outcome:string ->
-  selected_mode:string ->
+  ?turn_mode:turn_mode ->
   ?social_state:Keeper_social_model.social_state ->
   ?deliberation_execution:Keeper_deliberation.execution_result ->
   ?result:Keeper_agent_run.run_result option ->
@@ -92,9 +98,17 @@ val has_substantive_tool_calls : string list -> bool
 val visible_run_validation :
   Keeper_agent_run.run_result -> Oas.Raw_trace.run_validation option
 
-val selected_mode_of_result : Keeper_agent_run.run_result -> string
+val turn_mode_of_result : Keeper_agent_run.run_result -> turn_mode
 
-val work_kind_of_selected_mode : string -> string
+val turn_mode_to_string : turn_mode -> string
+
+val turn_mode_of_string : string -> turn_mode option
+
+val turn_mode_of_json : Yojson.Safe.t -> turn_mode option
+
+val work_kind_of_turn_mode : turn_mode -> string
+
+val work_kind_of_json : Yojson.Safe.t -> string option
 
 val accountability_evidence_refs :
   trace_id:string ->

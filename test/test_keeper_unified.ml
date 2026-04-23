@@ -1988,8 +1988,12 @@ let test_append_metrics_snapshot_treats_validated_evidence_as_tool_use () =
         | _ -> fail "expected one metrics line"
       in
       let json = Yojson.Safe.from_string line in
-      check string "work kind persisted as tool_use" "tool_use"
-        Yojson.Safe.Util.(json |> member "work_kind" |> to_string);
+      check string "turn mode persisted as tool_use" "tool_use"
+        Yojson.Safe.Util.(json |> member "turn_mode" |> to_string);
+      check bool "work_kind removed from snapshot" true
+        (match Yojson.Safe.Util.(json |> member "work_kind") with
+         | `Null -> true
+         | _ -> false);
       check string "scheduled autonomous outcome persisted as tool_use"
         "tool_use"
         Yojson.Safe.Util.(
@@ -2118,8 +2122,8 @@ let test_append_decision_record_persists_tool_calls () =
             ~meta
             ~observation:base_observation
             ~latency_ms:42
-            ~outcome:"tool_use"
-            ~selected_mode:"tool_use"
+            ~outcome:"success"
+            ~turn_mode:UM.Tool_use
             ~result:(Some result)
             ());
       let json =
@@ -2150,6 +2154,12 @@ let test_append_decision_record_persists_tool_calls () =
       check (list string) "tools used persisted"
         ["keeper_shell"; "keeper_board_post"]
         Yojson.Safe.Util.(json |> member "tools_used" |> to_list |> List.map to_string);
+      check (option string) "turn mode persisted" (Some "tool_use")
+        Yojson.Safe.Util.(json |> member "turn_mode" |> to_string_option);
+      check bool "selected_mode removed from decision log" true
+        (match Yojson.Safe.Util.(json |> member "selected_mode") with
+         | `Null -> true
+         | _ -> false);
       let recorded_tool_calls =
         Yojson.Safe.Util.(json |> member "tool_calls" |> to_list)
       in
@@ -2187,8 +2197,8 @@ let test_append_decision_record_nulls_unreported_usage () =
         ~meta:minimal_meta
         ~observation:base_observation
         ~latency_ms:420
-        ~outcome:"normal"
-        ~selected_mode:"normal"
+        ~outcome:"success"
+        ~turn_mode:UM.Text_response
         ~result:(Some result)
         ();
       let json =

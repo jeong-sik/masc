@@ -551,6 +551,7 @@ let latest_tool_audit_snapshot_from_decisions config keeper_name =
       ~parse_snapshot
       ~has_legacy_shape:(fun json ->
         Option.is_some (json_iso_opt json)
+        || Option.is_some (Safe_ops.json_string_opt "turn_mode" json)
         || Option.is_some (Safe_ops.json_string_opt "selected_mode" json)
         || Option.is_some (Safe_ops.json_string_opt "outcome" json))
     |> Option.map (fun snapshot ->
@@ -596,6 +597,7 @@ let latest_tool_audit_snapshot_from_metrics config keeper_name =
     ~has_legacy_shape:(fun json ->
       Option.is_some (json_iso_opt json)
       || Option.is_some (Safe_ops.json_string_opt "channel" json)
+      || Option.is_some (Safe_ops.json_string_opt "turn_mode" json)
       || Option.is_some (Safe_ops.json_string_opt "work_kind" json))
   |> Option.map (fun snapshot ->
          {

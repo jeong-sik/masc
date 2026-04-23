@@ -1,3 +1,8 @@
+---
+status: deprecated
+last_verified: 2026-04-23
+---
+
 # Command Plane Runbook — DEPRECATED
 
 > **이 문서와 Command Plane(CP) 전체가 제거 예정입니다.**
@@ -259,7 +264,7 @@ Content-Type: application/json
 
 실제 기능 개발을 `MASC` swarm으로 굴릴 때의 delivery 표준은 별도 문서를 본다:
 
-- [SWARM-DELIVERY-RUNBOOK.md](./SWARM-DELIVERY-RUNBOOK.md)
+- ~[SWARM-DELIVERY-RUNBOOK.md](./SWARM-DELIVERY-RUNBOOK.md) (removed)~
 
 1. `masc_operator_snapshot`
 2. `masc_operator_digest`
@@ -267,7 +272,7 @@ Content-Type: application/json
    - command-plane search/microarch signal은 여기서 먼저 읽고, 더 자세한 정보가 필요할 때만 full command-plane surface로 내려간다.
 3. `masc_operator_action`
 4. `masc_operator_confirm`
-5. 필요 시 `masc_team_session_events`
+5. ~`masc_team_session_events` (removed)~
 
 언제 쓰나:
 
@@ -281,24 +286,7 @@ Content-Type: application/json
 
 ## Session Runtime Compat Lane
 
-hot-swarm live harness와 별도로, `./scripts/harness_team_session_local64_smoke.sh`와 `./scripts/harness_supervisor_team_session.sh`는 current `masc_team_session_*` tool family와 OAS runtime bridge를 검증하는 supporting lane이다.
-
-핵심 차이:
-
-- managed-operation live harness
-  - deterministic fixture
-  - runtime-assisted claim/current_task/done
-  - managed-operation swarm proof와 dashboard truthfulness 검증이 목적
-- session runtime compat lane
-  - `masc_team_session_start` / `masc_team_session_step(spawn_batch=...)`를 사용한다
-  - `team_session_swarm_runner.ml`가 OAS swarm 실행을 담당한다
-  - session/proof/operator surface 검증이 목적이다
-
-주의:
-
-- session runtime compat lane은 managed-operation live harness의 대체가 아니다
-- managed-operation operation/detachment/current_task truth를 검증하려면 live harness/read model 쪽을 본다
-- task claim/current_task binding 자체를 검증하려면 `./scripts/harness_agent_swarm_live.sh`를 사용한다
+Removed. `masc_team_session_*` tool family, `team_session_swarm_runner.ml`, and compat harness scripts (`harness_team_session_local64_smoke.sh`, `harness_supervisor_team_session.sh`) were retired. Swarm execution now goes through OAS Swarm Runner directly; coordination state lives in board posts and keeper FSM.
 
 ## Which Tool Now?
 
@@ -317,7 +305,7 @@ hot-swarm live harness와 별도로, `./scripts/harness_team_session_local64_smo
 ### 1. worktree를 namespace로 착각
 
 증상:
-- worktree path로 `masc_start` 또는 `masc_set_room` 했는데 기존 coordination state가 그대로 보임
+- worktree path로 `masc_start` 했는데 기존 coordination state가 그대로 보임
 
 정리:
 - runtime namespace는 project root 기준 default 하나다
@@ -361,4 +349,4 @@ hot-swarm live harness와 별도로, `./scripts/harness_team_session_local64_smo
 
 - [BENCHMARK-RUNBOOK.md](./BENCHMARK-RUNBOOK.md)
 - [SUPERVISOR-MODE.md](./SUPERVISOR-MODE.md)
-- [QUICKSTART.md](./QUICKSTART.md)
+- ~[QUICKSTART.md](./QUICKSTART.md) (removed)~

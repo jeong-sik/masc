@@ -1,6 +1,6 @@
 ---
 status: reference
-last_verified: 2026-04-17
+last_verified: 2026-04-23
 code_refs:
   - lib/capability_registry.ml
 ---
@@ -20,13 +20,17 @@ The canonical SSOT is the **capability registry**, not any single tool list.
 Each capability may project into multiple surfaces:
 
 - `public_mcp`
-- `managed_agent_mcp`
 - `spawned_agent_mcp`
 - `local_worker`
 - `keeper_standard`
 - `keeper_privileged`
-- `mdal_auditable`
 - `privileged_executor`
+
+Removed surfaces (historical record):
+
+- `mdal_auditable` — removed in PR #4417 ("refactor: remove MDAL dead code")
+- `managed_agent_mcp` — never a `capability_registry` surface variant;
+  `Managed_agent` exists only as a `tool_profile` in `mcp_server_eio`
 
 Some projections intentionally reuse the same tool name with a different schema.
 Example:

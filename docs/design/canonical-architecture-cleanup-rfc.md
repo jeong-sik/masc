@@ -22,7 +22,7 @@ code_refs:
 - `../spec/SPEC-INDEX.md`
 - `../spec/01-system-overview.md`
 - `../spec/C-implementation-status.md`
-- `../architecture-boundary.md`
+- `../OAS-MASC-BOUNDARY.md`
 
 ## Problem Statement
 
@@ -68,7 +68,7 @@ The repo must stop describing non-canonical surfaces as equally first-class.
 |----|---------|------------------|------------------------|
 | E1 | Front-door promise is narrow, but public inventory claims are wide | `README.md` describes repo coordination + keeper runtime as the front door, while `docs/MCP-SURFACE-AUDIT.md` says default `tools/list` exposes 403 visible schemas | Users and agents cannot infer the intended default surface from docs alone |
 | E2 | Chain plane is described as canonical after the chain engine was removed | `docs/spec/01-system-overview.md` and `docs/MERGED-ARCHITECTURE-SSOT.md` still present a native chain plane, while `docs/spec/C-implementation-status.md` says Chain Engine is removed and the codebase no longer contains `lib/chain_*`. `docs/spec/04-chain-engine.md` was deleted (2026-04-17) as part of this cleanup. | The orchestration spine is internally contradictory |
-| E3 | MASC/OAS boundary is declared as strict but not enforced | `docs/architecture-boundary.md` forbids `Agent_sdk` imports in MASC core, but real imports exist outside keeper/worker/bridge lanes | Boundary rules become advisory and regress silently |
+| E3 | MASC/OAS boundary is declared as strict but not enforced | `docs/OAS-MASC-BOUNDARY.md` forbids `Agent_sdk` imports in MASC core, but real imports exist outside keeper/worker/bridge lanes | Boundary rules become advisory and regress silently |
 | E4 | "Small front door" narrative sits on top of a platform-scale monolith | `docs/ARCHITECTURE-COMPLEXITY-ANALYSIS.md` and `docs/spec/SPEC-INDEX.md` both show a very large tool/module footprint, while top-level docs increasingly describe a much smaller product | Without reduction or extraction, the product explanation remains fragile |
 
 ## Cleanup Matrix

@@ -692,10 +692,16 @@ let exit_code_of_message (message : string) : int option =
               int_of_string_opt raw
 
 let message_looks_like_resumable_cli_session (message : string) : bool =
-  match exit_code_of_message message with
-  | Some 75 ->
-      String_util.contains_substring_ci message "to resume this session:"
-  | _ -> false
+  Oas_worker_exec.Kimi_cli_transport_local.text_looks_like_resumable_session
+    message
+
+let resumable_cli_session_detail (message : string) : string =
+  Oas_worker_exec.Kimi_cli_transport_local.resumable_session_detail_of_text
+    message
+
+let resumable_cli_session_exit_code (message : string) : int option =
+  Oas_worker_exec.Kimi_cli_transport_local.resumable_session_exit_code_of_text
+    message
 
 let sdk_error_is_hard_quota (err : Oas.Error.sdk_error) : bool =
   match err with
@@ -1008,8 +1014,17 @@ let run_named
               (Resumable_cli_session
                  {
                    cascade_name;
-                   detail = message;
-                   exit_code = exit_code_of_message message;
+                   detail = resumable_cli_session_detail message;
+                   exit_code = resumable_cli_session_exit_code message;
+                 })
+        | Some (Llm_provider.Http_client.AcceptRejected { reason })
+          when message_looks_like_resumable_cli_session reason ->
+            sdk_error_of_masc_internal_error
+              (Resumable_cli_session
+                 {
+                   cascade_name;
+                   detail = resumable_cli_session_detail reason;
+                   exit_code = resumable_cli_session_exit_code reason;
                  })
         | _ ->
             sdk_error_of_masc_internal_error

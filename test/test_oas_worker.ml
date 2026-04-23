@@ -1367,16 +1367,20 @@ let test_classify_masc_internal_error_roundtrip () =
       (Oas_worker_named.Resumable_cli_session
          {
            cascade_name = "kimi_cli_keeper";
-           detail =
-             "kimi exited with code 75: \nTo resume this session: kimi -r ff37febe-2adb-4ac6-9dc6-cae23e672fbc";
+           detail = Oas_worker_exec.Kimi_cli_transport_local.resumable_session_detail;
            exit_code = Some 75;
          })
   in
   match Oas_worker_named.classify_masc_internal_error resumable_err with
   | Some (Oas_worker_named.Resumable_cli_session { cascade_name; detail; exit_code }) ->
       Alcotest.(check string) "resumable cascade" "kimi_cli_keeper" cascade_name;
-      Alcotest.(check bool) "resumable detail preserved" true
+      Alcotest.(check string) "resumable detail redacted"
+        Oas_worker_exec.Kimi_cli_transport_local.resumable_session_detail
+        detail;
+      Alcotest.(check bool) "resumable detail hides raw resume hint" false
         (contains_substring ~needle:"To resume this session:" detail);
+      Alcotest.(check bool) "resumable detail hides session token" false
+        (contains_substring ~needle:"kimi -r" detail);
       Alcotest.(check (option int)) "resumable exit code" (Some 75) exit_code
   | _ -> Alcotest.fail "expected structured resumable CLI session error"
 
@@ -1924,11 +1928,35 @@ let test_kimi_cli_should_log_stderr_line_filters_resume_noise () =
     (should_log "   ");
   Alcotest.(check bool) "resume hint suppressed" false
     (should_log "To resume this session: kimi -r ff37febe");
+  Alcotest.(check bool) "case-insensitive resume hint suppressed" false
+    (should_log "  TO RESUME THIS SESSION: kimi -r ff37febe");
   Alcotest.(check bool) "unexpected stderr remains visible" true
     (should_log "fatal: kimi auth missing");
   Alcotest.(check bool) "other stderr guidance remains visible" true
     (should_log "warning: upstream endpoint is slow")
 
+let test_kimi_cli_classify_cli_error_redacts_resumable_session_detail () =
+  let raw_message =
+    "kimi exited with code 75: \nTo resume this session: kimi -r ff37febe-2adb-4ac6-9dc6-cae23e672fbc"
+  in
+  match
+    Oas_worker_exec.Kimi_cli_transport_local.classify_cli_error
+      (Error
+         (Llm_provider.Http_client.NetworkError
+            {
+              message = raw_message;
+              kind = Llm_provider.Http_client.Unknown;
+            }))
+  with
+  | Error (Llm_provider.Http_client.AcceptRejected { reason }) ->
+      Alcotest.(check string) "canonical detail"
+        Oas_worker_exec.Kimi_cli_transport_local.resumable_session_detail
+        reason;
+      Alcotest.(check bool) "raw resume hint removed" false
+        (contains_substring ~needle:"To resume this session:" reason);
+      Alcotest.(check bool) "raw session id removed" false
+        (contains_substring ~needle:"ff37febe-2adb-4ac6-9dc6-cae23e672fbc" reason)
+  | _ -> Alcotest.fail "expected resumable session to map to AcceptRejected"
 let test_codex_cli_prompt_preflight_uses_pipeline_context_window_fallback () =
   let provider_cfg = make_codex_cli_provider_cfg () in
   let config =
@@ -3230,6 +3258,8 @@ let () =
         test_kimi_cli_model_for_provider_keeps_explicit_model;
       Alcotest.test_case "kimi stderr resume noise is filtered" `Quick
         test_kimi_cli_should_log_stderr_line_filters_resume_noise;
+      Alcotest.test_case "kimi exit 75 detail is redacted" `Quick
+        test_kimi_cli_classify_cli_error_redacts_resumable_session_detail;
       Alcotest.test_case "worker build_agent installs retry policy" `Quick
         test_worker_build_agent_uses_default_internal_retry_policy;
       Alcotest.test_case "resume config propagates retry policy" `Quick

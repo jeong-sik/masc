@@ -330,6 +330,56 @@ let test_runtime_surface_derives_cascade_exhausted_from_meta () =
     false
     (runtime |> member "runtime_blocker_continue_gate" |> to_bool)
 
+let test_runtime_surface_exposes_redacted_resumable_cli_session_blocker () =
+  KR.clear ();
+  let base = make_meta ~name:"runtime-resumable-cli-session-test" () in
+  let reason =
+    Masc_mcp.Oas_worker_exec.Kimi_cli_transport_local.resumable_session_detail
+  in
+  let meta =
+    {
+      base with
+      runtime =
+        {
+          base.runtime with
+          last_blocker = reason;
+          last_blocker_class =
+            Some (KT.Cascade_exhausted (KT.Other_detail reason));
+        };
+    }
+  in
+  let config =
+    Coord.default_config "/tmp/test-keeper-exec-status-resumable-cli-session"
+  in
+  ignore (KR.register ~base_path:config.base_path meta.name meta);
+  let runtime = KSB.runtime_surface_json config meta in
+  let contains_substring haystack needle =
+    let hay_len = String.length haystack in
+    let needle_len = String.length needle in
+    let rec loop i =
+      if i + needle_len > hay_len then false
+      else if String.sub haystack i needle_len = needle then true
+      else loop (i + 1)
+    in
+    needle_len = 0 || loop 0
+  in
+  let open Yojson.Safe.Util in
+  let summary = runtime |> member "runtime_blocker_summary" |> to_string in
+  check string "last blocker stays redacted"
+    reason
+    (runtime |> member "last_blocker" |> to_string);
+  check string "runtime blocker class"
+    "cascade_exhausted"
+    (runtime |> member "runtime_blocker_class" |> to_string);
+  check string "runtime blocker summary stays redacted"
+    reason
+    summary;
+  check bool "runtime blocker hides raw session command" false
+    (contains_substring summary "kimi -r");
+  check bool "runtime blocker continue gate stays false"
+    false
+    (runtime |> member "runtime_blocker_continue_gate" |> to_bool)
+
 let test_runtime_surface_derives_continue_gate_from_ambiguous_partial_commit () =
   KR.clear ();
   let meta = make_meta ~name:"runtime-continue-gate-test" () in
@@ -594,6 +644,9 @@ let () =
             test_runtime_surface_derives_autonomous_slot_wait_timeout_from_meta;
           test_case "runtime surface derives cascade exhausted blocker" `Quick
             test_runtime_surface_derives_cascade_exhausted_from_meta;
+          test_case "runtime surface keeps resumable CLI blocker redacted"
+            `Quick
+            test_runtime_surface_exposes_redacted_resumable_cli_session_blocker;
           test_case "runtime surface derives continue-gate blocker" `Quick
             test_runtime_surface_derives_continue_gate_from_ambiguous_partial_commit;
           test_case "runtime surface derives persisted continue-gate blocker"

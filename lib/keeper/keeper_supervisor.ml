@@ -221,7 +221,9 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
                   meta.name reason ()
             end
           end
-        with exn ->
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
           Log.Keeper.warn
             "%s: supervisor finally cleanup failed (suppressed to avoid Fun.Finally_raised): %s"
             meta.name (Printexc.to_string exn)))

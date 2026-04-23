@@ -522,7 +522,9 @@ let atomic_write_file ~(path : string) (content : string) : (unit, string) resul
       (fun () -> output_string oc content);
     Sys.rename tmp path;
     Ok ()
-  with exn ->
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
     (try Sys.remove tmp with Sys_error _ -> ());
     Error (Printf.sprintf "atomic write failed: %s" (Printexc.to_string exn))
 

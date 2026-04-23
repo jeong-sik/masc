@@ -249,7 +249,9 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
       let result_ref = ref None in
       let run_compute () =
         try result_ref := Some (Ok (compute ()))
-        with exn -> result_ref := Some (Error exn)
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn -> result_ref := Some (Error exn)
       in
       (match Eio_context.get_clock_opt () with
        | Some clock ->

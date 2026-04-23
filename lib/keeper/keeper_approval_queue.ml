@@ -179,7 +179,9 @@ let approval_rule_of_yojson json =
         match_count;
         source_approval_id;
       }
-  with _ -> None
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | _ -> None
 
 (* ── Global queue (Lock-free Atomic.t) ───────────────────── *)
 

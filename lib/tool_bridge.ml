@@ -78,7 +78,9 @@ let maybe_externalize ?(mime = "text/plain") (msg : string) : string =
           (try
              let stored = Tool_blob_store.put store ~bytes:msg ~mime in
              Tool_output.encode_for_oas stored
-           with _ -> msg)
+           with
+          | Eio.Cancel.Cancelled _ as e -> raise e
+          | _ -> msg)
 
 (** {1 Result Conversion} *)
 

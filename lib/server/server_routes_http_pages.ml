@@ -294,7 +294,9 @@ let bonsai_asset_mtime filename =
   try
     let st = Unix.stat path in
     Printf.sprintf "%d" (Float.to_int st.st_mtime)
-  with _ -> "0"
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | _ -> "0"
 
 let bonsai_bundle_version () = bonsai_asset_mtime "main.bc.js"
 let bonsai_tokens_version () = bonsai_asset_mtime "colors_and_type.css"

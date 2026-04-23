@@ -176,7 +176,9 @@ exception Semaphore_wait_timeout of float
     yield less aggressively. *)
 let last_autonomous_completion : (string, float) Hashtbl.t = Hashtbl.create 16
 
-let last_autonomous_completion_mutex = Mutex.create ()
+(* Stdlib.Mutex: completion table may be accessed from keepers on different
+   domains concurrently. *)
+let last_autonomous_completion_mutex = Stdlib.Mutex.create ()
 
 let with_completion_table f =
   Mutex.lock last_autonomous_completion_mutex;

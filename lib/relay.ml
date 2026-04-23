@@ -59,7 +59,9 @@ let calibration = {
 }
 
 (* Serialises writers of the compound [samples+correction_factor] update.
-   Readers of [correction_factor] rely on [@atomic] and do not take the lock. *)
+   Readers of [correction_factor] rely on [@atomic] and do not take the lock.
+   Stdlib.Mutex: this module has no Eio context; calibration only touched by
+   test code (see test/test_relay_coverage.ml). *)
 let calibration_lock = Mutex.create ()
 
 (** Record actual token count vs estimated for calibration.

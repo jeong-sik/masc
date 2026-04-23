@@ -700,14 +700,18 @@ let spawn_detached ~argv ~env ~cwd =
            Safe_ops.protect ~default:() (fun () -> ignore (Unix.setsid ()));
            (try
               if cwd <> "" then Unix.chdir cwd
-            with _ -> Unix._exit 126);
+            with
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | _ -> Unix._exit 126);
            Unix.dup2 devnull Unix.stdin;
            Unix.dup2 out_w Unix.stdout;
            Unix.dup2 err_w Unix.stderr;
            Unix.close out_r; Unix.close err_r;
            Unix.close out_w; Unix.close err_w; Unix.close devnull;
            (try Unix.execvpe bin (Array.of_list argv) env
-            with _ -> Unix._exit 127)
+            with
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | _ -> Unix._exit 127)
          end else begin
            (* --- PARENT --- *)
            Unix.close out_w;

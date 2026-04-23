@@ -596,7 +596,9 @@ let sync_client_token_file ~base_path ~agent_name ~default_role =
            Log.Server.warn
              "startup %s raw bearer token file for %s at %s"
              reason agent_name token_file
-         with exn ->
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
            Log.Server.error
              "startup failed to persist raw bearer token file for %s at %s: %s"
              agent_name token_file (Printexc.to_string exn))
@@ -611,7 +613,9 @@ let sync_client_token_file ~base_path ~agent_name ~default_role =
       Log.Server.info
         "startup verified raw bearer token file for %s at %s"
         agent_name token_file
-    with exn ->
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
       Log.Server.error
         "startup failed to normalize raw bearer token file for %s at %s: %s"
         agent_name token_file (Printexc.to_string exn)
@@ -621,7 +625,9 @@ let sync_client_token_file ~base_path ~agent_name ~default_role =
       try
         let raw = String.trim (Fs_compat.load_file token_file) in
         if raw = "" then None else Some raw
-      with exn ->
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
         Log.Server.warn
           "startup failed to read raw bearer token file for %s at %s: %s"
           agent_name token_file (Printexc.to_string exn);

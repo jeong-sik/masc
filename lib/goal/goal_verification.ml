@@ -271,7 +271,9 @@ let goal_verification_vote_of_yojson = function
                 | `Null -> Ok []
                 | `List values -> (
                     try Ok (List.map to_string values)
-                    with _ ->
+                    with
+                    | Eio.Cancel.Cancelled _ as e -> raise e
+                    | _ ->
                       Error "goal_verification_vote_of_yojson: invalid evidence_refs")
                 | other ->
                     Error

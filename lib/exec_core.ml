@@ -147,7 +147,9 @@ let snapshot_env ~cwd =
               Some (String.sub line (String.length prefix)
                       (String.length line - String.length prefix))
             else Some (String.sub line 0 8))
-        with _ -> None
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | _ -> None
   in
   let project_kind = detect_project_kind cwd in
   let project_name = detect_project_name cwd in

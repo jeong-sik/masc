@@ -64,7 +64,7 @@ let git_marker_kind path =
 let project_root config =
   let base = config.base_path in
   let candidate =
-    if Filename.basename base = ".masc" then Filename.dirname base else base
+    if Filename.basename base = Common.masc_dirname then Filename.dirname base else base
   in
   let rec find_repo_root dir =
     let git_marker = Filename.concat dir ".git" in
@@ -351,11 +351,10 @@ let workspace_repo_matches ~search_root ~repo_name =
     else if String.length entry > 0 && entry.[0] = '.' then 3
     else 2
   in
-  let skip_dir_name = function
-    | ".git" | ".hg" | ".svn" | ".masc" | ".worktrees" | "_build"
-    | "node_modules" ->
-        true
-    | _ -> false
+  let skip_dir_name name =
+    name = ".git" || name = ".hg" || name = ".svn"
+    || name = Common.masc_dirname || name = ".worktrees"
+    || name = "_build" || name = "node_modules"
   in
   let matches =
     if Filename.basename search_root = repo_name && is_git_clone search_root

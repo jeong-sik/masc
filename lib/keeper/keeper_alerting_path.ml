@@ -2,7 +2,7 @@
 
 let project_root_of_config (config : Coord.config) : string =
   let base = config.base_path in
-  if Filename.basename base = ".masc" then Filename.dirname base else base
+  if Filename.basename base = Common.masc_dirname then Filename.dirname base else base
 
 let starts_with ~(prefix : string) (s : string) : bool =
   Base.String.is_prefix s ~prefix
@@ -176,7 +176,7 @@ let absolute_allowed_paths_result ~(config : Coord.config)
 let playground_root_of_allowed (allowed_norms : string list) : string option =
   List.find_opt
     (fun p ->
-      let marker = "/.masc/playground/" in
+      let marker = "/" ^ Common.masc_dirname ^ "/playground/" in
       let mlen = String.length marker in
       let slen = String.length p in
       let rec find i =

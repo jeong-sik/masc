@@ -22,7 +22,7 @@ let get_masc_root () =
     | Some path when String.trim path <> "" -> String.trim path
     | _ -> Sys.getcwd ()
   in
-  Filename.concat base_path ".masc"
+  Filename.concat base_path Common.masc_dirname
 
 (** Get costs file path *)
 let costs_file () = Filename.concat (get_masc_root ()) "costs.jsonl"

@@ -411,13 +411,13 @@ let run_cmd host port base_path =
       resolution_source normalized_base_path;
     exit 1
   end;
-  let masc_dir = Filename.concat normalized_base_path ".masc" in
+  let masc_dir = Filename.concat normalized_base_path Common.masc_dirname in
   Fs_compat.mkdir_p masc_dir;
   acquire_pid_lock port;
   acquire_base_path_lock normalized_base_path;
   Log.init_from_env ();
   if stripped_base_path <> ""
-     && String.equal (Filename.basename stripped_base_path) ".masc"
+     && String.equal (Filename.basename stripped_base_path) Common.masc_dirname
   then
     Log.Server.warn
       "Normalizing --base-path from %s to %s because runtime base paths must point at the workspace root, not the .masc directory."

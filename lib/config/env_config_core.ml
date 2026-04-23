@@ -80,7 +80,7 @@ let strip_path_trailing_slashes value =
 let normalize_masc_base_path_input path =
   let normalized = strip_path_trailing_slashes path in
   if normalized = "" then ""
-  else if String.equal (Filename.basename normalized) ".masc" then
+  else if String.equal (Filename.basename normalized) Common.masc_dirname then
     match Filename.dirname normalized with
     | "" -> "."
     | parent -> parent

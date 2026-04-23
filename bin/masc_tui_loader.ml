@@ -8,7 +8,7 @@ let report path err =
 
 (** Load keepers from .masc/keepers/ *)
 let load_keepers (base_path : string) : keeper list =
-  let keepers_dir = Filename.concat (Filename.concat base_path ".masc") "keepers" in
+  let keepers_dir = Filename.concat (Filename.concat base_path Common.masc_dirname) "keepers" in
   if Sys.file_exists keepers_dir && Sys.is_directory keepers_dir then
     Sys.readdir keepers_dir
     |> Array.to_list
@@ -73,7 +73,7 @@ let parse_log_entry (line : string) : log_entry option =
 let find_metrics_files (base_path : string) (keeper_name : string) : string list =
   let metrics_dir = Filename.concat
     (Filename.concat
-       (Filename.concat base_path ".masc")
+       (Filename.concat base_path Common.masc_dirname)
        "keepers")
     (Filename.concat keeper_name "metrics") in
   if not (Sys.file_exists metrics_dir && Sys.is_directory metrics_dir) then []
@@ -149,7 +149,7 @@ let load_live_context (state : state) (base_path : string) (keeper_name : string
 
 (** Load state from .masc directory *)
 let load_from_masc_dir (state : state) (base_path : string) =
-  let masc_dir = Filename.concat base_path ".masc" in
+  let masc_dir = Filename.concat base_path Common.masc_dirname in
 
   (* Load agents *)
   let agents_dir = Filename.concat masc_dir "agents" in

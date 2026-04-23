@@ -404,7 +404,7 @@ let generate_default
     default_output_modes = ["text/plain"; "application/json"; "text/event-stream"];
     extensions = [
       ("masc", `Assoc [
-        ("roomPath", `String ".masc");
+        ("roomPath", `String Common.masc_dirname);
         ("storageTypes", `List [`String "file"]);
         ("features", `Assoc [
           ("voting", `Bool true);

@@ -159,7 +159,7 @@ let fetch_from_file_context (room_config : Coord_utils.config) ~query =
     || name = "node_modules"
     || name = "_build"
     || name = ".worktrees"
-    || name = ".masc"
+    || name = Common.masc_dirname
   in
 
   let rec walk depth dir acc =

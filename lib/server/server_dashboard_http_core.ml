@@ -1153,6 +1153,11 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Coord.conf
     | Ok role -> Some (role = Types.Admin)
     | Error _ -> None
   in
+  let effective_role =
+    match effective_role_result with
+    | Ok role -> Some (Types.agent_role_to_string role)
+    | Error _ -> None
+  in
   let auth_error =
     match token_credential_result with
     | Some (Error (Types.InvalidToken _ as err)) -> Some err

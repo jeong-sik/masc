@@ -260,6 +260,21 @@ let verify_operator_mcp_auth ~base_path request =
             | Ok () -> Ok None
             | Error err -> Error (Types.masc_error_to_string err))
 
+let request_actor_hint request =
+  match agent_from_request request with
+  | Some raw ->
+      let agent_name = String.trim raw in
+      if String.equal agent_name "" then None else Some agent_name
+  | None -> None
+
+let dashboard_actor_for_request ~base_path request =
+  match auth_token_from_request request with
+  | Some token -> (
+      match resolve_agent_name_for_auth_raw ~base_path request ~token:(Some token) with
+      | Ok (Some agent_name) -> Some agent_name
+      | Ok None | Error _ -> request_actor_hint request)
+  | None -> request_actor_hint request
+
 (** Extract host and explicit port only.
     Host header carries no scheme, so inferring a default port from scheme
     (80 for http, 443 for https) causes mismatches when the browser Origin

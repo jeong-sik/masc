@@ -252,7 +252,7 @@ let test_dashboard_shell_http_json_prefers_last_good_while_prewarming () =
 let test_dashboard_shell_auth_json_canonicalizes_token_owner () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   let cfg =
-    { Types.default_auth_config with enabled = true; require_token = true; default_role = Types.Worker }
+    { Types.default_auth_config with enabled = true; require_token = true }
   in
   Auth.save_auth_config config.base_path cfg;
   match Auth.create_token config.base_path ~agent_name:"codex" ~role:Types.Worker with
@@ -285,7 +285,7 @@ let test_dashboard_shell_auth_json_canonicalizes_token_owner () =
 let test_dashboard_shell_auth_json_reports_missing_token () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   let cfg =
-    { Types.default_auth_config with enabled = true; require_token = true; default_role = Types.Worker }
+    { Types.default_auth_config with enabled = true; require_token = true }
   in
   Auth.save_auth_config config.base_path cfg;
   let json =

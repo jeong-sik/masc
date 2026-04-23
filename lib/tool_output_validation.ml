@@ -41,10 +41,10 @@ let post_hook (result : Tool_result.t) : Tool_result.t =
 
 (* ── Installation ───────────────────────────────────────────── *)
 
-let installed = ref false
+let installed = Atomic.make false
 
 let install () =
-  if not !installed then begin
+  if not (Atomic.get installed) then begin
     Tool_dispatch.register_post_hook post_hook;
-    installed := true
+    Atomic.set installed true
   end

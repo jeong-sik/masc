@@ -95,25 +95,6 @@ let add_routes ~sw ~clock router =
          in
          Http.Response.json (Yojson.Safe.to_string json) reqd
        ) request reqd)
-  |> Http.Router.get "/api/v1/governance/cases" (fun request reqd ->
-       with_public_read (fun state req reqd ->
-         let base_path = state.Mcp_server.room_config.base_path in
-         let json = governance_cases_json req ~base_path in
-         Http.Response.json (Yojson.Safe.to_string json) reqd
-       ) request reqd)
-  |> Http.Router.prefix_get "/api/v1/governance/cases/" (fun request reqd ->
-       with_public_read (fun state _req reqd ->
-         let base_path = state.Mcp_server.room_config.base_path in
-         let path = Http.Request.path request in
-         (match extract_path_param ~prefix:"/api/v1/governance/cases/" path with
-          | None ->
-              Http.Response.json
-                (Yojson.Safe.to_string (`Assoc [("error", `String "case_id is required")]))
-                ~status:`Bad_request reqd
-          | Some case_id ->
-              let (status, json) = governance_case_detail_json ~base_path ~case_id in
-              respond_json_with_cors ~status request reqd (Yojson.Safe.to_string json))
-       ) request reqd)
   |> Http.Router.get "/api/v1/governance/params" (fun request reqd ->
        with_public_read (fun _state _req reqd ->
          let params = Runtime_params.registry () in

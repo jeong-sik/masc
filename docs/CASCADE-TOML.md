@@ -17,7 +17,7 @@ The repo seed should stay intentionally small.
 
 - Keep exactly one keeper-assignable bootstrap profile: `big_three`
 - Keep system-only plumbing profiles checked in only when runtime routing needs
-  them: `default`, `local_only`, `local_recovery`, `tool_rerank`
+  them: `default`, `governance_judge`, `operator_judge`, `local_only`, `local_recovery`, `tool_rerank`
 - Put personal experiments, vendor mixes, and machine-specific profiles in
   live config under `$MASC_BASE_PATH/.masc/config/cascade.toml`, not in the
   repo seed
@@ -30,6 +30,8 @@ graveyard of personal cascade variants.
 - `default`: fallback for unknown/missing cascade names. Keep it boring and
   close to `big_three`.
 - `big_three`: canonical keeper bootstrap profile for checked-in keepers.
+- `governance_judge`: system-only dashboard governance judge profile.
+- `operator_judge`: system-only dashboard operator judge profile.
 - `local_only`: system-only local lane used by phase routing during compacting
   and handoff paths.
 - `local_recovery`: system-only local recovery lane used after provider/cloud

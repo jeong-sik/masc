@@ -157,9 +157,10 @@ let run_docker_shell_command_with_status
           | Network_inherit -> ([], network_mode_to_string network_mode)
       in
       let gh_creds =
-        match Keeper_gh_env.config_dir config with
-        | Some dir -> dir
-        | None -> Env_config_keeper.KeeperSandbox.gh_creds_host_path ()
+        match Keeper_gh_env.keeper_config_dir config ~keeper_name:meta.name with
+        | Ok (Some dir) -> dir
+        | Ok None -> Env_config_keeper.KeeperSandbox.gh_creds_host_path ()
+        | Error err -> raise (Failure err)
       in
       let gitconfig = Env_config_keeper.KeeperSandbox.gitconfig_host_path () in
       let ssh_dir = Env_config_keeper.KeeperSandbox.ssh_dir_host_path () in
@@ -213,18 +214,21 @@ let run_docker_shell_command_with_status
         @ token_env
         @ [ image; "bash"; "-lc"; cmd ]
       in
-      let status, output =
-        Process_eio.run_argv_with_status
-          ~cwd:(Sys.getcwd ()) ~timeout_sec argv
-      in
-      if status <> Unix.WEXITED 0 then
-        Keeper_registry.record_error ~base_path:config.base_path meta.name
-          (Printf.sprintf "sandbox docker exec failed (%s): %s"
-             image
-             (Worker_dev_tools.truncate_for_log output))
-      else
-        Keeper_registry.clear_error ~base_path:config.base_path meta.name;
-      Ok { status; output; image; network_label }
+      (try
+         let status, output =
+           Process_eio.run_argv_with_status
+             ~cwd:(Sys.getcwd ()) ~timeout_sec argv
+         in
+         if status <> Unix.WEXITED 0 then
+           Keeper_registry.record_error ~base_path:config.base_path meta.name
+             (Printf.sprintf "sandbox docker exec failed (%s): %s"
+                image
+                (Worker_dev_tools.truncate_for_log output))
+         else
+           Keeper_registry.clear_error ~base_path:config.base_path meta.name;
+         Ok { status; output; image; network_label }
+       with
+       | Failure err -> sandbox_error err)
 
 let run_docker_with_git_bash
     ~(turn_sandbox_runtime : Keeper_turn_sandbox_runtime.t option)

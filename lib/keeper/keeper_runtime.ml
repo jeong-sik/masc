@@ -135,6 +135,8 @@ let ensure_keeper_meta config name =
       apply_default defaults.autoboot_enabled meta.autoboot_enabled in
     let target_mention_targets =
       match defaults.mention_targets with [] -> meta.mention_targets | xs -> xs in
+    let target_active_goal_ids =
+      apply_default defaults.active_goal_ids meta.active_goal_ids in
     let target_sandbox_profile =
       apply_default defaults.sandbox_profile meta.sandbox_profile in
     let target_network_mode =
@@ -191,6 +193,7 @@ let ensure_keeper_meta config name =
       meta.policy_voice_enabled <> target_policy_voice_enabled
       || meta.autoboot_enabled <> target_autoboot_enabled
       || meta.mention_targets <> target_mention_targets
+      || meta.active_goal_ids <> target_active_goal_ids
       || meta.tool_access <> target_tool_access
       || meta.sandbox_profile <> target_sandbox_profile
       || meta.network_mode <> target_network_mode
@@ -257,6 +260,7 @@ let ensure_keeper_meta config name =
         policy_voice_enabled = target_policy_voice_enabled;
         autoboot_enabled = target_autoboot_enabled;
         mention_targets = target_mention_targets;
+        active_goal_ids = target_active_goal_ids;
         tool_access = target_tool_access;
         sandbox_profile = target_sandbox_profile;
         network_mode = target_network_mode;

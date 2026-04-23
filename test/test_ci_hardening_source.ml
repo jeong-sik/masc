@@ -154,6 +154,12 @@ let test_release_truth_contracts () =
     (file_contains_pattern "mk/release.mk" "release-evidence:")
 
 let test_oas_pin_source_contracts () =
+  check bool "external opam pins retry transient git fetch failures" true
+    (file_contains_pattern "scripts/opam-pin-external-deps.sh"
+       "OPAM_PIN_RETRIES");
+  check bool "external opam pins use retry wrapper" true
+    (file_contains_pattern "scripts/opam-pin-external-deps.sh"
+       "opam_pin_add mcp_protocol");
   check bool "oas pin check parses local file pins from opam output" true
     (file_contains_pattern "scripts/check-oas-pin.sh"
        "extract_opam_pin_source()");

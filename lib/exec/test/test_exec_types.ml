@@ -70,7 +70,7 @@ let test_verdict_trusted_argv_smart_ctor () =
       assert (Verdict.Trusted_argv.bin t = bin);
       assert (Verdict.Trusted_argv.args t = [])
 
-let test_verdict_three_way () =
+let test_verdict_four_way () =
   let _ = Verdict.Deny { caps = []; reason = Parse_failed } in
   let _ =
     Verdict.Ask
@@ -79,6 +79,15 @@ let test_verdict_three_way () =
            | Ok b -> b
            | Error _ -> assert false);
         raw_source = "ls" }
+  in
+  let bin = match Bin.of_string "ls" with Ok b -> b | Error _ -> assert false in
+  let simple : Shell_ir.simple =
+    { bin; args = []; env = []; cwd = None; redirects = [] }
+  in
+  let _ =
+    Verdict.Suggest_confirm
+      ( Verdict.trust ~caps:[] simple,
+        { Verdict.risk_class = `Safe; ttl_sec = 60.0 } )
   in
   ()
 
@@ -93,5 +102,5 @@ let () =
   test_parsed_polymorphic ();
   test_path_scope_classify ();
   test_verdict_trusted_argv_smart_ctor ();
-  test_verdict_three_way ();
+  test_verdict_four_way ();
   print_endline "[test_exec_types] all tests passed"

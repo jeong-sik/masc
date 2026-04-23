@@ -16,11 +16,14 @@ type error =
     is terminal — no user-approved override exists. *)
 
 val run : Verdict.t -> (Verdict.Trusted_argv.t, error) result
-(** [run verdict] dispatches on the three verdict arms.
+(** [run verdict] dispatches on the four verdict arms.
 
-    On [Allow trusted], returns [Ok trusted].  The production wrappers
-    below consume this to decide whether the eventual [Process_eio]
-    call is allowed to happen. *)
+    On [Allow trusted] or [Suggest_confirm (trusted, _)], returns
+    [Ok trusted].  [Suggest_confirm] auto-allows but the token is
+    recorded in telemetry for future HITL confirmation.
+
+    On [Ask request], returns [Error (`Ask_required request)].
+    On [Deny { reason; _ }], returns [Error (`Denied reason)]. *)
 
 val run_argv :
   actor:string ->

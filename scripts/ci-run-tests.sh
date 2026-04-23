@@ -27,6 +27,7 @@ CI_TEST_ALLOW_RPC_RETRY="${CI_TEST_ALLOW_RPC_RETRY:-1}"
 CI_TEST_RPC_RETRY_DONE=0
 CI_TEST_ALLOW_FLAKY_RETRY="${CI_TEST_ALLOW_FLAKY_RETRY:-1}"
 CI_TEST_FLAKY_RETRY_DONE=0
+CI_TEST_DISK_FULL_GUIDANCE_DONE=0
 CI_TEST_ISOLATED_BUILD_DIR="${CI_TEST_ISOLATED_BUILD_DIR:-.ci_build}"
 CI_CONTRACT_HARNESS_ENABLED="${CI_CONTRACT_HARNESS_ENABLED:-0}"
 CI_CONTRACT_HARNESS_CMD="${CI_CONTRACT_HARNESS_CMD:-scripts/harness/contract/run_all.sh}"
@@ -50,6 +51,12 @@ elapsed_sec() {
 log_line() {
   local line="$1"
   printf '%s\n' "${line}" | tee -a "${TEST_LOG_FILE}"
+}
+
+tmpdir_disk_usage() {
+  local tmp_dir="${TMPDIR:-/tmp}"
+  df -h "${tmp_dir}" 2>/dev/null \
+    | awk 'NR == 2 { print "size=" $2 " used=" $3 " avail=" $4 " capacity=" $5; found=1 } END { if (!found) print "unknown" }'
 }
 
 active_cmd_tree_pids() {
@@ -135,7 +142,7 @@ diag_dump() {
   echo "[ci-diag] env DUNE_RPC=${DUNE_RPC:-<unset>}"
 
   echo "[ci-diag] ulimit -n (open files): $(ulimit -n 2>/dev/null || echo unknown)"
-  echo "[ci-diag] tmpdir usage: $(du -sh "${TMPDIR:-/tmp}" 2>/dev/null | cut -f1 || echo unknown)"
+  echo "[ci-diag] tmpdir usage: $(tmpdir_disk_usage)"
   echo "[ci-diag] process snapshot (dune/ocaml/test):"
   ps -eo pid,ppid,etime,%cpu,%mem,comm,args \
     | grep -Ei 'dune|ocaml|alcotest|test_' \
@@ -249,8 +256,27 @@ cache_disabled_cmd() {
 agent_sdk_interface_mismatch_detected() {
   [[ -f "${TEST_LOG_FILE}" ]] || return 1
   grep -Eq \
-    'Unbound module Agent_sdk|module Oas is an alias for module Agent_sdk|inconsistent assumptions over interface Agent_sdk' \
+    'Unbound module Agent_sdk|Unbound module Llm_provider|module Oas is an alias for module Agent_sdk|inconsistent assumptions over interface Agent_sdk|/lib/agent_sdk/[^[:space:]]+[.]cmxa' \
     "${TEST_LOG_FILE}"
+}
+
+disk_full_detected() {
+  [[ -f "${TEST_LOG_FILE}" ]] || return 1
+  grep -Eiq 'No space left on device|dune_trace_write[(][)]|ENOSPC' \
+    "${TEST_LOG_FILE}"
+}
+
+log_disk_full_guidance() {
+  if [[ "${CI_TEST_DISK_FULL_GUIDANCE_DONE}" -eq 1 ]]; then
+    return 0
+  fi
+
+  CI_TEST_DISK_FULL_GUIDANCE_DONE=1
+  local opam_path="${OPAM_SWITCH_PREFIX:-${HOME:-}/.opam}"
+  log_line "[ci-run] ERROR: detected disk exhaustion during dune build"
+  log_line "[ci-run] repair: df -h . ${opam_path} /tmp"
+  log_line "[ci-run] repair: bash scripts/disk-hygiene.sh --fix"
+  log_line "[ci-run] repair: bash scripts/disk-hygiene.sh --fix --reset-dune-cache # if dune cache artifacts remain inconsistent"
 }
 
 rpc_server_not_running_detected() {
@@ -261,19 +287,16 @@ rpc_server_not_running_detected() {
 clean_current_build_dir() {
   if [[ "${ACTIVE_TEST_BUILD_DIR}" != "_build" ]]; then
     env DUNE_BUILD_DIR="${ACTIVE_TEST_BUILD_DIR}" dune clean --root . \
-      > >(tee -a "${TEST_LOG_FILE}") \
-      2> >(tee -a "${TEST_LOG_FILE}" >&2)
+      >> "${TEST_LOG_FILE}" 2>&1
   else
-    dune clean --root . \
-      > >(tee -a "${TEST_LOG_FILE}") \
-      2> >(tee -a "${TEST_LOG_FILE}" >&2)
+    dune clean --root . >> "${TEST_LOG_FILE}" 2>&1
   fi
 }
 
 run_agent_sdk_clean_retry() {
   CI_TEST_CLEAN_RETRY_DONE=1
   run_cmd="$(cache_disabled_cmd "${run_cmd}")"
-  log_line "[ci-run] WARN: detected Agent_sdk interface mismatch; running dune clean and retrying once with DUNE_CACHE=disabled"
+  log_line "[ci-run] WARN: detected Agent_sdk/OAS artifact or interface mismatch; running dune clean and retrying once with DUNE_CACHE=disabled"
   log_line "[ci-run] retry_command: ${run_cmd}"
   clean_current_build_dir
   log_line "[ci-run] retry_started_at=$(iso_now)"
@@ -374,6 +397,10 @@ run_with_timeout "${run_cmd}"
 status=$?
 set -e
 
+if [[ "${status}" -ne 0 ]] && disk_full_detected; then
+  log_disk_full_guidance
+fi
+
 if [[ "${status}" -ne 0 ]] \
   && [[ "${CI_TEST_ALLOW_RPC_RETRY}" = "1" ]] \
   && [[ "${CI_TEST_RPC_RETRY_DONE}" -eq 0 ]] \
@@ -418,7 +445,8 @@ if [[ "${status}" -ne 0 ]] \
   && [[ "${CI_TEST_FLAKY_RETRY_DONE}" -eq 0 ]] \
   && [[ "${CI_TEST_RPC_RETRY_DONE}" -eq 0 ]] \
   && [[ "${CI_TEST_CLEAN_RETRY_DONE}" -eq 0 ]] \
-  && test_cmd_needs_dune_sanitization; then
+  && test_cmd_needs_dune_sanitization \
+  && ! disk_full_detected; then
   CI_TEST_FLAKY_RETRY_DONE=1
   diag_dump "flaky_pre_retry_${status}"
   ACTIVE_TEST_BUILD_DIR="${CI_TEST_ISOLATED_BUILD_DIR}_flaky"
@@ -429,6 +457,10 @@ if [[ "${status}" -ne 0 ]] \
   run_with_timeout "${run_cmd}"
   status=$?
   set -e
+
+  if [[ "${status}" -ne 0 ]] && disk_full_detected; then
+    log_disk_full_guidance
+  fi
 fi
 
 if [[ "${status}" -ne 0 ]] \
@@ -440,6 +472,9 @@ if [[ "${status}" -ne 0 ]] \
 fi
 
 if [[ "${status}" -ne 0 ]]; then
+  if disk_full_detected; then
+    log_disk_full_guidance
+  fi
   diag_dump "nonzero_exit_${status}"
   log_line "[ci-run] ERROR: test command failed with exit=${status}"
   exit "${status}"

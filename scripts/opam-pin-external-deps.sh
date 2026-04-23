@@ -67,35 +67,62 @@ done
 # --install mode can rebuild exactly the set that changed, nothing more.
 pinned_pkgs=()
 
+opam_pin_add() {
+  local package="$1"
+  local source="$2"
+  shift 2
+
+  local max_attempts="${OPAM_PIN_RETRIES:-4}"
+  local retry_delay_sec="${OPAM_PIN_RETRY_DELAY_SEC:-5}"
+  local attempt=1
+  local status=0
+
+  while true; do
+    if opam pin add "${package}" "${source}" "$@"; then
+      return 0
+    fi
+
+    status=$?
+    if [[ "${attempt}" -ge "${max_attempts}" ]]; then
+      echo "[opam-pin] ERROR: opam pin add failed after ${attempt} attempts: ${package} ${source}" >&2
+      return "${status}"
+    fi
+
+    echo "[opam-pin] WARN: opam pin add failed for ${package} (attempt ${attempt}/${max_attempts}, exit=${status}); retrying in ${retry_delay_sec}s" >&2
+    sleep "${retry_delay_sec}"
+    attempt=$((attempt + 1))
+  done
+}
+
 if $include_compact_protocol; then
-  opam pin add compact-protocol https://github.com/jeong-sik/compact-protocol.git#main -n -y
+  opam_pin_add compact-protocol https://github.com/jeong-sik/compact-protocol.git#main -n -y
   pinned_pkgs+=("compact-protocol")
 fi
 
 # mcp_protocol_eio and mcp_protocol_http merged into mcp_protocol
 # as sub-libraries (mcp-protocol-sdk#60). Pin the released single-package line.
-opam pin add mcp_protocol https://github.com/jeong-sik/mcp-protocol-sdk.git#v1.3.0 -n -y
+opam_pin_add mcp_protocol https://github.com/jeong-sik/mcp-protocol-sdk.git#v1.3.0 -n -y
 pinned_pkgs+=("mcp_protocol")
-opam pin add agent_sdk "${agent_sdk_pin_source}" -n -y
+opam_pin_add agent_sdk "${agent_sdk_pin_source}" -n -y
 pinned_pkgs+=("agent_sdk")
-opam pin add ocaml-webrtc "https://github.com/jeong-sik/ocaml-webrtc.git#${WEBRTC_SHA}" -n -y
+opam_pin_add ocaml-webrtc "https://github.com/jeong-sik/ocaml-webrtc.git#${WEBRTC_SHA}" -n -y
 pinned_pkgs+=("ocaml-webrtc")
-opam pin add grpc-direct-core "https://github.com/jeong-sik/grpc-direct.git#${GRPC_DIRECT_SHA}" -n -y
+opam_pin_add grpc-direct-core "https://github.com/jeong-sik/grpc-direct.git#${GRPC_DIRECT_SHA}" -n -y
 pinned_pkgs+=("grpc-direct-core")
-opam pin add grpc-direct "https://github.com/jeong-sik/grpc-direct.git#${GRPC_DIRECT_SHA}" -n -y
+opam_pin_add grpc-direct "https://github.com/jeong-sik/grpc-direct.git#${GRPC_DIRECT_SHA}" -n -y
 pinned_pkgs+=("grpc-direct")
-opam pin add neo4j_packstream "https://github.com/jeong-sik/ocaml-neo4j-bolt.git#${NEO4J_BOLT_SHA}" -n -y
+opam_pin_add neo4j_packstream "https://github.com/jeong-sik/ocaml-neo4j-bolt.git#${NEO4J_BOLT_SHA}" -n -y
 pinned_pkgs+=("neo4j_packstream")
-opam pin add neo4j_bolt_common "https://github.com/jeong-sik/ocaml-neo4j-bolt.git#${NEO4J_BOLT_SHA}" -n -y
+opam_pin_add neo4j_bolt_common "https://github.com/jeong-sik/ocaml-neo4j-bolt.git#${NEO4J_BOLT_SHA}" -n -y
 pinned_pkgs+=("neo4j_bolt_common")
-opam pin add neo4j_bolt "https://github.com/jeong-sik/ocaml-neo4j-bolt.git#${NEO4J_BOLT_SHA}" -n -y
+opam_pin_add neo4j_bolt "https://github.com/jeong-sik/ocaml-neo4j-bolt.git#${NEO4J_BOLT_SHA}" -n -y
 pinned_pkgs+=("neo4j_bolt")
-opam pin add neo4j_bolt_eio "https://github.com/jeong-sik/ocaml-neo4j-bolt.git#${NEO4J_BOLT_SHA}" -n -y
+opam_pin_add neo4j_bolt_eio "https://github.com/jeong-sik/ocaml-neo4j-bolt.git#${NEO4J_BOLT_SHA}" -n -y
 pinned_pkgs+=("neo4j_bolt_eio")
 
 if $include_bisect; then
   # bisect_ppx opam constraints lag newer compilers; keep CI solvable under OCaml 5.4 by pinning.
-  opam pin add bisect_ppx git+https://github.com/patricoferris/bisect_ppx.git#5.2 -n -y
+  opam_pin_add bisect_ppx git+https://github.com/patricoferris/bisect_ppx.git#5.2 -n -y
   pinned_pkgs+=("bisect_ppx")
 fi
 

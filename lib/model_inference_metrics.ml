@@ -515,14 +515,15 @@ let most_common_stage_of_entries (entries : raw_entry list) : string option =
   match StringMap.bindings counts with
   | [] -> None
   | bindings ->
-      bindings
-      |> List.sort (fun (stage_a, count_a) (stage_b, count_b) ->
+      (match
+         List.sort (fun (stage_a, count_a) (stage_b, count_b) ->
            let by_count = compare count_b count_a in
            if by_count <> 0 then by_count
            else compare stage_a stage_b)
-      |> List.hd
-      |> fst
-      |> fun stage -> Some stage
+           bindings
+       with
+       | [] -> None
+       | (stage, _) :: _ -> Some stage)
 
 (* ── Aggregate by model ─────────────────────────────────── *)
 

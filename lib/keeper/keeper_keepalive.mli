@@ -72,7 +72,7 @@ val with_keeper_turn_slot_for_test :
   keeper_name:string ->
   channel:Keeper_world_observation.keeper_cycle_channel ->
   (semaphore_wait_ms:int -> 'a) ->
-  'a
+  ('a, [> `Semaphore_wait_timeout of float ]) result
 
 (** Keepalive loop meta selection. Disk wins when it changed; otherwise
     fall back to the latest registry snapshot instead of the original boot

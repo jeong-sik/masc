@@ -310,6 +310,7 @@ let test_bash_routes_through_docker () =
     Keeper_exec_shell.handle_keeper_bash ~turn_sandbox_runtime:None
       ~turn_sandbox_runtime_git:None ~config ~meta
       ~args:(`Assoc [ ("cmd", `String "echo hello"); ("cwd", `String playground) ])
+      ()
   in
   Alcotest.(check bool)
     "bash surfaces docker image config error (docker route fired)"
@@ -326,6 +327,7 @@ let test_bash_legacy_skips_docker () =
     Keeper_exec_shell.handle_keeper_bash ~turn_sandbox_runtime:None
       ~turn_sandbox_runtime_git:None ~config ~meta
       ~args:(`Assoc [ ("cmd", `String "echo hello"); ("cwd", `String outside_cwd) ])
+      ()
   in
   Alcotest.(check bool)
     "legacy keeper bash does not surface docker image error"
@@ -340,6 +342,7 @@ let test_bash_git_creds_routes_through_docker () =
     Keeper_exec_shell.handle_keeper_bash ~turn_sandbox_runtime:None
       ~turn_sandbox_runtime_git:None ~config ~meta
       ~args:(`Assoc [ ("cmd", `String "git status"); ("cwd", `String playground) ])
+      ()
   in
   Alcotest.(check bool)
     "bash git cmd surfaces docker image config error (git-creds route fired)"
@@ -376,6 +379,7 @@ let test_bash_fake_docker_executes () =
     Keeper_exec_shell.handle_keeper_bash ~turn_sandbox_runtime:None
       ~turn_sandbox_runtime_git:None ~config ~meta
       ~args:(`Assoc [ ("cmd", `String "echo hello"); ("cwd", `String playground) ])
+      ()
   in
   Alcotest.(check (option bool)) "bash via fake docker is ok" (Some true)
     (parse_bool_field raw "ok");

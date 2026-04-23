@@ -69,6 +69,7 @@ let preset_name_of_tool_preset = function
   | Minimal -> "minimal"
   | Social -> "social"
   | Messaging -> "messaging"
+  | Dispatch -> "dispatch"
   | Coding -> "coding"
   | Research -> "research"
   | Delivery -> "delivery"
@@ -197,6 +198,13 @@ let is_keeper_mcp_context_required name =
   List.mem name keeper_mcp_context_required_tools
   || Tool_dispatch.is_mcp_context_required name
 
+let keeper_supported_keeper_masc_tools =
+  [ "masc_keeper_list"
+  ; "masc_keeper_status"
+  ; "masc_keeper_msg"
+  ; "masc_keeper_msg_result"
+  ]
+
 let keeper_supported_masc_schemas (schemas : Types.tool_schema list) =
   let supported_in_keeper name =
     if Tool_dispatch.is_registered name then
@@ -207,10 +215,11 @@ let keeper_supported_masc_schemas (schemas : Types.tool_schema list) =
       match Tool_dispatch.lookup_tag name with
       | Some Tool_dispatch.Mod_inline
       | Some Tool_dispatch.Mod_compact
-      | Some Tool_dispatch.Mod_keeper
       | Some Tool_dispatch.Mod_operator
       | Some Tool_dispatch.Mod_control ->
           false
+      | Some Tool_dispatch.Mod_keeper ->
+          List.mem name keeper_supported_keeper_masc_tools
       | Some _ -> true
       | None -> false
   in

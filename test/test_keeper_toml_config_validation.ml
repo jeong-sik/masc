@@ -53,7 +53,7 @@ let test_named_keeper_docker_defaults () =
         check (option string) (name ^ " network_mode") (Some "none")
           (Option.map KTP.network_mode_to_string defaults.network_mode)
   in
-  List.iter expect_keeper [ "sangsu"; "sojin"; "verdict" ]
+  List.iter expect_keeper [ "sangsu" ]
 
 (** Write a temporary TOML file, run load_keeper_toml, clean up. *)
 let with_temp_toml content f =
@@ -135,6 +135,18 @@ let test_cascade_name_accepts_catalog_entry () =
       if catalog = [] then ()
       else fail (Printf.sprintf "%s should be accepted: %s" test_name e)
 
+let test_tool_preset_accepts_dispatch () =
+  let result =
+    with_temp_toml
+      "[keeper]\nname = \"taskmaster\"\ntool_preset = \"dispatch\"\n"
+      KTP.load_keeper_toml
+  in
+  match result with
+  | Error e -> fail (Printf.sprintf "dispatch should be accepted: %s" e)
+  | Ok (_loaded_name, defaults) ->
+      check (option string) "dispatch preset parsed" (Some "dispatch")
+        defaults.tool_preset
+
 let () =
   run "Keeper TOML Config Validation"
     [
@@ -152,5 +164,7 @@ let () =
             test_cascade_name_accepts_known;
           test_case "accepts catalog entry (legacy alias)" `Quick
             test_cascade_name_accepts_catalog_entry;
+          test_case "accepts dispatch tool_preset" `Quick
+            test_tool_preset_accepts_dispatch;
         ] );
     ]

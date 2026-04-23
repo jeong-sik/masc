@@ -930,7 +930,16 @@ interface KeeperConfigCoordination {
 export interface KeeperConfigTools {
   tool_access: unknown
   tool_policy_mode: 'preset' | 'custom' | string
-  tool_preset?: 'minimal' | 'messaging' | 'coding' | 'research' | 'full' | null
+  tool_preset?:
+    | 'minimal'
+    | 'social'
+    | 'messaging'
+    | 'dispatch'
+    | 'coding'
+    | 'research'
+    | 'delivery'
+    | 'full'
+    | null
   tool_also_allow: string[]
   tool_custom_allowlist: string[]
   resolved_allowlist: string[]

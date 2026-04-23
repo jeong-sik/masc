@@ -86,6 +86,11 @@ let combinatorial_risk_escalation ~trifecta_active ~tool_name ~base_risk ~input 
 let risk_overrides : (string * risk_level) list =
   [
     ("masc_a2a_query_skill", Low); (* "skill" contains "kill" substring *)
+    ("masc_goal_upsert", High);
+    ("masc_goal_review", High);
+    ("masc_goal_transition", High);
+    ("masc_goal_verify", High);
+    ("masc_keeper_msg", Low);
     ("masc_claim_next", Medium); ("masc_claim_task", Medium);
   ]
 

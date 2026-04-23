@@ -164,8 +164,9 @@ let parse_tool_access_input (args : Yojson.Safe.t) :
               | None ->
                   Error
                     (Printf.sprintf
-                       "invalid tool_preset '%s' (allowed: minimal, social, messaging, coding, research, delivery, full)"
-                       raw))
+                       "invalid tool_preset '%s' (allowed: %s)"
+                       raw
+                       (String.concat ", " valid_tool_preset_strings)))
           | Some `Null -> Error "tool_preset must not be null"
           | Some _ -> Error "tool_preset must be a string"
         in

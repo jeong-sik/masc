@@ -41,6 +41,7 @@ type tool_preset =
   | Minimal
   | Social
   | Messaging
+  | Dispatch
   | Coding
   | Research
   | Delivery

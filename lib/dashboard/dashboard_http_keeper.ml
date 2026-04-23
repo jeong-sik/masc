@@ -1241,6 +1241,13 @@ let keeper_config_json (config : Coord.config) (name : string)
           ("active_model", `String active_model);
           ("active_model_label", Json_util.string_opt_to_json active_model_label);
           ("last_model_used_label", Json_util.string_opt_to_json last_model_used_label);
+          ( "per_provider_timeout_sec",
+            Json_util.float_opt_to_json m.per_provider_timeout_s );
+          ( "per_provider_timeout_mode",
+            `String
+              (match m.per_provider_timeout_s with
+               | Some _ -> "override"
+               | None -> "turn_budget_heuristic") );
           ("verify", `Bool false);
         ]
       in

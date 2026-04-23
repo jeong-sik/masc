@@ -633,16 +633,14 @@ export async function postRaw(
 
 // --- Operator ---
 
+const OPERATOR_ACTION_TIMEOUT_MS: Record<string, number> = {
+  keeper_message: KEEPER_MESSAGE_TIMEOUT_MS,
+  keeper_recover: KEEPER_MESSAGE_TIMEOUT_MS,
+  social_sweep: SOCIAL_SWEEP_TIMEOUT_MS,
+}
+
 function operatorActionTimeoutMs(body: OperatorActionRequest): number {
-  switch (body.action_type) {
-    case 'keeper_message':
-    case 'keeper_recover':
-      return KEEPER_MESSAGE_TIMEOUT_MS
-    case 'social_sweep':
-      return SOCIAL_SWEEP_TIMEOUT_MS
-    default:
-      return DEFAULT_POST_TIMEOUT_MS
-  }
+  return OPERATOR_ACTION_TIMEOUT_MS[body.action_type] ?? DEFAULT_POST_TIMEOUT_MS
 }
 
 export async function runOperatorAction(body: OperatorActionRequest): Promise<OperatorActionResult> {

@@ -525,6 +525,8 @@ describe('fetchKeeperConfig', () => {
       execution: {
         models: 'llama:test-balanced',
         active_model: 'llama:test-balanced',
+        per_provider_timeout_sec: 12.5,
+        per_provider_timeout_mode: 'override',
         verify: 'true',
         selected_cascade_name: 'keeper_unified',
         selected_cascade_canonical: 'keeper_unified',
@@ -657,6 +659,8 @@ describe('fetchKeeperConfig', () => {
     expect(result.execution.verify).toBe(true)
     expect(result.execution.selected_cascade_name).toBe('keeper_unified')
     expect(result.execution.selected_cascade_canonical).toBe('keeper_unified')
+    expect(result.execution.per_provider_timeout_sec).toBe(12.5)
+    expect(result.execution.per_provider_timeout_mode).toBe('override')
     expect(result.hooks?.destructive_check_tools).toEqual(['dynamic_boundary (Tool_dispatch.is_destructive)'])
     expect(result.hooks?.slots.pre_tool_use?.gates).toEqual(['keeper_deny_list'])
     expect(result.tools.tool_also_allow).toEqual(['keeper_board_post'])

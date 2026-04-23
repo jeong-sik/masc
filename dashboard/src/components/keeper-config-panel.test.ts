@@ -67,6 +67,8 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
     execution: {
       models: ['llama:test-balanced'],
       active_model: 'llama:test-balanced',
+      per_provider_timeout_sec: null,
+      per_provider_timeout_mode: 'turn_budget_heuristic',
       verify: true,
       selected_cascade_name: 'keeper_unified',
       selected_cascade_canonical: 'keeper_unified',
@@ -480,6 +482,8 @@ describe('KeeperConfigPanel', () => {
         execution: {
           models: ['llama:test-balanced'],
           active_model: 'llama:test-balanced',
+          per_provider_timeout_sec: null,
+          per_provider_timeout_mode: 'turn_budget_heuristic',
           verify: true,
           selected_cascade_name: 'resilient_breaker',
           selected_cascade_canonical: 'resilient_breaker',

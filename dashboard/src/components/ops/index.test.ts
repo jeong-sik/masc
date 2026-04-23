@@ -138,6 +138,56 @@ describe('Ops surface', () => {
     expect(items[2]?.textContent).toContain('키퍼 메시지는 잠시 보류')
   }, 120000)
 
+  it('renders keeper utility actions from the server catalog', async () => {
+    const {
+      Ops,
+      route,
+      operatorActionLog,
+      operatorDigestError,
+      operatorError,
+      operatorRoomDigest,
+      operatorSnapshot,
+      hydratedWorkflowId,
+    } = await loadOps()
+
+    route.value = { tab: 'command', params: { section: 'operations' }, postId: null } as RouteState
+    hydratedWorkflowId.value = null
+    operatorError.value = null
+    operatorDigestError.value = null
+    operatorSnapshot.value = {
+      root: { paused: false, namespace: 'default' },
+      sessions: [],
+      keepers: [{ name: 'qa-king', status: 'online' }],
+      recent_messages: [],
+      pending_confirms: [],
+      available_actions: [
+        { action_type: 'keeper_probe', target_type: 'keeper', description: 'probe from server' },
+        { action_type: 'keeper_github_identity_status', target_type: 'keeper' },
+        { action_type: 'keeper_unknown_maintenance', target_type: 'keeper' },
+        { action_type: 'broadcast', target_type: 'root' },
+      ],
+    } as unknown as OperatorSnapshot
+    operatorRoomDigest.value = {
+      target_type: 'namespace',
+      attention_items: [],
+      recommended_actions: [],
+      recent_reviews: [],
+    } as unknown as OperatorDigest
+    operatorActionLog.value = []
+
+    render(html`<${Ops} />`, container)
+    await flushUi()
+
+    const panel = container.querySelector('[data-testid="keeper-utilities-panel"]')
+    expect(panel).toBeTruthy()
+    expect(panel?.textContent).toContain('키퍼 유틸리티')
+    expect(panel?.textContent).toContain('probe from server')
+    expect(panel?.textContent).toContain('GitHub 인증 상태')
+    expect(panel?.textContent).toContain('keeper_unknown_maintenance')
+    expect(panel?.textContent).toContain('UI adapter pending')
+    expect(panel?.textContent).not.toContain('전체 공지')
+  }, 60000)
+
   it('renders the same single surface when active review items are present (no 3-column unhealthy branch)', async () => {
     const {
       Ops,

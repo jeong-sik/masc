@@ -1160,6 +1160,12 @@ proactive_enabled = true
         expected_default_models
         (json |> member "execution" |> member "models" |> to_list
        |> List.map to_string);
+      Alcotest.(check bool) "per-provider timeout is null by default" true
+        (json |> member "execution" |> member "per_provider_timeout_sec" = `Null);
+      Alcotest.(check string) "per-provider timeout mode uses heuristic"
+        "turn_budget_heuristic"
+        (json |> member "execution" |> member "per_provider_timeout_mode"
+       |> to_string);
       Alcotest.(check string) "cascade catalog source kind" "json"
         (json |> member "sources" |> member "cascade_catalog_source_kind"
        |> to_string);

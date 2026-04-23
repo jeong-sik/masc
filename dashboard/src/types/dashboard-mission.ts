@@ -527,19 +527,9 @@ export interface OperatorSnapshot {
   available_actions: OperatorActionDescriptor[]
 }
 
-type OperatorActionType =
-  | 'broadcast'
-  | 'namespace_pause'
-  | 'namespace_resume'
-  | 'room_pause'
-  | 'room_resume'
-  | 'social_sweep'
-  | 'task_inject'
-  | 'keeper_message'
-  | 'keeper_probe'
-  | 'keeper_recover'
+type OperatorActionType = string
 
-type OperatorTargetType = 'root' | 'namespace' | 'room' | 'keeper'
+type OperatorTargetType = string
 
 export interface OperatorActionRequest {
   actor: string

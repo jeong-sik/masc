@@ -261,6 +261,21 @@ function ConfigRow({ label, value }: { label: string; value: string }) {
   `
 }
 
+function formatSeconds(value: number): string {
+  if (!Number.isFinite(value)) return '--'
+  return value >= 60 ? `${(value / 60).toFixed(1)}m` : `${value.toFixed(value % 1 === 0 ? 0 : 1)}s`
+}
+
+function perProviderTimeoutLabel(execution: KeeperConfig['execution']): string {
+  if (
+    execution.per_provider_timeout_mode === 'override'
+    && typeof execution.per_provider_timeout_sec === 'number'
+  ) {
+    return formatSeconds(execution.per_provider_timeout_sec)
+  }
+  return 'turn budget heuristic'
+}
+
 function SectionHeader({ title }: { title: string }) {
   return html`
     <div class="text-2xs font-bold uppercase tracking-widest text-accent mt-6 mb-3 pb-1.5 border-b border-accent/20 flex items-center gap-2">
@@ -787,6 +802,10 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
 
       <${SectionHeader} title="실행" />
       <${ConfigRow} label="활성 모델" value=${c.execution.active_model || '--'} />
+      <${ConfigRow} label="provider timeout" value=${perProviderTimeoutLabel(c.execution)} />
+      <div class="mb-1.5 rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-2xs leading-relaxed text-[var(--text-muted)]">
+        cascade fallback 중 마지막 provider를 제외한 provider들에만 적용됩니다.
+      </div>
       <div class="flex items-center justify-between py-2 px-3 rounded bg-[var(--white-3)]">
         <span class="text-xs text-[var(--text-muted)]">검증</span>
         <${BoolBadge} value=${c.execution.verify} />

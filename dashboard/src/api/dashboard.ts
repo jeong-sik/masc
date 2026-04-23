@@ -1577,6 +1577,7 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
   const sources = isRecord(data.sources) ? data.sources : {}
   const metrics = isRecord(data.metrics) ? data.metrics : {}
   const sandboxEnvironment = normalizeKeeperSandboxEnvironment(data.sandbox_environment)
+  const perProviderTimeoutSec = asLooseNullableNumber(execution.per_provider_timeout_sec)
 
   return {
     name: asNullableString(data.name) ?? requestedName,
@@ -1610,6 +1611,12 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       active_model: asNullableString(execution.active_model) ?? '',
       active_model_label: asNullableString(execution.active_model_label),
       last_model_used_label: asNullableString(execution.last_model_used_label),
+      per_provider_timeout_sec: perProviderTimeoutSec,
+      per_provider_timeout_mode:
+        asNullableString(execution.per_provider_timeout_mode)
+        ?? (perProviderTimeoutSec != null
+            ? 'override'
+            : 'turn_budget_heuristic'),
       verify: asLooseBoolean(execution.verify),
       selected_cascade_name: asNullableString(execution.selected_cascade_name) ?? '',
       selected_cascade_canonical:

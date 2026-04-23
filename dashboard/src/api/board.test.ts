@@ -394,12 +394,18 @@ describe('normalizeGovernanceJudgeSummary', () => {
     const result = normalizeGovernanceJudgeSummary({
       judge_online: true,
       refreshing: false,
+      status: 'stale_visible',
+      degraded_reason: 'timeout',
+      cached_judgments_visible: true,
       model_used: 'gpt-4',
       keeper_name: 'janitor',
       last_error: null,
     })
     expect(result!.judge_online).toBe(true)
     expect(result!.refreshing).toBe(false)
+    expect(result!.status).toBe('stale_visible')
+    expect(result!.degraded_reason).toBe('timeout')
+    expect(result!.cached_judgments_visible).toBe(true)
     expect(result!.model_used).toBe('gpt-4')
     expect(result!.keeper_name).toBe('janitor')
     expect(result!.last_error).toBeNull()

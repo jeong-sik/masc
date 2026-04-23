@@ -100,6 +100,7 @@ type agent_meta = {
 
 (** Agent info *)
 type agent = {
+  id: Agent_id.t option; [@default None]  (* permanent UUID *)
   name: string;                           (* unique nickname: claude-swift-fox *)
   agent_type: string; [@default "unknown"] (* original type: claude, gemini, codex *)
   status: agent_status;

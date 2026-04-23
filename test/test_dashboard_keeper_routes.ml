@@ -554,6 +554,7 @@ let seed_agent_file ?(agent_type = "worker") ?(capabilities = []) config agent_n
   let timestamp = Types.now_iso () in
   let agent : Types.agent =
     {
+      id = None;
       name = agent_name;
       agent_type;
       status = Types.Active;

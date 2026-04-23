@@ -1,3 +1,5 @@
+open Ids
+
 (** Rate limit config *)
 type rate_limit_config = {
   per_minute: int;
@@ -231,6 +233,8 @@ let agent_role_of_yojson = function
 
 (** Agent credential - stored in .masc/auth/ *)
 type agent_credential = {
+  id: Credential_id.t option; [@default None]
+  agent_id: Agent_id.t option; [@default None]
   agent_name: string;
   token: string;        (* SHA256 hash of secret *)
   role: agent_role;
@@ -245,6 +249,14 @@ let agent_credential_to_yojson c =
     ("admin", `Bool (c.role = Admin));
     ("created_at", `String c.created_at);
   ] in
+  let base = match c.id with
+    | Some id -> ("id", `String (Credential_id.to_string id)) :: base
+    | None -> base
+  in
+  let base = match c.agent_id with
+    | Some aid -> ("agent_id", `String (Agent_id.to_string aid)) :: base
+    | None -> base
+  in
   match c.expires_at with
   | Some exp -> `Assoc (base @ [("expires_at", `String exp)])
   | None -> `Assoc base
@@ -252,6 +264,8 @@ let agent_credential_to_yojson c =
 let agent_credential_of_yojson json =
   let open Yojson.Safe.Util in
   try
+    let id = json |> member "id" |> to_string_option |> Option.map Credential_id.of_string in
+    let agent_id = json |> member "agent_id" |> to_string_option |> Option.map Agent_id.of_string in
     let agent_name = json |> member "agent_name" |> to_string in
     let token = json |> member "token" |> to_string in
     let created_at = json |> member "created_at" |> to_string in
@@ -262,7 +276,7 @@ let agent_credential_of_yojson json =
       | Some false -> Worker
       | None -> Worker
     in
-    Ok { agent_name; token; role; created_at; expires_at }
+    Ok { id; agent_id; agent_name; token; role; created_at; expires_at }
   with e -> Error (Printexc.to_string e)
 
 (** Auth config - room-level settings *)

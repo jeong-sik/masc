@@ -273,25 +273,32 @@ let test_delete_credential () =
   cleanup_test_room dir;
   check int "0 credentials after delete" 0 (List.length creds)
 
-let test_load_credential_nickname_fallback () =
-  (* Exact-name misses fall through to the agent-type prefix so a single
-     credential (e.g. "adversary.json") covers dynamically generated
-     nicknames ("adversary-fair-tapir"). *)
+let test_load_credential_redirect_stub () =
+  (* UUID-backed credentials write a redirect stub so legacy exact-name
+     lookups continue to work after Phase-3 migration. *)
   let dir = setup_test_room () in
-  let _ = Auth.create_token dir ~agent_name:"adversary" ~role:Types.Worker in
-  let hit = Auth.load_credential dir "adversary-fair-tapir" in
-  let miss_non_nickname = Auth.load_credential dir "unknown_plain" in
-  let miss_different_family = Auth.load_credential dir "stranger-fair-tapir" in
+  let id = Types.Credential_id.generate () in
+  let cred : Types.agent_credential =
+    {
+      id = Some id;
+      agent_id = None;
+      agent_name = "adversary";
+      token = "hashed-token";
+      role = Types.Worker;
+      created_at = "2026-01-01T00:00:00Z";
+      expires_at = None;
+    }
+  in
+  Auth.save_credential dir cred;
+  let stub_hit = Auth.load_credential dir "adversary" in
+  let uuid_hit = Auth.load_credential dir (Types.Credential_id.to_string id) in
   cleanup_test_room dir;
-  (match hit with
-   | Some cred when cred.agent_name = "adversary" -> ()
-   | _ -> fail "nickname 'adversary-fair-tapir' should resolve via prefix");
-  (match miss_non_nickname with
-   | None -> ()
-   | Some _ -> fail "plain unknown names must not fall through");
-  (match miss_different_family with
-   | None -> ()
-   | Some _ -> fail "unrelated agent_type must not reuse another keeper's cred")
+  (match stub_hit with
+   | Some loaded when loaded.agent_name = "adversary" -> ()
+   | _ -> fail "redirect stub should resolve to UUID-backed credential");
+  (match uuid_hit with
+   | Some loaded when loaded.agent_name = "adversary" -> ()
+   | _ -> fail "direct UUID lookup should resolve")
 
 let test_load_credential_exact_wins_over_fallback () =
   (* If both the nickname file and the prefix file exist, the exact
@@ -324,38 +331,24 @@ let test_extract_agent_type_prefix_keeper_aliases () =
   check (option string) "two segment keeper fallback unchanged" (Some "keeper")
     (Auth.extract_agent_type_prefix "keeper-sangsu")
 
-let test_verify_token_keeper_alias_fallback () =
+let test_verify_token_keeper_exact_match () =
+  (* UUID-based storage removes nickname-prefix collapse.  Keeper
+     credentials must be looked up by their exact agent_name. *)
   let dir = setup_test_room () in
   let result =
-    match Auth.create_token dir ~agent_name:"sangsu" ~role:Types.Admin with
+    match Auth.ensure_keeper_credential dir ~agent_name:"keeper-sangsu-agent" with
     | Ok (raw_token, _) ->
         Auth.verify_token dir ~agent_name:"keeper-sangsu-agent" ~token:raw_token
     | Error e -> Error e
   in
   cleanup_test_room dir;
   match result with
-  | Ok cred -> check string "fallback credential owner" "sangsu" cred.agent_name
+  | Ok cred ->
+      check string "keeper credential exact match" "keeper-sangsu-agent" cred.agent_name
   | Error e ->
       fail
         (Printf.sprintf
-           "keeper alias should verify via fallback credential: %s"
-           (Types.masc_error_to_string e))
-
-let test_verify_token_hyphenated_generated_nickname_fallback () =
-  let dir = setup_test_room () in
-  let result =
-    match Auth.create_token dir ~agent_name:"qa-king" ~role:Types.Admin with
-    | Ok (raw_token, _) ->
-        Auth.verify_token dir ~agent_name:"qa-king-warm-heron" ~token:raw_token
-    | Error e -> Error e
-  in
-  cleanup_test_room dir;
-  match result with
-  | Ok cred -> check string "fallback credential owner" "qa-king" cred.agent_name
-  | Error e ->
-      fail
-        (Printf.sprintf
-           "hyphenated generated alias should verify via fallback credential: %s"
+           "keeper credential should verify with exact agent_name: %s"
            (Types.masc_error_to_string e))
 
 let test_load_credential_missing_keeper_alias_stays_quiet () =
@@ -429,14 +422,15 @@ let test_ensure_keeper_credential_uses_shared_internal_token () =
       in
       match ensure_result with
       | Ok (raw_token, cred) ->
-          check string "normalized keeper name" "masc-improver" cred.agent_name;
+          check string "keeper credential exact name" "keeper-masc-improver-agent" cred.agent_name;
+          check bool "keeper credential has uuid id" true (Option.is_some cred.id);
           check bool "keeper credential is worker" true (cred.role = Types.Worker);
           check bool "shared internal token verifies" true
             (Auth.verify_internal_keeper_token dir ~token:raw_token);
           check bool "internal keeper token hash persisted" true
             (Sys.file_exists (Auth.internal_keeper_token_hash_file dir));
-          check bool "no per-keeper external credential persisted" true
-            (Option.is_none (Auth.load_credential dir "keeper-masc-improver-agent"));
+          check bool "keeper credential persisted by exact name" true
+            (Option.is_some (Auth.load_credential dir "keeper-masc-improver-agent"));
           check bool "no normalized keeper credential persisted" true
             (Option.is_none (Auth.load_credential dir "masc-improver"))
       | Error e ->
@@ -455,7 +449,7 @@ let test_ensure_keeper_credential_reuses_persisted_raw_token_when_env_mismatched
           Auth.ensure_keeper_credential dir ~agent_name:"keeper-masc-improver-agent")
       in
       let raw_token_path =
-        Filename.concat (Auth.auth_dir dir) "masc-improver.token"
+        Filename.concat (Auth.auth_dir dir) "keeper-masc-improver-agent.token"
       in
       let shared_raw_token = "shared-codex-token" in
       let _ =
@@ -472,9 +466,9 @@ let test_ensure_keeper_credential_reuses_persisted_raw_token_when_env_mismatched
             (Sys.file_exists raw_token_path);
           check int "persisted raw token file mode 0600" 0o600
             (permission_bits raw_token_path);
-          check string "first credential uses keeper middle name" "masc-improver"
+          check string "first credential uses exact keeper name" "keeper-masc-improver-agent"
             first_cred.agent_name;
-          check string "reused credential keeps keeper middle name" "masc-improver"
+          check string "reused credential keeps exact keeper name" "keeper-masc-improver-agent"
             reused_cred.agent_name;
           check string "persisted keeper raw token reused" first_raw_token
             reused_raw_token
@@ -672,16 +666,14 @@ let () =
       test_case "resolve agent from token" `Quick test_resolve_agent_from_token;
       test_case "list credentials" `Quick test_list_credentials;
       test_case "delete credential" `Quick test_delete_credential;
-      test_case "load_credential nickname prefix fallback" `Quick
-        test_load_credential_nickname_fallback;
+      test_case "load_credential redirect stub resolves" `Quick
+        test_load_credential_redirect_stub;
       test_case "load_credential exact match wins over fallback" `Quick
         test_load_credential_exact_wins_over_fallback;
       test_case "extract_agent_type_prefix keeper aliases" `Quick
         test_extract_agent_type_prefix_keeper_aliases;
-      test_case "verify_token keeper alias fallback" `Quick
-        test_verify_token_keeper_alias_fallback;
-      test_case "verify_token hyphenated generated nickname fallback" `Quick
-        test_verify_token_hyphenated_generated_nickname_fallback;
+      test_case "verify_token keeper exact match" `Quick
+        test_verify_token_keeper_exact_match;
       test_case "load_credential missing keeper alias stays quiet" `Quick
         test_load_credential_missing_keeper_alias_stays_quiet;
       test_case "verify_token dashboard legacy alias fallback" `Quick

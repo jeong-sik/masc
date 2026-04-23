@@ -328,6 +328,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       in
       let ctx0 = Keeper_exec_context.create ~system_prompt ~max_tokens:primary_max_context in
       let meta = {
+        id = None;
         name = p.name;
         agent_name = keeper_agent_name p.name;
         goal;

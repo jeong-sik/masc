@@ -15,14 +15,14 @@ let update_priority config ~task_id ~priority =
     try
       let backlog = read_backlog config in
 
-      let task_opt = List.find_opt (fun t -> t.id = task_id) backlog.tasks in
+      let task_opt = List.find_opt (fun (t : task) -> t.id = task_id) backlog.tasks in
 
       match task_opt with
       | None ->
           Printf.sprintf "❌ Task %s not found" task_id
       | Some task ->
           let old_priority = task.priority in
-          let new_tasks = List.map (fun t ->
+          let new_tasks = List.map (fun (t : task) ->
             if t.id = task_id then { t with priority }
             else t
           ) backlog.tasks in

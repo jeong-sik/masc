@@ -208,7 +208,8 @@ type agent_runtime_state =
 
 type keeper_meta =
   { (* -- Identity & profile -- *)
-    name : string
+    id : Ids.Keeper_id.t option [@default None]
+  ; name : string
   ; agent_name : string
   ; goal : string
   ; short_goal : string
@@ -1408,7 +1409,8 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
          then Error "invalid keeper meta (bad trace_id)"
          else
            Ok
-             { name = identity.pk_name
+             { id = None
+             ; name = identity.pk_name
              ; agent_name =
                  (if identity.pk_agent_name = ""
                   then keeper_agent_name identity.pk_name

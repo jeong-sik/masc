@@ -151,6 +151,7 @@ type agent_runtime_state = {
 (** {1 Keeper meta} *)
 
 type keeper_meta = {
+  id: Ids.Keeper_id.t option;
   name: string;
   agent_name: string;
   goal: string;

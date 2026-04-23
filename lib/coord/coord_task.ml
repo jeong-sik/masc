@@ -370,7 +370,7 @@ let find_duplicate_task (backlog : backlog) ~(title : string) ~(goal_id : string
          && Option.equal String.equal t.goal_id goal_id
          && not (Types.task_status_is_terminal t.task_status))
       backlog.tasks
-    |> Option.map (fun t -> t.id)
+    |> Option.map (fun (t : task) -> t.id)
 ;;
 
 (** Add task — file-locked to prevent task ID collision under concurrency.
@@ -583,7 +583,7 @@ let claim_task config ~agent_name ~task_id =
            let blocked_reason = ref None in
            let new_tasks =
              List.map
-               (fun task ->
+               (fun (task : task) ->
                   if task.id = task_id
                   then (
                     found := true;
@@ -694,7 +694,7 @@ let claim_task_r config ~agent_name ~task_id ()
     | Ok backlog ->
       (try
          (* Check role constraint before attempting claim *)
-         let target_task = List.find_opt (fun t -> t.id = task_id) backlog.tasks in
+         let target_task = List.find_opt (fun (t : task) -> t.id = task_id) backlog.tasks in
          let* task =
            match target_task with
            | None -> Error (Types.TaskNotFound task_id)
@@ -715,7 +715,7 @@ let claim_task_r config ~agent_name ~task_id ()
          Uses polymorphic variants for inline state tracking. *)
          let claim_state, new_tasks =
            List.fold_left
-             (fun (state, acc) t ->
+             (fun (state, acc) (t : task) ->
                 if t.id = task_id
                 then (
                   match t.task_status with
@@ -904,7 +904,7 @@ let transition_task_r
                     backlog.version))
           | _ -> Ok ()
         in
-        let task_opt = List.find_opt (fun t -> t.id = task_id) backlog.tasks in
+        let task_opt = List.find_opt (fun (t : task) -> t.id = task_id) backlog.tasks in
         let* task =
           match task_opt with
           | None -> Error (Types.TaskNotFound task_id)
@@ -1049,7 +1049,7 @@ let transition_task_r
         else (
           let new_tasks =
             List.map
-              (fun t ->
+              (fun (t : task) ->
                  if t.id = task_id
                  then (
                    let cycle_count, do_not_reclaim_reason =
@@ -1320,7 +1320,7 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result
         match read_backlog_r config with
         | Error msg -> Error (Types.IoError msg)
         | Ok backlog ->
-          let task_opt = List.find_opt (fun t -> t.id = task_id) backlog.tasks in
+          let task_opt = List.find_opt (fun (t : task) -> t.id = task_id) backlog.tasks in
           (match task_opt with
            | None -> Error (Types.TaskNotFound task_id)
            | Some task ->
@@ -1344,7 +1344,7 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result
              else (
                let new_tasks =
                  List.map
-                   (fun t ->
+                   (fun (t : task) ->
                       if t.id = task_id
                       then (
                         let new_cycle = t.cycle_count + 1 in
@@ -1496,7 +1496,7 @@ let link_task_execution_artifacts_r
         match read_backlog_r config with
         | Error msg -> Error (Types.IoError msg)
         | Ok backlog ->
-          (match List.find_opt (fun task -> task.id = task_id) backlog.tasks with
+          (match List.find_opt (fun (task : task) -> task.id = task_id) backlog.tasks with
            | None -> Error (Types.TaskNotFound task_id)
            | Some task ->
              let existing_contract =
@@ -1518,7 +1518,7 @@ let link_task_execution_artifacts_r
              in
              let new_tasks =
                List.map
-                 (fun candidate ->
+                 (fun (candidate : task) ->
                     if candidate.id = task_id
                     then { candidate with contract = Some updated_contract }
                     else candidate)

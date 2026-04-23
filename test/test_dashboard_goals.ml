@@ -98,6 +98,19 @@ let append_keeper_receipt (config : Coord.config) (meta : Keeper_types.keeper_me
   in
   Keeper_execution_receipt.append config receipt
 
+let append_keeper_decision_with_null_telemetry
+    (config : Coord.config) (meta : Keeper_types.keeper_meta) =
+  Fs_compat.append_jsonl
+    (Keeper_types.keeper_decision_log_path config meta.name)
+    (`Assoc
+      [
+        ("turn_id", `Int 9);
+        ("turn_verdict", `String "run");
+        ("turn_reasons", `List [ `String "test_fixture" ]);
+        ("wall_clock", `Float (Unix.gettimeofday ()));
+        ("telemetry", `Null);
+      ])
+
 let test_blocked_phase_projects_blocked_health () =
   with_room @@ fun config ->
   let _goal, _kind =
@@ -170,6 +183,38 @@ let test_goal_detail_surfaces_keeper_runtime_trust_and_blockers () =
         "execution_receipt"
         (linked_keeper |> member "latest_causal_event" |> member "kind" |> to_string)
 
+let test_goal_tree_tolerates_null_decision_telemetry () =
+  with_room @@ fun config ->
+  let goal, _kind =
+    match Goal_store.upsert_goal config ~title:"Show resilient goal tree" () with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  let meta = make_keeper_meta ~name:"null-telemetry-keeper" ~goal_id:goal.id in
+  (match Keeper_types.write_meta ~force:true config meta with
+   | Ok () -> ()
+   | Error err -> fail ("write_meta failed: " ^ err));
+  append_keeper_decision_with_null_telemetry config meta;
+  let tree_json = Dashboard_goals.dashboard_goals_tree_json ~config in
+  let node =
+    match tree_json |> member "tree" |> to_list with
+    | node :: _ -> node
+    | [] -> fail "expected one goal in tree"
+  in
+  check string "linked keeper still surfaced" meta.name
+    (node |> member "latest_keeper_ref" |> to_string);
+  match Dashboard_goals.goal_detail_json ~config ~goal_id:goal.id with
+  | Error msg -> fail msg
+  | Ok json ->
+      let linked_keeper =
+        match json |> member "linked_keepers" |> to_list with
+        | keeper :: _ -> keeper
+        | [] -> fail "expected linked keeper detail"
+      in
+      check (option string) "null telemetry selected_model stays absent" None
+        (linked_keeper |> member "runtime_trust" |> member "selected_model"
+        |> to_string_option)
+
 let test_goal_detail_does_not_promote_synthetic_blocker_over_receipt () =
   with_room @@ fun config ->
   let goal, _kind =
@@ -228,6 +273,8 @@ let () =
           test_case "goal detail surfaces keeper runtime trust and blockers"
             `Quick
             test_goal_detail_surfaces_keeper_runtime_trust_and_blockers;
+          test_case "goal tree tolerates null decision telemetry" `Quick
+            test_goal_tree_tolerates_null_decision_telemetry;
           test_case
             "goal detail keeps synthetic runtime blocker out of latest causal"
             `Quick

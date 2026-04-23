@@ -141,7 +141,7 @@ let coverage_reason_of_result
     in
     match result.usage_reported, telemetry_reported with
     | false, false ->
-        if String.equal result.tool_surface.turn_lane "text_only"
+        if String.equal result.tool_surface.tool_requirement "none"
            && structurally_unmetered_provider provider
         then Some "text_only_unmetered"
         else Some "missing_usage_and_inference"
@@ -309,6 +309,9 @@ let append_decision_record
     ~(latency_ms : int)
     ?(semaphore_wait_ms : int = 0)
     ~(outcome : string)
+    ?(degraded_retry_applied = false)
+    ?degraded_retry_cascade
+    ?fallback_reason
     ?turn_mode
     ?social_state
     ?deliberation_execution
@@ -435,6 +438,10 @@ let append_decision_record
         ("approval_mode", Json_util.string_opt_to_json approval_mode);
         ("channel", `String (decision_channel_of_observation observation));
         ("outcome", `String outcome);
+        ("degraded_retry_applied", `Bool degraded_retry_applied);
+        ( "degraded_retry_cascade",
+          Json_util.string_opt_to_json degraded_retry_cascade );
+        ("fallback_reason", Json_util.string_opt_to_json fallback_reason);
         ("turn_mode", Json_util.string_opt_to_json turn_mode_label);
         ("latency_ms", `Int latency_ms);
         ("semaphore_wait_ms", `Int semaphore_wait_ms);
@@ -538,6 +545,8 @@ let append_decision_record
               let tool_surface_fields =
                 [
                   ("turn_lane", `String r.tool_surface.turn_lane);
+                  ("tool_surface_class", `String r.tool_surface.tool_surface_class);
+                  ("tool_requirement", `String r.tool_surface.tool_requirement);
                   ("visible_tool_count", `Int r.tool_surface.visible_tool_count);
                   ("tool_gate_enabled", `Bool r.tool_surface.tool_gate_enabled);
                   ( "tool_surface_fallback_used",

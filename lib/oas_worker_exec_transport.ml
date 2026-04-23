@@ -355,6 +355,7 @@ let kimi_cli_extra_env (provider_cfg : Llm_provider.Provider_config.t) =
 
 let resolve_tool_lane_for_oas_tools
     ?agent_name
+    ?(tool_requirement = `Required)
     ~(provider_cfg : Llm_provider.Provider_config.t)
     ~(tools : Oas.Tool.t list)
     ()
@@ -382,6 +383,8 @@ let resolve_tool_lane_for_oas_tools
       Ok (tools, None)
   | _ when provider_supports_inline_tools provider_cfg ->
       Ok (tools, None)
+  | _ when tool_requirement = `Optional ->
+      Ok ([], None)
   | _ ->
       let detail =
         let runtime_mcp_requires_http_headers =

@@ -48,6 +48,8 @@ type ctx_composition_metrics =
 
 type tool_surface_metrics =
   { turn_lane : string
+  ; tool_surface_class : string
+  ; tool_requirement : string
   ; visible_tool_count : int
   ; tool_gate_enabled : bool
   ; tool_surface_fallback_used : bool
@@ -86,6 +88,9 @@ type run_result =
   ; inference_telemetry : Oas.Types.inference_telemetry option
   ; tool_surface : tool_surface_metrics
   }
+
+val should_require_tools_for_initial_turn :
+  max_turns:int -> turn_affordances:string list -> bool
 
 (** Canonical model label for MASC status/metrics surfaces.
     Prefers the final cascade attempt label when available, then the
@@ -184,6 +189,9 @@ val run_turn :
   -> ?trajectory_acc:Trajectory.accumulator
   -> ?tool_overlay:Oas.Tool_op.t ref
   -> ?priority:Llm_provider.Request_priority.t
+  -> ?degraded_retry_applied:bool
+  -> ?degraded_retry_cascade:string
+  -> ?fallback_reason:string
   -> ?is_retry:bool
   -> ?shared_context:Oas.Context.t
   -> ?event_bus:Oas.Event_bus.t

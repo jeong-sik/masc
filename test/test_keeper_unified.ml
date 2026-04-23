@@ -1326,6 +1326,8 @@ let sample_ctx_composition ?(system_prompt = "You are a keeper.")
 let sample_tool_surface_metrics () : Masc_mcp.Keeper_agent_run.tool_surface_metrics =
   {
     turn_lane = "tool_optional";
+    tool_surface_class = "mixed";
+    tool_requirement = "optional";
     visible_tool_count = 0;
     tool_gate_enabled = false;
     tool_surface_fallback_used = false;
@@ -2123,6 +2125,9 @@ let test_append_decision_record_persists_tool_calls () =
             ~observation:base_observation
             ~latency_ms:42
             ~outcome:"success"
+            ~degraded_retry_applied:true
+            ~degraded_retry_cascade:KC.local_recovery_cascade_name
+            ~fallback_reason:"turn_timeout"
             ~turn_mode:UM.Tool_use
             ~result:(Some result)
             ());
@@ -2156,6 +2161,15 @@ let test_append_decision_record_persists_tool_calls () =
         Yojson.Safe.Util.(json |> member "tools_used" |> to_list |> List.map to_string);
       check (option string) "turn mode persisted" (Some "tool_use")
         Yojson.Safe.Util.(json |> member "turn_mode" |> to_string_option);
+      check bool "degraded retry flag persisted" true
+        Yojson.Safe.Util.(json |> member "degraded_retry_applied" |> to_bool);
+      check (option string) "degraded retry cascade persisted"
+        (Some KC.local_recovery_cascade_name)
+        Yojson.Safe.Util.(
+          json |> member "degraded_retry_cascade" |> to_string_option);
+      check (option string) "fallback reason persisted"
+        (Some "turn_timeout")
+        Yojson.Safe.Util.(json |> member "fallback_reason" |> to_string_option);
       check bool "selected_mode removed from decision log" true
         (match Yojson.Safe.Util.(json |> member "selected_mode") with
          | `Null -> true
@@ -2389,45 +2403,95 @@ let wrapped_claude_limit_error () =
          kind = Llm_provider.Http_client.Unknown;
        })
 
-let test_fail_open_cascade_after_auto_recoverable_error_falls_back_to_default () =
-  let fallback =
-    EC.fail_open_cascade_after_auto_recoverable_error
-      ~base_cascade:"underdog"
+let expect_degraded_retry label expected_cascade expected_reason = function
+  | Some (retry : EC.degraded_retry) ->
+      check string (label ^ " cascade") expected_cascade retry.next_cascade;
+      check string (label ^ " reason") expected_reason retry.fallback_reason
+  | None -> fail (label ^ ": expected degraded retry")
+
+let test_degraded_retry_after_recoverable_error_uses_local_recovery_for_hard_quota () =
+  let degraded_retry =
+    EC.degraded_retry_after_recoverable_error
       ~effective_cascade:"underdog"
+      ~tool_requirement:"optional"
       (wrapped_claude_limit_error ())
   in
-  check (option string) "non-default cascade broadens to default"
-    (Some KC.default_cascade_name) fallback
+  expect_degraded_retry "hard quota degraded retry"
+    KC.local_recovery_cascade_name "hard_quota" degraded_retry
 
-let test_fail_open_cascade_after_auto_recoverable_error_returns_base_after_phase_override () =
-  let fallback =
-    EC.fail_open_cascade_after_auto_recoverable_error
-      ~base_cascade:"underdog"
-      ~effective_cascade:KC.local_recovery_cascade_name
+let test_degraded_retry_after_recoverable_error_uses_local_recovery_for_resumable_session () =
+  let degraded_retry =
+    EC.degraded_retry_after_recoverable_error
+      ~effective_cascade:"underdog"
+      ~tool_requirement:"optional"
+      (Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
+         (Masc_mcp.Oas_worker_named.Resumable_cli_session
+            {
+              cascade_name = "kimi_cli_keeper";
+              detail =
+                "kimi exited with code 75: \nTo resume this session: kimi -r ff37febe-2adb-4ac6-9dc6-cae23e672fbc";
+              exit_code = Some 75;
+            }))
+  in
+  expect_degraded_retry "resumable session degraded retry"
+    KC.local_recovery_cascade_name "resumable_cli_session" degraded_retry
+
+let test_degraded_retry_after_recoverable_error_includes_admission_queue_timeout () =
+  let degraded_retry =
+    EC.degraded_retry_after_recoverable_error
+      ~effective_cascade:"underdog"
+      ~tool_requirement:"optional"
+      (Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
+         (Masc_mcp.Oas_worker_named.Admission_queue_timeout
+            {
+              keeper_name = "nick0cave";
+              cascade_name = "big_three";
+              wait_sec = 90.0;
+            }))
+  in
+  expect_degraded_retry "admission queue timeout degraded retry"
+    KC.local_recovery_cascade_name "admission_queue_timeout" degraded_retry
+
+let test_degraded_retry_after_recoverable_error_includes_turn_timeout () =
+  let degraded_retry =
+    EC.degraded_retry_after_recoverable_error
+      ~effective_cascade:"underdog"
+      ~tool_requirement:"optional"
+      (Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
+         (Masc_mcp.Oas_worker_named.Turn_timeout { elapsed_sec = 180.0 }))
+  in
+  expect_degraded_retry "turn timeout degraded retry"
+    KC.local_recovery_cascade_name "turn_timeout" degraded_retry
+
+let test_degraded_retry_after_recoverable_error_blocks_required_tools () =
+  let degraded_retry =
+    EC.degraded_retry_after_recoverable_error
+      ~effective_cascade:"underdog"
+      ~tool_requirement:"required"
       (wrapped_claude_limit_error ())
   in
-  check (option string) "phase override returns to keeper base"
-    (Some "underdog") fallback
+  check bool "required tool turn stays terminal" true
+    (Option.is_none degraded_retry)
 
-let test_fail_open_cascade_after_auto_recoverable_error_preserves_explicit_local_only () =
-  let fallback =
-    EC.fail_open_cascade_after_auto_recoverable_error
-      ~base_cascade:KC.local_only_cascade_name
+let test_degraded_retry_after_recoverable_error_does_not_broaden_local_only () =
+  let degraded_retry =
+    EC.degraded_retry_after_recoverable_error
       ~effective_cascade:KC.local_only_cascade_name
+      ~tool_requirement:"optional"
       (wrapped_claude_limit_error ())
   in
-  check (option string) "explicit local_only stays authoritative" None
-    fallback
+  check bool "local_only does not broaden further" true
+    (Option.is_none degraded_retry)
 
-let test_fail_open_cascade_after_auto_recoverable_error_skips_default_cascade () =
-  let fallback =
-    EC.fail_open_cascade_after_auto_recoverable_error
-      ~base_cascade:KC.default_cascade_name
-      ~effective_cascade:KC.default_cascade_name
+let test_degraded_retry_after_recoverable_error_does_not_broaden_local_recovery () =
+  let degraded_retry =
+    EC.degraded_retry_after_recoverable_error
+      ~effective_cascade:KC.local_recovery_cascade_name
+      ~tool_requirement:"optional"
       (wrapped_claude_limit_error ())
   in
-  check (option string) "default cascade has no broader fallback" None
-    fallback
+  check bool "local_recovery does not broaden further" true
+    (Option.is_none degraded_retry)
 
 let test_fallback_cascade_for_unavailable_profile_prefers_default () =
   let fallback =
@@ -2447,26 +2511,30 @@ let test_fallback_cascade_for_unavailable_profile_prefers_base_after_phase_overr
   check (option string) "phase override fallback target is base cascade"
     (Some "underdog") fallback
 
-let test_next_fail_open_cascade_for_turn_returns_untried_fallback () =
-  let fallback =
+let test_next_fail_open_cascade_for_turn_returns_untried_local_recovery () =
+  let degraded_retry =
     UT.next_fail_open_cascade_for_turn
       ~base_cascade:"underdog"
       ~effective_cascade:"underdog"
+      ~tool_requirement:"optional"
       ~attempted_cascades:[ "underdog" ]
       (wrapped_claude_limit_error ())
   in
-  check (option string) "untried fallback returned"
-    (Some KC.default_cascade_name) fallback
+  expect_degraded_retry "next degraded retry"
+    KC.local_recovery_cascade_name "hard_quota" degraded_retry
 
-let test_next_fail_open_cascade_for_turn_suppresses_attempted_fallback () =
-  let fallback =
+let test_next_fail_open_cascade_for_turn_suppresses_attempted_local_recovery () =
+  let degraded_retry =
     UT.next_fail_open_cascade_for_turn
       ~base_cascade:"underdog"
       ~effective_cascade:"underdog"
-      ~attempted_cascades:[ "underdog"; KC.default_cascade_name ]
+      ~tool_requirement:"optional"
+      ~attempted_cascades:
+        [ "underdog"; KC.local_recovery_cascade_name ]
       (wrapped_claude_limit_error ())
   in
-  check (option string) "attempted fallback suppressed" None fallback
+  check bool "attempted local_recovery suppressed" true
+    (Option.is_none degraded_retry)
 
 (* context_overflow_limit is now in OAS as Retry.extract_context_limit.
    These tests verify the OAS SSOT API is accessible from MASC. *)
@@ -4619,22 +4687,32 @@ let () =
             test_fail_open_local_only_preserves_explicit_local_only_base;
           test_case "healthy local_only stays selected" `Quick
             test_fail_open_local_only_preserves_healthy_local_only;
-          test_case "strict quota fail-open broadens to default cascade" `Quick
-            test_fail_open_cascade_after_auto_recoverable_error_falls_back_to_default;
-          test_case "phase override fail-open returns to base cascade" `Quick
-            test_fail_open_cascade_after_auto_recoverable_error_returns_base_after_phase_override;
-          test_case "explicit local_only keeps fail-open disabled" `Quick
-            test_fail_open_cascade_after_auto_recoverable_error_preserves_explicit_local_only;
-          test_case "default cascade has no broader fail-open target" `Quick
-            test_fail_open_cascade_after_auto_recoverable_error_skips_default_cascade;
+          test_case "hard quota degraded retry uses local_recovery" `Quick
+            test_degraded_retry_after_recoverable_error_uses_local_recovery_for_hard_quota;
+          test_case "resumable session degraded retry uses local_recovery"
+            `Quick
+            test_degraded_retry_after_recoverable_error_uses_local_recovery_for_resumable_session;
+          test_case "admission queue timeout is degraded-retry eligible"
+            `Quick
+            test_degraded_retry_after_recoverable_error_includes_admission_queue_timeout;
+          test_case "turn timeout is degraded-retry eligible" `Quick
+            test_degraded_retry_after_recoverable_error_includes_turn_timeout;
+          test_case "required tool turns block degraded retry" `Quick
+            test_degraded_retry_after_recoverable_error_blocks_required_tools;
+          test_case "local_only stays terminal for degraded retry" `Quick
+            test_degraded_retry_after_recoverable_error_does_not_broaden_local_only;
+          test_case "local_recovery stays terminal for degraded retry" `Quick
+            test_degraded_retry_after_recoverable_error_does_not_broaden_local_recovery;
           test_case "unavailable profile fallback prefers default" `Quick
             test_fallback_cascade_for_unavailable_profile_prefers_default;
           test_case "unavailable phase override fallback prefers base" `Quick
             test_fallback_cascade_for_unavailable_profile_prefers_base_after_phase_override;
-          test_case "next fail-open returns untried fallback" `Quick
-            test_next_fail_open_cascade_for_turn_returns_untried_fallback;
-          test_case "next fail-open suppresses attempted fallback" `Quick
-            test_next_fail_open_cascade_for_turn_suppresses_attempted_fallback;
+          test_case "next degraded retry returns untried local_recovery"
+            `Quick
+            test_next_fail_open_cascade_for_turn_returns_untried_local_recovery;
+          test_case "next degraded retry suppresses attempted local_recovery"
+            `Quick
+            test_next_fail_open_cascade_for_turn_suppresses_attempted_local_recovery;
         ] );
       ( "tool_classification",
         [

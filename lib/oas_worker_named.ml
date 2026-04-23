@@ -84,6 +84,48 @@ let runtime_mcp_policy_for_tools ~(keeper_name : string) (tools : Oas.Tool.t lis
   | Some policy, None -> Some policy
   | None, _ -> None
 
+let runtime_mcp_policy_for_provider
+    ~(keeper_name : string)
+    ~(provider_cfg : Llm_provider.Provider_config.t)
+    (policy_opt : Llm_provider.Llm_transport.runtime_mcp_policy option) =
+  let agent_name =
+    keeper_agent_name_opt keeper_name |> Option.value ~default:""
+  in
+  Oas_worker_exec.runtime_mcp_policy_for_provider
+    ~provider_cfg ~agent_name policy_opt
+
+let filter_candidate_providers_for_tool_support
+    ~(keeper_name : string)
+    ?runtime_mcp_policy
+    ~require_tool_choice_support
+    ~require_tool_support
+    ~label
+    (provider_cfgs : Llm_provider.Provider_config.t list) =
+  if not require_tool_choice_support && not require_tool_support then
+    provider_cfgs
+  else
+    let filtered =
+      List.filter
+        (fun provider_cfg ->
+           let normalized_runtime_mcp_policy =
+             runtime_mcp_policy_for_provider
+               ~keeper_name ~provider_cfg runtime_mcp_policy
+           in
+           Provider_tool_support.supports_required_tool_use
+             ?runtime_mcp_policy:normalized_runtime_mcp_policy
+             ~require_tool_choice_support
+             ~require_tool_support
+             provider_cfg)
+        provider_cfgs
+    in
+    if filtered = [] && provider_cfgs <> [] then
+      Log.Misc.warn
+        "cascade %s: provider-normalized tool-use gate removed all providers (providers=[%s])"
+        label
+        (String.concat ", "
+           (List.map Provider_tool_support.provider_debug_label provider_cfgs));
+    filtered
+
 type masc_internal_error =
   | Cascade_exhausted of {
       cascade_name : string;
@@ -792,7 +834,9 @@ let run_named
   | Error e -> Error (eio_context_error_to_sdk_error e)
   | Ok (sw, net) ->
   let cascade_name =
-    Keeper_cascade_profile.normalize_declared_name cascade_name
+    let trimmed = String.trim cascade_name in
+    if Option.is_some model_strings && trimmed <> "" then trimmed
+    else Keeper_cascade_profile.normalize_declared_name cascade_name
   in
   let runtime_mcp_policy = runtime_mcp_policy_for_tools ~keeper_name tools in
   let configured_labels_result, candidate_cfgs_result =
@@ -803,12 +847,10 @@ let run_named
       ( Ok ms,
         Ok
           (resolve_providers_from_model_strings ?provider_filter
-             ?runtime_mcp_policy
              ~require_tool_choice_support ~require_tool_support ms) )
     | _ ->
       ( Cascade_runtime.models_of_cascade_name_result cascade_name,
         resolve_cascade_providers ?provider_filter
-          ?runtime_mcp_policy
           ~require_tool_choice_support ~require_tool_support ~cascade_name ()
       )
   in
@@ -817,6 +859,15 @@ let run_named
        Log.Misc.error "cascade %s: %s" cascade_name detail;
        Error (cascade_catalog_error_to_sdk_error detail)
    | Ok configured_labels, Ok candidate_cfgs ->
+  let candidate_cfgs =
+    filter_candidate_providers_for_tool_support
+      ~keeper_name
+      ?runtime_mcp_policy
+      ~require_tool_choice_support
+      ~require_tool_support
+      ~label:cascade_name
+      candidate_cfgs
+  in
   let capture, _metrics = Oas_worker_cascade.cascade_metrics_for_candidates ~candidate_cfgs () in
   let name = Printf.sprintf "oas-%s" cascade_name in
   match candidate_cfgs with
@@ -856,6 +907,10 @@ let run_named
     let config_result =
       Oas_worker_exec.resolve_tool_lane_for_oas_tools
         ?agent_name:(keeper_agent_name_opt keeper_name)
+        ~tool_requirement:
+          (if require_tool_choice_support || require_tool_support
+           then `Required
+           else `Optional)
         ~provider_cfg ~tools ()
       |> Result.map
            (fun (effective_tools, runtime_mcp_policy) ->

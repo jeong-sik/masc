@@ -130,6 +130,11 @@ let is_auto_recoverable_cascade_fail_open_error
   || is_resumable_cli_session_error err
   || is_auto_recoverable_cascade_exhausted_error err
 
+type degraded_retry =
+  { next_cascade : string
+  ; fallback_reason : string
+  }
+
 let fallback_cascade_for_unavailable_profile
     ~(base_cascade : string)
     ~(effective_cascade : string) : string option =
@@ -147,15 +152,51 @@ let fallback_cascade_for_unavailable_profile
   then None
   else Some Keeper_config.default_cascade_name
 
-let fail_open_cascade_after_auto_recoverable_error
-    ~(base_cascade : string)
+let degraded_retry_after_recoverable_error
     ~(effective_cascade : string)
-    (err : Oas.Error.sdk_error) : string option =
-  if not (is_auto_recoverable_cascade_fail_open_error err)
+    ~(tool_requirement : string)
+    (err : Oas.Error.sdk_error) : degraded_retry option =
+  let normalized_effective =
+    Keeper_cascade_profile.normalize_declared_name effective_cascade
+  in
+  let local_recovery_retry fallback_reason =
+    Some
+      {
+        next_cascade = Keeper_config.local_recovery_cascade_name;
+        fallback_reason;
+      }
+  in
+  if String.equal tool_requirement "required"
+     || String.equal normalized_effective Keeper_config.local_only_cascade_name
+     || String.equal normalized_effective
+          Keeper_config.local_recovery_cascade_name
   then None
+  else if Oas_worker_named.sdk_error_is_hard_quota err then
+    local_recovery_retry "hard_quota"
   else
-    fallback_cascade_for_unavailable_profile
-      ~base_cascade ~effective_cascade
+    match Oas_worker_named.classify_masc_internal_error err with
+    | Some (Oas_worker_named.Resumable_cli_session _) ->
+        local_recovery_retry "resumable_cli_session"
+    | Some (Oas_worker_named.Admission_queue_timeout _) ->
+        local_recovery_retry "admission_queue_timeout"
+    | Some (Oas_worker_named.Turn_timeout _) ->
+        local_recovery_retry "turn_timeout"
+    | Some
+        (Oas_worker_named.Cascade_exhausted
+           { reason = Keeper_types.Candidates_filtered_after_cycles; _ }) ->
+        local_recovery_retry "cascade_candidates_filtered"
+    | Some
+        (Oas_worker_named.Cascade_exhausted
+           { reason = Keeper_types.Other_detail detail; _ })
+      when Oas_worker_named.message_looks_like_cli_wrapped_hard_quota detail ->
+        local_recovery_retry "hard_quota"
+    | Some (Oas_worker_named.Cascade_exhausted _)
+    | Some (Oas_worker_named.No_tool_capable_provider _)
+    | Some (Oas_worker_named.Accept_rejected _)
+    | Some (Oas_worker_named.Admission_queue_rejected _)
+    | Some (Oas_worker_named.Ambiguous_post_commit _)
+    | None ->
+        None
 
 let is_auto_recoverable_turn_error (err : Oas.Error.sdk_error) : bool =
   is_transient_network_error err

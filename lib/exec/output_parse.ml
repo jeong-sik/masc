@@ -14,8 +14,7 @@ let deletions_re = Re.Pcre.re {|\b(\d+) deletion|} |> Re.compile
 let parse_git_status_porcelain output =
   let lines =
     String.split_on_char '\n' output
-    |> List.map String.trim
-    |> List.filter (fun line -> line <> "")
+    |> List.filter (fun line -> String.trim line <> "")
   in
   if lines = [] then None
   else
@@ -263,12 +262,25 @@ let classify_for_parsing ~cmd ~_output =
           else None
       | _ -> None
 
-let try_parse ~cmd ~output =
+let parser_allows_nonzero = function
+  | Dune_test -> true
+  | Git_status | Git_log_oneline | Git_diff_stat | Wc_lines | Ls_long -> false
+
+let try_parse ~cmd ~status ~output =
   match classify_for_parsing ~cmd ~_output:output with
   | None -> None
-  | Some Git_status -> parse_git_status_porcelain output
-  | Some Git_log_oneline -> parse_git_log_oneline output
-  | Some Git_diff_stat -> parse_git_diff_stat output
-  | Some Wc_lines -> parse_wc_lines output
-  | Some Ls_long -> parse_ls_long output
-  | Some Dune_test -> parse_dune_test output
+  | Some kind ->
+      let may_parse =
+        match status with
+        | Unix.WEXITED 0 -> true
+        | _ -> parser_allows_nonzero kind
+      in
+      if not may_parse then None
+      else
+        match kind with
+        | Git_status -> parse_git_status_porcelain output
+        | Git_log_oneline -> parse_git_log_oneline output
+        | Git_diff_stat -> parse_git_diff_stat output
+        | Wc_lines -> parse_wc_lines output
+        | Ls_long -> parse_ls_long output
+        | Dune_test -> parse_dune_test output

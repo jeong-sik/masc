@@ -478,6 +478,36 @@ let test_git_log_structured () =
   let commits = so |> member "commits" |> to_list in
   check int "commits count" 2 (List.length commits)
 
+let test_failed_git_status_has_no_structured_output () =
+  let json =
+    Masc_mcp.Exec_core.process_result_json
+      ~base_path:"/tmp"
+      ~keeper_name:"p10-test"
+      ~cmd:"git status --porcelain"
+      ~status:(Unix.WEXITED 128)
+      ~output:"fatal: not a git repository (or any of the parent directories): .git\n"
+      ()
+  in
+  check bool "no structured_output on failed git status" true
+    (match json |> member "structured_output" with
+     | `Null -> true
+     | _ -> false)
+
+let test_failed_git_log_has_no_structured_output () =
+  let json =
+    Masc_mcp.Exec_core.process_result_json
+      ~base_path:"/tmp"
+      ~keeper_name:"p10-test"
+      ~cmd:"git log --oneline -5"
+      ~status:(Unix.WEXITED 128)
+      ~output:"fatal: not a git repository (or any of the parent directories): .git\n"
+      ()
+  in
+  check bool "no structured_output on failed git log" true
+    (match json |> member "structured_output" with
+     | `Null -> true
+     | _ -> false)
+
 let test_wc_structured () =
   let json =
     Masc_mcp.Exec_core.process_result_json
@@ -672,6 +702,10 @@ let () =
             `Quick test_git_status_structured;
           test_case "git log --oneline produces commits array" `Quick
             test_git_log_structured;
+          test_case "failed git status has no structured_output" `Quick
+            test_failed_git_status_has_no_structured_output;
+          test_case "failed git log has no structured_output" `Quick
+            test_failed_git_log_has_no_structured_output;
           test_case "wc -l produces lines count" `Quick
             test_wc_structured;
           test_case "git diff --stat produces summary counts" `Quick

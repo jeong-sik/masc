@@ -55,7 +55,9 @@ let contains_substring s sub =
 (* --- git status --porcelain --- *)
 
 let parse_git_status_porcelean output =
-  let lines = split_lines (trim output) in
+  let lines =
+    split_lines output |> List.filter (fun line -> trim line <> "")
+  in
   if lines = [] then None
   else
     let staged = ref [] and unstaged = ref [] and untracked = ref [] in
@@ -131,28 +133,26 @@ let parse_git_diff_stat output =
     | last :: _ ->
         (* last line: " N files changed, M insertions(+), D deletions(-)" *)
         let lower = String.lowercase_ascii last in
-        if not (starts_with (trim lower) "file" || starts_with (trim lower) "files") then
+        if not (contains_substring lower " file changed"
+                || contains_substring lower " files changed")
+        then
           None
         else
           let files_changed = ref 0 and insertions = ref 0 and deletions = ref 0 in
+          let update_if_found target re =
+            try
+              ignore (Str.search_forward re last 0);
+              target := int_of_string (Str.matched_group 1 last)
+            with
+            | Not_found
+            | Failure _ -> ()
+          in
           (* parse "N file(s) changed" *)
-          (try
-             let re = Str.regexp {|\([0-9]+\) file|} in
-             if Str.string_match re (trim last) 0 then
-               files_changed := int_of_string (Str.matched_group 1 (trim last))
-           with _ -> ());
+          update_if_found files_changed (Str.regexp {|\([0-9]+\) file|});
           (* parse "M insertion(s)(+)" *)
-          (try
-             let re = Str.regexp {|\([0-9]+\) insertion|} in
-             if Str.string_match re (trim last) 0 then
-               insertions := int_of_string (Str.matched_group 1 (trim last))
-           with _ -> ());
+          update_if_found insertions (Str.regexp {|\([0-9]+\) insertion|});
           (* parse "D deletion(s)(-)" *)
-          (try
-             let re = Str.regexp {|\([0-9]+\) deletion|} in
-             if Str.string_match re (trim last) 0 then
-               deletions := int_of_string (Str.matched_group 1 (trim last))
-           with _ -> ());
+          update_if_found deletions (Str.regexp {|\([0-9]+\) deletion|});
           Some
             (`Assoc
                [
@@ -316,7 +316,7 @@ let classify_for_parsing ~cmd ~output =
       let base = Filename.basename bin |> String.lowercase_ascii in
       match base with
       | "git" ->
-          let sub = match rest with _first :: s :: _ -> Some s | _ -> None in
+          let sub = match rest with s :: _ -> Some s | _ -> None in
           (match sub with
           | Some "status" -> Some Git_status
           | Some "log" -> Some Git_log_oneline

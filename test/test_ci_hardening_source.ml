@@ -113,12 +113,15 @@ let test_release_truth_contracts () =
   check bool "release evidence changes stay in build scope" true
     (file_contains_pattern ".github/workflows/ci.yml"
        "scripts/release-evidence\\.sh$");
-  check bool "health job reruns doc truth scripts" true
+  check bool "health job reruns doc truth and OAS pin checks" true
     (file_contains_pattern ".github/workflows/ci.yml"
-       "scripts/check-doc-truth.sh\n          scripts/check-version-truth.sh");
-  check bool "doc truth job reruns doc, version, and pin checks" true
-    (file_contains_pattern ".github/workflows/ci.yml"
-       "scripts/check-doc-truth.sh\n          scripts/check-version-truth.sh\n          scripts/sync-oas-pin-docs.sh --check");
+       "scripts/check-doc-truth.sh\n          scripts/sync-oas-pin-docs.sh --check");
+  check bool "doc truth script delegates version truth" true
+    (file_contains_pattern "scripts/check-doc-truth.sh"
+       "scripts/check-version-truth.sh");
+  check bool "release workflow checks version truth" true
+    (file_contains_pattern ".github/workflows/release.yml"
+       "scripts/check-version-truth.sh");
   (* TODO: uncomment when ci_core fanout comment is added (#9419 follow-up) *)
   (* check bool "ci core fanout intentionally excludes tla" true
     (file_contains_pattern ".github/workflows/ci.yml"
@@ -133,10 +136,10 @@ let test_release_truth_contracts () =
     (file_contains_pattern ".github/workflows/release.yml"
        "path: dist/*");
   check bool "make install deps skips with-doc" true
-    (file_contains_pattern "Makefile"
+    (file_contains_pattern "mk/build.mk"
        "opam install . --deps-only --with-test -y");
   check bool "make release evidence target exists" true
-    (file_contains_pattern "Makefile" "release-evidence:")
+    (file_contains_pattern "mk/release.mk" "release-evidence:")
 
 let test_oas_pin_source_contracts () =
   check bool "oas pin check parses local file pins from opam output" true
@@ -478,12 +481,15 @@ let test_root_redirect_contracts () =
 
 
 let test_dashboard_component_split_contracts () =
-  check bool "proof helpers export verdict tone" true
-    (file_contains_pattern "dashboard/src/components/proof-helpers.ts"
+  check bool "harness health sections export verdict tone" true
+    (file_contains_pattern "dashboard/src/components/harness-health-sections.ts"
        "export function verdictTone");
-  check bool "proof helpers export worker run evidence tone" true
-    (file_contains_pattern "dashboard/src/components/proof-helpers.ts"
-       "export function workerRunEvidenceTone");
+  check bool "harness health tests cover verdict tone" true
+    (file_contains_pattern "dashboard/src/components/harness-health-sections.test.ts"
+       "describe('verdictTone'");
+  check bool "retired proof helpers module stays deleted" true
+    (file_not_contains_pattern "dashboard/src/components/proof-helpers.ts"
+       "export function");
   check bool "coord backend setup no longer references transaction companion after PG removal" true
     (file_not_contains_pattern "lib/coord/coord_utils_backend_setup.ml"
        "Transaction Pooler companion")
@@ -534,7 +540,7 @@ let test_activity_surface_contracts () =
        "Activity_graph.emit config");
   check bool "coord task lifecycle emits activity events via hook" true
     (file_contains_pattern "lib/coord/coord_task.ml"
-       "(Atomic.get Coord_hooks.activity_emit_fn) config");
+       "(Atomic.get Coord_hooks.activity_emit_fn)\n      config");
   check bool "coord broadcast emits activity events via hook" true
     (file_contains_pattern "lib/coord/coord_broadcast.ml"
        "(Atomic.get Coord_hooks.activity_emit_fn) config");
@@ -633,7 +639,8 @@ let test_transport_route_contracts () =
        {|Http.Router.get "/ws" websocket_discovery_handler|});
   check bool "mcp http agent injection preserves explicit legacy agent_name" true
     (file_contains_pattern "lib/server/server_mcp_transport_http.ml"
-       {|Option.is_some existing_agent || Option.is_some existing_legacy_agent|});
+       {|Option.is_none existing_agent
+                    && Option.is_none existing_legacy_agent|});
   check bool "common http deps prefer runtime captured in server_state" true
     (file_contains_pattern "lib/server/server_routes_http_common.ml"
        "state.Mcp_server.sw");

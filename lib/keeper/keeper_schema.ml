@@ -52,9 +52,7 @@ let tool_access_schema description =
         ("preset", `Assoc [
           ("type", `String "string");
           ("enum",
-            `List
-              [ `String "minimal"; `String "social"; `String "messaging"; `String "coding";
-                `String "dispatch"; `String "research"; `String "delivery"; `String "full" ]);
+            `List (List.map (fun s -> `String s) tool_preset_enum_strings));
         ]);
         ("also_allow", string_array_schema);
       ]);

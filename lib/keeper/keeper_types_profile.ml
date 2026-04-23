@@ -197,12 +197,12 @@ let lower_string_list_opt = function
   | [] -> None
   | xs -> Some (List.map String.lowercase_ascii xs)
 
+let valid_tool_preset_raw_strings =
+  [ "minimal"; "social"; "messaging"; "dispatch"; "coding"; "research"; "delivery"; "full" ]
+
 let normalize_tool_preset_raw raw =
   let normalized = String.trim (String.lowercase_ascii raw) in
-  match normalized with
-  | "minimal" | "social" | "messaging" | "dispatch" | "coding" | "research" | "delivery" | "full" ->
-      Some normalized
-  | _ -> None
+  if List.mem normalized valid_tool_preset_raw_strings then Some normalized else None
 
 let first_some = Dashboard_utils.first_some
 
@@ -565,8 +565,9 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
             | _ ->
                 Error
                   (Printf.sprintf
-                     "invalid tool_preset '%s' (allowed: minimal, social, messaging, dispatch, coding, research, delivery, full)"
-                     raw))
+                     "invalid tool_preset '%s' (allowed: %s)"
+                     raw
+                     (String.concat ", " valid_tool_preset_raw_strings)))
         | None -> Ok ())
   in
   let result =

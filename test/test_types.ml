@@ -348,6 +348,32 @@ let () =
         Alcotest.(check (list string)) "schema mirror == variant SSOT"
           Masc_mcp.Keeper_types.valid_tool_preset_strings
           Masc_mcp.Keeper_schema.tool_preset_enum_strings);
+      Alcotest.test_case "TOML parser mirror stays in sync" `Quick (fun () ->
+        (* Keeper_types_profile cannot depend on Keeper_types because
+           Keeper_types includes it, so the raw TOML allow-list is mirrored
+           there and guarded here. *)
+        Alcotest.(check (list string)) "profile mirror == variant SSOT"
+          Masc_mcp.Keeper_types.valid_tool_preset_strings
+          Masc_mcp.Keeper_types_profile.valid_tool_preset_raw_strings);
+      Alcotest.test_case "tool_access schema mirror stays in sync" `Quick (fun () ->
+        let open Yojson.Safe.Util in
+        let schema = Masc_mcp.Keeper_schema.tool_access_schema "test" in
+        let preset_shape =
+          match schema |> member "oneOf" |> to_list with
+          | preset_shape :: _ -> preset_shape
+          | [] -> Alcotest.fail "missing tool_access preset schema"
+        in
+        let enum =
+          preset_shape
+          |> member "properties"
+          |> member "preset"
+          |> member "enum"
+          |> to_list
+          |> List.map to_string
+        in
+        Alcotest.(check (list string)) "tool_access enum == variant SSOT"
+          Masc_mcp.Keeper_types.valid_tool_preset_strings
+          enum);
       Alcotest.test_case "Social, Dispatch, and Delivery present" `Quick (fun () ->
         let open Masc_mcp.Keeper_types in
         Alcotest.(check bool) "social present" true

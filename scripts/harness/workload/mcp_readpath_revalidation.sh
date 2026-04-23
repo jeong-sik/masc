@@ -236,11 +236,11 @@ run_mode() {
   local port grpc_port ws_port server_log server_pid
   local base_url mcp_url health_json health_file
   local session_line session_id protocol_version
-  local status_first_time status_second_time keeper_first_time keeper_second_time transport_time
+  local status_first_time status_second_time keeper_first_time keeper_second_time keeper_status_time transport_time
   local execution_time transport_health_time
-  local status_first_ok status_second_ok keeper_first_ok keeper_second_ok transport_ok
+  local status_first_ok status_second_ok keeper_first_ok keeper_second_ok keeper_status_ok transport_ok
   local execution_cache_state transport_cache_state
-  local keeper_json transport_json execution_json
+  local keeper_json keeper_status_json keeper_name transport_json execution_json
   local payload_contract_ok quiet_reason_contract_ok pending_lazy_ok health_mode_ok keeper_fiber_ok
   local result_pass="true"
 
@@ -325,8 +325,30 @@ run_mode() {
     keeper_second_ok="1"
   fi
   keeper_second_time="$LAST_TIME_TOTAL"
+  keeper_name="$(printf '%s' "$keeper_json" | jq -r '.keepers[0] // ""')"
 
-  if call_tool "$mcp_url" "$session_id" "$protocol_version" 15 "masc_transport_status" '{}'; then
+  if [[ "$(normalize_bool "$EXPECT_KEEPERS")" = "1" ]]; then
+    if [[ -n "$keeper_name" ]] \
+      && call_tool "$mcp_url" "$session_id" "$protocol_version" 15 "masc_keeper_status" "$(jq -cn --arg name "$keeper_name" '{name:$name}')"; then
+      keeper_status_ok="0"
+      keeper_status_time="$LAST_TIME_TOTAL"
+      keeper_status_json="$(json_from_response_text "$LAST_TEXT")"
+    elif [[ -n "$keeper_name" ]]; then
+      keeper_status_ok="1"
+      keeper_status_time="$LAST_TIME_TOTAL"
+      keeper_status_json='{}'
+    else
+      keeper_status_ok="1"
+      keeper_status_time="0"
+      keeper_status_json='{}'
+    fi
+  else
+    keeper_status_ok="0"
+    keeper_status_time="0"
+    keeper_status_json='{}'
+  fi
+
+  if call_tool "$mcp_url" "$session_id" "$protocol_version" 16 "masc_transport_status" '{}'; then
     transport_ok="0"
   else
     transport_ok="1"
@@ -343,29 +365,35 @@ run_mode() {
   transport_health_time="$LAST_TIME_TOTAL"
   transport_cache_state="$(printf '%s' "$LAST_RESPONSE" | jq -r '.projection_diagnostics.cache_state // ""')"
 
-  payload_contract_ok="$(printf '%s' "$keeper_json" | jq -r '
-    if ((.items // []) | length) == 0 then
+  payload_contract_ok="$(printf '%s' "$keeper_status_json" | jq -r --arg expect "$EXPECT_KEEPERS" '
+    if $expect != "1" then
+      "true"
+    elif (.name // "") == "" then
       "false"
     else
-      ([.items[] |
-        has("room_scope")
-        and has("presence_keepalive")
-        and has("proactive_enabled")
-        and has("initiative_enabled")
-        and (.diagnostic | type == "object")
-      ] | all | tostring)
+      (
+        ((.coordination.joined_room_ids // null) | type == "array")
+        and ((.runtime.proactive_enabled // null) | type == "boolean")
+      ) | tostring
     end
   ')"
 
-  quiet_reason_contract_ok="$(printf '%s' "$keeper_json" | jq -r '
-    [(.items // [])[] |
-      if (.keepalive_running == false and .presence_keepalive == true and .proactive_enabled == true) then
-        (.diagnostic.quiet_reason != "disabled")
-        and (.diagnostic.continuity_state != "desired_offline")
-      else
-        true
-      end
-    ] | all | tostring
+  quiet_reason_contract_ok="$(printf '%s' "$execution_json" | jq -r --arg expect "$EXPECT_KEEPERS" '
+    if $expect != "1" then
+      "true"
+    elif ((.keepers // []) | length) == 0 then
+      "false"
+    else
+      [(.keepers // [])[] |
+        if (.keepalive_running == false and .proactive_enabled == true) then
+          (.diagnostic | type == "object")
+          and (.diagnostic.quiet_reason != "disabled")
+          and (.diagnostic.continuity_state != "desired_offline")
+        else
+          true
+        end
+      ] | all | tostring
+    end
   ')"
 
   pending_lazy_ok="$(printf '%s' "$health_json" | jq -r '((.startup.pending_lazy_tasks // []) | length == 0) | tostring')"
@@ -390,7 +418,7 @@ run_mode() {
     end
   ')"
 
-  if [[ "$status_first_ok" != "0" || "$status_second_ok" != "0" || "$keeper_first_ok" != "0" || "$keeper_second_ok" != "0" || "$transport_ok" != "0" ]]; then
+  if [[ "$status_first_ok" != "0" || "$status_second_ok" != "0" || "$keeper_first_ok" != "0" || "$keeper_second_ok" != "0" || "$keeper_status_ok" != "0" || "$transport_ok" != "0" ]]; then
     result_pass="false"
   fi
   check_tool_time "masc_status(first)" "$status_first_time" "$MASC_STATUS_FIRST_MAX_SEC" || result_pass="false"
@@ -417,14 +445,18 @@ run_mode() {
       --arg pass "$result_pass" \
       --arg backend_mode "$(printf '%s' "$health_json" | jq -r '.startup.backend_mode // ""')" \
       --arg fallback_reason "$(printf '%s' "$health_json" | jq -r '.startup.fallback_reason // ""')" \
-      --argjson health "$health_json" \
-      --argjson keeper_list "$keeper_json" \
-      --argjson transport_status "$transport_json" \
-      --argjson execution "$(printf '%s' "$execution_json" | jq -c '{projection_diagnostics, generated_at}')" \
+      --arg health_json "$health_json" \
+      --arg keeper_list_json "$keeper_json" \
+      --arg keeper_status_json "$keeper_status_json" \
+      --arg keeper_name "$keeper_name" \
+      --arg transport_status_json "$transport_json" \
+      --arg execution_payload_json "$execution_json" \
+      --arg execution_json_sample "$(printf '%s' "$execution_json" | jq -c '{projection_diagnostics, generated_at}')" \
       --arg status_first_time "$status_first_time" \
       --arg status_second_time "$status_second_time" \
       --arg keeper_first_time "$keeper_first_time" \
       --arg keeper_second_time "$keeper_second_time" \
+      --arg keeper_status_time "$keeper_status_time" \
       --arg transport_time "$transport_time" \
       --arg execution_time "$execution_time" \
       --arg transport_health_time "$transport_health_time" \
@@ -435,7 +467,15 @@ run_mode() {
       --arg health_mode_ok "$health_mode_ok" \
       --arg execution_cache_state "$execution_cache_state" \
       --arg transport_cache_state "$transport_cache_state" \
-      '{
+      '
+      def num_or_zero: if . == null or . == "" then 0 else tonumber end;
+      ($health_json | try fromjson catch {}) as $health
+      | ($keeper_list_json | try fromjson catch {}) as $keeper_list
+      | ($keeper_status_json | try fromjson catch {}) as $keeper_status
+      | ($transport_status_json | try fromjson catch $transport_status_json) as $transport_status
+      | ($execution_payload_json | try fromjson catch {}) as $execution_payload
+      | ($execution_json_sample | try fromjson catch {}) as $execution
+      | {
         mode: $mode,
         pass: ($pass == "true"),
         base_url: $base_url,
@@ -452,13 +492,14 @@ run_mode() {
           transport_health_max_sec: ($ENV.TRANSPORT_HEALTH_MAX_SEC // "2" | tonumber)
         },
         timings: {
-          masc_status_first: ($status_first_time | tonumber),
-          masc_status_second: ($status_second_time | tonumber),
-          masc_keeper_list_first: ($keeper_first_time | tonumber),
-          masc_keeper_list_second: ($keeper_second_time | tonumber),
-          masc_transport_status: ($transport_time | tonumber),
-          dashboard_execution: ($execution_time | tonumber),
-          dashboard_transport_health: ($transport_health_time | tonumber)
+          masc_status_first: ($status_first_time | num_or_zero),
+          masc_status_second: ($status_second_time | num_or_zero),
+          masc_keeper_list_first: ($keeper_first_time | num_or_zero),
+          masc_keeper_list_second: ($keeper_second_time | num_or_zero),
+          masc_keeper_status: ($keeper_status_time | num_or_zero),
+          masc_transport_status: ($transport_time | num_or_zero),
+          dashboard_execution: ($execution_time | num_or_zero),
+          dashboard_transport_health: ($transport_health_time | num_or_zero)
         },
         checks: {
           payload_contract: ($payload_contract_ok == "true"),
@@ -469,7 +510,10 @@ run_mode() {
           execution_cache_state: $execution_cache_state,
           transport_cache_state: $transport_cache_state
         },
-        keeper_list_sample: (($keeper_list.items // [])[:2]),
+        keeper_name: (if ($keeper_name | length) > 0 then $keeper_name else null end),
+        keeper_list_names: (($keeper_list.keepers // [])[:5]),
+        keeper_status_sample: $keeper_status,
+        execution_keeper_sample: (($execution_payload.keepers // [])[:2]),
         transport_status: $transport_status,
         execution: $execution,
         health: {

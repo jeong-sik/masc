@@ -28,10 +28,11 @@
 - `masc_transport_status`가 빠르게 응답한다.
 - `/api/v1/dashboard/execution`과 `/api/v1/dashboard/transport-health`의 `projection_diagnostics.cache_state`가 `fresh`다.
 - `/health.startup.pending_lazy_tasks`가 빈 배열이다.
-- keeper list `items`에 다음 필드가 존재한다.
-  - `joined_room_ids`
-  - `proactive_enabled`
-- `keepalive_running=false` 이고 `proactive_enabled=true` 인 keeper는 `diagnostic.quiet_reason="disabled"`로 분류되지 않는다.
+- keeper가 하나 이상 있을 때, 첫 keeper의 `masc_keeper_status` payload에 다음 필드가 존재한다.
+  - `coordination.joined_room_ids`
+  - `runtime.proactive_enabled`
+- `/api/v1/dashboard/execution`의 keeper row는 `diagnostic` object를 포함한다.
+- `/api/v1/dashboard/execution`에서 `keepalive_running=false` 이고 `proactive_enabled=true` 인 keeper는 `diagnostic.quiet_reason="disabled"`로 분류되지 않는다.
 
 ## Output
 
@@ -41,7 +42,7 @@
 summary=/abs/path/to/logs/mcp_readpath_revalidation/<run-id>/summary.json
 ```
 
-summary에는 모드별 timing, backend mode, fallback reason, health transport 상태, keeper sample payload가 들어간다.
+summary에는 모드별 timing, backend mode, fallback reason, health transport 상태, keeper list 이름 샘플, `masc_keeper_status` 샘플, execution keeper 샘플이 들어간다.
 
 ## Useful Overrides
 

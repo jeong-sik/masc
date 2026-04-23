@@ -224,6 +224,10 @@ let metric_mcp_tool_schema_count = "masc_mcp_tool_schema_count"
 let metric_mcp_tool_schema_tokens_approx =
   "masc_mcp_tool_schema_tokens_approx"
 
+(* Process-level FD gauges — used in init() and update_fd_gauges. *)
+let metric_open_fds = "masc_process_open_fds"
+let metric_fd_warn_threshold = "masc_process_fd_warn_threshold"
+
 (** {1 Built-in Metrics} *)
 
 let init () =
@@ -350,15 +354,12 @@ let init () =
      time series before it crosses the OS limit and crashes the server.
      Evidence: 2026-04-16 production incident, 4029 CLOSE_WAIT sockets
      accumulated before the accept() path started failing. *)
-  let fd_open = "masc_process_open_fds" in
-  let fd_threshold = "masc_process_fd_warn_threshold" in
-  add fd_open
+  add metric_open_fds
     "Approximate count of open file descriptors for the server process \
      (derived from /dev/fd). Ramp indicates a socket/file leak." Gauge;
-  add fd_threshold
+  add metric_fd_warn_threshold
     "Threshold above which open_fds triggers a one-shot WARN log." Gauge;
-  set_gauge fd_threshold
-    (float_of_int (Env_config_core.get_int ~default:3000 "MASC_FD_WARN_THRESHOLD" |> max 1));
+  set_gauge metric_fd_warn_threshold (float_of_int fd_warn_threshold);
   (* Per-keeper turn outcome + token counters.  Labels are populated
      dynamically via inc_counter; no upfront registration needed.
      Covers issues #7495 (cost/token attribution) and #7519 (SLO). *)
@@ -411,8 +412,6 @@ let init () =
     "Total Oas.Event_bus.publish calls routed through \
      Oas_bus_instrument.publish."
     Counter
-
-let metric_open_fds = "masc_process_open_fds"
 
 let start_time = Time_compat.now ()
 

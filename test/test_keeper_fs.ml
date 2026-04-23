@@ -30,6 +30,10 @@ let has_tmp_files dir =
   Sys.readdir dir
   |> Array.exists (fun name -> Filename.check_suffix name ".tmp")
 
+let require_ok label = function
+  | Ok () -> ()
+  | Error msg -> failf "%s: %s" label msg
+
 (* ================================================================ *)
 (* ensure_dir tests                                                 *)
 (* ================================================================ *)
@@ -99,7 +103,7 @@ let test_save_atomic_basic () =
   let base = temp_dir () in
   let path = Filename.concat base "data.json" in
   let content = {|{"key": "value"}|} in
-  check bool "save_atomic ok" true (Result.is_ok (KF.save_atomic path content));
+  require_ok "save_atomic basic" (KF.save_atomic path content);
   let loaded = read_file path in
   check string "content matches" content loaded;
   check bool "no tmp file" false (has_tmp_files base);
@@ -108,8 +112,8 @@ let test_save_atomic_basic () =
 let test_save_atomic_overwrites () =
   let base = temp_dir () in
   let path = Filename.concat base "overwrite.txt" in
-  check bool "first save ok" true (Result.is_ok (KF.save_atomic path "first"));
-  check bool "second save ok" true (Result.is_ok (KF.save_atomic path "second"));
+  require_ok "save_atomic first write" (KF.save_atomic path "first");
+  require_ok "save_atomic second write" (KF.save_atomic path "second");
   let loaded = read_file path in
   check string "second write wins" "second" loaded;
   cleanup_dir base
@@ -117,7 +121,7 @@ let test_save_atomic_overwrites () =
 let test_save_atomic_creates_parent_dir () =
   let base = temp_dir () in
   let path = Filename.concat base "deep/nested/file.txt" in
-  check bool "nested save ok" true (Result.is_ok (KF.save_atomic path "content"));
+  require_ok "save_atomic creates parent dir" (KF.save_atomic path "content");
   check bool "file exists" true (Sys.file_exists path);
   let loaded = read_file path in
   check string "content matches" "content" loaded;
@@ -127,7 +131,7 @@ let test_save_json_atomic () =
   let base = temp_dir () in
   let path = Filename.concat base "test.json" in
   let json = `Assoc [("name", `String "keeper"); ("gen", `Int 1)] in
-  check bool "save_json_atomic ok" true (Result.is_ok (KF.save_json_atomic path json));
+  require_ok "save_json_atomic" (KF.save_json_atomic path json);
   let loaded = Yojson.Safe.from_file path in
   let open Yojson.Safe.Util in
   check string "name field" "keeper" (loaded |> member "name" |> to_string);

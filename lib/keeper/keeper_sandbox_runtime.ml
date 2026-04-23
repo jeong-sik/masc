@@ -56,8 +56,11 @@ type docker_preflight =
     next_actions : string list;
   }
 
+let docker_preflight_min_sec = 5.0
+let docker_preflight_max_sec = 20.0
+
 let docker_preflight_timeout ~timeout_sec =
-  min 20.0 (max 5.0 timeout_sec)
+  min docker_preflight_max_sec (max docker_preflight_min_sec timeout_sec)
 
 let required_commands =
   [
@@ -225,7 +228,7 @@ let ensure_keeper_sandbox_runtime ~timeout_sec =
       else
         match
           docker_info_security_options
-            ~timeout_sec:(min 20.0 (max 5.0 timeout_sec))
+            ~timeout_sec:(docker_preflight_timeout ~timeout_sec)
         with
         | Error _ as err -> err
         | Ok security_options ->

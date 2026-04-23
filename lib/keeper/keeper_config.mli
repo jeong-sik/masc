@@ -20,6 +20,9 @@ val local_recovery_cascade_name : string
     @since Core Triad *)
 val local_only_cascade_name : string
 
+(** Cascade name for turns that must use a tool-capable provider lane. *)
+val tool_use_strict_cascade_name : string
+
 (** Minimum context window (tokens) for any keeper turn. *)
 val min_keeper_context_tokens : int
 

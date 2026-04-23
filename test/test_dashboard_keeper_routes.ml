@@ -603,6 +603,8 @@ let append_execution_receipt config ~keeper_name =
       tool_surface =
         {
           turn_lane = "tool";
+          tool_surface_class = "mixed";
+          tool_requirement = "required";
           visible_tool_count = 2;
           tool_gate_enabled = true;
           tool_surface_fallback_used = false;
@@ -619,6 +621,10 @@ let append_execution_receipt config ~keeper_name =
       cascade_attempt_count = 2;
       cascade_fallback_applied = true;
       cascade_outcome = "passed_to_next_model";
+      degraded_retry_applied = true;
+      degraded_retry_cascade =
+        Some Masc_mcp.Keeper_config.local_recovery_cascade_name;
+      fallback_reason = Some "turn_timeout";
       stop_reason = Some "completed";
       error_kind = None;
       error_message = None;

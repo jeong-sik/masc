@@ -1,5 +1,7 @@
 type tool_surface =
   { turn_lane : string
+  ; tool_surface_class : string
+  ; tool_requirement : string
   ; visible_tool_count : int
   ; tool_gate_enabled : bool
   ; tool_surface_fallback_used : bool
@@ -35,6 +37,9 @@ type t =
   ; cascade_attempt_count : int
   ; cascade_fallback_applied : bool
   ; cascade_outcome : string
+  ; degraded_retry_applied : bool
+  ; degraded_retry_cascade : string option
+  ; fallback_reason : string option
   ; stop_reason : string option
   ; error_kind : string option
   ; error_message : string option

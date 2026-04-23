@@ -150,7 +150,10 @@ let compute_metrics_window
         let message_count = Safe_ops.json_int ~default:0 "message_count" j in
         let model_used_norm = normalize_model_name model_used in
         let model_bucket = if model_used_norm <> "" then model_used_norm else model_used in
-        let work_kind_raw = Safe_ops.json_string ~default:"" "work_kind" j in
+        let work_kind_raw =
+          Keeper_unified_metrics.work_kind_of_json j
+          |> Option.value ~default:""
+        in
         let memory_check = j |> member "memory_check" in
         let memory_performed = Safe_ops.json_bool ~default:false "performed" memory_check in
         let memory_query_kind = Safe_ops.json_string ~default:"none" "query_kind" memory_check in

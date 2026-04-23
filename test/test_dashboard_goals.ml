@@ -98,6 +98,18 @@ let append_keeper_receipt (config : Coord.config) (meta : Keeper_types.keeper_me
   in
   Keeper_execution_receipt.append config receipt
 
+let append_null_telemetry_decision (config : Coord.config)
+    (meta : Keeper_types.keeper_meta) =
+  Fs_compat.append_jsonl
+    (Keeper_types.keeper_decision_log_path config meta.name)
+    (`Assoc
+      [
+        ("turn_id", `Int 8);
+        ("turn_verdict", `String "run");
+        ("wall_clock_at_decision", `Float (Unix.gettimeofday ()));
+        ("telemetry", `Null);
+      ])
+
 let test_blocked_phase_projects_blocked_health () =
   with_room @@ fun config ->
   let _goal, _kind =
@@ -170,6 +182,32 @@ let test_goal_detail_surfaces_keeper_runtime_trust_and_blockers () =
         "execution_receipt"
         (linked_keeper |> member "latest_causal_event" |> member "kind" |> to_string)
 
+let test_goals_tree_tolerates_null_decision_telemetry () =
+  with_room @@ fun config ->
+  let goal, _kind =
+    match Goal_store.upsert_goal config ~title:"Ship null telemetry" () with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  let meta = make_keeper_meta ~name:"null-telemetry-keeper" ~goal_id:goal.id in
+  (match Keeper_types.write_meta ~force:true config meta with
+   | Ok () -> ()
+   | Error err -> fail ("write_meta failed: " ^ err));
+  append_null_telemetry_decision config meta;
+  let tree_json = Dashboard_goals.dashboard_goals_tree_json ~config in
+  ignore (tree_json |> member "tree" |> to_list);
+  match Dashboard_goals.goal_detail_json ~config ~goal_id:goal.id with
+  | Error msg -> fail msg
+  | Ok json ->
+      let linked_keeper =
+        match json |> member "linked_keepers" |> to_list with
+        | keeper :: _ -> keeper
+        | [] -> fail "expected linked keeper detail"
+      in
+      check bool "selected model remains null" true
+        (linked_keeper |> member "runtime_trust" |> member "selected_model"
+        = `Null)
+
 let test_goal_detail_does_not_promote_synthetic_blocker_over_receipt () =
   with_room @@ fun config ->
   let goal, _kind =
@@ -228,6 +266,8 @@ let () =
           test_case "goal detail surfaces keeper runtime trust and blockers"
             `Quick
             test_goal_detail_surfaces_keeper_runtime_trust_and_blockers;
+          test_case "goals tree tolerates null decision telemetry" `Quick
+            test_goals_tree_tolerates_null_decision_telemetry;
           test_case
             "goal detail keeps synthetic runtime blocker out of latest causal"
             `Quick

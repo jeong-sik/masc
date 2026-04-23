@@ -472,6 +472,14 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       | Ok () ->
         Log.Keeper.debug "create_keeper: metadata written for name=%s trace_id=%s"
           p.name (Keeper_id.Trace_id.to_string meta.runtime.trace_id);
+        (* Auto-generate credential file if missing (#A10) *)
+        let agent_name = keeper_agent_name p.name in
+        (match Auth.ensure_keeper_credential ctx.config.base_path ~agent_name with
+         | Ok _ ->
+             Log.Keeper.debug "create_keeper: credential ensured for %s" agent_name
+         | Error err ->
+             Log.Keeper.warn "create_keeper: credential ensure failed for %s: %s"
+               agent_name (Types.show_masc_error err));
         Progress.Tracker.step tracker ~message:"Starting keepalive loop" ();
         Log.Keeper.info "create_keeper: starting keepalive for name=%s" p.name;
         start_keepalive ctx meta;

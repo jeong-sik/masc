@@ -1,6 +1,6 @@
 (** A3 approval_policy + exec_gate tests — policy decides, gate
     dispatches.  Tests use [assert false] on the error arm so the
-    lib-scope ratchet on Stdlib.failwith stays green. *)
+    lib-scope ratchet on crash-call count stays green. *)
 
 open Masc_exec
 

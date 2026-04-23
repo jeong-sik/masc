@@ -236,10 +236,15 @@ let git_option_requires_arg = function
   | _ -> false
 
 let git_option_has_inline_arg opt =
-  starts_with opt "--git-dir=" || starts_with opt "--work-tree="
-  || starts_with opt "--namespace=" || starts_with opt "--exec-path="
-  || starts_with opt "--super-prefix=" || starts_with opt "--config-env="
-  || (String.length opt > 2 && (starts_with opt "-C" || starts_with opt "-c"))
+  String.starts_with ~prefix:"--git-dir=" opt
+  || String.starts_with ~prefix:"--work-tree=" opt
+  || String.starts_with ~prefix:"--namespace=" opt
+  || String.starts_with ~prefix:"--exec-path=" opt
+  || String.starts_with ~prefix:"--super-prefix=" opt
+  || String.starts_with ~prefix:"--config-env=" opt
+  || (String.length opt > 2
+      && (String.starts_with ~prefix:"-C" opt
+          || String.starts_with ~prefix:"-c" opt))
 
 let git_subcommand tokens =
   let rec loop = function
@@ -247,7 +252,7 @@ let git_subcommand tokens =
     | "--" :: _ -> None
     | opt :: _value :: rest when git_option_requires_arg opt -> loop rest
     | opt :: rest when git_option_has_inline_arg opt -> loop rest
-    | opt :: rest when starts_with opt "-" -> loop rest
+    | opt :: rest when String.starts_with ~prefix:"-" opt -> loop rest
     | sub :: _ -> Some sub
   in
   loop tokens

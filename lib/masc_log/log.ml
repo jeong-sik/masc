@@ -186,6 +186,13 @@ module Ring = struct
     if not (Sys.file_exists dir) then
       protect ~default:() (fun () -> Sys.mkdir dir 0o755)
 
+  let close_sink () =
+    match !file_channel with
+    | Some oc ->
+        close_out_noerr oc;
+        file_channel := None
+    | None -> ()
+
   let open_sink dir =
     ensure_dir dir;
     let date = date_string () in
@@ -209,11 +216,29 @@ module Ring = struct
       ("details", e.details);
     ]
 
+  let sink_matches_path path oc =
+    protect ~default:false (fun () ->
+      if not (Sys.file_exists path) then
+        false
+      else
+        let path_stat = Unix.stat path in
+        let chan_stat = Unix.fstat (Unix.descr_of_out_channel oc) in
+        path_stat.st_dev = chan_stat.st_dev && path_stat.st_ino = chan_stat.st_ino)
+
   let rotate_if_needed () =
     let today = date_string () in
-    if today <> !file_current_date && !file_base_dir <> "" then begin
-      (match !file_channel with Some oc -> close_out_noerr oc | None -> ());
-      open_sink !file_base_dir
+    if !file_base_dir <> "" then begin
+      let needs_reopen =
+        match !file_channel with
+        | Some oc ->
+            today <> !file_current_date
+            || not (sink_matches_path (log_file_path !file_base_dir today) oc)
+        | None -> true
+      in
+      if needs_reopen then begin
+        close_sink ();
+        open_sink !file_base_dir
+      end
     end
 
   let write_to_sink entry_json =
@@ -292,6 +317,7 @@ module Ring = struct
     ) to_load
 
   let init_file_sink dir =
+    close_sink ();
     load_from_file dir;
     let loaded = Atomic.get total in
     open_sink dir;

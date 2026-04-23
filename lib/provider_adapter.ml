@@ -502,7 +502,7 @@ let direct_adapters =
       default_model_id = Some "auto";
       model_policy =
         {
-          default_model_env = Some "MOONSHOT_DEFAULT_MODEL";
+          default_model_env = Some "KIMI_DEFAULT_MODEL";
           default_model_fallback = Some "kimi-k2.5";
           auto_models = No_auto_models;
           expand_auto = false;

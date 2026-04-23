@@ -246,7 +246,6 @@ let parse_ls_long output =
 (* --- dune test output --- *)
 
 let parse_dune_test output =
-  let lower = String.lowercase_ascii output in
   (* dune runtest outputs like:
      "Test src/...: ok" or "...FAILED..."
      Summary line may not exist, so count individual results. *)

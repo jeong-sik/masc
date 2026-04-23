@@ -34,6 +34,8 @@ let strict_action_enums =
     `String "keeper_message";
     `String "keeper_probe";
     `String "keeper_recover";
+    `String "keeper_github_identity_login_prepare";
+    `String "keeper_github_identity_status";
   ]
 
 let legacy_action_alias_enums =

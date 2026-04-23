@@ -262,6 +262,16 @@ let available_actions : available_action list =
     make_available_action ~action_type:"keeper_recover" ~tool_name:"masc_keeper_recover"
       ~target_type:"keeper"
       ~description:"Safe down/up recovery for stale/degraded keeper.";
+    make_available_action
+      ~action_type:"keeper_github_identity_login_prepare"
+      ~tool_name:"masc_keeper_github_identity_login_prepare"
+      ~target_type:"keeper"
+      ~description:"Prepare a keeper-bound GitHub CLI login command under operator confirmation.";
+    make_available_action
+      ~action_type:"keeper_github_identity_status"
+      ~tool_name:"masc_keeper_github_identity_status"
+      ~target_type:"keeper"
+      ~description:"Inspect keeper-bound GitHub identity bundle and gh auth status.";
   ]
 
 let available_action_to_yojson (entry : available_action) =

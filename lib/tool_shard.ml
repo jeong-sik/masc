@@ -720,7 +720,7 @@ Use for status updates, announcements, warnings, or coordination.";
     name = "keeper_task_claim";
     description = "Claim the next unclaimed todo task that matches your capabilities. \
 Returns claimed task details (task_id, title, description) or empty if none available. \
-After claiming, do the work and call keeper_task_done when finished.";
+If the keeper has active_goal_ids configured, only goal-linked tasks are eligible.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -737,6 +737,20 @@ The task must be claimed by you. Other agents verify completion from the result 
         ("result", `Assoc [("type", `String "string"); ("description", `String "What was done: files changed, tests run, outcome observed"); ("minLength", `Int 1)]);
       ]);
       ("required", `List [`String "task_id"; `String "result"]);
+    ];
+  };
+  {
+    name = "keeper_task_submit_for_verification";
+    description = "Submit your claimed task to verification instead of marking it done directly. \
+Use this after opening a PR or when review evidence must be attached before final approval.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("task_id", `Assoc [("type", `String "string"); ("description", `String "Task ID returned by keeper_task_claim"); ("minLength", `Int 1)]);
+        ("notes", `Assoc [("type", `String "string"); ("description", `String "Verification handoff notes: tests run, scope, remaining review expectations"); ("minLength", `Int 1)]);
+        ("pr_url", `Assoc [("type", `String "string"); ("description", `String "Draft or open PR URL to include in the verification handoff"); ("minLength", `Int 1)]);
+      ]);
+      ("required", `List [`String "task_id"; `String "notes"; `String "pr_url"]);
     ];
   };
   {

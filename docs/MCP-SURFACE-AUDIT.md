@@ -33,8 +33,8 @@ As of `2026-04-16`, the supported front door is repo coordination plus keeper/ru
 
 | Surface | Count | Source | Notes |
 |--------|------:|--------|-------|
-| Raw tool schemas | 449 | `Config.raw_all_tool_schemas` | Includes hidden, deprecated, placeholder, and compatibility aliases. Intentionally wider than `Tools.all_schemas_extended` (adds Board, Compact, Agent_timeline schemas that depend on Config). |
-| Visible tool schemas | 403 | `Config.visible_tool_schemas ()` | Default `tools/list` public surface |
+| Raw tool schemas | ~156 | `Config.raw_all_tool_schemas` | Code-verified count (25 modules, 157 before `retired_front_door_schema_names` filter). Intentionally wider than `Tools.all_schemas_extended` (adds Board, Compact, Agent_timeline schemas that depend on Config). |
+| Visible tool schemas | runtime-filtered | `Config.visible_tool_schemas ()` | Default `tools/list` public surface. Filtered by `Tool_catalog.is_visible` (Hidden, Deprecated, Admin-only excluded). Exact count varies by config. |
 | MCP prompts | 3 | `lib/mcp_prompt_surface.ml` | `tool_help`, `team_session_proof`, `command_truth` |
 | Fixed MCP resources | 21 | `lib/mcp_server.ml` | Status, tasks, messages, events, worktrees, schema, institution, library, tool-help index |
 | MCP resource templates | 7 | `lib/mcp_server.ml` | Message/event ranges, library docs, per-tool help |

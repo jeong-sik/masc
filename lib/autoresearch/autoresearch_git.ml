@@ -199,7 +199,7 @@ let prepare_managed_worktree ~base_path ~source_workdir ~loop_id =
       (match git_current_branch ~workdir:source_workdir with
       | Some branch when not (String.equal branch "main" || String.equal branch "master") ->
           warnings := ("source_branch:" ^ branch) :: !warnings
-      | _ -> ());
+      | Some _ | None -> ());
       let workdir = Autoresearch_storage.managed_worktree_dir ~base_path loop_id in
       if Sys.file_exists workdir then
         Result.error (Printf.sprintf "managed worktree already exists: %s" workdir)

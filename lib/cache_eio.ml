@@ -169,7 +169,9 @@ let maybe_migrate_legacy_entry config ~key entry =
         Atomic.set cached_entry_count (-1)
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
-    | _ -> ()
+    | exn ->
+        Log.Misc.warn "cache_eio maybe_migrate_legacy_entry failed: %s"
+          (Printexc.to_string exn)
 
 (** Guard to prevent concurrent directory scan stampedes.
     Only one fiber may scan the cache directory at a time;

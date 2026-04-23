@@ -13,6 +13,7 @@ let aliases : (string * string) list =
     "Edit", "keeper_fs_edit";
     "Grep", "keeper_shell";   (* op=rg routed at dispatch layer, Phase A.4 *)
     "Read", "keeper_fs_read";
+    "Shell", "keeper_bash";   (* LLM occasionally hallucinates "Shell" for bash *)
     "Write", "keeper_fs_edit"; (* create-vs-update collapsed at dispatch layer *)
   ]
 

@@ -535,7 +535,7 @@ let test_provider_cooldown_blocks_scheduled_turn_when_work_is_ready () =
 let test_provider_cooldown_keeps_scheduled_turn_open_when_fail_open_exists () =
   let meta =
     { minimal_meta with
-      cascade_name = "underdog";
+      cascade_name = "tool_rerank";
       current_task_id =
         (match Masc_mcp.Keeper_id.Task_id.of_string "task-789" with
          | Ok value -> Some value
@@ -2524,11 +2524,11 @@ let test_fail_open_local_only_when_probe_fails () =
   let cascade =
     UT.fail_open_local_only_when_unavailable
       ~probe_ollama_base_url:(fun _ -> false)
-      ~base_cascade:"underdog"
+      ~base_cascade:"tool_rerank"
       ~effective_cascade:"local_only"
       [ "ollama:qwen3.6:35b-a3b-mlx-bf16" ]
   in
-  check string "falls back to base cascade" "underdog" cascade
+  check string "falls back to base cascade" "tool_rerank" cascade
 
 let test_fail_open_local_only_preserves_explicit_local_only_base () =
   let cascade =
@@ -2652,8 +2652,8 @@ let test_degraded_retry_after_recoverable_error_does_not_broaden_local_recovery 
 let test_fallback_cascade_for_unavailable_profile_prefers_default () =
   let fallback =
     EC.fallback_cascade_for_unavailable_profile
-      ~base_cascade:"underdog"
-      ~effective_cascade:"underdog"
+      ~base_cascade:"tool_rerank"
+      ~effective_cascade:"tool_rerank"
   in
   check (option string) "non-default cascade fallback target is default"
     (Some KC.default_cascade_name) fallback
@@ -2661,11 +2661,11 @@ let test_fallback_cascade_for_unavailable_profile_prefers_default () =
 let test_fallback_cascade_for_unavailable_profile_prefers_base_after_phase_override () =
   let fallback =
     EC.fallback_cascade_for_unavailable_profile
-      ~base_cascade:"underdog"
+      ~base_cascade:"tool_rerank"
       ~effective_cascade:KC.local_recovery_cascade_name
   in
   check (option string) "phase override fallback target is base cascade"
-    (Some "underdog") fallback
+    (Some "tool_rerank") fallback
 
 let test_next_fail_open_cascade_for_turn_returns_untried_local_recovery () =
   let degraded_retry =

@@ -23,6 +23,9 @@ import { ChevronRight, ChevronLeft } from 'lucide-preact'
 import { ScrollToTopButton } from './common/scroll-to-top'
 import { CopyIdButton } from './common/copy-id-button'
 import { formatElapsedCompact } from '../lib/format-time'
+import { unacknowledgedCount } from './common/error-notification'
+import { ErrorPanel } from './common/error-panel'
+import { Bell } from 'lucide-preact'
 
 const buildIdentityOpen = signal(false)
 
@@ -110,6 +113,32 @@ export function ConnectionStatus() {
           class="inline-flex items-center justify-center rounded-sm border border-[var(--card-border)] bg-[var(--white-4)] px-2 py-0.5 tabular-nums attention-badge"
         >주의 ${attentionCount}건<//>
       ` : null}
+    </div>
+  `
+}
+
+const errorPanelOpen = signal(false)
+
+export function ErrorCounterBadge() {
+  const count = unacknowledgedCount.value
+  const open = errorPanelOpen.value
+
+  return html`
+    <div class="relative" role="status">
+      <button
+        type="button"
+        class="flex items-center gap-1.5 cursor-pointer rounded px-1 py-0.5 transition-colors hover:bg-[var(--white-5)] ${count > 0 ? 'text-[var(--bad)]' : 'text-[var(--text-muted)]'}"
+        title=${count > 0 ? `미확인 에러 ${count}건` : '에러 없음'}
+        onClick=${() => { errorPanelOpen.value = !errorPanelOpen.value }}
+        aria-expanded=${open}
+        aria-haspopup="true"
+      >
+        <${Bell} size=${14} />
+        ${count > 0 ? html`
+          <span class="inline-flex items-center justify-center min-w-4 h-4 px-1 rounded-full bg-[var(--bad)] text-2xs font-semibold text-white tabular-nums">${count > 99 ? '99+' : count}</span>
+        ` : null}
+      </button>
+      ${open ? html`<${ErrorPanel} onClose=${() => { errorPanelOpen.value = false }} />` : null}
     </div>
   `
 }

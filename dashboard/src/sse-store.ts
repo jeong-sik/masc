@@ -40,6 +40,7 @@ import { compositeTick } from './composite-signals'
 import { hydrateTransportHealthFromSSE } from './components/transport-health'
 import { activeKeeperName, hydrateKeeperStatus } from './keeper-runtime'
 import { showToast } from './components/common/toast'
+import { handleAgentFailed } from './components/common/error-notification'
 import { route } from './router'
 import {
   PERIODIC_REFRESH_DEV_MS,
@@ -376,6 +377,18 @@ export function setupSSEReaction(): () => void {
     if (event.type === 'transport_health_snapshot' && event.payload) {
       handleTransportHealth(event.payload)
       return
+    }
+
+    // 0d. Agent error notification — signal + toast, no fetch
+    if (event.type === 'oas:agent_failed') {
+      const p = (event.payload ?? {}) as Record<string, unknown>
+      handleAgentFailed({
+        agentName: typeof p.agent_name === 'string' ? p.agent_name
+          : event.agent_name ?? 'unknown',
+        taskId: typeof p.task_id === 'string' ? p.task_id : undefined,
+        error: typeof p.error === 'string' ? p.error
+          : event.error_text ?? '알 수 없는 오류',
+      })
     }
 
     // 1. Keeper heartbeat — signal-only, zero network calls

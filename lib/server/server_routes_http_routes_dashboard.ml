@@ -61,6 +61,35 @@ let available_cascade_profiles () : string list =
 let invalid_cascade_profiles () : (string * string list) list =
   (cascade_profile_gate ()).invalid_profiles
 
+let sync_keeper_cascade_meta ~(config : Coord.config) ~(name : string)
+    ~(cascade_name : string) : (bool, string) result =
+  let updated_at = Keeper_types.now_iso () in
+  match Keeper_types.read_meta config name with
+  | Error msg -> Error ("read_meta failed after TOML update: " ^ msg)
+  | Ok (Some meta) ->
+      let updated = { meta with cascade_name; updated_at } in
+      (match Keeper_types.write_meta ~force:true config updated with
+       | Ok () ->
+           let registered =
+             Option.is_some
+               (Keeper_registry.get ~base_path:config.base_path name)
+           in
+           Keeper_registry.update_meta ~base_path:config.base_path name updated;
+           Ok registered
+       | Error msg -> Error ("write_meta failed after TOML update: " ^ msg))
+  | Ok None ->
+      (match Keeper_registry.get ~base_path:config.base_path name with
+       | None -> Ok false
+       | Some entry ->
+           let updated = { entry.meta with cascade_name; updated_at } in
+           (match Keeper_types.write_meta ~force:true config updated with
+            | Ok () ->
+                Keeper_registry.update_meta ~base_path:config.base_path name
+                  updated;
+                Ok true
+            | Error msg ->
+                Error ("write_meta failed after TOML update: " ^ msg)))
+
 let dashboard_dev_actor_name = "dashboard"
 
 let dashboard_dev_token_path base_path =
@@ -1115,7 +1144,7 @@ and add_autoresearch_routes router =
   |> Http.Router.post "/api/v1/keeper/cascade" (fun request reqd ->
        with_tool_auth
          ~tool_name:(Tool_name.Masc.to_string Tool_name.Masc.Status)
-         (fun _state req reqd ->
+         (fun state req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            match Yojson.Safe.from_string body_str with
            | exception Yojson.Json_error _ ->
@@ -1165,10 +1194,26 @@ and add_autoresearch_routes router =
                        (String.escaped e))
                      reqd
                  | Ok () ->
-                   Http.Response.json ~request:req
-                     (Printf.sprintf
-                       {|{"ok":true,"keeper":"%s","cascade_name":"%s","source":"toml"}|}
-                       (String.escaped name) (String.escaped cascade))
-                     reqd)
+                   let config = state.Mcp_server.room_config in
+                   (match sync_keeper_cascade_meta ~config ~name
+                            ~cascade_name:cascade with
+                    | Error e ->
+                      Http.Response.json ~status:`Internal_server_error ~request:req
+                        (Printf.sprintf
+                           {|{"ok":false,"error":"%s"}|}
+                           (String.escaped e))
+                        reqd
+                    | Ok live_meta_synced ->
+                      Http.Response.json ~request:req
+                        (Yojson.Safe.to_string
+                           (`Assoc
+                              [
+                                ("ok", `Bool true);
+                                ("keeper", `String name);
+                                ("cascade_name", `String cascade);
+                                ("source", `String "toml");
+                                ("live_meta_synced", `Bool live_meta_synced);
+                              ]))
+                        reqd))
          )
        ) request reqd)

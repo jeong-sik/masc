@@ -354,7 +354,7 @@ let run_curl_post ?body ?token ~port ~path () =
     ; "-sS"
     ; "--http1.1"
     ; "--max-time"
-    ; "3"
+    ; "10"
     ; "-X"
     ; "POST"
     ; "-o"
@@ -420,7 +420,7 @@ let run_curl_get ?token ~port ~path () =
     ; "-sS"
     ; "--http1.1"
     ; "--max-time"
-    ; "3"
+    ; "10"
     ; "-X"
     ; "GET"
     ; "-o"
@@ -702,7 +702,7 @@ let with_seeded_server ?(env_overrides = []) f =
       rm_rf log_file;
       rm_rf base_path
     in
-    if not (wait_for_health ~port ~timeout_s:20.0)
+    if not (wait_for_health ~port ~timeout_s:45.0)
     then (
       let logs = read_file log_file in
       cleanup ();

@@ -37,6 +37,10 @@ val set_git_capture_hook_for_tests : git_capture_hook -> unit
     hook. *)
 val clear_git_capture_hook_for_tests : unit -> unit
 
+(** Effective timeout budget for the [git status --porcelain] capture,
+    after applying [MASC_WORKTREE_GIT_STATUS_TIMEOUT_SEC] if present. *)
+val git_status_timeout_sec : unit -> float
+
 (** Reset the in-memory per-repo status cache so tests observe a
     deterministic "no previous hash" state. *)
 val clear_status_cache_for_tests : unit -> unit

@@ -11,38 +11,38 @@ let test_bin_safe () =
   | Ok b ->
       assert (Bin.risk_class b = `Safe);
       assert (Bin.to_string b = "ls")
-  | Error _ -> failwith "ls must classify as Safe"
+  | Error _ -> assert false
 
 let test_bin_unknown_is_privileged () =
   match Bin.of_string "wibble" with
   | Ok b -> assert (Bin.risk_class b = `Privileged)
-  | Error _ -> failwith "unknown bin must still produce a Bin.t (Privileged)"
+  | Error _ -> assert false
 
 let test_bin_empty_rejected () =
   match Bin.of_string "" with
-  | Ok _ -> failwith "empty must error"
+  | Ok _ -> assert false
   | Error (`Unknown _) -> ()
 
 let test_git_op_destructive_detection () =
   match Git_op.of_argv [ "git"; "push"; "--force"; "origin"; "main" ] with
   | Ok (Git_op.Destructive _) -> ()
-  | Ok _ -> failwith "push --force must be Destructive"
-  | Error _ -> failwith "push --force must classify"
+  | Ok _ -> assert false
+  | Error _ -> assert false
 
 let test_git_op_read () =
   match Git_op.of_argv [ "git"; "status" ] with
   | Ok (Git_op.Read _) -> ()
-  | _ -> failwith "status must be Read"
+  | _ -> assert false
 
 let test_git_op_read_with_cwd_flag () =
   match Git_op.of_argv [ "git"; "-C"; "/tmp/repo"; "status" ] with
   | Ok (Git_op.Read _) -> ()
-  | _ -> assert false (* git -C /tmp/repo status must be Read *)
+  | _ -> assert false
 
 let test_git_op_unknown () =
   match Git_op.of_argv [ "git"; "exotic-subcmd" ] with
   | Error (`Unknown_subcmd _) -> ()
-  | _ -> failwith "unknown subcmd must error"
+  | _ -> assert false
 
 let test_parsed_polymorphic () =
   let p : int Parsed.t = Parsed.Parsed 42 in
@@ -50,18 +50,18 @@ let test_parsed_polymorphic () =
   let aborted : int Parsed.t = Parsed.Parse_aborted `Timeout_50ms in
   match p, too_complex, aborted with
   | Parsed 42, Too_complex `Heredoc, Parse_aborted `Timeout_50ms -> ()
-  | _ -> failwith "parsed variants wrong shape"
+  | _ -> assert false
 
 let test_path_scope_classify () =
   let ps = Path_scope.classify ~raw:"/etc/passwd" ~cwd:"/tmp" in
   assert (Path_scope.raw ps = "/etc/passwd");
   match Path_scope.scope ps with
   | Absolute_unknown _ -> ()
-  | _ -> failwith "A0 placeholder classifies everything as Absolute_unknown"
+  | _ -> assert false
 
 let test_verdict_trusted_argv_smart_ctor () =
   match Bin.of_string "ls" with
-  | Error _ -> failwith "ls ok"
+  | Error _ -> assert false
   | Ok bin ->
       let simple : Shell_ir.simple =
         { bin; args = []; env = []; cwd = None; redirects = [] }
@@ -77,7 +77,7 @@ let test_verdict_three_way () =
       { caps = []; summary = "x"; bin =
           (match Bin.of_string "ls" with
            | Ok b -> b
-           | Error _ -> failwith "ls ok");
+           | Error _ -> assert false);
         raw_source = "ls" }
   in
   ()

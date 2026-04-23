@@ -64,9 +64,18 @@ let keeper_name_from_agent_name agent_name =
   else
     None
 
+let is_keeper_agent_alias agent_name =
+  let prefix = "keeper-" and suffix = "-agent" in
+  let plen = String.length prefix and slen = String.length suffix in
+  let alen = String.length agent_name in
+  alen > plen + slen
+  && String.sub agent_name 0 plen = prefix
+  && String.sub agent_name (alen - slen) slen = suffix
+
 let canonical_keeper_name_from_agent_name agent_name =
   let trimmed = String.trim agent_name in
   match keeper_name_from_agent_name trimmed with
+  | Some keeper_name when is_keeper_agent_alias trimmed -> Some keeper_name
   | Some _ when Nickname.is_generated_nickname trimmed -> (
       match Nickname.extract_agent_type trimmed with
       | Some candidate when Keeper_config.validate_name candidate -> Some candidate

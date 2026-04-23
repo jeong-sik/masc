@@ -27,7 +27,7 @@ COPY ${BINARY_PATH} /app/masc-mcp
 RUN chmod +x /app/masc-mcp
 
 # Create non-root user for runtime
-RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
+RUN groupadd --system appgroup && useradd --system --gid appgroup appuser
 
 # Create data directory for JSONL fallback
 RUN mkdir -p /app/.masc && chown -R appuser:appgroup /app/.masc
@@ -40,6 +40,9 @@ ENV MASC_BASE_PATH=/app
 ENV MASC_CONFIG_DIR=/app/config
 
 EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD curl -fsS http://localhost:${PORT}/health || exit 1
 
 USER appuser
 

@@ -463,6 +463,7 @@ let run_docker_hardened_bash = Keeper_shell_docker.run_docker_hardened_bash
 
 let handle_keeper_bash
       ~(turn_sandbox_runtime : Keeper_turn_sandbox_runtime.t option)
+      ?(turn_sandbox_runtime_git : Keeper_turn_sandbox_runtime.t option)
       ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
@@ -597,7 +598,7 @@ let handle_keeper_bash
         "DOCKER_GIT_EXEC: keeper=%s cwd=%s cmd=%s"
         meta.name cwd cmd_for_log;
       run_docker_with_git_bash
-        ~config ~meta ~cwd ~timeout_sec ~cmd)
+        ?turn_sandbox_runtime:turn_sandbox_runtime_git ~config ~meta ~cwd ~timeout_sec ~cmd)
     else if sandbox_profile = Docker then (
       Log.Keeper.info
         "DOCKER_EXEC: keeper=%s cwd=%s cmd=%s network=%s"

@@ -4,6 +4,9 @@ type acquire_result =
 
 let pid_lock_path port = Printf.sprintf "/tmp/masc-%d.pid" port
 
+let base_path_lock_path base_path =
+  Filename.concat (Filename.concat base_path ".masc") "server-owner.pid"
+
 let close_quietly fd =
   try Unix.close fd with
   | Unix.Unix_error _ -> ()
@@ -155,6 +158,13 @@ let write_pid_file path pid =
     ~finally:(fun () -> close_out_noerr oc)
     (fun () -> Printf.fprintf oc "%d\n" pid)
 
+let claim_pid_file path =
+  Fs_compat.mkdir_p (Filename.dirname path);
+  let pid = Unix.getpid () in
+  write_pid_file path pid;
+  register_pid_cleanup ~path ~pid;
+  Acquired
+
 let acquire_pid_lock
     ?lock_path
     ?(probe_timeout_sec = 3.0)
@@ -224,8 +234,40 @@ let acquire_pid_lock
   | None -> Acquired)
   |> function
   | Already_running _ as result -> result
-  | Acquired ->
-      let pid = Unix.getpid () in
-      write_pid_file path pid;
-      register_pid_cleanup ~path ~pid;
-      Acquired
+  | Acquired -> claim_pid_file path
+
+let acquire_base_path_lock ?lock_path base_path =
+  let path =
+    match lock_path with
+    | Some value -> value
+    | None -> base_path_lock_path base_path
+  in
+  (match read_pid_file path with
+  | Some data -> (
+      match String.trim data |> int_of_string_opt with
+      | Some pid when pid > 0 ->
+          if pid_exists pid then
+            match process_command pid with
+            | Some command when looks_like_server_command command ->
+                Already_running { pid }
+            | Some _ | None ->
+                Log.legacy_stderr ~level:Log.Error ~module_name:"Server"
+                  (Printf.sprintf
+                     "[FATAL] PID %d owns %s but does not look like a masc-mcp server; refusing takeover"
+                     pid path);
+                Already_running { pid }
+          else begin
+            Log.legacy_stderr ~level:Log.Warn ~module_name:"Server"
+              (Printf.sprintf
+                 "[WARN] Removing stale base-path owner file (PID %d no longer running)"
+                 pid);
+            Acquired
+          end
+      | _ ->
+          Log.legacy_stderr ~level:Log.Warn ~module_name:"Server"
+            "[WARN] Invalid base-path owner file contents, overwriting";
+          Acquired)
+  | None -> Acquired)
+  |> function
+  | Already_running _ as result -> result
+  | Acquired -> claim_pid_file path

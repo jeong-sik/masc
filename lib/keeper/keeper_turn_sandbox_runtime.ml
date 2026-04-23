@@ -12,6 +12,7 @@ type t =
     container_root : string;
     uid : int;
     gid : int;
+    network_mode : network_mode;
     mutable state : state;
   }
 
@@ -26,7 +27,8 @@ let normalize_path path =
   Keeper_alerting_path.normalize_path_for_check path
   |> strip_trailing_slashes
 
-let create ~(config : Coord.config) ~(meta : keeper_meta) =
+let create ~(config : Coord.config) ~(meta : keeper_meta)
+    ?(network_mode = Network_none) () =
   {
     config;
     meta;
@@ -34,12 +36,19 @@ let create ~(config : Coord.config) ~(meta : keeper_meta) =
     container_root = Keeper_sandbox.container_root meta.name |> strip_trailing_slashes;
     uid = Unix.getuid ();
     gid = Unix.getgid ();
+    network_mode;
     state = Not_started;
   }
 
 let container_name_of (t : t) =
-  Printf.sprintf "masc-keeper-turn-%s-%d-%d"
+  let net_suffix =
+    match t.network_mode with
+    | Network_none -> "none"
+    | Network_inherit -> "inherit"
+  in
+  Printf.sprintf "masc-keeper-turn-%s-%s-%d-%d"
     (Coord_utils.safe_filename t.meta.name)
+    net_suffix
     (Unix.getpid ())
     (int_of_float (Unix.gettimeofday () *. 1000.0))
 
@@ -150,7 +159,7 @@ let start_container (t : t) ~(timeout_sec : float) =
               "--workdir";
               t.container_root;
               "--network";
-              "none";
+              network_mode_to_string t.network_mode;
               image;
               "sh";
               "-lc";

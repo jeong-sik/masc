@@ -374,6 +374,20 @@ let wait_for_health ~pid ~port ~timeout_s =
   in
   loop ()
 
+let wait_for_process_exit ~pid ~timeout_s =
+  let deadline = Unix.gettimeofday () +. timeout_s in
+  let rec loop () =
+    if not (process_alive pid) then
+      true
+    else if Unix.gettimeofday () >= deadline then
+      false
+    else begin
+      Unix.sleepf 0.1;
+      loop ()
+    end
+  in
+  loop ()
+
 let wait_for_startup_phase ~pid ~port ~timeout_s expected_phase =
   let deadline = Unix.gettimeofday () +. timeout_s in
   let rec loop () =
@@ -1526,6 +1540,93 @@ let test_main_eio_fresh_bootstrap_and_mcp_handshake () =
           Alcotest.(check bool) "canonical tool present" true
             (List.mem "masc_status" tool_names)))
 
+let test_main_eio_rejects_same_base_path_on_second_server () =
+  with_temp_dir "startup-base-path-owner-lock" (fun dir ->
+      let exe = find_main_eio_exe () in
+      let primary_port = find_free_port () in
+      let secondary_port = find_free_port_from (primary_port + 1) in
+      let primary_log = Filename.concat dir "primary.log" in
+      let secondary_log = Filename.concat dir "secondary.log" in
+      let open_log path =
+        Unix.openfile path [ Unix.O_CREAT; Unix.O_WRONLY; Unix.O_TRUNC ] 0o644
+      in
+      with_env "MASC_CONFIG_DIR" None @@ fun () ->
+      with_env "MASC_PERSONAS_DIR" None @@ fun () ->
+      with_cwd (project_root ()) @@ fun () ->
+      Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path:dir;
+      let env =
+        merge_env_overrides
+          [
+            ("MASC_BASE_PATH", dir);
+            ("MASC_STORAGE_TYPE", "filesystem");
+            ("GRAPHQL_API_KEY", "");
+            ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
+            ("MASC_AUTONOMY_ENABLED", "0");
+            ("MASC_ORCHESTRATOR_ENABLED", "0");
+            ("MASC_KEEPER_BOOTSTRAP_ENABLED", "false");
+            ("MASC_USE_H2", "0");
+            ("DUNE_SOURCEROOT", project_root ());
+          ]
+      in
+      let primary_fd = open_log primary_log in
+      let primary_pid =
+        Unix.create_process_env exe
+          [|
+            exe;
+            "--host";
+            "127.0.0.1";
+            "--port";
+            string_of_int primary_port;
+            "--base-path";
+            dir;
+          |]
+          env Unix.stdin primary_fd primary_fd
+      in
+      Unix.close primary_fd;
+      let secondary_pid = ref None in
+      Fun.protect
+        ~finally:(fun () ->
+          (match !secondary_pid with
+           | Some pid -> stop_process pid
+           | None -> ());
+          stop_process primary_pid)
+        (fun () ->
+          if not (wait_for_health ~pid:primary_pid ~port:primary_port ~timeout_s:5.0)
+          then begin
+            prerr_endline
+              (Printf.sprintf
+                 "primary main_eio did not expose /health within timeout in this environment.\nlog:\n%s"
+                 (read_file primary_log));
+            Alcotest.skip ()
+          end;
+          let secondary_fd = open_log secondary_log in
+          let pid =
+            Unix.create_process_env exe
+              [|
+                exe;
+                "--host";
+                "127.0.0.1";
+                "--port";
+                string_of_int secondary_port;
+                "--base-path";
+                dir;
+              |]
+              env Unix.stdin secondary_fd secondary_fd
+          in
+          secondary_pid := Some pid;
+          Unix.close secondary_fd;
+          if not (wait_for_process_exit ~pid ~timeout_s:5.0) then
+            Alcotest.failf
+              "secondary main_eio stayed alive despite shared base path\nlog:\n%s"
+              (read_file secondary_log);
+          let secondary_text = read_file secondary_log in
+          Alcotest.(check bool) "secondary log mentions base-path owner" true
+            (contains_substring secondary_text "already owns base path");
+          Alcotest.(check bool) "secondary log mentions primary pid" true
+            (contains_substring secondary_text (string_of_int primary_pid));
+          Alcotest.(check bool) "primary server stays healthy" true
+            (wait_for_health ~pid:primary_pid ~port:primary_port ~timeout_s:1.0)))
+
 let test_main_eio_invalid_cascade_stays_degraded_but_serves_dashboard () =
   with_temp_dir "startup-invalid-cascade" (fun dir ->
       let exe = find_main_eio_exe () in
@@ -1934,6 +2035,9 @@ let () =
           Alcotest.test_case
             "main_eio fresh bootstrap and MCP handshake"
             `Slow test_main_eio_fresh_bootstrap_and_mcp_handshake;
+          Alcotest.test_case
+            "main_eio rejects second server on same base path"
+            `Slow test_main_eio_rejects_same_base_path_on_second_server;
           Alcotest.test_case
             "main_eio partial catalog stays ready and surfaces rejections"
             `Slow

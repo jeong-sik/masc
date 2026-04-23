@@ -110,6 +110,16 @@ let direct_turn_observation (meta : keeper_meta) :
     work_discovery_due = false;
   }
 
+let resolve_turn_cascade_name (meta : keeper_meta) =
+  let raw_name = String.trim meta.cascade_name in
+  match Cascade_catalog_runtime.resolve_declared_name ~raw_name () with
+  | Ok cascade_name -> Ok cascade_name
+  | Error detail ->
+      Error
+        (Printf.sprintf
+           "invalid cascade_name %S for keeper %s: %s"
+           raw_name meta.name detail)
+
 (* -- handle_keeper_msg: orchestrator ---------------------------------------- *)
 
 let handle_keeper_msg ?on_text_delta ctx args : tool_result =
@@ -151,6 +161,11 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
       let turn_tracker = Progress.start_tracking ~task_id:turn_task_id ~total_steps:5 () in
       Progress.Tracker.step turn_tracker ~message:"Preparing keeper turn configuration" ();
       let meta = meta0 in
+      match resolve_turn_cascade_name meta with
+      | Error e ->
+        Progress.stop_tracking turn_task_id;
+        (false, "❌ " ^ e)
+      | Ok turn_cascade_name ->
       (* start_keepalive is deferred AFTER run_turn completes.
          Starting it here causes the heartbeat fiber to immediately grab LLM
          slots, starving the synchronous run_turn call (Issue #2610). *)
@@ -164,12 +179,6 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
           ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
           ~generation:meta.runtime.generation
       in
-      (* Historical drift: "keeper_turn" / "keeper_reply" were never defined
-         as separate cascade profiles in cascade.json; they always fell
-         through to default via Keeper_cascade_profile.canonicalize. Using
-         default_name here makes the resolution explicit and keeps metric
-         buckets/Prometheus labels from seeing ghost cascade names. *)
-      let turn_cascade_name = Keeper_cascade_profile.default_name in
       let effective_models =
         if direct_reply then
           Cascade_runtime.models_of_cascade_name turn_cascade_name

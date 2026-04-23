@@ -404,10 +404,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         (* Persist nickname so subsequent calls can use it. *)
         write_mcp_session_agent nickname;
         write_term_session_agent nickname;
-        (try ignore (Session.register registry ~agent_name:nickname)
-         with
-         | Eio.Cancel.Cancelled _ as e -> raise e
-         | exn -> log_mcp_exn ~label:"session register (nickname) failed" exn);
+        ignore (Session.register registry ~agent_name:nickname);
         nickname
       end
     end else
@@ -416,10 +413,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
 
   (* Auto-register session for non-read-only tools *)
   if agent_name <> "unknown" && not is_read_only then
-    (try ignore (Session.register registry ~agent_name)
-     with
-     | Eio.Cancel.Cancelled _ as e -> raise e
-     | exn -> log_mcp_exn ~label:"session register (tool) failed" exn);
+    ignore (Session.register registry ~agent_name);
 
   (* Log tool call *)
   Log.Mcp.debug "[%s] %s" agent_name name;

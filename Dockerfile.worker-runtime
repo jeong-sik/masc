@@ -29,6 +29,5 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /src/_build/install/default/bin/masc-worker-run /usr/local/bin/masc-worker-run
-COPY --from=build /src/_build/install/default/bin/masc-mcp /usr/local/bin/masc-mcp
 
-ENTRYPOINT ["/usr/local/bin/masc-worker-run"]
+ENTRYPOINT ["/usr/local/bin/masc-worker-run", "--spec-stdin"]

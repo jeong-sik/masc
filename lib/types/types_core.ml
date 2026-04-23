@@ -141,7 +141,7 @@ let agent_status_of_string_opt = function
 let agent_status_of_string s =
   match agent_status_of_string_opt s with
   | Some status -> status
-  | None -> Active  (* Safe default instead of failwith *)
+  | None -> Active  (* Safe default instead of raising *)
 
 (* Custom yojson converters for lowercase JSON compatibility *)
 let agent_status_to_yojson status = `String (agent_status_to_string status)

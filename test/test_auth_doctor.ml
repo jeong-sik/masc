@@ -62,7 +62,6 @@ let test_warns_for_codex_worker_admin_route_mismatch () =
         enabled = true;
         room_secret_hash = None;
         require_token = true;
-        default_role = Worker;
         token_expiry_hours = 24;
       }
   in
@@ -107,7 +106,6 @@ let test_errors_when_no_admin_bearer_source_exists () =
         enabled = true;
         room_secret_hash = None;
         require_token = true;
-        default_role = Worker;
         token_expiry_hours = 24;
       }
   in
@@ -144,7 +142,6 @@ let test_ignores_stale_admin_raw_token_file () =
         enabled = true;
         room_secret_hash = None;
         require_token = true;
-        default_role = Worker;
         token_expiry_hours = 24;
       }
   in

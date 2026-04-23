@@ -1363,6 +1363,10 @@ let keeper_config_json (config : Coord.config) (name : string)
             match tool_preset with
             | Some preset -> `String (Keeper_types.tool_preset_to_string preset)
             | None -> `Null);
+          ("tool_preset_source",
+            match m.tool_preset_source with
+            | Some src -> `String src
+            | None -> `Null);
           ("tool_also_allow", `List (List.map (fun s -> `String s) tool_also_allow));
           ("tool_custom_allowlist",
             `List

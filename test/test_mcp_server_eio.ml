@@ -11,6 +11,7 @@ module Tool_dispatch = Masc_mcp.Tool_dispatch
 module Tool_result = Masc_mcp.Tool_result
 module Keeper_types = Masc_mcp.Keeper_types
 module Keeper_registry = Masc_mcp.Keeper_registry
+module Masc_log = Log
 
 let () = Mirage_crypto_rng_unix.use_default ()
 
@@ -137,6 +138,39 @@ let int_field_exn label fields name =
   match List.assoc_opt name fields with
   | Some (`Int value) -> value
   | _ -> Alcotest.failf "%s missing int field %s" label name
+
+let latest_log_seq () =
+  match Masc_log.Ring.recent ~limit:1 () with
+  | (entry : Masc_log.Ring.entry) :: _ -> entry.seq
+  | [] -> -1
+
+let json_string_field_exn label json field =
+  match Yojson.Safe.Util.(json |> member field |> to_string_option) with
+  | Some value -> value
+  | None ->
+      Alcotest.failf "%s missing string field %s: %s" label field
+        (Yojson.Safe.to_string json)
+
+let log_detail_string (entry : Masc_log.Ring.entry) field =
+  Yojson.Safe.Util.(entry.details |> member field |> to_string_option)
+
+let find_mcp_tool_log_exn ~phase ~tool_name ~request_id entries =
+  match
+    List.find_opt
+      (fun entry ->
+        Option.equal String.equal (log_detail_string entry "phase") (Some phase)
+        && Option.equal String.equal
+             (log_detail_string entry "tool_name")
+             (Some tool_name)
+        && Option.equal String.equal
+             (log_detail_string entry "request_id")
+             (Some request_id))
+      entries
+  with
+  | Some entry -> entry
+  | None ->
+      Alcotest.failf "MCP tool log missing phase=%s tool=%s request_id=%s"
+        phase tool_name request_id
 
 let test_resolve_join_state_skips_read_only_lookup () =
   let called = ref false in
@@ -1910,6 +1944,77 @@ let test_handle_request_tools_call_board_post_structured_content () =
     Yojson.Safe.Util.(structured |> member "author" |> to_string);
   cleanup_dir base_path
 
+let test_handle_request_tools_call_logs_structured_mcp_details () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.set_switch sw;
+
+  let baseline = latest_log_seq () in
+  let base_path = temp_dir () in
+  let request_id = "1201" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+      let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+      ignore (Masc_mcp.Coord.init state.room_config ~agent_name:None);
+      let request =
+        Yojson.Safe.to_string
+          (`Assoc
+            [
+              ("jsonrpc", `String "2.0");
+              ("id", `Int 1201);
+              ("method", `String "tools/call");
+              ( "params",
+                `Assoc
+                  [
+                    ("name", `String "masc_board_post");
+                    ( "arguments",
+                      `Assoc
+                        [
+                          ("content", `String "log details parity");
+                          ("author", `String "tester");
+                        ] );
+                  ] );
+            ])
+      in
+      let response =
+        Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:"session-log" state
+          request
+      in
+      ignore (result_fields_exn response);
+      let entries =
+        Masc_log.Ring.recent ~limit:20 ~module_filter:"MCP"
+          ~since_seq:baseline ~order:`Oldest_first ()
+      in
+      let started =
+        find_mcp_tool_log_exn ~phase:"started" ~tool_name:"masc_board_post"
+          ~request_id entries
+      in
+      let result =
+        find_mcp_tool_log_exn ~phase:"result" ~tool_name:"masc_board_post"
+          ~request_id entries
+      in
+      let completed =
+        find_mcp_tool_log_exn ~phase:"completed" ~tool_name:"masc_board_post"
+          ~request_id entries
+      in
+      let check_common label (entry : Masc_log.Ring.entry) =
+        let details = entry.details in
+        Alcotest.(check string) (label ^ " event_family") "tool_call"
+          (json_string_field_exn label details "event_family");
+        Alcotest.(check string) (label ^ " session") "session-log"
+          (json_string_field_exn label details "session_id")
+      in
+      check_common "started" started;
+      check_common "result" result;
+      check_common "completed" completed;
+      Alcotest.(check string) "completed outcome" "ok"
+        (json_string_field_exn "completed" completed.details "outcome");
+      Alcotest.(check string) "result outcome" "ok"
+        (json_string_field_exn "result" result.details "outcome"))
+
 let test_handle_request_tools_call_records_keeper_usage_for_public_mcp () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -2801,6 +2906,8 @@ let eio_tests = [
   (* cache get structured content test removed: cache tools retired (#3640) *)
   "handle tools/call board post structured content", `Quick,
     test_handle_request_tools_call_board_post_structured_content;
+  "handle tools/call logs structured MCP details", `Quick,
+    test_handle_request_tools_call_logs_structured_mcp_details;
   "handle tools/call records keeper usage for public MCP tool", `Quick,
     test_handle_request_tools_call_records_keeper_usage_for_public_mcp;
   "handle tools/call blocks keeper internal tool", `Quick,

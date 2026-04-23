@@ -501,7 +501,7 @@ let invalid_profile_names body =
   | _ -> []
 ;;
 
-let make_keeper_meta_json ?(name = "route-shadow-demo") () =
+let make_keeper_meta_json ?(name = "route_shadow_demo") () =
   match
     Masc_mcp.Keeper_types.meta_of_json
       (`Assoc
@@ -603,6 +603,8 @@ let append_execution_receipt config ~keeper_name =
       tool_surface =
         {
           turn_lane = "tool";
+          tool_surface_class = "mixed";
+          tool_requirement = "required";
           visible_tool_count = 2;
           tool_gate_enabled = true;
           tool_surface_fallback_used = false;
@@ -619,6 +621,10 @@ let append_execution_receipt config ~keeper_name =
       cascade_attempt_count = 2;
       cascade_fallback_applied = true;
       cascade_outcome = "passed_to_next_model";
+      degraded_retry_applied = true;
+      degraded_retry_cascade =
+        Some Masc_mcp.Keeper_config.local_recovery_cascade_name;
+      fallback_reason = Some "turn_timeout";
       stop_reason = Some "completed";
       error_kind = None;
       error_message = None;
@@ -651,7 +657,7 @@ let with_seeded_server ?(env_overrides = []) f =
     in
     let log_file = Filename.temp_file "dashboard-keeper-routes-" ".log" in
     let base_path = Filename.temp_file "dashboard-keeper-base-" "" in
-    let keeper_name = "route-shadow-demo" in
+    let keeper_name = "route_shadow_demo" in
     (try Sys.remove base_path with
      | _ -> ());
     Unix.mkdir base_path 0o755;
@@ -935,7 +941,7 @@ let test_agent_purge_route_removes_keeper_artifacts_and_toml () =
        valid_model
        valid_model)
   @@ fun config_root ->
-  let keeper_name = "route-shadow-demo" in
+  let keeper_name = "route_shadow_demo" in
   let keeper_toml_path =
     Filename.concat (Filename.concat config_root "keepers") (keeper_name ^ ".toml")
   in
@@ -1108,7 +1114,7 @@ let test_execution_trust_route_surfaces_trust_summary_fields () =
     (row |> member "trust" |> member "approval_state" |> member "state"
      |> to_string);
   check string "route surfaces execution summary mutation guard"
-    "mutation_contract_not_observed"
+    "mutation_contract_satisfied"
     (row |> member "trust" |> member "execution_summary"
      |> member "mutation_guard_summary" |> to_string);
   check bool "route surfaces latest causal event field" true

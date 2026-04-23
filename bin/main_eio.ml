@@ -253,16 +253,6 @@ let make_extended_handler routes =
               ) hearths));
             ] in
             Http.Response.json (Yojson.Safe.to_string json) reqd
-        | `GET, p
-          when String.length p > 25
-               && String.sub p 0 25 = "/api/v1/governance/cases/" ->
-            (match !server_state with
-             | None -> Http.Response.json {|{"error":"not initialized"}|} reqd
-             | Some state ->
-                 let case_id = String.sub p 25 (String.length p - 25) in
-                 let base_path = state.Mcp_server.room_config.base_path in
-                 let (status, json) = governance_case_detail_json ~base_path ~case_id in
-                 Http.Response.json ~status (Yojson.Safe.to_string json) reqd)
         | `GET, p when String.length p > 14 && String.sub p 0 14 = "/api/v1/board/" ->
             let post_id = String.sub p 14 (String.length p - 14) in
             let format = Option.value ~default:"nested" (query_param request "format") in

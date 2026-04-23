@@ -1,5 +1,7 @@
 type tool_surface =
   { turn_lane : string
+  ; tool_surface_class : string
+  ; tool_requirement : string
   ; visible_tool_count : int
   ; tool_gate_enabled : bool
   ; tool_surface_fallback_used : bool
@@ -35,6 +37,9 @@ type t =
   ; cascade_attempt_count : int
   ; cascade_fallback_applied : bool
   ; cascade_outcome : string
+  ; degraded_retry_applied : bool
+  ; degraded_retry_cascade : string option
+  ; fallback_reason : string option
   ; stop_reason : string option
   ; error_kind : string option
   ; error_message : string option
@@ -113,6 +118,8 @@ let to_json (receipt : t) =
         `Assoc
           [
             ("turn_lane", `String receipt.tool_surface.turn_lane);
+            ("tool_surface_class", `String receipt.tool_surface.tool_surface_class);
+            ("tool_requirement", `String receipt.tool_surface.tool_requirement);
             ("visible_tool_count", `Int receipt.tool_surface.visible_tool_count);
             ("tool_gate_enabled", `Bool receipt.tool_surface.tool_gate_enabled);
             ( "tool_surface_fallback_used",
@@ -148,6 +155,15 @@ let to_json (receipt : t) =
             ("attempt_count", `Int receipt.cascade_attempt_count);
             ("fallback_applied", `Bool receipt.cascade_fallback_applied);
             ("outcome", `String receipt.cascade_outcome);
+            ("degraded_retry_applied", `Bool receipt.degraded_retry_applied);
+            ( "degraded_retry_cascade",
+              match receipt.degraded_retry_cascade with
+              | Some value -> `String value
+              | None -> `Null );
+            ( "fallback_reason",
+              match receipt.fallback_reason with
+              | Some value -> `String value
+              | None -> `Null );
           ] );
       ( "stop_reason",
         match receipt.stop_reason with

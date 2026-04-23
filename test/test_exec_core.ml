@@ -464,6 +464,20 @@ let test_git_status_structured () =
   check int "unstaged 1" 1 (List.length unstaged);
   check int "untracked 1" 1 (List.length untracked)
 
+let test_git_status_with_global_option_structured () =
+  let json =
+    Masc_mcp.Exec_core.process_result_json
+      ~base_path:"/tmp"
+      ~keeper_name:"p10-test"
+      ~cmd:"git -C /tmp/repo status --porcelain"
+      ~status:(Unix.WEXITED 0)
+      ~output:" M lib/foo.ml\n"
+      ()
+  in
+  let so = json |> member "structured_output" in
+  let unstaged = so |> member "unstaged" |> to_list in
+  check int "unstaged via git -C" 1 (List.length unstaged)
+
 let test_git_log_structured () =
   let json =
     Masc_mcp.Exec_core.process_result_json
@@ -711,6 +725,8 @@ let () =
         [
           test_case "git status --porcelain produces structured fields"
             `Quick test_git_status_structured;
+          test_case "git status with global option produces structured fields"
+            `Quick test_git_status_with_global_option_structured;
           test_case "git log --oneline produces commits array" `Quick
             test_git_log_structured;
           test_case "failed git status has no structured_output" `Quick

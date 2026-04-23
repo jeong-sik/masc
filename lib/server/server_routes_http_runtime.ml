@@ -207,27 +207,6 @@ let board_post_detail_json ~response_format ~post_id =
       in
       (`OK, Yojson.Safe.to_string json)
 
-let governance_case_status_filter_of_request request =
-  ignore (query_param request "status");
-  None
-
-let governance_cases_json request ~base_path =
-  let limit = int_query_param request "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
-  let offset = int_query_param request "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
-  let include_test = bool_query_param request "include_test" ~default:false in
-  let status_filter = governance_case_status_filter_of_request request in
-  Dashboard_governance.cases_json ~base_path ~limit ~offset ~status_filter
-    ~include_test
-
-let governance_case_detail_json ~base_path ~case_id =
-  let (status, json) = Dashboard_governance.case_detail_json ~base_path ~case_id in
-  let http_status =
-    match status with
-    | `OK -> `OK
-    | `Not_found -> `Not_found
-  in
-  (http_status, json)
-
 (** CORS preflight handler *)
 let options_handler request reqd =
   let origin = get_origin request in

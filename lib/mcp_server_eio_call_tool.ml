@@ -389,6 +389,19 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
   in
   let end_time = Eio.Time.now clock in
   let duration_ms = int_of_float ((end_time -. start_time) *. 1000.0) in
+  let jsonrpc_id_str =
+    match id with
+    | `String s -> s
+    | `Int i -> string_of_int i
+    | `Intlit s -> s
+    | `Float f -> Printf.sprintf "%0.0f" f
+    | _ -> "unknown"
+  in
+  let mcp_session_detail =
+    match mcp_session_id with
+    | Some session_id -> `String session_id
+    | None -> `Null
+  in
 
   (* Resolve agent_name: session identity > arguments > fallback *)
   let agent_name =
@@ -416,12 +429,16 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     ~agent_id:agent_name ~tool_name:name ~success ~error_msg:error_detail
     ?trace_id:otel_trace_id ();
   if not success then
-    Log.emit Log.Error ~module_name:"MCP"
+    Log.Mcp.emit Log.Error
       ~details:
         (`Assoc
           [
             ("event_family", `String "tool_call_failure");
             ("tool_name", `String name);
+            ("phase", `String "failure");
+            ("request_id", `String jsonrpc_id_str);
+            ("session_id", mcp_session_detail);
+            ("outcome", `String "error");
             ("agent_name", `String agent_name);
             ("duration_ms", `Int duration_ms);
             ("timeout_hit", `Bool !timeout_hit);
@@ -565,14 +582,6 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     log_mcp_exn ~label:"activity graph emit failed" exn);
 
-  let jsonrpc_id_str =
-    match id with
-    | `String s -> s
-    | `Int i -> string_of_int i
-    | `Intlit s -> s
-    | `Float f -> Printf.sprintf "%0.0f" f
-    | _ -> "unknown"
-  in
   let trace_id =
     match otel_trace_id with
     | Some tid -> tid
@@ -668,6 +677,22 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     String_util.utf8_safe ~max_bytes:83 ~suffix:"..." message |> String_util.to_string
   in
   let preview = String.map (function '\n' -> ' ' | c -> c) preview in
-  Log.Mcp.info "%s -> %s" name preview;
+  Log.Mcp.emit Log.Info
+    ~details:
+      (`Assoc
+        [
+          ("event_family", `String "tool_call");
+          ("tool_name", `String name);
+          ("phase", `String "result");
+          ("request_id", `String jsonrpc_id_str);
+          ("session_id", mcp_session_detail);
+          ("agent_name", `String agent_name);
+          ("outcome", `String (if success then "ok" else "error"));
+          ("success", `Bool success);
+          ("duration_ms", `Int duration_ms);
+          ("attempts", `Int attempts);
+          ("timeout_hit", `Bool !timeout_hit);
+        ])
+    (Printf.sprintf "%s -> %s" name preview);
 
   result

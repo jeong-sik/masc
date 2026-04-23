@@ -32,3 +32,11 @@ val select_cascade :
   base_cascade:string ->
   phase:Keeper_state_machine.phase ->
   routing_decision
+
+(** Override an already-routed cascade when the turn must guarantee a
+    tool-capable provider lane. Phase-routed local/recovery cascades are
+    preserved. *)
+val route_effective_cascade_for_tool_requirement :
+  effective_cascade:string ->
+  tool_requirement:string ->
+  routing_decision

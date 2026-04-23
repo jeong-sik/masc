@@ -183,6 +183,7 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     shared_memory_scope;
     tool_access;
     tool_denylist;
+    tool_preset_source = p.profile_defaults.tool_preset_source;
     autoboot_enabled;
     active_goal_ids =
       Option.value ~default:old.active_goal_ids p.profile_defaults.active_goal_ids;

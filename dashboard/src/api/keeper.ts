@@ -476,7 +476,15 @@ export function resumeKeeper(name: string): Promise<KeeperLifecycleResponse> {
 interface KeeperToolPolicyInput {
   action: 'set_policy'
   mode: 'preset' | 'custom' | 'full'
-  preset?: 'minimal' | 'messaging' | 'coding' | 'research' | 'full'
+  preset?:
+    | 'minimal'
+    | 'social'
+    | 'messaging'
+    | 'dispatch'
+    | 'coding'
+    | 'research'
+    | 'delivery'
+    | 'full'
   allow?: string[]
   also_allow?: string[]
   deny?: string[]
@@ -485,7 +493,16 @@ interface KeeperToolPolicyInput {
 export interface ToolEditResponse {
   ok: boolean
   tool_policy_mode: 'preset' | 'custom' | string
-  tool_preset?: 'minimal' | 'messaging' | 'coding' | 'research' | 'full' | null
+  tool_preset?:
+    | 'minimal'
+    | 'social'
+    | 'messaging'
+    | 'dispatch'
+    | 'coding'
+    | 'research'
+    | 'delivery'
+    | 'full'
+    | null
   tool_also_allow: string[]
   tool_custom_allowlist: string[]
   resolved_allowlist: string[]

@@ -213,6 +213,7 @@
    meta_cognition_types
    meta_cognition_rules
    meta_cognition_snapshot
+   governance_anomaly
    governance_cases_snapshot
    meta_cognition_parse
    meta_cognition_interpret

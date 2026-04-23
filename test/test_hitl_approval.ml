@@ -72,6 +72,27 @@ let with_test_config f =
       let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
       f state.room_config)
 
+let with_temp_masc_base f =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let old_base = Sys.getenv_opt "MASC_BASE_PATH" in
+  let old_base_input = Sys.getenv_opt "MASC_BASE_PATH_INPUT" in
+  let base_path = temp_dir () in
+  AQ.For_testing.reset_audit_store ();
+  Unix.putenv "MASC_BASE_PATH" base_path;
+  Unix.putenv "MASC_BASE_PATH_INPUT" base_path;
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_audit_store ();
+      (match old_base with
+       | Some value -> Unix.putenv "MASC_BASE_PATH" value
+       | None -> Unix.putenv "MASC_BASE_PATH" "");
+      (match old_base_input with
+       | Some value -> Unix.putenv "MASC_BASE_PATH_INPUT" value
+       | None -> Unix.putenv "MASC_BASE_PATH_INPUT" "");
+      cleanup_dir base_path)
+    f
+
 (* ── 1. Risk classification ──────────────────────────────── *)
 
 let test_risk_classification_critical () =
@@ -727,6 +748,28 @@ let test_callback_paranoid_medium_risk_uses_remembered_policy () =
       | Agent_sdk.Hooks.Edit _ ->
           Alcotest.fail "expected remembered approve, got edit")
 
+let test_read_recent_audit_filters_after_wide_scan () =
+  with_temp_masc_base @@ fun () ->
+  let keeper_name = "audit-target-keeper" in
+  AQ.audit_approval_event ~event_type:"resolved" ~id:"target-audit"
+    ~keeper_name ~tool_name:"keeper_shell" ~risk_level:AQ.Medium
+    ~decision:"approve" ();
+  for i = 1 to 32 do
+    AQ.audit_approval_event ~event_type:"resolved"
+      ~id:(Printf.sprintf "other-audit-%02d" i)
+      ~keeper_name:(Printf.sprintf "busy-keeper-%02d" i)
+      ~tool_name:"keeper_shell" ~risk_level:AQ.Medium
+      ~decision:"approve" ()
+  done;
+  match AQ.read_recent_audit ~keeper_name ~n:1 () with
+  | [ json ] ->
+      Alcotest.(check string) "target approval survives unrelated tail"
+        "target-audit"
+        Yojson.Safe.Util.(json |> member "id" |> to_string)
+  | items ->
+      Alcotest.fail
+        (Printf.sprintf "expected one target audit, got %d" (List.length items))
+
 (* ── Test runner ──────────────────────────────────────────── *)
 
 let () =
@@ -772,6 +815,8 @@ let () =
         test_resolve_with_policy_remembers_medium_allow;
       Alcotest.test_case "resolve_with_policy skips high allow memory" `Quick
         test_resolve_with_policy_does_not_remember_high_allow;
+      Alcotest.test_case "read_recent_audit scans before keeper filter" `Quick
+        test_read_recent_audit_filters_after_wide_scan;
     ]);
     ("callback_integration", [
       Alcotest.test_case "low risk auto-approved" `Quick test_callback_approves_low_risk;

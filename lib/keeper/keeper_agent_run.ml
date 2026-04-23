@@ -291,6 +291,8 @@ let ctx_composition_to_json (metrics : ctx_composition_metrics) : Yojson.Safe.t 
 
 type tool_surface_metrics =
   { turn_lane : string
+  ; tool_surface_class : string
+  ; tool_requirement : string
   ; visible_tool_count : int
   ; tool_gate_enabled : bool
   ; tool_surface_fallback_used : bool
@@ -314,6 +316,8 @@ type computed_tool_surface =
   ; selection_mode : string
   ; is_last_turn : bool
   ; is_warning_zone : bool
+  ; tool_surface_class : string
+  ; tool_requirement : string
   ; tool_gate_requested : bool
   ; tool_surface_fallback_used : bool
   ; lane : string
@@ -440,6 +444,16 @@ let tool_required_affordances =
   ; "task_audit"
   ]
 
+let should_require_tools_for_initial_turn ~(max_turns : int)
+    ~(turn_affordances : string list) =
+  let initial_per_call_turn = 1 in
+  let initial_turn_is_last = initial_per_call_turn >= max_turns - 1 in
+  max_turns > 1
+  && not initial_turn_is_last
+  && List.exists
+       (fun affordance -> List.mem affordance turn_affordances)
+       tool_required_affordances
+
 (* Tool selection & disclosure — extracted to Keeper_tool_disclosure (#5732) *)
 
 (* Deterministic selection floor size: keep the executable surface small
@@ -543,6 +557,9 @@ let run_turn
       ?(trajectory_acc : Trajectory.accumulator option)
       ?(tool_overlay : Oas.Tool_op.t ref option)
       ?priority
+      ?(degraded_retry_applied = false)
+      ?degraded_retry_cascade
+      ?fallback_reason
       ?(is_retry = false)
       ?shared_context
       ?event_bus
@@ -1227,6 +1244,8 @@ let run_turn
     ref
       {
         turn_lane = "text_only";
+        tool_surface_class = "none";
+        tool_requirement = "none";
         visible_tool_count = 0;
         tool_gate_enabled = false;
         tool_surface_fallback_used = false;
@@ -1512,9 +1531,23 @@ let run_turn
       else
         all_allowed
     in
+    let visible_tool_count = List.length all_allowed in
+    let tool_surface_class =
+      if visible_tool_count = 0 then "none"
+      else if List.for_all Tool_catalog.is_public_mcp all_allowed then
+        "public_only"
+      else
+        "mixed"
+    in
+    let tool_requirement =
+      if visible_tool_count = 0 then "none"
+      else if tool_gate_requested then "required"
+      else "optional"
+    in
     let lane =
       if is_retry then "retry"
-      else if tool_gate_requested then "tool_required"
+      else if String.equal tool_requirement "required" then "tool_required"
+      else if String.equal tool_requirement "optional" then "tool_optional"
       else (
         match current_tool_choice with
         | Some Oas.Types.None_ -> "tool_disabled"
@@ -1533,6 +1566,8 @@ let run_turn
       selection_mode;
       is_last_turn;
       is_warning_zone;
+      tool_surface_class;
+      tool_requirement;
       tool_gate_requested;
       tool_surface_fallback_used;
       lane;
@@ -1549,6 +1584,8 @@ let run_turn
   tool_surface_ref :=
     {
       turn_lane = initial_tool_surface.lane;
+      tool_surface_class = initial_tool_surface.tool_surface_class;
+      tool_requirement = initial_tool_surface.tool_requirement;
       visible_tool_count = List.length initial_tool_surface.all_allowed;
       tool_gate_enabled = initial_tool_surface.tool_gate_requested;
       tool_surface_fallback_used = initial_tool_surface.tool_surface_fallback_used;
@@ -1938,6 +1975,8 @@ let run_turn
               tool_surface_ref :=
                 {
                   turn_lane = lane;
+                  tool_surface_class = computed_surface.tool_surface_class;
+                  tool_requirement = computed_surface.tool_requirement;
                   visible_tool_count = List.length all_allowed;
                   tool_gate_enabled = computed_surface.tool_gate_requested;
                   tool_surface_fallback_used = computed_surface.tool_surface_fallback_used;
@@ -2011,6 +2050,8 @@ let run_turn
                    ; "llm_selected_count", `Int computed_surface.llm_selected_count
                    ; "final_visible", `Int (List.length all_allowed)
                    ; "turn_lane", `String lane
+                   ; "tool_surface_class", `String computed_surface.tool_surface_class
+                   ; "tool_requirement", `String computed_surface.tool_requirement
                    ; "tool_gate_enabled", `Bool computed_surface.tool_gate_requested
                    ; "tool_surface_fallback_used", `Bool computed_surface.tool_surface_fallback_used
                    ; "hook_ms", `Float hook_elapsed_ms
@@ -2126,9 +2167,12 @@ let run_turn
   with
   | Error e -> Error (Oas.Error.Internal e)
   | Ok oas_allowed_paths ->
-    let require_tool_choice_support = initial_tool_surface.tool_gate_requested in
+    let require_tool_choice_support =
+      String.equal initial_tool_surface.tool_requirement "required"
+    in
     let require_tool_support =
-      initial_tool_surface.tool_gate_requested && tools <> []
+      String.equal initial_tool_surface.tool_requirement "required"
+      && tools <> []
     in
     let timeout_s =
       match oas_timeout_s with
@@ -2857,6 +2901,8 @@ let run_turn
         tool_surface =
           {
             turn_lane = (!tool_surface_ref).turn_lane;
+            tool_surface_class = (!tool_surface_ref).tool_surface_class;
+            tool_requirement = (!tool_surface_ref).tool_requirement;
             visible_tool_count = (!tool_surface_ref).visible_tool_count;
             tool_gate_enabled = (!tool_surface_ref).tool_gate_enabled;
             tool_surface_fallback_used =
@@ -2880,6 +2926,9 @@ let run_turn
            | None -> false);
         cascade_outcome =
           cascade_outcome_of_observation cascade_observation;
+        degraded_retry_applied;
+        degraded_retry_cascade;
+        fallback_reason;
         stop_reason = !receipt_stop_reason_ref;
         error_kind;
         error_message;

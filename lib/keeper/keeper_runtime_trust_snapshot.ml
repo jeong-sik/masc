@@ -76,12 +76,17 @@ let keeper_turn_id_of_json json =
       | None -> json_int_opt_member "turn" json)
 
 let timeline_event_json ?trace_id ?keeper_turn_id ?task_id ?(goal_ids = [])
-    ?next_human_action ~ts_unix ~kind ~title ~summary ~severity () =
+    ?next_human_action ?observed_at_unix ?(observation_only = false)
+    ~ts_unix ~kind ~title ~summary ~severity () =
+  let observed_at_unix = Option.value ~default:ts_unix observed_at_unix in
   `Assoc
     [
       ("kind", `String kind);
       ("ts", `String (iso_of_unix_seconds ts_unix));
       ("ts_unix", `Float ts_unix);
+      ("observed_at", `String (iso_of_unix_seconds observed_at_unix));
+      ("observed_at_unix", `Float observed_at_unix);
+      ("observation_only", `Bool observation_only);
       ("trace_id", Json_util.string_opt_to_json trace_id);
       ("keeper_turn_id", Json_util.int_opt_to_json keeper_turn_id);
       ("task_id", Json_util.string_opt_to_json task_id);
@@ -315,7 +320,8 @@ let receipt_timeline_event receipt =
              ~severity ())
 
 let blocker_timeline_event ?task_id ?(goal_ids = []) ?trace_id
-    ~ts_unix ~runtime_blocker_fields ~next_human_action () =
+    ?observed_at_unix ~ts_unix ~runtime_blocker_fields
+    ~next_human_action () =
   let blocker_class = assoc_string_opt "runtime_blocker_class" runtime_blocker_fields in
   let blocker_summary =
     assoc_string_opt "runtime_blocker_summary" runtime_blocker_fields
@@ -326,6 +332,7 @@ let blocker_timeline_event ?task_id ?(goal_ids = []) ?trace_id
     when String.trim summary <> "" ->
       Some
         (timeline_event_json ?trace_id ?task_id ~goal_ids ?next_human_action
+           ?observed_at_unix ~observation_only:true
            ~ts_unix ~kind:"runtime_blocker"
            ~title:"Runtime Blocker"
            ~summary
@@ -338,12 +345,14 @@ let blocker_timeline_event ?task_id ?(goal_ids = []) ?trace_id
     when String.trim summary <> "" ->
       Some
         (timeline_event_json ?trace_id ?task_id ~goal_ids ?next_human_action
+           ?observed_at_unix ~observation_only:true
            ~ts_unix ~kind:"runtime_blocker"
            ~title:"Runtime Blocker"
            ~summary ~severity:"warn" ())
   | Some blocker_class, None ->
       Some
         (timeline_event_json ?trace_id ?task_id ~goal_ids ?next_human_action
+           ?observed_at_unix ~observation_only:true
            ~ts_unix ~kind:"runtime_blocker"
            ~title:"Runtime Blocker"
            ~summary:blocker_class ~severity:"warn" ())
@@ -441,10 +450,36 @@ let latest_receipt_json ~(config : Coord.config) ~(keeper_name : string) =
 let sort_timeline_events events =
   List.sort
     (fun left right ->
-      Float.compare
-        (json_float_opt_member "ts_unix" right |> Option.value ~default:0.0)
-        (json_float_opt_member "ts_unix" left |> Option.value ~default:0.0))
+      match
+        Bool.compare
+          (json_bool_opt_member "observation_only" left
+           |> Option.value ~default:false)
+          (json_bool_opt_member "observation_only" right
+           |> Option.value ~default:false)
+      with
+      | 0 ->
+          Float.compare
+            (json_float_opt_member "ts_unix" right |> Option.value ~default:0.0)
+            (json_float_opt_member "ts_unix" left |> Option.value ~default:0.0)
+      | cmp -> cmp)
     events
+
+let latest_causal_from_timeline = function
+  | `List items -> (
+      match
+        List.find_opt
+          (fun json ->
+             not
+               (json_bool_opt_member "observation_only" json
+                |> Option.value ~default:false))
+          items
+      with
+      | Some event -> event
+      | None -> (
+          match items with
+          | event :: _ -> event
+          | [] -> `Null))
+  | _ -> `Null
 
 let approval_state_json ~pending_approval_count ~latest_tool_call
     ~latest_approval_audit ~latest_receipt =
@@ -576,8 +611,9 @@ let causal_timeline_json ~meta ~latest_decision ~latest_receipt
     let task_id = Keeper_runtime_contract.current_task_id_opt meta in
     let goal_ids = meta.active_goal_ids in
     let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+    let observed_at_unix = Time_compat.now () in
     [
-      blocker_timeline_event ~ts_unix:(Time_compat.now ())
+      blocker_timeline_event ~ts_unix:observed_at_unix ~observed_at_unix
         ~runtime_blocker_fields ?task_id ~goal_ids
         ~trace_id ~next_human_action ()
     ]
@@ -677,9 +713,7 @@ let snapshot_json ~(config : Coord.config) ~(meta : keeper_meta) =
       ~runtime_blocker_fields ~next_human_action
   in
   let latest_causal_event =
-    match causal_timeline with
-    | `List (event :: _) -> event
-    | _ -> `Null
+    latest_causal_from_timeline causal_timeline
   in
   `Assoc
     [

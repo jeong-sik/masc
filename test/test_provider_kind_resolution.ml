@@ -144,9 +144,9 @@ let test_cascade_parse_custom_v1_base_url_dedupes_request_path () =
       "http://127.0.0.1:18080/v1" cfg.base_url
 
 let test_cascade_parse_kimi_legacy_alias_maps_to_k2_5 () =
-  with_env "KIMI_API_KEY_SB" (Some "dummy-key") (fun () ->
+  with_env "KIMI_API_KEY" (Some "dummy-key") (fun () ->
       match Cascade.parse_model_string "kimi:kimi-for-coding" with
-      | None -> fail "kimi legacy alias should parse when KIMI_API_KEY_SB is set"
+      | None -> fail "kimi legacy alias should parse when KIMI_API_KEY is set"
       | Some cfg ->
         check kind_testable "cfg.kind is OpenAI_compat"
           Pk.OpenAI_compat cfg.kind;

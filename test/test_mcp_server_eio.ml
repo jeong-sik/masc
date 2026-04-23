@@ -1663,7 +1663,7 @@ let test_execute_tool_hyphenated_generated_alias_claim_next_reuses_base_token ()
       ~name:"masc_claim_next"
       ~arguments:(`Assoc [ ("agent_name", `String "qa-king-warm-heron") ])
   in
-  Alcotest.(check bool) "claim_next succeeds" true ok;
+  if not ok then Alcotest.failf "claim_next failed: %s" msg;
   Alcotest.(check bool) "claim_next reports claimed task" true
     (contains_substring msg "task-001");
   Alcotest.(check (option string)) "current task set after claim_next"

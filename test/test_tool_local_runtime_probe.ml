@@ -45,20 +45,33 @@ let test_ollama_generate_parser_computes_tok_per_second () =
 let test_request_body_omits_keep_alive_by_default () =
   let json =
     Masc_mcp.Tool_local_runtime_probe.request_body_json
-      ~keep_alive:None ~model_id:"qwen3.5:35b-a3b-coding-nvfp4" ~prompt:"READY"
-      ~max_tokens:8
+      ~think:false ~keep_alive:None ~model_id:"qwen3.5:35b-a3b-coding-nvfp4"
+      ~prompt:"READY" ~max_tokens:8
     |> Yojson.Safe.from_string
   in
   let open Yojson.Safe.Util in
   check (option string) "keep_alive omitted"
     None
-    (json |> member "keep_alive" |> to_string_option)
+    (json |> member "keep_alive" |> to_string_option);
+  check bool "thinking disabled by default" false
+    (json |> member "think" |> to_bool)
+
+let test_request_body_can_enable_thinking () =
+  let json =
+    Masc_mcp.Tool_local_runtime_probe.request_body_json ~think:true
+      ~keep_alive:None ~model_id:"qwen3.5:35b-a3b-coding-nvfp4" ~prompt:"READY"
+      ~max_tokens:8
+    |> Yojson.Safe.from_string
+  in
+  let open Yojson.Safe.Util in
+  check bool "thinking can be requested" true
+    (json |> member "think" |> to_bool)
 
 let test_request_body_keeps_explicit_keep_alive () =
   let json =
     Masc_mcp.Tool_local_runtime_probe.request_body_json
-      ~keep_alive:(Some "90s") ~model_id:"qwen3.5:35b-a3b-coding-nvfp4"
-      ~prompt:"READY" ~max_tokens:8
+      ~think:false ~keep_alive:(Some "90s")
+      ~model_id:"qwen3.5:35b-a3b-coding-nvfp4" ~prompt:"READY" ~max_tokens:8
     |> Yojson.Safe.from_string
   in
   let open Yojson.Safe.Util in
@@ -151,6 +164,8 @@ let () =
             test_ollama_ps_non_200_is_reported_as_error;
           test_case "omits keep_alive by default" `Quick
             test_request_body_omits_keep_alive_by_default;
+          test_case "can enable thinking explicitly" `Quick
+            test_request_body_can_enable_thinking;
           test_case "keeps explicit keep_alive when requested" `Quick
             test_request_body_keeps_explicit_keep_alive;
           test_case "computes tok per second from generate response" `Quick

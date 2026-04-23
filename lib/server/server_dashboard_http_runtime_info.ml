@@ -34,6 +34,7 @@ let dashboard_runtime_probe_cache : dashboard_runtime_probe_cache_entry option A
 
 let dashboard_runtime_probe_cache_ttl_sec = 30.0
 let dashboard_runtime_probe_force_min_refresh_sec = 10.0
+let dashboard_runtime_probe_timeout_sec = 15
 let dashboard_runtime_probe_refresh_in_flight = Atomic.make false
 let dashboard_runtime_probe_runner_hook : (unit -> Yojson.Safe.t) option Atomic.t =
   Atomic.make None
@@ -277,7 +278,7 @@ let run_dashboard_runtime_probe () =
   | Some hook -> hook ()
   | None ->
       Tool_local_runtime.runtime_ollama_probe_json ~probe_runs:2 ~max_tokens:8
-        ~timeout_sec:6 ~ps_timeout_sec:2 ()
+        ~timeout_sec:dashboard_runtime_probe_timeout_sec ~ps_timeout_sec:2 ()
 
 let dashboard_runtime_probe_cached_value () =
   match Atomic.get dashboard_runtime_probe_cache with

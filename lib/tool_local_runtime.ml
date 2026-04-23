@@ -153,12 +153,17 @@ let handle_runtime_ollama_probe _ctx args : tool_result =
           (parse_int_opt value)
     | _ -> Tool_local_runtime_probe.default_probe_timeout_sec
   in
+  let think =
+    match member "think" args with
+    | `Bool value -> value
+    | _ -> false
+  in
   ( true,
     json_ok
       [
         ( "result",
           runtime_ollama_probe_json ?server_url ?model ?prompt ?keep_alive
-            ~probe_runs ~max_tokens ~timeout_sec () );
+            ~probe_runs ~max_tokens ~think ~timeout_sec () );
       ] )
 
 let dispatch ctx ~name ~args : tool_result option =
@@ -207,6 +212,14 @@ let schemas : tool_schema list =
                   ("keep_alive", `Assoc [ ("type", `String "string") ]);
                   ("probe_runs", `Assoc [ ("type", `String "integer") ]);
                   ("max_tokens", `Assoc [ ("type", `String "integer") ]);
+                  ( "think",
+                    `Assoc
+                      [
+                        ("type", `String "boolean");
+                        ( "description",
+                          `String
+                            "Enable Ollama thinking mode for reasoning models. Defaults to false so short probes can reach the response field." );
+                      ] );
                   ("timeout_sec", `Assoc [ ("type", `String "integer") ]);
                 ] );
           ];

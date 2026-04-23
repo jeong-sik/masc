@@ -160,6 +160,8 @@ let semaphore_wait_timeout_sec =
     ~default:60.0 ~min_v:5.0 ~max_v:600.0
 ;;
 
+exception Semaphore_wait_timeout of float
+
 (** Per-keeper record of the last autonomous turn completion timestamp.
     Used by the fairness cooldown to prevent a fast-cycling keeper from
     monopolizing the autonomous slot when peers are waiting.
@@ -366,31 +368,39 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
   Fun.protect
     ~finally:(fun () -> release_keeper_turn_slot ~keeper_name slot_state)
     (fun () ->
-      if is_autonomous then begin
-        (* Fairness cooldown: if this keeper recently completed a turn and
-           other keepers are waiting, yield before re-entering the FIFO
-           queue to give peers a chance to reach head-of-queue first.
-           See [maybe_yield_for_fairness] and #6810. *)
-        maybe_yield_for_fairness ~keeper_name;
-        let ticket = enqueue_autonomous_waiter ~keeper_name in
-        slot_state.autonomous_ticket := Some ticket;
-        match wait_for_autonomous_queue_head ~keeper_name ~ticket ~started_at:t0 with
-        | Error _ as e -> e
-        | Ok () ->
-          match acquire_bounded ~label:"autonomous" autonomous_turn_semaphore with
+      let autonomous_result =
+        if is_autonomous
+        then begin
+          (* Fairness cooldown: if this keeper recently completed a turn and
+             other keepers are waiting, yield before re-entering the FIFO
+             queue to give peers a chance to reach head-of-queue first.
+             See [maybe_yield_for_fairness] and #6810. *)
+          maybe_yield_for_fairness ~keeper_name;
+          let ticket = enqueue_autonomous_waiter ~keeper_name in
+          slot_state.autonomous_ticket := Some ticket;
+          match wait_for_autonomous_queue_head ~keeper_name ~ticket ~started_at:t0 with
           | Error _ as e -> e
           | Ok () ->
-            slot_state.acquired_autonomous := true;
-            drop_autonomous_waiter ~ticket;
-            slot_state.autonomous_ticket := None
-      end;
-      match acquire_bounded ~label:"turn" turn_semaphore with
+            match acquire_bounded ~label:"autonomous" autonomous_turn_semaphore with
+            | Error _ as e -> e
+            | Ok () ->
+              slot_state.acquired_autonomous := true;
+              drop_autonomous_waiter ~ticket;
+              slot_state.autonomous_ticket := None;
+              Ok ()
+        end
+        else Ok ()
+      in
+      match autonomous_result with
       | Error _ as e -> e
       | Ok () ->
-        slot_state.acquired_turn := true;
-        let semaphore_wait_ms =
-          int_of_float ((Time_compat.now () -. t0) *. 1000.0) in
-        Ok (f ~semaphore_wait_ms))
+        match acquire_bounded ~label:"turn" turn_semaphore with
+        | Error _ as e -> e
+        | Ok () ->
+          slot_state.acquired_turn := true;
+          let semaphore_wait_ms =
+            int_of_float ((Time_compat.now () -. t0) *. 1000.0) in
+          Ok (f ~semaphore_wait_ms))
 ;;
 
 let with_keeper_turn_slot_for_test ~keeper_name ~channel f =

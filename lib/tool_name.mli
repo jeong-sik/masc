@@ -109,8 +109,6 @@ module Masc : sig
     | Goal_upsert
     | Goal_verify
     | Find_by_capability
-    | Governance_feed
-    | Governance_status
     | Heartbeat
     | Join
     | Leave

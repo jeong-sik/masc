@@ -57,8 +57,6 @@ let extended_tools =
       "Search for symbols and patterns across the codebase.";
     make_schema "masc_code_read"
       "Read the contents of a source file.";
-    make_schema "masc_governance_status"
-      "Query the current governance policy status.";
     make_schema "masc_autoresearch_start"
       "Start an automated research cycle.";
 
@@ -156,12 +154,6 @@ let test_synonym_code_read () =
     ~tools:extended_tools ~query:"read source file contents" ~k:3 in
   check bool "synonym: masc_code_read via 'read source'" true
     (has_tool "masc_code_read" result)
-
-let test_synonym_governance_status () =
-  let result = Tool_prefilter.filter
-    ~tools:extended_tools ~query:"check governance policy status" ~k:3 in
-  check bool "synonym: masc_governance_status via 'governance status'" true
-    (has_tool "masc_governance_status" result)
 
 let test_synonym_autoresearch_start () =
   let result = Tool_prefilter.filter
@@ -276,7 +268,6 @@ let () =
           test_case "claim_next via synonym" `Quick test_synonym_claim_next;
           test_case "code_search via synonym" `Quick test_synonym_code_search;
           test_case "code_read via synonym" `Quick test_synonym_code_read;
-          test_case "governance_status via synonym" `Quick test_synonym_governance_status;
           test_case "autoresearch_start via synonym" `Quick test_synonym_autoresearch_start;
 
           test_case "worktree_create via synonym" `Quick test_synonym_worktree_create;

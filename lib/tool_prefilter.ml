@@ -161,11 +161,6 @@ let synonyms : (string * string list) list =
      [ "code shell"; "run code command"; "execute in code"; "code exec" ]);
     ("masc_code_git",
      [ "code git"; "git in code"; "code commit"; "code branch"; "code log" ]);
-    (* masc_governance_* — policy and rules *)
-    ("masc_governance_status",
-     [ "governance status"; "policy status"; "rules check"; "compliance check" ]);
-    ("masc_governance_feed",
-     [ "governance feed"; "policy events"; "rule changes"; "governance log" ]);
     (* masc_autoresearch_* — automated research *)
     ("masc_autoresearch_start",
      [ "start research"; "begin research"; "auto research"; "autoresearch start" ]);

@@ -203,8 +203,6 @@ module Masc = struct
     | Goal_upsert
     | Goal_verify
     | Find_by_capability
-    | Governance_feed
-    | Governance_status
     | Heartbeat
     | Join
     | Leave
@@ -300,8 +298,6 @@ module Masc = struct
     | Goal_upsert -> "masc_goal_upsert"
     | Goal_verify -> "masc_goal_verify"
     | Find_by_capability -> "masc_find_by_capability"
-    | Governance_feed -> "masc_governance_feed"
-    | Governance_status -> "masc_governance_status"
     | Heartbeat -> "masc_heartbeat"
     | Join -> "masc_join"
     | Leave -> "masc_leave"
@@ -397,8 +393,6 @@ module Masc = struct
     | "masc_goal_upsert" -> Some Goal_upsert
     | "masc_goal_verify" -> Some Goal_verify
     | "masc_find_by_capability" -> Some Find_by_capability
-    | "masc_governance_feed" -> Some Governance_feed
-    | "masc_governance_status" -> Some Governance_status
     | "masc_heartbeat" -> Some Heartbeat
     | "masc_join" -> Some Join
     | "masc_leave" -> Some Leave

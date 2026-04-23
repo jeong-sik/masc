@@ -274,6 +274,8 @@ type keeper_profile_defaults = {
   (* Telemetry Feedback — inject behavioral stats into keeper context *)
   telemetry_feedback_enabled : bool option;
   telemetry_feedback_window_hours : int option;
+  (* Per-provider timeout for cascade fallback. None = use turn budget heuristic. *)
+  per_provider_timeout : float option;
   social_model : string option;
   cascade_name : string option;
   models : string list option;
@@ -331,6 +333,7 @@ let empty_keeper_profile_defaults = {
   work_discovery_guidance = None;
   telemetry_feedback_enabled = None;
   telemetry_feedback_window_hours = None;
+  per_provider_timeout = None;
   social_model = None;
   max_turns_per_call = None;
   max_turns_per_call_scheduled_autonomous = None;
@@ -563,6 +566,14 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         work_discovery_guidance = str "work_discovery_guidance";
         telemetry_feedback_enabled = bool_ "telemetry_feedback_enabled";
         telemetry_feedback_window_hours = int_ "telemetry_feedback_window_hours";
+        per_provider_timeout =
+          (match Keeper_toml_loader.toml_float_opt doc (k "per_provider_timeout") with
+           | Some f when f > 0.0 -> Some f
+           | Some f when f <= 0.0 ->
+               Log.Keeper.warn
+                 "keeper TOML per_provider_timeout=%.1f is non-positive; ignoring" f;
+               None
+           | _ -> None);
         max_turns_per_call = int_ "max_turns_per_call";
         max_turns_per_call_scheduled_autonomous =
           int_ "max_turns_per_call_scheduled_autonomous";
@@ -613,6 +624,7 @@ let canonical_keeper_toml_key_names =
   ; "work_discovery_guidance"
   ; "telemetry_feedback_enabled"
   ; "telemetry_feedback_window_hours"
+  ; "per_provider_timeout"
   ; "max_turns_per_call"
   ; "max_turns_per_call_scheduled_autonomous"
   ; "social_model"
@@ -773,6 +785,8 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                   Safe_ops.json_bool_opt "telemetry_feedback_enabled" keeper_json;
                 telemetry_feedback_window_hours =
                   Safe_ops.json_int_opt "telemetry_feedback_window_hours" keeper_json;
+                per_provider_timeout =
+                  Safe_ops.json_float_opt "per_provider_timeout" keeper_json;
                 max_turns_per_call =
                   Safe_ops.json_int_opt "max_turns_per_call" keeper_json;
                 max_turns_per_call_scheduled_autonomous =
@@ -861,6 +875,7 @@ let merge_keeper_profile_defaults
     telemetry_feedback_window_hours =
       prefer overlay.telemetry_feedback_window_hours
         base.telemetry_feedback_window_hours;
+    per_provider_timeout = prefer overlay.per_provider_timeout base.per_provider_timeout;
     social_model = prefer overlay.social_model base.social_model;
     cascade_name = prefer overlay.cascade_name base.cascade_name;
     models = prefer overlay.models base.models;

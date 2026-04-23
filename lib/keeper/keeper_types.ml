@@ -249,6 +249,7 @@ type keeper_meta =
   ; work_discovery_guidance : string option
   ; telemetry_feedback_enabled : bool option
   ; telemetry_feedback_window_hours : int option
+  ; per_provider_timeout_s : float option
   ; (* -- Agent runtime state (usage, tracing, autonomy metrics) -- *)
     runtime : agent_runtime_state
   }
@@ -883,6 +884,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "work_discovery_guidance", Json_util.string_opt_to_json m.work_discovery_guidance
     ; "telemetry_feedback_enabled", Json_util.bool_opt_to_json m.telemetry_feedback_enabled
     ; "telemetry_feedback_window_hours", Json_util.int_opt_to_json m.telemetry_feedback_window_hours
+    ; "per_provider_timeout_s", Json_util.float_opt_to_json m.per_provider_timeout_s
     ]
 ;;
 
@@ -925,6 +927,7 @@ type parsed_keeper_policy =
   ; pp_voice_enabled : bool
   ; pp_voice_channel : string
   ; pp_voice_agent_id : string
+  ; pp_per_provider_timeout_s : float option
   }
 
 type parsed_keeper_state =
@@ -1141,6 +1144,9 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
         "voice_agent_id"
         json
     in
+    let pp_per_provider_timeout_s =
+      Safe_ops.json_float_opt "per_provider_timeout_s" json
+    in
     Ok
       { pp_policy_voice_enabled
       ; pp_sandbox_profile
@@ -1173,6 +1179,7 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
       ; pp_voice_enabled
       ; pp_voice_channel
       ; pp_voice_agent_id
+      ; pp_per_provider_timeout_s
       }
 ;;
 
@@ -1405,6 +1412,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
              ; voice_enabled = policy.pp_voice_enabled
              ; voice_channel = policy.pp_voice_channel
              ; voice_agent_id = policy.pp_voice_agent_id
+             ; per_provider_timeout_s = policy.pp_per_provider_timeout_s
              ; created_at =
                  (if state.ps_created_at_raw = ""
                   then now_iso ()
@@ -1538,6 +1546,7 @@ let fallback_canonical_keeper_meta_key_names =
   ; "work_discovery_guidance"
   ; "telemetry_feedback_enabled"
   ; "telemetry_feedback_window_hours"
+  ; "per_provider_timeout_s"
   ]
 ;;
 

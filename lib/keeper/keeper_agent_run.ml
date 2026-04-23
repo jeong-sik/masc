@@ -2256,6 +2256,7 @@ let run_turn
               natural completion (max_turns or model end_turn). *)
            ?oas_checkpoint:raw_oas_checkpoint
            ?event_bus
+           ?per_provider_timeout_s:meta.per_provider_timeout_s
            ())
      with
      | Error e -> Error e

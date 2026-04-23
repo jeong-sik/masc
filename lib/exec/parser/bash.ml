@@ -61,22 +61,8 @@ let to_shell_ir (stages : (string * string list) list)
    Order matters: multi-char markers ([<<<], [<<], [>>], [&&], [||],
    [$(], [$((], [<(], [>(]) are checked before their single-char
    prefixes.  First match wins. *)
-(* Tiny substring helper — parser lib does not depend on Astring and
-   we do not want to pull the dep in for one function. *)
-let contains_sub (s : string) (sub : string) : bool =
-  let ls = String.length s and lsub = String.length sub in
-  if lsub = 0 then true
-  else if lsub > ls then false
-  else
-    let rec loop i =
-      if i + lsub > ls then false
-      else if String.sub s i lsub = sub then true
-      else loop (i + 1)
-    in
-    loop 0
-
 let classify_too_complex (source : string) : Parsed.reason_too_complex option =
-  let has sub = contains_sub source sub in
+  let has sub = String_util.contains_substring source sub in
   if has "$((" then Some `Arith_expansion
   else if has "<<<" then Some `Here_string
   else if has "<<" then Some `Heredoc

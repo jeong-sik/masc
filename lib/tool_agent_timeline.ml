@@ -369,13 +369,25 @@ let turn_completed_events (config : Coord.config) ~agent_name ~limit :
                | _ -> []
            with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> []
          in
-         let tps =
-           try match e.payload |> member "tokens_per_second" with
-               | `Float v -> [("tokens_per_second", `Float v)]
-               | _ -> []
-           with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> []
-         in
-         reasoning @ tps
+        let tps =
+          try match e.payload |> member "tokens_per_second" with
+              | `Float v -> [("tokens_per_second", `Float v)]
+              | _ -> []
+          with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> []
+        in
+        let prompt_tps =
+          try match e.payload |> member "prompt_per_second" with
+              | `Float v -> [("prompt_per_second", `Float v)]
+              | _ -> []
+          with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> []
+        in
+        let hw_decode_tps =
+          try match e.payload |> member "hw_decode_tokens_per_second" with
+              | `Float v -> [("hw_decode_tokens_per_second", `Float v)]
+              | _ -> []
+          with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> []
+        in
+         reasoning @ tps @ prompt_tps @ hw_decode_tps
        in
        Some
          {

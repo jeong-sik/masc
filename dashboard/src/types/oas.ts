@@ -78,6 +78,9 @@ export interface OasHealthSummary {
   keeperSnapshotsCount: number
   lastKeeperTick: number | null
   totalEvents: number
+  replayLoadedEvents: number
+  replayTotalMatchingEvents: number
+  replayTruncated: boolean
   totalLlmCalls: number
   totalErrors: number
   lastLlmCallTs: number | null

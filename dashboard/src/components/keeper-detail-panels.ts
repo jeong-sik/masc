@@ -927,13 +927,16 @@ export function miniSparkline(
 export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
   const series = keeper.metrics_series ?? []
   const telemetryPoints = series.filter(
-    (p: KeeperMetricPoint) => p.inference_telemetry?.timings?.predicted_per_second != null,
+    (p: KeeperMetricPoint) => p.inference_telemetry != null || p.wall_tokens_per_second != null,
   )
   if (telemetryPoints.length === 0) return null
 
-  const tokPerSec = telemetryPoints.map(
-    (p: KeeperMetricPoint) => p.inference_telemetry?.timings?.predicted_per_second ?? 0,
-  )
+  const wallTokPerSec = telemetryPoints
+    .map((p: KeeperMetricPoint) => p.wall_tokens_per_second)
+    .filter((value): value is number => value != null)
+  const hwTokPerSec = telemetryPoints
+    .map((p: KeeperMetricPoint) => p.inference_telemetry?.timings?.predicted_per_second)
+    .filter((value): value is number => value != null)
   const latencies = telemetryPoints.map(
     (p: KeeperMetricPoint) => p.inference_telemetry?.request_latency_ms ?? 0,
   )
@@ -945,13 +948,22 @@ export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
   )
 
   const W = SPARKLINE_W, H = SPARKLINE_H
-  const lastTps = tokPerSec[tokPerSec.length - 1] ?? 0
-  const avgTps = tokPerSec.reduce((a, b) => a + b, 0) / tokPerSec.length
+  const lastWallTps = wallTokPerSec[wallTokPerSec.length - 1] ?? 0
+  const avgWallTps =
+    wallTokPerSec.length > 0
+      ? wallTokPerSec.reduce((a, b) => a + b, 0) / wallTokPerSec.length
+      : 0
+  const lastHwTps = hwTokPerSec[hwTokPerSec.length - 1] ?? 0
+  const avgHwTps =
+    hwTokPerSec.length > 0
+      ? hwTokPerSec.reduce((a, b) => a + b, 0) / hwTokPerSec.length
+      : 0
   const lastLatency = latencies[latencies.length - 1] ?? 0
   const totalCacheN = cacheNs.reduce((a, b) => a + b, 0)
   const totalReasoning = reasoningTokens.reduce((a, b) => a + b, 0)
 
-  const tpsLine = miniSparkline(tokPerSec)
+  const wallTpsLine = wallTokPerSec.length > 1 ? miniSparkline(wallTokPerSec) : ''
+  const hwTpsLine = hwTokPerSec.length > 1 ? miniSparkline(hwTokPerSec) : ''
   const latencyLine = miniSparkline(latencies)
 
   const lastFp = telemetryPoints[telemetryPoints.length - 1]?.inference_telemetry?.system_fingerprint
@@ -963,18 +975,32 @@ export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
         <span class="text-3xs text-[var(--text-dim)]">${telemetryPoints.length} points</span>
         ${lastFp ? html`<span class="text-3xs px-1.5 py-0.5 rounded bg-[var(--white-5)] text-[var(--text-dim)] font-mono">${lastFp}</span>` : null}
       </div>
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-        ${'' /* tok/s sparkline */}
+      <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+        ${wallTokPerSec.length > 0 ? html`
         <div class="p-3 rounded border border-[var(--card-border)] bg-[var(--white-3)]">
           <div class="flex items-center justify-between mb-1.5">
-            <span class="text-3xs uppercase tracking-wider text-[var(--text-muted)]">tok/s</span>
-            <span class="text-xs font-mono tabular-nums text-[var(--good)]">${lastTps.toFixed(1)}</span>
+            <span class="text-3xs uppercase tracking-wider text-[var(--text-muted)]">wall tok/s</span>
+            <span class="text-xs font-mono tabular-nums text-[var(--good)]">${lastWallTps.toFixed(1)}</span>
           </div>
           <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:var(--bg-deepest);">
-            ${tpsLine ? html`<polyline points="${tpsLine}" fill="none" stroke="var(--ok)" stroke-width="1.5"/>` : null}
+            ${wallTpsLine ? html`<polyline points="${wallTpsLine}" fill="none" stroke="var(--ok)" stroke-width="1.5"/>` : null}
           </svg>
-          <div class="text-3xs text-[var(--text-dim)] mt-1">avg ${avgTps.toFixed(1)}</div>
+          <div class="text-3xs text-[var(--text-dim)] mt-1">avg ${avgWallTps.toFixed(1)}</div>
         </div>
+        ` : null}
+
+        ${hwTokPerSec.length > 0 ? html`
+        <div class="p-3 rounded border border-[var(--card-border)] bg-[var(--white-3)]">
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="text-3xs uppercase tracking-wider text-[var(--text-muted)]">hw tok/s</span>
+            <span class="text-xs font-mono tabular-nums text-[var(--good)]">${lastHwTps.toFixed(1)}</span>
+          </div>
+          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:var(--bg-deepest);">
+            ${hwTpsLine ? html`<polyline points="${hwTpsLine}" fill="none" stroke="var(--ok)" stroke-width="1.5"/>` : null}
+          </svg>
+          <div class="text-3xs text-[var(--text-dim)] mt-1">avg ${avgHwTps.toFixed(1)} · decode-only</div>
+        </div>
+        ` : null}
 
         ${'' /* request latency */}
         <div class="p-3 rounded border border-[var(--card-border)] bg-[var(--white-3)]">

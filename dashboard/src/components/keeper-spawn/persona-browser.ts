@@ -3,6 +3,8 @@ import { useEffect } from 'preact/hooks'
 import { signal } from '@preact/signals'
 import { SurfaceCard } from '../common/card'
 import { ActionButton } from '../common/button'
+import { shellAuthSummary } from '../../store'
+import { dashboardAuthAccess } from '../../lib/dashboard-auth-access'
 import { personas, personasLoading, personasError, loadPersonas, spawnKeeperFromPersona, spawning, spawnResult, type PersonaSummary } from './keeper-spawn-state'
 
 const confirmTarget = signal<string | null>(null)
@@ -36,6 +38,7 @@ export function filterPersonas(
 function PersonaCard({ persona }: { persona: PersonaSummary }) {
   const isConfirming = confirmTarget.value === persona.name
   const isSpawning = spawning.value && isConfirming
+  const spawnAccess = dashboardAuthAccess(shellAuthSummary.value, 'worker')
   const title = persona.displayName ?? persona.name
   return html`
     <div class="rounded border border-[var(--card-border)] bg-[var(--white-4)] p-4 flex flex-col gap-2 min-w-45">
@@ -48,14 +51,22 @@ function PersonaCard({ persona }: { persona: PersonaSummary }) {
           <div class="flex flex-col gap-1.5">
             <p class="text-3xs text-[var(--warn)]">키퍼를 시작합니까?</p>
             <div class="flex gap-1.5">
-              <${ActionButton} variant="primary" size="sm" disabled=${isSpawning}
+              <${ActionButton} variant="primary" size="sm" disabled=${isSpawning || !spawnAccess.allowed}
+                title=${spawnAccess.allowed ? undefined : spawnAccess.reason ?? undefined}
                 onClick=${() => { void spawnKeeperFromPersona(persona.name).then(() => { confirmTarget.value = null }) }}>
                 ${isSpawning ? '생성 중...' : '시작'}<//>
               <${ActionButton} variant="ghost" size="sm" onClick=${() => { confirmTarget.value = null }}>취소<//>
             </div>
           </div>
         ` : html`
-          <${ActionButton} variant="ghost" size="sm" block=${true} onClick=${() => { confirmTarget.value = persona.name }}>키퍼 시작<//>
+          <${ActionButton}
+            variant="ghost"
+            size="sm"
+            block=${true}
+            disabled=${!spawnAccess.allowed}
+            title=${spawnAccess.allowed ? undefined : spawnAccess.reason ?? undefined}
+            onClick=${() => { confirmTarget.value = persona.name }}
+          >키퍼 시작<//>
         `}
       </div>
     </div>
@@ -64,6 +75,7 @@ function PersonaCard({ persona }: { persona: PersonaSummary }) {
 
 export function PersonaBrowser() {
   useEffect(() => { if (personas.value.length === 0 && !personasLoading.value) void loadPersonas() }, [])
+  const spawnAccess = dashboardAuthAccess(shellAuthSummary.value, 'worker')
   if (personasLoading.value) return html`<p class="text-xs text-[var(--text-muted)] py-4">페르소나 로딩 중...</p>`
   if (personasError.value) return html`
     <div class="py-4">
@@ -74,6 +86,11 @@ export function PersonaBrowser() {
   const visible = filterPersonas(personas.value, searchQuery.value)
   return html`
     <div>
+      ${spawnAccess.allowed ? null : html`
+        <p class="mb-3 text-2xs text-[var(--warn)]">
+          키퍼 생성 차단: ${spawnAccess.reason ?? 'worker 권한이 필요합니다.'}
+        </p>
+      `}
       <div class="flex flex-wrap items-center gap-2 mb-3">
         <input
           type="search"

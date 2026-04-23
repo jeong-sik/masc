@@ -49,6 +49,10 @@ vi.mock('./dashboard', () => ({
   reportToolHostFailure,
 }))
 
+vi.mock('../components/common/toast', () => ({
+  showActionToast: vi.fn(),
+}))
+
 beforeEach(() => {
   // Re-assert default return values because vi.clearAllMocks() in afterEach
   // wipes any per-test `.mockReturnValueOnce` queue and can clash with
@@ -273,6 +277,52 @@ describe('callMcpTool', () => {
         session_id: 'sess-1',
         timeout_ms: 30000,
       }),
+    )
+  })
+
+  it('does not retry implicit actor mismatches', async () => {
+    fetchWithTimeout
+      .mockResolvedValueOnce(
+        new Response('{}', {
+          status: 200,
+          headers: { 'Mcp-Session-Id': 'sess-mismatch-1' },
+        }),
+      )
+      .mockResolvedValueOnce(new Response('', { status: 202 }))
+      .mockResolvedValueOnce(
+        new Response('data: {"result":{"isError":true,"content":[{"type":"text","text":"🔐 Unauthorized: No credential found for dashboard (bearer token belongs to codex)"}]}}\n', { status: 200 }),
+      )
+
+    const { callMcpTool } = await import('./mcp')
+
+    await expect(callMcpTool('masc_persona_list', {})).rejects.toThrow(
+      'No credential found for dashboard',
+    )
+    const toolCalls = (fetchWithTimeout.mock.calls as Array<[string, RequestInit]>)
+      .filter(([, init]) => typeof init.body === 'string' && JSON.parse(init.body as string).method === 'tools/call')
+    expect(toolCalls).toHaveLength(1)
+  })
+
+  it('does not retry explicit actor mismatches', async () => {
+    authHeaders.mockImplementation((opts?: { actorName?: string | null }) => (
+      opts?.actorName ? { 'X-MASC-Agent': opts.actorName } : {}
+    ))
+    fetchWithTimeout
+      .mockResolvedValueOnce(
+        new Response('{}', {
+          status: 200,
+          headers: { 'Mcp-Session-Id': 'sess-explicit-mismatch' },
+        }),
+      )
+      .mockResolvedValueOnce(new Response('', { status: 202 }))
+      .mockResolvedValueOnce(
+        new Response('data: {"result":{"isError":true,"content":[{"type":"text","text":"🔐 Unauthorized: No credential found for dashboard (bearer token belongs to codex)"}]}}\n', { status: 200 }),
+      )
+
+    const { callMcpTool } = await import('./mcp')
+
+    await expect(callMcpTool('masc_join', { agent_name: 'dashboard' })).rejects.toThrow(
+      'No credential found for dashboard',
     )
   })
 

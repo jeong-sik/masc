@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-const { callMcpTool, showToast } = vi.hoisted(() => ({
+const { callMcpTool, showToast, shellAuthSummary } = vi.hoisted(() => ({
   callMcpTool: vi.fn(),
   showToast: vi.fn(),
+  shellAuthSummary: { value: { effective_role: 'worker', default_role: 'worker', auth_error_code: null, auth_error_detail: null } },
 }))
 
 vi.mock('../../api/mcp', () => ({
@@ -11,6 +12,10 @@ vi.mock('../../api/mcp', () => ({
 
 vi.mock('../common/toast', () => ({
   showToast,
+}))
+
+vi.mock('../../store', () => ({
+  shellAuthSummary,
 }))
 
 import {

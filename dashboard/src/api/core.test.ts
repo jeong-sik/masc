@@ -15,8 +15,10 @@ import {
   setStoredToken,
 } from './core'
 import { OperatorActionSchemaDriftError } from './schemas/operator-action'
+import { resetDashboardSessionActorForTests } from '../lib/dashboard-session-actor'
 
 afterEach(() => {
+  resetDashboardSessionActorForTests()
   vi.unstubAllGlobals()
   window.sessionStorage?.clear?.()
   try {

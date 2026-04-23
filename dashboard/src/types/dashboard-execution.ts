@@ -44,9 +44,13 @@ export interface DashboardShellAuthSummary {
   require_token: boolean
   default_role?: string | null
   token_present: boolean
+  token_valid: boolean
+  token_agent?: string | null
   requested_agent?: string | null
   effective_agent?: string | null
   effective_role?: string | null
+  auth_error_code?: 'missing_token' | 'invalid_token' | 'token_expired' | 'actor_mismatch' | 'insufficient_role' | 'same_origin_blocked' | 'unknown' | null
+  auth_error_detail?: string | null
   can_keeper_msg: boolean
   keeper_msg_error?: string | null
 }

@@ -12,6 +12,7 @@ module Coord = Masc_mcp.Coord
 module Keeper_exec_shell = Masc_mcp.Keeper_exec_shell
 module Keeper_registry = Masc_mcp.Keeper_registry
 module Keeper_sandbox = Masc_mcp.Keeper_sandbox
+module Keeper_shell_docker = Masc_mcp.Keeper_shell_docker
 module Keeper_types = Masc_mcp.Keeper_types
 module Keeper_alerting_path = Masc_mcp.Keeper_alerting_path
 module Tool_code_write = Masc_mcp.Tool_code_write
@@ -53,6 +54,21 @@ let write_file path content =
   let oc = open_out_bin path in
   Fun.protect ~finally:(fun () -> close_out oc) @@ fun () ->
   output_string oc content
+
+let read_file path =
+  let ic = open_in_bin path in
+  Fun.protect ~finally:(fun () -> close_in ic) @@ fun () ->
+  really_input_string ic (in_channel_length ic)
+
+let contains_substring haystack needle =
+  let len = String.length needle in
+  let n = String.length haystack in
+  let rec loop i =
+    if i + len > n then false
+    else if String.sub haystack i len = needle then true
+    else loop (i + 1)
+  in
+  loop 0
 
 let rec ensure_dir path =
   if path = "" || path = "." || path = "/" then ()
@@ -129,6 +145,40 @@ let with_tool_policy_config f =
   Tool_code_write.reset_policy_config_cache ();
   with_env "MASC_CONFIG_DIR" config_dir @@ fun () ->
   Fun.protect ~finally:Tool_code_write.reset_policy_config_cache f
+
+let with_config_dir config_dir f =
+  let prior = Sys.getenv_opt "MASC_CONFIG_DIR" in
+  Fun.protect
+    ~finally:(fun () ->
+      (match prior with
+       | Some value -> Unix.putenv "MASC_CONFIG_DIR" value
+       | None -> Unix.putenv "MASC_CONFIG_DIR" "");
+      Masc_mcp.Config_dir_resolver.reset ())
+    (fun () ->
+      Unix.putenv "MASC_CONFIG_DIR" config_dir;
+      Masc_mcp.Config_dir_resolver.reset ();
+      f ())
+
+let with_keeper_identity_toml ~config ~keeper_name ~github_identity
+    ~git_identity_mode f =
+  let masc_dir = Filename.concat config.Coord.base_path Common.masc_dirname in
+  let config_dir = Filename.concat masc_dir "config" in
+  let keepers_dir = Filename.concat config_dir "keepers" in
+  let gh_dir =
+    Filename.concat
+      (Filename.concat
+         (Filename.concat masc_dir "github-identities")
+         github_identity)
+      "gh"
+  in
+  ensure_dir keepers_dir;
+  ensure_dir gh_dir;
+  write_file
+    (Filename.concat keepers_dir (keeper_name ^ ".toml"))
+    (Printf.sprintf
+       "[keeper]\ngithub_identity = %S\ngit_identity_mode = %S\n"
+       github_identity git_identity_mode);
+  with_config_dir config_dir f
 
 let parse_field raw field =
   Yojson.Safe.from_string raw |> Json.member field
@@ -425,6 +475,115 @@ done\n\
 printf 'stdout:%s\\n' \"$*\"\n\
 exit 0\n"
 
+let fake_docker_log_args_script =
+  "#!/bin/sh\n\
+log_file=${KEEPER_DOCKER_LOG:-}\n\
+if [ -n \"$log_file\" ]; then\n\
+  printf '%s\\n' \"$*\" >> \"$log_file\"\n\
+fi\n\
+case \"$1\" in\n\
+  info)\n\
+    printf '[]\\n'\n\
+    exit 0\n\
+    ;;\n\
+  ps)\n\
+    exit 0\n\
+    ;;\n\
+  image)\n\
+    printf '[]\\n'\n\
+    exit 0\n\
+    ;;\n\
+  run)\n\
+    printf 'ok\\n'\n\
+    exit 0\n\
+    ;;\n\
+esac\n\
+printf 'unexpected docker invocation: %s\\n' \"$1\" >&2\n\
+exit 2\n"
+
+let docker_run_line log_path =
+  read_file log_path
+  |> String.split_on_char '\n'
+  |> List.find_opt (String.starts_with ~prefix:"run ")
+  |> function
+  | Some line -> line
+  | None -> Alcotest.fail "expected docker run log line"
+
+let run_git_creds_docker_shell ~config ~meta ~playground ~log_path =
+  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "false" @@ fun () ->
+  match
+    Keeper_shell_docker.run_docker_shell_command_with_status
+      ~config ~meta ~cwd:playground ~timeout_sec:5.0
+      ~cmd:"git status" ~git_creds_enabled:true
+      ~network_mode:Keeper_types.Network_inherit
+  with
+  | Error msg ->
+      Alcotest.failf "expected fake docker git-creds run, got %s" msg
+  | Ok result ->
+      Alcotest.(check (pair string int)) "fake docker exits cleanly"
+        ("exit", 0)
+        (match result.Keeper_shell_docker.status with
+         | Unix.WEXITED code -> ("exit", code)
+         | Unix.WSIGNALED code -> ("signaled", code)
+         | Unix.WSTOPPED code -> ("stopped", code));
+      docker_run_line log_path
+
+let test_git_creds_skips_missing_ssh_auth_sock () =
+  with_fake_docker fake_docker_log_args_script @@ fun () ->
+  setup ~sandbox:Keeper_types.Docker
+  @@ fun ~config ~meta ~playground ->
+  Masc_mcp.Config_dir_resolver.reset ();
+  let log_path = Filename.concat config.Coord.base_path "docker.log" in
+  let missing_sock =
+    Filename.concat config.Coord.base_path "missing-agent.sock"
+  in
+  with_env "SSH_AUTH_SOCK" missing_sock @@ fun () ->
+  let line =
+    run_git_creds_docker_shell ~config ~meta ~playground ~log_path
+  in
+  Alcotest.(check bool) "missing ssh-agent socket is not mounted" false
+    (contains_substring line missing_sock);
+  Alcotest.(check bool) "missing ssh-agent env is not forwarded" false
+    (contains_substring line "SSH_AUTH_SOCK=/tmp/keeper-creds/ssh-agent.sock")
+
+let test_git_creds_respects_keeper_alias_identity_mode () =
+  with_fake_docker fake_docker_log_args_script @@ fun () ->
+  setup ~sandbox:Keeper_types.Docker
+  @@ fun ~config ~meta ~playground ->
+  with_keeper_identity_toml ~config ~keeper_name:meta.name
+    ~github_identity:"anyang-keepers" ~git_identity_mode:"keeper_alias"
+  @@ fun () ->
+  let log_path = Filename.concat config.Coord.base_path "docker.log" in
+  let line =
+    run_git_creds_docker_shell ~config ~meta ~playground ~log_path
+  in
+  Alcotest.(check bool) "keeper_alias keeps keeper author" true
+    (contains_substring line "GIT_AUTHOR_NAME=minjae (MASC Keeper)");
+  Alcotest.(check bool) "keeper_alias does not force GitHub identity author" false
+    (contains_substring line "GIT_AUTHOR_NAME=anyang-keepers")
+
+let test_git_creds_uses_github_identity_mode () =
+  with_fake_docker fake_docker_log_args_script @@ fun () ->
+  setup ~sandbox:Keeper_types.Docker
+  @@ fun ~config ~meta ~playground ->
+  with_keeper_identity_toml ~config ~keeper_name:meta.name
+    ~github_identity:"anyang-keepers" ~git_identity_mode:"github_identity"
+  @@ fun () ->
+  let log_path = Filename.concat config.Coord.base_path "docker.log" in
+  let line =
+    run_git_creds_docker_shell ~config ~meta ~playground ~log_path
+  in
+  Alcotest.(check bool) "github_identity mode uses GitHub author" true
+    (contains_substring line "GIT_AUTHOR_NAME=anyang-keepers");
+  Alcotest.(check bool) "github_identity mode uses noreply email" true
+    (contains_substring line
+       "GIT_AUTHOR_EMAIL=anyang-keepers@users.noreply.github.com")
+
 let test_git_clone_repairs_existing_docker_clone_checkout () =
   with_tool_policy_config @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
@@ -520,6 +679,15 @@ let () =
             test_rg_no_match_remains_successful_in_docker_route;
           Alcotest.test_case "git_clone routes through docker" `Quick
             test_git_clone_routes_through_docker;
+          Alcotest.test_case
+            "git-creds skips missing SSH_AUTH_SOCK"
+            `Quick test_git_creds_skips_missing_ssh_auth_sock;
+          Alcotest.test_case
+            "git-creds respects keeper_alias git identity mode"
+            `Quick test_git_creds_respects_keeper_alias_identity_mode;
+          Alcotest.test_case
+            "git-creds uses GitHub author only in github_identity mode"
+            `Quick test_git_creds_uses_github_identity_mode;
           Alcotest.test_case "hard mode git_clone uses brokered route" `Quick
             test_hard_mode_git_clone_uses_brokered_route;
           Alcotest.test_case "git_clone repairs existing docker clone checkout"

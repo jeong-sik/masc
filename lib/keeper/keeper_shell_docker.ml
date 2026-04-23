@@ -198,7 +198,7 @@ let run_docker_shell_command_with_status
           in
           let git_author_name, git_author_email =
             match binding_result with
-            | Ok { github_identity = Some id; _ } ->
+            | Ok { github_identity = Some id; git_identity_mode = "github_identity"; _ } ->
                 id, id ^ "@users.noreply.github.com"
             | _ ->
                 ( Keeper_identity.keeper_git_author
@@ -234,12 +234,13 @@ let run_docker_shell_command_with_status
         else
           match ssh_auth_sock with
           | None -> empty
-          | Some path ->
+          | Some path when Sys.file_exists path ->
               let container_path =
                 Filename.concat cred_root "ssh-agent.sock"
               in
               ( [ "-v"; path ^ ":" ^ container_path ],
                 [ "-e"; "SSH_AUTH_SOCK=" ^ container_path ] )
+          | Some _ -> empty
       in
       let token_env =
         let gh_token =

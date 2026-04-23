@@ -544,8 +544,9 @@ let extract_keeper_name_for_post req_path suffix =
   in
   if is_valid_keeper_name raw then raw else ""
 
-let refresh_keeper_execution_surfaces ~name event =
+let refresh_keeper_execution_surfaces ~config ~name event =
   Operator_control_snapshot.invalidate_snapshot_cache ();
+  Dashboard_projection_cache.invalidate_snapshot_json ~config;
   (try Dashboard_cache.invalidate "execution:default:light" with
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn ->
@@ -555,8 +556,9 @@ let refresh_keeper_execution_surfaces ~name event =
   Server_dashboard_http_execution_surfaces.patch_keeper_dependent_caches
     ~keeper_name:name ~event
 
-let invalidate_keeper_execution_surfaces () =
+let invalidate_keeper_execution_surfaces ~config () =
   Operator_control_snapshot.invalidate_snapshot_cache ();
+  Dashboard_projection_cache.invalidate_snapshot_json ~config;
   Server_dashboard_http_execution_surfaces.invalidate_execution_cache ()
 
 let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
@@ -807,8 +809,8 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
         if String.equal action "boot"
         then (
           resume_booted_keeper_if_needed ();
-          refresh_keeper_execution_surfaces ~name "started")
-        else invalidate_keeper_execution_surfaces ();
+          refresh_keeper_execution_surfaces ~config ~name "started")
+        else invalidate_keeper_execution_surfaces ~config ();
         Http.Response.json ~compress:true ~request:req
           (Printf.sprintf {|{"ok":true,"action":"%s","name":"%s","detail":%s}|}
              (String.escaped action)
@@ -817,8 +819,8 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
           reqd
     | Some (true, _body) ->
         (match action with
-         | "shutdown" -> refresh_keeper_execution_surfaces ~name "stopped"
-         | _ -> invalidate_keeper_execution_surfaces ());
+         | "shutdown" -> refresh_keeper_execution_surfaces ~config ~name "stopped"
+         | _ -> invalidate_keeper_execution_surfaces ~config ());
         Http.Response.json ~compress:true ~request:req
           (Printf.sprintf {|{"ok":true,"action":"%s","name":"%s"}|}
              (String.escaped action)
@@ -918,10 +920,10 @@ let handle_keeper_directive_post state _agent_name req reqd body_str =
           Keeper_keepalive.process_directive
             ~agent_name:resolved_agent_name action_str;
           (match action_str with
-           | "pause" -> refresh_keeper_execution_surfaces ~name "paused"
-           | "resume" -> refresh_keeper_execution_surfaces ~name "resumed"
-           | "wakeup" -> invalidate_keeper_execution_surfaces ()
-           | _ -> invalidate_keeper_execution_surfaces ());
+           | "pause" -> refresh_keeper_execution_surfaces ~config ~name "paused"
+           | "resume" -> refresh_keeper_execution_surfaces ~config ~name "resumed"
+           | "wakeup" -> invalidate_keeper_execution_surfaces ~config ()
+           | _ -> invalidate_keeper_execution_surfaces ~config ());
           Http.Response.json ~compress:true ~request:req
             (Printf.sprintf {|{"ok":true,"action":"%s","name":"%s"}|}
                (String.escaped action_str) (String.escaped name))

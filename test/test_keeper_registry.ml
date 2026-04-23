@@ -239,6 +239,37 @@ let test_mark_turn_finished_records_completed_turn_outcome_once () =
         (Printf.sprintf "expected exactly one completed turn, got %d"
            (List.length turns))
 
+let test_completed_turns_replay_from_default_store () =
+  let base_path = temp_base_path "completed-turn-replay" in
+  Fun.protect
+    ~finally:(fun () ->
+      Audit.For_testing.reset_state ();
+      rm_rf base_path)
+    (fun () ->
+      with_env "MASC_BASE_PATH" base_path (fun () ->
+          Audit.For_testing.reset_state ();
+          let keeper_name = "k-completed-turn-replay" in
+          Audit.record_completed_turn ~keeper_name
+            {
+              Audit.turn_id = 42;
+              started_at = 100.0;
+              ended_at = 120.0;
+              outcome = Audit.Turn_substantive;
+            };
+          Audit.For_testing.clear_completed_turn_ring ~keeper_name;
+          match Audit.recent_completed_turns ~keeper_name ~limit:5 with
+          | [ turn ] ->
+              check int "turn_id replayed" 42 turn.turn_id;
+              check bool "substantive outcome replayed" true
+                (match turn.outcome with
+                 | Audit.Turn_substantive -> true
+                 | _ -> false)
+          | turns ->
+              fail
+                (Printf.sprintf
+                   "expected one replayed completed turn, got %d"
+                   (List.length turns))))
+
 let test_unregister () =
   R.clear ();
   let _entry = R.register ~base_path:bp "k2" (make_meta "k2") in
@@ -1046,6 +1077,8 @@ let () =
             test_dispatch_event_with_audit_preserves_snapshot;
           eio_test "mark_turn_finished records completed turn outcome once"
             test_mark_turn_finished_records_completed_turn_outcome_once;
+          eio_test "completed turns replay from default store"
+            test_completed_turns_replay_from_default_store;
           eio_test "unregister" test_unregister;
           eio_test "all" test_all;
           eio_test "update meta" test_update_meta;

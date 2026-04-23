@@ -170,6 +170,54 @@ let test_goal_detail_surfaces_keeper_runtime_trust_and_blockers () =
         "execution_receipt"
         (linked_keeper |> member "latest_causal_event" |> member "kind" |> to_string)
 
+let test_goal_detail_does_not_promote_synthetic_blocker_over_receipt () =
+  with_room @@ fun config ->
+  let goal, _kind =
+    match Goal_store.upsert_goal config ~title:"Ship blocker ordering" () with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  let meta =
+    let base = make_keeper_meta ~name:"blocker-keeper" ~goal_id:goal.id in
+    {
+      base with
+      runtime =
+        {
+          base.runtime with
+          last_blocker = "turn timed out";
+          last_blocker_class = Some Keeper_types.Turn_timeout;
+        };
+    }
+  in
+  (match Keeper_types.write_meta ~force:true config meta with
+   | Ok () -> ()
+   | Error err -> fail ("write_meta failed: " ^ err));
+  append_keeper_receipt config meta;
+  match Dashboard_goals.goal_detail_json ~config ~goal_id:goal.id with
+  | Error msg -> fail msg
+  | Ok json ->
+      let linked_keeper =
+        match json |> member "linked_keepers" |> to_list with
+        | keeper :: _ -> keeper
+        | [] -> fail "expected linked keeper detail"
+      in
+      let runtime_trust = linked_keeper |> member "runtime_trust" in
+      check string "durable receipt remains latest causal event"
+        "execution_receipt"
+        (runtime_trust |> member "latest_causal_event" |> member "kind" |> to_string);
+      let timeline = runtime_trust |> member "causal_timeline" |> to_list in
+      let blocker =
+        timeline
+        |> List.find_opt (fun event ->
+               String.equal "runtime_blocker"
+                 (event |> member "kind" |> to_string))
+      in
+      match blocker with
+      | None -> fail "expected runtime_blocker observation in timeline"
+      | Some event ->
+          check bool "runtime blocker marked observation-only" true
+            (event |> member "observation_only" |> to_bool)
+
 let () =
   run "Dashboard_goals"
     [
@@ -180,5 +228,9 @@ let () =
           test_case "goal detail surfaces keeper runtime trust and blockers"
             `Quick
             test_goal_detail_surfaces_keeper_runtime_trust_and_blockers;
+          test_case
+            "goal detail keeps synthetic runtime blocker out of latest causal"
+            `Quick
+            test_goal_detail_does_not_promote_synthetic_blocker_over_receipt;
         ] );
     ]

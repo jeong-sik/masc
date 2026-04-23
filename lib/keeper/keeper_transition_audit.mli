@@ -53,3 +53,8 @@ val record_completed_turn :
 (** Retrieve recent completed keeper turns for a keeper, newest first. *)
 val recent_completed_turns :
   keeper_name:string -> limit:int -> completed_turn_record list
+
+module For_testing : sig
+  val reset_state : unit -> unit
+  val clear_completed_turn_ring : keeper_name:string -> unit
+end

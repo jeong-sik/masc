@@ -1710,23 +1710,20 @@ let persist_directive_meta_update
            | latest_path :: _ -> latest_path
            | [] -> default_path)
   in
-  try
-    Keeper_fs.save_json_atomic persisted_path (meta_to_json updated_meta);
+  match Keeper_fs.save_json_atomic persisted_path (meta_to_json updated_meta) with
+  | Ok () ->
     Keeper_registry.update_meta
       ~base_path:entry.base_path
       entry.name
       updated_meta
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-      let err = Printexc.to_string exn in
-      Log.Keeper.warn
-        "directive meta persist failed for %s: %s"
-        entry.name
-        err;
-      Keeper_registry.update_meta
-        ~base_path:entry.base_path
-        entry.name
+  | Error msg ->
+    Log.Keeper.warn
+      "directive meta persist failed for %s: %s"
+      entry.name
+      msg;
+    Keeper_registry.update_meta
+      ~base_path:entry.base_path
+      entry.name
         updated_meta
 
 let set_keeper_paused_state ~agent_name paused =

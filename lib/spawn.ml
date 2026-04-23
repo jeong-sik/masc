@@ -157,65 +157,75 @@ let parse_gemini_output raw =
   with Yojson.Json_error _ ->
     parse_raw_output raw
 
-(** Default spawn configs for known agents *)
-let default_configs = [
-  ("claude", {
-    agent_name = "claude";
-    command = "claude --output-format json -p";
-    timeout_seconds = Env_config.Spawn.timeout_seconds;
-    working_dir = None;
-    mcp_tools = masc_mcp_tools;
-    parse_output = parse_claude_output;
-    stdin_prompt = true;
-    mcp_mode = Mcp_joined "--allowedTools";
-    prompt_mode = Prompt_stdin;
-  });
-  ("gemini", {
-    agent_name = "gemini";
-    command = "gemini --yolo --output-format json";
-    timeout_seconds = Env_config.Spawn.timeout_seconds;
-    working_dir = None;
-    mcp_tools = masc_mcp_tools;
-    parse_output = parse_gemini_output;
-    stdin_prompt = false;
-    mcp_mode = Mcp_spread "--allowed-tools";
-    prompt_mode = Prompt_flag "-p";
-  });
-  ("codex", {
-    agent_name = "codex";
-    command = "codex exec";
-    timeout_seconds = Env_config.Spawn.timeout_seconds;
-    working_dir = None;
-    mcp_tools = masc_mcp_tools;
-    parse_output = parse_raw_output;
-    stdin_prompt = true;
-    mcp_mode = Mcp_none;
-    prompt_mode = Prompt_stdin;
-  });
-  ("llama", {
-    agent_name = "llama";
-    command = Provider_adapter.make_local_label "explicit-model-required";
-    timeout_seconds = Env_config.Spawn.timeout_seconds;
-    working_dir = None;
-    mcp_tools = masc_mcp_tools;
-    parse_output = parse_raw_output;
-    stdin_prompt = true;
-    mcp_mode = Mcp_none;
-    prompt_mode = Prompt_stdin;
-  });
-]
+(** Build a spawn config from a canonical spawn key.
+    SSOT for agent names and aliases is [Provider_adapter.direct_adapters];
+    this function only maps resolved keys to their CLI invocation shape. *)
+let spawn_config_of_key key =
+  let open Env_config.Spawn in
+  match key with
+  | "claude" ->
+      Some {
+        agent_name = "claude";
+        command = "claude --output-format json -p";
+        timeout_seconds;
+        working_dir = None;
+        mcp_tools = masc_mcp_tools;
+        parse_output = parse_claude_output;
+        stdin_prompt = true;
+        mcp_mode = Mcp_joined "--allowedTools";
+        prompt_mode = Prompt_stdin;
+      }
+  | "gemini" ->
+      Some {
+        agent_name = "gemini";
+        command = "gemini --yolo --output-format json";
+        timeout_seconds;
+        working_dir = None;
+        mcp_tools = masc_mcp_tools;
+        parse_output = parse_gemini_output;
+        stdin_prompt = false;
+        mcp_mode = Mcp_spread "--allowed-tools";
+        prompt_mode = Prompt_flag "-p";
+      }
+  | "codex" ->
+      Some {
+        agent_name = "codex";
+        command = "codex exec";
+        timeout_seconds;
+        working_dir = None;
+        mcp_tools = masc_mcp_tools;
+        parse_output = parse_raw_output;
+        stdin_prompt = true;
+        mcp_mode = Mcp_none;
+        prompt_mode = Prompt_stdin;
+      }
+  | "llama" ->
+      Some {
+        agent_name = "llama";
+        command = Provider_adapter.make_local_label "explicit-model-required";
+        timeout_seconds;
+        working_dir = None;
+        mcp_tools = masc_mcp_tools;
+        parse_output = parse_raw_output;
+        stdin_prompt = true;
+        mcp_mode = Mcp_none;
+        prompt_mode = Prompt_stdin;
+      }
+  | _ -> None
+
+let default_configs =
+  [ "claude"; "gemini"; "codex"; "llama" ]
+  |> List.filter_map (fun key ->
+         Option.map (fun config -> (key, config)) (spawn_config_of_key key))
 
 (** Get spawn config for agent.
     Resolves all aliases via Provider_adapter registry (SSOT).
     spawn_alias_map removed — aliases are now in Provider_adapter.direct_adapters. *)
 let get_config agent_name =
   let normalized = String.lowercase_ascii (String.trim agent_name) in
-  match List.assoc_opt normalized default_configs with
-  | Some _ as result -> result
-  | None ->
-    match Provider_adapter.resolve_spawn_key normalized with
-    | Some key -> List.assoc_opt key default_configs
-    | None -> None
+  match Provider_adapter.resolve_spawn_key normalized with
+  | Some key -> spawn_config_of_key key
+  | None -> spawn_config_of_key normalized
 
 (** Build MCP flags from config's [mcp_mode] field.
     No agent-name matching — dispatch is config-driven. *)

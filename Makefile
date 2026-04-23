@@ -1,6 +1,10 @@
 # masc-mcp Makefile
 # Enterprise-ready development commands
 
+# Isolate build directory per worktree to prevent dune lock contention
+# when multiple worktrees run concurrent builds.
+export DUNE_BUILD_DIR ?= $(CURDIR)/_build
+
 .PHONY: build test test-unit test-contract test-contract-live test-transport test-webrtc-live-env test-all clean clean-tlc-artifacts coverage coverage-summary coverage-html coverage-percent doc install-deps pin-external-deps sync-oas-pin-docs doctor-oas-pin doctor-oas-drift doctor-disk-hygiene fix-disk-hygiene fix-disk-hygiene-hard dashboard-drift-check dashboard-drift-regen dev-setup fmt fmt-check health ocaml-health ci dashboard dev-dashboard build-all viewer-build viewer-serve harness-game-view-contract harness-streamable-http-contract harness-run-local-fresh-boot harness-trpg-session-contract harness-trpg-grimland-smoke viewer-local-e2e-check check-memory-leak bonsai-dashboard bonsai-dashboard-if-available dev-bonsai-dashboard clean-bonsai-dashboard bonsai-dashboard-tokens
 
 # Default target — OCaml + dashboard

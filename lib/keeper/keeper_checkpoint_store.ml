@@ -79,9 +79,12 @@ let save
     ("context", context_json);
   ] in
   let content = Yojson.Safe.to_string json in
-  Keeper_fs.save_atomic path content;
-  (* Auto-prune old checkpoints after each save *)
-  ignore (prune ~session_dir ~keep:max_checkpoints_retained)
+  match Keeper_fs.save_atomic path content with
+  | Ok () ->
+    (* Auto-prune old checkpoints after each save *)
+    ignore (prune ~session_dir ~keep:max_checkpoints_retained)
+  | Error msg ->
+    Log.Keeper.warn "save_checkpoint failed for %s: %s" path msg
 
 (* ================================================================ *)
 (* Load Latest                                                        *)
@@ -169,20 +172,23 @@ let oas_history_snapshot_id_of_checkpoint (ckpt : Oas.Checkpoint.t) : string =
 
 let save_oas_history ~(session_dir : string) (ckpt : Oas.Checkpoint.t) : unit =
   let snapshot_id = oas_history_snapshot_id_of_checkpoint ckpt in
-  Keeper_fs.save_atomic
+  match Keeper_fs.save_atomic
     (oas_history_path ~session_dir ~snapshot_id)
-    (Oas.Checkpoint.to_string ckpt);
-  let files = list_oas_history_files ~session_dir in
-  if List.length files > max_oas_history_retained then
-    files
-    |> List.filteri (fun index _ -> index >= max_oas_history_retained)
-    |> List.iter (fun filename ->
-         let path = oas_history_path ~session_dir ~snapshot_id:filename in
-         try Sys.remove path with
-         | Eio.Cancel.Cancelled _ as e -> raise e
-         | exn ->
-             Log.Keeper.warn "OAS snapshot cleanup failed for %s: %s"
-               path (Printexc.to_string exn))
+    (Oas.Checkpoint.to_string ckpt) with
+  | Ok () ->
+    let files = list_oas_history_files ~session_dir in
+    if List.length files > max_oas_history_retained then
+      files
+      |> List.filteri (fun index _ -> index >= max_oas_history_retained)
+      |> List.iter (fun filename ->
+           let path = oas_history_path ~session_dir ~snapshot_id:filename in
+           try Sys.remove path with
+           | Eio.Cancel.Cancelled _ as e -> raise e
+           | exn ->
+               Log.Keeper.warn "OAS snapshot cleanup failed for %s: %s"
+                 path (Printexc.to_string exn))
+  | Error msg ->
+    Log.Keeper.warn "save_oas_history failed for %s: %s" snapshot_id msg
 
 let delete_oas_history_files ~(session_dir : string) ~(snapshot_ids : string list)
     : string list * string list =
@@ -208,15 +214,17 @@ let delete_oas_history_files ~(session_dir : string) ~(snapshot_ids : string lis
 let save_oas ~(session_dir : string) (ckpt : Oas.Checkpoint.t)
   : (unit, string) result =
   let fallback () =
-    Keeper_fs.save_atomic
+    match Keeper_fs.save_atomic
       (oas_checkpoint_path ~session_dir ~session_id:ckpt.session_id)
-      (Oas.Checkpoint.to_string ckpt);
-    (try save_oas_history ~session_dir ckpt with
-     | Eio.Cancel.Cancelled _ as e -> raise e
-     | exn ->
-         Log.Keeper.warn "OAS snapshot archive write failed for %s: %s"
-           ckpt.session_id (Printexc.to_string exn));
-    Ok ()
+      (Oas.Checkpoint.to_string ckpt) with
+    | Ok () ->
+      (try save_oas_history ~session_dir ckpt with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+           Log.Keeper.warn "OAS snapshot archive write failed for %s: %s"
+             ckpt.session_id (Printexc.to_string exn));
+      Ok ()
+    | Error msg -> Error msg
   in
   try
     ignore (Keeper_fs.ensure_dir session_dir);

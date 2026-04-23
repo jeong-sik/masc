@@ -248,7 +248,8 @@ let execute_keeper_tool_call_with_outcome
     | "keeper_bash" ->
       make_executed_tool_result
         (Keeper_exec_shell.handle_keeper_bash
-           ~turn_sandbox_runtime ~turn_sandbox_runtime_git ~config ~meta ~args)
+           ~turn_sandbox_runtime ~turn_sandbox_runtime_git ~config ~meta ~args
+           ())
     | "keeper_bash_output" ->
       make_executed_tool_result
         (Keeper_exec_shell.handle_keeper_bash_output ~config ~meta ~args)

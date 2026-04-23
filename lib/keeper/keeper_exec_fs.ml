@@ -224,32 +224,35 @@ let handle_keeper_fs_edit
               | Error msg ->
                 error_json ~fields:[ "path", `String target ] msg
               | Ok (updated, occurrences) ->
-                (match turn_sandbox_runtime with
-                 | Some runtime ->
-                   (match
-                      Keeper_turn_sandbox_runtime.overwrite_file runtime
-                        ~host_path:target ~content:updated
-                        ~timeout_sec:30.0 ()
-                    with
-                    | Ok () -> ()
-                    | Error msg -> raise (Sys_error msg))
-                 | None ->
-                   Fs_compat.save_file target updated);
-                Log.Keeper.info
-                  "WRITE_AUDIT: keeper=%s fs_edit path=%s mode=patch \
-                   replace_all=%b occurrences=%d bytes=%d"
-                  meta.name target replace_all occurrences
-                  (String.length updated);
-                Yojson.Safe.to_string
-                  (`Assoc
-                      ([ "ok", `Bool true
-                       ; "path", `String target
-                       ; "mode", `String "patch"
-                       ; "replace_all", `Bool replace_all
-                       ; "occurrences", `Int occurrences
-                       ; "bytes_written", `Int (String.length updated)
-                       ]
-                      @ via_field))
+                let write_result =
+                  match turn_sandbox_runtime with
+                  | Some runtime ->
+                    Keeper_turn_sandbox_runtime.overwrite_file runtime
+                      ~host_path:target ~content:updated
+                      ~timeout_sec:30.0 ()
+                  | None ->
+                    Fs_compat.save_file target updated;
+                    Ok ()
+                in
+                (match write_result with
+                 | Error msg ->
+                   error_json ~fields:[ "path", `String target ] msg
+                 | Ok () ->
+                   Log.Keeper.info
+                     "WRITE_AUDIT: keeper=%s fs_edit path=%s mode=patch \
+                      replace_all=%b occurrences=%d bytes=%d"
+                     meta.name target replace_all occurrences
+                     (String.length updated);
+                   Yojson.Safe.to_string
+                     (`Assoc
+                        ([ "ok", `Bool true
+                         ; "path", `String target
+                         ; "mode", `String "patch"
+                         ; "replace_all", `Bool replace_all
+                         ; "occurrences", `Int occurrences
+                         ; "bytes_written", `Int (String.length updated)
+                         ]
+                        @ via_field)))
           with
           | Invalid_argument e ->
             error_json ~fields:[ "path", `String target ] e
@@ -266,42 +269,40 @@ let handle_keeper_fs_edit
   | Error e -> error_json e
   | Ok target ->
     (try
-       (match turn_sandbox_runtime with
-        | Some runtime ->
-          (match mode with
-           | Append ->
-             (match
-                Keeper_turn_sandbox_runtime.append_file runtime
-                  ~host_path:target ~content ~timeout_sec:30.0 ()
-              with
-              | Ok () -> ()
-              | Error msg -> raise (Sys_error msg))
-           | Overwrite ->
-             (match
-                Keeper_turn_sandbox_runtime.overwrite_file runtime
-                  ~host_path:target ~content ~timeout_sec:30.0 ()
-              with
-              | Ok () -> ()
-              | Error msg -> raise (Sys_error msg))
-           | Patch -> ())
-        | None ->
-          let parent = Filename.dirname target in
-          Fs_compat.mkdir_p parent;
-          (match mode with
-           | Append -> Fs_compat.append_file target content
-           | Overwrite -> Fs_compat.save_file target content
-           | Patch -> ()  (* unreachable: caught above *)));
-       Log.Keeper.info "WRITE_AUDIT: keeper=%s fs_edit path=%s mode=%s bytes=%d"
-         meta.name target mode_label
-         (String.length content);
-       Yojson.Safe.to_string
-         (`Assoc
-             ([ "ok", `Bool true
-              ; "path", `String target
-              ; "mode", `String mode_label
-              ; "bytes_written", `Int (String.length content)
-              ]
-             @ via_field))
+       let write_result =
+         match turn_sandbox_runtime with
+         | Some runtime ->
+           (match mode with
+            | Append ->
+              Keeper_turn_sandbox_runtime.append_file runtime
+                ~host_path:target ~content ~timeout_sec:30.0 ()
+            | Overwrite ->
+              Keeper_turn_sandbox_runtime.overwrite_file runtime
+                ~host_path:target ~content ~timeout_sec:30.0 ()
+            | Patch -> Ok ())
+         | None ->
+           let parent = Filename.dirname target in
+           Fs_compat.mkdir_p parent;
+           (match mode with
+            | Append -> Fs_compat.append_file target content
+            | Overwrite -> Fs_compat.save_file target content
+            | Patch -> ());
+           Ok ()
+       in
+       match write_result with
+       | Error msg -> error_json ~fields:[ "path", `String target ] msg
+       | Ok () ->
+         Log.Keeper.info "WRITE_AUDIT: keeper=%s fs_edit path=%s mode=%s bytes=%d"
+           meta.name target mode_label
+           (String.length content);
+         Yojson.Safe.to_string
+           (`Assoc
+               ([ "ok", `Bool true
+                ; "path", `String target
+                ; "mode", `String mode_label
+                ; "bytes_written", `Int (String.length content)
+                ]
+               @ via_field))
      with
      | Invalid_argument e -> error_json ~fields:[ "path", `String target ] e
      | Sys_error e -> error_json ~fields:[ "path", `String target ] e

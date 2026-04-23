@@ -146,6 +146,7 @@ Notes:
 
 - Check the default port for a target: `scripts/run-local.sh --print-port --target-dir /path/to/project`
 - To use a fixed port: `scripts/run-local.sh --target-dir /path/to/project --port 94xx`
+- Dir-local bootstrap excludes checked-in `config/keepers/*.toml` by default; add `--bootstrap-keepers` only when you explicitly want that seed copied into `<target>/.masc/config/keepers`
 - For shared repo/full-runtime paths, continue using `./start-masc-mcp.sh --http`
 - For a full boot/path/state inventory, see [docs/BOOT-ENV-STATE-INVENTORY.md](docs/BOOT-ENV-STATE-INVENTORY.md)
 - For active config/init diagnosis, use [docs/CONFIG-DOCTOR.md](docs/CONFIG-DOCTOR.md)
@@ -303,7 +304,8 @@ The dashboard should learn connector type and status from the gate descriptor
 surface instead of hardcoding vendor-specific assumptions.
 
 - `scripts/run-local.sh` does not build the dashboard automatically. Append `--build-dashboard` only when needed.
-- `start-masc-mcp.sh` automatically builds the dashboard SPA if `pnpm` or `corepack pnpm` is available.
+- `scripts/run-local.sh` also excludes checked-in keeper manifests during bootstrap unless `--bootstrap-keepers` is passed.
+- `start-masc-mcp.sh` skips dashboard builds in `--stdio` mode. In HTTP mode it starts `scripts/build-dashboard-if-needed.sh` in the background by default; set `MASC_DASHBOARD_BUILD_BLOCKING=1` if you need the old blocking behavior.
 - To run the dev server separately, use:
 
 ```bash

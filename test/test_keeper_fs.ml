@@ -99,7 +99,7 @@ let test_save_atomic_basic () =
   let base = temp_dir () in
   let path = Filename.concat base "data.json" in
   let content = {|{"key": "value"}|} in
-  KF.save_atomic path content;
+  check bool "save_atomic ok" true (Result.is_ok (KF.save_atomic path content));
   let loaded = read_file path in
   check string "content matches" content loaded;
   check bool "no tmp file" false (has_tmp_files base);
@@ -108,8 +108,8 @@ let test_save_atomic_basic () =
 let test_save_atomic_overwrites () =
   let base = temp_dir () in
   let path = Filename.concat base "overwrite.txt" in
-  KF.save_atomic path "first";
-  KF.save_atomic path "second";
+  check bool "first save ok" true (Result.is_ok (KF.save_atomic path "first"));
+  check bool "second save ok" true (Result.is_ok (KF.save_atomic path "second"));
   let loaded = read_file path in
   check string "second write wins" "second" loaded;
   cleanup_dir base
@@ -117,7 +117,7 @@ let test_save_atomic_overwrites () =
 let test_save_atomic_creates_parent_dir () =
   let base = temp_dir () in
   let path = Filename.concat base "deep/nested/file.txt" in
-  KF.save_atomic path "content";
+  check bool "nested save ok" true (Result.is_ok (KF.save_atomic path "content"));
   check bool "file exists" true (Sys.file_exists path);
   let loaded = read_file path in
   check string "content matches" "content" loaded;
@@ -127,7 +127,7 @@ let test_save_json_atomic () =
   let base = temp_dir () in
   let path = Filename.concat base "test.json" in
   let json = `Assoc [("name", `String "keeper"); ("gen", `Int 1)] in
-  KF.save_json_atomic path json;
+  check bool "save_json_atomic ok" true (Result.is_ok (KF.save_json_atomic path json));
   let loaded = Yojson.Safe.from_file path in
   let open Yojson.Safe.Util in
   check string "name field" "keeper" (loaded |> member "name" |> to_string);
@@ -171,7 +171,10 @@ let test_concurrent_save_atomic () =
   let errors = Atomic.make 0 in
   Eio.Fiber.all
     (List.init 10 (fun i () ->
-       try KF.save_atomic path (Printf.sprintf "fiber-%d" i)
+       try
+         match KF.save_atomic path (Printf.sprintf "fiber-%d" i) with
+         | Ok () -> ()
+         | Error _ -> Atomic.incr errors
        with _ -> Atomic.incr errors));
   check int "no errors" 0 (Atomic.get errors);
   check bool "file exists" true (Sys.file_exists path);

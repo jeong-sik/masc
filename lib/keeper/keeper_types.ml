@@ -358,10 +358,7 @@ let () =
      | Proactive_mixed_response
      | Proactive_error -> ());
     let s = proactive_cycle_outcome_to_string v in
-    if proactive_cycle_outcome_of_string s <> v then
-      failwith
-        (Printf.sprintf
-           "keeper_types: proactive round-trip broken for label %S" s)
+    assert (proactive_cycle_outcome_of_string s = v)
   in
   List.iter
     assert_roundtrip
@@ -1716,14 +1713,12 @@ let write_meta ?(force = false) config (m : keeper_meta) : (unit, string) result
   let persisted = if force then m else fresher_meta config m in
   let path = keeper_meta_path config persisted.name in
   let json = meta_to_json persisted in
-  try
-    Keeper_fs.save_json_atomic path json;
+  match Keeper_fs.save_json_atomic path json with
+  | Ok () ->
     !runtime_meta_write_sync_hook config persisted;
     Ok ()
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-    Error (Printf.sprintf "failed to write meta %s: %s" path (Printexc.to_string exn))
+  | Error msg ->
+    Error (Printf.sprintf "failed to write meta %s: %s" path msg)
 ;;
 
 let keeper_name_from_agent_name = Keeper_identity.keeper_name_from_agent_name

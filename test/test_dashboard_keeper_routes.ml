@@ -501,6 +501,19 @@ let invalid_profile_names body =
   | _ -> []
 ;;
 
+let keeper_profile_cascade_name body keeper_name =
+  let open Yojson.Safe.Util in
+  let json = Yojson.Safe.from_string body in
+  let rows = json |> member "keeper_profiles" |> to_list in
+  match
+    List.find_opt
+      (fun row -> row |> member "keeper" |> to_string = keeper_name)
+      rows
+  with
+  | Some row -> row |> member "cascade_name" |> to_string
+  | None -> fail ("keeper profile missing from cascade config: " ^ keeper_name)
+;;
+
 let make_keeper_meta_json ?(name = "route_shadow_demo") () =
   match
     Masc_mcp.Keeper_types.meta_of_json
@@ -1081,6 +1094,63 @@ let test_keeper_cascade_routes_filter_invalid_catalog_entries () =
     (contains_substr "invalid in active cascade.json" assign_invalid_result.body)
 ;;
 
+let test_keeper_cascade_assignment_updates_dashboard_projection () =
+  with_mock_model @@ fun valid_model ->
+  with_temp_config_root
+    (Printf.sprintf
+       {|{"default_models":["%s"],"keeper_unified_models":["%s"]}|}
+       valid_model
+       valid_model)
+  @@ fun config_root ->
+  let seeded_keeper_name = "route_shadow_demo" in
+  write_keeper_toml_fixture ~config_root ~keeper_name:seeded_keeper_name;
+  with_seeded_server
+    ~env_overrides:[ "MASC_CONFIG_DIR", config_root ]
+  @@ fun ~port ~config ~admin_token ~keeper_name ->
+  check string "fixture keeper name" seeded_keeper_name keeper_name;
+  let boot_path = Printf.sprintf "/api/v1/keepers/%s/boot" keeper_name in
+  let boot_result =
+    run_curl_post ~body:"{}" ~token:admin_token ~port ~path:boot_path ()
+  in
+  require_status "boot route registers keeper" 200 boot_result;
+  let before =
+    run_curl_get ~port ~path:"/api/v1/cascade/config" ()
+  in
+  require_status "cascade config GET before assignment returns 200" 200 before;
+  check string "dashboard starts with seeded meta cascade"
+    Masc_mcp.Keeper_config.default_cascade_name
+    (keeper_profile_cascade_name before.body keeper_name);
+  let assign_result =
+    run_curl_post
+      ~body:
+        (Printf.sprintf
+           {|{"keeper":"%s","cascade_name":"keeper_unified"}|}
+           keeper_name)
+      ~token:admin_token
+      ~port
+      ~path:"/api/v1/keeper/cascade"
+      ()
+  in
+  require_status "valid cascade assignment returns 200" 200 assign_result;
+  let open Yojson.Safe.Util in
+  let assign_json = Yojson.Safe.from_string assign_result.body in
+  check bool "assignment synced live meta" true
+    (assign_json |> member "live_meta_synced" |> to_bool);
+  let after =
+    run_curl_get ~port ~path:"/api/v1/cascade/config" ()
+  in
+  require_status "cascade config GET after assignment returns 200" 200 after;
+  check string "dashboard projection reflects assigned cascade"
+    "keeper_unified"
+    (keeper_profile_cascade_name after.body keeper_name);
+  (match Masc_mcp.Keeper_types.read_meta config keeper_name with
+   | Ok (Some meta) ->
+       check string "persistent meta cascade updated"
+         "keeper_unified" meta.cascade_name
+   | Ok None -> fail "keeper meta missing after cascade assignment"
+   | Error msg -> fail ("read_meta failed after cascade assignment: " ^ msg))
+;;
+
 let test_execution_trust_route_surfaces_trust_summary_fields () =
   with_seeded_server
   @@ fun ~port ~config ~admin_token:_ ~keeper_name ->
@@ -1296,6 +1366,10 @@ let () =
             "keeper cascade routes filter invalid catalog entries"
             `Slow
             test_keeper_cascade_routes_filter_invalid_catalog_entries
+        ; test_case
+            "keeper cascade assignment updates dashboard projection"
+            `Slow
+            test_keeper_cascade_assignment_updates_dashboard_projection
         ; test_case
             "execution trust route surfaces trust summary fields"
             `Slow

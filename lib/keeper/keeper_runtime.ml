@@ -207,6 +207,11 @@ let ensure_keeper_meta config name =
           defaults.per_provider_timeout
     in
 
+    (* --- Always Approve --- *)
+    let target_always_approve =
+      apply_default_opt defaults.always_approve meta.always_approve
+    in
+
     (* --- Change detection by category --- *)
     let proactive_changed =
       meta.proactive.enabled <> target_proactive
@@ -244,7 +249,8 @@ let ensure_keeper_meta config name =
       || meta.sandbox_profile <> target_sandbox_profile
       || meta.network_mode <> target_network_mode
       || meta.shared_memory_scope <> target_shared_memory_scope
-      || meta.allowed_paths <> target_allowed_paths in
+      || meta.allowed_paths <> target_allowed_paths
+      || meta.always_approve <> target_always_approve in
     let discovery_changed =
       meta.work_discovery_enabled <> target_wd_enabled
       || meta.work_discovery_sources <> target_wd_sources
@@ -323,6 +329,7 @@ let ensure_keeper_meta config name =
         telemetry_feedback_enabled = target_tf_enabled;
         telemetry_feedback_window_hours = target_tf_window;
         per_provider_timeout_s = target_per_provider_timeout;
+        always_approve = target_always_approve;
         updated_at = now_iso ();
       } in
       match write_meta config updated with

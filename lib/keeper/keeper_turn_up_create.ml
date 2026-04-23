@@ -400,6 +400,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         telemetry_feedback_enabled = p.profile_defaults.telemetry_feedback_enabled;
         telemetry_feedback_window_hours = p.profile_defaults.telemetry_feedback_window_hours;
         per_provider_timeout_s = p.profile_defaults.per_provider_timeout;
+        always_approve = p.profile_defaults.always_approve;
         runtime = {
           usage = {
             total_turns = 0;

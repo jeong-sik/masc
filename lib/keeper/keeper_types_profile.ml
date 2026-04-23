@@ -291,6 +291,7 @@ type keeper_profile_defaults = {
   per_provider_timeout_state : per_provider_timeout_state;
   (* Per-provider timeout for cascade fallback. None = use turn budget heuristic. *)
   per_provider_timeout : float option;
+  always_approve : bool option;
   social_model : string option;
   cascade_name : string option;
   models : string list option;
@@ -360,6 +361,7 @@ let empty_keeper_profile_defaults = {
   telemetry_feedback_window_hours = None;
   per_provider_timeout_state = Per_provider_timeout_unset;
   per_provider_timeout = None;
+  always_approve = None;
   social_model = None;
   max_turns_per_call = None;
   max_turns_per_call_scheduled_autonomous = None;
@@ -722,6 +724,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         telemetry_feedback_window_hours = int_ "telemetry_feedback_window_hours";
         per_provider_timeout_state;
         per_provider_timeout;
+        always_approve = bool_ "always_approve";
         max_turns_per_call = int_ "max_turns_per_call";
         max_turns_per_call_scheduled_autonomous =
           int_ "max_turns_per_call_scheduled_autonomous";
@@ -771,6 +774,7 @@ let parsed_field_key_names =
   ; "telemetry_feedback_enabled"
   ; "telemetry_feedback_window_hours"
   ; "per_provider_timeout"
+  ; "always_approve"
   ; "max_turns_per_call"
   ; "max_turns_per_call_scheduled_autonomous"
   ; "social_model"
@@ -822,6 +826,7 @@ let canonical_keeper_toml_key_names =
   ; "telemetry_feedback_enabled"
   ; "telemetry_feedback_window_hours"
   ; "per_provider_timeout"
+  ; "always_approve"
   ; "max_turns_per_call"
   ; "max_turns_per_call_scheduled_autonomous"
   ; "social_model"
@@ -1006,6 +1011,8 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                   Safe_ops.json_int_opt "telemetry_feedback_window_hours" keeper_json;
                 per_provider_timeout_state;
                 per_provider_timeout;
+                always_approve =
+                  Safe_ops.json_bool_opt "always_approve" keeper_json;
                 max_turns_per_call =
                   Safe_ops.json_int_opt "max_turns_per_call" keeper_json;
                 max_turns_per_call_scheduled_autonomous =
@@ -1158,6 +1165,7 @@ let merge_keeper_profile_defaults
         base.telemetry_feedback_window_hours;
     per_provider_timeout_state;
     per_provider_timeout;
+    always_approve = prefer overlay.always_approve base.always_approve;
     social_model = prefer overlay.social_model base.social_model;
     cascade_name = prefer overlay.cascade_name base.cascade_name;
     models = prefer overlay.models base.models;

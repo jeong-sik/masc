@@ -446,7 +446,10 @@ let tool_required_affordances =
 
 let should_require_tools_for_initial_turn ~(max_turns : int)
     ~(turn_affordances : string list) =
+  let initial_per_call_turn = 1 in
+  let initial_turn_is_last = initial_per_call_turn >= max_turns - 1 in
   max_turns > 1
+  && not initial_turn_is_last
   && List.exists
        (fun affordance -> List.mem affordance turn_affordances)
        tool_required_affordances

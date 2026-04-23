@@ -70,6 +70,8 @@ let append_keeper_receipt (config : Coord.config) (meta : Keeper_types.keeper_me
       tool_surface =
         {
           turn_lane = "tool";
+          tool_surface_class = "mixed";
+          tool_requirement = "required";
           visible_tool_count = 1;
           tool_gate_enabled = true;
           tool_surface_fallback_used = false;
@@ -84,6 +86,9 @@ let append_keeper_receipt (config : Coord.config) (meta : Keeper_types.keeper_me
       cascade_attempt_count = 1;
       cascade_fallback_applied = false;
       cascade_outcome = "completed";
+      degraded_retry_applied = false;
+      degraded_retry_cascade = None;
+      fallback_reason = None;
       stop_reason = Some "completed";
       error_kind = None;
       error_message = None;

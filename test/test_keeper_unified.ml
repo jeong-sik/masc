@@ -4098,6 +4098,15 @@ let test_keeper_allowed_tools_exclude_heartbeat () =
   check bool "masc_heartbeat hidden from keeper tool surface" false
     (List.mem "masc_heartbeat" allowed)
 
+let test_should_require_tools_for_initial_turn_matches_first_turn_gate () =
+  let affordances = [ "task_claim"; "board_post" ] in
+  check bool "two-turn call reserves final turn without forcing strict lane" false
+    (KAR.should_require_tools_for_initial_turn ~max_turns:2 ~turn_affordances:affordances);
+  check bool "three-turn call can require initial tools" true
+    (KAR.should_require_tools_for_initial_turn ~max_turns:3 ~turn_affordances:affordances);
+  check bool "no tool-required affordance stays optional" false
+    (KAR.should_require_tools_for_initial_turn ~max_turns:3 ~turn_affordances:[ "observe" ])
+
 (* ---------- render_inline_skip_reason tests ---------- *)
 
 let str_contains s sub =
@@ -4718,6 +4727,8 @@ let () =
         [
           test_case "keeper allowed tools exclude heartbeat" `Quick
             test_keeper_allowed_tools_exclude_heartbeat;
+          test_case "initial tool requirement mirrors first-turn gate" `Quick
+            test_should_require_tools_for_initial_turn_matches_first_turn_gate;
         ] );
       ( "verification_surface",
         [

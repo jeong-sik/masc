@@ -899,6 +899,7 @@ let test_run_named_per_provider_timeout_uses_clock_fallback_and_exempts_last_pro
     with_temp_masc_config
       (Printf.sprintf
          {|{
+  "big_three_models": ["ollama:auto"],
   "timeout_probe_models": [
     "custom:slow@%s",
     "custom:last@%s"

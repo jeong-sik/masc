@@ -723,7 +723,7 @@ let test_turn_runtime_relaxed_fs_omits_readonly_and_noexec () =
       Alcotest.(check bool) "relaxed runtime keeps tmpfs mount" true
         (contains_substring line "/tmp:rw,nosuid,nodev,size=")
 
-let () =
+let run_tests () =
   Alcotest.run "Keeper_docker_read"
     [
       ( "should_route_read",
@@ -792,3 +792,11 @@ let () =
             test_cleanup_stale_containers_removes_only_stale_masc_scope;
         ] );
     ]
+
+let () =
+  Eio_main.run @@ fun env ->
+  Process_eio.init
+    ~cwd_default:Eio.Path.(Eio.Stdenv.fs env / Sys.getcwd ())
+    ~proc_mgr:(Eio.Stdenv.process_mgr env)
+    ~clock:(Eio.Stdenv.clock env);
+  run_tests ()

@@ -1009,6 +1009,22 @@ mention_targets = ["a"]
     check (list string) "surfaces dead config"
       ["keeper.legacy_scope"; "keeper.scope_kind"] unknown
 
+let test_detect_unknown_keys_flags_unparsed_tool_access_table () =
+  let input = {|
+[keeper]
+goal = "g"
+
+[keeper.tool_access]
+kind = "preset"
+preset = "coding"
+|} in
+  match TL.parse_toml input with
+  | Error e -> fail e
+  | Ok doc ->
+    let unknown = KTP.detect_unknown_keeper_toml_keys doc in
+    check (list string) "tool_access TOML table is not silently accepted"
+      ["keeper.tool_access.kind"; "keeper.tool_access.preset"] unknown
+
 let test_oas_env_parses_allowed_keys () =
   let input = {|
 [keeper]
@@ -1235,6 +1251,8 @@ let () =
             test_detect_unknown_keys_empty_when_all_canonical;
           test_case "flags legacy dead config" `Quick
             test_detect_unknown_keys_flags_legacy_dead_config;
+          test_case "flags unparsed tool_access table" `Quick
+            test_detect_unknown_keys_flags_unparsed_tool_access_table;
           test_case "also_allow alias flagged" `Quick
             test_detect_unknown_keys_flags_also_allow_alias;
           test_case "oas_env keys not flagged as unknown" `Quick

@@ -809,8 +809,6 @@ let canonical_keeper_toml_key_names =
   ; "github_identity"
   ; "git_identity_mode"
   ; "tool_preset"
-  ; "tool_access.kind"
-  ; "tool_access.preset"
   ; "tool_also_allow"
   ; "tool_denylist"
   ; "active_goal_ids"

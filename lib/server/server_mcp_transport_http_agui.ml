@@ -57,7 +57,9 @@ let handle_ag_ui_events ~deps request reqd =
       let push event =
         match !info_ref with
         | None -> ()
-        | Some info -> ignore (send_raw info (ag_ui_event_of_masc_event event))
+        | Some info ->
+            if not (send_raw info (ag_ui_event_of_masc_event event)) then
+              Log.Server.debug "ag-ui push failed for session %s" info.session_id
       in
       let client_id, event_stream, evicted =
         Sse.register session_id ~push
@@ -83,11 +85,15 @@ let handle_ag_ui_events ~deps request reqd =
           make_event ~thread_id:default_thread_id ~run_id:(Some session_id) Run_started
           |> event_to_sse)
       in
-      ignore (send_raw info prime);
+      if not (send_raw info prime) then
+        Log.Server.debug "ag-ui prime send failed for session %s" info.session_id;
       (match last_event_id with
       | Some last_id ->
           let missed = Sse.get_events_after last_id in
-          List.iter (fun ev -> ignore (send_raw info ev)) missed
+          List.iter (fun ev ->
+            if not (send_raw info ev) then
+              Log.Server.debug "ag-ui replay send failed for session %s" info.session_id
+          ) missed
       | None -> ());
       (match deps.get_runtime_result () with
       | Ok runtime ->
@@ -99,7 +105,9 @@ let handle_ag_ui_events ~deps request reqd =
                 let event = Eio.Stream.take event_stream in
                 (try
                   if not (info.closed || !(info.stop)) then
-                    ignore (send_raw info event)
+                    if not (send_raw info event) then
+                      Log.Server.debug "ag-ui drain send failed for session %s"
+                        info.session_id
                 with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                   Log.Server.error "ag-ui drain write error: %s"
                     (Printexc.to_string exn);
@@ -122,7 +130,9 @@ let handle_ag_ui_events ~deps request reqd =
                      if info.closed then
                        stop_sse_session_preserve_guard info.session_id
                      else if not !(info.stop) then
-                       ignore (send_raw info ": ping\n\n")
+                       if not (send_raw info ": ping\n\n") then
+                         Log.Server.debug "ag-ui ping send failed for session %s"
+                           info.session_id
                    with Eio.Cancel.Cancelled _ as exn -> raise exn
                       | exn ->
                           Log.Server.warn "SSE ping send failed for session %s: %s" info.session_id (Printexc.to_string exn);

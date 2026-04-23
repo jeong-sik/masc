@@ -69,7 +69,8 @@ let stream_post_sse_start ~deps ~origin ~session_id ~protocol_version
   let response = Httpun.Response.create ~headers `OK in
   let writer = Httpun.Reqd.respond_with_streaming reqd response in
   let info = make_inline_sse_conn ~session_id writer in
-  ignore (send_raw info (sse_prime_event ()));
+  if not (send_raw info (sse_prime_event ())) then
+    Log.Server.debug "SSE prime send failed for session %s" info.session_id;
   info
 
 let spawn_post_sse_keepalive ~sw ~clock info =
@@ -84,7 +85,9 @@ let spawn_post_sse_keepalive ~sw ~clock info =
           if info.closed then
             close_sse_conn info
           else if not !(info.stop) then
-            ignore (send_raw info ": keepalive\n\n");
+            if not (send_raw info ": keepalive\n\n") then
+              Log.Server.debug "SSE keepalive send failed for session %s"
+                info.session_id;
           loop ())
       in
       try loop ()
@@ -95,9 +98,10 @@ let spawn_post_sse_keepalive ~sw ~clock info =
 let stream_post_sse_finish info = close_sse_conn info
 
 let stream_post_sse_json info (json : Yojson.Safe.t) =
-  ignore
-    (send_raw info
-       (Sse.format_event ~event_type:"message" (Yojson.Safe.to_string json)))
+  if not (send_raw info
+            (Sse.format_event ~event_type:"message" (Yojson.Safe.to_string json)))
+  then
+    Log.Server.debug "SSE json send failed for session %s" info.session_id
 
 let should_stream_post_tools_call request body_str accept_mode =
   should_use_sse_for_body request body_str accept_mode
@@ -552,7 +556,9 @@ let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Full)
           let push event =
             match !info_ref with
             | None -> ()
-            | Some info -> ignore (send_raw info event)
+            | Some info ->
+                if not (send_raw info event) then
+                  Log.Server.debug "SSE push failed for session %s" info.session_id
           in
           let client_id, event_stream, evicted =
             Sse.register ~kind:sse_kind session_id ~push
@@ -573,18 +579,25 @@ let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Full)
           in
           info_ref := Some info;
           register_sse_conn ~session_id ~info;
-          ignore (send_raw info (sse_prime_event ()));
+          if not (send_raw info (sse_prime_event ())) then
+            Log.Server.debug "SSE prime send failed for session %s" info.session_id;
           (match legacy_messages_endpoint with
           | None -> ()
           | Some f ->
               let endpoint_url = f session_id in
-              ignore
-                (send_raw info
-                   (Sse.format_event ~event_type:"endpoint" endpoint_url)));
+              if not (send_raw info
+                        (Sse.format_event ~event_type:"endpoint" endpoint_url))
+              then
+                Log.Server.debug "SSE endpoint send failed for session %s"
+                  info.session_id);
           (match last_event_id with
           | Some last_id ->
               let missed = Sse.get_events_after last_id in
-              List.iter (fun ev -> ignore (send_raw info ev)) missed
+              List.iter (fun ev ->
+                if not (send_raw info ev) then
+                  Log.Server.debug "SSE replay send failed for session %s"
+                    info.session_id
+              ) missed
           | None -> ());
           (match deps.get_runtime_result () with
           | Ok runtime ->
@@ -595,7 +608,9 @@ let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Full)
                     let event = Eio.Stream.take event_stream in
                     (try
                       if not (info.closed || !(info.stop)) then
-                        ignore (send_raw info event)
+                        if not (send_raw info event) then
+                          Log.Server.debug "SSE drain send failed for session %s"
+                            info.session_id
                     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                       Log.Server.error "drain write error: %s"
                         (Printexc.to_string exn);
@@ -624,7 +639,9 @@ let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Full)
                          if info.closed then
                            stop_sse_session info.session_id
                          else if not !(info.stop) then
-                           ignore (send_raw info ": ping\n\n")
+                           if not (send_raw info ": ping\n\n") then
+                             Log.Server.debug "SSE ping send failed for session %s"
+                               info.session_id
                        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                          if is_cancelled exn then raise exn;
                          Log.Server.error "ping send error: %s"

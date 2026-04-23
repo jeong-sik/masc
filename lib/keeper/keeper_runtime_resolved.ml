@@ -47,11 +47,11 @@ let bootstrap_max_active_keepers_live () =
   get_int ~default:10000 "MASC_KEEPER_BOOTSTRAP_MAX_ACTIVE_KEEPERS"
 
 let reactive_max_turns_per_call_live () =
-  max 1 (min 50 (get_int ~default:15 "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL"))
+  max 1 (min 50 (get_int ~default:30 "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL"))
 
 let autonomous_max_turns_per_call_live () =
   let global_cap = reactive_max_turns_per_call_live () in
-  let default = min global_cap 2 in
+  let default = min global_cap 10 in
   max 1
     (min global_cap
        (min 50

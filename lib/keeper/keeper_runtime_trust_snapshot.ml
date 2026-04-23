@@ -10,10 +10,13 @@ let json_int_opt_member key json =
   | _ -> None
 
 let json_float_opt_member key json =
-  match Yojson.Safe.Util.member key json with
-  | `Float value -> Some value
-  | `Int value -> Some (float_of_int value)
-  | `Intlit raw -> float_of_string_opt raw
+  match json with
+  | `Assoc _ ->
+    (match Yojson.Safe.Util.member key json with
+     | `Float value -> Some value
+     | `Int value -> Some (float_of_int value)
+     | `Intlit raw -> float_of_string_opt raw
+     | _ -> None)
   | _ -> None
 
 let json_string_opt_member key json =
@@ -29,13 +32,19 @@ let json_string_opt_value = function
   | _ -> None
 
 let json_bool_opt_member key json =
-  match Yojson.Safe.Util.member key json with
-  | `Bool value -> Some value
+  match json with
+  | `Assoc _ ->
+    (match Yojson.Safe.Util.member key json with
+     | `Bool value -> Some value
+     | _ -> None)
   | _ -> None
 
 let json_list_member key json =
-  match Yojson.Safe.Util.member key json with
-  | `List items -> items
+  match json with
+  | `Assoc _ ->
+    (match Yojson.Safe.Util.member key json with
+     | `List items -> items
+     | _ -> [])
   | _ -> []
 
 let json_string_list_member key json =

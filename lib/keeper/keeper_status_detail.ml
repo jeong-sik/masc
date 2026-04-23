@@ -157,8 +157,11 @@ let assoc_bool_opt key fields =
   | _ -> None
 
 let json_string_opt_member json key =
-  match Yojson.Safe.Util.member key json with
-  | `String value -> nonempty_trimmed value
+  match json with
+  | `Assoc _ ->
+    (match Yojson.Safe.Util.member key json with
+     | `String value -> nonempty_trimmed value
+     | _ -> None)
   | _ -> None
 
 let latest_metrics_json ~metrics_store ~metrics_path ~tail_bytes =

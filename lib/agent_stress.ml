@@ -56,7 +56,10 @@ let buffer_cap = 64
 let ensure_dir path =
   let dir = Filename.dirname path in
   if not (Sys.file_exists dir) then
-    (try Sys.mkdir dir 0o755 with Sys_error _ -> ())
+    try Sys.mkdir dir 0o755 with
+    | Sys_error msg when String.contains msg "exists" -> ()
+    | Sys_error msg ->
+      Log.warn ~ctx:"agent_stress" "cannot mkdir %s: %s" dir msg
 
 let do_flush () =
   match !store_path_ref with
@@ -71,7 +74,9 @@ let do_flush () =
           Log.warn ~ctx:"agent_stress" "cannot open %s: %s" path msg;
           None
       with
-      | None -> ()
+      | None ->
+          Log.warn ~ctx:"agent_stress" "flush skipped: %d records remain buffered"
+            (Queue.length buffer)
       | Some oc ->
         Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
           Queue.iter (fun json ->
@@ -126,4 +131,6 @@ let recent n =
         drop to_skip lines
         |> List.filter_map (fun line ->
           try Some (Yojson.Safe.from_string line)
-          with Yojson.Json_error _ -> None)
+          with Yojson.Json_error msg ->
+            Log.warn ~ctx:"agent_stress" "dropping malformed line: %s" msg;
+            None)

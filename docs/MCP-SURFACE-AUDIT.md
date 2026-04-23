@@ -1,6 +1,6 @@
 ---
 status: reference
-last_verified: 2026-04-17
+last_verified: 2026-04-23
 code_refs:
   - lib/mcp_server.ml
   - lib/mcp_server_eio.ml
@@ -33,8 +33,8 @@ As of `2026-04-16`, the supported front door is repo coordination plus keeper/ru
 
 | Surface | Count | Source | Notes |
 |--------|------:|--------|-------|
-| Raw tool schemas | 449 | `Config.raw_all_tool_schemas` | Includes hidden, deprecated, placeholder, and compatibility aliases |
-| Visible tool schemas | 403 | `Config.visible_tool_schemas ()` | Default `tools/list` public surface |
+| Raw tool schemas | ~156 | `Config.raw_all_tool_schemas` | Code-verified count (25 modules, 157 before `retired_front_door_schema_names` filter). Intentionally wider than `Tools.all_schemas_extended` (adds Board, Compact, Agent_timeline schemas that depend on Config). |
+| Visible tool schemas | runtime-filtered | `Config.visible_tool_schemas ()` | Default `tools/list` public surface. Filtered by `Tool_catalog.is_visible` (Hidden, Deprecated, Admin-only excluded). Exact count varies by config. |
 | MCP prompts | 3 | `lib/mcp_prompt_surface.ml` | `tool_help`, `team_session_proof`, `command_truth` |
 | Fixed MCP resources | 21 | `lib/mcp_server.ml` | Status, tasks, messages, events, worktrees, schema, institution, library, tool-help index |
 | MCP resource templates | 7 | `lib/mcp_server.ml` | Message/event ranges, library docs, per-tool help |
@@ -149,6 +149,7 @@ flowchart TD
 - Historical docs still mention team-session/command-plane as if they were canonical.
 - `Prompt_registry` and `Mcp_prompt_surface` describe two different prompt systems; without an explicit note, they look like one broken or incomplete system.
 - `docs/spec/SPEC-INDEX.md` still contains historical descriptions that should not be treated as the current front door.
+- `Config.raw_all_tool_schemas` and `Tools.all_schemas_extended` are two different assembly lists; the former includes Config-dependent modules (Board, Compact, Agent_timeline) that the latter deliberately omits to avoid a cycle.
 
 ### What this change fixes
 
@@ -160,6 +161,7 @@ flowchart TD
 | Type | Examples | Status |
 |------|----------|--------|
 | Intentional compatibility | `masc_claim`, `experiment_start`, `masc_trpg_*` | Deprecated/default-off aliases; keep if compatibility matters |
+| Retired front-door | `masc_collaboration_graph` | Removed from `raw_all_tool_schemas` in `config.ml` but still cited in spec docs |
 | Intentional internal-only | `Prompt_registry`, `data/prompts/*.json`, `config/prompts/*.md` | Real runtime feature, not public MCP surface |
 | Experimental but documented | `SWARM-RISC`, `GAME-VIEW-PROTOCOL` draft | Keep clearly labeled as non-canonical or draft |
 | Placeholder / review-needed | none | Dead hidden placeholder removed from the MCP schema inventory |

@@ -1,12 +1,24 @@
 // Session trace state — unified event store for GitHub Agents-style trace view.
-// Merges agent-timeline (broadcast/task), keeper-trajectory (tool calls),
-// and live OAS runtime SSE events into a single chronological event stream.
+// Merges agent-timeline (broadcast/task), keeper-trajectory (turn/thinking),
+// keeper tool-call log (full I/O), and live OAS runtime SSE events into a
+// single chronological event stream.
 // State is keyed per agent to avoid cross-overlay collisions.
 // Each SessionTraceView instance passes its own agentName to derived helpers.
 
 import { signal } from '@preact/signals'
-import { fetchAgentTimeline, fetchKeeperTrajectory } from '../../api/dashboard'
-import type { AgentTimelineEvent, AgentTimelineResponse, TrajectoryEntry, TrajectoryResponse } from '../../api/dashboard'
+import {
+  fetchAgentTimeline,
+  fetchKeeperToolCalls,
+  fetchKeeperTrajectory,
+} from '../../api/dashboard'
+import type {
+  AgentTimelineEvent,
+  AgentTimelineResponse,
+  ToolCallEntry,
+  ToolCallsResponse,
+  TrajectoryEntry,
+  TrajectoryResponse,
+} from '../../api/dashboard'
 
 // ── Types ──────────────────────────────────────────────
 
@@ -90,6 +102,7 @@ const liveTraceFeeds = signal<Record<string, UnifiedTraceEvent[]>>({})
 const EMPTY_SLOT: TraceSlot = { events: [], loading: false, error: null, filter: 'all', statusFilter: 'all', searchQuery: '', fetchToken: 0 }
 
 const LIVE_TRACE_LIMIT = 120
+const TOOL_CALL_MATCH_WINDOW_MS = 2000
 let liveTraceSeq = 0
 
 function getSlot(agent: string): TraceSlot {
@@ -338,6 +351,203 @@ function stringArrayField(value: unknown): string[] {
     .filter(Boolean)
 }
 
+function stringField(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() !== '' ? value : undefined
+}
+
+function numberField(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+function normalizeToolCallInput(input: unknown): Record<string, unknown> | string | undefined {
+  if (typeof input === 'string') return input
+  if (input != null && typeof input === 'object') return input as Record<string, unknown>
+  if (input == null) return undefined
+  try {
+    return JSON.stringify(input)
+  } catch {
+    return String(input)
+  }
+}
+
+function formatToolCallOutput(entry: ToolCallEntry): string {
+  if (typeof entry.output === 'string') return entry.output
+  const { sha256, bytes, mime, preview } = entry.output._blob
+  return `[masc:blob sha256=${sha256.slice(0, 12)}... bytes=${bytes} mime=${mime}]\n${preview}`
+}
+
+function toolCallMetadataDetail(entry: ToolCallEntry, traceOrigin: string): Record<string, unknown> {
+  const detail: Record<string, unknown> = { trace_origin: traceOrigin }
+  if (entry.trace_id) detail.trace_id = entry.trace_id
+  if (entry.session_id) detail.session_id = entry.session_id
+  if (entry.turn != null) detail.turn = entry.turn
+  if (entry.keeper_turn_id != null) detail.keeper_turn_id = entry.keeper_turn_id
+  if (entry.task_id) detail.task_id = entry.task_id
+  if (entry.lane) detail.lane = entry.lane
+  if (entry.model) detail.model = entry.model
+  return detail
+}
+
+function toolEventTraceId(event: UnifiedTraceEvent): string | undefined {
+  return stringField(event.detail.trace_id)
+}
+
+function toolEventSessionId(event: UnifiedTraceEvent): string | undefined {
+  return event.sessionId ?? stringField(event.detail.session_id)
+}
+
+function toolEventTurn(event: UnifiedTraceEvent): number | undefined {
+  return event.turn
+    ?? numberField(event.detail.turn)
+    ?? numberField(event.detail.keeper_turn_id)
+}
+
+function toolEventSuccess(event: UnifiedTraceEvent): boolean {
+  return event.gate?.status !== 'reject' && event.error == null
+}
+
+function toolCallEntryMatchesTraceEvent(
+  entry: ToolCallEntry,
+  event: UnifiedTraceEvent,
+): boolean {
+  if (event.kind !== 'tool_call' || !event.toolName) return false
+  if (event.gate?.status === 'reject') return false
+  if (entry.tool !== event.toolName) return false
+
+  const eventTraceId = toolEventTraceId(event)
+  if (eventTraceId && entry.trace_id && eventTraceId !== entry.trace_id) return false
+
+  const eventSessionId = toolEventSessionId(event)
+  if (
+    eventSessionId
+    && entry.session_id
+    && eventSessionId !== entry.session_id
+    && !(eventTraceId && entry.trace_id && eventTraceId === entry.trace_id)
+  ) {
+    return false
+  }
+
+  const eventTurn = toolEventTurn(event)
+  const entryTurn = entry.turn ?? entry.keeper_turn_id
+  if (eventTurn != null && entryTurn != null && eventTurn !== entryTurn) return false
+
+  if (event.duration_ms != null && Math.abs(event.duration_ms - entry.duration_ms) > 1) return false
+  if (toolEventSuccess(event) !== entry.success) return false
+
+  return Math.abs(event.ts - (entry.ts * 1000)) <= TOOL_CALL_MATCH_WINDOW_MS
+}
+
+function toolCallEntryMatchScore(entry: ToolCallEntry, event: UnifiedTraceEvent): number {
+  let score = Math.abs(event.ts - (entry.ts * 1000))
+  if (toolEventTraceId(event) && entry.trace_id && toolEventTraceId(event) === entry.trace_id) score -= 500
+  if (toolEventSessionId(event) && entry.session_id && toolEventSessionId(event) === entry.session_id) score -= 200
+  if (toolEventTurn(event) != null && (entry.turn ?? entry.keeper_turn_id) === toolEventTurn(event)) score -= 100
+  return score
+}
+
+function findBestToolCallEntryMatch(
+  entries: ToolCallEntry[],
+  event: UnifiedTraceEvent,
+  usedIndexes: Set<number>,
+): number | null {
+  let bestIndex: number | null = null
+  let bestScore = Number.POSITIVE_INFINITY
+  for (let index = 0; index < entries.length; index++) {
+    if (usedIndexes.has(index)) continue
+    const entry = entries[index]!
+    if (!toolCallEntryMatchesTraceEvent(entry, event)) continue
+    const score = toolCallEntryMatchScore(entry, event)
+    if (score < bestScore) {
+      bestScore = score
+      bestIndex = index
+    }
+  }
+  return bestIndex
+}
+
+function enrichToolCallTrace(
+  event: UnifiedTraceEvent,
+  entry: ToolCallEntry,
+): UnifiedTraceEvent {
+  const outputText = formatToolCallOutput(entry)
+  const error = entry.success ? null : outputText || event.error || 'tool call failed'
+  return {
+    ...event,
+    agentName: entry.keeper,
+    sessionId: entry.session_id ?? event.sessionId ?? null,
+    summary: entry.tool,
+    detail: { ...event.detail, ...toolCallMetadataDetail(entry, 'trajectory+tool_call_log') },
+    toolName: entry.tool,
+    toolArgs: normalizeToolCallInput(entry.input) ?? event.toolArgs,
+    toolResult: entry.success ? outputText : null,
+    duration_ms: entry.duration_ms,
+    turn: entry.turn ?? entry.keeper_turn_id ?? event.turn,
+    error,
+  }
+}
+
+function toolCallEntryToSyntheticTrace(entry: ToolCallEntry, index: number): UnifiedTraceEvent {
+  const ts = entry.ts * 1000
+  const outputText = formatToolCallOutput(entry)
+  return {
+    id: `tc-${entry.trace_id ?? 'no-trace'}-${entry.session_id ?? 'no-session'}-${entry.tool}-${Math.round(ts)}-${entry.turn ?? entry.keeper_turn_id ?? index}`,
+    ts,
+    ts_iso: new Date(ts).toISOString(),
+    kind: 'tool_call',
+    sourceLane: 'masc',
+    summary: entry.tool,
+    detail: toolCallMetadataDetail(entry, 'tool_call_log'),
+    agentName: entry.keeper,
+    sessionId: entry.session_id ?? null,
+    toolName: entry.tool,
+    toolArgs: normalizeToolCallInput(entry.input),
+    toolResult: entry.success ? outputText : null,
+    duration_ms: entry.duration_ms,
+    turn: entry.turn ?? entry.keeper_turn_id,
+    error: entry.success ? null : outputText || 'tool call failed',
+  }
+}
+
+function richerToolCallMatchesFallback(
+  richer: UnifiedTraceEvent,
+  fallback: UnifiedTraceEvent,
+): boolean {
+  if (richer.kind !== 'tool_call' || fallback.kind !== 'tool_call') return false
+  if (!richer.toolName || !fallback.toolName) return false
+  if (richer.toolName !== fallback.toolName) return false
+
+  const richerTraceId = toolEventTraceId(richer)
+  const fallbackTraceId = toolEventTraceId(fallback)
+  if (richerTraceId && fallbackTraceId && richerTraceId !== fallbackTraceId) return false
+
+  const richerSessionId = toolEventSessionId(richer)
+  const fallbackSessionId = toolEventSessionId(fallback)
+  if (
+    richerSessionId
+    && fallbackSessionId
+    && richerSessionId !== fallbackSessionId
+    && !(richerTraceId && fallbackTraceId && richerTraceId === fallbackTraceId)
+  ) {
+    return false
+  }
+
+  const richerTurn = toolEventTurn(richer)
+  const fallbackTurn = toolEventTurn(fallback)
+  if (richerTurn != null && fallbackTurn != null && richerTurn !== fallbackTurn) return false
+
+  if (
+    richer.duration_ms != null
+    && fallback.duration_ms != null
+    && Math.abs(richer.duration_ms - fallback.duration_ms) > 1
+  ) {
+    return false
+  }
+
+  if (toolEventSuccess(richer) !== toolEventSuccess(fallback)) return false
+
+  return Math.abs(richer.ts - fallback.ts) <= TOOL_CALL_MATCH_WINDOW_MS
+}
+
 function timelineEventToTrace(evt: AgentTimelineEvent, index: number): UnifiedTraceEvent {
   const ts = safeTimestamp(evt.ts)
   const detail = evt.detail ?? {}
@@ -414,6 +624,30 @@ function timelineEventToTrace(evt: AgentTimelineEvent, index: number): UnifiedTr
     }
   }
 
+  if (evt.type === 'tool_call') {
+    const toolName = stringField(detail.tool_name) ?? 'TOOL_CALL'
+    const durationMs = numberField(detail.duration_ms)
+    const toolArgsPreview = stringField(detail.tool_args_preview)
+    const explicitSuccess = typeof detail.success === 'boolean' ? detail.success : undefined
+    const errorText = stringField(detail.error)
+    const success = explicitSuccess ?? (errorText == null)
+    return {
+      id: `tl-${ts}-${evt.type}-${index}`,
+      ts,
+      ts_iso: evt.ts ?? new Date(ts).toISOString(),
+      kind: 'tool_call',
+      sourceLane: 'masc',
+      summary: toolName,
+      detail: { ...detail, type: evt.type, trace_origin: 'agent_timeline' },
+      sessionId: stringField(detail.session_id) ?? null,
+      operationId: stringField(detail.operation_id) ?? null,
+      toolName,
+      toolArgs: toolArgsPreview,
+      duration_ms: durationMs,
+      error: success ? null : (errorText ?? 'tool call failed'),
+    }
+  }
+
   const title = typeof detail.title === 'string' ? detail.title : ''
   const taskId = typeof detail.task_id === 'string' ? detail.task_id : ''
   return {
@@ -427,9 +661,14 @@ function timelineEventToTrace(evt: AgentTimelineEvent, index: number): UnifiedTr
   }
 }
 
-function trajectoryEntryToTrace(entry: TrajectoryEntry, index: number): UnifiedTraceEvent {
+function trajectoryEntryToTrace(
+  entry: TrajectoryEntry,
+  index: number,
+  traceId?: string,
+): UnifiedTraceEvent {
   // Backend sends `ts` in seconds (Unix float); normalize to milliseconds for sorting.
   const ts = typeof entry.ts === 'number' ? entry.ts * 1000 : safeTimestamp(entry.ts_iso)
+  const detail = traceId ? { trace_id: traceId, trace_origin: 'trajectory' } : { trace_origin: 'trajectory' }
 
   // Handle thinking entries (type === 'thinking')
   if (entry.type === 'thinking') {
@@ -440,7 +679,7 @@ function trajectoryEntryToTrace(entry: TrajectoryEntry, index: number): UnifiedT
       kind: 'thinking',
       sourceLane: 'masc',
       summary: entry.redacted ? '[비공개 사고]' : (entry.content?.slice(0, 120) ?? ''),
-      detail: {},
+      detail,
       turn: entry.turn,
       thinkingContent: entry.content,
       thinkingRedacted: entry.redacted,
@@ -454,7 +693,7 @@ function trajectoryEntryToTrace(entry: TrajectoryEntry, index: number): UnifiedT
     kind: 'tool_call',
     sourceLane: 'masc',
     summary: entry.tool_name ?? 'unknown',
-    detail: {},
+    detail,
     toolName: entry.tool_name,
     toolArgs: entry.args,
     toolResult: entry.result,
@@ -474,12 +713,48 @@ function trajectoryEntryToTrace(entry: TrajectoryEntry, index: number): UnifiedT
 export function buildTraceEvents(
   timeline: AgentTimelineResponse,
   trajectory: TrajectoryResponse | null,
+  toolCalls: ToolCallsResponse | null = null,
 ): UnifiedTraceEvent[] {
   const timelineTraces = (timeline.events ?? []).map(timelineEventToTrace)
   const trajectoryTraces = trajectory
-    ? (trajectory.entries ?? []).map(trajectoryEntryToTrace)
+    ? (trajectory.entries ?? []).map((entry, index) =>
+        trajectoryEntryToTrace(entry, index, trajectory.trace_id),
+      )
     : []
-  return mergeTraceEvents(timelineTraces, trajectoryTraces)
+  const toolCallEntries = toolCalls?.entries ?? []
+  const usedToolCallIndexes = new Set<number>()
+
+  const mergedTrajectoryTraces = trajectoryTraces.map((event) => {
+    if (event.kind !== 'tool_call') return event
+    const matchedIndex = findBestToolCallEntryMatch(
+      toolCallEntries,
+      event,
+      usedToolCallIndexes,
+    )
+    if (matchedIndex == null) return event
+    usedToolCallIndexes.add(matchedIndex)
+    return enrichToolCallTrace(event, toolCallEntries[matchedIndex]!)
+  })
+
+  const syntheticToolCallTraces = toolCallEntries.flatMap((entry, index) =>
+    usedToolCallIndexes.has(index) ? [] : [toolCallEntryToSyntheticTrace(entry, index)],
+  )
+
+  const richerToolCallTraces = [
+    ...mergedTrajectoryTraces.filter((event) => event.kind === 'tool_call'),
+    ...syntheticToolCallTraces,
+  ]
+  const filteredTimelineTraces = timelineTraces.filter((event) => {
+    if (event.kind !== 'tool_call') return true
+    return !richerToolCallTraces.some((richer) =>
+      richerToolCallMatchesFallback(richer, event),
+    )
+  })
+
+  return mergeTraceEvents(
+    [...filteredTimelineTraces, ...mergedTrajectoryTraces, ...syntheticToolCallTraces],
+    [],
+  )
 }
 
 // ── Actions ────────────────────────────────────────────
@@ -487,6 +762,7 @@ export function buildTraceEvents(
 const TIMELINE_HOURS = 24
 const TIMELINE_LIMIT = 200
 const TRAJECTORY_LIMIT = 100
+const TOOL_CALL_LIMIT = 100
 
 export async function loadSessionTrace(agentName: string, isKeeper: boolean): Promise<void> {
   // Bump fetch token for this agent — any prior in-flight fetch becomes stale.
@@ -502,13 +778,20 @@ export async function loadSessionTrace(agentName: string, isKeeper: boolean): Pr
     const trajectoryPromise = isKeeper
       ? fetchKeeperTrajectory(agentName, TRAJECTORY_LIMIT, true, true)
       : Promise.resolve(null)
+    const toolCallsPromise = isKeeper
+      ? fetchKeeperToolCalls(agentName, TOOL_CALL_LIMIT)
+      : Promise.resolve(null)
 
-    const [timeline, trajectory] = await Promise.all([timelinePromise, trajectoryPromise])
+    const [timeline, trajectory, toolCalls] = await Promise.all([
+      timelinePromise,
+      trajectoryPromise,
+      toolCallsPromise,
+    ])
 
     // Discard result if slot was closed or a newer fetch was started during await.
     if (getSlot(agentName).fetchToken !== token) return
 
-    const deduped = buildTraceEvents(timeline, trajectory)
+    const deduped = buildTraceEvents(timeline, trajectory, toolCalls)
 
     // Final stale check before writing
     if (getSlot(agentName).fetchToken !== token) return

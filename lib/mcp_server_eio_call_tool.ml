@@ -78,6 +78,148 @@ let quality_from_result ~success ~message ~attempts =
       ("issues", `List [issue]);
     ]
 
+let nonempty_string_opt = function
+  | Some value ->
+      let trimmed = String.trim value in
+      if trimmed = "" then None else Some trimmed
+  | None -> None
+
+let json_nonempty_string_opt key json =
+  nonempty_string_opt (Safe_ops.json_string_opt key json)
+
+type keeper_runtime_mcp_log_context = {
+  keeper_name : string;
+  model : string;
+  trace_id : string option;
+  session_id : string option;
+  turn : int option;
+  keeper_turn_id : int option;
+  task_id : string option;
+  goal_ids : string list option;
+  sandbox_profile : string option;
+  network_mode : string option;
+  shared_memory_scope : string option;
+}
+
+let runtime_mcp_keeper_log_context_of_entry
+    ?mcp_session_id
+    (entry : Keeper_registry.registry_entry)
+    ~(arguments : Yojson.Safe.t) : keeper_runtime_mcp_log_context =
+  let trace_id =
+    Keeper_id.Trace_id.to_string entry.meta.runtime.trace_id
+  in
+  let model =
+    let last_model_used = String.trim entry.meta.runtime.usage.last_model_used in
+    if last_model_used <> "" then last_model_used
+    else String.trim entry.meta.cascade_name
+  in
+  let session_id =
+    match json_nonempty_string_opt "session_id" arguments with
+    | Some _ as session_id -> session_id
+    | None ->
+        (match nonempty_string_opt mcp_session_id with
+         | Some _ as session_id -> session_id
+         | None -> Some trace_id)
+  in
+  let turn =
+    match entry.current_turn_observation with
+    | Some obs -> Some obs.turn_id
+    | None -> None
+  in
+  let goal_ids =
+    match entry.meta.active_goal_ids with
+    | [] -> None
+    | ids -> Some ids
+  in
+  {
+    keeper_name = entry.name;
+    model;
+    trace_id = Some trace_id;
+    session_id;
+    turn;
+    keeper_turn_id = turn;
+    task_id = Option.map Keeper_id.Task_id.to_string entry.meta.current_task_id;
+    goal_ids;
+    sandbox_profile =
+      Some (Keeper_types.sandbox_profile_to_string entry.meta.sandbox_profile);
+    network_mode =
+      Some (Keeper_types.network_mode_to_string entry.meta.network_mode);
+    shared_memory_scope =
+      Some
+        (Keeper_types.shared_memory_scope_to_string
+           entry.meta.shared_memory_scope);
+  }
+
+let runtime_mcp_keeper_error_preview message =
+  let max_chars = 400 in
+  let s = String.trim message in
+  String_util.utf8_safe ~max_bytes:(max_chars + 3) ~suffix:"..." s
+  |> String_util.to_string
+
+let runtime_mcp_keeper_tool_call_sse_payload
+    ~(keeper_name : string)
+    ~(tool_name : string)
+    ~(duration_ms : int)
+    ~(success : bool)
+    ~(message : string) : Yojson.Safe.t =
+  let base_fields =
+    [
+      ("type", `String "keeper_tool_call");
+      ("name", `String keeper_name);
+      ("tool_name", `String tool_name);
+      ("duration_ms", `Int duration_ms);
+      ("success", `Bool success);
+      ("ts_unix", `Float (Time_compat.now ()));
+    ]
+  in
+  let error_fields =
+    if success then []
+    else [ ("error_text", `String (runtime_mcp_keeper_error_preview message)) ]
+  in
+  `Assoc (base_fields @ error_fields)
+
+let record_runtime_mcp_keeper_tool_trace
+    ?mcp_session_id
+    (entry : Keeper_registry.registry_entry)
+    ~(tool_name : string)
+    ~(arguments : Yojson.Safe.t)
+    ~(message : string)
+    ~(success : bool)
+    ~(duration_ms : int) : unit =
+  let ctx =
+    runtime_mcp_keeper_log_context_of_entry
+      ?mcp_session_id
+      entry
+      ~arguments
+  in
+  Keeper_tool_call_log.log_call
+    ~keeper_name:ctx.keeper_name
+    ~tool_name
+    ~input:arguments
+    ~output_text:message
+    ~success
+    ~duration_ms:(float_of_int duration_ms)
+    ~model:ctx.model
+    ~lane:"runtime_mcp"
+    ?trace_id:ctx.trace_id
+    ?session_id:ctx.session_id
+    ?turn:ctx.turn
+    ?keeper_turn_id:ctx.keeper_turn_id
+    ?task_id:ctx.task_id
+    ?goal_ids:ctx.goal_ids
+    ?sandbox_profile:ctx.sandbox_profile
+    ?network_mode:ctx.network_mode
+    ?shared_memory_scope:ctx.shared_memory_scope
+    ~result_bytes:(String.length message)
+    ();
+  Sse.broadcast
+    (runtime_mcp_keeper_tool_call_sse_payload
+       ~keeper_name:ctx.keeper_name
+       ~tool_name
+       ~duration_ms
+       ~success
+       ~message)
+
 let read_only_retry_limit () =
   Env_config.Tools.readonly_retry_limit
 
@@ -446,6 +588,20 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
       | None -> message
       | Some h -> message ^ "\n\n💡 Recovery: " ^ h
   in
+  (match keeper_entry with
+   | Some entry ->
+       (try
+          record_runtime_mcp_keeper_tool_trace
+            ?mcp_session_id
+            entry
+            ~tool_name:name
+            ~arguments
+            ~message
+            ~success
+            ~duration_ms
+        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+          log_mcp_exn ~label:"runtime MCP keeper tool trace failed" exn)
+   | None -> ());
   let (status, required_follow_up) = parse_status_from_message ~success ~message in
   let quality = quality_from_result ~success ~message ~attempts in
   let workflow_guidance =

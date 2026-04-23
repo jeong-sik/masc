@@ -648,9 +648,7 @@ let batch_add_tasks_internal ?created_by config tasks =
              (List.length added_tasks)
              summary
          in
-         let _ =
-           broadcast config ~from_agent:actor ~content:msg
-         in
+         let _ = broadcast config ~from_agent:actor ~content:msg in
          Printf.sprintf "✅ Added %d tasks: %s" (List.length added_tasks) summary
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
@@ -1511,9 +1509,7 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result
                  then Printf.sprintf "🚫 Cancelled %s" task_id
                  else Printf.sprintf "🚫 Cancelled %s - %s" task_id reason
                in
-               let _ =
-                 broadcast config ~from_agent:agent_name ~content:msg
-               in
+               let _ = broadcast config ~from_agent:agent_name ~content:msg in
                emit_task_activity
                  config
                  ~agent_name

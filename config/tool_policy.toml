@@ -107,14 +107,6 @@ tools = ["masc_status", "masc_tasks", "masc_claim_next", "masc_transition", "mas
 [masc.coding]
 tools = ["masc_code_search", "masc_code_symbols", "masc_code_read", "masc_worktree_create", "masc_worktree_remove", "masc_worktree_list"]
 
-# ── Permissions ─────────────────────────────────────────────────────
-# Presets allowed to execute workflow mutations (pr merge, pr close, etc.).
-# Keepers with presets not listed here have these operations blocked.
-
-[permissions]
-workflow_presets = ["coding", "delivery", "full"]
-shell_write_presets = ["coding", "delivery", "full"]
-
 # ── GitHub Cache ───────────────────────────────────────────────────
 # Pre-execution hallucination gate: validates PR/issue numbers
 # against a cached list before executing gh CLI commands.

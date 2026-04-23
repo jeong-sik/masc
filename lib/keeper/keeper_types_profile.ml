@@ -177,6 +177,14 @@ let normalize_cascade_name_opt = function
   | None -> None
   | Some raw -> Some (Keeper_cascade_profile.normalize_declared_name raw)
 
+let normalize_git_identity_mode_opt = function
+  | None -> None
+  | Some raw -> (
+      match String.trim (String.lowercase_ascii raw) with
+      | "keeper_alias" -> Some "keeper_alias"
+      | "github_identity" -> Some "github_identity"
+      | _ -> None)
+
 let normalize_social_model_opt = function
   | None -> None
   | Some raw -> (
@@ -263,9 +271,12 @@ type keeper_profile_defaults = {
   sandbox_profile : sandbox_profile option;
   network_mode : network_mode option;
   shared_memory_scope : shared_memory_scope option;
+  github_identity : string option;
+  git_identity_mode : string option;
   tool_preset : string option;
   tool_also_allow : string list option;
   tool_denylist : string list option;
+  active_goal_ids : string list option;
   (* Work Discovery — config-driven proactive work scanning *)
   work_discovery_enabled : bool option;
   work_discovery_sources : string list option;
@@ -322,9 +333,12 @@ let empty_keeper_profile_defaults = {
   sandbox_profile = None;
   network_mode = None;
   shared_memory_scope = None;
+  github_identity = None;
+  git_identity_mode = None;
   tool_preset = None;
   tool_also_allow = None;
   tool_denylist = None;
+  active_goal_ids = None;
   work_discovery_enabled = None;
   work_discovery_sources = None;
   work_discovery_interval_sec = None;
@@ -444,6 +458,26 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
   in
   let result =
     Result.bind result (fun () ->
+        match str "github_identity" with
+        | Some raw when not (validate_name raw) ->
+            Error (Printf.sprintf "invalid github_identity '%s'" raw)
+        | _ -> Ok ())
+  in
+  let result =
+    Result.bind result (fun () ->
+        match str "git_identity_mode" with
+        | Some raw -> (
+            match normalize_git_identity_mode_opt (Some raw) with
+            | Some _ -> Ok ()
+            | None ->
+                Error
+                  (Printf.sprintf
+                     "invalid git_identity_mode '%s' (allowed: keeper_alias, github_identity)"
+                     raw))
+        | None -> Ok ())
+  in
+  let result =
+    Result.bind result (fun () ->
         match str "tool_preset" with
         | Some raw -> (
             match normalize_tool_preset_raw raw with
@@ -548,12 +582,19 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         shared_memory_scope =
           Option.bind (str "shared_memory_scope")
             shared_memory_scope_of_string;
+        github_identity = str "github_identity";
+        git_identity_mode =
+          normalize_git_identity_mode_opt (str "git_identity_mode");
         tool_preset =
           (match str "tool_preset" with
            | None -> None
            | Some raw -> normalize_tool_preset_raw raw);
         tool_also_allow = normalize_name_list_opt (strs "tool_also_allow");
         tool_denylist = normalize_name_list_opt (strs "tool_denylist");
+        active_goal_ids =
+          if has "active_goal_ids" then
+            Some (normalize_name_list (strs "active_goal_ids"))
+          else None;
         work_discovery_enabled = bool_ "work_discovery_enabled";
         work_discovery_sources =
           (match strs "work_discovery_sources" with
@@ -602,11 +643,14 @@ let canonical_keeper_toml_key_names =
   ; "sandbox_profile"
   ; "network_mode"
   ; "shared_memory_scope"
+  ; "github_identity"
+  ; "git_identity_mode"
   ; "tool_preset"
   ; "tool_access.kind"
   ; "tool_access.preset"
   ; "tool_also_allow"
   ; "tool_denylist"
+  ; "active_goal_ids"
   ; "work_discovery_enabled"
   ; "work_discovery_sources"
   ; "work_discovery_interval_sec"
@@ -742,6 +786,8 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                 sandbox_profile = None;
                 network_mode = None;
                 shared_memory_scope = None;
+                github_identity = None;
+                git_identity_mode = None;
                 tool_preset =
                   (match Safe_ops.json_string_opt "tool_preset" keeper_json with
                   | None -> None
@@ -759,6 +805,7 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                 tool_denylist =
                   normalize_name_list_opt
                     (Safe_ops.json_string_list "tool_denylist" keeper_json);
+                active_goal_ids = None;
                 work_discovery_enabled =
                   Safe_ops.json_bool_opt "work_discovery_enabled" keeper_json;
                 work_discovery_sources =
@@ -845,9 +892,13 @@ let merge_keeper_profile_defaults
     network_mode = prefer overlay.network_mode base.network_mode;
     shared_memory_scope =
       prefer overlay.shared_memory_scope base.shared_memory_scope;
+    github_identity = prefer overlay.github_identity base.github_identity;
+    git_identity_mode =
+      prefer overlay.git_identity_mode base.git_identity_mode;
     tool_preset = prefer overlay.tool_preset base.tool_preset;
     tool_also_allow = prefer overlay.tool_also_allow base.tool_also_allow;
     tool_denylist = prefer overlay.tool_denylist base.tool_denylist;
+    active_goal_ids = prefer overlay.active_goal_ids base.active_goal_ids;
     work_discovery_enabled =
       prefer overlay.work_discovery_enabled base.work_discovery_enabled;
     work_discovery_sources =

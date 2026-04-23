@@ -184,6 +184,8 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     tool_access;
     tool_denylist;
     autoboot_enabled;
+    active_goal_ids =
+      Option.value ~default:old.active_goal_ids p.profile_defaults.active_goal_ids;
     voice_enabled =
       Option.value ~default:old.voice_enabled p.voice_enabled_opt;
     voice_channel =

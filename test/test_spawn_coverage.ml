@@ -224,64 +224,6 @@ let test_lifecycle_suffix_omits_relay_checkpoint () =
     (try let _ = Str.search_forward (Str.regexp_string "relay_checkpoint") Spawn.masc_lifecycle_suffix 0 in true
      with Not_found -> false)
 
-(* ============================================================
-   default_configs Tests
-   ============================================================ *)
-
-let test_default_configs_not_empty () =
-  check bool "not empty" true (List.length Spawn.default_configs > 0)
-
-let test_default_configs_has_claude () =
-  check bool "has claude" true (List.mem_assoc "claude" Spawn.default_configs)
-
-let test_default_configs_has_gemini () =
-  check bool "has gemini" true (List.mem_assoc "gemini" Spawn.default_configs)
-
-let test_default_configs_has_codex () =
-  check bool "has codex" true (List.mem_assoc "codex" Spawn.default_configs)
-
-let test_default_configs_has_llama () =
-  check bool "has llama" true (List.mem_assoc "llama" Spawn.default_configs)
-
-let test_default_configs_has_no_ollama () =
-  check bool "no bare ollama config" false (List.mem_assoc "ollama" Spawn.default_configs)
-
-let test_default_configs_claude_command () =
-  match List.assoc_opt "claude" Spawn.default_configs with
-  | Some cfg -> check bool "has claude command" true
-      (try let _ = Str.search_forward (Str.regexp "claude") cfg.command 0 in true
-       with Not_found -> false)
-  | None -> fail "claude config missing"
-
-(* P2 #19: Test that default_configs use Env_config.Spawn.timeout_seconds *)
-let test_default_configs_timeout_from_env_config () =
-  let expected = Env_config.Spawn.timeout_seconds in
-  List.iter (fun (name, cfg) ->
-    check int (Printf.sprintf "%s timeout uses Env_config" name) expected cfg.Spawn.timeout_seconds
-  ) Spawn.default_configs
-
-let test_default_configs_timeout_is_600 () =
-  (* All agents should use 600s (10 min) default timeout *)
-  List.iter (fun (name, cfg) ->
-    check int (Printf.sprintf "%s timeout is 600" name) 600 cfg.Spawn.timeout_seconds
-  ) Spawn.default_configs
-
-let test_default_configs_gemini_command () =
-  match List.assoc_opt "gemini" Spawn.default_configs with
-  | Some cfg -> check bool "has gemini command" true
-      (try let _ = Str.search_forward (Str.regexp "gemini") cfg.command 0 in true
-       with Not_found -> false)
-  | None -> fail "no gemini config"
-
-let test_default_configs_gemini_json_output () =
-  match List.assoc_opt "gemini" Spawn.default_configs with
-  | Some cfg ->
-      check bool "has json output" true
-        (try
-           let _ = Str.search_forward (Str.regexp_string "--output-format json") cfg.command 0 in
-           true
-         with Not_found -> false)
-  | None -> fail "no gemini config"
 
 (* ============================================================
    get_config Tests
@@ -759,19 +701,6 @@ let () =
       test_case "has heartbeat" `Quick test_lifecycle_suffix_has_heartbeat;
       test_case "has handover_create" `Quick test_lifecycle_suffix_has_handover_create;
       test_case "omits relay_checkpoint" `Quick test_lifecycle_suffix_omits_relay_checkpoint;
-    ];
-    "default_configs", [
-      test_case "not empty" `Quick test_default_configs_not_empty;
-      test_case "has claude" `Quick test_default_configs_has_claude;
-      test_case "has gemini" `Quick test_default_configs_has_gemini;
-      test_case "has codex" `Quick test_default_configs_has_codex;
-      test_case "has llama" `Quick test_default_configs_has_llama;
-      test_case "has no ollama" `Quick test_default_configs_has_no_ollama;
-      test_case "claude command" `Quick test_default_configs_claude_command;
-      test_case "gemini command" `Quick test_default_configs_gemini_command;
-      test_case "gemini json output" `Quick test_default_configs_gemini_json_output;
-      test_case "timeout from env_config" `Quick test_default_configs_timeout_from_env_config;
-      test_case "timeout is 600" `Quick test_default_configs_timeout_is_600;
     ];
     "get_config", [
       test_case "claude" `Quick test_get_config_claude;

@@ -552,6 +552,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
           (match str "tool_preset" with
            | None -> None
            | Some raw -> normalize_tool_preset_raw raw);
+        tool_preset_source = str "tool_preset_source";
         tool_also_allow = normalize_name_list_opt (strs "tool_also_allow");
         tool_denylist = normalize_name_list_opt (strs "tool_denylist");
         work_discovery_enabled = bool_ "work_discovery_enabled";
@@ -603,6 +604,7 @@ let canonical_keeper_toml_key_names =
   ; "network_mode"
   ; "shared_memory_scope"
   ; "tool_preset"
+  ; "tool_preset_source"
   ; "tool_access.kind"
   ; "tool_access.preset"
   ; "tool_also_allow"
@@ -753,6 +755,8 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                             "persona profile %s has invalid tool_preset '%s'; ignoring"
                             path raw;
                           None));
+                tool_preset_source =
+                  Safe_ops.json_string_opt "tool_preset_source" keeper_json;
                 tool_also_allow =
                   normalize_name_list_opt
                     (Safe_ops.json_string_list "tool_also_allow" keeper_json);

@@ -13,7 +13,7 @@ let make_http_config ~host ~port : Http.config =
   in
   Unix.putenv Env_config_core.host_env_key config.host;
   Unix.putenv Env_config_core.http_port_env_key (string_of_int config.port);
-  Unix.putenv Env_config_runtime.Local_runtime.mcp_url_env_key
+  Unix.putenv Env_config_core.mcp_url_env_key
     (Printf.sprintf "http://%s:%d/mcp" advertised_host config.port);
   (match Sys.getenv_opt Env_config_core.http_base_url_env_key with
   | Some existing when String.trim existing <> "" -> ()

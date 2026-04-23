@@ -162,18 +162,18 @@ let resolved_keeper_args_from_persona args :
         let will =
           parse_self_model_opt args "will"
           |> first_some defaults.will
-          |> Option.value ~default:default_keeper_will
+          |> Option.value ~default:(Env_config_core.keeper_will ())
         in
         let needs =
           parse_self_model_opt args "needs"
           |> first_some defaults.needs
-          |> Option.value ~default:default_keeper_needs
-            in
-            let desires =
-              parse_self_model_opt args "desires"
-              |> first_some defaults.desires
-              |> Option.value ~default:default_keeper_desires
-            in
+          |> Option.value ~default:(Env_config_core.keeper_needs ())
+        in
+        let desires =
+          parse_self_model_opt args "desires"
+          |> first_some defaults.desires
+          |> Option.value ~default:(Env_config_core.keeper_desires ())
+        in
             let policy_voice_enabled =
               first_some
                 (get_bool_opt args "policy_voice_enabled")

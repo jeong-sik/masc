@@ -39,9 +39,6 @@ val tool_first_sentence_max_chars : int
 val default_proactive_enabled : bool
 val default_proactive_idle_sec : int
 val default_proactive_cooldown_sec : int
-val default_keeper_will : string
-val default_keeper_needs : string
-val default_keeper_desires : string
 val default_room_signal_prompt_enabled : bool
 val default_goal_horizon_max_chars : int
 val default_drift_max_clauses : int

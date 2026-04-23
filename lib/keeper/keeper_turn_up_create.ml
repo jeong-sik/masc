@@ -187,27 +187,27 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
               in
               let social_model =
                 p.profile_defaults.social_model
-                |> Option.value ~default:default_social_model
+                |> Option.value ~default:(Env_config_core.keeper_social_model ())
                 |> Keeper_social_model.normalize_social_model
               in
               let will =
                 Option.value
                   ~default:
-                    (Option.value ~default:default_keeper_will
+                    (Option.value ~default:(Env_config_core.keeper_will ())
                        p.profile_defaults.will)
                   p.will_opt
               in
               let needs =
                 Option.value
                   ~default:
-                    (Option.value ~default:default_keeper_needs
+                    (Option.value ~default:(Env_config_core.keeper_needs ())
                        p.profile_defaults.needs)
                   p.needs_opt
               in
               let desires =
                 Option.value
                   ~default:
-                    (Option.value ~default:default_keeper_desires
+                    (Option.value ~default:(Env_config_core.keeper_desires ())
                        p.profile_defaults.desires)
                   p.desires_opt
               in

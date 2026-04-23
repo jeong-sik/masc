@@ -253,8 +253,6 @@ type keeper_meta =
     runtime : agent_runtime_state
   }
 
-let default_social_model = "bdi_speech_v1"
-
 let normalize_tool_names names =
   names
   |> List.map String.trim
@@ -976,18 +974,18 @@ let parse_keeper_identity (json : Yojson.Safe.t)
         (normalize_goal_horizon_opt (Safe_ops.json_string_opt "long_goal" json))
   in
   let pk_social_model =
-    Safe_ops.json_string ~default:default_social_model "social_model" json
+    Safe_ops.json_string ~default:(Env_config_core.keeper_social_model ()) "social_model" json
   in
   let pk_will =
-    Safe_ops.json_string ~default:default_keeper_will "will" json
+    Safe_ops.json_string ~default:(Env_config_core.keeper_will ()) "will" json
     |> normalize_self_model_text
   in
   let pk_needs =
-    Safe_ops.json_string ~default:default_keeper_needs "needs" json
+    Safe_ops.json_string ~default:(Env_config_core.keeper_needs ()) "needs" json
     |> normalize_self_model_text
   in
   let pk_desires =
-    Safe_ops.json_string ~default:default_keeper_desires "desires" json
+    Safe_ops.json_string ~default:(Env_config_core.keeper_desires ()) "desires" json
     |> normalize_self_model_text
   in
   let pk_instructions = Safe_ops.json_string ~default:"" "instructions" json in

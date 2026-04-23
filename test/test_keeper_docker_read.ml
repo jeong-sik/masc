@@ -116,7 +116,7 @@ let test_docker_git_creds_routes () =
 
 let setup_config name =
   let base = temp_dir () in
-  Unix.mkdir (Filename.concat base ".masc") 0o755;
+  Unix.mkdir (Filename.concat base Common.masc_dirname) 0o755;
   let config = Coord.default_config base in
   let meta =
     make_meta ~name ~sandbox:Keeper_types.Docker

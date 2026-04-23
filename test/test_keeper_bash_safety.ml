@@ -275,7 +275,7 @@ let test_cleanup_dir_does_not_follow_symlinks () =
 
 let make_config () =
   let tmp = temp_dir () in
-  ensure_dir (Filename.concat tmp ".masc");
+  ensure_dir (Filename.concat tmp Common.masc_dirname);
   (tmp, Coord.default_config tmp)
 
 let make_docker_meta name =

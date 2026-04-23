@@ -52,8 +52,8 @@ let test_divergent_cwd_is_observational_only () =
   let effective = Filename.concat root "workspace" in
   Unix.mkdir cwd 0o755;
   Unix.mkdir effective 0o755;
-  let cwd_masc = Filename.concat cwd ".masc" in
-  let effective_masc = Filename.concat effective ".masc" in
+  let cwd_masc = Filename.concat cwd Common.masc_dirname in
+  let effective_masc = Filename.concat effective Common.masc_dirname in
   Unix.mkdir cwd_masc 0o755;
   Unix.mkdir effective_masc 0o755;
   Unix.mkdir (Filename.concat cwd_masc "perpetual") 0o755;
@@ -75,13 +75,13 @@ let test_divergent_cwd_is_not_a_strict_violation () =
   let effective = Filename.concat root "workspace" in
   Unix.mkdir cwd 0o755;
   Unix.mkdir effective 0o755;
-  Unix.mkdir (Filename.concat cwd ".masc") 0o755;
-  Unix.mkdir (Filename.concat effective ".masc") 0o755;
+  Unix.mkdir (Filename.concat cwd Common.masc_dirname) 0o755;
+  Unix.mkdir (Filename.concat effective Common.masc_dirname) 0o755;
   with_env "MASC_BASE_PATH_STRICT" (Some "false") @@ fun () ->
   let diag =
     Server_base_path_diagnostics.detect ~cwd
       ~effective_base_path:effective
-      ~effective_masc_root:(Filename.concat effective ".masc")
+      ~effective_masc_root:(Filename.concat effective Common.masc_dirname)
       ()
   in
   Alcotest.(check bool) "strict_mode_requested stays false" false
@@ -99,8 +99,8 @@ let test_explicit_env_resolution_remains_observational_only () =
   let effective = Filename.concat root "workspace" in
   Unix.mkdir cwd 0o755;
   Unix.mkdir effective 0o755;
-  Unix.mkdir (Filename.concat cwd ".masc") 0o755;
-  Unix.mkdir (Filename.concat effective ".masc") 0o755;
+  Unix.mkdir (Filename.concat cwd Common.masc_dirname) 0o755;
+  Unix.mkdir (Filename.concat effective Common.masc_dirname) 0o755;
   with_env "MASC_BASE_PATH_STRICT" (Some "true") @@ fun () ->
   let diag =
     Server_base_path_diagnostics.detect ~cwd
@@ -108,7 +108,7 @@ let test_explicit_env_resolution_remains_observational_only () =
       ~input_base_path:effective
       ~env_masc_base_path:effective
       ~effective_base_path:effective
-      ~effective_masc_root:(Filename.concat effective ".masc")
+      ~effective_masc_root:(Filename.concat effective Common.masc_dirname)
       ()
   in
   Alcotest.(check bool) "warning removed" false
@@ -128,15 +128,15 @@ let test_explicit_cli_resolution_source_remains_observational_only () =
   let effective = Filename.concat root "workspace" in
   Unix.mkdir cwd 0o755;
   Unix.mkdir effective 0o755;
-  Unix.mkdir (Filename.concat cwd ".masc") 0o755;
-  Unix.mkdir (Filename.concat effective ".masc") 0o755;
+  Unix.mkdir (Filename.concat cwd Common.masc_dirname) 0o755;
+  Unix.mkdir (Filename.concat effective Common.masc_dirname) 0o755;
   with_env "MASC_BASE_PATH_STRICT" None @@ fun () ->
   let diag =
     Server_base_path_diagnostics.detect ~cwd
       ~resolution_source:"explicit_cli"
       ~input_base_path:effective
       ~effective_base_path:effective
-      ~effective_masc_root:(Filename.concat effective ".masc")
+      ~effective_masc_root:(Filename.concat effective Common.masc_dirname)
       ()
   in
   Alcotest.(check bool) "strict_mode_requested false without user STRICT" false
@@ -206,8 +206,8 @@ let test_default_base_path_ignores_parent_base_path_override_in_tests () =
   let base_path = Filename.concat root "base" in
   let repo = Filename.concat base_path "workspace/yousleepwhen/masc-mcp" in
   mkdir_p repo;
-  Unix.mkdir (Filename.concat base_path ".masc") 0o755;
-  Unix.mkdir (Filename.concat repo ".masc") 0o755;
+  Unix.mkdir (Filename.concat base_path Common.masc_dirname) 0o755;
+  Unix.mkdir (Filename.concat repo Common.masc_dirname) 0o755;
   with_cwd repo @@ fun () ->
   with_env "MASC_BASE_PATH" (Some base_path) @@ fun () ->
   with_env "MASC_TEST_ALLOW_BASE_PATH_OVERRIDE" None @@ fun () ->
@@ -222,8 +222,8 @@ let test_default_base_path_preserves_base_path_override_with_opt_in () =
   let base_path = Filename.concat root "base" in
   let repo = Filename.concat base_path "workspace/yousleepwhen/masc-mcp" in
   mkdir_p repo;
-  Unix.mkdir (Filename.concat base_path ".masc") 0o755;
-  Unix.mkdir (Filename.concat repo ".masc") 0o755;
+  Unix.mkdir (Filename.concat base_path Common.masc_dirname) 0o755;
+  Unix.mkdir (Filename.concat repo Common.masc_dirname) 0o755;
   with_cwd repo @@ fun () ->
   with_env "MASC_BASE_PATH" (Some base_path) @@ fun () ->
   with_env "MASC_TEST_ALLOW_BASE_PATH_OVERRIDE" (Some "true") @@ fun () ->
@@ -237,7 +237,7 @@ let test_default_base_path_ignores_base_path_override_without_local_masc () =
   let base_path = Filename.concat root "base" in
   let repo = Filename.concat base_path "workspace/yousleepwhen/masc-mcp" in
   mkdir_p repo;
-  Unix.mkdir (Filename.concat base_path ".masc") 0o755;
+  Unix.mkdir (Filename.concat base_path Common.masc_dirname) 0o755;
   with_cwd repo @@ fun () ->
   with_env "MASC_BASE_PATH" (Some base_path) @@ fun () ->
   with_env "MASC_TEST_ALLOW_BASE_PATH_OVERRIDE" None @@ fun () ->

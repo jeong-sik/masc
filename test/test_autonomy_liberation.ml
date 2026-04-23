@@ -170,7 +170,7 @@ let test_finding_accumulation () =
   let base_path =
     Filename.concat (Filename.get_temp_dir_name ()) "test_findings_al"
   in
-  let masc_dir = Filename.concat base_path ".masc" in
+  let masc_dir = Filename.concat base_path Common.masc_dirname in
   let session_dir = Filename.concat masc_dir "session_test_al" in
   (try Sys.mkdir base_path 0o755 with Sys_error _ -> ());
   (try Sys.mkdir masc_dir 0o755 with Sys_error _ -> ());
@@ -198,7 +198,7 @@ let test_finding_accumulation_json_escaping () =
   let base_path =
     Filename.concat (Filename.get_temp_dir_name ()) "test_findings_escape"
   in
-  let masc_dir = Filename.concat base_path ".masc" in
+  let masc_dir = Filename.concat base_path Common.masc_dirname in
   Fun.protect
     ~finally:(fun () ->
       (try Sys.remove (Filename.concat masc_dir "shared_findings.jsonl") with Sys_error _ -> ());
@@ -220,7 +220,7 @@ let test_team_context_build_renders_findings_without_goal () =
   let base_path =
     Filename.concat (Filename.get_temp_dir_name ()) "test_findings_prompt"
   in
-  let masc_dir = Filename.concat base_path ".masc" in
+  let masc_dir = Filename.concat base_path Common.masc_dirname in
   Fun.protect
     ~finally:(fun () ->
       (try Sys.remove (Filename.concat masc_dir "shared_findings.jsonl") with Sys_error _ -> ());

@@ -219,7 +219,7 @@ let test_executable_relative_fallback_opt_in () =
 
 let test_home_masc_fallback () =
   with_temp_dir "config-dir-home" @@ fun home ->
-  let home_masc_root = Filename.concat home ".masc" in
+  let home_masc_root = Filename.concat home Common.masc_dirname in
   let config = make_config_root home_masc_root in
   let resolution =
     Lib.Config_dir_resolver.resolve_with
@@ -236,9 +236,9 @@ let test_home_masc_fallback () =
 let test_local_masc_fallback_precedes_home_masc () =
   with_temp_dir "config-dir-local" @@ fun root ->
   let target = Filename.concat root "target" in
-  let local_config = make_config_root (Filename.concat target ".masc") in
+  let local_config = make_config_root (Filename.concat target Common.masc_dirname) in
   let home = Filename.concat root "home" in
-  ignore (make_config_root (Filename.concat home ".masc"));
+  ignore (make_config_root (Filename.concat home Common.masc_dirname));
   let resolution =
     Lib.Config_dir_resolver.resolve_with
       (make_inputs ~cwd:root ~env_base_path:target ~env_home:home
@@ -253,11 +253,11 @@ let test_local_masc_fallback_precedes_home_masc () =
 let test_local_masc_fallback_collapses_explicit_masc_dir () =
   with_temp_dir "config-dir-local-masc" @@ fun root ->
   let target = Filename.concat root "target" in
-  let local_config = make_config_root (Filename.concat target ".masc") in
+  let local_config = make_config_root (Filename.concat target Common.masc_dirname) in
   let resolution =
     Lib.Config_dir_resolver.resolve_with
       (make_inputs ~cwd:root
-         ~env_base_path:(Filename.concat target ".masc")
+         ~env_base_path:(Filename.concat target Common.masc_dirname)
          ~executable_name:"/tmp/nonexistent-masc" ())
   in
   check string "status" "ready"
@@ -329,7 +329,7 @@ let test_personas_dirs_ignores_base_path_fallback () =
   write_file (Filename.concat config_root "cascade.json") "{}";
   write_file (Filename.concat config_root "tool_policy.toml") "# test marker\n";
   let base = Filename.dirname config_root in
-  let base_personas = Filename.concat (Filename.concat base ".masc") "personas" in
+  let base_personas = Filename.concat (Filename.concat base Common.masc_dirname) "personas" in
   mkdir_p base_personas;
   let config_personas = Filename.concat config_root "personas" in
   let inputs = make_inputs ~env_config_dir:config_root ~env_base_path:base

@@ -136,7 +136,7 @@ let test_symlink_created_when_masc_exists () =
     ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir)))
   ) (fun () ->
     (* Create a fake .masc directory at "repo root" *)
-    let masc_dir = Filename.concat dir ".masc" in
+    let masc_dir = Filename.concat dir Common.masc_dirname in
     Unix.mkdir masc_dir 0o755;
     (* Create a fake worktree directory *)
     let wt_dir = Filename.concat dir "fake-worktree" in
@@ -144,7 +144,7 @@ let test_symlink_created_when_masc_exists () =
     (* The sandbox creation would call symlink_masc internally.
        Test the end state: .masc should be symlinked into the worktree.
        Since symlink_masc is internal, we test the behavior via Unix.symlink. *)
-    let masc_in_wt = Filename.concat wt_dir ".masc" in
+    let masc_in_wt = Filename.concat wt_dir Common.masc_dirname in
     Unix.symlink masc_dir masc_in_wt;
     check bool ".masc link exists in worktree" true (Sys.file_exists masc_in_wt);
     (* Verify it's a symlink *)
@@ -238,7 +238,7 @@ let test_full_lifecycle () =
         check bool "branch non-empty" true (String.length sb.branch_name > 0);
 
         (* Verify .masc symlink *)
-        let masc_link = Filename.concat sb.worktree_path ".masc" in
+        let masc_link = Filename.concat sb.worktree_path Common.masc_dirname in
         check bool ".masc exists in sandbox" true (Sys.file_exists masc_link);
 
         (* Create a file to simulate work *)

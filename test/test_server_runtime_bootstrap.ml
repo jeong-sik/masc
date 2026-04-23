@@ -100,7 +100,7 @@ let make_config_root root =
 
 let write_basepath_keeper_toml base_path name =
   let keepers_dir =
-    Filename.concat (Filename.concat (Filename.concat base_path ".masc") "config")
+    Filename.concat (Filename.concat (Filename.concat base_path Common.masc_dirname) "config")
       "keepers"
   in
   mkdir_p keepers_dir;
@@ -614,11 +614,11 @@ let test_bootstrap_base_path_config_root_collapses_masc_input () =
       mkdir_p repo;
       ignore (make_config_root repo);
       let base_path = Filename.concat dir "base" in
-      mkdir_p (Filename.concat base_path ".masc");
+      mkdir_p (Filename.concat base_path Common.masc_dirname);
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
       with_cwd repo @@ fun () ->
       Server_runtime_bootstrap.bootstrap_base_path_config_root
-        ~base_path:(Filename.concat base_path ".masc");
+        ~base_path:(Filename.concat base_path Common.masc_dirname);
       Alcotest.(check bool) "config root created under parent .masc" true
         (Sys.file_exists (Filename.concat base_path ".masc/config/cascade.json"));
       Alcotest.(check bool) "nested .masc/.masc config not created" false
@@ -711,7 +711,7 @@ let test_keeper_paths_use_cluster_root () =
           let keeper_dir = Keeper_types.keeper_dir config in
           let expected_root =
             Filename.concat
-              (Filename.concat (Filename.concat dir ".masc") "clusters")
+              (Filename.concat (Filename.concat dir Common.masc_dirname) "clusters")
               "cluster-alpha"
           in
           Alcotest.(check bool) "keeper dir under cluster root" true
@@ -727,12 +727,12 @@ let test_tool_usage_log_uses_cluster_root () =
           let expected_dir =
             Filename.concat
               (Filename.concat
-                 (Filename.concat (Filename.concat dir ".masc") "clusters")
+                 (Filename.concat (Filename.concat dir Common.masc_dirname) "clusters")
                  "cluster-alpha")
               "tool_usage"
           in
           let legacy_dir =
-            Filename.concat (Filename.concat dir ".masc") "tool_usage"
+            Filename.concat (Filename.concat dir Common.masc_dirname) "tool_usage"
           in
           Alcotest.(check bool) "cluster tool_usage dir exists" true
             (Sys.file_exists expected_dir && Sys.is_directory expected_dir);
@@ -757,12 +757,12 @@ let test_keeper_tool_call_log_uses_cluster_root () =
               let expected_dir =
                 Filename.concat
                   (Filename.concat
-                     (Filename.concat (Filename.concat dir ".masc") "clusters")
+                     (Filename.concat (Filename.concat dir Common.masc_dirname) "clusters")
                      "cluster-alpha")
                   "tool_calls"
               in
               let legacy_dir =
-                Filename.concat (Filename.concat dir ".masc") "tool_calls"
+                Filename.concat (Filename.concat dir Common.masc_dirname) "tool_calls"
               in
               Alcotest.(check bool) "cluster tool_calls dir exists" true
                 (Sys.file_exists expected_dir && Sys.is_directory expected_dir);
@@ -1213,14 +1213,14 @@ let test_create_server_state_records_runtime_resolution () =
         (json |> member "config_resolution" |> member "cascade_authoring" |> member "path"
        |> to_string);
       Alcotest.(check string) "create_server_state records effective masc root"
-        (Unix.realpath (Filename.concat dir ".masc"))
+        (Unix.realpath (Filename.concat dir Common.masc_dirname))
         (json |> member "path_diagnostics" |> member "effective_masc_root"
        |> to_string))
 
 let test_create_server_state_preserves_raw_input_base_path () =
   with_temp_dir "startup-create-state-raw-input" (fun dir ->
       let repo = Filename.concat dir "repo" in
-      let raw_input = Filename.concat dir ".masc" in
+      let raw_input = Filename.concat dir Common.masc_dirname in
       mkdir_p repo;
       mkdir_p raw_input;
       ignore (make_config_root repo);

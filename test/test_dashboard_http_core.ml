@@ -111,7 +111,7 @@ let test_dashboard_shell_http_json_includes_paths () =
   in
   let effective_base_path = paths |> member "effective_base_path" |> to_string in
   let effective_masc_root = paths |> member "effective_masc_root" |> to_string in
-  let expected_masc_root = Unix.realpath (Filename.concat config.base_path ".masc") in
+  let expected_masc_root = Unix.realpath (Filename.concat config.base_path Common.masc_dirname) in
   check bool "paths present" true
     (match paths with `Assoc _ -> true | _ -> false);
   check bool "paths key present" true
@@ -175,7 +175,7 @@ let test_dashboard_shell_http_json_includes_paths () =
 
 let test_dashboard_shell_http_json_prefers_preserved_base_path_input () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
-  let raw_input = Filename.concat config.base_path ".masc" in
+  let raw_input = Filename.concat config.base_path Common.masc_dirname in
   with_env "MASC_BASE_PATH_INPUT" raw_input @@ fun () ->
   with_env "MASC_BASE_PATH" config.base_path @@ fun () ->
   let json = Lib.Server_dashboard_http_core.dashboard_shell_http_json config in

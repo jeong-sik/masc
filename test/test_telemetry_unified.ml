@@ -68,7 +68,7 @@ let test_source_of_string_unknown () =
 
 (* ── Empty base_path ─────────────────────────────── *)
 
-let masc_root dir = Filename.concat dir ".masc"
+let masc_root dir = Filename.concat dir Common.masc_dirname
 
 let test_empty_returns_empty () =
   Eio_main.run @@ fun env ->

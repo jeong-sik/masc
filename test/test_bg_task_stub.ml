@@ -123,7 +123,7 @@ let test_pid_file_created_and_cleaned () =
   Fun.protect
     ~finally:(fun () ->
       try
-        let keeper_dir = Filename.concat (Filename.concat base ".masc") "keeper" in
+        let keeper_dir = Filename.concat (Filename.concat base Common.masc_dirname) "keeper" in
         let rec rm path =
           if Sys.is_directory path then begin
             Array.iter (fun e -> rm (Filename.concat path e)) (Sys.readdir path);
@@ -162,7 +162,7 @@ let test_reap_orphans_removes_stale_file () =
   Fun.protect
     ~finally:(fun () ->
       try
-        let keeper_dir = Filename.concat (Filename.concat base ".masc") "keeper" in
+        let keeper_dir = Filename.concat (Filename.concat base Common.masc_dirname) "keeper" in
         let rec rm path =
           if Sys.is_directory path then begin
             Array.iter (fun e -> rm (Filename.concat path e)) (Sys.readdir path);

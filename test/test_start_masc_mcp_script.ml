@@ -340,8 +340,8 @@ let test_absolute_env_base_path_is_preserved () =
       make_fake_eio_exe dir;
       let stale_root = Filename.concat dir "stale-root" in
       let home_dir = Filename.concat dir "empty-home" in
-      mkdir_p (Filename.concat dir ".masc");
-      mkdir_p (Filename.concat stale_root ".masc");
+      mkdir_p (Filename.concat dir Common.masc_dirname);
+      mkdir_p (Filename.concat stale_root Common.masc_dirname);
       mkdir_p home_dir;
       let capture = Filename.concat dir "captured-sanitized.txt" in
       let code, stdout, stderr =
@@ -369,8 +369,8 @@ let test_absolute_parent_project_base_path_is_preserved () =
       let home_dir = Filename.concat dir "empty-home" in
       mkdir_p repo;
       mkdir_p home_dir;
-      mkdir_p (Filename.concat parent ".masc");
-      mkdir_p (Filename.concat repo ".masc");
+      mkdir_p (Filename.concat parent Common.masc_dirname);
+      mkdir_p (Filename.concat repo Common.masc_dirname);
       let script = Filename.concat repo "start-masc-mcp.sh" in
       copy_script (script_path ()) script;
       make_fake_eio_exe repo;
@@ -428,8 +428,8 @@ let test_zshenv_absolute_base_path_is_preserved () =
       let home_dir = Filename.concat dir "home" in
       mkdir_p repo;
       mkdir_p home_dir;
-      mkdir_p (Filename.concat parent ".masc");
-      mkdir_p (Filename.concat repo ".masc");
+      mkdir_p (Filename.concat parent Common.masc_dirname);
+      mkdir_p (Filename.concat repo Common.masc_dirname);
       write_file (Filename.concat home_dir ".zshenv")
         (Printf.sprintf "export MASC_BASE_PATH=%s\n" parent);
       let script = Filename.concat repo "start-masc-mcp.sh" in
@@ -460,8 +460,8 @@ let test_shared_root_env_base_path_is_preserved () =
       make_fake_eio_exe dir;
       let inherited_root = Filename.concat dir "shared-root" in
       let home_dir = Filename.concat dir "empty-home" in
-      mkdir_p (Filename.concat dir ".masc");
-      mkdir_p (Filename.concat inherited_root ".masc");
+      mkdir_p (Filename.concat dir Common.masc_dirname);
+      mkdir_p (Filename.concat inherited_root Common.masc_dirname);
       mkdir_p home_dir;
       let capture = Filename.concat dir "captured-opt-in.txt" in
       let code, stdout, stderr =
@@ -522,8 +522,8 @@ let test_explicit_base_path_execs_from_base_path () =
       let home_dir = Filename.concat dir "empty-home" in
       mkdir_p repo;
       mkdir_p home_dir;
-      mkdir_p (Filename.concat parent ".masc");
-      mkdir_p (Filename.concat repo ".masc");
+      mkdir_p (Filename.concat parent Common.masc_dirname);
+      mkdir_p (Filename.concat repo Common.masc_dirname);
       let script = Filename.concat repo "start-masc-mcp.sh" in
       copy_script (script_path ()) script;
       make_fake_eio_exe repo;
@@ -594,7 +594,7 @@ let test_zshenv_retired_pg_envs_are_scrubbed_before_exec () =
       let home_dir = Filename.concat dir "home" in
       mkdir_p repo;
       mkdir_p home_dir;
-      mkdir_p (Filename.concat parent ".masc");
+      mkdir_p (Filename.concat parent Common.masc_dirname);
       write_file (Filename.concat home_dir ".zshenv")
         "export SUPABASE_DB_URL=postgres://legacy/supabase\nexport SB_PG_URL=postgres://legacy/sb\n";
       let script = Filename.concat repo "start-masc-mcp.sh" in

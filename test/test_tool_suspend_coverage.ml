@@ -26,7 +26,7 @@ module Coord = Masc_mcp.Coord
 let make_config () =
   let tmp = Printf.sprintf "/tmp/test-suspend-%d" (Random.bits ()) in
   (try Unix.mkdir tmp 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
-  (try Unix.mkdir (Filename.concat tmp ".masc") 0o755
+  (try Unix.mkdir (Filename.concat tmp Common.masc_dirname) 0o755
    with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
   Coord.default_config tmp
 

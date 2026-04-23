@@ -15,7 +15,7 @@ let setup_test_room () =
   let unique_id = Printf.sprintf "masc-auth-test-%d-%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.)) in
   let tmp = Filename.concat (Filename.get_temp_dir_name ()) unique_id in
   Unix.mkdir tmp 0o755;
-  let masc_dir = Filename.concat tmp ".masc" in
+  let masc_dir = Filename.concat tmp Common.masc_dirname in
   Unix.mkdir masc_dir 0o755;
   tmp
 

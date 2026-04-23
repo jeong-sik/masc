@@ -107,15 +107,18 @@ let rec dispatch_pipeline stages =
               stdout = "";
               stderr = "nested pipeline not supported in native dispatch" }
       in
-      let first = List.hd stages in
-      (match first with
-       | Shell_ir.Simple s ->
-           let result = dispatch_simple s in
-           chain result.stdout (List.tl stages)
-       | Pipeline _ ->
-           { status = Unix.WEXITED 1;
-             stdout = "";
-             stderr = "nested pipeline not supported" })
+      (match stages with
+       | [] ->
+           { status = Unix.WEXITED 0; stdout = ""; stderr = "" }
+       | first :: rest ->
+           (match first with
+            | Shell_ir.Simple s ->
+                let result = dispatch_simple s in
+                chain result.stdout rest
+            | Pipeline _ ->
+                { status = Unix.WEXITED 1;
+                  stdout = "";
+                  stderr = "nested pipeline not supported" }))
 
 and dispatch (ir : Shell_ir.t) =
   match ir with

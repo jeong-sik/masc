@@ -126,38 +126,40 @@ let parse_git_diff_stat output =
   let lines = split_lines (trim output) in
   if lines = [] then None
   else
-    (* last line: " N files changed, M insertions(+), D deletions(-)" *)
-    let last = List.hd (List.rev lines) in
-    let lower = String.lowercase_ascii last in
-    if not (starts_with (trim lower) "file" || starts_with (trim lower) "files") then
-      None
-    else
-      let files_changed = ref 0 and insertions = ref 0 and deletions = ref 0 in
-      (* parse "N file(s) changed" *)
-      (try
-         let re = Str.regexp {|\([0-9]+\) file|} in
-         if Str.string_match re (trim last) 0 then
-           files_changed := int_of_string (Str.matched_group 1 (trim last))
-       with _ -> ());
-      (* parse "M insertion(s)(+)" *)
-      (try
-         let re = Str.regexp {|\([0-9]+\) insertion|} in
-         if Str.string_match re (trim last) 0 then
-           insertions := int_of_string (Str.matched_group 1 (trim last))
-       with _ -> ());
-      (* parse "D deletion(s)(-)" *)
-      (try
-         let re = Str.regexp {|\([0-9]+\) deletion|} in
-         if Str.string_match re (trim last) 0 then
-           deletions := int_of_string (Str.matched_group 1 (trim last))
-       with _ -> ());
-      Some
-        (`Assoc
-           [
-             ("files_changed", `Int !files_changed);
-             ("insertions", `Int !insertions);
-             ("deletions", `Int !deletions);
-           ])
+    match List.rev lines with
+    | [] -> None
+    | last :: _ ->
+        (* last line: " N files changed, M insertions(+), D deletions(-)" *)
+        let lower = String.lowercase_ascii last in
+        if not (starts_with (trim lower) "file" || starts_with (trim lower) "files") then
+          None
+        else
+          let files_changed = ref 0 and insertions = ref 0 and deletions = ref 0 in
+          (* parse "N file(s) changed" *)
+          (try
+             let re = Str.regexp {|\([0-9]+\) file|} in
+             if Str.string_match re (trim last) 0 then
+               files_changed := int_of_string (Str.matched_group 1 (trim last))
+           with _ -> ());
+          (* parse "M insertion(s)(+)" *)
+          (try
+             let re = Str.regexp {|\([0-9]+\) insertion|} in
+             if Str.string_match re (trim last) 0 then
+               insertions := int_of_string (Str.matched_group 1 (trim last))
+           with _ -> ());
+          (* parse "D deletion(s)(-)" *)
+          (try
+             let re = Str.regexp {|\([0-9]+\) deletion|} in
+             if Str.string_match re (trim last) 0 then
+               deletions := int_of_string (Str.matched_group 1 (trim last))
+           with _ -> ());
+          Some
+            (`Assoc
+               [
+                 ("files_changed", `Int !files_changed);
+                 ("insertions", `Int !insertions);
+                 ("deletions", `Int !deletions);
+               ])
 
 (* --- wc -l --- *)
 

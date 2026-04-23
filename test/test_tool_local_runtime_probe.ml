@@ -45,8 +45,8 @@ let test_ollama_generate_parser_computes_tok_per_second () =
 let test_request_body_omits_keep_alive_by_default () =
   let json =
     Masc_mcp.Tool_local_runtime_probe.request_body_json
-      ~think:false ~keep_alive:None ~model_id:"qwen3.5:35b-a3b-coding-nvfp4"
-      ~prompt:"READY" ~max_tokens:8
+      ~think_enabled:false ~keep_alive:None
+      ~model_id:"qwen3.5:35b-a3b-coding-nvfp4" ~prompt:"READY" ~max_tokens:8
     |> Yojson.Safe.from_string
   in
   let open Yojson.Safe.Util in
@@ -58,7 +58,7 @@ let test_request_body_omits_keep_alive_by_default () =
 
 let test_request_body_can_enable_thinking () =
   let json =
-    Masc_mcp.Tool_local_runtime_probe.request_body_json ~think:true
+    Masc_mcp.Tool_local_runtime_probe.request_body_json ~think_enabled:true
       ~keep_alive:None ~model_id:"qwen3.5:35b-a3b-coding-nvfp4" ~prompt:"READY"
       ~max_tokens:8
     |> Yojson.Safe.from_string
@@ -70,7 +70,7 @@ let test_request_body_can_enable_thinking () =
 let test_request_body_keeps_explicit_keep_alive () =
   let json =
     Masc_mcp.Tool_local_runtime_probe.request_body_json
-      ~think:false ~keep_alive:(Some "90s")
+      ~think_enabled:false ~keep_alive:(Some "90s")
       ~model_id:"qwen3.5:35b-a3b-coding-nvfp4" ~prompt:"READY" ~max_tokens:8
     |> Yojson.Safe.from_string
   in
@@ -78,6 +78,27 @@ let test_request_body_keeps_explicit_keep_alive () =
   check (option string) "keep_alive included"
     (Some "90s")
     (json |> member "keep_alive" |> to_string_option)
+
+let test_think_mode_parses_adaptive_policy () =
+  let parse raw =
+    Masc_mcp.Tool_local_runtime_probe.ollama_probe_think_mode_of_string raw
+    |> Option.map
+         Masc_mcp.Tool_local_runtime_probe.ollama_probe_think_mode_to_string
+  in
+  check (option string) "auto parsed" (Some "auto") (parse " auto ");
+  check (option string) "disabled alias parsed" (Some "disabled")
+    (parse "off");
+  check (option string) "enabled alias parsed" (Some "enabled")
+    (parse "YES");
+  check (option string) "invalid rejected" None (parse "maybe")
+
+let test_auto_think_policy_prioritizes_response () =
+  check bool "auto disables thinking for readiness" false
+    (Masc_mcp.Tool_local_runtime_probe.effective_think_enabled
+       Masc_mcp.Tool_local_runtime_probe.Think_auto);
+  check bool "enabled opts into thinking" true
+    (Masc_mcp.Tool_local_runtime_probe.effective_think_enabled
+       Masc_mcp.Tool_local_runtime_probe.Think_enabled)
 
 let test_normalize_server_url_strips_trailing_slashes () =
   check string "normalizes trailing slash" "http://127.0.0.1:11434"
@@ -168,6 +189,10 @@ let () =
             test_request_body_can_enable_thinking;
           test_case "keeps explicit keep_alive when requested" `Quick
             test_request_body_keeps_explicit_keep_alive;
+          test_case "parses adaptive think policy" `Quick
+            test_think_mode_parses_adaptive_policy;
+          test_case "auto think policy prioritizes response" `Quick
+            test_auto_think_policy_prioritizes_response;
           test_case "computes tok per second from generate response" `Quick
             test_ollama_generate_parser_computes_tok_per_second;
         ] );

@@ -153,18 +153,30 @@ let handle_runtime_ollama_probe _ctx args : tool_result =
           (parse_int_opt value)
     | _ -> Tool_local_runtime_probe.default_probe_timeout_sec
   in
-  let think =
-    match member "think" args with
-    | `Bool value -> value
-    | _ -> false
+  let think_mode =
+    match member "think_mode" args with
+    | `String value -> (
+        match Tool_local_runtime_probe.ollama_probe_think_mode_of_string value with
+        | Some mode -> Ok mode
+        | None ->
+            Error
+              "think_mode must be one of auto, disabled, or enabled")
+    | _ -> (
+        match member "think" args with
+        | `Bool true -> Ok Tool_local_runtime_probe.Think_enabled
+        | `Bool false -> Ok Tool_local_runtime_probe.Think_disabled
+        | _ -> Ok Tool_local_runtime_probe.Think_auto)
   in
-  ( true,
-    json_ok
-      [
-        ( "result",
-          runtime_ollama_probe_json ?server_url ?model ?prompt ?keep_alive
-            ~probe_runs ~max_tokens ~think ~timeout_sec () );
-      ] )
+  match think_mode with
+  | Error msg -> (false, json_error msg)
+  | Ok think_mode ->
+      ( true,
+        json_ok
+          [
+            ( "result",
+              runtime_ollama_probe_json ?server_url ?model ?prompt ?keep_alive
+                ~probe_runs ~max_tokens ~think_mode ~timeout_sec () );
+          ] )
 
 let dispatch ctx ~name ~args : tool_result option =
   match name with
@@ -218,7 +230,16 @@ let schemas : tool_schema list =
                         ("type", `String "boolean");
                         ( "description",
                           `String
-                            "Enable Ollama thinking mode for reasoning models. Defaults to false so short probes can reach the response field." );
+                            "Boolean shorthand for think_mode. false disables reasoning-mode thinking; true enables it." );
+                      ] );
+                  ( "think_mode",
+                    `Assoc
+                      [
+                        ("type", `String "string");
+                        ("enum", `List [ `String "auto"; `String "disabled"; `String "enabled" ]);
+                        ( "description",
+                          `String
+                            "Adaptive thinking policy for Ollama reasoning models. auto defaults to response-oriented non-thinking probes; enabled measures thinking path explicitly." );
                       ] );
                   ("timeout_sec", `Assoc [ ("type", `String "integer") ]);
                 ] );

@@ -30,6 +30,11 @@ type ollama_probe_run = {
   error : string option;
 }
 
+type ollama_probe_think_mode =
+  | Think_auto
+  | Think_disabled
+  | Think_enabled
+
 let bool_opt_to_json = Json_util.bool_opt_to_json
 
 let clamp ~min_value ~max_value value = max min_value (min max_value value)
@@ -84,6 +89,22 @@ let truncate_text ?(max_len = 160) text =
 
 let default_probe_timeout_sec = 6
 let default_ps_timeout_sec = 2
+
+let ollama_probe_think_mode_to_string = function
+  | Think_auto -> "auto"
+  | Think_disabled -> "disabled"
+  | Think_enabled -> "enabled"
+
+let ollama_probe_think_mode_of_string raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "auto" -> Some Think_auto
+  | "false" | "disabled" | "off" | "no" -> Some Think_disabled
+  | "true" | "enabled" | "on" | "yes" -> Some Think_enabled
+  | _ -> None
+
+let effective_think_enabled = function
+  | Think_enabled -> true
+  | Think_auto | Think_disabled -> false
 
 let string_or_fallback candidates =
   let rec loop = function
@@ -381,13 +402,13 @@ let should_attempt_generate_probe ~before_status ~before_error =
   | _, Some _ -> false
   | _ -> true
 
-let request_body_json ~think ~keep_alive ~model_id ~prompt ~max_tokens =
+let request_body_json ~think_enabled ~keep_alive ~model_id ~prompt ~max_tokens =
   let fields =
     [
       Some ("model", `String model_id);
       Some ("prompt", `String prompt);
       Some ("stream", `Bool false);
-      Some ("think", `Bool think);
+      Some ("think", `Bool think_enabled);
       (match Option.bind keep_alive trim_to_option with
       | Some value -> Some ("keep_alive", `String value)
       | None -> None);
@@ -403,14 +424,15 @@ let request_body_json ~think ~keep_alive ~model_id ~prompt ~max_tokens =
   in
   `Assoc fields |> Yojson.Safe.to_string
 
-let run_single_probe ~think ~keep_alive ~server_url ~model_id ~prompt ~max_tokens
-    ~timeout_sec ~run_index =
+let run_single_probe ~think_enabled ~keep_alive ~server_url ~model_id ~prompt
+    ~max_tokens ~timeout_sec ~run_index =
   let url = ollama_generate_url server_url in
   let started = Time_compat.now () in
   match
     http_post_json_text_with_status ~timeout_sec ~url
       ~body_json:
-        (request_body_json ~think ~keep_alive ~model_id ~prompt ~max_tokens)
+        (request_body_json ~think_enabled ~keep_alive ~model_id ~prompt
+           ~max_tokens)
   with
   | Error err ->
       failed_probe_run ~run_index ~http_status:None
@@ -437,7 +459,7 @@ let run_single_probe ~think ~keep_alive ~server_url ~model_id ~prompt ~max_token
               ~wall_clock_ms json
 
 let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
-    ?keep_alive ?(max_tokens = 16) ?(think = false)
+    ?keep_alive ?(max_tokens = 16) ?(think_mode = Think_auto)
     ?(timeout_sec = default_probe_timeout_sec)
     ?(ps_timeout_sec = default_ps_timeout_sec) () =
   let server_url =
@@ -452,6 +474,7 @@ let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
   let max_tokens = clamp ~min_value:1 ~max_value:128 max_tokens in
   let timeout_sec = clamp ~min_value:3 ~max_value:300 timeout_sec in
   let ps_timeout_sec = clamp ~min_value:1 ~max_value:30 ps_timeout_sec in
+  let think_enabled = effective_think_enabled think_mode in
   let before_status, loaded_before, before_error =
     fetch_ollama_ps ~timeout_sec:ps_timeout_sec ~server_url ()
   in
@@ -465,8 +488,8 @@ let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
         let completed_runs =
           List.init probe_runs (fun idx -> idx + 1)
           |> List.map (fun run_index ->
-                 run_single_probe ~think ~keep_alive ~server_url ~model_id ~prompt
-                   ~max_tokens ~timeout_sec ~run_index)
+                 run_single_probe ~think_enabled ~keep_alive ~server_url
+                   ~model_id ~prompt ~max_tokens ~timeout_sec ~run_index)
         in
         let run_errors =
           completed_runs
@@ -540,7 +563,8 @@ let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
       ("probe_runs_completed", `Int (List.length runs));
       ("keep_alive", string_opt_to_json (Option.bind keep_alive trim_to_option));
       ("max_tokens", `Int max_tokens);
-      ("think", `Bool think);
+      ("think_mode", `String (ollama_probe_think_mode_to_string think_mode));
+      ("think", `Bool think_enabled);
       ("timeout_sec", `Int timeout_sec);
       ("ps_timeout_sec", `Int ps_timeout_sec);
       ("prompt_chars", `Int (String.length prompt));

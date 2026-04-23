@@ -372,6 +372,49 @@ describe('normalizeKeepers lifecycle metrics', () => {
     })
   })
 
+  it('derives wall tok/s from usage output tokens and latency', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'wall-rate',
+        status: 'active',
+        metrics_series: [
+          {
+            ts_unix: 6,
+            context_ratio: 0.24,
+            context_tokens: 240,
+            context_max: 1000,
+            latency_ms: 2000,
+            generation: 2,
+            channel: 'turn',
+            model_used: 'glm-5',
+            cost_usd: 0.05,
+            compacted: false,
+            usage: {
+              input_tokens: 120,
+              output_tokens: 80,
+              total_tokens: 200,
+            },
+            inference_telemetry: {
+              request_latency_ms: 2000,
+              timings: {
+                predicted_per_second: 140,
+                prompt_per_second: 55,
+                cache_n: 10,
+              },
+            },
+          },
+        ],
+      },
+    ])
+
+    const metric = keeper?.metrics_series?.[0]
+    expect(metric?.input_tokens).toBe(120)
+    expect(metric?.output_tokens).toBe(80)
+    expect(metric?.total_tokens).toBe(200)
+    expect(metric?.wall_tokens_per_second).toBe(40)
+    expect(metric?.inference_telemetry?.timings?.predicted_per_second).toBe(140)
+  })
+
   it('preserves paused runtime signals and blocker metadata for keeper UI', () => {
     const [keeper] = normalizeKeepers([
       {

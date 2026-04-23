@@ -194,6 +194,10 @@ export interface KeeperMetricPoint {
   prompt_fingerprint: string | null
   prompt_metrics: PromptTelemetry | null
   ctx_composition: CtxCompositionTelemetry | null
+  input_tokens: number | null
+  output_tokens: number | null
+  total_tokens: number | null
+  wall_tokens_per_second: number | null
   inference_telemetry: InferenceTelemetry | null
   fallback_applied: boolean
   fallback_hops: number

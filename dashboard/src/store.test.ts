@@ -1,11 +1,15 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
   oasTotalEvents,
+  oasReplayLoadedEvents,
+  oasReplayTotalMatchingEvents,
+  oasReplayTruncated,
   oasTotalLlmCalls,
   oasTotalErrors,
   oasLastLlmCallTs,
   oasLastErrorTs,
   oasHealthSummary,
+  noteOasReplayWindow,
   resetOasRuntimeSignals,
   pushOasAgentEvent,
   updateOasKeeperSnapshot,
@@ -26,8 +30,28 @@ describe('oasHealthSummary', () => {
     oasTotalLlmCalls.value = 4
     oasTotalErrors.value = 2
     expect(oasHealthSummary.value.totalEvents).toBe(10)
+    expect(oasHealthSummary.value.replayLoadedEvents).toBe(0)
+    expect(oasHealthSummary.value.replayTotalMatchingEvents).toBe(0)
+    expect(oasHealthSummary.value.replayTruncated).toBe(false)
     expect(oasHealthSummary.value.totalLlmCalls).toBe(4)
     expect(oasHealthSummary.value.totalErrors).toBe(2)
+  })
+
+  it('tracks replay sample size separately from total matching entries', () => {
+    noteOasReplayWindow({
+      loadedEvents: 500,
+      totalMatchingEvents: 1842,
+      truncated: true,
+    })
+
+    expect(oasTotalEvents.value).toBe(1842)
+    expect(oasReplayLoadedEvents.value).toBe(500)
+    expect(oasReplayTotalMatchingEvents.value).toBe(1842)
+    expect(oasReplayTruncated.value).toBe(true)
+    expect(oasHealthSummary.value.totalEvents).toBe(1842)
+    expect(oasHealthSummary.value.replayLoadedEvents).toBe(500)
+    expect(oasHealthSummary.value.replayTotalMatchingEvents).toBe(1842)
+    expect(oasHealthSummary.value.replayTruncated).toBe(true)
   })
 
   it('reflects agent event buffer length', () => {
@@ -96,6 +120,9 @@ describe('oasHealthSummary', () => {
     resetOasSignals()
     const s = oasHealthSummary.value
     expect(s.totalEvents).toBe(0)
+    expect(s.replayLoadedEvents).toBe(0)
+    expect(s.replayTotalMatchingEvents).toBe(0)
+    expect(s.replayTruncated).toBe(false)
     expect(s.totalLlmCalls).toBe(0)
     expect(s.totalErrors).toBe(0)
     expect(s.agentEventsCount).toBe(0)

@@ -132,6 +132,9 @@ export const oasAgentEvents = signal<OasAgentEvent[]>([])
 export const oasKeeperSnapshots = signal<Map<string, OasKeeperSnapshot>>(new Map())
 export const oasLastKeeperTick = signal<number | null>(null)
 export const oasTotalEvents = signal(0)
+export const oasReplayLoadedEvents = signal(0)
+export const oasReplayTotalMatchingEvents = signal(0)
+export const oasReplayTruncated = signal(false)
 export const oasTotalLlmCalls = signal(0)
 export const oasTotalErrors = signal(0)
 export const oasLastLlmCallTs = signal<number | null>(null)
@@ -143,10 +146,27 @@ export function resetOasRuntimeSignals(): void {
   oasKeeperSnapshots.value = new Map()
   oasLastKeeperTick.value = null
   oasTotalEvents.value = 0
+  oasReplayLoadedEvents.value = 0
+  oasReplayTotalMatchingEvents.value = 0
+  oasReplayTruncated.value = false
   oasTotalLlmCalls.value = 0
   oasTotalErrors.value = 0
   oasLastLlmCallTs.value = null
   oasLastErrorTs.value = null
+}
+
+export function noteOasReplayWindow(input: {
+  loadedEvents: number
+  totalMatchingEvents: number
+  truncated: boolean
+}): void {
+  const loadedEvents = Math.max(0, Math.floor(input.loadedEvents))
+  const totalMatchingEvents = Math.max(loadedEvents, Math.floor(input.totalMatchingEvents))
+  const truncated = input.truncated && totalMatchingEvents > loadedEvents
+  oasReplayLoadedEvents.value = loadedEvents
+  oasReplayTotalMatchingEvents.value = totalMatchingEvents
+  oasReplayTruncated.value = truncated
+  oasTotalEvents.value = totalMatchingEvents
 }
 
 function sameOasAgentEvent(left: OasAgentEvent, right: OasAgentEvent): boolean {
@@ -254,6 +274,9 @@ export const oasHealthSummary: ReadonlySignal<OasHealthSummary> = computed(() =>
   keeperSnapshotsCount: oasKeeperSnapshots.value.size,
   lastKeeperTick: oasLastKeeperTick.value,
   totalEvents: oasTotalEvents.value,
+  replayLoadedEvents: oasReplayLoadedEvents.value,
+  replayTotalMatchingEvents: oasReplayTotalMatchingEvents.value,
+  replayTruncated: oasReplayTruncated.value,
   totalLlmCalls: oasTotalLlmCalls.value,
   totalErrors: oasTotalErrors.value,
   lastLlmCallTs: oasLastLlmCallTs.value,

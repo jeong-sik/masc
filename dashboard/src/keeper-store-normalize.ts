@@ -184,6 +184,7 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
           ? (typeof handoffObj.to_model === 'string' ? handoffObj.to_model : null)
           : (typeof item.handoff_to_model === 'string' ? item.handoff_to_model : null)
       const rawPrompt = isRecord(item.prompt) ? item.prompt : null
+      const rawUsage = isRecord(item.usage) ? item.usage : null
       const promptSegments: NonNullable<PromptTelemetry['segments']> =
         normalizePromptSegments(rawPrompt, new Set(['fingerprint', 'estimated_total_tokens', 'estimated_cacheable_tokens']))
       const promptFingerprint =
@@ -214,6 +215,14 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
           : null
       const rawTel = isRecord(item.inference_telemetry) ? item.inference_telemetry : null
       const rawTimings = rawTel && isRecord(rawTel.timings) ? rawTel.timings : null
+      const latencyMs = asNumber(item.latency_ms) ?? 0
+      const inputTokens = rawUsage ? (asNumber(rawUsage.input_tokens) ?? null) : null
+      const outputTokens = rawUsage ? (asNumber(rawUsage.output_tokens) ?? null) : null
+      const totalTokens = rawUsage ? (asNumber(rawUsage.total_tokens) ?? null) : null
+      const wallTokensPerSecond =
+        outputTokens != null && latencyMs > 0
+          ? outputTokens / (latencyMs / 1000)
+          : null
       const inference_telemetry = rawTel ? {
         system_fingerprint: typeof rawTel.system_fingerprint === 'string' ? rawTel.system_fingerprint : null,
         timings: rawTimings ? {
@@ -237,7 +246,7 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
         context_ratio: contextRatio,
         context_tokens: asNumber(item.context_tokens) ?? 0,
         context_max: asNumber(item.context_max) ?? 0,
-        latency_ms: asNumber(item.latency_ms) ?? 0,
+        latency_ms: latencyMs,
         generation: asNumber(item.generation) ?? 0,
         channel: typeof item.channel === 'string' ? item.channel : 'turn',
         is_handoff: handoffPerformed,
@@ -251,6 +260,10 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
         prompt_fingerprint: promptFingerprint,
         prompt_metrics,
         ctx_composition,
+        input_tokens: inputTokens,
+        output_tokens: outputTokens,
+        total_tokens: totalTokens,
+        wall_tokens_per_second: wallTokensPerSecond,
         inference_telemetry,
         fallback_applied: cascadeObj ? cascadeObj.fallback_applied === true : false,
         fallback_hops: cascadeObj ? (asNumber(cascadeObj.fallback_hops) ?? 0) : 0,

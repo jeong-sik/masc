@@ -85,6 +85,9 @@ describe('oas-runtime-store', () => {
     hydrateOasRuntimeFromTelemetryEntries(entries)
 
     expect(oasHealthSummary.value.totalEvents).toBe(4)
+    expect(oasHealthSummary.value.replayLoadedEvents).toBe(4)
+    expect(oasHealthSummary.value.replayTotalMatchingEvents).toBe(4)
+    expect(oasHealthSummary.value.replayTruncated).toBe(false)
     expect(oasHealthSummary.value.agentEventsCount).toBe(1)
     expect(oasHealthSummary.value.keeperSnapshotsCount).toBe(1)
     expect(oasHealthSummary.value.totalLlmCalls).toBe(1)
@@ -181,6 +184,8 @@ describe('oas-runtime-store', () => {
     fetchTelemetryMock.mockResolvedValue({
       generated_at: '2026-04-15T12:00:00Z',
       count: 1,
+      total_matching_entries: 1200,
+      truncated: true,
       entries: [
         {
           source: 'oas_event',
@@ -206,7 +211,52 @@ describe('oas-runtime-store', () => {
       n: 500,
       signal: undefined,
     })
-    expect(oasHealthSummary.value.totalEvents).toBe(1)
+    expect(oasHealthSummary.value.totalEvents).toBe(1200)
+    expect(oasHealthSummary.value.replayLoadedEvents).toBe(1)
+    expect(oasHealthSummary.value.replayTotalMatchingEvents).toBe(1200)
+    expect(oasHealthSummary.value.replayTruncated).toBe(true)
     expect(oasAgentEvents.value[0]?.type).toBe('reputation_changed')
+  })
+
+  it('increments total events above the replay baseline for live arrivals', async () => {
+    fetchTelemetryMock.mockResolvedValue({
+      generated_at: '2026-04-15T12:00:00Z',
+      count: 1,
+      total_matching_entries: 1200,
+      truncated: true,
+      entries: [
+        {
+          source: 'oas_event',
+          type: 'oas:masc:autonomy:agent_selected',
+          ts_unix: 555,
+          correlation_id: 'corr-baseline',
+          run_id: 'run-r',
+          payload: {
+            agent_name: 'gamma',
+            trigger: 'thompson',
+            timestamp: 555,
+          },
+        } as TelemetryEntry,
+      ],
+    })
+
+    await replayOasRuntimeTelemetry()
+
+    expect(oasHealthSummary.value.totalEvents).toBe(1200)
+
+    expect(applyOasRuntimeEvent({
+      type: 'oas:masc:autonomy:agent_selected',
+      ts_unix: 556,
+      correlation_id: 'corr-live',
+      run_id: 'run-live',
+      payload: {
+        agent_name: 'delta',
+        trigger: 'thompson',
+        timestamp: 556,
+      },
+    })).toBe(true)
+
+    expect(oasHealthSummary.value.totalEvents).toBe(1201)
+    expect(oasHealthSummary.value.agentEventsCount).toBe(2)
   })
 })

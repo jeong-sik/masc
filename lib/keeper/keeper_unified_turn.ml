@@ -1559,6 +1559,13 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           let turn_mode_label =
             Keeper_unified_metrics.turn_mode_to_string turn_mode
           in
+          let wall_tokens_per_second =
+            if result.usage_reported && latency_ms > 0 then
+              Some
+                (float_of_int result.usage.output_tokens
+                 /. (float_of_int latency_ms /. 1000.0))
+            else None
+          in
           (* Emit turn-completed event to Activity Graph for timeline token visibility *)
           (try
             let event =
@@ -1579,12 +1586,20 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                     ("context_ratio", `Float lifecycle.context_ratio);
                     ("tools_used", `List (List.map (fun s -> `String s) result.tools_used));
                   ]
+                  @ (match wall_tokens_per_second with
+                     | Some v -> [("tokens_per_second", `Float v)]
+                     | None -> [])
                   @ (match result.inference_telemetry with
                      | Some t ->
                        (match t.reasoning_tokens with Some n -> [("reasoning_tokens", `Int n)] | None -> [])
                        @ (match t.timings with
                           | Some ti ->
-                            (match ti.predicted_per_second with Some v -> [("tokens_per_second", `Float v)] | None -> [])
+                            (match ti.prompt_per_second with
+                             | Some v -> [("prompt_per_second", `Float v)]
+                             | None -> [])
+                            @ (match ti.predicted_per_second with
+                               | Some v -> [("hw_decode_tokens_per_second", `Float v)]
+                               | None -> [])
                           | None -> [])
                      | None -> [])))
                 ~tags:["keeper"; "turn"; "metrics"]

@@ -71,6 +71,31 @@ let scheduled_autonomous_outcome_of_result
   | false, true -> Proactive_tool_use
   | true, true -> Proactive_mixed_response
 
+type turn_mode =
+  | Tool_use
+  | Text_response
+  | Skip_text
+  | Noop
+
+let turn_mode_to_string = function
+  | Tool_use -> "tool_use"
+  | Text_response -> "text_response"
+  | Skip_text -> "skip_text"
+  | Noop -> "noop"
+
+let turn_mode_of_string (raw : string) : turn_mode option =
+  match String.trim raw with
+  | "tool_use" -> Some Tool_use
+  | "text_response" -> Some Text_response
+  | "skip_text" -> Some Skip_text
+  | "noop" -> Some Noop
+  | _ -> None
+
+let work_kind_of_turn_mode = function
+  | Tool_use -> "tool_use"
+  | Noop -> "noop"
+  | Text_response | Skip_text -> "text_turn"
+
 let has_substantive_tool_calls (tools_used : string list) : bool =
   let stay_silent = Tool_name.Keeper.to_string Tool_name.Keeper.Stay_silent in
   List.exists (fun name -> not (String.equal name stay_silent)) tools_used
@@ -150,18 +175,35 @@ let scheduled_autonomous_outcome_for_result
     ~has_text:(String.trim result.response_text <> "")
     ~has_tool_calls:(has_visible_tool_signal result)
 
-let selected_mode_of_result (result : Keeper_agent_run.run_result) : string =
+let turn_mode_of_result (result : Keeper_agent_run.run_result) : turn_mode =
   let text = String.trim result.response_text in
-  if has_visible_tool_signal result then "tool_use"
-  else if text = "" then "noop"
-  else if String.starts_with ~prefix:"SKIP:" text then "skip_text"
-  else "text_response"
+  if has_visible_tool_signal result then Tool_use
+  else if text = "" then Noop
+  else if String.starts_with ~prefix:"SKIP:" text then Skip_text
+  else Text_response
 
-let work_kind_of_selected_mode (selected_mode : string) : string =
-  match selected_mode with
-  | "tool_use" -> "tool_use"
-  | "noop" -> "noop"
-  | _ -> "text_turn"
+let turn_mode_of_json (json : Yojson.Safe.t) : turn_mode option =
+  match Safe_ops.json_string_opt "turn_mode" json with
+  | Some raw -> turn_mode_of_string raw
+  | None ->
+      (match Safe_ops.json_string_opt "selected_mode" json with
+       | Some raw -> turn_mode_of_string raw
+       | None ->
+           match Safe_ops.json_string_opt "work_kind" json with
+           | Some "tool_use" -> Some Tool_use
+           | Some "noop" -> Some Noop
+           | Some "text_turn" -> Some Text_response
+           | _ -> None)
+
+let work_kind_of_json (json : Yojson.Safe.t) : string option =
+  match turn_mode_of_json json with
+  | Some mode -> Some (work_kind_of_turn_mode mode)
+  | None ->
+      (match Safe_ops.json_string_opt "work_kind" json with
+       | Some raw ->
+           let value = String.trim raw in
+           if value = "" then None else Some value
+       | None -> None)
 
 (* A keeper acts as a verification authority when its persona wires the
    "verifier"/"검증자" mention targets. The dashboard and prompt builder
@@ -261,7 +303,7 @@ let append_decision_record
     ~(latency_ms : int)
     ?(semaphore_wait_ms : int = 0)
     ~(outcome : string)
-    ~(selected_mode : string)
+    ?turn_mode
     ?social_state
     ?deliberation_execution
     ?(result : Keeper_agent_run.run_result option = None)
@@ -354,11 +396,18 @@ let append_decision_record
               (Social.delivery_surface_to_string state.delivery_surface) );
         ]
   in
+  let turn_mode =
+    match turn_mode, result with
+    | Some mode, _ -> Some mode
+    | None, Some r -> Some (turn_mode_of_result r)
+    | None, None -> None
+  in
+  let turn_mode_label = Option.map turn_mode_to_string turn_mode in
   let suffix_seed =
     match response_preview, error with
     | Some preview, _ -> preview
     | None, Some err -> err
-    | None, None -> selected_mode
+    | None, None -> Option.value ~default:outcome turn_mode_label
   in
   let json =
     `Assoc
@@ -380,8 +429,7 @@ let append_decision_record
         ("approval_mode", Json_util.string_opt_to_json approval_mode);
         ("channel", `String (decision_channel_of_observation observation));
         ("outcome", `String outcome);
-        ("selected_mode", `String selected_mode);
-        ("selected_mode_source", `String "observed_result");
+        ("turn_mode", Json_util.string_opt_to_json turn_mode_label);
         ("latency_ms", `Int latency_ms);
         ("semaphore_wait_ms", `Int semaphore_wait_ms);
         ("trigger_signals", `List (List.map (fun s -> `String s) trigger_signals));
@@ -838,8 +886,7 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
     ?deliberation_execution () : unit =
   let now_ts = Time_compat.now () in
   let _observation = observation in
-  let selected_mode = selected_mode_of_result result in
-  let work_kind = work_kind_of_selected_mode selected_mode in
+  let turn_mode = turn_mode_of_result result in
   let surface_model_used = Keeper_agent_run.surface_model_used result in
   let scheduled_autonomous_outcome =
     if is_scheduled_autonomous_channel channel then
@@ -898,7 +945,7 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
           match compaction.trigger with
           | Some reason -> `String reason
           | None -> `Null);
-        ("work_kind", `String work_kind);
+        ("turn_mode", `String (turn_mode_to_string turn_mode));
         ( "scheduled_autonomous_outcome",
           match scheduled_autonomous_outcome with
           | Some outcome ->

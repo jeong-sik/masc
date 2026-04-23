@@ -218,8 +218,9 @@ MASC Types.tool_schema
 | MASC 필드 | OAS 매핑 |
 |-----------|---------|
 | `worker_container_meta.effective_model` | `Agent_sdk.Provider.config` model_id |
-| `max_turns_override` / timeout heuristic | `max_turns` |
-| `tool_profile` / `shell_profile` | `Tool.t list` 필터링 |
+| `runtime_backend` | description metadata + spawn/runtime routing |
+| `timeout_seconds` | `max_turns` heuristic |
+| fixed `session_min` MCP surface + fixed shell surface | `Tool.t list` |
 | heartbeat | periodic callback |
 | team_session description | `Builder.with_description` metadata |
 

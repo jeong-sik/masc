@@ -1,14 +1,14 @@
 type t =
-  | Local
+  | Local_playground
   | Docker
 
 let to_string = function
-  | Local -> "local"
+  | Local_playground -> "local_playground"
   | Docker -> "docker"
 
 let of_string value =
   match String.lowercase_ascii (String.trim value) with
-  | "local" -> Some Local
+  | "local_playground" | "local" -> Some Local_playground
   | "docker" -> Some Docker
   | _ -> None
 

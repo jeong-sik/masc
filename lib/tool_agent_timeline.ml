@@ -348,8 +348,8 @@ let turn_completed_events (config : Coord.config) ~agent_name ~limit :
          with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> "unknown"
        in
        let work_kind =
-         try e.payload |> member "work_kind" |> to_string
-         with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> "unknown"
+         Keeper_unified_metrics.work_kind_of_json e.payload
+         |> Option.value ~default:"unknown"
        in
        let context_ratio =
          try e.payload |> member "context_ratio" |> to_float

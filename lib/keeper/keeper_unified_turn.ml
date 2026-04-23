@@ -1413,10 +1413,6 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           Keeper_unified_metrics.append_decision_record ~config ~meta:updated_meta ~observation
             ~latency_ms ~semaphore_wait_ms
             ~outcome:(if is_ambiguous_partial then "partial" else "error")
-            ~selected_mode:
-              (if is_ambiguous_partial
-               then "ambiguous_side_effect_error"
-               else "error")
             ~social_state
             ~error:e_str ();
           (match write_meta config updated_meta with
@@ -1559,7 +1555,10 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                Log.Keeper.error
                  "write metrics snapshot failed after keeper cycle: %s"
                  (Printexc.to_string exn));
-          let selected_mode = Keeper_unified_metrics.selected_mode_of_result result in
+          let turn_mode = Keeper_unified_metrics.turn_mode_of_result result in
+          let turn_mode_label =
+            Keeper_unified_metrics.turn_mode_to_string turn_mode
+          in
           (* Emit turn-completed event to Activity Graph for timeline token visibility *)
           (try
             let event =
@@ -1576,7 +1575,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                     ("cost_usd", (if result.usage_reported then `Float turn_cost else `Null));
                     ("latency_ms", `Int latency_ms);
                     ("model_used", `String (Keeper_agent_run.surface_model_used result));
-                    ("work_kind", `String (Keeper_unified_metrics.work_kind_of_selected_mode (Keeper_unified_metrics.selected_mode_of_result result)));
+                    ("turn_mode", `String turn_mode_label);
                     ("context_ratio", `Float lifecycle.context_ratio);
                     ("tools_used", `List (List.map (fun s -> `String s) result.tools_used));
                   ]
@@ -1608,7 +1607,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             ~handoff_json:lifecycle.handoff_json;
           Keeper_unified_metrics.append_decision_record ~config ~meta:updated_meta ~observation
             ~latency_ms ~semaphore_wait_ms ~outcome:"success"
-            ~selected_mode
+            ~turn_mode
             ~social_state
             ~result:(Some result) ();
           (match explicit_accountability_claim with
@@ -1686,7 +1685,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             updated_meta.name model_used
             (result.usage.input_tokens + result.usage.output_tokens)
             latency_ms
-            selected_mode
+            turn_mode_label
             outcome_str;
           (* 7. Persist updated meta *)
           (match write_meta config updated_meta with

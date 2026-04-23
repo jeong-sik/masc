@@ -1,7 +1,6 @@
 (** Tests for the autonomy liberation refactoring (Phases 1-5). *)
 
 module Spawn = Masc_mcp.Spawn
-module Worker_types = Masc_mcp.Worker_types
 module Agent_tool_surfaces = Masc_mcp.Agent_tool_surfaces
 module Keeper_deliberation = Masc_mcp.Keeper_deliberation
 

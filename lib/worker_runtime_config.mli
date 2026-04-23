@@ -8,7 +8,8 @@
     + [MASC_WORKER_RUNTIME_DOCKER_IMAGE]
     + [MASC_WORKER_RUNTIME_HOST_MCP_BASE_URL]
     + [<config_root>/worker-runtime.json]
-    + Built-in defaults ([Local] backend, ["masc-worker-runtime:dev"] image). *)
+    + Built-in defaults ([Local_playground] backend,
+      ["masc-worker-runtime:dev"] image). *)
 
 (** {1 Types} *)
 

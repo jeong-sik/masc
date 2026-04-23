@@ -188,7 +188,6 @@
    lockfree_atomic
    retrieval_projection
    sdk_tool_contract
-   worker_types
    worker_oas
    worker_execution_backend
    worker_execution_spec

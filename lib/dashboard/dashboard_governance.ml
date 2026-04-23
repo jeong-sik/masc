@@ -63,6 +63,47 @@ let factual_snapshot_json ~base_path:_ =
       ("activity", `List []);
     ]
 
+let baseline_dir base_path =
+  Filename.concat
+    (Coord_utils.masc_dir_from_base_path ~base_path)
+    "governance"
+  |> fun d -> Filename.concat d "baselines"
+
+let anomaly_profiles_json ~base_path =
+  let dir = baseline_dir base_path in
+  try
+    if not (Sys.file_exists dir) then `List []
+    else
+      let files = Sys.readdir dir in
+      Array.to_list files
+      |> List.filter (fun f -> Filename.check_suffix f ".json")
+      |> List.filter_map (fun f ->
+          let agent_id = Filename.chop_suffix f ".json" in
+          match Governance_anomaly.load_profile ~base_path ~agent_id with
+          | Some p ->
+              Some
+                (`Assoc
+                   [
+                     ("agent_id", `String p.agent_id);
+                     ("window_days", `Int p.window_days);
+                     ("sample_count", `Int p.sample_count);
+                     ("activity_volume_mean", `Float p.activity_volume.mean);
+                     ("tool_diversity_mean", `Float p.tool_diversity.mean);
+                     ( "token_volume_mean",
+                       match p.token_volume with
+                       | Some s -> `Float s.mean
+                       | None -> `Null );
+                     ("failure_rate_mean", `Float p.failure_rate.mean);
+                     ("updated_at", `Float p.updated_at);
+                   ])
+          | None -> None)
+      |> fun items -> `List items
+  with
+  | Sys_error _ -> `List []
+  | exn ->
+      Log.Governance.warn "anomaly_profiles_json: %s" (Printexc.to_string exn);
+      `List []
+
 let dashboard_json ~base_path ~limit ~offset:_ ~status_filter:_ =
   let runtime = Dashboard_governance_judge.runtime_status base_path in
   let judgments = Dashboard_governance_judge.fresh_judgments_json ~base_path ~limit in
@@ -82,6 +123,7 @@ let dashboard_json ~base_path ~limit ~offset:_ ~status_filter:_ =
       ("approval_queue", approval_queue);
       ("approval_rules", approval_rules);
       ("cases", `List []);
+      ("anomaly_profiles", anomaly_profiles_json ~base_path);
     ]
 
 let cases_json ~base_path:_ ~limit ~offset ~status_filter:_ ~include_test:_ =

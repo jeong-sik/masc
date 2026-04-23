@@ -28,6 +28,7 @@ jobs:
           AGENT_DRAFT_GUARD_TITLE_RE: ${{ vars.AGENT_DRAFT_GUARD_TITLE_RE }}
           AGENT_DRAFT_GUARD_BRANCH_RE: ${{ vars.AGENT_DRAFT_GUARD_BRANCH_RE }}
           AGENT_DRAFT_GUARD_BYPASS_LABELS: ${{ vars.AGENT_DRAFT_GUARD_BYPASS_LABELS }}
+          AGENT_DRAFT_GUARD_HUMAN_ACTORS: ${{ vars.AGENT_DRAFT_GUARD_HUMAN_ACTORS }}
         with:
           script: |
             const owner = context.repo.owner;
@@ -50,6 +51,10 @@ jobs:
               .map((s) => s.trim().toLowerCase())
               .filter((label) => !automationProneBypassLabels.has(label))
               .filter(Boolean);
+            const humanActors = (process.env.AGENT_DRAFT_GUARD_HUMAN_ACTORS || owner)
+              .split(",")
+              .map((s) => s.trim().toLowerCase())
+              .filter(Boolean);
             const labels = (pr.labels || []).map((label) => label.name.toLowerCase());
             const ignoredBypassLabels = labels.filter((label) =>
               automationProneBypassLabels.has(label)
@@ -64,10 +69,43 @@ jobs:
               labels.includes("agent-pr") ||
               labels.includes("codex");
 
-            const hasBypass = labels.some((label) => bypassLabels.includes(label));
-            if (hasBypass) {
-              core.info("Human bypass label present; skip draft auto-merge guard.");
+            const bypassLabelSet = new Set(bypassLabels);
+            const presentBypassLabels = labels.filter((label) => bypassLabelSet.has(label));
+            const bypassPolicyFailures = [];
+            const verifiedBypassLabels = [];
+            if (presentBypassLabels.length > 0) {
+              const events = await github.paginate(github.rest.issues.listEvents, {
+                owner,
+                repo,
+                issue_number: pullNumber,
+                per_page: 100
+              });
+              for (const label of presentBypassLabels) {
+                const latest = [...events].reverse().find((event) =>
+                  (event.event === "labeled" || event.event === "unlabeled") &&
+                  event.label?.name?.toLowerCase() === label
+                );
+                const actor = latest?.actor;
+                const actorName = actor?.login?.toLowerCase();
+                if (!latest) {
+                  bypassPolicyFailures.push(`${label}: no label event found`);
+                } else if (latest.event !== "labeled") {
+                  bypassPolicyFailures.push(`${label}: latest event is ${latest.event}`);
+                } else if (actor?.type !== "User") {
+                  bypassPolicyFailures.push(`${label}: actor ${actor?.login || "(unknown)"} is ${actor?.type || "unknown"}, not User`);
+                } else if (!humanActors.includes(actorName)) {
+                  bypassPolicyFailures.push(`${label}: actor ${actor.login} is not in AGENT_DRAFT_GUARD_HUMAN_ACTORS`);
+                } else {
+                  verifiedBypassLabels.push(`${label} by ${actor.login}`);
+                }
+              }
+            }
+            if (verifiedBypassLabels.length > 0) {
+              core.info(`Verified human bypass label present: ${verifiedBypassLabels.join(", ")}.`);
               return;
+            }
+            for (const failure of bypassPolicyFailures) {
+              core.warning(`Ignoring unverified bypass label: ${failure}.`);
             }
 
             const query = `
@@ -105,6 +143,9 @@ jobs:
 
             const actions = [];
             const failedActions = [];
+            const policyFailures = bypassPolicyFailures.map((failure) =>
+              `unverified bypass label ${failure}`
+            );
             const summarizeError = (error) => {
               const messages = [];
               if (error?.message) messages.push(error.message);
@@ -155,7 +196,7 @@ jobs:
               }
             }
 
-            if (actions.length === 0 && failedActions.length === 0) {
+            if (actions.length === 0 && failedActions.length === 0 && policyFailures.length === 0) {
               core.info("Guarded PR is already draft-only.");
               return;
             }
@@ -164,11 +205,12 @@ jobs:
             const bypassLabelList =
               bypassLabels.length > 0 ? bypassLabels.join(", ") : "(no configured bypass labels)";
             const statusLine =
-              failedActions.length > 0
+              failedActions.length > 0 || policyFailures.length > 0
                 ? "Draft PR guard could not fully reapply protection."
                 : `Draft PR guard reapplied: ${actions.join(", ")}.`;
             const actionLines = [
               actions.length > 0 ? `Completed actions: ${actions.join(", ")}.` : "",
+              policyFailures.length > 0 ? `Policy findings: ${policyFailures.join("; ")}.` : "",
               failedActions.length > 0 ? `Failed actions: ${failedActions.join("; ")}.` : ""
             ].filter(Boolean);
             const body = [
@@ -178,10 +220,10 @@ jobs:
               ...actionLines,
               "",
               `This repository treats draft PRs as draft-only until a human explicitly opts in by adding one of these labels: ${bypassLabelList}.`,
-              ...(failedActions.length > 0
+              ...(failedActions.length > 0 || policyFailures.length > 0
                 ? [
                     "",
-                    "Manual action required: restore draft state or disable auto-merge, or add a bypass label only after explicit human approval."
+                    "Manual action required: restore draft state or disable auto-merge, remove unverified bypass labels, or add a bypass label only after explicit human approval."
                   ]
                 : [])
             ].join("\n");
@@ -210,8 +252,9 @@ jobs:
               });
             }
 
-            if (action === "ready_for_review" || action === "auto_merge_enabled") {
+            if (action === "ready_for_review" || action === "auto_merge_enabled" || policyFailures.length > 0) {
               const summary = [
+                policyFailures.length > 0 ? `policy failures: ${policyFailures.join("; ")}` : "",
                 actions.length > 0 ? actions.join(", ") : "",
                 failedActions.length > 0 ? `manual recovery required after failed automation: ${failedActions.join("; ")}` : ""
               ].filter(Boolean).join("; ");

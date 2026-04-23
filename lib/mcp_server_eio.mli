@@ -59,8 +59,8 @@ val set_clock : float Eio.Time.clock_ty Eio.Resource.t -> unit
 (** Get the Eio clock reference optionally. *)
 val get_clock_opt : unit -> float Eio.Time.clock_ty Eio.Resource.t option
 
-(** Get the Eio clock reference. Raises if not set. *)
-val get_clock : unit -> float Eio.Time.clock_ty Eio.Resource.t
+(** Get the Eio clock reference. Returns Error if not set. *)
+val get_clock : unit -> (float Eio.Time.clock_ty Eio.Resource.t, string) result
 
 (** {1 State Management} *)
 

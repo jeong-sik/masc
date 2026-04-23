@@ -15,6 +15,8 @@ open Keeper_types
 open Keeper_memory
 open Keeper_execution
 
+exception Semaphore_wait_timeout of float
+
 let keepalive_interval_sec () =
   Runtime_params.get Governance_registry.keeper_keepalive_interval_sec
 ;;

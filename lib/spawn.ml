@@ -213,11 +213,6 @@ let spawn_config_of_key key =
       }
   | _ -> None
 
-let default_configs =
-  [ "claude"; "gemini"; "codex"; "llama" ]
-  |> List.filter_map (fun key ->
-         Option.map (fun config -> (key, config)) (spawn_config_of_key key))
-
 (** Get spawn config for agent.
     Resolves all aliases via Provider_adapter registry (SSOT).
     spawn_alias_map removed — aliases are now in Provider_adapter.direct_adapters. *)

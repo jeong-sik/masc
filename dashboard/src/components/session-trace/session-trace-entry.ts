@@ -253,6 +253,11 @@ function ToolCallDetail({ event }: { event: UnifiedTraceEvent }) {
           거부: ${event.gate?.reason ?? ''}
         </div>
       ` : null}
+      ${!event.toolArgs && !resultText && !gateRejected ? html`
+        <div class="text-3xs text-[var(--text-dim)] italic px-2 py-1">
+          세부 정보가 기록되지 않았습니다.
+        </div>
+      ` : null}
       ${'' /* Metadata row */}
       ${event.cost_usd != null && event.cost_usd > 0 ? html`
         <div class="flex gap-3 text-3xs text-[var(--text-dim)]">

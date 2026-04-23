@@ -428,7 +428,8 @@ function timelineEventToTrace(evt: AgentTimelineEvent, index: number): UnifiedTr
 }
 
 function trajectoryEntryToTrace(entry: TrajectoryEntry, index: number): UnifiedTraceEvent {
-  const ts = typeof entry.ts === 'number' ? entry.ts : safeTimestamp(entry.ts_iso)
+  // Backend sends `ts` in seconds (Unix float); normalize to milliseconds for sorting.
+  const ts = typeof entry.ts === 'number' ? entry.ts * 1000 : safeTimestamp(entry.ts_iso)
 
   // Handle thinking entries (type === 'thinking')
   if (entry.type === 'thinking') {

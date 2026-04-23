@@ -2127,39 +2127,65 @@ let handle_keeper_shell
                Process_eio.run_argv_with_status ?env ~cwd ~timeout_sec argv
          in
          if Fs_compat.file_exists clone_path then
-           (* Already cloned — pull latest instead *)
-           let st, out =
-             if docker_hard_mode_brokered then
-               run_brokered_git ~cwd:repos_dir ~timeout_sec:60.0
-                 [ "git"; "-C"; clone_path; "pull"; "--ff-only" ]
-             else if meta.sandbox_profile = Docker then
-               match
-                 run_docker_shell_command_with_status ~config ~meta ~cwd:repos_dir
-                   ~timeout_sec:60.0
-                   ~cmd:(Printf.sprintf "git -C %s pull --ff-only"
-                           (Filename.quote repo_name))
-                   ~git_creds_enabled:true ~network_mode:Network_inherit
-               with
-               | Ok result -> (result.status, result.output)
-               | Error msg -> (Unix.WEXITED 127, msg)
-             else
-               Process_eio.run_argv_with_status ~timeout_sec:60.0
-                 [ "git"; "-C"; clone_path; "pull"; "--ff-only" ]
-           in
-           if st = Unix.WEXITED 0 then
-             update_playground_repo_cache
-               ~playground_dir:playground ~repo_name ~repo_path:clone_path
-               ~action:"pull" ~shallow:false;
-           Yojson.Safe.to_string
-             (`Assoc
-                 ([ "ok", `Bool (st = Unix.WEXITED 0)
-                  ; "op", `String op
-                  ; "action", `String "pull"
-                  ; "path", `String clone_path
-                  ; "status", Keeper_alerting_path.process_status_to_json st
-                  ; "output", `String out
-                  ]
-                 @ route_fields))
+           (* Existing sandbox clones may have a .git directory but no
+              checked-out files. Repair that locally before a pull, otherwise
+              git can report "Already up to date" while the worktree stays
+              unusable for read/search tools. *)
+           (match Coord_worktree.ensure_sandbox_clone_ready clone_path with
+            | Error err ->
+                Yojson.Safe.to_string
+                  (`Assoc
+                      ([ "ok", `Bool false
+                       ; "op", `String op
+                       ; "action", `String "repair_existing_clone"
+                       ; "path", `String clone_path
+                       ; "error", `String "sandbox_clone_not_ready"
+                       ; "status",
+                         Keeper_alerting_path.process_status_to_json
+                           (Unix.WEXITED 1)
+                       ; "output", `String (Types.masc_error_to_string err)
+                       ]
+                      @ route_fields))
+            | Ok repair_note ->
+                (* Already cloned — pull latest instead *)
+                let st, out =
+                  if docker_hard_mode_brokered then
+                    run_brokered_git ~cwd:repos_dir ~timeout_sec:60.0
+                      [ "git"; "-C"; clone_path; "pull"; "--ff-only" ]
+                  else if meta.sandbox_profile = Docker then
+                    match
+                      run_docker_shell_command_with_status ~config ~meta
+                        ~cwd:repos_dir ~timeout_sec:60.0
+                        ~cmd:(Printf.sprintf "git -C %s pull --ff-only"
+                                (Filename.quote repo_name))
+                        ~git_creds_enabled:true ~network_mode:Network_inherit
+                    with
+                    | Ok result -> (result.status, result.output)
+                    | Error msg -> (Unix.WEXITED 127, msg)
+                  else
+                    Process_eio.run_argv_with_status ~timeout_sec:60.0
+                      [ "git"; "-C"; clone_path; "pull"; "--ff-only" ]
+                in
+                if st = Unix.WEXITED 0 then
+                  update_playground_repo_cache
+                    ~playground_dir:playground ~repo_name ~repo_path:clone_path
+                    ~action:"pull" ~shallow:false;
+                let repair_fields =
+                  match repair_note with
+                  | None -> []
+                  | Some note -> [ "repair_note", `String note ]
+                in
+                Yojson.Safe.to_string
+                  (`Assoc
+                      ([ "ok", `Bool (st = Unix.WEXITED 0)
+                       ; "op", `String op
+                       ; "action", `String "pull"
+                       ; "path", `String clone_path
+                       ; "status", Keeper_alerting_path.process_status_to_json st
+                       ; "output", `String out
+                       ]
+                      @ repair_fields
+                      @ route_fields)))
          else
            let depth = Keeper_tool_policy.clone_depth () |> max 0 in
            let depth_args =

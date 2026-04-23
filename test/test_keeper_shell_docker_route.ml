@@ -62,6 +62,19 @@ let rec ensure_dir path =
     if parent <> path then ensure_dir parent;
     Unix.mkdir path 0o755)
 
+let run_ok ~cwd cmd =
+  let wrapped =
+    Printf.sprintf "cd %s && %s > /dev/null 2>&1" (Filename.quote cwd) cmd
+  in
+  let code = Sys.command wrapped in
+  if code <> 0 then
+    Alcotest.failf "command failed (%d): %s" code cmd
+
+let clear_checkout_but_keep_git_dir root =
+  Sys.readdir root
+  |> Array.iter (fun name ->
+    if name <> ".git" then cleanup_dir (Filename.concat root name))
+
 let make_meta ~name ~sandbox =
   let json =
     `Assoc
@@ -412,6 +425,49 @@ done\n\
 printf 'stdout:%s\\n' \"$*\"\n\
 exit 0\n"
 
+let test_git_clone_repairs_existing_docker_clone_checkout () =
+  with_tool_policy_config @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup ~sandbox:Keeper_types.Docker
+  @@ fun ~config ~meta ~playground ->
+  let source_repo = Filename.concat playground "source-masc-mcp" in
+  ensure_dir source_repo;
+  run_ok ~cwd:source_repo "git init -q -b main";
+  run_ok ~cwd:source_repo "git config user.email test@example.com";
+  run_ok ~cwd:source_repo "git config user.name Test";
+  let source_readme = Filename.concat source_repo "README.md" in
+  write_file source_readme "# sandbox clone\n";
+  run_ok ~cwd:source_repo "git add README.md";
+  run_ok ~cwd:source_repo "git commit -q -m init";
+  let repos_dir = Filename.concat playground "repos" in
+  ensure_dir repos_dir;
+  let clone_path = Filename.concat repos_dir "masc-mcp" in
+  run_ok ~cwd:repos_dir
+    (Printf.sprintf "git clone -q %s masc-mcp" (Filename.quote source_repo));
+  let restored_readme = Filename.concat clone_path "README.md" in
+  clear_checkout_but_keep_git_dir clone_path;
+  Alcotest.(check bool) "checkout file removed before repair" false
+    (Sys.file_exists restored_readme);
+  let raw =
+    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_runtime:None ~config ~meta
+      ~args:
+        (`Assoc
+          [
+            ("op", `String "git_clone");
+            ("url", `String "https://github.com/jeong-sik/masc-mcp.git");
+          ])
+  in
+  Alcotest.(check (option bool)) "git_clone succeeds after checkout repair"
+    (Some true)
+    (parse_bool_field raw "ok");
+  Alcotest.(check (option string)) "via=docker" (Some "docker")
+    (parse_string_field raw "via");
+  Alcotest.(check bool) "checkout restored" true
+    (Sys.file_exists restored_readme);
+  Alcotest.(check bool) "repair note surfaced" true
+    (response_mentions raw "repair_note" "checkout was restored")
+
 let test_bash_fake_docker_executes () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
@@ -466,5 +522,7 @@ let () =
             test_git_clone_routes_through_docker;
           Alcotest.test_case "hard mode git_clone uses brokered route" `Quick
             test_hard_mode_git_clone_uses_brokered_route;
+          Alcotest.test_case "git_clone repairs existing docker clone checkout"
+            `Quick test_git_clone_repairs_existing_docker_clone_checkout;
         ] );
     ]

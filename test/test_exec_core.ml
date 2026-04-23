@@ -524,6 +524,66 @@ let test_dune_test_structured () =
   check int "passed" 2 (so |> member "passed" |> to_int);
   check int "failed" 1 (so |> member "failed" |> to_int)
 
+(* --- P11: command history tests --- *)
+
+let tmp_dir_for_p11 = Filename.concat (Filename.get_temp_dir_name ()) "p11_test"
+
+let setup_p11 () =
+  if Sys.file_exists tmp_dir_for_p11 then
+    Array.iter (fun f ->
+      if Filename.check_suffix f ".jsonl" then
+        Sys.remove (Filename.concat tmp_dir_for_p11 f)
+    ) (Sys.readdir tmp_dir_for_p11)
+
+let test_history_append_and_read () =
+  setup_p11 ();
+  let module H = Masc_exec.Bash_history in
+  H.append ~base_path:tmp_dir_for_p11 ~keeper_name:"test-keeper"
+    { ts = 1000.0; cmd_hash = "abc123"; cmd_prefix = "git status";
+      semantic_kind = "Read"; duration_ms = 50; success = true };
+  H.append ~base_path:tmp_dir_for_p11 ~keeper_name:"test-keeper"
+    { ts = 2000.0; cmd_hash = "def456"; cmd_prefix = "dune build";
+      semantic_kind = "Build"; duration_ms = 5000; success = false };
+  let results =
+    H.suggest ~base_path:tmp_dir_for_p11 ~keeper_name:"test-keeper"
+      ~pattern:"git" ~limit:10
+  in
+  check int "found 1 git entry" 1 (List.length results);
+  let e = List.hd results in
+  check string "cmd_prefix" "git status" e.cmd_prefix;
+  check bool "success" true e.success
+
+let test_history_suggest_empty () =
+  setup_p11 ();
+  let module H = Masc_exec.Bash_history in
+  let results =
+    H.suggest ~base_path:tmp_dir_for_p11 ~keeper_name:"no-keeper"
+      ~pattern:"x" ~limit:5
+  in
+  check int "empty for nonexistent" 0 (List.length results)
+
+let test_history_cmd_hash () =
+  let module H = Masc_exec.Bash_history in
+  let h = H.cmd_hash "git status" in
+  check int "hash length 12" 12 (String.length h)
+
+let test_history_compaction () =
+  setup_p11 ();
+  let module H = Masc_exec.Bash_history in
+  for i = 1 to 15 do
+    H.append ~base_path:tmp_dir_for_p11 ~keeper_name:"compact-test"
+      { ts = float_of_int i; cmd_hash = string_of_int i;
+        cmd_prefix = "cmd" ^ string_of_int i;
+        semantic_kind = "Unknown"; duration_ms = 10; success = true }
+  done;
+  (* 15 entries is below max_entries (10000), so compact is a no-op *)
+  H.compact ~base_path:tmp_dir_for_p11 ~keeper_name:"compact-test";
+  let results =
+    H.suggest ~base_path:tmp_dir_for_p11 ~keeper_name:"compact-test"
+      ~pattern:"cmd" ~limit:100
+  in
+  check int "all 15 preserved" 15 (List.length results)
+
 
 let () =
   run "exec_core"
@@ -604,5 +664,16 @@ let () =
             test_unknown_cmd_no_structured;
           test_case "dune runtest produces passed/failed counts" `Quick
             test_dune_test_structured;
+        ] );
+      ( "p11_command_history",
+        [
+          test_case "append and read history entries" `Quick
+            test_history_append_and_read;
+          test_case "suggest returns empty for nonexistent" `Quick
+            test_history_suggest_empty;
+          test_case "cmd_hash produces 12-char hex" `Quick
+            test_history_cmd_hash;
+          test_case "compaction preserves entries below threshold"
+            `Quick test_history_compaction;
         ] );
     ]

@@ -122,7 +122,15 @@ let handle_keeper_task_tool
       in
       Yojson.Safe.to_string (`Assoc [ "ok", `Bool true; "result", `String result ]))
   | "keeper_task_claim" ->
-    let result = Coord.claim_next_r config ~agent_name:meta.agent_name () in
+    let task_filter =
+      match meta.active_goal_ids with
+      | [] -> fun (_task : Types.task) -> true
+      | goal_ids ->
+        fun task -> Keeper_runtime_contract.task_is_linked_to_keeper_goals goal_ids task
+    in
+    let result =
+      Coord.claim_next_r config ~agent_name:meta.agent_name ~task_filter ()
+    in
     let accountability_warning =
       if
         Keeper_accountability.accountability_risk_is_high config

@@ -95,13 +95,21 @@ let reconcile_agent_current_task_with_backlog config ~agent_name backlog =
           Log.Misc.error "agent state reconcile failed: %s" msg)
 
 (** Claim next highest priority unclaimed task.
-    Optional [exclude_task_ids] prevents re-claiming known bad tasks in the same loop run.
+    Optional [exclude_task_ids] prevents re-claiming known bad tasks in the
+    same loop run.  Optional [task_filter] lets callers scope eligible work
+    while the backlog lock is held.
 
     Scheduling logic:
     - Auto-releases any previous claim held by this agent (BUG-004)
     - Applies starvation prevention: tasks waiting >24h get priority boost
     - Within same effective priority, prefers older tasks (FIFO) *)
-let claim_next_r config ~agent_name ?(exclude_task_ids=[]) () =
+let claim_next_r
+      config
+      ~agent_name
+      ?(exclude_task_ids = [])
+      ?(task_filter = fun _ -> true)
+      ()
+  =
   ensure_initialized config;
 
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
@@ -204,8 +212,15 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) () =
         | Some rid -> rid :: (blocked_ids @ exclude_task_ids)
         | None -> blocked_ids @ exclude_task_ids
       in
+      let task_filter_excluded =
+        List.filter
+          (fun t -> (not (List.mem t.id all_excluded)) && not (task_filter t))
+          unclaimed
+      in
       let eligible =
-        List.filter (fun t -> not (List.mem t.id all_excluded)) unclaimed
+        List.filter
+          (fun t -> (not (List.mem t.id all_excluded)) && task_filter t)
+          unclaimed
       in
 
       (* Helper: clear agent current_task and reset status after auto-release
@@ -249,7 +264,11 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) () =
                observe_auto_release ()
            | None -> ());
           clear_agent_state_after_release ();
-          Claim_next_no_eligible { excluded_count = List.length all_excluded }
+          Claim_next_no_eligible
+            {
+              excluded_count =
+                List.length all_excluded + List.length task_filter_excluded;
+            }
       | _ :: _, task :: _ ->
           (* Claim this task *)
           let new_tasks = List.map (fun t ->

@@ -642,6 +642,34 @@ let sync_client_token_file ~base_path ~agent_name ~default_role =
       | Error _ -> create_and_persist ~reason:"repaired")
   | None -> create_and_persist ~reason:"created"
 
+let sync_bootable_keeper_credentials (state : Mcp_server.server_state) =
+  let base_path = state.Mcp_server.room_config.base_path in
+  let keeper_names =
+    Keeper_runtime.bootable_keeper_names state.Mcp_server.room_config
+  in
+  let synced_count, failed =
+    List.fold_left
+      (fun (synced_count, failed) keeper_name ->
+        let agent_name =
+          Keeper_types_profile.keeper_agent_name keeper_name
+        in
+        match Auth.ensure_keeper_credential base_path ~agent_name with
+        | Ok _ -> (synced_count + 1, failed)
+        | Error err ->
+            ( synced_count,
+              (keeper_name, Types.masc_error_to_string err) :: failed ))
+      (0, []) keeper_names
+  in
+  if synced_count > 0 then
+    Log.Server.info
+      "startup verified %d bootable keeper credential(s)"
+      synced_count;
+  List.rev failed
+  |> List.iter (fun (keeper_name, detail) ->
+         Log.Server.error
+           "startup keeper credential sync failed for %s: %s"
+           keeper_name detail)
+
 let bootstrap_prompt_state (state : Mcp_server.server_state) =
   Config_dir_resolver.log_warnings ~context:"ServerBootstrap" ();
   Config_dir_resolver.log_resolution ~context:"ServerBootstrap" ();
@@ -950,6 +978,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       sync_admin_token_env state;
       sync_client_token_file ~base_path ~agent_name:"codex-mcp-client"
         ~default_role:Types.Worker;
+      sync_bootable_keeper_credentials state;
       let path_diagnostics =
         runtime_path_diagnostics ~input_base_path:base_path state
       in

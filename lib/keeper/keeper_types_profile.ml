@@ -628,6 +628,7 @@ let canonical_keeper_toml_key_names =
   ; "max_turns_per_call"
   ; "max_turns_per_call_scheduled_autonomous"
   ; "social_model"
+  ; "execution_scope"
   ; "cascade_name"
   ; "models"
   ]

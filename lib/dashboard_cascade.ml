@@ -286,10 +286,12 @@ let raw_config_json () =
   Config_dir_resolver.log_warnings ~context:"DashboardCascade" ();
   let source : Cascade_toml_materializer.source_info = source_info () in
   let config_path = Some source.json_path in
-  let _ =
-    Cascade_toml_materializer.ensure_materialized_json
-      ~config_path:source.json_path
-  in
+  (match
+     Cascade_toml_materializer.ensure_materialized_json ~config_path:source.json_path
+   with
+   | Ok _ -> ()
+   | Error msg ->
+       Log.Keeper.warn "DashboardCascade: materialization failed for %s: %s" source.json_path msg);
   let source_text =
     try load_raw_config_string source.source_path with
     | Eio.Cancel.Cancelled _ as exn -> raise exn

@@ -34,7 +34,7 @@ let handle_broadcast (ctx : context) : tool_result option =
     Some (false, Printf.sprintf "Rate limited. %d sec remaining." wait_secs)
   else begin
     let trace_context = Otel_trace_context.from_ambient () in
-    let _ = Coord.broadcast ?trace_context config ~from_agent:agent_name ~content:message in
+    let broadcast_result = Coord.broadcast ?trace_context config ~from_agent:agent_name ~content:message in
         let mention = Mention.extract message in
         let _ = Session.push_message registry ~from_agent:agent_name ~content:message ~mention in
         let notification_fields = [
@@ -68,7 +68,7 @@ let handle_broadcast (ctx : context) : tool_result option =
         ignore (config, agent_name);
         Audit_log.log_broadcast config ~agent_id:agent_name
           ~message_preview:message ();
-        Some (true, "broadcast ok")
+        Some (true, broadcast_result)
   end
 
 (** masc_messages — retrieve recent messages *)

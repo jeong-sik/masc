@@ -211,7 +211,7 @@ let run_docker_shell_command_with_status
         @ network_args
         @ cred_mounts
         @ token_env
-        @ [ image; "bash"; "-lc"; cmd ^ " 2>&1" ]
+        @ [ image; "bash"; "-lc"; cmd ]
       in
       let status, output =
         Process_eio.run_argv_with_status
@@ -348,17 +348,17 @@ let run_docker_hardened_bash
       with
       | Error message -> error_json message
       | Ok result ->
-    Yojson.Safe.to_string
-      (`Assoc
-         [
-           ("ok", `Bool (result.status = Unix.WEXITED 0));
-           ("via", `String "docker");
-           ("cwd", `String cwd);
-           ("sandbox_profile", `String "docker");
-           ("git_creds_enabled", `Bool false);
-           ("network_mode", `String result.network_label);
-           ("effective_sandbox_image", `String result.image);
-           ( "status",
-             Keeper_alerting_path.process_status_to_json result.status );
-           ("output", `String result.output);
-         ])
+        Yojson.Safe.to_string
+          (`Assoc
+             [
+               ("ok", `Bool (result.status = Unix.WEXITED 0));
+               ("via", `String "docker");
+               ("cwd", `String cwd);
+               ("sandbox_profile", `String "docker");
+               ("git_creds_enabled", `Bool false);
+               ("network_mode", `String result.network_label);
+               ("effective_sandbox_image", `String result.image);
+               ( "status",
+                 Keeper_alerting_path.process_status_to_json result.status );
+               ("output", `String result.output);
+             ])

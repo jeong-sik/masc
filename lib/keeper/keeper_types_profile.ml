@@ -620,6 +620,8 @@ let canonical_keeper_toml_key_names =
   ; "network_mode"
   ; "shared_memory_scope"
   ; "tool_preset"
+  ; "tool_access.kind"
+  ; "tool_access.preset"
   ; "tool_also_allow"
   ; "also_allow"
   ; "tool_denylist"

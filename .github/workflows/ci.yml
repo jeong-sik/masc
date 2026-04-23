@@ -90,7 +90,7 @@ jobs:
           head_ref="${GITHUB_SHA}"
 
           if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
-            git fetch origin "${GITHUB_BASE_REF}" --depth=200
+            bash scripts/ci/git-fetch-retry.sh origin "${GITHUB_BASE_REF}" --depth=200
             base_ref="origin/${GITHUB_BASE_REF}"
             head_ref="${GITHUB_HEAD_SHA}"
           elif [ -n "${GITHUB_BEFORE}" ] && [ "${GITHUB_BEFORE}" != "0000000000000000000000000000000000000000" ]; then
@@ -215,7 +215,7 @@ jobs:
           HEAD_REF: ${{ github.event.pull_request.head.sha }}
         run: |
           chmod +x scripts/check-release-train-guard.sh
-          git fetch origin "${{ github.base_ref }}" --depth=100 --tags
+          bash scripts/ci/git-fetch-retry.sh origin "${{ github.base_ref }}" --depth=100 --tags
           scripts/check-release-train-guard.sh \
             --base "$BASE_REF" \
             --head "$HEAD_REF"
@@ -227,7 +227,7 @@ jobs:
           HEAD_REF: ${{ github.event.pull_request.head.sha }}
         run: |
           chmod +x scripts/check-pr-hygiene.sh
-          git fetch origin "${{ github.base_ref }}" --depth=100
+          bash scripts/ci/git-fetch-retry.sh origin "${{ github.base_ref }}" --depth=100
           scripts/check-pr-hygiene.sh \
             --base "$BASE_REF" \
             --head "$HEAD_REF" \
@@ -319,7 +319,7 @@ jobs:
 
       - name: Fetch base branch for health ratchet
         if: github.event_name == 'pull_request' && needs.changes.outputs.health_snapshot == 'true'
-        run: git fetch origin "${{ github.base_ref }}" --depth=1
+        run: bash scripts/ci/git-fetch-retry.sh origin "${{ github.base_ref }}" --depth=1
 
       - name: Run health snapshot
         if: needs.changes.outputs.health_snapshot == 'true'

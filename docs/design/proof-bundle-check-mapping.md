@@ -57,6 +57,7 @@ Without an explicit mapping table, it is easy to write check logic for fields th
 |---|---|---|---|---|---|
 | `contract.json` | OAS | full `runtime_constraints` + opaque `eval_criteria` | yes | no | no |
 | `evidence/mode_violations.json` | OAS | `ts`, `tool_name`, `input_summary`, `effective_mode`, `violation_kind` | no for active checks | yes | insufficient |
+| `evidence/effects.json` | OAS | pre-tool effect decision rows, including allowed / denied / pending evidence | no | advisory only | potential typed effect ledger input |
 | `evidence/token_usage.json` | OAS | turn token snapshots | no | optional annotation | no |
 | `evidence/review_warning.json` | OAS | warning string + effective mode | yes for bridge routing | yes as review tripwire source | still insufficient for full typed review satisfaction |
 | `tool_traces/*.jsonl` | OAS | tool trace rows | only as selected artifact presence | optional | partial, still missing typed join fields |
@@ -68,6 +69,7 @@ Without an explicit mapping table, it is easy to write check logic for fields th
 | manifest | `{run}/manifest.json` | yes | all phase-1A checks |
 | contract snapshot | `{run}/contract.json` | yes | `runtime.requested_execution_mode`, `runtime.risk_class`, `proof.contract_snapshot` |
 | mode violations | `{run}/evidence/mode_violations.json` | no | phase-1B friction only |
+| effect evidence | `{run}/evidence/effects.json` | no | advisory effect decision ledger only |
 | token usage | `{run}/evidence/token_usage.json` | no | advisory only |
 | review warning | `{run}/evidence/review_warning.json` | conditionally yes | active only when `runtime.review_requirement` is declared |
 | tool traces | `{run}/tool_traces/*.jsonl` | no by default | reserved for future active checks |

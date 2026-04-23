@@ -56,6 +56,17 @@
 
 ### Changed
 
+- **OAS pin bump → `main@031c7e6b` (`v0.170.5`).**
+  `scripts/oas-agent-sdk-pin.sh` now tracks the merged OAS truth-layer evidence
+  primitives, and the dependency floor in `dune-project` / `masc_mcp.opam` is
+  raised to `agent_sdk >= 0.170.5`. Keeper metrics now separate
+  `raw_evidence_ref_count` from `violation_count`, so OAS
+  `evidence/effects.json` rows are treated as advisory effect-decision evidence
+  instead of mode violations.
+- **Keeper TOML key drift assertion restored.** The TOML unknown-key allowlist no
+  longer whitelists `tool_access.kind` / `tool_access.preset` unless the TOML
+  profile parser actually consumes those nested keys, unblocking keeper test
+  executable startup after the canonical/parsed key lists diverged.
 - **OAS pin bump → `main@8b5bf30a` (`v0.170.4`).**
   `scripts/oas-agent-sdk-pin.sh` now tracks the merged OAS Kimi CLI session
   reuse fix on upstream `main`, and the dependency floor in `dune-project` /

@@ -129,6 +129,94 @@ let is_git_clone candidate =
   | `Directory | `File -> true
   | `Missing -> false
 
+let run_git_in_clone clone_path args =
+  run_argv_with_status ([ "git"; "-C"; clone_path; "--no-optional-locks" ] @ args)
+
+let trim_output_detail output =
+  let detail = String.trim output in
+  if detail = "" then "(no output)" else detail
+
+let first_nul_field output =
+  match String.index_opt output '\x00' with
+  | Some idx when idx > 0 -> Some (String.sub output 0 idx)
+  | Some _ -> None
+  | None ->
+      let trimmed = String.trim output in
+      if trimmed = "" then None else Some trimmed
+
+type sandbox_clone_state =
+  | Ready
+  | Needs_checkout of string
+  | Broken_git of string
+
+let inspect_sandbox_clone candidate =
+  let inside_status, inside_output =
+    run_git_in_clone candidate [ "rev-parse"; "--is-inside-work-tree" ]
+  in
+  if inside_status <> Unix.WEXITED 0 then
+    Broken_git
+      (Printf.sprintf "git rev-parse failed: %s"
+         (trim_output_detail inside_output))
+  else
+    let tracked_status, tracked_output =
+      run_git_in_clone candidate [ "ls-files"; "-z" ]
+    in
+    if tracked_status <> Unix.WEXITED 0 then
+      Broken_git
+        (Printf.sprintf "git ls-files failed: %s"
+           (trim_output_detail tracked_output))
+    else
+      match first_nul_field tracked_output with
+      | None -> Ready
+      | Some relpath ->
+          if safe_file_exists (Filename.concat candidate relpath) then Ready
+          else Needs_checkout relpath
+
+let restore_sandbox_clone_checkout candidate =
+  let checkout_status, checkout_output =
+    run_git_in_clone candidate [ "checkout"; "-f"; "HEAD"; "--"; "." ]
+  in
+  if checkout_status <> Unix.WEXITED 0 then
+    Error
+      (IoError
+         (Printf.sprintf
+            "sandbox_clone_checkout_restore_failed: could not restore tracked \
+             files in %s: %s"
+            candidate (trim_output_detail checkout_output)))
+  else
+    match inspect_sandbox_clone candidate with
+    | Ready ->
+        Ok
+          (Some
+             "Existing sandbox clone checkout was restored from HEAD before \
+              worktree creation.")
+    | Needs_checkout relpath ->
+        Error
+          (IoError
+             (Printf.sprintf
+                "sandbox_clone_checkout_restore_failed: %s is still missing \
+                 tracked path %s after checkout."
+                candidate relpath))
+    | Broken_git detail ->
+        Error
+          (IoError
+             (Printf.sprintf
+                "sandbox_clone_checkout_restore_failed: %s is still not a \
+                 usable git clone after checkout: %s"
+                candidate detail))
+
+let ensure_sandbox_clone_ready candidate =
+  match inspect_sandbox_clone candidate with
+  | Ready -> Ok None
+  | Needs_checkout _ -> restore_sandbox_clone_checkout candidate
+  | Broken_git detail ->
+      Error
+        (IoError
+           (Printf.sprintf
+              "sandbox_clone_invalid: %s has a .git marker but is not a usable \
+               git clone: %s"
+              candidate detail))
+
 let keeper_toml_path ~config ~agent_name =
   let keeper_name = Playground_paths.sanitize_keeper_name agent_name in
   Filename.concat
@@ -321,7 +409,9 @@ let auto_provision_sandbox_clone ~config ~agent_name ~repos_dir ~repo_name =
       Fs_compat.mkdir_p repos_dir;
       let clone_path = Filename.concat repos_dir repo_name in
       if safe_file_exists clone_path then
-        if is_git_clone clone_path then Ok (clone_path, None)
+        if is_git_clone clone_path then
+          ensure_sandbox_clone_ready clone_path
+          |> Result.map (fun repair_note -> (clone_path, repair_note))
         else
           Error
             (IoError
@@ -436,7 +526,9 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
         | Some name when not (safe_repo_name name) -> None
         | Some name ->
           let candidate = Filename.concat repos_dir name in
-          if is_git_clone candidate then Some candidate else None
+          if is_git_clone candidate
+          then Some (ensure_sandbox_clone_ready candidate |> Result.map (fun note -> (candidate, note)))
+          else None
       in
       let scan_first_git_repo dir =
         if not (safe_is_dir dir) then None
@@ -450,7 +542,10 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
             else
               let candidate = Filename.concat dir entries.(i) in
               if is_git_clone candidate
-              then Some candidate
+              then
+                Some
+                  (ensure_sandbox_clone_ready candidate
+                   |> Result.map (fun note -> (candidate, note)))
               else find (i + 1)
           in
           find 0
@@ -458,13 +553,13 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
       match repo_name with
       | Some name when String.trim name <> "" && safe_repo_name name -> (
           match explicit_repo with
-          | Some clone -> Ok (clone, None)
+          | Some result -> result
           | None ->
               auto_provision_sandbox_clone ~config ~agent_name ~repos_dir
                 ~repo_name:name)
       | _ -> (
           match scan_first_git_repo repos_dir with
-          | Some clone -> Ok (clone, None)
+          | Some result -> result
           | None ->
               Error
                 (missing_sandbox_clone_error ~agent_name ~repos_dir ~repo_name))

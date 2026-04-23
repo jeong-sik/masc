@@ -67,6 +67,21 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
+let rec rm_path path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then (
+      Array.iter (fun name -> rm_path (Filename.concat path name))
+        (Sys.readdir path);
+      Unix.rmdir path)
+    else
+      Unix.unlink path
+
+let clear_checkout_but_keep_git_dir repo =
+  Array.iter
+    (fun name ->
+       if name <> ".git" then rm_path (Filename.concat repo name))
+    (Sys.readdir repo)
+
 let rec ensure_dir path =
   if path = "" || path = "." || path = "/" then ()
   else if Sys.file_exists path then ()
@@ -496,6 +511,57 @@ let test_dispatch_worktree_create_and_remove_use_docker_keeper_lane () =
           check bool "docker worktree removed" false
             (Sys.file_exists docker_worktree)
 
+let test_dispatch_worktree_create_repairs_existing_sandbox_clone_checkout () =
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  init_process_eio env;
+  run_ok ~cwd:base_path "git init -q -b main";
+  let source_repo =
+    setup_nested_repo_with_remote ~base_path
+      ~repo_rel:"workspace/yousleepwhen/masc-mcp"
+  in
+  write_keeper_toml ~base_path ~name:"sangsu" ~sandbox_profile:"docker";
+  let sandbox_repos =
+    Filename.concat base_path ".masc/playground/docker/sangsu/repos"
+  in
+  ensure_dir sandbox_repos;
+  let sandbox_clone = Filename.concat sandbox_repos "masc-mcp" in
+  run_ok ~cwd:base_path
+    (Printf.sprintf "git clone -q %s %s"
+       (Filename.quote source_repo) (Filename.quote sandbox_clone));
+  clear_checkout_but_keep_git_dir sandbox_clone;
+  let config = Masc_mcp.Coord.default_config base_path in
+  ignore (Masc_mcp.Coord.init config ~agent_name:(Some "sangsu"));
+  let ctx : Tool_worktree.context = { config; agent_name = "sangsu" } in
+  let task_id = "task-restore-clone" in
+  let args = `Assoc [
+    ("task_id", `String task_id);
+    ("repo_name", `String "masc-mcp");
+    ("base_branch", `String "main");
+  ] in
+  let restored_readme = Filename.concat sandbox_clone "README.md" in
+  let docker_worktree =
+    Filename.concat sandbox_clone
+      (Filename.concat ".worktrees"
+         (Playground_paths.worktree_dir_name "sangsu" task_id))
+  in
+  match Tool_worktree.dispatch ctx ~name:"masc_worktree_create" ~args with
+  | None -> fail "dispatch returned None for masc_worktree_create"
+  | Some (false, msg) ->
+      fail
+        (Printf.sprintf
+           "expected broken sandbox clone checkout to be repaired, got error: %s"
+           msg)
+  | Some (true, msg) ->
+      check bool "message mentions checkout restore" true
+        (contains "restored from HEAD" msg);
+      check bool "sandbox clone checkout restored" true
+        (Sys.file_exists restored_readme);
+      check bool "docker worktree created after repair" true
+        (Sys.file_exists docker_worktree)
+
 (* ============================================================
    Test Runners
    ============================================================ *)
@@ -540,5 +606,7 @@ let () =
         test_dispatch_worktree_create_auto_provisions_before_wide_workspace_storm;
       test_case "docker keeper uses docker lane for create/remove" `Quick
         test_dispatch_worktree_create_and_remove_use_docker_keeper_lane;
+      test_case "broken sandbox clone checkout is restored" `Quick
+        test_dispatch_worktree_create_repairs_existing_sandbox_clone_checkout;
     ];
   ]

@@ -44,32 +44,40 @@ let raw_all_tool_schemas : Types.tool_schema list =
     Logs warnings for: duplicate names, empty names/descriptions,
     input_schema.type not "object". Does not block startup. *)
 let validate_schemas (schemas : Types.tool_schema list) =
-  let errors = ref [] in
-  let seen = ref StringSet.empty in
-  List.iter
-    (fun (schema : Types.tool_schema) ->
-      if StringSet.mem schema.name !seen then
-        errors :=
-          Printf.sprintf "Duplicate tool name: %s" schema.name :: !errors
-      else seen := StringSet.add schema.name !seen;
-      if schema.name = "" then
-        errors := "Empty tool name found" :: !errors;
-      if schema.description = "" then
-        errors :=
-          Printf.sprintf "Empty description for tool: %s" schema.name
-          :: !errors;
-      match Yojson.Safe.Util.member "type" schema.input_schema with
-      | `String "object" -> ()
-      | _ ->
-          errors :=
-            Printf.sprintf "Tool %s: input_schema.type is not 'object'"
-              schema.name
-            :: !errors)
-    schemas;
-  match !errors with
+  let errors, _ =
+    List.fold_left
+      (fun (errors, seen) (schema : Types.tool_schema) ->
+        let errors =
+          if StringSet.mem schema.name seen then
+            Printf.sprintf "Duplicate tool name: %s" schema.name :: errors
+          else errors
+        in
+        let seen = StringSet.add schema.name seen in
+        let errors =
+          if schema.name = "" then "Empty tool name found" :: errors
+          else errors
+        in
+        let errors =
+          if schema.description = "" then
+            Printf.sprintf "Empty description for tool: %s" schema.name
+            :: errors
+          else errors
+        in
+        let errors =
+          match Yojson.Safe.Util.member "type" schema.input_schema with
+          | `String "object" -> errors
+          | _ ->
+              Printf.sprintf "Tool %s: input_schema.type is not 'object'"
+                schema.name
+              :: errors
+        in
+        (errors, seen))
+      ([], StringSet.empty)
+      schemas
+  in
+  match errors with
   | [] -> ()
-  | errs ->
-      List.iter (fun e -> Log.Config.warn "%s" e) errs
+  | errs -> List.iter (fun e -> Log.Config.warn "%s" e) errs
 
 let all_tool_schemas : Types.tool_schema list =
   let schemas =

@@ -8,7 +8,8 @@ let schemas : Types.tool_schema list = [
   {
     name = "masc_add_task";
     description = "Add a new task to the backlog for agents to claim. \
-Tasks have status flow: todo → claimed → done/cancelled. \
+Tasks default to an advisory verification contract with completion/evidence requirements. \
+Normal status flow is todo → claimed → awaiting_verification → done/cancelled when verification FSM is enabled. \
 Priority 1=urgent, 5=low (default 3). \
 Returns task-XXX ID for tracking. \
 Example: masc_add_task({title: 'Fix login bug', priority: 1, description: 'Users cannot login with SSO'})";
@@ -63,6 +64,7 @@ Example: masc_add_task({title: 'Fix login bug', priority: 1, description: 'Users
     name = "masc_batch_add_tasks";
     description = "Add multiple tasks in one call (more efficient than repeated masc_add_task). \
 Use when: loading sprint backlog, importing from JIRA, creating related tasks. \
+Tasks default to the same advisory verification contract/evidence requirements as masc_add_task. \
 Each task gets unique ID (task-XXX). Atomic: all succeed or all fail. \
 Example: masc_batch_add_tasks({tasks: [{title: 'Task A', priority: 2}, {title: 'Task B'}]})";
     input_schema = `Assoc [
@@ -196,7 +198,8 @@ Tip: Look for status='todo' tasks to claim.";
 submit_for_verification, approve, or reject. \
 Call when you pick up, finish, or abandon a task. Supports CAS via expected_version. \
 After masc_add_task or masc_claim_next; pair with masc_deliver before action='done'. \
-Use submit_for_verification to request cross-agent review; approve/reject for verifier actions.";
+Use submit_for_verification to request cross-agent review; approve/reject for verifier actions. \
+Tasks created through masc_add_task normally route action='done' into awaiting_verification rather than final done.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

@@ -276,6 +276,68 @@ let test_done_redirects_to_verification_fsm () =
                   (Types.string_of_task_status status)))
         | _ -> fail "expected keeper_task_done to redirect into verification FSM")))
 
+let test_done_redirects_default_contract_task_to_verification_fsm () =
+  ensure_rng ();
+  with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
+    with_room (fun config ->
+      let meta = make_test_meta () in
+      let _ =
+        Coord.add_task config ~title:"Default verification task" ~priority:1
+          ~description:"created without explicit contract"
+      in
+      let task_id = (only_task config).id in
+      ignore (call_tool config meta "keeper_task_claim" (`Assoc []));
+      let result =
+        call_tool config meta "keeper_task_done"
+          (`Assoc
+             [
+               ("task_id", `String task_id);
+               ("result", `String "Implemented change and ran focused checks.");
+             ])
+      in
+      let json = parse_json result in
+      match Yojson.Safe.Util.member "ok" json with
+      | `Bool true ->
+        let task = only_task config in
+        (match task.task_status with
+         | Types.AwaitingVerification _ -> ()
+         | status ->
+           fail
+             (Printf.sprintf
+                "expected awaiting_verification, got %s"
+                (Types.string_of_task_status status)));
+        (match task.contract with
+         | Some contract ->
+           check bool "default completion contract present" true
+             (contract.completion_contract <> []);
+           check bool "default evidence contract present" true
+             (contract.verify_gate_evidence <> [])
+         | None -> fail "expected default verification contract");
+        let reqs = Verification.list_requests config.Coord.base_path in
+        let req =
+          List.find_opt
+            (fun (req : Verification.verification_request) ->
+               String.equal req.task_id task_id)
+            reqs
+        in
+        (match req with
+         | Some req ->
+           check bool "criteria populated" true (req.criteria <> []);
+           let evidence_refs =
+             match req.output with
+             | `Assoc fields -> (
+                 match List.assoc_opt "evidence_refs" fields with
+                 | Some (`List refs) ->
+                   List.filter_map
+                     (function `String s -> Some s | _ -> None)
+                     refs
+                 | _ -> [])
+             | _ -> []
+           in
+           check bool "evidence refs populated" true (evidence_refs <> [])
+         | None -> fail "expected verification request for default contract task")
+      | _ -> fail "expected keeper_task_done to redirect into verification FSM"))
+
 let test_submit_for_verification_requires_pr_url () =
   with_room (fun config ->
     let meta = make_test_meta () in
@@ -434,6 +496,8 @@ let () =
         test_done_respects_persisted_cdal_gate;
       test_case "done redirects to verification FSM" `Quick
         test_done_redirects_to_verification_fsm;
+      test_case "default contract redirects to verification FSM" `Quick
+        test_done_redirects_default_contract_task_to_verification_fsm;
     ];
     "submit_for_verification", [
       test_case "requires pr_url" `Quick

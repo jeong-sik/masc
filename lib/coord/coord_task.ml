@@ -118,6 +118,56 @@ let empty_task_contract =
   }
 ;;
 
+let default_verification_evidence_refs =
+  [ "completion_notes"; "pr_url_or_artifact_ref" ]
+;;
+
+let first_line text =
+  match String.index_opt text '\n' with
+  | Some idx -> String.sub text 0 idx
+  | None -> text
+;;
+
+let truncate ~max_len text =
+  if String.length text <= max_len then text
+  else String.sub text 0 max_len ^ "..."
+;;
+
+let default_completion_contract_text ~title ~description =
+  let title = String.trim title in
+  let description = description |> String.trim |> first_line in
+  if description = ""
+  then Printf.sprintf "Task scope satisfied: %s" title
+  else
+    truncate ~max_len:220
+      (Printf.sprintf "Task scope satisfied: %s - %s" title description)
+;;
+
+let ensure_task_contract_for_verification ?contract ~title ~description () =
+  let base =
+    match contract with
+    | Some contract -> normalize_task_contract contract
+    | None -> empty_task_contract
+  in
+  let completion_contract =
+    if base.completion_contract <> []
+    then base.completion_contract
+    else [ default_completion_contract_text ~title ~description ]
+  in
+  let required_evidence =
+    if base.required_evidence <> []
+    then base.required_evidence
+    else default_verification_evidence_refs
+  in
+  let verify_gate_evidence =
+    if base.verify_gate_evidence <> []
+    then base.verify_gate_evidence
+    else default_verification_evidence_refs
+  in
+  normalize_task_contract
+    { base with completion_contract; required_evidence; verify_gate_evidence }
+;;
+
 let merge_execution_links
       (existing : Types.task_execution_links)
       ?session_id
@@ -403,7 +453,14 @@ let add_task
              existing_id
          | None ->
            let task_id = Printf.sprintf "task-%03d" (next_task_number config backlog) in
-           let contract = Option.map normalize_task_contract contract in
+           let contract =
+             Some
+               (ensure_task_contract_for_verification
+                  ?contract
+                  ~title
+                  ~description
+                  ())
+           in
            let new_task =
              { id = task_id
              ; title
@@ -481,7 +538,14 @@ let batch_add_tasks_internal ?created_by config tasks =
              (fun (title, priority, description, contract, goal_id) ->
                 let task_id = Printf.sprintf "task-%03d" !next_num in
                 incr next_num;
-                let contract = Option.map normalize_task_contract contract in
+                let contract =
+                  Some
+                    (ensure_task_contract_for_verification
+                       ?contract
+                       ~title
+                       ~description
+                       ())
+                in
                 { id = task_id
                 ; title
                 ; description
@@ -1500,9 +1564,11 @@ let link_task_execution_artifacts_r
            | None -> Error (Types.TaskNotFound task_id)
            | Some task ->
              let existing_contract =
-               match task.contract with
-               | Some contract -> normalize_task_contract contract
-               | None -> empty_task_contract
+               ensure_task_contract_for_verification
+                 ?contract:task.contract
+                 ~title:task.title
+                 ~description:task.description
+                 ()
              in
              let updated_contract =
                { existing_contract with

@@ -458,7 +458,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           last_need = "";
         };
       keeper_id = None;
-      oas_env = Option.value ~default:[] p.profile_defaults.oas_env;
+      oas_env = p.profile_defaults.oas_env;
       meta_version = 0;
       } in
       Progress.Tracker.step tracker ~message:"Saving initial checkpoint" ();

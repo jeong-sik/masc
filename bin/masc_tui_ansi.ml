@@ -47,17 +47,17 @@ end
 
 (** Get terminal size (fallback to 80x24) *)
 let get_terminal_size () =
-  try
-    let read_tput arg =
+  let read_tput arg =
+    try
       let ic = Unix.open_process_args_in "tput" [| "tput"; arg |] in
       Fun.protect
         ~finally:(fun () -> ignore (Unix.close_process_in ic))
-        (fun () -> int_of_string (String.trim (input_line ic)))
-    in
-    let cols = read_tput "cols" in
-    let rows = read_tput "lines" in
-    (rows, cols)
-  with _ -> (24, 80)
+        (fun () -> int_of_string_opt (String.trim (input_line ic)))
+    with Unix.Unix_error _ | Sys_error _ | End_of_file -> None
+  in
+  match read_tput "cols", read_tput "lines" with
+  | Some cols, Some rows -> (rows, cols)
+  | _ -> (24, 80)
 
 (** Draw horizontal line *)
 let draw_hline width =

@@ -32,10 +32,12 @@ let error msg =
 let parse_date_arg name s =
   match String.length s with
   | 10 ->
-    (try
-       let year  = int_of_string (String.sub s 0 4) in
-       let mon   = int_of_string (String.sub s 5 2) in
-       let day   = int_of_string (String.sub s 8 2) in
+    (match
+       int_of_string_opt (String.sub s 0 4),
+       int_of_string_opt (String.sub s 5 2),
+       int_of_string_opt (String.sub s 8 2)
+     with
+     | Some year, Some mon, Some day ->
        let tm : Unix.tm = {
          tm_sec = 0; tm_min = 0; tm_hour = 0;
          tm_mday = day; tm_mon = mon - 1; tm_year = year - 1900;
@@ -43,7 +45,7 @@ let parse_date_arg name s =
        } in
        let (ts, _) = Unix.mktime tm in
        ts
-     with _ -> error (Printf.sprintf "invalid %s: %S (expected YYYY-MM-DD)" name s))
+     | _ -> error (Printf.sprintf "invalid %s: %S (expected YYYY-MM-DD)" name s))
   | _ -> error (Printf.sprintf "invalid %s: %S (expected YYYY-MM-DD)" name s)
 
 let base_path () =

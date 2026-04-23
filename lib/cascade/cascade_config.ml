@@ -627,14 +627,14 @@ type cascade_source = Named | Default_fallback | Hardcoded_defaults
     3. Selected item becomes first; rest sorted by weight desc
 
     @since 0.137.0 *)
-(* Shared weighted-shuffle RNG.  Protect draws with Stdlib.Mutex because
+(* Shared weighted-shuffle RNG.  Protect draws with Eio.Mutex because
    [Random.State.int] mutates the state and this path can be hit from
-   concurrent server fibers. *)
+   concurrent server fibers on the same domain. *)
 let weighted_shuffle_rng = Random.State.make_self_init ()
-let weighted_shuffle_rng_mu = Mutex.create ()
+let weighted_shuffle_rng_mu = Eio.Mutex.create ()
 
 let weighted_random_int bound =
-  Mutex.protect weighted_shuffle_rng_mu (fun () ->
+  Eio.Mutex.use_rw ~protect:true weighted_shuffle_rng_mu (fun () ->
     Random.State.int weighted_shuffle_rng bound)
 
 let weighted_shuffle

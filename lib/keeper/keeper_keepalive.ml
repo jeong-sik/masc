@@ -85,7 +85,7 @@ type autonomous_waiter =
     keeper_name : string;
   }
 
-let autonomous_wait_queue_mutex = Mutex.create ()
+let autonomous_wait_queue_mutex = Eio.Mutex.create ()
 
 let autonomous_wait_queue : autonomous_waiter list ref = ref []
 
@@ -94,8 +94,7 @@ let autonomous_wait_queue_next_ticket = ref 0
 let autonomous_queue_poll_sec = 0.05
 
 let with_autonomous_wait_queue f =
-  Mutex.lock autonomous_wait_queue_mutex;
-  Fun.protect ~finally:(fun () -> Mutex.unlock autonomous_wait_queue_mutex) f
+  Eio.Mutex.use_rw ~protect:true autonomous_wait_queue_mutex (fun () -> f ())
 
 let reset_autonomous_turn_queue_for_test () =
   with_autonomous_wait_queue (fun () ->

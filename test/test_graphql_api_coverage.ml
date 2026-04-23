@@ -135,30 +135,6 @@ let test_take_preserves_order () =
   check (list int) "order preserved" [1; 2; 3] result
 
 (* ============================================================
-   Type Tests
-   ============================================================ *)
-
-let test_page_info_has_next_page () =
-  let _ : bool = true in
-  ()
-
-let test_page_info_end_cursor () =
-  let _ : string option = None in
-  ()
-
-let test_edge_node () =
-  let _ : int = 42 in
-  ()
-
-let test_edge_cursor () =
-  let _ : string = "cursor" in
-  ()
-
-let test_connection_total_count () =
-  let _ : int = 100 in
-  ()
-
-(* ============================================================
    Test Runners
    ============================================================ *)
 
@@ -197,12 +173,5 @@ let () =
       test_case "zero" `Quick test_take_zero;
       test_case "negative" `Quick test_take_negative;
       test_case "order" `Quick test_take_preserves_order;
-    ];
-    "types", [
-      test_case "page_info has_next_page" `Quick test_page_info_has_next_page;
-      test_case "page_info end_cursor" `Quick test_page_info_end_cursor;
-      test_case "edge node" `Quick test_edge_node;
-      test_case "edge cursor" `Quick test_edge_cursor;
-      test_case "connection total_count" `Quick test_connection_total_count;
     ];
   ]

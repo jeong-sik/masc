@@ -8,18 +8,6 @@ open Alcotest
 module Mcp_server_eio = Masc_mcp.Mcp_server_eio
 module Mcp_server = Masc_mcp.Mcp_server
 (* ============================================================
-   Type Tests
-   ============================================================ *)
-
-let test_server_state_type () =
-  let _ : Mcp_server_eio.server_state option = None in
-  ()
-
-let test_jsonrpc_request_type () =
-  let _ : Mcp_server_eio.jsonrpc_request option = None in
-  ()
-
-(* ============================================================
    is_jsonrpc_v2 Tests
    ============================================================ *)
 
@@ -471,10 +459,6 @@ let test_mcp_session_roundtrip () =
 
 let () =
   run "MCP Server Eio Coverage" [
-    "types", [
-      test_case "server_state" `Quick test_server_state_type;
-      test_case "jsonrpc_request" `Quick test_jsonrpc_request_type;
-    ];
     "is_jsonrpc_v2", [
       test_case "valid" `Quick test_is_jsonrpc_v2_valid;
       test_case "invalid" `Quick test_is_jsonrpc_v2_invalid;

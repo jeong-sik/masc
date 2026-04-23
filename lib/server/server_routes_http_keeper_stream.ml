@@ -415,8 +415,9 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
   let message_id = Printf.sprintf "keeper-msg-%d" (now_id ()) in
   ignore (keeper_stream_send_raw writer mutex closed "retry: 1500\n\n");
   Eio.Fiber.fork ~sw (fun () ->
-      Eio.Switch.run @@ fun stream_sw ->
-      Eio.Switch.on_release stream_sw close_stream;
+      ignore
+        (Eio.Switch.run @@ fun stream_sw ->
+           Eio.Switch.on_release stream_sw close_stream;
           (* --- 1. Lifecycle: Run_started + Text_message_start --- *)
           ignore
             (keeper_stream_send_event writer mutex closed
@@ -545,6 +546,6 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
               | Eio.Cancel.Cancelled _ as e -> raise e
               | exn ->
                 send_keeper_error writer mutex closed ~thread_id ~run_id
-                  (Printexc.to_string exn)))
+                  (Printexc.to_string exn))))
 
 (** Build routes for MCP server *)

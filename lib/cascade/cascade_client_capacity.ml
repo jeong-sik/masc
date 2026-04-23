@@ -6,13 +6,13 @@ type entry = {
 }
 
 let registry : (string, entry) Hashtbl.t = Hashtbl.create 4
-let registry_mu = Mutex.create ()
+let registry_mu = Eio.Mutex.create ()
 
 let clamp_max n = if n < 1 then 1 else n
 
 let register ~url ~max_concurrent =
   let max_concurrent = clamp_max max_concurrent in
-  Mutex.protect registry_mu (fun () ->
+  Eio.Mutex.use_rw ~protect:true registry_mu (fun () ->
       match Hashtbl.find_opt registry url with
       | None ->
         let e = { max_concurrent; active = Atomic.make 0 } in
@@ -24,11 +24,11 @@ let register ~url ~max_concurrent =
             { max_concurrent; active = existing.active })
 
 let registered_urls () =
-  Mutex.protect registry_mu (fun () ->
+  Eio.Mutex.use_rw ~protect:true registry_mu (fun () ->
       Hashtbl.fold (fun url _ acc -> url :: acc) registry [])
 
 let snapshot () =
-  Mutex.protect registry_mu (fun () ->
+  Eio.Mutex.use_rw ~protect:true registry_mu (fun () ->
       Hashtbl.fold
         (fun url e acc ->
            let active = Atomic.get e.active in
@@ -44,10 +44,10 @@ let snapshot () =
         registry [])
 
 let unregister_all () =
-  Mutex.protect registry_mu (fun () -> Hashtbl.clear registry)
+  Eio.Mutex.use_rw ~protect:true registry_mu (fun () -> Hashtbl.clear registry)
 
 let lookup url =
-  Mutex.protect registry_mu (fun () -> Hashtbl.find_opt registry url)
+  Eio.Mutex.use_rw ~protect:true registry_mu (fun () -> Hashtbl.find_opt registry url)
 
 let is_registered url = lookup url <> None
 

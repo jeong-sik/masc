@@ -451,76 +451,9 @@ let handle_keeper_repair ctx args : tool_result =
       if String.trim task_spec = "" then
         (false, "task_spec is required")
       else
-        let target_mode = get_string args "target_mode" "snippet" in
-        let working_dir_arg = get_string args "working_dir" "" in
-        let plugin_id = get_string args "plugin_id" "ocaml" in
-        let target_file_opt = get_string_opt args "target_file" in
-        (* #6641 iter10 — narrow working_dir to caller's playground.
-           Default (empty arg) resolves to the caller's own playground
-           bundle root, not [Sys.getcwd ()]. Cross-keeper targets are
-           rejected. Shares the resolver with tool_repair_loop so the
-           same fix applies to both dispatchers. *)
-        match
-          resolve_playground_working_dir
-            ~agent_name:ctx.agent_name
-            ~base_path:ctx.config.base_path
-            ~working_dir_arg
-        with
-        | Error msg -> (false, msg)
-        | Ok working_dir ->
-            match
-              validate_target_file ~working_dir
-                ~target_file:target_file_opt
-            with
-            | Error msg -> (false, msg)
-            | Ok validated_target_file ->
-                  let validator_profile =
-                    get_string args "validator_profile"
-                      (if
-                         String.equal (String.lowercase_ascii target_mode)
-                           "repo"
-                       then
-                         "repo_dune_build"
-                       else
-                         "snippet_ocamlc")
-                  in
-                  let max_attempts =
-                    min 10 (max 1 (get_int args "max_attempts" 2))
-                  in
-                  let fields =
-                    [
-                      ("plugin_id", `String plugin_id);
-                      ("task_spec", `String task_spec);
-                      ("target_mode", `String target_mode);
-                      ("working_dir", `String working_dir);
-                      ("validator_profile", `String validator_profile);
-                      ( "model_label",
-                        `String
-                          (get_string args "model_label"
-                             (default_keeper_model_label meta)) );
-                      ("max_attempts", `Int max_attempts);
-                      ("artifact_session_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
-                    ]
-                  in
-                  let fields =
-                    match validated_target_file with
-                    | Some target_file ->
-                        ("target_file", `String target_file) :: fields
-                    | None -> fields
-                  in
-                  let fields =
-                    match get_string_opt args "source_text" with
-                    | Some source_text ->
-                        ("source_text", `String source_text) :: fields
-                    | None -> fields
-                  in
-                  let ok, body =
-                    (* Team_session_oas_bridge removed *)
-                    ignore (ctx.sw, ctx.clock, ctx.config, fields);
-                    (false, {|{"error":"team session oas bridge removed"}|})
-                  in
-                  invalidate_status_cache meta.name;
-                  (ok, annotate_keeper_repair_json ~keeper_name:meta.name body)
+        let body = {|{"error":"team session oas bridge removed"}|} in
+        invalidate_status_cache meta.name;
+        (false, annotate_keeper_repair_json ~keeper_name:meta.name body)
 
 let handle_keeper_down ctx args : tool_result =
   invalidate_keeper_list_cache ();

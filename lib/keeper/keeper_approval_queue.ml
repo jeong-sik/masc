@@ -203,11 +203,10 @@ let make_generated_id prefix =
   let digest = Digestif.SHA256.(digest_string entropy |> to_hex) in
   prefix ^ "_" ^ String.sub digest 0 12
 
-let rules_mu = Mutex.create ()
+let rules_mu = Eio.Mutex.create ()
 
 let with_rules_lock f =
-  Mutex.lock rules_mu;
-  Fun.protect f ~finally:(fun () -> Mutex.unlock rules_mu)
+  Eio.Mutex.use_rw ~protect:true rules_mu (fun () -> f ())
 
 let rules_path ?base_path () =
   let base_path =

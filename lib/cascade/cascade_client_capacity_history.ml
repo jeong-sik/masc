@@ -54,7 +54,7 @@ let cap_ref = ref 0
 let buf : event option array ref = ref [||]
 let head = ref 0
 let count = ref 0
-let mu = Mutex.create ()
+let mu = Eio.Mutex.create ()
 
 (* Lazy init: resolve capacity + allocate buffer on first use.  We
    do this outside [record] so [clear] / [capacity] can be called
@@ -85,7 +85,7 @@ let bump_prometheus_counter (ev : event) =
     ] ()
 
 let record ev =
-  Mutex.protect mu (fun () ->
+  Eio.Mutex.use_rw ~protect:true mu (fun () ->
       ensure_initialised_locked ();
       let cap = !cap_ref in
       (!buf).(!head) <- Some ev;
@@ -94,17 +94,17 @@ let record ev =
   bump_prometheus_counter ev
 
 let clear () =
-  Mutex.protect mu (fun () ->
+  Eio.Mutex.use_rw ~protect:true mu (fun () ->
       ensure_initialised_locked ();
       let cap = !cap_ref in
       for i = 0 to cap - 1 do (!buf).(i) <- None done;
       head := 0;
       count := 0)
 
-let size () = Mutex.protect mu (fun () -> !count)
+let size () = Eio.Mutex.use_rw ~protect:true mu (fun () -> !count)
 
 let capacity () =
-  Mutex.protect mu (fun () ->
+  Eio.Mutex.use_rw ~protect:true mu (fun () ->
       ensure_initialised_locked ();
       !cap_ref)
 
@@ -138,7 +138,7 @@ let collect_newest_first_locked () =
 
 let snapshot ?(limit = 100) ?kind ?since_ts () =
   let events =
-    Mutex.protect mu (fun () ->
+    Eio.Mutex.use_rw ~protect:true mu (fun () ->
         ensure_initialised_locked ();
         collect_newest_first_locked ())
   in

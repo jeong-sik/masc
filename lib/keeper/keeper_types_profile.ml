@@ -274,6 +274,7 @@ type keeper_profile_defaults = {
   github_identity : string option;
   git_identity_mode : string option;
   tool_preset : string option;
+  tool_preset_source : string option;
   tool_also_allow : string list option;
   tool_denylist : string list option;
   active_goal_ids : string list option;
@@ -344,6 +345,7 @@ let empty_keeper_profile_defaults = {
   github_identity = None;
   git_identity_mode = None;
   tool_preset = None;
+  tool_preset_source = None;
   tool_also_allow = None;
   tool_denylist = None;
   active_goal_ids = None;
@@ -1021,11 +1023,24 @@ let merge_string_list ~base overlay =
   match overlay with [] -> base | xs -> xs
 
 let merge_keeper_profile_defaults
+    ~agent_name
     ~(base : keeper_profile_defaults)
     ~(overlay : keeper_profile_defaults) : keeper_profile_defaults =
   let prefer overlay_value base_value =
     match overlay_value with Some _ -> overlay_value | None -> base_value
   in
+  let warn_on_conflict ~field ~base_value ~overlay_value =
+    match base_value, overlay_value with
+    | Some b, Some o when b <> o ->
+        Log.Keeper.warn
+          "keeper %s config conflict: %s differs between persona (%S) and TOML (%S). \
+           TOML wins."
+          agent_name field b o
+    | _ -> ()
+  in
+  warn_on_conflict ~field:"tool_preset"
+    ~base_value:base.tool_preset ~overlay_value:overlay.tool_preset;
+
   let per_provider_timeout_state, per_provider_timeout =
     match overlay.per_provider_timeout_state with
     | Per_provider_timeout_unset ->
@@ -1067,6 +1082,13 @@ let merge_keeper_profile_defaults
     git_identity_mode =
       prefer overlay.git_identity_mode base.git_identity_mode;
     tool_preset = prefer overlay.tool_preset base.tool_preset;
+    tool_preset_source =
+      (match overlay.tool_preset with
+       | Some _ -> Some "toml"
+       | None ->
+           match base.tool_preset with
+           | Some _ -> Some "persona"
+           | None -> None);
     tool_also_allow = prefer overlay.tool_also_allow base.tool_also_allow;
     tool_denylist = prefer overlay.tool_denylist base.tool_denylist;
     active_goal_ids = prefer overlay.active_goal_ids base.active_goal_ids;
@@ -1208,7 +1230,7 @@ let load_keeper_profile_defaults name : keeper_profile_defaults =
              let persona_defaults =
                load_keeper_profile_defaults_from_persona persona_name
              in
-             merge_keeper_profile_defaults ~base:persona_defaults ~overlay:defaults
+             merge_keeper_profile_defaults ~agent_name:name ~base:persona_defaults ~overlay:defaults
          | None -> defaults)
      | Error e ->
        Log.Keeper.warn "toml config for %s failed (%s), falling back to persona" name e;

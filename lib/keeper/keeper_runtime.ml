@@ -117,6 +117,11 @@ let ensure_keeper_meta config name =
         Error msg
     | Ok resolved_target_cascade_name ->
     let target_tool_access = resynced_tool_access defaults meta in
+    let target_tool_preset_source =
+      match defaults.tool_preset_source with
+      | Some _ as s -> s
+      | None -> meta.tool_preset_source
+    in
 
     (* --- Personality --- *)
     let target_goal = apply_default defaults.goal meta.goal in
@@ -277,6 +282,7 @@ let ensure_keeper_meta config name =
         mention_targets = target_mention_targets;
         active_goal_ids = target_active_goal_ids;
         tool_access = target_tool_access;
+        tool_preset_source = target_tool_preset_source;
         sandbox_profile = target_sandbox_profile;
         network_mode = target_network_mode;
         shared_memory_scope = target_shared_memory_scope;

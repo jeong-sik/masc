@@ -193,12 +193,6 @@ let install_from_env () =
       (match result with
        | Ok fd ->
            let mu = Mutex.create () in
-           let rec write_all fd buf off remaining =
-             if remaining <= 0 then ()
-             else match Unix.write_substring fd buf off remaining with
-               | 0 -> raise (Unix.Unix_error (Unix.EIO, "write_substring", ""))
-               | n -> write_all fd buf (off + n) (remaining - n)
-           in
            let writer line =
              Mutex.lock mu;
              Fun.protect

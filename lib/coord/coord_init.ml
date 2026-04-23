@@ -112,14 +112,12 @@ let pause config ~by ~reason =
       })
   in
   (* Broadcast pause notification *)
-  (match
-     broadcast
-       config
-       ~from_agent:"system"
-       ~content:(Printf.sprintf "⏸️ Coord PAUSED by %s: %s" by reason)
-   with
-   | Ok _ -> ()
-   | Error err -> Log.Coord.warn "pause broadcast failed: %s" err);
+  let _ =
+    broadcast
+      config
+      ~from_agent:"system"
+      ~content:(Printf.sprintf "⏸️ Coord PAUSED by %s: %s" by reason)
+  in
   ()
 ;;
 
@@ -134,14 +132,12 @@ let resume config ~by =
         { s with paused = false; pause_reason = None; paused_by = None; paused_at = None })
     in
     (* Broadcast resume notification *)
-    (match
-       broadcast
-         config
-         ~from_agent:"system"
-         ~content:(Printf.sprintf "▶️ Coord RESUMED by %s" by)
-     with
-     | Ok _ -> ()
-     | Error err -> Log.Coord.warn "resume broadcast failed: %s" err);
+    let _ =
+      broadcast
+        config
+        ~from_agent:"system"
+        ~content:(Printf.sprintf "▶️ Coord RESUMED by %s" by)
+    in
     `Resumed)
 ;;
 

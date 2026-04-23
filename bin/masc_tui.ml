@@ -4,6 +4,9 @@ open Masc_tui_ansi
 open Masc_tui_render
 open Masc_tui_loader
 
+(** Local exception for breaking the main TUI loop without using Exit. *)
+exception Break
+
 (** Send a message to a keeper via HTTP POST to /api/v1/keepers/chat/stream *)
 let send_keeper_message (state : state) (keeper_name : string) (message : string) : string =
   try
@@ -236,7 +239,7 @@ let main () =
        | Some k when state.view = Keeper_message ->
            let _handled = handle_message_key state base_path k in
            ()
-       | Some "q" | Some "Q" -> raise Exit
+       | Some "q" | Some "Q" -> raise Break
        | Some "r" | Some "R" ->
            load_from_masc_dir state base_path;
            (* Also reload logs if in log view *)
@@ -354,6 +357,6 @@ let main () =
       (* Render *)
       render state
     done
-  with Exit -> ()
+  with Break -> ()
 
 let () = main ()

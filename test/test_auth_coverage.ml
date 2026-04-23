@@ -775,8 +775,87 @@ let test_resolve_agent_name_preserves_explicit_stable_actor () =
       let request = Httpun.Request.create ~headers `POST "/mcp" in
       match SA.resolve_agent_name_for_auth ~base_path:dir request ~token:(Some raw_token) with
       | Ok (Some agent_name) ->
-          check string "stable actor preserved" "dashboard-admin" agent_name
-      | Ok None -> fail "expected explicit stable actor"
+          check string "token owner canonicalized" "stable-admin" agent_name
+      | Ok None -> fail "expected token-bound actor"
+      | Error e -> fail (Types.masc_error_to_string e))
+
+let test_resolve_agent_name_rejects_invalid_token () =
+  let module SA = Masc_mcp.Server_auth in
+  let dir = setup_test_room () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_room dir)
+    (fun () ->
+      ignore (Auth.enable_auth dir ~require_token:true ~agent_name:"bootstrap-admin");
+      let invalid_token = "definitely-invalid-token" in
+      let headers =
+        Httpun.Headers.of_list
+          [
+            ("authorization", "Bearer " ^ invalid_token);
+            ("x-masc-agent", "dashboard-admin");
+          ]
+      in
+      let request = Httpun.Request.create ~headers `POST "/mcp" in
+      match
+        SA.resolve_agent_name_for_auth
+          ~base_path:dir request ~token:(Some invalid_token)
+      with
+      | Error (Types.InvalidToken _) -> ()
+      | Error e -> failf "expected InvalidToken, got %s" (Types.masc_error_to_string e)
+      | Ok _ -> fail "expected invalid token failure")
+
+let test_authorize_read_request_canonicalizes_token_owner () =
+  let module SA = Masc_mcp.Server_auth in
+  let dir = setup_test_room () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_room dir)
+    (fun () ->
+      ignore (Auth.enable_auth dir ~require_token:true ~agent_name:"bootstrap-admin");
+      let raw_token =
+        match Auth.create_token dir ~agent_name:"stable-admin" ~role:Types.Admin with
+        | Ok (token, _cred) -> token
+        | Error e -> fail (Types.masc_error_to_string e)
+      in
+      let headers =
+        Httpun.Headers.of_list
+          [
+            ("authorization", "Bearer " ^ raw_token);
+            ("x-masc-agent", "dashboard-admin");
+          ]
+      in
+      let request =
+        Httpun.Request.create ~headers `GET "/api/v1/dashboard/shell"
+      in
+      match SA.authorize_read_request ~base_path:dir request with
+      | Ok () -> ()
+      | Error e -> fail (Types.masc_error_to_string e))
+
+let test_authorize_tool_request_canonicalizes_token_owner () =
+  let module SA = Masc_mcp.Server_auth in
+  let dir = setup_test_room () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_room dir)
+    (fun () ->
+      ignore (Auth.enable_auth dir ~require_token:true ~agent_name:"bootstrap-admin");
+      let raw_token =
+        match Auth.create_token dir ~agent_name:"stable-admin" ~role:Types.Admin with
+        | Ok (token, _cred) -> token
+        | Error e -> fail (Types.masc_error_to_string e)
+      in
+      let headers =
+        Httpun.Headers.of_list
+          [
+            ("authorization", "Bearer " ^ raw_token);
+            ("x-masc-agent", "dashboard-admin");
+          ]
+      in
+      let request =
+        Httpun.Request.create ~headers `POST "/api/v1/operator/action"
+      in
+      match
+        SA.authorize_tool_request
+          ~base_path:dir ~tool_name:"masc_operator_action" request
+      with
+      | Ok () -> ()
       | Error e -> fail (Types.masc_error_to_string e))
 
 (* ============================================================
@@ -879,8 +958,14 @@ let () =
         test_observer_sse_auth_rejects_query_token_on_non_observer_path;
       test_case "generated actor prefers token subject" `Quick
         test_resolve_agent_name_prefers_token_for_generated_actor;
-      test_case "stable actor preserved" `Quick
+      test_case "stable actor canonicalizes to token owner" `Quick
         test_resolve_agent_name_preserves_explicit_stable_actor;
+      test_case "invalid token fails" `Quick
+        test_resolve_agent_name_rejects_invalid_token;
+      test_case "read request uses token owner" `Quick
+        test_authorize_read_request_canonicalizes_token_owner;
+      test_case "tool request uses token owner" `Quick
+        test_authorize_tool_request_canonicalizes_token_owner;
       test_case "same-origin rejects missing origin without token" `Quick
         test_same_origin_browser_request_rejects_missing_origin;
       test_case "same-origin allows matching origin" `Quick

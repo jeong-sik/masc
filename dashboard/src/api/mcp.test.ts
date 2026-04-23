@@ -292,20 +292,41 @@ describe('callMcpTool', () => {
     })
   }, 60_000)
 
-  it('preserves an explicit agent_name field when the caller already set one', async () => {
+  it('treats legacy agent_name as payload when the session is token-authenticated', async () => {
     authHeaders.mockImplementation((opts?: { actorName?: string | null }) => (
       opts?.actorName ? { 'X-MASC-Agent': opts.actorName } : {}
     ))
     setupMcpSessionMocks('sess-explicit')
 
     const { callMcpTool } = await import('./mcp')
-    await callMcpTool('masc_join', { agent_name: 'codex-tool-matrix' })
+    await callMcpTool('masc_agent_fitness', { agent_name: 'codex-tool-matrix', days: 7 })
 
     const toolCall = findCallByMethod('tools/call')
     expect(toolCall).toBeDefined()
     const body = JSON.parse(toolCall![1].body as string)
     expect(body.params.arguments).toEqual({
       agent_name: 'codex-tool-matrix',
+      days: 7,
+      _agent_name: 'dashboard',
+    })
+    const headers = toolCall![1].headers as Record<string, string>
+    expect(headers['X-MASC-Agent']).toBe('dashboard')
+  }, 60_000)
+
+  it('still honors an explicit _agent_name override', async () => {
+    authHeaders.mockImplementation((opts?: { actorName?: string | null }) => (
+      opts?.actorName ? { 'X-MASC-Agent': opts.actorName } : {}
+    ))
+    setupMcpSessionMocks('sess-explicit-internal')
+
+    const { callMcpTool } = await import('./mcp')
+    await callMcpTool('masc_join', { _agent_name: 'codex-tool-matrix' })
+
+    const toolCall = findCallByMethod('tools/call')
+    expect(toolCall).toBeDefined()
+    const body = JSON.parse(toolCall![1].body as string)
+    expect(body.params.arguments).toEqual({
+      _agent_name: 'codex-tool-matrix',
     })
     const headers = toolCall![1].headers as Record<string, string>
     expect(headers['X-MASC-Agent']).toBe('codex-tool-matrix')
@@ -364,7 +385,7 @@ describe('callMcpTool', () => {
     expect(toolCalls).toHaveLength(1)
   })
 
-  it('does not retry explicit actor mismatches', async () => {
+  it('does not retry explicit _agent_name mismatches', async () => {
     authHeaders.mockImplementation((opts?: { actorName?: string | null }) => (
       opts?.actorName ? { 'X-MASC-Agent': opts.actorName } : {}
     ))
@@ -382,7 +403,7 @@ describe('callMcpTool', () => {
 
     const { callMcpTool } = await import('./mcp')
 
-    await expect(callMcpTool('masc_join', { agent_name: 'dashboard' })).rejects.toThrow(
+    await expect(callMcpTool('masc_join', { _agent_name: 'dashboard' })).rejects.toThrow(
       'No credential found for dashboard',
     )
   })

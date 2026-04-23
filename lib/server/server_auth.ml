@@ -174,12 +174,6 @@ let dashboard_actor_for_request ~base_path request =
       | Error _ -> request_actor_hint request)
   | None -> request_actor_hint request
 
-let is_transient_actor_name name =
-  let normalized = String.trim name in
-  normalized <> ""
-  && (String.starts_with ~prefix:"agent-" normalized
-      || Nickname.is_generated_nickname normalized)
-
 (** Extract host and explicit port only.
     Host header carries no scheme, so inferring a default port from scheme
     (80 for http, 443 for https) causes mismatches when the browser Origin
@@ -460,29 +454,12 @@ let is_public_read_path path =
 
 let resolve_agent_name_for_auth ~base_path request ~token :
     (string option, Types.masc_error) result =
-  match agent_from_request request with
-  | Some raw when String.trim raw <> "" ->
-      let agent_name = String.trim raw in
-      if is_transient_actor_name agent_name then
-        (match token with
-         | Some t ->
-             (match Auth.resolve_agent_from_token base_path ~token:t with
-              | Ok resolved -> Ok (Some resolved)
-              | Error (Types.InvalidToken _ as e) -> Error e
-              | Error (Types.TokenExpired _ as e) -> Error e
-              | Error _ -> Ok (Some agent_name))
-         | None -> Ok (Some agent_name))
-      else
-        Ok (Some agent_name)
-  | _ ->
-      (match token with
-       | None -> Ok None
-       | Some t ->
-           (match Auth.resolve_agent_from_token base_path ~token:t with
-            | Ok agent_name -> Ok (Some agent_name)
-            | Error (Types.InvalidToken _ as e) -> Error e
-            | Error (Types.TokenExpired _ as e) -> Error e
-            | Error _ -> Ok None))
+  match token with
+  | Some t -> (
+      match Auth.resolve_agent_from_token base_path ~token:t with
+      | Ok agent_name -> Ok (Some agent_name)
+      | Error err -> Error err)
+  | None -> Ok (request_actor_hint request)
 
 let authorize_permission_request ~base_path ~permission request :
     (unit, Types.masc_error) result =

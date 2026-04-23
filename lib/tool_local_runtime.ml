@@ -167,6 +167,11 @@ let handle_runtime_ollama_probe _ctx args : tool_result =
         | `Bool false -> Ok Tool_local_runtime_probe.Think_disabled
         | _ -> Ok Tool_local_runtime_probe.Think_auto)
   in
+  let generate_when_unloaded =
+    match member "generate_when_unloaded" args with
+    | `Bool flag -> flag
+    | _ -> true
+  in
   match think_mode with
   | Error msg -> (false, json_error msg)
   | Ok think_mode ->
@@ -175,7 +180,8 @@ let handle_runtime_ollama_probe _ctx args : tool_result =
           [
             ( "result",
               runtime_ollama_probe_json ?server_url ?model ?prompt ?keep_alive
-                ~probe_runs ~max_tokens ~think_mode ~timeout_sec () );
+                ~probe_runs ~max_tokens ~think_mode ~timeout_sec
+                ~generate_when_unloaded () );
           ] )
 
 let dispatch ctx ~name ~args : tool_result option =
@@ -242,6 +248,7 @@ let schemas : tool_schema list =
                             "Adaptive thinking policy for Ollama reasoning models. auto defaults to response-oriented non-thinking probes; enabled measures thinking path explicitly." );
                       ] );
                   ("timeout_sec", `Assoc [ ("type", `String "integer") ]);
+                  ("generate_when_unloaded", `Assoc [ ("type", `String "boolean") ]);
                 ] );
           ];
     };

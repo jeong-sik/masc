@@ -229,6 +229,34 @@ type parser_kind =
   | Ls_long
   | Dune_test
 
+let git_option_requires_arg = function
+  | "-C" | "-c" | "--git-dir" | "--work-tree" | "--namespace" | "--exec-path"
+  | "--super-prefix" | "--config-env" ->
+      true
+  | _ -> false
+
+let git_option_has_inline_arg opt =
+  String.starts_with ~prefix:"--git-dir=" opt
+  || String.starts_with ~prefix:"--work-tree=" opt
+  || String.starts_with ~prefix:"--namespace=" opt
+  || String.starts_with ~prefix:"--exec-path=" opt
+  || String.starts_with ~prefix:"--super-prefix=" opt
+  || String.starts_with ~prefix:"--config-env=" opt
+  || (String.length opt > 2
+      && (String.starts_with ~prefix:"-C" opt
+          || String.starts_with ~prefix:"-c" opt))
+
+let git_subcommand tokens =
+  let rec loop = function
+    | [] -> None
+    | "--" :: _ -> None
+    | opt :: _value :: rest when git_option_requires_arg opt -> loop rest
+    | opt :: rest when git_option_has_inline_arg opt -> loop rest
+    | opt :: rest when String.starts_with ~prefix:"-" opt -> loop rest
+    | sub :: _ -> Some sub
+  in
+  loop tokens
+
 let classify_for_parsing ~cmd ~_output =
   let tokens =
     String.trim cmd
@@ -242,7 +270,7 @@ let classify_for_parsing ~cmd ~_output =
       let base = Filename.basename bin |> String.lowercase_ascii in
       match base with
       | "git" ->
-          let sub = match rest with s :: _ -> Some s | _ -> None in
+          let sub = git_subcommand rest in
           (match sub with
           | Some "status" -> Some Git_status
           | Some "log" -> Some Git_log_oneline

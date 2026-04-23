@@ -395,6 +395,37 @@ let tool_call_outcome (json : Yojson.Safe.t) =
           | _ -> "unknown"))
   | _ -> "unknown"
 
+let jsonrpc_id_label = function
+  | `String s -> s
+  | `Int i -> string_of_int i
+  | `Intlit s -> s
+  | `Float f -> Printf.sprintf "%0.0f" f
+  | _ -> "?"
+
+let tool_profile_label = function
+  | Full -> "full"
+  | Managed_agent -> "managed_agent"
+  | Operator_remote -> "operator_remote"
+
+let mcp_tool_call_log_details ?outcome ~phase ~profile ~tool_name ~id
+    ?mcp_session_id () =
+  `Assoc
+    ([
+       ("event_family", `String "tool_call");
+       ("tool_name", `String tool_name);
+       ("phase", `String phase);
+       ("request_id", `String (jsonrpc_id_label id));
+       ( "session_id",
+         match mcp_session_id with
+         | Some session_id -> `String session_id
+         | None -> `Null );
+       ("profile", `String (tool_profile_label profile));
+     ]
+    @
+    match outcome with
+    | Some value -> [ ("outcome", `String value) ]
+    | None -> [])
+
 (** Handle incoming JSON-RPC request - Pure Eio Native *)
 let handle_request
     ~handle_call_tool_eio
@@ -492,14 +523,27 @@ let handle_request
                                make_error ~id (-32601)
                                  (unavailable_tool_message name)
                              else (
-                               Log.Mcp.info "tools/call: %s (id=%s, session=%s)" name
-                                 (match id with `Int i -> string_of_int i | `String s -> s | _ -> "?")
-                                 (match mcp_session_id with Some s -> s | None -> "none");
+                               Log.Mcp.emit Log.Info
+                                 ~details:
+                                   (mcp_tool_call_log_details ~phase:"started"
+                                      ~profile:call_profile ~tool_name:name ~id
+                                      ?mcp_session_id ())
+                                 (Printf.sprintf
+                                    "tools/call: %s (id=%s, session=%s)"
+                                    name (jsonrpc_id_label id)
+                                    (match mcp_session_id with Some s -> s | None -> "none"));
                                let result =
                                  handle_call_tool_eio ~sw ~clock ~profile ?mcp_session_id ?auth_token state id params
                                in
-                               Log.Mcp.info "tools/call completed: %s (outcome=%s)"
-                                 name (tool_call_outcome result);
+                               let outcome = tool_call_outcome result in
+                               Log.Mcp.emit Log.Info
+                                 ~details:
+                                   (mcp_tool_call_log_details ~phase:"completed"
+                                      ~profile:call_profile ~tool_name:name ~id
+                                      ?mcp_session_id ~outcome ())
+                                 (Printf.sprintf
+                                    "tools/call completed: %s (outcome=%s)"
+                                    name outcome);
                                result)
                            with Yojson.Safe.Util.Type_error (_, _) ->
                              make_error ~id (-32602) "Invalid params: name must be a string")

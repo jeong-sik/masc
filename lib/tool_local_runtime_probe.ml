@@ -396,11 +396,12 @@ let model_is_loaded model_id loaded_models =
       | None -> false)
     loaded_models
 
-let should_attempt_generate_probe ~before_status ~before_error =
+let should_attempt_generate_probe ~before_status ~before_error
+    ~generate_when_unloaded ~effective_model_loaded_before =
   match before_status, before_error with
-  | Some 200, _ -> true
+  | Some 200, _ -> generate_when_unloaded || effective_model_loaded_before
   | _, Some _ -> false
-  | _ -> true
+  | _ -> generate_when_unloaded || effective_model_loaded_before
 
 let request_body_json ~think_enabled ~keep_alive ~model_id ~prompt ~max_tokens =
   let fields =
@@ -461,7 +462,8 @@ let run_single_probe ~think_enabled ~keep_alive ~server_url ~model_id ~prompt
 let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
     ?keep_alive ?(max_tokens = 16) ?(think_mode = Think_auto)
     ?(timeout_sec = default_probe_timeout_sec)
-    ?(ps_timeout_sec = default_ps_timeout_sec) () =
+    ?(ps_timeout_sec = default_ps_timeout_sec)
+    ?(generate_when_unloaded = true) () =
   let server_url =
     Option.bind server_url trim_to_option
     |> Option.value ~default:Env_config_runtime.Ollama.server_url
@@ -479,11 +481,30 @@ let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
     fetch_ollama_ps ~timeout_sec:ps_timeout_sec ~server_url ()
   in
   let effective_model = select_effective_model ~requested_model:model loaded_before in
-  let runs, run_errors =
+  let effective_model_loaded_before =
     match effective_model with
-    | None -> ([], [ "No Ollama model was requested, loaded, or configured via OLLAMA_DEFAULT_MODEL." ])
-    | Some _ when not (should_attempt_generate_probe ~before_status ~before_error) ->
-        ([], [])
+    | Some model_id -> model_is_loaded model_id loaded_before
+    | None -> false
+  in
+  let runs, run_errors, generate_skipped_unloaded_model =
+    match effective_model with
+    | None ->
+        ( [],
+          [
+            "No Ollama model was requested, loaded, or configured via OLLAMA_DEFAULT_MODEL.";
+          ],
+          false )
+    | Some _ when
+        not
+          (should_attempt_generate_probe ~before_status ~before_error
+             ~generate_when_unloaded ~effective_model_loaded_before) ->
+        let skipped_unloaded_model =
+          match before_status, before_error with
+          | Some 200, None ->
+              not generate_when_unloaded && not effective_model_loaded_before
+          | _ -> false
+        in
+        ([], [], skipped_unloaded_model)
     | Some model_id ->
         let completed_runs =
           List.init probe_runs (fun idx -> idx + 1)
@@ -495,18 +516,13 @@ let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
           completed_runs
           |> List.filter_map (fun run -> run.error)
         in
-        (completed_runs, run_errors)
+        (completed_runs, run_errors, false)
   in
   let after_status, loaded_after, after_error =
     fetch_ollama_ps ~timeout_sec:ps_timeout_sec ~server_url ()
   in
   let runs_json = List.map ollama_probe_run_to_yojson runs in
   let kv_cache_assessment = kv_cache_assessment_json runs_json in
-  let effective_model_loaded_before =
-    match effective_model with
-    | Some model_id -> model_is_loaded model_id loaded_before
-    | None -> false
-  in
   let effective_model_loaded_after =
     match effective_model with
     | Some model_id -> model_is_loaded model_id loaded_after
@@ -522,6 +538,11 @@ let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
     |> (fun items ->
          if not effective_model_loaded_before && effective_model_loaded_after then
            "Probe appears to have loaded the model into Ollama residency."
+           :: items
+         else items)
+    |> (fun items ->
+         if generate_skipped_unloaded_model then
+           "Skipped /api/generate because the effective model was not resident; dashboard probes avoid cold-loading Ollama models."
            :: items
          else items)
     |> (fun items ->
@@ -561,6 +582,8 @@ let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
       ("effective_model", string_opt_to_json effective_model);
       ("probe_runs_requested", `Int probe_runs);
       ("probe_runs_completed", `Int (List.length runs));
+      ("generate_when_unloaded", `Bool generate_when_unloaded);
+      ("generate_skipped_unloaded_model", `Bool generate_skipped_unloaded_model);
       ("keep_alive", string_opt_to_json (Option.bind keep_alive trim_to_option));
       ("max_tokens", `Int max_tokens);
       ("think_mode", `String (ollama_probe_think_mode_to_string think_mode));

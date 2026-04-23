@@ -66,6 +66,13 @@ type executed_result = {
   recovery_hint : string option;
 }
 
+type diagnosis = {
+  rule_id : string;
+  explanation : string;
+  rewrite : string option;
+  tool_suggestion : string option;
+}
+
 type blocked_result = {
   command : string;
   error : string;
@@ -75,6 +82,7 @@ type blocked_result = {
   classification : classification;
   retryability : retryability;
   summary : string;
+  diagnosis : diagnosis option;
 }
 
 type outcome =
@@ -130,6 +138,7 @@ val build_blocked_outcome :
   ?hint:string ->
   ?alternatives:string list ->
   ?retryability:retryability ->
+  ?diag:diagnosis option ->
   unit ->
   outcome
 
@@ -158,6 +167,7 @@ val blocked_result_json :
   ?hint:string ->
   ?alternatives:string list ->
   ?retryability:retryability ->
+  ?diag:diagnosis option ->
   ?extra:(string * Yojson.Safe.t) list ->
   ?env_snapshot:exec_env_snapshot option ->
   unit ->

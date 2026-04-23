@@ -359,6 +359,92 @@ let test_output_cap_truncates_large_output () =
         check int "head_cap=8" 8 (cap |> member "head_cap" |> to_int);
         check int "tail_cap=8" 8 (cap |> member "tail_cap" |> to_int))))
 
+(* ---------- P8: Teaching Error Messages - diagnosis field -------------- *)
+
+let test_blocked_without_diagnosis_has_no_field () =
+  let json =
+    Masc_mcp.Exec_core.blocked_result_json
+      ~cmd:"some command"
+      ~error:"generic_blocked"
+      ~reason:"blocked for testing"
+      ()
+  in
+  match json |> member "diagnosis" with
+  | `Null -> ()
+  | _ -> fail "diagnosis must be absent when no ~diag passed"
+
+let test_blocked_with_diagnosis_has_all_fields () =
+  let diag =
+    { Masc_mcp.Exec_core.rule_id = "test_rule"
+    ; explanation = "explaining why"
+    ; rewrite = Some "use this instead"
+    ; tool_suggestion = None
+    }
+  in
+  let json =
+    Masc_mcp.Exec_core.blocked_result_json
+      ~cmd:"bad cmd"
+      ~error:"test_blocked"
+      ~reason:"testing"
+      ~diag:(Some diag)
+      ()
+  in
+  let d = json |> member "diagnosis" in
+  check string "rule_id" "test_rule" (d |> member "rule_id" |> to_string);
+  check string "explanation" "explaining why"
+    (d |> member "explanation" |> to_string);
+  check string "rewrite" "use this instead"
+    (d |> member "rewrite" |> to_string);
+  check bool "tool_suggestion absent" true
+    (match d |> member "tool_suggestion" with
+     | `Null -> true | _ -> false)
+
+let test_blocked_with_tool_suggestion () =
+  let diag =
+    { Masc_mcp.Exec_core.rule_id = "redirect_blocked"
+    ; explanation = "redirects are forbidden"
+    ; rewrite = None
+    ; tool_suggestion = Some "keeper_fs_edit"
+    }
+  in
+  let json =
+    Masc_mcp.Exec_core.blocked_result_json
+      ~cmd:"echo hi > file.txt"
+      ~error:"readonly_blocked"
+      ~reason:"redirect"
+      ~diag:(Some diag)
+      ()
+  in
+  let d = json |> member "diagnosis" in
+  check string "tool_suggestion" "keeper_fs_edit"
+    (d |> member "tool_suggestion" |> to_string);
+  check bool "rewrite absent" true
+    (match d |> member "rewrite" with
+     | `Null -> true | _ -> false)
+
+let test_blocked_diagnosis_both_rewrite_and_tool () =
+  let diag =
+    { Masc_mcp.Exec_core.rule_id = "chaining_blocked"
+    ; explanation = "chaining not allowed"
+    ; rewrite = Some "split into two calls"
+    ; tool_suggestion = Some "keeper_shell"
+    }
+  in
+  let json =
+    Masc_mcp.Exec_core.blocked_result_json
+      ~cmd:"a && b"
+      ~error:"command_blocked_readonly"
+      ~reason:"chaining"
+      ~diag:(Some diag)
+      ()
+  in
+  let d = json |> member "diagnosis" in
+  check string "rewrite" "split into two calls"
+    (d |> member "rewrite" |> to_string);
+  check string "tool_suggestion" "keeper_shell"
+    (d |> member "tool_suggestion" |> to_string)
+
+
 let () =
   run "exec_core"
     [
@@ -414,5 +500,16 @@ let () =
             `Quick test_output_cap_on_preserves_small_output;
           test_case "large output truncated with bytes_dropped > 0"
             `Quick test_output_cap_truncates_large_output;
+        ] );
+      ( "p8_diagnosis",
+        [
+          test_case "no diag => diagnosis absent" `Quick
+            test_blocked_without_diagnosis_has_no_field;
+          test_case "diag with rewrite => all fields present" `Quick
+            test_blocked_with_diagnosis_has_all_fields;
+          test_case "diag with tool_suggestion" `Quick
+            test_blocked_with_tool_suggestion;
+          test_case "diag with both rewrite and tool" `Quick
+            test_blocked_diagnosis_both_rewrite_and_tool;
         ] );
     ]

@@ -692,6 +692,11 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
           (match str "tool_preset" with
            | None -> None
            | Some raw -> normalize_tool_preset_raw raw);
+        tool_preset_source =
+          Option.bind (str "tool_preset") (fun raw ->
+              match normalize_tool_preset_raw raw with
+              | Some _ -> Some "toml"
+              | None -> None);
         tool_also_allow = normalize_name_list_opt (strs "tool_also_allow");
         tool_denylist = normalize_name_list_opt (strs "tool_denylist");
         active_goal_ids =
@@ -961,6 +966,13 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                             "persona profile %s has invalid tool_preset '%s'; ignoring"
                             path raw;
                           None));
+                tool_preset_source =
+                  (match Safe_ops.json_string_opt "tool_preset" keeper_json with
+                  | None -> None
+                  | Some raw -> (
+                      match normalize_tool_preset_raw raw with
+                      | Some _ -> Some "persona"
+                      | None -> None));
                 tool_also_allow =
                   normalize_name_list_opt
                     (Safe_ops.json_string_list "tool_also_allow" keeper_json);

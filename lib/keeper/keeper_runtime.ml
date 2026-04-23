@@ -212,6 +212,7 @@ let ensure_keeper_meta config name =
       || meta.mention_targets <> target_mention_targets
       || meta.active_goal_ids <> target_active_goal_ids
       || meta.tool_access <> target_tool_access
+      || meta.tool_preset_source <> target_tool_preset_source
       || meta.sandbox_profile <> target_sandbox_profile
       || meta.network_mode <> target_network_mode
       || meta.shared_memory_scope <> target_shared_memory_scope

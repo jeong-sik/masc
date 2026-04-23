@@ -627,10 +627,23 @@ module Kimi_cli_transport_local = struct
     String.length text >= prefix_len
     && String.sub text 0 prefix_len = prefix
 
+  let resumable_session_detail =
+    "kimi_cli session limit exceeded (exit 75). Resumable session available via -r."
+
+  let resume_hint_marker = "to resume this session:"
+  let resumable_session_public_marker = "resumable session available via -r."
+  let legacy_resumable_session_public_marker =
+    "the session is resumable with -r flag."
+
+  let is_resume_hint_line line =
+    let trimmed = String.trim line in
+    trimmed <> ""
+    && String_util.contains_substring_ci trimmed resume_hint_marker
+
   let should_log_stderr_line line =
     let trimmed = String.trim line in
     trimmed <> ""
-    && not (starts_with trimmed "To resume this session:")
+    && not (is_resume_hint_line trimmed)
 
   let on_stderr_line line =
     if should_log_stderr_line line then
@@ -651,6 +664,29 @@ module Kimi_cli_transport_local = struct
           in
           int_of_string_opt raw
 
+  let text_looks_like_resumable_session text =
+    let trimmed = String.trim text in
+    let has_raw_resume_hint =
+      match exit_code_of_message trimmed with
+      | Some 75 -> is_resume_hint_line trimmed
+      | _ -> false
+    in
+    trimmed <> ""
+    &&
+    (has_raw_resume_hint
+    || String_util.contains_substring_ci trimmed resumable_session_public_marker
+    || String_util.contains_substring_ci trimmed legacy_resumable_session_public_marker)
+
+  let resumable_session_detail_of_text text =
+    if text_looks_like_resumable_session text then resumable_session_detail
+    else String.trim text
+
+  let resumable_session_exit_code_of_text text =
+    match exit_code_of_message text with
+    | Some 75 -> Some 75
+    | _ when text_looks_like_resumable_session text -> Some 75
+    | _ -> None
+
   let classify_cli_error = function
     | Error (Llm_provider.Http_client.NetworkError { message; _ }) as err -> (
         match exit_code_of_message message with
@@ -667,12 +703,7 @@ module Kimi_cli_transport_local = struct
         | Some 75 ->
             Error
               (Llm_provider.Http_client.AcceptRejected
-                 {
-                   reason =
-                     "kimi_cli session limit exceeded (exit 75). "
-                     ^ "The session is resumable with -r flag. "
-                     ^ message;
-                 })
+                 { reason = resumable_session_detail })
         | _ -> err)
     | other -> other
 

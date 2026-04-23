@@ -148,7 +148,7 @@ flowchart TD
 
 - Historical docs still mention team-session/command-plane as if they were canonical.
 - `Prompt_registry` and `Mcp_prompt_surface` describe two different prompt systems; without an explicit note, they look like one broken or incomplete system.
-- `docs/SPEC.md` still contains historical descriptions that should not be treated as the current front door.
+- `docs/spec/SPEC-INDEX.md` still contains historical descriptions that should not be treated as the current front door.
 
 ### What this change fixes
 
@@ -190,8 +190,8 @@ flowchart TD
 ## SSOT Rewrite Order
 
 1. `README.md`
-2. `docs/MERGED-ARCHITECTURE-SSOT.md`
+2. `docs/spec/01-system-overview.md`
 3. `docs/QUICK-START.md`
 4. `docs/COMMAND-PLANE-RUNBOOK.md`
 5. `docs/GAME-VIEW-PROTOCOL.md` as explicit draft
-6. `docs/SPEC.md` as historical snapshot, not current SSOT
+6. `docs/spec/SPEC-INDEX.md` as historical snapshot, not current SSOT

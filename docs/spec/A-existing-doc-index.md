@@ -1,6 +1,6 @@
 ---
 status: reference
-last_verified: 2026-04-17
+last_verified: 2026-04-23
 code_refs:
   - docs/
   - docs/_audit/2026-04-17-doc-classification.md
@@ -56,8 +56,8 @@ code_refs:
 
 | File | Status | Notes |
 |------|--------|-------|
-| `docs/SPEC.md` | Historical | superseded by spec suite |
-| `docs/MERGED-ARCHITECTURE-SSOT.md` | Historical | shorter merged-architecture snapshot |
+| `docs/SPEC.md` | Removed | superseded by `docs/spec/SPEC-INDEX.md`; deleted 2026-04-23 |
+| `docs/MERGED-ARCHITECTURE-SSOT.md` | Removed | superseded by `docs/spec/01-system-overview.md`; deleted 2026-04-23 |
 | `docs/GLOSSARY.md` | Historical | superseded by `docs/spec/00-glossary.md` |
 | `docs/SWARM-ARCHITECTURE.md` | Historical | chain/spec context only |
 | `docs/DASHBOARD-INTEGRATION.md` | Historical | dashboard integration snapshot |
@@ -83,6 +83,10 @@ code_refs:
 | `docs/QUICKSTART.md` | Removed | 3-line redirect stub deleted; canonical entry is `docs/QUICK-START.md` |
 | `docs/SETUP.md` | Removed | install/run content merged into `README.md` and `docs/QUICK-START.md` |
 | `docs/INSTALL-CHECKLIST.md` | Removed | post-install checks merged into `docs/QUICK-START.md` |
+| `docs/SPEC.md` | Removed | content merged into `docs/spec/SPEC-INDEX.md`; deleted 2026-04-23 |
+| `docs/MERGED-ARCHITECTURE-SSOT.md` | Removed | content merged into `docs/spec/01-system-overview.md`; deleted 2026-04-23 |
+| `docs/OCAML-NORTH-STAR.md` | Removed | duplicate of `docs/NORTH-STAR-OCAML.md`; deleted 2026-04-23 |
+| `docs/architecture-boundary.md` | Removed | superseded by `docs/OAS-MASC-BOUNDARY.md`; deleted 2026-04-23 |
 | `docs/RELEASE-ROADMAP.md` | Not present | use `docs/VERSIONED-ROADMAP.md` and `docs/archive/RELEASE-ROADMAP-v287.md` |
 
 ## Notes

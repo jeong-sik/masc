@@ -219,6 +219,161 @@ let parse_dune_test output =
            ("skipped", `Int !skipped);
          ])
 
+(* --- gh pr list (tabular) --- *)
+
+let parse_gh_pr_list output =
+  let lines = String.split_on_char '\n' (String.trim output) in
+  match lines with
+  | [] -> None
+  | header :: body ->
+      let cols =
+        let h = String.trim header in
+        if String.length h = 0 then [||]
+        else Array.of_list (String.split_on_char '\t' h)
+      in
+      if Array.length cols < 2 then None
+      else
+        let prs = ref [] in
+        List.iter
+          (fun line ->
+            let fields = String.split_on_char '\t' (String.trim line) in
+            match fields with
+            | [] -> ()
+            | number :: rest ->
+                let n = String.trim number in
+                if n <> "" && String.for_all (fun c -> c >= '0' && c <= '9') n then
+                  let title =
+                    match rest with [] -> "" | t :: _ -> String.trim t
+                  in
+                  let state =
+                    let state_idx = Array.length cols - 1 in
+                    match List.nth_opt rest (state_idx - 1) with
+                    | Some s -> String.trim s
+                    | None -> ""
+                  in
+                  prs := `Assoc [
+                    ("number", `String n);
+                    ("title", `String title);
+                    ("state", `String state);
+                  ] :: !prs)
+          body;
+        let n = List.length !prs in
+        if n = 0 then None
+        else Some (`Assoc [("prs", `List (List.rev !prs)); ("count", `Int n)])
+
+(* --- pytest output --- *)
+
+let parse_pytest output =
+  let lines = String.split_on_char '\n' (String.trim output) in
+  let passed = ref 0 and failed = ref 0
+  and errors = ref 0 and skipped = ref 0 in
+  List.iter
+    (fun line ->
+      let l = String.trim line in
+      if String.length l < 5 then ()
+      else
+        (* Summary line: "X passed, Y failed, Z errors, W skipped" *)
+        let extract_count prefix =
+          match Re.execp (Re.compile (Re.Pcre.re
+            (Printf.sprintf "(\\d+) %s" prefix))) l with
+          | true ->
+              (match Re.exec (Re.compile (Re.Pcre.re
+                (Printf.sprintf "(\\d+) %s" prefix))) l with
+               | exception _ -> ()
+               | m ->
+                   match int_of_string_opt (Re.Group.get m 1) with
+                   | Some n ->
+                       if prefix = "passed" then passed := n
+                       else if prefix = "failed" then failed := n
+                       else if prefix = "error" then errors := n
+                       else if prefix = "skipped" then skipped := n
+                       else ()
+                   | None -> ())
+          | false -> ()
+        in
+        if String_util.contains_substring l "passed"
+           || String_util.contains_substring l "failed"
+           || String_util.contains_substring l "error"
+        then begin
+          extract_count "passed";
+          extract_count "failed";
+          extract_count "error";
+          extract_count "skipped"
+        end)
+    lines;
+  let total = !passed + !failed + !errors + !skipped in
+  if total = 0 then None
+  else Some (`Assoc [
+    ("passed", `Int !passed);
+    ("failed", `Int !failed);
+    ("errors", `Int !errors);
+    ("skipped", `Int !skipped);
+  ])
+
+(* --- cargo test output --- *)
+
+let parse_cargo_test output =
+  let lines = String.split_on_char '\n' (String.trim output) in
+  let passed = ref 0 and failed = ref 0 in
+  List.iter
+    (fun line ->
+      let l = String.trim line in
+      if String_util.contains_substring l "test result:" then begin
+        (* "test result: ok. X passed; 0 failed; ..." *)
+        let extract re =
+          match Re.exec (Re.compile (Re.Pcre.re re)) l with
+          | exception _ -> 0
+          | m ->
+              match int_of_string_opt (Re.Group.get m 1) with
+              | Some n -> n
+              | None -> 0
+        in
+        passed := !passed + extract "(\\d+) passed";
+        failed := !failed + extract "(\\d+) failed"
+      end)
+    lines;
+  let total = !passed + !failed in
+  if total = 0 then None
+  else Some (`Assoc [
+    ("passed", `Int !passed);
+    ("failed", `Int !failed);
+  ])
+
+(* --- UTF-8 boundary helper --- *)
+
+(** Length of the UTF-8 character whose leading byte is at position [i]. *)
+let utf8_char_len s i =
+  let b = Char.code s.[i] in
+  if b land 0x80 = 0 then 1
+  else if b land 0xE0 = 0xC0 then 2
+  else if b land 0xF0 = 0xE0 then 3
+  else 4
+
+(** Find the start offset of the last complete UTF-8 character
+    that begins at or before byte position [pos] in [s].
+    UTF-8 continuation bytes have the pattern 10xxxxxx (0x80..0xBF).
+    A leading byte never matches that pattern, so we walk backwards
+    until we find one.  Returns [pos] if [pos] is already at a
+    character boundary. *)
+let utf8_find_char_start s pos =
+  let rec loop i =
+    if i <= 0 then 0
+    else if Char.code s.[i] land 0xC0 <> 0x80 then i
+    else loop (i - 1)
+  in
+  loop (min pos (String.length s - 1))
+
+(** Truncate string [s] to at most [max_bytes], breaking only at
+    UTF-8 character boundaries.  Returns the safe prefix. *)
+let utf8_truncate s max_bytes =
+  let len = String.length s in
+  if len <= max_bytes then s
+  else
+    let boundary = utf8_find_char_start s (max_bytes - 1) in
+    let char_end = boundary + utf8_char_len s boundary in
+    if char_end <= max_bytes then String.sub s 0 char_end
+    else String.sub s 0 boundary
+
 (* --- dispatcher --- *)
 
 type parser_kind =
@@ -228,6 +383,9 @@ type parser_kind =
   | Wc_lines
   | Ls_long
   | Dune_test
+  | Gh_pr_list
+  | Pytest
+  | Cargo_test
 
 let git_option_requires_arg = function
   | "-C" | "-c" | "--git-dir" | "--work-tree" | "--namespace" | "--exec-path"
@@ -290,11 +448,29 @@ let classify_for_parsing ~cmd ~_output =
           if List.exists (fun t -> t = "runtest" || t = "test") rest then
             Some Dune_test
           else None
+      | "gh" ->
+          (match rest with
+           | "pr" :: rest' ->
+               if List.exists (fun t -> t = "list") rest' then
+                 Some Gh_pr_list
+               else None
+           | _ -> None)
+      | "pytest" | "py.test" ->
+          Some Pytest
+      | "python" | "python3" ->
+          if List.exists (fun t -> t = "pytest") rest then
+            Some Pytest
+          else None
+      | "cargo" ->
+          if List.exists (fun t -> t = "test") rest then
+            Some Cargo_test
+          else None
       | _ -> None
 
 let parser_allows_nonzero = function
-  | Dune_test -> true
-  | Git_status | Git_log_oneline | Git_diff_stat | Wc_lines | Ls_long -> false
+  | Dune_test | Pytest | Cargo_test -> true
+  | Git_status | Git_log_oneline | Git_diff_stat | Wc_lines
+  | Ls_long | Gh_pr_list -> false
 
 let try_parse ~cmd ~status ~output =
   match classify_for_parsing ~cmd ~_output:output with
@@ -314,3 +490,6 @@ let try_parse ~cmd ~status ~output =
         | Wc_lines -> parse_wc_lines output
         | Ls_long -> parse_ls_long output
         | Dune_test -> parse_dune_test output
+        | Gh_pr_list -> parse_gh_pr_list output
+        | Pytest -> parse_pytest output
+        | Cargo_test -> parse_cargo_test output

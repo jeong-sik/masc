@@ -88,6 +88,41 @@ let add_bytes t buf off len =
 let add_string t s =
   add_bytes_inner t (Bytes.unsafe_of_string s) 0 (String.length s)
 
+(** Walk backwards from [pos] to find the start of the last complete
+    UTF-8 character that begins at or before [pos].  Continuation
+    bytes have the bit pattern 10xxxxxx (0x80..0xBF); a leading byte
+    never matches, so the scan stops as soon as one is found. *)
+(** Length of the UTF-8 character whose leading byte is at position [i].
+    0xxxxxxx → 1 byte (ASCII)
+    110xxxxx → 2 bytes
+    1110xxxx → 3 bytes
+    11110xxx → 4 bytes *)
+let utf8_char_len s i =
+  let b = Char.code s.[i] in
+  if b land 0x80 = 0 then 1
+  else if b land 0xE0 = 0xC0 then 2
+  else if b land 0xF0 = 0xE0 then 3
+  else 4
+
+let utf8_find_char_start s pos =
+  let rec loop i =
+    if i <= 0 then 0
+    else if Char.code s.[i] land 0xC0 <> 0x80 then i
+    else loop (i - 1)
+  in
+  loop (min pos (String.length s - 1))
+
+(** Truncate [s] to at most [max_bytes], breaking only at UTF-8
+    character boundaries.  Returns [s] unchanged if it already fits. *)
+let utf8_truncate s max_bytes =
+  let len = String.length s in
+  if len <= max_bytes then s
+  else
+    let boundary = utf8_find_char_start s (max_bytes - 1) in
+    let char_end = boundary + utf8_char_len s boundary in
+    if char_end <= max_bytes then String.sub s 0 char_end
+    else String.sub s 0 boundary
+
 let head t = Buffer.contents t.head_buf
 
 let tail t =
@@ -124,5 +159,15 @@ let render t =
     head_s ^ extra
   else
     let dropped = bytes_dropped t in
+    let head_s = utf8_truncate (head t) t.head_cap in
+    let tail_raw = tail t in
+    let tail_s =
+      if String.length tail_raw > t.tail_cap then
+        let skip = String.length tail_raw - t.tail_cap in
+        utf8_truncate
+          (String.sub tail_raw skip (String.length tail_raw - skip))
+          t.tail_cap
+      else tail_raw
+    in
     Printf.sprintf "%s\n...(truncated %d bytes)...\n%s"
-      (head t) dropped (tail t)
+      head_s dropped tail_s

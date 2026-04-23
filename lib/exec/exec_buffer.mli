@@ -40,4 +40,13 @@ val render : t -> string
     [head ^ separator ^ tail] where separator is a single-line
     [\n...(truncated N bytes)...\n] marker.  The separator is only
     present when [bytes_dropped > 0] so golden tests on small outputs
-    remain byte-identical to the raw stream. *)
+    remain byte-identical to the raw stream.
+
+    When truncation occurs, both head and tail are trimmed to UTF-8
+    character boundaries so CJK and emoji output is never split mid-byte. *)
+
+val utf8_truncate : string -> int -> string
+(** [utf8_truncate s max_bytes] returns the prefix of [s] that fits
+    within [max_bytes], breaking only at UTF-8 character boundaries.
+    Returns [s] unchanged if it already fits.  Safe for CJK, emoji,
+    and other multi-byte sequences. *)

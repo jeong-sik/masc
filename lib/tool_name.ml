@@ -247,6 +247,21 @@ module Masc = struct
     | Worktree_list
     | Worktree_remove
     | Worktree_status
+    | Approval_get
+    | Collaboration_graph
+    | Config
+    | Gc
+    | Get_metrics
+    | Mcp_session
+    | Pause
+    | Resume
+    | Spawn
+    | Start
+    | Tool_admin_snapshot
+    | Tool_admin_update
+    | Tool_stats
+    | Webrtc_answer
+    | Webrtc_offer
 
   let to_string = function
     | A2a_delegate -> "masc_a2a_delegate"
@@ -342,6 +357,21 @@ module Masc = struct
     | Worktree_list -> "masc_worktree_list"
     | Worktree_remove -> "masc_worktree_remove"
     | Worktree_status -> "masc_worktree_status"
+    | Approval_get -> "masc_approval_get"
+    | Collaboration_graph -> "masc_collaboration_graph"
+    | Config -> "masc_config"
+    | Gc -> "masc_gc"
+    | Get_metrics -> "masc_get_metrics"
+    | Mcp_session -> "masc_mcp_session"
+    | Pause -> "masc_pause"
+    | Resume -> "masc_resume"
+    | Spawn -> "masc_spawn"
+    | Start -> "masc_start"
+    | Tool_admin_snapshot -> "masc_tool_admin_snapshot"
+    | Tool_admin_update -> "masc_tool_admin_update"
+    | Tool_stats -> "masc_tool_stats"
+    | Webrtc_answer -> "masc_webrtc_answer"
+    | Webrtc_offer -> "masc_webrtc_offer"
 
   let of_string = function
     | "masc_a2a_delegate" -> Some A2a_delegate
@@ -437,6 +467,21 @@ module Masc = struct
     | "masc_worktree_list" -> Some Worktree_list
     | "masc_worktree_remove" -> Some Worktree_remove
     | "masc_worktree_status" -> Some Worktree_status
+    | "masc_approval_get" -> Some Approval_get
+    | "masc_collaboration_graph" -> Some Collaboration_graph
+    | "masc_config" -> Some Config
+    | "masc_gc" -> Some Gc
+    | "masc_get_metrics" -> Some Get_metrics
+    | "masc_mcp_session" -> Some Mcp_session
+    | "masc_pause" -> Some Pause
+    | "masc_resume" -> Some Resume
+    | "masc_spawn" -> Some Spawn
+    | "masc_start" -> Some Start
+    | "masc_tool_admin_snapshot" -> Some Tool_admin_snapshot
+    | "masc_tool_admin_update" -> Some Tool_admin_update
+    | "masc_tool_stats" -> Some Tool_stats
+    | "masc_webrtc_answer" -> Some Webrtc_answer
+    | "masc_webrtc_offer" -> Some Webrtc_offer
     | _ -> None
 
   let pp fmt t = Format.pp_print_string fmt (to_string t)

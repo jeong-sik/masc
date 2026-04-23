@@ -34,7 +34,10 @@ let all_masc : Tool_name.Masc.t list =
   ; Set_current_task; Status; Task_history; Tasks; Tool_grant; Tool_help
   ; Tool_list; Tool_revoke; Transition; Update_priority; Web_search; Who
   ; Workflow_guide; Worktree_create; Worktree_list; Worktree_remove
-  ; Worktree_status ]
+  ; Worktree_status
+  ; Approval_get; Collaboration_graph; Config; Gc; Get_metrics; Mcp_session
+  ; Pause; Resume; Spawn; Start; Tool_admin_snapshot; Tool_admin_update
+  ; Tool_stats; Webrtc_answer; Webrtc_offer ]
 
 let all_masc_keeper : Tool_name.Masc_keeper.t list =
   [ Clear; Compact; Create_from_persona; Down; List; Msg; Repair; Reset

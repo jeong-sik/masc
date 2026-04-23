@@ -1749,57 +1749,6 @@ let persistent_agent_names config =
            as non-persistent: %s" name msg;
         None)
 
-let write_meta ?(force = false) config (m : keeper_meta) : (unit, string) result =
-  (* Assign UUID on first write for legacy keepers lacking keeper_id *)
-  let m =
-    match m.keeper_id with
-    | Some _ -> m
-    | None -> { m with keeper_id = Some (Keeper_id.Uid.generate ()) }
-  in
-  let path = keeper_meta_path config m.name in
-  if force then
-    let persisted = { m with meta_version = m.meta_version + 1 } in
-    let json = meta_to_json persisted in
-    match Keeper_fs.save_json_atomic path json with
-    | Ok () ->
-      !runtime_meta_write_sync_hook config persisted;
-      Ok ()
-    | Error msg ->
-      Error (Printf.sprintf "failed to write meta %s: %s" path msg)
-  else
-    (* Version CAS: reject writes whose version doesn't match what's on disk *)
-    let on_disk : (keeper_meta option, string) result =
-      read_meta_file_path path
-    in
-    match on_disk with
-    | Ok (Some existing) ->
-      if existing.meta_version <> m.meta_version then
-        Error (Printf.sprintf
-          "meta version conflict for %s: expected %d, disk has %d"
-          m.name m.meta_version existing.meta_version)
-      else
-        let persisted = { m with meta_version = m.meta_version + 1 } in
-        let json = meta_to_json persisted in
-        (match Keeper_fs.save_json_atomic path json with
-        | Ok () ->
-          !runtime_meta_write_sync_hook config persisted;
-          Ok ()
-        | Error msg ->
-          Error (Printf.sprintf "failed to write meta %s: %s" path msg))
-    | Ok None ->
-      (* No existing file — initial write *)
-      let persisted = { m with meta_version = 1 } in
-      let json = meta_to_json persisted in
-      (match Keeper_fs.save_json_atomic path json with
-      | Ok () ->
-        !runtime_meta_write_sync_hook config persisted;
-        Ok ()
-      | Error msg ->
-        Error (Printf.sprintf "failed to write meta %s: %s" path msg))
-    | Error msg ->
-      Error (Printf.sprintf "failed to read existing meta for CAS %s: %s" path msg)
-;;
-
 let keeper_name_from_agent_name = Keeper_identity.keeper_name_from_agent_name
 
 let canonical_keeper_name_from_agent_name =
@@ -1880,6 +1829,82 @@ let read_meta_if_changed config name ~(last_mtime : float)
 (* Model selection, path utilities, and JSONL helpers
    extracted to Keeper_types_support *)
 include Keeper_types_support
+
+let current_utc_timestamp () =
+  let t = Unix.gmtime (Unix.gettimeofday ()) in
+  Printf.sprintf
+    "%04d-%02d-%02dT%02d:%02d:%02dZ"
+    (t.tm_year + 1900)
+    (t.tm_mon + 1)
+    t.tm_mday
+    t.tm_hour
+    t.tm_min
+    t.tm_sec
+;;
+
+let refresh_progress_updated_line config name =
+  let progress_path = keeper_progress_path config name in
+  try
+    let content = Fs_compat.load_file progress_path in
+    let now_str = current_utc_timestamp () in
+    let updated =
+      String.split_on_char '\n' content
+      |> List.map (fun line ->
+        if String.starts_with ~prefix:"Updated:" (String.trim line)
+        then "Updated: " ^ now_str
+        else line)
+      |> String.concat "\n"
+    in
+    Fs_compat.save_file progress_path updated
+  with
+  | _ -> ()
+;;
+
+let persist_meta config path persisted =
+  let json = meta_to_json persisted in
+  match Keeper_fs.save_json_atomic path json with
+  | Ok () ->
+    !runtime_meta_write_sync_hook config persisted;
+    refresh_progress_updated_line config persisted.name;
+    Ok ()
+  | Error msg ->
+    Error (Printf.sprintf "failed to write meta %s: %s" path msg)
+;;
+
+let write_meta ?(force = false) config (m : keeper_meta) : (unit, string) result =
+  (* Assign UUID on first write for legacy keepers lacking keeper_id. *)
+  let m =
+    match m.keeper_id with
+    | Some _ -> m
+    | None -> { m with keeper_id = Some (Keeper_id.Uid.generate ()) }
+  in
+  let path = keeper_meta_path config m.name in
+  if force
+  then
+    let persisted = { m with meta_version = m.meta_version + 1 } in
+    persist_meta config path persisted
+  else (
+    (* Version CAS: reject writes whose version doesn't match what's on disk. *)
+    match read_meta_file_path path with
+    | Ok (Some existing) ->
+      if existing.meta_version <> m.meta_version
+      then
+        Error
+          (Printf.sprintf
+             "meta version conflict for %s: expected %d, disk has %d"
+             m.name
+             m.meta_version
+             existing.meta_version)
+      else
+        let persisted = { m with meta_version = m.meta_version + 1 } in
+        persist_meta config path persisted
+    | Ok None ->
+      (* No existing file — initial write. *)
+      let persisted = { m with meta_version = 1 } in
+      persist_meta config path persisted
+    | Error msg ->
+      Error (Printf.sprintf "failed to read existing meta for CAS %s: %s" path msg))
+;;
 
 (** Fiber-level health for keeper supervisor monitoring.
     Defined here (not in Keeper_supervisor) to avoid circular

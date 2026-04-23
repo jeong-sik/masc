@@ -94,21 +94,11 @@ let evidence_session_id_of_worker_run = function
 let session_min_tool_names =
   Tool_catalog.tools_for_surface Tool_catalog.Session_min
 
-let execution_scope_or_default = function
-  | Some scope -> scope
-  | None -> Worker_types.Limited_code_change
-
 (* Model tier inference removed (#4505). Cascade handles model selection
    without hardcoded name→tier mapping. *)
 
-let worker_profiles_of_scope scope =
-  match scope with
-  | Worker_types.Observe_only ->
-      (Profile_session_min, Shell_readonly)
-  | Worker_types.Limited_code_change ->
-      (Profile_session_dev, Shell_dev)
-  | Worker_types.Autonomous ->
-      (Profile_session_dev, Shell_dev)
+let default_tool_profile = Profile_session_dev
+let default_shell_profile = Shell_dev
 
 let worker_meta_to_yojson (meta : worker_container_meta) =
   `Assoc
@@ -121,9 +111,6 @@ let worker_meta_to_yojson (meta : worker_container_meta) =
       ( "selection_note",
         Option.fold ~none:`Null ~some:(fun s -> `String s) meta.selection_note
       );
-      ( "execution_scope",
-        `String
-          (Worker_types.execution_scope_to_string meta.execution_scope) );
       ("thinking_enabled", Option.fold ~none:`Null ~some:(fun v -> `Bool v) meta.thinking_enabled);
       ("max_turns_override", Option.fold ~none:`Null ~some:(fun n -> `Int n) meta.max_turns_override);
       ("timeout_seconds", Option.fold ~none:`Null ~some:(fun n -> `Int n) meta.timeout_seconds);
@@ -148,19 +135,6 @@ let worker_meta_of_yojson json =
       match json |> member "worker_name" |> to_string_option with
       | None -> None
       | Some worker_name ->
-          let execution_scope =
-            (* Issue #8605: was Option.map over the variant-returning
-               [_of_string] which silently downgraded typos to
-               [Limited_code_change]. Now uses [_of_string_opt] +
-               flatten so a typo becomes [None], then
-               [execution_scope_or_default] applies its explicit default. *)
-            json |> member "execution_scope" |> to_string_option
-            |> Option.map (fun value ->
-                   String.lowercase_ascii (String.trim value))
-            |> Option.map Worker_types.execution_scope_of_string_opt
-            |> Option.join
-            |> execution_scope_or_default
-          in
           Some
             {
               version =
@@ -176,7 +150,6 @@ let worker_meta_of_yojson json =
               role = json |> member "role" |> to_string_option;
               selection_note =
                 json |> member "selection_note" |> to_string_option;
-              execution_scope;
               thinking_enabled =
                 json |> member "thinking_enabled" |> to_bool_option;
               max_turns_override =
@@ -188,15 +161,15 @@ let worker_meta_of_yojson json =
                 | Some value -> (
                     match tool_profile_of_string value with
                     | Some profile -> profile
-                    | None -> fst (worker_profiles_of_scope execution_scope))
-                | None -> fst (worker_profiles_of_scope execution_scope));
+                    | None -> default_tool_profile)
+                | None -> default_tool_profile);
               shell_profile =
                 (match json |> member "shell_profile" |> to_string_option with
                 | Some value -> (
                     match shell_profile_of_string value with
                     | Some profile -> profile
-                    | None -> snd (worker_profiles_of_scope execution_scope))
-                | None -> snd (worker_profiles_of_scope execution_scope));
+                    | None -> default_shell_profile)
+                | None -> default_shell_profile);
               worker_class =
                 (match json |> member "worker_class" |> to_string_option with
                 | Some value ->
@@ -320,11 +293,6 @@ let start_worker_heartbeat ~sw ~(auth_token : string option) ~session_id
               worker_name (Printexc.to_string exn));
       fun () -> active := false
 
-let resolve_execution_scope ?execution_scope () =
-  match execution_scope with
-  | Some scope -> scope
-  | None -> Worker_types.Limited_code_change
-
 let build_oas_mcp_tools ~sw ~auth_token ~session_id ~worker_name ~prompt:_
     ~allowed_tools =
   let allowed_names =
@@ -366,7 +334,7 @@ let build_oas_mcp_tools ~sw ~auth_token ~session_id ~worker_name ~prompt:_
                }))
     listed_schemas
 
-let build_local_shell_tools ~room_config ~worker_name ~execution_scope ~workdir =
+let build_local_shell_tools ~room_config ~worker_name ~workdir =
   match Process_eio.get_proc_mgr (), Process_eio.get_clock () with
   | Ok proc_mgr, Ok clock -> (
       let on_exec ~tool_name ~success ~duration_ms =
@@ -381,16 +349,9 @@ let build_local_shell_tools ~room_config ~worker_name ~execution_scope ~workdir 
         | _ -> ());
         ()
       in
-      match execution_scope with
-      | Worker_types.Observe_only ->
-          Ok
-            (Worker_dev_tools.make_readonly_tools ~proc_mgr ~clock
-               ~workdir ~on_exec ())
-      | Worker_types.Limited_code_change
-      | Worker_types.Autonomous ->
-          Ok
-            (Worker_dev_tools.make_tools ~proc_mgr ~clock ~workdir
-               ~on_exec ()))
+      Ok
+        (Worker_dev_tools.make_tools ~proc_mgr ~clock ~workdir
+           ~on_exec ()))
   | Error e, _ | _, Error e -> Error e
 
 (** Convert a model label to an OAS Provider.config.
@@ -419,10 +380,9 @@ let oas_tool_names (tools : Oas.Tool.t list) =
   List.map (fun (tool : Oas.Tool.t) -> tool.schema.name) tools
 
 let make_worker_meta ~base_path ~workspace_path ~worker_name
-    ~mcp_session_id ~role ~selection_note ~execution_scope ~worker_class
+    ~mcp_session_id ~role ~selection_note ~worker_class
     ~effective_model ~thinking_enabled ~max_turns_override
     ~timeout_seconds =
-  let tool_profile, shell_profile = worker_profiles_of_scope execution_scope in
   {
     version = worker_container_version;
     worker_name;
@@ -430,12 +390,11 @@ let make_worker_meta ~base_path ~workspace_path ~worker_name
     workspace_path;
     role;
     selection_note;
-    execution_scope;
     thinking_enabled;
     max_turns_override;
     timeout_seconds;
-    tool_profile;
-    shell_profile;
+    tool_profile = default_tool_profile;
+    shell_profile = default_shell_profile;
     worker_class;
     effective_model;
     checkpoint_path =
@@ -553,10 +512,7 @@ let materialize_direct_evidence ~base_path ~worker_name
           aliases;
           requested_provider = Some "local";
           requested_model = Some meta.effective_model;
-          requested_policy =
-            Some
-              (Worker_types.execution_scope_to_string
-                 meta.execution_scope);
+          requested_policy = None;
           workdir = Some workspace_path;
         }
       in

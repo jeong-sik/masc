@@ -67,7 +67,6 @@
         test_keeper_tool_surface_guard
         test_keeper_benchmark_canary
         test_keeper_pr_review
-        test_keeper_execution_scope
         test_playground_paths
         test_keeper_llama_only
         test_keeper_meta_cwd_resilience
@@ -126,7 +125,6 @@
         test_keeper_retrieval_quality
         test_observability_redact
         test_observability_provider_contracts
-        test_worker_oas_scope_gate
         test_config_doctor
         test_cascade_toml_materialization
         test_doctor_dispatch
@@ -182,7 +180,6 @@
           test_keeper_tool_surface_guard
           test_keeper_benchmark_canary
           test_keeper_pr_review
-          test_keeper_execution_scope
           test_playground_paths
           test_keeper_llama_only
           test_keeper_meta_cwd_resilience
@@ -241,7 +238,6 @@
           test_keeper_retrieval_quality
           test_observability_redact
           test_observability_provider_contracts
-          test_worker_oas_scope_gate
           test_config_doctor
           test_cascade_toml_materialization
           test_doctor_dispatch

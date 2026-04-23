@@ -555,10 +555,6 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
       <div class="mt-3 grid grid-cols-2 gap-2 text-2xs text-text-muted">
         <div>Sandbox</div>
         <div class="text-right text-text-body">${keeper.sandbox_profile}</div>
-        <div>Effective</div>
-        <div class="text-right text-text-body">${keeper.sandbox_effective_kind ?? '-'}</div>
-        <div>Scope</div>
-        <div class="text-right text-text-body">${keeper.execution_scope}</div>
         <div>Approval</div>
         <div class="text-right text-text-body">${keeper.approval_profile ?? '-'}</div>
         <div>Cascade</div>

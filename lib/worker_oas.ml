@@ -6,7 +6,6 @@
 
     Key mappings:
     - worker_container_meta fields -> OAS agent_config + Builder options
-    - MASC execution_scope -> OAS max_turns cap + system prompt contract
     - MASC heartbeat -> OAS periodic_callback
     - MASC tool_profile/shell_profile -> OAS Tool.t list filtering
     - MASC worker metadata -> OAS Builder.with_description metadata
@@ -30,31 +29,22 @@ let oas_model_of_effective_model (model_id : string) : string =
 (* worker_container_meta -> OAS Types.agent_config                   *)
 (* ================================================================ *)
 
-(** Map MASC execution_scope to max_turns cap.
-    Mirrors the logic in local_agent_eio_runners.ml run_worker_oas. *)
-let max_turns_cap_of_scope (scope : Worker_types.execution_scope) : int =
-  match scope with
-  | Observe_only -> 12
-  | Limited_code_change -> 20
-  | Autonomous -> 30
-
 let proof_result_status_to_string =
   Oas_worker_exec.proof_result_status_to_string
 
-(** Derive max_turns from worker meta, applying the scope cap.
-    When max_turns_override is set, it is clamped to [1, cap].
+(** Derive max_turns from worker meta.
+    When max_turns_override is set, it is clamped to [1, max_int].
     When absent, timeout_seconds / 20 is used as a heuristic. *)
 let effective_max_turns (meta : Worker_container_types.worker_container_meta) : int =
-  let cap = max_turns_cap_of_scope meta.execution_scope in
   match meta.max_turns_override with
-  | Some value -> max 1 (min cap value)
+  | Some value -> max 1 value
   | None ->
-    let from_timeout =
+      let from_timeout =
       match meta.timeout_seconds with
       | Some sec -> max 2 (sec / 20)
       | None -> 8
-    in
-    max 2 (min cap from_timeout)
+      in
+      max 2 from_timeout
 
 (** Convert MASC worker_container_meta to OAS agent_config.
     Maps worker_name, model, thinking, max_turns, and temperature. *)
@@ -87,7 +77,7 @@ let agent_config_of_worker_meta
 (* ================================================================ *)
 
 (** Encode MASC-specific worker metadata as a human-readable description
-    string. This preserves context (role, scope, worker class) that has
+    string. This preserves context (role, worker class) that has
     no direct OAS equivalent. *)
 let description_of_meta (meta : Worker_container_types.worker_container_meta) : string =
   let lines = ref [] in
@@ -104,8 +94,6 @@ let description_of_meta (meta : Worker_container_types.worker_container_meta) : 
   (match meta.selection_note with
    | Some n -> add "selection_note" n
    | None -> ());
-  add "execution_scope"
-    (Worker_types.execution_scope_to_string meta.execution_scope);
   add "effective_model" meta.effective_model;
   (match meta.worker_class with
    | Some cls -> add "worker_class" (Worker_types.worker_class_to_string cls)
@@ -120,41 +108,8 @@ let description_of_meta (meta : Worker_container_types.worker_container_meta) : 
 let oas_provider_of_label = Worker_container.oas_provider_of_label
 
 (* ================================================================ *)
-(* execution_scope -> gate_config                                    *)
+(* gate_config                                                       *)
 (* ================================================================ *)
-
-(** Derive Eval_gate.gate_config from execution_scope.
-    Observe_only: strict allowlist (read-only tools), low budget.
-    Limited_code_change: moderate budget, deny destructive bash.
-    Autonomous: permissive, higher budget. *)
-(* Destructive operations denied in all non-autonomous scopes. *)
-let destructive_denied_tools =
-  [ "shell_exec_dangerous"; "git_push_force"; "rm_rf" ]
-
-(* Code mutation tools additionally denied in observe_only scope. *)
-let code_mutation_denied_tools =
-  [ "keeper_bash";
-    "masc_code_write"; "masc_code_edit"; "masc_code_delete";
-    "masc_code_shell"; "masc_code_git" ]
-
-(* MASC state-mutating tools denied in observe_only scope.
-   Observe_only workers should only read coordination state, not modify it.
-   Includes SDK aliases (masc_set_current_task, masc_complete_task) to
-   prevent bypass via alias routing. *)
-let masc_mutating_denied_tools =
-  [ "masc_add_task"; "masc_claim_next"; "masc_transition";
-    "masc_complete_task";  (* alias of masc_transition *)
-    "masc_board_post"; "masc_board_comment"; "masc_board_vote";
-    "masc_worktree_create"; "masc_worktree_remove";
-    "masc_portal_open"; "masc_portal_send"; "masc_portal_close";
-    "masc_plan_set_task"; "masc_plan_clear_task";
-    "masc_set_current_task";  (* alias of masc_plan_set_task *)
-    "masc_run_init"; "masc_run_plan"; "masc_run_log";
-    "masc_run_deliverable";
-    "masc_operator_action"; "masc_operator_confirm";
-    "masc_room_delete"; "masc_admin_cleanup"; "masc_admin_reset";
-    "masc_gc_force"; "masc_spawn"; "masc_force_leave";
-    "masc_config_set"; "masc_execute" ]
 
 (* Local model (Qwen3.5 Q4) — no cloud cost, so generous turn budget. *)
 let local_model_gate =
@@ -169,48 +124,8 @@ let local_model_gate =
 let default_internal_tool_retry_policy =
   Oas.Tool_retry_policy.default_internal
 
-let tool_policy_of_execution_scope
-    (scope : Worker_types.execution_scope) : Tool_access_policy.t =
-  match scope with
-  | Observe_only ->
-      {
-        Tool_access_policy.allow = Tool_access_policy.All;
-        deny =
-          Tool_access_policy.union
-            [
-              Tool_access_policy.Names destructive_denied_tools;
-              Tool_access_policy.Names code_mutation_denied_tools;
-              Tool_access_policy.Names masc_mutating_denied_tools;
-            ];
-      }
-  | Limited_code_change ->
-      {
-        Tool_access_policy.allow = Tool_access_policy.All;
-        deny = Tool_access_policy.Names destructive_denied_tools;
-      }
-  | Autonomous ->
-      Tool_access_policy.allow_all
-
-let gate_config_of_execution_scope
-    (scope : Worker_types.execution_scope) : Eval_gate.gate_config =
-  let tool_policy = tool_policy_of_execution_scope scope in
-  let denied_tools =
-    Tool_access_policy.resolve_selector tool_policy.deny
-  in
-  match scope with
-  | Observe_only ->
-      { local_model_gate with
-        denied_tools;
-      }
-  | Limited_code_change ->
-      { local_model_gate with
-        denied_tools;
-      }
-  | Autonomous ->
-      { Eval_gate.default_config with
-        max_tool_calls_per_turn = 20;
-        max_cost_usd = 0.50;
-      }
+let default_gate_config () =
+  { local_model_gate with denied_tools = [] }
 
 (* ================================================================ *)
 (* Build OAS Agent.t via Builder                                     *)
@@ -589,7 +504,7 @@ and resume_worker_via_oas
   let injector_config = Masc_context_injector.default_config () in
   let context_injector = Masc_context_injector.make ~config:injector_config () in
   let shared_context = Oas.Context.copy checkpoint.context in
-  let gate_config = gate_config_of_execution_scope meta.execution_scope in
+  let gate_config = default_gate_config () in
   let tool_names_ref, hooks = make_tool_tracking_hooks ~gate_config ~context:shared_context () in
   let resume_model_id = resume_model_id_of_checkpoint meta checkpoint in
   let* resume_provider =
@@ -786,7 +701,7 @@ let orchestrate_workers
   let rec build_agents acc = function
     | [] -> Ok (List.rev acc)
     | ((meta : Worker_container_types.worker_container_meta), provider, system_prompt, tools, raw_trace, heartbeat_cbs) :: rest ->
-      let gate_config = gate_config_of_execution_scope meta.execution_scope in
+      let gate_config = default_gate_config () in
       let tool_names_ref, hooks = make_tool_tracking_hooks ~gate_config () in
       let* agent =
         build_agent ~net ~meta ~provider ~system_prompt ~tools ~hooks

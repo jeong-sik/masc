@@ -289,7 +289,6 @@ spawn 시 인자로 직접 설정하는 필드.
 {
   "name": "analyst",
   "goal": "Review incoming issues and prepare safe changes",
-  "execution_scope": "workspace",
   "sandbox_profile": "docker",
   "network_mode": "none",
   "shared_memory_scope": "room",
@@ -801,8 +800,8 @@ materialize될 수 있지만, 정식 edit surface는 `profile.json`과 `keeper.t
 [`docs/KEEPER-FILE-MODEL.md` §2 Keeper Declaration](./KEEPER-FILE-MODEL.md#2-keeper-declaration)을 참조한다. 요약:
 
 - **Canonical minimal**: `[keeper]` 테이블에 `persona_name`만. 나머지는 persona 기본값에서 해석.
-- **Overlay fields**: `goal`, `tool_preset`, `tool_also_allow`, `cascade_name`, `execution_scope` 등 배치별 override 전용.
-- **Allowed value sets**: `execution_scope ∈ {observe_only, workspace, local}`, `tool_preset ∈ {minimal, social, messaging, coding, research, delivery, full}`, `social_model ∈ {bdi_speech_v1, magentic_ledger_v1}`, `cascade_name`은 `cascade.json`에 `<name>_models` 키로 존재해야 함.
+- **Overlay fields**: `goal`, `tool_preset`, `tool_also_allow`, `cascade_name`, `sandbox_profile`, `network_mode`, `shared_memory_scope` 등 배치별 override 전용.
+- **Allowed value sets**: `tool_preset ∈ {minimal, social, messaging, coding, research, delivery, full}`, `sandbox_profile ∈ {local, docker}`, `network_mode ∈ {none, inherit}`, `shared_memory_scope ∈ {disabled, room}`, `social_model ∈ {bdi_speech_v1, magentic_ledger_v1}`, `cascade_name`은 `cascade.json`에 `<name>_models` 키로 존재해야 함.
 - **Removed / hard-rejected**: `models`, `allowed_models`, `active_model`, `presence_keepalive*`, `trigger_mode`, `initiative_*`, `policy_mode`, `policy_shell_mode`. 로드 시 에러로 실패한다.
 - **Unknown keys**: canonical/removed 둘 다 아닌 key는 **boot 시 warning** 후 무시된다 (`keeper TOML <path> has unknown keys: ...`). 과거에 `room_scope`/`scope_kind` 같은 dead config가 축적된 적이 있으므로 warning을 발견하면 정리한다.
 

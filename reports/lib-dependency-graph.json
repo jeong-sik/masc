@@ -1,23 +1,27 @@
 {
   "stats": {
-    "total_modules": 572,
-    "total_edges": 2150,
-    "avg_out_degree": 3.76,
-    "leaf_count": 181,
-    "root_count": 108
+    "total_modules": 613,
+    "total_edges": 2508,
+    "avg_out_degree": 4.09,
+    "leaf_count": 173,
+    "root_count": 102
   },
   "top_imported": [
     [
       "Coord",
-      111
+      125
     ],
     [
       "Keeper_types",
-      74
+      98
+    ],
+    [
+      "Oas",
+      92
     ],
     [
       "Keeper",
-      54
+      60
     ],
     [
       "Tool_dispatch",
@@ -28,89 +32,89 @@
       35
     ],
     [
+      "Prometheus",
+      33
+    ],
+    [
+      "Tool_args",
+      31
+    ],
+    [
       "Sse",
       30
     ],
     [
-      "Oas",
-      30
-    ],
-    [
-      "Tool_args",
-      30
-    ],
-    [
-      "Prometheus",
-      27
+      "Keeper_registry",
+      29
     ],
     [
       "Tool_catalog",
-      27
+      28
     ],
     [
-      "Keeper_registry",
-      25
+      "Keeper_id",
+      28
     ],
     [
       "Server_auth",
-      25
+      26
     ],
     [
       "Keeper_state_machine",
+      25
+    ],
+    [
+      "Keeper_alerting_path",
+      24
+    ],
+    [
+      "Config_dir_resolver",
       23
     ],
     [
-      "Cascade_runtime",
-      22
+      "Provider_adapter",
+      23
     ],
     [
-      "Tool_spec",
+      "Keeper_config",
+      23
+    ],
+    [
+      "Cascade_config",
       22
     ],
     [
       "Server_utils",
-      21
-    ],
-    [
-      "Dashboard",
-      20
-    ],
-    [
-      "Keeper_id",
-      20
-    ],
-    [
-      "Keeper_config",
-      20
-    ],
-    [
-      "Provider_adapter",
-      18
+      22
     ]
   ],
   "top_importers": [
     [
       "Server_bootstrap_loops",
-      59
+      61
     ],
     [
       "Keeper_agent_run",
-      51
+      60
     ],
     [
       "Server_runtime_bootstrap",
-      43
+      46
     ],
     [
       "Dashboard_http_keeper",
-      39
+      45
     ],
     [
       "Server_dashboard_http_keeper_api",
-      38
+      39
     ],
     [
       "Keeper_keepalive",
+      37
+    ],
+    [
+      "Keeper_unified_turn",
       36
     ],
     [
@@ -118,31 +122,35 @@
       35
     ],
     [
-      "Keeper_unified_turn",
-      33
-    ],
-    [
       "Keeper_turn",
       32
     ],
     [
       "Server_routes_http_routes_dashboard",
-      27
+      31
+    ],
+    [
+      "Tool_keeper",
+      25
+    ],
+    [
+      "Keeper_status_detail",
+      24
     ],
     [
       "Server_h2_gateway",
       23
     ],
     [
-      "Keeper_status_detail",
-      23
-    ],
-    [
-      "Tool_keeper",
+      "Keeper_turn_up_create",
       23
     ],
     [
       "Tool_task",
+      22
+    ],
+    [
+      "Keeper_world_observation",
       21
     ],
     [
@@ -154,20 +162,12 @@
       20
     ],
     [
-      "Keeper_turn_up_create",
+      "Oas_worker_named",
       20
     ],
     [
-      "Oas_worker_named",
-      18
-    ],
-    [
-      "Server_dashboard_http",
-      17
-    ],
-    [
-      "Keeper_world_observation",
-      17
+      "Keeper_exec_shell",
+      19
     ]
   ],
   "cycles": [
@@ -176,102 +176,60 @@
       "Agent_card",
       "Agent_tool_surfaces",
       "Auth",
+      "Autoresearch",
+      "Autoresearch_codegen",
       "Capability_registry",
+      "Cascade_catalog_runtime",
+      "Cascade_inference",
+      "Cascade_runtime",
       "Config",
-      "Dashboard",
-      "Dashboard_attention",
-      "Dashboard_governance_metrics",
+      "Context_compact_oas",
+      "Coord",
       "Dashboard_harness_health",
-      "Dashboard_labels",
-      "Dashboard_operator_judge",
       "Drift_guard",
       "Eval_gate",
-      "Exec_core",
-      "Governance_pipeline",
-      "Governance_pipeline_risk",
+      "Goal_store",
+      "Goal_verification",
       "Governance_registry",
-      "Keeper_agent_run",
+      "Keeper_accountability",
       "Keeper_alerting",
       "Keeper_alerting_path",
       "Keeper_approval_queue",
-      "Keeper_cascade_routing",
-      "Keeper_cdal_contract",
+      "Keeper_benchmark_canary",
       "Keeper_checkpoint_store",
       "Keeper_compact_policy",
       "Keeper_config",
       "Keeper_context_core",
-      "Keeper_coordination",
       "Keeper_decision_audit",
-      "Keeper_exec_board",
       "Keeper_exec_context",
-      "Keeper_exec_fs",
-      "Keeper_exec_masc",
-      "Keeper_exec_memory",
-      "Keeper_exec_persona",
-      "Keeper_exec_preflight",
-      "Keeper_exec_shared",
-      "Keeper_exec_shell",
       "Keeper_exec_status",
-      "Keeper_exec_status_metrics",
-      "Keeper_exec_task",
-      "Keeper_exec_tools",
-      "Keeper_exec_voice",
-      "Keeper_execution",
+      "Keeper_fs",
       "Keeper_generation_lineage",
-      "Keeper_guards",
-      "Keeper_hooks_oas",
-      "Keeper_keepalive",
-      "Keeper_memory_bank",
+      "Keeper_identity",
       "Keeper_memory_policy",
-      "Keeper_memory_recall",
       "Keeper_model_labels",
-      "Keeper_msg_async",
       "Keeper_post_turn",
       "Keeper_prompt",
       "Keeper_registry",
       "Keeper_rollover",
-      "Keeper_runtime",
-      "Keeper_social_model",
-      "Keeper_status_bridge",
-      "Keeper_status_detail",
-      "Keeper_summarizer",
-      "Keeper_supervisor",
+      "Keeper_sandbox",
       "Keeper_text_processing",
-      "Keeper_tool_disclosure",
-      "Keeper_tool_diversity",
       "Keeper_tool_policy",
       "Keeper_tool_policy_config",
-      "Keeper_tool_pr_review",
       "Keeper_tool_registry",
-      "Keeper_tools_oas",
-      "Keeper_turn",
-      "Keeper_turn_lifecycle",
-      "Keeper_turn_setup",
-      "Keeper_turn_up",
-      "Keeper_turn_up_args",
-      "Keeper_turn_up_create",
-      "Keeper_turn_up_update",
+      "Keeper_trace_emit",
       "Keeper_types",
-      "Keeper_unified_prompt",
-      "Keeper_unified_turn",
-      "Keeper_voice_local",
+      "Keeper_types_profile",
+      "Keeper_types_support",
       "Keeper_world_observation",
-      "Masc_grpc_client",
       "Masc_grpc_server",
       "Masc_grpc_service",
-      "Masc_grpc_transport",
       "Mcp_server",
-      "Memory_hooks",
       "Memory_oas_bridge",
-      "Oas_worker_exec",
-      "Oas_worker_named",
-      "Operator_judgment",
-      "Operator_pending_confirm",
-      "Otel_spans",
+      "Planning_eio",
       "Procedural_memory",
       "Runtime_params",
       "Server_mcp_transport_ws",
-      "Server_startup_state",
       "Server_webrtc_transport",
       "Server_ws_standalone",
       "Sse",
@@ -280,7 +238,9 @@
       "Tool_agent_timeline",
       "Tool_autoresearch",
       "Tool_autoresearch_broadcast",
+      "Tool_autoresearch_context",
       "Tool_autoresearch_cycle",
+      "Tool_autoresearch_registry",
       "Tool_board",
       "Tool_catalog",
       "Tool_code",
@@ -288,10 +248,9 @@
       "Tool_dispatch",
       "Tool_help_registry",
       "Tool_input_validation",
-      "Tool_keeper",
       "Tool_library",
       "Tool_local_runtime",
-      "Tool_output_validation",
+      "Tool_local_runtime_bench",
       "Tool_permission_map",
       "Tool_run",
       "Tool_shard",
@@ -302,17 +261,28 @@
       "Tools",
       "Transport",
       "Transport_metrics",
-      "Voice_bridge",
-      "Voice_session_manager",
+      "Verification_protocol",
       "Worker_dev_tools",
       "Workflow_guide"
-    ],
-    [
-      "Autoresearch",
-      "Autoresearch_codegen"
     ]
   ],
   "clusters": [
+    {
+      "prefix": "tool_call",
+      "module_count": 7,
+      "members": [
+        "Tool_call_quality_benchmark",
+        "Tool_call_quality_benchmark_loader",
+        "Tool_call_quality_benchmark_render",
+        "Tool_call_quality_benchmark_scoring",
+        "Tool_call_quality_benchmark_summary",
+        "Tool_call_quality_benchmark_types",
+        "Tool_call_replay_harness"
+      ],
+      "internal_edges": 9,
+      "external_dep_count": 1,
+      "coupling_ratio": 0.9
+    },
     {
       "prefix": "server_mcp",
       "module_count": 10,
@@ -345,8 +315,8 @@
         "Meta_cognition_types"
       ],
       "internal_edges": 7,
-      "external_dep_count": 4,
-      "coupling_ratio": 0.636
+      "external_dep_count": 5,
+      "coupling_ratio": 0.583
     },
     {
       "prefix": "keeper_social",
@@ -361,8 +331,8 @@
         "Keeper_social_model_types"
       ],
       "internal_edges": 3,
-      "external_dep_count": 2,
-      "coupling_ratio": 0.6
+      "external_dep_count": 3,
+      "coupling_ratio": 0.5
     },
     {
       "prefix": "masc_grpc",
@@ -390,8 +360,8 @@
         "Tool_autoresearch_schemas"
       ],
       "internal_edges": 6,
-      "external_dep_count": 10,
-      "coupling_ratio": 0.375
+      "external_dep_count": 11,
+      "coupling_ratio": 0.353
     },
     {
       "prefix": "keeper_exec",
@@ -413,8 +383,8 @@
         "Keeper_exec_voice"
       ],
       "internal_edges": 19,
-      "external_dep_count": 42,
-      "coupling_ratio": 0.311
+      "external_dep_count": 57,
+      "coupling_ratio": 0.25
     },
     {
       "prefix": "tool_local",
@@ -429,8 +399,8 @@
         "Tool_local_runtime_verify"
       ],
       "internal_edges": 4,
-      "external_dep_count": 11,
-      "coupling_ratio": 0.267
+      "external_dep_count": 12,
+      "coupling_ratio": 0.25
     },
     {
       "prefix": "operator_digest",
@@ -444,6 +414,22 @@
       "internal_edges": 2,
       "external_dep_count": 6,
       "coupling_ratio": 0.25
+    },
+    {
+      "prefix": "oas_worker",
+      "module_count": 7,
+      "members": [
+        "Oas_worker",
+        "Oas_worker_cascade",
+        "Oas_worker_exec",
+        "Oas_worker_exec_agent",
+        "Oas_worker_exec_checkpoint",
+        "Oas_worker_exec_transport",
+        "Oas_worker_named"
+      ],
+      "internal_edges": 8,
+      "external_dep_count": 25,
+      "coupling_ratio": 0.242
     },
     {
       "prefix": "mcp_server",
@@ -461,12 +447,12 @@
         "Mcp_server_eio_types"
       ],
       "internal_edges": 17,
-      "external_dep_count": 56,
-      "coupling_ratio": 0.233
+      "external_dep_count": 57,
+      "coupling_ratio": 0.23
     },
     {
       "prefix": "server_routes",
-      "module_count": 16,
+      "module_count": 17,
       "members": [
         "Server_routes_http",
         "Server_routes_http_common",
@@ -479,15 +465,16 @@
         "Server_routes_http_routes_channel_gate",
         "Server_routes_http_routes_dashboard",
         "Server_routes_http_routes_frontend",
+        "Server_routes_http_routes_legendary_bash",
         "Server_routes_http_routes_provider_runs",
         "Server_routes_http_routes_room",
         "Server_routes_http_routes_sidecar",
         "Server_routes_http_routes_verification",
         "Server_routes_http_runtime"
       ],
-      "internal_edges": 20,
-      "external_dep_count": 67,
-      "coupling_ratio": 0.23
+      "internal_edges": 21,
+      "external_dep_count": 72,
+      "coupling_ratio": 0.226
     },
     {
       "prefix": "tool_inline",
@@ -504,18 +491,6 @@
       "coupling_ratio": 0.214
     },
     {
-      "prefix": "governance_pipeline",
-      "module_count": 3,
-      "members": [
-        "Governance_pipeline",
-        "Governance_pipeline_risk",
-        "Governance_pipeline_types"
-      ],
-      "internal_edges": 3,
-      "external_dep_count": 12,
-      "coupling_ratio": 0.2
-    },
-    {
       "prefix": "worker_runtime",
       "module_count": 4,
       "members": [
@@ -525,17 +500,41 @@
         "Worker_runtime_helper_protocol"
       ],
       "internal_edges": 2,
-      "external_dep_count": 9,
-      "coupling_ratio": 0.182
+      "external_dep_count": 8,
+      "coupling_ratio": 0.2
+    },
+    {
+      "prefix": "keeper_sandbox",
+      "module_count": 3,
+      "members": [
+        "Keeper_sandbox",
+        "Keeper_sandbox_containment",
+        "Keeper_sandbox_runtime"
+      ],
+      "internal_edges": 1,
+      "external_dep_count": 4,
+      "coupling_ratio": 0.2
+    },
+    {
+      "prefix": "governance_pipeline",
+      "module_count": 3,
+      "members": [
+        "Governance_pipeline",
+        "Governance_pipeline_risk",
+        "Governance_pipeline_types"
+      ],
+      "internal_edges": 3,
+      "external_dep_count": 15,
+      "coupling_ratio": 0.167
     },
     {
       "prefix": "keeper_turn",
       "module_count": 10,
       "members": [
         "Keeper_turn",
-        "Keeper_turn_cycle_contract",
         "Keeper_turn_intent",
         "Keeper_turn_lifecycle",
+        "Keeper_turn_sandbox_runtime",
         "Keeper_turn_setup",
         "Keeper_turn_telemetry",
         "Keeper_turn_up",
@@ -544,8 +543,8 @@
         "Keeper_turn_up_update"
       ],
       "internal_edges": 8,
-      "external_dep_count": 42,
-      "coupling_ratio": 0.16
+      "external_dep_count": 47,
+      "coupling_ratio": 0.145
     },
     {
       "prefix": "tool_misc",
@@ -574,17 +573,23 @@
       "coupling_ratio": 0.133
     },
     {
-      "prefix": "oas_worker",
-      "module_count": 4,
+      "prefix": "keeper_tool",
+      "module_count": 10,
       "members": [
-        "Oas_worker",
-        "Oas_worker_cascade",
-        "Oas_worker_exec",
-        "Oas_worker_named"
+        "Keeper_tool_affinity",
+        "Keeper_tool_alias",
+        "Keeper_tool_boundary",
+        "Keeper_tool_call_log",
+        "Keeper_tool_disclosure",
+        "Keeper_tool_diversity",
+        "Keeper_tool_policy",
+        "Keeper_tool_policy_config",
+        "Keeper_tool_pr_review",
+        "Keeper_tool_registry"
       ],
       "internal_edges": 3,
-      "external_dep_count": 21,
-      "coupling_ratio": 0.125
+      "external_dep_count": 24,
+      "coupling_ratio": 0.111
     },
     {
       "prefix": "dashboard_governance",
@@ -597,18 +602,6 @@
       "internal_edges": 1,
       "external_dep_count": 8,
       "coupling_ratio": 0.111
-    },
-    {
-      "prefix": "keeper_status",
-      "module_count": 3,
-      "members": [
-        "Keeper_status",
-        "Keeper_status_bridge",
-        "Keeper_status_detail"
-      ],
-      "internal_edges": 3,
-      "external_dep_count": 26,
-      "coupling_ratio": 0.103
     },
     {
       "prefix": "server_dashboard",
@@ -628,25 +621,34 @@
         "Server_dashboard_http_runtime_support"
       ],
       "internal_edges": 8,
-      "external_dep_count": 73,
-      "coupling_ratio": 0.099
+      "external_dep_count": 77,
+      "coupling_ratio": 0.094
     },
     {
-      "prefix": "keeper_tool",
-      "module_count": 8,
+      "prefix": "keeper_status",
+      "module_count": 3,
       "members": [
-        "Keeper_tool_affinity",
-        "Keeper_tool_call_log",
-        "Keeper_tool_disclosure",
-        "Keeper_tool_diversity",
-        "Keeper_tool_policy",
-        "Keeper_tool_policy_config",
-        "Keeper_tool_pr_review",
-        "Keeper_tool_registry"
+        "Keeper_status",
+        "Keeper_status_bridge",
+        "Keeper_status_detail"
+      ],
+      "internal_edges": 3,
+      "external_dep_count": 33,
+      "coupling_ratio": 0.083
+    },
+    {
+      "prefix": "keeper_runtime",
+      "module_count": 5,
+      "members": [
+        "Keeper_runtime",
+        "Keeper_runtime_config",
+        "Keeper_runtime_contract",
+        "Keeper_runtime_resolved",
+        "Keeper_runtime_trust_snapshot"
       ],
       "internal_edges": 2,
-      "external_dep_count": 22,
-      "coupling_ratio": 0.083
+      "external_dep_count": 24,
+      "coupling_ratio": 0.077
     },
     {
       "prefix": "server_h2",
@@ -669,8 +671,20 @@
         "Keeper_types_support"
       ],
       "internal_edges": 1,
-      "external_dep_count": 16,
-      "coupling_ratio": 0.059
+      "external_dep_count": 17,
+      "coupling_ratio": 0.056
+    },
+    {
+      "prefix": "keeper_unified",
+      "module_count": 3,
+      "members": [
+        "Keeper_unified_metrics",
+        "Keeper_unified_prompt",
+        "Keeper_unified_turn"
+      ],
+      "internal_edges": 2,
+      "external_dep_count": 45,
+      "coupling_ratio": 0.043
     },
     {
       "prefix": "dashboard_http",
@@ -685,8 +699,8 @@
         "Dashboard_http_tool_quality"
       ],
       "internal_edges": 2,
-      "external_dep_count": 52,
-      "coupling_ratio": 0.037
+      "external_dep_count": 58,
+      "coupling_ratio": 0.033
     },
     {
       "prefix": "dashboard_execution",
@@ -699,7 +713,7 @@
         "Dashboard_execution_sessions"
       ],
       "internal_edges": 0,
-      "external_dep_count": 12,
+      "external_dep_count": 13,
       "coupling_ratio": 0.0
     },
     {
@@ -712,7 +726,7 @@
         "Keeper_memory_recall"
       ],
       "internal_edges": 0,
-      "external_dep_count": 6,
+      "external_dep_count": 7,
       "coupling_ratio": 0.0
     },
     {
@@ -748,7 +762,19 @@
         "Operator_control_snapshot"
       ],
       "internal_edges": 0,
-      "external_dep_count": 24,
+      "external_dep_count": 26,
+      "coupling_ratio": 0.0
+    },
+    {
+      "prefix": "keeper_shell",
+      "module_count": 3,
+      "members": [
+        "Keeper_shell_bg_task",
+        "Keeper_shell_docker",
+        "Keeper_shell_gh_context"
+      ],
+      "internal_edges": 0,
+      "external_dep_count": 13,
       "coupling_ratio": 0.0
     }
   ],
@@ -764,6 +790,7 @@
       "Keeper_cascade_profile",
       "Prometheus"
     ],
+    "Attempt_state": [],
     "Admission_queue_metrics": [
       "Prometheus"
     ],
@@ -820,7 +847,8 @@
       "Oas_response",
       "Oas_worker",
       "Provider_adapter",
-      "Spawn"
+      "Spawn",
+      "Tool_name"
     ],
     "Auth": [
       "Tool_access_policy",
@@ -856,9 +884,20 @@
     ],
     "Cache_eio": [],
     "Cascade_inference": [
+      "Cascade_catalog_runtime",
       "Cascade_config",
-      "Cascade_runtime",
       "Keeper_cascade_profile"
+    ],
+    "Cascade_catalog_runtime": [
+      "Cascade_config",
+      "Cascade_config_loader",
+      "Cascade_strategy",
+      "Cascade_toml_materializer",
+      "Config_dir_resolver",
+      "Keeper_cascade_profile",
+      "Keeper_config",
+      "Masc_eio_env",
+      "Provider_tool_support"
     ],
     "Cascade_client_capacity": [
       "Cascade_client_capacity_history",
@@ -867,31 +906,46 @@
     "Cascade_client_capacity_history": [
       "Prometheus"
     ],
+    "Cascade_catalog_validator": [
+      "Cascade_config",
+      "Cascade_config_loader",
+      "Cascade_strategy"
+    ],
     "Cascade_config": [
       "Cascade_config_loader",
       "Cascade_health_filter",
       "Cascade_health_tracker",
       "Cascade_model_resolve",
+      "Cascade_state",
       "Cascade_strategy",
       "Cascade_throttle",
+      "Provider_adapter",
       "Provider_kind_resolver"
     ],
-    "Cascade_config_loader": [],
+    "Cascade_config_loader": [
+      "Cascade_toml_materializer"
+    ],
+    "Cascade_toml_materializer": [
+      "Config_dir_resolver"
+    ],
     "Cascade_fsm": [
       "Cascade_health_filter"
     ],
     "Cascade_health_filter": [],
     "Cascade_health_tracker": [],
-    "Cascade_model_resolve": [],
+    "Cascade_model_resolve": [
+      "Provider_adapter"
+    ],
     "Cascade_ollama_probe": [
       "Cascade_throttle"
     ],
     "Cascade_runtime": [
+      "Cascade_catalog_runtime",
       "Cascade_config",
-      "Cascade_config_loader",
       "Config_dir_resolver",
       "Keeper_cascade_profile",
-      "Provider_adapter"
+      "Provider_adapter",
+      "Provider_tool_support"
     ],
     "Cascade_state": [],
     "Cascade_strategy": [
@@ -909,19 +963,22 @@
     ],
     "Config": [
       "Capability_registry",
+      "Keeper_types",
       "Tool_agent_timeline",
       "Tool_autoresearch",
       "Tool_board",
       "Tool_catalog",
       "Tool_compact",
-      "Tool_keeper",
       "Tool_local_runtime",
       "Tool_shard",
       "Tool_team_memory",
       "Tools"
     ],
     "Config_doctor": [
+      "Cascade_catalog_runtime",
+      "Cascade_catalog_validator",
       "Config_dir_resolver",
+      "Keeper_sandbox_runtime",
       "Server_base_path_diagnostics"
     ],
     "Doctor_dispatch": [],
@@ -952,6 +1009,9 @@
     ],
     "Dashboard_cache": [
       "Dashboard"
+    ],
+    "Dashboard_projection_cache": [
+      "Dashboard_cache"
     ],
     "Dashboard_tool_host_events": [
       "Audit_log",
@@ -986,10 +1046,26 @@
       "Operator_approval",
       "Operator_judgment"
     ],
+    "Dashboard_safe_autonomy": [
+      "Activity_feed",
+      "Coord",
+      "Dashboard",
+      "Dashboard_governance_metrics",
+      "Dashboard_http_tool_quality",
+      "Keeper_approval_queue",
+      "Keeper_benchmark_canary",
+      "Keeper_id",
+      "Keeper_repo_readiness",
+      "Keeper_sandbox",
+      "Keeper_status_bridge",
+      "Keeper_types",
+      "Transport_metrics"
+    ],
     "Dashboard_surface_readiness": [],
     "Dashboard_execution": [
       "Coord",
       "Dashboard",
+      "Dashboard_projection_cache",
       "Keeper_exec_status",
       "Keeper_status_bridge",
       "Keeper_types",
@@ -1024,8 +1100,8 @@
       "Operator_digest_types"
     ],
     "Dashboard_mission": [
-      "Dashboard_cache",
       "Dashboard_mission_assembly",
+      "Dashboard_projection_cache",
       "Operator_control",
       "Operator_digest_types"
     ],
@@ -1102,8 +1178,10 @@
       "Anti_rationalization",
       "Cascade_config",
       "Cascade_runtime",
+      "Cdal_verdict_gate",
       "Coord",
       "Dashboard",
+      "Dashboard_attribution",
       "Dashboard_eval_feed",
       "Dashboard_goals",
       "Dashboard_harness_health",
@@ -1113,6 +1191,7 @@
       "Governance_registry",
       "Keeper",
       "Keeper_alerting_path",
+      "Keeper_cascade_profile",
       "Keeper_crash_persistence",
       "Keeper_decision_audit",
       "Keeper_exec_context",
@@ -1120,13 +1199,16 @@
       "Keeper_exec_status_metrics",
       "Keeper_exec_tools",
       "Keeper_execution",
-      "Keeper_execution_scope",
+      "Keeper_execution_receipt",
       "Keeper_hooks_oas",
       "Keeper_id",
       "Keeper_memory",
       "Keeper_prompt",
       "Keeper_prompt_names",
       "Keeper_registry",
+      "Keeper_runtime_contract",
+      "Keeper_runtime_trust_snapshot",
+      "Keeper_sandbox_runtime",
       "Keeper_state_machine",
       "Keeper_status_bridge",
       "Keeper_supervisor",
@@ -1149,12 +1231,19 @@
       "Cascade_runtime",
       "Coord",
       "Eval_calibration",
+      "Harness",
       "Keeper_types"
     ],
     "Dashboard_eval_feed": [],
     "Dashboard_goals": [
       "Coord",
-      "Goal_store"
+      "Goal_phase",
+      "Goal_store",
+      "Goal_verification",
+      "Keeper_approval_queue",
+      "Keeper_execution_receipt",
+      "Keeper_id",
+      "Keeper_types"
     ],
     "Dashboard_feature_health": [],
     "Dashboard_provider_runs": [
@@ -1168,11 +1257,17 @@
       "Tool_local_runtime_core"
     ],
     "Dashboard_cascade": [
+      "Cascade_catalog_runtime",
+      "Cascade_catalog_validator",
       "Cascade_client_capacity",
       "Cascade_client_capacity_history",
+      "Cascade_config_loader",
       "Cascade_runtime",
       "Cascade_strategy_trace",
       "Cascade_throttle",
+      "Cascade_toml_materializer",
+      "Config_dir_resolver",
+      "Keeper",
       "Keeper_cascade_profile",
       "Keeper_registry"
     ],
@@ -1189,7 +1284,9 @@
       "Build_identity",
       "Config_dir_resolver",
       "Coord",
+      "Dashboard",
       "Dashboard_http_helpers",
+      "Keeper_runtime_resolved",
       "Tool_local_runtime",
       "Tool_misc",
       "Tool_unified"
@@ -1199,6 +1296,7 @@
       "Dashboard",
       "Dashboard_cache",
       "Dashboard_execution",
+      "Dashboard_http_keeper",
       "Keeper_status_bridge",
       "Keeper_types",
       "Mcp_server",
@@ -1223,13 +1321,6 @@
       "Server_dashboard_http_core",
       "Server_dashboard_http_execution_surfaces",
       "Sse"
-    ],
-    "Server_meta_cognition_feedback": [
-      "Board",
-      "Board_dispatch",
-      "Dashboard",
-      "Dashboard_http_helpers",
-      "Meta_cognition"
     ],
     "Server_dashboard_http": [
       "Board",
@@ -1288,6 +1379,7 @@
       "Server_routes_http_routes_channel_gate",
       "Server_routes_http_routes_dashboard",
       "Server_routes_http_routes_frontend",
+      "Server_routes_http_routes_legendary_bash",
       "Server_routes_http_routes_provider_runs",
       "Server_routes_http_routes_room",
       "Server_routes_http_routes_sidecar",
@@ -1363,6 +1455,7 @@
       "Keeper_types",
       "Local_runtime_pool",
       "Mcp_server",
+      "Oas",
       "Operator_control_snapshot",
       "Prometheus",
       "Server_auth",
@@ -1382,12 +1475,23 @@
       "Tool_unified"
     ],
     "Server_dashboard_http_delete_actions": [
+      "Auth",
       "Board_dispatch",
+      "Config_dir_resolver",
+      "Coord",
       "Goal_janitor",
       "Goal_store",
+      "Keeper",
+      "Keeper_id",
+      "Keeper_keepalive",
+      "Keeper_registry",
+      "Keeper_types",
       "Mcp_server",
+      "Metrics_store_eio",
+      "Operator_pending_confirm",
       "Server_auth",
-      "Task_dispatch"
+      "Task_dispatch",
+      "Tool_shard"
     ],
     "Server_routes_http_routes_frontend": [
       "Credits_dashboard",
@@ -1407,17 +1511,18 @@
       "Web_dashboard"
     ],
     "Server_routes_http_routes_room": [
-      "Coord",
       "Dashboard_execution_helpers",
       "Mcp_server",
+      "Room_protocol",
       "Server_auth",
       "Server_routes_http_common",
-      "Server_utils",
-      "Tempo"
+      "Server_utils"
     ],
     "Server_routes_http_routes_dashboard": [
       "Anti_rationalization",
       "Auth",
+      "Cascade_catalog_runtime",
+      "Cascade_catalog_validator",
       "Cascade_runtime",
       "Config_dir_resolver",
       "Coord",
@@ -1426,10 +1531,12 @@
       "Dashboard_harness_health",
       "Dashboard_http_autoresearch",
       "Dashboard_http_tool_quality",
+      "Dashboard_safe_autonomy",
       "Dashboard_surface_readiness",
       "Dashboard_tool_host_events",
       "Env_config_introspect",
       "Keeper",
+      "Keeper_cascade_profile",
       "Keeper_toml_loader",
       "Mcp_server",
       "Server_auth",
@@ -1487,6 +1594,11 @@
       "Tool_board"
     ],
     "Server_routes_http_routes_artifacts": [
+      "Server_auth",
+      "Server_utils"
+    ],
+    "Server_routes_http_routes_legendary_bash": [
+      "Legendary_counters",
       "Server_auth",
       "Server_utils"
     ],
@@ -1553,6 +1665,7 @@
       "Agent_identity",
       "Agent_registry_eio",
       "Agent_tool_surfaces",
+      "Board",
       "Board_dispatch",
       "Board_votes",
       "Cache_eio",
@@ -1574,6 +1687,7 @@
       "Masc_event_bus",
       "Mcp_server",
       "Metrics_store_eio",
+      "Oas",
       "Oas_bus_instrument",
       "Oas_sse_bridge",
       "Operator_control",
@@ -1612,6 +1726,8 @@
     "Server_base_path_diagnostics": [],
     "Server_runtime_bootstrap": [
       "Agent_stress",
+      "Auth",
+      "Cascade_catalog_runtime",
       "Config_dir_resolver",
       "Coord",
       "Dashboard",
@@ -1623,6 +1739,7 @@
       "Keeper_exec_tools",
       "Keeper_keepalive",
       "Keeper_runtime_config",
+      "Keeper_runtime_resolved",
       "Keeper_types",
       "Llm_metric_bridge",
       "Masc_eio_env",
@@ -1655,7 +1772,9 @@
       "Transport",
       "Transport_bridge"
     ],
+    "Server_state_product": [],
     "Server_startup_state": [
+      "Server_state_product",
       "Transport"
     ],
     "Server_startup_takeover": [
@@ -1730,7 +1849,38 @@
     "Web_dashboard": [],
     "Credits_dashboard": [],
     "Repo_synthesis_benchmark": [],
+    "Keeper_benchmark_canary": [
+      "Keeper",
+      "Keeper_config",
+      "Keeper_types",
+      "Tool_call_quality_benchmark"
+    ],
+    "Tool_call_quality_benchmark_types": [],
+    "Tool_call_quality_benchmark_loader": [
+      "Tool_call_quality_benchmark_types"
+    ],
+    "Tool_call_quality_benchmark_scoring": [
+      "Tool_call_quality_benchmark_types"
+    ],
+    "Tool_call_quality_benchmark_summary": [
+      "Tool_call_quality_benchmark_scoring",
+      "Tool_call_quality_benchmark_types"
+    ],
+    "Tool_call_quality_benchmark_render": [
+      "Tool_call_quality_benchmark_types"
+    ],
+    "Tool_call_quality_benchmark": [
+      "Tool_call_quality_benchmark_loader",
+      "Tool_call_quality_benchmark_render",
+      "Tool_call_quality_benchmark_scoring",
+      "Tool_call_quality_benchmark_summary"
+    ],
+    "Room_protocol": [
+      "Coord",
+      "Tempo"
+    ],
     "Inference_utils": [
+      "Oas",
       "Oas_response"
     ],
     "WebRTC": [],
@@ -1746,7 +1896,9 @@
     ],
     "Graphql_endpoint": [],
     "Graphql_api": [],
-    "Handover_eio": [],
+    "Handover_eio": [
+      "Prometheus"
+    ],
     "Hebbian_eio": [
       "Level2_config"
     ],
@@ -1755,6 +1907,7 @@
       "Otel_config",
       "Otel_trace_context",
       "Prometheus",
+      "Server_startup_state",
       "Streamable_http",
       "Version"
     ],
@@ -1768,7 +1921,9 @@
     "Llm_metric_bridge": [
       "Prometheus"
     ],
-    "Oas_log_bridge": [],
+    "Oas_log_bridge": [
+      "Oas"
+    ],
     "Local_runtime_pool": [
       "Discovery_cache",
       "Provider_adapter"
@@ -1776,6 +1931,7 @@
     "Lockfree_atomic": [],
     "Retrieval_projection": [],
     "Sdk_tool_contract": [
+      "Oas",
       "Tool_schema_dsl"
     ],
     "Worker_types": [],
@@ -1804,8 +1960,7 @@
     "Worker_runtime": [],
     "Worker_runtime_config": [
       "Config_dir_resolver",
-      "Worker_execution_backend",
-      "Worker_types"
+      "Worker_execution_backend"
     ],
     "Worker_runtime_docker": [
       "Cascade_config",
@@ -1843,43 +1998,47 @@
       "Worker_execution_spec",
       "Worker_oas",
       "Worker_runtime_config",
-      "Worker_runtime_docker",
-      "Worker_types"
+      "Worker_runtime_docker"
     ],
     "Worker_dev_tools": [
       "Attribution",
       "Dashboard_attribution",
       "Eval_gate",
+      "Oas",
       "Worker_tool_input"
     ],
-    "Worker_tool_input": [],
-    "Worker_verification": [
-      "Oas",
-      "Verifier_oas",
-      "Worker_container_types"
+    "Legendary_counters": [
+      "Gate_diff_types"
     ],
+    "Worker_tool_input": [],
     "Prompt_defaults": [
       "Config_dir_resolver"
     ],
     "Prompt_composer": [
       "Team_context"
     ],
-    "Oas_response": [],
+    "Oas_response": [
+      "Oas"
+    ],
     "Thompson_sampling": [
       "Agent_health",
       "Heuristic_metrics",
       "Post_verifier"
     ],
-    "Memory_jsonl": [],
+    "Memory_jsonl": [
+      "Oas"
+    ],
     "Memory_oas_bridge": [
       "Institution_eio",
       "Keeper_memory_policy",
       "Memory_jsonl",
+      "Oas",
       "Procedural_memory"
     ],
     "Memory_hooks": [
       "Keeper",
-      "Memory_oas_bridge"
+      "Memory_oas_bridge",
+      "Oas"
     ],
     "Meta_cognition": [],
     "Meta_cognition_types": [],
@@ -1890,9 +2049,12 @@
       "Board",
       "Coord",
       "Meta_cognition_rules",
-      "Meta_cognition_types"
+      "Meta_cognition_types",
+      "Prometheus"
     ],
-    "Governance_cases_snapshot": [],
+    "Governance_cases_snapshot": [
+      "Prometheus"
+    ],
     "Meta_cognition_parse": [
       "Meta_cognition_types"
     ],
@@ -1972,6 +2134,7 @@
       "Audit_log",
       "Auth",
       "Coord",
+      "Keeper_tool_boundary",
       "Mcp_server",
       "Mcp_server_eio_governance",
       "Mcp_server_eio_helpers",
@@ -1990,7 +2153,6 @@
       "Tool_coord",
       "Tool_dispatch",
       "Tool_inline_dispatch",
-      "Tool_keeper",
       "Tool_library",
       "Tool_local_runtime",
       "Tool_misc",
@@ -2007,6 +2169,7 @@
       "Agent_identity",
       "Agent_registry_eio",
       "Audit_log",
+      "Keeper_registry",
       "Masc_error_recovery",
       "Mcp_server",
       "Mcp_server_eio_types",
@@ -2022,7 +2185,8 @@
       "Workflow_guide"
     ],
     "Masc_context_injector": [
-      "Context"
+      "Context",
+      "Oas"
     ],
     "Masc_error_recovery": [],
     "Mcp_server_eio_tool_profile": [
@@ -2056,7 +2220,8 @@
     "Metrics_store_eio": [],
     "Oas": [],
     "Verification": [
-      "Attribution"
+      "Attribution",
+      "Prometheus"
     ],
     "Operator_approval": [
       "Oas"
@@ -2106,6 +2271,7 @@
       "Cascade_runtime",
       "Coord",
       "Dashboard",
+      "Dashboard_cache",
       "Dashboard_http_helpers",
       "Keeper_exec_status",
       "Keeper_exec_status_metrics",
@@ -2113,6 +2279,7 @@
       "Keeper_id",
       "Keeper_memory",
       "Keeper_registry",
+      "Keeper_social_model",
       "Keeper_state_machine",
       "Keeper_status_bridge",
       "Keeper_types",
@@ -2144,6 +2311,10 @@
       "Tool_dispatch",
       "Tool_result"
     ],
+    "Otel_genai": [
+      "Otel_config",
+      "Otel_spans"
+    ],
     "Otel_spans": [
       "Config",
       "Opentelemetry_client_cohttp_eio",
@@ -2170,23 +2341,21 @@
       "Governance_registry",
       "Runtime_params"
     ],
-    "Goal_store": [
-      "Coord"
+    "Goal_phase": [],
+    "Goal_verification": [
+      "Coord",
+      "Goal_phase"
     ],
-    "Goal_guard": [],
+    "Goal_store": [
+      "Coord",
+      "Goal_phase",
+      "Goal_verification"
+    ],
     "Goal_janitor": [
       "Coord",
+      "Goal_phase",
       "Goal_store",
       "Keeper_types"
-    ],
-    "Goal_orchestrator": [
-      "Coord",
-      "Goal_store",
-      "Heuristic_metrics"
-    ],
-    "Goal_scheduler": [
-      "Coord",
-      "Goal_store"
     ],
     "Convergence": [],
     "Coord": [
@@ -2201,7 +2370,9 @@
       "Subscriptions",
       "Telemetry_eio"
     ],
-    "Run_eio": [],
+    "Run_eio": [
+      "Prometheus"
+    ],
     "Team_context": [],
     "Keeper_generation_lineage": [
       "Coord",
@@ -2241,10 +2412,10 @@
     ],
     "Tui_decode": [],
     "Tools": [
+      "Keeper_types",
       "Tool_autoresearch",
       "Tool_code",
       "Tool_code_write",
-      "Tool_keeper",
       "Tool_library",
       "Tool_local_runtime",
       "Tool_run",
@@ -2254,9 +2425,7 @@
       "Tool_team_memory"
     ],
     "Tool_args": [],
-    "Task_sandbox": [
-      "Worker_types"
-    ],
+    "Task_sandbox": [],
     "Tool_plan": [
       "Coord",
       "Planning_eio",
@@ -2271,7 +2440,9 @@
       "Tool_dispatch",
       "Tool_spec"
     ],
-    "Tool_bridge": [],
+    "Tool_bridge": [
+      "Oas"
+    ],
     "Tool_access_policy": [
       "Tool_catalog"
     ],
@@ -2324,6 +2495,7 @@
       "Cdal_verdict_gate",
       "Coord",
       "Eval_calibration",
+      "Goal_store",
       "Harness",
       "Keeper_tool_policy",
       "Keeper_types",
@@ -2344,8 +2516,29 @@
     "Task_dispatch": [
       "Coord"
     ],
+    "Coord_types": [
+      "Coord"
+    ],
+    "Coord_status_rendering": [
+      "Coord_types"
+    ],
+    "Coord_goals": [
+      "Coord_types",
+      "Goal_phase",
+      "Goal_store",
+      "Goal_verification",
+      "Tool_args"
+    ],
+    "Coord_assertions": [
+      "Coord_types"
+    ],
     "Tool_coord": [
+      "Auth",
       "Coord",
+      "Coord_assertions",
+      "Coord_goals",
+      "Coord_status_rendering",
+      "Coord_types",
       "Planning_eio",
       "Tool_args",
       "Tool_catalog",
@@ -2381,6 +2574,7 @@
       "Coord",
       "Keeper_alerting_path",
       "Keeper_types",
+      "Oas",
       "Tool_dispatch",
       "Tool_input_validation",
       "Tool_spec"
@@ -2408,6 +2602,7 @@
       "Inference_utils",
       "Local_runtime_pool",
       "Masc_eio_env",
+      "Oas",
       "Oas_worker_cascade"
     ],
     "Tool_local_runtime_bench": [
@@ -2416,6 +2611,7 @@
       "Inference_utils",
       "Local_runtime_pool",
       "Masc_eio_env",
+      "Oas",
       "Provider_adapter"
     ],
     "Tool_local_runtime_status": [
@@ -2457,11 +2653,13 @@
       "Tool_dispatch"
     ],
     "Typed_tool_masc": [
+      "Oas",
       "Tool_catalog",
       "Tool_dispatch",
       "Tool_spec"
     ],
     "Tool_broadcast_typed": [
+      "Oas",
       "Tool_dispatch",
       "Tool_input_validation",
       "Typed_tool_masc"
@@ -2475,6 +2673,7 @@
     ],
     "Tool_name": [],
     "Tool_input_validation": [
+      "Oas",
       "Tool_dispatch",
       "Tool_result"
     ],
@@ -2484,6 +2683,7 @@
       "Tool_result"
     ],
     "Tool_metrics_persist": [
+      "Prometheus",
       "Shutdown",
       "Tool_metrics",
       "Tool_result"
@@ -2542,12 +2742,12 @@
       "Tool_inline_dispatch_comm",
       "Tool_inline_dispatch_coord",
       "Tool_inline_dispatch_extra",
-      "Tool_inline_dispatch_types",
-      "Worker_types"
+      "Tool_inline_dispatch_types"
     ],
     "Tool_inline_dispatch_extra": [
       "A2a_tools",
       "Auto_responder",
+      "Board",
       "Mcp_server",
       "Metrics_store_eio",
       "Notify",
@@ -2605,6 +2805,8 @@
     ],
     "Agent_reputation": [
       "Coord",
+      "Keeper_accountability",
+      "Keeper_identity",
       "Mention_inbox"
     ],
     "Activity_feed": [
@@ -2707,21 +2909,21 @@
     "Eval_harness": [
       "Trajectory"
     ],
+    "Tool_call_replay_harness": [
+      "Provider_adapter"
+    ],
     "Exec_core": [
+      "Cdal_judge",
       "Keeper_alerting_path",
       "Worker_dev_tools"
     ],
     "Eval_calibration": [
       "Anti_rationalization",
-      "Harness"
+      "Harness",
+      "Oas"
     ],
     "Contract": [],
-    "Keeper_schema": [
-      "Keeper_execution_scope"
-    ],
-    "Keeper_execution_scope": [
-      "Keeper"
-    ],
+    "Keeper_schema": [],
     "Keeper_social_model_types": [],
     "Keeper_social_model_protocol": [],
     "Keeper_social_model_magentic_ledger_fsm": [],
@@ -2729,20 +2931,23 @@
     "Keeper_social_model_magentic_ledger_v1": [],
     "Keeper_social_model_registry": [],
     "Keeper_social_model": [
+      "Keeper",
       "Keeper_agent_run",
       "Keeper_social_model_protocol",
       "Keeper_social_model_registry",
       "Keeper_social_model_types",
       "Keeper_types"
     ],
-    "Keeper_cascade_profile": [],
+    "Keeper_cascade_profile": [
+      "Cascade_config_loader",
+      "Config_dir_resolver"
+    ],
     "Keeper_cascade_routing": [
       "Keeper_config",
       "Keeper_state_machine"
     ],
     "Keeper_config": [
       "Keeper_cascade_profile",
-      "Keeper_execution_scope",
       "Runtime_params",
       "Tool_args"
     ],
@@ -2751,28 +2956,37 @@
       "Config_dir_resolver",
       "Keeper_toml_loader"
     ],
+    "Keeper_runtime_resolved": [],
     "Keeper_cdal_contract": [
       "Keeper_types",
       "Oas"
     ],
-    "Proof_artifact_reader": [],
-    "Violation_record": [],
+    "Proof_artifact_reader": [
+      "Oas"
+    ],
+    "Violation_record": [
+      "Oas"
+    ],
     "Cdal_types": [],
     "Cdal_loader": [
+      "Oas",
       "Proof_artifact_reader"
     ],
     "Cdal_judge": [
       "Cdal_loader",
-      "Cdal_types"
+      "Cdal_types",
+      "Oas"
     ],
     "Cdal_eval_v1": [
       "Cdal_friction_projection",
       "Cdal_judge",
       "Cdal_loader",
-      "Cdal_types"
+      "Cdal_types",
+      "Oas"
     ],
     "Cdal_friction_projection": [
       "Cdal_types",
+      "Oas",
       "Proof_artifact_reader",
       "Violation_record"
     ],
@@ -2786,20 +3000,17 @@
       "Board_dispatch",
       "Coord",
       "Dashboard_attribution",
+      "Planning_eio",
       "Subscriptions",
       "Verification"
     ],
-    "Artifact_store": [],
-    "Golden_set": [],
     "Adversarial_eval": [],
     "Labeling": [
       "Cdal_types"
     ],
-    "Keeper_telemetry_feedback": [
-      "Keeper"
-    ],
     "Keeper_deliberation": [
-      "Keeper_prompt_names"
+      "Keeper_prompt_names",
+      "Oas"
     ],
     "Keeper_id": [],
     "Keeper_types_profile": [
@@ -2807,8 +3018,8 @@
       "Coord",
       "Keeper",
       "Keeper_cascade_profile",
-      "Keeper_execution_scope",
       "Keeper_fs",
+      "Keeper_runtime_resolved",
       "Keeper_schema",
       "Keeper_social_model_types",
       "Keeper_toml_loader",
@@ -2821,25 +3032,27 @@
     ],
     "Keeper_types": [
       "Config_dir_resolver",
-      "Context",
       "Coord",
       "Keeper",
       "Keeper_config",
-      "Keeper_execution_scope",
       "Keeper_fs",
       "Keeper_id",
+      "Keeper_identity",
       "Keeper_social_model_types",
       "Keeper_types_profile",
+      "Oas",
       "Tool_catalog",
       "Tool_name"
     ],
     "Keeper_memory": [],
     "Keeper_accountability": [
-      "Attribution"
+      "Attribution",
+      "Keeper_identity"
     ],
     "Keeper_memory_policy": [
       "Coord",
-      "Keeper_types"
+      "Keeper_types",
+      "Oas"
     ],
     "Keeper_memory_bank": [
       "Keeper_types"
@@ -2850,9 +3063,20 @@
       "Keeper_guard",
       "Keeper_measurement",
       "Keeper_state_machine",
-      "Keeper_types"
+      "Keeper_types",
+      "Oas"
     ],
     "Keeper_skill_routing": [],
+    "Keeper_sandbox": [
+      "Coord",
+      "Keeper_types"
+    ],
+    "Keeper_repo_readiness": [
+      "Coord",
+      "Keeper_alerting_path",
+      "Keeper_sandbox",
+      "Keeper_types"
+    ],
     "Keeper_alerting": [
       "Board",
       "Board_dispatch",
@@ -2863,6 +3087,7 @@
       "Keeper_id",
       "Keeper_memory",
       "Keeper_types",
+      "Oas",
       "Runtime_params",
       "Tool_board",
       "Tool_shard"
@@ -2871,7 +3096,35 @@
       "Coord",
       "Keeper_exec_context",
       "Keeper_fs",
+      "Keeper_sandbox",
+      "Keeper_types",
+      "Oas"
+    ],
+    "Keeper_sandbox_containment": [
+      "Coord",
+      "Keeper_alerting_path",
+      "Keeper_sandbox",
       "Keeper_types"
+    ],
+    "Keeper_sandbox_runtime": [
+      "Keeper_types",
+      "Worker_dev_tools"
+    ],
+    "Keeper_turn_sandbox_runtime": [
+      "Coord",
+      "Keeper_alerting_path",
+      "Keeper_sandbox",
+      "Keeper_sandbox_runtime",
+      "Keeper_types",
+      "Worker_dev_tools"
+    ],
+    "Keeper_docker_read": [
+      "Keeper_alerting_path",
+      "Keeper_sandbox",
+      "Keeper_sandbox_runtime",
+      "Keeper_turn_sandbox_runtime",
+      "Keeper_types",
+      "Worker_dev_tools"
     ],
     "Keeper_timing": [],
     "Keeper_tool_registry": [
@@ -2882,7 +3135,9 @@
       "Tool_shard"
     ],
     "Keeper_tool_diversity": [
-      "Keeper_types"
+      "Keeper",
+      "Keeper_types",
+      "Tool_name"
     ],
     "Keeper_tool_policy_config": [
       "Config_dir_resolver",
@@ -2903,7 +3158,12 @@
       "Tool_catalog",
       "Tool_code_write",
       "Tool_dispatch",
+      "Tool_name",
       "Tool_shard"
+    ],
+    "Keeper_tool_boundary": [
+      "Coord",
+      "Tool_keeper"
     ],
     "Keeper_turn_intent": [],
     "Keeper_discovered_tools": [],
@@ -2939,6 +3199,7 @@
       "Keeper_alerting",
       "Keeper_alerting_path",
       "Keeper_exec_context",
+      "Keeper_sandbox",
       "Keeper_tool_policy",
       "Keeper_types",
       "Tool_dispatch",
@@ -2958,20 +3219,58 @@
       "Coord",
       "Keeper",
       "Keeper_alerting_path",
+      "Keeper_docker_read",
       "Keeper_exec_shared",
+      "Keeper_sandbox_containment",
+      "Keeper_turn_sandbox_runtime",
       "Keeper_types",
       "Tool_shard_limits"
+    ],
+    "Keeper_shell_docker": [
+      "Coord",
+      "Keeper_alerting_path",
+      "Keeper_exec_shared",
+      "Keeper_gh_env",
+      "Keeper_registry",
+      "Keeper_sandbox",
+      "Keeper_sandbox_runtime",
+      "Keeper_turn_sandbox_runtime",
+      "Keeper_types",
+      "Worker_dev_tools"
+    ],
+    "Keeper_shell_gh_context": [
+      "Coord",
+      "Keeper_exec_shared",
+      "Keeper_gh_shared",
+      "Keeper_id",
+      "Keeper_sandbox",
+      "Keeper_types"
+    ],
+    "Keeper_shell_bg_task": [
+      "Coord",
+      "Keeper",
+      "Keeper_alerting_path",
+      "Keeper_exec_shared",
+      "Keeper_types"
     ],
     "Keeper_exec_shell": [
       "Coord",
       "Exec_core",
       "Keeper",
       "Keeper_alerting_path",
+      "Keeper_docker_read",
       "Keeper_exec_shared",
       "Keeper_gh_env",
-      "Keeper_registry",
+      "Keeper_gh_shared",
+      "Keeper_sandbox",
+      "Keeper_sandbox_containment",
+      "Keeper_shell_bg_task",
+      "Keeper_shell_docker",
+      "Keeper_shell_gh_context",
       "Keeper_tool_policy",
+      "Keeper_turn_sandbox_runtime",
       "Keeper_types",
+      "Legendary_counters",
       "Tool_code_write",
       "Worker_dev_tools"
     ],
@@ -2982,7 +3281,10 @@
       "Coord",
       "Keeper_config",
       "Keeper_gh_env",
-      "Keeper_tool_policy"
+      "Keeper_id",
+      "Keeper_tool_policy",
+      "Keeper_types",
+      "Tool_code_write"
     ],
     "Keeper_tool_pr_review": [
       "Coord",
@@ -2996,6 +3298,7 @@
       "Keeper_accountability",
       "Keeper_alerting_path",
       "Keeper_identity",
+      "Keeper_repo_readiness",
       "Keeper_tool_policy",
       "Keeper_types"
     ],
@@ -3018,18 +3321,19 @@
       "Coord",
       "Keeper_alerting_path",
       "Keeper_exec_shared",
-      "Keeper_execution_scope",
       "Keeper_types",
       "Tool_autoresearch",
       "Tool_dispatch"
     ],
     "Keeper_exec_memory": [
       "Coord",
+      "Keeper_alerting_path",
       "Keeper_exec_context",
       "Keeper_exec_shared",
       "Keeper_id",
       "Keeper_memory_policy",
       "Keeper_memory_recall",
+      "Keeper_sandbox",
       "Keeper_types"
     ],
     "Keeper_exec_tools": [
@@ -3053,17 +3357,15 @@
     "Keeper_voice_local": [
       "Voice_session_manager"
     ],
-    "Keeper_voice_loop": [
-      "Keeper",
-      "Voice_bridge"
-    ],
     "Keeper_exec_status_metrics": [
       "Keeper_accountability",
       "Keeper_memory",
-      "Keeper_types"
+      "Keeper_types",
+      "Keeper_world_observation"
     ],
     "Keeper_exec_status": [
       "Coord",
+      "Keeper",
       "Keeper_model_labels",
       "Keeper_state_machine",
       "Keeper_types",
@@ -3071,29 +3373,36 @@
     ],
     "Keeper_exec_persona": [
       "Keeper_memory",
+      "Keeper_preset_defaults",
+      "Keeper_turn_up_args",
       "Keeper_types",
       "Tool_args"
     ],
     "Keeper_model_labels": [
       "Cascade_runtime",
+      "Keeper_benchmark_canary",
       "Keeper_types"
     ],
     "Keeper_fs": [
       "Coord",
       "Keeper"
     ],
-    "Keeper_identity": [],
+    "Keeper_identity": [
+      "Keeper_config"
+    ],
     "Keeper_checkpoint_store": [
       "Inference_utils",
       "Keeper",
       "Keeper_fs",
-      "Keeper_types"
+      "Keeper_types",
+      "Oas"
     ],
     "Keeper_text_processing": [
       "Keeper_memory_policy"
     ],
     "Keeper_summarizer": [
-      "Keeper_text_processing"
+      "Keeper_text_processing",
+      "Oas"
     ],
     "Keeper_context_core": [
       "Context",
@@ -3103,7 +3412,9 @@
       "Keeper_fs",
       "Keeper_memory_policy",
       "Keeper_model_labels",
+      "Keeper_text_processing",
       "Keeper_types",
+      "Oas",
       "Provider_adapter"
     ],
     "Keeper_compact_policy": [
@@ -3114,10 +3425,12 @@
       "Harness",
       "Keeper_context_core",
       "Keeper_types",
+      "Oas",
       "Prometheus",
       "Sse"
     ],
     "Keeper_compact_audit": [
+      "Oas",
       "Oas_bus_instrument"
     ],
     "Keeper_rollover": [
@@ -3127,7 +3440,8 @@
       "Keeper_generation_lineage",
       "Keeper_id",
       "Keeper_identity",
-      "Keeper_types"
+      "Keeper_types",
+      "Oas"
     ],
     "Keeper_post_turn": [
       "Keeper",
@@ -3138,14 +3452,19 @@
       "Keeper_memory",
       "Keeper_memory_policy",
       "Keeper_rollover",
-      "Keeper_types"
+      "Keeper_types",
+      "Oas"
     ],
-    "Keeper_artifact_hydrator": [],
+    "Keeper_artifact_hydrator": [
+      "Oas"
+    ],
     "Keeper_exec_context": [
       "Cascade_config",
+      "Cascade_runtime",
       "Coord",
       "Keeper",
       "Keeper_compact_policy",
+      "Keeper_config",
       "Keeper_context_core",
       "Keeper_exec_status",
       "Keeper_id",
@@ -3157,6 +3476,7 @@
       "Keeper_rollover",
       "Keeper_state_machine",
       "Keeper_types",
+      "Oas",
       "Prometheus"
     ],
     "Keeper_tools_oas": [
@@ -3165,9 +3485,12 @@
       "Keeper",
       "Keeper_exec_tools",
       "Keeper_registry",
+      "Keeper_tool_alias",
       "Keeper_tool_call_log",
+      "Keeper_turn_sandbox_runtime",
       "Keeper_types",
       "Keeper_types_support",
+      "Oas",
       "Sse",
       "Tool_bridge",
       "Tool_dispatch",
@@ -3183,6 +3506,7 @@
       "Keeper_registry",
       "Keeper_types",
       "Masc_event_bus",
+      "Oas",
       "Oas_bus_instrument",
       "Sse",
       "Tool_catalog",
@@ -3196,28 +3520,38 @@
       "Keeper_tool_call_log",
       "Keeper_tool_policy",
       "Keeper_types",
+      "Oas",
       "Prometheus",
       "Sse",
       "Tool_catalog",
+      "Tool_name",
       "Trajectory"
     ],
     "Keeper_extend_turns": [
-      "Agent"
+      "Agent",
+      "Oas"
     ],
     "Keeper_llm_bridge": [
       "Keeper",
       "Masc_eio_env",
       "Oas"
     ],
+    "Keeper_tool_alias": [],
     "Keeper_tool_disclosure": [
       "Keeper_registry",
-      "Keeper_types"
+      "Keeper_tool_alias",
+      "Keeper_types",
+      "Oas"
     ],
     "Keeper_turn_telemetry": [
       "Cdal_friction_projection",
       "Cdal_types",
       "Keeper",
-      "Keeper_types_profile"
+      "Keeper_types_profile",
+      "Oas"
+    ],
+    "Keeper_wake_telemetry": [
+      "Oas"
     ],
     "Keeper_approval_queue": [
       "Keeper",
@@ -3225,17 +3559,41 @@
       "Observability_redact",
       "Sse"
     ],
+    "Keeper_runtime_contract": [
+      "Convergence",
+      "Coord",
+      "Keeper_approval_queue",
+      "Keeper_id",
+      "Keeper_types"
+    ],
+    "Keeper_runtime_trust_snapshot": [
+      "Coord",
+      "Keeper_approval_queue",
+      "Keeper_exec_status",
+      "Keeper_id",
+      "Keeper_memory",
+      "Keeper_registry",
+      "Keeper_runtime_contract",
+      "Keeper_state_machine",
+      "Keeper_status_bridge",
+      "Keeper_tool_call_log",
+      "Keeper_types"
+    ],
     "Keeper_agent_run": [
       "Agent",
+      "Cascade_catalog_runtime",
       "Cascade_config",
       "Cascade_inference",
       "Cascade_runtime",
       "Cdal_eval_v1",
       "Cdal_loader",
       "Cdal_types",
+      "Config_dir_resolver",
       "Context",
       "Coord",
+      "Dashboard_harness_health",
       "Governance_pipeline",
+      "Harness",
       "Inference_utils",
       "Keeper",
       "Keeper_alerting_path",
@@ -3247,6 +3605,7 @@
       "Keeper_discovered_tools",
       "Keeper_exec_context",
       "Keeper_exec_tools",
+      "Keeper_execution_receipt",
       "Keeper_extend_turns",
       "Keeper_hooks_oas",
       "Keeper_id",
@@ -3256,9 +3615,12 @@
       "Keeper_memory_recall",
       "Keeper_prompt",
       "Keeper_registry",
+      "Keeper_runtime_resolved",
       "Keeper_summarizer",
+      "Keeper_text_processing",
       "Keeper_timing",
       "Keeper_tool_affinity",
+      "Keeper_tool_alias",
       "Keeper_tool_call_log",
       "Keeper_tool_disclosure",
       "Keeper_tool_policy",
@@ -3269,6 +3631,7 @@
       "Keeper_types",
       "Keeper_types_profile",
       "Keeper_types_support",
+      "Keeper_wake_telemetry",
       "Masc_context_injector",
       "Memory_hooks",
       "Memory_oas_bridge",
@@ -3282,10 +3645,13 @@
       "Agent_economy",
       "Board",
       "Board_dispatch",
+      "Cascade_config",
+      "Cascade_health_tracker",
       "Cascade_runtime",
       "Coord",
       "Keeper",
       "Keeper_approval_queue",
+      "Keeper_cascade_profile",
       "Keeper_checkpoint_store",
       "Keeper_config",
       "Keeper_exec_context",
@@ -3295,6 +3661,7 @@
       "Keeper_model_labels",
       "Keeper_registry",
       "Keeper_types",
+      "Oas",
       "Worktree_live_context"
     ],
     "Keeper_decision_audit": [
@@ -3305,8 +3672,6 @@
       "Keeper_state_machine",
       "Keeper_world_observation"
     ],
-    "Keeper_decision_pipeline_contract": [],
-    "Keeper_turn_cycle_contract": [],
     "Keeper_composite_observer": [
       "Keeper_failure_circuit_breaker",
       "Keeper_registry",
@@ -3317,17 +3682,48 @@
     "Keeper_behavioral_regime_observer": [
       "Keeper_types"
     ],
-    "Keeper_campaign_fsm": [],
     "Keeper_unified_prompt": [
       "Agent_economy",
       "Board",
       "Keeper_memory_policy",
       "Keeper_prompt_names",
+      "Keeper_tool_policy",
       "Keeper_types",
       "Keeper_world_observation"
     ],
+    "Keeper_unified_metrics": [
+      "Coord",
+      "Keeper",
+      "Keeper_agent_run",
+      "Keeper_approval_queue",
+      "Keeper_deliberation",
+      "Keeper_exec_context",
+      "Keeper_id",
+      "Keeper_model_labels",
+      "Keeper_runtime_contract",
+      "Keeper_status_bridge",
+      "Keeper_tool_call_log",
+      "Keeper_types",
+      "Keeper_world_observation",
+      "Oas",
+      "Oas_worker",
+      "Sse",
+      "Tool_name"
+    ],
+    "Keeper_error_classify": [
+      "Keeper_cascade_profile",
+      "Keeper_config",
+      "Keeper_exec_context",
+      "Keeper_exec_tools",
+      "Keeper_registry",
+      "Keeper_types",
+      "Oas",
+      "Oas_worker_named"
+    ],
     "Keeper_unified_turn": [
+      "Cascade_config",
       "Cascade_inference",
+      "Cascade_ollama_probe",
       "Cascade_runtime",
       "Coord",
       "Governance_registry",
@@ -3335,30 +3731,31 @@
       "Keeper_accountability",
       "Keeper_agent_run",
       "Keeper_approval_queue",
+      "Keeper_cascade_profile",
       "Keeper_cascade_routing",
       "Keeper_config",
       "Keeper_coordination",
-      "Keeper_deliberation",
       "Keeper_event_bus",
       "Keeper_exec_context",
       "Keeper_exec_tools",
       "Keeper_id",
       "Keeper_model_labels",
       "Keeper_registry",
+      "Keeper_runtime_resolved",
       "Keeper_state_machine",
-      "Keeper_tool_call_log",
       "Keeper_tool_registry",
       "Keeper_types",
       "Keeper_types_profile",
+      "Keeper_unified_metrics",
       "Keeper_unified_prompt",
       "Keeper_world_observation",
       "Oas",
       "Oas_bus_instrument",
       "Oas_worker",
       "Oas_worker_named",
+      "Otel_genai",
       "Prometheus",
       "Runtime_params",
-      "Sse",
       "Trajectory"
     ],
     "Keeper_prompt_names": [],
@@ -3373,8 +3770,18 @@
     "Keeper_execution": [
       "Keeper_exec_context"
     ],
-    "Keeper_event_bus": [],
-    "Masc_event_bus": [],
+    "Keeper_execution_receipt": [
+      "Coord",
+      "Keeper_types",
+      "Keeper_types_support",
+      "Oas_worker"
+    ],
+    "Keeper_event_bus": [
+      "Oas"
+    ],
+    "Masc_event_bus": [
+      "Oas"
+    ],
     "Keeper_keepalive": [
       "Agent_stress",
       "Board_dispatch",
@@ -3393,6 +3800,7 @@
       "Keeper_fs",
       "Keeper_guard",
       "Keeper_id",
+      "Keeper_lifecycle_events",
       "Keeper_measurement",
       "Keeper_memory",
       "Keeper_recurring",
@@ -3413,7 +3821,9 @@
       "Sse",
       "Thompson_sampling"
     ],
-    "Keeper_lifecycle_events": [],
+    "Keeper_lifecycle_events": [
+      "Keeper_state_machine"
+    ],
     "Heartbeat_smart": [],
     "Keeper_crash_persistence": [
       "Keeper"
@@ -3427,6 +3837,7 @@
       "Dashboard_attribution",
       "Governance_registry",
       "Keeper",
+      "Keeper_runtime_resolved",
       "Keeper_state_machine",
       "Keeper_trace_emit",
       "Keeper_transition_audit",
@@ -3451,9 +3862,6 @@
       "Keeper",
       "Keeper_types_support"
     ],
-    "Keeper_trace_validate": [
-      "Keeper_invariant_check"
-    ],
     "Keeper_supervisor": [
       "Coord",
       "Governance_registry",
@@ -3462,14 +3870,18 @@
       "Keeper_crash_persistence",
       "Keeper_execution",
       "Keeper_keepalive",
+      "Keeper_lifecycle_events",
       "Keeper_registry",
       "Keeper_state_machine",
+      "Keeper_status_bridge",
       "Keeper_types",
+      "Oas",
       "Oas_events",
       "Runtime_params",
       "Shutdown"
     ],
     "Keeper_runtime": [
+      "Cascade_catalog_runtime",
       "Config_dir_resolver",
       "Governance_registry",
       "Keeper",
@@ -3477,6 +3889,8 @@
       "Keeper_config",
       "Keeper_keepalive",
       "Keeper_registry",
+      "Keeper_runtime_resolved",
+      "Keeper_social_model",
       "Keeper_state_machine",
       "Keeper_supervisor",
       "Keeper_turn",
@@ -3492,9 +3906,13 @@
       "Keeper",
       "Keeper_alerting_path",
       "Keeper_config",
-      "Keeper_execution_scope",
+      "Keeper_sandbox",
       "Keeper_types",
       "Tool_args"
+    ],
+    "Keeper_preset_defaults": [
+      "Keeper",
+      "Keeper_types"
     ],
     "Keeper_turn_up_create": [
       "Cascade_runtime",
@@ -3508,7 +3926,10 @@
       "Keeper_fs",
       "Keeper_id",
       "Keeper_keepalive",
+      "Keeper_preset_defaults",
       "Keeper_registry",
+      "Keeper_runtime_resolved",
+      "Keeper_sandbox_runtime",
       "Keeper_social_model",
       "Keeper_tool_policy",
       "Keeper_turn_up_args",
@@ -3522,6 +3943,7 @@
       "Keeper",
       "Keeper_config",
       "Keeper_keepalive",
+      "Keeper_sandbox_runtime",
       "Keeper_turn_up_args",
       "Keeper_types"
     ],
@@ -3543,6 +3965,7 @@
     ],
     "Keeper_turn": [
       "Agent_economy",
+      "Cascade_catalog_runtime",
       "Cascade_config",
       "Cascade_runtime",
       "Coord",
@@ -3550,8 +3973,6 @@
       "Keeper_accountability",
       "Keeper_agent_run",
       "Keeper_alerting",
-      "Keeper_cascade_profile",
-      "Keeper_config",
       "Keeper_event_bus",
       "Keeper_exec_context",
       "Keeper_execution",
@@ -3567,11 +3988,12 @@
       "Keeper_turn_setup",
       "Keeper_turn_up",
       "Keeper_types",
-      "Keeper_unified_turn",
+      "Keeper_unified_metrics",
       "Keeper_world_observation",
       "Oas",
       "Progress",
       "Tool_args",
+      "Tool_name",
       "Trajectory",
       "Worktree_live_context"
     ],
@@ -3584,19 +4006,20 @@
       "Discovery_cache",
       "Keeper_alerting",
       "Keeper_alerting_path",
-      "Keeper_config",
       "Keeper_context_core",
       "Keeper_exec_context",
       "Keeper_exec_status",
       "Keeper_exec_status_metrics",
       "Keeper_exec_tools",
       "Keeper_execution",
-      "Keeper_execution_scope",
       "Keeper_generation_lineage",
       "Keeper_id",
       "Keeper_memory",
       "Keeper_model_labels",
       "Keeper_registry",
+      "Keeper_runtime_trust_snapshot",
+      "Keeper_sandbox",
+      "Keeper_sandbox_runtime",
       "Keeper_social_model",
       "Keeper_status_bridge",
       "Keeper_types",
@@ -3617,13 +4040,18 @@
       "Trajectory"
     ],
     "Keeper_status_bridge": [
+      "Cascade_toml_materializer",
+      "Config_dir_resolver",
+      "Keeper_approval_queue",
       "Keeper_cascade_profile",
       "Keeper_config",
       "Keeper_exec_status",
       "Keeper_registry",
       "Keeper_social_model",
       "Keeper_state_machine",
-      "Keeper_types"
+      "Keeper_types",
+      "Oas",
+      "Oas_worker_named"
     ],
     "Keeper_persona": [
       "Keeper_exec_persona",
@@ -3642,11 +4070,13 @@
     ],
     "Discovery_history": [],
     "Model_inference_metrics": [
-      "Keeper_cascade_profile"
+      "Keeper_cascade_profile",
+      "Keeper_hooks_oas"
     ],
     "Oas_model_resolve": [],
     "Context_compact_oas": [
-      "Cascade_runtime"
+      "Cascade_runtime",
+      "Oas"
     ],
     "Verifier_core": [],
     "Verifier_oas": [
@@ -3661,9 +4091,14 @@
     "Procedural_memory": [
       "Config"
     ],
+    "Provider_tool_support": [
+      "Provider_adapter"
+    ],
     "Oas_events": [
+      "Keeper_lifecycle_events",
       "Keeper_state_machine",
       "Masc_event_bus",
+      "Oas",
       "Oas_bus_instrument"
     ],
     "Oas_worker": [],
@@ -3671,20 +4106,43 @@
       "Llm_metric_bridge",
       "Provider_adapter"
     ],
-    "Oas_worker_exec": [
+    "Oas_worker_exec_agent": [
       "Agent",
-      "Cascade_config",
       "Context",
-      "Masc_event_bus",
       "Masc_grpc_transport",
       "Oas",
-      "Oas_bus_instrument",
       "Oas_worker_cascade",
+      "Oas_worker_exec_transport"
+    ],
+    "Oas_worker_exec": [
+      "Agent",
+      "Context",
+      "Masc_grpc_transport",
+      "Oas",
+      "Oas_worker_cascade",
+      "Oas_worker_exec_agent",
+      "Oas_worker_exec_checkpoint",
+      "Oas_worker_exec_transport",
+      "Provider_tool_support",
       "Tool_bridge"
+    ],
+    "Oas_worker_exec_checkpoint": [
+      "Agent",
+      "Masc_event_bus",
+      "Oas",
+      "Oas_bus_instrument"
+    ],
+    "Oas_worker_exec_transport": [
+      "Cascade_config",
+      "Oas",
+      "Provider_adapter",
+      "Provider_tool_support",
+      "Tool_catalog"
     ],
     "Oas_worker_named": [
       "Admission_queue",
       "Agent",
+      "Cascade_catalog_runtime",
       "Cascade_client_capacity",
       "Cascade_config",
       "Cascade_fsm",
@@ -3695,6 +4153,7 @@
       "Cascade_strategy_trace",
       "Cascade_throttle",
       "Keeper_cascade_profile",
+      "Keeper_types",
       "Masc_grpc_transport",
       "Oas",
       "Oas_response",
@@ -3707,11 +4166,13 @@
       "Oas"
     ],
     "Oas_bus_instrument": [
+      "Oas",
       "Prometheus"
     ],
     "Oas_sse_bridge": [
       "Coord",
       "Inference_utils",
+      "Oas",
       "Oas_bus_instrument",
       "Prometheus",
       "Sse"
@@ -3732,7 +4193,8 @@
       "Eval_gate",
       "Governance_pipeline_types",
       "Keeper_tool_registry",
-      "Tool_catalog"
+      "Tool_catalog",
+      "Tool_name"
     ],
     "Governance_pipeline": [
       "Audit_log",
@@ -3740,6 +4202,8 @@
       "Governance_pipeline_risk",
       "Governance_pipeline_types",
       "Keeper_approval_queue",
+      "Keeper_runtime_contract",
+      "Keeper_types",
       "Oas",
       "Operator_pending_confirm",
       "Otel_spans",
@@ -3774,10 +4238,12 @@
       "Keeper_msg_async",
       "Keeper_registry",
       "Keeper_runtime",
+      "Keeper_social_model",
       "Keeper_state_machine",
       "Keeper_status_bridge",
       "Keeper_status_detail",
       "Keeper_types",
+      "Oas",
       "Prometheus",
       "Server_startup_state",
       "Tool_args",
@@ -3822,6 +4288,7 @@
       "Autoresearch_knowledge",
       "Coord",
       "Memory_oas_bridge",
+      "Oas",
       "Tool_args",
       "Tool_autoresearch_broadcast",
       "Tool_autoresearch_context",
@@ -3865,6 +4332,13 @@
       "Tool_args",
       "Tool_local_runtime_http",
       "Tools"
-    ]
+    ],
+    "Godsplit-safety:": [],
+    "Variant": [],
+    "Unification": [],
+    "&": [],
+    "Godfile": [],
+    "Gate_diff_types": [],
+    "Gh_command_validation": []
   }
 }

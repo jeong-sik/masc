@@ -682,7 +682,6 @@ run_live_case() {
       autoboot_enabled: false,
       proactive_enabled: false,
       auto_handoff: false,
-      execution_scope: "workspace",
       allowed_paths: $allowed_paths
     }')"
 

@@ -470,7 +470,6 @@ type sandbox = {
   task_id : string;
   worktree_path : string;
   branch_name : string;
-  execution_scope : execution_scope;
   created_at : float;
 }
 ```

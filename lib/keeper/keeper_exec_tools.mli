@@ -169,6 +169,7 @@ val execute_keeper_tool_call :
   meta:keeper_meta ->
   ctx_work:working_context ->
   ?turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t ->
+  ?turn_sandbox_runtime_git:Keeper_turn_sandbox_runtime.t ->
   ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t) ->
   name:string ->
   input:Yojson.Safe.t ->

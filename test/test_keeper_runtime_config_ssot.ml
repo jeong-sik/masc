@@ -140,7 +140,6 @@ let test_policy_resync () =
     (Filename.concat keepers_toml_dir (keeper_name ^ ".toml"))
 {|[keeper]
 goal = "test"
-execution_scope = "observe_only"
 policy_voice_enabled = false
 |};
   let config = Coord.default_config room_dir in
@@ -152,7 +151,6 @@ policy_voice_enabled = false
             ("name", `String keeper_name);
             ("agent_name", `String keeper_name);
             ("trace_id", `String "trace-policy-resync");
-            ("execution_scope", `String "local");
             ("policy_voice_enabled", `Bool true);
           ])
     with
@@ -162,15 +160,9 @@ policy_voice_enabled = false
   (match Keeper_types.write_meta ~force:true config initial_meta with
   | Error e -> fail ("write_meta failed: " ^ e)
   | Ok () -> ());
-  let execution_scope_testable =
-    Alcotest.testable
-      (fun fmt v -> Format.pp_print_string fmt (Keeper_execution_scope.to_string v))
-      Keeper_execution_scope.equal
-  in
   match Keeper_runtime.ensure_keeper_meta config keeper_name with
   | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
   | Ok updated ->
-      check execution_scope_testable "execution_scope" Keeper_execution_scope.Observe_only updated.Keeper_types.execution_scope;
       check bool "policy_voice_enabled" false updated.policy_voice_enabled
 
 let test_sandbox_policy_resync () =
@@ -293,7 +285,6 @@ let test_tool_policy_resync () =
     (Filename.concat keepers_toml_dir (keeper_name ^ ".toml"))
     {|[keeper]
 goal = "test"
-execution_scope = "workspace"
 allowed_paths = ["workspace/example/project"]
 tool_preset = "social"
 also_allow = ["keeper_bash", "keeper_shell"]
@@ -307,7 +298,6 @@ also_allow = ["keeper_bash", "keeper_shell"]
             ("name", `String keeper_name);
             ("agent_name", `String keeper_name);
             ("trace_id", `String "trace-tool-policy-resync");
-            ("execution_scope", `String "workspace");
             ("allowed_paths", `List [ `String ".masc/playground/old" ]);
             ( "tool_access",
               `Assoc
@@ -358,7 +348,6 @@ let test_allowed_paths_explicit_empty_clears_runtime () =
     (Filename.concat keepers_toml_dir (keeper_name ^ ".toml"))
     {|[keeper]
 goal = "test"
-execution_scope = "workspace"
 allowed_paths = []
 |};
   let config = Coord.default_config room_dir in
@@ -370,7 +359,6 @@ allowed_paths = []
             ("name", `String keeper_name);
             ("agent_name", `String keeper_name);
             ("trace_id", `String "trace-allowed-paths-explicit-empty");
-            ("execution_scope", `String "workspace");
             ("allowed_paths", `List [ `String "workspace/example/project" ]);
           ])
     with
@@ -403,7 +391,6 @@ let test_persona_allowed_paths_is_ignored () =
   "name": "persona clear",
   "keeper": {
     "goal": "test",
-    "execution_scope": "workspace",
     "allowed_paths": ["workspace/example/project"]
   }
 }|};
@@ -416,7 +403,6 @@ let test_persona_allowed_paths_is_ignored () =
             ("name", `String keeper_name);
             ("agent_name", `String keeper_name);
             ("trace_id", `String "trace-persona-allowed-paths-ignored");
-            ("execution_scope", `String "workspace");
             ("allowed_paths", `List []);
           ])
     with
@@ -445,7 +431,6 @@ let test_custom_tool_access_preserved_without_preset () =
     (Filename.concat keepers_toml_dir (keeper_name ^ ".toml"))
     {|[keeper]
 goal = "test"
-execution_scope = "workspace"
 allowed_paths = ["workspace/example/project"]
 |};
   let config = Coord.default_config room_dir in
@@ -457,7 +442,6 @@ allowed_paths = ["workspace/example/project"]
             ("name", `String keeper_name);
             ("agent_name", `String keeper_name);
             ("trace_id", `String "trace-tool-policy-custom-preserve");
-            ("execution_scope", `String "workspace");
             ("allowed_paths", `List [ `String ".masc/playground/old" ]);
             ( "tool_access",
               `Assoc
@@ -528,7 +512,6 @@ let test_persona_overlay_resync () =
     {|[keeper]
 persona_name = "scholar"
 goal = "대화에 바로 쓸 수 있는 연구 브리프를 만든다."
-execution_scope = "workspace"
 tool_preset = "delivery"
 |};
   let config = Coord.default_config room_dir in
@@ -544,7 +527,6 @@ tool_preset = "delivery"
             ("needs", `String "stale needs");
             ("instructions", `String "stale instructions");
             ("mention_targets", `List [ `String "old-target" ]);
-            ("execution_scope", `String "observe_only");
             ( "tool_access",
               `Assoc
                 [
@@ -575,9 +557,6 @@ tool_preset = "delivery"
       check (list string) "persona mention_targets inherited"
         [ "scholar"; "학자" ]
         updated.mention_targets;
-      check string "execution_scope from toml"
-        "workspace"
-        (Keeper_execution_scope.to_string updated.execution_scope);
       check
         (option string)
         "tool_preset from toml overlay"
@@ -613,7 +592,6 @@ goal = "minimal TOML"
             ("goal", `String "old goal");
             ("will", `String "runtime will");
             ("instructions", `String "runtime instructions");
-            ("execution_scope", `String "local");
           ])
     with
     | Ok meta -> meta
@@ -622,11 +600,6 @@ goal = "minimal TOML"
   (match Keeper_types.write_meta ~force:true config initial_meta with
   | Error e -> fail ("write_meta failed: " ^ e)
   | Ok () -> ());
-  let execution_scope_testable =
-    Alcotest.testable
-      (fun fmt v -> Format.pp_print_string fmt (Keeper_execution_scope.to_string v))
-      Keeper_execution_scope.equal
-  in
   match Keeper_runtime.ensure_keeper_meta config keeper_name with
   | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
   | Ok updated ->
@@ -635,9 +608,7 @@ goal = "minimal TOML"
       (* will was NOT in TOML → preserved from runtime *)
       check string "will preserved" "runtime will" updated.will;
       (* instructions was NOT in TOML → preserved from runtime *)
-      check string "instructions preserved" "runtime instructions" updated.instructions;
-      (* execution_scope was NOT in TOML → preserved from runtime *)
-      check execution_scope_testable "execution_scope preserved" Keeper_execution_scope.Local updated.execution_scope
+      check string "instructions preserved" "runtime instructions" updated.instructions
 
 (** Test: TOML work_discovery fields overwrite stale option-typed meta fields. *)
 let test_discovery_resync () =

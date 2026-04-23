@@ -53,7 +53,6 @@ export function normalizeKeeperApprovalQueueItem(raw: unknown): KeeperApprovalQu
   if (!id || !keeperName || !toolName || !riskLevel) return null
   const runtimeContract = isRecord(raw.runtime_contract)
     ? {
-        execution_scope: asNullableString(raw.runtime_contract.execution_scope),
         sandbox_profile: asNullableString(raw.runtime_contract.sandbox_profile),
         network_mode: asNullableString(raw.runtime_contract.network_mode),
         shared_memory_scope: asNullableString(raw.runtime_contract.shared_memory_scope),

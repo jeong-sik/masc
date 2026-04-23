@@ -40,7 +40,6 @@ type worker_container_meta = {
   workspace_path : string;
   role : string option;
   selection_note : string option;
-  execution_scope : Worker_types.execution_scope;
   thinking_enabled : bool option;
   max_turns_override : int option;
   timeout_seconds : int option;

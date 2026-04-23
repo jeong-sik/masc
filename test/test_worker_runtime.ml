@@ -1,5 +1,4 @@
 module Lib = Masc_mcp
-module Worker_types = Masc_mcp.Worker_types
 
 open Alcotest
 
@@ -93,7 +92,6 @@ let test_worker_runtime_config_prefers_env_override () =
     {|{
   "worker_spawn": {
     "backend": "docker",
-    "docker_scopes": ["limited_code_change", "autonomous"],
     "docker": {
       "image": "masc-worker-runtime:test"
     }
@@ -103,21 +101,15 @@ let test_worker_runtime_config_prefers_env_override () =
   with_env "MASC_WORKER_RUNTIME_BACKEND" None @@ fun () ->
   Lib.Config_dir_resolver.reset ();
   Lib.Worker_runtime_config.reset ();
-  check string "file config enables docker for code-change scope" "docker"
+  check string "file config enables docker backend" "docker"
     (Lib.Worker_execution_backend.to_string
-       (Lib.Worker_runtime_config.backend_for_scope
-          Worker_types.Limited_code_change));
-  check string "observe-only remains local" "local"
-    (Lib.Worker_execution_backend.to_string
-       (Lib.Worker_runtime_config.backend_for_scope
-          Worker_types.Observe_only));
+       (Lib.Worker_runtime_config.backend ()));
   with_env "MASC_WORKER_RUNTIME_BACKEND" (Some "local") @@ fun () ->
   Lib.Config_dir_resolver.reset ();
   Lib.Worker_runtime_config.reset ();
   check string "env override forces local backend" "local"
     (Lib.Worker_execution_backend.to_string
-       (Lib.Worker_runtime_config.backend_for_scope
-          Worker_types.Limited_code_change))
+       (Lib.Worker_runtime_config.backend ()))
 
 let test_worker_runtime_helper_protocol_roundtrip () =
   let run_result : Lib.Worker_container_types.run_result =
@@ -164,8 +156,7 @@ let test_worker_runtime_invalid_config_fails_closed () =
   Lib.Worker_runtime_config.reset ();
   check string "malformed config resolves to fail-closed docker backend" "docker"
     (Lib.Worker_execution_backend.to_string
-       (Lib.Worker_runtime_config.backend_for_scope
-          Worker_types.Limited_code_change));
+       (Lib.Worker_runtime_config.backend ()));
   check string "malformed config clears docker image" ""
     (Lib.Worker_runtime_config.docker_image ())
 
@@ -202,8 +193,7 @@ let test_run_worker_oas_rejects_invalid_explicit_model_label () =
           worker_name = "worker-local";
           model_label = "not-a-model-label";
           working_dir = None;
-          worker_class = Some Worker_types.Worker_executor;
-          execution_scope = Some Worker_types.Observe_only;
+          worker_class = Some Masc_mcp.Worker_types.Worker_executor;
           thinking_enabled = Some false;
           max_turns = 2;
           worker_run_id = Some "run-local";

@@ -303,32 +303,23 @@ let ensure_sandbox_bundle_for_profile ~(config : Coord.config)
 
 (** Compute effective read allowed_paths from keeper meta.
     Returns the single sandbox root plus any explicit [allowed_paths]
-    entries. [["*"]] means full-access opt-in: the resulting empty list is
-    interpreted by the OAS worker builder as "skip path restriction".
-    Workspace/local scope no longer grants extra hardcoded paths; every
-    additional path must be listed explicitly in [allowed_paths]. *)
+    entries. Every additional path must be listed explicitly in
+    [allowed_paths]. *)
 let effective_allowed_paths ~(meta : Keeper_types.keeper_meta) : string list =
   let sandbox_paths = Keeper_sandbox.allowed_path_roots_of_meta ~meta in
-  match meta.allowed_paths with
-  | ["*"] -> []
-  | explicit -> sandbox_paths @ explicit
+  sandbox_paths @ meta.allowed_paths
 
 (** Compute effective write allowed_paths from keeper meta.
     Returns the single sandbox root plus any explicit [allowed_paths]
-    entries. [["*"]] means full-access opt-in (empty allowlist signals
-    "skip path restriction" to the OAS worker builder). Workspace/local
-    scope no longer grants extra hardcoded paths; every additional path
-    must be listed explicitly in [allowed_paths]. *)
+    entries. Every additional path must be listed explicitly in
+    [allowed_paths]. *)
 let effective_write_allowed_paths ~(meta : Keeper_types.keeper_meta) : string list =
   let sandbox_paths = Keeper_sandbox.allowed_path_roots_of_meta ~meta in
-  match meta.allowed_paths with
-  | ["*"] -> []
-  | explicit -> sandbox_paths @ explicit
+  sandbox_paths @ meta.allowed_paths
 
 (** Resolve a path for read-only access within the keeper's effective
     allowlist. The allowlist is usually the keeper sandbox root
-    plus any explicit custom paths; explicit ["*"] still means full
-    project-root access. *)
+    plus any explicit custom paths. *)
 let resolve_keeper_read_path ~(config : Coord.config)
     ~(allowed_paths : string list) ~(raw_path : string)
     : (string, string) result =

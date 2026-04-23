@@ -453,12 +453,8 @@ let append_execution_receipt config ~keeper_name =
           tool_gate_enabled = true;
           tool_surface_fallback_used = false;
         };
-      sandbox_configured_kind =
-        Lib.Keeper_types.sandbox_profile_to_string meta.sandbox_profile;
-      sandbox_effective_kind =
-        Lib.Keeper_execution_receipt.effective_sandbox_kind_of_meta meta;
-      execution_scope =
-        Lib.Keeper_execution_scope.to_string meta.execution_scope;
+      sandbox_kind =
+        Lib.Keeper_execution_receipt.sandbox_kind_of_meta meta;
       sandbox_root = Some config.base_path;
       network_mode = Lib.Keeper_types.network_mode_to_string meta.network_mode;
       approval_profile = Some "trusted_local";
@@ -656,9 +652,9 @@ let test_execution_trust_surfaces_latest_receipt () =
               (compact_row |> member "trust" |> member "tool_contract_result"
              |> to_string);
             check string "execution trust row preserves sandbox kind"
-              "worktree"
+              "local"
               (trust_row |> member "trust" |> member "sandbox"
-             |> member "effective_kind" |> to_string);
+             |> member "kind" |> to_string);
             check string "execution trust row preserves cascade outcome"
               "passed_to_next_model"
               (trust_row |> member "trust" |> member "cascade"

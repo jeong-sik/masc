@@ -5,7 +5,6 @@ type docker_config = {
 
 type worker_spawn = {
   backend : Worker_execution_backend.t;
-  docker_scopes : Worker_types.execution_scope list;
   docker : docker_config;
 }
 
@@ -13,18 +12,11 @@ type t = {
   worker_spawn : worker_spawn;
 }
 
-let default_docker_scopes =
-  [
-    Worker_types.Limited_code_change;
-    Worker_types.Autonomous;
-  ]
-
 let default =
   {
     worker_spawn =
       {
         backend = Worker_execution_backend.Local;
-        docker_scopes = default_docker_scopes;
         docker =
           {
             image = "masc-worker-runtime:dev";
@@ -38,7 +30,6 @@ let malformed_fail_closed =
     worker_spawn =
       {
         backend = Worker_execution_backend.Docker;
-        docker_scopes = default_docker_scopes;
         docker =
           {
             image = "";
@@ -65,22 +56,6 @@ let env_image_opt () =
 let env_host_mcp_base_url_opt () =
   Sys.getenv_opt "MASC_WORKER_RUNTIME_HOST_MCP_BASE_URL" |> trim_opt
 
-let execution_scope_of_string_opt value =
-  match String.lowercase_ascii (String.trim value) with
-  | "observe_only" -> Some Worker_types.Observe_only
-  | "limited_code_change" -> Some Worker_types.Limited_code_change
-  | "autonomous" -> Some Worker_types.Autonomous
-  | _ -> None
-
-let scopes_of_json = function
-  | `List values ->
-      values
-      |> List.filter_map (function
-           | `String value ->
-               execution_scope_of_string_opt value
-           | _ -> None)
-  | _ -> []
-
 let load_file_config path =
   if Sys.file_exists path then
     try
@@ -94,11 +69,6 @@ let load_file_config path =
               | Some backend -> backend
               | None -> default.worker_spawn.backend)
           | _ -> default.worker_spawn.backend
-        in
-        let docker_scopes =
-          match spawn_json |> member "docker_scopes" |> scopes_of_json with
-          | [] -> default_docker_scopes
-          | scopes -> scopes
         in
         let docker_json = spawn_json |> member "docker" in
         let image =
@@ -117,7 +87,6 @@ let load_file_config path =
           worker_spawn =
             {
               backend;
-              docker_scopes;
               docker = { image; host_mcp_base_url };
             };
         }
@@ -148,7 +117,6 @@ let apply_env_overrides (config : t) =
   {
     worker_spawn =
       {
-        config.worker_spawn with
         backend;
         docker = { image; host_mcp_base_url };
       };
@@ -172,18 +140,8 @@ let resolve () =
 let reset () =
   cached := None
 
-let backend_for_scope scope =
-  match scope with
-  | Worker_types.Observe_only ->
-      Worker_execution_backend.Local
-  | _ ->
-      let config = resolve () in
-      match config.worker_spawn.backend with
-      | Worker_execution_backend.Local -> Worker_execution_backend.Local
-      | Worker_execution_backend.Docker ->
-          if List.mem scope config.worker_spawn.docker_scopes then
-            Worker_execution_backend.Docker
-          else Worker_execution_backend.Local
+let backend () =
+  (resolve ()).worker_spawn.backend
 
 let docker_image () =
   (resolve ()).worker_spawn.docker.image

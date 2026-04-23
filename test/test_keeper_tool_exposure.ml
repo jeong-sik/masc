@@ -135,10 +135,10 @@ let test_custom_unknown_tool_names_are_dropped () =
     (has_tool "totally_unknown_tool" tools)
 
 (* ============================================================
-   4. All keepers get shell tools (mode removed)
+   4. All keepers get shell tools
    ============================================================ *)
 
-let test_coding_preset_has_shell_readonly () =
+let test_coding_preset_has_shell_access () =
   let meta = make_meta ~preset:Keeper_types.Coding () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has keeper_shell" true
@@ -273,7 +273,7 @@ let test_research_plus_also_allow_combined () =
   in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has board_get via also_allow" true (has_tool "keeper_board_get" tools);
-  check bool "has shell readonly" true (has_tool "keeper_shell" tools);
+  check bool "has shell access" true (has_tool "keeper_shell" tools);
   check bool "has autoresearch" true (has_any_prefix "masc_autoresearch_" tools);
   check bool "has board_post via also_allow" true (has_tool "keeper_board_post" tools);
   check bool "has read" true (has_tool "keeper_fs_read" tools)
@@ -486,24 +486,24 @@ let test_path_whitespace_only_rejected () =
       ~config ~allowed_paths:[] ~raw_path:"   " in
     check bool "whitespace path rejected" true (Result.is_error result)))
 
-let test_path_empty_allowed_permits_all_within_root () =
+let test_path_empty_allowlist_defaults_to_project_root () =
   let dir = make_path_test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
     run_with_isolated_base_path (fun () ->
     let config = Coord.default_config dir in
-    (* Empty allowed_paths = permit all within root *)
+    (* Empty low-level allowlist falls back to project-root resolution. *)
     let r1 = Keeper_alerting_path.resolve_keeper_target_path
       ~config ~allowed_paths:[] ~raw_path:"lib/a.ml" in
     let r2 = Keeper_alerting_path.resolve_keeper_target_path
       ~config ~allowed_paths:[] ~raw_path:"src/b.ml" in
-    check bool "lib ok with empty allowed" true (Result.is_ok r1);
-    check bool "src ok with empty allowed" true (Result.is_ok r2)))
+    check bool "lib ok with empty allowlist" true (Result.is_ok r1);
+    check bool "src ok with empty allowlist" true (Result.is_ok r2)))
 
 (* ============================================================
    10b. Read-path: resolve_keeper_read_path respects allowlists
    ============================================================ *)
 
-let test_read_path_empty_allowlist_permits_full_root () =
+let test_read_path_empty_allowlist_defaults_to_project_root () =
   let dir = make_path_test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
     run_with_isolated_base_path (fun () ->
@@ -708,24 +708,24 @@ let test_keeper_reported_nonexistent_subdir () =
       ~raw_path:"lib/foo.ml" in
     check bool "project file via allowed explicit path" true (Result.is_ok r3)))
 
-let test_keeper_reported_observe_only_scope () =
+let test_keeper_reported_explicit_paths_only () =
   let dir = make_masc_path_test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
     run_with_isolated_base_path (fun () ->
     let config = Coord.default_config dir in
     let allowed = [
-      ".masc/playground/observer/";
-      ".masc/keepers/observer/";
+      ".masc/playground/allowed-only/";
+      ".masc/keepers/allowed-only/";
       ".masc/traces/"
     ] in
     let r1 = Keeper_alerting_path.resolve_keeper_target_path
       ~config ~allowed_paths:allowed
-      ~raw_path:".masc/keepers/observer/" in
-    check bool "observer dir access" true (Result.is_ok r1);
+      ~raw_path:".masc/keepers/allowed-only/" in
+    check bool "allowed keeper dir access" true (Result.is_ok r1);
     let r2 = Keeper_alerting_path.resolve_keeper_target_path
       ~config ~allowed_paths:allowed
       ~raw_path:"lib/foo.ml" in
-    check bool "observer blocked from lib/" true (Result.is_error r2)))
+    check bool "unlisted lib path blocked" true (Result.is_error r2)))
 
 (* ============================================================
    Runner
@@ -750,7 +750,7 @@ let () =
         test_custom_unknown_tool_names_are_dropped;
     ]);
     ("shell_tools", [
-      test_case "coding preset has shell readonly" `Quick test_coding_preset_has_shell_readonly;
+      test_case "coding preset has shell access" `Quick test_coding_preset_has_shell_access;
     ]);
     ("coding_tools", [
       test_case "all keepers have coding tools" `Quick test_all_keepers_have_coding_tools;
@@ -801,9 +801,10 @@ let () =
         test_path_allowed_paths_single_trailing_slash;
       test_case "empty path rejected" `Quick test_path_empty_rejected;
       test_case "whitespace only rejected" `Quick test_path_whitespace_only_rejected;
-      test_case "empty allowed permits all" `Quick test_path_empty_allowed_permits_all_within_root;
-      test_case "read path empty allowlist permits full root" `Quick
-        test_read_path_empty_allowlist_permits_full_root;
+      test_case "empty allowlist defaults to project root" `Quick
+        test_path_empty_allowlist_defaults_to_project_root;
+      test_case "read path empty allowlist defaults to project root" `Quick
+        test_read_path_empty_allowlist_defaults_to_project_root;
       test_case "read path respects allowed_paths" `Quick
         test_read_path_respects_allowed_paths;
       test_case "read path rejects outside root" `Quick test_read_path_rejects_outside_root;
@@ -817,8 +818,8 @@ let () =
       test_case "read vs write path alignment" `Quick test_read_vs_write_path_alignment;
       test_case "keeper-reported nonexistent subdir" `Quick
         test_keeper_reported_nonexistent_subdir;
-      test_case "keeper-reported observe_only scope" `Quick
-        test_keeper_reported_observe_only_scope;
+      test_case "keeper-reported explicit paths only" `Quick
+        test_keeper_reported_explicit_paths_only;
     ]);
     (* Merged from test_keeper_deny_list_coverage.ml *)
     ("deny_list", [

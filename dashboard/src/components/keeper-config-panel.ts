@@ -112,14 +112,12 @@ function buildPayload(draft: EditDraft, orig: KeeperConfig): KeeperConfigUpdateP
   return payload
 }
 
-// Runtime config draft for proactive/compaction/handoff inline editing
-type ExecutionScope = 'observe_only' | 'workspace' | 'local'
+// Runtime config draft for sandbox/proactive/compaction/handoff inline editing
 export type SandboxProfile = 'local' | 'docker'
 export type SandboxNetworkMode = 'none' | 'inherit'
 export type SharedMemoryScope = 'disabled' | 'room'
 
 export type RuntimeDraft = {
-  execution_scope: ExecutionScope
   sandbox_profile: SandboxProfile
   network_mode: SandboxNetworkMode
   shared_memory_scope: SharedMemoryScope
@@ -153,7 +151,6 @@ export function coerceSharedMemoryScope(raw: string | undefined): SharedMemorySc
 
 export function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
   return {
-    execution_scope: (c.execution_scope as ExecutionScope) ?? 'workspace',
     sandbox_profile: coerceSandboxProfile(c.sandbox_profile),
     network_mode: coerceNetworkMode(c.network_mode),
     shared_memory_scope: coerceSharedMemoryScope(c.shared_memory_scope),
@@ -173,7 +170,6 @@ export function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
 
 export function buildRuntimePayload(draft: RuntimeDraft, orig: KeeperConfig): KeeperConfigUpdatePayload {
   const payload: KeeperConfigUpdatePayload = {}
-  if (draft.execution_scope !== (orig.execution_scope ?? 'workspace')) payload.execution_scope = draft.execution_scope
   const newPaths = draft.allowed_paths_text.split('\n').map(s => s.trim()).filter(Boolean)
   const origPaths = orig.allowed_paths ?? []
   if (JSON.stringify(newPaths) !== JSON.stringify(origPaths)) payload.allowed_paths = newPaths
@@ -701,7 +697,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       <div class="mt-2">
         <${Callout}
           title="런타임 설정"
-          body="실행 범위 섹션에서 execution_scope, sandbox_profile, network_mode, shared_memory_scope, allowed_paths를 저장할 수 있습니다. 프로액티브, 컴팩션, 핸드오프도 인라인 편집 가능하고, 소스/실행/런타임/조율은 읽기 전용입니다."
+          body="실행 범위 섹션에서 sandbox_profile, network_mode, shared_memory_scope, allowed_paths를 저장할 수 있습니다. 프로액티브, 컴팩션, 핸드오프도 인라인 편집 가능하고, 소스/실행/런타임/조율은 읽기 전용입니다."
         />
       </div>
 
@@ -823,12 +819,6 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       <${SectionHeader} title="실행 범위" />
       ${rd ? html`
         <${InlineSelectRow}
-          label="execution_scope"
-          value=${rd.execution_scope}
-          options=${['observe_only', 'workspace', 'local'] as const}
-          onChange=${(value: string) => updateRuntimeDraft('execution_scope', value as ExecutionScope)}
-        />
-        <${InlineSelectRow}
           label="sandbox_profile"
           value=${rd.sandbox_profile}
           options=${['local', 'docker'] as const}
@@ -849,7 +839,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         <div class="py-2 px-3 rounded bg-[var(--white-3)]">
           <div class="flex items-center justify-between mb-1">
             <span class="text-xs text-[var(--text-body)]">allowed_paths</span>
-            <span class="text-3xs text-[var(--text-muted)]">한 줄에 하나씩. * = 전체 허용</span>
+            <span class="text-3xs text-[var(--text-muted)]">한 줄에 하나씩. 명시 경로만 허용됩니다.</span>
           </div>
           <textarea class="w-full text-xs font-mono bg-[var(--white-6)] border border-[var(--card-border)] rounded px-2 py-1.5 text-[var(--text-body)] resize-y"
             rows=${3}
@@ -874,7 +864,6 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
           <${SetupGuideCard} connectorId="sandbox_hardened" />
         ` : null}
       ` : html`
-        <${ConfigRow} label="execution_scope" value=${c.execution_scope ?? 'workspace'} />
         <${ConfigRow} label="sandbox_profile" value=${c.sandbox_profile ?? 'local'} />
         <${ConfigRow} label="network_mode" value=${c.network_mode ?? 'inherit'} />
         <${ConfigRow} label="shared_memory_scope" value=${c.shared_memory_scope ?? 'disabled'} />

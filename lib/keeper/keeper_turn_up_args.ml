@@ -17,7 +17,6 @@ type parsed_args = {
   policy_voice_enabled_opt : bool option;
   allowed_paths_opt : string list option;
   autoboot_enabled_opt : bool option;
-  execution_scope_opt : Keeper_execution_scope.t option;
   sandbox_profile_opt : sandbox_profile option;
   network_mode_opt : network_mode option;
   shared_memory_scope_opt : shared_memory_scope option;
@@ -229,15 +228,6 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     let long_goal_opt = parse_goal_horizon_opt args "long_goal" in
     let policy_voice_enabled_opt = get_bool_opt args "policy_voice_enabled" in
     let autoboot_enabled_opt = get_bool_opt args "autoboot_enabled" in
-    let execution_scope_opt =
-      get_string_opt args "execution_scope"
-      |> Option.map (fun s ->
-        match Keeper_execution_scope.of_string s with
-        | Ok v -> v
-        | Error (`Unknown_scope raw) ->
-          Log.Keeper.warn "keeper_up: unknown execution_scope %S, using default" raw;
-          Keeper_execution_scope.default)
-    in
     let voice_enabled_opt = get_bool_opt args "voice_enabled" in
     let voice_channel_opt = get_string_opt args "voice_channel" in
     let voice_agent_id_opt = get_string_opt args "voice_agent_id" in
@@ -320,7 +310,6 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
       policy_voice_enabled_opt;
       allowed_paths_opt;
       autoboot_enabled_opt;
-      execution_scope_opt;
       sandbox_profile_opt;
       network_mode_opt;
       shared_memory_scope_opt;
@@ -429,6 +418,9 @@ let validate_sandbox_settings
     ~sandbox_profile
     ~network_mode
     ~allowed_paths =
+  if allowed_paths = [ "*" ] then
+    Error "allowed_paths=[\"*\"] is not supported; enumerate explicit paths instead"
+  else
   match sandbox_profile with
   | Local -> (
       match network_mode with
@@ -438,26 +430,20 @@ let validate_sandbox_settings
             "network_mode=none requires sandbox_profile=docker")
   | Docker ->
       let profile_label = sandbox_profile_to_string sandbox_profile in
-      if allowed_paths = [ "*" ] then
-        Error
-          (Printf.sprintf
-             "%s rejects allowed_paths=[\"*\"]; keep writes inside the private playground root"
-             profile_label)
-      else
-        let escaping =
-          List.filter
-            (fun path ->
-              not
-                (sandbox_allowed_path_within_private_root
-                   ~config ~keeper_name ~sandbox_profile path))
-            allowed_paths
-        in
-        match escaping with
-        | [] -> Ok ()
-        | _ ->
-            Error
-              (Printf.sprintf
-                 "%s allowed_paths must stay under %s (rejected: %s)"
-                 profile_label
-                 (private_workspace_root_rel ~sandbox_profile keeper_name)
-                 (String.concat ", " escaping))
+      let escaping =
+        List.filter
+          (fun path ->
+            not
+              (sandbox_allowed_path_within_private_root
+                 ~config ~keeper_name ~sandbox_profile path))
+          allowed_paths
+      in
+      match escaping with
+      | [] -> Ok ()
+      | _ ->
+          Error
+            (Printf.sprintf
+               "%s allowed_paths must stay under %s (rejected: %s)"
+               profile_label
+               (private_workspace_root_rel ~sandbox_profile keeper_name)
+               (String.concat ", " escaping))

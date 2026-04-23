@@ -33,8 +33,8 @@ val make_tool_tracking_hooks :
 
 (** {1 Gate Configuration} *)
 
-val gate_config_of_execution_scope :
-  Worker_types.execution_scope -> Eval_gate.gate_config
+val default_gate_config :
+  unit -> Eval_gate.gate_config
 
 (** {1 Worker Execution} *)
 

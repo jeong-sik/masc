@@ -138,8 +138,6 @@ let ensure_keeper_meta config name =
       apply_default defaults.autoboot_enabled meta.autoboot_enabled in
     let target_mention_targets =
       match defaults.mention_targets with [] -> meta.mention_targets | xs -> xs in
-    let target_execution_scope =
-      apply_default defaults.execution_scope meta.execution_scope in
     let target_sandbox_profile =
       apply_default defaults.sandbox_profile meta.sandbox_profile in
     let target_network_mode =
@@ -197,7 +195,6 @@ let ensure_keeper_meta config name =
       || meta.autoboot_enabled <> target_autoboot_enabled
       || meta.mention_targets <> target_mention_targets
       || meta.tool_access <> target_tool_access
-      || meta.execution_scope <> target_execution_scope
       || meta.sandbox_profile <> target_sandbox_profile
       || meta.network_mode <> target_network_mode
       || meta.shared_memory_scope <> target_shared_memory_scope
@@ -264,7 +261,6 @@ let ensure_keeper_meta config name =
         autoboot_enabled = target_autoboot_enabled;
         mention_targets = target_mention_targets;
         tool_access = target_tool_access;
-        execution_scope = target_execution_scope;
         sandbox_profile = target_sandbox_profile;
         network_mode = target_network_mode;
         shared_memory_scope = target_shared_memory_scope;

@@ -960,7 +960,6 @@ interface KeeperHookIntrospection {
 
 export interface KeeperConfig {
   name: string
-  execution_scope: string
   sandbox_profile?: 'local' | 'docker' | string
   network_mode?: 'none' | 'inherit' | string
   shared_memory_scope?: 'disabled' | 'room' | string

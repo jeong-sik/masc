@@ -570,11 +570,9 @@ export interface GoalDetailKeeper {
   current_task_id: string | null
   active_goal_ids: string[]
   sandbox_profile: string
-  execution_scope: string
   network_mode: string
   cascade_name: string
   approval_profile: string | null
-  sandbox_effective_kind: string | null
   cascade_outcome: string | null
   latest_execution_outcome: string | null
   latest_execution_at: string | null

@@ -252,16 +252,7 @@ let keeper_trust_json ?(include_receipt = false)
     | None ->
       `Assoc
         [
-          ( "configured_kind",
-            `String
-              (Keeper_types.sandbox_profile_to_string meta.sandbox_profile) );
-          ( "effective_kind",
-            `String
-              (Keeper_execution_receipt.effective_sandbox_kind_of_meta meta)
-          );
-          ( "execution_scope",
-            `String
-              (Keeper_execution_scope.to_string meta.execution_scope) );
+          ("kind", `String (Keeper_types.sandbox_profile_to_string meta.sandbox_profile));
           ("sandbox_root", `String config.base_path);
           ("network_mode", `String (Keeper_types.network_mode_to_string meta.network_mode));
         ]
@@ -1431,7 +1422,6 @@ let keeper_config_json (config : Coord.config) (name : string)
       (`OK,
        `Assoc [
          ("name", `String m.name);
-         ("execution_scope", `String (Keeper_execution_scope.to_string m.execution_scope));
          ("sandbox_profile", `String (Keeper_types.sandbox_profile_to_string m.sandbox_profile));
          ("network_mode", `String (Keeper_types.network_mode_to_string m.network_mode));
          ("shared_memory_scope",

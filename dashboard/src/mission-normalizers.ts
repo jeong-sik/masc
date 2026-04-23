@@ -79,7 +79,6 @@ function normalizeWorkerRunEvidence(raw: unknown): DashboardProofWorkerRunEviden
       .map(item => (typeof item === 'string' ? item.trim() : ''))
       .filter(Boolean),
     success: asBoolean(raw.success),
-    execution_scope: asString(raw.execution_scope) ?? null,
     requested_worker_class: asString(raw.requested_worker_class) ?? null,
     requested_worker_size: asString(raw.requested_worker_size) ?? null,
     tool_surface_status: asString(raw.tool_surface_status) ?? null,
@@ -122,7 +121,6 @@ function normalizeWorkerReadiness(raw: unknown): DashboardMissionWorkerReadiness
   return {
     worker_name: workerName,
     spawn_role: asString(raw.spawn_role) ?? null,
-    execution_scope: asString(raw.execution_scope) ?? null,
     runtime_pool: asString(raw.runtime_pool) ?? null,
     routing_reason: asString(raw.routing_reason) ?? null,
     has_meta: asBoolean(raw.has_meta),

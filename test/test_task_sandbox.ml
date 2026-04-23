@@ -7,7 +7,6 @@
 open Alcotest
 
 module Task_sandbox = Masc_mcp.Task_sandbox
-module Worker_types = Masc_mcp.Worker_types
 module Coord = Masc_mcp.Coord
 
 (* ============================================================
@@ -54,36 +53,11 @@ let test_sandbox_type_fields () =
     task_id = "task-001";
     worktree_path = "/tmp/test/.worktrees/agent-task-001";
     branch_name = "agent/task-001";
-    execution_scope = Worker_types.Limited_code_change;
     created_at = 1234567890.0;
   } in
   check string "task_id" "task-001" sb.task_id;
   check string "worktree_path" "/tmp/test/.worktrees/agent-task-001" sb.worktree_path;
   check string "branch_name" "agent/task-001" sb.branch_name
-
-let test_sandbox_scope_observe_only () =
-  let sb : Task_sandbox.sandbox = {
-    task_id = "task-002";
-    worktree_path = "/tmp/test/.worktrees/observer-task-002";
-    branch_name = "observer/task-002";
-    execution_scope = Observe_only;
-    created_at = 0.0;
-  } in
-  match sb.execution_scope with
-  | Observe_only -> ()
-  | _ -> fail "expected Observe_only"
-
-let test_sandbox_scope_autonomous () =
-  let sb : Task_sandbox.sandbox = {
-    task_id = "task-003";
-    worktree_path = "/tmp/test/.worktrees/auto-task-003";
-    branch_name = "auto/task-003";
-    execution_scope = Autonomous;
-    created_at = 0.0;
-  } in
-  match sb.execution_scope with
-  | Autonomous -> ()
-  | _ -> fail "expected Autonomous"
 
 (* ============================================================
    Create error path tests
@@ -116,7 +90,6 @@ let test_changed_files_returns_empty_for_nonexistent_path () =
     task_id = "task-nonexistent";
     worktree_path = "/tmp/definitely-does-not-exist-12345";
     branch_name = "test/nonexistent";
-    execution_scope = Limited_code_change;
     created_at = 0.0;
   } in
   let _files = Task_sandbox.changed_files sb in
@@ -132,7 +105,6 @@ let test_cleanup_fails_for_nonexistent_sandbox () =
       task_id = "task-ghost";
       worktree_path = "/tmp/definitely-does-not-exist-67890";
       branch_name = "ghost/task-ghost";
-      execution_scope = Limited_code_change;
       created_at = 0.0;
     } in
     match Task_sandbox.cleanup ~config ~agent_name:"ghost-agent" sb with
@@ -268,11 +240,6 @@ let test_full_lifecycle () =
         (* Verify .masc symlink *)
         let masc_link = Filename.concat sb.worktree_path ".masc" in
         check bool ".masc exists in sandbox" true (Sys.file_exists masc_link);
-
-        (* Verify default scope *)
-        (match sb.execution_scope with
-         | Limited_code_change -> ()
-         | _ -> fail "expected Limited_code_change");
 
         (* Create a file to simulate work *)
         let test_file = Filename.concat sb.worktree_path "work.txt" in
@@ -436,8 +403,6 @@ let () =
   run "Task_sandbox" [
     "types", [
       test_case "sandbox_fields" `Quick test_sandbox_type_fields;
-      test_case "scope_observe_only" `Quick test_sandbox_scope_observe_only;
-      test_case "scope_autonomous" `Quick test_sandbox_scope_autonomous;
     ];
     "error_paths", [
       test_case "fails_without_git" `Quick test_create_fails_without_git;

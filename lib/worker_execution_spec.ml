@@ -6,7 +6,6 @@ type t = {
   model_label : string;
   working_dir : string option;
   worker_class : Worker_types.worker_class option;
-  execution_scope : Worker_types.execution_scope option;
   thinking_enabled : bool option;
   max_turns : int;
   worker_run_id : string option;
@@ -46,22 +45,6 @@ let string_list_of_yojson = function
            | _ -> None)
   | _ -> []
 
-let execution_scope_to_yojson = function
-  | Some scope ->
-      `String (Worker_types.execution_scope_to_string scope)
-  | None -> `Null
-
-let execution_scope_of_yojson = function
-  | `String value ->
-      (* Issue #8605: was [Some (execution_scope_of_string ...)] — silently
-         downgraded any unknown string to [Limited_code_change]. The opt
-         version returns [None] for typos, surfacing the malformed input
-         to the JSON layer instead of routing it to a valid privilege. *)
-      Worker_types.execution_scope_of_string_opt
-        (String.lowercase_ascii (String.trim value))
-  | `Null -> None
-  | _ -> None
-
 let worker_class_to_yojson = function
   | Some worker_class ->
       `String (Worker_types.worker_class_to_string worker_class)
@@ -82,7 +65,6 @@ let to_yojson (spec : t) =
       ("model_label", `String spec.model_label);
       ("working_dir", option_to_yojson (fun s -> `String s) spec.working_dir);
       ("worker_class", worker_class_to_yojson spec.worker_class);
-      ("execution_scope", execution_scope_to_yojson spec.execution_scope);
       ("thinking_enabled", option_to_yojson (fun v -> `Bool v) spec.thinking_enabled);
       ("max_turns", `Int spec.max_turns);
       ("worker_run_id", option_to_yojson (fun s -> `String s) spec.worker_run_id);
@@ -122,8 +104,6 @@ let of_yojson (json : Yojson.Safe.t) =
              model_label;
              working_dir = option_string (json |> member "working_dir");
              worker_class = worker_class_of_yojson (json |> member "worker_class");
-             execution_scope =
-               execution_scope_of_yojson (json |> member "execution_scope");
              thinking_enabled =
                (match json |> member "thinking_enabled" with
                | `Bool value -> Some value

@@ -60,7 +60,7 @@ let string_of_status = function
    other input returns [None]. The previous variant-returning shape
    silently routed unknowns to [Idle], a *valid* downstream variant,
    which is silent JSON-decode miscategorization. Same anti-pattern
-   class as #8605 (execution_scope) and #8607 (agent_health). *)
+   class as #8605 (removed policy enum parsing) and #8607 (agent_health). *)
 let status_of_string_opt = function
   | "active" -> Some Active
   | "idle" -> Some Idle

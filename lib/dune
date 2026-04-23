@@ -389,7 +389,6 @@
    eval_calibration
    ;; Keeper contract
    keeper_schema
-   keeper_execution_scope
    keeper_social_model_types
    keeper_social_model_protocol
    keeper_social_model_magentic_ledger_fsm

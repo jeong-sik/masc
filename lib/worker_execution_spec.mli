@@ -11,7 +11,6 @@ type t = {
   model_label : string;
   working_dir : string option;
   worker_class : Worker_types.worker_class option;
-  execution_scope : Worker_types.execution_scope option;
   thinking_enabled : bool option;
   max_turns : int;
   worker_run_id : string option;
@@ -26,6 +25,5 @@ type t = {
 val to_yojson : t -> Yojson.Safe.t
 
 (** [of_yojson json] parses a previously serialized spec. Unknown
-    strings for [worker_class] / [execution_scope] surface as [None]
-    rather than a silent downgrade (issue #8605). *)
+    strings for [worker_class] surface as [None]. *)
 val of_yojson : Yojson.Safe.t -> (t, string) result

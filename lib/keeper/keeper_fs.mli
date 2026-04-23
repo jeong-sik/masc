@@ -21,12 +21,12 @@ val clear_dir_cache : unit -> unit
 (** {1 Atomic File Writes} *)
 
 (** Atomically save [content] to [path] via write-to-temp + rename.
-    @raises Sys_error on I/O failure *)
-val save_atomic : string -> string -> unit
+    Returns [Error _] on I/O failure. *)
+val save_atomic : string -> string -> (unit, string) result
 
 (** Atomically save a JSON value as pretty-printed JSON.
-    @raises Sys_error on I/O failure *)
-val save_json_atomic : string -> Yojson.Safe.t -> unit
+    Returns [Error _] on I/O failure. *)
+val save_json_atomic : string -> Yojson.Safe.t -> (unit, string) result
 
 (** {1 Standard Keeper Paths} *)
 

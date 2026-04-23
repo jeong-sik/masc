@@ -186,7 +186,6 @@ export interface DashboardMissionTimelineItem {
 export interface DashboardMissionWorkerReadiness {
   worker_name: string
   spawn_role?: string | null
-  execution_scope?: string | null
   runtime_pool?: string | null
   routing_reason?: string | null
   has_meta?: boolean | null
@@ -297,7 +296,6 @@ export interface DashboardProofWorkerRunEvidence {
   trace_validated?: boolean | null
   validation_failures?: string[]
   success?: boolean | null
-  execution_scope?: string | null
   requested_worker_class?: string | null
   requested_worker_size?: string | null
   requested_runtime?: string | null

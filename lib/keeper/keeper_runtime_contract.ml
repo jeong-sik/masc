@@ -89,8 +89,6 @@ let runtime_contract_json ?config (meta : keeper_meta) : Yojson.Safe.t =
   in
   `Assoc
     [
-      ( "execution_scope",
-        `String (Keeper_execution_scope.to_string meta.execution_scope) );
       ("sandbox_profile", `String (sandbox_profile_to_string meta.sandbox_profile));
       ("network_mode", `String (network_mode_to_string meta.network_mode));
       ( "shared_memory_scope",

@@ -175,7 +175,12 @@ let write_json_root config path json =
        | Error msg ->
          Log.Misc.warn "write_json_root: local mirror write failed for %s: %s"
            path msg)
-  | None -> write_json_local path json
+  | None ->
+      (match write_json_local path json with
+       | Ok () -> ()
+       | Error msg ->
+         Log.Misc.warn "write_json_root: local write failed for %s: %s"
+           path msg)
 
 let delete_path_root config path =
   match root_key_of_path config path with

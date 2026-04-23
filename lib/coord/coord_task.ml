@@ -22,7 +22,7 @@ let trim_opt = function
       if trimmed = "" then None else Some trimmed
   | None -> None
 
-/** Agents who currently hold a Claimed or InProgress task.
+(* Agents who currently hold a Claimed or InProgress task.
     Used by the Hebbian hook to strengthen only against agents who are
     actively working, not everyone who happens to be joined.
     Falls back to active_agents if the backlog cannot be read. *)

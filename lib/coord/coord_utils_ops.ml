@@ -137,9 +137,7 @@ let read_json_local_result path =
 let write_json_local path json =
   mkdir_p (Filename.dirname path);
   let content = Yojson.Safe.pretty_to_string json in
-  match Fs_compat.save_file_atomic path content with
-  | Ok () -> ()
-  | Error msg -> raise (Sys_error msg)
+  Fs_compat.save_file_atomic path content
 
 (* Root-scoped JSON helpers for shared room registry/current_room metadata. *)
 let read_json_root config path =
@@ -172,10 +170,11 @@ let write_json_root config path json =
        | Ok () -> ()
        | Error e -> Log.Misc.warn "write_json_root backend_set failed for %s: %s" key (Backend_types.show_error e));
       (* Dual-write: mirror to local filesystem so PG-timeout fallback reads fresh data *)
-      (try write_json_local path json
-       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+      (match write_json_local path json with
+       | Ok () -> ()
+       | Error msg ->
          Log.Misc.warn "write_json_root: local mirror write failed for %s: %s"
-           path (Printexc.to_string exn))
+           path msg)
   | None -> write_json_local path json
 
 let delete_path_root config path =
@@ -269,17 +268,27 @@ let write_json config path json =
        | Error e -> Log.Misc.warn "write_json backend_set failed for %s: %s" key (Backend_types.show_error e));
       if should_dual_write_local config then
         (* Keep a plaintext mirror for non-filesystem backends so local fallback reads stay fresh. *)
-        (try write_json_local path json
-         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+        (match write_json_local path json with
+         | Ok () -> ()
+         | Error msg ->
            Log.Misc.warn "write_json: local mirror write failed for %s: %s"
-             path (Printexc.to_string exn))
-  | None -> write_json_local path json
+             path msg)
+  | None -> (
+      match write_json_local path json with
+      | Ok () -> ()
+      | Error msg ->
+        Log.Misc.warn "write_json: local write failed for %s: %s" path msg)
 
 let write_text_local path content =
   mkdir_p (Filename.dirname path);
   let tmp_path = path ^ ".tmp" in
-  Fs_compat.save_file tmp_path content;
-  Unix.rename tmp_path path
+  try
+    Fs_compat.save_file tmp_path content;
+    Unix.rename tmp_path path;
+    Ok ()
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e -> Error (Printexc.to_string e)
 
 let write_text config path content =
   match key_of_path config path with
@@ -291,11 +300,16 @@ let write_text config path content =
              (Backend_types.show_error e));
       if should_dual_write_local config then
         (* Keep a plaintext mirror for non-filesystem backends so local fallback reads stay fresh. *)
-        (try write_text_local path content
-         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+        (match write_text_local path content with
+         | Ok () -> ()
+         | Error msg ->
            Log.Misc.warn "write_text: local mirror write failed for %s: %s"
-             path (Printexc.to_string exn))
-  | None -> write_text_local path content
+             path msg)
+  | None -> (
+      match write_text_local path content with
+      | Ok () -> ()
+      | Error msg ->
+        Log.Misc.warn "write_text: local write failed for %s: %s" path msg)
 
 let delete_path config path =
   match key_of_path config path with

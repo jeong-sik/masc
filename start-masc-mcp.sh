@@ -126,13 +126,12 @@ resolve_base_path() {
 }
 
 build_dashboard_spa() {
-    local dashboard_dir="$SCRIPT_DIR/dashboard"
-    local dashboard_index="$SCRIPT_DIR/assets/dashboard/index.html"
+    local build_script="$SCRIPT_DIR/scripts/build-dashboard-if-needed.sh"
+    local temp_root="${TMPDIR:-/tmp}"
     local log_file=""
-    local dashboard_pm=()
-    local dashboard_pm_label=""
 
-    if [ ! -f "$dashboard_dir/package.json" ]; then
+    if [ "$HTTP_MODE" != "true" ]; then
+        echo "[dashboard] Skipping SPA build in stdio mode." >&2
         return 0
     fi
 
@@ -141,78 +140,34 @@ build_dashboard_spa() {
         return 0
     fi
 
-    if ! is_truthy "${MASC_DASHBOARD_BUILD_ALWAYS:-0}"; then
-        local stale=0
-        if [ ! -f "$dashboard_index" ]; then
-            stale=1
-        fi
-        for candidate in \
-            "$dashboard_dir/package.json" \
-            "$dashboard_dir/pnpm-lock.yaml" \
-            "$dashboard_dir/tsconfig.json" \
-            "$dashboard_dir/vite.config.ts"
-        do
-            if [ -f "$candidate" ] && [ "$candidate" -nt "$dashboard_index" ]; then
-                stale=1
-                break
-            fi
-        done
-        if [ "$stale" -eq 0 ] && [ -d "$dashboard_dir/src" ] && find "$dashboard_dir/src" -type f -newer "$dashboard_index" | head -n 1 | grep -q .; then
-            stale=1
-        fi
-        if [ "$stale" -eq 0 ] && [ -d "$dashboard_dir/public" ] && find "$dashboard_dir/public" -type f -newer "$dashboard_index" | head -n 1 | grep -q .; then
-            stale=1
-        fi
-        if [ "$stale" -eq 0 ]; then
-            echo "[dashboard] Build output is fresh; skipping SPA build." >&2
-            return 0
-        fi
-    fi
-
-    echo "[dashboard] Building SPA before server start..." >&2
-    if command -v pnpm >/dev/null 2>&1; then
-        dashboard_pm=(pnpm)
-    elif command -v corepack >/dev/null 2>&1; then
-        dashboard_pm=(corepack pnpm)
-    else
-        echo "[dashboard] pnpm/corepack not found, skipping dashboard build." >&2
+    if [ ! -f "$build_script" ]; then
+        echo "[dashboard] Build helper not found, skipping SPA build." >&2
         return 0
     fi
-    dashboard_pm_label="${dashboard_pm[*]}"
 
-    local temp_root="${TMPDIR:-/tmp}"
+    if is_truthy "${MASC_DASHBOARD_BUILD_BLOCKING:-0}"; then
+        echo "[dashboard] Building SPA before server start..." >&2
+        "$build_script"
+        return 0
+    fi
+
     temp_root="${temp_root%/}"
     if [ ! -d "$temp_root" ] || [ ! -w "$temp_root" ]; then
         temp_root="/tmp"
     fi
     if ! log_file="$(TMPDIR="$temp_root" mktemp "$temp_root/masc-dashboard-build.XXXXXX" 2>/dev/null)"; then
-        echo "[dashboard] Unable to create temp log file; falling back to stderr-less logging." >&2
+        echo "[dashboard] Unable to create temp log file; background build log disabled." >&2
         log_file="/dev/null"
     fi
-    if [ -d "$dashboard_dir/node_modules" ]; then
-        if (cd "$dashboard_dir" && "${dashboard_pm[@]}" run build >"$log_file" 2>&1); then
-            tail -n 3 "$log_file" >&2 || true
-            if [ "$log_file" != "/dev/null" ]; then
-                rm -f "$log_file"
-            fi
-            return 0
-        fi
-        echo "[dashboard] Existing deps build failed, retrying after ${dashboard_pm_label} install..." >&2
+    (
+        cd "$SCRIPT_DIR" &&
+        "$build_script"
+    ) >"$log_file" 2>&1 &
+    if [ "$log_file" = "/dev/null" ]; then
+        echo "[dashboard] Background SPA build started." >&2
+    else
+        echo "[dashboard] Background SPA build started (log: $log_file)." >&2
     fi
-
-    if (cd "$dashboard_dir" && "${dashboard_pm[@]}" install --frozen-lockfile --prefer-offline >"$log_file" 2>&1 && "${dashboard_pm[@]}" run build >>"$log_file" 2>&1); then
-        tail -n 6 "$log_file" >&2 || true
-        if [ "$log_file" != "/dev/null" ]; then
-            rm -f "$log_file"
-        fi
-        return 0
-    fi
-
-    tail -n 20 "$log_file" >&2 || true
-    if [ "$log_file" != "/dev/null" ]; then
-        rm -f "$log_file"
-    fi
-    echo "[dashboard] Build failed (non-fatal, server will show fallback page)." >&2
 }
 
 ask_config_bootstrap() {
@@ -659,12 +614,14 @@ check_port_in_use() {
     fi
 }
 
-check_port_in_use "$PORT" "HTTP"
-check_port_in_use "${MASC_GRPC_PORT:-8936}" "gRPC"
-check_port_in_use "${MASC_WS_PORT:-8937}" "WebSocket"
+if [ "$HTTP_MODE" = "true" ]; then
+    check_port_in_use "$PORT" "HTTP"
+    check_port_in_use "${MASC_GRPC_PORT:-8936}" "gRPC"
+    check_port_in_use "${MASC_WS_PORT:-8937}" "WebSocket"
+fi
 
-# Dashboard SPA build (Vite) — assets/dashboard/ is no longer committed to git.
-# Always attempt the build before server startup so the served bundle matches current sources.
+# Dashboard SPA build (Vite) — routed through the shared helper script.
+# HTTP mode starts it in the background by default; stdio skips it entirely.
 build_dashboard_spa
 
 # Resolve executable path
@@ -709,7 +666,7 @@ elif [ -x "$WORKSPACE_STDIO_EIO_EXE" ]; then
 fi
 
 # 5. Build Eio version if not found (Lwt deprecated, download disabled)
-if [ -z "$MASC_EIO_EXE" ]; then
+if [ "$HTTP_MODE" = "true" ] && [ -z "$MASC_EIO_EXE" ]; then
     echo "Building MASC MCP server from source..." >&2
     if ! command -v dune >/dev/null 2>&1; then
         echo "Error: dune not found. Install dune first." >&2
@@ -749,7 +706,7 @@ fi
 
 # Rebuild Eio version if sources are newer than the executable (avoids stale binary runs)
 # NOTE: Lwt version (main.exe) is deprecated - Eio is now the default
-if [ -n "$MASC_EIO_EXE" ] && command -v dune >/dev/null 2>&1; then
+if [ "$HTTP_MODE" = "true" ] && [ -n "$MASC_EIO_EXE" ] && command -v dune >/dev/null 2>&1; then
     if find "$SCRIPT_DIR/bin" "$SCRIPT_DIR/lib" \
         -type f \( -name '*.ml' -o -name '*.mli' -o -name 'dune' \) \
         -newer "$MASC_EIO_EXE" 2>/dev/null | head -n 1 | grep -q .; then
@@ -814,8 +771,10 @@ wait_for_port() {
         waited=$((waited + 1))
     done
 }
-if ! wait_for_port "$PORT"; then
-    exit 1
+if [ "$HTTP_MODE" = "true" ]; then
+    if ! wait_for_port "$PORT"; then
+        exit 1
+    fi
 fi
 
 # Select executable based on EIO_MODE

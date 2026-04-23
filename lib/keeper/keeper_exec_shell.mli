@@ -51,6 +51,7 @@ val handle_keeper_bash :
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->
   args:Yojson.Safe.t ->
+  unit ->
   string
 
 val handle_keeper_bash_output :

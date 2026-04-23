@@ -322,7 +322,7 @@ let test_docker_blocks_nested_docker_command () =
     Keeper_exec_shell.handle_keeper_bash
       ~turn_sandbox_runtime:None
       ~config ~meta
-      ~args:(`Assoc [ ("cmd", `String "docker run --rm alpine true") ])
+      ~args:(`Assoc [ ("cmd", `String "docker run --rm alpine true") ]) ()
   in
   match parse_error_field raw with
   | Some err ->
@@ -342,7 +342,7 @@ let test_docker_blocks_docker_socket_reference () =
     Keeper_exec_shell.handle_keeper_bash
       ~turn_sandbox_runtime:None
       ~config ~meta
-      ~args:(`Assoc [ ("cmd", `String "cat /var/run/docker.sock") ])
+      ~args:(`Assoc [ ("cmd", `String "cat /var/run/docker.sock") ]) ()
   in
   match parse_error_field raw with
   | Some err ->
@@ -365,7 +365,7 @@ let test_docker_missing_seccomp_profile_fails_closed () =
         Keeper_exec_shell.handle_keeper_bash
           ~turn_sandbox_runtime:None
           ~config ~meta
-          ~args:(`Assoc [ ("cmd", `String "pwd") ])
+          ~args:(`Assoc [ ("cmd", `String "pwd") ]) ()
       in
       match parse_error_field raw with
       | Some err ->

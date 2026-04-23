@@ -305,7 +305,7 @@ surface instead of hardcoding vendor-specific assumptions.
 
 - `scripts/run-local.sh` does not build the dashboard automatically. Append `--build-dashboard` only when needed.
 - `scripts/run-local.sh` also excludes checked-in keeper manifests during bootstrap unless `--bootstrap-keepers` is passed.
-- `start-masc-mcp.sh` automatically builds the dashboard SPA if `pnpm` or `corepack pnpm` is available.
+- `start-masc-mcp.sh` skips dashboard builds in `--stdio` mode. In HTTP mode it starts `scripts/build-dashboard-if-needed.sh` in the background by default; set `MASC_DASHBOARD_BUILD_BLOCKING=1` if you need the old blocking behavior.
 - To run the dev server separately, use:
 
 ```bash

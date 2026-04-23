@@ -149,9 +149,11 @@ let git_tag_best ~workdir ~cycle ~score =
   else
   let tag = Printf.sprintf "ar-best-c%d-%.4f" cycle score in
   (try
-     ignore
-       (run_git_with_status ~timeout_sec:10.0 ~workdir
-          [ "tag"; "-f"; tag ])
+     let (_status, _output) =
+       run_git_with_status ~timeout_sec:10.0 ~workdir
+         [ "tag"; "-f"; tag ]
+     in
+     ()
    with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Autoresearch.warn "git tag failed in %s: %s" workdir (Printexc.to_string exn))
 
 (** Get the git top-level directory for a workdir. *)
@@ -193,13 +195,15 @@ let prepare_managed_worktree ~base_path ~source_workdir ~loop_id =
   match git_top_level ~workdir:source_workdir with
   | Error _ as err -> err
   | Ok repo_root ->
-      let warnings = ref [] in
-      if git_is_dirty ~workdir:source_workdir then
-        warnings := "source_workdir_dirty" :: !warnings;
-      (match git_current_branch ~workdir:source_workdir with
-      | Some branch when not (String.equal branch "main" || String.equal branch "master") ->
-          warnings := ("source_branch:" ^ branch) :: !warnings
-      | Some _ | None -> ());
+      let warnings =
+        if git_is_dirty ~workdir:source_workdir then ["source_workdir_dirty"] else []
+      in
+      let warnings =
+        match git_current_branch ~workdir:source_workdir with
+        | Some branch when not (String.equal branch "main" || String.equal branch "master") ->
+            ("source_branch:" ^ branch) :: warnings
+        | Some _ | None -> warnings
+      in
       let workdir = Autoresearch_storage.managed_worktree_dir ~base_path loop_id in
       if Sys.file_exists workdir then
         Result.error (Printf.sprintf "managed worktree already exists: %s" workdir)
@@ -211,7 +215,7 @@ let prepare_managed_worktree ~base_path ~source_workdir ~loop_id =
             [ "worktree"; "add"; "-b"; branch; workdir; "HEAD" ]
         with
         | Unix.WEXITED 0, _ ->
-            Result.ok (workdir, repo_root, List.rev !warnings)
+            Result.ok (workdir, repo_root, List.rev warnings)
         | _, lines ->
             Result.error
               (Printf.sprintf "failed to create managed worktree: %s"

@@ -206,7 +206,7 @@ type module_tag =
   | Mod_shard
 
 let tag_registry : (string, module_tag) Hashtbl.t = Hashtbl.create 512
-let tag_registry_initialized = ref false
+let tag_registry_initialized = Atomic.make false
 
 (** Schema registry — maps tool name → input_schema JSON.
     Populated alongside tag_registry during server initialization.
@@ -229,8 +229,8 @@ let lookup_schema name = with_dispatch_ro (fun () -> Hashtbl.find_opt schema_reg
 
 let tag_registry_count () = with_dispatch_ro (fun () -> Hashtbl.length tag_registry)
 
-let mark_tag_registry_initialized () = with_dispatch_rw (fun () -> tag_registry_initialized := true)
-let is_tag_registry_initialized () = with_dispatch_ro (fun () -> !tag_registry_initialized)
+let mark_tag_registry_initialized () = with_dispatch_rw (fun () -> Atomic.set tag_registry_initialized true)
+let is_tag_registry_initialized () = with_dispatch_ro (fun () -> Atomic.get tag_registry_initialized)
 
 (** Mint a [Tool_token.t] validated against both registries.
     Protected by dispatch_mu for thread safety (Copilot review).

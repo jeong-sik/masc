@@ -274,8 +274,7 @@ let coerce_tool_timeout_sec (raw_timeout_sec : float option) : float option =
       Some (float_of_int (max 5 (min 300 raw_sec)))
 
 (** Optional per-tool timeout to prevent long calls from starving the request loop. *)
-let tool_timeout_sec_opt ~(tool_name : string) ~(arguments : Yojson.Safe.t) : float option =
-  ignore arguments;
+let tool_timeout_sec_opt ~(tool_name : string) ~(_arguments : Yojson.Safe.t) : float option =
   match tool_name with
   | "masc_keeper_msg" ->
       (* No fixed timeout for keeper_msg. Keeper has its own internal limits
@@ -338,7 +337,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     let local_timeout_hit = ref false in
     let result =
       try
-        match tool_timeout_sec_opt ~tool_name:name ~arguments with
+        match tool_timeout_sec_opt ~tool_name:name ~_arguments:arguments with
         | None ->
             execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~arguments
         | Some timeout_sec ->

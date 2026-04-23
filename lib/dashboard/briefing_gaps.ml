@@ -66,15 +66,20 @@ let collect_metadata_gaps ~sessions ~keepers ~agents =
   in
   take 8 (session_gaps @ keeper_gaps @ agent_gaps)
 
-let gap_kinds_for_section = function
-  | "communication" ->
-      [ "session_communication_mode_missing"; "keeper_last_reply_missing" ]
-  | "alignment" ->
-      [ "session_goal_missing"; "agent_focus_missing" ]
-  | _ -> []
+type section =
+  | Communication
+  | Alignment
+  | Watch
 
-let count_metadata_gaps_for_section ~section_id gaps =
-  let allowed = gap_kinds_for_section section_id in
+let gap_kinds_for_section = function
+  | Communication ->
+      [ "session_communication_mode_missing"; "keeper_last_reply_missing" ]
+  | Alignment ->
+      [ "session_goal_missing"; "agent_focus_missing" ]
+  | Watch -> []
+
+let count_metadata_gaps_for_section ~section gaps =
+  let allowed = gap_kinds_for_section section in
   gaps
   |> List.fold_left
        (fun acc json ->
@@ -82,8 +87,8 @@ let count_metadata_gaps_for_section ~section_id gaps =
          if List.mem kind allowed then acc + 1 else acc)
        0
 
-let evidence_of_metadata_gaps ~section_id metadata_gaps =
-  let allowed = gap_kinds_for_section section_id in
+let evidence_of_metadata_gaps ~section metadata_gaps =
+  let allowed = gap_kinds_for_section section in
   metadata_gaps
   |> List.filter_map (fun json ->
          let kind = string_field "kind" json in

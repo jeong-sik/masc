@@ -15,7 +15,7 @@ val default_config : config
 (** Load config from environment or use defaults *)
 val load_config : unit -> config
 val make_orchestrator_prompt : port:int -> string
-val should_orchestrate : Coord.config -> bool
+val should_orchestrate : min_priority:int -> Coord.config -> bool
 
 (** Start the orchestrator background services using Pulse.
     Returns a cancel function to gracefully stop both Pulse engines. *)

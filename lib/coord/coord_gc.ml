@@ -161,7 +161,7 @@ let cleanup_zombies
 
       (* Phase 5: Update state — only remove successfully cleaned agents *)
       if !successfully_cleaned <> [] then begin
-        let _ = update_state config (fun s ->
+        let _state = update_state config (fun s ->
           { s with active_agents =
               List.filter (fun a -> not (List.mem a !successfully_cleaned)) s.active_agents }
         ) in

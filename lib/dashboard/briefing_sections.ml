@@ -3,20 +3,29 @@
 open Briefing_json_helpers
 open Briefing_gaps
 
-let has_operational_signal ~section_id ~room_health ~incident_count ~recommended_action_count =
+let section_id_string = function
+  | Communication -> "communication"
+  | Alignment -> "alignment"
+  | Watch -> "watch"
+
+let section_label = function
+  | Communication -> "Communication"
+  | Alignment -> "Alignment"
+  | Watch -> "Watch Next"
+
+let has_operational_signal ~section ~room_health ~incident_count ~recommended_action_count =
   let room_risky =
     Dashboard_utils.is_health_at_risk (Dashboard_utils.health_level_of_string room_health)
   in
-  match section_id with
-  | "watch" -> room_risky || incident_count > 0 || recommended_action_count > 0
-  | "communication" | "alignment" -> room_risky || incident_count > 0
-  | _ -> false
+  match section with
+  | Watch -> room_risky || incident_count > 0 || recommended_action_count > 0
+  | Communication | Alignment -> room_risky || incident_count > 0
 
-let annotate_section ~section_id ~status ~summary ~evidence ~metadata_gaps
+let annotate_section ~section ~status ~summary ~evidence ~metadata_gaps
     ~room_health ~incident_count ~recommended_action_count =
-  let gap_count = count_metadata_gaps_for_section ~section_id metadata_gaps in
+  let gap_count = count_metadata_gaps_for_section ~section metadata_gaps in
   let operational =
-    has_operational_signal ~section_id ~room_health ~incident_count
+    has_operational_signal ~section ~room_health ~incident_count
       ~recommended_action_count
   in
   let signal_class, evidence_quality =
@@ -35,8 +44,8 @@ let annotate_section ~section_id ~status ~summary ~evidence ~metadata_gaps
   in
   `Assoc
     [
-      ("id", `String section_id);
-      ("label", `String (match section_id with "communication" -> "Communication" | "alignment" -> "Alignment" | _ -> "Watch Next"));
+      ("id", `String (section_id_string section));
+      ("label", `String (section_label section));
       ("status", `String status);
       ("summary", `String summary);
       ("evidence", `List (List.map (fun item -> `String item) evidence));
@@ -74,9 +83,7 @@ let build_communication_section ~sessions ~recent_messages ~metadata_gaps
     count_matching_field "communication_mode" sessions ~predicate:(fun value ->
         value <> "" && value <> "unknown")
   in
-  let metadata_evidence =
-    evidence_of_metadata_gaps ~section_id:"communication" metadata_gaps
-  in
+  let metadata_evidence = evidence_of_metadata_gaps ~section:Communication metadata_gaps in
   let positive_signal =
     recent_message_count > 0 || broadcast_total > 0 || portal_total > 0
   in
@@ -143,9 +150,7 @@ let build_alignment_section ~sessions ~agents ~metadata_gaps =
         if String.equal (string_field "goal" json) "unassigned" then acc else acc + 1)
       0 sessions
   in
-  let metadata_evidence =
-    evidence_of_metadata_gaps ~section_id:"alignment" metadata_gaps
-  in
+  let metadata_evidence = evidence_of_metadata_gaps ~section:Alignment metadata_gaps in
   let evidence =
     []
     |> evidence_add_if (active_agent_count = 0) "Active agents count is zero"
@@ -226,13 +231,13 @@ let build_briefing_sections ~mission_summary_json ~sessions ~agents ~recent_mess
   in
   ( watch_summary,
     [
-      annotate_section ~section_id:"communication" ~status:communication_status
+      annotate_section ~section:Communication ~status:communication_status
         ~summary:communication_summary ~evidence:communication_evidence
         ~metadata_gaps ~room_health ~incident_count ~recommended_action_count;
-      annotate_section ~section_id:"alignment" ~status:alignment_status
+      annotate_section ~section:Alignment ~status:alignment_status
         ~summary:alignment_summary ~evidence:alignment_evidence ~metadata_gaps
         ~room_health ~incident_count ~recommended_action_count;
-      annotate_section ~section_id:"watch" ~status:watch_status
+      annotate_section ~section:Watch ~status:watch_status
         ~summary:watch_summary ~evidence:watch_evidence ~metadata_gaps
         ~room_health ~incident_count ~recommended_action_count;
     ] )

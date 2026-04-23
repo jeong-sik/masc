@@ -355,4 +355,7 @@ let track_tool_assigned ?fs config ~agent_id ~profile ?preset ~tool_count ~assig
     Replaces the old rotate function; date-split makes rewriting unnecessary. *)
 let rotate ~fs:_ config ~max_age_days : unit =
   let store = get_telemetry_store config in
-  ignore (Dated_jsonl.prune store ~days:max_age_days)
+  let pruned = Dated_jsonl.prune store ~days:max_age_days in
+  if pruned > 0 then
+    Log.Metrics.info "telemetry_eio: pruned %d old day-files (max_age=%d days)"
+      pruned max_age_days

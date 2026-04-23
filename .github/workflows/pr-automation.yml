@@ -44,11 +44,19 @@ jobs:
               (process.env.AGENT_DRAFT_GUARD_BRANCH_RE || String.raw`^(codex[/-]|keeper[/-])`),
               "i"
             );
-            const bypassLabels = (process.env.AGENT_DRAFT_GUARD_BYPASS_LABELS || "human-approved-ready,allow-auto-merge")
+            const automationProneBypassLabels = new Set(["allow-auto-merge"]);
+            const bypassLabels = (process.env.AGENT_DRAFT_GUARD_BYPASS_LABELS || "human-approved-ready")
               .split(",")
               .map((s) => s.trim().toLowerCase())
+              .filter((label) => !automationProneBypassLabels.has(label))
               .filter(Boolean);
             const labels = (pr.labels || []).map((label) => label.name.toLowerCase());
+            const ignoredBypassLabels = labels.filter((label) =>
+              automationProneBypassLabels.has(label)
+            );
+            if (ignoredBypassLabels.length > 0) {
+              core.info(`Ignoring automation-prone bypass labels: ${ignoredBypassLabels.join(", ")}.`);
+            }
 
             const looksAgentAuthored =
               titlePattern.test(pr.title || "") ||
@@ -129,11 +137,13 @@ jobs:
             }
 
             const marker = "<!-- masc-agent-draft-guard -->";
+            const bypassLabelList =
+              bypassLabels.length > 0 ? bypassLabels.join(", ") : "(no configured bypass labels)";
             const body = [
               marker,
               `Draft PR guard reapplied: ${actions.join(", ")}.`,
               "",
-              `This repository treats draft PRs as draft-only until a human explicitly opts in by adding one of these labels: ${bypassLabels.join(", ")}.`
+              `This repository treats draft PRs as draft-only until a human explicitly opts in by adding one of these labels: ${bypassLabelList}.`
             ].join("\n");
             const comments = await github.paginate(github.rest.issues.listComments, {
               owner,

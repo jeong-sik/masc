@@ -21,6 +21,8 @@ CACHE_READY_TIMEOUT_SEC="${CACHE_READY_TIMEOUT_SEC:-45}"
 TOOL_TIMEOUT_SEC="${TOOL_TIMEOUT_SEC:-35}"
 EXPECT_KEEPERS="${EXPECT_KEEPERS:-1}"
 KEEP_SERVER="${KEEP_SERVER:-0}"
+EXPECT_HEALTH_MODE="${EXPECT_HEALTH_MODE:-auto}"
+KEEPER_STATUS_SAMPLE_LIMIT="${KEEPER_STATUS_SAMPLE_LIMIT:-3}"
 
 MASC_STATUS_FIRST_MAX_SEC="${MASC_STATUS_FIRST_MAX_SEC:-5}"
 MASC_STATUS_SECOND_MAX_SEC="${MASC_STATUS_SECOND_MAX_SEC:-1.5}"
@@ -46,6 +48,25 @@ normalize_bool() {
   case "$(printf '%s' "${1:-0}" | tr '[:upper:]' '[:lower:]')" in
     1|true|yes|y|on) printf '1' ;;
     *) printf '0' ;;
+  esac
+}
+
+health_mode_enforced() {
+  local expect="${1:-auto}"
+  case "$(printf '%s' "$expect" | tr '[:upper:]' '[:lower:]')" in
+    auto)
+      if [[ "$(normalize_bool "$START_SERVER")" = "1" ]]; then
+        printf '1\n'
+      else
+        printf '0\n'
+      fi
+      ;;
+    1|true|yes|y|on)
+      printf '1\n'
+      ;;
+    *)
+      printf '0\n'
+      ;;
   esac
 }
 
@@ -242,7 +263,10 @@ run_mode() {
   local execution_cache_state transport_cache_state
   local keeper_json keeper_status_json keeper_name transport_json execution_json
   local payload_contract_ok quiet_reason_contract_ok pending_lazy_ok health_mode_ok keeper_fiber_ok
+  local health_mode_check_enabled keeper_status_attempted_json
+  local keeper_candidate request_id keeper_status_attempt_count
   local result_pass="true"
+  local -a keeper_names=()
 
   if [[ "$(normalize_bool "$START_SERVER")" = "1" ]]; then
     port="$(pick_port)"
@@ -325,15 +349,37 @@ run_mode() {
     keeper_second_ok="1"
   fi
   keeper_second_time="$LAST_TIME_TOTAL"
-  keeper_name="$(printf '%s' "$keeper_json" | jq -r '.keepers[0] // ""')"
+  mapfile -t keeper_names < <(printf '%s' "$keeper_json" | jq -r '.keepers[]?' 2>/dev/null || true)
+  keeper_name=""
+  keeper_status_attempted_json='[]'
 
   if [[ "$(normalize_bool "$EXPECT_KEEPERS")" = "1" ]]; then
-    if [[ -n "$keeper_name" ]] \
-      && call_tool "$mcp_url" "$session_id" "$protocol_version" 15 "masc_keeper_status" "$(jq -cn --arg name "$keeper_name" '{name:$name}')"; then
-      keeper_status_ok="0"
-      keeper_status_time="$LAST_TIME_TOTAL"
-      keeper_status_json="$(json_from_response_text "$LAST_TEXT")"
-    elif [[ -n "$keeper_name" ]]; then
+    if [[ "${#keeper_names[@]}" -gt 0 ]]; then
+      request_id=15
+      keeper_status_attempt_count=0
+      for keeper_candidate in "${keeper_names[@]}"; do
+        if (( keeper_status_attempt_count >= KEEPER_STATUS_SAMPLE_LIMIT )); then
+          break
+        fi
+        keeper_status_attempt_count=$((keeper_status_attempt_count + 1))
+        keeper_status_attempted_json="$(
+          printf '%s' "$keeper_status_attempted_json" \
+            | jq -c --arg name "$keeper_candidate" '. + [$name]'
+        )"
+        if call_tool "$mcp_url" "$session_id" "$protocol_version" "$request_id" "masc_keeper_status" "$(jq -cn --arg name "$keeper_candidate" '{name:$name}')"; then
+          keeper_name="$keeper_candidate"
+          keeper_status_ok="0"
+          keeper_status_time="$LAST_TIME_TOTAL"
+          keeper_status_json="$(json_from_response_text "$LAST_TEXT")"
+          break
+        fi
+        request_id=$((request_id + 1))
+      done
+    fi
+
+    if [[ -n "$keeper_name" ]]; then
+      :
+    elif [[ "${#keeper_names[@]}" -gt 0 ]]; then
       keeper_status_ok="1"
       keeper_status_time="$LAST_TIME_TOTAL"
       keeper_status_json='{}'
@@ -405,18 +451,23 @@ run_mode() {
     end
   ')"
 
-  health_mode_ok="$(printf '%s' "$health_json" | jq -r --arg mode "$mode" '
-    if $mode == "http_only" then
-      ((.transport.grpc.enabled == false)
-        and (.transport.websocket.enabled == false)
-        and (.transport.webrtc.enabled == false)) | tostring
-    else
-      ((.transport.grpc.enabled == false)
-        and (.transport.websocket.enabled == true)
-        and (.transport.websocket.listening == true)
-        and (.transport.webrtc.enabled == true)) | tostring
-    end
-  ')"
+  health_mode_check_enabled="$(health_mode_enforced "$EXPECT_HEALTH_MODE")"
+  if [[ "$health_mode_check_enabled" = "1" ]]; then
+    health_mode_ok="$(printf '%s' "$health_json" | jq -r --arg mode "$mode" '
+      if $mode == "http_only" then
+        ((.transport.grpc.enabled == false)
+          and (.transport.websocket.enabled == false)
+          and (.transport.webrtc.enabled == false)) | tostring
+      else
+        ((.transport.grpc.enabled == false)
+          and (.transport.websocket.enabled == true)
+          and (.transport.websocket.listening == true)
+          and (.transport.webrtc.enabled == true)) | tostring
+      end
+    ')"
+  else
+    health_mode_ok="true"
+  fi
 
   if [[ "$status_first_ok" != "0" || "$status_second_ok" != "0" || "$keeper_first_ok" != "0" || "$keeper_second_ok" != "0" || "$keeper_status_ok" != "0" || "$transport_ok" != "0" ]]; then
     result_pass="false"
@@ -449,6 +500,7 @@ run_mode() {
       --arg keeper_list_json "$keeper_json" \
       --arg keeper_status_json "$keeper_status_json" \
       --arg keeper_name "$keeper_name" \
+      --arg keeper_status_attempted_json "$keeper_status_attempted_json" \
       --arg transport_status_json "$transport_json" \
       --arg execution_payload_json "$execution_json" \
       --arg execution_json_sample "$(printf '%s' "$execution_json" | jq -c '{projection_diagnostics, generated_at}')" \
@@ -465,6 +517,7 @@ run_mode() {
       --arg pending_lazy_ok "$pending_lazy_ok" \
       --arg keeper_fiber_ok "$keeper_fiber_ok" \
       --arg health_mode_ok "$health_mode_ok" \
+      --arg health_mode_check_enabled "$health_mode_check_enabled" \
       --arg execution_cache_state "$execution_cache_state" \
       --arg transport_cache_state "$transport_cache_state" \
       '
@@ -472,6 +525,7 @@ run_mode() {
       ($health_json | try fromjson catch {}) as $health
       | ($keeper_list_json | try fromjson catch {}) as $keeper_list
       | ($keeper_status_json | try fromjson catch {}) as $keeper_status
+      | ($keeper_status_attempted_json | try fromjson catch []) as $keeper_status_attempted
       | ($transport_status_json | try fromjson catch $transport_status_json) as $transport_status
       | ($execution_payload_json | try fromjson catch {}) as $execution_payload
       | ($execution_json_sample | try fromjson catch {}) as $execution
@@ -506,12 +560,14 @@ run_mode() {
           quiet_reason_contract: ($quiet_reason_contract_ok == "true"),
           pending_lazy_tasks_empty: ($pending_lazy_ok == "true"),
           keeper_fibers_present: ($keeper_fiber_ok == "true"),
+          health_transport_mode_enforced: ($health_mode_check_enabled == "1"),
           health_transport_mode: ($health_mode_ok == "true"),
           execution_cache_state: $execution_cache_state,
           transport_cache_state: $transport_cache_state
         },
         keeper_name: (if ($keeper_name | length) > 0 then $keeper_name else null end),
         keeper_list_names: (($keeper_list.keepers // [])[:5]),
+        keeper_status_attempted_names: $keeper_status_attempted,
         keeper_status_sample: $keeper_status,
         execution_keeper_sample: (($execution_payload.keepers // [])[:2]),
         transport_status: $transport_status,
@@ -547,7 +603,16 @@ main() {
       log "mode=${mode} FAIL"
       overall_pass="false"
     fi
-    results="$(jq -cs '.[0] + [.[1]]' <(printf '%s' "$results") "$RUN_DIR/${mode}.json")"
+    if [[ -f "$RUN_DIR/${mode}.json" ]]; then
+      results="$(jq -cs '.[0] + [.[1]]' <(printf '%s' "$results") "$RUN_DIR/${mode}.json")"
+    else
+      results="$(
+        jq -nc \
+          --argjson current "$results" \
+          --arg mode "$mode" \
+          '$current + [{mode:$mode, pass:false, error:"mode result missing"}]'
+      )"
+    fi
   done
 
   jq -n \

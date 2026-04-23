@@ -192,18 +192,44 @@ let run_docker_shell_command_with_status
             @ optional_ro_mount ~host:ssh_dir
                 ~container:(Filename.concat cred_root ".ssh")
           in
+          let git_author_name, git_author_email =
+            match Keeper_gh_env.keeper_binding config ~keeper_name:meta.name with
+            | Ok { github_identity = Some id; _ } ->
+                id, id ^ "@users.noreply.github.com"
+            | _ -> "MASC Keeper", "keeper@masc.local"
+          in
           let envs =
             [
               "-e"; "HOME=" ^ cred_root;
               "-e"; "GH_CONFIG_DIR=" ^ Filename.concat cred_root ".config/gh";
               "-e"; "GIT_CONFIG_GLOBAL=" ^ Filename.concat cred_root ".gitconfig";
-              "-e"; "GIT_AUTHOR_NAME=MASC Keeper";
-              "-e"; "GIT_AUTHOR_EMAIL=keeper@masc.local";
-              "-e"; "GIT_COMMITTER_NAME=MASC Keeper";
-              "-e"; "GIT_COMMITTER_EMAIL=keeper@masc.local";
+              "-e"; "GIT_CONFIG_COUNT=1";
+              "-e"; "GIT_CONFIG_KEY_0=safe.directory";
+              "-e"; "GIT_CONFIG_VALUE_0=*";
+              "-e"; "GIT_AUTHOR_NAME=" ^ git_author_name;
+              "-e"; "GIT_AUTHOR_EMAIL=" ^ git_author_email;
+              "-e"; "GIT_COMMITTER_NAME=" ^ git_author_name;
+              "-e"; "GIT_COMMITTER_EMAIL=" ^ git_author_email;
             ]
           in
           mounts, envs
+      in
+      let ssh_auth_sock = Sys.getenv_opt "SSH_AUTH_SOCK" in
+      let ssh_auth_mount, ssh_auth_env =
+        if not git_creds_enabled then
+          [], []
+        else
+          match ssh_auth_sock with
+          | None -> [], []
+          | Some path ->
+              if Sys.file_exists path then
+                let container_path =
+                  Filename.concat cred_root "ssh-agent.sock"
+                in
+                ( [ "-v"; path ^ ":" ^ container_path ],
+                  [ "-e"; "SSH_AUTH_SOCK=" ^ container_path ] )
+              else
+                [], []
       in
       let token_env =
         let gh_token =
@@ -257,6 +283,8 @@ let run_docker_shell_command_with_status
         @ network_args
         @ cred_mounts
         @ cred_envs
+        @ ssh_auth_mount
+        @ ssh_auth_env
         @ token_env
         @ [ image; "bash"; "-lc"; cmd ]
       in

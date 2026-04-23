@@ -61,18 +61,18 @@ let clear_dir_cache () : unit =
     Delegates to {!Fs_compat.save_file_atomic} (Eio-aware, re-raises
     [Eio.Cancel.Cancelled]).  Ensures the parent directory exists first.
 
-    @raises Sys_error on I/O failure *)
-let save_atomic (path : string) (content : string) : unit =
+    Returns [(unit, string) result] for explicit error handling. *)
+let save_atomic (path : string) (content : string) : (unit, string) result =
   let dir = Filename.dirname path in
   ignore (ensure_dir dir);
   match Fs_compat.save_file_atomic path content with
-  | Ok () -> ()
+  | Ok () -> Ok ()
   | Error msg ->
     Log.Keeper.warn "keeper_fs: save_atomic failed path=%s error=%s" path msg;
-    raise (Sys_error msg)
+    Error msg
 
 (** Atomically save a Yojson value as pretty-printed JSON. *)
-let save_json_atomic (path : string) (json : Yojson.Safe.t) : unit =
+let save_json_atomic (path : string) (json : Yojson.Safe.t) : (unit, string) result =
   save_atomic path (Yojson.Safe.pretty_to_string json)
 
 (* ================================================================ *)

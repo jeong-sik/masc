@@ -15,6 +15,8 @@ open Keeper_types
 open Keeper_memory
 open Keeper_execution
 
+exception Semaphore_wait_timeout of float
+
 let keepalive_interval_sec () =
   Runtime_params.get Governance_registry.keeper_keepalive_interval_sec
 ;;
@@ -159,8 +161,6 @@ let semaphore_wait_timeout_sec =
     "MASC_KEEPER_SEMAPHORE_WAIT_TIMEOUT_SEC"
     ~default:60.0 ~min_v:5.0 ~max_v:600.0
 ;;
-
-exception Semaphore_wait_timeout of float
 
 (** Per-keeper record of the last autonomous turn completion timestamp.
     Used by the fairness cooldown to prevent a fast-cycling keeper from

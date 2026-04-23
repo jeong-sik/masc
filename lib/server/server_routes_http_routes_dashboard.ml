@@ -108,12 +108,13 @@ let read_reusable_dashboard_dev_token ~base_path path :
       | Ok (Reusable raw) -> Ok (Some raw)
       | Ok Rotate -> Ok None
       | Error msg -> Error msg
-    with Eio.Cancel.Cancelled _ as e -> raise e
-    with exn ->
-      Log.Server.warn
-        "dashboard dev-token read skipped for %s: %s"
-        path (Printexc.to_string exn);
-      Ok None
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
+        Log.Server.warn
+          "dashboard dev-token read skipped for %s: %s"
+          path (Printexc.to_string exn);
+        Ok None
 
 let persist_dashboard_dev_token ~base_path raw : (unit, string) result =
   let token_path = dashboard_dev_token_path base_path in
@@ -122,9 +123,10 @@ let persist_dashboard_dev_token ~base_path raw : (unit, string) result =
     Auth.save_private_text_file token_path raw;
     remove_dashboard_dev_token_file_if_exists legacy_path;
     Ok ()
-  with Eio.Cancel.Cancelled _ as e -> raise e
-  with exn ->
-    Error (Printf.sprintf "persist dev-token: %s" (Printexc.to_string exn))
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+      Error (Printf.sprintf "persist dev-token: %s" (Printexc.to_string exn))
 
 let mint_dashboard_dev_token base_path : (string, string) result =
   match

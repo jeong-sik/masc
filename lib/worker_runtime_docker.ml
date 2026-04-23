@@ -105,6 +105,8 @@ let allowlisted_env_pairs () =
       Env_config_core.storage_type_env_key;
       Env_config_core.base_path_env_key;
       Env_config_core.config_dir_env_key;
+      "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL";
+      "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS";
     ]
   in
   let inherited =

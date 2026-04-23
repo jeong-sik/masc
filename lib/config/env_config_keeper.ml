@@ -357,7 +357,7 @@ module KeeperKeepalive = struct
       leaving only 1 productive action per cycle.
       Env: [MASC_KEEPER_OAS_MAX_TURNS_PER_CALL]. Default: 15. Range: [1, 50]. *)
   let oas_max_turns_per_call =
-    max 1 (min 50 (get_int ~default:15 "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL"))
+    max 1 (min 50 (get_int ~default:30 "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL"))
 
   (** Smaller turn budget for scheduled autonomous cycles so one keeper does
       not monopolize the autonomous semaphore for minutes at a time.
@@ -374,7 +374,7 @@ module KeeperKeepalive = struct
       Env: [MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS].
       Default: min(global, 2). Range: [1, global]. *)
   let oas_max_turns_per_call_scheduled_autonomous =
-    let default = min oas_max_turns_per_call 2 in
+    let default = min oas_max_turns_per_call 10 in
     max 1
       (min oas_max_turns_per_call
          (min 50

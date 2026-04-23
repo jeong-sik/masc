@@ -1313,7 +1313,7 @@ let load_keeper_profile_defaults name : keeper_profile_defaults =
     Values outside the range are rejected so a typo in TOML cannot silently
     bypass the budget envelope. *)
 let clamp_max_turns_override : int option -> int option = function
-  | Some n when n >= 1 && n <= 50 -> Some n
+  | Some n when n >= 1 && n <= 100 -> Some n
   | _ -> None
 
 let effective_max_turns_per_call (profile : keeper_profile_defaults) : int =

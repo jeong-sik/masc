@@ -211,7 +211,12 @@ let ensure_keeper_meta config name =
     let target_always_approve =
       apply_default_opt defaults.always_approve meta.always_approve
     in
-
+    (* --- OAS Env --- *)
+    let target_oas_env =
+      match defaults.oas_env with
+      | [] -> meta.oas_env
+      | env -> env
+    in
     (* --- Change detection by category --- *)
     let proactive_changed =
       meta.proactive.enabled <> target_proactive
@@ -261,12 +266,13 @@ let ensure_keeper_meta config name =
       || meta.telemetry_feedback_window_hours <> target_tf_window in
     let timeout_policy_changed =
       meta.per_provider_timeout_s <> target_per_provider_timeout in
+    let oas_env_changed = meta.oas_env <> target_oas_env in
     let any_changed =
       proactive_changed || signal_changed || denylist_changed || models_changed
       || social_model_changed
       || cascade_changed
       || personality_changed || policy_changed || discovery_changed
-      || telemetry_changed || timeout_policy_changed in
+      || telemetry_changed || timeout_policy_changed || oas_env_changed in
 
     if any_changed then begin
       let cats = List.filter_map Fun.id [
@@ -281,6 +287,7 @@ let ensure_keeper_meta config name =
         (if discovery_changed then Some "discovery" else None);
         (if telemetry_changed then Some "telemetry" else None);
         (if timeout_policy_changed then Some "timeout_policy" else None);
+        (if oas_env_changed then Some "oas_env" else None);
       ] in
       Log.Keeper.info
         "ensure_keeper_meta: re-syncing [%s] for %s"
@@ -330,6 +337,7 @@ let ensure_keeper_meta config name =
         telemetry_feedback_window_hours = target_tf_window;
         per_provider_timeout_s = target_per_provider_timeout;
         always_approve = target_always_approve;
+        oas_env = target_oas_env;
         updated_at = now_iso ();
       } in
       match write_meta config updated with

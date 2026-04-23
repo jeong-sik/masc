@@ -204,6 +204,7 @@ type keeper_meta = {
   always_approve : bool option;
   runtime: agent_runtime_state;
   keeper_id : Keeper_id.Uid.t option;
+  oas_env: (string * string) list;
   meta_version : int;
 }
 

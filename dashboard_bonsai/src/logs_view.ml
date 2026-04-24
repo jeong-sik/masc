@@ -1542,7 +1542,7 @@ let view_hud
     | "" -> "—"
     | ts -> Printf.sprintf "%s UTC" (Hud.hhmmss_of_iso ts)
   in
-  Hud.strip
+  Hud.strip ~label:"Log controls"
     [ Hud.cell ~k:"Source" ~v:"Log.Ring" ()
     ; Hud.cell ~k:"Total" ~v:(Printf.sprintf "%d" response.total) ()
     ; Hud.cell ~k:"Level" ~v:"INFO+" ()

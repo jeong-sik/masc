@@ -121,7 +121,8 @@ let cell ?(v_class : v_class = `Neutral) ~k ~v () =
     ]
 ;;
 
-let strip cells = Node.div ~attrs:[ Style.hud ] cells
+let strip ?(label : string = "Key metrics") cells =
+  Node.div ~attrs:[ Style.hud; Attr.role "status"; Attr.arialabel label ] cells
 
 (** Extract "HH:MM:SS" from an ISO-8601 UTC timestamp
     (e.g. "2026-04-20T04:02:07Z" → "04:02:07"). Falls back to the full

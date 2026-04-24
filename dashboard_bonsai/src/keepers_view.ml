@@ -42,7 +42,7 @@ stylesheet
 
   .eyebrow {
     font-family: 'Noto Sans KR', sans-serif;
-    font-size: 10px;
+    font-size: 11px;
     letter-spacing: 0.3em;
     text-transform: uppercase;
     color: var(--text-dim);
@@ -120,7 +120,7 @@ let view_hud_strip
   in
   let counts = Keepers_directory.counts rows in
   let coverage = Keepers_directory.coverage rows in
-  Hud.strip
+  Hud.strip ~label:"Fleet KPIs"
     [ Hud.cell ~k:"Fleet" ~v:(Printf.sprintf "%02d" counts.total) ()
     ; Hud.cell ~v_class:(if counts.active > 0 then `Ok else `Neutral)
         ~k:"Active"

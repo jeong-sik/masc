@@ -598,6 +598,7 @@
   ;; godsplit-safety: variant unification & godfile decomposition
   gate_diff_types
   gh_command_validation
+  gh_exit_class
 )
 (private_modules
  dashboard_http_keeper_metrics

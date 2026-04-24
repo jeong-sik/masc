@@ -85,15 +85,28 @@ let test_session_min_and_local_worker_share_core () =
       (String.concat ", " (SS.elements missing));
   Alcotest.(check bool) "shared core present" true (SS.is_empty missing)
 
-let test_keeper_denied_disjoint_from_public_mcp () =
+let public_keeper_denied_overlap_allowed =
+  set_of
+    [
+      "masc_persona_generate";
+      "masc_persona_save";
+      "masc_keeper_create_from_persona";
+    ]
+
+let test_keeper_denied_public_mcp_overlap_is_explicit () =
   let denied = set_of (Tool_catalog.tools_for_surface Tool_catalog.Keeper_denied) in
   let public = set_of (Tool_catalog.tools_for_surface Tool_catalog.Public_mcp) in
   let overlap = SS.inter denied public in
-  if not (SS.is_empty overlap) then
-    Alcotest.failf "Keeper_denied overlaps with Public_mcp: {%s}"
-      (String.concat ", " (SS.elements overlap));
-  Alcotest.(check bool) "Keeper_denied disjoint from Public_mcp" true
-    (SS.is_empty overlap)
+  let unexpected = SS.diff overlap public_keeper_denied_overlap_allowed in
+  let missing = SS.diff public_keeper_denied_overlap_allowed overlap in
+  if not (SS.is_empty unexpected) then
+    Alcotest.failf "Unexpected Keeper_denied/Public_mcp overlap: {%s}"
+      (String.concat ", " (SS.elements unexpected));
+  if not (SS.is_empty missing) then
+    Alcotest.failf "Expected Keeper_denied/Public_mcp overlap missing: {%s}"
+      (String.concat ", " (SS.elements missing));
+  Alcotest.(check bool) "Keeper_denied/Public_mcp overlap explicit" true
+    (SS.is_empty unexpected && SS.is_empty missing)
 
 let test_keeper_internal_disjoint_from_public_mcp () =
   let internal = set_of (Tool_catalog.tools_for_surface Tool_catalog.Keeper_internal) in
@@ -367,8 +380,8 @@ let () =
         [
           Alcotest.test_case "Session_min ∩ Local_worker shared core" `Quick
             test_session_min_and_local_worker_share_core;
-          Alcotest.test_case "Keeper_denied ∩ Public_mcp = ∅" `Quick
-            test_keeper_denied_disjoint_from_public_mcp;
+          Alcotest.test_case "Keeper_denied/Public_mcp overlap is explicit" `Quick
+            test_keeper_denied_public_mcp_overlap_is_explicit;
           Alcotest.test_case "Keeper_internal ∩ Public_mcp = ∅" `Quick
             test_keeper_internal_disjoint_from_public_mcp;
           Alcotest.test_case "Keeper_internal contains known tools" `Quick

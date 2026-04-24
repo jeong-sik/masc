@@ -138,3 +138,16 @@ val tag_registry_count : unit -> int
 
 val mark_tag_registry_initialized : unit -> unit
 val is_tag_registry_initialized : unit -> bool
+
+(** {1 Did-you-mean Suggestions (#9784)} *)
+
+val all_registered_names : unit -> string list
+(** Every tool name registered in either the tag_registry or the
+    handler registry, deduplicated. Iteration order is unspecified. *)
+
+val find_similar_names :
+  ?limit:int -> ?min_score:float -> query:string -> unit -> string list
+(** Return up to [limit] (default 3) tool names from the registries with
+    [Text_similarity.jaccard_similarity] to [query] >= [min_score]
+    (default 0.4), sorted by similarity descending. Used to enrich
+    Unknown tool errors with self-correction hints for LLM clients. *)

@@ -171,6 +171,10 @@ let () =
             `Quick
             Test_operator_control_keeper
             .test_keeper_config_exposes_live_runtime_and_sources;
+          Alcotest.test_case
+            "keeper config uses backend scoped private workspace root" `Quick
+            Test_operator_control_keeper
+            .test_keeper_config_uses_backend_scoped_private_workspace_root;
           Alcotest.test_case "keeper repair reseeds identity drift" `Quick
             Test_operator_control_keeper
             .test_keeper_repair_reseeds_identity_drift;

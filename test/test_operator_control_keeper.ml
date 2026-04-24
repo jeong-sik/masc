@@ -1931,6 +1931,87 @@ proactive_enabled = true
       in
       Alcotest.(check bool) "keeper down ok" true ok)
 
+let test_keeper_config_uses_backend_scoped_private_workspace_root () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let keeper_name = "sandbox-root" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_keepalive.stop_keepalive keeper_name;
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      let keeper_ctx : _ Tool_keeper.context =
+        {
+          config;
+          agent_name = "operator";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      let ok, _ =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("goal", `String "Verify sandbox root surface");
+                ("proactive_enabled", `Bool false);
+                ("autoboot_enabled", `Bool false);
+              ])
+      in
+      Alcotest.(check bool) "keeper up ok" true ok;
+      let assert_config_root label expected_rel expected_abs =
+        let status, json =
+          Masc_mcp.Dashboard_http_keeper.keeper_config_json config keeper_name
+        in
+        Alcotest.(check bool) (label ^ " config found") true (status = `OK);
+        let open Yojson.Safe.Util in
+        Alcotest.(check string) (label ^ " private workspace root")
+          expected_abs
+          (json |> member "private_workspace_root" |> to_string);
+        Alcotest.(check (list string)) (label ^ " effective allowed paths")
+          [ expected_rel ]
+          (json |> member "effective_allowed_paths" |> to_list
+         |> List.map to_string)
+      in
+      let local_rel =
+        Masc_mcp.Keeper_sandbox.host_root_rel_of_profile
+          Keeper_types.Local keeper_name
+      in
+      assert_config_root "local" local_rel (Filename.concat base_dir local_rel);
+      update_keeper_sandbox_mode config keeper_name
+        ~sandbox_profile:Keeper_types.Docker
+        ~network_mode:Keeper_types.Network_none;
+      Keeper_status_detail.invalidate_status_cache_for keeper_name;
+      let docker_rel =
+        Masc_mcp.Keeper_sandbox.host_root_rel_of_profile
+          Keeper_types.Docker keeper_name
+      in
+      let docker_abs = Filename.concat base_dir docker_rel in
+      assert_config_root "docker" docker_rel docker_abs;
+      let ok, status_body =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_status"
+          ~args:(`Assoc [ ("name", `String keeper_name); ("fast", `Bool true) ])
+      in
+      Alcotest.(check bool) "keeper status ok" true ok;
+      let status_json = parse_json_exn status_body in
+      let open Yojson.Safe.Util in
+      let execution_context = status_json |> member "execution_context" in
+      Alcotest.(check string) "status playground path"
+        docker_rel
+        (execution_context |> member "playground_path" |> to_string);
+      Alcotest.(check string) "status private workspace root"
+        docker_abs
+        (execution_context |> member "private_workspace_root" |> to_string))
+
 let test_snapshot_keeper_tool_audit_fallback () =
   Eio_main.run @@ fun env ->
   ensure_fs env;

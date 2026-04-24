@@ -1466,9 +1466,7 @@ let keeper_config_json (config : Coord.config) (name : string)
         | _ -> None
       in
       let private_workspace_root =
-        Filename.concat
-          (Keeper_alerting_path.project_root_of_config config)
-          (Keeper_alerting_path.playground_path_of_keeper m.name)
+        Keeper_sandbox.host_root_abs_of_meta ~config m
       in
       let sandbox_environment =
         let string_or_null value =

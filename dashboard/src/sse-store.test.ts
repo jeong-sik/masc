@@ -239,6 +239,36 @@ describe('setupSSEReaction reconnect hydration', () => {
     cleanup()
   })
 
+  it('routes websocket raw push events through the same route-scoped refresh budget', async () => {
+    const { sseStore } = await loadSseStore()
+    route.value = { tab: 'workspace', params: { section: 'board' }, postId: null }
+
+    sseStore.routeServerPushEvent({
+      type: 'comment_added',
+      post_id: 'post-1',
+      comment_id: 'comment-1',
+    })
+    vi.advanceTimersByTime(1_000)
+    await flushAsyncWork()
+
+    expect(refreshBoard).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps websocket raw push refreshes hidden when the route does not need that surface', async () => {
+    const { sseStore } = await loadSseStore()
+    route.value = { tab: 'overview', params: {}, postId: null }
+
+    sseStore.routeServerPushEvent({
+      type: 'comment_added',
+      post_id: 'post-1',
+      comment_id: 'comment-1',
+    })
+    vi.advanceTimersByTime(1_000)
+    await flushAsyncWork()
+
+    expect(refreshBoard).not.toHaveBeenCalled()
+  })
+
   it('hydrates websocket dashboard snapshots for board, goals, and composite slices', async () => {
     const { sseStore } = await loadSseStore()
 
@@ -261,5 +291,20 @@ describe('setupSSEReaction reconnect hydration', () => {
       count: 0,
       snapshots: [],
     })
+  })
+
+  it('routes websocket dashboard delta event types without treating payloads as snapshots', async () => {
+    const { sseStore } = await loadSseStore()
+    route.value = { tab: 'workspace', params: { section: 'board' }, postId: null }
+
+    sseStore.hydrateDashboardSlice('board', {
+      post_id: 'post-1',
+      comment_id: 'comment-1',
+    }, 'comment_added')
+    vi.advanceTimersByTime(1_000)
+    await flushAsyncWork()
+
+    expect(hydrateBoardSnapshot).not.toHaveBeenCalled()
+    expect(refreshBoard).toHaveBeenCalledTimes(1)
   })
 })

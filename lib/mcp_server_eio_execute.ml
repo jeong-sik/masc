@@ -533,12 +533,12 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   if join_required && not room_initialized then
     with_system_internal_audit ~agent_name
       (false, Printf.sprintf
-         "⚠️ MASC room not initialized.\n\n💡 Workflow: masc_init → masc_join → masc_status → %s\n📚 See: @~/me/instructions/masc-workflow.md\n[DEBUG] agent_name=%s room_initialized=%b"
-         name agent_name room_initialized)
+         "⚠️ MASC room not initialized.\n\n💡 Fastest: masc_start(path=\"<project>\") — one-step init+join, then call %s.\n💡 Alternative: masc_init → masc_join → masc_status → %s\n📚 See: @~/me/instructions/masc-workflow.md\n[DEBUG] agent_name=%s room_initialized=%b"
+         name name agent_name room_initialized)
   else if join_required && not is_joined then
     with_system_internal_audit ~agent_name
       (false, Printf.sprintf
-         "❌ Join required: Call masc_join first before using %s.\n\n💡 Workflow: masc_join → masc_status → %s\n📚 See: @~/me/instructions/masc-workflow.md\n[DEBUG] agent_name=%s is_joined=%b"
+         "❌ Join required before using %s.\n\n💡 Fastest: masc_start(path=\"<project>\") — one-step join with room scope.\n💡 Alternative: masc_join → masc_status → %s\n📚 See: @~/me/instructions/masc-workflow.md\n[DEBUG] agent_name=%s is_joined=%b"
          name name agent_name is_joined)
   else (
 

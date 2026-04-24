@@ -26,7 +26,7 @@ stylesheet
     font-family: var(--font-display, 'Cinzel', serif);
     font-size: 13px;
     letter-spacing: 0.26em;
-    color: var(--accent-brass, #8a6a28);
+    color: var(--accent-brass, #968228);
     text-transform: uppercase;
     margin: 0;
     flex-shrink: 0;

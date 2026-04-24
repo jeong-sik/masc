@@ -38,7 +38,7 @@ stylesheet
   }
 
   .tail_brass {
-    color: var(--accent-brass, #8a6a28);
+    color: var(--accent-brass, #968228);
     font-size: 18px;
     margin-left: 14px;
   }

@@ -543,6 +543,10 @@ let test_autoresearch_keeper_tools_match_schema_inventory () =
     (List.mem "masc_repo_synthesis_swarm_start" raw_names);
   check bool "solo autoresearch start stays exposed" true
     (List.mem "masc_autoresearch_start" names);
+  check bool "autoresearch record finding is exposed" true
+    (List.mem "masc_autoresearch_record_finding" names);
+  check bool "autoresearch search findings is exposed" true
+    (List.mem "masc_autoresearch_search_findings" names);
   check bool "autoresearch shard has no swarm start" false
     (List.mem "masc_autoresearch_swarm_start" names);
   check bool "autoresearch shard has no repo synthesis swarm start" false

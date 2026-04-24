@@ -17,6 +17,7 @@ let all_keeper : Tool_name.Keeper.t list =
 let all_masc : Tool_name.Masc.t list =
   [ A2a_delegate; Add_task; Agent_card; Agent_fitness; Agent_update; Agents
   ; Autoresearch_cycle; Autoresearch_inject; Autoresearch_start
+  ; Autoresearch_record_finding; Autoresearch_search_findings
   ; Autoresearch_status; Autoresearch_stop
   ; Batch_add_tasks; Board_cleanup; Board_comment; Board_comment_vote
   ; Board_delete; Board_get; Board_hearths; Board_list; Board_post
@@ -39,8 +40,8 @@ let all_masc : Tool_name.Masc.t list =
   ; Tool_stats; Webrtc_answer; Webrtc_offer ]
 
 let all_masc_keeper : Tool_name.Masc_keeper.t list =
-  [ Clear; Compact; Create_from_persona; Down; List; Msg; Repair; Reset
-  ; Status; Up ]
+  [ Clear; Compact; Create_from_persona; Down; List; Msg; Persona_audit; Repair
+  ; Reset; Status; Up ]
 
 let all_tool_names : Tool_name.t list =
   List.map (fun k -> Tool_name.Keeper k) all_keeper

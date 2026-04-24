@@ -301,6 +301,9 @@ let () = List.iter (fun (n, m) -> Hashtbl.replace metadata_table n m) explicit_m
 let register_metadata name (meta : metadata) =
   Hashtbl.replace metadata_table name meta
 
+let registered_metadata name =
+  Hashtbl.find_opt metadata_table name
+
 (* ================================================================ *)
 (* Public MCP surface — delegates to Tool_catalog_surfaces (SSOT)   *)
 (* ================================================================ *)
@@ -457,6 +460,7 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Masc TM.Agent_card
   | TN.Masc TM.Agent_fitness
   | TN.Masc TM.Agents
+  | TN.Masc TM.Autoresearch_search_findings
   | TN.Masc TM.Autoresearch_status
   | TN.Masc TM.Board_get
   | TN.Masc TM.Board_hearths
@@ -508,6 +512,7 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Masc TM.Add_task
   | TN.Masc TM.Agent_update
   | TN.Masc TM.Autoresearch_cycle
+  | TN.Masc TM.Autoresearch_record_finding
   | TN.Masc TM.Batch_add_tasks
   | TN.Masc TM.Board_cleanup
   | TN.Masc TM.Board_comment
@@ -552,6 +557,7 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Masc TM.Update_priority ->
       Some Masc_coordination
   | TN.Masc_keeper TMK.List
+  | TN.Masc_keeper TMK.Persona_audit
   | TN.Masc_keeper TMK.Status ->
       Some Read_only
   | TN.Masc_keeper TMK.Clear
@@ -659,6 +665,8 @@ let tool_group_of_typed_tool_name = function
   | TN.Masc
       ( TM.Autoresearch_cycle
       | TM.Autoresearch_inject
+      | TM.Autoresearch_record_finding
+      | TM.Autoresearch_search_findings
       | TM.Autoresearch_start
       | TM.Autoresearch_status
       | TM.Autoresearch_stop ) ->

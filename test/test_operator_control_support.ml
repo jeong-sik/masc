@@ -12,6 +12,7 @@ let temp_dir () =
 (** Ensure Fs_compat has the Eio fs handle set.
     Call inside Eio_main.run before creating Coord config. *)
 let ensure_fs env =
+  Masc_test_deps.init_eio_clock env;
   if not (Fs_compat.has_fs ()) then
     Fs_compat.set_fs (Eio.Stdenv.fs env)
 

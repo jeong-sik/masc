@@ -877,7 +877,7 @@ let shard_autoresearch : shard = {
   tools = autoresearch_keeper_tools;
   read_only_tools = [];
   removable = true;
-  description = "Autonomous experiment loop: start, cycle, status, inject, stop";
+  description = "Autonomous experiment loop: start, cycle, status, inject, stop, findings";
 }
 
 (** Per-agent shard overrides.  Read-modify-write is serialised by

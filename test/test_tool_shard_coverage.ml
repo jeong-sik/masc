@@ -541,7 +541,17 @@ let () =
           List.exists (fun (t : Types.tool_schema) ->
             t.name = "masc_autoresearch_cycle") tools
         in
-        Alcotest.(check bool) "has cycle" true has_cycle);
+        let has_record =
+          List.exists (fun (t : Types.tool_schema) ->
+            t.name = "masc_autoresearch_record_finding") tools
+        in
+        let has_search =
+          List.exists (fun (t : Types.tool_schema) ->
+            t.name = "masc_autoresearch_search_findings") tools
+        in
+        Alcotest.(check bool) "has cycle" true has_cycle;
+        Alcotest.(check bool) "has record finding" true has_record;
+        Alcotest.(check bool) "has search findings" true has_search);
       Alcotest.test_case "in defaults" `Quick (fun () ->
         let defaults = Tool_shard.default_shard_names in
         Alcotest.(check bool) "autoresearch in defaults"

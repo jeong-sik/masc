@@ -107,23 +107,24 @@ let finding_of_yojson (json : Yojson.Safe.t) : (finding, string) result =
 
 (** {1 Storage (JSONL)} *)
 
-let findings_dir () =
-  let base = Env_config_core.base_path () in
-  Filename.concat base ".masc/autoresearch/findings"
+let findings_dir ~base_path =
+  Filename.concat
+    (Filename.concat (Common.masc_dir_from_base_path ~base_path) "autoresearch")
+    "findings"
 
-let findings_file () =
-  Filename.concat (findings_dir ()) "findings.jsonl"
+let findings_file ~base_path =
+  Filename.concat (findings_dir ~base_path) "findings.jsonl"
 
-let ensure_findings_dir () =
-  Fs_compat.mkdir_p (findings_dir ())
+let ensure_findings_dir ~base_path =
+  Fs_compat.mkdir_p (findings_dir ~base_path)
 
-let append_finding (f : finding) : unit =
-  ensure_findings_dir ();
+let append_finding ~base_path (f : finding) : unit =
+  ensure_findings_dir ~base_path;
   let line = Yojson.Safe.to_string (finding_to_yojson f) ^ "\n" in
-  Fs_compat.append_file (findings_file ()) line
+  Fs_compat.append_file (findings_file ~base_path) line
 
-let load_all_findings () : finding list =
-  let path = findings_file () in
+let load_all_findings ~base_path () : finding list =
+  let path = findings_file ~base_path in
   if not (Sys.file_exists path) then []
   else
     Fs_compat.load_jsonl path
@@ -152,9 +153,9 @@ let rec take n = function
   | _ when n <= 0 -> []
   | x :: rest -> x :: take (n - 1) rest
 
-let search_findings ~query ?(limit=10) () : finding list =
+let search_findings ~base_path ~query ?(limit=10) () : finding list =
   let query_lower = String.lowercase_ascii query in
-  load_all_findings ()
+  load_all_findings ~base_path ()
   |> List.rev  (* most recent first — load_all returns oldest first *)
   |> List.filter (fun f ->
     let haystack = String.lowercase_ascii
@@ -218,8 +219,8 @@ let sync_to_graphql (f : finding) : (bool, string) result =
 let generate_finding_id () =
   Random_id.prefixed ~prefix:"fn-" ~bytes:6
 
-let record_finding ~(finding : finding) : Yojson.Safe.t =
-  append_finding finding;
+let record_finding ~base_path ~(finding : finding) : Yojson.Safe.t =
+  append_finding ~base_path finding;
   (* Best-effort GraphQL sync — local JSONL is authoritative *)
   let graphql_ok = match sync_to_graphql finding with
     | Ok _ -> true

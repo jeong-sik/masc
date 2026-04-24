@@ -8,6 +8,7 @@
 
 (** Autoresearch tool schemas: [masc_autoresearch_start],
     [masc_autoresearch_status], [masc_autoresearch_stop],
-    [masc_autoresearch_history], [masc_autoresearch_insights], and
-    swarm synthesis entries. *)
+    [masc_autoresearch_inject], [masc_autoresearch_cycle],
+    [masc_autoresearch_record_finding], and
+    [masc_autoresearch_search_findings]. *)
 val schemas : Types.tool_schema list

@@ -68,6 +68,8 @@ module Masc : sig
     | Agents
     | Autoresearch_cycle
     | Autoresearch_inject
+    | Autoresearch_record_finding
+    | Autoresearch_search_findings
     | Autoresearch_start
     | Autoresearch_status
     | Autoresearch_stop
@@ -177,6 +179,7 @@ module Masc_keeper : sig
     | Down
     | List
     | Msg
+    | Persona_audit
     | Repair
     | Reset
     | Status

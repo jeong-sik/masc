@@ -599,13 +599,15 @@ let test_keeper_status_exposes_summary_and_recoverable () =
       Alcotest.(check bool) "keepalive running false" false
         Yojson.Safe.Util.(status_json |> member "keepalive_running" |> to_bool))
 
-let test_keeper_up_rejects_non_public_social_model_arg () =
+let test_keeper_up_ignores_non_public_social_model_arg () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
+  let keeper_name = "social-model-keeper" in
   Fun.protect
     ~finally:(fun () ->
+      Keeper_keepalive.stop_keepalive keeper_name;
       Keeper_registry.clear ();
       Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
@@ -627,18 +629,19 @@ let test_keeper_up_rejects_non_public_social_model_arg () =
           ~args:
             (`Assoc
               [
-                ("name", `String "social-model-keeper");
+                ("name", `String keeper_name);
                 ("goal", `String "Reject social model override");
                 ("social_model", `String "magentic_ledger_v1");
                 ("proactive_enabled", `Bool false);
                 ("autoboot_enabled", `Bool false);
               ])
       in
-      Alcotest.(check bool) "keeper up rejected" false ok;
-      Alcotest.(check bool) "mentions non-public keeper args" true
-        (contains_substring body "non-public keeper args");
-      Alcotest.(check bool) "mentions social_model" true
-        (contains_substring body "social_model"))
+      Alcotest.(check bool) "keeper up accepted" true ok;
+      let json = parse_json_exn body in
+      Alcotest.(check string) "keeps canonical keeper name" keeper_name
+        Yojson.Safe.Util.(json |> member "name" |> to_string);
+      Alcotest.(check string) "ignores arg social_model" "bdi_speech_v1"
+        Yojson.Safe.Util.(json |> member "social_model" |> to_string))
 
 let test_keeper_status_defaults_name_to_caller () =
   Eio_main.run @@ fun env ->

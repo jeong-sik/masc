@@ -626,7 +626,9 @@ let parse_cost_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option =
 (* ── Read decisions.jsonl files ─────────────────────────── *)
 
 let read_all_decisions ~base_path ~since_unix : raw_entry list =
-  let keeper_dir = Filename.concat base_path ".masc/keepers" in
+  let keeper_dir =
+    Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers"
+  in
   if not (Sys.file_exists keeper_dir) then []
   else
     let files =
@@ -665,7 +667,9 @@ let read_all_decisions ~base_path ~since_unix : raw_entry list =
     ) files
 
 let read_cost_entries ~base_path ~since_unix : raw_entry list =
-  let path = Filename.concat base_path ".masc/costs.jsonl" in
+  let path =
+    Filename.concat (Common.masc_dir_from_base_path ~base_path) "costs.jsonl"
+  in
   if not (Sys.file_exists path) then []
   else
     try

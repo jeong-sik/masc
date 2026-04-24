@@ -113,6 +113,10 @@ val register_metadata : string -> metadata -> unit
 (** Register runtime metadata for a tool. Called by [Tool_spec.register].
     Overwrites any previous entry for the same name. *)
 
+val registered_metadata : string -> metadata option
+(** Explicit or [Tool_spec]-registered metadata, without surface-derived
+    fallback metadata. *)
+
 val explicit_metadata : (string * metadata) list
 (** Explicitly configured tool metadata entries (for test verification). *)
 

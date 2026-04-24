@@ -408,6 +408,8 @@ let dashboard_planning_http_json ~(config : Coord.config) : Yojson.Safe.t =
             ("done", `Int done_count);
             ("cancelled", `Int cancelled_count);
           ] );
+      ( "coordination_fsm",
+        Coordination_product_snapshot.safe_build_yojson config );
     ]
 
 let dashboard_goals_tree_http_json ~(config : Coord.config) : Yojson.Safe.t =

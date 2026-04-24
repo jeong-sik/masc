@@ -249,6 +249,30 @@ let test_dashboard_shell_http_json_prefers_last_good_while_prewarming () =
       check int "last-good counts reused" 7
         (json |> member "counts" |> member "agents" |> to_int))
 
+let test_dashboard_planning_http_json_includes_coordination_fsm () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  ignore (Lib.Coord.init config ~agent_name:(Some "dashboard"));
+  let json = Lib.Server_dashboard_http.dashboard_planning_http_json ~config in
+  let open Yojson.Safe.Util in
+  let coordination = json |> member "coordination_fsm" in
+  check string "mode" "advisory" (coordination |> member "mode" |> to_string);
+  check bool "summary present" true
+    (match coordination |> member "summary" with
+     | `Assoc _ -> true
+     | _ -> false);
+  check bool "summary evidence present" true
+    (match coordination |> member "summary" |> member "evidence" with
+     | `Int _ -> true
+     | _ -> false);
+  check bool "violations present" true
+    (match coordination |> member "violations" with
+     | `List _ -> true
+     | _ -> false);
+  check bool "evidence present" true
+    (match coordination |> member "evidence" with
+     | `List _ -> true
+     | _ -> false)
+
 let test_dashboard_shell_auth_json_canonicalizes_token_owner () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   let cfg =
@@ -363,6 +387,8 @@ let () =
             test_dashboard_shell_http_json_uses_bootstrap_payload_while_prewarming;
           test_case "shell reuses last good payload while prewarming" `Quick
             test_dashboard_shell_http_json_prefers_last_good_while_prewarming;
+          test_case "planning payload includes coordination FSM" `Quick
+            test_dashboard_planning_http_json_includes_coordination_fsm;
           test_case "shell auth canonicalizes token owner" `Quick
             test_dashboard_shell_auth_json_canonicalizes_token_owner;
           test_case "shell auth reports missing token" `Quick

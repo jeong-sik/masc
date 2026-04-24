@@ -88,6 +88,9 @@ val spend :
 val get_balance : base_path:string -> agent_name:string -> float
 (** Current balance for an agent. Returns initial_balance if no history. *)
 
+val list_transactions : base_path:string -> transaction list
+(** Read ledger transactions in append order. Malformed entries are skipped. *)
+
 val economic_pressure : base_path:string -> agent_name:string -> pressure_mode
 (** Determine behavioral pressure mode from current balance. *)
 

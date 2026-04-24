@@ -14,5 +14,5 @@
 val assertion_kind_enum_strings : string list
 
 (** Tool schemas: [masc_status], [masc_reset], [masc_workflow_guide],
-    [masc_check], [masc_heartbeat]. *)
+    [masc_coordination_fsm_snapshot], [masc_check], [masc_heartbeat]. *)
 val schemas : Types.tool_schema list

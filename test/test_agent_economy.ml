@@ -230,6 +230,27 @@ let test_ledger_file_created () =
       Alcotest.(check bool) "ledger file exists" true (Sys.file_exists path)));
   rm_rf dir
 
+let test_list_transactions () =
+  let dir = fresh_tmpdir () in
+  reset_cache ();
+  with_economy_enabled (fun () ->
+    with_env "MASC_ECONOMY_REPUTATION_MULTIPLIER" "false" (fun () ->
+      ignore (Agent_economy.earn
+        ~base_path:dir ~agent_name:"reader"
+        ~kind:Earn_task_done ~reason:"task done"
+        ~metadata:(`Assoc [ ("goal_id", `String "goal-1") ])
+        ());
+      ignore (Agent_economy.spend
+        ~base_path:dir ~agent_name:"reader"
+        ~amount:0.25 ~kind:Spend_model_call ~reason:"model call" ());
+      let txns = Agent_economy.list_transactions ~base_path:dir in
+      Alcotest.(check int) "transaction count" 2 (List.length txns);
+      let first = List.hd txns in
+      let open Yojson.Safe.Util in
+      Alcotest.(check string) "metadata goal id" "goal-1"
+        (first.metadata |> member "goal_id" |> to_string)));
+  rm_rf dir
+
 (** {1 Reputation Multiplier Tests} *)
 
 let test_reward_multiplier_range () =
@@ -332,6 +353,7 @@ let () =
     ("persistence", [
       Alcotest.test_case "ledger persistence" `Quick test_ledger_persistence;
       Alcotest.test_case "ledger file created" `Quick test_ledger_file_created;
+      Alcotest.test_case "list transactions" `Quick test_list_transactions;
     ]);
     ("reputation", [
       Alcotest.test_case "multiplier range" `Quick test_reward_multiplier_range;

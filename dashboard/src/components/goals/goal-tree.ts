@@ -10,6 +10,7 @@ import {
   goalTreeLoading as treeLoading,
   hydrateGoalTreeSnapshot,
 } from '../../goal-tree-state'
+import { coordinationFsmSnapshot } from '../../store'
 import { EmptyState, ErrorState, LoadingState } from '../common/feedback-state'
 import { ActionButton } from '../common/button'
 import { FilterChips } from '../common/filter-chips'
@@ -18,6 +19,7 @@ import { TimeAgo } from '../common/time-ago'
 import { TaskCreateForm } from '../task-manage/task-create-form'
 import type {
   DashboardGoalDetailResponse,
+  DashboardCoordinationFsmViolation,
   GoalDetailKeeper,
   GoalDetailTimelineEvent,
   GoalTreeNode,
@@ -403,6 +405,11 @@ function GoalBadges({ badges }: { badges: string[] }) {
   `
 }
 
+function coordinationViolationsForGoal(goalId: string): DashboardCoordinationFsmViolation[] {
+  const violations = coordinationFsmSnapshot.value?.violations ?? []
+  return violations.filter(violation => violation.refs?.goal_id === goalId)
+}
+
 function TreeTask({ task }: { task: GoalTreeTask }) {
   return html`
     <div class="flex flex-wrap items-center gap-2 rounded bg-white/3 px-2 py-1.5 text-xs">
@@ -424,6 +431,8 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
   const hasContent = node.children.length > 0 || node.tasks.length > 0
   const isSelected = selectedGoalId.value === node.id
   const verificationSummary = node.verification_summary ?? EMPTY_GOAL_VERIFICATION_SUMMARY
+  const coordinationViolations = coordinationViolationsForGoal(node.id)
+  const coordinationHasError = coordinationViolations.some(v => v.severity === 'error')
   const indent = depth * 20
   const headerBase = isSelected
     ? 'group flex items-start gap-3 rounded border border-accent/35 bg-[rgba(11,18,32,0.94)] p-3 transition-colors w-full text-left shadow-[0_0_0_1px_rgba(110,231,255,0.08)]'
@@ -488,6 +497,14 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
             ${node.pending_approval_count > 0 ? html`
               <span class="rounded border border-warn/30 bg-warn/10 px-2 py-0.5 text-3xs font-medium text-warn">
                 approval ${node.pending_approval_count}
+              </span>
+            ` : null}
+            ${coordinationViolations.length > 0 ? html`
+              <span
+                class="rounded border px-2 py-0.5 text-3xs font-medium ${coordinationHasError ? 'border-bad/30 bg-bad/10 text-bad' : 'border-warn/30 bg-warn/10 text-warn'}"
+                title="Goal x Task x Board x Reward"
+              >
+                FSM ${coordinationViolations.length}
               </span>
             ` : null}
             ${node.blocking_source !== 'none' ? html`

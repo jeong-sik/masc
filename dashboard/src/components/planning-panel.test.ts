@@ -13,6 +13,12 @@ vi.mock('../router', () => ({
   get route() { return routeSignal },
 }))
 
+const coordinationSignal = signal<unknown>(null)
+
+vi.mock('../store', () => ({
+  get coordinationFsmSnapshot() { return coordinationSignal },
+}))
+
 vi.mock('./goals', () => ({
   Planning: () => html`<div data-testid="planning">Planning</div>`,
 }))
@@ -29,7 +35,10 @@ function setRoute(view?: string) {
 }
 
 describe('PlanningPanel', () => {
-  beforeEach(() => setRoute())
+  beforeEach(() => {
+    setRoute()
+    coordinationSignal.value = null
+  })
   afterEach(() => cleanup())
 
   it('renders GoalTree by default', () => {
@@ -55,5 +64,59 @@ describe('PlanningPanel', () => {
     setRoute('nonexistent')
     render(html`<${PlanningPanel} />`)
     expect(screen.getByTestId('goal-tree')).toBeTruthy()
+  })
+
+  it('renders coordination health violations', () => {
+    coordinationSignal.value = {
+      mode: 'advisory',
+      summary: {
+        products: 1,
+        violations: 1,
+        evidence: 2,
+        severity_counts: { info: 0, warn: 0, error: 1 },
+      },
+      evidence: [
+        {
+          source: 'telemetry',
+          kind: 'task_completed',
+          label: 'task completed',
+          detail: 'success=true; duration_ms=42',
+          refs: { goal_id: 'goal-1', task_ids: ['task-1'] },
+        },
+        {
+          source: 'board',
+          kind: 'post',
+          label: 'Board post',
+          detail: 'author=keeper',
+          refs: { goal_id: 'goal-1' },
+        },
+      ],
+      violations: [
+        {
+          severity: 'error',
+          code: 'reward_without_evidence',
+          message: 'Reward missing evidence',
+          refs: { goal_id: 'goal-1', task_ids: ['task-1'] },
+          evidence: [
+            {
+              source: 'telemetry',
+              kind: 'task_completed',
+              label: 'task completed',
+              detail: 'success=true; duration_ms=42',
+            },
+          ],
+        },
+      ],
+    }
+
+    render(html`<${PlanningPanel} />`)
+
+    expect(screen.getByText('Coordination Health')).toBeTruthy()
+    expect(screen.getByText('reward_without_evidence')).toBeTruthy()
+    expect(screen.getByText(/Reward missing evidence/)).toBeTruthy()
+    expect(screen.getByText(/goal: goal-1/)).toBeTruthy()
+    expect(screen.getAllByText('telemetry/task_completed').length).toBeGreaterThan(0)
+    expect(screen.getByText('board/post')).toBeTruthy()
+    expect(screen.getAllByText('task completed').length).toBeGreaterThan(0)
   })
 })

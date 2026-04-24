@@ -90,6 +90,7 @@ module Masc : sig
     | Claim_next
     | Claim_task
     | Cleanup_zombies
+    | Coordination_fsm_snapshot
     | Code_delete
     | Code_edit
     | Code_git

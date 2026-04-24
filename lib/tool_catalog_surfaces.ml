@@ -123,7 +123,7 @@ let public_mcp_surface_tools =
     "masc_claim_next"; "masc_transition";
     (* Planning *)
     "masc_goal_list"; "masc_goal_upsert"; "masc_goal_review";
-    "masc_goal_transition"; "masc_goal_verify";
+    "masc_goal_transition"; "masc_goal_verify"; "masc_coordination_fsm_snapshot";
     "masc_plan_init"; "masc_plan_get"; "masc_plan_set_task"; "masc_plan_update";
     (* Heartbeat *)
     "masc_heartbeat";
@@ -140,7 +140,7 @@ let public_mcp_surface_tools =
     "masc_board_post"; "masc_board_list"; "masc_board_get";
     "masc_board_comment"; "masc_board_vote";
     (* Agent discovery *)
-    "masc_agents"; "masc_dashboard"; "masc_agent_card"; "masc_collaboration_graph";
+    "masc_agents"; "masc_dashboard"; "masc_agent_card";
     (* Utility *)
     "masc_tool_help"; "masc_web_search"; "masc_check";
     (* HITL approval queue *)
@@ -160,7 +160,7 @@ let spawned_agent_surface_tools =
     "masc_who"; "masc_agent_update"; "masc_add_task"; "masc_heartbeat";
     "masc_messages";
     "masc_goal_list"; "masc_goal_upsert"; "masc_goal_review";
-    "masc_goal_transition"; "masc_goal_verify";
+    "masc_goal_transition"; "masc_goal_verify"; "masc_coordination_fsm_snapshot";
     "masc_worktree_create"; "masc_worktree_remove"; "masc_worktree_list";
     "masc_board_list"; "masc_board_post"; "masc_board_comment";
     "masc_board_vote"; "masc_board_get";
@@ -180,7 +180,7 @@ let local_worker_surface_tools =
     "masc_status"; "masc_tasks"; "masc_claim_next"; "masc_transition";
     "masc_add_task"; "masc_heartbeat";
     "masc_goal_list"; "masc_goal_upsert"; "masc_goal_review";
-    "masc_goal_transition"; "masc_goal_verify";
+    "masc_goal_transition"; "masc_goal_verify"; "masc_coordination_fsm_snapshot";
     "masc_board_post"; "masc_board_list"; "masc_board_get";
     "masc_board_comment"; "masc_board_vote"; "masc_board_search";
     "masc_code_search"; "masc_code_symbols"; "masc_code_read";
@@ -194,7 +194,7 @@ let session_min_surface_tools =
     "masc_status"; "masc_tasks"; "masc_claim_next";
     "masc_plan_set_task"; "masc_transition"; "masc_add_task";
     "masc_goal_list"; "masc_goal_upsert"; "masc_goal_review";
-    "masc_goal_transition"; "masc_goal_verify";
+    "masc_goal_transition"; "masc_goal_verify"; "masc_coordination_fsm_snapshot";
     "masc_broadcast"; "masc_heartbeat";
   ]
 
@@ -281,6 +281,7 @@ let coordination_role_tools : string list =
     "masc_who";
     "masc_heartbeat";
     "masc_messages";
+    "masc_coordination_fsm_snapshot";
     "masc_board_list";
     "masc_board_post";
     "masc_board_comment";

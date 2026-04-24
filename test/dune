@@ -1245,6 +1245,12 @@
  (modules test_server_state_product)
  (libraries masc_test_deps))
 
+; #9571 SSOT enforcement — no inline ".masc" literal outside Common.masc_dirname
+(test
+ (name test_masc_dirname_ssot)
+ (modules test_masc_dirname_ssot)
+ (libraries masc_test_deps unix str))
+
 (executable
  (name keeper_tool_matrix_case_runner)
  (modules keeper_tool_matrix_case_runner test_keeper_tool_matrix_cases

@@ -282,6 +282,18 @@ let test_resolved_runtime_freezes_toml_values_after_init () =
   check int "reactive max turns frozen from toml"
     12 runtime.reactive_max_turns_per_call.value
 
+let test_resolved_runtime_accepts_max_turns_ceiling () =
+  with_clean_boot_overrides @@ fun () ->
+  Config_boot_overrides.set "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL" "100";
+  Config_boot_overrides.set
+    "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS" "100";
+  Keeper_runtime_resolved.init ();
+  let runtime = Keeper_runtime_resolved.current () in
+  check int "reactive max turns accepts 100"
+    100 runtime.reactive_max_turns_per_call.value;
+  check int "autonomous max turns accepts 100"
+    100 runtime.autonomous_max_turns_per_call.value
+
 let test_resolved_runtime_prefers_env_over_toml () =
   with_clean_boot_overrides @@ fun () ->
   with_base_path @@ fun base_path ->
@@ -315,6 +327,7 @@ let () =
         ; test_case "explicit MASC_CONFIG_DIR wins over base path" `Quick test_explicit_config_dir_wins_over_base_path
         ; test_case "float value round trip" `Quick test_float_value_round_trip
         ; test_case "resolved runtime freezes toml values after init" `Quick test_resolved_runtime_freezes_toml_values_after_init
+        ; test_case "resolved runtime accepts max_turns ceiling" `Quick test_resolved_runtime_accepts_max_turns_ceiling
         ; test_case "resolved runtime prefers env over toml" `Quick test_resolved_runtime_prefers_env_over_toml
         ] )
     ]

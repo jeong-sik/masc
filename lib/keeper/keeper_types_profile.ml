@@ -487,12 +487,11 @@ let oas_env_key_is_allowed suffix =
   let allowed_prefixes =
     [ "OAS_CLAUDE_"; "OAS_CODEX_"; "OAS_GEMINI_"; "MASC_KEEPER_OAS_" ]
   in
-  String.length suffix
-    > (List.fold_left (fun acc p -> max acc (String.length p)) 0 allowed_prefixes)
-  && List.exists (fun p ->
-       String.length suffix >= String.length p
-       && String.sub suffix 0 (String.length p) = p)
-       allowed_prefixes
+  List.exists
+    (fun p ->
+      String.length suffix > String.length p
+      && String.sub suffix 0 (String.length p) = p)
+    allowed_prefixes
 
 let extract_oas_env_from_doc (doc : Keeper_toml_loader.toml_doc)
     : (string * string) list =
@@ -1310,12 +1309,15 @@ let load_keeper_profile_defaults name : keeper_profile_defaults =
      | None -> ());
     load_keeper_profile_defaults_from_persona name
 
-(** Clamp a profile-provided max-turns override to [1, 50] — the same range
-    enforced by [Env_config_keeper.KeeperKeepalive.oas_max_turns_per_call].
+(** Clamp a profile-provided max-turns override to [1, 100] — the same range
+    enforced by [Keeper_runtime_resolved.reactive_max_turns_per_call].
     Values outside the range are rejected so a typo in TOML cannot silently
     bypass the budget envelope. *)
 let clamp_max_turns_override : int option -> int option = function
-  | Some n when n >= 1 && n <= 100 -> Some n
+  | Some n
+    when n >= Keeper_runtime_resolved.max_turns_per_call_min
+      && n <= Keeper_runtime_resolved.max_turns_per_call_max ->
+    Some n
   | _ -> None
 
 let effective_max_turns_per_call (profile : keeper_profile_defaults) : int =

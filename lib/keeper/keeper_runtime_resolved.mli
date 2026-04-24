@@ -31,6 +31,9 @@ type t = {
   oas_timeout_per_turn : float field;
 }
 
+val max_turns_per_call_min : int
+val max_turns_per_call_max : int
+
 val init : unit -> unit
 val reset_for_tests : unit -> unit
 val current : unit -> t

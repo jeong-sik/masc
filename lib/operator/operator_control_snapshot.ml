@@ -214,6 +214,14 @@ let remote_client_type_of_context (ctx : 'a context) =
   | Some _ -> "mcp_remote"
   | None -> "local_api"
 
+let max_turns_override_source = function
+  | Some n
+    when n >= Keeper_runtime_resolved.max_turns_per_call_min
+      && n <= Keeper_runtime_resolved.max_turns_per_call_max ->
+    "override"
+  | Some _ -> "override_invalid"
+  | None -> "env"
+
 let operator_server_profile_json =
   `Assoc
     [
@@ -780,13 +788,8 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                                 Keeper_types_profile.effective_max_turns_per_call
                                   profile
                               in
-                              let classify_source = function
-                                | Some n when n >= 1 && n <= 50 -> "override"
-                                | Some _ -> "override_invalid"
-                                | None -> "env"
-                              in
                               let reactive_source =
-                                classify_source profile.max_turns_per_call
+                                max_turns_override_source profile.max_turns_per_call
                               in
                               let autonomous_effective =
                                 Keeper_types_profile
@@ -794,7 +797,7 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                                   profile
                               in
                               let autonomous_source =
-                                classify_source
+                                max_turns_override_source
                                   profile.max_turns_per_call_scheduled_autonomous
                               in
                               let raw_override_int = function
@@ -837,8 +840,14 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                                               .max_turns_per_call_scheduled_autonomous );
                                       ] );
                                   ("manifest_path", manifest_path_json);
-                                  ("clamp_min", `Int 1);
-                                  ("clamp_max", `Int 50);
+                                  ( "clamp_min",
+                                    `Int
+                                      Keeper_runtime_resolved.max_turns_per_call_min
+                                  );
+                                  ( "clamp_max",
+                                    `Int
+                                      Keeper_runtime_resolved.max_turns_per_call_max
+                                  );
                                 ])
                           in
                           dt_profile := Time_compat.now () -. t_profile;

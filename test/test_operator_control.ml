@@ -21,6 +21,10 @@ let () =
             `Quick
             Test_operator_control_snapshot
             .test_align_keeper_runtime_status_tolerates_null_status_json;
+          Alcotest.test_case "snapshot max-turn source accepts raised ceiling"
+            `Quick
+            Test_operator_control_snapshot
+            .test_max_turns_override_source_accepts_raised_ceiling;
           Alcotest.test_case "snapshot context ratio resolves cli provider budget"
             `Quick
             Test_operator_control_snapshot

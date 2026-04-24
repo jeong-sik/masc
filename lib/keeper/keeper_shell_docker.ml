@@ -292,6 +292,7 @@ let run_docker_shell_command_with_status
           "--user";
           Printf.sprintf "%d:%d" uid gid;
         ]
+        @ Keeper_sandbox_runtime.docker_nofile_args ()
         @ Env_config_keeper.KeeperSandbox.read_only_rootfs_args ()
         @ [
           "--tmpfs";

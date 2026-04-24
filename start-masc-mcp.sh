@@ -451,8 +451,26 @@ if [ -n "${MASC_BASE_PATH:-}" ]; then
 fi
 
 raise_open_file_limit() {
-    local desired="${MASC_NOFILE_TARGET:-4096}"
+    # Multi-keeper local runs can fan out across many LLM/provider CLIs,
+    # sockets, logs, and watcher handles. Keep the default high enough for
+    # 50-ish concurrent sessions while still allowing operators to override.
+    local desired="${MASC_NOFILE_TARGET:-245760}"
     local current hard target
+
+    case "$desired" in
+        max|hard)
+            desired=""
+            ;;
+    esac
+
+    if [ -z "$desired" ]; then
+        hard="$(ulimit -Hn 2>/dev/null || echo "")"
+        if [[ "$hard" =~ ^[0-9]+$ ]]; then
+            desired="$hard"
+        else
+            desired="${MASC_NOFILE_UNLIMITED_TARGET:-245760}"
+        fi
+    fi
 
     if ! [[ "$desired" =~ ^[0-9]+$ ]]; then
         echo "Warning: ignoring invalid MASC_NOFILE_TARGET=$desired" >&2
@@ -460,7 +478,6 @@ raise_open_file_limit() {
     fi
 
     current="$(ulimit -Sn 2>/dev/null || ulimit -n 2>/dev/null || echo "")"
-    hard="$(ulimit -Hn 2>/dev/null || echo "")"
     if ! [[ "$current" =~ ^[0-9]+$ ]]; then
         return 0
     fi

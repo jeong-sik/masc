@@ -561,6 +561,10 @@ module KeeperSandbox = struct
   let pids_limit () =
     max 32 (get_int ~default:128 "MASC_KEEPER_SANDBOX_PIDS_LIMIT")
 
+  (** Open file descriptor limit inside keeper Docker containers. *)
+  let nofile_limit () =
+    max 1024 (get_int ~default:245_760 "MASC_KEEPER_SANDBOX_NOFILE_LIMIT")
+
   (** Docker memory limit string, e.g. 2g / 512m. *)
   let memory () =
     get_string ~default:"2g" "MASC_KEEPER_SANDBOX_MEMORY"

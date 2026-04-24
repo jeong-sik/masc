@@ -484,8 +484,13 @@ let compute_judgments
         let raw_text = Oas_response.text_of_response response in
         let parsed = Llm_provider.Lenient_json.parse raw_text in
         match parsed with
-        | `Assoc [("raw", `String _)] ->
-            Error "Governance judge returned unparseable response (Lenient_json fallback hit)"
+        | `Assoc [("raw", `String raw)] ->
+            (* #9774: surface a preview of the raw text so the next
+               diagnostic pass can see what shape the LLM is producing
+               without having to enable raw provider logging. *)
+            let msg = Judge_diagnostics.format_lenient_fallback ~judge_label:"Governance" raw in
+            Log.Governance.warn "%s" msg;
+            Error msg
         | _ ->
             let generated_at = now_iso () in
             let expires_at = iso_of_unix (Unix.gettimeofday () +. cache_ttl_sec ()) in

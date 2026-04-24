@@ -39,6 +39,17 @@ let resolve_task_create_goal_id ~config ~(meta : keeper_meta) args =
                 (String.concat ", " goal_ids)))
 ;;
 
+let parse_task_contract_arg args =
+  match Yojson.Safe.Util.member "contract" args with
+  | `Null -> Ok None
+  | (`Assoc _ as json) -> (
+      match Types.task_contract_of_yojson json with
+      | Ok contract -> Ok (Some contract)
+      | Error message ->
+          Error (Printf.sprintf "Invalid contract payload: %s" message))
+  | _ -> Error "contract must be an object when provided"
+;;
+
 let active_goal_scope_json ~(meta : keeper_meta) ?matched_goal_id
     ?excluded_count () =
   let scoped = meta.active_goal_ids <> [] in
@@ -197,16 +208,20 @@ let handle_keeper_task_tool
       match resolve_task_create_goal_id ~config ~meta args with
       | Error message -> error_json message
       | Ok goal_id ->
-          let result =
-            Coord_task.add_task ?goal_id config ~title ~priority ~description
-          in
-          Yojson.Safe.to_string
-            (`Assoc
-              [
-                "ok", `Bool true;
-                "result", `String result;
-                "goal_id", Json_util.string_opt_to_json goal_id;
-              ]))
+          (match parse_task_contract_arg args with
+           | Error message -> error_json message
+           | Ok contract ->
+              let result =
+                Coord_task.add_task ?contract ?goal_id config ~title ~priority
+                  ~description
+              in
+              Yojson.Safe.to_string
+                (`Assoc
+                  [
+                    "ok", `Bool true;
+                    "result", `String result;
+                    "goal_id", Json_util.string_opt_to_json goal_id;
+                  ])))
   | "keeper_task_claim" ->
     let task_filter =
       match meta.active_goal_ids with
@@ -214,8 +229,10 @@ let handle_keeper_task_tool
       | goal_ids ->
         fun task -> Keeper_runtime_contract.task_is_linked_to_keeper_goals goal_ids task
     in
+    let agent_tool_names = Keeper_tool_policy.keeper_allowed_tool_names meta in
     let result =
-      Coord.claim_next_r config ~agent_name:meta.agent_name ~task_filter ()
+      Coord.claim_next_r config ~agent_name:meta.agent_name ~agent_tool_names
+        ~task_filter ()
     in
     (match result with
      | Coord.Claim_next_claimed { task_id; _ } ->

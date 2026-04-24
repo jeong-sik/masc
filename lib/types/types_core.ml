@@ -491,6 +491,7 @@ let task_execution_links_of_yojson json =
 type task_contract = {
   strict : bool;
   completion_contract : string list;
+  required_tools : string list;
   required_evidence : string list;
   inspect_gate_evidence : string list;
   verify_gate_evidence : string list;
@@ -518,6 +519,7 @@ let task_contract_to_yojson (contract : task_contract) =
       ("strict", `Bool contract.strict);
       ( "completion_contract",
         string_list_to_yojson contract.completion_contract );
+      ("required_tools", string_list_to_yojson contract.required_tools);
       ("required_evidence", string_list_to_yojson contract.required_evidence);
       ( "inspect_gate_evidence",
         string_list_to_yojson contract.inspect_gate_evidence );
@@ -554,6 +556,7 @@ let task_contract_of_yojson json =
       {
         strict;
         completion_contract = task_contract_string_list json "completion_contract";
+        required_tools = task_contract_string_list json "required_tools";
         required_evidence = task_contract_string_list json "required_evidence";
         inspect_gate_evidence =
           task_contract_string_list json "inspect_gate_evidence";

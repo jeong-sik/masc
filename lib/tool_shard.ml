@@ -773,6 +773,22 @@ Duplicate titles are rejected automatically (dedup by normalized title).";
           ("type", `String "string");
           ("description", `String "Optional structured goal linkage. Preferred over relying only on [goal:<id>] in the title.");
         ]);
+        ("contract", `Assoc [
+          ("type", `String "object");
+          ("description", `String "Optional persisted task contract. Use required_tools to prevent routing execution work to keepers without needed tools.");
+          ("properties", `Assoc [
+            ("strict", `Assoc [ ("type", `String "boolean") ]);
+            ("completion_contract", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
+            ("required_tools", `Assoc [
+              ("type", `String "array");
+              ("items", `Assoc [ ("type", `String "string") ]);
+              ("description", `String "Tool names required to claim this task, e.g. keeper_bash or masc_code_git.");
+            ]);
+            ("required_evidence", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
+            ("inspect_gate_evidence", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
+            ("verify_gate_evidence", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
+          ]);
+        ]);
       ]);
       ("required", `List [`String "title"; `String "description"]);
     ];

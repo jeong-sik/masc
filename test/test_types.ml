@@ -218,6 +218,7 @@ let test_backlog_parse_live_shape_with_null_optional_nested_fields () =
                     [
                       ("strict", `Bool false);
                       ("completion_contract", `List []);
+                      ("required_tools", `List [ `String "keeper_bash" ]);
                       ("required_evidence", `List []);
                       ("inspect_gate_evidence", `List []);
                       ("verify_gate_evidence", `List []);
@@ -263,7 +264,9 @@ let test_backlog_parse_live_shape_with_null_optional_nested_fields () =
              contract.links.session_id;
            Alcotest.(check (option string))
              "autoresearch_loop_id null -> None" None
-             contract.links.autoresearch_loop_id)
+             contract.links.autoresearch_loop_id;
+           Alcotest.(check (list string)) "required_tools parsed"
+             [ "keeper_bash" ] contract.required_tools)
 
 let () =
   Alcotest.run "Types" [

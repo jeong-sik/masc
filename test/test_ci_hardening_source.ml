@@ -42,6 +42,28 @@ let file_pattern_position file_rel pattern =
         let re = Str.regexp_string pattern in
         try Some (Str.search_forward re content 0) with Not_found -> None)
 
+let source_root () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root -> root
+  | None -> Sys.getcwd ()
+
+let quote = Filename.quote
+
+let run_agent_draft_policy env =
+  let env_prefix =
+    env
+    |> List.map (fun (k, v) -> Printf.sprintf "%s=%s" k (quote v))
+    |> String.concat " "
+  in
+  let script =
+    Filename.concat (source_root ()) "scripts/ci/check-agent-draft-policy.sh"
+  in
+  let cmd =
+    Printf.sprintf "cd %s && %s bash %s >/dev/null 2>&1"
+      (quote (source_root ())) env_prefix (quote script)
+  in
+  Sys.command cmd
+
 let test_ci_sync_and_asset_contracts () =
   check bool "pr sync script added" true
     (file_contains_pattern "scripts/check-pr-sync.sh" "workflow payload head");
@@ -51,8 +73,44 @@ let test_ci_sync_and_asset_contracts () =
     (file_contains_pattern ".github/workflows/ci.yml" "Verify PR sync");
   check bool "ci workflow passes pr number to sync check" true
     (file_contains_pattern ".github/workflows/ci.yml" "--pr-number \"$PR_NUMBER\"");
+  check bool "ci gate enforces agent draft policy" true
+    (file_contains_pattern ".github/workflows/ci.yml"
+       "Enforce agent draft policy on merge gate");
+  check bool "ci gate uses agent draft policy script" true
+    (file_contains_pattern ".github/workflows/ci.yml"
+       "scripts/ci/check-agent-draft-policy.sh");
   check bool "pr hygiene no longer checks dashboard assets (gitignored)" true
     (not (file_contains_pattern "scripts/check-pr-hygiene.sh" "dashboard source or Vite config changed but assets/dashboard was not updated"))
+
+let test_agent_draft_policy_script () =
+  let base =
+    [
+      ("GITHUB_EVENT_NAME", "pull_request");
+      ("PR_TITLE", "fix: keep long turns visibly alive");
+      ("PR_HEAD_REF", "codex/keeper-process-evidence");
+      ("PR_LABELS", "");
+    ]
+  in
+  check int "non pull_request events are ignored" 0
+    (run_agent_draft_policy [ ("GITHUB_EVENT_NAME", "push") ]);
+  check int "draft agent PR passes" 0
+    (run_agent_draft_policy (("PR_IS_DRAFT", "true") :: base));
+  check bool "ready agent PR without bypass fails" true
+    (run_agent_draft_policy (("PR_IS_DRAFT", "false") :: base) <> 0);
+  check int "ready agent PR with bypass label passes" 0
+    (run_agent_draft_policy
+       (("PR_IS_DRAFT", "false")
+       :: ("PR_LABELS", "enhancement,human-approved-ready")
+       :: List.remove_assoc "PR_LABELS" base));
+  check int "ready non-agent PR passes" 0
+    (run_agent_draft_policy
+       [
+         ("GITHUB_EVENT_NAME", "pull_request");
+         ("PR_IS_DRAFT", "false");
+         ("PR_TITLE", "fix: human authored branch");
+         ("PR_HEAD_REF", "feature/human-branch");
+         ("PR_LABELS", "enhancement");
+       ])
 
 let test_health_and_ci_runner_diagnostics () =
   check bool "health snapshot records baseline source" true
@@ -692,9 +750,13 @@ let test_transport_route_contracts () =
     h2_delete_path_verifies_full_mcp_auth;
   check bool "h2 gateway webrtc routes enforce tool auth" true
     (file_contains_pattern "lib/server/server_h2_gateway.ml"
-       {|authorize_tool_request
-                ~base_path:state.Mcp_server.room_config.base_path
-                ~tool_name:"masc_webrtc_offer"|});
+       {|authorize_tool_request|}
+    && file_contains_pattern "lib/server/server_h2_gateway.ml"
+         {|~base_path:state.Mcp_server.room_config.base_path|}
+    && file_contains_pattern "lib/server/server_h2_gateway.ml"
+         {|~tool_name:"masc_webrtc_offer"|}
+    && file_contains_pattern "lib/server/server_h2_gateway.ml"
+         {|~tool_name:"masc_webrtc_answer"|});
   check bool "h2 gateway respects webrtc disabled state" true
     (file_contains_pattern "lib/server/server_h2_gateway.ml"
        {|Server_webrtc_transport.is_enabled ()|})
@@ -778,9 +840,9 @@ let test_dashboard_timeout_guard_contracts () =
   check bool "h2 dashboard shell route threads state clock" true
     (file_contains_pattern "lib/server/server_h2_gateway.ml"
        "dashboard_shell_http_json ?clock:state.Mcp_server.clock");
-  check bool "h2 transport health route uses transport metrics" true
+  check bool "h2 transport health route uses cached dashboard helper" true
     (file_contains_pattern "lib/server/server_h2_gateway.ml"
-       "Transport_metrics.transport_health_json");
+       "dashboard_transport_health_http_json ~state");
   check bool "server dashboard transport health helper uses cached surface" true
     (file_contains_pattern "lib/server/server_dashboard_http_execution_surfaces.ml"
        {|cached_surface_json _transport_health_cache|});
@@ -849,6 +911,8 @@ let () =
     [
       ("source_guard", [
            test_case "sync and asset contracts" `Quick test_ci_sync_and_asset_contracts;
+           test_case "agent draft policy script" `Quick
+             test_agent_draft_policy_script;
            test_case "contract harness and team session authz contracts" `Quick
              test_contract_harness_and_execution_session_authz_contracts;
            test_case "health and ci diagnostics" `Quick test_health_and_ci_runner_diagnostics;

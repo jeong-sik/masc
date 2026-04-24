@@ -126,6 +126,10 @@ stylesheet
     color: var(--text-dim);
     flex-shrink: 0;
   }
+
+  @media (prefers-reduced-motion: reduce) {
+    .dot_live, .dot_thinking { animation: none; }
+  }
 |}]
 
 (** Keeper 상태 → roster dot 상태 매핑. `Warn` → `Thinking` (뭔가

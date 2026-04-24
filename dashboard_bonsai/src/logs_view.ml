@@ -1284,6 +1284,10 @@ stylesheet
     text-decoration: line-through;
     text-decoration-color: var(--accent-blood);
   }
+
+  @media (prefers-reduced-motion: reduce) {
+    .pulse { animation: none; }
+  }
 |}]
 
 let level_class level =

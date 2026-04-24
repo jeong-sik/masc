@@ -60,6 +60,8 @@ let test_emit_cost_event_writes_inference_telemetry () =
   check int "reasoning_tokens" 3 (json |> member "reasoning_tokens" |> to_int);
   check int "cache_n" 7 (json |> member "cache_n" |> to_int);
   check int "request_latency_ms" 42 (json |> member "request_latency_ms" |> to_int);
+  check (float 0.001) "tokens_per_second" (5.0 /. 0.042)
+    (json |> member "tokens_per_second" |> to_float);
   check (float 0.001) "prompt_per_second" 21.55
     (json |> member "prompt_per_second" |> to_float);
   check (float 0.001) "provider_tokens_per_second" 81.56
@@ -102,6 +104,34 @@ let test_emit_cost_event_uses_typed_provider_kind_for_bare_model () =
   let json = read_jsonl_line (Filename.concat root "costs.jsonl") in
   check string "provider from provider_kind" "kimi_cli"
     (json |> member "provider" |> to_string)
+
+let test_emit_cost_event_writes_wall_tok_s_without_provider_timings () =
+  let root = temp_dir () in
+  let telemetry : Agent_sdk.Types.inference_telemetry = {
+    system_fingerprint = None;
+    timings = None;
+    reasoning_tokens = None;
+    request_latency_ms = 250;
+    peak_memory_gb = None;
+    provider_kind = Some Llm_provider.Provider_kind.OpenAI_compat;
+    reasoning_effort = None;
+    canonical_model_id = Some "auto";
+    effective_context_window = Some 128000;
+    provider_internal_action_count = None;
+  } in
+  Hooks.emit_cost_event ~masc_root:root ~agent_name:"keeper"
+    ~task_id:None ~model:"ollama:qwen3.6:27b-coding-nvfp4"
+    ~input_tokens:100 ~output_tokens:50 ~cost_usd:0.0
+    ~telemetry ();
+  let json = read_jsonl_line (Filename.concat root "costs.jsonl") in
+  check (float 0.001) "wall tokens_per_second" 200.0
+    (json |> member "tokens_per_second" |> to_float);
+  check bool "native prompt timing absent" true
+    (match json |> member "prompt_per_second" with `Null -> true | _ -> false);
+  check bool "native decode timing absent" true
+    (match json |> member "hw_decode_tokens_per_second" with
+     | `Null -> true
+     | _ -> false)
 
 let test_cost_usd_for_usage_falls_back_for_paid_provider () =
   let model = "openai:gpt-4.1" in
@@ -366,6 +396,8 @@ let () =
             test_emit_cost_event_marks_usage_missing
         ; test_case "emit_cost_event uses typed provider kind for bare model" `Quick
             test_emit_cost_event_uses_typed_provider_kind_for_bare_model
+        ; test_case "emit_cost_event computes wall tok/s without native timings" `Quick
+            test_emit_cost_event_writes_wall_tok_s_without_provider_timings
         ; test_case "cost fallback estimates paid provider usage" `Quick
             test_cost_usd_for_usage_falls_back_for_paid_provider
         ; test_case "cost fallback preserves reported cost" `Quick

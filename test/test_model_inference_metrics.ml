@@ -43,6 +43,30 @@ let write_decisions path entries =
     ) entries
   )
 
+let iso_of_unix ts =
+  let tm = Unix.gmtime ts in
+  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+    tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
+
+let write_costs base entries =
+  let masc_dir = Filename.concat base ".masc" in
+  let rec mkdir_p dir =
+    if not (Sys.file_exists dir) then begin
+      mkdir_p (Filename.dirname dir);
+      Unix.mkdir dir 0o755
+    end
+  in
+  mkdir_p masc_dir;
+  let path = Filename.concat masc_dir "costs.jsonl" in
+  let oc = open_out path in
+  Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
+    List.iter (fun json ->
+      output_string oc (Yojson.Safe.to_string json);
+      output_char oc '\n'
+    ) entries
+  )
+
 let now_unix () = Unix.gettimeofday ()
 
 let success_entry ~model ~ts ?(input_tokens=100) ?(output_tokens=50)
@@ -77,6 +101,26 @@ let success_entry ~model ~ts ?(input_tokens=100) ?(output_tokens=50)
       ("cost_usd", `Float cost_usd);
     ] @ extra_telemetry_fields));
   ]
+
+let cost_entry ~model ~ts ?(input_tokens=100) ?(output_tokens=50)
+    ?(latency_ms=500) ?tokens_per_second ?(provider="ollama") () =
+  let tok_fields =
+    match tokens_per_second with
+    | Some v -> [("tokens_per_second", `Float v)]
+    | None -> []
+  in
+  `Assoc ([
+    ("timestamp", `String (iso_of_unix ts));
+    ("agent", `String "keeper");
+    ("provider", `String provider);
+    ("model", `String model);
+    ("input_tokens", `Int input_tokens);
+    ("output_tokens", `Int output_tokens);
+    ("cost_usd", `Float 0.0);
+    ("usage_missing", `Bool false);
+    ("source", `String "auto_trajectory");
+    ("request_latency_ms", `Int latency_ms);
+  ] @ tok_fields)
 
 let error_entry ~cascade_name ~ts ?provider () =
   `Assoc [
@@ -446,6 +490,43 @@ let test_coverage_diagnostics_survive_aggregation () =
     check string "recent json stage" "oas"
       (recent_json |> member "coverage_stage" |> to_string))
 
+let test_costs_jsonl_backfills_wall_tok_per_sec () =
+  let base = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let ts = now_unix () in
+    write_costs base [
+      cost_entry ~model:"qwen3.6:27b-coding-nvfp4" ~ts
+        ~input_tokens:100 ~output_tokens:50 ~latency_ms:250 ();
+    ];
+    let agg = M.compute ~base_path:base ~window_minutes:60 in
+    let s = List.hd agg.models in
+    check string "cost model"
+      "ollama:qwen3.6:27b-coding-nvfp4" s.model_id;
+    check int "one cost entry" 1 s.entry_count;
+    check (option (float 0.001)) "wall tok/sec from cost latency"
+      (Some 200.0) s.avg_tok_per_sec;
+    check int "usage sample" 1 s.usage_sample_count;
+    check int "telemetry sample" 1 s.telemetry_sample_count)
+
+let test_costs_jsonl_dedupes_matching_decision_sample () =
+  let base = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let path = make_keeper_dir base "dedupe" in
+    let ts = now_unix () in
+    write_decisions path [
+      success_entry ~model:"ollama:qwen3.6:27b-coding-nvfp4" ~ts
+        ~input_tokens:100 ~output_tokens:50 ~latency_ms:500 ();
+    ];
+    write_costs base [
+      cost_entry ~model:"ollama:qwen3.6:27b-coding-nvfp4" ~ts
+        ~input_tokens:100 ~output_tokens:50 ~latency_ms:250 ();
+    ];
+    let agg = M.compute ~base_path:base ~window_minutes:60 in
+    let s = List.hd agg.models in
+    check int "matching cost sample deduped" 1 s.entry_count;
+    check (option (float 0.001)) "decision tok/sec preserved"
+      (Some 100.0) s.avg_tok_per_sec)
+
 (* ── thinking_fraction tests ─────────────────────── *)
 
 let success_entry_with_thinking ~model ~ts ~thinking_enabled () =
@@ -802,6 +883,8 @@ let () =
       test_case "prompt tps and peak memory aggregates" `Quick test_prompt_tps_and_peak_memory_aggregates;
       test_case "missing usage serializes unknowns" `Quick test_missing_usage_serializes_unknowns;
       test_case "coverage diagnostics survive aggregation" `Quick test_coverage_diagnostics_survive_aggregation;
+      test_case "costs.jsonl backfills wall tok/sec" `Quick test_costs_jsonl_backfills_wall_tok_per_sec;
+      test_case "costs.jsonl dedupes matching decision sample" `Quick test_costs_jsonl_dedupes_matching_decision_sample;
       test_case "json roundtrip" `Quick test_json_roundtrip;
     ];
     "thinking_fraction", [

@@ -177,6 +177,19 @@ let record_llm_tok_s_metrics
        Prometheus.metric_llm_decode_tok_per_sec ~labels v
    | _ -> ())
 
+let wall_tokens_per_second
+    ~(usage_missing : bool)
+    ~(output_tokens : int)
+    ~(telemetry : Oas.Types.inference_telemetry option)
+  : float option =
+  match telemetry with
+  | Some t when not usage_missing && output_tokens > 0
+                && t.request_latency_ms > 0 ->
+      Some
+        (Float.of_int output_tokens
+         /. (Float.of_int t.request_latency_ms /. 1000.0))
+  | _ -> None
+
 (** Append a cost event to .masc/costs.jsonl for per-task cost attribution.
     Schema matches bin/masc_cost.ml with an additional "source" field to
     distinguish automatic entries from manual CLI entries.
@@ -216,6 +229,10 @@ let emit_cost_event
       @ [("request_latency_ms", `Int t.request_latency_ms)]
     | None -> []
   in
+  let wall_tok_s_fields =
+    float_field "tokens_per_second"
+      (wall_tokens_per_second ~usage_missing ~output_tokens ~telemetry)
+  in
   let entry = `Assoc ([
     ("agent", `String agent_name);
     ("task_id", Json_util.string_opt_to_json task_id);
@@ -228,7 +245,7 @@ let emit_cost_event
     ("usage_missing", `Bool usage_missing);
     ("timestamp", `String (Types.now_iso ()));
     ("source", `String "auto_trajectory");
-  ] @ telemetry_fields) in
+  ] @ wall_tok_s_fields @ telemetry_fields) in
   let line = Yojson.Safe.to_string entry ^ "\n" in
   (try Fs_compat.append_file path line
    with Eio.Cancel.Cancelled _ as e -> raise e
@@ -505,13 +522,18 @@ let make_hooks
           | Some t -> t.request_latency_ms
           | None -> 0
         in
+        let wall_tok_s_opt =
+          wall_tokens_per_second ~usage_missing ~output_tokens:output_tok
+            ~telemetry:response.telemetry
+        in
         record_llm_tok_s_metrics ~model ~telemetry:response.telemetry;
+        let wall_tok_s = fmt_tok_s wall_tok_s_opt in
         let prompt_tok_s = fmt_tok_s prompt_tok_s_opt in
         let decode_tok_s = fmt_tok_s decode_tok_s_opt in
         Log.Keeper.info
-          "keeper:%s turn=%d total_turns=%d model=%s tokens=%d prompt_tok_s=%s decode_tok_s=%s latency_ms=%d"
+          "keeper:%s turn=%d total_turns=%d model=%s tokens=%d wall_tok_s=%s prompt_tok_s=%s decode_tok_s=%s latency_ms=%d"
           meta.name turn meta.runtime.usage.total_turns model total_tok
-          prompt_tok_s decode_tok_s latency_ms;
+          wall_tok_s prompt_tok_s decode_tok_s latency_ms;
         (* Emit per-turn cost event for task attribution.
            cost_usd from OAS Pricing.annotate_response_cost (oas#393 resolved). *)
         (match trajectory_acc with

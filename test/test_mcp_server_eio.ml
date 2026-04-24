@@ -386,11 +386,20 @@ let test_eio_context_delegation () =
   Mcp_eio.set_net net;
   Mcp_eio.set_clock clock;
   let delegated_net = Eio_context.get_net_opt () in
+  (* Compare the underlying clock resource, not the Result wrappers.
+     Each call to get_clock allocates a fresh [Ok _] box, so
+     [Ok a] == [Ok b] is always false even when [a == b]. See #9709. *)
+  let direct_clock = Eio_context.get_clock () in
   let alias_clock = Mcp_eio.get_clock () in
+  let clock_delegated =
+    match direct_clock, alias_clock with
+    | Ok a, Ok b -> a == b
+    | _, _ -> false
+  in
   Alcotest.(check bool) "net delegated to shared Eio_context" true
     (Option.is_some delegated_net);
   Alcotest.(check bool) "clock delegated to shared Eio_context" true
-    (Eio_context.get_clock () == alias_clock)
+    clock_delegated
 
 let option_ref_equal left right =
   match left, right with

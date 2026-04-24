@@ -1064,6 +1064,7 @@ let view_summary_strip
   in
   let summary = coverage rows in
   Meta.strip
+    ~label:"Keepers summary"
     [ Meta.cell
         ~color:
           (if String.is_empty execution_generated_at then `Default else `Ok)

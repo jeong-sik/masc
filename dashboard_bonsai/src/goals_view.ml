@@ -438,6 +438,7 @@ let rec view_node ~(depth : int) (n : Goals_types.node) : Node.t =
 let view_meta_strip (r : Goals_types.response) =
   let s = r.summary in
   Meta.strip
+    ~label:"Goals summary"
     [ Meta.cell ~k:"goals" ~v:(Printf.sprintf "%d" s.total_goals) ()
     ; Meta.cell ~color:`Ok ~k:"active"
         ~v:(Printf.sprintf "%d" s.active_goals) ()

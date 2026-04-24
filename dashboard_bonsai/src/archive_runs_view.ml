@@ -324,6 +324,7 @@ let view_meta_strip (r : Archive_runs_types.response) =
       | Running | Stopped | Paused | Completed | Unknown -> false)
   in
   Meta.strip
+    ~label:"Archive runs summary"
     [ Meta.cell ~k:"total" ~v:(Printf.sprintf "%d" r.total) ()
     ; Meta.cell ~color:`Ok ~k:"running" ~v:(Printf.sprintf "%d" running) ()
     ; Meta.cell ~k:"completed" ~v:(Printf.sprintf "%d" completed) ()

@@ -113,6 +113,7 @@ let hhmmss_of_iso (s : string) : string =
 
 let view_meta_strip ~(total : int) ~(dead : int) ~(synced : string) =
   Meta.strip
+    ~label:"Dead keepers summary"
     [ Meta.cell ~k:"fleet" ~v:(Printf.sprintf "%02d" total) ()
     ; Meta.cell ~color:`Blood ~k:"dead" ~v:(Printf.sprintf "%02d" dead) ()
     ; Meta.cell ~k:"synced" ~v:synced ()

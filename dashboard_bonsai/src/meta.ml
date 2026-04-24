@@ -68,6 +68,12 @@ let cell ?(color : value_color = `Default) ~(k : string) ~(v : string) () : Node
     ]
 ;;
 
-let strip (cells : Node.t list) : Node.t =
-  Node.div ~attrs:[ Style.strip ] cells
+let strip ?(label : string option) (cells : Node.t list) : Node.t =
+  let base = [ Style.strip ] in
+  let attrs =
+    match label with
+    | Some l -> Attr.arialabel l :: base
+    | None -> base
+  in
+  Node.div ~attrs cells
 ;;

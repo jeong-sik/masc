@@ -960,11 +960,29 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
         cascade_rotation_attempts := attempt :: !cascade_rotation_attempts
       in
       let run_result, latency_ms =
-        Fun.protect ~finally:(fun () ->
-          unsubscribe_event_bus ();
-          Keeper_registry.mark_turn_finished
-            ~base_path:config.base_path meta.name)
-        (fun () ->
+        (* Cancel-safe cleanup (#9747): stdlib [Fun.protect] wraps cleanup
+           exceptions in [Fun.Finally_raised], losing the outer
+           [Eio.Cancel.Cancelled]. Cleanup here swallows Cancelled (the
+           outer one is already in flight) and logs non-cancel exceptions
+           instead of propagating them. *)
+        let cleanup () =
+          (try unsubscribe_event_bus () with
+           | Eio.Cancel.Cancelled _ -> ()
+           | e ->
+             Log.Keeper.warn
+               "%s: unsubscribe_event_bus in turn cleanup raised: %s"
+               meta.name (Printexc.to_string e));
+          (try
+             Keeper_registry.mark_turn_finished
+               ~base_path:config.base_path meta.name
+           with
+           | Eio.Cancel.Cancelled _ -> ()
+           | e ->
+             Log.Keeper.warn
+               "%s: mark_turn_finished in turn cleanup raised: %s"
+               meta.name (Printexc.to_string e))
+        in
+        match
         Keeper_exec_context.timed (fun () ->
           match Eio_context.get_clock () with
           | Error msg -> Error (Oas.Error.Internal msg)
@@ -1459,7 +1477,10 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 (Oas_worker_named.sdk_error_of_masc_internal_error
                    (Oas_worker_named.Turn_timeout
                       { elapsed_sec = timeout_sec }))
-            end)))
+            end))
+        with
+        | result -> cleanup (); result
+        | exception e -> cleanup (); raise e
       in
       let turn_event_bus = drain_turn_event_bus () in
       (match turn_event_bus.correlation_id with

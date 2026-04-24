@@ -78,13 +78,17 @@ type conditions = {
   (** Provider rejected the most recent prompt for exceeding its max
       context window. Distinct from [context_within_budget] (soft,
       ratio-based warning): [context_overflow] is a hard failure reported
-      by the provider. Cleared by a successful [Compaction_completed] or
-      by an operator clear action. *)
+      by the provider. Cleared by a [Compaction_completed] whose payload
+      reports real token savings ([before_tokens > after_tokens]) or by
+      an operator clear action. A noop compaction ([before = after])
+      leaves this flag set so the overflow can be escalated instead of
+      re-entering an infinite compact→clear→overflow loop (#9988). *)
   compact_retry_exhausted : bool;
   (** Consecutive auto-compact attempts failed to resolve the overflow.
       While set, the next [Context_overflow_detected] derives [Paused]
       instead of [Overflowed] so operator intervention is required.
-      Reset by [Compaction_completed] or [Fiber_started]. *)
+      Reset by a [Compaction_completed] with real savings or by
+      [Fiber_started]; a noop compaction does not reset this latch. *)
 }
 
 val default_conditions : conditions

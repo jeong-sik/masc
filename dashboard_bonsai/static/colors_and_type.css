@@ -503,6 +503,18 @@ hr {
   .btn:active { transform: none; }
 }
 
+@media (prefers-contrast: more) {
+  :root, [data-theme="dark-fantasy"], [data-theme="cyberpunk"],
+  [data-theme="terminal"], [data-theme="parchment"] {
+    --text-dim: var(--text-bright);
+    --border-main: var(--border-highlight);
+  }
+  a { border-bottom-style: solid; }
+  .btn { border-width: 2px; }
+  .input { border-width: 2px; }
+  .card, .panel { border-width: 2px; }
+}
+
 /* ══════════════════════════════════════════════════════════════
    PRINT — high-contrast B&W, hide chrome
    ══════════════════════════════════════════════════════════════ */

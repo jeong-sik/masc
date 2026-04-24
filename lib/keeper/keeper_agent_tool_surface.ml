@@ -90,24 +90,12 @@ let has_task_claim_affordance turn_affordances =
        | Some (Board_post_or_comment | Message_sweep | Task_audit) | None -> false)
     turn_affordances
 
-let has_task_audit_affordance turn_affordances =
-  List.exists
-    (fun affordance ->
-       match turn_affordance_of_string affordance with
-       | Some Task_audit -> true
-       | Some (Board_post_or_comment | Message_sweep | Task_claim) | None -> false)
-    turn_affordances
-
 let preferred_tool_choice_for_required_turn ~(has_current_task : bool)
     ~(turn_affordances : string list) ~(allowed_tool_names : string list) =
   if (not has_current_task)
      && has_task_claim_affordance turn_affordances
      && List.mem "keeper_task_claim" allowed_tool_names
   then Oas.Types.Tool "keeper_task_claim"
-  else if (not has_current_task)
-          && has_task_audit_affordance turn_affordances
-          && List.mem "keeper_tasks_list" allowed_tool_names
-  then Oas.Types.Tool "keeper_tasks_list"
   else Oas.Types.Any
 
 let owned_active_task_id_for_meta ~(config : Coord.config)
@@ -247,4 +235,3 @@ let tool_index_entry_of_tool
     | None -> []
   in
   Oas.Tool_index.{ name; description = t.schema.description; group; aliases }
-

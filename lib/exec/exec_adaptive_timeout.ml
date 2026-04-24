@@ -43,7 +43,7 @@ let compute config entries =
 
 type stats_result =
   | Adapted of { p95_ms : int; recommended_ms : int; sample_count : int }
-  | Default of { reason : string }
+  | Default of { reason : string; recommended_ms : int }
 
 let stats config entries =
   let success_durations =
@@ -54,7 +54,8 @@ let stats config entries =
   let n = List.length success_durations in
   if n < config.min_samples then
     Default { reason = Printf.sprintf
-      "only %d successful runs (need %d)" n config.min_samples }
+      "only %d successful runs (need %d)" n config.min_samples;
+      recommended_ms = config.default_ms }
   else begin
     let sorted = List.sort Int.compare success_durations in
     let p95_idx = min (n - 1) (int_of_float (float_of_int n *. 0.95)) in
@@ -72,9 +73,9 @@ let stats_to_json = function
         ("recommended_ms", `Int recommended_ms);
         ("sample_count", `Int sample_count);
       ]
-  | Default { reason } ->
+  | Default { reason; recommended_ms } ->
       `Assoc [
         ("adapted", `Bool false);
         ("reason", `String reason);
-        ("recommended_ms", `Int default_config.default_ms);
+        ("recommended_ms", `Int recommended_ms);
       ]

@@ -63,8 +63,9 @@ let test_compute_ignores_failures () =
 let test_stats_default () =
   let entries = [ entry ~duration_ms:100 "ls" ] in
   (match AT.stats AT.default_config entries with
-   | AT.Default { reason } ->
-     Alcotest.(check bool) "reason is non-empty" true (String.length reason > 0)
+   | AT.Default { reason; recommended_ms } ->
+     Alcotest.(check bool) "reason is non-empty" true (String.length reason > 0);
+     Alcotest.(check int) "recommended from config default" 120_000 recommended_ms
    | _ -> Alcotest.fail "should be Default")
 
 let test_stats_adapted () =
@@ -110,6 +111,17 @@ let test_stats_json_default () =
       | _ -> Alcotest.fail "should have default recommended_ms")
    | _ -> Alcotest.fail "expected assoc")
 
+let test_stats_json_default_uses_config_default () =
+  let config = { AT.default_config with default_ms = 45_000 } in
+  let s = AT.stats config [] in
+  let json = AT.stats_to_json s in
+  (match json with
+   | `Assoc fields ->
+     (match List.assoc_opt "recommended_ms" fields with
+      | Some (`Int 45_000) -> ()
+      | _ -> Alcotest.fail "should use configured default_ms")
+   | _ -> Alcotest.fail "expected assoc")
+
 let () =
   test_default_config ();
   test_compute_empty ();
@@ -122,4 +134,5 @@ let () =
   test_stats_adapted ();
   test_stats_json_adapted ();
   test_stats_json_default ();
-  print_endline "test_exec_adaptive_timeout: 11/11 passed"
+  test_stats_json_default_uses_config_default ();
+  print_endline "test_exec_adaptive_timeout: 12/12 passed"

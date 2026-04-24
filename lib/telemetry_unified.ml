@@ -188,6 +188,106 @@ let freshness_fields ~now latest_ts =
   | None ->
     [ ("latest_ts_unix", `Null); ("latest_ts_iso", `Null); ("latest_age_s", `Null) ]
 
+(* ── Semantic duplicate suppression ───────────────── *)
+
+let assoc_field name = function
+  | `Assoc fields -> List.assoc_opt name fields
+  | _ -> None
+
+let string_field name json =
+  match assoc_field name json with
+  | Some (`String value) ->
+    let value = String.trim value in
+    if value = "" then None else Some value
+  | _ -> None
+
+let bool_field name json =
+  match assoc_field name json with
+  | Some (`Bool value) -> Some value
+  | _ -> None
+
+let drop_prefix prefix value =
+  if String.starts_with ~prefix value then
+    String.sub value (String.length prefix)
+      (String.length value - String.length prefix)
+  else value
+
+let drop_suffix suffix value =
+  if String.ends_with ~suffix value then
+    String.sub value 0 (String.length value - String.length suffix)
+  else value
+
+let canonical_actor_name value =
+  value
+  |> String.trim
+  |> drop_prefix "keeper-"
+  |> drop_suffix "-agent"
+
+type tool_call_signature = {
+  actor : string;
+  tool : string;
+  success : bool option;
+  ts : float;
+}
+
+let tool_call_signature ?success ~actor ~tool ~ts () =
+  let actor = canonical_actor_name actor in
+  let tool = String.trim tool in
+  if actor = "" || tool = "" || ts <= 0.0 then None
+  else Some { actor; tool; success; ts }
+
+let tool_call_io_signature json =
+  match string_field "source" json with
+  | Some "tool_call_io" ->
+    (match string_field "keeper" json, string_field "tool" json with
+     | Some actor, Some tool ->
+       tool_call_signature ?success:(bool_field "success" json) ~actor ~tool
+         ~ts:(extract_ts json) ()
+     | _ -> None)
+  | _ -> None
+
+let tool_called_event_detail json =
+  match string_field "source" json, assoc_field "event" json with
+  | Some "agent_event", Some (`List (`String tag :: detail :: _))
+    when tag = "Tool_called" || tag = "tool_called" -> (
+      match detail with
+      | `Assoc _ -> Some detail
+      | _ -> None)
+  | _ -> None
+
+let agent_tool_called_signature json =
+  match tool_called_event_detail json with
+  | None -> None
+  | Some detail ->
+    (match string_field "agent_id" detail, string_field "tool_name" detail with
+     | Some actor, Some tool ->
+       tool_call_signature ?success:(bool_field "success" detail) ~actor ~tool
+         ~ts:(extract_ts json) ()
+     | _ -> None)
+
+let same_tool_call_signature left right =
+  String.equal left.actor right.actor
+  && String.equal left.tool right.tool
+  &&
+  (match left.success, right.success with
+   | Some a, Some b -> Bool.equal a b
+   | _ -> true)
+  && abs_float (left.ts -. right.ts) <= 5.0
+
+let suppress_shadow_agent_tool_events entries =
+  let tool_call_io =
+    List.filter_map tool_call_io_signature entries
+  in
+  if tool_call_io = [] then entries
+  else
+    List.filter
+      (fun json ->
+        match agent_tool_called_signature json with
+        | None -> true
+        | Some signature ->
+          not (List.exists (same_tool_call_signature signature) tool_call_io))
+      entries
+
 (* ── Entry tagging ──────────────────────────────────── *)
 
 let tag_entry source (json : Yojson.Safe.t) : Yojson.Safe.t =
@@ -352,6 +452,11 @@ let read_unified_result ~base_path ~masc_root ?(sources = all_sources)
     List.filter
       (fun json -> matches_scope ?session_id ?operation_id ?worker_run_id json)
       filtered
+  in
+  let filtered =
+    if List.mem Agent_event sources && List.mem Tool_call_io sources then
+      suppress_shadow_agent_tool_events filtered
+    else filtered
   in
   (* Sort by timestamp descending (newest first) *)
   let sorted = sort_newest_first filtered in

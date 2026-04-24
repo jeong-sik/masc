@@ -395,6 +395,32 @@ let surface_model_used (result : run_result) : string =
   | Some model -> model
   | None -> Option.value ~default:"" (nonempty_trimmed result.model_used)
 
+let surface_resolved_model_id (result : run_result) : string =
+  (* Always prefer the concrete resolved model_id over any cascade label.
+     The final attempt's model_id is authoritative — cascade attempts are
+     recorded in order, so [List.rev |> find_map] picks the last attempt
+     that actually ran. Falls back to selected/primary observation fields
+     when attempts are unavailable, then to the raw provider-reported
+     [model_used]. See #9953. *)
+  let attempt_resolved_id (attempt : Oas_worker.cascade_attempt) =
+    nonempty_trimmed attempt.model_id
+  in
+  let observation_resolved_id (obs : Oas_worker.cascade_observation) =
+    match
+      obs.attempts
+      |> List.rev
+      |> List.find_map attempt_resolved_id
+    with
+    | Some model -> Some model
+    | None -> (
+        match Option.bind obs.selected_model nonempty_trimmed with
+        | Some model -> Some model
+        | None -> Option.bind obs.primary_model nonempty_trimmed)
+  in
+  match Option.bind result.cascade_observation observation_resolved_id with
+  | Some model -> model
+  | None -> Option.value ~default:"" (nonempty_trimmed result.model_used)
+
 type keeper_internal_error =
   | Keeper_tool_surface_empty of
       { keeper_name : string

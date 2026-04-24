@@ -932,6 +932,7 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
   let _observation = observation in
   let turn_mode = turn_mode_of_result result in
   let surface_model_used = Keeper_agent_run.surface_model_used result in
+  let resolved_model_id = Keeper_agent_run.surface_resolved_model_id result in
   let scheduled_autonomous_outcome =
     if is_scheduled_autonomous_channel channel then
       Some (scheduled_autonomous_outcome_for_result result)
@@ -969,6 +970,7 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
         ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
         ("generation", `Int turn_generation);
         ("model_used", `String surface_model_used);
+        ("resolved_model_id", `String resolved_model_id);
         ("prompt_fingerprint", `String result.prompt_metrics.fingerprint);
         ("prompt", Keeper_agent_run.prompt_metrics_to_json result.prompt_metrics);
         ( "timeout_budget",

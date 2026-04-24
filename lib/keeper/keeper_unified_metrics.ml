@@ -87,6 +87,72 @@ type turn_mode =
   | Skip_text
   | Noop
 
+type usage_trust =
+  | Usage_missing
+  | Usage_trusted
+  | Usage_untrusted of string list
+
+let usage_absurd_token_threshold = 1_000_000
+
+let usage_trust_is_trusted = function
+  | Usage_trusted -> true
+  | Usage_missing | Usage_untrusted _ -> false
+
+let usage_trust_to_string = function
+  | Usage_missing -> "missing"
+  | Usage_trusted -> "trusted"
+  | Usage_untrusted _ -> "untrusted"
+
+let usage_trust_reasons = function
+  | Usage_untrusted reasons -> reasons
+  | Usage_missing | Usage_trusted -> []
+
+let usage_trust_json_fields trust =
+  [
+    ("usage_trust", `String (usage_trust_to_string trust));
+    ( "usage_anomaly",
+      `Bool
+        (match trust with
+         | Usage_untrusted _ -> true
+         | Usage_missing | Usage_trusted -> false) );
+    ( "usage_anomaly_reasons",
+      `List (List.map (fun reason -> `String reason) (usage_trust_reasons trust)) );
+  ]
+
+let add_reason reason reasons =
+  if List.mem reason reasons then reasons else reason :: reasons
+
+let classify_usage_trust ~(usage_reported : bool)
+    ~(usage : Oas.Types.api_usage)
+    ~(model_used : string)
+    ~(resolved_model_id : string)
+    ~(context_max : int) : usage_trust =
+  if not usage_reported then Usage_missing
+  else
+    let reasons = ref [] in
+    let add reason = reasons := add_reason reason !reasons in
+    let model_used = String.trim model_used in
+    let resolved_model_id = String.trim resolved_model_id in
+    let model_missing value = value = "" || String.equal value "unknown" in
+    if model_missing model_used && model_missing resolved_model_id then
+      add "missing_model_id";
+    if usage.input_tokens < 0 then add "negative_input_tokens";
+    if usage.output_tokens < 0 then add "negative_output_tokens";
+    if usage.cache_creation_input_tokens < 0 then
+      add "negative_cache_creation_tokens";
+    if usage.cache_read_input_tokens < 0 then add "negative_cache_read_tokens";
+    if usage.input_tokens = 0 && usage.output_tokens = 0 then
+      add "zero_token_usage_reported";
+    if usage.input_tokens > usage_absurd_token_threshold then
+      add "input_tokens_gt_1m";
+    if usage.output_tokens > usage_absurd_token_threshold then
+      add "output_tokens_gt_1m";
+    if context_max > 0 && usage.input_tokens > context_max * 2 then
+      add "input_tokens_gt_2x_context_max";
+    match List.rev !reasons with
+    | [] -> Usage_trusted
+    | reasons -> Usage_untrusted reasons
+
 let turn_mode_to_string = function
   | Tool_use -> "tool_use"
   | Text_response -> "text_response"
@@ -533,9 +599,20 @@ let append_decision_record
           match result with
           | Some r ->
               let surface_model_used = Keeper_agent_run.surface_model_used r in
+              let resolved_model_id =
+                Keeper_agent_run.surface_resolved_model_id r
+              in
               let telemetry_reported = telemetry_reported_of_result r in
               let coverage_reason = coverage_reason_of_result r in
               let coverage_stage = coverage_stage_of_result r in
+              let usage_trust =
+                classify_usage_trust
+                  ~usage_reported:r.usage_reported
+                  ~usage:r.usage
+                  ~model_used:surface_model_used
+                  ~resolved_model_id
+                  ~context_max:0
+              in
               let thinking_enabled_field =
                 match turn_thinking_enabled with
                 | Some b -> [("thinking_enabled", `Bool b)]
@@ -627,12 +704,13 @@ let append_decision_record
                     ("cache_read_tokens", `Int r.usage.cache_read_input_tokens);
                     ("cost_usd", match r.usage.cost_usd with Some c -> `Float c | None -> `Null);
                     ( "tokens_per_second",
-                      if latency_ms > 0 then
+                      if usage_trust_is_trusted usage_trust && latency_ms > 0 then
                         `Float
                           (float_of_int r.usage.output_tokens
                            /. (float_of_int latency_ms /. 1000.0))
                       else `Null );
                   ]
+                  @ usage_trust_json_fields usage_trust
                 else
                   [
                     ("input_tokens", `Null);
@@ -642,9 +720,11 @@ let append_decision_record
                     ("cost_usd", `Null);
                     ("tokens_per_second", `Null);
                   ]
+                  @ usage_trust_json_fields usage_trust
               in
               `Assoc ([
                 ("model_used", `String surface_model_used);
+                ("resolved_model_id", `String resolved_model_id);
                 ("outcome", `String "success");
                 ("turn_count", `Int r.turn_count);
                 ("stop_reason", `String stop_reason_str);
@@ -719,9 +799,29 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
     ?(update_proactive_rt = true)
     ?social_state
     ?social_transition_reason
+    ?(context_max = 0)
     (result : Keeper_agent_run.run_result) : keeper_meta =
   let now_ts = Time_compat.now () in
   let surface_model_used = Keeper_agent_run.surface_model_used result in
+  let resolved_model_id = Keeper_agent_run.surface_resolved_model_id result in
+  let usage_trust =
+    classify_usage_trust
+      ~usage_reported:result.usage_reported
+      ~usage:result.usage
+      ~model_used:surface_model_used
+      ~resolved_model_id
+      ~context_max
+  in
+  let usage_trusted = usage_trust_is_trusted usage_trust in
+  let trusted_input_tokens =
+    if usage_trusted then result.usage.input_tokens else 0
+  in
+  let trusted_output_tokens =
+    if usage_trusted then result.usage.output_tokens else 0
+  in
+  let trusted_total_tokens =
+    if usage_trusted then Keeper_exec_context.total_tokens result.usage else 0
+  in
   (* Use cascade_observation.selected_model (canonical, no :latest suffix)
      instead of parsing model strings and stripping :latest manually.
      surface_model_used already extracts this from cascade_observation.
@@ -729,10 +829,12 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
      L6 (strip_latest model ID parsing) boundary violations. See #5626. *)
   let used_model_id = surface_model_used in
   let turn_cost =
-    let pricing = Llm_provider.Pricing.pricing_for_model used_model_id in
-    Llm_provider.Pricing.estimate_cost ~pricing
-      ~input_tokens:result.usage.input_tokens
-      ~output_tokens:result.usage.output_tokens ()
+    if usage_trusted then
+      let pricing = Llm_provider.Pricing.pricing_for_model used_model_id in
+      Llm_provider.Pricing.estimate_cost ~pricing
+        ~input_tokens:result.usage.input_tokens
+        ~output_tokens:result.usage.output_tokens ()
+    else 0.0
   in
   let substantive_tool_call_count =
     result.tools_used
@@ -773,16 +875,17 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
     runtime = { rt with
       usage = {
         total_turns = rt.usage.total_turns + 1;
-        total_input_tokens = rt.usage.total_input_tokens + result.usage.input_tokens;
-        total_output_tokens = rt.usage.total_output_tokens + result.usage.output_tokens;
+        total_input_tokens = rt.usage.total_input_tokens + trusted_input_tokens;
+        total_output_tokens =
+          rt.usage.total_output_tokens + trusted_output_tokens;
         total_tokens =
-          rt.usage.total_tokens + Keeper_exec_context.total_tokens result.usage;
+          rt.usage.total_tokens + trusted_total_tokens;
         total_cost_usd = rt.usage.total_cost_usd +. turn_cost;
         last_turn_ts = now_ts;
         last_model_used = surface_model_used;
-        last_input_tokens = result.usage.input_tokens;
-        last_output_tokens = result.usage.output_tokens;
-        last_total_tokens = Keeper_exec_context.total_tokens result.usage;
+        last_input_tokens = trusted_input_tokens;
+        last_output_tokens = trusted_output_tokens;
+        last_total_tokens = trusted_total_tokens;
         last_latency_ms = latency_ms;
       };
       (* Deterministic scheduled autonomous cycle accounting is separated from
@@ -932,6 +1035,14 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
   let turn_mode = turn_mode_of_result result in
   let surface_model_used = Keeper_agent_run.surface_model_used result in
   let resolved_model_id = Keeper_agent_run.surface_resolved_model_id result in
+  let usage_trust =
+    classify_usage_trust
+      ~usage_reported:result.usage_reported
+      ~usage:result.usage
+      ~model_used:surface_model_used
+      ~resolved_model_id
+      ~context_max
+  in
   let scheduled_autonomous_outcome =
     if is_scheduled_autonomous_channel channel then
       Some (scheduled_autonomous_outcome_for_result result)
@@ -941,22 +1052,26 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
   let usage_json =
     if result.usage_reported then
       `Assoc
-        [
+        ([
           ("input_tokens", `Int result.usage.input_tokens);
           ("output_tokens", `Int result.usage.output_tokens);
           ("total_tokens",
            `Int (Keeper_exec_context.total_tokens result.usage));
         ]
+        @ usage_trust_json_fields usage_trust)
     else
       `Assoc
-        [
+        ([
           ("input_tokens", `Null);
           ("output_tokens", `Null);
           ("total_tokens", `Null);
         ]
+        @ usage_trust_json_fields usage_trust)
   in
   let cost_json =
-    if result.usage_reported then `Float turn_cost else `Null
+    if result.usage_reported && usage_trust_is_trusted usage_trust then
+      `Float turn_cost
+    else `Null
   in
   let snapshot =
     `Assoc
@@ -978,6 +1093,12 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
           | None -> `Null );
         ("ctx_composition", Keeper_agent_run.ctx_composition_to_json result.ctx_composition);
         ("usage", usage_json);
+        ("usage_trust", `String (usage_trust_to_string usage_trust));
+        ( "usage_anomaly_reasons",
+          `List
+            (List.map
+               (fun reason -> `String reason)
+               (usage_trust_reasons usage_trust)) );
         ("latency_ms", `Int latency_ms);
         ("cost_usd", cost_json);
         ("context_ratio", `Float context_ratio);

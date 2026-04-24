@@ -1722,13 +1722,28 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           let used_model_id =
             Keeper_agent_run.surface_model_used result
           in
+          let resolved_model_id =
+            Keeper_agent_run.surface_resolved_model_id result
+          in
+          let usage_trust_for_cost =
+            Keeper_unified_metrics.classify_usage_trust
+              ~usage_reported:result.usage_reported
+              ~usage:result.usage
+              ~model_used:used_model_id
+              ~resolved_model_id
+              ~context_max:0
+          in
           let turn_cost =
-            let pricing =
-              Llm_provider.Pricing.pricing_for_model used_model_id
-            in
-            Llm_provider.Pricing.estimate_cost ~pricing
-              ~input_tokens:result.usage.input_tokens
-              ~output_tokens:result.usage.output_tokens ()
+            if Keeper_unified_metrics.usage_trust_is_trusted
+                 usage_trust_for_cost
+            then
+              let pricing =
+                Llm_provider.Pricing.pricing_for_model used_model_id
+              in
+              Llm_provider.Pricing.estimate_cost ~pricing
+                ~input_tokens:result.usage.input_tokens
+                ~output_tokens:result.usage.output_tokens ()
+            else 0.0
           in
           let lifecycle =
             apply_post_turn_lifecycle ~base_dir
@@ -1764,6 +1779,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               ~social_state
               ~social_transition_reason:
                 (Social.transition_reason_to_string social_transition_reason)
+              ~context_max:lifecycle.context_max
               ~update_proactive_rt:true
               result
           in
@@ -1810,8 +1826,23 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           let turn_mode_label =
             Keeper_unified_metrics.turn_mode_to_string turn_mode
           in
+          let model_used = Keeper_agent_run.surface_model_used result in
+          let resolved_model_id =
+            Keeper_agent_run.surface_resolved_model_id result
+          in
+          let usage_trust =
+            Keeper_unified_metrics.classify_usage_trust
+              ~usage_reported:result.usage_reported
+              ~usage:result.usage
+              ~model_used
+              ~resolved_model_id
+              ~context_max:lifecycle.context_max
+          in
+          let usage_trusted =
+            Keeper_unified_metrics.usage_trust_is_trusted usage_trust
+          in
           let wall_tokens_per_second =
-            if result.usage_reported && latency_ms > 0 then
+            if usage_trusted && latency_ms > 0 then
               Some
                 (float_of_int result.usage.output_tokens
                  /. (float_of_int latency_ms /. 1000.0))
@@ -1826,13 +1857,24 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 ~payload:(`Assoc
                   ([
                     ("keeper_name", `String updated_meta.name);
-                    ("input_tokens", (if result.usage_reported then `Int result.usage.input_tokens else `Null));
-                    ("output_tokens", (if result.usage_reported then `Int result.usage.output_tokens else `Null));
-                    ("cache_creation_tokens", (if result.usage_reported then `Int result.usage.cache_creation_input_tokens else `Null));
-                    ("cache_read_tokens", (if result.usage_reported then `Int result.usage.cache_read_input_tokens else `Null));
-                    ("cost_usd", (if result.usage_reported then `Float turn_cost else `Null));
+                    ("input_tokens", (if usage_trusted then `Int result.usage.input_tokens else `Null));
+                    ("output_tokens", (if usage_trusted then `Int result.usage.output_tokens else `Null));
+                    ("cache_creation_tokens", (if usage_trusted then `Int result.usage.cache_creation_input_tokens else `Null));
+                    ("cache_read_tokens", (if usage_trusted then `Int result.usage.cache_read_input_tokens else `Null));
+                    ("cost_usd", (if usage_trusted then `Float turn_cost else `Null));
                     ("latency_ms", `Int latency_ms);
-                    ("model_used", `String (Keeper_agent_run.surface_model_used result));
+                    ("model_used", `String model_used);
+                    ("resolved_model_id", `String resolved_model_id);
+                    ( "usage_trust",
+                      `String
+                        (Keeper_unified_metrics.usage_trust_to_string
+                           usage_trust) );
+                    ( "usage_anomaly_reasons",
+                      `List
+                        (List.map
+                           (fun reason -> `String reason)
+                           (Keeper_unified_metrics.usage_trust_reasons
+                              usage_trust)) );
                     ("turn_mode", `String turn_mode_label);
                     ("context_ratio", `Float lifecycle.context_ratio);
                     ("tools_used", `List (List.map (fun s -> `String s) result.tools_used));
@@ -1907,7 +1949,6 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                      ~validated_evidence)
                 ()
           | None -> ());
-          let model_used = Keeper_agent_run.surface_model_used result in
           let outcome_str =
             match result.stop_reason with
             | Oas_worker.Completed -> "completed"
@@ -1928,31 +1969,62 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           in
           Prometheus.inc_counter Prometheus.metric_keeper_turns
             ~labels:[("keeper_name", updated_meta.name); ("outcome", outcome_label)] ();
-          Prometheus.inc_counter Prometheus.metric_keeper_input_tokens
-            ~labels:[("keeper_name", updated_meta.name); ("model", model_used)]
-            ~delta:(float_of_int result.usage.input_tokens) ();
-          Prometheus.inc_counter Prometheus.metric_keeper_output_tokens
-            ~labels:[("keeper_name", updated_meta.name); ("model", model_used)]
-            ~delta:(float_of_int result.usage.output_tokens) ();
-          (* #7469 Step 1: emit prompt-cache usage so Anthropic/Bedrock
-             hit rate is observable. Skip when both are zero — non-caching
-             providers (GLM/local-llama) would otherwise register a series
-             per keeper+model combination that never moves off zero.
-             Metric names pulled from [Prometheus] constants so a typo
-             here would fail to compile instead of silently creating a
-             dead series. *)
-          (if result.usage.cache_creation_input_tokens > 0 then
-             Prometheus.inc_counter Prometheus.metric_keeper_cache_creation_tokens
-               ~labels:[("keeper_name", updated_meta.name); ("model", model_used)]
-               ~delta:(float_of_int result.usage.cache_creation_input_tokens) ());
-          (if result.usage.cache_read_input_tokens > 0 then
-             Prometheus.inc_counter Prometheus.metric_keeper_cache_read_tokens
-               ~labels:[("keeper_name", updated_meta.name); ("model", model_used)]
-               ~delta:(float_of_int result.usage.cache_read_input_tokens) ());
+          if usage_trusted then begin
+            Prometheus.inc_counter Prometheus.metric_keeper_input_tokens
+              ~labels:[("keeper_name", updated_meta.name); ("model", model_used)]
+              ~delta:(float_of_int result.usage.input_tokens) ();
+            Prometheus.inc_counter Prometheus.metric_keeper_output_tokens
+              ~labels:[("keeper_name", updated_meta.name); ("model", model_used)]
+              ~delta:(float_of_int result.usage.output_tokens) ();
+            (* #7469 Step 1: emit prompt-cache usage so Anthropic/Bedrock
+               hit rate is observable. Skip when both are zero — non-caching
+               providers (GLM/local-llama) would otherwise register a series
+               per keeper+model combination that never moves off zero.
+               Metric names pulled from [Prometheus] constants so a typo
+               here would fail to compile instead of silently creating a
+               dead series. *)
+            (if result.usage.cache_creation_input_tokens > 0 then
+               Prometheus.inc_counter Prometheus.metric_keeper_cache_creation_tokens
+                 ~labels:[("keeper_name", updated_meta.name); ("model", model_used)]
+                 ~delta:(float_of_int result.usage.cache_creation_input_tokens) ());
+            (if result.usage.cache_read_input_tokens > 0 then
+               Prometheus.inc_counter Prometheus.metric_keeper_cache_read_tokens
+                 ~labels:[("keeper_name", updated_meta.name); ("model", model_used)]
+                 ~delta:(float_of_int result.usage.cache_read_input_tokens) ())
+          end else begin
+            let reasons =
+              match Keeper_unified_metrics.usage_trust_reasons usage_trust with
+              | [] -> [Keeper_unified_metrics.usage_trust_to_string usage_trust]
+              | reasons -> reasons
+            in
+            List.iter
+              (fun reason ->
+                 Prometheus.inc_counter
+                   Prometheus.metric_keeper_usage_anomalies
+                   ~labels:
+                     [
+                       ("keeper_name", updated_meta.name);
+                       ("model", model_used);
+                       ("reason", reason);
+                     ]
+                   ())
+              reasons;
+            Log.Keeper.warn
+              "%s: keeper usage telemetry untrusted model=%s resolved_model=%s reasons=%s input=%d output=%d context_max=%d"
+              updated_meta.name model_used resolved_model_id
+              (String.concat "," reasons)
+              result.usage.input_tokens
+              result.usage.output_tokens
+              lifecycle.context_max
+          end;
+          let logged_total_tokens =
+            if usage_trusted then
+              result.usage.input_tokens + result.usage.output_tokens
+            else 0
+          in
           Log.Keeper.info
             "%s: keeper cycle OK model=%s tokens=%d latency=%dms mode=%s stop=%s"
-            updated_meta.name model_used
-            (result.usage.input_tokens + result.usage.output_tokens)
+            updated_meta.name model_used logged_total_tokens
             latency_ms
             turn_mode_label
             outcome_str;

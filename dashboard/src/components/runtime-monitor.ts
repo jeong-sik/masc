@@ -88,6 +88,7 @@ const COVERAGE_REASON_LABELS: Record<string, string> = {
   missing_usage_and_inference: 'usage/inference missing',
   missing_usage: 'usage missing',
   missing_inference: 'inference missing',
+  untrusted_usage: 'usage untrusted',
   text_only_unmetered: 'text-only n/a',
   unknown: 'unknown reason',
 }
@@ -262,6 +263,7 @@ export function recentEntryMissingLabel(
   // signal when the cell is empty due to missing OAS timings vs. missing
   // per-turn usage accounting.
   if (entry.outcome === 'error') return 'error-only'
+  if (entry.usage_trust === 'untrusted') return 'untrusted'
   if (entry.coverage_reason === 'text_only_unmetered') return 'n/a'
   if (entry.telemetry_reported === false && entry.usage_reported === false)
     return 'no-telemetry'
@@ -293,6 +295,12 @@ function recentEntryDetail(
 ): string | null {
   const parts = [
     entry.outcome?.trim(),
+    entry.usage_trust === 'untrusted'
+      ? [
+          'usage untrusted',
+          ...(entry.usage_anomaly_reasons ?? []),
+        ].join(': ')
+      : null,
     coverageStageLabel(entry.coverage_stage),
     coverageReasonLabel(entry.coverage_reason),
     entry.turn_lane?.trim(),

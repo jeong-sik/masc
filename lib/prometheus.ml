@@ -184,6 +184,8 @@ let metric_keeper_cache_creation_tokens =
   "masc_keeper_cache_creation_tokens_total"
 let metric_keeper_cache_read_tokens =
   "masc_keeper_cache_read_tokens_total"
+let metric_keeper_usage_anomalies =
+  "masc_keeper_usage_anomalies_total"
 
 (* Keeper compaction (keeper_compact_policy.ml, tool_keeper.ml). *)
 let metric_keeper_compactions = "masc_keeper_compactions_total"
@@ -500,6 +502,9 @@ let init () =
     Counter;
   add metric_keeper_cache_read_tokens
     "Cumulative prompt-cache read tokens per keeper turn (labels: keeper_name, model)"
+    Counter;
+  add metric_keeper_usage_anomalies
+    "Keeper turns whose reported usage was marked untrusted (labels: keeper_name, model, reason)"
     Counter;
   (* Tool schema budget gauges — set once at boot via
      [set_tool_schema_stats]. Covers #7483 Step 1. *)

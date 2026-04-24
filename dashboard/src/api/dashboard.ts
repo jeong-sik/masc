@@ -612,6 +612,8 @@ export interface DashboardRuntimeModelMetric {
     tools_count: number
     usage_reported?: boolean | null
     telemetry_reported?: boolean | null
+    usage_trust?: string | null
+    usage_anomaly_reasons?: string[] | null
     coverage_reason?: string | null
     coverage_stage?: string | null
   }> | null
@@ -746,6 +748,12 @@ function decodeRuntimeModelMetric(raw: unknown): DashboardRuntimeModelMetric | n
             tools_count: asNumber(r.tools_count) ?? 0,
             usage_reported: asBoolean(r.usage_reported),
             telemetry_reported: asBoolean(r.telemetry_reported),
+            usage_trust: asNullableString(r.usage_trust),
+            usage_anomaly_reasons: Array.isArray(r.usage_anomaly_reasons)
+              ? (r.usage_anomaly_reasons as unknown[])
+                  .map(item => asString(item) ?? '')
+                  .filter(item => item.length > 0)
+              : null,
             coverage_reason: asNullableString(r.coverage_reason),
             coverage_stage: asNullableString(r.coverage_stage),
           }))

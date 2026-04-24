@@ -23,6 +23,27 @@ type turn_mode =
   | Skip_text
   | Noop
 
+type usage_trust =
+  | Usage_missing
+  | Usage_trusted
+  | Usage_untrusted of string list
+
+val classify_usage_trust :
+  usage_reported:bool ->
+  usage:Oas.Types.api_usage ->
+  model_used:string ->
+  resolved_model_id:string ->
+  context_max:int ->
+  usage_trust
+
+val usage_trust_is_trusted : usage_trust -> bool
+
+val usage_trust_to_string : usage_trust -> string
+
+val usage_trust_reasons : usage_trust -> string list
+
+val usage_trust_json_fields : usage_trust -> (string * Yojson.Safe.t) list
+
 val update_metrics_from_result :
   Keeper_types.keeper_meta ->
   latency_ms:int ->
@@ -31,6 +52,7 @@ val update_metrics_from_result :
   ?update_proactive_rt:bool ->
   ?social_state:Keeper_social_model.social_state ->
   ?social_transition_reason:string ->
+  ?context_max:int ->
   Keeper_agent_run.run_result ->
   Keeper_types.keeper_meta
 

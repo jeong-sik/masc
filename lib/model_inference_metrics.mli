@@ -22,6 +22,8 @@ type recent_entry = {
   re_tools_count : int;
   re_usage_reported : bool option;
   re_telemetry_reported : bool option;
+  re_usage_trust : string option;
+  re_usage_anomaly_reasons : string list;
   re_coverage_reason : string option;
   re_coverage_stage : string option;
 }

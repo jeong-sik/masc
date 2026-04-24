@@ -76,6 +76,7 @@ stylesheet
     border: 1px solid var(--border-main);
     background: color-mix(in oklab, var(--bg-deep) 48%, transparent);
     box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--text-bright) 3%, transparent);
+    overflow-x: auto;
   }
 
   .head {

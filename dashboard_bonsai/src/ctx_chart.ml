@@ -77,6 +77,10 @@ stylesheet
     .lbl_warn { color: Mark; }
     .lbl_dang { color: MarkText; }
   }
+
+  @media (max-width: 760px) {
+    .chart { grid-template-columns: 80px 1fr; }
+  }
 |}]
 
 let svg_a k v = Attr.create k v

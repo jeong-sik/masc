@@ -1289,6 +1289,18 @@ stylesheet
     text-decoration-color: var(--accent-blood);
   }
 
+  @media (max-width: 760px) {
+    .row {
+      grid-template-columns: 1.75rem minmax(0, 1fr);
+      grid-template-rows: auto auto;
+      gap: 4px 8px;
+      padding: 0.5rem 0.5rem;
+    }
+    .ts, .level, .mod_col, .source_badge { font-size: 10px; }
+    .message { font-size: 13px; }
+    .filter_bar { flex-wrap: wrap; gap: 6px; }
+  }
+
   @media (prefers-reduced-motion: reduce) {
     .pulse { animation: none; }
     *, *::before, *::after {

@@ -155,6 +155,10 @@ stylesheet
     .frame_err { background: MarkText; }
     .nm_dead { color: GrayText; }
   }
+
+  @media (max-width: 760px) {
+    .axis, .lane { grid-template-columns: 80px 1fr; }
+  }
 |}]
 
 let frame_class = function

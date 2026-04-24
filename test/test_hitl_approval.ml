@@ -10,6 +10,7 @@
 module GP = Masc_mcp.Governance_pipeline
 module AQ = Masc_mcp.Keeper_approval_queue
 module KT = Masc_mcp.Keeper_types
+module SDH = Masc_mcp.Server_dashboard_http
 module Mcp_eio = Masc_mcp.Mcp_server_eio
 
 let check = Alcotest.(check string)
@@ -607,6 +608,73 @@ let test_resolve_with_policy_does_not_remember_high_allow () =
       | Error err ->
           Alcotest.fail ("resolve_with_policy failed: " ^ AQ.resolve_error_to_string err))
 
+let test_dashboard_resolve_and_delete_rules_use_room_base_path () =
+  let env_base = temp_dir () in
+  let room_base = temp_dir () in
+  let old_base = Sys.getenv_opt "MASC_BASE_PATH" in
+  let old_base_input = Sys.getenv_opt "MASC_BASE_PATH_INPUT" in
+  AQ.For_testing.reset_audit_store ();
+  Unix.putenv "MASC_BASE_PATH" env_base;
+  Unix.putenv "MASC_BASE_PATH_INPUT" env_base;
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_audit_store ();
+      (match old_base with
+       | Some value -> Unix.putenv "MASC_BASE_PATH" value
+       | None -> Unix.putenv "MASC_BASE_PATH" "");
+      (match old_base_input with
+       | Some value -> Unix.putenv "MASC_BASE_PATH_INPUT" value
+       | None -> Unix.putenv "MASC_BASE_PATH_INPUT" "");
+      cleanup_dir env_base;
+      cleanup_dir room_base)
+    (fun () ->
+      let id =
+        AQ.submit_pending
+          ~keeper_name:"dashboard-room-keeper"
+          ~tool_name:"masc_claim_task"
+          ~input:(`Assoc [ ("task_id", `String "task-room") ])
+          ~risk_level:AQ.Medium
+          ~on_resolution:(fun _ -> ())
+          ()
+      in
+      let resolve_args =
+        `Assoc
+          [
+            ("id", `String id);
+            ("decision", `String "approve");
+            ("remember_rule", `Bool true);
+          ]
+      in
+      let rule_id =
+        match
+          SDH.dashboard_governance_approval_resolve_http_json ~base_path:room_base
+            ~args:resolve_args
+        with
+        | Ok json ->
+            let open Yojson.Safe.Util in
+            json |> member "rule_id" |> to_string
+        | Error err ->
+            Alcotest.fail
+              ("dashboard resolve failed: "
+              ^ SDH.approval_resolve_http_error_to_string err)
+      in
+      Alcotest.(check int) "room rule persisted" 1
+        (List.length (AQ.list_rules ~base_path:room_base ()));
+      Alcotest.(check int) "env fallback has no rule" 0
+        (List.length (AQ.list_rules ~base_path:env_base ()));
+      (match
+         SDH.dashboard_governance_approval_rule_delete_http_json
+           ~base_path:room_base
+           ~args:(`Assoc [ ("id", `String rule_id) ])
+       with
+       | Ok _ -> ()
+       | Error message ->
+           Alcotest.fail ("dashboard rule delete failed: " ^ message));
+      Alcotest.(check int) "room rule deleted" 0
+        (List.length (AQ.list_rules ~base_path:room_base ()));
+      Alcotest.(check int) "env fallback still empty" 0
+        (List.length (AQ.list_rules ~base_path:env_base ())))
+
 let test_approval_get_dispatch_missing_id () =
   let ok, msg = execute_approval_get (`Assoc [("id", `String "")]) in
   Alcotest.(check bool) "missing id fails" false ok;
@@ -778,6 +846,36 @@ let test_callback_always_approve_bypasses_threshold () =
     Alcotest.fail ("expected Approve with always_approve, got Reject: " ^ r)
   | _ -> Alcotest.fail "unexpected decision"
 
+let test_runtime_trust_classifies_always_approve_flag () =
+  with_test_config @@ fun config ->
+  AQ.For_testing.reset_audit_store ();
+  Fun.protect
+    ~finally:AQ.For_testing.reset_audit_store
+    (fun () ->
+      let keeper_name = "always-flag-keeper" in
+      let meta =
+        meta_from_json
+          (`Assoc [
+            ("name", `String keeper_name);
+            ("trace_id", `String "trace-always-flag");
+            ("always_approve", `Bool true);
+          ])
+      in
+      AQ.audit_approval_event ~base_path:config.base_path
+        ~event_type:"auto_approved_always" ~id:"auto-always-flag-test"
+        ~keeper_name ~tool_name:"masc_create_task" ~risk_level:AQ.Medium
+        ~auto_approved:true ();
+      let snapshot =
+        Masc_mcp.Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta
+      in
+      let open Yojson.Safe.Util in
+      let approval = snapshot |> member "approval" in
+      Alcotest.(check string) "runtime trust always flag state" "always_flag"
+        (approval |> member "state" |> to_string);
+      Alcotest.(check string) "runtime trust latest event kind"
+        "auto_approved_always"
+        (approval |> member "latest_event_kind" |> to_string))
+
 let test_callback_always_approve_respects_forbidden () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -899,6 +997,8 @@ let () =
         test_resolve_with_policy_remembers_medium_allow;
       Alcotest.test_case "resolve_with_policy skips high allow memory" `Quick
         test_resolve_with_policy_does_not_remember_high_allow;
+      Alcotest.test_case "dashboard approve-always rules use room base_path" `Quick
+        test_dashboard_resolve_and_delete_rules_use_room_base_path;
       Alcotest.test_case "read_recent_audit scans before keeper filter" `Quick
         test_read_recent_audit_filters_after_wide_scan;
     ]);
@@ -912,6 +1012,8 @@ let () =
         test_callback_paranoid_medium_risk_uses_remembered_policy;
       Alcotest.test_case "always_approve bypasses threshold" `Quick
         test_callback_always_approve_bypasses_threshold;
+      Alcotest.test_case "runtime trust classifies always_approve flag" `Quick
+        test_runtime_trust_classifies_always_approve_flag;
       Alcotest.test_case "always_approve respects forbidden" `Quick
         test_callback_always_approve_respects_forbidden;
     ]);

@@ -517,11 +517,12 @@ let rec add_routes ~sw ~clock router =
            (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.post "/api/v1/dashboard/governance/approvals/resolve" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_operator_confirm" (fun _state _req reqd ->
+       with_tool_auth ~tool_name:"masc_operator_confirm" (fun state _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let args = Yojson.Safe.from_string body_str in
-             match dashboard_governance_approval_resolve_http_json ~args with
+             let base_path = state.Mcp_server.room_config.base_path in
+             match dashboard_governance_approval_resolve_http_json ~base_path ~args with
              | Ok json ->
                  respond_json_with_cors request reqd (Yojson.Safe.to_string json)
              | Error (Gone _ as err) ->
@@ -539,12 +540,13 @@ let rec add_routes ~sw ~clock router =
          )
        ) request reqd)
   |> Http.Router.post "/api/v1/dashboard/governance/approvals/rules/delete" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_operator_confirm" (fun _state _req reqd ->
+       with_tool_auth ~tool_name:"masc_operator_confirm" (fun state _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let args = Yojson.Safe.from_string body_str in
+             let base_path = state.Mcp_server.room_config.base_path in
              match
-               dashboard_governance_approval_rule_delete_http_json ~args
+               dashboard_governance_approval_rule_delete_http_json ~base_path ~args
              with
              | Ok json ->
                  respond_json_with_cors request reqd (Yojson.Safe.to_string json)

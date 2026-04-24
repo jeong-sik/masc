@@ -116,7 +116,7 @@ let severity_of_approval_event event decision =
       match decision with
       | Some raw when String_util.contains_substring_ci raw "reject" -> "bad"
       | _ -> "ok")
-  | "auto_approved_rule_match" | "rule_created" -> "ok"
+  | "auto_approved_rule_match" | "auto_approved_always" | "rule_created" -> "ok"
   | _ -> "warn"
 
 let severity_of_transition_type event_type =
@@ -197,6 +197,11 @@ let approval_event_timeline_event json =
             ( "approval_rule_match",
               Printf.sprintf "Approval Rule · %s" tool_name,
               Printf.sprintf "auto-approved by %s" matched_by,
+              None )
+        | "auto_approved_always" ->
+            ( "approval_always_flag",
+              Printf.sprintf "Approval Always · %s" tool_name,
+              "auto-approved by keeper always_approve flag",
               None )
         | "rule_created" ->
             ( "approval_rule_created",
@@ -508,6 +513,7 @@ let approval_state_json ~pending_approval_count ~latest_tool_call
     if pending_approval_count > 0 then "pending"
     else
       match latest_event_kind with
+      | Some "auto_approved_always" -> "always_flag"
       | Some "auto_approved_rule_match" -> "always_rule"
       | Some "resolved" -> "resolved"
       | Some "expired" -> "expired"
@@ -582,7 +588,7 @@ let execution_summary_json ~meta ~latest_receipt =
         | None -> `Null );
     ]
 
-let causal_timeline_json ~meta ~latest_decision ~latest_receipt
+let causal_timeline_json ~base_path ~meta ~latest_decision ~latest_receipt
     ~latest_tool_call ~latest_approval_audit ~runtime_blocker_fields
     ~next_human_action =
   let tool_events =
@@ -590,7 +596,8 @@ let causal_timeline_json ~meta ~latest_decision ~latest_receipt
     |> List.filter_map tool_call_timeline_event
   in
   let approval_events =
-    Keeper_approval_queue.read_recent_audit ~keeper_name:meta.name ~n:8 ()
+    Keeper_approval_queue.read_recent_audit ~base_path ~keeper_name:meta.name
+      ~n:8 ()
     |> List.filter_map approval_event_timeline_event
   in
   let transition_events =
@@ -661,7 +668,10 @@ let snapshot_json ~(config : Coord.config) ~(meta : keeper_meta) =
   let latest_tool_call = latest_tool_call_json ~keeper_name:meta.name in
   let latest_receipt = latest_receipt_json ~config ~keeper_name:meta.name in
   let latest_approval_audit =
-    match Keeper_approval_queue.read_recent_audit ~keeper_name:meta.name ~n:1 () with
+    match
+      Keeper_approval_queue.read_recent_audit ~base_path:config.base_path
+        ~keeper_name:meta.name ~n:1 ()
+    with
     | json :: _ -> Some json
     | [] -> None
   in
@@ -714,7 +724,8 @@ let snapshot_json ~(config : Coord.config) ~(meta : keeper_meta) =
     execution_summary_json ~meta ~latest_receipt
   in
   let causal_timeline =
-    causal_timeline_json ~meta ~latest_decision ~latest_receipt
+    causal_timeline_json ~base_path:config.base_path ~meta ~latest_decision
+      ~latest_receipt
       ~latest_tool_call ~latest_approval_audit
       ~runtime_blocker_fields ~next_human_action
   in

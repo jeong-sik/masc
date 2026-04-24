@@ -46,6 +46,81 @@ let test_dashboard_route_scoped_slices_are_valid () =
         (Ws.valid_dashboard_slice slice))
     [ "board"; "goals"; "composite" ]
 
+(* ====== Parse cache for broadcast amplification ====== *)
+
+(* Sse.notify_external_subscribers delivers the same [event: string]
+   reference to every WS session in a fanout loop.  Before the cache,
+   each session parsed the JSON independently; after the cache, consecutive
+   calls with the same reference return a memoised result.  These tests
+   cover correctness of the parse output — the cache is transparent and
+   must never produce a different logical result. *)
+
+let test_parse_sse_dashboard_event_known_type () =
+  let event_str =
+    Yojson.Safe.to_string
+      (`Assoc [
+        ("type", `String "execution_snapshot");
+        ("payload", `Assoc [("keepers", `Int 3)]);
+      ])
+  in
+  match Ws.parse_sse_dashboard_event event_str with
+  | Some parsed ->
+      Alcotest.(check string) "event_type preserved"
+        "execution_snapshot" parsed.event_type;
+      Alcotest.(check (option string)) "execution_snapshot maps to execution"
+        (Some "execution") parsed.slice
+  | None -> Alcotest.fail "expected parsed event"
+
+let test_parse_sse_dashboard_event_unknown_type () =
+  let event_str =
+    Yojson.Safe.to_string
+      (`Assoc [("type", `String "not.a.real.event"); ("payload", `Null)])
+  in
+  match Ws.parse_sse_dashboard_event event_str with
+  | Some parsed ->
+      Alcotest.(check (option string)) "no slice for unknown type"
+        None parsed.slice
+  | None -> Alcotest.fail "expected Some with slice=None, not outright None"
+
+let test_parse_sse_dashboard_event_malformed () =
+  let result = Ws.parse_sse_dashboard_event "not-valid-json{" in
+  Alcotest.(check bool) "malformed yields None"
+    true (Option.is_none result)
+
+let test_parse_sse_dashboard_event_stable_on_repeat () =
+  let event_str =
+    Yojson.Safe.to_string
+      (`Assoc [("type", `String "execution_snapshot"); ("payload", `Int 1)])
+  in
+  let extract = function
+    | Some (p : Ws.parsed_sse_event) -> Some (p.event_type, p.slice)
+    | None -> None
+  in
+  let a = extract (Ws.parse_sse_dashboard_event event_str) in
+  let b = extract (Ws.parse_sse_dashboard_event event_str) in
+  Alcotest.(check (option (pair string (option string))))
+    "repeat returns same shape" a b
+
+let test_parse_sse_dashboard_event_invalidated_on_new_ref () =
+  let e1 =
+    Yojson.Safe.to_string
+      (`Assoc [("type", `String "execution_snapshot")])
+  in
+  let e2 =
+    Yojson.Safe.to_string
+      (`Assoc [("type", `String "transport_health_snapshot")])
+  in
+  let et = function
+    | Some (p : Ws.parsed_sse_event) -> Some p.event_type
+    | None -> None
+  in
+  let r1 = Ws.parse_sse_dashboard_event e1 in
+  let r2 = Ws.parse_sse_dashboard_event e2 in
+  Alcotest.(check (option string)) "first parse"
+    (Some "execution_snapshot") (et r1);
+  Alcotest.(check (option string)) "second parse distinct"
+    (Some "transport_health_snapshot") (et r2)
+
 (* ====== External Subscriber Broadcast (WS delivery path) ====== *)
 
 let test_ws_external_subscriber_receives_broadcast () =
@@ -139,6 +214,18 @@ let () =
     ("dashboard", [
       Alcotest.test_case "route scoped slices are valid" `Quick
         test_dashboard_route_scoped_slices_are_valid;
+    ]);
+    ("parse_cache", [
+      Alcotest.test_case "known type maps to slice" `Quick
+        test_parse_sse_dashboard_event_known_type;
+      Alcotest.test_case "unknown type yields None slice" `Quick
+        test_parse_sse_dashboard_event_unknown_type;
+      Alcotest.test_case "malformed input returns None" `Quick
+        test_parse_sse_dashboard_event_malformed;
+      Alcotest.test_case "repeated calls stable" `Quick
+        test_parse_sse_dashboard_event_stable_on_repeat;
+      Alcotest.test_case "cache invalidates on new ref" `Quick
+        test_parse_sse_dashboard_event_invalidated_on_new_ref;
     ]);
     ("external_subscriber", [
       Alcotest.test_case "single subscriber receives broadcast" `Quick

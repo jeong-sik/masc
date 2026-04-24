@@ -49,10 +49,10 @@ stylesheet
     color: var(--text-dim, #9a846e);
   }
 
-  .c_ok      { color: var(--status-ok, #4a7a2a); border-color: var(--status-ok, #4a7a2a); }
-  .c_warn    { color: var(--status-warn, #c08828); border-color: var(--status-warn, #c08828); }
+  .c_ok      { color: var(--status-ok, #6a9a4a); border-color: var(--status-ok, #6a9a4a); }
+  .c_warn    { color: var(--status-warn, #b87828); border-color: var(--status-warn, #b87828); }
   .c_bad     { color: var(--accent-blood, #e85050); border-color: var(--accent-blood, #e85050); }
-  .c_brass   { color: var(--accent-brass, #8a6a28); border-color: var(--accent-brass, #8a6a28); }
+  .c_brass   { color: var(--accent-brass, #968228); border-color: var(--accent-brass, #968228); }
   .c_paused  { color: var(--text-dim, #9a846e); border-color: var(--border-main, #3a2e20); }
   .c_neutral { color: var(--text-dim, #9a846e); border-color: var(--border-main, #3a2e20); }
 |}]

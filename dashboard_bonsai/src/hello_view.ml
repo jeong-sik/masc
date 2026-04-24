@@ -74,7 +74,7 @@ stylesheet
 let component (_graph @ local) =
   Bonsai.return
     (Node.div
-       ~attrs:[ Style.root; Attr.role "main" ]
+       ~attrs:[ Style.root; Attr.role "main"; Attr.create "aria-label" "Dashboard landing" ]
        [ Node.p ~attrs:[ Style.eyebrow ] [ Node.text "masc · runtime" ]
        ; Node.h1 ~attrs:[ Style.title ] [ Node.text "dark manor · bonsai" ]
        ; Node.p

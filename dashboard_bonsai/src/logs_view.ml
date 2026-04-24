@@ -1745,7 +1745,7 @@ let render_response
           ; Node.span ~attrs:[ Style.input_shell_value ] [ Node.text "200" ]
           ]
       ; Node.div ~attrs:[ Style.toolbar_spacer ] []
-      ; Node.button ~attrs:[ Style.btn_ghost ] [ Node.text "refresh" ]
+      ; Node.button ~attrs:[ Style.btn_ghost; Attr.create "type" "button" ] [ Node.text "refresh" ]
       ]
   in
   let tally = tally_fleet keepers.keepers in
@@ -2164,14 +2164,14 @@ let render_response
         ; Node.div
             ~attrs:[ Style.page_actions ]
             [ Node.button
-                ~attrs:[ Style.pbtn ]
+                ~attrs:[ Style.pbtn; Attr.create "type" "button" ]
                 [ Node.span
                     ~attrs:[ Style.pbtn_glyph; Attr.create "aria-hidden" "true" ]
                     []
                 ; Node.text "preflight"
                 ]
             ; Node.button
-                ~attrs:[ Style.pbtn; Style.pbtn_primary ]
+                ~attrs:[ Style.pbtn; Style.pbtn_primary; Attr.create "type" "button" ]
                 [ Node.span
                     ~attrs:[ Style.pbtn_glyph; Attr.create "aria-hidden" "true" ]
                     []

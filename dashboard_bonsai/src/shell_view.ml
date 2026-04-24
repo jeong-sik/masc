@@ -1012,7 +1012,7 @@ let view ?(shell = Overview_types.fixture) ?hud ?aside ~(active : Route.t) (chil
     ; topbar ~active
     ; nav ~active
     ; Node.div
-        ~attrs:[ Style.main; Attr.role "main" ]
+        ~attrs:[ Style.main; Attr.role "main"; Attr.create "aria-label" "Dashboard content" ]
         [ Node.div ~attrs:[ Style.hud; Attr.role "status"; Attr.create "aria-label" "Key metrics" ] hud_nodes
         ; Node.div ~attrs:[ Style.page; Attr.id "main-content" ] children
         ]

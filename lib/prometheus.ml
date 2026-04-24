@@ -300,6 +300,8 @@ let metric_llm_provider_request_latency =
   "masc_llm_provider_request_latency_seconds"
 
 (* Domain-specific counters not yet constant-ised. *)
+let metric_anti_rationalization_fallback =
+  "masc_anti_rationalization_fallback_total"
 let metric_board_truncated_posts = "masc_board_truncated_posts_total"
 let metric_cascade_strategy_decisions = "masc_cascade_strategy_decisions_total"
 let metric_cascade_capacity_events = "masc_cascade_capacity_events_total"
@@ -449,6 +451,9 @@ let init () =
     Gauge;
   add metric_board_truncated_posts
     "Total board posts truncated due to size limits"
+    Counter;
+  add metric_anti_rationalization_fallback
+    "Total anti-rationalization fallbacks fired (verifier LLM unavailable), labeled by mode and cascade"
     Counter;
   add metric_agent_heartbeat_age_seconds
     "Maximum observed heartbeat age across active agents (seconds)"

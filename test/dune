@@ -420,6 +420,7 @@
         test_eval_gate
         test_eval_harness
         test_tool_board_coverage
+        test_anti_rationalization_fail_mode
         ; test_proof_criteria removed (team session cleanup)
         test_tool_registration_consistency
         ; test_tree_index removed (CP purge)
@@ -587,6 +588,7 @@
         test_eval_gate
         test_eval_harness
         test_tool_board_coverage
+        test_anti_rationalization_fail_mode
         ; test_proof_criteria removed (team session cleanup)
         test_tool_registration_consistency
         ; test_tree_index removed (CP purge)

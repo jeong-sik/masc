@@ -212,4 +212,31 @@ module Model_defaults = struct
     get_string ~default:"task" "MASC_GOAL_DISPATCH_RUNTIME"
 end
 
+(** {1 Anti-Rationalization Configuration}
+    Primary env vars: MASC_ANTI_RATIONALIZATION_*. *)
+
+module AntiRationalization = struct
+  (* #9794: when the verifier LLM is unavailable, the historical behavior
+     is to approve by default (favor liveness). Operators that want stronger
+     governance can flip to fail-closed (favor safety) via env var.
+     Default stays Open for backward compatibility. *)
+  type fail_mode =
+    | Open
+    | Closed
+
+  let fail_mode_of_string raw =
+    let s = String.lowercase_ascii (String.trim raw) in
+    match s with
+    | "closed" | "reject" | "fail_closed" | "deny" -> Closed
+    | _ -> Open
+
+  let fail_mode_to_string = function
+    | Open -> "open"
+    | Closed -> "closed"
+
+  let fail_mode =
+    fail_mode_of_string
+      (get_string ~default:"open" "MASC_ANTI_RATIONALIZATION_FAIL_MODE")
+end
+
 (** {1 Endpoint Configuration} *)

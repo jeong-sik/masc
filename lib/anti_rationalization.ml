@@ -475,10 +475,42 @@ let review
             req.agent_name req.task_title evaluator_cascade);
        emit { verdict = v; evaluator_cascade; generator_cascade; gate; fallback_reason }
      | Error err ->
-       (* Liveness > correctness: if LLM is unavailable, approve *)
+       (* #9794: when the verifier LLM is unavailable, the operator picks
+          between liveness (Open: approve, original behavior) and safety
+          (Closed: reject so the action stays gated). The choice is config-
+          driven; see Env_config.AntiRationalization. Both paths emit the
+          same Prometheus counter so monitoring sees the fallback rate
+          regardless of the chosen policy. *)
        let msg = Oas.Error.to_string err in
-       Log.Task.warn "[anti-rationalization] LLM unavailable: %s (approving by default)" msg;
-       emit { verdict = Approve; evaluator_cascade; generator_cascade; gate = Fallback; fallback_reason = Some msg })
+       let mode = Env_config.AntiRationalization.fail_mode in
+       let mode_str = Env_config.AntiRationalization.fail_mode_to_string mode in
+       Prometheus.inc_counter
+         Prometheus.metric_anti_rationalization_fallback
+         ~labels:[ ("mode", mode_str); ("cascade", evaluator_cascade) ]
+         ();
+       (match mode with
+        | Env_config.AntiRationalization.Open ->
+          Log.Task.warn
+            "[anti-rationalization] LLM unavailable: %s (approving by default; mode=open MASC_ANTI_RATIONALIZATION_FAIL_MODE=open)"
+            msg;
+          emit
+            { verdict = Approve
+            ; evaluator_cascade
+            ; generator_cascade
+            ; gate = Fallback
+            ; fallback_reason = Some msg
+            }
+        | Env_config.AntiRationalization.Closed ->
+          Log.Task.warn
+            "[anti-rationalization] LLM unavailable: %s (rejecting by default; mode=closed MASC_ANTI_RATIONALIZATION_FAIL_MODE=closed)"
+            msg;
+          emit
+            { verdict = Reject (sprintf "verifier unavailable (fail-closed): %s" msg)
+            ; evaluator_cascade
+            ; generator_cascade
+            ; gate = Fallback
+            ; fallback_reason = Some msg
+            }))
 
 (** Backward-compatible wrapper that returns only the verdict.
     Use [review] directly for structured results with audit metadata. *)

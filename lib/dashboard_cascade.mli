@@ -156,10 +156,25 @@ val keeper_profile_fields :
     {!provider_status}.  [declared] is [true] iff [cascade.json] lists a
     model whose scheme prefix matches [provider_key].
 
+    When [?base_path] is supplied, each provider entry additionally
+    carries performance aggregates from the last [?window_minutes]
+    (default [30]) of keeper decisions.jsonl — [avg_prompt_tok_per_sec],
+    [avg_decode_tok_per_sec], [avg_tok_per_sec], [avg_latency_ms],
+    [p50_latency_ms], [p95_latency_ms], [request_count].  When omitted,
+    those fields are [null] and no jsonl scan happens; the response
+    also carries [perf_window_minutes: null].  Perf aggregator failures
+    fall back to [null] entries and log at [warn] level — a corrupt
+    jsonl must not take this endpoint offline.
+
     @since 0.6.0
     @since 0.173.0 [declared] and [status] fields added; providers list
-                   now merges declared-but-untracked candidates. *)
-val health_json : unit -> Yojson.Safe.t
+                   now merges declared-but-untracked candidates.
+    @since 0.173.1 [?base_path] + [?window_minutes] added; per-provider
+                   perf fields are now part of the shape. *)
+val health_json :
+  ?window_minutes:int ->
+  ?base_path:string ->
+  unit -> Yojson.Safe.t
 
 (** Classify a provider's operational state from tracker fields.  See
     the [status] enum in {!health_json}. *)
@@ -174,9 +189,16 @@ val zero_provider_info : string -> Cascade_health_tracker.provider_info
 
 (** Serialize a tracker entry (or synthesized placeholder) to the shape
     described by {!health_json}.  [declared] controls the [declared]
-    field; [status] is derived via {!provider_status}. *)
+    field; [status] is derived via {!provider_status}.  [?perf], when
+    supplied, populates the seven perf fields (avg_*_tok_per_sec,
+    *_latency_ms, request_count) from
+    {!Model_inference_metrics.provider_rollup}; otherwise those fields
+    are [null]. *)
 val provider_entry_to_json :
-  declared:bool -> Cascade_health_tracker.provider_info -> Yojson.Safe.t
+  declared:bool ->
+  ?perf:Model_inference_metrics.provider_stats ->
+  Cascade_health_tracker.provider_info ->
+  Yojson.Safe.t
 
 (** [provider_scheme_of_model_string s] returns the scheme prefix of a
     [cascade.json] model spec (the text before the first [:]), or [s]

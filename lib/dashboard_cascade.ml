@@ -421,8 +421,39 @@ let zero_provider_info (key : string) : Health.provider_info =
     Existing callers (tests, UI) read the previous 7 behavioural fields
     unchanged; the two new keys are strictly additive. *)
 let provider_entry_to_json ~(declared : bool)
+    ?(perf : Model_inference_metrics.provider_stats option)
     (info : Health.provider_info) : Yojson.Safe.t =
-  `Assoc [
+  let opt_float = function Some f -> `Float f | None -> `Null in
+  let perf_fields =
+    match perf with
+    | None ->
+      (* Distinguish "the aggregator was not available this call"
+         (absent base_path) from "the aggregator ran and this provider
+         had no entries".  We use [null] in both cases — the UI reads
+         the sibling [request_count] to tell them apart: [null] with
+         [request_count = null] means no aggregator; [null] with
+         [request_count = 0] means aggregator ran and found nothing. *)
+      [ ("avg_prompt_tok_per_sec", `Null)
+      ; ("avg_decode_tok_per_sec", `Null)
+      ; ("avg_tok_per_sec", `Null)
+      ; ("avg_latency_ms", `Null)
+      ; ("p50_latency_ms", `Null)
+      ; ("p95_latency_ms", `Null)
+      ; ("request_count", `Null)
+      ]
+    | Some (stats : Model_inference_metrics.provider_stats) ->
+      [ ("avg_prompt_tok_per_sec",
+         opt_float stats.ps_avg_prompt_tok_per_sec)
+      ; ("avg_decode_tok_per_sec",
+         opt_float stats.ps_avg_decode_tok_per_sec)
+      ; ("avg_tok_per_sec", opt_float stats.ps_avg_tok_per_sec)
+      ; ("avg_latency_ms", opt_float stats.ps_avg_latency_ms)
+      ; ("p50_latency_ms", opt_float stats.ps_p50_latency_ms)
+      ; ("p95_latency_ms", opt_float stats.ps_p95_latency_ms)
+      ; ("request_count", `Int stats.ps_entry_count)
+      ]
+  in
+  `Assoc ([
     ("provider_key", `String info.provider_key);
     ("success_rate", `Float info.success_rate);
     ("consecutive_failures", `Int info.consecutive_failures);
@@ -439,7 +470,7 @@ let provider_entry_to_json ~(declared : bool)
     ("rejected_in_window", `Int info.rejected_in_window);
     ("declared", `Bool declared);
     ("status", `String (provider_status info));
-  ]
+  ] @ perf_fields)
 
 (** Back-compat alias: older call sites may still reference the previous
     serializer name.  Keeping it as a thin wrapper keeps the diff in
@@ -491,7 +522,19 @@ let declared_provider_schemes_set
 let declared_provider_schemes_of_config ?config_path () : string list =
   StringSet.elements (declared_provider_schemes_set ?config_path ())
 
-let health_json () =
+(** When [?base_path] is supplied, [health_json] augments each provider
+    entry with performance fields (see {!provider_entry_to_json}) sourced
+    from {!Model_inference_metrics.provider_rollup} over the last
+    [?window_minutes] (default 30) of keeper decisions.jsonl.  When
+    omitted the perf fields are [null] and no jsonl scan happens — the
+    endpoint keeps the zero-dependency behaviour expected by tests that
+    run without a room_config.
+
+    Errors from the aggregator (corrupt jsonl, missing directory) are
+    caught and the perf fields fall back to [null]; a broken log must
+    not take down the dashboard. *)
+let health_json ?(window_minutes = 30)
+    ?(base_path : string option) () =
   let config_path = Cascade_runtime.cascade_config_path () in
   let declared = declared_provider_schemes_set ?config_path () in
   let tracked = Health.all_providers Health.global in
@@ -501,18 +544,48 @@ let health_json () =
         StringSet.add p.provider_key acc)
       StringSet.empty tracked
   in
+  let perf_by_provider : (string, Model_inference_metrics.provider_stats) Hashtbl.t =
+    Hashtbl.create 8
+  in
+  (match base_path with
+   | None -> ()
+   | Some base_path ->
+     (try
+        let agg =
+          Model_inference_metrics.compute ~base_path ~window_minutes
+        in
+        let rollup = Model_inference_metrics.provider_rollup agg in
+        List.iter
+          (fun (s : Model_inference_metrics.provider_stats) ->
+             Hashtbl.replace perf_by_provider s.ps_provider s)
+          rollup
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+        Log.Keeper.warn
+          "dashboard_cascade.health_json: provider perf aggregate failed: %s"
+          (Printexc.to_string exn)));
+  let perf_for key =
+    match Hashtbl.find_opt perf_by_provider key with
+    | Some _ as some -> some
+    | None -> None
+  in
   let tracked_entries =
     List.map
       (fun (info : Health.provider_info) ->
         provider_entry_to_json
-          ~declared:(StringSet.mem info.provider_key declared) info)
+          ~declared:(StringSet.mem info.provider_key declared)
+          ?perf:(perf_for info.provider_key)
+          info)
       tracked
   in
   let declared_only = StringSet.diff declared tracked_keys in
   let untouched_entries =
     StringSet.fold
       (fun key acc ->
-        provider_entry_to_json ~declared:true (zero_provider_info key)
+        provider_entry_to_json ~declared:true
+          ?perf:(perf_for key)
+          (zero_provider_info key)
         :: acc)
       declared_only []
   in
@@ -527,6 +600,10 @@ let health_json () =
     ("cooldown_threshold", `Int Health.cooldown_threshold);
     ("cooldown_sec", `Float Health.cooldown_sec);
     ("hard_quota_cooldown_sec", `Float Health.hard_quota_cooldown_sec);
+    ("perf_window_minutes",
+     match base_path with
+     | Some _ -> `Int window_minutes
+     | None -> `Null);
     ("providers", `List (tracked_entries @ untouched_entries));
   ]
 

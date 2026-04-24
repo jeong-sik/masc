@@ -18,6 +18,14 @@ let preset_of_defaults defaults =
     ~call_site:"keeper_turn_up_create"
     ~defaults_tool_preset:defaults.tool_preset
 
+(* #9749: bootstrap can race a heartbeat/supervisor meta write after
+   crash recovery. Retry on CAS conflict while keeping heartbeat-owned
+   cursors from disk. *)
+let write_initial_meta config meta =
+  write_meta_with_merge
+    ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
+    config meta
+
 let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
   Log.Keeper.info "create_keeper: starting for name=%s" p.name;
   let task_id = Printf.sprintf "keeper_create_%s" p.name in
@@ -508,7 +516,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         (false, Printf.sprintf "initial checkpoint save failed: %s" e)
       | Ok _ ->
       Progress.Tracker.step tracker ~message:"Writing keeper metadata" ();
-      match write_meta ctx.config meta with
+      match write_initial_meta ctx.config meta with
       | Error e ->
         Log.Keeper.error "create_keeper failed: write_meta error for name=%s: %s" p.name e;
         Progress.stop_tracking task_id;

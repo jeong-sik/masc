@@ -51,6 +51,7 @@ val cmd_targets_git_or_gh : string -> bool
 val handle_keeper_bash :
   turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t option ->
   turn_sandbox_runtime_git:Keeper_turn_sandbox_runtime.t option ->
+  exec_cache:Masc_exec.Exec_cache.t option ->
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->
   args:Yojson.Safe.t ->
@@ -75,6 +76,7 @@ val handle_keeper_bash_kill :
 
 val handle_keeper_shell :
   turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t option ->
+  exec_cache:Masc_exec.Exec_cache.t option ->
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->
   args:Yojson.Safe.t ->

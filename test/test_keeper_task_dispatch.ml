@@ -98,12 +98,12 @@ let with_room f =
 let call_tool config meta name input =
   let ctx_work = make_ctx_work () in
   Keeper_exec_tools.execute_keeper_tool_call
-    ~config ~meta ~ctx_work ~name ~input ()
+    ~config ~meta ~ctx_work ~exec_cache:None ~name ~input ()
 
 let call_tool_with_search config meta name input search_fn =
   let ctx_work = make_ctx_work () in
   Keeper_exec_tools.execute_keeper_tool_call
-    ~config ~meta ~ctx_work ~search_fn ~name ~input ()
+    ~config ~meta ~ctx_work ~exec_cache:None ~search_fn ~name ~input ()
 
 let parse_json s =
   try Yojson.Safe.from_string s

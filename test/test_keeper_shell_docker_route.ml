@@ -261,7 +261,7 @@ let assert_docker_route_fires ~config ~meta ~playground =
   List.iter
     (fun (op, args) ->
       let raw =
-        Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_runtime:None ~config ~meta ~args
+        Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_runtime:None ~exec_cache:None ~config ~meta ~args
       in
       Alcotest.(check bool)
         (Printf.sprintf "%s surfaces docker image config error (docker route fired)" op)
@@ -285,7 +285,7 @@ let test_cat_legacy_keeper_skips_docker () =
   ensure_dir (Filename.dirname host_path);
   ignore (Fs_compat.save_file_atomic host_path "matrix");
   let raw =
-    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_runtime:None ~config ~meta
+    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_runtime:None ~exec_cache:None ~config ~meta
       ~args:(`Assoc [ ("op", `String "cat"); ("path", `String host_path) ])
   in
   Alcotest.(check bool)
@@ -326,7 +326,7 @@ let test_rg_no_match_remains_successful_in_docker_route () =
   ensure_dir (Filename.dirname host_path);
   ignore (Fs_compat.save_file_atomic host_path "alpha\nbeta\ngamma\n");
   let raw =
-    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_runtime:None ~config ~meta
+    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_runtime:None ~exec_cache:None ~config ~meta
       ~args:
         (`Assoc
             [
@@ -348,7 +348,7 @@ let test_git_clone_routes_through_docker () =
   setup ~sandbox:Keeper_types.Docker
   @@ fun ~config ~meta ~playground ->
   let raw =
-    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_runtime:None ~config ~meta
+    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_runtime:None ~exec_cache:None ~config ~meta
       ~args:
         (`Assoc
           [
@@ -373,7 +373,7 @@ let test_hard_mode_git_clone_uses_brokered_route () =
   setup ~sandbox:Keeper_types.Docker
   @@ fun ~config ~meta ~playground ->
   let raw =
-    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_runtime:None ~config ~meta
+    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_runtime:None ~exec_cache:None ~config ~meta
       ~args:
         (`Assoc
           [
@@ -398,7 +398,7 @@ let test_bash_routes_through_docker () =
   @@ fun ~config ~meta ~playground ->
   let raw =
     Keeper_exec_shell.handle_keeper_bash ~turn_sandbox_runtime:None
-      ~turn_sandbox_runtime_git:None ~config ~meta
+      ~turn_sandbox_runtime_git:None ~exec_cache:None ~config ~meta
       ~args:(`Assoc [ ("cmd", `String "echo hello"); ("cwd", `String playground) ])
       ()
   in
@@ -415,7 +415,7 @@ let test_bash_legacy_skips_docker () =
   Fun.protect ~finally:(fun () -> cleanup_dir outside_cwd) @@ fun () ->
   let raw =
     Keeper_exec_shell.handle_keeper_bash ~turn_sandbox_runtime:None
-      ~turn_sandbox_runtime_git:None ~config ~meta
+      ~turn_sandbox_runtime_git:None ~exec_cache:None ~config ~meta
       ~args:(`Assoc [ ("cmd", `String "echo hello"); ("cwd", `String outside_cwd) ])
       ()
   in
@@ -430,7 +430,7 @@ let test_bash_git_creds_routes_through_docker () =
   @@ fun ~config ~meta ~playground ->
   let raw =
     Keeper_exec_shell.handle_keeper_bash ~turn_sandbox_runtime:None
-      ~turn_sandbox_runtime_git:None ~config ~meta
+      ~turn_sandbox_runtime_git:None ~exec_cache:None ~config ~meta
       ~args:(`Assoc [ ("cmd", `String "git status"); ("cwd", `String playground) ])
       ()
   in
@@ -445,7 +445,7 @@ let test_hard_mode_blocks_raw_gh_bash () =
   @@ fun ~config ~meta ~playground:_ ->
   let raw =
     Keeper_exec_shell.handle_keeper_bash ~turn_sandbox_runtime:None
-      ~turn_sandbox_runtime_git:None ~config ~meta
+      ~turn_sandbox_runtime_git:None ~exec_cache:None ~config ~meta
       ~args:(`Assoc [ ("cmd", `String "gh pr list") ])
       ()
   in
@@ -608,7 +608,7 @@ let test_git_clone_repairs_existing_docker_clone_checkout () =
   Alcotest.(check bool) "checkout file removed before repair" false
     (Sys.file_exists restored_readme);
   let raw =
-    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_runtime:None ~config ~meta
+    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_runtime:None ~exec_cache:None ~config ~meta
       ~args:
         (`Assoc
           [
@@ -633,7 +633,7 @@ let test_bash_fake_docker_executes () =
   @@ fun ~config ~meta ~playground ->
   let raw =
     Keeper_exec_shell.handle_keeper_bash ~turn_sandbox_runtime:None
-      ~turn_sandbox_runtime_git:None ~config ~meta
+      ~turn_sandbox_runtime_git:None ~exec_cache:None ~config ~meta
       ~args:(`Assoc [ ("cmd", `String "echo hello"); ("cwd", `String playground) ])
       ()
   in

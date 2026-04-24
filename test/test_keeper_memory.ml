@@ -685,7 +685,7 @@ let test_memory_search_cross_generation () =
     let ctx_work = KEC.append ctx_work
       (Agent_sdk.Types.text_message Agent_sdk.Types.User "hello keeper") in
     (* Search for "canary" — only exists in history.jsonl *)
-    let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work
+    let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work ~exec_cache:None
       ~name:"keeper_memory_search"
       ~input:(`Assoc [ ("query", `String "canary"); ("limit", `Int 5); ("source", `String "history") ])
       () in
@@ -707,7 +707,7 @@ let test_memory_search_checkpoint_only () =
     let ctx_work = KEC.create ~system_prompt:"test" ~max_tokens:4096 in
     let ctx_work = KEC.append ctx_work
       (Agent_sdk.Types.text_message Agent_sdk.Types.User "optimize the database query") in
-    let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work
+    let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work ~exec_cache:None
       ~name:"keeper_memory_search"
       ~input:(`Assoc [ ("query", `String "database"); ("limit", `Int 5); ("source", `String "history") ])
       () in
@@ -730,7 +730,7 @@ let test_memory_search_dedup () =
     let ctx_work = KEC.create ~system_prompt:"test" ~max_tokens:4096 in
     let ctx_work = KEC.append ctx_work
       (Agent_sdk.Types.text_message Agent_sdk.Types.User "shared needle message") in
-    let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work
+    let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work ~exec_cache:None
       ~name:"keeper_memory_search"
       ~input:(`Assoc [ ("query", `String "needle"); ("limit", `Int 10); ("source", `String "history") ])
       () in
@@ -768,7 +768,7 @@ let test_memory_search_prev_generation () =
     let ctx_work = KEC.append ctx_work
       (Agent_sdk.Types.text_message Agent_sdk.Types.User "status report") in
     (* Search for "postgres" — only in previous generation's history *)
-    let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work
+    let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work ~exec_cache:None
       ~name:"keeper_memory_search"
       ~input:(`Assoc [ ("query", `String "postgres"); ("limit", `Int 5); ("source", `String "history") ])
       () in
@@ -780,7 +780,7 @@ let test_memory_search_prev_generation () =
     check bool "match references schema migration" true
       (List.exists (fun m -> Re.execp (Re.str "postgres" |> Re.compile) m) matches);
     (* Also verify current generation is searchable *)
-    let result2 = KET.execute_keeper_tool_call ~config ~meta ~ctx_work
+    let result2 = KET.execute_keeper_tool_call ~config ~meta ~ctx_work ~exec_cache:None
       ~name:"keeper_memory_search"
       ~input:(`Assoc [ ("query", `String "cluster"); ("limit", `Int 5); ("source", `String "history") ])
       () in
@@ -836,7 +836,7 @@ let test_memory_search_bank_basic () =
         ~priority:66 ~generation:2 ~turn:5 ~ts_unix:1100.0 ();
     ];
     let ctx_work = KEC.create ~system_prompt:"test" ~max_tokens:4096 in
-    let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work
+    let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work ~exec_cache:None
       ~name:"keeper_memory_search"
       ~input:(`Assoc [ ("query", `String "Postgres") ])
       () in
@@ -864,7 +864,7 @@ let test_memory_search_bank_kind_filter () =
     ];
     let ctx_work = KEC.create ~system_prompt:"test" ~max_tokens:4096 in
     (* Search with kind=goal — should only return "use Redis" *)
-    let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work
+    let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work ~exec_cache:None
       ~name:"keeper_memory_search"
       ~input:(`Assoc [ ("query", `String "use"); ("kind", `String "goal") ])
       () in
@@ -886,7 +886,7 @@ let test_memory_search_bank_scored_order () =
       memory_note ~kind:"decision" ~text:"task alpha upgrade" ~priority:90 ~generation:2 ~turn:3 ~ts_unix:200.0 ();
     ];
     let ctx_work = KEC.create ~system_prompt:"test" ~max_tokens:4096 in
-    let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work
+    let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work ~exec_cache:None
       ~name:"keeper_memory_search"
       ~input:(`Assoc [ ("query", `String "alpha"); ("limit", `Int 5) ])
       () in
@@ -923,7 +923,7 @@ let test_memory_search_bank_prefers_long_term_over_stale_short_term () =
         ~priority:95 ~generation:1 ~turn:2 ~ts_unix:1000.0 ();
     ];
     let ctx_work = KEC.create ~system_prompt:"test" ~max_tokens:4096 in
-    let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work
+    let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work ~exec_cache:None
       ~name:"keeper_memory_search"
       ~input:(`Assoc [ ("query", `String "postgres evidence trail") ])
       () in
@@ -941,7 +941,7 @@ let test_memory_search_bank_empty () =
     let config = make_test_room_config dir in
     let meta = keeper_meta ~name:"empty-keeper" ~mention_targets:["empty-keeper"] () in
     let ctx_work = KEC.create ~system_prompt:"test" ~max_tokens:4096 in
-    let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work
+    let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work ~exec_cache:None
       ~name:"keeper_memory_search"
       ~input:(`Assoc [ ("query", `String "anything") ])
       () in
@@ -961,7 +961,7 @@ let test_memory_search_bank_no_match () =
       memory_note ~kind:"decision" ~text:"deploy to staging" ~priority:86 ~generation:1 ~turn:1 ~ts_unix:1000.0 ();
     ];
     let ctx_work = KEC.create ~system_prompt:"test" ~max_tokens:4096 in
-    let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work
+    let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work ~exec_cache:None
       ~name:"keeper_memory_search"
       ~input:(`Assoc [ ("query", `String "nonexistent_keyword_xyz") ])
       () in
@@ -981,7 +981,7 @@ let test_memory_search_source_history () =
       {|{"role":"user","content":"deploy the legacy service"}|};
     ];
     let ctx_work = KEC.create ~system_prompt:"test" ~max_tokens:4096 in
-    let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work
+    let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work ~exec_cache:None
       ~name:"keeper_memory_search"
       ~input:(`Assoc [ ("query", `String "legacy"); ("source", `String "history") ])
       () in
@@ -1008,7 +1008,7 @@ let test_memory_search_source_all () =
       {|{"role":"user","content":"alpha from history"}|};
     ];
     let ctx_work = KEC.create ~system_prompt:"test" ~max_tokens:4096 in
-    let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work
+    let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work ~exec_cache:None
       ~name:"keeper_memory_search"
       ~input:(`Assoc [ ("query", `String "alpha"); ("source", `String "all"); ("limit", `Int 10) ])
       () in

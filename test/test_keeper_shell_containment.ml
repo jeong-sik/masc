@@ -209,7 +209,7 @@ let test_legacy_keeper_unaffected () =
   @@ fun ~base ~config ~meta ~playground:_ ->
   let outside = outside_in_root ~base "secret.txt" in
   let raw =
-    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_runtime:None ~config ~meta
+    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_runtime:None ~exec_cache:None ~config ~meta
       ~args:(`Assoc [ ("op", `String "cat"); ("path", `String outside) ])
   in
   Alcotest.(check bool) "legacy bypasses symmetric containment" false
@@ -221,7 +221,7 @@ let test_docker_keeper_blocks_ls_outside () =
   let outside_dir = Filename.concat base "outside_playground" in
   ensure_dir outside_dir;
   let raw =
-    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_runtime:None ~config ~meta
+    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_runtime:None ~exec_cache:None ~config ~meta
       ~args:
         (`Assoc [ ("op", `String "ls"); ("path", `String outside_dir) ])
   in
@@ -233,7 +233,7 @@ let test_docker_keeper_blocks_cat_outside () =
   @@ fun ~base ~config ~meta ~playground:_ ->
   let outside = outside_in_root ~base "host_secret.txt" in
   let raw =
-    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_runtime:None ~config ~meta
+    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_runtime:None ~exec_cache:None ~config ~meta
       ~args:(`Assoc [ ("op", `String "cat"); ("path", `String outside) ])
   in
   Alcotest.(check bool) "cat outside playground blocked" true
@@ -249,7 +249,7 @@ let test_docker_keeper_blocks_rg_outside () =
        (Filename.concat outside_dir "leak.txt")
        "secret-token");
   let raw =
-    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_runtime:None ~config ~meta
+    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_runtime:None ~exec_cache:None ~config ~meta
       ~args:
         (`Assoc
           [
@@ -267,7 +267,7 @@ let test_docker_keeper_blocks_find_outside () =
   let outside_dir = Filename.concat base "outside_playground" in
   ensure_dir outside_dir;
   let raw =
-    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_runtime:None ~config ~meta
+    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_runtime:None ~exec_cache:None ~config ~meta
       ~args:
         (`Assoc
           [
@@ -285,7 +285,7 @@ let test_docker_keeper_allows_inside_playground () =
   let demo = Filename.concat playground "demo.txt" in
   ignore (Fs_compat.save_file_atomic demo "hello inside playground");
   let raw =
-    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_runtime:None ~config ~meta
+    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_runtime:None ~exec_cache:None ~config ~meta
       ~args:(`Assoc [ ("op", `String "cat"); ("path", `String demo) ])
   in
   (* Goal: containment did not block. Whether `cat` succeeds depends on
@@ -299,7 +299,7 @@ let test_docker_git_creds_contained () =
   @@ fun ~base ~config ~meta ~playground:_ ->
   let outside = outside_in_root ~base "git_secret.txt" in
   let raw =
-    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_runtime:None ~config ~meta
+    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_runtime:None ~exec_cache:None ~config ~meta
       ~args:(`Assoc [ ("op", `String "cat"); ("path", `String outside) ])
   in
   Alcotest.(check bool) "docker git-creds also contained" true
@@ -338,7 +338,7 @@ let test_gh_binds_repo_from_active_task_worktree () =
   with_env "GH_PWD_FILE" gh_pwd_file @@ fun () ->
   with_env "PATH" (bin_dir ^ ":" ^ existing_path ()) @@ fun () ->
   let raw =
-    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_runtime:None ~config ~meta
+    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_runtime:None ~exec_cache:None ~config ~meta
       ~args:
         (`Assoc
           [
@@ -379,7 +379,7 @@ let test_gh_missing_worktree_returns_typed_error () =
   in
   let meta = { meta with current_task_id = Some current_task_id } in
   let raw =
-    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_runtime:None ~config ~meta
+    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_runtime:None ~exec_cache:None ~config ~meta
       ~args:(`Assoc [ ("op", `String "gh"); ("cmd", `String "pr list") ])
   in
   Alcotest.(check (option string)) "typed gh error"

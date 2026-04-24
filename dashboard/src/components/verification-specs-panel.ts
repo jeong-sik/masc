@@ -10,7 +10,7 @@
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
-import { useEffect, useRef } from 'preact/hooks'
+import { useEffect } from 'preact/hooks'
 import {
   fetchTlaSpecs,
   type TlaSpecCategory,
@@ -23,7 +23,8 @@ import { ErrorState, LoadingState } from './common/feedback-state'
 import { StatusChip } from './common/status-chip'
 import { FilterChips } from './common/filter-chips'
 import { TextInput } from './common/input'
-import { createManagedAsyncResource, type ManagedAsyncResource } from '../lib/async-state'
+import type { ManagedAsyncResource } from '../lib/async-state'
+import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 
 type CategoryFilter = 'all' | TlaSpecCategory
 const categoryFilter = signal<CategoryFilter>('all')
@@ -109,11 +110,7 @@ function SpecsTable({ entries }: { entries: TlaSpecEntry[] }) {
 }
 
 export function VerificationSpecsPanel() {
-  const resourceRef = useRef<ManagedAsyncResource<TlaSpecsResponse> | null>(null)
-  if (resourceRef.current === null) {
-    resourceRef.current = createManagedAsyncResource<TlaSpecsResponse>()
-  }
-  const resource = resourceRef.current
+  const resource = useManagedAsyncResource<TlaSpecsResponse>()
 
   useEffect(() => {
     void loadSpecs(resource)

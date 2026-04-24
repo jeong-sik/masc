@@ -39,7 +39,11 @@ function KeeperToolPresetChip({ keeperName }: { keeperName: string }) {
 
 function KeeperCascadeSelector({ keeper }: { keeper: Keeper }) {
   const [cascadeProfiles, setCascadeProfiles] = useState<Awaited<ReturnType<typeof fetchCascadeProfiles>> | null>(null)
-  const [currentCascade, setCurrentCascade] = useState(keeper.cascade_name || 'default')
+  const [draftCascade, setDraftCascade] = useState<{
+    keeperName: string
+    from: string
+    cascade: string
+  } | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -53,10 +57,10 @@ function KeeperCascadeSelector({ keeper }: { keeper: Keeper }) {
     }
   }, [])
 
-  useEffect(() => {
-    setCurrentCascade(keeper.cascade_name || 'default')
-  }, [keeper.name, keeper.cascade_name])
-
+  const fallbackCascade = keeper.cascade_name || 'default'
+  const currentCascade = draftCascade?.keeperName === keeper.name && draftCascade.from === fallbackCascade
+    ? draftCascade.cascade
+    : fallbackCascade
   const profiles = cascadeProfiles?.profiles ?? []
   const invalidProfiles = cascadeProfiles?.invalid_profiles ?? []
   if (profiles.length + invalidProfiles.length <= 1) return null
@@ -79,13 +83,14 @@ function KeeperCascadeSelector({ keeper }: { keeper: Keeper }) {
         value=${currentCascade}
         onChange=${(e: Event) => {
           const val = (e.target as HTMLSelectElement).value
-          setCurrentCascade(val)
+          const draft = { keeperName: keeper.name, from: fallbackCascade, cascade: val }
+          setDraftCascade(draft)
           updateKeeperCascade(keeper.name, val)
             .then(() => {
               refreshDashboard()
             })
             .catch((err) => {
-              setCurrentCascade(keeper.cascade_name || 'default')
+              setDraftCascade((current) => current === draft ? null : current)
               const msg = err instanceof Error ? err.message : 'Cascade 변경 실패'
               showToast(msg, 'error')
             })

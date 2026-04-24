@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useEffect, useRef } from 'preact/hooks'
+import { useEffect } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
 import {
   fetchRuntimeModelMetrics,
@@ -15,7 +15,8 @@ import { ErrorState, LoadingState } from './common/feedback-state'
 import { StatCell } from './common/stat-cell'
 import { StatusChip } from './common/status-chip'
 import { TextInput } from './common/input'
-import { createManagedAsyncResource, type ManagedAsyncResource } from '../lib/async-state'
+import type { ManagedAsyncResource } from '../lib/async-state'
+import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 
 /**
  * Filters model metrics by case-insensitive substring match against
@@ -313,11 +314,7 @@ export function metricCoverageText(metric: DashboardRuntimeModelMetric): string 
 }
 
 export function RuntimeMonitor() {
-  const resourceRef = useRef<ManagedAsyncResource<RuntimeData> | null>(null)
-  if (resourceRef.current === null) {
-    resourceRef.current = createManagedAsyncResource<RuntimeData>()
-  }
-  const resource = resourceRef.current
+  const resource = useManagedAsyncResource<RuntimeData>()
   const windowMinutes = useSignal(30)
   const expandedModel = useSignal<string | null>(null)
   const modelSearch = useSignal('')

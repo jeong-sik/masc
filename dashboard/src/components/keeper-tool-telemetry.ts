@@ -3,11 +3,11 @@
 // cross-trace aggregation, and hourly timeline sparklines.
 
 import { html } from 'htm/preact'
-import { useEffect, useRef, useState } from 'preact/hooks'
+import { useEffect, useState } from 'preact/hooks'
 import { fetchKeeperToolStats } from '../api/dashboard'
 import type { ToolStat, HourlyBucket, ToolStatsResponse } from '../api/dashboard'
 import { toolCategory, formatDuration, durationColor } from './tool-call-shared'
-import { createManagedAsyncResource, type ManagedAsyncResource } from '../lib/async-state'
+import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { SectionCap } from './common/section-cap'
 
 // ── Types ─────────────────────────────────────────────
@@ -124,16 +124,12 @@ interface KeeperToolTelemetryProps {
 }
 
 export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
-  const resourceRef = useRef<ManagedAsyncResource<TelemetryState> | null>(null)
-  if (resourceRef.current === null) {
-    resourceRef.current = createManagedAsyncResource<TelemetryState>({
-      tools: [],
-      timeline: [],
-      totalEntries: 0,
-      windowHours: 24,
-    })
-  }
-  const resource = resourceRef.current
+  const resource = useManagedAsyncResource<TelemetryState>({
+    tools: [],
+    timeline: [],
+    totalEntries: 0,
+    windowHours: 24,
+  })
   const [query, setQuery] = useState('')
 
   useEffect(() => {

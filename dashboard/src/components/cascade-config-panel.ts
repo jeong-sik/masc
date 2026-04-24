@@ -8,7 +8,7 @@
 // Pattern mirrors RuntimeMonitor: managed async resource + manual refresh.
 
 import { html } from 'htm/preact'
-import { useEffect, useRef } from 'preact/hooks'
+import { useEffect } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
 import { fetchGateKeepers, type GateKeeperInfo } from '../api/gate'
 import {
@@ -47,7 +47,8 @@ import { ErrorState, LoadingState } from './common/feedback-state'
 import { TextInput } from './common/input'
 import { StatCell } from './common/stat-cell'
 import { StatusChip } from './common/status-chip'
-import { createManagedAsyncResource, type ManagedAsyncResource } from '../lib/async-state'
+import type { ManagedAsyncResource } from '../lib/async-state'
+import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 
 interface CascadeData {
   config: CascadeConfigResponse | null
@@ -1108,11 +1109,7 @@ function CascadeRawConfigEditor({
 export function CascadeConfigPanel() {
   const traceSearch = useSignal('')
   const healthSearch = useSignal('')
-  const resourceRef = useRef<ManagedAsyncResource<CascadeData> | null>(null)
-  if (resourceRef.current === null) {
-    resourceRef.current = createManagedAsyncResource<CascadeData>()
-  }
-  const resource = resourceRef.current
+  const resource = useManagedAsyncResource<CascadeData>()
 
   useEffect(() => {
     void loadCascadeData(resource)

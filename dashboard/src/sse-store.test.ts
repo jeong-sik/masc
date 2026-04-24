@@ -268,6 +268,39 @@ describe('setupSSEReaction reconnect hydration', () => {
     expect(refreshBoard).not.toHaveBeenCalled()
   })
 
+  it('does not trigger observatory graph refresh from the workspace board route', async () => {
+    const { sseStore } = await loadSseStore()
+    const refreshActivity = vi.fn()
+    sseStore.registerActivityRefresh(refreshActivity)
+    route.value = { tab: 'workspace', params: { section: 'board' }, postId: null }
+
+    sseStore.routeServerPushEvent({
+      type: 'activity_graph_changed',
+      payload: { kind: 'activity_graph_changed' },
+    } as unknown as Parameters<typeof sseStore.routeServerPushEvent>[0])
+    vi.advanceTimersByTime(1_000)
+    await flushAsyncWork()
+
+    expect(refreshActivity).not.toHaveBeenCalled()
+  })
+
+  it('cancels pending stale refresh dispatches after a route switch', async () => {
+    const { sseStore } = await loadSseStore()
+    route.value = { tab: 'workspace', params: { section: 'board' }, postId: null }
+
+    sseStore.routeServerPushEvent({
+      type: 'comment_added',
+      post_id: 'post-1',
+      comment_id: 'comment-1',
+    })
+    route.value = { tab: 'monitoring', params: { section: 'observatory' }, postId: null }
+    sseStore.cancelPendingSSERefreshes()
+    vi.advanceTimersByTime(1_000)
+    await flushAsyncWork()
+
+    expect(refreshBoard).not.toHaveBeenCalled()
+  })
+
   it('hydrates websocket dashboard snapshots for board, goals, and composite slices', async () => {
     const { sseStore } = await loadSseStore()
 

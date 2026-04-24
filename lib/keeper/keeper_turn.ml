@@ -492,6 +492,18 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                with
                | Eio.Cancel.Cancelled _ as e -> raise e
                | exn ->
+                   (* #10047: surface the drop as a Prometheus counter so
+                      dashboards can alert when state advances without a
+                      matching metric record. The log alone was too easy
+                      to miss and operators trusted metric jsonl as
+                      ground truth. *)
+                   Prometheus.inc_counter
+                     Prometheus.metric_keeper_metric_emit_dropped
+                     ~labels:[
+                       ("keeper", updated_meta.name);
+                       ("channel", "turn");
+                       ("site", "keeper_turn_msg");
+                     ] ();
                    Log.Keeper.error
                      "write metrics snapshot failed after keeper_msg turn: %s"
                      (Printexc.to_string exn));

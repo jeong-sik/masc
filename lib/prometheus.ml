@@ -187,6 +187,14 @@ let metric_keeper_cache_read_tokens =
 let metric_keeper_usage_anomalies =
   "masc_keeper_usage_anomalies_total"
 
+(* #10047: [append_metrics_snapshot] failures in [keeper_turn.ml] and
+   [keeper_unified_turn.ml] used to be log-only, masking state/metric
+   divergence. Surface as a counter so dashboards can alert on silent
+   metric drops and operators stop trusting metric jsonl as ground
+   truth when keepers are running. *)
+let metric_keeper_metric_emit_dropped =
+  "masc_keeper_metric_emit_dropped_total"
+
 (* Keeper compaction (keeper_compact_policy.ml, tool_keeper.ml). *)
 let metric_keeper_compactions = "masc_keeper_compactions_total"
 let metric_keeper_compaction_ratio_change =

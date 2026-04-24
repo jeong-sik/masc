@@ -24,6 +24,25 @@ let ids ?goal_id ?(task_ids = []) ?(post_ids = []) ?agent_name () : CP.ids =
   { goal_id; task_ids; post_ids; agent_name }
 ;;
 
+let task ?goal_id ~id ~title () : Types.task =
+  { id
+  ; title
+  ; description = ""
+  ; task_status = Types.Todo
+  ; priority = 3
+  ; files = []
+  ; created_at = "2026-04-24T00:00:00Z"
+  ; created_by = None
+  ; worktree = None
+  ; goal_id
+  ; stage = None
+  ; contract = None
+  ; handoff_context = None
+  ; cycle_count = 0
+  ; do_not_reclaim_reason = None
+  }
+;;
+
 let product
       ?goal
       ?(task = CP.No_task)
@@ -62,6 +81,38 @@ let test_task_axis_projection () =
     "mixed aggregate"
     "mixed"
     (CP.task_phase_to_string (CP.task_phase_of_counts [ done_status; cancelled_status ]))
+;;
+
+let test_goal_linkage_prefers_structured_goal_id () =
+  let explicit =
+    task ~id:"task-1" ~title:"Implement product FSM" ~goal_id:"goal-1" ()
+  in
+  let legacy =
+    task ~id:"task-2" ~title:"[goal:goal-1] legacy marker" ()
+  in
+  let explicit_other_with_legacy_marker =
+    task
+      ~id:"task-3"
+      ~title:"[goal:goal-1] stale legacy marker"
+      ~goal_id:"goal-2"
+      ()
+  in
+  Alcotest.(check bool)
+    "explicit goal_id matches"
+    true
+    (Convergence.task_has_goal_id ~goal_id:"goal-1" explicit);
+  Alcotest.(check bool)
+    "legacy marker does not satisfy structured matcher"
+    false
+    (Convergence.task_has_goal_id ~goal_id:"goal-1" legacy);
+  Alcotest.(check bool)
+    "legacy matcher remains backward compatible"
+    true
+    (Convergence.task_matches_goal ~goal_id:"goal-1" legacy);
+  Alcotest.(check bool)
+    "structured goal_id wins over stale title marker"
+    false
+    (Convergence.task_matches_goal ~goal_id:"goal-1" explicit_other_with_legacy_marker)
 ;;
 
 let test_goal_terminal_open_tasks_violation () =
@@ -166,8 +217,8 @@ let test_snapshot_json () =
   let task_counts = CP.task_counts_of_statuses [ done_status ] in
   let refs = ids ~goal_id:"goal-1" ~task_ids:[ "task-1" ] () in
   let evidence : CP.evidence =
-    { source = "telemetry"
-    ; kind = "task_completed"
+    { source = CP.Source_telemetry
+    ; kind = CP.Evidence_telemetry_task_completed
     ; id = Some "task-1"
     ; label = "task completed"
     ; detail = "success=true; duration_ms=42"
@@ -206,6 +257,12 @@ let () =
   Alcotest.run
     "Coordination_product"
     [ "task_axis", [ Alcotest.test_case "projection" `Quick test_task_axis_projection ]
+    ; ( "goal_linkage"
+      , [ Alcotest.test_case
+            "structured goal_id matcher"
+            `Quick
+            test_goal_linkage_prefers_structured_goal_id
+        ] )
     ; ( "invariants"
       , [ Alcotest.test_case
             "terminal goal with open task"

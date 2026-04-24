@@ -95,6 +95,15 @@ type ids =
   ; agent_name : string option
   }
 
+module Ref_key = struct
+  let goal_id = "goal_id"
+  let task_id = "task_id"
+  let task_ids = "task_ids"
+  let post_id = "post_id"
+  let post_ids = "post_ids"
+  let agent_name = "agent_name"
+end
+
 let empty_ids = { goal_id = None; task_ids = []; post_ids = []; agent_name = None }
 
 type task_counts =
@@ -162,9 +171,55 @@ let default_facts =
   }
 ;;
 
+type evidence_source =
+  | Source_goal_store
+  | Source_task_store
+  | Source_board
+  | Source_economy
+  | Source_telemetry
+
+let evidence_source_to_string = function
+  | Source_goal_store -> "goal_store"
+  | Source_task_store -> "task_store"
+  | Source_board -> "board"
+  | Source_economy -> "economy"
+  | Source_telemetry -> "telemetry"
+;;
+
+type evidence_kind =
+  | Evidence_goal_phase
+  | Evidence_task_status
+  | Evidence_board_post
+  | Evidence_economy_earn_task_done
+  | Evidence_economy_earn_board_post
+  | Evidence_economy_earn_upvote
+  | Evidence_economy_earn_mention_response
+  | Evidence_economy_spend_model_call
+  | Evidence_economy_spend_deliberation
+  | Evidence_economy_adjustment
+  | Evidence_telemetry_task_started
+  | Evidence_telemetry_task_completed
+  | Evidence_telemetry_tool_called
+
+let evidence_kind_to_string = function
+  | Evidence_goal_phase -> "goal_phase"
+  | Evidence_task_status -> "task_status"
+  | Evidence_board_post -> "post"
+  | Evidence_economy_earn_task_done -> "earn_task_done"
+  | Evidence_economy_earn_board_post -> "earn_board_post"
+  | Evidence_economy_earn_upvote -> "earn_upvote"
+  | Evidence_economy_earn_mention_response -> "earn_mention_response"
+  | Evidence_economy_spend_model_call -> "spend_model_call"
+  | Evidence_economy_spend_deliberation -> "spend_deliberation"
+  | Evidence_economy_adjustment -> "adjustment"
+  | Evidence_telemetry_task_started -> "task_started"
+  | Evidence_telemetry_task_completed -> "task_completed"
+  | Evidence_telemetry_tool_called -> "tool_called"
+;;
+
 type evidence =
-  { source : string
-  ; kind : string
+  { source : evidence_source
+  ; kind : evidence_kind
   ; id : string option
   ; label : string
   ; detail : string
@@ -329,10 +384,10 @@ let string_list_to_yojson values = `List (List.map (fun value -> `String value) 
 
 let ids_to_yojson ids =
   `Assoc
-    [ "goal_id", option_string_to_yojson ids.goal_id
-    ; "task_ids", string_list_to_yojson ids.task_ids
-    ; "post_ids", string_list_to_yojson ids.post_ids
-    ; "agent_name", option_string_to_yojson ids.agent_name
+    [ Ref_key.goal_id, option_string_to_yojson ids.goal_id
+    ; Ref_key.task_ids, string_list_to_yojson ids.task_ids
+    ; Ref_key.post_ids, string_list_to_yojson ids.post_ids
+    ; Ref_key.agent_name, option_string_to_yojson ids.agent_name
     ]
 ;;
 
@@ -365,8 +420,8 @@ let option_float_to_yojson = function
 
 let evidence_to_yojson evidence =
   `Assoc
-    [ "source", `String evidence.source
-    ; "kind", `String evidence.kind
+    [ "source", `String (evidence_source_to_string evidence.source)
+    ; "kind", `String (evidence_kind_to_string evidence.kind)
     ; "id", option_string_to_yojson evidence.id
     ; "label", `String evidence.label
     ; "detail", `String evidence.detail
@@ -413,6 +468,14 @@ type snapshot =
   ; violations : violation list
   }
 
+let schema_version_current = 1
+
+type snapshot_mode = Advisory
+
+let snapshot_mode_to_string = function
+  | Advisory -> "advisory"
+;;
+
 let snapshot products =
   let violations = List.concat_map check_invariants products in
   { products; violations }
@@ -435,13 +498,13 @@ let evidence_for_violation products violation =
   |> Option.value ~default:[]
 ;;
 
-let snapshot_to_yojson snapshot =
+let snapshot_to_yojson ?projection_error snapshot =
   let evidence =
     snapshot.products |> List.concat_map (fun product -> product.evidence)
   in
-  `Assoc
-    [ "schema_version", `Int 1
-    ; "mode", `String "advisory"
+  let fields =
+    [ "schema_version", `Int schema_version_current
+    ; "mode", `String (snapshot_mode_to_string Advisory)
     ; ( "summary"
       , `Assoc
           [ "products", `Int (List.length snapshot.products)
@@ -459,4 +522,8 @@ let snapshot_to_yojson snapshot =
                violation_to_yojson ~evidence violation)
              snapshot.violations) )
     ]
+  in
+  match projection_error with
+  | Some message -> `Assoc (fields @ [ "projection_error", `String message ])
+  | None -> `Assoc fields
 ;;

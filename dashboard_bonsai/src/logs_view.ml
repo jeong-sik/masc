@@ -1396,8 +1396,8 @@ let sigil_char source =
 let view_entry ~is_first (e : Logs_types.entry) =
   let row_attrs =
     match row_tint e.normalized_level with
-    | None -> [ Style.row; Attr.create "aria-label" (e.normalized_level ^ " " ^ e.module_ ^ ": " ^ e.message) ]
-    | Some tint -> [ Style.row; tint; Attr.create "aria-label" (e.normalized_level ^ " " ^ e.module_ ^ ": " ^ e.message) ]
+    | None -> [ Style.row; Attr.role "listitem"; Attr.create "aria-label" (e.normalized_level ^ " " ^ e.module_ ^ ": " ^ e.message) ]
+    | Some tint -> [ Style.row; tint; Attr.role "listitem"; Attr.create "aria-label" (e.normalized_level ^ " " ^ e.module_ ^ ": " ^ e.message) ]
   in
   let sigil_attrs =
     match sigil_class e.normalized_level with

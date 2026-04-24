@@ -24,6 +24,12 @@ Next: 대기 유지; all non-destructive actions exhausted
 OpenQuestions: none
 Constraints: repos/ empty|}
 
+let stale_tool_surface_summary =
+  {|Goal: verify live tool policy
+Next plan: use keeper_task_claim after checking live policy
+Constraints: tool surface: masc_* only; no keeper_* tools visible
+OpenQuestions: why did the previous turn see stale tools?|}
+
 let test_strips_backward () =
   let filtered =
     Masc_mcp.Keeper_memory_policy.filter_forward_looking_summary full_summary
@@ -93,6 +99,20 @@ let test_drops_inert_idle_directives () =
   Alcotest.(check bool) "constraints still kept"
     true (Astring.String.is_infix ~affix:"Constraints:" filtered)
 
+let test_drops_stale_tool_surface_claims () =
+  let filtered =
+    Masc_mcp.Keeper_memory_policy.filter_forward_looking_summary
+      stale_tool_surface_summary
+  in
+  Alcotest.(check bool) "stale masc-only claim removed"
+    false (Astring.String.is_infix ~affix:"masc_* only" filtered);
+  Alcotest.(check bool) "stale missing keeper tools removed"
+    false (Astring.String.is_infix ~affix:"no keeper_* tools" filtered);
+  Alcotest.(check bool) "goal still kept"
+    true (Astring.String.is_infix ~affix:"Goal:" filtered);
+  Alcotest.(check bool) "live-policy action still kept"
+    true (Astring.String.is_infix ~affix:"keeper_task_claim" filtered)
+
 let () =
   Alcotest.run "continuity forward filter"
     [ ( "filter_forward_looking_summary",
@@ -106,5 +126,7 @@ let () =
             test_preserves_line_order;
           Alcotest.test_case "drops inert idle directives" `Quick
             test_drops_inert_idle_directives;
+          Alcotest.test_case "drops stale tool surface claims" `Quick
+            test_drops_stale_tool_surface_claims;
         ] );
     ]

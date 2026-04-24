@@ -312,6 +312,29 @@ let with_keeper_name args name =
       `Assoc (("name", `String name) :: List.remove_assoc "name" fields)
   | other -> other
 
+let prepare_passive_keeper_identity ctx args =
+  let requested_name =
+    match String.trim (get_string args "name" "") with
+    | "" -> String.trim ctx.agent_name
+    | name -> name
+  in
+  if String.equal requested_name "" then
+    Ok (args, None)
+  else
+    match read_meta_resolved ctx.config requested_name with
+    | Ok (Some (_resolved_name, meta)) -> (
+        match maybe_reseed_keeper_identity ctx meta with
+        | Ok (updated_meta, identity_reseed) ->
+            Ok (with_keeper_name args updated_meta.name, identity_reseed)
+        | Error _ as err -> err)
+    | Ok None -> Ok (args, None)
+    | Error err -> Error (Printf.sprintf "❌ %s" err)
+
+let attach_identity_reseed ?identity_reseed json =
+  match identity_reseed with
+  | None -> json
+  | Some note -> attach_assoc_field "identity_reseed" note json
+
 let handle_keeper_create_from_persona ctx args : tool_result =
   if not Server_startup_state.((!state).state_ready) then begin
     let elapsed = Server_startup_state.elapsed_since_start () in
@@ -357,15 +380,21 @@ let handle_keeper_up ctx args : tool_result =
   with_keeper_startup_gate (fun () -> execute_keeper_up ctx args)
 
 let handle_keeper_status ctx args : tool_result =
-  let ok, body = Status.handle_keeper_status ctx args in
-  if not ok then (ok, body)
-  else
-    let json =
-      try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
-    in
-    (true,
-     Yojson.Safe.pretty_to_string
-       (annotate_keeper_json ~runtime_class:"keeper" json))
+  match prepare_passive_keeper_identity ctx args with
+  | Error err -> (false, err)
+  | Ok (prepared_args, identity_reseed) ->
+      let ok, body = Status.handle_keeper_status ctx prepared_args in
+      if not ok then (ok, body)
+      else
+        let json =
+          try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
+        in
+        let json =
+          json
+          |> annotate_keeper_json ~runtime_class:"keeper"
+          |> attach_identity_reseed ?identity_reseed
+        in
+        (true, Yojson.Safe.pretty_to_string json)
 
 let resolve_keeper_name ctx args =
   let name = String.trim (get_string args "name" "") in
@@ -707,16 +736,21 @@ let handle_keeper_sandbox_status ctx args : tool_result =
                ("items", `List items);
              ]) )
   | _ ->
-      (match resolve_keeper_meta ctx args with
+      (match prepare_passive_keeper_identity ctx args with
        | Error err -> (false, err)
-       | Ok meta ->
-           ( true,
-             Yojson.Safe.pretty_to_string
-               (`Assoc
-                  [
-                    ("keeper", `String meta.name);
-                    ("sandbox", render_item meta);
-                  ]) ))
+       | Ok (prepared_args, identity_reseed) -> (
+           match resolve_keeper_meta ctx prepared_args with
+           | Error err -> (false, err)
+           | Ok meta ->
+               let json =
+                 `Assoc
+                   [
+                     ("keeper", `String meta.name);
+                     ("sandbox", render_item meta);
+                   ]
+                 |> attach_identity_reseed ?identity_reseed
+               in
+               (true, Yojson.Safe.pretty_to_string json)))
 
 let handle_keeper_sandbox_start ctx args : tool_result =
   match resolve_keeper_meta ctx args with

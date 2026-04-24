@@ -280,10 +280,12 @@ let normalize_board_post_meta args =
 
     The detector walks the string once with a small state machine that is
     aware of fenced code blocks (so markdown markers inside ```...```
-    don't count). It returns the FIRST signal it finds, which is also
-    surfaced in the WARN log so future audits can see WHICH pattern
-    triggered the marker. New signals are added conservatively — only
-    those whose false-positive surface is small for prose + code (#9777).
+    don't count). Inline code spans outside fences are also tracked so
+    bold markers inside `...` don't count as unclosed emphasis. It returns
+    the FIRST signal it finds, which is also surfaced in the WARN log so
+    future audits can see WHICH pattern triggered the marker. New signals
+    are added conservatively — only those whose false-positive surface is
+    small for prose + code (#9777).
 
     Evidence:
     - ani1999 p-c0494a2e body_len=467 ending in a lone '`' (Odd_inline_tick)
@@ -310,6 +312,7 @@ let truncation_signal_to_string = function
 let detect_truncated_markdown_with_reason (text : string) : truncation_signal option =
   let len = String.length text in
   let in_fence = ref false in
+  let in_inline = ref false in
   let inline_outside = ref 0 in
   let fences = ref 0 in
   let double_ast_outside = ref 0 in
@@ -322,12 +325,18 @@ let detect_truncated_markdown_with_reason (text : string) : truncation_signal op
       in_fence := not !in_fence;
       i := !i + 3
     end else if !i + 1 < len
-                && text.[!i] = '*' && text.[!i + 1] = '*' && not !in_fence
+                && text.[!i] = '*'
+                && text.[!i + 1] = '*'
+                && (not !in_fence)
+                && not !in_inline
     then begin
       incr double_ast_outside;
       i := !i + 2
     end else begin
-      if text.[!i] = '`' && not !in_fence then incr inline_outside;
+      if text.[!i] = '`' && not !in_fence then begin
+        incr inline_outside;
+        in_inline := not !in_inline
+      end;
       incr i
     end
   done;

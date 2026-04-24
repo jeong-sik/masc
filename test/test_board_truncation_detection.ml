@@ -33,6 +33,10 @@ let test_balanced_inline_tick_no_signal () =
   check (option signal_t) "balanced inline `let x` ticks"
     None (detect "Use `let` and `in` together.")
 
+let test_double_asterisk_in_inline_code_no_signal () =
+  check (option signal_t) "glob in balanced inline code"
+    None (detect "Run `ls **/*.ml` before submitting.")
+
 let test_underscore_in_identifier_not_truncation () =
   (* Identifiers with underscores must NOT trigger detection
      (the original detector was deliberately conservative on _). *)
@@ -60,6 +64,11 @@ let test_odd_double_asterisk_triggers () =
   check (option signal_t) "unclosed bold"
     (Some Tool_board.Odd_double_asterisk)
     (detect "This is **important and never closed")
+
+let test_odd_double_asterisk_outside_inline_code_triggers () =
+  check (option signal_t) "unclosed bold after inline glob"
+    (Some Tool_board.Odd_double_asterisk)
+    (detect "Run `ls **/*.ml`, then write **summary")
 
 let test_unfinished_link_triggers () =
   check (option signal_t) "trailing [text]( with no )"
@@ -101,6 +110,7 @@ let () =
           test_case "complete text" `Quick test_complete_text_no_signal;
           test_case "balanced fence" `Quick test_balanced_fence_no_signal;
           test_case "balanced inline tick" `Quick test_balanced_inline_tick_no_signal;
+          test_case "double asterisk in inline code" `Quick test_double_asterisk_in_inline_code_no_signal;
           test_case "underscore identifier" `Quick test_underscore_in_identifier_not_truncation;
           test_case "prose paren" `Quick test_paren_in_prose_not_unfinished_link;
         ] );
@@ -109,6 +119,7 @@ let () =
           test_case "odd fence" `Quick test_odd_fence_triggers;
           test_case "odd inline tick" `Quick test_odd_inline_tick_triggers;
           test_case "odd double asterisk" `Quick test_odd_double_asterisk_triggers;
+          test_case "odd double asterisk outside inline code" `Quick test_odd_double_asterisk_outside_inline_code_triggers;
           test_case "unfinished link" `Quick test_unfinished_link_triggers;
           test_case "unfinished image" `Quick test_unfinished_image_triggers;
         ] );

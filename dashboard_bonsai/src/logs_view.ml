@@ -37,6 +37,29 @@ stylesheet
     gap: 1.25rem;
     isolation: isolate;
   }
+  .skip_nav {
+    position: absolute;
+    left: -9999px;
+    top: auto;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    z-index: 100;
+    font-family: 'Noto Sans KR', sans-serif;
+    font-size: 13px;
+    padding: 8px 16px;
+    background: var(--bg-panel);
+    color: var(--accent-brass);
+    border: 2px solid var(--accent-brass);
+    text-decoration: none;
+  }
+  .skip_nav:focus {
+    position: fixed;
+    top: 8px;
+    left: 8px;
+    width: auto;
+    height: auto;
+  }
 
   @media (max-width: 1280px) {
     .root { padding-right: 2.5rem; }
@@ -2133,7 +2156,14 @@ let render_response
   in
   Node.div
     ~attrs:[ Style.root ]
-    [ nav
+    [ Node.a
+        ~attrs:
+          [ Style.skip_nav
+          ; Attr.href "#main-content"
+          ; Attr.create "aria-label" "Skip to main content"
+          ]
+        [ Node.text "Skip to main content" ]
+    ; nav
     ; brand_row
     ; view_heartbeat ~entries:response.entries ()
     ; view_hud ~keepers response
@@ -2176,7 +2206,7 @@ let render_response
            "in vigil", Style.page_h1_bright
        in
        Node.div
-         ~attrs:[ Style.page_head ]
+         ~attrs:[ Style.page_head; Attr.id "main-content" ]
          [ Node.div
              ~attrs:[ Style.page_head_lead ]
              [ Node.div

@@ -371,6 +371,7 @@
         test_keeper_meta_cas_retry
         test_judge_diagnostics
         test_judge_json_recovery
+        test_keeper_cli_mcp_config
         test_keeper_identity_parse
         test_worker_runtime
         test_capability_registry
@@ -543,6 +544,7 @@
         test_keeper_meta_cas_retry
         test_judge_diagnostics
         test_judge_json_recovery
+        test_keeper_cli_mcp_config
         test_keeper_identity_parse
         test_worker_runtime
         test_capability_registry

@@ -427,6 +427,8 @@
    keeper_id
    keeper_types_profile
    keeper_meta_contract
+   keeper_meta_json_scrub
+   keeper_meta_json_parse
    keeper_meta_json
    keeper_types_support
    keeper_types
@@ -629,6 +631,8 @@
  dashboard_mission_assembly
  keeper_types_profile
  keeper_meta_contract
+ keeper_meta_json_scrub
+ keeper_meta_json_parse
  keeper_meta_json
  keeper_types_support
  server_dashboard_http_cache

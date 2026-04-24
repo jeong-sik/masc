@@ -231,6 +231,9 @@ let transport_entries =
        default leaves headroom.";
     entry ~default:"8937" "MASC_WS_PORT" "WebSocket server port";
     entry ~default:"true" "MASC_WS_ENABLED" "Enable WebSocket transport";
+    entry ~default:"1048576" "MASC_WS_CLIENT_BUFFER_LIMIT_BYTES"
+      "Skip WS dashboard deltas for authenticated sessions whose last reported \
+       WebSocket.bufferedAmount exceeds this many bytes. 0 disables the gate.";
     entry ~default:"true" "MASC_WEBRTC_ENABLED" "Enable WebRTC transport";
     entry ~default:"auto" "MASC_USE_H2" "HTTP mode (auto|h2_only|h1_only)";
     entry ~default:"240" "MASC_STARTUP_WATCHDOG_SEC"

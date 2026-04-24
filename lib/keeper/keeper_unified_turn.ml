@@ -131,12 +131,19 @@ let ensure_local_discovery_ready
              (String.concat ", " labels)
              (Printexc.to_string exn))
 
-let fail_open_local_only_when_unavailable
+type local_only_liveness_decision =
+  | Keep_effective_cascade of string
+  | Probe_local_only_urls of {
+      effective_cascade : string;
+      fallback_cascade : string;
+      ollama_base_urls : string list;
+    }
+
+let decide_local_only_liveness
     ?resolve_label
-    ?probe_ollama_base_url
     ~(base_cascade : string)
     ~(effective_cascade : string)
-    (labels : string list) : string =
+    (labels : string list) : local_only_liveness_decision =
   let resolve_label =
     match resolve_label with
     | Some resolve_label -> resolve_label
@@ -150,7 +157,7 @@ let fail_open_local_only_when_unavailable
   in
   if not (String.equal normalized_effective Keeper_config.local_only_cascade_name)
      || String.equal normalized_base Keeper_config.local_only_cascade_name
-  then normalized_effective
+  then Keep_effective_cascade normalized_effective
   else
     let ollama_urls =
       labels
@@ -162,8 +169,28 @@ let fail_open_local_only_when_unavailable
       |> dedupe_keep_order
     in
     match ollama_urls with
-    | [] -> normalized_effective
-    | _ ->
+    | [] -> Keep_effective_cascade normalized_effective
+    | ollama_base_urls ->
+        Probe_local_only_urls
+          {
+            effective_cascade = normalized_effective;
+            fallback_cascade = normalized_base;
+            ollama_base_urls;
+          }
+
+let fail_open_local_only_when_unavailable
+    ?resolve_label
+    ?probe_ollama_base_url
+    ~(base_cascade : string)
+    ~(effective_cascade : string)
+    (labels : string list) : string =
+  match
+    decide_local_only_liveness ?resolve_label ~base_cascade ~effective_cascade
+      labels
+  with
+  | Keep_effective_cascade cascade -> cascade
+  | Probe_local_only_urls
+      { effective_cascade; fallback_cascade; ollama_base_urls } ->
       let probe_ollama_base_url =
         match probe_ollama_base_url with
         | Some probe -> Some probe
@@ -175,10 +202,10 @@ let fail_open_local_only_when_unavailable
            | _ -> None)
       in
       (match probe_ollama_base_url with
-       | None -> normalized_effective
+       | None -> effective_cascade
        | Some probe ->
-         if List.exists probe ollama_urls then normalized_effective
-         else normalized_base)
+         if List.exists probe ollama_base_urls then effective_cascade
+         else fallback_cascade)
 
 (* Extracted to Keeper_error_classify — see keeper_error_classify.ml *)
 

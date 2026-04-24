@@ -2706,6 +2706,52 @@ let test_ensure_local_discovery_ready_surfaces_refresh_failure () =
       check bool "error includes label" true
         (contains_substring msg "llama:auto")
 
+let provider_config_of_label label =
+  match Masc_mcp.Cascade_config.parse_model_string label with
+  | Some cfg -> cfg
+  | None -> fail ("expected model label to parse: " ^ label)
+
+let test_decide_local_only_liveness_keeps_non_local_effective () =
+  match
+    UT.decide_local_only_liveness
+      ~resolve_label:(fun _ -> fail "resolver should not run")
+      ~base_cascade:"keeper_unified"
+      ~effective_cascade:"default"
+      [ "not-a-real-label" ]
+  with
+  | UT.Keep_effective_cascade cascade ->
+      check string "keeps selected cascade" KC.default_cascade_name cascade
+  | UT.Probe_local_only_urls _ -> fail "unexpected local-only probe decision"
+
+let test_decide_local_only_liveness_keeps_explicit_local_only () =
+  match
+    UT.decide_local_only_liveness
+      ~resolve_label:(fun _ -> fail "resolver should not run")
+      ~base_cascade:"local_only"
+      ~effective_cascade:"local_only"
+      [ "not-a-real-label" ]
+  with
+  | UT.Keep_effective_cascade cascade ->
+      check string "keeps explicit local_only" "local_only" cascade
+  | UT.Probe_local_only_urls _ -> fail "unexpected local-only probe decision"
+
+let test_decide_local_only_liveness_requests_deduped_ollama_probe () =
+  let label = "ollama:qwen3.6:35b-a3b-mlx-bf16" in
+  let cfg = provider_config_of_label label in
+  match
+    UT.decide_local_only_liveness
+      ~base_cascade:"keeper_unified"
+      ~effective_cascade:"local_only"
+      [ label; label ]
+  with
+  | UT.Keep_effective_cascade _ -> fail "expected Ollama liveness probe"
+  | UT.Probe_local_only_urls
+      { effective_cascade; fallback_cascade; ollama_base_urls } ->
+      check string "effective cascade" "local_only" effective_cascade;
+      check string "fallback cascade" "keeper_unified" fallback_cascade;
+      check (list string) "deduped probe URLs" [ cfg.base_url ]
+        ollama_base_urls
+
 let test_fail_open_local_only_when_probe_fails () =
   let cascade =
     UT.fail_open_local_only_when_unavailable
@@ -2717,13 +2763,17 @@ let test_fail_open_local_only_when_probe_fails () =
   check string "falls back to base cascade" "tool_rerank" cascade
 
 let test_fail_open_local_only_preserves_explicit_local_only_base () =
+  let probe_calls = ref 0 in
   let cascade =
     UT.fail_open_local_only_when_unavailable
-      ~probe_ollama_base_url:(fun _ -> false)
+      ~probe_ollama_base_url:(fun _ ->
+        incr probe_calls;
+        false)
       ~base_cascade:"local_only"
       ~effective_cascade:"local_only"
       [ "ollama:qwen3.6:35b-a3b-mlx-bf16" ]
   in
+  check int "probe not called" 0 !probe_calls;
   check string "explicit local_only stays local_only" "local_only" cascade
 
 let test_fail_open_local_only_preserves_healthy_local_only () =
@@ -5280,6 +5330,14 @@ let () =
             test_sync_keeper_paused_state_surfaces_write_failure_without_mutating_registry;
           test_case "local discovery guard surfaces refresh failure" `Quick
             test_ensure_local_discovery_ready_surfaces_refresh_failure;
+          test_case "local_only liveness decision keeps non-local route" `Quick
+            test_decide_local_only_liveness_keeps_non_local_effective;
+          test_case "local_only liveness decision keeps explicit local base"
+            `Quick
+            test_decide_local_only_liveness_keeps_explicit_local_only;
+          test_case "local_only liveness decision requests deduped probe"
+            `Quick
+            test_decide_local_only_liveness_requests_deduped_ollama_probe;
           test_case "local_only fail-open falls back when ollama is down" `Quick
             test_fail_open_local_only_when_probe_fails;
           test_case "explicit local_only does not fail-open" `Quick

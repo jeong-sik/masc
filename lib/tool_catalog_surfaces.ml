@@ -132,7 +132,7 @@ let public_mcp_surface_tools =
     "masc_keeper_sandbox_status"; "masc_keeper_sandbox_start"; "masc_keeper_sandbox_stop";
     "masc_keeper_up"; "masc_keeper_repair"; "masc_keeper_reset";
     "masc_keeper_down";
-    "masc_persona_list";
+    "masc_persona_list"; "masc_persona_schema";
     (* Board *)
     "masc_board_post"; "masc_board_list"; "masc_board_get";
     "masc_board_comment"; "masc_board_vote";
@@ -203,6 +203,7 @@ let admin_surface_tools =
     "masc_tool_admin_snapshot";
     "masc_config";
     (* Phase 2: surface SSOT *)
+    "masc_persona_generate"; "masc_persona_save";
     "masc_keeper_create_from_persona"; "masc_keeper_reset";
     "masc_pause"; "masc_resume";
     "masc_runtime_ollama_probe"; "masc_tool_list";
@@ -227,6 +228,8 @@ let keeper_denied_surface_tools =
     "masc_tool_admin_update";
     "masc_tool_admin_snapshot";
     "masc_config";
+    "masc_persona_generate";
+    "masc_persona_save";
     "masc_keeper_create_from_persona";
     (* NOTE: masc_keeper_reset is on public_mcp_surface_tools (line 126),
        so it cannot be added to Keeper_denied without violating the

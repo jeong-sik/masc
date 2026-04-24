@@ -505,6 +505,33 @@ let test_masc_spawn_schema () =
 
 (* test_masc_persona_list_schema removed: persona list coverage is trivial. *)
 
+let test_masc_persona_authoring_schemas () =
+  (match find_tool "masc_persona_schema" with
+  | None -> Alcotest.fail "masc_persona_schema not found"
+  | Some _ -> ());
+  (match find_tool "masc_persona_generate" with
+  | None -> Alcotest.fail "masc_persona_generate not found"
+  | Some schema -> (
+      match get_json_assoc "properties" schema.input_schema with
+      | Some props ->
+          Alcotest.(check bool) "generate has concept" true
+            (List.mem_assoc "concept" props);
+          Alcotest.(check bool) "generate has tool_preset" true
+            (List.mem_assoc "tool_preset" props)
+      | None -> Alcotest.fail "masc_persona_generate missing properties"));
+  match find_tool "masc_persona_save" with
+  | None -> Alcotest.fail "masc_persona_save not found"
+  | Some schema -> (
+      match get_json_assoc "properties" schema.input_schema with
+      | Some props ->
+          Alcotest.(check bool) "save has handle" true
+            (List.mem_assoc "handle" props);
+          Alcotest.(check bool) "save has profile" true
+            (List.mem_assoc "profile" props);
+          Alcotest.(check bool) "save has dry_run" true
+            (List.mem_assoc "dry_run" props)
+      | None -> Alcotest.fail "masc_persona_save missing properties")
+
 let test_masc_keeper_create_from_persona_schema () =
   match find_tool "masc_keeper_create_from_persona" with
   | None -> Alcotest.fail "masc_keeper_create_from_persona not found"
@@ -858,6 +885,8 @@ let () =
       Alcotest.test_case "spawn" `Quick test_masc_spawn_schema;
     ];
     "keeper_runtime_tools", [
+      Alcotest.test_case "persona-authoring" `Quick
+        test_masc_persona_authoring_schemas;
       Alcotest.test_case "keeper-create-from-persona" `Quick
         test_masc_keeper_create_from_persona_schema;
       Alcotest.test_case "keeper-up" `Quick

@@ -25,21 +25,30 @@ module Http_client = struct
   let is_provider_parse_error body =
     contains_ci ~haystack:body ~needle:"can't find closing" ()
 
-  (* AcceptRejected is raised by OAS for multiple distinct conditions:
-     (a) permanent provider failures (kimi_cli exit 1 is explicitly labeled
-         "permanent auth/config/model error") — must NOT cascade.
-     (b) provider capability mismatches wrapped by MASC's worker layer at
+  (* AcceptRejected is raised by OAS for multiple distinct conditions, all
+     of which are per-provider rather than cascade-wide. A different provider
+     in the cascade may handle the request even when the current one rejects:
+     (a) Per-provider permanent failures from subprocess CLI transports.
+         - kimi_cli exit 1: [transport_kimi_cli.ml] labels this
+           "permanent auth/config/model error". The auth/config is specific
+           to Moonshot; claude/gpt/ollama providers are unaffected.
+         - gemini_cli startup crash: [transport_gemini_cli.ml] explicitly
+           marks the AcceptRejected with "rejecting without retry so the
+           cascade can move on".
+     (b) Provider capability mismatches wrapped by MASC's worker layer at
          [oas_worker_named.ml:672-678] (InvalidConfig runtime_mcp_auth /
-         tool_support). The worker comment at line 661-665 documents explicit
-         cascade intent. The detail string is built in
-         [oas_worker_exec_transport.ml:444-452] and consistently starts with
-         "<provider> does not support ...".
-     This filter whitelists only markers from class (b). Class (a) has no
-     matching marker and falls through to false. CompletionContractViolation
-     and UnrecognizedStopReason use free-form [reason] and are not whitelisted
-     here — their cascade intent is tracked separately. See masc-mcp #9850. *)
+         tool_support). The detail string is built in
+         [oas_worker_exec_transport.ml] and starts with "<provider> does not
+         support ...". Another provider with matching capability can succeed.
+     The markers below cover (a) and (b). CompletionContractViolation and
+     UnrecognizedStopReason use free-form [reason] and are not whitelisted
+     here — their cascade intent is tracked at their own call sites in
+     [oas_worker_named.ml:673-678]. See masc-mcp #9932 (kimi fallback),
+     #9850 (codex_cli runtime_mcp_auth). *)
   let accept_rejected_cascadable_markers = [
     "does not support";
+    "rejected the request";  (* kimi_cli exit 1 — #9932 *)
+    "startup crash";          (* gemini_cli top-level await / yoga_wasm *)
   ]
 
   let accept_rejected_is_cascadable reason =

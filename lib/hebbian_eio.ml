@@ -364,3 +364,72 @@ let get_graph_data config : (synapse list * string list) =
     List.concat_map (fun s -> [s.from_agent; s.to_agent]) graph.synapses
   ) in
   (graph.synapses, agents)
+
+(** #9876: consolidation scheduler.
+
+    The evidence in #9876 is that [last_consolidation = 0.0] on a live
+    graph with 37 synapses — consolidation had never run, not just
+    "not recently". Root cause: {!consolidate} has zero production
+    callers. The fiber below closes the loop so decay + pruning
+    actually execute on a cadence, and the graph stops being
+    write-only.
+
+    Design follows {!Tool_metrics_persist.start_flush_fiber} (the
+    canonical periodic-fiber pattern in this codebase): fork on the
+    startup switch, loop with [Eio.Time.sleep], catch non-Cancel
+    exceptions per-iteration so a transient IO failure cannot kill
+    the fiber.
+
+    Metrics (for #9520 telemetry discipline):
+    - [masc_hebbian_consolidate_total{outcome=ok\|error}]
+    - [masc_hebbian_consolidate_pruned_total] — counts pruned synapses
+    - [masc_hebbian_consolidate_duration_seconds] — histogram
+
+    The fiber is cancelable via the passed switch. Shutdown is a
+    passive cancellation — we do NOT run a final consolidation on
+    shutdown because pruning on an unclean exit is riskier than
+    skipping one cycle. *)
+let start_consolidation_fiber ~sw ~clock config =
+  let interval_s = Level2_config.Hebbian.consolidation_interval_s () in
+  let decay_after_days =
+    int_of_float (Level2_config.Hebbian.decay_after_days ())
+  in
+  Log.Coord.info
+    "hebbian: consolidation fiber starting (interval=%.0fs decay_after=%dd)"
+    interval_s decay_after_days;
+  Eio.Fiber.fork ~sw (fun () ->
+    let rec loop () =
+      Eio.Time.sleep clock interval_s;
+      let t0 = Time_compat.now () in
+      (try
+         let pruned = consolidate config ~decay_after_days () in
+         let elapsed = Time_compat.now () -. t0 in
+         Prometheus.inc_counter
+           "masc_hebbian_consolidate_total"
+           ~labels:[("outcome", "ok")] ();
+         if pruned > 0 then
+           Prometheus.inc_counter
+             "masc_hebbian_consolidate_pruned_total"
+             ~delta:(Float.of_int pruned) ();
+         Prometheus.observe_histogram
+           "masc_hebbian_consolidate_duration_seconds" elapsed;
+         if pruned > 0 then
+           Log.Coord.info
+             "hebbian: consolidated graph, pruned=%d duration=%.3fs"
+             pruned elapsed
+         else
+           Log.Coord.debug
+             "hebbian: consolidated graph, pruned=0 duration=%.3fs"
+             elapsed
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+         Prometheus.inc_counter
+           "masc_hebbian_consolidate_total"
+           ~labels:[("outcome", "error")] ();
+         Log.Coord.error
+           "hebbian: consolidation iteration failed: %s"
+           (Printexc.to_string exn));
+      loop ()
+    in
+    loop ())

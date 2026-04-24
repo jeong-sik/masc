@@ -276,6 +276,56 @@ let test_append_history_caps_and_preserves_order () =
   assert (Float.equal head_ts 1.0);
   print_endline "✓ test_append_history_caps_and_preserves_order passed"
 
+(* #9876: consolidation fiber must actually call [consolidate] on its
+   cadence. Without this test, the gap that caused [last_consolidation
+   = 0.0] in production cannot be detected by CI. Uses a very short
+   interval env override so the test is fast; verifies the side
+   effect (last_consolidation advances) and the metric fires. *)
+let test_consolidation_fiber_runs () =
+  Unix.putenv "MASC_HEBBIAN_CONSOLIDATION_INTERVAL_S" "0.05";
+  Unix.putenv "MASC_HEBBIAN_DECAY_AFTER_DAYS" "14";
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-hebbian-fiber-%d-%d"
+         (Unix.getpid ())
+         (int_of_float (Unix.gettimeofday () *. 1000000.)))
+  in
+  Unix.mkdir base 0o755;
+  let config = Coord.default_config base in
+  let _ = Coord.init config ~agent_name:None in
+  Hebbian_eio.strengthen config ~from_agent:"claude" ~to_agent:"gemini" ();
+  let clock = Eio.Stdenv.clock env in
+  let before =
+    Prometheus.metric_value_or_zero
+      "masc_hebbian_consolidate_total"
+      ~labels:[("outcome", "ok")] ()
+  in
+  (try
+     Eio.Switch.run (fun sw ->
+       Hebbian_eio.start_consolidation_fiber ~sw ~clock config;
+       (* sleep long enough for 2+ ticks at 0.05s, then raise [Exit]
+          to break out of the switch. [Eio.Switch.run] cancels the
+          fiber and re-raises; we catch [Exit] outside. This mirrors
+          how production shutdown cancels the bootstrap switch. *)
+       Eio.Time.sleep clock 0.25;
+       raise Exit)
+   with Exit -> ());
+  let after =
+    Prometheus.metric_value_or_zero
+      "masc_hebbian_consolidate_total"
+      ~labels:[("outcome", "ok")] ()
+  in
+  let _ = Coord.reset config in
+  rm_rf base;
+  Unix.putenv "MASC_HEBBIAN_CONSOLIDATION_INTERVAL_S" "";
+  Unix.putenv "MASC_HEBBIAN_DECAY_AFTER_DAYS" "";
+  Alcotest.(check bool)
+    "fiber invoked consolidate at least twice"
+    true
+    (after -. before >= 2.0)
+
 let () =
   Alcotest.run "Hebbian_eio"
     [
@@ -301,6 +351,11 @@ let () =
           Alcotest.test_case "custom learning params" `Quick
             test_custom_params;
           Alcotest.test_case "lock stats" `Quick test_lock_stats;
+        ] );
+      ( "consolidation_fiber",
+        [
+          Alcotest.test_case "fiber runs consolidate periodically" `Quick
+            test_consolidation_fiber_runs;
         ] );
       ( "weight_history",
         [

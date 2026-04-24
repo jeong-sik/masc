@@ -35,6 +35,17 @@ module Hebbian = struct
     Env_config_core.get_float ~default:0.01 "MASC_HEBBIAN_DECAY"
   let min_weight () = 0.05
   let max_weight () = 1.0
+  (* #9876: consolidation scheduler cadence and horizon. Defaults are
+     conservative: once per hour, decay synapses untouched for 14 days.
+     Hebbian models in neuroscience (Song, Miller, Abbott 2000) typically
+     use a consolidation cadence much shorter than the decay horizon so
+     that pruning never races with active strengthen/weaken traffic. The
+     1h / 14d ratio satisfies this: ~336 consolidation passes before a
+     single synapse's decay window closes. *)
+  let consolidation_interval_s () =
+    Env_config_core.get_float ~default:3600.0 "MASC_HEBBIAN_CONSOLIDATION_INTERVAL_S"
+  let decay_after_days () =
+    Env_config_core.get_float ~default:14.0 "MASC_HEBBIAN_DECAY_AFTER_DAYS"
 end
 
 (** Get all config as JSON for debugging *)

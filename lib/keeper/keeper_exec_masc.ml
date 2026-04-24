@@ -47,7 +47,8 @@ let keeper_masc_path_blocked
     then keeper_effective_allowed_paths ~meta
     else keeper_effective_write_allowed_paths ~meta
   in
-  if effective_paths = [] then None
+  if effective_paths = []
+  then None
   else (
     let candidates =
       List.filter_map
@@ -58,11 +59,13 @@ let keeper_masc_path_blocked
         [ "path"; "file_path"; "target_path" ]
     in
     let resolve raw =
-      if is_read_only then
-        resolve_keeper_read_path ~config ~meta ~raw_path:raw
+      if is_read_only
+      then resolve_keeper_read_path ~config ~meta ~raw_path:raw
       else
         Keeper_alerting_path.resolve_keeper_target_path
-          ~config ~allowed_paths:effective_paths ~raw_path:raw
+          ~config
+          ~allowed_paths:effective_paths
+          ~raw_path:raw
     in
     List.find_map
       (fun raw ->
@@ -70,6 +73,62 @@ let keeper_masc_path_blocked
          | Error e -> Some e
          | Ok _ -> None)
       candidates)
+;;
+
+let handle_keeper_masc_code_read
+      ~(config : Coord.config)
+      ~(meta : keeper_meta)
+      ~(args : Yojson.Safe.t)
+  =
+  let path = Safe_ops.json_string ~default:"" "path" args in
+  let offset = Safe_ops.json_int ~default:0 "offset" args in
+  let limit = Safe_ops.json_int ~default:100 "limit" args in
+  if path = ""
+  then error_json "❌ Path required: 'path' parameter"
+  else (
+    match resolve_keeper_read_path ~config ~meta ~raw_path:path with
+    | Error e -> error_json e
+    | Ok target ->
+      if not (Sys.file_exists target)
+      then error_json (Printf.sprintf "❌ File not found: %s" path)
+      else if Tool_code.is_binary_file target
+      then error_json "❌ Binary file detected"
+      else (
+        let file_size = (Unix.stat target).Unix.st_size in
+        if file_size > Tool_code.max_file_size
+        then
+          error_json
+            (Printf.sprintf
+               "❌ File too large: %d bytes (max: %d)"
+               file_size
+               Tool_code.max_file_size)
+        else (
+          try
+            let content = In_channel.with_open_text target In_channel.input_all in
+            let lines = String.split_on_char '\n' content in
+            let total_lines = List.length lines in
+            let safe_offset = max 0 (min offset total_lines) in
+            let safe_limit = min limit (total_lines - safe_offset) in
+            let selected_lines = ref [] in
+            for i = safe_offset to safe_offset + safe_limit - 1 do
+              match List.nth_opt lines i with
+              | Some line -> selected_lines := line :: !selected_lines
+              | None -> ()
+            done;
+            let result_lines = List.rev !selected_lines in
+            Yojson.Safe.to_string
+              (`Assoc
+                  [ "path", `String path
+                  ; "offset", `Int safe_offset
+                  ; "limit", `Int safe_limit
+                  ; "total_lines", `Int total_lines
+                  ; "lines", `List (List.map (fun line -> `String line) result_lines)
+                  ])
+          with
+          | Eio.Cancel.Cancelled _ as e -> raise e
+          | exn ->
+            error_json
+              (Printf.sprintf "❌ Failed to read file: %s" (Printexc.to_string exn)))))
 ;;
 
 let handle_keeper_masc_tool
@@ -90,39 +149,47 @@ let handle_keeper_masc_tool
              ; "reason", `String reason
              ])
      | Ok token ->
-       (match Tool_dispatch.dispatch ~token ~args with
-        | Some (true, msg) -> msg
-        | Some (false, msg) -> error_json msg
-        | None ->
-          if Tool_dispatch.is_mcp_context_required name
-          then
-            error_json
-              (Printf.sprintf
-                 "tool '%s' requires MCP session (use keeper_* equivalent)"
-                 name)
-          else (
-            match Tool_dispatch.lookup_tag name with
-            | Some tag ->
-              let keeper_agent = keeper_agent_sender ~meta in
-              (match
-                 !Keeper_exec_shared.tag_dispatch_fn ~config ~agent_name:keeper_agent ~tag ~name ~args
-               with
-               | Some (true, msg) -> msg
-               | Some (false, msg) -> error_json msg
-               | None ->
-                 Yojson.Safe.to_string
-                   (`Assoc
-                       [ "error", `String "tool_not_supported_in_keeper"
-                       ; "tool", `String name
-                       ; ( "hint"
-                         , `String
-                             "tag dispatch returned None; tool may be unsupported, \
-                              blocked, or misconfigured" )
-                       ]))
-            | None ->
-              Yojson.Safe.to_string
-                (`Assoc
-                    [ "error", `String "unregistered_masc_tool"; "tool", `String name ]))))
+       if name = "masc_code_read"
+       then handle_keeper_masc_code_read ~config ~meta ~args
+       else (
+         match Tool_dispatch.dispatch ~token ~args with
+         | Some (true, msg) -> msg
+         | Some (false, msg) -> error_json msg
+         | None ->
+           if Tool_dispatch.is_mcp_context_required name
+           then
+             error_json
+               (Printf.sprintf
+                  "tool '%s' requires MCP session (use keeper_* equivalent)"
+                  name)
+           else (
+             match Tool_dispatch.lookup_tag name with
+             | Some tag ->
+               let keeper_agent = keeper_agent_sender ~meta in
+               (match
+                  !Keeper_exec_shared.tag_dispatch_fn
+                    ~config
+                    ~agent_name:keeper_agent
+                    ~tag
+                    ~name
+                    ~args
+                with
+                | Some (true, msg) -> msg
+                | Some (false, msg) -> error_json msg
+                | None ->
+                  Yojson.Safe.to_string
+                    (`Assoc
+                        [ "error", `String "tool_not_supported_in_keeper"
+                        ; "tool", `String name
+                        ; ( "hint"
+                          , `String
+                              "tag dispatch returned None; tool may be unsupported, \
+                               blocked, or misconfigured" )
+                        ]))
+             | None ->
+               Yojson.Safe.to_string
+                 (`Assoc
+                     [ "error", `String "unregistered_masc_tool"; "tool", `String name ]))))
 ;;
 
 (* ── Tool execution dispatch ──────────────────────────────────── *)

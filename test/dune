@@ -109,6 +109,7 @@
         test_oas_compat_cascade_fallback
         test_heuristic_metrics_boot_wireup
         test_cap_blocker_structured_error
+        test_context_overflow_action_tracker
         test_keeper_fs_edit_patch
         test_keeper_docker_read
         test_keeper_github_read_only
@@ -233,6 +234,7 @@
           test_oas_compat_cascade_fallback
           test_heuristic_metrics_boot_wireup
           test_cap_blocker_structured_error
+          test_context_overflow_action_tracker
           test_keeper_fs_edit_patch
           test_keeper_docker_read
           test_keeper_github_read_only

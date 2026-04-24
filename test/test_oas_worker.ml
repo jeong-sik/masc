@@ -2064,6 +2064,10 @@ let test_kimi_cli_classify_cli_error_redacts_resumable_session_detail () =
   let raw_message =
     "kimi exited with code 75: \nTo resume this session: kimi -r ff37febe-2adb-4ac6-9dc6-cae23e672fbc"
   in
+  let canonical_detail =
+    Oas_worker_exec.Kimi_cli_transport_local.resumable_session_detail_of_text
+      raw_message
+  in
   match
     Oas_worker_exec.Kimi_cli_transport_local.classify_cli_error
       (Error
@@ -2074,9 +2078,7 @@ let test_kimi_cli_classify_cli_error_redacts_resumable_session_detail () =
             }))
   with
   | Error (Llm_provider.Http_client.AcceptRejected { reason }) ->
-      Alcotest.(check string) "canonical detail"
-        Oas_worker_exec.Kimi_cli_transport_local.resumable_session_detail
-        reason;
+      Alcotest.(check string) "canonical detail" canonical_detail reason;
       Alcotest.(check bool) "raw resume hint removed" false
         (contains_substring ~needle:"To resume this session:" reason);
       Alcotest.(check bool) "raw session id removed" false
@@ -2086,6 +2088,10 @@ let test_kimi_cli_classify_cli_error_redacts_resumable_session_detail () =
 let test_kimi_cli_classify_cli_error_treats_exit_1_resume_hint_as_resumable () =
   let raw_message =
     "kimi exited with code 1: \nTo resume this session: kimi -r 5de0f199-6bd7-4509-bfa6-3308e0ebd97f"
+  in
+  let canonical_detail =
+    Oas_worker_exec.Kimi_cli_transport_local.resumable_session_detail_of_text
+      raw_message
   in
   Alcotest.(check bool) "exit 1 resume hint is resumable" true
     (Oas_worker_exec.Kimi_cli_transport_local.text_looks_like_resumable_session
@@ -2103,14 +2109,40 @@ let test_kimi_cli_classify_cli_error_treats_exit_1_resume_hint_as_resumable () =
             }))
   with
   | Error (Llm_provider.Http_client.AcceptRejected { reason }) ->
-      Alcotest.(check string) "canonical detail"
-        Oas_worker_exec.Kimi_cli_transport_local.resumable_session_detail
-        reason;
+      Alcotest.(check string) "canonical detail" canonical_detail reason;
+      Alcotest.(check bool) "does not claim exit 75" false
+        (contains_substring ~needle:"exit 75" reason);
       Alcotest.(check bool) "raw resume hint removed" false
         (contains_substring ~needle:"To resume this session:" reason);
       Alcotest.(check bool) "raw session id removed" false
         (contains_substring ~needle:"5de0f199-6bd7-4509-bfa6-3308e0ebd97f" reason)
   | _ -> Alcotest.fail "expected exit 1 resume hint to map to resumable session"
+
+let test_kimi_cli_resumable_invalid_request_reclassifies_as_structured () =
+  let raw_message =
+    "kimi exited with code 1: \nTo resume this session: kimi -r 5de0f199-6bd7-4509-bfa6-3308e0ebd97f"
+  in
+  let detail =
+    Oas_worker_exec.Kimi_cli_transport_local.resumable_session_detail_of_text
+      raw_message
+  in
+  let sdk_error =
+    Oas.Error.Api (Llm_provider.Retry.InvalidRequest { message = detail })
+  in
+  match
+    Oas_worker_named.sdk_error_to_resumable_cli_session
+      ~cascade_name:"kimi_cli_keeper" sdk_error
+  with
+  | Some structured -> (
+      match Oas_worker_named.classify_masc_internal_error structured with
+      | Some
+          (Oas_worker_named.Resumable_cli_session
+             { cascade_name; detail = structured_detail; exit_code }) ->
+          Alcotest.(check string) "cascade" "kimi_cli_keeper" cascade_name;
+          Alcotest.(check string) "detail" detail structured_detail;
+          Alcotest.(check (option int)) "exit code" (Some 1) exit_code
+      | _ -> Alcotest.fail "expected structured resumable CLI session")
+  | None -> Alcotest.fail "expected InvalidRequest detail to reclassify"
 
 let test_kimi_cli_classify_cli_error_keeps_exit_1_with_error_as_reject () =
   let raw_message =
@@ -3456,6 +3488,8 @@ let () =
         test_kimi_cli_classify_cli_error_redacts_resumable_session_detail;
       Alcotest.test_case "kimi exit 1 resume hint is resumable" `Quick
         test_kimi_cli_classify_cli_error_treats_exit_1_resume_hint_as_resumable;
+      Alcotest.test_case "kimi resumable InvalidRequest is structured" `Quick
+        test_kimi_cli_resumable_invalid_request_reclassifies_as_structured;
       Alcotest.test_case "kimi exit 1 with stderr remains rejected" `Quick
         test_kimi_cli_classify_cli_error_keeps_exit_1_with_error_as_reject;
       Alcotest.test_case "worker build_agent installs retry policy" `Quick

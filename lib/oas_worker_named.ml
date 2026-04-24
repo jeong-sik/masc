@@ -811,6 +811,23 @@ let resumable_cli_session_exit_code (message : string) : int option =
   Oas_worker_exec.Kimi_cli_transport_local.resumable_session_exit_code_of_text
     message
 
+let sdk_error_to_resumable_cli_session ~cascade_name
+    (err : Oas.Error.sdk_error) =
+  match classify_masc_internal_error err with
+  | Some (Resumable_cli_session _) -> Some err
+  | _ ->
+      let message = Oas.Error.to_string err in
+      if message_looks_like_resumable_cli_session message then
+        Some
+          (sdk_error_of_masc_internal_error
+             (Resumable_cli_session
+                {
+                  cascade_name;
+                  detail = resumable_cli_session_detail message;
+                  exit_code = resumable_cli_session_exit_code message;
+                }))
+      else None
+
 let sdk_error_is_hard_quota (err : Oas.Error.sdk_error) : bool =
   match err with
   | Oas.Error.Api api_err ->
@@ -1254,6 +1271,11 @@ let run_named
            on_success ~provider_key:provider_cfg.model_id;
            Ok result)
       | Error sdk_err ->
+        let sdk_err =
+          match sdk_error_to_resumable_cli_session ~cascade_name sdk_err with
+          | Some err -> err
+          | None -> sdk_err
+        in
         (* Classify hard-quota (account-level exhaustion) distinctly from
            transient failures.  Hard quota (e.g. Anthropic multi-day usage
            limit, ZAI balance 0) will not recover within the 60s

@@ -701,7 +701,7 @@ module Kimi_cli_transport_local = struct
     && String.sub text 0 prefix_len = prefix
 
   let resumable_session_detail =
-    "kimi_cli session limit exceeded (exit 75). Resumable session available via -r."
+    "kimi_cli reported a resumable CLI session. Resumable session available via -r."
 
   let resume_hint_marker = "to resume this session:"
   let resumable_session_public_marker = "resumable session available via -r."
@@ -735,6 +735,24 @@ module Kimi_cli_transport_local = struct
             |> String.trim
           in
           int_of_string_opt raw
+
+  let exit_code_marker_of_text text =
+    let marker = "(exit " in
+    let lower = String.lowercase_ascii text in
+    let marker_len = String.length marker in
+    let text_len = String.length lower in
+    let rec find_marker index =
+      if index + marker_len > text_len then None
+      else if String.sub lower index marker_len = marker then
+        let number_start = index + marker_len in
+        match String.index_from_opt lower number_start ')' with
+        | Some number_end when number_end > number_start ->
+            String.sub lower number_start (number_end - number_start)
+            |> String.trim |> int_of_string_opt
+        | _ -> None
+      else find_marker (index + 1)
+    in
+    find_marker 0
 
   let exit_payload_of_message message =
     let prefix = "kimi exited with code " in
@@ -773,14 +791,26 @@ module Kimi_cli_transport_local = struct
     || String_util.contains_substring_ci trimmed legacy_resumable_session_public_marker)
 
   let resumable_session_detail_of_text text =
-    if text_looks_like_resumable_session text then resumable_session_detail
+    if text_looks_like_resumable_session text then
+      let trimmed = String.trim text in
+      match
+        match exit_code_of_message trimmed with
+        | Some code -> Some code
+        | None -> exit_code_marker_of_text trimmed
+      with
+      | Some code ->
+          Printf.sprintf
+            "kimi_cli reported a resumable CLI session (exit %d). \
+             Resumable session available via -r."
+            code
+      | None -> resumable_session_detail
     else String.trim text
 
   let resumable_session_exit_code_of_text text =
     match exit_code_of_message text with
     | Some (75 as code) -> Some code
     | Some (1 as code) when text_looks_like_resumable_session text -> Some code
-    | _ when text_looks_like_resumable_session text -> Some 75
+    | _ when text_looks_like_resumable_session text -> exit_code_marker_of_text text
     | _ -> None
 
   let classify_cli_error = function
@@ -788,7 +818,7 @@ module Kimi_cli_transport_local = struct
         if text_looks_like_resumable_session message then
           Error
             (Llm_provider.Http_client.AcceptRejected
-               { reason = resumable_session_detail })
+               { reason = resumable_session_detail_of_text message })
         else
           match exit_code_of_message message with
         | Some 1 ->
@@ -804,7 +834,7 @@ module Kimi_cli_transport_local = struct
         | Some 75 ->
             Error
               (Llm_provider.Http_client.AcceptRejected
-                 { reason = resumable_session_detail })
+                 { reason = resumable_session_detail_of_text message })
         | _ -> err)
     | other -> other
 

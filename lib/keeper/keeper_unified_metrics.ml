@@ -122,6 +122,44 @@ let usage_trust_json_fields trust =
 let add_reason reason reasons =
   if List.mem reason reasons then reasons else reason :: reasons
 
+(* #9959 defensive observability: surface usage-field trust into
+   Prometheus so operators can alert on rising untrusted/missing
+   rates while the upstream OAS fix (jeong-sik/oas#1181 —
+   accumulated values leaking into per-response [api_usage]) lands.
+
+   Two counters:
+   - [masc_keeper_usage_trust_total{keeper, outcome}] — high-level
+     outcome (trusted / missing / untrusted).
+   - [masc_keeper_usage_anomaly_reason_total{keeper, reason}] —
+     per-reason drill-down for untrusted outcomes (e.g.
+     [input_tokens_gt_1m], [input_tokens_gt_2x_context_max],
+     [zero_token_usage_reported]).
+
+   Called once per turn from [update_metrics_from_result]; other
+   classify sites (append_metrics_snapshot, keeper_turn) serialize
+   the trust into the JSONL ledger but do not bump the counter, so
+   the counter rate equals the per-turn rate rather than 2–3×. *)
+let usage_trust_outcome_metric = "masc_keeper_usage_trust_total"
+let usage_anomaly_reason_metric = "masc_keeper_usage_anomaly_reason_total"
+
+let record_usage_trust ~keeper_name ~(trust : usage_trust) =
+  let outcome = usage_trust_to_string trust in
+  Prometheus.inc_counter usage_trust_outcome_metric
+    ~labels:[ ("keeper", keeper_name); ("outcome", outcome) ] ();
+  match trust with
+  | Usage_untrusted reasons ->
+    List.iter
+      (fun reason ->
+        Prometheus.inc_counter usage_anomaly_reason_metric
+          ~labels:[ ("keeper", keeper_name); ("reason", reason) ] ())
+      reasons;
+    Log.Keeper.warn
+      "#9959 usage_anomaly keeper=%s reasons=[%s] — upstream fix \
+       tracked in jeong-sik/oas#1181; cost accounting is suppressed \
+       to 0.0 for this turn by [usage_trust_is_trusted] gate."
+      keeper_name (String.concat "," reasons)
+  | Usage_missing | Usage_trusted -> ()
+
 let classify_usage_trust ~(usage_reported : bool)
     ~(usage : Oas.Types.api_usage)
     ~(model_used : string)
@@ -813,6 +851,10 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
       ~resolved_model_id
       ~context_max
   in
+  (* #9959: surface classification into Prometheus exactly once per
+     turn. Other [classify_usage_trust] call sites serialize the
+     trust into JSONL but do not bump the counter. *)
+  record_usage_trust ~keeper_name:meta.name ~trust:usage_trust;
   let usage_trusted = usage_trust_is_trusted usage_trust in
   let trusted_input_tokens =
     if usage_trusted then result.usage.input_tokens else 0

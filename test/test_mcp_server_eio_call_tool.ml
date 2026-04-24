@@ -96,6 +96,17 @@ let test_transition_has_no_fixed_timeout () =
        ~_arguments:(`Assoc [])
      = None)
 
+let test_persona_generate_timeout_exceeds_oas_budget () =
+  match
+    Masc_mcp.Mcp_server_eio_call_tool.tool_timeout_sec_opt
+      ~tool_name:"masc_persona_generate"
+      ~_arguments:(`Assoc [])
+  with
+  | Some timeout_sec ->
+      check bool "persona generate timeout exceeds internal OAS budget" true
+        (timeout_sec > 120.)
+  | None -> fail "expected persona generation to keep a bounded outer timeout"
+
 let test_regular_tool_uses_default_timeout () =
   match
     Masc_mcp.Mcp_server_eio_call_tool.tool_timeout_sec_opt
@@ -245,6 +256,8 @@ let () =
           test_case "generic failure is error" `Quick test_generic_failure_quality_is_error;
           test_case "success has no issues" `Quick test_success_quality_has_no_issues;
           test_case "transition has no fixed timeout" `Quick test_transition_has_no_fixed_timeout;
+          test_case "persona generate timeout exceeds OAS budget" `Quick
+            test_persona_generate_timeout_exceeds_oas_budget;
           test_case "regular tool keeps default timeout" `Quick test_regular_tool_uses_default_timeout;
           test_case "runtime MCP log context uses keeper trace/current turn" `Quick
             test_runtime_mcp_keeper_log_context_uses_keeper_trace_and_current_turn;

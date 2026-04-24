@@ -287,6 +287,11 @@ let tool_timeout_sec_opt ~(tool_name : string) ~(_arguments : Yojson.Safe.t) : f
          mutation continues in the background, leaving caller-visible status
          out of sync with persisted task state. *)
       None
+  | "masc_persona_generate" ->
+      (* Persona generation runs an OAS worker with its own 120s budget. Keep
+         the outer MCP tools/call timeout above that budget so callers see the
+         generation result or the OAS error instead of a premature MCP timeout. *)
+      Some 150.0
   | _ ->
       let global_default_sec =
         float_of_int

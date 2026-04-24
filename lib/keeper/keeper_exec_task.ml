@@ -66,6 +66,39 @@ let find_task_goal_id config task_id =
          if String.equal task.id task_id then task.goal_id else None)
 ;;
 
+let merge_current_task_id ~(latest : keeper_meta) ~(caller : keeper_meta) =
+  {
+    latest with
+    current_task_id = caller.current_task_id;
+    updated_at = caller.updated_at;
+  }
+;;
+
+let sync_keeper_meta_current_task
+    ~(config : Coord.config)
+    ~(meta : keeper_meta)
+    ~(task_id : string)
+  =
+  match Keeper_id.Task_id.of_string task_id with
+  | Error msg ->
+    Log.Keeper.warn
+      "keeper:%s could not sync claimed task %s into current_task_id: %s"
+      meta.name task_id msg
+  | Ok current_task_id ->
+    let updated_meta =
+      { meta with current_task_id = Some current_task_id; updated_at = now_iso () }
+    in
+    Keeper_registry.update_meta ~base_path:config.base_path meta.name updated_meta;
+    (match
+       write_meta_with_merge ~merge:merge_current_task_id config updated_meta
+     with
+     | Ok () -> ()
+     | Error msg ->
+       Log.Keeper.warn
+         "keeper:%s failed to persist claimed current_task_id=%s: %s"
+         meta.name task_id msg)
+;;
+
 let handle_keeper_task_tool
       ~(config : Coord.config)
       ~(meta : keeper_meta)
@@ -184,6 +217,12 @@ let handle_keeper_task_tool
     let result =
       Coord.claim_next_r config ~agent_name:meta.agent_name ~task_filter ()
     in
+    (match result with
+     | Coord.Claim_next_claimed { task_id; _ } ->
+       sync_keeper_meta_current_task ~config ~meta ~task_id
+     | Coord.Claim_next_no_unclaimed
+     | Coord.Claim_next_no_eligible _
+     | Coord.Claim_next_error _ -> ());
     let accountability_warning =
       if
         Keeper_accountability.accountability_risk_is_high config

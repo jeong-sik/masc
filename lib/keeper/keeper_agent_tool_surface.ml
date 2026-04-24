@@ -100,7 +100,23 @@ let preferred_tool_choice_for_required_turn ~(has_current_task : bool)
      && has_task_claim_affordance turn_affordances
      && List.mem "keeper_task_claim" allowed_tool_names
   then Oas.Types.Tool "keeper_task_claim"
-  else Oas.Types.Any
+  else if not has_current_task then
+    (* #10008: no active task and no applicable specific claim tool
+       to force.  Fall back to [Auto] instead of [Any] so the model
+       can respond with an honest refusal ("no eligible task to
+       claim", "no matching affordance to exercise") without
+       triggering the [Require_tool_use] contract violation.  The
+       caller ([Keeper_agent_run]) reads [tool_choice = Auto] as
+       "MASC dropped the specific-tool demand" and relaxes the
+       completion contract to [Allow_text_or_tool].  Otherwise the
+       affordance-driven gate would self-contradict — force a tool
+       call when no applicable tool exists. *)
+    Oas.Types.Auto
+  else
+    (* Active task in progress: keep the strict gate.  The keeper is
+       expected to make progress via some tool call (board update,
+       task_update, task_done, etc.). *)
+    Oas.Types.Any
 
 let owned_active_task_id_for_meta ~(config : Coord.config)
     ~(meta : Keeper_types.keeper_meta) =

@@ -5071,22 +5071,46 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
          (Printf.sprintf
             "expected Any when already owning work, got %s"
             (Agent_sdk.Types.show_tool_choice other)));
+  (* #10008: when no specific tool is applicable for the current
+     affordance, fall back to [Auto] so the model can respond with
+     honest refusal text ("no eligible task to claim") instead of
+     being forced into a [Require_tool_use] contract violation. *)
   (match
      choose
        ~turn_affordances:[ "task_audit" ]
        ~allowed_tool_names:[ "keeper_tasks_list"; "keeper_board_post" ]
        ()
    with
-   | Agent_sdk.Types.Any -> ()
+   | Agent_sdk.Types.Auto -> ()
    | other ->
        fail
-         (Printf.sprintf "expected Any for task audit, got %s"
+         (Printf.sprintf
+            "expected Auto for task audit without applicable tool \
+             (#10008), got %s"
             (Agent_sdk.Types.show_tool_choice other)));
-  match choose ~allowed_tool_names:[ "keeper_board_post" ] () with
+  (match choose ~allowed_tool_names:[ "keeper_board_post" ] () with
+  | Agent_sdk.Types.Auto -> ()
+  | other ->
+      fail
+        (Printf.sprintf
+           "expected Auto when claim is unavailable and keeper is \
+            idle (#10008), got %s"
+           (Agent_sdk.Types.show_tool_choice other)));
+  (* Active task keeper retains the strict gate even without a
+     specific applicable tool — the caller is expected to make
+     progress via board_post, task_update, etc. *)
+  match
+    choose ~has_current_task:true
+      ~turn_affordances:[ "task_audit" ]
+      ~allowed_tool_names:[ "keeper_tasks_list"; "keeper_board_post" ]
+      ()
+  with
   | Agent_sdk.Types.Any -> ()
   | other ->
       fail
-        (Printf.sprintf "expected Any when claim is unavailable, got %s"
+        (Printf.sprintf
+           "expected Any for active-task keeper (must make \
+            progress), got %s"
            (Agent_sdk.Types.show_tool_choice other))
 
 (* ---------- render_inline_skip_reason tests ---------- *)

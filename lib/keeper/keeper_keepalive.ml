@@ -944,8 +944,18 @@ let write_heartbeat_snapshot
             | Some s -> keeper_state_snapshot_to_json s )
         ; "continuity_summary", `String continuity_summary
         ; "compacted", `Bool false
-        ; "compaction_before_tokens", `Int token_count_v
-        ; "compaction_after_tokens", `Int token_count_v
+        ; (* #9943: status_tick is a snapshot, not a compaction
+             event. Emitting [before = after = token_count_v]
+             caused 956/972 (98.4%) of daily metric entries to
+             look like compaction attempts with zero savings —
+             a false signal that drowned actual compactions.
+             Zero marks the record as "not a compaction event";
+             the dashboard already skips records with
+             compacted=false, but analysts running ad-hoc jq over
+             the ledger no longer mistake status_tick for a
+             failed compaction. *)
+          "compaction_before_tokens", `Int 0
+        ; "compaction_after_tokens", `Int 0
         ; "work_kind", `String "status_tick"
         ; "tool_call_count", `Int 0
         ; "tools_used", `List []

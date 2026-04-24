@@ -23,7 +23,7 @@ stylesheet
     background:
       radial-gradient(ellipse 60% 40% at 12% 8%, rgba(212,169,64,0.06), transparent 55%),
       radial-gradient(ellipse 40% 50% at 92% 95%, rgba(232,80,80,0.08), transparent 60%),
-      linear-gradient(170deg, #0e0a08 0%, #140c08 60%, #080504 100%);
+      linear-gradient(170deg, var(--bg-deep) 0%, color-mix(in oklab, var(--bg-panel) 50%, var(--bg-deep)) 60%, var(--bg-deep) 100%);
     font-family: var(--font-ui, 'Noto Sans KR', sans-serif);
   }
 
@@ -33,7 +33,7 @@ stylesheet
     align-items: center;
     gap: 18px;
     padding: 0 22px;
-    background: linear-gradient(180deg, #1a140e, #120b08);
+    background: linear-gradient(180deg, var(--bg-panel), var(--bg-deep));
     border-bottom: 1px solid var(--border-highlight);
     box-shadow: 0 2px 0 rgba(0,0,0,0.4), inset 0 -1px 0 rgba(212,169,64,0.12);
   }
@@ -125,7 +125,7 @@ stylesheet
     padding: 4px 8px;
     border: 1px solid var(--border-main);
     color: var(--text-primary);
-    background: #14100a;
+    background: var(--bg-panel);
     white-space: nowrap;
   }
 
@@ -153,7 +153,7 @@ stylesheet
   }
 
   .nav {
-    background: linear-gradient(180deg, #18110c, #0e0806);
+    background: linear-gradient(180deg, var(--bg-panel), var(--bg-deep));
     border-right: 1px solid var(--border-main);
     padding: 16px 0;
     display: flex;
@@ -259,7 +259,7 @@ stylesheet
   .hud {
     display: grid;
     grid-template-columns: repeat(6, minmax(0, 1fr));
-    background: linear-gradient(180deg, #1a140e, #140d08);
+    background: linear-gradient(180deg, var(--bg-panel), var(--bg-deep));
     border-bottom: 1px solid var(--border-highlight);
   }
 
@@ -305,7 +305,7 @@ stylesheet
   }
 
   .aside {
-    background: linear-gradient(180deg, #16100a, #0e0806);
+    background: linear-gradient(180deg, var(--bg-panel), var(--bg-deep));
     border-left: 1px solid var(--border-main);
     padding: 18px 18px 30px;
     overflow: auto;
@@ -346,11 +346,7 @@ stylesheet
   .focus {
     position: relative;
     padding: 16px 16px 14px;
-    background: linear-gradient(180deg, #241a12, #14100a);
-    border: 1px solid var(--accent-brass-dim);
-  }
-
-  .focus::before {
+    background: linear-gradient(180deg, var(--bg-panel-alt), var(--bg-panel));
     content: "";
     position: absolute;
     inset: 3px;
@@ -383,7 +379,7 @@ stylesheet
     font-size: 20px;
     background:
       radial-gradient(circle at 35% 25%, rgba(212,169,64,0.16), transparent 38%),
-      linear-gradient(180deg, #241a12, #100a07);
+      linear-gradient(180deg, var(--bg-panel-alt), var(--bg-deep));
   }
 
   .focus_name {
@@ -419,7 +415,7 @@ stylesheet
 
   .vial {
     height: 8px;
-    background: #0a0604;
+    background: var(--bg-deep);
     border: 1px solid var(--border-main);
     position: relative;
     overflow: hidden;
@@ -429,8 +425,8 @@ stylesheet
     display: block;
     height: 100%;
     width: 62%;
-    background: linear-gradient(90deg, #3d6a28, #6a9a44);
-    box-shadow: 0 0 6px rgba(106,154,68,0.35);
+    background: linear-gradient(90deg, color-mix(in oklab, var(--status-ok) 60%, var(--bg-deep)), var(--status-ok));
+    box-shadow: 0 0 6px color-mix(in oklab, var(--status-ok) 35%, transparent);
   }
 
   .vial::after {
@@ -468,7 +464,7 @@ stylesheet
     font-size: 11px;
     color: var(--text-bright);
     border: 1px solid rgba(120,100,80,0.14);
-    background: #0c0806;
+    background: var(--bg-deep);
     padding: 1px;
   }
 

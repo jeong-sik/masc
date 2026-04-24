@@ -7,6 +7,12 @@
 
 include Board_types
 
+(* #9919 audit follow-up: fleet-visible counter for the legacy
+   author-heuristic post-kind migration branch.  Replaces a
+   degenerate [Heuristic_metrics.record] emit. *)
+let legacy_migrate_post_kind_metric =
+  "masc_board_legacy_migrate_post_kind_total"
+
 let visibility_to_string = function
   | Public -> "public"
   | Unlisted -> "unlisted"
@@ -131,15 +137,17 @@ let legacy_migrate_post_kind ~meta_json ~author ~visibility ~expires_at ~hearth 
   then
     Automation_post
   else if legacy_author_looks_automation author then begin
-    Heuristic_metrics.record {
-      module_name = "board_core_classify";
-      site = "legacy_migrate_post_kind";
-      raw_value = 1.0;
-      threshold = 0.5;
-      triggered = true;
-      provenance = Board_classify ("author_heuristic:" ^ author);
-      timestamp = Unix.gettimeofday ();
-    };
+    (* #9919 audit follow-up: the prior [Heuristic_metrics.record]
+       at this site was degenerate — [raw=1.0, threshold=0.5,
+       triggered=true] encoded no decision information, only a
+       count of how often the author-heuristic fallback promoted a
+       post to [Automation_post].  Replace with a proper Prometheus
+       counter labelled by [author] so operators can see which
+       legacy authors still drive the migration path, and so
+       [Heuristic_metrics_diagnostics] stops flagging this site as
+       instrumentation theatre. *)
+    Prometheus.inc_counter legacy_migrate_post_kind_metric
+      ~labels:[ ("author", author) ] ();
     Automation_post
   end
   else

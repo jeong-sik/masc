@@ -57,6 +57,7 @@
         test_keeper_tool_use_failure_counter
         test_keeper_compaction_outcome_counter
         test_keeper_usage_trust_counter
+        test_heuristic_theatre_audit
         test_keeper_wake_telemetry
         test_keeper_memory
         test_keeper_accountability
@@ -186,6 +187,7 @@
           test_keeper_tool_use_failure_counter
           test_keeper_compaction_outcome_counter
           test_keeper_usage_trust_counter
+          test_heuristic_theatre_audit
           test_keeper_wake_telemetry
           test_keeper_memory
           test_keeper_accountability

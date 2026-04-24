@@ -15,6 +15,13 @@
 
 (** {1 Types} *)
 
+(** Canonical Prometheus metric name for priority-trigger selection
+    events.  Labels: [("agent", <name>); ("trigger", "mentioned" |
+    "content_alert" | "other")].  Exposed so tests and Grafana
+    rules can pin the name without hard-coding a string literal.
+    #9919 audit follow-up (tick #24). *)
+val priority_trigger_selected_metric : string
+
 (** Agent statistics for Thompson Sampling.
     Alpha/beta are Beta distribution priors, updated by vote feedback. *)
 type agent_stats = {

@@ -208,7 +208,7 @@ let view ?(keepers : Keepers_types.response = Keepers_types.fixture) () =
         ; svg_a "preserveAspectRatio" "none"
         ; Style.svg
         ; Attr.role "img"
-        ; Attr.arialabel "Context usage chart over 60 minutes"
+        ; Attr.create "aria-label" "Context usage chart over 60 minutes"
         ]
       (hairlines @ guides @ polylines)
   in

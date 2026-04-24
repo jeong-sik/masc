@@ -232,7 +232,7 @@ let view_hero_panel (r : Overview_types.response) =
     ~attrs:[ Style.panel ]
     [ Node.h2 ~attrs:[ Style.panel_title ] [ Node.text "runtime · identity" ]
     ; Node.div
-        ~attrs:[ Style.kv_row; Attr.role "list"; Attr.arialabel "Runtime identity" ]
+        ~attrs:[ Style.kv_row; Attr.role "list"; Attr.create "aria-label" "Runtime identity" ]
         [ Node.div
             ~attrs:[ Style.kv; Attr.role "listitem" ]
             [ Node.div ~attrs:[ Style.k ] [ Node.text "project" ]
@@ -280,7 +280,7 @@ let view_build_panel (r : Overview_types.response) =
     ~attrs:[ Style.panel ]
     [ Node.h2 ~attrs:[ Style.panel_title ] [ Node.text "build · release" ]
     ; Node.div
-        ~attrs:[ Style.kv_row; Attr.role "list"; Attr.arialabel "Build and release" ]
+        ~attrs:[ Style.kv_row; Attr.role "list"; Attr.create "aria-label" "Build and release" ]
         [ Node.div
             ~attrs:[ Style.kv; Attr.role "listitem" ]
             [ Node.div ~attrs:[ Style.k ] [ Node.text "version" ]
@@ -368,7 +368,7 @@ let view_meta_panel (r : Overview_types.response) =
     match m.dominant_belief with
     | Some b ->
       Node.div
-        ~attrs:[ Style.belief; Attr.role "note"; Attr.arialabel ("dominant belief: " ^ b.status) ]
+        ~attrs:[ Style.belief; Attr.role "note"; Attr.create "aria-label" ("dominant belief: " ^ b.status) ]
         [ Node.span
             ~attrs:[ Style.belief_tag ]
             [ Node.text b.status ]
@@ -376,7 +376,7 @@ let view_meta_panel (r : Overview_types.response) =
         ]
     | None ->
       Node.div
-        ~attrs:[ Style.empty; Attr.role "status"; Attr.arialabel "No dominant belief" ]
+        ~attrs:[ Style.empty; Attr.role "status"; Attr.create "aria-label" "No dominant belief" ]
         [ Node.text "no dominant belief recorded." ]
   in
   Node.div
@@ -385,7 +385,7 @@ let view_meta_panel (r : Overview_types.response) =
         ~attrs:[ Style.panel_title ]
         [ Node.text "meta · cognition" ]
     ; Node.div
-        ~attrs:[ Style.kv_row; Attr.role "list"; Attr.arialabel "Meta and cognition" ]
+        ~attrs:[ Style.kv_row; Attr.role "list"; Attr.create "aria-label" "Meta and cognition" ]
         [ Node.div
             ~attrs:[ Style.kv; Attr.role "listitem" ]
             [ Node.div ~attrs:[ Style.k ] [ Node.text "stagnation" ]
@@ -393,7 +393,7 @@ let view_meta_panel (r : Overview_types.response) =
                 ~attrs:[ Style.v ]
                 [ Node.text (Printf.sprintf "%d%%" pct)
                 ; Node.div
-                    ~attrs:[ Style.stag_bar; Attr.role "progressbar"; Attr.arialabel "Stagnation score"
+                    ~attrs:[ Style.stag_bar; Attr.role "progressbar"; Attr.create "aria-label" "Stagnation score"
                            ; Attr.create "aria-valuenow" (Int.to_string pct)
                            ; Attr.create "aria-valuemin" "0"
                            ; Attr.create "aria-valuemax" "100" ]

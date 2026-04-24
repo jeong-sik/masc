@@ -115,14 +115,14 @@ let cell ?(v_class : v_class = `Neutral) ~k ~v () =
     | Some c -> [ Style.v; c ]
   in
   Node.div
-    ~attrs:[ Style.cell; Attr.arialabel (k ^ ": " ^ v) ]
+    ~attrs:[ Style.cell; Attr.create "aria-label" (k ^ ": " ^ v) ]
     [ Node.div ~attrs:[ Style.k ] [ Node.text k ]
     ; Node.div ~attrs:v_attrs [ Node.text v ]
     ]
 ;;
 
 let strip ?(label : string = "Key metrics") cells =
-  Node.div ~attrs:[ Style.hud; Attr.role "status"; Attr.arialabel label ] cells
+  Node.div ~attrs:[ Style.hud; Attr.role "status"; Attr.create "aria-label" label ] cells
 
 (** Extract "HH:MM:SS" from an ISO-8601 UTC timestamp
     (e.g. "2026-04-20T04:02:07Z" → "04:02:07"). Falls back to the full

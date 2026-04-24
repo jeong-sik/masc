@@ -32,6 +32,21 @@ let run_with_timeout_and_fallback ~timeout_s fn =
   with
   | Eio.Time.Timeout ->
     let wall = elapsed () in
+    (* #9639/#9662: Eio cancel is cooperative. When the fiber blocks inside
+       an uncancellable region (native HTTP bulk read, syscall, non-yielding
+       loop), [with_timeout_exn] fires but the fiber continues until the
+       next yield. Surface that overshoot as a structured warn so the
+       condition is observable instead of silently inflating wall time. *)
+    let deadline =
+      Timeout_policy.Deadline.make
+        ~layer:Timeout_policy.Layer.Oas_bridge
+        ~origin:"keeper_llm_bridge"
+        ~wall_cap_s:timeout_s
+        ~now:(t0)
+    in
+    let _ : bool =
+      Timeout_policy.overshoot_warn ~deadline ~actual_wall_s:wall ()
+    in
     Log.Keeper.warn
       "keeper_llm_bridge: OAS execution timed out after %.1fs (budget=%.0fs; OAS context rollback only; external tool side effects are not reverted)"
       wall timeout_s;

@@ -1678,18 +1678,14 @@ let render_response
     Node.div
       ~attrs:[ Style.toolbar ]
       [ (let filter_chip ~level ~label =
-           let click =
-             Attr.on_click (fun _ev ->
-               let effect =
-                 Effect.of_sync_fun
-                   (fun () ->
-                     let doc = Js_of_ocaml.Dom_html.document in
-                     doc##.documentElement##setAttribute
-                       (Js_of_ocaml.Js.string "data-log-level")
-                       (Js_of_ocaml.Js.string level))
-                   ()
-               in
-               effect)
+           let fire () =
+             Effect.of_sync_fun
+               (fun () ->
+                 let doc = Js_of_ocaml.Dom_html.document in
+                 doc##.documentElement##setAttribute
+                   (Js_of_ocaml.Js.string "data-log-level")
+                   (Js_of_ocaml.Js.string level))
+               ()
            in
            Node.span
              ~attrs:
@@ -1697,7 +1693,13 @@ let render_response
                ; Attr.create "data-filter-level" level
                ; Attr.role "button"
                ; Attr.tabindex 0
-               ; click
+               ; Attr.on_click (fun _ev -> fire ())
+               ; Attr.on_key_down (fun ev ->
+                   let open Virtual_dom.Vdom.Event.Keyboard in
+                   if Key.equal ev.key Key.Enter
+                      || Key.equal ev.key (Key.of_string " ")
+                   then fire ()
+                   else Effect.of_sync_fun (fun () -> ()) ())
                ]
              [ Node.text label ]
          in
@@ -1836,18 +1838,26 @@ let render_response
          nav_link Dead_keepers ~tail)
       ; nav_link Archive_runs
       ; (let chip name label =
+           let fire () =
+             Effect.of_sync_fun
+               (fun () ->
+                 Dom_html.window##.location##.hash
+                 := Js.string ("#" ^ name))
+               ()
+           in
            Node.div
              ~attrs:
                [ Style.theme_chip
                ; Attr.create "data-chip-theme" name
                ; Attr.role "button"
                ; Attr.tabindex 0
-               ; Attr.on_click (fun _ ->
-                   Effect.of_sync_fun
-                     (fun () ->
-                       Dom_html.window##.location##.hash
-                       := Js.string ("#" ^ name))
-                     ())
+               ; Attr.on_click (fun _ -> fire ())
+               ; Attr.on_key_down (fun ev ->
+                   let open Virtual_dom.Vdom.Event.Keyboard in
+                   if Key.equal ev.key Key.Enter
+                      || Key.equal ev.key (Key.of_string " ")
+                   then fire ()
+                   else Effect.of_sync_fun (fun () -> ()) ())
                ]
              [ Node.text label ]
          in

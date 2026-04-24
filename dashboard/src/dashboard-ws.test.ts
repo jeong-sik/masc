@@ -67,6 +67,27 @@ function installWebSocketMocks(): void {
   })))
 }
 
+function installControlledDiscovery(): Array<(response: Response) => void> {
+  mockSockets.length = 0
+  const resolvers: Array<(response: Response) => void> = []
+  vi.stubGlobal('WebSocket', MockWebSocket)
+  vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((resolve) => {
+    resolvers.push(resolve)
+  })))
+  return resolvers
+}
+
+function wsDiscoveryResponse(wsUrl = 'ws://127.0.0.1:8937/'): Response {
+  return new Response(JSON.stringify({
+    enabled: true,
+    listening: true,
+    ws_url: wsUrl,
+  }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  })
+}
+
 function parseRpc(socket: MockWebSocket, index: number): JsonRpcRequest {
   return JSON.parse(socket.sent[index] ?? '{}') as JsonRpcRequest
 }
@@ -138,6 +159,40 @@ describe('parseWebSocketSseFrames', () => {
 })
 
 describe('dashboard websocket route subscriptions', () => {
+  it('does not open a socket when discovery resolves after disconnect', async () => {
+    const discoveries = installControlledDiscovery()
+
+    const connect = connectDashboardWS({ tab: 'overview', params: {} })
+    expect(discoveries).toHaveLength(1)
+
+    disconnectDashboardWS()
+    discoveries[0]!(wsDiscoveryResponse())
+    await connect
+    await flushPromises()
+
+    expect(mockSockets).toHaveLength(0)
+  })
+
+  it('ignores stale discovery responses after a newer connect starts', async () => {
+    const discoveries = installControlledDiscovery()
+
+    const staleConnect = connectDashboardWS({ tab: 'overview', params: {} })
+    const latestConnect = connectDashboardWS({ tab: 'workspace', params: { section: 'board' } })
+    expect(discoveries).toHaveLength(2)
+
+    discoveries[1]!(wsDiscoveryResponse('ws://127.0.0.1:8937/latest'))
+    await latestConnect
+    expect(mockSockets).toHaveLength(1)
+    expect(mockSockets[0]!.url).toBe('ws://127.0.0.1:8937/latest')
+
+    discoveries[0]!(wsDiscoveryResponse('ws://127.0.0.1:8937/stale'))
+    await staleConnect
+    await flushPromises()
+
+    expect(mockSockets).toHaveLength(1)
+    expect(mockSockets[0]!.readyState).toBe(MockWebSocket.CONNECTING)
+  })
+
   it('subscribes the latest route captured while hello is still in flight', async () => {
     installWebSocketMocks()
 

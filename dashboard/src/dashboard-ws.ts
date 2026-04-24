@@ -28,6 +28,7 @@ let reconnectAttempts = 0
 let lastSubscribeKey = ''
 let desiredRouteState: DashboardRouteState | null = null
 let shouldReconnect = true
+let connectGeneration = 0
 const pending = new Map<number, PendingRpc>()
 
 function rememberRouteState(routeState: DashboardRouteState): DashboardRouteState {
@@ -287,11 +288,17 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
 
   shouldReconnect = true
   clearReconnectTimer()
-  const wsUrl = await discoverWsUrl().catch(err => {
-    dashboardWsLastError.value = err instanceof Error ? err.message : String(err)
-    return null
-  })
-  if (!wsUrl) return
+  const generation = ++connectGeneration
+  let wsUrl: string | null
+  try {
+    wsUrl = await discoverWsUrl()
+  } catch (err) {
+    if (generation === connectGeneration && shouldReconnect) {
+      dashboardWsLastError.value = err instanceof Error ? err.message : String(err)
+    }
+    return
+  }
+  if (!wsUrl || !shouldReconnect || generation !== connectGeneration) return
 
   closeSocket()
   const ws = new WebSocket(wsUrl)
@@ -338,6 +345,7 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
 
 export function disconnectDashboardWS(): void {
   shouldReconnect = false
+  connectGeneration += 1
   clearReconnectTimer()
   dashboardWsConnected.value = false
   dashboardWsReady.value = false

@@ -93,7 +93,7 @@ print_matches \
 print_matches \
   "provider adapter still has model-label/provider heuristics" \
   lib/provider_adapter.ml \
-  'provider_of_model_label|is_structurally_unmetered_provider|kimi_cli|codex_cli|gemini_cli|String\.starts_with'
+  'prefix_classification_vocabulary|bare_heuristic|is_kimi_model_id|is_moonshot_base_url|String\.starts_with|List\.mem[[:space:]]+provider[[:space:]]+\['
 
 section "Anti-Fake Detector"
 anti_fake_output=""

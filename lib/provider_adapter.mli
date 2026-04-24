@@ -294,10 +294,14 @@ val default_model_label_result : unit -> (string, string) result
 (** Extract provider prefix from a "provider:model" label. *)
 val provider_prefix_of_label_result : string -> (string, string) result
 
-(** Classify a raw model label (prefixed or bare) to a provider name for
-    telemetry grouping. Returns ["unknown"] when no rule fits, so analysis
-    queries can filter rather than miscount. *)
-val provider_of_model_label : string -> string
+(** Classify a model label to a provider name for telemetry grouping.
+
+    Explicit ["provider:model"] labels use the adapter registry prefix. Bare
+    model ids are classified only when the caller supplies typed
+    [provider_kind] telemetry; otherwise this returns ["unknown"] rather than
+    guessing from vendor-looking substrings. *)
+val provider_of_model_label :
+  ?provider_kind:Llm_provider.Provider_config.provider_kind -> string -> string
 
 (** True when the provider emits no usage tokens in its standard response.
     Used by metrics coverage gating so text-only turns against CLI-class

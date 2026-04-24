@@ -336,6 +336,58 @@ let test_provider_label_of_config_preserves_cli_vs_api_identity () =
   check string "kimi cli model label" "kimi_cli:kimi-for-coding"
     (Adapter.model_label_of_config kimi_cli_cfg)
 
+let test_provider_of_model_label_uses_typed_boundaries () =
+  check string "explicit prefix wins over coarse kind" "glm-coding"
+    (Adapter.provider_of_model_label
+       ~provider_kind:Llm_provider.Provider_config.OpenAI_compat
+       "glm-coding:glm-5.1");
+  check string "bare labels do not guess" "unknown"
+    (Adapter.provider_of_model_label "gpt-5.4");
+  check string "typed bare label uses provider kind" "openai"
+    (Adapter.provider_of_model_label
+       ~provider_kind:Llm_provider.Provider_config.OpenAI_compat
+       "gpt-5.4");
+  check string "unknown explicit prefix stays unknown" "unknown"
+    (Adapter.provider_of_model_label "private-provider:model-x")
+
+let test_unmetered_provider_uses_declared_telemetry_policy () =
+  check bool "kimi cli usage missing by design" true
+    (Adapter.is_structurally_unmetered_provider "kimi_cli");
+  check bool "codex cli usage missing by design" true
+    (Adapter.is_structurally_unmetered_provider "codex_cli");
+  check bool "gemini cli usage missing by design" true
+    (Adapter.is_structurally_unmetered_provider "gemini_cli");
+  check bool "claude code usage missing by design" true
+    (Adapter.is_structurally_unmetered_provider "claude_code");
+  check bool "ollama usage missing by design" true
+    (Adapter.is_structurally_unmetered_provider "ollama");
+  check bool "direct openai reports usage" false
+    (Adapter.is_structurally_unmetered_provider "openai");
+  check bool "unknown provider is not silently exempt" false
+    (Adapter.is_structurally_unmetered_provider "unknown")
+
+let test_openai_compat_provider_identity_uses_endpoint_metadata () =
+  let kimi_endpoint_cfg =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.OpenAI_compat
+      ~model_id:"anything"
+      ~base_url:"https://api.moonshot.ai/v1/"
+      ~request_path:"/chat/completions"
+      ()
+  in
+  let openai_endpoint_cfg =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.OpenAI_compat
+      ~model_id:"kimi-k2.5"
+      ~base_url:"https://api.openai.com"
+      ~request_path:"/v1/chat/completions"
+      ()
+  in
+  check string "moonshot endpoint maps to kimi adapter" "kimi"
+    (Adapter.provider_label_of_config kimi_endpoint_cfg);
+  check string "model id alone does not imply kimi" "openai"
+    (Adapter.provider_label_of_config openai_endpoint_cfg)
+
 let () =
   run "Provider Adapter"
     [
@@ -370,6 +422,12 @@ let () =
             test_runtime_mcp_header_support_uses_declared_policy;
           test_case "provider label keeps cli vs api identity" `Quick
             test_provider_label_of_config_preserves_cli_vs_api_identity;
+          test_case "provider model label uses typed boundaries" `Quick
+            test_provider_of_model_label_uses_typed_boundaries;
+          test_case "unmetered provider uses telemetry policy" `Quick
+            test_unmetered_provider_uses_declared_telemetry_policy;
+          test_case "openai compat identity uses endpoint metadata" `Quick
+            test_openai_compat_provider_identity_uses_endpoint_metadata;
           test_case "resolve voice aliases" `Quick test_resolve_voice_aliases;
           test_case "voice auth env resolution" `Quick
             test_voice_auth_env_resolution;

@@ -30,16 +30,24 @@ let keeper_denied_tools =
 
 (** Derive a provider label from a model id.
 
-    Delegates to {!Provider_adapter.provider_of_model_label}. Kept as a
-    thin alias so existing callers in keeper_* and dashboard_* modules
-    do not need to update, while the vendor-name vocabulary lives with
-    the other provider-classification helpers. *)
-let provider_of_model (model : string) : string =
-  Provider_adapter.provider_of_model_label model
+    Delegates to {!Provider_adapter.provider_of_model_label}. Explicit
+    ["provider:model"] labels are trusted; bare model ids require typed OAS
+    [provider_kind] telemetry and otherwise stay ["unknown"]. *)
+let provider_of_model ?provider_kind (model : string) : string =
+  Provider_adapter.provider_of_model_label ?provider_kind model
+
+let provider_kind_of_telemetry
+    (telemetry : Oas.Types.inference_telemetry option) =
+  match telemetry with
+  | Some { provider_kind = Some kind; _ } -> Some kind
+  | Some _ | None -> None
+
+let provider_of_model_with_telemetry ~model ~telemetry =
+  let provider_kind = provider_kind_of_telemetry telemetry in
+  provider_of_model ?provider_kind model
 
 let structurally_unmetered_provider provider =
-  List.mem provider
-    [ "ollama"; "codex_cli"; "gemini_cli"; "claude_code"; "kimi_cli" ]
+  Provider_adapter.is_structurally_unmetered_provider provider
 
 let usage_has_tokens (usage : Oas.Types.api_usage) =
   usage.input_tokens > 0
@@ -74,9 +82,10 @@ let estimate_usage_cost_usd ~(model : string) (usage : Oas.Types.api_usage)
       model usage.input_tokens usage.output_tokens;
     0.0
 
-let cost_usd_for_usage ~(model : string) (usage : Oas.Types.api_usage)
+let cost_usd_for_usage ?provider_kind ~(model : string)
+    (usage : Oas.Types.api_usage)
     : float =
-  let provider = provider_of_model model in
+  let provider = provider_of_model ?provider_kind model in
   match usage.cost_usd with
   | Some cost when cost > 0.0 -> cost
   | Some cost ->
@@ -146,14 +155,14 @@ let record_llm_tok_s_metrics
     | _ -> None, None
   in
   let provider_kind_label =
-    match telemetry with
-    | Some { provider_kind = Some pk; _ } ->
-      Llm_provider.Provider_kind.to_string pk
-    | _ -> "unknown"
+    match provider_kind_of_telemetry telemetry with
+    | Some pk -> Llm_provider.Provider_kind.to_string pk
+    | None -> "unknown"
   in
+  let provider = provider_of_model_with_telemetry ~model ~telemetry in
   let labels =
     [ "model", model
-    ; "provider", provider_of_model model
+    ; "provider", provider
     ; "provider_kind", provider_kind_label
     ]
   in
@@ -210,7 +219,8 @@ let emit_cost_event
   let entry = `Assoc ([
     ("agent", `String agent_name);
     ("task_id", Json_util.string_opt_to_json task_id);
-    ("provider", `String (provider_of_model model));
+    ( "provider",
+      `String (provider_of_model_with_telemetry ~model ~telemetry) );
     ("model", `String model);
     ("input_tokens", `Int input_tokens);
     ("output_tokens", `Int output_tokens);
@@ -429,7 +439,11 @@ let make_hooks
         let input_tok, output_tok, turn_cost_usd, usage_missing =
           match response.usage with
           | Some u ->
-              (u.input_tokens, u.output_tokens, cost_usd_for_usage ~model u, false)
+              let provider_kind = provider_kind_of_telemetry response.telemetry in
+              ( u.input_tokens,
+                u.output_tokens,
+                cost_usd_for_usage ?provider_kind ~model u,
+                false )
           | None -> (0, 0, 0.0, true)
         in
         let total_tok = input_tok + output_tok in

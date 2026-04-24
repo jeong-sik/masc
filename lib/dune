@@ -564,6 +564,7 @@
    oas_bus_instrument
    oas_sse_bridge
    env_config_introspect
+   env_git_noninteractive
    runtime_params
    governance_registry
    governance_pipeline_types

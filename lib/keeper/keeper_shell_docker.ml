@@ -240,6 +240,7 @@ let run_docker_shell_command_with_status
                 "-e"; "GIT_CONFIG_KEY_0=safe.directory";
                 "-e"; "GIT_CONFIG_VALUE_0=*";
               ]
+              @ Env_git_noninteractive.docker_env_args
               @ git_identity_env ~name:git_author_name ~email:git_author_email
             in
             Ok (mounts, envs)

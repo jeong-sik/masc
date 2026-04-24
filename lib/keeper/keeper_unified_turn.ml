@@ -198,15 +198,20 @@ let next_fail_open_cascade_for_turn
     ~(tool_requirement : string)
     ~(attempted_cascades : string list)
     (err : Oas.Error.sdk_error) : EC.degraded_retry option =
-  let _ = base_cascade in
-  match
-    EC.degraded_retry_after_recoverable_error
-      ~effective_cascade ~tool_requirement err
-  with
-  | Some { next_cascade; _ }
-    when List.exists (String.equal next_cascade) attempted_cascades ->
-      None
-  | next -> next
+  EC.degraded_rotation_after_recoverable_error
+    ~base_cascade ~effective_cascade ~tool_requirement
+    ~attempted_cascades err
+
+let sdk_error_kind = function
+  | Oas.Error.Api _ -> "api"
+  | Oas.Error.Agent _ -> "agent"
+  | Oas.Error.Mcp _ -> "mcp"
+  | Oas.Error.Config _ -> "config"
+  | Oas.Error.Serialization _ -> "serialization"
+  | Oas.Error.Io _ -> "io"
+  | Oas.Error.Orchestration _ -> "orchestration"
+  | Oas.Error.A2a _ -> "a2a"
+  | Oas.Error.Internal _ -> "internal"
 
 let oas_timeout_guard_sec = 1.0
 
@@ -935,6 +940,25 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
       let last_execution = ref initial_execution in
       let last_timeout_budget : oas_timeout_budget_resolution option ref = ref None in
       let degraded_retry_info = ref None in
+      let cascade_rotation_attempts = ref [] in
+      let record_cascade_rotation_attempt
+          ~(from_cascade : string)
+          ~(retry : EC.degraded_retry)
+          ~(outcome : string)
+          (err : Oas.Error.sdk_error) =
+        let attempt : Keeper_execution_receipt.cascade_rotation_attempt =
+          {
+            from_cascade;
+            to_cascade = retry.next_cascade;
+            reason = retry.fallback_reason;
+            outcome;
+            error_kind = Some (sdk_error_kind err);
+            error_message = Some (Oas.Error.to_string err);
+            recorded_at = now_iso ();
+          }
+        in
+        cascade_rotation_attempts := attempt :: !cascade_rotation_attempts
+      in
       let run_result, latency_ms =
         Fun.protect ~finally:(fun () ->
           unsubscribe_event_bus ();
@@ -1037,6 +1061,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                     (Option.map
                        (fun (retry : EC.degraded_retry) -> retry.fallback_reason)
                        !degraded_retry_info)
+                  ~cascade_rotation_attempts:
+                    (List.rev !cascade_rotation_attempts)
                   ~temperature:execution.temperature
                   ~max_tokens:execution.max_tokens
                   ~oas_timeout_s
@@ -1207,6 +1233,11 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                           ~cascade_name:degraded_retry.next_cascade
                       with
                       | Error fail_open_err ->
+                          record_cascade_rotation_attempt
+                            ~from_cascade:execution.cascade_name
+                            ~retry:degraded_retry
+                            ~outcome:"setup_failed"
+                            fail_open_err;
                           Log.Keeper.warn
                             "%s: recoverable cascade failure in %s suggested degraded retry to %s (reason=%s), but retry setup failed: %s"
                             meta.name execution.cascade_name
@@ -1216,9 +1247,14 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                           mark_terminal_error fail_open_err;
                           Error fail_open_err
                       | Ok next_execution ->
+                          record_cascade_rotation_attempt
+                            ~from_cascade:execution.cascade_name
+                            ~retry:degraded_retry
+                            ~outcome:"retry_scheduled"
+                            err;
                           degraded_retry_info := Some degraded_retry;
                           Log.Keeper.warn
-                            "%s: recoverable cascade failure in %s; degraded retry on cascade=%s reason=%s max_context=%d context_budget=%d primary_budget=%d requested_override=%s: %s"
+                            "%s: recoverable cascade failure in %s; rotation retry on cascade=%s reason=%s max_context=%d context_budget=%d primary_budget=%d requested_override=%s: %s"
                             meta.name execution.cascade_name
                             next_execution.cascade_name
                             degraded_retry.fallback_reason

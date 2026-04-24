@@ -192,6 +192,8 @@ val run_turn :
   -> ?degraded_retry_applied:bool
   -> ?degraded_retry_cascade:string
   -> ?fallback_reason:string
+  -> ?cascade_rotation_attempts:
+       Keeper_execution_receipt.cascade_rotation_attempt list
   -> ?is_retry:bool
   -> ?shared_context:Oas.Context.t
   -> ?event_bus:Oas.Event_bus.t

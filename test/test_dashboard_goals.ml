@@ -89,6 +89,7 @@ let append_keeper_receipt (config : Coord.config) (meta : Keeper_types.keeper_me
       degraded_retry_applied = false;
       degraded_retry_cascade = None;
       fallback_reason = None;
+      cascade_rotation_attempts = [];
       stop_reason = Some "completed";
       error_kind = None;
       error_message = None;

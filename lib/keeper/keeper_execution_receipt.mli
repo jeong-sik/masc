@@ -7,6 +7,16 @@ type tool_surface =
   ; tool_surface_fallback_used : bool
   }
 
+type cascade_rotation_attempt =
+  { from_cascade : string
+  ; to_cascade : string
+  ; reason : string
+  ; outcome : string
+  ; error_kind : string option
+  ; error_message : string option
+  ; recorded_at : string
+  }
+
 type t =
   { keeper_name : string
   ; agent_name : string
@@ -40,6 +50,7 @@ type t =
   ; degraded_retry_applied : bool
   ; degraded_retry_cascade : string option
   ; fallback_reason : string option
+  ; cascade_rotation_attempts : cascade_rotation_attempt list
   ; stop_reason : string option
   ; error_kind : string option
   ; error_message : string option

@@ -208,6 +208,100 @@ let degraded_retry_after_recoverable_error
     | None ->
         None
 
+let recoverable_cascade_failure_reason (err : Oas.Error.sdk_error) =
+  if Oas_worker_named.sdk_error_is_hard_quota err then
+    Some "hard_quota"
+  else
+    match Oas_worker_named.classify_masc_internal_error err with
+    | Some (Oas_worker_named.Resumable_cli_session _) ->
+        Some "resumable_cli_session"
+    | Some (Oas_worker_named.Admission_queue_timeout _) ->
+        Some "admission_queue_timeout"
+    | Some (Oas_worker_named.Oas_timeout_budget _) ->
+        Some "oas_timeout_budget"
+    | Some (Oas_worker_named.Turn_timeout _) ->
+        Some "turn_timeout"
+    | Some
+        (Oas_worker_named.Cascade_exhausted
+           { reason = Keeper_types.Candidates_filtered_after_cycles; _ }) ->
+        Some "cascade_candidates_filtered"
+    | Some
+        (Oas_worker_named.Cascade_exhausted
+           { reason = Keeper_types.Other_detail detail; _ })
+      when Oas_worker_named.message_looks_like_cli_wrapped_hard_quota detail ->
+        Some "hard_quota"
+    | Some (Oas_worker_named.Cascade_exhausted _)
+    | Some (Oas_worker_named.No_tool_capable_provider _)
+    | Some (Oas_worker_named.Accept_rejected _)
+    | Some (Oas_worker_named.Admission_queue_rejected _)
+    | Some (Oas_worker_named.Ambiguous_post_commit _)
+    | None ->
+        None
+
+let normalized_cascade_name name =
+  let trimmed = String.trim name in
+  if
+    String.equal trimmed Keeper_config.local_only_cascade_name
+    || String.equal trimmed Keeper_config.local_recovery_cascade_name
+    || String.equal trimmed Keeper_config.tool_use_strict_cascade_name
+  then trimmed
+  else Keeper_cascade_profile.normalize_declared_name trimmed
+
+let required_tool_rotation_candidate name =
+  let normalized = normalized_cascade_name name in
+  not
+    (String.equal normalized Keeper_config.local_only_cascade_name
+     || String.equal normalized Keeper_config.local_recovery_cascade_name)
+
+let degraded_rotation_candidates
+    ~(base_cascade : string)
+    ~(effective_cascade : string)
+    ~(tool_requirement : string) =
+  let normalized_base = normalized_cascade_name base_cascade in
+  let normalized_effective = normalized_cascade_name effective_cascade in
+  let candidates =
+    if String.equal tool_requirement "required" then
+      [
+        Keeper_config.tool_use_strict_cascade_name;
+        normalized_base;
+        Keeper_config.default_cascade_name;
+      ]
+    else
+      [
+        normalized_base;
+        Keeper_config.default_cascade_name;
+        Keeper_config.local_recovery_cascade_name;
+        Keeper_config.tool_use_strict_cascade_name;
+      ]
+  in
+  candidates
+  |> List.map normalized_cascade_name
+  |> dedupe_keep_order
+  |> List.filter (fun candidate ->
+         (not (String.equal candidate normalized_effective))
+         && (not (String.equal tool_requirement "required")
+             || required_tool_rotation_candidate candidate))
+
+let degraded_rotation_after_recoverable_error
+    ~(base_cascade : string)
+    ~(effective_cascade : string)
+    ~(tool_requirement : string)
+    ~(attempted_cascades : string list)
+    (err : Oas.Error.sdk_error) : degraded_retry option =
+  match recoverable_cascade_failure_reason err with
+  | None -> None
+  | Some fallback_reason ->
+      let attempted =
+        attempted_cascades
+        |> List.map normalized_cascade_name
+        |> dedupe_keep_order
+      in
+      degraded_rotation_candidates
+        ~base_cascade ~effective_cascade ~tool_requirement
+      |> List.find_opt (fun candidate ->
+             not (List.exists (String.equal candidate) attempted))
+      |> Option.map (fun next_cascade -> { next_cascade; fallback_reason })
+
 let is_auto_recoverable_turn_error (err : Oas.Error.sdk_error) : bool =
   is_transient_network_error err
   || is_server_rejected_parse_error err

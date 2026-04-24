@@ -2745,30 +2745,60 @@ let test_fallback_cascade_for_unavailable_profile_prefers_base_after_phase_overr
   check (option string) "phase override fallback target is base cascade"
     (Some "tool_rerank") fallback
 
-let test_next_fail_open_cascade_for_turn_returns_untried_local_recovery () =
+let test_next_fail_open_cascade_for_turn_returns_untried_default_cascade () =
   let degraded_retry =
     UT.next_fail_open_cascade_for_turn
-      ~base_cascade:"underdog"
-      ~effective_cascade:"underdog"
+      ~base_cascade:"tool_rerank"
+      ~effective_cascade:"tool_rerank"
       ~tool_requirement:"optional"
-      ~attempted_cascades:[ "underdog" ]
+      ~attempted_cascades:[ "tool_rerank" ]
       (wrapped_claude_limit_error ())
   in
   expect_degraded_retry "next degraded retry"
-    KC.local_recovery_cascade_name "hard_quota" degraded_retry
+    KC.default_cascade_name "hard_quota" degraded_retry
 
-let test_next_fail_open_cascade_for_turn_suppresses_attempted_local_recovery () =
+let test_next_fail_open_cascade_for_turn_continues_to_local_recovery () =
   let degraded_retry =
     UT.next_fail_open_cascade_for_turn
-      ~base_cascade:"underdog"
-      ~effective_cascade:"underdog"
+      ~base_cascade:"tool_rerank"
+      ~effective_cascade:"tool_rerank"
       ~tool_requirement:"optional"
       ~attempted_cascades:
-        [ "underdog"; KC.local_recovery_cascade_name ]
+        [ "tool_rerank"; KC.default_cascade_name ]
       (wrapped_claude_limit_error ())
   in
-  check bool "attempted local_recovery suppressed" true
+  expect_degraded_retry "next degraded retry after default"
+    KC.local_recovery_cascade_name "hard_quota" degraded_retry
+
+let test_next_fail_open_cascade_for_turn_suppresses_exhausted_rotation_group () =
+  let degraded_retry =
+    UT.next_fail_open_cascade_for_turn
+      ~base_cascade:"tool_rerank"
+      ~effective_cascade:"tool_rerank"
+      ~tool_requirement:"optional"
+      ~attempted_cascades:
+        [
+          "tool_rerank";
+          KC.default_cascade_name;
+          KC.local_recovery_cascade_name;
+          KC.tool_use_strict_cascade_name;
+        ]
+      (wrapped_claude_limit_error ())
+  in
+  check bool "exhausted rotation group suppressed" true
     (Option.is_none degraded_retry)
+
+let test_next_fail_open_cascade_for_turn_allows_required_tool_rotation () =
+  let degraded_retry =
+    UT.next_fail_open_cascade_for_turn
+      ~base_cascade:"tool_rerank"
+      ~effective_cascade:KC.tool_use_strict_cascade_name
+      ~tool_requirement:"required"
+      ~attempted_cascades:[ KC.tool_use_strict_cascade_name ]
+      (wrapped_claude_limit_error ())
+  in
+  expect_degraded_retry "required tool degraded retry"
+    "tool_rerank" "hard_quota" degraded_retry
 
 (* context_overflow_limit is now in OAS as Retry.extract_context_limit.
    These tests verify the OAS SSOT API is accessible from MASC. *)
@@ -4983,12 +5013,18 @@ let () =
             test_fallback_cascade_for_unavailable_profile_prefers_default;
           test_case "unavailable phase override fallback prefers base" `Quick
             test_fallback_cascade_for_unavailable_profile_prefers_base_after_phase_override;
-          test_case "next degraded retry returns untried local_recovery"
+          test_case "next degraded retry returns untried default cascade"
             `Quick
-            test_next_fail_open_cascade_for_turn_returns_untried_local_recovery;
-          test_case "next degraded retry suppresses attempted local_recovery"
+            test_next_fail_open_cascade_for_turn_returns_untried_default_cascade;
+          test_case "next degraded retry continues to local_recovery"
             `Quick
-            test_next_fail_open_cascade_for_turn_suppresses_attempted_local_recovery;
+            test_next_fail_open_cascade_for_turn_continues_to_local_recovery;
+          test_case "next degraded retry suppresses exhausted rotation group"
+            `Quick
+            test_next_fail_open_cascade_for_turn_suppresses_exhausted_rotation_group;
+          test_case "required tool turns rotate without dropping requirement"
+            `Quick
+            test_next_fail_open_cascade_for_turn_allows_required_tool_rotation;
         ] );
       ( "tool_classification",
         [

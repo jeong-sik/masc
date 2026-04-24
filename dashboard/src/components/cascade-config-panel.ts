@@ -30,6 +30,7 @@ import {
   type CascadeConfigResponse,
   type CascadeHealthProvider,
   type CascadeHealthResponse,
+  type CascadeProviderStatus,
   type CascadeInvalidProfile,
   type CascadeKeeperProfile,
   type CascadeProfile,
@@ -599,6 +600,61 @@ export function providerTone(p: CascadeHealthProvider): 'ok' | 'warn' | 'bad' {
 }
 
 /**
+ * Status chip tone for the optional `status` field.
+ *
+ * - `active`: tracker recorded events in the window (ok).
+ * - `cooldown`: actively blocked (bad).
+ * - `configured`: declared but untouched — neutral. Rendering this
+ *   explicitly answers "why is this provider not being used?" in a way
+ *   that the previous "row is absent" encoding could not.
+ */
+export function providerStatusTone(
+  status?: CascadeProviderStatus,
+): 'ok' | 'warn' | 'bad' | 'neutral' {
+  switch (status) {
+    case 'active': return 'ok'
+    case 'cooldown': return 'bad'
+    case 'configured': return 'neutral'
+    default: return 'neutral'
+  }
+}
+
+/**
+ * Format a `number | null | undefined` tok/s value for a table cell.
+ *
+ * The three empty cases render distinct labels so operators can tell
+ * "backend did not report" from "reported zero":
+ * - `undefined` (field absent on response, older server) → `—`
+ * - `null` (aggregator ran, found nothing) → `no data`
+ * - finite number → fixed(1)
+ *
+ * Zero is rendered as `0.0`, not collapsed to a dash.
+ */
+export function fmtPerfTokPerSec(
+  value: number | null | undefined,
+): string {
+  if (value === undefined) return '—'
+  if (value === null) return 'no data'
+  return value.toFixed(1)
+}
+
+/**
+ * Compact rendering of per-provider p50/p95 latency used in the Health
+ * Tracker table.  Same empty-state rules as `fmtPerfTokPerSec`.
+ */
+export function fmtPerfLatencyPair(
+  p50: number | null | undefined,
+  p95: number | null | undefined,
+): string {
+  const fmt = (v: number | null | undefined) => {
+    if (v === undefined) return '—'
+    if (v === null) return 'ø'
+    return Math.round(v).toString()
+  }
+  return `${fmt(p50)} / ${fmt(p95)} ms`
+}
+
+/**
  * Pure filter for Health Tracker provider rows.
  *
  * Case-insensitive substring match on `provider_key`. Also matches the
@@ -660,6 +716,10 @@ function HealthTable({
             <tr class="text-[var(--text-muted)] border-b border-[var(--card-border)]">
               <th class="text-left py-1 w-4"></th>
               <th class="text-left py-1">Provider</th>
+              <th
+                class="text-left py-1"
+                title="Operational state: active (recent events), cooldown (blocked), configured (declared but untouched)"
+              >Status</th>
               <th class="text-right py-1">Success</th>
               <th class="text-right py-1">Consec. fail</th>
               <th class="text-right py-1">Events</th>
@@ -667,6 +727,18 @@ function HealthTable({
                 class="text-right py-1"
                 title="응답은 왔지만 accept 게이트에서 거부된 이벤트 수"
               >Rejected</th>
+              <th
+                class="text-right py-1"
+                title="Prompt prefill throughput (entry-weighted mean across this provider's models)"
+              >Prefill tok/s</th>
+              <th
+                class="text-right py-1"
+                title="Decode throughput (predicted tokens / second, entry-weighted)"
+              >Decode tok/s</th>
+              <th
+                class="text-right py-1"
+                title="Latency p50 / p95 in milliseconds (approximation: weighted mean of per-model percentiles)"
+              >Latency p50/p95</th>
               <th class="text-right py-1">Cooldown</th>
             </tr>
           </thead>
@@ -674,10 +746,27 @@ function HealthTable({
             ${filtered.map((p: CascadeHealthProvider) => {
               const tone = providerTone(p)
               const rejected = p.rejected_in_window ?? 0
+              const status: CascadeProviderStatus | undefined = p.status
+              // `declared = false` on a tracker-only row signals config
+              // drift (provider was tracked but is no longer referenced
+              // by cascade.json). Surface it next to the provider key so
+              // operators can prune it. `undefined` means the server is
+              // too old to carry the field — don't decorate in that case.
+              const orphaned = p.declared === false
               return html`
               <tr class="border-b border-[var(--card-border)] last:border-b-0">
                 <td class="py-1"><span class=${`inline-block w-2 h-2 rounded-full ${TONE_DOT[tone]}`}></span></td>
-                <td class="py-1"><code class="text-[var(--text-strong)]">${p.provider_key}</code></td>
+                <td class="py-1">
+                  <code class="text-[var(--text-strong)]">${p.provider_key}</code>
+                  ${orphaned
+                    ? html`<span class="ml-1 text-2xs text-[var(--warn)]" title="Provider was tracked but is no longer declared in cascade.json">orphan</span>`
+                    : null}
+                </td>
+                <td class="py-1">
+                  ${status
+                    ? html`<${StatusChip} tone=${providerStatusTone(status)} uppercase=${false}>${status}<//>`
+                    : html`<span class="text-[var(--text-muted)]">—</span>`}
+                </td>
                 <td class="py-1 text-right tabular-nums">${fmtPct(p.success_rate)}</td>
                 <td class="py-1 text-right tabular-nums">${p.consecutive_failures}</td>
                 <td class="py-1 text-right tabular-nums">${p.events_in_window}</td>
@@ -686,6 +775,9 @@ function HealthTable({
                     ? html`<span class="text-[var(--warn)]">${rejected}</span>`
                     : html`<span class="text-[var(--text-muted)]">—</span>`}
                 </td>
+                <td class="py-1 text-right tabular-nums">${fmtPerfTokPerSec(p.avg_prompt_tok_per_sec)}</td>
+                <td class="py-1 text-right tabular-nums">${fmtPerfTokPerSec(p.avg_decode_tok_per_sec)}</td>
+                <td class="py-1 text-right tabular-nums">${fmtPerfLatencyPair(p.p50_latency_ms, p.p95_latency_ms)}</td>
                 <td class="py-1 text-right">
                   ${p.in_cooldown
                     ? html`<${StatusChip} tone="bad">${fmtCooldownExpiry(p.cooldown_expires_at)}<//>`

@@ -78,6 +78,14 @@ export interface CascadeRawConfigResponse {
   raw_json: string
 }
 
+/** Operational state reported next to [provider_key] on the dashboard.
+ *  - `active`: tracker recorded at least one event in the current window.
+ *  - `cooldown`: tracker opened a cooldown window.
+ *  - `configured`: declared in `cascade.json` but zero traffic in the
+ *    current window (either untouched since startup or expired out).
+ *  @since 0.173.0 */
+export type CascadeProviderStatus = 'active' | 'cooldown' | 'configured'
+
 export interface CascadeHealthProvider {
   provider_key: string
   success_rate: number
@@ -91,6 +99,40 @@ export interface CascadeHealthProvider {
    *  unusable output".
    *  @since 0.160.0 — optional for backward compat with older servers. */
   rejected_in_window?: number
+  /** `true` iff any `cascade.json` profile lists a model whose scheme
+   *  prefix matches `provider_key`. `false` surfaces providers that
+   *  were tracked but are no longer referenced by config (e.g. after
+   *  a cascade rename).
+   *  @since 0.173.0 — optional for backward compat with older servers. */
+  declared?: boolean
+  /** @since 0.173.0 — optional for backward compat with older servers. */
+  status?: CascadeProviderStatus
+  /** Entry-weighted mean prefill throughput across all models that
+   *  share this provider scheme, over the last `perf_window_minutes`
+   *  of keeper decisions.jsonl. `null` when no contributing model
+   *  reported inference_timings (Anthropic/Gemini path).
+   *  @since 0.173.1 — optional; backend returns only when `base_path`
+   *  is wired (always in production, never in test harnesses). */
+  avg_prompt_tok_per_sec?: number | null
+  /** @since 0.173.1 */
+  avg_decode_tok_per_sec?: number | null
+  /** @since 0.173.1 */
+  avg_tok_per_sec?: number | null
+  /** @since 0.173.1 */
+  avg_latency_ms?: number | null
+  /** Approximation: entry-weighted mean of per-model p50.  Not a true
+   *  cross-model percentile; fine for dashboard sparklines.  When
+   *  exact values are needed, compute from recent_entries in
+   *  `/api/v1/runtime/model-metrics`.
+   *  @since 0.173.1 */
+  p50_latency_ms?: number | null
+  /** @since 0.173.1 — see `p50_latency_ms`. */
+  p95_latency_ms?: number | null
+  /** Number of keeper turns attributed to this provider in the perf
+   *  window.  `null` when the backend was unable to run the aggregate
+   *  (missing `base_path`); `0` when it ran and found none.
+   *  @since 0.173.1 */
+  request_count?: number | null
 }
 
 export interface CascadeHealthResponse {
@@ -99,6 +141,11 @@ export interface CascadeHealthResponse {
   cooldown_threshold: number
   cooldown_sec: number
   providers: CascadeHealthProvider[]
+  /** Window used by the per-provider perf aggregate.  `null` when the
+   *  backend did not compute perf (no `base_path`, matches every
+   *  provider having null perf fields).
+   *  @since 0.173.1 — optional for backward compat with older servers. */
+  perf_window_minutes?: number | null
 }
 
 export function fetchCascadeConfig(

@@ -55,7 +55,7 @@ function extractGeneratedNicknamePrefix(name: string): string | null {
     return uniquePrefix || null
   }
 
-  return parts[0] ?? null
+  return null
 }
 
 export function keeperNameFromAgentName(agentName: string | null | undefined): string | null {

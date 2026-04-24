@@ -30,6 +30,11 @@ describe('keeper identity helpers', () => {
     expect(canonicalKeeperNameFromAgentName('ramarama-fierce-panda')).toBe('ramarama')
   })
 
+  it('does not canonicalize arbitrary hyphenated runtime names', () => {
+    expect(canonicalKeeperNameFromAgentName('foo-bar')).toBeNull()
+    expect(keeperPrimaryName(null, 'foo-bar')).toBe('foo-bar')
+  })
+
   it('canonicalizes keeper alias names', () => {
     expect(canonicalKeeperName('keeper-sangsu-agent')).toBe('sangsu')
   })
@@ -44,5 +49,13 @@ describe('keeper identity helpers', () => {
       'ramarama',
       'ramarama-fierce-panda',
     ])
+  })
+
+  it('does not add the first segment as a keeper lookup key for arbitrary hyphenated runtime names', () => {
+    const keys = keeperIdentityKeys(null, null, 'foo-bar')
+
+    expect(keys).toContain('foo-bar')
+    expect(keys).not.toContain('foo')
+    expect(keys).not.toContain('keeper:foo')
   })
 })

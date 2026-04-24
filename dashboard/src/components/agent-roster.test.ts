@@ -382,6 +382,30 @@ describe('countRuntimeKinds', () => {
       totalRuntimes: 1,
     })
   })
+
+  it('does not classify arbitrary hyphenated agents as matching keeper prefixes', () => {
+    const result = countRuntimeKinds(
+      [
+        makeAgent({
+          name: 'foo-bar',
+          agent_type: 'agent',
+        }),
+      ],
+      [
+        {
+          name: 'foo',
+          agent_name: 'keeper-foo-agent',
+          status: 'active',
+        } as Keeper,
+      ],
+    )
+
+    expect(result).toEqual({
+      agents: 1,
+      keepers: 1,
+      totalRuntimes: 2,
+    })
+  })
 })
 
 describe('mergeRosterAgent', () => {

@@ -344,7 +344,8 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
       try
         match tool_timeout_sec_opt ~tool_name:name ~_arguments:arguments with
         | None ->
-            execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~arguments
+            execute_tool_eio ~sw ~clock ?profile:(Some profile) ?mcp_session_id ?auth_token
+              state ~name ~arguments
         | Some timeout_sec ->
             (try
                Eio.Time.with_timeout_exn
@@ -354,6 +355,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
                    execute_tool_eio
                      ~sw
                      ~clock
+                     ?profile:(Some profile)
                      ?mcp_session_id
                      ?auth_token
                      state

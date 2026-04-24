@@ -168,8 +168,9 @@ let required_tool_claim_guard config ~agent_name ?agent_tool_names task =
       Error
         (Types.TaskInvalidState
            (Printf.sprintf
-              "Task %s requires unavailable tool(s): %s"
+              "Task %s requires tool(s) unavailable to %s: %s"
               task.id
+              agent_name
               (String.concat ", " missing))))
 ;;
 

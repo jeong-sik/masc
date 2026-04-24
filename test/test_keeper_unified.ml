@@ -5046,6 +5046,15 @@ let test_should_require_tools_for_initial_turn_matches_first_turn_gate () =
        ~turn_affordances:[ "board_post_or_comment" ]);
   check bool "three-turn call can require initial tools" true
     (KAR.should_require_tools_for_initial_turn ~max_turns:3 ~turn_affordances:affordances);
+  check bool "pending verification requires an action tool" true
+    (KAR.should_require_tools_for_initial_turn ~max_turns:3
+       ~turn_affordances:[ "task_verify" ]);
+  check bool "work discovery requires an action tool" true
+    (KAR.should_require_tools_for_initial_turn ~max_turns:3
+       ~turn_affordances:[ "work_discovery" ]);
+  check bool "worktree delta inspection requires an action tool" true
+    (KAR.should_require_tools_for_initial_turn ~max_turns:3
+       ~turn_affordances:[ "inspect_worktree_delta" ]);
   check bool "no tool-required affordance stays optional" false
     (KAR.should_require_tools_for_initial_turn ~max_turns:3 ~turn_affordances:[ "observe" ])
 
@@ -5078,6 +5087,18 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
   (match
      choose
        ~turn_affordances:[ "task_audit" ]
+       ~allowed_tool_names:[ "keeper_tasks_audit"; "keeper_board_post" ]
+       ()
+   with
+   | Agent_sdk.Types.Tool name ->
+       check string "task audit prefers audit tool" "keeper_tasks_audit" name
+   | other ->
+       fail
+         (Printf.sprintf "expected Tool keeper_tasks_audit, got %s"
+            (Agent_sdk.Types.show_tool_choice other)));
+  (match
+     choose
+       ~turn_affordances:[ "task_audit" ]
        ~allowed_tool_names:[ "keeper_tasks_list"; "keeper_board_post" ]
        ()
    with
@@ -5087,6 +5108,18 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
          (Printf.sprintf
             "expected Auto for task audit without applicable tool \
              (#10008), got %s"
+            (Agent_sdk.Types.show_tool_choice other)));
+  (match
+     choose
+       ~turn_affordances:[ "task_verify" ]
+       ~allowed_tool_names:[ "keeper_tasks_list"; "keeper_board_post" ]
+       ()
+   with
+   | Agent_sdk.Types.Tool name ->
+       check string "task verify prefers task list" "keeper_tasks_list" name
+   | other ->
+       fail
+         (Printf.sprintf "expected Tool keeper_tasks_list, got %s"
             (Agent_sdk.Types.show_tool_choice other)));
   (match choose ~allowed_tool_names:[ "keeper_board_post" ] () with
   | Agent_sdk.Types.Auto -> ()
@@ -5881,6 +5914,14 @@ let () =
               in
               check bool "task_verify present without meta" true
                 (List.mem "task_verify" affordances));
+          test_case "affordance: work discovery requires action" `Quick
+            (fun () ->
+              let obs = { base_observation with work_discovery_due = true } in
+              let affordances =
+                UM.observed_affordances_of_observation obs
+              in
+              check bool "work_discovery present" true
+                (List.mem "work_discovery" affordances));
           test_case "trigger: keeper sees pending_verification"
             `Quick (fun () ->
               let meta =

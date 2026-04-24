@@ -373,6 +373,7 @@ let observed_affordances_of_observation
   let _ = meta in
   if observation.pending_verification_count > 0 then
     add "task_verify";
+  if observation.work_discovery_due then add "work_discovery";
   if Option.is_some observation.worktree_change_summary then add "inspect_worktree_delta";
   List.rev !affordances
 

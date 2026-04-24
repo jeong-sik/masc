@@ -489,7 +489,7 @@ let handle_batch_add_tasks ctx args =
     (true, Coord.batch_add_tasks_with_contracts
       ~created_by:ctx.agent_name ctx.config tasks)
 
-let handle_claim ctx args =
+let handle_claim ?agent_tool_names ctx args =
   if not (try Coord.is_agent_joined ctx.config ~agent_name:ctx.agent_name with Sys_error _ | Not_found -> false) then
     result_to_response (Error (Types.AgentNotJoined ctx.agent_name))
   else if args |> member "agent_role" <> `Null then
@@ -499,7 +499,11 @@ let handle_claim ctx args =
   match validate_task_id task_id with
   | Error e -> result_to_response (Error e)
   | Ok task_id ->
-  let agent_tool_names = keeper_agent_tool_names ctx in
+  let agent_tool_names =
+    match agent_tool_names with
+    | Some _ -> agent_tool_names
+    | None -> keeper_agent_tool_names ctx
+  in
   let result =
     Coord.claim_task_r ctx.config ~agent_name:ctx.agent_name ~task_id
       ?agent_tool_names ()
@@ -516,14 +520,17 @@ let handle_claim ctx args =
    | Error e -> Log.Task.debug "task claim failed for %s: %s" task_id (Types.masc_error_to_string e));
   result_to_response result
 
-let handle_claim_next ctx _args =
+let handle_claim_next ?agent_tool_names ctx _args =
   if not (try Coord.is_agent_joined ctx.config ~agent_name:ctx.agent_name with Sys_error _ | Not_found -> false) then
     (false, Printf.sprintf "Agent '%s' is not a member of this room" ctx.agent_name)
   else
-  let agent_tool_names = keeper_agent_tool_names ctx in
+  let agent_tool_names =
+    match agent_tool_names with
+    | Some _ -> agent_tool_names
+    | None -> keeper_agent_tool_names ctx
+  in
   let result =
-    Coord.claim_next_r ctx.config ~agent_name:ctx.agent_name
-      ?agent_tool_names ()
+    Coord.claim_next_r ctx.config ~agent_name:ctx.agent_name ?agent_tool_names ()
   in
   let message = match result with
     | Coord.Claim_next_claimed { message; _ } ->
@@ -637,7 +644,7 @@ and handle_cancel_task ctx args =
        Log.Task.error "metrics record failed: %s" (Types.masc_error_to_string err));
   result_to_response result
 
-and handle_transition ctx args =
+and handle_transition ?agent_tool_names ctx args =
   (* Underscore-prefixed keys (e.g. "_agent_name") are internal protocol markers
      injected by the HTTP transport and dashboard client for identity
      propagation. They are consumed upstream in Agent_identity and must not
@@ -832,10 +839,14 @@ and handle_transition ctx args =
   in
   let rec try_transition attempt =
     let ev = if attempt = 0 then expected_version else None in
-    let agent_tool_names = keeper_agent_tool_names ctx in
+    let agent_tool_names =
+      match agent_tool_names with
+      | Some _ -> agent_tool_names
+      | None -> keeper_agent_tool_names ctx
+    in
     let r = Coord.transition_task_r ctx.config ~agent_name:ctx.agent_name
               ~task_id ~action ?expected_version:ev ~notes ~reason
-              ?agent_tool_names ?handoff_context () in
+              ?handoff_context ?agent_tool_names () in
     if is_version_mismatch r && attempt < max_cas_retries then begin
       Log.Task.info "CAS version mismatch on %s (attempt %d/%d), retrying in %.0fms"
         task_id (attempt + 1) max_cas_retries (cas_retry_delay_s *. 1000.0);
@@ -1006,12 +1017,13 @@ let handle_task_history ctx args =
 
 include Tool_task_schemas
 (* Dispatch function *)
-let dispatch ctx ~name ~args : tool_result option =
+let dispatch ?agent_tool_names ctx ~name ~args : tool_result option =
   match name with
   | "masc_add_task" -> Some (handle_add_task ctx args)
   | "masc_batch_add_tasks" -> Some (handle_batch_add_tasks ctx args)
-  | "masc_claim_next" -> Some (handle_claim_next ctx args)
-  | "masc_transition" -> Some (handle_transition ctx args)
+  | "masc_claim_task" -> Some (handle_claim ?agent_tool_names ctx args)
+  | "masc_claim_next" -> Some (handle_claim_next ?agent_tool_names ctx args)
+  | "masc_transition" -> Some (handle_transition ?agent_tool_names ctx args)
   | "masc_update_priority" -> Some (handle_update_priority ctx args)
   | "masc_tasks" -> Some (handle_tasks ctx args)
   | "masc_task_history" -> Some (handle_task_history ctx args)

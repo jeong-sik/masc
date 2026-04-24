@@ -21,8 +21,9 @@ import {
 import { TimeAgo } from './common/time-ago'
 import type { Keeper } from '../types'
 import { invalidateDashboardCache, refreshDashboard } from '../store'
-import { selectKeeper } from '../keeper-runtime'
-import { keeperStatusDetails } from '../keeper-state'
+import { hydrateKeeperStatus, selectKeeper } from '../keeper-runtime'
+import { activeKeeperName, keeperStatusDetails } from '../keeper-state'
+import { registerKeeperTurnRefresh } from '../sse-store'
 import { findKeeper } from '../lib/keeper-utils'
 import {
   KeeperConversationPanel,
@@ -86,6 +87,18 @@ export {
 // ── Route state / fallback selection ──────────────────────
 
 export const selectedKeeper = signal<Keeper | null>(null)
+
+registerKeeperTurnRefresh((keeperName: string) => {
+  if (keeperName !== activeKeeperName.value) return
+  void hydrateKeeperStatus(keeperName, true)
+  void import('./keeper-trajectory-timeline')
+    .then(({ loadTrajectory }) => {
+      void loadTrajectory(keeperName)
+    })
+    .catch(err => {
+      console.debug('[keeper] trajectory refresh unavailable', err instanceof Error ? err.message : '')
+    })
+})
 
 function selectedKeeperMatches(keeperName: string): boolean {
   const selected = selectedKeeper.value

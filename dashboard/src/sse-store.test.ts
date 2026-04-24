@@ -1,10 +1,11 @@
 import { signal } from '@preact/signals'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { RouteState } from './types'
 
 void vi
 
-const route = {
-  value: { tab: 'overview' as const, params: {}, postId: null },
+const route: { value: RouteState } = {
+  value: { tab: 'overview', params: {}, postId: null },
 }
 type CurrentRoute = typeof route.value
 
@@ -20,6 +21,7 @@ const refreshDashboard = vi.fn<() => Promise<void>>(async () => {})
 const refreshExecution = vi.fn<() => Promise<void>>(async () => {})
 const refreshBoard = vi.fn<() => void>(() => {})
 const invalidateDashboardCache = vi.fn<() => void>(() => {})
+const hydrateShellSnapshot = vi.fn<(payload: unknown) => void>(() => {})
 const hydrateExecutionSnapshot = vi.fn<(payload: unknown) => void>(() => {})
 const removeBoardPost = vi.fn<(postId?: string) => void>(() => {})
 const refreshForRoute = vi.fn<(nextRoute: CurrentRoute) => void>()
@@ -38,6 +40,7 @@ async function loadSseStore() {
   vi.doMock('./store', () => ({
     keeperHeartbeats,
     invalidateDashboardCache,
+    hydrateShellSnapshot,
     hydrateExecutionSnapshot,
     refreshDashboard,
     refreshExecution,
@@ -76,6 +79,7 @@ describe('setupSSEReaction reconnect hydration', () => {
     refreshExecution.mockClear()
     refreshBoard.mockClear()
     invalidateDashboardCache.mockClear()
+    hydrateShellSnapshot.mockClear()
     hydrateExecutionSnapshot.mockClear()
     removeBoardPost.mockClear()
     refreshForRoute.mockClear()
@@ -145,6 +149,69 @@ describe('setupSSEReaction reconnect hydration', () => {
       },
     })
     expect(requestNamespaceTruthNow).not.toHaveBeenCalled()
+
+    cleanup()
+  })
+
+  it('does not refresh hidden heavy surfaces for keeper lifecycle events on overview', async () => {
+    const { sseStore, sse } = await loadSseStore()
+    const refreshOperator = vi.fn()
+    sseStore.registerOperatorRefresh(refreshOperator)
+    route.value = { tab: 'overview', params: {}, postId: null }
+    const cleanup = sseStore.setupSSEReaction()
+
+    sse.lastEvent.value = {
+      type: 'keeper_phase_changed',
+      name: 'qa-king',
+      prev_phase: 'running',
+      new_phase: 'failing',
+    }
+    vi.advanceTimersByTime(1_000)
+    await flushAsyncWork()
+
+    expect(refreshExecution).not.toHaveBeenCalled()
+    expect(refreshOperator).not.toHaveBeenCalled()
+
+    cleanup()
+  })
+
+  it('routes execution SSE refreshes only when the current route needs execution data', async () => {
+    const { sseStore, sse } = await loadSseStore()
+    route.value = { tab: 'monitoring', params: { section: 'agents' }, postId: null }
+    const cleanup = sseStore.setupSSEReaction()
+
+    sse.lastEvent.value = {
+      type: 'keeper_phase_changed',
+      name: 'qa-king',
+      prev_phase: 'running',
+      new_phase: 'failing',
+    }
+    vi.advanceTimersByTime(1_000)
+    await flushAsyncWork()
+
+    expect(refreshExecution).toHaveBeenCalledTimes(1)
+    expect(refreshExecution).toHaveBeenCalledWith()
+
+    cleanup()
+  })
+
+  it('keeps operator lifecycle refreshes scoped to the command route', async () => {
+    const { sseStore, sse } = await loadSseStore()
+    const refreshOperator = vi.fn()
+    sseStore.registerOperatorRefresh(refreshOperator)
+    route.value = { tab: 'command', params: {}, postId: null }
+    const cleanup = sseStore.setupSSEReaction()
+
+    sse.lastEvent.value = {
+      type: 'keeper_turn_complete',
+      name: 'qa-king',
+      turn: 42,
+    }
+    vi.advanceTimersByTime(1_000)
+    await flushAsyncWork()
+
+    expect(refreshOperator).toHaveBeenCalledTimes(1)
+    expect(refreshExecution).not.toHaveBeenCalled()
 
     cleanup()
   })

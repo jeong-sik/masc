@@ -1,6 +1,7 @@
 // Agent detail shared state, selectors, data fetching, and utility functions
 
 import { signal } from '@preact/signals'
+import { selectedAgentName } from './agent-detail-selection'
 import { showToast } from './common/toast'
 import {
   agents,
@@ -26,10 +27,10 @@ export type TaskHistoryRow = {
   taskId: string
   text: string
 }
+export { selectedAgentName } from './agent-detail-selection'
 
 // --- Signals ---
 
-export const selectedAgentName = signal<string | null>(null)
 export const loading = signal(false)
 export const detailError = signal('')
 export const namespaceActivity = signal<string[]>([])
@@ -116,6 +117,19 @@ export function setKeeperRedirect(fn: (agentName: string) => boolean): void {
 
 export function openAgentDetail(agentName: string): void {
   if (_keeperRedirect && _keeperRedirect(agentName)) return
+  const keeper = keeperForAgent(agentName)
+  if (keeper) {
+    void import('./keeper-detail')
+      .then(({ openKeeperDetail }) => {
+        openKeeperDetail(keeper)
+      })
+      .catch(err => {
+        console.warn('[agent-detail] keeper redirect failed', err instanceof Error ? err.message : err)
+        selectedAgentName.value = agentName
+        void refreshAgentDetail()
+      })
+    return
+  }
   selectedAgentName.value = agentName
   void refreshAgentDetail()
 }

@@ -292,8 +292,9 @@ let rec add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/shell" (fun request reqd ->
        with_public_read (fun state req reqd ->
+         let light = Server_utils.bool_query_param req "light" ~default:false in
          let json =
-           dashboard_shell_http_json ?clock:state.Mcp_server.clock ~request:req
+           dashboard_shell_http_json ?clock:state.Mcp_server.clock ~request:req ~light
              state.Mcp_server.room_config
          in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd

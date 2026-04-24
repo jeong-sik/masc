@@ -100,8 +100,13 @@ type AbortableRequestOptions = {
   signal?: AbortSignal
 }
 
-export function fetchDashboardShell(opts?: AbortableRequestOptions): Promise<DashboardShellResponse> {
-  return get('/api/v1/dashboard/shell', { signal: opts?.signal })
+type DashboardShellRequestOptions = AbortableRequestOptions & {
+  light?: boolean
+}
+
+export function fetchDashboardShell(opts?: DashboardShellRequestOptions): Promise<DashboardShellResponse> {
+  const qs = opts?.light ? '?light=true' : ''
+  return get(`/api/v1/dashboard/shell${qs}`, { signal: opts?.signal })
 }
 
 // --- System logs ---

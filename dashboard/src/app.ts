@@ -3,6 +3,7 @@
 
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
+import { lazy, Suspense } from 'preact/compat'
 import { signal } from '@preact/signals'
 import { persistentSignal } from './lib/persistent-signal'
 import { route, initRouter } from './router'
@@ -14,10 +15,10 @@ import {
 } from './sse'
 import { requestNamespaceTruthNow, disposeNamespaceTruthScheduler } from './namespace-truth-store'
 import { cancelPendingSSERefreshes, registerMissionRefresh, setupSSEReaction, startPeriodicRefresh, stopPeriodicRefresh } from './sse-store'
-import { refreshForRoute } from './tab-refresh'
 import { refreshMissionSnapshot } from './mission-store'
 import { replayOasRuntimeTelemetry } from './oas-runtime-store'
 import { refreshShell } from './store'
+import { connectDashboardWS, disconnectDashboardWS, subscribeDashboardRoute } from './dashboard-ws'
 import { ensureDevToken } from './api/mcp'
 import {
   BuildIdentityBadge,
@@ -27,13 +28,13 @@ import {
   SideRail,
 } from './components/dashboard-shell'
 import { ThemeSwitch } from './components/theme-switch'
-import { AgentDetailOverlay } from './components/agent-detail'
-import { TaskDetailOverlay } from './components/goals/task-detail-overlay'
+import { selectedAgentName } from './components/agent-detail-selection'
+import { selectedTask } from './components/goals/task-detail-selection'
 import { ToastContainer } from './components/common/toast'
 import { ConfirmDialogOverlay } from './components/common/confirm-dialog'
 import { CommandPalette } from './components/common/command-palette'
 import { AuthStatus, RemoteWarningBanner } from './components/auth-status'
-import { startErrorCleanup, stopErrorCleanup } from './components/common/error-notification'
+import { startErrorCleanup, stopErrorCleanup } from './components/common/error-notification-state'
 import { DASHBOARD_NAV_ITEMS, currentSectionForRoute } from './config/navigation'
 import { Menu, X } from 'lucide-preact'
 
@@ -45,6 +46,23 @@ const sidebarCollapsed = persistentSignal<boolean>({
   defaultValue: false,
 })
 const mobileMenuOpen = signal(false)
+const LazyAgentDetailOverlay = lazy(async () => ({
+  default: (await import('./components/agent-detail')).AgentDetailOverlay,
+}))
+const LazyTaskDetailOverlay = lazy(async () => ({
+  default: (await import('./components/goals/task-detail-overlay')).TaskDetailOverlay,
+}))
+
+function refreshCurrentRoute(options?: { recordVisit?: boolean }): void {
+  const routeState = route.value
+  void import('./tab-refresh')
+    .then(({ refreshForRoute }) => {
+      refreshForRoute(routeState, options)
+    })
+    .catch(err => {
+      console.warn('[app] route refresh unavailable', err instanceof Error ? err.message : err)
+    })
+}
 
 export function App() {
   useEffect(() => {
@@ -55,7 +73,7 @@ export function App() {
 
     // Prime the lightweight shell status first so build/version metadata lands
     // while the project snapshot warms heavier execution/command projections.
-    void refreshShell()
+    void refreshShell({ light: true })
     requestNamespaceTruthNow()
 
     // Replay durable OAS state before opening the live SSE tail.
@@ -72,6 +90,7 @@ export function App() {
           })
           .finally(() => {
             if (cancelled) return
+            void connectDashboardWS(route.value)
             connectSSE()
             resumeQueuedOasRuntimeIngress()
           })
@@ -92,6 +111,7 @@ export function App() {
 
     return () => {
       cancelled = true
+      disconnectDashboardWS()
       disconnectSSE()
       unsubSSE()
       stopPeriodicRefresh()
@@ -104,8 +124,9 @@ export function App() {
     // Cancel any pending SSE-triggered refreshes from the previous tab
     // to prevent stale fetch results arriving after navigation (C-4/M-12).
     cancelPendingSSERefreshes()
-    refreshForRoute(route.value, { recordVisit: true })
-  }, [route.value.tab, route.value.params.section, route.value.params.q])
+    void subscribeDashboardRoute(route.value)
+    refreshCurrentRoute({ recordVisit: true })
+  }, [route.value.tab, route.value.params.section, route.value.params.view, route.value.params.q])
 
   const currentTab = route.value.tab
   const currentView = DASHBOARD_NAV_ITEMS.find(item => item.id === currentTab)
@@ -171,8 +192,12 @@ export function App() {
         </main>
       </div>
 
-      <${AgentDetailOverlay} />
-      <${TaskDetailOverlay} />
+      ${selectedAgentName.value
+        ? html`<${Suspense} fallback=${null}><${LazyAgentDetailOverlay} /><//>`
+        : null}
+      ${selectedTask.value
+        ? html`<${Suspense} fallback=${null}><${LazyTaskDetailOverlay} /><//>`
+        : null}
       <${ToastContainer} />
       <${ConfirmDialogOverlay} />
       <${CommandPalette} />

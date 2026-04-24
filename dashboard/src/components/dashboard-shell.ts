@@ -23,7 +23,7 @@ import { ChevronRight, ChevronLeft } from 'lucide-preact'
 import { ScrollToTopButton } from './common/scroll-to-top'
 import { CopyIdButton } from './common/copy-id-button'
 import { formatElapsedCompact } from '../lib/format-time'
-import { unacknowledgedCount } from './common/error-notification'
+import { unacknowledgedCount } from './common/error-notification-state'
 import { ErrorPanel } from './common/error-panel'
 import { Bell } from 'lucide-preact'
 

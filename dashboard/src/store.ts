@@ -20,6 +20,7 @@ import type {
   DashboardRuntimeResolution,
   DashboardShellAuthSummary,
   DashboardShellMetaCognitionSummary,
+  DashboardShellResponse,
 } from './types'
 import {
   fetchDashboardExecution,
@@ -368,12 +369,14 @@ export const staleKeepers: ReadonlySignal<Set<string>> = computed(() => {
 
 interface RefreshOptions {
   force?: boolean
+  light?: boolean
 }
 
 // TTL values from config/constants.ts
 
 let inflightDashboardRefresh: Promise<void> | null = null
 let inflightShellRefresh: Promise<void> | null = null
+let inflightShellRefreshLight = false
 let lastShellRefreshAt = 0
 
 export function invalidateDashboardCache(): void {
@@ -452,37 +455,52 @@ function normalizeShellAuthSummary(raw: unknown): DashboardShellAuthSummary | nu
   }
 }
 
+export function hydrateShellSnapshot(data: DashboardShellResponse, opts?: { light?: boolean }): void {
+  const wantsLight = opts?.light === true
+  const normalizedAuth = normalizeShellAuthSummary(data.auth)
+  setCanonicalDashboardActor(
+    normalizedAuth?.token_valid
+      ? normalizedAuth.effective_agent ?? normalizedAuth.token_agent ?? null
+      : null,
+  )
+  const normalizedStatus = normalizeServerStatus(data.status, data.generated_at)
+  if (normalizedStatus) {
+    serverStatus.value = mergeServerStatus(serverStatus.value, normalizedStatus)
+  }
+  if (data.counts) {
+    shellCounts.value = {
+      agents: data.counts.agents ?? 0,
+      tasks: data.counts.tasks ?? 0,
+      keepers: data.counts.keepers ?? 0,
+      total_runtimes: data.counts.total_runtimes ?? ((data.counts.agents ?? 0) + (data.counts.keepers ?? 0)),
+      configured_keepers: data.configured_keepers ?? 0,
+    }
+  }
+  shellMetaCognition.value = normalizeShellMetaCognitionSummary(data.meta_cognition)
+  shellAuthSummary.value = normalizedAuth
+  const normalizedConfigResolution = normalizeDashboardConfigResolution(data.config_resolution)
+  const normalizedRuntimeResolution = normalizeDashboardRuntimeResolution(data.runtime_resolution)
+  if (!wantsLight || normalizedConfigResolution) {
+    shellConfigResolution.value = normalizedConfigResolution
+  }
+  if (!wantsLight || normalizedRuntimeResolution) {
+    shellRuntimeResolution.value = normalizedRuntimeResolution
+  }
+  lastShellRefreshAt = Date.now()
+}
+
 export async function refreshShell(opts?: RefreshOptions): Promise<void> {
-  if (inflightShellRefresh) return inflightShellRefresh
+  const wantsLight = opts?.light === true
+  if (inflightShellRefresh) {
+    if (wantsLight || !inflightShellRefreshLight) return inflightShellRefresh
+    await inflightShellRefresh
+  }
   if (!opts?.force && Date.now() - lastShellRefreshAt < SHELL_TTL_MS) return
+  inflightShellRefreshLight = wantsLight
   inflightShellRefresh = (async () => {
     try {
-      const data = await fetchDashboardShell()
-      const normalizedAuth = normalizeShellAuthSummary(data.auth)
-      setCanonicalDashboardActor(
-        normalizedAuth?.token_valid
-          ? normalizedAuth.effective_agent ?? normalizedAuth.token_agent ?? null
-          : null,
-      )
-      const normalizedStatus = normalizeServerStatus(data.status, data.generated_at)
-      if (normalizedStatus) {
-        serverStatus.value = mergeServerStatus(serverStatus.value, normalizedStatus)
-      }
-      // Extract lightweight counts for fast initial render (before execution loads)
-      if (data.counts) {
-        shellCounts.value = {
-          agents: data.counts.agents ?? 0,
-          tasks: data.counts.tasks ?? 0,
-          keepers: data.counts.keepers ?? 0,
-          total_runtimes: data.counts.total_runtimes ?? ((data.counts.agents ?? 0) + (data.counts.keepers ?? 0)),
-          configured_keepers: data.configured_keepers ?? 0,
-        }
-      }
-      shellMetaCognition.value = normalizeShellMetaCognitionSummary(data.meta_cognition)
-      shellAuthSummary.value = normalizedAuth
-      shellConfigResolution.value = normalizeDashboardConfigResolution(data.config_resolution)
-      shellRuntimeResolution.value = normalizeDashboardRuntimeResolution(data.runtime_resolution)
-      lastShellRefreshAt = Date.now()
+      const data = await fetchDashboardShell({ light: wantsLight })
+      hydrateShellSnapshot(data, { light: wantsLight })
     } catch (err) {
       setCanonicalDashboardActor(null)
       shellAuthSummary.value = null
@@ -490,6 +508,7 @@ export async function refreshShell(opts?: RefreshOptions): Promise<void> {
       showToast('서버 연결 실패 — 데이터를 불러올 수 없습니다', 'error', 6000)
     } finally {
       inflightShellRefresh = null
+      inflightShellRefreshLight = false
     }
   })()
   return inflightShellRefresh

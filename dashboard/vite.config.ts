@@ -29,6 +29,7 @@ export default defineConfig(({ command }) => {
             '/api': proxyTarget,
             '/mcp': { target: proxyTarget },
             '/sse': { target: proxyTarget },
+            '/ws': { target: proxyTarget },
           },
         }
       : undefined,

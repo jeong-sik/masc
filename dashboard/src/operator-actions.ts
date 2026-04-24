@@ -192,6 +192,6 @@ export async function confirmOperatorPendingAction(
 }
 
 registerOperatorRefresh(() => {
-  void refreshOperatorSnapshot({ force: true })
-  void refreshOperatorRoomDigest({ force: true })
+  void refreshOperatorSnapshot()
+  void refreshOperatorRoomDigest()
 })

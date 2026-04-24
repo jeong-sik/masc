@@ -25,7 +25,7 @@ import {
   keeperPrimaryName,
 } from './common/keeper-identity'
 import { AgentAvatar } from './overview/agent-avatar'
-import { openAgentDetail } from './agent-detail'
+import { openAgentDetail } from './agent-detail-state'
 import { openKeeperDetail } from './keeper-detail'
 import { formatDuration, trimText } from './mission-utils'
 import { formatTokens } from '../lib/format-number'

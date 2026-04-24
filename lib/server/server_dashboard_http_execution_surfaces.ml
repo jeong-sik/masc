@@ -13,11 +13,7 @@ let warm_shell_cache (state : Mcp_server.server_state) =
     (fun () ->
       let t0 = Time_compat.now () in
       (try
-         let cache_key =
-           Printf.sprintf "shell:coord=%s:workspace=%s"
-             state.Mcp_server.room_config.base_path
-             state.Mcp_server.room_config.workspace_path
-         in
+         let cache_key = dashboard_shell_cache_key state.Mcp_server.room_config in
          let compute () =
            dashboard_shell_payload_json state.Mcp_server.room_config
          in
@@ -136,6 +132,12 @@ let _transport_health_cache =
           `String "Transport health data is warming up. Refresh in a few seconds."
         );
       ])
+
+let dashboard_execution_snapshot_json () =
+  cached_surface_json _execution_cache
+
+let dashboard_transport_health_snapshot_json () =
+  cached_surface_json _transport_health_cache
 
 (* Issue #8396: cache patchers used to recognise only 7 lifecycle event
    names while [Keeper_lifecycle_events.all_event_names] now publishes

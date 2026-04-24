@@ -378,6 +378,85 @@ let handle_resources_unsubscribe_eio id ?mcp_session_id params =
   | Some _, None -> make_error ~id (-32602) "Missing params"
   | Some _, Some _ -> make_error ~id (-32602) "Invalid params: expected object"
 
+let optional_string_member key fields =
+  match List.assoc_opt key fields with
+  | Some (`String value) ->
+      let trimmed = String.trim value in
+      if trimmed = "" then None else Some trimmed
+  | Some `Null | None -> None
+  | Some _ -> None
+
+let string_list_member key fields =
+  match List.assoc_opt key fields with
+  | Some (`List values) ->
+      values
+      |> List.filter_map (function
+        | `String value ->
+            let trimmed = String.trim value in
+            if trimmed = "" then None else Some trimmed
+        | _ -> None)
+  | _ -> []
+
+let dashboard_response_or_error id = function
+  | Ok result -> make_response ~id result
+  | Error msg -> make_error ~id (-32600) msg
+
+let handle_dashboard_hello_eio state id ?mcp_session_id params =
+  match (mcp_session_id, params) with
+  | None, _ -> make_error ~id (-32600) "dashboard/hello requires a WebSocket session"
+  | Some session_id, Some (`Assoc fields) ->
+      let token = optional_string_member "token" fields in
+      Server_mcp_transport_ws.dashboard_hello
+        ~base_path:state.Mcp_server.room_config.base_path ~session_id ?token ()
+      |> dashboard_response_or_error id
+  | Some _, None -> make_error ~id (-32602) "Missing params"
+  | Some _, Some _ -> make_error ~id (-32602) "Invalid params: expected object"
+
+let handle_dashboard_subscribe_eio state id ?mcp_session_id params =
+  match (mcp_session_id, params) with
+  | None, _ ->
+      make_error ~id (-32600) "dashboard/subscribe requires a WebSocket session"
+  | Some session_id, Some (`Assoc fields) ->
+      let route = optional_string_member "route" fields in
+      let slices = string_list_member "slices" fields in
+      let slices =
+        if slices = [] then [ "shell"; "namespace"; "transport" ] else slices
+      in
+      ignore state;
+      Server_mcp_transport_ws.dashboard_subscribe ~session_id ?route ~slices ()
+      |> dashboard_response_or_error id
+  | Some _, None -> make_error ~id (-32602) "Missing params"
+  | Some _, Some _ -> make_error ~id (-32602) "Invalid params: expected object"
+
+let handle_dashboard_unsubscribe_eio id ?mcp_session_id params =
+  match (mcp_session_id, params) with
+  | None, _ ->
+      make_error ~id (-32600) "dashboard/unsubscribe requires a WebSocket session"
+  | Some session_id, Some (`Assoc fields) ->
+      let slices = string_list_member "slices" fields in
+      let slices_opt = if slices = [] then None else Some slices in
+      Server_mcp_transport_ws.dashboard_unsubscribe ~session_id ?slices:slices_opt
+        ()
+      |> dashboard_response_or_error id
+  | Some session_id, None ->
+      Server_mcp_transport_ws.dashboard_unsubscribe ~session_id ()
+      |> dashboard_response_or_error id
+  | Some _, Some _ -> make_error ~id (-32602) "Invalid params: expected object"
+
+let handle_dashboard_ack_eio id ?mcp_session_id params =
+  match (mcp_session_id, params) with
+  | None, _ -> make_error ~id (-32600) "dashboard/ack requires a WebSocket session"
+  | Some session_id, Some (`Assoc fields) ->
+      let seq =
+        match List.assoc_opt "seq" fields with
+        | Some (`Int n) -> n
+        | _ -> 0
+      in
+      Server_mcp_transport_ws.dashboard_ack ~session_id ~seq
+      |> dashboard_response_or_error id
+  | Some _, None -> make_error ~id (-32602) "Missing params"
+  | Some _, Some _ -> make_error ~id (-32602) "Invalid params: expected object"
+
 let contains_casefold = Mcp_server_eio_call_tool.contains_casefold
 
 let tool_call_outcome (json : Yojson.Safe.t) =
@@ -487,6 +566,17 @@ let handle_request
                        handle_resources_subscribe_eio id ?mcp_session_id req.params
                    | "resources/unsubscribe" ->
                        handle_resources_unsubscribe_eio id ?mcp_session_id req.params
+                   | "dashboard/hello" ->
+                       handle_dashboard_hello_eio state id ?mcp_session_id
+                         req.params
+                   | "dashboard/subscribe" ->
+                       handle_dashboard_subscribe_eio state id ?mcp_session_id
+                         req.params
+                   | "dashboard/unsubscribe" ->
+                       handle_dashboard_unsubscribe_eio id ?mcp_session_id
+                         req.params
+                   | "dashboard/ack" ->
+                       handle_dashboard_ack_eio id ?mcp_session_id req.params
                    | "prompts/list" -> (
                        match TP.parse_cursor_only_params req.params with
                        | Error msg -> make_error ~id (-32602) msg

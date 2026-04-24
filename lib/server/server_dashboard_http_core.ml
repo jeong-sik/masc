@@ -808,10 +808,11 @@ let meta_cognition_summary_empty_json =
 let dashboard_shell_cache_prefix (config : Coord.config) =
   Printf.sprintf "shell:coord=%s:" config.base_path
 
-let dashboard_shell_cache_key (config : Coord.config) =
-  Printf.sprintf "%sworkspace=%s"
+let dashboard_shell_cache_key ?(light = false) (config : Coord.config) =
+  Printf.sprintf "%sworkspace=%s:mode=%s"
     (dashboard_shell_cache_prefix config)
     config.workspace_path
+    (if light then "light" else "full")
 
 let meta_cognition_summary_key (config : Coord.config) =
   dashboard_cache_key config "meta_cognition_summary" "dashboard_shell"
@@ -951,7 +952,7 @@ let is_dashboard_cache_timeout_json = function
       | _ -> false)
   | _ -> false
 
-let dashboard_shell_payload_json (config : Coord.config) : Yojson.Safe.t =
+let dashboard_shell_payload_json ?(light = false) (config : Coord.config) : Yojson.Safe.t =
   let cluster = Env_config_core.cluster_name () in
   let started_at = Unix.gettimeofday () in
   let measure_ms f =
@@ -984,21 +985,26 @@ let dashboard_shell_payload_json (config : Coord.config) : Yojson.Safe.t =
   let meta_cognition_r = ref (`Null, 0) in
   let config_resolution_r = ref (`Null, 0) in
   let runtime_resolution_r = ref (`Null, 0) in
-  Eio.Fiber.all
-    [
-      (fun () ->
-        meta_cognition_r :=
-          measure_json_projection "meta_cognition" (fun () ->
-              meta_cognition_summary_cached config));
-      (fun () ->
-        config_resolution_r :=
-          measure_json_projection "config_resolution" (fun () ->
-              Config_dir_resolver.(resolve () |> to_json)));
-      (fun () ->
-        runtime_resolution_r :=
-          measure_json_projection "runtime_resolution" (fun () ->
-              Server_dashboard_http_runtime_info.runtime_resolution_json config));
-    ];
+  if light then
+    meta_cognition_r :=
+      measure_json_projection "meta_cognition" (fun () ->
+          meta_cognition_summary_cached config)
+  else
+    Eio.Fiber.all
+      [
+        (fun () ->
+          meta_cognition_r :=
+            measure_json_projection "meta_cognition" (fun () ->
+                meta_cognition_summary_cached config));
+        (fun () ->
+          config_resolution_r :=
+            measure_json_projection "config_resolution" (fun () ->
+                Config_dir_resolver.(resolve () |> to_json)));
+        (fun () ->
+          runtime_resolution_r :=
+            measure_json_projection "runtime_resolution" (fun () ->
+                Server_dashboard_http_runtime_info.runtime_resolution_json config));
+      ];
   let meta_cognition_json, meta_cognition_ms = !meta_cognition_r in
   let config_resolution_json, config_resolution_ms = !config_resolution_r in
   let runtime_resolution_json, runtime_resolution_ms = !runtime_resolution_r in
@@ -1037,6 +1043,7 @@ let dashboard_shell_payload_json (config : Coord.config) : Yojson.Safe.t =
            ("meta_cognition_ms", `Int meta_cognition_ms);
            ("config_resolution_ms", `Int config_resolution_ms);
            ("runtime_resolution_ms", `Int runtime_resolution_ms);
+           ("light", `Bool light);
          ]
 
 let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Coord.config) :
@@ -1186,12 +1193,12 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Coord.conf
       ("keeper_msg_error", Json_util.string_opt_to_json keeper_msg_error);
     ]
 
-let dashboard_shell_http_json ?clock ?request (config : Coord.config) : Yojson.Safe.t =
-  let cache_key = dashboard_shell_cache_key config in
+let dashboard_shell_http_json ?clock ?request ?(light = false) (config : Coord.config) : Yojson.Safe.t =
+  let cache_key = dashboard_shell_cache_key ~light config in
   let compute () =
     (* Shell endpoint is read-only; use config directly without isolation
        since state is not available in this context. *)
-    dashboard_shell_payload_json config
+    dashboard_shell_payload_json ~light config
   in
   let clock_opt =
     match clock with

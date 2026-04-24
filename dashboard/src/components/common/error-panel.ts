@@ -6,7 +6,7 @@ import {
   unacknowledgedErrors,
   acknowledgeError,
   clearAllErrors,
-} from './error-notification'
+} from './error-notification-state'
 import type { ErrorCode, ErrorSeverity } from '../../types/error'
 import { formatElapsedCompact } from '../../lib/format-time'
 

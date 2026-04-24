@@ -34,6 +34,7 @@ type similarity_measurement = {
   repetition_risk : float;
   goal_alignment : float;
   response_alignment : float;
+  similarity_measurable : bool;
 }
 
 type timing_measurement = {
@@ -96,6 +97,7 @@ let capture
       ~repetition_risk
       ~goal_alignment
       ~response_alignment
+      ?(similarity_measurable = true)
       ~now_ts
       ~idle_seconds
       ~since_last_compaction_sec
@@ -121,6 +123,7 @@ let capture
       { repetition_risk
       ; goal_alignment
       ; response_alignment
+      ; similarity_measurable
       }
   ; timing =
       { now_ts
@@ -152,6 +155,7 @@ let measurement_snapshot_to_json (s : measurement_snapshot) : Yojson.Safe.t =
       "repetition_risk", `Float s.similarity.repetition_risk;
       "goal_alignment", `Float s.similarity.goal_alignment;
       "response_alignment", `Float s.similarity.response_alignment;
+      "similarity_measurable", `Bool s.similarity.similarity_measurable;
     ];
     "timing", `Assoc [
       "now_ts", `Float s.timing.now_ts;

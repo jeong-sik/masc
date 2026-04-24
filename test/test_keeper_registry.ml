@@ -159,6 +159,7 @@ let test_dispatch_event_with_audit_preserves_snapshot () =
         { repetition_risk = 0.95
         ; goal_alignment = 0.1
         ; response_alignment = 0.1
+        ; similarity_measurable = true
         }
     ; timing =
         { now_ts = 1000.0

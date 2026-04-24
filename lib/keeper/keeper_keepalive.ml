@@ -789,6 +789,13 @@ let write_heartbeat_snapshot
         jaccard_similarity user_message assistant_message
       | _ -> 0.0
     in
+    (* status_tick / heartbeat turns lack a user/assistant pair, so the 0.0
+       fallbacks above are sentinels, not measurements. Mark the snapshot
+       non-measurable and let Keeper_guard fail-closed on similarity gates. *)
+    let similarity_measurable =
+      Option.is_some latest_user_message
+      && Option.is_some latest_assistant_message
+    in
     let context_ratio_v = match ctx_opt with
       | Some c -> Keeper_exec_context.context_ratio c
       | None -> 0.0
@@ -867,6 +874,7 @@ let write_heartbeat_snapshot
         ~repetition_risk
         ~goal_alignment
         ~response_alignment
+        ~similarity_measurable
         ~now_ts
         ~idle_seconds:0
         ~since_last_compaction_sec

@@ -26,9 +26,14 @@ let evaluate (s : measurement_snapshot) : event list =
   let events = ref [] in
   let add ev = events := ev :: !events in
 
-  (* 1. Guardrail: 4-way AND gate *)
+  (* 1. Guardrail: 4-way AND gate.
+     Fail-closed when similarity is not measurable (e.g. status_tick without
+     a user/assistant pair) — the goal_alignment / response_alignment floats
+     are 0.0 sentinels in that case, which would otherwise satisfy the two
+     [<=] comparisons trivially. See #10012. *)
   let guardrail_fired =
-    s.similarity.repetition_risk >= t.guardrail_repetition_threshold
+    s.similarity.similarity_measurable
+    && s.similarity.repetition_risk >= t.guardrail_repetition_threshold
     && s.similarity.goal_alignment <= t.guardrail_goal_alignment_threshold
     && s.similarity.response_alignment <= t.guardrail_response_alignment_threshold
     && s.context.context_ratio >= t.guardrail_context_threshold
@@ -105,7 +110,8 @@ let evaluate (s : measurement_snapshot) : event list =
     auto_rules = {
       reflect = s.similarity.repetition_risk >= t.reflect_repetition_threshold;
       plan =
-        s.similarity.goal_alignment <= t.plan_goal_alignment_threshold
+        s.similarity.similarity_measurable
+        && s.similarity.goal_alignment <= t.plan_goal_alignment_threshold
         && s.similarity.response_alignment <= t.plan_response_alignment_threshold;
       compact = (compact_ratio || compact_msg || compact_tok) && cooldown_ok;
       handoff =

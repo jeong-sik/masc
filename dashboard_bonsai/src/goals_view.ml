@@ -387,7 +387,7 @@ let rec view_node ~(depth : int) (n : Goals_types.node) : Node.t =
                  ~attrs:[ Style.conv_bar_wrap ]
                  [ Node.text (Printf.sprintf "%d%%" n.convergence_pct)
                  ; Node.div
-                     ~attrs:[ Style.conv_bar; Attr.role "progressbar"
+                     ~attrs:[ Style.conv_bar; Attr.role "progressbar"; Attr.arialabel "Goal convergence"
                             ; Attr.create "aria-valuenow" (Int.to_string n.convergence_pct)
                             ; Attr.create "aria-valuemin" "0"
                             ; Attr.create "aria-valuemax" "100" ]

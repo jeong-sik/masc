@@ -393,7 +393,7 @@ let view_meta_panel (r : Overview_types.response) =
                 ~attrs:[ Style.v ]
                 [ Node.text (Printf.sprintf "%d%%" pct)
                 ; Node.div
-                    ~attrs:[ Style.stag_bar; Attr.role "progressbar"
+                    ~attrs:[ Style.stag_bar; Attr.role "progressbar"; Attr.arialabel "Stagnation score"
                            ; Attr.create "aria-valuenow" (Int.to_string pct)
                            ; Attr.create "aria-valuemin" "0"
                            ; Attr.create "aria-valuemax" "100" ]

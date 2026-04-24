@@ -231,6 +231,9 @@ let native_event_to_json (evt : Oas.Event_bus.event) : Yojson.Safe.t option =
         (wrap ~event_type:"handoff_completed" ~payload ~agent_name:from_agent ())
   | Oas.Event_bus.ContextCompacted
       { agent_name; before_tokens; after_tokens; phase } ->
+      (* #9935: compaction completed — clears any pending
+         imminent and fires action-taken counter. *)
+      Context_overflow_action_tracker.record_action ~keeper_name:agent_name;
       let payload =
         `Assoc
           [
@@ -245,6 +248,13 @@ let native_event_to_json (evt : Oas.Event_bus.event) : Yojson.Safe.t option =
     None  (* Internal; no SSE relay needed *)
   | Oas.Event_bus.ContextOverflowImminent
         { agent_name; estimated_tokens; limit_tokens; ratio } ->
+      (* #9935: track imminent→action pairing so an unanswered
+         overflow (no compact_started/compacted within grace
+         window) is observable via metric + warn log, rather
+         than silently burning out on oas_timeout_budget. *)
+      Context_overflow_action_tracker.record_imminent
+        ~keeper_name:agent_name
+        ~ts:(Time_compat.now ());
       let payload =
         `Assoc [
           ("agent_name", `String agent_name);
@@ -256,6 +266,9 @@ let native_event_to_json (evt : Oas.Event_bus.event) : Yojson.Safe.t option =
       Some (wrap ~event_type:"context_overflow_imminent" ~payload
               ~agent_name ())
   | Oas.Event_bus.ContextCompactStarted { agent_name; trigger } ->
+      (* #9935: compaction started — clears pending imminent
+         and fires action-taken counter. *)
+      Context_overflow_action_tracker.record_action ~keeper_name:agent_name;
       let payload =
         `Assoc [
           ("agent_name", `String agent_name);

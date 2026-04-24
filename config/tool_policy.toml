@@ -156,7 +156,12 @@ max_output_bytes = 8192
 # URLs not matching any org here are rejected.
 
 [git_clone]
-allowed_orgs = ["jeong-sik"]
+# Two GitHub identity surfaces for the operator:
+#   jeong-sik    — current canonical user (commit author, gh CLI default)
+#   yousleepwhen — personal namespace used in workspace/yousleepwhen/*
+# Both are explicitly listed so the keeper can clone repos referenced by
+# the workspace tree (#9783).
+allowed_orgs = ["jeong-sik", "yousleepwhen"]
 # Repos blocked even if org is allowed. Format: "org/repo" (lowercase).
 denied_repos = ["jeong-sik/me"]
 # Clone depth: 0 = full clone, N = shallow --depth N.

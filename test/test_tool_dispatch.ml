@@ -198,4 +198,42 @@ let () =
               check bool "contains error info" true
                 (String.length msg > 0 && Astring.String.is_infix ~affix:"boom" msg));
         ] );
+      ( "did_you_mean_9784",
+        [
+          test_case "find_similar_names returns close match" `Quick (fun () ->
+              register_full ~tool_name:"__sim_masc_claim_next" ~handler:echo_handler;
+              register_full ~tool_name:"__sim_masc_add_task" ~handler:echo_handler;
+              register_full ~tool_name:"__sim_masc_join" ~handler:echo_handler;
+              let suggestions =
+                Tool_dispatch.find_similar_names
+                  ~query:"__sim_masc_claim_task" ()
+              in
+              check bool "non-empty suggestions" true
+                (List.length suggestions >= 1);
+              check bool "top suggestion is closest" true
+                (List.hd suggestions = "__sim_masc_claim_next"));
+          test_case "find_similar_names empty when nothing close" `Quick (fun () ->
+              let suggestions =
+                Tool_dispatch.find_similar_names
+                  ~query:"completely_different_xyzqq_unrelated" ()
+              in
+              check int "no suggestions" 0 (List.length suggestions));
+          test_case "find_similar_names respects limit" `Quick (fun () ->
+              for i = 1 to 5 do
+                register_full
+                  ~tool_name:(Printf.sprintf "__limit_test_tool_%d" i)
+                  ~handler:echo_handler
+              done;
+              let suggestions =
+                Tool_dispatch.find_similar_names ~limit:2
+                  ~query:"__limit_test_tool_1" ()
+              in
+              check bool "at most 2 returned" true
+                (List.length suggestions <= 2));
+          test_case "all_registered_names enumerates registry" `Quick (fun () ->
+              register_full ~tool_name:"__enum_check_xyz" ~handler:echo_handler;
+              let all = Tool_dispatch.all_registered_names () in
+              check bool "contains registered name" true
+                (List.mem "__enum_check_xyz" all));
+        ] );
     ]

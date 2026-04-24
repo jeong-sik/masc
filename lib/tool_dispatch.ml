@@ -242,3 +242,40 @@ let mint_token ~name =
     Tool_token.mint_with
       ~validate:(fun n -> Hashtbl.mem tag_registry n || Hashtbl.mem registry n)
       ~name)
+
+(** Enumerate every tool name registered in either the tag_registry (primary)
+    or the handler registry (fallback). Used by [find_similar_names] to
+    drive "did you mean" suggestions for Unknown tool errors (#9784). *)
+let all_registered_names () =
+  with_dispatch_ro (fun () ->
+    let acc =
+      Hashtbl.fold (fun n _ a -> n :: a) tag_registry []
+    in
+    Hashtbl.fold
+      (fun n _ a -> if List.mem n a then a else n :: a)
+      registry acc)
+
+(* #9784: Unknown tool errors must include closest-name suggestions so the
+   LLM can self-correct on the next turn. Jaccard works well for snake_case
+   tool names because Text_similarity tokenizes on non-alphanumeric and
+   captures shared morphemes via byte n-grams. The default min_score 0.4
+   excludes unrelated names while accepting near-misses like
+   masc_claim_task -> masc_claim_next (Jaccard >= 0.5). *)
+let find_similar_names ?(limit = 3) ?(min_score = 0.4) ~query () =
+  let candidates = all_registered_names () in
+  let scored =
+    List.filter_map
+      (fun n ->
+        let s = Text_similarity.jaccard_similarity query n in
+        if s >= min_score then Some (s, n) else None)
+      candidates
+  in
+  let sorted =
+    List.sort (fun (a, _) (b, _) -> Float.compare b a) scored
+  in
+  let rec take k = function
+    | _ when k <= 0 -> []
+    | [] -> []
+    | (_, n) :: rest -> n :: take (k - 1) rest
+  in
+  take limit sorted

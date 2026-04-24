@@ -624,13 +624,25 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         Tool_inline_dispatch.dispatch inline_ctx ~name
   in
 
+  (* #9784: enrich Unknown tool errors with closest-name suggestions so the
+     LLM can self-correct on the next turn rather than re-emit the same
+     hallucinated name. Suggestions come from a similarity scan of the
+     full tool registry. *)
+  let format_unknown_tool_error ~reason =
+    let suggestions = Tool_dispatch.find_similar_names ~query:name () in
+    match suggestions with
+    | [] -> Printf.sprintf "Unknown tool: %s (%s)" name reason
+    | xs ->
+        Printf.sprintf "Unknown tool: %s — did you mean: %s? (%s)"
+          name (String.concat ", " xs) reason
+  in
   (* Primary dispatch: mint token at I/O boundary, then O(1) tag lookup.
      Tool_token validates the name exists in the tag registry (Parse, Don't
      Validate). If mint fails, the tool is truly unknown. *)
   match Tool_dispatch.mint_token ~name with
   | Error reason ->
       with_system_internal_audit ~agent_name
-        (false, Printf.sprintf "Unknown tool: %s (%s)" name reason)
+        (false, format_unknown_tool_error ~reason)
   | Ok _token ->
       (* Token proves the name is registered in at least one registry.
          lookup_tag None after mint is a registry inconsistency (tool in

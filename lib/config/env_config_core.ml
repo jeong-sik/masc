@@ -261,14 +261,81 @@ let base_path_raw_opt () =
 let base_path_opt () =
   base_path_raw_opt () |> Option.map normalize_masc_base_path_input
 
+(** [running_under_test_executable ()] mirrors the convention in
+    {!Config_dir_resolver}: the process's [Sys.executable_name]
+    basename starts with ["test_"]. Used to gate production-path
+    safeguards. *)
+let running_under_test_executable () =
+  let basename =
+    Sys.executable_name |> Filename.basename |> String.lowercase_ascii
+  in
+  String.length basename >= 5 && String.sub basename 0 5 = "test_"
+
+(** #9903: production base-path safeguard for test executables.
+
+    Without this, a test whose [MASC_BASE_PATH] override fails to
+    take effect (due to any combination of dune env precedence,
+    module init-time caching, or Eio.Path absolute-path
+    interpretation) silently falls through to the operator's HOME
+    and appends fixture data to the live ledger — the exact
+    failure mode diagnosed on [~/me/.masc/board_votes.jsonl]
+    (112 hot-voter-* rows overwrote real keeper votes).
+
+    The safeguard is lossy by design: a test that resolves
+    [base_path] to a [HOME] prefix raises [Config_error]
+    immediately. Loss of a test run is strictly better than loss
+    of production data.
+
+    Escape hatch: set [MASC_TEST_ALLOW_HOME_BASE_PATH=1] for tests
+    that legitimately need HOME-relative paths (none known today;
+    the env var exists only so a reviewer can turn it on
+    temporarily while investigating a new breach).
+
+    Non-test executables (the MCP server) skip the check — HOME
+    fallback is the correct production behavior. *)
+let test_allow_home_base_path_env = "MASC_TEST_ALLOW_HOME_BASE_PATH"
+
+let base_path_prod_guard path =
+  if not (running_under_test_executable ()) then path
+  else begin
+    let allow =
+      match raw_value_opt test_allow_home_base_path_env |> trim_opt with
+      | Some v -> v = "1" || v = "true"
+      | None -> false
+    in
+    if allow then path
+    else
+      match home_dir_opt () with
+      | None -> path
+      | Some home ->
+        let home_norm = normalize_masc_base_path_input home in
+        if home_norm <> "" && String.length path >= String.length home_norm
+           && String.sub path 0 (String.length home_norm) = home_norm
+        then
+          raise (Config_error
+            (Printf.sprintf
+               "#9903 test isolation breach: Env_config_core.base_path() \
+                resolved to %S under HOME=%S in test executable %S. This \
+                indicates a MASC_BASE_PATH override failure — writing to \
+                the production ledger under HOME would corrupt real data. \
+                Fix the override path in the test, or set \
+                MASC_TEST_ALLOW_HOME_BASE_PATH=1 to bypass (not \
+                recommended)."
+               path home_norm (Filename.basename Sys.executable_name)))
+        else path
+  end
+
 (** Project base path with HOME fallback, then "." fallback when unset. *)
 let base_path () =
-  match base_path_opt () with
-  | Some path -> path
-  | None ->
-      (match home_dir_opt () with
-       | Some home -> normalize_masc_base_path_input home
-       | None -> ".")
+  let raw =
+    match base_path_opt () with
+    | Some path -> path
+    | None ->
+        (match home_dir_opt () with
+         | Some home -> normalize_masc_base_path_input home
+         | None -> ".")
+  in
+  base_path_prod_guard raw
 
 let sb_path_opt () =
   match base_path_opt () with

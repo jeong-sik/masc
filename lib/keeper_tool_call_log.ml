@@ -23,6 +23,7 @@ let max_output_len = 4000
 let pending_truncation : (string, int * int option) Hashtbl.t = Hashtbl.create 8
 
 type turn_context = {
+  agent_name: string option;
   lane: string option;
   tool_choice: string option;
   thinking_enabled: bool option;
@@ -30,17 +31,26 @@ type turn_context = {
   prompt_fingerprint: string option;
   trace_id: string option;
   session_id: string option;
+  generation: int option;
   turn: int option;
   keeper_turn_id: int option;
   task_id: string option;
   goal_ids: string list option;
   sandbox_profile: string option;
+  sandbox_root: string option;
+  allowed_paths: string list option;
   network_mode: string option;
   shared_memory_scope: string option;
   approval_mode: string option;
+  tool_surface_class: string option;
+  visible_tool_count: int option;
+  required_tools: string list option;
+  missing_required_tools: string list option;
+  cascade_profile: string option;
 }
 
 let empty_turn_context = {
+  agent_name = None;
   lane = None;
   tool_choice = None;
   thinking_enabled = None;
@@ -48,14 +58,22 @@ let empty_turn_context = {
   prompt_fingerprint = None;
   trace_id = None;
   session_id = None;
+  generation = None;
   turn = None;
   keeper_turn_id = None;
   task_id = None;
   goal_ids = None;
   sandbox_profile = None;
+  sandbox_root = None;
+  allowed_paths = None;
   network_mode = None;
   shared_memory_scope = None;
   approval_mode = None;
+  tool_surface_class = None;
+  visible_tool_count = None;
+  required_tools = None;
+  missing_required_tools = None;
+  cascade_profile = None;
 }
 
 let pending_turn_context : (string, turn_context) Hashtbl.t = Hashtbl.create 8
@@ -68,12 +86,15 @@ let consume_truncation_info ~keeper_name () =
   | Some info -> Hashtbl.remove pending_truncation keeper_name; info
   | None -> (0, None)
 
-let set_turn_context ~keeper_name ?lane ?tool_choice ?thinking_enabled
-    ?thinking_budget ?prompt_fingerprint ?trace_id ?session_id ?turn
-    ?keeper_turn_id ?task_id ?goal_ids ?sandbox_profile
-    ?network_mode ?shared_memory_scope ?approval_mode () =
+let set_turn_context ~keeper_name ?agent_name ?lane ?tool_choice
+    ?thinking_enabled ?thinking_budget ?prompt_fingerprint ?trace_id
+    ?session_id ?generation ?turn ?keeper_turn_id ?task_id ?goal_ids
+    ?sandbox_profile ?sandbox_root ?allowed_paths ?network_mode
+    ?shared_memory_scope ?approval_mode ?tool_surface_class ?visible_tool_count
+    ?required_tools ?missing_required_tools ?cascade_profile () =
   Hashtbl.replace pending_turn_context keeper_name
     {
+      agent_name;
       lane;
       tool_choice;
       thinking_enabled;
@@ -81,22 +102,31 @@ let set_turn_context ~keeper_name ?lane ?tool_choice ?thinking_enabled
       prompt_fingerprint;
       trace_id;
       session_id;
+      generation;
       turn;
       keeper_turn_id;
       task_id;
       goal_ids;
       sandbox_profile;
+      sandbox_root;
+      allowed_paths;
       network_mode;
       shared_memory_scope;
       approval_mode;
+      tool_surface_class;
+      visible_tool_count;
+      required_tools;
+      missing_required_tools;
+      cascade_profile;
     }
 
-let get_turn_context ~keeper_name () =
-  let ctx =
+let get_turn_context_record ~keeper_name () =
     match Hashtbl.find_opt pending_turn_context keeper_name with
     | Some ctx -> ctx
     | None -> empty_turn_context
-  in
+
+let get_turn_context ~keeper_name () =
+  let ctx = get_turn_context_record ~keeper_name () in
   ( ctx.lane
   , ctx.tool_choice
   , ctx.thinking_enabled
@@ -112,6 +142,48 @@ let get_turn_context ~keeper_name () =
   , ctx.network_mode
   , ctx.shared_memory_scope
   , ctx.approval_mode )
+
+let optional_model model =
+  match model with
+  | Some value when String.trim value <> "" -> Some value
+  | _ -> None
+
+let runtime_contract_json_for_call ~keeper_name ?model () =
+  let ctx = get_turn_context_record ~keeper_name () in
+  Keeper_runtime_contract.runtime_contract_json_from_fields
+    ~keeper_name
+    ?agent_name:ctx.agent_name
+    ?trace_id:ctx.trace_id
+    ?session_id:ctx.session_id
+    ?generation:ctx.generation
+    ?keeper_turn_id:ctx.keeper_turn_id
+    ?task_id:ctx.task_id
+    ?goal_ids:ctx.goal_ids
+    ?sandbox_profile:ctx.sandbox_profile
+    ?sandbox_root:ctx.sandbox_root
+    ?allowed_paths:ctx.allowed_paths
+    ?network_mode:ctx.network_mode
+    ?shared_memory_scope:ctx.shared_memory_scope
+    ?approval_mode:ctx.approval_mode
+    ?tool_surface_class:ctx.tool_surface_class
+    ?visible_tool_count:ctx.visible_tool_count
+    ?required_tools:ctx.required_tools
+    ?missing_required_tools:ctx.missing_required_tools
+    ?model:(optional_model model)
+    ?cascade_profile:ctx.cascade_profile
+    ()
+
+let action_radius_json_for_call ~keeper_name ~tool_name ~input ~success
+    ~duration_ms ?error () =
+  let ctx = get_turn_context_record ~keeper_name () in
+  Keeper_runtime_contract.action_radius_json
+    ~tool_name
+    ~input
+    ~success
+    ~duration_ms
+    ?error
+    ?sandbox_target:ctx.sandbox_profile
+    ()
 
 let store_ref : Dated_jsonl.t option ref = ref None
 
@@ -179,16 +251,18 @@ let input_to_json (input : Yojson.Safe.t) : Yojson.Safe.t =
 
 let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
     ~(output_text : string) ~(success : bool) ~(duration_ms : float)
-    ?(model : string = "") ?lane ?tool_choice ?thinking_enabled
-    ?thinking_budget ?prompt_fingerprint ?trace_id ?session_id ?turn
-    ?keeper_turn_id ?task_id ?goal_ids ?sandbox_profile
-    ?network_mode ?shared_memory_scope ?approval_mode ?result_bytes
-    ?truncated_to () =
+    ?(model : string = "") ?agent_name ?lane ?tool_choice ?thinking_enabled
+    ?thinking_budget ?prompt_fingerprint ?trace_id ?session_id ?generation
+    ?turn ?keeper_turn_id ?task_id ?goal_ids ?sandbox_profile ?sandbox_root
+    ?allowed_paths ?network_mode ?shared_memory_scope ?approval_mode
+    ?tool_surface_class ?visible_tool_count ?required_tools
+    ?missing_required_tools ?cascade_profile ?result_bytes ?truncated_to () =
   if Observability_redact.is_denied_tool ~tool_name then ()
   else
     match !store_ref with
     | None -> ()
     | Some store ->
+      let ctx = get_turn_context_record ~keeper_name () in
       let ( ctx_lane
           , ctx_tool_choice
           , ctx_thinking_enabled
@@ -258,6 +332,43 @@ let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
         match approval_mode with
         | Some _ -> approval_mode
         | None -> ctx_approval_mode
+      in
+      let agent_name =
+        match agent_name with Some _ -> agent_name | None -> ctx.agent_name
+      in
+      let generation =
+        match generation with Some _ -> generation | None -> ctx.generation
+      in
+      let sandbox_root =
+        match sandbox_root with Some _ -> sandbox_root | None -> ctx.sandbox_root
+      in
+      let allowed_paths =
+        match allowed_paths with Some _ -> allowed_paths | None -> ctx.allowed_paths
+      in
+      let tool_surface_class =
+        match tool_surface_class with
+        | Some _ -> tool_surface_class
+        | None -> ctx.tool_surface_class
+      in
+      let visible_tool_count =
+        match visible_tool_count with
+        | Some _ -> visible_tool_count
+        | None -> ctx.visible_tool_count
+      in
+      let required_tools =
+        match required_tools with
+        | Some _ -> required_tools
+        | None -> ctx.required_tools
+      in
+      let missing_required_tools =
+        match missing_required_tools with
+        | Some _ -> missing_required_tools
+        | None -> ctx.missing_required_tools
+      in
+      let cascade_profile =
+        match cascade_profile with
+        | Some _ -> cascade_profile
+        | None -> ctx.cascade_profile
       in
       let model_field =
         if model = "" then [] else [("model", `String model)]
@@ -334,6 +445,42 @@ let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
       let safe_input = input_to_json (Observability_redact.redact_json_value input) in
       let safe_output = Observability_redact.redact_preview ~max_len:max_output_len output_text in
       let output_json = blob_aware_output_json safe_output in
+      let model_opt = optional_model (Some model) in
+      let runtime_contract =
+        Keeper_runtime_contract.runtime_contract_json_from_fields
+          ~keeper_name
+          ?agent_name
+          ?trace_id
+          ?session_id
+          ?generation
+          ?keeper_turn_id
+          ?task_id
+          ?goal_ids
+          ?sandbox_profile
+          ?sandbox_root
+          ?allowed_paths
+          ?network_mode
+          ?shared_memory_scope
+          ?approval_mode
+          ?tool_surface_class
+          ?visible_tool_count
+          ?required_tools
+          ?missing_required_tools
+          ?model:model_opt
+          ?cascade_profile
+          ()
+      in
+      let error = if success then None else Some safe_output in
+      let action_radius =
+        Keeper_runtime_contract.action_radius_json
+          ~tool_name
+          ~input:safe_input
+          ~success
+          ~duration_ms
+          ?error
+          ?sandbox_target:sandbox_profile
+          ()
+      in
       let json =
         `Assoc
           ([ ("ts", `Float (Time_compat.now ()))
@@ -343,6 +490,8 @@ let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
            ; ("output", output_json)
            ; ("success", `Bool success)
            ; ("duration_ms", `Float duration_ms)
+           ; ("runtime_contract", runtime_contract)
+           ; ("action_radius", action_radius)
            ]
            @ model_field @ lane_field @ tool_choice_field
            @ thinking_enabled_field @ thinking_budget_field

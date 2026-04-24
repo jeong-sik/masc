@@ -126,6 +126,7 @@ let test_turn_context_fields_stored () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.set_turn_context
       ~keeper_name:"k"
+      ~agent_name:"keeper-k-agent"
       ~lane:"tool_required"
       ~tool_choice:"required"
       ~thinking_enabled:false
@@ -133,18 +134,27 @@ let test_turn_context_fields_stored () =
       ~prompt_fingerprint:"prompt-fp-k"
       ~trace_id:"trace-k"
       ~session_id:"trace-k"
+      ~generation:3
       ~turn:7
       ~keeper_turn_id:7
       ~task_id:"task-runtime-trust"
       ~goal_ids:["goal-short"; "goal-long"]
       ~sandbox_profile:"docker"
+      ~sandbox_root:"/tmp/k-sandbox"
+      ~allowed_paths:["/tmp/k-sandbox"; "/tmp/shared"]
       ~network_mode:"inherit"
       ~shared_memory_scope:"team"
       ~approval_mode:"manual"
+      ~tool_surface_class:"execution"
+      ~visible_tool_count:2
+      ~required_tools:["keeper_bash"]
+      ~missing_required_tools:["keeper_fs_edit"]
+      ~cascade_profile:"tool_use_strict"
       ();
     Keeper_tool_call_log.log_call
       ~keeper_name:"k" ~tool_name:"masc_status"
-      ~input:(`Assoc []) ~output_text:"ok"
+      ~input:(`Assoc [("path", `String "/tmp/k-sandbox/status.json")])
+      ~output_text:"ok"
       ~success:true ~duration_ms:2.0 ();
     let entries = Keeper_tool_call_log.read_recent () in
     Alcotest.(check int) "one entry" 1 (List.length entries);
@@ -191,7 +201,40 @@ let test_turn_context_fields_stored () =
       (Safe_ops.json_string_opt "shared_memory_scope" entry);
     Alcotest.(check (option string)) "approval_mode field"
       (Some "manual")
-      (Safe_ops.json_string_opt "approval_mode" entry))
+      (Safe_ops.json_string_opt "approval_mode" entry);
+    let runtime_contract =
+      Yojson.Safe.Util.member "runtime_contract" entry
+    in
+    Alcotest.(check (option string)) "runtime_contract keeper"
+      (Some "k")
+      (Safe_ops.json_string_opt "keeper_name" runtime_contract);
+    Alcotest.(check (option string)) "runtime_contract agent"
+      (Some "keeper-k-agent")
+      (Safe_ops.json_string_opt "agent_name" runtime_contract);
+    Alcotest.(check int) "runtime_contract generation" 3
+      (Safe_ops.json_int ~default:0 "generation" runtime_contract);
+    Alcotest.(check (list string)) "runtime_contract allowed_paths"
+      ["/tmp/k-sandbox"; "/tmp/shared"]
+      Yojson.Safe.Util.(
+        runtime_contract |> member "allowed_paths" |> to_list |> List.map to_string);
+    Alcotest.(check (list string)) "runtime_contract required_tools"
+      ["keeper_bash"]
+      Yojson.Safe.Util.(
+        runtime_contract |> member "required_tools" |> to_list |> List.map to_string);
+    Alcotest.(check (list string)) "runtime_contract missing_required_tools"
+      ["keeper_fs_edit"]
+      Yojson.Safe.Util.(
+        runtime_contract |> member "missing_required_tools" |> to_list
+        |> List.map to_string);
+    let action_radius = Yojson.Safe.Util.member "action_radius" entry in
+    Alcotest.(check (option string)) "action_radius tool"
+      (Some "masc_status")
+      (Safe_ops.json_string_opt "tool_name" action_radius);
+    Alcotest.(check (option string)) "action_radius target path"
+      (Some "/tmp/k-sandbox/status.json")
+      (Safe_ops.json_string_opt "target_path" action_radius);
+    Alcotest.(check bool) "action_radius success" true
+      (Safe_ops.json_bool ~default:false "success" action_radius))
 
 let test_turn_context_fields_absent_without_context () =
   with_tmp_log (fun () ->

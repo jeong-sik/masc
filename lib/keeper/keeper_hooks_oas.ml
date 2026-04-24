@@ -672,6 +672,70 @@ let make_hooks
              ?shared_memory_scope ?approval_mode
              ~result_bytes ?truncated_to ()
          with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
+        (match trajectory_acc with
+         | None -> ()
+         | Some acc ->
+           let keeper_name = (!meta_ref).name in
+           let trace_id = acc.Trajectory.trace_id in
+           let safe_input =
+             Observability_redact.redact_json_value input
+           in
+           let safe_output =
+             Observability_redact.redact_preview
+               ~max_len:4000
+               output_text
+           in
+           let runtime_contract =
+             Keeper_tool_call_log.runtime_contract_json_for_call
+               ~keeper_name
+               ~model
+               ()
+           in
+           let action_radius =
+             Keeper_tool_call_log.action_radius_json_for_call
+               ~keeper_name
+               ~tool_name
+               ~input:safe_input
+               ~success:(outcome = "ok")
+               ~duration_ms
+               ?error:(if outcome = "ok" then None else Some safe_output)
+               ()
+           in
+           let now = Time_compat.now () in
+           let entry : Trajectory.tool_call_entry =
+             {
+               ts = now;
+               ts_iso = Types.iso8601_of_unix_seconds now;
+               turn = acc.Trajectory.turn;
+               round = Trajectory.calls_in_current_turn acc + 1;
+               tool_name;
+               args_json = Yojson.Safe.to_string safe_input;
+               gate_decision = Trajectory.Pass;
+               result = Some safe_output;
+               duration_ms = int_of_float (Float.round duration_ms);
+               error = (if outcome = "ok" then None else Some safe_output);
+               cost_usd = Trajectory.tool_cost_estimate tool_name;
+             }
+           in
+           Trajectory.record_entry
+             ~runtime_contract
+             ~action_radius
+             ~on_persist_error:(fun exn ->
+               Telemetry_coverage_gap.record
+                 ~masc_root:acc.Trajectory.masc_root
+                 ~source:"trajectory_tool_call"
+                 ~producer:"keeper_hooks_oas.post_tool_use"
+                 ~durable_store:
+                   (Trajectory.trajectory_path acc.Trajectory.masc_root
+                      acc.Trajectory.keeper_name trace_id)
+                 ~dashboard_surface:"/api/v1/keepers/:name/tool-stats"
+                 ~stale_reason:"trajectory_append_failed"
+                 ~keeper_name
+                 ~trace_id
+                 ~error:(Printexc.to_string exn)
+                 ())
+             acc
+             entry);
         (try
            on_tool_executed
              ~tool_name

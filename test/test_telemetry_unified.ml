@@ -513,12 +513,70 @@ let test_summary_includes_freshness_metadata () =
       | Some (`Int age) -> float_of_int age
       | _ -> Alcotest.fail "expected latest_age_s"
     in
+    let health =
+      match List.assoc_opt "health" fields with
+      | Some (`String value) -> value
+      | _ -> Alcotest.fail "expected health"
+    in
+    let producer =
+      match List.assoc_opt "producer" fields with
+      | Some (`String value) -> value
+      | _ -> Alcotest.fail "expected producer"
+    in
+    let freshness_slo_s =
+      match List.assoc_opt "freshness_slo_s" fields with
+      | Some (`Float value) -> value
+      | Some (`Int value) -> float_of_int value
+      | _ -> Alcotest.fail "expected freshness_slo_s"
+    in
     Alcotest.(check bool) "latest ts close to event" true
       (abs_float (latest_ts -. recent_ts) < 5.0);
     Alcotest.(check bool) "latest iso present" true (String.length latest_iso > 0);
     Alcotest.(check bool) "latest age bounded" true
-      (latest_age >= 0.0 && latest_age < 180.0)
+      (latest_age >= 0.0 && latest_age < 180.0);
+    Alcotest.(check string) "health ok" "ok" health;
+    Alcotest.(check string) "producer" "telemetry_eio" producer;
+    Alcotest.(check (float 0.1)) "freshness SLO" 900.0 freshness_slo_s
   | None -> Alcotest.fail "expected agent_event source summary"
+
+let test_summary_surfaces_coverage_gaps () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "telem_summary_gap" in
+  let root = masc_root dir in
+  Telemetry_coverage_gap.record
+    ~masc_root:root
+    ~source:"agent_event"
+    ~producer:"telemetry_eio"
+    ~durable_store:(Filename.concat root "telemetry")
+    ~dashboard_surface:"/api/v1/dashboard/telemetry"
+    ~stale_reason:"append_failed"
+    ~error:"disk full"
+    ();
+  let json = Telemetry_unified.summary_json ~base_path:dir ~masc_root:root () in
+  match json with
+  | `Assoc fields ->
+    let gaps =
+      match List.assoc_opt "coverage_gaps" fields with
+      | Some (`List values) -> values
+      | _ -> Alcotest.fail "expected coverage_gaps"
+    in
+    Alcotest.(check int) "one coverage gap" 1 (List.length gaps);
+    let source_summary =
+      match List.assoc_opt "sources" fields with
+      | Some (`List sources) ->
+        List.find
+          (fun source_json ->
+            String.equal "agent_event"
+              (json_string_field "source" source_json))
+          sources
+      | _ -> Alcotest.fail "expected sources"
+    in
+    Alcotest.(check string) "agent_event health" "coverage_gap"
+      (json_string_field "health" source_summary);
+    Alcotest.(check string) "agent_event stale reason" "append_failed"
+      (json_string_field "stale_reason" source_summary)
+  | _ -> Alcotest.fail "expected Assoc"
 
 let test_summary_counts_all_entries_beyond_recent_cap () =
   Eio_main.run @@ fun env ->
@@ -616,6 +674,8 @@ let () =
           Alcotest.test_case "with data" `Quick test_summary_with_data;
           Alcotest.test_case "includes freshness metadata" `Quick
             test_summary_includes_freshness_metadata;
+          Alcotest.test_case "surfaces coverage gaps" `Quick
+            test_summary_surfaces_coverage_gaps;
           Alcotest.test_case "counts all rows beyond recent cap" `Quick
             test_summary_counts_all_entries_beyond_recent_cap;
         ] );

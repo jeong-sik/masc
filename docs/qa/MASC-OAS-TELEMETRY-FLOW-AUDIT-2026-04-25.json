@@ -1,0 +1,105 @@
+{
+  "audit_id": "masc-oas-telemetry-flow-audit-2026-04-25",
+  "checked_at": "2026-04-25T00:00:00+09:00",
+  "scope": "MASC keeper telemetry flow from OAS tool execution into dashboard surfaces",
+  "boundary": {
+    "oas": "generic agent/run/tool/proof truth",
+    "masc": "keeper/task/goal/sandbox/approval/runtime-radius semantics",
+    "oas_patch_made": false
+  },
+  "before_snapshot": {
+    "observed_at": "2026-04-24T16:16:28Z",
+    "sources": [
+      { "source": "oas_event", "state": "fresh" },
+      { "source": "agent_event", "state": "fresh" },
+      { "source": "keeper_metric", "state": "fresh" },
+      { "source": "tool_call_io", "state": "fresh" },
+      { "source": "tool_metric", "state": "stale", "latest_age_approx_s": 2040 },
+      { "source": "tool_usage", "state": "stale", "latest_age_approx_s": 15120 }
+    ]
+  },
+  "implemented": {
+    "runtime_contract": true,
+    "action_radius": true,
+    "trajectory_post_tool_rows": true,
+    "trajectory_gate_decode": true,
+    "coverage_gap_store": true,
+    "unified_source_health": true
+  },
+  "surfaces": [
+    {
+      "surface": "/api/v1/keepers/:name/tool-calls",
+      "producer": "keeper_hooks_oas.post_tool_use",
+      "durable_store": ".masc/tool_calls/YYYY-MM/DD.jsonl",
+      "status": "contract_and_action_radius_added"
+    },
+    {
+      "surface": "/api/v1/keepers/:name/tool-stats",
+      "producer": "keeper_hooks_oas.post_tool_use",
+      "durable_store": ".masc/trajectories/<keeper>/<trace>.jsonl",
+      "status": "trajectory_tool_call_rows_added"
+    },
+    {
+      "surface": "/api/v1/dashboard/execution-trust",
+      "producer": "keeper_agent_run.execution_receipt",
+      "durable_store": ".masc/keepers/<keeper>/execution-receipts",
+      "status": "contract_and_action_radius_added"
+    },
+    {
+      "surface": "/api/v1/dashboard/telemetry/summary",
+      "producer": "Telemetry_unified.summary_json",
+      "durable_store": "unified read side",
+      "status": "source_health_and_coverage_gaps_added"
+    }
+  ],
+  "oas_audit": {
+    "patched": false,
+    "findings": [
+      "EventBus envelope already has correlation_id, run_id, and caused_by.",
+      "ToolCalled and ToolCompleted propagate correlation_id/run_id and completion caused_by.",
+      "Event forwarding preserves correlation_id, run_id, and caused_by.",
+      "Raw_trace remains generic with worker_run_id/session_id.",
+      "Runtime evidence carries raw_trace_run_id through participant outcomes."
+    ]
+  },
+  "verification": {
+    "masc_build": {
+      "command": "scripts/dune-local.sh build test/test_trajectory.exe test/test_keeper_tool_call_log.exe test/test_dashboard_keeper_routes.exe test/test_dashboard_execution.exe test/test_telemetry_unified.exe test/test_telemetry_eio_coverage.exe",
+      "status": "passed"
+    },
+    "test_binaries": [
+      { "command": "_build/default/test/test_trajectory.exe", "status": "passed" },
+      { "command": "_build/default/test/test_keeper_tool_call_log.exe", "status": "passed" },
+      { "command": "env MASC_BASE_PATH=/tmp/masc-test-dashboard-keeper-routes _build/default/test/test_dashboard_keeper_routes.exe", "status": "passed" },
+      { "command": "env MASC_BASE_PATH=/tmp/masc-test-dashboard-execution _build/default/test/test_dashboard_execution.exe", "status": "passed" },
+      { "command": "_build/default/test/test_telemetry_unified.exe", "status": "passed" },
+      { "command": "_build/default/test/test_telemetry_eio_coverage.exe", "status": "passed" }
+    ],
+    "dashboard_tests": {
+      "command": "pnpm --dir dashboard exec vitest run --no-file-parallelism --maxWorkers=1 src/components/keeper-tool-telemetry.test.ts src/components/telemetry-unified.test.ts src/api/dashboard.test.ts",
+      "status": "passed",
+      "files": 3,
+      "tests": 49
+    },
+    "dashboard_typecheck": {
+      "command": "pnpm --dir dashboard typecheck",
+      "status": "passed"
+    },
+    "dashboard_full_suite_note": "A package-script invocation with an extra argument separator ran the full dashboard suite and failed in unrelated locale-sensitive TimeAgo tests where Korean absolute-time text contained the excluded character.",
+    "live_keeper_turn_acceptance": "not_run"
+  },
+  "external_evidence": [
+    {
+      "claim": "OpenTelemetry GenAI semantic conventions are Development",
+      "source": "https://opentelemetry.io/docs/specs/semconv/gen-ai/",
+      "checked_at": "2026-04-25 KST",
+      "confidence": "High"
+    },
+    {
+      "claim": "MCP specification redirects to 2025-11-25",
+      "source": "https://modelcontextprotocol.io/specification",
+      "checked_at": "2026-04-25 KST",
+      "confidence": "High"
+    }
+  ]
+}

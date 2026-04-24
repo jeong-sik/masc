@@ -23,6 +23,16 @@ type tool_call_entry = {
   cost_usd : float;
 }
 
+type gate_decode_summary = {
+  parsed_gate_count : int;
+  legacy_default_count : int;
+}
+
+type entries_read_result = {
+  entries : tool_call_entry list;
+  gate_decode : gate_decode_summary;
+}
+
 type trajectory_outcome =
   | Completed
   | Failed of string
@@ -76,7 +86,12 @@ val outcome_to_json : trajectory_outcome -> Yojson.Safe.t
 val outcome_to_string : trajectory_outcome -> string
 val default_result_truncation : int
 val default_thinking_truncation : int
-val entry_to_json : ?result_max_len:int -> tool_call_entry -> Yojson.Safe.t
+val entry_to_json :
+  ?result_max_len:int ->
+  ?runtime_contract:Yojson.Safe.t ->
+  ?action_radius:Yojson.Safe.t ->
+  tool_call_entry ->
+  Yojson.Safe.t
 val thinking_entry_to_json : ?content_max_len:int -> thinking_entry -> Yojson.Safe.t
 val trajectory_line_to_json : ?result_max_len:int -> ?content_max_len:int -> trajectory_line -> Yojson.Safe.t
 val trajectory_to_json : trajectory -> Yojson.Safe.t
@@ -87,6 +102,8 @@ val trajectories_dir : string -> string -> string
 val trajectory_path : string -> string -> string -> string
 
 val append_entry :
+  ?runtime_contract:Yojson.Safe.t ->
+  ?action_radius:Yojson.Safe.t ->
   masc_root:string -> keeper_name:string -> trace_id:string ->
   tool_call_entry -> unit
 
@@ -131,7 +148,13 @@ val create_accumulator :
 val set_task_id : accumulator -> string -> unit
 val clear_task_id : accumulator -> unit
 val increment_turn : accumulator -> unit
-val record_entry : accumulator -> tool_call_entry -> unit
+val record_entry :
+  ?runtime_contract:Yojson.Safe.t ->
+  ?action_radius:Yojson.Safe.t ->
+  ?on_persist_error:(exn -> unit) ->
+  accumulator ->
+  tool_call_entry ->
+  unit
 val finalize : accumulator -> trajectory_outcome -> trajectory
 
 val detect_entropy :
@@ -180,3 +203,9 @@ val read_entries_since :
   tool_call_entry list
 (** Read entries from all trace files for a keeper with ts >= [since].
     Results sorted chronologically. *)
+
+val read_entries_since_result :
+  masc_root:string -> keeper_name:string -> since:float ->
+  entries_read_result
+(** Like {!read_entries_since}, plus whether the persisted gate object was
+    parsed or defaulted for legacy rows that had no readable gate payload. *)

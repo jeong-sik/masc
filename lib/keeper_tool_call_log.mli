@@ -28,6 +28,7 @@ val consume_truncation_info :
 
 val set_turn_context :
   keeper_name:string ->
+  ?agent_name:string ->
   ?lane:string ->
   ?tool_choice:string ->
   ?thinking_enabled:bool ->
@@ -35,14 +36,22 @@ val set_turn_context :
   ?prompt_fingerprint:string ->
   ?trace_id:string ->
   ?session_id:string ->
+  ?generation:int ->
   ?turn:int ->
   ?keeper_turn_id:int ->
   ?task_id:string ->
   ?goal_ids:string list ->
   ?sandbox_profile:string ->
+  ?sandbox_root:string ->
+  ?allowed_paths:string list ->
   ?network_mode:string ->
   ?shared_memory_scope:string ->
   ?approval_mode:string ->
+  ?tool_surface_class:string ->
+  ?visible_tool_count:int ->
+  ?required_tools:string list ->
+  ?missing_required_tools:string list ->
+  ?cascade_profile:string ->
   unit ->
   unit
 (** [set_turn_context ...] stores the current effective turn policy for
@@ -61,6 +70,26 @@ val get_turn_context :
     the keeper, or [None] values when no turn context has
     been recorded. *)
 
+val runtime_contract_json_for_call :
+  keeper_name:string ->
+  ?model:string ->
+  unit ->
+  Yojson.Safe.t
+(** [runtime_contract_json_for_call ~keeper_name ?model ()] returns the
+    canonical keeper runtime contract from the current turn context. *)
+
+val action_radius_json_for_call :
+  keeper_name:string ->
+  tool_name:string ->
+  input:Yojson.Safe.t ->
+  success:bool ->
+  duration_ms:float ->
+  ?error:string ->
+  unit ->
+  Yojson.Safe.t
+(** [action_radius_json_for_call ...] derives the canonical action radius
+    from a keeper tool call and its current sandbox context. *)
+
 val init : ?cluster_name:string -> base_path:string -> unit -> unit
 (** [init ?cluster_name ~base_path ()] creates the cluster-aware Dated_jsonl
     store. Call once at startup. *)
@@ -73,6 +102,7 @@ val log_call :
   success:bool ->
   duration_ms:float ->
   ?model:string ->
+  ?agent_name:string ->
   ?lane:string ->
   ?tool_choice:string ->
   ?thinking_enabled:bool ->
@@ -80,14 +110,22 @@ val log_call :
   ?prompt_fingerprint:string ->
   ?trace_id:string ->
   ?session_id:string ->
+  ?generation:int ->
   ?turn:int ->
   ?keeper_turn_id:int ->
   ?task_id:string ->
   ?goal_ids:string list ->
   ?sandbox_profile:string ->
+  ?sandbox_root:string ->
+  ?allowed_paths:string list ->
   ?network_mode:string ->
   ?shared_memory_scope:string ->
   ?approval_mode:string ->
+  ?tool_surface_class:string ->
+  ?visible_tool_count:int ->
+  ?required_tools:string list ->
+  ?missing_required_tools:string list ->
+  ?cascade_profile:string ->
   ?result_bytes:int ->
   ?truncated_to:int ->
   unit ->

@@ -95,6 +95,15 @@ let cascade_rotation_attempt_to_json attempt =
       ("recorded_at", `String attempt.recorded_at);
     ]
 
+let receipt_duration_ms receipt =
+  match
+    Types.parse_iso8601_opt receipt.started_at,
+    Types.parse_iso8601_opt receipt.ended_at
+  with
+  | Some started_at, Some ended_at ->
+    max 0.0 ((ended_at -. started_at) *. 1000.0)
+  | _ -> 0.0
+
 let string_contains_ci haystack needle =
   let haystack = String.lowercase_ascii haystack in
   let needle = String.lowercase_ascii needle in
@@ -185,6 +194,44 @@ let to_json (receipt : t) =
             | None -> `Null );
         ]
   in
+  let runtime_contract =
+    Keeper_runtime_contract.runtime_contract_json_from_fields
+      ~keeper_name:receipt.keeper_name
+      ~agent_name:receipt.agent_name
+      ~trace_id:receipt.trace_id
+      ~session_id:receipt.trace_id
+      ~generation:receipt.generation
+      ?keeper_turn_id:receipt.turn_count
+      ?task_id:receipt.current_task_id
+      ~goal_ids:receipt.goal_ids
+      ~sandbox_profile:receipt.sandbox_kind
+      ?sandbox_root:receipt.sandbox_root
+      ~network_mode:receipt.network_mode
+      ?approval_mode:receipt.approval_profile
+      ~tool_surface_class:receipt.tool_surface.tool_surface_class
+      ~visible_tool_count:receipt.tool_surface.visible_tool_count
+      ~required_tools:receipt.tool_surface.required_tools
+      ~missing_required_tools:receipt.tool_surface.missing_required_tools
+      ?model:receipt.model_used
+      ~cascade_profile:receipt.cascade_name
+      ()
+  in
+  let action_radius =
+    Keeper_runtime_contract.action_radius_json
+      ~tool_name:"keeper_turn"
+      ~input:
+        (`Assoc
+           [
+             ("action", `String "run_turn");
+             ("target_kind", `String "keeper");
+             ("target_path", string_opt_json receipt.sandbox_root);
+           ])
+      ~success:(String.equal receipt.outcome "ok")
+      ~duration_ms:(receipt_duration_ms receipt)
+      ?error:receipt.error_message
+      ~sandbox_target:receipt.sandbox_kind
+      ()
+  in
   `Assoc
     [
       ("schema", `String "keeper.execution_receipt.v1");
@@ -206,6 +253,8 @@ let to_json (receipt : t) =
       ("terminal_reason_code", `String receipt.terminal_reason_code);
       ("operator_disposition", `String operator_disposition);
       ("operator_disposition_reason", `String operator_disposition_reason);
+      ("runtime_contract", runtime_contract);
+      ("action_radius", action_radius);
       ("response_text_present", `Bool receipt.response_text_present);
       ( "model_used",
         match receipt.model_used with

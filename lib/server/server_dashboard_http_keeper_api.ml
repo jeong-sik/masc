@@ -1054,15 +1054,80 @@ let handle_keeper_get_subroutes state req request reqd =
         |> max 1 |> min 168  (* 1h .. 7d *)
       in
       let since = Time_compat.now () -. (float_of_int window_hours *. 3600.0) in
-      let entries =
-        Trajectory.read_entries_since ~masc_root ~keeper_name:name ~since
+      let read_result =
+        Trajectory.read_entries_since_result ~masc_root ~keeper_name:name ~since
       in
+      let entries = read_result.Trajectory.entries in
       let tools = Trajectory.aggregate_tool_stats entries in
       let timeline = Trajectory.hourly_timeline entries in
+      let latest_ts =
+        List.fold_left
+          (fun acc (entry : Trajectory.tool_call_entry) ->
+            match acc with
+            | Some ts when ts >= entry.ts -> acc
+            | _ -> Some entry.ts)
+          None entries
+      in
+      let latest_age_s =
+        match latest_ts with
+        | Some ts -> Some (max 0.0 (Time_compat.now () -. ts))
+        | None -> None
+      in
+      let freshness_slo_s = 300.0 in
+      let dashboard_surface = "/api/v1/keepers/:name/tool-stats" in
+      let coverage_gaps =
+        Telemetry_coverage_gap.read_recent ~masc_root ~n:32
+        |> List.filter (fun gap ->
+             String.equal
+               (Safe_ops.json_string ~default:"" "dashboard_surface" gap)
+               dashboard_surface
+             &&
+             match Safe_ops.json_string_opt "keeper_name" gap with
+             | Some keeper_name -> String.equal keeper_name name
+             | None -> true)
+      in
+      let latest_gap = List.rev coverage_gaps |> List.find_opt (fun _ -> true) in
+      let health, stale_reason =
+        match latest_gap with
+        | Some gap ->
+            ( "coverage_gap",
+              Safe_ops.json_string ~default:"coverage_gap" "stale_reason" gap )
+        | None -> (
+            match latest_age_s with
+            | None -> ("empty", "no_entries")
+            | Some age when age > freshness_slo_s ->
+                ("stale", "freshness_slo_exceeded")
+            | Some _ -> ("ok", ""))
+      in
       let json = `Assoc [
         ("keeper", `String name);
         ("window_hours", `Int window_hours);
         ("total_entries", `Int (List.length entries));
+        ("source", `String "trajectory_tool_call");
+        ("producer", `String "keeper_hooks_oas.post_tool_use");
+        ("durable_store", `String (Trajectory.trajectories_dir masc_root name));
+        ("dashboard_surface", `String dashboard_surface);
+        ("freshness_slo_s", `Float freshness_slo_s);
+        ( "latest_ts_unix",
+          match latest_ts with Some ts -> `Float ts | None -> `Null );
+        ( "latest_ts_iso",
+          match latest_ts with
+          | Some ts -> `String (Types.iso8601_of_unix_seconds ts)
+          | None -> `Null );
+        ( "latest_age_s",
+          match latest_age_s with Some age -> `Float age | None -> `Null );
+        ("health", `String health);
+        ( "stale_reason",
+          if stale_reason = "" then `Null else `String stale_reason );
+        ( "gate_decode",
+          `Assoc
+            [
+              ( "parsed_gate_count",
+                `Int read_result.Trajectory.gate_decode.parsed_gate_count );
+              ( "legacy_default_count",
+                `Int read_result.Trajectory.gate_decode.legacy_default_count );
+            ] );
+        ("coverage_gaps", `List coverage_gaps);
         ("tools", `List (List.map Trajectory.tool_stat_to_json tools));
         ("timeline", `List (List.map Trajectory.hourly_bucket_to_json timeline));
       ] in
@@ -1085,9 +1150,51 @@ let handle_keeper_get_subroutes state req request reqd =
       let entries =
         Keeper_tool_call_log.read_recent ~keeper_name:name ~n:limit ()
       in
+      let config = state.Mcp_server.room_config in
+      let masc_root = Coord.masc_root_dir config in
+      let latest_ts =
+        List.fold_left
+          (fun acc json ->
+            match Safe_ops.json_float_opt "ts" json with
+            | Some ts -> (
+                match acc with
+                | Some existing when existing >= ts -> acc
+                | _ -> Some ts)
+            | None -> acc)
+          None entries
+      in
+      let freshness_slo_s = 300.0 in
+      let latest_age_s =
+        match latest_ts with
+        | Some ts -> Some (max 0.0 (Time_compat.now () -. ts))
+        | None -> None
+      in
+      let health, stale_reason =
+        match latest_age_s with
+        | None -> ("empty", "no_entries")
+        | Some age when age > freshness_slo_s ->
+            ("stale", "freshness_slo_exceeded")
+        | Some _ -> ("ok", "")
+      in
       let json = `Assoc [
         ("keeper", `String name);
         ("count", `Int (List.length entries));
+        ("source", `String "tool_call_io");
+        ("producer", `String "keeper_hooks_oas.post_tool_use");
+        ("durable_store", `String (Filename.concat masc_root "tool_calls"));
+        ("dashboard_surface", `String "/api/v1/keepers/:name/tool-calls");
+        ("freshness_slo_s", `Float freshness_slo_s);
+        ( "latest_ts_unix",
+          match latest_ts with Some ts -> `Float ts | None -> `Null );
+        ( "latest_ts_iso",
+          match latest_ts with
+          | Some ts -> `String (Types.iso8601_of_unix_seconds ts)
+          | None -> `Null );
+        ( "latest_age_s",
+          match latest_age_s with Some age -> `Float age | None -> `Null );
+        ("health", `String health);
+        ( "stale_reason",
+          if stale_reason = "" then `Null else `String stale_reason );
         ("entries", `List entries);
       ] in
       Http.Response.json ~compress:true ~request:req

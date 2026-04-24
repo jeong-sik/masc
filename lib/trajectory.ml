@@ -33,6 +33,16 @@ type tool_call_entry = {
   cost_usd : float;                 (** Estimated cost of this call *)
 }
 
+type gate_decode_summary = {
+  parsed_gate_count : int;
+  legacy_default_count : int;
+}
+
+type entries_read_result = {
+  entries : tool_call_entry list;
+  gate_decode : gate_decode_summary;
+}
+
 type trajectory_outcome =
   | Completed
   | Failed of string
@@ -120,28 +130,46 @@ let outcome_to_string = function
 (** Default truncation limit for result text in JSONL persistence. *)
 let default_result_truncation = 500
 
-let entry_to_json ?(result_max_len = default_result_truncation) (e : tool_call_entry) : Yojson.Safe.t =
-  `Assoc [
-    ("ts", `Float e.ts);
-    ("ts_iso", `String e.ts_iso);
-    ("turn", `Int e.turn);
-    ("round", `Int e.round);
-    ("tool_name", `String e.tool_name);
-    ("args", (try Yojson.Safe.from_string e.args_json with Yojson.Json_error _ -> `String e.args_json));
-    ("gate", gate_decision_to_json e.gate_decision);
-    ("result",
-      (match e.result with
-       | None -> `Null
-       | Some r ->
-           if result_max_len > 0 then
-             `String (String_util.utf8_safe
-                        ~max_bytes:(result_max_len + 3) ~suffix:"..." r
-                      |> String_util.to_string)
-           else `String r));
-    ("duration_ms", `Int e.duration_ms);
-    ("error", Json_util.string_opt_to_json e.error);
-    ("cost_usd", `Float e.cost_usd);
-  ]
+let entry_to_json ?(result_max_len = default_result_truncation)
+    ?runtime_contract ?action_radius (e : tool_call_entry) : Yojson.Safe.t =
+  let runtime_contract_field =
+    match runtime_contract with
+    | Some value -> [ ("runtime_contract", value) ]
+    | None -> []
+  in
+  let action_radius_field =
+    match action_radius with
+    | Some value -> [ ("action_radius", value) ]
+    | None -> []
+  in
+  `Assoc
+    ([
+       ("ts", `Float e.ts);
+       ("ts_iso", `String e.ts_iso);
+       ("turn", `Int e.turn);
+       ("round", `Int e.round);
+       ("tool_name", `String e.tool_name);
+       ( "args",
+         (try Yojson.Safe.from_string e.args_json with
+          | Yojson.Json_error _ -> `String e.args_json) );
+       ("gate", gate_decision_to_json e.gate_decision);
+       ( "result",
+         (match e.result with
+          | None -> `Null
+          | Some r ->
+              if result_max_len > 0 then
+                `String
+                  (String_util.utf8_safe
+                     ~max_bytes:(result_max_len + 3)
+                     ~suffix:"..."
+                     r
+                   |> String_util.to_string)
+              else `String r) );
+       ("duration_ms", `Int e.duration_ms);
+       ("error", Json_util.string_opt_to_json e.error);
+       ("cost_usd", `Float e.cost_usd);
+     ]
+    @ runtime_contract_field @ action_radius_field)
 
 let default_thinking_truncation = 2000
 
@@ -198,12 +226,13 @@ let trajectory_path (masc_root : string) (keeper_name : string) (trace_id : stri
 let ensure_dir path =
   Fs_compat.mkdir_p path
 
-let append_entry ~(masc_root : string) ~(keeper_name : string) ~(trace_id : string)
-    (entry : tool_call_entry) : unit =
+let append_entry ?runtime_contract ?action_radius ~(masc_root : string)
+    ~(keeper_name : string) ~(trace_id : string) (entry : tool_call_entry) :
+    unit =
   let dir = trajectories_dir masc_root keeper_name in
   ensure_dir dir;
   let path = trajectory_path masc_root keeper_name trace_id in
-  let json = entry_to_json entry in
+  let json = entry_to_json ?runtime_contract ?action_radius entry in
   let line = Yojson.Safe.to_string json ^ "\n" in
   Fs_compat.append_file path line
 
@@ -283,14 +312,31 @@ let clear_task_id (acc : accumulator) : unit =
 let increment_turn (acc : accumulator) : unit =
   acc.turn <- acc.turn + 1
 
-let record_entry (acc : accumulator) (entry : tool_call_entry) : unit =
+let record_entry ?runtime_contract ?action_radius ?on_persist_error
+    (acc : accumulator) (entry : tool_call_entry) : unit =
   acc.entries <- entry :: acc.entries;
   acc.total_cost <- acc.total_cost +. entry.cost_usd;
   acc.total_calls <- acc.total_calls + 1;
   (* Persist immediately for crash recovery *)
-  (try append_entry ~masc_root:acc.masc_root ~keeper_name:acc.keeper_name
-       ~trace_id:acc.trace_id entry
-   with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Keeper.error "Failed to persist entry for %s: %s" acc.trace_id (Printexc.to_string exn))
+  (try
+     append_entry ?runtime_contract ?action_radius ~masc_root:acc.masc_root
+       ~keeper_name:acc.keeper_name ~trace_id:acc.trace_id entry
+   with
+   | Eio.Cancel.Cancelled _ as e -> raise e
+   | exn ->
+       Log.Keeper.error "Failed to persist entry for %s: %s" acc.trace_id
+         (Printexc.to_string exn);
+       (match on_persist_error with
+        | None -> ()
+        | Some report ->
+            try report exn
+            with
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | report_exn ->
+                Log.Keeper.warn
+                  "Failed to report trajectory persist gap for %s: %s"
+                  acc.trace_id
+                  (Printexc.to_string report_exn)))
 
 let finalize (acc : accumulator) (outcome : trajectory_outcome) : trajectory =
   let traj = {
@@ -451,15 +497,72 @@ let hourly_bucket_to_json (b : hourly_bucket) : Yojson.Safe.t =
     ("error_count", `Int b.error_count);
   ]
 
+let gate_decision_of_json = function
+  | `Assoc fields -> (
+      match List.assoc_opt "status" fields with
+      | Some (`String status) -> (
+          match String.lowercase_ascii status with
+          | "pass" | "passed" -> (Pass, true)
+          | "reject" | "rejected" | "gated" ->
+              let reason =
+                match List.assoc_opt "reason" fields with
+                | Some (`String value) when String.trim value <> "" -> value
+                | _ -> "persisted gate rejection"
+              in
+              (Reject reason, true)
+          | _ -> (Pass, false))
+      | _ -> (Pass, false))
+  | _ -> (Pass, false)
+
+let tool_call_entry_of_json (json : Yojson.Safe.t) :
+    (tool_call_entry * bool) option =
+  try
+    let open Yojson.Safe.Util in
+    match member "type" json with
+    | `String "trajectory_summary" -> None
+    | `String "thinking" -> None
+    | _ ->
+        let gate_decision, parsed_gate =
+          gate_decision_of_json (member "gate" json)
+        in
+        Some
+          ( {
+              ts = json |> member "ts" |> to_float;
+              ts_iso = json |> member "ts_iso" |> to_string;
+              turn = json |> member "turn" |> to_int;
+              round = json |> member "round" |> to_int;
+              tool_name = json |> member "tool_name" |> to_string;
+              args_json = json |> member "args" |> Yojson.Safe.to_string;
+              gate_decision;
+              result =
+                (match json |> member "result" with
+                 | `Null -> None
+                 | `String s -> Some s
+                 | _ -> None);
+              duration_ms = json |> member "duration_ms" |> to_int;
+              error =
+                (match json |> member "error" with
+                 | `Null -> None
+                 | `String s -> Some s
+                 | _ -> None);
+              cost_usd = json |> member "cost_usd" |> to_float;
+            },
+            parsed_gate )
+  with
+  | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
+
 (** Read all .jsonl trace files for a keeper. Filter entries with ts >= since.
     Scans the keeper's trajectory directory for all trace files. *)
-let read_entries_since ~(masc_root : string) ~(keeper_name : string) ~(since : float)
-    : tool_call_entry list =
+let read_entries_since_result ~(masc_root : string) ~(keeper_name : string)
+    ~(since : float) : entries_read_result =
   let dir = trajectories_dir masc_root keeper_name in
-  if not (Sys.file_exists dir) then []
+  if not (Sys.file_exists dir) then
+    { entries = []; gate_decode = { parsed_gate_count = 0; legacy_default_count = 0 } }
   else
     let files = Sys.readdir dir in
     let all_entries = ref [] in
+    let parsed_gate_count = ref 0 in
+    let legacy_default_count = ref 0 in
     Array.iter (fun fname ->
       if Filename.check_suffix fname ".jsonl" then begin
         let path = Filename.concat dir fname in
@@ -470,39 +573,31 @@ let read_entries_since ~(masc_root : string) ~(keeper_name : string) ~(since : f
              if String.trim line <> "" then
                try
                  let json = Yojson.Safe.from_string line in
-                 let open Yojson.Safe.Util in
-                 (match member "type" json with
-                  | `String "trajectory_summary" -> ()
-                  | _ ->
-                    let ts = json |> member "ts" |> to_float in
-                    if ts >= since then
-                      let entry = {
-                        ts;
-                        ts_iso = json |> member "ts_iso" |> to_string;
-                        turn = json |> member "turn" |> to_int;
-                        round = json |> member "round" |> to_int;
-                        tool_name = json |> member "tool_name" |> to_string;
-                        args_json = json |> member "args" |> Yojson.Safe.to_string;
-                        gate_decision = Pass;
-                        result =
-                          (match json |> member "result" with
-                           | `Null -> None
-                           | `String s -> Some s
-                           | _ -> None);
-                        duration_ms = json |> member "duration_ms" |> to_int;
-                        error =
-                          (match json |> member "error" with
-                           | `Null -> None
-                           | `String s -> Some s
-                           | _ -> None);
-                        cost_usd = json |> member "cost_usd" |> to_float;
-                      } in
-                      all_entries := entry :: !all_entries)
+                 (match tool_call_entry_of_json json with
+                  | Some (entry, parsed_gate) when entry.ts >= since ->
+                      if parsed_gate then incr parsed_gate_count
+                      else incr legacy_default_count;
+                      all_entries := entry :: !all_entries
+                  | _ -> ())
                with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ())
          with Sys_error _ -> ())
       end
     ) files;
-    List.sort (fun (a : tool_call_entry) (b : tool_call_entry) -> compare a.ts b.ts) !all_entries
+    {
+      entries =
+        List.sort
+          (fun (a : tool_call_entry) (b : tool_call_entry) -> compare a.ts b.ts)
+          !all_entries;
+      gate_decode =
+        {
+          parsed_gate_count = !parsed_gate_count;
+          legacy_default_count = !legacy_default_count;
+        };
+    }
+
+let read_entries_since ~(masc_root : string) ~(keeper_name : string)
+    ~(since : float) : tool_call_entry list =
+  (read_entries_since_result ~masc_root ~keeper_name ~since).entries
 
 (* ================================================================ *)
 (* Read trajectory from JSONL (for replay/eval)                     *)
@@ -519,32 +614,9 @@ let read_entries ~(masc_root : string) ~(keeper_name : string) ~(trace_id : stri
     |> List.filter_map (fun line ->
         try
           let json = Yojson.Safe.from_string line in
-          (* Skip summary lines *)
-          match Yojson.Safe.Util.member "type" json with
-          | `String "trajectory_summary" -> None
-          | _ ->
-              let open Yojson.Safe.Util in
-              Some {
-                ts = json |> member "ts" |> to_float;
-                ts_iso = json |> member "ts_iso" |> to_string;
-                turn = json |> member "turn" |> to_int;
-                round = json |> member "round" |> to_int;
-                tool_name = json |> member "tool_name" |> to_string;
-                args_json = json |> member "args" |> Yojson.Safe.to_string;
-                gate_decision = Pass;  (* Simplified for replay *)
-                result =
-                  (match json |> member "result" with
-                   | `Null -> None
-                   | `String s -> Some s
-                   | _ -> None);
-                duration_ms = json |> member "duration_ms" |> to_int;
-                error =
-                  (match json |> member "error" with
-                   | `Null -> None
-                   | `String s -> Some s
-                   | _ -> None);
-                cost_usd = json |> member "cost_usd" |> to_float;
-              }
+          match tool_call_entry_of_json json with
+          | Some (entry, _parsed_gate) -> Some entry
+          | None -> None
         with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None)
 
 (** Read all trajectory lines including thinking entries. *)
@@ -572,25 +644,7 @@ let read_all_lines ~(masc_root : string) ~(keeper_name : string) ~(trace_id : st
                 redacted = (match json |> member "redacted" with `Bool b -> b | _ -> false);
               })
           | _ ->
-              Some (Tool_call {
-                ts = json |> member "ts" |> to_float;
-                ts_iso = json |> member "ts_iso" |> to_string;
-                turn = json |> member "turn" |> to_int;
-                round = json |> member "round" |> to_int;
-                tool_name = json |> member "tool_name" |> to_string;
-                args_json = json |> member "args" |> Yojson.Safe.to_string;
-                gate_decision = Pass;
-                result =
-                  (match json |> member "result" with
-                   | `Null -> None
-                   | `String s -> Some s
-                   | _ -> None);
-                duration_ms = json |> member "duration_ms" |> to_int;
-                error =
-                  (match json |> member "error" with
-                   | `Null -> None
-                   | `String s -> Some s
-                   | _ -> None);
-                cost_usd = json |> member "cost_usd" |> to_float;
-              })
+              (match tool_call_entry_of_json json with
+               | Some (entry, _parsed_gate) -> Some (Tool_call entry)
+               | None -> None)
         with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None)

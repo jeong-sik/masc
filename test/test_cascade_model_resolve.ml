@@ -102,13 +102,14 @@ let test_gemini_cli_auto_models_env_override () =
 
 let test_codex_and_claude_cli_auto_models_env_override () =
   with_clean_env (fun () ->
-    check (list string) "codex default keeps ChatGPT-supported models only"
+    check (list string) "codex default keeps Codex-supported models only"
       [
         "gpt-5.2";
         "gpt-5.3-codex-spark";
         "gpt-5.3-codex";
         "gpt-5.4-mini";
         "gpt-5.4";
+        "gpt-5.5";
       ]
       (R.codex_cli_auto_models ());
     check (list string) "claude default delegates to CLI"
@@ -157,6 +158,7 @@ let test_expand_auto_models_includes_cli_auto_specs () =
         "codex_cli:gpt-5.3-codex";
         "codex_cli:gpt-5.4-mini";
         "codex_cli:gpt-5.4";
+        "codex_cli:gpt-5.5";
         "claude_code:auto";
         "kimi_cli:kimi-for-coding";
       ]

@@ -345,6 +345,7 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
       features: ['snapshot', 'delta', 'mode_snapshot'],
     })
       .then(() => {
+        if (socket !== ws) return
         dashboardWsReady.value = true
         dashboardWsLastError.value = null
         if (desiredRouteState) {
@@ -352,8 +353,13 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
         }
       })
       .catch(err => {
+        if (socket !== ws) return
+        dashboardWsConnected.value = false
         dashboardWsReady.value = false
         dashboardWsLastError.value = err instanceof Error ? err.message : String(err)
+        lastSubscribeKey = ''
+        closeSocket()
+        scheduleReconnect()
       })
   }
   ws.onmessage = (event) => {

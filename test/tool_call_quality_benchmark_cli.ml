@@ -57,8 +57,20 @@ let () =
   in
   let usage = "tool_call_quality_benchmark_cli [--cases PATH] [--evidence PATH]" in
   Arg.parse specs (fun _ -> ()) usage;
-  let cases = Tool_call_quality_benchmark.load_cases_from_file !cases_path in
-  let runs = Tool_call_quality_benchmark.load_runs_from_file !evidence_path in
+  let cases =
+    match Tool_call_quality_benchmark.load_cases_from_file !cases_path with
+    | Ok v -> v
+    | Error msg ->
+        prerr_endline ("load_cases_from_file failed: " ^ msg);
+        exit 1
+  in
+  let runs =
+    match Tool_call_quality_benchmark.load_runs_from_file !evidence_path with
+    | Ok v -> v
+    | Error msg ->
+        prerr_endline ("load_runs_from_file failed: " ^ msg);
+        exit 1
+  in
   let summary =
     Tool_call_quality_benchmark.summarize ~cases ~runs
       ~model_filters:!model_filters ~keeper_filters:!keeper_filters ()

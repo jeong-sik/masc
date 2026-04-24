@@ -250,6 +250,19 @@ let transition_timeline_event json =
   match json_float_opt_member "wall_clock_at_decision" json with
   | None -> None
   | Some ts_unix ->
+      let operator_signal =
+        match json |> Yojson.Safe.Util.member "operator_signal" with
+        | `Assoc fields -> Some fields
+        | _ -> None
+      in
+      let signal_string key =
+        Option.bind operator_signal (assoc_string_opt key)
+      in
+      let signal_bool key =
+        Option.map
+          (fun fields -> assoc_bool_default key ~default:false fields)
+          operator_signal
+      in
       let prev_phase =
         json |> Yojson.Safe.Util.member "prev_phase"
         |> json_string_opt_value
@@ -262,18 +275,36 @@ let transition_timeline_event json =
         json |> Yojson.Safe.Util.member "selected_event"
       in
       let event_type =
-        json_string_opt_member "type" selected_event
+        (match json_string_opt_member "event_type" json with
+         | Some _ as value -> value
+         | None -> json_string_opt_member "type" selected_event)
         |> Option.value ~default:"transition"
       in
       let prev_phase = Option.value ~default:"unknown" prev_phase in
       let new_phase = Option.value ~default:"unknown" new_phase in
+      let signal_summary = signal_string "summary" in
+      let next_human_action =
+        match signal_bool "requires_operator_decision" with
+        | Some true -> signal_string "next_human_action"
+        | _ -> None
+      in
+      let summary =
+        match signal_summary with
+        | Some signal when String.trim signal <> "" ->
+            Printf.sprintf "%s -> %s via %s · %s"
+              prev_phase new_phase event_type signal
+        | _ ->
+            Printf.sprintf "%s -> %s via %s"
+              prev_phase new_phase event_type
+      in
+      let severity =
+        signal_string "severity"
+        |> Option.value ~default:(severity_of_transition_type event_type)
+      in
       Some
-        (timeline_event_json ~ts_unix ~kind:"transition"
+        (timeline_event_json ?next_human_action ~ts_unix ~kind:"transition"
            ~title:(Printf.sprintf "Transition · %s" event_type)
-           ~summary:
-             (Printf.sprintf "%s -> %s via %s"
-                prev_phase new_phase event_type)
-           ~severity:(severity_of_transition_type event_type) ())
+           ~summary ~severity ())
 
 let receipt_timeline_event receipt =
   match json_string_opt_member "ended_at" receipt with

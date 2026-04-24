@@ -10,6 +10,7 @@ function validTransition(overrides: Record<string, unknown> = {}): Record<string
     prev_phase: 'Running',
     new_phase: 'Compacting',
     selected_event: null,
+    event_type: 'operator_pause',
     wall_clock_at_decision: 1_712_000_000.5,
     transition_outcome: 'ok',
     ...overrides,
@@ -44,6 +45,33 @@ describe('parseKeeperTransitionsResponse', () => {
     })
     expect(out.transitions).toHaveLength(2)
     expect(out.transitions[1]!.new_phase).toBe('Running')
+  })
+
+  it('keeps operator signal fields for dashboard urgency cues', () => {
+    const out = parseKeeperTransitionsResponse({
+      keeper: 'greeter',
+      current_phase: 'Paused',
+      count: 1,
+      transitions: [
+        validTransition({
+          new_phase: 'Paused',
+          operator_signal: {
+            class: 'operator_gate',
+            severity: 'warn',
+            requires_operator_decision: true,
+            next_human_action: 'resume_or_update_policy',
+            summary: 'keeper paused; operator decision is required',
+          },
+        }),
+      ],
+    })
+    expect(out.transitions[0]!.event_type).toBe('operator_pause')
+    expect(out.transitions[0]!.operator_signal).toMatchObject({
+      class: 'operator_gate',
+      severity: 'warn',
+      requires_operator_decision: true,
+      next_human_action: 'resume_or_update_policy',
+    })
   })
 
   it('accepts null current_phase', () => {

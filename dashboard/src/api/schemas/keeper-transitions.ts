@@ -7,9 +7,11 @@
 
 import {
   array,
+  boolean,
   nullable,
   number,
   object,
+  optional,
   safeParse,
   string,
   unknown,
@@ -17,12 +19,22 @@ import {
   type InferOutput,
 } from 'valibot'
 
+const KeeperTransitionOperatorSignalSchema = object({
+  class: string(),
+  severity: string(),
+  requires_operator_decision: boolean(),
+  next_human_action: nullable(string()),
+  summary: string(),
+})
+
 const KeeperTransitionSchema = object({
   prev_phase: string(),
   new_phase: string(),
   selected_event: unknown(),
+  event_type: optional(string()),
   wall_clock_at_decision: number(),
   transition_outcome: string(),
+  operator_signal: optional(KeeperTransitionOperatorSignalSchema),
 })
 
 const KeeperTransitionsResponseSchema = object({
@@ -33,6 +45,9 @@ const KeeperTransitionsResponseSchema = object({
 })
 
 export type KeeperTransition = InferOutput<typeof KeeperTransitionSchema>
+export type KeeperTransitionOperatorSignal = InferOutput<
+  typeof KeeperTransitionOperatorSignalSchema
+>
 export type KeeperTransitionsResponse = InferOutput<typeof KeeperTransitionsResponseSchema>
 
 export class KeeperTransitionsSchemaDriftError extends Error {

@@ -4,8 +4,63 @@
 open Alcotest
 
 module Audit = Masc_mcp.Keeper_transition_audit
+module KSM = Masc_mcp.Keeper_state_machine
 
 let fail = Alcotest.fail
+
+let temp_dir () =
+  let dir = Filename.temp_file "test_keeper_transition_audit_" "" in
+  Unix.unlink dir;
+  Unix.mkdir dir 0o755;
+  dir
+
+let cleanup_dir dir =
+  let rec rm path =
+    if Sys.file_exists path then
+      if Sys.is_directory path then (
+        Array.iter (fun name -> rm (Filename.concat path name)) (Sys.readdir path);
+        Unix.rmdir path)
+      else
+        Unix.unlink path
+  in
+  try rm dir with _ -> ()
+
+let with_env key value f =
+  let old_value = Sys.getenv_opt key in
+  Unix.putenv key value;
+  Fun.protect
+    ~finally:(fun () ->
+      match old_value with
+      | Some old -> Unix.putenv key old
+      | None -> Unix.putenv key "")
+    f
+
+let keeper_meta name =
+  match
+    Masc_mcp.Keeper_types.meta_of_json
+      (`Assoc
+        [
+          ("name", `String name);
+          ("agent_name", `String (name ^ "-agent"));
+          ("trace_id", `String ("trace-" ^ name));
+          ("goal", `String "transition-audit-test");
+          ("cascade_name", `String Masc_mcp.Keeper_config.default_cascade_name);
+        ])
+  with
+  | Ok meta -> meta
+  | Error err -> fail ("meta_of_json failed: " ^ err)
+
+let transition ?(prev_phase = KSM.Running) ?(new_phase = KSM.Paused)
+    ?(selected_event = KSM.Operator_pause) () : Audit.transition_record =
+  {
+    Audit.snapshot = None;
+    events_fired = [ selected_event ];
+    selected_event;
+    prev_phase;
+    new_phase;
+    transition_outcome = "applied";
+    wall_clock_at_decision = 1_712_000_000.5;
+  }
 
 (* ── Helpers to exercise the JSON round-trip via store ─────────── *)
 
@@ -80,6 +135,63 @@ let test_limit_respected () =
   check int "limit respected" 3 (List.length turns);
   check int "newest within limit" 10 (List.hd turns).Audit.turn_id
 
+let test_operator_pause_signal_requires_decision () =
+  let json = Audit.to_json (transition ()) in
+  let open Yojson.Safe.Util in
+  check string "event type" "operator_pause"
+    (json |> member "event_type" |> to_string);
+  let signal = json |> member "operator_signal" in
+  check string "class" "operator_gate" (signal |> member "class" |> to_string);
+  check string "severity" "warn" (signal |> member "severity" |> to_string);
+  check bool "requires decision" true
+    (signal |> member "requires_operator_decision" |> to_bool);
+  check string "next action" "resume_or_update_policy"
+    (signal |> member "next_human_action" |> to_string)
+
+let test_compact_retry_exhausted_signal_is_alerting () =
+  let json =
+    Audit.to_json
+      (transition ~new_phase:KSM.Paused
+         ~selected_event:KSM.Compact_retry_exhausted ())
+  in
+  let open Yojson.Safe.Util in
+  let signal = json |> member "operator_signal" in
+  check string "event type" "compact_retry_exhausted"
+    (json |> member "event_type" |> to_string);
+  check string "class" "context_management"
+    (signal |> member "class" |> to_string);
+  check string "severity" "bad" (signal |> member "severity" |> to_string);
+  check bool "requires decision" true
+    (signal |> member "requires_operator_decision" |> to_bool);
+  check string "next action" "approve_handoff_or_reduce_context"
+    (signal |> member "next_human_action" |> to_string)
+
+let test_runtime_trust_timeline_carries_transition_operator_signal () =
+  Audit.For_testing.reset_state ();
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Audit.For_testing.reset_state ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let sink = Filename.concat base_dir "transition-audit.jsonl" in
+      with_env "MASC_KEEPER_TRANSITION_LOG" sink (fun () ->
+          let keeper_name = "runtime-trust-transition-signal" in
+          let config = Masc_mcp.Coord.default_config base_dir in
+          let meta = keeper_meta keeper_name in
+          Audit.record_transition ~keeper_name (transition ());
+          let snapshot =
+            Masc_mcp.Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta
+          in
+          let open Yojson.Safe.Util in
+          let event = snapshot |> member "latest_causal_event" in
+          check string "latest event kind" "transition"
+            (event |> member "kind" |> to_string);
+          check string "transition next action" "resume_or_update_policy"
+            (event |> member "next_human_action" |> to_string);
+          check string "transition severity" "warn"
+            (event |> member "severity" |> to_string)))
+
 (* ── Run ───────────────────────────────────────────────────────── *)
 
 let () =
@@ -92,5 +204,14 @@ let () =
           test_case "ring capacity limit" `Quick test_ring_capacity_limit;
           test_case "ring ordering newest first" `Quick test_ring_ordering_is_newest_first;
           test_case "limit respected" `Quick test_limit_respected;
+        ] );
+      ( "transition_operator_signal",
+        [
+          test_case "operator pause requires decision" `Quick
+            test_operator_pause_signal_requires_decision;
+          test_case "compact retry exhausted is alerting" `Quick
+            test_compact_retry_exhausted_signal_is_alerting;
+          test_case "runtime trust timeline carries signal" `Quick
+            test_runtime_trust_timeline_carries_transition_operator_signal;
         ] );
     ]

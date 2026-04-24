@@ -450,6 +450,13 @@ let init () =
     "Total persisted read-model entries dropped during filesystem scans, \
      labeled by surface and reason"
     Counter;
+  add metric_keeper_metric_emit_dropped
+    "Total keeper metric snapshot emissions dropped due to \
+     append_metrics_snapshot exceptions. State JSON already advanced \
+     (write_meta succeeded); this counter surfaces the divergence that \
+     would otherwise be observable only in server stderr logs. Labeled \
+     by keeper, channel, and site."
+    Counter;
   add metric_oas_sse_relay_retries
     "Total OAS SSE relay retry attempts, labeled by failed stage"
     Counter;

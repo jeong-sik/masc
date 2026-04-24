@@ -324,6 +324,12 @@
  (modules test_governance_cases_snapshot)
  (libraries masc_test_deps))
 
+; #10047: state/metric divergence counter
+(test
+ (name test_keeper_metric_emit_dropped_counter)
+ (modules test_keeper_metric_emit_dropped_counter)
+ (libraries masc_test_deps))
+
 (test
  (name test_sandbox_clone_conflict)
  (modules test_sandbox_clone_conflict)

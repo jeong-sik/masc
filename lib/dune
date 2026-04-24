@@ -427,6 +427,7 @@
    keeper_id
    keeper_types_profile
    keeper_meta_contract
+   keeper_meta_json
    keeper_types_support
    keeper_types
    keeper_meta_merge
@@ -628,6 +629,7 @@
  dashboard_mission_assembly
  keeper_types_profile
  keeper_meta_contract
+ keeper_meta_json
  keeper_types_support
  server_dashboard_http_cache
  dashboard_http_helpers

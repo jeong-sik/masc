@@ -108,11 +108,12 @@ check "V9-masc-llama-envvar" 4 \
   'MASC_LLAMA' \
   "lib/"
 
-# V10: OAS-owned provider filters must not be re-owned outside compatibility loaders.
+# V10: OAS-owned provider filters must not be re-owned outside compatibility loaders/scrubbers.
 check_forbidden_outside "V10-provider-filter-ownership" \
   'allowed_providers' \
   "lib/" \
-  "lib/keeper/keeper_types.ml"
+  "lib/keeper/keeper_types.ml" \
+  "lib/keeper/keeper_meta_json.ml"
 
 # V11: proof-store layout knowledge must stay inside the proof reader adapter.
 check_forbidden_outside "V11-proof-store-layout" \

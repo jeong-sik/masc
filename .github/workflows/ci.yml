@@ -692,6 +692,22 @@ jobs:
     timeout-minutes: 2
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Enforce agent draft policy on merge gate
+        if: github.event_name == 'pull_request'
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          PR_IS_DRAFT: ${{ github.event.pull_request.draft }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          AGENT_DRAFT_GUARD_TITLE_RE: ${{ vars.AGENT_DRAFT_GUARD_TITLE_RE }}
+          AGENT_DRAFT_GUARD_BRANCH_RE: ${{ vars.AGENT_DRAFT_GUARD_BRANCH_RE }}
+          AGENT_DRAFT_GUARD_BYPASS_LABELS: ${{ vars.AGENT_DRAFT_GUARD_BYPASS_LABELS }}
+        run: scripts/ci/check-agent-draft-policy.sh
+
       - name: Aggregate required check status
         env:
           PR_SYNC_RESULT: ${{ needs.pr-sync-check.result }}

@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
+import { waitFor } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 void vi
@@ -181,7 +182,9 @@ describe('PromptRegistryPanel', () => {
     expect(container.textContent).toContain('프롬프트 레지스트리')
     expect(container.textContent).toContain('keeper.world')
     expect(container.textContent).toContain('/tmp/config/prompts/keeper.world.md')
-    expect(container.textContent).toContain('file world')
+    await waitFor(() => {
+      expect(container.textContent).toContain('file world')
+    })
     expect((container.querySelector('textarea') as HTMLTextAreaElement).value).toBe('override world')
 
     const governanceButton = Array.from(container.querySelectorAll('button')).find(button =>

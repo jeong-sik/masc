@@ -231,7 +231,13 @@ let goal_alignment_score
     ~(user_message : string option)
     ~(assistant_reply : string option) : float =
   let goals = goal_horizon_candidates meta in
-  if goals = [] then 0.0
+  (* Unmeasurable → sentinel [1.0] so [plan_goal_alignment_threshold <= X]
+     and [guardrail_goal_alignment_threshold <= floor] gates do NOT
+     fire; [goal_drift = 1.0 - alignment] then reads 0.0 (no drift).
+     [0.0] was a permissive default that conflated "no goal data" with
+     "total misalignment", triggering auto_plan on every status_tick
+     (#10012). CLAUDE.md anti-pattern #2: Unknown → Permissive Default. *)
+  if goals = [] then 1.0
   else
     let user_score =
       match user_message with
@@ -244,7 +250,7 @@ let goal_alignment_score
       | Some text -> Some (best_goal_similarity ~text ~goals)
     in
     match user_score, reply_score with
-    | None, None -> 0.0
+    | None, None -> 1.0
     | Some s, None | None, Some s -> s
     | Some u, Some r -> (u +. r) /. 2.0
 

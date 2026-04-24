@@ -189,4 +189,9 @@ echo "PR: $pr_url"
 
 if [[ $watch_checks -eq 1 ]]; then
   gh pr checks "$pr_number" --repo "$repo" --watch || true
+  echo "PR status:"
+  gh pr view "$pr_number" --repo "$repo" \
+    --json state,isDraft,mergeStateStatus,headRefOid,url \
+    --jq '"state=\(.state) draft=\(.isDraft) mergeState=\(.mergeStateStatus) head=\(.headRefOid)\nurl=\(.url)"' \
+    || true
 fi

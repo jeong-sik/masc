@@ -7,7 +7,12 @@ import {
   parseWebSocketSseFrames,
   subscribeDashboardRoute,
 } from './dashboard-ws'
-import { dashboardWsLastSeq } from './dashboard-ws-state'
+import {
+  dashboardWsConnected,
+  dashboardWsLastError,
+  dashboardWsLastSeq,
+  dashboardWsReady,
+} from './dashboard-ws-state'
 
 interface JsonRpcRequest {
   id: number
@@ -99,7 +104,10 @@ async function flushPromises(): Promise<void> {
 
 afterEach(() => {
   disconnectDashboardWS()
+  dashboardWsConnected.value = false
+  dashboardWsLastError.value = null
   dashboardWsLastSeq.value = 0
+  dashboardWsReady.value = false
   vi.useRealTimers()
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
@@ -244,6 +252,32 @@ describe('dashboard websocket route subscriptions', () => {
       result: { snapshot: { seq: 7, slices: {} } },
     })
     await flushPromises()
+  })
+
+  it('reconnects when the hello handshake never responds', async () => {
+    vi.useFakeTimers()
+    installWebSocketMocks()
+
+    await connectDashboardWS({ tab: 'workspace', params: { section: 'board' } })
+    const firstSocket = mockSockets[0]!
+    firstSocket.open()
+    const hello = parseRpc(firstSocket, 0)
+    expect(hello.method).toBe('dashboard/hello')
+    expect(dashboardWsConnected.value).toBe(true)
+
+    await vi.advanceTimersByTimeAsync(15_000)
+    await flushPromises()
+
+    expect(firstSocket.readyState).toBe(MockWebSocket.CLOSED)
+    expect(dashboardWsConnected.value).toBe(false)
+    expect(dashboardWsReady.value).toBe(false)
+    expect(dashboardWsLastError.value).toBe('dashboard websocket rpc timed out: dashboard/hello')
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    await flushPromises()
+
+    expect(mockSockets).toHaveLength(2)
+    expect(mockSockets[1]!.readyState).toBe(MockWebSocket.CONNECTING)
   })
 
   it('ignores stale subscribe snapshots that arrive after a newer route subscription', async () => {

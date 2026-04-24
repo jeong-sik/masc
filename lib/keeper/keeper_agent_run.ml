@@ -453,12 +453,28 @@ let cascade_outcome_of_observation = function
   | Some _ -> "completed"
   | None -> "not_observed"
 
-let tool_required_affordances =
-  [ "board_post_or_comment"
-  ; "message_sweep"
-  ; "task_claim"
-  ; "task_audit"
-  ]
+type turn_affordance =
+  | Board_post_or_comment
+  | Message_sweep
+  | Task_claim
+  | Task_audit
+
+let turn_affordance_of_string = function
+  | "board_post_or_comment" -> Some Board_post_or_comment
+  | "message_sweep" -> Some Message_sweep
+  | "task_claim" -> Some Task_claim
+  | "task_audit" -> Some Task_audit
+  | _ -> None
+
+let should_tool_gate_affordance = function
+  | Board_post_or_comment | Message_sweep | Task_claim | Task_audit -> true
+
+let turn_affordances_require_tool_gate turn_affordances =
+  List.exists
+    (function
+      | Some affordance -> should_tool_gate_affordance affordance
+      | None -> false)
+    (List.map turn_affordance_of_string turn_affordances)
 
 let should_require_tools_for_initial_turn ~(max_turns : int)
     ~(turn_affordances : string list) =
@@ -466,9 +482,39 @@ let should_require_tools_for_initial_turn ~(max_turns : int)
   let initial_turn_is_last = initial_per_call_turn >= max_turns - 1 in
   max_turns > 1
   && not initial_turn_is_last
-  && List.exists
-       (fun affordance -> List.mem affordance turn_affordances)
-       tool_required_affordances
+  && turn_affordances_require_tool_gate turn_affordances
+
+let tool_names =
+  List.map Tool_name.to_string
+
+let fallback_floor_tool_names =
+  tool_names
+    Tool_name.[
+      Keeper Context_status;
+      Keeper Task_claim;
+      Keeper Tasks_list;
+      Keeper Board_list;
+      Keeper Board_get;
+    ]
+
+let fallback_repo_probe_tool_names =
+  tool_names Tool_name.[ Keeper Fs_read; Keeper Shell; Keeper Bash ]
+
+let is_claim_tool_name name =
+  match Tool_name.of_string name with
+  | Some (Keeper Task_claim) | Some (Masc Claim_next) -> true
+  | _ -> false
+
+let is_claim_context_tool_name name =
+  match Tool_name.of_string name with
+  | Some (Keeper Task_claim)
+  | Some (Keeper Tasks_list)
+  | Some (Keeper Context_status)
+  | Some (Masc Claim_next)
+  | Some (Masc Tasks)
+  | Some (Masc Status) ->
+      true
+  | _ -> false
 
 (* Tool selection & disclosure — extracted to Keeper_tool_disclosure (#5732) *)
 
@@ -486,26 +532,8 @@ let tool_index_entry_of_tool
     (t : Oas.Tool.t) : Oas.Tool_index.entry =
   let name = t.schema.name in
   let group =
-    if String.starts_with ~prefix:"keeper_board_" name then Some "board"
-    else if String.starts_with ~prefix:"keeper_memory_" name
-         || String.starts_with ~prefix:"keeper_library_" name then Some "knowledge"
-    else if String.starts_with ~prefix:"keeper_task" name then Some "tasks"
-    else if String.starts_with ~prefix:"keeper_voice_" name then Some "voice"
-    else if String.starts_with ~prefix:"keeper_fs_" name
-         || name = "keeper_shell"
-         || name = "keeper_bash"
-         || name = "keeper_write" then Some "filesystem"
-    else if String.starts_with ~prefix:"masc_board_" name then Some "masc_board"
-    else if String.starts_with ~prefix:"masc_keeper_" name then Some "masc_keeper"
-    else if String.starts_with ~prefix:"masc_plan_" name then Some "masc_plan"
-    else if String.starts_with ~prefix:"masc_worktree_" name then Some "masc_worktree"
-    else if String.starts_with ~prefix:"masc_code_" name then Some "masc_code"
-    else if String.starts_with ~prefix:"masc_governance_" name then Some "masc_governance"
-    else if String.starts_with ~prefix:"masc_autoresearch_" name then Some "masc_autoresearch"
-    else if String.starts_with ~prefix:"masc_agent_" name
-         || name = "masc_agents" then Some "masc_agent"
-    else if String.starts_with ~prefix:"masc_" name then Some "masc_core"
-    else None
+    Tool_catalog.tool_group name
+    |> Option.map Tool_catalog.tool_group_to_string
   in
   let aliases =
     match Hashtbl.find_opt korean_kw_tbl name with
@@ -1341,22 +1369,14 @@ let run_turn
     validated
   in
   let fallback_tool_surface ~turn =
-    let floor =
-      [ "keeper_context_status"
-      ; "keeper_task_claim"
-      ; "keeper_tasks_list"
-      ; "keeper_board_list"
-      ; "keeper_board_get"
-      ]
-    in
     let repo_probe =
-      [ "keeper_fs_read"; "keeper_shell"; "keeper_bash" ]
+      fallback_repo_probe_tool_names
       |> List.find_opt (fun name ->
            Keeper_tool_policy.StringSet.mem name universe_set
            && Keeper_tool_policy.StringSet.mem name allowed_exec_set)
       |> Option.to_list
     in
-    validate_allow_list ~turn (floor @ repo_probe)
+    validate_allow_list ~turn (fallback_floor_tool_names @ repo_probe)
   in
   let tool_gate_requested_for_turn ~current_tool_choice ~is_last_turn =
     let caller_requires_tools =
@@ -1366,10 +1386,7 @@ let run_turn
     in
     max_turns > 1
     && not is_last_turn
-    && (caller_requires_tools
-        || List.exists
-             (fun affordance -> List.mem affordance turn_affordances)
-             tool_required_affordances)
+    && (caller_requires_tools || turn_affordances_require_tool_gate turn_affordances)
   in
   let compute_tool_surface ~turn ~messages ~current_tool_choice ~decay_discovered
       : computed_tool_surface =
@@ -1928,18 +1945,8 @@ let run_turn
                       scan rev
                     in
                     let is_claim_only_turn =
-                      List.exists (fun n ->
-                        String.equal n "keeper_task_claim"
-                        || String.equal n "masc_claim_next"
-                      ) last_tool_names
-                      && List.for_all (fun n ->
-                        String.equal n "keeper_task_claim"
-                        || String.equal n "masc_claim_next"
-                        || String.equal n "keeper_tasks_list"
-                        || String.equal n "masc_tasks"
-                        || String.equal n "masc_status"
-                        || String.equal n "keeper_context_status"
-                      ) last_tool_names
+                      List.exists is_claim_tool_name last_tool_names
+                      && List.for_all is_claim_context_tool_name last_tool_names
                     in
                     if is_claim_only_turn then
                       let nudge =

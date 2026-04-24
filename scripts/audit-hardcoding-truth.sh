@@ -88,7 +88,7 @@ section "Confirmed String/Heuristic Semantics"
 print_matches \
   "keeper agent surface still derives affordance groups from tool-name strings" \
   lib/keeper/keeper_agent_run.ml \
-  'tool_required_affordances|String\.starts_with|fallback_tool_surface|is_claim_only_turn'
+  'tool_required_affordances|String\.starts_with|String\.equal[[:space:]]+[a-zA-Z_]+[[:space:]]+"(keeper|masc)_[^"]+"|List\.mem[[:space:]]+[a-zA-Z_]+[[:space:]]+turn_affordances'
 
 print_matches \
   "provider adapter still has model-label/provider heuristics" \

@@ -102,18 +102,30 @@ case "${cmd1}:${cmd2}" in
     printf 'https://github.com/example/test/pull/42\n'
     ;;
   pr:view)
-    if [ "${3:-}" = "https://github.com/example/test/pull/42" ]; then
-      printf '42\n'
-    else
-      printf 'https://github.com/example/test/pull/42\n'
-    fi
+    args="$*"
+    case "$args" in
+      *"state,isDraft,mergeStateStatus,headRefOid,url"*)
+        printf 'state=OPEN draft=true mergeState=CLEAN head=abc123\nurl=https://github.com/example/test/pull/42\n'
+        ;;
+      *)
+        if [ "${3:-}" = "https://github.com/example/test/pull/42" ]; then
+          printf '42\n'
+        else
+          printf 'https://github.com/example/test/pull/42\n'
+        fi
+        ;;
+    esac
     ;;
   api:*)
     cat >"$labels_file"
     ;;
   pr:checks)
-    printf 'unexpected pr checks invocation\n' >&2
-    exit 1
+    if [ "${FAKE_GH_ALLOW_CHECKS:-}" = "1" ]; then
+      printf 'checks ok\n'
+    else
+      printf 'unexpected pr checks invocation\n' >&2
+      exit 1
+    fi
     ;;
   *)
     printf 'unexpected gh invocation: %s %s\n' "$cmd1" "$cmd2" >&2
@@ -204,6 +216,46 @@ let test_script_runs_under_system_bash_without_watch () =
       check bool "does not add docs label for code-only change" false
         (contains_substring labels "\"docs\""))
 
+let test_script_prints_final_status_after_watch () =
+  with_temp_dir "pr-open-script-watch-status" (fun dir ->
+      init_repo_with_remote dir;
+      let fake_gh_dir = make_fake_gh dir in
+      let gh_log = Filename.concat dir "gh.log" in
+      let gh_labels = Filename.concat dir "gh-labels.json" in
+      let body_file = Filename.concat dir "body.md" in
+      write_file body_file
+        "## Summary\nTest body\n\n## Product impact\n- Promise affected: `none/internal`\n- User-visible change: none\n\n## Evidence\n- local script test\n\n## Review evidence\n- not applicable for script test\n\n## Linked issue\n- Refs #1234\n";
+      let path =
+        Printf.sprintf "%s:%s" fake_gh_dir
+          (match Sys.getenv_opt "PATH" with Some p -> p | None -> "")
+      in
+      let env =
+        [
+          ("PATH", path);
+          ("FAKE_GH_LOG", gh_log);
+          ("FAKE_GH_LABELS", gh_labels);
+          ("FAKE_GH_ALLOW_CHECKS", "1");
+        ]
+      in
+      let cmd =
+        Printf.sprintf "/bin/bash %s --repo %s --title %s --body-file %s"
+          (quote (script_path ()))
+          (quote "example/test")
+          (quote "fix: print final status")
+          (quote body_file)
+      in
+      let code, stdout, stderr = run_shell ~cwd:dir ~env cmd in
+      if code <> 0 then
+        failf "pr-open failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout stderr;
+      check bool "runs watched checks" true
+        (contains_substring (read_file gh_log) "pr checks");
+      check bool "prints final status heading" true
+        (contains_substring stdout "PR status:");
+      check bool "prints final draft state" true
+        (contains_substring stdout "draft=true");
+      check bool "prints final merge state" true
+        (contains_substring stdout "mergeState=CLEAN"))
+
 let test_script_rejects_body_missing_required_sections () =
   with_temp_dir "pr-open-script-missing-sections" (fun dir ->
       init_repo_with_remote dir;
@@ -290,6 +342,8 @@ let () =
             test_source_avoids_mapfile_only_bash4_features;
           test_case "runs under system bash without watch" `Quick
             test_script_runs_under_system_bash_without_watch;
+          test_case "prints final status after watch" `Quick
+            test_script_prints_final_status_after_watch;
           test_case "rejects body missing required sections" `Quick
             test_script_rejects_body_missing_required_sections;
           test_case "rejects staged changes before push" `Quick

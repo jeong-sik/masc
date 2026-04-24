@@ -117,6 +117,12 @@ stylesheet
     .btn { border-width: 2px; border-color: var(--text-bright); }
     .cta_note { color: var(--text-bright); }
   }
+
+  @media (forced-colors: active) {
+    .panel { border-color: CanvasText; }
+    .btn { border-color: LinkText; color: LinkText; }
+    .btn_primary { border-color: Highlight; color: Highlight; }
+  }
 |}]
 
 type blueprint = {

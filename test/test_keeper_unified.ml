@@ -1696,6 +1696,67 @@ let test_metrics_surface_model_prefers_successful_cascade_label () =
   check string "last_model_used stores canonical surface label" selected_label
     updated.runtime.usage.last_model_used
 
+(* #9953: [surface_resolved_model_id] returns the concrete model_id from
+   the last cascade attempt, even when [model_label] is populated. This
+   lets analysts correlate ["context_max"] with the actual resolved
+   variant instead of the auto label. *)
+let test_metrics_resolved_model_id_prefers_last_attempt_id () =
+  let result =
+    make_run_result ~text:"I checked the board." ~tools:[]
+      ~model:"claude-opus-4-6" ~input_tok:100 ~output_tok:50
+      ~cascade_observation:
+        {
+          Masc_mcp.Oas_worker.cascade_name =
+            Masc_mcp.Keeper_config.default_cascade_name;
+          strategy = Some "round_robin";
+          configured_labels = [ "claude_code:auto" ];
+          candidate_models =
+            [ "claude-sonnet-4-6"; "claude-opus-4-6" ];
+          primary_model = Some "claude-sonnet-4-6";
+          selected_model = Some "claude-opus-4-6";
+          selected_model_raw = Some "claude-opus-4-6";
+          selected_index = None;
+          fallback_hops = Some 1;
+          fallback_applied = true;
+          attempts =
+            [
+              {
+                Masc_mcp.Oas_worker.attempt_index = 0;
+                model_id = "claude-sonnet-4-6";
+                model_label = Some "claude_code:auto";
+                latency_ms = None;
+                error = Some "HTTP 503";
+              };
+              {
+                attempt_index = 1;
+                model_id = "claude-opus-4-6";
+                model_label = Some "claude_code:auto";
+                latency_ms = Some 187;
+                error = None;
+              };
+            ];
+          fallback_events = [];
+          attempt_details_available = true;
+          attempt_details_source = "oas_metrics_callbacks";
+        }
+      ()
+  in
+  check string "surface_model_used returns cascade label"
+    "claude_code:auto" (KAR.surface_model_used result);
+  check string "surface_resolved_model_id returns concrete variant id"
+    "claude-opus-4-6" (KAR.surface_resolved_model_id result)
+
+(* #9953: when no cascade observation is available, resolved id falls
+   back to the raw [model_used] reported by the provider, not to the
+   empty string. This preserves signal for non-cascade keeper turns. *)
+let test_metrics_resolved_model_id_fallback_to_model_used () =
+  let result =
+    make_run_result ~text:"ok" ~tools:[] ~model:"claude-opus-4-6"
+      ~input_tok:10 ~output_tok:5 ()
+  in
+  check string "surface_resolved_model_id falls back to model_used"
+    "claude-opus-4-6" (KAR.surface_resolved_model_id result)
+
 let test_metrics_tool_response () =
   let result =
     make_run_result ~text:"" ~tools:["keeper_board_post"; "keeper_board_comment"]
@@ -4981,6 +5042,11 @@ let () =
           test_case "text response" `Quick test_metrics_text_response;
           test_case "surface model prefers successful cascade label" `Quick
             test_metrics_surface_model_prefers_successful_cascade_label;
+          test_case "resolved_model_id prefers last attempt id (#9953)"
+            `Quick
+            test_metrics_resolved_model_id_prefers_last_attempt_id;
+          test_case "resolved_model_id falls back to model_used (#9953)"
+            `Quick test_metrics_resolved_model_id_fallback_to_model_used;
           test_case "tool response" `Quick test_metrics_tool_response;
           test_case "noop response" `Quick test_metrics_noop_response;
           test_case "observation-only tools are noop" `Quick

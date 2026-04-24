@@ -23,6 +23,9 @@ type task_id = private string
 
 val task_id_to_string : task_id -> string
 
+val task_id_of_string : string -> (task_id, string) result
+(** Rehydrate a task_id from JSON at the MCP boundary without raising. *)
+
 val task_id_of_string_exn : string -> task_id
 (** Rehydrate a task_id from JSON at the MCP boundary. Raises
     [Invalid_argument] on a syntactically invalid handle — callers must

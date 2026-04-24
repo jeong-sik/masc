@@ -23,9 +23,13 @@ type task_id = string
 
 let task_id_to_string t = t
 
+let task_id_of_string s =
+  if s = "" then Error "empty handle" else Ok s
+
 let task_id_of_string_exn s =
-  if s = "" then invalid_arg "Bg_task.task_id_of_string_exn: empty handle";
-  s
+  match task_id_of_string s with
+  | Ok task_id -> task_id
+  | Error msg -> invalid_arg ("Bg_task.task_id_of_string_exn: " ^ msg)
 
 type snapshot = {
   stdout_since : string;

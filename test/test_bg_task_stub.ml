@@ -39,6 +39,10 @@ let poll_for_closed tid =
     | Error _ -> false)
 
 let test_task_id_empty_rejected () =
+  (match Bg_task.task_id_of_string "" with
+   | Error "empty handle" -> ()
+   | Error msg -> failf "unexpected error message: %s" msg
+   | Ok _ -> fail "empty id must return Error");
   match Bg_task.task_id_of_string_exn "" with
   | exception Invalid_argument _ -> ()
   | _ -> fail "empty id must raise"

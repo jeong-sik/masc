@@ -3,6 +3,13 @@
 
 open Keeper_types
 
+(** #10061: compare personality text fields ignoring leading/trailing
+    whitespace.  The TOML heredoc parser drops the newline before the
+    closing triple-quote; the state JSON writer preserves the in-
+    memory value.  That 1-byte drift drives a re-sync storm on every
+    hot-reload tick unless the compare normalizes whitespace. *)
+let personality_text_equal a b = String.equal (String.trim a) (String.trim b)
+
 type boot_meta_resolution = {
   meta : keeper_meta;
   materialized : bool;
@@ -250,16 +257,19 @@ let ensure_keeper_meta config name =
        writes/day on nick0cave alone; other 13 keepers: 0 events).
        Normalise both sides with [String.trim] so only meaningful
        content drives resync. *)
-    let trim_equal a b = String.equal (String.trim a) (String.trim b) in
+    let personality_field_differs current target =
+      not (personality_text_equal current target)
+    in
     let personality_changed =
-      not (trim_equal meta.goal target_goal)
-      || not (trim_equal meta.short_goal target_short_goal)
-      || not (trim_equal meta.mid_goal target_mid_goal)
-      || not (trim_equal meta.long_goal target_long_goal)
-      || not (trim_equal meta.will target_will)
-      || not (trim_equal meta.needs target_needs)
-      || not (trim_equal meta.desires target_desires)
-      || not (trim_equal meta.instructions target_instructions) in
+      personality_field_differs meta.goal target_goal
+      || personality_field_differs meta.short_goal target_short_goal
+      || personality_field_differs meta.mid_goal target_mid_goal
+      || personality_field_differs meta.long_goal target_long_goal
+      || personality_field_differs meta.will target_will
+      || personality_field_differs meta.needs target_needs
+      || personality_field_differs meta.desires target_desires
+      || personality_field_differs meta.instructions target_instructions
+    in
     let policy_changed =
       meta.policy_voice_enabled <> target_policy_voice_enabled
       || meta.autoboot_enabled <> target_autoboot_enabled

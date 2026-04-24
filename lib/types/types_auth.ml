@@ -243,9 +243,14 @@ type agent_credential = {
 } [@@deriving show]
 
 let agent_credential_to_yojson c =
+  (* Canonical role representation is ["role": "admin"|"worker"] (string).
+     Legacy ["admin": bool] is emitted alongside for backward compatibility
+     with older readers that only inspect the bool field. Both fields always
+     agree by construction. *)
   let base = [
     ("agent_name", `String c.agent_name);
     ("token", `String c.token);
+    ("role", `String (agent_role_to_string c.role));
     ("admin", `Bool (c.role = Admin));
     ("created_at", `String c.created_at);
   ] in
@@ -270,11 +275,30 @@ let agent_credential_of_yojson json =
     let token = json |> member "token" |> to_string in
     let created_at = json |> member "created_at" |> to_string in
     let expires_at = json |> member "expires_at" |> to_string_option in
+    (* Role resolution: canonical field is ["role"] (string),
+       legacy fallback is ["admin"] (bool).
+
+       Writer drift history — pre-#9767 keeper credential files on the live
+       fleet were stored as [{"role": "admin", ...}] while the canonical
+       [agent_credential_to_yojson] only emitted [{"admin": bool, ...}].
+       A parser that looked only at ["admin"] silently downgraded every
+       such credential to Worker, causing masc_board_delete and other
+       CanAdmin tools to return Forbidden for janitor / dashboard / qa-king
+       even though their credential files explicitly declared "role":"admin".
+
+       Both fields are read now. ["role"] wins when both are present.
+       Unknown role strings fall back to Worker (fail-closed, least
+       privilege). Missing both fields also defaults to Worker. *)
     let role =
-      match json |> member "admin" |> to_bool_option with
-      | Some true -> Admin
-      | Some false -> Worker
-      | None -> Worker
+      match json |> member "role" |> to_string_option with
+      | Some s ->
+          (match agent_role_of_string s with
+           | Ok r -> r
+           | Error _ -> Worker)
+      | None ->
+          (match json |> member "admin" |> to_bool_option with
+           | Some true -> Admin
+           | Some false | None -> Worker)
     in
     Ok { id; agent_id; agent_name; token; role; created_at; expires_at }
   with e -> Error (Printexc.to_string e)

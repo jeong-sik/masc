@@ -200,6 +200,12 @@ stylesheet
     background: rgba(212,169,64,0.05);
   }
 
+  .nav_link:focus-visible {
+    outline: 2px solid var(--accent-brass);
+    outline-offset: -2px;
+    background: rgba(212,169,64,0.08);
+  }
+
   .nav_link_active {
     color: var(--accent-brass);
     border-left-color: var(--accent-brass);
@@ -615,11 +621,20 @@ let route_tail = function
 ;;
 
 let nav_link ~(active : Route.t) (route : Route.t) =
+  let is_active = Route.equal active route in
   let attrs =
     let base = [ Style.nav_link ] in
-    let base = if Route.equal active route then Style.nav_link_active :: base else base in
+    let base = if is_active then Style.nav_link_active :: base else base in
     let base =
       if Route.is_implemented route then base else Style.nav_link_soon :: base
+    in
+    let base =
+      if is_active then Attr.create "aria-current" "page" :: base else base
+    in
+    let base =
+      if not (Route.is_implemented route)
+      then Attr.create "aria-disabled" "true" :: base
+      else base
     in
     Attr.href (Route.path route) :: base
   in
@@ -639,7 +654,7 @@ let nav_link ~(active : Route.t) (route : Route.t) =
 let nav ~(active : Route.t) =
   let lnk = nav_link ~active in
   Node.div
-    ~attrs:[ Style.nav ]
+    ~attrs:[ Style.nav; Attr.role "navigation"; Attr.arialabel "Main navigation" ]
     [ section "watch"
     ; lnk Overview
     ; lnk Logs
@@ -675,7 +690,7 @@ let pill ?(tone : tone = `Neutral) text =
 
 let topbar ~(active : Route.t) =
   Node.div
-    ~attrs:[ Style.topbar ]
+    ~attrs:[ Style.topbar; Attr.role "banner" ]
     [ Node.div
         ~attrs:[ Style.brand ]
         [ Node.div ~attrs:[ Style.brand_mark ] [ Node.span [ Node.text "M" ] ]
@@ -932,7 +947,7 @@ let watch_feed () =
 
 let default_aside ~(shell : Overview_types.response) ~(active : Route.t) =
   Node.div
-    ~attrs:[ Style.aside ]
+    ~attrs:[ Style.aside; Attr.role "complementary"; Attr.arialabel "Sidebar details" ]
     [ focus_card ~shell ~active
     ; flame ()
     ; watch_feed ()
@@ -955,7 +970,7 @@ let view ?(shell = Overview_types.fixture) ?hud ?aside ~(active : Route.t) (chil
     [ topbar ~active
     ; nav ~active
     ; Node.div
-        ~attrs:[ Style.main ]
+        ~attrs:[ Style.main; Attr.role "main" ]
         [ Node.div ~attrs:[ Style.hud ] hud_nodes
         ; Node.div ~attrs:[ Style.page ] children
         ]

@@ -591,6 +591,7 @@ let run_docker_hardened_bash = Keeper_shell_docker.run_docker_hardened_bash
 let handle_keeper_bash
       ~(turn_sandbox_runtime : Keeper_turn_sandbox_runtime.t option)
       ~(turn_sandbox_runtime_git : Keeper_turn_sandbox_runtime.t option)
+      ~(exec_cache : Masc_exec.Exec_cache.t option)
       ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
@@ -1202,6 +1203,7 @@ let resolve_gh_repo_context = Keeper_shell_gh_context.resolve_gh_repo_context
 
 let handle_keeper_shell
       ~(turn_sandbox_runtime : Keeper_turn_sandbox_runtime.t option)
+      ~(exec_cache : Masc_exec.Exec_cache.t option)
       ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
@@ -2070,53 +2072,135 @@ let handle_keeper_shell
            (match Worker_dev_tools.validate_command_paths ~workdir:cwd cmd_str with
             | Error e -> path_error e
             | Ok () ->
-              let st, out =
-                match turn_sandbox_runtime with
-                | Some runtime ->
-                  (match
-                     Keeper_turn_sandbox_runtime.run_bash_with_status runtime
-                       ~cwd ~cmd:cmd_str ~timeout_sec ()
-                   with
-                   | Ok payload -> payload
-                   | Error msg -> (Unix.WEXITED 127, msg))
-                | None ->
-                  run_argv_with_status_retry_eintr ~cwd ~timeout_sec
-                    [ "bash"; "-lc"; cmd_str ^ " 2>&1" ]
-              in
-              if process_status_is_timeout st then
-                Yojson.Safe.to_string
-                  (Exec_core.process_result_json
-                     ~artifact_policy:Exec_core.Inline_only
-                     ~base_path:root
-                     ~keeper_name:meta.name
-                     ~cmd:cmd_str
-                     ~extra:
-                       [
-                         "op", `String op;
-                         "cwd", `String cwd;
-                         "command", `String cmd_str;
-                         "error", `String "command_timed_out";
-                         "timeout_sec", `Float timeout_sec;
-                       ]
-                     ~status:st
-                     ~output:out
-                     ())
-              else
-                Yojson.Safe.to_string
-                  (Exec_core.process_result_json
-                     ~artifact_policy:Exec_core.Inline_only
-                     ~base_path:root
-                     ~keeper_name:meta.name
-                     ~cmd:cmd_str
-                     ~extra:
-                       [
-                         "op", `String op;
-                         "cwd", `String cwd;
-                         "command", `String cmd_str;
-                       ]
-                     ~status:st
-                     ~output:out
-                     ()))))
+              (* P21: exec cache — skip execution on hit, store on miss *)
+              (match exec_cache with
+               | Some cache ->
+                 (match Masc_exec.Exec_cache.lookup cache cmd_str with
+                  | Some entry ->
+                    let st = Unix.WEXITED entry.exit_code in
+                    Yojson.Safe.to_string
+                      (Exec_core.process_result_json
+                         ~artifact_policy:Exec_core.Inline_only
+                         ~base_path:root
+                         ~keeper_name:meta.name
+                         ~cmd:cmd_str
+                         ~extra:
+                           [ "op", `String op
+                           ; "cwd", `String cwd
+                           ; "command", `String cmd_str
+                           ; "cached", `Bool true
+                           ; "cache_age_ms",
+                               `Int (int_of_float
+                                       ((Unix.time () -. entry.cached_at) *. 1000.))
+                           ]
+                         ~status:st
+                         ~output:entry.output
+                         ())
+                  | None ->
+                    let t0 = Unix.gettimeofday () in
+                    let st, out =
+                      match turn_sandbox_runtime with
+                      | Some runtime ->
+                        (match
+                           Keeper_turn_sandbox_runtime.run_bash_with_status runtime
+                             ~cwd ~cmd:cmd_str ~timeout_sec ()
+                         with
+                         | Ok payload -> payload
+                         | Error msg -> (Unix.WEXITED 127, msg))
+                      | None ->
+                        run_argv_with_status_retry_eintr ~cwd ~timeout_sec
+                          [ "bash"; "-lc"; cmd_str ^ " 2>&1" ]
+                    in
+                    let elapsed_ms =
+                      int_of_float ((Unix.gettimeofday () -. t0) *. 1000.)
+                    in
+                    if not (process_status_is_timeout st) then begin
+                      let exit_code = match st with
+                        | Unix.WEXITED n -> n
+                        | Unix.WSIGNALED n -> 128 + n
+                        | Unix.WSTOPPED n -> 256 + n
+                      in
+                      Masc_exec.Exec_cache.store cache
+                        ~cmd:cmd_str ~exit_code ~output:out ~duration_ms:elapsed_ms
+                    end;
+                    if process_status_is_timeout st then
+                      Yojson.Safe.to_string
+                        (Exec_core.process_result_json
+                           ~artifact_policy:Exec_core.Inline_only
+                           ~base_path:root
+                           ~keeper_name:meta.name
+                           ~cmd:cmd_str
+                           ~extra:
+                             [ "op", `String op
+                             ; "cwd", `String cwd
+                             ; "command", `String cmd_str
+                             ; "error", `String "command_timed_out"
+                             ; "timeout_sec", `Float timeout_sec
+                             ]
+                           ~status:st
+                           ~output:out
+                           ())
+                    else
+                      Yojson.Safe.to_string
+                        (Exec_core.process_result_json
+                           ~artifact_policy:Exec_core.Inline_only
+                           ~base_path:root
+                           ~keeper_name:meta.name
+                           ~cmd:cmd_str
+                           ~extra:
+                             [ "op", `String op
+                             ; "cwd", `String cwd
+                             ; "command", `String cmd_str
+                             ]
+                           ~status:st
+                           ~output:out
+                           ()))
+               | None ->
+                 let st, out =
+                   match turn_sandbox_runtime with
+                   | Some runtime ->
+                     (match
+                        Keeper_turn_sandbox_runtime.run_bash_with_status runtime
+                          ~cwd ~cmd:cmd_str ~timeout_sec ()
+                      with
+                      | Ok payload -> payload
+                      | Error msg -> (Unix.WEXITED 127, msg))
+                   | None ->
+                     run_argv_with_status_retry_eintr ~cwd ~timeout_sec
+                       [ "bash"; "-lc"; cmd_str ^ " 2>&1" ]
+                 in
+                 if process_status_is_timeout st then
+                   Yojson.Safe.to_string
+                     (Exec_core.process_result_json
+                        ~artifact_policy:Exec_core.Inline_only
+                        ~base_path:root
+                        ~keeper_name:meta.name
+                        ~cmd:cmd_str
+                        ~extra:
+                          [ "op", `String op
+                          ; "cwd", `String cwd
+                          ; "command", `String cmd_str
+                          ; "error", `String "command_timed_out"
+                          ; "timeout_sec", `Float timeout_sec
+                          ]
+                        ~status:st
+                        ~output:out
+                        ())
+                 else
+                   Yojson.Safe.to_string
+                     (Exec_core.process_result_json
+                        ~artifact_policy:Exec_core.Inline_only
+                        ~base_path:root
+                        ~keeper_name:meta.name
+                        ~cmd:cmd_str
+                        ~extra:
+                          [ "op", `String op
+                          ; "cwd", `String cwd
+                          ; "command", `String cmd_str
+                          ]
+                        ~status:st
+                        ~output:out
+                        ())))))
   | "git_clone" ->
     (* Clone a repo into this keeper's playground repos directory.
        Sandboxed: always targets .masc/playground/<keeper_name>/repos/<repo_name>.

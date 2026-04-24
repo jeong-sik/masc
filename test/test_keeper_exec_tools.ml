@@ -114,7 +114,7 @@ let test_execute_with_outcome_policy_gate_is_non_failure () =
     (fun ~config ~meta ~ctx_work ->
       let result =
         KET.execute_keeper_tool_call_with_outcome
-          ~config ~meta ~ctx_work
+          ~config ~meta ~ctx_work ~exec_cache:None
           ~name:"keeper_fs_read"
           ~input:(`Assoc [ ("path", `String "blocked.txt") ])
           ()
@@ -132,7 +132,7 @@ let test_execute_with_outcome_missing_file_is_failure () =
     (fun ~config ~meta ~ctx_work ->
       let result =
         KET.execute_keeper_tool_call_with_outcome
-          ~config ~meta ~ctx_work
+          ~config ~meta ~ctx_work ~exec_cache:None
           ~name:"keeper_fs_read"
           ~input:(`Assoc [ ("path", `String "missing.txt") ])
           ()
@@ -147,7 +147,7 @@ let test_execute_with_outcome_bad_query_is_failure () =
     (fun ~config ~meta ~ctx_work ->
       let result =
         KET.execute_keeper_tool_call_with_outcome
-          ~config ~meta ~ctx_work
+          ~config ~meta ~ctx_work ~exec_cache:None
           ~name:"keeper_tool_search"
           ~input:(`Assoc [ ("query", `String "") ])
           ()

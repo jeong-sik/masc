@@ -403,7 +403,7 @@ let test_claim_tool_exposes_routing_warning_for_high_risk_keeper () =
       ignore (Coord.add_task config ~title:"Task to claim" ~priority:1 ~description:"desc");
       let result =
         Keeper_exec_tools.execute_keeper_tool_call
-          ~config ~meta ~ctx_work:(make_ctx_work ())
+          ~config ~meta ~ctx_work:(make_ctx_work ()) ~exec_cache:None
           ~name:"keeper_task_claim" ~input:(`Assoc []) ()
         |> Yojson.Safe.from_string
       in
@@ -433,7 +433,7 @@ let test_preflight_exposes_routing_hint_for_high_risk_keeper () =
            ]);
       let result =
         Keeper_exec_tools.execute_keeper_tool_call
-          ~config ~meta ~ctx_work:(make_ctx_work ())
+          ~config ~meta ~ctx_work:(make_ctx_work ()) ~exec_cache:None
           ~name:"keeper_preflight_check" ~input:(`Assoc []) ()
         |> Yojson.Safe.from_string
       in

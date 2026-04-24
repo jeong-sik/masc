@@ -114,6 +114,7 @@ let execute_keeper_tool_call_with_outcome
       ~(ctx_work : working_context)
       ?turn_sandbox_runtime
       ?turn_sandbox_runtime_git
+      ~(exec_cache : Masc_exec.Exec_cache.t option)
       ?search_fn
       ~(name : string)
       ~(input : Yojson.Safe.t)
@@ -248,7 +249,7 @@ let execute_keeper_tool_call_with_outcome
     | "keeper_bash" ->
       make_executed_tool_result
         (Keeper_exec_shell.handle_keeper_bash
-           ~turn_sandbox_runtime ~turn_sandbox_runtime_git ~config ~meta ~args
+           ~turn_sandbox_runtime ~turn_sandbox_runtime_git ~exec_cache ~config ~meta ~args
            ())
     | "keeper_bash_output" ->
       make_executed_tool_result
@@ -258,7 +259,7 @@ let execute_keeper_tool_call_with_outcome
         (Keeper_exec_shell.handle_keeper_bash_kill ~config ~meta ~args)
     | "keeper_shell" ->
       make_executed_tool_result
-        (Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_runtime ~config ~meta ~args)
+        (Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_runtime ~exec_cache ~config ~meta ~args)
     | "keeper_voice_speak"
     | "keeper_voice_listen"
     | "keeper_voice_agent"
@@ -358,6 +359,7 @@ let execute_keeper_tool_call
       ~(ctx_work : working_context)
       ?turn_sandbox_runtime
       ?turn_sandbox_runtime_git
+      ~(exec_cache : Masc_exec.Exec_cache.t option)
       ?search_fn
       ~(name : string)
       ~(input : Yojson.Safe.t)
@@ -367,6 +369,6 @@ let execute_keeper_tool_call
   let result =
     execute_keeper_tool_call_with_outcome
       ~config ~meta ~ctx_work ?turn_sandbox_runtime ?turn_sandbox_runtime_git
-      ?search_fn ~name ~input ()
+      ~exec_cache ?search_fn ~name ~input ()
   in
   result.raw_output

@@ -159,6 +159,7 @@ let make_keeper_tool_handler
     ~(ctx_snapshot : Keeper_types.working_context)
     ?turn_sandbox_runtime
     ?turn_sandbox_runtime_git
+    ~(exec_cache : Masc_exec.Exec_cache.t option)
     ?search_fn
     ?on_tool_called
     ?(translate_input = fun j -> j)
@@ -192,6 +193,7 @@ let make_keeper_tool_handler
               ~config ~meta ~ctx_work:ctx_snapshot
               ?turn_sandbox_runtime
               ?turn_sandbox_runtime_git
+              ~exec_cache
               ?search_fn
               ~name ~input ())
         in
@@ -400,6 +402,7 @@ let make_tool_bundle
         Some (Keeper_turn_sandbox_runtime.create ~config ~meta ~network_mode:Network_inherit ())
     | Keeper_types.Local -> None
   in
+  let exec_cache = Some (Masc_exec.Exec_cache.create ()) in
   (* Build Tool.t for the full universe so BM25 and Tool_op can
      discover tools beyond the active preset.  Progressive disclosure
      (AllowList filter in before_turn_hook) controls LLM visibility;
@@ -441,6 +444,7 @@ let make_tool_bundle
           (make_keeper_tool_handler ~name:td.name ~config ~meta ~ctx_snapshot
              ?turn_sandbox_runtime
              ?turn_sandbox_runtime_git
+             ~exec_cache
              ?search_fn ?on_tool_called ~failure_counts ()))
       else None
     ) tool_defs
@@ -472,6 +476,7 @@ let make_tool_bundle
             (make_keeper_tool_handler ~name:internal ~config ~meta ~ctx_snapshot
                ?turn_sandbox_runtime
                ?turn_sandbox_runtime_git
+               ~exec_cache
                ?search_fn ?on_tool_called
                ~translate_input:(fun j ->
                  Keeper_tool_alias.translate_input ~public j)

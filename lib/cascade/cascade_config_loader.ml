@@ -161,6 +161,8 @@ let catalog_key_specs =
     ("_cli_max_concurrent", Schema_field);
     ("_tiers", Schema_field);
     ("_sticky_ttl_ms", Schema_field);
+    ("_keep_alive", Schema_field);
+    ("_num_ctx", Schema_field);
     ("_keeper_assignable", Keeper_assignable_field);
   ]
 
@@ -256,6 +258,13 @@ let load_profile ~config_path ~name =
 type inference_params = {
   temperature: float option;
   max_tokens: int option;
+  keep_alive: string option;
+  (** Ollama [keep_alive] override: integer seconds ("-1", "3600") or
+      duration string ("5m", "30m"). Honored only when the resolved
+      provider is Ollama. *)
+  num_ctx: int option;
+  (** Ollama [num_ctx] override: per-request KV cache allocation in
+      tokens. Honored only when the resolved provider is Ollama. *)
 }
 
 let read_float_field json key =
@@ -272,13 +281,20 @@ let read_int_field json key =
   | `Float f -> Some (int_of_float f)
   | _ -> None
 
+let read_string_field json key =
+  let open Yojson.Safe.Util in
+  match json |> member key with
+  | `String s when String.trim s <> "" -> Some (String.trim s)
+  | _ -> None
+
 let resolve_inference_params ~config_path ~name =
   match load_json config_path with
   | Error msg ->
       Eio.traceln
         "[CascadeConfig] resolve_inference_params: %s (name=%s, path=%s)"
         msg name config_path;
-      { temperature = None; max_tokens = None }
+      { temperature = None; max_tokens = None;
+        keep_alive = None; num_ctx = None }
   | Ok json ->
     let temp =
       match read_float_field json (name ^ "_temperature") with
@@ -290,7 +306,20 @@ let resolve_inference_params ~config_path ~name =
       | Some _ as v -> v
       | None -> read_int_field json "default_max_tokens"
     in
-    { temperature = temp; max_tokens = max_tok }
+    let keep_alive =
+      match read_string_field json (name ^ "_keep_alive") with
+      | Some _ as v -> v
+      | None -> read_string_field json "default_keep_alive"
+    in
+    let num_ctx =
+      match read_int_field json (name ^ "_num_ctx") with
+      | Some n when n > 0 -> Some n
+      | _ ->
+        (match read_int_field json "default_num_ctx" with
+         | Some n when n > 0 -> Some n
+         | _ -> None)
+    in
+    { temperature = temp; max_tokens = max_tok; keep_alive; num_ctx }
 
 (* ── Per-cascade API key env override ────────────────── *)
 

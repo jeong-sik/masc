@@ -45,6 +45,8 @@ val parse_model_string :
   ?system_prompt:string ->
   ?api_key_env_overrides:(string * string) list ->
   ?supports_tool_choice_override:bool ->
+  ?keep_alive:string ->
+  ?num_ctx:int ->
   string -> Llm_provider.Provider_config.t option
 (** [api_key_env_overrides] defaults to [[]]. When non-empty, it overrides
     the registry default API key env var for matching providers; see
@@ -70,6 +72,8 @@ val parse_weighted_entry :
   ?max_tokens:int ->
   ?system_prompt:string ->
   ?api_key_env_overrides:(string * string) list ->
+  ?keep_alive:string ->
+  ?num_ctx:int ->
   Cascade_config_loader.weighted_entry ->
   Llm_provider.Provider_config.t option
 
@@ -87,6 +91,8 @@ val parse_weighted_entry_diag :
   ?max_tokens:int ->
   ?system_prompt:string ->
   ?api_key_env_overrides:(string * string) list ->
+  ?keep_alive:string ->
+  ?num_ctx:int ->
   Cascade_config_loader.weighted_entry ->
   (Llm_provider.Provider_config.t, weighted_entry_drop) result
 
@@ -318,6 +324,12 @@ val load_json : string -> (Yojson.Safe.t, string) result
 type inference_params = {
   temperature: float option;
   max_tokens: int option;
+  keep_alive: string option;
+  (** Ollama [keep_alive] override. Honored only when the resolved
+      provider is Ollama. *)
+  num_ctx: int option;
+  (** Ollama [num_ctx] override. Honored only when the resolved
+      provider is Ollama. *)
 }
 
 (** Resolve inference parameters from cascade.json.

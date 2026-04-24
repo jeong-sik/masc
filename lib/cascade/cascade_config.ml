@@ -22,6 +22,8 @@ let load_profile = Cascade_config_loader.load_profile
 type inference_params = Cascade_config_loader.inference_params = {
   temperature: float option;
   max_tokens: int option;
+  keep_alive: string option;
+  num_ctx: int option;
 }
 
 let resolve_inference_params = Cascade_config_loader.resolve_inference_params
@@ -93,7 +95,7 @@ let split_provider_model (s : string) : (string * string) option =
 
 (** Build a {!Llm_provider.Provider_config.t} for "custom:model@url" specs. *)
 let make_custom_config ~temperature ~max_tokens ?system_prompt
-    ?supports_tool_choice_override model_id =
+    ?supports_tool_choice_override ?keep_alive ?num_ctx model_id =
   let actual_model, base_url = parse_custom_model model_id in
   if actual_model = "" then None
   else Some (Llm_provider.Provider_config.make
@@ -108,6 +110,8 @@ let make_custom_config ~temperature ~max_tokens ?system_prompt
                ~max_tokens
                ?system_prompt
                ?supports_tool_choice_override
+               ?keep_alive
+               ?num_ctx
                ())
 
 (** Resolve the effective API key env var name for a provider.
@@ -213,7 +217,8 @@ let kimi_is_available ~api_key_env_overrides =
     || Option.is_some (nonempty_env "KIMI_API_KEY")
 
 let make_kimi_config ~temperature ~max_tokens ?system_prompt
-    ?(api_key_env_overrides = []) ?supports_tool_choice_override model_id =
+    ?(api_key_env_overrides = []) ?supports_tool_choice_override
+    ?keep_alive ?num_ctx model_id =
   let effective_api_key_env =
     resolve_kimi_api_key_env ~api_key_env_overrides
   in
@@ -241,11 +246,14 @@ let make_kimi_config ~temperature ~max_tokens ?system_prompt
     ~max_context:(resolve_kimi_max_context resolved_model_id)
     ?system_prompt
     ?supports_tool_choice_override
+    ?keep_alive
+    ?num_ctx
     ()
 
 (** Build a {!Llm_provider.Provider_config.t} from a registry entry. *)
 let make_registry_config ~temperature ~max_tokens ?system_prompt
     ?(api_key_env_overrides=[]) ?supports_tool_choice_override
+    ?keep_alive ?num_ctx
     ~provider_name ~model_id (entry : Llm_provider.Provider_registry.entry) =
   let defaults = entry.defaults in
   let effective_api_key_env =
@@ -313,6 +321,8 @@ let make_registry_config ~temperature ~max_tokens ?system_prompt
     ~max_context
     ?system_prompt
     ?supports_tool_choice_override
+    ?keep_alive
+    ?num_ctx
     ()
 
 (* ── Model string parsing ──────────────────────────────── *)
@@ -322,19 +332,23 @@ let parse_model_string
     ?(max_tokens = Llm_provider.Constants.Inference.default_max_tokens)
     ?system_prompt ?(api_key_env_overrides = [])
     ?supports_tool_choice_override
+    ?keep_alive ?num_ctx
     (s : string) : Llm_provider.Provider_config.t option =
   let trimmed = String.trim s in
   match split_provider_model trimmed with
   | Some ("custom", model_id) ->
     (match make_custom_config ~temperature ~max_tokens ?system_prompt
-             ?supports_tool_choice_override model_id with
+             ?supports_tool_choice_override ?keep_alive ?num_ctx
+             model_id with
      | Some cfg -> Some cfg
      | None -> None)
   | Some (provider_name, model_id) when is_kimi_provider provider_name ->
     if kimi_is_available ~api_key_env_overrides then
       Some
         (make_kimi_config ~temperature ~max_tokens ?system_prompt
-           ~api_key_env_overrides ?supports_tool_choice_override model_id)
+           ~api_key_env_overrides ?supports_tool_choice_override
+           ?keep_alive ?num_ctx
+           model_id)
     else None
   | _ ->
   (* Kind classification goes through [Provider_kind_resolver] — a sum-typed
@@ -357,6 +371,7 @@ let parse_model_string
         else
           Some (make_registry_config ~temperature ~max_tokens ?system_prompt
                   ~api_key_env_overrides ?supports_tool_choice_override
+                  ?keep_alive ?num_ctx
                   ~provider_name ~model_id entry)
 
 (** Parse a {!Cascade_config_loader.weighted_entry} into a
@@ -367,11 +382,13 @@ let parse_weighted_entry
     ?(temperature = Llm_provider.Constants.Inference.default_temperature)
     ?(max_tokens = Llm_provider.Constants.Inference.default_max_tokens)
     ?system_prompt ?(api_key_env_overrides = [])
+    ?keep_alive ?num_ctx
     (entry : Cascade_config_loader.weighted_entry)
   : Llm_provider.Provider_config.t option =
   parse_model_string ~temperature ~max_tokens ?system_prompt
     ~api_key_env_overrides
     ?supports_tool_choice_override:entry.supports_tool_choice
+    ?keep_alive ?num_ctx
     entry.model
 
 (** Categorised diagnostic for a failed weighted-entry parse. *)
@@ -388,6 +405,7 @@ let parse_weighted_entry_diag
     ?(temperature = Llm_provider.Constants.Inference.default_temperature)
     ?(max_tokens = Llm_provider.Constants.Inference.default_max_tokens)
     ?system_prompt ?(api_key_env_overrides = [])
+    ?keep_alive ?num_ctx
     (entry : Cascade_config_loader.weighted_entry)
   : (Llm_provider.Provider_config.t, weighted_entry_drop) result =
   let raw = String.trim entry.model in
@@ -395,7 +413,8 @@ let parse_weighted_entry_diag
   | None -> Error (Drop_invalid_syntax raw)
   | Some ("custom", model_id) ->
     (match make_custom_config ~temperature ~max_tokens ?system_prompt
-             ?supports_tool_choice_override:entry.supports_tool_choice model_id with
+             ?supports_tool_choice_override:entry.supports_tool_choice
+             ?keep_alive ?num_ctx model_id with
      | Some c -> Ok c
      | None -> Error (Drop_invalid_syntax raw))
   | Some (provider_name, model_id) when is_kimi_provider provider_name ->
@@ -404,6 +423,7 @@ let parse_weighted_entry_diag
         (make_kimi_config ~temperature ~max_tokens ?system_prompt
            ~api_key_env_overrides
            ?supports_tool_choice_override:entry.supports_tool_choice
+           ?keep_alive ?num_ctx
            model_id)
     else
       Error (Drop_unavailable_scheme { model = raw; scheme = provider_name })
@@ -417,6 +437,7 @@ let parse_weighted_entry_diag
       Ok (make_registry_config ~temperature ~max_tokens ?system_prompt
             ~api_key_env_overrides
             ?supports_tool_choice_override:entry.supports_tool_choice
+            ?keep_alive ?num_ctx
             ~provider_name ~model_id reg_entry)
 
 (** Expand provider:auto specs that map to multiple models.

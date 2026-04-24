@@ -6,6 +6,16 @@ type severity_counts =
   ; error : int
   }
 
+type observed_state =
+  { goals : Goal_store.goal list
+  ; tasks : Types.task list
+  ; posts : Board.post list
+  ; transactions : Agent_economy.transaction list
+  ; telemetry_events : Telemetry_eio.event_record list
+  ; persist_errors : int
+  ; economy_enabled : bool
+  }
+
 let unique_strings items =
   List.fold_left
     (fun acc item ->
@@ -51,6 +61,84 @@ let meta_string_list key (post : Board.post) =
 ;;
 
 let post_id_string (post : Board.post) = Board.Post_id.to_string post.id
+
+let compare_desc_float_then_string ~float_value ~string_value left right =
+  let by_time = Float.compare (float_value right) (float_value left) in
+  if by_time <> 0 then by_time else String.compare (string_value left) (string_value right)
+;;
+
+let compare_goal_id (left : Goal_store.goal) (right : Goal_store.goal) =
+  String.compare left.id right.id
+;;
+
+let compare_task_id (left : Types.task) (right : Types.task) =
+  String.compare left.id right.id
+;;
+
+let compare_post_activity left right =
+  compare_desc_float_then_string
+    ~float_value:(fun (post : Board.post) -> post.updated_at)
+    ~string_value:post_id_string
+    left
+    right
+;;
+
+let compare_transaction_activity left right =
+  compare_desc_float_then_string
+    ~float_value:(fun (txn : Agent_economy.transaction) -> txn.timestamp)
+    ~string_value:(fun txn -> txn.id)
+    left
+    right
+;;
+
+let telemetry_event_sort_key = function
+  | Telemetry_eio.Agent_joined { agent_id; capabilities } ->
+    Printf.sprintf "agent_joined:%s:%s" agent_id (String.concat "," capabilities)
+  | Telemetry_eio.Agent_left { agent_id; reason } ->
+    Printf.sprintf "agent_left:%s:%s" agent_id reason
+  | Telemetry_eio.Task_started { task_id; agent_id } ->
+    Printf.sprintf "task_started:%s:%s" task_id agent_id
+  | Telemetry_eio.Task_completed { task_id; duration_ms; success } ->
+    Printf.sprintf "task_completed:%s:%d:%b" task_id duration_ms success
+  | Telemetry_eio.Handoff_triggered { from_agent; to_agent; reason } ->
+    Printf.sprintf "handoff:%s:%s:%s" from_agent to_agent reason
+  | Telemetry_eio.Error_occurred { code; message; context } ->
+    Printf.sprintf "error:%s:%s:%s" code message context
+  | Telemetry_eio.Tool_called { tool_name; success; duration_ms; agent_id; source } ->
+    Printf.sprintf
+      "tool_called:%s:%b:%d:%s:%s"
+      tool_name
+      success
+      duration_ms
+      (Option.value agent_id ~default:"")
+      (Option.value source ~default:"")
+  | Telemetry_eio.Tool_assigned { agent_id; profile; preset; tool_count; assignment_id } ->
+    Printf.sprintf
+      "tool_assigned:%s:%s:%s:%d:%s"
+      agent_id
+      profile
+      (Option.value preset ~default:"")
+      tool_count
+      assignment_id
+;;
+
+let compare_telemetry_activity left right =
+  compare_desc_float_then_string
+    ~float_value:(fun (record : Telemetry_eio.event_record) -> record.timestamp)
+    ~string_value:(fun record -> telemetry_event_sort_key record.event)
+    left
+    right
+;;
+
+let canonicalize_observed_state state =
+  { state with
+    goals = List.sort compare_goal_id state.goals
+  ; tasks = List.sort compare_task_id state.tasks
+  ; posts = List.sort compare_post_activity state.posts
+  ; transactions = List.sort compare_transaction_activity state.transactions
+  ; telemetry_events = List.sort compare_telemetry_activity state.telemetry_events
+  }
+;;
 
 let take n values =
   let rec loop remaining acc = function
@@ -149,10 +237,7 @@ let economy_transactions_for ids transactions =
     match ids.agent_name with
     | Some agent_name -> String.equal txn.agent_name agent_name && spend_kind txn.kind
     | None -> false)
-  |> List.sort (fun left right ->
-    Float.compare
-      (right : Agent_economy.transaction).timestamp
-      (left : Agent_economy.transaction).timestamp)
+  |> List.sort compare_transaction_activity
 ;;
 
 let reward_facts ~(ids : Coordination_product.ids) transactions =
@@ -312,8 +397,7 @@ let evidence_for ~ids ~tasks ~linked_posts ~transactions ~telemetry_events =
   let task_rows = tasks |> List.map (task_evidence ids) |> take 5 in
   let board_rows =
     linked_posts
-    |> List.sort (fun (left : Board.post) (right : Board.post) ->
-      Float.compare right.updated_at left.updated_at)
+    |> List.sort compare_post_activity
     |> List.map (board_evidence ids)
     |> take 5
   in
@@ -322,10 +406,7 @@ let evidence_for ~ids ~tasks ~linked_posts ~transactions ~telemetry_events =
   in
   let telemetry_rows =
     telemetry_events
-    |> List.sort (fun left right ->
-      Float.compare
-        (right : Telemetry_eio.event_record).timestamp
-        (left : Telemetry_eio.event_record).timestamp)
+    |> List.sort compare_telemetry_activity
     |> List.filter_map (telemetry_evidence_for_event ids)
     |> take 5
   in
@@ -388,6 +469,7 @@ let product_for
       ~transactions
       ~telemetry_events
       ~persist_errors
+      ~economy_enabled
   =
   let task_statuses = List.map (fun (task : Types.task) -> task.task_status) tasks in
   let task_counts = Coordination_product.task_counts_of_statuses task_statuses in
@@ -405,7 +487,6 @@ let product_for
   let has_reward_earning, has_spend, has_penalty =
     reward_facts ~ids transactions
   in
-  let economy_enabled = Agent_economy.enabled () in
   let reward =
     Coordination_product.reward_phase_of_facts
       ~economy_enabled
@@ -434,7 +515,13 @@ let product_for
   product
 ;;
 
-let product_for_goal ~all_tasks ~posts ~transactions ~telemetry_events ~persist_errors
+let product_for_goal
+      ~all_tasks
+      ~posts
+      ~transactions
+      ~telemetry_events
+      ~persist_errors
+      ~economy_enabled
     (goal : Goal_store.goal)
   =
   let tasks =
@@ -449,6 +536,7 @@ let product_for_goal ~all_tasks ~posts ~transactions ~telemetry_events ~persist_
       ~transactions
       ~telemetry_events
       ~persist_errors
+      ~economy_enabled
   in
   { product with
     facts =
@@ -471,22 +559,30 @@ let read_recent_telemetry config =
     []
 ;;
 
-let build (config : Coord.config) =
-  let goals = Goal_store.list_goals config () in
-  let all_tasks = Coord_query.get_tasks_safe config in
-  let posts = Board_dispatch.list_posts ~limit:Board.Limits.max_posts () in
-  let transactions = Agent_economy.list_transactions ~base_path:config.base_path in
-  let telemetry_events = read_recent_telemetry config in
-  let persist_errors = Board.persist_error_count () in
+let capture (config : Coord.config) =
+  { goals = Goal_store.list_goals config ()
+  ; tasks = Coord_query.get_tasks_safe config
+  ; posts = Board_dispatch.list_posts ~limit:Board.Limits.max_posts ()
+  ; transactions = Agent_economy.list_transactions ~base_path:config.base_path
+  ; telemetry_events = read_recent_telemetry config
+  ; persist_errors = Board.persist_error_count ()
+  ; economy_enabled = Agent_economy.enabled ()
+  }
+;;
+
+let project state =
+  let state = canonicalize_observed_state state in
+  let all_tasks = state.tasks in
   let goal_products =
     List.map
       (product_for_goal
          ~all_tasks
-         ~posts
-         ~transactions
-         ~telemetry_events
-         ~persist_errors)
-      goals
+         ~posts:state.posts
+         ~transactions:state.transactions
+         ~telemetry_events:state.telemetry_events
+         ~persist_errors:state.persist_errors
+         ~economy_enabled:state.economy_enabled)
+      state.goals
   in
   let linked_task_ids =
     goal_products
@@ -502,13 +598,16 @@ let build (config : Coord.config) =
         ~goal_phase:None
         ~goal_id:None
         ~tasks:[ task ]
-        ~posts
-        ~transactions
-        ~telemetry_events
-        ~persist_errors)
+        ~posts:state.posts
+        ~transactions:state.transactions
+        ~telemetry_events:state.telemetry_events
+        ~persist_errors:state.persist_errors
+        ~economy_enabled:state.economy_enabled)
   in
   Coordination_product.snapshot (goal_products @ unlinked_task_products)
 ;;
+
+let build config = config |> capture |> project
 
 let severity_counts (snapshot : Coordination_product.snapshot) =
   let count severity =

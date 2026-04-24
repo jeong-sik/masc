@@ -60,6 +60,17 @@ val startup_prune_keeper_checkpoints : Mcp_server.server_state -> unit
 val startup_migrate_keeper_histories : Mcp_server.server_state -> unit
 val sync_bootable_keeper_credentials : Mcp_server.server_state -> unit
 
+(** {2 Codex MCP Client Auth} *)
+
+type codex_mcp_config_sync_status =
+  | Codex_mcp_config_updated
+  | Codex_mcp_config_unchanged
+  | Codex_mcp_config_server_missing
+  | Codex_mcp_config_header_missing
+
+val sync_codex_mcp_auth_header_content :
+  raw_token:string -> string -> string * codex_mcp_config_sync_status
+
 (** {1 Main Entry Point} *)
 
 val run :

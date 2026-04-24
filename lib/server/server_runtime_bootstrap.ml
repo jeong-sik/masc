@@ -582,6 +582,194 @@ let sync_internal_keeper_token_env (state : Mcp_server.server_state) =
   Log.Server.info
     "startup internal keeper MCP token synced via MASC_INTERNAL_MCP_TOKEN"
 
+let sync_codex_mcp_config_env_key = "MASC_SYNC_CODEX_MCP_CONFIG"
+let codex_config_path_env_key = "MASC_CODEX_CONFIG_PATH"
+
+type codex_mcp_config_sync_status =
+  | Codex_mcp_config_updated
+  | Codex_mcp_config_unchanged
+  | Codex_mcp_config_server_missing
+  | Codex_mcp_config_header_missing
+
+let escape_toml_basic_string value =
+  let buf = Buffer.create (String.length value) in
+  String.iter
+    (function
+      | '\\' -> Buffer.add_string buf "\\\\"
+      | '"' -> Buffer.add_string buf "\\\""
+      | '\b' -> Buffer.add_string buf "\\b"
+      | '\012' -> Buffer.add_string buf "\\f"
+      | '\n' -> Buffer.add_string buf "\\n"
+      | '\r' -> Buffer.add_string buf "\\r"
+      | '\t' -> Buffer.add_string buf "\\t"
+      | c -> Buffer.add_char buf c)
+    value;
+  Buffer.contents buf
+
+let split_lines_with_trailing_newline content =
+  let has_trailing_newline =
+    String.length content > 0 && content.[String.length content - 1] = '\n'
+  in
+  let lines = String.split_on_char '\n' content in
+  let lines =
+    if has_trailing_newline then
+      match List.rev lines with
+      | "" :: rest -> List.rev rest
+      | _ -> lines
+    else
+      lines
+  in
+  (lines, has_trailing_newline)
+
+let leading_indent line =
+  let rec loop idx =
+    if idx >= String.length line then String.length line
+    else
+      match line.[idx] with
+      | ' ' | '\t' -> loop (idx + 1)
+      | _ -> idx
+  in
+  String.sub line 0 (loop 0)
+
+let is_toml_section_header trimmed =
+  String.length trimmed >= 2 && trimmed.[0] = '['
+
+let is_http_headers_binding trimmed =
+  let key = "http_headers" in
+  let key_len = String.length key in
+  if String.length trimmed < key_len then
+    false
+  else if not (String.equal (String.sub trimmed 0 key_len) key) then
+    false
+  else
+    match String.get trimmed key_len with
+    | exception Invalid_argument _ -> true
+    | ' ' | '\t' | '=' -> true
+    | _ -> false
+
+let sync_codex_mcp_auth_header_content ~raw_token content =
+  let lines, has_trailing_newline =
+    split_lines_with_trailing_newline content
+  in
+  let replacement_line line =
+    Printf.sprintf "%shttp_headers = { Authorization = \"Bearer %s\" }"
+      (leading_indent line)
+      (escape_toml_basic_string raw_token)
+  in
+  let rec loop ~in_masc_section ~seen_masc_section ~seen_header ~changed acc =
+    function
+    | [] ->
+        let status =
+          if not seen_masc_section then
+            Codex_mcp_config_server_missing
+          else if not seen_header then
+            Codex_mcp_config_header_missing
+          else if changed then
+            Codex_mcp_config_updated
+          else
+            Codex_mcp_config_unchanged
+        in
+        let rendered = String.concat "\n" (List.rev acc) in
+        let rendered =
+          if has_trailing_newline then rendered ^ "\n" else rendered
+        in
+        (rendered, status)
+    | line :: rest ->
+        let trimmed = String.trim line in
+        let entering_masc_section =
+          String.equal trimmed "[mcp_servers.masc]"
+        in
+        let leaving_masc_section =
+          in_masc_section
+          && is_toml_section_header trimmed
+          && not entering_masc_section
+        in
+        let in_masc_section =
+          if entering_masc_section then true
+          else if leaving_masc_section then false
+          else in_masc_section
+        in
+        let seen_masc_section = seen_masc_section || entering_masc_section in
+        let should_replace =
+          in_masc_section && is_http_headers_binding trimmed
+        in
+        let line, seen_header, changed =
+          if should_replace then
+            let next = replacement_line line in
+            (next, true, changed || not (String.equal next line))
+          else
+            (line, seen_header, changed)
+        in
+        loop ~in_masc_section ~seen_masc_section ~seen_header ~changed
+          (line :: acc) rest
+  in
+  loop ~in_masc_section:false ~seen_masc_section:false ~seen_header:false
+    ~changed:false [] lines
+
+let codex_config_path_opt () =
+  match Sys.getenv_opt codex_config_path_env_key |> Env_config_core.trim_opt with
+  | Some path -> Some path
+  | None ->
+      Option.map
+        (fun home -> Filename.concat home ".codex/config.toml")
+        (Env_config_core.home_dir_opt ())
+
+let sync_codex_mcp_config ~base_path ~agent_name =
+  if
+    not
+      (Env_config_core.get_bool ~default:false sync_codex_mcp_config_env_key)
+  then
+    ()
+  else
+    match codex_config_path_opt () with
+    | None ->
+        Log.Server.info
+          "startup skipped Codex MCP config sync: HOME is not set"
+    | Some config_path ->
+        if not (Sys.file_exists config_path) then
+          Log.Server.info
+            "startup skipped Codex MCP config sync: %s does not exist"
+            config_path
+        else
+          let token_file =
+            Filename.concat (Auth.auth_dir base_path) (agent_name ^ ".token")
+          in
+          try
+            let raw_token = String.trim (Fs_compat.load_file token_file) in
+            if String.equal raw_token "" then
+              Log.Server.warn
+                "startup skipped Codex MCP config sync: raw token file is empty at %s"
+                token_file
+            else
+              let content = Fs_compat.load_file config_path in
+              let updated, status =
+                sync_codex_mcp_auth_header_content ~raw_token content
+              in
+              (match status with
+               | Codex_mcp_config_updated ->
+                   Auth.save_private_text_file config_path updated;
+                   Log.Server.warn
+                     "startup synced Codex MCP bearer header for %s in %s"
+                     agent_name config_path
+               | Codex_mcp_config_unchanged ->
+                   Log.Server.info
+                     "startup Codex MCP bearer header already current for %s"
+                     agent_name
+               | Codex_mcp_config_server_missing ->
+                   Log.Server.info
+                     "startup skipped Codex MCP config sync: [mcp_servers.masc] missing in %s"
+                     config_path
+               | Codex_mcp_config_header_missing ->
+                   Log.Server.info
+                     "startup skipped Codex MCP config sync: masc http_headers missing in %s"
+                     config_path)
+          with
+          | Eio.Cancel.Cancelled _ as e -> raise e
+          | exn ->
+              Log.Server.error
+                "startup failed Codex MCP config sync for %s: %s"
+                agent_name (Printexc.to_string exn)
+
 let sync_client_token_file ~base_path ~agent_name ~role =
   let token_file =
     Filename.concat (Auth.auth_dir base_path) (agent_name ^ ".token")
@@ -642,12 +830,13 @@ let sync_client_token_file ~base_path ~agent_name ~role =
     else
       None
   in
-  match current_raw with
-  | Some raw_token -> (
-      match Auth.verify_token base_path ~agent_name ~token:raw_token with
-      | Ok _ -> normalize_existing raw_token
-      | Error _ -> create_and_persist ~reason:"repaired")
-  | None -> create_and_persist ~reason:"created"
+  (match current_raw with
+   | Some raw_token -> (
+       match Auth.verify_token base_path ~agent_name ~token:raw_token with
+       | Ok _ -> normalize_existing raw_token
+       | Error _ -> create_and_persist ~reason:"repaired")
+   | None -> create_and_persist ~reason:"created");
+  sync_codex_mcp_config ~base_path ~agent_name
 
 let sync_bootable_keeper_credentials (state : Mcp_server.server_state) =
   let base_path = state.Mcp_server.room_config.base_path in

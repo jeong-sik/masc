@@ -490,6 +490,12 @@ if [ -z "${MASC_WEBRTC_ENABLED+x}" ]; then
     export MASC_WEBRTC_ENABLED=1
 fi
 
+# Shared local runtime should keep the Codex streamable-HTTP MCP entry aligned
+# with the bearer token minted during server bootstrap. Set to 0 to opt out.
+if [ -z "${MASC_SYNC_CODEX_MCP_CONFIG+x}" ]; then
+    export MASC_SYNC_CODEX_MCP_CONFIG=1
+fi
+
 # Default arguments
 PORT="${MASC_MCP_PORT:-8935}"
 PORT_EXPLICIT=0

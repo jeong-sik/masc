@@ -77,7 +77,22 @@ let run_turn
   : (run_result, Oas.Error.sdk_error) result
   =
   Masc_runtime_events.emit_turn_start ();
-  Fun.protect ~finally:Masc_runtime_events.emit_turn_end
+  (* Cancel-safe cleanup (#9747): stdlib [Fun.protect] wraps finally
+     exceptions in [Fun.Finally_raised], masking the outer
+     [Eio.Cancel.Cancelled] raised by the turn body during fleet-wide
+     cancellation. Swallow Cancelled in the finally (the outer one is
+     already in flight) and log non-cancel exceptions instead of
+     propagating them. Mirrors the pattern used in
+     [keeper_unified_turn.ml] (#9747 iter 1). *)
+  let safe_emit_turn_end () =
+    try Masc_runtime_events.emit_turn_end () with
+    | Eio.Cancel.Cancelled _ -> ()
+    | e ->
+      Log.Keeper.warn
+        "%s: emit_turn_end in finally raised: %s"
+        meta.name (Printexc.to_string e)
+  in
+  Fun.protect ~finally:safe_emit_turn_end
   @@ fun () ->
   let receipt_started_at = Types.now_iso () in
   let meta = sync_current_task_id_from_backlog ~config meta in

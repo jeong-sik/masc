@@ -501,6 +501,11 @@ hr {
 @media (prefers-reduced-motion: reduce) {
   .btn { transition-duration: 0.01ms !important; }
   .btn:active { transform: none; }
+  *, *::before, *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 @media (prefers-contrast: more) {

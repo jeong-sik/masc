@@ -219,13 +219,41 @@ type cascade_execution = {
   max_tokens : int;
 }
 
+let fail_open_rotation_cascades_from_catalog
+    ~(catalog_names : string list)
+    ~(keeper_assignable : string list) =
+  if catalog_names = [] then None
+  else
+    let is_reserved_recovery name =
+      String.equal name Keeper_config.default_cascade_name
+      || String.equal name Keeper_config.local_recovery_cascade_name
+    in
+    let is_keeper_assignable name =
+      List.exists (String.equal name) keeper_assignable
+    in
+    match
+      catalog_names
+      |> List.filter (fun name ->
+             is_reserved_recovery name || is_keeper_assignable name)
+      |> dedupe_keep_order
+    with
+    | [] -> None
+    | candidates -> Some candidates
+
+let active_fail_open_rotation_cascades () =
+  fail_open_rotation_cascades_from_catalog
+    ~catalog_names:(Keeper_cascade_profile.catalog_names ())
+    ~keeper_assignable:(Keeper_cascade_profile.keeper_catalog_names ())
+
 let next_fail_open_cascade_for_turn
+    ?rotation_cascades
     ~(base_cascade : string)
     ~(effective_cascade : string)
     ~(tool_requirement : string)
     ~(attempted_cascades : string list)
     (err : Oas.Error.sdk_error) : EC.degraded_retry option =
   EC.degraded_rotation_after_recoverable_error
+    ?rotation_cascades
     ~base_cascade ~effective_cascade ~tool_requirement
     ~attempted_cascades err
 
@@ -1093,6 +1121,9 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                   ?event_bus:(Keeper_event_bus.get ())
                   ())
           in
+          let fail_open_rotation_cascades =
+            active_fail_open_rotation_cascades ()
+          in
           let rec retry_loop ~run_meta ~(execution : cascade_execution)
               ~run_generation
               ~attempt ~is_retry
@@ -1241,6 +1272,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 end else
                   match
                     next_fail_open_cascade_for_turn
+                      ?rotation_cascades:fail_open_rotation_cascades
                       ~base_cascade:meta.cascade_name
                       ~effective_cascade:execution.cascade_name
                       ~tool_requirement:initial_tool_requirement

@@ -170,14 +170,21 @@ describe('refreshPlanForRoute fleet-health view-aware branching', () => {
     expect(refreshPlanForRoute({
       tab: 'monitoring',
       params: { section: 'fleet-health' },
-    })).toEqual(['namespaceTruth', 'missionSnapshot'])
+    })).toEqual(['namespaceTruth'])
   })
 
   it('view=event-log hydrates general monitoring data', () => {
     expect(refreshPlanForRoute({
       tab: 'monitoring',
       params: { section: 'fleet-health', view: 'event-log' },
-    })).toEqual(['namespaceTruth', 'missionSnapshot'])
+    })).toEqual(['namespaceTruth'])
+  })
+
+  it('view=governance avoids mission and operator-heavy route refreshes', () => {
+    expect(refreshPlanForRoute({
+      tab: 'monitoring',
+      params: { section: 'fleet-health', view: 'governance' },
+    })).toEqual(['namespaceTruth'])
   })
 
   it('view=tool-quality routes to the existing refreshToolQuality API', () => {

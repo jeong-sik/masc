@@ -201,7 +201,7 @@ let view_lane ~name ~stat ~(status : lane_status) ~frames =
     | `Live | `Warn -> [ Style.nm ]
   in
   Node.div
-    ~attrs:[ Style.lane; Attr.role "listitem"; Attr.arialabel (name ^ ": " ^ stat) ]
+    ~attrs:[ Style.lane; Attr.role "listitem"; Attr.create "aria-label" (name ^ ": " ^ stat) ]
     [ Node.div
         ~attrs:[ Style.lane_meta ]
         [ Node.span ~attrs:[ Style.dot; dot_cls; Attr.create "aria-hidden" "true" ] []
@@ -292,7 +292,7 @@ let view ?(keepers : Keepers_types.response = Keepers_types.fixture) () =
     | live_keepers -> List.map live_keepers ~f:view_lane_of_keeper
   in
   Node.div
-    ~attrs:[ Style.swim; Attr.role "list"; Attr.arialabel "Keeper activity timeline" ]
+    ~attrs:[ Style.swim; Attr.role "list"; Attr.create "aria-label" "Keeper activity timeline" ]
     ([ Node.div
          ~attrs:[ Style.axis ]
          [ Node.div

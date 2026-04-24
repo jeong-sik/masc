@@ -44,6 +44,33 @@ val usage_trust_reasons : usage_trust -> string list
 
 val usage_trust_json_fields : usage_trust -> (string * Yojson.Safe.t) list
 
+(** Canonical metric names for the per-turn usage-trust counters
+    (#9959).  Exposed so tests can pin the names without hard-coding
+    string literals.
+
+    Labels:
+    - [usage_trust_outcome_metric]: [("keeper", ...); ("outcome",
+      "trusted" | "missing" | "untrusted")]
+    - [usage_anomaly_reason_metric]: [("keeper", ...); ("reason", ...)]
+      where [reason] is one of the strings [classify_usage_trust]
+      attaches to [Usage_untrusted]. *)
+val usage_trust_outcome_metric : string
+val usage_anomaly_reason_metric : string
+
+(** [record_usage_trust ~keeper_name ~trust] increments the outcome
+    counter once and, for [Usage_untrusted] outcomes, also
+    increments [usage_anomaly_reason_metric] per reason and logs a
+    warn line.
+
+    Intended for a single per-turn emit site — currently
+    [update_metrics_from_result]. Other classify sites serialize
+    [trust] into the JSONL ledger without bumping the counter so
+    the counter rate equals the per-turn rate. *)
+val record_usage_trust :
+  keeper_name:string ->
+  trust:usage_trust ->
+  unit
+
 val update_metrics_from_result :
   Keeper_types.keeper_meta ->
   latency_ms:int ->

@@ -72,7 +72,7 @@ let strip ?(label : string option) (cells : Node.t list) : Node.t =
   let base = [ Style.strip ] in
   let attrs =
     match label with
-    | Some l -> Attr.arialabel l :: base
+    | Some l -> Attr.create "aria-label" l :: base
     | None -> base
   in
   Node.div ~attrs cells

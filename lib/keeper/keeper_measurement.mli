@@ -47,6 +47,12 @@ type similarity_measurement = {
   repetition_risk : float;
   goal_alignment : float;
   response_alignment : float;
+  similarity_measurable : bool;
+  (** [false] when the turn lacked the user/assistant message pair (or goal horizon)
+      needed to compute [goal_alignment] / [response_alignment] honestly. In that
+      case the two similarity floats are sentinel [0.0] — distinguishable from a
+      real measurement of [0.0] only by this flag. Gates that consume similarity
+      must fail-closed when [similarity_measurable = false] (see Keeper_guard). *)
 }
 
 type timing_measurement = {
@@ -98,6 +104,7 @@ val capture :
   repetition_risk:float ->
   goal_alignment:float ->
   response_alignment:float ->
+  ?similarity_measurable:bool ->
   now_ts:float ->
   idle_seconds:int ->
   since_last_compaction_sec:float ->

@@ -72,10 +72,13 @@ val degraded_retry_after_recoverable_error :
   degraded_retry option
 
 (** Returns the next untried cascade in the same-turn recovery group for a
-    whole-cascade failure. This broadens beyond the legacy one-hop
-    local_recovery fallback, while keeping required-tool turns on lanes that
-    can still be filtered for tool-capable providers. *)
+    whole-cascade failure. [rotation_cascades], when provided, is the
+    runtime/catalog-owned candidate order; otherwise the legacy
+    base/default/local_recovery group is used. Required-tool turns keep the
+    tool requirement and leave concrete provider filtering to the cascade
+    resolver. *)
 val degraded_rotation_after_recoverable_error :
+  ?rotation_cascades:string list ->
   base_cascade:string ->
   effective_cascade:string ->
   tool_requirement:string ->

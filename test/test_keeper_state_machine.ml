@@ -527,6 +527,7 @@ let healthy_snapshot : Meas.measurement_snapshot = {
     repetition_risk = 0.1;
     goal_alignment = 0.8;
     response_alignment = 0.7;
+    similarity_measurable = true;
   };
   timing = {
     now_ts = 1000.0;
@@ -603,6 +604,7 @@ let test_guard_guardrail_triggers () =
       repetition_risk = 0.95;
       goal_alignment = 0.1;
       response_alignment = 0.1;
+      similarity_measurable = true;
     };
     context = { healthy_snapshot.context with context_ratio = 0.85 };
   } in
@@ -640,6 +642,51 @@ let test_guard_plan_requires_both_alignments_low () =
     ) events
   in
   check bool "plan requires both" false (Option.value ~default:true plan_flag)
+
+(* Regression test for #10012.
+
+   Both [goal_alignment] and [response_alignment] at 0.0 would ordinarily
+   satisfy the plan gate's two [<=] comparisons, but when the snapshot was
+   produced by a turn that had no user/assistant message pair (status_tick,
+   heartbeat), those zeroes are sentinels, not measurements. The guard must
+   fail-closed via [similarity_measurable=false] and emit [plan=false]. *)
+let test_guard_plan_fails_closed_when_similarity_unmeasurable () =
+  let snap = { healthy_snapshot with
+    similarity =
+      { healthy_snapshot.similarity with
+        goal_alignment = 0.0;
+        response_alignment = 0.0;
+        similarity_measurable = false;
+      };
+  } in
+  let events = Guard.evaluate snap in
+  let plan_flag =
+    List.find_map (function
+      | SM.Context_measured { auto_rules; _ } -> Some auto_rules.plan
+      | _ -> None
+    ) events
+  in
+  check bool "plan does not fire on unmeasurable similarity"
+    false (Option.value ~default:true plan_flag)
+
+(* Same invariant for the guardrail gate — even when every float value lines
+   up for a guardrail stop, [similarity_measurable=false] must suppress it. *)
+let test_guard_guardrail_fails_closed_when_similarity_unmeasurable () =
+  let snap = { healthy_snapshot with
+    similarity = {
+      repetition_risk = 0.95;
+      goal_alignment = 0.0;
+      response_alignment = 0.0;
+      similarity_measurable = false;
+    };
+    context = { healthy_snapshot.context with context_ratio = 0.85 };
+  } in
+  let events = Guard.evaluate snap in
+  let has_guardrail = List.exists (function
+    | SM.Guardrail_stop _ -> true | _ -> false
+  ) events in
+  check bool "guardrail does not fire on unmeasurable similarity"
+    false has_guardrail
 
 (* ── Phase roundtrip tests ─────────────────────────────── *)
 
@@ -2104,6 +2151,10 @@ let () =
       test_case "guardrail triggers" `Quick test_guard_guardrail_triggers;
       test_case "hb failure at threshold" `Quick test_guard_hb_failure_threshold;
       test_case "plan requires both low" `Quick test_guard_plan_requires_both_alignments_low;
+      test_case "plan fails-closed when similarity unmeasurable" `Quick
+        test_guard_plan_fails_closed_when_similarity_unmeasurable;
+      test_case "guardrail fails-closed when similarity unmeasurable" `Quick
+        test_guard_guardrail_fails_closed_when_similarity_unmeasurable;
     ];
     "roundtrip", [
       test_case "phase string roundtrip" `Quick test_phase_string_roundtrip;

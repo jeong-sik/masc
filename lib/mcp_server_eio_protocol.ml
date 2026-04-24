@@ -457,6 +457,10 @@ let handle_dashboard_ack_eio id ?mcp_session_id params =
   | Some _, None -> make_error ~id (-32602) "Missing params"
   | Some _, Some _ -> make_error ~id (-32602) "Invalid params: expected object"
 
+let handle_dashboard_ack_notification ?mcp_session_id params =
+  ignore (handle_dashboard_ack_eio `Null ?mcp_session_id params);
+  `Null
+
 let contains_casefold = Mcp_server_eio_call_tool.contains_casefold
 
 let tool_call_outcome (json : Yojson.Safe.t) =
@@ -544,7 +548,10 @@ let handle_request
             if not (is_valid_request_id id) then
               make_error ~id:`Null (-32600) "Invalid Request: id must be string, number, or null"
             else if Mcp_transport_protocol.is_notification req then
-              `Null
+              (match req.method_ with
+               | "dashboard/ack" ->
+                   handle_dashboard_ack_notification ?mcp_session_id req.params
+               | _ -> `Null)
             else
                 (try
                    (match req.method_ with

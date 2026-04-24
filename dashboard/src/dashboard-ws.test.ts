@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+const sseStoreMocks = vi.hoisted(() => ({
+  hydrateDashboardSlice: vi.fn(),
+  routeServerPushEvent: vi.fn(),
+}))
+
+vi.mock('./sse-store', () => sseStoreMocks)
+
 import {
   connectDashboardWS,
   dashboardSlicesForRoute,
@@ -111,6 +118,8 @@ afterEach(() => {
   vi.useRealTimers()
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
+  sseStoreMocks.hydrateDashboardSlice.mockClear()
+  sseStoreMocks.routeServerPushEvent.mockClear()
 })
 
 describe('dashboardSlicesForRoute', () => {
@@ -280,6 +289,72 @@ describe('dashboard websocket route subscriptions', () => {
     expect(mockSockets[1]!.readyState).toBe(MockWebSocket.CONNECTING)
   })
 
+  it('reconnects when the initial route subscription never responds', async () => {
+    vi.useFakeTimers()
+    installWebSocketMocks()
+
+    await connectDashboardWS({ tab: 'workspace', params: { section: 'board' } })
+    const firstSocket = mockSockets[0]!
+    firstSocket.open()
+    const hello = parseRpc(firstSocket, 0)
+    firstSocket.receive({ jsonrpc: '2.0', id: hello.id, result: {} })
+    await flushPromises()
+
+    const subscribe = parseRpc(firstSocket, 1)
+    expect(subscribe.method).toBe('dashboard/subscribe')
+    expect(dashboardWsReady.value).toBe(true)
+
+    await vi.advanceTimersByTimeAsync(15_000)
+    await flushPromises()
+
+    expect(firstSocket.readyState).toBe(MockWebSocket.CLOSED)
+    expect(dashboardWsConnected.value).toBe(false)
+    expect(dashboardWsReady.value).toBe(false)
+    expect(dashboardWsLastError.value).toBe(
+      'dashboard websocket rpc timed out: dashboard/subscribe',
+    )
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    await flushPromises()
+
+    expect(mockSockets).toHaveLength(2)
+    expect(mockSockets[1]!.readyState).toBe(MockWebSocket.CONNECTING)
+  })
+
+  it('acknowledges dashboard deltas as notifications without response tracking', async () => {
+    installWebSocketMocks()
+
+    await connectDashboardWS({ tab: 'overview', params: {} })
+    const socket = mockSockets[0]!
+    socket.open()
+    const hello = parseRpc(socket, 0)
+    socket.receive({ jsonrpc: '2.0', id: hello.id, result: {} })
+    await flushPromises()
+
+    const subscribe = parseRpc(socket, 1)
+    socket.receive({
+      jsonrpc: '2.0',
+      id: subscribe.id,
+      result: { snapshot: { seq: 1, slices: {} } },
+    })
+    await flushPromises()
+
+    socket.receive({
+      jsonrpc: '2.0',
+      method: 'dashboard/delta',
+      params: { seq: 42 },
+    })
+
+    const ack = JSON.parse(socket.sent[2] ?? '{}') as Record<string, unknown>
+    expect(ack).toMatchObject({
+      jsonrpc: '2.0',
+      method: 'dashboard/ack',
+      params: { seq: 42, bufferedAmount: 0 },
+    })
+    expect(ack).not.toHaveProperty('id')
+    expect(dashboardWsLastSeq.value).toBe(42)
+  })
+
   it('ignores stale subscribe snapshots that arrive after a newer route subscription', async () => {
     installWebSocketMocks()
 
@@ -398,5 +473,68 @@ describe('dashboard websocket route subscriptions', () => {
     await flushPromises()
 
     expect(dashboardWsLastSeq.value).toBe(1)
+  })
+
+  it('ignores dashboard slice deltas outside the latest route subscription', async () => {
+    installWebSocketMocks()
+
+    await connectDashboardWS({ tab: 'workspace', params: { section: 'board' } })
+    const socket = mockSockets[0]!
+    socket.open()
+    const hello = parseRpc(socket, 0)
+    socket.receive({ jsonrpc: '2.0', id: hello.id, result: {} })
+    await flushPromises()
+
+    const initialSubscribe = parseRpc(socket, 1)
+    socket.receive({
+      jsonrpc: '2.0',
+      id: initialSubscribe.id,
+      result: { snapshot: { seq: 1, slices: { board: { posts: [] } } } },
+    })
+    await flushPromises()
+    sseStoreMocks.hydrateDashboardSlice.mockClear()
+
+    socket.receive({
+      jsonrpc: '2.0',
+      method: 'dashboard/delta',
+      params: { seq: 2, slice: 'board', payload: { posts: [] } },
+    })
+    expect(sseStoreMocks.hydrateDashboardSlice).toHaveBeenCalledWith(
+      'board',
+      { posts: [] },
+      undefined,
+    )
+    sseStoreMocks.hydrateDashboardSlice.mockClear()
+
+    const switchPromise = subscribeDashboardRoute({
+      tab: 'monitoring',
+      params: { section: 'observatory' },
+    })
+    const routeSubscribe = parseRpc(socket, socket.sent.length - 1)
+    socket.receive({
+      jsonrpc: '2.0',
+      id: routeSubscribe.id,
+      result: { snapshot: { seq: 3, slices: { execution: { agents: [] } } } },
+    })
+    await switchPromise
+    sseStoreMocks.hydrateDashboardSlice.mockClear()
+
+    socket.receive({
+      jsonrpc: '2.0',
+      method: 'dashboard/delta',
+      params: { seq: 4, slice: 'board', payload: { posts: [] } },
+    })
+    expect(sseStoreMocks.hydrateDashboardSlice).not.toHaveBeenCalled()
+
+    socket.receive({
+      jsonrpc: '2.0',
+      method: 'dashboard/delta',
+      params: { seq: 5, slice: 'execution', payload: { agents: [] } },
+    })
+    expect(sseStoreMocks.hydrateDashboardSlice).toHaveBeenCalledWith(
+      'execution',
+      { agents: [] },
+      undefined,
+    )
   })
 })

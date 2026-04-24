@@ -1636,9 +1636,23 @@ let run_turn
                 else current_params.tool_choice
               in
               let turn_completion_contract =
-                if computed_surface.tool_gate_requested
-                then Keeper_tool_disclosure.Require_tool_use
-                else Keeper_tool_disclosure.completion_contract_of_tool_choice tool_choice
+                (* #10008: the affordance-driven tool gate still
+                   requests Require_tool_use, but if [preferred_...]
+                   explicitly chose [Auto] (no applicable specific
+                   tool), honor that signal and relax the contract.
+                   Otherwise the gate would reject the model's honest
+                   refusal ("no eligible task to claim") as a
+                   contract violation, producing the 0/14 proactive
+                   success rate observed for the new keeper cohort. *)
+                match computed_surface.tool_gate_requested, tool_choice with
+                | true, Some Oas.Types.Auto ->
+                  Keeper_tool_disclosure.completion_contract_of_tool_choice
+                    tool_choice
+                | true, _ ->
+                  Keeper_tool_disclosure.Require_tool_use
+                | false, _ ->
+                  Keeper_tool_disclosure.completion_contract_of_tool_choice
+                    tool_choice
               in
               completion_contract_ref := turn_completion_contract;
               if turn_completion_contract = Keeper_tool_disclosure.Require_tool_use

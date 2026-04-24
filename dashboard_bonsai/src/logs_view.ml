@@ -1512,7 +1512,7 @@ let view_tombstrip ?(states = keeper_fsm_states) () =
       [ Node.text label ]
   in
   Node.div
-    ~attrs:[ Style.tombstrip; Attr.arialabel "Keeper FSM states" ]
+    ~attrs:[ Style.tombstrip; Attr.create "aria-label" "Keeper FSM states" ]
     (List.map states ~f:tile)
 ;;
 
@@ -1639,7 +1639,7 @@ let render_response
       in
       Node.div
         ~attrs:[ Style.tape_fade ]
-        [ Node.div ~attrs:[ Style.tape; Attr.role "log"; Attr.arialabel "Log entries" ] rendered
+        [ Node.div ~attrs:[ Style.tape; Attr.role "log"; Attr.create "aria-label" "Log entries" ] rendered
         ; Node.div ~attrs:[ Style.tape_end ] []
         ]
   in
@@ -1704,7 +1704,7 @@ let render_response
              [ Node.text label ]
          in
          Node.div
-           ~attrs:[ Style.chip_group; Attr.role "group"; Attr.arialabel "Log level filter" ]
+           ~attrs:[ Style.chip_group; Attr.role "group"; Attr.create "aria-label" "Log level filter" ]
            [ filter_chip ~level:"debug" ~label:"debug+"
            ; filter_chip ~level:"info" ~label:"info+"
            ; filter_chip ~level:"warn" ~label:"warn+"

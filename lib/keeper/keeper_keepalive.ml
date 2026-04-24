@@ -796,6 +796,13 @@ let write_heartbeat_snapshot
            CLAUDE.md anti-pattern #2: Unknown → Permissive Default. *)
         1.0
     in
+    (* status_tick / heartbeat turns lack a user/assistant pair, so the 0.0
+       fallbacks above are sentinels, not measurements. Mark the snapshot
+       non-measurable and let Keeper_guard fail-closed on similarity gates. *)
+    let similarity_measurable =
+      Option.is_some latest_user_message
+      && Option.is_some latest_assistant_message
+    in
     let context_ratio_v = match ctx_opt with
       | Some c -> Keeper_exec_context.context_ratio c
       | None -> 0.0
@@ -874,6 +881,7 @@ let write_heartbeat_snapshot
         ~repetition_risk
         ~goal_alignment
         ~response_alignment
+        ~similarity_measurable
         ~now_ts
         ~idle_seconds:0
         ~since_last_compaction_sec
@@ -933,14 +941,24 @@ let write_heartbeat_snapshot
         ; "trace_id", `String (Keeper_id.Trace_id.to_string meta_current.runtime.trace_id)
         ; "generation", `Int meta_current.runtime.generation
         ; "model_used", `String meta_current.runtime.usage.last_model_used
-        ; ( "usage"
+        ; (* #10018: status_tick is a snapshot, not an LLM-call event.
+             Emitting [runtime.usage.last_*_tokens] and [last_latency_ms]
+             caused the last turn's per-turn values to be repeat-emitted
+             on every heartbeat — observed analyst heartbeats 5 min
+             apart both reported [input=273325, output=8067,
+             total=281392, latency_ms=191894] while no LLM call ran.
+             Downstream daily token aggregates and p50 latency were
+             inflated by ~heartbeat-count per turn. Same "snapshot vs
+             event" boundary fix as #9950 for compaction fields.
+             [total_cost_usd] is a running total and remains emitted. *)
+          ( "usage"
           , `Assoc
-              [ "input_tokens", `Int meta_current.runtime.usage.last_input_tokens
-              ; "output_tokens", `Int meta_current.runtime.usage.last_output_tokens
-              ; "total_tokens", `Int meta_current.runtime.usage.last_total_tokens
+              [ "input_tokens", `Int 0
+              ; "output_tokens", `Int 0
+              ; "total_tokens", `Int 0
               ]
           )
-        ; "latency_ms", `Int meta_current.runtime.usage.last_latency_ms
+        ; "latency_ms", `Int 0
         ; "cost_usd", `Float meta_current.runtime.usage.total_cost_usd
         ; "context_ratio", `Float context_ratio_v
         ; "context_tokens", `Int token_count_v

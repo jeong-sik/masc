@@ -161,6 +161,16 @@ function sendRpc(method: string, params: JsonObject): Promise<unknown> {
   })
 }
 
+function sendNotification(method: string, params: JsonObject): void {
+  if (!socket || socket.readyState !== WebSocket.OPEN) return
+  const currentSocket = socket
+  try {
+    currentSocket.send(JSON.stringify({ jsonrpc: '2.0', method, params }))
+  } catch {
+    // Best-effort telemetry; the close/error path owns reconnect decisions.
+  }
+}
+
 function handleRpcResponse(raw: JsonObject): boolean {
   if (typeof raw.id !== 'number') return false
   const pendingRpc = pending.get(raw.id)
@@ -184,7 +194,7 @@ function applySnapshot(raw: unknown): void {
   const slices = snapshot.slices as Record<string, unknown> | undefined
   if (!slices || typeof slices !== 'object') return
   for (const [slice, payload] of Object.entries(slices)) {
-    hydrateDashboardSlice(slice, payload)
+    hydrateRouteDashboardSlice(slice, payload)
   }
 }
 
@@ -202,17 +212,27 @@ function applyDelta(raw: unknown): void {
   }
   if (typeof delta.seq === 'number') {
     dashboardWsLastSeq.value = delta.seq
-    void sendRpc('dashboard/ack', {
+    sendNotification('dashboard/ack', {
       seq: delta.seq,
       bufferedAmount: socket?.bufferedAmount ?? 0,
-    }).catch(() => {})
+    })
   }
   if (typeof delta.slice !== 'string') return
-  hydrateDashboardSlice(
+  hydrateRouteDashboardSlice(
     delta.slice,
     delta.payload,
     typeof delta.event_type === 'string' ? delta.event_type : undefined,
   )
+}
+
+function activeRouteWantsDashboardSlice(slice: string): boolean {
+  if (!desiredRouteState) return true
+  return dashboardSlicesForRoute(desiredRouteState).includes(slice)
+}
+
+function hydrateRouteDashboardSlice(slice: string, payload: unknown, eventType?: string): void {
+  if (!activeRouteWantsDashboardSlice(slice)) return
+  hydrateDashboardSlice(slice, payload, eventType)
 }
 
 function handleNotification(raw: JsonObject): boolean {
@@ -279,6 +299,16 @@ function handleMessage(data: unknown): void {
   if (handleRpcResponse(record)) return
   if (handleNotification(record)) return
   handleRawPush(record)
+}
+
+function reconnectAfterCurrentSocketFailure(ws: WebSocket, err: unknown): void {
+  if (socket !== ws) return
+  dashboardWsConnected.value = false
+  dashboardWsReady.value = false
+  dashboardWsLastError.value = err instanceof Error ? err.message : String(err)
+  lastSubscribeKey = ''
+  closeSocket()
+  scheduleReconnect()
 }
 
 export async function subscribeDashboardRoute(routeState: DashboardRouteState): Promise<void> {
@@ -350,17 +380,10 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
         dashboardWsLastError.value = null
         if (desiredRouteState) {
           void subscribeDashboardRoute(desiredRouteState)
+            .catch(err => reconnectAfterCurrentSocketFailure(ws, err))
         }
       })
-      .catch(err => {
-        if (socket !== ws) return
-        dashboardWsConnected.value = false
-        dashboardWsReady.value = false
-        dashboardWsLastError.value = err instanceof Error ? err.message : String(err)
-        lastSubscribeKey = ''
-        closeSocket()
-        scheduleReconnect()
-      })
+      .catch(err => reconnectAfterCurrentSocketFailure(ws, err))
   }
   ws.onmessage = (event) => {
     if (socket !== ws) return

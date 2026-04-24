@@ -758,9 +758,16 @@ let handle_keeper_bash
            ; "cmd", `String cmd_for_log
            ]))
     else if sandbox_profile = Docker && git_creds_enabled then (
+      let detected_tool = if cmd_targets_gh cmd then "gh" else "git" in
       Log.Keeper.info
-        "DOCKER_GIT_EXEC: keeper=%s cwd=%s cmd=%s"
-        meta.name cwd cmd_for_log;
+        "DOCKER_GIT_EXEC: keeper=%s cwd=%s cmd=%s detected_tool=%s \
+         base_network=%s upgraded_to=inherit"
+        meta.name cwd cmd_for_log detected_tool
+        (network_mode_to_string base_network_mode);
+      Prometheus.inc_counter
+        "masc_keeper_bash_network_upgrade_total"
+        ~labels:[ ("keeper", meta.name); ("detected_tool", detected_tool) ]
+        ();
       run_docker_with_git_bash
         ~turn_sandbox_runtime:turn_sandbox_runtime_git
         ~config ~meta ~cwd ~timeout_sec ~cmd ())

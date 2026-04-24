@@ -41,19 +41,25 @@ let test_named_keeper_docker_defaults () =
     | Some repo_root -> Filename.concat repo_root "config/keepers"
     | None -> "config/keepers"
   in
-  let expect_keeper name =
+  let expect_keeper ~name ~persona =
     let path = Filename.concat config_dir (name ^ ".toml") in
     match KTP.load_keeper_toml path with
     | Error e -> fail (Printf.sprintf "%s: %s" name e)
     | Ok (_loaded_name, defaults) ->
-        check (option string) (name ^ " persona_name") (Some name)
+        check (option string) (name ^ " persona_name") (Some persona)
           defaults.persona_name;
         check (option string) (name ^ " sandbox_profile") (Some "docker")
           (Option.map KTP.sandbox_profile_to_string defaults.sandbox_profile);
-        check (option string) (name ^ " network_mode") (Some "none")
-          (Option.map KTP.network_mode_to_string defaults.network_mode)
+        (* After the host→inherit alias migration, all three docker keepers
+           request [Network_inherit] so keeper_bash can dispatch git/gh. *)
+        check (option string) (name ^ " network_mode") (Some "inherit")
+          (Option.map KTP.network_mode_to_string defaults.network_mode);
+        check (option string) (name ^ " github_identity")
+          (Some "anyang-keepers") defaults.github_identity
   in
-  List.iter expect_keeper [ "sangsu" ]
+  expect_keeper ~name:"issue_king" ~persona:"issue_king";
+  expect_keeper ~name:"masc-improver" ~persona:"analyst";
+  expect_keeper ~name:"sangsu" ~persona:"executor"
 
 (** Write a temporary TOML file, run load_keeper_toml, clean up. *)
 let with_temp_toml content f =
@@ -147,6 +153,64 @@ let test_tool_preset_accepts_dispatch () =
       check (option string) "dispatch preset parsed" (Some "dispatch")
         defaults.tool_preset
 
+(** Reject [network_mode = "bogus"] at TOML load time so invalid strings
+    do not silently fall back to persona defaults. *)
+let test_network_mode_rejects_unknown () =
+  let result =
+    with_temp_toml
+      "[keeper]\nname = \"nettest\"\nnetwork_mode = \"bogus\"\n"
+      KTP.load_keeper_toml
+  in
+  match result with
+  | Ok _ -> fail "network_mode=bogus should be rejected"
+  | Error e ->
+      let lowered = String.lowercase_ascii e in
+      let contains needle =
+        let nl = String.length needle in
+        let hl = String.length lowered in
+        let found = ref false in
+        if nl <= hl then
+          for i = 0 to hl - nl do
+            if String.sub lowered i nl = needle then found := true
+          done;
+        !found
+      in
+      check bool "error mentions invalid network_mode" true
+        (contains "invalid network_mode");
+      check bool "error mentions deprecated alias" true
+        (contains "host")
+
+(** Accept [network_mode = "host"] as a deprecated alias for "inherit".
+    Ensures operators migrating from docker-run terminology are not
+    silently dropped to persona defaults.  The loader emits a warning and
+    the parsed value equals [Network_inherit]. *)
+let test_network_mode_accepts_host_alias () =
+  let result =
+    with_temp_toml
+      "[keeper]\nname = \"hosttest\"\nsandbox_profile = \"docker\"\n\
+       network_mode = \"host\"\n"
+      KTP.load_keeper_toml
+  in
+  match result with
+  | Error e -> fail (Printf.sprintf "host alias should be accepted: %s" e)
+  | Ok (_loaded_name, defaults) ->
+      check (option string) "host alias maps to inherit" (Some "inherit")
+        (Option.map KTP.network_mode_to_string defaults.network_mode)
+
+(** Regression: classify_toml_failure_reason must bucket raw error strings
+    into a small cardinality set so the Prometheus label set stays bounded. *)
+let test_classify_toml_failure_reason_buckets () =
+  let f = KTP.classify_toml_failure_reason in
+  check string "invalid network_mode" "invalid_network_mode"
+    (f "invalid network_mode 'bogus' (allowed: none, inherit)");
+  check string "invalid sandbox_profile" "invalid_sandbox_profile"
+    (f "invalid sandbox_profile 'lol' (allowed: local, docker)");
+  check string "unknown field" "unknown_field"
+    (f "unknown field 'legacy_scope'");
+  check string "parse error" "parse_error"
+    (f "parse error at line 3");
+  check string "uncategorized" "other" (f "completely novel problem")
+
 let () =
   run "Keeper TOML Config Validation"
     [
@@ -166,5 +230,14 @@ let () =
             test_cascade_name_accepts_catalog_entry;
           test_case "accepts dispatch tool_preset" `Quick
             test_tool_preset_accepts_dispatch;
+        ] );
+      ( "network_mode validation",
+        [
+          test_case "rejects unknown network_mode" `Quick
+            test_network_mode_rejects_unknown;
+          test_case "accepts host as deprecated alias for inherit" `Quick
+            test_network_mode_accepts_host_alias;
+          test_case "classifies failures into bounded label set" `Quick
+            test_classify_toml_failure_reason_buckets;
         ] );
     ]

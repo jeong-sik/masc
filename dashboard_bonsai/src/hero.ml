@@ -62,6 +62,12 @@ stylesheet
     .eyebrow { color: var(--text-bright); }
     .title { color: var(--text-bright); }
   }
+
+  @media (forced-colors: active) {
+    .title { color: CanvasText; }
+    .tail_brass { color: Highlight; }
+    .tail_blood { color: MarkText; }
+  }
 |}]
 
 type tail_color = [ `Brass | `Blood ]

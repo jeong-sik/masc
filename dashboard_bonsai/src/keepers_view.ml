@@ -30,6 +30,10 @@ stylesheet
   @media (prefers-contrast: more) {
     .quiet { border-width: 2px; border-style: solid; border-color: var(--text-bright); color: var(--text-bright); }
   }
+
+  @media (forced-colors: active) {
+    .quiet { border-color: CanvasText; color: CanvasText; }
+  }
 |}]
 
 let view_hero (rows : Keepers_directory.row list) =

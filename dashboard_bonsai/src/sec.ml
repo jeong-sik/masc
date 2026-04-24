@@ -55,6 +55,12 @@ stylesheet
     font-variant-numeric: tabular-nums;
     flex-shrink: 0;
   }
+
+  @media (forced-colors: active) {
+    .sec_title { color: CanvasText; }
+    .sec_sub { color: GrayText; }
+    .sec_right { color: GrayText; }
+  }
 |}]
 
 let view ?(sub : string option) ?(right : string option) ~(title : string) () : Node.t =

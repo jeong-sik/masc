@@ -69,6 +69,16 @@ stylesheet
     .eyebrow { color: var(--text-bright); }
     .meta { color: var(--text-bright); }
   }
+
+  @media (forced-colors: active) {
+    .title { color: CanvasText; text-shadow: none; }
+    .divider { border-top-color: CanvasText; }
+  }
+
+  @media (max-width: 760px) {
+    .root { padding: 1.5rem 1rem; }
+    .title { font-size: 1.5rem; letter-spacing: 0.12em; }
+  }
 |}]
 
 let component (_graph @ local) =

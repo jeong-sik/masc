@@ -1366,7 +1366,7 @@ let view_entry ~is_first (e : Logs_types.entry) =
     ; Node.div ~attrs:[ Style.mod_col ] [ Node.text e.module_ ]
     ; Node.div
         ~attrs:[ Style.source_badge ]
-        [ Node.span ~attrs:[ Style.dot; dot_class e.normalized_level ] []
+        [ Node.span ~attrs:[ Style.dot; dot_class e.normalized_level; Attr.create "aria-hidden" "true" ] []
         ; Node.text e.source
         ]
     ; Node.div message_block

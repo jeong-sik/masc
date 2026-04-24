@@ -204,7 +204,7 @@ let view_lane ~name ~stat ~(status : lane_status) ~frames =
     ~attrs:[ Style.lane; Attr.role "listitem"; Attr.arialabel (name ^ ": " ^ stat) ]
     [ Node.div
         ~attrs:[ Style.lane_meta ]
-        [ Node.span ~attrs:[ Style.dot; dot_cls ] []
+        [ Node.span ~attrs:[ Style.dot; dot_cls; Attr.create "aria-hidden" "true" ] []
         ; Node.span ~attrs:nm_attrs [ Node.text name ]
         ; Node.span ~attrs:[ Style.stat ] [ Node.text stat ]
         ]

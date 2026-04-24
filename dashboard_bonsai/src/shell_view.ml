@@ -707,7 +707,7 @@ let pill ?(tone : tone = `Neutral) text =
   in
   Node.span
     ~attrs
-    [ Node.span ~attrs:[ Style.dot ] []
+    [ Node.span ~attrs:[ Style.dot; Attr.create "aria-hidden" "true" ] []
     ; Node.text text
     ]
 ;;

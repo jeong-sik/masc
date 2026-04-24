@@ -512,6 +512,94 @@ let preferred_tool_choice_for_required_turn ~(has_current_task : bool)
   then Oas.Types.Tool "keeper_tasks_list"
   else Oas.Types.Any
 
+let owned_active_task_id_for_meta ~(config : Coord.config)
+    ~(meta : Keeper_types.keeper_meta) =
+  match meta.current_task_id with
+  | Some task_id -> Some task_id
+  | None ->
+    let actual_name =
+      try Coord.resolve_agent_name config meta.agent_name
+      with
+      | Sys_error _ | Yojson.Json_error _ -> meta.agent_name
+      | exn ->
+        Log.Keeper.warn
+          "keeper:%s resolve_agent_name failed while reconciling current task: %s"
+          meta.name (Printexc.to_string exn);
+        meta.agent_name
+    in
+    let matches assignee =
+      String.equal assignee meta.agent_name || String.equal assignee actual_name
+    in
+    (try
+       Coord.get_tasks_raw config
+       |> List.find_map (fun (task : Types.task) ->
+            match task.task_status with
+            | Types.Claimed { assignee; _ }
+            | Types.InProgress { assignee; _ }
+            | Types.AwaitingVerification { assignee; _ }
+              when matches assignee -> (
+                match Keeper_id.Task_id.of_string task.id with
+                | Ok task_id -> Some task_id
+                | Error msg ->
+                  Log.Keeper.warn
+                    "keeper:%s owned task %s could not be parsed: %s"
+                    meta.name task.id msg;
+                  None)
+            | Types.Claimed _
+            | Types.InProgress _
+            | Types.AwaitingVerification _
+            | Types.Todo
+            | Types.Done _
+            | Types.Cancelled _ -> None)
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | exn ->
+       Log.Keeper.warn
+         "keeper:%s owned task reconciliation failed: %s"
+         meta.name (Printexc.to_string exn);
+       None)
+;;
+
+let merge_current_task_id ~(latest : Keeper_types.keeper_meta)
+    ~(caller : Keeper_types.keeper_meta) =
+  {
+    latest with
+    current_task_id = caller.current_task_id;
+    updated_at = caller.updated_at;
+  }
+;;
+
+let sync_current_task_id_from_backlog ~(config : Coord.config)
+    (meta : Keeper_types.keeper_meta) =
+  match meta.current_task_id with
+  | Some _ -> meta
+  | None -> (
+    match owned_active_task_id_for_meta ~config ~meta with
+    | None -> meta
+    | Some task_id ->
+      let updated_meta =
+        {
+          meta with
+          current_task_id = Some task_id;
+          updated_at = Types.now_iso ();
+        }
+      in
+      Keeper_registry.update_meta ~base_path:config.base_path meta.name updated_meta;
+      (match
+         Keeper_types.write_meta_with_merge
+           ~merge:merge_current_task_id config updated_meta
+       with
+       | Ok () -> ()
+       | Error msg ->
+         Log.Keeper.warn
+           "keeper:%s failed to persist reconciled current_task_id=%s: %s"
+           meta.name (Keeper_id.Task_id.to_string task_id) msg);
+      Log.Keeper.info
+        "keeper:%s reconciled current_task_id=%s from backlog ownership"
+        meta.name (Keeper_id.Task_id.to_string task_id);
+      updated_meta)
+;;
+
 let tool_names =
   List.map Tool_name.to_string
 
@@ -643,6 +731,7 @@ let run_turn
   Fun.protect ~finally:Masc_runtime_events.emit_turn_end
   @@ fun () ->
   let receipt_started_at = Types.now_iso () in
+  let meta = sync_current_task_id_from_backlog ~config meta in
   (* 0. Resolve inference parameters via Cascade_inference *)
   let temperature =
     match temperature with
@@ -1369,37 +1458,7 @@ let run_turn
   let receipt_tool_contract_result_ref = ref "unknown" in
   let tool_calls_ref : tool_call_detail list ref = ref [] in
   let keeper_has_owned_active_task () =
-    if Option.is_some meta.current_task_id then true
-    else
-      let actual_name =
-        try Coord.resolve_agent_name config meta.agent_name
-        with
-        | Sys_error _ | Yojson.Json_error _ -> meta.agent_name
-        | exn ->
-            Log.Keeper.warn
-              "keeper:%s resolve_agent_name failed while checking owned task: %s"
-              meta.name (Printexc.to_string exn);
-            meta.agent_name
-      in
-      let matches assignee =
-        String.equal assignee meta.agent_name || String.equal assignee actual_name
-      in
-      try
-        Coord.get_tasks_raw config
-        |> List.exists (fun (task : Types.task) ->
-             match task.task_status with
-             | Types.Claimed { assignee; _ }
-             | Types.InProgress { assignee; _ }
-             | Types.AwaitingVerification { assignee; _ } ->
-                 matches assignee
-             | Types.Todo | Types.Done _ | Types.Cancelled _ -> false)
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn ->
-          Log.Keeper.warn
-            "keeper:%s owned task check failed: %s"
-            meta.name (Printexc.to_string exn);
-          false
+    Option.is_some (owned_active_task_id_for_meta ~config ~meta:!meta_ref)
   in
   let validate_allow_list ~turn raw =
     let raw = Tool_portal.filter_visible_tool_names portal_ctx raw in
@@ -1884,6 +1943,9 @@ let run_turn
           ~success
           ~duration_ms
           ~provider ->
+        (match Keeper_registry.get ~base_path:config.base_path meta.name with
+         | Some entry -> meta_ref := entry.meta
+         | None -> ());
         tool_calls_ref :=
           { tool_name
           ; provider
@@ -1997,7 +2059,7 @@ let run_turn
                  (keeper_task_claim / masc_claim_next), inject a prompt
                  to break the claim-only loop and start real work. *)
               let ctx =
-                match meta.current_task_id with
+                match (!meta_ref).current_task_id with
                 | Some task_id ->
                     let last_tool_names =
                       let rev = List.rev messages in
@@ -2183,11 +2245,11 @@ let run_turn
                 ?thinking_budget:current_params.thinking_budget
                 ~prompt_fingerprint:prompt_metrics.fingerprint
                 ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-                ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-                ~turn
-                ~keeper_turn_id:turn
-                ?task_id:(Option.map Keeper_id.Task_id.to_string meta.current_task_id)
-                ~goal_ids:meta.active_goal_ids
+	                ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+	                ~turn
+	                ~keeper_turn_id:turn
+	                ?task_id:(Option.map Keeper_id.Task_id.to_string (!meta_ref).current_task_id)
+	                ~goal_ids:meta.active_goal_ids
                 ~sandbox_profile:
                   (Keeper_types.sandbox_profile_to_string meta.sandbox_profile)
                 ~network_mode:
@@ -2451,6 +2513,9 @@ let run_turn
           Keeper_exec_task.handle_keeper_task_tool ~config ~meta ~name:tool_name
             ~args:input
         in
+        (match Keeper_registry.get ~base_path:config.base_path meta.name with
+         | Some entry -> meta_ref := entry.meta
+         | None -> ());
         let duration_ms = (Time_compat.now () -. started) *. 1000.0 in
         let success =
           try
@@ -2991,13 +3056,13 @@ let run_turn
               let store = Oas.Proof_store.default_config in
               let outcome = Cdal_eval_v1.evaluate ~store p in
               let verdict = Cdal_eval_v1.verdict_of_outcome outcome in
-              let task_subject =
-                Option.map
-                  (fun task_id ->
-                    Coord_hooks.
-                      { kind = "task"; id = Keeper_id.Task_id.to_string task_id })
-                  meta.current_task_id
-              in
+	              let task_subject =
+	                Option.map
+	                  (fun task_id ->
+	                    Coord_hooks.
+	                      { kind = "task"; id = Keeper_id.Task_id.to_string task_id })
+	                  (!meta_ref).current_task_id
+	              in
               let emit_keeper_activity ~kind ~payload ~tags =
                 try
                   (Atomic.get Coord_hooks.activity_emit_fn) config
@@ -3013,7 +3078,9 @@ let run_turn
                     kind
                     (Printexc.to_string exn)
               in
-              let task_id = Option.map Keeper_id.Task_id.to_string meta.current_task_id in
+	              let task_id =
+	                Option.map Keeper_id.Task_id.to_string (!meta_ref).current_task_id
+	              in
               Cdal_eval_v1.persist ?task_id verdict;
               Keeper_turn_telemetry.log_keeper_contract_verdict ~keeper_name:meta.name verdict;
               emit_keeper_activity
@@ -3278,9 +3345,9 @@ let run_turn
         agent_name = meta.agent_name;
         trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id;
         generation;
-        turn_count = !receipt_turn_count_ref;
-        current_task_id =
-          Option.map Keeper_id.Task_id.to_string meta.current_task_id;
+	        turn_count = !receipt_turn_count_ref;
+	        current_task_id =
+	          Option.map Keeper_id.Task_id.to_string (!meta_ref).current_task_id;
         goal_ids = meta.active_goal_ids;
         outcome =
           (match turn_result with

@@ -123,6 +123,11 @@ let execute_keeper_tool_call_with_outcome
   =
   let args = input in
   let now_ts = Time_compat.now () in
+  let meta =
+    match Keeper_registry.get ~base_path:config.base_path meta.name with
+    | Some entry -> entry.meta
+    | None -> meta
+  in
   let apply_circuit_breaker (result : executed_tool_result) =
     match result.outcome, result.payload_shape with
     | `Success, _ ->

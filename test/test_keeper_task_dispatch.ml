@@ -119,6 +119,21 @@ let contains_substring s needle =
   in
   if n_len = 0 then true else loop 0
 
+let with_registered_keeper config meta f =
+  Keeper_registry.unregister ~base_path:config.Coord.base_path meta.Keeper_types.name;
+  ignore
+    (Keeper_registry.register_offline
+       ~base_path:config.Coord.base_path
+       meta.Keeper_types.name
+       meta);
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_registry.unregister ~base_path:config.Coord.base_path meta.Keeper_types.name)
+    f
+
+let current_task_id_string (meta : Keeper_types.keeper_meta) =
+  Option.map Keeper_id.Task_id.to_string meta.current_task_id
+
 (* --- keeper_task_claim tests --- *)
 
 let test_claim_returns_result () =
@@ -131,6 +146,35 @@ let test_claim_returns_result () =
     | `String s ->
       check bool "claim result non-empty" true (String.length s > 0)
     | _ -> fail "expected result string in claim response")
+
+let test_claim_syncs_keeper_current_task_id () =
+  with_room (fun config ->
+    let meta = make_test_meta () in
+    with_registered_keeper config meta (fun () ->
+      let _ =
+        Coord.add_task config ~title:"Synced task" ~priority:1 ~description:"desc"
+      in
+      let result = call_tool config meta "keeper_task_claim" (`Assoc []) in
+      let json = parse_json result in
+      let task_id =
+        Yojson.Safe.Util.(
+          json |> member "claimed_task" |> member "task_id" |> to_string)
+      in
+      let registry_meta =
+        match Keeper_registry.get ~base_path:config.Coord.base_path meta.name with
+        | Some entry -> entry.meta
+        | None -> fail "expected keeper registry entry"
+      in
+      check (option string) "registry current_task_id" (Some task_id)
+        (current_task_id_string registry_meta);
+      let persisted_meta =
+        match Keeper_types.read_meta config meta.name with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "expected persisted keeper meta"
+        | Error msg -> fail msg
+      in
+      check (option string) "persisted current_task_id" (Some task_id)
+        (current_task_id_string persisted_meta)))
 
 let test_claim_empty_room () =
   with_room (fun config ->
@@ -575,6 +619,8 @@ let () =
   Alcotest.run "Keeper_task_dispatch" [
     "claim", [
       test_case "claim returns result" `Quick test_claim_returns_result;
+      test_case "claim syncs keeper current_task_id" `Quick
+        test_claim_syncs_keeper_current_task_id;
       test_case "claim empty room" `Quick test_claim_empty_room;
       test_case "claim respects active_goal_ids" `Quick
         test_claim_respects_active_goal_ids;

@@ -1551,6 +1551,22 @@ let dispatch_recurring_keepalive
     0
 ;;
 
+(** Whether a smart-heartbeat decision should allow the keepalive
+    cycle to continue evaluating turns.
+
+    Pure for testability. The full [run_smart_heartbeat_gate] layers
+    side-effects (sleep, cycle-timestamp update) on top of this
+    decision. Regression guard for the "claim-holding keeper
+    starvation" bug: [Skip_busy] must NOT gate cycle execution,
+    otherwise any keeper with [current_task_id=Some _] is blocked
+    from ever running a turn (discovered 2026-04-25 — 8/14 keepers
+    frozen with claimed tasks). *)
+let smart_heartbeat_cycle_continues (d : Heartbeat_smart.decision) : bool =
+  match d with
+  | Heartbeat_smart.Skip_busy | Heartbeat_smart.Emit -> true
+  | Heartbeat_smart.Skip_idle _ -> false
+;;
+
 let run_smart_heartbeat_gate
       ~(clock : _ Eio.Time.clock)
       ~(stop : bool Atomic.t)
@@ -1573,28 +1589,25 @@ let run_smart_heartbeat_gate
         ~last_heartbeat:!last_heartbeat_cycle_ts)
     else Heartbeat_smart.Emit
   in
-  match smart_hb_decision with
-  | Heartbeat_smart.Skip_busy ->
-    Log.Keeper.debug
-      "smart heartbeat: skip (busy, task=%s)"
-      (match meta_current.current_task_id with Some t -> Keeper_id.Task_id.to_string t | None -> "?");
-    let base =
-      Heartbeat_smart.effective_interval
-        ~config:smart_hb_config
-        ~last_activity:!last_successful_heartbeat_ts
-    in
-    let jitter = base *. 0.2 *. Random.float 1.0 in
-    interruptible_sleep ~clock ~stop ~wakeup (base +. jitter);
-    false
-  | Heartbeat_smart.Skip_idle next_time ->
-    let wait = Float.max 1.0 (next_time -. Time_compat.now ()) in
-    Log.Keeper.debug "smart heartbeat: skip (idle, next in %.1fs)" wait;
-    let jitter = wait *. 0.1 *. Random.float 1.0 in
-    interruptible_sleep ~clock ~stop ~wakeup (wait +. jitter);
-    false
-  | Heartbeat_smart.Emit ->
-    last_heartbeat_cycle_ts := Time_compat.now ();
-    true
+  (* Run side-effects (idle sleep, cycle-timestamp update) per the
+     decision, then use [smart_heartbeat_cycle_continues] (pure, see
+     .mli) as the authoritative gate answer. This split exists so the
+     regression guard lives in a pure function that unit tests can
+     exercise without an Eio runtime. *)
+  (match smart_hb_decision with
+   | Heartbeat_smart.Skip_busy ->
+     Log.Keeper.debug
+       "smart heartbeat: busy (task=%s) — cycle continues, broadcast may be debounced"
+       (match meta_current.current_task_id with Some t -> Keeper_id.Task_id.to_string t | None -> "?");
+     last_heartbeat_cycle_ts := Time_compat.now ()
+   | Heartbeat_smart.Skip_idle next_time ->
+     let wait = Float.max 1.0 (next_time -. Time_compat.now ()) in
+     Log.Keeper.debug "smart heartbeat: skip (idle, next in %.1fs)" wait;
+     let jitter = wait *. 0.1 *. Random.float 1.0 in
+     interruptible_sleep ~clock ~stop ~wakeup (wait +. jitter)
+   | Heartbeat_smart.Emit ->
+     last_heartbeat_cycle_ts := Time_compat.now ());
+  smart_heartbeat_cycle_continues smart_hb_decision
 ;;
 
 let maybe_write_heartbeat_snapshot

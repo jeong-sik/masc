@@ -70,6 +70,17 @@ val drop_autonomous_waiter_for_test : int -> unit
     at time [now].  0.0 = no yield needed.  Exposed for unit testing. *)
 val fairness_delay_sec_at : now:float -> keeper_name:string -> float
 
+(** Pure: whether a [Heartbeat_smart] decision should allow the
+    keepalive cycle (presence/snapshot/board/turn/recurring) to run.
+
+    Contract: [Skip_busy] -> [true] (cycle continues; broadcast may be
+    debounced elsewhere). [Skip_idle] -> [false] (keeper idle, back
+    off). [Emit] -> [true]. Regression guard for the claim-holding
+    keeper starvation bug where [Skip_busy] was mis-used as a
+    cycle-skip signal, blocking any keeper with a claimed task from
+    ever running a turn. *)
+val smart_heartbeat_cycle_continues : Heartbeat_smart.decision -> bool
+
 (** Test-only: stamp a completion time directly (bypasses [Time_compat.now]).
     Use to set up deterministic fairness-cooldown scenarios. *)
 val record_autonomous_completion_at_for_test : keeper_name:string -> ts:float -> unit

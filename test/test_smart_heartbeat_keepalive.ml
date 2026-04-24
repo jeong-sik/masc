@@ -121,6 +121,29 @@ let test_decision_to_string_skip_idle () =
   check bool "starts with skip:idle" true
     (String.length s > 9 && String.sub s 0 9 = "skip:idle")
 
+(* ── Cycle-gate regression guard ───────────────────────────────────
+   Claim-holding keeper starvation (2026-04-25): 8 of 14 keepers
+   were frozen because Skip_busy (emitted whenever current_task_id
+   was Some _) was mis-used as a cycle-skip signal. The only way to
+   reach the turn evaluator is through [run_smart_heartbeat_gate]
+   returning true. These tests codify the correct mapping: Skip_busy
+   debounces the broadcast but must NEVER skip the cycle itself. *)
+
+module KK = Masc_mcp.Keeper_keepalive
+
+let test_cycle_continues_on_skip_busy () =
+  check bool "Skip_busy cycle continues" true
+    (KK.smart_heartbeat_cycle_continues HS.Skip_busy)
+
+let test_cycle_continues_on_emit () =
+  check bool "Emit cycle continues" true
+    (KK.smart_heartbeat_cycle_continues HS.Emit)
+
+let test_cycle_pauses_on_skip_idle () =
+  let next = Unix.gettimeofday () +. 60.0 in
+  check bool "Skip_idle pauses cycle" false
+    (KK.smart_heartbeat_cycle_continues (HS.Skip_idle next))
+
 (* ── Test runner ─── *)
 
 let () =
@@ -146,5 +169,11 @@ let () =
       test_case "emit" `Quick test_decision_to_string_emit;
       test_case "skip_busy" `Quick test_decision_to_string_skip_busy;
       test_case "skip_idle" `Quick test_decision_to_string_skip_idle;
+    ];
+    "cycle_gate_regression", [
+      test_case "Skip_busy -> cycle continues (#claim-starvation regression)"
+        `Quick test_cycle_continues_on_skip_busy;
+      test_case "Emit -> cycle continues" `Quick test_cycle_continues_on_emit;
+      test_case "Skip_idle -> cycle pauses" `Quick test_cycle_pauses_on_skip_idle;
     ];
   ]

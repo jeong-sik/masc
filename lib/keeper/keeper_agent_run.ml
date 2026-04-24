@@ -1906,10 +1906,25 @@ let run_turn
             visible to the subprocess (see issue #10049 for fix plan)"
            meta.name cascade_name);
     let cli_transport_overrides =
+      let claude_mcp_config =
+        match keeper_oas_context.claude_mcp_config with
+        | Some _ as cfg -> cfg
+        | None ->
+            (* #10049 Option C: auto-construct from the keeper bearer
+               token + server host/port when env is unset. Gated
+               behind MASC_AUTO_CONSTRUCT_CLAUDE_MCP (default false) so
+               the existing explicit-env path stays unchanged until
+               operators opt in. Returns [None] when the flag is off
+               or the token file is missing — the Log.Keeper.warn
+               above (iter 10052) still fires for visibility. *)
+            Keeper_cli_mcp_config.try_construct_for_keeper
+              ~base_path:config.base_path
+              ~agent_name:meta.agent_name
+      in
       Some
         ({
           cwd = Some keeper_sandbox_root;
-          claude_mcp_config = keeper_oas_context.claude_mcp_config;
+          claude_mcp_config;
           claude_allowed_tools = None;
           claude_permission_mode = None;
           claude_max_turns = Some max_turns;

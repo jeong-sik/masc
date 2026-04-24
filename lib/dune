@@ -503,6 +503,7 @@
    keeper_guards
    keeper_usage_trust
    keeper_hooks_oas
+   keeper_cli_mcp_config
    keeper_extend_turns
    keeper_llm_bridge
    keeper_tool_alias

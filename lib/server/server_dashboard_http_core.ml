@@ -674,7 +674,7 @@ let dashboard_mission_briefing_http_json ~state ~sw ~clock request =
       dashboard_cache_key state.Mcp_server.room_config "mission_briefing"
         (Option.value ~default:"" actor)
     in
-    Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:5.0
+    Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:120.0
       ~clock ~timeout_sec:dashboard_mission_timeout_s compute
 
 let dashboard_shell_status_json (config : Coord.config) : Yojson.Safe.t =

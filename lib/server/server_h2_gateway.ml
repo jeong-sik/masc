@@ -658,10 +658,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
 
       | `GET, "/api/v1/dashboard/transport-health" ->
           let state = get_server_state () in
-          let json =
-            Transport_metrics.transport_health_json
-              ~config:state.Mcp_server.room_config
-          in
+          let json = dashboard_transport_health_http_json ~state in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
       | `GET, "/api/v1/dashboard/perf" ->

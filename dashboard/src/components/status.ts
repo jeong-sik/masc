@@ -3,20 +3,85 @@
 // fleet-health (FilterChips unified panel), memory-subsystems.
 
 import { html } from 'htm/preact'
+import { lazy, Suspense } from 'preact/compat'
 import { route } from '../router'
-import { AgentsUnified } from './agents-unified'
-import { RuntimePanel } from './runtime-panel'
-import { MemorySubsystems } from './memory-subsystems'
-import { FleetHealthPanel } from './fleet-health-panel'
-import { Observatory } from './observatory/observatory'
-import { AttributionPanel } from './attribution-panel'
-import { JourneyPanel } from './journey-panel'
-import { SafeAutonomyPanel } from './safe-autonomy'
+import { LoadingState } from './common/feedback-state'
 
 type StatusSection =
   | 'observatory' | 'journey' | 'agents' | 'runtime' | 'fleet-health'
   | 'safe-autonomy'
   | 'memory-subsystems' | 'attribution'
+
+const LazyAgentsUnified = lazy(async () => ({
+  default: (await import('./agents-unified')).AgentsUnified,
+}))
+const LazyRuntimePanel = lazy(async () => ({
+  default: (await import('./runtime-panel')).RuntimePanel,
+}))
+const LazyMemorySubsystems = lazy(async () => ({
+  default: (await import('./memory-subsystems')).MemorySubsystems,
+}))
+const LazyFleetHealthPanel = lazy(async () => ({
+  default: (await import('./fleet-health-panel')).FleetHealthPanel,
+}))
+const LazyObservatory = lazy(async () => ({
+  default: (await import('./observatory/observatory')).Observatory,
+}))
+const LazyAttributionPanel = lazy(async () => ({
+  default: (await import('./attribution-panel')).AttributionPanel,
+}))
+const LazyJourneyPanel = lazy(async () => ({
+  default: (await import('./journey-panel')).JourneyPanel,
+}))
+const LazySafeAutonomyPanel = lazy(async () => ({
+  default: (await import('./safe-autonomy')).SafeAutonomyPanel,
+}))
+
+function sectionFallback(label: string) {
+  return html`<${LoadingState}>${label} 불러오는 중...<//>`
+}
+
+function sectionLabel(section: StatusSection): string {
+  switch (section) {
+    case 'observatory':
+      return '관찰소'
+    case 'journey':
+      return '여정'
+    case 'runtime':
+      return '런타임'
+    case 'fleet-health':
+      return 'Fleet Health'
+    case 'safe-autonomy':
+      return 'Safe Autonomy'
+    case 'memory-subsystems':
+      return '메모리 서브시스템'
+    case 'attribution':
+      return '기여 분석'
+    case 'agents':
+      return '에이전트 상태'
+  }
+}
+
+function renderSection(section: StatusSection) {
+  switch (section) {
+    case 'observatory':
+      return html`<${LazyObservatory} />`
+    case 'journey':
+      return html`<${LazyJourneyPanel} />`
+    case 'runtime':
+      return html`<${LazyRuntimePanel} />`
+    case 'fleet-health':
+      return html`<${LazyFleetHealthPanel} />`
+    case 'safe-autonomy':
+      return html`<${LazySafeAutonomyPanel} />`
+    case 'memory-subsystems':
+      return html`<${LazyMemorySubsystems} />`
+    case 'attribution':
+      return html`<${LazyAttributionPanel} />`
+    case 'agents':
+      return html`<${LazyAgentsUnified} />`
+  }
+}
 
 function currentSection(): StatusSection {
   const section = route.value.params.section
@@ -38,21 +103,9 @@ export function Status() {
   return html`
     <div class="flex flex-col gap-5">
       <div class="transition-opacity duration-300">
-        ${section === 'observatory'
-          ? html`<${Observatory} />`
-          : section === 'journey'
-            ? html`<${JourneyPanel} />`
-          : section === 'runtime'
-            ? html`<${RuntimePanel} />`
-          : section === 'fleet-health'
-            ? html`<${FleetHealthPanel} />`
-          : section === 'safe-autonomy'
-            ? html`<${SafeAutonomyPanel} />`
-          : section === 'memory-subsystems'
-            ? html`<${MemorySubsystems} />`
-          : section === 'attribution'
-            ? html`<${AttributionPanel} />`
-            : html`<${AgentsUnified} />`}
+        <${Suspense} fallback=${sectionFallback(sectionLabel(section))}>
+          ${renderSection(section)}
+        <//>
       </div>
     </div>
   `

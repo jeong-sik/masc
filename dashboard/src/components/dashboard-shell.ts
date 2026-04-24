@@ -7,7 +7,6 @@ import { connected, reconnectCount, lastDisconnectedAt } from '../sse'
 import { dashboardLoading, serverStatus } from '../store'
 import { missionSnapshot, missionLoading } from '../mission-store'
 import { namespaceTruthInitializing } from '../namespace-truth-store'
-import { Overview } from './overview/overview'
 import { ErrorBoundary } from './common/error-boundary'
 import { TimeAgo } from './common/time-ago'
 import { LoadingState } from './common/feedback-state'
@@ -29,6 +28,7 @@ import { Bell } from 'lucide-preact'
 
 const buildIdentityOpen = signal(false)
 
+const LazyOverview = lazy(async () => ({ default: (await import('./overview/overview')).Overview }))
 const LazyStatus = lazy(async () => ({ default: (await import('./status')).Status }))
 const LazyWork = lazy(async () => ({ default: (await import('./work')).Work }))
 const LazyOperations = lazy(async () => ({ default: (await import('./control')).Operations }))
@@ -467,7 +467,11 @@ function TabContent() {
 
   switch (tab) {
     case 'overview':
-      return html`<${Overview} />`
+      return html`
+        <${Suspense} fallback=${lazyTabFallback('개요 화면')}>
+          <${LazyOverview} />
+        <//>
+      `
     case 'monitoring':
       return html`
         <${Suspense} fallback=${lazyTabFallback('모니터링 화면')}>
@@ -505,7 +509,11 @@ function TabContent() {
         <//>
       `
     default:
-      return html`<${Overview} />`
+      return html`
+        <${Suspense} fallback=${lazyTabFallback('개요 화면')}>
+          <${LazyOverview} />
+        <//>
+      `
   }
 }
 

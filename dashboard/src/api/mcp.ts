@@ -17,7 +17,7 @@ import {
   MCP_INITIALIZE_TIMEOUT_MS,
   MCP_INITIALIZED_NOTIFY_TIMEOUT_MS,
 } from '../config/constants'
-import { reportToolHostFailure } from './dashboard'
+import { reportToolHostFailure } from './tool-host-failure'
 import { showActionToast } from '../components/common/toast'
 
 // --- MCP Session Management ---

@@ -11,6 +11,13 @@ import {
   fetchKeeperToolCalls,
   fetchKeeperTrajectory,
 } from '../../api/dashboard'
+import {
+  deleteLiveTraceSlot,
+  ensureLiveTraceSlot,
+  liveTraceFeeds,
+  registerLiveTraceHistoricalIdsProvider,
+  registerLiveTraceSlotProvider,
+} from './session-trace-live-store'
 import type {
   AgentTimelineEvent,
   AgentTimelineResponse,
@@ -97,13 +104,15 @@ interface TraceSlot {
 // ── Per-agent state map ────────────────────────────────
 
 const traceSlots = signal<Record<string, TraceSlot>>({})
-const liveTraceFeeds = signal<Record<string, UnifiedTraceEvent[]>>({})
 
 const EMPTY_SLOT: TraceSlot = { events: [], loading: false, error: null, filter: 'all', statusFilter: 'all', searchQuery: '', fetchToken: 0 }
 
-const LIVE_TRACE_LIMIT = 120
 const TOOL_CALL_MATCH_WINDOW_MS = 2000
-let liveTraceSeq = 0
+
+registerLiveTraceHistoricalIdsProvider((agentName) =>
+  traceSlots.value[agentName]?.events.map(item => item.id) ?? [],
+)
+registerLiveTraceSlotProvider((agentName) => traceSlots.value[agentName] != null)
 
 function getSlot(agent: string): TraceSlot {
   return traceSlots.value[agent] ?? EMPTY_SLOT
@@ -769,9 +778,7 @@ export async function loadSessionTrace(agentName: string, isKeeper: boolean): Pr
   const prevSlot = getSlot(agentName)
   const token = prevSlot.fetchToken + 1
   patchSlot(agentName, { loading: true, error: null, fetchToken: token })
-  if (!liveTraceFeeds.value[agentName]) {
-    liveTraceFeeds.value = { ...liveTraceFeeds.value, [agentName]: [] }
-  }
+  ensureLiveTraceSlot(agentName)
 
   try {
     const timelinePromise = fetchAgentTimeline(agentName, TIMELINE_HOURS, TIMELINE_LIMIT)
@@ -808,70 +815,11 @@ export async function loadSessionTrace(agentName: string, isKeeper: boolean): Pr
   }
 }
 
-/** Append a live MASC tool call event from SSE into the trace feed. */
-export function appendLiveToolCall(
-  agentName: string,
-  evt: {
-    toolName: string
-    durationMs: number
-    success: boolean
-    error: string | null
-    tsUnix: number
-  },
-): void {
-  const tsMs = evt.tsUnix * 1000
-  appendLiveTraceEvent(agentName, {
-    id: `live-masc-tool-${tsMs}-${evt.toolName}`,
-    ts: tsMs,
-    ts_iso: new Date(tsMs).toISOString(),
-    kind: 'tool_call',
-    sourceLane: 'masc',
-    summary: evt.toolName,
-    detail: {},
-    agentName,
-    toolName: evt.toolName,
-    duration_ms: evt.durationMs,
-    error: evt.error,
-  })
-}
-
-/** Append a live OAS runtime event from SSE into the trace feed. */
-export function appendLiveOasEvent(
-  agentName: string,
-  event: Omit<UnifiedTraceEvent, 'sourceLane' | 'agentName'>,
-): void {
-  appendLiveTraceEvent(agentName, {
-    ...event,
-    sourceLane: 'oas',
-    agentName,
-  })
-}
-
-function appendLiveTraceEvent(agentName: string, event: UnifiedTraceEvent): void {
-  if (!traceSlots.value[agentName] && !liveTraceFeeds.value[agentName]) return
-  const prev = liveTraceFeeds.value[agentName] ?? []
-  const historical = traceSlots.value[agentName]?.events ?? []
-  const seenIds = new Set([
-    ...historical.map(item => item.id),
-    ...prev.map(item => item.id),
-  ])
-  const uniqueEvent =
-    seenIds.has(event.id)
-      ? { ...event, id: `${event.id}-${++liveTraceSeq}` }
-      : event
-  const next = [...prev, uniqueEvent]
-  const pruned =
-    next.length > LIVE_TRACE_LIMIT
-      ? next.slice(next.length - LIVE_TRACE_LIMIT)
-      : next
-  liveTraceFeeds.value = { ...liveTraceFeeds.value, [agentName]: pruned }
-}
+export { appendLiveOasEvent, appendLiveToolCall } from './session-trace-live-store'
 
 export function closeSessionTrace(agentName: string): void {
   const next = { ...traceSlots.value }
   delete next[agentName]
   traceSlots.value = next
-  const feeds = { ...liveTraceFeeds.value }
-  delete feeds[agentName]
-  liveTraceFeeds.value = feeds
+  deleteLiveTraceSlot(agentName)
 }

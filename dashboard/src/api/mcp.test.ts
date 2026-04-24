@@ -45,7 +45,7 @@ vi.mock('./core', () => ({
   setStoredToken,
 }))
 
-vi.mock('./dashboard', () => ({
+vi.mock('./tool-host-failure', () => ({
   reportToolHostFailure,
 }))
 

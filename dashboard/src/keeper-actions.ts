@@ -1,9 +1,9 @@
+import { callMcpTool } from './api/mcp'
+import { runOperatorAction } from './api/core'
 import {
-  callMcpTool,
-  runOperatorAction,
   sendKeeperMessageDetailed,
   streamKeeperMessage,
-} from './api'
+} from './api/keeper'
 import { invalidateDashboardCache, refreshDashboard } from './store'
 import type {
   KeeperConversationDelivery,

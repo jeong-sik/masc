@@ -1,23 +1,28 @@
-// Zod schema-at-boundary for SSE events from the MCP server.
+// Lightweight schema-at-boundary for SSE events from the MCP server.
 //
-// Parse gate: the top-level `type` discriminator is validated against a
-// closed enum so unknown event names surface as drift instead of becoming
-// silent no-ops. All other fields are declared as optional (mirrors the
-// existing `SSEEvent` interface) so new backend payload shapes don't hard-
-// fail the dashboard — but the field types are still checked when present.
-//
-// TypeScript SSOT: src/types/sse.ts (SSEEvent interface).
-// Phase 1 goal: eliminate the `as SSEEvent` cast in src/sse.ts by giving
-// onmessage a checked parse boundary. Phase 2 will split this into a
-// per-variant z.discriminatedUnion so handlers can switch exhaustively.
+// This module intentionally avoids pulling a generic schema runtime into the
+// dashboard hot path. SSE and WebSocket push streams import this parser during
+// boot, so keep validation direct and limited to the boundary guarantees the
+// handlers rely on.
 
-import { z } from 'zod'
+import type {
+  Attribution,
+  AttributionOutcome,
+  SSEEvent,
+  SSEEventType,
+} from '../types/sse'
 
-// --- Type discriminator (closed enum) -------------------------------------
-// Mirror of the non-OAS literals in `SSEEventType` in ../types/sse.ts.
-// OAS bridge events stay open by prefix so a newer server does not get
-// parse-dropped the moment it adds a new `oas:*` event family.
-const FixedSSEEventTypeSchema = z.enum([
+type SchemaIssue = { path?: string; message: string }
+type SafeParseSuccess<T> = { success: true; data: T }
+type SafeParseFailure = { success: false; error: { issues: SchemaIssue[] } }
+type SafeParseResult<T> = SafeParseSuccess<T> | SafeParseFailure
+
+type SchemaLike<T> = {
+  parse(value: unknown): T
+  safeParse(value: unknown): SafeParseResult<T>
+}
+
+const FIXED_SSE_EVENT_TYPES = new Set([
   'agent_joined',
   'agent_left',
   'broadcast',
@@ -62,135 +67,208 @@ const FixedSSEEventTypeSchema = z.enum([
   'transport_health_snapshot',
 ])
 
-const OasPrefixedEventTypeSchema = z
-  .string()
-  .regex(/^oas:/, 'Expected an oas:* event type')
-
-export const SSEEventTypeSchema = z.union([
-  FixedSSEEventTypeSchema,
-  OasPrefixedEventTypeSchema,
+const STRING_FIELDS = new Set([
+  'severity',
+  'source',
+  'agent',
+  'from',
+  'from_agent',
+  'message',
+  'content',
+  'task_id',
+  'status',
+  'post_id',
+  'comment_id',
+  'title',
+  'author',
+  'voter',
+  'direction',
+  'hearth',
+  'agent_name',
+  'keeper_name',
+  'event_type',
+  'name',
+  'from_model',
+  'to_model',
+  'trigger',
+  'reason',
+  'prev_phase',
+  'new_phase',
+  'event',
+  'tool_name',
+  'error_text',
+  'reason_code',
+  'phase',
+  'from_state',
+  'to_state',
+  'session_id',
+  'operation_id',
+  'worker_run_id',
+  'model_used',
+  'correlation_id',
+  'run_id',
 ])
 
-export type SSEEventType = z.infer<typeof SSEEventTypeSchema>
-
-// --- Attribution envelope (nested discriminated union) --------------------
-// OCaml SSOT: lib/attribution.mli. Structurally mirrors AttributionOutcome
-// which is a discriminated union on `kind`. Zod's discriminatedUnion
-// matches exactly — unknown `kind` fails parse.
-
-const AttributionOutcomeSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('passed') }),
-  z.object({
-    kind: z.literal('policy_failed'),
-    reason: z.string(),
-  }),
-  z.object({
-    kind: z.literal('transition_blocked'),
-    from_state: z.string(),
-    to_state: z.string(),
-    reason: z.string(),
-  }),
-  z.object({
-    kind: z.literal('partial_pass'),
-    score: z.number(),
-    rationale: z.string(),
-  }),
+const NUMBER_FIELDS = new Set([
+  'generation',
+  'context_ratio',
+  'ts_unix',
+  'from_generation',
+  'to_generation',
+  'before_tokens',
+  'after_tokens',
+  'saved_tokens',
+  'duration_ms',
+  'turn',
+  'input_tokens',
+  'output_tokens',
+  'cost_usd',
+  'tool_calls_made',
+  'total_turns',
 ])
 
-export const AttributionSchema = z.object({
-  origin: z.enum(['det', 'nondet']),
-  // `gate` is intentionally open: known canonical names are documented in
-  // the TS SSEEvent AttributionGate union but new gates must not break
-  // existing clients.
-  gate: z.string(),
-  evidence: z.record(z.string(), z.unknown()),
-  outcome: AttributionOutcomeSchema,
+const BOOLEAN_FIELDS = new Set(['success'])
+
+function ok<T>(data: T): SafeParseSuccess<T> {
+  return { success: true, data }
+}
+
+function fail<T = never>(path: string | undefined, message: string): SafeParseResult<T> {
+  return { success: false, error: { issues: [{ path, message }] } }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function isSSEEventType(value: unknown): value is SSEEventType {
+  return typeof value === 'string' && (
+    FIXED_SSE_EVENT_TYPES.has(value) || value.startsWith('oas:')
+  )
+}
+
+function schema<T>(
+  safeParse: (value: unknown) => SafeParseResult<T>,
+): SchemaLike<T> {
+  return {
+    parse(value: unknown): T {
+      const result = safeParse(value)
+      if (result.success) return result.data
+      throw new Error(result.error.issues.map(issue => issue.message).join('; '))
+    },
+    safeParse,
+  }
+}
+
+export const SSEEventTypeSchema = schema<SSEEventType>((value) => {
+  if (isSSEEventType(value)) return ok(value)
+  return fail(undefined, 'Expected a known SSE event type or an oas:* event type')
 })
 
-export type Attribution = z.infer<typeof AttributionSchema>
+export type { SSEEventType }
 
-// --- SSE envelope --------------------------------------------------------
-// Strict on discriminator (`type`), permissive on payload (every other
-// field optional). Unknown fields pass through to preserve forward-
-// compat: a newer server emitting a new payload field must not crash
-// a slightly older dashboard. Typed fields still reject wrong-type values.
-export const SSEMessageSchema = z
-  .object({
-    type: SSEEventTypeSchema,
-    severity: z.string().optional(),
-    source: z.string().optional(),
-    agent: z.string().optional(),
-    from: z.string().optional(),
-    from_agent: z.string().optional(),
-    message: z.string().optional(),
-    content: z.string().optional(),
-    task_id: z.string().optional(),
-    status: z.string().optional(),
-    post_id: z.string().optional(),
-    comment_id: z.string().optional(),
-    title: z.string().optional(),
-    author: z.string().optional(),
-    voter: z.string().optional(),
-    direction: z.string().optional(),
-    hearth: z.string().optional(),
-    agent_name: z.string().optional(),
-    keeper_name: z.string().optional(),
-    event_type: z.string().optional(),
-    // Keeper event fields
-    name: z.string().optional(),
-    generation: z.number().optional(),
-    context_ratio: z.number().optional(),
-    ts_unix: z.number().optional(),
-    from_generation: z.number().optional(),
-    to_generation: z.number().optional(),
-    from_model: z.string().optional(),
-    to_model: z.string().optional(),
-    before_tokens: z.number().optional(),
-    after_tokens: z.number().optional(),
-    saved_tokens: z.number().optional(),
-    trigger: z.string().optional(),
-    reason: z.string().optional(),
-    // Phase transitions
-    prev_phase: z.string().optional(),
-    new_phase: z.string().optional(),
-    event: z.string().optional(),
-    // Tool call / skip fields
-    tool_name: z.string().optional(),
-    duration_ms: z.number().optional(),
-    success: z.boolean().optional(),
-    error_text: z.string().optional(),
-    reason_code: z.string().optional(),
-    turn: z.number().optional(),
-    phase: z.string().optional(),
-    from_state: z.string().optional(),
-    to_state: z.string().optional(),
-    session_id: z.string().optional(),
-    operation_id: z.string().optional(),
-    worker_run_id: z.string().optional(),
-    // Turn complete enrichment
-    model_used: z.string().optional(),
-    input_tokens: z.number().optional(),
-    output_tokens: z.number().optional(),
-    cost_usd: z.number().optional(),
-    tool_calls_made: z.number().optional(),
-    total_turns: z.number().optional(),
-    // Generic OAS payload container
-    payload: z.record(z.string(), z.unknown()).optional(),
-    // OAS envelope
-    correlation_id: z.string().optional(),
-    run_id: z.string().optional(),
-    // Gate attribution envelope
-    attribution: AttributionSchema.optional(),
+function validateAttributionOutcome(value: unknown): SafeParseResult<AttributionOutcome> {
+  if (!isRecord(value)) return fail('outcome', 'Expected attribution outcome object')
+  const kind = value.kind
+  switch (kind) {
+    case 'passed':
+      return ok({ kind })
+    case 'policy_failed':
+      return typeof value.reason === 'string'
+        ? ok({ kind, reason: value.reason })
+        : fail('outcome.reason', 'Expected string reason')
+    case 'transition_blocked':
+      return (
+        typeof value.from_state === 'string'
+        && typeof value.to_state === 'string'
+        && typeof value.reason === 'string'
+      )
+        ? ok({
+            kind,
+            from_state: value.from_state,
+            to_state: value.to_state,
+            reason: value.reason,
+          })
+        : fail('outcome', 'Expected transition fields')
+    case 'partial_pass':
+      return (
+        typeof value.score === 'number'
+        && Number.isFinite(value.score)
+        && typeof value.rationale === 'string'
+      )
+        ? ok({ kind, score: value.score, rationale: value.rationale })
+        : fail('outcome', 'Expected partial_pass score and rationale')
+    default:
+      return fail('outcome.kind', 'Expected known attribution outcome kind')
+  }
+}
+
+export const AttributionSchema = schema<Attribution>((value) => {
+  if (!isRecord(value)) return fail(undefined, 'Expected attribution object')
+  if (value.origin !== 'det' && value.origin !== 'nondet') {
+    return fail('origin', 'Expected attribution origin')
+  }
+  if (typeof value.gate !== 'string') {
+    return fail('gate', 'Expected attribution gate')
+  }
+  if (!isRecord(value.evidence)) {
+    return fail('evidence', 'Expected attribution evidence object')
+  }
+  const outcome = validateAttributionOutcome(value.outcome)
+  if (!outcome.success) return outcome
+  return ok({
+    origin: value.origin,
+    gate: value.gate,
+    evidence: value.evidence,
+    outcome: outcome.data,
   })
-  .passthrough()
+})
 
-export type SSEMessage = z.infer<typeof SSEMessageSchema>
+export type { Attribution }
+
+export type SSEMessage = SSEEvent
+
+export const SSEMessageSchema = schema<SSEMessage>((value) => {
+  if (!isRecord(value)) return fail(undefined, 'Expected SSE message object')
+  if (!isSSEEventType(value.type)) {
+    return fail('type', 'Expected known SSE event type or oas:* event type')
+  }
+
+  for (const key of STRING_FIELDS) {
+    const field = value[key]
+    if (field != null && typeof field !== 'string') {
+      return fail(key, `Expected ${key} to be a string`)
+    }
+  }
+  for (const key of NUMBER_FIELDS) {
+    const field = value[key]
+    if (field != null && (typeof field !== 'number' || !Number.isFinite(field))) {
+      return fail(key, `Expected ${key} to be a number`)
+    }
+  }
+  for (const key of BOOLEAN_FIELDS) {
+    const field = value[key]
+    if (field != null && typeof field !== 'boolean') {
+      return fail(key, `Expected ${key} to be a boolean`)
+    }
+  }
+
+  if (value.payload != null && !isRecord(value.payload)) {
+    return fail('payload', 'Expected payload object')
+  }
+  if (value.attribution != null) {
+    const attribution = AttributionSchema.safeParse(value.attribution)
+    if (!attribution.success) return attribution
+  }
+
+  return ok(value as unknown as SSEMessage)
+})
 
 /** Schema drift error for SSE boundary.
  *  Matches the GateStatusSchemaDriftError pattern used by Valibot schemas. */
 export class SSESchemaDriftError extends Error {
   constructor(
-    public readonly issues: readonly { path?: string; message: string }[],
+    public readonly issues: readonly SchemaIssue[],
     public readonly raw: unknown,
   ) {
     super(`SSE schema drift: ${issues.map((i) => i.message).join('; ')}`)
@@ -206,11 +284,9 @@ export function parseSSEMessage(raw: unknown): SSEMessage | null {
   if (result.success) return result.data
   // Surface drift in dev tools without crashing the stream. Aggregate issues
   // into one warn; keep payload visible so operators can diff server output.
-  const issues = result.error.issues.map((i) => ({
-    path: i.path.join('.'),
-    message: i.message,
-  }))
-  // eslint-disable-next-line no-console
-  console.warn('[SSE] schema drift, event dropped', { issues, raw })
+  console.warn('[SSE] schema drift, event dropped', {
+    issues: result.error.issues,
+    raw,
+  })
   return null
 }

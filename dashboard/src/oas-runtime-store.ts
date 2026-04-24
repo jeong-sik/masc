@@ -1,4 +1,4 @@
-import { appendLiveOasEvent } from './components/session-trace/session-trace-state'
+import { appendLiveOasEvent } from './components/session-trace/session-trace-live-store'
 import { isRecord, asNumber, asString } from './components/common/normalize'
 import { fetchTelemetry, type TelemetryEntry } from './api/dashboard'
 import { OAS_TELEMETRY_REPLAY_LIMIT } from './config/constants'

@@ -11,8 +11,7 @@ import {
   normalizeJournalSeverity,
   normalizeJournalSource,
 } from './journal-entry'
-import { appendLiveToolCall } from './components/session-trace/session-trace-state'
-import { applyOasRuntimeEvent } from './oas-runtime-store'
+import { appendLiveToolCall } from './components/session-trace/session-trace-live-store'
 import { parseSSEMessage } from './schemas/sse'
 import { RingBuffer } from './lib/ring-buffer'
 
@@ -23,6 +22,12 @@ import {
 } from './config/constants'
 
 const SSE_SESSION_KEY = 'masc_dashboard_sse_session_id'
+let oasRuntimeStorePromise: Promise<typeof import('./oas-runtime-store')> | null = null
+
+function loadOasRuntimeStore(): Promise<typeof import('./oas-runtime-store')> {
+  oasRuntimeStorePromise ??= import('./oas-runtime-store')
+  return oasRuntimeStorePromise
+}
 
 // --- Signals ---
 
@@ -297,7 +302,13 @@ function handleEvent(event: SSEEvent): void {
       : rawType
   const agent = event.agent ?? event.author ?? event.from ?? event.from_agent ?? ''
   if (rawType.startsWith('oas:')) {
-    applyOasRuntimeEvent(event, { includeLiveTrace: true })
+    void loadOasRuntimeStore()
+      .then(({ applyOasRuntimeEvent }) => {
+        applyOasRuntimeEvent(event, { includeLiveTrace: true })
+      })
+      .catch(err => {
+        console.warn('[SSE] OAS runtime handler unavailable', err instanceof Error ? err.message : err)
+      })
   }
 
   switch (type) {

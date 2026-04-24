@@ -16,7 +16,6 @@ import {
 import { requestNamespaceTruthNow, disposeNamespaceTruthScheduler } from './namespace-truth-store'
 import { cancelPendingSSERefreshes, registerMissionRefresh, setupSSEReaction, startPeriodicRefresh, stopPeriodicRefresh } from './sse-store'
 import { refreshMissionSnapshot } from './mission-store'
-import { replayOasRuntimeTelemetry } from './oas-runtime-store'
 import { refreshShell } from './store'
 import { connectDashboardWS, disconnectDashboardWS, subscribeDashboardRoute } from './dashboard-ws'
 import { ensureDevToken } from './api/mcp'
@@ -32,7 +31,6 @@ import { selectedAgentName } from './components/agent-detail-selection'
 import { selectedTask } from './components/goals/task-detail-selection'
 import { ToastContainer } from './components/common/toast'
 import { ConfirmDialogOverlay } from './components/common/confirm-dialog'
-import { CommandPalette } from './components/common/command-palette'
 import { AuthStatus, RemoteWarningBanner } from './components/auth-status'
 import { startErrorCleanup, stopErrorCleanup } from './components/common/error-notification-state'
 import { DASHBOARD_NAV_ITEMS, currentSectionForRoute } from './config/navigation'
@@ -51,6 +49,9 @@ const LazyAgentDetailOverlay = lazy(async () => ({
 }))
 const LazyTaskDetailOverlay = lazy(async () => ({
   default: (await import('./components/goals/task-detail-overlay')).TaskDetailOverlay,
+}))
+const LazyCommandPalette = lazy(async () => ({
+  default: (await import('./components/common/command-palette')).CommandPalette,
 }))
 
 function refreshCurrentRoute(options?: { recordVisit?: boolean }): void {
@@ -78,7 +79,8 @@ export function App() {
 
     // Replay durable OAS state before opening the live SSE tail.
     pauseQueuedOasRuntimeIngress()
-    void replayOasRuntimeTelemetry()
+    void import('./oas-runtime-store')
+      .then(({ replayOasRuntimeTelemetry }) => replayOasRuntimeTelemetry())
       .catch(err => {
         console.warn('[app] OAS runtime replay failed', err instanceof Error ? err.message : err)
       })
@@ -200,7 +202,9 @@ export function App() {
         : null}
       <${ToastContainer} />
       <${ConfirmDialogOverlay} />
-      <${CommandPalette} />
+      <${Suspense} fallback=${null}>
+        <${LazyCommandPalette} />
+      <//>
     </div>
   `
 }

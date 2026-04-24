@@ -130,6 +130,16 @@ let git_rev_parse_short_cancel_refresh dir =
 let git_rev_parse_short_probe_argv dir =
   [ "git"; "-C"; dir; "--no-optional-locks"; "rev-parse"; "--short"; "HEAD" ]
 
+(* Bumped 5s → 15s for large repos (#9765, #9775).
+   `~/me` repeatedly trips the 5s budget on first probe after TTL
+   expiry (3 occurrences in issue #9775 logs at 18:29/18:41/18:50).
+   The probe runs on a background fiber via
+   [maybe_refresh_git_rev_parse_short_in_background], so the extra
+   wall-time does not affect the hot dashboard path — cached values
+   keep serving during the refresh. Matches the sibling
+   [dashboard_runtime_probe_timeout_sec = 15] at the top of this module. *)
+let git_rev_parse_short_probe_timeout_sec = 15.0
+
 let git_rev_parse_short_probe dir =
   match Atomic.get git_rev_parse_short_probe_hook_for_tests with
   | Some hook -> hook dir
@@ -141,7 +151,7 @@ let git_rev_parse_short_probe dir =
           ~actor:"system/runtime_info"
           ~raw_source
           ~summary:"dashboard runtime git probe"
-          ~timeout_sec:5.0
+          ~timeout_sec:git_rev_parse_short_probe_timeout_sec
           argv
       with
       | Unix.WEXITED 0, output -> trim_to_option output

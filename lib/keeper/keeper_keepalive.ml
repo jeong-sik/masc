@@ -137,7 +137,9 @@ type autonomous_waiter =
     keeper_name : string;
   }
 
-let autonomous_wait_queue_mutex = Eio.Mutex.create ()
+(* Stdlib.Mutex: queue operations are pure/non-yielding and test helpers call
+   them outside Eio_main. *)
+let autonomous_wait_queue_mutex = Stdlib.Mutex.create ()
 
 let autonomous_wait_queue : autonomous_waiter list ref = ref []
 
@@ -146,7 +148,10 @@ let autonomous_wait_queue_next_ticket = ref 0
 let autonomous_queue_poll_sec = 0.05
 
 let with_autonomous_wait_queue f =
-  Eio.Mutex.use_rw ~protect:true autonomous_wait_queue_mutex (fun () -> f ())
+  Mutex.lock autonomous_wait_queue_mutex;
+  Fun.protect
+    ~finally:(fun () -> Mutex.unlock autonomous_wait_queue_mutex)
+    f
 
 let reset_autonomous_turn_queue_for_test () =
   with_autonomous_wait_queue (fun () ->
@@ -1152,6 +1157,75 @@ let collect_keepalive_board_events
     pending_board_events, meta_current)
 ;;
 
+let in_turn_liveness_pulse_interval_sec () =
+  max 5.0 (min 30.0 (float_of_int (keepalive_interval_sec ())))
+;;
+
+let with_in_turn_liveness_pulse_for_test ~sw:_sw ~clock ~interval_sec ~tick f =
+  let interval_sec = max 0.001 interval_sec in
+  Eio.Switch.run (fun pulse_sw ->
+    let pulse_stop = Atomic.make false in
+    Eio.Switch.on_release pulse_sw (fun () -> Atomic.set pulse_stop true);
+    Eio.Fiber.fork ~sw:pulse_sw (fun () ->
+      let rec loop () =
+        Eio.Time.sleep clock interval_sec;
+        if not (Atomic.get pulse_stop) then (
+          (try tick ()
+           with
+           | Eio.Cancel.Cancelled _ as e -> raise e
+           | exn ->
+               Log.Keeper.warn "in-turn liveness pulse failed: %s"
+                 (Printexc.to_string exn));
+          loop ())
+      in
+      loop ());
+    f ())
+;;
+
+let emit_in_turn_liveness_pulse ~(ctx : _ context) ~(meta : keeper_meta) =
+  match Keeper_registry.get ~base_path:ctx.config.base_path meta.name with
+  | Some entry when Option.is_some entry.current_turn_observation ->
+      (try
+         ignore (Coord.heartbeat ctx.config ~agent_name:meta.agent_name)
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+           Log.Keeper.debug "in-turn heartbeat failed for %s: %s"
+             meta.name (Printexc.to_string exn));
+      let now_ts = Time_compat.now () in
+      (try
+         Sse.broadcast
+           (`Assoc
+              [ "type", `String "keeper_heartbeat"
+              ; "name", `String meta.name
+              ; "generation", `Int meta.runtime.generation
+              ; "ts_unix", `Float now_ts
+              ; "phase", `String "turn_running"
+              ; "in_turn", `Bool true
+              ])
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+           Log.Keeper.error "in-turn heartbeat SSE broadcast failed: %s"
+             (Printexc.to_string exn))
+  | _ -> ()
+;;
+
+let with_in_turn_liveness_pulse
+      ~(ctx : _ context)
+      ~(meta : keeper_meta)
+      ~(stop : bool Atomic.t)
+      f
+  =
+  with_in_turn_liveness_pulse_for_test
+    ~sw:ctx.sw
+    ~clock:ctx.clock
+    ~interval_sec:(in_turn_liveness_pulse_interval_sec ())
+    ~tick:(fun () ->
+      if not (Atomic.get stop) then emit_in_turn_liveness_pulse ~ctx ~meta)
+    f
+;;
+
 let run_keepalive_unified_turn
       ~(ctx : _ context)
       ~(meta_after_triage : keeper_meta)
@@ -1274,15 +1348,17 @@ let run_keepalive_unified_turn
           with_keeper_turn_slot ~keeper_name:meta_after_triage.name
             ~channel:turn_decision.channel (fun ~semaphore_wait_ms ->
             match
-              Keeper_unified_turn.run_keeper_cycle
-                ~config:ctx.config
-                ~meta:meta_after_observe
-                ~observation:obs
-                ~generation:meta_after_observe.runtime.generation
-                ~channel:turn_decision.channel
-                ~semaphore_wait_ms:semaphore_wait_ms
-                ~shared_context
-                ()
+              with_in_turn_liveness_pulse ~ctx ~meta:meta_after_observe ~stop
+                (fun () ->
+                  Keeper_unified_turn.run_keeper_cycle
+                    ~config:ctx.config
+                    ~meta:meta_after_observe
+                    ~observation:obs
+                    ~generation:meta_after_observe.runtime.generation
+                    ~channel:turn_decision.channel
+                    ~semaphore_wait_ms:semaphore_wait_ms
+                    ~shared_context
+                    ())
             with
             | Error err ->
               let e_str = Oas.Error.to_string err in

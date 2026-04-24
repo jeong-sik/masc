@@ -148,6 +148,33 @@ let test_autonomous_slot_released_when_body_raises () =
   Alcotest.(check (list string)) "autonomous queue drained" []
     (KK.autonomous_waiter_snapshot_for_test ())
 
+let test_in_turn_liveness_pulse_stops_when_body_raises () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let clock = Eio.Stdenv.clock env in
+  let ticks = Atomic.make 0 in
+  let raised =
+    try
+      let _ =
+        KK.with_in_turn_liveness_pulse_for_test
+          ~sw
+          ~clock
+          ~interval_sec:0.01
+          ~tick:(fun () -> ignore (Atomic.fetch_and_add ticks 1))
+          (fun () ->
+            Eio.Time.sleep clock 0.025;
+            raise Exit)
+      in
+      false
+    with Exit -> true
+  in
+  Alcotest.(check bool) "body exception propagated" true raised;
+  Alcotest.(check bool) "pulse ticked while body ran" true (Atomic.get ticks > 0);
+  let ticks_after_raise = Atomic.get ticks in
+  Eio.Time.sleep clock 0.04;
+  Alcotest.(check int) "pulse stopped after body raised" ticks_after_raise
+    (Atomic.get ticks)
+
 let () =
   Alcotest.run "Keeper_semaphore_fairness"
     [
@@ -176,5 +203,10 @@ let () =
             (with_fresh_state test_reactive_slot_released_when_body_raises);
           Alcotest.test_case "autonomous slot released when body raises" `Quick
             (with_fresh_state test_autonomous_slot_released_when_body_raises);
+        ] );
+      ( "in_turn_liveness",
+        [
+          Alcotest.test_case "pulse stops when body raises" `Quick
+            (with_fresh_state test_in_turn_liveness_pulse_stops_when_body_raises);
         ] );
     ]

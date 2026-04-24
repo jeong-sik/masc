@@ -3,13 +3,34 @@
 open Alcotest
 open Masc_mcp
 
+let has_prefix ~prefix s =
+  let plen = String.length prefix in
+  String.length s >= plen && String.sub s 0 plen = prefix
+
+let rec remove_tree path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then begin
+      Array.iter
+        (fun child -> remove_tree (Filename.concat path child))
+        (Sys.readdir path);
+      Unix.rmdir path
+    end else
+      Sys.remove path
+
+let cleanup_temp_base dir =
+  let basename = Filename.basename dir in
+  let temp_dir = Filename.get_temp_dir_name () in
+  if Filename.dirname dir = temp_dir
+     && has_prefix ~prefix:"autoresearch-knowledge-" basename then
+    try remove_tree dir with _ -> ()
+
 let with_temp_base prefix f =
   let dir =
     Filename.concat (Filename.get_temp_dir_name ())
       (prefix ^ "-" ^ Autoresearch_knowledge.generate_finding_id ())
   in
   Fs_compat.mkdir_p dir;
-  f dir
+  Fun.protect ~finally:(fun () -> cleanup_temp_base dir) (fun () -> f dir)
 
 let make_finding ?(id = Autoresearch_knowledge.generate_finding_id ())
     ?(goal = "Understand attention window effect on BPB")
@@ -100,6 +121,26 @@ let dispatch_json ctx ~name ~args =
   | Some (false, body) -> fail (name ^ " failed: " ^ body)
   | Some (true, body) -> Yojson.Safe.from_string body
 
+let dispatch_error label ctx ~name ~args =
+  match Tool_autoresearch.dispatch ctx ~name ~args with
+  | None -> fail ("dispatch missing for " ^ name)
+  | Some (true, body) -> fail (name ^ " unexpectedly succeeded: " ^ body)
+  | Some (false, body) ->
+    let json = Yojson.Safe.from_string body in
+    let error =
+      Yojson.Safe.Util.(member "error" json |> to_string_option)
+    in
+    check bool (label ^ " error field present") true (Option.is_some error);
+    json
+
+let valid_record_fields evidence =
+  [
+    ("goal", `String "Validate autoresearch finding input");
+    ("hypothesis", `String "bad inputs should not persist findings");
+    ("evidence", `String evidence);
+    ("conclusion", `String "validation rejects malformed fields");
+  ]
+
 let test_record_and_search_dispatch () =
   with_temp_base "autoresearch-knowledge-dispatch" @@ fun base_path ->
   let ctx = make_ctx base_path in
@@ -124,6 +165,94 @@ let test_record_and_search_dispatch () =
   in
   check int "dispatch search count" 1
     (Yojson.Safe.Util.(member "count" search |> to_int))
+
+let test_record_dispatch_rejects_invalid_input () =
+  with_temp_base "autoresearch-knowledge-invalid-record" @@ fun base_path ->
+  let ctx = make_ctx base_path in
+  let unique = "invalid-record-token-autoresearch-findings" in
+  let cases =
+    [
+      ( "blank required field",
+        `Assoc
+          [
+            ("goal", `String " ");
+            ("hypothesis", `String "bad inputs should not persist findings");
+            ("evidence", `String unique);
+            ("conclusion", `String "validation rejects malformed fields");
+          ] );
+      ( "invalid confidence",
+        `Assoc
+          (("confidence", `String "hihg") :: valid_record_fields unique) );
+      ( "non-string tag",
+        `Assoc
+          (("tags", `List [`String "ok"; `Int 1])
+           :: valid_record_fields unique) );
+      ( "negative cycle_start",
+        `Assoc
+          (("cycle_start", `Int (-1)) :: valid_record_fields unique) );
+      ( "reversed cycle range",
+        `Assoc
+          (("cycle_start", `Int 3)
+           :: ("cycle_end", `Int 1)
+           :: valid_record_fields unique) );
+    ]
+  in
+  List.iter
+    (fun (label, args) ->
+      ignore
+        (dispatch_error label ctx ~name:"masc_autoresearch_record_finding"
+           ~args))
+    cases;
+  let search =
+    dispatch_json ctx ~name:"masc_autoresearch_search_findings"
+      ~args:(`Assoc [("query", `String unique)])
+  in
+  check int "invalid records were not persisted" 0
+    (Yojson.Safe.Util.(member "count" search |> to_int))
+
+let test_search_dispatch_rejects_invalid_input () =
+  with_temp_base "autoresearch-knowledge-invalid-search" @@ fun base_path ->
+  let ctx = make_ctx base_path in
+  let cases =
+    [
+      ("blank query", `Assoc [("query", `String " ")]);
+      ("zero limit", `Assoc [("query", `String "x"); ("limit", `Int 0)]);
+      ("negative limit", `Assoc [("query", `String "x"); ("limit", `Int (-1))]);
+      ("too large limit", `Assoc [("query", `String "x"); ("limit", `Int 101)]);
+      ("non-numeric limit", `Assoc [("query", `String "x"); ("limit", `String "abc")]);
+      ("fractional limit", `Assoc [("query", `String "x"); ("limit", `String "1.5")]);
+    ]
+  in
+  List.iter
+    (fun (label, args) ->
+      ignore
+        (dispatch_error label ctx ~name:"masc_autoresearch_search_findings"
+           ~args))
+    cases
+
+let test_search_dispatch_limit_returns_recent_matches () =
+  with_temp_base "autoresearch-knowledge-limit" @@ fun base_path ->
+  let ctx = make_ctx base_path in
+  let unique = "limit-token-autoresearch-findings" in
+  let record id =
+    ignore
+      (Autoresearch_knowledge.record_finding ~base_path
+         ~finding:(make_finding ~id ~evidence:unique ()))
+  in
+  record "fn-limit-1";
+  record "fn-limit-2";
+  record "fn-limit-3";
+  let search =
+    dispatch_json ctx ~name:"masc_autoresearch_search_findings"
+      ~args:(`Assoc [("query", `String unique); ("limit", `String "2")])
+  in
+  let ids =
+    Yojson.Safe.Util.(
+      member "findings" search |> to_list
+      |> List.map (fun json -> member "id" json |> to_string))
+  in
+  check (list string) "most recent limited matches"
+    ["fn-limit-3"; "fn-limit-2"] ids
 
 let test_finding_serde_roundtrip () =
   let f : Autoresearch_knowledge.finding = {
@@ -158,6 +287,12 @@ let () =
       test_case "search no match" `Quick test_search_no_match;
       test_case "base path isolation" `Quick test_base_path_isolation;
       test_case "record/search dispatch" `Quick test_record_and_search_dispatch;
+      test_case "record dispatch rejects invalid input" `Quick
+        test_record_dispatch_rejects_invalid_input;
+      test_case "search dispatch rejects invalid input" `Quick
+        test_search_dispatch_rejects_invalid_input;
+      test_case "search dispatch limit returns recent matches" `Quick
+        test_search_dispatch_limit_returns_recent_matches;
     ];
     "serialization", [
       test_case "finding JSON roundtrip" `Quick test_finding_serde_roundtrip;

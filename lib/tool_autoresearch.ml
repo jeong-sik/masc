@@ -416,62 +416,151 @@ let wrap_result json =
   in
   (not is_error, s)
 
+let arg_member key = function
+  | `Assoc fields -> List.assoc_opt key fields
+  | _ -> None
+
+let parse_int_string s =
+  let trimmed = String.trim s in
+  if trimmed = "" then None else int_of_string_opt trimmed
+
+let parse_optional_int_arg key args =
+  match arg_member key args with
+  | None -> Ok None
+  | Some (`Int i) -> Ok (Some i)
+  | Some (`String s) -> (
+      match parse_int_string s with
+      | Some i -> Ok (Some i)
+      | None -> Error (Printf.sprintf "%s must be an integer" key))
+  | Some _ -> Error (Printf.sprintf "%s must be an integer" key)
+
+let parse_limit_arg args =
+  let value =
+    match parse_optional_int_arg "limit" args with
+    | Ok None -> Ok 10
+    | Ok (Some i) -> Ok i
+    | Error _ -> Error "limit must be an integer between 1 and 100"
+  in
+  match value with
+  | Error _ as e -> e
+  | Ok limit ->
+      if limit < 1 || limit > 100 then
+        Error "limit must be an integer between 1 and 100"
+      else Ok limit
+
+let parse_required_trimmed_strings keys args =
+  let rec loop acc invalid = function
+    | [] ->
+        if invalid = [] then Ok (List.rev acc)
+        else
+          Error
+            (Printf.sprintf "%s are required and must be non-empty strings"
+               (String.concat ", " keys))
+    | key :: rest -> (
+        match arg_member key args with
+        | Some (`String value) ->
+            let trimmed = String.trim value in
+            if trimmed = "" then loop acc (key :: invalid) rest
+            else loop ((key, trimmed) :: acc) invalid rest
+        | _ -> loop acc (key :: invalid) rest)
+  in
+  loop [] [] keys
+
+let parse_confidence_arg args =
+  match arg_member "confidence" args with
+  | None -> Ok Autoresearch_knowledge.Medium
+  | Some (`String value) -> (
+      match Autoresearch_knowledge.confidence_of_string_opt value with
+      | Some confidence -> Ok confidence
+      | None -> Error "confidence must be one of: high, medium, low")
+  | Some _ -> Error "confidence must be one of: high, medium, low"
+
+let parse_tags_arg args =
+  match arg_member "tags" args with
+  | None -> Ok []
+  | Some (`List items) ->
+      let rec loop acc = function
+        | [] -> Ok (List.rev acc)
+        | `String tag :: rest -> loop (tag :: acc) rest
+        | _ -> Error "tags must be an array of strings"
+      in
+      loop [] items
+  | Some _ -> Error "tags must be an array of strings"
+
+let parse_cycle_range_arg args =
+  match parse_optional_int_arg "cycle_start" args with
+  | Error msg -> Error msg
+  | Ok cycle_start -> (
+      match parse_optional_int_arg "cycle_end" args with
+      | Error msg -> Error msg
+      | Ok cycle_end -> (
+          match cycle_start, cycle_end with
+          | Some a, _ when a < 0 -> Error "cycle_start must be >= 0"
+          | _, Some b when b < 0 -> Error "cycle_end must be >= 0"
+          | Some a, Some b when a > b ->
+              Error "cycle_start must be <= cycle_end"
+          | Some a, Some b -> Ok (Some (a, b))
+          | Some a, None -> Ok (Some (a, a))
+          | None, Some b -> Ok (Some (b, b))
+          | None, None -> Ok None))
+
 (** Handle record_finding — persist a structured research finding. *)
 let handle_record_finding (ctx : context) args =
   let keeper_name = match ctx.agent_name with Some n -> n | None -> "unknown" in
-  let goal = Safe_ops.json_string ~default:"" "goal" args in
-  let hypothesis = Safe_ops.json_string ~default:"" "hypothesis" args in
-  let evidence = Safe_ops.json_string ~default:"" "evidence" args in
-  let conclusion = Safe_ops.json_string ~default:"" "conclusion" args in
-  if goal = "" || hypothesis = "" || evidence = "" || conclusion = "" then
-    `Assoc [("error", `String "goal, hypothesis, evidence, conclusion are required")]
-  else
-    let loop_id = Safe_ops.json_string ~default:"" "loop_id" args in
-    let confidence = Safe_ops.json_string ~default:"medium" "confidence" args in
-    let tags = match Yojson.Safe.Util.member "tags" args with
-      | `List items -> List.filter_map Yojson.Safe.Util.to_string_option items
-      | _ -> []
-    in
-    let cycle_start = Safe_ops.json_int_opt "cycle_start" args in
-    let cycle_end = Safe_ops.json_int_opt "cycle_end" args in
-    let cycle_range = match cycle_start, cycle_end with
-      | Some a, Some b -> Some (a, b)
-      | Some a, None -> Some (a, a)  (* single cycle *)
-      | None, Some b -> Some (b, b)
-      | None, None -> None
-    in
-    let finding : Autoresearch_knowledge.finding = {
-      id = Autoresearch_knowledge.generate_finding_id ();
-      loop_id;
-      keeper_name;
-      goal;
-      hypothesis;
-      evidence;
-      conclusion;
-      confidence = Autoresearch_knowledge.confidence_of_string confidence;
-      tags;
-      related_findings = [];
-      cycle_range;
-      timestamp = Unix.gettimeofday ();
-    } in
-    Autoresearch_knowledge.record_finding ~base_path:ctx.base_path ~finding
+  match
+    parse_required_trimmed_strings
+      [ "goal"; "hypothesis"; "evidence"; "conclusion" ]
+      args
+  with
+  | Error msg -> `Assoc [ ("error", `String msg) ]
+  | Ok required -> (
+      match
+        parse_confidence_arg args, parse_tags_arg args, parse_cycle_range_arg args
+      with
+      | Error msg, _, _ | _, Error msg, _ | _, _, Error msg ->
+          `Assoc [ ("error", `String msg) ]
+      | Ok confidence, Ok tags, Ok cycle_range ->
+          let required_value key = List.assoc key required in
+          let loop_id =
+            match arg_member "loop_id" args with
+            | Some (`String value) -> String.trim value
+            | _ -> ""
+          in
+          let finding : Autoresearch_knowledge.finding = {
+            id = Autoresearch_knowledge.generate_finding_id ();
+            loop_id;
+            keeper_name;
+            goal = required_value "goal";
+            hypothesis = required_value "hypothesis";
+            evidence = required_value "evidence";
+            conclusion = required_value "conclusion";
+            confidence;
+            tags;
+            related_findings = [];
+            cycle_range;
+            timestamp = Unix.gettimeofday ();
+          } in
+          Autoresearch_knowledge.record_finding ~base_path:ctx.base_path ~finding)
 
 (** Handle search_findings — search previous research findings by keyword. *)
 let handle_search_findings (ctx : context) args =
-  let query = Safe_ops.json_string ~default:"" "query" args in
+  let query = Safe_ops.json_string ~default:"" "query" args |> String.trim in
   if query = "" then
     `Assoc [("error", `String "query is required")]
   else
-    let limit = Safe_ops.json_int ~default:10 "limit" args in
-    let findings =
-      Autoresearch_knowledge.search_findings ~base_path:ctx.base_path
-        ~query ~limit ()
-    in
-    `Assoc [
-      ("ok", `Bool true);
-      ("count", `Int (List.length findings));
-      ("findings", `List (List.map Autoresearch_knowledge.finding_to_yojson findings));
-    ]
+    match parse_limit_arg args with
+    | Error msg -> `Assoc [("error", `String msg)]
+    | Ok limit ->
+        let findings =
+          Autoresearch_knowledge.search_findings ~base_path:ctx.base_path
+            ~query ~limit ()
+        in
+        `Assoc [
+          ("ok", `Bool true);
+          ("count", `Int (List.length findings));
+          ("findings",
+           `List (List.map Autoresearch_knowledge.finding_to_yojson findings));
+        ]
 
 (** Dispatch an autoresearch tool call (standard MCP pattern). *)
 let dispatch (ctx : context) ~name ~args : tool_result option =

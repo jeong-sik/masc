@@ -372,6 +372,21 @@ let metric_llm_provider_request_latency =
 (* Domain-specific counters not yet constant-ised. *)
 let metric_anti_rationalization_fallback =
   "masc_anti_rationalization_fallback_total"
+(* #10113: per-pattern + per-decision counter for the gate 2
+   excuse substring detector.  [decision] distinguishes the
+   three reachable outcomes:
+   - [advisory_to_llm]: pattern detected, default mode → LLM evaluates
+     with the pattern as a heuristic hint;
+   - [terminal_reject]: pattern detected,
+     [MASC_ANTI_RATIONALIZATION_GATE2_FAIL_CLOSED=true] →
+     historical local reject (operator opt-in);
+   - [advisory_safety_net_reject]: pattern detected, advisory
+     mode, but the LLM evaluator was unavailable so the
+     pattern was upgraded to a Reject (LLM-down safety net).
+   Lets the operator measure false-positive vs true-positive
+   ratio per pattern across deployments without grepping logs. *)
+let metric_anti_rationalization_excuse_pattern =
+  "masc_anti_rationalization_excuse_pattern_total"
 let metric_board_truncated_posts = "masc_board_truncated_posts_total"
 let metric_cascade_strategy_decisions = "masc_cascade_strategy_decisions_total"
 let metric_cascade_capacity_events = "masc_cascade_capacity_events_total"
@@ -549,6 +564,11 @@ let init () =
     Counter;
   add metric_anti_rationalization_fallback
     "Total anti-rationalization fallbacks fired (verifier LLM unavailable), labeled by mode and cascade"
+    Counter;
+  add metric_anti_rationalization_excuse_pattern
+    "Total anti-rationalization excuse pattern detections at gate 2, \
+     labeled by pattern and decision (advisory_to_llm | terminal_reject \
+     | advisory_safety_net_reject) — #10113"
     Counter;
   add metric_agent_heartbeat_age_seconds
     "Maximum observed heartbeat age across active agents (seconds)"

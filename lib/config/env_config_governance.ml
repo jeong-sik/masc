@@ -237,6 +237,28 @@ module AntiRationalization = struct
   let fail_mode =
     fail_mode_of_string
       (get_string ~default:"open" "MASC_ANTI_RATIONALIZATION_FAIL_MODE")
+
+  (* #10113: gate 2 (substring excuse pattern) historically
+     issued a terminal Reject before the LLM evaluator ever
+     saw the notes.  Substring matching has no word-boundary
+     or context awareness, so legitimate notes that mention
+     "filed a follow-up issue" or "fixed primary path; pre-
+     existing issue #1234 tracked separately" were rejected
+     and keepers learned to sanitize vocabulary instead of
+     describing the work honestly — the opposite of the
+     gate's intent.
+
+     Default after #10113 is [false]: the substring
+     detection becomes an advisory hint that travels into
+     the LLM evaluator prompt, and the LLM makes the final
+     decision with full context.  Operators who explicitly
+     want a local fail-closed safety net (e.g. running
+     without a reliable LLM evaluator) can flip this to
+     [true] to restore the terminal-reject behaviour.
+     Independent of [fail_mode] which only governs the
+     LLM-unavailable branch at gate 3. *)
+  let gate2_fail_closed =
+    get_bool ~default:false "MASC_ANTI_RATIONALIZATION_GATE2_FAIL_CLOSED"
 end
 
 (** {1 Endpoint Configuration} *)

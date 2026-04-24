@@ -1354,8 +1354,17 @@ let parse_keeper_state
   let last_current_intention =
     cap_loaded (Safe_ops.json_string ~default:"" "last_current_intention" json)
   in
+  (* #9933: blocker may carry a structured [masc_oas_error] JSON
+     payload. cap_loaded (narrative budget = 200 chars) would slice
+     the JSON mid-key and lose diagnostic fields (budget_sec,
+     keeper_turn_timeout_sec, estimated_input_tokens, source).
+     cap_blocker preserves structured payloads up to
+     masc_oas_error_max_chars and falls through to the narrative
+     budget for plain text. Symmetric with the write side in
+     Keeper_social_model_types.cap_social_state. *)
   let last_blocker =
-    cap_loaded (Safe_ops.json_string ~default:"" "last_blocker" json)
+    Keeper_social_model_types.cap_blocker
+      (Safe_ops.json_string ~default:"" "last_blocker" json)
   in
   let last_blocker_class =
     match Safe_ops.json_string_opt "last_blocker_class" json with

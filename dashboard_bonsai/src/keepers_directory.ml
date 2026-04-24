@@ -1120,14 +1120,14 @@ let view
   match rows with
   | [] ->
     Node.div
-      ~attrs:[ Style.quiet ]
+      ~attrs:[ Style.quiet; Attr.role "status"; Attr.arialabel "Directory loading" ]
       [ Node.text
           "runtime/mission snapshot이 아직 조용합니다. keepers summary만 먼저 올라왔을 가능성이 있습니다."
       ]
   | _ ->
     let selected = selected_row rows selected_name in
     Node.div
-      ~attrs:[ Style.directory; Attr.role "grid" ]
+      ~attrs:[ Style.directory; Attr.role "grid"; Attr.arialabel "Keepers directory" ]
       ([ Node.div
            ~attrs:[ Style.head; Attr.role "row" ]
            [ Node.div ~attrs:[ Attr.role "columnheader" ] [ Node.text "Sigil" ]
@@ -1355,8 +1355,8 @@ let note_section row =
     ; (match notes with
        | [] ->
          Node.div
-           ~attrs:[ Style.quiet ]
-           [ Node.text "trust/note/current_work evidence가 아직 없습니다." ]
+           ~attrs:[ Style.quiet; Attr.role "status"; Attr.arialabel "No keeper notes" ]
+           [ Node.span ~attrs:[ Attr.create "lang" "ko" ] [ Node.text "trust/note/current_work evidence가 아직 없습니다." ] ]
        | entries ->
          Node.div
            ~attrs:[ Style.list ]
@@ -1454,8 +1454,8 @@ let preview_section row =
     Node.div
       [ Shell_view.aside_title "Preview"
       ; Node.div
-          ~attrs:[ Style.quiet ]
-          [ Node.text "agent brief preview가 아직 없습니다." ]
+          ~attrs:[ Style.quiet; Attr.role "status"; Attr.arialabel "No brief preview" ]
+          [ Node.span ~attrs:[ Attr.create "lang" "ko" ] [ Node.text "agent brief preview가 아직 없습니다." ] ]
       ]
   else
     Node.div
@@ -1484,8 +1484,8 @@ let aside
       ~attrs:[ Shell_view.Style.aside ]
       [ Shell_view.aside_title ~right:"fleet quiet" "Focus"
       ; Node.div
-          ~attrs:[ Style.quiet ]
-          [ Node.text "선택 가능한 directory row가 아직 없습니다." ]
+          ~attrs:[ Style.quiet; Attr.role "status"; Attr.arialabel "No directory row selected" ]
+          [ Node.span ~attrs:[ Attr.create "lang" "ko" ] [ Node.text "선택 가능한 directory row가 아직 없습니다." ] ]
       ]
   | Some row ->
     Node.div

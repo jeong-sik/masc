@@ -375,7 +375,7 @@ let rec view_node ~(depth : int) (n : Goals_types.node) : Node.t =
     else Node.h3 ~attrs:[ Style.goal_title ] [ Node.text (truncate ~max_len:60 n.title) ]
   in
   Node.div
-    ~attrs:(Style.goal :: Attr.role "treeitem" :: Attr.arialabel n.title :: indent_attr)
+    ~attrs:(Style.goal :: Attr.role "listitem" :: Attr.arialabel n.title :: indent_attr)
     (List.concat
        [ [ Node.div
              ~attrs:[ Style.goal_head ]
@@ -387,7 +387,7 @@ let rec view_node ~(depth : int) (n : Goals_types.node) : Node.t =
                  ~attrs:[ Style.conv_bar_wrap ]
                  [ Node.text (Printf.sprintf "%d%%" n.convergence_pct)
                  ; Node.div
-                     ~attrs:[ Style.conv_bar; Attr.role "progressbar"
+                     ~attrs:[ Style.conv_bar; Attr.role "progressbar"; Attr.arialabel "Goal convergence"
                             ; Attr.create "aria-valuenow" (Int.to_string n.convergence_pct)
                             ; Attr.create "aria-valuemin" "0"
                             ; Attr.create "aria-valuemax" "100" ]
@@ -473,11 +473,11 @@ let render ~(shell : Overview_types.response) (r : Goals_types.response) : Node.
     ; (match r.tree with
        | [] ->
          Node.div
-           ~attrs:[ Style.quiet ]
+           ~attrs:[ Style.quiet; Attr.role "status"; Attr.arialabel "No goals" ]
            [ Node.text "goal tree is empty." ]
        | nodes ->
          Node.div
-           ~attrs:[ Style.tree; Attr.role "tree"; Attr.arialabel "Goal tree" ]
+           ~attrs:[ Style.tree; Attr.role "list"; Attr.arialabel "Goal tree" ]
            (List.map nodes ~f:(view_node ~depth:0)))
     ]
 ;;

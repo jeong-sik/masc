@@ -157,7 +157,7 @@ let view_slot ~(state : state) ~sigil ~name ~state_label ~when_ =
         [ Node.span ~attrs:[ Style.name ] [ Node.text name ]
         ; Node.div
             ~attrs:[ Style.state ]
-            [ Node.span ~attrs:[ Style.dot; dot_cls ] []
+            [ Node.span ~attrs:[ Style.dot; dot_cls; Attr.create "aria-hidden" "true" ] []
             ; Node.text state_label
             ]
         ]
@@ -204,5 +204,5 @@ let view ?(keepers : Keepers_types.response = Keepers_types.fixture) () =
     | [] -> view_static ()
     | live -> List.map live ~f:view_slot_of_keeper
   in
-  Node.div ~attrs:[ Style.roster; Attr.role "list" ] slots
+  Node.div ~attrs:[ Style.roster; Attr.role "list"; Attr.arialabel "Keeper slots" ] slots
 ;;

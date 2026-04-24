@@ -1333,8 +1333,8 @@ let sigil_char source =
 let view_entry ~is_first (e : Logs_types.entry) =
   let row_attrs =
     match row_tint e.normalized_level with
-    | None -> [ Style.row; Attr.role "listitem" ]
-    | Some tint -> [ Style.row; tint; Attr.role "listitem" ]
+    | None -> [ Style.row ]
+    | Some tint -> [ Style.row; tint ]
   in
   let sigil_attrs =
     match sigil_class e.normalized_level with
@@ -1628,7 +1628,7 @@ let render_response
     | [] ->
       Node.div
         ~attrs:[ Style.empty ]
-        [ Node.text "저택은 조용하다. 아무도 아직 말하지 않았다."
+        [ Node.span ~attrs:[ Attr.create "lang" "ko" ] [ Node.text "저택은 조용하다. 아무도 아직 말하지 않았다." ]
         ; Node.span
             ~attrs:[ Style.empty_attr ]
             [ Node.text "log ring · empty" ]
@@ -1663,7 +1663,7 @@ let render_response
              ]
            in
            let tail =
-             [ Node.span ~attrs:[ Style.crumbs_cur ] [ Node.text "저널" ]
+             [ Node.span ~attrs:[ Style.crumbs_cur ] [ Node.span ~attrs:[ Attr.create "lang" "ko" ] [ Node.text "저널" ] ]
              ]
            in
            head @ runtime_seg @ tail)
@@ -1704,7 +1704,7 @@ let render_response
              [ Node.text label ]
          in
          Node.div
-           ~attrs:[ Style.chip_group ]
+           ~attrs:[ Style.chip_group; Attr.role "group"; Attr.arialabel "Log level filter" ]
            [ filter_chip ~level:"debug" ~label:"debug+"
            ; filter_chip ~level:"info" ~label:"info+"
            ; filter_chip ~level:"warn" ~label:"warn+"
@@ -2015,7 +2015,7 @@ let render_response
             ; Node.div ~attrs:[ Style.evrow_mk ] []
             ; Node.div
                 ~attrs:[ Style.evrow_b ]
-                [ Node.text "조용하다 · 경고 없음" ]
+                [ Node.span ~attrs:[ Attr.create "lang" "ko" ] [ Node.text "조용하다 · 경고 없음" ] ]
             ]
         ]
     | rows -> Node.div ~attrs:[ Style.evs ] (List.map rows ~f:ev_of_entry)
@@ -2149,7 +2149,7 @@ let render_response
         [ Node.div
             ~attrs:[ Style.header_lead ]
             [ Node.p ~attrs:[ Style.eyebrow ] [ Node.text "log ring · in-memory" ]
-            ; Node.h1
+            ; Node.h2
                 ~attrs:[ Style.title ]
                 [ Node.span ~attrs:[ Style.versal ] [ Node.text "J" ]
                 ; Node.span ~attrs:[ Style.title_rest ] [ Node.text "ournal" ]

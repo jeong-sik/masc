@@ -634,7 +634,7 @@ type tone =
 let label (route : Route.t) = Route.label route
 
 let section text =
-  Node.div ~attrs:[ Style.nav_section ] [ Node.text text ]
+  Node.div ~attrs:[ Style.nav_section; Attr.create "aria-hidden" "true" ] [ Node.text text ]
 ;;
 
 let route_tail = function
@@ -784,7 +784,7 @@ let short_base path =
 ;;
 
 let aside_title ?right text =
-  Node.h4
+  Node.h2
     ~attrs:[ Style.aside_title ]
     ([ Node.text text ]
      @

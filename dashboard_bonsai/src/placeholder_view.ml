@@ -217,7 +217,7 @@ let blueprint_of_route : Route.t -> blueprint = function
 let panel ~title ~text ~code =
   Node.div
     ~attrs:[ Style.panel; Attr.role "listitem"; Attr.arialabel title ]
-    [ Node.h4 ~attrs:[ Style.panel_title ] [ Node.text title ]
+    [ Node.h2 ~attrs:[ Style.panel_title ] [ Node.text title ]
     ; Node.p ~attrs:[ Style.panel_text ] [ Node.text text ]
     ; Node.div ~attrs:[ Style.panel_code ] [ Node.text code ]
     ]
@@ -243,7 +243,7 @@ let component ~(route : Route.t) (_graph @ local) =
           ]
       ; Sec.view ~title:"operator contract" ~sub:"target · measure · next" ()
       ; Node.div
-          ~attrs:[ Style.grid; Attr.role "list" ]
+          ~attrs:[ Style.grid; Attr.role "list"; Attr.arialabel "Operator contract panels" ]
           [ panel ~title:"measure" ~text:bp.measure ~code:"what must stay visible"
           ; panel ~title:"next" ~text:bp.next_step ~code:bp.endpoint
           ; panel

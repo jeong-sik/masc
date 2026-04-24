@@ -185,9 +185,11 @@ let render
         ]
       else
         [ Node.div
-            ~attrs:[ Style.quiet ]
-            [ Node.text
-                "keepers summary endpoint is quiet — directory snapshot만 먼저 올라와 있습니다."
+            ~attrs:[ Style.quiet; Attr.role "status"; Attr.arialabel "No live keepers" ]
+            [ Node.span ~attrs:[ Attr.create "lang" "ko" ]
+                [ Node.text
+                    "keepers summary endpoint is quiet — directory snapshot만 먼저 올라와 있습니다."
+                ]
             ]
         ]
   in

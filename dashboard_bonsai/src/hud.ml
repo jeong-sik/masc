@@ -115,7 +115,7 @@ let cell ?(v_class : v_class = `Neutral) ~k ~v () =
     | Some c -> [ Style.v; c ]
   in
   Node.div
-    ~attrs:[ Style.cell ]
+    ~attrs:[ Style.cell; Attr.arialabel (k ^ ": " ^ v) ]
     [ Node.div ~attrs:[ Style.k ] [ Node.text k ]
     ; Node.div ~attrs:v_attrs [ Node.text v ]
     ]

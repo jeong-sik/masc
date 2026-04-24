@@ -357,11 +357,11 @@ let render ~(shell : Overview_types.response) (r : Archive_runs_types.response) 
     ; (match r.loops with
        | [] ->
          Node.div
-           ~attrs:[ Style.quiet ]
+           ~attrs:[ Style.quiet; Attr.role "status"; Attr.arialabel "No archive runs" ]
            [ Node.text "no runs recorded yet." ]
        | loops ->
          Node.div
-           ~attrs:[ Style.loop_list; Attr.role "list" ]
+           ~attrs:[ Style.loop_list; Attr.role "list"; Attr.arialabel "Archive runs" ]
            (List.map loops ~f:view_loop))
     ]
 ;;

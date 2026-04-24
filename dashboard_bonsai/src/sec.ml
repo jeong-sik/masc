@@ -60,7 +60,7 @@ stylesheet
 let view ?(sub : string option) ?(right : string option) ~(title : string) () : Node.t =
   let nodes : Node.t list =
     List.concat
-      [ [ Node.h3 ~attrs:[ Style.sec_title ] [ Node.text title ] ]
+      [ [ Node.h2 ~attrs:[ Style.sec_title ] [ Node.text title ] ]
       ; (match sub with
          | Some s when String.length s > 0 ->
            [ Node.span ~attrs:[ Style.sec_sub ] [ Node.text s ] ]

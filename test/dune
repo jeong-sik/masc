@@ -406,6 +406,7 @@
         test_eio_mutex_concurrency
         test_a2a_e2e
         test_board_dispatch
+        test_board_fixture_detector
 
         test_task_dispatch
         test_drift_guard_core
@@ -575,6 +576,7 @@
         test_eio_mutex_concurrency
         test_a2a_e2e
         test_board_dispatch
+        test_board_fixture_detector
 
         test_task_dispatch
         test_drift_guard_core

@@ -71,6 +71,7 @@
    dashboard_governance_metrics
    dashboard_operator_judge
    judge_diagnostics
+   judge_json_recovery
    dashboard_safe_autonomy
    dashboard_surface_readiness
    dashboard_execution

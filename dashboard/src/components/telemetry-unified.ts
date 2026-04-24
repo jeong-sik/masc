@@ -1,7 +1,7 @@
 // Telemetry Unified — MASC runtime diagnosis view.
 
 import { html } from 'htm/preact'
-import { useEffect, useRef } from 'preact/hooks'
+import { useEffect, useMemo, useRef } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
 import {
   fetchDashboardShell,
@@ -458,7 +458,10 @@ function EntryRow({ entry }: { entry: TelemetryEntry }) {
   const scopeBadges = telemetryScopeBadges(entry)
 
   return html`
-    <div class="border-b border-[var(--card-border)] hover:bg-[var(--bg-panel-hover)] transition-colors">
+    <div
+      class="border-b border-[var(--card-border)] hover:bg-[var(--bg-panel-hover)] transition-colors"
+      style="content-visibility:auto;contain-intrinsic-size:36px"
+    >
       <button
         type="button"
         class="w-full flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer select-none text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
@@ -507,7 +510,10 @@ function GroupRow({ item }: { item: Extract<TelemetryDisplayItem, { kind: 'group
   const contentId = `telemetry-group-${item.key.replace(/[^a-zA-Z0-9_-]/g, '-')}`
 
   return html`
-    <div class="border-b border-[var(--card-border)] bg-[rgba(255,255,255,0.015)] hover:bg-[var(--bg-panel-hover)] transition-colors">
+    <div
+      class="border-b border-[var(--card-border)] bg-[rgba(255,255,255,0.015)] hover:bg-[var(--bg-panel-hover)] transition-colors"
+      style="content-visibility:auto;contain-intrinsic-size:36px"
+    >
       <button
         type="button"
         class="w-full flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer select-none text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
@@ -566,6 +572,7 @@ export function TelemetryUnified() {
   const params = route.value.params
   const latestRequestId = useRef(0)
   const activeController = useRef<AbortController | null>(null)
+  const initialLoadDone = useRef(false)
   const autoRefreshLoadRef = useRef<() => Promise<void>>(async () => undefined)
   const state = useSignal<TelemetryState>({
     entries: [],
@@ -680,7 +687,17 @@ export function TelemetryUnified() {
   autoRefreshLoadRef.current = load
 
   useEffect(() => {
-    void load()
+    if (!initialLoadDone.current) {
+      initialLoadDone.current = true
+      void autoRefreshLoadRef.current()
+      return
+    }
+    const timeoutId = window.setTimeout(() => {
+      void autoRefreshLoadRef.current()
+    }, 250)
+    return () => {
+      window.clearTimeout(timeoutId)
+    }
   }, [
     sourceFilter.value,
     keeperFilter.value,
@@ -700,10 +717,14 @@ export function TelemetryUnified() {
   }, [])
 
   const { entries, summary, totalEntries, store, loading, error } = state.value
-  const allDisplayItems = buildTelemetryDisplayItems(entries)
-  const displayItems = filterTelemetryDisplayItems(allDisplayItems, entrySearch.value)
-  const isFilteringEntries = entrySearch.value.trim() !== ''
-  const condensed = condensedStats(displayItems)
+  const entrySearchQuery = entrySearch.value
+  const allDisplayItems = useMemo(() => buildTelemetryDisplayItems(entries), [entries])
+  const displayItems = useMemo(
+    () => filterTelemetryDisplayItems(allDisplayItems, entrySearchQuery),
+    [allDisplayItems, entrySearchQuery],
+  )
+  const isFilteringEntries = entrySearchQuery.trim() !== ''
+  const condensed = useMemo(() => condensedStats(displayItems), [displayItems])
 
   return html`
     <div class="flex flex-col gap-4">

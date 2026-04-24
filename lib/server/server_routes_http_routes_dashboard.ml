@@ -61,6 +61,10 @@ let available_cascade_profiles () : string list =
 let invalid_cascade_profiles () : (string * string list) list =
   (cascade_profile_gate ()).invalid_profiles
 
+let telemetry_summary_cache_key ~base_path ~masc_root =
+  let digest = Digest.string (base_path ^ "\000" ^ masc_root) |> Digest.to_hex in
+  "dashboard:telemetry_summary:" ^ digest
+
 let sync_keeper_cascade_meta ~(config : Coord.config) ~(name : string)
     ~(cascade_name : string) : (bool, string) result =
   let updated_at = Keeper_types.now_iso () in
@@ -847,7 +851,11 @@ let rec add_routes ~sw ~clock router =
          let config = state.Mcp_server.room_config in
          let base_path = config.base_path in
          let masc_root = Coord.masc_root_dir config in
-         let json = Telemetry_unified.summary_json ~base_path ~masc_root () in
+         let cache_key = telemetry_summary_cache_key ~base_path ~masc_root in
+         let json =
+           Dashboard_cache.get_or_compute cache_key ~ttl:30.0 (fun () ->
+               Telemetry_unified.summary_json ~base_path ~masc_root ())
+         in
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd
        ) request reqd)

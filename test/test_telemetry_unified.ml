@@ -52,6 +52,20 @@ let append_jsonl_entry_for_ts dir ts json =
   let path = jsonl_path_for_unix_seconds dir ts in
   Fs_compat.append_file path (Yojson.Safe.to_string json ^ "\n")
 
+let json_int_field name = function
+  | `Assoc fields -> (
+      match List.assoc_opt name fields with
+      | Some (`Int value) -> value
+      | _ -> -1)
+  | _ -> -1
+
+let json_string_field name = function
+  | `Assoc fields -> (
+      match List.assoc_opt name fields with
+      | Some (`String value) -> value
+      | _ -> "")
+  | _ -> ""
+
 (* ── Source roundtrip ────────────────────────────── *)
 
 let test_source_roundtrip () =
@@ -183,6 +197,77 @@ let test_keeper_metrics_per_keeper () =
       ~sources:[Telemetry_unified.Keeper_metric]
       ~keeper_name:"cheolsu" () in
   Alcotest.(check int) "one cheolsu entry" 1 (List.length cheolsu_only)
+
+let test_keeper_metrics_fast_path_preserves_noisy_keeper_top_n () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "telem_keeper_fast_top" in
+  let hot_dir = Filename.concat dir ".masc/keepers/hot/metrics" in
+  let old_dir = Filename.concat dir ".masc/keepers/old/metrics" in
+  Fs_compat.mkdir_p hot_dir;
+  Fs_compat.mkdir_p old_dir;
+  write_jsonl hot_dir
+    (List.init 120 (fun i ->
+         `Assoc
+           [
+             ("ts_unix", `Float (1_000.0 +. Float.of_int i));
+             ("name", `String "hot");
+             ("i", `Int i);
+           ]));
+  write_jsonl old_dir
+    (List.init 50 (fun i ->
+         `Assoc
+           [
+             ("ts_unix", `Float (Float.of_int i));
+             ("name", `String "old");
+             ("i", `Int i);
+           ]));
+  let result =
+    Telemetry_unified.read_unified_result ~base_path:dir
+      ~masc_root:(masc_root dir) ~sources:[ Telemetry_unified.Keeper_metric ]
+      ~n:100 ()
+  in
+  Alcotest.(check int) "limited result" 100 (List.length result.entries);
+  Alcotest.(check int) "sentinel total" 101 result.total_matching_entries;
+  Alcotest.(check bool) "truncated" true result.truncated;
+  let indices = List.map (json_int_field "i") result.entries in
+  Alcotest.(check int) "newest hot entry first" 119 (List.hd indices);
+  Alcotest.(check int) "oldest returned hot entry last" 20 (List.nth indices 99);
+  Alcotest.(check (list string)) "only hot top entries returned"
+    (List.init 100 (fun _ -> "hot"))
+    (List.map (json_string_field "name") result.entries)
+
+let test_keeper_metrics_fast_path_sets_truncated_with_sentinel () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "telem_keeper_fast_sentinel" in
+  let write_keeper name ts =
+    let metrics_dir = Filename.concat dir (".masc/keepers/" ^ name ^ "/metrics") in
+    Fs_compat.mkdir_p metrics_dir;
+    write_jsonl metrics_dir
+      [
+        `Assoc
+          [
+            ("ts_unix", `Float ts);
+            ("name", `String name);
+            ("channel", `String "turn");
+          ];
+      ]
+  in
+  write_keeper "alpha" 3_000.0;
+  write_keeper "beta" 2_000.0;
+  write_keeper "gamma" 1_000.0;
+  let result =
+    Telemetry_unified.read_unified_result ~base_path:dir
+      ~masc_root:(masc_root dir) ~sources:[ Telemetry_unified.Keeper_metric ]
+      ~n:2 ()
+  in
+  Alcotest.(check int) "returned limit" 2 (List.length result.entries);
+  Alcotest.(check int) "sentinel total" 3 result.total_matching_entries;
+  Alcotest.(check bool) "truncated" true result.truncated;
+  Alcotest.(check (list string)) "newest keepers"
+    [ "alpha"; "beta" ]
+    (List.map (json_string_field "name") result.entries)
 
 (* ── Sorting (newest first) ──────────────────────── *)
 
@@ -455,6 +540,10 @@ let () =
           Alcotest.test_case "oas events + scope filter" `Quick
             test_oas_event_source_and_scope_filter;
           Alcotest.test_case "keeper metrics" `Quick test_keeper_metrics_per_keeper;
+          Alcotest.test_case "keeper metrics fast path keeps noisy top n" `Quick
+            test_keeper_metrics_fast_path_preserves_noisy_keeper_top_n;
+          Alcotest.test_case "keeper metrics fast path sentinel" `Quick
+            test_keeper_metrics_fast_path_sets_truncated_with_sentinel;
           Alcotest.test_case "sorted newest first" `Quick test_sorted_newest_first;
           Alcotest.test_case "n limits output" `Quick test_n_limits_output;
           Alcotest.test_case "time window reports total before limit" `Quick

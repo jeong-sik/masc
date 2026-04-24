@@ -224,6 +224,11 @@ let transport_entries =
     entry ~default:"8936" "MASC_GRPC_PORT" "gRPC server port";
     entry ~default:"true" "MASC_GRPC_ENABLED" "Enable gRPC transport";
     entry ~default:"(derived)" "MASC_GRPC_TARGET" "gRPC client target address";
+    entry ~default:"48" "MASC_GRPC_STREAM_MAX_BUFFER"
+      "Per-subscriber outbound buffer drop threshold.  When the stream has \
+       this many unsent events queued, new events are dropped and \
+       masc_grpc_events_dropped_total advances.  Stream capacity is 64, \
+       default leaves headroom.";
     entry ~default:"8937" "MASC_WS_PORT" "WebSocket server port";
     entry ~default:"true" "MASC_WS_ENABLED" "Enable WebSocket transport";
     entry ~default:"true" "MASC_WEBRTC_ENABLED" "Enable WebRTC transport";

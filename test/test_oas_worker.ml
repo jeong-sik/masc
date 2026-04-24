@@ -2082,6 +2082,59 @@ let test_kimi_cli_classify_cli_error_redacts_resumable_session_detail () =
       Alcotest.(check bool) "raw session id removed" false
         (contains_substring ~needle:"ff37febe-2adb-4ac6-9dc6-cae23e672fbc" reason)
   | _ -> Alcotest.fail "expected resumable session to map to AcceptRejected"
+
+let test_kimi_cli_classify_cli_error_treats_exit_1_resume_hint_as_resumable () =
+  let raw_message =
+    "kimi exited with code 1: \nTo resume this session: kimi -r 5de0f199-6bd7-4509-bfa6-3308e0ebd97f"
+  in
+  Alcotest.(check bool) "exit 1 resume hint is resumable" true
+    (Oas_worker_exec.Kimi_cli_transport_local.text_looks_like_resumable_session
+       raw_message);
+  Alcotest.(check (option int)) "exit code preserved" (Some 1)
+    (Oas_worker_exec.Kimi_cli_transport_local.resumable_session_exit_code_of_text
+       raw_message);
+  match
+    Oas_worker_exec.Kimi_cli_transport_local.classify_cli_error
+      (Error
+         (Llm_provider.Http_client.NetworkError
+            {
+              message = raw_message;
+              kind = Llm_provider.Http_client.Unknown;
+            }))
+  with
+  | Error (Llm_provider.Http_client.AcceptRejected { reason }) ->
+      Alcotest.(check string) "canonical detail"
+        Oas_worker_exec.Kimi_cli_transport_local.resumable_session_detail
+        reason;
+      Alcotest.(check bool) "raw resume hint removed" false
+        (contains_substring ~needle:"To resume this session:" reason);
+      Alcotest.(check bool) "raw session id removed" false
+        (contains_substring ~needle:"5de0f199-6bd7-4509-bfa6-3308e0ebd97f" reason)
+  | _ -> Alcotest.fail "expected exit 1 resume hint to map to resumable session"
+
+let test_kimi_cli_classify_cli_error_keeps_exit_1_with_error_as_reject () =
+  let raw_message =
+    "kimi exited with code 1: \nAuthentication failed\nTo resume this session: kimi -r ff37febe"
+  in
+  Alcotest.(check bool) "exit 1 with real stderr is not resumable" false
+    (Oas_worker_exec.Kimi_cli_transport_local.text_looks_like_resumable_session
+       raw_message);
+  match
+    Oas_worker_exec.Kimi_cli_transport_local.classify_cli_error
+      (Error
+         (Llm_provider.Http_client.NetworkError
+            {
+              message = raw_message;
+              kind = Llm_provider.Http_client.Unknown;
+            }))
+  with
+  | Error (Llm_provider.Http_client.AcceptRejected { reason }) ->
+      Alcotest.(check bool) "reject reason preserved" true
+        (contains_substring ~needle:"kimi_cli rejected the request (exit 1)"
+           reason);
+      Alcotest.(check bool) "stderr detail preserved" true
+        (contains_substring ~needle:"Authentication failed" reason)
+  | _ -> Alcotest.fail "expected exit 1 with real stderr to stay rejected"
 let test_codex_cli_prompt_preflight_uses_pipeline_context_window_fallback () =
   let provider_cfg = make_codex_cli_provider_cfg () in
   let config =
@@ -3401,6 +3454,10 @@ let () =
         test_kimi_cli_should_log_stderr_line_filters_resume_noise;
       Alcotest.test_case "kimi exit 75 detail is redacted" `Quick
         test_kimi_cli_classify_cli_error_redacts_resumable_session_detail;
+      Alcotest.test_case "kimi exit 1 resume hint is resumable" `Quick
+        test_kimi_cli_classify_cli_error_treats_exit_1_resume_hint_as_resumable;
+      Alcotest.test_case "kimi exit 1 with stderr remains rejected" `Quick
+        test_kimi_cli_classify_cli_error_keeps_exit_1_with_error_as_reject;
       Alcotest.test_case "worker build_agent installs retry policy" `Quick
         test_worker_build_agent_uses_default_internal_retry_policy;
       Alcotest.test_case "resume config propagates retry policy" `Quick

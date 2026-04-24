@@ -736,11 +736,34 @@ module Kimi_cli_transport_local = struct
           in
           int_of_string_opt raw
 
+  let exit_payload_of_message message =
+    let prefix = "kimi exited with code " in
+    if not (starts_with message prefix) then None
+    else
+      match String.index_from_opt message (String.length prefix) ':' with
+      | None -> None
+      | Some colon ->
+          Some
+            (String.sub message (colon + 1)
+               (String.length message - colon - 1)
+             |> String.trim)
+
+  let payload_has_only_resume_hint payload =
+    payload
+    |> String.split_on_char '\n'
+    |> List.map String.trim
+    |> List.filter (fun line -> line <> "")
+    |> fun lines -> lines <> [] && List.for_all is_resume_hint_line lines
+
   let text_looks_like_resumable_session text =
     let trimmed = String.trim text in
     let has_raw_resume_hint =
       match exit_code_of_message trimmed with
       | Some 75 -> is_resume_hint_line trimmed
+      | Some 1 -> (
+          match exit_payload_of_message trimmed with
+          | Some payload -> payload_has_only_resume_hint payload
+          | None -> false)
       | _ -> false
     in
     trimmed <> ""
@@ -755,13 +778,19 @@ module Kimi_cli_transport_local = struct
 
   let resumable_session_exit_code_of_text text =
     match exit_code_of_message text with
-    | Some 75 -> Some 75
+    | Some (75 as code) -> Some code
+    | Some (1 as code) when text_looks_like_resumable_session text -> Some code
     | _ when text_looks_like_resumable_session text -> Some 75
     | _ -> None
 
   let classify_cli_error = function
     | Error (Llm_provider.Http_client.NetworkError { message; _ }) as err -> (
-        match exit_code_of_message message with
+        if text_looks_like_resumable_session message then
+          Error
+            (Llm_provider.Http_client.AcceptRejected
+               { reason = resumable_session_detail })
+        else
+          match exit_code_of_message message with
         | Some 1 ->
             Error
               (Llm_provider.Http_client.AcceptRejected

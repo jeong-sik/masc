@@ -190,7 +190,7 @@ let approval_event_timeline_event json =
               Some "retry_or_rerun" )
         | "auto_approved_rule_match" ->
             let matched_by =
-              json |> Yojson.Safe.Util.member "rule_match"
+              json |> json_member "rule_match"
               |> json_string_opt_member "matched_by"
               |> Option.value ~default:"always_rule"
             in
@@ -251,7 +251,7 @@ let transition_timeline_event json =
   | None -> None
   | Some ts_unix ->
       let operator_signal =
-        match json |> Yojson.Safe.Util.member "operator_signal" with
+        match json |> json_member "operator_signal" with
         | `Assoc fields -> Some fields
         | _ -> None
       in
@@ -264,15 +264,15 @@ let transition_timeline_event json =
           operator_signal
       in
       let prev_phase =
-        json |> Yojson.Safe.Util.member "prev_phase"
+        json |> json_member "prev_phase"
         |> json_string_opt_value
       in
       let new_phase =
-        json |> Yojson.Safe.Util.member "new_phase"
+        json |> json_member "new_phase"
         |> json_string_opt_value
       in
       let selected_event =
-        json |> Yojson.Safe.Util.member "selected_event"
+        json |> json_member "selected_event"
       in
       let event_type =
         (match json_string_opt_member "event_type" json with
@@ -324,12 +324,12 @@ let receipt_timeline_event receipt =
           |> Option.value ~default:"unknown"
         in
         let cascade_outcome =
-          receipt |> Yojson.Safe.Util.member "cascade"
+          receipt |> json_member "cascade"
           |> json_string_opt_member "outcome"
           |> Option.value ~default:"not_observed"
         in
         let error_kind =
-          match Yojson.Safe.Util.member "error" receipt with
+          match json_member "error" receipt with
           | `Assoc _ as error -> json_string_opt_member "kind" error
           | _ -> None
         in
@@ -340,7 +340,7 @@ let receipt_timeline_event receipt =
               if String.equal tool_contract_result "violated" then "bad"
               else if
                 String.equal cascade_outcome "passed_to_next_model"
-                || (receipt |> Yojson.Safe.Util.member "cascade"
+                || (receipt |> json_member "cascade"
                     |> json_bool_opt_member "fallback_applied"
                     |> Option.value ~default:false)
               then "warn"
@@ -525,7 +525,7 @@ let approval_state_json ~pending_approval_count ~latest_tool_call
     ~latest_approval_audit ~latest_receipt =
   let latest_rule_match =
     Option.bind latest_approval_audit (fun json ->
-        match Yojson.Safe.Util.member "rule_match" json with
+        match json_member "rule_match" json with
         | `Assoc _ as rule_match -> Some rule_match
         | _ -> None)
   in
@@ -537,7 +537,7 @@ let approval_state_json ~pending_approval_count ~latest_tool_call
   in
   let approval_profile =
     Option.bind latest_receipt (fun receipt ->
-        receipt |> Yojson.Safe.Util.member "approval"
+        receipt |> json_member "approval"
         |> json_string_opt_member "profile")
   in
   let state =
@@ -582,14 +582,14 @@ let execution_summary_json ~meta ~latest_receipt =
   let sandbox_kind =
     match latest_receipt with
     | Some receipt ->
-        receipt |> Yojson.Safe.Util.member "sandbox"
+        receipt |> json_member "sandbox"
         |> json_string_opt_member "kind"
     | None -> Some (Keeper_types.sandbox_profile_to_string meta.sandbox_profile)
   in
   let network_mode =
     match latest_receipt with
     | Some receipt ->
-        receipt |> Yojson.Safe.Util.member "sandbox"
+        receipt |> json_member "sandbox"
         |> json_string_opt_member "network_mode"
     | None -> Some (Keeper_types.network_mode_to_string meta.network_mode)
   in
@@ -725,7 +725,7 @@ let snapshot_json ~(config : Coord.config) ~(meta : keeper_meta) =
   in
   let selected_model =
     Option.bind latest_decision (fun json ->
-        match Yojson.Safe.Util.member "telemetry" json with
+        match json_member "telemetry" json with
         | `Assoc _ as telemetry ->
             (match json_string_opt_member "selected_model" telemetry with
              | Some _ as value -> value

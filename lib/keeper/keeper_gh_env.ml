@@ -82,30 +82,40 @@ let with_env (config : Coord.config) (gh_cmd : string) : string =
   | Some dir ->
     Printf.sprintf "GH_CONFIG_DIR=%s %s" (Filename.quote dir) gh_cmd
 
+(* RFC-0007 PR-1: compose base env for a gh/git subprocess.
+
+   Order of operations (inside-out):
+     1. Start from [Unix.environment ()].
+     2. Scrub long-lived host credentials that are consumed by MASC
+        in-process and MUST NOT cross into a keeper subprocess or
+        sandboxed container.
+     3. Prepend the non-interactive git constants so credential prompts
+        cannot hang the subprocess on a missing tty.
+     4. Strip any pre-existing [GH_CONFIG_DIR=] entry and prepend the
+        keeper-scoped value so the keeper's GH identity wins over any
+        operator config present in the process env.
+
+   See [Env_keeper_scrub] and [Env_git_noninteractive] for the
+   canonical lists and their rationale. *)
+let compose_base_with_gh_config ~dir =
+  let scrubbed = Env_keeper_scrub.filter_environment (Unix.environment ()) in
+  let with_noprompt = Env_git_noninteractive.inject_into_environment scrubbed in
+  let without_existing_gh =
+    Array.to_list with_noprompt
+    |> List.filter (fun entry ->
+         not (String.starts_with ~prefix:"GH_CONFIG_DIR=" entry))
+  in
+  let gh_config = "GH_CONFIG_DIR=" ^ dir in
+  Array.of_list (gh_config :: without_existing_gh)
+
 let process_env (config : Coord.config) : string array option =
   match config_dir config with
   | None -> None
-  | Some dir ->
-    let gh_config = "GH_CONFIG_DIR=" ^ dir in
-    let base =
-      Unix.environment ()
-      |> Array.to_list
-      |> List.filter (fun entry ->
-        not (String.starts_with ~prefix:"GH_CONFIG_DIR=" entry))
-    in
-    Some (Array.of_list (gh_config :: base))
+  | Some dir -> Some (compose_base_with_gh_config ~dir)
 
 let keeper_process_env (config : Coord.config) ~(keeper_name : string) :
     (string array option, string) result =
   keeper_config_dir config ~keeper_name
   |> Result.map (function
        | None -> None
-       | Some dir ->
-           let gh_config = "GH_CONFIG_DIR=" ^ dir in
-           let base =
-             Unix.environment ()
-             |> Array.to_list
-             |> List.filter (fun entry ->
-                  not (String.starts_with ~prefix:"GH_CONFIG_DIR=" entry))
-           in
-           Some (Array.of_list (gh_config :: base)))
+       | Some dir -> Some (compose_base_with_gh_config ~dir))

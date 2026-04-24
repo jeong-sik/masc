@@ -975,6 +975,7 @@
 ; Keeper Tool Matrix — shared case modules as a library
 (library
  (name keeper_tool_matrix_cases_lib)
+ (wrapped false)
  (modules test_keeper_tool_matrix_cases test_mcp_tool_matrix_cases)
  (libraries masc_test_deps))
 

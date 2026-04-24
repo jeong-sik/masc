@@ -1,27 +1,31 @@
-(** Non-interactive git environment — RFC-0007 rev.3 PR-1.
+(** Non-interactive git subprocess environment (RFC-0007 PR-1 / #9639 Cluster B).
 
-    Centralised constants that force git subprocesses (invoked inside
-    the keeper docker sandbox or via [Unix.execve]) to fail fast rather
-    than block on a credential prompt.
+    SSOT for the env-var pairs that must be set whenever MASC spawns [git]
+    or [gh] in a non-tty subprocess (Docker sandbox or direct [Process_eio]
+    call). Missing these constants silently hangs the subprocess on a
+    credential prompt — the container has no tty to display it, so the
+    timeout trips only after the outer wall-clock cap fires.
 
-    Evidence (2026-04-24, commit 0e408ffc1d5b34badb0cc1b9f3704a9e725fb8c6):
-    [rg -n 'GIT_ASKPASS|GIT_TERMINAL_PROMPT' lib/ test/ scripts/] returned
-    zero hits. A keeper [git push] inside docker could, in principle,
-    hang indefinitely if the RO-mounted [hosts.yml] auth path failed
-    before git fell through to a prompt. This module is the centralised
-    fix (RFC-0007 PR-1, one callsite today: [keeper_shell_docker.ml:234-245]).
-
-    Consumers MUST prefer these constants over open-coding the pairs,
-    so future callsites inherit the safety guarantee by construction. *)
+    Design reference: [GIT_NO_PROMPT_ENV] record in claude-code at
+    [src/utils/worktree.ts:199-202] and [src/utils/plugins/marketplaceManager.ts:510-512].
+    Principle P3 of RFC-0007: "Non-interactive defaults are a constant,
+    not an opinion." *)
 
 val env : (string * string) list
-(** The two canonical pairs:
-    - [("GIT_ASKPASS", "")]       — empty helper, git raises instead of prompting
-    - [("GIT_TERMINAL_PROMPT", "0")] — disables the git-core prompt fallback *)
+(** Canonical non-interactive env pairs. Must be merged into every
+    subprocess environment that may invoke git/gh without a tty. *)
+
+val env_pairs : string list
+(** Flattened [K=V] strings suitable for prepending to a [Unix.environment]
+    array. *)
+
+val docker_args : string list
+(** Flattened ["-e"; "K=V"; ...] pairs for direct [docker run] argv. *)
 
 val docker_env_args : string list
-(** [env] flattened as docker [run -e KEY=VALUE] argv tokens.
+(** Backwards-compatible alias for {!docker_args}. *)
 
-    Each pair [(k, v)] produces two tokens [\["-e"; k ^ "=" ^ v\]], matching
-    the existing inline style in [keeper_shell_docker.ml]. Callers append
-    this to their existing [-e] list. *)
+val inject_into_environment : string array -> string array
+(** Prepend {!env_pairs} to [env], stripping any pre-existing entries
+    with matching keys so the canonical value wins. Preserves the order of
+    non-matching entries. *)

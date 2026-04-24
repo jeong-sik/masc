@@ -288,6 +288,8 @@
    telemetry_unified
    tempo
    timeout_policy
+   env_git_noninteractive
+   env_keeper_scrub
    tui_decode
    tools
    tool_args

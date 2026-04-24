@@ -23,6 +23,13 @@ let tool_use_strict_cascade_name = "tool_use_strict"
     to 65,536, which can exceed the discovered provider ceiling. *)
 let min_keeper_context_tokens = 64_000
 
+(** Maximum context window (tokens) accepted for [max_context_override] on
+    keeper turn-up args (#9953).  Matches the largest published context
+    window among supported providers (Claude Opus 4.7 / Sonnet 4.6 = 1M).
+    Bumps to a 2M-class model must update this constant alongside the
+    provider registry entry. *)
+let max_keeper_context_tokens = 1_000_000
+
 (* ── Alert preview truncation lengths ─────────────────────── *)
 (* Invariant: excerpt_min < message_max < reply_max.
    Violating this makes the min/max logic in keeper_alerting.ml degenerate. *)

@@ -8,6 +8,8 @@ open Alcotest
 module Config = Masc_mcp.Config
 module Auth = Masc_mcp.Auth
 module Tool_catalog = Masc_mcp.Tool_catalog
+module Tool_help_registry = Masc_mcp.Tool_help_registry
+module Tool_shard = Masc_mcp.Tool_shard
 
 let dummy_schema name : Types.tool_schema =
   {
@@ -41,6 +43,21 @@ let test_all_tool_names_contains_pause () =
 let test_all_tool_names_contains_approval_get () =
   check bool "masc_approval_get registered" true
     (List.mem "masc_approval_get" (Config.all_tool_names ()))
+
+let test_shard_base_tools_registered_for_help () =
+  List.iter
+    (fun (tool : Types.tool_schema) ->
+      let registered =
+        Config.raw_all_tool_schemas
+        |> List.exists (fun (schema : Types.tool_schema) ->
+               String.equal schema.name tool.name)
+      in
+      check bool (tool.name ^ " in raw schemas") true registered;
+      match Tool_help_registry.find_entry Config.raw_all_tool_schemas tool.name with
+      | Some entry ->
+          check string (tool.name ^ " help name") tool.name entry.name
+      | None -> failf "%s missing from tool help registry" tool.name)
+    Tool_shard.base_tools
 
 let test_approval_get_requires_admin_permission () =
   check bool "approval_get admin-only" true
@@ -81,6 +98,8 @@ let () =
             test_all_tool_names_contains_pause;
           test_case "all_tool_names contains approval_get" `Quick
             test_all_tool_names_contains_approval_get;
+          test_case "shard base tools registered for help" `Quick
+            test_shard_base_tools_registered_for_help;
           test_case "approval get requires admin permission" `Quick
             test_approval_get_requires_admin_permission;
           test_case "removed mode tools omitted" `Quick

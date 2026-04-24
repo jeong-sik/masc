@@ -806,6 +806,10 @@ stylesheet
     color: var(--accent-brass);
     background: color-mix(in oklab, var(--accent-brass) 5%, transparent);
   }
+  .nav_link:focus-visible {
+    outline: 2px solid var(--accent-brass);
+    outline-offset: -2px;
+  }
   .nav_link_active {
     color: var(--accent-brass);
     border-left-color: var(--accent-brass);

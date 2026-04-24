@@ -164,15 +164,41 @@ let agent_of_yojson json =
             in
             Printf.sprintf "%s (last_seen=%s)" original_error last_seen_repr
           in
-          (match
-             match last_seen_raw with
-             | Some value -> normalize_agent_last_seen ~joined_at:joined_at_value value
-             | None -> joined_at_value  (* missing last_seen → bootstrap *)
-           with
+          let now_iso () =
+            `String (iso8601_of_unix_seconds (Unix.gettimeofday ()))
+          in
+          let normalized_last_seen =
+            match last_seen_raw with
+            | Some value ->
+                normalize_agent_last_seen ~joined_at:joined_at_value value
+            | None ->
+                (* Missing last_seen → bootstrap from joined_at when
+                   present, otherwise fall back to the current wall-clock
+                   time (#9751).  [last_seen] is a liveness marker, not
+                   identity-critical; a recent-but-approximate timestamp
+                   is strictly better than failing the whole record
+                   deserialisation for an optional field. *)
+                (match joined_at_value with
+                 | Some _ as v -> v
+                 | None -> Some (now_iso ()))
+          in
+          (match normalized_last_seen with
           | Some normalized_last_seen ->
-              let normalized_fields =
+              let fields_without_last_seen =
                 ("last_seen", normalized_last_seen)
                 :: List.remove_assoc "last_seen" fields
+              in
+              (* If joined_at is also unusable, inject a now() value so
+                 the generated deserialiser's required-field check passes.
+                 The agent record can always be rebuilt from a heartbeat;
+                 losing the whole entry because of a missing timestamp is
+                 strictly worse (#9751). *)
+              let normalized_fields =
+                match joined_at_value with
+                | Some _ -> fields_without_last_seen
+                | None ->
+                    ("joined_at", now_iso ())
+                    :: List.remove_assoc "joined_at" fields_without_last_seen
               in
               (match agent_of_yojson_generated (`Assoc normalized_fields) with
                | Ok _ as ok -> ok

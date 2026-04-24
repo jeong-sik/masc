@@ -37,7 +37,6 @@ let of_string_opt (raw : string) : t option =
   | "tool_rerank" -> Some Tool_rerank
   (* Legacy aliases → Big_three *)
   | "default"
-  | "keeper_unified"
   | "oas-keeper_unified"
   | "coding_first"
   | "oas-coding_first"
@@ -45,13 +44,13 @@ let of_string_opt (raw : string) : t option =
   | "sangsu" | "local_mlx_vlm_qwen36"
   | "nick0cave" | "capacity_queue_trio" | "vendor_mix_balanced"
   | "cost_tier_ladder" | "oauth_cli_rotate" | "quality_sticky_glm51"
-  | "tool_use_strict" | "resilient_breaker"
   | "underdog" | "local"
     -> Some Big_three
-  (* Phase-routing names: NOT variants.  Returning None lets
+  (* Catalog-routed names: NOT variants.  Returning None lets
      [canonicalize_with_catalog] preserve them as catalog names so
-     keeper phase-routing code (local_only, local_recovery) continues
-     to resolve cascade.json keys correctly. *)
+     keeper phase-routing and tool-routing code continues to resolve
+     cascade.json keys correctly. *)
+  | "keeper_unified" | "tool_use_strict" | "resilient_breaker"
   | "local_only" | "local_recovery" -> None
   | _ -> None
 

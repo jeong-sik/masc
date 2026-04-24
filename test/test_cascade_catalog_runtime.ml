@@ -202,14 +202,22 @@ let test_valid_catalog_skips_live_probes_at_bootstrap () =
   init_config_root config_dir;
   with_config_dir config_dir @@ fun () ->
   let shared_model = Printf.sprintf "custom:mock@%s/v1" dummy_base_url in
+  let keeper_unified_model =
+    Printf.sprintf "custom:keeper-unified@%s/v1" dummy_base_url
+  in
+  let strict_model =
+    Printf.sprintf "custom:tool-use-strict@%s/v1" dummy_base_url
+  in
   ignore
     (write_cascade_json config_dir
        (Printf.sprintf
           {|{
   "big_three_models": ["%s"],
-  "tool_rerank_models": ["%s"]
+  "keeper_unified_models": ["%s"],
+  "tool_rerank_models": ["%s"],
+  "tool_use_strict_models": ["%s"]
 }|}
-          shared_model shared_model));
+          shared_model keeper_unified_model shared_model strict_model));
   let snapshot =
     match Cascade_catalog_runtime.inspect_active () with
     | Ok (Cascade_catalog_runtime.Validated snapshot) -> snapshot
@@ -223,7 +231,7 @@ let test_valid_catalog_skips_live_probes_at_bootstrap () =
              (Cascade_catalog_runtime.rejection_to_yojson rejection))
   in
   let snapshot_json = Cascade_catalog_runtime.snapshot_to_yojson snapshot in
-  check int "profile_count" 2 (json_int_field "profile_count" snapshot_json);
+  check int "profile_count" 4 (json_int_field "profile_count" snapshot_json);
   check bool "bootstrap probe status is skipped" true
     (contains_substring (Yojson.Safe.to_string snapshot_json) "\"status\":\"skipped\"");
   let blank_name =
@@ -232,6 +240,28 @@ let test_valid_catalog_skips_live_probes_at_bootstrap () =
   in
   check string "blank name defaults to big_three"
     Keeper_config.default_cascade_name blank_name;
+  let keeper_unified_name =
+    require_ok
+      (Cascade_catalog_runtime.resolve_declared_name
+         ~raw_name:"keeper_unified" ())
+  in
+  check string "keeper_unified resolves to catalog profile"
+    "keeper_unified" keeper_unified_name;
+  check (list string) "keeper_unified models use exact catalog profile"
+    [ keeper_unified_model ]
+    (require_ok
+       (Cascade_catalog_runtime.models_of_cascade_name "keeper_unified"));
+  let strict_name =
+    require_ok
+      (Cascade_catalog_runtime.resolve_declared_name
+         ~raw_name:"tool_use_strict" ())
+  in
+  check string "tool_use_strict resolves to catalog profile"
+    "tool_use_strict" strict_name;
+  check (list string) "tool_use_strict models use exact catalog profile"
+    [ strict_model ]
+    (require_ok
+       (Cascade_catalog_runtime.models_of_cascade_name "tool_use_strict"));
   match
     Cascade_catalog_runtime.resolve_declared_name ~raw_name:"missing_profile" ()
   with
@@ -411,7 +441,10 @@ let test_partial_catalog_keeps_validated_subset_available () =
                 "uses unregistered provider scheme")
            reasons
      | None -> false);
-  let config_json = Masc_mcp.Dashboard_cascade.config_json () in
+  let config_json =
+    with_eio @@ fun ~sw:_ ~net:_ ~clock:_ ~fs:_ ~proc_mgr:_ ->
+    Masc_mcp.Dashboard_cascade.config_json ()
+  in
   let profile_names =
     json_list_field "profiles" config_json
     |> List.map (json_string_field "name")

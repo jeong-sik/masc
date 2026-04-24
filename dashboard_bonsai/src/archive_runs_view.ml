@@ -357,7 +357,7 @@ let render ~(shell : Overview_types.response) (r : Archive_runs_types.response) 
     ; (match r.loops with
        | [] ->
          Node.div
-           ~attrs:[ Style.quiet; Attr.role "status" ]
+           ~attrs:[ Style.quiet; Attr.role "status"; Attr.arialabel "No archive runs" ]
            [ Node.text "no runs recorded yet." ]
        | loops ->
          Node.div

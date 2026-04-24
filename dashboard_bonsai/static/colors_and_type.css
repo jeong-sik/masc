@@ -480,6 +480,19 @@ hr {
 }
 :focus:not(:focus-visible) { outline: none; }
 
+@media (forced-colors: active) {
+  a { color: LinkText; }
+  a:hover { color: LinkText; border-bottom-color: LinkText; }
+  :focus-visible { outline-color: Highlight; }
+  hr { border-top-color: CanvasText; }
+  .dot { background: CanvasText; }
+  .dot.ok, .dot.warn, .dot.bad { background: CanvasText; box-shadow: none; }
+  h2, h3 { color: CanvasText; }
+  .pill { border-color: CanvasText; color: CanvasText; }
+  .btn { border-color: ButtonText; color: ButtonText; }
+  .input { border-color: ButtonText; color: CanvasText; }
+}
+
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb, var(--border-main)); border-radius: 4px; }

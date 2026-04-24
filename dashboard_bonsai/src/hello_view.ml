@@ -63,6 +63,12 @@ stylesheet
     font-size: 0.75rem;
     color: var(--text-dim);
   }
+
+  @media (prefers-contrast: more) {
+    .divider { border-top-width: 2px; border-top-color: var(--text-bright); }
+    .eyebrow { color: var(--text-bright); }
+    .meta { color: var(--text-bright); }
+  }
 |}]
 
 let component (_graph @ local) =

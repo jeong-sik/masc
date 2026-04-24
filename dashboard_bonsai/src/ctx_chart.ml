@@ -65,6 +65,12 @@ stylesheet
   }
   .lbl_warn { top: 22px; color: color-mix(in oklab, var(--accent-brass) 80%, var(--text-dim)); }
   .lbl_dang { top: 6px;  color: color-mix(in oklab, var(--accent-blood) 80%, var(--text-dim)); }
+
+  @media (prefers-contrast: more) {
+    .meta { border-right-width: 2px; border-right-color: var(--text-bright); color: var(--text-bright); }
+    .track { outline: 1px solid var(--text-bright); }
+    .lbl_warn, .lbl_dang { color: var(--text-bright); }
+  }
 |}]
 
 let svg_a k v = Attr.create k v

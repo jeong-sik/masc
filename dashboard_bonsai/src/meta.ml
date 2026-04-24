@@ -49,6 +49,11 @@ stylesheet
   .v_ok    { color: var(--status-ok, #6a9a4a); font-variant-numeric: tabular-nums; }
   .v_brass { color: var(--accent-brass, #968228); font-variant-numeric: tabular-nums; }
   .v_blood { color: var(--accent-blood, #e85050); font-variant-numeric: tabular-nums; }
+
+  @media (prefers-contrast: more) {
+    .strip { border-width: 2px; border-color: var(--text-bright); }
+    .k { color: var(--text-bright); }
+  }
 |}]
 
 type value_color = [ `Default | `Ok | `Brass | `Blood ]

@@ -108,6 +108,15 @@ stylesheet
     .panel { min-height: 0; }
     .cta_note { width: 100%; margin-left: 0; }
   }
+
+  @media (prefers-contrast: more) {
+    .panel { border-width: 2px; border-color: var(--text-bright); }
+    .panel_title { color: var(--text-bright); }
+    .panel_code { color: var(--text-bright); }
+    .cta { border-width: 2px; border-color: var(--text-bright); }
+    .btn { border-width: 2px; border-color: var(--text-bright); }
+    .cta_note { color: var(--text-bright); }
+  }
 |}]
 
 type blueprint = {

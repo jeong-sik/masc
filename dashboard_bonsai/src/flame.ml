@@ -66,6 +66,11 @@ stylesheet
     color: var(--text-bright);
     font-variant-numeric: tabular-nums;
   }
+
+  @media (prefers-contrast: more) {
+    .flame_bar { border-width: 2px; border-color: var(--text-bright); }
+    .flame_chip { border-width: 2px; }
+  }
 |}]
 
 let seg_class = function

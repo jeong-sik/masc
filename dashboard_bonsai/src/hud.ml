@@ -99,6 +99,11 @@ stylesheet
   .v_ok   { color: var(--status-ok); }
   .v_warn { color: var(--status-warn); }
   .v_bad  { color: var(--status-bad); }
+
+  @media (prefers-contrast: more) {
+    .hud { border-width: 2px; border-color: var(--text-bright); }
+    .k { color: var(--text-bright); }
+  }
 |}]
 
 let v_class_attr = function

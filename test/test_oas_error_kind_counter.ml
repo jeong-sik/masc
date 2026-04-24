@@ -3,7 +3,7 @@
    #9933: verify that [Oas_worker_named.sdk_error_of_masc_internal_error]
    emits [masc_oas_error_total{kind}] once per constructed error so
    Grafana can alert on per-kind rates without parsing the
-   free-form BDI blocker string.  Exercises all 5 variants of
+   free-form BDI blocker string.  Exercises all 9 variants of
    [masc_internal_error] (the single production source of
    [masc_oas_error] payloads). *)
 
@@ -86,6 +86,69 @@ let test_resumable_cli_session_kind () =
     (before +. 1.0)
     (counter_for kind)
 
+let test_no_tool_capable_provider_kind () =
+  let kind = "no_tool_capable_provider" in
+  let before = counter_for kind in
+  let _ =
+    OWN.sdk_error_of_masc_internal_error
+      (OWN.No_tool_capable_provider
+         {
+           cascade_name = "tool_required";
+           configured_labels = [ "openai"; "anthropic" ];
+         })
+  in
+  Alcotest.(check (float 0.0001))
+    "no_tool_capable_provider counter +1"
+    (before +. 1.0)
+    (counter_for kind)
+
+let test_accept_rejected_kind () =
+  let kind = "accept_rejected" in
+  let before = counter_for kind in
+  let _ =
+    OWN.sdk_error_of_masc_internal_error
+      (OWN.Accept_rejected
+         {
+           scope = "keeper_turn";
+           model = Some "codex";
+           reason = "accept=false";
+         })
+  in
+  Alcotest.(check (float 0.0001))
+    "accept_rejected counter +1"
+    (before +. 1.0)
+    (counter_for kind)
+
+let test_admission_queue_timeout_kind () =
+  let kind = "admission_queue_timeout" in
+  let before = counter_for kind in
+  let _ =
+    OWN.sdk_error_of_masc_internal_error
+      (OWN.Admission_queue_timeout
+         {
+           keeper_name = "keeper-alpha";
+           cascade_name = "big_three";
+           wait_sec = 30.0;
+         })
+  in
+  Alcotest.(check (float 0.0001))
+    "admission_queue_timeout counter +1"
+    (before +. 1.0)
+    (counter_for kind)
+
+let test_admission_queue_rejected_kind () =
+  let kind = "admission_queue_rejected" in
+  let before = counter_for kind in
+  let _ =
+    OWN.sdk_error_of_masc_internal_error
+      (OWN.Admission_queue_rejected
+         { keeper_name = "keeper-alpha"; reason = "queue closed" })
+  in
+  Alcotest.(check (float 0.0001))
+    "admission_queue_rejected counter +1"
+    (before +. 1.0)
+    (counter_for kind)
+
 let test_ambiguous_post_commit_kind () =
   let kind = "ambiguous_post_commit" in
   let before = counter_for kind in
@@ -137,6 +200,14 @@ let () =
             test_cascade_exhausted_kind;
           Alcotest.test_case "resumable_cli_session" `Quick
             test_resumable_cli_session_kind;
+          Alcotest.test_case "no_tool_capable_provider" `Quick
+            test_no_tool_capable_provider_kind;
+          Alcotest.test_case "accept_rejected" `Quick
+            test_accept_rejected_kind;
+          Alcotest.test_case "admission_queue_timeout" `Quick
+            test_admission_queue_timeout_kind;
+          Alcotest.test_case "admission_queue_rejected" `Quick
+            test_admission_queue_rejected_kind;
           Alcotest.test_case "ambiguous_post_commit" `Quick
             test_ambiguous_post_commit_kind;
         ] );

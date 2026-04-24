@@ -55,6 +55,20 @@ let usage_has_tokens (usage : Oas.Types.api_usage) =
   || usage.cache_creation_input_tokens > 0
   || usage.cache_read_input_tokens > 0
 
+(* #9919: counter for post_tool_use_failure events.
+
+   Replaces an earlier [Heuristic_metrics.record] emit that produced
+   degenerate 1-bit records (51 identical rows in 48h of production,
+   [threshold=0.0, raw=1.0, triggered=true]).  Per keeper + per tool
+   labels let dashboards and #9880 governance judgments distinguish
+   which keeper-tool pairs are actually failing instead of reading a
+   single undifferentiated marker. *)
+let tool_use_failure_metric = "masc_keeper_tool_use_failure_total"
+
+let record_tool_use_failure ~keeper_name ~tool_name =
+  Prometheus.inc_counter tool_use_failure_metric
+    ~labels:[ ("keeper", keeper_name); ("tool", tool_name) ] ()
+
 (* #9868: use [pricing_for_model_opt] so unknown models surface as
    [None] and get a loud catalog-miss signal instead of silently
    returning $0. [pricing_for_model] (non-opt) collapses unknown into
@@ -721,24 +735,14 @@ let make_hooks
         let meta = !meta_ref in
         (* The richer counterpart
              "tool <name> returned error result (n/max): <detail>"
-           is already emitted at ERROR by keeper_tools_oas before this hook
-           runs. Emitting a second ERROR here with the same error content
-           produces paired duplicate lines per tool failure. Keep a debug
-           trace for hook-chain readers; the metric below still records. *)
+           is already emitted at ERROR by keeper_tools_oas before this
+           hook runs. Emitting a second ERROR here with the same error
+           content produces paired duplicate lines per tool failure —
+           keep a debug trace for hook-chain readers only. *)
         Log.Keeper.debug "keeper:%s tool_use_failure: %s — %s"
           meta.name tool_name error;
-        let error_detail_len =
-          String.length (String.trim error) |> Float.of_int
-        in
-        Heuristic_metrics.record {
-          module_name = "keeper_hooks_oas";
-          site = "post_tool_use_failure";
-          raw_value = error_detail_len;
-          threshold = 1.0;
-          triggered = error_detail_len >= 1.0;
-          provenance = Pipeline_stage ("post_tool_use_failure:" ^ tool_name);
-          timestamp = Unix.gettimeofday ();
-        };
+        (* #9919: this path is a count event, not a heuristic decision. *)
+        record_tool_use_failure ~keeper_name:meta.name ~tool_name;
         Oas.Hooks.Continue
       | _ -> Oas.Hooks.Continue);
   }

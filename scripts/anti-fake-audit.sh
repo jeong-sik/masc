@@ -32,19 +32,40 @@ echo ""
 FAKE=0
 SUSPECT=0
 GOOD=0
+HARNESS=0
+
+count_rg() {
+  local pattern="$1"
+  local file="$2"
+  rg -c "$pattern" "$file" 2>/dev/null || echo 0
+}
+
+has_rg() {
+  local pattern="$1"
+  local file="$2"
+  rg -q "$pattern" "$file" 2>/dev/null
+}
 
 for f in "${TEST_FILES[@]}"; do
-  ASSERT_TRUE=$(rg -c "assert true|assert_bool.*true" "$f" 2>/dev/null || echo 0)
-  LET_IGNORE=$(rg -c "let _ =" "$f" 2>/dev/null || echo 0)
-  TODO_COUNT=$(rg -c '\(\* TODO|\(\* FIXME' "$f" 2>/dev/null || echo 0)
+  ASSERT_TRUE=$(count_rg "assert true|assert_bool.*true" "$f")
+  LET_IGNORE=$(count_rg "let _ =" "$f")
+  TODO_COUNT=$(count_rg '\(\* TODO|\(\* FIXME' "$f")
 
-  REAL_ASSERT=$(rg -c 'Alcotest\.|assert_equal|check_raises' "$f" 2>/dev/null || echo 0)
-  PROP_TEST=$(rg -c 'QCheck|quickcheck|Crowbar|property' "$f" 2>/dev/null || echo 0)
-  ROUNDTRIP=$(rg -c 'roundtrip' "$f" 2>/dev/null || echo 0)
+  REAL_ASSERT=$(count_rg 'Alcotest\.|assert_equal|check_raises|Alcotest\.fail|fail[[:space:]]+"|failwith[[:space:]]+"|assert[[:space:]]*\(|(^|[^A-Za-z0-9_])check[[:space:]]+(bool|int|string|float|list|option|pair|\()' "$f")
+  PROP_TEST=$(count_rg 'QCheck|quickcheck|Crowbar|property' "$f")
+  ROUNDTRIP=$(count_rg 'roundtrip' "$f")
 
-  PENALTY=$(echo "scale=2; $ASSERT_TRUE * 0.3 + $LET_IGNORE * 0.2 + $TODO_COUNT * 0.15" | bc)
-  BONUS=$(echo "scale=2; $REAL_ASSERT * 0.05 + $PROP_TEST * 0.05 + $ROUNDTRIP * 0.1" | bc)
-  BONUS=$(echo "scale=2; if ($BONUS > 0.5) 0.5 else $BONUS" | bc)
+  if ! has_rg 'Alcotest\.run|run[[:space:]]+"' "$f" \
+     && has_rg 'Arg\.parse|Sys\.argv|Unix\.system|exit[[:space:]]+[01]' "$f"; then
+    HARNESS=$((HARNESS + 1))
+    printf "  %-55s  score=n/a    [HARNESS]\n" "$f"
+    continue
+  fi
+
+  LET_IGNORE_PENALTY=$(echo "scale=2; p = $LET_IGNORE * 0.02; if (p > 0.25) 0.25 else p" | bc)
+  PENALTY=$(echo "scale=2; $ASSERT_TRUE * 0.3 + $LET_IGNORE_PENALTY + $TODO_COUNT * 0.15" | bc)
+  BONUS=$(echo "scale=2; $REAL_ASSERT * 0.08 + $PROP_TEST * 0.05 + $ROUNDTRIP * 0.1" | bc)
+  BONUS=$(echo "scale=2; if ($BONUS > 0.7) 0.7 else $BONUS" | bc)
   SCORE=$(echo "scale=2; s = 0.5 - $PENALTY + $BONUS; if (s < 0) 0 else if (s > 1) 1 else s" | bc)
 
   TIER="good"
@@ -66,6 +87,7 @@ echo "=== Summary ==="
 echo "  Good:    $GOOD"
 echo "  Suspect: $SUSPECT"
 echo "  Fake:    $FAKE"
+echo "  Harness: $HARNESS"
 echo "  Total:   $FILE_COUNT"
 
 if [ "$FAKE" -gt 0 ]; then

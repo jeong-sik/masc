@@ -35,6 +35,8 @@ let () =
             check bool "canonical_name default" true (Option.is_none spec.canonical_name);
             check bool "replacement default" true (Option.is_none spec.replacement);
             check bool "reason default" true (Option.is_none spec.reason);
+            check bool "effect_domain default" true
+              (Option.is_none spec.effect_domain);
             check bool "title default" true (Option.is_none spec.title));
           test_case "create with optional args" `Quick (fun () ->
             let spec =
@@ -48,6 +50,7 @@ let () =
                 ~is_idempotent:true
                 ~visibility:Tool_catalog.Hidden
                 ~required_permission:Types.CanAdmin
+                ~effect_domain:Tool_catalog.Masc_coordination
                 ~reason:"hidden for test"
                 ~title:"Test Tool"
                 ()
@@ -56,6 +59,8 @@ let () =
             check bool "is_idempotent" true spec.is_idempotent;
             check bool "required_permission" true
               (spec.required_permission = Some Types.CanAdmin);
+            check bool "effect_domain" true
+              (spec.effect_domain = Some Tool_catalog.Masc_coordination);
             check bool "reason present" true (Option.is_some spec.reason);
             check bool "title present" true (Option.is_some spec.title));
         ] );
@@ -141,6 +146,7 @@ let () =
                 ~handler_binding:Tag_dispatch
                 ~is_destructive:true
                 ~required_permission:Types.CanAdmin
+                ~effect_domain:Tool_catalog.Main_worktree_write
                 ~visibility:Tool_catalog.Hidden
                 ~reason:"test hidden"
                 ()
@@ -150,6 +156,8 @@ let () =
             check bool "destructive" true (meta.destructive = Some true);
             check bool "required_permission" true
               (meta.required_permission = Some Types.CanAdmin);
+            check bool "effect_domain" true
+              (meta.effect_domain = Some Tool_catalog.Main_worktree_write);
             check bool "hidden" true (meta.visibility = Tool_catalog.Hidden);
             check bool "reason" true (meta.reason = Some "test hidden"));
           test_case "empty name rejected" `Quick (fun () ->

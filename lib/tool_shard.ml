@@ -1105,6 +1105,14 @@ let tool_required_permission = function
   | "masc_tool_grant" | "masc_tool_revoke" -> Some Types.CanAdmin
   | _ -> None
 
+let tool_effect_domain name =
+  match Tool_name.of_string name with
+  | Some (Tool_name.Masc Tool_name.Masc.Tool_list) ->
+      Some Tool_catalog.Read_only
+  | Some (Tool_name.Masc (Tool_name.Masc.Tool_grant | Tool_name.Masc.Tool_revoke)) ->
+      Some Tool_catalog.Masc_coordination
+  | _ -> None
+
 let () =
   List.iter
     (fun (s : Types.tool_schema) ->
@@ -1119,5 +1127,6 @@ let () =
            ~is_idempotent:(List.mem s.name _tool_spec_read_only)
            ~is_destructive:(List.mem s.name _tool_spec_destructive)
            ?required_permission:(tool_required_permission s.name)
+           ?effect_domain:(tool_effect_domain s.name)
            ()))
     schemas

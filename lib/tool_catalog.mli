@@ -15,6 +15,12 @@ type implementation_status =
   | Simulation
   | Placeholder
 
+type effect_domain =
+  | Read_only
+  | Masc_coordination
+  | Playground_write
+  | Main_worktree_write
+
 type metadata = {
   visibility : visibility;
   lifecycle : lifecycle;
@@ -27,6 +33,7 @@ type metadata = {
   destructive : bool option;
   idempotent : bool option;
   required_permission : Types.permission option;
+  effect_domain : effect_domain option;
 }
 
 (** {1 Configuration} *)
@@ -61,6 +68,8 @@ val full_surface_override : unit -> bool
 
 val metadata : string -> metadata
 val implementation_status : string -> implementation_status
+val effect_domain : string -> effect_domain option
+val is_main_worktree_boundary_exempt : string -> bool option
 val canonical_tool_name : string -> string
 val is_placeholder : string -> bool
 val is_visible : ?include_hidden:bool -> ?include_deprecated:bool -> string -> bool
@@ -71,6 +80,7 @@ val allow_direct_call : string -> bool
 val visibility_to_string : visibility -> string
 val lifecycle_to_string : lifecycle -> string
 val implementation_status_to_string : implementation_status -> string
+val effect_domain_to_string : effect_domain -> string
 
 (** {1 JSON metadata} *)
 

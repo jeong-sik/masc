@@ -28,6 +28,12 @@ type implementation_status =
   | Simulation
   | Placeholder
 
+type effect_domain =
+  | Read_only
+  | Masc_coordination
+  | Playground_write
+  | Main_worktree_write
+
 include (Tool_catalog_surfaces : sig
   type surface = Tool_catalog_surfaces.surface =
     | Public_mcp | Spawned_agent | Local_worker | Session_min
@@ -46,6 +52,7 @@ type metadata = {
   destructive : bool option;
   idempotent : bool option;
   required_permission : Types.permission option;
+  effect_domain : effect_domain option;
 }
 
 (* ================================================================ *)
@@ -65,6 +72,7 @@ let default_metadata =
     destructive = None;
     idempotent = None;
     required_permission = None;
+    effect_domain = None;
   }
 
 (* Runtime-readable like MASC_FULL_SURFACE so tests and local admin flows can
@@ -90,6 +98,7 @@ let deprecated ?canonical_name ?replacement ?(allow_direct_call_when_hidden = fa
     destructive = None;
     idempotent = None;
     required_permission = None;
+    effect_domain = None;
   }
 
 let hidden_active ?canonical_name ?replacement ?(allow_direct_call_when_hidden = true)
@@ -106,9 +115,10 @@ let hidden_active ?canonical_name ?replacement ?(allow_direct_call_when_hidden =
     destructive = None;
     idempotent = None;
     required_permission = None;
+    effect_domain = None;
   }
 
-let with_semantic_flags ?readonly ?destructive ?idempotent meta =
+let with_semantic_flags ?readonly ?destructive ?idempotent ?effect_domain meta =
   {
     meta with
     readonly =
@@ -117,13 +127,21 @@ let with_semantic_flags ?readonly ?destructive ?idempotent meta =
       (match destructive with Some value -> Some value | None -> meta.destructive);
     idempotent =
       (match idempotent with Some value -> Some value | None -> meta.idempotent);
+    effect_domain =
+      (match effect_domain with
+      | Some value -> Some value
+      | None -> meta.effect_domain);
   }
 
 let readonly_tool =
-  with_semantic_flags ~readonly:true ~idempotent:true default_metadata
+  with_semantic_flags ~readonly:true ~idempotent:true
+    ~effect_domain:Read_only default_metadata
 
 let destructive_tool =
   with_semantic_flags ~destructive:true default_metadata
+
+let masc_coordination_tool =
+  with_semantic_flags ~effect_domain:Masc_coordination default_metadata
 
 (* ================================================================ *)
 (* Explicit metadata registry                                       *)
@@ -154,23 +172,23 @@ let explicit_metadata : (string * metadata) list =
     ("masc_plan_get", readonly_tool);
     ("masc_worktree_list", readonly_tool);
     ( "masc_join",
-      { default_metadata with required_permission = Some Types.CanJoin } );
+      { masc_coordination_tool with required_permission = Some Types.CanJoin } );
     ( "masc_leave",
-      { default_metadata with required_permission = Some Types.CanLeave } );
+      { masc_coordination_tool with required_permission = Some Types.CanLeave } );
     ( "masc_broadcast",
-      { default_metadata with required_permission = Some Types.CanBroadcast } );
+      { masc_coordination_tool with required_permission = Some Types.CanBroadcast } );
     ( "masc_messages",
       { readonly_tool with required_permission = Some Types.CanReadState } );
     ( "masc_who",
       { readonly_tool with required_permission = Some Types.CanReadState } );
     ( "channel_gate",
-      { default_metadata with required_permission = Some Types.CanBroadcast } );
+      { masc_coordination_tool with required_permission = Some Types.CanBroadcast } );
     ( "masc_portal_open",
-      { default_metadata with required_permission = Some Types.CanOpenPortal } );
+      { masc_coordination_tool with required_permission = Some Types.CanOpenPortal } );
     ( "masc_portal_close",
-      { default_metadata with required_permission = Some Types.CanOpenPortal } );
+      { masc_coordination_tool with required_permission = Some Types.CanOpenPortal } );
     ( "masc_portal_send",
-      { default_metadata with required_permission = Some Types.CanSendPortal } );
+      { masc_coordination_tool with required_permission = Some Types.CanSendPortal } );
     ( "masc_room_status",
       hidden_active ~canonical_name:"masc_status" ~replacement:"masc_status"
         "Managed-agent compatibility alias. Prefer masc_status for canonical namespace state reads." );
@@ -226,12 +244,12 @@ let explicit_metadata : (string * metadata) list =
     ("masc_tool_grant", destructive_tool);
     ("masc_tool_revoke", destructive_tool);
     ( "masc_keeper_reset",
-      { default_metadata with required_permission = Some Types.CanBroadcast } );
+      { masc_coordination_tool with required_permission = Some Types.CanBroadcast } );
     ( "masc_keeper_compact",
-      { default_metadata with required_permission = Some Types.CanBroadcast } );
+      { masc_coordination_tool with required_permission = Some Types.CanBroadcast } );
     ( "masc_keeper_clear",
       with_semantic_flags ~destructive:true
-        { default_metadata with required_permission = Some Types.CanBroadcast } );
+        { masc_coordination_tool with required_permission = Some Types.CanBroadcast } );
     ( "masc_operation_stop",
       destructive_tool );
     ( "masc_operation_pause",
@@ -306,9 +324,201 @@ let implementation_status_to_string = function
   | Simulation -> "simulation"
   | Placeholder -> "placeholder"
 
+let effect_domain_to_string = function
+  | Read_only -> "read_only"
+  | Masc_coordination -> "masc_coordination"
+  | Playground_write -> "playground_write"
+  | Main_worktree_write -> "main_worktree_write"
+
 let implementation_allows_public_visibility = function
   | Real | Adapter -> true
   | Simulation | Placeholder -> false
+
+module TN = Tool_name
+module TK = Tool_name.Keeper
+module TM = Tool_name.Masc
+module TMK = Tool_name.Masc_keeper
+
+let inferred_effect_domain_of_typed_tool_name = function
+  | TN.Keeper TK.Bash
+  | TN.Keeper TK.Bash_kill
+  | TN.Keeper TK.Shell ->
+      Some Main_worktree_write
+  | TN.Keeper TK.Bash_output
+  | TN.Keeper TK.Board_get
+  | TN.Keeper TK.Board_list
+  | TN.Keeper TK.Board_search
+  | TN.Keeper TK.Board_stats
+  | TN.Keeper TK.Code_read
+  | TN.Keeper TK.Context_status
+  | TN.Keeper TK.Discovery
+  | TN.Keeper TK.Fs_read
+  | TN.Keeper TK.Library_read
+  | TN.Keeper TK.Library_search
+  | TN.Keeper TK.Memory_search
+  | TN.Keeper TK.Pr_review_read
+  | TN.Keeper TK.Preflight_check
+  | TN.Keeper TK.Stay_silent
+  | TN.Keeper TK.Tasks_audit
+  | TN.Keeper TK.Tasks_list
+  | TN.Keeper TK.Time_now
+  | TN.Keeper TK.Tool_search
+  | TN.Keeper TK.Tools_list
+  | TN.Keeper TK.Voice_sessions ->
+      Some Read_only
+  | TN.Keeper TK.Fs_edit
+  | TN.Keeper TK.Write ->
+      Some Playground_write
+  | TN.Keeper TK.Board_cleanup
+  | TN.Keeper TK.Board_comment
+  | TN.Keeper TK.Board_comment_vote
+  | TN.Keeper TK.Board_delete
+  | TN.Keeper TK.Board_post
+  | TN.Keeper TK.Board_vote
+  | TN.Keeper TK.Broadcast
+  | TN.Keeper TK.Handoff
+  | TN.Keeper TK.Pr_review_comment
+  | TN.Keeper TK.Pr_review_reply
+  | TN.Keeper TK.Task_claim
+  | TN.Keeper TK.Task_create
+  | TN.Keeper TK.Task_done
+  | TN.Keeper TK.Task_force_done
+  | TN.Keeper TK.Task_force_release
+  | TN.Keeper TK.Task_submit_for_verification
+  | TN.Keeper TK.Voice_agent
+  | TN.Keeper TK.Voice_listen
+  | TN.Keeper TK.Voice_session_end
+  | TN.Keeper TK.Voice_session_start
+  | TN.Keeper TK.Voice_speak ->
+      Some Masc_coordination
+  | TN.Masc TM.A2a_delegate
+  | TN.Masc TM.Autoresearch_inject
+  | TN.Masc TM.Autoresearch_start
+  | TN.Masc TM.Autoresearch_stop
+  | TN.Masc TM.Deliver
+  | TN.Masc TM.Dispatch_plan
+  | TN.Masc TM.Operator_action
+  | TN.Masc TM.Spawn
+  | TN.Masc TM.Start ->
+      Some Main_worktree_write
+  | TN.Masc TM.Agent_card
+  | TN.Masc TM.Agent_fitness
+  | TN.Masc TM.Agents
+  | TN.Masc TM.Autoresearch_status
+  | TN.Masc TM.Board_get
+  | TN.Masc TM.Board_hearths
+  | TN.Masc TM.Board_list
+  | TN.Masc TM.Board_profile
+  | TN.Masc TM.Board_search
+  | TN.Masc TM.Board_stats
+  | TN.Masc TM.Check
+  | TN.Masc TM.Code_read
+  | TN.Masc TM.Code_search
+  | TN.Masc TM.Code_symbols
+  | TN.Masc TM.Collaboration_graph
+  | TN.Masc TM.Config
+  | TN.Masc TM.Dashboard
+  | TN.Masc TM.Get_metrics
+  | TN.Masc TM.Goal_list
+  | TN.Masc TM.Goal_review
+  | TN.Masc TM.Mcp_session
+  | TN.Masc TM.Messages
+  | TN.Masc TM.Operation_status
+  | TN.Masc TM.Operator_digest
+  | TN.Masc TM.Operator_snapshot
+  | TN.Masc TM.Plan_get
+  | TN.Masc TM.Plan_get_task
+  | TN.Masc TM.Status
+  | TN.Masc TM.Task_history
+  | TN.Masc TM.Tasks
+  | TN.Masc TM.Tool_admin_snapshot
+  | TN.Masc TM.Tool_help
+  | TN.Masc TM.Tool_list
+  | TN.Masc TM.Tool_stats
+  | TN.Masc TM.Web_search
+  | TN.Masc TM.Who
+  | TN.Masc TM.Workflow_guide
+  | TN.Masc TM.Worktree_list
+  | TN.Masc TM.Approval_get
+  | TN.Masc TM.Webrtc_answer
+  | TN.Masc TM.Webrtc_offer ->
+      Some Read_only
+  | TN.Masc TM.Code_delete
+  | TN.Masc TM.Code_edit
+  | TN.Masc TM.Code_git
+  | TN.Masc TM.Code_shell
+  | TN.Masc TM.Code_write
+  | TN.Masc TM.Worktree_create
+  | TN.Masc TM.Worktree_remove ->
+      Some Playground_write
+  | TN.Masc TM.Add_task
+  | TN.Masc TM.Agent_update
+  | TN.Masc TM.Autoresearch_cycle
+  | TN.Masc TM.Batch_add_tasks
+  | TN.Masc TM.Board_cleanup
+  | TN.Masc TM.Board_comment
+  | TN.Masc TM.Board_comment_vote
+  | TN.Masc TM.Board_delete
+  | TN.Masc TM.Board_post
+  | TN.Masc TM.Board_vote
+  | TN.Masc TM.Broadcast
+  | TN.Masc TM.Cancel_task
+  | TN.Masc TM.Claim_next
+  | TN.Masc TM.Claim_task
+  | TN.Masc TM.Cleanup_zombies
+  | TN.Masc TM.Complete_task
+  | TN.Masc TM.Gc
+  | TN.Masc TM.Goal_transition
+  | TN.Masc TM.Goal_upsert
+  | TN.Masc TM.Goal_verify
+  | TN.Masc TM.Heartbeat
+  | TN.Masc TM.Join
+  | TN.Masc TM.Leave
+  | TN.Masc TM.List_tasks
+  | TN.Masc TM.Note_add
+  | TN.Masc TM.Operation_pause
+  | TN.Masc TM.Operation_start
+  | TN.Masc TM.Operation_stop
+  | TN.Masc TM.Operator_confirm
+  | TN.Masc TM.Pause
+  | TN.Masc TM.Plan_clear_task
+  | TN.Masc TM.Plan_init
+  | TN.Masc TM.Plan_set_task
+  | TN.Masc TM.Plan_update
+  | TN.Masc TM.Register_capabilities
+  | TN.Masc TM.Release_task
+  | TN.Masc TM.Reset
+  | TN.Masc TM.Coord_status
+  | TN.Masc TM.Resume
+  | TN.Masc TM.Set_current_task
+  | TN.Masc TM.Tool_admin_update
+  | TN.Masc TM.Tool_grant
+  | TN.Masc TM.Tool_revoke
+  | TN.Masc TM.Transition
+  | TN.Masc TM.Update_priority ->
+      Some Masc_coordination
+  | TN.Masc_keeper TMK.List
+  | TN.Masc_keeper TMK.Status ->
+      Some Read_only
+  | TN.Masc_keeper TMK.Clear
+  | TN.Masc_keeper TMK.Compact
+  | TN.Masc_keeper TMK.Create_from_persona
+  | TN.Masc_keeper TMK.Down
+  | TN.Masc_keeper TMK.Msg
+  | TN.Masc_keeper TMK.Repair
+  | TN.Masc_keeper TMK.Reset
+  | TN.Masc_keeper TMK.Up ->
+      Some Masc_coordination
+
+let inferred_effect_domain name =
+  match Tool_name.of_string name with
+  | Some typed_name -> inferred_effect_domain_of_typed_tool_name typed_name
+  | None -> None
+
+let attach_inferred_effect_domain name (meta : metadata) =
+  match meta.effect_domain with
+  | Some _ -> meta
+  | None -> { meta with effect_domain = inferred_effect_domain name }
 
 let metadata name =
   let base =
@@ -331,27 +541,40 @@ let metadata name =
           allow_direct_call_when_hidden = true;
           reason = Some "Internal tool; not on public MCP surface." }
   in
-  if Tool_catalog_surfaces.is_on_surface System_internal name then
+  let with_surface_visibility =
+    if Tool_catalog_surfaces.is_on_surface System_internal name then
     (* Surface membership is the canonical "hidden but callable" contract for
        system-internal tools, even when a tool also carries explicit metadata
        for semantic hints like readonly/destructive. *)
-    {
-      base with
-      visibility = Hidden;
-      allow_direct_call_when_hidden = true;
-      reason =
-        (match base.reason with
-        | Some _ -> base.reason
-        | None ->
-            Some
-              "System-internal tool; callable but not listed in tools/list.");
-    }
-  else
-    base
+      {
+        base with
+        visibility = Hidden;
+        allow_direct_call_when_hidden = true;
+        reason =
+          (match base.reason with
+          | Some _ -> base.reason
+          | None ->
+              Some
+                "System-internal tool; callable but not listed in tools/list.");
+      }
+    else
+      base
+  in
+  attach_inferred_effect_domain name with_surface_visibility
 
 let implementation_status name =
   let meta = metadata name in
   meta.implementation_status
+
+let effect_domain name =
+  let meta = metadata name in
+  meta.effect_domain
+
+let is_main_worktree_boundary_exempt name =
+  match effect_domain name with
+  | Some Read_only | Some Masc_coordination | Some Playground_write -> Some true
+  | Some Main_worktree_write -> Some false
+  | None -> None
 
 let canonical_tool_name name =
   match (metadata name).canonical_name with
@@ -418,11 +641,18 @@ let metadata_to_fields name =
     | Some reason -> ("reason", `String reason) :: with_replacement
     | None -> with_replacement
   in
+  let with_effect_domain =
+    match meta.effect_domain with
+    | Some effect_domain ->
+        ("effectDomain", `String (effect_domain_to_string effect_domain))
+        :: with_reason
+    | None -> with_reason
+  in
   match meta.required_permission with
   | Some permission ->
       ("requiredPermission", `String (Types.show_permission permission))
-      :: with_reason
-  | None -> with_reason
+      :: with_effect_domain
+  | None -> with_effect_domain
 
 let public_contract_fields name =
   let meta = metadata name in
@@ -432,9 +662,16 @@ let public_contract_fields name =
         `String (implementation_status_to_string meta.implementation_status) );
     ]
   in
+  let with_effect_domain =
+    match meta.effect_domain with
+    | Some effect_domain ->
+        ("effectDomain", `String (effect_domain_to_string effect_domain))
+        :: base
+    | None -> base
+  in
   match meta.canonical_name with
-  | Some canonical_name -> ("canonicalName", `String canonical_name) :: base
-  | None -> base
+  | Some canonical_name -> ("canonicalName", `String canonical_name) :: with_effect_domain
+  | None -> with_effect_domain
 
 let allow_direct_call name =
   let meta = metadata name in

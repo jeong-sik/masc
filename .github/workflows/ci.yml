@@ -285,6 +285,7 @@ jobs:
           bash scripts/ci/check-tla-variant-sync.sh || true
           bash scripts/ci/check-telemetry-coverage.sh || true
           bash scripts/ci/check-determinism-contract.sh || true
+          bash scripts/audit-hardcoding-truth.sh || true
 
   health:
     name: Health

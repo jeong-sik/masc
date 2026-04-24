@@ -25,7 +25,13 @@ let vote_log_path () =
   let base = board_base_path () in
   Filename.concat base ".masc/board_votes.jsonl"
 
-let append_vote_log ~target ~voter ~direction =
+(* #10086: [ts] is the cast timestamp supplied by the caller.  Both
+   the append (line-append on cast) and the rewrite (atomic flush
+   from the in-memory store) MUST serialize the same [ts] for a
+   given (target, voter) pair — otherwise analytics keyed on vote
+   recency (hot ranking, vote-velocity windows) see fabricated
+   timestamps advancing on every flush cycle. *)
+let append_vote_log ~target ~voter ~direction ~ts =
   try
     ensure_masc_dir ();
     let path = vote_log_path () in
@@ -33,7 +39,7 @@ let append_vote_log ~target ~voter ~direction =
       ("target", `String target);
       ("voter", `String voter);
       ("direction", `String (vote_direction_to_string direction));
-      ("ts", `Float (Time_compat.now ()));
+      ("ts", `Float ts);
     ] in
     Fs_compat.append_file path (Yojson.Safe.to_string json ^ "\n");
     rotate_if_needed path
@@ -45,7 +51,7 @@ let rewrite_vote_log store =
     let path = vote_log_path () in
     let buf = Buffer.create 4096 in
     Hashtbl.iter
-      (fun target direction ->
+      (fun target (direction, ts) ->
         let voter =
           match String.rindex_opt target ':' with
           | Some idx when idx + 1 < String.length target ->
@@ -58,7 +64,12 @@ let rewrite_vote_log store =
               ("target", `String target);
               ("voter", `String voter);
               ("direction", `String (vote_direction_to_string direction));
-              ("ts", `Float (Time_compat.now ()));
+              (* #10086: persist the cast ts stored alongside the
+                 direction, NOT [Time_compat.now ()].  The previous
+                 behaviour rewrote every row's timestamp on each
+                 flush cycle, destroying audit and feeding wrong
+                 values to hot-ranking / recency scoring. *)
+              ("ts", `Float ts);
             ]
         in
         Buffer.add_string buf (Yojson.Safe.to_string json ^ "\n"))
@@ -93,10 +104,10 @@ let vote store ~voter ~post_id ~direction : (int, board_error) result =
               let vote_key = "post:" ^ Post_id.to_string pid ^ ":" ^ voter in
               let now = Time_compat.now () in
               match Hashtbl.find_opt store.vote_log vote_key with
-              | Some prev when prev = direction ->
+              | Some (prev, _prev_ts) when prev = direction ->
                   Error (Already_voted (Printf.sprintf "%s already voted %s on %s"
                     voter (vote_direction_to_string direction) post_id))
-              | Some _opposite ->
+              | Some (_opposite, _prev_ts) ->
                   let flipped = match direction with
                     | Up -> { post with votes_up = post.votes_up + 1;
                                         votes_down = max 0 (post.votes_down - 1);
@@ -106,10 +117,10 @@ let vote store ~voter ~post_id ~direction : (int, board_error) result =
                                           updated_at = now }
                   in
                   Hashtbl.replace store.posts (Post_id.to_string pid) flipped;
-                  Hashtbl.replace store.vote_log vote_key direction;
+                  Hashtbl.replace store.vote_log vote_key (direction, now);
                   store.dirty_posts <- true;  (* Deferred flush *)
                   invalidate_post_caches store;
-                  append_vote_log ~target:vote_key ~voter ~direction;
+                  append_vote_log ~target:vote_key ~voter ~direction ~ts:now;
                   (* Record vote for Thompson Sampling feedback *)
                   let author_name = Agent_id.to_string post.author in
                   let vote_dir = match direction with Up -> `Up | Down -> `Down in
@@ -123,10 +134,10 @@ let vote store ~voter ~post_id ~direction : (int, board_error) result =
                     | Down -> { post with votes_down = post.votes_down + 1; updated_at = now }
                   in
                   Hashtbl.replace store.posts (Post_id.to_string pid) updated;
-                  Hashtbl.replace store.vote_log vote_key direction;
+                  Hashtbl.replace store.vote_log vote_key (direction, now);
                   store.dirty_posts <- true;  (* Deferred flush *)
                   invalidate_post_caches store;
-                  append_vote_log ~target:vote_key ~voter ~direction;
+                  append_vote_log ~target:vote_key ~voter ~direction ~ts:now;
                   (* Record vote for Thompson Sampling feedback *)
                   let author_name = Agent_id.to_string post.author in
                   let vote_dir = match direction with Up -> `Up | Down -> `Down in
@@ -167,11 +178,12 @@ let vote_comment store ~voter ~comment_id ~direction : (int, board_error) result
         | None -> Error (Comment_not_found comment_id)
         | Some cmt ->
             let vote_key = "comment:" ^ Comment_id.to_string cid ^ ":" ^ voter in
+            let now = Time_compat.now () in
             match Hashtbl.find_opt store.vote_log vote_key with
-            | Some prev when prev = direction ->
+            | Some (prev, _prev_ts) when prev = direction ->
                 Error (Already_voted (Printf.sprintf "%s already voted %s on comment %s"
                   voter (vote_direction_to_string direction) comment_id))
-            | Some _opposite ->
+            | Some (_opposite, _prev_ts) ->
                 let flipped = match direction with
                   | Up -> { cmt with votes_up = cmt.votes_up + 1;
                                      votes_down = max 0 (cmt.votes_down - 1) }
@@ -179,10 +191,10 @@ let vote_comment store ~voter ~comment_id ~direction : (int, board_error) result
                                        votes_up = max 0 (cmt.votes_up - 1) }
                 in
                 Hashtbl.replace store.comments (Comment_id.to_string cid) flipped;
-                Hashtbl.replace store.vote_log vote_key direction;
+                Hashtbl.replace store.vote_log vote_key (direction, now);
                 store.dirty_comments <- true;  (* Deferred flush *)
                 invalidate_comment_caches store;
-                append_vote_log ~target:vote_key ~voter ~direction;
+                append_vote_log ~target:vote_key ~voter ~direction ~ts:now;
                 (* Record vote for Thompson Sampling feedback *)
                 let author_name = Agent_id.to_string cmt.author in
                 let vote_dir = match direction with Up -> `Up | Down -> `Down in
@@ -194,10 +206,10 @@ let vote_comment store ~voter ~comment_id ~direction : (int, board_error) result
                   | Down -> { cmt with votes_down = cmt.votes_down + 1 }
                 in
                 Hashtbl.replace store.comments (Comment_id.to_string cid) updated;
-                Hashtbl.replace store.vote_log vote_key direction;
+                Hashtbl.replace store.vote_log vote_key (direction, now);
                 store.dirty_comments <- true;  (* Deferred flush *)
                 invalidate_comment_caches store;
-                append_vote_log ~target:vote_key ~voter ~direction;
+                append_vote_log ~target:vote_key ~voter ~direction ~ts:now;
                 (* Record vote for Thompson Sampling feedback *)
                 let author_name = Agent_id.to_string cmt.author in
                 let vote_dir = match direction with Up -> `Up | Down -> `Down in
@@ -449,15 +461,27 @@ let load_persisted_votes store =
               Safe_ops.json_string_opt "direction" json with
         | Some target, Some dir_str ->
           let direction = if dir_str = "down" then Down else Up in
+          (* #10086: legacy rows persisted before this fix may have
+             [ts] overwritten by a prior flush cycle.  Use the
+             recorded value when present; fall back to 0.0 rather
+             than [Time_compat.now ()] — loading a ledger at server
+             start time must NOT advance the ts of every pre-fix
+             vote to "now".  Downstream readers treat ts=0.0 as
+             "unknown cast time". *)
+          let ts =
+            match Safe_ops.json_float_opt "ts" json with
+            | Some t -> t
+            | None -> 0.0
+          in
           if is_fixture_voter_target target then begin
             incr fixture_detected;
             if quarantine then incr quarantined
             else begin
-              Hashtbl.replace store.vote_log target direction;
+              Hashtbl.replace store.vote_log target (direction, ts);
               incr loaded
             end
           end else begin
-            Hashtbl.replace store.vote_log target direction;
+            Hashtbl.replace store.vote_log target (direction, ts);
             incr loaded
           end
         | _ -> ()

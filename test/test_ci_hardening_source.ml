@@ -79,6 +79,10 @@ let test_ci_sync_and_asset_contracts () =
   check bool "ci gate uses agent draft policy script" true
     (file_contains_pattern ".github/workflows/ci.yml"
        "scripts/ci/check-agent-draft-policy.sh");
+  check bool "ci gate refreshes live draft state" true
+    (file_contains_pattern ".github/workflows/ci.yml" "PR_LIVE_IS_DRAFT");
+  check bool "ci gate refreshes live labels" true
+    (file_contains_pattern ".github/workflows/ci.yml" "PR_LIVE_LABELS");
   check bool "pr hygiene no longer checks dashboard assets (gitignored)" true
     (not (file_contains_pattern "scripts/check-pr-hygiene.sh" "dashboard source or Vite config changed but assets/dashboard was not updated"))
 
@@ -95,6 +99,19 @@ let test_agent_draft_policy_script () =
     (run_agent_draft_policy [ ("GITHUB_EVENT_NAME", "push") ]);
   check int "draft agent PR passes" 0
     (run_agent_draft_policy (("PR_IS_DRAFT", "true") :: base));
+  check int "live draft state overrides stale ready event" 0
+    (run_agent_draft_policy
+       (("PR_LIVE_IS_DRAFT", "true") :: ("PR_IS_DRAFT", "false") :: base));
+  check bool "live ready state overrides stale draft event" true
+    (run_agent_draft_policy
+       (("PR_LIVE_IS_DRAFT", "false") :: ("PR_IS_DRAFT", "true") :: base)
+    <> 0);
+  check int "live bypass label overrides stale event labels" 0
+    (run_agent_draft_policy
+       (("PR_LIVE_IS_DRAFT", "false")
+       :: ("PR_LIVE_LABELS", "enhancement,human-approved-ready")
+       :: ("PR_IS_DRAFT", "true")
+       :: base));
   check bool "ready agent PR without bypass fails" true
     (run_agent_draft_policy (("PR_IS_DRAFT", "false") :: base) <> 0);
   check int "ready agent PR with bypass label passes" 0

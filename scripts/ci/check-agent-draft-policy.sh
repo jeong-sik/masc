@@ -11,10 +11,17 @@ if [[ "$event_name" != "pull_request" ]]; then
   exit 0
 fi
 
-pr_is_draft="${PR_IS_DRAFT:-false}"
+pr_is_draft="${PR_LIVE_IS_DRAFT:-${PR_IS_DRAFT:-false}}"
 pr_title="${PR_TITLE:-}"
 pr_head_ref="${PR_HEAD_REF:-}"
-pr_labels_csv="${PR_LABELS:-}"
+pr_labels_csv="${PR_LIVE_LABELS:-${PR_LABELS:-}}"
+
+if [[ -n "${PR_LIVE_IS_DRAFT:-}" ]]; then
+  echo "agent draft policy: using live PR draft state ${PR_LIVE_IS_DRAFT}"
+fi
+if [[ -n "${PR_LIVE_LABELS:-}" ]]; then
+  echo "agent draft policy: using live PR labels ${PR_LIVE_LABELS}"
+fi
 
 lower() {
   printf '%s' "$1" | tr '[:upper:]' '[:lower:]'

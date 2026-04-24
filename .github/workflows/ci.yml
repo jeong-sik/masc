@@ -10,6 +10,7 @@ on:
 permissions:
   contents: read
   actions: write
+  pull-requests: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -700,13 +701,28 @@ jobs:
         env:
           GITHUB_EVENT_NAME: ${{ github.event_name }}
           PR_IS_DRAFT: ${{ github.event.pull_request.draft }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
           PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          GH_TOKEN: ${{ github.token }}
           AGENT_DRAFT_GUARD_TITLE_RE: ${{ vars.AGENT_DRAFT_GUARD_TITLE_RE }}
           AGENT_DRAFT_GUARD_BRANCH_RE: ${{ vars.AGENT_DRAFT_GUARD_BRANCH_RE }}
           AGENT_DRAFT_GUARD_BYPASS_LABELS: ${{ vars.AGENT_DRAFT_GUARD_BYPASS_LABELS }}
-        run: scripts/ci/check-agent-draft-policy.sh
+        run: |
+          if command -v gh >/dev/null 2>&1 && [ -n "${PR_NUMBER:-}" ]; then
+            live_is_draft="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft' 2>/dev/null || true)"
+            if [ "$live_is_draft" = "true" ] || [ "$live_is_draft" = "false" ]; then
+              export PR_LIVE_IS_DRAFT="$live_is_draft"
+            else
+              echo "::warning::Could not resolve live PR draft state; falling back to pull_request event payload."
+            fi
+            live_labels="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json labels --jq '[.labels[].name] | join(",")' 2>/dev/null || true)"
+            if [ -n "$live_labels" ]; then
+              export PR_LIVE_LABELS="$live_labels"
+            fi
+          fi
+          scripts/ci/check-agent-draft-policy.sh
 
       - name: Aggregate required check status
         env:

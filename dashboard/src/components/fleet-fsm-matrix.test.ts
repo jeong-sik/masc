@@ -112,7 +112,7 @@ describe('tallyInvariantViolations', () => {
 
 describe('sparkClassFor', () => {
   it('extracts a single bg-* utility from the full chip class', () => {
-    // The bracketed arbitrary-value syntax (`bg-[var(...)]`) cannot
+    // Bracketed Tailwind arbitrary values that wrap CSS vars cannot
     // live inside a JS regex literal because `[...]` starts a
     // character class; use startsWith on the extracted prefix.
     expect(sparkClassFor('Running').startsWith('bg-[var(--ok-10)]')).toBe(true)

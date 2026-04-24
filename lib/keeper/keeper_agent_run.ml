@@ -2071,9 +2071,9 @@ let run_turn
                    | Some existing -> Some (existing ^ "\n\n" ^ temporal))
               in
               (* 1c. Claimed-task execution nudge: when the keeper holds a
-                 claimed task but the last turn only called claim tools
-                 (keeper_task_claim / masc_claim_next), inject a prompt
-                 to break the claim-only loop and start real work. *)
+                 claimed task but the last turn only called claim tools,
+                 inject a prompt to break the claim-only loop and start real
+                 work. *)
               let ctx =
                 match (!meta_ref).current_task_id with
                 | Some task_id ->

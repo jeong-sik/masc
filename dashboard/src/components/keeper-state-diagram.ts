@@ -68,13 +68,25 @@ function transitionType(selectedEvent: unknown): string {
 }
 
 function signalTone(severity: string | null | undefined): string {
+  // Unknown severity → treat as warn (fail-closed). Only an explicit "ok" from
+  // the backend renders as green. See issue #9894 (Unknown → Permissive Default
+  // anti-pattern; CLAUDE.md #2). Backend emits 'ok' | 'warn' | 'bad' today via
+  // lib/keeper/keeper_transition_audit.ml; any new severity must be mapped
+  // here explicitly before it is allowed to show as healthy.
   switch (severity) {
     case 'bad':
       return 'border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--bad)]'
     case 'warn':
       return 'border-[var(--warn-24)] bg-[var(--warn-8)] text-[var(--warn)]'
-    default:
+    case 'ok':
       return 'border-[rgba(34,197,94,0.24)] bg-[var(--emerald-8)] text-[var(--ok)]'
+    default:
+      // Client-side observability: record unexpected severities so future
+      // backend additions are noticed before they regress to silent-OK.
+      if (typeof console !== 'undefined' && severity != null && severity !== '') {
+        console.warn('[signalTone] unknown severity; rendering as warn', { severity })
+      }
+      return 'border-[var(--warn-24)] bg-[var(--warn-8)] text-[var(--warn)]'
   }
 }
 

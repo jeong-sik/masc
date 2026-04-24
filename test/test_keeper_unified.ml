@@ -3918,7 +3918,7 @@ let test_side_effect_reclassification_drops_keeper_read_only_tools_from_mixed_se
 
 let test_metrics_mixed_response () =
   let result =
-    make_run_result ~text:"Done." ~tools:["keeper_fs_read"]
+    make_run_result ~text:"Done." ~tools:["keeper_fs_edit"]
       ~model:"test-model" ~input_tok:150 ~output_tok:60 ()
   in
   let updated =

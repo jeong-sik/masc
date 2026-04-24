@@ -1565,7 +1565,15 @@ let test_execute_tool_explicit_alias_reuses_joined_nickname () =
       "done"
   in
   Alcotest.(check bool) "done success with same explicit alias" true ok_done;
-  Alcotest.(check bool) "done message has done" true (contains_substring done_msg "done");
+  (* The verifier-gate redirects Done → Submit_for_verification when no
+     CDAL verdict is present, producing the terminal status
+     [awaiting_verification]. Either [done] (no gate) or
+     [awaiting_verification] (gate active) is a valid terminal outcome;
+     the alias-reuse intent is covered by [ok_done = true] plus the
+     stable agent alias used across all three transitions. *)
+  Alcotest.(check bool) "done or awaiting_verification reached" true
+    (contains_substring done_msg "done"
+     || contains_substring done_msg "awaiting_verification");
 
   cleanup_dir base_path
 

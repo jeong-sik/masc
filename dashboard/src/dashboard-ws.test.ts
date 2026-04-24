@@ -1,6 +1,87 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { dashboardSlicesForRoute, parseWebSocketSseFrames } from './dashboard-ws'
+import {
+  connectDashboardWS,
+  dashboardSlicesForRoute,
+  disconnectDashboardWS,
+  parseWebSocketSseFrames,
+  subscribeDashboardRoute,
+} from './dashboard-ws'
+import { dashboardWsLastSeq } from './dashboard-ws-state'
+
+interface JsonRpcRequest {
+  id: number
+  method: string
+  params: Record<string, unknown>
+}
+
+const mockSockets: MockWebSocket[] = []
+
+class MockWebSocket {
+  static CONNECTING = 0
+  static OPEN = 1
+  static CLOSING = 2
+  static CLOSED = 3
+
+  readyState = MockWebSocket.CONNECTING
+  bufferedAmount = 0
+  sent: string[] = []
+  onopen: ((event: Event) => void) | null = null
+  onmessage: ((event: MessageEvent) => void) | null = null
+  onerror: ((event: Event) => void) | null = null
+  onclose: ((event: CloseEvent) => void) | null = null
+
+  constructor(readonly url: string) {
+    mockSockets.push(this)
+  }
+
+  send(data: string): void {
+    this.sent.push(data)
+  }
+
+  close(): void {
+    this.readyState = MockWebSocket.CLOSED
+    this.onclose?.(new CloseEvent('close'))
+  }
+
+  open(): void {
+    this.readyState = MockWebSocket.OPEN
+    this.onopen?.(new Event('open'))
+  }
+
+  receive(payload: unknown): void {
+    this.onmessage?.({ data: JSON.stringify(payload) } as MessageEvent)
+  }
+}
+
+function installWebSocketMocks(): void {
+  mockSockets.length = 0
+  vi.stubGlobal('WebSocket', MockWebSocket)
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+    enabled: true,
+    listening: true,
+    ws_url: 'ws://127.0.0.1:8937/',
+  }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  })))
+}
+
+function parseRpc(socket: MockWebSocket, index: number): JsonRpcRequest {
+  return JSON.parse(socket.sent[index] ?? '{}') as JsonRpcRequest
+}
+
+async function flushPromises(): Promise<void> {
+  await Promise.resolve()
+  await Promise.resolve()
+}
+
+afterEach(() => {
+  disconnectDashboardWS()
+  dashboardWsLastSeq.value = 0
+  vi.unstubAllGlobals()
+  vi.restoreAllMocks()
+})
 
 describe('dashboardSlicesForRoute', () => {
   it('keeps global shell namespace and transport slices on every route', () => {
@@ -53,5 +134,82 @@ describe('parseWebSocketSseFrames', () => {
       { type: 'post_created', post_id: 'p1' },
       { type: 'keeper_composite_changed', name: 'qa-king' },
     ])
+  })
+})
+
+describe('dashboard websocket route subscriptions', () => {
+  it('subscribes the latest route captured while hello is still in flight', async () => {
+    installWebSocketMocks()
+
+    await connectDashboardWS({ tab: 'overview', params: {} })
+    await subscribeDashboardRoute({ tab: 'workspace', params: { section: 'board' } })
+
+    const socket = mockSockets[0]!
+    socket.open()
+    const hello = parseRpc(socket, 0)
+    expect(hello.method).toBe('dashboard/hello')
+
+    socket.receive({ jsonrpc: '2.0', id: hello.id, result: {} })
+    await flushPromises()
+
+    const subscribe = parseRpc(socket, 1)
+    expect(subscribe.method).toBe('dashboard/subscribe')
+    expect(subscribe.params.route).toBe('workspace:board::')
+    expect(subscribe.params.slices).toEqual(expect.arrayContaining(['board']))
+
+    socket.receive({
+      jsonrpc: '2.0',
+      id: subscribe.id,
+      result: { snapshot: { seq: 7, slices: {} } },
+    })
+    await flushPromises()
+  })
+
+  it('ignores stale subscribe snapshots that arrive after a newer route subscription', async () => {
+    installWebSocketMocks()
+
+    await connectDashboardWS({ tab: 'overview', params: {} })
+    const socket = mockSockets[0]!
+    socket.open()
+    const hello = parseRpc(socket, 0)
+    socket.receive({ jsonrpc: '2.0', id: hello.id, result: {} })
+    await flushPromises()
+
+    const initialSubscribe = parseRpc(socket, 1)
+    socket.receive({
+      jsonrpc: '2.0',
+      id: initialSubscribe.id,
+      result: { snapshot: { seq: 1, slices: {} } },
+    })
+    await flushPromises()
+    dashboardWsLastSeq.value = 0
+
+    const stalePromise = subscribeDashboardRoute({
+      tab: 'workspace',
+      params: { section: 'board' },
+    })
+    const staleSubscribe = parseRpc(socket, 2)
+
+    const latestPromise = subscribeDashboardRoute({
+      tab: 'workspace',
+      params: { section: 'planning' },
+    })
+    const latestSubscribe = parseRpc(socket, 3)
+
+    socket.receive({
+      jsonrpc: '2.0',
+      id: staleSubscribe.id,
+      result: { snapshot: { seq: 11, slices: {} } },
+    })
+    await stalePromise
+    expect(dashboardWsLastSeq.value).toBe(0)
+
+    socket.receive({
+      jsonrpc: '2.0',
+      id: latestSubscribe.id,
+      result: { snapshot: { seq: 22, slices: {} } },
+    })
+    await latestPromise
+    expect(dashboardWsLastSeq.value).toBe(22)
   })
 })

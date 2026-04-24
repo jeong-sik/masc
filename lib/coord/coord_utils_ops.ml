@@ -413,9 +413,9 @@ let with_distributed_lock ?clock config _path key f =
       | Ok true -> true
       | _ ->
           sleep_lock_retry ?clock delay;
-          acquire (attempts - 1) (Float.min 0.05 (delay *. 2.0))
+          acquire (attempts - 1) (Float.min 0.5 (delay *. 2.0))
   in
-  if acquire 20 0.005 then
+  if acquire 50 0.05 then
     Common.protect ~module_name:"room_utils" ~finally_label:"finalizer"
       ~finally:(fun () ->
         match backend_release_lock config ~key ~owner with
@@ -432,7 +432,7 @@ let with_distributed_lock ?clock config _path key f =
   else
     invalid_arg
       (Printf.sprintf
-         "Failed to acquire distributed lock for key: %s (20 attempts exhausted)"
+         "Failed to acquire distributed lock for key: %s (50 attempts exhausted)"
          key)
 
 let with_distributed_lock_r ?clock config path key f : ('a, masc_error) result =
@@ -445,9 +445,9 @@ let with_distributed_lock_r ?clock config path key f : ('a, masc_error) result =
       | Ok true -> true
       | _ ->
           sleep_lock_retry ?clock delay;
-          acquire (attempts - 1) (Float.min 0.05 (delay *. 2.0))
+          acquire (attempts - 1) (Float.min 0.5 (delay *. 2.0))
   in
-  if acquire 20 0.005 then
+  if acquire 50 0.05 then
     Common.protect ~module_name:"room_utils" ~finally_label:"finalizer"
       ~finally:(fun () ->
         match backend_release_lock config ~key ~owner with

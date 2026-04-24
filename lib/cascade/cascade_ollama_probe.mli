@@ -56,6 +56,7 @@ val cached_capacity :
 val try_probe :
   sw:Eio.Switch.t ->
   net:[> [> `Generic ] Eio.Net.ty ] Eio.Resource.t ->
+  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   ?timeout_s:float ->
   ?now:float ->
   string ->

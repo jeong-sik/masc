@@ -91,13 +91,14 @@ let probe_endpoint_of base_url =
   in
   stripped ^ Masc_network_defaults.ollama_api_ps_path
 
-let try_probe ~sw ~net ?(timeout_s = 0.5) ?now url =
+let try_probe ~sw ~net ?clock ?(timeout_s = 0.5) ?now url =
   let _ = sw in
-  let _ = timeout_s in
   let now = match now with Some n -> n | None -> now_default () in
   let endpoint = probe_endpoint_of url in
   match
     Masc_http_client.get_sync
+      ?clock
+      ~timeout_sec:timeout_s
       ~net
       ~url:endpoint
       ~headers:[("accept", "application/json")]

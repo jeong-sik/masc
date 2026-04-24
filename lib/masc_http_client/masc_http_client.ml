@@ -82,7 +82,30 @@ type response = {
   body : string;
 }
 
-let post_sync ~net ?(https = None) ~url ~headers ~body () =
+(** Apply an optional Eio wall-clock timeout around a request. When both
+    [clock] and [timeout_sec] are supplied, a sleep fiber races the request
+    fiber; whichever finishes first wins and the loser is cancelled. On
+    timeout the caller receives [Error "timeout after ..."] instead of the
+    underlying HTTP result. When either argument is omitted the behaviour
+    is identical to the pre-timeout implementation, so existing callers
+    need not be updated.
+
+    We use [Eio.Fiber.first] instead of [Eio.Time.with_timeout] because the
+    latter requires the inner function's Error constructor to be a
+    polymorphic variant compatible with [> `Timeout], while our callers use
+    plain [string] error payloads. *)
+let with_optional_timeout ?clock ?timeout_sec f =
+  match clock, timeout_sec with
+  | Some clock, Some timeout_sec when timeout_sec > 0.0 ->
+      Eio.Fiber.first
+        (fun () -> f ())
+        (fun () ->
+          Eio.Time.sleep clock timeout_sec;
+          Error (Printf.sprintf "timeout after %.1fs" timeout_sec))
+  | _ -> f ()
+
+let post_sync ?clock ?timeout_sec ~net ?(https = None) ~url ~headers ~body () =
+  with_optional_timeout ?clock ?timeout_sec @@ fun () ->
   try
     Eio.Switch.run @@ fun sw ->
     let client = make_closing_client ~sw ~net ~https in
@@ -106,7 +129,8 @@ let post_sync ~net ?(https = None) ~url ~headers ~body () =
   | exn -> Error (Printexc.to_string exn)
 
 (** GET with structured error handling. *)
-let get_response_sync ~net ?(https = None) ~url ~headers () =
+let get_response_sync ?clock ?timeout_sec ~net ?(https = None) ~url ~headers () =
+  with_optional_timeout ?clock ?timeout_sec @@ fun () ->
   try
     Eio.Switch.run @@ fun sw ->
     let client = make_closing_client ~sw ~net ~https in
@@ -132,7 +156,7 @@ let get_response_sync ~net ?(https = None) ~url ~headers () =
   | exn -> Error (Printexc.to_string exn)
 
 (** GET with structured error handling. *)
-let get_sync ~net ?(https = None) ~url ~headers () =
-  match get_response_sync ~net ~https ~url ~headers () with
+let get_sync ?clock ?timeout_sec ~net ?(https = None) ~url ~headers () =
+  match get_response_sync ?clock ?timeout_sec ~net ~https ~url ~headers () with
   | Ok response -> Ok (response.status, response.body)
   | Error _ as error -> error

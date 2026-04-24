@@ -1,6 +1,6 @@
 import type { RouteState, SSEEvent } from './types'
 import { parseSSEMessage } from './schemas/sse'
-import { hydrateDashboardSlice, hydrateServerPushEvent } from './sse-store'
+import { hydrateDashboardSlice, routeServerPushEvent } from './sse-store'
 import {
   dashboardWsConnected,
   dashboardWsLastError,
@@ -205,7 +205,7 @@ function handleRawPush(raw: unknown): void {
   const candidate = unwrapSseCandidate(raw as JsonObject)
   const parsed = parseSSEMessage(candidate)
   if (!parsed) return
-  hydrateServerPushEvent(parsed as unknown as SSEEvent)
+  routeServerPushEvent(parsed as unknown as SSEEvent)
 }
 
 export function parseWebSocketSseFrames(data: string): unknown[] {

@@ -365,6 +365,54 @@ function handleBoardPostCreated(event: SSEEvent): boolean {
   return true
 }
 
+export function routeServerPushEvent(event: SSEEvent): void {
+  if (hydrateServerPushEvent(event)) {
+    return
+  }
+
+  const simpleRoute = SIMPLE_ROUTES[event.type]
+  if (simpleRoute) {
+    scheduleTargetRefresh(
+      simpleRoute.target,
+      REFRESH_FNS[simpleRoute.target],
+      simpleRoute.debounceMs,
+    )
+  }
+
+  for (const { prefix, target } of PREFIX_ROUTES) {
+    if (event.type.startsWith(prefix)) {
+      scheduleTargetRefresh(target, REFRESH_FNS[target])
+      break
+    }
+  }
+
+  if (KEEPER_LIFECYCLE_EVENTS.has(normalizeMascEventType(event.type))) {
+    handleKeeperLifecycle(event)
+  }
+
+  if (AUTORESEARCH_EVENTS.has(event.type) && activeAutoresearchRoute()) {
+    scheduleRefresh('autoresearch_route', () => {
+      void refreshActiveRoute()
+    }, SSE_DEFAULT_DEBOUNCE_MS)
+  }
+
+  if (
+    event.type.startsWith('decision_')
+    || event.type === 'governance_param_changed'
+    || event.type === 'approval:pending'
+    || event.type === 'approval:resolved'
+  ) {
+    if (route.value.tab === 'command') {
+      scheduleRefresh('command_route', () => {
+        void refreshActiveRoute()
+      })
+    }
+    if (_refreshGovernanceFn) {
+      scheduleRefresh('governance', () => void handleGovernance())
+    }
+  }
+}
+
 export function hydrateServerPushEvent(event: SSEEvent): boolean {
   if ((event.type === 'project_snapshot' || event.type === 'namespace_truth_snapshot' || event.type === 'room_truth_snapshot') && event.payload) {
     handleNamespaceTruthSnapshot(event.payload)
@@ -429,6 +477,12 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
   return false
 }
 
+function eventPayloadRecord(payload: unknown): Record<string, unknown> {
+  return payload && typeof payload === 'object' && !Array.isArray(payload)
+    ? payload as Record<string, unknown>
+    : { payload }
+}
+
 export function hydrateDashboardSlice(slice: string, payload: unknown, eventType?: string): void {
   switch (eventType) {
     case 'project_snapshot':
@@ -440,6 +494,13 @@ export function hydrateDashboardSlice(slice: string, payload: unknown, eventType
     case 'transport_health_snapshot':
       hydrateServerPushEvent({ type: eventType, payload } as SSEEvent)
       return
+  }
+  if (eventType) {
+    routeServerPushEvent({
+      type: eventType,
+      ...eventPayloadRecord(payload),
+    } as SSEEvent)
+    return
   }
 
   switch (slice) {
@@ -497,56 +558,7 @@ export function setupSSEReaction(): () => void {
 
   const unsubscribe = lastEvent.subscribe((event) => {
     if (!event) return
-
-    if (hydrateServerPushEvent(event)) {
-      return
-    }
-
-    // 2. Simple route: exact match
-    const simpleRoute = SIMPLE_ROUTES[event.type]
-    if (simpleRoute) {
-      scheduleTargetRefresh(
-        simpleRoute.target,
-        REFRESH_FNS[simpleRoute.target],
-        simpleRoute.debounceMs,
-      )
-    }
-
-    // 4. Simple route: prefix match
-    for (const { prefix, target } of PREFIX_ROUTES) {
-      if (event.type.startsWith(prefix)) {
-        scheduleTargetRefresh(target, REFRESH_FNS[target])
-        break
-      }
-    }
-
-    // 5. Keeper lifecycle — additional operator refresh + thread hydration
-    if (KEEPER_LIFECYCLE_EVENTS.has(normalizeMascEventType(event.type))) {
-      handleKeeperLifecycle(event)
-    }
-
-    if (AUTORESEARCH_EVENTS.has(event.type) && activeAutoresearchRoute()) {
-      scheduleRefresh('autoresearch_route', () => {
-        void refreshActiveRoute()
-      }, SSE_DEFAULT_DEBOUNCE_MS)
-    }
-
-    // 6. Governance events
-    if (
-      event.type.startsWith('decision_')
-      || event.type === 'governance_param_changed'
-      || event.type === 'approval:pending'
-      || event.type === 'approval:resolved'
-    ) {
-      if (route.value.tab === 'command') {
-        scheduleRefresh('command_route', () => {
-          void refreshActiveRoute()
-        })
-      }
-      if (_refreshGovernanceFn) {
-        scheduleRefresh('governance', () => void handleGovernance())
-      }
-    }
+    routeServerPushEvent(event)
   })
 
   return () => {

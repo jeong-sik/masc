@@ -83,6 +83,31 @@ let test_invalid_capabilities () =
   let identity = Agent_registry_eio.get_or_create_identity params in
   check int "ignores invalid" 0 (List.length identity.capabilities)
 
+(* #9788: tools/call payload arrives as `Null instead of an object.
+   Previously crashed inside Yojson.Safe.Util.member; must degrade
+   to anonymous identity. *)
+let test_null_payload () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Agent_registry_eio.reset_for_testing ();
+  let identity = Agent_registry_eio.get_or_create_identity `Null in
+  check bool "has agent_name" true (String.length identity.agent_name > 0);
+  check bool "starts with agent-" true
+    (String.length identity.agent_name >= 6
+     && String.sub identity.agent_name 0 6 = "agent-")
+
+(* Same defensive behavior for non-object scalars. *)
+let test_scalar_payload () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Agent_registry_eio.reset_for_testing ();
+  let identity_string = Agent_registry_eio.get_or_create_identity (`String "garbage") in
+  let identity_int = Agent_registry_eio.get_or_create_identity (`Int 42) in
+  let identity_list = Agent_registry_eio.get_or_create_identity (`List []) in
+  check bool "string payload tolerated" true (String.length identity_string.agent_name > 0);
+  check bool "int payload tolerated" true (String.length identity_int.agent_name > 0);
+  check bool "list payload tolerated" true (String.length identity_list.agent_name > 0)
+
 (* Rapid session creation *)
 let test_rapid_creation () =
   Eio_main.run @@ fun env ->
@@ -100,6 +125,8 @@ let () =
     "params", [
       test_case "empty" `Quick test_empty_params;
       test_case "null_values" `Quick test_null_values;
+      test_case "null_payload" `Quick test_null_payload;
+      test_case "scalar_payload" `Quick test_scalar_payload;
       test_case "long_name" `Quick test_long_agent_name;
       test_case "special_chars" `Quick test_special_chars;
     ];

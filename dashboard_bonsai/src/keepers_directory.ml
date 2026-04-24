@@ -1120,7 +1120,7 @@ let view
   match rows with
   | [] ->
     Node.div
-      ~attrs:[ Style.quiet; Attr.role "status" ]
+      ~attrs:[ Style.quiet; Attr.role "status"; Attr.arialabel "Directory loading" ]
       [ Node.text
           "runtime/mission snapshot이 아직 조용합니다. keepers summary만 먼저 올라왔을 가능성이 있습니다."
       ]

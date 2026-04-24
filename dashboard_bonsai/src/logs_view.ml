@@ -1704,7 +1704,7 @@ let render_response
              [ Node.text label ]
          in
          Node.div
-           ~attrs:[ Style.chip_group ]
+           ~attrs:[ Style.chip_group; Attr.role "group"; Attr.arialabel "Log level filter" ]
            [ filter_chip ~level:"debug" ~label:"debug+"
            ; filter_chip ~level:"info" ~label:"info+"
            ; filter_chip ~level:"warn" ~label:"warn+"

@@ -376,7 +376,7 @@ let view_meta_panel (r : Overview_types.response) =
         ]
     | None ->
       Node.div
-        ~attrs:[ Style.empty; Attr.role "status" ]
+        ~attrs:[ Style.empty; Attr.role "status"; Attr.arialabel "No dominant belief" ]
         [ Node.text "no dominant belief recorded." ]
   in
   Node.div

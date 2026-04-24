@@ -35,8 +35,8 @@ stylesheet
 
   .eyebrow {
     font-family: 'Noto Sans KR', sans-serif;
-    font-size: 10px;
-    letter-spacing: 0.3em;
+    font-size: 11px;
+    letter-spacing: 0.25em;
     text-transform: uppercase;
     color: var(--text-dim);
     margin: 0;
@@ -76,8 +76,8 @@ stylesheet
   .meta_item { display: flex; align-items: baseline; gap: 8px; }
   .meta_k {
     font-family: 'Noto Sans KR', sans-serif;
-    font-size: 9px;
-    letter-spacing: 0.24em;
+    font-size: 11px;
+    letter-spacing: 0.2em;
     text-transform: uppercase;
     color: var(--text-dim);
   }
@@ -121,7 +121,7 @@ stylesheet
 
   .pill {
     font-family: 'JetBrains Mono', ui-monospace, monospace;
-    font-size: 10px;
+    font-size: 11px;
     letter-spacing: 0.16em;
     text-transform: uppercase;
     padding: 4px 8px;
@@ -169,14 +169,14 @@ stylesheet
   }
   .goal_id {
     font-family: 'JetBrains Mono', ui-monospace, monospace;
-    font-size: 10px;
+    font-size: 11px;
     color: var(--text-dim);
     letter-spacing: 0.06em;
     margin-right: 10px;
   }
   .goal_err {
     font-family: 'JetBrains Mono', ui-monospace, monospace;
-    font-size: 10px;
+    font-size: 11px;
     color: var(--accent-viscera);
     letter-spacing: 0.02em;
     margin-left: 10px;
@@ -189,7 +189,7 @@ stylesheet
     font-variant-numeric: tabular-nums;
     text-align: right;
   }
-  .cycle_dim { color: var(--text-dim); font-size: 10px; }
+  .cycle_dim { color: var(--text-dim); font-size: 11px; }
 
   .kd {
     font-family: 'JetBrains Mono', ui-monospace, monospace;

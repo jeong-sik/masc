@@ -119,7 +119,7 @@ stylesheet
     align-items: center;
     gap: 6px;
     font-family: var(--font-ui, 'Noto Sans KR', sans-serif);
-    font-size: 9px;
+    font-size: 11px;
     letter-spacing: 0.2em;
     text-transform: uppercase;
     padding: 4px 8px;
@@ -164,8 +164,8 @@ stylesheet
   .nav_section {
     padding: 14px 18px 6px;
     font-family: var(--font-ui, 'Noto Sans KR', sans-serif);
-    font-size: 9px;
-    letter-spacing: 0.3em;
+    font-size: 11px;
+    letter-spacing: 0.25em;
     text-transform: uppercase;
     color: var(--text-dim);
     display: flex;
@@ -268,8 +268,8 @@ stylesheet
 
   .hud_k {
     font-family: var(--font-ui, 'Noto Sans KR', sans-serif);
-    font-size: 9px;
-    letter-spacing: 0.28em;
+    font-size: 11px;
+    letter-spacing: 0.22em;
     text-transform: uppercase;
     color: var(--text-dim);
   }
@@ -443,8 +443,8 @@ stylesheet
 
   .stat_l {
     font-family: var(--font-ui, 'Noto Sans KR', sans-serif);
-    font-size: 9px;
-    letter-spacing: 0.22em;
+    font-size: 11px;
+    letter-spacing: 0.18em;
     color: var(--text-dim);
     text-transform: uppercase;
   }

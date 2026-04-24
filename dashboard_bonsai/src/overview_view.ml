@@ -40,8 +40,8 @@ stylesheet
 
   .eyebrow {
     font-family: 'Noto Sans KR', sans-serif;
-    font-size: 10px;
-    letter-spacing: 0.3em;
+    font-size: 11px;
+    letter-spacing: 0.25em;
     text-transform: uppercase;
     color: var(--text-dim);
     margin: 0;
@@ -82,8 +82,8 @@ stylesheet
   }
   .panel_title {
     font-family: 'Noto Sans KR', sans-serif;
-    font-size: 10px;
-    letter-spacing: 0.3em;
+    font-size: 11px;
+    letter-spacing: 0.25em;
     text-transform: uppercase;
     color: var(--text-dim);
     margin: 0;
@@ -102,8 +102,8 @@ stylesheet
   }
   .k {
     font-family: 'Noto Sans KR', sans-serif;
-    font-size: 10px;
-    letter-spacing: 0.22em;
+    font-size: 11px;
+    letter-spacing: 0.2em;
     text-transform: uppercase;
     color: var(--text-dim);
   }
@@ -138,8 +138,8 @@ stylesheet
   }
   .count_k {
     font-family: 'Noto Sans KR', sans-serif;
-    font-size: 9px;
-    letter-spacing: 0.28em;
+    font-size: 11px;
+    letter-spacing: 0.22em;
     text-transform: uppercase;
     color: var(--text-dim);
   }
@@ -175,8 +175,8 @@ stylesheet
   }
   .belief_tag {
     font-family: 'JetBrains Mono', ui-monospace, monospace;
-    font-size: 10px;
-    letter-spacing: 0.2em;
+    font-size: 11px;
+    letter-spacing: 0.18em;
     text-transform: uppercase;
     color: var(--accent-brass);
     margin-right: 10px;

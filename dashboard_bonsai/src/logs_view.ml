@@ -128,8 +128,8 @@ stylesheet
 
   .pulse_label {
     font-family: 'Noto Sans KR', -apple-system, sans-serif;
-    font-size: 9px;
-    letter-spacing: 0.3em;
+    font-size: 11px;
+    letter-spacing: 0.25em;
     text-transform: uppercase;
     color: var(--text-dim);
   }
@@ -154,15 +154,15 @@ stylesheet
 
   .heartbeat_eyebrow {
     font-family: 'Noto Sans KR', -apple-system, sans-serif;
-    font-size: 9px;
-    letter-spacing: 0.3em;
+    font-size: 11px;
+    letter-spacing: 0.25em;
     text-transform: uppercase;
     color: var(--text-dim);
   }
 
   .heartbeat_scale {
     font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace;
-    font-size: 9px;
+    font-size: 11px;
     letter-spacing: 0.12em;
     color: #4a3a32;
   }
@@ -278,7 +278,7 @@ stylesheet
 
   .chip {
     font-family: 'Noto Sans KR', -apple-system, sans-serif;
-    font-size: 10px;
+    font-size: 11px;
     letter-spacing: 0.2em;
     text-transform: uppercase;
     padding: 4px 12px;
@@ -321,14 +321,14 @@ stylesheet
     color: var(--text-dim);
   }
 
-  .input_shell_label { letter-spacing: 0.25em; text-transform: uppercase; color: #4a3a32; font-size: 9px; }
+  .input_shell_label { letter-spacing: 0.2em; text-transform: uppercase; color: #4a3a32; font-size: 11px; }
   .input_shell_value { font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 11px; color: var(--text-primary); }
 
   .toolbar_spacer { flex: 1; }
 
   .btn_ghost {
     font-family: 'Noto Sans KR', -apple-system, sans-serif;
-    font-size: 10px;
+    font-size: 11px;
     letter-spacing: 0.2em;
     text-transform: uppercase;
     padding: 5px 12px;
@@ -354,8 +354,8 @@ stylesheet
 
   .eyebrow {
     font-family: 'Noto Sans KR', -apple-system, sans-serif;
-    font-size: 10px;
-    letter-spacing: 0.3em;
+    font-size: 11px;
+    letter-spacing: 0.25em;
     text-transform: uppercase;
     color: var(--text-dim);
     margin: 0 0 0.25rem 0;
@@ -569,15 +569,15 @@ stylesheet
 
   .ts_rel {
     font-family: 'Noto Sans KR', -apple-system, sans-serif;
-    font-size: 9px;
-    letter-spacing: 0.2em;
+    font-size: 11px;
+    letter-spacing: 0.18em;
     text-transform: uppercase;
     color: #4a3a32;
   }
 
   .level {
     font-family: 'Noto Sans KR', -apple-system, sans-serif;
-    font-size: 10px;
+    font-size: 11px;
     letter-spacing: 0.25em;
     text-transform: uppercase;
     font-weight: 500;
@@ -599,7 +599,7 @@ stylesheet
     align-items: center;
     gap: 6px;
     font-family: 'Noto Sans KR', -apple-system, sans-serif;
-    font-size: 9px;
+    font-size: 11px;
     letter-spacing: 0.2em;
     text-transform: uppercase;
     padding: 3px 8px;
@@ -771,8 +771,8 @@ stylesheet
   .nav_section {
     padding: 14px 18px 6px;
     font-family: 'Noto Sans KR', sans-serif;
-    font-size: 9px;
-    letter-spacing: 0.3em;
+    font-size: 11px;
+    letter-spacing: 0.25em;
     text-transform: uppercase;
     color: var(--text-dim);
     display: flex;
@@ -854,7 +854,7 @@ stylesheet
   }
   .theme_chip {
     font-family: 'Noto Sans KR', sans-serif;
-    font-size: 8px;
+    font-size: 10px;
     letter-spacing: 0.22em;
     text-transform: uppercase;
     padding: 3px 6px;
@@ -1027,8 +1027,8 @@ stylesheet
   }
   .focus_stat_l {
     font-family: 'Noto Sans KR', sans-serif;
-    font-size: 9px;
-    letter-spacing: 0.22em;
+    font-size: 11px;
+    letter-spacing: 0.18em;
     color: var(--text-dim);
     text-transform: uppercase;
   }
@@ -1262,7 +1262,7 @@ stylesheet
   .tomb {
     padding: 5px 8px;
     font-family: 'Cinzel', 'Cormorant SC', serif;
-    font-size: 9px;
+    font-size: 11px;
     letter-spacing: 0.16em;
     text-transform: uppercase;
     color: var(--text-dim);

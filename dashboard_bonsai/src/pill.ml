@@ -40,7 +40,7 @@ stylesheet
 
   .pill_sm {
     font-family: 'JetBrains Mono', ui-monospace, monospace;
-    font-size: 9px;
+    font-size: 11px;
     letter-spacing: 0.16em;
     text-transform: uppercase;
     padding: 2px 6px;

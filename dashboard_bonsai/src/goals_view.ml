@@ -36,8 +36,8 @@ stylesheet
 
   .eyebrow {
     font-family: 'Noto Sans KR', sans-serif;
-    font-size: 10px;
-    letter-spacing: 0.3em;
+    font-size: 11px;
+    letter-spacing: 0.25em;
     text-transform: uppercase;
     color: var(--text-dim);
     margin: 0;
@@ -77,8 +77,8 @@ stylesheet
   .meta_item { display: flex; align-items: baseline; gap: 8px; }
   .meta_k {
     font-family: 'Noto Sans KR', sans-serif;
-    font-size: 9px;
-    letter-spacing: 0.24em;
+    font-size: 11px;
+    letter-spacing: 0.2em;
     text-transform: uppercase;
     color: var(--text-dim);
   }
@@ -132,7 +132,7 @@ stylesheet
   }
   .goal_horizon {
     font-family: 'JetBrains Mono', ui-monospace, monospace;
-    font-size: 10px;
+    font-size: 11px;
     color: var(--text-dim);
     letter-spacing: 0.14em;
     text-transform: uppercase;
@@ -172,8 +172,8 @@ stylesheet
 
   .status_pill {
     font-family: 'JetBrains Mono', ui-monospace, monospace;
-    font-size: 9px;
-    letter-spacing: 0.16em;
+    font-size: 11px;
+    letter-spacing: 0.14em;
     text-transform: uppercase;
     padding: 2px 6px;
     border: 1px solid var(--border-main);
@@ -213,8 +213,8 @@ stylesheet
 
   .blocker_k {
     font-family: 'JetBrains Mono', ui-monospace, monospace;
-    font-size: 9px;
-    letter-spacing: 0.18em;
+    font-size: 11px;
+    letter-spacing: 0.16em;
     text-transform: uppercase;
     color: var(--status-warn);
   }
@@ -228,7 +228,7 @@ stylesheet
 
   .blocker_meta {
     font-family: 'JetBrains Mono', ui-monospace, monospace;
-    font-size: 10px;
+    font-size: 11px;
     color: var(--text-dim);
   }
 |}]

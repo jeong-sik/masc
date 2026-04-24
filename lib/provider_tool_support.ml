@@ -10,10 +10,19 @@ let normalize_cli_provider_caps
     ~(provider_cfg : Llm_provider.Provider_config.t)
     (caps : Llm_provider.Capabilities.capabilities) =
   match provider_cfg.kind with
+  | Llm_provider.Provider_config.Claude_code ->
+      {
+        caps with
+        supports_tools = false;
+        supports_tool_choice = false;
+        supports_runtime_mcp_tools = true;
+        supports_runtime_tool_events = true;
+      }
   | Llm_provider.Provider_config.Kimi_cli ->
       {
         caps with
         supports_tools = false;
+        supports_tool_choice = false;
         supports_runtime_mcp_tools = true;
         supports_runtime_tool_events = true;
       }

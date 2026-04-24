@@ -59,19 +59,25 @@ let write_text_file path content =
     ~finally:(fun () -> close_out_noerr oc)
     (fun () -> output_string oc content)
 
-let make_keeper_meta ?agent_name name =
+let make_keeper_meta ?agent_name ?tool_access name =
   let agent_name =
     Option.value agent_name
       ~default:(Keeper_types.keeper_agent_name name)
   in
+  let tool_access_fields =
+    match tool_access with
+    | Some access -> [ ("tool_access", access) ]
+    | None -> []
+  in
   let json =
     `Assoc
-      [
-        ("name", `String name);
-        ("agent_name", `String agent_name);
-        ("trace_id", `String ("trace-test-" ^ name));
-        ("goal", `String "test goal");
-      ]
+      ([
+         ("name", `String name);
+         ("agent_name", `String agent_name);
+         ("trace_id", `String ("trace-test-" ^ name));
+         ("goal", `String "test goal");
+       ]
+       @ tool_access_fields)
   in
   match Keeper_types.meta_of_json json with
   | Ok meta -> meta
@@ -2173,6 +2179,105 @@ let test_handle_request_tools_call_blocks_keeper_internal_tool () =
      with Not_found -> false);
   cleanup_dir base_path
 
+let tool_names_from_list_response response =
+  match response with
+  | `Assoc fields -> (
+      match List.assoc_opt "result" fields with
+      | Some (`Assoc result_fields) -> (
+          match List.assoc_opt "tools" result_fields with
+          | Some (`List tools) ->
+              tools
+              |> List.filter_map (function
+                   | `Assoc fields -> List.assoc_opt "name" fields
+                   | _ -> None)
+              |> List.filter_map (function `String s -> Some s | _ -> None)
+          | _ -> Alcotest.fail "tools not a list")
+      | _ -> Alcotest.fail "result not an object")
+  | _ -> Alcotest.fail "response not an object"
+
+let test_handle_request_tools_list_internal_keeper_runtime_includes_keeper_internal_tools
+    () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+      let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+      let token = Masc_mcp.Auth.ensure_internal_keeper_token base_path in
+      let request = Yojson.Safe.to_string (`Assoc [
+        ("jsonrpc", `String "2.0");
+        ("id", `Int 119);
+        ("method", `String "tools/list");
+        ("params", `Assoc []);
+      ]) in
+      let response =
+        Mcp_eio.handle_request ~clock ~sw ~auth_token:token
+          ~internal_keeper_runtime:true state request
+      in
+      let names = tool_names_from_list_response response in
+      Alcotest.(check bool) "keeper_bash listed" true
+        (List.mem "keeper_bash" names);
+      Alcotest.(check bool) "system internal still hidden" false
+        (List.mem "masc_mcp_session" names))
+
+let test_handle_request_tools_call_internal_keeper_runtime_allows_keeper_internal_tool
+    () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_registry.clear ();
+      cleanup_dir base_path)
+    (fun () ->
+      Keeper_registry.clear ();
+      let keeper_name = "sangsu" in
+      let keeper_agent_name = Keeper_types.keeper_agent_name keeper_name in
+      let tool_access =
+        `Assoc
+          [
+            ("kind", `String "custom");
+            ("tools", `List [ `String "keeper_bash"; `String "keeper_time_now" ]);
+          ]
+      in
+      ignore
+        (Keeper_registry.register ~base_path keeper_name
+           (make_keeper_meta ~agent_name:keeper_agent_name ~tool_access
+              keeper_name));
+      let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+      let token = Masc_mcp.Auth.ensure_internal_keeper_token base_path in
+      let request = Yojson.Safe.to_string (`Assoc [
+        ("jsonrpc", `String "2.0");
+        ("id", `Int 120);
+        ("method", `String "tools/call");
+        ("params", `Assoc [
+          ("name", `String "keeper_bash");
+          ( "arguments",
+            `Assoc
+              [
+                ("_agent_name", `String keeper_agent_name);
+                ("cmd", `String "pwd");
+              ] );
+        ]);
+      ]) in
+      let response =
+        Mcp_eio.handle_request ~clock ~sw ~auth_token:token
+          ~internal_keeper_runtime:true state request
+      in
+      let result = result_fields_exn response in
+      Alcotest.(check bool) "keeper_bash is not an MCP error" false
+        (match List.assoc_opt "isError" result with
+         | Some (`Bool value) -> value
+         | _ -> Alcotest.fail "missing isError");
+      let structured = structured_content_exn response in
+      Alcotest.(check bool) "keeper_bash ok" true
+        Yojson.Safe.Util.(structured |> member "ok" |> to_bool))
+
 let test_handle_request_batch_rejected () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -2991,6 +3096,10 @@ let eio_tests = [
     test_handle_request_tools_call_records_keeper_usage_for_public_mcp;
   "handle tools/call blocks keeper internal tool", `Quick,
     test_handle_request_tools_call_blocks_keeper_internal_tool;
+  "handle tools/list internal keeper runtime includes keeper tools", `Quick,
+    test_handle_request_tools_list_internal_keeper_runtime_includes_keeper_internal_tools;
+  "handle tools/call internal keeper runtime allows keeper tool", `Quick,
+    test_handle_request_tools_call_internal_keeper_runtime_allows_keeper_internal_tool;
   "handle invalid json", `Quick, test_handle_request_invalid_json;
   "handle method not found", `Quick, test_handle_request_method_not_found;
   (* TRPG tool tests removed — modules archived *)

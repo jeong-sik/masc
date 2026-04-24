@@ -193,8 +193,8 @@ let public_tool_help_schemas () =
   Config.visible_tool_schemas ()
 
 let handle_list_tools_eio ?(profile = Full) ?names ?(include_hidden = false)
-    ?(include_deprecated = false) ?(include_usage = false) ?cursor
-    ?agent_id
+    ?(include_deprecated = false) ?(include_usage = false)
+    ?(include_keeper_internal = false) ?cursor ?agent_id
     state id =
   let usage_summary =
     if include_usage then
@@ -204,6 +204,7 @@ let handle_list_tools_eio ?(profile = Full) ?names ?(include_hidden = false)
   in
   let tools =
     TP.tool_schemas_for_profile ~include_hidden ~include_deprecated
+      ~include_keeper_internal
       state profile
     |> (match names with
        | None -> Fun.id
@@ -518,6 +519,7 @@ let handle_request
     ?(profile = Full)
     ?mcp_session_id
     ?auth_token
+    ?(internal_keeper_runtime = false)
     state
     request_str =
   try
@@ -600,6 +602,7 @@ let handle_request
                            in
                            handle_list_tools_eio ~profile:list_profile ?names
                              ~include_hidden ~include_deprecated ~include_usage
+                             ~include_keeper_internal:internal_keeper_runtime
                              ?cursor ?agent_id:auth_token state id)
                    | "tools/call" ->
                        (match req.params with
@@ -616,7 +619,11 @@ let handle_request
                               | Operator_remote | Managed_agent -> profile
                               | Full -> Full
                             in
-                            if not (TP.tool_allowed_in_profile state call_profile name) then
+                            if not
+                                 (TP.tool_allowed_in_profile
+                                    ~internal_keeper_runtime
+                                    state call_profile name)
+                            then
                                make_error ~id (-32601)
                                  (unavailable_tool_message name)
                              else (
@@ -630,7 +637,9 @@ let handle_request
                                     name (jsonrpc_id_label id)
                                     (match mcp_session_id with Some s -> s | None -> "none"));
                                let result =
-                                 handle_call_tool_eio ~sw ~clock ~profile ?mcp_session_id ?auth_token state id params
+                                 handle_call_tool_eio ~sw ~clock ~profile
+                                   ?mcp_session_id ?auth_token
+                                   ~internal_keeper_runtime state id params
                                in
                                let outcome = tool_call_outcome result in
                                Log.Mcp.emit Log.Info

@@ -1463,6 +1463,11 @@ let make_codex_cli_provider_cfg ?(model_id = "codex") () =
     ~kind:Llm_provider.Provider_config.Codex_cli
     ~model_id ~base_url:"" ()
 
+let make_claude_code_provider_cfg ?(model_id = "auto") () =
+  Llm_provider.Provider_config.make
+    ~kind:Llm_provider.Provider_config.Claude_code
+    ~model_id ~base_url:"" ()
+
 let make_openai_compat_provider_cfg ?(model_id = "gpt-4.1") () =
   Llm_provider.Provider_config.make
     ~kind:Llm_provider.Provider_config.OpenAI_compat
@@ -1690,6 +1695,60 @@ let test_resolve_tool_lane_for_kimi_cli_public_tools_with_agent_name_keeps_runti
         "expected kimi_cli public MCP tools with agent_name to use runtime MCP lane"
   | Error err -> Alcotest.fail (Oas.Error.to_string err)
 
+let test_resolve_tool_lane_for_claude_code_keeper_internal_tools_uses_runtime_mcp_policy () =
+  with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
+  with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token" @@ fun () ->
+  let tools = [ make_named_noop_tool "keeper_bash" ] in
+  match
+    Oas_worker_exec.resolve_tool_lane_for_oas_tools
+      ~agent_name:"keeper-sangsu-agent"
+      ~provider_cfg:(make_claude_code_provider_cfg ())
+      ~tools ()
+  with
+  | Ok (effective_tools, Some policy) ->
+      let masc_headers =
+        List.find_map
+          (function
+            | Llm_provider.Llm_transport.Http_server server
+              when String.equal server.name "masc" -> Some server.headers
+            | _ -> None)
+          policy.servers
+      in
+      Alcotest.(check int) "runtime lane strips inline tools" 0
+        (List.length effective_tools);
+      Alcotest.(check (list string)) "keeper internal tool allowed"
+        [ "keeper_bash" ] policy.allowed_tool_names;
+      Alcotest.(check (option string)) "keeper header preserved"
+        (Some "sangsu")
+        (Option.bind masc_headers (List.assoc_opt "x-masc-keeper-name"));
+      Alcotest.(check (option string)) "internal token preserved"
+        (Some "internal-keeper-token")
+        (Option.bind masc_headers (List.assoc_opt "x-masc-internal-token"))
+  | Ok (_, None) ->
+      Alcotest.fail
+        "expected claude_code keeper-internal tools to use runtime MCP lane"
+  | Error err -> Alcotest.fail (Oas.Error.to_string err)
+
+let test_resolve_tool_lane_for_kimi_cli_keeper_internal_tools_uses_runtime_mcp_policy () =
+  with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
+  with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token" @@ fun () ->
+  let tools = [ make_named_noop_tool "keeper_bash" ] in
+  match
+    Oas_worker_exec.resolve_tool_lane_for_oas_tools
+      ~agent_name:"keeper-sangsu-agent"
+      ~provider_cfg:(make_kimi_cli_provider_cfg ())
+      ~tools ()
+  with
+  | Ok (effective_tools, Some policy) ->
+      Alcotest.(check int) "runtime lane strips inline tools" 0
+        (List.length effective_tools);
+      Alcotest.(check (list string)) "keeper internal tool allowed"
+        [ "keeper_bash" ] policy.allowed_tool_names
+  | Ok (_, None) ->
+      Alcotest.fail
+        "expected kimi_cli keeper-internal tools to use runtime MCP lane"
+  | Error err -> Alcotest.fail (Oas.Error.to_string err)
+
 let test_resolve_tool_lane_for_kimi_cli_mixed_tools_keeps_public_runtime_subset () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
   let tools =
@@ -1741,6 +1800,22 @@ let test_resolve_tool_lane_for_codex_cli_internal_tools_rejects () =
   | Ok _ ->
       Alcotest.fail
         "expected codex_cli to reject keeper-internal tools without inline tool support"
+  | Error (Oas.Error.Config (Oas.Error.InvalidConfig { field; _ })) ->
+      Alcotest.(check string) "field" "tool_support" field
+  | Error err -> Alcotest.fail (Oas.Error.to_string err)
+
+let test_resolve_tool_lane_for_codex_cli_keeper_internal_tools_with_agent_rejects () =
+  with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
+  with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token" @@ fun () ->
+  match
+    Oas_worker_exec.resolve_tool_lane_for_oas_tools
+      ~agent_name:"keeper-sangsu-agent"
+      ~provider_cfg:(make_codex_cli_provider_cfg ())
+      ~tools:[ make_named_noop_tool "keeper_bash" ] ()
+  with
+  | Ok _ ->
+      Alcotest.fail
+        "expected codex_cli to reject keeper-internal tools requiring request-scoped headers"
   | Error (Oas.Error.Config (Oas.Error.InvalidConfig { field; _ })) ->
       Alcotest.(check string) "field" "tool_support" field
   | Error err -> Alcotest.fail (Oas.Error.to_string err)
@@ -1818,6 +1893,33 @@ let test_filter_candidate_providers_for_tool_support_drops_codex_cli_keeper_boun
   | _ ->
       Alcotest.failf "expected only kimi_cli provider to remain, got %d"
         (List.length filtered)
+
+let test_filter_candidate_providers_for_tool_support_keeps_header_capable_cli_for_keeper_internal_tools
+    () =
+  with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
+  with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token" @@ fun () ->
+  let tools = [ make_named_noop_tool "keeper_bash" ] in
+  let runtime_mcp_policy =
+    Masc_mcp.Oas_worker_named.runtime_mcp_policy_for_tools
+      ~keeper_name:"sangsu" tools
+  in
+  let filtered =
+    Masc_mcp.Oas_worker_named.filter_candidate_providers_for_tool_support
+      ~keeper_name:"sangsu"
+      ?runtime_mcp_policy
+      ~tools
+      ~require_tool_choice_support:true
+      ~require_tool_support:true
+      ~label:"tool_use_strict"
+      [
+        make_claude_code_provider_cfg ();
+        make_codex_cli_provider_cfg ();
+        make_kimi_cli_provider_cfg ();
+      ]
+  in
+  Alcotest.(check (list string)) "header-capable CLI providers remain"
+    [ "claude_code:auto"; "kimi_cli:kimi-for-coding" ]
+    (List.map Provider_tool_support.provider_debug_label filtered)
 
 let test_kimi_mcp_config_json_of_policy_filters_to_allowed_servers () =
   let policy =
@@ -3506,8 +3608,20 @@ let () =
         test_resolve_tool_lane_for_kimi_cli_mixed_tools_keeps_public_runtime_subset;
       Alcotest.test_case "public MCP tools on openai_compat stay inline" `Quick
         test_resolve_tool_lane_for_openai_public_tools_keeps_inline_tools;
+      Alcotest.test_case
+        "keeper-internal tools on claude_code use runtime MCP lane"
+        `Quick
+        test_resolve_tool_lane_for_claude_code_keeper_internal_tools_uses_runtime_mcp_policy;
+      Alcotest.test_case
+        "keeper-internal tools on kimi_cli use runtime MCP lane when keeper-bound"
+        `Quick
+        test_resolve_tool_lane_for_kimi_cli_keeper_internal_tools_uses_runtime_mcp_policy;
       Alcotest.test_case "keeper-internal tools on codex_cli are rejected" `Quick
         test_resolve_tool_lane_for_codex_cli_internal_tools_rejects;
+      Alcotest.test_case
+        "keeper-internal tools on codex_cli with keeper actor are rejected"
+        `Quick
+        test_resolve_tool_lane_for_codex_cli_keeper_internal_tools_with_agent_rejects;
       Alcotest.test_case "keeper-internal tools on kimi_cli are rejected" `Quick
         test_resolve_tool_lane_for_kimi_cli_internal_tools_rejects;
       Alcotest.test_case "optional keeper-internal tools on codex_cli drop to text" `Quick
@@ -3518,6 +3632,10 @@ let () =
         "provider-normalized filter drops codex keeper-bound actor tools"
         `Quick
         test_filter_candidate_providers_for_tool_support_drops_codex_cli_keeper_bound_actor_tools;
+      Alcotest.test_case
+        "provider-normalized filter keeps header-capable keeper-internal lanes"
+        `Quick
+        test_filter_candidate_providers_for_tool_support_keeps_header_capable_cli_for_keeper_internal_tools;
       Alcotest.test_case "kimi runtime MCP config keeps only allowed servers" `Quick
         test_kimi_mcp_config_json_of_policy_filters_to_allowed_servers;
       Alcotest.test_case "runtime MCP policy injects keeper agent header for masc server" `Quick

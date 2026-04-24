@@ -156,6 +156,9 @@ let public_mcp_tool_names_of_oas_tools =
 let public_mcp_tool_requires_bound_actor =
   Oas_worker_exec_transport.public_mcp_tool_requires_bound_actor
 
+let runtime_mcp_tool_requires_bound_actor =
+  Oas_worker_exec_transport.runtime_mcp_tool_requires_bound_actor
+
 let runtime_mcp_policy_with_masc_agent_name =
   Oas_worker_exec_transport.runtime_mcp_policy_with_masc_agent_name
 
@@ -173,6 +176,9 @@ let tool_names_are_public_mcp =
 
 let public_mcp_runtime_policy_of_tool_names =
   Oas_worker_exec_transport.public_mcp_runtime_policy_of_tool_names
+
+let runtime_mcp_policy_of_tool_names =
+  Oas_worker_exec_transport.runtime_mcp_policy_of_tool_names
 
 let provider_label =
   Oas_worker_exec_transport.provider_label

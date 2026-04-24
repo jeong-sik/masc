@@ -255,8 +255,23 @@ let public_mcp_tools_of_oas_tools (tools : Oas.Tool.t list) =
 let tool_names_are_public_mcp (tool_names : string list) =
   tool_names <> [] && List.for_all Tool_catalog.is_public_mcp tool_names
 
-let public_mcp_tool_requires_bound_actor tool_name =
+let runtime_mcp_tool_requires_bound_actor tool_name =
   Tool_catalog.requires_actor_binding tool_name
+
+let public_mcp_tool_requires_bound_actor tool_name =
+  Tool_catalog.is_public_mcp tool_name
+  && runtime_mcp_tool_requires_bound_actor tool_name
+
+let tool_names_are_runtime_mcp ?(allow_keeper_internal = false)
+    (tool_names : string list) =
+  tool_names <> []
+  && List.for_all
+    (fun tool_name ->
+      Tool_catalog.is_public_mcp tool_name
+      ||
+      (allow_keeper_internal
+       && Tool_catalog.is_on_surface Tool_catalog.Keeper_internal tool_name))
+    tool_names
 
 let trim_nonempty_string raw =
   let trimmed = String.trim raw in
@@ -268,18 +283,32 @@ let trim_nonempty value =
 let first_nonempty_env names =
   List.find_map (fun name -> Sys.getenv_opt name |> trim_nonempty) names
 
-let public_mcp_runtime_policy_of_tool_names ?agent_name (tool_names : string list) :
+let runtime_mcp_policy_of_tool_names ?agent_name
+    ?(allow_keeper_internal = false) (tool_names : string list) :
     Llm_provider.Llm_transport.runtime_mcp_policy option =
   let tool_names = dedupe_preserve_order tool_names in
-  if not (tool_names_are_public_mcp tool_names) then
+  let has_keeper_internal =
+    List.exists
+      (Tool_catalog.is_on_surface Tool_catalog.Keeper_internal)
+      tool_names
+  in
+  if
+    not (tool_names_are_runtime_mcp ~allow_keeper_internal tool_names)
+  then
     None
   else
     let agent_name = Option.bind agent_name trim_nonempty_string in
     let keeper_name = Option.bind agent_name keeper_name_of_agent_name in
+    let internal_keeper_token =
+      first_nonempty_env [ "MASC_INTERNAL_MCP_TOKEN" ]
+    in
+    if has_keeper_internal
+       && (Option.is_none keeper_name || Option.is_none internal_keeper_token)
+    then
+      None
+    else
     let masc_headers =
-      match
-        (keeper_name, first_nonempty_env [ "MASC_INTERNAL_MCP_TOKEN" ])
-      with
+      match (keeper_name, internal_keeper_token) with
       | Some keeper_name, Some token ->
           let agent_header =
             match agent_name with
@@ -311,6 +340,10 @@ let public_mcp_runtime_policy_of_tool_names ?agent_name (tool_names : string lis
         strict = true;
         disable_builtin_tools = true;
       }
+
+let public_mcp_runtime_policy_of_tool_names ?agent_name (tool_names : string list) :
+    Llm_provider.Llm_transport.runtime_mcp_policy option =
+  runtime_mcp_policy_of_tool_names ?agent_name tool_names
 
 let provider_label (provider_cfg : Llm_provider.Provider_config.t) =
   Printf.sprintf "%s:%s"
@@ -386,11 +419,23 @@ let resolve_tool_lane_for_oas_tools
   let requested_agent_name =
     Option.bind agent_name trim_nonempty_string
   in
+  let keeper_internal_tool_names =
+    match requested_agent_name with
+    | Some agent_name when Option.is_some (keeper_name_of_agent_name agent_name) ->
+        tools
+        |> List.filter (fun (tool : Oas.Tool.t) ->
+               Tool_catalog.is_on_surface Tool_catalog.Keeper_internal
+                 tool.schema.name)
+        |> List.map (fun (tool : Oas.Tool.t) -> tool.schema.name)
+        |> dedupe_preserve_order
+    | _ -> []
+  in
   let codex_keeper_bound_actor_tools =
     match provider_cfg.kind, requested_agent_name with
     | Llm_provider.Provider_config.Codex_cli, Some agent_name
       when Option.is_some (keeper_name_of_agent_name agent_name) ->
-        List.filter public_mcp_tool_requires_bound_actor public_tool_names
+        List.filter runtime_mcp_tool_requires_bound_actor
+          (public_tool_names @ keeper_internal_tool_names)
     | _ -> []
   in
   if codex_keeper_bound_actor_tools <> [] then
@@ -405,9 +450,23 @@ let resolve_tool_lane_for_oas_tools
         (fun tool_name -> not (public_mcp_tool_requires_bound_actor tool_name))
         public_tool_names
   in
+  let keeper_internal_tool_names =
+    if codex_keeper_bound_actor_tools = [] then
+      keeper_internal_tool_names
+    else
+      List.filter
+        (fun tool_name ->
+          not (runtime_mcp_tool_requires_bound_actor tool_name))
+        keeper_internal_tool_names
+  in
+  let runtime_tool_names =
+    dedupe_preserve_order (public_tool_names @ keeper_internal_tool_names)
+  in
   let runtime_mcp_policy =
-    public_mcp_runtime_policy_of_tool_names
-      ?agent_name:requested_agent_name public_tool_names
+    runtime_mcp_policy_of_tool_names
+      ?agent_name:requested_agent_name
+      ~allow_keeper_internal:(keeper_internal_tool_names <> [])
+      runtime_tool_names
     |> runtime_mcp_policy_for_provider ~provider_cfg
          ~agent_name:(Option.value ~default:"" requested_agent_name)
   in

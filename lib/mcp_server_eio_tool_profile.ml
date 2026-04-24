@@ -60,29 +60,42 @@ Use masc_heartbeat periodically; use @agent mentions in masc_broadcast. \
 Prefer worktrees for parallel work. \
 Use masc_tool_help to inspect tool contracts and prefer the smallest useful surface."
 
-let tool_schemas_for_profile ?(include_hidden = false) ?(include_deprecated = false)
-    _state profile =
+let tool_schemas_for_profile ?(include_hidden = false)
+    ?(include_deprecated = false) ?(include_keeper_internal = false) _state
+    profile =
   let schemas =
     match profile with
     | Full ->
         let show_all = include_hidden || Tool_catalog.full_surface_override () in
+        let keeper_internal_schemas =
+          if not include_keeper_internal then []
+          else
+            Tool_shard.keeper_model_tools
+            |> List.filter (fun (schema : Types.tool_schema) ->
+                   Tool_catalog.is_on_surface Tool_catalog.Keeper_internal
+                     schema.name
+                   && Tool_catalog.is_visible ~include_hidden:true
+                        ~include_deprecated schema.name)
+        in
         let all =
           Config.visible_tool_schemas
-            ~include_hidden:show_all ~include_deprecated ()
+            ~include_hidden:(show_all || include_keeper_internal)
+            ~include_deprecated ()
+          @ keeper_internal_schemas
+          |> dedupe_tool_schemas_by_name
         in
-        let without_internal =
+        let full_profile_tools =
           List.filter
             (fun (schema : Types.tool_schema) ->
-              not (Tool_catalog.is_on_surface Tool_catalog.Keeper_internal schema.name)
-              && not (Tool_catalog.is_on_surface Tool_catalog.System_internal schema.name))
+              let is_keeper_internal =
+                Tool_catalog.is_on_surface Tool_catalog.Keeper_internal schema.name
+              in
+              (not (Tool_catalog.is_on_surface Tool_catalog.System_internal schema.name))
+              && (if is_keeper_internal then include_keeper_internal
+                  else show_all || Tool_catalog.is_public_mcp schema.name))
             all
         in
-        if show_all then without_internal
-        else
-          List.filter
-            (fun (schema : Types.tool_schema) ->
-              Tool_catalog.is_public_mcp schema.name)
-            without_internal
+        full_profile_tools
     | Managed_agent ->
         let passthrough =
           Config.visible_tool_schemas ~include_hidden:true ~include_deprecated:false ()
@@ -96,11 +109,12 @@ let tool_schemas_for_profile ?(include_hidden = false) ?(include_deprecated = fa
   in
   schemas
 
-let tool_allowed_in_profile state profile tool_name =
+let tool_allowed_in_profile ?(internal_keeper_runtime = false) state profile
+    tool_name =
   match profile with
   | Full ->
       if Tool_catalog.is_on_surface Tool_catalog.Keeper_internal tool_name then
-        false
+        internal_keeper_runtime
       else
         let allowed_schema_names =
           Config.visible_tool_schemas ~include_hidden:true ~include_deprecated:true ()

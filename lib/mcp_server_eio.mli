@@ -107,6 +107,7 @@ val handle_request :
   ?profile:tool_profile ->
   ?mcp_session_id:string ->
   ?auth_token:string ->
+  ?internal_keeper_runtime:bool ->
   server_state ->
   string ->
   Yojson.Safe.t
@@ -119,6 +120,7 @@ val execute_tool_eio :
   ?profile:tool_profile ->
   ?mcp_session_id:string ->
   ?auth_token:string ->
+  ?internal_keeper_runtime:bool ->
   server_state ->
   name:string ->
   arguments:Yojson.Safe.t ->

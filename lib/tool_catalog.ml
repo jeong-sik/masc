@@ -318,12 +318,19 @@ let keeper_internal_metadata name =
     | Some _ -> Adapter
     | None -> Real
   in
-  hidden_active
+  let meta =
+    hidden_active
     ?canonical_name:replacement
     ?replacement
     ~allow_direct_call_when_hidden:false
     ~implementation_status
     "Keeper-internal tool. Use the keeper runtime or the public MASC equivalent when available."
+  in
+  {
+    meta with
+    required_permission = Some Types.CanBroadcast;
+    requires_actor_binding = Some true;
+  }
 
 let public_mcp_set : (string, unit) Hashtbl.t =
   let tbl = Hashtbl.create 64 in

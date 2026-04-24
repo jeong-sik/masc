@@ -157,19 +157,22 @@ let handle_request
     ?(profile = Full)
     ?mcp_session_id
     ?auth_token
+    ?(internal_keeper_runtime = false)
     state
     request_str =
   Mcp_server_eio_protocol.handle_request
-    ~handle_call_tool_eio:(fun ~sw ~clock ~profile ?mcp_session_id ?auth_token state id params ->
+    ~handle_call_tool_eio:(fun ~sw ~clock ~profile ?mcp_session_id ?auth_token
+        ~internal_keeper_runtime state id params ->
        Mcp_server_eio_call_tool.handle_call_tool_eio
          ~execute_tool_eio
          ~maybe_emit_resource_notifications:Mcp_server_eio_protocol.maybe_emit_resource_notifications
          ~broadcast_tools_list_changed:Mcp_server_eio_protocol.broadcast_tools_list_changed
-         ~sw ~clock ~profile ?mcp_session_id ?auth_token state id params)
+         ~sw ~clock ~profile ?mcp_session_id ?auth_token
+         ~internal_keeper_runtime state id params)
     ~handle_read_resource_eio:Mcp_server_eio_resource.handle_read_resource_eio
     ~clock ~sw
     ~profile:(profile : tool_profile :> Mcp_server_eio_types.tool_profile)
-    ?mcp_session_id ?auth_token state request_str
+    ?mcp_session_id ?auth_token ~internal_keeper_runtime state request_str
 
 (** Re-export transport mode from protocol for backward compatibility *)
 type transport_mode = Mcp_server_eio_protocol.transport_mode = Framed | LineDelimited

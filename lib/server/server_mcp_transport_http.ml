@@ -13,6 +13,7 @@ type runtime = Server_mcp_transport_http_types.runtime = {
     ?profile:tool_profile ->
     ?mcp_session_id:string ->
     ?auth_token:string ->
+    ?internal_keeper_runtime:bool ->
     string ->
     Yojson.Safe.t;
   clear_resource_subscriptions_for_session : string -> unit;
@@ -365,9 +366,14 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                 body_with_canonical_http_actor ~base_path
                                   ~auth_token request body_str
                               in
+                              let internal_keeper_runtime =
+                                Server_auth.is_verified_internal_keeper_request
+                                  ~base_path request
+                              in
                               let response_json =
                                 runtime.handle_request ?auth_token ~profile
-                                  ~mcp_session_id:session_id body_with_agent
+                                  ~mcp_session_id:session_id
+                                  ~internal_keeper_runtime body_with_agent
                               in
                               let protocol_version =
                                 get_protocol_version_for_session ~session_id request
@@ -750,9 +756,13 @@ let handle_post_messages ~deps request reqd =
                     body_with_canonical_http_actor ~base_path ~auth_token
                       request body_str
                   in
+                  let internal_keeper_runtime =
+                    Server_auth.is_verified_internal_keeper_request
+                      ~base_path request
+                  in
                   let response_json =
                     runtime.handle_request ~mcp_session_id:session_id
-                      ?auth_token body_with_agent
+                      ?auth_token ~internal_keeper_runtime body_with_agent
                   in
                   (match response_json with
                   | `Null -> ()

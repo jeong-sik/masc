@@ -75,6 +75,20 @@ let test_plain_narrative_short_preserved () =
     "short narrative unchanged"
     narrative_short (T.cap_blocker narrative_short)
 
+(* The on-wire stored form emitted by Oas_worker_named and consumed by
+   Keeper_supervisor is [masc_oas_error] with no outer "Internal error:"
+   wrapper (see keeper_supervisor.ml:63). This pins that contract — if a
+   future logging layer ever prepends "Internal error: ", the detector
+   needs to be updated in parallel. *)
+let test_wrapped_internal_error_is_treated_as_narrative () =
+  let wrapped = "Internal error: " ^ oas_error_payload_small in
+  let result = T.cap_blocker wrapped in
+  Alcotest.(check bool)
+    "wrapped form without [masc_oas_error] prefix → narrative cap"
+    true
+    (String.length result <= T.default_option_field_max_chars + 8
+     (* ellipsis byte-padding budget *))
+
 let test_plain_narrative_long_truncated () =
   let result = T.cap_blocker narrative_long in
   Alcotest.(check bool)
@@ -160,6 +174,8 @@ let () =
             test_plain_narrative_short_preserved;
           Alcotest.test_case "long truncated at narrative cap" `Quick
             test_plain_narrative_long_truncated;
+          Alcotest.test_case "wrapped 'Internal error:' → narrative" `Quick
+            test_wrapped_internal_error_is_treated_as_narrative;
         ] );
       ( "idempotence",
         [ Alcotest.test_case "four shapes" `Quick test_idempotence ] );

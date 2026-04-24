@@ -126,6 +126,9 @@ let install_moon_clock () =
 ;;
 
 let () =
+  Dom_html.document##.documentElement##setAttribute
+    (Js.string "lang")
+    (Js.string "en");
   install_theme_listener ();
   Start.start ~bind_to_element_with_id:"app" Dashboard_bonsai_lib.App.root;
   Dashboard_bonsai_lib.Logs_fetch.run ();

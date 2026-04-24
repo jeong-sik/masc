@@ -213,6 +213,14 @@ let view ?(keepers : Keepers_types.response = Keepers_types.fixture) () =
     | [] -> polylines_static ()
     | live_keepers -> polylines_of_keepers live_keepers
   in
+  let meta_lines =
+    match keepers.keepers with
+    | [] -> [ "luna 38 · brass-owl 67"; "moth 12 · ash ×" ]
+    | live -> meta_lines_of live
+  in
+  let aria_desc =
+    "Context usage chart over 60 minutes. " ^ String.concat ~sep:"; " meta_lines
+  in
   let svg =
     Node.create_svg "svg"
       ~attrs:
@@ -220,14 +228,10 @@ let view ?(keepers : Keepers_types.response = Keepers_types.fixture) () =
         ; svg_a "preserveAspectRatio" "none"
         ; Style.svg
         ; Attr.role "img"
-        ; Attr.create "aria-label" "Context usage chart over 60 minutes"
+        ; Attr.create "aria-label" aria_desc
         ]
       (hairlines @ guides @ polylines)
   in
-  let meta_lines =
-    match keepers.keepers with
-    | [] -> [ "luna 38 · brass-owl 67"; "moth 12 · ash ×" ]
-    | live -> meta_lines_of live
   in
   Node.div
     ~attrs:[ Swim.Style.swim ]

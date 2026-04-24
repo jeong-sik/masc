@@ -1442,6 +1442,13 @@ let view_heartbeat ?(entries : Logs_types.entry list = []) () =
     | [] -> heartbeat_bars
     | _ -> heartbeat_bars_of_entries entries
   in
+  let active = List.count ~f:(fun (_, l) -> l <> `Idle) bars in
+  let max_height = List.fold bars ~init:0 ~f:(fun acc (h, _) -> Int.max acc h) in
+  let aria_desc =
+    Printf.sprintf
+      "Cycle pulse: %d of 60 ticks active, peak density %d"
+      active max_height
+  in
   let bar i (height, level) =
     let cls =
       match level with
@@ -1475,7 +1482,7 @@ let view_heartbeat ?(entries : Logs_types.entry list = []) () =
     Node.div ~attrs:(Attr.create "aria-hidden" "true" :: title_attr :: style :: base_attrs) []
   in
   Node.div
-    ~attrs:[ Style.heartbeat; Attr.role "img"; Attr.create "aria-label" "Cycle pulse: event density across last 60 ticks" ]
+    ~attrs:[ Style.heartbeat; Attr.role "img"; Attr.create "aria-label" aria_desc ]
     [ Node.div
         ~attrs:[ Style.heartbeat_head ]
         [ Node.span

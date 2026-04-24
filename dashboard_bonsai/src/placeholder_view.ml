@@ -254,10 +254,10 @@ let component ~(route : Route.t) (_graph @ local) =
       ; Node.div
           ~attrs:[ Style.cta ]
           [ Node.a
-              ~attrs:[ Attr.href (Route.path Logs); Style.btn; Style.btn_primary ]
+              ~attrs:[ Attr.href (Route.path Logs); Style.btn; Style.btn_primary; Attr.create "aria-label" "Open keeper journal (logs)" ]
               [ Node.text "journal" ]
           ; Node.a
-              ~attrs:[ Attr.href "/dashboard/"; Style.btn ]
+              ~attrs:[ Attr.href "/dashboard/"; Style.btn; Attr.create "aria-label" "Open legacy Bonsai dashboard" ]
               [ Node.text "legacy" ]
           ; Node.span
               ~attrs:[ Style.cta_note ]

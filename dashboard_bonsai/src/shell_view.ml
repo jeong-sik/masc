@@ -80,7 +80,7 @@ stylesheet
     gap: 10px;
     color: var(--text-dim);
     font-family: var(--font-ui, 'Noto Sans KR', sans-serif);
-    font-size: 10px;
+    font-size: 11px;
     letter-spacing: 0.22em;
     text-transform: uppercase;
     overflow: hidden;
@@ -247,7 +247,7 @@ stylesheet
   .tail {
     margin-left: auto;
     font-family: var(--font-mono, 'JetBrains Mono', monospace);
-    font-size: 10px;
+    font-size: 11px;
     color: var(--accent-blood);
   }
 
@@ -335,7 +335,7 @@ stylesheet
 
   .aside_title .r {
     font-family: var(--font-mono, 'JetBrains Mono', monospace);
-    font-size: 10px;
+    font-size: 11px;
     color: var(--text-dim);
     margin-left: auto;
     font-variant-numeric: tabular-nums;
@@ -406,7 +406,7 @@ stylesheet
     display: flex;
     justify-content: space-between;
     font-family: var(--font-mono, 'JetBrains Mono', monospace);
-    font-size: 10px;
+    font-size: 11px;
     color: var(--text-dim);
     margin-bottom: 4px;
     font-variant-numeric: tabular-nums;
@@ -465,7 +465,7 @@ stylesheet
 
   .flame {
     font-family: var(--font-mono, 'JetBrains Mono', monospace);
-    font-size: 10px;
+    font-size: 11px;
     color: var(--text-bright);
     border: 1px solid rgba(120,100,80,0.14);
     background: #0c0806;
@@ -515,7 +515,7 @@ stylesheet
 
   .event_time {
     font-family: var(--font-mono, 'JetBrains Mono', monospace);
-    font-size: 10px;
+    font-size: 11px;
     color: var(--text-dim);
     font-variant-numeric: tabular-nums;
   }
@@ -539,7 +539,7 @@ stylesheet
 
   .event_body code {
     font-family: var(--font-mono, 'JetBrains Mono', monospace);
-    font-size: 10px;
+    font-size: 11px;
     color: var(--accent-brass);
     background: rgba(212,169,64,0.08);
     padding: 0 5px;
@@ -898,7 +898,7 @@ let focus_card ~(shell : Overview_types.response) ~(active : Route.t) =
 let flame_block ?(cls = Style.flame_block) ~flex text =
   Node.div
     ~attrs:
-      [ cls
+      [ Attr.create "aria-hidden" "true"; cls
       ; Attr.style
           (Css_gen.create
              ~field:"flex-grow"
@@ -911,7 +911,7 @@ let flame () =
   Node.div
     [ aside_title ~right:"2.40s" "Last turn"
     ; Node.div
-        ~attrs:[ Style.flame ]
+        ~attrs:[ Style.flame; Attr.role "img"; Attr.create "aria-label" "Flame graph: last turn timing breakdown" ]
         [ Node.div
             ~attrs:[ Style.flame_row ]
             [ flame_block ~flex:240. "bonsai.shell()" ]
@@ -951,7 +951,7 @@ let watch_feed () =
   Node.div
     [ aside_title ~right:"live" "Watch"
     ; Node.div
-        ~attrs:[ Style.events ]
+        ~attrs:[ Style.events; Attr.role "log"; Attr.create "aria-label" "Watch event feed" ]
         [ event ~tone:`Ok "now"
             [ Node.code [ Node.text "shell" ]
             ; Node.text " . dashboard_v2 chrome mounted."
@@ -1002,7 +1002,7 @@ let view ?(shell = Overview_types.fixture) ?hud ?aside ~(active : Route.t) (chil
     ; nav ~active
     ; Node.div
         ~attrs:[ Style.main; Attr.role "main" ]
-        [ Node.div ~attrs:[ Style.hud; Attr.create "aria-label" "Key metrics" ] hud_nodes
+        [ Node.div ~attrs:[ Style.hud; Attr.role "status"; Attr.create "aria-label" "Key metrics" ] hud_nodes
         ; Node.div ~attrs:[ Style.page; Attr.id "main-content" ] children
         ]
     ; aside_node

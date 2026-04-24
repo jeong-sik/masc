@@ -63,6 +63,7 @@ type tail_color = [ `Brass | `Blood ]
 
 let view
       ?(sub : string option)
+      ?(sub_lang : string option)
       ?(tail : (string * tail_color) option)
       ~(eyebrow : string)
       ~(title : string)
@@ -79,9 +80,14 @@ let view
       head @ [ Node.span ~attrs:[ Style.tail_blood ] [ Node.text txt ] ]
   in
   let sub_node : Node.t list =
+    let sub_attrs =
+      match sub_lang with
+      | Some lang -> [ Style.sub; Attr.create "lang" lang ]
+      | None -> [ Style.sub ]
+    in
     match sub with
     | Some s when String.length s > 0 ->
-      [ Node.p ~attrs:[ Style.sub ] [ Node.text s ] ]
+      [ Node.p ~attrs:sub_attrs [ Node.text s ] ]
     | _ -> []
   in
   Node.div

@@ -14,78 +14,6 @@ module Style =
 [%css
 stylesheet
   {|
-  .root {
-    display: grid;
-    grid-template-columns: 232px 1fr;
-    min-height: 100vh;
-    background:
-      radial-gradient(ellipse 60% 40% at 12% 8%, rgba(138,106,40,0.06), transparent 55%),
-      radial-gradient(ellipse 40% 50% at 92% 95%, rgba(58,90,72,0.05), transparent 60%),
-      linear-gradient(170deg, #0e0a08 0%, #140c08 60%, #080504 100%);
-    color: var(--text-primary);
-    font-family: 'Noto Sans KR', 'EB Garamond', sans-serif;
-  }
-
-  .main {
-    padding: 3rem 3rem 2rem;
-    display: flex;
-    flex-direction: column;
-    gap: 1.5rem;
-    overflow: auto;
-  }
-
-  .eyebrow {
-    font-family: 'Noto Sans KR', sans-serif;
-    font-size: 11px;
-    letter-spacing: 0.25em;
-    text-transform: uppercase;
-    color: var(--text-dim);
-    margin: 0;
-  }
-
-  .title {
-    font-family: 'Cinzel', serif;
-    font-size: 32px;
-    letter-spacing: 0.16em;
-    color: var(--text-bright);
-    text-transform: uppercase;
-    margin: 0;
-  }
-
-  .title_brass { color: var(--accent-brass); }
-
-  .sub {
-    font-family: 'EB Garamond', serif;
-    font-style: italic;
-    font-size: 14px;
-    color: var(--text-primary);
-    margin: 0;
-    max-width: 620px;
-  }
-
-  .meta_strip {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 24px;
-    padding: 12px 16px;
-    border: 1px solid var(--border-main);
-    background: linear-gradient(180deg, rgba(42,20,14,0.35), rgba(20,12,8,0.65));
-    font-family: 'JetBrains Mono', ui-monospace, monospace;
-    font-size: 11px;
-    color: var(--text-dim);
-  }
-  .meta_item { display: flex; align-items: baseline; gap: 8px; }
-  .meta_k {
-    font-family: 'Noto Sans KR', sans-serif;
-    font-size: 11px;
-    letter-spacing: 0.2em;
-    text-transform: uppercase;
-    color: var(--text-dim);
-  }
-  .meta_v { font-variant-numeric: tabular-nums; color: var(--text-bright); }
-  .meta_v_ok { color: var(--status-ok); }
-  .meta_v_brass { color: var(--accent-brass); }
-
   .quiet {
     padding: 40px 20px;
     text-align: center;
@@ -172,19 +100,6 @@ stylesheet
     background: var(--status-ok);
   }
 
-  .status_pill {
-    font-family: 'JetBrains Mono', ui-monospace, monospace;
-    font-size: 11px;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    padding: 2px 6px;
-    border: 1px solid var(--border-main);
-    text-align: center;
-    color: var(--text-dim);
-  }
-  .status_active { color: var(--status-ok); border-color: var(--status-ok); background: rgba(90,122,58,0.12); }
-  .status_paused { color: var(--status-warn); border-color: var(--status-warn); background: rgba(160,106,26,0.10); }
-  .status_done { color: var(--accent-brass); border-color: var(--accent-brass); background: rgba(138,106,40,0.12); }
 
   .tasks {
     font-family: 'JetBrains Mono', ui-monospace, monospace;
@@ -232,6 +147,16 @@ stylesheet
     font-family: 'JetBrains Mono', ui-monospace, monospace;
     font-size: 11px;
     color: var(--text-dim);
+  }
+
+  @media (max-width: 760px) {
+    .goal_head {
+      grid-template-columns: 1fr;
+      gap: 8px;
+    }
+    .goal_horizon { text-align: left; }
+    .conv_bar_wrap { text-align: left; }
+    .goal_indent { margin-left: 12px; padding-left: 10px; }
   }
 |}]
 
@@ -468,6 +393,7 @@ let render ~(shell : Overview_types.response) (r : Goals_types.response) : Node.
           "config-driven goal forest. 각 node는 goal 하나 + 직속 \
            task들 + 하위 goals. convergence는 child goals의 평균 \
            progress."
+        ~sub_lang:"ko"
         ()
     ; view_meta_strip r
     ; (match r.tree with

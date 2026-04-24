@@ -55,7 +55,7 @@ stylesheet
     position: relative;
     height: 24px;
     font-family: 'JetBrains Mono', ui-monospace, monospace;
-    font-size: 10px;
+    font-size: 11px;
     color: var(--text-dim);
   }
   .tick {
@@ -123,7 +123,7 @@ stylesheet
     top: 9px;
     height: 14px;
     font-family: 'JetBrains Mono', ui-monospace, monospace;
-    font-size: 10px;
+    font-size: 11px;
     color: var(--bg-deep);
     padding: 0 4px;
     line-height: 14px;

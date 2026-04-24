@@ -50,7 +50,7 @@ stylesheet
     gap: 14px;
     margin-top: 10px;
     font-family: 'JetBrains Mono', ui-monospace, monospace;
-    font-size: 10px;
+    font-size: 11px;
     color: var(--text-dim);
     letter-spacing: 0.04em;
   }

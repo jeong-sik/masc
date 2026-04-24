@@ -18,54 +18,6 @@ module Style =
 [%css
 stylesheet
   {|
-  .root {
-    display: grid;
-    grid-template-columns: 232px 1fr;
-    min-height: 100vh;
-    background:
-      radial-gradient(ellipse 60% 40% at 12% 8%, rgba(138,106,40,0.06), transparent 55%),
-      radial-gradient(ellipse 40% 50% at 92% 95%, rgba(58,58,90,0.06), transparent 60%),
-      linear-gradient(170deg, #0e0a08 0%, #140c08 60%, #080504 100%);
-    color: var(--text-primary);
-    font-family: 'Noto Sans KR', 'EB Garamond', sans-serif;
-  }
-
-  .main {
-    padding: 3rem 3rem 2rem;
-    display: flex;
-    flex-direction: column;
-    gap: 1.5rem;
-    overflow: auto;
-  }
-
-  .eyebrow {
-    font-family: 'Noto Sans KR', sans-serif;
-    font-size: 11px;
-    letter-spacing: 0.25em;
-    text-transform: uppercase;
-    color: var(--text-dim);
-    margin: 0;
-  }
-
-  .title {
-    font-family: 'Cinzel', serif;
-    font-size: 32px;
-    letter-spacing: 0.16em;
-    color: var(--text-bright);
-    text-transform: uppercase;
-    margin: 0;
-  }
-  .title_brass { color: var(--accent-brass); }
-
-  .sub {
-    font-family: 'EB Garamond', serif;
-    font-style: italic;
-    font-size: 14px;
-    color: var(--text-primary);
-    margin: 0;
-    max-width: 680px;
-  }
-
   .grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -229,7 +181,7 @@ let paused_pill ~(paused : bool) =
 let view_hero_panel (r : Overview_types.response) =
   let s = r.status in
   Node.div
-    ~attrs:[ Style.panel ]
+    ~attrs:[ Style.panel; Attr.role "group"; Attr.create "aria-label" "Runtime identity panel" ]
     [ Node.h2 ~attrs:[ Style.panel_title ] [ Node.text "runtime · identity" ]
     ; Node.div
         ~attrs:[ Style.kv_row; Attr.role "list"; Attr.create "aria-label" "Runtime identity" ]
@@ -277,7 +229,7 @@ let view_hero_panel (r : Overview_types.response) =
 let view_build_panel (r : Overview_types.response) =
   let b = r.status.build in
   Node.div
-    ~attrs:[ Style.panel ]
+    ~attrs:[ Style.panel; Attr.role "group"; Attr.create "aria-label" "Build release panel" ]
     [ Node.h2 ~attrs:[ Style.panel_title ] [ Node.text "build · release" ]
     ; Node.div
         ~attrs:[ Style.kv_row; Attr.role "list"; Attr.create "aria-label" "Build and release" ]
@@ -327,26 +279,26 @@ let view_counts_panel (r : Overview_types.response) =
     else Printf.sprintf "%d / %d" c.keepers r.configured_keepers
   in
   Node.div
-    ~attrs:[ Style.panel ]
+    ~attrs:[ Style.panel; Attr.role "group"; Attr.create "aria-label" "Fleet counts panel" ]
     [ Node.h2 ~attrs:[ Style.panel_title ] [ Node.text "fleet · counts" ]
     ; Node.div
         ~attrs:[ Style.counts ]
         [ Node.div
-            ~attrs:[ Style.count_cell ]
+            ~attrs:[ Style.count_cell; Attr.create "aria-label" ("keepers: " ^ keeper_label) ]
             [ Node.div ~attrs:[ Style.count_k ] [ Node.text "keepers" ]
             ; Node.div
                 ~attrs:[ Style.count_v ]
                 [ Node.text keeper_label ]
             ]
         ; Node.div
-            ~attrs:[ Style.count_cell ]
+            ~attrs:[ Style.count_cell; Attr.create "aria-label" ("tasks: " ^ Printf.sprintf "%d" c.tasks) ]
             [ Node.div ~attrs:[ Style.count_k ] [ Node.text "tasks" ]
             ; Node.div
                 ~attrs:[ Style.count_v ]
                 [ Node.text (Printf.sprintf "%d" c.tasks) ]
             ]
         ; Node.div
-            ~attrs:[ Style.count_cell ]
+            ~attrs:[ Style.count_cell; Attr.create "aria-label" ("agents: " ^ Printf.sprintf "%d" c.agents) ]
             [ Node.div ~attrs:[ Style.count_k ] [ Node.text "agents" ]
             ; Node.div
                 ~attrs:[ Style.count_v ]
@@ -380,7 +332,7 @@ let view_meta_panel (r : Overview_types.response) =
         [ Node.text "no dominant belief recorded." ]
   in
   Node.div
-    ~attrs:[ Style.panel ]
+    ~attrs:[ Style.panel; Attr.role "group"; Attr.create "aria-label" "Meta cognition panel" ]
     [ Node.h2
         ~attrs:[ Style.panel_title ]
         [ Node.text "meta · cognition" ]
@@ -433,9 +385,10 @@ let render (r : Overview_types.response) : Node.t =
           "runtime snapshot — identity, build, fleet counts, \
            meta-cognition. shell endpoint의 압축 projection으로, \
            깊은 진단은 각 tab에서 확인."
+        ~sub_lang:"ko"
         ()
     ; Node.div
-        ~attrs:[ Style.grid ]
+        ~attrs:[ Style.grid; Attr.role "region"; Attr.create "aria-label" "Overview panels" ]
         [ view_hero_panel r
         ; view_build_panel r
         ; view_counts_panel r

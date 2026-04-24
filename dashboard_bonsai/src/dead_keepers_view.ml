@@ -20,80 +20,6 @@ module Style =
 [%css
 stylesheet
   {|
-  .root {
-    display: grid;
-    grid-template-columns: 232px 1fr;
-    min-height: 100vh;
-    background:
-      radial-gradient(ellipse 60% 40% at 12% 8%, rgba(212,169,64,0.06), transparent 55%),
-      radial-gradient(ellipse 40% 50% at 92% 95%, rgba(232,80,80,0.08), transparent 60%),
-      linear-gradient(170deg, #0e0a08 0%, #140c08 60%, #080504 100%);
-    color: var(--text-primary);
-    font-family: 'Noto Sans KR', 'EB Garamond', sans-serif;
-  }
-
-  .main {
-    padding: 3rem 3rem 2rem;
-    display: flex;
-    flex-direction: column;
-    gap: 1.5rem;
-    overflow: auto;
-  }
-
-  .eyebrow {
-    font-family: 'Noto Sans KR', sans-serif;
-    font-size: 11px;
-    letter-spacing: 0.25em;
-    text-transform: uppercase;
-    color: var(--text-dim);
-    margin: 0;
-  }
-
-  .title {
-    font-family: 'Cinzel', serif;
-    font-size: 32px;
-    letter-spacing: 0.16em;
-    color: var(--text-bright);
-    text-transform: uppercase;
-    margin: 0;
-  }
-
-  .title_blood { color: var(--accent-blood); }
-
-  .sub {
-    font-family: 'EB Garamond', serif;
-    font-style: italic;
-    font-size: 14px;
-    color: var(--text-primary);
-    margin: 0;
-    max-width: 620px;
-  }
-
-  .meta_strip {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 24px;
-    padding: 12px 16px;
-    border: 1px solid var(--border-main);
-    background: linear-gradient(180deg, rgba(42,20,14,0.35), rgba(20,12,8,0.65));
-    font-family: 'JetBrains Mono', ui-monospace, monospace;
-    font-size: 11px;
-    color: var(--text-dim);
-  }
-  .meta_item { display: flex; align-items: baseline; gap: 8px; }
-  .meta_k {
-    font-family: 'Noto Sans KR', sans-serif;
-    font-size: 11px;
-    letter-spacing: 0.2em;
-    text-transform: uppercase;
-    color: var(--text-dim);
-  }
-  .meta_v {
-    font-variant-numeric: tabular-nums;
-    color: var(--text-bright);
-  }
-  .meta_v_blood { color: var(--accent-blood); }
-
   .quiet {
     padding: 40px 20px;
     text-align: center;
@@ -157,6 +83,7 @@ let render ~(shell : Overview_types.response) (keepers : Keepers_types.response)
           "fleet의 추락한 자들. 이 목록은 Keepers 엔드포인트의 status=Dead \
            필터링 — 별도 endpoint 없음. 각 slot은 마지막으로 관측된 \
            state와 latency를 기록한다."
+        ~sub_lang:"ko"
         ()
     ; view_meta_strip ~total ~dead:dead_n ~synced
     ; view_dead_list dead

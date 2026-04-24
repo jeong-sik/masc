@@ -163,6 +163,25 @@ let transition_reason_to_string = function
 let default_belief_summary_max_chars = 400
 let default_option_field_max_chars = 200
 
+(* #9933: structured error payloads (e.g. [masc_oas_error] JSON, or
+   Oas.Error.to_string's "Internal error: [masc_oas_error]" wrapper)
+   must NOT be truncated at the narrative budget, or the JSON body is
+   cut mid-key and downstream consumers (dashboard, retry classifier,
+   log search) see a partial kind=oas_timeout_budget record with the
+   budget-underscore value missing, and cannot recover the diagnostic
+   fields. The operator ends up re-filing the same triage ticket
+   because the budget value, elapsed time, and source field never
+   reach them. *)
+let masc_oas_error_prefix = "[masc_oas_error]"
+let masc_oas_error_wrapped_prefix = "Internal error: " ^ masc_oas_error_prefix
+
+(** Safety cap for structured payloads. ~2000 chars fits a
+    Yojson-encoded [masc_internal_error] record of any current variant
+    plus the wrapping prefix, with headroom for future fields. Past
+    this the payload is pathological and we still cap it rather than
+    store unbounded blobs. *)
+let masc_oas_error_max_chars = 2000
+
 let truncate_string ~max_chars s =
   String_util.utf8_safe ~max_bytes:(max_chars + 3) ~suffix:"…" s |> String_util.to_string
 
@@ -171,6 +190,34 @@ let truncate_option ~max_chars = function
   | Some s ->
       Some (String_util.utf8_safe ~max_bytes:(max_chars + 3) ~suffix:"…" s
             |> String_util.to_string)
+
+let has_masc_oas_error_prefix (s : string) : bool =
+  let has_prefix prefix =
+    let pl = String.length prefix in
+    String.length s >= pl && String.sub s 0 pl = prefix
+  in
+  has_prefix masc_oas_error_prefix
+  || has_prefix masc_oas_error_wrapped_prefix
+
+(** [cap_blocker s] returns [s] unchanged when it is a structured
+    [masc_oas_error] payload that fits inside [masc_oas_error_max_chars].
+    Narrative strings fall through to the normal option-field cap so
+    dashboards / logs still see bounded text. This is the #9933 fix
+    for budget-underscore truncation. Idempotent. *)
+let cap_blocker
+    ?(option_max_chars = default_option_field_max_chars)
+    (s : string) : string =
+  let trimmed = String.trim s in
+  let has_prefix = has_masc_oas_error_prefix trimmed in
+  if has_prefix && String.length s <= masc_oas_error_max_chars then s
+  else if has_prefix then
+    truncate_string ~max_chars:masc_oas_error_max_chars s
+  else
+    truncate_string ~max_chars:option_max_chars s
+
+let cap_blocker_option ?option_max_chars = function
+  | None -> None
+  | Some s -> Some (cap_blocker ?option_max_chars s)
 
 let cap_social_state
     ?(belief_max_chars = default_belief_summary_max_chars)
@@ -184,6 +231,7 @@ let cap_social_state
       truncate_option ~max_chars:option_max_chars state.active_desire;
     current_intention =
       truncate_option ~max_chars:option_max_chars state.current_intention;
-    blocker = truncate_option ~max_chars:option_max_chars state.blocker;
+    blocker =
+      cap_blocker_option ~option_max_chars state.blocker;
     need = truncate_option ~max_chars:option_max_chars state.need;
   }

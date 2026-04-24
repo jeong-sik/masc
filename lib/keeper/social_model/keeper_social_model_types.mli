@@ -64,15 +64,36 @@ val transition_reason_to_string : transition_reason -> string
 val default_belief_summary_max_chars : int
 val default_option_field_max_chars : int
 
+(** #9933: safety cap for structured [masc_oas_error] payloads. Larger
+    than the narrative cap so JSON bodies survive intact. *)
+val masc_oas_error_max_chars : int
+
+(** Prefix the structured-payload branch of {!cap_blocker} matches. *)
+val masc_oas_error_prefix : string
+
 (** Truncate a string to [max_chars] characters; append "…" when the
     limit bites. Shared by [cap_social_state] and the checkpoint load
     path so both directions honour the same budget. Idempotent. *)
 val truncate_string : max_chars:int -> string -> string
 
+(** [cap_blocker s] preserves structured [masc_oas_error] payloads up
+    to {!masc_oas_error_max_chars}, including the
+    ["Internal error: [masc_oas_error]"] wrapper emitted by
+    [Oas.Error.to_string], so downstream diagnostics (dashboard, retry
+    classifier, log search) can read the JSON body intact. Narrative
+    strings fall through to {!default_option_field_max_chars}.
+    Idempotent. See #9933. *)
+val cap_blocker : ?option_max_chars:int -> string -> string
+
+(** Option-aware variant of {!cap_blocker}. *)
+val cap_blocker_option : ?option_max_chars:int -> string option -> string option
+
 (** Bound the narrative fields of a [social_state] before it leaves the
     speech model. Caps [belief_summary] and each option field with an
-    ellipsis marker when they exceed the budget. Other fields pass
-    through unchanged. Idempotent. *)
+    ellipsis marker when they exceed the budget. The [blocker] field
+    is special-cased via {!cap_blocker} so structured
+    [masc_oas_error] payloads are preserved intact (#9933).
+    Idempotent. *)
 val cap_social_state :
   ?belief_max_chars:int ->
   ?option_max_chars:int ->

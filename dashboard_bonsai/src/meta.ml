@@ -35,8 +35,8 @@ stylesheet
 
   .k {
     font-family: 'Noto Sans KR', sans-serif;
-    font-size: 9px;
-    letter-spacing: 0.24em;
+    font-size: 11px;
+    letter-spacing: 0.2em;
     text-transform: uppercase;
     color: var(--text-dim, #6a5848);
   }

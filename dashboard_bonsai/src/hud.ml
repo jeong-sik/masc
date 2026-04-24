@@ -83,8 +83,8 @@ stylesheet
 
   .k {
     font-family: 'Noto Sans KR', -apple-system, sans-serif;
-    font-size: 9px;
-    letter-spacing: 0.25em;
+    font-size: 11px;
+    letter-spacing: 0.2em;
     text-transform: uppercase;
     color: var(--text-dim);
   }

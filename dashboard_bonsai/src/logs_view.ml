@@ -1358,8 +1358,8 @@ let view_entry ~is_first (e : Logs_types.entry) =
   in
   let sigil_attrs =
     match sigil_class e.normalized_level with
-    | None -> [ Style.sigil ]
-    | Some c -> [ Style.sigil; c ]
+    | None -> [ Style.sigil; Attr.create "aria-hidden" "true" ]
+    | Some c -> [ Style.sigil; c; Attr.create "aria-hidden" "true" ]
   in
   let message_attrs =
     if is_first then [ Style.message; Style.message_lead ] else [ Style.message ]

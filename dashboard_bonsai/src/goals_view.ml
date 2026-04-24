@@ -202,7 +202,7 @@ let view_task_chip (t : Goals_types.task) =
   Node.div
     ~attrs:[ Style.task ]
     [ Node.span
-        ~attrs:[ Style.task_dot; task_dot_class t.status ]
+        ~attrs:[ Style.task_dot; task_dot_class t.status; Attr.create "aria-hidden" "true" ]
         [ Node.text (task_glyph t.status) ]
     ; Node.span ~attrs:[ Style.task_title ] [ Node.text t.title ]
     ]

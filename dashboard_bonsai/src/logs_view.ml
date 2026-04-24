@@ -281,7 +281,7 @@ stylesheet
     font-size: 11px;
     letter-spacing: 0.2em;
     text-transform: uppercase;
-    padding: 4px 12px;
+    padding: 7px 12px;
     border-radius: 999px;
     color: var(--text-dim);
     cursor: pointer;
@@ -332,7 +332,7 @@ stylesheet
     font-size: 11px;
     letter-spacing: 0.2em;
     text-transform: uppercase;
-    padding: 5px 12px;
+    padding: 7px 12px;
     border: 1px solid var(--border-main);
     border-radius: 2px;
     background: transparent;
@@ -859,7 +859,7 @@ stylesheet
     font-size: 11px;
     letter-spacing: 0.22em;
     text-transform: uppercase;
-    padding: 3px 6px;
+    padding: 7px 8px;
     background: var(--bg-panel);
     border: 1px solid var(--border-main);
     color: var(--text-dim);

@@ -12,6 +12,12 @@ type command_result =
   ; status : Unix.process_status
   }
 
+(* Read-only git probe timeout. Large monorepos (~/me, kidsnote-backend)
+   repeatedly trip a 5 s budget on first probe after filesystem cache
+   eviction; 15 s matches [server_dashboard_http_runtime_info]'s sibling
+   probe that was bumped for the same reason in #9765/#9775. *)
+let read_only_probe_timeout_sec = 15.0
+
 let run_git ~timeout_sec ~clone_path args =
   let argv = [ "git"; "-C"; clone_path; "--no-optional-locks" ] @ args in
   let status, output =
@@ -195,7 +201,7 @@ let inspect
            ])
   else
     let inside =
-      run_git ~timeout_sec:5.0 ~clone_path [ "rev-parse"; "--is-inside-work-tree" ]
+      run_git ~timeout_sec:read_only_probe_timeout_sec ~clone_path [ "rev-parse"; "--is-inside-work-tree" ]
     in
     if not inside.ok then
       common_fields "not_git_repo" false
@@ -212,15 +218,15 @@ let inspect
       in
       let dirty = status.ok && String.trim status.output <> "" in
       let branch =
-        run_git ~timeout_sec:5.0 ~clone_path [ "branch"; "--show-current" ]
+        run_git ~timeout_sec:read_only_probe_timeout_sec ~clone_path [ "branch"; "--show-current" ]
         |> fun r -> if r.ok then first_line_opt r.output else None
       in
       let head =
-        run_git ~timeout_sec:5.0 ~clone_path [ "rev-parse"; "--short"; "HEAD" ]
+        run_git ~timeout_sec:read_only_probe_timeout_sec ~clone_path [ "rev-parse"; "--short"; "HEAD" ]
         |> fun r -> if r.ok then first_line_opt r.output else None
       in
       let upstream =
-        run_git ~timeout_sec:5.0 ~clone_path
+        run_git ~timeout_sec:read_only_probe_timeout_sec ~clone_path
           [ "rev-parse"; "--abbrev-ref"; "--symbolic-full-name"; "@{upstream}" ]
       in
       let upstream_name = if upstream.ok then first_line_opt upstream.output else None in
@@ -239,7 +245,7 @@ let inspect
             else None, None)
       in
       let origin =
-        run_git ~timeout_sec:5.0 ~clone_path [ "remote"; "get-url"; "origin" ]
+        run_git ~timeout_sec:read_only_probe_timeout_sec ~clone_path [ "remote"; "get-url"; "origin" ]
       in
       let has_origin = origin.ok && String.trim origin.output <> "" in
       let state, ok, next_action =

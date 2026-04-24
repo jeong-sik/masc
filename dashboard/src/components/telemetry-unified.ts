@@ -29,8 +29,8 @@ interface StoreSnapshot {
   keepers: number
   agents: number
   tasks: number
-  activeSessions: number
   activeOperations: number
+  blockedOperations: number
   continuityAlerts: number
   toolsRegistered: number
   toolsPublic: number
@@ -42,7 +42,7 @@ interface StoreSnapshot {
 
 const EMPTY_STORE: StoreSnapshot = {
   keepers: 0, agents: 0, tasks: 0,
-  activeSessions: 0, activeOperations: 0, continuityAlerts: 0,
+  activeOperations: 0, blockedOperations: 0, continuityAlerts: 0,
   toolsRegistered: 0, toolsPublic: 0, toolsTotalCalls: 0, toolsNeverCalled: 0,
   version: null, uptime: null,
 }
@@ -626,8 +626,8 @@ export function TelemetryUnified() {
           keepers: counts?.keepers ?? 0,
           agents: counts?.agents ?? 0,
           tasks: counts?.tasks ?? 0,
-          activeSessions: execSummary?.active_sessions ?? 0,
           activeOperations: execSummary?.active_operations ?? 0,
+          blockedOperations: execSummary?.blocked_operations ?? 0,
           continuityAlerts: execSummary?.continuity_alerts ?? 0,
           toolsRegistered: inv?.count ?? 0,
           toolsPublic: surfacePublic,
@@ -756,7 +756,8 @@ export function TelemetryUnified() {
           title="Keeper 현황 (live)"
           value=${String(store.keepers)}
           detail=${[
-            `${store.activeSessions} 활성 세션`,
+            `${store.activeOperations} 활성 작업`,
+            store.blockedOperations > 0 ? `${store.blockedOperations} 차단 작업` : null,
             `${store.continuityAlerts} continuity 알림`,
             store.version ? `v${store.version}` : null,
             store.uptime != null ? `uptime ${Math.floor(store.uptime / 60)}m` : null,

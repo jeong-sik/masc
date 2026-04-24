@@ -68,7 +68,7 @@ async function loadPanel(
     fetchTelemetrySummary,
     fetchDashboardShell: opts?.fetchDashboardShell ?? vi.fn().mockResolvedValue({ counts: { keepers: 2, agents: 0, tasks: 5 }, status: { version: '0.2.0', build: { uptime_seconds: 600 } } }),
     fetchDashboardTools: opts?.fetchDashboardTools ?? vi.fn().mockResolvedValue({ tool_inventory: { count: 10, tools: [], surface_summary: { public_mcp: { count: 5, tools: [] } } }, tool_usage: { total_calls: 100, never_called_count: 0 } }),
-    fetchDashboardNamespaceTruth: opts?.fetchDashboardNamespaceTruth ?? vi.fn().mockResolvedValue({ execution: { summary: { active_sessions: 1, active_operations: 3, continuity_alerts: 0 } } }),
+    fetchDashboardNamespaceTruth: opts?.fetchDashboardNamespaceTruth ?? vi.fn().mockResolvedValue({ execution: { summary: { active_operations: 3, blocked_operations: 1, continuity_alerts: 0 } } }),
   }))
   return import('./telemetry-unified')
 }
@@ -210,7 +210,9 @@ describe('TelemetryUnified', () => {
     expect(container.textContent).toContain('Keeper 현황 (live)')
     expect(container.textContent).toContain('Tool 등록 현황 (live)')
     expect(container.textContent).toContain('Agent 현황 (live)')
-    expect(container.textContent).toContain('1 활성 세션')
+    expect(container.textContent).toContain('3 활성 작업')
+    expect(container.textContent).toContain('1 차단 작업')
+    expect(container.textContent).not.toContain('활성 세션')
     expect(container.textContent).toContain('5 public')
   })
 
@@ -567,7 +569,7 @@ describe('TelemetryUnified', () => {
     const fetchTelemetrySummary = createAbortableResponse(baseSummary)
     const fetchDashboardShell = createAbortableResponse({ counts: { keepers: 2, agents: 0, tasks: 5 }, status: { version: '0.2.0', build: { uptime_seconds: 600 } } })
     const fetchDashboardTools = createAbortableResponse({ tool_inventory: { count: 10, tools: [], surface_summary: { public_mcp: { count: 5, tools: [] } } }, tool_usage: { total_calls: 100, never_called_count: 0 } })
-    const fetchDashboardNamespaceTruth = createAbortableResponse({ execution: { summary: { active_sessions: 1, active_operations: 3, continuity_alerts: 0 } } })
+    const fetchDashboardNamespaceTruth = createAbortableResponse({ execution: { summary: { active_operations: 3, blocked_operations: 1, continuity_alerts: 0 } } })
     const { TelemetryUnified } = await loadPanel(fetchTelemetry, fetchTelemetrySummary, {
       fetchDashboardShell,
       fetchDashboardTools,

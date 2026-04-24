@@ -139,7 +139,16 @@ let operator_disposition (receipt : t) =
     receipt.cascade_fallback_applied
     || String.equal cascade_outcome "passed_to_next_model"
   then ("pass_next_model", "cascade_fallback")
-  else ("pass", "healthy")
+  (* "healthy" requires an explicit success signal: turn completed without
+     error AND cascade reached the configured terminal. Any other fallthrough
+     is an unmapped state — surface it as "unknown" so a new cascade_outcome
+     or terminal_reason_code does not silently display as "healthy" on the
+     dashboard. See #9900 and CLAUDE.md anti-pattern #2. *)
+  else if
+    String.equal receipt.outcome "ok"
+    && String.equal cascade_outcome "completed"
+  then ("pass", "healthy")
+  else ("unknown", "unmapped_cascade_state")
 
 let to_json (receipt : t) =
   let operator_disposition, operator_disposition_reason =

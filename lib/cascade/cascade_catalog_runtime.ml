@@ -798,8 +798,42 @@ let resolve_named_providers ?sw ?net ?clock ?provider_filter
           (Printf.sprintf
              "cascade %s resolved to no callable providers"
              normalized)
-      else
-        Ok providers
+      else (
+        (* Observability for cascade-name -> runtime-provider divergence.
+           If the returned provider set ever disagrees with the declared
+           weighted_entries of the profile (e.g. under snapshot staleness
+           or cache leak across cascades), the mismatch shows up here.
+           See memory/handoff-2026-04-24-masc-runtime-mcp-auth-resolved.md *)
+        let declared =
+          List.map
+            (fun (e : Cascade_config_loader.weighted_entry) ->
+              String.trim e.model)
+            profile.weighted_entries
+        in
+        let returned =
+          List.map
+            (fun (c : Llm_provider.Provider_config.t) ->
+              Printf.sprintf "%s:%s"
+                (Llm_provider.Provider_config.string_of_provider_kind c.kind)
+                (String.trim c.model_id))
+            providers
+        in
+        let leaked =
+          List.filter (fun m -> not (List.mem m declared)) returned
+        in
+        (if leaked <> [] then
+           Log.warn ~ctx:"CascadeCatalog"
+             "resolve_named_providers(%s): %d providers NOT in declared \
+              profile (declared=[%s] returned=[%s] leaked=[%s])"
+             normalized (List.length leaked)
+             (String.concat ", " declared)
+             (String.concat ", " returned)
+             (String.concat ", " leaked)
+         else
+           Log.debug ~ctx:"CascadeCatalog"
+             "resolve_named_providers(%s) -> [%s]" normalized
+             (String.concat ", " returned));
+        Ok providers)
 
 let resolve_inference_params ?sw ?net ?clock ~name () =
   match lookup_active_profile ?sw ?net ?clock name with

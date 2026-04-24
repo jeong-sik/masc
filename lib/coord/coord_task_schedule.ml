@@ -222,15 +222,42 @@ let latest_receipt_blocks_required_tool_claim config ~agent_name ~required_tools
       let operator_reason =
         json_string_path [ "operator_disposition_reason" ] receipt
       in
+      let tool_contract_result =
+        json_string_path [ "tool_contract_result" ] receipt
+      in
+      let tool_requirement =
+        json_string_path [ "tool_surface"; "tool_requirement" ] receipt
+      in
+      let tools_used = json_string_list "tools_used" receipt in
+      let degraded_contract =
+        match tool_contract_result with
+        | Some
+            ( "violated"
+            | "unknown"
+            | "satisfied_by_deterministic_fallback"
+            | "needs_execution_progress"
+            | "missing_required_tool_use"
+            | "passive_only"
+            | "claim_only_after_owned_task"
+            | "tool_surface_mismatch"
+            | "no_tool_capable_provider" ) ->
+            true
+        | Some _ | None -> false
+      in
       let visible_tools =
         json_string_list "requested_tools" receipt
         @ json_string_list "canonical_tools" receipt
+        @ tools_used
       in
-      operator_reason = Some "tool_required_no_tools"
-      && not
-           (List.exists
-              (fun required_tool -> string_list_contains visible_tools required_tool)
-              required_tools)
+      let required_tool_visible =
+        List.exists
+          (fun required_tool -> string_list_contains visible_tools required_tool)
+          required_tools
+      in
+      (operator_reason = Some "tool_required_no_tools"
+       || degraded_contract
+       || (tool_requirement = Some "required" && tools_used = []))
+      && not required_tool_visible
 
 let agent_current_task_matches_backlog backlog ~agent_name task_id =
   match

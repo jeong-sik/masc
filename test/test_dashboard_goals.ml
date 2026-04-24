@@ -75,6 +75,8 @@ let append_keeper_receipt (config : Coord.config) (meta : Keeper_types.keeper_me
           visible_tool_count = 1;
           tool_gate_enabled = true;
           tool_surface_fallback_used = false;
+          required_tools = [];
+          missing_required_tools = [];
         };
       sandbox_kind = Keeper_execution_receipt.sandbox_kind_of_meta meta;
       sandbox_root = Some config.base_path;

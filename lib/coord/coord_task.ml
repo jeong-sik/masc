@@ -120,6 +120,59 @@ let empty_task_contract =
   }
 ;;
 
+let task_required_tools (task : Types.task) =
+  match task.contract with
+  | Some contract -> normalized_string_list contract.required_tools
+  | None -> []
+;;
+
+let missing_required_tools ~allowed required =
+  List.filter
+    (fun required_name ->
+       not (List.exists (String.equal required_name) allowed))
+    required
+;;
+
+let required_tool_claim_guard config ~agent_name ?agent_tool_names task =
+  let required_tools = task_required_tools task in
+  match required_tools, agent_tool_names with
+  | [], _ -> Ok ()
+  | _ :: _, None ->
+    log_event config
+      (Yojson.Safe.to_string
+         (`Assoc
+             [ "type", `String "task_claim_required_tools_unknown_surface"
+             ; "agent", `String agent_name
+             ; "task", `String task.id
+             ; ( "required_tools",
+                 `List (List.map (fun name -> `String name) required_tools) )
+             ; "ts", `String (now_iso ())
+             ]));
+    Ok ()
+  | _ :: _, Some allowed ->
+    let missing = missing_required_tools ~allowed required_tools in
+    if missing = [] then Ok ()
+    else (
+      log_event config
+        (Yojson.Safe.to_string
+           (`Assoc
+               [ "type", `String "task_claim_required_tools_blocked"
+               ; "agent", `String agent_name
+               ; "task", `String task.id
+               ; ( "required_tools",
+                   `List (List.map (fun name -> `String name) required_tools) )
+               ; ( "missing_tools",
+                   `List (List.map (fun name -> `String name) missing) )
+               ; "ts", `String (now_iso ())
+               ]));
+      Error
+        (Types.TaskInvalidState
+           (Printf.sprintf
+              "Task %s requires unavailable tool(s): %s"
+              task.id
+              (String.concat ", " missing))))
+;;
+
 let default_verification_evidence_refs =
   [ "completion_notes"; "pr_url_or_artifact_ref" ]
 ;;
@@ -770,7 +823,7 @@ let claim_task config ~agent_name ~task_id =
 ;;
 
 (** Result-returning version of claim_task for type-safe error handling. *)
-let claim_task_r config ~agent_name ~task_id ()
+let claim_task_r config ~agent_name ~task_id ?agent_tool_names ()
   : string Types.masc_result
   =
   let open Result.Syntax in
@@ -801,6 +854,9 @@ let claim_task_r config ~agent_name ~task_id ()
            match target_task with
            | None -> Error (Types.TaskNotFound task_id)
            | Some task -> Ok task
+         in
+         let* () =
+           required_tool_claim_guard config ~agent_name ?agent_tool_names task
          in
          (* Cycle-prevention gate: refuse claim when do_not_reclaim_reason is set.
          The reason can come from cancel/release hard-stop logic or be applied
@@ -965,6 +1021,7 @@ let transition_task_r
       ~agent_name
       ~task_id
       ~action
+      ?agent_tool_names
       ?expected_version
       ?(notes = "")
       ?(reason = "")
@@ -1009,6 +1066,19 @@ let transition_task_r
           match task_opt with
           | None -> Error (Types.TaskNotFound task_id)
           | Some task -> Ok task
+        in
+        let* () =
+          match action with
+          | Types.Claim ->
+            required_tool_claim_guard config ~agent_name ?agent_tool_names task
+          | Types.Release
+          | Types.Start
+          | Types.Submit_for_verification
+          | Types.Approve_verification
+          | Types.Reject_verification
+          | Types.Done_action
+          | Types.Cancel ->
+            Ok ()
         in
         let* () =
           match action, do_not_reclaim_reason_blocks_claim task.do_not_reclaim_reason with

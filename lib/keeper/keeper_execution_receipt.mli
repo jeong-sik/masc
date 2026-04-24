@@ -5,6 +5,8 @@ type tool_surface =
   ; visible_tool_count : int
   ; tool_gate_enabled : bool
   ; tool_surface_fallback_used : bool
+  ; required_tools : string list
+  ; missing_required_tools : string list
   }
 
 type cascade_rotation_attempt =

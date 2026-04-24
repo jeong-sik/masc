@@ -105,6 +105,25 @@ let sync_planning_current_task_with_owned_task (ctx : context) =
   | Some task_id -> Planning_eio.set_current_task ctx.config ~task_id
   | None -> Planning_eio.clear_current_task ctx.config
 
+let keeper_agent_tool_names (ctx : context) =
+  let resolved =
+    try Coord.resolve_agent_name ctx.config ctx.agent_name
+    with
+    | Sys_error _ | Yojson.Json_error _ -> ctx.agent_name
+    | exn ->
+        Log.Task.warn "resolve_agent_name failed for keeper tool surface %s: %s"
+          ctx.agent_name
+          (Printexc.to_string exn);
+        ctx.agent_name
+  in
+  [ ctx.agent_name; resolved ]
+  |> List.filter_map Keeper_identity.canonical_keeper_name
+  |> List.sort_uniq String.compare
+  |> List.find_map (fun keeper_name ->
+       match Keeper_registry.get ~base_path:ctx.config.base_path keeper_name with
+       | Some entry -> Some (Keeper_tool_policy.keeper_allowed_tool_names entry.meta)
+       | None -> None)
+
 let review_completion_notes
     ~(completion_contract : string list option)
     ~(evaluator_cascade : string option)
@@ -480,7 +499,11 @@ let handle_claim ctx args =
   match validate_task_id task_id with
   | Error e -> result_to_response (Error e)
   | Ok task_id ->
-  let result = Coord.claim_task_r ctx.config ~agent_name:ctx.agent_name ~task_id () in
+  let agent_tool_names = keeper_agent_tool_names ctx in
+  let result =
+    Coord.claim_task_r ctx.config ~agent_name:ctx.agent_name ~task_id
+      ?agent_tool_names ()
+  in
   (match result with
    | Ok _ ->
        sync_planning_current_task_with_owned_task ctx;
@@ -497,7 +520,11 @@ let handle_claim_next ctx _args =
   if not (try Coord.is_agent_joined ctx.config ~agent_name:ctx.agent_name with Sys_error _ | Not_found -> false) then
     (false, Printf.sprintf "Agent '%s' is not a member of this room" ctx.agent_name)
   else
-  let result = Coord.claim_next_r ctx.config ~agent_name:ctx.agent_name () in
+  let agent_tool_names = keeper_agent_tool_names ctx in
+  let result =
+    Coord.claim_next_r ctx.config ~agent_name:ctx.agent_name
+      ?agent_tool_names ()
+  in
   let message = match result with
     | Coord.Claim_next_claimed { message; _ } ->
         sync_planning_current_task_with_owned_task ctx;
@@ -805,9 +832,10 @@ and handle_transition ctx args =
   in
   let rec try_transition attempt =
     let ev = if attempt = 0 then expected_version else None in
+    let agent_tool_names = keeper_agent_tool_names ctx in
     let r = Coord.transition_task_r ctx.config ~agent_name:ctx.agent_name
               ~task_id ~action ?expected_version:ev ~notes ~reason
-              ?handoff_context () in
+              ?agent_tool_names ?handoff_context () in
     if is_version_mismatch r && attempt < max_cas_retries then begin
       Log.Task.info "CAS version mismatch on %s (attempt %d/%d), retrying in %.0fms"
         task_id (attempt + 1) max_cas_retries (cas_retry_delay_s *. 1000.0);

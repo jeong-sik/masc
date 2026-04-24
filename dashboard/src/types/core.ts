@@ -241,7 +241,19 @@ export interface KeeperTrustApprovalState {
 
 export interface KeeperTrustExecutionSummary {
   tool_contract_result?: string | null
+  runtime_proof_status?: string | null
+  required_tools?: string[] | null
+  missing_required_tools?: string[] | null
+  requested_tools?: string[] | null
+  tools_used?: string[] | null
+  requested_tool_count?: number | null
+  tools_used_count?: number | null
+  provider_attempt_count?: number | null
+  provider_fallback_applied?: boolean | null
+  provider_selected_model?: string | null
+  cascade_outcome?: string | null
   sandbox_summary?: string | null
+  sandbox_root?: string | null
   mutation_guard_summary?: string | null
   latest_receipt_at?: string | null
 }

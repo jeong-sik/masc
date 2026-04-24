@@ -94,6 +94,18 @@ let runtime_mcp_policy_for_provider
   Oas_worker_exec.runtime_mcp_policy_for_provider
     ~provider_cfg ~agent_name policy_opt
 
+let codex_cli_cannot_carry_keeper_bound_runtime_mcp
+    ~(keeper_name : string)
+    ~(provider_cfg : Llm_provider.Provider_config.t)
+    (policy_opt : Llm_provider.Llm_transport.runtime_mcp_policy option) =
+  match provider_cfg.kind, keeper_agent_name_opt keeper_name, policy_opt with
+  | Llm_provider.Provider_config.Codex_cli, Some agent_name, Some policy
+    when Option.is_some (Keeper_identity.keeper_name_from_agent_name agent_name)
+    ->
+      List.exists Oas_worker_exec.public_mcp_tool_requires_bound_actor
+        policy.allowed_tool_names
+  | _ -> false
+
 let filter_candidate_providers_for_tool_support
     ~(keeper_name : string)
     ?runtime_mcp_policy
@@ -111,7 +123,10 @@ let filter_candidate_providers_for_tool_support
              runtime_mcp_policy_for_provider
                ~keeper_name ~provider_cfg runtime_mcp_policy
            in
-           Provider_tool_support.supports_required_tool_use
+           (not
+              (codex_cli_cannot_carry_keeper_bound_runtime_mcp
+                 ~keeper_name ~provider_cfg normalized_runtime_mcp_policy))
+           && Provider_tool_support.supports_required_tool_use
              ?runtime_mcp_policy:normalized_runtime_mcp_policy
              ~require_tool_choice_support
              ~require_tool_support

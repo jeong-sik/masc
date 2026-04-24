@@ -151,6 +151,9 @@ let dedupe_preserve_order =
 let public_mcp_tool_names_of_oas_tools =
   Oas_worker_exec_transport.public_mcp_tool_names_of_oas_tools
 
+let public_mcp_tool_requires_bound_actor =
+  Oas_worker_exec_transport.public_mcp_tool_requires_bound_actor
+
 let runtime_mcp_policy_with_masc_agent_name =
   Oas_worker_exec_transport.runtime_mcp_policy_with_masc_agent_name
 

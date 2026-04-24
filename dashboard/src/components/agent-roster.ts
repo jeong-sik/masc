@@ -753,6 +753,9 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                   <span class="inline-flex items-center rounded-sm border border-[var(--warn-20)] bg-[var(--warn-10)] px-2 py-0.5 text-3xs font-semibold text-[var(--warn)]">
                     ${stateNote.label}
                   </span>
+                  ${lastActivityAt
+                    ? html`<span class="text-3xs text-[var(--text-muted)]">최근 활동 이후 <${TimeAgo} timestamp=${lastActivityAt} /></span>`
+                    : null}
                   <span class="min-w-0 flex-1 text-xs leading-relaxed text-[var(--text-body)] break-words line-clamp-2" title=${stateNote.text}>
                     ${stateNote.text}
                   </span>

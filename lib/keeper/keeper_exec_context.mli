@@ -231,6 +231,43 @@ val dispatch_keeper_phase_event :
   Keeper_state_machine.event ->
   unit
 
+(** Canonical metric name for the compaction outcome counter.
+
+    Labels: [("keeper", <name>); ("outcome", "ok" | "noop")].
+    Exported so tests can pin the name without hard-coding a string
+    literal.  #9988. *)
+val compaction_outcome_metric : string
+
+(** [record_compaction_outcome ~keeper_name ~before_tokens ~after_tokens]
+    emits the outcome counter and (for [saved_tokens <= 0]) a warn log,
+    without dispatching an FSM event.  Exposed for unit tests and for
+    callers that need the observability signal before/after a dispatch.  *)
+val record_compaction_outcome :
+  keeper_name:string ->
+  before_tokens:int ->
+  after_tokens:int ->
+  unit
+
+(** [dispatch_compaction_completed ~config ~keeper_name ~before_tokens
+    ~after_tokens] dispatches a [Compaction_completed] phase event and
+    updates observability in one place.
+
+    Emits [compaction_outcome_metric] labelled with [outcome=ok] when
+    [after_tokens < before_tokens] and [outcome=noop] otherwise.  A
+    [noop] outcome also logs a warning — the FSM (#9988) keeps
+    [context_overflow] set in this case, so operators need the signal
+    to escalate profile / alert.
+
+    Two emit paths exist ([tool_keeper] manual compact recovery and
+    [dispatch_post_turn_lifecycle_events] automatic compact); both
+    funnel through this helper to keep observability coherent. *)
+val dispatch_compaction_completed :
+  config:Coord.config ->
+  keeper_name:string ->
+  before_tokens:int ->
+  after_tokens:int ->
+  unit
+
 val dispatch_post_turn_lifecycle_events :
   config:Coord.config ->
   keeper_name:string ->

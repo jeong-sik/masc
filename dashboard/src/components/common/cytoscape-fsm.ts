@@ -1,5 +1,5 @@
 // CytoscapeFSM — Reusable interactive state machine visualization.
-// Uses Cytoscape.js (already bundled via mermaid) for pan/zoom/animation.
+// Loads Cytoscape.js on demand for pan/zoom/animation.
 
 import { html } from 'htm/preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
@@ -56,7 +56,7 @@ interface CytoscapeFsmProps {
   class?: string
 }
 
-// Lazy-load Cytoscape (already in bundle via mermaid)
+// Lazy-load Cytoscape for graph-heavy panels.
 type CyCore = cytoscape.Core
 
 let cyPromise: Promise<typeof cytoscape> | null = null

@@ -418,6 +418,16 @@ let claim_next_r
           && latest_receipt_blocks_required_tool_claim config ~agent_name
                ~required_tools
       in
+      if Option.is_none agent_tool_names
+         && List.exists (fun task -> task_required_tools task <> []) unclaimed
+      then
+        log_event config
+          (Printf.sprintf
+             "{\"type\":\"task_claim_next_required_tools_unknown_surface\",\"agent\":\"%s\",\"candidate_count\":%d,\"ts\":\"%s\"}"
+             agent_name
+             (List.length
+                (List.filter (fun task -> task_required_tools task <> []) unclaimed))
+             (now_iso ()));
       let required_tool_claim_allowed (task : task) =
         let required_tools = task_required_tools task in
         required_tools_allowed ?agent_tool_names required_tools

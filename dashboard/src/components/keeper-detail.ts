@@ -193,6 +193,18 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
     || keeper.trust?.disposition_reason?.trim()
     || keeper.trust?.execution_summary?.mutation_guard_summary?.trim()
     || null
+  const executionSummary = keeper.trust?.execution_summary ?? null
+  const runtimeProofStatus =
+    executionSummary?.runtime_proof_status?.trim()
+    || executionSummary?.tool_contract_result?.trim()
+    || null
+  const requiredTools = executionSummary?.required_tools ?? []
+  const missingRequiredTools = executionSummary?.missing_required_tools ?? []
+  const usedTools = executionSummary?.tools_used ?? []
+  const providerAttempts = executionSummary?.provider_attempt_count
+  const providerFallback = executionSummary?.provider_fallback_applied
+  const providerSelectedModel = executionSummary?.provider_selected_model?.trim() || null
+  const cascadeOutcome = executionSummary?.cascade_outcome?.trim() || null
   const trustLatestEvent = keeper.trust?.latest_causal_event ?? null
   const hbTs = keeper.last_heartbeat ? Date.parse(keeper.last_heartbeat) : null
   const hbAgeMs = hbTs != null && !Number.isNaN(hbTs) ? Date.now() - hbTs : null
@@ -323,6 +335,28 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
           : null}
         ${trustSummary
           ? html`<span><strong class="text-[var(--text-strong)]">Trust</strong> · ${trustSummary}</span>`
+          : null}
+        ${runtimeProofStatus
+          ? html`<span><strong class="text-[var(--text-strong)]">Proof</strong> · ${runtimeProofStatus}</span>`
+          : null}
+        ${requiredTools.length > 0
+          ? html`<span><strong class="text-[var(--text-strong)]">Required</strong> · ${requiredTools.join(', ')}</span>`
+          : null}
+        ${usedTools.length > 0
+          ? html`<span><strong class="text-[var(--text-strong)]">Used</strong> · ${usedTools.join(', ')}</span>`
+          : null}
+        ${missingRequiredTools.length > 0
+          ? html`<span class="text-[var(--bad)]"><strong>Missing</strong> · ${missingRequiredTools.join(', ')}</span>`
+          : null}
+        ${providerSelectedModel || cascadeOutcome || typeof providerAttempts === 'number'
+          ? html`
+              <span>
+                <strong class="text-[var(--text-strong)]">Provider</strong>
+                · ${providerSelectedModel ?? cascadeOutcome ?? 'observed'}
+                ${typeof providerAttempts === 'number' ? ` · ${providerAttempts} tries` : ''}
+                ${providerFallback === true ? ' · fallback' : ''}
+              </span>
+            `
           : null}
         ${trustLatestEvent
           ? html`

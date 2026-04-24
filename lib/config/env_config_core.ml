@@ -77,8 +77,39 @@ let strip_path_trailing_slashes value =
   in
   if trimmed = "" then "" else loop trimmed
 
+let expand_home_prefix value =
+  if String.length value >= 2 && value.[0] = '~' && value.[1] = '/' then
+    match raw_value_opt "HOME" |> trim_opt with
+    | Some home -> Filename.concat home (String.sub value 2 (String.length value - 2))
+    | None -> value
+  else
+    value
+
+let normalize_path_lexically value =
+  let value = expand_home_prefix (String.trim value) in
+  if value = "" then ""
+  else
+    let absolute = value.[0] = '/' in
+    let parts = String.split_on_char '/' value in
+    let rec fold acc = function
+      | [] -> acc
+      | "" :: rest | "." :: rest -> fold acc rest
+      | ".." :: rest -> (
+          match acc, absolute with
+          | _ :: acc_tail, _ -> fold acc_tail rest
+          | [], true -> fold [] rest
+          | [], false -> fold [ ".." ] rest)
+      | part :: rest -> fold (part :: acc) rest
+    in
+    let normalized_parts = List.rev (fold [] parts) in
+    match absolute, normalized_parts with
+    | true, [] -> "/"
+    | true, parts -> "/" ^ String.concat "/" parts
+    | false, [] -> "."
+    | false, parts -> String.concat "/" parts
+
 let normalize_masc_base_path_input path =
-  let normalized = strip_path_trailing_slashes path in
+  let normalized = path |> normalize_path_lexically |> strip_path_trailing_slashes in
   if normalized = "" then ""
   else if String.equal (Filename.basename normalized) Common.masc_dirname then
     match Filename.dirname normalized with

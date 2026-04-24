@@ -1521,6 +1521,8 @@ let sample_tool_surface_metrics () : Masc_mcp.Keeper_agent_run.tool_surface_metr
     visible_tool_count = 0;
     tool_gate_enabled = false;
     tool_surface_fallback_used = false;
+    required_tool_names = [];
+    missing_required_tool_names = [];
     config_root = "";
     cascade_config_path = None;
     gemini_mcp_disabled = false;

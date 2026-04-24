@@ -967,6 +967,9 @@ function ConnectorLivePanel({
                 <span aria-hidden="true">⚠</span>
                 <span>Directory error</span>
               </span>
+              ${connector?.gate_health_checked_at
+                ? html`<span class="text-3xs text-[var(--text-dim)]">checked ${timeAgo(connector.gate_health_checked_at)}</span>`
+                : null}
               <div class="mt-1">
                 <span class="font-medium">Cause: </span> keeper directory unavailable, manual entry only.
               </div>
@@ -1023,8 +1026,8 @@ function ConnectorLivePanel({
                 class="mt-3 rounded border border-dashed border-[var(--warn-20)] border-l-4 border-l-amber-500 bg-[var(--warn-10)] px-3 py-3 text-xs"
                 data-sidecar-not-started-panel
               >
-                <div class="mb-1 flex items-center justify-between gap-2">
-                  <div class="flex items-center gap-2">
+                <div class="mb-1 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div class="flex flex-wrap items-center gap-2">
                     <span
                       class="inline-flex items-center gap-1 rounded-sm border border-[var(--warn-20)] bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-4 text-[var(--warn)]"
                       aria-label="Sidecar process status: not running"
@@ -1034,8 +1037,11 @@ function ConnectorLivePanel({
                       <span>Not running</span>
                     </span>
                     <span class="font-medium text-[var(--text-body)]">Sidecar not started</span>
+                    ${connector?.updated_at
+                      ? html`<span class="text-3xs text-[var(--text-dim)]">last seen ${timeAgo(connector.updated_at)}</span>`
+                      : null}
                   </div>
-                  <div class="flex items-center gap-2">
+                  <div class="flex flex-wrap items-center gap-2 sm:justify-end">
                     <${ActionButton}
                       variant="primary"
                       size="sm"

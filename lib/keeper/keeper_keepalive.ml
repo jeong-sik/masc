@@ -787,7 +787,14 @@ let write_heartbeat_snapshot
       match latest_user_message, latest_assistant_message with
       | Some user_message, Some assistant_message ->
         jaccard_similarity user_message assistant_message
-      | _ -> 0.0
+      | _ ->
+        (* Unmeasurable (status_tick, heartbeat, empty reply): use the
+           sentinel [1.0] so the plan gate [<= 0.100] and guardrail gate
+           [<= floor] do NOT fire. [0.0] was a permissive default that
+           conflated "no alignment measurable" with "no alignment at
+           all", triggering auto_plan on every status_tick (#10012).
+           CLAUDE.md anti-pattern #2: Unknown → Permissive Default. *)
+        1.0
     in
     let context_ratio_v = match ctx_opt with
       | Some c -> Keeper_exec_context.context_ratio c
@@ -2317,6 +2324,24 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
              ~keeper_name:live_meta.name
              ~detail)
       in
+      (* Cancel-safe finally (#9747 iter 2): [cleanup_tracking] touches
+         registry state that can raise transiently during shutdown.
+         Stdlib [Fun.protect] would wrap that as [Fun.Finally_raised],
+         masking the body's Cancelled / Keeper_fiber_crash. Swallow
+         Cancelled (the outer one is in flight) and log non-cancel
+         exceptions instead of propagating them. Mirrors
+         keeper_agent_run.ml and keeper_unified_turn.ml:990. *)
+      let safe_cleanup_tracking () =
+        try
+          Keeper_registry.cleanup_tracking
+            ~base_path:ctx.config.base_path live_meta.name
+        with
+        | Eio.Cancel.Cancelled _ -> ()
+        | e ->
+          Log.Keeper.warn
+            "%s: cleanup_tracking in heartbeat finally raised: %s"
+            live_meta.name (Printexc.to_string e)
+      in
       Fun.protect
         (fun () ->
           try
@@ -2348,8 +2373,7 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
                 (Printexc.to_string exn);
               record_crash (Keeper_registry.Exception (Printexc.to_string exn))
             end)
-        ~finally:(fun () ->
-          Keeper_registry.cleanup_tracking ~base_path:ctx.config.base_path live_meta.name)))
+        ~finally:safe_cleanup_tracking))
   )
 ;;
 

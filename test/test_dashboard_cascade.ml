@@ -468,6 +468,123 @@ let test_health_serializable () =
   let reparsed = Yojson.Safe.from_string s in
   check json "roundtrip" j reparsed
 
+(* ── provider_scheme_of_model_string / declared merge ─────────────────── *)
+
+let test_provider_scheme_extracts_prefix () =
+  let scheme = Masc_mcp.Dashboard_cascade.provider_scheme_of_model_string in
+  check string "prefixed with colon"
+    "codex_cli" (scheme "codex_cli:auto");
+  check string "prefix with hyphen"
+    "glm-coding" (scheme "glm-coding:glm-5.1");
+  check string "bare passes through"
+    "ollama-only" (scheme "ollama-only");
+  check string "empty string safe"
+    "" (scheme "")
+
+let test_provider_status_transitions () =
+  let info_cooldown : Masc_mcp.Cascade_health_tracker.provider_info =
+    { provider_key = "x"; success_rate = 0.0; consecutive_failures = 3
+    ; in_cooldown = true; cooldown_expires_at = Some 1.0
+    ; events_in_window = 5; rejected_in_window = 5 }
+  in
+  let info_active : Masc_mcp.Cascade_health_tracker.provider_info =
+    { info_cooldown with in_cooldown = false; consecutive_failures = 0
+    ; cooldown_expires_at = None; events_in_window = 5
+    ; rejected_in_window = 0; success_rate = 1.0 }
+  in
+  let info_idle : Masc_mcp.Cascade_health_tracker.provider_info =
+    { info_active with events_in_window = 0; rejected_in_window = 0 }
+  in
+  check string "cooldown"   "cooldown"
+    (Masc_mcp.Dashboard_cascade.provider_status info_cooldown);
+  check string "active"     "active"
+    (Masc_mcp.Dashboard_cascade.provider_status info_active);
+  check string "configured" "configured"
+    (Masc_mcp.Dashboard_cascade.provider_status info_idle)
+
+let test_zero_provider_info_is_optimistic () =
+  let info = Masc_mcp.Dashboard_cascade.zero_provider_info "some_scheme" in
+  check string "key" "some_scheme" info.provider_key;
+  check (float 0.0) "optimistic success rate" 1.0 info.success_rate;
+  check int "no failures" 0 info.consecutive_failures;
+  check bool "not in cooldown" false info.in_cooldown;
+  check int "no events" 0 info.events_in_window;
+  check int "no rejects" 0 info.rejected_in_window
+
+let test_provider_entry_json_adds_declared_and_status () =
+  let info = Masc_mcp.Dashboard_cascade.zero_provider_info "unheard_provider" in
+  let j = Masc_mcp.Dashboard_cascade.provider_entry_to_json
+    ~declared:true info in
+  (match member "declared" j with
+   | `Bool true -> ()
+   | _ -> fail "declared should be true");
+  (match member "status" j with
+   | `String "configured" -> ()
+   | other -> fail (Printf.sprintf "status expected 'configured', got %s"
+                      (Yojson.Safe.to_string other)));
+  check string "provider_key surfaces unchanged" "unheard_provider"
+    (Yojson.Safe.Util.to_string (member "provider_key" j));
+  (* Behavioural fields are still present — PR is strictly additive. *)
+  (match member "events_in_window" j with
+   | `Int 0 -> () | _ -> fail "events_in_window should be int 0");
+  (match member "in_cooldown" j with
+   | `Bool false -> () | _ -> fail "in_cooldown should be false")
+
+let test_declared_provider_schemes_reads_all_profiles () =
+  (* Fixture covers: string model spec, object-with-weight model spec,
+     profile-less key (temperature without matching models) that the
+     catalog loader must tolerate, and a commented field that must be
+     skipped. Assert that every declared scheme — across both primary
+     and secondary profiles — ends up in the returned list, and that
+     non-profile keys do not leak in. *)
+  let cascade_contents =
+    {|{
+  "_comment": "Fixture for declared_provider_schemes_of_config",
+  "default_models": [
+    { "model": "codex_cli:auto", "weight": 1 },
+    { "model": "kimi_cli:kimi-for-coding", "weight": 1 }
+  ],
+  "default_temperature": 0.2,
+  "default_max_tokens": 16384,
+  "big_three_models": [
+    { "model": "codex_cli:auto", "weight": 1 },
+    { "model": "glm-coding:auto", "weight": 1 }
+  ],
+  "local_only_models": [ "ollama:auto" ],
+  "big_three_temperature": 0.2
+}
+|}
+  in
+  with_temp_config_root cascade_contents (fun config_path ->
+    let schemes =
+      Masc_mcp.Dashboard_cascade.declared_provider_schemes_of_config
+        ~config_path ()
+    in
+    let sorted_expected =
+      List.sort compare
+        [ "codex_cli"; "glm-coding"; "kimi_cli"; "ollama" ]
+    in
+    check (list string)
+      "all declared provider schemes surfaced, deduplicated, sorted"
+      sorted_expected schemes)
+
+let test_declared_provider_schemes_handles_missing_path () =
+  let schemes =
+    Masc_mcp.Dashboard_cascade.declared_provider_schemes_of_config
+      ?config_path:None ()
+  in
+  check (list string) "missing path gives empty list" [] schemes
+
+let test_declared_provider_schemes_handles_malformed_config () =
+  with_temp_config_root "not valid json at all" (fun config_path ->
+    (* Catalog loader fails → we swallow and return empty.  Health
+       endpoint must not disappear because cascade.json is broken. *)
+    let schemes =
+      Masc_mcp.Dashboard_cascade.declared_provider_schemes_of_config
+        ~config_path ()
+    in
+    check (list string) "malformed json gives empty list" [] schemes)
+
 (* ── SLO (LT-11) ─────────────────────────────────────── *)
 
 module ST = Masc_mcp.Cascade_strategy_trace
@@ -689,6 +806,20 @@ let () =
     "health_json", [
       test_case "top-level shape" `Quick test_health_shape;
       test_case "roundtrip serializable" `Quick test_health_serializable;
+      test_case "provider_scheme_of_model_string extracts prefix" `Quick
+        test_provider_scheme_extracts_prefix;
+      test_case "provider_status transitions cooldown/active/configured"
+        `Quick test_provider_status_transitions;
+      test_case "zero_provider_info has optimistic defaults" `Quick
+        test_zero_provider_info_is_optimistic;
+      test_case "provider_entry_to_json surfaces declared + status" `Quick
+        test_provider_entry_json_adds_declared_and_status;
+      test_case "declared_provider_schemes reads all profiles" `Quick
+        test_declared_provider_schemes_reads_all_profiles;
+      test_case "declared_provider_schemes tolerates missing path" `Quick
+        test_declared_provider_schemes_handles_missing_path;
+      test_case "declared_provider_schemes tolerates malformed json"
+        `Quick test_declared_provider_schemes_handles_malformed_config;
     ];
     "slo_json", [
       test_case "top-level shape" `Quick test_slo_top_level_shape;

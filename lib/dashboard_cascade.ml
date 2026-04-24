@@ -377,7 +377,51 @@ let save_raw_config_json raw_json =
 
 (* ── Health projection ──────────────────────────────── *)
 
-let provider_info_to_json (info : Health.provider_info) : Yojson.Safe.t =
+(** Classify a provider's operational state for dashboard rendering.
+
+    - [cooldown]: tracker opened a cooldown window.
+    - [active]: events arrived in the current window and the tracker is
+      not cooled down.
+    - [configured]: declared in [cascade.json] but has not produced
+      tracker events in the current window (either untouched since
+      startup, or expired from the window). The UI uses this to tell
+      "declared-but-never-called" apart from the normal healthy case.
+
+    A future [disabled] state (e.g. missing API key, registry drop)
+    would live here too, but currently we have no per-provider health
+    tracker entry for that condition. *)
+let provider_status (info : Health.provider_info) : string =
+  if info.in_cooldown then "cooldown"
+  else if info.events_in_window > 0 then "active"
+  else "configured"
+
+(** Synthesise a provider_info with optimistic defaults for a
+    cascade-declared provider that has not been observed by the tracker
+    in the current window.  [success_rate = 1.0] mirrors
+    [Cascade_health_tracker]'s "unknown = optimistic" convention. *)
+let zero_provider_info (key : string) : Health.provider_info =
+  { provider_key = key
+  ; success_rate = 1.0
+  ; consecutive_failures = 0
+  ; in_cooldown = false
+  ; cooldown_expires_at = None
+  ; events_in_window = 0
+  ; rejected_in_window = 0
+  }
+
+(** [provider_entry_to_json ~declared info] serialises a provider_info
+    together with two derived fields:
+
+    - [declared : bool]  — [true] iff any [cascade.json] profile lists a
+      model whose scheme prefix matches [info.provider_key].  Lets the
+      UI distinguish "still referenced in config" from "left over in the
+      tracker after a config change".
+    - [status : string] — see {!provider_status}.
+
+    Existing callers (tests, UI) read the previous 7 behavioural fields
+    unchanged; the two new keys are strictly additive. *)
+let provider_entry_to_json ~(declared : bool)
+    (info : Health.provider_info) : Yojson.Safe.t =
   `Assoc [
     ("provider_key", `String info.provider_key);
     ("success_rate", `Float info.success_rate);
@@ -393,10 +437,85 @@ let provider_info_to_json (info : Health.provider_info) : Yojson.Safe.t =
        so dashboards can distinguish "provider down" from "provider
        returns unusable output". *)
     ("rejected_in_window", `Int info.rejected_in_window);
+    ("declared", `Bool declared);
+    ("status", `String (provider_status info));
   ]
 
+(** Back-compat alias: older call sites may still reference the previous
+    serializer name.  Keeping it as a thin wrapper keeps the diff in
+    this PR focused on the health_json merge. *)
+let provider_info_to_json (info : Health.provider_info) : Yojson.Safe.t =
+  provider_entry_to_json ~declared:false info
+
+(** [provider_scheme_of_model_string s] returns the text before the first
+    [:] in [s], or [s] itself if no colon is present.  The scheme
+    corresponds to the provider_key produced by
+    [Keeper_hooks_oas.provider_of_model] for prefixed specs; bare model
+    ids (rare in cascade.json) fall through unchanged and merge with
+    whatever heuristic keeper_hooks_oas assigned them at runtime.  *)
+let provider_scheme_of_model_string (s : string) : string =
+  match String.index_opt s ':' with
+  | Some i -> String.sub s 0 i
+  | None -> s
+
+(** Collect the set of provider scheme prefixes declared by any cascade
+    profile in [config_path].  Reads the typed catalog (so invalid
+    profiles are skipped) and then each profile's raw model list.  Errors
+    are swallowed into an empty set — a missing/malformed [cascade.json]
+    is already surfaced by [config_json]; we do not want the health
+    endpoint to disappear just because the catalog loader fails. *)
+let declared_provider_schemes_set
+    ?(config_path : string option) () : StringSet.t =
+  match config_path with
+  | None -> StringSet.empty
+  | Some path ->
+    (match Cascade_config_loader.load_catalog ~config_path:path with
+     | Error _ -> StringSet.empty
+     | Ok entries ->
+       List.fold_left
+         (fun acc (entry : Cascade_config_loader.catalog_entry) ->
+            let models =
+              Cascade_config_loader.load_profile
+                ~config_path:path ~name:entry.name
+            in
+            List.fold_left
+              (fun acc m ->
+                 StringSet.add (provider_scheme_of_model_string m) acc)
+              acc models)
+         StringSet.empty entries)
+
+(** Public list version of {!declared_provider_schemes_set}.  Sorted and
+    deduplicated for stable dashboard rendering and easy test assertions
+    that do not want to depend on a [Set.Make] type leaking across the
+    .mli boundary. *)
+let declared_provider_schemes_of_config ?config_path () : string list =
+  StringSet.elements (declared_provider_schemes_set ?config_path ())
+
 let health_json () =
-  let providers = Health.all_providers Health.global in
+  let config_path = Cascade_runtime.cascade_config_path () in
+  let declared = declared_provider_schemes_set ?config_path () in
+  let tracked = Health.all_providers Health.global in
+  let tracked_keys =
+    List.fold_left
+      (fun acc (p : Health.provider_info) ->
+        StringSet.add p.provider_key acc)
+      StringSet.empty tracked
+  in
+  let tracked_entries =
+    List.map
+      (fun (info : Health.provider_info) ->
+        provider_entry_to_json
+          ~declared:(StringSet.mem info.provider_key declared) info)
+      tracked
+  in
+  let declared_only = StringSet.diff declared tracked_keys in
+  let untouched_entries =
+    StringSet.fold
+      (fun key acc ->
+        provider_entry_to_json ~declared:true (zero_provider_info key)
+        :: acc)
+      declared_only []
+  in
   `Assoc [
     ("updated_at", `String (now_iso ()));
     (* Health tracker is the SSOT for these values; reading env here would
@@ -408,7 +527,7 @@ let health_json () =
     ("cooldown_threshold", `Int Health.cooldown_threshold);
     ("cooldown_sec", `Float Health.cooldown_sec);
     ("hard_quota_cooldown_sec", `Float Health.hard_quota_cooldown_sec);
-    ("providers", `List (List.map provider_info_to_json providers));
+    ("providers", `List (tracked_entries @ untouched_entries));
   ]
 
 (* ── Client capacity projection ─────────────────────── *)

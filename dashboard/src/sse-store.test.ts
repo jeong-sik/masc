@@ -31,7 +31,7 @@ const requestNamespaceTruthNow = vi.fn<() => void>()
 const requestNamespaceTruth = vi.fn<() => void>()
 const showToast = vi.fn<(message: string, kind?: string, durationMs?: number) => void>()
 const replayOasRuntimeTelemetry = vi.fn<() => Promise<void>>(async () => {})
-const hydrateFleetCompositeSnapshot = vi.fn<(payload: unknown) => boolean>(() => true)
+const hydrateFleetCompositeSnapshot = vi.fn<(payload: unknown) => void>()
 const hydrateGoalTreeSnapshot = vi.fn<(payload: unknown) => boolean>(() => true)
 
 async function flushAsyncWork(): Promise<void> {
@@ -106,7 +106,6 @@ describe('setupSSEReaction reconnect hydration', () => {
     replayOasRuntimeTelemetry.mockClear()
     replayOasRuntimeTelemetry.mockResolvedValue(undefined)
     hydrateFleetCompositeSnapshot.mockClear()
-    hydrateFleetCompositeSnapshot.mockReturnValue(true)
     hydrateGoalTreeSnapshot.mockClear()
     hydrateGoalTreeSnapshot.mockReturnValue(true)
     namespaceTruth.value = null

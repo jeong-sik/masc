@@ -54,6 +54,9 @@ type tool_access =
     }
   | Custom of string list
 
+val tool_access_default_room_signal_prompt_enabled :
+  default:bool -> tool_access -> bool
+
 (** {1 Runtime types (embedded in agent_runtime_state)} *)
 
 type compaction_runtime = {

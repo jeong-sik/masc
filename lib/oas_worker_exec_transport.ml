@@ -399,15 +399,10 @@ let resolve_tool_lane_for_oas_tools
         List.filter public_mcp_tool_requires_bound_actor public_tool_names
     | _ -> []
   in
-  match codex_keeper_bound_actor_tools, tool_requirement with
-  | _ :: _ as bound_actor_tools, `Required ->
-      let detail =
-        Printf.sprintf
-          "codex_cli runtime MCP cannot carry keeper-bound auth headers for: %s"
-          (String.concat ", " bound_actor_tools)
-      in
-      Error (invalid_runtime_config "runtime_mcp_auth" detail)
-  | _ ->
+  if codex_keeper_bound_actor_tools <> [] then
+    Log.warn ~ctx:"oas_worker_exec"
+      "codex_cli omitting keeper-bound runtime MCP tool(s) that require request-scoped auth headers: %s"
+      (String.concat ", " codex_keeper_bound_actor_tools);
   let public_tool_names =
     if codex_keeper_bound_actor_tools = [] then
       public_tool_names

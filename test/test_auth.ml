@@ -416,6 +416,42 @@ let test_verify_token_keeper_exact_match () =
            "keeper credential should verify with exact agent_name: %s"
            (Types.masc_error_to_string e))
 
+let test_verify_token_keeper_alias_accepts_stable_owner_after_bootstrap () =
+  let dir = setup_test_room () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_room dir)
+    (fun () ->
+      match Auth.create_token dir ~agent_name:"sangsu" ~role:Types.Worker with
+      | Error e ->
+          fail
+            (Printf.sprintf "stable keeper token creation failed: %s"
+               (Types.masc_error_to_string e))
+      | Ok (stable_raw_token, _) -> (
+          match
+            Auth.ensure_keeper_credential dir
+              ~agent_name:"keeper-sangsu-agent"
+          with
+          | Error e ->
+              fail
+                (Printf.sprintf "keeper credential bootstrap failed: %s"
+                   (Types.masc_error_to_string e))
+          | Ok _ -> (
+              check bool "exact alias credential exists" true
+                (Option.is_some
+                   (Auth.load_credential dir "keeper-sangsu-agent"));
+              match
+                Auth.verify_token dir ~agent_name:"keeper-sangsu-agent"
+                  ~token:stable_raw_token
+              with
+              | Ok cred ->
+                  check string "stable keeper owner accepted" "sangsu"
+                    cred.agent_name
+              | Error e ->
+                  fail
+                    (Printf.sprintf
+                       "keeper alias should accept stable owner token after bootstrap: %s"
+                       (Types.masc_error_to_string e)))))
+
 let test_load_credential_missing_keeper_alias_stays_quiet () =
   let dir = setup_test_room () in
   let resolved, stderr_output =
@@ -778,6 +814,8 @@ let () =
         test_extract_agent_type_prefix_keeper_aliases;
       test_case "verify_token keeper exact match" `Quick
         test_verify_token_keeper_exact_match;
+      test_case "verify_token keeper alias accepts stable owner after bootstrap" `Quick
+        test_verify_token_keeper_alias_accepts_stable_owner_after_bootstrap;
       test_case "load_credential missing keeper alias stays quiet" `Quick
         test_load_credential_missing_keeper_alias_stays_quiet;
       test_case "verify_token dashboard legacy alias fallback" `Quick

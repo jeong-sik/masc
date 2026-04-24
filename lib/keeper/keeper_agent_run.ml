@@ -1525,7 +1525,7 @@ let run_turn
       tool_gate_requested_for_turn ~current_tool_choice ~is_last_turn
     in
     let all_allowed, tool_surface_fallback_used =
-      if tool_gate_requested && all_allowed = [] then
+      if all_allowed = [] then
         let fallback_allowed = fallback_tool_surface ~turn in
         if fallback_allowed <> [] then fallback_allowed, true else all_allowed, false
       else
@@ -1894,6 +1894,58 @@ let run_turn
                   (match ctx with
                    | None -> Some temporal
                    | Some existing -> Some (existing ^ "\n\n" ^ temporal))
+              in
+              (* 1c. Claimed-task execution nudge: when the keeper holds a
+                 claimed task but the last turn only called claim tools
+                 (keeper_task_claim / masc_claim_next), inject a prompt
+                 to break the claim-only loop and start real work. *)
+              let ctx =
+                match meta.current_task_id with
+                | Some task_id ->
+                    let last_tool_names =
+                      let rev = List.rev messages in
+                      let rec scan = function
+                        | [] -> []
+                        | (msg : Oas.Types.message) :: rest ->
+                          let names =
+                            List.filter_map
+                              (function
+                                | Oas.Types.ToolUse { name; _ } -> Some name
+                                | _ -> None)
+                              msg.content
+                          in
+                          if names <> [] then names else scan rest
+                      in
+                      scan rev
+                    in
+                    let is_claim_only_turn =
+                      List.exists (fun n ->
+                        String.equal n "keeper_task_claim"
+                        || String.equal n "masc_claim_next"
+                      ) last_tool_names
+                      && List.for_all (fun n ->
+                        String.equal n "keeper_task_claim"
+                        || String.equal n "masc_claim_next"
+                        || String.equal n "keeper_tasks_list"
+                        || String.equal n "masc_tasks"
+                        || String.equal n "masc_status"
+                        || String.equal n "keeper_context_status"
+                      ) last_tool_names
+                    in
+                    if is_claim_only_turn then
+                      let nudge =
+                        Printf.sprintf
+                          "[CLAIMED TASK] You hold %s. Do NOT call claim_next again. \
+                           Use keeper_bash, keeper_shell, keeper_fs_read, or other \
+                           execution tools to start working on it now."
+                          (Keeper_id.Task_id.to_string task_id)
+                      in
+                      (match ctx with
+                       | None -> Some nudge
+                       | Some existing -> Some (existing ^ "\n\n" ^ nudge))
+                    else
+                      ctx
+                | None -> ctx
               in
               let computed_surface =
                 compute_tool_surface

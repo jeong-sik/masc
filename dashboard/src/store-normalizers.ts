@@ -61,6 +61,8 @@ export function normalizeAgent(raw: unknown): Agent | null {
   return {
     name,
     agent_type: asString(raw.agent_type),
+    keeper_name: asString(raw.keeper_name) ?? null,
+    keeper_id: asString(raw.keeper_id) ?? null,
     status: normalizeAgentStatus(raw.status),
     current_task: asString(raw.current_task) ?? null,
     joined_at: asString(raw.joined_at),
@@ -276,6 +278,8 @@ export function normalizeExecutionWorkerSupportBrief(raw: unknown): DashboardExe
   return {
     name,
     agent_name: asString(raw.agent_name),
+    keeper_name: asString(raw.keeper_name) ?? null,
+    keeper_id: asString(raw.keeper_id) ?? null,
     status: asString(raw.status),
     tone: normalizeExecutionTone(raw.tone),
     state,
@@ -307,6 +311,7 @@ export function normalizeExecutionContinuityBrief(raw: unknown): DashboardExecut
   }
   return {
     name,
+    keeper_id: asString(raw.keeper_id) ?? null,
     agent_name: asString(raw.agent_name) ?? null,
     status: asString(raw.status),
     tone: normalizeExecutionTone(raw.tone),

@@ -328,7 +328,34 @@ describe('keeperRuntimeName', () => {
 })
 
 describe('countRuntimeKinds', () => {
-  it('does not classify generated taskmaster nicknames as the taskmaster keeper', () => {
+  it('collapses keeper-owned generated sub-op aliases when agent meta carries keeper identity', () => {
+    const result = countRuntimeKinds(
+      [
+        makeAgent({
+          name: 'ramarama-fierce-panda',
+          agent_type: 'ramarama',
+          keeper_name: 'ramarama',
+          keeper_id: 'keeper-uuid-1',
+        }),
+      ],
+      [
+        {
+          name: 'ramarama',
+          keeper_id: 'keeper-uuid-1',
+          agent_name: 'keeper-ramarama-agent',
+          status: 'active',
+        } as Keeper,
+      ],
+    )
+
+    expect(result).toEqual({
+      agents: 0,
+      keepers: 1,
+      totalRuntimes: 1,
+    })
+  })
+
+  it('classifies generated keeper nicknames as the canonical keeper when names match', () => {
     const result = countRuntimeKinds(
       [
         makeAgent({
@@ -344,6 +371,30 @@ describe('countRuntimeKinds', () => {
         {
           name: 'taskmaster',
           agent_name: 'keeper-taskmaster-agent',
+          status: 'active',
+        } as Keeper,
+      ],
+    )
+
+    expect(result).toEqual({
+      agents: 0,
+      keepers: 1,
+      totalRuntimes: 1,
+    })
+  })
+
+  it('does not classify arbitrary hyphenated agents as matching keeper prefixes', () => {
+    const result = countRuntimeKinds(
+      [
+        makeAgent({
+          name: 'foo-bar',
+          agent_type: 'agent',
+        }),
+      ],
+      [
+        {
+          name: 'foo',
+          agent_name: 'keeper-foo-agent',
           status: 'active',
         } as Keeper,
       ],

@@ -769,6 +769,14 @@ let run_turn
     Keeper_context_core.repair_broken_tool_call_pairs
       (Keeper_exec_context.messages_of_context ctx_work)
   in
+  let estimated_input_tokens =
+    let composition =
+      build_ctx_composition_metrics ~system_prompt:turn_system_prompt
+        ~dynamic_context ~memory_context ~temporal_context ~user_message
+        ~history_messages ~actual_input_tokens:0
+    in
+    max prompt_metrics.estimated_total_tokens composition.display_total_tokens
+  in
   let ctx_work = Keeper_exec_context.append ctx_work user_msg in
   if not is_retry
   then Keeper_exec_context.persist_message ~source:history_user_source session user_msg;
@@ -2263,7 +2271,8 @@ let run_turn
       match oas_timeout_s with
       | Some value -> value
       | None ->
-          Keeper_runtime_resolved.oas_timeout_for_context ~max_context
+          Keeper_runtime_resolved.oas_timeout_for_estimated_input_tokens
+            ~estimated_input_tokens
     in
     let cli_transport_overrides =
       Some

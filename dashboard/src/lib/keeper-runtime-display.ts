@@ -97,6 +97,9 @@ export function keeperRuntimeBlockerHint(keeper: Keeper | null | undefined): str
   if (blockerClass === 'turn_timeout_after_queue_wait') {
     return '대기 후 실행된 턴이 전체 제한 시간을 초과했습니다.'
   }
+  if (blockerClass === 'oas_timeout_budget') {
+    return 'OAS 실행 예산이 먼저 소진되었습니다.'
+  }
   if (blockerClass === 'turn_timeout') {
     return '턴 실행 시간이 제한 시간을 초과했습니다.'
   }

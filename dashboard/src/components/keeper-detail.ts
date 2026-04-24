@@ -216,6 +216,7 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
         autonomous_slot_wait_timeout: 'Autonomous slot wait timeout',
         admission_queue_wait_timeout: 'Admission queue wait timeout',
         turn_timeout_after_queue_wait: 'Turn timeout after queue wait',
+        oas_timeout_budget: 'OAS timeout budget',
         turn_timeout: 'Turn timeout',
         completion_contract_violation: 'Completion contract violation',
         cascade_exhausted: 'Cascade exhausted',

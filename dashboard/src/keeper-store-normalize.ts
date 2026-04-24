@@ -251,6 +251,19 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
               segments: promptSegments,
             }
           : null
+      const rawTimeoutBudget = isRecord(item.timeout_budget) ? item.timeout_budget : null
+      const timeout_budget =
+        rawTimeoutBudget != null
+          ? {
+              oas_timeout_sec: asNumber(rawTimeoutBudget.oas_timeout_sec) ?? null,
+              adaptive_timeout_sec: asNumber(rawTimeoutBudget.adaptive_timeout_sec) ?? null,
+              keeper_turn_timeout_sec: asNumber(rawTimeoutBudget.keeper_turn_timeout_sec) ?? null,
+              remaining_turn_budget_sec: asNumber(rawTimeoutBudget.remaining_turn_budget_sec) ?? null,
+              estimated_input_tokens: asNumber(rawTimeoutBudget.estimated_input_tokens) ?? null,
+              max_turns: asNumber(rawTimeoutBudget.max_turns) ?? null,
+              source: typeof rawTimeoutBudget.source === 'string' ? rawTimeoutBudget.source : null,
+            }
+          : null
       const rawCtxComposition = isRecord(item.ctx_composition) ? item.ctx_composition : null
       const rawCtxSegments =
         rawCtxComposition && isRecord(rawCtxComposition.segments) ? rawCtxComposition.segments : null
@@ -311,12 +324,14 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
         handoff_new_generation: handoffNewGeneration,
         prompt_fingerprint: promptFingerprint,
         prompt_metrics,
+        timeout_budget,
         ctx_composition,
         input_tokens: inputTokens,
         output_tokens: outputTokens,
         total_tokens: totalTokens,
         wall_tokens_per_second: wallTokensPerSecond,
         inference_telemetry,
+        cascade_strategy: cascadeObj && typeof cascadeObj.strategy === 'string' ? cascadeObj.strategy : null,
         fallback_applied: cascadeObj ? cascadeObj.fallback_applied === true : false,
         fallback_hops: cascadeObj ? (asNumber(cascadeObj.fallback_hops) ?? 0) : 0,
         fallback_from: firstFallback && typeof firstFallback.from_model_id === 'string' ? firstFallback.from_model_id : null,
@@ -437,6 +452,7 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         reconcile_status: asString(row.reconcile_status) ?? null,
         emoji: asString(row.emoji),
         koreanName: asString(row.koreanName) ?? asString(row.korean_name),
+        keeper_id: asString(row.keeper_id) ?? null,
         agent_name: asString(row.agent_name),
         trace_id: asString(row.trace_id),
         model,

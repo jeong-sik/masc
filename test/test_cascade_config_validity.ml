@@ -215,7 +215,7 @@ let test_priority_tier_label_tiers_normalize_to_model_ids () =
     [ [ "claude-haiku-4-5-20251001" ]; [ "gemini-3-flash-preview" ] ]
     strategy.tiers
 
-let test_priority_tier_invalid_tiers_fall_back_to_failover () =
+let test_priority_tier_invalid_tiers_fall_back_to_default_strategy () =
   with_temp_cascade_json @@ fun tmp ->
   let oc = open_out tmp in
   Fun.protect
@@ -235,10 +235,54 @@ let test_priority_tier_invalid_tiers_fall_back_to_failover () =
     Masc_mcp.Cascade_config.resolve_strategy
       ~config_path:tmp ~name:"regression" ()
   in
-  check string "invalid tiers demote to failover"
-    "failover"
+  check string "invalid tiers demote to default strategy"
+    "round_robin"
     (Masc_mcp.Cascade_strategy.kind_to_string strategy.kind);
-  check (list (list string)) "failover carries no tiers" [] strategy.tiers
+  check (list (list string)) "default strategy carries no tiers" [] strategy.tiers
+
+let test_keeper_assignable_profile_defaults_to_round_robin () =
+  with_temp_cascade_json @@ fun tmp ->
+  let oc = open_out tmp in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () ->
+      output_string oc
+        {|{
+  "regression_models": [
+    "claude_code:claude-haiku-4-5-20251001",
+    "gemini_cli:gemini-3-flash-preview"
+  ],
+  "regression_keeper_assignable": true
+}|});
+  let strategy =
+    Masc_mcp.Cascade_config.resolve_strategy
+      ~config_path:tmp ~name:"regression" ()
+  in
+  check string "keeper assignable defaults to round_robin"
+    "round_robin"
+    (Masc_mcp.Cascade_strategy.kind_to_string strategy.kind)
+
+let test_non_keeper_assignable_profile_defaults_to_failover () =
+  with_temp_cascade_json @@ fun tmp ->
+  let oc = open_out tmp in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () ->
+      output_string oc
+        {|{
+  "regression_models": [
+    "claude_code:claude-haiku-4-5-20251001",
+    "gemini_cli:gemini-3-flash-preview"
+  ],
+  "regression_keeper_assignable": false
+}|});
+  let strategy =
+    Masc_mcp.Cascade_config.resolve_strategy
+      ~config_path:tmp ~name:"regression" ()
+  in
+  check string "non-keeper profile stays failover"
+    "failover"
+    (Masc_mcp.Cascade_strategy.kind_to_string strategy.kind)
 
 let () =
   let path = cascade_path () in
@@ -266,8 +310,16 @@ let () =
             `Quick
             test_priority_tier_label_tiers_normalize_to_model_ids;
           test_case
-            "priority_tier invalid tiers fall back to failover"
+            "priority_tier invalid tiers fall back to default strategy"
             `Quick
-            test_priority_tier_invalid_tiers_fall_back_to_failover;
+            test_priority_tier_invalid_tiers_fall_back_to_default_strategy;
+          test_case
+            "keeper-assignable profile defaults to round_robin"
+            `Quick
+            test_keeper_assignable_profile_defaults_to_round_robin;
+          test_case
+            "non-keeper-assignable profile defaults to failover"
+            `Quick
+            test_non_keeper_assignable_profile_defaults_to_failover;
         ] );
     ]

@@ -212,23 +212,76 @@ let oas_timeout_guard_sec = 1.0
 
 let min_oas_timeout_budget_sec = 30.0
 
-let bounded_oas_timeout_for_turn_budget_with_turn_budget ~(max_context : int)
-    ~(max_turns : int)
-    ~(remaining_turn_budget_s : float) : float option =
+type oas_timeout_budget_resolution = {
+  effective_timeout_sec : float;
+  adaptive_timeout_sec : float;
+  keeper_turn_timeout_sec : float;
+  remaining_turn_budget_sec : float;
+  estimated_input_tokens : int;
+  max_turns : int;
+  source : string;
+}
+
+let oas_timeout_budget_resolution_to_yojson
+    (budget : oas_timeout_budget_resolution) : Yojson.Safe.t =
+  `Assoc
+    [
+      ("oas_timeout_sec", `Float budget.effective_timeout_sec);
+      ("adaptive_timeout_sec", `Float budget.adaptive_timeout_sec);
+      ("keeper_turn_timeout_sec", `Float budget.keeper_turn_timeout_sec);
+      ("remaining_turn_budget_sec", `Float budget.remaining_turn_budget_sec);
+      ("estimated_input_tokens", `Int budget.estimated_input_tokens);
+      ("max_turns", `Int budget.max_turns);
+      ("source", `String budget.source);
+    ]
+
+let resolve_bounded_oas_timeout_budget_with_turn_budget
+    ~(estimated_input_tokens : int) ~(max_turns : int)
+    ~(remaining_turn_budget_s : float) : oas_timeout_budget_resolution option =
   let usable_budget = remaining_turn_budget_s -. oas_timeout_guard_sec in
   if usable_budget < min_oas_timeout_budget_sec
   then None
   else
-    let adaptive_timeout =
-      Env_config_keeper.KeeperKeepalive.oas_timeout_for_context_with_turn_budget
-        ~max_context ~max_turns
+    let runtime = Keeper_runtime_resolved.current () in
+    let adaptive_timeout_sec =
+      Keeper_runtime_resolved
+      .oas_timeout_for_estimated_input_tokens_with_turn_budget
+        ~estimated_input_tokens ~max_turns
+    in
+    let effective_timeout_sec =
+      Float.min adaptive_timeout_sec usable_budget
+    in
+    let source =
+      match runtime.oas_timeout_override_sec.value with
+      | Some _ when effective_timeout_sec < adaptive_timeout_sec ->
+          "override_capped_by_turn_budget"
+      | Some _ -> "override"
+      | None when effective_timeout_sec < adaptive_timeout_sec ->
+          "adaptive_estimated_input_tokens_capped_by_turn_budget"
+      | None -> "adaptive_estimated_input_tokens"
     in
     Some
-      (Float.min adaptive_timeout usable_budget)
+      {
+        effective_timeout_sec;
+        adaptive_timeout_sec;
+        keeper_turn_timeout_sec = runtime.turn_timeout_sec.value;
+        remaining_turn_budget_sec = usable_budget;
+        estimated_input_tokens = max 0 estimated_input_tokens;
+        max_turns;
+        source;
+      }
 
-let bounded_oas_timeout_for_turn_budget ~(max_context : int)
+let bounded_oas_timeout_for_turn_budget_with_turn_budget
+    ~(estimated_input_tokens : int) ~(max_turns : int)
     ~(remaining_turn_budget_s : float) : float option =
-  bounded_oas_timeout_for_turn_budget_with_turn_budget ~max_context
+  Option.map
+    (fun (budget : oas_timeout_budget_resolution) -> budget.effective_timeout_sec)
+    (resolve_bounded_oas_timeout_budget_with_turn_budget
+       ~estimated_input_tokens ~max_turns ~remaining_turn_budget_s)
+
+let bounded_oas_timeout_for_turn_budget ~(estimated_input_tokens : int)
+    ~(remaining_turn_budget_s : float) : float option =
+  bounded_oas_timeout_for_turn_budget_with_turn_budget ~estimated_input_tokens
     ~max_turns:(Keeper_runtime_resolved.reactive_max_turns_per_call ())
     ~remaining_turn_budget_s
 
@@ -705,6 +758,13 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
            No dynamic_context needed here. *)
         { system_prompt; dynamic_context = "" }
       in
+      let prompt_timeout_metrics =
+        Keeper_agent_run.build_prompt_metrics ~system_prompt
+          ~dynamic_context:"" ~user_message
+      in
+      let prompt_timeout_estimate_tokens =
+        max 1 prompt_timeout_metrics.estimated_total_tokens
+      in
       let turn_affordances =
         Keeper_unified_metrics.observed_affordances_of_observation ~meta observation
       in
@@ -873,6 +933,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
              Keeper_registry.Decision_guard_ok
        | _ -> ());
       let last_execution = ref initial_execution in
+      let last_timeout_budget : oas_timeout_budget_resolution option ref = ref None in
       let degraded_retry_info = ref None in
       let run_result, latency_ms =
         Fun.protect ~finally:(fun () ->
@@ -1013,9 +1074,9 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             in
             let attempt_result =
               match
-                bounded_oas_timeout_for_turn_budget_with_turn_budget
+                resolve_bounded_oas_timeout_budget_with_turn_budget
                   ~max_turns
-                  ~max_context:execution.max_context
+                  ~estimated_input_tokens:prompt_timeout_estimate_tokens
                   ~remaining_turn_budget_s:(remaining_turn_budget_s ())
               with
               | None ->
@@ -1028,12 +1089,13 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                                 "Turn wall-clock budget exhausted before retry (remaining=%.1fs)"
                                 (remaining_turn_budget_s ());
                           }))
-              | Some oas_timeout_s ->
+              | Some timeout_budget ->
+                  last_timeout_budget := Some timeout_budget;
                   Keeper_registry.set_turn_cascade_state
                     ~base_path:config.base_path meta.name
                     Keeper_registry.Cascade_trying;
                   do_run ~execution ~run_meta ~run_generation ~is_retry
-                    ~oas_timeout_s
+                    ~oas_timeout_s:timeout_budget.effective_timeout_sec
             in
             match attempt_result with
             | Ok result ->
@@ -1050,6 +1112,22 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                   Keeper_registry.Cascade_done;
                 Ok result
             | Error err ->
+                let err =
+                  match err, !last_timeout_budget with
+                  | Oas.Error.Api (Timeout { message }), Some timeout_budget
+                    when EC.is_structural_oas_timeout_message message ->
+                      Oas_worker_named.sdk_error_of_masc_internal_error
+                        (Oas_worker_named.Oas_timeout_budget
+                           {
+                             budget_sec = timeout_budget.effective_timeout_sec;
+                             keeper_turn_timeout_sec =
+                               timeout_budget.keeper_turn_timeout_sec;
+                             estimated_input_tokens =
+                               timeout_budget.estimated_input_tokens;
+                             source = timeout_budget.source;
+                           })
+                  | _ -> err
+                in
                 let _ = drain_turn_event_bus () in
                 let committed_tools = committed_mutating_tools_snapshot () in
                 if committed_tools <> []
@@ -1373,8 +1451,18 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             (Trajectory.Failed (Oas.Error.to_string err));
           let e_str = Oas.Error.to_string err in
           let is_transient = EC.is_transient_network_error err in
-          (match err with
-           | Oas.Error.Api (Timeout { message }) ->
+          (match Oas_worker_named.classify_masc_internal_error err with
+           | Some (Oas_worker_named.Oas_timeout_budget _) ->
+               Prometheus.inc_counter
+                 Prometheus.metric_keeper_oas_timeout_classifications
+                 ~labels:[("classification", "structural_budget")] ()
+           | Some (Oas_worker_named.Turn_timeout _) ->
+               Prometheus.inc_counter
+                 Prometheus.metric_keeper_oas_timeout_classifications
+                 ~labels:[("classification", "turn_wall_clock")] ()
+           | _ -> (
+               match err with
+               | Oas.Error.Api (Timeout { message }) ->
                let classification =
                  if is_transient then "transient_network"
                  else if EC.is_structural_oas_timeout_message message then
@@ -1384,7 +1472,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                Prometheus.inc_counter
                  Prometheus.metric_keeper_oas_timeout_classifications
                  ~labels:[("classification", classification)] ()
-           | _ -> ());
+               | _ -> ()));
           let is_server_parse_rejection = EC.is_server_rejected_parse_error err in
           let is_auto_recoverable = EC.is_auto_recoverable_turn_error err in
           let is_ambiguous_partial = EC.is_ambiguous_side_effect_error err in
@@ -1628,6 +1716,9 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                ~message_count:lifecycle.message_count
                ~compaction:lifecycle.compaction
                ~handoff_json:lifecycle.handoff_json
+               ?timeout_budget_json:
+                 (Option.map oas_timeout_budget_resolution_to_yojson
+                    !last_timeout_budget)
                ()
           with
            | Eio.Cancel.Cancelled _ as e -> raise e

@@ -135,23 +135,45 @@ let scope_message_feed_enabled (meta : keeper_meta) : bool =
 let message_feed_targets (meta : keeper_meta) =
   if meta.mention_targets <> [] then meta.mention_targets else [ meta.name ]
 
+let normalized_identity_token value =
+  let trimmed = String.lowercase_ascii (String.trim value) in
+  if trimmed = "" then None else Some trimmed
+
+let identity_tokens_of_value value =
+  let trimmed = String.trim value in
+  [
+    normalized_identity_token trimmed;
+    Option.bind
+      (Keeper_identity.canonical_keeper_name_from_agent_name trimmed)
+      normalized_identity_token;
+    Option.bind (Keeper_identity.canonical_keeper_name trimmed)
+      normalized_identity_token;
+  ]
+  |> List.filter_map (fun value -> value)
+  |> List.sort_uniq String.compare
+
+let self_identity_tokens (meta : keeper_meta) =
+  [ meta.name; meta.agent_name ]
+  |> List.map identity_tokens_of_value
+  |> List.flatten
+  |> List.sort_uniq String.compare
+
 let collect_message_scope ~(config : Coord.config) ~(meta : keeper_meta) :
     ((string * string) list * (string * string) list * (string * int) list) =
   let targets = message_feed_targets meta in
   let broad_scope = scope_message_feed_enabled meta in
-  let self_tokens =
-    [ meta.name; meta.agent_name ]
-    |> List.map (fun value -> String.lowercase_ascii (String.trim value))
-  in
+  let self_tokens = self_identity_tokens meta in
   let batch_limit = Keeper_config.keeper_batch_limit () in
   let rec consume_room_messages remaining last_processed mentions scope_messages =
     function
     | [] -> (`Done, remaining, last_processed, List.rev mentions, List.rev scope_messages)
     | (msg : Types.message) :: rest ->
-        let author =
-          String.lowercase_ascii (String.trim msg.from_agent)
-        in
-        if author = "" || List.mem author self_tokens then
+        let author = String.trim msg.from_agent in
+        if author = ""
+           || List.exists
+                (fun author_token -> List.mem author_token self_tokens)
+                (identity_tokens_of_value author)
+        then
           consume_room_messages remaining msg.seq mentions scope_messages rest
         else if exact_direct_mention_present ~targets msg.content then
           if remaining <= 0 then
@@ -326,12 +348,12 @@ let board_signal_match
     ~continuity_summary:(_ : string)
     ~(meta : keeper_meta)
     ~(signal : Board_dispatch.keeper_board_signal) : board_signal_match =
-  let author = String.lowercase_ascii (String.trim signal.author) in
-  let self_tokens =
-    [ meta.name; meta.agent_name ]
-    |> List.map (fun value -> String.lowercase_ascii (String.trim value))
-  in
-  if List.mem author self_tokens then
+  let self_tokens = self_identity_tokens meta in
+  if
+    List.exists
+      (fun author_token -> List.mem author_token self_tokens)
+      (identity_tokens_of_value signal.author)
+  then
     { explicit_mention = false; matched_targets = []; score = 0 }
   else
     let targets =
@@ -445,7 +467,8 @@ let read_continuity_summary ~(config : Coord.config) ~(meta : keeper_meta)
 let bootstrap_window_sec = Env_config.InternalTimers.bootstrap_window_sec
 
 let is_self_author ~self_tokens (author : string) : bool =
-  List.mem (String.lowercase_ascii (String.trim author)) self_tokens
+  identity_tokens_of_value author
+  |> List.exists (fun author_token -> List.mem author_token self_tokens)
 
 (** Check whether this keeper has commented on a post, and whether new
     external comments arrived after the keeper's latest comment.
@@ -501,10 +524,7 @@ let board_signal_wake_reason
   else if scope_message_feed_enabled meta then
     Some "board_activity"
   else
-    let self_tokens =
-      [ meta.name; meta.agent_name ]
-      |> List.map (fun value -> String.lowercase_ascii (String.trim value))
-    in
+    let self_tokens = self_identity_tokens meta in
     match signal.kind with
     | Board_dispatch.Board_comment_added ->
         (match check_self_comment_status ~self_tokens ~post_id:signal.post_id with
@@ -535,10 +555,7 @@ let collect_board_events ~(base_path : string) ~(continuity_summary : string)
         (Time_compat.now () -. bootstrap_window_sec, None)
     in
     let posts = list_board_posts_after_cursor base_cursor in
-    let self_tokens =
-      [ meta.name; meta.agent_name ]
-      |> List.map (fun value -> String.lowercase_ascii (String.trim value))
-    in
+    let self_tokens = self_identity_tokens meta in
     let recent =
       List.filter
         (fun (p : Board.post) ->

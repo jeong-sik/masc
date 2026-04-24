@@ -174,6 +174,9 @@ let blocker_class_of_string (reason : string) : blocker_class option =
   else if String_util.contains_substring_ci trimmed "admission queue wait timeout"
   then
     Some Admission_queue_wait_timeout
+  else if String_util.contains_substring_ci trimmed "oas budget timeout"
+  then
+    Some Oas_timeout_budget
   else if String_util.contains_substring_ci trimmed "turn wall-clock timeout"
   then
     Some Turn_timeout
@@ -194,6 +197,8 @@ let blocker_class_of_sdk_error (err : Oas.Error.sdk_error) : blocker_class optio
       Some Admission_queue_wait_timeout
   | Some (Oas_worker_named.Admission_queue_rejected _) ->
       None
+  | Some (Oas_worker_named.Oas_timeout_budget _) ->
+      Some Oas_timeout_budget
   | Some (Oas_worker_named.Turn_timeout _) ->
       Some Turn_timeout
   | Some (Oas_worker_named.Ambiguous_post_commit { is_timeout; _ }) ->
@@ -220,6 +225,10 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
   let summary = match cls with
     | Cascade_exhausted reason ->
         if summary = "" then cascade_exhaustion_summary reason else summary
+    | Oas_timeout_budget ->
+        if summary = "" then
+          "OAS budget timeout fired before the keeper hard timeout."
+        else summary
     | _ -> if summary = "" then str else summary
   in
   { blocker_class = str; summary; continue_gate }

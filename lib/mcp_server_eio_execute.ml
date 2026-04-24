@@ -157,6 +157,40 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     | None -> auth_token
   in
 
+  let resolve_owner_keeper_identity owner_name =
+    let candidates =
+      [
+        Keeper_types.canonical_keeper_name owner_name;
+        Keeper_types.canonical_keeper_name_from_agent_name owner_name;
+      ]
+      |> List.filter_map (function
+           | Some value when String.trim value <> "" -> Some (String.trim value)
+           | _ -> None)
+      |> List.sort_uniq String.compare
+    in
+    let rec loop = function
+      | [] -> None
+      | candidate :: rest -> (
+          match Keeper_types.read_meta_resolved config candidate with
+          | Ok (Some (resolved_name, meta)) ->
+              Some
+                ( resolved_name,
+                  Option.map Keeper_id.Uid.to_string meta.Keeper_types.keeper_id )
+          | Ok None -> loop rest
+          | Error _ -> loop rest)
+    in
+    loop candidates
+  in
+
+  let owner_keeper_identity =
+    match token with
+    | None -> None
+    | Some raw -> (
+        match Auth.resolve_agent_from_token config.base_path ~token:raw with
+        | Ok owner_name -> resolve_owner_keeper_identity owner_name
+        | Error _ -> None)
+  in
+
   let mode_gate_error =
     if not (Tool_catalog.allow_direct_call name) then
       Some (direct_call_block_message name)
@@ -398,7 +432,12 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       if is_joined then
         agent_name
       else begin
-        let join_result = Coord.join config ~agent_name ~capabilities:[] () in
+        let join_result =
+          Coord.join config ~agent_name ~capabilities:[]
+            ~keeper_name:(Option.map fst owner_keeper_identity)
+            ~keeper_id:(Option.bind owner_keeper_identity snd)
+            ()
+        in
         let nickname = extract_nickname_from_join_result ~fallback:agent_name join_result in
         Log.Mcp.info "Auto-joined for %s: %s -> %s" name agent_name nickname;
         (* Persist nickname so subsequent calls can use it. *)
@@ -410,6 +449,39 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     end else
       agent_name
   in
+
+  (match owner_keeper_identity with
+   | Some (keeper_name, keeper_id) when agent_name <> "unknown" && !room_init_cached ->
+       (try
+          Coord_task.update_local_agent_state config ~agent_name (fun agent ->
+              let meta =
+                match agent.meta with
+                | Some existing ->
+                    {
+                      existing with
+                      keeper_name = Some keeper_name;
+                      keeper_id;
+                    }
+                | None ->
+                    {
+                      session_id = "";
+                      agent_type = agent.agent_type;
+                      pid = None;
+                      hostname = None;
+                      tty = None;
+                      worktree = None;
+                      parent_task = None;
+                      keeper_name = Some keeper_name;
+                      keeper_id;
+                    }
+              in
+              { agent with meta = Some meta })
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn ->
+            Log.Mcp.warn "keeper owner stamp skipped for %s: %s"
+              agent_name (Printexc.to_string exn))
+   | Some _ | None -> ());
 
   (* Auto-register session for non-read-only tools *)
   if agent_name <> "unknown" && not is_read_only then begin

@@ -224,23 +224,27 @@ let turn_timeout_sec () =
 let admission_wait_timeout_sec () =
   (current ()).admission_wait_timeout_sec.value
 
-let oas_timeout_for_context_with_turn_budget ~(max_context : int)
-    ~(max_turns : int) : float =
+let oas_timeout_for_estimated_input_tokens_with_turn_budget
+    ~(estimated_input_tokens : int) ~(max_turns : int) : float =
   let runtime = current () in
   match runtime.oas_timeout_override_sec.value with
   | Some value -> value
   | None ->
       let base = 120.0 in
-      let context_time =
-        Float.of_int max_context /. 1000.0 *. runtime.oas_timeout_per_1k.value
+      let input_time =
+        Float.of_int (max 0 estimated_input_tokens) /. 1000.0
+        *. runtime.oas_timeout_per_1k.value
       in
       let effective_turns =
         Float.of_int (min max_turns 40)
       in
       let turn_time = effective_turns *. runtime.oas_timeout_per_turn.value in
       Float.max 30.0
-        (Float.min runtime.turn_timeout_sec.value (base +. context_time +. turn_time))
+        (Float.min runtime.turn_timeout_sec.value
+           (base +. input_time +. turn_time))
 
-let oas_timeout_for_context ~(max_context : int) : float =
-  oas_timeout_for_context_with_turn_budget ~max_context
+let oas_timeout_for_estimated_input_tokens ~(estimated_input_tokens : int) :
+    float =
+  oas_timeout_for_estimated_input_tokens_with_turn_budget
+    ~estimated_input_tokens
     ~max_turns:(reactive_max_turns_per_call ())

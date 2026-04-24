@@ -366,6 +366,65 @@ let test_collect_board_events_keeps_external_replies_after_self_comment () =
             (Option.value ~default:"" event.latest_external_author)
       | _ -> fail "expected one follow-up board event")
 
+let test_collect_board_events_treats_generated_alias_as_self_comment () =
+  let base_dir = temp_dir () in
+  let meta =
+    {
+      (make_meta "ramarama") with
+      agent_name = "keeper-ramarama-agent";
+    }
+  in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Unix.putenv "MASC_BASE_PATH" base_dir;
+      Masc_mcp.Board.reset_global_for_test ();
+      Masc_mcp.Board_dispatch.reset_for_test ();
+      Masc_mcp.Board_dispatch.init_jsonl ();
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
+      let post_id =
+        match
+          Masc_mcp.Board_dispatch.create_post ~author:"alice"
+            ~title:"General update" ~content:"No direct mention here"
+            ~post_kind:Masc_mcp.Board.Human_post ()
+        with
+        | Ok post -> Masc_mcp.Board.Post_id.to_string post.id
+        | Error e -> fail ("create_post failed: " ^ Masc_mcp.Board.show_board_error e)
+      in
+      (match
+         Masc_mcp.Board_dispatch.add_comment ~post_id
+           ~author:"ramarama-fierce-panda"
+           ~content:"I am following this thread."
+           ()
+       with
+      | Ok _ -> ()
+      | Error e -> fail ("add_comment failed: " ^ Masc_mcp.Board.show_board_error e));
+      Unix.sleepf 0.02;
+      (match
+         Masc_mcp.Board_dispatch.add_comment ~post_id ~author:"bob"
+           ~content:"Thanks, there is a new question for you."
+           ()
+       with
+      | Ok _ -> ()
+      | Error e -> fail ("add_comment failed: " ^ Masc_mcp.Board.show_board_error e));
+      let events, new_count, mention_count =
+        WO.collect_board_events ~base_path:base_dir
+          ~continuity_summary:"goal ramarama"
+          ~meta
+      in
+      check int "new count still tracks recent post" 1 new_count;
+      check int "mention count stays zero" 0 mention_count;
+      match events with
+      | [ event ] ->
+          check bool "generated alias counts as self comment" true event.self_commented;
+          check int "external reply count" 1 event.new_external_since;
+          check string "latest external author" "bob"
+            (Option.value ~default:"" event.latest_external_author)
+      | _ -> fail "expected one follow-up board event")
+
 let test_observe_ignores_scope_messages_without_room_signal_opt_in () =
   let base_dir = temp_dir () in
   Fun.protect
@@ -1506,6 +1565,7 @@ let test_metrics_surface_model_prefers_successful_cascade_label () =
       ~cascade_observation:
         {
           Masc_mcp.Oas_worker.cascade_name = Masc_mcp.Keeper_config.default_cascade_name;
+          strategy = Some "round_robin";
           configured_labels = [ "llama:auto" ];
           candidate_models =
             [ "llama:qwen3.5-35b-a3b-ud-q8-xl"; selected_label ];
@@ -1862,6 +1922,7 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
             Some
               {
                 Masc_mcp.Oas_worker.cascade_name = Masc_mcp.Keeper_config.default_cascade_name;
+                strategy = Some "round_robin";
                 configured_labels = [ "llama:auto" ];
                 candidate_models =
                   [
@@ -2618,6 +2679,23 @@ let test_degraded_retry_after_recoverable_error_includes_turn_timeout () =
   in
   expect_degraded_retry "turn timeout degraded retry"
     KC.local_recovery_cascade_name "turn_timeout" degraded_retry
+
+let test_degraded_retry_after_recoverable_error_includes_oas_timeout_budget () =
+  let degraded_retry =
+    EC.degraded_retry_after_recoverable_error
+      ~effective_cascade:"underdog"
+      ~tool_requirement:"optional"
+      (Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
+         (Masc_mcp.Oas_worker_named.Oas_timeout_budget
+            {
+              budget_sec = 273.0;
+              keeper_turn_timeout_sec = 1200.0;
+              estimated_input_tokens = 2_000;
+              source = "adaptive_estimated_input_tokens";
+            }))
+  in
+  expect_degraded_retry "oas timeout budget degraded retry"
+    KC.local_recovery_cascade_name "oas_timeout_budget" degraded_retry
 
 let test_degraded_retry_after_recoverable_error_blocks_required_tools () =
   let degraded_retry =
@@ -3381,22 +3459,36 @@ let test_cascade_exhausted_error_includes_resumable_cli_session_error () =
     (EC.is_cascade_exhausted_error err)
 
 let test_bounded_oas_timeout_uses_adaptive_when_budget_is_large () =
+  let estimated_input_tokens = 2_000 in
   let expected =
-    Env_config.KeeperKeepalive.oas_timeout_for_context ~max_context:262_144
+    Env_config.KeeperKeepalive.oas_timeout_for_estimated_input_tokens
+      ~estimated_input_tokens
   in
   match
     UT.bounded_oas_timeout_for_turn_budget
-      ~max_context:262_144 ~remaining_turn_budget_s:1200.0
+      ~estimated_input_tokens ~remaining_turn_budget_s:1200.0
   with
   | Some timeout_s ->
       check (float 0.01) "adaptive timeout kept under full budget"
         expected timeout_s
   | None -> fail "expected bounded timeout"
 
+let test_bounded_oas_timeout_scales_with_estimated_input_tokens () =
+  match
+    ( UT.bounded_oas_timeout_for_turn_budget
+        ~estimated_input_tokens:2_000 ~remaining_turn_budget_s:1200.0,
+      UT.bounded_oas_timeout_for_turn_budget
+        ~estimated_input_tokens:262_144 ~remaining_turn_budget_s:1200.0 )
+  with
+  | Some low_prompt_timeout, Some high_prompt_timeout ->
+      check bool "smaller prompt gets smaller budget" true
+        (low_prompt_timeout < high_prompt_timeout)
+  | _ -> fail "expected bounded timeouts for both prompt sizes"
+
 let test_bounded_oas_timeout_caps_to_remaining_turn_budget () =
   match
     UT.bounded_oas_timeout_for_turn_budget
-      ~max_context:262_144 ~remaining_turn_budget_s:235.7
+      ~estimated_input_tokens:2_000 ~remaining_turn_budget_s:235.7
   with
   | Some timeout_s ->
       check (float 0.01) "remaining budget cap applies" 234.7 timeout_s
@@ -3406,13 +3498,15 @@ let test_bounded_oas_timeout_uses_channel_turn_budget_override () =
   let max_turns =
     Env_config.KeeperKeepalive.oas_max_turns_per_call_scheduled_autonomous
   in
+  let estimated_input_tokens = 2_000 in
   let expected =
-    Env_config.KeeperKeepalive.oas_timeout_for_context_with_turn_budget
-      ~max_context:262_144 ~max_turns
+    Env_config.KeeperKeepalive
+    .oas_timeout_for_estimated_input_tokens_with_turn_budget
+      ~estimated_input_tokens ~max_turns
   in
   match
     UT.bounded_oas_timeout_for_turn_budget_with_turn_budget
-      ~max_turns ~max_context:262_144 ~remaining_turn_budget_s:1200.0
+      ~max_turns ~estimated_input_tokens ~remaining_turn_budget_s:1200.0
   with
   | Some timeout_s ->
       check (float 0.01) "scheduled autonomous turn budget lowers adaptive timeout"
@@ -3422,7 +3516,7 @@ let test_bounded_oas_timeout_uses_channel_turn_budget_override () =
 let test_bounded_oas_timeout_refuses_too_little_budget () =
   check (option (float 0.01)) "insufficient budget returns none" None
     (UT.bounded_oas_timeout_for_turn_budget
-       ~max_context:262_144 ~remaining_turn_budget_s:20.0)
+       ~estimated_input_tokens:2_000 ~remaining_turn_budget_s:20.0)
 
 let test_pure_local_labels_detection () =
   check bool "ollama-only cascade is pure local" true
@@ -4436,6 +4530,8 @@ let () =
             test_collect_board_events_keeps_non_mentions_for_room_signal_keepers;
           test_case "keeps external replies after self comment" `Quick
             test_collect_board_events_keeps_external_replies_after_self_comment;
+          test_case "treats generated alias as self comment" `Quick
+            test_collect_board_events_treats_generated_alias_as_self_comment;
           test_case "default keepers ignore scope messages" `Quick
             test_observe_ignores_scope_messages_without_room_signal_opt_in;
           test_case "room-signal keepers collect scope messages" `Quick
@@ -4810,6 +4906,8 @@ let () =
             test_cascade_exhausted_error_includes_resumable_cli_session_error;
           test_case "bounded OAS timeout keeps adaptive timeout under full budget" `Quick
             test_bounded_oas_timeout_uses_adaptive_when_budget_is_large;
+          test_case "bounded OAS timeout scales with estimated input tokens" `Quick
+            test_bounded_oas_timeout_scales_with_estimated_input_tokens;
           test_case "bounded OAS timeout caps to remaining turn budget" `Quick
             test_bounded_oas_timeout_caps_to_remaining_turn_budget;
           test_case "bounded OAS timeout respects channel turn budget override" `Quick
@@ -4873,6 +4971,8 @@ let () =
             test_degraded_retry_after_recoverable_error_includes_admission_queue_timeout;
           test_case "turn timeout is degraded-retry eligible" `Quick
             test_degraded_retry_after_recoverable_error_includes_turn_timeout;
+          test_case "OAS timeout budget is degraded-retry eligible" `Quick
+            test_degraded_retry_after_recoverable_error_includes_oas_timeout_budget;
           test_case "required tool turns block degraded retry" `Quick
             test_degraded_retry_after_recoverable_error_blocks_required_tools;
           test_case "local_only stays terminal for degraded retry" `Quick

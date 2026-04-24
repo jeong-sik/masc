@@ -5,6 +5,8 @@
 export interface Agent {
   name: string
   agent_type?: string
+  keeper_name?: string | null
+  keeper_id?: string | null
   status?: 'active' | 'busy' | 'listening' | 'idle' | 'inactive' | 'offline'
   current_task: string | null
   context_ratio?: number
@@ -168,6 +170,16 @@ export interface PromptTelemetry {
   segments: Record<string, PromptSegmentTelemetry>
 }
 
+export interface TimeoutBudgetTelemetry {
+  oas_timeout_sec: number | null
+  adaptive_timeout_sec: number | null
+  keeper_turn_timeout_sec: number | null
+  remaining_turn_budget_sec: number | null
+  estimated_input_tokens: number | null
+  max_turns: number | null
+  source: string | null
+}
+
 export interface CtxCompositionTelemetry {
   actual_input_tokens: number | null
   display_total_tokens: number
@@ -193,12 +205,14 @@ export interface KeeperMetricPoint {
   handoff_new_generation: number | null
   prompt_fingerprint: string | null
   prompt_metrics: PromptTelemetry | null
+  timeout_budget: TimeoutBudgetTelemetry | null
   ctx_composition: CtxCompositionTelemetry | null
   input_tokens: number | null
   output_tokens: number | null
   total_tokens: number | null
   wall_tokens_per_second: number | null
   inference_telemetry: InferenceTelemetry | null
+  cascade_strategy?: string | null
   fallback_applied: boolean
   fallback_hops: number
   fallback_from: string | null
@@ -561,6 +575,7 @@ export type KeeperPhase =
 
 export interface Keeper {
   name: string
+  keeper_id?: string | null
   pipeline_stage?: PipelineStage
   phase?: KeeperPhase | null
   runtime_class?: 'keeper'
@@ -594,6 +609,7 @@ export interface Keeper {
     | 'autonomous_slot_wait_timeout'
     | 'admission_queue_wait_timeout'
     | 'turn_timeout_after_queue_wait'
+    | 'oas_timeout_budget'
     | 'turn_timeout'
     | 'completion_contract_violation'
     | 'cascade_exhausted'
@@ -912,6 +928,7 @@ interface KeeperConfigRuntime {
     | 'autonomous_slot_wait_timeout'
     | 'admission_queue_wait_timeout'
     | 'turn_timeout_after_queue_wait'
+    | 'oas_timeout_budget'
     | 'turn_timeout'
     | 'completion_contract_violation'
     | 'cascade_exhausted'

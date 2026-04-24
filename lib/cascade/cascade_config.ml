@@ -1004,33 +1004,52 @@ let local_capacity_for_selections ~sw ~net ?config_path selections =
    strategy fields do not flood the log on every keeper turn. *)
 let strategy_warned : (string * string, unit) Hashtbl.t = Hashtbl.create 4
 
-let warn_unknown_strategy ~name ~raw ~msg =
+let warn_unknown_strategy ~name ~raw ~msg ~fallback_kind =
   let key = (name, raw) in
   if not (Hashtbl.mem strategy_warned key) then begin
     Hashtbl.add strategy_warned key ();
     Printf.eprintf
-      "[warn] cascade %s: %s; falling back to failover\n%!" name msg
+      "[warn] cascade %s: %s; falling back to %s\n%!"
+      name msg (Cascade_strategy.kind_to_string fallback_kind)
   end
 
 let invalid_priority_tier_warned : (string * string, unit) Hashtbl.t =
   Hashtbl.create 4
 
-let warn_invalid_priority_tier ~name ~msg =
+let warn_invalid_priority_tier ~name ~msg ~fallback_kind =
   let key = (name, msg) in
   if not (Hashtbl.mem invalid_priority_tier_warned key) then begin
     Hashtbl.add invalid_priority_tier_warned key ();
     Printf.eprintf
-      "[warn] cascade %s: %s; falling back to failover\n%!" name msg
+      "[warn] cascade %s: %s; falling back to %s\n%!"
+      name msg (Cascade_strategy.kind_to_string fallback_kind)
   end
 
-let parse_kind_or_default ~name = function
+let default_strategy_kind ?config_path ~name () =
+  match config_path with
   | None -> Cascade_strategy.Failover
+  | Some path ->
+    (match Cascade_config_loader.load_catalog ~config_path:path with
+     | Ok entries ->
+       (match
+          List.find_opt
+            (fun (entry : Cascade_config_loader.catalog_entry) ->
+               String.equal entry.name name)
+            entries
+        with
+        | Some entry when entry.keeper_assignable ->
+            Cascade_strategy.Round_robin
+        | _ -> Cascade_strategy.Failover)
+     | Error _ -> Cascade_strategy.Failover)
+
+let parse_kind_or_default ~name ~default_kind = function
+  | None -> default_kind
   | Some raw ->
     match Cascade_strategy.parse_kind raw with
     | Ok k -> k
     | Error msg ->
-      warn_unknown_strategy ~name ~raw ~msg;
-      Cascade_strategy.Failover
+      warn_unknown_strategy ~name ~raw ~msg ~fallback_kind:default_kind;
+      default_kind
 
 let cycle_policy_from_loader (cfg : Cascade_config_loader.strategy_config) =
   let d = Cascade_strategy.default_cycle_policy in
@@ -1087,9 +1106,12 @@ let resolve_strategy ?config_path ~name () =
   match config_path with
   | None -> Cascade_strategy.failover
   | Some path ->
+    let default_kind = default_strategy_kind ~config_path:path ~name () in
     let cfg = Cascade_config_loader.resolve_strategy_config
                 ~config_path:path ~name in
-    let parsed_kind = parse_kind_or_default ~name cfg.kind in
+    let parsed_kind =
+      parse_kind_or_default ~name ~default_kind cfg.kind
+    in
     let cycle = cycle_policy_from_loader cfg in
     let kind, tiers =
       match parsed_kind with
@@ -1105,8 +1127,9 @@ let resolve_strategy ?config_path ~name () =
           (match result with
            | Ok tiers -> (parsed_kind, tiers)
            | Error msg ->
-               warn_invalid_priority_tier ~name ~msg;
-               (Cascade_strategy.Failover, []))
+               warn_invalid_priority_tier
+                 ~name ~msg ~fallback_kind:default_kind;
+               (default_kind, []))
       | _ -> (parsed_kind, [])
     in
     let sticky_ttl_ms =

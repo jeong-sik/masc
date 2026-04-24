@@ -30,7 +30,8 @@ let agent_parse_error_snapshot ~agent_name ~agent_file =
 
 (** Join room - with auto-generated nickname and metadata *)
 let join config ~agent_name ?(agent_type_override=None) ~capabilities
-    ?(pid=None) ?(hostname=None) ?(tty=None) ?(worktree=None) ?(parent_task=None) () =
+    ?(pid=None) ?(hostname=None) ?(tty=None) ?(worktree=None)
+    ?(parent_task=None) ?(keeper_name=None) ?(keeper_id=None) () =
   ensure_initialized config;
 
   (* Determine if this is a legacy call (agent_name = type) or new style *)
@@ -87,6 +88,8 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
          tty = (match tty with Some t -> Some t | None -> get_tty ());
          worktree;
          parent_task;
+         keeper_name;
+         keeper_id;
        } in
        let updated = { existing_agent with
          status = Active;
@@ -138,6 +141,8 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
     tty = (match tty with Some t -> Some t | None -> get_tty ());
     worktree;
     parent_task;
+    keeper_name;
+    keeper_id;
   } in
 
   let agent_file = Filename.concat (agents_dir config) (safe_filename nickname ^ ".json") in

@@ -27,10 +27,10 @@
     wall-clock budget. Returns [None] when too little budget remains to
     schedule another call safely. *)
 val bounded_oas_timeout_for_turn_budget :
-  max_context:int -> remaining_turn_budget_s:float -> float option
+  estimated_input_tokens:int -> remaining_turn_budget_s:float -> float option
 
 val bounded_oas_timeout_for_turn_budget_with_turn_budget :
-  max_context:int ->
+  estimated_input_tokens:int ->
   max_turns:int ->
   remaining_turn_budget_s:float ->
   float option

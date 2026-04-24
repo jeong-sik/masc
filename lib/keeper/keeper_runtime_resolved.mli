@@ -45,11 +45,11 @@ val reactive_max_idle_turns : unit -> int
 val autonomous_max_idle_turns : unit -> int
 val turn_timeout_sec : unit -> float
 val admission_wait_timeout_sec : unit -> float
-val oas_timeout_for_context_with_turn_budget :
-  max_context:int ->
+val oas_timeout_for_estimated_input_tokens_with_turn_budget :
+  estimated_input_tokens:int ->
   max_turns:int ->
   float
 
-val oas_timeout_for_context :
-  max_context:int ->
+val oas_timeout_for_estimated_input_tokens :
+  estimated_input_tokens:int ->
   float

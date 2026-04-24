@@ -40,6 +40,7 @@ let worker_max_tool_calls_per_turn = 12
 
 type cascade_observation = {
   cascade_name : string;
+  strategy : string option;
   configured_labels : string list;
   candidate_models : string list;
   primary_model : string option;
@@ -221,7 +222,7 @@ let normalized_selected_model ~(selected_model_raw : string option)
 (* Observation building                                              *)
 (* ================================================================ *)
 
-let cascade_observation_of_candidates ~cascade_name ~configured_labels
+let cascade_observation_of_candidates ~cascade_name ?strategy ~configured_labels
     ~(candidate_cfgs : Llm_provider.Provider_config.t list)
     ~(selected_model_raw : string option)
     ?(attempts = [])
@@ -246,6 +247,7 @@ let cascade_observation_of_candidates ~cascade_name ~configured_labels
   in
   {
     cascade_name;
+    strategy;
     configured_labels;
     candidate_models;
     primary_model;
@@ -386,10 +388,10 @@ let cascade_metrics_for_candidates
   in
   (capture, metrics)
 
-let cascade_observation_with_metrics ~cascade_name ~configured_labels
+let cascade_observation_with_metrics ~cascade_name ?strategy ~configured_labels
     ~(candidate_cfgs : Llm_provider.Provider_config.t list)
-    ~(selected_model_raw : string option) ~(capture : cascade_metrics_capture) =
-  cascade_observation_of_candidates ~cascade_name ~configured_labels
+    ~(selected_model_raw : string option) ~(capture : cascade_metrics_capture) () =
+  cascade_observation_of_candidates ~cascade_name ?strategy ~configured_labels
     ~candidate_cfgs ~selected_model_raw
     ~attempts:(List.rev capture.attempts_rev)
     ~fallback_events:(List.rev capture.fallback_events_rev)
@@ -405,6 +407,7 @@ let cascade_observation_to_json (obs : cascade_observation) : Yojson.Safe.t =
   `Assoc
     [
       ("cascade_name", `String obs.cascade_name);
+      ("strategy", Json_util.string_opt_to_json obs.strategy);
       ( "configured_labels",
         `List (List.map (fun label -> `String label) obs.configured_labels) );
       ( "candidate_models",

@@ -34,6 +34,7 @@ type cascade_fallback_event = {
 
 type cascade_observation = {
   cascade_name : string;
+  strategy : string option;
   configured_labels : string list;
   candidate_models : string list;
   primary_model : string option;

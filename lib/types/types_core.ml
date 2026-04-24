@@ -96,6 +96,8 @@ type agent_meta = {
   tty: string option; [@default None]     (* terminal identifier *)
   worktree: string option; [@default None] (* git worktree path *)
   parent_task: string option; [@default None] (* task that spawned this agent *)
+  keeper_name: string option; [@default None] (* stable keeper owner, when this runtime is keeper-owned *)
+  keeper_id: string option; [@default None] (* stable keeper UUID, when available *)
 } [@@deriving yojson { strict = false }, show]
 
 (** Agent info *)

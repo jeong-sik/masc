@@ -33,10 +33,6 @@ Example: masc_add_task({title: 'Fix login bug', goal_id: 'g-123', priority: 1, d
           ("type", `String "string");
           ("description", `String "REQUIRED for goal rollup visibility. Set this to one of the active_goal_ids from your system prompt <available_goals> block. Tasks without a goal_id are orphaned and do not contribute to goal progress tracking.");
         ]);
-        ("required_preset", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Tool preset required to claim this task. Must match a preset name from tool_policy.toml (e.g., 'dispatch', 'delivery', 'coding'). Only keepers whose preset covers the required tools can claim. Omit for any agent.");
-        ]);
         ("contract", `Assoc [
           ("type", `String "object");
           ("description", `String "Optional persisted task contract for strict deterministic completion gating.");

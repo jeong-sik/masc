@@ -111,6 +111,7 @@
         test_env_git_noninteractive
         test_gh_exit_class
         test_gh_exit_class_wiring
+        test_keeper_claude_mcp_autoconfig
         test_stay_silent_loop_detector
         test_oas_compat_cascade_fallback
         test_heuristic_metrics_boot_wireup
@@ -242,6 +243,7 @@
           test_env_git_noninteractive
           test_gh_exit_class
           test_gh_exit_class_wiring
+          test_keeper_claude_mcp_autoconfig
           test_stay_silent_loop_detector
           test_oas_compat_cascade_fallback
           test_heuristic_metrics_boot_wireup

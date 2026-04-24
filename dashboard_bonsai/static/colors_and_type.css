@@ -29,7 +29,7 @@
   /* Text — bone and bandage */
   --text-bright:  #e8d8b8;       /* clean bone */
   --text-primary: #b8a488;       /* dirty bandage */
-  --text-dim:     #6a5848;       /* mold dust */
+  --text-dim:     #9a846e;       /* mold dust — WCAG AA compliant */
 
   /* Accents — blood is primary now; brass demoted to warning */
   --accent-blood:    #a01818;    /* fresh arterial */

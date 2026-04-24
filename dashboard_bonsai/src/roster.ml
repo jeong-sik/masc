@@ -115,7 +115,7 @@ stylesheet
 
   .dot_live     { background: var(--status-ok); box-shadow: 0 0 6px var(--status-ok); animation: roster_pulse 1.8s ease-in-out infinite; }
   .dot_thinking { background: var(--accent-brass); box-shadow: 0 0 6px var(--accent-brass); animation: roster_pulse 1.2s ease-in-out infinite; }
-  .dot_idle     { background: #4a3a32; }
+  .dot_idle     { background: var(--text-dim); }
   .dot_failed   { background: var(--accent-blood); box-shadow: 0 0 8px var(--accent-blood); }
 
   .when_ {

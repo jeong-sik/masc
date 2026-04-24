@@ -669,7 +669,7 @@ let nav_link ~(active : Route.t) (route : Route.t) =
   in
   Node.a
     ~attrs
-    ([ Node.span ~attrs:[ Style.nav_glyph ] []
+    ([ Node.span ~attrs:[ Style.nav_glyph; Attr.create "aria-hidden" "true" ] []
      ; Node.text (label route)
      ]
      @ tail)

@@ -341,6 +341,7 @@ stylesheet
     transition: color 0.18s, border-color 0.18s;
   }
   .btn_ghost:hover { color: var(--accent-brass); border-color: var(--border-highlight); }
+  .btn_ghost:focus-visible { outline: 2px solid var(--accent-brass); outline-offset: -2px; }
 
   .header {
     display: flex;
@@ -1177,6 +1178,7 @@ stylesheet
     border-color: var(--accent-brass);
     color: var(--accent-brass);
   }
+  .pbtn:focus-visible { outline: 2px solid var(--accent-brass); outline-offset: -2px; }
   .pbtn_primary {
     background: linear-gradient(180deg, #3a2a16 0%, #241810 100%);
     border-color: var(--accent-brass);
@@ -1737,7 +1739,7 @@ let render_response
   let moonrise =
     Node.div
       ~attrs:[ Style.moonrise ]
-      [ Node.span ~attrs:[ Style.moon_glyph ] []
+      [ Node.span ~attrs:[ Style.moon_glyph; Attr.create "aria-hidden" "true" ] []
       ; Node.span ~attrs:[ Style.moon_lead ] [ Node.text moon_lead_text ]
       ; Node.span ~attrs:[ Style.moon_sep ] [ Node.text "·" ]
       ; Node.span [ Node.text "lit by a half moon" ]
@@ -2116,12 +2118,16 @@ let render_response
             ~attrs:[ Style.page_actions ]
             [ Node.button
                 ~attrs:[ Style.pbtn ]
-                [ Node.span ~attrs:[ Style.pbtn_glyph ] []
+                [ Node.span
+                    ~attrs:[ Style.pbtn_glyph; Attr.create "aria-hidden" "true" ]
+                    []
                 ; Node.text "preflight"
                 ]
             ; Node.button
                 ~attrs:[ Style.pbtn; Style.pbtn_primary ]
-                [ Node.span ~attrs:[ Style.pbtn_glyph ] []
+                [ Node.span
+                    ~attrs:[ Style.pbtn_glyph; Attr.create "aria-hidden" "true" ]
+                    []
                 ; Node.text "advance round"
                 ]
             ]
@@ -2137,7 +2143,7 @@ let render_response
                 ~attrs:[ Style.title ]
                 [ Node.span ~attrs:[ Style.versal ] [ Node.text "J" ]
                 ; Node.span ~attrs:[ Style.title_rest ] [ Node.text "ournal" ]
-                ; Node.span ~attrs:[ Style.title_rule ] []
+                ; Node.span ~attrs:[ Style.title_rule; Attr.create "aria-hidden" "true" ] []
                 ; Node.span
                     ~attrs:[ Style.folio ]
                     [ Node.text "folio xii · recto" ]
@@ -2149,12 +2155,12 @@ let render_response
         ]
     ; Node.div
         ~attrs:[ Style.sec ]
-        [ Node.span ~attrs:[ Style.sec_glyph ] []
+        [ Node.span ~attrs:[ Style.sec_glyph; Attr.create "aria-hidden" "true" ] []
         ; Node.div ~attrs:[ Style.sec_h ] [ Node.text "log ring" ]
         ; Node.span
             ~attrs:[ Style.sec_sub ]
             [ Node.text "in-memory journal · newest on top" ]
-        ; Node.span ~attrs:[ Style.sec_hr ] []
+        ; Node.span ~attrs:[ Style.sec_hr; Attr.create "aria-hidden" "true" ] []
         ; Node.span
             ~attrs:[ Style.sec_r ]
             [ Node.text "rows "
@@ -2173,12 +2179,12 @@ let render_response
     ; tape
     ; Node.div
         ~attrs:[ Style.sec ]
-        [ Node.span ~attrs:[ Style.sec_glyph ] []
+        [ Node.span ~attrs:[ Style.sec_glyph; Attr.create "aria-hidden" "true" ] []
         ; Node.div ~attrs:[ Style.sec_h ] [ Node.text "keepers" ]
         ; Node.span
             ~attrs:[ Style.sec_sub ]
             [ Node.text "sorted by heartbeat · ctx spark = last 10 min" ]
-        ; Node.span ~attrs:[ Style.sec_hr ] []
+        ; Node.span ~attrs:[ Style.sec_hr; Attr.create "aria-hidden" "true" ] []
         ; Node.span
             ~attrs:[ Style.sec_r ]
             [ Node.text "slot "
@@ -2194,12 +2200,12 @@ let render_response
     ; Roster.view ~keepers ()
     ; Node.div
         ~attrs:[ Style.sec ]
-        [ Node.span ~attrs:[ Style.sec_glyph ] []
+        [ Node.span ~attrs:[ Style.sec_glyph; Attr.create "aria-hidden" "true" ] []
         ; Node.div ~attrs:[ Style.sec_h ] [ Node.text "cycle activity" ]
         ; Node.span
             ~attrs:[ Style.sec_sub ]
             [ Node.text "last 60 minutes · one lane per keeper" ]
-        ; Node.span ~attrs:[ Style.sec_hr ] []
+        ; Node.span ~attrs:[ Style.sec_hr; Attr.create "aria-hidden" "true" ] []
         ; Node.span
             ~attrs:[ Style.sec_r ]
             [ Node.text "mock · trace endpoint "
@@ -2209,12 +2215,12 @@ let render_response
     ; Swim.view ~keepers ()
     ; Node.div
         ~attrs:[ Style.sec ]
-        [ Node.span ~attrs:[ Style.sec_glyph ] []
+        [ Node.span ~attrs:[ Style.sec_glyph; Attr.create "aria-hidden" "true" ] []
         ; Node.div ~attrs:[ Style.sec_h ] [ Node.text "context pressure" ]
         ; Node.span
             ~attrs:[ Style.sec_sub ]
             [ Node.text "60m rolling · % of window · warn 75 / danger 90" ]
-        ; Node.span ~attrs:[ Style.sec_hr ] []
+        ; Node.span ~attrs:[ Style.sec_hr; Attr.create "aria-hidden" "true" ] []
         ; Node.span
             ~attrs:[ Style.sec_r ]
             [ Node.text "mock · keepers endpoint "
@@ -2224,12 +2230,12 @@ let render_response
     ; Ctx_chart.view ~keepers ()
     ; Node.div
         ~attrs:[ Style.sec ]
-        [ Node.span ~attrs:[ Style.sec_glyph ] []
+        [ Node.span ~attrs:[ Style.sec_glyph; Attr.create "aria-hidden" "true" ] []
         ; Node.div ~attrs:[ Style.sec_h ] [ Node.text "keeper rites · 12 states" ]
         ; Node.span
             ~attrs:[ Style.sec_sub ]
             [ Node.text "Offline → Running → {Failing · Overflowed · Compacting · Draining} → Paused / Stopped / Crashed → Restarting → Dead" ]
-        ; Node.span ~attrs:[ Style.sec_hr ] []
+        ; Node.span ~attrs:[ Style.sec_hr; Attr.create "aria-hidden" "true" ] []
         ; Node.span
             ~attrs:[ Style.sec_r ]
             [ Node.text "mock · keeper phase wire "

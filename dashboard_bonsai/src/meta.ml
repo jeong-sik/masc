@@ -28,7 +28,7 @@ stylesheet
     );
     font-family: 'JetBrains Mono', ui-monospace, monospace;
     font-size: 11px;
-    color: var(--text-dim, #6a5848);
+    color: var(--text-dim, #9a846e);
   }
 
   .item { display: flex; align-items: baseline; gap: 8px; }
@@ -38,7 +38,7 @@ stylesheet
     font-size: 11px;
     letter-spacing: 0.2em;
     text-transform: uppercase;
-    color: var(--text-dim, #6a5848);
+    color: var(--text-dim, #9a846e);
   }
 
   .v {

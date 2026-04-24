@@ -34,7 +34,7 @@ stylesheet
   .sec_sub {
     font-family: var(--font-body, 'EB Garamond', serif);
     font-style: italic;
-    color: var(--text-dim, #6a5848);
+    color: var(--text-dim, #9a846e);
     font-size: 13px;
     flex-shrink: 0;
   }
@@ -51,7 +51,7 @@ stylesheet
   .sec_right {
     font-family: var(--font-mono, 'JetBrains Mono', monospace);
     font-size: 11px;
-    color: var(--text-dim, #6a5848);
+    color: var(--text-dim, #9a846e);
     font-variant-numeric: tabular-nums;
     flex-shrink: 0;
   }

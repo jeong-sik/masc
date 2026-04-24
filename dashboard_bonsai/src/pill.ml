@@ -35,7 +35,7 @@ stylesheet
     text-align: center;
     border: 1px solid var(--border-main, #3a2e20);
     font-variant-numeric: tabular-nums;
-    color: var(--text-dim, #6a5848);
+    color: var(--text-dim, #9a846e);
   }
 
   .pill_sm {
@@ -46,15 +46,15 @@ stylesheet
     padding: 2px 6px;
     border: 1px solid var(--border-main, #3a2e20);
     text-align: center;
-    color: var(--text-dim, #6a5848);
+    color: var(--text-dim, #9a846e);
   }
 
   .c_ok      { color: var(--status-ok, #4a7a2a); border-color: var(--status-ok, #4a7a2a); }
   .c_warn    { color: var(--status-warn, #c08828); border-color: var(--status-warn, #c08828); }
   .c_bad     { color: var(--accent-blood, #a01818); border-color: var(--accent-blood, #a01818); }
   .c_brass   { color: var(--accent-brass, #8a6a28); border-color: var(--accent-brass, #8a6a28); }
-  .c_paused  { color: var(--text-dim, #6a5848); border-color: var(--border-main, #3a2e20); }
-  .c_neutral { color: var(--text-dim, #6a5848); border-color: var(--border-main, #3a2e20); }
+  .c_paused  { color: var(--text-dim, #9a846e); border-color: var(--border-main, #3a2e20); }
+  .c_neutral { color: var(--text-dim, #9a846e); border-color: var(--border-main, #3a2e20); }
 |}]
 
 type size = [ `Sm | `Md ]

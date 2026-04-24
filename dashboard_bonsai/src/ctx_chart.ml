@@ -59,7 +59,7 @@ stylesheet
     position: absolute;
     right: 8px;
     font-family: 'JetBrains Mono', ui-monospace, monospace;
-    font-size: 9px;
+    font-size: 10px;
     color: var(--text-dim);
     pointer-events: none;
   }

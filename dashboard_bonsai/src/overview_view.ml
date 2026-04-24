@@ -368,7 +368,7 @@ let view_meta_panel (r : Overview_types.response) =
     match m.dominant_belief with
     | Some b ->
       Node.div
-        ~attrs:[ Style.belief ]
+        ~attrs:[ Style.belief; Attr.role "note"; Attr.arialabel ("dominant belief: " ^ b.status) ]
         [ Node.span
             ~attrs:[ Style.belief_tag ]
             [ Node.text b.status ]

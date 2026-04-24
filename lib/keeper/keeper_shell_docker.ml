@@ -240,7 +240,11 @@ let run_docker_shell_command_with_status
                 "-e"; "GIT_CONFIG_KEY_0=safe.directory";
                 "-e"; "GIT_CONFIG_VALUE_0=*";
               ]
-              @ Env_git_noninteractive.docker_env_args
+              (* RFC-0007 PR-1: non-interactive git constants must reach the
+                 container. Without these, git's credential helpers can
+                 open /dev/tty inside a sandbox that has no tty and hang
+                 until the outer wall-clock timeout trips silently. *)
+              @ Env_git_noninteractive.docker_args
               @ git_identity_env ~name:git_author_name ~email:git_author_email
             in
             Ok (mounts, envs)

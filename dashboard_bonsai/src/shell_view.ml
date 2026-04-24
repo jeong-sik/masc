@@ -184,7 +184,7 @@ stylesheet
     display: flex;
     align-items: center;
     gap: 11px;
-    padding: 8px 18px;
+    padding: 14px 18px;
     color: var(--text-primary);
     font-family: var(--font-ui, 'Noto Sans KR', sans-serif);
     font-size: 11px;

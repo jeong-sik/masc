@@ -1583,11 +1583,15 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             ?fallback_reason
             ~social_state
             ~error:e_str ();
-          (match write_meta config updated_meta with
+          (match write_meta_with_retry config updated_meta with
            | Ok () -> ()
            | Error msg ->
-               Log.Keeper.error
-                 "write_meta failed after unified turn failure: %s" msg);
+               if is_version_conflict_error msg then
+                 Log.Keeper.warn
+                   "write_meta lost CAS race after retries (turn failure path): %s" msg
+               else
+                 Log.Keeper.error
+                   "write_meta failed after unified turn failure: %s" msg);
           if is_ambiguous_partial then begin
             let failure_reason =
               Option.value
@@ -1876,10 +1880,18 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             latency_ms
             turn_mode_label
             outcome_str;
-          (* 7. Persist updated meta *)
-          (match write_meta config updated_meta with
+          (* 7. Persist updated meta — RMW retry to avoid losing the cycle's
+             usage/trace data when a heartbeat fiber bumps meta_version
+             between the cycle's read and its write. See #9764. *)
+          (match write_meta_with_retry config updated_meta with
            | Ok () -> ()
-           | Error msg -> Log.Keeper.error "write_meta failed after keeper cycle: %s" msg);
+           | Error msg ->
+               if is_version_conflict_error msg then
+                 Log.Keeper.warn
+                   "write_meta lost CAS race after retries (keeper cycle): %s" msg
+               else
+                 Log.Keeper.error
+                   "write_meta failed after keeper cycle: %s" msg);
           (* 8. Handle stop reason *)
           (match result.stop_reason with
            | Oas_worker.TurnBudgetExhausted { turns_used; limit } ->

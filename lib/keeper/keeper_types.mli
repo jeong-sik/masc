@@ -282,6 +282,27 @@ val keeper_names : Coord.config -> string list
 val keepalive_keeper_names : Coord.config -> string list
 val persistent_agent_names : Coord.config -> string list
 val write_meta : ?force:bool -> Coord.config -> keeper_meta -> (unit, string) result
+
+val write_meta_with_retry :
+  ?max_retries:int -> Coord.config -> keeper_meta -> (unit, string) result
+(** CAS write with bounded retry on version conflict.
+
+    On version conflict, re-reads disk to learn the latest version,
+    lifts the caller's payload onto it, and writes again. Retries up
+    to [max_retries] (default 3) times. Non-conflict errors fail
+    immediately.
+
+    Trade-off: payload-wins-at-field-level. Concurrent writes from
+    other fibers (e.g. heartbeat updating last_seen) are overwritten
+    by this caller's payload. Use only when the caller's data is
+    less recoverable than the concurrent writer's (cycle completion
+    qualifies; heartbeat does NOT — it should keep using {!write_meta}
+    and tolerate occasional CAS conflicts). See #9764 / #9733 / #9769. *)
+
+val is_version_conflict_error : string -> bool
+(** True when [write_meta] returned an error caused by CAS version
+    mismatch (vs an actual I/O failure). Useful for callers that want
+    to log conflicts at WARN and other failures at ERROR. *)
 val keeper_name_from_agent_name : string -> string option
 val canonical_keeper_name_from_agent_name : string -> string option
 val canonical_keeper_name : string -> string option

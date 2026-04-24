@@ -252,13 +252,28 @@ jobs:
               });
             }
 
-            if (action === "ready_for_review" || action === "auto_merge_enabled" || policyFailures.length > 0) {
-              const summary = [
-                policyFailures.length > 0 ? `policy failures: ${policyFailures.join("; ")}` : "",
-                actions.length > 0 ? actions.join(", ") : "",
-                failedActions.length > 0 ? `manual recovery required after failed automation: ${failedActions.join("; ")}` : ""
-              ].filter(Boolean).join("; ");
+            // Always compose the summary so both hard-fail and warn paths can reference it.
+            const summary = [
+              policyFailures.length > 0 ? `policy failures: ${policyFailures.join("; ")}` : "",
+              actions.length > 0 ? actions.join(", ") : "",
+              failedActions.length > 0 ? `manual recovery required after failed automation: ${failedActions.join("; ")}` : ""
+            ].filter(Boolean).join("; ");
+
+            // Hard-fail only on actions that actually violate the Draft invariants:
+            //   - automation step itself failed (failedActions), or
+            //   - someone tried to enable auto-merge / flip to draft while a policy is breached.
+            // A plain `ready_for_review` must not block the downstream label-and-review job
+            // (which depends on `needs: draft-automerge-guard.result == 'success'`). Otherwise
+            // every Ready PR ends up BLOCKED on this required check.
+            const hardFailure = failedActions.length > 0;
+            const draftSafetyViolation =
+              (action === "auto_merge_enabled" || action === "converted_to_draft") &&
+              policyFailures.length > 0;
+
+            if (hardFailure || draftSafetyViolation) {
               core.setFailed(`Draft PR guard blocked ${action}: ${summary}.`);
+            } else if (policyFailures.length > 0) {
+              core.warning(`Draft PR guard non-blocking policy note (${action}): ${summary}`);
             }
 
   label-and-review:

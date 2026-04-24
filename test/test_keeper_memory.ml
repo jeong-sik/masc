@@ -137,6 +137,7 @@ let base_measurement : Meas.measurement_snapshot = {
     repetition_risk = 0.1;
     goal_alignment = 0.8;
     response_alignment = 0.8;
+    similarity_measurable = true;
   };
   timing = {
     now_ts = 1000.0;

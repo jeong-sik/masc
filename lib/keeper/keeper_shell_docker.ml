@@ -113,6 +113,39 @@ let cmd_targets_git_or_gh cmd =
     let tokens = String.split_on_char ' ' trimmed in
     List.exists (fun tok -> tok = "git" || tok = "gh") tokens
 
+let cmd_targets_gh cmd =
+  let trimmed = String.trim cmd in
+  let first_word =
+    match String.index_opt trimmed ' ' with
+    | Some i -> String.sub trimmed 0 i
+    | None -> trimmed
+  in
+  if first_word = "gh" then true
+  else
+    (* Same "prefixed by cd ..." allowance as cmd_targets_git_or_gh,
+       but strict to gh for classification purposes. *)
+    let tokens = String.split_on_char ' ' trimmed in
+    List.exists (fun tok -> tok = "gh") tokens
+
+(* Emit a ("gh_exit_class", "…") JSON field when [cmd] targets gh,
+   AND increment the matching Legendary_counters bucket.  Callers
+   append the returned list to their `Assoc payload unconditionally —
+   it is empty for non-gh commands, so call sites keep their shape. *)
+let gh_exit_class_field ~cmd ~status ~output : (string * Yojson.Safe.t) list =
+  if not (cmd_targets_gh cmd) then []
+  else
+    let exit_code = match status with
+      | Unix.WEXITED n -> n
+      | Unix.WSIGNALED n -> 128 + n
+      | Unix.WSTOPPED n -> 256 + n
+    in
+    (* Docker shell captures stdout+stderr combined into [output];
+       Gh_exit_class rules match on substrings so passing the combined
+       buffer as [stderr] is sound. *)
+    let class_ = Gh_exit_class.classify ~exit_code ~stderr:output in
+    Legendary_counters.incr_gh_exit_class class_;
+    [ ("gh_exit_class", `String (Gh_exit_class.to_string class_)) ]
+
 let optional_ro_mount ~host ~container =
   if host = "" then []
   else if not (Sys.file_exists host) then []
@@ -384,7 +417,7 @@ let run_docker_with_git_bash
            Keeper_registry.clear_error ~base_path:config.base_path meta.name;
          Yojson.Safe.to_string
            (`Assoc
-              [
+              ([
                 ("ok", `Bool (st = Unix.WEXITED 0));
                 ("via", `String "docker");
                 ("cwd", `String cwd);
@@ -394,7 +427,7 @@ let run_docker_with_git_bash
                 ("effective_sandbox_image", `String image);
                 ("status", Keeper_alerting_path.process_status_to_json st);
                 ("output", `String out);
-              ]))
+              ] @ gh_exit_class_field ~cmd ~status:st ~output:out)))
     | None ->
       match
         run_docker_shell_command_with_status ~config ~meta ~cwd ~timeout_sec
@@ -404,7 +437,7 @@ let run_docker_with_git_bash
       | Ok result ->
         Yojson.Safe.to_string
           (`Assoc
-             [
+             ([
                ("ok", `Bool (result.status = Unix.WEXITED 0));
                ("via", `String "docker");
                ("cwd", `String cwd);
@@ -415,7 +448,7 @@ let run_docker_with_git_bash
                ( "status",
                  Keeper_alerting_path.process_status_to_json result.status );
                ("output", `String result.output);
-             ]))
+             ] @ gh_exit_class_field ~cmd ~status:result.status ~output:result.output)))
 
 let run_docker_hardened_bash
     ~(turn_sandbox_runtime : Keeper_turn_sandbox_runtime.t option)
@@ -453,7 +486,7 @@ let run_docker_hardened_bash
            Keeper_registry.clear_error ~base_path:config.base_path meta.name;
          Yojson.Safe.to_string
            (`Assoc
-              [
+              ([
                 ("ok", `Bool (st = Unix.WEXITED 0));
                 ("via", `String "docker");
                 ("cwd", `String cwd);
@@ -463,7 +496,7 @@ let run_docker_hardened_bash
                 ("effective_sandbox_image", `String image);
                 ("status", Keeper_alerting_path.process_status_to_json st);
                 ("output", `String out);
-              ]))
+              ] @ gh_exit_class_field ~cmd ~status:st ~output:out)))
     | _ ->
       (* P12: check egress policy before running networked container *)
       (match check_egress ~config ~meta ~cmd with
@@ -477,7 +510,7 @@ let run_docker_hardened_bash
       | Ok result ->
         Yojson.Safe.to_string
           (`Assoc
-             [
+             ([
                ("ok", `Bool (result.status = Unix.WEXITED 0));
                ("via", `String "docker");
                ("cwd", `String cwd);
@@ -488,4 +521,4 @@ let run_docker_hardened_bash
                ( "status",
                  Keeper_alerting_path.process_status_to_json result.status );
                ("output", `String result.output);
-             ]))
+             ] @ gh_exit_class_field ~cmd ~status:result.status ~output:result.output)))

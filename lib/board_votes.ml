@@ -407,30 +407,28 @@ let recalculate_reply_counts store =
     operators see the problem immediately instead of the silent-
     persist failure mode that caused #9903.
 
-    Pattern set is deliberately narrow: only names that could never
-    be real keeper/agent identities. Known production patterns are
-    [keeper-*], [<name>-keeper-agent], bare agent IDs — none of
+    Pattern set is deliberately narrow and is applied only to the
+    voter segment of the persisted target. Known production patterns
+    are [keeper-*], [<name>-keeper-agent], bare agent IDs — none of
     which collide with the fixture patterns below.
 
     Env var: [MASC_BOARD_VOTE_QUARANTINE=1] promotes detection from
     warn-and-load to skip-fixture-rows. Defaults to warn-only to
     avoid surprising live operators.  *)
 let is_fixture_voter_target target =
-  let contains ~needle haystack =
-    let nl = String.length needle in
-    let hl = String.length haystack in
-    if nl > hl then false
-    else
-      let rec scan i =
-        if i + nl > hl then false
-        else if String.sub haystack i nl = needle then true
-        else scan (i + 1)
-      in
-      scan 0
+  let voter =
+    match String.rindex_opt target ':' with
+    | Some idx when idx + 1 < String.length target ->
+        String.sub target (idx + 1) (String.length target - idx - 1)
+    | _ -> target
   in
-  contains ~needle:"hot-voter-" target
-  || contains ~needle:"synthetic-voter-" target
-  || contains ~needle:":test-voter-" target
+  let has_prefix ~prefix s =
+    let prefix_len = String.length prefix in
+    String.length s >= prefix_len && String.sub s 0 prefix_len = prefix
+  in
+  has_prefix ~prefix:"hot-voter-" voter
+  || has_prefix ~prefix:"synthetic-voter-" voter
+  || has_prefix ~prefix:"test-voter-" voter
 
 let quarantine_enabled () =
   match Sys.getenv_opt "MASC_BOARD_VOTE_QUARANTINE" with

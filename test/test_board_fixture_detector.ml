@@ -34,6 +34,7 @@ let test_test_voter_flagged () =
 
 let test_real_keeper_names_not_flagged () =
   let cases = [
+    "post:hot-voter-topic:keeper-taskmaster-agent";
     "post:p-abc:keeper-taskmaster-agent";
     "post:p-abc:sangsu";
     "post:p-abc:anyang-keepers";

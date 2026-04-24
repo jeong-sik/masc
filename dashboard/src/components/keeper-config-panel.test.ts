@@ -26,6 +26,7 @@ function makeSlot(overrides: Partial<KeeperHookSlot> = {}): KeeperHookSlot {
 function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
   return {
     name: 'keeper-sangsu',
+    active_goal_ids: ['goal-runtime'],
     sandbox_profile: 'local',
     network_mode: 'inherit',
     shared_memory_scope: 'disabled',
@@ -118,6 +119,12 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
     coordination: {
       mention_targets: ['sangsu'],
       joined_room_ids: ['default'],
+      active_goal_ids: ['goal-runtime'],
+      active_goals: [
+        { id: 'goal-runtime', title: 'Ship runtime clarity', horizon: 'mid' },
+      ],
+      active_goal_count: 1,
+      missing_active_goal_ids: [],
     },
     sources: {
       live_meta_path: '/tmp/.masc/keepers/keeper-sangsu/live.json',
@@ -254,6 +261,7 @@ describe('sandbox coerce helpers', () => {
 function makeKeeperConfigForSandbox(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
   const base: KeeperConfig = {
     name: 'test-keeper',
+    active_goal_ids: [],
     sandbox_profile: 'local',
     network_mode: 'inherit',
     shared_memory_scope: 'disabled',
@@ -279,7 +287,14 @@ function makeKeeperConfigForSandbox(overrides: Partial<KeeperConfig> = {}): Keep
       cooldown_sec: 0,
     } as KeeperConfig['handoff'],
     runtime: {} as KeeperConfig['runtime'],
-    coordination: {} as KeeperConfig['coordination'],
+    coordination: {
+      mention_targets: [],
+      joined_room_ids: [],
+      active_goal_ids: [],
+      active_goals: [],
+      active_goal_count: 0,
+      missing_active_goal_ids: [],
+    },
     tools: {} as KeeperConfig['tools'],
     sources: {} as KeeperConfig['sources'],
     metrics: {} as KeeperConfig['metrics'],
@@ -383,10 +398,94 @@ describe('buildRuntimePayload — sandbox diffing', () => {
     const payload = buildRuntimePayload(draft, c)
     expect(payload.sandbox_profile).toBeUndefined()
   })
+
+  it('emits active_goal_ids when goal bindings change', () => {
+    const c = makeKeeperConfigForSandbox({
+      active_goal_ids: ['goal-a'],
+      coordination: {
+        mention_targets: [],
+        joined_room_ids: [],
+        active_goal_ids: ['goal-a'],
+        active_goals: [{ id: 'goal-a', title: 'Goal A', horizon: 'short' }],
+        active_goal_count: 1,
+        missing_active_goal_ids: [],
+      },
+    })
+    const payload = buildRuntimePayload(draftFrom(c, {
+      active_goal_ids: ['goal-b', 'goal-c'],
+    }), c)
+    expect(payload.active_goal_ids).toEqual(['goal-b', 'goal-c'])
+  })
 })
 
 const mocks = vi.hoisted(() => ({
   fetchKeeperConfig: vi.fn(async () => makeKeeperConfig()),
+  fetchDashboardGoalsTree: vi.fn(async () => ({
+    tree: [
+      {
+        id: 'goal-runtime',
+        title: 'Ship runtime clarity',
+        horizon: 'mid',
+        status: 'active',
+        status_color: '#4ade80',
+        phase: 'executing',
+        phase_color: '#4ade80',
+        health: 'on_track',
+        health_color: '#4ade80',
+        badges: [],
+        status_reason: '',
+        priority: 2,
+        metric: null,
+        target_value: null,
+        due_date: null,
+        parent_goal_id: null,
+        convergence: 0,
+        convergence_pct: 0,
+        tasks: [],
+        task_count: 0,
+        task_done_count: 0,
+        verification_summary: {
+          required_votes: 0,
+          approve_votes: 0,
+          reject_votes: 0,
+          pending_votes: 0,
+          quorum_met: false,
+          rejected: false,
+          votes: [],
+        },
+        pending_verification_count: 0,
+        timeline_events: [],
+        children: [],
+        child_count: 0,
+        last_activity_at: '',
+        stagnation_seconds: 0,
+        linked_keeper_names: [],
+        pending_approval_count: 0,
+        infra_risk_count: 0,
+        linkage_source: 'none',
+        linkage_warning_count: 0,
+        blocking_source: 'none',
+        blocking_reason: '',
+        created_at: '',
+        updated_at: '',
+      },
+    ],
+    summary: {
+      total_goals: 1,
+      active_goals: 1,
+      on_track_goals: 1,
+      done_goals: 0,
+      paused_goals: 0,
+      at_risk_goals: 0,
+      blocked_goals: 0,
+      total_tasks: 0,
+      done_tasks: 0,
+      pending_approvals: 0,
+      infra_risk_count: 0,
+      overall_convergence: 0,
+      overall_convergence_pct: 0,
+    },
+  })),
   fetchCascadeProfiles: vi.fn(async () => ({
     profiles: ['keeper_unified', 'resilient_breaker'],
     invalid_profiles: [
@@ -402,6 +501,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../api/dashboard', () => ({
   fetchCascadeProfiles: mocks.fetchCascadeProfiles,
+  fetchDashboardGoalsTree: mocks.fetchDashboardGoalsTree,
   fetchKeeperConfig: mocks.fetchKeeperConfig,
   patchKeeperConfig: mocks.patchKeeperConfig,
   updateKeeperCascade: mocks.updateKeeperCascade,
@@ -421,6 +521,7 @@ describe('KeeperConfigPanel', () => {
     document.body.appendChild(container)
     resetKeeperConfig()
     mocks.fetchKeeperConfig.mockClear()
+    mocks.fetchDashboardGoalsTree.mockClear()
     mocks.fetchCascadeProfiles.mockClear()
     mocks.patchKeeperConfig.mockClear()
     mocks.updateKeeperCascade.mockClear()
@@ -438,6 +539,7 @@ describe('KeeperConfigPanel', () => {
     await flush()
 
     expect(mocks.fetchKeeperConfig).toHaveBeenCalledTimes(1)
+    expect(mocks.fetchDashboardGoalsTree).toHaveBeenCalledTimes(1)
     expect(mocks.fetchCascadeProfiles).toHaveBeenCalledTimes(1)
     expect(container.textContent).toContain('편집 가능 범위')
     expect(container.textContent).toContain('keeper TOML의 cascade_name')
@@ -448,6 +550,8 @@ describe('KeeperConfigPanel', () => {
     expect(container.textContent).toContain('/tmp/config/cascade.toml')
     expect(container.textContent).toContain('/tmp/config/cascade.json')
     expect(container.textContent).toContain('런타임 설정')
+    expect(container.textContent).toContain('active_goal_ids')
+    expect(container.textContent).toContain('Ship runtime clarity')
     expect(container.textContent).toContain('/tmp/.masc/keepers/keeper-sangsu/live.json')
     expect(container.textContent).toContain('활성 모델')
     expect(container.textContent).toContain('레지스트리 상태')

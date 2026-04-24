@@ -6,13 +6,14 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import {
   fetchCascadeProfiles,
+  fetchDashboardGoalsTree,
   fetchKeeperConfig,
   patchKeeperConfig,
   updateKeeperCascade,
   type CascadeInvalidProfile,
 } from '../api/dashboard'
 import type { KeeperConfigUpdatePayload } from '../api/dashboard'
-import type { KeeperConfig, KeeperHookSlot } from '../types'
+import type { GoalTreeNode, KeeperConfig, KeeperHookSlot } from '../types'
 import type { KeeperConfigLoadStatus } from './keeper-detail-source'
 import { formatTokens } from '../lib/format-number'
 import { isVerifierRoleKeeper } from '../lib/keeper-utils'
@@ -32,6 +33,8 @@ type CascadeProfileCatalog = {
 }
 const cascadeProfilesResource = createAsyncResource<CascadeProfileCatalog>()
 const cascadeProfilesState = cascadeProfilesResource.state
+const goalOptionsResource = createAsyncResource<GoalTreeNode[]>()
+const goalOptionsState = goalOptionsResource.state
 const editMode = signal(false)
 const saving = signal(false)
 const saveError = signal<string | null>(null)
@@ -119,6 +122,7 @@ export type SharedMemoryScope = 'disabled' | 'room'
 
 export type RuntimeDraft = {
   sandbox_profile: SandboxProfile
+  active_goal_ids: string[]
   network_mode: SandboxNetworkMode
   shared_memory_scope: SharedMemoryScope
   allowed_paths_text: string
@@ -152,6 +156,9 @@ export function coerceSharedMemoryScope(raw: string | undefined): SharedMemorySc
 export function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
   return {
     sandbox_profile: coerceSandboxProfile(c.sandbox_profile),
+    active_goal_ids: c.coordination.active_goal_ids.length > 0
+      ? c.coordination.active_goal_ids
+      : c.active_goal_ids,
     network_mode: coerceNetworkMode(c.network_mode),
     shared_memory_scope: coerceSharedMemoryScope(c.shared_memory_scope),
     allowed_paths_text: (c.allowed_paths ?? []).join('\n'),
@@ -172,6 +179,10 @@ export function buildRuntimePayload(draft: RuntimeDraft, orig: KeeperConfig): Ke
   const payload: KeeperConfigUpdatePayload = {}
   const newPaths = draft.allowed_paths_text.split('\n').map(s => s.trim()).filter(Boolean)
   const origPaths = orig.allowed_paths ?? []
+  const origActiveGoalIds = orig.coordination.active_goal_ids.length > 0
+    ? orig.coordination.active_goal_ids
+    : orig.active_goal_ids
+  if (!sameStringArray(draft.active_goal_ids, origActiveGoalIds)) payload.active_goal_ids = draft.active_goal_ids
   if (JSON.stringify(newPaths) !== JSON.stringify(origPaths)) payload.allowed_paths = newPaths
   if (draft.sandbox_profile !== coerceSandboxProfile(orig.sandbox_profile)) payload.sandbox_profile = draft.sandbox_profile
   if (draft.network_mode !== coerceNetworkMode(orig.network_mode)) payload.network_mode = draft.network_mode
@@ -202,6 +213,38 @@ function updateRuntimeDraft(field: keyof RuntimeDraft, value: boolean | number |
   runtimeDraft.value = next
 }
 
+function sameStringArray(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false
+  return a.every((value, index) => value === b[index])
+}
+
+function dedupeStrings(values: readonly string[]): string[] {
+  const seen = new Set<string>()
+  const next: string[] = []
+  for (const raw of values) {
+    const value = raw.trim()
+    if (!value || seen.has(value)) continue
+    seen.add(value)
+    next.push(value)
+  }
+  return next
+}
+
+function updateRuntimeActiveGoalIds(values: readonly string[]) {
+  const d = runtimeDraft.value
+  if (!d) return
+  runtimeDraft.value = { ...d, active_goal_ids: dedupeStrings(values) }
+}
+
+function toggleRuntimeActiveGoal(goalId: string, checked: boolean) {
+  const d = runtimeDraft.value
+  if (!d) return
+  const next = checked
+    ? [...d.active_goal_ids, goalId]
+    : d.active_goal_ids.filter((id) => id !== goalId)
+  updateRuntimeActiveGoalIds(next)
+}
+
 export async function loadKeeperConfig(
   name: string,
   options?: { force?: boolean },
@@ -218,6 +261,7 @@ export async function loadKeeperConfig(
 export function resetKeeperConfig(): void {
   configResource.reset()
   cascadeProfilesResource.reset()
+  goalOptionsResource.reset()
   configKeeperName.value = ''
   editMode.value = false
   editDraft.value = null
@@ -248,6 +292,25 @@ async function loadCascadeProfiles(options?: { force?: boolean }): Promise<void>
   if (!force && cascadeProfilesState.value.status === 'loaded') return
   if (force) cascadeProfilesResource.reset()
   await cascadeProfilesResource.load(() => fetchCascadeProfiles())
+}
+
+function flattenGoalTree(nodes: readonly GoalTreeNode[]): GoalTreeNode[] {
+  const out: GoalTreeNode[] = []
+  for (const node of nodes) {
+    out.push(node)
+    out.push(...flattenGoalTree(node.children ?? []))
+  }
+  return out
+}
+
+async function loadGoalOptions(options?: { force?: boolean }): Promise<void> {
+  const force = options?.force === true
+  if (!force && goalOptionsState.value.status === 'loaded') return
+  if (force) goalOptionsResource.reset()
+  await goalOptionsResource.load(async () => {
+    const response = await fetchDashboardGoalsTree()
+    return flattenGoalTree(response.tree)
+  })
 }
 
 // ── Helpers ──────────────────────────────────────────────
@@ -518,6 +581,9 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
   if (cascadeState.status === 'idle') {
     void loadCascadeProfiles()
   }
+  if (goalOptionsState.value.status === 'idle') {
+    void loadGoalOptions()
+  }
 
   if (state.status === 'loading') {
     return html`<${LoadingState}>설정 불러오는 중...<//>`
@@ -697,6 +763,16 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
   const invalidCascadeSummary = invalidCascadeProfiles
     .map((profile) => `${profile.name}: ${profile.errors.join('; ')}`)
     .join(' | ')
+  const goalState = goalOptionsState.value
+  const goalOptionsLoaded = goalState.status === 'loaded'
+  const goalOptions: GoalTreeNode[] = goalOptionsLoaded ? goalState.data : []
+  const selectedActiveGoalIds = rd
+    ? rd.active_goal_ids
+    : (c.coordination.active_goal_ids.length > 0 ? c.coordination.active_goal_ids : c.active_goal_ids)
+  const knownGoalIds = new Set(goalOptions.map((goal) => goal.id))
+  const unknownSelectedGoalIds = goalOptionsLoaded
+    ? selectedActiveGoalIds.filter((goalId) => !knownGoalIds.has(goalId))
+    : []
 
   return html`
     <div class="flex flex-col gap-1.5">
@@ -966,6 +1042,46 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       <${ConfigRow} label="프레즌스 간격" value=${c.runtime.presence_keepalive_sec + 's'} />
 
       <${SectionHeader} title="네임스페이스 조율" />
+      <div class="py-2 px-3 rounded border border-card-border/50 bg-card/20 backdrop-blur-sm mb-1.5">
+        <div class="flex items-center justify-between gap-3 mb-2">
+          <span class="text-xs font-medium text-text-muted">active_goal_ids</span>
+          <span class="text-3xs text-[var(--text-muted)]">${selectedActiveGoalIds.length}개 선택</span>
+        </div>
+        ${goalState.status === 'loading' ? html`
+          <div class="text-2xs text-[var(--text-muted)]">목표 목록 로딩 중...</div>
+        ` : goalState.status === 'error' ? html`
+          <div class="text-2xs text-[var(--bad)]">${goalState.message}</div>
+        ` : goalOptions.length > 0 && rd ? html`
+          <div class="grid gap-1.5">
+            ${goalOptions.map((goal) => {
+              const checked = rd.active_goal_ids.includes(goal.id)
+              return html`
+                <label class="flex items-center gap-2 rounded bg-[var(--white-3)] px-2 py-1.5 text-xs text-[var(--text-body)]">
+                  <input
+                    type="checkbox"
+                    checked=${checked}
+                    onChange=${(event: Event) => {
+                      toggleRuntimeActiveGoal(goal.id, (event.currentTarget as HTMLInputElement).checked)
+                    }}
+                  />
+                  <span class="min-w-[4.5rem] font-mono text-3xs text-[var(--text-muted)]">${goal.horizon}</span>
+                  <span class="flex-1 truncate">${goal.title}</span>
+                  <span class="font-mono text-3xs text-[var(--text-dim)]">${goal.id}</span>
+                </label>
+              `
+            })}
+          </div>
+        ` : selectedActiveGoalIds.length > 0 ? html`
+          <${ModelList} models=${selectedActiveGoalIds} />
+        ` : html`
+          <div class="text-2xs text-[var(--text-muted)]">활성 목표가 연결되어 있지 않습니다.</div>
+        `}
+        ${unknownSelectedGoalIds.length > 0 ? html`
+          <div class="mt-2 text-2xs text-[var(--warn)]">
+            Goal Store에서 찾을 수 없는 연결: ${unknownSelectedGoalIds.join(', ')}
+          </div>
+        ` : null}
+      </div>
       ${isVerifierRoleKeeper(c.coordination.mention_targets) ? html`
       <div class="mb-2 flex items-center gap-2 rounded border border-accent/30 bg-[var(--accent-10)] px-3 py-2">
         <span class="rounded border border-accent/40 bg-[var(--accent-5)] px-2 py-0.5 text-3xs font-semibold uppercase tracking-1 text-accent">Verifier</span>

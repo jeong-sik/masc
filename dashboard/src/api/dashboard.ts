@@ -1474,6 +1474,18 @@ function normalizeKeeperHookSlots(raw: unknown): Record<string, KeeperHookSlot> 
   return slots
 }
 
+function normalizeKeeperConfigActiveGoals(raw: unknown): KeeperConfig['coordination']['active_goals'] {
+  return asRecordArray(raw)
+    .map((item) => {
+      const id = asNullableString(item.id)
+      const title = asNullableString(item.title)
+      const horizon = asNullableString(item.horizon)
+      if (!id || !title || !horizon) return null
+      return { id, title, horizon }
+    })
+    .filter((item): item is KeeperConfig['coordination']['active_goals'][number] => item !== null)
+}
+
 function normalizePromptBlock(raw: unknown, fallbackKey: string): { key: string; source: string; text: string } {
   if (!isRecord(raw)) {
     return {
@@ -1576,6 +1588,7 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
   const handoff = isRecord(data.handoff) ? data.handoff : {}
   const hooks = isRecord(data.hooks) ? data.hooks : null
   const runtime = isRecord(data.runtime) ? data.runtime : {}
+  const runtimeTrust = isRecord(data.runtime_trust) ? data.runtime_trust : null
   const coordination = isRecord(data.coordination) ? data.coordination : {}
   const tools = isRecord(data.tools) ? data.tools : {}
   const sources = isRecord(data.sources) ? data.sources : {}
@@ -1585,6 +1598,7 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
 
   return {
     name: asNullableString(data.name) ?? requestedName,
+    active_goal_ids: normalizeStringList(data.active_goal_ids),
     sandbox_profile: asNullableString(data.sandbox_profile) ?? 'local',
     network_mode: asNullableString(data.network_mode) ?? 'inherit',
     shared_memory_scope: asNullableString(data.shared_memory_scope) ?? 'disabled',
@@ -1688,9 +1702,14 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
               ? asLooseBoolean(runtime.runtime_blocker_continue_gate)
               : null),
     },
+    runtime_trust: runtimeTrust,
     coordination: {
       mention_targets: normalizeStringList(coordination.mention_targets),
       joined_room_ids: normalizeStringList(coordination.joined_room_ids),
+      active_goal_ids: normalizeStringList(coordination.active_goal_ids),
+      active_goals: normalizeKeeperConfigActiveGoals(coordination.active_goals),
+      active_goal_count: asInt(coordination.active_goal_count) ?? 0,
+      missing_active_goal_ids: normalizeStringList(coordination.missing_active_goal_ids),
     },
     tools: {
       tool_access: tools.tool_access ?? {},
@@ -1753,6 +1772,7 @@ export type SandboxNetworkMode = 'none' | 'inherit'
 export type SharedMemoryScope = 'disabled' | 'room'
 
 export type KeeperConfigUpdatePayload = {
+  active_goal_ids?: string[]
   allowed_paths?: string[]
   // Sandbox
   sandbox_profile?: SandboxProfile

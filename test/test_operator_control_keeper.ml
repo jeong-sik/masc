@@ -1656,6 +1656,14 @@ proactive_enabled = true
 |};
       let config = Coord.default_config base_dir in
       ignore (Coord.init config ~agent_name:(Some "operator"));
+      let linked_goal =
+        match
+          Goal_store.upsert_goal config ~id:"goal-runtime"
+            ~title:"Ship runtime clarity" ~horizon:Goal_store.Mid ()
+        with
+        | Ok (goal, _) -> goal
+        | Error err -> Alcotest.fail ("goal upsert failed: " ^ err)
+      in
       let keeper_ctx : _ Tool_keeper.context =
         {
           config;
@@ -1682,6 +1690,41 @@ proactive_enabled = true
         | Ok None -> Alcotest.fail "keeper meta missing"
         | Error err -> Alcotest.fail ("meta read failed: " ^ err)
       in
+      let parsed_goal_update =
+        match
+          Keeper_turn_up_args.parse keeper_ctx
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("active_goal_ids", `List [ `String linked_goal.id ]);
+              ])
+        with
+        | Ok parsed -> parsed
+        | Error (_ok, msg) -> Alcotest.fail ("active_goal_ids parse failed: " ^ msg)
+      in
+      let ok, msg =
+        Keeper_turn_up_update.update_keeper keeper_ctx parsed_goal_update meta
+      in
+      Alcotest.(check bool) ("active_goal_ids update ok: " ^ msg) true ok;
+      let meta = read_keeper_meta_exn config keeper_name in
+      let parsed_bad_goal_update =
+        match
+          Keeper_turn_up_args.parse keeper_ctx
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("active_goal_ids", `List [ `String "goal-missing" ]);
+              ])
+        with
+        | Ok parsed -> parsed
+        | Error (_ok, msg) -> Alcotest.fail ("bad active_goal_ids parse failed: " ^ msg)
+      in
+      let ok, msg =
+        Keeper_turn_up_update.update_keeper keeper_ctx parsed_bad_goal_update meta
+      in
+      Alcotest.(check bool) "unknown active goal rejected" false ok;
+      Alcotest.(check bool) "unknown active goal names surfaced" true
+        (contains_substring msg "goal-missing");
       let mutated =
         {
           meta with
@@ -1716,6 +1759,20 @@ proactive_enabled = true
       let open Yojson.Safe.Util in
       Alcotest.(check bool) "trigger_mode removed from config surface" true
         (json |> member "coordination" |> member "trigger_mode" = `Null);
+      Alcotest.(check (list string)) "active_goal_ids top-level"
+        [ linked_goal.id ]
+        (json |> member "active_goal_ids" |> to_list |> List.map to_string);
+      Alcotest.(check (list string)) "active_goal_ids in coordination"
+        [ linked_goal.id ]
+        (json |> member "coordination" |> member "active_goal_ids"
+         |> to_list |> List.map to_string);
+      Alcotest.(check string) "active goal title resolved"
+        linked_goal.title
+        (json |> member "coordination" |> member "active_goals"
+         |> index 0 |> member "title" |> to_string);
+      Alcotest.(check string) "runtime trust disposition surfaced"
+        "Pass"
+        (json |> member "runtime_trust" |> member "disposition" |> to_string);
       Alcotest.(check bool) "runtime paused from live meta" true
         (json |> member "runtime" |> member "paused" |> to_bool);
       Alcotest.(check bool) "proactive enabled from live meta" false

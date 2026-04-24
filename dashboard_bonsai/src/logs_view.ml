@@ -660,8 +660,9 @@ stylesheet
     color: var(--text-dim);
     font-family: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
     font-size: 11px;
+    line-height: 1.45;
     margin-top: 0.25rem;
-    opacity: 0.75;
+    overflow-wrap: anywhere;
   }
 
   .empty {
@@ -848,6 +849,10 @@ stylesheet
   .nav_link_active .nav_link_glyph {
     background: var(--accent-brass);
     box-shadow: 0 0 6px var(--accent-brass);
+  }
+  .nav_link_soon {
+    color: var(--text-dim);
+    font-style: italic;
   }
   .nav_link_tail {
     margin-left: auto;
@@ -1311,7 +1316,6 @@ stylesheet
   }
   .tomb_dead {
     color: var(--text-dim);
-    opacity: 0.5;
     text-decoration: line-through;
     text-decoration-color: var(--accent-blood);
   }
@@ -1856,7 +1860,7 @@ let render_response
     let base = if active then Attr.create "aria-current" "page" :: base else base in
     let base =
       if not (Route.is_implemented route)
-      then Attr.create "aria-disabled" "true" :: base
+      then Style.nav_link_soon :: Attr.create "aria-disabled" "true" :: base
       else base
     in
     let tail_node =

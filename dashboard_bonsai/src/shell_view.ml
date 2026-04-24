@@ -227,7 +227,7 @@ stylesheet
 
   .nav_link_soon {
     color: var(--text-dim);
-    opacity: 0.62;
+    font-style: italic;
   }
 
   .nav_glyph {

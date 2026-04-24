@@ -50,15 +50,23 @@ type ActivityCandidate = {
   ageSeconds: number
 }
 
+const MODEL_PLACEHOLDERS = new Set(['unknown', 'none', '-', 'n/a'])
+
 function trimmed(value: string | null | undefined): string | null {
   const text = value?.trim()
   return text ? text : null
 }
 
+function modelText(value: string | null | undefined): string | null {
+  const text = trimmed(value)
+  if (!text || MODEL_PLACEHOLDERS.has(text.toLowerCase())) return null
+  return text
+}
+
 function latestMetricModel(source: KeeperModelDisplaySource | null | undefined): string | null {
   const series = source?.metrics_series ?? []
   for (let index = series.length - 1; index >= 0; index -= 1) {
-    const model = trimmed(series[index]?.model_used)
+    const model = modelText(series[index]?.model_used)
     if (model) return model
   }
   return null
@@ -67,22 +75,22 @@ function latestMetricModel(source: KeeperModelDisplaySource | null | undefined):
 export function keeperDisplayModel(
   source: KeeperModelDisplaySource | null | undefined,
 ): KeeperModelDisplay | null {
-  const lastModelLabel = trimmed(source?.last_model_used_label)
+  const lastModelLabel = modelText(source?.last_model_used_label)
   if (lastModelLabel) return { label: '최근 모델', value: lastModelLabel }
 
-  const lastModel = trimmed(source?.last_model_used)
+  const lastModel = modelText(source?.last_model_used)
   if (lastModel) return { label: '최근 모델', value: lastModel }
 
-  const activeModelLabel = trimmed(source?.active_model_label)
+  const activeModelLabel = modelText(source?.active_model_label)
   if (activeModelLabel) return { label: '현재 모델', value: activeModelLabel }
 
-  const activeModel = trimmed(source?.active_model)
+  const activeModel = modelText(source?.active_model)
   if (activeModel) return { label: '현재 모델', value: activeModel }
 
   const metricModel = latestMetricModel(source)
   if (metricModel) return { label: '최근 모델', value: metricModel }
 
-  const fallbackModel = trimmed(source?.model) ?? trimmed(source?.primary_model)
+  const fallbackModel = modelText(source?.model) ?? modelText(source?.primary_model)
   if (fallbackModel) return { label: '모델', value: fallbackModel }
   return null
 }

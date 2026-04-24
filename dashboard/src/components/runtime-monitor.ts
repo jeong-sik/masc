@@ -252,13 +252,23 @@ function fmtCoverageAwareCost(metric: DashboardRuntimeModelMetric, value?: numbe
   return formatted !== '--' ? formatted : metricMissingLabel(metric)
 }
 
-function recentEntryMissingLabel(
+export function recentEntryMissingLabel(
   entry: NonNullable<DashboardRuntimeModelMetric['recent_entries']>[number],
 ): string {
+  // Order: most-specific to least-specific.
+  // Goal: make "why is this cell empty?" observable instead of rendering an
+  // opaque `--`. The `telemetry_reported`/`usage_reported` flags land earlier
+  // in the response than `coverage_reason`, so they give the most direct
+  // signal when the cell is empty due to missing OAS timings vs. missing
+  // per-turn usage accounting.
   if (entry.outcome === 'error') return 'error-only'
   if (entry.coverage_reason === 'text_only_unmetered') return 'n/a'
+  if (entry.telemetry_reported === false && entry.usage_reported === false)
+    return 'no-telemetry'
+  if (entry.telemetry_reported === false) return 'no-timings'
+  if (entry.usage_reported === false) return 'no-usage'
   if (entry.coverage_reason) return 'missing'
-  return '--'
+  return '—'
 }
 
 function fmtRecentEntryNumber(
@@ -490,6 +500,12 @@ export function RuntimeMonitor() {
                             tone=${'ok'}
                           />`
                         : null}
+                      ${metric.prompt_avg_tok_per_sec != null
+                        ? html`<${StatusChip}
+                            label=${`${fmtNumber(metric.prompt_avg_tok_per_sec, 1)} tok/s prefill`}
+                            tone=${'ok'}
+                          />`
+                        : null}
                       ${metric.hw_decode_avg_tok_per_sec != null
                         ? html`<${StatusChip}
                             label=${`${fmtNumber(metric.hw_decode_avg_tok_per_sec, 1)} tok/s hw`}
@@ -511,6 +527,9 @@ export function RuntimeMonitor() {
                     <div>input/output · ${fmtCoverageAwareNumber(metric, metric.total_input_tokens)} / ${fmtCoverageAwareNumber(metric, metric.total_output_tokens)}</div>
                     <div>reasoning/cache · ${fmtCoverageAwareNumber(metric, metric.total_reasoning_tokens)} / ${fmtCoverageAwareNumber(metric, metric.total_cache_read_tokens)}</div>
                     <div>tools · ${fmtNumber(metric.avg_tool_calls_per_turn, 1)}/turn (${fmtNumber(metric.total_tool_calls)})</div>
+                    ${metric.prompt_p50_tok_per_sec != null || metric.prompt_p95_tok_per_sec != null
+                      ? html`<div class="col-span-3 text-text-muted">prefill tok/s p50/p95 · ${fmtNumber(metric.prompt_p50_tok_per_sec, 1)} / ${fmtNumber(metric.prompt_p95_tok_per_sec, 1)} (prompt_eval only; complements wall + hw rows)</div>`
+                      : null}
                     ${metric.hw_decode_p50_tok_per_sec != null
                       ? html`<div class="col-span-3 text-text-muted">hw tok/s p50/p95 · ${fmtNumber(metric.hw_decode_p50_tok_per_sec, 1)} / ${fmtNumber(metric.hw_decode_p95_tok_per_sec, 1)} (decode-only; excludes queue/prefill/thinking)</div>`
                       : null}
@@ -570,18 +589,19 @@ export function RuntimeMonitor() {
                       </button>
                       ${expandedModel.value === metric.model_id
                         ? html`<div class="mt-1 border-t border-card-border/50 pt-2">
-                            <div class="grid grid-cols-6 gap-1 text-3xs text-[var(--text-muted)] font-medium mb-1">
-                              <div>time</div><div>in tok</div><div>out tok</div><div>latency</div><div>cost</div><div>tools</div>
+                            <div class="grid grid-cols-7 gap-1 text-3xs text-[var(--text-muted)] font-medium mb-1">
+                              <div>time</div><div>in tok</div><div>out tok</div><div>latency</div><div>prefill tok/s</div><div>cost</div><div>tools</div>
                             </div>
                             ${metric.recent_entries?.map(re => {
                               const detail = recentEntryDetail(re)
                               return html`
                                 <div class="mb-1">
-                                  <div class="grid grid-cols-6 gap-1 text-2xs text-[var(--text-body)]">
+                                  <div class="grid grid-cols-7 gap-1 text-2xs text-[var(--text-body)]">
                                     <div>${fmtTime(re.ts_unix)}</div>
                                     <div>${fmtRecentEntryNumber(re, re.input_tokens)}</div>
                                     <div>${fmtRecentEntryNumber(re, re.output_tokens)}</div>
                                     <div>${re.latency_ms == null ? recentEntryMissingLabel(re) : `${fmtNumber(re.latency_ms, 0)}ms`}</div>
+                                    <div>${fmtRecentEntryNumber(re, re.prompt_tok_per_sec, 1)}</div>
                                     <div>${fmtRecentEntryCost(re, re.cost_usd)}</div>
                                     <div>${re.tools_count}</div>
                                   </div>

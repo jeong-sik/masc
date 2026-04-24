@@ -1,6 +1,19 @@
 import { describe, it, expect } from 'vitest'
-import { runtimeProviderTone, modelMetricTone, fmtCost, fmtSuccessRate, fmtNumber, filterModelMetrics, sortModelMetricsByUrgency, metricCoverageText } from './runtime-monitor'
+import { runtimeProviderTone, modelMetricTone, fmtCost, fmtSuccessRate, fmtNumber, filterModelMetrics, sortModelMetricsByUrgency, metricCoverageText, recentEntryMissingLabel } from './runtime-monitor'
 import type { DashboardRuntimeProviderSnapshot, DashboardRuntimeModelMetric } from '../api/dashboard'
+
+type RecentEntry = NonNullable<DashboardRuntimeModelMetric['recent_entries']>[number]
+function makeRecentEntry(overrides: Partial<RecentEntry> = {}): RecentEntry {
+  return {
+    ts_unix: 0,
+    input_tokens: null,
+    output_tokens: null,
+    latency_ms: null,
+    cost_usd: null,
+    tools_count: 0,
+    ...overrides,
+  }
+}
 
 function makeProvider(overrides: Partial<DashboardRuntimeProviderSnapshot> = {}): DashboardRuntimeProviderSnapshot {
   return {
@@ -351,5 +364,88 @@ describe('sortModelMetricsByUrgency', () => {
     ]
     const result = sortModelMetricsByUrgency(sample)
     expect(result.map(m => m.model_id)).toEqual(['with-errors', 'unknown'])
+  })
+})
+
+// ── recentEntryMissingLabel ──
+//
+// The default fallback for "this cell has no value" used to be `--`, which
+// hides *why* the cell is empty. Operators need to tell "backend never
+// emitted this field" apart from "backend emitted an explicit zero" apart
+// from "the whole turn errored out". The label picks the most specific
+// signal the entry provides.
+
+describe('recentEntryMissingLabel', () => {
+  it('surfaces error-only when the turn outcome itself was an error', () => {
+    expect(recentEntryMissingLabel(makeRecentEntry({ outcome: 'error' })))
+      .toBe('error-only')
+  })
+
+  it('flags text_only_unmetered as n/a (expected shape for tool-only turns)', () => {
+    expect(
+      recentEntryMissingLabel(
+        makeRecentEntry({ coverage_reason: 'text_only_unmetered' }),
+      ),
+    ).toBe('n/a')
+  })
+
+  it('reports no-telemetry when both flags are false', () => {
+    expect(
+      recentEntryMissingLabel(
+        makeRecentEntry({
+          telemetry_reported: false,
+          usage_reported: false,
+        }),
+      ),
+    ).toBe('no-telemetry')
+  })
+
+  it('reports no-timings when only telemetry_reported is false', () => {
+    expect(
+      recentEntryMissingLabel(
+        makeRecentEntry({
+          telemetry_reported: false,
+          usage_reported: true,
+        }),
+      ),
+    ).toBe('no-timings')
+  })
+
+  it('reports no-usage when only usage_reported is false', () => {
+    expect(
+      recentEntryMissingLabel(
+        makeRecentEntry({
+          telemetry_reported: true,
+          usage_reported: false,
+        }),
+      ),
+    ).toBe('no-usage')
+  })
+
+  it('falls back to "missing" when only a coverage_reason is present', () => {
+    expect(
+      recentEntryMissingLabel(
+        makeRecentEntry({ coverage_reason: 'latency_missing' }),
+      ),
+    ).toBe('missing')
+  })
+
+  it('renders an em-dash when nothing is known about the absence', () => {
+    expect(recentEntryMissingLabel(makeRecentEntry())).toBe('—')
+  })
+
+  it('keeps error-only priority over the reporting-flag signals', () => {
+    // An errored turn should show error-only even if telemetry flags are
+    // false for unrelated reasons; the user should not have to decode a
+    // no-timings label when the real story is that the turn failed.
+    expect(
+      recentEntryMissingLabel(
+        makeRecentEntry({
+          outcome: 'error',
+          telemetry_reported: false,
+          usage_reported: false,
+        }),
+      ),
+    ).toBe('error-only')
   })
 })

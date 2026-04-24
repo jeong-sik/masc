@@ -12,6 +12,10 @@
 
 open Masc_mcp
 
+module Agent_economy = Masc_mcp__Agent_economy
+
+let () = Mirage_crypto_rng_unix.use_default ()
+
 (* ============================================================ *)
 (* Test Helpers                                                  *)
 (* ============================================================ *)
@@ -64,6 +68,30 @@ let with_test_env f =
     let _ = Coord.reset config in
     Unix.rmdir tmp_dir;
     raise e
+
+let with_env key value f =
+  let prev = Sys.getenv_opt key in
+  Unix.putenv key value;
+  let result =
+    try f ()
+    with e ->
+      (match prev with
+       | Some v -> Unix.putenv key v
+       | None -> Unix.putenv key "");
+      raise e
+  in
+  (match prev with
+   | Some v -> Unix.putenv key v
+   | None -> Unix.putenv key "");
+  result
+
+let with_task_economy_enabled f =
+  Agent_economy.reset_cache ();
+  with_env "MASC_ECONOMY_ENABLED" "true" (fun () ->
+    with_env "MASC_ECONOMY_INITIAL_BALANCE" "5.0" (fun () ->
+      with_env "MASC_ECONOMY_REWARD_TASK_DONE" "10.0" (fun () ->
+        with_env "MASC_ECONOMY_REPUTATION_MULTIPLIER" "false" (fun () ->
+          Fun.protect ~finally:Agent_economy.reset_cache f))))
 
 let latest_ring_seq () =
   match Log.Ring.recent ~limit:1 () with
@@ -722,6 +750,55 @@ let test_transition_done_idempotent () =
     | Error e -> Alcotest.failf "Expected Ok (no-op), got error: %s" (Types.masc_error_to_string e)
   )
 
+let test_transition_done_awards_task_reward_once () =
+  with_task_economy_enabled (fun () ->
+    with_test_env (fun config ->
+      let claude = find_agent_name_by_prefix config "claude" in
+      let _ = Coord.add_task config ~title:"Rewarded task" ~priority:1 ~description:"" in
+      let balance_before =
+        Agent_economy.get_balance ~base_path:config.base_path ~agent_name:claude
+      in
+      Alcotest.(check (float 0.01)) "initial balance" 5.0 balance_before;
+      (match Coord.claim_task_r config ~agent_name:claude ~task_id:"task-001" () with
+       | Ok _ -> ()
+       | Error err ->
+         Alcotest.failf "claim_task_r failed: %s" (Types.show_masc_error err));
+      (match
+         Coord.transition_task_r config ~agent_name:claude ~task_id:"task-001"
+           ~action:Types.Start ()
+       with
+       | Ok _ -> ()
+       | Error err ->
+         Alcotest.failf "transition_task_r start failed: %s"
+           (Types.show_masc_error err));
+      (match
+         transition_done_r config ~agent_name:claude ~task_id:"task-001"
+           ~notes:"done"
+       with
+       | Ok _ -> ()
+       | Error err ->
+         Alcotest.failf "transition_task_r done failed: %s"
+           (Types.show_masc_error err));
+      let balance_after_done =
+        Agent_economy.get_balance ~base_path:config.base_path ~agent_name:claude
+      in
+      Alcotest.(check (float 0.01)) "done reward applied once" 15.0
+        balance_after_done;
+      (match
+         transition_done_r config ~agent_name:claude ~task_id:"task-001"
+           ~notes:"repeat"
+       with
+       | Ok msg ->
+         Alcotest.(check bool) "repeat done is no-op" true
+           (str_contains msg "no-op")
+       | Error err ->
+         Alcotest.failf "repeat done failed: %s" (Types.show_masc_error err));
+      let balance_after_repeat =
+        Agent_economy.get_balance ~base_path:config.base_path ~agent_name:claude
+      in
+      Alcotest.(check (float 0.01)) "repeat done does not double pay" 15.0
+        balance_after_repeat))
+
 let test_transition_cancel_idempotent () =
   with_test_env (fun config ->
     let _ = Coord.add_task config ~title:"Test" ~priority:1 ~description:"" in
@@ -1348,6 +1425,8 @@ let () =
       Alcotest.test_case "invalid" `Quick test_transition_invalid;
       Alcotest.test_case "version mismatch" `Quick test_transition_version_mismatch;
       Alcotest.test_case "done idempotent" `Quick test_transition_done_idempotent;
+      Alcotest.test_case "done awards task reward once" `Quick
+        test_transition_done_awards_task_reward_once;
       Alcotest.test_case "cancel idempotent" `Quick test_transition_cancel_idempotent;
     ];
 

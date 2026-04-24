@@ -1409,6 +1409,19 @@ let transition_task_r
                  ());
           (match action with
            | Types.Done_action ->
+             (* Completion rewards are tied to the real state-changing done path;
+                idempotent done no-ops return before this block. *)
+             (try
+                (Atomic.get Coord_hooks.agent_economy_earn_fn)
+                  ~base_path:config.base_path
+                  ~agent_name
+                  ~reason:(Printf.sprintf "completed %s" task_id)
+              with
+              | Eio.Cancel.Cancelled _ as e -> raise e
+              | exn ->
+                Log.RoomTask.error
+                  "transition economy done hook: %s"
+                  (Printexc.to_string exn));
              (try
                 let active = (Coord_state.read_state config).active_agents in
                 (Atomic.get Coord_hooks.relation_on_task_done_fn)

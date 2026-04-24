@@ -48,7 +48,7 @@ stylesheet
 
   .v_ok    { color: var(--status-ok, #4a7a2a); font-variant-numeric: tabular-nums; }
   .v_brass { color: var(--accent-brass, #8a6a28); font-variant-numeric: tabular-nums; }
-  .v_blood { color: var(--accent-blood, #a01818); font-variant-numeric: tabular-nums; }
+  .v_blood { color: var(--accent-blood, #e85050); font-variant-numeric: tabular-nums; }
 |}]
 
 type value_color = [ `Default | `Ok | `Brass | `Blood ]

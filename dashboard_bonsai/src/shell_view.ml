@@ -22,7 +22,7 @@ stylesheet
     color: var(--text-primary);
     background:
       radial-gradient(ellipse 60% 40% at 12% 8%, rgba(212,169,64,0.06), transparent 55%),
-      radial-gradient(ellipse 40% 50% at 92% 95%, rgba(160,24,24,0.08), transparent 60%),
+      radial-gradient(ellipse 40% 50% at 92% 95%, rgba(232,80,80,0.08), transparent 60%),
       linear-gradient(170deg, #0e0a08 0%, #140c08 60%, #080504 100%);
     font-family: var(--font-ui, 'Noto Sans KR', sans-serif);
   }

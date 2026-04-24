@@ -26,7 +26,7 @@ stylesheet
     min-height: 100vh;
     background:
       radial-gradient(circle at 88% 14%, rgba(138, 106, 40, 0.10), transparent 22%),
-      radial-gradient(circle at 8% 88%, rgba(160, 24, 24, 0.05), transparent 28%),
+      radial-gradient(circle at 8% 88%, rgba(232, 80, 80, 0.05), transparent 28%),
       var(--bg-deep);
     color: var(--text-primary);
     font-family: 'EB Garamond', 'Noto Sans KR', Georgia, serif;
@@ -186,7 +186,7 @@ stylesheet
   }
 
   .heartbeat_bar_warn  { background: linear-gradient(180deg, var(--status-warn) 0%, #6a3c10 100%); }
-  .heartbeat_bar_error { background: linear-gradient(180deg, #e84848 0%, #8a1010 100%); box-shadow: 0 0 6px rgba(160, 24, 24, 0.45); }
+  .heartbeat_bar_error { background: linear-gradient(180deg, var(--accent-blood) 0%, var(--accent-blood-dim) 100%); box-shadow: 0 0 6px rgba(232, 80, 80, 0.45); }
   .heartbeat_bar_idle  { background: var(--border-main); opacity: 0.6; }
 
   /* hud CSS → Hud 모듈로 이관 (shell 추출 Phase 2.A) */
@@ -203,7 +203,7 @@ stylesheet
       linear-gradient(90deg,
         rgba(138, 106, 40, 0.10) 0%,
         transparent 45%,
-        rgba(160, 24, 24, 0.06) 100%),
+        rgba(232, 80, 80, 0.06) 100%),
       #0f0b09;
     border: 1px solid var(--border-main);
     border-radius: 2px;
@@ -511,7 +511,7 @@ stylesheet
   }
 
   .sigil_warn  { color: var(--status-warn); border-color: var(--status-warn); box-shadow: inset 0 0 0 1px rgba(232,216,184,0.06), 0 0 8px rgba(160, 106, 26, 0.35); }
-  .sigil_error { color: var(--text-bright); border-color: var(--accent-blood); background: radial-gradient(circle at 35% 30%, rgba(232,216,184,0.28), transparent 55%), #3a1410; box-shadow: inset 0 0 0 1px rgba(232,216,184,0.08), 0 0 10px rgba(160, 24, 24, 0.45); }
+  .sigil_error { color: var(--text-bright); border-color: var(--accent-blood); background: radial-gradient(circle at 35% 30%, rgba(232,216,184,0.28), transparent 55%), #3a1410; box-shadow: inset 0 0 0 1px rgba(232,216,184,0.08), 0 0 10px rgba(232, 80, 80, 0.45); }
 
   .message_lead::first-letter {
     font-family: 'Cinzel', 'EB Garamond', serif;
@@ -538,13 +538,13 @@ stylesheet
   }
 
   .row_error {
-    background: linear-gradient(90deg, rgba(160, 24, 24, 0.08) 0%, transparent 60%);
+    background: linear-gradient(90deg, rgba(232, 80, 80, 0.08) 0%, transparent 60%);
     border-left-color: var(--accent-blood);
   }
 
   .row_error:hover {
-    background: linear-gradient(90deg, rgba(160, 24, 24, 0.18) 0%, transparent 65%);
-    box-shadow: inset 1px 0 0 0 rgba(160, 24, 24, 0.55);
+    background: linear-gradient(90deg, rgba(232, 80, 80, 0.18) 0%, transparent 65%);
+    box-shadow: inset 1px 0 0 0 rgba(232, 80, 80, 0.55);
     border-left-color: #c94a3a;
   }
 
@@ -588,7 +588,7 @@ stylesheet
   .level_debug { color: var(--text-dim); }
   .level_info  { color: var(--text-primary); }
   .level_warn  { color: var(--status-warn); }
-  .level_error { color: var(--accent-blood); text-shadow: 0 0 12px rgba(160, 24, 24, 0.32); }
+  .level_error { color: var(--accent-blood); text-shadow: 0 0 12px rgba(232, 80, 80, 0.32); }
 
   .mod_col {
     font-family: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
@@ -684,7 +684,7 @@ stylesheet
       inset 0 0 0 1px rgba(232, 216, 184, 0.18),
       inset -6px -8px 14px rgba(0, 0, 0, 0.55),
       inset 5px 4px 10px rgba(232, 216, 184, 0.15),
-      0 6px 14px rgba(160, 24, 24, 0.35),
+      0 6px 14px rgba(232, 80, 80, 0.35),
       0 0 22px rgba(138, 106, 40, 0.22);
     transform: rotate(-14deg);
     z-index: 4;
@@ -1088,7 +1088,7 @@ stylesheet
   }
   .evrow_bad .evrow_b_code {
     color: var(--accent-blood);
-    background: rgba(160, 24, 24, 0.08);
+    background: rgba(232, 80, 80, 0.08);
   }
 
   /* ─── page-head (hero) ───

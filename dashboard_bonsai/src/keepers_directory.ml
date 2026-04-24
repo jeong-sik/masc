@@ -240,8 +240,8 @@ stylesheet
   }
 
   .vial_fill_bad {
-    background: linear-gradient(90deg, #5a0f0f, #a01818);
-    box-shadow: 0 0 6px rgba(160, 24, 24, 0.35);
+    background: linear-gradient(90deg, #8a2828, #e85050);
+    box-shadow: 0 0 6px rgba(232, 80, 80, 0.35);
   }
 
   .meta_strip {

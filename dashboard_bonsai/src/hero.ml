@@ -44,7 +44,7 @@ stylesheet
   }
 
   .tail_blood {
-    color: var(--accent-blood, #a01818);
+    color: var(--accent-blood, #e85050);
     font-size: 18px;
     margin-left: 14px;
   }

@@ -39,7 +39,7 @@ stylesheet
     text-transform: uppercase;
     color: var(--text-bright);
     margin: 0;
-    text-shadow: 0 0 40px rgba(160, 24, 24, 0.28);
+    text-shadow: 0 0 40px rgba(232, 80, 80, 0.28);
   }
 
   .sub {

@@ -32,8 +32,8 @@
   --text-dim:     #9a846e;       /* mold dust — WCAG AA compliant */
 
   /* Accents — blood is primary now; brass demoted to warning */
-  --accent-blood:    #a01818;    /* fresh arterial */
-  --accent-blood-dim:#5a0f0f;    /* dried clot */
+  --accent-blood:    #e85050;    /* WCAG AA compliant on all surfaces */
+  --accent-blood-dim:#8a2828;    /* dried clot — dim companion */
   --accent-viscera:  #c94a3a;    /* raw flesh / inflamed */
   --accent-bile:     #6a7a3a;    /* sickly yellow-green */
   --accent-mold:     #3a5a48;    /* cold mold */
@@ -42,8 +42,8 @@
   --accent-bone:     #d8c8a0;
   --accent-ink:      #3a2a5a;    /* arcane violet, rarer */
   --accent-ember:    #c4461a;    /* dying ember */
-  --accent-glow:     rgba(160, 24, 24, 0.28);
-  --accent-blood-glow: rgba(201, 74, 58, 0.32);
+  --accent-glow:     rgba(232, 80, 80, 0.28);
+  --accent-blood-glow: rgba(232, 80, 80, 0.32);
 
   /* Status — blood, bile, mold */
   --status-ok:    #5a7a3a;       /* bile / queasy green */

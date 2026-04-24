@@ -49,8 +49,8 @@ stylesheet
     position: relative;
     height: 120px;
     background: linear-gradient(180deg,
-      rgba(160,24,24,0.04) 0%,
-      rgba(160,24,24,0.02) 10%,
+      rgba(232,80,80,0.04) 0%,
+      rgba(232,80,80,0.02) 10%,
       transparent 25%,
       transparent 100%);
   }

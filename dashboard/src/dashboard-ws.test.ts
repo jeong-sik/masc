@@ -100,6 +100,7 @@ async function flushPromises(): Promise<void> {
 afterEach(() => {
   disconnectDashboardWS()
   dashboardWsLastSeq.value = 0
+  vi.useRealTimers()
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
 })
@@ -191,6 +192,31 @@ describe('dashboard websocket route subscriptions', () => {
 
     expect(mockSockets).toHaveLength(1)
     expect(mockSockets[0]!.readyState).toBe(MockWebSocket.CONNECTING)
+  })
+
+  it('retries discovery when the websocket endpoint is enabled but not listening yet', async () => {
+    vi.useFakeTimers()
+    mockSockets.length = 0
+    vi.stubGlobal('WebSocket', MockWebSocket)
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        enabled: true,
+        listening: false,
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(wsDiscoveryResponse())
+    vi.stubGlobal('fetch', fetchMock)
+
+    await connectDashboardWS({ tab: 'overview', params: {} })
+    expect(mockSockets).toHaveLength(0)
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(mockSockets).toHaveLength(1)
   })
 
   it('subscribes the latest route captured while hello is still in flight', async () => {
@@ -296,5 +322,47 @@ describe('dashboard websocket route subscriptions', () => {
     socket.close()
 
     await expect(subscribePromise).rejects.toThrow('dashboard websocket closed')
+  })
+
+  it('rejects in-flight subscribe RPCs when the server never responds', async () => {
+    vi.useFakeTimers()
+    installWebSocketMocks()
+
+    await connectDashboardWS({ tab: 'overview', params: {} })
+    const socket = mockSockets[0]!
+    socket.open()
+    const hello = parseRpc(socket, 0)
+    socket.receive({ jsonrpc: '2.0', id: hello.id, result: {} })
+    await flushPromises()
+
+    const initialSubscribe = parseRpc(socket, 1)
+    socket.receive({
+      jsonrpc: '2.0',
+      id: initialSubscribe.id,
+      result: { snapshot: { seq: 1, slices: {} } },
+    })
+    await flushPromises()
+
+    const subscribePromise = subscribeDashboardRoute({
+      tab: 'workspace',
+      params: { section: 'planning' },
+    })
+    const subscribe = parseRpc(socket, 2)
+    expect(subscribe.method).toBe('dashboard/subscribe')
+
+    const rejection = expect(subscribePromise).rejects.toThrow(
+      'dashboard websocket rpc timed out: dashboard/subscribe',
+    )
+    await vi.advanceTimersByTimeAsync(15_000)
+    await rejection
+
+    socket.receive({
+      jsonrpc: '2.0',
+      id: subscribe.id,
+      result: { snapshot: { seq: 99, slices: {} } },
+    })
+    await flushPromises()
+
+    expect(dashboardWsLastSeq.value).toBe(1)
   })
 })

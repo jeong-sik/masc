@@ -48,6 +48,7 @@ type t = {
   allow_direct_call_when_hidden : bool;
   title : string option;
   required_permission : Types.permission option;
+  effect_domain : Tool_catalog.effect_domain option;
 }
 
 (** {1 Builder} *)
@@ -71,6 +72,7 @@ val create :
   ?allow_direct_call_when_hidden:bool ->
   ?title:string ->
   ?required_permission:Types.permission ->
+  ?effect_domain:Tool_catalog.effect_domain ->
   unit -> t
 (** Build a tool spec. The first five arguments are required (compile error
     if omitted). All optional arguments default to fail-closed values:

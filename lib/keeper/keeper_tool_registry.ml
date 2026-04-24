@@ -274,49 +274,16 @@ let is_read_only_with_input ~(tool_name : string) ~(input : Yojson.Safe.t) : boo
    Keep these tools mutating for reconcile/error handling; this predicate
    only controls whether the per-turn boundary blocks follow-up tools.
 
-   DESIGN SMELL — see [keeper_tool_registry.mli] follow-up: the allowlist
-   is hardcoded by tool name, so it drifts whenever a new tool is added
-   (or renamed) in [keeper_tool_registry]/[masc_mcp.ml].  The [keeper_*]
-   and [masc_*] name prefixes carry no effect-domain semantics — e.g.,
-   [keeper_task_claim] and [masc_claim_next] both claim a task but this
-   predicate listed only the former until #6671 (this change).  The
-   structural fix is to tag every tool spec with an
-   [effect_domain = Read_only | Masc_coordination | Playground_write |
-   Main_worktree_write] variant and derive this predicate from the tag,
-   so the OCaml exhaustiveness checker catches missing entries at
-   compile time.  Tracked as follow-up; the minimal patch below unblocks
-   keepers first. *)
+   The effect-domain tag is resolved through [Tool_catalog], so this boundary
+   no longer has to mirror tool names or infer semantics from prefixes. *)
 let is_main_worktree_boundary_exempt_with_input
     ~(tool_name : string)
     ~(input : Yojson.Safe.t) : bool =
   if is_read_only_with_input ~tool_name ~input then true
   else
-    match Tool_name.of_string tool_name with
-    (* Keeper coordination: MASC-state-only mutations *)
-    | Some (Keeper Task_claim) | Some (Keeper Task_done)
-    | Some (Keeper Task_create) | Some (Keeper Tasks_list)
-    | Some (Keeper Board_post) | Some (Keeper Board_comment)
-    | Some (Keeper Board_vote) | Some (Keeper Board_list)
-    | Some (Keeper Board_get) | Some (Keeper Board_delete)
-    | Some (Keeper Board_cleanup) | Some (Keeper Broadcast) -> true
-    (* MASC coordination aliases — same effect domain as keeper_* above *)
-    | Some (Masc Tasks) | Some (Masc Add_task) | Some (Masc Claim_next)
-    | Some (Masc Batch_add_tasks) | Some (Masc Plan_init)
-    | Some (Masc Plan_set_task) | Some (Masc Plan_update)
-    | Some (Masc Plan_get) | Some (Masc Transition)
-    | Some (Masc Broadcast) | Some (Masc Messages) | Some (Masc Status)
-    | Some (Masc Dashboard) | Some (Masc Agents) | Some (Masc Agent_card)
-    | Some (Masc Board_post) | Some (Masc Board_comment)
-    | Some (Masc Board_vote) | Some (Masc Board_comment_vote)
-    | Some (Masc Board_delete) | Some (Masc Board_list)
-    | Some (Masc Board_get) | Some (Masc Board_stats)
-    | Some (Masc Board_hearths) | Some (Masc Board_profile) -> true
-    (* Playground-scoped write tools *)
-    | Some (Masc Code_edit) | Some (Masc Code_write)
-    | Some (Masc Code_delete) | Some (Masc Code_shell)
-    | Some (Masc Code_git) | Some (Masc Worktree_create)
-    | Some (Keeper Fs_edit) -> true
-    | _ -> false
+    match Tool_catalog.is_main_worktree_boundary_exempt tool_name with
+    | Some exempt -> exempt
+    | None -> false
 
 (* ── Reconcile-safe tools (mutating but idempotent enough) ─── *)
 

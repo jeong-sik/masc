@@ -29,6 +29,7 @@ type t = {
   allow_direct_call_when_hidden : bool;
   title : string option;
   required_permission : Types.permission option;
+  effect_domain : Tool_catalog.effect_domain option;
 }
 
 (* ================================================================ *)
@@ -54,12 +55,13 @@ let create
     ?(allow_direct_call_when_hidden = false)
     ?title
     ?required_permission
+    ?effect_domain
     () =
   { name; description; module_tag; input_schema; handler_binding;
     is_read_only; requires_join; is_destructive; is_idempotent;
     visibility; lifecycle; implementation_status;
     canonical_name; replacement; reason;
-    allow_direct_call_when_hidden; title; required_permission }
+    allow_direct_call_when_hidden; title; required_permission; effect_domain }
 
 (* ================================================================ *)
 (* Conversion                                                       *)
@@ -123,7 +125,8 @@ let register (spec : t) =
       readonly = Some spec.is_read_only;
       destructive = Some spec.is_destructive;
       idempotent = Some spec.is_idempotent;
-      required_permission = spec.required_permission };
+      required_permission = spec.required_permission;
+      effect_domain = spec.effect_domain };
   (* 5. Handler binding — auto-register Direct/Shared into Tool_dispatch *)
   (match spec.handler_binding with
    | Direct h | Shared h ->

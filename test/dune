@@ -106,6 +106,7 @@
         test_env_git_noninteractive
         test_gh_exit_class
         test_stay_silent_loop_detector
+        test_heuristic_metrics_boot_wireup
         test_keeper_fs_edit_patch
         test_keeper_docker_read
         test_keeper_github_read_only
@@ -227,6 +228,7 @@
           test_env_git_noninteractive
           test_gh_exit_class
           test_stay_silent_loop_detector
+          test_heuristic_metrics_boot_wireup
           test_keeper_fs_edit_patch
           test_keeper_docker_read
           test_keeper_github_read_only

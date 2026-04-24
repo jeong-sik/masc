@@ -273,6 +273,46 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
   Keeper_runtime_resolved.init ();
   (* RFC-0001 Gate A: initialize instrumentation stores *)
   Heuristic_metrics.init ~base_path;
+  (* #9919: boot-time diagnostics for the instrumentation-theatre
+     signature (#7718). The diagnostics module flags sites where a
+     large number of records collapse to a single [(raw_value,
+     threshold, triggered)] tuple — the #9919 symptom was 51 rows,
+     all [(1.0, 0.0, true)] at [post_tool_use_failure], making the
+     whole ledger equivalent to a 1-bit "a failure happened".
+
+     We run this once at startup over a recent slice rather than on
+     a periodic fiber: the degenerate shape persists across
+     restarts, so one observation at boot is enough to make
+     operators see the problem, and an ongoing poll would compete
+     with the live writer without adding diagnostic value. *)
+  (try
+     let recent = Heuristic_metrics.recent 500 in
+     let report = Heuristic_metrics_diagnostics.analyze recent in
+     if report.total_records > 0 then begin
+       Log.Server.info "heuristic_metrics diagnostics: %s"
+         (Heuristic_metrics_diagnostics.pretty_summary report);
+       if report.degenerate_sites <> [] then
+         Log.Server.warn
+           "#9919 heuristic_metrics degenerate sites detected: [%s] \
+            — each site accumulated >= %d records with exactly one \
+            distinct (raw_value, threshold, triggered) tuple, which \
+            is the #7718 instrumentation-theatre signature. Check \
+            the site emitters for hardcoded thresholds/values."
+           (String.concat ", " report.degenerate_sites)
+           Heuristic_metrics_diagnostics.degenerate_min_records;
+       if report.one_sided_sites <> [] then
+         Log.Server.warn
+           "#9919 heuristic_metrics one-sided sites: [%s] — every \
+            record at these sites had the same [triggered] value, \
+            meaning the threshold gate never flipped. Either the \
+            threshold is trivial or the branch is unreachable."
+           (String.concat ", " report.one_sided_sites)
+     end
+   with
+   | Eio.Cancel.Cancelled _ as e -> raise e
+   | exn ->
+     Log.Server.warn "#9919 heuristic_metrics diagnostics failed: %s"
+       (Printexc.to_string exn));
   Agent_stress.init ~base_path;
   (* Load tool policy presets from config/tool_policy.toml *)
   (match Keeper_exec_tools.init_policy_config ~base_path with

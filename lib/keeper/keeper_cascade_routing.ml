@@ -36,36 +36,18 @@ let route_effective_cascade_for_tool_requirement_with_model_labels
     ~(model_labels_of_cascade : string -> string list)
     ~(effective_cascade : string)
     ~(tool_requirement : string) : routing_decision =
-  let trimmed_effective = String.trim effective_cascade in
-  let normalized_effective =
-    Keeper_cascade_profile.normalize_declared_name trimmed_effective
-  in
+  ignore model_labels_of_cascade;
   if not (String.equal tool_requirement "required") then
     {
       effective_cascade;
       reason = "tool-optional or text-only turn keeps routed cascade";
     }
-  else (
-    let effective_is_pure_local =
-      trimmed_effective <> ""
-      && model_labels_of_cascade trimmed_effective
-         |> Cascade_runtime.labels_are_pure_local
-    in
-    if
-      String.equal trimmed_effective Keeper_config.tool_use_strict_cascade_name
-      || String.equal normalized_effective Keeper_config.local_only_cascade_name
-      || String.equal normalized_effective Keeper_config.local_recovery_cascade_name
-      || effective_is_pure_local
-    then
-      {
-        effective_cascade;
-        reason = "tool-required turn preserves local or phase-routed cascade";
-      }
-    else
-      {
-        effective_cascade = Keeper_config.tool_use_strict_cascade_name;
-        reason = "tool-required turn uses strict tool-capable cascade";
-      })
+  else
+    {
+      effective_cascade;
+      reason =
+        "tool-required turn keeps routed cascade; provider capability filter enforces tool support";
+    }
 
 let route_effective_cascade_for_tool_requirement =
   route_effective_cascade_for_tool_requirement_with_model_labels

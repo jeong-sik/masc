@@ -255,14 +255,8 @@ let public_mcp_tools_of_oas_tools (tools : Oas.Tool.t list) =
 let tool_names_are_public_mcp (tool_names : string list) =
   tool_names <> [] && List.for_all Tool_catalog.is_public_mcp tool_names
 
-let public_mcp_tool_requires_bound_actor = function
-  | "masc_claim_next"
-  | "masc_transition"
-  | "masc_join"
-  | "masc_leave"
-  | "masc_plan_set_task" ->
-      true
-  | _ -> false
+let public_mcp_tool_requires_bound_actor tool_name =
+  Tool_catalog.requires_actor_binding tool_name
 
 let trim_nonempty_string raw =
   let trimmed = String.trim raw in

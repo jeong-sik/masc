@@ -30,6 +30,7 @@ type t = {
   title : string option;
   required_permission : Types.permission option;
   effect_domain : Tool_catalog.effect_domain option;
+  requires_actor_binding : bool option;
 }
 
 (* ================================================================ *)
@@ -56,12 +57,14 @@ let create
     ?title
     ?required_permission
     ?effect_domain
+    ?requires_actor_binding
     () =
   { name; description; module_tag; input_schema; handler_binding;
     is_read_only; requires_join; is_destructive; is_idempotent;
     visibility; lifecycle; implementation_status;
     canonical_name; replacement; reason;
-    allow_direct_call_when_hidden; title; required_permission; effect_domain }
+    allow_direct_call_when_hidden; title; required_permission; effect_domain;
+    requires_actor_binding }
 
 (* ================================================================ *)
 (* Conversion                                                       *)
@@ -126,7 +129,8 @@ let register (spec : t) =
       destructive = Some spec.is_destructive;
       idempotent = Some spec.is_idempotent;
       required_permission = spec.required_permission;
-      effect_domain = spec.effect_domain };
+      effect_domain = spec.effect_domain;
+      requires_actor_binding = spec.requires_actor_binding };
   (* 5. Handler binding — auto-register Direct/Shared into Tool_dispatch *)
   (match spec.handler_binding with
    | Direct h | Shared h ->

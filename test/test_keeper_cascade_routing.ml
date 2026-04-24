@@ -87,14 +87,14 @@ let test_running_with_custom_base () =
   check string "Running preserves custom base"
     "coding_first" r.effective_cascade
 
-let test_tool_required_turn_uses_strict_lane () =
+let test_tool_required_turn_preserves_routed_cascade () =
   let r =
     Routing.route_effective_cascade_for_tool_requirement_with_model_labels
       ~model_labels_of_cascade:(fun _ -> [ "claude_code:auto" ])
       ~effective_cascade:"big_three" ~tool_requirement:"required"
   in
-  check string "required tool turns route to strict lane"
-    Masc_mcp.Keeper_config.tool_use_strict_cascade_name r.effective_cascade
+  check string "required tool turns preserve routed cascade"
+    "big_three" r.effective_cascade
 
 let test_tool_required_turn_preserves_pure_local_cascade () =
   let r =
@@ -146,8 +146,8 @@ let () =
     "edge_cases", [
       test_case "Failing overrides local_only base" `Quick test_failing_with_local_only_base;
       test_case "Running preserves custom base"     `Quick test_running_with_custom_base;
-      test_case "Required tool turn uses strict lane" `Quick
-        test_tool_required_turn_uses_strict_lane;
+      test_case "Required tool turn preserves routed cascade" `Quick
+        test_tool_required_turn_preserves_routed_cascade;
       test_case "Required tool turn preserves pure-local cascade" `Quick
         test_tool_required_turn_preserves_pure_local_cascade;
       test_case "Required tool turn preserves local recovery" `Quick

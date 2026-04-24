@@ -264,7 +264,6 @@ let degraded_rotation_candidates
   let candidates =
     if String.equal tool_requirement "required" then
       [
-        Keeper_config.tool_use_strict_cascade_name;
         normalized_base;
         Keeper_config.default_cascade_name;
       ]
@@ -273,7 +272,6 @@ let degraded_rotation_candidates
         normalized_base;
         Keeper_config.default_cascade_name;
         Keeper_config.local_recovery_cascade_name;
-        Keeper_config.tool_use_strict_cascade_name;
       ]
   in
   candidates

@@ -37,6 +37,8 @@ let () =
             check bool "reason default" true (Option.is_none spec.reason);
             check bool "effect_domain default" true
               (Option.is_none spec.effect_domain);
+            check bool "requires_actor_binding default" true
+              (Option.is_none spec.requires_actor_binding);
             check bool "title default" true (Option.is_none spec.title));
           test_case "create with optional args" `Quick (fun () ->
             let spec =
@@ -51,6 +53,7 @@ let () =
                 ~visibility:Tool_catalog.Hidden
                 ~required_permission:Types.CanAdmin
                 ~effect_domain:Tool_catalog.Masc_coordination
+                ~requires_actor_binding:true
                 ~reason:"hidden for test"
                 ~title:"Test Tool"
                 ()
@@ -61,6 +64,8 @@ let () =
               (spec.required_permission = Some Types.CanAdmin);
             check bool "effect_domain" true
               (spec.effect_domain = Some Tool_catalog.Masc_coordination);
+            check bool "requires_actor_binding" true
+              (spec.requires_actor_binding = Some true);
             check bool "reason present" true (Option.is_some spec.reason);
             check bool "title present" true (Option.is_some spec.title));
         ] );
@@ -147,6 +152,7 @@ let () =
                 ~is_destructive:true
                 ~required_permission:Types.CanAdmin
                 ~effect_domain:Tool_catalog.Main_worktree_write
+                ~requires_actor_binding:true
                 ~visibility:Tool_catalog.Hidden
                 ~reason:"test hidden"
                 ()
@@ -158,6 +164,8 @@ let () =
               (meta.required_permission = Some Types.CanAdmin);
             check bool "effect_domain" true
               (meta.effect_domain = Some Tool_catalog.Main_worktree_write);
+            check bool "requires_actor_binding" true
+              (meta.requires_actor_binding = Some true);
             check bool "hidden" true (meta.visibility = Tool_catalog.Hidden);
             check bool "reason" true (meta.reason = Some "test hidden"));
           test_case "empty name rejected" `Quick (fun () ->

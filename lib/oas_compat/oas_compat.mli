@@ -21,6 +21,24 @@
     regression risk that should not ride this foundational PR. *)
 
 module Http_client : sig
+  type cascade_failure_class =
+    | Local_resource_exhaustion
+    | Context_overflow
+    | Provider_parse_error
+    | Transient_http of int
+    | Terminal_http of int
+    | Accept_rejected_capability_mismatch
+    | Accept_rejected_terminal
+    | Cli_transport_required
+    | Network_error
+
+  val classify : Llm_provider.Http_client.http_error -> cascade_failure_class
+  (** Classify an OAS HTTP/client failure into MASC's typed cascade boundary.
+
+      Compatibility string checks remain quarantined in this adapter. Downstream
+      cascade/FSM code should branch on this class rather than reparsing
+      provider error text. *)
+
   val should_cascade : Llm_provider.Http_client.http_error -> bool
   (** Decide whether an error should cascade to the next provider.
 

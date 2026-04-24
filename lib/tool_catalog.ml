@@ -68,6 +68,7 @@ type metadata = {
   idempotent : bool option;
   required_permission : Types.permission option;
   effect_domain : effect_domain option;
+  requires_actor_binding : bool option;
 }
 
 (* ================================================================ *)
@@ -88,6 +89,7 @@ let default_metadata =
     idempotent = None;
     required_permission = None;
     effect_domain = None;
+    requires_actor_binding = None;
   }
 
 (* Runtime-readable like MASC_FULL_SURFACE so tests and local admin flows can
@@ -114,6 +116,7 @@ let deprecated ?canonical_name ?replacement ?(allow_direct_call_when_hidden = fa
     idempotent = None;
     required_permission = None;
     effect_domain = None;
+    requires_actor_binding = None;
   }
 
 let hidden_active ?canonical_name ?replacement ?(allow_direct_call_when_hidden = true)
@@ -131,9 +134,11 @@ let hidden_active ?canonical_name ?replacement ?(allow_direct_call_when_hidden =
     idempotent = None;
     required_permission = None;
     effect_domain = None;
+    requires_actor_binding = None;
   }
 
-let with_semantic_flags ?readonly ?destructive ?idempotent ?effect_domain meta =
+let with_semantic_flags ?readonly ?destructive ?idempotent ?effect_domain
+    ?requires_actor_binding meta =
   {
     meta with
     readonly =
@@ -146,6 +151,10 @@ let with_semantic_flags ?readonly ?destructive ?idempotent ?effect_domain meta =
       (match effect_domain with
       | Some value -> Some value
       | None -> meta.effect_domain);
+    requires_actor_binding =
+      (match requires_actor_binding with
+      | Some value -> Some value
+      | None -> meta.requires_actor_binding);
   }
 
 let readonly_tool =
@@ -157,6 +166,9 @@ let destructive_tool =
 
 let masc_coordination_tool =
   with_semantic_flags ~effect_domain:Masc_coordination default_metadata
+
+let actor_bound_masc_coordination_tool =
+  with_semantic_flags ~requires_actor_binding:true masc_coordination_tool
 
 (* ================================================================ *)
 (* Explicit metadata registry                                       *)
@@ -187,9 +199,12 @@ let explicit_metadata : (string * metadata) list =
     ("masc_plan_get", readonly_tool);
     ("masc_worktree_list", readonly_tool);
     ( "masc_join",
-      { masc_coordination_tool with required_permission = Some Types.CanJoin } );
+      { actor_bound_masc_coordination_tool with required_permission = Some Types.CanJoin } );
     ( "masc_leave",
-      { masc_coordination_tool with required_permission = Some Types.CanLeave } );
+      { actor_bound_masc_coordination_tool with required_permission = Some Types.CanLeave } );
+    ("masc_claim_next", actor_bound_masc_coordination_tool);
+    ("masc_transition", actor_bound_masc_coordination_tool);
+    ("masc_plan_set_task", actor_bound_masc_coordination_tool);
     ( "masc_broadcast",
       { masc_coordination_tool with required_permission = Some Types.CanBroadcast } );
     ( "masc_messages",
@@ -768,6 +783,11 @@ let effect_domain name =
   let meta = metadata name in
   meta.effect_domain
 
+let requires_actor_binding name =
+  match (metadata name).requires_actor_binding with
+  | Some value -> value
+  | None -> false
+
 let is_main_worktree_boundary_exempt name =
   match effect_domain name with
   | Some Read_only | Some Masc_coordination | Some Playground_write -> Some true
@@ -852,11 +872,16 @@ let metadata_to_fields name =
         ("toolGroup", `String (tool_group_to_string group)) :: with_effect_domain
     | None -> with_effect_domain
   in
+  let with_actor_binding =
+    match meta.requires_actor_binding with
+    | Some value -> ("requiresActorBinding", `Bool value) :: with_tool_group
+    | None -> with_tool_group
+  in
   match meta.required_permission with
   | Some permission ->
       ("requiredPermission", `String (Types.show_permission permission))
-      :: with_tool_group
-  | None -> with_tool_group
+      :: with_actor_binding
+  | None -> with_actor_binding
 
 let public_contract_fields name =
   let meta = metadata name in
@@ -873,9 +898,14 @@ let public_contract_fields name =
         :: base
     | None -> base
   in
+  let with_actor_binding =
+    match meta.requires_actor_binding with
+    | Some value -> ("requiresActorBinding", `Bool value) :: with_effect_domain
+    | None -> with_effect_domain
+  in
   match meta.canonical_name with
-  | Some canonical_name -> ("canonicalName", `String canonical_name) :: with_effect_domain
-  | None -> with_effect_domain
+  | Some canonical_name -> ("canonicalName", `String canonical_name) :: with_actor_binding
+  | None -> with_actor_binding
 
 let allow_direct_call name =
   let meta = metadata name in

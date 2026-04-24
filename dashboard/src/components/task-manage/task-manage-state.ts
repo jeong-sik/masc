@@ -1,7 +1,7 @@
 import { signal } from '@preact/signals'
 import { callMcpTool } from '../../api/mcp'
 import { showToast } from '../common/toast'
-import { refreshExecution } from '../../store'
+import { refreshExecution, refreshGoals } from '../../store'
 
 export const showTaskCreate = signal(false)
 export const taskCreating = signal(false)
@@ -23,7 +23,10 @@ export async function createTask(input: TaskCreateInput): Promise<boolean> {
     await callMcpTool('masc_add_task', args)
     showToast('태스크 생성 완료', 'success')
     showTaskCreate.value = false
-    await refreshExecution({ force: true })
+    await Promise.all([
+      refreshExecution({ force: true }),
+      refreshGoals(),
+    ])
     return true
   } catch (err) {
     showToast(`태스크 생성 실패: ${err instanceof Error ? err.message : String(err)}`, 'error')

@@ -186,6 +186,7 @@ function blockerSourceLabel(source: GoalTreeNode['blocking_source']): string {
     case 'approval': return 'Approval'
     case 'keeper_runtime': return 'Keeper runtime'
     case 'task_fsm': return 'Task FSM'
+    case 'goal_linkage': return 'Goal linkage'
     case 'stalled': return 'Stalled'
     default: return source
   }
@@ -199,6 +200,7 @@ function blockerSourceClass(source: GoalTreeNode['blocking_source']): string {
     case 'child_goal':
     case 'approval':
     case 'task_fsm':
+    case 'goal_linkage':
     case 'stalled':
       return 'border-warn/25 bg-warn/10 text-warn'
     default:

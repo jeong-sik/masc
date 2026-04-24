@@ -16,6 +16,7 @@ type tree_node = {
   pending_approval_count : int;
   infra_risk_count : int;
   linkage_source : string;
+  linkage_warning_count : int;
   status_reason : string;
   blocking_source : string;
   blocking_reason : string;
@@ -31,14 +32,14 @@ type goal_detail_keeper = {
 }
 
 let task_is_linked_to_goal (task : Types.task) goal_id =
-  match task.goal_id with
-  | Some typed_goal_id -> String.equal typed_goal_id goal_id
-  | None -> false
+  Convergence.task_matches_goal ~goal_id task
 
 let task_linkage_source_opt (task : Types.task) goal_id =
   match task.goal_id with
   | Some task_goal_id when String.equal task_goal_id goal_id -> Some "explicit"
-  | Some _ | None -> None
+  | Some _ -> None
+  | None ->
+      if task_is_linked_to_goal task goal_id then Some "title_tag" else None
 
 let task_assignee (task : Types.task) : string option =
   Types.task_assignee_of_status task.task_status
@@ -269,7 +270,7 @@ let goal_phase_to_health = function
 
 let goal_health_reason ~goal_phase ~blocked_by_receipt ~child_blocked
     ~pending_approvals ~sandbox_risk ~cascade_risk ~fsm_risk ~stalled
-    ~stagnation_seconds ~child_at_risk =
+    ~stagnation_seconds ~child_at_risk ~linkage_warning_reason =
   match goal_phase_to_health goal_phase with
   | Some "done" -> "Goal phase is completed."
   | Some "paused" -> "Goal phase is paused."
@@ -292,6 +293,16 @@ let goal_health_reason ~goal_phase ~blocked_by_receipt ~child_blocked
         "Latest keeper run fell back within the configured cascade."
       else if fsm_risk then
         "Linked task is waiting on FSM verification or remediation."
+      else if Option.is_some linkage_warning_reason then
+        (match linkage_warning_reason with
+         | Some "no_linked_tasks" ->
+             "Goal has no linked tasks, child goals, or assigned keepers."
+         | Some "no_open_work" ->
+             "Linked tasks are terminal but none completed successfully."
+         | Some "unstaffed" ->
+             "Linked tasks exist, but no keeper is assigned or linked."
+         | Some reason -> reason
+         | None -> "Goal linkage needs attention.")
       else if stalled then
         Printf.sprintf "No linked activity for %s."
           (human_duration stagnation_seconds)
@@ -441,10 +452,40 @@ let rec build_tree context goals goal =
     List.exists
       (fun ((task, _) : Types.task * string) ->
         match task.task_status with
-        | Types.AwaitingVerification _ | Types.Cancelled _ -> true
-        | Types.Todo | Types.Claimed _ | Types.InProgress _ | Types.Done _ ->
+        | Types.AwaitingVerification _ -> true
+        | Types.Todo | Types.Claimed _ | Types.InProgress _ | Types.Done _
+        | Types.Cancelled _ ->
             false)
       linked_tasks
+  in
+  let open_linked_task_count =
+    linked_tasks
+    |> List.filter (fun ((task, _) : Types.task * string) ->
+           not (task_is_terminal task))
+    |> List.length
+  in
+  let done_linked_task_count =
+    linked_tasks
+    |> List.filter (fun ((task, _) : Types.task * string) -> task_is_done task)
+    |> List.length
+  in
+  let linkage_warning_reason =
+    match goal.Goal_store.phase with
+    | Goal_phase.Executing
+    | Goal_phase.Awaiting_verification
+    | Goal_phase.Awaiting_approval ->
+        if linked_tasks = [] && children = [] && direct_linked_keeper_names = [] then
+          Some "no_linked_tasks"
+        else if linked_tasks <> [] && open_linked_task_count = 0
+                && done_linked_task_count = 0 then
+          Some "no_open_work"
+        else if open_linked_task_count > 0 && direct_linked_keeper_names = [] then
+          Some "unstaffed"
+        else
+          None
+    | Goal_phase.Completed | Goal_phase.Blocked | Goal_phase.Paused
+    | Goal_phase.Dropped ->
+        None
   in
   let stalled =
     stagnation_seconds >= stagnation_threshold_seconds goal.Goal_store.horizon
@@ -453,6 +494,11 @@ let rec build_tree context goals goal =
     tree_badges ~pending_approvals:(List.length direct_pending_approvals)
       ~sandbox_risk:direct_sandbox_risk ~cascade_risk:direct_cascade_risk
       ~fsm_risk:direct_fsm_risk ~stalled
+  in
+  let direct_badges =
+    match linkage_warning_reason with
+    | Some reason -> reason :: direct_badges
+    | None -> direct_badges
   in
   let badges =
     dedupe_sort
@@ -499,11 +545,18 @@ let rec build_tree context goals goal =
       (direct_linkage_source
        :: List.map (fun (child : tree_node) -> child.linkage_source) children)
   in
+  let linkage_warning_count =
+    (if Option.is_some linkage_warning_reason then 1 else 0)
+    + List.fold_left
+        (fun acc (child : tree_node) -> acc + child.linkage_warning_count)
+        0 children
+  in
   let at_risk =
     pending_approval_count > 0
     || infra_risk_count > 0
     || Option.is_some direct_runtime_blocking_reason
     || direct_fsm_risk
+    || Option.is_some linkage_warning_reason
     || stalled
     || child_at_risk
   in
@@ -516,7 +569,7 @@ let rec build_tree context goals goal =
       ~child_blocked ~pending_approvals:pending_approval_count
       ~sandbox_risk:direct_sandbox_risk ~cascade_risk:direct_cascade_risk
       ~fsm_risk:direct_fsm_risk ~stalled
-      ~stagnation_seconds ~child_at_risk
+      ~stagnation_seconds ~child_at_risk ~linkage_warning_reason
   in
   let blocking_source, blocking_reason =
     match goal.Goal_store.phase with
@@ -533,6 +586,8 @@ let rec build_tree context goals goal =
             Option.value direct_runtime_blocking_reason ~default:status_reason )
         else if direct_fsm_risk then
           ("task_fsm", status_reason)
+        else if Option.is_some linkage_warning_reason then
+          ("goal_linkage", status_reason)
         else if stalled then
           ("stalled", status_reason)
         else
@@ -565,6 +620,7 @@ let rec build_tree context goals goal =
     pending_approval_count;
     infra_risk_count;
     linkage_source;
+    linkage_warning_count;
     status_reason;
     blocking_source;
     blocking_reason;
@@ -821,6 +877,7 @@ let rec tree_node_to_json ?(effective_policy_for_goal = fun _ -> None)
       ("pending_approval_count", `Int node.pending_approval_count);
       ("infra_risk_count", `Int node.infra_risk_count);
       ("linkage_source", `String node.linkage_source);
+      ("linkage_warning_count", `Int node.linkage_warning_count);
       ("blocking_source", `String node.blocking_source);
       ("blocking_reason", `String node.blocking_reason);
       ("latest_keeper_ref", Json_util.string_opt_to_json node.latest_keeper_ref);
@@ -1186,6 +1243,11 @@ let dashboard_goals_tree_json ~(config : Coord.config) : Yojson.Safe.t =
     List.length
       (List.filter (fun (node : tree_node) -> String.equal node.health health) all_nodes)
   in
+  let active_goal_count =
+    goals
+    |> List.filter (fun (goal : Goal_store.goal) -> goal.status = Goal_store.Active)
+    |> List.length
+  in
   let pending_approval_total =
     match Keeper_approval_queue.list_pending_dashboard_json () with
     | `List items -> List.length items
@@ -1204,7 +1266,8 @@ let dashboard_goals_tree_json ~(config : Coord.config) : Yojson.Safe.t =
         `Assoc
           [
             ("total_goals", `Int total_goals);
-            ("active_goals", `Int (count_health "on_track"));
+            ("active_goals", `Int active_goal_count);
+            ("on_track_goals", `Int (count_health "on_track"));
             ("done_goals", `Int (count_health "done"));
             ("paused_goals", `Int (count_health "paused"));
             ("at_risk_goals", `Int (count_health "at_risk"));

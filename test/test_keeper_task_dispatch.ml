@@ -166,6 +166,77 @@ let test_claim_respects_active_goal_ids () =
     | Some task -> check string "claimed scoped task" "Masc goal task" task.title
     | None -> fail "expected a claimed task")
 
+let test_create_defaults_single_active_goal_id () =
+  with_room (fun config ->
+    let goal, _ =
+      match Goal_store.upsert_goal config ~title:"Scoped keeper goal" () with
+      | Ok payload -> payload
+      | Error msg -> fail msg
+    in
+    let meta = make_goal_scoped_meta [ goal.id ] in
+    let result =
+      call_tool config meta "keeper_task_create"
+        (`Assoc
+          [
+            ("title", `String "Default scoped task");
+            ("description", `String "desc");
+          ])
+    in
+    let json = parse_json result in
+    check bool "create ok" true
+      (Yojson.Safe.Util.member "ok" json |> Yojson.Safe.Util.to_bool);
+    check string "response goal_id" goal.id
+      (Yojson.Safe.Util.member "goal_id" json |> Yojson.Safe.Util.to_string);
+    check (option string) "task linked goal" (Some goal.id)
+      (only_task config).goal_id)
+
+let test_create_requires_goal_id_for_multiple_active_goals () =
+  with_room (fun config ->
+    let goal_a, _ =
+      match Goal_store.upsert_goal config ~title:"Goal A" () with
+      | Ok payload -> payload
+      | Error msg -> fail msg
+    in
+    let goal_b, _ =
+      match Goal_store.upsert_goal config ~title:"Goal B" () with
+      | Ok payload -> payload
+      | Error msg -> fail msg
+    in
+    let meta = make_goal_scoped_meta [ goal_a.id; goal_b.id ] in
+    let result =
+      call_tool config meta "keeper_task_create"
+        (`Assoc
+          [
+            ("title", `String "Ambiguous scoped task");
+            ("description", `String "desc");
+          ])
+    in
+    let json = parse_json result in
+    let error =
+      Yojson.Safe.Util.member "error" json |> Yojson.Safe.Util.to_string
+    in
+    check bool "error asks for goal_id" true
+      (contains_substring error "goal_id is required"))
+
+let test_create_rejects_unknown_goal_id () =
+  with_room (fun config ->
+    let meta = make_test_meta () in
+    let result =
+      call_tool config meta "keeper_task_create"
+        (`Assoc
+          [
+            ("title", `String "Unknown goal task");
+            ("description", `String "desc");
+            ("goal_id", `String "goal-missing");
+          ])
+    in
+    let json = parse_json result in
+    let error =
+      Yojson.Safe.Util.member "error" json |> Yojson.Safe.Util.to_string
+    in
+    check bool "error mentions unknown goal" true
+      (contains_substring error "unknown goal_id"))
+
 (* --- keeper_task_done tests --- *)
 
 let test_done_with_empty_task_id () =
@@ -487,6 +558,12 @@ let () =
       test_case "claim empty room" `Quick test_claim_empty_room;
       test_case "claim respects active_goal_ids" `Quick
         test_claim_respects_active_goal_ids;
+      test_case "create defaults single active goal_id" `Quick
+        test_create_defaults_single_active_goal_id;
+      test_case "create requires explicit goal_id for multiple active goals" `Quick
+        test_create_requires_goal_id_for_multiple_active_goals;
+      test_case "create rejects unknown goal_id" `Quick
+        test_create_rejects_unknown_goal_id;
     ];
     "done", [
       test_case "empty task_id returns error" `Quick test_done_with_empty_task_id;

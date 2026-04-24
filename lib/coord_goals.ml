@@ -227,6 +227,40 @@ let actor_must_be_operator action =
   | Goal_phase.Reopen ->
       false
 
+let validate_goal_completion_ready config ~goal_id ~override_note =
+  match override_note with
+  | Some note when String.trim note <> "" -> Ok ()
+  | _ ->
+      let linked_tasks =
+        Coord_query.get_tasks_safe config
+        |> List.filter (Convergence.task_matches_goal ~goal_id)
+      in
+      let open_count =
+        linked_tasks
+        |> List.filter (fun (task : Types.task) ->
+               not (Types.task_status_is_terminal task.task_status))
+        |> List.length
+      in
+      let done_count =
+        linked_tasks
+        |> List.filter (fun (task : Types.task) ->
+               Types.task_status_is_done task.task_status)
+        |> List.length
+      in
+      if linked_tasks = [] then
+        Error
+          "goal completion requires at least one linked task; provide override_note to force"
+      else if open_count > 0 then
+        Error
+          (Printf.sprintf
+             "goal completion blocked: %d linked task(s) are still open; provide override_note to force"
+             open_count)
+      else if done_count = 0 then
+        Error
+          "goal completion blocked: linked tasks are terminal but none are done; provide override_note to force"
+      else
+        Ok ()
+
 let parse_optional_string_list args field =
   match Yojson.Safe.Util.member field args with
   | `Null -> Ok None
@@ -406,6 +440,7 @@ let handle_goal_transition (ctx : context) args =
       validation_error_result [ err ]
   | Ok goal_id, Ok (Some action), Ok (Some actor) -> (
       let note = get_string_opt args "note" in
+      let override_note = get_string_opt args "override_note" in
       if actor_must_be_operator action
          && actor.Goal_verification.kind <> Goal_verification.Operator
       then
@@ -415,13 +450,22 @@ let handle_goal_transition (ctx : context) args =
         match Goal_store.get_goal ctx.config ~goal_id with
         | None -> error_result_typed ~code:Not_found "goal not found"
         | Some goal ->
-            let goals = Goal_store.list_goals ctx.config () in
-            let effective_policy =
-              Goal_verification.effective_policy_for_nodes
-                ~goals:(goal_policy_nodes goals) ~goal_id
-            in
             begin
-              match effective_policy with
+              match
+                if action = Goal_phase.Request_complete then
+                  validate_goal_completion_ready ctx.config ~goal_id
+                    ~override_note
+                else
+                  Ok ()
+              with
+              | Error msg -> error_result_typed ~code:Conflict msg
+              | Ok () ->
+                  let goals = Goal_store.list_goals ctx.config () in
+                  let effective_policy =
+                    Goal_verification.effective_policy_for_nodes
+                      ~goals:(goal_policy_nodes goals) ~goal_id
+                  in
+                  match effective_policy with
               | Error msg -> error_result_typed ~code:Validation_error msg
               | Ok effective_policy ->
                   let has_effective_verifier_policy =

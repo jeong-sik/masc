@@ -381,7 +381,7 @@ let view_meta_panel (r : Overview_types.response) =
   in
   Node.div
     ~attrs:[ Style.panel ]
-    [ Node.p
+    [ Node.h4
         ~attrs:[ Style.panel_title ]
         [ Node.text "meta · cognition" ]
     ; Node.div
@@ -393,10 +393,14 @@ let view_meta_panel (r : Overview_types.response) =
                 ~attrs:[ Style.v ]
                 [ Node.text (Printf.sprintf "%d%%" pct)
                 ; Node.div
-                    ~attrs:[ Style.stag_bar ]
+                    ~attrs:[ Style.stag_bar; Attr.role "progressbar"
+                           ; Attr.create "aria-valuenow" (Int.to_string pct)
+                           ; Attr.create "aria-valuemin" "0"
+                           ; Attr.create "aria-valuemax" "100" ]
                     [ Node.div
                         ~attrs:[ Style.stag_fill; stag_color m.stagnation_score; bar_style ]
                         []
+                    ]
                     ]
                 ]
             ]

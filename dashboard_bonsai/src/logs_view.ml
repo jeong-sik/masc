@@ -1666,7 +1666,7 @@ let render_response
       in
       Node.div
         ~attrs:[ Style.tape_fade ]
-        [ Node.div ~attrs:[ Style.tape; Attr.role "log"; Attr.create "aria-label" "Log entries" ] rendered
+        [ Node.div ~attrs:[ Style.tape; Attr.role "log"; Attr.create "aria-live" "polite"; Attr.create "aria-label" "Log entries" ] rendered
         ; Node.div ~attrs:[ Style.tape_end ] []
         ]
   in

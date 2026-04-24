@@ -969,7 +969,7 @@ let watch_feed () =
   Node.div
     [ aside_title ~right:"live" "Watch"
     ; Node.div
-        ~attrs:[ Style.events; Attr.role "log"; Attr.create "aria-label" "Watch event feed" ]
+        ~attrs:[ Style.events; Attr.role "log"; Attr.create "aria-live" "polite"; Attr.create "aria-label" "Watch event feed" ]
         [ event ~tone:`Ok "now"
             [ Node.code [ Node.text "shell" ]
             ; Node.text " . dashboard_v2 chrome mounted."

@@ -1190,6 +1190,7 @@ let view
            ; Attr.tabindex 0
            ; Attr.role "row"
            ; Attr.create "aria-label" row.name
+           ; Attr.create "aria-selected" (if is_selected then "true" else "false")
            ]
            @ row_click_effect row.name
            @ if is_selected then [ Style.row_selected ] else []

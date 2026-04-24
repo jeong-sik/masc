@@ -144,6 +144,12 @@ stylesheet
     .dot_idle     { background: GrayText; }
     .dot_failed   { background: MarkText; }
   }
+
+  @media (max-width: 760px) {
+    .roster { grid-template-columns: repeat(2, 1fr); }
+    .sigil { width: 22px; height: 22px; font-size: 10px; }
+    .slot { padding: 8px 10px; gap: 8px; }
+  }
 |}]
 
 (** Keeper 상태 → roster dot 상태 매핑. `Warn` → `Thinking` (뭔가

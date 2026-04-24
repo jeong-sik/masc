@@ -277,16 +277,42 @@ let normalize_board_post_meta args =
   if base_fields = [] then None else Some (`Assoc base_fields)
 
 (** Detect markdown that was cut mid-write by an LLM max_tokens limit.
-    Symptoms: odd count of triple-backtick fences (unclosed ```code```
-    block), or odd count of single backticks outside fenced regions.
-    Evidence: ani1999 board post p-c0494a2e body_len=467 ending in a
-    lone '`'. Walks the string once with a tiny state machine so
-    backticks inside a fenced block don't count. *)
-let detect_truncated_markdown (text : string) : bool =
+
+    The detector walks the string once with a small state machine that is
+    aware of fenced code blocks (so markdown markers inside ```...```
+    don't count). It returns the FIRST signal it finds, which is also
+    surfaced in the WARN log so future audits can see WHICH pattern
+    triggered the marker. New signals are added conservatively — only
+    those whose false-positive surface is small for prose + code (#9777).
+
+    Evidence:
+    - ani1999 p-c0494a2e body_len=467 ending in a lone '`' (Odd_inline_tick)
+    - keeper-qa-king-agent body_len=3575 (#9777, Odd_fence) *)
+
+type truncation_signal =
+  | Odd_fence              (** odd count of triple-backtick code fences *)
+  | Odd_inline_tick        (** odd count of single backticks outside fences *)
+  | Unfinished_link        (** trailing [text]( with no closing ) *)
+  | Unfinished_image       (** trailing ![alt]( with no closing ) *)
+  | Odd_double_asterisk    (** odd count of ** outside fences (unclosed bold) *)
+
+let truncation_signal_to_string = function
+  | Odd_fence -> "odd_fence"
+  | Odd_inline_tick -> "odd_inline_tick"
+  | Unfinished_link -> "unfinished_link"
+  | Unfinished_image -> "unfinished_image"
+  | Odd_double_asterisk -> "odd_double_asterisk"
+
+(* Walk the text once collecting structural counters and trailing-shape
+   evidence. Underscore- and single-asterisk-based emphasis are NOT
+   counted because identifiers, file paths, and inline math frequently
+   carry odd counts and would yield false positives. *)
+let detect_truncated_markdown_with_reason (text : string) : truncation_signal option =
   let len = String.length text in
   let in_fence = ref false in
   let inline_outside = ref 0 in
   let fences = ref 0 in
+  let double_ast_outside = ref 0 in
   let i = ref 0 in
   while !i < len do
     if !i + 2 < len
@@ -295,12 +321,59 @@ let detect_truncated_markdown (text : string) : bool =
       incr fences;
       in_fence := not !in_fence;
       i := !i + 3
+    end else if !i + 1 < len
+                && text.[!i] = '*' && text.[!i + 1] = '*' && not !in_fence
+    then begin
+      incr double_ast_outside;
+      i := !i + 2
     end else begin
       if text.[!i] = '`' && not !in_fence then incr inline_outside;
       incr i
     end
   done;
-  !fences mod 2 = 1 || !inline_outside mod 2 = 1
+  let odd n = n mod 2 = 1 in
+  if odd !fences then Some Odd_fence
+  else if odd !inline_outside then Some Odd_inline_tick
+  else if odd !double_ast_outside then Some Odd_double_asterisk
+  else
+    (* Look at the trailing fragment for unfinished link / image syntax.
+       Markdown link is [text](url); if we see [text]( with no closing )
+       before EOF, that's a strong truncation signal. Walk backwards from
+       the end looking for the last '(' on a line that has '[' before it
+       and no matching ')'. *)
+    let last_open_paren = ref (-1) in
+    let last_close_paren = ref (-1) in
+    for j = len - 1 downto 0 do
+      if !last_open_paren < 0 && text.[j] = '(' then last_open_paren := j;
+      if !last_close_paren < 0 && text.[j] = ')' then last_close_paren := j
+    done;
+    if !last_open_paren > !last_close_paren && !last_open_paren > 0 then
+      (* Check the byte just before for ']'; that distinguishes
+         a markdown link/image truncation from arbitrary parens in prose. *)
+      let bracket_pos = !last_open_paren - 1 in
+      if bracket_pos >= 0 && text.[bracket_pos] = ']' then
+        (* Image is ![alt](url) — distinguished from link by '!' before '['. *)
+        let is_image =
+          let scan = ref (bracket_pos - 1) in
+          let saw_image = ref false in
+          (* find the matching '[' for this ']'; bail if we leave a line. *)
+          while !scan >= 0 && text.[!scan] <> '[' && text.[!scan] <> '\n' do
+            decr scan
+          done;
+          if !scan >= 0 && text.[!scan] = '[' && !scan > 0
+             && text.[!scan - 1] = '!'
+          then saw_image := true;
+          !saw_image
+        in
+        Some (if is_image then Unfinished_image else Unfinished_link)
+      else
+        None
+    else
+      None
+
+(* Backwards-compatible boolean wrapper. *)
+let detect_truncated_markdown (text : string) : bool =
+  detect_truncated_markdown_with_reason text <> None
 
 let handle_post_create args =
   let title = get_string_opt args "title" in
@@ -313,7 +386,8 @@ let handle_post_create args =
   let raw_content = match body with Some value -> value | None -> get_string args "content" "" in
   let content =
     let stripped = strip_state_blocks_text raw_content in
-    if detect_truncated_markdown stripped then begin
+    match detect_truncated_markdown_with_reason stripped with
+    | Some reason ->
       let author_label =
         match get_string_opt args "author" |> Option.map String.trim with
         | Some a when a <> "" -> a
@@ -321,11 +395,15 @@ let handle_post_create args =
       in
       Prometheus.inc_counter Prometheus.metric_board_truncated_posts
         ~labels:[("author", author_label)] ();
+      (* #9777: body_len is the LLM's own output length AFTER state-block
+         stripping, not a MASC-imposed limit. The signal name explains
+         which structural pattern triggered the marker. *)
       Log.BoardLog.warn
-        "board_post: detected truncated markdown (author=%s body_len=%d) — appending 잘림 marker"
-        author_label (String.length stripped);
+        "board_post: detected truncated markdown (author=%s body_len=%d signal=%s) — appending 잘림 marker"
+        author_label (String.length stripped)
+        (truncation_signal_to_string reason);
       stripped ^ "\n\n_…[잘림 — LLM 출력이 중간에 끊겼습니다]_"
-    end else
+    | None ->
       stripped
   in
   let author = get_string_opt args "author" |> Option.map String.trim in

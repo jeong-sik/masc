@@ -267,4 +267,34 @@ describe('dashboard websocket route subscriptions', () => {
     await latestPromise
     expect(dashboardWsLastSeq.value).toBe(22)
   })
+
+  it('rejects in-flight subscribe RPCs when the socket closes', async () => {
+    installWebSocketMocks()
+
+    await connectDashboardWS({ tab: 'overview', params: {} })
+    const socket = mockSockets[0]!
+    socket.open()
+    const hello = parseRpc(socket, 0)
+    socket.receive({ jsonrpc: '2.0', id: hello.id, result: {} })
+    await flushPromises()
+
+    const initialSubscribe = parseRpc(socket, 1)
+    socket.receive({
+      jsonrpc: '2.0',
+      id: initialSubscribe.id,
+      result: { snapshot: { seq: 1, slices: {} } },
+    })
+    await flushPromises()
+
+    const subscribePromise = subscribeDashboardRoute({
+      tab: 'workspace',
+      params: { section: 'planning' },
+    })
+    const subscribe = parseRpc(socket, 2)
+    expect(subscribe.method).toBe('dashboard/subscribe')
+
+    socket.close()
+
+    await expect(subscribePromise).rejects.toThrow('dashboard websocket closed')
+  })
 })

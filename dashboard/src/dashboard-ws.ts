@@ -86,6 +86,13 @@ function clearReconnectTimer(): void {
   }
 }
 
+function rejectPendingRpcs(err: Error): void {
+  for (const { reject } of pending.values()) {
+    reject(err)
+  }
+  pending.clear()
+}
+
 function scheduleReconnect(): void {
   if (!shouldReconnect) return
   if (reconnectTimer) return
@@ -106,10 +113,7 @@ function closeSocket(): void {
     socket.close()
     socket = null
   }
-  for (const { reject } of pending.values()) {
-    reject(new Error('dashboard websocket closed'))
-  }
-  pending.clear()
+  rejectPendingRpcs(new Error('dashboard websocket closed'))
 }
 
 async function discoverWsUrl(): Promise<string | null> {
@@ -339,6 +343,7 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
     dashboardWsReady.value = false
     lastSubscribeKey = ''
     socket = null
+    rejectPendingRpcs(new Error('dashboard websocket closed'))
     scheduleReconnect()
   }
 }

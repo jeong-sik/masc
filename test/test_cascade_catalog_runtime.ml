@@ -45,6 +45,39 @@ let contains_substring haystack needle =
   in
   loop 0
 
+let capture_stderr f =
+  let pipe_read, pipe_write = Unix.pipe () in
+  let saved_stderr = Unix.dup Unix.stderr in
+  Unix.dup2 pipe_write Unix.stderr;
+  Unix.close pipe_write;
+  let result =
+    try
+      f ();
+      Ok ()
+    with exn ->
+      Error (exn, Printexc.get_raw_backtrace ())
+  in
+  flush stderr;
+  Unix.dup2 saved_stderr Unix.stderr;
+  Unix.close saved_stderr;
+  Unix.set_nonblock pipe_read;
+  let buf = Buffer.create 256 in
+  let tmp = Bytes.create 256 in
+  let rec read_all () =
+    match Unix.read pipe_read tmp 0 (Bytes.length tmp) with
+    | 0 -> ()
+    | n ->
+        Buffer.add_subbytes buf tmp 0 n;
+        read_all ()
+    | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK), _, _) -> ()
+  in
+  read_all ();
+  Unix.close pipe_read;
+  let output = Buffer.contents buf in
+  match result with
+  | Ok () -> output
+  | Error (exn, bt) -> Printexc.raise_with_backtrace exn bt
+
 let with_env name value f =
   let saved = Sys.getenv_opt name in
   (match value with
@@ -594,6 +627,37 @@ let test_resolve_named_providers_runtime_mcp_headers_drop_unsupported_providers 
   check bool "keeps claude_code with runtime MCP header support" true
     (List.mem "claude_code" (provider_kinds providers))
 
+let test_resolve_named_providers_canonical_labels_are_not_leaks () =
+  with_temp_dir "cascade-catalog-canonical-labels" @@ fun dir ->
+  let config_dir = Filename.concat dir "config" in
+  init_config_root config_dir;
+  with_config_dir config_dir @@ fun () ->
+  let model = Printf.sprintf "custom:judge@%s/v1" dummy_base_url in
+  ignore
+    (write_cascade_json config_dir
+       (Printf.sprintf
+          {|{
+  "big_three_models": ["%s", "codex_cli:auto", "gemini_cli:auto"],
+  "governance_judge_models": ["%s", "codex_cli:auto", "gemini_cli:auto"]
+}|}
+          model model));
+  Log.set_level Log.Info;
+  let stderr_output =
+    capture_stderr (fun () ->
+        let providers =
+          require_ok
+            (Cascade_catalog_runtime.resolve_named_providers
+               ~cascade_name:"governance_judge" ())
+        in
+        let kinds = provider_kinds providers in
+        check bool "keeps canonical custom provider" true
+          (List.mem "openai_compat" kinds);
+        check bool "expands codex_cli:auto" true (List.mem "codex_cli" kinds);
+        check bool "expands gemini_cli:auto" true (List.mem "gemini_cli" kinds))
+  in
+  check bool "canonicalized provider labels are not false leaks" false
+    (contains_substring stderr_output "NOT in")
+
 let test_config_doctor_live_reports_catalog_validation () =
   with_temp_dir "cascade-doctor-live" @@ fun dir ->
   let base_path = Filename.concat dir "base" in
@@ -715,6 +779,10 @@ let () =
             "resolve_named_providers runtime MCP headers drop unsupported providers"
             `Quick
             test_resolve_named_providers_runtime_mcp_headers_drop_unsupported_providers;
+          test_case
+            "resolve_named_providers canonical labels are not leak warnings"
+            `Quick
+            test_resolve_named_providers_canonical_labels_are_not_leaks;
           test_case
             "config doctor live reports catalog validation"
             `Quick

@@ -32,8 +32,9 @@ let test_extract_domains () =
     Egress_policy.extract_domains_from_command
       "curl -s https://api.github.com/repos/ocaml/ocaml/releases | jq .tag_name"
   in
-  assert (List.length domains = 1);
-  assert (List.hd domains = "api.github.com")
+  match domains with
+  | [ domain ] -> assert (domain = "api.github.com")
+  | _ -> assert false
 
 let test_extract_multiple_domains () =
   let domains =
@@ -49,8 +50,9 @@ let test_extract_strips_port () =
     Egress_policy.extract_domains_from_command
       "curl https://localhost:8080/health"
   in
-  assert (List.length domains = 1);
-  assert (List.hd domains = "localhost")
+  match domains with
+  | [ domain ] -> assert (domain = "localhost")
+  | _ -> assert false
 
 let test_extract_no_urls () =
   let domains =

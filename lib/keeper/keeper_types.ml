@@ -52,6 +52,19 @@ type tool_access =
       }
   | Custom of string list
 
+let tool_names_include_board name_list =
+  List.exists
+    (fun name ->
+       String.starts_with ~prefix:"keeper_board_" name
+       || String.starts_with ~prefix:"masc_board_" name)
+    name_list
+
+let tool_access_default_room_signal_prompt_enabled ~default = function
+  | Preset { preset = Minimal; also_allow } ->
+      default || tool_names_include_board also_allow
+  | Preset _ -> true
+  | Custom tool_names -> tool_names_include_board tool_names
+
 (* -- Runtime types (moved into agent_runtime_state) -- *)
 
 type compaction_runtime =

@@ -100,11 +100,16 @@ let ensure_keeper_meta config name =
       apply_default defaults.proactive_idle_sec Keeper_config.default_proactive_idle_sec in
     let target_cooldown_sec =
       apply_default defaults.proactive_cooldown_sec Keeper_config.default_proactive_cooldown_sec in
+    let target_tool_access = resynced_tool_access defaults meta in
     let target_room_signal_prompt_enabled =
       match Keeper_config.keeper_room_signal_prompt_enabled_override () with
       | Some override -> override
       | None ->
-          Option.value ~default:Keeper_config.default_room_signal_prompt_enabled
+          Option.value
+            ~default:
+              (tool_access_default_room_signal_prompt_enabled
+                 ~default:Keeper_config.default_room_signal_prompt_enabled
+                 target_tool_access)
             defaults.room_signal_prompt_enabled
     in
     let target_denylist = apply_default defaults.tool_denylist meta.tool_denylist in
@@ -141,7 +146,6 @@ let ensure_keeper_meta config name =
         Log.Keeper.error "%s" msg;
         Error msg
     | Ok resolved_target_cascade_name ->
-    let target_tool_access = resynced_tool_access defaults meta in
     let target_tool_preset_source =
       match defaults.tool_preset_source with
       | Some _ as s -> s

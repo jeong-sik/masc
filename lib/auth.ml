@@ -221,7 +221,7 @@ let extract_generated_nickname_prefix name =
 let is_generated_nickname_shape name =
   List.length (String.split_on_char '-' name) >= 3
 
-let extract_agent_type_prefix name =
+let keeper_transport_alias_stable_name name =
   match String.split_on_char '-' name with
   | "keeper" :: rest -> (
       match List.rev rest with
@@ -229,8 +229,16 @@ let extract_agent_type_prefix name =
           List.rev middle_rev
           |> String.concat "-"
           |> trim_nonempty
-      | _ -> Some "keeper")
-  | _ -> extract_generated_nickname_prefix name
+      | _ -> None)
+  | _ -> None
+
+let extract_agent_type_prefix name =
+  match keeper_transport_alias_stable_name name with
+  | Some stable_name -> Some stable_name
+  | None -> (
+      match String.split_on_char '-' name with
+      | "keeper" :: _ -> Some "keeper"
+      | _ -> extract_generated_nickname_prefix name)
 
 let credential_agent_name agent_name =
   match extract_agent_type_prefix agent_name with
@@ -494,7 +502,23 @@ let missing_credential_error config ~agent_name ~token : masc_error =
     accepted. Generated nicknames may also use a token owned by their
     stable prefix, but only when the supplied token itself resolves to
     that prefix. This keeps joined nickname continuity without letting an
-    unrelated bearer token impersonate another generated family. *)
+    unrelated bearer token impersonate another generated family. Keeper
+    transport aliases (keeper-<name>-agent) additionally accept an
+    existing stable keeper token even after an exact alias credential has
+    been bootstrapped, because these aliases are transport identity, not
+    separate runtime actors. *)
+let verify_token_owner_alias config ~agent_name ~token =
+  match find_credential_by_token config ~token with
+  | Ok owner when String.equal owner.agent_name (credential_agent_name agent_name) ->
+      Ok owner
+  | Ok owner ->
+      Error
+        (Unauthorized
+           (Printf.sprintf
+              "No credential found for %s (bearer token belongs to %s)"
+              agent_name owner.agent_name))
+  | Error e -> Error e
+
 let verify_token config ~agent_name ~token : (agent_credential, masc_error) result =
   let cred_opt =
     match load_credential config agent_name with
@@ -504,22 +528,14 @@ let verify_token config ~agent_name ~token : (agent_credential, masc_error) resu
         |> List.find_map (load_credential config)
   in
   match cred_opt with
-  | None -> (
-      match find_credential_by_token config ~token with
-      | Ok owner
-        when String.equal owner.agent_name (credential_agent_name agent_name) ->
-          Ok owner
-      | Ok owner ->
-          Error
-            (Unauthorized
-               (Printf.sprintf
-                  "No credential found for %s (bearer token belongs to %s)"
-                  agent_name owner.agent_name))
-      | Error e -> Error e)
+  | None -> verify_token_owner_alias config ~agent_name ~token
   | Some cred ->
       let token_hash = sha256_hash token in
       if cred.token <> token_hash then
-        Error (InvalidToken "Token mismatch")
+        if Option.is_some (keeper_transport_alias_stable_name agent_name) then
+          verify_token_owner_alias config ~agent_name ~token
+        else
+          Error (InvalidToken "Token mismatch")
       else
         (* Check expiry *)
         match cred.expires_at with

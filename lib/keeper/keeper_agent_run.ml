@@ -2577,6 +2577,64 @@ let run_turn
              ~history_messages
              ~actual_input_tokens:usage.input_tokens
          in
+         let has_positive_count_after_marker haystack marker =
+           let haystack = String.lowercase_ascii haystack in
+           let marker = String.lowercase_ascii marker in
+           let hay_len = String.length haystack in
+           let marker_len = String.length marker in
+           let is_digit c = c >= '0' && c <= '9' in
+           let rec parse_digits idx acc =
+             if idx >= hay_len || not (is_digit haystack.[idx]) then acc
+             else
+               parse_digits (idx + 1)
+                 ((acc * 10) + Char.code haystack.[idx] - Char.code '0')
+           in
+           let rec skip_to_digit start idx =
+             if idx >= hay_len || idx - start > 32 then false
+             else if is_digit haystack.[idx] then
+               parse_digits idx 0 > 0
+             else
+               skip_to_digit start (idx + 1)
+           in
+           let rec search idx =
+             if marker_len = 0 || idx + marker_len > hay_len then false
+             else if String.sub haystack idx marker_len = marker then
+               skip_to_digit (idx + marker_len) (idx + marker_len)
+             else
+               search (idx + 1)
+           in
+           search 0
+         in
+         let actionable_signal_context =
+           let haystack = user_message ^ "\n" ^ dynamic_context in
+           String_util.contains_substring_ci haystack "## Discovered Work"
+           || has_positive_count_after_marker haystack "### Board Activity"
+           || has_positive_count_after_marker haystack "Unclaimed tasks"
+         in
+         let passive_status_tool_name = function
+           | "masc_status"
+           | "keeper_context_status"
+           | "masc_plan_get"
+           | "keeper_time_now"
+           | "keeper_board_list"
+           | "keeper_board_get"
+           | "keeper_tasks_list"
+           | "masc_tasks" ->
+               true
+           | _ -> false
+         in
+         let passive_only_actionable_turn_reason =
+           if actionable_signal_context
+              && actual_keeper_tool_names <> []
+              && List.for_all passive_status_tool_name actual_keeper_tool_names
+           then
+             Some
+               (Printf.sprintf
+                  "actionable keeper signal was present, but the model only used passive status/read tools: %s"
+                  (String.concat ", " actual_keeper_tool_names))
+           else
+             None
+         in
          (* Required-tool turns are filtered onto providers that declare
             tool support plus tool_choice support. If a text-only response
             still reaches this point, treat it as a contract failure. *)
@@ -2590,31 +2648,48 @@ let run_turn
              Keeper_tool_disclosure.validate_completion_contract_presence
                ~contract:effective_completion_contract
                ~tool_present:!keeper_surface_tool_used_ref
+             , passive_only_actionable_turn_reason
            with
-           | Ok () ->
-             receipt_tool_contract_result_ref := "satisfied";
-             Ok text
-           | Error reason ->
-             receipt_tool_contract_result_ref := "violated";
-             let contract_str =
-               match effective_completion_contract with
-               | Keeper_tool_disclosure.Allow_text_or_tool -> "Allow_text_or_tool"
-               | Keeper_tool_disclosure.Require_tool_use -> "Require_tool_use"
-             in
-             Log.Keeper.error
-               "keeper:%s required tool contract violated \
-                (turn=%d, tools=%d, contract=%s). \
-                Rejecting text-only response. Reason: %s"
-               meta.name result.turns
-               (List.length actual_keeper_tool_names)
-               contract_str reason;
-             Error
-               (Oas.Error.Agent
-                  (Oas.Error.CompletionContractViolation
-                     {
-                       contract = Oas.Completion_contract_id.Require_tool_use;
-                       reason;
-                     }))
+           | Ok (), Some reason ->
+               receipt_tool_contract_result_ref := "violated";
+               Log.Keeper.error
+                 "keeper:%s required tool contract violated \
+                  (turn=%d, tools=%d). Rejecting passive-only actionable turn. \
+                  Reason: %s"
+                 meta.name result.turns
+                 (List.length actual_keeper_tool_names)
+                 reason;
+               Error
+                 (Oas.Error.Agent
+                    (Oas.Error.CompletionContractViolation
+                       {
+                         contract = Oas.Completion_contract_id.Require_tool_use;
+                         reason;
+                       }))
+           | Ok (), None ->
+               receipt_tool_contract_result_ref := "satisfied";
+               Ok text
+           | Error reason, _ ->
+               receipt_tool_contract_result_ref := "violated";
+               let contract_str =
+                 match effective_completion_contract with
+                 | Keeper_tool_disclosure.Allow_text_or_tool -> "Allow_text_or_tool"
+                 | Keeper_tool_disclosure.Require_tool_use -> "Require_tool_use"
+               in
+               Log.Keeper.error
+                 "keeper:%s required tool contract violated \
+                  (turn=%d, tools=%d, contract=%s). \
+                  Rejecting text-only response. Reason: %s"
+                 meta.name result.turns
+                 (List.length actual_keeper_tool_names)
+                 contract_str reason;
+               Error
+                 (Oas.Error.Agent
+                    (Oas.Error.CompletionContractViolation
+                       {
+                         contract = Oas.Completion_contract_id.Require_tool_use;
+                         reason;
+                       }))
          in
          let finalize_response_text raw_response_text =
            let stop_reason_str =

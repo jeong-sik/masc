@@ -371,9 +371,29 @@ let () =
           |> to_list
           |> List.map to_string
         in
-        Alcotest.(check (list string)) "tool_access enum == variant SSOT"
-          Masc_mcp.Keeper_types.valid_tool_preset_strings
-          enum);
+      Alcotest.(check (list string)) "tool_access enum == variant SSOT"
+        Masc_mcp.Keeper_types.valid_tool_preset_strings
+        enum);
+      Alcotest.test_case "room signal defaults follow keeper tool access" `Quick (fun () ->
+        let open Masc_mcp.Keeper_types in
+        let check_access label expected access =
+          Alcotest.(check bool) label expected
+            (tool_access_default_room_signal_prompt_enabled
+               ~default:false
+               access)
+        in
+        check_access "minimal stays quiet by default" false
+          (Preset { preset = Minimal; also_allow = [] });
+        check_access "minimal board opt-in listens" true
+          (Preset { preset = Minimal; also_allow = [ "keeper_board_post" ] });
+        check_access "delivery listens to board by default" true
+          (Preset { preset = Delivery; also_allow = [] });
+        check_access "messaging listens to board by default" true
+          (Preset { preset = Messaging; also_allow = [] });
+        check_access "custom without board stays quiet" false
+          (Custom [ "keeper_time_now" ]);
+        check_access "custom board allowlist listens" true
+          (Custom [ "keeper_board_post" ]));
       Alcotest.test_case "Social, Dispatch, and Delivery present" `Quick (fun () ->
         let open Masc_mcp.Keeper_types in
         Alcotest.(check bool) "social present" true

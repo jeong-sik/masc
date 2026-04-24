@@ -34,7 +34,7 @@ stylesheet
   {|
   .swim {
     border: 1px solid var(--border-main);
-    background: rgba(14, 10, 8, 0.4);
+    background: color-mix(in oklab, var(--bg-deep) 40%, transparent);
     margin-top: 6px;
   }
   .axis {
@@ -116,7 +116,7 @@ stylesheet
   .track {
     position: relative;
     height: 32px;
-    background: repeating-linear-gradient(to right, transparent 0 99px, rgba(120, 100, 80, 0.05) 99px 100px);
+    background: repeating-linear-gradient(to right, transparent 0 99px, color-mix(in oklab, var(--border-highlight) 5%, transparent) 99px 100px);
   }
   .frame {
     position: absolute;

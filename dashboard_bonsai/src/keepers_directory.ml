@@ -74,8 +74,8 @@ stylesheet
   {|
   .directory {
     border: 1px solid var(--border-main);
-    background: rgba(14, 10, 8, 0.48);
-    box-shadow: inset 0 0 0 1px rgba(232, 216, 184, 0.03);
+    background: color-mix(in oklab, var(--bg-deep) 48%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--text-bright) 3%, transparent);
   }
 
   .head {
@@ -84,7 +84,7 @@ stylesheet
     gap: 14px;
     align-items: center;
     padding: 10px 16px;
-    border-bottom: 1px solid rgba(120, 100, 80, 0.16);
+    border-bottom: 1px solid color-mix(in oklab, var(--border-highlight) 16%, transparent);
     background: linear-gradient(180deg, color-mix(in oklab, var(--bg-panel) 80%, var(--bg-deep)), var(--bg-deep));
     font-family: var(--font-ui, 'Noto Sans KR', sans-serif);
     font-size: 11px;
@@ -100,7 +100,7 @@ stylesheet
     gap: 14px;
     align-items: center;
     padding: 12px 16px;
-    border-bottom: 1px solid rgba(120, 100, 80, 0.12);
+    border-bottom: 1px solid color-mix(in oklab, var(--border-highlight) 12%, transparent);
     cursor: pointer;
     transition: background 120ms ease;
   }
@@ -109,7 +109,7 @@ stylesheet
 
   .row:hover,
   .row:focus-visible {
-    background: rgba(160, 140, 110, 0.04);
+    background: color-mix(in oklab, var(--accent-brass) 4%, transparent);
   }
 
   .row:focus-visible {
@@ -118,7 +118,7 @@ stylesheet
   }
 
   .row_selected {
-    background: linear-gradient(90deg, rgba(212, 169, 64, 0.08), transparent 72%);
+    background: linear-gradient(90deg, color-mix(in oklab, var(--accent-brass) 8%, transparent), transparent 72%);
   }
 
   .row_selected::before {
@@ -137,7 +137,7 @@ stylesheet
     height: 40px;
     border: 1px solid var(--accent-brass-dim);
     background:
-      radial-gradient(circle at 35% 30%, rgba(232, 216, 184, 0.16), transparent 58%),
+      radial-gradient(circle at 35% 30%, color-mix(in oklab, var(--text-bright) 16%, transparent), transparent 58%),
       var(--bg-panel-alt, #1b140f);
     display: grid;
     place-items: center;
@@ -241,7 +241,7 @@ stylesheet
 
   .vial_fill_bad {
     background: linear-gradient(90deg, var(--accent-blood-dim), var(--accent-blood));
-    box-shadow: 0 0 6px rgba(232, 80, 80, 0.35);
+    box-shadow: 0 0 6px color-mix(in oklab, var(--accent-blood) 35%, transparent);
   }
 
   .meta_strip {
@@ -250,7 +250,7 @@ stylesheet
 
   .note_box {
     border: 1px solid var(--border-main);
-    background: rgba(14, 10, 8, 0.4);
+    background: color-mix(in oklab, var(--bg-deep) 40%, transparent);
     padding: 12px 14px;
     display: flex;
     flex-direction: column;
@@ -303,8 +303,8 @@ stylesheet
   }
 
   .preview_box {
-    border: 1px solid rgba(120, 100, 80, 0.18);
-    background: rgba(8, 5, 4, 0.42);
+    border: 1px solid color-mix(in oklab, var(--border-highlight) 18%, transparent);
+    background: color-mix(in oklab, var(--bg-deep) 42%, transparent);
     padding: 10px 12px;
     display: flex;
     flex-direction: column;

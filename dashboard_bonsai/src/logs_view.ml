@@ -25,8 +25,8 @@ stylesheet
     position: relative;
     min-height: 100vh;
     background:
-      radial-gradient(circle at 88% 14%, rgba(138, 106, 40, 0.10), transparent 22%),
-      radial-gradient(circle at 8% 88%, rgba(232, 80, 80, 0.05), transparent 28%),
+      radial-gradient(circle at 88% 14%, color-mix(in oklab, var(--accent-brass) 10%, transparent), transparent 22%),
+      radial-gradient(circle at 8% 88%, color-mix(in oklab, var(--accent-blood) 5%, transparent), transparent 28%),
       var(--bg-deep);
     color: var(--text-primary);
     font-family: 'EB Garamond', 'Noto Sans KR', Georgia, serif;
@@ -117,7 +117,7 @@ stylesheet
     height: 6px;
     border-radius: 50%;
     background: var(--accent-brass);
-    box-shadow: 0 0 8px rgba(138, 106, 40, 0.55);
+    box-shadow: 0 0 8px color-mix(in oklab, var(--accent-brass) 55%, transparent);
     animation: pulse-beat 2.4s ease-in-out infinite;
   }
 
@@ -143,7 +143,7 @@ stylesheet
       linear-gradient(180deg, var(--bg-panel) 0%, var(--bg-deep) 100%);
     border: 1px solid var(--border-main);
     border-radius: 2px;
-    box-shadow: inset 0 0 0 1px rgba(196, 162, 101, 0.04);
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent-brass) 4%, transparent);
   }
 
   .heartbeat_head {
@@ -186,7 +186,7 @@ stylesheet
   }
 
   .heartbeat_bar_warn  { background: linear-gradient(180deg, var(--status-warn) 0%, color-mix(in oklab, var(--status-warn) 40%, var(--bg-deep)) 100%); }
-  .heartbeat_bar_error { background: linear-gradient(180deg, var(--accent-blood) 0%, var(--accent-blood-dim) 100%); box-shadow: 0 0 6px rgba(232, 80, 80, 0.45); }
+  .heartbeat_bar_error { background: linear-gradient(180deg, var(--accent-blood) 0%, var(--accent-blood-dim) 100%); box-shadow: 0 0 6px color-mix(in oklab, var(--accent-blood) 45%, transparent); }
   .heartbeat_bar_idle  { background: var(--border-main); opacity: 0.6; }
 
   /* hud CSS → Hud 모듈로 이관 (shell 추출 Phase 2.A) */
@@ -201,9 +201,9 @@ stylesheet
     padding: 8px 14px;
     background:
       linear-gradient(90deg,
-        rgba(138, 106, 40, 0.10) 0%,
+        color-mix(in oklab, var(--accent-brass) 10%, transparent) 0%,
         transparent 45%,
-        rgba(232, 80, 80, 0.06) 100%),
+        color-mix(in oklab, var(--accent-blood) 6%, transparent) 100%),
       var(--bg-deep);
     border: 1px solid var(--border-main);
     border-radius: 2px;
@@ -220,8 +220,8 @@ stylesheet
     border-radius: 50%;
     background: radial-gradient(circle at 28% 28%, var(--text-bright) 0%, var(--accent-brass) 55%, var(--border-highlight) 100%);
     box-shadow:
-      0 0 10px rgba(232, 216, 184, 0.22),
-      inset 0 0 0 1px rgba(232, 216, 184, 0.12);
+      0 0 10px color-mix(in oklab, var(--text-bright) 22%, transparent),
+      inset 0 0 0 1px color-mix(in oklab, var(--text-bright) 12%, transparent);
     flex-shrink: 0;
   }
 
@@ -292,7 +292,7 @@ stylesheet
   .chip:focus-visible { outline: 2px solid var(--accent-brass); outline-offset: 1px; }
   .chip_active {
     color: var(--text-bright);
-    background: rgba(138, 106, 40, 0.14);
+    background: color-mix(in oklab, var(--accent-brass) 14%, transparent);
     box-shadow: inset 0 0 0 1px var(--accent-brass);
   }
 
@@ -305,7 +305,7 @@ stylesheet
   html[data-log-level="error"] .chip[data-filter-level="error"],
   html:not([data-log-level])   .chip[data-filter-level="info"] {
     color: var(--text-bright);
-    background: rgba(138, 106, 40, 0.14);
+    background: color-mix(in oklab, var(--accent-brass) 14%, transparent);
     box-shadow: inset 0 0 0 1px var(--accent-brass);
   }
 
@@ -387,7 +387,7 @@ stylesheet
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
-    text-shadow: 0 0 18px rgba(138, 106, 40, 0.28);
+    text-shadow: 0 0 18px color-mix(in oklab, var(--accent-brass) 28%, transparent);
     margin-right: 4px;
     align-self: flex-start;
     padding-top: 6px;
@@ -462,7 +462,7 @@ stylesheet
     right: 0;
     top: 0;
     height: 28px;
-    background: linear-gradient(180deg, var(--bg-deep) 0%, rgba(10, 7, 6, 0) 100%);
+    background: linear-gradient(180deg, var(--bg-deep) 0%, transparent 100%);
     pointer-events: none;
     z-index: 2;
   }
@@ -473,7 +473,7 @@ stylesheet
   .tape_end {
     position: relative;
     height: 32px;
-    background: linear-gradient(180deg, rgba(10, 7, 6, 0) 0%, var(--bg-deep) 100%);
+    background: linear-gradient(180deg, transparent 0%, var(--bg-deep) 100%);
     margin-top: -8px;
     pointer-events: none;
   }
@@ -495,7 +495,7 @@ stylesheet
     border-radius: 50%;
     border: 1px solid var(--accent-brass);
     background:
-      radial-gradient(circle at 35% 30%, rgba(232, 216, 184, 0.18), transparent 55%),
+      radial-gradient(circle at 35% 30%, color-mix(in oklab, var(--text-bright) 18%, transparent), transparent 55%),
       var(--bg-panel);
     display: grid;
     place-items: center;
@@ -505,13 +505,13 @@ stylesheet
     color: var(--accent-brass);
     text-transform: uppercase;
     box-shadow:
-      inset 0 0 0 1px rgba(232, 216, 184, 0.06),
-      0 0 6px rgba(138, 106, 40, 0.18);
+      inset 0 0 0 1px color-mix(in oklab, var(--text-bright) 6%, transparent),
+      0 0 6px color-mix(in oklab, var(--accent-brass) 18%, transparent);
     align-self: center;
   }
 
-  .sigil_warn  { color: var(--status-warn); border-color: var(--status-warn); box-shadow: inset 0 0 0 1px rgba(232,216,184,0.06), 0 0 8px rgba(160, 106, 26, 0.35); }
-  .sigil_error { color: var(--text-bright); border-color: var(--accent-blood); background: radial-gradient(circle at 35% 30%, rgba(232,216,184,0.28), transparent 55%), color-mix(in oklab, var(--accent-blood) 25%, var(--bg-deep)); box-shadow: inset 0 0 0 1px rgba(232,216,184,0.08), 0 0 10px color-mix(in oklab, var(--accent-blood) 45%, transparent); }
+  .sigil_warn  { color: var(--status-warn); border-color: var(--status-warn); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--text-bright) 6%, transparent), 0 0 8px color-mix(in oklab, var(--accent-brass) 35%, transparent); }
+  .sigil_error { color: var(--text-bright); border-color: var(--accent-blood); background: radial-gradient(circle at 35% 30%, color-mix(in oklab, var(--text-bright) 28%, transparent), transparent 55%), color-mix(in oklab, var(--accent-blood) 25%, var(--bg-deep)); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--text-bright) 8%, transparent), 0 0 10px color-mix(in oklab, var(--accent-blood) 45%, transparent); }
 
   .message_lead::first-letter {
     font-family: 'Cinzel', 'EB Garamond', serif;
@@ -525,37 +525,37 @@ stylesheet
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
-    text-shadow: 0 0 14px rgba(138, 106, 40, 0.25);
+    text-shadow: 0 0 14px color-mix(in oklab, var(--accent-brass) 25%, transparent);
   }
 
   .row_debug { border-left-color: var(--status-idle); }
   .row_info  { border-left-color: var(--accent-mold); }
 
   .row:hover {
-    background: linear-gradient(90deg, rgba(138, 106, 40, 0.08), transparent 70%);
-    box-shadow: inset 1px 0 0 0 rgba(138, 106, 40, 0.35);
+    background: linear-gradient(90deg, color-mix(in oklab, var(--accent-brass) 8%, transparent), transparent 70%);
+    box-shadow: inset 1px 0 0 0 color-mix(in oklab, var(--accent-brass) 35%, transparent);
     border-left-color: var(--accent-brass);
   }
 
   .row_error {
-    background: linear-gradient(90deg, rgba(232, 80, 80, 0.08) 0%, transparent 60%);
+    background: linear-gradient(90deg, color-mix(in oklab, var(--accent-blood) 8%, transparent) 0%, transparent 60%);
     border-left-color: var(--accent-blood);
   }
 
   .row_error:hover {
-    background: linear-gradient(90deg, rgba(232, 80, 80, 0.18) 0%, transparent 65%);
-    box-shadow: inset 1px 0 0 0 rgba(232, 80, 80, 0.55);
+    background: linear-gradient(90deg, color-mix(in oklab, var(--accent-blood) 18%, transparent) 0%, transparent 65%);
+    box-shadow: inset 1px 0 0 0 color-mix(in oklab, var(--accent-blood) 55%, transparent);
     border-left-color: var(--accent-viscera);
   }
 
   .row_warn {
-    background: linear-gradient(90deg, rgba(160, 106, 26, 0.06) 0%, transparent 60%);
+    background: linear-gradient(90deg, color-mix(in oklab, var(--accent-brass) 6%, transparent) 0%, transparent 60%);
     border-left-color: var(--status-warn);
   }
 
   .row_warn:hover {
-    background: linear-gradient(90deg, rgba(160, 106, 26, 0.15) 0%, transparent 65%);
-    box-shadow: inset 1px 0 0 0 rgba(160, 106, 26, 0.5);
+    background: linear-gradient(90deg, color-mix(in oklab, var(--accent-brass) 15%, transparent) 0%, transparent 65%);
+    box-shadow: inset 1px 0 0 0 color-mix(in oklab, var(--accent-brass) 50%, transparent);
     border-left-color: var(--accent-ember);
   }
 
@@ -588,7 +588,7 @@ stylesheet
   .level_debug { color: var(--text-dim); }
   .level_info  { color: var(--text-primary); }
   .level_warn  { color: var(--status-warn); }
-  .level_error { color: var(--accent-blood); text-shadow: 0 0 12px rgba(232, 80, 80, 0.32); }
+  .level_error { color: var(--accent-blood); text-shadow: 0 0 12px color-mix(in oklab, var(--accent-blood) 32%, transparent); }
 
   .mod_col {
     font-family: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
@@ -681,11 +681,11 @@ stylesheet
     background: radial-gradient(circle at 32% 28%, var(--accent-viscera) 0%, var(--accent-blood) 40%, color-mix(in oklab, var(--accent-blood) 50%, var(--bg-deep)) 80%, color-mix(in oklab, var(--accent-blood) 20%, var(--bg-deep)) 100%);
     border: 2px solid var(--accent-brass);
     box-shadow:
-      inset 0 0 0 1px rgba(232, 216, 184, 0.18),
-      inset -6px -8px 14px rgba(0, 0, 0, 0.55),
-      inset 5px 4px 10px rgba(232, 216, 184, 0.15),
-      0 6px 14px rgba(232, 80, 80, 0.35),
-      0 0 22px rgba(138, 106, 40, 0.22);
+      inset 0 0 0 1px color-mix(in oklab, var(--text-bright) 18%, transparent),
+      inset -6px -8px 14px color-mix(in oklab, var(--bg-deep) 55%, transparent),
+      inset 5px 4px 10px color-mix(in oklab, var(--text-bright) 15%, transparent),
+      0 6px 14px color-mix(in oklab, var(--accent-blood) 35%, transparent),
+      0 0 22px color-mix(in oklab, var(--accent-brass) 22%, transparent);
     transform: rotate(-14deg);
     z-index: 4;
     pointer-events: none;
@@ -696,7 +696,7 @@ stylesheet
     color: var(--text-bright);
     font-size: 22px;
     letter-spacing: 0.04em;
-    text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6), 0 0 8px rgba(232, 216, 184, 0.35);
+    text-shadow: 0 1px 0 color-mix(in oklab, var(--bg-deep) 60%, transparent), 0 0 8px color-mix(in oklab, var(--text-bright) 35%, transparent);
   }
 
   .signet::before {
@@ -704,7 +704,7 @@ stylesheet
     position: absolute;
     inset: 6px;
     border-radius: 50%;
-    border: 1px dashed rgba(232, 216, 184, 0.22);
+    border: 1px dashed color-mix(in oklab, var(--text-bright) 22%, transparent);
     transform: rotate(14deg);
   }
 
@@ -734,7 +734,7 @@ stylesheet
     padding: 18px 0 24px;
     background: linear-gradient(180deg, var(--bg-panel) 0%, var(--bg-deep) 100%);
     border-right: 1px solid var(--border-main);
-    box-shadow: inset -1px 0 0 rgba(138, 106, 40, 0.08);
+    box-shadow: inset -1px 0 0 color-mix(in oklab, var(--accent-brass) 8%, transparent);
     display: flex;
     flex-direction: column;
     overflow-y: auto;
@@ -804,12 +804,12 @@ stylesheet
   }
   .nav_link:hover {
     color: var(--accent-brass);
-    background: rgba(138, 106, 40, 0.05);
+    background: color-mix(in oklab, var(--accent-brass) 5%, transparent);
   }
   .nav_link_active {
     color: var(--accent-brass);
     border-left-color: var(--accent-brass);
-    background: linear-gradient(90deg, rgba(138, 106, 40, 0.10), transparent 70%);
+    background: linear-gradient(90deg, color-mix(in oklab, var(--accent-brass) 10%, transparent), transparent 70%);
   }
   .nav_link_glyph {
     width: 6px;
@@ -876,7 +876,7 @@ stylesheet
     border-color: var(--accent-brass);
     color: var(--accent-brass);
     background: linear-gradient(180deg, var(--bg-panel), var(--bg-deep));
-    box-shadow: 0 0 0 1px rgba(138, 106, 40, 0.25) inset;
+    box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent-brass) 25%, transparent) inset;
   }
 
   /* active chip via declarative CSS only — listener가 <html data-theme>
@@ -890,7 +890,7 @@ stylesheet
     border-color: var(--accent-brass);
     color: var(--accent-brass);
     background: linear-gradient(180deg, var(--bg-panel), var(--bg-deep));
-    box-shadow: 0 0 0 1px rgba(138, 106, 40, 0.25) inset;
+    box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent-brass) 25%, transparent) inset;
   }
 
   /* ─── right aside (340px, fixed) ───
@@ -905,7 +905,7 @@ stylesheet
     padding: 22px 18px 28px;
     background: linear-gradient(180deg, var(--bg-panel) 0%, var(--bg-deep) 100%);
     border-left: 1px solid var(--border-main);
-    box-shadow: inset 1px 0 0 rgba(138, 106, 40, 0.06);
+    box-shadow: inset 1px 0 0 color-mix(in oklab, var(--accent-brass) 6%, transparent);
     display: flex;
     flex-direction: column;
     gap: 22px;
@@ -1011,13 +1011,13 @@ stylesheet
     height: 100%;
     width: 64%;
     background: linear-gradient(90deg, var(--accent-brass-dim), var(--accent-brass));
-    box-shadow: 0 0 6px rgba(138, 106, 40, 0.45);
+    box-shadow: 0 0 6px color-mix(in oklab, var(--accent-brass) 45%, transparent);
   }
   .vial::after {
     content: "";
     position: absolute;
     inset: 0;
-    background-image: repeating-linear-gradient(90deg, transparent 0 19px, rgba(0, 0, 0, 0.5) 19px 20px);
+    background-image: repeating-linear-gradient(90deg, transparent 0 19px, color-mix(in oklab, var(--bg-deep) 50%, transparent) 19px 20px);
     pointer-events: none;
   }
 
@@ -1082,13 +1082,13 @@ stylesheet
     font-family: 'JetBrains Mono', ui-monospace, monospace;
     font-size: 11px;
     color: var(--accent-brass);
-    background: rgba(138, 106, 40, 0.08);
+    background: color-mix(in oklab, var(--accent-brass) 8%, transparent);
     padding: 0 5px;
     border: 1px solid var(--border-main);
   }
   .evrow_bad .evrow_b_code {
     color: var(--accent-blood);
-    background: rgba(232, 80, 80, 0.08);
+    background: color-mix(in oklab, var(--accent-blood) 8%, transparent);
   }
 
   /* ─── page-head (hero) ───
@@ -1135,15 +1135,15 @@ stylesheet
   }
   .page_h1_blood {
     color: var(--accent-blood);
-    text-shadow: 0 0 18px rgba(201, 74, 58, 0.32);
+    text-shadow: 0 0 18px color-mix(in oklab, var(--accent-blood) 32%, transparent);
   }
   .page_h1_brass {
     color: var(--accent-brass);
-    text-shadow: 0 0 18px rgba(138, 106, 40, 0.32);
+    text-shadow: 0 0 18px color-mix(in oklab, var(--accent-brass) 32%, transparent);
   }
   .page_h1_bright {
     color: var(--text-bright);
-    text-shadow: 0 0 18px rgba(216, 200, 160, 0.24);
+    text-shadow: 0 0 18px color-mix(in oklab, var(--text-primary) 24%, transparent);
   }
   .page_sub {
     font-family: 'EB Garamond', 'Noto Sans KR', Georgia, serif;
@@ -1185,7 +1185,7 @@ stylesheet
     color: var(--accent-brass);
   }
   .pbtn_primary:hover {
-    background: rgba(138, 106, 40, 0.12);
+    background: color-mix(in oklab, var(--accent-brass) 12%, transparent);
     color: var(--text-bright);
   }
   .pbtn_glyph {
@@ -1211,7 +1211,7 @@ stylesheet
     height: 6px;
     border-radius: 50%;
     background: var(--accent-brass);
-    box-shadow: 0 0 6px rgba(138, 106, 40, 0.35);
+    box-shadow: 0 0 6px color-mix(in oklab, var(--accent-brass) 35%, transparent);
     align-self: center;
   }
   .sec_h {

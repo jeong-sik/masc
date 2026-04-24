@@ -42,9 +42,9 @@ stylesheet
     border: 1px solid var(--border-highlight);
     border-radius: 2px;
     box-shadow:
-      inset 0 0 0 1px rgba(196, 162, 101, 0.08),
-      0 2px 12px rgba(0, 0, 0, 0.6),
-      0 16px 24px -16px rgba(0, 0, 0, 0.9);
+      inset 0 0 0 1px color-mix(in oklab, var(--accent-brass) 8%, transparent),
+      0 2px 12px color-mix(in oklab, var(--bg-deep) 60%, transparent),
+      0 16px 24px -16px color-mix(in oklab, var(--bg-deep) 90%, transparent);
     backdrop-filter: blur(2px);
   }
 

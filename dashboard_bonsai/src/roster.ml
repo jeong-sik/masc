@@ -48,8 +48,8 @@ stylesheet
     border: 1px solid var(--border-main);
     border-radius: 2px;
     box-shadow:
-      inset 0 0 0 1px rgba(196, 162, 101, 0.06),
-      0 -8px 24px -12px rgba(0, 0, 0, 0.85);
+      inset 0 0 0 1px color-mix(in oklab, var(--accent-brass) 6%, transparent),
+      0 -8px 24px -12px color-mix(in oklab, var(--bg-deep) 85%, transparent);
     backdrop-filter: blur(2px);
   }
 
@@ -66,14 +66,14 @@ stylesheet
     height: 26px;
     border-radius: 50%;
     border: 1px solid var(--accent-brass);
-    background: radial-gradient(circle at 35% 30%, rgba(232, 216, 184, 0.22), transparent 55%), var(--bg-panel);
+    background: radial-gradient(circle at 35% 30%, color-mix(in oklab, var(--text-bright) 22%, transparent), transparent 55%), var(--bg-panel);
     display: grid;
     place-items: center;
     font-family: 'Cinzel', serif;
     font-size: 11px;
     color: var(--text-bright);
     text-transform: uppercase;
-    box-shadow: inset 0 0 0 1px rgba(232, 216, 184, 0.08), 0 0 8px rgba(138, 106, 40, 0.22);
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--text-bright) 8%, transparent), 0 0 8px color-mix(in oklab, var(--accent-brass) 22%, transparent);
     flex-shrink: 0;
   }
 

@@ -36,7 +36,7 @@ stylesheet
   }
   .flame_seg {
     height: 100%;
-    border-right: 1px solid rgba(0, 0, 0, 0.35);
+    border-right: 1px solid color-mix(in oklab, var(--bg-deep) 35%, transparent);
   }
   .flame_seg:last-child { border-right: 0; }
   .flame_seg_llm   { background: var(--t-llm); }
@@ -59,7 +59,7 @@ stylesheet
     width: 10px;
     height: 10px;
     display: inline-block;
-    border: 1px solid rgba(0, 0, 0, 0.45);
+    border: 1px solid color-mix(in oklab, var(--bg-deep) 45%, transparent);
   }
   .flame_lbl { color: var(--text-primary); }
   .flame_pct {

@@ -89,7 +89,7 @@ stylesheet
   .conv_bar {
     margin-top: 4px;
     height: 4px;
-    background: rgba(58,90,72,0.12);
+    background: color-mix(in oklab, var(--status-ok) 12%, transparent);
     position: relative;
   }
   .conv_bar_fill {
@@ -120,8 +120,8 @@ stylesheet
   .task_title { color: var(--text-primary); }
 
   .blocker {
-    border: 1px solid rgba(160,106,26,0.28);
-    background: rgba(160,106,26,0.08);
+    border: 1px solid color-mix(in oklab, var(--accent-brass) 28%, transparent);
+    background: color-mix(in oklab, var(--accent-brass) 8%, transparent);
     padding: 8px 10px;
     display: flex;
     flex-direction: column;

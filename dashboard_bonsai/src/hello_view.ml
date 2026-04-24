@@ -39,7 +39,7 @@ stylesheet
     text-transform: uppercase;
     color: var(--text-bright);
     margin: 0;
-    text-shadow: 0 0 40px rgba(232, 80, 80, 0.28);
+    text-shadow: 0 0 40px color-mix(in oklab, var(--accent-blood) 28%, transparent);
   }
 
   .sub {

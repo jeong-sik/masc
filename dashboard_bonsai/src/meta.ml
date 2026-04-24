@@ -23,8 +23,8 @@ stylesheet
     border: 1px solid var(--border-main, #3a2e20);
     background: linear-gradient(
       180deg,
-      rgba(42, 20, 14, 0.35),
-      rgba(20, 12, 8, 0.65)
+      color-mix(in oklab, var(--bg-card) 35%, transparent),
+      color-mix(in oklab, var(--bg-deep) 65%, transparent)
     );
     font-family: 'JetBrains Mono', ui-monospace, monospace;
     font-size: 11px;

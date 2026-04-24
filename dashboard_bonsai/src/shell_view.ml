@@ -21,8 +21,8 @@ stylesheet
     min-height: 100vh;
     color: var(--text-primary);
     background:
-      radial-gradient(ellipse 60% 40% at 12% 8%, rgba(212,169,64,0.06), transparent 55%),
-      radial-gradient(ellipse 40% 50% at 92% 95%, rgba(232,80,80,0.08), transparent 60%),
+      radial-gradient(ellipse 60% 40% at 12% 8%, color-mix(in oklab, var(--accent-brass) 6%, transparent), transparent 55%),
+      radial-gradient(ellipse 40% 50% at 92% 95%, color-mix(in oklab, var(--accent-blood) 8%, transparent), transparent 60%),
       linear-gradient(170deg, var(--bg-deep) 0%, color-mix(in oklab, var(--bg-panel) 50%, var(--bg-deep)) 60%, var(--bg-deep) 100%);
     font-family: var(--font-ui, 'Noto Sans KR', sans-serif);
   }
@@ -35,7 +35,7 @@ stylesheet
     padding: 0 22px;
     background: linear-gradient(180deg, var(--bg-panel), var(--bg-deep));
     border-bottom: 1px solid var(--border-highlight);
-    box-shadow: 0 2px 0 rgba(0,0,0,0.4), inset 0 -1px 0 rgba(212,169,64,0.12);
+    box-shadow: 0 2px 0 color-mix(in oklab, var(--bg-deep) 40%, transparent), inset 0 -1px 0 color-mix(in oklab, var(--accent-brass) 12%, transparent);
   }
 
   .brand {
@@ -197,19 +197,19 @@ stylesheet
 
   .nav_link:hover {
     color: var(--accent-brass);
-    background: rgba(212,169,64,0.05);
+    background: color-mix(in oklab, var(--accent-brass) 5%, transparent);
   }
 
   .nav_link:focus-visible {
     outline: 2px solid var(--accent-brass);
     outline-offset: -2px;
-    background: rgba(212,169,64,0.08);
+    background: color-mix(in oklab, var(--accent-brass) 8%, transparent);
   }
 
   .nav_link_active {
     color: var(--accent-brass);
     border-left-color: var(--accent-brass);
-    background: linear-gradient(90deg, rgba(212,169,64,0.1), transparent 70%);
+    background: linear-gradient(90deg, color-mix(in oklab, var(--accent-brass) 10%, transparent), transparent 70%);
   }
 
   .nav_link_active::after {
@@ -378,7 +378,7 @@ stylesheet
     font-family: var(--font-display, 'Cinzel', serif);
     font-size: 20px;
     background:
-      radial-gradient(circle at 35% 25%, rgba(212,169,64,0.16), transparent 38%),
+      radial-gradient(circle at 35% 25%, color-mix(in oklab, var(--accent-brass) 16%, transparent), transparent 38%),
       linear-gradient(180deg, var(--bg-panel-alt), var(--bg-deep));
   }
 
@@ -433,7 +433,7 @@ stylesheet
     content: "";
     position: absolute;
     inset: 0;
-    background-image: repeating-linear-gradient(90deg, transparent 0 19px, rgba(0,0,0,0.5) 19px 20px);
+    background-image: repeating-linear-gradient(90deg, transparent 0 19px, color-mix(in oklab, var(--bg-deep) 50%, transparent) 19px 20px);
     pointer-events: none;
   }
 
@@ -463,7 +463,7 @@ stylesheet
     font-family: var(--font-mono, 'JetBrains Mono', monospace);
     font-size: 11px;
     color: var(--text-bright);
-    border: 1px solid rgba(120,100,80,0.14);
+    border: 1px solid color-mix(in oklab, var(--border-highlight) 14%, transparent);
     background: var(--bg-deep);
     padding: 1px;
   }
@@ -537,7 +537,7 @@ stylesheet
     font-family: var(--font-mono, 'JetBrains Mono', monospace);
     font-size: 11px;
     color: var(--accent-brass);
-    background: rgba(212,169,64,0.08);
+    background: color-mix(in oklab, var(--accent-brass) 8%, transparent);
     padding: 0 5px;
     border: 1px solid var(--border-main);
   }

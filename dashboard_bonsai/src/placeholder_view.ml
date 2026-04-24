@@ -64,7 +64,7 @@ stylesheet
     padding: 14px 16px;
     border: 1px solid var(--border-highlight);
     background:
-      linear-gradient(180deg, rgba(42,30,20,0.4), rgba(20,12,8,0.7));
+      linear-gradient(180deg, color-mix(in oklab, var(--bg-card) 40%, transparent), color-mix(in oklab, var(--bg-deep) 70%, transparent));
   }
 
   .btn {

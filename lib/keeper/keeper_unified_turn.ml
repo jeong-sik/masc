@@ -1765,6 +1765,14 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               ~update_proactive_rt:true
               result
           in
+          (* #9926: observe consecutive stay_silent turns to detect the
+             masc-improver-style loop that burned 13.3h of LLM time on
+             unclaimable backlog. Pure in-memory counter; fires a latched
+             warn + counter metric when the streak crosses
+             MASC_STAY_SILENT_LOOP_THRESHOLD (default 10). *)
+          Keeper_stay_silent_loop_detector.record_turn
+            ~keeper_name:updated_meta.Keeper_types.name
+            ~speech_act:updated_meta.Keeper_types.runtime.last_speech_act;
           (try
              let channel =
                if observation.pending_mentions <> []

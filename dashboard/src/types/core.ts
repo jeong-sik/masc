@@ -914,6 +914,23 @@ interface KeeperConfigHandoff {
   cooldown_sec: number
 }
 
+export interface KeeperConfigActiveGoal {
+  id: string
+  title: string
+  horizon: string
+}
+
+export interface KeeperConfigRuntimeTrust {
+  disposition?: string | null
+  disposition_reason?: string | null
+  needs_attention?: boolean | null
+  attention_reason?: string | null
+  next_human_action?: string | null
+  approval?: unknown
+  execution?: unknown
+  latest_causal_event?: unknown
+}
+
 interface KeeperConfigRuntime {
   paused: boolean
   registered: boolean
@@ -942,6 +959,10 @@ interface KeeperConfigRuntime {
 interface KeeperConfigCoordination {
   mention_targets: string[]
   joined_room_ids: string[]
+  active_goal_ids: string[]
+  active_goals: KeeperConfigActiveGoal[]
+  active_goal_count: number
+  missing_active_goal_ids: string[]
 }
 
 export interface KeeperConfigTools {
@@ -1029,6 +1050,7 @@ interface KeeperHookIntrospection {
 
 export interface KeeperConfig {
   name: string
+  active_goal_ids: string[]
   sandbox_profile?: 'local' | 'docker' | string
   network_mode?: 'none' | 'inherit' | string
   shared_memory_scope?: 'disabled' | 'room' | string
@@ -1046,6 +1068,7 @@ export interface KeeperConfig {
   handoff: KeeperConfigHandoff
   hooks?: KeeperHookIntrospection
   runtime: KeeperConfigRuntime
+  runtime_trust?: KeeperConfigRuntimeTrust | null
   coordination: KeeperConfigCoordination
   tools: KeeperConfigTools
   sources: KeeperConfigSources

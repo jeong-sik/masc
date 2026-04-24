@@ -24,6 +24,7 @@ type parsed_args = {
   voice_channel_opt : string option;
   voice_agent_id_opt : string option;
   mention_targets_in : string list;
+  active_goal_ids_opt : string list option;
   max_context_override_opt : int option;
   proactive_enabled_opt : bool option;
   proactive_idle_sec_opt : int option;
@@ -194,6 +195,7 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     in
     let tool_access_input_res = parse_tool_access_input args in
     let allowed_paths_opt_res = parse_present_string_list_opt args "allowed_paths" in
+    let active_goal_ids_opt_res = parse_present_string_list_opt args "active_goal_ids" in
     let sandbox_profile_opt_res =
       parse_enum_string_opt args "sandbox_profile" sandbox_profile_of_string
         ~allowed_values:(String.concat ", " valid_sandbox_profile_strings)
@@ -209,17 +211,20 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     in
     match
       compaction_profile_opt_res, tool_access_input_res, allowed_paths_opt_res,
-      sandbox_profile_opt_res, network_mode_opt_res, shared_memory_scope_opt_res
+      active_goal_ids_opt_res, sandbox_profile_opt_res, network_mode_opt_res,
+      shared_memory_scope_opt_res
     with
-    | Error e, _, _, _, _, _
-    | _, Error e, _, _, _, _
-    | _, _, Error e, _, _, _
-    | _, _, _, Error e, _, _
-    | _, _, _, _, Error e, _
-    | _, _, _, _, _, Error e -> Error (false, e)
+    | Error e, _, _, _, _, _, _
+    | _, Error e, _, _, _, _, _
+    | _, _, Error e, _, _, _, _
+    | _, _, _, Error e, _, _, _
+    | _, _, _, _, Error e, _, _
+    | _, _, _, _, _, Error e, _
+    | _, _, _, _, _, _, Error e -> Error (false, e)
     | Ok compaction_profile_opt,
       Ok (tool_access_opt, tool_preset_opt, tool_also_allow_opt),
       Ok allowed_paths_opt,
+      Ok active_goal_ids_opt,
       Ok sandbox_profile_opt,
       Ok network_mode_opt,
       Ok shared_memory_scope_opt ->
@@ -310,6 +315,7 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
       long_goal_opt;
       policy_voice_enabled_opt;
       allowed_paths_opt;
+      active_goal_ids_opt;
       autoboot_enabled_opt;
       sandbox_profile_opt;
       network_mode_opt;

@@ -46,6 +46,26 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
     | Some paths -> paths
     | None -> Option.value ~default:[] p.profile_defaults.allowed_paths
   in
+  let active_goal_ids =
+    match p.active_goal_ids_opt with
+    | Some ids -> ids
+    | None -> Option.value ~default:[] p.profile_defaults.active_goal_ids
+  in
+  let active_goal_ids_error =
+    match p.active_goal_ids_opt with
+    | None -> None
+    | Some _ ->
+        let missing =
+          List.filter
+            (fun goal_id -> Option.is_none (Goal_store.get_goal ctx.config ~goal_id))
+            active_goal_ids
+        in
+        if missing = [] then None
+        else
+          Some
+            (Printf.sprintf "unknown active_goal_ids: %s"
+               (String.concat ", " missing))
+  in
   let sandbox_profile =
     resolve_sandbox_profile
       ~preferred:p.sandbox_profile_opt
@@ -91,7 +111,9 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
     Log.Keeper.warn "create_keeper failed: goal is required (name=%s)" p.name;
     (false, "goal is required when creating a keeper")
   end
-  else
+  else match active_goal_ids_error with
+  | Some msg -> (false, msg)
+  | None ->
     match
       validate_sandbox_settings
         ~config:ctx.config
@@ -291,9 +313,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           |> Keeper_types_profile.load_persona_extended
           |> Option.value ~default:""
         in
-        let active_goal_ids =
-          Option.value ~default:[] p.profile_defaults.active_goal_ids
-        in
         let active_goals =
           List.filter_map
             (fun goal_id ->
@@ -389,7 +408,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         max_context_override = p.max_context_override_opt;
         continuity_summary = "";
         active_goal_ids =
-          Option.value ~default:[] p.profile_defaults.active_goal_ids;
+          active_goal_ids;
         paused = false;
         autoboot_enabled;
         current_task_id = None;

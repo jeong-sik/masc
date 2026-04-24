@@ -8,11 +8,35 @@ open Keeper_types
 open Keeper_keepalive
 open Keeper_turn_up_args
 
+let resolve_active_goal_ids config p old_ids =
+  let active_goal_ids =
+    match p.active_goal_ids_opt with
+    | Some ids -> ids
+    | None ->
+        Option.value ~default:old_ids p.profile_defaults.active_goal_ids
+  in
+  match p.active_goal_ids_opt with
+  | None -> Ok active_goal_ids
+  | Some _ ->
+      let missing =
+        List.filter
+          (fun goal_id -> Option.is_none (Goal_store.get_goal config ~goal_id))
+          active_goal_ids
+      in
+      if missing = [] then Ok active_goal_ids
+      else
+        Error
+          (Printf.sprintf "unknown active_goal_ids: %s"
+             (String.concat ", " missing))
+
 let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool_result =
   match p.tool_access_opt, old.tool_access, p.tool_preset_opt, p.tool_also_allow_opt with
   | None, Custom _, None, Some _ ->
       (false, "tool_also_allow requires a preset-based keeper policy; set tool_preset first")
   | _ ->
+  match resolve_active_goal_ids ctx.config p old.active_goal_ids with
+  | Error msg -> (false, msg)
+  | Ok active_goal_ids ->
   let goal_provided = Option.is_some p.goal_opt in
   let goal =
     match p.goal_opt with
@@ -185,8 +209,7 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     tool_denylist;
     tool_preset_source = p.profile_defaults.tool_preset_source;
     autoboot_enabled;
-    active_goal_ids =
-      Option.value ~default:old.active_goal_ids p.profile_defaults.active_goal_ids;
+    active_goal_ids;
     voice_enabled =
       Option.value ~default:old.voice_enabled p.voice_enabled_opt;
     voice_channel =

@@ -537,6 +537,7 @@ describe('fetchKeeperConfig', () => {
   it('normalizes singleton string, numeric string, and boolean string fields', async () => {
     const rawResponse = {
       name: 'keeper-sangsu',
+      active_goal_ids: ['goal-runtime'],
       sandbox_profile: 'docker',
       network_mode: 'none',
       shared_memory_scope: 'room',
@@ -633,9 +634,20 @@ describe('fetchKeeperConfig', () => {
         presence_keepalive_sec: '30',
         runtime_blocker_continue_gate: 'false',
       },
+      runtime_trust: {
+        disposition: 'Pass',
+        disposition_reason: 'healthy',
+        needs_attention: false,
+      },
       coordination: {
         mention_targets: 'sangsu',
         joined_room_ids: 'default',
+        active_goal_ids: ['goal-runtime'],
+        active_goals: [
+          { id: 'goal-runtime', title: 'Ship runtime clarity', horizon: 'mid' },
+        ],
+        active_goal_count: '1',
+        missing_active_goal_ids: [],
       },
       tools: {
         tool_access: { kind: 'preset', preset: 'coding' },
@@ -724,6 +736,10 @@ describe('fetchKeeperConfig', () => {
     expect(result.sources.cascade_runtime_json_editable).toBe(false)
     expect(result.metrics.total_cost_usd).toBe(0.12)
     expect(result.runtime.presence_keepalive_sec).toBe(30)
+    expect(result.active_goal_ids).toEqual(['goal-runtime'])
+    expect(result.coordination.active_goal_ids).toEqual(['goal-runtime'])
+    expect(result.coordination.active_goals[0]?.title).toBe('Ship runtime clarity')
+    expect(result.runtime_trust?.disposition).toBe('Pass')
   })
 })
 

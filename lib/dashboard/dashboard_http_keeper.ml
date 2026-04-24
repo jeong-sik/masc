@@ -1216,8 +1216,50 @@ let keeper_config_json (config : Coord.config) (name : string)
                    | Goal_store.Long -> "long"
                  in
                  Some (id, title, horizon_str)
-             | None -> None)
+               | None -> None)
           m.active_goal_ids
+      in
+      let active_goal_ids_json =
+        `List (List.map (fun goal_id -> `String goal_id) m.active_goal_ids)
+      in
+      let active_goals_json =
+        `List
+          (List.map
+             (fun (id, title, horizon) ->
+                `Assoc [
+                  ("id", `String id);
+                  ("title", `String title);
+                  ("horizon", `String horizon);
+                ])
+             active_goals)
+      in
+      let resolved_active_goal_ids =
+        List.map (fun (id, _, _) -> id) active_goals
+      in
+      let missing_active_goal_ids =
+        m.active_goal_ids
+        |> List.filter (fun goal_id ->
+               not (List.mem goal_id resolved_active_goal_ids))
+      in
+      let coordination =
+        match coordination_surface_json m with
+        | `Assoc fields ->
+            `Assoc
+              (fields
+               @ [
+                   ("active_goal_ids", active_goal_ids_json);
+                   ("active_goals", active_goals_json);
+                   ("active_goal_count", `Int (List.length m.active_goal_ids));
+                   ( "missing_active_goal_ids",
+                     `List
+                       (List.map
+                          (fun goal_id -> `String goal_id)
+                          missing_active_goal_ids) );
+                 ])
+        | other -> other
+      in
+      let runtime_trust =
+        Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta:m
       in
       let effective_system_prompt =
         Keeper_prompt.build_keeper_system_prompt
@@ -1479,6 +1521,7 @@ let keeper_config_json (config : Coord.config) (name : string)
       (`OK,
        `Assoc [
          ("name", `String m.name);
+         ("active_goal_ids", active_goal_ids_json);
          ("sandbox_profile", `String (Keeper_types.sandbox_profile_to_string m.sandbox_profile));
          ("network_mode", `String (Keeper_types.network_mode_to_string m.network_mode));
          ("shared_memory_scope",
@@ -1508,7 +1551,8 @@ let keeper_config_json (config : Coord.config) (name : string)
          ("tools", tools_access);
          ("hooks", Keeper_hooks_oas.hook_introspection_json ());
          ("runtime", runtime_surface_json config m);
-         ("coordination", coordination_surface_json m);
+         ("runtime_trust", runtime_trust);
+         ("coordination", coordination);
          ("sources", source_provenance_json config m);
          ("metrics", metrics);
        ])

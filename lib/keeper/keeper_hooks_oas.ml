@@ -69,6 +69,22 @@ let record_tool_use_failure ~keeper_name ~tool_name =
   Prometheus.inc_counter tool_use_failure_metric
     ~labels:[ ("keeper", keeper_name); ("tool", tool_name) ] ()
 
+(* #10083: some OAS transports (kimi_cli silent-failure and
+   CompletionContractViolation synthetic responses) emit
+   [response.model = ""].  That empty string then flows into every
+   per-model counter label in this hook (after_turn_hook_total,
+   masc_llm_inference_duration_seconds, pricing_catalog_miss_total)
+   and contaminates per-provider aggregates — one empty-model turn
+   wipes out the ability to attribute its ~50s of inference time to
+   any specific provider.  The resolve helper applies a layered
+   fallback (raw → telemetry canonical_model_id → named sentinel)
+   and emits a labelled counter so the operator can see WHICH
+   transport leaked and WHICH resolution path recovered it. *)
+let empty_response_model_metric =
+  "masc_after_turn_response_model_empty_total"
+
+let unknown_model_sentinel = "unknown_provider"
+
 let zero_usage : Oas.Types.api_usage =
   {
     input_tokens = 0;
@@ -84,6 +100,35 @@ let canonical_model_id_of_telemetry ~model
   | Some { canonical_model_id = Some id; _ } when String.trim id <> "" ->
       String.trim id
   | _ -> model
+
+(* #10083: layered fallback for [response.model] empty-string leaks.
+   Non-empty raw model is returned unchanged.  When empty, we consult
+   the telemetry envelope's [canonical_model_id] (which OAS populates
+   on well-formed transports even when the completion body omits
+   [model]); if that is also missing we tag the turn
+   [unknown_model_sentinel] so downstream labels remain explicit
+   rather than becoming the ambiguous empty string.  Each fallback
+   path emits a counter so the operator can attribute leaks per
+   keeper per source. *)
+let resolve_after_turn_model ~keeper_name
+    ~(response : Oas.Types.api_response) =
+  let raw_model = response.model in
+  if String.trim raw_model <> "" then raw_model
+  else begin
+    let canonical =
+      canonical_model_id_of_telemetry ~model:"" response.telemetry
+    in
+    let resolved, source =
+      if String.trim canonical <> "" then canonical, "telemetry_resolved"
+      else unknown_model_sentinel, "unknown_sentinel"
+    in
+    Prometheus.inc_counter empty_response_model_metric
+      ~labels:[ ("keeper", keeper_name); ("source", source) ] ();
+    Log.Keeper.warn
+      "keeper:%s after_turn response.model empty → fallback=%s resolved=%s"
+      keeper_name source resolved;
+    resolved
+  end
 
 let context_max_of_telemetry
     (telemetry : Oas.Types.inference_telemetry option) =
@@ -554,22 +599,7 @@ let make_hooks
       match event with
       | Oas.Hooks.AfterTurn { turn; response } ->
         let meta = !meta_ref in
-        (* #10083: OAS provider transports can return [response.model = ""]
-           on silent failure paths (kimi_cli empty-usage fallback, cascade
-           contract retry exhaustion).  Leaving it empty propagates to
-           every downstream metric label ([masc_after_turn_hook_total],
-           [masc_pricing_catalog_miss_total], [masc_llm_inference_duration_seconds])
-           as the literal key `""`, contaminating per-provider latency
-           histograms and making pricing catalog miss unobservable (which
-           provider is missing?).  Normalise to a stable sentinel
-           `unknown_provider` so the miss becomes grepable and
-           dashboards distinguish empty-model turns from legitimate ones.
-           CLAUDE.md anti-pattern #2: Unknown -> Permissive Default. *)
-        let model =
-          match String.trim response.model with
-          | "" -> "unknown_provider"
-          | s -> s
-        in
+        let model = resolve_after_turn_model ~keeper_name:meta.name ~response in
         let usage_trust =
           classify_usage_trust ?usage:response.usage ~model
             ~telemetry:response.telemetry ()

@@ -87,6 +87,10 @@ val metric_keeper_write_meta_failures : string
 val metric_keeper_lifecycle_dispatch_rejections : string
 val metric_keeper_paused_state_persist_errors : string
 val metric_keeper_unexpected_tool_partial_tolerance : string
+val metric_keeper_require_tool_use_violations : string
+(** #10091: labelled [keeper, has_current_task, contract_status]
+    so fleet histograms can distinguish the active-task strict
+    path from the no-task path covered by #10031. *)
 val metric_keeper_tool_alias_canonicalizations : string
 val metric_keeper_profile_config_conflicts : string
 val metric_keeper_oas_timeout_classifications : string

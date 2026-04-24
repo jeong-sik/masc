@@ -2336,7 +2336,21 @@ let run_turn
              , actionable_tool_contract_violation_reason
            with
            | Ok (), Some reason ->
-               receipt_tool_contract_result_ref := tool_contract_status ();
+               let contract_status = tool_contract_status () in
+               receipt_tool_contract_result_ref := contract_status;
+               (* #10091: emit the labelled counter so dashboards
+                  can distinguish the [has_current_task=true]
+                  strict-gate path (#10031 kept this intentionally
+                  strict) from the [has_current_task=false] path
+                  (already relaxed to [Auto]).  The strict gate
+                  behaviour is unchanged — this is pure
+                  observability that lets the operator pinpoint
+                  which (keeper, contract_status) pairs are
+                  config-mismatched. *)
+               Keeper_tool_disclosure.record_require_tool_use_violation
+                 ~keeper_name:meta.name
+                 ~has_current_task:(keeper_has_owned_active_task ())
+                 ~contract_status;
                Log.Keeper.error
                  "keeper:%s required tool contract violated \
                   (turn=%d, tools=%d). Rejecting no-op/passive actionable turn. \
@@ -2349,9 +2363,15 @@ let run_turn
                receipt_tool_contract_result_ref := tool_contract_status ();
                Ok (`Provider_text text)
            | Error reason, _ ->
-               receipt_tool_contract_result_ref :=
+               let contract_status =
                  if actual_keeper_tool_names = [] then "missing_required_tool_use"
-                 else tool_contract_status ();
+                 else tool_contract_status ()
+               in
+               receipt_tool_contract_result_ref := contract_status;
+               Keeper_tool_disclosure.record_require_tool_use_violation
+                 ~keeper_name:meta.name
+                 ~has_current_task:(keeper_has_owned_active_task ())
+                 ~contract_status;
                let contract_str =
                  match effective_completion_contract with
                  | Keeper_tool_disclosure.Allow_text_or_tool -> "Allow_text_or_tool"

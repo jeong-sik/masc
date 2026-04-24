@@ -60,6 +60,12 @@ let inc_grpc_events_delivered ?(delta=1) () =
 let set_ws_sessions count =
   Prometheus.set_gauge Prometheus.metric_ws_sessions (float_of_int count)
 
+let inc_ws_parse_cache_hit () =
+  Prometheus.inc_counter Prometheus.metric_ws_parse_cache_hits ()
+
+let inc_ws_parse_cache_miss () =
+  Prometheus.inc_counter Prometheus.metric_ws_parse_cache_misses ()
+
 (** {1 Environment-derived Transport Config} *)
 
 let grpc_runtime_listening : bool Atomic.t = Atomic.make false

@@ -121,6 +121,41 @@ let test_parse_sse_dashboard_event_invalidated_on_new_ref () =
   Alcotest.(check (option string)) "second parse distinct"
     (Some "transport_health_snapshot") (et r2)
 
+(* Counter observability: reuse of the same event string reference
+   must register as a hit, distinct strings must register as misses.
+   Read counter deltas because the global state is shared across tests. *)
+let read_counter name =
+  Masc_mcp.Prometheus.metric_value_or_zero name ()
+
+let test_parse_cache_counters () =
+  let hits_name = Masc_mcp.Prometheus.metric_ws_parse_cache_hits in
+  let misses_name = Masc_mcp.Prometheus.metric_ws_parse_cache_misses in
+  let hits0 = read_counter hits_name in
+  let misses0 = read_counter misses_name in
+  let e =
+    Yojson.Safe.to_string
+      (`Assoc [("type", `String "execution_snapshot")])
+  in
+  let (_ : _ option) = Ws.parse_sse_dashboard_event e in (* miss *)
+  let (_ : _ option) = Ws.parse_sse_dashboard_event e in (* hit *)
+  let (_ : _ option) = Ws.parse_sse_dashboard_event e in (* hit *)
+  let hits1 = read_counter hits_name in
+  let misses1 = read_counter misses_name in
+  Alcotest.(check (float 0.001)) "two hits observed"
+    2.0 (hits1 -. hits0);
+  Alcotest.(check (float 0.001)) "one miss observed"
+    1.0 (misses1 -. misses0);
+  (* A fresh string with the same content forces a reparse (physical
+     inequality) — proves the cache key is not structural equality. *)
+  let e2 =
+    Yojson.Safe.to_string
+      (`Assoc [("type", `String "execution_snapshot")])
+  in
+  let (_ : _ option) = Ws.parse_sse_dashboard_event e2 in (* miss *)
+  let misses2 = read_counter misses_name in
+  Alcotest.(check (float 0.001)) "fresh allocation forces miss"
+    1.0 (misses2 -. misses1)
+
 (* ====== External Subscriber Broadcast (WS delivery path) ====== *)
 
 let test_ws_external_subscriber_receives_broadcast () =
@@ -226,6 +261,8 @@ let () =
         test_parse_sse_dashboard_event_stable_on_repeat;
       Alcotest.test_case "cache invalidates on new ref" `Quick
         test_parse_sse_dashboard_event_invalidated_on_new_ref;
+      Alcotest.test_case "hit/miss counters track reuse" `Quick
+        test_parse_cache_counters;
     ]);
     ("external_subscriber", [
       Alcotest.test_case "single subscriber receives broadcast" `Quick

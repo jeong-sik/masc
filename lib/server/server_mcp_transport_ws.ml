@@ -308,8 +308,12 @@ let parse_cache : (string * parsed_sse_event option) Atomic.t =
 
 let parse_sse_dashboard_event sse_event =
   let cached_str, cached_val = Atomic.get parse_cache in
-  if cached_str == sse_event then cached_val
+  if cached_str == sse_event then begin
+    Transport_metrics.inc_ws_parse_cache_hit ();
+    cached_val
+  end
   else begin
+    Transport_metrics.inc_ws_parse_cache_miss ();
     let result =
       match Yojson.Safe.from_string sse_event with
       | exception _ -> None

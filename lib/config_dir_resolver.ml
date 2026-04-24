@@ -249,7 +249,26 @@ let config_root_resolution (inputs : inputs) =
       | Some path -> ({ path; exists = true; source = Local_masc }, [])
       | None ->
           match path_from_home_masc inputs with
-          | Some path -> ({ path; exists = true; source = Home_masc }, [])
+          | Some path ->
+              (* Warn only when MASC_BASE_PATH was set but local resolution
+                 still failed — that is the #9896 drift signature (harness
+                 subprocess has env set or is meant to, yet Local_masc
+                 didn't resolve so we slid into HOME). If env_base_path is
+                 empty the user deliberately runs without an explicit base
+                 path and HOME is the intended root; no warning needed. *)
+              let warnings =
+                match trim_opt inputs.env_base_path with
+                | None -> []
+                | Some _ ->
+                    [
+                      Printf.sprintf
+                        "MASC_BASE_PATH is set but its .masc/config was \
+                         not found; falling back to HOME (%s). Check \
+                         subprocess env propagation. See #9896."
+                        path;
+                    ]
+              in
+              ({ path; exists = true; source = Home_masc }, warnings)
           | None ->
               if repo_config_fallback_enabled () then
                 match path_from_cwd inputs.cwd with

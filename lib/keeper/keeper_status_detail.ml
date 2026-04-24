@@ -1240,8 +1240,8 @@ let handle_keeper_status ctx args : tool_result =
                    (Coord_utils.safe_filename (Keeper_id.Trace_id.to_string m.runtime.trace_id)))));
            ]);
            (let sandbox = Keeper_sandbox.of_meta ~config:ctx.config ~meta:m in
-           let playground_rel = Keeper_alerting_path.playground_path_of_keeper m.name in
-           let playground_abs = Filename.concat ctx.config.base_path playground_rel in
+           let playground_rel = sandbox.host_root_rel in
+           let playground_abs = sandbox.host_root_abs in
            "execution_context", `Assoc [
              ("sandbox_id", `String sandbox.sandbox_id);
              ("sandbox_backend", `String (Keeper_sandbox.backend_to_string sandbox.backend));

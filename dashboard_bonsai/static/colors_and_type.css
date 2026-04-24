@@ -468,6 +468,13 @@ hr {
   text-shadow: 0 0 24px var(--accent-blood-glow);
 }
 
+/* Focus ring baseline — all interactive elements */
+:focus-visible {
+  outline: 2px solid var(--accent-brass);
+  outline-offset: 2px;
+}
+:focus:not(:focus-visible) { outline: none; }
+
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb, var(--border-main)); border-radius: 4px; }

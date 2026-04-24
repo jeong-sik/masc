@@ -156,6 +156,45 @@ let test_parse_cache_counters () =
   Alcotest.(check (float 0.001)) "fresh allocation forces miss"
     1.0 (misses2 -. misses1)
 
+(* ====== Bytes cache for broadcast fanout ====== *)
+
+(* Sse.notify_external_subscribers delivers the same event string reference
+   to every WS session.  The bytes cache collapses N identical
+   [Bytes.of_string] allocations into one per unique string reference. *)
+
+let test_bytes_of_shared_text_reuses_same_ref () =
+  let text = String.make 32 'x' in
+  let b1 = Ws.bytes_of_shared_text text in
+  let b2 = Ws.bytes_of_shared_text text in
+  (* Physical equality: the same reference returns the exact same
+     [Bytes.t] (not just equal content), proving no re-allocation. *)
+  Alcotest.(check bool) "same string ref returns same Bytes"
+    true (b1 == b2)
+
+let test_bytes_of_shared_text_content_matches () =
+  let text = "{\"type\":\"execution_snapshot\",\"payload\":{\"n\":1}}" in
+  let bytes = Ws.bytes_of_shared_text text in
+  Alcotest.(check int) "length matches" (String.length text)
+    (Bytes.length bytes);
+  Alcotest.(check string) "content round-trips" text
+    (Bytes.to_string bytes)
+
+let test_bytes_of_shared_text_invalidates_on_new_ref () =
+  (* Force two distinct string allocations so physical equality differs
+     even though content is the same.  The cache must re-allocate rather
+     than return the prior bytes. *)
+  let a = String.concat "" ["hello"; "-world"] in
+  let b = String.concat "" ["hello"; "-world"] in
+  assert (not (a == b));
+  let ba = Ws.bytes_of_shared_text a in
+  let bb = Ws.bytes_of_shared_text b in
+  Alcotest.(check bool) "distinct refs get distinct bytes"
+    true (not (ba == bb));
+  Alcotest.(check string) "content still correct for A"
+    a (Bytes.to_string ba);
+  Alcotest.(check string) "content still correct for B"
+    b (Bytes.to_string bb)
+
 (* ====== External Subscriber Broadcast (WS delivery path) ====== *)
 
 let test_ws_external_subscriber_receives_broadcast () =
@@ -263,6 +302,14 @@ let () =
         test_parse_sse_dashboard_event_invalidated_on_new_ref;
       Alcotest.test_case "hit/miss counters track reuse" `Quick
         test_parse_cache_counters;
+    ]);
+    ("bytes_cache", [
+      Alcotest.test_case "same string ref returns same Bytes" `Quick
+        test_bytes_of_shared_text_reuses_same_ref;
+      Alcotest.test_case "content round-trips through cache" `Quick
+        test_bytes_of_shared_text_content_matches;
+      Alcotest.test_case "distinct refs force re-allocation" `Quick
+        test_bytes_of_shared_text_invalidates_on_new_ref;
     ]);
     ("external_subscriber", [
       Alcotest.test_case "single subscriber receives broadcast" `Quick

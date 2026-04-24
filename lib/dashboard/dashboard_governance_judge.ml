@@ -483,6 +483,21 @@ let compute_judgments
            to {raw: string} only after all recovery transforms fail. *)
         let raw_text = Oas_response.text_of_response response in
         let parsed = Llm_provider.Lenient_json.parse raw_text in
+        let parsed =
+          (* #9851: when the model prefixes prose before the JSON object
+             ("Here is the judgment: {...}"), Lenient_json's fence/comma
+             recovery does not strip the prose and falls through to the
+             {raw: <text>} sentinel. Try one more recovery: locate the
+             first balanced {...} block in the raw text and re-parse. *)
+          match parsed with
+          | `Assoc [("raw", `String raw)] -> (
+              match Judge_json_recovery.extract_balanced_object raw with
+              | Some block -> (
+                  try Llm_provider.Lenient_json.parse block
+                  with _ -> parsed)
+              | None -> parsed)
+          | _ -> parsed
+        in
         match parsed with
         | `Assoc [("raw", `String raw)] ->
             (* #9774: surface a preview of the raw text so the next

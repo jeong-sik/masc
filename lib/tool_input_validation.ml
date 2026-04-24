@@ -100,6 +100,74 @@ let normalize_transition_args (args : Yojson.Safe.t) : Yojson.Safe.t =
         `Assoc with_notes
   | _ -> args
 
+(* #9785: OAS validation messages list missing required fields as
+   `  "<field>": MISSING (required: <type>)`. When the LLM emitted a
+   similarly-named key (e.g. sent "name" while the schema requires
+   "tool_name"), surface the closest match so the next turn can self-
+   correct in one shot. Pure string transformation over the OAS-emitted
+   message — no OAS API change needed. *)
+let missing_field_re =
+  Re.Pcre.re {|"([^"]+)":\s*MISSING|} |> Re.compile
+
+(* Substring containment in either direction is a strong signal for
+   parameter-name confusion ("name" ⊂ "tool_name"). For short identifiers
+   pure Jaccard underweights this case (tool_name ↔ name ≈ 0.36) so we
+   blend the two with a containment bonus. *)
+let string_contains haystack needle =
+  let nlen = String.length needle in
+  let hlen = String.length haystack in
+  if nlen = 0 || nlen > hlen then false
+  else
+    let rec scan i =
+      if i + nlen > hlen then false
+      else if String.sub haystack i nlen = needle then true
+      else scan (i + 1)
+    in
+    scan 0
+
+let param_name_similarity a b =
+  let la = String.lowercase_ascii a and lb = String.lowercase_ascii b in
+  if la = lb then 1.0
+  else if string_contains la lb || string_contains lb la then
+    (* one contained in the other — very likely the LLM confusion case *)
+    0.8
+  else Text_similarity.jaccard_similarity a b
+
+let augment_missing_param_hint ~(args : Yojson.Safe.t) (oas_message : string) =
+  let arg_keys =
+    match args with
+    | `Assoc fields -> List.map fst fields
+    | _ -> []
+  in
+  if arg_keys = [] then oas_message
+  else
+    let suggestions =
+      Re.all missing_field_re oas_message
+      |> List.filter_map (fun g ->
+        let missing = Re.Group.get g 1 in
+        if List.mem missing arg_keys then None
+        else
+          let scored =
+            List.filter_map
+              (fun k ->
+                let s = param_name_similarity missing k in
+                if s >= 0.4 then Some (s, k) else None)
+              arg_keys
+          in
+          let sorted =
+            List.sort (fun (a, _) (b, _) -> Float.compare b a) scored
+          in
+          match sorted with
+          | (_, closest) :: _ ->
+            Some
+              (Printf.sprintf
+                 "  hint: you sent \"%s\"; rename it to \"%s\""
+                 closest missing)
+          | [] -> None)
+    in
+    if suggestions = [] then oas_message
+    else oas_message ^ "\n\nDid you mean:\n" ^ String.concat "\n" suggestions
+
 let register_pre_hook () =
   let lookup name =
     Option.map
@@ -125,11 +193,12 @@ let register_pre_hook () =
       Log.info "tool_input_validation coerced args for %s" name;
       Proceed coerced
     | Oas.Tool_middleware.Reject { message; _ } ->
-      Log.info "tool_input_validation rejected %s: %s" name message;
+      let augmented = augment_missing_param_hint ~args:compat_args message in
+      Log.info "tool_input_validation rejected %s: %s" name augmented;
       Reject {
         Tool_result.success = false;
         data = `Assoc [
-          ("error", `String message);
+          ("error", `String augmented);
           ("validation", `String "oas_tool_middleware");
         ];
         tool_name = name;

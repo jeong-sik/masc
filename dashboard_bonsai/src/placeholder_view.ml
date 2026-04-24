@@ -23,7 +23,7 @@ stylesheet
     min-height: 148px;
     border: 1px solid var(--border-main);
     background:
-      linear-gradient(180deg, rgba(28,18,14,0.68), rgba(14,10,8,0.86));
+      linear-gradient(180deg, color-mix(in oklab, var(--bg-panel) 68%, transparent), color-mix(in oklab, var(--bg-deep) 86%, transparent));
     padding: 15px 16px;
     display: flex;
     flex-direction: column;

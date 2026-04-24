@@ -32,7 +32,7 @@ stylesheet
 
   .goal {
     border: 1px solid var(--border-main);
-    background: linear-gradient(180deg, rgba(28,18,14,0.7), rgba(14,10,8,0.85));
+    background: linear-gradient(180deg, color-mix(in oklab, var(--bg-panel) 70%, transparent), color-mix(in oklab, var(--bg-deep) 85%, transparent));
     padding: 14px 16px;
     display: flex;
     flex-direction: column;

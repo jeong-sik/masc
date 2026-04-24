@@ -35,7 +35,7 @@ stylesheet
     gap: 14px;
     padding: 12px 16px;
     border: 1px solid var(--border-main);
-    background: linear-gradient(180deg, rgba(28,18,14,0.7), rgba(14,10,8,0.85));
+    background: linear-gradient(180deg, color-mix(in oklab, var(--bg-panel) 70%, transparent), color-mix(in oklab, var(--bg-deep) 85%, transparent));
     align-items: center;
     transition: border-color 120ms ease, background 120ms ease;
   }
@@ -62,7 +62,7 @@ stylesheet
   .pill_completed {
     color: var(--accent-brass);
     border-color: var(--accent-brass);
-    background: rgba(138,106,40,0.12);
+    background: color-mix(in oklab, var(--accent-brass) 12%, transparent);
   }
   .pill_failed {
     color: var(--accent-blood);

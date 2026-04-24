@@ -654,6 +654,13 @@ let sdk_error_to_cascade_outcome (err : Oas.Error.sdk_error)
   | Oas.Error.Agent (Oas.Error.UnrecognizedStopReason { reason }) ->
     Some (Cascade_fsm.Call_err
       (Llm_provider.Http_client.AcceptRejected { reason }))
+  | Oas.Error.Config
+      (Oas.Error.InvalidConfig { field = "runtime_mcp_auth"; detail })
+  | Oas.Error.Config
+      (Oas.Error.InvalidConfig { field = "tool_support"; detail }) ->
+    Some
+      (Cascade_fsm.Call_err
+         (Llm_provider.Http_client.AcceptRejected { reason = detail }))
   | _ -> None
 
 let moonshot_auth_hint_marker = "Moonshot returned 401"

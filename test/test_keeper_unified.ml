@@ -2993,6 +2993,27 @@ let test_metrics_failure_response () =
   check string "failure transition reason tracked" "failure:run_error"
     updated.runtime.last_social_transition_reason
 
+let test_metrics_failure_timeout_increments_proactive_backoff () =
+  let sdk_error =
+    Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
+      (Masc_mcp.Oas_worker_named.Oas_timeout_budget
+         {
+           budget_sec = 90.0;
+           keeper_turn_timeout_sec = 90.0;
+           estimated_input_tokens = 42_000;
+           source = "test";
+         })
+  in
+  let updated =
+    UM.update_metrics_from_failure minimal_meta ~latency_ms:90
+      ~observation:base_observation
+      ~reason:"OAS budget timeout after 90s" ~sdk_error
+      ~social_transition_reason:"failure:run_error" ()
+  in
+  check int "proactive timeout backoff count +1"
+    (minimal_meta.runtime.proactive_rt.consecutive_noop_count + 1)
+    updated.runtime.proactive_rt.consecutive_noop_count
+
 let test_metrics_failure_response_redacts_resumable_cli_session_detail () =
   let raw_reason =
     "kimi exited with code 75: \nTo resume this session: kimi -r ff37febe-2adb-4ac6-9dc6-cae23e672fbc"
@@ -4735,6 +4756,8 @@ let () =
           test_case "social fields" `Quick
             test_metrics_persist_social_state_fields;
           test_case "failure response" `Quick test_metrics_failure_response;
+          test_case "timeout failure increments proactive backoff" `Quick
+            test_metrics_failure_timeout_increments_proactive_backoff;
           test_case "failure response redacts resumable session detail" `Quick
             test_metrics_failure_response_redacts_resumable_cli_session_detail;
           test_case "mixed response" `Quick test_metrics_mixed_response;

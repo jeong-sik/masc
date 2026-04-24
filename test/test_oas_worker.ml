@@ -754,6 +754,27 @@ let test_sdk_error_to_cascade_outcome_keeps_invalid_request_as_400 () =
          | Some Cascade_fsm.Slot_full -> "some-slot-full"
          | None -> "none")
 
+let test_sdk_error_to_cascade_outcome_cascades_runtime_mcp_auth_config () =
+  let detail = "codex_cli runtime MCP cannot carry keeper-bound auth headers" in
+  let err =
+    Oas.Error.Config
+      (Oas.Error.InvalidConfig { field = "runtime_mcp_auth"; detail })
+  in
+  match Oas_worker_named.sdk_error_to_cascade_outcome err with
+  | Some
+      (Cascade_fsm.Call_err
+         (Llm_provider.Http_client.AcceptRejected { reason })) ->
+      Alcotest.(check string) "reason preserved" detail reason
+  | outcome ->
+      Alcotest.failf
+        "expected runtime_mcp_auth InvalidConfig to cascade as AcceptRejected, got %s"
+        (match outcome with
+         | Some (Cascade_fsm.Call_err _) -> "some-call-err"
+         | Some (Cascade_fsm.Accept_rejected _) -> "some-accept-rejected"
+         | Some (Cascade_fsm.Call_ok _) -> "some-call-ok"
+         | Some Cascade_fsm.Slot_full -> "some-slot-full"
+         | None -> "none")
+
 let make_openai_compat_provider_cfg ?(model_id = "mock-model")
     ?(base_url = "http://127.0.0.1:18080/v1")
     ?(request_path = "/chat/completions") ?(api_key = "") () =
@@ -3240,6 +3261,8 @@ let () =
         test_sdk_error_to_cascade_outcome_maps_not_found_to_404;
       Alcotest.test_case "sdk_error_to_cascade_outcome keeps ordinary InvalidRequest at 400" `Quick
         test_sdk_error_to_cascade_outcome_keeps_invalid_request_as_400;
+      Alcotest.test_case "sdk_error_to_cascade_outcome cascades runtime MCP auth config" `Quick
+        test_sdk_error_to_cascade_outcome_cascades_runtime_mcp_auth_config;
       Alcotest.test_case "Moonshot auth errors include configured env hint" `Quick
         test_enrich_sdk_error_for_moonshot_auth_includes_env_hint;
       Alcotest.test_case "OpenAI-compatible 404 errors include endpoint hint" `Quick

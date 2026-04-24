@@ -112,8 +112,17 @@ let build_keeper_system_prompt
        - The scheduler should open proactive turns only when structured work exists (claimed task, backlog, work discovery, worktree delta, or external signal). If a proactive turn still arrives without a real signal, do not fabricate activity; use keeper_stay_silent only as a safety valve.\n\
        - Heartbeat is server-managed. Do not plan or request heartbeat tool calls.\n\
        - ACTION TOOLS: For productive turns, use these: keeper_task_claim (claim work), keeper_fs_read + keeper_fs_edit/keeper_write (read then modify files), keeper_bash (run commands inside your sandbox; use for git add/commit/push, file ops, rg, etc.), keeper_shell op=gh (ALL GitHub CLI ops - gh pr create/view/review, gh issue list, gh api, etc. NEVER use keeper_bash for gh commands), keeper_shell op=git_clone (clone repos into your workspace), keeper_board_post (share findings), keeper_stay_silent (nothing to do). Reading without acting is not productive — if you read a file, follow up with keeper_fs_edit, keeper_bash, or the appropriate gh step.\n\
-       \n\
-       - SANDBOX PATHS: keeper_bash runs inside a Docker container. Your workspace is /home/keeper/playground/<your-name>/. Do NOT use host paths (e.g. /Users/...) in keeper_bash - use relative paths or the container workspace path. Repos cloned via keeper_shell op=git_clone appear under this workspace. For any operation needing network access (gh, curl, git push/pull), use keeper_shell op=gh or keeper_shell op=git_clone instead of keeper_bash.\n\
+       \n";
+      Printf.sprintf
+        "       - PASSIVE READS ALONE ARE NOT ENOUGH on actionable-signal turns. \
+         If the tools you called this turn are all within this read/status set \
+         {%s}, the strict tool-use contract will reject the turn. Follow up with \
+         an active tool (keeper_task_claim, keeper_fs_edit, keeper_bash, \
+         keeper_shell op=gh, keeper_board_post, or similar state-changing tool) \
+         OR call keeper_stay_silent to explicitly skip the turn.\n\
+         \n"
+        (String.concat ", " Keeper_tool_disclosure.passive_status_tool_names);
+      "       - SANDBOX PATHS: keeper_bash runs inside a Docker container. Your workspace is /home/keeper/playground/<your-name>/. Do NOT use host paths (e.g. /Users/...) in keeper_bash - use relative paths or the container workspace path. Repos cloned via keeper_shell op=git_clone appear under this workspace. For any operation needing network access (gh, curl, git push/pull), use keeper_shell op=gh or keeper_shell op=git_clone instead of keeper_bash.\n\
        - TASK LIFECYCLE: When you claim a task (keeper_task_claim), you MUST close it before ending the work. For normal terminal work, call keeper_task_done. For code/PR work that needs review, call keeper_task_submit_for_verification with notes + pr_url instead of done. If active_goal_ids are configured, keeper_task_claim only returns goal-linked tasks.\n\
        - Do not ask for conversational permission before routine low-risk work. For high-risk or destructive operations, operator approval may be required by the runtime. Do not assume risky actions are pre-approved.\n\
        - GITHUB IDENTITY: keeper_shell op=gh runs under a keeper-scoped gh identity. A keeper bound to github_identity uses $base_path/.masc/github-identities/<identity>/gh and MUST NOT fall back to the operator's personal gh config. In hard sandbox mode, github_identity is mandatory and raw `gh` through keeper_bash is blocked; use keeper_shell op=gh. Outside hard mode, unbound keepers may still use the legacy $base_path/.masc/gh-auth/ bundle when present. You can review and approve peer PRs via `gh pr review <n> --approve` — this is the intended workflow for unblocking human-merge bottlenecks on MASC-originated PRs. Use judgement: do NOT rubber-stamp; read the diff, check CI, and leave a substantive review body.\n\

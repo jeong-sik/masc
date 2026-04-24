@@ -152,17 +152,25 @@ let validate_completion_contract
        Error
          "keeper turn violated required tool contract: no tools were called")
 
-let is_passive_status_tool_name = function
-  | "masc_status"
-  | "keeper_context_status"
-  | "masc_plan_get"
-  | "keeper_time_now"
-  | "keeper_board_list"
-  | "keeper_board_get"
-  | "keeper_tasks_list"
-  | "masc_tasks" ->
-      true
-  | _ -> false
+(** Tools that report state without changing it. A turn whose tool calls
+    are entirely within this set on an actionable signal is rejected by
+    [actionable_tool_contract_violation_reason]; the same list is rendered
+    into the keeper prompt (see [Keeper_prompt]) so the model sees the
+    same definition the contract enforces. *)
+let passive_status_tool_names : string list =
+  [
+    "masc_status";
+    "keeper_context_status";
+    "masc_plan_get";
+    "keeper_time_now";
+    "keeper_board_list";
+    "keeper_board_get";
+    "keeper_tasks_list";
+    "masc_tasks";
+  ]
+
+let is_passive_status_tool_name name =
+  List.mem name passive_status_tool_names
 
 let actionable_tool_contract_violation_reason
       ~(actionable_signal_context : bool)

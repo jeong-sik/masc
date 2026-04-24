@@ -431,6 +431,7 @@
    keeper_meta_json_parse
    keeper_meta_json
    keeper_types_support
+   keeper_meta_store
    keeper_types
    keeper_meta_merge
    keeper_memory
@@ -635,6 +636,7 @@
  keeper_meta_json_parse
  keeper_meta_json
  keeper_types_support
+ keeper_meta_store
  server_dashboard_http_cache
  dashboard_http_helpers
  dashboard_http_monitoring

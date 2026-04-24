@@ -170,6 +170,61 @@ let test_oas_event_source_and_scope_filter () =
     Alcotest.(check string) "event type preserved" "turn_completed" event_type
   | _ -> Alcotest.fail "expected Assoc"
 
+let test_shadow_agent_tool_called_deduped_from_unified_view () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "telem_shadow_tool_called" in
+  let telemetry_dir = Filename.concat dir ".masc/telemetry" in
+  let tool_calls_dir = Filename.concat dir ".masc/tool_calls" in
+  Fs_compat.mkdir_p telemetry_dir;
+  Fs_compat.mkdir_p tool_calls_dir;
+  write_jsonl telemetry_dir [
+    `Assoc
+      [
+        ("timestamp", `Float 1000.2);
+        ( "event",
+          `List
+            [
+              `String "Tool_called";
+              `Assoc
+                [
+                  ("tool_name", `String "masc_status");
+                  ("success", `Bool true);
+                  ("duration_ms", `Int 12);
+                  ("agent_id", `String "keeper-sangsu-agent");
+                ];
+            ] );
+      ];
+  ];
+  write_jsonl tool_calls_dir [
+    `Assoc
+      [
+        ("ts", `Float 1000.0);
+        ("keeper", `String "sangsu");
+        ("tool", `String "masc_status");
+        ("success", `Bool true);
+        ("duration_ms", `Float 12.0);
+      ];
+  ];
+  let result =
+    Telemetry_unified.read_unified_result ~base_path:dir
+      ~masc_root:(masc_root dir)
+      ~sources:[ Telemetry_unified.Agent_event; Telemetry_unified.Tool_call_io ]
+      ()
+  in
+  Alcotest.(check int) "shadow agent event removed" 1
+    (List.length result.entries);
+  Alcotest.(check int) "total reflects visible unified entries" 1
+    result.total_matching_entries;
+  Alcotest.(check string) "full tool call row preserved" "tool_call_io"
+    (json_string_field "source" (List.hd result.entries));
+  let raw_agent_entries =
+    Telemetry_unified.read_unified ~base_path:dir ~masc_root:(masc_root dir)
+      ~sources:[ Telemetry_unified.Agent_event ] ()
+  in
+  Alcotest.(check int) "source-filtered agent event remains available" 1
+    (List.length raw_agent_entries)
+
 (* ── Keeper metrics discovery ────────────────────── *)
 
 let test_keeper_metrics_per_keeper () =
@@ -539,6 +594,8 @@ let () =
           Alcotest.test_case "agent events" `Quick test_agent_event_source;
           Alcotest.test_case "oas events + scope filter" `Quick
             test_oas_event_source_and_scope_filter;
+          Alcotest.test_case "dedupe shadow agent tool_called" `Quick
+            test_shadow_agent_tool_called_deduped_from_unified_view;
           Alcotest.test_case "keeper metrics" `Quick test_keeper_metrics_per_keeper;
           Alcotest.test_case "keeper metrics fast path keeps noisy top n" `Quick
             test_keeper_metrics_fast_path_preserves_noisy_keeper_top_n;

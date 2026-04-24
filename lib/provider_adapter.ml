@@ -1261,6 +1261,55 @@ let provider_prefix_of_label_result label =
            "Default model label must be provider:model, got: %s"
            normalized)
 
+(** Provider names recognised as prefix tokens in "<provider>:<model>" labels.
+
+    Used by {!provider_of_model_label} when a label carries an explicit
+    prefix, so telemetry groups costs.jsonl rows without misclassifying
+    idiosyncratic or private vendor names. *)
+let prefix_classification_vocabulary = [
+  "glm-coding"; "glm"; "claude"; "claude_code";
+  "gemini"; "gemini_cli"; "codex_cli"; "ollama";
+]
+
+(** Classify a raw model label to a provider name for telemetry grouping.
+
+    Callers feed heterogeneous model strings — OAS transports may emit
+    either prefixed (["glm-coding:glm-5-turbo"]) or bare
+    (["claude-haiku-4-5-20251001"]) labels. Prefer the explicit prefix
+    when present; fall back to a minimal heuristic over known bare-name
+    shapes. Returns ["unknown"] rather than guessing when no rule fits
+    so analysis queries can filter those rows out rather than miscount
+    them. *)
+let provider_of_model_label (model : string) : string =
+  let bare_heuristic () =
+    let starts_with prefix =
+      String.length model >= String.length prefix
+      && String.sub model 0 (String.length prefix) = prefix
+    in
+    if starts_with "glm-" then "glm-coding"
+    else if starts_with "claude-" then "claude"
+    else if starts_with "gemini-" then "gemini"
+    else if starts_with "gpt-" then "openai"
+    else if starts_with "qwen" || starts_with "llama" then "ollama"
+    else "unknown"
+  in
+  match String.index_opt model ':' with
+  | Some i ->
+      let prefix = String.sub model 0 i in
+      if List.mem prefix prefix_classification_vocabulary then prefix
+      else bare_heuristic ()
+  | None -> bare_heuristic ()
+
+(** Whether a provider emits no usage tokens in its standard response.
+
+    Used by metrics coverage gating: a text-only turn against one of
+    these providers cannot produce a usage_reported=true record even on
+    success, so we don't count that as a coverage gap. The set matches
+    the CLI-class providers where the CLI strips or elides usage before
+    returning to the caller. *)
+let is_structurally_unmetered_provider (provider : string) : bool =
+  List.mem provider [ "kimi_cli"; "codex_cli"; "gemini_cli" ]
+
 let default_model_provider_prefix_result () =
   match default_model_label_result () with
   | Ok label -> provider_prefix_of_label_result label

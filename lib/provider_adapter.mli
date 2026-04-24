@@ -294,6 +294,16 @@ val default_model_label_result : unit -> (string, string) result
 (** Extract provider prefix from a "provider:model" label. *)
 val provider_prefix_of_label_result : string -> (string, string) result
 
+(** Classify a raw model label (prefixed or bare) to a provider name for
+    telemetry grouping. Returns ["unknown"] when no rule fits, so analysis
+    queries can filter rather than miscount. *)
+val provider_of_model_label : string -> string
+
+(** True when the provider emits no usage tokens in its standard response.
+    Used by metrics coverage gating so text-only turns against CLI-class
+    providers that strip usage do not count as coverage gaps. *)
+val is_structurally_unmetered_provider : string -> bool
+
 (** Provider prefix of the default model label. *)
 val default_model_provider_prefix_result : unit -> (string, string) result
 

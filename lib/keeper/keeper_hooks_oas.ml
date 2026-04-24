@@ -30,41 +30,12 @@ let keeper_denied_tools =
 
 (** Derive a provider label from a model id.
 
-    Benchmarking downstream (e.g. 15-keeper cascade weighted_random turns)
-    needs to group costs.jsonl rows by provider. The raw [model] field
-    mixes two conventions:
-    - prefixed: [glm-coding:glm-5-turbo], [claude:claude-haiku-4-5-20251001]
-    - bare: [glm-5-turbo], [claude-haiku-4-5-20251001] (emitted by some
-      OAS transports that strip the scheme before reporting)
-
-    Prefer the prefix when present; otherwise fall back to a minimal
-    heuristic over known bare-name shapes. Returns [unknown] rather
-    than guessing when no rule fits, so analysis queries can filter
-    those rows out rather than miscount them. *)
-let known_providers = [
-  "glm-coding"; "glm"; "claude"; "claude_code";
-  "gemini"; "gemini_cli"; "codex_cli"; "ollama";
-]
-
+    Delegates to {!Provider_adapter.provider_of_model_label}. Kept as a
+    thin alias so existing callers in keeper_* and dashboard_* modules
+    do not need to update, while the vendor-name vocabulary lives with
+    the other provider-classification helpers. *)
 let provider_of_model (model : string) : string =
-  let bare_heuristic () =
-    let starts_with prefix =
-      String.length model >= String.length prefix
-      && String.sub model 0 (String.length prefix) = prefix
-    in
-    if starts_with "glm-" then "glm-coding"
-    else if starts_with "claude-" then "claude"
-    else if starts_with "gemini-" then "gemini"
-    else if starts_with "gpt-" then "openai"
-    else if starts_with "qwen" || starts_with "llama" then "ollama"
-    else "unknown"
-  in
-  match String.index_opt model ':' with
-  | Some i ->
-    let prefix = String.sub model 0 i in
-    if List.mem prefix known_providers then prefix
-    else bare_heuristic ()
-  | None -> bare_heuristic ()
+  Provider_adapter.provider_of_model_label model
 
 type tool_execution_summary =
   { tool_name : string

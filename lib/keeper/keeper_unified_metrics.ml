@@ -138,7 +138,7 @@ let telemetry_reported_of_result
   Option.is_some result.inference_telemetry
 
 let structurally_unmetered_provider (provider : string) : bool =
-  List.mem provider [ "kimi_cli"; "codex_cli"; "gemini_cli" ]
+  Provider_adapter.is_structurally_unmetered_provider provider
 
 let coverage_reason_of_result
     (result : Keeper_agent_run.run_result) : string option =

@@ -10,8 +10,16 @@ let fixture_runs repo_root =
 
 let load_fixture () =
   let repo_root = Sys.getcwd () in
-  let cases = Tool_call_quality_benchmark.load_cases_from_file (fixture_cases repo_root) in
-  let runs = Tool_call_quality_benchmark.load_runs_from_file (fixture_runs repo_root) in
+  let cases =
+    match Tool_call_quality_benchmark.load_cases_from_file (fixture_cases repo_root) with
+    | Ok v -> v
+    | Error msg -> fail ("load_cases_from_file failed: " ^ msg)
+  in
+  let runs =
+    match Tool_call_quality_benchmark.load_runs_from_file (fixture_runs repo_root) with
+    | Ok v -> v
+    | Error msg -> fail ("load_runs_from_file failed: " ^ msg)
+  in
   (cases, runs)
 
 let find_row ~provider ~model ~keeper rows =

@@ -3,8 +3,8 @@ include module type of Tool_call_quality_benchmark_types
 val default_case_set_path : repo_root:string -> string
 val default_evidence_path : repo_root:string -> string
 
-val load_cases_from_file : string -> benchmark_case list
-val load_runs_from_file : string -> evidence_run list
+val load_cases_from_file : string -> (benchmark_case list, string) result
+val load_runs_from_file : string -> (evidence_run list, string) result
 
 val score_run :
   cases:benchmark_case list -> evidence_run -> case_score option

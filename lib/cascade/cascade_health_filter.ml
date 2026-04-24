@@ -14,6 +14,20 @@
     variants lives in exactly one place. When OAS adds a new error
     variant, only [lib/oas_compat] fails to compile, not this module
     and every other consumer. *)
+type cascade_failure_class =
+  Oas_compat.Http_client.cascade_failure_class =
+  | Local_resource_exhaustion
+  | Context_overflow
+  | Provider_parse_error
+  | Transient_http of int
+  | Terminal_http of int
+  | Accept_rejected_capability_mismatch
+  | Accept_rejected_terminal
+  | Cli_transport_required
+  | Network_error
+
+let classify_failure err = Oas_compat.Http_client.classify err
+
 let should_cascade_to_next err = Oas_compat.Http_client.should_cascade err
 
 (* ── Local provider detection ──────────────────────────── *)

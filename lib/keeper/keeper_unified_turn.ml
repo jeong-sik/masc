@@ -1017,31 +1017,6 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             then "required"
             else "optional"
           in
-          let initial_execution_result =
-            if not (String.equal initial_tool_requirement "required") then
-              Ok initial_execution
-            else
-              let routed =
-                Keeper_cascade_routing.route_effective_cascade_for_tool_requirement
-                  ~effective_cascade:initial_execution.cascade_name
-                  ~tool_requirement:"required"
-              in
-              if String.equal routed.effective_cascade initial_execution.cascade_name
-              then
-                Ok initial_execution
-              else
-                match build_cascade_execution ~cascade_name:routed.effective_cascade with
-                | Ok routed_execution ->
-                    Log.Keeper.info
-                      "%s: tool-required turn rerouted %s -> %s (%s)"
-                      meta.name initial_execution.cascade_name
-                      routed_execution.cascade_name routed.reason;
-                    Ok routed_execution
-                | Error err -> Error err
-          in
-          match initial_execution_result with
-          | Error err -> Error err
-          | Ok initial_execution ->
           let do_run ~(execution : cascade_execution) ~run_meta ~run_generation ~is_retry
               ~oas_timeout_s =
             last_execution := execution;

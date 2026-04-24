@@ -2876,7 +2876,6 @@ let test_next_fail_open_cascade_for_turn_suppresses_exhausted_rotation_group () 
           "tool_rerank";
           KC.default_cascade_name;
           KC.local_recovery_cascade_name;
-          KC.tool_use_strict_cascade_name;
         ]
       (wrapped_claude_limit_error ())
   in

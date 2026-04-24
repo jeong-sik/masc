@@ -143,6 +143,34 @@ let test_required_tool_support_filter_drops_runtime_mcp_providers_without_header
   check bool "keeps claude_code with runtime MCP header support" true
     (List.mem "claude_code" (provider_kinds providers))
 
+let test_oas_http_error_classification_is_typed () =
+  let module H = Masc_mcp.Cascade_health_filter in
+  let context_overflow =
+    Llm_provider.Http_client.HttpError
+      { code = 400; body = "maximum context length exceeded" }
+  in
+  let provider_parse =
+    Llm_provider.Http_client.HttpError
+      { code = 400; body = "can't find closing '}'" }
+  in
+  let capability_mismatch =
+    Llm_provider.Http_client.AcceptRejected
+      { reason = "openai_compat:model does not support inline tools" }
+  in
+  check bool "context overflow class cascades" true
+    (match H.classify_failure context_overflow with
+    | H.Context_overflow -> H.should_cascade_to_next context_overflow
+    | _ -> false);
+  check bool "provider parse class cascades" true
+    (match H.classify_failure provider_parse with
+    | H.Provider_parse_error -> H.should_cascade_to_next provider_parse
+    | _ -> false);
+  check bool "capability mismatch class cascades" true
+    (match H.classify_failure capability_mismatch with
+    | H.Accept_rejected_capability_mismatch ->
+        H.should_cascade_to_next capability_mismatch
+    | _ -> false)
+
 let () =
   run "Cascade_runtime"
     [
@@ -164,5 +192,7 @@ let () =
           test_case "runtime MCP header requirement drops unsupported providers"
             `Quick
             test_required_tool_support_filter_drops_runtime_mcp_providers_without_header_support;
+          test_case "OAS HTTP errors classify before cascade boolean" `Quick
+            test_oas_http_error_classification_is_typed;
         ] );
     ]

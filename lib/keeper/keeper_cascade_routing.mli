@@ -33,10 +33,10 @@ val select_cascade :
   phase:Keeper_state_machine.phase ->
   routing_decision
 
-(** Override an already-routed cascade when the turn must guarantee a
-    tool-capable provider lane. Phase-routed local/recovery cascades are
-    preserved. Pure-local configured cascades are also preserved, regardless
-    of their profile name. *)
+(** Preserve an already-routed cascade while carrying the tool requirement
+    forward to provider capability filtering. Tool-required turns must not
+    rewrite profile names such as ["tool_use_strict"]; the cascade resolver
+    and provider capability gate own the concrete candidate set. *)
 val route_effective_cascade_for_tool_requirement :
   effective_cascade:string ->
   tool_requirement:string ->

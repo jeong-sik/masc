@@ -354,6 +354,7 @@ let direct_adapters =
                     "gpt-5.3-codex";
                     "gpt-5.4-mini";
                     "gpt-5.4";
+                    "gpt-5.5";
                   ];
                 prefer_default_model_env = false;
               };

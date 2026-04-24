@@ -940,7 +940,19 @@ let write_heartbeat_snapshot
         ; "agent_name", `String meta_current.agent_name
         ; "trace_id", `String (Keeper_id.Trace_id.to_string meta_current.runtime.trace_id)
         ; "generation", `Int meta_current.runtime.generation
-        ; "model_used", `String meta_current.runtime.usage.last_model_used
+        ; (* #10018 follow-up: [model_used] is also snapshot-stale.
+             last_model_used is the *previous turn's* provider label;
+             emitting it on every heartbeat made
+             per-provider latency histograms and dashboards show
+             ghost provider names long after the binary that wrote
+             them was rebuilt (observed qa-king / nick0cave stuck on
+             "deterministic_required_tool_fallback" across
+             post-#9967 rebuild).  Emit empty string here so
+             downstream per-provider aggregation ignores heartbeat
+             records.  `last_model_used_label` on the keeper state
+             JSON still reflects the last real turn for dashboard
+             snapshot panels. *)
+          "model_used", `String ""
         ; (* #10018: status_tick is a snapshot, not an LLM-call event.
              Emitting [runtime.usage.last_*_tokens] and [last_latency_ms]
              caused the last turn's per-turn values to be repeat-emitted

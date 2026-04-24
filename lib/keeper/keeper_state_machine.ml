@@ -390,15 +390,30 @@ let update_conditions (c : conditions) (ev : event) : conditions =
     }
   | Compaction_started ->
     { c with compaction_active = true }
-  | Compaction_completed _ ->
-    (* A successful compaction clears the overflow flags.  The retry-
-       exhausted latch is released too: further overflow cycles start
-       fresh. *)
-    { c with
-      compaction_active = false;
-      context_overflow = false;
-      compact_retry_exhausted = false;
-    }
+  | Compaction_completed { before_tokens; after_tokens } ->
+    (* #9988: "completed" alone does not mean the overflow was resolved.
+       In production 98.4% of [Compaction_completed] events arrive with
+       [before_tokens = after_tokens] because the checkpoint reducers
+       produced no savings (no tool_result sections to strip, pure-text
+       turns, etc).  Clearing [context_overflow] unconditionally created
+       an infinite loop with [Context_overflow_detected]: the next turn
+       re-measures the same context, re-fires overflow, re-attempts a
+       noop compaction, and clears the flag again.  #9935 observed
+       45–71 imminent events/day with zero observable reduction action.
+
+       Treat [saved_tokens <= 0] as a noop: keep [context_overflow] set
+       so the next layer (operator alert, stronger compaction profile,
+       handoff) can take over. Only a real reduction clears the flag
+       and releases the retry-exhausted latch. *)
+    let saved_tokens = before_tokens - after_tokens in
+    if saved_tokens > 0 then
+      { c with
+        compaction_active = false;
+        context_overflow = false;
+        compact_retry_exhausted = false;
+      }
+    else
+      { c with compaction_active = false }
   | Compaction_failed _ ->
     (* Leave [context_overflow] set — the overflow has not been resolved.
        The retry-exhausted latch is owned by the caller (keeper_unified_turn

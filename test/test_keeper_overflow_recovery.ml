@@ -143,6 +143,83 @@ let test_two_consecutive_overflows () =
   in
   check_phase SM.Compacting tr5.new_phase "cycle 2 auto-compact → Compacting"
 
+(* ── Scenario 4b: noop compaction (#9988) ──────────────────── *)
+
+(* Prior handler dropped the [before_tokens, after_tokens] payload and
+   cleared [context_overflow] on every [Compaction_completed].  In
+   production 98.4% of completion events carried [before = after] (pure-
+   text turns with nothing for reducers to strip), so the FSM re-entered
+   Running, the next turn re-measured, and re-fired
+   [Context_overflow_detected].  Result: 45–71 overflow events/day with
+   zero observable reduction (#9935).  The noop path now has to leave
+   the flag set. *)
+let test_noop_compaction_keeps_overflow () =
+  let tr1 = apply_ok SM.Running running_conds (overflow_event ()) in
+  let tr2 =
+    apply_ok SM.Overflowed tr1.updated_conditions SM.Auto_compact_triggered
+  in
+  let tr3 =
+    apply_ok SM.Compacting tr2.updated_conditions
+      (SM.Compaction_completed
+         { before_tokens = 200_000; after_tokens = 200_000 })
+  in
+  check bool "noop compaction does NOT clear context_overflow"
+    true tr3.updated_conditions.context_overflow;
+  check bool "noop compaction does NOT reset compact_retry_exhausted"
+    tr2.updated_conditions.compact_retry_exhausted
+    tr3.updated_conditions.compact_retry_exhausted;
+  check bool "noop still exits Compacting (compaction_active=false)"
+    false tr3.updated_conditions.compaction_active;
+  check_phase SM.Overflowed tr3.new_phase
+    "post-noop phase remains Overflowed, not Running"
+
+(* [after > before] (reducer added a wrapper, retry grew the payload,
+   etc.) is also degenerate — must not clear. *)
+let test_negative_savings_keeps_overflow () =
+  let tr1 = apply_ok SM.Running running_conds (overflow_event ()) in
+  let tr2 =
+    apply_ok SM.Overflowed tr1.updated_conditions SM.Auto_compact_triggered
+  in
+  let tr3 =
+    apply_ok SM.Compacting tr2.updated_conditions
+      (SM.Compaction_completed
+         { before_tokens = 200_000; after_tokens = 210_000 })
+  in
+  check bool "negative-savings compaction does NOT clear overflow"
+    true tr3.updated_conditions.context_overflow
+
+(* Noop → real savings: first keeps overflow, next cycle with real
+   reduction clears it.  Confirms the new branch is additive, not
+   blocking recovery. *)
+let test_noop_then_real_savings_clears () =
+  let tr1 = apply_ok SM.Running running_conds (overflow_event ()) in
+  let tr2 =
+    apply_ok SM.Overflowed tr1.updated_conditions SM.Auto_compact_triggered
+  in
+  let tr3 =
+    apply_ok SM.Compacting tr2.updated_conditions
+      (SM.Compaction_completed
+         { before_tokens = 180_000; after_tokens = 180_000 })
+  in
+  check bool "after noop, overflow still set"
+    true tr3.updated_conditions.context_overflow;
+  let tr4 =
+    apply_ok tr3.new_phase tr3.updated_conditions (overflow_event ())
+  in
+  let tr5 =
+    apply_ok tr4.new_phase tr4.updated_conditions SM.Auto_compact_triggered
+  in
+  let tr6 =
+    apply_ok SM.Compacting tr5.updated_conditions
+      (SM.Compaction_completed
+         { before_tokens = 180_000; after_tokens = 60_000 })
+  in
+  check_phase SM.Running tr6.new_phase "real savings → Running";
+  check bool "real savings clear context_overflow"
+    false tr6.updated_conditions.context_overflow;
+  check bool "real savings clear compact_retry_exhausted"
+    false tr6.updated_conditions.compact_retry_exhausted
+
 (* ── Scenario 5: heartbeat failure during Overflowed ──────── *)
 
 let test_heartbeat_failure_preserved_through_overflow () =
@@ -185,6 +262,12 @@ let () =
         test_operator_clear_returns_to_running;
       test_case "two consecutive overflows" `Quick
         test_two_consecutive_overflows;
+      test_case "noop compaction keeps overflow (#9988)" `Quick
+        test_noop_compaction_keeps_overflow;
+      test_case "negative-savings keeps overflow (#9988)" `Quick
+        test_negative_savings_keeps_overflow;
+      test_case "noop then real savings clears (#9988)" `Quick
+        test_noop_then_real_savings_clears;
       test_case "heartbeat failure preserved through overflow" `Quick
         test_heartbeat_failure_preserved_through_overflow;
     ]

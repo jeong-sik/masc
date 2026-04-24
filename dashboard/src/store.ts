@@ -16,6 +16,8 @@ import type {
   DashboardExecutionWorkerSupportBrief,
   DashboardExecutionContinuityBrief,
   DashboardExecutionResponse,
+  DashboardMemoryResponse,
+  DashboardPlanningResponse,
   DashboardConfigResolution,
   DashboardRuntimeResolution,
   DashboardShellAuthSummary,
@@ -399,9 +401,7 @@ export async function refreshDashboard(opts?: RefreshOptions): Promise<void> {
   return inflightDashboardRefresh
 }
 
-function applyPlanningEnvelope(data: {
-  goals?: unknown[]
-}): void {
+function applyPlanningEnvelope(data: DashboardPlanningResponse): void {
   goals.value = (Array.isArray(data.goals) ? data.goals : [])
     .map((row): Goal | null => {
       if (!isRecord(row)) return null
@@ -434,6 +434,11 @@ function applyPlanningEnvelope(data: {
       }
     })
     .filter((row): row is Goal => row !== null)
+}
+
+export function hydratePlanningSnapshot(data: DashboardPlanningResponse): void {
+  applyPlanningEnvelope(data)
+  lastGoalsRefreshAt.value = data.generated_at ?? new Date().toISOString()
 }
 
 function normalizeShellAuthSummary(raw: unknown): DashboardShellAuthSummary | null {
@@ -675,6 +680,19 @@ export async function refreshBoard(): Promise<void> {
   }
 }
 
+export function hydrateBoardSnapshot(data: DashboardMemoryResponse): void {
+  const next = data.posts ?? []
+  boardPosts.value = reconcileBoardPosts(boardPosts.value, next)
+  const offset = typeof data.offset === 'number' ? data.offset : 0
+  const limit = typeof data.limit === 'number' ? data.limit : boardPageSize()
+  boardOffset.value = offset + next.length
+  boardHasMore.value = typeof data.has_more === 'boolean'
+    ? data.has_more
+    : next.length >= limit
+  boardTotal.value = typeof data.total === 'number' ? data.total : null
+  lastBoardRefreshAt.value = data.generated_at ?? new Date().toISOString()
+}
+
 /** Append the next page of board posts onto boardPosts. Noop if a request is
  *  already in flight or the server indicated no more pages. */
 export async function loadMoreBoardPosts(): Promise<void> {
@@ -713,8 +731,7 @@ export async function refreshGoals(): Promise<void> {
   goalsLoading.value = true
   try {
     const data = await fetchDashboardPlanning()
-    applyPlanningEnvelope(data)
-    lastGoalsRefreshAt.value = new Date().toISOString()
+    hydratePlanningSnapshot(data)
   } catch (err) {
     console.warn('[Planning] fetch error:', err)
   } finally {

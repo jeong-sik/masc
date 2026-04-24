@@ -25,6 +25,7 @@ import type {
   FleetCompositeSnapshot,
   KeeperCompositeSnapshot,
 } from '../api/keeper'
+import { fleetCompositeSnapshot } from '../composite-signals'
 import {
   displayState,
   extractLaneValue,
@@ -237,6 +238,7 @@ interface FleetFsmMatrixProps {
 
 export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
   const fetcher = props.fetcher ?? fetchKeepersComposite
+  const allowStreamedData = props.fetcher == null
   const intervalMs = props.pollIntervalMs ?? POLL_INTERVAL_MS
   const [data, setData] = useState<FleetCompositeSnapshot | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -246,6 +248,23 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
   // returns a fresh record per tick and we pair it with a setData call
   // which triggers the re-render — avoids a redundant state subscription.
   const historyRef = useRef<KeeperFleetHistory>({})
+
+  useEffect(() => {
+    if (!allowStreamedData) return
+    const applyStreamedSnapshot = (snap: FleetCompositeSnapshot | null) => {
+      if (!snap) return
+      historyRef.current = pushObservation(
+        historyRef.current,
+        snap.snapshots,
+        FLEET_HISTORY_LEN,
+      )
+      setData(snap)
+      setError(null)
+      setLoading(false)
+    }
+    applyStreamedSnapshot(fleetCompositeSnapshot.value)
+    return fleetCompositeSnapshot.subscribe(applyStreamedSnapshot)
+  }, [allowStreamedData])
 
   useEffect(() => {
     let cancelled = false

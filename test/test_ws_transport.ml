@@ -35,6 +35,17 @@ let test_sha1_different_inputs () =
   let r2 = Digestif.SHA1.(digest_string "b" |> to_raw_string) in
   Alcotest.(check bool) "different inputs different hashes" true (r1 <> r2)
 
+(* ====== Dashboard route-scoped slices ====== *)
+
+let test_dashboard_route_scoped_slices_are_valid () =
+  List.iter
+    (fun slice ->
+      Alcotest.(check bool)
+        (Printf.sprintf "%s is accepted" slice)
+        true
+        (Ws.valid_dashboard_slice slice))
+    [ "board"; "goals"; "composite" ]
+
 (* ====== External Subscriber Broadcast (WS delivery path) ====== *)
 
 let test_ws_external_subscriber_receives_broadcast () =
@@ -124,6 +135,10 @@ let () =
       Alcotest.test_case "produces 20 bytes" `Quick test_sha1_produces_20_bytes;
       Alcotest.test_case "deterministic" `Quick test_sha1_deterministic;
       Alcotest.test_case "different inputs" `Quick test_sha1_different_inputs;
+    ]);
+    ("dashboard", [
+      Alcotest.test_case "route scoped slices are valid" `Quick
+        test_dashboard_route_scoped_slices_are_valid;
     ]);
     ("external_subscriber", [
       Alcotest.test_case "single subscriber receives broadcast" `Quick

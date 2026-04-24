@@ -19,20 +19,12 @@ let dashboard_namespace_truth_focus_json =
 let dashboard_namespace_truth_http_json =
   Server_dashboard_http_namespace_truth.dashboard_namespace_truth_http_json
 
-let dashboard_memory_http_json request : Yojson.Safe.t =
-  let hearth = query_param request "hearth" in
-  let author_filter =
-    query_param request "author"
-    |> Option.map String.trim
-    |> Fun.flip Option.bind (fun s -> if s = "" then None else Some s)
-  in
-  let sort_by = board_sort_order_of_request request in
-  let exclude_system = bool_query_param request "exclude_system" ~default:false in
-  let exclude_automation =
-    bool_query_param request "exclude_automation" ~default:false
-  in
-  let limit = int_query_param request "limit" ~default:100 |> clamp ~min_v:1 ~max_v:500 in
-  let offset = int_query_param request "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
+let dashboard_board_json ?hearth ?author_filter
+    ?(sort_by = Board_dispatch.Hot) ?(exclude_system = false)
+    ?(exclude_automation = false) ?(limit = 100) ?(offset = 0) () :
+    Yojson.Safe.t =
+  let limit = clamp ~min_v:1 ~max_v:500 limit in
+  let offset = clamp ~min_v:0 ~max_v:5000 offset in
   let cache_key =
     Printf.sprintf "board:memory:%s;%s;%s;%b;%b;%d;%d"
       (Option.value ~default:"-" hearth)
@@ -87,6 +79,27 @@ let dashboard_memory_http_json request : Yojson.Safe.t =
         ("total", total_json);
         ("sort_by", `String (board_sort_label sort_by));
       ])
+
+let dashboard_memory_http_json request : Yojson.Safe.t =
+  let hearth = query_param request "hearth" in
+  let author_filter =
+    query_param request "author"
+    |> Option.map String.trim
+    |> Fun.flip Option.bind (fun s -> if s = "" then None else Some s)
+  in
+  let sort_by = board_sort_order_of_request request in
+  let exclude_system = bool_query_param request "exclude_system" ~default:false in
+  let exclude_automation =
+    bool_query_param request "exclude_automation" ~default:false
+  in
+  let limit =
+    int_query_param request "limit" ~default:100 |> clamp ~min_v:1 ~max_v:500
+  in
+  let offset =
+    int_query_param request "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000
+  in
+  dashboard_board_json ?hearth ?author_filter ~sort_by ~exclude_system
+    ~exclude_automation ~limit ~offset ()
 
 let dashboard_memory_subsystems_http_json ~(config : Coord_utils.config) request
     : Yojson.Safe.t =
@@ -399,6 +412,24 @@ let dashboard_planning_http_json ~(config : Coord.config) : Yojson.Safe.t =
 
 let dashboard_goals_tree_http_json ~(config : Coord.config) : Yojson.Safe.t =
   Dashboard_goals.dashboard_goals_tree_json ~config
+
+let dashboard_goals_snapshot_json ~(config : Coord.config) : Yojson.Safe.t =
+  `Assoc
+    [
+      ("planning", dashboard_planning_http_json ~config);
+      ("tree", dashboard_goals_tree_http_json ~config);
+    ]
+
+let dashboard_fleet_composite_json ~(base_path : string) () : Yojson.Safe.t =
+  let snapshots = Keeper_composite_observer.all_snapshots ~base_path () in
+  `Assoc
+    [
+      ("generated_at", `Float (Unix.gettimeofday ()));
+      ("count", `Int (List.length snapshots));
+      ( "snapshots",
+        `List (List.map Keeper_composite_observer.snapshot_to_json snapshots)
+      );
+    ]
 
 let dashboard_goal_detail_http_json ~(config : Coord.config) ~goal_id :
     Yojson.Safe.t =

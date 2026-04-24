@@ -4,6 +4,12 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect, useMemo } from 'preact/hooks'
 import { fetchDashboardGoalDetail, fetchDashboardGoalsTree } from '../../api/dashboard'
+import {
+  goalTreeData as treeData,
+  goalTreeError as treeError,
+  goalTreeLoading as treeLoading,
+  hydrateGoalTreeSnapshot,
+} from '../../goal-tree-state'
 import { EmptyState, ErrorState, LoadingState } from '../common/feedback-state'
 import { ActionButton } from '../common/button'
 import { FilterChips } from '../common/filter-chips'
@@ -12,7 +18,6 @@ import { TimeAgo } from '../common/time-ago'
 import { TaskCreateForm } from '../task-manage/task-create-form'
 import type {
   DashboardGoalDetailResponse,
-  DashboardGoalsTreeResponse,
   GoalDetailKeeper,
   GoalDetailTimelineEvent,
   GoalTreeNode,
@@ -228,9 +233,6 @@ function timelineSeverityClass(severity: GoalDetailTimelineEvent['severity']): s
   }
 }
 
-const treeData = signal<DashboardGoalsTreeResponse | null>(null)
-const treeLoading = signal(false)
-const treeError = signal<string | null>(null)
 const expandedNodes = signal<Set<string>>(new Set())
 const filterQuery = signal('')
 const treePhaseFilter = signal<GoalPhaseFilter>('all')
@@ -280,7 +282,7 @@ async function refreshTree() {
   treeLoading.value = true
   treeError.value = null
   try {
-    treeData.value = await fetchDashboardGoalsTree()
+    hydrateGoalTreeSnapshot(await fetchDashboardGoalsTree())
   } catch (err) {
     treeError.value = err instanceof Error ? err.message : String(err)
   } finally {

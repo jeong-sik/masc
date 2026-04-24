@@ -43,11 +43,18 @@ export function dashboardSlicesForRoute(routeState: Pick<RouteState, 'tab' | 'pa
 
   if (routeState.tab === 'workspace' && routeState.params.section === 'planning') {
     slices.add('execution')
+    slices.add('goals')
+  }
+  if (routeState.tab === 'workspace' && routeState.params.section === 'board') {
+    slices.add('board')
   }
   if (routeState.tab === 'monitoring') {
     const section = routeState.params.section
     if (section === 'observatory' || section === 'journey' || section === 'agents') {
       slices.add('execution')
+    }
+    if (section === 'agents') {
+      slices.add('composite')
     }
     if (section === 'fleet-health' && routeState.params.view === 'comparison') {
       slices.add('execution')
@@ -108,11 +115,17 @@ function sendRpc(method: string, params: JsonObject): Promise<unknown> {
   if (!socket || socket.readyState !== WebSocket.OPEN) {
     return Promise.reject(new Error('dashboard websocket is not open'))
   }
+  const currentSocket = socket
   const id = ++rpcId
   const payload = { jsonrpc: '2.0', id, method, params }
   return new Promise((resolve, reject) => {
     pending.set(id, { resolve, reject })
-    socket?.send(JSON.stringify(payload))
+    try {
+      currentSocket.send(JSON.stringify(payload))
+    } catch (err) {
+      pending.delete(id)
+      reject(err instanceof Error ? err : new Error(String(err)))
+    }
   })
 }
 
@@ -195,12 +208,37 @@ function handleRawPush(raw: unknown): void {
   hydrateServerPushEvent(parsed as unknown as SSEEvent)
 }
 
+export function parseWebSocketSseFrames(data: string): unknown[] {
+  const payloads: unknown[] = []
+  const frames = data.split(/\r?\n\r?\n/)
+  for (const frame of frames) {
+    const dataLines: string[] = []
+    for (const line of frame.split(/\r?\n/)) {
+      if (!line.startsWith('data:')) continue
+      const value = line.slice('data:'.length)
+      dataLines.push(value.startsWith(' ') ? value.slice(1) : value)
+    }
+    if (dataLines.length === 0) continue
+    const body = dataLines.join('\n').trim()
+    if (!body || body === '[DONE]') continue
+    try {
+      payloads.push(JSON.parse(body))
+    } catch {
+      // Non-JSON SSE frames are ignored; dashboard pushes are JSON.
+    }
+  }
+  return payloads
+}
+
 function handleMessage(data: unknown): void {
   if (typeof data !== 'string') return
   let raw: unknown
   try {
     raw = JSON.parse(data)
   } catch {
+    for (const payload of parseWebSocketSseFrames(data)) {
+      handleRawPush(payload)
+    }
     return
   }
   if (!raw || typeof raw !== 'object') return
@@ -216,11 +254,16 @@ export async function subscribeDashboardRoute(routeState: Pick<RouteState, 'tab'
   const key = `${routeKey(routeState)}|${slices.join(',')}`
   if (key === lastSubscribeKey) return
   lastSubscribeKey = key
-  const result = await sendRpc('dashboard/subscribe', {
-    route: routeKey(routeState),
-    slices,
-  })
-  applySubscribeResult(result)
+  try {
+    const result = await sendRpc('dashboard/subscribe', {
+      route: routeKey(routeState),
+      slices,
+    })
+    applySubscribeResult(result)
+  } catch (err) {
+    if (lastSubscribeKey === key) lastSubscribeKey = ''
+    throw err
+  }
 }
 
 export async function connectDashboardWS(routeState?: Pick<RouteState, 'tab' | 'params'>): Promise<void> {

@@ -13,12 +13,21 @@ import {
   pauseQueuedOasRuntimeIngress,
   resumeQueuedOasRuntimeIngress,
 } from './sse'
-import type { BoardPost, DashboardExecutionResponse, DashboardShellResponse, SSEEvent } from './types'
+import type {
+  BoardPost,
+  DashboardExecutionResponse,
+  DashboardMemoryResponse,
+  DashboardPlanningResponse,
+  DashboardShellResponse,
+  SSEEvent,
+} from './types'
 import {
   keeperHeartbeats,
   invalidateDashboardCache,
+  hydrateBoardSnapshot,
   hydrateShellSnapshot,
   hydrateExecutionSnapshot,
+  hydratePlanningSnapshot,
   refreshDashboard,
   refreshExecution,
   refreshBoard,
@@ -37,7 +46,8 @@ import {
 import { mergeServerStatus } from './store-normalizers'
 import { normalizeOperatorSnapshot, normalizeOperatorDigest } from './operator-normalizers'
 import { operatorSnapshot, operatorRoomDigest } from './operator-signals'
-import { compositeTick } from './composite-signals'
+import { compositeTick, hydrateFleetCompositeSnapshot } from './composite-signals'
+import { hydrateGoalTreeSnapshot } from './goal-tree-state'
 import { showToast } from './components/common/toast'
 import type { ErrorCode } from './types/error'
 import { route } from './router'
@@ -454,6 +464,23 @@ export function hydrateDashboardSlice(slice: string, payload: unknown, eventType
     }
     case 'transport':
       hydrateServerPushEvent({ type: 'transport_health_snapshot', payload } as SSEEvent)
+      return
+    case 'board':
+      hydrateBoardSnapshot(payload as DashboardMemoryResponse)
+      return
+    case 'goals': {
+      if (!payload || typeof payload !== 'object') return
+      const record = payload as { planning?: unknown; tree?: unknown }
+      if (record.planning) {
+        hydratePlanningSnapshot(record.planning as DashboardPlanningResponse)
+      }
+      if (record.tree) {
+        hydrateGoalTreeSnapshot(record.tree)
+      }
+      return
+    }
+    case 'composite':
+      hydrateFleetCompositeSnapshot(payload)
       return
   }
 }

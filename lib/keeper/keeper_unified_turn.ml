@@ -1851,6 +1851,24 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           with
            | Eio.Cancel.Cancelled _ as e -> raise e
            | exn ->
+               (* #10047: surface drop as a Prometheus counter so
+                  dashboards can alert when state advances without a
+                  matching metric record (keeper was running but jsonl
+                  shows no turn). *)
+               let channel =
+                 if observation.pending_mentions <> []
+                    || observation.pending_board_events <> []
+                    || observation.pending_scope_messages <> []
+                 then "turn"
+                 else "scheduled_autonomous"
+               in
+               Prometheus.inc_counter
+                 Prometheus.metric_keeper_metric_emit_dropped
+                 ~labels:[
+                   ("keeper", updated_meta.Keeper_types.name);
+                   ("channel", channel);
+                   ("site", "keeper_unified_turn");
+                 ] ();
                Log.Keeper.error
                  "write metrics snapshot failed after keeper cycle: %s"
                  (Printexc.to_string exn));

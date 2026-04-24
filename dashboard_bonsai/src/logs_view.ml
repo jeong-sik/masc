@@ -1826,6 +1826,12 @@ let render_response
     let active = Route.equal route current_route in
     let base = [ Style.nav_link ] in
     let base = if active then Style.nav_link_active :: base else base in
+    let base = if active then Attr.create "aria-current" "page" :: base else base in
+    let base =
+      if not (Route.is_implemented route)
+      then Attr.create "aria-disabled" "true" :: base
+      else base
+    in
     let tail_node =
       match tail with
       | None -> []

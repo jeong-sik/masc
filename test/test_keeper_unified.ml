@@ -1093,10 +1093,10 @@ let test_system_prompt_prefers_bash_and_gh_pr_lane () =
   in
   check bool "mentions git path via keeper_bash" true
     (contains_substring sys
-       "keeper_bash (run commands, including git add/commit/push inside worktrees)");
+       "keeper_bash (run commands inside your sandbox; use for git add/commit/push");
   check bool "mentions gh create path" true
     (contains_substring sys
-       "keeper_shell op=gh (PR/issues via gh CLI; after git push");
+       "keeper_shell op=gh (ALL GitHub CLI ops - gh pr create/view/review");
   check bool "does not advertise removed keeper_github" false
     (contains_substring sys "keeper_github");
   check bool "legacy pr workflow removed" false
@@ -1749,6 +1749,8 @@ let test_metrics_observation_only_tools_are_noop () =
         Masc_mcp.Tool_name.Keeper.Context_status;
       Masc_mcp.Tool_name.Keeper.to_string
         Masc_mcp.Tool_name.Keeper.Tool_search;
+      Masc_mcp.Tool_name.Keeper.to_string Masc_mcp.Tool_name.Keeper.Tasks_list;
+      Masc_mcp.Tool_name.Keeper.to_string Masc_mcp.Tool_name.Keeper.Task_claim;
     ]
   in
   let result =
@@ -1773,6 +1775,16 @@ let test_metrics_observation_only_tools_are_noop () =
   check int "noop turn increments"
     (minimal_meta.runtime.noop_turn_count + 1)
     updated.runtime.noop_turn_count
+
+let test_metrics_execution_tools_are_substantive () =
+  check bool "claim alone is not execution progress" false
+    (UM.has_substantive_tool_calls [ "keeper_task_claim" ]);
+  check bool "task listing is not execution progress" false
+    (UM.has_substantive_tool_calls [ "keeper_tasks_list" ]);
+  check bool "bash is execution progress" true
+    (UM.has_substantive_tool_calls [ "keeper_bash" ]);
+  check bool "completion is execution progress" true
+    (UM.has_substantive_tool_calls [ "keeper_task_submit_for_verification" ])
 
 let sample_run_ref : Agent_sdk.Raw_trace.run_ref = {
   worker_run_id = "test-run"; path = "/tmp/test.jsonl";
@@ -3957,6 +3969,7 @@ let test_validate_completion_contract_presence_requires_keeper_surface_tool () =
 let test_actionable_tool_contract_flags_no_tools () =
   match
     KTD.actionable_tool_contract_violation_reason
+      ~claim_context_allowed:true
       ~actionable_signal_context:true
       ~tool_names:[]
   with
@@ -3968,6 +3981,7 @@ let test_actionable_tool_contract_flags_no_tools () =
 let test_actionable_tool_contract_flags_passive_only_tools () =
   match
     KTD.actionable_tool_contract_violation_reason
+      ~claim_context_allowed:true
       ~actionable_signal_context:true
       ~tool_names:[ "keeper_board_get"; "masc_status" ]
   with
@@ -3976,13 +3990,34 @@ let test_actionable_tool_contract_flags_passive_only_tools () =
         (contains_substring reason "passive status/read tools")
   | None -> fail "expected actionable passive-only violation"
 
+let test_actionable_tool_contract_rejects_claim_context_when_already_claimed () =
+  let () =
+    match
+      KTD.actionable_tool_contract_violation_reason
+        ~claim_context_allowed:false
+        ~actionable_signal_context:true
+        ~tool_names:[ "keeper_task_claim" ]
+    with
+    | Some reason ->
+        check bool "reason mentions execution progress" true
+          (contains_substring reason "without execution progress")
+    | None -> fail "expected actionable claim-context-only violation"
+  in
+  check (option string) "claim context is allowed before ownership" None
+    (KTD.actionable_tool_contract_violation_reason
+       ~claim_context_allowed:true
+       ~actionable_signal_context:true
+       ~tool_names:[ "keeper_task_claim" ])
+
 let test_actionable_tool_contract_allows_execution_tools () =
   check (option string) "execution tool satisfies actionable signal" None
     (KTD.actionable_tool_contract_violation_reason
+       ~claim_context_allowed:true
        ~actionable_signal_context:true
        ~tool_names:[ "keeper_bash"; "masc_status" ]);
   check (option string) "non-actionable no-op remains allowed" None
     (KTD.actionable_tool_contract_violation_reason
+       ~claim_context_allowed:true
        ~actionable_signal_context:false
        ~tool_names:[])
 
@@ -4602,13 +4637,11 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
          (Printf.sprintf "expected Tool keeper_task_claim, got %s"
             (Agent_sdk.Types.show_tool_choice other)));
   (match choose ~has_current_task:true () with
-   | Agent_sdk.Types.Tool name ->
-       check string "falls back to task listing when already owning work"
-         "keeper_tasks_list" name
+   | Agent_sdk.Types.Any -> ()
    | other ->
        fail
          (Printf.sprintf
-            "expected Tool keeper_tasks_list when already owning work, got %s"
+            "expected Any when already owning work, got %s"
             (Agent_sdk.Types.show_tool_choice other)));
   (match
      choose
@@ -4952,6 +4985,8 @@ let () =
           test_case "noop response" `Quick test_metrics_noop_response;
           test_case "observation-only tools are noop" `Quick
             test_metrics_observation_only_tools_are_noop;
+          test_case "execution tools are substantive" `Quick
+            test_metrics_execution_tools_are_substantive;
           test_case "validated evidence counts as visible" `Quick
             test_metrics_validated_evidence_counts_as_visible;
           test_case "failed validation does not count as visible" `Quick
@@ -5018,6 +5053,10 @@ let () =
             test_actionable_tool_contract_flags_no_tools;
           test_case "actionable signal rejects passive-only tools" `Quick
             test_actionable_tool_contract_flags_passive_only_tools;
+          test_case
+            "actionable signal rejects claim context after ownership"
+            `Quick
+            test_actionable_tool_contract_rejects_claim_context_when_already_claimed;
           test_case "actionable signal allows execution tools" `Quick
             test_actionable_tool_contract_allows_execution_tools;
           test_case "tool usage delta uses registry counts" `Quick

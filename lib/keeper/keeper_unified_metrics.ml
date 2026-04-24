@@ -106,23 +106,20 @@ let work_kind_of_turn_mode = function
   | Noop -> "noop"
   | Text_response | Skip_text -> "text_turn"
 
-(** Observation-only tools that do not constitute productive work.
+(** Observation/claim-context tools do not constitute productive work.
     A cycle using only these tools (or none) is a "noop" and triggers
-    exponential cooldown backoff to prevent token waste. *)
+    exponential cooldown backoff to prevent token waste.  The classification
+    is shared with required-tool contract validation so receipts and liveness
+    metrics agree on what counts as progress. *)
 let observation_only_tool_strings =
-  [ Tool_name.Keeper.to_string Tool_name.Keeper.Stay_silent
-  ; Tool_name.Keeper.to_string Tool_name.Keeper.Board_list
-  ; Tool_name.Keeper.to_string Tool_name.Keeper.Context_status
-  ; Tool_name.Keeper.to_string Tool_name.Keeper.Tool_search
-  ]
+  Keeper_tool_disclosure.passive_status_tool_names
+  @ Keeper_tool_disclosure.claim_context_tool_names
 
 let is_observation_only_tool_name name =
-  List.mem name observation_only_tool_strings
+  not (Keeper_tool_disclosure.is_execution_progress_tool_name name)
 
 let has_substantive_tool_calls (tools_used : string list) : bool =
-  List.exists
-    (fun name -> not (is_observation_only_tool_name name))
-    tools_used
+  List.exists Keeper_tool_disclosure.is_execution_progress_tool_name tools_used
 
 (** A cycle is noop when it produced no text AND all tools used (if any)
     are observation-only.  Productive cycles reset consecutive_noop_count. *)

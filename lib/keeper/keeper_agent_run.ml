@@ -506,8 +506,8 @@ let preferred_tool_choice_for_required_turn ~(has_current_task : bool)
      && has_task_claim_affordance turn_affordances
      && List.mem "keeper_task_claim" allowed_tool_names
   then Oas.Types.Tool "keeper_task_claim"
-  else if (has_task_claim_affordance turn_affordances
-           || has_task_audit_affordance turn_affordances)
+  else if (not has_current_task)
+          && has_task_audit_affordance turn_affordances
           && List.mem "keeper_tasks_list" allowed_tool_names
   then Oas.Types.Tool "keeper_tasks_list"
   else Oas.Types.Any
@@ -617,20 +617,10 @@ let fallback_repo_probe_tool_names =
   tool_names Tool_name.[ Keeper Fs_read; Keeper Shell; Keeper Bash ]
 
 let is_claim_tool_name name =
-  match Tool_name.of_string name with
-  | Some (Keeper Task_claim) | Some (Masc Claim_next) -> true
-  | _ -> false
+  Keeper_tool_disclosure.is_claim_tool_name name
 
 let is_claim_context_tool_name name =
-  match Tool_name.of_string name with
-  | Some (Keeper Task_claim)
-  | Some (Keeper Tasks_list)
-  | Some (Keeper Context_status)
-  | Some (Masc Claim_next)
-  | Some (Masc Tasks)
-  | Some (Masc Status) ->
-      true
-  | _ -> false
+  Keeper_tool_disclosure.is_claim_context_tool_name name
 
 (* Tool selection & disclosure — extracted to Keeper_tool_disclosure (#5732) *)
 
@@ -2478,6 +2468,7 @@ let run_turn
             meta.name (Printexc.to_string exn)
     in
     let deterministic_required_tool_fallback ~reason ~trigger =
+      let has_current_task = keeper_has_owned_active_task () in
       let available name =
         List.mem name !requested_tool_names_ref
         || (Keeper_tool_policy.StringSet.mem name universe_set
@@ -2485,12 +2476,11 @@ let run_turn
             && Tool_portal.filter_visible_tool_names portal_ctx [ name ] <> [])
       in
       let fallback_tool =
-        if (not (keeper_has_owned_active_task ()))
-           && has_task_claim_affordance turn_affordances
+        if (not has_current_task) && has_task_claim_affordance turn_affordances
            && available "keeper_task_claim"
         then Some ("keeper_task_claim", `Assoc [])
-        else if (has_task_claim_affordance turn_affordances
-                 || has_task_audit_affordance turn_affordances)
+        else if (not has_current_task)
+                && has_task_audit_affordance turn_affordances
                 && available "keeper_tasks_list"
         then
           Some
@@ -2548,7 +2538,12 @@ let run_turn
                "keeper:%s deterministic claim fallback log failed: %s" meta.name
                (Printexc.to_string exn));
         receipt_tool_contract_result_ref :=
-          "satisfied_by_deterministic_fallback";
+          (match Keeper_tool_disclosure.classify_tool_progress tool_name with
+           | Keeper_tool_disclosure.Passive_status
+           | Keeper_tool_disclosure.Claim_context -> "needs_execution_progress"
+           | Keeper_tool_disclosure.Execution
+           | Keeper_tool_disclosure.Completion ->
+             "satisfied_by_deterministic_fallback");
         Log.Keeper.warn
           "keeper:%s required tool contract fallback called %s after %s (reason=%s)"
           meta.name tool_name trigger reason;
@@ -2890,6 +2885,7 @@ let run_turn
          in
          let actionable_tool_contract_violation_reason =
            Keeper_tool_disclosure.actionable_tool_contract_violation_reason
+             ~claim_context_allowed:(not (keeper_has_owned_active_task ()))
              ~actionable_signal_context
              ~tool_names:actual_keeper_tool_names
          in

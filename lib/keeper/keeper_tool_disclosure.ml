@@ -152,27 +152,110 @@ let validate_completion_contract
        Error
          "keeper turn violated required tool contract: no tools were called")
 
+(** Keeper tool progress classes are the shared contract between prompt
+    disclosure, required-tool validation, runtime receipts, and liveness
+    metrics.  Keep these classes conservative: state/reporting tools do not
+    count as productive progress, and claim tools only bind work; execution
+    or completion tools are what prove the keeper is alive past task pickup. *)
+type tool_progress_class =
+  | Passive_status
+  | Claim_context
+  | Execution
+  | Completion
+
+let tool_progress_class_to_string = function
+  | Passive_status -> "passive_status"
+  | Claim_context -> "claim_context"
+  | Execution -> "execution"
+  | Completion -> "completion"
+
 (** Tools that report state without changing it. A turn whose tool calls
     are entirely within this set on an actionable signal is rejected by
     [actionable_tool_contract_violation_reason]; the same list is rendered
     into the keeper prompt (see [Keeper_prompt]) so the model sees the
     same definition the contract enforces. *)
 let passive_status_tool_names : string list =
-  [
-    "masc_status";
-    "keeper_context_status";
-    "masc_plan_get";
-    "keeper_time_now";
-    "keeper_board_list";
-    "keeper_board_get";
-    "keeper_tasks_list";
-    "masc_tasks";
-  ]
+  Tool_name.
+    [
+      Masc Status;
+      Masc Plan_get;
+      Masc Tasks;
+      Keeper Stay_silent;
+      Keeper Context_status;
+      Keeper Time_now;
+      Keeper Board_list;
+      Keeper Board_get;
+      Keeper Board_search;
+      Keeper Board_stats;
+      Keeper Tasks_list;
+      Keeper Tasks_audit;
+      Keeper Tool_search;
+      Keeper Tools_list;
+    ]
+  |> List.map Tool_name.to_string
+
+let claim_context_tool_names : string list =
+  Tool_name.
+    [
+      Masc Add_task;
+      Masc Batch_add_tasks;
+      Masc Claim_next;
+      Masc Claim_task;
+      Keeper Task_claim;
+      Keeper Task_create;
+      Keeper Task_force_release;
+    ]
+  |> List.map Tool_name.to_string
+
+let completion_tool_names : string list =
+  Tool_name.
+    [
+      Masc Cancel_task;
+      Masc Complete_task;
+      Masc Deliver;
+      Masc Release_task;
+      Keeper Task_done;
+      Keeper Task_force_done;
+      Keeper Task_submit_for_verification;
+    ]
+  |> List.map Tool_name.to_string
+
+let classify_tool_progress name =
+  let canonical_name =
+    match Tool_name.of_string name with
+    | Some tool -> Tool_name.to_string tool
+    | None -> name
+  in
+  if List.mem canonical_name passive_status_tool_names
+  then Passive_status
+  else if List.mem canonical_name claim_context_tool_names
+  then Claim_context
+  else if List.mem canonical_name completion_tool_names
+  then Completion
+  else Execution
 
 let is_passive_status_tool_name name =
-  List.mem name passive_status_tool_names
+  match classify_tool_progress name with
+  | Passive_status -> true
+  | Claim_context | Execution | Completion -> false
+
+let is_claim_tool_name name =
+  match Tool_name.of_string name with
+  | Some (Keeper Task_claim) | Some (Masc Claim_next) -> true
+  | _ -> false
+
+let is_claim_context_tool_name name =
+  match classify_tool_progress name with
+  | Passive_status | Claim_context -> true
+  | Execution | Completion -> false
+
+let is_execution_progress_tool_name name =
+  match classify_tool_progress name with
+  | Execution | Completion -> true
+  | Passive_status | Claim_context -> false
 
 let actionable_tool_contract_violation_reason
+      ~(claim_context_allowed : bool)
       ~(actionable_signal_context : bool)
       ~(tool_names : string list)
   : string option
@@ -187,6 +270,13 @@ let actionable_tool_contract_violation_reason
       Some
         (Printf.sprintf
            "actionable keeper signal was present, but the model only used passive status/read tools: %s"
+           (String.concat ", " names))
+    | names
+      when (not claim_context_allowed)
+           && List.for_all is_claim_context_tool_name names ->
+      Some
+        (Printf.sprintf
+           "actionable keeper signal was present, but the model only used claim/context tools without execution progress: %s"
            (String.concat ", " names))
     | _ -> None
 

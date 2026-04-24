@@ -36,7 +36,9 @@ let handle_keeper_bash_output
     error_json
       "task_id is required. Example: task_id='bgt-<timestamp>-<seq>-<pid>'."
   else
-    let tid = Bg_task.task_id_of_string_exn raw_id in
+    match Bg_task.task_id_of_string raw_id with
+    | Error msg -> error_json (Printf.sprintf "invalid task_id: %s" msg)
+    | Ok tid -> (
     match Bg_task.read tid ~since_stdout ~since_stderr with
     | Error (Bg_task.Unknown_task _) ->
         error_json
@@ -79,7 +81,7 @@ let handle_keeper_bash_output
                ("bytes_dropped_stdout", `Int snap.bytes_dropped_stdout);
                ("bytes_dropped_stderr", `Int snap.bytes_dropped_stderr);
              ]
-             @ semantic_fields))
+             @ semantic_fields)))
 
 (* ── Kill ─────────────────────────────────────────────────── *)
 
@@ -100,7 +102,9 @@ let handle_keeper_bash_kill
     error_json
       "task_id is required. Example: task_id='bgt-<timestamp>-<seq>-<pid>'."
   else
-    let tid = Bg_task.task_id_of_string_exn raw_id in
+    match Bg_task.task_id_of_string raw_id with
+    | Error msg -> error_json (Printf.sprintf "invalid task_id: %s" msg)
+    | Ok tid -> (
     match Bg_task.kill tid ~signal ~grace_sec with
     | Error (Bg_task.Unknown_task_kill _) ->
         error_json
@@ -121,4 +125,4 @@ let handle_keeper_bash_kill
               ("task_id", `String tid_str);
               ("signal", `Int signal);
               ("grace_sec", `Float grace_sec);
-            ])
+            ]))

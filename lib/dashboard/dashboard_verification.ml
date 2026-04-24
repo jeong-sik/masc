@@ -86,20 +86,36 @@ let next_action_of_output (output : Yojson.Safe.t) : string option =
 
 (** Status + verdict + approver triple. Keeps all three derivations in one
     place so the match is exhaustive over the Verification state machine. *)
+type status_bucket =
+  | Pending
+  | Approved
+  | Rejected
+
+let status_bucket_of_request (req : V.verification_request) : status_bucket =
+  match req.status with
+  | V.Pending | V.Assigned _ -> Pending
+  | V.Completed V.Pass -> Approved
+  | V.Completed (V.Fail _ | V.Partial _) -> Rejected
+
+let status_bucket_to_string = function
+  | Pending -> "pending"
+  | Approved -> "approved"
+  | Rejected -> "rejected"
+
 let derive_status_fields (req : V.verification_request)
   : string * string option * string * string option =
   (* returns (status, verdict_opt, verdict_reason, approved_by_opt) *)
   match req.status with
   | V.Pending ->
-      "pending", None, "", None
+      status_bucket_to_string Pending, None, "", None
   | V.Assigned _ ->
-      "pending", None, "", None
+      status_bucket_to_string Pending, None, "", None
   | V.Completed V.Pass ->
-      "approved", Some "pass", "", req.verifier
+      status_bucket_to_string Approved, Some "pass", "", req.verifier
   | V.Completed (V.Fail reason) ->
-      "rejected", Some "fail", reason, req.verifier
+      status_bucket_to_string Rejected, Some "fail", reason, req.verifier
   | V.Completed (V.Partial (_, reason)) ->
-      "rejected", Some "partial", reason, req.verifier
+      status_bucket_to_string Rejected, Some "partial", reason, req.verifier
 
 (** Per-request JSON row. *)
 let request_to_json (req : V.verification_request) : Yojson.Safe.t =
@@ -238,8 +254,7 @@ let is_rejected (req : V.verification_request) : bool =
   | _ -> false
 
 let bucket_of_status (req : V.verification_request) : string =
-  let status, _, _, _ = derive_status_fields req in
-  status
+  req |> status_bucket_of_request |> status_bucket_to_string
 
 let summary_json ?recent () : Yojson.Safe.t =
   let recent = clamp_recent recent in
@@ -249,11 +264,10 @@ let summary_json ?recent () : Yojson.Safe.t =
   let approved = ref 0 in
   let rejected = ref 0 in
   List.iter (fun req ->
-    match bucket_of_status req with
-    | "pending" -> incr pending
-    | "approved" -> incr approved
-    | "rejected" -> incr rejected
-    | _ -> assert false
+    match status_bucket_of_request req with
+    | Pending -> incr pending
+    | Approved -> incr approved
+    | Rejected -> incr rejected
   ) all;
   let recent_rejections =
     all

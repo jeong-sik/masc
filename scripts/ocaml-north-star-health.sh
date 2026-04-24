@@ -51,11 +51,12 @@ fi
 count_pattern() {
   local scope="$1"
   local pattern="$2"
-  rg -n "$pattern" $scope -g '*.{ml,mli}' 2>/dev/null | awk 'END {print NR+0}'
+  shift 2
+  rg -n "$pattern" $scope -g '*.{ml,mli}' "$@" 2>/dev/null | awk 'END {print NR+0}' || true
 }
 
 count_prod() {
-  count_pattern "lib bin" "$1"
+  count_pattern "lib bin" "$1" -g '!**/test/**'
 }
 
 count_all() {

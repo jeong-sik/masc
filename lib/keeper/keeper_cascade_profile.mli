@@ -7,7 +7,8 @@
 
     One keeper-assignable bootstrap profile (Big_three) and one system-only
     profile (Tool_rerank).
-    Phase-routing names ("local_only", "local_recovery") are NOT variants —
+    Catalog-routed names ("keeper_unified", "tool_use_strict",
+    "resilient_breaker", "local_only", "local_recovery") are NOT variants —
     they pass through [canonicalize_with_catalog] as catalog names.
 
     @since 0.9.5 *)
@@ -35,7 +36,8 @@ val to_string : t -> string
 val of_string_opt : string -> t option
 (** Parse a raw cascade name into the variant. Handles legacy aliases
     by collapsing them to [Big_three]. Returns [None] for unknown names
-    and phase-routing names ("local_only", "local_recovery"). *)
+    and catalog-routed names ("keeper_unified", "tool_use_strict",
+    "resilient_breaker", "local_only", "local_recovery"). *)
 
 val canonical : string -> t
 (** [canonical raw] = [of_string_opt raw |> Option.value ~default]. *)

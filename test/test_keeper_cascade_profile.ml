@@ -2,9 +2,9 @@ open Alcotest
 
 module Profile = Masc_mcp.Keeper_cascade_profile
 
-(* Only the 4 SSOT variants round-trip through [of_string_opt] -> [to_string].
+(* Only the SSOT variants round-trip through [of_string_opt] -> [to_string].
    Legacy aliases collapse to Big_three; phase-routing names return None. *)
-let variant_names = [ "big_three"; "underdog"; "local"; "tool_rerank" ]
+let variant_names = [ "big_three"; "tool_rerank" ]
 
 let write_file path contents =
   let oc = open_out path in
@@ -47,11 +47,23 @@ let test_legacy_aliases_collapse_to_big_three () =
                   "tool_use_strict"; "resilient_breaker"; "" ] in
   List.iter
     (fun raw ->
-      let canon = Profile.canonicalize raw in
+      let canon = Profile.canonicalize_with_catalog ~catalog:[] raw in
       check string ("alias " ^ raw ^ " -> big_three") "big_three" canon)
     aliases
 
-let test_phase_routing_returns_none () =
+let test_catalog_routed_names_return_none () =
+  check (option (testable (fun fmt _ -> Format.fprintf fmt "<profile>") (=)))
+    "keeper_unified returns None"
+    None
+    (Profile.of_string_opt "keeper_unified");
+  check (option (testable (fun fmt _ -> Format.fprintf fmt "<profile>") (=)))
+    "tool_use_strict returns None"
+    None
+    (Profile.of_string_opt "tool_use_strict");
+  check (option (testable (fun fmt _ -> Format.fprintf fmt "<profile>") (=)))
+    "resilient_breaker returns None"
+    None
+    (Profile.of_string_opt "resilient_breaker");
   check (option (testable (fun fmt _ -> Format.fprintf fmt "<profile>") (=)))
     "local_only returns None"
     None
@@ -76,6 +88,8 @@ let test_catalog_names_follow_live_config () =
       {
         "default_models": ["ollama:auto"],
         "custom_live_models": ["ollama:auto"],
+        "keeper_unified_models": ["ollama:auto"],
+        "tool_use_strict_models": ["ollama:auto"],
         "tool_rerank_temperature": 0.0,
         "tool_rerank_max_tokens": 200,
         "tool_rerank_keeper_assignable": false,
@@ -86,10 +100,17 @@ let test_catalog_names_follow_live_config () =
     (fun path ->
       let catalog = Profile.catalog_names ~config_path:path () in
       check (list string) "catalog_names follows cascade schema keys"
-        [ "custom_live"; "default"; "governance_judge"; "tool_rerank" ]
+        [
+          "custom_live";
+          "default";
+          "governance_judge";
+          "keeper_unified";
+          "tool_rerank";
+          "tool_use_strict";
+        ]
         catalog;
       check (list string) "keeper catalog excludes system-only cascades"
-        [ "custom_live"; "default" ]
+        [ "custom_live"; "default"; "keeper_unified"; "tool_use_strict" ]
         (Profile.keeper_catalog_names ~config_path:path ());
       check (list string) "system catalog follows explicit metadata"
         [ "governance_judge"; "tool_rerank" ]
@@ -97,6 +118,12 @@ let test_catalog_names_follow_live_config () =
       check string "dynamic live profile survives canonicalization"
         "custom_live"
         (Profile.canonicalize_with_catalog ~catalog "custom_live");
+      check string "keeper_unified catalog profile survives canonicalization"
+        "keeper_unified"
+        (Profile.canonicalize_with_catalog ~catalog "keeper_unified");
+      check string "tool_use_strict catalog profile survives canonicalization"
+        "tool_use_strict"
+        (Profile.canonicalize_with_catalog ~catalog "tool_use_strict");
       check string "dynamic live profile requires exact match"
         "big_three"
         (Profile.canonicalize_with_catalog ~catalog "Custom_Live");
@@ -109,7 +136,9 @@ let test_resolve_live_with_catalog_requires_active_membership () =
     {|
       {
         "default_models": ["ollama:auto"],
-        "custom_live_models": ["ollama:auto"]
+        "custom_live_models": ["ollama:auto"],
+        "keeper_unified_models": ["ollama:auto"],
+        "tool_use_strict_models": ["ollama:auto"]
       }
     |}
     (fun path ->
@@ -117,6 +146,12 @@ let test_resolve_live_with_catalog_requires_active_membership () =
       check string "active custom profile survives live resolution"
         "custom_live"
         (Profile.resolve_live_with_catalog ~catalog "custom_live");
+      check string "keeper_unified catalog profile survives live resolution"
+        "keeper_unified"
+        (Profile.resolve_live_with_catalog ~catalog "keeper_unified");
+      check string "tool_use_strict catalog profile survives live resolution"
+        "tool_use_strict"
+        (Profile.resolve_live_with_catalog ~catalog "tool_use_strict");
       check string "legacy alias resolves through active default"
         "big_three"
         (Profile.resolve_live_with_catalog ~catalog "oas-keeper_unified");
@@ -145,7 +180,8 @@ let () =
         [ test_case "active names round-trip" `Quick test_round_trip;
           test_case "known_cascades covers active" `Quick test_known_cascades_covers_variants;
           test_case "legacy aliases collapse" `Quick test_legacy_aliases_collapse_to_big_three;
-          test_case "phase routing returns None" `Quick test_phase_routing_returns_none;
+          test_case "catalog-routed names return None" `Quick
+            test_catalog_routed_names_return_none;
           test_case "unknown falls back to default" `Quick test_unknown_falls_back_to_default;
           test_case "catalog_names follow live config" `Quick test_catalog_names_follow_live_config;
           test_case "resolve_live_with_catalog requires active membership" `Quick

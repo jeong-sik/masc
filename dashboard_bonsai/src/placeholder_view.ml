@@ -74,7 +74,7 @@ stylesheet
     min-height: 30px;
     padding: 7px 12px;
     border: 1px solid var(--accent-brass-dim);
-    background: linear-gradient(180deg, #241a12, #14100a);
+    background: linear-gradient(180deg, color-mix(in oklab, var(--bg-panel) 80%, var(--bg-deep)), var(--bg-deep));
     color: var(--text-primary);
     font-family: var(--font-ui, 'Noto Sans KR', sans-serif);
     font-size: 11px;
@@ -92,7 +92,7 @@ stylesheet
   .btn_primary {
     color: var(--accent-brass);
     border-color: var(--accent-brass);
-    background: linear-gradient(180deg, #3a2a16, #241810);
+    background: linear-gradient(180deg, color-mix(in oklab, var(--accent-brass) 20%, var(--bg-panel)), var(--bg-deep));
   }
 
   .cta_note {

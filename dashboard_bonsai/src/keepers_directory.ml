@@ -85,7 +85,7 @@ stylesheet
     align-items: center;
     padding: 10px 16px;
     border-bottom: 1px solid rgba(120, 100, 80, 0.16);
-    background: linear-gradient(180deg, #1c140e, #160f0a);
+    background: linear-gradient(180deg, color-mix(in oklab, var(--bg-panel) 80%, var(--bg-deep)), var(--bg-deep));
     font-family: var(--font-ui, 'Noto Sans KR', sans-serif);
     font-size: 11px;
     letter-spacing: 0.28em;
@@ -235,8 +235,8 @@ stylesheet
   }
 
   .vial_fill_warn {
-    background: linear-gradient(90deg, #8a6a20, #d4a940);
-    box-shadow: 0 0 6px rgba(212, 169, 64, 0.35);
+    background: linear-gradient(90deg, var(--accent-brass-dim), var(--accent-brass));
+    box-shadow: 0 0 6px color-mix(in oklab, var(--accent-brass) 35%, transparent);
   }
 
   .vial_fill_bad {

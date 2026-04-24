@@ -150,7 +150,44 @@ let kimi_provider_name = "kimi"
 let moonshot_base_url_env = "KIMI_BASE_URL"
 let moonshot_api_key_env = "KIMI_API_KEY_SB"
 let moonshot_default_base_url = "https://api.moonshot.ai/v1"
-let kimi_default_max_context = 256_000
+
+(* #9953: Resolve Kimi max_context from the OAS capabilities SSOT.
+
+   Prior code hard-coded [256_000] here, which drifted from the
+   OAS [Capabilities.kimi_capabilities.max_context_tokens] value
+   of [262_144] (the canonical 256 KiB binary context window).
+   Same-label [kimi] turns therefore recorded two different
+   [context_max] values depending on which config builder ran —
+   one symptom of the 3-way [claude_code:auto] drift documented
+   in the issue.
+
+   Resolution order:
+   1. Per-model capabilities override ({!Capabilities.for_model_id}
+      resolved id) — allows future per-variant overrides to take
+      effect without touching this file.
+   2. Provider-level [kimi_capabilities.max_context_tokens] from
+      the OAS SSOT.
+   3. Registry entry default (safety net for exotic configs).
+*)
+let resolve_kimi_max_context resolved_model_id =
+  let open Llm_provider in
+  let from_model =
+    Option.bind
+      (Capabilities.for_model_id resolved_model_id)
+      (fun c -> c.Capabilities.max_context_tokens)
+  in
+  match from_model with
+  | Some n -> n
+  | None ->
+    (match Capabilities.kimi_capabilities.max_context_tokens with
+     | Some n -> n
+     | None ->
+       (* OAS SSOT has always populated this; fall through to
+          registry entry only if OAS removes the field. *)
+       (match Provider_registry.find (Provider_registry.default ())
+                kimi_provider_name with
+        | Some entry -> entry.Provider_registry.max_context
+        | None -> 0))
 
 let is_kimi_provider provider_name =
   String.equal provider_name kimi_provider_name
@@ -201,7 +238,7 @@ let make_kimi_config ~temperature ~max_tokens ?system_prompt
     ~request_path:(moonshot_request_path ())
     ~temperature
     ~max_tokens
-    ~max_context:kimi_default_max_context
+    ~max_context:(resolve_kimi_max_context resolved_model_id)
     ?system_prompt
     ?supports_tool_choice_override
     ()

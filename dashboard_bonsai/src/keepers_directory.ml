@@ -344,6 +344,12 @@ stylesheet
       gap: 10px;
     }
   }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      transition-duration: 0.01ms !important;
+    }
+  }
 |}]
 
 let normalize_lookup_key value = String.lowercase (String.strip value)

@@ -209,6 +209,12 @@ stylesheet
     color: var(--text-dim);
     text-align: right;
   }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      transition-duration: 0.01ms !important;
+    }
+  }
 |}]
 
 let pill_color : Archive_runs_types.status -> Pill.color = function

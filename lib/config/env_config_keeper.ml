@@ -390,18 +390,28 @@ module KeeperKeepalive = struct
         get_float ~default:1.5 "MASC_KEEPER_OAS_TIMEOUT_PER_1K"
       in
       let per_turn =
-        get_float ~default:30.0 "MASC_KEEPER_OAS_TIMEOUT_PER_TURN"
+        (* #10008 fm2: bumped from 30.0 to 60.0. Recent-hour p50 turn
+           latency across the fleet is ~17min (#9933); 30s was the
+           "fantasy" value flagged in the issue body.  60s is still
+           well below observed p50 but doubles the budget allowance
+           without pushing the formula past [turn_timeout_sec] (1200 s
+           cap).  Operators who need more can raise
+           [MASC_KEEPER_OAS_TIMEOUT_PER_TURN] via env; the hard cap at
+           [Float.min turn_timeout_sec ...] below protects the fleet
+           from runaway budgets. *)
+        get_float ~default:60.0 "MASC_KEEPER_OAS_TIMEOUT_PER_TURN"
       in
       let input_time =
         Float.of_int (max 0 estimated_input_tokens) /. 1000.0 *. per_1k
       in
-      (* Cap at 40 effective turns even if the configured per-call turn
-         budget is higher. This is a deliberate safety cap: with
-         per_turn=30s, 40 turns alone consume 1200s — the entire
-         turn_timeout_sec budget. Users pushing beyond 40 turns should
-         instead raise turn_timeout_sec or split the work. *)
+      (* Cap at 20 effective turns even if the configured per-call turn
+         budget is higher.  With per_turn=60s, 20 turns consume 1200s —
+         the entire turn_timeout_sec budget.  Users pushing beyond 20
+         turns should instead raise turn_timeout_sec or split the
+         work.  Cap halved from 40 → 20 when per_turn default doubled
+         (30 → 60) so the boundary condition is preserved. *)
       let effective_turns =
-        Float.of_int (min max_turns 40)
+        Float.of_int (min max_turns 20)
       in
       let turn_time = effective_turns *. per_turn in
       Float.max 30.0

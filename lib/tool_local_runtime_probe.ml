@@ -35,6 +35,17 @@ type ollama_probe_think_mode =
   | Think_disabled
   | Think_enabled
 
+type generate_probe_skip_reason =
+  | No_effective_model
+  | Status_only
+  | Ps_preflight_error
+  | Model_unloaded
+  | Policy_skip
+
+type generate_probe_decision =
+  | Run_generate_probe
+  | Skip_generate_probe of generate_probe_skip_reason
+
 let bool_opt_to_json = Json_util.bool_opt_to_json
 
 let clamp ~min_value ~max_value value = max min_value (min max_value value)
@@ -105,6 +116,17 @@ let ollama_probe_think_mode_of_string raw =
 let effective_think_enabled = function
   | Think_enabled -> true
   | Think_auto | Think_disabled -> false
+
+let generate_probe_skip_reason_to_string = function
+  | No_effective_model -> "no_effective_model"
+  | Status_only -> "status_only"
+  | Ps_preflight_error -> "ps_error"
+  | Model_unloaded -> "model_unloaded"
+  | Policy_skip -> "policy_skip"
+
+let generate_probe_decision_to_string = function
+  | Run_generate_probe -> "run_generate"
+  | Skip_generate_probe reason -> generate_probe_skip_reason_to_string reason
 
 let string_or_fallback candidates =
   let rec loop = function
@@ -396,15 +418,34 @@ let model_is_loaded model_id loaded_models =
       | None -> false)
     loaded_models
 
+let decide_generate_probe ~effective_model ~before_status ~before_error
+    ~run_generate ~generate_when_unloaded ~effective_model_loaded_before =
+  match effective_model with
+  | None -> Skip_generate_probe No_effective_model
+  | Some _ when not run_generate -> Skip_generate_probe Status_only
+  | Some _ when Option.is_some before_error -> Skip_generate_probe Ps_preflight_error
+  | Some _ -> (
+      match before_status with
+      | Some 200 ->
+          if generate_when_unloaded || effective_model_loaded_before then
+            Run_generate_probe
+          else
+            Skip_generate_probe Model_unloaded
+      | _ ->
+          if generate_when_unloaded || effective_model_loaded_before then
+            Run_generate_probe
+          else
+            Skip_generate_probe Policy_skip)
+
 let should_attempt_generate_probe ~before_status ~before_error ~run_generate
     ~generate_when_unloaded ~effective_model_loaded_before =
-  if not run_generate then
-    false
-  else
-  match before_error, before_status with
-  | Some _, _ -> false
-  | None, Some 200 -> generate_when_unloaded || effective_model_loaded_before
-  | None, _ -> generate_when_unloaded || effective_model_loaded_before
+  match
+    decide_generate_probe ~effective_model:(Some "__probe_decision_compat__")
+      ~before_status ~before_error ~run_generate ~generate_when_unloaded
+      ~effective_model_loaded_before
+  with
+  | Run_generate_probe -> true
+  | Skip_generate_probe _ -> false
 
 let request_body_json ~think_enabled ~keep_alive ~model_id ~prompt ~max_tokens =
   let fields =
@@ -490,27 +531,24 @@ let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
     | Some model_id -> model_is_loaded model_id loaded_before
     | None -> false
   in
-  let runs, run_errors, generate_skipped_unloaded_model =
-    match effective_model with
-    | None ->
+  let generate_decision =
+    decide_generate_probe ~effective_model ~before_status ~before_error
+      ~run_generate ~generate_when_unloaded ~effective_model_loaded_before
+  in
+  let runs, run_errors =
+    match generate_decision, effective_model with
+    | Skip_generate_probe No_effective_model, _ ->
         ( [],
           [
             "No Ollama model was requested, loaded, or configured via OLLAMA_DEFAULT_MODEL.";
-          ],
-          false )
-    | Some _ when
-        not
-          (should_attempt_generate_probe ~before_status ~before_error
-             ~run_generate
-             ~generate_when_unloaded ~effective_model_loaded_before) ->
-        let skipped_unloaded_model =
-          match before_status, before_error with
-          | Some 200, None ->
-              not generate_when_unloaded && not effective_model_loaded_before
-          | _ -> false
-        in
-        ([], [], skipped_unloaded_model)
-    | Some model_id ->
+          ] )
+    | Skip_generate_probe _, _ -> ([], [])
+    | Run_generate_probe, None ->
+        ([],
+         [
+           "No Ollama model was requested, loaded, or configured via OLLAMA_DEFAULT_MODEL.";
+         ])
+    | Run_generate_probe, Some model_id ->
         let completed_runs =
           List.init probe_runs (fun idx -> idx + 1)
           |> List.map (fun run_index ->
@@ -521,16 +559,18 @@ let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
           completed_runs
           |> List.filter_map (fun run -> run.error)
         in
-        (completed_runs, run_errors, false)
+        (completed_runs, run_errors)
   in
   let generate_skip_reason =
-    match effective_model, runs with
-    | None, [] -> Some "no_effective_model"
-    | Some _, [] when not run_generate -> Some "status_only"
-    | Some _, [] when Option.is_some before_error -> Some "ps_error"
-    | Some _, [] when generate_skipped_unloaded_model -> Some "model_unloaded"
-    | Some _, [] -> Some "policy_skip"
-    | _ -> None
+    match generate_decision with
+    | Run_generate_probe -> None
+    | Skip_generate_probe reason ->
+        Some (generate_probe_skip_reason_to_string reason)
+  in
+  let generate_skipped_unloaded_model =
+    match generate_decision with
+    | Skip_generate_probe Model_unloaded -> true
+    | _ -> false
   in
   (match generate_skip_reason with
    | Some reason ->

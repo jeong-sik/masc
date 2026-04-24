@@ -241,6 +241,29 @@ let test_generate_probe_is_skipped_after_failed_preflight () =
        ~run_generate:true
        ~generate_when_unloaded:false ~effective_model_loaded_before:false)
 
+let test_generate_probe_decision_reports_typed_reasons () =
+  let decision ?(effective_model = Some "qwen3") ?before_status
+      ?before_error ?(run_generate = true) ?(generate_when_unloaded = true)
+      ?(effective_model_loaded_before = false) () =
+    Masc_mcp.Tool_local_runtime_probe.decide_generate_probe ~effective_model
+      ~before_status ~before_error ~run_generate ~generate_when_unloaded
+      ~effective_model_loaded_before
+    |> Masc_mcp.Tool_local_runtime_probe.generate_probe_decision_to_string
+  in
+  check string "no model reason" "no_effective_model"
+    (decision ~effective_model:None ());
+  check string "status-only reason" "status_only"
+    (decision ~run_generate:false ());
+  check string "preflight error reason" "ps_error"
+    (decision ~before_status:200 ~before_error:"curl exit code 28" ());
+  check string "cold model skip reason" "model_unloaded"
+    (decision ~before_status:200 ~generate_when_unloaded:false ());
+  check string "unknown preflight skip reason" "policy_skip"
+    (decision ~generate_when_unloaded:false ());
+  check string "resident model runs even with cold-load disabled" "run_generate"
+    (decision ~before_status:200 ~generate_when_unloaded:false
+       ~effective_model_loaded_before:true ())
+
 let () =
   run "tool_local_runtime_probe"
     [
@@ -282,5 +305,7 @@ let () =
             test_kv_cache_assessment_requires_two_successful_runs;
           test_case "skips generate after failed ps preflight" `Quick
             test_generate_probe_is_skipped_after_failed_preflight;
+          test_case "generate probe decision reports typed reasons" `Quick
+            test_generate_probe_decision_reports_typed_reasons;
         ] );
     ]

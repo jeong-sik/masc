@@ -2618,29 +2618,10 @@ let run_turn
            || has_positive_count_after_marker haystack "### Board Activity"
            || has_positive_count_after_marker haystack "Unclaimed tasks"
          in
-         let passive_status_tool_name = function
-           | "masc_status"
-           | "keeper_context_status"
-           | "masc_plan_get"
-           | "keeper_time_now"
-           | "keeper_board_list"
-           | "keeper_board_get"
-           | "keeper_tasks_list"
-           | "masc_tasks" ->
-               true
-           | _ -> false
-         in
-         let passive_only_actionable_turn_reason =
-           if actionable_signal_context
-              && actual_keeper_tool_names <> []
-              && List.for_all passive_status_tool_name actual_keeper_tool_names
-           then
-             Some
-               (Printf.sprintf
-                  "actionable keeper signal was present, but the model only used passive status/read tools: %s"
-                  (String.concat ", " actual_keeper_tool_names))
-           else
-             None
+         let actionable_tool_contract_violation_reason =
+           Keeper_tool_disclosure.actionable_tool_contract_violation_reason
+             ~actionable_signal_context
+             ~tool_names:actual_keeper_tool_names
          in
          (* Required-tool turns are filtered onto providers that declare
             tool support plus tool_choice support. If a text-only response
@@ -2655,13 +2636,13 @@ let run_turn
              Keeper_tool_disclosure.validate_completion_contract_presence
                ~contract:effective_completion_contract
                ~tool_present:!keeper_surface_tool_used_ref
-             , passive_only_actionable_turn_reason
+             , actionable_tool_contract_violation_reason
            with
            | Ok (), Some reason ->
                receipt_tool_contract_result_ref := "violated";
                Log.Keeper.error
                  "keeper:%s required tool contract violated \
-                  (turn=%d, tools=%d). Rejecting passive-only actionable turn. \
+                  (turn=%d, tools=%d). Rejecting no-op/passive actionable turn. \
                   Reason: %s"
                  meta.name result.turns
                  (List.length actual_keeper_tool_names)

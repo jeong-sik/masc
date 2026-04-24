@@ -2653,6 +2653,15 @@ let wrapped_claude_limit_error () =
          kind = Llm_provider.Http_client.Unknown;
        })
 
+let required_tool_contract_violation_error () =
+  Agent_sdk.Error.Agent
+    (CompletionContractViolation
+       {
+         contract = Agent_sdk.Completion_contract_id.Require_tool_use;
+         reason =
+           "required tool contract unsatisfied: tool_choice requested tool use, but the model returned no ToolUse block";
+       })
+
 let expect_degraded_retry label expected_cascade expected_reason = function
   | Some (retry : EC.degraded_retry) ->
       check string (label ^ " cascade") expected_cascade retry.next_cascade;
@@ -2832,6 +2841,18 @@ let test_next_fail_open_cascade_for_turn_allows_required_tool_rotation () =
   in
   expect_degraded_retry "required tool degraded retry"
     "tool_rerank" "hard_quota" degraded_retry
+
+let test_next_fail_open_cascade_for_turn_retries_required_tool_contract_violation () =
+  let degraded_retry =
+    UT.next_fail_open_cascade_for_turn
+      ~base_cascade:KC.default_cascade_name
+      ~effective_cascade:KC.tool_use_strict_cascade_name
+      ~tool_requirement:"required"
+      ~attempted_cascades:[ KC.tool_use_strict_cascade_name ]
+      (required_tool_contract_violation_error ())
+  in
+  expect_degraded_retry "required contract degraded retry"
+    KC.default_cascade_name "required_tool_contract_violation" degraded_retry
 
 (* context_overflow_limit is now in OAS as Retry.extract_context_limit.
    These tests verify the OAS SSOT API is accessible from MASC. *)
@@ -3841,6 +3862,39 @@ let test_validate_completion_contract_presence_requires_keeper_surface_tool () =
   | Error e ->
     check bool "error mentions keeper-surface tools" true
       (contains_substring e "keeper-surface tools")
+
+let test_actionable_tool_contract_flags_no_tools () =
+  match
+    KTD.actionable_tool_contract_violation_reason
+      ~actionable_signal_context:true
+      ~tool_names:[]
+  with
+  | Some reason ->
+      check bool "reason mentions no keeper tools" true
+        (contains_substring reason "no keeper tools")
+  | None -> fail "expected actionable no-tool violation"
+
+let test_actionable_tool_contract_flags_passive_only_tools () =
+  match
+    KTD.actionable_tool_contract_violation_reason
+      ~actionable_signal_context:true
+      ~tool_names:[ "keeper_board_get"; "masc_status" ]
+  with
+  | Some reason ->
+      check bool "reason mentions passive tools" true
+        (contains_substring reason "passive status/read tools")
+  | None -> fail "expected actionable passive-only violation"
+
+let test_actionable_tool_contract_allows_execution_tools () =
+  check (option string) "execution tool satisfies actionable signal" None
+    (KTD.actionable_tool_contract_violation_reason
+       ~actionable_signal_context:true
+       ~tool_names:[ "keeper_bash"; "masc_status" ]);
+  check (option string) "non-actionable no-op remains allowed" None
+    (KTD.actionable_tool_contract_violation_reason
+       ~actionable_signal_context:false
+       ~tool_names:[])
+
 let test_tool_usage_delta_uses_registry_counts () =
   let before =
     [
@@ -4822,6 +4876,12 @@ let () =
             "completion contract presence requires keeper-surface tool"
             `Quick
             test_validate_completion_contract_presence_requires_keeper_surface_tool;
+          test_case "actionable signal rejects no tools" `Quick
+            test_actionable_tool_contract_flags_no_tools;
+          test_case "actionable signal rejects passive-only tools" `Quick
+            test_actionable_tool_contract_flags_passive_only_tools;
+          test_case "actionable signal allows execution tools" `Quick
+            test_actionable_tool_contract_allows_execution_tools;
           test_case "tool usage delta uses registry counts" `Quick
             test_tool_usage_delta_uses_registry_counts;
           test_case "tool usage delta ignores removed tools" `Quick
@@ -5083,6 +5143,9 @@ let () =
           test_case "required tool turns rotate without dropping requirement"
             `Quick
             test_next_fail_open_cascade_for_turn_allows_required_tool_rotation;
+          test_case "required tool contract violations rotate retry lane"
+            `Quick
+            test_next_fail_open_cascade_for_turn_retries_required_tool_contract_violation;
         ] );
       ( "tool_classification",
         [

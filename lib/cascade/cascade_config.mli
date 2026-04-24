@@ -125,9 +125,10 @@ val order_weighted_entries :
     snapshots can preserve dynamic health ordering without rereading raw
     [cascade.json].
 
-    When [rotation_scope] is provided, each [provider:auto] expansion is
-    round-robined independently within that scope before the usual
-    weight/health ordering is applied. *)
+    When [rotation_scope] is provided, equal-weight top-level provider entries
+    are round-robined within that scope, and each [provider:auto] expansion is
+    round-robined independently before the usual weight/health ordering is
+    applied. *)
 
 (** Like {!parse_model_string} but returns a [Result] with a diagnostic
     error message explaining why parsing failed (unknown provider, missing

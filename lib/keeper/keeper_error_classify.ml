@@ -209,7 +209,9 @@ let degraded_retry_after_recoverable_error
         None
 
 let recoverable_cascade_failure_reason (err : Oas.Error.sdk_error) =
-  if Oas_worker_named.sdk_error_is_hard_quota err then
+  if is_required_tool_contract_violation err then
+    Some "required_tool_contract_violation"
+  else if Oas_worker_named.sdk_error_is_hard_quota err then
     Some "hard_quota"
   else
     match Oas_worker_named.classify_masc_internal_error err with

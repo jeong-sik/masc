@@ -164,7 +164,7 @@ stylesheet
     font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace;
     font-size: 11px;
     letter-spacing: 0.12em;
-    color: #4a3a32;
+    color: var(--text-dim);
   }
 
   .heartbeat_track {
@@ -322,7 +322,7 @@ stylesheet
     color: var(--text-dim);
   }
 
-  .input_shell_label { letter-spacing: 0.2em; text-transform: uppercase; color: #4a3a32; font-size: 11px; }
+  .input_shell_label { letter-spacing: 0.2em; text-transform: uppercase; color: var(--text-dim); font-size: 11px; }
   .input_shell_value { font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 11px; color: var(--text-primary); }
 
   .toolbar_spacer { flex: 1; }
@@ -573,7 +573,7 @@ stylesheet
     font-size: 11px;
     letter-spacing: 0.18em;
     text-transform: uppercase;
-    color: #4a3a32;
+    color: var(--text-dim);
   }
 
   .level {
@@ -653,12 +653,12 @@ stylesheet
   .empty_attr {
     display: block;
     margin-top: 0.75rem;
-    font-size: 10px;
+    font-size: 11px;
     letter-spacing: 0.3em;
     text-transform: uppercase;
     font-family: 'Noto Sans KR', -apple-system, sans-serif;
     font-style: normal;
-    color: #4a3a32;
+    color: var(--text-dim);
   }
 
   /* Wrapper kept for backward compatibility with the existing render

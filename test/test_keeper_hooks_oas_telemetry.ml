@@ -133,6 +133,53 @@ let test_emit_cost_event_writes_wall_tok_s_without_provider_timings () =
      | `Null -> true
      | _ -> false)
 
+let test_emit_cost_event_marks_untrusted_usage () =
+  let root = temp_dir () in
+  let telemetry : Agent_sdk.Types.inference_telemetry =
+    {
+      system_fingerprint = None;
+      timings = None;
+      reasoning_tokens = None;
+      request_latency_ms = 250;
+      peak_memory_gb = None;
+      provider_kind = Some Llm_provider.Provider_kind.Ollama;
+      reasoning_effort = None;
+      canonical_model_id = Some "ollama:qwen3.6:27b-coding-nvfp4";
+      effective_context_window = Some 128000;
+      provider_internal_action_count = None;
+    }
+  in
+  Hooks.emit_cost_event ~masc_root:root ~agent_name:"keeper"
+    ~task_id:None ~model:"ollama:qwen3.6:27b-coding-nvfp4"
+    ~input_tokens:2_000_000 ~output_tokens:50 ~cost_usd:0.99
+    ~telemetry ();
+  let json = read_jsonl_line (Filename.concat root "costs.jsonl") in
+  check string "usage trust" "untrusted"
+    (json |> member "usage_trust" |> to_string);
+  check bool "usage anomaly" true
+    (json |> member "usage_anomaly" |> to_bool);
+  let reasons =
+    json |> member "usage_anomaly_reasons" |> to_list |> List.map to_string
+  in
+  check bool "reason includes absurd input" true
+    (List.mem "input_tokens_gt_1m" reasons);
+  check bool "reason includes context overrun" true
+    (List.mem "input_tokens_gt_2x_context_max" reasons);
+  check int "safe input tokens" 0
+    (json |> member "input_tokens" |> to_int);
+  check int "safe output tokens" 0
+    (json |> member "output_tokens" |> to_int);
+  check (float 0.001) "safe cost" 0.0
+    (json |> member "cost_usd" |> to_float);
+  check int "raw input tokens retained" 2_000_000
+    (json |> member "raw_input_tokens" |> to_int);
+  check int "raw output tokens retained" 50
+    (json |> member "raw_output_tokens" |> to_int);
+  check bool "wall tok/s omitted" true
+    (match json |> member "tokens_per_second" with
+     | `Null -> true
+     | _ -> false)
+
 let test_cost_usd_for_usage_falls_back_for_paid_provider () =
   let model = "openai:gpt-4.1" in
   let usage = make_usage ~input_tokens:1000 ~output_tokens:500 () in
@@ -398,6 +445,8 @@ let () =
             test_emit_cost_event_uses_typed_provider_kind_for_bare_model
         ; test_case "emit_cost_event computes wall tok/s without native timings" `Quick
             test_emit_cost_event_writes_wall_tok_s_without_provider_timings
+        ; test_case "emit_cost_event marks untrusted usage" `Quick
+            test_emit_cost_event_marks_untrusted_usage
         ; test_case "cost fallback estimates paid provider usage" `Quick
             test_cost_usd_for_usage_falls_back_for_paid_provider
         ; test_case "cost fallback preserves reported cost" `Quick

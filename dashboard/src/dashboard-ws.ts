@@ -12,6 +12,7 @@ type JsonObject = Record<string, unknown>
 type PendingRpc = {
   resolve: (value: unknown) => void
   reject: (err: Error) => void
+  timeout: ReturnType<typeof setTimeout>
 }
 type DashboardRouteState = Pick<RouteState, 'tab' | 'params'>
 
@@ -20,6 +21,13 @@ interface DashboardWsDiscovery {
   listening?: boolean
   ws_url?: string
 }
+
+interface DashboardWsDiscoveryResult {
+  wsUrl: string | null
+  retry: boolean
+}
+
+const DASHBOARD_WS_RPC_TIMEOUT_MS = 15_000
 
 let socket: WebSocket | null = null
 let rpcId = 0
@@ -86,6 +94,14 @@ function clearReconnectTimer(): void {
   }
 }
 
+function rejectPendingRpcs(err: Error): void {
+  for (const { reject, timeout } of pending.values()) {
+    clearTimeout(timeout)
+    reject(err)
+  }
+  pending.clear()
+}
+
 function scheduleReconnect(): void {
   if (!shouldReconnect) return
   if (reconnectTimer) return
@@ -106,20 +122,20 @@ function closeSocket(): void {
     socket.close()
     socket = null
   }
-  for (const { reject } of pending.values()) {
-    reject(new Error('dashboard websocket closed'))
-  }
-  pending.clear()
+  rejectPendingRpcs(new Error('dashboard websocket closed'))
 }
 
-async function discoverWsUrl(): Promise<string | null> {
+async function discoverWsUrl(): Promise<DashboardWsDiscoveryResult> {
   const response = await fetch('/ws', { credentials: 'same-origin' })
-  if (!response.ok) return null
+  if (!response.ok) return { wsUrl: null, retry: true }
   const data = await response.json() as DashboardWsDiscovery
-  if (data.enabled !== true || data.listening !== true || typeof data.ws_url !== 'string') {
-    return null
+  if (data.enabled !== true) {
+    return { wsUrl: null, retry: false }
   }
-  return data.ws_url
+  if (data.listening !== true || typeof data.ws_url !== 'string') {
+    return { wsUrl: null, retry: true }
+  }
+  return { wsUrl: data.ws_url, retry: false }
 }
 
 function sendRpc(method: string, params: JsonObject): Promise<unknown> {
@@ -130,11 +146,16 @@ function sendRpc(method: string, params: JsonObject): Promise<unknown> {
   const id = ++rpcId
   const payload = { jsonrpc: '2.0', id, method, params }
   return new Promise((resolve, reject) => {
-    pending.set(id, { resolve, reject })
+    const timeout = setTimeout(() => {
+      if (!pending.delete(id)) return
+      reject(new Error(`dashboard websocket rpc timed out: ${method}`))
+    }, DASHBOARD_WS_RPC_TIMEOUT_MS)
+    pending.set(id, { resolve, reject, timeout })
     try {
       currentSocket.send(JSON.stringify(payload))
     } catch (err) {
       pending.delete(id)
+      clearTimeout(timeout)
       reject(err instanceof Error ? err : new Error(String(err)))
     }
   })
@@ -145,6 +166,7 @@ function handleRpcResponse(raw: JsonObject): boolean {
   const pendingRpc = pending.get(raw.id)
   if (!pendingRpc) return true
   pending.delete(raw.id)
+  clearTimeout(pendingRpc.timeout)
   const error = raw.error as { message?: unknown } | undefined
   if (error) {
     pendingRpc.reject(new Error(typeof error.message === 'string' ? error.message : 'dashboard websocket rpc failed'))
@@ -289,16 +311,25 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
   shouldReconnect = true
   clearReconnectTimer()
   const generation = ++connectGeneration
-  let wsUrl: string | null
+  let discovery: DashboardWsDiscoveryResult
   try {
-    wsUrl = await discoverWsUrl()
+    discovery = await discoverWsUrl()
   } catch (err) {
     if (generation === connectGeneration && shouldReconnect) {
       dashboardWsLastError.value = err instanceof Error ? err.message : String(err)
+      scheduleReconnect()
     }
     return
   }
-  if (!wsUrl || !shouldReconnect || generation !== connectGeneration) return
+  const wsUrl = discovery.wsUrl
+  if (!wsUrl) {
+    if (generation === connectGeneration && shouldReconnect && discovery.retry) {
+      dashboardWsLastError.value = 'dashboard websocket unavailable'
+      scheduleReconnect()
+    }
+    return
+  }
+  if (!shouldReconnect || generation !== connectGeneration) return
 
   closeSocket()
   const ws = new WebSocket(wsUrl)
@@ -339,6 +370,7 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
     dashboardWsReady.value = false
     lastSubscribeKey = ''
     socket = null
+    rejectPendingRpcs(new Error('dashboard websocket closed'))
     scheduleReconnect()
   }
 }

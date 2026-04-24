@@ -260,6 +260,15 @@ let update_synapse graph (synapse : synapse) : synapse_graph =
   ) graph.synapses) in
   { graph with synapses = updated }
 
+(* #9876: Prometheus counter for Hebbian edge updates.  The graph
+   sits dormant across 7h+ of fleet traffic (synapses written once
+   at boot, [last_updated] never advances) and operators had no
+   fleet-wide signal distinguishing "hook never fires" from "write
+   fails silently" from "weaken called but no synapse existed".
+   One counter with an [outcome] label surfaces each path so the
+   dormant-graph diagnosis has ground truth. *)
+let edge_update_outcome_metric = "masc_hebbian_edge_update_total"
+
 (** Strengthen connection - synchronous *)
 let strengthen config ?params ~from_agent ~to_agent () : unit =
   let params = Option.value params ~default:(default_params ()) in
@@ -280,15 +289,24 @@ let strengthen config ?params ~from_agent ~to_agent () : unit =
     } in
     let new_graph = update_synapse graph updated in
     save_graph config new_graph
-  )
+  );
+  Prometheus.inc_counter edge_update_outcome_metric
+    ~labels:[ ("outcome", "strengthened") ] ()
 
 (** Weaken connection - synchronous *)
 let weaken config ?params ~from_agent ~to_agent () : unit =
   let params = Option.value params ~default:(default_params ()) in
+  let outcome = ref "weaken_no_synapse" in
   with_graph_lock config (fun () ->
     let graph = load_graph config in
     match find_synapse graph ~from_agent ~to_agent with
-    | None -> ()  (* No synapse to weaken *)
+    | None ->
+      (* #9876: keep outcome="weaken_no_synapse" so Grafana can see
+         "fleet tried to weaken A→B but no edge existed" — silent
+         drop used to hide one failure mode where failure-side
+         learning never persisted because the matching strengthen
+         event never ran first. *)
+      ()
     | Some synapse ->
       let new_weight = max 0.0 (synapse.weight -. params.weaken_rate) in
       let now = Time_compat.now () in
@@ -300,8 +318,11 @@ let weaken config ?params ~from_agent ~to_agent () : unit =
         weight_history = append_history ~ts:now ~w:new_weight synapse.weight_history;
       } in
       let new_graph = update_synapse graph updated in
-      save_graph config new_graph
-  )
+      save_graph config new_graph;
+      outcome := "weakened"
+  );
+  Prometheus.inc_counter edge_update_outcome_metric
+    ~labels:[ ("outcome", !outcome) ] ()
 
 (** Get preferred collaboration partner - synchronous *)
 let get_preferred_partner config ~agent_id : string option =

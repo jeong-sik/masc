@@ -276,6 +276,33 @@ let test_evaluate_keeper_auto_rules_plan_requires_both_low () =
   in
   check bool "public evaluator uses same plan contract" false eval.plan
 
+(* #10012: status_tick / heartbeat / empty-reply turns used to trigger
+   plan because the [goal_alignment_score] fallback was 0.0 — conflating
+   "no data to measure alignment" with "total misalignment". The plan
+   gate [goal_alignment <= 0.060] then fired on every such turn.  The
+   fixed sentinel is 1.0 ("perfect alignment" ≡ "no intervention
+   needed when we cannot measure"); the complement [goal_drift = 0.0]
+   also reads clean, so neither the plan gate nor the drift-alert
+   gate false-fires. *)
+let test_goal_alignment_score_missing_messages_returns_sentinel () =
+  let meta = keeper_meta ~name:"ga-keeper" ~mention_targets:["ga-keeper"] () in
+  (* goal_horizon_candidates may return [] for the bare meta — this case
+     is the first arm of the fix (goals = [] → 1.0). *)
+  let empty_goals_score =
+    Keeper_memory_recall.goal_alignment_score
+      ~meta ~user_message:None ~assistant_reply:None
+  in
+  check (float 0.001)
+    "goal_alignment=1.0 when no goals AND no messages (#10012)"
+    1.0 empty_goals_score;
+  let missing_both_score =
+    Keeper_memory_recall.goal_alignment_score
+      ~meta ~user_message:None ~assistant_reply:None
+  in
+  check (float 0.001)
+    "goal_alignment=1.0 when both messages missing (#10012)"
+    1.0 missing_both_score
+
 (* --- history recall tests --- *)
 
 let test_tmpdir () =
@@ -1194,6 +1221,8 @@ let () =
             test_auto_rule_eval_of_measurement_plan_requires_both_low;
           test_case "public evaluator plan requires both low" `Quick
             test_evaluate_keeper_auto_rules_plan_requires_both_low;
+          test_case "goal_alignment_score returns sentinel on missing messages (#10012)" `Quick
+            test_goal_alignment_score_missing_messages_returns_sentinel;
         ] );
       ( "e2e_memory_pipeline",
         [

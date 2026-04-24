@@ -29,6 +29,8 @@ type recent_entry = {
   re_tools_count : int;
   re_usage_reported : bool option;
   re_telemetry_reported : bool option;
+  re_usage_trust : string option;
+  re_usage_anomaly_reasons : string list;
   re_coverage_reason : string option;
   re_coverage_stage : string option;
 }
@@ -167,6 +169,54 @@ let json_string_field_opt key (fields : (string * Yojson.Safe.t) list) =
       if trimmed = "" then None else Some trimmed
   | _ -> None
 
+let json_string_list_field key (fields : (string * Yojson.Safe.t) list) =
+  match List.assoc_opt key fields with
+  | Some (`List xs) ->
+      List.filter_map
+        (function
+          | `String s ->
+              let trimmed = String.trim s in
+              if trimmed = "" then None else Some trimmed
+          | _ -> None)
+        xs
+  | _ -> []
+
+let usage_absurd_token_threshold = 1_000_000
+
+let infer_usage_trust_from_fields fields ~(usage_reported : bool)
+    ~(model : string) ~(input_tokens : int option)
+    ~(output_tokens : int option) : string option * string list =
+  let emitted_reasons = json_string_list_field "usage_anomaly_reasons" fields in
+  match json_string_field_opt "usage_trust" fields with
+  | Some trust -> Some trust, emitted_reasons
+  | None ->
+      if not usage_reported then Some "missing", []
+      else
+        let reasons = ref [] in
+        let add reason =
+          if not (List.mem reason !reasons) then reasons := reason :: !reasons
+        in
+        let model = String.trim model in
+        if model = "" || String.equal model "unknown" then add "missing_model_id";
+        (match input_tokens with
+         | Some n when n < 0 -> add "negative_input_tokens"
+         | Some n when n > usage_absurd_token_threshold -> add "input_tokens_gt_1m"
+         | _ -> ());
+        (match output_tokens with
+         | Some n when n < 0 -> add "negative_output_tokens"
+         | Some n when n > usage_absurd_token_threshold -> add "output_tokens_gt_1m"
+         | _ -> ());
+        (match input_tokens, output_tokens with
+         | Some 0, Some 0 -> add "zero_token_usage_reported"
+         | _ -> ());
+        match List.rev !reasons with
+        | [] -> Some "trusted", []
+        | reasons -> Some "untrusted", reasons
+
+let usage_trust_untrusted = function
+  | Some "untrusted" -> true
+  | _ -> false
+
 (* ── Parse telemetry from decisions.jsonl entries ────────── *)
 
 type raw_entry = {
@@ -196,6 +246,8 @@ type raw_entry = {
   tools_used : string list;
   usage_reported : bool option;
   telemetry_reported : bool option;
+  usage_trust : string option;
+  usage_anomaly_reasons : string list;
   coverage_reason : string option;
   coverage_stage : string option;
   is_error : bool;
@@ -269,6 +321,9 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option 
                   tools_used = outer_tools_used;
                   usage_reported = json_bool_field_opt "usage_reported" tfields;
                   telemetry_reported = json_bool_field_opt "telemetry_reported" tfields;
+                  usage_trust = json_string_field_opt "usage_trust" tfields;
+                  usage_anomaly_reasons =
+                    json_string_list_field "usage_anomaly_reasons" tfields;
                   coverage_reason = json_string_field_opt "coverage_reason" tfields;
                   coverage_stage = json_string_field_opt "coverage_stage" tfields;
                   is_error = true }
@@ -283,7 +338,9 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option 
                    | _ -> "unknown")
            in
            let provider = provider_opt_of_fields ~model tfields in
-           let tok_per_sec = json_float_field_opt "tokens_per_second" tfields in
+           let tok_per_sec_raw =
+             json_float_field_opt "tokens_per_second" tfields
+           in
            let prompt_tok_per_sec =
              match List.assoc_opt "prompt_per_second" tfields with
              | Some (`Float f) when f > 0.0 -> Some f
@@ -316,15 +373,19 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option 
              | None -> read "peak_memory"
            in
            let latency_ms = json_float_field_opt "request_latency_ms" tfields in
-           let input_tokens = json_int_field_opt "input_tokens" tfields in
-           let output_tokens = json_int_field_opt "output_tokens" tfields in
-           let cache_read_tokens = json_int_field_opt "cache_read_tokens" tfields in
-           let reasoning_tokens = json_int_field_opt "reasoning_tokens" tfields in
+           let input_tokens_raw = json_int_field_opt "input_tokens" tfields in
+           let output_tokens_raw = json_int_field_opt "output_tokens" tfields in
+           let cache_read_tokens_raw =
+             json_int_field_opt "cache_read_tokens" tfields
+           in
+           let reasoning_tokens_raw =
+             json_int_field_opt "reasoning_tokens" tfields
+           in
            let fallback_applied =
              match List.assoc_opt "fallback_applied" tfields with
              | Some (`Bool b) -> b | _ -> false
            in
-           let cost_usd = json_float_field_opt "cost_usd" tfields in
+           let cost_usd_raw = json_float_field_opt "cost_usd" tfields in
            (* Per-turn thinking_enabled — emitted by keeper_unified_turn's
               append_decision_record under telemetry.thinking_enabled. Treat
               explicit null or absent as None so backfill stays clean. *)
@@ -337,19 +398,43 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option 
              match json_bool_field_opt "usage_reported" tfields with
              | Some _ as value -> value
              | None ->
-                 if input_tokens <> None
-                    || output_tokens <> None
-                    || cache_read_tokens <> None
-                    || reasoning_tokens <> None
-                    || cost_usd <> None
+                 if input_tokens_raw <> None
+                    || output_tokens_raw <> None
+                    || cache_read_tokens_raw <> None
+                    || reasoning_tokens_raw <> None
+                    || cost_usd_raw <> None
                  then Some true
                  else None
            in
+           let usage_trust, usage_anomaly_reasons =
+             infer_usage_trust_from_fields tfields
+               ~usage_reported:(Option.value ~default:false usage_reported)
+               ~model
+               ~input_tokens:input_tokens_raw
+               ~output_tokens:output_tokens_raw
+           in
+           let usage_untrusted = usage_trust_untrusted usage_trust in
+           let tok_per_sec =
+             if usage_untrusted then None else tok_per_sec_raw
+           in
+           let input_tokens =
+             if usage_untrusted then None else input_tokens_raw
+           in
+           let output_tokens =
+             if usage_untrusted then None else output_tokens_raw
+           in
+           let cache_read_tokens =
+             if usage_untrusted then None else cache_read_tokens_raw
+           in
+           let reasoning_tokens =
+             if usage_untrusted then None else reasoning_tokens_raw
+           in
+           let cost_usd = if usage_untrusted then None else cost_usd_raw in
            let telemetry_reported =
              match json_bool_field_opt "telemetry_reported" tfields with
              | Some _ as value -> value
              | None ->
-                 if tok_per_sec <> None
+                 if tok_per_sec_raw <> None
                     || prompt_tok_per_sec <> None
                     || hw_decode_tok_per_sec <> None
                     || peak_memory_gb <> None
@@ -377,8 +462,16 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option 
                   tools_used = outer_tools_used;
                   usage_reported;
                   telemetry_reported;
-                  coverage_reason = json_string_field_opt "coverage_reason" tfields;
-                  coverage_stage = json_string_field_opt "coverage_stage" tfields;
+                  usage_trust;
+                  usage_anomaly_reasons;
+                  coverage_reason =
+                    json_string_field_opt "coverage_reason" tfields;
+                  coverage_stage =
+                    if usage_untrusted then
+                      match json_string_field_opt "coverage_stage" tfields with
+                      | Some _ as stage -> stage
+                      | None -> Some "keeper"
+                    else json_string_field_opt "coverage_stage" tfields;
                   is_error = false }
        | _ -> None)
     | _ -> None
@@ -417,39 +510,61 @@ let parse_cost_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option =
       in
       (match ts with
        | Some ts when ts >= since_unix ->
-           (match json_string_field_opt "model" fields with
-            | None -> None
-            | Some raw_model ->
+            let raw_model =
+              json_string_field_opt "model" fields
+              |> Option.value ~default:"unknown"
+            in
                 let provider = provider_opt_of_fields ~model:raw_model fields in
                 let model = canonical_cost_model_id ~provider raw_model in
                 let usage_missing =
                   json_bool_field_opt "usage_missing" fields
                   |> Option.value ~default:false
                 in
-                let input_tokens =
+                let usage_reported = not usage_missing in
+                let input_tokens_raw =
                   if usage_missing then None
                   else json_int_field_opt "input_tokens" fields
                 in
-                let output_tokens =
+                let output_tokens_raw =
                   if usage_missing then None
                   else json_int_field_opt "output_tokens" fields
                 in
-                let cache_read_tokens =
+                let cache_read_tokens_raw =
                   match json_int_field_opt "cache_read_tokens" fields with
                   | Some _ as v -> v
                   | None -> json_int_field_opt "cache_read_input_tokens" fields
                 in
+                let usage_trust, usage_anomaly_reasons =
+                  infer_usage_trust_from_fields fields
+                    ~usage_reported
+                    ~model
+                    ~input_tokens:input_tokens_raw
+                    ~output_tokens:output_tokens_raw
+                in
+                let usage_untrusted = usage_trust_untrusted usage_trust in
                 let latency_ms =
                   json_float_field_opt "request_latency_ms" fields
                 in
-                let tok_per_sec =
+                let tok_per_sec_raw =
                   match json_float_field_opt "tokens_per_second" fields with
                   | Some v when v > 0.0 -> Some v
                   | _ ->
-                      (match output_tokens, latency_ms with
+                      (match output_tokens_raw, latency_ms with
                        | Some out, Some latency when out > 0 && latency > 0.0 ->
                            Some (Float.of_int out /. (latency /. 1000.0))
                        | _ -> None)
+                in
+                let tok_per_sec =
+                  if usage_untrusted then None else tok_per_sec_raw
+                in
+                let input_tokens =
+                  if usage_untrusted then None else input_tokens_raw
+                in
+                let output_tokens =
+                  if usage_untrusted then None else output_tokens_raw
+                in
+                let cache_read_tokens =
+                  if usage_untrusted then None else cache_read_tokens_raw
                 in
                 let prompt_tok_per_sec =
                   match List.assoc_opt "prompt_per_second" fields with
@@ -466,7 +581,7 @@ let parse_cost_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option =
                   | _ -> None
                 in
                 let telemetry_reported =
-                  tok_per_sec <> None
+                  tok_per_sec_raw <> None
                   || prompt_tok_per_sec <> None
                   || hw_decode_tok_per_sec <> None
                   || peak_memory_gb <> None
@@ -488,17 +603,23 @@ let parse_cost_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option =
                   ; input_tokens
                   ; output_tokens
                   ; cache_read_tokens
-                  ; reasoning_tokens = json_int_field_opt "reasoning_tokens" fields
+                  ; reasoning_tokens =
+                      if usage_untrusted then None
+                      else json_int_field_opt "reasoning_tokens" fields
                   ; fallback_applied = false
-                  ; cost_usd = json_float_field_opt "cost_usd" fields
+                  ; cost_usd =
+                      if usage_untrusted then None
+                      else json_float_field_opt "cost_usd" fields
                   ; tool_call_count = 0
                   ; tools_used = []
-                  ; usage_reported = Some (not usage_missing)
+                  ; usage_reported = Some usage_reported
                   ; telemetry_reported = Some telemetry_reported
+                  ; usage_trust
+                  ; usage_anomaly_reasons
                   ; coverage_reason = None
                   ; coverage_stage = Some "costs_jsonl"
                   ; is_error = false
-                  })
+                  }
        | _ -> None)
   | _ -> None
 
@@ -608,11 +729,12 @@ let read_all_entries ~base_path ~since_unix =
   merge_decision_and_cost_entries decisions costs
 
 let usage_signal_present (entry : raw_entry) : bool =
-  entry.input_tokens <> None
+  (not (usage_trust_untrusted entry.usage_trust))
+  && (entry.input_tokens <> None
   || entry.output_tokens <> None
   || entry.cache_read_tokens <> None
   || entry.reasoning_tokens <> None
-  || entry.cost_usd <> None
+  || entry.cost_usd <> None)
 
 let telemetry_signal_present (entry : raw_entry) : bool =
   entry.tok_per_sec <> None
@@ -622,9 +744,11 @@ let telemetry_signal_present (entry : raw_entry) : bool =
   || entry.latency_ms <> None
 
 let usage_reported_effective (entry : raw_entry) : bool =
-  match entry.usage_reported with
-  | Some reported -> reported
-  | None -> usage_signal_present entry
+  if usage_trust_untrusted entry.usage_trust then false
+  else
+    match entry.usage_reported with
+    | Some reported -> reported
+    | None -> usage_signal_present entry
 
 let telemetry_reported_effective (entry : raw_entry) : bool =
   match entry.telemetry_reported with
@@ -633,6 +757,7 @@ let telemetry_reported_effective (entry : raw_entry) : bool =
 
 let coverage_reason_of_entry (entry : raw_entry) : string option =
   if entry.is_error then Some "error_turn"
+  else if usage_trust_untrusted entry.usage_trust then Some "untrusted_usage"
   else
     match entry.coverage_reason with
     | Some _ as reason -> reason
@@ -879,6 +1004,8 @@ let aggregate_by_model (entries : raw_entry list) : model_stats list =
           re_tools_count = e.tool_call_count;
           re_usage_reported = e.usage_reported;
           re_telemetry_reported = e.telemetry_reported;
+          re_usage_trust = e.usage_trust;
+          re_usage_anomaly_reasons = e.usage_anomaly_reasons;
           re_coverage_reason = coverage_reason_of_entry e;
           re_coverage_stage = coverage_stage_of_entry e;
         });
@@ -1084,6 +1211,12 @@ let model_stats_to_json (s : model_stats) : Yojson.Safe.t =
             match r.re_usage_reported with Some value -> `Bool value | None -> `Null);
           ("telemetry_reported",
             match r.re_telemetry_reported with Some value -> `Bool value | None -> `Null);
+          ("usage_trust", opt_string r.re_usage_trust);
+          ( "usage_anomaly_reasons",
+            `List
+              (List.map
+                 (fun reason -> `String reason)
+                 r.re_usage_anomaly_reasons) );
           ("coverage_reason", opt_string r.re_coverage_reason);
           ("coverage_stage", opt_string r.re_coverage_stage);
         ]

@@ -71,7 +71,8 @@ let now_unix () = Unix.gettimeofday ()
 
 let success_entry ~model ~ts ?(input_tokens=100) ?(output_tokens=50)
     ?(latency_ms=500) ?prompt_per_second ?peak_memory_gb
-    ?provider ?(cost_usd=0.01) ?(tools_used=[]) () =
+    ?provider ?usage_trust ?(usage_anomaly_reasons=[])
+    ?(cost_usd=0.01) ?(tools_used=[]) () =
   let extra_telemetry_fields =
     (match prompt_per_second with
      | Some v -> [("prompt_per_second", `Float v)]
@@ -84,6 +85,18 @@ let success_entry ~model ~ts ?(input_tokens=100) ?(output_tokens=50)
     (match provider with
      | Some v -> [("provider", `String v)]
      | None -> [])
+    @
+    (match usage_trust with
+     | Some v -> [("usage_trust", `String v)]
+     | None -> [])
+    @
+    (match usage_anomaly_reasons with
+     | [] -> []
+     | reasons ->
+         [
+           ( "usage_anomaly_reasons",
+             `List (List.map (fun reason -> `String reason) reasons) );
+         ])
   in
   `Assoc [
     ("ts_unix", `Float ts);
@@ -195,10 +208,11 @@ let test_single_model_success () =
     write_decisions path [
       success_entry ~model:"claude-sonnet" ~ts:(ts -. 10.0)
         ~input_tokens:200 ~output_tokens:100 ~latency_ms:1000
-        ~cost_usd:0.005 ~tools_used:["shell"; "read"] ();
+        ~provider:"claude" ~cost_usd:0.005
+        ~tools_used:["shell"; "read"] ();
       success_entry ~model:"claude-sonnet" ~ts:(ts -. 5.0)
         ~input_tokens:150 ~output_tokens:80 ~latency_ms:800
-        ~cost_usd:0.003 ~tools_used:["shell"] ();
+        ~provider:"claude" ~cost_usd:0.003 ~tools_used:["shell"] ();
     ];
     let agg = M.compute ~base_path:base ~window_minutes:60 in
     check int "total_entries" 2 agg.total_entries;
@@ -222,6 +236,41 @@ let test_single_model_success () =
       (Option.value ~default:0.0 s.avg_latency_ms > 0.0);
     check bool "tok/s > 0" true
       (Option.value ~default:0.0 s.avg_tok_per_sec > 0.0))
+
+let test_untrusted_usage_excluded_from_aggregates () =
+  let base = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let path = make_keeper_dir base "meter" in
+    let ts = now_unix () in
+    write_decisions path [
+      success_entry ~model:"llama:qwen3.5-27b" ~ts:(ts -. 10.0)
+        ~input_tokens:100 ~output_tokens:20 ~latency_ms:1000 ();
+      success_entry ~model:"llama:qwen3.5-27b" ~ts:(ts -. 5.0)
+        ~input_tokens:1_721_506 ~output_tokens:900 ~latency_ms:1000
+        ~usage_trust:"untrusted"
+        ~usage_anomaly_reasons:["input_tokens_gt_1m"] ();
+    ];
+    let agg = M.compute ~base_path:base ~window_minutes:60 in
+    check int "total entries retained for diagnosis" 2 agg.total_entries;
+    check int "models" 1 (List.length agg.models);
+    let s = List.hd agg.models in
+    check (option int) "trusted input total only" (Some 100)
+      s.total_input_tokens;
+    check (option int) "trusted output total only" (Some 20)
+      s.total_output_tokens;
+    check int "usage sample count excludes untrusted" 1 s.usage_sample_count;
+    check int "usage missing counts untrusted" 1 s.usage_missing_count;
+    check (option (float 0.001)) "tok/s excludes untrusted outlier"
+      (Some 20.0) s.avg_tok_per_sec;
+    check (option string) "coverage flags untrusted usage"
+      (Some "untrusted_usage") s.primary_coverage_reason;
+    let recent = List.hd s.recent_entries in
+    check (option string) "recent usage trust" (Some "untrusted")
+      recent.re_usage_trust;
+    check (option int) "recent untrusted input hidden" None
+      recent.re_input_tokens;
+    check (list string) "recent anomaly reasons"
+      ["input_tokens_gt_1m"] recent.re_usage_anomaly_reasons)
 
 let test_error_turns_counted () =
   let base = test_dir () in
@@ -873,6 +922,8 @@ let () =
     "basics", [
       test_case "empty dir" `Quick test_empty_dir;
       test_case "single model success" `Quick test_single_model_success;
+      test_case "untrusted usage excluded from aggregates" `Quick
+        test_untrusted_usage_excluded_from_aggregates;
       test_case "error turns counted" `Quick test_error_turns_counted;
       test_case "multi model sorted" `Quick test_multi_model;
       test_case "window filter" `Quick test_window_filter;

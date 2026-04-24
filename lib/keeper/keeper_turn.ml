@@ -47,19 +47,51 @@ let resolved_model_id_for_result ~(meta : keeper_meta)
 
 let turn_cost_for_result ~(meta : keeper_meta)
     (result : Keeper_agent_run.run_result) : float =
-  let pricing =
-    Llm_provider.Pricing.pricing_for_model
-      (resolved_model_id_for_result ~meta result)
+  let resolved_model_id = resolved_model_id_for_result ~meta result in
+  let surface_model_used = Keeper_agent_run.surface_model_used result in
+  let usage_trust =
+    Keeper_unified_metrics.classify_usage_trust
+      ~usage_reported:result.usage_reported
+      ~usage:result.usage
+      ~model_used:surface_model_used
+      ~resolved_model_id
+      ~context_max:0
   in
-  Llm_provider.Pricing.estimate_cost ~pricing
-    ~input_tokens:result.usage.input_tokens
-    ~output_tokens:result.usage.output_tokens ()
+  if Keeper_unified_metrics.usage_trust_is_trusted usage_trust then
+    let pricing =
+      Llm_provider.Pricing.pricing_for_model resolved_model_id
+    in
+    Llm_provider.Pricing.estimate_cost ~pricing
+      ~input_tokens:result.usage.input_tokens
+      ~output_tokens:result.usage.output_tokens ()
+  else 0.0
 
 let update_direct_turn_meta (meta : keeper_meta) ~(latency_ms : int)
     (result : Keeper_agent_run.run_result) : keeper_meta =
   let now_ts = Time_compat.now () in
   let turn_cost = turn_cost_for_result ~meta result in
   let surface_model_used = Keeper_agent_run.surface_model_used result in
+  let resolved_model_id = resolved_model_id_for_result ~meta result in
+  let usage_trust =
+    Keeper_unified_metrics.classify_usage_trust
+      ~usage_reported:result.usage_reported
+      ~usage:result.usage
+      ~model_used:surface_model_used
+      ~resolved_model_id
+      ~context_max:0
+  in
+  let usage_trusted =
+    Keeper_unified_metrics.usage_trust_is_trusted usage_trust
+  in
+  let trusted_input_tokens =
+    if usage_trusted then result.usage.input_tokens else 0
+  in
+  let trusted_output_tokens =
+    if usage_trusted then result.usage.output_tokens else 0
+  in
+  let trusted_total_tokens =
+    if usage_trusted then Keeper_exec_context.total_tokens result.usage else 0
+  in
   {
     meta with
     updated_at = now_iso ();
@@ -70,19 +102,17 @@ let update_direct_turn_meta (meta : keeper_meta) ~(latency_ms : int)
           {
             total_turns = meta.runtime.usage.total_turns + 1;
             total_input_tokens =
-              meta.runtime.usage.total_input_tokens + result.usage.input_tokens;
+              meta.runtime.usage.total_input_tokens + trusted_input_tokens;
             total_output_tokens =
-              meta.runtime.usage.total_output_tokens + result.usage.output_tokens;
+              meta.runtime.usage.total_output_tokens + trusted_output_tokens;
             total_tokens =
-              meta.runtime.usage.total_tokens
-              + Keeper_exec_context.total_tokens result.usage;
+              meta.runtime.usage.total_tokens + trusted_total_tokens;
             total_cost_usd = meta.runtime.usage.total_cost_usd +. turn_cost;
             last_turn_ts = now_ts;
             last_model_used = surface_model_used;
-            last_input_tokens = result.usage.input_tokens;
-            last_output_tokens = result.usage.output_tokens;
-            last_total_tokens =
-              Keeper_exec_context.total_tokens result.usage;
+            last_input_tokens = trusted_input_tokens;
+            last_output_tokens = trusted_output_tokens;
+            last_total_tokens = trusted_total_tokens;
             last_latency_ms = latency_ms;
           };
       };

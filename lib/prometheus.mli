@@ -73,6 +73,7 @@ val metric_keeper_input_tokens : string
 val metric_keeper_output_tokens : string
 val metric_keeper_cache_creation_tokens : string
 val metric_keeper_cache_read_tokens : string
+val metric_keeper_usage_anomalies : string
 val metric_keeper_compactions : string
 val metric_keeper_compaction_ratio_change : string
 val metric_keeper_compaction_saved_tokens : string

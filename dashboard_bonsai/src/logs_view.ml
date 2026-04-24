@@ -1333,8 +1333,8 @@ let sigil_char source =
 let view_entry ~is_first (e : Logs_types.entry) =
   let row_attrs =
     match row_tint e.normalized_level with
-    | None -> [ Style.row; Attr.role "listitem" ]
-    | Some tint -> [ Style.row; tint; Attr.role "listitem" ]
+    | None -> [ Style.row ]
+    | Some tint -> [ Style.row; tint ]
   in
   let sigil_attrs =
     match sigil_class e.normalized_level with

@@ -54,6 +54,7 @@
         test_keeper_hooks_oas_provider
         test_keeper_hooks_oas_pricing
         test_keeper_hooks_oas_telemetry
+          test_keeper_tool_use_failure_counter
         test_keeper_wake_telemetry
         test_keeper_memory
         test_keeper_accountability
@@ -180,6 +181,7 @@
           test_keeper_hooks_oas_provider
           test_keeper_hooks_oas_pricing
           test_keeper_hooks_oas_telemetry
+          test_keeper_tool_use_failure_counter
           test_keeper_wake_telemetry
           test_keeper_memory
           test_keeper_accountability

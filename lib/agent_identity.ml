@@ -110,6 +110,9 @@ let generate_session_key () =
 (** Create identity from MCP request params *)
 let from_mcp_params params =
   let module U = Yojson.Safe.Util in
+  (* #9788: normalize null/non-object payloads to empty assoc so U.member
+     below cannot raise Type_error and crash tools/call dispatch. *)
+  let params = match params with `Assoc _ -> params | _ -> `Assoc [] in
   let get_opt key =
     match U.member key params with
     | `String s -> Some s

@@ -915,3 +915,127 @@ let to_json (agg : aggregate) : Yojson.Safe.t =
     ; ("total_error_entries", `Int agg.total_error_entries)
     ; ("models", `List (List.map model_stats_to_json agg.models))
     ]
+
+(* ── Provider-scope rollup ─────────────────────────────────
+   Groups per-model stats by their [provider] string (the scheme prefix
+   produced by [Keeper_hooks_oas.provider_of_model]). Feeds
+   [Dashboard_cascade.health_json] so the cascade dashboard can surface
+   throughput and latency per provider next to the behavioural signals
+   from [Cascade_health_tracker].
+
+   All means are [entry_count]-weighted. Latency percentiles are
+   approximations — averaging per-model p50/p95 does not produce a
+   true cross-model percentile, but the closed form here is good enough
+   for dashboard sparklines and avoids dragging the raw entry list
+   through another aggregation layer. Call sites that need exact
+   percentiles should compute them from [recent_entries]. *)
+
+type provider_stats = {
+  ps_provider : string;
+  ps_entry_count : int;
+  ps_model_count : int;
+  ps_avg_tok_per_sec : float option;
+  ps_avg_prompt_tok_per_sec : float option;
+  ps_avg_decode_tok_per_sec : float option;
+  ps_avg_latency_ms : float option;
+  ps_p50_latency_ms : float option;
+  ps_p95_latency_ms : float option;
+  ps_total_cost_usd : float option;
+}
+
+(* Entry-weighted mean over [models]. Returns [None] when every
+   contributing model returned [None] for the metric or when the total
+   weight collapses to zero (all entry_count = 0). *)
+let weighted_mean_opt
+    (models : model_stats list)
+    (f : model_stats -> float option)
+  : float option =
+  let sum, weight =
+    List.fold_left
+      (fun (sum, weight) (m : model_stats) ->
+        match f m with
+        | Some v when m.entry_count > 0 ->
+          sum +. v *. Float.of_int m.entry_count,
+          weight + m.entry_count
+        | _ -> sum, weight)
+      (0.0, 0) models
+  in
+  if weight = 0 then None else Some (sum /. Float.of_int weight)
+
+(* Sum of a [float option] projection across models.  Returns [None] iff
+   every contributing model returned [None] (distinguishing "no data"
+   from "reported and zero"). *)
+let summed_opt_float
+    (models : model_stats list)
+    (f : model_stats -> float option)
+  : float option =
+  let total, reported =
+    List.fold_left
+      (fun (total, reported) (m : model_stats) ->
+        match f m with
+        | Some v -> total +. v, reported + 1
+        | None -> total, reported)
+      (0.0, 0) models
+  in
+  if reported = 0 then None else Some total
+
+let provider_rollup (agg : aggregate) : provider_stats list =
+  let by_provider : (string, model_stats list) Hashtbl.t =
+    Hashtbl.create 8
+  in
+  List.iter
+    (fun (m : model_stats) ->
+      match m.provider with
+      | None -> ()
+      | Some p ->
+        let existing =
+          try Hashtbl.find by_provider p with Not_found -> []
+        in
+        Hashtbl.replace by_provider p (m :: existing))
+    agg.models;
+  let rolled =
+    Hashtbl.fold
+      (fun provider models acc ->
+        let total_entries =
+          List.fold_left (fun n (m : model_stats) -> n + m.entry_count) 0 models
+        in
+        let rollup = {
+          ps_provider = provider;
+          ps_entry_count = total_entries;
+          ps_model_count = List.length models;
+          ps_avg_tok_per_sec =
+            weighted_mean_opt models (fun m -> m.avg_tok_per_sec);
+          ps_avg_prompt_tok_per_sec =
+            weighted_mean_opt models (fun m -> m.prompt_avg_tok_per_sec);
+          ps_avg_decode_tok_per_sec =
+            weighted_mean_opt models (fun m -> m.hw_decode_avg_tok_per_sec);
+          ps_avg_latency_ms =
+            weighted_mean_opt models (fun m -> m.avg_latency_ms);
+          ps_p50_latency_ms =
+            weighted_mean_opt models (fun m -> m.p50_latency_ms);
+          ps_p95_latency_ms =
+            weighted_mean_opt models (fun m -> m.p95_latency_ms);
+          ps_total_cost_usd =
+            summed_opt_float models (fun m -> m.total_cost_usd);
+        } in
+        rollup :: acc)
+      by_provider []
+  in
+  List.sort
+    (fun a b -> Int.compare b.ps_entry_count a.ps_entry_count)
+    rolled
+
+let provider_stats_to_json (s : provider_stats) : Yojson.Safe.t =
+  let opt_float = function Some f -> `Float f | None -> `Null in
+  `Assoc
+    [ ("provider", `String s.ps_provider)
+    ; ("entry_count", `Int s.ps_entry_count)
+    ; ("model_count", `Int s.ps_model_count)
+    ; ("avg_tok_per_sec", opt_float s.ps_avg_tok_per_sec)
+    ; ("avg_prompt_tok_per_sec", opt_float s.ps_avg_prompt_tok_per_sec)
+    ; ("avg_decode_tok_per_sec", opt_float s.ps_avg_decode_tok_per_sec)
+    ; ("avg_latency_ms", opt_float s.ps_avg_latency_ms)
+    ; ("p50_latency_ms", opt_float s.ps_p50_latency_ms)
+    ; ("p95_latency_ms", opt_float s.ps_p95_latency_ms)
+    ; ("total_cost_usd", opt_float s.ps_total_cost_usd)
+    ]

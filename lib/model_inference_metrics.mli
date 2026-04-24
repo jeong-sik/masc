@@ -146,3 +146,70 @@ val to_json : aggregate -> Yojson.Safe.t
 
 val model_stats_to_json : model_stats -> Yojson.Safe.t
 (** Serialize a single [model_stats] entry to JSON. *)
+
+(** Per-provider rollup of {!model_stats} aggregated across every model id
+    whose [provider] matches. Feeds {!Dashboard_cascade.health_json}'s
+    [providers] array so the UI can render per-provider throughput and
+    latency next to the existing behavioural (success_rate, cooldown)
+    fields from {!Cascade_health_tracker}.
+
+    All perf fields are [entry_count]-weighted averages of the underlying
+    [model_stats] values. Latency percentiles are approximations (a true
+    p50/p95 would need to merge raw entries across models; call sites
+    that need exact percentiles should compute them from [recent_entries]
+    instead of this rollup).
+
+    @since 0.173.0 *)
+type provider_stats = {
+  ps_provider : string;
+  ps_entry_count : int;
+  ps_model_count : int;
+    (** Number of distinct [model_id]s contributing to this rollup. *)
+  ps_avg_tok_per_sec : float option;
+    (** Wall-clock throughput, entry-weighted mean across models. *)
+  ps_avg_prompt_tok_per_sec : float option;
+    (** Prefill throughput (prompt_per_second from OAS inference_timings),
+        entry-weighted. [None] when no contributing model reported it
+        (Anthropic/Gemini path). *)
+  ps_avg_decode_tok_per_sec : float option;
+    (** Hardware decode throughput (predicted_per_second), entry-weighted. *)
+  ps_avg_latency_ms : float option;
+  ps_p50_latency_ms : float option;
+    (** Entry-weighted mean of per-model p50. Approximate, not a true
+        p50 across all entries. *)
+  ps_p95_latency_ms : float option;
+    (** Entry-weighted mean of per-model p95. Approximate; see
+        {!ps_p50_latency_ms}. *)
+  ps_total_cost_usd : float option;
+}
+
+val provider_rollup : aggregate -> provider_stats list
+(** Group the per-model entries in [aggregate] by [provider] and return
+    a rollup sorted by [ps_entry_count] descending. Models with
+    [provider = None] are excluded — if this drops a meaningful chunk of
+    traffic it usually means an upstream [keeper_hooks_oas.provider_of_model]
+    heuristic failed and should be fixed at the source rather than
+    guessed at here.
+
+    @since 0.173.0 *)
+
+val provider_stats_to_json : provider_stats -> Yojson.Safe.t
+(** JSON shape consumed by {!Dashboard_cascade}:
+    {[
+      {
+        "provider": "ollama",
+        "entry_count": 42,
+        "model_count": 2,
+        "avg_tok_per_sec": 52.1,
+        "avg_prompt_tok_per_sec": 210.4,
+        "avg_decode_tok_per_sec": 61.8,
+        "avg_latency_ms": 1820.0,
+        "p50_latency_ms": 1500.0,
+        "p95_latency_ms": 3200.0,
+        "total_cost_usd": null
+      }
+    ]}
+    Null fields signal "no contributing model reported this metric";
+    zero means "reported and equal to zero".
+
+    @since 0.173.0 *)

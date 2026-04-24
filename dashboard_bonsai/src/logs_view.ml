@@ -140,7 +140,7 @@ stylesheet
     gap: 6px;
     padding: 10px 14px 12px;
     background:
-      linear-gradient(180deg, var(--bg-panel) 0%, #0f0b09 100%);
+      linear-gradient(180deg, var(--bg-panel) 0%, var(--bg-deep) 100%);
     border: 1px solid var(--border-main);
     border-radius: 2px;
     box-shadow: inset 0 0 0 1px rgba(196, 162, 101, 0.04);
@@ -180,12 +180,12 @@ stylesheet
 
   .heartbeat_bar {
     min-width: 2px;
-    background: #3a5a48;
+    background: var(--accent-mold);
     border-radius: 1px;
     opacity: 0.82;
   }
 
-  .heartbeat_bar_warn  { background: linear-gradient(180deg, var(--status-warn) 0%, #6a3c10 100%); }
+  .heartbeat_bar_warn  { background: linear-gradient(180deg, var(--status-warn) 0%, color-mix(in oklab, var(--status-warn) 40%, var(--bg-deep)) 100%); }
   .heartbeat_bar_error { background: linear-gradient(180deg, var(--accent-blood) 0%, var(--accent-blood-dim) 100%); box-shadow: 0 0 6px rgba(232, 80, 80, 0.45); }
   .heartbeat_bar_idle  { background: var(--border-main); opacity: 0.6; }
 
@@ -204,7 +204,7 @@ stylesheet
         rgba(138, 106, 40, 0.10) 0%,
         transparent 45%,
         rgba(232, 80, 80, 0.06) 100%),
-      #0f0b09;
+      var(--bg-deep);
     border: 1px solid var(--border-main);
     border-radius: 2px;
     font-family: 'EB Garamond', 'Noto Sans KR', Georgia, serif;
@@ -273,7 +273,7 @@ stylesheet
     padding: 2px;
     border: 1px solid var(--border-main);
     border-radius: 999px;
-    background: #0f0b09;
+    background: var(--bg-deep);
   }
 
   .chip {
@@ -316,7 +316,7 @@ stylesheet
     padding: 4px 10px;
     border: 1px solid var(--border-main);
     border-radius: 2px;
-    background: #0f0b09;
+    background: var(--bg-deep);
     font-family: 'Noto Sans KR', -apple-system, sans-serif;
     font-size: 11px;
     color: var(--text-dim);
@@ -511,7 +511,7 @@ stylesheet
   }
 
   .sigil_warn  { color: var(--status-warn); border-color: var(--status-warn); box-shadow: inset 0 0 0 1px rgba(232,216,184,0.06), 0 0 8px rgba(160, 106, 26, 0.35); }
-  .sigil_error { color: var(--text-bright); border-color: var(--accent-blood); background: radial-gradient(circle at 35% 30%, rgba(232,216,184,0.28), transparent 55%), #3a1410; box-shadow: inset 0 0 0 1px rgba(232,216,184,0.08), 0 0 10px rgba(232, 80, 80, 0.45); }
+  .sigil_error { color: var(--text-bright); border-color: var(--accent-blood); background: radial-gradient(circle at 35% 30%, rgba(232,216,184,0.28), transparent 55%), color-mix(in oklab, var(--accent-blood) 25%, var(--bg-deep)); box-shadow: inset 0 0 0 1px rgba(232,216,184,0.08), 0 0 10px color-mix(in oklab, var(--accent-blood) 45%, transparent); }
 
   .message_lead::first-letter {
     font-family: 'Cinzel', 'EB Garamond', serif;
@@ -528,8 +528,8 @@ stylesheet
     text-shadow: 0 0 14px rgba(138, 106, 40, 0.25);
   }
 
-  .row_debug { border-left-color: #4a3a32; }
-  .row_info  { border-left-color: #3a5a48; }
+  .row_debug { border-left-color: var(--status-idle); }
+  .row_info  { border-left-color: var(--accent-mold); }
 
   .row:hover {
     background: linear-gradient(90deg, rgba(138, 106, 40, 0.08), transparent 70%);
@@ -545,7 +545,7 @@ stylesheet
   .row_error:hover {
     background: linear-gradient(90deg, rgba(232, 80, 80, 0.18) 0%, transparent 65%);
     box-shadow: inset 1px 0 0 0 rgba(232, 80, 80, 0.55);
-    border-left-color: #c94a3a;
+    border-left-color: var(--accent-viscera);
   }
 
   .row_warn {
@@ -556,7 +556,7 @@ stylesheet
   .row_warn:hover {
     background: linear-gradient(90deg, rgba(160, 106, 26, 0.15) 0%, transparent 65%);
     box-shadow: inset 1px 0 0 0 rgba(160, 106, 26, 0.5);
-    border-left-color: #c4461a;
+    border-left-color: var(--accent-ember);
   }
 
   .ts {
@@ -607,7 +607,7 @@ stylesheet
     padding: 3px 8px;
     border: 1px solid var(--border-main);
     border-radius: 999px;
-    background: #1b1612;
+    background: var(--bg-panel-alt);
     color: var(--text-dim);
     width: fit-content;
     height: fit-content;
@@ -678,7 +678,7 @@ stylesheet
     width: 56px;
     height: 56px;
     border-radius: 50%;
-    background: radial-gradient(circle at 32% 28%, #c94a3a 0%, var(--accent-blood) 40%, #5a0a0a 80%, #2a0404 100%);
+    background: radial-gradient(circle at 32% 28%, var(--accent-viscera) 0%, var(--accent-blood) 40%, color-mix(in oklab, var(--accent-blood) 50%, var(--bg-deep)) 80%, color-mix(in oklab, var(--accent-blood) 20%, var(--bg-deep)) 100%);
     border: 2px solid var(--accent-brass);
     box-shadow:
       inset 0 0 0 1px rgba(232, 216, 184, 0.18),
@@ -732,7 +732,7 @@ stylesheet
     width: 220px;
     height: 100vh;
     padding: 18px 0 24px;
-    background: linear-gradient(180deg, #18110c 0%, #0e0806 100%);
+    background: linear-gradient(180deg, var(--bg-panel) 0%, var(--bg-deep) 100%);
     border-right: 1px solid var(--border-main);
     box-shadow: inset -1px 0 0 rgba(138, 106, 40, 0.08);
     display: flex;
@@ -903,7 +903,7 @@ stylesheet
     width: 340px;
     height: 100vh;
     padding: 22px 18px 28px;
-    background: linear-gradient(180deg, #16100a 0%, #0e0806 100%);
+    background: linear-gradient(180deg, var(--bg-panel) 0%, var(--bg-deep) 100%);
     border-left: 1px solid var(--border-main);
     box-shadow: inset 1px 0 0 rgba(138, 106, 40, 0.06);
     display: flex;
@@ -944,7 +944,7 @@ stylesheet
   .focus {
     position: relative;
     padding: 16px 16px 14px;
-    background: linear-gradient(180deg, #241a12 0%, #14100a 100%);
+    background: linear-gradient(180deg, var(--bg-panel-alt) 0%, var(--bg-panel) 100%);
     border: 1px solid var(--accent-brass-dim);
   }
   .focus::before {
@@ -964,7 +964,7 @@ stylesheet
     width: 46px;
     height: 46px;
     border: 1px solid var(--accent-brass);
-    background: linear-gradient(135deg, #2a1f14, #0e0806);
+    background: linear-gradient(135deg, var(--bg-panel-alt), var(--bg-deep));
     display: grid;
     place-items: center;
     font-family: 'Cinzel', serif;
@@ -1001,7 +1001,7 @@ stylesheet
   .ctx_lbl_v { color: var(--text-bright); }
   .vial {
     height: 8px;
-    background: #0a0604;
+    background: var(--bg-deep);
     border: 1px solid var(--border-main);
     position: relative;
     overflow: hidden;
@@ -1010,7 +1010,7 @@ stylesheet
     display: block;
     height: 100%;
     width: 64%;
-    background: linear-gradient(90deg, #8a6a20, #d4a940);
+    background: linear-gradient(90deg, var(--accent-brass-dim), var(--accent-brass));
     box-shadow: 0 0 6px rgba(138, 106, 40, 0.45);
   }
   .vial::after {
@@ -1165,7 +1165,7 @@ stylesheet
     letter-spacing: 0.24em;
     text-transform: uppercase;
     padding: 7px 12px;
-    background: linear-gradient(180deg, #241a12 0%, #14100a 100%);
+    background: linear-gradient(180deg, var(--bg-panel-alt) 0%, var(--bg-panel) 100%);
     border: 1px solid var(--accent-brass-dim);
     color: var(--text-primary);
     cursor: default;
@@ -1180,7 +1180,7 @@ stylesheet
   }
   .pbtn:focus-visible { outline: 2px solid var(--accent-brass); outline-offset: -2px; }
   .pbtn_primary {
-    background: linear-gradient(180deg, #3a2a16 0%, #241810 100%);
+    background: linear-gradient(180deg, color-mix(in oklab, var(--accent-brass) 20%, var(--bg-panel)) 0%, color-mix(in oklab, var(--accent-brass) 10%, var(--bg-deep)) 100%);
     border-color: var(--accent-brass);
     color: var(--accent-brass);
   }
@@ -1271,12 +1271,12 @@ stylesheet
     text-transform: uppercase;
     color: var(--text-dim);
     border: 1px solid var(--border-main);
-    background: #1a120c;
+    background: var(--bg-panel-alt);
   }
   .tomb_active {
     color: var(--accent-brass);
     border-color: var(--accent-brass);
-    background: linear-gradient(180deg, #2a1f14, #14100a);
+    background: linear-gradient(180deg, var(--bg-panel-alt), var(--bg-panel));
   }
   .tomb_danger {
     color: var(--accent-blood);
@@ -1291,6 +1291,9 @@ stylesheet
 
   @media (prefers-reduced-motion: reduce) {
     .pulse { animation: none; }
+    *, *::before, *::after {
+      transition-duration: 0.01ms !important;
+    }
   }
 |}]
 
@@ -2055,7 +2058,7 @@ let render_response
   in
   let aside =
     Node.div
-      ~attrs:[ Style.aside ]
+      ~attrs:[ Style.aside; Attr.role "complementary"; Attr.create "aria-label" "Keeper details" ]
       [ Node.div
           ~attrs:[]
           [ aside_h

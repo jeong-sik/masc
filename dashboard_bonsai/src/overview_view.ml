@@ -26,7 +26,7 @@ stylesheet
 
   .panel {
     border: 1px solid var(--border-main);
-    background: linear-gradient(180deg, rgba(28,18,14,0.7), rgba(14,10,8,0.85));
+    background: linear-gradient(180deg, color-mix(in oklab, var(--bg-panel) 70%, transparent), color-mix(in oklab, var(--bg-deep) 85%, transparent));
     padding: 18px 20px;
     display: flex;
     flex-direction: column;
@@ -84,7 +84,7 @@ stylesheet
     flex-direction: column;
     gap: 6px;
     padding: 14px;
-    background: rgba(14,10,8,0.4);
+    background: color-mix(in oklab, var(--bg-deep) 40%, transparent);
     border: 1px solid var(--border-main);
     text-align: center;
   }
@@ -105,7 +105,7 @@ stylesheet
 
   .stag_bar {
     height: 6px;
-    background: rgba(138,106,40,0.15);
+    background: color-mix(in oklab, var(--accent-brass) 15%, transparent);
     position: relative;
     margin-top: 6px;
   }

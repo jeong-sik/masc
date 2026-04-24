@@ -23,7 +23,7 @@ stylesheet
     min-height: 148px;
     border: 1px solid var(--border-main);
     background:
-      linear-gradient(180deg, rgba(28,18,14,0.68), rgba(14,10,8,0.86));
+      linear-gradient(180deg, color-mix(in oklab, var(--bg-panel) 68%, transparent), color-mix(in oklab, var(--bg-deep) 86%, transparent));
     padding: 15px 16px;
     display: flex;
     flex-direction: column;
@@ -74,7 +74,7 @@ stylesheet
     min-height: 30px;
     padding: 7px 12px;
     border: 1px solid var(--accent-brass-dim);
-    background: linear-gradient(180deg, #241a12, #14100a);
+    background: linear-gradient(180deg, color-mix(in oklab, var(--bg-panel) 80%, var(--bg-deep)), var(--bg-deep));
     color: var(--text-primary);
     font-family: var(--font-ui, 'Noto Sans KR', sans-serif);
     font-size: 11px;
@@ -92,7 +92,7 @@ stylesheet
   .btn_primary {
     color: var(--accent-brass);
     border-color: var(--accent-brass);
-    background: linear-gradient(180deg, #3a2a16, #241810);
+    background: linear-gradient(180deg, color-mix(in oklab, var(--accent-brass) 20%, var(--bg-panel)), var(--bg-deep));
   }
 
   .cta_note {
@@ -252,7 +252,7 @@ let component ~(route : Route.t) (_graph @ local) =
               ~code:(Route.path Logs)
           ]
       ; Node.div
-          ~attrs:[ Style.cta ]
+          ~attrs:[ Style.cta; Attr.role "group"; Attr.create "aria-label" "Quick navigation" ]
           [ Node.a
               ~attrs:[ Attr.href (Route.path Logs); Style.btn; Style.btn_primary; Attr.create "aria-label" "Open keeper journal (logs)" ]
               [ Node.text "journal" ]

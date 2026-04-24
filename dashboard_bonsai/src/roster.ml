@@ -45,7 +45,7 @@ stylesheet
     grid-template-columns: repeat(4, 1fr);
     gap: 1px;
     background: var(--border-main);
-    border: 1px solid #3a2a20;
+    border: 1px solid var(--border-main);
     border-radius: 2px;
     box-shadow:
       inset 0 0 0 1px rgba(196, 162, 101, 0.06),

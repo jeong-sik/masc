@@ -85,7 +85,7 @@ stylesheet
     align-items: center;
     padding: 10px 16px;
     border-bottom: 1px solid rgba(120, 100, 80, 0.16);
-    background: linear-gradient(180deg, #1c140e, #160f0a);
+    background: linear-gradient(180deg, color-mix(in oklab, var(--bg-panel) 80%, var(--bg-deep)), var(--bg-deep));
     font-family: var(--font-ui, 'Noto Sans KR', sans-serif);
     font-size: 11px;
     letter-spacing: 0.28em;
@@ -235,12 +235,12 @@ stylesheet
   }
 
   .vial_fill_warn {
-    background: linear-gradient(90deg, #8a6a20, #d4a940);
-    box-shadow: 0 0 6px rgba(212, 169, 64, 0.35);
+    background: linear-gradient(90deg, var(--accent-brass-dim), var(--accent-brass));
+    box-shadow: 0 0 6px color-mix(in oklab, var(--accent-brass) 35%, transparent);
   }
 
   .vial_fill_bad {
-    background: linear-gradient(90deg, #8a2828, #e85050);
+    background: linear-gradient(90deg, var(--accent-blood-dim), var(--accent-blood));
     box-shadow: 0 0 6px rgba(232, 80, 80, 0.35);
   }
 
@@ -1483,7 +1483,7 @@ let aside
   match selected_row rows selected_name with
   | None ->
     Node.div
-      ~attrs:[ Shell_view.Style.aside ]
+      ~attrs:[ Shell_view.Style.aside; Attr.role "complementary"; Attr.create "aria-label" "Keeper details" ]
       [ Shell_view.aside_title ~right:"fleet quiet" "Focus"
       ; Node.div
           ~attrs:[ Style.quiet; Attr.role "status"; Attr.create "aria-label" "No directory row selected" ]
@@ -1491,7 +1491,7 @@ let aside
       ]
   | Some row ->
     Node.div
-      ~attrs:[ Shell_view.Style.aside ]
+      ~attrs:[ Shell_view.Style.aside; Attr.role "complementary"; Attr.create "aria-label" "Keeper details" ]
       [ focus_card row
       ; note_section row
       ; data_section row execution mission

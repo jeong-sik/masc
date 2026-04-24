@@ -12,7 +12,7 @@
 // in-flight state is held in a per-row signal map.
 
 import { html } from 'htm/preact'
-import { useEffect, useMemo, useRef } from 'preact/hooks'
+import { useEffect, useMemo } from 'preact/hooks'
 import { signal } from '@preact/signals'
 import {
   fetchVerificationRequests,
@@ -28,10 +28,8 @@ import { ErrorState, LoadingState } from './common/feedback-state'
 import { StatusChip } from './common/status-chip'
 import { FilterChips } from './common/filter-chips'
 import { TextInput } from './common/input'
-import {
-  createManagedAsyncResource,
-  type ManagedAsyncResource,
-} from '../lib/async-state'
+import type { ManagedAsyncResource } from '../lib/async-state'
+import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { route } from '../router'
 
 const AUTO_REFRESH_MS = 15_000
@@ -527,13 +525,7 @@ function RequestsTable({
 // ── Panel ─────────────────────────────────────────────
 
 export function VerificationRequestsPanel() {
-  const resourceRef = useRef<
-    ManagedAsyncResource<VerificationRequestsResponse> | null
-  >(null)
-  if (resourceRef.current === null) {
-    resourceRef.current = createManagedAsyncResource<VerificationRequestsResponse>()
-  }
-  const resource = resourceRef.current
+  const resource = useManagedAsyncResource<VerificationRequestsResponse>()
 
   useEffect(() => {
     void loadData(resource)

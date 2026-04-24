@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useEffect, useMemo, useRef } from 'preact/hooks'
+import { useEffect, useMemo } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
 import { Card } from './common/card'
 import { EmptyState } from './common/empty-state'
@@ -7,9 +7,9 @@ import { ErrorState, LoadingState } from './common/feedback-state'
 import { StatCell } from './common/stat-cell'
 import { StatusChip } from './common/status-chip'
 import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
-import { createManagedAsyncResource, type ManagedAsyncResource } from '../lib/async-state'
 import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { useSavedSignal } from '../lib/saved-signal'
+import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { get, type GetOptions } from '../api/core'
 
 export interface ToolRejection {
@@ -104,11 +104,7 @@ function queueTone(depth: number, oldest: number | null): string {
 }
 
 export function GovernanceMonitor() {
-  const resourceRef = useRef<ManagedAsyncResource<GovernanceToolEvents> | null>(null)
-  if (resourceRef.current === null) {
-    resourceRef.current = createManagedAsyncResource<GovernanceToolEvents>()
-  }
-  const resource = resourceRef.current
+  const resource = useManagedAsyncResource<GovernanceToolEvents>()
   const windowMinutes = useSignal(60)
   const [query] = useSavedSignal('dash:filter:governance-monitor:query', '')
 

@@ -2,7 +2,7 @@
 // Fetches from GET /api/v1/keepers/:name/tool-calls
 
 import { html } from 'htm/preact'
-import { useEffect, useRef } from 'preact/hooks'
+import { useEffect } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
 import { fetchKeeperToolCalls } from '../api/dashboard'
 import type { ToolCallEntry } from '../api/dashboard'
@@ -10,7 +10,7 @@ import { formatTimeHms } from '../lib/format-time'
 import { LoadingState } from './common/feedback-state'
 import { SectionCap } from './common/section-cap'
 import { toolCategory, formatDuration, durationColor } from './tool-call-shared'
-import { createManagedAsyncResource, type ManagedAsyncResource } from '../lib/async-state'
+import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { parseToolBlobMarker } from '../lib/tool-blob-marker'
 
 // Delegated to lib/format-time (SSOT)
@@ -110,11 +110,7 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
 // ── Main component ──────────────────────────────────────
 
 export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) {
-  const resourceRef = useRef<ManagedAsyncResource<ToolCallEntry[]> | null>(null)
-  if (resourceRef.current === null) {
-    resourceRef.current = createManagedAsyncResource<ToolCallEntry[]>([])
-  }
-  const resource = resourceRef.current
+  const resource = useManagedAsyncResource<ToolCallEntry[]>([])
   const filterTool = useSignal('')
 
   useEffect(() => {

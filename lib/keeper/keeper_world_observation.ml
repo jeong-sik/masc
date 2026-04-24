@@ -943,13 +943,6 @@ let keeper_cycle_decision
             ~consecutive_noop_count:meta.runtime.proactive_rt.consecutive_noop_count
             ()
         in
-        (* Exponential backoff for consecutive noop turns: 2^min(n, 3), cap 8x *)
-        let noop_backoff =
-          let n = meta.runtime.consecutive_noop_count in
-          if n <= 0 then 1
-          else Int.min 8 (1 lsl (Int.min n 3))
-        in
-        let effective_cooldown = effective_cooldown * noop_backoff in
         let task_cooldown_divisor =
           Keeper_config.keeper_proactive_task_cooldown_divisor ()
         in

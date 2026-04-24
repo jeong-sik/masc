@@ -485,7 +485,9 @@ let test_scheduled_turn_uses_cooldown_only () =
   in
   let obs = { base_observation with idle_seconds = 0 } in
   check bool "cooldown opens scheduled turn for current task" true
-    (WO.should_run_keeper_cycle ~meta obs)
+    (WO.keeper_cycle_decision
+       ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> None)
+       ~meta obs).should_run
 
 let test_scheduled_turn_skips_without_structured_work_signal () =
   let meta =
@@ -734,7 +736,9 @@ let test_idle_decay_triggers_turn () =
     }
   in
   check bool "idle decay triggers turn before base cooldown" true
-    (WO.should_run_keeper_cycle ~meta base_observation)
+    (WO.keeper_cycle_decision
+       ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> None)
+       ~meta base_observation).should_run
 
 let test_scheduled_turn_decision_uses_backlog_acceleration () =
   let meta =
@@ -759,7 +763,11 @@ let test_scheduled_turn_decision_uses_backlog_acceleration () =
       failed_task_count = 2;
     }
   in
-  let decision = WO.keeper_cycle_decision ~meta obs in
+  let decision =
+    WO.keeper_cycle_decision
+      ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> None)
+      ~meta obs
+  in
   check bool "backlog acceleration opens scheduled turn" true decision.should_run;
   check bool "marks actionable backlog" true
     (match decision.verdict with
@@ -894,9 +902,50 @@ let test_task_reactive_cooldown_floor_never_hits_zero () =
         failed_task_count = 1;
       }
     in
-    let decision = WO.keeper_cycle_decision ~meta obs in
+    let decision =
+      WO.keeper_cycle_decision
+        ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> None)
+        ~meta obs
+    in
     check (option int) "task reactive cooldown clamps to positive floor" (Some 300)
       decision.task_reactive_cooldown)
+
+let test_task_backlog_cooldown_applies_noop_backoff_once () =
+  with_env "MASC_KEEPER_PROACTIVE_TASK_MIN_COOLDOWN_SEC" "0" (fun () ->
+    let meta =
+      {
+        minimal_meta with
+        proactive =
+          { enabled = true; idle_sec = 120; cooldown_sec = 300 };
+        runtime =
+          {
+            minimal_meta.runtime with
+            consecutive_noop_count = 16;
+            proactive_rt =
+              { minimal_meta.runtime.proactive_rt with
+                consecutive_noop_count = 3;
+                last_ts = Time_compat.now () -. 1000.0;
+              };
+          };
+      }
+    in
+    let obs =
+      {
+        base_observation with
+        idle_seconds = 1000;
+        unclaimed_task_count = 1;
+      }
+    in
+    let decision =
+      WO.keeper_cycle_decision
+        ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> None)
+        ~meta obs
+    in
+    check (option int) "cooldown uses proactive noop backoff once" (Some 2400)
+      decision.effective_cooldown;
+    check (option int) "task cooldown stays responsive" (Some 800)
+      decision.task_reactive_cooldown;
+    check bool "task backlog can schedule after task cooldown" true decision.should_run)
 
 let test_scheduled_turn_decision_runs_immediately_on_fresh_backlog_update () =
   let meta =
@@ -921,7 +970,11 @@ let test_scheduled_turn_decision_runs_immediately_on_fresh_backlog_update () =
       backlog_updated_since_last_scheduled_autonomous = true;
     }
   in
-  let decision = WO.keeper_cycle_decision ~meta obs in
+  let decision =
+    WO.keeper_cycle_decision
+      ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> None)
+      ~meta obs
+  in
   check bool "fresh backlog bypasses cooldown" true decision.should_run;
   check bool "backlog emits reactive cooldown tag" true
     (match decision.verdict with
@@ -4720,6 +4773,8 @@ let () =
             test_pending_approval_blocks_turns_until_resolved;
           test_case "task reactive cooldown floor never hits zero" `Quick
             test_task_reactive_cooldown_floor_never_hits_zero;
+          test_case "task backlog cooldown applies noop backoff once" `Quick
+            test_task_backlog_cooldown_applies_noop_backoff_once;
           test_case "fresh backlog update bypasses cooldown" `Quick
             test_scheduled_turn_decision_runs_immediately_on_fresh_backlog_update;
           test_case "runtime trust snapshot tolerates null telemetry" `Quick

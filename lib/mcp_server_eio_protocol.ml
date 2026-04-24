@@ -453,7 +453,19 @@ let handle_dashboard_ack_eio id ?mcp_session_id params =
         | Some (`Int n) -> n
         | _ -> 0
       in
-      Server_mcp_transport_ws.dashboard_ack ~session_id ~seq
+      (* Client reports WebSocket.bufferedAmount alongside every ack so the
+         server can observe when a dashboard is falling behind.  The key is
+         camelCase to match the TypeScript client's wire representation; the
+         value is dropped when negative or absent so a malformed client
+         cannot poison the gauge. *)
+      let buffered_amount =
+        match List.assoc_opt "bufferedAmount" fields with
+        | Some (`Int n) when n >= 0 -> Some n
+        | Some (`Float f) when f >= 0.0 && Float.is_finite f ->
+            Some (int_of_float f)
+        | _ -> None
+      in
+      Server_mcp_transport_ws.dashboard_ack ~session_id ~seq ?buffered_amount ()
       |> dashboard_response_or_error id
   | Some _, None -> make_error ~id (-32602) "Missing params"
   | Some _, Some _ -> make_error ~id (-32602) "Invalid params: expected object"

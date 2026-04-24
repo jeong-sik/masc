@@ -27,6 +27,17 @@ type ws_session = {
   mutable dashboard_route: string option;
   dashboard_slices: (string, unit) Hashtbl.t;
   mutable dashboard_seq: int;
+  (** Last seq value the client has acknowledged.  0 until the first ack
+      arrives.  Paired with {!dashboard_last_buffered_amount} so the server
+      can reason about client liveness without touching the wire. *)
+  mutable dashboard_last_ack_seq: int;
+  (** Last [WebSocket.bufferedAmount] the client reported in a
+      [dashboard/ack] notification.  A growing value is a leading indicator
+      that the client cannot drain deltas as fast as the server pushes them;
+      sustained growth should eventually gate further sends.  Observability
+      lands first — gating is a follow-up once thresholds are established
+      from production distributions. *)
+  mutable dashboard_last_buffered_amount: int;
   mutable inbound_partial_text: Buffer.t option;
 }
 
@@ -56,6 +67,8 @@ let new_session ~id ~wsd =
     dashboard_route = None;
     dashboard_slices = Hashtbl.create 8;
     dashboard_seq = 0;
+    dashboard_last_ack_seq = 0;
+    dashboard_last_buffered_amount = 0;
     inbound_partial_text = None;
   }
 
@@ -315,19 +328,30 @@ let dashboard_unsubscribe ~session_id ?slices () =
         Ok (`Assoc [ ("session", dashboard_session_result session) ])
       end
 
-let dashboard_ack ~session_id ~seq =
+let dashboard_ack ~session_id ~seq ?buffered_amount () =
   match find_session session_id with
   | None -> Error "WebSocket session not found"
   | Some session ->
       if not session.dashboard_authenticated then
         Error "dashboard/ack requires dashboard/hello first"
-      else
+      else begin
+        if seq > session.dashboard_last_ack_seq then
+          session.dashboard_last_ack_seq <- seq;
+        (match buffered_amount with
+         | Some n when n >= 0 ->
+             session.dashboard_last_buffered_amount <- n;
+             Transport_metrics.observe_ws_client_buffered_bytes n
+         | _ -> ());
         Ok
           (`Assoc
             [
               ("session_id", `String session.id);
               ("ack", `Int seq);
+              ("server_last_ack_seq", `Int session.dashboard_last_ack_seq);
+              ("server_last_buffered_amount",
+                `Int session.dashboard_last_buffered_amount);
             ])
+      end
 
 (** Shape of an SSE event after dashboard-oriented parsing.
     [slice] is [None] when the event does not map to a dashboard slice,

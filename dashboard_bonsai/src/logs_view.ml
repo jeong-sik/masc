@@ -1291,6 +1291,9 @@ stylesheet
 
   @media (prefers-reduced-motion: reduce) {
     .pulse { animation: none; }
+    *, *::before, *::after {
+      transition-duration: 0.01ms !important;
+    }
   }
 |}]
 

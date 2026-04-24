@@ -834,9 +834,9 @@ stylesheet
     padding: 14px 18px 0;
     border-top: 1px solid var(--border-main);
     font-family: 'JetBrains Mono', ui-monospace, monospace;
-    font-size: 9px;
+    font-size: 10px;
     letter-spacing: 0.16em;
-    color: var(--border-highlight);
+    color: var(--text-dim);
     text-transform: uppercase;
   }
   .nav_foot_v { color: var(--text-dim); }

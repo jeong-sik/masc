@@ -598,6 +598,30 @@ stylesheet
       padding: 18px 16px 44px;
     }
   }
+
+  .skip_nav {
+    position: absolute;
+    left: -9999px;
+    top: auto;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    z-index: 100;
+    font-family: 'Noto Sans KR', sans-serif;
+    font-size: 13px;
+    padding: 8px 16px;
+    background: var(--bg-panel);
+    color: var(--accent-brass);
+    border: 2px solid var(--accent-brass);
+    text-decoration: none;
+  }
+  .skip_nav:focus {
+    position: fixed;
+    top: 8px;
+    left: 8px;
+    width: auto;
+    height: auto;
+  }
 |}]
 
 type tone =
@@ -967,12 +991,19 @@ let view ?(shell = Overview_types.fixture) ?hud ?aside ~(active : Route.t) (chil
   in
   Node.div
     ~attrs:[ Style.shell ]
-    [ topbar ~active
+    [ Node.a
+        ~attrs:
+          [ Style.skip_nav
+          ; Attr.href "#main-content"
+          ; Attr.arialabel "Skip to main content"
+          ]
+        [ Node.text "Skip to main content" ]
+    ; topbar ~active
     ; nav ~active
     ; Node.div
         ~attrs:[ Style.main; Attr.role "main" ]
         [ Node.div ~attrs:[ Style.hud ] hud_nodes
-        ; Node.div ~attrs:[ Style.page ] children
+        ; Node.div ~attrs:[ Style.page; Attr.id "main-content" ] children
         ]
     ; aside_node
     ]

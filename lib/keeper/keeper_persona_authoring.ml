@@ -378,6 +378,26 @@ let schema_json ?(include_examples = false) () =
                  ] )
            ] )
      ; "archetype_axes", archetype_axes_json ()
+     ; ( "authoring_flow"
+       , `Assoc
+           [ "draft_tool", `String "masc_persona_generate"
+           ; "save_tool", `String "masc_persona_save"
+           ; "dry_run_keeper_tool", `String "masc_keeper_create_from_persona"
+           ; "start_keeper_tool", `String "masc_keeper_create_from_persona"
+           ; ( "draft_args"
+             , `Assoc
+                 [ "concept", `String "<natural-language persona concept>"
+                 ; "tool_preset", `String "<optional preset>"
+                 ] )
+           ; ( "save_args"
+             , `Assoc
+                 [ "handle", `String "<handle>"
+                 ; "profile", `String "<profile JSON from draft or hand-authored>"
+                 ; "dry_run", `Bool true
+                 ] )
+           ; ( "keeper_dry_run_args"
+             , `Assoc [ "persona_name", `String "<handle>"; "dry_run", `Bool true ] )
+           ] )
      ; ( "keeperization"
        , `Assoc
            [ "dry_run_tool", `String "masc_keeper_create_from_persona"

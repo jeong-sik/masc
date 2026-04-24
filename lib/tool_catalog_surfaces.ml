@@ -132,7 +132,10 @@ let public_mcp_surface_tools =
     "masc_keeper_sandbox_status"; "masc_keeper_sandbox_start"; "masc_keeper_sandbox_stop";
     "masc_keeper_up"; "masc_keeper_repair"; "masc_keeper_reset";
     "masc_keeper_down";
-    "masc_persona_list"; "masc_persona_schema";
+    (* Persona authoring is operator-visible, but these materialization tools
+       remain on Keeper_denied so managed keepers never receive them. *)
+    "masc_persona_list"; "masc_persona_schema"; "masc_persona_generate";
+    "masc_persona_save"; "masc_keeper_create_from_persona";
     (* Board *)
     "masc_board_post"; "masc_board_list"; "masc_board_get";
     "masc_board_comment"; "masc_board_vote";
@@ -231,11 +234,9 @@ let keeper_denied_surface_tools =
     "masc_persona_generate";
     "masc_persona_save";
     "masc_keeper_create_from_persona";
-    (* NOTE: masc_keeper_reset is on public_mcp_surface_tools (line 126),
-       so it cannot be added to Keeper_denied without violating the
-       Keeper_denied ∩ Public_mcp = ∅ invariant (test_tool_surface_ssot.ml:90).
-       Keepers don't see the public_mcp surface at discovery, so no filter
-       is needed here. Admin permission still blocks execution. *)
+    (* NOTE: masc_keeper_reset is on public_mcp_surface_tools. Keepers don't
+       see the public_mcp surface at discovery, so no filter is needed here.
+       Admin permission still blocks execution. *)
     "masc_pause";
     "masc_resume";
   ]

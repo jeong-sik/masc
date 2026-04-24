@@ -1011,7 +1011,15 @@ let test_persona_authoring_schema_explains_effects () =
   check bool "documents tool presets" true
     (contains_substring rendered "tool_preset");
   check bool "documents archetype axes" true
-    (contains_substring rendered "archetype_axes")
+    (contains_substring rendered "archetype_axes");
+  check string "draft tool" "masc_persona_generate"
+    (Yojson.Safe.Util.member "authoring_flow" json
+     |> Yojson.Safe.Util.member "draft_tool"
+     |> Yojson.Safe.Util.to_string);
+  check string "save tool" "masc_persona_save"
+    (Yojson.Safe.Util.member "authoring_flow" json
+     |> Yojson.Safe.Util.member "save_tool"
+     |> Yojson.Safe.Util.to_string)
 
 let test_persona_authoring_normalizes_keeper_defaults () =
   match KPA.normalize_profile ~handle:"probe" authoring_minimal_profile with

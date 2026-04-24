@@ -232,35 +232,35 @@ let view_hero_panel (r : Overview_types.response) =
     ~attrs:[ Style.panel ]
     [ Node.h4 ~attrs:[ Style.panel_title ] [ Node.text "runtime · identity" ]
     ; Node.div
-        ~attrs:[ Style.kv_row ]
+        ~attrs:[ Style.kv_row; Attr.role "list" ]
         [ Node.div
-            ~attrs:[ Style.kv ]
+            ~attrs:[ Style.kv; Attr.role "listitem" ]
             [ Node.div ~attrs:[ Style.k ] [ Node.text "project" ]
             ; Node.div
                 ~attrs:[ Style.v; Style.v_brass ]
                 [ Node.text (if String.is_empty s.project then "—" else s.project) ]
             ]
         ; Node.div
-            ~attrs:[ Style.kv ]
+            ~attrs:[ Style.kv; Attr.role "listitem" ]
             [ Node.div ~attrs:[ Style.k ] [ Node.text "cluster" ]
             ; Node.div
                 ~attrs:[ Style.v ]
                 [ Node.text (if String.is_empty s.cluster then "—" else s.cluster) ]
             ]
         ; Node.div
-            ~attrs:[ Style.kv ]
+            ~attrs:[ Style.kv; Attr.role "listitem" ]
             [ Node.div ~attrs:[ Style.k ] [ Node.text "base path" ]
             ; Node.div
                 ~attrs:[ Style.v; Style.v_dim ]
                 [ Node.text (if String.is_empty r.base_path then "—" else r.base_path) ]
             ]
         ; Node.div
-            ~attrs:[ Style.kv ]
+            ~attrs:[ Style.kv; Attr.role "listitem" ]
             [ Node.div ~attrs:[ Style.k ] [ Node.text "status" ]
             ; paused_pill ~paused:s.paused
             ]
         ; Node.div
-            ~attrs:[ Style.kv ]
+            ~attrs:[ Style.kv; Attr.role "listitem" ]
             [ Node.div ~attrs:[ Style.k ] [ Node.text "tempo" ]
             ; Node.div
                 ~attrs:[ Style.v ]
@@ -280,9 +280,9 @@ let view_build_panel (r : Overview_types.response) =
     ~attrs:[ Style.panel ]
     [ Node.h4 ~attrs:[ Style.panel_title ] [ Node.text "build · release" ]
     ; Node.div
-        ~attrs:[ Style.kv_row ]
+        ~attrs:[ Style.kv_row; Attr.role "list" ]
         [ Node.div
-            ~attrs:[ Style.kv ]
+            ~attrs:[ Style.kv; Attr.role "listitem" ]
             [ Node.div ~attrs:[ Style.k ] [ Node.text "version" ]
             ; Node.div
                 ~attrs:[ Style.v; Style.v_brass ]
@@ -293,21 +293,21 @@ let view_build_panel (r : Overview_types.response) =
                 ]
             ]
         ; Node.div
-            ~attrs:[ Style.kv ]
+            ~attrs:[ Style.kv; Attr.role "listitem" ]
             [ Node.div ~attrs:[ Style.k ] [ Node.text "commit" ]
             ; Node.div
                 ~attrs:[ Style.v; Style.v_dim ]
                 [ Node.text (short_commit b.commit) ]
             ]
         ; Node.div
-            ~attrs:[ Style.kv ]
+            ~attrs:[ Style.kv; Attr.role "listitem" ]
             [ Node.div ~attrs:[ Style.k ] [ Node.text "uptime" ]
             ; Node.div
                 ~attrs:[ Style.v ]
                 [ Node.text (hms_of_seconds b.uptime_seconds) ]
             ]
         ; Node.div
-            ~attrs:[ Style.kv ]
+            ~attrs:[ Style.kv; Attr.role "listitem" ]
             [ Node.div ~attrs:[ Style.k ] [ Node.text "started" ]
             ; Node.div
                 ~attrs:[ Style.v; Style.v_dim ]
@@ -385,9 +385,9 @@ let view_meta_panel (r : Overview_types.response) =
         ~attrs:[ Style.panel_title ]
         [ Node.text "meta · cognition" ]
     ; Node.div
-        ~attrs:[ Style.kv_row ]
+        ~attrs:[ Style.kv_row; Attr.role "list" ]
         [ Node.div
-            ~attrs:[ Style.kv ]
+            ~attrs:[ Style.kv; Attr.role "listitem" ]
             [ Node.div ~attrs:[ Style.k ] [ Node.text "stagnation" ]
             ; Node.div
                 ~attrs:[ Style.v ]
@@ -401,7 +401,7 @@ let view_meta_panel (r : Overview_types.response) =
                 ]
             ]
         ; Node.div
-            ~attrs:[ Style.kv ]
+            ~attrs:[ Style.kv; Attr.role "listitem" ]
             [ Node.div ~attrs:[ Style.k ] [ Node.text "beliefs" ]
             ; Node.div
                 ~attrs:[ Style.v ]

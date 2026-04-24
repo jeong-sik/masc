@@ -1510,7 +1510,7 @@ let view_tombstrip ?(states = keeper_fsm_states) () =
       [ Node.text label ]
   in
   Node.div
-    ~attrs:[ Style.tombstrip ]
+    ~attrs:[ Style.tombstrip; Attr.arialabel "Keeper FSM states" ]
     (List.map states ~f:tile)
 ;;
 

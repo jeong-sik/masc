@@ -13,81 +13,6 @@ module Style =
 [%css
 stylesheet
   {|
-  .root {
-    display: grid;
-    grid-template-columns: 232px 1fr;
-    min-height: 100vh;
-    background:
-      radial-gradient(ellipse 60% 40% at 12% 8%, rgba(212,169,64,0.05), transparent 55%),
-      radial-gradient(ellipse 40% 50% at 92% 95%, rgba(58,90,72,0.06), transparent 60%),
-      linear-gradient(170deg, #0e0a08 0%, #140c08 60%, #080504 100%);
-    color: var(--text-primary);
-    font-family: 'Noto Sans KR', 'EB Garamond', sans-serif;
-  }
-
-  .main {
-    padding: 3rem 3rem 2rem;
-    display: flex;
-    flex-direction: column;
-    gap: 1.5rem;
-    overflow: auto;
-  }
-
-  .eyebrow {
-    font-family: 'Noto Sans KR', sans-serif;
-    font-size: 11px;
-    letter-spacing: 0.25em;
-    text-transform: uppercase;
-    color: var(--text-dim);
-    margin: 0;
-  }
-
-  .title {
-    font-family: 'Cinzel', serif;
-    font-size: 32px;
-    letter-spacing: 0.16em;
-    color: var(--text-bright);
-    text-transform: uppercase;
-    margin: 0;
-  }
-
-  .title_count { color: var(--accent-brass); }
-
-  .sub {
-    font-family: 'EB Garamond', serif;
-    font-style: italic;
-    font-size: 14px;
-    color: var(--text-primary);
-    margin: 0;
-    max-width: 620px;
-  }
-
-  .meta_strip {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 24px;
-    padding: 12px 16px;
-    border: 1px solid var(--border-main);
-    background: linear-gradient(180deg, rgba(42,20,14,0.35), rgba(20,12,8,0.65));
-    font-family: 'JetBrains Mono', ui-monospace, monospace;
-    font-size: 11px;
-    color: var(--text-dim);
-  }
-  .meta_item { display: flex; align-items: baseline; gap: 8px; }
-  .meta_k {
-    font-family: 'Noto Sans KR', sans-serif;
-    font-size: 11px;
-    letter-spacing: 0.2em;
-    text-transform: uppercase;
-    color: var(--text-dim);
-  }
-  .meta_v {
-    font-variant-numeric: tabular-nums;
-    color: var(--text-bright);
-  }
-  .meta_v_live { color: var(--status-ok); }
-  .meta_v_fail { color: var(--accent-blood); }
-
   .quiet {
     padding: 40px 20px;
     text-align: center;
@@ -215,6 +140,19 @@ stylesheet
       transition-duration: 0.01ms !important;
     }
   }
+
+  @media (max-width: 760px) {
+    .loop {
+      grid-template-columns: 1fr;
+      gap: 8px;
+    }
+    .goal {
+      min-width: 0;
+    }
+    .cycle, .kd, .elapsed {
+      text-align: left;
+    }
+  }
 |}]
 
 let pill_color : Archive_runs_types.status -> Pill.color = function
@@ -264,7 +202,21 @@ let view_loop (l : Archive_runs_types.loop) =
   let keeps = l.total_keeps in
   let discards = l.total_discards in
   Node.div
-    ~attrs:[ Style.loop; Attr.role "listitem"; Attr.create "aria-label" l.goal ]
+    ~attrs:
+      [ Style.loop
+      ; Attr.role "listitem"
+      ; Attr.create
+          "aria-label"
+          (Archive_runs_types.status_label l.status
+           ^ " · "
+           ^ cycle_str
+           ^ " · +"
+           ^ Int.to_string keeps
+           ^ " −"
+           ^ Int.to_string discards
+           ^ " · "
+           ^ l.goal)
+      ]
     [ Pill.view
         ~color:(pill_color l.status)
         ~label:(Archive_runs_types.status_label l.status)
@@ -352,6 +304,7 @@ let render ~(shell : Overview_types.response) (r : Archive_runs_types.response) 
           "autoresearch의 reinforced-write loop 기록. 각 row는 \
            목표 · cycle progress · keeps/discards 의 총합. 실패한 \
            run은 error 사유를 함께 남긴다."
+        ~sub_lang:"ko"
         ()
     ; view_meta_strip r
     ; (match r.loops with

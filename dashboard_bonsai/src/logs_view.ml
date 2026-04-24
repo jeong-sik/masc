@@ -231,7 +231,7 @@ stylesheet
     letter-spacing: 0.22em;
     text-transform: uppercase;
     color: var(--text-bright);
-    font-size: 10px;
+    font-size: 11px;
   }
 
   .moon_sep {
@@ -251,7 +251,7 @@ stylesheet
     margin-left: auto;
     color: var(--text-dim);
     font-variant: normal;
-    font-size: 10px;
+    font-size: 11px;
     letter-spacing: 0.2em;
     text-transform: uppercase;
   }
@@ -414,7 +414,7 @@ stylesheet
   .folio {
     font-family: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
     font-variant-numeric: tabular-nums;
-    font-size: 10px;
+    font-size: 11px;
     letter-spacing: 0.08em;
     color: var(--border-highlight);
     text-transform: none;
@@ -500,7 +500,7 @@ stylesheet
     display: grid;
     place-items: center;
     font-family: 'Cinzel', serif;
-    font-size: 10px;
+    font-size: 11px;
     letter-spacing: 0;
     color: var(--accent-brass);
     text-transform: uppercase;
@@ -636,7 +636,7 @@ stylesheet
   .details {
     color: var(--text-dim);
     font-family: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
-    font-size: 10px;
+    font-size: 11px;
     margin-top: 0.25rem;
     opacity: 0.75;
   }
@@ -715,7 +715,7 @@ stylesheet
     left: 50%;
     transform: translateX(-50%) rotate(14deg);
     font-family: 'Noto Sans KR', sans-serif;
-    font-size: 10px;
+    font-size: 11px;
     letter-spacing: 0.3em;
     text-transform: uppercase;
     color: var(--border-highlight);
@@ -825,7 +825,7 @@ stylesheet
   .nav_link_tail {
     margin-left: auto;
     font-family: 'JetBrains Mono', ui-monospace, monospace;
-    font-size: 10px;
+    font-size: 11px;
     color: var(--accent-blood);
     font-variant-numeric: tabular-nums;
   }
@@ -835,7 +835,7 @@ stylesheet
     padding: 14px 18px 0;
     border-top: 1px solid var(--border-main);
     font-family: 'JetBrains Mono', ui-monospace, monospace;
-    font-size: 10px;
+    font-size: 11px;
     letter-spacing: 0.16em;
     color: var(--text-dim);
     text-transform: uppercase;
@@ -856,7 +856,7 @@ stylesheet
   }
   .theme_chip {
     font-family: 'Noto Sans KR', sans-serif;
-    font-size: 10px;
+    font-size: 11px;
     letter-spacing: 0.22em;
     text-transform: uppercase;
     padding: 3px 6px;
@@ -932,7 +932,7 @@ stylesheet
   }
   .aside_h_tail {
     font-family: 'JetBrains Mono', ui-monospace, monospace;
-    font-size: 10px;
+    font-size: 11px;
     color: var(--text-dim);
     margin-left: auto;
     font-variant-numeric: tabular-nums;
@@ -993,7 +993,7 @@ stylesheet
     display: flex;
     justify-content: space-between;
     font-family: 'JetBrains Mono', ui-monospace, monospace;
-    font-size: 10px;
+    font-size: 11px;
     color: var(--text-dim);
     margin-bottom: 4px;
     font-variant-numeric: tabular-nums;
@@ -1056,7 +1056,7 @@ stylesheet
   .evrow:last-child { border-bottom: 0; }
   .evrow_t {
     font-family: 'JetBrains Mono', ui-monospace, monospace;
-    font-size: 10px;
+    font-size: 11px;
     color: var(--text-dim);
     font-variant-numeric: tabular-nums;
   }
@@ -1080,7 +1080,7 @@ stylesheet
   .evrow_b_em { color: var(--text-bright); font-style: italic; }
   .evrow_b_code {
     font-family: 'JetBrains Mono', ui-monospace, monospace;
-    font-size: 10px;
+    font-size: 11px;
     color: var(--accent-brass);
     background: rgba(138, 106, 40, 0.08);
     padding: 0 5px;
@@ -1110,7 +1110,7 @@ stylesheet
   }
   .page_tag {
     font-family: 'Noto Sans KR', -apple-system, sans-serif;
-    font-size: 10px;
+    font-size: 11px;
     letter-spacing: 0.3em;
     text-transform: uppercase;
     color: var(--text-dim);
@@ -1161,7 +1161,7 @@ stylesheet
   }
   .pbtn {
     font-family: 'Noto Sans KR', sans-serif;
-    font-size: 10px;
+    font-size: 11px;
     letter-spacing: 0.24em;
     text-transform: uppercase;
     padding: 7px 12px;
@@ -1333,8 +1333,8 @@ let sigil_char source =
 let view_entry ~is_first (e : Logs_types.entry) =
   let row_attrs =
     match row_tint e.normalized_level with
-    | None -> [ Style.row ]
-    | Some tint -> [ Style.row; tint ]
+    | None -> [ Style.row; Attr.create "aria-label" (e.normalized_level ^ " " ^ e.module_ ^ ": " ^ e.message) ]
+    | Some tint -> [ Style.row; tint; Attr.create "aria-label" (e.normalized_level ^ " " ^ e.module_ ^ ": " ^ e.message) ]
   in
   let sigil_attrs =
     match sigil_class e.normalized_level with
@@ -1452,10 +1452,10 @@ let view_heartbeat ?(entries : Logs_types.entry list = []) () =
       Attr.style (Css_gen.create ~field:"height" ~value:(Printf.sprintf "%dpx" h))
     in
     let title_attr = Attr.create "title" tip in
-    Node.div ~attrs:(title_attr :: style :: base_attrs) []
+    Node.div ~attrs:(Attr.create "aria-hidden" "true" :: title_attr :: style :: base_attrs) []
   in
   Node.div
-    ~attrs:[ Style.heartbeat ]
+    ~attrs:[ Style.heartbeat; Attr.role "img"; Attr.create "aria-label" "Cycle pulse: event density across last 60 ticks" ]
     [ Node.div
         ~attrs:[ Style.heartbeat_head ]
         [ Node.span
@@ -1627,7 +1627,7 @@ let render_response
     match response.entries with
     | [] ->
       Node.div
-        ~attrs:[ Style.empty ]
+        ~attrs:[ Style.empty; Attr.role "status"; Attr.create "aria-label" "No log entries" ]
         [ Node.span ~attrs:[ Attr.create "lang" "ko" ] [ Node.text "저택은 조용하다. 아무도 아직 말하지 않았다." ]
         ; Node.span
             ~attrs:[ Style.empty_attr ]
@@ -1676,15 +1676,25 @@ let render_response
   in
   let toolbar =
     Node.div
-      ~attrs:[ Style.toolbar ]
+      ~attrs:[ Style.toolbar; Attr.role "group"; Attr.create "aria-label" "Log controls" ]
       [ (let filter_chip ~level ~label =
            let fire () =
              Effect.of_sync_fun
                (fun () ->
-                 let doc = Js_of_ocaml.Dom_html.document in
-                 doc##.documentElement##setAttribute
-                   (Js_of_ocaml.Js.string "data-log-level")
-                   (Js_of_ocaml.Js.string level))
+                 let root = Dom_html.document##.documentElement in
+                 root##setAttribute
+                   (Js.string "data-log-level")
+                   (Js.string level);
+                 let update lvl =
+                   Js.Opt.iter
+                     (root##querySelector
+                        (Js.string ("[data-filter-level=\"" ^ lvl ^ "\"]")))
+                     (fun el ->
+                        el##setAttribute
+                          (Js.string "aria-pressed")
+                          (Js.string (if lvl = level then "true" else "false")))
+                 in
+                 update "debug"; update "info"; update "warn"; update "error")
                ()
            in
            Node.span
@@ -1692,6 +1702,7 @@ let render_response
                [ Style.chip
                ; Attr.create "data-filter-level" level
                ; Attr.role "button"
+               ; Attr.create "aria-pressed" (if level = "info" then "true" else "false")
                ; Attr.tabindex 0
                ; Attr.on_click (fun _ev -> fire ())
                ; Attr.on_key_down (fun ev ->
@@ -1740,7 +1751,7 @@ let render_response
   in
   let moonrise =
     Node.div
-      ~attrs:[ Style.moonrise ]
+      ~attrs:[ Style.moonrise; Attr.role "status"; Attr.create "aria-label" "Watch status" ]
       [ Node.span ~attrs:[ Style.moon_glyph; Attr.create "aria-hidden" "true" ] []
       ; Node.span ~attrs:[ Style.moon_lead ] [ Node.text moon_lead_text ]
       ; Node.span ~attrs:[ Style.moon_sep ] [ Node.text "·" ]
@@ -1842,7 +1853,19 @@ let render_response
              Effect.of_sync_fun
                (fun () ->
                  Dom_html.window##.location##.hash
-                 := Js.string ("#" ^ name))
+                   := Js.string ("#" ^ name);
+                 let root = Dom_html.document##.documentElement in
+                 let update n =
+                   Js.Opt.iter
+                     (root##querySelector
+                        (Js.string ("[data-chip-theme=\"" ^ n ^ "\"]")))
+                     (fun el ->
+                        el##setAttribute
+                          (Js.string "aria-pressed")
+                          (Js.string (if n = name then "true" else "false")))
+                 in
+                 update "dark"; update "cyber"; update "term";
+                 update "parchment"; update "paper")
                ()
            in
            Node.div
@@ -1850,6 +1873,7 @@ let render_response
                [ Style.theme_chip
                ; Attr.create "data-chip-theme" name
                ; Attr.role "button"
+               ; Attr.create "aria-pressed" (if name = "dark" then "true" else "false")
                ; Attr.tabindex 0
                ; Attr.on_click (fun _ -> fire ())
                ; Attr.on_key_down (fun ev ->

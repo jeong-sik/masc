@@ -69,7 +69,7 @@ let cell ?(color : value_color = `Default) ~(k : string) ~(v : string) () : Node
 ;;
 
 let strip ?(label : string option) (cells : Node.t list) : Node.t =
-  let base = [ Style.strip ] in
+  let base = [ Style.strip; Attr.role "status" ] in
   let attrs =
     match label with
     | Some l -> Attr.create "aria-label" l :: base

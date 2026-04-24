@@ -122,7 +122,7 @@ stylesheet
     margin-left: auto;
     font-family: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
     font-variant-numeric: tabular-nums;
-    font-size: 10px;
+    font-size: 11px;
     color: var(--text-dim);
     flex-shrink: 0;
   }
@@ -150,7 +150,7 @@ let view_slot ~(state : state) ~sigil ~name ~state_label ~when_ =
     | `Failed -> Style.dot_failed
   in
   Node.div
-    ~attrs:[ Style.slot; Attr.role "listitem" ]
+    ~attrs:[ Style.slot; Attr.role "listitem"; Attr.create "aria-label" (name ^ " · " ^ state_label ^ " · " ^ when_) ]
     [ Node.div ~attrs:[ Style.sigil ] [ Node.text sigil ]
     ; Node.div
         ~attrs:[ Style.body ]

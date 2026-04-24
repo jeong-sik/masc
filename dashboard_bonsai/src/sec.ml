@@ -65,7 +65,7 @@ let view ?(sub : string option) ?(right : string option) ~(title : string) () : 
          | Some s when String.length s > 0 ->
            [ Node.span ~attrs:[ Style.sec_sub ] [ Node.text s ] ]
          | _ -> [])
-      ; [ Node.div ~attrs:[ Style.sec_hr ] [] ]
+      ; [ Node.div ~attrs:[ Style.sec_hr; Attr.create "aria-hidden" "true" ] [] ]
       ; (match right with
          | Some r when String.length r > 0 ->
            [ Node.div ~attrs:[ Style.sec_right ] [ Node.text r ] ]

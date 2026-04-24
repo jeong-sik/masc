@@ -169,7 +169,7 @@ stylesheet
 
   .subline {
     font-family: var(--font-mono, 'JetBrains Mono', monospace);
-    font-size: 10px;
+    font-size: 11px;
     line-height: 1.35;
     color: var(--text-dim);
     font-variant-numeric: tabular-nums;
@@ -226,7 +226,7 @@ stylesheet
   .metric_sub {
     margin-top: 3px;
     font-family: var(--font-mono, 'JetBrains Mono', monospace);
-    font-size: 10px;
+    font-size: 11px;
     color: var(--text-dim);
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
@@ -1121,13 +1121,15 @@ let view
   | [] ->
     Node.div
       ~attrs:[ Style.quiet; Attr.role "status"; Attr.create "aria-label" "Directory loading" ]
-      [ Node.text
-          "runtime/mission snapshot이 아직 조용합니다. keepers summary만 먼저 올라왔을 가능성이 있습니다."
+      [ Node.span ~attrs:[ Attr.create "lang" "ko" ]
+          [ Node.text
+              "runtime/mission snapshot이 아직 조용합니다. keepers summary만 먼저 올라왔을 가능성이 있습니다."
+          ]
       ]
   | _ ->
     let selected = selected_row rows selected_name in
     Node.div
-      ~attrs:[ Style.directory; Attr.role "grid"; Attr.create "aria-label" "Keepers directory" ]
+      ~attrs:[ Style.directory; Attr.role "table"; Attr.create "aria-label" "Keepers directory" ]
       ([ Node.div
            ~attrs:[ Style.head; Attr.role "row" ]
            [ Node.div ~attrs:[ Attr.role "columnheader" ] [ Node.text "Sigil" ]
@@ -1179,21 +1181,21 @@ let view
          in
          Node.div
            ~attrs:row_attrs
-           [ Node.div ~attrs:[ Style.sigil ] [ Node.text (row_sigil row.name) ]
+           [ Node.div ~attrs:[ Style.sigil; Attr.role "cell" ] [ Node.text (row_sigil row.name) ]
            ; Node.div
-               ~attrs:[ Style.identity ]
+               ~attrs:[ Style.identity; Attr.role "cell" ]
                [ Node.div ~attrs:[ Style.name ] [ Node.text row.name ]
                ; Node.div
                    ~attrs:[ Style.subline ]
                    [ Node.text (String.concat ~sep:" · " subtitle_bits) ]
                ]
            ; Node.div
-               ~attrs:[ Style.summary ]
+               ~attrs:[ Style.summary; Attr.role "cell" ]
                [ Node.div ~attrs:[ Style.summary_k ] [ Node.text summary_k ]
                ; Node.div ~attrs:[ Style.summary_v ] [ Node.text summary_v ]
                ]
            ; Node.div
-               ~attrs:[ Style.chip_stack ]
+               ~attrs:[ Style.chip_stack; Attr.role "cell" ]
                [ Node.div
                    ~attrs:[ Style.chip_row ]
                    [ Pill.view ~size:`Sm ~color:row.status_color
@@ -1224,7 +1226,7 @@ let view
                    ]
                ]
            ; Node.div
-               ~attrs:[ Style.metric ]
+               ~attrs:[ Style.metric; Attr.role "cell" ]
                [ Node.div
                    ~attrs:[ context_class row.context_pct ]
                    [ Node.text
@@ -1359,10 +1361,10 @@ let note_section row =
            [ Node.span ~attrs:[ Attr.create "lang" "ko" ] [ Node.text "trust/note/current_work evidence가 아직 없습니다." ] ]
        | entries ->
          Node.div
-           ~attrs:[ Style.list ]
+           ~attrs:[ Style.list; Attr.role "list"; Attr.create "aria-label" "Keeper notes" ]
            (List.map entries ~f:(fun (label, text) ->
               Node.div
-                ~attrs:[ Style.note_box ]
+                ~attrs:[ Style.note_box; Attr.role "listitem" ]
                 [ Node.div ~attrs:[ Style.note_k ] [ Node.text label ]
                 ; Node.div ~attrs:[ Style.note_v ] [ Node.text text ]
                 ])))
@@ -1429,10 +1431,10 @@ let data_section row execution mission =
   Node.div
     [ Shell_view.aside_title "Data"
     ; Node.div
-        ~attrs:[ Style.list ]
+        ~attrs:[ Style.list; Attr.role "list"; Attr.create "aria-label" "Keeper data" ]
         (List.map (rows @ sparse_rows) ~f:(fun (label, value) ->
            Node.div
-             ~attrs:[ Style.list_row ]
+             ~attrs:[ Style.list_row; Attr.role "listitem" ]
              [ Node.div ~attrs:[ Style.list_k ] [ Node.text label ]
              ; Node.div ~attrs:[ Style.list_v ] [ Node.text value ]
              ]))
@@ -1461,10 +1463,10 @@ let preview_section row =
     Node.div
       [ Shell_view.aside_title "Preview"
       ; Node.div
-          ~attrs:[ Style.list ]
+          ~attrs:[ Style.list; Attr.role "list"; Attr.create "aria-label" "Brief preview" ]
           (List.map previews ~f:(fun (label, text) ->
              Node.div
-               ~attrs:[ Style.preview_box ]
+               ~attrs:[ Style.preview_box; Attr.role "listitem" ]
                [ Node.div ~attrs:[ Style.preview_label ] [ Node.text label ]
                ; Node.div ~attrs:[ Style.preview_text ] [ Node.text text ]
                ]))

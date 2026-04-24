@@ -28,7 +28,7 @@ stylesheet
   {|
   .pill_md {
     font-family: 'JetBrains Mono', ui-monospace, monospace;
-    font-size: 10px;
+    font-size: 11px;
     letter-spacing: 0.16em;
     text-transform: uppercase;
     padding: 4px 8px;

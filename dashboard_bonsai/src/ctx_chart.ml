@@ -40,7 +40,7 @@ stylesheet
   }
   .meta_v {
     font-family: 'JetBrains Mono', ui-monospace, monospace;
-    font-size: 10px;
+    font-size: 11px;
     letter-spacing: 0.08em;
     text-transform: none;
     color: var(--text-primary);
@@ -59,7 +59,7 @@ stylesheet
     position: absolute;
     right: 8px;
     font-family: 'JetBrains Mono', ui-monospace, monospace;
-    font-size: 10px;
+    font-size: 11px;
     color: var(--text-dim);
     pointer-events: none;
   }

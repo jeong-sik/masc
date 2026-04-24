@@ -101,6 +101,7 @@ let normalize_execution_links (links : Types.task_execution_links) =
 let normalize_task_contract (contract : Types.task_contract) =
   { contract with
     completion_contract = normalized_string_list contract.completion_contract
+  ; required_tools = normalized_string_list contract.required_tools
   ; required_evidence = normalized_string_list contract.required_evidence
   ; inspect_gate_evidence = normalized_string_list contract.inspect_gate_evidence
   ; verify_gate_evidence = normalized_string_list contract.verify_gate_evidence
@@ -111,6 +112,7 @@ let normalize_task_contract (contract : Types.task_contract) =
 let empty_task_contract =
   { strict = false
   ; completion_contract = []
+  ; required_tools = []
   ; required_evidence = []
   ; inspect_gate_evidence = []
   ; verify_gate_evidence = []

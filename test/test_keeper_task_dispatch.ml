@@ -13,6 +13,9 @@ let make_test_meta ?(name = "test-keeper") () : Keeper_types.keeper_meta =
 let make_goal_scoped_meta goal_ids =
   { (make_test_meta ()) with active_goal_ids = goal_ids }
 
+let make_meta_with_tools tools =
+  { (make_test_meta ()) with tool_access = Keeper_types.Custom tools }
+
 let make_ctx_work () =
   Keeper_exec_context.create ~system_prompt:"test" ~max_tokens:4000
 
@@ -47,9 +50,26 @@ let strict_contract ?(verify_gate_evidence = []) () : Types.task_contract =
   {
     strict = true;
     completion_contract = [ "tests pass" ];
+    required_tools = [];
     required_evidence = [];
     inspect_gate_evidence = [];
     verify_gate_evidence;
+    links =
+      {
+        operation_id = None;
+        session_id = None;
+        autoresearch_loop_id = None;
+      };
+  }
+
+let contract_requiring_tools required_tools : Types.task_contract =
+  {
+    strict = false;
+    completion_contract = [];
+    required_tools;
+    required_evidence = [];
+    inspect_gate_evidence = [];
+    verify_gate_evidence = [];
     links =
       {
         operation_id = None;
@@ -229,6 +249,59 @@ let test_claim_respects_active_goal_ids () =
         Yojson.Safe.Util.(
           json |> member "claimed_task" |> member "goal_id" |> to_string)
     | None -> fail "expected a claimed task")
+
+let test_claim_skips_required_tools_without_access () =
+  with_room (fun config ->
+    let meta = make_meta_with_tools [ "keeper_task_claim"; "keeper_tasks_list" ] in
+    let _ =
+      Coord.add_task
+        ~contract:(contract_requiring_tools [ "keeper_bash" ])
+        config
+        ~title:"Needs bash"
+        ~priority:1
+        ~description:"requires shell execution"
+    in
+    let _ =
+      Coord.add_task config ~title:"Readable fallback" ~priority:2
+        ~description:"does not require shell"
+    in
+    ignore (call_tool config meta "keeper_task_claim" (`Assoc []));
+    let claimed =
+      Coord.get_tasks_raw config
+      |> List.find_opt (fun (task : Types.task) ->
+           Types.task_assignee_of_status task.task_status = Some meta.agent_name)
+    in
+    match claimed with
+    | Some task -> check string "claimed fallback" "Readable fallback" task.title
+    | None -> fail "expected fallback task to be claimed")
+
+let test_claim_allows_required_tools_with_access () =
+  with_room (fun config ->
+    let meta =
+      make_meta_with_tools
+        [ "keeper_task_claim"; "keeper_tasks_list"; "keeper_bash" ]
+    in
+    let _ =
+      Coord.add_task
+        ~contract:(contract_requiring_tools [ "keeper_bash" ])
+        config
+        ~title:"Needs bash"
+        ~priority:1
+        ~description:"requires shell execution"
+    in
+    let _ =
+      Coord.add_task config ~title:"Readable fallback" ~priority:2
+        ~description:"does not require shell"
+    in
+    ignore (call_tool config meta "keeper_task_claim" (`Assoc []));
+    let claimed =
+      Coord.get_tasks_raw config
+      |> List.find_opt (fun (task : Types.task) ->
+           Types.task_assignee_of_status task.task_status = Some meta.agent_name)
+    in
+    match claimed with
+    | Some task -> check string "claimed required-tool task" "Needs bash" task.title
+    | None -> fail "expected required-tool task to be claimed")
 
 let test_create_defaults_single_active_goal_id () =
   with_room (fun config ->
@@ -624,6 +697,10 @@ let () =
       test_case "claim empty room" `Quick test_claim_empty_room;
       test_case "claim respects active_goal_ids" `Quick
         test_claim_respects_active_goal_ids;
+      test_case "claim skips tasks requiring missing tools" `Quick
+        test_claim_skips_required_tools_without_access;
+      test_case "claim allows tasks requiring available tools" `Quick
+        test_claim_allows_required_tools_with_access;
       test_case "create defaults single active goal_id" `Quick
         test_create_defaults_single_active_goal_id;
       test_case "create requires explicit goal_id for multiple active goals" `Quick

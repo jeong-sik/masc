@@ -65,6 +65,180 @@ let verification_blocks_claim latest_status_by_task (task : Types.task) =
   | Some (_, `Passed)
   | None -> false
 
+let task_required_tools (task : Types.task) =
+  match task.contract with
+  | Some contract -> contract.required_tools
+  | None -> []
+
+let string_list_contains all value =
+  List.exists (String.equal value) all
+
+let required_tools_allowed ?agent_tool_names required_tools =
+  match required_tools, agent_tool_names with
+  | [], _ -> true
+  | _ :: _, None -> true
+  | required, Some allowed ->
+      List.for_all (string_list_contains allowed) required
+
+let underscore_name name =
+  String.map (function '-' -> '_' | c -> c) name
+
+let hyphen_name name =
+  String.map (function '_' -> '-' | c -> c) name
+
+let keeper_name_from_agent_name agent_name =
+  let trimmed = String.trim agent_name in
+  if
+    String.starts_with ~prefix:"keeper-" trimmed
+    && String.ends_with ~suffix:"-agent" trimmed
+    && String.length trimmed > 13
+  then Some (String.sub trimmed 7 (String.length trimmed - 13))
+  else if String.ends_with ~suffix:"-agent" trimmed && String.length trimmed > 6
+  then Some (String.sub trimmed 0 (String.length trimmed - 6))
+  else None
+
+let agent_record_keeper_name config ~agent_name =
+  let agent_file =
+    Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json")
+  in
+  if path_exists config agent_file then
+    match read_agent_with_repair config agent_file with
+    | Ok { meta = Some { keeper_name = Some name; _ }; _ } ->
+        let name = String.trim name in
+        if name = "" then None else Some name
+    | Ok _ | Error _ -> None
+  else None
+
+let keeper_receipt_candidate_names config ~agent_name =
+  let base =
+    [ agent_record_keeper_name config ~agent_name
+    ; keeper_name_from_agent_name agent_name
+    ; Some agent_name
+    ]
+    |> List.filter_map Fun.id
+  in
+  base
+  |> List.concat_map (fun name ->
+       let trimmed = String.trim name in
+       if trimmed = "" then []
+       else
+         [ trimmed; safe_filename trimmed; underscore_name trimmed; hyphen_name trimmed ])
+  |> List.sort_uniq String.compare
+
+let directory_exists path =
+  try Sys.file_exists path && Sys.is_directory path with _ -> false
+
+let directory_entries path =
+  try Sys.readdir path |> Array.to_list with _ -> []
+
+let jsonl_files_under base_dir =
+  if not (directory_exists base_dir) then []
+  else
+    directory_entries base_dir
+    |> List.filter_map (fun month ->
+         let month_dir = Filename.concat base_dir month in
+         if directory_exists month_dir then Some month_dir else None)
+    |> List.concat_map (fun month_dir ->
+         directory_entries month_dir
+         |> List.filter (String.ends_with ~suffix:".jsonl")
+         |> List.map (Filename.concat month_dir))
+
+let last_nonempty_line path =
+  try
+    let input = open_in path in
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr input)
+      (fun () ->
+         let rec loop last =
+           match input_line input with
+           | line ->
+               let trimmed = String.trim line in
+               loop (if trimmed = "" then last else Some trimmed)
+           | exception End_of_file -> last
+         in
+         loop None)
+  with _ -> None
+
+let latest_json_in_receipt_dir base_dir =
+  jsonl_files_under base_dir
+  |> List.sort (fun a b -> compare b a)
+  |> List.find_map (fun path ->
+       match last_nonempty_line path with
+       | None -> None
+       | Some line -> (
+           try Some (Yojson.Safe.from_string line)
+           with Yojson.Json_error _ -> None))
+
+let json_member_path path json =
+  List.fold_left
+    (fun current key -> Yojson.Safe.Util.member key current)
+    json
+    path
+
+let json_raw_string_path path json =
+  match json_member_path path json with
+  | `String value -> Some (String.trim value)
+  | _ -> None
+
+let json_string_path path json =
+  json_raw_string_path path json
+  |> Option.map String.lowercase_ascii
+
+let receipt_sort_key json =
+  match json_raw_string_path [ "recorded_at" ] json with
+  | Some value -> value
+  | None ->
+      Option.value ~default:"" (json_raw_string_path [ "ended_at" ] json)
+
+let latest_execution_receipt_json config ~agent_name =
+  let keeper_root = Filename.concat (masc_root_dir config) "keepers" in
+  keeper_receipt_candidate_names config ~agent_name
+  |> List.filter_map (fun keeper_name ->
+       let base_dir =
+         Filename.concat
+           (Filename.concat keeper_root keeper_name)
+           "execution-receipts"
+       in
+       latest_json_in_receipt_dir base_dir)
+  |> List.sort (fun a b -> compare (receipt_sort_key b) (receipt_sort_key a))
+  |> List.find_opt (fun _ -> true)
+
+let json_string_list key json =
+  match Yojson.Safe.Util.member key json with
+  | `List items ->
+      List.filter_map
+        (function
+          | `String value ->
+              let trimmed = String.trim value in
+              if trimmed = "" then None else Some trimmed
+          | _ -> None)
+        items
+  | _ -> []
+
+let latest_receipt_blocks_required_tool_claim config ~agent_name =
+  match latest_execution_receipt_json config ~agent_name with
+  | None -> false
+  | Some receipt ->
+      let operator_reason =
+        json_string_path [ "operator_disposition_reason" ] receipt
+      in
+      let tool_contract_result =
+        json_string_path [ "tool_contract_result" ] receipt
+      in
+      let tool_requirement =
+        json_string_path [ "tool_surface"; "tool_requirement" ] receipt
+      in
+      let tools_used = json_string_list "tools_used" receipt in
+      let degraded_contract =
+        match tool_contract_result with
+        | Some ("violated" | "unknown" | "satisfied_by_deterministic_fallback") ->
+            true
+        | Some _ | None -> false
+      in
+      operator_reason = Some "tool_required_no_tools"
+      || degraded_contract
+      || (tool_requirement = Some "required" && tools_used = [])
+
 let agent_current_task_matches_backlog backlog ~agent_name task_id =
   match
     List.find_opt
@@ -126,6 +300,7 @@ let reconcile_agent_current_task_with_backlog config ~agent_name backlog =
 let claim_next_r
       config
       ~agent_name
+      ?agent_tool_names
       ?(exclude_task_ids = [])
       ?(task_filter = fun _ -> true)
       ()
@@ -241,6 +416,35 @@ let claim_next_r
         | Some rid -> rid :: (blocked_ids @ exclude_task_ids)
         | None -> blocked_ids @ exclude_task_ids
       in
+      let required_tool_receipt_blocked =
+        List.exists (fun task -> task_required_tools task <> []) unclaimed
+        && latest_receipt_blocks_required_tool_claim config ~agent_name
+      in
+      let required_tool_claim_allowed (task : task) =
+        let required_tools = task_required_tools task in
+        required_tools_allowed ?agent_tool_names required_tools
+        && (required_tools = [] || not required_tool_receipt_blocked)
+      in
+      let required_tool_excluded =
+        List.filter
+          (fun (t : task) ->
+             (not (List.mem t.id all_excluded))
+             && task_filter t
+             && not (required_tool_claim_allowed t))
+          unclaimed
+      in
+      if required_tool_excluded <> [] then
+        log_event config
+          (Printf.sprintf
+             "{\"type\":\"task_claim_next_skip_required_tools\",\"agent\":\"%s\",\"blocked\":%d,\"receipt_blocked\":%b,\"agent_tool_names_known\":%b,\"ts\":\"%s\"}"
+             agent_name
+             (List.length required_tool_excluded)
+             required_tool_receipt_blocked
+             (Option.is_some agent_tool_names)
+             (now_iso ()));
+      let effective_task_filter task =
+        task_filter task && required_tool_claim_allowed task
+      in
       let task_filter_excluded =
         List.filter
           (fun (t : task) -> (not (List.mem t.id all_excluded)) && not (task_filter t))
@@ -248,7 +452,8 @@ let claim_next_r
       in
       let eligible_from candidates =
         List.filter
-          (fun (t : task) -> (not (List.mem t.id all_excluded)) && task_filter t)
+          (fun (t : task) ->
+             (not (List.mem t.id all_excluded)) && effective_task_filter t)
           candidates
       in
       let primary_eligible = eligible_from primary_unclaimed in
@@ -302,7 +507,9 @@ let claim_next_r
           Claim_next_no_eligible
             {
               excluded_count =
-                List.length all_excluded + List.length task_filter_excluded;
+                List.length all_excluded
+                + List.length task_filter_excluded
+                + List.length required_tool_excluded;
             }
       | _ :: _, task :: _ ->
           (* Claim this task *)

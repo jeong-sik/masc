@@ -50,6 +50,7 @@ let add_strict_task config =
   let contract : Types.task_contract = {
     strict = true;
     completion_contract = ["tests pass"];
+    required_tools = [];
     required_evidence = [];
     inspect_gate_evidence = [];
     verify_gate_evidence = ["output.json"];

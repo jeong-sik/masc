@@ -178,61 +178,63 @@ let run_docker_shell_command_with_status
           | Network_inherit -> ([], network_mode_to_string network_mode)
       in
       let cred_root = "/tmp/keeper-creds" in
-      let cred_mounts, cred_envs =
+      let cred_result =
         if not git_creds_enabled then
-          [], []
+          Ok ([], [])
         else
-          let binding_result =
-            Keeper_gh_env.keeper_binding config ~keeper_name:meta.name
-          in
-          let gh_creds =
-            match binding_result with
-            | Ok { gh_config_dir = Some dir; _ } -> dir
-            | Ok { gh_config_dir = None; _ } ->
-                Env_config_keeper.KeeperSandbox.gh_creds_host_path ()
-            | Error err -> raise (Failure err)
-          in
-          let gitconfig = Env_config_keeper.KeeperSandbox.gitconfig_host_path () in
-          let ssh_dir = Env_config_keeper.KeeperSandbox.ssh_dir_host_path () in
-          let mounts =
-            optional_ro_mount ~host:gh_creds
-              ~container:(Filename.concat cred_root ".config/gh")
-            @ optional_ro_mount ~host:gitconfig
-                ~container:(Filename.concat cred_root ".gitconfig")
-            @ optional_ro_mount ~host:ssh_dir
-                ~container:(Filename.concat cred_root ".ssh")
-          in
-          let git_author_name, git_author_email =
-            match binding_result with
-            | Ok { github_identity = Some id; git_identity_mode = "github_identity"; _ } ->
-                id, id ^ "@users.noreply.github.com"
-            | _ ->
-                ( Keeper_identity.keeper_git_author
-                    ~keeper_name:meta.name,
-                  Keeper_identity.keeper_git_email
-                    ~keeper_name:meta.name )
-          in
-          let git_identity_env ~name ~email =
-            [
-              "-e"; "GIT_AUTHOR_NAME=" ^ name;
-              "-e"; "GIT_AUTHOR_EMAIL=" ^ email;
-              "-e"; "GIT_COMMITTER_NAME=" ^ name;
-              "-e"; "GIT_COMMITTER_EMAIL=" ^ email;
-            ]
-          in
-          let envs =
-            [
-              "-e"; "HOME=" ^ cred_root;
-              "-e"; "GH_CONFIG_DIR=" ^ Filename.concat cred_root ".config/gh";
-              "-e"; "GIT_CONFIG_GLOBAL=" ^ Filename.concat cred_root ".gitconfig";
-              "-e"; "GIT_CONFIG_COUNT=1";
-              "-e"; "GIT_CONFIG_KEY_0=safe.directory";
-              "-e"; "GIT_CONFIG_VALUE_0=*";
-            ]
-            @ git_identity_env ~name:git_author_name ~email:git_author_email
-          in
-          mounts, envs
+          match Keeper_gh_env.keeper_binding config ~keeper_name:meta.name with
+          | Error err -> Error err
+          | Ok binding ->
+            let gh_creds =
+              match binding.gh_config_dir with
+              | Some dir -> dir
+              | None ->
+                  Env_config_keeper.KeeperSandbox.gh_creds_host_path ()
+            in
+            let gitconfig = Env_config_keeper.KeeperSandbox.gitconfig_host_path () in
+            let ssh_dir = Env_config_keeper.KeeperSandbox.ssh_dir_host_path () in
+            let mounts =
+              optional_ro_mount ~host:gh_creds
+                ~container:(Filename.concat cred_root ".config/gh")
+              @ optional_ro_mount ~host:gitconfig
+                  ~container:(Filename.concat cred_root ".gitconfig")
+              @ optional_ro_mount ~host:ssh_dir
+                  ~container:(Filename.concat cred_root ".ssh")
+            in
+            let git_author_name, git_author_email =
+              match binding with
+              | { github_identity = Some id; git_identity_mode = "github_identity"; _ } ->
+                  id, id ^ "@users.noreply.github.com"
+              | _ ->
+                  ( Keeper_identity.keeper_git_author
+                      ~keeper_name:meta.name,
+                    Keeper_identity.keeper_git_email
+                      ~keeper_name:meta.name )
+            in
+            let git_identity_env ~name ~email =
+              [
+                "-e"; "GIT_AUTHOR_NAME=" ^ name;
+                "-e"; "GIT_AUTHOR_EMAIL=" ^ email;
+                "-e"; "GIT_COMMITTER_NAME=" ^ name;
+                "-e"; "GIT_COMMITTER_EMAIL=" ^ email;
+              ]
+            in
+            let envs =
+              [
+                "-e"; "HOME=" ^ cred_root;
+                "-e"; "GH_CONFIG_DIR=" ^ Filename.concat cred_root ".config/gh";
+                "-e"; "GIT_CONFIG_GLOBAL=" ^ Filename.concat cred_root ".gitconfig";
+                "-e"; "GIT_CONFIG_COUNT=1";
+                "-e"; "GIT_CONFIG_KEY_0=safe.directory";
+                "-e"; "GIT_CONFIG_VALUE_0=*";
+              ]
+              @ git_identity_env ~name:git_author_name ~email:git_author_email
+            in
+            Ok (mounts, envs)
       in
+      match cred_result with
+      | Error err -> sandbox_error err
+      | Ok (cred_mounts, cred_envs) ->
       let ssh_auth_sock = Sys.getenv_opt "SSH_AUTH_SOCK" in
       let ssh_auth_mount, ssh_auth_env =
         let empty = ([], []) in

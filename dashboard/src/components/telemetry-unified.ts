@@ -613,7 +613,7 @@ export function TelemetryUnified() {
           return null
         })
       const storePromise = Promise.all([
-        catchStoreFailure(fetchDashboardShell({ signal: controller.signal })),
+        catchStoreFailure(fetchDashboardShell({ light: true, signal: controller.signal })),
         catchStoreFailure(fetchDashboardTools({ signal: controller.signal })),
         catchStoreFailure(fetchDashboardNamespaceTruth({ signal: controller.signal })),
       ]).then(([shell, tools, truth]) => {

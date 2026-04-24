@@ -13,10 +13,11 @@ import {
   pauseQueuedOasRuntimeIngress,
   resumeQueuedOasRuntimeIngress,
 } from './sse'
-import type { BoardPost, DashboardExecutionResponse, SSEEvent } from './types'
+import type { BoardPost, DashboardExecutionResponse, DashboardShellResponse, SSEEvent } from './types'
 import {
   keeperHeartbeats,
   invalidateDashboardCache,
+  hydrateShellSnapshot,
   hydrateExecutionSnapshot,
   refreshDashboard,
   refreshExecution,
@@ -37,12 +38,10 @@ import { mergeServerStatus } from './store-normalizers'
 import { normalizeOperatorSnapshot, normalizeOperatorDigest } from './operator-normalizers'
 import { operatorSnapshot, operatorRoomDigest } from './operator-signals'
 import { compositeTick } from './composite-signals'
-import { hydrateTransportHealthFromSSE } from './components/transport-health'
-import { activeKeeperName, hydrateKeeperStatus } from './keeper-runtime'
 import { showToast } from './components/common/toast'
-import { handleAgentFailed } from './components/common/error-notification'
 import type { ErrorCode } from './types/error'
 import { route } from './router'
+import { routeWantsRefreshTarget } from './refresh-scope'
 import {
   PERIODIC_REFRESH_DEV_MS,
   PERIODIC_REFRESH_PROD_MS,
@@ -69,6 +68,11 @@ export function registerOperatorRefresh(fn: () => void): void {
 let _refreshMissionFn: (() => void) | null = null
 export function registerMissionRefresh(fn: () => void): void {
   _refreshMissionFn = fn
+}
+
+let _keeperTurnRefreshFn: ((keeperName: string) => void) | null = null
+export function registerKeeperTurnRefresh(fn: (keeperName: string) => void): void {
+  _keeperTurnRefreshFn = fn
 }
 
 const _refreshActivityFns = new Set<() => void>()
@@ -137,12 +141,21 @@ const PREFIX_ROUTES: Array<{ prefix: string; target: RefreshTarget }> = [
 ]
 
 const REFRESH_FNS: Record<RefreshTarget, () => void> = {
-  execution: () => { void refreshExecution({ force: true }) },
+  execution: () => { void refreshExecution() },
   board:     refreshBoard,
   operator:  () => _refreshOperatorFn?.(),
   activity:  () => {
     for (const fn of _refreshActivityFns) fn()
   },
+}
+
+function scheduleTargetRefresh(
+  target: RefreshTarget,
+  fn: () => void,
+  delayMs?: number,
+): void {
+  if (!routeWantsRefreshTarget(route.value, target)) return
+  scheduleRefresh(target, fn, delayMs)
 }
 
 // --- Named handlers for complex events ---
@@ -201,11 +214,13 @@ function handleOperatorDigest(payload: unknown): void {
 }
 
 function handleTransportHealth(payload: unknown): void {
-  try {
-    hydrateTransportHealthFromSSE(payload)
-  } catch (err) {
-    console.debug('[SSE] transport health hydration failed', err instanceof Error ? err.message : '')
-  }
+  void import('./components/transport-health')
+    .then(({ hydrateTransportHealthFromSSE }) => {
+      hydrateTransportHealthFromSSE(payload)
+    })
+    .catch(err => {
+      console.debug('[SSE] transport health hydration failed', err instanceof Error ? err.message : '')
+    })
 }
 
 function handleKeeperHeartbeat(event: { name?: string; ts_unix?: number }): void {
@@ -219,21 +234,20 @@ function handleKeeperHeartbeat(event: { name?: string; ts_unix?: number }): void
 }
 
 function handleKeeperLifecycle(event: { type: string; name?: string }): void {
-  // All keeper lifecycle events trigger operator refresh
-  scheduleRefresh('operator', () => _refreshOperatorFn?.(), SSE_KEEPER_OPERATOR_DEBOUNCE_MS)
+  if (routeWantsRefreshTarget(route.value, 'operator')) {
+    scheduleRefresh('operator', () => _refreshOperatorFn?.(), SSE_KEEPER_OPERATOR_DEBOUNCE_MS)
+  }
 
   // keeper_turn_complete: re-hydrate active keeper's conversation + trajectory
   if (normalizeMascEventType(event.type) === 'keeper_turn_complete') {
     const keeperName = event.name ?? ''
-    const viewing = activeKeeperName.value
-    if (keeperName && keeperName === viewing) {
-      scheduleRefresh(`keeper_thread_${keeperName}`, () => {
-        void hydrateKeeperStatus(keeperName, true)
-      }, SSE_KEEPER_THREAD_DEBOUNCE_MS)
-      scheduleRefresh(`keeper_trajectory_${keeperName}`, async () => {
-        const { loadTrajectory } = await import('./components/keeper-trajectory-timeline')
-        void loadTrajectory(keeperName)
-      }, SSE_KEEPER_THREAD_DEBOUNCE_MS)
+    if (!keeperName) return
+    if (_keeperTurnRefreshFn) {
+      scheduleRefresh(
+        `keeper_thread_${keeperName}`,
+        () => _keeperTurnRefreshFn?.(keeperName),
+        SSE_KEEPER_THREAD_DEBOUNCE_MS,
+      )
     }
   }
 }
@@ -341,6 +355,109 @@ function handleBoardPostCreated(event: SSEEvent): boolean {
   return true
 }
 
+export function hydrateServerPushEvent(event: SSEEvent): boolean {
+  if ((event.type === 'project_snapshot' || event.type === 'namespace_truth_snapshot' || event.type === 'room_truth_snapshot') && event.payload) {
+    handleNamespaceTruthSnapshot(event.payload)
+    return true
+  }
+
+  if (event.type === 'execution_snapshot' && event.payload) {
+    handleExecutionSnapshot(event.payload)
+    return true
+  }
+
+  if (event.type === 'operator_snapshot' && event.payload) {
+    handleOperatorSnapshot(event.payload)
+    return true
+  }
+  if (event.type === 'operator_digest' && event.payload) {
+    handleOperatorDigest(event.payload)
+    return true
+  }
+  if (event.type === 'transport_health_snapshot' && event.payload) {
+    handleTransportHealth(event.payload)
+    return true
+  }
+
+  if (event.type === 'oas:agent_failed') {
+    const p = (event.payload ?? {}) as Record<string, unknown>
+    const rawCode = typeof p.error_code === 'string' ? p.error_code : undefined
+    void import('./components/common/error-notification')
+      .then(({ handleAgentFailed }) => {
+        handleAgentFailed({
+          agentName: typeof p.agent_name === 'string' ? p.agent_name
+            : event.agent_name ?? 'unknown',
+          taskId: typeof p.task_id === 'string' ? p.task_id : undefined,
+          errorCode: rawCode as ErrorCode | undefined,
+          error: typeof p.error === 'string' ? p.error
+            : event.error_text ?? '알 수 없는 오류',
+        })
+      })
+      .catch(err => {
+        console.debug('[SSE] agent-failed notification unavailable', err instanceof Error ? err.message : '')
+      })
+    return false
+  }
+
+  if (event.type === 'keeper_heartbeat') {
+    handleKeeperHeartbeat(event)
+    return true
+  }
+
+  if (event.type === 'keeper_composite_changed') {
+    const payload = event as unknown as { name?: string; ts_unix?: number }
+    const name = typeof payload.name === 'string' ? payload.name : ''
+    const ts_unix = typeof payload.ts_unix === 'number' ? payload.ts_unix : Date.now() / 1000
+    compositeTick.value = { name, ts_unix }
+    return true
+  }
+
+  if (event.type === 'post_created' && handleBoardPostCreated(event)) {
+    return true
+  }
+
+  return false
+}
+
+export function hydrateDashboardSlice(slice: string, payload: unknown, eventType?: string): void {
+  switch (eventType) {
+    case 'project_snapshot':
+    case 'namespace_truth_snapshot':
+    case 'room_truth_snapshot':
+    case 'execution_snapshot':
+    case 'operator_snapshot':
+    case 'operator_digest':
+    case 'transport_health_snapshot':
+      hydrateServerPushEvent({ type: eventType, payload } as SSEEvent)
+      return
+  }
+
+  switch (slice) {
+    case 'shell':
+      hydrateShellSnapshot(payload as DashboardShellResponse, { light: true })
+      return
+    case 'namespace':
+      hydrateServerPushEvent({ type: 'project_snapshot', payload } as SSEEvent)
+      return
+    case 'execution':
+      hydrateServerPushEvent({ type: 'execution_snapshot', payload } as SSEEvent)
+      return
+    case 'operator': {
+      const record = payload as { snapshot?: unknown; digest?: unknown }
+      if (record.snapshot) {
+        hydrateServerPushEvent({ type: 'operator_snapshot', payload: record.snapshot } as SSEEvent)
+      }
+      if (record.digest) {
+        hydrateServerPushEvent({ type: 'operator_digest', payload: record.digest } as SSEEvent)
+      }
+      return
+    }
+    case 'transport':
+      hydrateServerPushEvent({ type: 'transport_health_snapshot', payload } as SSEEvent)
+      return
+  }
+}
+
 // --- SSE reaction setup ---
 
 export function setupSSEReaction(): () => void {
@@ -354,73 +471,14 @@ export function setupSSEReaction(): () => void {
   const unsubscribe = lastEvent.subscribe((event) => {
     if (!event) return
 
-    // 0. Project snapshot — server push, no HTTP fetch needed
-    if ((event.type === 'project_snapshot' || event.type === 'namespace_truth_snapshot' || event.type === 'room_truth_snapshot') && event.payload) {
-      handleNamespaceTruthSnapshot(event.payload)
-      return
-    }
-
-    // 0b. Execution snapshot — server push, no HTTP fetch needed
-    if (event.type === 'execution_snapshot' && event.payload) {
-      handleExecutionSnapshot(event.payload)
-      return
-    }
-
-    // 0c. Operator/transport snapshots — server push, no HTTP fetch needed
-    if (event.type === 'operator_snapshot' && event.payload) {
-      handleOperatorSnapshot(event.payload)
-      return
-    }
-    if (event.type === 'operator_digest' && event.payload) {
-      handleOperatorDigest(event.payload)
-      return
-    }
-    if (event.type === 'transport_health_snapshot' && event.payload) {
-      handleTransportHealth(event.payload)
-      return
-    }
-
-    // 0d. Agent error notification — signal + toast, no fetch
-    if (event.type === 'oas:agent_failed') {
-      const p = (event.payload ?? {}) as Record<string, unknown>
-      const rawCode = typeof p.error_code === 'string' ? p.error_code : undefined
-      handleAgentFailed({
-        agentName: typeof p.agent_name === 'string' ? p.agent_name
-          : event.agent_name ?? 'unknown',
-        taskId: typeof p.task_id === 'string' ? p.task_id : undefined,
-        errorCode: rawCode as ErrorCode | undefined,
-        error: typeof p.error === 'string' ? p.error
-          : event.error_text ?? '알 수 없는 오류',
-      })
-    }
-
-    // 1. Keeper heartbeat — signal-only, zero network calls
-    if (event.type === 'keeper_heartbeat') {
-      handleKeeperHeartbeat(event)
-      return
-    }
-
-    // Composite lifecycle tick — signal-only; consumers (FSM Hub) re-fetch
-    // /composite themselves. Envelope carries {name, ts_unix} per RFC-0003.
-    if (event.type === 'keeper_composite_changed') {
-      const payload = event as unknown as { name?: string; ts_unix?: number }
-      const name = typeof payload.name === 'string' ? payload.name : ''
-      const ts_unix = typeof payload.ts_unix === 'number' ? payload.ts_unix : Date.now() / 1000
-      compositeTick.value = { name, ts_unix }
-      return
-    }
-
-    // 1b. Board post incremental hydration — when enriched payload is
-    // available and sort=recent, prepend directly and skip the full refresh.
-    if (event.type === 'post_created' && handleBoardPostCreated(event)) {
-      // Hydrated from SSE payload — no HTTP fetch needed.
+    if (hydrateServerPushEvent(event)) {
       return
     }
 
     // 2. Simple route: exact match
     const simpleRoute = SIMPLE_ROUTES[event.type]
     if (simpleRoute) {
-      scheduleRefresh(
+      scheduleTargetRefresh(
         simpleRoute.target,
         REFRESH_FNS[simpleRoute.target],
         simpleRoute.debounceMs,
@@ -430,7 +488,7 @@ export function setupSSEReaction(): () => void {
     // 4. Simple route: prefix match
     for (const { prefix, target } of PREFIX_ROUTES) {
       if (event.type.startsWith(prefix)) {
-        scheduleRefresh(target, REFRESH_FNS[target])
+        scheduleTargetRefresh(target, REFRESH_FNS[target])
         break
       }
     }

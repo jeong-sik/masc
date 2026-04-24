@@ -1,0 +1,290 @@
+import type { RouteState, SSEEvent } from './types'
+import { parseSSEMessage } from './schemas/sse'
+import { hydrateDashboardSlice, hydrateServerPushEvent } from './sse-store'
+import {
+  dashboardWsConnected,
+  dashboardWsLastError,
+  dashboardWsLastSeq,
+  dashboardWsReady,
+} from './dashboard-ws-state'
+
+type JsonObject = Record<string, unknown>
+type PendingRpc = {
+  resolve: (value: unknown) => void
+  reject: (err: Error) => void
+}
+
+interface DashboardWsDiscovery {
+  enabled?: boolean
+  listening?: boolean
+  ws_url?: string
+}
+
+let socket: WebSocket | null = null
+let rpcId = 0
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+let reconnectAttempts = 0
+let lastSubscribeKey = ''
+let shouldReconnect = true
+const pending = new Map<number, PendingRpc>()
+
+function routeKey(routeState: Pick<RouteState, 'tab' | 'params'>): string {
+  const params = routeState.params
+  return [
+    routeState.tab,
+    params.section ?? '',
+    params.view ?? '',
+    params.q ?? '',
+  ].join(':')
+}
+
+export function dashboardSlicesForRoute(routeState: Pick<RouteState, 'tab' | 'params'>): string[] {
+  const slices = new Set(['shell', 'namespace', 'transport'])
+
+  if (routeState.tab === 'workspace' && routeState.params.section === 'planning') {
+    slices.add('execution')
+  }
+  if (routeState.tab === 'monitoring') {
+    const section = routeState.params.section
+    if (section === 'observatory' || section === 'journey' || section === 'agents') {
+      slices.add('execution')
+    }
+    if (section === 'fleet-health' && routeState.params.view === 'comparison') {
+      slices.add('execution')
+      slices.add('transport')
+    }
+  }
+  if (routeState.tab === 'command' && routeState.params.view !== 'inspector') {
+    slices.add('operator')
+  }
+
+  return Array.from(slices).sort()
+}
+
+function clearReconnectTimer(): void {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer)
+    reconnectTimer = null
+  }
+}
+
+function scheduleReconnect(): void {
+  if (!shouldReconnect) return
+  if (reconnectTimer) return
+  reconnectAttempts += 1
+  const delay = Math.min(15_000, 500 * Math.pow(2, Math.min(reconnectAttempts, 5)))
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null
+    void connectDashboardWS()
+  }, delay)
+}
+
+function closeSocket(): void {
+  if (socket) {
+    socket.onopen = null
+    socket.onclose = null
+    socket.onerror = null
+    socket.onmessage = null
+    socket.close()
+    socket = null
+  }
+  for (const { reject } of pending.values()) {
+    reject(new Error('dashboard websocket closed'))
+  }
+  pending.clear()
+}
+
+async function discoverWsUrl(): Promise<string | null> {
+  const response = await fetch('/ws', { credentials: 'same-origin' })
+  if (!response.ok) return null
+  const data = await response.json() as DashboardWsDiscovery
+  if (data.enabled !== true || data.listening !== true || typeof data.ws_url !== 'string') {
+    return null
+  }
+  return data.ws_url
+}
+
+function sendRpc(method: string, params: JsonObject): Promise<unknown> {
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    return Promise.reject(new Error('dashboard websocket is not open'))
+  }
+  const id = ++rpcId
+  const payload = { jsonrpc: '2.0', id, method, params }
+  return new Promise((resolve, reject) => {
+    pending.set(id, { resolve, reject })
+    socket?.send(JSON.stringify(payload))
+  })
+}
+
+function handleRpcResponse(raw: JsonObject): boolean {
+  if (typeof raw.id !== 'number') return false
+  const pendingRpc = pending.get(raw.id)
+  if (!pendingRpc) return true
+  pending.delete(raw.id)
+  const error = raw.error as { message?: unknown } | undefined
+  if (error) {
+    pendingRpc.reject(new Error(typeof error.message === 'string' ? error.message : 'dashboard websocket rpc failed'))
+  } else {
+    pendingRpc.resolve(raw.result)
+  }
+  return true
+}
+
+function applySnapshot(raw: unknown): void {
+  const snapshot = raw as { slices?: unknown; seq?: unknown }
+  if (typeof snapshot.seq === 'number') {
+    dashboardWsLastSeq.value = snapshot.seq
+  }
+  const slices = snapshot.slices as Record<string, unknown> | undefined
+  if (!slices || typeof slices !== 'object') return
+  for (const [slice, payload] of Object.entries(slices)) {
+    hydrateDashboardSlice(slice, payload)
+  }
+}
+
+function applySubscribeResult(raw: unknown): void {
+  const result = raw as { snapshot?: unknown }
+  if (result.snapshot) applySnapshot(result.snapshot)
+}
+
+function applyDelta(raw: unknown): void {
+  const delta = raw as {
+    seq?: unknown
+    slice?: unknown
+    event_type?: unknown
+    payload?: unknown
+  }
+  if (typeof delta.seq === 'number') {
+    dashboardWsLastSeq.value = delta.seq
+    void sendRpc('dashboard/ack', {
+      seq: delta.seq,
+      bufferedAmount: socket?.bufferedAmount ?? 0,
+    }).catch(() => {})
+  }
+  if (typeof delta.slice !== 'string') return
+  hydrateDashboardSlice(
+    delta.slice,
+    delta.payload,
+    typeof delta.event_type === 'string' ? delta.event_type : undefined,
+  )
+}
+
+function handleNotification(raw: JsonObject): boolean {
+  if (raw.method === 'dashboard/delta') {
+    applyDelta(raw.params)
+    return true
+  }
+  if (raw.method === 'dashboard/snapshot') {
+    applySnapshot(raw.params)
+    return true
+  }
+  return false
+}
+
+function unwrapSseCandidate(raw: JsonObject): unknown {
+  const params = raw.params as { type?: unknown } | undefined
+  if (raw.jsonrpc && params?.type) return params
+  return raw
+}
+
+function handleRawPush(raw: unknown): void {
+  if (!raw || typeof raw !== 'object') return
+  const candidate = unwrapSseCandidate(raw as JsonObject)
+  const parsed = parseSSEMessage(candidate)
+  if (!parsed) return
+  hydrateServerPushEvent(parsed as unknown as SSEEvent)
+}
+
+function handleMessage(data: unknown): void {
+  if (typeof data !== 'string') return
+  let raw: unknown
+  try {
+    raw = JSON.parse(data)
+  } catch {
+    return
+  }
+  if (!raw || typeof raw !== 'object') return
+  const record = raw as JsonObject
+  if (handleRpcResponse(record)) return
+  if (handleNotification(record)) return
+  handleRawPush(record)
+}
+
+export async function subscribeDashboardRoute(routeState: Pick<RouteState, 'tab' | 'params'>): Promise<void> {
+  if (!dashboardWsReady.value) return
+  const slices = dashboardSlicesForRoute(routeState)
+  const key = `${routeKey(routeState)}|${slices.join(',')}`
+  if (key === lastSubscribeKey) return
+  lastSubscribeKey = key
+  const result = await sendRpc('dashboard/subscribe', {
+    route: routeKey(routeState),
+    slices,
+  })
+  applySubscribeResult(result)
+}
+
+export async function connectDashboardWS(routeState?: Pick<RouteState, 'tab' | 'params'>): Promise<void> {
+  if (typeof WebSocket === 'undefined') return
+  if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
+    return
+  }
+
+  shouldReconnect = true
+  clearReconnectTimer()
+  const wsUrl = await discoverWsUrl().catch(err => {
+    dashboardWsLastError.value = err instanceof Error ? err.message : String(err)
+    return null
+  })
+  if (!wsUrl) return
+
+  closeSocket()
+  const ws = new WebSocket(wsUrl)
+  socket = ws
+  ws.onopen = () => {
+    if (socket !== ws) return
+    dashboardWsConnected.value = true
+    reconnectAttempts = 0
+    const token = sessionStorage.getItem('masc_bearer_token')
+    void sendRpc('dashboard/hello', {
+      protocol: 'dashboard-ws.v1',
+      token: token ?? undefined,
+      features: ['snapshot', 'delta', 'mode_snapshot'],
+    })
+      .then(() => {
+        dashboardWsReady.value = true
+        dashboardWsLastError.value = null
+        if (routeState) {
+          void subscribeDashboardRoute(routeState)
+        }
+      })
+      .catch(err => {
+        dashboardWsReady.value = false
+        dashboardWsLastError.value = err instanceof Error ? err.message : String(err)
+      })
+  }
+  ws.onmessage = (event) => {
+    if (socket !== ws) return
+    handleMessage(event.data)
+  }
+  ws.onerror = () => {
+    if (socket !== ws) return
+    dashboardWsLastError.value = 'dashboard websocket error'
+  }
+  ws.onclose = () => {
+    if (socket !== ws) return
+    dashboardWsConnected.value = false
+    dashboardWsReady.value = false
+    lastSubscribeKey = ''
+    socket = null
+    scheduleReconnect()
+  }
+}
+
+export function disconnectDashboardWS(): void {
+  shouldReconnect = false
+  clearReconnectTimer()
+  dashboardWsConnected.value = false
+  dashboardWsReady.value = false
+  lastSubscribeKey = ''
+  closeSocket()
+}

@@ -1304,6 +1304,32 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
               Log.Server.warn "gRPC keeper client init failed: %s"
                 (Printexc.to_string exn))
        | Http | Ws | Webrtc | Local -> ());
+      Server_mcp_transport_ws.set_dashboard_snapshot_provider (function
+        | "shell" ->
+            Some
+              (Server_dashboard_http.dashboard_shell_payload_json ~light:true
+                 state.Mcp_server.room_config)
+        | "execution" ->
+            Some (Server_dashboard_http.dashboard_execution_snapshot_json ())
+        | "operator" ->
+            Some
+              (`Assoc
+                [
+                  ( "snapshot",
+                    Server_dashboard_http.cached_surface_json
+                      Server_dashboard_http._operator_snapshot_cache );
+                  ( "digest",
+                    Server_dashboard_http.cached_surface_json
+                      Server_dashboard_http._operator_digest_cache );
+                ])
+        | "transport" ->
+            Some (Server_dashboard_http.dashboard_transport_health_snapshot_json ())
+        | "namespace" ->
+            Server_dashboard_http.namespace_truth_snapshot_from_caches state
+        | "composite" | "board" | "goals" ->
+            None
+        | _ ->
+            None);
       (* Standalone WebSocket transport (enabled by default, opt-out via MASC_WS_ENABLED=0) *)
       Server_ws_standalone.start ~sw ~env
         ~on_message:(fun ws_session_id body_str ->

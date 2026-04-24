@@ -145,7 +145,7 @@ describe('refreshPlanForRoute', () => {
       params: {},
     })
 
-    expect(refreshShell).toHaveBeenCalledWith()
+    expect(refreshShell).toHaveBeenCalledWith({ light: true })
   })
 
   it('uses the scheduler-backed execution refresh path on monitoring navigation', () => {

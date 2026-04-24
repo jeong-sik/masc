@@ -520,9 +520,12 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
 
       | `GET, "/api/v1/dashboard/shell" ->
           let state = get_server_state () in
+          let light =
+            Server_utils.bool_query_param httpun_request "light" ~default:false
+          in
           let json =
             dashboard_shell_http_json ?clock:state.Mcp_server.clock
-              ~request:httpun_request
+              ~request:httpun_request ~light
               state.Mcp_server.room_config
           in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors

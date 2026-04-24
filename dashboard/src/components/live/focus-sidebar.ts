@@ -2,7 +2,7 @@
 
 import { html } from 'htm/preact'
 import { focusAgents } from '../../live-store'
-import { openAgentDetail, selectedAgentName } from '../agent-detail'
+import { openAgentDetail, selectedAgentName } from '../agent-detail-state'
 import { TimeAgo } from '../common/time-ago'
 
 function pressureClass(pressure: 'calm' | 'normal' | 'hot'): string {

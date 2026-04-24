@@ -34,9 +34,7 @@ let is_enabled () =
 let make_websocket_handler ~on_message _client_addr (wsd : Ws.Wsd.t) :
     Ws.Websocket_connection.input_handlers =
   let session_id = Server_mcp_transport_ws.next_id () in
-  let session : Server_mcp_transport_ws.ws_session =
-    { id = session_id; wsd; closed = false }
-  in
+  let session = Server_mcp_transport_ws.new_session ~id:session_id ~wsd in
   Server_mcp_transport_ws.with_sessions_rw (fun () ->
     Hashtbl.replace Server_mcp_transport_ws.sessions session_id session);
   Transport_metrics.set_ws_sessions
@@ -49,33 +47,25 @@ let make_websocket_handler ~on_message _client_addr (wsd : Ws.Wsd.t) :
     ~callback:(fun sse_event ->
       if not session.closed
          && not
-              (Server_mcp_transport_ws.send_text_checked ~context:"sse-forward"
-                 session sse_event)
+              (Server_mcp_transport_ws.send_dashboard_or_raw_sse session
+                 sse_event)
       then
         Server_mcp_transport_ws.cleanup_session session_id)
     ();
   Log.Server.info "WebSocket session %s connected (standalone port)" session_id;
-  let buf = Buffer.create 4096 in
   { Ws.Websocket_connection.
-    frame = (fun ~opcode ~is_fin:_ ~len:_ payload ->
+    frame = (fun ~opcode ~is_fin ~len payload ->
       match opcode with
-      | `Text | `Binary ->
-        Buffer.clear buf;
-        Ws.Payload.schedule_read payload
-          ~on_eof:(fun () ->
-            let text = Buffer.contents buf in
-            if String.length text > 0 then
-              on_message session_id text)
-          ~on_read:(fun bs ~off ~len ->
-            Buffer.add_string buf
-              (Bigstringaf.substring bs ~off ~len))
+      | `Text | `Binary | `Continuation ->
+        Server_mcp_transport_ws.read_inbound_message_frame session
+          ~on_message ~is_fin ~len payload
       | `Ping ->
         Ws.Wsd.send_pong wsd;
         Ws.Payload.close payload
       | `Connection_close ->
         Server_mcp_transport_ws.cleanup_session session_id;
         Ws.Payload.close payload
-      | `Pong | `Continuation | `Other _ ->
+      | `Pong | `Other _ ->
         Ws.Payload.close payload
     );
     eof = (fun ?error:_ () ->

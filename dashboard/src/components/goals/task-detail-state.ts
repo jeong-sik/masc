@@ -1,6 +1,7 @@
 // Task detail overlay state — signals, fetch, normalization
 
 import { signal } from '@preact/signals'
+import { selectedTask } from './task-detail-selection'
 import { fetchTaskEvents } from '../../api/actions'
 import { extractApiError } from '../../api/core'
 import { fetchAgentTimeline, fetchKeeperTrajectory } from '../../api/dashboard'
@@ -8,6 +9,7 @@ import { buildTraceEvents, type UnifiedTraceEvent } from '../session-trace/sessi
 import { findKeeper } from '../../lib/keeper-utils'
 import { goalById } from './goal-helpers'
 import type { Goal, Task } from '../../types'
+export { selectedTask } from './task-detail-selection'
 
 // -- Activity filter (owned here, consumed by task-activity-list) ---
 
@@ -127,7 +129,6 @@ export function filterGoalRelations(
 
 // -- Overlay signals ------------------------------------------------
 
-export const selectedTask = signal<Task | null>(null)
 export const taskEvents = signal<NormalizedTaskEvent[]>([])
 export const taskEventsLoading = signal(false)
 export const taskEventsError = signal<string | null>(null)

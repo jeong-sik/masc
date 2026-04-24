@@ -146,10 +146,17 @@ val provider_capacity_json : unit -> Yojson.Safe.t
 val dashboard_shell_http_json :
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   ?request:Httpun.Request.t ->
+  ?light:bool ->
   Coord.config ->
   Yojson.Safe.t
 
+val dashboard_shell_cache_key :
+  ?light:bool ->
+  Coord.config ->
+  string
+
 val dashboard_shell_payload_json :
+  ?light:bool ->
   Coord.config -> Yojson.Safe.t
 
 val is_dashboard_cache_timeout_json :

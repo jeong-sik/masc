@@ -57,7 +57,7 @@ async function loadPanel(
   fetchTelemetry: (opts?: { signal?: AbortSignal }) => Promise<TelemetryResponse>,
   fetchTelemetrySummary: (opts?: { signal?: AbortSignal }) => Promise<TelemetrySummaryResponse>,
   opts?: {
-    fetchDashboardShell?: (args?: { signal?: AbortSignal }) => Promise<unknown>
+    fetchDashboardShell?: (args?: { light?: boolean; signal?: AbortSignal }) => Promise<unknown>
     fetchDashboardTools?: (args?: { signal?: AbortSignal }) => Promise<unknown>
     fetchDashboardNamespaceTruth?: (args?: { signal?: AbortSignal }) => Promise<unknown>
   },

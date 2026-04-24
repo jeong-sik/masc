@@ -2,7 +2,7 @@
 
 import { html } from 'htm/preact'
 import { agentPulses, type PulseState } from '../../live-store'
-import { openAgentDetail, selectedAgentName } from '../agent-detail'
+import { openAgentDetail, selectedAgentName } from '../agent-detail-state'
 
 function pulseStateClass(state: PulseState): string {
   switch (state) {

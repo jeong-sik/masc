@@ -113,7 +113,7 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
 const REFRESHERS: Record<RefreshTask, (routeState: Pick<RouteState, 'tab' | 'params'>) => void> = {
   // Route visits should reuse the existing shell TTL instead of forcing a
   // fresh projection on every navigation.
-  shell: () => { void refreshShell() },
+  shell: () => { void refreshShell({ light: true }) },
   namespaceTruth: () => { requestNamespaceTruth() },
   missionSnapshot: () => { void refreshMissionSnapshot() },
   // Execution already has a fetch scheduler; route refreshes should enqueue

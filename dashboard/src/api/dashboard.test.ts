@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  fetchDashboardShell,
   fetchDashboardGovernance,
   fetchDashboardGoalDetail,
   fetchDashboardGoalsTree,
@@ -57,6 +58,27 @@ function makeRawGoalNode(overrides: Record<string, unknown> = {}) {
     ...overrides,
   }
 }
+
+describe('fetchDashboardShell', () => {
+  it('uses the light shell query when requested', async () => {
+    const rawResponse = {
+      status: { project: 'default' },
+      counts: { agents: 1, tasks: 2, keepers: 3 },
+    }
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(rawResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await fetchDashboardShell({ light: true })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/shell?light=true')
+  })
+})
 
 describe('fetchDashboardTools', () => {
   it('fills missing category and tier with defaults', async () => {

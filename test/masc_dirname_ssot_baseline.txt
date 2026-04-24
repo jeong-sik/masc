@@ -1,5 +1,4 @@
 lib/auth.ml:24
-lib/autoresearch_knowledge.ml:112
 lib/board_votes.ml:26
 lib/config/playground_paths.ml:17
 lib/config_dir_resolver.ml:211
@@ -24,10 +23,8 @@ lib/keeper/keeper_exec_shared.ml:252
 lib/keeper/keeper_exec_shell.ml:548
 lib/keeper/keeper_gh_env.ml:15
 lib/keeper/keeper_status_detail.ml:1238
-lib/keeper/keeper_transition_audit.ml:151
 lib/mcp_server_eio_resource.ml:150
 lib/mcp_server_eio_resource.ml:163
-lib/model_inference_metrics.ml:388
 lib/oas_worker_cascade.ml:435
 lib/repo_synthesis_benchmark.ml:73
 lib/server/server_routes_http_routes_dashboard.ml:100

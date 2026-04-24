@@ -77,10 +77,7 @@ let friction_of_outcome = function
 (* JSONL persistence                                                *)
 (* ================================================================ *)
 
-(* Evaluated at module init time (eager). MASC_DATA_DIR / MASC_BASE_PATH must
-   be set before this module is loaded. Safe in practice because the
-   server sets all env vars at process startup. *)
-let default_base_path =
+let default_base_path () =
   let root =
     match Sys.getenv_opt Env_config_core.data_dir_env_key with
     | Some dir -> dir
@@ -88,8 +85,13 @@ let default_base_path =
   in
   Filename.concat root "cdal_verdicts"
 
-let persist ?(base_dir = default_base_path) ?task_id
+let persist ?base_dir ?task_id
     (verdict : Cdal_types.contract_verdict) : unit =
+  let base_dir =
+    match base_dir with
+    | Some dir -> dir
+    | None -> default_base_path ()
+  in
   let store = Dated_jsonl.create ~base_dir () in
   let json = Cdal_types.contract_verdict_to_json verdict in
   let envelope = match task_id with

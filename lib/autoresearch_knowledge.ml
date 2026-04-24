@@ -108,7 +108,9 @@ let finding_of_yojson (json : Yojson.Safe.t) : (finding, string) result =
 (** {1 Storage (JSONL)} *)
 
 let findings_dir ~base_path =
-  Filename.concat base_path ".masc/autoresearch/findings"
+  Filename.concat
+    (Filename.concat (Common.masc_dir_from_base_path ~base_path) "autoresearch")
+    "findings"
 
 let findings_file ~base_path =
   Filename.concat (findings_dir ~base_path) "findings.jsonl"

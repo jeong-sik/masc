@@ -47,7 +47,7 @@ let check_verdict (v : Cdal_types.contract_verdict) : gate_result =
       in
       Reject msg
 
-let default_base_path =
+let default_base_path () =
   let root =
     match Sys.getenv_opt Env_config_core.data_dir_env_key with
     | Some dir -> dir
@@ -55,9 +55,14 @@ let default_base_path =
   in
   Filename.concat root "cdal_verdicts"
 
-let lookup_latest_verdict ?(base_dir = default_base_path)
+let lookup_latest_verdict ?base_dir
     ?(limit = Env_config_runtime.Cdal.verdict_lookup_limit ())
     ~task_id () : Cdal_types.contract_verdict option =
+  let base_dir =
+    match base_dir with
+    | Some dir -> dir
+    | None -> default_base_path ()
+  in
   let store = Dated_jsonl.create ~base_dir () in
   let recent = Dated_jsonl.read_recent store limit in
   let result = List.fold_left (fun acc json ->
@@ -126,9 +131,9 @@ let attribution_for_missing_verdict ?(gate_label = strict_gate_label)
          "No CDAL verdict found for task %s. Submit evidence before completing."
          task_id)
 
-let gate_check ?(base_dir = default_base_path)
+let gate_check ?base_dir
     ?(gate_label = strict_gate_label) ~task_id () : string option =
-  match lookup_latest_verdict ~base_dir ~task_id () with
+  match lookup_latest_verdict ?base_dir ~task_id () with
   | None ->
     Dashboard_attribution.record
       (attribution_for_missing_verdict ~gate_label ~task_id ());

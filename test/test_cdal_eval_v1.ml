@@ -81,6 +81,17 @@ let setup_store () =
   let store : Agent_sdk.Proof_store.config = { root = tmp_dir } in
   (store, tmp_dir)
 
+let with_env name value f =
+  let previous = Sys.getenv_opt name in
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some v -> Unix.putenv name v
+      | None -> Unix.putenv name "")
+    (fun () ->
+      Unix.putenv name value;
+      f ())
+
 (* ================================================================ *)
 (* test_full_pipeline                                                *)
 (* ================================================================ *)
@@ -196,6 +207,28 @@ let test_review_requirement_yields_inconclusive () =
       (Printf.sprintf "expected Verdict, got Load_failure: %s"
          (CL.load_error_to_string err))
 
+let test_persist_explicit_base_dir_avoids_default_resolution () =
+  with_env "MASC_BASE_PATH" "" @@ fun () ->
+  with_env "MASC_BASE_PATH_INPUT" "" @@ fun () ->
+  let store, tmp = setup_store () in
+  let run_id = "persist-explicit-base-dir" in
+  let contract = make_contract () in
+  let contract_id = Agent_sdk.Risk_contract.contract_id contract in
+  let proof = make_proof ~run_id ~contract_id () in
+  Agent_sdk.Proof_store.init_run store ~run_id;
+  Agent_sdk.Proof_store.write_manifest store ~run_id proof;
+  Agent_sdk.Proof_store.write_contract store ~run_id contract;
+  match CE.evaluate ~store proof with
+  | Verdict (v, _) ->
+      let base_dir = Filename.concat tmp "cdal_verdicts" in
+      Eio_main.run @@ fun _env -> CE.persist ~base_dir v;
+      Alcotest.(check bool)
+        "explicit base_dir created" true (Sys.file_exists base_dir)
+  | Load_failure (err, _) ->
+      Alcotest.fail
+        (Printf.sprintf "expected Verdict, got Load_failure: %s"
+           (CL.load_error_to_string err))
+
 (* ================================================================ *)
 (* Runner                                                            *)
 (* ================================================================ *)
@@ -210,5 +243,7 @@ let () =
         test_verdict_of_outcome;
       Alcotest.test_case "review requirement yields inconclusive" `Quick
         test_review_requirement_yields_inconclusive;
+      Alcotest.test_case "persist explicit base_dir avoids default resolution"
+        `Quick test_persist_explicit_base_dir_avoids_default_resolution;
     ]);
   ]

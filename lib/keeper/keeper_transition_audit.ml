@@ -276,15 +276,19 @@ let get_default_store () =
   match !default_store_ref with
   | Some store -> Some store
   | None ->
-      let dir =
-        Filename.concat (Env_config_core.base_path ()) ".masc/transition-audit"
-      in
-      (match Dated_jsonl.create ~base_dir:dir () with
-       | store ->
-           default_store_ref := Some store;
-           Some store
-       | exception (Eio.Cancel.Cancelled _ as e) -> raise e
-       | exception exn ->
+      (try
+         let dir =
+           Filename.concat
+             (Common.masc_dir_from_base_path
+                ~base_path:(Env_config_core.base_path ()))
+             "transition-audit"
+         in
+         let store = Dated_jsonl.create ~base_dir:dir () in
+         default_store_ref := Some store;
+         Some store
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
            Log.Keeper.warn "transition_audit default store failed: %s"
              (Printexc.to_string exn);
            None)

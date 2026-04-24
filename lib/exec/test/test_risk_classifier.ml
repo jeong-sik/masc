@@ -53,7 +53,7 @@ let test_classify_read () =
     "dig example.com"; "nslookup example.com";
     "git status"; "git log --oneline"; "git diff"; "git show HEAD";
     "git branch"; "git tag"; "git remote -v"; "git stash list";
-    "dune build"; "opam list"; "cargo test"; "npm test"; "make";
+    "opam list";
   ] in
   List.iter (fun cmd ->
     match RC.classify cmd with
@@ -73,7 +73,8 @@ let test_classify_write () =
     "cp a b"; "mv a b"; "touch newfile"; "mkdir -p dir/sub";
     "tee output.txt"; "install -m 755 bin /usr/local/bin";
     "chmod 644 file"; "chown user file"; "chgrp staff file";
-    "cargo build"; "docker build .";
+    "dune build"; "cargo build"; "cargo test"; "npm test";
+    "npm run build"; "make"; "make test"; "docker build .";
   ] in
   List.iter (fun cmd ->
     match RC.classify cmd with
@@ -172,6 +173,21 @@ let test_whitespace_handling () =
    | RC.Read -> ()
    | other -> Alcotest.fail (Printf.sprintf
      "leading whitespace cat should be read, got %s"
+     (RC.risk_class_to_string other)));
+  (match RC.classify "git\tstatus" with
+   | RC.Read -> ()
+   | other -> Alcotest.fail (Printf.sprintf
+     "tab-separated git status should be read, got %s"
+     (RC.risk_class_to_string other)));
+  (match RC.classify "rm\t-rf /" with
+   | RC.Destructive -> ()
+   | other -> Alcotest.fail (Printf.sprintf
+     "tab-separated rm -rf should be destructive, got %s"
+     (RC.risk_class_to_string other)));
+  (match RC.classify "rm\n-rf /" with
+   | RC.Destructive -> ()
+   | other -> Alcotest.fail (Printf.sprintf
+     "newline-separated rm -rf should be destructive, got %s"
      (RC.risk_class_to_string other)))
 
 (* --- empty string --- *)

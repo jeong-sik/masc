@@ -33,12 +33,31 @@ let default_timeout_ms = function
 
 (* --- classification helpers --- *)
 
+let is_shell_whitespace = function
+  | ' ' | '\t' | '\n' | '\r' | '\011' | '\012' -> true
+  | _ -> false
+
+let normalize_shell_whitespace cmd =
+  let len = String.length cmd in
+  let buf = Buffer.create len in
+  let in_ws = ref false in
+  String.iter (fun ch ->
+    if is_shell_whitespace ch then
+      in_ws := true
+    else begin
+      if !in_ws && Buffer.length buf > 0 then Buffer.add_char buf ' ';
+      in_ws := false;
+      Buffer.add_char buf ch
+    end
+  ) cmd;
+  Buffer.contents buf
+
 let first_token cmd =
   let len = String.length cmd in
   let i = ref 0 in
-  while !i < len && cmd.[!i] = ' ' do incr i done;
+  while !i < len && is_shell_whitespace cmd.[!i] do incr i done;
   let start = !i in
-  while !i < len && cmd.[!i] <> ' ' do incr i done;
+  while !i < len && not (is_shell_whitespace cmd.[!i]) do incr i done;
   if start >= !i then ""
   else String.sub cmd start (!i - start)
 
@@ -82,7 +101,7 @@ let read_prefixes = [
   "ps"; "top"; "htop"; "lsof"; "ss"; "netstat"; "dig"; "nslookup";
   "git status"; "git log"; "git diff"; "git show"; "git branch";
   "git tag"; "git remote"; "git stash list"; "git config --get";
-  "dune"; "opam"; "cargo test"; "npm test"; "npm run"; "make";
+  "opam";
   "ocamlfind"; "ocamlopt"; "ocamlc";
 ]
 
@@ -93,7 +112,8 @@ let write_prefixes = [
   "cp"; "mv"; "touch"; "mkdir"; "tee"; "install";
   "chmod"; "chown"; "chgrp";
   "sed -i"; "awk"; "patch";
-  "npm install"; "npm publish"; "cargo build"; "cargo publish";
+  "dune"; "cargo build"; "cargo test"; "cargo publish";
+  "npm install"; "npm publish"; "npm test"; "npm run"; "make";
   "docker build"; "docker push"; "docker compose";
 ]
 
@@ -118,14 +138,14 @@ let matches_prefix cmd prefix =
   String.length cmd >= plen
   && String.sub cmd 0 plen = prefix
   && (String.length cmd = plen
-      || cmd.[plen] = ' '
+      || is_shell_whitespace cmd.[plen]
       || cmd.[plen] = '.')
 
 let prefix_matches prefixes cmd =
   List.exists (matches_prefix cmd) prefixes
 
 let classify cmd =
-  let cmd = String.trim cmd in
+  let cmd = normalize_shell_whitespace (String.trim cmd) in
   let tok = first_token cmd in
   if prefix_matches destructive_prefixes cmd then
     Destructive

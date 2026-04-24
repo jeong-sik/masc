@@ -2,6 +2,7 @@
 
 open Masc_mcp
 module CP = Coordination_product
+module CPS = Coordination_product_snapshot
 
 let done_status =
   Types.Done
@@ -24,11 +25,11 @@ let ids ?goal_id ?(task_ids = []) ?(post_ids = []) ?agent_name () : CP.ids =
   { goal_id; task_ids; post_ids; agent_name }
 ;;
 
-let task ?goal_id ~id ~title () : Types.task =
+let task ?goal_id ?(task_status = Types.Todo) ~id ~title () : Types.task =
   { id
   ; title
   ; description = ""
-  ; task_status = Types.Todo
+  ; task_status
   ; priority = 3
   ; files = []
   ; created_at = "2026-04-24T00:00:00Z"
@@ -40,6 +41,78 @@ let task ?goal_id ~id ~title () : Types.task =
   ; handoff_context = None
   ; cycle_count = 0
   ; do_not_reclaim_reason = None
+  }
+;;
+
+let goal ?(phase = Goal_phase.Executing) ~id ~title () : Goal_store.goal =
+  { id
+  ; horizon = Goal_store.Short
+  ; title
+  ; metric = None
+  ; target_value = None
+  ; due_date = None
+  ; priority = 3
+  ; status = Goal_store.Active
+  ; phase
+  ; verifier_policy = None
+  ; require_completion_approval = false
+  ; active_verification_request_id = None
+  ; parent_goal_id = None
+  ; last_review_note = None
+  ; last_review_at = None
+  ; created_at = "2026-04-24T00:00:00Z"
+  ; updated_at = "2026-04-24T00:00:01Z"
+  }
+;;
+
+let post_id value =
+  match Board.Post_id.of_string value with
+  | Ok id -> id
+  | Error err -> Alcotest.failf "invalid post id: %s" (Board.show_board_error err)
+;;
+
+let agent_id value =
+  match Board.Agent_id.of_string value with
+  | Ok id -> id
+  | Error err -> Alcotest.failf "invalid agent id: %s" (Board.show_board_error err)
+;;
+
+let post ?(updated_at = 2.0) ~id ~title ~meta_json () : Board.post =
+  { id = post_id id
+  ; author = agent_id "worker"
+  ; title
+  ; body = "body"
+  ; content = "content"
+  ; post_kind = Board.Automation_post
+  ; meta_json = Some meta_json
+  ; visibility = Board.Internal
+  ; created_at = 1.0
+  ; updated_at
+  ; expires_at = 0.0
+  ; votes_up = 0
+  ; votes_down = 0
+  ; reply_count = 0
+  ; hearth = None
+  ; thread_id = None
+  }
+;;
+
+let transaction ?(timestamp = 3.0) ~id ~task_id () : Agent_economy.transaction =
+  { id
+  ; agent_name = "worker"
+  ; kind = Agent_economy.Earn_task_done
+  ; amount = 1.0
+  ; balance_after = 11.0
+  ; reason = "done"
+  ; counterparty = "system"
+  ; metadata = `Assoc [ CP.Ref_key.task_id, `String task_id ]
+  ; timestamp
+  }
+;;
+
+let telemetry ?(timestamp = 4.0) ~task_id () : Telemetry_eio.event_record =
+  { timestamp
+  ; event = Telemetry_eio.Task_completed { task_id; duration_ms = 42; success = true }
   }
 ;;
 
@@ -253,6 +326,57 @@ let test_snapshot_json () =
      |> to_string)
 ;;
 
+let test_projection_is_deterministic_from_captured_state () =
+  let goal_a = goal ~id:"goal-a" ~title:"A" () in
+  let goal_b = goal ~id:"goal-b" ~title:"B" () in
+  let task_a =
+    task ~goal_id:"goal-a" ~id:"task-a" ~title:"A task" ~task_status:done_status ()
+  in
+  let task_b = task ~goal_id:"goal-b" ~id:"task-b" ~title:"B task" () in
+  let orphan = task ~id:"task-orphan" ~title:"Orphan task" () in
+  let post_a =
+    post
+      ~id:"post-a"
+      ~title:"A signal"
+      ~meta_json:(`Assoc [ CP.Ref_key.task_id, `String "task-a" ])
+      ()
+  in
+  let txn_a = transaction ~id:"txn-a" ~task_id:"task-a" () in
+  let telemetry_a = telemetry ~task_id:"task-a" () in
+  let left : CPS.observed_state =
+    { goals = [ goal_b; goal_a ]
+    ; tasks = [ orphan; task_b; task_a ]
+    ; posts = [ post_a ]
+    ; transactions = [ txn_a ]
+    ; telemetry_events = [ telemetry_a ]
+    ; persist_errors = 0
+    ; economy_enabled = true
+    }
+  in
+  let right =
+    { left with
+      goals = List.rev left.goals
+    ; tasks = List.rev left.tasks
+    ; posts = List.rev left.posts
+    ; transactions = List.rev left.transactions
+    ; telemetry_events = List.rev left.telemetry_events
+    }
+  in
+  let left_json = left |> CPS.project |> CP.snapshot_to_yojson |> Yojson.Safe.to_string in
+  let right_json = right |> CPS.project |> CP.snapshot_to_yojson |> Yojson.Safe.to_string in
+  Alcotest.(check string) "projection ignores capture order" left_json right_json;
+  let disabled =
+    { left with economy_enabled = false }
+    |> CPS.project
+    |> CP.snapshot_to_yojson
+  in
+  let open Yojson.Safe.Util in
+  Alcotest.(check string)
+    "captured economy flag controls reward deterministically"
+    "disabled"
+    (disabled |> member "products" |> index 0 |> member "reward" |> to_string)
+;;
+
 let () =
   Alcotest.run
     "Coordination_product"
@@ -280,6 +404,12 @@ let () =
         ] )
     ; ( "reward"
       , [ Alcotest.test_case "reward machine phases" `Quick test_reward_machine_phases ] )
-    ; "json", [ Alcotest.test_case "snapshot json" `Quick test_snapshot_json ]
+    ; ( "json"
+      , [ Alcotest.test_case "snapshot json" `Quick test_snapshot_json
+        ; Alcotest.test_case
+            "captured-state projection is deterministic"
+            `Quick
+            test_projection_is_deterministic_from_captured_state
+        ] )
     ]
 ;;

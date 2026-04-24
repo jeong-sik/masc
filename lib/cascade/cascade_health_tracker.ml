@@ -149,18 +149,41 @@ type provider_state = {
 
 type t = {
   providers: (string, provider_state) Hashtbl.t;
-  mu: Eio.Mutex.t;
+  mu: Stdlib.Mutex.t;
 }
 
 (* ── Constructor ──────────────────────────────── *)
 
 let create () : t = {
   providers = Hashtbl.create 8;
-  mu = Eio.Mutex.create ();
+  mu = Stdlib.Mutex.create ();
 }
 
+(* #9873: Stdlib.Mutex, not Eio.Mutex, per the module doc at line 11.
+
+   The drift (doc said Stdlib, code used Eio) caused 12 test failures
+   in test_keeper_unified because [Eio.Mutex.use_rw] depends on the
+   [Cancel.Get_context] effect handler, which is only installed
+   inside an [Eio_main.run] event loop. Tests calling
+   [provider_cooldown_remaining_sec_for_cascade → provider_info]
+   outside that loop propagate [Stdlib.Effect.Unhandled].
+
+   Stdlib.Mutex has no effect dependency — a keeper scheduling
+   check can run under an Eio fiber OR a bare test, and in either
+   case the critical section (record append + list scan) is small
+   enough to be pure-blocking without the cooperative-yield
+   semantics Eio.Mutex provides.
+
+   Per feedback memory feedback_ocaml5-mutex-selection.md:
+   - Same domain Eio.Mutex → EDEADLK risk on reentrant paths
+   - Cross-domain Stdlib.Mutex or Eio.Promise
+   This module is cross-fiber but single-domain; Stdlib.Mutex is
+   the correct pick and matches the documented design. *)
 let with_lock t f =
-  Eio.Mutex.use_rw ~protect:true t.mu (fun () -> f ())
+  Stdlib.Mutex.lock t.mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock t.mu)
+    (fun () -> f ())
 
 let get_or_create_state t key =
   match Hashtbl.find_opt t.providers key with

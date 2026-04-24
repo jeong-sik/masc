@@ -263,7 +263,7 @@ cache_disabled_cmd() {
 agent_sdk_interface_mismatch_detected() {
   [[ -f "${TEST_LOG_FILE}" ]] || return 1
   grep -Eq \
-    'Unbound module Agent_sdk|Unbound module Llm_provider|module Oas is an alias for module Agent_sdk|inconsistent assumptions over interface Agent_sdk|/lib/agent_sdk/[^[:space:]]+[.]cmxa' \
+    'Unbound module Agent_sdk|Unbound module Llm_provider|module Oas is an alias for module Agent_sdk|make inconsistent assumptions|inconsistent assumptions over interface Agent_sdk|over interface Llm_provider__|/lib/agent_sdk/[^[:space:]]+[.]cmxa' \
     "${TEST_LOG_FILE}"
 }
 

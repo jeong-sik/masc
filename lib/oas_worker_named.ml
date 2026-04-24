@@ -892,6 +892,8 @@ let run_named
     ?context_reducer
     ?memory
     ?tool_retry_policy
+    ?(required_tool_satisfaction =
+      Oas.Completion_contract.any_tool_call_satisfies)
     ?raw_trace
     ?on_event
     ?on_yield
@@ -1032,6 +1034,7 @@ let run_named
                  context_reducer;
                  memory;
                  tool_retry_policy;
+                 required_tool_satisfaction;
                  description =
                    Some
                      (Printf.sprintf "cascade:%s/%s" cascade_name
@@ -1611,6 +1614,8 @@ let run_named_with_masc_tools
     ?hooks
     ?memory
     ?tool_retry_policy
+    ?(required_tool_satisfaction =
+      Oas.Completion_contract.any_tool_call_satisfies)
     ?raw_trace
     ?on_event
     ?on_yield
@@ -1636,6 +1641,7 @@ let run_named_with_masc_tools
     ~max_turns ~temperature ~max_tokens ?max_input_tokens ?max_cost_usd
     ?wait_timeout_sec ?guardrails ?hooks ?memory
     ?tool_retry_policy
+    ~required_tool_satisfaction
     ?compact_ratio
     ?approval
     ?raw_trace ?on_event ?on_yield ?on_resume ?proof_ref

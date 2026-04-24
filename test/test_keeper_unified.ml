@@ -3986,7 +3986,7 @@ let test_side_effect_reclassification_drops_keeper_read_only_tools_from_mixed_se
 
 let test_metrics_mixed_response () =
   let result =
-    make_run_result ~text:"Done." ~tools:["keeper_fs_read"]
+    make_run_result ~text:"Done." ~tools:["keeper_fs_edit"]
       ~model:"test-model" ~input_tok:150 ~output_tok:60 ()
   in
   let updated =
@@ -4219,6 +4219,45 @@ let test_actionable_tool_contract_allows_execution_tools () =
        ~claim_context_allowed:true
        ~actionable_signal_context:false
        ~tool_names:[])
+
+let required_tool_call name input
+  : Agent_sdk.Completion_contract.tool_call
+  =
+  { name; input; tool = None }
+
+let satisfies_required_tool name input =
+  Result.is_ok
+    (KTD.required_tool_satisfaction (required_tool_call name input))
+
+let test_required_tool_satisfaction_rejects_passive_tools () =
+  check bool "masc_status is passive" false
+    (satisfies_required_tool "masc_status" (`Assoc []));
+  check bool "keeper_tasks_list is passive" false
+    (satisfies_required_tool "keeper_tasks_list" (`Assoc []));
+  check bool "keeper_stay_silent is passive" false
+    (satisfies_required_tool "keeper_stay_silent" (`Assoc []));
+  check bool "Read alias is passive" false
+    (satisfies_required_tool "Read" (`Assoc []));
+  check bool "read-only gh shell is passive" false
+    (satisfies_required_tool "keeper_shell"
+       (`Assoc
+          [
+            ("op", `String "gh");
+            ("cmd", `String "pr view 123");
+          ]))
+
+let test_required_tool_satisfaction_accepts_mutating_tools () =
+  check bool "keeper_task_claim mutates" true
+    (satisfies_required_tool "keeper_task_claim" (`Assoc []));
+  check bool "Write alias mutates" true
+    (satisfies_required_tool "Write" (`Assoc []));
+  check bool "mutating gh shell satisfies" true
+    (satisfies_required_tool "keeper_shell"
+       (`Assoc
+          [
+            ("op", `String "gh");
+            ("cmd", `String "pr comment 123 --body ok");
+          ]))
 
 let test_tool_usage_delta_uses_registry_counts () =
   let before =
@@ -4890,11 +4929,10 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
        ~allowed_tool_names:[ "keeper_tasks_list"; "keeper_board_post" ]
        ()
    with
-   | Agent_sdk.Types.Tool name ->
-       check string "task audit prefers safe task listing" "keeper_tasks_list" name
+   | Agent_sdk.Types.Any -> ()
    | other ->
        fail
-         (Printf.sprintf "expected Tool keeper_tasks_list, got %s"
+         (Printf.sprintf "expected Any for task audit, got %s"
             (Agent_sdk.Types.show_tool_choice other)));
   match choose ~allowed_tool_names:[ "keeper_board_post" ] () with
   | Agent_sdk.Types.Any -> ()
@@ -5309,6 +5347,10 @@ let () =
             test_claim_tool_classification_covers_masc_claim_task;
           test_case "actionable signal allows execution tools" `Quick
             test_actionable_tool_contract_allows_execution_tools;
+          test_case "required tool predicate rejects passive tools" `Quick
+            test_required_tool_satisfaction_rejects_passive_tools;
+          test_case "required tool predicate accepts mutating tools" `Quick
+            test_required_tool_satisfaction_accepts_mutating_tools;
           test_case "tool usage delta uses registry counts" `Quick
             test_tool_usage_delta_uses_registry_counts;
           test_case "tool usage delta ignores removed tools" `Quick

@@ -119,9 +119,9 @@ let operator_disposition (receipt : t) =
   then ("alert_exhausted", "cascade_exhausted")
   else if
     String.equal receipt.tool_surface.tool_requirement "required"
-    && (String.equal receipt.tool_contract_result "violated"
+    && (not (String.equal receipt.tool_contract_result "satisfied")
         || receipt.tools_used = [])
-  then ("pause_human", "tool_required_no_tools")
+  then ("pause_human", "tool_required_unsatisfied")
   else if
     match error_kind with
     | Some kind ->

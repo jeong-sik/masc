@@ -122,6 +122,7 @@ stylesheet
   .goal_title {
     font-family: 'Cinzel', serif;
     font-size: 16px;
+    font-weight: normal;
     letter-spacing: 0.08em;
     color: var(--text-bright);
     text-transform: uppercase;
@@ -129,6 +130,7 @@ stylesheet
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    margin: 0;
   }
   .goal_horizon {
     font-family: 'JetBrains Mono', ui-monospace, monospace;
@@ -368,14 +370,16 @@ let rec view_node ~(depth : int) (n : Goals_types.node) : Node.t =
           ]
       ]
   in
+  let title_node =
+    if depth = 0 then Node.h2 ~attrs:[ Style.goal_title ] [ Node.text (truncate ~max_len:60 n.title) ]
+    else Node.h3 ~attrs:[ Style.goal_title ] [ Node.text (truncate ~max_len:60 n.title) ]
+  in
   Node.div
     ~attrs:(Style.goal :: indent_attr)
     (List.concat
        [ [ Node.div
              ~attrs:[ Style.goal_head ]
-             [ Node.div
-                 ~attrs:[ Style.goal_title ]
-                 [ Node.text (truncate ~max_len:60 n.title) ]
+             [ title_node
              ; Node.div
                  ~attrs:[ Style.goal_horizon ]
                  [ Node.text horizon_text ]

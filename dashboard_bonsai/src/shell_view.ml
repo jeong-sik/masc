@@ -755,7 +755,7 @@ let hud_cell ?(tone : tone = `Neutral) ~k ~v () =
     | `Bad -> [ Style.hud_v; Style.hud_bad ]
   in
   Node.div
-    ~attrs:[ Style.hud_cell ]
+    ~attrs:[ Style.hud_cell; Attr.arialabel (k ^ ": " ^ v) ]
     [ Node.div ~attrs:[ Style.hud_k ] [ Node.text k ]
     ; Node.div ~attrs:v_attrs [ Node.text v ]
     ]
@@ -1002,7 +1002,7 @@ let view ?(shell = Overview_types.fixture) ?hud ?aside ~(active : Route.t) (chil
     ; nav ~active
     ; Node.div
         ~attrs:[ Style.main; Attr.role "main" ]
-        [ Node.div ~attrs:[ Style.hud ] hud_nodes
+        [ Node.div ~attrs:[ Style.hud; Attr.arialabel "Key metrics" ] hud_nodes
         ; Node.div ~attrs:[ Style.page; Attr.id "main-content" ] children
         ]
     ; aside_node

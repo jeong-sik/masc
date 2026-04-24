@@ -779,22 +779,33 @@ let resolve_named_providers ?sw ?net ?clock ?provider_filter
   match lookup_active_profile ?sw ?net ?clock cascade_name with
   | Error _ as e -> e
   | Ok (_snapshot, normalized, profile) ->
-      let providers =
+      let provider_label (c : Llm_provider.Provider_config.t) =
+        Printf.sprintf "%s:%s"
+          (Llm_provider.Provider_config.string_of_provider_kind c.kind)
+          (String.trim c.model_id)
+      in
+      let ordered_entries =
         Cascade_config.order_weighted_entries
           ~rotation_scope:normalized
           profile.weighted_entries
-        |> Cascade_config.parse_weighted_entries
+      in
+      let parsed_declared_providers =
+        Cascade_config.parse_weighted_entries
              ~api_key_env_overrides:profile.api_key_env_overrides
              ~cascade_name:normalized
-        |> Cascade_config.apply_provider_filter
+          ordered_entries
+      in
+      let filtered_declared_providers =
+        Cascade_config.apply_provider_filter
              ~provider_filter
              ~label:normalized
+          parsed_declared_providers
       in
       let providers =
         Provider_tool_support.apply_required_tool_use_filter
           ?runtime_mcp_policy
           ~require_tool_choice_support ~require_tool_support
-          ~label:normalized providers
+          ~label:normalized filtered_declared_providers
       in
       if providers = [] then
         Error
@@ -802,32 +813,23 @@ let resolve_named_providers ?sw ?net ?clock ?provider_filter
              "cascade %s resolved to no callable providers"
              normalized)
       else (
-        (* Observability for cascade-name -> runtime-provider divergence.
-           If the returned provider set ever disagrees with the declared
-           weighted_entries of the profile (e.g. under snapshot staleness
-           or cache leak across cascades), the mismatch shows up here.
+        (* Observability for cascade-name -> runtime-provider divergence.  Compare
+           against the profile after provider:auto expansion, canonical provider
+           parsing, and provider_filter fallback.  The raw declared strings can
+           be aliases such as [codex_cli:auto] or [custom:model@url], while
+           Provider_config carries concrete/canonical labels.
            See memory/handoff-2026-04-24-masc-runtime-mcp-auth-resolved.md *)
         let declared =
-          List.map
-            (fun (e : Cascade_config_loader.weighted_entry) ->
-              String.trim e.model)
-            profile.weighted_entries
+          List.map provider_label filtered_declared_providers
         in
-        let returned =
-          List.map
-            (fun (c : Llm_provider.Provider_config.t) ->
-              Printf.sprintf "%s:%s"
-                (Llm_provider.Provider_config.string_of_provider_kind c.kind)
-                (String.trim c.model_id))
-            providers
-        in
+        let returned = List.map provider_label providers in
         let leaked =
           List.filter (fun m -> not (List.mem m declared)) returned
         in
         (if leaked <> [] then
            Log.warn ~ctx:"CascadeCatalog"
-             "resolve_named_providers(%s): %d providers NOT in declared \
-              profile (declared=[%s] returned=[%s] leaked=[%s])"
+             "resolve_named_providers(%s): %d providers NOT in parsed declared \
+              profile (parsed_declared=[%s] returned=[%s] leaked=[%s])"
              normalized (List.length leaked)
              (String.concat ", " declared)
              (String.concat ", " returned)

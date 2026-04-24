@@ -109,7 +109,7 @@ let keeper_schemas : tool_schema list = [
   };
   {
     name = "masc_persona_generate";
-    description = "Draft a persona profile.json from a natural-language concept. This does not write files; use masc_persona_save to persist it.";
+    description = "Draft a persona profile.json from a natural-language concept. This does not write files; use masc_persona_schema for field and archetype choice effects, then masc_persona_save to persist it.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -130,11 +130,34 @@ let keeper_schemas : tool_schema list = [
           ("default", `String "ko");
           ("description", `String "Preferred language for generated text.");
         ]);
+        ("alignment", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [
+            `String "helpful"; `String "skeptical"; `String "protective";
+            `String "chaotic"; `String "ruthless";
+          ]);
+          ("description", `String "Optional archetype axis. Influences generated role, trait, goals, and instructions. Call masc_persona_schema for per-choice effects.");
+        ]);
+        ("operating_style", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [
+            `String "research"; `String "coding"; `String "dispatch";
+            `String "social"; `String "delivery";
+          ]);
+          ("description", `String "Optional archetype axis. If tool_preset is omitted, this also selects the default keeper.tool_preset. Call masc_persona_schema for per-choice effects.");
+        ]);
+        ("risk_posture", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [
+            `String "cautious"; `String "balanced"; `String "high-autonomy";
+          ]);
+          ("description", `String "Optional archetype axis. Influences generated autonomy and safety language while save still validates concrete fields. Call masc_persona_schema for per-choice effects.");
+        ]);
         ("tool_preset", `Assoc [
           ("type", `String "string");
           ("default", `String "research");
           ("enum", `List (List.map (fun s -> `String s) tool_preset_enum_strings));
-          ("description", `String "Default keeper.tool_preset for the draft.");
+          ("description", `String "Default keeper.tool_preset for the draft. When omitted, operating_style is used if present, otherwise research.");
         ]);
         ("proactive_enabled", `Assoc [
           ("type", `String "boolean");

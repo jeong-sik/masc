@@ -517,7 +517,13 @@ let test_masc_persona_authoring_schemas () =
           Alcotest.(check bool) "generate has concept" true
             (List.mem_assoc "concept" props);
           Alcotest.(check bool) "generate has tool_preset" true
-            (List.mem_assoc "tool_preset" props)
+            (List.mem_assoc "tool_preset" props);
+          Alcotest.(check bool) "generate has alignment axis" true
+            (List.mem_assoc "alignment" props);
+          Alcotest.(check bool) "generate has operating_style axis" true
+            (List.mem_assoc "operating_style" props);
+          Alcotest.(check bool) "generate has risk_posture axis" true
+            (List.mem_assoc "risk_posture" props)
       | None -> Alcotest.fail "masc_persona_generate missing properties"));
   match find_tool "masc_persona_save" with
   | None -> Alcotest.fail "masc_persona_save not found"

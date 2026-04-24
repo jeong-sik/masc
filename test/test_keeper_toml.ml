@@ -884,7 +884,7 @@ let test_persona_resolver_defaults_to_research_tool_preset () =
       check string "persona default tool_preset" "research"
         (Yojson.Safe.Util.to_string tool_preset)
 
-let test_persona_resolver_rejects_non_public_social_model_arg () =
+let test_persona_resolver_ignores_non_public_social_model_arg () =
   with_personas_dir @@ fun personas_dir ->
   let persona_dir = Filename.concat personas_dir "probe" in
   mkdir_p persona_dir;
@@ -906,12 +906,12 @@ let test_persona_resolver_rejects_non_public_social_model_arg () =
           ("social_model", `String "magentic_ledger_v1");
         ])
   with
-  | Ok _ -> fail "expected non-public social_model rejection"
-  | Error e ->
-      check bool "mentions non-public keeper args" true
-        (Str.string_match (Str.regexp_string "non-public keeper args") e 0
-         || contains_substring e "non-public keeper args");
-      check bool "mentions social_model" true (contains_substring e "social_model")
+  | Error e -> fail ("resolver failed: " ^ e)
+  | Ok (_, resolved) ->
+      check bool "social_model omitted from resolved args" false
+        (match Yojson.Safe.Util.member "social_model" resolved with
+         | `String _ -> true
+         | _ -> false)
 
 let test_persona_resolver_preserves_autoboot_enabled_arg () =
   with_personas_dir @@ fun personas_dir ->
@@ -1086,6 +1086,12 @@ let test_persona_authoring_schema_explains_effects () =
     (contains_substring rendered "tool_preset");
   check bool "documents archetype axes" true
     (contains_substring rendered "archetype_axes");
+  check bool "documents alignment axis" true
+    (contains_substring rendered "alignment");
+  check bool "documents choice effects" true
+    (contains_substring rendered "choice_effects");
+  check bool "documents generated fields" true
+    (contains_substring rendered "generated_fields");
   check string "draft tool" "masc_persona_generate"
     (Yojson.Safe.Util.member "authoring_flow" json
      |> Yojson.Safe.Util.member "draft_tool"
@@ -1094,6 +1100,53 @@ let test_persona_authoring_schema_explains_effects () =
     (Yojson.Safe.Util.member "authoring_flow" json
      |> Yojson.Safe.Util.member "save_tool"
      |> Yojson.Safe.Util.to_string)
+
+let test_persona_authoring_axes_validate_and_default_preset () =
+  let args =
+    `Assoc
+      [
+        ("alignment", `String "Chaotic");
+        ("operating_style", `String "coding");
+        ("risk_posture", `String "high-autonomy");
+      ]
+  in
+  match KPA.selected_archetype_axes_from_args args with
+  | Error e -> fail e
+  | Ok axes ->
+      check string "alignment normalized" "chaotic"
+        (Yojson.Safe.Util.member "alignment" (KPA.archetype_axes_to_json axes)
+         |> Yojson.Safe.Util.to_string);
+      check string "operating style default preset" "coding"
+        (match KPA.generation_tool_preset (`Assoc []) axes with
+         | Ok value -> value
+         | Error e -> fail e);
+      check string "explicit preset overrides style" "research"
+        (match
+           KPA.generation_tool_preset
+             (`Assoc [ ("tool_preset", `String "research") ])
+             axes
+         with
+         | Ok value -> value
+         | Error e -> fail e);
+      let selected_effects = KPA.selected_archetype_effects_to_json axes in
+      let rendered_effects = Yojson.Safe.to_string selected_effects in
+      check bool "selected effects include axes" true
+        (contains_substring rendered_effects "operating_style");
+      check bool "selected effects expose default preset" true
+        (contains_substring rendered_effects "default_tool_preset");
+      check bool "selected effects expose generated fields" true
+        (contains_substring rendered_effects "keeper.instructions")
+
+let test_persona_authoring_axes_reject_unknown_choices () =
+  match
+    KPA.selected_archetype_axes_from_args
+      (`Assoc [ ("alignment", `String "evil") ])
+  with
+  | Ok _ -> fail "expected invalid alignment rejection"
+  | Error e ->
+      check bool "mentions invalid alignment" true
+        (contains_substring e "invalid alignment");
+      check bool "mentions allowed values" true (contains_substring e "helpful")
 
 let test_persona_authoring_normalizes_keeper_defaults () =
   match KPA.normalize_profile ~handle:"probe" authoring_minimal_profile with
@@ -1476,8 +1529,8 @@ let () =
           test_case "skips bad files" `Quick test_discover_skips_bad_files;
           test_case "persona profile canonicalizes soul_profile" `Quick
             test_persona_resolver_defaults_to_research_tool_preset;
-          test_case "persona resolver rejects non-public social_model arg" `Quick
-            test_persona_resolver_rejects_non_public_social_model_arg;
+          test_case "persona resolver ignores non-public social_model arg" `Quick
+            test_persona_resolver_ignores_non_public_social_model_arg;
           test_case "persona resolver preserves autoboot_enabled arg" `Quick
             test_persona_resolver_preserves_autoboot_enabled_arg;
           test_case "persona resolver preserves canonical tool_access and allowed_paths" `Quick
@@ -1488,6 +1541,10 @@ let () =
             test_persona_resolver_rejects_custom_tool_access_durable_toml;
           test_case "persona authoring schema explains effects" `Quick
             test_persona_authoring_schema_explains_effects;
+          test_case "persona authoring axes validate and default preset" `Quick
+            test_persona_authoring_axes_validate_and_default_preset;
+          test_case "persona authoring axes reject unknown choices" `Quick
+            test_persona_authoring_axes_reject_unknown_choices;
           test_case "persona authoring normalizes defaults" `Quick
             test_persona_authoring_normalizes_keeper_defaults;
           test_case "persona authoring rejects unknown keeper fields" `Quick

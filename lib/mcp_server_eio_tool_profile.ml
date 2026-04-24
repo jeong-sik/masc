@@ -229,6 +229,9 @@ let custom_tool_titles : (string * string) list = [
   ("masc_keeper_msg", "Send Keeper Message");
   ("masc_keeper_repair", "Keeper Repair");
   ("masc_keeper_status", "Keeper Status");
+  ("masc_keeper_sandbox_status", "Keeper Sandbox Status");
+  ("masc_keeper_sandbox_start", "Start Keeper Sandbox");
+  ("masc_keeper_sandbox_stop", "Stop Keeper Sandbox");
   ("masc_keeper_down", "Stop Keeper");
   ("masc_keeper_compact", "Compact Keeper Context");
   ("masc_keeper_clear", "Clear Keeper Context");

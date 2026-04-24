@@ -767,6 +767,11 @@ let keeper_snapshot_json ~(config : Coord.config) (snapshot : keeper_snapshot) =
   let meta = snapshot.meta in
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   let sandbox = snapshot.sandbox in
+  let sandbox_live =
+    Keeper_sandbox_control.live_status_json
+      ~include_preflight:false
+      ~config ~meta ~timeout_sec:3.0 ~verbose:false ()
+  in
   let domains =
     [
       snapshot.tool_domain;
@@ -790,6 +795,7 @@ let keeper_snapshot_json ~(config : Coord.config) (snapshot : keeper_snapshot) =
       ("network_mode", `String sandbox.network_mode);
       ("sandbox_root", `String sandbox.host_root_abs);
       ("container_root", string_opt_to_json sandbox.container_root);
+      ("sandbox_live", sandbox_live);
       ("goal", `String meta.goal);
       ("goal_horizons",
        `Assoc

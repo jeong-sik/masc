@@ -11,6 +11,415 @@ let contains_substring s needle =
   in
   if n_len = 0 then true else loop 0
 
+let with_env key value f =
+  let prior = Sys.getenv_opt key in
+  Unix.putenv key value;
+  Fun.protect
+    ~finally:(fun () ->
+      match prior with
+      | Some v -> Unix.putenv key v
+      | None -> Unix.putenv key "")
+    f
+
+let rec ensure_dir path =
+  if path = "" || path = "." || path = "/" then
+    ()
+  else if Sys.file_exists path then
+    ()
+  else (
+    let parent = Filename.dirname path in
+    if parent <> path then ensure_dir parent;
+    Unix.mkdir path 0o755)
+
+let write_file path content =
+  let oc = open_out_bin path in
+  Fun.protect ~finally:(fun () -> close_out oc) @@ fun () ->
+  output_string oc content
+
+let read_file path =
+  let ic = open_in_bin path in
+  Fun.protect ~finally:(fun () -> close_in ic) @@ fun () ->
+  really_input_string ic (in_channel_length ic)
+
+let read_keeper_meta_exn config keeper_name =
+  match Keeper_types.read_meta config keeper_name with
+  | Ok (Some meta) -> meta
+  | Ok None -> Alcotest.fail ("keeper meta missing: " ^ keeper_name)
+  | Error err -> Alcotest.fail ("keeper meta read failed: " ^ err)
+
+let with_fake_docker script f =
+  let dir = temp_dir () in
+  let docker_path = Filename.concat dir "docker" in
+  write_file docker_path script;
+  Unix.chmod docker_path 0o755;
+  let path =
+    match Sys.getenv_opt "PATH" with
+    | Some prior when String.trim prior <> "" -> dir ^ ":" ^ prior
+    | _ -> dir
+  in
+  Fun.protect ~finally:(fun () -> cleanup_dir dir) @@ fun () ->
+  with_env "MASC_TEST_FAKE_DOCKER_PATH" docker_path @@ fun () ->
+  with_env "PATH" path f
+
+let update_keeper_sandbox_mode config keeper_name ~sandbox_profile ~network_mode =
+  let meta = read_keeper_meta_exn config keeper_name in
+  match
+    Keeper_types.write_meta config
+      { meta with sandbox_profile; network_mode }
+  with
+  | Ok () -> ()
+  | Error err -> Alcotest.fail ("keeper meta write failed: " ^ err)
+
+let drift_keeper_identity config keeper_name ~agent_name =
+  let meta = read_keeper_meta_exn config keeper_name in
+  let previous_trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+  match
+    Keeper_types.write_meta ~force:true config
+      { meta with agent_name; updated_at = Keeper_types.now_iso () }
+  with
+  | Ok () -> previous_trace_id
+  | Error err -> Alcotest.fail ("keeper identity drift write failed: " ^ err)
+
+let fake_docker_managed_sandbox_script =
+  "#!/bin/sh\n\
+state_file=${KEEPER_DOCKER_STATE_FILE:?}\n\
+log_file=${KEEPER_DOCKER_LOG:-}\n\
+tab=$(printf '\\t')\n\
+read_state() {\n\
+  if [ ! -s \"$state_file\" ]; then\n\
+    return 1\n\
+  fi\n\
+  IFS=$tab read -r cid name image status running created_at keeper kind network owner_pid started_at ttl_sec < \"$state_file\"\n\
+}\n\
+if [ -n \"$log_file\" ]; then\n\
+  printf '%s\\n' \"$1 $*\" >> \"$log_file\"\n\
+fi\n\
+cmd=$1\n\
+shift\n\
+case \"$cmd\" in\n\
+  info)\n\
+    printf '[]\\n'\n\
+    exit 0\n\
+    ;;\n\
+  ps)\n\
+    if read_state; then\n\
+      printf '%s\\n' \"$cid\"\n\
+    fi\n\
+    exit 0\n\
+    ;;\n\
+  run)\n\
+    name=''\n\
+    keeper=''\n\
+    kind=''\n\
+    network=''\n\
+    owner_pid=''\n\
+    started_at=''\n\
+    ttl_sec=''\n\
+    image=''\n\
+    while [ \"$#\" -gt 0 ]; do\n\
+      case \"$1\" in\n\
+        --name)\n\
+          name=$2\n\
+          shift 2\n\
+          ;;\n\
+        --label)\n\
+          case \"$2\" in\n\
+            masc.mcp.keeper=*) keeper=${2#masc.mcp.keeper=} ;;\n\
+            masc.mcp.kind=*) kind=${2#masc.mcp.kind=} ;;\n\
+            masc.mcp.network=*) network=${2#masc.mcp.network=} ;;\n\
+            masc.mcp.owner_pid=*) owner_pid=${2#masc.mcp.owner_pid=} ;;\n\
+            masc.mcp.started_at=*) started_at=${2#masc.mcp.started_at=} ;;\n\
+            masc.mcp.ttl_sec=*) ttl_sec=${2#masc.mcp.ttl_sec=} ;;\n\
+          esac\n\
+          shift 2\n\
+          ;;\n\
+        --user|--tmpfs|-v|--workdir|--pids-limit|--memory|--network|--security-opt)\n\
+          shift 2\n\
+          ;;\n\
+        -d|--rm|--read-only|--cap-drop=ALL)\n\
+          shift\n\
+          ;;\n\
+        alpine:test)\n\
+          image=$1\n\
+          break\n\
+          ;;\n\
+        *)\n\
+          shift\n\
+          ;;\n\
+      esac\n\
+    done\n\
+    printf 'managed-1\\t%s\\t%s\\trunning\\ttrue\\t2026-04-24T00:00:00Z\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n' \\\n\
+      \"$name\" \"$image\" \"$keeper\" \"$kind\" \"$network\" \"$owner_pid\" \"$started_at\" \"$ttl_sec\" > \"$state_file\"\n\
+    printf 'managed-1\\n'\n\
+    exit 0\n\
+    ;;\n\
+  inspect)\n\
+    format=''\n\
+    if [ \"$1\" = \"--format\" ]; then\n\
+      format=$2\n\
+      shift 2\n\
+    fi\n\
+    if ! read_state; then\n\
+      exit 0\n\
+    fi\n\
+    case \"$format\" in\n\
+      *'.Config.Image'*)\n\
+        printf '%s\\t/%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n' \\\n\
+          \"$cid\" \"$name\" \"$image\" \"$status\" \"$running\" \"$created_at\" \"$keeper\" \"$kind\" \"$network\" \"$owner_pid\" \"$started_at\" \"$ttl_sec\"\n\
+        ;;\n\
+      *)\n\
+        printf '%s\\t%s\\t%s\\t%s\\n' \"$owner_pid\" \"$started_at\" \"$running\" \"$ttl_sec\"\n\
+        ;;\n\
+    esac\n\
+    exit 0\n\
+    ;;\n\
+  rm)\n\
+    if [ \"$1\" = \"-f\" ]; then\n\
+      shift\n\
+    fi\n\
+    : > \"$state_file\"\n\
+    printf '%s\\n' \"$@\"\n\
+    exit 0\n\
+    ;;\n\
+esac\n\
+printf 'unexpected docker invocation: %s\\n' \"$cmd\" >&2\n\
+exit 2\n"
+
+let test_keeper_sandbox_tools_are_public_and_titled () =
+  let checks =
+    [
+      ("masc_keeper_sandbox_status", "Keeper Sandbox Status");
+      ("masc_keeper_sandbox_start", "Start Keeper Sandbox");
+      ("masc_keeper_sandbox_stop", "Stop Keeper Sandbox");
+    ]
+  in
+  List.iter
+    (fun (name, expected_title) ->
+      let schema_present =
+        List.exists
+          (fun (schema : Types.tool_schema) -> String.equal schema.name name)
+          Config.raw_all_tool_schemas
+      in
+      Alcotest.(check bool) (name ^ " schema present") true schema_present;
+      Alcotest.(check bool) (name ^ " public mcp") true
+        (List.mem name Tool_catalog.public_mcp_tools);
+      Alcotest.(check string) (name ^ " title") expected_title
+        (Mcp_server_eio_tool_profile.tool_title_of_name name))
+    checks
+
+let test_keeper_sandbox_status_exposes_local_summary () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let keeper_name = "sandbox-local" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_keepalive.stop_keepalive keeper_name;
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      let keeper_ctx : _ Tool_keeper.context =
+        {
+          config;
+          agent_name = "operator";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      let ok, _ =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("goal", `String "Inspect local sandbox summary");
+                ("proactive_enabled", `Bool false);
+                ("autoboot_enabled", `Bool false);
+              ])
+      in
+      Alcotest.(check bool) "keeper up ok" true ok;
+      let ok, body =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_sandbox_status"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("include_preflight", `Bool false);
+              ])
+      in
+      Alcotest.(check bool) "sandbox status ok" true ok;
+      let sandbox_json =
+        parse_json_exn body |> Yojson.Safe.Util.member "sandbox"
+      in
+      let open Yojson.Safe.Util in
+      Alcotest.(check string) "sandbox profile local" "local"
+        (sandbox_json |> member "sandbox_profile" |> to_string);
+      Alcotest.(check string) "effective mode local" "local"
+        (sandbox_json |> member "effective_mode" |> to_string);
+      Alcotest.(check int) "no live containers" 0
+        (sandbox_json |> member "container_count" |> to_int);
+      Alcotest.(check (option string)) "local why_no_container"
+        (Some "sandbox_profile=local")
+        (sandbox_json |> member "why_no_container" |> to_string_option);
+      Alcotest.(check bool) "identity matches canonical agent" true
+        (sandbox_json |> member "identity" |> member "agent_name_matches"
+       |> to_bool);
+      let ok, status_body =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_status"
+          ~args:(`Assoc [ ("name", `String keeper_name); ("fast", `Bool true) ])
+      in
+      Alcotest.(check bool) "keeper status ok" true ok;
+      let status_json = parse_json_exn status_body in
+      Alcotest.(check string) "status surfaces sandbox_live local" "local"
+        Yojson.Safe.Util.(
+          status_json |> member "sandbox_live" |> member "effective_mode"
+          |> to_string))
+
+let test_keeper_sandbox_start_status_stop_with_fake_docker () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let keeper_name = "sandbox-docker" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_keepalive.stop_keepalive keeper_name;
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      let keeper_ctx : _ Tool_keeper.context =
+        {
+          config;
+          agent_name = "operator";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      let state_dir = Filename.concat base_dir "fake-docker" in
+      let state_file = Filename.concat state_dir "containers.tsv" in
+      let log_path = Filename.concat state_dir "docker.log" in
+      ensure_dir state_dir;
+      let ok, _ =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("goal", `String "Prewarm managed sandbox container");
+                ("proactive_enabled", `Bool false);
+                ("autoboot_enabled", `Bool false);
+              ])
+      in
+      Alcotest.(check bool) "keeper up ok" true ok;
+      update_keeper_sandbox_mode config keeper_name
+        ~sandbox_profile:Keeper_types.Docker
+        ~network_mode:Keeper_types.Network_none;
+      Keeper_status_detail.invalidate_status_cache_for keeper_name;
+      with_fake_docker fake_docker_managed_sandbox_script @@ fun () ->
+      (match Sys.getenv_opt "MASC_TEST_FAKE_DOCKER_PATH" with
+       | Some expected ->
+           Alcotest.(check string) "fake docker path selected" expected
+             (Masc_mcp.Keeper_sandbox_runtime.docker_command ())
+       | None -> Alcotest.fail "fake docker path missing");
+      with_env "KEEPER_DOCKER_STATE_FILE" state_file @@ fun () ->
+      with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+      with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+      with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+      with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+      with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+      with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "false" @@ fun () ->
+      let ok, start_body =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_sandbox_start"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("ttl_sec", `Float 90.0);
+              ])
+      in
+      if not ok then
+        Alcotest.failf "sandbox start failed: %s" start_body;
+      Alcotest.(check bool) "sandbox start ok" true ok;
+      let start_json = parse_json_exn start_body in
+      let open Yojson.Safe.Util in
+      Alcotest.(check bool) "sandbox start created container" true
+        (start_json |> member "sandbox" |> member "started" |> to_bool);
+      Alcotest.(check string) "sandbox start network none" "none"
+        (start_json |> member "sandbox" |> member "network_label" |> to_string);
+      Alcotest.(check (option (float 0.0001))) "sandbox start ttl preserved"
+        (Some 90.0)
+        (start_json |> member "sandbox" |> member "ttl_sec" |> to_float_option);
+      let log = read_file log_path in
+      Alcotest.(check bool) "managed container kind label present" true
+        (contains_substring log "masc.mcp.kind=managed");
+      Alcotest.(check bool) "managed ttl label present" true
+        (contains_substring log "masc.mcp.ttl_sec=90");
+      Alcotest.(check bool) "network none passed to docker" true
+        (contains_substring log "--network none");
+      let ok, status_body =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_sandbox_status"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("include_preflight", `Bool false);
+              ])
+      in
+      Alcotest.(check bool) "sandbox status after start ok" true ok;
+      let sandbox_json = parse_json_exn status_body |> member "sandbox" in
+      Alcotest.(check string) "effective mode managed" "managed_running"
+        (sandbox_json |> member "effective_mode" |> to_string);
+      Alcotest.(check int) "one live container" 1
+        (sandbox_json |> member "container_count" |> to_int);
+      Alcotest.(check (option string)) "no why_no_container while running" None
+        (sandbox_json |> member "why_no_container" |> to_string_option);
+      let container =
+        sandbox_json |> member "containers" |> to_list |> List.hd
+      in
+      Alcotest.(check (option string)) "managed kind surfaced"
+        (Some "managed")
+        (container |> member "container_kind" |> to_string_option);
+      Alcotest.(check (option string)) "container network surfaced"
+        (Some "none")
+        (container |> member "network_label" |> to_string_option);
+      let ok, stop_body =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_sandbox_stop"
+          ~args:(`Assoc [ ("name", `String keeper_name) ])
+      in
+      Alcotest.(check bool) "sandbox stop ok" true ok;
+      let stop_json = parse_json_exn stop_body in
+      Alcotest.(check int) "stop matched one" 1
+        (stop_json |> member "stop_result" |> member "matched" |> to_int);
+      Alcotest.(check int) "stop removed one" 1
+        (stop_json |> member "stop_result" |> member "removed" |> to_int);
+      let ok, final_status_body =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_sandbox_status"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("include_preflight", `Bool false);
+              ])
+      in
+      Alcotest.(check bool) "sandbox status after stop ok" true ok;
+      let final_sandbox = parse_json_exn final_status_body |> member "sandbox" in
+      Alcotest.(check int) "no containers after stop" 0
+        (final_sandbox |> member "container_count" |> to_int);
+      Alcotest.(check bool) "why_no_container restored" true
+        (Option.is_some
+           (final_sandbox |> member "why_no_container" |> to_string_option)))
+
 let test_snapshot_exposes_keeper_and_social_actions () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -309,6 +718,175 @@ let test_keeper_status_accepts_agent_name_alias () =
       let status_json = parse_json_exn body in
       Alcotest.(check string) "status resolves canonical keeper name" keeper_name
         Yojson.Safe.Util.(status_json |> member "name" |> to_string))
+
+let test_keeper_status_accepts_legacy_separator_agent_alias () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let keeper_name = "issue-king" in
+  let keeper_agent_name = "keeper_issue_king_agent" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_keepalive.stop_keepalive keeper_name;
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      let keeper_ctx : _ Tool_keeper.context =
+        {
+          config;
+          agent_name = "operator";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      let ok, _ =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("goal", `String "Probe keeper runtime");
+                ("proactive_enabled", `Bool false);
+                ("autoboot_enabled", `Bool false);
+              ])
+      in
+      Alcotest.(check bool) "keeper up ok" true ok;
+      let ok, body =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_status"
+          ~args:(`Assoc [ ("name", `String keeper_agent_name); ("fast", `Bool true) ])
+      in
+      Alcotest.(check bool) "status ok via legacy separator alias" true ok;
+      let status_json = parse_json_exn body in
+      Alcotest.(check string) "legacy alias resolves canonical keeper name"
+        keeper_name Yojson.Safe.Util.(status_json |> member "name" |> to_string))
+
+let test_keeper_up_reseeds_identity_drift () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let keeper_name = "issue-king" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_keepalive.stop_keepalive keeper_name;
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      let keeper_ctx : _ Tool_keeper.context =
+        {
+          config;
+          agent_name = "operator";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      let up_args =
+        `Assoc
+          [
+            ("name", `String keeper_name);
+            ("goal", `String "Repair identity drift");
+            ("proactive_enabled", `Bool false);
+            ("autoboot_enabled", `Bool false);
+          ]
+      in
+      let ok, _ = dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up" ~args:up_args in
+      Alcotest.(check bool) "keeper up ok" true ok;
+      let previous_trace_id =
+        drift_keeper_identity config keeper_name
+          ~agent_name:"keeper_issue_king_agent"
+      in
+      let ok, body = dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up" ~args:up_args in
+      Alcotest.(check bool) "keeper up after drift ok" true ok;
+      let body_json = parse_json_exn body in
+      let identity_reseed = Yojson.Safe.Util.member "identity_reseed" body_json in
+      Alcotest.(check string) "identity reseed reason" "agent_name_mismatch"
+        Yojson.Safe.Util.(identity_reseed |> member "reason" |> to_string);
+      let meta = read_keeper_meta_exn config keeper_name in
+      let current_trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+      Alcotest.(check string) "agent name restored to canonical"
+        (Keeper_types.keeper_agent_name keeper_name) meta.agent_name;
+      Alcotest.(check bool) "trace id rotated" true
+        (not (String.equal current_trace_id previous_trace_id));
+      Alcotest.(check bool) "previous trace retained in history" true
+        (List.mem previous_trace_id meta.runtime.trace_history))
+
+let test_keeper_repair_reseeds_identity_drift () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let keeper_name = "issue-king-repair" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_keepalive.stop_keepalive keeper_name;
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some keeper_name));
+      let keeper_ctx : _ Tool_keeper.context =
+        {
+          config;
+          agent_name = keeper_name;
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      let ok, _ =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("goal", `String "Repair identity drift");
+                ("proactive_enabled", `Bool false);
+                ("autoboot_enabled", `Bool false);
+              ])
+      in
+      Alcotest.(check bool) "keeper up ok" true ok;
+      let meta_before = read_keeper_meta_exn config keeper_name in
+      let working_dir =
+        Keeper_sandbox.host_root_abs_of_meta ~config meta_before
+      in
+      let previous_trace_id =
+        drift_keeper_identity config keeper_name
+          ~agent_name:"keeper_issue_king_repair_agent"
+      in
+      let ok, body =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_repair"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("task_spec", `String "repair drift");
+                ("working_dir", `String working_dir);
+              ])
+      in
+      Alcotest.(check bool) "keeper repair currently returns removed bridge" false ok;
+      let body_json = parse_json_exn body in
+      let identity_reseed = Yojson.Safe.Util.member "identity_reseed" body_json in
+      Alcotest.(check string) "repair reseed reason" "agent_name_mismatch"
+        Yojson.Safe.Util.(identity_reseed |> member "reason" |> to_string);
+      let meta_after = read_keeper_meta_exn config keeper_name in
+      let current_trace_id = Keeper_id.Trace_id.to_string meta_after.runtime.trace_id in
+      Alcotest.(check string) "repair restores canonical agent name"
+        (Keeper_types.keeper_agent_name keeper_name) meta_after.agent_name;
+      Alcotest.(check bool) "repair rotates trace id" true
+        (not (String.equal current_trace_id previous_trace_id)))
 
 let test_keeper_status_exposes_model_observability () =
   Eio_main.run @@ fun env ->
@@ -1258,8 +1836,15 @@ proactive_enabled = true
         (contains_substring effective_system_prompt ("Goal: " ^ mutated.goal));
       Alcotest.(check bool) "effective system prompt includes world block" true
         (contains_substring effective_system_prompt "<world>");
+      let stale_base =
+        match Masc_mcp.Keeper_types.read_meta config keeper_name with
+        | Ok (Some meta) -> meta
+        | Ok None -> Alcotest.fail "keeper meta missing before stale write"
+        | Error err ->
+            Alcotest.fail ("keeper meta reload failed before stale write: " ^ err)
+      in
       let stale_meta =
-        { mutated with
+        { stale_base with
           cascade_name = "vendor_mix_balanced";
           updated_at = Types.now_iso ();
         }

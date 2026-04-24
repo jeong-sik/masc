@@ -381,6 +381,82 @@ let keeper_schemas : tool_schema list = [
   };
 
   {
+    name = "masc_keeper_sandbox_status";
+    description = "Inspect Docker sandbox state for one keeper or all keepers. Reports Docker preflight, visible containers, why no container is present, and identity drift warnings.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Keeper handle. When omitted, return sandbox status for all registered keepers.");
+        ]);
+        ("verbose", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Include full Docker preflight details in each result.");
+        ]);
+        ("include_preflight", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "When true, include Docker preflight status for docker keepers.");
+        ]);
+        ("timeout_sec", `Assoc [
+          ("type", `String "number");
+          ("description", `String "Docker command timeout in seconds (default: 5).");
+        ]);
+      ]);
+    ];
+  };
+
+  {
+    name = "masc_keeper_sandbox_start";
+    description = "Start a visible managed Docker sandbox container for a keeper. Only applies to sandbox_profile=docker keepers.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Keeper handle.");
+        ]);
+        ("network_mode", `Assoc [
+          ("type", `String "string");
+          ("enum", `List (List.map (fun s -> `String s) network_mode_enum_strings));
+          ("description", `String "Managed container network policy. Defaults to the keeper's configured network_mode.");
+        ]);
+        ("ttl_sec", `Assoc [
+          ("type", `String "number");
+          ("description", `String "Managed container TTL in seconds before stale cleanup removes it (default: 1800).");
+        ]);
+        ("timeout_sec", `Assoc [
+          ("type", `String "number");
+          ("description", `String "Docker command timeout in seconds (default: 10).");
+        ]);
+      ]);
+      ("required", `List [`String "name"]);
+    ];
+  };
+
+  {
+    name = "masc_keeper_sandbox_stop";
+    description = "Stop managed keeper sandbox containers. By default stops all managed keeper sandbox containers in the current base path.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional keeper handle. When omitted, stop all managed keeper sandbox containers for this base path.");
+        ]);
+        ("prune_stale", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Also run stale keeper sandbox cleanup after stopping managed containers.");
+        ]);
+        ("timeout_sec", `Assoc [
+          ("type", `String "number");
+          ("description", `String "Docker command timeout in seconds (default: 10).");
+        ]);
+      ]);
+    ];
+  };
+
+  {
     name = "masc_keeper_msg";
     description = "Send a message to a keeper (async). Returns immediately with a request_id. Poll masc_keeper_msg_result for the response.";
     input_schema = `Assoc [

@@ -115,9 +115,12 @@ let should_stream_post_tools_call request body_str accept_mode =
 (** Inject or replace [_agent_name] in MCP [tools/call] arguments.
     For authenticated dashboard sessions, the HTTP-layer token owner is the
     canonical caller identity, so a stale browser-supplied [_agent_name]
-    must be overwritten. Legacy [agent_name] is left untouched because some
-    tools use it as a domain argument rather than caller identity. *)
-let inject_agent_name_into_body ?(rewrite_existing = false) ~agent_name body_str =
+    must be overwritten. The legacy argument-scoped [token] is also removed
+    when HTTP auth is present so stale MCP bodies cannot override the
+    transport token. Legacy [agent_name] is left untouched because some tools
+    use it as a domain argument rather than caller identity. *)
+let inject_agent_name_into_body ?(rewrite_existing = false) ?(strip_token = false)
+    ~agent_name body_str =
   try
     let json = Yojson.Safe.from_string body_str in
     let open Yojson.Safe.Util in
@@ -144,8 +147,17 @@ let inject_agent_name_into_body ?(rewrite_existing = false) ~agent_name body_str
           match args with
           | `Assoc fields ->
               let normalized_fields =
-                if rewrite_existing then
-                  List.filter (fun (key, _) -> not (String.equal key "_agent_name")) fields
+                let fields =
+                  if rewrite_existing then
+                    List.filter
+                      (fun (key, _) -> not (String.equal key "_agent_name"))
+                      fields
+                  else
+                    fields
+                in
+                if strip_token then
+                  List.filter (fun (key, _) -> not (String.equal key "token"))
+                    fields
                 else
                   fields
               in
@@ -183,6 +195,7 @@ let body_with_canonical_http_actor ~base_path ~auth_token request body_str =
   | Some agent ->
       inject_agent_name_into_body
         ~rewrite_existing:(Option.is_some auth_token)
+        ~strip_token:(Option.is_some auth_token)
         ~agent_name:agent body_str
 
 let handle_post_mcp ~deps ?(profile = Full) request reqd =

@@ -175,12 +175,15 @@ let runtime_mcp_policy_with_masc_agent_name
                   ~value:agent_name headers
               in
               let headers =
-                match first_nonempty_env [ "MASC_INTERNAL_MCP_TOKEN" ] with
-                | Some token ->
+                match
+                  ( first_nonempty_env [ "MASC_INTERNAL_MCP_TOKEN" ],
+                    keeper_name_of_agent_name agent_name )
+                with
+                | Some token, Some _ ->
                     upsert_http_header
                       ~key:"x-masc-internal-token"
                       ~value:token headers
-                | None -> headers
+                | _ -> headers
               in
               let headers =
                 match keeper_name_of_agent_name agent_name with
@@ -252,6 +255,15 @@ let public_mcp_tools_of_oas_tools (tools : Oas.Tool.t list) =
 let tool_names_are_public_mcp (tool_names : string list) =
   tool_names <> [] && List.for_all Tool_catalog.is_public_mcp tool_names
 
+let public_mcp_tool_requires_bound_actor = function
+  | "masc_claim_next"
+  | "masc_transition"
+  | "masc_join"
+  | "masc_leave"
+  | "masc_plan_set_task" ->
+      true
+  | _ -> false
+
 let trim_nonempty_string raw =
   let trimmed = String.trim raw in
   if String.equal trimmed "" then None else Some trimmed
@@ -262,16 +274,28 @@ let trim_nonempty value =
 let first_nonempty_env names =
   List.find_map (fun name -> Sys.getenv_opt name |> trim_nonempty) names
 
-let public_mcp_runtime_policy_of_tool_names ?agent_name:_ (tool_names : string list) :
+let public_mcp_runtime_policy_of_tool_names ?agent_name (tool_names : string list) :
     Llm_provider.Llm_transport.runtime_mcp_policy option =
   let tool_names = dedupe_preserve_order tool_names in
   if not (tool_names_are_public_mcp tool_names) then
     None
   else
+    let agent_name = Option.bind agent_name trim_nonempty_string in
+    let keeper_name = Option.bind agent_name keeper_name_of_agent_name in
     let masc_headers =
-      match first_nonempty_env [ "MASC_INTERNAL_MCP_TOKEN" ] with
-      | Some token -> [ ("x-masc-internal-token", token) ]
-      | None ->
+      match
+        (keeper_name, first_nonempty_env [ "MASC_INTERNAL_MCP_TOKEN" ])
+      with
+      | Some keeper_name, Some token ->
+          let agent_header =
+            match agent_name with
+            | Some agent_name -> [ ("x-masc-agent-name", agent_name) ]
+            | None -> []
+          in
+          ("x-masc-internal-token", token)
+          :: ("x-masc-keeper-name", keeper_name)
+          :: agent_header
+      | _ ->
           (match first_nonempty_env [ "MASC_MCP_TOKEN" ] with
            | Some token -> [ ("Authorization", "Bearer " ^ token) ]
            | None -> [])
@@ -367,6 +391,30 @@ let resolve_tool_lane_for_oas_tools
   let public_tool_names = public_mcp_tool_names_of_oas_tools public_tools in
   let requested_agent_name =
     Option.bind agent_name trim_nonempty_string
+  in
+  let codex_keeper_bound_actor_tools =
+    match provider_cfg.kind, requested_agent_name with
+    | Llm_provider.Provider_config.Codex_cli, Some agent_name
+      when Option.is_some (keeper_name_of_agent_name agent_name) ->
+        List.filter public_mcp_tool_requires_bound_actor public_tool_names
+    | _ -> []
+  in
+  match codex_keeper_bound_actor_tools, tool_requirement with
+  | _ :: _ as bound_actor_tools, `Required ->
+      let detail =
+        Printf.sprintf
+          "codex_cli runtime MCP cannot carry keeper-bound auth headers for: %s"
+          (String.concat ", " bound_actor_tools)
+      in
+      Error (invalid_runtime_config "runtime_mcp_auth" detail)
+  | _ ->
+  let public_tool_names =
+    if codex_keeper_bound_actor_tools = [] then
+      public_tool_names
+    else
+      List.filter
+        (fun tool_name -> not (public_mcp_tool_requires_bound_actor tool_name))
+        public_tool_names
   in
   let runtime_mcp_policy =
     public_mcp_runtime_policy_of_tool_names

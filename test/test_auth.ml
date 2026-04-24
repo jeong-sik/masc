@@ -243,6 +243,27 @@ let test_verify_token_reports_token_owner_on_agent_mismatch () =
   | Error _, _ ->
       fail "create_token should succeed"
 
+let test_verify_token_allows_generated_alias_for_token_owner_prefix () =
+  let dir = setup_test_room () in
+  let create_result = Auth.create_token dir ~agent_name:"qa-king" ~role:Types.Worker in
+  let verify_result =
+    match create_result with
+    | Ok (raw_token, _) ->
+        Auth.verify_token dir ~agent_name:"qa-king-warm-heron" ~token:raw_token
+    | Error e -> Error e
+  in
+  cleanup_test_room dir;
+  match create_result, verify_result with
+  | Ok _, Ok cred ->
+      check string "token owner credential returned" "qa-king" cred.agent_name;
+      check bool "role preserved" true (cred.role = Types.Worker)
+  | Ok _, Error e ->
+      fail
+        (Printf.sprintf "generated alias should reuse owner token: %s"
+           (Types.masc_error_to_string e))
+  | Error _, _ ->
+      fail "create_token should succeed"
+
 let test_resolve_agent_from_token () =
   let dir = setup_test_room () in
   let create_result = Auth.create_token dir ~agent_name:"resolver" ~role:Types.Worker in
@@ -742,6 +763,8 @@ let () =
       test_case "verify wrong token" `Quick test_verify_wrong_token;
       test_case "verify token reports token owner on agent mismatch" `Quick
         test_verify_token_reports_token_owner_on_agent_mismatch;
+      test_case "verify token allows generated alias for owner prefix" `Quick
+        test_verify_token_allows_generated_alias_for_token_owner_prefix;
       test_case "resolve agent from token" `Quick test_resolve_agent_from_token;
       test_case "list credentials" `Quick test_list_credentials;
       test_case "delete credential" `Quick test_delete_credential;

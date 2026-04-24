@@ -489,11 +489,12 @@ let missing_credential_error config ~agent_name ~token : masc_error =
 
 (** Verify a token.
 
-    Looks up the credential by exact [agent_name] match first.  Only
-    hard-coded legacy aliases (dashboard → dashboard-dev) are accepted
-    as a fallback.  The old nickname-prefix collapse
-    ([extract_agent_type_prefix]) has been removed from the verify
-    path entirely — UUID-based storage makes it unnecessary. *)
+    Looks up the credential by exact [agent_name] match first. If that
+    misses, hard-coded legacy aliases (dashboard → dashboard-dev) are
+    accepted. Generated nicknames may also use a token owned by their
+    stable prefix, but only when the supplied token itself resolves to
+    that prefix. This keeps joined nickname continuity without letting an
+    unrelated bearer token impersonate another generated family. *)
 let verify_token config ~agent_name ~token : (agent_credential, masc_error) result =
   let cred_opt =
     match load_credential config agent_name with
@@ -503,7 +504,18 @@ let verify_token config ~agent_name ~token : (agent_credential, masc_error) resu
         |> List.find_map (load_credential config)
   in
   match cred_opt with
-  | None -> Error (missing_credential_error config ~agent_name ~token)
+  | None -> (
+      match find_credential_by_token config ~token with
+      | Ok owner
+        when String.equal owner.agent_name (credential_agent_name agent_name) ->
+          Ok owner
+      | Ok owner ->
+          Error
+            (Unauthorized
+               (Printf.sprintf
+                  "No credential found for %s (bearer token belongs to %s)"
+                  agent_name owner.agent_name))
+      | Error e -> Error e)
   | Some cred ->
       let token_hash = sha256_hash token in
       if cred.token <> token_hash then

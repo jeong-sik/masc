@@ -211,6 +211,41 @@ let () =
             check string "name" "__test_spec_schema_conv" schema.Types.name;
             check string "description" "schema conv test" schema.description);
         ] );
+      ( "tool_catalog_groups",
+        [
+          test_case "typed tool groups are exposed without string-prefix routing" `Quick
+            (fun () ->
+              let check_group name expected =
+                check (option string) name (Some expected)
+                  (Option.map Tool_catalog.tool_group_to_string
+                     (Tool_catalog.tool_group name))
+              in
+              check_group "keeper_board_post" "board";
+              check_group "keeper_memory_search" "knowledge";
+              check_group "keeper_library_read" "knowledge";
+              check_group "keeper_task_claim" "tasks";
+              check_group "keeper_voice_speak" "voice";
+              check_group "keeper_fs_read" "filesystem";
+              check_group "keeper_bash" "filesystem";
+              check_group "masc_board_post" "masc_board";
+              check_group "masc_keeper_status" "masc_keeper";
+              check_group "masc_plan_get" "masc_plan";
+              check_group "masc_worktree_list" "masc_worktree";
+              check_group "masc_code_write" "masc_code";
+              check_group "masc_autoresearch_status" "masc_autoresearch";
+              check_group "masc_agents" "masc_agent";
+              check_group "masc_status" "masc_core";
+              check (option string) "unknown" None
+                (Option.map Tool_catalog.tool_group_to_string
+                   (Tool_catalog.tool_group "__unknown_tool")));
+          test_case "metadata fields include typed tool group" `Quick (fun () ->
+            let fields = Tool_catalog.metadata_to_fields "keeper_board_post" in
+            check bool "toolGroup=board" true
+              (List.mem ("toolGroup", `String "board") fields);
+            check bool "unknown has no toolGroup" false
+              (Tool_catalog.metadata_to_fields "__unknown_tool"
+              |> List.exists (fun (key, _) -> String.equal key "toolGroup")));
+        ] );
       ( "verify_handler_coverage",
         [
           test_case "Tag_dispatch binding not in verify missing" `Quick (fun () ->

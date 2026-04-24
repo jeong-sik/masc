@@ -34,6 +34,21 @@ type effect_domain =
   | Playground_write
   | Main_worktree_write
 
+type tool_group =
+  | Board
+  | Knowledge
+  | Tasks
+  | Voice
+  | Filesystem
+  | Masc_board
+  | Masc_keeper
+  | Masc_plan
+  | Masc_worktree
+  | Masc_code
+  | Masc_autoresearch
+  | Masc_agent
+  | Masc_core
+
 include (Tool_catalog_surfaces : sig
   type surface = Tool_catalog_surfaces.surface =
     | Public_mcp | Spawned_agent | Local_worker | Session_min
@@ -330,6 +345,21 @@ let effect_domain_to_string = function
   | Playground_write -> "playground_write"
   | Main_worktree_write -> "main_worktree_write"
 
+let tool_group_to_string = function
+  | Board -> "board"
+  | Knowledge -> "knowledge"
+  | Tasks -> "tasks"
+  | Voice -> "voice"
+  | Filesystem -> "filesystem"
+  | Masc_board -> "masc_board"
+  | Masc_keeper -> "masc_keeper"
+  | Masc_plan -> "masc_plan"
+  | Masc_worktree -> "masc_worktree"
+  | Masc_code -> "masc_code"
+  | Masc_autoresearch -> "masc_autoresearch"
+  | Masc_agent -> "masc_agent"
+  | Masc_core -> "masc_core"
+
 let implementation_allows_public_visibility = function
   | Real | Adapter -> true
   | Simulation | Placeholder -> false
@@ -515,6 +545,174 @@ let inferred_effect_domain name =
   | Some typed_name -> inferred_effect_domain_of_typed_tool_name typed_name
   | None -> None
 
+let tool_group_of_typed_tool_name = function
+  | TN.Keeper
+      ( TK.Board_cleanup
+      | TK.Board_comment
+      | TK.Board_comment_vote
+      | TK.Board_delete
+      | TK.Board_get
+      | TK.Board_list
+      | TK.Board_post
+      | TK.Board_search
+      | TK.Board_stats
+      | TK.Board_vote ) ->
+      Some Board
+  | TN.Keeper (TK.Memory_search | TK.Library_read | TK.Library_search) ->
+      Some Knowledge
+  | TN.Keeper
+      ( TK.Task_claim
+      | TK.Task_create
+      | TK.Task_done
+      | TK.Task_force_done
+      | TK.Task_force_release
+      | TK.Task_submit_for_verification
+      | TK.Tasks_audit
+      | TK.Tasks_list ) ->
+      Some Tasks
+  | TN.Keeper
+      ( TK.Voice_agent
+      | TK.Voice_listen
+      | TK.Voice_session_end
+      | TK.Voice_session_start
+      | TK.Voice_sessions
+      | TK.Voice_speak ) ->
+      Some Voice
+  | TN.Keeper (TK.Bash | TK.Fs_edit | TK.Fs_read | TK.Shell | TK.Write) ->
+      Some Filesystem
+  | TN.Keeper
+      ( TK.Bash_kill
+      | TK.Bash_output
+      | TK.Broadcast
+      | TK.Code_read
+      | TK.Context_status
+      | TK.Discovery
+      | TK.Handoff
+      | TK.Pr_review_comment
+      | TK.Pr_review_read
+      | TK.Pr_review_reply
+      | TK.Preflight_check
+      | TK.Stay_silent
+      | TK.Time_now
+      | TK.Tool_search
+      | TK.Tools_list ) ->
+      None
+  | TN.Masc
+      ( TM.Board_cleanup
+      | TM.Board_comment
+      | TM.Board_comment_vote
+      | TM.Board_delete
+      | TM.Board_get
+      | TM.Board_hearths
+      | TM.Board_list
+      | TM.Board_post
+      | TM.Board_profile
+      | TM.Board_search
+      | TM.Board_stats
+      | TM.Board_vote ) ->
+      Some Masc_board
+  | TN.Masc_keeper _ -> Some Masc_keeper
+  | TN.Masc
+      ( TM.Plan_clear_task
+      | TM.Plan_get
+      | TM.Plan_get_task
+      | TM.Plan_init
+      | TM.Plan_set_task
+      | TM.Plan_update ) ->
+      Some Masc_plan
+  | TN.Masc (TM.Worktree_create | TM.Worktree_list | TM.Worktree_remove) ->
+      Some Masc_worktree
+  | TN.Masc
+      ( TM.Code_delete
+      | TM.Code_edit
+      | TM.Code_git
+      | TM.Code_read
+      | TM.Code_search
+      | TM.Code_shell
+      | TM.Code_symbols
+      | TM.Code_write ) ->
+      Some Masc_code
+  | TN.Masc
+      ( TM.Autoresearch_cycle
+      | TM.Autoresearch_inject
+      | TM.Autoresearch_start
+      | TM.Autoresearch_status
+      | TM.Autoresearch_stop ) ->
+      Some Masc_autoresearch
+  | TN.Masc (TM.Agent_card | TM.Agent_fitness | TM.Agent_update | TM.Agents) ->
+      Some Masc_agent
+  | TN.Masc
+      ( TM.A2a_delegate
+      | TM.Add_task
+      | TM.Approval_get
+      | TM.Batch_add_tasks
+      | TM.Broadcast
+      | TM.Cancel_task
+      | TM.Check
+      | TM.Claim_next
+      | TM.Claim_task
+      | TM.Cleanup_zombies
+      | TM.Collaboration_graph
+      | TM.Complete_task
+      | TM.Config
+      | TM.Coord_status
+      | TM.Dashboard
+      | TM.Deliver
+      | TM.Dispatch_plan
+      | TM.Gc
+      | TM.Get_metrics
+      | TM.Goal_list
+      | TM.Goal_review
+      | TM.Goal_transition
+      | TM.Goal_upsert
+      | TM.Goal_verify
+      | TM.Heartbeat
+      | TM.Join
+      | TM.Leave
+      | TM.List_tasks
+      | TM.Mcp_session
+      | TM.Messages
+      | TM.Note_add
+      | TM.Operation_pause
+      | TM.Operation_start
+      | TM.Operation_status
+      | TM.Operation_stop
+      | TM.Operator_action
+      | TM.Operator_confirm
+      | TM.Operator_digest
+      | TM.Operator_snapshot
+      | TM.Pause
+      | TM.Register_capabilities
+      | TM.Release_task
+      | TM.Reset
+      | TM.Resume
+      | TM.Set_current_task
+      | TM.Spawn
+      | TM.Start
+      | TM.Status
+      | TM.Task_history
+      | TM.Tasks
+      | TM.Tool_admin_snapshot
+      | TM.Tool_admin_update
+      | TM.Tool_grant
+      | TM.Tool_help
+      | TM.Tool_list
+      | TM.Tool_revoke
+      | TM.Tool_stats
+      | TM.Transition
+      | TM.Update_priority
+      | TM.Web_search
+      | TM.Webrtc_answer
+      | TM.Webrtc_offer
+      | TM.Who
+      | TM.Workflow_guide ) ->
+      Some Masc_core
+
+let tool_group name =
+  match Tool_name.of_string name with
+  | Some typed_name -> tool_group_of_typed_tool_name typed_name
+  | None -> None
+
 let attach_inferred_effect_domain name (meta : metadata) =
   match meta.effect_domain with
   | Some _ -> meta
@@ -648,11 +846,17 @@ let metadata_to_fields name =
         :: with_reason
     | None -> with_reason
   in
+  let with_tool_group =
+    match tool_group name with
+    | Some group ->
+        ("toolGroup", `String (tool_group_to_string group)) :: with_effect_domain
+    | None -> with_effect_domain
+  in
   match meta.required_permission with
   | Some permission ->
       ("requiredPermission", `String (Types.show_permission permission))
-      :: with_effect_domain
-  | None -> with_effect_domain
+      :: with_tool_group
+  | None -> with_tool_group
 
 let public_contract_fields name =
   let meta = metadata name in

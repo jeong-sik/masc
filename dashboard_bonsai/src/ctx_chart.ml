@@ -33,7 +33,7 @@ stylesheet
     justify-content: center;
     gap: 4px;
     font-family: 'Noto Sans KR', sans-serif;
-    font-size: 9px;
+    font-size: 11px;
     letter-spacing: 0.22em;
     text-transform: uppercase;
     color: var(--text-dim);

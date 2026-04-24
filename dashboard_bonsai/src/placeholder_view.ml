@@ -32,7 +32,7 @@ stylesheet
 
   .panel_title {
     font-family: var(--font-ui, 'Noto Sans KR', sans-serif);
-    font-size: 9px;
+    font-size: 11px;
     letter-spacing: 0.28em;
     text-transform: uppercase;
     color: var(--text-dim);

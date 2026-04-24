@@ -713,7 +713,7 @@ stylesheet
     left: 50%;
     transform: translateX(-50%) rotate(14deg);
     font-family: 'Noto Sans KR', sans-serif;
-    font-size: 8px;
+    font-size: 10px;
     letter-spacing: 0.3em;
     text-transform: uppercase;
     color: var(--border-highlight);
@@ -755,7 +755,7 @@ stylesheet
     display: grid;
     place-items: center;
     font-family: 'Cinzel', serif;
-    font-size: 9px;
+    font-size: 11px;
     transform: rotate(45deg);
   }
   .nav_brand_rune > span { transform: rotate(-45deg); display: block; }

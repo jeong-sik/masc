@@ -46,7 +46,7 @@ stylesheet
     border-right: 1px solid var(--border-main);
     padding: 6px 14px;
     font-family: 'Noto Sans KR', sans-serif;
-    font-size: 9px;
+    font-size: 11px;
     letter-spacing: 0.24em;
     text-transform: uppercase;
     color: var(--text-dim);
@@ -108,7 +108,7 @@ stylesheet
   }
   .stat {
     font-family: 'Noto Sans KR', sans-serif;
-    font-size: 9px;
+    font-size: 11px;
     letter-spacing: 0.18em;
     color: var(--text-dim);
     text-transform: uppercase;

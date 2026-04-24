@@ -87,7 +87,7 @@ stylesheet
     border-bottom: 1px solid rgba(120, 100, 80, 0.16);
     background: linear-gradient(180deg, #1c140e, #160f0a);
     font-family: var(--font-ui, 'Noto Sans KR', sans-serif);
-    font-size: 9px;
+    font-size: 11px;
     letter-spacing: 0.28em;
     text-transform: uppercase;
     color: var(--text-dim);
@@ -180,7 +180,7 @@ stylesheet
 
   .summary_k {
     font-family: var(--font-ui, 'Noto Sans KR', sans-serif);
-    font-size: 9px;
+    font-size: 11px;
     letter-spacing: 0.2em;
     text-transform: uppercase;
     color: var(--text-dim);
@@ -259,7 +259,7 @@ stylesheet
 
   .note_k {
     font-family: var(--font-ui, 'Noto Sans KR', sans-serif);
-    font-size: 9px;
+    font-size: 11px;
     letter-spacing: 0.22em;
     text-transform: uppercase;
     color: var(--text-dim);
@@ -287,7 +287,7 @@ stylesheet
   .list_k {
     min-width: 92px;
     font-family: var(--font-ui, 'Noto Sans KR', sans-serif);
-    font-size: 9px;
+    font-size: 11px;
     letter-spacing: 0.22em;
     text-transform: uppercase;
     color: var(--text-dim);
@@ -313,7 +313,7 @@ stylesheet
 
   .preview_label {
     font-family: var(--font-ui, 'Noto Sans KR', sans-serif);
-    font-size: 9px;
+    font-size: 11px;
     letter-spacing: 0.22em;
     text-transform: uppercase;
     color: var(--text-dim);

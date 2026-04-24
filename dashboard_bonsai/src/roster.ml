@@ -100,7 +100,7 @@ stylesheet
     align-items: center;
     gap: 6px;
     font-family: 'Noto Sans KR', -apple-system, sans-serif;
-    font-size: 9px;
+    font-size: 11px;
     letter-spacing: 0.22em;
     text-transform: uppercase;
     color: var(--text-dim);

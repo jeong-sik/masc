@@ -32,8 +32,14 @@ module Http_client : sig
       signals context overflow / provider parse error.
       [CliTransportRequired] cascades — the CLI provider cannot serve
       this request over HTTP, so the next provider must.
-      [AcceptRejected] does not cascade — the upstream contract has
-      already decided this payload is inadmissible. *)
+      [AcceptRejected] cascades only when the [reason] string carries a
+      provider-capability-mismatch marker (e.g. "does not support"). This
+      covers MASC's worker-layer wrapping of OAS [InvalidConfig] errors
+      for [runtime_mcp_auth] and [tool_support], whose cascade intent is
+      documented at [oas_worker_named.ml:661-678]. Permanent provider
+      failures such as [kimi_cli] exit 1 ("permanent auth/config/model
+      error") do not match any marker and remain non-cascading. See
+      masc-mcp #9850 for the motivating codex_cli case. *)
 end
 
 module Metrics : sig

@@ -25,6 +25,28 @@ module Http_client = struct
   let is_provider_parse_error body =
     contains_ci ~haystack:body ~needle:"can't find closing" ()
 
+  (* AcceptRejected is raised by OAS for multiple distinct conditions:
+     (a) permanent provider failures (kimi_cli exit 1 is explicitly labeled
+         "permanent auth/config/model error") — must NOT cascade.
+     (b) provider capability mismatches wrapped by MASC's worker layer at
+         [oas_worker_named.ml:672-678] (InvalidConfig runtime_mcp_auth /
+         tool_support). The worker comment at line 661-665 documents explicit
+         cascade intent. The detail string is built in
+         [oas_worker_exec_transport.ml:444-452] and consistently starts with
+         "<provider> does not support ...".
+     This filter whitelists only markers from class (b). Class (a) has no
+     matching marker and falls through to false. CompletionContractViolation
+     and UnrecognizedStopReason use free-form [reason] and are not whitelisted
+     here — their cascade intent is tracked separately. See masc-mcp #9850. *)
+  let accept_rejected_cascadable_markers = [
+    "does not support";
+  ]
+
+  let accept_rejected_is_cascadable reason =
+    List.exists
+      (fun needle -> contains_ci ~haystack:reason ~needle ())
+      accept_rejected_cascadable_markers
+
   let should_cascade (err : Llm_provider.Http_client.http_error) : bool =
     if Llm_provider.Http_client.is_local_resource_exhaustion err then false
     else
@@ -36,7 +58,8 @@ module Http_client = struct
           true
       | Llm_provider.Http_client.HttpError { code; _ } ->
           List.mem code Llm_provider.Constants.Http.cascadable_codes
-      | Llm_provider.Http_client.AcceptRejected _ -> false
+      | Llm_provider.Http_client.AcceptRejected { reason } ->
+          accept_rejected_is_cascadable reason
       | Llm_provider.Http_client.CliTransportRequired _ -> true
       | Llm_provider.Http_client.NetworkError _ -> true
 end

@@ -13,6 +13,29 @@ type cli_transport_overrides = {
   gemini_yolo : bool option;
 }
 
+(* #10097: codex_cli omits the same set of keeper-bound runtime MCP
+   tools on every request because the structural limitation
+   (request-scoped auth headers) cannot be carried through codex's
+   transport.  The previous Log.warn fired 143×/session with one
+   distinct tool list — pure noise that masked other warnings.  Track
+   the most recent tool list per [agent_name] and only emit when it
+   changes (initial fire, or tool surface drift).  Stdlib.Mutex
+   guards concurrent access from heartbeat/turn fibers across
+   domains. *)
+let codex_omission_state_mu = Stdlib.Mutex.create ()
+let codex_omission_state : (string, string) Hashtbl.t = Hashtbl.create 16
+
+let codex_omission_should_log ~agent_name ~tool_list_key =
+  Stdlib.Mutex.lock codex_omission_state_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock codex_omission_state_mu)
+    (fun () ->
+       match Hashtbl.find_opt codex_omission_state agent_name with
+       | Some prev when String.equal prev tool_list_key -> false
+       | _ ->
+         Hashtbl.replace codex_omission_state agent_name tool_list_key;
+         true)
+
 (** Resolve a model label string to an OAS Provider.config.
     Uses MASC [Cascade_config.parse_model_string] (with Provider_registry as SSOT).
     Explicit model-label execution must never silently substitute a
@@ -438,10 +461,17 @@ let resolve_tool_lane_for_oas_tools
           (public_tool_names @ keeper_internal_tool_names)
     | _ -> []
   in
-  if codex_keeper_bound_actor_tools <> [] then
-    Log.warn ~ctx:"oas_worker_exec"
-      "codex_cli omitting keeper-bound runtime MCP tool(s) that require request-scoped auth headers: %s"
-      (String.concat ", " codex_keeper_bound_actor_tools);
+  (if codex_keeper_bound_actor_tools <> [] then
+    let tool_list_key = String.concat "," codex_keeper_bound_actor_tools in
+    let agent_name_key =
+      Option.value ~default:"<no_agent>" requested_agent_name
+    in
+    if codex_omission_should_log ~agent_name:agent_name_key ~tool_list_key
+    then
+      Log.warn ~ctx:"oas_worker_exec"
+        "codex_cli omitting keeper-bound runtime MCP tool(s) that require request-scoped auth headers: %s (subsequent identical omissions for %s suppressed)"
+        tool_list_key
+        agent_name_key);
   let public_tool_names =
     if codex_keeper_bound_actor_tools = [] then
       public_tool_names

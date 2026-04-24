@@ -166,24 +166,31 @@ let present_json_keys (keys : string list) (json : Yojson.Safe.t) : string list 
   | _ -> []
 
 let reject_removed_keeper_input_keys ~tool_name (args : Yojson.Safe.t) =
+  (* #9752: non-public args (currently only [social_model]) should not
+     fail the whole call. External clients like codex-mcp-client have
+     sent [social_model] in real traffic — hard-rejecting DoS's the
+     call for a field that is never consumed downstream from the args
+     blob anyway ([social_model] runtime value comes from the keeper
+     meta, not the MCP args). Warn and continue; the policy from #7447
+     (social_model off the public OAS/MCP surface) is preserved because
+     no caller path reads [args.social_model] to drive behaviour. *)
   let non_public = present_json_keys non_public_keeper_input_key_names args in
-  match non_public with
-  | _ :: _ as fields ->
+  (match non_public with
+   | _ :: _ as fields ->
+       Log.Keeper.warn
+         "%s: ignoring non-public keeper args %s (see #7447, #9752 — \
+          accepted for external-client compatibility, no runtime effect)"
+         tool_name (String.concat ", " fields)
+   | [] -> ());
+  let present = present_json_keys removed_keeper_input_key_names args in
+  match present with
+  | [] -> Ok ()
+  | fields ->
       Error
         (Printf.sprintf
-           "non-public keeper args for %s: %s. These keeper runtime internals are not part of the public MCP/OAS surface."
+           "removed keeper args for %s: %s. Keepers are always-on by definition."
            tool_name
            (String.concat ", " fields))
-  | [] ->
-      let present = present_json_keys removed_keeper_input_key_names args in
-      match present with
-      | [] -> Ok ()
-      | fields ->
-          Error
-            (Printf.sprintf
-               "removed keeper args for %s: %s. Keepers are always-on by definition."
-               tool_name
-               (String.concat ", " fields))
 
 let reject_removed_keeper_msg_input_keys ~tool_name (args : Yojson.Safe.t) =
   let present = present_json_keys removed_keeper_msg_input_key_names args in

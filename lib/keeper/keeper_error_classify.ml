@@ -255,34 +255,49 @@ let required_tool_rotation_candidate name =
     (String.equal normalized Keeper_config.local_only_cascade_name
      || String.equal normalized Keeper_config.local_recovery_cascade_name)
 
+let legacy_degraded_rotation_candidates
+    ~(base_cascade : string)
+    ~(tool_requirement : string) =
+  let normalized_base = normalized_cascade_name base_cascade in
+  let default_cascade =
+    normalized_cascade_name Keeper_config.default_cascade_name
+  in
+  let local_recovery_cascade =
+    normalized_cascade_name Keeper_config.local_recovery_cascade_name
+  in
+  if String.equal tool_requirement "required" then
+    [ normalized_base; default_cascade ]
+  else
+    [ normalized_base; default_cascade; local_recovery_cascade ]
+
+let normalize_rotation_candidates candidates =
+  candidates
+  |> List.filter_map (fun candidate ->
+         let trimmed = String.trim candidate in
+         if String.equal trimmed "" then None else Some (normalized_cascade_name trimmed))
+  |> dedupe_keep_order
+
 let degraded_rotation_candidates
+    ~(rotation_cascades : string list option)
     ~(base_cascade : string)
     ~(effective_cascade : string)
     ~(tool_requirement : string) =
-  let normalized_base = normalized_cascade_name base_cascade in
   let normalized_effective = normalized_cascade_name effective_cascade in
   let candidates =
-    if String.equal tool_requirement "required" then
-      [
-        normalized_base;
-        Keeper_config.default_cascade_name;
-      ]
-    else
-      [
-        normalized_base;
-        Keeper_config.default_cascade_name;
-        Keeper_config.local_recovery_cascade_name;
-      ]
+    match rotation_cascades with
+    | None ->
+        legacy_degraded_rotation_candidates ~base_cascade ~tool_requirement
+    | Some catalog ->
+        normalize_rotation_candidates (base_cascade :: catalog)
   in
   candidates
-  |> List.map normalized_cascade_name
-  |> dedupe_keep_order
   |> List.filter (fun candidate ->
          (not (String.equal candidate normalized_effective))
          && (not (String.equal tool_requirement "required")
              || required_tool_rotation_candidate candidate))
 
 let degraded_rotation_after_recoverable_error
+    ?rotation_cascades
     ~(base_cascade : string)
     ~(effective_cascade : string)
     ~(tool_requirement : string)
@@ -297,6 +312,7 @@ let degraded_rotation_after_recoverable_error
         |> dedupe_keep_order
       in
       degraded_rotation_candidates
+        ~rotation_cascades
         ~base_cascade ~effective_cascade ~tool_requirement
       |> List.find_opt (fun candidate ->
              not (List.exists (String.equal candidate) attempted))

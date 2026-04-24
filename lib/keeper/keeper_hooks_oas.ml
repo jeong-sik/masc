@@ -47,12 +47,32 @@ let usage_has_tokens (usage : Oas.Types.api_usage) =
   || usage.cache_creation_input_tokens > 0
   || usage.cache_read_input_tokens > 0
 
+(* #9868: use [pricing_for_model_opt] so unknown models surface as
+   [None] and get a loud catalog-miss signal instead of silently
+   returning $0. [pricing_for_model] (non-opt) collapses unknown into
+   [zero_pricing], which is the exact "Unknown -> Permissive Default"
+   anti-pattern called out in `instructions/software-development.md`
+   (OAS #555 parallel). Paid providers (openai gpt-5 family, glm
+   family) are missing from the upstream OAS catalog today, so this
+   path is the only place the miss becomes observable. *)
 let estimate_usage_cost_usd ~(model : string) (usage : Oas.Types.api_usage)
     : float =
-  let pricing = Llm_provider.Pricing.pricing_for_model model in
-  Llm_provider.Pricing.estimate_cost ~pricing
-    ~input_tokens:usage.input_tokens
-    ~output_tokens:usage.output_tokens ()
+  match Llm_provider.Pricing.pricing_for_model_opt model with
+  | Some pricing ->
+    Llm_provider.Pricing.estimate_cost ~pricing
+      ~input_tokens:usage.input_tokens
+      ~output_tokens:usage.output_tokens ()
+  | None ->
+    Prometheus.inc_counter
+      "masc_pricing_catalog_miss_total"
+      ~labels:[("model", model)] ();
+    Log.Keeper.warn
+      "pricing_catalog_miss model=%s input_tokens=%d output_tokens=%d \
+       — no pricing entry in Llm_provider.Pricing catalog; cost recorded \
+       as 0.0 (not a true zero). Add the entry upstream in \
+       agent_sdk/llm_provider/pricing.ml, then bump the OAS pin."
+      model usage.input_tokens usage.output_tokens;
+    0.0
 
 let cost_usd_for_usage ~(model : string) (usage : Oas.Types.api_usage)
     : float =

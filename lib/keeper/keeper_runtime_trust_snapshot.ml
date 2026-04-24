@@ -738,6 +738,28 @@ let snapshot_json ~(config : Coord.config) ~(meta : keeper_meta) =
   let disposition, disposition_reason =
     disposition_of_snapshot ~pending_approval_count ~runtime_blocker_fields
   in
+  let operator_disposition, operator_disposition_reason =
+    match latest_receipt with
+    | Some receipt -> (
+        let open Yojson.Safe.Util in
+        match
+          ( member "operator_disposition" receipt
+          , member "operator_disposition_reason" receipt )
+        with
+        | `String disposition, `String reason -> (disposition, reason)
+        | _ -> (
+            match disposition with
+            | "Pass" -> ("pass", disposition_reason)
+            | "Pause" -> ("pause_human", disposition_reason)
+            | "Alert" -> ("alert_exhausted", disposition_reason)
+            | _ -> ("pause_human", disposition_reason)))
+    | None -> (
+        match disposition with
+        | "Pass" -> ("pass", disposition_reason)
+        | "Pause" -> ("pause_human", disposition_reason)
+        | "Alert" -> ("alert_exhausted", disposition_reason)
+        | _ -> ("pause_human", disposition_reason))
+  in
   let needs_attention =
     assoc_bool_default "needs_attention" ~default:false attention_fields
   in
@@ -785,6 +807,8 @@ let snapshot_json ~(config : Coord.config) ~(meta : keeper_meta) =
       ("runtime_blockers", `Assoc runtime_blocker_fields);
       ("disposition", `String disposition);
       ("disposition_reason", `String disposition_reason);
+      ("operator_disposition", `String operator_disposition);
+      ("operator_disposition_reason", `String operator_disposition_reason);
       ("needs_attention", `Bool needs_attention);
       ("attention_reason", Json_util.string_opt_to_json attention_reason);
       ("next_human_action", Json_util.string_opt_to_json next_human_action);

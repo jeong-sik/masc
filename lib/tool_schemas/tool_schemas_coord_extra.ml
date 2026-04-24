@@ -161,6 +161,14 @@ The actor field records who initiated the transition.";
                   ("action", enum_schema goal_transition_action_enum);
                   ("actor", goal_principal_schema);
                   ("note", `Assoc [ ("type", `String "string") ]);
+                  ( "override_note",
+                    `Assoc
+                      [
+                        ("type", `String "string");
+                        ( "description",
+                          `String
+                            "Operator rationale for forcing request_complete when linked task evidence is incomplete." );
+                      ] );
                 ] );
             ("required", `List [ `String "goal_id"; `String "action"; `String "actor" ]);
           ];

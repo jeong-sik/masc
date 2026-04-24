@@ -39,6 +39,33 @@ let resolve_task_create_goal_id ~config ~(meta : keeper_meta) args =
                 (String.concat ", " goal_ids)))
 ;;
 
+let active_goal_scope_json ~(meta : keeper_meta) ?matched_goal_id
+    ?excluded_count () =
+  let scoped = meta.active_goal_ids <> [] in
+  let fields =
+    [
+      ("mode", `String (if scoped then "active_goal_ids" else "all_tasks"));
+      ("scoped", `Bool scoped);
+      ( "active_goal_ids",
+        `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids)
+      );
+      ("matched_goal_id", Json_util.string_opt_to_json matched_goal_id);
+    ]
+  in
+  let fields =
+    match excluded_count with
+    | Some count -> fields @ [ ("excluded_count", `Int count) ]
+    | None -> fields
+  in
+  `Assoc fields
+;;
+
+let find_task_goal_id config task_id =
+  Coord.get_tasks_raw config
+  |> List.find_map (fun (task : Types.task) ->
+         if String.equal task.id task_id then task.goal_id else None)
+;;
+
 let handle_keeper_task_tool
       ~(config : Coord.config)
       ~(meta : keeper_meta)
@@ -167,7 +194,8 @@ let handle_keeper_task_tool
       else
         None
     in
-    let message = match result with
+    let message =
+      match result with
       | Coord.Claim_next_claimed { message; _ } -> message
       | Coord.Claim_next_no_unclaimed -> "📋 No unclaimed tasks. ACTION: Stop task-checking — nothing to claim."
       | Coord.Claim_next_no_eligible { excluded_count; _ } ->
@@ -184,11 +212,36 @@ let handle_keeper_task_tool
           scope_suffix excluded_count
       | Coord.Claim_next_error e -> Printf.sprintf "❌ Error: %s" e
     in
+    let claim_scope, claimed_task_fields =
+      match result with
+      | Coord.Claim_next_claimed { task_id; title; priority; released_task_id; _ } ->
+          let matched_goal_id = find_task_goal_id config task_id in
+          ( active_goal_scope_json ~meta ?matched_goal_id ()
+          , [
+              ( "claimed_task",
+                `Assoc
+                  [
+                    ("task_id", `String task_id);
+                    ("title", `String title);
+                    ("priority", `Int priority);
+                    ( "goal_id",
+                      Json_util.string_opt_to_json matched_goal_id );
+                    ( "released_task_id",
+                      Json_util.string_opt_to_json released_task_id );
+                  ] );
+            ] )
+      | Coord.Claim_next_no_eligible { excluded_count } ->
+          (active_goal_scope_json ~meta ~excluded_count (), [])
+      | Coord.Claim_next_no_unclaimed | Coord.Claim_next_error _ ->
+          (active_goal_scope_json ~meta (), [])
+    in
     Yojson.Safe.to_string
       (`Assoc
          ([
             ("result", `String message);
+            ("claim_scope", claim_scope);
           ]
+         @ claimed_task_fields
          @
          match accountability_warning with
          | Some warning -> [ ("routing_warning", `String warning) ]

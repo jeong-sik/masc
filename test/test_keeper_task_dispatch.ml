@@ -147,23 +147,43 @@ let test_claim_empty_room () =
 
 let test_claim_respects_active_goal_ids () =
   with_room (fun config ->
-    let meta = make_goal_scoped_meta [ "goal-masc" ] in
+    let goal, _ =
+      match Goal_store.upsert_goal config ~title:"Masc goal" () with
+      | Ok payload -> payload
+      | Error msg -> fail msg
+    in
+    let other_goal, _ =
+      match Goal_store.upsert_goal config ~title:"Other goal" () with
+      | Ok payload -> payload
+      | Error msg -> fail msg
+    in
+    let meta = make_goal_scoped_meta [ goal.id ] in
     let _ =
-      Coord_task.add_task ~goal_id:"goal-other" config
+      Coord_task.add_task ~goal_id:other_goal.id config
         ~title:"Other goal task" ~priority:1 ~description:"desc"
     in
     let _ =
-      Coord_task.add_task ~goal_id:"goal-masc" config
+      Coord_task.add_task ~goal_id:goal.id config
         ~title:"Masc goal task" ~priority:5 ~description:"desc"
     in
-    let _result = call_tool config meta "keeper_task_claim" (`Assoc []) in
+    let result = call_tool config meta "keeper_task_claim" (`Assoc []) in
+    let json = parse_json result in
     let claimed_task =
       Coord.get_tasks_raw config
       |> List.find_opt (fun (task : Types.task) ->
            Types.task_assignee_of_status task.task_status = Some meta.agent_name)
     in
     match claimed_task with
-    | Some task -> check string "claimed scoped task" "Masc goal task" task.title
+    | Some task ->
+      check string "claimed scoped task" "Masc goal task" task.title;
+      let scope = Yojson.Safe.Util.member "claim_scope" json in
+      check string "claim scope mode" "active_goal_ids"
+        Yojson.Safe.Util.(scope |> member "mode" |> to_string);
+      check string "claim scope matched goal" goal.id
+        Yojson.Safe.Util.(scope |> member "matched_goal_id" |> to_string);
+      check string "claimed task goal" goal.id
+        Yojson.Safe.Util.(
+          json |> member "claimed_task" |> member "goal_id" |> to_string)
     | None -> fail "expected a claimed task")
 
 let test_create_defaults_single_active_goal_id () =

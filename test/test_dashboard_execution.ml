@@ -678,6 +678,14 @@ let test_execution_trust_surfaces_latest_receipt () =
               "passed_to_next_model"
               (trust_row |> member "trust" |> member "cascade"
              |> member "outcome" |> to_string);
+            check string "execution trust row exposes operator disposition"
+              "fail_open_next_cascade"
+              (trust_row |> member "trust" |> member "operator_disposition"
+             |> to_string);
+            check string "execution trust row exposes operator disposition reason"
+              "degraded_retry"
+              (trust_row |> member "trust" |> member "operator_disposition_reason"
+             |> to_string);
             check bool "execution trust row preserves degraded retry flag" true
               (trust_row |> member "trust" |> member "cascade"
              |> member "degraded_retry_applied" |> to_bool);

@@ -271,7 +271,9 @@ let test_masc_goal_transition_schema () =
           Alcotest.(check bool) "has actor" true
             (List.mem_assoc "actor" props);
           Alcotest.(check bool) "has note" true
-            (List.mem_assoc "note" props)
+            (List.mem_assoc "note" props);
+          Alcotest.(check bool) "has override_note" true
+            (List.mem_assoc "override_note" props)
       | None -> Alcotest.fail "masc_goal_transition missing properties");
       match get_json_list "required" schema.input_schema with
       | Some reqs ->

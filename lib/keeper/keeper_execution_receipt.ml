@@ -93,7 +93,58 @@ let cascade_rotation_attempt_to_json attempt =
       ("recorded_at", `String attempt.recorded_at);
     ]
 
+let string_contains_ci haystack needle =
+  let haystack = String.lowercase_ascii haystack in
+  let needle = String.lowercase_ascii needle in
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  let rec loop i =
+    if needle_len = 0 then true
+    else if i + needle_len > haystack_len then false
+    else if String.sub haystack i needle_len = needle then true
+    else loop (i + 1)
+  in
+  loop 0
+
+let operator_disposition (receipt : t) =
+  let cascade_outcome = String.lowercase_ascii receipt.cascade_outcome in
+  let terminal_reason = String.lowercase_ascii receipt.terminal_reason_code in
+  let error_kind =
+    Option.map String.lowercase_ascii receipt.error_kind
+  in
+  if
+    String.equal terminal_reason "cascade_exhausted"
+    || String.equal cascade_outcome "cascade_exhausted"
+    || String.equal cascade_outcome "exhausted"
+  then ("alert_exhausted", "cascade_exhausted")
+  else if
+    String.equal receipt.tool_surface.tool_requirement "required"
+    && (String.equal receipt.tool_contract_result "violated"
+        || receipt.tools_used = [])
+  then ("pause_human", "tool_required_no_tools")
+  else if
+    match error_kind with
+    | Some kind ->
+        string_contains_ci kind "config"
+        || string_contains_ci kind "auth"
+        || string_contains_ci terminal_reason "config"
+        || string_contains_ci terminal_reason "auth"
+    | None ->
+        string_contains_ci terminal_reason "config"
+        || string_contains_ci terminal_reason "auth"
+  then ("pause_human", "preflight_config_error")
+  else if receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_cascade
+  then ("fail_open_next_cascade", "degraded_retry")
+  else if
+    receipt.cascade_fallback_applied
+    || String.equal cascade_outcome "passed_to_next_model"
+  then ("pass_next_model", "cascade_fallback")
+  else ("pass", "healthy")
+
 let to_json (receipt : t) =
+  let operator_disposition, operator_disposition_reason =
+    operator_disposition receipt
+  in
   let error_json =
     match receipt.error_kind, receipt.error_message with
     | None, None -> `Null
@@ -129,6 +180,8 @@ let to_json (receipt : t) =
       ("goal_ids", list_json receipt.goal_ids);
       ("outcome", `String receipt.outcome);
       ("terminal_reason_code", `String receipt.terminal_reason_code);
+      ("operator_disposition", `String operator_disposition);
+      ("operator_disposition_reason", `String operator_disposition_reason);
       ("response_text_present", `Bool receipt.response_text_present);
       ( "model_used",
         match receipt.model_used with

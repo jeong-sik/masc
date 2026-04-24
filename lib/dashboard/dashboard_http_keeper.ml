@@ -303,6 +303,15 @@ let keeper_trust_json ?(include_receipt = false)
         match latest_receipt with
         | Some receipt -> Yojson.Safe.Util.member "terminal_reason_code" receipt
         | None -> `String "no_receipt" );
+      ( "operator_disposition",
+        match latest_receipt with
+        | Some receipt -> Yojson.Safe.Util.member "operator_disposition" receipt
+        | None -> `String "not_run" );
+      ( "operator_disposition_reason",
+        match latest_receipt with
+        | Some receipt ->
+            Yojson.Safe.Util.member "operator_disposition_reason" receipt
+        | None -> `String "no_receipt" );
       ( "tool_contract_result",
         match latest_receipt with
         | Some receipt -> Yojson.Safe.Util.member "tool_contract_result" receipt

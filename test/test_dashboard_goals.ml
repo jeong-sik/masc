@@ -268,6 +268,8 @@ let test_goal_detail_surfaces_keeper_runtime_trust_and_blockers () =
       let runtime_trust = linked_keeper |> member "runtime_trust" in
       check string "disposition ok" "Pass"
         (runtime_trust |> member "disposition" |> to_string);
+      check string "operator disposition ok" "pass"
+        (runtime_trust |> member "operator_disposition" |> to_string);
       check string "approval idle" "idle"
         (runtime_trust |> member "approval" |> member "state" |> to_string);
       check string "execution receipt latest event" "execution_receipt"

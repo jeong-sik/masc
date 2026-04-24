@@ -161,6 +161,16 @@ function sendRpc(method: string, params: JsonObject): Promise<unknown> {
   })
 }
 
+function sendNotification(method: string, params: JsonObject): void {
+  if (!socket || socket.readyState !== WebSocket.OPEN) return
+  const currentSocket = socket
+  try {
+    currentSocket.send(JSON.stringify({ jsonrpc: '2.0', method, params }))
+  } catch {
+    // Best-effort telemetry; the close/error path owns reconnect decisions.
+  }
+}
+
 function handleRpcResponse(raw: JsonObject): boolean {
   if (typeof raw.id !== 'number') return false
   const pendingRpc = pending.get(raw.id)
@@ -202,10 +212,10 @@ function applyDelta(raw: unknown): void {
   }
   if (typeof delta.seq === 'number') {
     dashboardWsLastSeq.value = delta.seq
-    void sendRpc('dashboard/ack', {
+    sendNotification('dashboard/ack', {
       seq: delta.seq,
       bufferedAmount: socket?.bufferedAmount ?? 0,
-    }).catch(() => {})
+    })
   }
   if (typeof delta.slice !== 'string') return
   hydrateDashboardSlice(
@@ -281,6 +291,16 @@ function handleMessage(data: unknown): void {
   handleRawPush(record)
 }
 
+function reconnectAfterCurrentSocketFailure(ws: WebSocket, err: unknown): void {
+  if (socket !== ws) return
+  dashboardWsConnected.value = false
+  dashboardWsReady.value = false
+  dashboardWsLastError.value = err instanceof Error ? err.message : String(err)
+  lastSubscribeKey = ''
+  closeSocket()
+  scheduleReconnect()
+}
+
 export async function subscribeDashboardRoute(routeState: DashboardRouteState): Promise<void> {
   const desired = rememberRouteState(routeState)
   if (!dashboardWsReady.value) return
@@ -350,17 +370,10 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
         dashboardWsLastError.value = null
         if (desiredRouteState) {
           void subscribeDashboardRoute(desiredRouteState)
+            .catch(err => reconnectAfterCurrentSocketFailure(ws, err))
         }
       })
-      .catch(err => {
-        if (socket !== ws) return
-        dashboardWsConnected.value = false
-        dashboardWsReady.value = false
-        dashboardWsLastError.value = err instanceof Error ? err.message : String(err)
-        lastSubscribeKey = ''
-        closeSocket()
-        scheduleReconnect()
-      })
+      .catch(err => reconnectAfterCurrentSocketFailure(ws, err))
   }
   ws.onmessage = (event) => {
     if (socket !== ws) return

@@ -5,7 +5,7 @@ import { refreshMissionSnapshot } from './mission-store'
 import { refreshOperatorRoomDigest, refreshOperatorSnapshot } from './operator-store'
 
 async function refreshActivityGraphSurface(): Promise<void> {
-  const { refreshActivityGraph } = await import('./components/activity-graph')
+  const { refreshActivityGraph } = await import('./components/activity-graph-store')
   await refreshActivityGraph()
 }
 

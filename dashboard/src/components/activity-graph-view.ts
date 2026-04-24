@@ -6,11 +6,10 @@ import 'vis-network/styles/vis-network.css'
 import { DataSet } from 'vis-data'
 import { statusLabel } from '../lib/status-label'
 import { tooltipHtml } from '../lib/escape-html'
+import { selectedNodeId, highlightedAgentId } from './activity-graph-selection'
 import type { ActivityGraphResponse, ActivityGraphEdge } from '../types'
 
 const hoveredNodeId = signal<string | null>(null)
-export const selectedNodeId = signal<string | null>(null)
-export const highlightedAgentId = signal<string | null>(null)
 
 function nodeColor(kind: string, status: string): string {
   if (status === 'offline' || status === 'retired') return 'var(--slate-500)'

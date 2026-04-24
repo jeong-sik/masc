@@ -46,8 +46,8 @@ stylesheet
     color: var(--text-bright, #e8d9b0);
   }
 
-  .v_ok    { color: var(--status-ok, #6a9a4a); font-variant-numeric: tabular-nums; }
-  .v_brass { color: var(--accent-brass, #968228); font-variant-numeric: tabular-nums; }
+  .v_ok    { color: var(--status-ok, #4a7a2a); font-variant-numeric: tabular-nums; }
+  .v_brass { color: var(--accent-brass, #8a6a28); font-variant-numeric: tabular-nums; }
   .v_blood { color: var(--accent-blood, #e85050); font-variant-numeric: tabular-nums; }
 |}]
 

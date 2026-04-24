@@ -281,8 +281,27 @@ let test_tla_check_respects_keep_tlc_artifacts () =
         (Sys.file_exists
            (Filename.concat repo_dir "specs/keeper-state-machine/TraceData.tla")))
 
+(* Makefile surface was split into [Makefile] + [mk/*.mk] fragments; the
+   target definitions now live in [mk/quality.mk]. Concatenate the top-level
+   Makefile with every fragment the Makefile includes so a future refactor
+   that moves targets between fragments still satisfies this test. *)
+let read_makefile_surface () =
+  let root = source_root () in
+  let top = read_file (Filename.concat root "Makefile") in
+  let mk_dir = Filename.concat root "mk" in
+  let fragments =
+    if Sys.file_exists mk_dir && Sys.is_directory mk_dir then
+      Sys.readdir mk_dir
+      |> Array.to_list
+      |> List.filter (fun name -> Filename.check_suffix name ".mk")
+      |> List.map (fun name -> read_file (Filename.concat mk_dir name))
+    else
+      []
+  in
+  String.concat "\n" (top :: fragments)
+
 let test_makefile_exposes_disk_hygiene_targets () =
-  let makefile = read_file (Filename.concat (source_root ()) "Makefile") in
+  let makefile = read_makefile_surface () in
   check bool "doctor target exists" true
     (contains_substring makefile "doctor-disk-hygiene:");
   check bool "safe fix target exists" true

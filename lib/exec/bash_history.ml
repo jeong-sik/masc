@@ -120,9 +120,10 @@ let entry_of_json = function
 (* --- path resolution --- *)
 
 let history_path ~base_path ~keeper_name =
+  (* #9571: use Common.masc_dir_from_base_path instead of inlining ".masc". *)
   let dir =
     Filename.concat
-      (Filename.concat base_path ".masc")
+      (Common.masc_dir_from_base_path ~base_path)
       (Filename.concat "keeper" keeper_name)
   in
   ( Filename.concat dir "bash_history.jsonl",

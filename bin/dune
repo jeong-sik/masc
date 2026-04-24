@@ -37,7 +37,7 @@
  (modules masc_compaction_audit)
  (public_name masc-compaction-audit)
  (package masc_mcp)
- (libraries masc_mcp unix eio eio_main))
+ (libraries masc_mcp masc_core unix eio eio_main))
 
 ;; TLA+ trace converter: JSONL -> TraceData.tla
 (executable

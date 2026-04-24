@@ -59,7 +59,9 @@ let base_path () =
       | Some h -> h
       | None -> "."
     in
-    Filename.concat home "me/.masc"
+    (* #9571: use Common.masc_dirname SSOT (from masc_core) instead of
+       inlining ".masc". *)
+    Filename.concat home (Filename.concat "me" Common.masc_dirname)
 
 let retention_from_env default =
   match Sys.getenv_opt "MASC_COMPACTION_AUDIT_RETENTION_DAYS" with

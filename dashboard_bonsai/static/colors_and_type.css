@@ -15,6 +15,8 @@
 /* ── Dark Fantasy (default) — Visceral · decay-forward ── */
 :root,
 [data-theme="dark-fantasy"] {
+  color-scheme: dark;
+
   /* Base surfaces — wet stone, blood-soaked wood */
   --bg-deep:        #0a0706;     /* pitch with a red undertone */
   --bg-panel:       #14100d;     /* rotted wood */
@@ -95,6 +97,7 @@
 
 /* ── Cyberpunk ─────────────────────────────────────────── */
 [data-theme="cyberpunk"] {
+  color-scheme: dark;
   --bg-deep:      #05000f;
   --bg-panel:     #0d0821;
   --bg-panel-alt: #130e2a;
@@ -129,6 +132,7 @@
 
 /* ── Terminal ──────────────────────────────────────────── */
 [data-theme="terminal"] {
+  color-scheme: dark;
   --bg-deep:      #000800;
   --bg-panel:     #001200;
   --bg-panel-alt: #001a00;
@@ -163,6 +167,7 @@
 
 /* ── Parchment (in-app warm theme) ─────────────────────── */
 [data-theme="parchment"] {
+  color-scheme: dark;
   --bg-deep:      #1a1610;
   --bg-panel:     #241f18;
   --bg-panel-alt: #2e2820;

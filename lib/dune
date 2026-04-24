@@ -501,6 +501,10 @@
    keeper_approval_queue
    keeper_runtime_contract
    keeper_runtime_trust_snapshot
+   keeper_agent_prompt_metrics
+   keeper_agent_tool_surface
+   keeper_agent_result
+   keeper_agent_error
    keeper_agent_run
    keeper_world_observation
    keeper_decision_audit
@@ -686,6 +690,10 @@
   keeper_tool_alias
   keeper_tool_disclosure
   keeper_turn_telemetry
+  keeper_agent_prompt_metrics
+  keeper_agent_tool_surface
+  keeper_agent_result
+  keeper_agent_error
   keeper_exec_context
   keeper_guards
   keeper_turn_setup

@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+const sseStoreMocks = vi.hoisted(() => ({
+  hydrateDashboardSlice: vi.fn(),
+  routeServerPushEvent: vi.fn(),
+}))
+
+vi.mock('./sse-store', () => sseStoreMocks)
+
 import {
   connectDashboardWS,
   dashboardSlicesForRoute,
@@ -111,6 +118,8 @@ afterEach(() => {
   vi.useRealTimers()
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
+  sseStoreMocks.hydrateDashboardSlice.mockClear()
+  sseStoreMocks.routeServerPushEvent.mockClear()
 })
 
 describe('dashboardSlicesForRoute', () => {
@@ -398,5 +407,68 @@ describe('dashboard websocket route subscriptions', () => {
     await flushPromises()
 
     expect(dashboardWsLastSeq.value).toBe(1)
+  })
+
+  it('ignores dashboard slice deltas outside the latest route subscription', async () => {
+    installWebSocketMocks()
+
+    await connectDashboardWS({ tab: 'workspace', params: { section: 'board' } })
+    const socket = mockSockets[0]!
+    socket.open()
+    const hello = parseRpc(socket, 0)
+    socket.receive({ jsonrpc: '2.0', id: hello.id, result: {} })
+    await flushPromises()
+
+    const initialSubscribe = parseRpc(socket, 1)
+    socket.receive({
+      jsonrpc: '2.0',
+      id: initialSubscribe.id,
+      result: { snapshot: { seq: 1, slices: { board: { posts: [] } } } },
+    })
+    await flushPromises()
+    sseStoreMocks.hydrateDashboardSlice.mockClear()
+
+    socket.receive({
+      jsonrpc: '2.0',
+      method: 'dashboard/delta',
+      params: { seq: 2, slice: 'board', payload: { posts: [] } },
+    })
+    expect(sseStoreMocks.hydrateDashboardSlice).toHaveBeenCalledWith(
+      'board',
+      { posts: [] },
+      undefined,
+    )
+    sseStoreMocks.hydrateDashboardSlice.mockClear()
+
+    const switchPromise = subscribeDashboardRoute({
+      tab: 'monitoring',
+      params: { section: 'observatory' },
+    })
+    const routeSubscribe = parseRpc(socket, socket.sent.length - 1)
+    socket.receive({
+      jsonrpc: '2.0',
+      id: routeSubscribe.id,
+      result: { snapshot: { seq: 3, slices: { execution: { agents: [] } } } },
+    })
+    await switchPromise
+    sseStoreMocks.hydrateDashboardSlice.mockClear()
+
+    socket.receive({
+      jsonrpc: '2.0',
+      method: 'dashboard/delta',
+      params: { seq: 4, slice: 'board', payload: { posts: [] } },
+    })
+    expect(sseStoreMocks.hydrateDashboardSlice).not.toHaveBeenCalled()
+
+    socket.receive({
+      jsonrpc: '2.0',
+      method: 'dashboard/delta',
+      params: { seq: 5, slice: 'execution', payload: { agents: [] } },
+    })
+    expect(sseStoreMocks.hydrateDashboardSlice).toHaveBeenCalledWith(
+      'execution',
+      { agents: [] },
+      undefined,
+    )
   })
 })

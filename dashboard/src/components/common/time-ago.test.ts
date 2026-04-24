@@ -15,6 +15,8 @@ const flushUi = async () => {
   for (let i = 0; i < 4; i++) await Promise.resolve()
 }
 
+const RELATIVE_SUFFIX_RE = /(?:초|분|시간|일|주|개월|년) 전/
+
 describe('toMs (pure normalization)', () => {
   it('passes unix ms through unchanged', () => {
     expect(toMs(1_700_000_000_000)).toBe(1_700_000_000_000)
@@ -64,9 +66,9 @@ describe('pickDisplayText', () => {
     expect(out).not.toContain('·')
   })
 
-  it('mode=absolute returns only the absolute fragment (no "전")', () => {
+  it('mode=absolute returns only the absolute fragment (no relative suffix)', () => {
     const out = pickDisplayText(recent, 'absolute')
-    expect(out).not.toMatch(/전/)
+    expect(out).not.toMatch(RELATIVE_SUFFIX_RE)
   })
 
   it('mode=both joins relative and absolute with "·"', () => {
@@ -125,7 +127,7 @@ describe('TimeAgo component', () => {
   it('mode="absolute" renders only the absolute fragment', () => {
     render(html`<${TimeAgo} timestamp=${Date.now() - 60_000} mode="absolute" />`, container)
     const el = container.querySelector('time')!
-    expect(el.textContent).not.toMatch(/전/)
+    expect(el.textContent).not.toMatch(RELATIVE_SUFFIX_RE)
   })
 
   it('mode="both" renders both fragments joined by "·"', () => {

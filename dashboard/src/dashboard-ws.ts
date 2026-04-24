@@ -184,7 +184,7 @@ function applySnapshot(raw: unknown): void {
   const slices = snapshot.slices as Record<string, unknown> | undefined
   if (!slices || typeof slices !== 'object') return
   for (const [slice, payload] of Object.entries(slices)) {
-    hydrateDashboardSlice(slice, payload)
+    hydrateRouteDashboardSlice(slice, payload)
   }
 }
 
@@ -208,11 +208,21 @@ function applyDelta(raw: unknown): void {
     }).catch(() => {})
   }
   if (typeof delta.slice !== 'string') return
-  hydrateDashboardSlice(
+  hydrateRouteDashboardSlice(
     delta.slice,
     delta.payload,
     typeof delta.event_type === 'string' ? delta.event_type : undefined,
   )
+}
+
+function activeRouteWantsDashboardSlice(slice: string): boolean {
+  if (!desiredRouteState) return true
+  return dashboardSlicesForRoute(desiredRouteState).includes(slice)
+}
+
+function hydrateRouteDashboardSlice(slice: string, payload: unknown, eventType?: string): void {
+  if (!activeRouteWantsDashboardSlice(slice)) return
+  hydrateDashboardSlice(slice, payload, eventType)
 }
 
 function handleNotification(raw: JsonObject): boolean {

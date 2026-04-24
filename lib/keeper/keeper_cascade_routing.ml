@@ -32,11 +32,9 @@ let select_cascade ~(base_cascade : string) ~(phase : Keeper_state_machine.phase
       { effective_cascade = base_cascade;
         reason = "non-turn phase (blocked upstream)" }
 
-let route_effective_cascade_for_tool_requirement_with_model_labels
-    ~(model_labels_of_cascade : string -> string list)
-    ~(effective_cascade : string)
-    ~(tool_requirement : string) : routing_decision =
-  ignore model_labels_of_cascade;
+let route_effective_cascade_for_tool_requirement
+    ~(effective_cascade : string) ~(tool_requirement : string) :
+    routing_decision =
   if not (String.equal tool_requirement "required") then
     {
       effective_cascade;
@@ -48,7 +46,3 @@ let route_effective_cascade_for_tool_requirement_with_model_labels
       reason =
         "tool-required turn keeps routed cascade; provider capability filter enforces tool support";
     }
-
-let route_effective_cascade_for_tool_requirement =
-  route_effective_cascade_for_tool_requirement_with_model_labels
-    ~model_labels_of_cascade:Cascade_runtime.models_of_cascade_name

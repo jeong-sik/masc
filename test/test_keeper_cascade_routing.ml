@@ -89,23 +89,14 @@ let test_running_with_custom_base () =
 
 let test_tool_required_turn_preserves_routed_cascade () =
   let r =
-    Routing.route_effective_cascade_for_tool_requirement_with_model_labels
-      ~model_labels_of_cascade:(fun _ -> [ "claude_code:auto" ])
+    Routing.route_effective_cascade_for_tool_requirement
       ~effective_cascade:"big_three" ~tool_requirement:"required"
   in
   check string "required tool turns preserve routed cascade"
-    "big_three" r.effective_cascade
-
-let test_tool_required_turn_preserves_pure_local_cascade () =
-  let r =
-    Routing.route_effective_cascade_for_tool_requirement_with_model_labels
-      ~model_labels_of_cascade:(function
-        | "ollama_only" -> [ "ollama:auto" ]
-        | _ -> [])
-      ~effective_cascade:"ollama_only" ~tool_requirement:"required"
-  in
-  check string "required tool turns preserve pure-local cascade"
-    "ollama_only" r.effective_cascade
+    "big_three" r.effective_cascade;
+  check bool "required tool turns do not rewrite to strict cascade" false
+    (String.equal Masc_mcp.Keeper_config.tool_use_strict_cascade_name
+       r.effective_cascade)
 
 let test_tool_required_turn_preserves_local_recovery () =
   let r =
@@ -148,8 +139,6 @@ let () =
       test_case "Running preserves custom base"     `Quick test_running_with_custom_base;
       test_case "Required tool turn preserves routed cascade" `Quick
         test_tool_required_turn_preserves_routed_cascade;
-      test_case "Required tool turn preserves pure-local cascade" `Quick
-        test_tool_required_turn_preserves_pure_local_cascade;
       test_case "Required tool turn preserves local recovery" `Quick
         test_tool_required_turn_preserves_local_recovery;
       test_case "All phases have reason"            `Quick test_all_phases_have_reason;

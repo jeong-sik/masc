@@ -1889,7 +1889,7 @@ let render_response
              [ Node.text label ]
          in
          Node.div
-           ~attrs:[ Style.theme_chips ]
+           ~attrs:[ Style.theme_chips; Attr.role "group"; Attr.create "aria-label" "Theme selector" ]
            [ chip "dark" "dark"
            ; chip "cyber" "cyber"
            ; chip "term" "term"

@@ -40,12 +40,42 @@ type cleanup_result =
     errors : string list;
   }
 
+type live_container =
+  {
+    id : string;
+    name : string;
+    image : string;
+    status : string;
+    running : bool option;
+    created_at : string option;
+    keeper_name : string option;
+    container_kind : string option;
+    network_label : string option;
+    owner_pid : int option;
+    started_at : float option;
+    ttl_sec : float option;
+  }
+
+type stop_result =
+  {
+    matched : int;
+    removed : int;
+    errors : string list;
+  }
+
 val docker_command : unit -> string
 (** Resolve the Docker CLI from the current [PATH]. This keeps Docker
     calls deterministic after the Eio process manager has been
     initialized and tests inject a fake [docker] binary. *)
 
+val docker_command_argv : unit -> string list
+(** Process argv prefix for invoking Docker. Tests may inject a shell
+    script fake [docker] binary; this helper wraps that path via
+    [/bin/sh] so direct script execution does not depend on host shebang
+    handling. *)
+
 val docker_label_args :
+  ?ttl_sec:float ->
   base_path:string ->
   keeper_name:string ->
   container_kind:string ->
@@ -54,6 +84,35 @@ val docker_label_args :
   string list
 (** Docker [--label] argv fragment for containers owned by the keeper
     sandbox runtime. *)
+
+val docker_network_args :
+  Keeper_types.network_mode -> string list * string
+(** Docker network argv fragment and the MASC network label.  In
+    particular, [Network_inherit] intentionally maps to no Docker
+    [--network] argument; Docker has no network named ["inherit"]. *)
+
+val list_containers :
+  ?keeper_name:string ->
+  ?container_kind:string ->
+  base_path:string ->
+  timeout_sec:float ->
+  unit ->
+  (live_container list, string) result
+(** List MASC keeper sandbox containers scoped to the same [base_path].
+    Optional filters are implemented via Docker labels, not name matching. *)
+
+val live_container_to_yojson :
+  live_container -> Yojson.Safe.t
+
+val stop_containers :
+  ?keeper_name:string ->
+  ?container_kind:string ->
+  base_path:string ->
+  timeout_sec:float ->
+  unit ->
+  stop_result
+(** Stop containers scoped to this base path and optional keeper/kind
+    labels.  This never targets containers lacking MASC keeper labels. *)
 
 val cleanup_stale_containers :
   ?now:float ->

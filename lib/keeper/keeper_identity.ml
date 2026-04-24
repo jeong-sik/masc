@@ -47,8 +47,7 @@ let git_env_for_keeper ~(keeper_name : string) : string array =
   in
   Array.of_list (filtered @ overrides)
 
-let keeper_name_from_agent_name agent_name =
-  let prefix = "keeper-" and suffix = "-agent" in
+let parse_keeper_agent_name ~prefix ~suffix agent_name =
   let plen = String.length prefix and slen = String.length suffix in
   let alen = String.length agent_name in
   if alen > plen + slen
@@ -57,20 +56,46 @@ let keeper_name_from_agent_name agent_name =
   then
     let keeper_name = String.sub agent_name plen (alen - plen - slen) in
     if Keeper_config.validate_name keeper_name then Some keeper_name else None
-  else if Nickname.is_generated_nickname agent_name
-          && Keeper_config.validate_name agent_name
-  then
-    Some agent_name
   else
     None
 
+let keeper_name_from_agent_name agent_name =
+  match
+    parse_keeper_agent_name ~prefix:"keeper-" ~suffix:"-agent" agent_name
+  with
+  | Some keeper_name -> Some keeper_name
+  | None -> (
+      match
+        parse_keeper_agent_name ~prefix:"keeper_" ~suffix:"_agent" agent_name
+      with
+      | Some keeper_name -> Some keeper_name
+      | None -> (
+          match
+            parse_keeper_agent_name ~prefix:"keeper-" ~suffix:"_agent" agent_name
+          with
+          | Some keeper_name -> Some keeper_name
+          | None -> (
+              match
+                parse_keeper_agent_name ~prefix:"keeper_" ~suffix:"-agent" agent_name
+              with
+              | Some keeper_name -> Some keeper_name
+              | None ->
+                  if Nickname.is_generated_nickname agent_name
+                     && Keeper_config.validate_name agent_name
+                  then
+                    Some agent_name
+                  else
+                    None)))
+
 let is_keeper_agent_alias agent_name =
-  let prefix = "keeper-" and suffix = "-agent" in
-  let plen = String.length prefix and slen = String.length suffix in
-  let alen = String.length agent_name in
-  alen > plen + slen
-  && String.sub agent_name 0 plen = prefix
-  && String.sub agent_name (alen - slen) slen = suffix
+  Option.is_some
+    (parse_keeper_agent_name ~prefix:"keeper-" ~suffix:"-agent" agent_name)
+  || Option.is_some
+       (parse_keeper_agent_name ~prefix:"keeper_" ~suffix:"_agent" agent_name)
+  || Option.is_some
+       (parse_keeper_agent_name ~prefix:"keeper-" ~suffix:"_agent" agent_name)
+  || Option.is_some
+       (parse_keeper_agent_name ~prefix:"keeper_" ~suffix:"-agent" agent_name)
 
 let canonical_keeper_name_from_agent_name agent_name =
   let trimmed = String.trim agent_name in

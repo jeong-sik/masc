@@ -59,14 +59,16 @@ let container_path_of_host ~config ~(meta : keeper_meta) ~host_path
    [build_docker_argv ~command_argv]. *)
 let build_docker_argv ~image ~container_name ~host_root ~croot
     ~uid ~gid ~seccomp_args ~command_argv =
-  [
-    Keeper_sandbox_runtime.docker_command ();
-    "run";
-    "--rm";
-    "--name"; container_name;
-    "-i";
-    "--user"; Printf.sprintf "%d:%d" uid gid;
-  ]
+  Keeper_sandbox_runtime.docker_command_argv ()
+  @ [
+      "run";
+      "--rm";
+      "--name";
+      container_name;
+      "-i";
+      "--user";
+      Printf.sprintf "%d:%d" uid gid;
+    ]
   @ Env_config_keeper.KeeperSandbox.read_only_rootfs_args ()
   @ [
     "--tmpfs";

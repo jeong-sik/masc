@@ -964,6 +964,11 @@ let handle_keeper_status ctx args : tool_result =
            | Some _, Some preflight -> Some preflight
            | _ -> None
          in
+         let sandbox_live =
+           Keeper_sandbox_control.live_status_json
+             ~include_preflight:false
+             ~config:ctx.config ~meta:m ~timeout_sec:5.0 ~verbose:false ()
+         in
          let runtime_blocker_fields =
           runtime_blocker_fields_json ctx.config m
          in
@@ -1049,6 +1054,7 @@ let handle_keeper_status ctx args : tool_result =
              Json_util.string_opt_to_json sandbox_last_error);
            ("sandbox_preflight",
              Json_util.option_to_yojson Fun.id sandbox_preflight);
+           ("sandbox_live", sandbox_live);
            ("effective_sandbox_image",
              Json_util.string_opt_to_json effective_sandbox_image);
            ("tool_policy_mode",
@@ -1255,6 +1261,7 @@ let handle_keeper_status ctx args : tool_result =
                Json_util.string_opt_to_json sandbox_last_error);
              ("sandbox_preflight",
                Json_util.option_to_yojson Fun.id sandbox_preflight);
+             ("sandbox_live", sandbox_live);
              ("effective_sandbox_image",
                Json_util.string_opt_to_json effective_sandbox_image);
              ("allowed_paths", string_list_to_json m.allowed_paths);

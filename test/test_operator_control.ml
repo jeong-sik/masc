@@ -109,6 +109,14 @@ let () =
           Alcotest.test_case "keeper status accepts agent alias" `Quick
             Test_operator_control_keeper
             .test_keeper_status_accepts_agent_name_alias;
+          Alcotest.test_case
+            "keeper status accepts legacy separator agent alias"
+            `Quick
+            Test_operator_control_keeper
+            .test_keeper_status_accepts_legacy_separator_agent_alias;
+          Alcotest.test_case "keeper up reseeds identity drift" `Quick
+            Test_operator_control_keeper
+            .test_keeper_up_reseeds_identity_drift;
           Alcotest.test_case "keeper status exposes model observability"
             `Quick
             Test_operator_control_keeper
@@ -142,10 +150,26 @@ let () =
           Alcotest.test_case "keeper status schema makes name optional" `Quick
             Test_operator_control_keeper
             .test_keeper_status_schema_makes_name_optional;
+          Alcotest.test_case "keeper sandbox tools are public and titled"
+            `Quick
+            Test_operator_control_keeper
+            .test_keeper_sandbox_tools_are_public_and_titled;
+          Alcotest.test_case "keeper sandbox status exposes local summary"
+            `Quick
+            Test_operator_control_keeper
+            .test_keeper_sandbox_status_exposes_local_summary;
+          Alcotest.test_case
+            "keeper sandbox start status stop works with fake docker"
+            `Quick
+            Test_operator_control_keeper
+            .test_keeper_sandbox_start_status_stop_with_fake_docker;
           Alcotest.test_case "keeper config exposes live runtime and sources"
             `Quick
             Test_operator_control_keeper
             .test_keeper_config_exposes_live_runtime_and_sources;
+          Alcotest.test_case "keeper repair reseeds identity drift" `Quick
+            Test_operator_control_keeper
+            .test_keeper_repair_reseeds_identity_drift;
           Alcotest.test_case "snapshot keeper tool audit fallback" `Quick
             Test_operator_control_keeper.test_snapshot_keeper_tool_audit_fallback;
           Alcotest.test_case "snapshot keeper tool audit uses decision log"

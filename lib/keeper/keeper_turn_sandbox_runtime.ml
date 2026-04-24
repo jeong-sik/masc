@@ -141,16 +141,18 @@ let start_container (t : t) ~(timeout_sec : float) =
     | Error _ as err -> err
     | Ok seccomp_args ->
         let container_name = container_name_of t in
-        let network_label = network_mode_to_string t.network_mode in
+        let network_args, network_label =
+          Keeper_sandbox_runtime.docker_network_args t.network_mode
+        in
         let argv =
-          [
-            Keeper_sandbox_runtime.docker_command ();
-            "run";
-            "-d";
-            "--rm";
-            "--name";
-            container_name;
-          ]
+          Keeper_sandbox_runtime.docker_command_argv ()
+          @ [
+              "run";
+              "-d";
+              "--rm";
+              "--name";
+              container_name;
+            ]
           @ Keeper_sandbox_runtime.docker_label_args
               ~base_path:t.config.base_path
               ~keeper_name:t.meta.name
@@ -178,8 +180,9 @@ let start_container (t : t) ~(timeout_sec : float) =
               t.host_root ^ ":" ^ t.container_root ^ ":rw";
               "--workdir";
               t.container_root;
-              "--network";
-              network_label;
+            ]
+          @ network_args
+          @ [
               image;
               "sh";
               "-lc";
@@ -212,14 +215,14 @@ let run_exec_with_status_once
   | Ok container_name ->
       let container_cwd = container_cwd_of_host t ~host_cwd:cwd in
       let argv =
-        [
-          Keeper_sandbox_runtime.docker_command ();
-          "exec";
-          "--user";
-          Printf.sprintf "%d:%d" t.uid t.gid;
-          "-w";
-          container_cwd;
-        ]
+        Keeper_sandbox_runtime.docker_command_argv ()
+        @ [
+            "exec";
+            "--user";
+            Printf.sprintf "%d:%d" t.uid t.gid;
+            "-w";
+            container_cwd;
+          ]
         @ (match stdin_content with Some _ -> [ "-i" ] | None -> [])
         @ (container_name :: command_argv)
       in
@@ -316,7 +319,8 @@ let cleanup (t : t) =
   | Running { container_name } ->
       t.state <- Not_started;
       let argv =
-        [ Keeper_sandbox_runtime.docker_command (); "rm"; "-f"; container_name ]
+        Keeper_sandbox_runtime.docker_command_argv ()
+        @ [ "rm"; "-f"; container_name ]
       in
       let _st, _out = run_argv_with_status_retry_eintr ~timeout_sec:5.0 argv in
       ()

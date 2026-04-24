@@ -91,6 +91,10 @@ val docker_network_args :
     particular, [Network_inherit] intentionally maps to no Docker
     [--network] argument; Docker has no network named ["inherit"]. *)
 
+val docker_nofile_args : unit -> string list
+(** Docker [--ulimit nofile=<soft>:<hard>] argv fragment for keeper
+    sandbox containers. *)
+
 val list_containers :
   ?keeper_name:string ->
   ?container_kind:string ->

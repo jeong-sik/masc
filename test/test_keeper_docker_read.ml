@@ -472,6 +472,20 @@ let test_docker_network_args_follow_masc_policy () =
     [] args_inherit;
   Alcotest.(check string) "network inherit label" "inherit" label_inherit
 
+let test_docker_nofile_args_follow_config () =
+  with_env "MASC_KEEPER_SANDBOX_NOFILE_LIMIT" "not-a-number" @@ fun () ->
+  Alcotest.(check (list string)) "default nofile limit"
+    [ "--ulimit"; "nofile=245760:245760" ]
+    (Keeper_sandbox_runtime.docker_nofile_args ());
+  with_env "MASC_KEEPER_SANDBOX_NOFILE_LIMIT" "8192" @@ fun () ->
+  Alcotest.(check (list string)) "configured nofile limit"
+    [ "--ulimit"; "nofile=8192:8192" ]
+    (Keeper_sandbox_runtime.docker_nofile_args ());
+  with_env "MASC_KEEPER_SANDBOX_NOFILE_LIMIT" "256" @@ fun () ->
+  Alcotest.(check (list string)) "nofile floor"
+    [ "--ulimit"; "nofile=1024:1024" ]
+    (Keeper_sandbox_runtime.docker_nofile_args ())
+
 let test_cleanup_stale_containers_removes_only_stale_masc_scope () =
   with_fake_docker fake_docker_cleanup_script @@ fun () ->
   let base = temp_dir () in
@@ -771,6 +785,8 @@ let run_tests () =
         [
           Alcotest.test_case "docker network args follow policy" `Quick
             test_docker_network_args_follow_masc_policy;
+          Alcotest.test_case "docker nofile args follow config" `Quick
+            test_docker_nofile_args_follow_config;
           Alcotest.test_case "managed label args include ttl" `Quick
             test_sandbox_container_label_args_include_managed_ttl;
           Alcotest.test_case "sandbox label args include owner scope" `Quick

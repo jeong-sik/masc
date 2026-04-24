@@ -198,6 +198,10 @@ let docker_network_args = function
   | Keeper_types.Network_none -> ([ "--network"; "none" ], "none")
   | Keeper_types.Network_inherit -> ([], "inherit")
 
+let docker_nofile_args () =
+  let limit = Env_config_keeper.KeeperSandbox.nofile_limit () in
+  [ "--ulimit"; Printf.sprintf "nofile=%d:%d" limit limit ]
+
 type inspected_container =
   {
     owner_pid : int option;

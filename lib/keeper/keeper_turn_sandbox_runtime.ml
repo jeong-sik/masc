@@ -162,6 +162,7 @@ let start_container (t : t) ~(timeout_sec : float) =
             "--user";
             Printf.sprintf "%d:%d" t.uid t.gid;
           ]
+          @ Keeper_sandbox_runtime.docker_nofile_args ()
           @ Env_config_keeper.KeeperSandbox.read_only_rootfs_args ()
           @ [
             "--tmpfs";

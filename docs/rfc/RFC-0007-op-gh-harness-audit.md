@@ -1,9 +1,11 @@
 # RFC-0007: Pragmatic `keeper_shell op=gh` Hardening
 
-- **Status**: Draft (rev.2)
+- **Status**: Draft (rev.3)
 - **Author**: vincent (with Claude)
 - **Created**: 2026-04-24
-- **Revised**: 2026-04-24 — replaced Samchon 4-layer big-bang with a claude-code-inspired 3-PR phasing (rev.1 sketch preserved in §8 Appendix)
+- **Revised**:
+  - 2026-04-24 rev.2 — replaced Samchon 4-layer big-bang with a claude-code-inspired 3-PR phasing (rev.1 sketch preserved in §8 Appendix).
+  - 2026-04-24 rev.3 — evidence correction: `GIT_ASKPASS` / `GIT_TERMINAL_PROMPT` are **absent** in the current codebase, not "scattered" as rev.2 claimed. PR-1 cost estimate bumped 80 → 120 lines accordingly.
 - **Related**: RFC-0005 (typed capability substrate), RFC-0006 (surface + symmetric sandbox), RFC-0008 (CredentialProvider — same review cycle), #8773, #6814
 - **Drives**: reduce LLM-facing tool error rate without rewriting the gh surface; keep every change landable in a single PR
 
@@ -12,7 +14,7 @@
 Two concrete failures observed on 2026-04-24 (evidence record `memory/procedural-memory/2026-04-24-keeper-docker-github-provider-evidence-record.md` on the `me` repo, decision id `keeper-docker-gh-provider-audit-2026-04-24`):
 
 1. **Tool error shape is a single string.** `lib/gh_command_validation.ml:215-251` returns `Error "<message>"`. An LLM can read the message but cannot programmatically distinguish *transient* input errors (typo, wrong flag type) from *policy* errors (R2 irreversible, out-of-org repo). No retry contract exists.
-2. **Non-interactive defaults are not enforced in every caller.** `lib/keeper/keeper_shell_docker.ml` sets `GIT_ASKPASS=''` and `GIT_TERMINAL_PROMPT=0` inline; the same constants are scattered across other callers. A new callsite that forgets one of these hangs the container on a credential prompt — silent timeout.
+2. **Non-interactive defaults are absent, not scattered** (evidence correction in rev.3 — `rg -n 'GIT_ASKPASS|GIT_TERMINAL_PROMPT' lib/ test/ scripts/` returned zero hits on commit `0e408ffc1d5b34badb0cc1b9f3704a9e725fb8c6`). `lib/keeper/keeper_shell_docker.ml:234-245` composes the docker `-e` env list inline — `HOME`, `GH_CONFIG_DIR`, `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_COUNT=1`, `GIT_CONFIG_KEY_0=safe.directory`, `GIT_CONFIG_VALUE_0=*`, and the `GIT_AUTHOR_*`/`GIT_COMMITTER_*` pair — but never sets `GIT_ASKPASS=''` or `GIT_TERMINAL_PROMPT=0`. A keeper `git push` inside the container can, in principle, block indefinitely on a credential prompt; the only thing saving us today is that the RO-mounted `hosts.yml` (F-1) answers gh's auth query before git falls through to a prompt.
 
 Both are fixable without the Samchon 4-layer rewrite proposed in rev.1. Splitting the rewrite into 3 PRs keeps every step reviewable and reversible.
 
@@ -30,12 +32,12 @@ These principles are the whole RFC. Everything below is mechanical execution.
 
 ## 3. Three-PR phasing
 
-### PR-1 — `env_git_noninteractive` + scrub list (≈80 lines + tests)
+### PR-1 — `env_git_noninteractive` + scrub list (≈120 lines + tests)
 
-- **What**: new `lib/env_git_noninteractive.mli` exposing a single value `val env : (string * string) list`. Callers in `keeper_shell_docker.ml`, `keeper_exec_shell.ml` (op=gh / op=git_clone branches) replace their local inline `("GIT_ASKPASS","")` pairs with `@ Env_git_noninteractive.env`.
+- **What**: new `lib/env_git_noninteractive.mli` exposing `val env : (string * string) list = [("GIT_ASKPASS",""); ("GIT_TERMINAL_PROMPT","0")]`. These constants do not exist anywhere in `lib/`/`test/`/`scripts/` today (verified rev.3); PR-1 introduces them and wires them into `keeper_shell_docker.ml:234-245` alongside the existing `HOME`/`GH_CONFIG_DIR`/`GIT_CONFIG_*` block. `keeper_exec_shell.ml` is currently free of git env (verified), so there is a single callsite for this PR.
 - **Also**: `lib/env_keeper_scrub.ml` with two lists `scrub : string list` (Anthropic keys, AWS creds, OIDC tokens — copy from claude-code) and `pass : string list` (`GH_TOKEN`, `GITHUB_TOKEN`, `SSH_AUTH_SOCK`, `GIT_*`). docker run argv construction uses both.
-- **Why safe**: additive; any missed callsite is caught by `test_env_git_noninteractive.ml` that greps for forgotten `GIT_ASKPASS` literals under `lib/`.
-- **Observability**: metric `keeper_shell_docker.git_prompt_env_missing_total` (should be 0 after PR).
+- **Why safe**: additive — we are introducing constants that currently don't exist, not deleting or refactoring an existing pattern. A regression test asserts that every docker `-e` argv produced by `keeper_shell_docker.run_docker_shell_command_with_status` contains both keys.
+- **Observability**: metric `keeper_shell_docker.git_prompt_env_missing_total` (should be 0 after PR, and is effectively undefined before PR — the test is the more reliable gate).
 
 ### PR-2 — structured `gh_result.t` (≈120 lines)
 
@@ -106,12 +108,12 @@ No circular dependency; both RFCs can be reviewed in parallel and merged in the 
 
 | Item                           | Lines changed (est.) | Test added (est.) | Risk                          |
 |--------------------------------|---------------------:|------------------:|-------------------------------|
-| PR-1 env constants             |                   80 |                60 | low                           |
+| PR-1 env constants             |                  120 |                80 | low                           |
 | PR-2 structured result         |                  120 |               100 | medium (alias maintained)     |
 | PR-3 typed `Api_*`             |                  200 |               150 | medium (new module)           |
-| **Total**                      |              **400** |           **310** | —                             |
+| **Total**                      |              **440** |           **330** | —                             |
 
-Compare to rev.1's estimated 1200+ lines in a single cycle; 3-PR split is ~a third of the surface and reversible per step.
+Compare to rev.1's estimated 1200+ lines in a single cycle; 3-PR split is still ~a third of the surface and reversible per step. (rev.3 bumped PR-1 by 40 lines: the constants are being *introduced*, not refactored, so the mli + ml + wiring + the new regression test add more than the rev.2 "deduplication" framing implied.)
 
 ## 8. Appendix — original aspirational sketch (rev.1, retained for discussion)
 

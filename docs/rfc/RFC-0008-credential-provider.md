@@ -3,7 +3,8 @@
 - **Status**: Draft
 - **Author**: vincent (with Claude)
 - **Created**: 2026-04-24
-- **Related**: RFC-0007 rev.2 (shares a review cycle), F-1 (#9843), F-2 (#9844), F-4 (#9847)
+- **Revised**: 2026-04-24 — §3 binding.env description clarified: the list is composed **inside** `Host_config_provider.resolve` from bundle paths + `Env_git_noninteractive.env` from RFC-0007 PR-1, not forwarded from an `env` field on the upstream `Keeper_gh_env.keeper_binding` (which has no such field).
+- **Related**: RFC-0007 rev.3 (shares a review cycle), F-1 (#9843), F-2 (#9844), F-4 (#9847)
 - **Drives**: convert the "keeper-scoped identity" label into an actual capability boundary; make credential lifecycle explicit so Option B (in-container login) can ship later without rewiring the caller
 
 ## 1. Problem (field-verified 2026-04-24)
@@ -34,7 +35,7 @@ type ro_mount = { host : string; container : string }
 
 type binding = {
   identity  : string;                    (* keeper-scoped identity, e.g. "anyang-keepers" *)
-  env       : (string * string) list;    (* GH_CONFIG_DIR, HOME, GIT_ASKPASS='', GIT_TERMINAL_PROMPT=0, ... *)
+  env       : (string * string) list;    (* composed inside resolve; see note below *)
   ro_mounts : ro_mount list;             (* host paths mounted read-only (Option A); empty for Option B *)
   bootstrap : string list option;        (* argv executed inside container after start; None for Option A *)
   metadata  : (string * string) list;    (* audit: source, issued_at, ttl_seconds, sha256_prefix *)
@@ -58,6 +59,8 @@ val finalize : binding -> container_id:string -> (unit, error) result
     [Eio.Switch.on_release] or equivalent so crashes still hit it. *)
 val tear_down : binding -> container_id:string option -> unit
 ```
+
+> **Evidence note (rev.1 cross-correction, 2026-04-24)**: The upstream `Keeper_gh_env.keeper_binding` exposes only `{github_identity; git_identity_mode; bundle_root; gh_config_dir}` (see `lib/keeper/keeper_gh_env.ml:18-23`). The `binding.env` list in this signature is therefore **composed inside `Host_config_provider.resolve`** from (a) the path-derived entries already built inline at `keeper_shell_docker.ml:234-245` today — `HOME=<cred_root>`, `GH_CONFIG_DIR=<cred_root>/.config/gh`, `GIT_CONFIG_GLOBAL=<cred_root>/.gitconfig`, the `GIT_CONFIG_*` safe.directory block, `GIT_AUTHOR_*`/`GIT_COMMITTER_*` — plus (b) `Env_git_noninteractive.env` added by RFC-0007 PR-1. The trait concentrates this composition in one place; it does not introduce new env keys beyond what PR-1 adds.
 
 Two concrete modules:
 

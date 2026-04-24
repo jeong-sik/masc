@@ -430,9 +430,37 @@ let keeper_tool_audit_fields ?(include_allowed_tools = true) config
         fallback_snapshot.tool_audit_source,
         fallback_snapshot.tool_audit_at )
 
-let cached_tool_audit_json ~lightweight config (meta : Keeper_types.keeper_meta) =
-  let cache_key = "kta:" ^ meta.name in
-  Dashboard_cache.get_or_compute cache_key ~ttl:2.0 (fun () ->
+let lightweight_tool_audit_fallback_json (meta : Keeper_types.keeper_meta) =
+  let last_autonomous = String.trim meta.runtime.last_autonomous_action_at in
+  let has_runtime_activity =
+    last_autonomous <> ""
+    || meta.runtime.autonomous_turn_count > 0
+    || meta.runtime.autonomous_action_count > 0
+  in
+  `Assoc [
+    ("allowed_tool_names", `List []);
+    ("recent_tool_names", `List []);
+    ("latest_tool_names", `List []);
+    ( "latest_tool_call_count",
+      if has_runtime_activity then `Int 0 else `Null );
+    ("latest_action_source", `Null);
+    ( "tool_audit_source",
+      if has_runtime_activity then `String "keeper_runtime_meta" else `Null );
+    ( "tool_audit_at",
+      if last_autonomous <> "" then `String last_autonomous
+      else if has_runtime_activity then `String meta.updated_at
+      else `Null );
+  ]
+
+let cached_tool_audit_json ~lightweight (config : Coord.config)
+    (meta : Keeper_types.keeper_meta) =
+  let base_hash = Digest.to_hex (Digest.string config.base_path) in
+  let cache_key = "kta:" ^ base_hash ^ ":" ^ meta.name in
+  if lightweight then
+    Dashboard_cache.seed_stale_if_missing cache_key ~stale_for:120.0
+      (lightweight_tool_audit_fallback_json meta);
+  let ttl = if lightweight then 30.0 else 2.0 in
+  Dashboard_cache.get_or_compute cache_key ~ttl (fun () ->
     let allowed_tool_names, recent_tool_names, latest_tool_names,
         latest_tool_call_count, latest_action_source,
         tool_audit_source, tool_audit_at =
@@ -701,7 +729,10 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                    | Some p -> `String (Keeper_state_machine.phase_to_string p)
                    | None -> `Null
                  in
-                 let context_snapshot = keeper_context_snapshot_of_meta config meta in
+                 let context_snapshot =
+                   if lightweight then fallback_keeper_context_snapshot meta
+                   else keeper_context_snapshot_of_meta config meta
+                 in
                  emit_timing_log (Time_compat.now () -. t_work_start);
                  Some
                    (`Assoc

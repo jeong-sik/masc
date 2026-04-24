@@ -183,7 +183,6 @@ let test_snapshot_prefers_metrics_context_truth_over_usage_counters () =
       let json =
         Operator_control.snapshot_json ~view:"summary"
           ~include_keepers:true ~include_messages:false
-          ~lightweight_summary:true
           (operator_ctx env sw config "owner")
       in
       let keeper =
@@ -427,10 +426,14 @@ let test_snapshot_lightweight_summary_omits_heavy_activity () =
 let test_snapshot_lightweight_summary_keeps_tool_audit () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
+  Eio_guard.enable ();
+  Dashboard_cache.invalidate_all ();
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
+      Dashboard_cache.invalidate_all ();
+      Eio_guard.disable ();
       Keeper_keepalive.stop_keepalive "lightweight-audit";
       Keeper_registry.clear ();
       Keeper_runtime.reset_test_state base_dir;
@@ -483,6 +486,32 @@ let test_snapshot_lightweight_summary_keeps_tool_audit () =
             ("tool_call_count", `Int 0);
             ("tools_used", `List []);
           ]);
+      let meta =
+        match Keeper_types.read_meta config keeper_name with
+        | Ok (Some meta) -> meta
+        | Ok None -> Alcotest.fail "expected keeper meta"
+        | Error err -> Alcotest.fail err
+      in
+      let first_audit =
+        Operator_control_snapshot.cached_tool_audit_json ~lightweight:true
+          config meta
+      in
+      Alcotest.(check bool) "lightweight audit returns fallback immediately" true
+        (Yojson.Safe.Util.member "tool_audit_source" first_audit = `Null);
+      let rec wait_for_metrics attempts =
+        let audit =
+          Operator_control_snapshot.cached_tool_audit_json ~lightweight:true
+            config meta
+        in
+        match Yojson.Safe.Util.member "tool_audit_source" audit with
+        | `String "keeper_metrics" -> audit
+        | _ when attempts > 0 ->
+            Eio.Time.sleep (Eio.Stdenv.clock env) 0.05;
+            wait_for_metrics (attempts - 1)
+        | _ -> Alcotest.fail "expected refreshed lightweight tool audit"
+      in
+      ignore (wait_for_metrics 20);
+      Operator_control.invalidate_snapshot_cache ();
       let json =
         Operator_control.snapshot_json ~view:"summary"
           ~include_keepers:true ~include_messages:false
@@ -511,10 +540,15 @@ let test_snapshot_lightweight_summary_keeps_tool_audit () =
 let test_snapshot_lightweight_summary_keeps_recent_tools_distinct_from_latest () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
+  Eio_guard.enable ();
+  Dashboard_cache.invalidate_all ();
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
-    ~finally:(fun () -> cleanup_dir base_dir)
+    ~finally:(fun () ->
+      Dashboard_cache.invalidate_all ();
+      Eio_guard.disable ();
+      cleanup_dir base_dir)
     (fun () ->
       let config = Coord.default_config base_dir in
       ignore (Coord.init config ~agent_name:(Some "owner"));
@@ -562,6 +596,31 @@ let test_snapshot_lightweight_summary_keeps_recent_tools_distinct_from_latest ()
               ("tools_used", `List []);
             ])
       done;
+      let meta =
+        match Keeper_types.read_meta config keeper_name with
+        | Ok (Some meta) -> meta
+        | Ok None -> Alcotest.fail "expected keeper meta"
+        | Error err -> Alcotest.fail err
+      in
+      ignore
+        (Operator_control_snapshot.cached_tool_audit_json ~lightweight:true
+           config meta);
+      let rec wait_for_recent_tools attempts =
+        let audit =
+          Operator_control_snapshot.cached_tool_audit_json ~lightweight:true
+            config meta
+        in
+        let recent =
+          Yojson.Safe.Util.(audit |> member "recent_tool_names" |> to_list)
+        in
+        if recent <> [] then audit
+        else if attempts > 0 then (
+          Eio.Time.sleep (Eio.Stdenv.clock env) 0.05;
+          wait_for_recent_tools (attempts - 1))
+        else Alcotest.fail "expected refreshed lightweight recent tools"
+      in
+      ignore (wait_for_recent_tools 20);
+      Operator_control.invalidate_snapshot_cache ();
       let json =
         Operator_control.snapshot_json ~view:"summary"
           ~include_keepers:true ~include_messages:false

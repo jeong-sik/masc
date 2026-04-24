@@ -1158,6 +1158,22 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
         | _ -> reason)
     | None -> reason
   in
+  let failure_counts_for_proactive_backoff =
+    is_scheduled_autonomous_cycle
+    &&
+    match sdk_error with
+    | Some err -> (
+        match Oas_worker_named.classify_masc_internal_error err with
+        | Some
+            (Oas_worker_named.Oas_timeout_budget _
+            | Oas_worker_named.Turn_timeout _
+            | Oas_worker_named.Admission_queue_timeout _
+            | Oas_worker_named.Admission_queue_rejected _
+            | Oas_worker_named.Resumable_cli_session _) ->
+            true
+        | Some _ | None -> false)
+    | None -> false
+  in
   let preview =
     let trimmed = String.trim public_reason in
     if trimmed = "" then "keeper cycle failed"
@@ -1195,6 +1211,10 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
         last_preview =
           if is_scheduled_autonomous_cycle then preview
           else meta.runtime.proactive_rt.last_preview;
+        consecutive_noop_count =
+          (if failure_counts_for_proactive_backoff then
+             meta.runtime.proactive_rt.consecutive_noop_count + 1
+           else meta.runtime.proactive_rt.consecutive_noop_count);
       };
       last_speech_act =
         (match social_state with

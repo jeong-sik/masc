@@ -484,6 +484,34 @@ let should_require_tools_for_initial_turn ~(max_turns : int)
   && not initial_turn_is_last
   && turn_affordances_require_tool_gate turn_affordances
 
+let has_task_claim_affordance turn_affordances =
+  List.exists
+    (fun affordance ->
+       match turn_affordance_of_string affordance with
+       | Some Task_claim -> true
+       | Some (Board_post_or_comment | Message_sweep | Task_audit) | None -> false)
+    turn_affordances
+
+let has_task_audit_affordance turn_affordances =
+  List.exists
+    (fun affordance ->
+       match turn_affordance_of_string affordance with
+       | Some Task_audit -> true
+       | Some (Board_post_or_comment | Message_sweep | Task_claim) | None -> false)
+    turn_affordances
+
+let preferred_tool_choice_for_required_turn ~(has_current_task : bool)
+    ~(turn_affordances : string list) ~(allowed_tool_names : string list) =
+  if (not has_current_task)
+     && has_task_claim_affordance turn_affordances
+     && List.mem "keeper_task_claim" allowed_tool_names
+  then Oas.Types.Tool "keeper_task_claim"
+  else if (has_task_claim_affordance turn_affordances
+           || has_task_audit_affordance turn_affordances)
+          && List.mem "keeper_tasks_list" allowed_tool_names
+  then Oas.Types.Tool "keeper_tasks_list"
+  else Oas.Types.Any
+
 let tool_names =
   List.map Tool_name.to_string
 
@@ -1340,6 +1368,39 @@ let run_turn
   let receipt_response_text_present_ref = ref false in
   let receipt_tool_contract_result_ref = ref "unknown" in
   let tool_calls_ref : tool_call_detail list ref = ref [] in
+  let keeper_has_owned_active_task () =
+    if Option.is_some meta.current_task_id then true
+    else
+      let actual_name =
+        try Coord.resolve_agent_name config meta.agent_name
+        with
+        | Sys_error _ | Yojson.Json_error _ -> meta.agent_name
+        | exn ->
+            Log.Keeper.warn
+              "keeper:%s resolve_agent_name failed while checking owned task: %s"
+              meta.name (Printexc.to_string exn);
+            meta.agent_name
+      in
+      let matches assignee =
+        String.equal assignee meta.agent_name || String.equal assignee actual_name
+      in
+      try
+        Coord.get_tasks_raw config
+        |> List.exists (fun (task : Types.task) ->
+             match task.task_status with
+             | Types.Claimed { assignee; _ }
+             | Types.InProgress { assignee; _ }
+             | Types.AwaitingVerification { assignee; _ } ->
+                 matches assignee
+             | Types.Todo | Types.Done _ | Types.Cancelled _ -> false)
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+          Log.Keeper.warn
+            "keeper:%s owned task check failed: %s"
+            meta.name (Printexc.to_string exn);
+          false
+  in
   let validate_allow_list ~turn raw =
     let raw = Tool_portal.filter_visible_tool_names portal_ctx raw in
     let validated, dropped_names =
@@ -1574,10 +1635,19 @@ let run_turn
           "context overflow guard: %d tools > max %d, truncating"
           (List.length all_allowed)
           max_tools;
+        let required_turn_essential_tool_names =
+          if tool_gate_requested
+             && (has_task_claim_affordance turn_affordances
+                 || has_task_audit_affordance turn_affordances)
+          then [ "keeper_task_claim"; "keeper_tasks_list" ]
+          else []
+        in
+        let essential_names =
+          Keeper_types.dedupe_keep_order
+            (visible_always_include_tools @ required_turn_essential_tool_names)
+        in
         let essential =
-          List.filter
-            (fun name -> List.mem name visible_always_include_tools)
-            all_allowed
+          List.filter (fun name -> List.mem name essential_names) all_allowed
         in
         let non_essential =
           List.filter
@@ -1670,7 +1740,8 @@ let run_turn
   in
   match initial_tool_surface_result with
   | Error err -> Error err
-  | Ok _ ->
+  | Ok initial_tool_surface ->
+  requested_tool_names_ref := initial_tool_surface.all_allowed;
   (* Mutation boundary mechanism removed. Previously, the first successful
      mutating tool would open a "boundary" that blocked further tools and
      exited the OAS loop early. This caused keeper death spirals (#6801) and
@@ -2059,7 +2130,11 @@ let run_turn
                 if computed_surface.is_last_turn
                 then current_params.tool_choice
                 else if computed_surface.tool_gate_requested && List.length all_allowed > 0
-                then Some Oas.Types.Any
+                then
+                  Some
+                    (preferred_tool_choice_for_required_turn
+                       ~has_current_task:(keeper_has_owned_active_task ())
+                       ~turn_affordances ~allowed_tool_names:all_allowed)
                 else current_params.tool_choice
               in
               let turn_completion_contract =
@@ -2340,6 +2415,119 @@ let run_turn
             "[wake_payload] telemetry failed keeper=%s: %s"
             meta.name (Printexc.to_string exn)
     in
+    let deterministic_required_tool_fallback ~reason ~trigger =
+      let available name =
+        List.mem name !requested_tool_names_ref
+        || (Keeper_tool_policy.StringSet.mem name universe_set
+            && Keeper_tool_policy.StringSet.mem name allowed_exec_set
+            && Tool_portal.filter_visible_tool_names portal_ctx [ name ] <> [])
+      in
+      let fallback_tool =
+        if (not (keeper_has_owned_active_task ()))
+           && has_task_claim_affordance turn_affordances
+           && available "keeper_task_claim"
+        then Some ("keeper_task_claim", `Assoc [])
+        else if (has_task_claim_affordance turn_affordances
+                 || has_task_audit_affordance turn_affordances)
+                && available "keeper_tasks_list"
+        then
+          Some
+            ( "keeper_tasks_list",
+              `Assoc
+                [
+                  ("status", `String "todo");
+                  ("include_done", `Bool false);
+                  ("limit", `Int 20);
+                ] )
+        else None
+      in
+      match fallback_tool with
+      | None when !keeper_surface_tool_used_ref -> None
+      | None -> None
+      | Some _ when !keeper_surface_tool_used_ref -> None
+      | Some (tool_name, input) ->
+        let started = Time_compat.now () in
+        let output_text =
+          Keeper_exec_task.handle_keeper_task_tool ~config ~meta ~name:tool_name
+            ~args:input
+        in
+        let duration_ms = (Time_compat.now () -. started) *. 1000.0 in
+        let success =
+          try
+            match Yojson.Safe.from_string output_text with
+            | `Assoc fields -> not (List.mem_assoc "error" fields)
+            | _ -> true
+          with
+          | Yojson.Json_error _ -> true
+        in
+        keeper_surface_tool_used_ref := true;
+        actual_keeper_tool_names_ref := [ tool_name ];
+        observed_tool_names_ref := [ tool_name ];
+        canonical_tool_names_ref := [ tool_name ];
+        tool_calls_ref :=
+          {
+            tool_name;
+            provider = "deterministic_required_tool_fallback";
+            outcome = if success then "ok" else "error";
+            latency_ms = duration_ms;
+          }
+          :: !tool_calls_ref;
+        (try
+           Keeper_tool_call_log.log_call ~keeper_name:meta.name ~tool_name
+             ~input ~output_text ~success ~duration_ms
+             ~model:"deterministic_required_tool_fallback" ()
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
+             Log.Keeper.warn
+               "keeper:%s deterministic claim fallback log failed: %s" meta.name
+               (Printexc.to_string exn));
+        receipt_tool_contract_result_ref :=
+          "satisfied_by_deterministic_fallback";
+        Log.Keeper.warn
+          "keeper:%s required tool contract fallback called %s after %s (reason=%s)"
+          meta.name tool_name trigger reason;
+        Some
+          (Printf.sprintf
+             "Deterministic fallback called %s after %s.\nReason: %s\nResult: %s"
+             tool_name trigger reason output_text)
+    in
+    let deterministic_fallback_run_result ~reason ~trigger fallback_text =
+      let model = "deterministic_required_tool_fallback" in
+      let usage = Keeper_exec_context.zero_usage in
+      let ctx_composition =
+        build_ctx_composition_metrics ~system_prompt:turn_system_prompt
+          ~dynamic_context ~memory_context ~temporal_context ~user_message
+          ~history_messages ~actual_input_tokens:0
+      in
+      receipt_turn_count_ref := Some 0;
+      receipt_model_used_ref := Some model;
+      receipt_stop_reason_ref := Some trigger;
+      receipt_response_text_present_ref := true;
+      Log.Keeper.warn
+        "keeper:%s completed required-tool turn via deterministic fallback after %s: %s"
+        meta.name trigger reason;
+      {
+        response_text = fallback_text;
+        model_used = model;
+        prompt_metrics;
+        ctx_composition;
+        cascade_observation = !receipt_cascade_observation_ref;
+        turn_count = 0;
+        tool_calls_made = List.length !actual_keeper_tool_names_ref;
+        usage;
+        usage_reported = false;
+        tools_used = !actual_keeper_tool_names_ref;
+        tool_calls = List.rev !tool_calls_ref;
+        checkpoint = None;
+        proof = None;
+        trace_ref = None;
+        run_validation = None;
+        stop_reason = Oas_worker.Completed;
+        inference_telemetry = None;
+        tool_surface = !tool_surface_ref;
+      }
+    in
     let turn_result =
       match
        Keeper_llm_bridge.run_with_timeout_and_fallback ~timeout_s (fun () ->
@@ -2407,7 +2595,24 @@ let run_turn
            ?per_provider_timeout_s:meta.per_provider_timeout_s
            ())
      with
-     | Error e -> Error e
+     | Error e ->
+       let reason =
+         Printf.sprintf "model cascade failed before keeper tool use: %s"
+           (Oas.Error.to_string e)
+       in
+       if degraded_retry_applied
+          && turn_affordances_require_tool_gate turn_affordances
+       then
+         match
+           deterministic_required_tool_fallback ~reason
+             ~trigger:"cascade failure"
+         with
+         | Some fallback_text ->
+             Ok
+               (deterministic_fallback_run_result ~reason
+                  ~trigger:"cascade failure" fallback_text)
+         | None -> Error e
+       else Error e
      | Ok result ->
        let post_turn_t0 = Time_compat.now () in
        (* Checkpoint save is deferred until after [STATE] synthesis so the
@@ -2623,6 +2828,14 @@ let run_turn
              ~actionable_signal_context
              ~tool_names:actual_keeper_tool_names
          in
+         let contract_violation_error reason =
+           Oas.Error.Agent
+             (Oas.Error.CompletionContractViolation
+                {
+                  contract = Oas.Completion_contract_id.Require_tool_use;
+                  reason;
+                })
+         in
          (* Required-tool turns are filtered onto providers that declare
             tool support plus tool_choice support. If a text-only response
             still reaches this point, treat it as a contract failure. *)
@@ -2643,20 +2856,22 @@ let run_turn
                Log.Keeper.error
                  "keeper:%s required tool contract violated \
                   (turn=%d, tools=%d). Rejecting no-op/passive actionable turn. \
-                  Reason: %s"
+                 Reason: %s"
                  meta.name result.turns
                  (List.length actual_keeper_tool_names)
                  reason;
-               Error
-                 (Oas.Error.Agent
-                    (Oas.Error.CompletionContractViolation
-                       {
-                         contract = Oas.Completion_contract_id.Require_tool_use;
-                         reason;
-                       }))
+              (match
+                 deterministic_required_tool_fallback ~reason
+                   ~trigger:"no-tool response"
+               with
+               | Some fallback_text ->
+                   Ok
+                     (`Deterministic_fallback
+                       (reason, "no-tool response", fallback_text))
+               | None -> Error (contract_violation_error reason))
            | Ok (), None ->
                receipt_tool_contract_result_ref := "satisfied";
-               Ok text
+               Ok (`Provider_text text)
            | Error reason, _ ->
                receipt_tool_contract_result_ref := "violated";
                let contract_str =
@@ -2671,13 +2886,15 @@ let run_turn
                  meta.name result.turns
                  (List.length actual_keeper_tool_names)
                  contract_str reason;
-               Error
-                 (Oas.Error.Agent
-                    (Oas.Error.CompletionContractViolation
-                       {
-                         contract = Oas.Completion_contract_id.Require_tool_use;
-                         reason;
-                       }))
+              (match
+                 deterministic_required_tool_fallback ~reason
+                   ~trigger:"no-tool response"
+               with
+               | Some fallback_text ->
+                   Ok
+                     (`Deterministic_fallback
+                       (reason, "no-tool response", fallback_text))
+               | None -> Error (contract_violation_error reason))
          in
          let finalize_response_text raw_response_text =
            let stop_reason_str =
@@ -2693,17 +2910,22 @@ let run_turn
              match Keeper_memory_policy.parse_state_snapshot_from_reply raw_response_text with
              | Some snapshot -> snapshot
              | None ->
+                 let final_tool_names =
+                   match !actual_keeper_tool_names_ref with
+                   | [] -> actual_keeper_tool_names
+                   | names -> names
+                 in
                  let synth =
                    Keeper_memory_policy.synthesize_state_from_run_result
                      ~goal:meta.goal
-                     ~tools_used:actual_keeper_tool_names
+                     ~tools_used:final_tool_names
                      ~stop_reason:stop_reason_str
                      ~response_text:raw_response_text
                  in
                  Log.Keeper.info
                    "keeper:%s [STATE] missing, synthesized from %d tools (stop=%s)"
                    meta.name
-                   (List.length actual_keeper_tool_names)
+                   (List.length final_tool_names)
                    stop_reason_str;
                  synth
            in
@@ -3015,7 +3237,11 @@ let run_turn
          in
          match text_result with
          | Error e -> Error e
-         | Ok text -> (
+         | Ok (`Deterministic_fallback (reason, trigger, fallback_text)) ->
+             Ok
+               (deterministic_fallback_run_result ~reason ~trigger
+                  fallback_text)
+         | Ok (`Provider_text text) -> (
              match
                Keeper_tool_disclosure.normalize_response_text
                  ~text ~tool_names:actual_keeper_tool_names ()

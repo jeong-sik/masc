@@ -4548,6 +4548,49 @@ let test_should_require_tools_for_initial_turn_matches_first_turn_gate () =
   check bool "no tool-required affordance stays optional" false
     (KAR.should_require_tools_for_initial_turn ~max_turns:3 ~turn_affordances:[ "observe" ])
 
+let test_preferred_tool_choice_for_required_turn_claims_first () =
+  let choose ?(has_current_task = false) ?(turn_affordances = [ "task_claim" ])
+      ?(allowed_tool_names =
+        [ "keeper_task_claim"; "keeper_tasks_list"; "keeper_board_post" ])
+      () =
+    KAR.preferred_tool_choice_for_required_turn ~has_current_task
+      ~turn_affordances ~allowed_tool_names
+  in
+  (match choose () with
+   | Agent_sdk.Types.Tool name ->
+       check string "forces claim tool first" "keeper_task_claim" name
+   | other ->
+       fail
+         (Printf.sprintf "expected Tool keeper_task_claim, got %s"
+            (Agent_sdk.Types.show_tool_choice other)));
+  (match choose ~has_current_task:true () with
+   | Agent_sdk.Types.Tool name ->
+       check string "falls back to task listing when already owning work"
+         "keeper_tasks_list" name
+   | other ->
+       fail
+         (Printf.sprintf
+            "expected Tool keeper_tasks_list when already owning work, got %s"
+            (Agent_sdk.Types.show_tool_choice other)));
+  (match
+     choose
+       ~turn_affordances:[ "task_audit" ]
+       ~allowed_tool_names:[ "keeper_tasks_list"; "keeper_board_post" ]
+       ()
+   with
+   | Agent_sdk.Types.Tool name ->
+       check string "task audit prefers safe task listing" "keeper_tasks_list" name
+   | other ->
+       fail
+         (Printf.sprintf "expected Tool keeper_tasks_list, got %s"
+            (Agent_sdk.Types.show_tool_choice other)));
+  match choose ~allowed_tool_names:[ "keeper_board_post" ] () with
+  | Agent_sdk.Types.Any -> ()
+  | other ->
+      fail
+        (Printf.sprintf "expected Any when claim is unavailable, got %s"
+           (Agent_sdk.Types.show_tool_choice other))
+
 (* ---------- render_inline_skip_reason tests ---------- *)
 
 let str_contains s sub =
@@ -5208,6 +5251,8 @@ let () =
             test_keeper_allowed_tools_exclude_heartbeat;
           test_case "initial tool requirement mirrors first-turn gate" `Quick
             test_should_require_tools_for_initial_turn_matches_first_turn_gate;
+          test_case "task backlog required turn prefers claim tool choice"
+            `Quick test_preferred_tool_choice_for_required_turn_claims_first;
         ] );
       ( "verification_surface",
         [

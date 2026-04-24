@@ -682,6 +682,19 @@ let test_sdk_error_is_hard_quota_detects_claude_cli_limit_wrapper () =
   Alcotest.(check bool) "Claude CLI limit wrapper counts as hard quota" true
     (Oas_worker_named.sdk_error_is_hard_quota err)
 
+let test_sdk_error_is_hard_quota_detects_claude_org_monthly_limit_wrapper () =
+  let err =
+    Oas.Error.Api
+      (Llm_provider.Retry.NetworkError
+         {
+           message =
+             "claude exited with code 1: {\"type\":\"result\",\"subtype\":\"success\",\"is_error\":true,\"api_error_status\":429,\"result\":\"You've hit your org's monthly usage limit\"}";
+           kind = Llm_provider.Http_client.Unknown;
+         })
+  in
+  Alcotest.(check bool) "Claude org monthly usage limit counts as hard quota" true
+    (Oas_worker_named.sdk_error_is_hard_quota err)
+
 let test_sdk_error_is_hard_quota_keeps_transient_network_errors_false () =
   let err =
     Oas.Error.Api
@@ -768,6 +781,43 @@ let test_sdk_error_to_cascade_outcome_cascades_runtime_mcp_auth_config () =
   | outcome ->
       Alcotest.failf
         "expected runtime_mcp_auth InvalidConfig to cascade as AcceptRejected, got %s"
+        (match outcome with
+         | Some (Cascade_fsm.Call_err _) -> "some-call-err"
+         | Some (Cascade_fsm.Accept_rejected _) -> "some-accept-rejected"
+         | Some (Cascade_fsm.Call_ok _) -> "some-call-ok"
+         | Some Cascade_fsm.Slot_full -> "some-slot-full"
+         | None -> "none")
+
+let test_sdk_error_to_cascade_outcome_cascades_resumable_cli_session () =
+  let raw_message =
+    "kimi exited with code 1: \nTo resume this session: kimi -r 5de0f199-6bd7-4509-bfa6-3308e0ebd97f"
+  in
+  let detail =
+    Oas_worker_exec.Kimi_cli_transport_local.resumable_session_detail_of_text
+      raw_message
+  in
+  let sdk_error =
+    Oas.Error.Api (Llm_provider.Retry.InvalidRequest { message = detail })
+  in
+  let structured =
+    match
+      Oas_worker_named.sdk_error_to_resumable_cli_session
+        ~cascade_name:"tool_use_strict" sdk_error
+    with
+    | Some structured -> structured
+    | None -> Alcotest.fail "expected structured resumable CLI session"
+  in
+  match Oas_worker_named.sdk_error_to_cascade_outcome structured with
+  | Some
+      (Cascade_fsm.Call_err
+         (Llm_provider.Http_client.NetworkError { message; kind })) ->
+      Alcotest.(check bool) "detail remains resumable marker" true
+        (Oas_worker_named.message_looks_like_resumable_cli_session message);
+      Alcotest.(check bool) "unknown network kind" true
+        (kind = Llm_provider.Http_client.Unknown)
+  | outcome ->
+      Alcotest.failf
+        "expected resumable CLI session to cascade as NetworkError, got %s"
         (match outcome with
          | Some (Cascade_fsm.Call_err _) -> "some-call-err"
          | Some (Cascade_fsm.Accept_rejected _) -> "some-accept-rejected"
@@ -3374,6 +3424,8 @@ let () =
         test_sdk_error_is_hard_quota_detects_gemini_cli_network_wrapper;
       Alcotest.test_case "sdk_error_is_hard_quota detects Claude CLI limit wrapper" `Quick
         test_sdk_error_is_hard_quota_detects_claude_cli_limit_wrapper;
+      Alcotest.test_case "sdk_error_is_hard_quota detects Claude org monthly limit wrapper" `Quick
+        test_sdk_error_is_hard_quota_detects_claude_org_monthly_limit_wrapper;
       Alcotest.test_case "sdk_error_is_hard_quota keeps transient network errors false" `Quick
         test_sdk_error_is_hard_quota_keeps_transient_network_errors_false;
       Alcotest.test_case "sdk_error_is_hard_quota preserves RateLimited detection" `Quick
@@ -3386,6 +3438,8 @@ let () =
         test_sdk_error_to_cascade_outcome_keeps_invalid_request_as_400;
       Alcotest.test_case "sdk_error_to_cascade_outcome cascades runtime MCP auth config" `Quick
         test_sdk_error_to_cascade_outcome_cascades_runtime_mcp_auth_config;
+      Alcotest.test_case "sdk_error_to_cascade_outcome cascades resumable CLI session" `Quick
+        test_sdk_error_to_cascade_outcome_cascades_resumable_cli_session;
       Alcotest.test_case "Moonshot auth errors include configured env hint" `Quick
         test_enrich_sdk_error_for_moonshot_auth_includes_env_hint;
       Alcotest.test_case "OpenAI-compatible 404 errors include endpoint hint" `Quick

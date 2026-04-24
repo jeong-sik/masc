@@ -92,6 +92,12 @@ type run_result =
 val should_require_tools_for_initial_turn :
   max_turns:int -> turn_affordances:string list -> bool
 
+val preferred_tool_choice_for_required_turn :
+     has_current_task:bool
+  -> turn_affordances:string list
+  -> allowed_tool_names:string list
+  -> Oas.Types.tool_choice
+
 (** Canonical model label for MASC status/metrics surfaces.
     Prefers the final cascade attempt label when available, then the
     selected/primary configured cascade label, and finally falls back to the

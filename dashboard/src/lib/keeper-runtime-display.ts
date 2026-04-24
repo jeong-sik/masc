@@ -4,6 +4,149 @@ import { relativeTime } from './format-time'
 /** Max seconds since last heartbeat to consider the keeper process alive. */
 const HEARTBEAT_ALIVE_THRESHOLD_S = 120
 
+export type KeeperActivitySource =
+  | 'autonomous_action'
+  | 'heartbeat'
+  | 'last_activity'
+  | 'last_turn'
+  | 'agent_seen'
+  | 'created'
+  | 'none'
+
+export interface KeeperActivityDisplay {
+  source: KeeperActivitySource
+  label: string
+  timestamp: string | null
+  ageSeconds: number | null
+}
+
+export interface KeeperModelDisplay {
+  label: string
+  value: string
+}
+
+type KeeperModelDisplaySource = {
+  last_model_used_label?: string | null
+  last_model_used?: string | null
+  active_model_label?: string | null
+  active_model?: string | null
+  model?: string | null
+  primary_model?: string | null
+  metrics_series?: Array<{ model_used?: string | null } | null> | null
+}
+
+type KeeperActivityDisplaySource = {
+  last_autonomous_action_at?: string | null
+  last_heartbeat?: string | null
+  last_activity_ago_s?: number | null
+  last_turn_ago_s?: number | null
+  created_at?: string | null
+}
+
+type ActivityCandidate = {
+  source: KeeperActivitySource
+  label: string
+  timestamp: string | null
+  ageSeconds: number
+}
+
+function trimmed(value: string | null | undefined): string | null {
+  const text = value?.trim()
+  return text ? text : null
+}
+
+function latestMetricModel(source: KeeperModelDisplaySource | null | undefined): string | null {
+  const series = source?.metrics_series ?? []
+  for (let index = series.length - 1; index >= 0; index -= 1) {
+    const model = trimmed(series[index]?.model_used)
+    if (model) return model
+  }
+  return null
+}
+
+export function keeperDisplayModel(
+  source: KeeperModelDisplaySource | null | undefined,
+): KeeperModelDisplay | null {
+  const lastModelLabel = trimmed(source?.last_model_used_label)
+  if (lastModelLabel) return { label: '최근 모델', value: lastModelLabel }
+
+  const lastModel = trimmed(source?.last_model_used)
+  if (lastModel) return { label: '최근 모델', value: lastModel }
+
+  const activeModelLabel = trimmed(source?.active_model_label)
+  if (activeModelLabel) return { label: '현재 모델', value: activeModelLabel }
+
+  const activeModel = trimmed(source?.active_model)
+  if (activeModel) return { label: '현재 모델', value: activeModel }
+
+  const metricModel = latestMetricModel(source)
+  if (metricModel) return { label: '최근 모델', value: metricModel }
+
+  const fallbackModel = trimmed(source?.model) ?? trimmed(source?.primary_model)
+  if (fallbackModel) return { label: '모델', value: fallbackModel }
+  return null
+}
+
+function timestampCandidate(
+  source: KeeperActivitySource,
+  label: string,
+  timestamp: string | null | undefined,
+): ActivityCandidate | null {
+  const value = trimmed(timestamp)
+  if (!value) return null
+  const ms = Date.parse(value)
+  if (Number.isNaN(ms)) return null
+  return {
+    source,
+    label,
+    timestamp: value,
+    ageSeconds: Math.max(0, Math.round((Date.now() - ms) / 1000)),
+  }
+}
+
+function ageCandidate(
+  source: KeeperActivitySource,
+  label: string,
+  ageSeconds: number | null | undefined,
+): ActivityCandidate | null {
+  if (typeof ageSeconds !== 'number' || !Number.isFinite(ageSeconds) || ageSeconds < 0) return null
+  return {
+    source,
+    label,
+    timestamp: null,
+    ageSeconds: Math.round(ageSeconds),
+  }
+}
+
+export function keeperActivityDisplay(
+  keeper: KeeperActivityDisplaySource | null | undefined,
+  fallbackAgentLastSeen?: string | null,
+): KeeperActivityDisplay {
+  const candidates = [
+    timestampCandidate('autonomous_action', '마지막 행동', keeper?.last_autonomous_action_at),
+    timestampCandidate('heartbeat', '하트비트', keeper?.last_heartbeat),
+    ageCandidate('last_activity', '최근 활동', keeper?.last_activity_ago_s),
+    ageCandidate('last_turn', '마지막 턴', keeper?.last_turn_ago_s),
+  ].filter((candidate): candidate is ActivityCandidate => candidate != null)
+
+  candidates.sort((left, right) => left.ageSeconds - right.ageSeconds)
+  const freshest = candidates[0]
+  if (freshest) return freshest
+
+  const agentSeen = timestampCandidate('agent_seen', '에이전트 신호', fallbackAgentLastSeen)
+  if (agentSeen) return agentSeen
+
+  const created = timestampCandidate('created', '생성', keeper?.created_at)
+  if (created) return created
+
+  return {
+    source: 'none',
+    label: '최근 활동',
+    timestamp: null,
+    ageSeconds: null,
+  }
+}
+
 export function keeperDisplayStatus(keeper: Keeper | null | undefined, fallbackStatus?: string | null): string {
   if (keeper?.paused) return 'paused'
   const status = keeper?.status ?? fallbackStatus

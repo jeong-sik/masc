@@ -365,6 +365,8 @@
    activity_feed
    ;; RFC-0001 Gate A: Det/NonDet boundary instrumentation
    heuristic_metrics
+   ;; Instrumentation theatre guard (#7718): variance + coverage over recent records
+   heuristic_metrics_diagnostics
    agent_stress
    transport
    transport_bridge

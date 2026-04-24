@@ -1273,6 +1273,12 @@
  (modules test_keeper_meta_merge)
  (libraries masc_test_deps))
 
+; Instrumentation-theatre guard (#7718)
+(test
+ (name test_heuristic_metrics_diagnostics)
+ (modules test_heuristic_metrics_diagnostics)
+ (libraries masc_test_deps))
+
 (executable
  (name keeper_tool_matrix_case_runner)
  (modules keeper_tool_matrix_case_runner)

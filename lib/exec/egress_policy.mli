@@ -40,10 +40,12 @@ val blocked_to_json : check_result -> string
     [Blocked] → structured error with [attempted] and [allowed]. *)
 
 val of_json_string : source:string -> string -> t
-(** Parse a JSON domain array.  Returns [empty] on parse error. *)
+(** Parse a JSON domain array.  Returns [empty] on parse error.
+    [empty] is fail-closed for commands with extracted outbound domains. *)
 
 val of_file : string -> t
-(** Load from a JSON file.  Returns [empty] if missing or unreadable. *)
+(** Load from a JSON file.  Returns [empty] if missing or unreadable.
+    [empty] is fail-closed for commands with extracted outbound domains. *)
 
 val to_allowed_domains : t -> string list
 (** Return the list of allowed domains for inspection. *)

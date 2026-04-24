@@ -5,7 +5,8 @@
     Docker or keeper internals.
 
     Policy source: [egress.json] in the keeper's config directory.
-    Empty list (or missing file) = all outbound blocked.
+    Empty, missing, unreadable, or invalid policy = fail closed for
+    commands with extracted outbound domains.
     Wildcard suffix: ["*.github.com"] matches ["api.github.com"]. *)
 
 type t = {
@@ -123,8 +124,8 @@ let of_json_string ~source json_str =
 
 (** Load policy from a file path.
 
-    Returns [empty] if the file does not exist or is unreadable
-    (fail-closed). *)
+    Returns [empty] if the file does not exist or is unreadable.
+    [empty] is fail-closed for commands with extracted outbound domains. *)
 let of_file path =
   match Stdlib.In_channel.with_open_bin path Stdlib.In_channel.input_all with
   | json_str ->

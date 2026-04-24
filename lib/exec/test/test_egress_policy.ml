@@ -154,6 +154,17 @@ let test_of_json_string_empty_array_blocks_outbound () =
       assert (allowed = [])
   | Allowed -> assert false
 
+let test_of_file_missing_blocks_git_url_command () =
+  let path = Filename.temp_file "masc-missing-egress-" ".json" in
+  Sys.remove path;
+  let policy = Egress_policy.of_file path in
+  assert (Egress_policy.to_allowed_domains policy = []);
+  match Egress_policy.check_command policy "git clone https://github.com/ocaml/ocaml" with
+  | Egress_policy.Blocked { attempted; allowed } ->
+      assert (attempted = "github.com");
+      assert (allowed = [])
+  | Allowed -> assert false
+
 let () =
   test_empty_blocks_outbound ();
   test_empty_allows_commands_without_urls ();
@@ -171,4 +182,5 @@ let () =
   test_of_json_string_invalid ();
   test_of_json_string_not_array ();
   test_of_json_string_empty_array_blocks_outbound ();
+  test_of_file_missing_blocks_git_url_command ();
   print_endline "[test_egress_policy] all tests passed"

@@ -3146,6 +3146,152 @@ let test_next_fail_open_cascade_for_turn_retries_required_tool_contract_violatio
   expect_degraded_retry "required contract degraded retry"
     KC.default_cascade_name "required_tool_contract_violation" degraded_retry
 
+let test_next_fail_open_cascade_for_turn_uses_catalog_rotation_profile () =
+  let degraded_retry =
+    UT.next_fail_open_cascade_for_turn
+      ~rotation_cascades:
+        [
+          KC.default_cascade_name;
+          KC.local_recovery_cascade_name;
+          "ollama_only";
+        ]
+      ~base_cascade:"tool_rerank"
+      ~effective_cascade:"tool_rerank"
+      ~tool_requirement:"optional"
+      ~attempted_cascades:
+        [
+          "tool_rerank";
+          KC.default_cascade_name;
+          KC.local_recovery_cascade_name;
+        ]
+      (wrapped_claude_limit_error ())
+  in
+  expect_degraded_retry "catalog degraded retry"
+    "ollama_only" "hard_quota" degraded_retry
+
+let test_next_fail_open_cascade_for_turn_does_not_inject_default_when_catalog_omits_it () =
+  let degraded_retry =
+    UT.next_fail_open_cascade_for_turn
+      ~rotation_cascades:[ "resilient_breaker" ]
+      ~base_cascade:"tool_rerank"
+      ~effective_cascade:"tool_rerank"
+      ~tool_requirement:"optional"
+      ~attempted_cascades:[ "tool_rerank" ]
+      (wrapped_claude_limit_error ())
+  in
+  expect_degraded_retry "catalog-only degraded retry"
+    "resilient_breaker" "hard_quota" degraded_retry
+
+let test_next_fail_open_cascade_for_required_tool_filters_local_recovery_catalog () =
+  let degraded_retry =
+    UT.next_fail_open_cascade_for_turn
+      ~rotation_cascades:[ KC.local_recovery_cascade_name; "big_three" ]
+      ~base_cascade:KC.default_cascade_name
+      ~effective_cascade:KC.tool_use_strict_cascade_name
+      ~tool_requirement:"required"
+      ~attempted_cascades:[ KC.tool_use_strict_cascade_name ]
+      (required_tool_contract_violation_error ())
+  in
+  expect_degraded_retry "required catalog degraded retry"
+    "big_three" "required_tool_contract_violation" degraded_retry
+
+let test_next_fail_open_cascade_for_required_tool_rejects_local_recovery_only_catalog () =
+  let degraded_retry =
+    UT.next_fail_open_cascade_for_turn
+      ~rotation_cascades:[ KC.local_recovery_cascade_name ]
+      ~base_cascade:KC.tool_use_strict_cascade_name
+      ~effective_cascade:KC.tool_use_strict_cascade_name
+      ~tool_requirement:"required"
+      ~attempted_cascades:[ KC.tool_use_strict_cascade_name ]
+      (required_tool_contract_violation_error ())
+  in
+  check bool "required catalog local_recovery-only group is exhausted" true
+    (Option.is_none degraded_retry)
+
+let test_degraded_rotation_after_recoverable_error_filters_required_catalog_directly () =
+  let degraded_retry =
+    EC.degraded_rotation_after_recoverable_error
+      ~rotation_cascades:[ KC.local_recovery_cascade_name; " big_three " ]
+      ~base_cascade:KC.tool_use_strict_cascade_name
+      ~effective_cascade:KC.tool_use_strict_cascade_name
+      ~tool_requirement:"required"
+      ~attempted_cascades:[ KC.tool_use_strict_cascade_name ]
+      (required_tool_contract_violation_error ())
+  in
+  expect_degraded_retry "required catalog classifier rotation"
+    "big_three" "required_tool_contract_violation" degraded_retry
+
+let test_degraded_rotation_after_recoverable_error_normalizes_catalog_directly () =
+  let degraded_retry =
+    EC.degraded_rotation_after_recoverable_error
+      ~rotation_cascades:[ ""; " tool_rerank "; " catalog_next "; "catalog_next" ]
+      ~base_cascade:" tool_rerank "
+      ~effective_cascade:"tool_rerank"
+      ~tool_requirement:"optional"
+      ~attempted_cascades:[ "tool_rerank" ]
+      (wrapped_claude_limit_error ())
+  in
+  expect_degraded_retry "normalized catalog classifier rotation"
+    "catalog_next" "hard_quota" degraded_retry
+
+let test_fail_open_rotation_cascades_from_catalog_merges_reserved_and_assignable () =
+  let rotation =
+    UT.fail_open_rotation_cascades_from_catalog
+      ~catalog_names:
+        [
+          KC.default_cascade_name;
+          KC.local_recovery_cascade_name;
+          "ollama_only";
+        ]
+      ~keeper_assignable:[ KC.default_cascade_name; "ollama_only" ]
+  in
+  check (option (list string)) "catalog-derived rotation order"
+    (Some
+       [
+         KC.default_cascade_name;
+         KC.local_recovery_cascade_name;
+         "ollama_only";
+       ])
+    rotation
+
+let test_fail_open_rotation_cascades_from_catalog_preserves_catalog_order () =
+  let rotation =
+    UT.fail_open_rotation_cascades_from_catalog
+      ~catalog_names:
+        [
+          "ollama_only";
+          KC.local_recovery_cascade_name;
+          KC.default_cascade_name;
+        ]
+      ~keeper_assignable:[ KC.default_cascade_name; "ollama_only" ]
+  in
+  check (option (list string)) "catalog-derived rotation preserves catalog order"
+    (Some
+       [
+         "ollama_only";
+         KC.local_recovery_cascade_name;
+         KC.default_cascade_name;
+       ])
+    rotation
+
+let test_fail_open_rotation_cascades_from_catalog_empty_when_unresolved () =
+  let rotation =
+    UT.fail_open_rotation_cascades_from_catalog
+      ~catalog_names:[]
+      ~keeper_assignable:[ KC.default_cascade_name ]
+  in
+  check (option (list string)) "unresolved catalog falls back to legacy path"
+    None rotation
+
+let test_fail_open_rotation_cascades_from_catalog_empty_without_assignable_candidates () =
+  let rotation =
+    UT.fail_open_rotation_cascades_from_catalog
+      ~catalog_names:[ "experimental_only" ]
+      ~keeper_assignable:[]
+  in
+  check (option (list string)) "resolved catalog without assignable candidates"
+    None rotation
+
 (* context_overflow_limit is now in OAS as Retry.extract_context_limit.
    These tests verify the OAS SSOT API is accessible from MASC. *)
 let test_context_overflow_limit_parses_common_oas_errors () =
@@ -5632,6 +5778,36 @@ let () =
           test_case "required tool contract violations rotate retry lane"
             `Quick
             test_next_fail_open_cascade_for_turn_retries_required_tool_contract_violation;
+          test_case "catalog rotation can continue beyond reserved recovery"
+            `Quick
+            test_next_fail_open_cascade_for_turn_uses_catalog_rotation_profile;
+          test_case "catalog rotation does not inject missing default"
+            `Quick
+            test_next_fail_open_cascade_for_turn_does_not_inject_default_when_catalog_omits_it;
+          test_case "required-tool catalog rotation filters local recovery"
+            `Quick
+            test_next_fail_open_cascade_for_required_tool_filters_local_recovery_catalog;
+          test_case "required-tool local-recovery-only catalog exhausts"
+            `Quick
+            test_next_fail_open_cascade_for_required_tool_rejects_local_recovery_only_catalog;
+          test_case "classifier filters required-tool catalog rotation"
+            `Quick
+            test_degraded_rotation_after_recoverable_error_filters_required_catalog_directly;
+          test_case "classifier normalizes catalog rotation"
+            `Quick
+            test_degraded_rotation_after_recoverable_error_normalizes_catalog_directly;
+          test_case "catalog rotation order merges reserved and assignable"
+            `Quick
+            test_fail_open_rotation_cascades_from_catalog_merges_reserved_and_assignable;
+          test_case "catalog rotation preserves catalog order"
+            `Quick
+            test_fail_open_rotation_cascades_from_catalog_preserves_catalog_order;
+          test_case "unresolved catalog keeps legacy rotation fallback"
+            `Quick
+            test_fail_open_rotation_cascades_from_catalog_empty_when_unresolved;
+          test_case "resolved catalog without assignable candidates falls back"
+            `Quick
+            test_fail_open_rotation_cascades_from_catalog_empty_without_assignable_candidates;
         ] );
       ( "tool_classification",
         [

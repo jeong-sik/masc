@@ -44,6 +44,11 @@ ACTIVE_CMD_PGID=""
 ACTIVE_LOG_TAIL_PID=""
 CI_LAST_TIMEOUT_DIAG_DONE=0
 
+if [[ -n "${ME_ROOT:-}" ]]; then
+  export MASC_BASE_PATH="${MASC_BASE_PATH:-${ME_ROOT}}"
+  export MASC_BASE_PATH_INPUT="${MASC_BASE_PATH_INPUT:-${MASC_BASE_PATH}}"
+fi
+
 iso_now() {
   date -u +"%Y-%m-%dT%H:%M:%SZ"
 }

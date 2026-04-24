@@ -140,6 +140,13 @@ stylesheet
   .frame_err  { background: var(--t-err); color: var(--text-bright); }
   .frame_wait { background: var(--t-wait); color: var(--text-dim); }
   .frame_think { background: var(--t-think); color: var(--text-primary); }
+
+  @media (prefers-contrast: more) {
+    .track { outline: 1px solid var(--text-bright); }
+    .frame { border: 1px solid var(--text-bright); }
+    .stat { color: var(--text-bright); }
+    .nm_dead { color: var(--text-bright); }
+  }
 |}]
 
 let frame_class = function

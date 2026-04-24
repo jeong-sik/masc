@@ -55,6 +55,29 @@ stylesheet
   .c_brass   { color: var(--accent-brass, #968228); border-color: var(--accent-brass, #968228); }
   .c_paused  { color: var(--text-dim, #9a846e); border-color: var(--border-main, #3a2e20); }
   .c_neutral { color: var(--text-dim, #9a846e); border-color: var(--border-main, #3a2e20); }
+
+  @media (prefers-contrast: more) {
+    .pill_md, .pill_sm {
+      border-width: 2px;
+      border-color: var(--text-bright);
+    }
+    .c_ok      { border-color: var(--status-ok); }
+    .c_warn    { border-color: var(--status-warn); }
+    .c_bad     { border-color: var(--accent-blood); }
+    .c_brass   { border-color: var(--accent-brass); }
+    .c_paused  { border-color: var(--text-dim); }
+    .c_neutral { border-color: var(--text-dim); }
+  }
+
+  @media (forced-colors: active) {
+    .pill_md, .pill_sm { border-color: ButtonText; }
+    .c_ok      { border-color: Highlight; color: Highlight; }
+    .c_warn    { border-color: Mark; color: Mark; }
+    .c_bad     { border-color: MarkText; color: MarkText; }
+    .c_brass   { border-color: ButtonText; }
+    .c_paused  { border-color: GrayText; color: GrayText; }
+    .c_neutral { border-color: GrayText; color: GrayText; }
+  }
 |}]
 
 type size = [ `Sm | `Md ]

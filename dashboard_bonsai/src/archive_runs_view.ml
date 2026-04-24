@@ -153,6 +153,12 @@ stylesheet
       text-align: left;
     }
   }
+
+  @media (prefers-contrast: more) {
+    .goal { border-width: 2px; border-color: var(--text-bright); }
+    .goal_header { border-bottom-width: 2px; border-color: var(--text-bright); }
+    .k { color: var(--text-bright); }
+  }
 |}]
 
 let pill_color : Archive_runs_types.status -> Pill.color = function

@@ -130,6 +130,20 @@ stylesheet
   @media (prefers-reduced-motion: reduce) {
     .dot_live, .dot_thinking { animation: none; }
   }
+
+  @media (prefers-contrast: more) {
+    .slot { border: 1px solid var(--text-bright); }
+    .dot { width: 7px; height: 7px; border: 1px solid var(--text-bright); }
+    .state { color: var(--text-bright); }
+    .when_ { color: var(--text-bright); }
+  }
+
+  @media (forced-colors: active) {
+    .dot_live     { background: Highlight; }
+    .dot_thinking { background: Mark; }
+    .dot_idle     { background: GrayText; }
+    .dot_failed   { background: MarkText; }
+  }
 |}]
 
 (** Keeper 상태 → roster dot 상태 매핑. `Warn` → `Thinking` (뭔가

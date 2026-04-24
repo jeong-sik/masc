@@ -158,6 +158,14 @@ stylesheet
     .conv_bar_wrap { text-align: left; }
     .goal_indent { margin-left: 12px; padding-left: 10px; }
   }
+
+  @media (prefers-contrast: more) {
+    .goal { border-width: 2px; border-color: var(--text-bright); }
+    .goal_head { border-bottom-width: 2px; border-color: var(--text-bright); }
+    .k { color: var(--text-bright); }
+    .conv_bar { outline: 1px solid var(--text-bright); }
+    .task_dot { color: var(--text-bright); }
+  }
 |}]
 
 let status_pill_color (s : string) : Pill.color =

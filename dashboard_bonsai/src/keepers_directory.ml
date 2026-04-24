@@ -350,6 +350,15 @@ stylesheet
       transition-duration: 0.01ms !important;
     }
   }
+
+  @media (prefers-contrast: more) {
+    .card { border-width: 2px; border-color: var(--text-bright); }
+    .card_header { border-bottom-width: 2px; border-color: var(--text-bright); }
+    .section_title { color: var(--text-bright); }
+    .k { color: var(--text-bright); }
+    .metric_v_bad { color: var(--accent-blood); font-weight: 700; }
+    .filter_input { border-width: 2px; border-color: var(--text-bright); }
+  }
 |}]
 
 let normalize_lookup_key value = String.lowercase (String.strip value)

@@ -1295,6 +1295,16 @@ stylesheet
       transition-duration: 0.01ms !important;
     }
   }
+
+  @media (prefers-contrast: more) {
+    .row { border-bottom-width: 1px; border-bottom-color: var(--text-dim); }
+    .level, .source_badge { border-width: 2px; }
+    .level_error { border-color: var(--accent-blood); }
+    .level_warn  { border-color: var(--status-warn); }
+    .filter_bar { border-width: 2px; border-color: var(--text-bright); }
+    .search_input { border-width: 2px; border-color: var(--text-bright); }
+    .chip, .btn_ghost { border-width: 2px; border-color: var(--text-bright); }
+  }
 |}]
 
 let level_class level =

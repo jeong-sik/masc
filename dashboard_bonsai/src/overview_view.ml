@@ -151,6 +151,26 @@ stylesheet
     .count_cell { padding: 12px 8px; }
     .count_v { font-size: 28px; }
   }
+
+  @media (prefers-contrast: more) {
+    .panel { border-width: 2px; border-color: var(--text-bright); }
+    .panel_title { color: var(--text-bright); }
+    .k { color: var(--text-bright); }
+    .count_k { color: var(--text-bright); }
+    .count_cell { border-width: 2px; border-color: var(--text-bright); }
+    .belief { border-width: 2px; border-style: solid; border-color: var(--text-bright); color: var(--text-primary); }
+    .empty { border-width: 2px; border-style: solid; border-color: var(--text-bright); color: var(--text-primary); }
+    .stag_bar { outline: 1px solid var(--text-bright); }
+  }
+
+  @media (forced-colors: active) {
+    .stag_fill     { background: Highlight; }
+    .stag_fill_warn { background: Mark; }
+    .stag_fill_bad { background: MarkText; }
+    .v_ok  { color: Highlight; }
+    .v_warn { color: Mark; }
+    .v_bad { color: MarkText; }
+  }
 |}]
 
 let hms_of_seconds total =

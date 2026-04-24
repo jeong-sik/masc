@@ -87,6 +87,24 @@ val ensure_local_discovery_ready :
   string list ->
   (unit, string) result
 
+(** Deterministic decision for the local-only phase fallback boundary. This
+    does not probe runtime liveness; it only decides whether the selected
+    labels warrant an Ollama liveness check before preserving [local_only]. *)
+type local_only_liveness_decision =
+  | Keep_effective_cascade of string
+  | Probe_local_only_urls of {
+      effective_cascade : string;
+      fallback_cascade : string;
+      ollama_base_urls : string list;
+    }
+
+val decide_local_only_liveness :
+  ?resolve_label:(string -> Llm_provider.Provider_config.t option) ->
+  base_cascade:string ->
+  effective_cascade:string ->
+  string list ->
+  local_only_liveness_decision
+
 (** When phase routing temporarily forces [local_only], fail open to the
     keeper's configured base cascade if the local Ollama endpoint is
     unavailable. Explicit [local_only] keepers are preserved. Exposed for

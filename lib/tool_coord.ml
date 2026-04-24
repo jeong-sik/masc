@@ -102,6 +102,17 @@ let credential_state (ctx : context) ~actual_name =
   let auth_cfg = Auth.load_auth_config ctx.config.base_path in
   let credential_required = auth_cfg.enabled && auth_cfg.require_token in
   let credential_candidates = unique_strings [ ctx.agent_name; actual_name ] in
+  let internal_keeper_credential_available name =
+    match
+      ( Keeper_identity.keeper_name_from_agent_name name,
+        Sys.getenv_opt Auth.internal_keeper_token_env_key )
+    with
+    | Some _, Some raw ->
+        let token = String.trim raw in
+        token <> ""
+        && Auth.verify_internal_keeper_token ctx.config.base_path ~token
+    | _ -> false
+  in
   let is_initial_admin name =
     match Auth.read_initial_admin ctx.config.base_path with
     | Some admin -> String.equal name admin
@@ -112,6 +123,7 @@ let credential_state (ctx : context) ~actual_name =
     || List.exists
          (fun name ->
            is_initial_admin name
+           || internal_keeper_credential_available name
            || Option.is_some (Auth.load_credential ctx.config.base_path name))
          credential_candidates
   in

@@ -1173,6 +1173,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       bootstrap_server_state_blocking state;
       sync_admin_token_env state;
       sync_internal_keeper_token_env state;
+      sync_bootable_keeper_credentials state;
       sync_client_token_file ~base_path ~agent_name:"codex-mcp-client"
         ~role:Types.Worker;
       let path_diagnostics =

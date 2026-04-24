@@ -166,6 +166,9 @@ let kimi_cli_runtime_mcp_jsons =
 let public_mcp_tools_of_oas_tools =
   Oas_worker_exec_transport.public_mcp_tools_of_oas_tools
 
+let public_mcp_tool_requires_bound_actor =
+  Oas_worker_exec_transport.public_mcp_tool_requires_bound_actor
+
 let tool_names_are_public_mcp =
   Oas_worker_exec_transport.tool_names_are_public_mcp
 

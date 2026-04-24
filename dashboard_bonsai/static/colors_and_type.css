@@ -477,3 +477,22 @@ hr {
   .btn { transition-duration: 0.01ms !important; }
   .btn:active { transform: none; }
 }
+
+/* ══════════════════════════════════════════════════════════════
+   PRINT — high-contrast B&W, hide chrome
+   ══════════════════════════════════════════════════════════════ */
+@media print {
+  *, *::before, *::after {
+    background: white !important;
+    color: black !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+  .nav, [role="navigation"], .skip-link, .dot, [aria-hidden="true"],
+  .tex-parchment, .tex-blood, .tex-wax, .tex-scratch, .tex-mold, .tex-viscera, .tex-noise {
+    display: none !important;
+  }
+  .btn { border: 1px solid black !important; }
+  .frame-gothic::before, .frame-gothic::after { display: none !important; }
+  .frame-arch, .frame-sarc { border: 1px solid black !important; clip-path: none; border-radius: 0; }
+}

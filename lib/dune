@@ -423,6 +423,7 @@
    keeper_types_profile
    keeper_types_support
    keeper_types
+   keeper_meta_merge
    keeper_memory
    keeper_accountability
    keeper_memory_policy

@@ -300,7 +300,30 @@ val write_meta_with_retry :
     by this caller's payload. Use only when the caller's data is
     less recoverable than the concurrent writer's (cycle completion
     qualifies; heartbeat does NOT — it should keep using {!write_meta}
-    and tolerate occasional CAS conflicts). See #9764 / #9733 / #9769. *)
+    and tolerate occasional CAS conflicts). See #9764 / #9733 / #9769.
+
+    Equivalent to [write_meta_with_merge ~merge:Keeper_meta_merge.caller_wins];
+    kept as a thin wrapper for backwards compatibility. *)
+
+val write_meta_with_merge :
+  ?max_retries:int ->
+  merge:(latest:keeper_meta -> caller:keeper_meta -> keeper_meta) ->
+  Coord.config ->
+  keeper_meta ->
+  (unit, string) result
+(** CAS write with bounded retry and caller-supplied field merge (#9769).
+
+    Like {!write_meta_with_retry}, but on CAS conflict the caller's
+    [merge] function decides which fields to take from the disk
+    snapshot and which from the caller. This eliminates the false
+    sharing that caused turn-failure writes to lose the CAS race
+    against concurrent heartbeat writers: the turn path never modifies
+    [joined_room_ids] / [last_seen_seq_by_room], so preserving those
+    from disk lets the retry succeed without clobbering heartbeat data.
+
+    The merge function MUST set the returned [meta_version] to the
+    disk's version so the next CAS check passes. The provided
+    strategies in {!Keeper_meta_merge} do this. *)
 
 val is_version_conflict_error : string -> bool
 (** True when [write_meta] returned an error caused by CAS version

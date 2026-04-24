@@ -1262,6 +1262,12 @@
  (modules test_timeout_policy)
  (libraries masc_test_deps))
 
+; write_meta CAS field-merge (#9769)
+(test
+ (name test_keeper_meta_merge)
+ (modules test_keeper_meta_merge)
+ (libraries masc_test_deps))
+
 (executable
  (name keeper_tool_matrix_case_runner)
  (modules keeper_tool_matrix_case_runner)

@@ -1525,7 +1525,7 @@ let run_turn
       tool_gate_requested_for_turn ~current_tool_choice ~is_last_turn
     in
     let all_allowed, tool_surface_fallback_used =
-      if tool_gate_requested && all_allowed = [] then
+      if all_allowed = [] then
         let fallback_allowed = fallback_tool_surface ~turn in
         if fallback_allowed <> [] then fallback_allowed, true else all_allowed, false
       else

@@ -252,6 +252,26 @@ let test_heartbeat_failure_preserved_through_overflow () =
   check_phase SM.Failing tr4.new_phase
     "post-compact, heartbeat failure surfaces as Failing"
 
+(* ── Scenario 6 (#9988): noop compaction must not clear overflow ──── *)
+
+let test_noop_compaction_keeps_overflow () =
+  (* Overflow detected, auto-compact runs, but reducers did not shrink
+     the context (e.g. pure-text history). before == after ⇒ the FSM
+     must NOT clear [context_overflow], otherwise the next turn will
+     re-trip the same overflow loop (#9935/#9943). *)
+  let tr1 = apply_ok SM.Running running_conds (overflow_event ()) in
+  let tr2 =
+    apply_ok SM.Overflowed tr1.updated_conditions SM.Auto_compact_triggered
+  in
+  let tr3 =
+    apply_ok SM.Compacting tr2.updated_conditions
+      (SM.Compaction_completed { before_tokens = 180_000; after_tokens = 180_000 })
+  in
+  check bool "noop compaction keeps context_overflow set" true
+    tr3.updated_conditions.context_overflow;
+  check bool "compaction_active cleared" false
+    tr3.updated_conditions.compaction_active
+
 let () =
   run "keeper_overflow_recovery" [
     "overflow-lifecycle",
@@ -270,5 +290,7 @@ let () =
         test_noop_then_real_savings_clears;
       test_case "heartbeat failure preserved through overflow" `Quick
         test_heartbeat_failure_preserved_through_overflow;
+      test_case "noop compaction keeps overflow (#9988)" `Quick
+        test_noop_compaction_keeps_overflow;
     ]
   ]

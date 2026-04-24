@@ -399,7 +399,7 @@ let update_conditions (c : conditions) (ev : event) : conditions =
        an infinite loop with [Context_overflow_detected]: the next turn
        re-measures the same context, re-fires overflow, re-attempts a
        noop compaction, and clears the flag again.  #9935 observed
-       45–71 imminent events/day with zero observable reduction action.
+       45-71 imminent events/day with zero observable reduction action.
 
        Treat [saved_tokens <= 0] as a noop: keep [context_overflow] set
        so the next layer (operator alert, stronger compaction profile,
@@ -412,8 +412,13 @@ let update_conditions (c : conditions) (ev : event) : conditions =
         context_overflow = false;
         compact_retry_exhausted = false;
       }
-    else
+    else begin
+      Log.Keeper.warn
+        "[fsm] compaction_completed with no savings (before=%d after=%d); \
+         keeping context_overflow=true to avoid noop re-trigger loop"
+        before_tokens after_tokens;
       { c with compaction_active = false }
+    end
   | Compaction_failed _ ->
     (* Leave [context_overflow] set — the overflow has not been resolved.
        The retry-exhausted latch is owned by the caller (keeper_unified_turn

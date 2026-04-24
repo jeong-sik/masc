@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.14.0] - 2026-04-24
+
+### Added
+- `Env_git_noninteractive` module (`lib/env_git_noninteractive.{ml,mli}`) centralises `GIT_ASKPASS=''` and `GIT_TERMINAL_PROMPT=0` for keeper docker subprocesses. Previously these constants were absent everywhere in the codebase (verified zero hits on commit `0e408ffc`), so a keeper `git push` inside the sandbox could, in principle, block indefinitely on a credential prompt if the RO-mounted `hosts.yml` auth path failed before git fell through.
+
+### Changed
+- `keeper_shell_docker.run_docker_shell_command_with_status` now appends `Env_git_noninteractive.docker_env_args` to the docker `-e` env list at the single credential-composition callsite (`lib/keeper/keeper_shell_docker.ml:234-245`). No change to identity/auth semantics; the container now fails fast on a git credential prompt rather than hanging.
+
+### RFC
+- RFC-0007 rev.3 and RFC-0008 landed as design documents (`docs/rfc/`). This release implements RFC-0007 PR-1 only; PR-2 (`gh_result.t` structured result), PR-3 (typed `Api_get` / `Api_graphql_query`), and RFC-0008 `CredentialProvider` trait are tracked for follow-up releases.
+
 ## [0.13.0] - 2026-04-24
 
 ### Added

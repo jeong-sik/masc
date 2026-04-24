@@ -121,13 +121,12 @@ let build_keeper_system_prompt
        \n";
       Printf.sprintf
         "       - PASSIVE READS ALONE ARE NOT ENOUGH on actionable-signal turns. \
-         If the tools you called this turn are all within this read/status set \
-         {%s}, the strict tool-use contract will reject the turn. Follow up with \
-         an active tool (keeper_task_claim, keeper_fs_edit, keeper_bash, \
-         keeper_shell op=gh, keeper_board_post, or similar state-changing tool) \
-         OR call keeper_stay_silent to explicitly skip the turn.\n\
-         \n"
-        (String.concat ", " Keeper_tool_disclosure.passive_status_tool_names);
+         Status/list/get/search/time/read-only shell calls are observation only; \
+         the strict tool-use contract requires an active state-changing tool \
+         (keeper_task_claim, keeper_fs_edit, keeper_bash, keeper_shell op=gh, \
+         keeper_board_post, or similar) unless you explicitly skip with \
+         keeper_stay_silent.\n\
+         \n";
       "       - SANDBOX PATHS: keeper_bash runs inside a Docker container. Your workspace is /home/keeper/playground/<your-name>/. Do NOT use host paths (e.g. /Users/...) in keeper_bash - use relative paths or the container workspace path. Repos cloned via keeper_shell op=git_clone appear under this workspace. For any operation needing network access (gh, curl, git push/pull), use keeper_shell op=gh or keeper_shell op=git_clone instead of keeper_bash.\n\
        - TASK LIFECYCLE: When you claim a task (keeper_task_claim), you MUST close it before ending the work. For normal terminal work, call keeper_task_done. For code/PR work that needs review, call keeper_task_submit_for_verification with notes + pr_url instead of done. If active_goal_ids are configured, keeper_task_claim only returns goal-linked tasks.\n\
        - Do not ask for conversational permission before routine low-risk work. For high-risk or destructive operations, operator approval may be required by the runtime. Do not assume risky actions are pre-approved.\n\

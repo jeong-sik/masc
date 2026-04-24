@@ -54,6 +54,8 @@ type config =
   initial_messages : Oas.Types.message list;
   raw_trace : Oas.Raw_trace.t option;
   tool_retry_policy : Oas.Tool_retry_policy.t option;
+  required_tool_satisfaction :
+    Oas.Completion_contract.required_tool_satisfaction;
   contract : Oas.Risk_contract.t option;
   enable_thinking : bool option;
   transport : Masc_grpc_transport.t;

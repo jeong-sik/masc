@@ -169,6 +169,11 @@ let tool_progress_class_to_string = function
   | Execution -> "execution"
   | Completion -> "completion"
 
+let canonical_tool_name name =
+  match Keeper_tool_alias.canonicalize_observed [ name ] with
+  | canonical :: _ -> canonical
+  | [] -> name
+
 (** Tools that report state without changing it. A turn whose tool calls
     are entirely within this set on an actionable signal is rejected by
     [actionable_tool_contract_violation_reason]; the same list is rendered
@@ -214,6 +219,7 @@ let completion_tool_names : string list =
   |> List.map Tool_name.to_string
 
 let classify_tool_progress name =
+  let name = canonical_tool_name name in
   let canonical_name =
     match Tool_name.of_string name with
     | Some tool -> Tool_name.to_string tool
@@ -248,6 +254,36 @@ let is_execution_progress_tool_name name =
   | Execution | Completion -> true
   | Passive_status | Claim_context -> false
 
+let tool_name_can_satisfy_required_contract name =
+  let name = canonical_tool_name name in
+  match Tool_catalog.effect_domain name with
+  | Some Tool_catalog.Read_only -> false
+  | Some
+      ( Tool_catalog.Masc_coordination
+      | Tool_catalog.Playground_write
+      | Tool_catalog.Main_worktree_write ) ->
+      true
+  | None -> not (Tool_dispatch.is_read_only name)
+
+let required_tool_satisfaction
+      (call : Oas.Completion_contract.tool_call)
+  : (unit, string) result
+  =
+  let tool_name = canonical_tool_name call.name in
+  let mutates =
+    match Tool_catalog.effect_domain tool_name with
+    | Some Tool_catalog.Read_only -> false
+    | _ ->
+      Keeper_exec_tools.has_mutating_side_effect_with_input
+        ~tool_name ~input:call.input
+  in
+  if mutates then Ok ()
+  else
+    Error
+      (Printf.sprintf
+         "tool '%s' is read-only/passive and cannot satisfy a required-tool contract"
+         tool_name)
+
 let actionable_tool_contract_violation_reason
       ~(claim_context_allowed : bool)
       ~(actionable_signal_context : bool)
@@ -260,7 +296,11 @@ let actionable_tool_contract_violation_reason
     | [] ->
       Some
         "actionable keeper signal was present, but the model called no keeper tools"
-    | names when List.for_all is_passive_status_tool_name names ->
+    | names
+      when List.for_all
+             (fun name ->
+                not (tool_name_can_satisfy_required_contract name))
+             names ->
       Some
         (Printf.sprintf
            "actionable keeper signal was present, but the model only used passive status/read tools: %s"

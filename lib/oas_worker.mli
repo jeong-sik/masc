@@ -112,6 +112,8 @@ val run_named :
   ?context_reducer:Oas.Context_reducer.t ->
   ?memory:Oas.Memory.t ->
   ?tool_retry_policy:Oas.Tool_retry_policy.t ->
+  ?required_tool_satisfaction:
+    Oas.Completion_contract.required_tool_satisfaction ->
   ?raw_trace:Oas.Raw_trace.t ->
   ?on_event:(Oas.Types.sse_event -> unit) ->
   ?on_yield:(unit -> unit) ->
@@ -190,6 +192,8 @@ val run_named_with_masc_tools :
   ?hooks:Oas.Hooks.hooks ->
   ?memory:Oas.Memory.t ->
   ?tool_retry_policy:Oas.Tool_retry_policy.t ->
+  ?required_tool_satisfaction:
+    Oas.Completion_contract.required_tool_satisfaction ->
   ?raw_trace:Oas.Raw_trace.t ->
   ?on_event:(Oas.Types.sse_event -> unit) ->
   ?on_yield:(unit -> unit) ->

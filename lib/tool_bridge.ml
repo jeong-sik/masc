@@ -112,6 +112,39 @@ let params_of_json_schema = Oas.Mcp.json_schema_to_params
     Create OAS [Tool.t] from MASC schema definition + dispatch handler.
     This allows incremental migration: each tool can be converted independently. *)
 
+let oas_permission_of_masc_tool name =
+  let meta = Tool_catalog.metadata name in
+  match meta.destructive, meta.readonly with
+  | Some true, _ -> Some Oas.Tool.Destructive
+  | _, Some true -> Some Oas.Tool.ReadOnly
+  | _, Some false -> Some Oas.Tool.Write
+  | _ when Tool_dispatch.is_destructive name -> Some Oas.Tool.Destructive
+  | _ when Tool_dispatch.is_read_only name -> Some Oas.Tool.ReadOnly
+  | _ -> None
+
+let oas_descriptor_of_masc_tool name =
+  let descriptor_of_permission permission =
+    let mutation_class, concurrency_class =
+      match permission with
+      | Oas.Tool.ReadOnly ->
+          Some "read_only", Some Oas.Tool.Parallel_read
+      | Oas.Tool.Write ->
+          Some "workspace_mutating", Some Oas.Tool.Sequential_workspace
+      | Oas.Tool.Destructive ->
+          Some "external_effect", Some Oas.Tool.Exclusive_external
+    in
+    {
+      Oas.Tool.kind = Some "masc";
+      mutation_class;
+      concurrency_class;
+      permission = Some permission;
+      shell = None;
+      notes = [];
+      examples = [];
+    }
+  in
+  Option.map descriptor_of_permission (oas_permission_of_masc_tool name)
+
 (** Create an OAS [Tool.t] from a MASC tool schema and a handler function.
 
     [handler] receives raw JSON args and returns MASC [(bool * string)].
@@ -127,8 +160,9 @@ let params_of_json_schema = Oas.Mcp.json_schema_to_params
 let oas_tool_of_masc ~name ~description ~input_schema
     handler : Oas.Tool.t =
   let parameters = params_of_json_schema input_schema in
+  let descriptor = oas_descriptor_of_masc_tool name in
   let oas_handler json_args =
     let success, msg = handler json_args in
     to_oas_tool_result (success, msg)
   in
-  Oas.Tool.create ~name ~description ~parameters oas_handler
+  Oas.Tool.create ?descriptor ~name ~description ~parameters oas_handler

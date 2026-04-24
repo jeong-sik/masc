@@ -76,6 +76,11 @@
 
 ### Changed
 
+- **Strict required-tool contracts now use typed tool effects.** MASC passes
+  an input-aware required-tool satisfaction predicate into OAS, so passive
+  observation tools such as `masc_status` and `keeper_tasks_list` no longer
+  satisfy required productive action. The OAS dependency floor is raised to
+  `agent_sdk >= 0.171.0` for the new contract hook.
 - **OAS pin bump → `main@031c7e6b` (`v0.170.5`).**
   `scripts/oas-agent-sdk-pin.sh` now tracks the merged OAS truth-layer evidence
   primitives, and the dependency floor in `dune-project` / `masc_mcp.opam` is

@@ -618,6 +618,21 @@ stylesheet
     width: auto;
     height: auto;
   }
+
+  @media (prefers-contrast: more) {
+    .topbar { border-bottom-width: 2px; border-bottom-color: var(--text-bright); }
+    .nav { border-right-width: 2px; border-right-color: var(--text-bright); }
+    .nav_link { border-left-width: 3px; }
+    .hud { border-bottom-width: 2px; border-bottom-color: var(--text-bright); }
+    .hud_cell { border-right-width: 2px; border-right-color: var(--text-bright); }
+    .hud_k { color: var(--text-bright); }
+    .aside { border-left-width: 2px; border-left-color: var(--text-bright); }
+    .pill { border-width: 2px; border-color: var(--text-bright); }
+    .vial { border-width: 2px; border-color: var(--text-bright); }
+    .event { border-bottom-width: 2px; border-bottom-color: var(--text-dim); }
+    .event_body code { border-width: 2px; border-color: var(--text-bright); }
+    .focus { border-width: 2px; border-color: var(--text-bright); }
+  }
 |}]
 
 type tone =

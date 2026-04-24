@@ -169,6 +169,13 @@ let latest_store_ts dir label : float option =
         (Printexc.to_string exn);
       None
 
+let sort_newest_first entries =
+  List.sort (fun a b -> Float.compare (extract_ts b) (extract_ts a)) entries
+
+let take_first n entries =
+  if n <= 0 then []
+  else List.filteri (fun i _ -> i < n) entries
+
 let freshness_fields ~now latest_ts =
   match latest_ts with
   | Some ts ->
@@ -263,19 +270,64 @@ let read_keeper_metrics ~masc_root ?keeper_name ?since_ts ?until_ts ~n () :
     read_fixed_source dir Keeper_metric ~n ?since_ts ?until_ts ()
   ) dirs
 
+let read_keeper_metrics_fast_top ~masc_root ~n () : Yojson.Safe.t list =
+  let target = n + 1 in
+  let probe_limit = min 64 target in
+  let dirs = discover_keeper_metric_dirs masc_root in
+  let probes =
+    List.filter_map
+      (fun (name, dir) ->
+        let entries = read_fixed_source dir Keeper_metric ~n:probe_limit () in
+        match latest_ts_of_entries entries with
+        | None -> None
+        | Some latest_ts -> Some (name, dir, latest_ts, entries))
+      dirs
+    |> List.sort (fun (_, _, a, _) (_, _, b, _) -> Float.compare b a)
+  in
+  let rec loop acc = function
+    | [] -> acc
+    | (_name, dir, latest_ts, probe_entries) :: rest ->
+      let acc = sort_newest_first acc |> take_first target in
+      let cutoff =
+        if List.length acc < target then None
+        else List.nth_opt acc (target - 1) |> Option.map extract_ts
+      in
+      (match cutoff with
+       | Some ts when latest_ts < ts -> acc
+       | _ ->
+         let entries =
+           if target <= probe_limit then probe_entries
+           else read_fixed_source dir Keeper_metric ~n:target ()
+         in
+         loop (sort_newest_first (entries @ acc) |> take_first target) rest)
+  in
+  loop [] probes
+
 (* ── Unified read ───────────────────────────────────── *)
 
 let read_unified_result ~base_path ~masc_root ?(sources = all_sources)
     ?keeper_name ?session_id ?operation_id ?worker_run_id ?since_ts ?until_ts
     ?(n = 100) () : read_result =
   let limited = n > 0 in
-  let per_source = if limited then max n (n * 2) else 0 in
+  let has_filter =
+    Option.is_some keeper_name || Option.is_some session_id
+    || Option.is_some operation_id || Option.is_some worker_run_id
+    || Option.is_some since_ts || Option.is_some until_ts
+  in
+  let per_source =
+    if not limited then 0
+    else if has_filter then max n (n * 2)
+    else n + 1
+  in
   let all_entries =
     List.concat_map (fun source ->
       match source with
       | Keeper_metric ->
-        read_keeper_metrics ~masc_root ?keeper_name ?since_ts ?until_ts
-          ~n:per_source ()
+        if limited && Option.is_none keeper_name && not has_filter then
+          read_keeper_metrics_fast_top ~masc_root ~n ()
+        else
+          read_keeper_metrics ~masc_root ?keeper_name ?since_ts ?until_ts
+            ~n:per_source ()
       | _ ->
         match fixed_store_dir ~masc_root ~base_path source with
         | Some dir ->
@@ -302,13 +354,11 @@ let read_unified_result ~base_path ~masc_root ?(sources = all_sources)
       filtered
   in
   (* Sort by timestamp descending (newest first) *)
-  let sorted = List.sort (fun a b ->
-    Float.compare (extract_ts b) (extract_ts a)
-  ) filtered in
+  let sorted = sort_newest_first filtered in
   let total_matching_entries = List.length sorted in
   let entries =
     if not limited || total_matching_entries <= n then sorted
-    else List.filteri (fun i _ -> i < n) sorted
+    else take_first n sorted
   in
   { entries; total_matching_entries; truncated = limited && total_matching_entries > n }
 

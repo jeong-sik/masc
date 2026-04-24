@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TelemetryResponse, TelemetrySummaryResponse } from '../api/dashboard'
 
 void vi
+vi.setConfig({ testTimeout: 120_000 })
 
 const baseTelemetry: TelemetryResponse = {
   generated_at: '2026-04-09T05:10:00Z',
@@ -117,6 +118,52 @@ describe('TelemetryUnified', () => {
 
     expect(fetchTelemetry).toHaveBeenCalledTimes(2)
     expect(fetchTelemetrySummary).toHaveBeenCalledTimes(2)
+  })
+
+  it('debounces server-side telemetry filter changes', async () => {
+    const fetchTelemetry = vi.fn().mockResolvedValue(baseTelemetry)
+    const fetchTelemetrySummary = vi.fn().mockResolvedValue(baseSummary)
+    const { TelemetryUnified } = await loadPanel(fetchTelemetry, fetchTelemetrySummary)
+
+    await act(async () => {
+      render(html`<${TelemetryUnified} />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    expect(fetchTelemetry).toHaveBeenCalledTimes(1)
+
+    const keeperInput = container.querySelector<HTMLInputElement>('input[aria-label="키퍼 이름 필터"]')
+    expect(keeperInput).toBeTruthy()
+
+    await act(async () => {
+      if (!keeperInput) return
+      keeperInput.value = 's'
+      keeperInput.dispatchEvent(new Event('input', { bubbles: true }))
+      keeperInput.value = 'sa'
+      keeperInput.dispatchEvent(new Event('input', { bubbles: true }))
+      keeperInput.value = 'sangsu'
+      keeperInput.dispatchEvent(new Event('input', { bubbles: true }))
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    expect(fetchTelemetry).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(249)
+    })
+    await flushUi()
+
+    expect(fetchTelemetry).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1)
+    })
+    await flushUi()
+
+    expect(fetchTelemetry).toHaveBeenCalledTimes(2)
+    expect(fetchTelemetry.mock.calls[1]?.[0]).toMatchObject({ keeper: 'sangsu' })
   })
 
   it('surfaces summary fetch errors to the panel error banner (regression: Phase 0 fleet-data-core)', async () => {

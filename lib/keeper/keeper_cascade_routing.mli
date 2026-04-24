@@ -35,8 +35,17 @@ val select_cascade :
 
 (** Override an already-routed cascade when the turn must guarantee a
     tool-capable provider lane. Phase-routed local/recovery cascades are
-    preserved. *)
+    preserved. Pure-local configured cascades are also preserved, regardless
+    of their profile name. *)
 val route_effective_cascade_for_tool_requirement :
+  effective_cascade:string ->
+  tool_requirement:string ->
+  routing_decision
+
+(** Same as {!route_effective_cascade_for_tool_requirement}, with model-label
+    resolution injected for deterministic tests. *)
+val route_effective_cascade_for_tool_requirement_with_model_labels :
+  model_labels_of_cascade:(string -> string list) ->
   effective_cascade:string ->
   tool_requirement:string ->
   routing_decision

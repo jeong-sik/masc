@@ -32,7 +32,8 @@ let select_cascade ~(base_cascade : string) ~(phase : Keeper_state_machine.phase
       { effective_cascade = base_cascade;
         reason = "non-turn phase (blocked upstream)" }
 
-let route_effective_cascade_for_tool_requirement
+let route_effective_cascade_for_tool_requirement_with_model_labels
+    ~(model_labels_of_cascade : string -> string list)
     ~(effective_cascade : string)
     ~(tool_requirement : string) : routing_decision =
   let trimmed_effective = String.trim effective_cascade in
@@ -44,17 +45,28 @@ let route_effective_cascade_for_tool_requirement
       effective_cascade;
       reason = "tool-optional or text-only turn keeps routed cascade";
     }
-  else if
-    String.equal trimmed_effective Keeper_config.tool_use_strict_cascade_name
-    || String.equal normalized_effective Keeper_config.local_only_cascade_name
-    || String.equal normalized_effective Keeper_config.local_recovery_cascade_name
-  then
-    {
-      effective_cascade;
-      reason = "tool-required turn preserves phase-routed system cascade";
-    }
-  else
-    {
-      effective_cascade = Keeper_config.tool_use_strict_cascade_name;
-      reason = "tool-required turn uses strict tool-capable cascade";
-    }
+  else (
+    let effective_is_pure_local =
+      trimmed_effective <> ""
+      && model_labels_of_cascade trimmed_effective
+         |> Cascade_runtime.labels_are_pure_local
+    in
+    if
+      String.equal trimmed_effective Keeper_config.tool_use_strict_cascade_name
+      || String.equal normalized_effective Keeper_config.local_only_cascade_name
+      || String.equal normalized_effective Keeper_config.local_recovery_cascade_name
+      || effective_is_pure_local
+    then
+      {
+        effective_cascade;
+        reason = "tool-required turn preserves local or phase-routed cascade";
+      }
+    else
+      {
+        effective_cascade = Keeper_config.tool_use_strict_cascade_name;
+        reason = "tool-required turn uses strict tool-capable cascade";
+      })
+
+let route_effective_cascade_for_tool_requirement =
+  route_effective_cascade_for_tool_requirement_with_model_labels
+    ~model_labels_of_cascade:Cascade_runtime.models_of_cascade_name

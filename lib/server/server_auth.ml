@@ -266,6 +266,12 @@ let dashboard_actor_for_request ~base_path request =
       | Ok None | Error _ -> request_actor_hint request)
   | None -> request_actor_hint request
 
+let is_verified_internal_keeper_request ~base_path request =
+  match auth_token_from_request request with
+  | Some token when Auth.verify_internal_keeper_token base_path ~token ->
+      Option.is_some (internal_keeper_agent_from_request request)
+  | _ -> false
+
 let sanitized_dashboard_actor_for_request ~base_path request =
   match dashboard_actor_for_request ~base_path request with
   | Some raw ->

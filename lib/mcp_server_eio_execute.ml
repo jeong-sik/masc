@@ -41,7 +41,8 @@ let direct_call_block_message name =
       name
 
 let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
-    ?mcp_session_id ?auth_token state ~name ~arguments =
+    ?mcp_session_id ?auth_token ?(internal_keeper_runtime = false) state ~name
+    ~arguments =
   (* clock parameter used for Session_eio.wait_for_message *)
   (* mcp_session_id: HTTP MCP session ID for agent_name persistence across tool calls *)
   let module U = Yojson.Safe.Util in
@@ -157,6 +158,17 @@ let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
     | Some _ as token -> token
     | None -> arg_get_string_opt "token"
   in
+  let verified_internal_keeper_runtime =
+    internal_keeper_runtime
+    &&
+    match token with
+    | Some raw -> Auth.verify_internal_keeper_token config.base_path ~token:raw
+    | None -> false
+  in
+  let internal_keeper_runtime_tool =
+    verified_internal_keeper_runtime
+    && Tool_catalog.is_on_surface Tool_catalog.Keeper_internal name
+  in
 
   let resolve_owner_keeper_identity owner_name =
     let candidates =
@@ -193,7 +205,10 @@ let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
   in
 
   let mode_gate_error =
-    if not (Tool_catalog.allow_direct_call name) then
+    if
+      (not internal_keeper_runtime_tool)
+      && not (Tool_catalog.allow_direct_call name)
+    then
       Some (direct_call_block_message name)
     else
       None
@@ -684,10 +699,105 @@ let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
         Printf.sprintf "Unknown tool: %s — did you mean: %s? (%s)"
           name (String.concat ", " xs) reason
   in
+  let internal_keeper_meta_of_agent () =
+    match Keeper_registry.find_by_agent_name agent_name with
+    | Some (entry : Keeper_registry.registry_entry)
+      when String.equal entry.base_path config.base_path ->
+        Ok entry.meta
+    | Some _ | None ->
+        let candidates =
+          [
+            Keeper_types.canonical_keeper_name_from_agent_name agent_name;
+            Keeper_types.canonical_keeper_name agent_name;
+          ]
+          |> List.filter_map (function
+               | Some value when String.trim value <> "" ->
+                   Some (String.trim value)
+               | _ -> None)
+          |> List.sort_uniq String.compare
+        in
+        let rec loop = function
+          | [] ->
+              Error
+                (Printf.sprintf
+                   "Internal keeper runtime request is not bound to a known \
+                    keeper agent: %s"
+                   agent_name)
+          | candidate :: rest -> (
+              match Keeper_types.read_meta_resolved config candidate with
+              | Ok (Some (_resolved_name, meta)) -> Ok meta
+              | Ok None -> loop rest
+              | Error msg -> Error msg)
+        in
+        loop candidates
+  in
+  let dispatch_internal_keeper_runtime_tool () =
+    match Tool_dispatch.run_pre_hooks ~name ~args:arguments with
+    | (Some blocked, _) -> Some (Tool_result.to_legacy blocked)
+    | (None, coerced_args) -> (
+        match internal_keeper_meta_of_agent () with
+        | Error msg -> Some (false, msg)
+        | Ok meta ->
+            let ctx_work =
+              Keeper_exec_context.create ~system_prompt:""
+                ~max_tokens:(Keeper_config.keeper_unified_max_tokens ())
+            in
+            let turn_sandbox_runtime =
+              match meta.Keeper_types.sandbox_profile with
+              | Keeper_types.Docker ->
+                  Some
+                    (Keeper_turn_sandbox_runtime.create ~config ~meta
+                       ~network_mode:meta.network_mode ())
+              | Keeper_types.Local -> None
+            in
+            let turn_sandbox_runtime_git =
+              match meta.Keeper_types.sandbox_profile with
+              | Keeper_types.Docker ->
+                  if Env_config_keeper.KeeperSandbox.hard_mode () then
+                    None
+                  else
+                    Some
+                      (Keeper_turn_sandbox_runtime.create ~config ~meta
+                         ~network_mode:Keeper_types.Network_inherit ())
+              | Keeper_types.Local -> None
+            in
+            let cleanup () =
+              (match turn_sandbox_runtime with
+               | Some runtime -> Keeper_turn_sandbox_runtime.cleanup runtime
+               | None -> ());
+              match turn_sandbox_runtime_git with
+              | Some runtime -> Keeper_turn_sandbox_runtime.cleanup runtime
+              | None -> ()
+            in
+            let exec_cache = Some (Masc_exec.Exec_cache.create ()) in
+            let result =
+              Fun.protect
+                ~finally:cleanup
+                (fun () ->
+                  Keeper_exec_tools.execute_keeper_tool_call_with_outcome
+                    ~config ~meta ~ctx_work ?turn_sandbox_runtime
+                    ?turn_sandbox_runtime_git ~exec_cache ~name
+                    ~input:coerced_args ())
+            in
+            let success =
+              match result.Keeper_exec_tools.outcome with
+              | `Success -> true
+              | `Failure -> false
+            in
+            Some (success, result.raw_output))
+  in
   (* Primary dispatch: mint token at I/O boundary, then O(1) tag lookup.
      Tool_token validates the name exists in the tag registry (Parse, Don't
      Validate). If mint fails, the tool is truly unknown. *)
-  match Tool_dispatch.mint_token ~name with
+  match
+    if internal_keeper_runtime_tool then
+      dispatch_internal_keeper_runtime_tool ()
+    else
+      None
+  with
+  | Some result ->
+      with_system_internal_audit ~agent_name result
+  | None -> match Tool_dispatch.mint_token ~name with
   | Error reason ->
       with_system_internal_audit ~agent_name
         (false, format_unknown_tool_error ~reason)

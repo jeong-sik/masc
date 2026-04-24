@@ -11,6 +11,7 @@ type runtime = Server_mcp_transport_http_types.runtime = {
     ?profile:tool_profile ->
     ?mcp_session_id:string ->
     ?auth_token:string ->
+    ?internal_keeper_runtime:bool ->
     string ->
     Yojson.Safe.t;
   clear_resource_subscriptions_for_session : string -> unit;

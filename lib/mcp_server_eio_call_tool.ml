@@ -318,7 +318,7 @@ let resolve_managed_agent_call ?mcp_session_id params =
 (** Handle tools/call JSON-RPC method *)
 let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     ~broadcast_tools_list_changed ~sw ~clock ?(profile = Full) ?mcp_session_id
-    ?auth_token state id params =
+    ?auth_token ?(internal_keeper_runtime = false) state id params =
   let module U = Yojson.Safe.Util in
   let make_response = Mcp_transport_protocol.make_response in
   let (name, arguments) =
@@ -345,6 +345,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
         match tool_timeout_sec_opt ~tool_name:name ~_arguments:arguments with
         | None ->
             execute_tool_eio ~sw ~clock ?profile:(Some profile) ?mcp_session_id ?auth_token
+              ?internal_keeper_runtime:(Some internal_keeper_runtime)
               state ~name ~arguments
         | Some timeout_sec ->
             (try
@@ -358,6 +359,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
                      ?profile:(Some profile)
                      ?mcp_session_id
                      ?auth_token
+                     ?internal_keeper_runtime:(Some internal_keeper_runtime)
                      state
                      ~name
                      ~arguments)

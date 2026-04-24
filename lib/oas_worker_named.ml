@@ -67,15 +67,27 @@ let keeper_agent_name_opt (keeper_name : string) =
 
 let runtime_mcp_policy_for_tools ~(keeper_name : string) (tools : Oas.Tool.t list)
     =
-  let public_tool_names =
+  let agent_name = keeper_agent_name_opt keeper_name in
+  let runtime_tool_names =
     tools
-    |> Oas_worker_exec.public_mcp_tools_of_oas_tools
-    |> Oas_worker_exec.public_mcp_tool_names_of_oas_tools
+    |> List.filter (fun (tool : Oas.Tool.t) ->
+           Tool_catalog.is_public_mcp tool.schema.name
+           ||
+           (Option.is_some agent_name
+            && Tool_catalog.is_on_surface Tool_catalog.Keeper_internal
+                 tool.schema.name))
+    |> List.map (fun (tool : Oas.Tool.t) -> tool.schema.name)
+  in
+  let has_keeper_internal =
+    List.exists
+      (Tool_catalog.is_on_surface Tool_catalog.Keeper_internal)
+      runtime_tool_names
   in
   match
-    Oas_worker_exec.public_mcp_runtime_policy_of_tool_names
-      ?agent_name:(keeper_agent_name_opt keeper_name) public_tool_names,
-    keeper_agent_name_opt keeper_name
+    Oas_worker_exec.runtime_mcp_policy_of_tool_names
+      ?agent_name
+      ~allow_keeper_internal:has_keeper_internal runtime_tool_names,
+    agent_name
   with
   | Some policy, Some agent_name ->
       Some
@@ -102,13 +114,14 @@ let codex_cli_cannot_carry_keeper_bound_runtime_mcp
   | Llm_provider.Provider_config.Codex_cli, Some agent_name, Some policy
     when Option.is_some (Keeper_identity.keeper_name_from_agent_name agent_name)
     ->
-      List.exists Oas_worker_exec.public_mcp_tool_requires_bound_actor
+      List.exists Oas_worker_exec.runtime_mcp_tool_requires_bound_actor
         policy.allowed_tool_names
   | _ -> false
 
 let filter_candidate_providers_for_tool_support
     ~(keeper_name : string)
     ?runtime_mcp_policy
+    ?(tools = [])
     ~require_tool_choice_support
     ~require_tool_support
     ~label
@@ -123,9 +136,26 @@ let filter_candidate_providers_for_tool_support
              runtime_mcp_policy_for_provider
                ~keeper_name ~provider_cfg runtime_mcp_policy
            in
+           let tool_lane_supported =
+             match tools with
+             | [] -> true
+             | _ -> (
+                 match
+                   Oas_worker_exec.resolve_tool_lane_for_oas_tools
+                     ?agent_name:(keeper_agent_name_opt keeper_name)
+                     ~tool_requirement:
+                       (if require_tool_choice_support || require_tool_support
+                        then `Required
+                        else `Optional)
+                     ~provider_cfg ~tools ()
+                 with
+                 | Ok _ -> true
+                 | Error _ -> false)
+           in
            (not
               (codex_cli_cannot_carry_keeper_bound_runtime_mcp
                  ~keeper_name ~provider_cfg normalized_runtime_mcp_policy))
+           && tool_lane_supported
            && Provider_tool_support.supports_required_tool_use
              ?runtime_mcp_policy:normalized_runtime_mcp_policy
              ~require_tool_choice_support
@@ -957,6 +987,7 @@ let run_named
     filter_candidate_providers_for_tool_support
       ~keeper_name
       ?runtime_mcp_policy
+      ~tools
       ~require_tool_choice_support
       ~require_tool_support
       ~label:cascade_name

@@ -125,7 +125,7 @@ cd masc-mcp
 # Pin private dependencies (OAS, mcp_protocol, etc.)
 scripts/opam-pin-external-deps.sh
 opam install . --deps-only
-dune build
+scripts/dune-local.sh build bin/main_eio.exe
 
 scripts/run-local.sh --target-dir "$PWD"
 PORT="$(scripts/run-local.sh --print-port --target-dir "$PWD")"
@@ -337,8 +337,11 @@ To reproduce CI-style test output with heartbeat logs locally:
 
 ```bash
 CI_TEST_TIMEOUT_SEC=1200 CI_TEST_HEARTBEAT_SEC=30 \
-  scripts/ci-run-tests.sh "opam exec -- dune test --root ."
+  scripts/ci-run-tests.sh "scripts/dune-local.sh test"
 ```
+
+Use raw `opam exec -- dune ...` only for intentional CI-parity checks; normal local
+development should stay on focused targets and the throttled wrapper.
 
 ## Transport and Auth
 

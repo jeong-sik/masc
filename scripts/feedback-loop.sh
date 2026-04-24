@@ -12,6 +12,8 @@ TARGET=${2:-"mitosis"}
 LOG_DIR="logs/feedback-loop"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 LOG_FILE="${LOG_DIR}/${TARGET}_${TIMESTAMP}.jsonl"
+DUNE_BUILD_TARGET="${MASC_LOCAL_DUNE_TARGET:-bin/main_eio.exe}"
+RUN_FULL_TESTS="${MASC_LOCAL_FULL_DUNE_TESTS:-0}"
 
 mkdir -p "$LOG_DIR"
 
@@ -26,23 +28,30 @@ for i in $(seq 1 $ITERATIONS); do
   
   START_TIME=$(date +%s%3N)
   
-  # 1. Build
-  echo "🔨 Building..."
-  if ! opam exec -- dune build --root "$REPO_DIR" 2>&1; then
+  # 1. Build a focused target by default. Full-suite validation belongs in CI
+  # unless this local loop explicitly opts in.
+  echo "🔨 Building $DUNE_BUILD_TARGET..."
+  if ! "$REPO_DIR/scripts/dune-local.sh" build "$DUNE_BUILD_TARGET" 2>&1; then
     echo "{\"iteration\":$i,\"phase\":\"build\",\"status\":\"failed\"}" >> "$LOG_FILE"
     echo "❌ Build failed at iteration $i"
     continue
   fi
   
   # 2. Test
-  echo "🧪 Testing..."
-  TEST_OUTPUT=$(
-    CI_TEST_TIMEOUT_SEC=1200 CI_TEST_HEARTBEAT_SEC=30 \
-      "$REPO_DIR/scripts/ci-run-tests.sh" \
-      "opam exec -- dune test --root \"$REPO_DIR\"" 2>&1 || true
-  )
-  TEST_PASSED=$(echo "$TEST_OUTPUT" | grep -c "Test Successful" || echo "0")
-  TEST_FAILED=$(echo "$TEST_OUTPUT" | grep -c "FAILED\|Error" || echo "0")
+  if [ "$RUN_FULL_TESTS" = "1" ]; then
+    echo "🧪 Testing full suite..."
+    TEST_OUTPUT=$(
+      CI_TEST_TIMEOUT_SEC=1200 CI_TEST_HEARTBEAT_SEC=30 \
+        "$REPO_DIR/scripts/ci-run-tests.sh" \
+        "$REPO_DIR/scripts/dune-local.sh test" 2>&1 || true
+    )
+    TEST_PASSED=$(echo "$TEST_OUTPUT" | grep -c "Test Successful" || echo "0")
+    TEST_FAILED=$(echo "$TEST_OUTPUT" | grep -c "FAILED\|Error" || echo "0")
+  else
+    echo "🧪 Skipping full local test suite. Set MASC_LOCAL_FULL_DUNE_TESTS=1 to opt in."
+    TEST_PASSED=0
+    TEST_FAILED=0
+  fi
   
   # 3. Measure (run metrics if available)
   echo "📊 Measuring..."

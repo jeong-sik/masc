@@ -16,7 +16,13 @@ mktemp_ci_log() {
   fi
 }
 
-TEST_CMD="${1:-opam exec -- dune test}"
+if [[ -n "${1:-}" ]]; then
+  TEST_CMD="$1"
+elif [[ "${GITHUB_ACTIONS:-}" != "true" && -x "scripts/dune-local.sh" ]]; then
+  TEST_CMD="scripts/dune-local.sh test"
+else
+  TEST_CMD="opam exec -- dune test"
+fi
 TEST_TIMEOUT_SEC="${CI_TEST_TIMEOUT_SEC:-1200}"
 HEARTBEAT_SEC="${CI_TEST_HEARTBEAT_SEC:-30}"
 START_EPOCH="$(date +%s)"
@@ -224,7 +230,8 @@ heartbeat() {
 }
 
 test_cmd_needs_dune_sanitization() {
-  [[ "${TEST_CMD}" == *"dune "* ]] && [[ "${TEST_CMD}" != *"unset DUNE_RPC"* ]]
+  ([[ "${TEST_CMD}" == *"dune "* ]] || [[ "${TEST_CMD}" == *"dune-local.sh"* ]]) \
+    && [[ "${TEST_CMD}" != *"unset DUNE_RPC"* ]]
 }
 
 test_cmd_has_explicit_build_dir() {

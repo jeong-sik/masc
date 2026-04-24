@@ -5,7 +5,7 @@ test: test-unit
 
 # Unit tests only (no server required)
 test-unit: doctor-oas-pin
-	scripts/ci-run-tests.sh "opam exec -- dune test --root ."
+	scripts/ci-run-tests.sh "scripts/dune-local.sh test"
 
 # Contract harness (self-bootstrapping, hermetic local server)
 test-contract:
@@ -39,7 +39,7 @@ clean-tlc-artifacts:
 coverage:
 	rm -rf _coverage
 	mkdir -p _coverage
-	CI_TEST_TIMEOUT_SEC=1200 CI_TEST_HEARTBEAT_SEC=30 scripts/ci-run-tests.sh "BISECT_FILE=$(CURDIR)/_coverage/bisect opam exec -- dune test --root . --instrument-with bisect_ppx --force"
+	CI_TEST_TIMEOUT_SEC=1200 CI_TEST_HEARTBEAT_SEC=30 scripts/ci-run-tests.sh "BISECT_FILE=$(CURDIR)/_coverage/bisect scripts/dune-local.sh test --instrument-with bisect_ppx --force"
 
 # Print coverage summary to stdout
 coverage-summary: coverage

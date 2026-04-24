@@ -24,7 +24,7 @@ echo "=== verify-refactor ==="
 
 # 1. Build check
 echo "[1/3] Building..."
-if dune build --root . @install 2>&1 | tail -3; then
+if scripts/dune-local.sh build @install 2>&1 | tail -3; then
   printf "  PASS  build\n"
   PASS=$((PASS + 1))
 else

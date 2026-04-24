@@ -5,7 +5,7 @@ all: build-all
 
 # Build OCaml + dashboard (dashboard rebuilds only when sources changed)
 build: doctor-oas-pin
-	dune build --root .
+	scripts/dune-local.sh build
 	@scripts/build-dashboard-if-needed.sh
 
 # Build dashboard SPA (Vite) — force rebuild
@@ -68,7 +68,7 @@ build-all: build bonsai-dashboard-if-available
 
 # Generate documentation
 doc:
-	dune build --root . @doc
+	scripts/dune-local.sh build @doc
 	@echo "Documentation generated at _build/default/_doc/_html/index.html"
 
 # Install dependencies

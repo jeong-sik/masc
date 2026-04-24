@@ -92,9 +92,9 @@ if $opam_drift; then
   # dune regenerates masc_mcp.opam from dune-project when the (generate_opam_files true)
   # stanza is present. We don't hand-edit the file — that's what the "generated"
   # header tells every tool to expect.
-  info "running: dune build masc_mcp.opam"
-  if ! dune build --root . masc_mcp.opam 2>/dev/null; then
-    echo "sync-version-truth: 'dune build masc_mcp.opam' failed" >&2
+  info "running: scripts/dune-local.sh build masc_mcp.opam"
+  if ! scripts/dune-local.sh build masc_mcp.opam 2>/dev/null; then
+    echo "sync-version-truth: 'scripts/dune-local.sh build masc_mcp.opam' failed" >&2
     exit 1
   fi
 fi

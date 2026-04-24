@@ -183,9 +183,9 @@ require_cmd python3
 require_cmd "${VALGRIND_BIN}"
 
 if [[ "${BUILD_FIRST}" -eq 1 ]]; then
-  require_cmd dune
+  require_cmd "${REPO_ROOT}/scripts/dune-local.sh"
   echo "[memory-leak] building bin/main_eio.exe" >&2
-  dune build --root "${REPO_ROOT}" bin/main_eio.exe
+  "${REPO_ROOT}/scripts/dune-local.sh" build bin/main_eio.exe
 fi
 
 SERVER_EXE="$(harness_find_server_exe "${REPO_ROOT}" "${MASC_MAIN_EIO_EXE:-}")"

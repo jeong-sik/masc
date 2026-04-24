@@ -149,6 +149,12 @@ jobs:
             const policyFailures = bypassPolicyFailures.map((failure) =>
               `unverified bypass label ${failure}`
             );
+            const missingVerifiedApproval = looksAgentAuthored && verifiedBypassLabels.length === 0;
+            if (missingVerifiedApproval) {
+              const expected =
+                bypassLabels.length > 0 ? bypassLabels.join(", ") : "(no configured bypass labels)";
+              policyFailures.push(`missing verified human approval label: ${expected}`);
+            }
             const summarizeError = (error) => {
               const messages = [];
               if (error?.message) messages.push(error.message);
@@ -215,7 +221,9 @@ jobs:
             const statusLine =
               failedActions.length > 0
                 ? "Draft PR guard could not fully reapply protection."
-                : softFailures.length > 0 || policyFailures.length > 0
+                : policyFailures.length > 0
+                ? "Draft PR guard blocked an unapproved agent PR."
+                : softFailures.length > 0
                 ? "Draft PR guard applied with non-critical notes."
                 : `Draft PR guard reapplied: ${actions.join(", ")}.`;
             const actionLines = [
@@ -236,7 +244,12 @@ jobs:
                     "",
                     "Manual action required: restore draft state, or add a bypass label only after explicit human approval."
                   ]
-                : softFailures.length > 0 || policyFailures.length > 0
+                : policyFailures.length > 0
+                ? [
+                    "",
+                    "Manual action required: add a bypass label only after explicit human approval."
+                  ]
+                : softFailures.length > 0
                 ? [
                     "",
                     "Non-critical notes above. Draft state is maintained — no manual action needed."
@@ -276,13 +289,15 @@ jobs:
               softFailures.length > 0 ? `non-critical: ${softFailures.join("; ")}` : ""
             ].filter(Boolean).join("; ");
 
-            // Hard-fail only on critical failures that violate Draft invariants:
+            // Hard-fail on approval policy failures as well as critical
+            // failures that violate Draft invariants:
+            //   - agent-like PR lacks a verified human approval label
             //   - convert-to-draft failed (PR is still Ready when it shouldn't be)
             //   - someone tried to enable auto-merge / flip to draft while a policy is breached.
             // auto-merge disable failure is NOT a hard failure because:
             //   1. GitHub never auto-merges a draft PR regardless of auto-merge setting
             //   2. The convert-to-draft action is the real safety mechanism
-            const hardFailure = failedActions.length > 0;
+            const hardFailure = failedActions.length > 0 || policyFailures.length > 0;
             const draftSafetyViolation =
               (action === "auto_merge_enabled" || action === "converted_to_draft") &&
               policyFailures.length > 0;

@@ -8,6 +8,20 @@
 open Keeper_types
 open Keeper_exec_shared
 
+(* ── P12: Network egress policy ───────────────────────── *)
+
+let egress_policy_path ~(config : Coord.config) ~(meta : keeper_meta) =
+  let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
+  Filename.concat playground "egress.json"
+
+let check_egress ~(config : Coord.config) ~(meta : keeper_meta) ~cmd =
+  let path = egress_policy_path ~config ~meta in
+  let policy = Masc_exec.Egress_policy.of_file path in
+  match Masc_exec.Egress_policy.check_command policy cmd with
+  | Masc_exec.Egress_policy.Allowed -> None
+  | Masc_exec.Egress_policy.Blocked _ as blocked ->
+      Some (Masc_exec.Egress_policy.blocked_to_json blocked)
+
 (* ── Container naming ──────────────────────────────────── *)
 
 let keeper_sandbox_container_name (meta : keeper_meta) =
@@ -343,6 +357,10 @@ let run_docker_with_git_bash
     sandbox_error_json
       "sandbox_profile=docker+git_creds blocks nested container runtimes and host socket references"
   else
+    (* P12: check egress policy for git commands with network access *)
+    (match check_egress ~config ~meta ~cmd with
+     | Some blocked_json -> blocked_json
+     | None ->
     match turn_sandbox_runtime with
     | Some runtime ->
       (match
@@ -391,7 +409,7 @@ let run_docker_with_git_bash
                ( "status",
                  Keeper_alerting_path.process_status_to_json result.status );
                ("output", `String result.output);
-             ])
+             ]))
 
 let run_docker_hardened_bash
     ~(turn_sandbox_runtime : Keeper_turn_sandbox_runtime.t option)
@@ -441,7 +459,11 @@ let run_docker_hardened_bash
                 ("output", `String out);
               ]))
     | _ ->
-      match
+      (* P12: check egress policy before running networked container *)
+      (match check_egress ~config ~meta ~cmd with
+       | Some blocked_json -> blocked_json
+       | None ->
+       match
         run_docker_shell_command_with_status ~config ~meta ~cwd ~timeout_sec
           ~cmd ~git_creds_enabled:false ~network_mode
       with
@@ -460,4 +482,4 @@ let run_docker_hardened_bash
                ( "status",
                  Keeper_alerting_path.process_status_to_json result.status );
                ("output", `String result.output);
-             ])
+             ]))

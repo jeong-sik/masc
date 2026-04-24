@@ -13,6 +13,7 @@ type PendingRpc = {
   resolve: (value: unknown) => void
   reject: (err: Error) => void
 }
+type DashboardRouteState = Pick<RouteState, 'tab' | 'params'>
 
 interface DashboardWsDiscovery {
   enabled?: boolean
@@ -25,10 +26,20 @@ let rpcId = 0
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 let reconnectAttempts = 0
 let lastSubscribeKey = ''
+let desiredRouteState: DashboardRouteState | null = null
 let shouldReconnect = true
+let connectGeneration = 0
 const pending = new Map<number, PendingRpc>()
 
-function routeKey(routeState: Pick<RouteState, 'tab' | 'params'>): string {
+function rememberRouteState(routeState: DashboardRouteState): DashboardRouteState {
+  desiredRouteState = {
+    tab: routeState.tab,
+    params: { ...routeState.params },
+  }
+  return desiredRouteState
+}
+
+function routeKey(routeState: DashboardRouteState): string {
   const params = routeState.params
   return [
     routeState.tab,
@@ -38,7 +49,7 @@ function routeKey(routeState: Pick<RouteState, 'tab' | 'params'>): string {
   ].join(':')
 }
 
-export function dashboardSlicesForRoute(routeState: Pick<RouteState, 'tab' | 'params'>): string[] {
+export function dashboardSlicesForRoute(routeState: DashboardRouteState): string[] {
   const slices = new Set(['shell', 'namespace', 'transport'])
 
   if (routeState.tab === 'workspace' && routeState.params.section === 'planning') {
@@ -248,17 +259,19 @@ function handleMessage(data: unknown): void {
   handleRawPush(record)
 }
 
-export async function subscribeDashboardRoute(routeState: Pick<RouteState, 'tab' | 'params'>): Promise<void> {
+export async function subscribeDashboardRoute(routeState: DashboardRouteState): Promise<void> {
+  const desired = rememberRouteState(routeState)
   if (!dashboardWsReady.value) return
-  const slices = dashboardSlicesForRoute(routeState)
-  const key = `${routeKey(routeState)}|${slices.join(',')}`
+  const slices = dashboardSlicesForRoute(desired)
+  const key = `${routeKey(desired)}|${slices.join(',')}`
   if (key === lastSubscribeKey) return
   lastSubscribeKey = key
   try {
     const result = await sendRpc('dashboard/subscribe', {
-      route: routeKey(routeState),
+      route: routeKey(desired),
       slices,
     })
+    if (lastSubscribeKey !== key) return
     applySubscribeResult(result)
   } catch (err) {
     if (lastSubscribeKey === key) lastSubscribeKey = ''
@@ -266,7 +279,8 @@ export async function subscribeDashboardRoute(routeState: Pick<RouteState, 'tab'
   }
 }
 
-export async function connectDashboardWS(routeState?: Pick<RouteState, 'tab' | 'params'>): Promise<void> {
+export async function connectDashboardWS(routeState?: DashboardRouteState): Promise<void> {
+  if (routeState) rememberRouteState(routeState)
   if (typeof WebSocket === 'undefined') return
   if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
     return
@@ -274,11 +288,17 @@ export async function connectDashboardWS(routeState?: Pick<RouteState, 'tab' | '
 
   shouldReconnect = true
   clearReconnectTimer()
-  const wsUrl = await discoverWsUrl().catch(err => {
-    dashboardWsLastError.value = err instanceof Error ? err.message : String(err)
-    return null
-  })
-  if (!wsUrl) return
+  const generation = ++connectGeneration
+  let wsUrl: string | null
+  try {
+    wsUrl = await discoverWsUrl()
+  } catch (err) {
+    if (generation === connectGeneration && shouldReconnect) {
+      dashboardWsLastError.value = err instanceof Error ? err.message : String(err)
+    }
+    return
+  }
+  if (!wsUrl || !shouldReconnect || generation !== connectGeneration) return
 
   closeSocket()
   const ws = new WebSocket(wsUrl)
@@ -296,8 +316,8 @@ export async function connectDashboardWS(routeState?: Pick<RouteState, 'tab' | '
       .then(() => {
         dashboardWsReady.value = true
         dashboardWsLastError.value = null
-        if (routeState) {
-          void subscribeDashboardRoute(routeState)
+        if (desiredRouteState) {
+          void subscribeDashboardRoute(desiredRouteState)
         }
       })
       .catch(err => {
@@ -325,9 +345,11 @@ export async function connectDashboardWS(routeState?: Pick<RouteState, 'tab' | '
 
 export function disconnectDashboardWS(): void {
   shouldReconnect = false
+  connectGeneration += 1
   clearReconnectTimer()
   dashboardWsConnected.value = false
   dashboardWsReady.value = false
   lastSubscribeKey = ''
+  desiredRouteState = null
   closeSocket()
 }

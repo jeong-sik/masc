@@ -121,6 +121,10 @@ let () =
           Alcotest.test_case "keeper up reseeds identity drift" `Quick
             Test_operator_control_keeper
             .test_keeper_up_reseeds_identity_drift;
+          Alcotest.test_case
+            "keeper status reseeds separator identity drift" `Quick
+            Test_operator_control_keeper
+            .test_keeper_status_reseeds_separator_identity_drift;
           Alcotest.test_case "keeper status exposes model observability"
             `Quick
             Test_operator_control_keeper
@@ -162,6 +166,10 @@ let () =
             `Quick
             Test_operator_control_keeper
             .test_keeper_sandbox_status_exposes_local_summary;
+          Alcotest.test_case
+            "keeper sandbox status reseeds separator identity drift" `Quick
+            Test_operator_control_keeper
+            .test_keeper_sandbox_status_reseeds_separator_identity_drift;
           Alcotest.test_case
             "keeper sandbox start status stop works with fake docker"
             `Quick

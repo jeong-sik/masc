@@ -1185,6 +1185,33 @@ let test_prompt_continuity_drops_inert_idle_directives () =
   check bool "constraints preserved" true
     (contains_substring user "Constraints: repos/ empty")
 
+let test_prompt_continuity_drops_stale_tool_surface_claims () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let obs =
+    {
+      base_observation with
+      continuity_summary =
+        "Goal: restore autonomous tool use\n\
+         Next plan: call keeper_task_claim after checking live policy\n\
+         Constraints: tool surface: masc_* only; no keeper_* tools visible";
+      unclaimed_task_count = 3;
+    }
+  in
+  let _sys, user =
+    UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:obs ()
+  in
+  check bool "continuity section present" true
+    (contains_substring user "### Continuity");
+  check bool "stale masc-only surface removed" false
+    (contains_substring user "masc_* only");
+  check bool "stale missing keeper tools removed" false
+    (contains_substring user "no keeper_* tools");
+  check bool "goal preserved" true
+    (contains_substring user "Goal: restore autonomous tool use");
+  check bool "live policy action preserved" true
+    (contains_substring user "keeper_task_claim")
+
 let test_prompt_includes_mentions_section () =
   let obs =
     { base_observation with
@@ -4845,6 +4872,8 @@ let () =
           test_case "omits empty sections" `Quick test_prompt_omits_empty_sections;
           test_case "continuity drops inert idle directives" `Quick
             test_prompt_continuity_drops_inert_idle_directives;
+          test_case "continuity drops stale tool surface claims" `Quick
+            test_prompt_continuity_drops_stale_tool_surface_claims;
           test_case "includes mentions" `Quick test_prompt_includes_mentions_section;
           test_case "includes board activity" `Quick
             test_prompt_includes_board_activity_section;

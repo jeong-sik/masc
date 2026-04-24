@@ -80,6 +80,20 @@ let drift_keeper_identity config keeper_name ~agent_name =
   | Ok () -> previous_trace_id
   | Error err -> Alcotest.fail ("keeper identity drift write failed: " ^ err)
 
+let check_identity_reseed_reason label json =
+  Alcotest.(check string) label "agent_name_mismatch"
+    Yojson.Safe.Util.(json |> member "identity_reseed" |> member "reason" |> to_string)
+
+let check_keeper_identity_repaired config keeper_name previous_trace_id =
+  let meta = read_keeper_meta_exn config keeper_name in
+  let current_trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+  Alcotest.(check string) "agent name restored to canonical"
+    (Keeper_types.keeper_agent_name keeper_name) meta.agent_name;
+  Alcotest.(check bool) "trace id rotated" true
+    (not (String.equal current_trace_id previous_trace_id));
+  Alcotest.(check bool) "previous trace retained in history" true
+    (List.mem previous_trace_id meta.runtime.trace_history)
+
 let fake_docker_managed_sandbox_script =
   "#!/bin/sh\n\
 state_file=${KEEPER_DOCKER_STATE_FILE:?}\n\
@@ -820,6 +834,121 @@ let test_keeper_up_reseeds_identity_drift () =
         (not (String.equal current_trace_id previous_trace_id));
       Alcotest.(check bool) "previous trace retained in history" true
         (List.mem previous_trace_id meta.runtime.trace_history))
+
+let test_keeper_status_reseeds_separator_identity_drift () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let keeper_name = "issue_king" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_keepalive.stop_keepalive keeper_name;
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      let keeper_ctx : _ Tool_keeper.context =
+        {
+          config;
+          agent_name = "operator";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      let ok, _ =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("goal", `String "Repair status identity drift");
+                ("proactive_enabled", `Bool false);
+                ("autoboot_enabled", `Bool false);
+              ])
+      in
+      Alcotest.(check bool) "keeper up ok" true ok;
+      let previous_trace_id =
+        drift_keeper_identity config keeper_name
+          ~agent_name:"keeper-issue-king-agent"
+      in
+      let ok, body =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_status"
+          ~args:(`Assoc [ ("name", `String keeper_name); ("fast", `Bool true) ])
+      in
+      Alcotest.(check bool) "keeper status repairs identity drift" true ok;
+      let status_json = parse_json_exn body in
+      check_identity_reseed_reason "status reseed reason" status_json;
+      Alcotest.(check string) "status keeps canonical keeper name" keeper_name
+        Yojson.Safe.Util.(status_json |> member "name" |> to_string);
+      check_keeper_identity_repaired config keeper_name previous_trace_id)
+
+let test_keeper_sandbox_status_reseeds_separator_identity_drift () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let keeper_name = "sandbox_issue_king" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_keepalive.stop_keepalive keeper_name;
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      let keeper_ctx : _ Tool_keeper.context =
+        {
+          config;
+          agent_name = "operator";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      let ok, _ =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("goal", `String "Repair sandbox identity drift");
+                ("proactive_enabled", `Bool false);
+                ("autoboot_enabled", `Bool false);
+              ])
+      in
+      Alcotest.(check bool) "keeper up ok" true ok;
+      let previous_trace_id =
+        drift_keeper_identity config keeper_name
+          ~agent_name:"keeper-sandbox-issue-king-agent"
+      in
+      let ok, body =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_sandbox_status"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("include_preflight", `Bool false);
+              ])
+      in
+      Alcotest.(check bool) "sandbox status repairs identity drift" true ok;
+      let body_json = parse_json_exn body in
+      check_identity_reseed_reason "sandbox status reseed reason" body_json;
+      let sandbox_json = Yojson.Safe.Util.member "sandbox" body_json in
+      let open Yojson.Safe.Util in
+      Alcotest.(check bool) "sandbox identity matches canonical agent" true
+        (sandbox_json |> member "identity" |> member "agent_name_matches"
+       |> to_bool);
+      Alcotest.(check string) "sandbox expected canonical agent"
+        (Keeper_types.keeper_agent_name keeper_name)
+        (sandbox_json |> member "identity" |> member "agent_name" |> to_string);
+      check_keeper_identity_repaired config keeper_name previous_trace_id)
 
 let test_keeper_repair_reseeds_identity_drift () =
   Eio_main.run @@ fun env ->

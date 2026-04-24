@@ -44,6 +44,58 @@ let effective_keepalive_meta
       | Some entry -> entry.meta
       | None -> fallback)
 
+let repair_identity_drift_for_keepalive ~(ctx : _ context) (meta : keeper_meta) :
+    keeper_meta option =
+  let expected_agent_name = keeper_agent_name meta.name in
+  if String.equal expected_agent_name meta.agent_name then
+    Some meta
+  else
+    let previous_trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+    let new_trace_id_raw = Keeper_identity.generate_trace_id () in
+    match Keeper_id.Trace_id.of_string new_trace_id_raw with
+    | Error err ->
+        Log.Keeper.error
+          "keepalive identity repair failed for %s: invalid trace_id %s (%s)"
+          meta.name new_trace_id_raw err;
+        None
+    | Ok new_trace_id ->
+        let base_dir = session_base_dir ctx.config in
+        let _session =
+          Keeper_exec_context.create_session ~session_id:new_trace_id_raw
+            ~base_dir
+        in
+        let repaired =
+          {
+            meta with
+            agent_name = expected_agent_name;
+            updated_at = now_iso ();
+            runtime =
+              {
+                meta.runtime with
+                trace_id = new_trace_id;
+                trace_history =
+                  Json_util.dedupe_keep_order
+                    (previous_trace_id :: meta.runtime.trace_history);
+                generation = meta.runtime.generation + 1;
+              };
+          }
+        in
+        (match write_meta ~force:true ctx.config repaired with
+         | Ok () ->
+             Log.Keeper.warn
+               "keepalive repaired identity drift for %s: %s -> %s"
+               meta.name meta.agent_name expected_agent_name;
+             Some repaired
+         | Error err ->
+             Prometheus.inc_counter
+               Prometheus.metric_keeper_write_meta_failures
+               ~labels:[ ("keeper", meta.name); ("phase", "identity_repair") ]
+               ();
+             Log.Keeper.error
+               "keepalive identity repair failed for %s: write_meta failed: %s"
+               meta.name err;
+             None)
+
 (* Global turn slot cap. Safety ceiling for ALL keeper turns (autonomous
    + reactive). Default 12 = headroom for up to 12 keepers. *)
 let keeper_turn_throttle_limit =
@@ -1531,6 +1583,11 @@ let run_heartbeat_loop
           ~fallback:m
           ~disk_meta_opt
       in
+      let meta_current =
+        match repair_identity_drift_for_keepalive ~ctx meta_current with
+        | Some repaired -> repaired
+        | None -> meta_current
+      in
       (* Sync disk meta to registry so dashboard reads live values.  #5364.
          When disk meta is unchanged we still prefer the registry copy because
          runtime writes update it via the write_meta hook. This keeps
@@ -1998,6 +2055,11 @@ let bootstrap_live_keeper_meta ~(ctx : _ context) (m : keeper_meta) : keeper_met
     then (
       let (_init_msg : string) = Coord.init ctx.config ~agent_name:None in
       ());
+    let m =
+      match repair_identity_drift_for_keepalive ~ctx m with
+      | Some repaired -> repaired
+      | None -> m
+    in
     let synced = ensure_keeper_room_presence ctx.config m in
     (match write_meta ~force:true ctx.config synced with
      | Ok () -> ()
@@ -2110,6 +2172,12 @@ let record_keeper_crashed
 
 let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_meta) : unit
   =
+  match repair_identity_drift_for_keepalive ~ctx m with
+  | None ->
+      Log.Keeper.error
+        "start_keepalive skipped %s: identity drift could not be repaired"
+        m.name
+  | Some m -> (
   let existing_entry =
     Keeper_registry.get ~base_path:ctx.config.base_path m.name
   in
@@ -2196,6 +2264,7 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
             end)
         ~finally:(fun () ->
           Keeper_registry.cleanup_tracking ~base_path:ctx.config.base_path live_meta.name)))
+  )
 ;;
 
 let stop_keepalive ?base_path name =

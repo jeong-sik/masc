@@ -240,7 +240,7 @@ let sdk_error_kind = function
   | Oas.Error.A2a _ -> "a2a"
   | Oas.Error.Internal _ -> "internal"
 
-let oas_timeout_guard_sec = 1.0
+let oas_timeout_guard_sec = 30.0
 
 let min_oas_timeout_budget_sec = 30.0
 

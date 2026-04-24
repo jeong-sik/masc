@@ -3818,7 +3818,7 @@ let test_bounded_oas_timeout_caps_to_remaining_turn_budget () =
       ~estimated_input_tokens:2_000 ~remaining_turn_budget_s:235.7
   with
   | Some timeout_s ->
-      check (float 0.01) "remaining budget cap applies" 234.7 timeout_s
+      check (float 0.01) "remaining budget cap leaves finalization guard" 205.7 timeout_s
   | None -> fail "expected bounded timeout"
 
 let test_bounded_oas_timeout_uses_channel_turn_budget_override () =

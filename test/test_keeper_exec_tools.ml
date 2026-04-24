@@ -157,6 +157,98 @@ let test_execute_with_outcome_bad_query_is_failure () =
       check string "bad query payload shape" "structured_error"
         (payload_kind result.payload_shape))
 
+(* ── Exec cache integration tests ──────────────────────────── *)
+
+let test_exec_cache_miss_then_hit () =
+  with_exec_fixture "keeper_exec_cache_hit"
+    (fun ~config ~meta ~ctx_work ->
+      let cache = Masc_exec.Exec_cache.create () in
+      let result1 =
+        KET.execute_keeper_tool_call
+          ~config ~meta ~ctx_work ~exec_cache:(Some cache)
+          ~name:"keeper_bash"
+          ~input:(`Assoc [ ("cmd", `String "echo hello_cache_test") ])
+          ()
+      in
+      let json1 = Yojson.Safe.from_string result1 in
+      (* First call: no cached field *)
+      check bool "first call not cached"
+        true
+        (match Yojson.Safe.Util.member "cached" json1 with
+         | `Bool true -> false
+         | _ -> true);
+      (* Second call with same command: should hit cache *)
+      let result2 =
+        KET.execute_keeper_tool_call
+          ~config ~meta ~ctx_work ~exec_cache:(Some cache)
+          ~name:"keeper_bash"
+          ~input:(`Assoc [ ("cmd", `String "echo hello_cache_test") ])
+          ()
+      in
+      let json2 = Yojson.Safe.from_string result2 in
+      check bool "second call cached"
+        true
+        (match Yojson.Safe.Util.member "cached" json2 with
+         | `Bool true -> true
+         | _ -> false);
+      (* Cache stats: 1 hit, 1 miss *)
+      let hits, misses = Masc_exec.Exec_cache.stats cache in
+      check int "cache hits" 1 hits;
+      check int "cache misses" 1 misses)
+
+let test_exec_cache_none_no_caching () =
+  with_exec_fixture "keeper_exec_cache_none"
+    (fun ~config ~meta ~ctx_work ->
+      (* With exec_cache=None, two identical calls both execute *)
+      let result1 =
+        KET.execute_keeper_tool_call
+          ~config ~meta ~ctx_work ~exec_cache:None
+          ~name:"keeper_bash"
+          ~input:(`Assoc [ ("cmd", `String "echo no_cache_test") ])
+          ()
+      in
+      let json1 = Yojson.Safe.from_string result1 in
+      let result2 =
+        KET.execute_keeper_tool_call
+          ~config ~meta ~ctx_work ~exec_cache:None
+          ~name:"keeper_bash"
+          ~input:(`Assoc [ ("cmd", `String "echo no_cache_test") ])
+          ()
+      in
+      let json2 = Yojson.Safe.from_string result2 in
+      (* Neither should have cached:true *)
+      check bool "first call not cached"
+        true
+        (match Yojson.Safe.Util.member "cached" json1 with
+         | `Bool true -> false
+         | _ -> true);
+      check bool "second call not cached"
+        true
+        (match Yojson.Safe.Util.member "cached" json2 with
+         | `Bool true -> false
+         | _ -> true))
+
+let test_exec_cache_stats_json () =
+  let cache = Masc_exec.Exec_cache.create () in
+  let json = Masc_exec.Exec_cache.to_json cache in
+  check int "initial hit_count" 0
+    Yojson.Safe.Util.(member "hit_count" json |> to_int);
+  check int "initial miss_count" 0
+    Yojson.Safe.Util.(member "miss_count" json |> to_int);
+  check int "initial entry_count" 0
+    Yojson.Safe.Util.(member "entry_count" json |> to_int);
+  (* Store an entry and check *)
+  Masc_exec.Exec_cache.store cache ~cmd:"test_cmd" ~exit_code:0
+    ~output:"test output" ~duration_ms:100;
+  let json2 = Masc_exec.Exec_cache.to_json cache in
+  check int "after store entry_count" 1
+    Yojson.Safe.Util.(member "entry_count" json2 |> to_int);
+  (* Lookup triggers a hit *)
+  ignore (Masc_exec.Exec_cache.lookup cache "test_cmd");
+  let json3 = Masc_exec.Exec_cache.to_json cache in
+  check int "after lookup hit_count" 1
+    Yojson.Safe.Util.(member "hit_count" json3 |> to_int)
+
 let () =
   Masc_test_deps.init_keeper_tool_registry ();
   ignore
@@ -183,5 +275,10 @@ let () =
         test_execute_with_outcome_missing_file_is_failure;
       test_case "bad query is failure" `Quick
         test_execute_with_outcome_bad_query_is_failure;
+    ]);
+    ("exec_cache", [
+      test_case "miss then hit" `Quick test_exec_cache_miss_then_hit;
+      test_case "no cache when None" `Quick test_exec_cache_none_no_caching;
+      test_case "stats json" `Quick test_exec_cache_stats_json;
     ]);
   ]

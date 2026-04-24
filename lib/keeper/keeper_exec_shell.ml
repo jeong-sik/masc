@@ -1041,6 +1041,77 @@ let handle_keeper_bash
                    else None
                  with
                  | None ->
+                   (* P21: exec cache for foreground path *)
+                   (match exec_cache with
+                    | Some cache ->
+                      (match Masc_exec.Exec_cache.lookup cache cmd with
+                       | Some entry ->
+                         let st = Unix.WEXITED entry.exit_code in
+                         Yojson.Safe.to_string
+                           (Exec_core.process_result_json
+                              ~base_path:root
+                              ~keeper_name:meta.name
+                              ~cmd
+                              ~extra:[
+                                "cwd", `String cwd;
+                                "execution_time_ms", `Int entry.duration_ms;
+                                "cached", `Bool true;
+                                "cache_age_ms",
+                                  `Int (int_of_float
+                                          ((Unix.time () -. entry.cached_at) *. 1000.));
+                              ]
+                              ~status:st
+                              ~output:entry.output
+                              ~env_snapshot:env_snap
+                              ())
+                       | None ->
+                         let t0 = Unix.gettimeofday () in
+                         let st, out =
+                           Process_eio.run_argv_with_status
+                             ~cwd ~timeout_sec argv_merged
+                         in
+                         let elapsed_ms =
+                           int_of_float ((Unix.gettimeofday () -. t0) *. 1000.)
+                         in
+                         if not (process_status_is_timeout st) then begin
+                           let exit_code = match st with
+                             | Unix.WEXITED n -> n
+                             | Unix.WSIGNALED n -> 128 + n
+                             | Unix.WSTOPPED n -> 256 + n
+                           in
+                           Masc_exec.Exec_cache.store cache
+                             ~cmd ~exit_code ~output:out ~duration_ms:elapsed_ms
+                         end;
+                         (if auto_bg_observe_enabled then begin
+                            let budget_ms =
+                              Masc_exec.Exec_run.default_budget_ms ()
+                            in
+                            let promoted_candidate = elapsed_ms >= budget_ms in
+                            Legendary_counters.incr_auto_bg_observed
+                              ~promoted_candidate;
+                            if promoted_candidate then
+                              Log.Keeper.info
+                                "auto_bg_would_have_promoted keeper=%s \
+                                 cmd_hash=%s duration_ms=%d budget_ms=%d"
+                                meta.name
+                                (Worker_dev_tools.cmd_hash_for_log cmd)
+                                elapsed_ms
+                                budget_ms
+                          end);
+                         Yojson.Safe.to_string
+                           (Exec_core.process_result_json
+                              ~base_path:root
+                              ~keeper_name:meta.name
+                              ~cmd
+                              ~extra:[
+                                "cwd", `String cwd;
+                                "execution_time_ms", `Int elapsed_ms;
+                              ]
+                              ~status:st
+                              ~output:out
+                              ~env_snapshot:env_snap
+                              ()))
+                    | None ->
                    let t0 = Unix.gettimeofday () in
                    let st, out =
                      Process_eio.run_argv_with_status
@@ -1077,7 +1148,7 @@ let handle_keeper_bash
                         ~status:st
                         ~output:out
                         ~env_snapshot:env_snap
-                        ())
+                        ()))
                  | Some clock ->
                    let budget_ms = Masc_exec.Exec_run.default_budget_ms () in
                    let t0_bg = Unix.gettimeofday () in
@@ -1098,6 +1169,18 @@ let handle_keeper_bash
                       let elapsed_ms =
                         int_of_float ((Unix.gettimeofday () -. t0_bg) *. 1000.)
                       in
+                      (* P21: store in exec cache if not a timeout *)
+                      if not (process_status_is_timeout r.status) then
+                        (match exec_cache with
+                         | Some cache ->
+                           let exit_code = match r.status with
+                             | Unix.WEXITED n -> n
+                             | Unix.WSIGNALED n -> 128 + n
+                             | Unix.WSTOPPED n -> 256 + n
+                           in
+                           Masc_exec.Exec_cache.store cache
+                             ~cmd ~exit_code ~output:r.stdout ~duration_ms:elapsed_ms
+                         | None -> ());
                       Yojson.Safe.to_string
                         (Exec_core.process_result_json
                            ~base_path:root

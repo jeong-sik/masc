@@ -428,6 +428,7 @@
    keeper_memory_recall
    keeper_skill_routing
    keeper_sandbox
+   keeper_sandbox_control
    keeper_repo_readiness
    keeper_alerting
    keeper_alerting_path
@@ -704,6 +705,7 @@
   tool_autoresearch_cycle
   keeper_skill_routing
   keeper_sandbox
+  keeper_sandbox_control
   keeper_alerting_path
   keeper_sandbox_containment
   keeper_sandbox_runtime

@@ -1758,23 +1758,37 @@ let canonical_keeper_name_from_agent_name =
 
 let canonical_keeper_name = Keeper_identity.canonical_keeper_name
 
+let separator_alias_variants name =
+  let map_sep ~from_ch ~to_ch value =
+    String.map (fun c -> if c = from_ch then to_ch else c) value
+  in
+  Json_util.dedupe_keep_order
+    [ name; map_sep ~from_ch:'_' ~to_ch:'-' name; map_sep ~from_ch:'-' ~to_ch:'_' name ]
+
 let read_meta_resolved config name : ((string * keeper_meta) option, string) result =
   let requested_name = String.trim name in
   let read_candidate candidate =
     read_meta_file_path (keeper_meta_path config candidate)
     |> Result.map (Option.map (fun meta -> (candidate, meta)))
   in
+  let rec read_first = function
+    | [] -> Ok None
+    | candidate :: rest -> (
+        match read_candidate candidate with
+        | Ok None -> read_first rest
+        | Ok (Some _) as ok -> ok
+        | Error _ as err -> err)
+  in
   if requested_name = "" then
     Ok None
   else
-    match read_candidate requested_name with
-    | Ok None -> (
-        match keeper_name_from_agent_name requested_name with
-        | Some alias_name when not (String.equal alias_name requested_name) ->
-            read_candidate alias_name
-        | _ -> Ok None)
-    | Ok (Some _) as ok -> ok
-    | Error _ as err -> err
+    let alias_candidates =
+      match keeper_name_from_agent_name requested_name with
+      | Some alias_name when not (String.equal alias_name requested_name) ->
+          separator_alias_variants alias_name
+      | _ -> []
+    in
+    read_first (separator_alias_variants requested_name @ alias_candidates)
 ;;
 
 let read_meta config name : (keeper_meta option, string) result =

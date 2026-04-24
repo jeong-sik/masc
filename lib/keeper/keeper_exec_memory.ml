@@ -380,6 +380,11 @@ let keeper_context_status_json
   in
   let playground_mind = sandbox_root ^ "/mind/" in
   let playground_repos = sandbox_root ^ "/repos/" in
+  let sandbox_live =
+    Keeper_sandbox_control.live_status_json
+      ~include_preflight:true
+      ~config ~meta ~timeout_sec:3.0 ~verbose:false ()
+  in
   Yojson.Safe.to_string
     (`Assoc
         ([ "name", `String meta.name
@@ -393,7 +398,8 @@ let keeper_context_status_json
         ]
         @ Keeper_sandbox.context_status_fields sandbox
         @
-        [ (* Legacy aliases kept for one release. Prompts use sandbox_*.
+        [ "sandbox_live", sandbox_live
+        ; (* Legacy aliases kept for one release. Prompts use sandbox_*.
              Values are still present for old keeper continuations. *)
           "playground_bundle", `String playground_bundle
         ; "playground_mind", `String playground_mind

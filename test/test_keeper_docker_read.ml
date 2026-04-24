@@ -134,6 +134,7 @@ let with_fake_docker script f =
     | _ -> dir
   in
   Fun.protect ~finally:(fun () -> cleanup_dir dir) @@ fun () ->
+  with_env "MASC_TEST_FAKE_DOCKER_PATH" docker_path @@ fun () ->
   with_env "PATH" path f
 
 let test_container_path_root_maps () =
@@ -389,11 +390,11 @@ case \"$1\" in\n\
     for arg in \"$@\"; do last=\"$arg\"; done\n\
     case \"$last\" in\n\
       old-container)\n\
-        printf '999999\\t100.000\\ttrue\\n'\n\
+        printf '999999\\t100.000\\ttrue\\t600\\n'\n\
         exit 0\n\
         ;;\n\
       fresh-container)\n\
-        printf '%s\\t990.000\\ttrue\\n' \"${KEEPER_TEST_PID:-1}\"\n\
+        printf '%s\\t990.000\\ttrue\\t600\\n' \"${KEEPER_TEST_PID:-1}\"\n\
         exit 0\n\
         ;;\n\
     esac\n\
@@ -439,6 +440,37 @@ let test_sandbox_container_label_args_include_owner_scope () =
     (has_label_prefix "masc.mcp.started_at=");
   Alcotest.(check bool) "network label" true
     (has_label "masc.mcp.network=none")
+
+let test_sandbox_container_label_args_include_managed_ttl () =
+  let args =
+    Keeper_sandbox_runtime.docker_label_args
+      ~ttl_sec:90.0
+      ~base_path:"/tmp/masc"
+      ~keeper_name:"issue-king"
+      ~container_kind:"managed"
+      ~network_label:"inherit" ()
+  in
+  let has_label value = List.mem value args in
+  Alcotest.(check bool) "managed kind label" true
+    (has_label "masc.mcp.kind=managed");
+  Alcotest.(check bool) "ttl label" true
+    (has_label "masc.mcp.ttl_sec=90");
+  Alcotest.(check bool) "inherit network label" true
+    (has_label "masc.mcp.network=inherit")
+
+let test_docker_network_args_follow_masc_policy () =
+  let args_none, label_none =
+    Keeper_sandbox_runtime.docker_network_args Keeper_types.Network_none
+  in
+  Alcotest.(check (list string)) "network none passes docker flag"
+    [ "--network"; "none" ] args_none;
+  Alcotest.(check string) "network none label" "none" label_none;
+  let args_inherit, label_inherit =
+    Keeper_sandbox_runtime.docker_network_args Keeper_types.Network_inherit
+  in
+  Alcotest.(check (list string)) "network inherit omits docker flag"
+    [] args_inherit;
+  Alcotest.(check string) "network inherit label" "inherit" label_inherit
 
 let test_cleanup_stale_containers_removes_only_stale_masc_scope () =
   with_fake_docker fake_docker_cleanup_script @@ fun () ->
@@ -737,6 +769,12 @@ let run_tests () =
         ] );
       ( "container_path_of_host",
         [
+          Alcotest.test_case "docker network args follow policy" `Quick
+            test_docker_network_args_follow_masc_policy;
+          Alcotest.test_case "managed label args include ttl" `Quick
+            test_sandbox_container_label_args_include_managed_ttl;
+          Alcotest.test_case "sandbox label args include owner scope" `Quick
+            test_sandbox_container_label_args_include_owner_scope;
           Alcotest.test_case "playground root maps to container root"
             `Quick test_container_path_root_maps;
           Alcotest.test_case "nested host path maps with suffix" `Quick

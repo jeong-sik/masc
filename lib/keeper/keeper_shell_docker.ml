@@ -167,9 +167,7 @@ let run_docker_shell_command_with_status
         if git_creds_enabled then
           ([ "--network"; "bridge" ], "bridge")
         else
-          match network_mode with
-          | Network_none -> ([ "--network"; "none" ], "none")
-          | Network_inherit -> ([], network_mode_to_string network_mode)
+          Keeper_sandbox_runtime.docker_network_args network_mode
       in
       let cred_root = "/tmp/keeper-creds" in
       let cred_mounts, cred_envs =
@@ -255,13 +253,13 @@ let run_docker_shell_command_with_status
           [ "-e"; "GH_TOKEN=" ^ gh_token ]
       in
       let argv =
-        [
-          Keeper_sandbox_runtime.docker_command ();
-          "run";
-          "--rm";
-          "--name";
-          container_name;
-        ]
+        Keeper_sandbox_runtime.docker_command_argv ()
+        @ [
+            "run";
+            "--rm";
+            "--name";
+            container_name;
+          ]
         @ Keeper_sandbox_runtime.docker_label_args
             ~base_path:config.base_path
             ~keeper_name:meta.name

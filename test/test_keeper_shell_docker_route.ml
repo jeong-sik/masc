@@ -539,6 +539,17 @@ let test_git_creds_skips_missing_ssh_auth_sock () =
   Alcotest.(check bool) "missing ssh-agent env is not forwarded" false
     (contains_substring line "SSH_AUTH_SOCK=/tmp/keeper-creds/ssh-agent.sock")
 
+let test_git_creds_inherit_network_omits_invalid_network_flag () =
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup ~sandbox:Keeper_types.Docker
+  @@ fun ~config ~meta ~playground ->
+  let log_path = Filename.concat config.Coord.base_path "docker.log" in
+  let line =
+    run_git_creds_docker_shell ~config ~meta ~playground ~log_path
+  in
+  Alcotest.(check bool) "network inherit never uses invalid flag value" false
+    (contains_substring line "--network inherit")
+
 let test_git_creds_respects_keeper_alias_identity_mode () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types.Docker
@@ -670,6 +681,9 @@ let () =
           Alcotest.test_case
             "git-creds skips missing SSH_AUTH_SOCK"
             `Quick test_git_creds_skips_missing_ssh_auth_sock;
+          Alcotest.test_case
+            "git-creds inherit network omits invalid docker flag"
+            `Quick test_git_creds_inherit_network_omits_invalid_network_flag;
           Alcotest.test_case
             "git-creds respects keeper_alias git identity mode"
             `Quick test_git_creds_respects_keeper_alias_identity_mode;

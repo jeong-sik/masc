@@ -69,6 +69,85 @@ let annotate_keeper_json ~runtime_class json =
       `Assoc (("runtime_class", `String runtime_class) :: fields)
   | other -> other
 
+let attach_assoc_field key value = function
+  | `Assoc fields -> `Assoc ((key, value) :: fields)
+  | other -> other
+
+let maybe_reseed_keeper_identity ctx (meta : keeper_meta) =
+  let expected_agent_name = Keeper_types.keeper_agent_name meta.name in
+  if String.equal expected_agent_name meta.agent_name then
+    Ok (meta, None)
+  else
+    let previous_trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+    let new_trace_id_raw = Keeper_identity.generate_trace_id () in
+    match Keeper_id.Trace_id.of_string new_trace_id_raw with
+    | Error err ->
+        Error
+          (Printf.sprintf
+             "failed to reseed keeper identity for %s: invalid trace_id %s (%s)"
+             meta.name new_trace_id_raw err)
+    | Ok new_trace_id ->
+        let base_dir = Keeper_types.session_base_dir ctx.config in
+        let _session =
+          Keeper_exec_context.create_session ~session_id:new_trace_id_raw
+            ~base_dir
+        in
+        let updated_meta =
+          {
+            meta with
+            agent_name = expected_agent_name;
+            updated_at = Keeper_types.now_iso ();
+            runtime =
+              {
+                meta.runtime with
+                trace_id = new_trace_id;
+                trace_history =
+                  Json_util.dedupe_keep_order
+                    (previous_trace_id :: meta.runtime.trace_history);
+                generation = meta.runtime.generation + 1;
+              };
+          }
+        in
+        (match Keeper_types.write_meta ~force:true ctx.config updated_meta with
+         | Ok () ->
+             Keeper_status_detail.invalidate_status_cache_for updated_meta.name;
+             Ok
+               ( updated_meta,
+                 Some
+                   (`Assoc
+                      [
+                        ("reason", `String "agent_name_mismatch");
+                        ("keeper_name", `String updated_meta.name);
+                        ("previous_agent_name", `String meta.agent_name);
+                        ("expected_agent_name", `String expected_agent_name);
+                        ("previous_trace_id", `String previous_trace_id);
+                        ("new_trace_id", `String new_trace_id_raw);
+                      ]) )
+         | Error err ->
+             Error
+               (Printf.sprintf
+                  "failed to persist reseeded keeper identity for %s: %s"
+                  meta.name err))
+
+let prepare_keeper_up_identity ctx args =
+  let name = String.trim (get_string args "name" "") in
+  match read_meta_resolved ctx.config name with
+  | Ok (Some (_resolved_name, meta)) -> (
+      match maybe_reseed_keeper_identity ctx meta with
+      | Ok (updated_meta, identity_reseed) ->
+          let prepared_args =
+            match args with
+            | `Assoc fields ->
+                `Assoc
+                  (("name", `String updated_meta.name)
+                  :: List.remove_assoc "name" fields)
+            | other -> other
+          in
+          Ok (prepared_args, identity_reseed)
+      | Error _ as err -> err)
+  | Ok None -> Ok (args, None)
+  | Error err -> Error (Printf.sprintf "❌ %s" err)
+
 let startup_not_ready_error_json elapsed =
   `Assoc
     [
@@ -91,17 +170,27 @@ let with_keeper_startup_gate f =
     f ()
 
 let execute_keeper_up ctx args : tool_result =
-  let ok, body = Turn.handle_keeper_up ctx args in
-  if not ok then (ok, body)
-  else
-    let json =
-      try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
-    in
-    invalidate_keeper_list_cache ();
-    Keeper_status_detail.invalidate_status_cache_for (get_string args "name" "");
-    (true,
-     Yojson.Safe.pretty_to_string
-       (annotate_keeper_json ~runtime_class:"keeper" json))
+  match prepare_keeper_up_identity ctx args with
+  | Error err -> (false, err)
+  | Ok (prepared_args, identity_reseed) ->
+      let ok, body = Turn.handle_keeper_up ctx prepared_args in
+      if not ok then
+        (ok, body)
+      else
+        let json =
+          try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
+        in
+        let json =
+          match identity_reseed with
+          | Some note -> attach_assoc_field "identity_reseed" note json
+          | None -> json
+        in
+        invalidate_keeper_list_cache ();
+        Keeper_status_detail.invalidate_status_cache_for
+          (get_string prepared_args "name" "");
+        (true,
+         Yojson.Safe.pretty_to_string
+           (annotate_keeper_json ~runtime_class:"keeper" json))
 
 let keeper_brief_meta_json (meta : keeper_meta) =
   `Assoc
@@ -359,7 +448,7 @@ let default_keeper_model_label (meta : keeper_meta) =
       | _ -> Env_config.Local_runtime.default_model)
   | model -> model
 
-let annotate_keeper_repair_json ~(keeper_name : string) body =
+let annotate_keeper_repair_json ?identity_reseed ~(keeper_name : string) body =
   let parsed =
     try Some (Yojson.Safe.from_string body) with Yojson.Json_error _ -> None
   in
@@ -367,10 +456,15 @@ let annotate_keeper_repair_json ~(keeper_name : string) body =
   | Some (`Assoc fields) ->
       Yojson.Safe.pretty_to_string
         (`Assoc
-          ( ("runtime_class", `String "keeper")
-          :: ("keeper_name", `String keeper_name)
-          :: ("delegated_tool", `String "masc_keeper_repair")
-          :: fields ))
+          ((match identity_reseed with
+            | Some note -> [ ("identity_reseed", note) ]
+            | None -> [])
+          @ [
+              ("runtime_class", `String "keeper");
+              ("keeper_name", `String keeper_name);
+              ("delegated_tool", `String "masc_keeper_repair");
+            ]
+          @ fields))
   | _ -> body
 
 (* Playground path containment helpers (inlined from deleted Tool_repair_loop). *)
@@ -446,7 +540,10 @@ let resolve_playground_working_dir ~agent_name ~base_path ~working_dir_arg =
 let handle_keeper_repair ctx args : tool_result =
   match resolve_keeper_meta ctx args with
   | Error err -> (false, err)
-  | Ok meta ->
+  | Ok meta -> (
+      match maybe_reseed_keeper_identity ctx meta with
+      | Error err -> (false, err)
+      | Ok (meta, identity_reseed) ->
       let task_spec = get_string args "task_spec" "" in
       if String.trim task_spec = "" then
         (false, "task_spec is required")
@@ -520,7 +617,9 @@ let handle_keeper_repair ctx args : tool_result =
                     (false, {|{"error":"team session oas bridge removed"}|})
                   in
                   invalidate_status_cache meta.name;
-                  (ok, annotate_keeper_repair_json ~keeper_name:meta.name body)
+                  ( ok,
+                    annotate_keeper_repair_json ?identity_reseed
+                      ~keeper_name:meta.name body ))
 
 let handle_keeper_down ctx args : tool_result =
   invalidate_keeper_list_cache ();
@@ -567,6 +666,136 @@ let handle_keeper_list ctx args : tool_result =
         Yojson.Safe.pretty_to_string json)
   in
   (true, body)
+
+let parse_network_mode_or_error raw =
+  match network_mode_of_string raw with
+  | Some mode -> Ok mode
+  | None ->
+      Error
+        (Printf.sprintf "invalid network_mode %S (allowed: %s)" raw
+           (String.concat ", " valid_network_mode_strings))
+
+let handle_keeper_sandbox_status ctx args : tool_result =
+  let verbose = get_bool args "verbose" false in
+  let include_preflight = get_bool args "include_preflight" true in
+  let timeout_sec = min 20.0 (max 1.0 (get_float args "timeout_sec" 5.0)) in
+  let render_item (meta : keeper_meta) =
+    Keeper_sandbox_control.live_status_json
+      ~include_preflight ~config:ctx.config ~meta ~timeout_sec ~verbose ()
+  in
+  match String.trim (get_string args "name" "") with
+  | "" ->
+      let items =
+        Keeper_registry.all ~base_path:ctx.config.base_path ()
+        |> List.sort (fun (a : Keeper_registry.registry_entry)
+                          (b : Keeper_registry.registry_entry) ->
+             String.compare a.name b.name)
+        |> List.filter_map (fun (entry : Keeper_registry.registry_entry) ->
+             match read_meta ctx.config entry.name with
+             | Ok (Some meta) -> Some (render_item meta)
+             | Ok None | Error _ -> None)
+      in
+      ( true,
+        Yojson.Safe.pretty_to_string
+          (`Assoc
+             [
+               ("count", `Int (List.length items));
+               ("items", `List items);
+             ]) )
+  | _ ->
+      (match resolve_keeper_meta ctx args with
+       | Error err -> (false, err)
+       | Ok meta ->
+           ( true,
+             Yojson.Safe.pretty_to_string
+               (`Assoc
+                  [
+                    ("keeper", `String meta.name);
+                    ("sandbox", render_item meta);
+                  ]) ))
+
+let handle_keeper_sandbox_start ctx args : tool_result =
+  match resolve_keeper_meta ctx args with
+  | Error err -> (false, err)
+  | Ok meta ->
+      let timeout_sec = min 30.0 (max 1.0 (get_float args "timeout_sec" 10.0)) in
+      let ttl_sec = min 86_400.0 (max 1.0 (get_float args "ttl_sec" 1800.0)) in
+      let network_mode_raw =
+        String.trim
+          (get_string args "network_mode"
+             (network_mode_to_string meta.network_mode))
+      in
+      (match parse_network_mode_or_error network_mode_raw with
+       | Error err -> (false, err)
+       | Ok network_mode -> (
+           match
+             Keeper_sandbox_control.start_managed_container
+               ~config:ctx.config ~meta ~network_mode ~ttl_sec ~timeout_sec ()
+           with
+           | Error err -> (false, err)
+           | Ok result ->
+               invalidate_status_cache meta.name;
+               ( true,
+                 Yojson.Safe.pretty_to_string
+                   (`Assoc
+                      [
+                        ("keeper", `String meta.name);
+                        ("action", `String "start");
+                        ("sandbox", result);
+                      ]) )))
+
+let handle_keeper_sandbox_stop ctx args : tool_result =
+  let timeout_sec = min 30.0 (max 1.0 (get_float args "timeout_sec" 10.0)) in
+  let prune_stale = get_bool args "prune_stale" false in
+  let keeper_name =
+    match String.trim (get_string args "name" "") with
+    | "" -> None
+    | name -> Some name
+  in
+  let stop_result =
+    Keeper_sandbox_control.stop_managed_containers
+      ?keeper_name ~config:ctx.config ~timeout_sec ()
+  in
+  let stale_cleanup =
+    if prune_stale then
+      Some
+        (Keeper_sandbox_control.cleanup_stale ~config:ctx.config
+           ~timeout_sec:(min timeout_sec 5.0) ())
+    else
+      None
+  in
+  (match keeper_name with
+   | Some name -> invalidate_status_cache name
+   | None -> Keeper_status_detail.invalidate_status_cache_all ());
+  let stop_json =
+    `Assoc
+      [
+        ("matched", `Int stop_result.matched);
+        ("removed", `Int stop_result.removed);
+        ("errors", `List (List.map (fun err -> `String err) stop_result.errors));
+      ]
+  in
+  let stale_json =
+    match stale_cleanup with
+    | None -> `Null
+    | Some cleanup ->
+        `Assoc
+          [
+            ("scanned", `Int cleanup.scanned);
+            ("removed", `Int cleanup.removed);
+            ("errors",
+             `List (List.map (fun err -> `String err) cleanup.errors));
+          ]
+  in
+  ( true,
+    Yojson.Safe.pretty_to_string
+      (`Assoc
+         [
+           ("action", `String "stop");
+           ("keeper", Json_util.string_opt_to_json keeper_name);
+           ("stop_result", stop_json);
+           ("stale_cleanup", stale_json);
+         ]) )
 
 (* masc_keeper_reconcile tool removed along with the manual_reconcile
    blocker mechanism. Failed turns record evidence via Keeper_registry;
@@ -914,6 +1143,9 @@ let dispatch ctx ~name ~args : tool_result option =
   | "masc_keeper_repair" -> Some (handle_keeper_repair ctx args)
   | "masc_keeper_down" -> Some (handle_keeper_down ctx args)
   | "masc_keeper_list" -> Some (handle_keeper_list ctx args)
+  | "masc_keeper_sandbox_status" -> Some (handle_keeper_sandbox_status ctx args)
+  | "masc_keeper_sandbox_start" -> Some (handle_keeper_sandbox_start ctx args)
+  | "masc_keeper_sandbox_stop" -> Some (handle_keeper_sandbox_stop ctx args)
   | "masc_keeper_reset" -> Some (handle_keeper_reset ctx args)
   | "masc_keeper_compact" -> Some (handle_keeper_compact ctx args)
   | "masc_keeper_clear" -> Some (handle_keeper_clear ctx args)
@@ -934,14 +1166,17 @@ let dispatch_stream ~on_text_delta ctx ~name ~args : tool_result option =
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
-let _tool_spec_read_only = [ "masc_keeper_list"; "masc_keeper_status" ]
+let _tool_spec_read_only =
+  [ "masc_keeper_list"; "masc_keeper_status"; "masc_keeper_sandbox_status" ]
 
 let tool_required_permission = function
-  | "masc_persona_list" | "masc_keeper_list" | "masc_keeper_status" ->
+  | "masc_persona_list" | "masc_keeper_list" | "masc_keeper_status"
+  | "masc_keeper_sandbox_status" ->
       Some Types.CanReadState
   | "masc_keeper_create_from_persona" | "masc_keeper_up"
   | "masc_keeper_msg" | "masc_keeper_msg_result"
   | "masc_keeper_repair"
+  | "masc_keeper_sandbox_start" | "masc_keeper_sandbox_stop"
   | "masc_keeper_down" | "masc_keeper_reset"
   | "masc_keeper_compact" | "masc_keeper_clear" ->
       Some Types.CanBroadcast

@@ -249,6 +249,9 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
       <div class="rounded border ${toneClass} px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-[var(--text-body)]">
         ${keeper.paused
           ? html`<span class="inline-flex items-center rounded-sm px-2 py-0.5 text-2xs font-semibold bg-[var(--warn-14)] text-[var(--warn)]">일시정지</span>
+            ${keeper.last_autonomous_action_at
+              ? html`<span class="text-[var(--text-muted)]">마지막 행동 이후 <${TimeAgo} timestamp=${keeper.last_autonomous_action_at} /></span>`
+              : null}
             <button
               class="inline-flex items-center rounded px-2 py-0.5 text-2xs font-medium bg-[var(--white-6)] hover:bg-[var(--white-8)] text-[var(--text-strong)] transition-colors disabled:opacity-50"
               disabled=${directiveLoading.value}

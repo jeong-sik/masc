@@ -137,6 +137,19 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
       | Some o -> o | None -> "*"
     in
     let cors = cors_headers origin in
+    (* [with_server_state] (#9793): HTTP-layer replacement for the
+       [get_server_state] raise-wrapper. Returns a controlled 500 JSON
+       error when server state is not initialized, instead of raising
+       [Failure] and crashing the request fiber. Mirrors the pattern
+       [handle_post_graphql] already uses via [get_server_state_result]. *)
+    let with_server_state h2_reqd f =
+      match get_server_state_result () with
+      | Ok state -> f state
+      | Error message ->
+          h2_respond_json h2_reqd
+            (server_state_error_json message)
+            ~status:`Internal_server_error ~extra_headers:cors
+    in
     let session_id_opt = get_session_id_any httpun_request in
     let h2_respond_dashboard_index () =
       let index_path = dashboard_index_path () in
@@ -550,52 +563,52 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
       | `GET, "/api/v1/dashboard/project-snapshot"
       | `GET, "/api/v1/dashboard/namespace-truth"
       | `GET, "/api/v1/dashboard/room-truth" ->
-          let state = get_server_state () in
-          let json =
-            dashboard_namespace_truth_http_json ~state ~sw ~clock httpun_request
-          in
-          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+          with_server_state h2_reqd (fun state ->
+            let json =
+              dashboard_namespace_truth_http_json ~state ~sw ~clock httpun_request
+            in
+            h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/execution" ->
-          let state = get_server_state () in
-          let json = dashboard_execution_http_json ~state ~sw ~clock httpun_request in
-          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+          with_server_state h2_reqd (fun state ->
+            let json = dashboard_execution_http_json ~state ~sw ~clock httpun_request in
+            h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/execution-trust" ->
-          let state = get_server_state () in
-          let json =
-            dashboard_execution_trust_http_json ~state ~sw ~clock
-              httpun_request
-          in
-          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+          with_server_state h2_reqd (fun state ->
+            let json =
+              dashboard_execution_trust_http_json ~state ~sw ~clock
+                httpun_request
+            in
+            h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/board" ->
           let json = dashboard_memory_http_json httpun_request in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
       | `GET, "/api/v1/dashboard/governance" ->
-          let state = get_server_state () in
-          let json =
-            dashboard_governance_http_json httpun_request
-              ~base_path:state.Mcp_server.room_config.base_path
-          in
-          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+          with_server_state h2_reqd (fun state ->
+            let json =
+              dashboard_governance_http_json httpun_request
+                ~base_path:state.Mcp_server.room_config.base_path
+            in
+            h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/planning" ->
-          let state = get_server_state () in
-          let json =
-            dashboard_planning_http_json
-              ~config:state.Mcp_server.room_config
-          in
-          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+          with_server_state h2_reqd (fun state ->
+            let json =
+              dashboard_planning_http_json
+                ~config:state.Mcp_server.room_config
+            in
+            h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/goals" ->
-          let state = get_server_state () in
-          let json =
-            dashboard_goals_tree_http_json
-              ~config:state.Mcp_server.room_config
-          in
-          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+          with_server_state h2_reqd (fun state ->
+            let json =
+              dashboard_goals_tree_http_json
+                ~config:state.Mcp_server.room_config
+            in
+            h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/goals/detail" ->
           let state = get_server_state () in
@@ -639,32 +652,32 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
               ~extra_headers:cors
 
       | `GET, "/api/v1/dashboard/mission" ->
-          let state = get_server_state () in
-          let json = dashboard_mission_http_json ~state ~sw ~clock httpun_request in
-          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+          with_server_state h2_reqd (fun state ->
+            let json = dashboard_mission_http_json ~state ~sw ~clock httpun_request in
+            h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/session" ->
-          let state = get_server_state () in
-          let json = dashboard_session_http_json ~state ~sw ~clock httpun_request in
-          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+          with_server_state h2_reqd (fun state ->
+            let json = dashboard_session_http_json ~state ~sw ~clock httpun_request in
+            h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/mission/briefing" ->
-          let state = get_server_state () in
-          let json =
-            dashboard_mission_briefing_http_json ~state ~sw ~clock
-              httpun_request
-          in
-          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+          with_server_state h2_reqd (fun state ->
+            let json =
+              dashboard_mission_briefing_http_json ~state ~sw ~clock
+                httpun_request
+            in
+            h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/transport-health" ->
-          let state = get_server_state () in
-          let json = dashboard_transport_health_http_json ~state in
-          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+          with_server_state h2_reqd (fun state ->
+            let json = dashboard_transport_health_http_json ~state in
+            h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/perf" ->
-          let state = get_server_state () in
-          let json = dashboard_perf_http_json state.Mcp_server.room_config in
-          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+          with_server_state h2_reqd (fun state ->
+            let json = dashboard_perf_http_json state.Mcp_server.room_config in
+            h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors)
 
       | `GET, "/api/v1/autoresearch/loops" ->
           let state = get_server_state () in

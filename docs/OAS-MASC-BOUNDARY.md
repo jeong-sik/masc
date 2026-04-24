@@ -152,7 +152,19 @@ Use this checklist when reviewing boundary-touching PRs:
 
 ## OAS API Surface Drift — Detection & Repair
 
-Two complementary mechanisms keep the OAS/MASC type boundary honest. Both are normal-path tools; neither requires remembering env vars for common usage.
+Three complementary mechanisms keep the OAS/MASC boundary honest. The first keeps upstream OAS coordinator-agnostic; the other two keep MASC's consumer-side type boundary honest.
+
+### Layer 0 — SDK independence gate (`scripts/ci/check-masc-oas-boundary.sh`)
+
+MASC's boundary guard resolves an OAS checkout and, when that checkout provides `scripts/check-sdk-independence.sh`, delegates upstream vocabulary scanning to OAS itself. This prevents the downstream repo from proving independence by scanning MASC-side adapters such as `lib/oas_*.ml`.
+
+```bash
+AGENT_SDK_LOCAL_REPO=/path/to/oas \
+MASC_STRICT_OAS_INDEPENDENCE=1 \
+bash scripts/ci/check-masc-oas-boundary.sh
+```
+
+Without `MASC_STRICT_OAS_INDEPENDENCE=1`, the guard warns and continues when the OAS checkout or OAS-owned script is unavailable. That keeps downstream PR ordering decoupled while still giving local reviewers a strict mode.
 
 ### Layer 1 — Fingerprint gate (`scripts/oas-drift-check.sh`)
 

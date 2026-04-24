@@ -3,7 +3,8 @@
 # Meta-issue: #9519
 #
 # CONTRACT:
-#   - OAS must not reference masc_ prefix or MASC modules.
+#   - Upstream OAS must remain coordinator-agnostic. When an OAS
+#     checkout provides scripts/check-sdk-independence.sh, delegate to it.
 #   - MASC must use OAS public APIs (Agent.run, context_injector, etc.)
 #     rather than reimplementing lifecycle/retry/budget logic.
 #   - MASC must not touch OAS internal modules (Oas_worker internals,
@@ -15,18 +16,65 @@ cd "$(git rev-parse --show-toplevel)"
 
 exit_code=0
 
-# 1. OAS files referencing masc_ prefix (forbidden)
-echo "=== Scan: OAS -> MASC back-reference ==="
-oas_matches=$(
-  rg -n 'masc_\|MASC' lib/oas_*.ml lib/oas_*.mli \
-  --type ml 2>/dev/null || true
-)
-if [ -n "$oas_matches" ]; then
-  echo "FAIL: OAS module references MASC (boundary violation):"
-  echo "$oas_matches" | head -20
-  exit_code=1
+resolve_oas_repo() {
+  if [[ -n "${AGENT_SDK_LOCAL_REPO:-}" ]]; then
+    if git -C "${AGENT_SDK_LOCAL_REPO}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      (cd "${AGENT_SDK_LOCAL_REPO}" && pwd -P)
+      return 0
+    fi
+    echo "AGENT_SDK_LOCAL_REPO is not a git checkout: ${AGENT_SDK_LOCAL_REPO}" >&2
+    return 2
+  fi
+
+  local repo_parent
+  repo_parent="$(dirname "$(pwd)")"
+  local candidates=(
+    "${repo_parent}/oas"
+    "${HOME:-}/me/workspace/yousleepwhen/oas"
+  )
+
+  local candidate
+  for candidate in "${candidates[@]}"; do
+    if [[ -n "$candidate" ]] \
+      && git -C "$candidate" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      (cd "$candidate" && pwd -P)
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+# 1. Upstream OAS SDK should not learn MASC coordinator vocabulary.
+echo "=== Scan: Upstream OAS SDK independence ==="
+if oas_repo="$(resolve_oas_repo)"; then
+  echo "OAS checkout: ${oas_repo}"
+  if [[ -f "${oas_repo}/scripts/check-sdk-independence.sh" ]]; then
+    if (cd "$oas_repo" && bash scripts/check-sdk-independence.sh); then
+      echo "PASS"
+    else
+      echo "FAIL: upstream OAS SDK independence check failed"
+      exit_code=1
+    fi
+  else
+    echo "WARN: ${oas_repo}/scripts/check-sdk-independence.sh not found; skipping upstream SDK scan"
+    if [[ "${MASC_STRICT_OAS_INDEPENDENCE:-0}" == "1" ]]; then
+      echo "FAIL: MASC_STRICT_OAS_INDEPENDENCE=1 requires upstream SDK scan"
+      exit_code=1
+    fi
+  fi
 else
-  echo "PASS"
+  resolve_status=$?
+  if [[ "$resolve_status" -eq 2 ]]; then
+    echo "FAIL: explicit OAS checkout override is invalid"
+    exit_code=1
+  else
+    echo "WARN: no OAS checkout found; skipping upstream SDK scan"
+    if [[ "${MASC_STRICT_OAS_INDEPENDENCE:-0}" == "1" ]]; then
+      echo "FAIL: MASC_STRICT_OAS_INDEPENDENCE=1 requires an OAS checkout"
+      exit_code=1
+    fi
+  fi
 fi
 
 # 2. MASC files that reimplement OAS patterns (heuristic)
@@ -35,8 +83,13 @@ fi
 echo "=== Scan: MASC lifecycle reimplementation heuristic ==="
 # List of patterns that indicate MASC is doing OAS's job
 masc_matches=$(
-  rg -n 'retry_count\|backoff_ms\|budget_remaining\|context_window\|token_budget' \
-    lib/keeper/ lib/masc_*.ml --type ml 2>/dev/null || true
+  rg -n --type ml \
+    -e 'retry_count' \
+    -e 'backoff_ms' \
+    -e 'budget_remaining' \
+    -e 'context_window' \
+    -e 'token_budget' \
+    lib/keeper/ lib/masc_*.ml 2>/dev/null || true
 )
 if [ -n "$masc_matches" ]; then
   echo "WARN: MASC files contain OAS-reserved concepts (verify they call OAS, not reimplement):"
@@ -46,8 +99,11 @@ fi
 # 3. MASC using Oas_worker internal constructors instead of public API
 echo "=== Scan: MASC -> Oas_worker internal constructor use ==="
 internal_matches=$(
-  rg -n 'Oas_response\.\|Oas_worker\.run_raw\|Oas_worker\.internal' \
-    lib/keeper/ lib/masc_*.ml --type ml 2>/dev/null || true
+  rg -n --type ml \
+    -e 'Oas_response\.' \
+    -e 'Oas_worker\.run_raw' \
+    -e 'Oas_worker\.internal' \
+    lib/keeper/ lib/masc_*.ml 2>/dev/null || true
 )
 if [ -n "$internal_matches" ]; then
   echo "WARN: MASC uses Oas_worker internal-looking identifiers:"

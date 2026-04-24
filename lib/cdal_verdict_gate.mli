@@ -70,3 +70,45 @@ val to_attribution : ?gate_label:string -> Cdal_types.contract_verdict -> Attrib
     is required so the optional argument can be erased. *)
 val attribution_for_missing_verdict :
   ?gate_label:string -> task_id:string -> unit -> Attribution.t
+
+(** {1 Ledger health (#10115)}
+
+    The verdict gate reads from a JSONL ledger maintained by
+    [Cdal_eval_v1.persist].  When the writer pipeline goes
+    dormant (observed: 12-day gap before #10115) the reader gate
+    keeps firing "no verdict found" advisories that have no
+    grounded fix — operator-visible WARNs misdirect the
+    investigation toward [MASC_CDAL_VERDICT_LOOKUP_LIMIT].
+    {!ledger_health_report} surfaces the underlying file-system
+    state so a boot-time check (or a [sb] introspection tool)
+    can detect dormancy at the source. *)
+
+type ledger_health = {
+  base_dir : string;          (** Directory the report was taken from. *)
+  total_files : int;          (** Count of [DD.jsonl] files found. *)
+  latest_mtime : float option;
+    (** Newest [DD.jsonl] mtime in Unix seconds, or [None] when no
+        files exist. *)
+  age_seconds : float option;
+    (** [now - latest_mtime] when [latest_mtime] is set; [None]
+        otherwise. *)
+}
+
+val ledger_health_report : ?base_dir:string -> unit -> ledger_health
+(** Snapshot the on-disk state of the verdict ledger.  No I/O on
+    the verdict contents themselves; only readdir + stat.  Pure
+    introspection — does not log. *)
+
+val stale_age_seconds_default : float
+(** Default staleness threshold (7 days) used by
+    {!log_ledger_health_warn_if_stale}. *)
+
+val log_ledger_health_warn_if_stale :
+  ?base_dir:string ->
+  ?stale_age_seconds:float ->
+  unit -> ledger_health
+(** Combines {!ledger_health_report} with a structured WARN line
+    when the ledger is empty or older than [stale_age_seconds].
+    Returns the same report so the caller can also publish it on
+    a metrics surface.  Intended for boot-time wiring or a
+    dedicated [sb cdal health] command. *)

@@ -44,6 +44,10 @@ import {
   runtimeCountSourceLabel,
   shouldShowExecutionFallbackState,
 } from '../runtime-counts'
+import {
+  keeperActivityDisplay,
+  keeperDisplayModel,
+} from '../lib/keeper-runtime-display'
 
 type StatusFilter = 'all' | RuntimeBand
 
@@ -84,23 +88,11 @@ export function rosterModelMeta(
     active_model_label?: string | null
     active_model?: string | null
     model?: string | null
+    primary_model?: string | null
+    metrics_series?: Array<{ model_used?: string | null } | null> | null
   } | null | undefined,
 ): { label: string; value: string } | null {
-  const lastModelLabel = source?.last_model_used_label?.trim()
-  if (lastModelLabel) return { label: '최근 모델', value: lastModelLabel }
-
-  const lastModel = source?.last_model_used?.trim()
-  if (lastModel) return { label: '최근 모델', value: lastModel }
-
-  const activeModelLabel = source?.active_model_label?.trim()
-  if (activeModelLabel) return { label: '현재 모델', value: activeModelLabel }
-
-  const activeModel = source?.active_model?.trim()
-  if (activeModel) return { label: '현재 모델', value: activeModel }
-
-  const fallbackModel = source?.model?.trim()
-  if (fallbackModel) return { label: '모델', value: fallbackModel }
-  return null
+  return keeperDisplayModel(source)
 }
 
 export function rosterContextMeta(
@@ -656,12 +648,12 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             ?? keeperRuntime?.recent_input_preview
             ?? goalSummary
             ?? null
-          const lastActivityAge = keeperRuntime?.last_activity_ago_s ?? null
-          const lastActivityAt =
-            keeperRuntime?.last_autonomous_action_at
-            ?? keeperRuntime?.last_heartbeat
-            ?? agent.last_seen
-            ?? null
+          const activityDisplay = keeperRuntime
+            ? keeperActivityDisplay(keeperRuntime, agent.last_seen)
+            : null
+          const lastActivityAge = activityDisplay?.ageSeconds ?? null
+          const lastActivityAt = activityDisplay?.timestamp ?? agent.last_seen ?? null
+          const lastActivityLabel = activityDisplay?.label ?? '최근 활동'
           const contextMeta =
             rosterContextMeta(keeperRuntime ?? null)
           const workPreview =
@@ -692,7 +684,9 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             )
             ?? agent.name
           const modelMeta = rosterModelMeta(keeperRuntime ?? agent)
-          const compactModel = compactModelLabel(modelMeta?.value)
+          const modelDisplay = isKeeper
+            ? modelMeta?.value ?? null
+            : compactModelLabel(modelMeta?.value)
           const fsmPhaseKey =
             keeperMonitoring?.phase.key && keeperMonitoring.phase.key !== 'unknown'
               ? keeperMonitoring.phase.key
@@ -754,7 +748,9 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                     ${stateNote.label}
                   </span>
                   ${lastActivityAt
-                    ? html`<span class="text-3xs text-[var(--text-muted)]">마지막 행동 이후 <${TimeAgo} timestamp=${lastActivityAt} /></span>`
+                    ? html`<span class="text-3xs text-[var(--text-muted)]">최근 신호 · ${lastActivityLabel} <${TimeAgo} timestamp=${lastActivityAt} /></span>`
+                    : lastActivityAge != null
+                      ? html`<span class="text-3xs text-[var(--text-muted)]">최근 신호 · ${lastActivityLabel} ${formatDuration(lastActivityAge)} 전</span>`
                     : null}
                   <span class="min-w-0 flex-1 text-xs leading-relaxed text-[var(--text-body)] break-words line-clamp-2" title=${stateNote.text}>
                     ${stateNote.text}
@@ -779,7 +775,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
               <div class="flex flex-wrap items-center gap-2 text-2xs text-[var(--text-muted)]">
                 <span class="inline-flex items-center rounded-sm border border-[var(--white-8)] bg-[var(--white-2)] px-2.5 py-1">
-                  최근 활동
+                  ${lastActivityLabel}
                   <span class="ml-1 text-[var(--text-body)]">
                     ${lastActivityAt
                       ? html`<${TimeAgo} timestamp=${lastActivityAt} />`
@@ -800,10 +796,10 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                     </span>
                   </span>
                 ` : null}
-                ${modelMeta && compactModel ? html`
+                ${modelMeta && modelDisplay ? html`
                   <span class="inline-flex items-center gap-1.5 rounded-sm border border-[var(--white-8)] bg-[var(--white-2)] px-2.5 py-1">
                     <span>${modelMeta.label}</span>
-                    <span class="font-mono text-3xs text-[var(--text-body)]" translate="no" title=${modelMeta.value}>${compactModel}</span>
+                    <span class="max-w-[18rem] overflow-hidden text-ellipsis whitespace-nowrap font-mono text-3xs text-[var(--text-body)]" translate="no" title=${modelMeta.value}>${modelDisplay}</span>
                   </span>
                 ` : null}
               </div>

@@ -4,7 +4,12 @@
 
 import { html } from 'htm/preact'
 import { isOfflineStatus } from '../lib/status-utils'
-import { keeperDisplayStatus, keeperRuntimeBlockerHint } from '../lib/keeper-runtime-display'
+import {
+  keeperActivityDisplay,
+  keeperDisplayModel,
+  keeperDisplayStatus,
+  keeperRuntimeBlockerHint,
+} from '../lib/keeper-runtime-display'
 import { signal } from '@preact/signals'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { requestConfirm } from './common/confirm-dialog'
@@ -757,12 +762,10 @@ export function KeeperDetailPage() {
     typeof keeper.context_ratio === 'number' && Number.isFinite(keeper.context_ratio)
       ? `${Math.round(keeper.context_ratio * 100)}%`
       : '정보 없음'
-  const lastModel =
-    keeper.metrics_series && keeper.metrics_series.length > 0
-      ? keeper.metrics_series[keeper.metrics_series.length - 1]?.model_used
-      : null
-  const effectiveModel = lastModel || keeper.active_model || keeper.model || '정보 없음'
-  const lastActivity = keeper.last_autonomous_action_at ?? keeper.last_heartbeat ?? keeper.created_at ?? null
+  const effectiveModelMeta = keeperDisplayModel(keeper)
+  const effectiveModelLabel = effectiveModelMeta?.label ?? '모델'
+  const effectiveModel = effectiveModelMeta?.value ?? '정보 없음'
+  const activityDisplay = keeperActivityDisplay(keeper, keeper.agent?.last_seen)
 
   const submitClearContext = () => {
     void (async () => {
@@ -857,8 +860,9 @@ export function KeeperDetailPage() {
         <${KeeperDetailOverviewSidebar}
           effectiveStatus=${effectiveStatus}
           contextRatioPct=${contextRatioPct}
+          effectiveModelLabel=${effectiveModelLabel}
           effectiveModel=${effectiveModel}
-          lastActivity=${lastActivity}
+          activity=${activityDisplay}
         />
 
         <div class="order-1 xl:order-2 flex flex-col gap-5">

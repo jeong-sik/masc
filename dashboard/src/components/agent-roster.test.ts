@@ -1,7 +1,7 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import { act } from 'preact/test-utils'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   AgentRoster,
   runtimeBadgeClass,
@@ -480,6 +480,7 @@ describe('AgentRoster live-only cards', () => {
   afterEach(() => {
     render(null, container)
     container.remove()
+    vi.useRealTimers()
     agents.value = []
     keepers.value = []
     executionLoaded.value = false
@@ -555,6 +556,46 @@ describe('AgentRoster live-only cards', () => {
     expect(container.textContent).not.toContain('stale keeper brief work')
     expect(container.textContent).not.toContain('stale_tool')
     expect(container.textContent).not.toContain('old blocker that should stay out of the roster')
+  })
+
+  it('uses heartbeat and full keeper model for cards when action/model fallbacks disagree', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-24T18:00:00Z'))
+    agents.value = [
+      makeAgent({
+        name: 'keeper-sangsu-agent',
+        status: 'active',
+        last_seen: '2026-04-24T17:55:00Z',
+        model: 'claude',
+      }),
+    ]
+    keepers.value = [
+      {
+        name: 'sangsu',
+        agent_name: 'keeper-sangsu-agent',
+        status: 'active',
+        active_model: 'claude_code:auto',
+        model: 'claude',
+        last_heartbeat: '2026-04-24T17:54:00Z',
+        last_autonomous_action_at: '2026-04-24T12:00:00Z',
+        last_activity_ago_s: 21_600,
+        recent_output_preview: '지금 필요한 코드 변경을 바로 만들고 결과를 확인한다.',
+        recent_tool_names: ['keeper_tasks_list'],
+      } as Keeper,
+    ]
+
+    await act(async () => {
+      render(html`<${AgentRoster} keeperFilter="keeper-only" />`, container)
+    })
+    await flushUi()
+
+    const text = container.textContent ?? ''
+    expect(text).toContain('sangsu')
+    expect(text).toContain('하트비트')
+    expect(text).toContain('6분 전')
+    expect(text).toContain('claude_code:auto')
+    expect(text).not.toContain('마지막 행동 이후')
+    expect(text).not.toContain('최근 모델claude')
   })
 })
 

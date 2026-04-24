@@ -8,17 +8,20 @@ import type { Keeper } from '../types'
 import { refreshDashboard } from '../store'
 import { peekLoadedKeeperConfig } from './keeper-config-panel'
 import { KeeperPhaseAndStage } from './keeper-phase-indicator'
+import { formatDuration } from '../lib/format-time'
+import {
+  keeperDisplayModel,
+  type KeeperActivityDisplay,
+} from '../lib/keeper-runtime-display'
 
 function KeeperModelChip({ keeper }: { keeper: Keeper }) {
-  const series = keeper.metrics_series ?? []
-  const lastUsed = series.length > 0 ? series[series.length - 1]?.model_used : null
-  const display = lastUsed || keeper.active_model || keeper.model
+  const display = keeperDisplayModel(keeper)
   if (!display) return null
   return html`
     <span
       class="inline-flex items-center py-0.5 px-2 rounded text-3xs font-mono bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-20)]"
-      title=${lastUsed && keeper.model ? `마지막 호출: ${lastUsed}\n설정: ${keeper.model}` : ''}
-    >${display}</span>
+      title=${`${display.label}: ${display.value}`}
+    >${display.value}</span>
   `
 }
 
@@ -258,16 +261,28 @@ function KeeperDetailQuickFact({
   `
 }
 
+function KeeperActivityValue({ activity }: { activity: KeeperActivityDisplay }) {
+  if (activity.timestamp) {
+    return html`${activity.label} <${TimeAgo} timestamp=${activity.timestamp} />`
+  }
+  if (activity.ageSeconds != null) {
+    return html`${activity.label} ${formatDuration(activity.ageSeconds)} 전`
+  }
+  return html`정보 없음`
+}
+
 export function KeeperDetailOverviewSidebar({
   effectiveStatus,
   contextRatioPct,
+  effectiveModelLabel,
   effectiveModel,
-  lastActivity,
+  activity,
 }: {
   effectiveStatus: string
   contextRatioPct: string
+  effectiveModelLabel: string
   effectiveModel: string
-  lastActivity: string | null
+  activity: KeeperActivityDisplay
 }) {
   return html`
     <aside class="order-2 xl:order-1 xl:sticky xl:top-[104px] xl:self-start">
@@ -282,9 +297,9 @@ export function KeeperDetailOverviewSidebar({
         <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
           <${KeeperDetailQuickFact} label="상태">${effectiveStatus}</${KeeperDetailQuickFact}>
           <${KeeperDetailQuickFact} label="컨텍스트">${contextRatioPct}</${KeeperDetailQuickFact}>
-          <${KeeperDetailQuickFact} label="현재 모델">${effectiveModel}</${KeeperDetailQuickFact}>
+          <${KeeperDetailQuickFact} label=${effectiveModelLabel}>${effectiveModel}</${KeeperDetailQuickFact}>
           <${KeeperDetailQuickFact} label="최근 활동">
-            ${lastActivity ? html`<${TimeAgo} timestamp=${lastActivity} />` : '정보 없음'}
+            <${KeeperActivityValue} activity=${activity} />
           </${KeeperDetailQuickFact}>
         </div>
 

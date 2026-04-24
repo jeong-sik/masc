@@ -1,6 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Keeper } from '../types'
-import { keeperDisplayStatus } from './keeper-runtime-display'
+import {
+  keeperActivityDisplay,
+  keeperDisplayModel,
+  keeperDisplayStatus,
+} from './keeper-runtime-display'
 
 /** Minimal Keeper stub with only the fields relevant to status classification. */
 function makeKeeper(overrides: Partial<Keeper> = {}): Keeper {
@@ -88,6 +92,98 @@ describe('keeperDisplayStatus', () => {
         agent: { exists: true },
       })
       expect(keeperDisplayStatus(keeper)).toBe('stopped')
+    })
+  })
+})
+
+describe('keeperDisplayModel', () => {
+  it('keeps CLI/provider runtime labels intact for active auto profiles', () => {
+    expect(
+      keeperDisplayModel({
+        active_model_label: 'claude_code:auto',
+        active_model: 'claude',
+        model: 'claude',
+      }),
+    ).toEqual({ label: '현재 모델', value: 'claude_code:auto' })
+  })
+
+  it('keeps active runtime labels ahead of metrics-series fallback', () => {
+    expect(
+      keeperDisplayModel({
+        active_model: 'claude_code:auto',
+        metrics_series: [
+          { model_used: 'openai:gpt-5.4' },
+          { model_used: 'anthropic:claude-sonnet-4-6' },
+        ],
+      }),
+    ).toEqual({ label: '현재 모델', value: 'claude_code:auto' })
+  })
+
+  it('uses the latest metrics model when structured runtime model is absent', () => {
+    expect(
+      keeperDisplayModel({
+        metrics_series: [
+          { model_used: 'openai:gpt-5.4' },
+          { model_used: 'anthropic:claude-sonnet-4-6' },
+        ],
+      }),
+    ).toEqual({ label: '최근 모델', value: 'anthropic:claude-sonnet-4-6' })
+  })
+})
+
+describe('keeperActivityDisplay', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-24T18:00:00Z'))
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('uses heartbeat as the latest live signal when autonomous action is older', () => {
+    expect(
+      keeperActivityDisplay({
+        last_autonomous_action_at: '2026-04-24T12:00:00Z',
+        last_heartbeat: '2026-04-24T17:54:00Z',
+      }),
+    ).toEqual({
+      source: 'heartbeat',
+      label: '하트비트',
+      timestamp: '2026-04-24T17:54:00Z',
+      ageSeconds: 360,
+    })
+  })
+
+  it('does not let agent last_seen override keeper runtime signals', () => {
+    expect(
+      keeperActivityDisplay(
+        { last_heartbeat: '2026-04-24T17:54:00Z' },
+        '2026-04-24T17:59:00Z',
+      ).source,
+    ).toBe('heartbeat')
+  })
+
+  it('uses autonomous action when it is newer than heartbeat', () => {
+    expect(
+      keeperActivityDisplay({
+        last_autonomous_action_at: '2026-04-24T17:59:00Z',
+        last_heartbeat: '2026-04-24T17:54:00Z',
+      }).source,
+    ).toBe('autonomous_action')
+  })
+
+  it('falls back to numeric activity age when no timestamp exists', () => {
+    expect(
+      keeperActivityDisplay({
+        last_activity_ago_s: 75,
+        last_turn_ago_s: 180,
+      }),
+    ).toEqual({
+      source: 'last_activity',
+      label: '최근 활동',
+      timestamp: null,
+      ageSeconds: 75,
     })
   })
 })

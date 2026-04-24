@@ -289,6 +289,7 @@ stylesheet
   }
 
   .chip:hover { color: var(--text-primary); }
+  .chip:focus-visible { outline: 2px solid var(--accent-brass); outline-offset: 1px; }
   .chip_active {
     color: var(--text-bright);
     background: rgba(138, 106, 40, 0.14);
@@ -869,6 +870,7 @@ stylesheet
     border-color: var(--accent-brass-dim);
     color: var(--accent-brass);
   }
+  .theme_chip:focus-visible { outline: 2px solid var(--accent-brass); outline-offset: 1px; }
   .theme_chip_active {
     border-color: var(--accent-brass);
     color: var(--accent-brass);
@@ -1691,6 +1693,8 @@ let render_response
              ~attrs:
                [ Style.chip
                ; Attr.create "data-filter-level" level
+               ; Attr.role "button"
+               ; Attr.tabindex 0
                ; click
                ]
              [ Node.text label ]
@@ -1834,6 +1838,8 @@ let render_response
              ~attrs:
                [ Style.theme_chip
                ; Attr.create "data-chip-theme" name
+               ; Attr.role "button"
+               ; Attr.tabindex 0
                ; Attr.on_click (fun _ ->
                    Effect.of_sync_fun
                      (fun () ->

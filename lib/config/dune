@@ -9,6 +9,7 @@
    env_config_core
    env_config_governance
    env_config_keeper
+   env_config_oas_bridge
    env_config_runtime
    env_config_snapshot
    feature_flag_registry

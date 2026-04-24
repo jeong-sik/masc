@@ -1149,17 +1149,19 @@ let handle_persona_generate ctx args =
                ~language
            in
            match
-             Masc_oas_bridge.run_safe ~timeout_s:120.0 (fun () ->
-               Oas_worker.run_named
-                 ~cascade_name
-                 ~goal:prompt
-                 ~max_turns:1
-                 ~temperature
-                 ~max_tokens
-                 ~approval:Approval_callbacks.auto_approve
-                 ~sw:ctx.Keeper_types.sw
-                 ?net:ctx.Keeper_types.net
-                 ())
+             Masc_oas_bridge.run_with_caller
+               ~caller:"keeper_persona_authoring"
+               (fun () ->
+                 Oas_worker.run_named
+                   ~cascade_name
+                   ~goal:prompt
+                   ~max_turns:1
+                   ~temperature
+                   ~max_tokens
+                   ~approval:Approval_callbacks.auto_approve
+                   ~sw:ctx.Keeper_types.sw
+                   ?net:ctx.Keeper_types.net
+                   ())
            with
            | Error err ->
              ( false

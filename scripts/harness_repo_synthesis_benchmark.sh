@@ -11,7 +11,7 @@ mkdir -p "${OUT_DIR}"
 (
   cd "${ROOT_DIR}"
   if [ "${REPO_SYNTHESIS_SKIP_BUILD:-0}" != "1" ] || [ ! -x "${BENCH_EXE}" ]; then
-    dune build --root . ./test/test_repo_synthesis_benchmark.exe >/dev/null
+    scripts/dune-local.sh build ./test/test_repo_synthesis_benchmark.exe >/dev/null
   fi
   "${BENCH_EXE}" >"${SUMMARY_PATH}"
 )

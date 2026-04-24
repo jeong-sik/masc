@@ -107,7 +107,7 @@ ensure_cli_built() {
   (
     cd "${ROOT_DIR}"
     if [[ "${TOOL_CALL_QUALITY_SKIP_BUILD:-0}" != "1" || ! -x "${CLI_EXE}" ]]; then
-      dune build --root . ./test/tool_call_quality_benchmark_cli.exe >/dev/null
+      scripts/dune-local.sh build ./test/tool_call_quality_benchmark_cli.exe >/dev/null
     fi
   )
 }

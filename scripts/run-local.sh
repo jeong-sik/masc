@@ -15,7 +15,6 @@ PRINT_PORT_ONLY=0
 BOOTSTRAP_ONLY=0
 BUILD_DASHBOARD=0
 BOOTSTRAP_KEEPERS=0
-DUNE_JOBS="${MASC_DUNE_JOBS:-8}"
 
 git_common_root() {
   if ! command -v git >/dev/null 2>&1; then
@@ -243,7 +242,7 @@ EXE="$(resolve_built_exe)"
 
 if binary_is_stale "$EXE"; then
   echo "[local-run] Building local binary..." >&2
-  dune build -j "$DUNE_JOBS" --root "$REPO_ROOT" bin/main_eio.exe
+  "$REPO_ROOT/scripts/dune-local.sh" build bin/main_eio.exe
 fi
 
 if [ ! -x "$EXE" ]; then

@@ -42,8 +42,8 @@ echo "  README.md badge updated"
 
 # 3) opam metadata (if tracked)
 if [ -f "$ROOT_DIR/masc_mcp.opam" ]; then
-  dune build masc_mcp.opam --root "$ROOT_DIR"
-  echo "  masc_mcp.opam updated (via dune build)"
+  "$ROOT_DIR/scripts/dune-local.sh" build masc_mcp.opam
+  echo "  masc_mcp.opam updated (via scripts/dune-local.sh)"
 fi
 
 # 4) CHANGELOG stub (prepend if missing)

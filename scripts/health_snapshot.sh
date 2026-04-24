@@ -163,10 +163,10 @@ PY
 
 echo "=== Health Snapshot ==="
 if [ "$SKIP_BUILD" -eq 0 ]; then
-  echo "Running dune build --root . @check"
-  dune build --root . @check
+  echo "Running scripts/dune-local.sh build @check"
+  scripts/dune-local.sh build @check
 else
-  echo "Skipping dune build --root . @check"
+  echo "Skipping scripts/dune-local.sh build @check"
 fi
 
 anti_fake_output=""

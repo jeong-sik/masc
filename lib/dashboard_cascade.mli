@@ -109,7 +109,16 @@ val save_raw_config_json :
 val keeper_profile_fields :
   keeper:string -> cascade_name:string -> (string * Yojson.Safe.t) list
 
-(** JSON snapshot of the cascade health tracker.
+(** JSON snapshot of the cascade health tracker, merged with
+    [cascade.json]'s declared candidate list.
+
+    Entries come from two sources:
+    1. {!Cascade_health_tracker.all_providers Health.global} — every
+       provider the tracker has observed events for.
+    2. Providers declared in any [cascade.json] profile but absent from
+       the tracker, synthesised via {!zero_provider_info}.  Lets the UI
+       surface "why isn't this provider being used?" for candidates that
+       never get selected.
 
     Shape:
     {[
@@ -120,19 +129,72 @@ val keeper_profile_fields :
         "cooldown_sec": 60.0,
         "hard_quota_cooldown_sec": 3600.0,
         "providers": [
-          { "provider_key": "glm:glm-5.1",
+          { "provider_key": "glm-coding",
             "success_rate": 0.87,
             "consecutive_failures": 0,
             "in_cooldown": false,
             "cooldown_expires_at": null,
-            "events_in_window": 42 },
+            "events_in_window": 42,
+            "rejected_in_window": 0,
+            "declared": true,
+            "status": "active" },
+          { "provider_key": "kimi_cli",
+            "success_rate": 1.0,
+            "consecutive_failures": 0,
+            "in_cooldown": false,
+            "cooldown_expires_at": null,
+            "events_in_window": 0,
+            "rejected_in_window": 0,
+            "declared": true,
+            "status": "configured" },
           ...
         ]
       }
     ]}
 
-    @since 0.6.0 *)
+    [status] is one of [active | cooldown | configured]; see
+    {!provider_status}.  [declared] is [true] iff [cascade.json] lists a
+    model whose scheme prefix matches [provider_key].
+
+    @since 0.6.0
+    @since 0.173.0 [declared] and [status] fields added; providers list
+                   now merges declared-but-untracked candidates. *)
 val health_json : unit -> Yojson.Safe.t
+
+(** Classify a provider's operational state from tracker fields.  See
+    the [status] enum in {!health_json}. *)
+val provider_status : Cascade_health_tracker.provider_info -> string
+
+(** Synthesise a provider_info with optimistic defaults for a provider
+    that is declared in [cascade.json] but has no tracker events in the
+    current window.  Used by {!health_json} to merge declared-only
+    candidates; exposed for tests so fixtures don't have to hand-build
+    the record. *)
+val zero_provider_info : string -> Cascade_health_tracker.provider_info
+
+(** Serialize a tracker entry (or synthesized placeholder) to the shape
+    described by {!health_json}.  [declared] controls the [declared]
+    field; [status] is derived via {!provider_status}. *)
+val provider_entry_to_json :
+  declared:bool -> Cascade_health_tracker.provider_info -> Yojson.Safe.t
+
+(** [provider_scheme_of_model_string s] returns the scheme prefix of a
+    [cascade.json] model spec (the text before the first [:]), or [s]
+    unchanged when no [:] is present.  The scheme corresponds to the
+    [provider_key] produced at runtime by
+    [Keeper_hooks_oas.provider_of_model] for prefixed specs. *)
+val provider_scheme_of_model_string : string -> string
+
+(** [declared_provider_schemes_of_config ?config_path ()] returns the
+    sorted, de-duplicated list of provider scheme prefixes declared by
+    any cascade profile in [config_path].
+
+    Returns the empty list when the path is [None] or the catalog
+    cannot be loaded — a failure here must not take the health
+    endpoint offline.  Used by {!health_json} to augment the tracker's
+    provider list with zero-traffic candidates. *)
+val declared_provider_schemes_of_config :
+  ?config_path:string -> unit -> string list
 
 (** JSON snapshot of the {!Cascade_client_capacity} registry —
     the per-URL/sentinel slot table used for ollama HTTP and CLI

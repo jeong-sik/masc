@@ -240,7 +240,7 @@ stylesheet
   }
 
   .vial_fill_bad {
-    background: linear-gradient(90deg, #8a2828, #e85050);
+    background: linear-gradient(90deg, var(--accent-blood-dim), var(--accent-blood));
     box-shadow: 0 0 6px rgba(232, 80, 80, 0.35);
   }
 

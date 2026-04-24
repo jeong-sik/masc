@@ -607,7 +607,7 @@ stylesheet
     padding: 3px 8px;
     border: 1px solid var(--border-main);
     border-radius: 999px;
-    background: #1b1612;
+    background: var(--bg-panel-alt);
     color: var(--text-dim);
     width: fit-content;
     height: fit-content;

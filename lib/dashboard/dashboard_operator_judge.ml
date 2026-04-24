@@ -214,8 +214,12 @@ let compute_judgments
            fences and applies other deterministic recovery transforms. *)
         let raw_text = Oas_response.text_of_response response in
         match Llm_provider.Lenient_json.parse raw_text with
-        | `Assoc [("raw", `String _)] ->
-            Error "Operator judge returned unparseable response (Lenient_json fallback hit)"
+        | `Assoc [("raw", `String raw)] ->
+            (* #9774: include a preview so the failure diagnostic doesn't
+               require enabling raw provider logging. *)
+            let msg = Judge_diagnostics.format_lenient_fallback ~judge_label:"Operator" raw in
+            Log.Governance.warn "%s" msg;
+            Error msg
         | parsed -> Ok (response.model, parsed)
       with
       | Yojson.Json_error msg ->

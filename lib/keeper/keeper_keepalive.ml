@@ -17,6 +17,15 @@ open Keeper_execution
 
 exception Semaphore_wait_timeout of float
 
+(* #10008 fm3: canonical metric name for proactive-scheduler skip
+   reasons.  Labels: [("keeper", <name>); ("reason", <skip_reason>)].
+   [reason] is derived from
+   [Keeper_world_observation.verdict_reasons_to_strings], which
+   produces one of {keeper_paused, approval_pending,
+   scheduled_autonomous_disabled, provider_cooldown_pending,
+   idle_gate_pending, cooldown_pending, no_signal}. *)
+let proactive_skip_reason_metric = "masc_keeper_proactive_skip_total"
+
 let keepalive_interval_sec () =
   Runtime_params.get Governance_registry.keeper_keepalive_interval_sec
 ;;
@@ -1298,6 +1307,24 @@ let run_keepalive_unified_turn
       let verdict_strs = Keeper_world_observation.verdict_reasons_to_strings turn_decision.verdict in
       let channel_str = Keeper_world_observation.channel_to_string turn_decision.channel in
       if not should_run_turn then (
+        (* #10008 fm3: emit per-reason skip counter so operators can
+           see why proactive scheduler never fires for a given keeper.
+           scholar/executor stayed at [proactive_count_total=0,
+           last_proactive_ts=0.0] for 45+ min despite
+           proactive_enabled=true — the info log alone buried the
+           reason across many lines.  Labelled counter lets Grafana
+           split [no_signal] vs [cooldown_pending] vs
+           [scheduled_autonomous_disabled] so the bootstrap problem
+           ("need signals to fire, need to fire to generate signals")
+           is visible fleet-wide. *)
+        List.iter (fun reason_str ->
+          Prometheus.inc_counter
+            proactive_skip_reason_metric
+            ~labels:[
+              ("keeper", meta_after_triage.name);
+              ("reason", reason_str);
+            ] ())
+          verdict_strs;
         let log_not_scheduled =
           match turn_decision.verdict with
           | Keeper_world_observation.Skip { reasons = (Keeper_world_observation.Scheduled_autonomous_disabled, []) } ->

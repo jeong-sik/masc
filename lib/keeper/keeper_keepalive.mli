@@ -28,6 +28,16 @@ val keeper_turn_throttle_limit : int
 (** Runtime keeper turn concurrency limit derived from
     [MASC_KEEPER_AUTOBOOT_MAX]. *)
 
+val proactive_skip_reason_metric : string
+(** Canonical Prometheus metric name for the proactive-scheduler
+    skip-reason counter.  Labels: [("keeper", <name>); ("reason",
+    <skip_reason_label>)].  [reason] is produced by
+    [Keeper_world_observation.verdict_reasons_to_strings] and is
+    one of [keeper_paused | approval_pending |
+    scheduled_autonomous_disabled | provider_cooldown_pending |
+    idle_gate_pending | cooldown_pending | no_signal].
+    #10008 failure mode 3. *)
+
 val semaphore_wait_timeout_sec : float
 (** Wall-clock cap on [Eio.Semaphore.acquire] when waiting for a keeper
     turn slot. Derived from [MASC_KEEPER_SEMAPHORE_WAIT_TIMEOUT_SEC]

@@ -121,7 +121,8 @@ let install_snapshot_for_tests ~source_path ~profile_names =
            {
              name;
              weighted_entries = [];
-             inference_params = { temperature = None; max_tokens = None };
+             inference_params = { temperature = None; max_tokens = None;
+                                  keep_alive = None; num_ctx = None };
              api_key_env_overrides = [];
              strategy = Cascade_strategy.failover;
              ollama_max_concurrent = None;
@@ -411,6 +412,8 @@ let validate_profile_static ~config_path name : (profile_build, profile_rejectio
               match
                 Cascade_config.parse_weighted_entry_diag
                   ~api_key_env_overrides
+                  ?keep_alive:inference_params.keep_alive
+                  ?num_ctx:inference_params.num_ctx
                   entry
               with
               | Ok provider_cfg ->

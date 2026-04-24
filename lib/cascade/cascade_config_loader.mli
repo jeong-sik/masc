@@ -93,13 +93,21 @@ val load_profile_weighted :
 type inference_params = {
   temperature: float option;
   max_tokens: int option;
+  keep_alive: string option;
+  (** Ollama [keep_alive] override: integer seconds or duration string.
+      Honored only when the resolved provider is Ollama. *)
+  num_ctx: int option;
+  (** Ollama [num_ctx] override: per-request KV cache allocation in
+      tokens. Honored only when the resolved provider is Ollama. *)
 }
 
 (** Resolve inference parameters from cascade.json.
 
     Resolution order:
-    1. ["{name}_temperature"] / ["{name}_max_tokens"]
-    2. ["default_temperature"] / ["default_max_tokens"]
+    1. ["{name}_temperature"] / ["{name}_max_tokens"] /
+       ["{name}_keep_alive"] / ["{name}_num_ctx"]
+    2. ["default_temperature"] / ["default_max_tokens"] /
+       ["default_keep_alive"] / ["default_num_ctx"]
     3. [None] (caller uses own defaults) *)
 val resolve_inference_params :
   config_path:string -> name:string -> inference_params

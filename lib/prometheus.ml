@@ -277,6 +277,7 @@ let metric_grpc_active_streams = "masc_grpc_active_streams_total"
 let metric_grpc_heartbeat_latency = "masc_grpc_heartbeat_latency_seconds"
 let metric_grpc_subscribers = "masc_grpc_subscribers_total"
 let metric_grpc_events_delivered = "masc_grpc_events_delivered_total"
+let metric_grpc_events_dropped = "masc_grpc_events_dropped_total"
 let metric_ws_sessions = "masc_ws_sessions_total"
 let metric_ws_parse_cache_hits = "masc_ws_parse_cache_hits_total"
 let metric_ws_parse_cache_misses = "masc_ws_parse_cache_misses_total"
@@ -592,6 +593,10 @@ let init () =
     ~help:"gRPC heartbeat round-trip latency" ();
   add metric_grpc_subscribers "Active gRPC Subscribe stream subscribers" Gauge;
   add metric_grpc_events_delivered "Total events delivered via gRPC streams" Counter;
+  add metric_grpc_events_dropped
+    "Events dropped by gRPC subscribers when the stream buffer is full \
+     (capacity pressure — operator must investigate slow consumers)"
+    Counter;
   add metric_ws_sessions "Active standalone WebSocket sessions" Gauge;
   add metric_ws_parse_cache_hits
     "WS dashboard delta parse cache hits (same event string reused across sessions)"

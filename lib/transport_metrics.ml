@@ -55,6 +55,9 @@ let inc_grpc_events_delivered ?(delta=1) () =
   Prometheus.inc_counter Prometheus.metric_grpc_events_delivered
     ~delta:(float_of_int delta) ()
 
+let inc_grpc_events_dropped () =
+  Prometheus.inc_counter Prometheus.metric_grpc_events_dropped ()
+
 (** {1 WebSocket Metrics} *)
 
 let set_ws_sessions count =
@@ -276,6 +279,7 @@ let transport_health_json ~config =
     else 0.0
   in
   let grpc_events = v Prometheus.metric_grpc_events_delivered () in
+  let grpc_events_dropped = v Prometheus.metric_grpc_events_dropped () in
   let stale_agents = v Prometheus.metric_agent_stale_total () in
   let lifecycle_dispatch_rejections =
     int_of_float
@@ -360,6 +364,7 @@ let transport_health_json ~config =
       ("subscribers", `Int grpc_subscribers_i);
       ("heartbeat_avg_seconds", `Float grpc_heartbeat_avg);
       ("events_delivered", `Int (int_of_float grpc_events));
+      ("events_dropped", `Int (int_of_float grpc_events_dropped));
     ]);
     ("websocket", `Assoc [
       ("enabled", `Bool ws_configured);

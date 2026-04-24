@@ -495,10 +495,14 @@ let handle_subscribe
     if Atomic.get stream_closed || Grpc_eio.Stream.is_closed stream then begin
       (* Stream already gone — auto-cleanup *)
       cleanup_subscriber ()
-    end else if Grpc_eio.Stream.length stream >= max_buffer then
-      (* Stream buffer near-full — drop event to avoid blocking broadcast *)
+    end else if Grpc_eio.Stream.length stream >= max_buffer then begin
+      (* Stream buffer near-full — drop event to avoid blocking broadcast.
+         Bump [masc_grpc_events_dropped_total] so the capacity pressure
+         is visible to operators and the drop is not just a log line. *)
+      Transport_metrics.inc_grpc_events_dropped ();
       Log.Misc.warn "gRPC subscriber %s: buffer full (%d), dropping event"
         sub_id (Grpc_eio.Stream.length stream)
+    end
     else begin
       let seq = Int64.of_int (Atomic.fetch_and_add seq_counter 1) in
       let event = T.Event.{

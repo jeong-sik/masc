@@ -111,6 +111,100 @@ let append_keeper_decision_with_null_telemetry
         ("telemetry", `Null);
       ])
 
+let root_node json =
+  match json |> member "tree" |> to_list with
+  | node :: _ -> node
+  | [] -> fail "expected one goal in tree"
+
+let test_empty_executing_goal_is_at_risk () =
+  with_room @@ fun config ->
+  let _goal, _kind =
+    match Goal_store.upsert_goal config ~title:"Empty executing goal" () with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  let json = Dashboard_goals.dashboard_goals_tree_json ~config in
+  let node = root_node json in
+  check string "empty goal health" "at_risk"
+    (node |> member "health" |> to_string);
+  check string "empty goal blocker" "goal_linkage"
+    (node |> member "blocking_source" |> to_string);
+  check int "linkage warning count" 1
+    (node |> member "linkage_warning_count" |> to_int);
+  check int "active summary counts status" 1
+    (json |> member "summary" |> member "active_goals" |> to_int);
+  check int "on_track summary separate" 0
+    (json |> member "summary" |> member "on_track_goals" |> to_int)
+
+let test_open_task_without_keeper_is_at_risk () =
+  with_room @@ fun config ->
+  let goal, _kind =
+    match Goal_store.upsert_goal config ~title:"Unstaffed goal" () with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  ignore
+    (Coord_task.add_task ~goal_id:goal.id config ~title:"Unstaffed task"
+       ~priority:3 ~description:"needs a keeper");
+  let node = Dashboard_goals.dashboard_goals_tree_json ~config |> root_node in
+  check string "unstaffed health" "at_risk"
+    (node |> member "health" |> to_string);
+  check string "unstaffed blocker" "goal_linkage"
+    (node |> member "blocking_source" |> to_string);
+  check int "one linked task" 1 (node |> member "task_count" |> to_int);
+  check int "linkage warning count" 1
+    (node |> member "linkage_warning_count" |> to_int)
+
+let test_cancelled_only_goal_is_at_risk () =
+  with_room @@ fun config ->
+  let goal, _kind =
+    match Goal_store.upsert_goal config ~title:"Cancelled-only goal" () with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  ignore
+    (Coord_task.add_task ~goal_id:goal.id config ~title:"Cancelled task"
+       ~priority:3 ~description:"cancel me");
+  let task_id =
+    match Coord.get_tasks_raw config with
+    | [ task ] -> task.id
+    | tasks ->
+        fail (Printf.sprintf "expected one task, got %d" (List.length tasks))
+  in
+  (match Coord.cancel_task_r config ~agent_name:"planner" ~task_id
+           ~reason:"test cancellation" with
+   | Ok _ -> ()
+   | Error err -> fail (Types.masc_error_to_string err));
+  let node = Dashboard_goals.dashboard_goals_tree_json ~config |> root_node in
+  check string "cancelled-only health" "at_risk"
+    (node |> member "health" |> to_string);
+  check string "cancelled-only blocker" "goal_linkage"
+    (node |> member "blocking_source" |> to_string);
+  check int "linkage warning count" 1
+    (node |> member "linkage_warning_count" |> to_int)
+
+let test_title_marker_links_legacy_task () =
+  with_room @@ fun config ->
+  let goal, _kind =
+    match Goal_store.upsert_goal config ~title:"Legacy marker goal" () with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  ignore
+    (Coord_task.add_task config
+       ~title:(Printf.sprintf "[goal:%s] Legacy task" goal.id)
+       ~priority:3 ~description:"legacy title marker");
+  let node = Dashboard_goals.dashboard_goals_tree_json ~config |> root_node in
+  let task =
+    match node |> member "tasks" |> to_list with
+    | task :: _ -> task
+    | [] -> fail "expected linked title-marker task"
+  in
+  check string "legacy linkage source" "title_tag"
+    (task |> member "linkage_source" |> to_string);
+  check string "node linkage source" "title_tag"
+    (node |> member "linkage_source" |> to_string)
+
 let test_blocked_phase_projects_blocked_health () =
   with_room @@ fun config ->
   let _goal, _kind =
@@ -268,6 +362,14 @@ let () =
     [
       ( "tree",
         [
+          test_case "empty executing goal is at risk" `Quick
+            test_empty_executing_goal_is_at_risk;
+          test_case "open task without keeper is at risk" `Quick
+            test_open_task_without_keeper_is_at_risk;
+          test_case "cancelled-only goal is at risk" `Quick
+            test_cancelled_only_goal_is_at_risk;
+          test_case "title marker links legacy task" `Quick
+            test_title_marker_links_legacy_task;
           test_case "blocked phase maps to blocked health" `Quick
             test_blocked_phase_projects_blocked_health;
           test_case "goal detail surfaces keeper runtime trust and blockers"

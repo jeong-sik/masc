@@ -304,6 +304,59 @@ describe('dashboard goals decoding', () => {
     })
   })
 
+  it('does not default missing goal health to on_track', async () => {
+    const rawResponse = {
+      tree: [
+        makeRawGoalNode({
+          health: undefined,
+          blocking_source: 'goal_linkage',
+          linkage_warning_count: 1,
+        }),
+      ],
+      summary: {},
+    }
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(rawResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchDashboardGoalsTree()
+
+    expect(result.tree[0]).toMatchObject({
+      health: 'at_risk',
+      blocking_source: 'goal_linkage',
+      linkage_warning_count: 1,
+    })
+  })
+
+  it('decodes on_track_goals separately from active_goals', async () => {
+    const rawResponse = {
+      tree: [makeRawGoalNode()],
+      summary: {
+        total_goals: 3,
+        active_goals: 2,
+        on_track_goals: 1,
+      },
+    }
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(rawResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchDashboardGoalsTree()
+
+    expect(result.summary.active_goals).toBe(2)
+    expect(result.summary.on_track_goals).toBe(1)
+  })
+
   it('retains keeper trust summary and latest event on goal detail payloads', async () => {
     const rawResponse = {
       goal: makeRawGoalNode(),

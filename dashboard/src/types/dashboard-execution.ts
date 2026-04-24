@@ -583,7 +583,7 @@ export interface GoalTreeNode {
   infra_risk_count: number
   linkage_source: 'explicit' | 'title_tag' | 'mixed' | 'none' | string
   linkage_warning_count: number
-  blocking_source: 'goal_phase' | 'child_goal' | 'approval' | 'keeper_runtime' | 'task_fsm' | 'stalled' | 'none' | string
+  blocking_source: 'goal_phase' | 'child_goal' | 'approval' | 'keeper_runtime' | 'task_fsm' | 'goal_linkage' | 'stalled' | 'none' | string
   blocking_reason: string
   latest_keeper_ref?: string | null
   latest_turn_ref?: number | null
@@ -595,6 +595,7 @@ export interface GoalTreeNode {
 export interface GoalTreeSummary {
   total_goals: number
   active_goals: number
+  on_track_goals: number
   done_goals: number
   paused_goals: number
   at_risk_goals: number

@@ -17,6 +17,28 @@ let keeper_tool_result_json ~(ok : bool) ~(message : string) =
        ])
 ;;
 
+let validate_goal_id config goal_id =
+  match Goal_store.get_goal config ~goal_id with
+  | Some _ -> Ok goal_id
+  | None -> Error (Printf.sprintf "unknown goal_id: %s" goal_id)
+;;
+
+let resolve_task_create_goal_id ~config ~(meta : keeper_meta) args =
+  match Safe_ops.json_string_opt "goal_id" args with
+  | Some s when String.trim s <> "" ->
+      validate_goal_id config (String.trim s) |> Result.map Option.some
+  | _ ->
+      (match meta.active_goal_ids with
+       | [] -> Ok None
+       | [ goal_id ] ->
+           validate_goal_id config goal_id |> Result.map Option.some
+       | goal_ids ->
+           Error
+             (Printf.sprintf
+                "goal_id is required when keeper has multiple active_goal_ids: [%s]"
+                (String.concat ", " goal_ids)))
+;;
+
 let handle_keeper_task_tool
       ~(config : Coord.config)
       ~(meta : keeper_meta)
@@ -107,20 +129,24 @@ let handle_keeper_task_tool
     let title = Safe_ops.json_string ~default:"" "title" args |> String.trim in
     let description = Safe_ops.json_string ~default:"" "description" args |> String.trim in
     let priority = Safe_ops.json_int ~default:3 "priority" args |> max 1 |> min 5 in
-    let goal_id =
-      match Safe_ops.json_string_opt "goal_id" args with
-      | Some s when String.trim s <> "" -> Some (String.trim s)
-      | _ -> None
-    in
     if title = ""
     then error_json "title is required. Provide a clear, actionable task title."
     else if description = ""
     then error_json "description is required. Explain what needs to be done and why."
     else (
-      let result =
-        Coord_task.add_task ?goal_id config ~title ~priority ~description
-      in
-      Yojson.Safe.to_string (`Assoc [ "ok", `Bool true; "result", `String result ]))
+      match resolve_task_create_goal_id ~config ~meta args with
+      | Error message -> error_json message
+      | Ok goal_id ->
+          let result =
+            Coord_task.add_task ?goal_id config ~title ~priority ~description
+          in
+          Yojson.Safe.to_string
+            (`Assoc
+              [
+                "ok", `Bool true;
+                "result", `String result;
+                "goal_id", Json_util.string_opt_to_json goal_id;
+              ]))
   | "keeper_task_claim" ->
     let task_filter =
       match meta.active_goal_ids with

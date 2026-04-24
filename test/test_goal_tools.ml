@@ -45,6 +45,41 @@ let get_string_field json field =
   | `String value -> value
   | _ -> fail (field ^ " missing")
 
+let contains_substring s needle =
+  let s_len = String.length s in
+  let n_len = String.length needle in
+  let rec loop i =
+    if n_len = 0 then true
+    else if i + n_len > s_len then false
+    else if String.sub s i n_len = needle then true
+    else loop (i + 1)
+  in
+  loop 0
+
+let create_done_task config ~goal_id ~title =
+  ignore
+    (Coord_task.add_task ~goal_id config ~title ~priority:3
+       ~description:"done task fixture");
+  let task_id =
+    Coord.get_tasks_raw config
+    |> List.find_map (fun (task : Types.task) ->
+           if String.equal task.title title then Some task.id else None)
+    |> function
+    | Some task_id -> task_id
+    | None -> fail ("task not found: " ^ title)
+  in
+  let step action notes =
+    match
+      Coord.transition_task_r config ~agent_name:"planner" ~task_id ~action
+        ~notes ()
+    with
+    | Ok _ -> ()
+    | Error err -> fail (Types.masc_error_to_string err)
+  in
+  step Types.Claim "test fixture claim";
+  step Types.Start "test fixture start";
+  step Types.Done_action "test fixture done"
+
 let expect_error = function
   | Some (false, body) -> Yojson.Safe.from_string body
   | Some (true, _) -> fail "expected tool error"
@@ -143,6 +178,7 @@ let test_goal_review_updates_status () =
     | Ok payload -> payload
     | Error msg -> fail msg
   in
+  create_done_task config ~goal_id:goal.id ~title:"Review done task";
   let reviewed =
     Tool_coord.dispatch (coord_ctx config) ~name:"masc_goal_review"
       ~args:
@@ -187,6 +223,7 @@ let test_goal_transition_verification_to_completion () =
     | Ok payload -> payload
     | Error msg -> fail msg
   in
+  create_done_task config ~goal_id:goal.id ~title:"Verify done task";
   let transitioned =
     Tool_coord.dispatch (coord_ctx config) ~name:"masc_goal_transition"
       ~args:
@@ -253,6 +290,7 @@ let test_goal_transition_approval_gate () =
     | Ok payload -> payload
     | Error msg -> fail msg
   in
+  create_done_task config ~goal_id:goal.id ~title:"Approval done task";
   let transitioned =
     Tool_coord.dispatch (coord_ctx config) ~name:"masc_goal_transition"
       ~args:
@@ -332,6 +370,7 @@ let test_goal_review_done_uses_transition_flow () =
     | Ok payload -> payload
     | Error msg -> fail msg
   in
+  create_done_task config ~goal_id:goal.id ~title:"Compat done task";
   let reviewed =
     Tool_coord.dispatch (coord_ctx config) ~name:"masc_goal_review"
       ~args:
@@ -349,6 +388,80 @@ let test_goal_review_done_uses_transition_flow () =
   check string "legacy done routes to awaiting_verification"
     "awaiting_verification"
     (reviewed_json |> Yojson.Safe.Util.member "goal" |> fun json ->
+     get_string_field json "phase")
+
+let test_goal_completion_requires_linked_task () =
+  with_room @@ fun config ->
+  let goal, _kind =
+    match Goal_store.upsert_goal config ~title:"No task completion" () with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  let completed =
+    Tool_coord.dispatch (coord_ctx config) ~name:"masc_goal_transition"
+      ~args:
+        (`Assoc
+          [
+            ("goal_id", `String goal.id);
+            ("action", `String "request_complete");
+            ("actor", principal_json ~kind:"operator" ~id:"planner");
+          ])
+  in
+  let error_json = expect_error completed in
+  check string "zero task completion blocked" "conflict"
+    (get_string_field error_json "error_code");
+  check bool "error mentions linked task" true
+    (contains_substring (Yojson.Safe.to_string error_json) "linked task")
+
+let test_goal_completion_blocks_open_tasks () =
+  with_room @@ fun config ->
+  let goal, _kind =
+    match Goal_store.upsert_goal config ~title:"Open task completion" () with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  ignore
+    (Coord_task.add_task ~goal_id:goal.id config ~title:"Still open"
+       ~priority:3 ~description:"open");
+  let completed =
+    Tool_coord.dispatch (coord_ctx config) ~name:"masc_goal_transition"
+      ~args:
+        (`Assoc
+          [
+            ("goal_id", `String goal.id);
+            ("action", `String "request_complete");
+            ("actor", principal_json ~kind:"operator" ~id:"planner");
+          ])
+  in
+  let error_json = expect_error completed in
+  check string "open task completion blocked" "conflict"
+    (get_string_field error_json "error_code")
+
+let test_goal_completion_override_allows_empty_goal () =
+  with_room @@ fun config ->
+  let goal, _kind =
+    match Goal_store.upsert_goal config ~title:"Override completion" () with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  let completed =
+    Tool_coord.dispatch (coord_ctx config) ~name:"masc_goal_transition"
+      ~args:
+        (`Assoc
+          [
+            ("goal_id", `String goal.id);
+            ("action", `String "request_complete");
+            ("actor", principal_json ~kind:"operator" ~id:"planner");
+            ("override_note", `String "metric-only manual completion");
+          ])
+  in
+  let completed_json =
+    match completed with
+    | Some result -> parse_json_result result
+    | None -> fail "masc_goal_transition not handled"
+  in
+  check string "override completes goal" "completed"
+    (completed_json |> Yojson.Safe.Util.member "goal" |> fun json ->
      get_string_field json "phase")
 
 let test_operator_actions_require_operator_principal () =
@@ -426,6 +539,12 @@ let () =
             test_goal_transition_approval_gate;
           test_case "review done compatibility" `Quick
             test_goal_review_done_uses_transition_flow;
+          test_case "completion requires linked task" `Quick
+            test_goal_completion_requires_linked_task;
+          test_case "completion blocks open tasks" `Quick
+            test_goal_completion_blocks_open_tasks;
+          test_case "completion override allows empty goal" `Quick
+            test_goal_completion_override_allows_empty_goal;
           test_case "operator-only actions enforce operator principal" `Quick
             test_operator_actions_require_operator_principal;
           test_case "approval requires operator principal" `Quick

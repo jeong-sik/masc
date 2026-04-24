@@ -389,6 +389,63 @@ let test_registered_hook_transition_strips_internal_agent_marker () =
     (assoc_string "agent_name" forwarded)
 
 (* ================================================================ *)
+(* #9785: missing-required-param hint augmentation                   *)
+(* ================================================================ *)
+
+let test_augment_suggests_closest_arg_key () =
+  (* Schema requires "tool_name" but LLM sent "name". *)
+  let oas_msg =
+    "Your call to \"masc_tool_help\":\n{\"name\":\"masc_board_post\"}\n\n\
+     Errors (fix these and call again):\n\
+    \  \"tool_name\": MISSING (required: string)"
+  in
+  let args = `Assoc [("name", `String "masc_board_post")] in
+  let augmented = Tool_input_validation.augment_missing_param_hint ~args oas_msg in
+  Alcotest.(check bool) "appends Did you mean section" true
+    (string_contains augmented "Did you mean:");
+  Alcotest.(check bool) "names actual key sent" true
+    (string_contains augmented "you sent \"name\"");
+  Alcotest.(check bool) "names required key" true
+    (string_contains augmented "rename it to \"tool_name\"")
+
+let test_augment_skips_when_missing_field_present_in_args () =
+  (* Field is missing because the value is wrong type, not absent. *)
+  let oas_msg =
+    "Your call to \"x\":\n{\"task_id\":\"...\"}\n\n\
+     Errors (fix these and call again):\n\
+    \  \"task_id\": MISSING (required: string)"
+  in
+  let args = `Assoc [("task_id", `String "abc")] in
+  let augmented = Tool_input_validation.augment_missing_param_hint ~args oas_msg in
+  Alcotest.(check string) "message is unchanged" oas_msg augmented
+
+let test_augment_skips_when_no_similar_arg_key () =
+  let oas_msg =
+    "Errors (fix these and call again):\n\
+    \  \"tool_name\": MISSING (required: string)"
+  in
+  let args = `Assoc [("zzzz_unrelated_xyzqq", `String "value")] in
+  let augmented = Tool_input_validation.augment_missing_param_hint ~args oas_msg in
+  Alcotest.(check string) "message is unchanged when nothing similar" oas_msg augmented
+
+let test_augment_handles_non_object_args () =
+  let oas_msg =
+    "Errors (fix these and call again):\n\
+    \  \"x\": MISSING (required: string)"
+  in
+  let augmented = Tool_input_validation.augment_missing_param_hint ~args:`Null oas_msg in
+  Alcotest.(check string) "message unchanged for null args" oas_msg augmented
+
+let test_augment_handles_no_missing_section () =
+  let oas_msg =
+    "Errors (fix these and call again):\n\
+    \  \"x\": wrong type — expected: integer, got: string"
+  in
+  let args = `Assoc [("x", `String "abc")] in
+  let augmented = Tool_input_validation.augment_missing_param_hint ~args oas_msg in
+  Alcotest.(check string) "message unchanged when nothing MISSING" oas_msg augmented
+
+(* ================================================================ *)
 (* Runner                                                            *)
 (* ================================================================ *)
 
@@ -434,5 +491,17 @@ let () =
         test_registered_hook_transition_compat_status_action;
       Alcotest.test_case "masc_transition strips internal markers" `Quick
         test_registered_hook_transition_strips_internal_agent_marker;
+    ]);
+    ("missing_param_hint_9785", [
+      Alcotest.test_case "suggests closest arg key as rename target" `Quick
+        test_augment_suggests_closest_arg_key;
+      Alcotest.test_case "skips when missing field is already present" `Quick
+        test_augment_skips_when_missing_field_present_in_args;
+      Alcotest.test_case "skips when no arg key is similar" `Quick
+        test_augment_skips_when_no_similar_arg_key;
+      Alcotest.test_case "handles non-object args" `Quick
+        test_augment_handles_non_object_args;
+      Alcotest.test_case "ignores wrong-type errors with no MISSING" `Quick
+        test_augment_handles_no_missing_section;
     ]);
   ]

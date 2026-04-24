@@ -3,6 +3,7 @@ open Alcotest
 module TL = Masc_mcp.Keeper_toml_loader
 module KTP = Masc_mcp.Keeper_types_profile
 module KPA = Masc_mcp.Keeper_persona_authoring
+module KEP = Masc_mcp.Keeper_exec_persona
 
 let contains_substring s needle =
   let s_len = String.length s in
@@ -990,6 +991,79 @@ let test_persona_resolver_preserves_canonical_tool_access_and_allowed_paths () =
          | `String _ -> true
          | _ -> false)
 
+let test_persona_resolver_renders_durable_keeper_toml () =
+  let resolved =
+    `Assoc
+      [
+        ("name", `String "probe-keeper");
+        ("persona_name", `String "probe");
+        ("goal", `String "line1\nline2");
+        ("short_goal", `String "short");
+        ("mid_goal", `String "mid");
+        ("long_goal", `String "long");
+        ("instructions", `String "quote: \"ok\"");
+        ("policy_voice_enabled", `Bool false);
+        ("autoboot_enabled", `Bool false);
+        ("mention_targets", `List [ `String "probe"; `String "@probe" ]);
+        ("proactive_enabled", `Bool true);
+        ("allowed_paths", `List [ `String "/tmp/probe" ]);
+        ("tool_preset", `String "research");
+        ("tool_also_allow", `List [ `String "masc_status" ]);
+        ("tool_denylist", `List [ `String "masc_keeper_reset" ]);
+      ]
+  in
+  match KEP.render_keeper_toml_from_resolved_args resolved with
+  | Error e -> fail ("render failed: " ^ e)
+  | Ok toml -> (
+      match TL.parse_toml toml with
+      | Error e -> fail ("rendered TOML did not parse: " ^ e)
+      | Ok doc -> (
+          match KTP.profile_defaults_of_toml doc with
+          | Error e -> fail ("rendered TOML did not load: " ^ e)
+          | Ok defaults ->
+              check (option string) "name" (Some "probe-keeper")
+                (TL.toml_string_opt doc "keeper.name");
+              check (option string) "persona_name" (Some "probe")
+                defaults.persona_name;
+              check (option string) "goal" (Some "line1\nline2")
+                defaults.goal;
+              check (option string) "instructions"
+                (Some "quote: \"ok\"") defaults.instructions;
+              check (option bool) "autoboot" (Some false)
+                defaults.autoboot_enabled;
+              check (list string) "mention targets"
+                [ "probe"; "@probe" ] defaults.mention_targets;
+              check (option (list string)) "allowed_paths"
+                (Some [ "/tmp/probe" ]) defaults.allowed_paths;
+              check (option string) "tool_preset" (Some "research")
+                defaults.tool_preset;
+              check (option (list string)) "tool_also_allow"
+                (Some [ "masc_status" ]) defaults.tool_also_allow;
+              check (option (list string)) "tool_denylist"
+                (Some [ "masc_keeper_reset" ]) defaults.tool_denylist))
+
+let test_persona_resolver_rejects_custom_tool_access_durable_toml () =
+  let resolved =
+    `Assoc
+      [
+        ("name", `String "probe-keeper");
+        ("persona_name", `String "probe");
+        ("goal", `String "test");
+        ("mention_targets", `List [ `String "probe" ]);
+        ( "tool_access",
+          `Assoc
+            [
+              ("kind", `String "custom");
+              ("tools", `List [ `String "masc_status" ]);
+            ] );
+      ]
+  in
+  match KEP.render_keeper_toml_from_resolved_args resolved with
+  | Ok _ -> fail "expected custom tool_access durable TOML rejection"
+  | Error e ->
+      check bool "mentions custom tool_access" true
+        (contains_substring e "tool_access.kind=custom")
+
 let authoring_minimal_profile =
   `Assoc
     [
@@ -1408,6 +1482,10 @@ let () =
             test_persona_resolver_preserves_autoboot_enabled_arg;
           test_case "persona resolver preserves canonical tool_access and allowed_paths" `Quick
             test_persona_resolver_preserves_canonical_tool_access_and_allowed_paths;
+          test_case "persona resolver renders durable keeper TOML" `Quick
+            test_persona_resolver_renders_durable_keeper_toml;
+          test_case "persona resolver rejects custom tool_access durable TOML" `Quick
+            test_persona_resolver_rejects_custom_tool_access_durable_toml;
           test_case "persona authoring schema explains effects" `Quick
             test_persona_authoring_schema_explains_effects;
           test_case "persona authoring normalizes defaults" `Quick

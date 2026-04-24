@@ -10,6 +10,12 @@
 
 (** {1 Types} *)
 
+(* #9919 audit follow-up: Prometheus counter for priority-trigger
+   selections. Replaces a degenerate [Heuristic_metrics.record]
+   emit ([threshold=0.0, triggered=true] tautology). *)
+let priority_trigger_selected_metric =
+  "masc_thompson_priority_trigger_selected_total"
+
 type agent_stats = {
   name : string;
   (* Thompson Sampling Beta distribution parameters *)
@@ -482,14 +488,23 @@ let select_with_feedback ~agents ~max_n ~pending_triggers ~tick_interval_s =
         let s = get_stats name in
         let ticks = ticks_since_selection ~stats:s ~tick_interval_s in
         let signal = starvation_bonus ~ticks in
-        (* RFC-0001 Gate A: record thompson selection observation *)
-        Heuristic_metrics.record {
-          module_name = "thompson_sampling"; site = "priority_trigger";
-          raw_value = signal; threshold = 0.0;
-          triggered = true;
-          provenance = Thompson "starvation_bonus";
-          timestamp = Unix.gettimeofday ();
-        };
+        (* #9919 audit follow-up: the prior [Heuristic_metrics.record]
+           at this site was semi-degenerate — [threshold=0.0] and
+           [triggered=true] were tautological (caller already filtered
+           by eligibility).  The real useful observation is "a priority
+           trigger was selected with [signal=X]"; expose it as a
+           Prometheus counter labelled by the trigger kind so operators
+           can split mention-driven vs content-alert-driven selection
+           rates.  [Heuristic_metrics_diagnostics] will stop flagging
+           this site as instrumentation theatre. *)
+        let trigger_label =
+          match trigger with
+          | Mentioned _ -> "mentioned"
+          | ContentAlert _ -> "content_alert"
+          | Scheduled | Starved | Thompson -> "other"
+        in
+        Prometheus.inc_counter priority_trigger_selected_metric
+          ~labels:[ ("agent", name); ("trigger", trigger_label) ] ();
         add_selected {
           agent_name = name;
           trigger;

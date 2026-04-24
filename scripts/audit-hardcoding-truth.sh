@@ -118,10 +118,26 @@ else
 fi
 
 section "CI Failure Visibility"
-print_matches \
-  "meta bug-class gates are still advisory in CI" \
-  .github/workflows/ci.yml \
-  'Meta bug-class gates|continue-on-error: true|check-enum-string-safety\.sh \|\| true'
+ci_meta_block="$(
+  awk '
+    /^[[:space:]]{6}- name: Meta bug-class gates/ { in_block = 1 }
+    in_block && /^[[:space:]]{2}[A-Za-z0-9_-]+:/ { exit }
+    in_block { print }
+  ' .github/workflows/ci.yml
+)"
+if [ -z "$ci_meta_block" ]; then
+  mark_confirmed "meta bug-class gates are missing from CI"
+elif printf '%s\n' "$ci_meta_block" | rg -q 'continue-on-error:[[:space:]]*true|\|\|[[:space:]]*true'; then
+  mark_confirmed "meta bug-class gates are still advisory in CI"
+  printf '%s\n' "$ci_meta_block" \
+    | rg -n 'continue-on-error:[[:space:]]*true|\|\|[[:space:]]*true' || true
+elif printf '%s\n' "$ci_meta_block" | rg -q 'audit-hardcoding-truth\.sh' \
+  && ! printf '%s\n' "$ci_meta_block" | rg -q 'audit-hardcoding-truth\.sh[[:space:]]+--fail-on-confirmed'; then
+  mark_confirmed "hardcoding audit runs in non-strict mode inside meta gates"
+  printf '%s\n' "$ci_meta_block" | rg -n 'audit-hardcoding-truth\.sh' || true
+else
+  echo "PASS: meta bug-class gates run as blocking CI checks."
+fi
 
 section "Broad Active-Source Smell Sample"
 rg -n \

@@ -968,17 +968,22 @@
 ; MCP Tool Matrix (2 modules + generated names + runner dep)
 (test
  (name test_mcp_tool_matrix)
- (modules test_mcp_tool_matrix test_mcp_tool_matrix_cases)
+ (modules test_mcp_tool_matrix)
  (deps tool_matrix_case_runner.exe)
+ (libraries masc_test_deps keeper_tool_matrix_cases_lib))
+
+; Keeper Tool Matrix — shared case modules as a library
+(library
+ (name keeper_tool_matrix_cases_lib)
+ (modules test_keeper_tool_matrix_cases test_mcp_tool_matrix_cases)
  (libraries masc_test_deps))
 
-; Keeper Tool Matrix (3 modules + runner dep)
+; Keeper Tool Matrix (test driver + runner dep)
 (test
  (name test_keeper_tool_matrix)
- (modules test_keeper_tool_matrix test_keeper_tool_matrix_cases
-          test_mcp_tool_matrix_cases)
+ (modules test_keeper_tool_matrix)
  (deps keeper_tool_matrix_case_runner.exe)
- (libraries masc_test_deps))
+ (libraries masc_test_deps keeper_tool_matrix_cases_lib))
 
 ; ============================================================
 ; Special: Custom compiler flags
@@ -1208,13 +1213,13 @@
 
 (executable
  (name tool_matrix_manifest)
- (modules tool_matrix_manifest test_mcp_tool_matrix_cases)
- (libraries masc_test_deps))
+ (modules tool_matrix_manifest)
+ (libraries masc_test_deps keeper_tool_matrix_cases_lib))
 
 (executable
  (name tool_matrix_case_runner)
- (modules tool_matrix_case_runner test_mcp_tool_matrix_cases)
- (libraries masc_test_deps))
+ (modules tool_matrix_case_runner)
+ (libraries masc_test_deps keeper_tool_matrix_cases_lib))
 
 ; Context Isolation (multi-keeper)
 (test
@@ -1253,6 +1258,5 @@
 
 (executable
  (name keeper_tool_matrix_case_runner)
- (modules keeper_tool_matrix_case_runner test_keeper_tool_matrix_cases
-          test_mcp_tool_matrix_cases)
- (libraries masc_test_deps))
+ (modules keeper_tool_matrix_case_runner)
+ (libraries masc_test_deps keeper_tool_matrix_cases_lib))

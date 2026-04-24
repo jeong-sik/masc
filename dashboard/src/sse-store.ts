@@ -51,7 +51,6 @@ import {
   SSE_KEEPER_THREAD_DEBOUNCE_MS,
   SSE_RECONNECT_RETRY_MS,
 } from './config/constants'
-import { replayOasRuntimeTelemetry } from './oas-runtime-store'
 
 // --- Refresh function registration (avoids circular imports) ---
 
@@ -294,6 +293,7 @@ function handleReconnect(): void {
 
 async function hydrateAfterReconnect(): Promise<void> {
   try {
+    const { replayOasRuntimeTelemetry } = await import('./oas-runtime-store')
     await replayOasRuntimeTelemetry()
   } catch (err) {
     console.warn('[SSE] reconnect OAS replay failed', err instanceof Error ? err.message : err)

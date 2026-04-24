@@ -1,8 +1,3 @@
-import {
-  fetchDashboardMission,
-  fetchDashboardMissionBriefing,
-  fetchDashboardMissionSession,
-} from './api'
 import { isAbortError } from './lib/async-state'
 import {
   missionSnapshot,
@@ -55,6 +50,7 @@ export async function refreshMissionSnapshot(
   missionError.value = null
   inflightMissionSnapshotRefresh = (async () => {
     try {
+      const { fetchDashboardMission } = await import('./api/dashboard')
       const raw = await fetchDashboardMission()
       const normalized = normalizeMission(raw)
       if (isMissionInitializingPayload(normalized) && missionSnapshot.value) {
@@ -86,6 +82,7 @@ export async function refreshMissionSessionDetail(
   missionSessionDetailLoading.value = true
   missionSessionDetailError.value = null
   try {
+    const { fetchDashboardMissionSession } = await import('./api/dashboard')
     const raw = await fetchDashboardMissionSession(sessionId, { signal: opts?.signal })
     if (opts?.signal?.aborted) return
     missionSessionDetail.value = normalizeMissionSessionDetail(raw)
@@ -106,6 +103,7 @@ export async function refreshMissionBriefing(
   missionBriefingLoading.value = true
   missionBriefingError.value = null
   try {
+    const { fetchDashboardMissionBriefing } = await import('./api/dashboard')
     const raw = await fetchDashboardMissionBriefing(force, { signal: opts?.signal })
     if (opts?.signal?.aborted) return
     const normalized = normalizeMissionBriefing(raw)

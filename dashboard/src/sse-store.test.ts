@@ -31,8 +31,10 @@ const showToast = vi.fn<(message: string, kind?: string, durationMs?: number) =>
 const replayOasRuntimeTelemetry = vi.fn<() => Promise<void>>(async () => {})
 
 async function flushAsyncWork(): Promise<void> {
-  await Promise.resolve()
-  await Promise.resolve()
+  await vi.dynamicImportSettled()
+  for (let i = 0; i < 6; i += 1) {
+    await Promise.resolve()
+  }
 }
 
 async function loadSseStore() {

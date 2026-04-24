@@ -7,6 +7,7 @@ const apiMocks = vi.hoisted(() => ({
 }))
 
 vi.mock('./api', () => apiMocks)
+vi.mock('./api/dashboard', () => apiMocks)
 
 const missionPayload = {
   generated_at: '2026-03-25T09:00:00Z',

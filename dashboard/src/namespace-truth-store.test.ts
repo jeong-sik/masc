@@ -9,6 +9,10 @@ const apiMocks = vi.hoisted(() => ({
 }))
 
 vi.mock('./api', () => apiMocks)
+vi.mock('./api/dashboard-hot', () => ({
+  fetchDashboardNamespaceTruth: apiMocks.fetchDashboardNamespaceTruth,
+  fetchDashboardShell: apiMocks.fetchDashboardShell,
+}))
 vi.mock('./api/dashboard', () => ({
   fetchDashboardNamespaceTruth: apiMocks.fetchDashboardNamespaceTruth,
 }))

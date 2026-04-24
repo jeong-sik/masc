@@ -1,4 +1,4 @@
-import { fetchDashboardNamespaceTruth } from './api'
+import { fetchDashboardNamespaceTruth } from './api/dashboard-hot'
 import { asString, isRecord } from './components/common/normalize'
 import { serverStatus } from './store'
 import {

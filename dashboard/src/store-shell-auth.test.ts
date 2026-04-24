@@ -12,6 +12,9 @@ const toastMocks = vi.hoisted(() => ({
 }))
 
 vi.mock('./api', () => apiMocks)
+vi.mock('./api/dashboard-hot', () => ({
+  fetchDashboardShell: apiMocks.fetchDashboardShell,
+}))
 vi.mock('./sse', () => ({
   journal: {
     log: vi.fn(),

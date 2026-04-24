@@ -7,7 +7,6 @@ import type {
   OperatorDigest,
   OperatorSnapshot,
 } from '../types'
-import { parseOperatorActionResult } from './schemas/operator-action'
 import { sanitizeDashboardActorName } from '../lib/dashboard-actor'
 import {
   currentDashboardActorName,
@@ -650,6 +649,7 @@ export async function runOperatorAction(body: OperatorActionRequest): Promise<Op
     authHeaders({ actorName: body.actor }),
     operatorActionTimeoutMs(body),
   )
+  const { parseOperatorActionResult } = await import('./schemas/operator-action')
   return parseOperatorActionResult(raw)
 }
 
@@ -667,6 +667,7 @@ export async function confirmOperatorAction(
     },
     authHeaders({ actorName: actor }),
   )
+  const { parseOperatorActionResult } = await import('./schemas/operator-action')
   return parseOperatorActionResult(raw)
 }
 

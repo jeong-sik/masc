@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { act } from 'preact/test-utils'
 import { signal } from '@preact/signals'
+import { waitFor } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const fetchTelemetry = vi.fn().mockResolvedValue({
@@ -102,7 +103,9 @@ describe('Observatory', () => {
 
     expect(fetchTelemetry).toHaveBeenCalledTimes(1)
     expect(fetchToolQuality).toHaveBeenCalledTimes(1)
-    expect(container.textContent).toContain('activity-panels-stub')
+    await waitFor(() => {
+      expect(container.textContent).toContain('activity-panels-stub')
+    })
     expect(container.textContent).not.toContain('live-monitor-stub')
     expect(container.textContent).toContain('최근 1시간')
     expect(container.textContent).toContain('자동 갱신')
@@ -129,7 +132,9 @@ describe('Observatory', () => {
     })
     await flushUi()
 
-    expect(container.textContent).toContain('live-monitor-stub')
+    await waitFor(() => {
+      expect(container.textContent).toContain('live-monitor-stub')
+    })
     expect(container.textContent).not.toContain('activity-panels-stub')
     expect(container.textContent).toContain('실시간 스트림과 에이전트 상태를 한곳에서 봅니다.')
 

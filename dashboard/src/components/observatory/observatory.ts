@@ -14,6 +14,7 @@
 
 import { html } from 'htm/preact'
 import { signal, useSignal } from '@preact/signals'
+import { lazy, Suspense } from 'preact/compat'
 import { useEffect, useRef } from 'preact/hooks'
 import {
   currentKeeperFilter,
@@ -40,12 +41,21 @@ import { CrossSignalReadout } from './cross-signal-readout'
 import { DetailPane } from './detail-pane'
 import { cursorPosition } from './cursor-store'
 import { LoadingState } from '../common/feedback-state'
-import { Live } from '../live'
-import { ObservatoryActivityPanels } from '../activity-graph'
 
 const DEFAULT_RANGE: TimeRangePreset = '1h'
 const observatoryRefreshVersion = signal(0)
 type ObservatoryView = 'timeline' | 'live'
+
+const LazyLive = lazy(async () => ({
+  default: (await import('../live')).Live,
+}))
+const LazyObservatoryActivityPanels = lazy(async () => ({
+  default: (await import('../activity-graph')).ObservatoryActivityPanels,
+}))
+
+function lazyObservatoryFallback(label: string) {
+  return html`<${LoadingState}>${label} 불러오는 중...<//>`
+}
 
 // --- Observatory state ---
 
@@ -311,7 +321,11 @@ export function Observatory() {
       ` : null}
 
       ${activeView.value === 'live'
-        ? html`<${Live} variant="observatory" />`
+        ? html`
+            <${Suspense} fallback=${lazyObservatoryFallback('라이브 모니터')}>
+              <${LazyLive} variant="observatory" />
+            <//>
+          `
         : !hasTrackData && data.loading
         ? html`<${LoadingState}>관찰소 데이터 불러오는 중...<//>`
         : html`
@@ -348,7 +362,13 @@ export function Observatory() {
             <${DetailPane} />
           `}
 
-      ${activeView.value === 'timeline' ? html`<${ObservatoryActivityPanels} />` : null}
+      ${activeView.value === 'timeline'
+        ? html`
+            <${Suspense} fallback=${lazyObservatoryFallback('활동 분석 패널')}>
+              <${LazyObservatoryActivityPanels} />
+            <//>
+          `
+        : null}
 
       ${activeView.value === 'timeline' ? html`
         <p class="text-3xs text-text-dim italic">

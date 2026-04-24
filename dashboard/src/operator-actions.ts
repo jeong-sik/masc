@@ -1,5 +1,10 @@
-import { confirmOperatorAction, fetchOperatorDigest, fetchOperatorSnapshot, runOperatorAction } from './api'
-import { extractApiError } from './api/core'
+import {
+  confirmOperatorAction,
+  extractApiError,
+  fetchOperatorDigest,
+  fetchOperatorSnapshot,
+  runOperatorAction,
+} from './api/core'
 import type {
   OperatorActionLogEntry,
   OperatorActionRequest,

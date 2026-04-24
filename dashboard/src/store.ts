@@ -22,12 +22,7 @@ import type {
   DashboardShellMetaCognitionSummary,
   DashboardShellResponse,
 } from './types'
-import {
-  fetchDashboardExecution,
-  fetchDashboardMemory,
-  fetchDashboardPlanning,
-  fetchDashboardShell,
-} from './api'
+import { fetchDashboardShell } from './api/dashboard-hot'
 import { journal } from './sse'
 import { showToast } from './components/common/toast'
 import {
@@ -554,6 +549,7 @@ async function doFetchExecution(): Promise<void> {
   executionLoading.value = true
   executionError.value = null
   try {
+    const { fetchDashboardExecution } = await import('./api/dashboard')
     const data = await fetchDashboardExecution()
     hydrateExecutionSnapshot(data)
   } catch (err) {
@@ -651,6 +647,7 @@ function boardPageSize(): number {
 export async function refreshBoard(): Promise<void> {
   boardLoading.value = true
   try {
+    const { fetchDashboardMemory } = await import('./api/dashboard')
     const limit = boardPageSize()
     const data = await fetchDashboardMemory(boardSortMode.value, {
       excludeSystem: boardExcludeSystem.value,
@@ -682,6 +679,7 @@ export async function loadMoreBoardPosts(): Promise<void> {
   if (!boardHasMore.value) return
   boardLoadingMore.value = true
   try {
+    const { fetchDashboardMemory } = await import('./api/dashboard')
     const limit = boardPageSize()
     const offset = boardOffset.value
     const data = await fetchDashboardMemory(boardSortMode.value, {
@@ -712,6 +710,7 @@ export async function loadMoreBoardPosts(): Promise<void> {
 export async function refreshGoals(): Promise<void> {
   goalsLoading.value = true
   try {
+    const { fetchDashboardPlanning } = await import('./api/dashboard')
     const data = await fetchDashboardPlanning()
     applyPlanningEnvelope(data)
     lastGoalsRefreshAt.value = new Date().toISOString()

@@ -232,7 +232,7 @@ let view_hero_panel (r : Overview_types.response) =
     ~attrs:[ Style.panel ]
     [ Node.h3 ~attrs:[ Style.panel_title ] [ Node.text "runtime · identity" ]
     ; Node.div
-        ~attrs:[ Style.kv_row; Attr.role "list" ]
+        ~attrs:[ Style.kv_row; Attr.role "list"; Attr.arialabel "Runtime identity" ]
         [ Node.div
             ~attrs:[ Style.kv; Attr.role "listitem" ]
             [ Node.div ~attrs:[ Style.k ] [ Node.text "project" ]
@@ -280,7 +280,7 @@ let view_build_panel (r : Overview_types.response) =
     ~attrs:[ Style.panel ]
     [ Node.h3 ~attrs:[ Style.panel_title ] [ Node.text "build · release" ]
     ; Node.div
-        ~attrs:[ Style.kv_row; Attr.role "list" ]
+        ~attrs:[ Style.kv_row; Attr.role "list"; Attr.arialabel "Build and release" ]
         [ Node.div
             ~attrs:[ Style.kv; Attr.role "listitem" ]
             [ Node.div ~attrs:[ Style.k ] [ Node.text "version" ]
@@ -385,7 +385,7 @@ let view_meta_panel (r : Overview_types.response) =
         ~attrs:[ Style.panel_title ]
         [ Node.text "meta · cognition" ]
     ; Node.div
-        ~attrs:[ Style.kv_row; Attr.role "list" ]
+        ~attrs:[ Style.kv_row; Attr.role "list"; Attr.arialabel "Meta and cognition" ]
         [ Node.div
             ~attrs:[ Style.kv; Attr.role "listitem" ]
             [ Node.div ~attrs:[ Style.k ] [ Node.text "stagnation" ]

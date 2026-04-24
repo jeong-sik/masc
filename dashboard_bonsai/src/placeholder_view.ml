@@ -243,7 +243,7 @@ let component ~(route : Route.t) (_graph @ local) =
           ]
       ; Sec.view ~title:"operator contract" ~sub:"target · measure · next" ()
       ; Node.div
-          ~attrs:[ Style.grid; Attr.role "list" ]
+          ~attrs:[ Style.grid; Attr.role "list"; Attr.arialabel "Operator contract panels" ]
           [ panel ~title:"measure" ~text:bp.measure ~code:"what must stay visible"
           ; panel ~title:"next" ~text:bp.next_step ~code:bp.endpoint
           ; panel

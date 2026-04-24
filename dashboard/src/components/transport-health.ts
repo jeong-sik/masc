@@ -160,6 +160,27 @@ function compactId(value: string): string {
   return `${value.slice(0, 8)}...${value.slice(-6)}`
 }
 
+// Hit ratio formatter: returns "—" when the cache has seen no traffic
+// (hits + misses = 0).  Rendering "0% (0/0)" would look like a failure
+// mode when it actually means "nothing has happened yet".
+export function formatHitRate(hits: number, misses: number): string {
+  const total = hits + misses
+  if (total <= 0) return '—'
+  const pct = Math.round((hits * 100) / total)
+  return `${pct}%`
+}
+
+// Average bytes per ack from histogram sum + count.  Histogram backend
+// accumulates a sum; dividing by the auto-created _count gives the
+// mean.  Guard against zero count to avoid NaN.
+export function formatAvgBufferedBytes(sum: number, count: number): string {
+  if (count <= 0) return '—'
+  const avg = sum / count
+  if (avg < 1024) return `${Math.round(avg)} B`
+  if (avg < 1024 * 1024) return `${(avg / 1024).toFixed(1)} KB`
+  return `${(avg / (1024 * 1024)).toFixed(2)} MB`
+}
+
 function statusDot(status: StatusTone): string {
   if (status === 'ok') return 'bg-[var(--ok)]'
   if (status === 'warn') return 'bg-[var(--warn)]'
@@ -199,11 +220,19 @@ function grpcTone(data: TransportHealthData): StatusTone {
 }
 
 function websocketTone(data: TransportHealthData): StatusTone {
-  return transportTone(
+  const base = transportTone(
     data.websocket.configured,
     data.websocket.listening,
     data.websocket.sessions > 0,
   )
+  // A healthy transport that has tripped the backpressure circuit at
+  // least once is not in the 'bad' state — WS is still carrying
+  // traffic — but the operator should notice.  Degrade 'ok' to 'warn'
+  // and leave an already-bad state alone.
+  if (base === 'ok' && data.websocket.delivery.throttled_deliveries > 0) {
+    return 'warn'
+  }
+  return base
 }
 
 function webrtcActive(data: TransportHealthData): boolean {
@@ -437,6 +466,26 @@ export function TransportHealthPanel() {
               <${MetricRow} label="세션" value=${data.websocket.sessions} />
               <${MetricRow} label="모드" value=${data.websocket.mode} />
               <${MetricRow} label="릴레이 소스" value=${data.websocket.relay_source} />
+              <${MetricRow}
+                label="파싱 캐시"
+                value=${formatHitRate(data.websocket.delivery.parse_cache_hits, data.websocket.delivery.parse_cache_misses)}
+                sub=${`${data.websocket.delivery.parse_cache_hits} 히트 / ${data.websocket.delivery.parse_cache_misses} 미스`}
+              />
+              <${MetricRow}
+                label="바이트 캐시"
+                value=${formatHitRate(data.websocket.delivery.bytes_cache_hits, data.websocket.delivery.bytes_cache_misses)}
+                sub=${`${data.websocket.delivery.bytes_cache_hits} 히트 / ${data.websocket.delivery.bytes_cache_misses} 미스`}
+              />
+              <${MetricRow}
+                label="클라이언트 드레인"
+                value=${formatAvgBufferedBytes(data.websocket.delivery.client_buffered_bytes_sum, data.websocket.delivery.client_buffered_bytes_count)}
+                sub=${`${data.websocket.delivery.client_acks} ack`}
+              />
+              <${MetricRow}
+                label="억제된 전달"
+                value=${data.websocket.delivery.throttled_deliveries}
+                sub=${data.websocket.delivery.throttled_deliveries > 0 ? '서킷 오픈' : '정상'}
+              />
             <//>
 
             <${SectionCard} title="WebRTC" status=${webrtcStatus} eyebrow=${webrtcEyebrow(data)}>

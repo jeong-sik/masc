@@ -2,7 +2,7 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { signal } from '@preact/signals'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { filterHotSessions } from './transport-health'
+import { filterHotSessions, formatHitRate, formatAvgBufferedBytes } from './transport-health'
 import type { HotSession } from '../api/transport-health'
 
 function sampleResponse(overrides?: Partial<Record<string, unknown>>) {
@@ -52,6 +52,16 @@ function sampleResponse(overrides?: Partial<Record<string, unknown>>) {
       port: 8936,
       sessions: 0,
       relay_source: 'sse_external_subscriber',
+      delivery: {
+        parse_cache_hits: 0,
+        parse_cache_misses: 0,
+        bytes_cache_hits: 0,
+        bytes_cache_misses: 0,
+        client_acks: 0,
+        throttled_deliveries: 0,
+        client_buffered_bytes_sum: 0,
+        client_buffered_bytes_count: 0,
+      },
     },
     webrtc: {
       enabled: true,
@@ -374,5 +384,52 @@ describe('filterHotSessions', () => {
     // None of the fixture sessions have "12" in id/kind/last_event_id.
     const result = filterHotSessions(sessions, '12')
     expect(result).toEqual([])
+  })
+})
+
+describe('formatHitRate', () => {
+  it('returns em dash when the cache has not seen any traffic', () => {
+    // An idle cache must read as "nothing happened", not "0% success" —
+    // operators should not be alarmed by a fresh server.
+    expect(formatHitRate(0, 0)).toBe('—')
+  })
+
+  it('computes a whole-number percentage', () => {
+    expect(formatHitRate(90, 10)).toBe('90%')
+    expect(formatHitRate(1, 3)).toBe('25%')
+  })
+
+  it('returns 100% when every observation is a hit', () => {
+    expect(formatHitRate(50, 0)).toBe('100%')
+  })
+
+  it('returns 0% when every observation is a miss', () => {
+    // Different from the idle case: misses-only means the cache exists
+    // but its key never matched.  That IS a 0% reading.
+    expect(formatHitRate(0, 5)).toBe('0%')
+  })
+})
+
+describe('formatAvgBufferedBytes', () => {
+  it('returns em dash when no ack has been observed', () => {
+    expect(formatAvgBufferedBytes(0, 0)).toBe('—')
+  })
+
+  it('formats sub-kilobyte averages in bytes', () => {
+    expect(formatAvgBufferedBytes(500, 1)).toBe('500 B')
+  })
+
+  it('switches to kilobytes above 1024 bytes', () => {
+    // 10 acks totalling 20 KiB worth of buffered_amount → 2 KB avg.
+    expect(formatAvgBufferedBytes(20 * 1024, 10)).toBe('2.0 KB')
+  })
+
+  it('switches to megabytes above a mebibyte', () => {
+    // One ack reporting 4 MiB of buffered bytes.
+    expect(formatAvgBufferedBytes(4 * 1024 * 1024, 1)).toBe('4.00 MB')
+  })
+
+  it('rounds byte averages to the nearest integer', () => {
+    expect(formatAvgBufferedBytes(7, 2)).toBe('4 B')
   })
 })

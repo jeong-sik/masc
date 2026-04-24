@@ -58,6 +58,7 @@ type computed_tool_surface =
 type turn_affordance =
   | Board_post_or_comment
   | Message_sweep
+  | Reply_in_room
   | Task_claim
   | Task_audit
   | Task_verify
@@ -67,6 +68,7 @@ type turn_affordance =
 let turn_affordance_of_string = function
   | "board_post_or_comment" -> Some Board_post_or_comment
   | "message_sweep" -> Some Message_sweep
+  | "reply_in_room" -> Some Reply_in_room
   | "task_claim" -> Some Task_claim
   | "task_audit" -> Some Task_audit
   | "task_verify" -> Some Task_verify
@@ -77,6 +79,7 @@ let turn_affordance_of_string = function
 let should_tool_gate_affordance = function
   | Board_post_or_comment
   | Message_sweep
+  | Reply_in_room
   | Task_claim
   | Task_audit
   | Task_verify

@@ -2196,9 +2196,10 @@ let run_turn
              meta.name
              (String.concat ", " unexpected_tool_names);
          let actual_keeper_tool_names =
-           canonical_tool_names
-           |> List.filter (fun tool_name -> List.mem tool_name all_tool_names)
-           |> Keeper_types.dedupe_keep_order
+          Keeper_tool_disclosure.final_keeper_tool_names
+            ~reported_tool_names
+            ~observed_tool_names
+            ~allowed_tool_names:all_tool_names
          in
          actual_keeper_tool_names_ref := actual_keeper_tool_names;
          let usage = Keeper_exec_context.usage_of_response result.response in
@@ -2242,7 +2243,8 @@ let run_turn
          in
          let actionable_signal_context =
            let haystack = user_message ^ "\n" ^ dynamic_context in
-           String_util.contains_substring_ci haystack "## Discovered Work"
+           turn_affordances_require_tool_gate turn_affordances
+           || String_util.contains_substring_ci haystack "## Discovered Work"
            || has_positive_count_after_marker haystack "### Board Activity"
            || has_positive_count_after_marker haystack "Unclaimed tasks"
          in

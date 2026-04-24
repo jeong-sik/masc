@@ -118,5 +118,11 @@ let view_mini ~(segments : (kind * int) list) =
                [ Node.text (Printf.sprintf "%d" pct) ]
            ]))
   in
-  Node.div ~attrs:[ Style.flame; Attr.role "img"; Attr.create "aria-label" "Tool category time distribution" ] [ bar; legend ]
+  let aria_desc =
+    "Tool category time distribution: "
+    ^ String.concat ~sep:", "
+        (List.map segments ~f:(fun (kind, pct) ->
+             Printf.sprintf "%s %d%%" (label kind) pct))
+  in
+  Node.div ~attrs:[ Style.flame; Attr.role "img"; Attr.create "aria-label" aria_desc ] [ bar; legend ]
 ;;

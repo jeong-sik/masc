@@ -472,3 +472,8 @@ hr {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb, var(--border-main)); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover, var(--border-highlight)); }
+
+@media (prefers-reduced-motion: reduce) {
+  .btn { transition-duration: 0.01ms !important; }
+  .btn:active { transform: none; }
+}

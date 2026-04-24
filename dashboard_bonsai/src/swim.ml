@@ -181,7 +181,7 @@ let frame ~(kind : frame_kind) ~left ~width ~label =
   in
   Node.div
     ~attrs:[ Style.frame; frame_class kind; style
-           ; Attr.title (Printf.sprintf "%s: %s" (kind_label kind) label) ]
+           ; Attr.create "aria-label" (Printf.sprintf "%s: %s" (kind_label kind) label) ]
     [ Node.text label ]
 ;;
 

@@ -8,6 +8,11 @@
 
 import { signal } from '@preact/signals'
 
+import {
+  parseFleetCompositeSnapshot,
+  type FleetCompositeSnapshot,
+} from './api/keeper'
+
 interface CompositeTickEnvelope {
   name: string
   ts_unix: number
@@ -17,3 +22,15 @@ export const compositeTick = signal<CompositeTickEnvelope>({
   name: '',
   ts_unix: 0,
 })
+
+export const fleetCompositeSnapshot = signal<FleetCompositeSnapshot | null>(null)
+
+export function hydrateFleetCompositeSnapshot(payload: unknown): boolean {
+  try {
+    fleetCompositeSnapshot.value = parseFleetCompositeSnapshot(payload)
+    return true
+  } catch (err) {
+    console.debug('[Composite] fleet snapshot hydration failed', err instanceof Error ? err.message : '')
+    return false
+  }
+}

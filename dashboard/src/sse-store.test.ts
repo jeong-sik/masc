@@ -21,14 +21,18 @@ const refreshDashboard = vi.fn<() => Promise<void>>(async () => {})
 const refreshExecution = vi.fn<() => Promise<void>>(async () => {})
 const refreshBoard = vi.fn<() => void>(() => {})
 const invalidateDashboardCache = vi.fn<() => void>(() => {})
+const hydrateBoardSnapshot = vi.fn<(payload: unknown) => void>(() => {})
 const hydrateShellSnapshot = vi.fn<(payload: unknown) => void>(() => {})
 const hydrateExecutionSnapshot = vi.fn<(payload: unknown) => void>(() => {})
+const hydratePlanningSnapshot = vi.fn<(payload: unknown) => void>(() => {})
 const removeBoardPost = vi.fn<(postId?: string) => void>(() => {})
 const refreshForRoute = vi.fn<(nextRoute: CurrentRoute) => void>()
 const requestNamespaceTruthNow = vi.fn<() => void>()
 const requestNamespaceTruth = vi.fn<() => void>()
 const showToast = vi.fn<(message: string, kind?: string, durationMs?: number) => void>()
 const replayOasRuntimeTelemetry = vi.fn<() => Promise<void>>(async () => {})
+const hydrateFleetCompositeSnapshot = vi.fn<(payload: unknown) => boolean>(() => true)
+const hydrateGoalTreeSnapshot = vi.fn<(payload: unknown) => boolean>(() => true)
 
 async function flushAsyncWork(): Promise<void> {
   await vi.dynamicImportSettled()
@@ -42,8 +46,10 @@ async function loadSseStore() {
   vi.doMock('./store', () => ({
     keeperHeartbeats,
     invalidateDashboardCache,
+    hydrateBoardSnapshot,
     hydrateShellSnapshot,
     hydrateExecutionSnapshot,
+    hydratePlanningSnapshot,
     refreshDashboard,
     refreshExecution,
     refreshBoard,
@@ -66,6 +72,13 @@ async function loadSseStore() {
     replayOasRuntimeTelemetry,
     applyOasRuntimeEvent: vi.fn(),
   }))
+  vi.doMock('./composite-signals', () => ({
+    compositeTick: signal({ name: '', ts_unix: 0 }),
+    hydrateFleetCompositeSnapshot,
+  }))
+  vi.doMock('./goal-tree-state', () => ({
+    hydrateGoalTreeSnapshot,
+  }))
   vi.doMock('./router', () => ({ route }))
   const sseStore = await import('./sse-store')
   const sse = await import('./sse')
@@ -81,8 +94,10 @@ describe('setupSSEReaction reconnect hydration', () => {
     refreshExecution.mockClear()
     refreshBoard.mockClear()
     invalidateDashboardCache.mockClear()
+    hydrateBoardSnapshot.mockClear()
     hydrateShellSnapshot.mockClear()
     hydrateExecutionSnapshot.mockClear()
+    hydratePlanningSnapshot.mockClear()
     removeBoardPost.mockClear()
     refreshForRoute.mockClear()
     requestNamespaceTruthNow.mockClear()
@@ -90,6 +105,10 @@ describe('setupSSEReaction reconnect hydration', () => {
     showToast.mockClear()
     replayOasRuntimeTelemetry.mockClear()
     replayOasRuntimeTelemetry.mockResolvedValue(undefined)
+    hydrateFleetCompositeSnapshot.mockClear()
+    hydrateFleetCompositeSnapshot.mockReturnValue(true)
+    hydrateGoalTreeSnapshot.mockClear()
+    hydrateGoalTreeSnapshot.mockReturnValue(true)
     namespaceTruth.value = null
     namespaceTruthError.value = null
     boardPosts.value = []
@@ -106,6 +125,8 @@ describe('setupSSEReaction reconnect hydration', () => {
     vi.doUnmock('./tab-refresh')
     vi.doUnmock('./components/common/toast')
     vi.doUnmock('./oas-runtime-store')
+    vi.doUnmock('./composite-signals')
+    vi.doUnmock('./goal-tree-state')
     vi.doUnmock('./router')
   })
 
@@ -216,5 +237,29 @@ describe('setupSSEReaction reconnect hydration', () => {
     expect(refreshExecution).not.toHaveBeenCalled()
 
     cleanup()
+  })
+
+  it('hydrates websocket dashboard snapshots for board, goals, and composite slices', async () => {
+    const { sseStore } = await loadSseStore()
+
+    sseStore.hydrateDashboardSlice('board', { posts: [], generated_at: 'now' })
+    sseStore.hydrateDashboardSlice('goals', {
+      planning: { goals: [], generated_at: 'now' },
+      tree: { tree: [], summary: { total_goals: 0 } },
+    })
+    sseStore.hydrateDashboardSlice('composite', {
+      generated_at: 1,
+      count: 0,
+      snapshots: [],
+    })
+
+    expect(hydrateBoardSnapshot).toHaveBeenCalledWith({ posts: [], generated_at: 'now' })
+    expect(hydratePlanningSnapshot).toHaveBeenCalledWith({ goals: [], generated_at: 'now' })
+    expect(hydrateGoalTreeSnapshot).toHaveBeenCalledWith({ tree: [], summary: { total_goals: 0 } })
+    expect(hydrateFleetCompositeSnapshot).toHaveBeenCalledWith({
+      generated_at: 1,
+      count: 0,
+      snapshots: [],
+    })
   })
 })

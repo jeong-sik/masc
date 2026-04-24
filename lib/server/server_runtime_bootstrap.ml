@@ -1366,8 +1366,19 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
             Some (Server_dashboard_http.dashboard_transport_health_snapshot_json ())
         | "namespace" ->
             Server_dashboard_http.namespace_truth_snapshot_from_caches state
-        | "composite" | "board" | "goals" ->
-            None
+        | "composite" ->
+            Some
+              (Server_dashboard_http.dashboard_fleet_composite_json
+                 ~base_path:state.Mcp_server.room_config.base_path ())
+        | "board" ->
+            Some
+              (Server_dashboard_http.dashboard_board_json
+                 ~sort_by:Board_dispatch.Recent ~exclude_system:true
+                 ~limit:100 ~offset:0 ())
+        | "goals" ->
+            Some
+              (Server_dashboard_http.dashboard_goals_snapshot_json
+                 ~config:state.Mcp_server.room_config)
         | _ ->
             None);
       (* Standalone WebSocket transport (enabled by default, opt-out via MASC_WS_ENABLED=0) *)

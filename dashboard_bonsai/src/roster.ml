@@ -150,7 +150,7 @@ let view_slot ~(state : state) ~sigil ~name ~state_label ~when_ =
     | `Failed -> Style.dot_failed
   in
   Node.div
-    ~attrs:[ Style.slot ]
+    ~attrs:[ Style.slot; Attr.role "listitem" ]
     [ Node.div ~attrs:[ Style.sigil ] [ Node.text sigil ]
     ; Node.div
         ~attrs:[ Style.body ]
@@ -204,5 +204,5 @@ let view ?(keepers : Keepers_types.response = Keepers_types.fixture) () =
     | [] -> view_static ()
     | live -> List.map live ~f:view_slot_of_keeper
   in
-  Node.div ~attrs:[ Style.roster ] slots
+  Node.div ~attrs:[ Style.roster; Attr.role "list" ] slots
 ;;

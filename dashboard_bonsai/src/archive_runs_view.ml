@@ -258,7 +258,7 @@ let view_loop (l : Archive_runs_types.loop) =
   let keeps = l.total_keeps in
   let discards = l.total_discards in
   Node.div
-    ~attrs:[ Style.loop ]
+    ~attrs:[ Style.loop; Attr.role "listitem"; Attr.arialabel l.goal ]
     [ Pill.view
         ~color:(pill_color l.status)
         ~label:(Archive_runs_types.status_label l.status)
@@ -355,7 +355,7 @@ let render ~(shell : Overview_types.response) (r : Archive_runs_types.response) 
            [ Node.text "no runs recorded yet." ]
        | loops ->
          Node.div
-           ~attrs:[ Style.loop_list ]
+           ~attrs:[ Style.loop_list; Attr.role "list" ]
            (List.map loops ~f:view_loop))
     ]
 ;;

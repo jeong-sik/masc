@@ -128,7 +128,7 @@ let view_dead_list (dead : Keepers_types.keeper list) =
       [ Node.text "fleet is whole — no keepers have fallen." ]
   | ks ->
     Node.div
-      ~attrs:[]
+      ~attrs:[ Attr.role "list"; Attr.arialabel "Dead keepers list" ]
       (List.map ks ~f:Roster.view_slot_of_keeper)
 ;;
 

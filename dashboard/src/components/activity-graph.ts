@@ -2,16 +2,14 @@
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
+import { lazy, Suspense } from 'preact/compat'
 import { useEffect } from 'preact/hooks'
-import { createManagedAsyncResource } from '../lib/async-state'
 import { Card } from './common/card'
 import { EmptyState, LoadingState } from './common/feedback-state'
 import { ActionButton } from './common/button'
 import { FilterChips } from './common/filter-chips'
 import { TimeAgo } from './common/time-ago'
 import { Sparkline } from './common/sparkline'
-import { GraphView } from './activity-graph-view'
-import { ActivitySwimlane } from './activity-swimlane'
 import { ActivityHeatmap } from './activity-heatmap'
 import { KeeperPhaseTimeline } from './keeper-phase-strip'
 import { CollapsibleSection } from './common/collapsible'
@@ -24,23 +22,35 @@ import {
   eventKindLabel as activityEventKindLabel,
   type ActionTimelineFilter,
 } from './activity-graph-groups'
-import { fetchActivityGraph } from '../api'
 import { registerActivityRefresh } from '../sse-store'
 import { hashForRoute } from '../router'
 import {
-  currentTimeRangeFilter,
   timeRangeLabel,
   type TimeRangePreset,
 } from '../observatory-filter-store'
+import {
+  activityRange,
+  graphResource,
+  loadGraph,
+  loadGraphForRange,
+} from './activity-graph-store'
 import type { ActivityGraphResponse, ActivityGraphNode, ActionTimelineGroup } from '../types'
-
-const graphResource = createManagedAsyncResource<ActivityGraphResponse | null>(null)
-const DEFAULT_ACTIVITY_RANGE: TimeRangePreset = '1h'
 
 const actionFilter = signal<ActionTimelineFilter>('all')
 const showLifecycle = signal(false)
 const expandedActionGroups = signal<Set<string>>(new Set())
 const actionQuery = signal('')
+
+const LazyGraphView = lazy(async () => ({
+  default: (await import('./activity-graph-view')).GraphView,
+}))
+const LazyActivitySwimlane = lazy(async () => ({
+  default: (await import('./activity-swimlane')).ActivitySwimlane,
+}))
+
+function lazyPanelFallback(label: string) {
+  return html`<${LoadingState}>${label} 불러오는 중...<//>`
+}
 
 /**
  * Pure filter for action timeline groups.
@@ -73,20 +83,6 @@ export function visibleNamespaceLabel(namespaceId: string | null | undefined): s
   const value = typeof namespaceId === 'string' ? namespaceId.trim() : ''
   if (!value || value === 'default') return null
   return value
-}
-
-function activityRange(): TimeRangePreset {
-  return currentTimeRangeFilter() ?? DEFAULT_ACTIVITY_RANGE
-}
-
-function loadGraphForRange(since: TimeRangePreset) {
-  return graphResource.load((signal) => {
-    return fetchActivityGraph(since, { signal })
-  })
-}
-
-function loadGraph() {
-  return loadGraphForRange(activityRange())
 }
 
 function StatsRow({ data }: { data: ActivityGraphResponse }) {
@@ -354,8 +350,6 @@ function WarmingUpActivityGraph() {
   `
 }
 
-export { loadGraph as refreshActivityGraph }
-
 function useActivityGraphRefresh(since: TimeRangePreset) {
   useEffect(() => {
     void loadGraphForRange(since)
@@ -388,7 +382,9 @@ function DerivedActivityPanels({ data }: { data: ActivityGraphResponse }) {
           <p class="monitor-subheadline">에이전트, 작업, 결정, 운영 이벤트 간의 연결을 시각화합니다. 관찰소의 시간 범위를 따라 파생 분석을 갱신합니다.</p>
         </div>
         <${StatsRow} data=${data} />
-        <${GraphView} data=${data} />
+        <${Suspense} fallback=${lazyPanelFallback('관계 그래프')}>
+          <${LazyGraphView} data=${data} />
+        <//>
         <div class="flex flex-wrap gap-x-3 gap-y-2 mt-3 text-[var(--text-muted)] text-sm">
           <span>생성 시각: ${data.generated_at}</span>
           <span>데이터 범위: 최근 ${data.window.limit}건 이벤트</span>
@@ -438,21 +434,24 @@ export function ObservatoryActivityPanels() {
                 <${CollapsibleSection}
                   title="활동 분석"
                   badge=${html`<span class="ml-1 text-3xs font-normal text-[var(--text-dim)]">액션 ${actionCount}</span>`}
+                  mountWhenOpen
                 >
                   <${ActivityTimelinePanel} data=${data} />
                 <//>
               `}
 
-      <${CollapsibleSection} title="에이전트 타임라인">
-        <${ActivitySwimlane} since=${since} />
+      <${CollapsibleSection} title="에이전트 타임라인" mountWhenOpen>
+        <${Suspense} fallback=${lazyPanelFallback('에이전트 타임라인')}>
+          <${LazyActivitySwimlane} since=${since} />
+        <//>
       <//>
 
-      <${CollapsibleSection} title="키퍼 상태 전환">
+      <${CollapsibleSection} title="키퍼 상태 전환" mountWhenOpen>
         <${KeeperPhaseTimeline} />
       <//>
 
       ${data && (data.stats.event_count ?? 0) > 0 ? html`
-        <${CollapsibleSection} title="파생 분석">
+        <${CollapsibleSection} title="파생 분석" mountWhenOpen>
           <${DerivedActivityPanels} data=${data} />
         <//>
       ` : null}

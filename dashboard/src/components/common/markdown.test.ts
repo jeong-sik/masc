@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
+import { waitFor } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Markdown } from './markdown'
 
@@ -170,13 +171,14 @@ describe('Markdown', () => {
 
   // ── Shiki syntax highlighting integration ─────────────────
   describe('shiki highlighting', () => {
-    // Helper: flush microtask queue so the async useEffect resolves
-    const flush = () => new Promise<void>((r) => setTimeout(r, 50))
+    const waitForShiki = () => waitFor(() => {
+      expect(container.querySelector('pre.shiki-rendered')).not.toBeNull()
+    })
 
     it('highlights non-mermaid code fences via shiki', async () => {
       const md = '```typescript\nconst x = 1\n```'
       render(html`<${Markdown} text=${md} />`, container)
-      await flush()
+      await waitForShiki()
       const shikiPre = container.querySelector('pre.shiki-rendered')
       expect(shikiPre).not.toBeNull()
       // The mock escapes HTML entities — verify content is present
@@ -187,7 +189,7 @@ describe('Markdown', () => {
       // Render both a mermaid and a non-mermaid block to verify selectivity
       const md = '```mermaid\ngraph TD\nA-->B\n```\n\n```js\nconst a = 1\n```'
       render(html`<${Markdown} text=${md} />`, container)
-      await flush()
+      await waitForShiki()
       // Only the JS block should get shiki highlighting
       const shikiBlocks = container.querySelectorAll('pre.shiki-rendered')
       expect(shikiBlocks.length).toBe(1)
@@ -197,7 +199,7 @@ describe('Markdown', () => {
     it('escapes HTML entities in highlighted code (XSS prevention)', async () => {
       const md = '```html\n<script>alert("xss")</script>\n```'
       render(html`<${Markdown} text=${md} />`, container)
-      await flush()
+      await waitForShiki()
       // The shiki mock escapes < and > so no raw <script> in DOM
       expect(container.innerHTML).not.toContain('<script>')
     })

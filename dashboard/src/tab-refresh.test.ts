@@ -36,12 +36,12 @@ vi.mock('./components/observatory/observatory', () => ({
   refreshObservatorySurface: vi.fn(),
 }))
 
-vi.mock('./components/activity-graph', () => ({
+vi.mock('./components/activity-graph-store', () => ({
   refreshActivityGraph: vi.fn(),
 }))
 
 import { refreshFeatureHealth } from './components/feature-health'
-import { refreshActivityGraph } from './components/activity-graph'
+import { refreshActivityGraph } from './components/activity-graph-store'
 import { refreshObservatorySurface } from './components/observatory/observatory'
 import { refreshServerConfig } from './components/server-config'
 import { refreshForRoute, refreshPlanForRoute } from './tab-refresh'

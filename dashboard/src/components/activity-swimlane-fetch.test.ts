@@ -43,7 +43,7 @@ async function loadSwimlane(options: {
     EmptyState: ({ children }: { children?: unknown }) => html`<div>${children}</div>`,
     LoadingState: ({ children }: { children?: unknown }) => html`<div>${children}</div>`,
   }))
-  vi.doMock('./activity-graph-view', () => ({
+  vi.doMock('./activity-graph-selection', () => ({
     selectedNodeId: signal<string | null>(null),
     highlightedAgentId: signal<string | null>(null),
   }))

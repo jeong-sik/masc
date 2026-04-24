@@ -9,25 +9,91 @@ import { useRef, useEffect, useMemo } from 'preact/hooks'
 import { Marked } from 'marked'
 import DOMPurify from 'dompurify'
 
-// ── Lazy shiki loader ────────────────────────────────────────
-import type { Highlighter } from 'shiki'
 import type MermaidDefault from 'mermaid'
 
-let shikiPromise: Promise<Highlighter> | null = null
+// ── Lazy shiki loader ────────────────────────────────────────
+interface DashboardHighlighter {
+  getLoadedLanguages(): string[]
+  loadLanguage(...langs: unknown[]): Promise<void>
+  codeToHtml(code: string, options: { lang: string; theme: string }): string
+}
 
-function getShiki(): Promise<Highlighter> {
+type ShikiLanguageModule = { default: unknown | unknown[] }
+type ShikiLanguageLoader = () => Promise<ShikiLanguageModule>
+
+const SHIKI_THEME = 'vitesse-dark'
+const SHIKI_LANG_ALIASES: Record<string, string> = {
+  js: 'javascript',
+  jsx: 'javascript',
+  ts: 'typescript',
+  tsx: 'typescript',
+  py: 'python',
+  sh: 'bash',
+  shell: 'bash',
+  zsh: 'bash',
+  yml: 'yaml',
+  md: 'markdown',
+}
+const SHIKI_LANG_LOADERS: Record<string, ShikiLanguageLoader> = {
+  bash: () => import('shiki/langs/bash.mjs'),
+  css: () => import('shiki/langs/css.mjs'),
+  diff: () => import('shiki/langs/diff.mjs'),
+  go: () => import('shiki/langs/go.mjs'),
+  html: () => import('shiki/langs/html.mjs'),
+  javascript: () => import('shiki/langs/javascript.mjs'),
+  json: () => import('shiki/langs/json.mjs'),
+  markdown: () => import('shiki/langs/markdown.mjs'),
+  ocaml: () => import('shiki/langs/ocaml.mjs'),
+  python: () => import('shiki/langs/python.mjs'),
+  rust: () => import('shiki/langs/rust.mjs'),
+  sql: () => import('shiki/langs/sql.mjs'),
+  typescript: () => import('shiki/langs/typescript.mjs'),
+  yaml: () => import('shiki/langs/yaml.mjs'),
+}
+
+let shikiPromise: Promise<DashboardHighlighter> | null = null
+let loadedShikiLanguages = new Set<string>()
+
+function getShiki(): Promise<DashboardHighlighter> {
   if (!shikiPromise) {
-    shikiPromise = import('shiki').then(async (shiki) => {
-      return shiki.createHighlighter({
-        themes: ['vitesse-dark'],
-        langs: ['javascript', 'typescript', 'python', 'bash', 'json', 'yaml', 'html', 'css', 'sql', 'go', 'rust']
+    shikiPromise = Promise.all([
+      import('shiki/core'),
+      import('shiki/engine/javascript'),
+      import('shiki/themes/vitesse-dark.mjs'),
+    ]).then(async ([shiki, engine, theme]) => {
+      loadedShikiLanguages = new Set()
+      return shiki.createHighlighterCore({
+        themes: [theme.default],
+        langs: [],
+        engine: engine.createJavaScriptRegexEngine(),
       })
     }).catch((err) => {
       shikiPromise = null  // allow retry on next call
+      loadedShikiLanguages = new Set()
       throw err
     })
   }
   return shikiPromise
+}
+
+function normalizeShikiLang(lang: string): string {
+  const normalized = lang.trim().toLowerCase()
+  return SHIKI_LANG_ALIASES[normalized] ?? normalized
+}
+
+async function ensureShikiLanguage(highlighter: DashboardHighlighter, lang: string): Promise<string> {
+  const normalized = normalizeShikiLang(lang)
+  if (normalized === 'text') return 'text'
+  const loader = SHIKI_LANG_LOADERS[normalized]
+  if (!loader) return 'text'
+  if (loadedShikiLanguages.has(normalized) || highlighter.getLoadedLanguages().includes(normalized)) {
+    return normalized
+  }
+  const module = await loader()
+  const registrations = Array.isArray(module.default) ? module.default : [module.default]
+  await highlighter.loadLanguage(...registrations)
+  loadedShikiLanguages.add(normalized)
+  return normalized
 }
 
 // ── Lazy mermaid loader ──────────────────────────────────────
@@ -216,7 +282,7 @@ function MarkdownContent({ text, class: className }: { text: string; class?: str
 
     let cancelled = false
     void (async () => {
-      let highlighter: Highlighter | null = null
+      let highlighter: DashboardHighlighter | null = null
       
       for (const codeEl of codeBlocks) {
         if (cancelled) break
@@ -238,12 +304,9 @@ function MarkdownContent({ text, class: className }: { text: string; class?: str
           highlighter = await getShiki()
           if (cancelled) break
         }
-        
+
         try {
-          const loadedLangs = highlighter.getLoadedLanguages()
-          if (lang !== 'text' && !loadedLangs.includes(lang)) {
-            lang = 'text'
-          }
+          lang = await ensureShikiLanguage(highlighter, lang)
         } catch {
           lang = 'text'
         }
@@ -251,7 +314,7 @@ function MarkdownContent({ text, class: className }: { text: string; class?: str
         if (cancelled) break
 
         try {
-          const rawHtml = highlighter.codeToHtml(code, { lang, theme: 'vitesse-dark' })
+          const rawHtml = highlighter.codeToHtml(code, { lang, theme: SHIKI_THEME })
           const safeHtml = sanitizeShikiHtml(rawHtml)
 
           const div = document.createElement('div')

@@ -71,60 +71,81 @@ let test_keepalive_jitter_range () =
 
 let adaptive = Cfg.KeeperKeepalive.oas_timeout_for_estimated_input_tokens
 
-let test_oas_timeout_32k () =
+(* #10008 fm2: the budget formula no longer scales with
+   [max_turns * per_turn(=30s)].  Production p50 turn latency is
+   ~16 min (#9933) — the 30s/turn assumption was 32x off, and
+   velvet-hammer at max_turns=10 computed only 423.8s against a
+   1200s wall-clock cap, starving multi-turn research calls.
+   Budget now equals [turn_timeout_sec] directly.  These tests
+   pin that invariant: input-token size and max_turns no longer
+   affect the computed budget, only the env override and the
+   wall-clock cap do. *)
+
+let turn_cap = Cfg.KeeperKeepalive.turn_timeout_sec
+
+let test_oas_timeout_32k_uses_wall_clock () =
   let v = adaptive ~estimated_input_tokens:32_000 in
-  (* 120 + 32*1.5 + min(15,40)*30 = 120+48+450 = 618 *)
-  check (float 1.0) "32K → 618s" 618.0 v
+  check (float 1.0)
+    "32K input → wall-clock cap (turn_timeout_sec)" turn_cap v
 
-let test_oas_timeout_128k () =
+let test_oas_timeout_128k_uses_wall_clock () =
   let v = adaptive ~estimated_input_tokens:128_000 in
-  (* 120 + 128*1.5 + 450 = 762 *)
-  check (float 1.0) "128K → 762s" 762.0 v
+  check (float 1.0)
+    "128K input → wall-clock cap (turn_timeout_sec)" turn_cap v
 
-let test_oas_timeout_262k () =
+let test_oas_timeout_262k_uses_wall_clock () =
   let v = adaptive ~estimated_input_tokens:262_144 in
-  (* 120 + 262.144*1.5 + min(15,40)*30 = 120+393.216+450 = 963.216 *)
-  check bool "262K → [960, 970]" true (v >= 960.0 && v <= 970.0)
+  check (float 1.0)
+    "262K input → wall-clock cap (turn_timeout_sec)" turn_cap v
 
-let test_oas_timeout_262k_scheduled_autonomous () =
+let test_oas_timeout_scheduled_autonomous_uses_wall_clock () =
+  (* #10008 fm2 regression guard: max_turns must not pull the
+     budget below the wall-clock cap anymore. velvet-hammer's
+     423.8s symptom is gone; this call returns [turn_timeout_sec]
+     regardless of max_turns. *)
   let v =
     Cfg.KeeperKeepalive.oas_timeout_for_estimated_input_tokens_with_turn_budget
       ~estimated_input_tokens:262_144
       ~max_turns:Cfg.KeeperKeepalive.oas_max_turns_per_call_scheduled_autonomous
   in
-  (* #6810: default lowered 5→2 to keep semaphore hold under wait timeout.
-     120 + 262.144*1.5 + min(2,40)*30 = 120+393.216+60 = 573.216 *)
-  check bool "262K scheduled autonomous → [570, 580]" true
-    (v >= 570.0 && v <= 580.0)
+  check (float 1.0)
+    "scheduled_autonomous → wall-clock cap (turn_timeout_sec)"
+    turn_cap v
 
-let test_oas_timeout_zero () =
+let test_oas_timeout_zero_uses_wall_clock () =
   let v = adaptive ~estimated_input_tokens:0 in
-  (* 120 + 0 + min(15,40)*30 = 570 *)
-  check (float 1.0) "0 context → base+turn budget 570s" 570.0 v
+  check (float 1.0)
+    "0 context → wall-clock cap (turn_timeout_sec)" turn_cap v
 
-let test_oas_timeout_monotonic () =
+(* #10008 fm2: the formula no longer varies with token count,
+   so the old "monotonic increase with input size" invariant is
+   replaced by a "constant equal to wall-clock cap" invariant. *)
+let test_oas_timeout_is_token_independent () =
   let v1 = adaptive ~estimated_input_tokens:32_000 in
   let v2 = adaptive ~estimated_input_tokens:128_000 in
   let v3 = adaptive ~estimated_input_tokens:262_144 in
-  check bool "32K < 128K" true (v1 < v2);
-  check bool "128K < 262K" true (v2 < v3)
+  check (float 0.1) "32K == 128K (both at wall-clock cap)" v1 v2;
+  check (float 0.1) "128K == 262K (both at wall-clock cap)" v2 v3;
+  check (float 0.1) "all equal to turn_timeout_sec" turn_cap v1
 
 let test_oas_timeout_cap () =
   let v = adaptive ~estimated_input_tokens:1_000_000 in
-  check (float 0.1) "1M estimated input tokens → capped at turn timeout 1200" 1200.0 v
+  check (float 0.1)
+    "1M estimated input tokens → capped at turn timeout 1200"
+    turn_cap v
 
 let test_turn_timeout_default () =
   check (float 0.1) "default turn timeout 1200s" 1200.0
     Cfg.KeeperKeepalive.turn_timeout_sec
 
 let test_max_turns_default () =
-  check int "default max_turns_per_call 15" 15
+  check int "default max_turns_per_call 30" 30
     Cfg.KeeperKeepalive.oas_max_turns_per_call
 
 let test_scheduled_autonomous_max_turns_default () =
-  (* #6810: lowered 5→2 so autonomous semaphore hold
-     (turns × latency) stays under 60s wait timeout. *)
-  check int "default scheduled autonomous max_turns_per_call 2" 2
+  (* Raised to 10 after Docker oas_env propagation restored; see
+     [env_config_keeper.ml] docstring. *)
+  check int "default scheduled autonomous max_turns_per_call 10" 10
     Cfg.KeeperKeepalive.oas_max_turns_per_call_scheduled_autonomous
 
 let test_max_turns_range () =
@@ -349,17 +370,22 @@ let () =
       test_case "jitter range" `Quick test_keepalive_jitter_range;
     ];
     "oas_timeout_adaptive", [
-      test_case "adaptive 32K context" `Quick test_oas_timeout_32k;
-      test_case "adaptive 128K context" `Quick test_oas_timeout_128k;
-      test_case "adaptive 262K context" `Quick test_oas_timeout_262k;
-      test_case "adaptive 262K scheduled autonomous context" `Quick
-        test_oas_timeout_262k_scheduled_autonomous;
-      test_case "adaptive 0 context" `Quick test_oas_timeout_zero;
-      test_case "adaptive monotonic" `Quick test_oas_timeout_monotonic;
+      test_case "32K context uses wall-clock cap (#10008 fm2)" `Quick
+        test_oas_timeout_32k_uses_wall_clock;
+      test_case "128K context uses wall-clock cap (#10008 fm2)" `Quick
+        test_oas_timeout_128k_uses_wall_clock;
+      test_case "262K context uses wall-clock cap (#10008 fm2)" `Quick
+        test_oas_timeout_262k_uses_wall_clock;
+      test_case "scheduled autonomous uses wall-clock cap (#10008 fm2)" `Quick
+        test_oas_timeout_scheduled_autonomous_uses_wall_clock;
+      test_case "0 context uses wall-clock cap (#10008 fm2)" `Quick
+        test_oas_timeout_zero_uses_wall_clock;
+      test_case "budget is token-count independent (#10008 fm2)" `Quick
+        test_oas_timeout_is_token_independent;
       test_case "turn timeout default is 1200" `Quick test_turn_timeout_default;
       test_case "adaptive capped at turn timeout" `Quick test_oas_timeout_cap;
-      test_case "max_turns default is 15" `Quick test_max_turns_default;
-      test_case "scheduled autonomous max_turns default is 2" `Quick
+      test_case "max_turns default is 30" `Quick test_max_turns_default;
+      test_case "scheduled autonomous max_turns default is 10" `Quick
         test_scheduled_autonomous_max_turns_default;
       test_case "max_turns range" `Quick test_max_turns_range;
       test_case "scheduled autonomous max_turns range" `Quick

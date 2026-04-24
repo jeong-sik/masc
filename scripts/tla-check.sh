@@ -163,6 +163,12 @@ run_tlc "$REPO_ROOT/specs/boundary" "KeeperContinueGate.tla"
 run_tlc_buggy "$REPO_ROOT/specs/boundary" "KeeperContinueGate.tla"
 run_tlc "$REPO_ROOT/specs/boundary" "ToolCallContract.tla"
 run_tlc_buggy "$REPO_ROOT/specs/boundary" "ToolCallContract.tla"
+run_tlc "$REPO_ROOT/specs/state-product" "StateProduct.tla"
+run_tlc_buggy "$REPO_ROOT/specs/state-product" "StateProduct.tla"
+run_tlc "$REPO_ROOT/specs/state-product" "CoordinationProduct.tla"
+run_tlc_buggy "$REPO_ROOT/specs/state-product" "CoordinationProduct.tla"
+run_tlc "$REPO_ROOT/specs/task-lifecycle" "TaskLifecycle.tla"
+run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskLifecycle.tla"
 
 # Optional: run TraceSpec if --trace flag provided
 if [ "${1:-}" = "--trace" ]; then

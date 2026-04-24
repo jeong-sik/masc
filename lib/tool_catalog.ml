@@ -462,6 +462,7 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Masc TM.Code_symbols
   | TN.Masc TM.Collaboration_graph
   | TN.Masc TM.Config
+  | TN.Masc TM.Coordination_fsm_snapshot
   | TN.Masc TM.Dashboard
   | TN.Masc TM.Get_metrics
   | TN.Masc TM.Goal_list
@@ -670,6 +671,7 @@ let tool_group_of_typed_tool_name = function
       | TM.Collaboration_graph
       | TM.Complete_task
       | TM.Config
+      | TM.Coordination_fsm_snapshot
       | TM.Coord_status
       | TM.Dashboard
       | TM.Deliver

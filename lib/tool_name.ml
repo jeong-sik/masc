@@ -184,6 +184,7 @@ module Masc = struct
     | Claim_next
     | Claim_task
     | Cleanup_zombies
+    | Coordination_fsm_snapshot
     | Code_delete
     | Code_edit
     | Code_git
@@ -283,6 +284,7 @@ module Masc = struct
     | Claim_next -> "masc_claim_next"
     | Claim_task -> "masc_claim_task"
     | Cleanup_zombies -> "masc_cleanup_zombies"
+    | Coordination_fsm_snapshot -> "masc_coordination_fsm_snapshot"
     | Autoresearch_cycle -> "masc_autoresearch_cycle"
     | Autoresearch_inject -> "masc_autoresearch_inject"
     | Autoresearch_start -> "masc_autoresearch_start"
@@ -387,6 +389,7 @@ module Masc = struct
     | "masc_claim_next" -> Some Claim_next
     | "masc_claim_task" -> Some Claim_task
     | "masc_cleanup_zombies" -> Some Cleanup_zombies
+    | "masc_coordination_fsm_snapshot" -> Some Coordination_fsm_snapshot
     | "masc_autoresearch_cycle" -> Some Autoresearch_cycle
     | "masc_autoresearch_inject" -> Some Autoresearch_inject
     | "masc_autoresearch_start" -> Some Autoresearch_start

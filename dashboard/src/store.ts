@@ -23,6 +23,11 @@ import type {
   DashboardShellAuthSummary,
   DashboardShellMetaCognitionSummary,
   DashboardShellResponse,
+  DashboardCoordinationFsmEvidence,
+  DashboardCoordinationFsmProduct,
+  DashboardCoordinationFsmRefs,
+  DashboardCoordinationFsmSnapshot,
+  DashboardCoordinationFsmViolation,
 } from './types'
 import { fetchDashboardShell } from './api/dashboard-hot'
 import { journal } from './sse'
@@ -113,6 +118,7 @@ export function removeBoardPost(postId: string | undefined): void {
 
 export const goals = signal<Goal[]>([])
 export const goalsLoading = signal(false)
+export const coordinationFsmSnapshot = signal<DashboardCoordinationFsmSnapshot | null>(null)
 
 // --- OAS monitoring state ---
 
@@ -396,7 +402,138 @@ export async function refreshDashboard(opts?: RefreshOptions): Promise<void> {
   return inflightDashboardRefresh
 }
 
+function normalizeStringList(raw: unknown): string[] {
+  if (Array.isArray(raw)) {
+    return raw.filter((value): value is string =>
+      typeof value === 'string' && value.trim() !== '',
+    )
+  }
+  if (typeof raw === 'string' && raw.trim() !== '') return [raw]
+  return []
+}
+
+function normalizeCoordinationFsmRefs(raw: unknown): DashboardCoordinationFsmRefs {
+  const refsRecord = isRecord(raw) ? raw : {}
+  return {
+    goal_id: asString(refsRecord.goal_id) ?? null,
+    task_ids: normalizeStringList(refsRecord.task_ids),
+    post_ids: normalizeStringList(refsRecord.post_ids),
+    agent_name: asString(refsRecord.agent_name) ?? null,
+  }
+}
+
+function normalizeCoordinationFsmEvidence(raw: unknown): DashboardCoordinationFsmEvidence | null {
+  if (!isRecord(raw)) return null
+  return {
+    source: asString(raw.source) ?? undefined,
+    kind: asString(raw.kind) ?? undefined,
+    id: asString(raw.id) ?? null,
+    label: asString(raw.label) ?? undefined,
+    detail: asString(raw.detail) ?? undefined,
+    timestamp: asNumber(raw.timestamp) ?? null,
+    refs: normalizeCoordinationFsmRefs(raw.refs),
+  }
+}
+
+function normalizeCoordinationFsmEvidenceList(raw: unknown): DashboardCoordinationFsmEvidence[] {
+  return Array.isArray(raw)
+    ? raw
+      .map(normalizeCoordinationFsmEvidence)
+      .filter((row): row is DashboardCoordinationFsmEvidence => row !== null)
+    : []
+}
+
+function refsOverlap(
+  left: DashboardCoordinationFsmRefs | undefined,
+  right: DashboardCoordinationFsmRefs | undefined,
+): boolean {
+  if (!left || !right) return false
+  if (left.goal_id && left.goal_id === right.goal_id) return true
+  if (left.agent_name && left.agent_name === right.agent_name) return true
+  if ((left.task_ids ?? []).some(taskId => (right.task_ids ?? []).includes(taskId))) return true
+  return (left.post_ids ?? []).some(postId => (right.post_ids ?? []).includes(postId))
+}
+
+function normalizeCoordinationFsmSnapshot(raw: unknown): DashboardCoordinationFsmSnapshot | null {
+  if (!isRecord(raw)) return null
+  const summaryRecord = isRecord(raw.summary) ? raw.summary : {}
+  const severityRecord = isRecord(summaryRecord.severity_counts)
+    ? summaryRecord.severity_counts
+    : {}
+  const products: DashboardCoordinationFsmProduct[] = Array.isArray(raw.products)
+    ? raw.products
+      .map((row): DashboardCoordinationFsmProduct | null => {
+        if (!isRecord(row)) return null
+        return {
+          refs: normalizeCoordinationFsmRefs(row.refs),
+          goal: asString(row.goal) ?? null,
+          task: asString(row.task) ?? undefined,
+          board: asString(row.board) ?? undefined,
+          reward: asString(row.reward) ?? undefined,
+          evidence: normalizeCoordinationFsmEvidenceList(row.evidence),
+          violations: Array.isArray(row.violations)
+            ? row.violations
+              .map((violation): DashboardCoordinationFsmViolation | null => {
+                if (!isRecord(violation)) return null
+                return {
+                  axis: asString(violation.axis) ?? undefined,
+                  code: asString(violation.code) ?? undefined,
+                  severity: asString(violation.severity) ?? undefined,
+                  message: asString(violation.message) ?? undefined,
+                  refs: normalizeCoordinationFsmRefs(violation.refs),
+                  evidence: normalizeCoordinationFsmEvidenceList(violation.evidence),
+                }
+              })
+              .filter((violation): violation is DashboardCoordinationFsmViolation => violation !== null)
+            : [],
+        }
+      })
+      .filter((row): row is DashboardCoordinationFsmProduct => row !== null)
+    : []
+  const fallbackEvidence = products.flatMap(product => product.evidence ?? [])
+  const snapshotEvidence = normalizeCoordinationFsmEvidenceList(raw.evidence)
+  const evidence = snapshotEvidence.length > 0 ? snapshotEvidence : fallbackEvidence
+  const violations = Array.isArray(raw.violations)
+    ? raw.violations
+      .map((row): DashboardCoordinationFsmViolation | null => {
+        if (!isRecord(row)) return null
+        const refs = normalizeCoordinationFsmRefs(row.refs)
+        const rowEvidence = normalizeCoordinationFsmEvidenceList(row.evidence)
+        return {
+          axis: asString(row.axis) ?? undefined,
+          code: asString(row.code) ?? undefined,
+          severity: asString(row.severity) ?? undefined,
+          message: asString(row.message) ?? undefined,
+          refs,
+          evidence: rowEvidence.length > 0
+            ? rowEvidence
+            : fallbackEvidence.filter(item => refsOverlap(refs, item.refs)).slice(0, 5),
+        }
+      })
+      .filter((row): row is DashboardCoordinationFsmViolation => row !== null)
+    : []
+  return {
+    schema_version: asNumber(raw.schema_version) ?? undefined,
+    mode: asString(raw.mode) ?? undefined,
+    summary: {
+      products: asNumber(summaryRecord.products) ?? undefined,
+      violations: asNumber(summaryRecord.violations) ?? undefined,
+      evidence: asNumber(summaryRecord.evidence) ?? evidence.length,
+      severity_counts: {
+        info: asNumber(severityRecord.info) ?? 0,
+        warn: asNumber(severityRecord.warn) ?? 0,
+        error: asNumber(severityRecord.error) ?? 0,
+      },
+    },
+    products,
+    evidence,
+    violations,
+    projection_error: asString(raw.projection_error) ?? null,
+  }
+}
+
 function applyPlanningEnvelope(data: DashboardPlanningResponse): void {
+  coordinationFsmSnapshot.value = normalizeCoordinationFsmSnapshot(data.coordination_fsm)
   goals.value = (Array.isArray(data.goals) ? data.goals : [])
     .map((row): Goal | null => {
       if (!isRecord(row)) return null

@@ -224,6 +224,27 @@ let get_balance ~base_path ~agent_name =
     | Some b -> b
     | None -> initial_balance ())
 
+let list_transactions ~base_path =
+  let path = ledger_path base_path in
+  if not (Sys.file_exists path) then []
+  else
+    match Safe_ops.read_file_safe path with
+    | Error e ->
+      Log.Misc.warn "economy ledger read failed for %s: %s" path e;
+      []
+    | Ok content ->
+      content
+      |> String.split_on_char '\n'
+      |> List.filter_map (fun line ->
+        let trimmed = String.trim line in
+        if trimmed = "" then None
+        else
+          try transaction_of_json (Yojson.Safe.from_string trimmed)
+          with Yojson.Json_error msg ->
+            Log.Misc.warn
+              "agent_economy: skipping malformed ledger entry: %s" msg;
+            None)
+
 (** {1 Reputation Integration} *)
 
 let reward_multiplier ~overall_score =

@@ -102,6 +102,7 @@ let select_public_local_worker_schemas () =
   let wanted = local_worker_public_tool_names in
   dedupe_schemas
     (Tool_board.tools
+    @ Tool_schemas_coord_core.schemas
     @ Tool_schemas_coord_extra.schemas
     @ local_worker_code_schemas
     @ local_worker_worktree_schemas

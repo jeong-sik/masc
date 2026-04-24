@@ -57,6 +57,15 @@ Pair with masc_check to assert specific prerequisites before acting.";
     ];
   };
   {
+    name = "masc_coordination_fsm_snapshot";
+    description = "Read-only advisory snapshot of Goal x Task x Board x Reward orthogonal coordination states. \
+Use to detect inconsistent cross-axis state such as terminal goals with open tasks, pending board signals after terminal work, or rewards without evidence.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
+  {
     name = "masc_check";
     description = "Assert preconditions on your agent state (joined, task claimed, worktree active, etc). \
 Call when you want to confirm prerequisites before starting work; returns pass/fail with fix hints. \

@@ -434,6 +434,19 @@ function bootstrapInitializingPayload(path: string): unknown | null {
           done: 0,
           cancelled: 0,
         },
+        coordination_fsm: {
+          schema_version: 1,
+          mode: 'advisory',
+          summary: {
+            products: 0,
+            violations: 0,
+            evidence: 0,
+            severity_counts: { info: 0, warn: 0, error: 0 },
+          },
+          products: [],
+          evidence: [],
+          violations: [],
+        },
       }
     case '/api/v1/dashboard/mission':
       return {

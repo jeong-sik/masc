@@ -89,6 +89,22 @@ let () = test "dispatch_status" (fun () ->
   | None -> failwith "dispatch returned None"
 )
 
+(* Test dispatch coordination FSM snapshot *)
+let () = test "dispatch_coordination_fsm_snapshot" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ = Coord.init ctx.config ~agent_name:(Some "test-agent") in
+  let args = `Assoc [] in
+  match Tool_coord.dispatch ctx ~name:"masc_coordination_fsm_snapshot" ~args with
+  | Some (success, result) ->
+      assert success;
+      let json = Yojson.Safe.from_string result in
+      let open Yojson.Safe.Util in
+      assert (json |> member "mode" |> to_string = "advisory");
+      assert (json |> member "summary" |> member "products" |> to_int >= 0);
+      assert (json |> member "summary" |> member "evidence" |> to_int >= 0)
+  | None -> failwith "dispatch returned None"
+)
+
 (* Test status summary and active task cap *)
 let () = test "dispatch_status_summary_and_cap" (fun () ->
   let ctx = make_test_ctx () in

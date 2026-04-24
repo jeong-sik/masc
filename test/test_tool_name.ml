@@ -22,7 +22,8 @@ let all_masc : Tool_name.Masc.t list =
   ; Board_delete; Board_get; Board_hearths; Board_list; Board_post
   ; Board_profile; Board_search
   ; Board_stats; Board_vote; Broadcast; Cancel_task; Check; Claim_next
-  ; Claim_task; Cleanup_zombies; Code_delete; Code_edit; Code_git; Code_read
+  ; Claim_task; Cleanup_zombies; Coordination_fsm_snapshot; Code_delete
+  ; Code_edit; Code_git; Code_read
   ; Code_search; Code_shell; Code_symbols; Code_write; Complete_task
   ; Dashboard; Deliver; Dispatch_plan
   ; Heartbeat; Join; Leave; List_tasks; Messages; Note_add

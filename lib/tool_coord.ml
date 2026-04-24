@@ -275,6 +275,24 @@ let planning_context_state (ctx : context) (binding : current_binding)
           in
           { planning_missing_task = None; deliverable_conflict_task })
 
+let coordination_fsm_attention_items ctx =
+  try
+    let snapshot = Coordination_product_snapshot.build ctx.config in
+    let counts = Coordination_product_snapshot.severity_counts snapshot in
+    if counts.error = 0 && counts.warn = 0 then
+      []
+    else
+      [
+        Printf.sprintf
+          "Coordination FSM advisory has %d error(s), %d warning(s). Call masc_coordination_fsm_snapshot before changing goal/task/board/reward state."
+          counts.error counts.warn;
+      ]
+  with
+  | exn ->
+      Log.Coord.warn "coordination FSM status advisory failed: %s"
+        (Printexc.to_string exn);
+      []
+
 let status_summary_string (ctx : context) =
   Coord.ensure_initialized ctx.config;
   let state = Coord.read_state ctx.config in
@@ -468,6 +486,7 @@ let status_summary_string (ctx : context) =
         ]
     else
       items
+    |> fun items -> items @ coordination_fsm_attention_items ctx
     |> fun items ->
     if zombie_count > 0 then
       items
@@ -577,6 +596,13 @@ let handle_workflow_guide ctx _args =
   in
   (true, Yojson.Safe.to_string result)
 
+(* ── Coordination product FSM snapshot ─────────────────────────── *)
+
+let handle_coordination_fsm_snapshot ctx _args =
+  ( true,
+    Yojson.Safe.to_string
+      (Coordination_product_snapshot.safe_build_yojson ctx.config) )
+
 (* ── State check (assertion-based verification) ────────────────── *)
 
 (** Issue #8636: SSOT for [masc_check] assertion vocabulary. Schema
@@ -603,6 +629,8 @@ let dispatch ctx ~name ~args : tool_result option =
   | "masc_goal_review" -> Some (Coord_goals.handle_goal_review ctx args)
   | "masc_goal_transition" -> Some (Coord_goals.handle_goal_transition ctx args)
   | "masc_goal_verify" -> Some (Coord_goals.handle_goal_verify ctx args)
+  | "masc_coordination_fsm_snapshot" ->
+      Some (handle_coordination_fsm_snapshot ctx args)
   | "masc_reset" -> Some (handle_reset ctx args)
   | "masc_workflow_guide" -> Some (handle_workflow_guide ctx args)
   | "masc_check" ->
@@ -625,13 +653,15 @@ let schemas = Tool_schemas_coord.schemas
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
-let _tool_spec_read_only = [ "masc_status"; "masc_goal_list" ]
+let _tool_spec_read_only =
+  [ "masc_status"; "masc_goal_list"; "masc_coordination_fsm_snapshot" ]
 let _tool_spec_system_internal = [ "masc_reset" ]
 
 let _tool_spec_requires_join = [ "masc_heartbeat" ]
 
 let tool_required_permission = function
   | "masc_status" | "masc_workflow_guide" | "masc_check"
+  | "masc_coordination_fsm_snapshot"
   | "masc_goal_list" ->
       Some Types.CanReadState
   | "masc_goal_upsert" | "masc_goal_review"

@@ -338,6 +338,8 @@
    typed_tool_masc
    tool_broadcast_typed
    state_product
+   coordination_product
+   coordination_product_snapshot
    tool_token
    tool_dispatch
    tool_name

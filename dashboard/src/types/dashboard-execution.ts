@@ -452,6 +452,64 @@ export interface DashboardPlanningResponse {
     done?: number
     cancelled?: number
   }
+  coordination_fsm?: DashboardCoordinationFsmSnapshot | null
+}
+
+export interface DashboardCoordinationFsmRefs {
+  goal_id?: string | null
+  task_ids?: string[]
+  post_ids?: string[]
+  agent_name?: string | null
+}
+
+export interface DashboardCoordinationFsmEvidence {
+  source?: string
+  kind?: string
+  id?: string | null
+  label?: string
+  detail?: string
+  timestamp?: number | null
+  refs?: DashboardCoordinationFsmRefs
+}
+
+export interface DashboardCoordinationFsmViolation {
+  axis?: string
+  code?: string
+  severity?: 'info' | 'warn' | 'error' | string
+  message?: string
+  refs?: DashboardCoordinationFsmRefs
+  evidence?: DashboardCoordinationFsmEvidence[]
+}
+
+export interface DashboardCoordinationFsmProduct {
+  refs?: DashboardCoordinationFsmRefs
+  goal?: string | null
+  task?: string
+  board?: string
+  reward?: string
+  evidence?: DashboardCoordinationFsmEvidence[]
+  violations?: DashboardCoordinationFsmViolation[]
+}
+
+export interface DashboardCoordinationFsmSummary {
+  products?: number
+  violations?: number
+  evidence?: number
+  severity_counts?: {
+    info?: number
+    warn?: number
+    error?: number
+  }
+}
+
+export interface DashboardCoordinationFsmSnapshot {
+  schema_version?: number
+  mode?: string
+  summary?: DashboardCoordinationFsmSummary
+  products?: DashboardCoordinationFsmProduct[]
+  evidence?: DashboardCoordinationFsmEvidence[]
+  violations?: DashboardCoordinationFsmViolation[]
+  projection_error?: string | null
 }
 
 // --- Goal Tree (hierarchical goal decomposition) ---

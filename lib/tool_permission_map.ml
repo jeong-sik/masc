@@ -34,6 +34,7 @@ let legacy_permission_entries : (string * permission) list =
     ("masc_agent_fitness", CanReadState);
     ("masc_dashboard", CanReadState);
     ("masc_check", CanReadState);
+    ("masc_coordination_fsm_snapshot", CanReadState);
     ("masc_approval_pending", CanReadState);
     ("masc_approval_get", CanAdmin);
     ("masc_collaboration_graph", CanReadState);

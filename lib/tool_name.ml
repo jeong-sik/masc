@@ -162,6 +162,8 @@ module Masc = struct
     | Agents
     | Autoresearch_cycle
     | Autoresearch_inject
+    | Autoresearch_record_finding
+    | Autoresearch_search_findings
     | Autoresearch_start
     | Autoresearch_status
     | Autoresearch_stop
@@ -287,6 +289,8 @@ module Masc = struct
     | Coordination_fsm_snapshot -> "masc_coordination_fsm_snapshot"
     | Autoresearch_cycle -> "masc_autoresearch_cycle"
     | Autoresearch_inject -> "masc_autoresearch_inject"
+    | Autoresearch_record_finding -> "masc_autoresearch_record_finding"
+    | Autoresearch_search_findings -> "masc_autoresearch_search_findings"
     | Autoresearch_start -> "masc_autoresearch_start"
     | Autoresearch_status -> "masc_autoresearch_status"
     | Autoresearch_stop -> "masc_autoresearch_stop"
@@ -392,6 +396,8 @@ module Masc = struct
     | "masc_coordination_fsm_snapshot" -> Some Coordination_fsm_snapshot
     | "masc_autoresearch_cycle" -> Some Autoresearch_cycle
     | "masc_autoresearch_inject" -> Some Autoresearch_inject
+    | "masc_autoresearch_record_finding" -> Some Autoresearch_record_finding
+    | "masc_autoresearch_search_findings" -> Some Autoresearch_search_findings
     | "masc_autoresearch_start" -> Some Autoresearch_start
     | "masc_autoresearch_status" -> Some Autoresearch_status
     | "masc_autoresearch_stop" -> Some Autoresearch_stop
@@ -480,6 +486,7 @@ module Masc_keeper = struct
     | Down
     | List
     | Msg
+    | Persona_audit
     | Repair
     | Reset
     | Status
@@ -492,6 +499,7 @@ module Masc_keeper = struct
     | Down -> "masc_keeper_down"
     | List -> "masc_keeper_list"
     | Msg -> "masc_keeper_msg"
+    | Persona_audit -> "masc_keeper_persona_audit"
     | Repair -> "masc_keeper_repair"
     | Reset -> "masc_keeper_reset"
     | Status -> "masc_keeper_status"
@@ -504,6 +512,7 @@ module Masc_keeper = struct
     | "masc_keeper_down" -> Some Down
     | "masc_keeper_list" -> Some List
     | "masc_keeper_msg" -> Some Msg
+    | "masc_keeper_persona_audit" -> Some Persona_audit
     | "masc_keeper_repair" -> Some Repair
     | "masc_keeper_reset" -> Some Reset
     | "masc_keeper_status" -> Some Status

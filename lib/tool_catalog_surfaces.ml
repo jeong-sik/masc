@@ -202,6 +202,7 @@ let session_min_surface_tools =
 let admin_surface_tools =
   [
     "masc_autoresearch_cycle"; "masc_autoresearch_inject";
+    "masc_autoresearch_record_finding";
     "masc_autoresearch_start"; "masc_autoresearch_stop";
     "masc_tool_admin_update"; "masc_tool_grant"; "masc_tool_revoke";
     "masc_tool_admin_snapshot";
@@ -253,7 +254,7 @@ let system_internal_surface_tools =
     (* Agent evaluation — system loop *)
     "masc_agent_fitness";
     (* Internal monitoring *)
-    "masc_autoresearch_status";
+    "masc_autoresearch_search_findings"; "masc_autoresearch_status";
     "masc_tool_stats"; "masc_surface_audit";
     (* Phase 2 addition *)
     "masc_get_metrics";

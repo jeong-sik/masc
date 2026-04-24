@@ -567,6 +567,16 @@ let test_permission_for_tool_autoresearch_start () =
   | Some Types.CanAdmin -> ()
   | _ -> fail "expected CanAdmin"
 
+let test_permission_for_tool_autoresearch_record_finding () =
+  match Auth.permission_for_tool "masc_autoresearch_record_finding" with
+  | Some Types.CanAdmin -> ()
+  | _ -> fail "expected CanAdmin"
+
+let test_permission_for_tool_autoresearch_search_findings () =
+  match Auth.permission_for_tool "masc_autoresearch_search_findings" with
+  | Some Types.CanReadState -> ()
+  | _ -> fail "expected CanReadState"
+
 let test_permission_for_tool_autoresearch_cycle () =
   match Auth.permission_for_tool "masc_autoresearch_cycle" with
   | Some Types.CanAdmin -> ()
@@ -1010,6 +1020,10 @@ let () =
         test_permission_for_tool_autoresearch_status;
       test_case "autoresearch_start" `Quick
         test_permission_for_tool_autoresearch_start;
+      test_case "autoresearch_record_finding" `Quick
+        test_permission_for_tool_autoresearch_record_finding;
+      test_case "autoresearch_search_findings" `Quick
+        test_permission_for_tool_autoresearch_search_findings;
       test_case "autoresearch_cycle" `Quick
         test_permission_for_tool_autoresearch_cycle;
       test_case "autoresearch_inject" `Quick

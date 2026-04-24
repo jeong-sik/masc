@@ -454,16 +454,19 @@ let handle_record_finding (ctx : context) args =
       cycle_range;
       timestamp = Unix.gettimeofday ();
     } in
-    Autoresearch_knowledge.record_finding ~finding
+    Autoresearch_knowledge.record_finding ~base_path:ctx.base_path ~finding
 
 (** Handle search_findings — search previous research findings by keyword. *)
-let handle_search_findings _ctx args =
+let handle_search_findings (ctx : context) args =
   let query = Safe_ops.json_string ~default:"" "query" args in
   if query = "" then
     `Assoc [("error", `String "query is required")]
   else
     let limit = Safe_ops.json_int ~default:10 "limit" args in
-    let findings = Autoresearch_knowledge.search_findings ~query ~limit () in
+    let findings =
+      Autoresearch_knowledge.search_findings ~base_path:ctx.base_path
+        ~query ~limit ()
+    in
     `Assoc [
       ("ok", `Bool true);
       ("count", `Int (List.length findings));
@@ -478,17 +481,25 @@ let dispatch (ctx : context) ~name ~args : tool_result option =
   | "masc_autoresearch_stop" -> Some (wrap_result (handle_stop ctx args))
   | "masc_autoresearch_inject" -> Some (wrap_result (handle_inject ctx args))
   | "masc_autoresearch_cycle" -> Some (wrap_result (Tool_autoresearch_cycle.handle_cycle ctx args))
+  | "masc_autoresearch_record_finding" ->
+      Some (wrap_result (handle_record_finding ctx args))
+  | "masc_autoresearch_search_findings" ->
+      Some (wrap_result (handle_search_findings ctx args))
   | _ -> None
 
 (* ================================================================ *)
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
-let _tool_spec_system_internal = [ "masc_autoresearch_status" ]
+let _tool_spec_system_internal =
+  [ "masc_autoresearch_search_findings"; "masc_autoresearch_status" ]
 
 let tool_required_permission = function
   | "masc_autoresearch_status" ->
       Some Types.CanReadState
+  | "masc_autoresearch_search_findings" ->
+      Some Types.CanReadState
+  | "masc_autoresearch_record_finding"
   | "masc_autoresearch_start" | "masc_autoresearch_cycle"
   | "masc_autoresearch_inject" | "masc_autoresearch_stop" ->
       Some Types.CanAdmin

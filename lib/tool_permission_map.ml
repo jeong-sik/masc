@@ -3,7 +3,9 @@
 open Types
 
 let declared_permission_for_tool tool_name =
-  (Tool_catalog.metadata tool_name).required_permission
+  match Tool_catalog.registered_metadata tool_name with
+  | Some meta -> meta.required_permission
+  | None -> None
 
 let legacy_permission_entries : (string * permission) list =
   [
@@ -43,6 +45,7 @@ let legacy_permission_entries : (string * permission) list =
     ("masc_plan_get_task", CanReadState);
     ("masc_plan_get", CanReadState);
     ("masc_workflow_guide", CanReadState);
+    ("masc_autoresearch_search_findings", CanReadState);
     ("masc_autoresearch_status", CanReadState);
     ("masc_config", CanReadState);
     ("masc_add_task", CanAddTask);
@@ -76,6 +79,7 @@ let legacy_permission_entries : (string * permission) list =
     ("masc_policy_approve", CanBroadcast);
     ("masc_cleanup_zombies", CanBroadcast);
     ("masc_autoresearch_start", CanAdmin);
+    ("masc_autoresearch_record_finding", CanAdmin);
     (* Issue #8661: dropped masc_autoresearch_swarm_start /
        masc_repo_synthesis_swarm_start — tools were retired with the
        swarm cleanup (#8559) and tests in test_tool_access_policy.ml

@@ -70,7 +70,8 @@ let build_goal_with_feedback
       ~memory ~pattern ~limit:3
   in
   let finding_text =
-    Autoresearch_knowledge.search_findings ~query:pattern ~limit:3 ()
+    Autoresearch_knowledge.search_findings ~base_path:ctx.base_path
+      ~query:pattern ~limit:3 ()
     |> render_recent_findings
   in
   [
@@ -135,7 +136,8 @@ let persist_failure_feedback
       timestamp = Unix.gettimeofday ();
     }
   in
-  ignore (Autoresearch_knowledge.record_finding ~finding)
+  ignore (Autoresearch_knowledge.record_finding ~base_path:ctx.base_path
+            ~finding)
 
 let check_patience_limit (state : Autoresearch.loop_state) =
   if state.consecutive_discards >= state.patience then

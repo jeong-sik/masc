@@ -141,4 +141,78 @@ Normally the loop runs autonomously; use this for manual single-step control.";
     ];
   };
 
+  {
+    name = "masc_autoresearch_record_finding";
+    description = "Persist a structured autoresearch finding to the current MASC base path. \
+Use after a research loop discovers evidence that should inform future cycles. \
+Requires goal, hypothesis, evidence, and conclusion.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("loop_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional autoresearch loop ID associated with this finding");
+        ]);
+        ("goal", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Research goal or question");
+        ]);
+        ("hypothesis", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Hypothesis that was tested or evaluated");
+        ]);
+        ("evidence", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Observed evidence, measurements, or citations");
+        ]);
+        ("conclusion", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Conclusion drawn from the evidence");
+        ]);
+        ("confidence", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "high"; `String "medium"; `String "low"]);
+          ("description", `String "Confidence level (default: medium)");
+        ]);
+        ("tags", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "Optional finding tags");
+        ]);
+        ("cycle_start", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Optional first cycle number covered by this finding");
+        ]);
+        ("cycle_end", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Optional last cycle number covered by this finding");
+        ]);
+      ]);
+      ("required", `List [
+        `String "goal"; `String "hypothesis"; `String "evidence";
+        `String "conclusion";
+      ]);
+    ];
+  };
+
+  {
+    name = "masc_autoresearch_search_findings";
+    description = "Search structured autoresearch findings stored under the current MASC base path. \
+Returns the most recent matching findings first.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("query", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Keyword or phrase to search for");
+        ]);
+        ("limit", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Maximum number of findings to return (default: 10)");
+        ]);
+      ]);
+      ("required", `List [`String "query"]);
+    ];
+  };
+
 ]

@@ -1,4 +1,9 @@
 [keeper]
-persona_name = "sangsu"
+persona_name = "executor"
 sandbox_profile = "docker"
-network_mode = "host"
+network_mode = "inherit"
+tool_preset = "messaging"
+work_discovery_enabled = true
+work_discovery_sources = ["unclaimed_tasks"]
+github_identity = "anyang-keepers"
+git_identity_mode = "github_identity"

@@ -85,6 +85,11 @@ let network_mode_of_string raw =
   match String.trim (String.lowercase_ascii raw) with
   | "none" -> Some Network_none
   | "inherit" -> Some Network_inherit
+  | "host" ->
+      Log.Keeper.warn
+        "network_mode=\"host\" is a deprecated alias for \"inherit\"; \
+         update TOML to use \"inherit\"";
+      Some Network_inherit
   | _ -> None
 
 (* Issue #8467: Variant SSOT for [network_mode]. *)
@@ -612,7 +617,8 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
             | None ->
                 Error
                   (Printf.sprintf
-                     "invalid network_mode '%s' (allowed: none, inherit)"
+                     "invalid network_mode '%s' (allowed: none, inherit; \
+                      deprecated alias: host)"
                      raw))
         | None -> Ok ())
   in
@@ -1298,13 +1304,42 @@ let load_keeper_profile_defaults_result name :
   | None ->
     Ok (load_keeper_profile_defaults_from_persona name)
 
+(* Classify a [load_keeper_toml] failure message into a low-cardinality
+   label suitable for Prometheus. The raw error string embeds user input
+   (invalid enum values etc.) and would blow up metric cardinality. *)
+let classify_toml_failure_reason (err : string) : string =
+  let err_lc = String.lowercase_ascii err in
+  let contains needle =
+    let nl = String.length needle in
+    let hl = String.length err_lc in
+    if nl = 0 then true
+    else if nl > hl then false
+    else
+      let rec loop i =
+        if i + nl > hl then false
+        else if String.sub err_lc i nl = needle then true
+        else loop (i + 1)
+      in
+      loop 0
+  in
+  if contains "invalid network_mode" then "invalid_network_mode"
+  else if contains "invalid sandbox_profile" then "invalid_sandbox_profile"
+  else if contains "invalid shared_memory_scope" then "invalid_shared_memory_scope"
+  else if contains "invalid" then "invalid_enum"
+  else if contains "unknown" || contains "unexpected field" then "unknown_field"
+  else if contains "parse" || contains "syntax" then "parse_error"
+  else "other"
+
 let load_keeper_profile_defaults name : keeper_profile_defaults =
   match load_keeper_profile_defaults_result name with
   | Ok defaults -> defaults
   | Error e ->
     (match keeper_toml_path_opt name with
      | Some _ ->
-       Log.Keeper.warn "toml config for %s failed (%s), falling back to persona" name e
+       Log.Keeper.warn "toml config for %s failed (%s), falling back to persona" name e;
+       Prometheus.inc_counter "masc_keeper_toml_invalid_total"
+         ~labels:[ ("keeper", name); ("reason", classify_toml_failure_reason e) ]
+         ()
      | None -> ());
     load_keeper_profile_defaults_from_persona name
 

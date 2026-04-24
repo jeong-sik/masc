@@ -149,19 +149,16 @@ jobs:
             const policyFailures = bypassPolicyFailures.map((failure) =>
               `unverified bypass label ${failure}`
             );
-            // When an agent PR is being explicitly converted back to draft and
-            // has landed in the safe invariant (draft=true, no auto-merge),
-            // treating "missing approval" as a policy violation is a false
-            // positive — the guard has nothing left to enforce because the PR
-            // is already draft-only. See #9910 follow-up evidence.
-            const safeDraftEndState =
-              action === "converted_to_draft" &&
-              current.isDraft &&
-              !current.autoMergeRequest;
+            // When an agent PR is already in the safe invariant
+            // (draft=true, no auto-merge), treating "missing approval" as a
+            // policy violation is a false positive: the guard has nothing left
+            // to enforce because the PR is already draft-only. This covers the
+            // initial draft open path as well as explicit convert-to-draft.
+            const safeDraftOnlyState = current.isDraft && !current.autoMergeRequest;
             const missingVerifiedApproval =
               looksAgentAuthored &&
               verifiedBypassLabels.length === 0 &&
-              !safeDraftEndState;
+              !safeDraftOnlyState;
             if (missingVerifiedApproval) {
               const expected =
                 bypassLabels.length > 0 ? bypassLabels.join(", ") : "(no configured bypass labels)";

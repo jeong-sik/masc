@@ -184,7 +184,11 @@ type flusher_msg =
 type store = {
   posts: (string, post) Hashtbl.t;
   comments: (string, comment) Hashtbl.t;
-  vote_log: (string, vote_direction) Hashtbl.t;
+  (* #10086: vote_log entry carries the original vote timestamp so
+     [rewrite_vote_log] can persist it without overwriting with
+     [Time_compat.now ()] on every flush.  Legacy rows that lack [ts]
+     load with a fallback timestamp — see [load_persisted_votes]. *)
+  vote_log: (string, vote_direction * float) Hashtbl.t;
   post_count: int ref;
   mutable last_sweep: float;
   mutex: Eio.Mutex.t;

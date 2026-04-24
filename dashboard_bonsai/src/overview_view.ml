@@ -230,7 +230,7 @@ let view_hero_panel (r : Overview_types.response) =
   let s = r.status in
   Node.div
     ~attrs:[ Style.panel ]
-    [ Node.h4 ~attrs:[ Style.panel_title ] [ Node.text "runtime · identity" ]
+    [ Node.h3 ~attrs:[ Style.panel_title ] [ Node.text "runtime · identity" ]
     ; Node.div
         ~attrs:[ Style.kv_row; Attr.role "list" ]
         [ Node.div
@@ -278,7 +278,7 @@ let view_build_panel (r : Overview_types.response) =
   let b = r.status.build in
   Node.div
     ~attrs:[ Style.panel ]
-    [ Node.h4 ~attrs:[ Style.panel_title ] [ Node.text "build · release" ]
+    [ Node.h3 ~attrs:[ Style.panel_title ] [ Node.text "build · release" ]
     ; Node.div
         ~attrs:[ Style.kv_row; Attr.role "list" ]
         [ Node.div
@@ -328,7 +328,7 @@ let view_counts_panel (r : Overview_types.response) =
   in
   Node.div
     ~attrs:[ Style.panel ]
-    [ Node.h4 ~attrs:[ Style.panel_title ] [ Node.text "fleet · counts" ]
+    [ Node.h3 ~attrs:[ Style.panel_title ] [ Node.text "fleet · counts" ]
     ; Node.div
         ~attrs:[ Style.counts ]
         [ Node.div
@@ -381,7 +381,7 @@ let view_meta_panel (r : Overview_types.response) =
   in
   Node.div
     ~attrs:[ Style.panel ]
-    [ Node.h4
+    [ Node.h3
         ~attrs:[ Style.panel_title ]
         [ Node.text "meta · cognition" ]
     ; Node.div

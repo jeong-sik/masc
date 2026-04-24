@@ -4012,11 +4012,24 @@ let test_bounded_oas_timeout_uses_adaptive_when_budget_is_large () =
       ~estimated_input_tokens ~remaining_turn_budget_s:1200.0
   with
   | Some timeout_s ->
-      check (float 0.01) "adaptive timeout kept under full budget"
-        expected timeout_s
+      (* The bounded variant subtracts a ~30s finalization guard
+         from [remaining_turn_budget_s] and caps at the adaptive
+         raw.  With #10008 fm2 the adaptive raw equals
+         [turn_timeout_sec] (1200), so the finalization guard path
+         dominates: returned value is [remaining - 30]. *)
+      check bool "bounded timeout at or below adaptive raw"
+        true (timeout_s <= expected);
+      check bool "bounded leaves positive finalization guard"
+        true (timeout_s < 1200.0 && timeout_s > 1100.0)
   | None -> fail "expected bounded timeout"
 
-let test_bounded_oas_timeout_scales_with_estimated_input_tokens () =
+(* #10008 fm2: the budget formula no longer scales with token count,
+   so [bounded_oas_timeout_for_turn_budget] returns the same value
+   for small and large prompts when the remaining_turn_budget is
+   unchanged.  Replaces the prior "smaller prompt gets smaller
+   budget" invariant, which was load-bearing on the (removed)
+   [per_1k * tokens] term. *)
+let test_bounded_oas_timeout_is_token_independent () =
   match
     ( UT.bounded_oas_timeout_for_turn_budget
         ~estimated_input_tokens:2_000 ~remaining_turn_budget_s:1200.0,
@@ -4024,8 +4037,8 @@ let test_bounded_oas_timeout_scales_with_estimated_input_tokens () =
         ~estimated_input_tokens:262_144 ~remaining_turn_budget_s:1200.0 )
   with
   | Some low_prompt_timeout, Some high_prompt_timeout ->
-      check bool "smaller prompt gets smaller budget" true
-        (low_prompt_timeout < high_prompt_timeout)
+      check (float 0.01) "token count no longer affects budget"
+        low_prompt_timeout high_prompt_timeout
   | _ -> fail "expected bounded timeouts for both prompt sizes"
 
 let test_bounded_oas_timeout_caps_to_remaining_turn_budget () =
@@ -4042,7 +4055,7 @@ let test_bounded_oas_timeout_uses_channel_turn_budget_override () =
     Env_config.KeeperKeepalive.oas_max_turns_per_call_scheduled_autonomous
   in
   let estimated_input_tokens = 2_000 in
-  let expected =
+  let raw =
     Env_config.KeeperKeepalive
     .oas_timeout_for_estimated_input_tokens_with_turn_budget
       ~estimated_input_tokens ~max_turns
@@ -4052,8 +4065,15 @@ let test_bounded_oas_timeout_uses_channel_turn_budget_override () =
       ~max_turns ~estimated_input_tokens ~remaining_turn_budget_s:1200.0
   with
   | Some timeout_s ->
-      check (float 0.01) "scheduled autonomous turn budget lowers adaptive timeout"
-        expected timeout_s
+      (* #10008 fm2: raw formula no longer depends on max_turns;
+         bounded variant still subtracts the ~30s finalization
+         guard from [remaining_turn_budget_s] and caps at the
+         raw.  Verify the cap was applied ([<=] raw) and the
+         guard reserved a positive amount. *)
+      check bool "bounded timeout at or below raw formula output"
+        true (timeout_s <= raw);
+      check bool "finalization guard reserves positive delta"
+        true (timeout_s <= 1200.0 && timeout_s > 1100.0)
   | None -> fail "expected bounded timeout"
 
 let test_bounded_oas_timeout_refuses_too_little_budget () =
@@ -5762,8 +5782,8 @@ let () =
             test_cascade_exhausted_error_includes_resumable_cli_session_error;
           test_case "bounded OAS timeout keeps adaptive timeout under full budget" `Quick
             test_bounded_oas_timeout_uses_adaptive_when_budget_is_large;
-          test_case "bounded OAS timeout scales with estimated input tokens" `Quick
-            test_bounded_oas_timeout_scales_with_estimated_input_tokens;
+          test_case "bounded OAS timeout is token-independent (#10008 fm2)" `Quick
+            test_bounded_oas_timeout_is_token_independent;
           test_case "bounded OAS timeout caps to remaining turn budget" `Quick
             test_bounded_oas_timeout_caps_to_remaining_turn_budget;
           test_case "bounded OAS timeout respects channel turn budget override" `Quick

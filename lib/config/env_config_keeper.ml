@@ -326,17 +326,11 @@ module KeeperKeepalive = struct
       Guards against indefinite LLM response waits within a turn.
 
       When [MASC_KEEPER_OAS_TIMEOUT_SEC] is set, that value is used directly.
-      Otherwise, {!oas_timeout_for_estimated_input_tokens} computes an
-      adaptive timeout:
-        base + estimated_input_tokens/1K × per_1k + min(max_turns, 40) × per_turn
-      References {!oas_max_turns_per_call} (default 30) directly to avoid
-      default drift.  Previous formula used 4× headroom on a default of 5,
-      producing min(5, 40)=5 effective turns.  Using the actual per-call
-      turn budget keeps scheduled-autonomous and reactive channels aligned
-      with the timeout heuristic.
-
-      At 262K context, 30 turns/call:
-        120 + 393 + min(30,40)×30 = 120+393+900 = 1413
+      Otherwise, {!oas_timeout_for_estimated_input_tokens} returns the
+      keeper wall-clock cap directly.  The previous adaptive formula used
+      token count and per-turn multipliers, but those estimates were far
+      below observed fleet turn latency and could timeout before a real
+      multi-turn call completed.
 
       Env: [MASC_KEEPER_OAS_TIMEOUT_SEC]. Default: adaptive.
       Range: [30, turn_timeout_sec]. *)
@@ -382,40 +376,38 @@ module KeeperKeepalive = struct
 
   let oas_timeout_for_estimated_input_tokens_with_turn_budget
       ~(estimated_input_tokens : int) ~(max_turns : int) : float =
+    let _ = max_turns in
     match oas_timeout_sec_override with
     | Some v -> v
     | None ->
-      let base = 120.0 in
-      let per_1k =
-        get_float ~default:1.5 "MASC_KEEPER_OAS_TIMEOUT_PER_1K"
-      in
-      let per_turn =
-        (* #10008 fm2: bumped from 30.0 to 60.0. Recent-hour p50 turn
-           latency across the fleet is ~17min (#9933); 30s was the
-           "fantasy" value flagged in the issue body.  60s is still
-           well below observed p50 but doubles the budget allowance
-           without pushing the formula past [turn_timeout_sec] (1200 s
-           cap).  Operators who need more can raise
-           [MASC_KEEPER_OAS_TIMEOUT_PER_TURN] via env; the hard cap at
-           [Float.min turn_timeout_sec ...] below protects the fleet
-           from runaway budgets. *)
-        get_float ~default:60.0 "MASC_KEEPER_OAS_TIMEOUT_PER_TURN"
-      in
-      let input_time =
-        Float.of_int (max 0 estimated_input_tokens) /. 1000.0 *. per_1k
-      in
-      (* Cap at 20 effective turns even if the configured per-call turn
-         budget is higher.  With per_turn=60s, 20 turns consume 1200s —
-         the entire turn_timeout_sec budget.  Users pushing beyond 20
-         turns should instead raise turn_timeout_sec or split the
-         work.  Cap halved from 40 → 20 when per_turn default doubled
-         (30 → 60) so the boundary condition is preserved. *)
-      let effective_turns =
-        Float.of_int (min max_turns 20)
-      in
-      let turn_time = effective_turns *. per_turn in
-      Float.max 30.0
-        (Float.min turn_timeout_sec (base +. input_time +. turn_time))
+      (* #10008 fm2: the prior formula scaled the budget linearly with
+         [max_turns * per_turn (=30s)].  #9933 recent-hour measurement
+         shows fleet p50 turn latency ~16 min (960s) — the 30s-per-turn
+         assumption was 32x below reality.  velvet-hammer at max_turns=10
+         computed only 423.8s of OAS budget against a 1200s wall-clock
+         cap; multi-turn research calls regularly hit
+         [oas_timeout_budget] before a single real turn finished.
+
+         Root-cause fix: drop the [per_turn * turns] term entirely.
+         [turn_timeout_sec] is already the authoritative wall-clock
+         cap the formula was trying to approach.  Keep the tiny
+         [base + input_time] estimate as a lower bound so tests and
+         callers that set explicit overrides still see a sensible
+         value, then floor at the wall-clock cap.  [max_turns] stops
+         being an input to this computation — the count controls the
+         OAS agent's retry budget elsewhere, not MASC's wall-clock
+         expectation. *)
+      let _ = estimated_input_tokens in
+      (* Use wall-clock cap directly.  Short calls exit early via
+         tool-response detection; they do not need a smaller budget
+         reserved up front.  [estimated_input_tokens] and the old
+         [base + input_time] estimate are no longer load-bearing
+         inputs — they scaled at 1.5s/1k tokens, which was
+         negligible compared to the real p50 turn latency the
+         multiplier was trying to reserve for.  Kept in the
+         signature because callers still pass the value; ignored
+         for budget computation. *)
+      turn_timeout_sec
 
   let oas_timeout_for_estimated_input_tokens
       ~(estimated_input_tokens : int) : float =

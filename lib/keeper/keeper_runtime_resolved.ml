@@ -231,22 +231,22 @@ let admission_wait_timeout_sec () =
 
 let oas_timeout_for_estimated_input_tokens_with_turn_budget
     ~(estimated_input_tokens : int) ~(max_turns : int) : float =
+  let _ = estimated_input_tokens in
+  let _ = max_turns in
   let runtime = current () in
   match runtime.oas_timeout_override_sec.value with
   | Some value -> value
   | None ->
-      let base = 120.0 in
-      let input_time =
-        Float.of_int (max 0 estimated_input_tokens) /. 1000.0
-        *. runtime.oas_timeout_per_1k.value
-      in
-      let effective_turns =
-        Float.of_int (min max_turns 40)
-      in
-      let turn_time = effective_turns *. runtime.oas_timeout_per_turn.value in
-      Float.max 30.0
-        (Float.min runtime.turn_timeout_sec.value
-           (base +. input_time +. turn_time))
+      (* #10008 fm2: kept in lockstep with
+         [Env_config.KeeperKeepalive.oas_timeout_for_estimated_input_tokens_with_turn_budget].
+         The old formula scaled linearly with [max_turns * per_turn(=30s)]
+         but production p50 turn latency was ~16 min (#9933), making
+         the multiplier 32x below reality.  Drop the turn-count and
+         input-token scaling; return [turn_timeout_sec] directly as
+         the wall-clock cap.  Short calls exit early via tool-response
+         detection, they do not need a smaller budget reserved up
+         front. *)
+      runtime.turn_timeout_sec.value
 
 let oas_timeout_for_estimated_input_tokens ~(estimated_input_tokens : int) :
     float =

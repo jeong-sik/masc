@@ -203,6 +203,33 @@ let test_agent_of_yojson_annotates_invalid_last_seen () =
       check bool "error mentions last_seen value" true
         (contains "last_seen=")
 
+let test_agent_of_yojson_missing_last_seen_falls_back_to_now () =
+  (* #9751: when last_seen is entirely absent AND joined_at is not a usable
+     string, fall back to a current-wall-clock timestamp rather than
+     failing the whole record. last_seen is a liveness marker, not
+     identity-critical. *)
+  let json =
+    `Assoc
+      [
+        ("name", `String "keeper-orphan");
+        ("agent_type", `String "keeper");
+        ("status", `String "active");
+        ("capabilities", `List []);
+        ("current_task", `Null);
+        (* no joined_at, no last_seen *)
+      ]
+  in
+  match Types.agent_of_yojson json with
+  | Ok agent ->
+      check string "agent parsed without last_seen or joined_at"
+        "keeper-orphan" agent.name;
+      check bool "last_seen populated with ISO timestamp" true
+        (String.length agent.last_seen > 0
+         && String.contains agent.last_seen 'T'
+         && String.contains agent.last_seen 'Z')
+  | Error msg ->
+      fail ("missing last_seen+joined_at should fall back, not error: " ^ msg)
+
 let test_heartbeat_repairs_legacy_agent_last_seen () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -259,6 +286,8 @@ let () =
             test_agent_of_yojson_bootstraps_null_last_seen_from_joined_at;
           test_case "agent parser error annotates invalid last_seen (#7947)" `Quick
             test_agent_of_yojson_annotates_invalid_last_seen;
+          test_case "agent parser falls back when both last_seen and joined_at missing (#9751)" `Quick
+            test_agent_of_yojson_missing_last_seen_falls_back_to_now;
           test_case "heartbeat repairs legacy agent last_seen" `Quick
             test_heartbeat_repairs_legacy_agent_last_seen;
         ] );

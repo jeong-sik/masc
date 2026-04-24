@@ -330,6 +330,33 @@ let transport_health_json ~config =
       ("port", `Int (ws_port ()));
       ("sessions", `Int ws_sessions);
       ("relay_source", `String "sse_external_subscriber");
+      (* Diagnostic counters for the WS delivery path.  Read by literal
+         metric name so this surface does not take a compile-time
+         dependency on any particular WS perf/observability PR.  If the
+         metric has not been registered yet [metric_value_or_zero]
+         returns 0.0, which reads naturally as "nothing has happened" —
+         the same thing the caller would see immediately after server
+         startup before the first event. *)
+      ("delivery", `Assoc [
+        ("parse_cache_hits",
+         `Int (int_of_float (v "masc_ws_parse_cache_hits_total" ())));
+        ("parse_cache_misses",
+         `Int (int_of_float (v "masc_ws_parse_cache_misses_total" ())));
+        ("bytes_cache_hits",
+         `Int (int_of_float (v "masc_ws_bytes_cache_hits_total" ())));
+        ("bytes_cache_misses",
+         `Int (int_of_float (v "masc_ws_bytes_cache_misses_total" ())));
+        ("client_acks",
+         `Int (int_of_float (v "masc_ws_client_acks_total" ())));
+        ("throttled_deliveries",
+         `Int (int_of_float (v "masc_ws_throttled_deliveries_total" ())));
+        (* Histogram sum + auto _count give operators enough to compute
+           average buffered bytes per ack without scraping /metrics. *)
+        ("client_buffered_bytes_sum",
+         `Float (v "masc_ws_client_buffered_bytes" ()));
+        ("client_buffered_bytes_count",
+         `Int (int_of_float (v "masc_ws_client_buffered_bytes_count" ())));
+      ]);
     ]);
     ("webrtc", `Assoc [
       ("enabled", `Bool webrtc_configured);

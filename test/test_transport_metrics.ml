@@ -280,6 +280,28 @@ let test_transport_health_json () =
     (agent_health_json
      |> U.member "lifecycle_dispatch_rejections_total"
      |> U.to_int);
+  (* The [delivery] sub-object surfaces WS cache/ack/throttle counters
+     inline so the dashboard can render operational state without
+     scraping /metrics directly.  Fields are read by literal name with
+     [metric_value_or_zero], so presence (not value) is the contract
+     this test enforces. *)
+  let delivery_json = ws_json |> U.member "delivery" in
+  check bool "websocket delivery sub-object present" true
+    (match delivery_json with `Assoc _ -> true | _ -> false);
+  List.iter (fun (field, label) ->
+    check bool (Printf.sprintf "%s field present (int)" label) true
+      (match delivery_json |> U.member field with `Int _ -> true | _ -> false))
+    [ "parse_cache_hits", "parse_cache_hits"
+    ; "parse_cache_misses", "parse_cache_misses"
+    ; "bytes_cache_hits", "bytes_cache_hits"
+    ; "bytes_cache_misses", "bytes_cache_misses"
+    ; "client_acks", "client_acks"
+    ; "throttled_deliveries", "throttled_deliveries"
+    ; "client_buffered_bytes_count", "client_buffered_bytes_count"
+    ];
+  check bool "client_buffered_bytes_sum field present (float)" true
+    (match delivery_json |> U.member "client_buffered_bytes_sum" with
+     | `Float _ | `Int _ -> true | _ -> false);
   ignore (Masc_mcp.Sse.close_all_clients ());
   cleanup_dir base_dir
 

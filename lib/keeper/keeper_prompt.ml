@@ -29,7 +29,8 @@ let format_list_for_prompt (items : string list) : string =
     [Keeper_tool_policy]); keeping them as arguments avoids a dependency
     cycle between [Keeper_prompt] and [Keeper_tool_policy].  Falls back
     to the raw template text if rendering fails so that prompt wiring
-    bugs do not brick keepers. *)
+    bugs do not brick keepers — but the fallback is now logged loudly so
+    the silent-degradation case documented in #9893 becomes observable. *)
 let render_world_prompt ~allowed_orgs ~denied_repos : string =
   let vars =
     [
@@ -41,7 +42,12 @@ let render_world_prompt ~allowed_orgs ~denied_repos : string =
     Prompt_registry.render_prompt_template Keeper_prompt_names.world vars
   with
   | Ok rendered -> rendered
-  | Error _ -> Prompt_registry.get_prompt Keeper_prompt_names.world
+  | Error msg ->
+      Log.Keeper.warn
+        "render_world_prompt: template render failed, falling back to raw \
+         template (keepers may see unrendered placeholders): %s"
+        msg;
+      Prompt_registry.get_prompt Keeper_prompt_names.world
 
 let build_keeper_system_prompt
     ~goal ~short_goal ~mid_goal ~long_goal ~will ~needs ~desires

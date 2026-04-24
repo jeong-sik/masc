@@ -26,6 +26,7 @@ RUN apt-get update \
       npm \
       opam \
       ocaml-dune \
+      openssh-client \
       python3 \
       ripgrep \
       tree \

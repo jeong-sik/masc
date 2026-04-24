@@ -102,6 +102,7 @@
         test_keeper_transition_audit
         test_keeper_shell_containment
         test_keeper_shell_docker_route
+        test_env_git_noninteractive
         test_keeper_fs_edit_patch
         test_keeper_docker_read
         test_keeper_github_read_only
@@ -219,6 +220,7 @@
           test_keeper_transition_audit
           test_keeper_shell_containment
           test_keeper_shell_docker_route
+          test_env_git_noninteractive
           test_keeper_fs_edit_patch
           test_keeper_docker_read
           test_keeper_github_read_only

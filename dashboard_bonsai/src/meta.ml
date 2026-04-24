@@ -54,6 +54,11 @@ stylesheet
     .strip { border-width: 2px; border-color: var(--text-bright); }
     .k { color: var(--text-bright); }
   }
+
+  @media (forced-colors: active) {
+    .v_ok { color: Highlight; }
+    .v_blood { color: MarkText; }
+  }
 |}]
 
 type value_color = [ `Default | `Ok | `Brass | `Blood ]

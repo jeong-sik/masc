@@ -71,6 +71,14 @@ stylesheet
     .flame_bar { border-width: 2px; border-color: var(--text-bright); }
     .flame_chip { border-width: 2px; }
   }
+
+  @media (forced-colors: active) {
+    .flame_seg_llm, .flame_seg_tool { background: Highlight; }
+    .flame_seg_think { background: ButtonText; }
+    .flame_seg_wait { background: GrayText; }
+    .flame_seg_err { background: MarkText; }
+    .flame_chip { border-color: CanvasText; }
+  }
 |}]
 
 let seg_class = function

@@ -159,6 +159,15 @@ stylesheet
     .goal_header { border-bottom-width: 2px; border-color: var(--text-bright); }
     .k { color: var(--text-bright); }
   }
+
+  @media (forced-colors: active) {
+    .pill_running { color: Highlight; border-color: Highlight; }
+    .pill_completed { color: ButtonText; border-color: ButtonText; }
+    .pill_failed { color: MarkText; border-color: MarkText; }
+    .pill_stopped { color: GrayText; border-color: GrayText; }
+    .pill_paused { color: Mark; border-color: Mark; }
+    .kd_keep { color: Highlight; }
+  }
 |}]
 
 let pill_color : Archive_runs_types.status -> Pill.color = function

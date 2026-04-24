@@ -631,6 +631,13 @@ let retry_message_looks_like_not_found (message : string) : bool =
     errors (budget, idle, exit) are not — they would recur on any model. *)
 let sdk_error_to_cascade_outcome (err : Oas.Error.sdk_error)
     : Cascade_fsm.provider_outcome option =
+  match classify_masc_internal_error err with
+  | Some (Resumable_cli_session { detail; _ }) ->
+    Some
+      (Cascade_fsm.Call_err
+         (Llm_provider.Http_client.NetworkError
+            { message = detail; kind = Llm_provider.Http_client.Unknown }))
+  | _ -> (
   match err with
   | Oas.Error.Api api_err ->
     let http_err = match[@warning "-8"] api_err with
@@ -676,7 +683,7 @@ let sdk_error_to_cascade_outcome (err : Oas.Error.sdk_error)
     Some
       (Cascade_fsm.Call_err
          (Llm_provider.Http_client.AcceptRejected { reason = detail }))
-  | _ -> None
+  | _ -> None)
 
 let moonshot_auth_hint_marker = "Moonshot returned 401"
 let openai_compat_not_found_hint_marker =
@@ -763,6 +770,8 @@ let cli_wrapped_hard_quota_indicators = [
   "quota will reset after";
   "\"api_error_status\":429";
   "you've hit your limit";
+  "monthly usage limit";
+  "org's monthly usage limit";
   "resets apr ";
 ]
 

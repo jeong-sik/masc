@@ -293,6 +293,11 @@
  (libraries masc_test_deps))
 
 (test
+ (name test_base_path_prod_guard)
+ (modules test_base_path_prod_guard)
+ (libraries masc_test_deps))
+
+(test
  (name test_governance_cases_snapshot)
  (modules test_governance_cases_snapshot)
  (libraries masc_test_deps))

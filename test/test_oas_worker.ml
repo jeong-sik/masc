@@ -1710,6 +1710,31 @@ let test_filter_candidate_providers_for_tool_support_normalizes_codex_headers ()
     "codex survives provider-normalized runtime MCP tool filter"
     1 (List.length filtered)
 
+let test_filter_candidate_providers_for_tool_support_drops_codex_cli_keeper_bound_actor_tools
+    () =
+  with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
+  with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token" @@ fun () ->
+  let runtime_mcp_policy =
+    Oas_worker_exec.public_mcp_runtime_policy_of_tool_names
+      ~agent_name:"keeper-sangsu-agent" [ "masc_status"; "masc_claim_next" ]
+  in
+  let filtered =
+    Masc_mcp.Oas_worker_named.filter_candidate_providers_for_tool_support
+      ~keeper_name:"sangsu"
+      ?runtime_mcp_policy
+      ~require_tool_choice_support:true
+      ~require_tool_support:true
+      ~label:"tool_use_strict"
+      [ make_codex_cli_provider_cfg (); make_kimi_cli_provider_cfg () ]
+  in
+  match filtered with
+  | [ provider_cfg ] ->
+      Alcotest.(check bool) "kimi remains after codex bound-actor filter" true
+        (provider_cfg.kind = Llm_provider.Provider_config.Kimi_cli)
+  | _ ->
+      Alcotest.failf "expected only kimi_cli provider to remain, got %d"
+        (List.length filtered)
+
 let test_kimi_mcp_config_json_of_policy_filters_to_allowed_servers () =
   let policy =
     {
@@ -3314,6 +3339,10 @@ let () =
         test_resolve_tool_lane_for_codex_cli_internal_tools_optional_drops_tools;
       Alcotest.test_case "provider-normalized filter keeps codex public MCP lane" `Quick
         test_filter_candidate_providers_for_tool_support_normalizes_codex_headers;
+      Alcotest.test_case
+        "provider-normalized filter drops codex keeper-bound actor tools"
+        `Quick
+        test_filter_candidate_providers_for_tool_support_drops_codex_cli_keeper_bound_actor_tools;
       Alcotest.test_case "kimi runtime MCP config keeps only allowed servers" `Quick
         test_kimi_mcp_config_json_of_policy_filters_to_allowed_servers;
       Alcotest.test_case "runtime MCP policy injects keeper agent header for masc server" `Quick

@@ -239,15 +239,27 @@ let ensure_keeper_meta config name =
       Keeper_cascade_profile.normalize_declared_name meta.cascade_name
       <> resolved_target_cascade_name
     in
+    (* #10061: persisted state vs TOML source can differ by a single
+       trailing newline when OCaml string literals round-trip through
+       the TOML writer (heredoc [""" … """] closing sequence drops the
+       final newline) or through an older binary that wrote the field
+       with extra whitespace. The semantic content of these prose
+       fields does not care about trailing whitespace, yet a byte-
+       level [<>] compare marks every 30 s hot-reload tick as a
+       personality change, producing a re-sync storm (2880 redundant
+       writes/day on nick0cave alone; other 13 keepers: 0 events).
+       Normalise both sides with [String.trim] so only meaningful
+       content drives resync. *)
+    let trim_equal a b = String.equal (String.trim a) (String.trim b) in
     let personality_changed =
-      meta.goal <> target_goal
-      || meta.short_goal <> target_short_goal
-      || meta.mid_goal <> target_mid_goal
-      || meta.long_goal <> target_long_goal
-      || meta.will <> target_will
-      || meta.needs <> target_needs
-      || meta.desires <> target_desires
-      || meta.instructions <> target_instructions in
+      not (trim_equal meta.goal target_goal)
+      || not (trim_equal meta.short_goal target_short_goal)
+      || not (trim_equal meta.mid_goal target_mid_goal)
+      || not (trim_equal meta.long_goal target_long_goal)
+      || not (trim_equal meta.will target_will)
+      || not (trim_equal meta.needs target_needs)
+      || not (trim_equal meta.desires target_desires)
+      || not (trim_equal meta.instructions target_instructions) in
     let policy_changed =
       meta.policy_voice_enabled <> target_policy_voice_enabled
       || meta.autoboot_enabled <> target_autoboot_enabled

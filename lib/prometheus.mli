@@ -75,6 +75,11 @@ val metric_keeper_cache_creation_tokens : string
 val metric_keeper_cache_read_tokens : string
 val metric_keeper_usage_anomalies : string
 val metric_keeper_metric_emit_dropped : string
+val metric_keeper_context_max_observed : string
+(** #9953: bucketed counter for observed [context_max] values.
+    Labels: [keeper, model_used, resolved_model_id,
+    context_max_bucket].  Bucket vocabulary:
+    [64k | 128k | 200k | 256k | 1m | other | zero]. *)
 val metric_keeper_compactions : string
 val metric_keeper_compaction_ratio_change : string
 val metric_keeper_compaction_saved_tokens : string

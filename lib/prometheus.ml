@@ -195,6 +195,21 @@ let metric_keeper_usage_anomalies =
 let metric_keeper_metric_emit_dropped =
   "masc_keeper_metric_emit_dropped_total"
 
+(* #9953: counter of observed [context_max] values labelled by
+   [keeper, model_used, resolved_model_id, context_max_bucket].
+   The bucket label collapses raw token counts into a small set
+   of strings ("64k" | "128k" | "200k" | "256k" | "1m" | "other"
+   | "zero") so the cardinality stays bounded.
+
+   Operators use this counter to detect drift: the same
+   ([model_used], [resolved_model_id]) pair should land in ONE
+   bucket; observing two buckets means the resolution path
+   produced different ceilings on different turns.  The 42% /
+   17% / 41% split for [claude_code:auto] reported in #9953 is
+   directly visible here as three counter rows. *)
+let metric_keeper_context_max_observed =
+  "masc_keeper_context_max_observed_total"
+
 (* Keeper compaction (keeper_compact_policy.ml, tool_keeper.ml). *)
 let metric_keeper_compactions = "masc_keeper_compactions_total"
 let metric_keeper_compaction_ratio_change =
@@ -396,6 +411,15 @@ let init () =
   add metric_sse_capacity_evictions "Total SSE clients evicted due to max client capacity" Counter;
   add metric_sse_write_failures "Total SSE write failures by reason" Counter;
   add metric_sse_rejects "Total SSE connections rejected by storm guard" Counter;
+  (* #9953: context_max distribution per keeper / model / resolved
+     model.  Operators query [count by (model_used, resolved_model_id)
+     (masc_keeper_context_max_observed_total)] to detect drift —
+     a count > 1 indicates the same model resolved to different
+     ceilings on different turns. *)
+  add metric_keeper_context_max_observed
+    "Total observed keeper context_max values, bucketed (labels: keeper, \
+     model_used, resolved_model_id, context_max_bucket=64k|128k|200k|256k|1m|other|zero)"
+    Counter;
   (* Keeper compaction metrics — emitted by keeper_compact_policy.ml *)
   add metric_keeper_compactions
     "Total keeper compactions performed" Counter;

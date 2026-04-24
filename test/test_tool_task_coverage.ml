@@ -761,6 +761,22 @@ let () = test "handle_add_task_rejects_removed_required_preset_argument" (fun ()
   assert (str_contains result "Unknown argument")
 )
 
+let () = test "add_task_schema_omits_removed_required_preset_argument" (fun () ->
+  let schema =
+    match
+      List.find_opt
+        (fun (schema : Types.tool_schema) ->
+           String.equal schema.name "masc_add_task")
+        Tool_task_schemas.schemas
+    with
+    | Some schema -> schema
+    | None -> failwith "masc_add_task schema not found"
+  in
+  let properties =
+    Yojson.Safe.Util.(schema.input_schema |> member "properties")
+  in
+  assert (Yojson.Safe.Util.member "required_preset" properties = `Null))
+
 let () = test "handle_claim_rejects_removed_agent_role_argument" (fun () ->
   let ctx = make_test_ctx () in
   let _ =

@@ -453,6 +453,113 @@ let test_release_hard_stop_blocks_direct_reclaim () =
           ("expected TaskInvalidState, got " ^ Types.masc_error_to_string e)
     | Ok _ -> Alcotest.fail "direct claim should be blocked after hard-stop release")
 
+let write_tasks config tasks =
+  let backlog = Coord.read_backlog config in
+  let updated : Types.backlog =
+    { tasks; last_updated = Types.now_iso (); version = backlog.version + 1 }
+  in
+  Coord.write_backlog config updated
+
+let task_by_id config task_id =
+  match
+    List.find_opt
+      (fun (t : Types.task) -> String.equal t.id task_id)
+      (Coord.get_tasks_raw config)
+  with
+  | Some task -> task
+  | None -> Alcotest.failf "%s not found" task_id
+
+let test_claim_next_uses_legacy_auto_cycle_as_fallback () =
+  with_test_env (fun config ->
+    let claude = find_agent_name_by_prefix config "claude" in
+    let _ =
+      Coord.add_task config ~title:"Legacy soft-blocked task" ~priority:1
+        ~description:""
+    in
+    let backlog = Coord.read_backlog config in
+    let tasks =
+      List.map
+        (fun (t : Types.task) ->
+           if String.equal t.id "task-001"
+           then
+             { t with
+               cycle_count = 3
+             ; do_not_reclaim_reason = Some "auto: 3 releases"
+             }
+           else t)
+        backlog.tasks
+    in
+    write_tasks config tasks;
+    match Coord.claim_next_r config ~agent_name:claude () with
+    | Coord.Claim_next_claimed { task_id; _ } ->
+      Alcotest.(check string) "fallback claim" "task-001" task_id;
+      let task = task_by_id config task_id in
+      Alcotest.(check (option string)) "legacy soft block cleared" None
+        task.do_not_reclaim_reason
+    | Coord.Claim_next_no_eligible _ ->
+      Alcotest.fail "legacy auto-cycle reason should be fallback claimable"
+    | Coord.Claim_next_no_unclaimed ->
+      Alcotest.fail "expected one fallback-claimable task"
+    | Coord.Claim_next_error msg -> Alcotest.fail msg)
+
+let test_claim_next_prefers_unblocked_over_legacy_auto_cycle () =
+  with_test_env (fun config ->
+    let claude = find_agent_name_by_prefix config "claude" in
+    let _ =
+      Coord.add_task config ~title:"Legacy soft-blocked urgent" ~priority:1
+        ~description:""
+    in
+    let _ =
+      Coord.add_task config ~title:"Normal lower-priority work" ~priority:5
+        ~description:""
+    in
+    let backlog = Coord.read_backlog config in
+    let tasks =
+      List.map
+        (fun (t : Types.task) ->
+           if String.equal t.id "task-001"
+           then
+             { t with
+               cycle_count = 3
+             ; do_not_reclaim_reason = Some "auto: 3 releases"
+             }
+           else t)
+        backlog.tasks
+    in
+    write_tasks config tasks;
+    match Coord.claim_next_r config ~agent_name:claude () with
+    | Coord.Claim_next_claimed { task_id; _ } ->
+      Alcotest.(check string) "unblocked work is primary" "task-002" task_id
+    | Coord.Claim_next_no_eligible _ ->
+      Alcotest.fail "normal unblocked task should be claimed before fallback"
+    | Coord.Claim_next_no_unclaimed ->
+      Alcotest.fail "expected claimable tasks"
+    | Coord.Claim_next_error msg -> Alcotest.fail msg)
+
+let test_release_cycles_do_not_create_auto_do_not_reclaim () =
+  with_test_env (fun config ->
+    let claude = find_agent_name_by_prefix config "claude" in
+    let _ =
+      Coord.add_task config ~title:"Retryable task" ~priority:1 ~description:""
+    in
+    for _ = 1 to 3 do
+      (match Coord.claim_task_r config ~agent_name:claude ~task_id:"task-001" () with
+       | Ok _ -> ()
+       | Error e -> Alcotest.fail (Types.masc_error_to_string e));
+      (match Coord.release_task_r config ~agent_name:claude ~task_id:"task-001" () with
+       | Ok _ -> ()
+       | Error e -> Alcotest.fail (Types.masc_error_to_string e))
+    done;
+    let task = task_by_id config "task-001" in
+    Alcotest.(check int) "release cycles still tracked" 3 task.cycle_count;
+    Alcotest.(check (option string)) "no auto hard stop" None
+      task.do_not_reclaim_reason;
+    match Coord.claim_task_r config ~agent_name:claude ~task_id:"task-001" () with
+    | Ok _ -> ()
+    | Error e ->
+      Alcotest.fail
+        ("retryable task should remain claimable: " ^ Types.masc_error_to_string e))
+
 (* ============================================================ *)
 (* Update Priority Tests                                         *)
 (* ============================================================ *)
@@ -1207,6 +1314,12 @@ let () =
         test_release_hard_stop_blocks_future_claim_next;
       Alcotest.test_case "release hard-stop blocks direct reclaim" `Quick
         test_release_hard_stop_blocks_direct_reclaim;
+      Alcotest.test_case "legacy auto-cycle block is fallback claimable" `Quick
+        test_claim_next_uses_legacy_auto_cycle_as_fallback;
+      Alcotest.test_case "unblocked tasks beat legacy auto-cycle fallback" `Quick
+        test_claim_next_prefers_unblocked_over_legacy_auto_cycle;
+      Alcotest.test_case "release cycles do not create auto block" `Quick
+        test_release_cycles_do_not_create_auto_do_not_reclaim;
     ];
 
     (* === Update Priority === *)

@@ -90,6 +90,14 @@ val claim_task :
 val claim_task_r :
   config -> agent_name:string -> task_id:string -> unit -> string Types.masc_result
 
+val do_not_reclaim_reason_blocks_claim : string option -> string option
+(** Returns [Some reason] only when [reason] is an explicit hard-stop that
+    should still block claiming. Legacy automatic cycle reasons such as
+    ["auto: 3 releases"] are treated as soft and return [None]. *)
+
+val clear_soft_do_not_reclaim_reason : Types.task -> Types.task
+(** Clears legacy automatic cycle block reasons before a task is claimed. *)
+
 (** {1 Task transitions} *)
 
 val transition_task_r :

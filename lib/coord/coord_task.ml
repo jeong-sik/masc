@@ -628,6 +628,41 @@ let batch_add_tasks_with_contracts ?created_by config tasks =
   batch_add_tasks_internal ?created_by config tasks
 ;;
 
+let is_legacy_auto_cycle_do_not_reclaim_reason reason =
+  let trimmed = String.trim reason in
+  let prefix = "auto: " in
+  let parse_suffix suffix =
+    let prefix_len = String.length prefix in
+    let suffix_len = String.length suffix in
+    let len = String.length trimmed in
+    if
+      len > prefix_len + suffix_len
+      && String.starts_with ~prefix trimmed
+      && String.ends_with ~suffix trimmed
+    then
+      let raw_count = String.sub trimmed prefix_len (len - prefix_len - suffix_len) in
+      match int_of_string_opt raw_count with
+      | Some count -> count >= 3
+      | None -> false
+    else
+      false
+  in
+  parse_suffix " releases" || parse_suffix " cancellations"
+;;
+
+let do_not_reclaim_reason_blocks_claim = function
+  | Some reason when is_legacy_auto_cycle_do_not_reclaim_reason reason -> None
+  | Some _ as reason -> reason
+  | None -> None
+;;
+
+let clear_soft_do_not_reclaim_reason (task : Types.task) =
+  match task.do_not_reclaim_reason with
+  | Some reason when is_legacy_auto_cycle_do_not_reclaim_reason reason ->
+    { task with do_not_reclaim_reason = None }
+  | Some _ | None -> task
+;;
+
 (** Claim task with file locking (TOCTOU prevention) *)
 let claim_task config ~agent_name ~task_id =
   ensure_initialized config;
@@ -652,12 +687,13 @@ let claim_task config ~agent_name ~task_id =
                   then (
                     found := true;
                     (* Cycle-prevention gate: see _r variant below for rationale. *)
-                    (match task.do_not_reclaim_reason with
+                    (match do_not_reclaim_reason_blocks_claim task.do_not_reclaim_reason with
                      | Some r -> blocked_reason := Some r
                      | None -> ());
                     match task.task_status with
                     | _ when !blocked_reason <> None -> task
                     | Todo ->
+                      let task = clear_soft_do_not_reclaim_reason task in
                       { task with
                         task_status =
                           Claimed { assignee = agent_name; claimed_at = now_iso () }
@@ -768,7 +804,7 @@ let claim_task_r config ~agent_name ~task_id ()
          The reason can come from cancel/release hard-stop logic or be applied
          directly by an operator. See PRs #7794 (schema), #7798 (cancel hook). *)
          let* () =
-           match task.do_not_reclaim_reason with
+           match do_not_reclaim_reason_blocks_claim task.do_not_reclaim_reason with
            | None -> Ok ()
            | Some r ->
              Error
@@ -784,6 +820,7 @@ let claim_task_r config ~agent_name ~task_id ()
                 then (
                   match t.task_status with
                   | Todo ->
+                    let t = clear_soft_do_not_reclaim_reason t in
                     let t' =
                       { t with
                         task_status =
@@ -906,10 +943,9 @@ let release_should_block_reclaim handoff_context =
 ;;
 
 let derive_release_do_not_reclaim_reason (task : Types.task) handoff_context =
-  match task.do_not_reclaim_reason with
+  match do_not_reclaim_reason_blocks_claim task.do_not_reclaim_reason with
   | Some _ as existing -> existing
   | None ->
-    let next_cycle = task.cycle_count + 1 in
     let first_text =
       match release_handoff_texts handoff_context with
       | text :: _ -> Some text
@@ -918,9 +954,7 @@ let derive_release_do_not_reclaim_reason (task : Types.task) handoff_context =
     if release_should_block_reclaim handoff_context
     then
       Some
-        (Option.value first_text ~default:(Printf.sprintf "auto: %d releases" next_cycle))
-    else if next_cycle >= 3
-    then Some (Printf.sprintf "auto: %d releases" next_cycle)
+        (Option.value first_text ~default:"release hard-stop requested")
     else None
 ;;
 
@@ -973,6 +1007,14 @@ let transition_task_r
           match task_opt with
           | None -> Error (Types.TaskNotFound task_id)
           | Some task -> Ok task
+        in
+        let* () =
+          match action, do_not_reclaim_reason_blocks_claim task.do_not_reclaim_reason with
+          | Types.Claim, Some r ->
+            Error
+              (Types.TaskInvalidState
+                 (Printf.sprintf "Task %s is blocked from re-claim: %s" task_id r))
+          | _ -> Ok ()
         in
         let now = now_iso () in
         let now_ts = Time_compat.now () in
@@ -1116,6 +1158,17 @@ let transition_task_r
               (fun (t : task) ->
                  if t.id = task_id
                  then (
+                   let t =
+                     match action with
+                     | Types.Claim -> clear_soft_do_not_reclaim_reason t
+                     | Types.Release
+                     | Types.Start
+                     | Types.Done_action
+                     | Types.Cancel
+                     | Types.Submit_for_verification
+                     | Types.Approve_verification
+                     | Types.Reject_verification -> t
+                   in
                    let cycle_count, do_not_reclaim_reason =
                      match action with
                      | Types.Release ->
@@ -1412,11 +1465,12 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result
                       if t.id = task_id
                       then (
                         let new_cycle = t.cycle_count + 1 in
-                        (* Auto-set do_not_reclaim_reason when the operator flags
-                     a hard stop in the cancel reason, or after 3 cycles. *)
+                        (* Set do_not_reclaim_reason only when the operator flags
+                     an explicit hard stop in the cancel reason. *)
                         let auto_dnr =
                           match t.do_not_reclaim_reason with
-                          | Some _ as existing -> existing
+                          | Some _ as existing ->
+                            do_not_reclaim_reason_blocks_claim existing
                           | None ->
                             let lower = String.lowercase_ascii reason in
                             let flagged =
@@ -1425,8 +1479,6 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result
                             in
                             if flagged && reason <> ""
                             then Some reason
-                            else if new_cycle >= 3
-                            then Some (Printf.sprintf "auto: %d cancellations" new_cycle)
                             else None
                         in
                         { t with

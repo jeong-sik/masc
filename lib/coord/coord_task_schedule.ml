@@ -9,8 +9,28 @@ include Coord_state
 
 let task_is_claim_pool_candidate (task : Types.task) =
   match task.task_status with
+  | Todo ->
+      Option.is_none
+        (Coord_task.do_not_reclaim_reason_blocks_claim task.do_not_reclaim_reason)
+  | Claimed _ | InProgress _ | AwaitingVerification _ | Done _ | Cancelled _ ->
+      false
+
+let task_is_primary_claim_pool_candidate (task : Types.task) =
+  match task.task_status with
   | Todo -> Option.is_none task.do_not_reclaim_reason
   | Claimed _ | InProgress _ | AwaitingVerification _ | Done _ | Cancelled _ ->
+      false
+
+let task_is_soft_reclaim_candidate (task : Types.task) =
+  match task.task_status, task.do_not_reclaim_reason with
+  | Todo, Some reason ->
+      Option.is_none (Coord_task.do_not_reclaim_reason_blocks_claim (Some reason))
+  | Todo, None
+  | Claimed _, _
+  | InProgress _, _
+  | AwaitingVerification _, _
+  | Done _, _
+  | Cancelled _, _ ->
       false
 
 type verification_claim_state =
@@ -183,7 +203,8 @@ let claim_next_r
         t.task_status = Types.Todo
       ) sorted in
       let blocked_todo = List.filter (fun (t : Types.task) ->
-        Option.is_some t.do_not_reclaim_reason
+        Option.is_some
+          (Coord_task.do_not_reclaim_reason_blocks_claim t.do_not_reclaim_reason)
       ) all_todo in
       let latest_verification_status = latest_verification_status_by_task config in
       let verification_blocked_todo =
@@ -200,7 +221,15 @@ let claim_next_r
              "{\"type\":\"task_claim_next_skip_verification\",\"agent\":\"%s\",\"blocked\":%d,\"ts\":\"%s\"}"
              agent_name (List.length verification_blocked_todo) (now_iso ()));
 
-      let unclaimed = List.filter task_is_claim_pool_candidate sorted in
+      let primary_unclaimed =
+        List.filter task_is_primary_claim_pool_candidate sorted
+      in
+      let soft_unclaimed =
+        List.filter task_is_soft_reclaim_candidate sorted
+      in
+      let unclaimed =
+        List.filter task_is_claim_pool_candidate sorted
+      in
       (* Also exclude the just-released task: the agent is moving on,
          re-claiming the same task would be a no-op loop. *)
       let blocked_ids =
@@ -217,10 +246,16 @@ let claim_next_r
           (fun (t : task) -> (not (List.mem t.id all_excluded)) && not (task_filter t))
           unclaimed
       in
-      let eligible =
+      let eligible_from candidates =
         List.filter
           (fun (t : task) -> (not (List.mem t.id all_excluded)) && task_filter t)
-          unclaimed
+          candidates
+      in
+      let primary_eligible = eligible_from primary_unclaimed in
+      let eligible =
+        match primary_eligible with
+        | _ :: _ -> primary_eligible
+        | [] -> eligible_from soft_unclaimed
       in
 
       (* Helper: clear agent current_task and reset status after auto-release
@@ -273,10 +308,11 @@ let claim_next_r
           (* Claim this task *)
           let new_tasks = List.map (fun (t : task) ->
             if t.id = task.id then
-              { t with task_status = Claimed {
-                  assignee = agent_name;
-                  claimed_at = now_iso ()
-                }
+              let t = Coord_task.clear_soft_do_not_reclaim_reason t in
+              {
+                t with
+                task_status =
+                  Claimed { assignee = agent_name; claimed_at = now_iso () };
               }
             else t
           ) working_tasks in

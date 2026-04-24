@@ -471,6 +471,12 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     result);
   Tool_metrics_persist.start_flush_fiber ~sw ~clock
     ~base_path:state.room_config.base_path;
+  (* #9876: Hebbian consolidation fiber. Prior to this, the graph was
+     write-only — strengthen/weaken populated synapses but decay +
+     pruning never ran (zero production callers of [consolidate]).
+     last_consolidation=0.0 on live graphs confirmed the gap in
+     production. *)
+  Hebbian_eio.start_consolidation_fiber ~sw ~clock state.room_config;
   (* System_internal tool usage log: durable JSONL for pruning evidence (#5120) *)
   Tool_usage_log.init
     ~base_path:state.room_config.base_path

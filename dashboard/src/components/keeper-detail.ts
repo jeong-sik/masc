@@ -276,18 +276,27 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
               <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-2xs font-semibold bg-[var(--warn-14)] text-[var(--warn)]">
                 계속 진행 승인 대기
               </span>
+              ${keeper.last_autonomous_action_at
+                ? html`<span class="text-[var(--text-muted)]">마지막 행동 이후 <${TimeAgo} timestamp=${keeper.last_autonomous_action_at} /></span>`
+                : null}
             `
           : socialFallbackActive
           ? html`
               <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-2xs font-semibold bg-[var(--warn-14)] text-[var(--warn)]">
                 Social fallback
               </span>
+              ${keeper.last_autonomous_action_at
+                ? html`<span class="text-[var(--text-muted)]">마지막 행동 이후 <${TimeAgo} timestamp=${keeper.last_autonomous_action_at} /></span>`
+                : null}
             `
           : runtimeBlockerClass
           ? html`
               <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-2xs font-semibold bg-[var(--bad-soft)] text-[var(--bad)]">
                 ${runtimeBlockerLabel ?? 'Runtime blocker'}
               </span>
+              ${keeper.last_autonomous_action_at
+                ? html`<span class="text-[var(--text-muted)]">마지막 행동 이후 <${TimeAgo} timestamp=${keeper.last_autonomous_action_at} /></span>`
+                : null}
             `
           : null}
         ${runtimeBlocker

@@ -166,6 +166,13 @@ stylesheet
     .conv_bar { outline: 1px solid var(--text-bright); }
     .task_dot { color: var(--text-bright); }
   }
+
+  @media (forced-colors: active) {
+    .task_dot_done { color: Highlight; }
+    .task_dot_run { color: Mark; }
+    .conv_bar_fill { background: Highlight; }
+    .goal_meta_v_ok { color: Highlight; }
+  }
 |}]
 
 let status_pill_color (s : string) : Pill.color =

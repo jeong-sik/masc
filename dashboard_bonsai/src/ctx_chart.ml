@@ -71,6 +71,12 @@ stylesheet
     .track { outline: 1px solid var(--text-bright); }
     .lbl_warn, .lbl_dang { color: var(--text-bright); }
   }
+
+  @media (forced-colors: active) {
+    .meta { border-right-color: CanvasText; }
+    .lbl_warn { color: Mark; }
+    .lbl_dang { color: MarkText; }
+  }
 |}]
 
 let svg_a k v = Attr.create k v

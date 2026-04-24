@@ -1305,6 +1305,13 @@ stylesheet
     .search_input { border-width: 2px; border-color: var(--text-bright); }
     .chip, .btn_ghost { border-width: 2px; border-color: var(--text-bright); }
   }
+
+  @media (forced-colors: active) {
+    .level_error { color: MarkText; border-color: MarkText; text-shadow: none; }
+    .level_warn { color: Mark; border-color: Mark; }
+    .level_debug { color: GrayText; }
+    .source_badge { border-color: GrayText; }
+  }
 |}]
 
 let level_class level =

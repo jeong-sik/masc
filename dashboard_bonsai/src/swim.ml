@@ -147,6 +147,14 @@ stylesheet
     .stat { color: var(--text-bright); }
     .nm_dead { color: var(--text-bright); }
   }
+
+  @media (forced-colors: active) {
+    .frame_llm, .frame_tool { background: Highlight; }
+    .frame_think { background: ButtonText; }
+    .frame_wait { background: GrayText; }
+    .frame_err { background: MarkText; }
+    .nm_dead { color: GrayText; }
+  }
 |}]
 
 let frame_class = function

@@ -554,7 +554,22 @@ let make_hooks
       match event with
       | Oas.Hooks.AfterTurn { turn; response } ->
         let meta = !meta_ref in
-        let model = response.model in
+        (* #10083: OAS provider transports can return [response.model = ""]
+           on silent failure paths (kimi_cli empty-usage fallback, cascade
+           contract retry exhaustion).  Leaving it empty propagates to
+           every downstream metric label ([masc_after_turn_hook_total],
+           [masc_pricing_catalog_miss_total], [masc_llm_inference_duration_seconds])
+           as the literal key `""`, contaminating per-provider latency
+           histograms and making pricing catalog miss unobservable (which
+           provider is missing?).  Normalise to a stable sentinel
+           `unknown_provider` so the miss becomes grepable and
+           dashboards distinguish empty-model turns from legitimate ones.
+           CLAUDE.md anti-pattern #2: Unknown -> Permissive Default. *)
+        let model =
+          match String.trim response.model with
+          | "" -> "unknown_provider"
+          | s -> s
+        in
         let usage_trust =
           classify_usage_trust ?usage:response.usage ~model
             ~telemetry:response.telemetry ()

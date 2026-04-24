@@ -863,7 +863,7 @@ let focus_card ~(shell : Overview_types.response) ~(active : Route.t) =
                         ; Node.text focus_detail
                         ]
                     ]
-                ; Node.div ~attrs:[ Style.vial ] [ Node.span ~attrs:[ vial_style ] [] ]
+                ; Node.div ~attrs:[ Style.vial ] [ Node.span ~attrs:[ vial_style; Attr.create "aria-hidden" "true" ] [] ]
                 ]
             ; Node.div
                 ~attrs:[ Style.stats ]
@@ -944,7 +944,7 @@ let watch_feed () =
     Node.div
       ~attrs:[ Style.event ]
       [ Node.span ~attrs:[ Style.event_time ] [ Node.text time ]
-      ; Node.span ~attrs:mark_attrs []
+      ; Node.span ~attrs:(Attr.create "aria-hidden" "true" :: mark_attrs) []
       ; Node.span ~attrs:[ Style.event_body ] body
       ]
   in

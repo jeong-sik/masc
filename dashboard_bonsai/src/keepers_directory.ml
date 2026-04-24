@@ -1324,7 +1324,7 @@ let focus_card row =
                     ]
                 ; Node.div
                     ~attrs:[ Shell_view.Style.vial ]
-                    [ Node.span ~attrs:vial_fill_attrs [] ]
+                    [ Node.span ~attrs:(Attr.create "aria-hidden" "true" :: vial_fill_attrs) [] ]
                 ]
             ; Node.div
                 ~attrs:[ Shell_view.Style.stats ]

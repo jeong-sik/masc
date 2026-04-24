@@ -1669,7 +1669,7 @@ let render_response
            head @ runtime_seg @ tail)
       ; Node.div
           ~attrs:[ Style.pulse_slot ]
-          [ Node.span ~attrs:[ Style.pulse ] []
+          [ Node.span ~attrs:[ Style.pulse; Attr.create "aria-hidden" "true" ] []
           ; Node.span ~attrs:[ Style.pulse_label ] [ Node.text "live · 3s" ]
           ]
       ]
@@ -1783,7 +1783,7 @@ let render_response
     in
     Node.a
       ~attrs:(Attr.href (Route.path route) :: base)
-      ([ Node.span ~attrs:[ Style.nav_link_glyph ] []
+      ([ Node.span ~attrs:[ Style.nav_link_glyph; Attr.create "aria-hidden" "true" ] []
        ; Node.text (Route.label route)
        ]
        @ tail_node)
@@ -1945,7 +1945,7 @@ let render_response
               ]
           ; Node.div
               ~attrs:[ Style.vial ]
-              [ Node.span ~attrs:[ Style.vial_fill; vial_style ] [] ]
+              [ Node.span ~attrs:[ Style.vial_fill; vial_style; Attr.create "aria-hidden" "true" ] [] ]
           ]
       ; Node.div
           ~attrs:[ Style.focus_stats ]

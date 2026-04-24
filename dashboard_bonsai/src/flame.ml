@@ -98,7 +98,7 @@ let view_mini ~(segments : (kind * int) list) =
       (List.map segments ~f:(fun (kind, pct) ->
          Node.span
            ~attrs:[ Style.flame_item ]
-           [ Node.span ~attrs:[ Style.flame_chip; seg_class kind ] []
+           [ Node.span ~attrs:[ Style.flame_chip; seg_class kind; Attr.create "aria-hidden" "true" ] []
            ; Node.span ~attrs:[ Style.flame_lbl ] [ Node.text (label kind) ]
            ; Node.span
                ~attrs:[ Style.flame_pct ]

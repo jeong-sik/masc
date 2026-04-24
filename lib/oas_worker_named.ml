@@ -300,7 +300,36 @@ let masc_internal_error_to_json = function
         ("original_error", `String original_error);
       ]
 
+(* #9933: classify emitted [masc_oas_error] payloads by kind so
+   dashboards and Grafana alerts can watch the fleet-wide rate per
+   error class (cascade_exhausted vs oas_timeout_budget vs
+   ambiguous_post_commit, etc.) rather than reading the free-form
+   BDI blocker string.  125 [oas_timeout_budget] events accumulated
+   across 9 keepers in 24h without an aggregate signal — this
+   counter is the per-kind surface.
+
+   Emit point is this constructor so all 14 call sites of
+   [sdk_error_of_masc_internal_error] are covered automatically,
+   without changing their signatures or threading [keeper_name]
+   through callers that do not have it readily.  A follow-up PR
+   can add a [keeper] label once every construction site has the
+   name in scope. *)
+let masc_oas_error_total_metric = "masc_oas_error_total"
+
+let kind_of_masc_internal_error = function
+  | Cascade_exhausted _ -> "cascade_exhausted"
+  | Resumable_cli_session _ -> "resumable_cli_session"
+  | No_tool_capable_provider _ -> "no_tool_capable_provider"
+  | Accept_rejected _ -> "accept_rejected"
+  | Admission_queue_timeout _ -> "admission_queue_timeout"
+  | Admission_queue_rejected _ -> "admission_queue_rejected"
+  | Turn_timeout _ -> "turn_timeout"
+  | Oas_timeout_budget _ -> "oas_timeout_budget"
+  | Ambiguous_post_commit _ -> "ambiguous_post_commit"
+
 let sdk_error_of_masc_internal_error err =
+  Prometheus.inc_counter masc_oas_error_total_metric
+    ~labels:[ ("kind", kind_of_masc_internal_error err) ] ();
   Oas.Error.Internal
     (masc_internal_error_prefix ^ Yojson.Safe.to_string (masc_internal_error_to_json err))
 

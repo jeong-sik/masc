@@ -334,6 +334,7 @@
         test_server_base_path_diagnostics
         test_server_startup_takeover
         test_keeper_meta_listing
+        test_keeper_meta_cas_retry
         test_keeper_identity_parse
         test_worker_runtime
         test_capability_registry
@@ -499,6 +500,7 @@
         test_server_base_path_diagnostics
         test_server_startup_takeover
         test_keeper_meta_listing
+        test_keeper_meta_cas_retry
         test_keeper_identity_parse
         test_worker_runtime
         test_capability_registry

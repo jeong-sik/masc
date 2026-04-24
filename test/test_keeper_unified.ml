@@ -4463,6 +4463,23 @@ let test_final_keeper_tool_names_falls_back_to_reported_tool_use () =
     [ "keeper_task_claim"; "keeper_bash" ]
     final_tools
 
+let test_final_keeper_tool_names_accepts_reported_mcp_keeper_tool () =
+  let final_tools =
+    KTD.final_keeper_tool_names
+      ~reported_tool_names:
+        [ "mcp__masc__masc_board_post"; "list_mcp_resources" ]
+      ~observed_tool_names:[]
+      ~allowed_tool_names:[ "keeper_board_post"; "keeper_bash" ]
+  in
+  check (list string) "reported MCP keeper tool preserved"
+    [ "keeper_board_post" ]
+    final_tools;
+  check (option string) "reported execution tool satisfies actionable signal" None
+    (KTD.actionable_tool_contract_violation_reason
+       ~claim_context_allowed:true
+       ~actionable_signal_context:true
+       ~tool_names:final_tools)
+
 (* prioritized_disclosed_tool_names tests removed: function replaced
    by OAS Tool_selector.select in #5429 boundary cleanup. *)
 
@@ -5058,6 +5075,16 @@ let test_should_require_tools_for_initial_turn_matches_first_turn_gate () =
   check bool "no tool-required affordance stays optional" false
     (KAR.should_require_tools_for_initial_turn ~max_turns:3 ~turn_affordances:[ "observe" ])
 
+let test_should_require_tools_for_initial_turn_covers_actionable_affordances () =
+  let require affordance =
+    KAR.should_require_tools_for_initial_turn ~max_turns:2
+      ~turn_affordances:[ affordance ]
+  in
+  check bool "reply requires tool gate" true (require "reply_in_room");
+  check bool "verification requires tool gate" true (require "task_verify");
+  check bool "worktree inspection requires tool gate" true
+    (require "inspect_worktree_delta")
+
 let test_preferred_tool_choice_for_required_turn_claims_first () =
   let choose ?(has_current_task = false) ?(turn_affordances = [ "task_claim" ])
       ?(allowed_tool_names =
@@ -5565,6 +5592,9 @@ let () =
           test_case "final keeper tool names fall back to reported tools"
             `Quick
             test_final_keeper_tool_names_falls_back_to_reported_tool_use;
+          test_case "final keeper tool names accept reported MCP keeper tool"
+            `Quick
+            test_final_keeper_tool_names_accepts_reported_mcp_keeper_tool;
           test_case "tool query strips continuity noise" `Quick
             test_tool_query_text_of_user_message_strips_continuity_noise;
           test_case "tool query keeps counted headers" `Quick
@@ -5872,6 +5902,9 @@ let () =
             test_keeper_allowed_tools_exclude_heartbeat;
           test_case "initial tool requirement mirrors first-turn gate" `Quick
             test_should_require_tools_for_initial_turn_matches_first_turn_gate;
+          test_case "initial tool requirement covers actionable affordances"
+            `Quick
+            test_should_require_tools_for_initial_turn_covers_actionable_affordances;
           test_case "task backlog required turn prefers claim tool choice"
             `Quick test_preferred_tool_choice_for_required_turn_claims_first;
         ] );

@@ -106,6 +106,219 @@ let validate_resolved_keeper_create_json (json : Yojson.Safe.t) : string list =
     errors := "mention_targets is required" :: !errors;
   List.rev !errors
 
+let toml_escape_string value =
+  let buf = Buffer.create (String.length value + 8) in
+  String.iter
+    (function
+      | '\\' -> Buffer.add_string buf "\\\\"
+      | '"' -> Buffer.add_string buf "\\\""
+      | '\n' -> Buffer.add_string buf "\\n"
+      | '\r' -> Buffer.add_string buf "\\r"
+      | '\t' -> Buffer.add_string buf "\\t"
+      | c -> Buffer.add_char buf c)
+    value;
+  Buffer.contents buf
+
+let toml_string value = "\"" ^ toml_escape_string value ^ "\""
+
+let toml_string_array values =
+  values |> List.map toml_string |> String.concat ", " |> Printf.sprintf "[%s]"
+
+let toml_float value =
+  if Float.is_finite value then Ok (Printf.sprintf "%.17g" value)
+  else Error "non-finite float cannot be persisted to keeper TOML"
+
+let required_resolved_string key json =
+  match Safe_ops.json_string_opt key json with
+  | Some value when String.trim value <> "" -> Ok value
+  | _ -> Error (Printf.sprintf "resolved_args.%s is required" key)
+
+let optional_resolved_string key json =
+  match Safe_ops.json_string_opt key json with
+  | Some value when String.trim value <> "" -> Some value
+  | _ -> None
+
+let append_string_field acc key value =
+  (Printf.sprintf "%s = %s" key (toml_string value)) :: acc
+
+let append_optional_string_field acc key json =
+  match optional_resolved_string key json with
+  | Some value -> append_string_field acc key value
+  | None -> acc
+
+let append_bool_field acc key value =
+  (Printf.sprintf "%s = %s" key (if value then "true" else "false")) :: acc
+
+let append_optional_bool_field acc key json =
+  match Safe_ops.json_bool_opt key json with
+  | Some value -> append_bool_field acc key value
+  | None -> acc
+
+let append_int_field acc key value =
+  (Printf.sprintf "%s = %d" key value) :: acc
+
+let append_optional_int_field acc key json =
+  match Safe_ops.json_int_opt key json with
+  | Some value -> append_int_field acc key value
+  | None -> acc
+
+let append_string_list_field acc key values =
+  (Printf.sprintf "%s = %s" key (toml_string_array values)) :: acc
+
+let append_present_string_list_field acc key json =
+  match Safe_ops.json_member_opt key json with
+  | Some (`List _) ->
+      append_string_list_field acc key (Safe_ops.json_string_list key json)
+  | Some _ | None -> acc
+
+let append_tool_access_fields acc json =
+  match Safe_ops.json_member_opt "tool_access" json with
+  | Some (`Assoc _ as tool_access) -> (
+      match Safe_ops.json_string_opt "kind" tool_access with
+      | Some "preset" -> (
+          match Safe_ops.json_string_opt "preset" tool_access with
+          | Some preset ->
+              let acc = append_string_field acc "tool_preset" preset in
+              Ok (append_present_string_list_field acc "tool_also_allow" tool_access)
+          | None -> Error "tool_access.preset is required for durable TOML")
+      | Some "custom" ->
+          Error
+            "tool_access.kind=custom cannot be persisted to keeper TOML yet; use a tool_preset/tool_also_allow policy for persona-backed durable keepers"
+      | Some other ->
+          Error (Printf.sprintf "invalid tool_access.kind for durable TOML: %s" other)
+      | None -> Error "tool_access.kind is required for durable TOML")
+  | Some _ -> Error "tool_access must be an object for durable TOML"
+  | None ->
+      let acc =
+        match Safe_ops.json_string_opt "tool_preset" json with
+        | Some preset -> append_string_field acc "tool_preset" preset
+        | None -> acc
+      in
+      Ok (append_present_string_list_field acc "tool_also_allow" json)
+
+let render_keeper_toml_from_resolved_args (json : Yojson.Safe.t) :
+    (string, string) result =
+  match required_resolved_string "name" json with
+  | Error _ as err -> err
+  | Ok name ->
+      if not (validate_name name) then
+        Error "resolved_args.name is not a valid keeper name"
+      else
+        match required_resolved_string "persona_name" json with
+        | Error _ as err -> err
+        | Ok persona_name ->
+            if not (validate_name persona_name) then
+              Error "resolved_args.persona_name is not a valid persona name"
+            else
+              let fields = [] in
+              let fields = append_string_field fields "name" name in
+              let fields = append_string_field fields "persona_name" persona_name in
+              let fields = append_optional_string_field fields "goal" json in
+              let fields = append_optional_string_field fields "short_goal" json in
+              let fields = append_optional_string_field fields "mid_goal" json in
+              let fields = append_optional_string_field fields "long_goal" json in
+              let fields = append_optional_string_field fields "will" json in
+              let fields = append_optional_string_field fields "needs" json in
+              let fields = append_optional_string_field fields "desires" json in
+              let fields = append_optional_string_field fields "instructions" json in
+              let fields =
+                append_optional_bool_field fields "policy_voice_enabled" json
+              in
+              let fields =
+                append_optional_bool_field fields "autoboot_enabled" json
+              in
+              let fields =
+                append_present_string_list_field fields "mention_targets" json
+              in
+              let fields =
+                append_optional_bool_field fields "proactive_enabled" json
+              in
+              let fields =
+                append_optional_int_field fields "proactive_idle_sec" json
+              in
+              let fields =
+                append_optional_int_field fields "proactive_cooldown_sec" json
+              in
+              let fields = append_present_string_list_field fields "shards" json in
+              let fields =
+                append_present_string_list_field fields "allowed_paths" json
+              in
+              let fields =
+                append_optional_string_field fields "sandbox_profile" json
+              in
+              let fields =
+                append_optional_string_field fields "network_mode" json
+              in
+              let fields =
+                append_optional_string_field fields "shared_memory_scope" json
+              in
+              let fields =
+                append_present_string_list_field fields "active_goal_ids" json
+              in
+              (match append_tool_access_fields fields json with
+              | Error _ as err -> err
+              | Ok fields ->
+                  let fields =
+                    append_present_string_list_field fields "tool_denylist" json
+                  in
+                  let timeout_fields =
+                    match Safe_ops.json_float_opt "per_provider_timeout" json with
+                    | None -> Ok fields
+                    | Some value -> (
+                        match toml_float value with
+                        | Error _ as err -> err
+                        | Ok rendered ->
+                            Ok
+                              ((Printf.sprintf "per_provider_timeout = %s"
+                                  rendered)
+                              :: fields))
+                  in
+                  Result.map
+                    (fun fields ->
+                      String.concat "\n"
+                        ([
+                           "# Generated by masc_keeper_create_from_persona.";
+                           "[keeper]";
+                         ]
+                        @ List.rev fields)
+                      ^ "\n")
+                    timeout_fields)
+
+let persist_keeper_toml_from_resolved_args (json : Yojson.Safe.t) :
+    (Yojson.Safe.t, string) result =
+  match required_resolved_string "name" json with
+  | Error _ as err -> err
+  | Ok name ->
+      if not (validate_name name) then
+        Error "resolved_args.name is not a valid keeper name"
+      else
+        let path =
+          Filename.concat (Config_dir_resolver.keepers_dir ()) (name ^ ".toml")
+        in
+        match Config_dir_resolver.keeper_toml_path_opt name with
+        | Some existing_path ->
+            Ok
+              (`Assoc
+                [
+                  ("path", `String existing_path);
+                  ("created", `Bool false);
+                  ("reason", `String "already_exists");
+                ])
+        | None -> (
+            match render_keeper_toml_from_resolved_args json with
+            | Error _ as err -> err
+            | Ok content -> (
+                Fs_compat.mkdir_p (Filename.dirname path);
+                match Fs_compat.save_file_atomic path content with
+                | Error msg -> Error msg
+                | Ok () ->
+                    Ok
+                      (`Assoc
+                        [
+                          ("path", `String path);
+                          ("created", `Bool true);
+                        ])))
+
 let resolved_keeper_args_from_persona args :
     ((persona_summary * Yojson.Safe.t), string) result =
   let persona_name = get_string args "persona_name" "" |> String.trim in

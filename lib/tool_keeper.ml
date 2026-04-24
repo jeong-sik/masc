@@ -356,10 +356,17 @@ let handle_keeper_create_from_persona ctx args : tool_result =
         in
         (true, Yojson.Safe.to_string json)
       else
+        match Keeper_exec_persona.render_keeper_toml_from_resolved_args resolved_args with
+        | Error e -> (false, "❌ " ^ e)
+        | Ok _ ->
         let (ok, body) = with_keeper_startup_gate (fun () -> execute_keeper_up ctx resolved_args) in
         if not ok then
           (false, body)
         else
+          match Keeper_exec_persona.persist_keeper_toml_from_resolved_args resolved_args with
+          | Error e ->
+              (false, "❌ keeper created but durable config write failed: " ^ e)
+          | Ok durable_config ->
           let created_json =
             try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
           in
@@ -368,6 +375,7 @@ let handle_keeper_create_from_persona ctx args : tool_result =
               [
                 ("persona", Keeper_exec_persona.persona_summary_to_json persona);
                 ("created", `Bool true);
+                ("durable_config", durable_config);
                 ("result", annotate_keeper_json ~runtime_class:"keeper" created_json);
                 ("resolved_args", resolved_args);
               ]

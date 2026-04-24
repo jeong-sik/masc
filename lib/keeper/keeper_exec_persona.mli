@@ -11,5 +11,11 @@ val find_jsonl_row_by_action_id :
 
 val validate_resolved_keeper_create_json : Yojson.Safe.t -> string list
 
+val render_keeper_toml_from_resolved_args :
+  Yojson.Safe.t -> (string, string) result
+
+val persist_keeper_toml_from_resolved_args :
+  Yojson.Safe.t -> (Yojson.Safe.t, string) result
+
 val resolved_keeper_args_from_persona :
   Yojson.Safe.t -> (persona_summary * Yojson.Safe.t, string) result

@@ -28,6 +28,7 @@ val room_secret_file : string -> string
 val auth_config_file : string -> string
 val credential_file : string -> string -> string
 val internal_keeper_token_hash_file : string -> string
+val internal_keeper_token_env_key : string
 
 (** {1 Auth Config} *)
 

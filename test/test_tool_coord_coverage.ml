@@ -310,6 +310,30 @@ let () = test "dispatch_status_suppresses_lifecycle_guidance_without_credential"
   | None -> failwith "dispatch returned None"
 )
 
+let () = test "dispatch_status_treats_keeper_internal_auth_as_credential" (fun () ->
+  Fun.protect ~finally:Fs_compat.clear_fs @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let ctx = { (make_test_ctx ()) with agent_name = "keeper-sangsu-agent" } in
+  let _ = Coord.init ctx.config ~agent_name:(Some "keeper-sangsu-agent") in
+  ignore (Auth.enable_auth ctx.config.base_path ~require_token:true ~agent_name:"admin");
+  ignore (Auth.ensure_internal_keeper_token ctx.config.base_path);
+  ignore (Coord.add_task ctx.config ~title:"Keeper work" ~priority:3 ~description:"");
+  Planning_eio.set_current_task ctx.config ~task_id:"task-001";
+  match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
+  | Some (success, result) ->
+      assert success;
+      assert (
+        str_contains result
+          "🔐 Credential: required=yes | available=yes | candidates=keeper-sangsu-agent");
+      assert (
+        not
+          (str_contains result
+             "Lifecycle actions are credential-blocked for keeper-sangsu-agent"));
+      assert (str_contains result "💡 Suggested next:")
+  | None -> failwith "dispatch returned None"
+)
+
 let () = test "dispatch_status_no_owned_prefers_claim_next_over_transition" (fun () ->
   Fun.protect ~finally:Fs_compat.clear_fs @@ fun () ->
   Eio_main.run @@ fun env ->

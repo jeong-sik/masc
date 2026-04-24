@@ -1696,19 +1696,20 @@ let test_sync_bootable_keeper_credentials_mints_keeper_alias_token () =
       in
       Server_runtime_bootstrap.bootstrap_server_state_blocking state;
       Server_runtime_bootstrap.sync_bootable_keeper_credentials state;
-      let token_path =
-        Filename.concat (Auth.auth_dir dir) "masc-improver.token"
+      let raw_token =
+        match Sys.getenv_opt "MASC_INTERNAL_MCP_TOKEN" with
+        | Some raw when String.trim raw <> "" -> String.trim raw
+        | _ -> Alcotest.fail "missing internal keeper token after startup sync"
       in
-      let raw_token = String.trim (read_file token_path) in
       let credential =
-        match Auth.load_credential dir "masc-improver" with
+        match Auth.load_credential dir "keeper-masc-improver-agent" with
         | Some cred -> cred
-        | None -> Alcotest.fail "missing masc-improver credential after startup sync"
+        | None ->
+            Alcotest.fail
+              "missing keeper-masc-improver-agent credential after startup sync"
       in
-      Alcotest.(check bool) "keeper token file created" true
-        (Sys.file_exists token_path);
-      Alcotest.(check int) "keeper token file private" 0o600
-        ((Unix.stat token_path).Unix.st_perm land 0o777);
+      Alcotest.(check bool) "internal keeper token hash persisted" true
+        (Sys.file_exists (Auth.internal_keeper_token_hash_file dir));
       Alcotest.(check string) "raw token hashes to keeper credential"
         credential.token (Auth.sha256_hash raw_token);
       match
@@ -1716,10 +1717,10 @@ let test_sync_bootable_keeper_credentials_mints_keeper_alias_token () =
           ~token:raw_token
       with
       | Ok alias_cred ->
-          Alcotest.(check string) "keeper alias resolves stored credential"
-            "masc-improver" alias_cred.agent_name
+          Alcotest.(check string) "keeper credential resolves exact agent"
+            "keeper-masc-improver-agent" alias_cred.agent_name
       | Error err ->
-          Alcotest.failf "bootable keeper token should verify via alias: %s"
+          Alcotest.failf "bootable keeper token should verify exactly: %s"
             (Types.masc_error_to_string err))
 
 let test_main_eio_rejects_same_base_path_on_second_server () =

@@ -1635,10 +1635,19 @@ let run_turn
           "context overflow guard: %d tools > max %d, truncating"
           (List.length all_allowed)
           max_tools;
+        let required_turn_essential_tool_names =
+          if tool_gate_requested
+             && (has_task_claim_affordance turn_affordances
+                 || has_task_audit_affordance turn_affordances)
+          then [ "keeper_task_claim"; "keeper_tasks_list" ]
+          else []
+        in
+        let essential_names =
+          Keeper_types.dedupe_keep_order
+            (visible_always_include_tools @ required_turn_essential_tool_names)
+        in
         let essential =
-          List.filter
-            (fun name -> List.mem name visible_always_include_tools)
-            all_allowed
+          List.filter (fun name -> List.mem name essential_names) all_allowed
         in
         let non_essential =
           List.filter
@@ -2407,15 +2416,20 @@ let run_turn
             meta.name (Printexc.to_string exn)
     in
     let deterministic_required_tool_fallback ~reason ~trigger =
-      let requested name = List.mem name !requested_tool_names_ref in
+      let available name =
+        List.mem name !requested_tool_names_ref
+        || (Keeper_tool_policy.StringSet.mem name universe_set
+            && Keeper_tool_policy.StringSet.mem name allowed_exec_set
+            && Tool_portal.filter_visible_tool_names portal_ctx [ name ] <> [])
+      in
       let fallback_tool =
         if (not (keeper_has_owned_active_task ()))
            && has_task_claim_affordance turn_affordances
-           && requested "keeper_task_claim"
+           && available "keeper_task_claim"
         then Some ("keeper_task_claim", `Assoc [])
         else if (has_task_claim_affordance turn_affordances
                  || has_task_audit_affordance turn_affordances)
-                && requested "keeper_tasks_list"
+                && available "keeper_tasks_list"
         then
           Some
             ( "keeper_tasks_list",
@@ -2850,11 +2864,14 @@ let run_turn
                  deterministic_required_tool_fallback ~reason
                    ~trigger:"no-tool response"
                with
-               | Some fallback_text -> Ok fallback_text
+               | Some fallback_text ->
+                   Ok
+                     (`Deterministic_fallback
+                       (reason, "no-tool response", fallback_text))
                | None -> Error (contract_violation_error reason))
            | Ok (), None ->
                receipt_tool_contract_result_ref := "satisfied";
-               Ok text
+               Ok (`Provider_text text)
            | Error reason, _ ->
                receipt_tool_contract_result_ref := "violated";
                let contract_str =
@@ -2873,7 +2890,10 @@ let run_turn
                  deterministic_required_tool_fallback ~reason
                    ~trigger:"no-tool response"
                with
-               | Some fallback_text -> Ok fallback_text
+               | Some fallback_text ->
+                   Ok
+                     (`Deterministic_fallback
+                       (reason, "no-tool response", fallback_text))
                | None -> Error (contract_violation_error reason))
          in
          let finalize_response_text raw_response_text =
@@ -3217,7 +3237,11 @@ let run_turn
          in
          match text_result with
          | Error e -> Error e
-         | Ok text -> (
+         | Ok (`Deterministic_fallback (reason, trigger, fallback_text)) ->
+             Ok
+               (deterministic_fallback_run_result ~reason ~trigger
+                  fallback_text)
+         | Ok (`Provider_text text) -> (
              match
                Keeper_tool_disclosure.normalize_response_text
                  ~text ~tool_names:actual_keeper_tool_names ()

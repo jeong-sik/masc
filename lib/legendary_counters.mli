@@ -20,6 +20,18 @@ val incr_auto_bg_observed : promoted_candidate:bool -> unit
     When [promoted_candidate] is [true] the elapsed duration would
     have tripped [MASC_BLOCKING_BUDGET_MS]. *)
 
+val incr_gh_exit_class : Gh_exit_class.t -> unit
+(** Record one docker-sandbox gh invocation under its exit class, as
+    classified by {!Gh_exit_class.classify}.  Callers increment this
+    from the docker shell emission sites in [Keeper_shell_docker] so
+    that the dashboard and [/api/v1/legendary_bash/shadow_counters]
+    endpoint can visualise the distribution of gh outcomes
+    (Ok_0 vs Auth_failed vs Network vs …) without parsing stderr
+    blobs in the UI layer.
+
+    This is the first production consumer of {!Gh_exit_class};
+    previous callers only relied on raw exit codes. *)
+
 val incr_too_complex_by_tag : string -> unit
 (** Record one shadow rejection attributable to a subset-excluded
     bash construct.  [tag] is the [parse_tag] string emitted by
@@ -65,6 +77,16 @@ type snapshot = {
   too_complex_parse_error : int;
   too_complex_parse_aborted : int;
   too_complex_other : int;
+  (* Distribution of docker-sandbox gh invocations by exit class, as
+     classified by {!Gh_exit_class.classify}.  Callers increment these
+     from the JSON emission sites in [Keeper_shell_docker]; non-gh
+     commands in the same sandbox do not touch these counters. *)
+  gh_exit_ok_0 : int;
+  gh_exit_policy_blocked : int;
+  gh_exit_type_mismatch : int;
+  gh_exit_auth_failed : int;
+  gh_exit_network : int;
+  gh_exit_unknown : int;
 }
 
 val snapshot : unit -> snapshot

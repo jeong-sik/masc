@@ -18,6 +18,13 @@ let too_complex_control_flow = Atomic.make 0
 let too_complex_function_def = Atomic.make 0
 let too_complex_glob_brace = Atomic.make 0
 let too_complex_background = Atomic.make 0
+
+let gh_exit_ok_0 = Atomic.make 0
+let gh_exit_policy_blocked = Atomic.make 0
+let gh_exit_type_mismatch = Atomic.make 0
+let gh_exit_auth_failed = Atomic.make 0
+let gh_exit_network = Atomic.make 0
+let gh_exit_unknown = Atomic.make 0
 let too_complex_parse_error = Atomic.make 0
 let too_complex_parse_aborted = Atomic.make 0
 let too_complex_other = Atomic.make 0
@@ -35,6 +42,15 @@ let incr_gate_diff (diff : Gate_diff_types.gate_diff) =
 let incr_auto_bg_observed ~promoted_candidate =
   incr auto_bg_observed;
   if promoted_candidate then incr auto_bg_would_have_promoted
+
+let incr_gh_exit_class (c : Gh_exit_class.t) =
+  match c with
+  | Gh_exit_class.Ok_0 -> incr gh_exit_ok_0
+  | Gh_exit_class.Policy_blocked -> incr gh_exit_policy_blocked
+  | Gh_exit_class.Type_mismatch -> incr gh_exit_type_mismatch
+  | Gh_exit_class.Auth_failed -> incr gh_exit_auth_failed
+  | Gh_exit_class.Network -> incr gh_exit_network
+  | Gh_exit_class.Unknown -> incr gh_exit_unknown
 
 (* Strip the [too_complex:] / [parse_aborted:] prefix if present, so
    callers can pass either the full [shadow_parse_outcome] tag or a
@@ -90,7 +106,13 @@ let reset () =
   Atomic.set too_complex_background 0;
   Atomic.set too_complex_parse_error 0;
   Atomic.set too_complex_parse_aborted 0;
-  Atomic.set too_complex_other 0
+  Atomic.set too_complex_other 0;
+  Atomic.set gh_exit_ok_0 0;
+  Atomic.set gh_exit_policy_blocked 0;
+  Atomic.set gh_exit_type_mismatch 0;
+  Atomic.set gh_exit_auth_failed 0;
+  Atomic.set gh_exit_network 0;
+  Atomic.set gh_exit_unknown 0
 
 type snapshot = {
   gate_diff_total : int;
@@ -115,6 +137,12 @@ type snapshot = {
   too_complex_parse_error : int;
   too_complex_parse_aborted : int;
   too_complex_other : int;
+  gh_exit_ok_0 : int;
+  gh_exit_policy_blocked : int;
+  gh_exit_type_mismatch : int;
+  gh_exit_auth_failed : int;
+  gh_exit_network : int;
+  gh_exit_unknown : int;
 }
 
 let snapshot () =
@@ -144,6 +172,12 @@ let snapshot () =
     too_complex_parse_error = Atomic.get too_complex_parse_error;
     too_complex_parse_aborted = Atomic.get too_complex_parse_aborted;
     too_complex_other = Atomic.get too_complex_other;
+    gh_exit_ok_0 = Atomic.get gh_exit_ok_0;
+    gh_exit_policy_blocked = Atomic.get gh_exit_policy_blocked;
+    gh_exit_type_mismatch = Atomic.get gh_exit_type_mismatch;
+    gh_exit_auth_failed = Atomic.get gh_exit_auth_failed;
+    gh_exit_network = Atomic.get gh_exit_network;
+    gh_exit_unknown = Atomic.get gh_exit_unknown;
   }
 
 let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
@@ -173,6 +207,12 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
     ("too_complex_parse_error", `Int s.too_complex_parse_error);
     ("too_complex_parse_aborted", `Int s.too_complex_parse_aborted);
     ("too_complex_other", `Int s.too_complex_other);
+    ("gh_exit_ok_0", `Int s.gh_exit_ok_0);
+    ("gh_exit_policy_blocked", `Int s.gh_exit_policy_blocked);
+    ("gh_exit_type_mismatch", `Int s.gh_exit_type_mismatch);
+    ("gh_exit_auth_failed", `Int s.gh_exit_auth_failed);
+    ("gh_exit_network", `Int s.gh_exit_network);
+    ("gh_exit_unknown", `Int s.gh_exit_unknown);
   ]
 
 let safe_ratio ~num ~den =

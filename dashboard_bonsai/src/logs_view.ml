@@ -180,7 +180,7 @@ stylesheet
 
   .heartbeat_bar {
     min-width: 2px;
-    background: #3a5a48;
+    background: var(--accent-mold);
     border-radius: 1px;
     opacity: 0.82;
   }
@@ -528,8 +528,8 @@ stylesheet
     text-shadow: 0 0 14px rgba(138, 106, 40, 0.25);
   }
 
-  .row_debug { border-left-color: #4a3a32; }
-  .row_info  { border-left-color: #3a5a48; }
+  .row_debug { border-left-color: var(--status-idle); }
+  .row_info  { border-left-color: var(--accent-mold); }
 
   .row:hover {
     background: linear-gradient(90deg, rgba(138, 106, 40, 0.08), transparent 70%);
@@ -545,7 +545,7 @@ stylesheet
   .row_error:hover {
     background: linear-gradient(90deg, rgba(232, 80, 80, 0.18) 0%, transparent 65%);
     box-shadow: inset 1px 0 0 0 rgba(232, 80, 80, 0.55);
-    border-left-color: #c94a3a;
+    border-left-color: var(--accent-viscera);
   }
 
   .row_warn {
@@ -556,7 +556,7 @@ stylesheet
   .row_warn:hover {
     background: linear-gradient(90deg, rgba(160, 106, 26, 0.15) 0%, transparent 65%);
     box-shadow: inset 1px 0 0 0 rgba(160, 106, 26, 0.5);
-    border-left-color: #c4461a;
+    border-left-color: var(--accent-ember);
   }
 
   .ts {
@@ -678,7 +678,7 @@ stylesheet
     width: 56px;
     height: 56px;
     border-radius: 50%;
-    background: radial-gradient(circle at 32% 28%, #c94a3a 0%, var(--accent-blood) 40%, #5a0a0a 80%, #2a0404 100%);
+    background: radial-gradient(circle at 32% 28%, var(--accent-viscera) 0%, var(--accent-blood) 40%, #5a0a0a 80%, #2a0404 100%);
     border: 2px solid var(--accent-brass);
     box-shadow:
       inset 0 0 0 1px rgba(232, 216, 184, 0.18),

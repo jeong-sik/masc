@@ -99,6 +99,19 @@ val metric_mcp_tool_schema_tokens_approx : string
 
 val metric_mcp_requests : string
 val metric_llm_inference_duration : string
+
+val metric_llm_prompt_tok_per_sec : string
+(** [masc_llm_prompt_tok_per_sec] — prefill throughput histogram.
+    Observed in [Keeper_hooks_oas] after_turn when [response.telemetry.timings]
+    is [Some] and [prompt_per_second] is positive. Labels: [model], [provider_kind]. *)
+
+val metric_llm_decode_tok_per_sec : string
+(** [masc_llm_decode_tok_per_sec] — decode throughput histogram.
+    Observed alongside {!metric_llm_prompt_tok_per_sec} from the same turn
+    when [predicted_per_second] is positive. Silent for providers that do
+    not emit timings; inspect [masc_after_turn_telemetry_missing_total] to
+    tell absence apart from zero. *)
+
 val metric_after_turn_hook : string
 val metric_after_turn_telemetry_missing : string
 val metric_after_turn_telemetry_zero_latency : string

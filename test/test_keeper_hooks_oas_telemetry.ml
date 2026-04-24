@@ -117,6 +117,173 @@ let test_record_keeper_tool_duration_metric_tracks_labels () =
   check (float 0.0001) "sum delta" 0.25 (sum_after -. sum_before);
   check (float 0.0001) "count delta" 1.0 (count_after -. count_before)
 
+let make_telemetry
+    ?(prompt_per_second : float option = None)
+    ?(predicted_per_second : float option = None)
+    ?(request_latency_ms = 0)
+    ?(provider_kind : Llm_provider.Provider_kind.t option = None)
+    ?(include_timings = true)
+    () : Agent_sdk.Types.inference_telemetry =
+  let timings : Agent_sdk.Types.inference_timings option =
+    if include_timings then
+      Some {
+        prompt_n = None;
+        prompt_ms = None;
+        prompt_per_second;
+        predicted_n = None;
+        predicted_ms = None;
+        predicted_per_second;
+        cache_n = None;
+      }
+    else None
+  in
+  {
+    system_fingerprint = None;
+    timings;
+    reasoning_tokens = None;
+    request_latency_ms;
+    peak_memory_gb = None;
+    provider_kind;
+    reasoning_effort = None;
+    canonical_model_id = None;
+    effective_context_window = None;
+    provider_internal_action_count = None;
+  }
+
+let histogram_snapshot metric ~labels =
+  let sum =
+    Masc_mcp.Prometheus.metric_value_or_zero metric ~labels ()
+  in
+  let count =
+    Masc_mcp.Prometheus.metric_value_or_zero (metric ^ "_count") ~labels ()
+  in
+  sum, count
+
+let test_record_llm_tok_s_metrics_both_histograms_observe () =
+  let telemetry =
+    make_telemetry
+      ~prompt_per_second:(Some 123.5)
+      ~predicted_per_second:(Some 87.25)
+      ~request_latency_ms:42
+      ~provider_kind:(Some Llm_provider.Provider_kind.Ollama)
+      () in
+  let labels =
+    [ "model", "ollama:qwen3.6"
+    ; "provider", "ollama"
+    ; "provider_kind", "ollama"
+    ]
+  in
+  let prompt_sum_before, prompt_count_before =
+    histogram_snapshot Masc_mcp.Prometheus.metric_llm_prompt_tok_per_sec
+      ~labels in
+  let decode_sum_before, decode_count_before =
+    histogram_snapshot Masc_mcp.Prometheus.metric_llm_decode_tok_per_sec
+      ~labels in
+  Hooks.record_llm_tok_s_metrics ~model:"ollama:qwen3.6"
+    ~telemetry:(Some telemetry);
+  let prompt_sum_after, prompt_count_after =
+    histogram_snapshot Masc_mcp.Prometheus.metric_llm_prompt_tok_per_sec
+      ~labels in
+  let decode_sum_after, decode_count_after =
+    histogram_snapshot Masc_mcp.Prometheus.metric_llm_decode_tok_per_sec
+      ~labels in
+  check (float 0.001) "prompt sum delta" 123.5
+    (prompt_sum_after -. prompt_sum_before);
+  check (float 0.001) "prompt count delta" 1.0
+    (prompt_count_after -. prompt_count_before);
+  check (float 0.001) "decode sum delta" 87.25
+    (decode_sum_after -. decode_sum_before);
+  check (float 0.001) "decode count delta" 1.0
+    (decode_count_after -. decode_count_before)
+
+let test_record_llm_tok_s_metrics_timings_none_is_noop () =
+  (* Anthropic/Gemini path: backends populate request_latency_ms but leave
+     timings = None.  The helper must not touch the tok/s histograms in
+     that case — otherwise the histogram would be polluted with zeros. *)
+  let telemetry =
+    make_telemetry ~include_timings:false ~request_latency_ms:250
+      ~provider_kind:(Some Llm_provider.Provider_kind.Anthropic) ()
+  in
+  let labels =
+    [ "model", "claude:claude-haiku-4-5-20251001"
+    ; "provider", "claude"
+    ; "provider_kind", "anthropic"
+    ]
+  in
+  let _, prompt_count_before =
+    histogram_snapshot Masc_mcp.Prometheus.metric_llm_prompt_tok_per_sec
+      ~labels in
+  let _, decode_count_before =
+    histogram_snapshot Masc_mcp.Prometheus.metric_llm_decode_tok_per_sec
+      ~labels in
+  Hooks.record_llm_tok_s_metrics
+    ~model:"claude:claude-haiku-4-5-20251001"
+    ~telemetry:(Some telemetry);
+  let _, prompt_count_after =
+    histogram_snapshot Masc_mcp.Prometheus.metric_llm_prompt_tok_per_sec
+      ~labels in
+  let _, decode_count_after =
+    histogram_snapshot Masc_mcp.Prometheus.metric_llm_decode_tok_per_sec
+      ~labels in
+  check (float 0.001) "prompt count unchanged" 0.0
+    (prompt_count_after -. prompt_count_before);
+  check (float 0.001) "decode count unchanged" 0.0
+    (decode_count_after -. decode_count_before)
+
+let test_record_llm_tok_s_metrics_zero_value_is_skipped () =
+  (* Guard: a backend that reports prompt_per_second = Some 0.0 (e.g. a
+     very short prompt processed in sub-millisecond time that rounds to
+     zero) should not observe 0 into the histogram, which would skew the
+     p50/p95 buckets. *)
+  let telemetry =
+    make_telemetry
+      ~prompt_per_second:(Some 0.0)
+      ~predicted_per_second:(Some 55.0)
+      ~provider_kind:(Some Llm_provider.Provider_kind.OpenAI_compat) ()
+  in
+  let labels =
+    [ "model", "openai:gpt-5.4"
+    ; "provider", "unknown"
+    ; "provider_kind", "openai_compat"
+    ]
+  in
+  let _, prompt_count_before =
+    histogram_snapshot Masc_mcp.Prometheus.metric_llm_prompt_tok_per_sec
+      ~labels in
+  let _, decode_count_before =
+    histogram_snapshot Masc_mcp.Prometheus.metric_llm_decode_tok_per_sec
+      ~labels in
+  Hooks.record_llm_tok_s_metrics ~model:"openai:gpt-5.4"
+    ~telemetry:(Some telemetry);
+  let _, prompt_count_after =
+    histogram_snapshot Masc_mcp.Prometheus.metric_llm_prompt_tok_per_sec
+      ~labels in
+  let _, decode_count_after =
+    histogram_snapshot Masc_mcp.Prometheus.metric_llm_decode_tok_per_sec
+      ~labels in
+  check (float 0.001) "prompt zero skipped" 0.0
+    (prompt_count_after -. prompt_count_before);
+  check (float 0.001) "decode positive observed" 1.0
+    (decode_count_after -. decode_count_before)
+
+let test_record_llm_tok_s_metrics_none_telemetry_is_noop () =
+  (* Belt and braces: explicitly None telemetry must not raise or emit. *)
+  let labels =
+    [ "model", "unknown:nothing"
+    ; "provider", "unknown"
+    ; "provider_kind", "unknown"
+    ]
+  in
+  let _, prompt_count_before =
+    histogram_snapshot Masc_mcp.Prometheus.metric_llm_prompt_tok_per_sec
+      ~labels in
+  Hooks.record_llm_tok_s_metrics ~model:"unknown:nothing" ~telemetry:None;
+  let _, prompt_count_after =
+    histogram_snapshot Masc_mcp.Prometheus.metric_llm_prompt_tok_per_sec
+      ~labels in
+  check (float 0.001) "prompt count unchanged" 0.0
+    (prompt_count_after -. prompt_count_before)
+
 let () =
   run "keeper_hooks_oas/telemetry"
     [ ( "costs_jsonl",
@@ -127,5 +294,15 @@ let () =
             test_tool_execution_summary_derives_provider_and_outcome
         ; test_case "keeper tool duration metric tracks labels" `Quick
             test_record_keeper_tool_duration_metric_tracks_labels
+        ] )
+    ; ( "llm_tok_s_metrics",
+        [ test_case "both histograms observe when timings present" `Quick
+            test_record_llm_tok_s_metrics_both_histograms_observe
+        ; test_case "timings=None is no-op (Anthropic/Gemini path)" `Quick
+            test_record_llm_tok_s_metrics_timings_none_is_noop
+        ; test_case "Some 0.0 prompt rate is skipped (no bucket poisoning)" `Quick
+            test_record_llm_tok_s_metrics_zero_value_is_skipped
+        ; test_case "telemetry=None is a safe no-op" `Quick
+            test_record_llm_tok_s_metrics_none_telemetry_is_noop
         ] )
     ]

@@ -474,9 +474,7 @@ let transport_health_cache_diagnostics () =
       | _ -> [])
   | _ -> []
 
-let dashboard_transport_health_http_json ~state =
-  let live_json =
-    Transport_metrics.transport_health_json ~config:state.Mcp_server.room_config
-  in
-  extend_projection_diagnostics live_json
-    (("source", `String "live_metrics") :: transport_health_cache_diagnostics ())
+let dashboard_transport_health_http_json ~state:_ =
+  let json = cached_surface_json _transport_health_cache in
+  extend_projection_diagnostics json
+    (("source", `String "cached_surface") :: transport_health_cache_diagnostics ())

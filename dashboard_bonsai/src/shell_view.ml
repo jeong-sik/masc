@@ -633,6 +633,13 @@ stylesheet
     .event_body code { border-width: 2px; border-color: var(--text-bright); }
     .focus { border-width: 2px; border-color: var(--text-bright); }
   }
+
+  @media (forced-colors: active) {
+    .vial > span { background: Highlight; box-shadow: none; }
+    .event_ok { border-color: Highlight; }
+    .event_bad { border-color: MarkText; box-shadow: none; }
+    .nav_link.is_active { border-color: Highlight; }
+  }
 |}]
 
 type tone =

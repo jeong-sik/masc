@@ -359,6 +359,12 @@ stylesheet
     .metric_v_bad { color: var(--accent-blood); font-weight: 700; }
     .filter_input { border-width: 2px; border-color: var(--text-bright); }
   }
+
+  @media (forced-colors: active) {
+    .metric_v_bad { color: MarkText; }
+    .metric_v_warn { color: Mark; }
+    .row_selected { background: Highlight; color: HighlightText; }
+  }
 |}]
 
 let normalize_lookup_key value = String.lowercase (String.strip value)

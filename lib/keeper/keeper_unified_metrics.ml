@@ -106,15 +106,6 @@ let work_kind_of_turn_mode = function
   | Noop -> "noop"
   | Text_response | Skip_text -> "text_turn"
 
-(** Observation/claim-context tools do not constitute productive work.
-    A cycle using only these tools (or none) is a "noop" and triggers
-    exponential cooldown backoff to prevent token waste.  The classification
-    is shared with required-tool contract validation so receipts and liveness
-    metrics agree on what counts as progress. *)
-let observation_only_tool_strings =
-  Keeper_tool_disclosure.passive_status_tool_names
-  @ Keeper_tool_disclosure.claim_context_tool_names
-
 let is_observation_only_tool_name name =
   not (Keeper_tool_disclosure.is_execution_progress_tool_name name)
 

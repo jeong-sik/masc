@@ -174,31 +174,6 @@ let canonical_tool_name name =
   | canonical :: _ -> canonical
   | [] -> name
 
-(** Tools that report state without changing it. A turn whose tool calls
-    are entirely within this set on an actionable signal is rejected by
-    [actionable_tool_contract_violation_reason]; the same list is rendered
-    into the keeper prompt (see [Keeper_prompt]) so the model sees the
-    same definition the contract enforces. *)
-let passive_status_tool_names : string list =
-  Tool_name.
-    [
-      Masc Status;
-      Masc Plan_get;
-      Masc Tasks;
-      Keeper Stay_silent;
-      Keeper Context_status;
-      Keeper Time_now;
-      Keeper Board_list;
-      Keeper Board_get;
-      Keeper Board_search;
-      Keeper Board_stats;
-      Keeper Tasks_list;
-      Keeper Tasks_audit;
-      Keeper Tool_search;
-      Keeper Tools_list;
-    ]
-  |> List.map Tool_name.to_string
-
 let claim_context_tool_names : string list =
   Tool_name.
     [ Masc Claim_next; Masc Claim_task; Keeper Task_claim ]
@@ -218,41 +193,30 @@ let completion_tool_names : string list =
     ]
   |> List.map Tool_name.to_string
 
-let classify_tool_progress name =
-  let name = canonical_tool_name name in
-  let canonical_name =
-    match Tool_name.of_string name with
-    | Some tool -> Tool_name.to_string tool
-    | None -> name
-  in
-  if List.mem canonical_name passive_status_tool_names
-  then Passive_status
-  else if List.mem canonical_name claim_context_tool_names
-  then Claim_context
-  else if List.mem canonical_name completion_tool_names
-  then Completion
-  else Execution
-
-let is_passive_status_tool_name name =
-  match classify_tool_progress name with
-  | Passive_status -> true
-  | Claim_context | Execution | Completion -> false
-
 let is_claim_tool_name name =
+  let name = canonical_tool_name name in
   match Tool_name.of_string name with
   | Some (Keeper Task_claim) | Some (Masc Claim_next) | Some (Masc Claim_task) ->
     true
   | _ -> false
 
 let is_claim_context_tool_name name =
-  match classify_tool_progress name with
-  | Passive_status | Claim_context -> true
-  | Execution | Completion -> false
+  let name = canonical_tool_name name in
+  let canonical_name =
+    match Tool_name.of_string name with
+    | Some tool -> Tool_name.to_string tool
+    | None -> name
+  in
+  List.mem canonical_name claim_context_tool_names
 
-let is_execution_progress_tool_name name =
-  match classify_tool_progress name with
-  | Execution | Completion -> true
-  | Passive_status | Claim_context -> false
+let is_completion_tool_name name =
+  let name = canonical_tool_name name in
+  let canonical_name =
+    match Tool_name.of_string name with
+    | Some tool -> Tool_name.to_string tool
+    | None -> name
+  in
+  List.mem canonical_name completion_tool_names
 
 let tool_name_can_satisfy_required_contract name =
   let name = canonical_tool_name name in
@@ -283,6 +247,26 @@ let required_tool_satisfaction
       (Printf.sprintf
          "tool '%s' is read-only/passive and cannot satisfy a required-tool contract"
          tool_name)
+
+let classify_tool_progress name =
+  let name = canonical_tool_name name in
+  if is_completion_tool_name name
+  then Completion
+  else if is_claim_context_tool_name name
+  then Claim_context
+  else if tool_name_can_satisfy_required_contract name
+  then Execution
+  else Passive_status
+
+let is_passive_status_tool_name name =
+  match classify_tool_progress name with
+  | Passive_status -> true
+  | Claim_context | Execution | Completion -> false
+
+let is_execution_progress_tool_name name =
+  match classify_tool_progress name with
+  | Execution | Completion -> true
+  | Passive_status | Claim_context -> false
 
 let actionable_tool_contract_violation_reason
       ~(claim_context_allowed : bool)

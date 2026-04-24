@@ -105,8 +105,12 @@ let bytes_cache : (string * Bytes.t) Atomic.t =
 
 let bytes_of_shared_text text =
   let cached_str, cached_bytes = Atomic.get bytes_cache in
-  if cached_str == text then cached_bytes
+  if cached_str == text then begin
+    Transport_metrics.inc_ws_bytes_cache_hit ();
+    cached_bytes
+  end
   else begin
+    Transport_metrics.inc_ws_bytes_cache_miss ();
     let bytes = Bytes.of_string text in
     Atomic.set bytes_cache (text, bytes);
     bytes

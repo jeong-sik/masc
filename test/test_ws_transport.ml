@@ -195,6 +195,34 @@ let test_bytes_of_shared_text_invalidates_on_new_ref () =
   Alcotest.(check string) "content still correct for B"
     b (Bytes.to_string bb)
 
+(* Observability: the Prometheus counters must account exactly for the
+   traffic the cache absorbs — hits for reuse, misses for fresh
+   allocations.  Delta-check against shared module-level state so other
+   tests running before us do not poison the expected values. *)
+let read_counter name = Masc_mcp.Prometheus.metric_value_or_zero name ()
+
+let test_bytes_cache_counters () =
+  let hits_name = Masc_mcp.Prometheus.metric_ws_bytes_cache_hits in
+  let misses_name = Masc_mcp.Prometheus.metric_ws_bytes_cache_misses in
+  let hits0 = read_counter hits_name in
+  let misses0 = read_counter misses_name in
+  let text = String.make 16 'z' in
+  let _ = Ws.bytes_of_shared_text text in   (* miss: first time *)
+  let _ = Ws.bytes_of_shared_text text in   (* hit *)
+  let _ = Ws.bytes_of_shared_text text in   (* hit *)
+  Alcotest.(check (float 0.001)) "two hits observed"
+    2.0 (read_counter hits_name -. hits0);
+  Alcotest.(check (float 0.001)) "one miss observed"
+    1.0 (read_counter misses_name -. misses0);
+  (* A fresh allocation with the same content must register as another
+     miss — confirms the key is physical, not structural, at the counter
+     level too. *)
+  let text' = String.concat "" [String.make 8 'z'; String.make 8 'z'] in
+  assert (not (text == text'));
+  let _ = Ws.bytes_of_shared_text text' in
+  Alcotest.(check (float 0.001)) "fresh allocation forces another miss"
+    2.0 (read_counter misses_name -. misses0)
+
 (* ====== External Subscriber Broadcast (WS delivery path) ====== *)
 
 let test_ws_external_subscriber_receives_broadcast () =
@@ -310,6 +338,8 @@ let () =
         test_bytes_of_shared_text_content_matches;
       Alcotest.test_case "distinct refs force re-allocation" `Quick
         test_bytes_of_shared_text_invalidates_on_new_ref;
+      Alcotest.test_case "hit/miss counters track reuse" `Quick
+        test_bytes_cache_counters;
     ]);
     ("external_subscriber", [
       Alcotest.test_case "single subscriber receives broadcast" `Quick

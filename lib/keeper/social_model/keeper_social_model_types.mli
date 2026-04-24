@@ -77,9 +77,11 @@ val masc_oas_error_prefix : string
 val truncate_string : max_chars:int -> string -> string
 
 (** [cap_blocker s] preserves structured [masc_oas_error] payloads up
-    to {!masc_oas_error_max_chars} so downstream diagnostics (dashboard,
-    retry classifier, log search) can read the JSON body intact.
-    Narrative strings fall through to {!default_option_field_max_chars}.
+    to {!masc_oas_error_max_chars}, including the
+    ["Internal error: [masc_oas_error]"] wrapper emitted by
+    [Oas.Error.to_string], so downstream diagnostics (dashboard, retry
+    classifier, log search) can read the JSON body intact. Narrative
+    strings fall through to {!default_option_field_max_chars}.
     Idempotent. See #9933. *)
 val cap_blocker : ?option_max_chars:int -> string -> string
 

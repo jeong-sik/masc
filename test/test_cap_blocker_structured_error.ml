@@ -3,9 +3,9 @@
    #9933: blocker field must preserve structured masc_oas_error
    JSON payloads. The pre-fix behaviour truncated at 200 chars,
    slicing payloads like
-   "[masc_oas_error] {\"kind\":\"oas_timeout_budget\",\"budget_sec\":30.0,...}"
-   mid-key and leaving operators with "budget_" as the trailing
-   evidence.
+   "Internal error: [masc_oas_error] {\"kind\":\"oas_timeout_budget\",\
+   \"budget_sec\":30.0,...}" mid-key and leaving operators with
+   "budget_" as the trailing evidence.
 
    Pinned invariants:
    1. Structured payload ≤ 2000 chars → identity (no ellipsis)
@@ -23,6 +23,8 @@ let oas_error_payload_small =
   "[masc_oas_error] {\"kind\":\"oas_timeout_budget\",\
    \"budget_sec\":30.0,\"keeper_turn_timeout_sec\":120.0,\
    \"estimated_input_tokens\":45000,\"source\":\"tool_list_build\"}"
+
+let wrapped_oas_error_payload_small = "Internal error: " ^ oas_error_payload_small
 
 let oas_error_payload_huge =
   let buf = Buffer.create 2500 in
@@ -75,19 +77,14 @@ let test_plain_narrative_short_preserved () =
     "short narrative unchanged"
     narrative_short (T.cap_blocker narrative_short)
 
-(* The on-wire stored form emitted by Oas_worker_named and consumed by
-   Keeper_supervisor is [masc_oas_error] with no outer "Internal error:"
-   wrapper (see keeper_supervisor.ml:63). This pins that contract — if a
-   future logging layer ever prepends "Internal error: ", the detector
-   needs to be updated in parallel. *)
-let test_wrapped_internal_error_is_treated_as_narrative () =
-  let wrapped = "Internal error: " ^ oas_error_payload_small in
-  let result = T.cap_blocker wrapped in
+let test_wrapped_internal_error_preserved () =
+  let result = T.cap_blocker wrapped_oas_error_payload_small in
+  Alcotest.(check string)
+    "wrapped structured payload unchanged"
+    wrapped_oas_error_payload_small result;
   Alcotest.(check bool)
-    "wrapped form without [masc_oas_error] prefix → narrative cap"
-    true
-    (String.length result <= T.default_option_field_max_chars + 8
-     (* ellipsis byte-padding budget *))
+    "no ellipsis added to wrapped structured payload"
+    false (ends_with_ellipsis result)
 
 let test_plain_narrative_long_truncated () =
   let result = T.cap_blocker narrative_long in
@@ -109,6 +106,7 @@ let test_idempotence () =
       (Printf.sprintf "idempotent: %s" label) once twice
   in
   check "small structured" oas_error_payload_small;
+  check "wrapped structured" wrapped_oas_error_payload_small;
   check "huge structured" oas_error_payload_huge;
   check "short narrative" narrative_short;
   check "long narrative" narrative_long
@@ -174,8 +172,8 @@ let () =
             test_plain_narrative_short_preserved;
           Alcotest.test_case "long truncated at narrative cap" `Quick
             test_plain_narrative_long_truncated;
-          Alcotest.test_case "wrapped 'Internal error:' → narrative" `Quick
-            test_wrapped_internal_error_is_treated_as_narrative;
+          Alcotest.test_case "wrapped 'Internal error:' preserved" `Quick
+            test_wrapped_internal_error_preserved;
         ] );
       ( "idempotence",
         [ Alcotest.test_case "four shapes" `Quick test_idempotence ] );

@@ -2909,6 +2909,18 @@ let test_next_fail_open_cascade_for_turn_suppresses_exhausted_rotation_group () 
   check bool "exhausted rotation group suppressed" true
     (Option.is_none degraded_retry)
 
+let test_next_fail_open_cascade_for_required_tool_uses_default_not_strict () =
+  let degraded_retry =
+    UT.next_fail_open_cascade_for_turn
+      ~base_cascade:"tool_rerank"
+      ~effective_cascade:"tool_rerank"
+      ~tool_requirement:"required"
+      ~attempted_cascades:[ "tool_rerank" ]
+      (wrapped_claude_limit_error ())
+  in
+  expect_degraded_retry "required tool degraded retry skips strict injection"
+    KC.default_cascade_name "hard_quota" degraded_retry
+
 let test_next_fail_open_cascade_for_turn_allows_required_tool_rotation () =
   let degraded_retry =
     UT.next_fail_open_cascade_for_turn
@@ -5266,6 +5278,9 @@ let () =
           test_case "next degraded retry suppresses exhausted rotation group"
             `Quick
             test_next_fail_open_cascade_for_turn_suppresses_exhausted_rotation_group;
+          test_case "required-tool rotation uses default without strict injection"
+            `Quick
+            test_next_fail_open_cascade_for_required_tool_uses_default_not_strict;
           test_case "required tool turns rotate without dropping requirement"
             `Quick
             test_next_fail_open_cascade_for_turn_allows_required_tool_rotation;

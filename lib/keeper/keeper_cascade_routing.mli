@@ -41,11 +41,3 @@ val route_effective_cascade_for_tool_requirement :
   effective_cascade:string ->
   tool_requirement:string ->
   routing_decision
-
-(** Same as {!route_effective_cascade_for_tool_requirement}, with model-label
-    resolution injected for deterministic tests. *)
-val route_effective_cascade_for_tool_requirement_with_model_labels :
-  model_labels_of_cascade:(string -> string list) ->
-  effective_cascade:string ->
-  tool_requirement:string ->
-  routing_decision

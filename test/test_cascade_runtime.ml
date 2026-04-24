@@ -171,6 +171,39 @@ let test_oas_http_error_classification_is_typed () =
         H.should_cascade_to_next capability_mismatch
     | _ -> false)
 
+let test_oas_failure_classification_keeps_terminal_branches_non_cascading () =
+  let module H = Masc_mcp.Cascade_health_filter in
+  let terminal_http =
+    Llm_provider.Http_client.HttpError
+      { code = 418; body = "terminal provider refusal" }
+  in
+  let accept_terminal =
+    Llm_provider.Http_client.AcceptRejected
+      { reason = "provider authentication failed" }
+  in
+  let local_resource =
+    Llm_provider.Http_client.NetworkError
+      {
+        message = "too many open files";
+        kind = Llm_provider.Http_client.Local_resource_exhaustion;
+      }
+  in
+  (match H.classify_failure terminal_http with
+  | H.Terminal_http 418 ->
+      check bool "terminal HTTP class does not cascade" false
+        (H.should_cascade_to_next terminal_http)
+  | _ -> fail "expected terminal HTTP classification");
+  (match H.classify_failure accept_terminal with
+  | H.Accept_rejected_terminal ->
+      check bool "terminal accept rejection does not cascade" false
+        (H.should_cascade_to_next accept_terminal)
+  | _ -> fail "expected terminal accept rejection classification");
+  match H.classify_failure local_resource with
+  | H.Local_resource_exhaustion ->
+      check bool "local resource exhaustion does not cascade" false
+        (H.should_cascade_to_next local_resource)
+  | _ -> fail "expected local resource exhaustion classification"
+
 let () =
   run "Cascade_runtime"
     [
@@ -194,5 +227,7 @@ let () =
             test_required_tool_support_filter_drops_runtime_mcp_providers_without_header_support;
           test_case "OAS HTTP errors classify before cascade boolean" `Quick
             test_oas_http_error_classification_is_typed;
+          test_case "OAS terminal classes stay non-cascading" `Quick
+            test_oas_failure_classification_keeps_terminal_branches_non_cascading;
         ] );
     ]

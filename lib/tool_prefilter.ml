@@ -207,6 +207,8 @@ let synonyms : (string * string list) list =
      [ "stop keeper"; "shutdown keeper"; "kill keeper"; "keeper terminate" ]);
     ("masc_keeper_list",
      [ "list keepers"; "show keepers"; "keeper status all"; "active keepers" ]);
+    ("masc_keeper_persona_audit",
+     [ "keeper persona audit"; "persona keeper check"; "keeper toml persona"; "autoboot keepalive audit" ]);
     ("masc_keeper_msg",
      [ "send keeper message"; "talk to keeper"; "message keeper"; "keeper chat" ]);
     ("masc_keeper_status",

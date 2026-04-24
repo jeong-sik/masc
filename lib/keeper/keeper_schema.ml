@@ -267,6 +267,35 @@ let keeper_schemas : tool_schema list = [
   };
 
   {
+    name = "masc_keeper_persona_audit";
+    description = "Audit persona-backed keeper materialization across the active config root, durable keeper TOML, live runtime metadata, registry presence, autoboot, and keepalive state.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional keeper handle to audit. When omitted, all known keepers in the current base path/config root are audited.");
+        ]);
+        ("names", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "Optional keeper handles to audit. Combined with name when both are provided.");
+        ]);
+        ("limit", `Assoc [
+          ("type", `String "integer");
+          ("default", `Int 100);
+          ("description", `String "Maximum number of keepers to audit when name/names are omitted. Clamped to 500.");
+        ]);
+        ("include_ok", `Assoc [
+          ("type", `String "boolean");
+          ("default", `Bool true);
+          ("description", `String "If false, return only keepers with audit issues while keeping summary counts over all audited keepers.");
+        ]);
+      ]);
+    ];
+  };
+
+  {
     name = "masc_keeper_up";
     description = "Create or update a durable keeper. Keepers auto-start on server boot and are reconciled back into live presence.";
     input_schema = `Assoc [

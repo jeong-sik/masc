@@ -23,6 +23,7 @@ let legacy_permission_entries : (string * permission) list =
     ("masc_persona_schema", CanReadState);
     ("masc_keeper_status", CanReadState);
     ("masc_keeper_list", CanReadState);
+    ("masc_keeper_persona_audit", CanReadState);
     ("masc_runtime_verify", CanReadState);
     ("masc_runtime_ollama_probe", CanReadState);
     ("masc_operation_status", CanReadState);

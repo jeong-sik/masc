@@ -28,7 +28,7 @@ stylesheet
 
   .eyebrow {
     font-family: 'Noto Sans KR', -apple-system, sans-serif;
-    font-size: 10px;
+    font-size: 11px;
     letter-spacing: 0.3em;
     text-transform: uppercase;
     color: #6a5848;
@@ -72,7 +72,7 @@ stylesheet
 let component (_graph @ local) =
   Bonsai.return
     (Node.div
-       ~attrs:[ Style.root ]
+       ~attrs:[ Style.root; Attr.role "main" ]
        [ Node.p ~attrs:[ Style.eyebrow ] [ Node.text "masc · runtime" ]
        ; Node.h1 ~attrs:[ Style.title ] [ Node.text "dark manor · bonsai" ]
        ; Node.p

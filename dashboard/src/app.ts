@@ -15,10 +15,9 @@ import {
 } from './sse'
 import { requestNamespaceTruthNow, disposeNamespaceTruthScheduler } from './namespace-truth-store'
 import { cancelPendingSSERefreshes, registerMissionRefresh, setupSSEReaction, startPeriodicRefresh, stopPeriodicRefresh } from './sse-store'
-import { refreshMissionSnapshot } from './mission-store'
 import { refreshShell } from './store'
 import { connectDashboardWS, disconnectDashboardWS, subscribeDashboardRoute } from './dashboard-ws'
-import { ensureDevToken } from './api/mcp'
+import { ensureDevToken } from './api/dev-token'
 import {
   BuildIdentityBadge,
   ConnectionStatus,
@@ -31,7 +30,6 @@ import { selectedAgentName } from './components/agent-detail-selection'
 import { selectedTask } from './components/goals/task-detail-selection'
 import { ToastContainer } from './components/common/toast'
 import { ConfirmDialogOverlay } from './components/common/confirm-dialog'
-import { AuthStatus, RemoteWarningBanner } from './components/auth-status'
 import { startErrorCleanup, stopErrorCleanup } from './components/common/error-notification-state'
 import { DASHBOARD_NAV_ITEMS, currentSectionForRoute } from './config/navigation'
 import { Menu, X } from 'lucide-preact'
@@ -53,6 +51,24 @@ const LazyTaskDetailOverlay = lazy(async () => ({
 const LazyCommandPalette = lazy(async () => ({
   default: (await import('./components/common/command-palette')).CommandPalette,
 }))
+const LazyAuthStatus = lazy(async () => ({
+  default: (await import('./components/auth-status')).AuthStatus,
+}))
+const LazyRemoteWarningBanner = lazy(async () => ({
+  default: (await import('./components/auth-status')).RemoteWarningBanner,
+}))
+
+function authStatusFallback() {
+  return html`
+    <span
+      class="flex h-[22px] w-[4.5rem] items-center gap-1.5 rounded border border-solid border-[var(--card-border)] bg-[var(--white-4)] px-2"
+      aria-hidden="true"
+    >
+      <span class="size-[7px] rounded-sm bg-[var(--white-15)]"></span>
+      <span class="h-2.5 w-9 rounded bg-[var(--white-10)]"></span>
+    </span>
+  `
+}
 
 function refreshCurrentRoute(options?: { recordVisit?: boolean }): void {
   const routeState = route.value
@@ -100,7 +116,13 @@ export function App() {
 
     // Register mission refresh for periodic recovery from transient failures.
     // Uses registration pattern to avoid circular imports.
-    registerMissionRefresh(() => void refreshMissionSnapshot())
+    registerMissionRefresh(() => {
+      void import('./mission-actions')
+        .then(({ refreshMissionSnapshot }) => refreshMissionSnapshot())
+        .catch(err => {
+          console.warn('[app] mission refresh unavailable', err instanceof Error ? err.message : err)
+        })
+    })
 
     // Setup SSE -> store reaction (debounced refresh on events)
     const unsubSSE = setupSSEReaction()
@@ -171,7 +193,9 @@ export function App() {
           </div>
 
           <div class="flex shrink-0 flex-wrap items-center justify-end gap-2">
-            <${AuthStatus} />
+            <${Suspense} fallback=${authStatusFallback()}>
+              <${LazyAuthStatus} />
+            <//>
             <${ConnectionStatus} />
             <${ErrorCounterBadge} />
             <${ThemeSwitch} />
@@ -180,7 +204,9 @@ export function App() {
         </div>
       </header>
 
-      <${RemoteWarningBanner} />
+      <${Suspense} fallback=${null}>
+        <${LazyRemoteWarningBanner} />
+      <//>
 
       <div class="flex flex-1 gap-2 overflow-hidden p-2 max-[1100px]:flex-col">
         <aside id="dashboard-side-rail" class="${sidebarCollapsed.value ? 'w-14' : 'w-55'} shrink-0 overflow-y-auto overflow-x-hidden rounded-xl border border-[var(--white-5)] bg-[rgba(15,22,36,0.6)] backdrop-blur-xl transition-[width] duration-300 ease-[cubic-bezier(0.2,0.8,0.2,1)] max-[1100px]:w-full max-[1100px]:max-h-75 ${mobileMenuOpen.value ? '' : 'max-[768px]:hidden'}">

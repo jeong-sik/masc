@@ -8,10 +8,7 @@
 
 import { signal } from '@preact/signals'
 
-import {
-  parseFleetCompositeSnapshot,
-  type FleetCompositeSnapshot,
-} from './api/keeper'
+import type { FleetCompositeSnapshot } from './api/schemas/keeper-composite'
 
 interface CompositeTickEnvelope {
   name: string
@@ -25,12 +22,12 @@ export const compositeTick = signal<CompositeTickEnvelope>({
 
 export const fleetCompositeSnapshot = signal<FleetCompositeSnapshot | null>(null)
 
-export function hydrateFleetCompositeSnapshot(payload: unknown): boolean {
-  try {
-    fleetCompositeSnapshot.value = parseFleetCompositeSnapshot(payload)
-    return true
-  } catch (err) {
-    console.debug('[Composite] fleet snapshot hydration failed', err instanceof Error ? err.message : '')
-    return false
-  }
+export function hydrateFleetCompositeSnapshot(payload: unknown): void {
+  void import('./api/schemas/keeper-composite')
+    .then(({ parseFleetCompositeSnapshot }) => {
+      fleetCompositeSnapshot.value = parseFleetCompositeSnapshot(payload)
+    })
+    .catch(err => {
+      console.debug('[Composite] fleet snapshot hydration failed', err instanceof Error ? err.message : '')
+    })
 }

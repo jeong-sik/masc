@@ -3,8 +3,9 @@ module IntMap = Map.Make (Int)
 
 (** Model_inference_metrics — per-model aggregate inference statistics.
 
-    Reads keeper decisions.jsonl files, extracts telemetry entries within
-    a configurable time window, and computes per-model aggregates:
+    Reads keeper decisions.jsonl files plus inference-level costs.jsonl
+    samples, extracts telemetry entries within a configurable time window,
+    and computes per-model aggregates:
     avg/p50/p95 tok/s, avg/p50/p95 latency, total reasoning tokens,
     cost attribution, tool usage, and success/error rates.
 
@@ -382,6 +383,125 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option 
        | _ -> None)
     | _ -> None
 
+let read_hw_decode_tok_per_sec (fields : (string * Yojson.Safe.t) list) =
+  let read key =
+    match List.assoc_opt key fields with
+    | Some (`Float f) when f > 0.0 -> Some f
+    | Some (`Int n) when n > 0 -> Some (Float.of_int n)
+    | _ -> None
+  in
+  match read "hw_decode_tokens_per_second" with
+  | Some _ as v -> v
+  | None -> read "provider_tokens_per_second"
+
+let starts_with ~prefix s =
+  let plen = String.length prefix in
+  String.length s >= plen && String.sub s 0 plen = prefix
+
+let canonical_cost_model_id ~(provider : string option) model =
+  match provider with
+  | Some "ollama" when not (starts_with ~prefix:"ollama:" model) ->
+      "ollama:" ^ model
+  | _ -> model
+
+let parse_cost_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option =
+  match json with
+  | `Assoc fields ->
+      let ts =
+        match Safe_ops.json_float_opt "ts_unix" json with
+        | Some v -> Some v
+        | None ->
+            (match List.assoc_opt "timestamp" fields with
+             | Some (`String s) -> Types.parse_iso8601_opt s
+             | _ -> None)
+      in
+      (match ts with
+       | Some ts when ts >= since_unix ->
+           (match json_string_field_opt "model" fields with
+            | None -> None
+            | Some raw_model ->
+                let provider = provider_opt_of_fields ~model:raw_model fields in
+                let model = canonical_cost_model_id ~provider raw_model in
+                let usage_missing =
+                  json_bool_field_opt "usage_missing" fields
+                  |> Option.value ~default:false
+                in
+                let input_tokens =
+                  if usage_missing then None
+                  else json_int_field_opt "input_tokens" fields
+                in
+                let output_tokens =
+                  if usage_missing then None
+                  else json_int_field_opt "output_tokens" fields
+                in
+                let cache_read_tokens =
+                  match json_int_field_opt "cache_read_tokens" fields with
+                  | Some _ as v -> v
+                  | None -> json_int_field_opt "cache_read_input_tokens" fields
+                in
+                let latency_ms =
+                  json_float_field_opt "request_latency_ms" fields
+                in
+                let tok_per_sec =
+                  match json_float_field_opt "tokens_per_second" fields with
+                  | Some v when v > 0.0 -> Some v
+                  | _ ->
+                      (match output_tokens, latency_ms with
+                       | Some out, Some latency when out > 0 && latency > 0.0 ->
+                           Some (Float.of_int out /. (latency /. 1000.0))
+                       | _ -> None)
+                in
+                let prompt_tok_per_sec =
+                  match List.assoc_opt "prompt_per_second" fields with
+                  | Some (`Float f) when f > 0.0 -> Some f
+                  | Some (`Int n) when n > 0 -> Some (Float.of_int n)
+                  | _ -> None
+                in
+                let hw_decode_tok_per_sec =
+                  read_hw_decode_tok_per_sec fields
+                in
+                let peak_memory_gb =
+                  match json_float_field_opt "peak_memory_gb" fields with
+                  | Some v when v > 0.0 -> Some v
+                  | _ -> None
+                in
+                let telemetry_reported =
+                  tok_per_sec <> None
+                  || prompt_tok_per_sec <> None
+                  || hw_decode_tok_per_sec <> None
+                  || peak_memory_gb <> None
+                  || latency_ms <> None
+                in
+                Some
+                  { model
+                  ; ts_unix = ts
+                  ; outcome = "success"
+                  ; stop_reason = None
+                  ; turn_lane = None
+                  ; tok_per_sec
+                  ; provider
+                  ; prompt_tok_per_sec
+                  ; hw_decode_tok_per_sec
+                  ; peak_memory_gb
+                  ; thinking_enabled = None
+                  ; latency_ms
+                  ; input_tokens
+                  ; output_tokens
+                  ; cache_read_tokens
+                  ; reasoning_tokens = json_int_field_opt "reasoning_tokens" fields
+                  ; fallback_applied = false
+                  ; cost_usd = json_float_field_opt "cost_usd" fields
+                  ; tool_call_count = 0
+                  ; tools_used = []
+                  ; usage_reported = Some (not usage_missing)
+                  ; telemetry_reported = Some telemetry_reported
+                  ; coverage_reason = None
+                  ; coverage_stage = Some "costs_jsonl"
+                  ; is_error = false
+                  })
+       | _ -> None)
+  | _ -> None
+
 (* ── Read decisions.jsonl files ─────────────────────────── *)
 
 let read_all_decisions ~base_path ~since_unix : raw_entry list =
@@ -422,6 +542,70 @@ let read_all_decisions ~base_path ~since_unix : raw_entry list =
         Printexc.raise_with_backtrace exn bt
       | _ -> []
     ) files
+
+let read_cost_entries ~base_path ~since_unix : raw_entry list =
+  let path = Filename.concat base_path ".masc/costs.jsonl" in
+  if not (Sys.file_exists path) then []
+  else
+    try
+      let ic = open_in path in
+      let entries = ref [] in
+      Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+        (try
+           while true do
+             let line = input_line ic in
+             if String.length line > 2 then
+               match Yojson.Safe.from_string line with
+               | json ->
+                 (match parse_cost_entry json ~since_unix with
+                  | Some e -> entries := e :: !entries
+                  | None -> ())
+               | exception (Eio.Cancel.Cancelled _ as exn) ->
+                 let bt = Printexc.get_raw_backtrace () in
+                 Printexc.raise_with_backtrace exn bt
+               | exception Yojson.Json_error _ -> ()
+           done
+         with End_of_file -> ());
+        !entries)
+    with
+    | Eio.Cancel.Cancelled _ as exn ->
+        let bt = Printexc.get_raw_backtrace () in
+        Printexc.raise_with_backtrace exn bt
+    | _ -> []
+
+let same_int_opt a b =
+  match a, b with
+  | Some x, Some y -> x = y
+  | _ -> false
+
+let same_inference_sample a b =
+  String.equal a.model b.model
+  && Float.abs (a.ts_unix -. b.ts_unix) <= 5.0
+  && same_int_opt a.input_tokens b.input_tokens
+  && same_int_opt a.output_tokens b.output_tokens
+
+let merge_decision_and_cost_entries decisions costs =
+  let decision_shadowed_by_cost d =
+    d.tok_per_sec = None
+    && List.exists
+         (fun c -> c.tok_per_sec <> None && same_inference_sample d c)
+         costs
+  in
+  let decisions_kept =
+    List.filter (fun d -> not (decision_shadowed_by_cost d)) decisions
+  in
+  let cost_duplicate_of_decision c =
+    List.exists
+      (fun d -> d.tok_per_sec <> None && same_inference_sample d c)
+      decisions
+  in
+  decisions_kept
+  @ List.filter (fun c -> not (cost_duplicate_of_decision c)) costs
+
+let read_all_entries ~base_path ~since_unix =
+  let decisions = read_all_decisions ~base_path ~since_unix in
+  let costs = read_cost_entries ~base_path ~since_unix in
+  merge_decision_and_cost_entries decisions costs
 
 let usage_signal_present (entry : raw_entry) : bool =
   entry.input_tokens <> None
@@ -770,7 +954,7 @@ let group_entries_by_model (entries : raw_entry list)
 
 let compute ~base_path ~window_minutes : aggregate =
   let since_unix = Time_compat.now () -. (Float.of_int window_minutes *. 60.0) in
-  let entries = read_all_decisions ~base_path ~since_unix in
+  let entries = read_all_entries ~base_path ~since_unix in
   let models = aggregate_by_model entries in
   let total_error_entries =
     List.length (List.filter (fun e -> e.is_error) entries)
@@ -782,7 +966,7 @@ let compute ~base_path ~window_minutes : aggregate =
 let compute_with_buckets ~base_path ~window_minutes ~bucket_minutes : aggregate =
   let bucket_minutes = max 1 bucket_minutes in
   let since_unix = Time_compat.now () -. (Float.of_int window_minutes *. 60.0) in
-  let entries = read_all_decisions ~base_path ~since_unix in
+  let entries = read_all_entries ~base_path ~since_unix in
   let models = aggregate_by_model entries in
   let bucket_sec = bucket_minutes * 60 in
   let by_model_map : raw_entry list StringMap.t =
@@ -809,7 +993,7 @@ let compute_with_buckets ~base_path ~window_minutes ~bucket_minutes : aggregate 
 
 let aggregate_buckets ~base_path ~window_min ~bucket_min : model_bucketed list =
   let since_unix = Time_compat.now () -. (Float.of_int window_min *. 60.0) in
-  let entries = read_all_decisions ~base_path ~since_unix in
+  let entries = read_all_entries ~base_path ~since_unix in
   let bucket_sec = if bucket_min <= 0 then 60 else bucket_min * 60 in
   let by_model = group_entries_by_model entries in
   List.map (fun (model_id, es) ->

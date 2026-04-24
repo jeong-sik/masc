@@ -1,7 +1,8 @@
 (** Model_inference_metrics — per-model aggregate inference statistics.
 
-    Reads keeper decisions.jsonl files and computes per-model aggregates
-    within a configurable time window.
+    Reads keeper decisions.jsonl files plus inference-level costs.jsonl
+    samples and computes per-model aggregates within a configurable time
+    window.
 
     @since 2.259.0
     Extended with cost/tool/error metrics: @since 2.270.0 *)

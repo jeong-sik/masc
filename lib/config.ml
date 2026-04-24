@@ -38,7 +38,16 @@ let raw_all_tool_schemas : Types.tool_schema list =
        @ Tool_autoresearch.schemas
        @ Tool_compact.schemas
        @ Tool_agent_timeline.schemas
-       @ Tool_shard.schemas))
+       @ Tool_shard.schemas
+       (* Base shard tools (keeper_stay_silent, keeper_time_now,
+          keeper_context_status, keeper_memory_search, keeper_tools_list)
+          are always-present for every keeper but were only declared in
+          [Tool_shard.base_tools] — a shard definition — and never reached
+          the authoritative registry consumed by [Tool_help_registry.find_entry].
+          Without them here, keepers that requested help on these tools
+          received "unknown tool" despite the dispatcher handling them.
+          See #9912. *)
+       @ Tool_shard.base_tools))
 
 (** Validate tool schemas at module initialization time.
     Logs warnings for: duplicate names, empty names/descriptions,

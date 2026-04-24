@@ -37,8 +37,18 @@ type t = {
   keeper_runtime_toml_present : bool;
   warnings : string list;
   next_actions : string list;
+  persona_tool_preset_conflicts : persona_tool_preset_conflict list;
   catalog_validation : Yojson.Safe.t option;
   sandbox_preflight : Yojson.Safe.t option;
+}
+
+and persona_tool_preset_conflict = {
+  keeper_name : string;
+  persona_name : string;
+  toml_path : string;
+  persona_path : string;
+  toml_tool_preset : string;
+  persona_tool_preset : string;
 }
 
 type catalog_issue_severity = Cascade_catalog_validator.severity =
@@ -161,6 +171,122 @@ let cascade_catalog_next_actions ~config_path issues =
       primary_action;
       "Rerun `masc-mcp doctor config` after editing cascade.json.";
     ]
+
+let normalize_tool_preset_opt raw =
+  match raw with
+  | None -> None
+  | Some value ->
+      let normalized = String.trim (String.lowercase_ascii value) in
+      if normalized = "" then
+        None
+      else
+        Some normalized
+
+let non_empty_trimmed_opt raw =
+  match raw with
+  | None -> None
+  | Some value ->
+      let trimmed = String.trim value in
+      if trimmed = "" then
+        None
+      else
+        Some trimmed
+
+let persona_tool_preset_conflict_to_warning conflict =
+  Printf.sprintf
+    "Keeper %s TOML tool_preset %S overrides persona %s tool_preset %S (toml=%s persona=%s)."
+    conflict.keeper_name
+    conflict.toml_tool_preset
+    conflict.persona_name
+    conflict.persona_tool_preset
+    conflict.toml_path
+    conflict.persona_path
+
+let persona_tool_preset_conflict_to_action conflict =
+  Printf.sprintf
+    "Remove tool_preset from %s unless the override is intentional; TOML wins until fixed."
+    conflict.toml_path
+
+let persona_tool_preset_conflict_to_yojson conflict =
+  `Assoc
+    [
+      ("keeper_name", `String conflict.keeper_name);
+      ("persona_name", `String conflict.persona_name);
+      ("toml_path", `String conflict.toml_path);
+      ("persona_path", `String conflict.persona_path);
+      ("toml_tool_preset", `String conflict.toml_tool_preset);
+      ("persona_tool_preset", `String conflict.persona_tool_preset);
+    ]
+
+let discover_persona_tool_preset_conflicts ~active_config_root
+    ~active_personas_root =
+  let keepers_dir = Filename.concat active_config_root "keepers" in
+  if not (Env_config_core.existing_dir keepers_dir) then
+    []
+  else
+    Sys.readdir keepers_dir
+    |> Array.to_list
+    |> List.filter (fun name -> Filename.check_suffix name ".toml")
+    |> List.filter_map (fun filename ->
+           let toml_path = Filename.concat keepers_dir filename in
+           match Safe_ops.read_file_safe toml_path with
+           | Error _ -> None
+           | Ok content -> (
+               match Keeper_toml_loader.parse_toml content with
+               | Error _ -> None
+               | Ok doc ->
+                   let keeper_name =
+                     Keeper_toml_loader.toml_string_opt doc "keeper.name"
+                     |> non_empty_trimmed_opt
+                     |> Option.value
+                          ~default:(Filename.chop_suffix filename ".toml")
+                   in
+                   let persona_name =
+                     Keeper_toml_loader.toml_string_opt doc
+                       "keeper.persona_name"
+                     |> non_empty_trimmed_opt
+                     |> Option.value ~default:keeper_name
+                   in
+                   let toml_tool_preset =
+                     Keeper_toml_loader.toml_string_opt doc
+                       "keeper.tool_preset"
+                     |> normalize_tool_preset_opt
+                   in
+                   match toml_tool_preset with
+                   | None -> None
+                   | Some toml_tool_preset ->
+                       let persona_path =
+                         Filename.concat
+                           (Filename.concat active_personas_root persona_name)
+                           "profile.json"
+                       in
+                       if not (Env_config_core.existing_file persona_path) then
+                         None
+                       else
+                         match Safe_ops.read_json_file_logged
+                                 ~label:"config_doctor_persona" persona_path
+                         with
+                         | None -> None
+                         | Some json ->
+                             let persona_tool_preset =
+                               json
+                               |> Yojson.Safe.Util.member "keeper"
+                               |> Safe_ops.json_string_opt "tool_preset"
+                               |> normalize_tool_preset_opt
+                             in
+                             match persona_tool_preset with
+                             | Some persona_tool_preset
+                               when persona_tool_preset <> toml_tool_preset ->
+                                 Some
+                                   {
+                                     keeper_name;
+                                     persona_name;
+                                     toml_path;
+                                     persona_path;
+                                     toml_tool_preset;
+                                     persona_tool_preset;
+                                   }
+                             | _ -> None))
 
 let current_inputs ~base_path_input ~default_base_path () =
   let normalized_base_path =
@@ -292,6 +418,11 @@ let analyze_with (inputs : inputs) =
   let cascade_catalog_issues =
     diagnose_cascade_catalog ~active_config_root
   in
+  let persona_tool_preset_conflicts =
+    discover_persona_tool_preset_conflicts
+      ~active_config_root
+      ~active_personas_root
+  in
   let cascade_config_path =
     Filename.concat active_config_root Config_dir_resolver.cascade_json_filename
   in
@@ -349,6 +480,8 @@ let analyze_with (inputs : inputs) =
     |> List.filter_map (fun warning -> warning)
     |> fun base_warnings ->
     base_warnings
+    @ List.map persona_tool_preset_conflict_to_warning
+        persona_tool_preset_conflicts
     @ List.map (fun issue -> issue.message) cascade_catalog_issues
     |> dedupe_keep_order
   in
@@ -425,7 +558,11 @@ let analyze_with (inputs : inputs) =
            | _ ->
                "No further action needed.");
         ]
-    |> fun base_actions -> base_actions @ cascade_actions
+    |> fun base_actions ->
+    base_actions
+    @ List.map persona_tool_preset_conflict_to_action
+        persona_tool_preset_conflicts
+    @ cascade_actions
     |> dedupe_keep_order
   in
   let has_catalog_errors =
@@ -439,6 +576,7 @@ let analyze_with (inputs : inputs) =
     | Shadowed -> Warn
     | Initialized ->
         if has_catalog_errors then Error
+        else if persona_tool_preset_conflicts <> [] then Warn
         else if warnings = [] then Ok else Warn
   in
   {
@@ -458,6 +596,7 @@ let analyze_with (inputs : inputs) =
     keeper_runtime_toml_present;
     warnings;
     next_actions;
+    persona_tool_preset_conflicts;
     catalog_validation = None;
     sandbox_preflight = None;
   }
@@ -595,6 +734,10 @@ let to_yojson (report : t) =
       ("keeper_runtime_toml_present", `Bool report.keeper_runtime_toml_present);
       ("warnings", `List (List.map (fun value -> `String value) report.warnings));
       ("next_actions", `List (List.map (fun value -> `String value) report.next_actions));
+      ( "persona_tool_preset_conflicts",
+        `List
+          (List.map persona_tool_preset_conflict_to_yojson
+             report.persona_tool_preset_conflicts) );
       ( "catalog_validation",
         match report.catalog_validation with
         | Some value -> value
@@ -643,6 +786,19 @@ let render_text (report : t) =
   add_line
     (Printf.sprintf "keeper_runtime.toml: %s"
        (if report.keeper_runtime_toml_present then "present" else "missing"));
+  if report.persona_tool_preset_conflicts <> [] then begin
+    add_line "";
+    add_line "persona_tool_preset_conflicts:";
+    List.iter
+      (fun conflict ->
+         add_line
+           (Printf.sprintf "- keeper=%s persona=%s toml=%s persona_profile=%s"
+              conflict.keeper_name
+              conflict.persona_name
+              conflict.toml_path
+              conflict.persona_path))
+      report.persona_tool_preset_conflicts
+  end;
   (match report.catalog_validation with
    | Some validation ->
        add_line "";

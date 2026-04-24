@@ -37,6 +37,45 @@ let keeper_denied_tools =
 let provider_of_model (model : string) : string =
   Provider_adapter.provider_of_model_label model
 
+let structurally_unmetered_provider provider =
+  List.mem provider
+    [ "ollama"; "codex_cli"; "gemini_cli"; "claude_code"; "kimi_cli" ]
+
+let usage_has_tokens (usage : Oas.Types.api_usage) =
+  usage.input_tokens > 0
+  || usage.output_tokens > 0
+  || usage.cache_creation_input_tokens > 0
+  || usage.cache_read_input_tokens > 0
+
+let estimate_usage_cost_usd ~(model : string) (usage : Oas.Types.api_usage)
+    : float =
+  let pricing = Llm_provider.Pricing.pricing_for_model model in
+  Llm_provider.Pricing.estimate_cost ~pricing
+    ~input_tokens:usage.input_tokens
+    ~output_tokens:usage.output_tokens ()
+
+let cost_usd_for_usage ~(model : string) (usage : Oas.Types.api_usage)
+    : float =
+  let provider = provider_of_model model in
+  match usage.cost_usd with
+  | Some cost when cost > 0.0 -> cost
+  | Some cost ->
+      if
+        usage_has_tokens usage
+        && not (structurally_unmetered_provider provider)
+      then
+        estimate_usage_cost_usd ~model usage
+      else
+        cost
+  | None ->
+      if
+        usage_has_tokens usage
+        && not (structurally_unmetered_provider provider)
+      then
+        estimate_usage_cost_usd ~model usage
+      else
+        0.0
+
 type tool_execution_summary =
   { tool_name : string
   ; provider : string
@@ -122,6 +161,7 @@ let emit_cost_event
     ~(input_tokens : int)
     ~(output_tokens : int)
     ~(cost_usd : float)
+    ?(usage_missing : bool = false)
     ?(telemetry : Oas.Types.inference_telemetry option)
     () : unit =
   let path = Filename.concat masc_root "costs.jsonl" in
@@ -155,6 +195,7 @@ let emit_cost_event
     ("input_tokens", `Int input_tokens);
     ("output_tokens", `Int output_tokens);
     ("cost_usd", `Float cost_usd);
+    ("usage_missing", `Bool usage_missing);
     ("timestamp", `String (Types.now_iso ()));
     ("source", `String "auto_trajectory");
   ] @ telemetry_fields) in
@@ -365,10 +406,11 @@ let make_hooks
       | Oas.Hooks.AfterTurn { turn; response } ->
         let meta = !meta_ref in
         let model = response.model in
-        let input_tok, output_tok, turn_cost_usd = match response.usage with
-          | Some u -> (u.input_tokens, u.output_tokens,
-                       Option.value ~default:0.0 u.cost_usd)
-          | None -> (0, 0, 0.0)
+        let input_tok, output_tok, turn_cost_usd, usage_missing =
+          match response.usage with
+          | Some u ->
+              (u.input_tokens, u.output_tokens, cost_usd_for_usage ~model u, false)
+          | None -> (0, 0, 0.0, true)
         in
         let total_tok = input_tok + output_tok in
         (* Provider prefix cache token tracking (Anthropic).
@@ -443,7 +485,8 @@ let make_hooks
            emit_cost_event ~masc_root:acc.masc_root
              ~agent_name:meta.name ~task_id:acc.task_id
              ~model ~input_tokens:input_tok ~output_tokens:output_tok
-             ~cost_usd:turn_cost_usd ?telemetry:response.telemetry ()
+             ~cost_usd:turn_cost_usd ~usage_missing
+             ?telemetry:response.telemetry ()
          | None -> ());
         let text = Oas.Types.text_of_content response.content in
         let has_state_block =
@@ -628,13 +671,16 @@ let make_hooks
            trace for hook-chain readers; the metric below still records. *)
         Log.Keeper.debug "keeper:%s tool_use_failure: %s — %s"
           meta.name tool_name error;
+        let error_detail_len =
+          String.length (String.trim error) |> Float.of_int
+        in
         Heuristic_metrics.record {
           module_name = "keeper_hooks_oas";
           site = "post_tool_use_failure";
-          raw_value = 1.0;
-          threshold = 0.0;
-          triggered = true;
-          provenance = Pipeline_stage "post_tool_use_failure";
+          raw_value = error_detail_len;
+          threshold = 1.0;
+          triggered = error_detail_len >= 1.0;
+          provenance = Pipeline_stage ("post_tool_use_failure:" ^ tool_name);
           timestamp = Unix.gettimeofday ();
         };
         Oas.Hooks.Continue

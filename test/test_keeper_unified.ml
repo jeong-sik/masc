@@ -1661,6 +1661,39 @@ let test_metrics_noop_response () =
     updated.runtime.autonomous_action_count;
   check int "total_turns +1" (minimal_meta.runtime.usage.total_turns + 1) updated.runtime.usage.total_turns
 
+let test_metrics_observation_only_tools_are_noop () =
+  let observation_only =
+    [
+      Masc_mcp.Tool_name.Keeper.to_string Masc_mcp.Tool_name.Keeper.Board_list;
+      Masc_mcp.Tool_name.Keeper.to_string
+        Masc_mcp.Tool_name.Keeper.Context_status;
+      Masc_mcp.Tool_name.Keeper.to_string
+        Masc_mcp.Tool_name.Keeper.Tool_search;
+    ]
+  in
+  let result =
+    make_run_result ~text:"" ~tools:observation_only
+      ~model:"test-model" ~input_tok:50 ~output_tok:10 ()
+  in
+  let updated =
+    UM.update_metrics_from_result minimal_meta ~latency_ms:100
+      ~observation:base_observation result
+  in
+  check bool "tools are not substantive" false
+    (UM.has_substantive_tool_calls observation_only);
+  check int "proactive visible_count unchanged"
+    minimal_meta.runtime.proactive_rt.visible_count_total
+    updated.runtime.proactive_rt.visible_count_total;
+  check int "autonomous action unchanged"
+    minimal_meta.runtime.autonomous_action_count
+    updated.runtime.autonomous_action_count;
+  check int "autonomous tool turn unchanged"
+    minimal_meta.runtime.autonomous_tool_turn_count
+    updated.runtime.autonomous_tool_turn_count;
+  check int "noop turn increments"
+    (minimal_meta.runtime.noop_turn_count + 1)
+    updated.runtime.noop_turn_count
+
 let sample_run_ref : Agent_sdk.Raw_trace.run_ref = {
   worker_run_id = "test-run"; path = "/tmp/test.jsonl";
   start_seq = 0; end_seq = 5; agent_name = "test"; session_id = None;
@@ -4725,6 +4758,8 @@ let () =
             test_metrics_surface_model_prefers_successful_cascade_label;
           test_case "tool response" `Quick test_metrics_tool_response;
           test_case "noop response" `Quick test_metrics_noop_response;
+          test_case "observation-only tools are noop" `Quick
+            test_metrics_observation_only_tools_are_noop;
           test_case "validated evidence counts as visible" `Quick
             test_metrics_validated_evidence_counts_as_visible;
           test_case "failed validation does not count as visible" `Quick

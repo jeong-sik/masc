@@ -27,6 +27,19 @@ type event = {
   timestamp : float;
 }
 
+type coverage_site = {
+  module_name : string;
+  site : string;
+  count : int;
+  triggered_count : int;
+}
+
+type coverage_report = {
+  total_events : int;
+  sites : coverage_site list;
+  unique_decision_tuples : int;
+}
+
 (* ================================================================ *)
 (* Serialization                                                    *)
 (* ================================================================ *)
@@ -160,3 +173,93 @@ let recent n =
           with Yojson.Json_error msg ->
             Log.warn ~ctx:"heuristic_metrics" "dropping malformed line: %s" msg;
             None)
+
+let coverage_report_of_events events =
+  let site_counts : ((string * string), (int * int) ref) Hashtbl.t =
+    Hashtbl.create 16
+  in
+  let unique_tuples : (string, unit) Hashtbl.t = Hashtbl.create 16 in
+  let json_string_field name json =
+    match Yojson.Safe.Util.member name json with
+    | `String value -> Some value
+    | _ -> None
+  in
+  let json_float_field name json =
+    match Yojson.Safe.Util.member name json with
+    | `Float value -> Some value
+    | `Int value -> Some (Float.of_int value)
+    | _ -> None
+  in
+  let json_bool_field name json =
+    match Yojson.Safe.Util.member name json with
+    | `Bool value -> Some value
+    | _ -> None
+  in
+  List.iter
+    (fun json ->
+       match json_string_field "module" json, json_string_field "site" json with
+       | Some module_name, Some site ->
+           let triggered =
+             Option.value ~default:false (json_bool_field "triggered" json)
+           in
+           let key = (module_name, site) in
+           let slot =
+             match Hashtbl.find_opt site_counts key with
+             | Some slot -> slot
+             | None ->
+                 let slot = ref (0, 0) in
+                 Hashtbl.add site_counts key slot;
+                 slot
+           in
+           let count, triggered_count = !slot in
+           slot :=
+             (count + 1, triggered_count + if triggered then 1 else 0);
+           let tuple_key =
+             Printf.sprintf "%s\000%s\000%.12g\000%.12g\000%b"
+               module_name
+               site
+               (Option.value ~default:Float.nan
+                  (json_float_field "raw_value" json))
+               (Option.value ~default:Float.nan
+                  (json_float_field "threshold" json))
+               triggered
+           in
+           Hashtbl.replace unique_tuples tuple_key ()
+       | _ -> ())
+    events;
+  let sites =
+    site_counts
+    |> Hashtbl.to_seq
+    |> List.of_seq
+    |> List.map (fun ((module_name, site), counts) ->
+           let count, triggered_count = !counts in
+           { module_name; site; count; triggered_count })
+    |> List.sort (fun a b ->
+           let c = String.compare a.module_name b.module_name in
+           if c <> 0 then c else String.compare a.site b.site)
+  in
+  {
+    total_events = List.length events;
+    sites;
+    unique_decision_tuples = Hashtbl.length unique_tuples;
+  }
+
+let recent_coverage n =
+  recent n |> coverage_report_of_events
+
+let coverage_site_to_json site =
+  `Assoc
+    [
+      ("module", `String site.module_name);
+      ("site", `String site.site);
+      ("count", `Int site.count);
+      ("triggered_count", `Int site.triggered_count);
+    ]
+
+let coverage_report_to_json report =
+  `Assoc
+    [
+      ("total_events", `Int report.total_events);
+      ("unique_decision_tuples", `Int report.unique_decision_tuples);
+      ("sites", `List (List.map coverage_site_to_json report.sites));
+    ]

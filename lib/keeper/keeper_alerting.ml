@@ -182,11 +182,14 @@ let signal_bonus_multi_tool = 0.06
 let handoff_pressure_threshold () =
   Runtime_params.get Governance_registry.keeper_handoff_pressure_threshold
 (** Goal alignment below which low-alignment signal fires. *)
-let goal_alignment_floor = 0.20
+let goal_alignment_floor = 0.05
 (** Response alignment below which low-alignment signal fires. *)
 let response_alignment_floor = 0.16
 (** Minimum tool call count to trigger multi-tool signal. *)
 let multi_tool_min_count = 2
+
+let alert_emit_threshold () =
+  max 0.0 (min 1.0 Env_config.KeeperAlert.min_score)
 
 let keeper_alert_signal
     ~(message : string)
@@ -229,12 +232,13 @@ let keeper_alert_signal
   end;
   let score = max 0.0 (min 1.0 !score) in
   let keywords = keyword_hits |> List.map fst |> dedup_strings in
+  let threshold = alert_emit_threshold () in
   Heuristic_metrics.record {
     module_name = "keeper_alerting";
     site = "keeper_alert_signal";
     raw_value = score;
-    threshold = 0.0;
-    triggered = score > 0.0;
+    threshold;
+    triggered = score >= threshold;
     provenance = Alert_scoring (String.concat "," (List.rev !reasons));
     timestamp = Unix.gettimeofday ();
   };
@@ -467,7 +471,7 @@ let maybe_emit_interesting_alert
     ~(response_alignment : float)
     ~(auto_rules : keeper_auto_rule_eval) : interesting_alert_result =
   let enabled = Env_config.KeeperAlert.enabled in
-  let threshold = max 0.0 (min 1.0 Env_config.KeeperAlert.min_score) in
+  let threshold = alert_emit_threshold () in
   if not enabled then
     { empty_interesting_alert_result with enabled = false; threshold }
   else

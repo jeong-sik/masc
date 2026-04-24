@@ -32,6 +32,19 @@ type event = {
   timestamp : float;
 }
 
+type coverage_site = {
+  module_name : string;
+  site : string;
+  count : int;
+  triggered_count : int;
+}
+
+type coverage_report = {
+  total_events : int;
+  sites : coverage_site list;
+  unique_decision_tuples : int;
+}
+
 val record : event -> unit
 (** Append a metric event.  Thread-safe.  No-op if storage is not initialized. *)
 
@@ -44,6 +57,16 @@ val flush : unit -> unit
 
 val recent : int -> Yojson.Safe.t list
 (** Read the N most recent events as JSON objects. *)
+
+val coverage_report_of_events : Yojson.Safe.t list -> coverage_report
+(** Summarize event coverage by module/site and count distinct
+    raw/threshold/triggered tuples. *)
+
+val recent_coverage : int -> coverage_report
+(** Read recent events and summarize their coverage. *)
+
+val coverage_report_to_json : coverage_report -> Yojson.Safe.t
+(** Serialize a coverage report for diagnostics. *)
 
 val event_to_json : event -> Yojson.Safe.t
 (** Serialize an event for external consumption (dashboard, tests). *)

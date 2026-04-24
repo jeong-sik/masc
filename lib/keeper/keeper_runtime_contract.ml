@@ -81,6 +81,152 @@ let approval_policy_effective_json ?config (meta : keeper_meta) =
   in
   Keeper_approval_queue.policy_summary_json ~base_path ~keeper_name:meta.name
 
+let string_opt_json = function
+  | Some value when String.trim value <> "" -> `String value
+  | _ -> `Null
+
+let int_opt_json = function
+  | Some value -> `Int value
+  | None -> `Null
+
+let string_list_json values =
+  `List (List.map (fun value -> `String value) values)
+
+let nonempty_list = function
+  | Some values -> values
+  | None -> []
+
+let provider_of_model = function
+  | None -> None
+  | Some model -> (
+      let model = String.trim model in
+      if model = "" then None
+      else
+        match String.index_opt model ':' with
+        | Some idx when idx > 0 -> Some (String.sub model 0 idx)
+        | _ -> None)
+
+let runtime_contract_json_from_fields ~keeper_name ?agent_name ?trace_id
+    ?session_id ?generation ?keeper_turn_id ?task_id ?goal_ids
+    ?sandbox_profile ?sandbox_root ?allowed_paths ?network_mode
+    ?shared_memory_scope ?approval_mode ?tool_surface_class
+    ?visible_tool_count ?required_tools ?missing_required_tools ?provider ?model
+    ?cascade_profile () : Yojson.Safe.t =
+  let provider =
+    match provider with
+    | Some _ -> provider
+    | None -> provider_of_model model
+  in
+  `Assoc
+    [
+      ("keeper_name", `String keeper_name);
+      ("agent_name", string_opt_json agent_name);
+      ("trace_id", string_opt_json trace_id);
+      ("session_id", string_opt_json session_id);
+      ("generation", int_opt_json generation);
+      ("keeper_turn_id", int_opt_json keeper_turn_id);
+      ("task_id", string_opt_json task_id);
+      ("goal_ids", string_list_json (nonempty_list goal_ids));
+      ("sandbox_profile", string_opt_json sandbox_profile);
+      ("sandbox_root", string_opt_json sandbox_root);
+      ("allowed_paths", string_list_json (nonempty_list allowed_paths));
+      ("network_mode", string_opt_json network_mode);
+      ("shared_memory_scope", string_opt_json shared_memory_scope);
+      ("approval_mode", string_opt_json approval_mode);
+      ("tool_surface_class", string_opt_json tool_surface_class);
+      ("visible_tool_count", int_opt_json visible_tool_count);
+      ("required_tools", string_list_json (nonempty_list required_tools));
+      ( "missing_required_tools",
+        string_list_json (nonempty_list missing_required_tools) );
+      ("provider", string_opt_json provider);
+      ("model", string_opt_json model);
+      ("cascade_profile", string_opt_json cascade_profile);
+    ]
+
+let contains_substring haystack needle =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  let rec loop i =
+    if needle_len = 0 then true
+    else if i + needle_len > haystack_len then false
+    else if String.sub haystack i needle_len = needle then true
+    else loop (i + 1)
+  in
+  loop 0
+
+let json_string_field name = function
+  | `Assoc fields -> (
+      match List.assoc_opt name fields with
+      | Some (`String value) when String.trim value <> "" -> Some value
+      | _ -> None)
+  | _ -> None
+
+let first_string_field names json =
+  List.find_map (fun name -> json_string_field name json) names
+
+let path_like_key key =
+  let key = String.lowercase_ascii key in
+  key = "cwd" || key = "dir" || key = "directory" || key = "file"
+  || contains_substring key "path"
+
+let collect_observed_paths json =
+  let rec loop acc = function
+    | `Assoc fields ->
+        List.fold_left
+          (fun acc (key, value) ->
+            match value with
+            | `String path when path_like_key key && String.trim path <> "" ->
+                path :: acc
+            | other -> loop acc other)
+          acc fields
+    | `List values -> List.fold_left loop acc values
+    | _ -> acc
+  in
+  loop [] json
+  |> List.sort_uniq String.compare
+
+let target_kind_of_input input target_path =
+  match json_string_field "target_kind" input with
+  | Some value -> value
+  | None -> (
+      match json_string_field "kind" input with
+      | Some value -> value
+      | None -> (
+          match target_path with
+          | Some _ -> "path"
+          | None -> "tool"))
+
+let action_radius_json ~tool_name ~input ~success ~duration_ms ?error
+    ?sandbox_target () : Yojson.Safe.t =
+  let action_key =
+    first_string_field [ "action"; "action_key"; "op"; "cmd"; "command" ] input
+    |> Option.value ~default:tool_name
+  in
+  let target_path =
+    first_string_field
+      [
+        "target_path";
+        "path";
+        "file_path";
+        "repo_path";
+        "worktree_path";
+        "cwd";
+      ]
+      input
+  in
+  `Assoc
+    [
+      ("tool_name", `String tool_name);
+      ("action_key", `String action_key);
+      ("target_kind", `String (target_kind_of_input input target_path));
+      ("target_path", string_opt_json target_path);
+      ("sandbox_target", string_opt_json sandbox_target);
+      ("observed_paths", string_list_json (collect_observed_paths input));
+      ("success", `Bool success);
+      ("duration_ms", `Float duration_ms);
+      ("error", string_opt_json error);
+    ]
+
 let runtime_contract_json ?config (meta : keeper_meta) : Yojson.Safe.t =
   let sandbox_target = backend_of_meta meta in
   let goal_progress = goal_progress_json ?config meta in

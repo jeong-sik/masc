@@ -70,6 +70,37 @@ let fixed_store_dir ~masc_root ~base_path = function
   | Tool_metric  -> Some (Filename.concat base_path "data/tool-metrics")
   | Keeper_metric -> None  (* handled separately *)
 
+let source_freshness_slo_s = function
+  | Keeper_metric -> 300.0
+  | Tool_call_io -> 300.0
+  | Oas_event -> 300.0
+  | Agent_event -> 900.0
+  | Tool_usage -> 900.0
+  | Tool_metric -> 900.0
+
+let source_producer = function
+  | Keeper_metric -> "keeper_unified_metrics"
+  | Agent_event -> "telemetry_eio"
+  | Tool_call_io -> "keeper_hooks_oas"
+  | Tool_usage -> "tool_usage_log"
+  | Oas_event -> "oas_event_bus"
+  | Tool_metric -> "tool_metrics_persist"
+
+let source_dashboard_surface = function
+  | Keeper_metric -> "/api/v1/dashboard/telemetry/summary"
+  | Agent_event -> "/api/v1/dashboard/telemetry"
+  | Tool_call_io -> "/api/v1/keepers/:name/tool-calls"
+  | Tool_usage -> "/api/v1/dashboard/tools"
+  | Oas_event -> "/api/v1/dashboard/telemetry"
+  | Tool_metric -> "/api/v1/dashboard/tool-quality"
+
+let source_durable_store ~masc_root ~base_path = function
+  | Keeper_metric -> Filename.concat masc_root "keepers/*/metrics"
+  | source -> (
+      match fixed_store_dir ~masc_root ~base_path source with
+      | Some dir -> dir
+      | None -> "")
+
 (** Discover all keeper metric directories under [masc_root/keepers/]. *)
 let discover_keeper_metric_dirs masc_root : (string * string) list =
   let keepers_dir = Filename.concat masc_root "keepers" in
@@ -187,6 +218,44 @@ let freshness_fields ~now latest_ts =
     ]
   | None ->
     [ ("latest_ts_unix", `Null); ("latest_ts_iso", `Null); ("latest_age_s", `Null) ]
+
+let source_health_fields ~now ~exists ~entry_count ~latest_ts ~freshness_slo_s
+    ?coverage_gap () =
+  match coverage_gap with
+  | Some gap ->
+    [
+      ("health", `String "coverage_gap");
+      ( "stale_reason",
+        `String
+          (Safe_ops.json_string ~default:"coverage_gap" "stale_reason" gap) );
+    ]
+  | None ->
+    let health, stale_reason =
+      if not exists then ("missing", "store_missing")
+      else if entry_count = 0 then ("empty", "no_entries")
+      else
+        match latest_ts with
+        | None -> ("empty", "no_entries")
+        | Some ts ->
+          let latest_age_s = max 0.0 (now -. ts) in
+          if latest_age_s > freshness_slo_s then
+            ("stale", "freshness_slo_exceeded")
+          else ("ok", "")
+    in
+    [
+      ("health", `String health);
+      ( "stale_reason",
+        if stale_reason = "" then `Null else `String stale_reason );
+    ]
+
+let latest_coverage_gap_for_source gaps source =
+  let source_name = source_to_string source in
+  gaps
+  |> List.rev
+  |> List.find_opt (fun gap ->
+       String.equal
+         (Safe_ops.json_string ~default:"" "source" gap)
+         source_name)
 
 (* ── Semantic duplicate suppression ───────────────── *)
 
@@ -491,6 +560,7 @@ let count_fixed_source_entries ~masc_root ~base_path source : int =
 
 let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
   let now = Unix.gettimeofday () in
+  let coverage_gaps = Telemetry_coverage_gap.read_recent ~masc_root ~n:50 in
   let keeper_dirs = discover_keeper_metric_dirs masc_root in
   let keeper_total =
     List.fold_left (fun acc (name, dir) ->
@@ -513,8 +583,20 @@ let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
       None keeper_dirs
   in
   let source_json_and_count source =
+    let freshness_slo_s = source_freshness_slo_s source in
+    let metadata_fields =
+      [
+        ("freshness_slo_s", `Float freshness_slo_s);
+        ("producer", `String (source_producer source));
+        ( "durable_store",
+          `String (source_durable_store ~masc_root ~base_path source) );
+        ("dashboard_surface", `String (source_dashboard_surface source));
+      ]
+    in
+    let coverage_gap = latest_coverage_gap_for_source coverage_gaps source in
     match source with
     | Keeper_metric ->
+      let exists = keeper_dirs <> [] in
       ( `Assoc
           ([
              ("source", `String (source_to_string source));
@@ -527,7 +609,10 @@ let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
              ("keeper_count", `Int (List.length keeper_dirs));
              ("entry_count", `Int keeper_total);
            ]
-          @ freshness_fields ~now keeper_latest_ts),
+          @ metadata_fields
+          @ freshness_fields ~now keeper_latest_ts
+          @ source_health_fields ~now ~exists ~entry_count:keeper_total
+              ~latest_ts:keeper_latest_ts ~freshness_slo_s ?coverage_gap ()),
         keeper_total )
     | _ ->
       let dir = match fixed_store_dir ~masc_root ~base_path source with
@@ -544,7 +629,10 @@ let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
              ("exists", `Bool exists);
              ("entry_count", `Int count);
            ]
-          @ freshness_fields ~now latest_ts),
+          @ metadata_fields
+          @ freshness_fields ~now latest_ts
+          @ source_health_fields ~now ~exists ~entry_count:count ~latest_ts
+              ~freshness_slo_s ?coverage_gap ()),
         count )
   in
   let source_summaries = List.map source_json_and_count all_sources in
@@ -554,5 +642,6 @@ let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
   `Assoc [
     ("generated_at", `String (Types.now_iso ()));
     ("sources", `List (List.map fst source_summaries));
+    ("coverage_gaps", `List coverage_gaps);
     ("total_entries", `Int total_entries);
   ]

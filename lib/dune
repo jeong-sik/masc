@@ -287,6 +287,7 @@
    subsystem_health
    subscriptions
    telemetry_eio
+   telemetry_coverage_gap
    telemetry_unified
    tempo
    timeout_policy

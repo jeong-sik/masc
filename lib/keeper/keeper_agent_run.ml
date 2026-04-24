@@ -1688,6 +1688,7 @@ let run_turn
               in
               Keeper_tool_call_log.set_turn_context
                 ~keeper_name:meta.name
+                ~agent_name:meta.agent_name
                 ~lane
                 ?tool_choice:(Option.map
                   (fun choice ->
@@ -1698,19 +1699,27 @@ let run_turn
                 ?thinking_budget:current_params.thinking_budget
                 ~prompt_fingerprint:prompt_metrics.fingerprint
                 ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-	                ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-	                ~turn
-	                ~keeper_turn_id:turn
-	                ?task_id:(Option.map Keeper_id.Task_id.to_string (!meta_ref).current_task_id)
-	                ~goal_ids:meta.active_goal_ids
+                ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+                ~generation
+                ~turn
+                ~keeper_turn_id:turn
+                ?task_id:(Option.map Keeper_id.Task_id.to_string (!meta_ref).current_task_id)
+                ~goal_ids:meta.active_goal_ids
                 ~sandbox_profile:
                   (Keeper_types.sandbox_profile_to_string meta.sandbox_profile)
+                ~sandbox_root:(Keeper_sandbox.host_root_abs_of_meta ~config meta)
+                ~allowed_paths:(Keeper_alerting_path.effective_allowed_paths ~meta)
                 ~network_mode:
                   (Keeper_types.network_mode_to_string meta.network_mode)
                 ~shared_memory_scope:
                   (Keeper_types.shared_memory_scope_to_string
                      meta.shared_memory_scope)
                 ?approval_mode:approval_mode_effective
+                ~tool_surface_class:computed_surface.tool_surface_class
+                ~visible_tool_count:(List.length all_allowed)
+                ~required_tools:computed_surface.required_tool_names
+                ~missing_required_tools:computed_surface.missing_required_tool_names
+                ~cascade_profile:cascade_name
                 ();
               (* Tool disclosure telemetry: emitted after all allow-list rewrites
            (last-turn intersect, max_tools cap) so that
@@ -2791,6 +2800,29 @@ let run_turn
        Log.Keeper.warn
          "keeper:%s execution_receipt append failed: %s"
          meta.name
-         (Printexc.to_string exn));
+         (Printexc.to_string exn);
+       (try
+          let masc_root = Coord.masc_root_dir config in
+          Telemetry_coverage_gap.record
+            ~masc_root
+            ~source:"execution_receipt"
+            ~producer:"keeper_agent_run.execution_receipt"
+            ~durable_store:
+              (Filename.concat
+                 (Filename.concat (Filename.concat masc_root "keepers") meta.name)
+                 "execution-receipts")
+            ~dashboard_surface:"/api/v1/dashboard/execution-trust"
+            ~stale_reason:"execution_receipt_append_failed"
+            ~keeper_name:meta.name
+            ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+            ~error:(Printexc.to_string exn)
+            ()
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | gap_exn ->
+          Log.Keeper.warn
+            "keeper:%s execution_receipt coverage gap append failed: %s"
+            meta.name
+            (Printexc.to_string gap_exn)));
     turn_result
 ;;

@@ -397,6 +397,49 @@ let test_hourly_bucket_json () =
   Alcotest.(check int) "calls" 5 (json |> member "call_count" |> to_int);
   Alcotest.(check int) "errors" 1 (json |> member "error_count" |> to_int)
 
+let test_entry_to_json_includes_contract_and_radius () =
+  let entry : Trajectory.tool_call_entry = {
+    ts = 1000.0;
+    ts_iso = "2026-04-06T10:00:00Z";
+    turn = 1;
+    round = 1;
+    tool_name = "keeper_bash";
+    args_json = {|{"command":"pwd"}|};
+    gate_decision = Trajectory.Pass;
+    result = Some "/tmp/work";
+    duration_ms = 25;
+    error = None;
+    cost_usd = 0.0001;
+  } in
+  let runtime_contract =
+    Keeper_runtime_contract.runtime_contract_json_from_fields
+      ~keeper_name:"alpha"
+      ~agent_name:"alpha-agent"
+      ~trace_id:"trace-alpha"
+      ~generation:2
+      ~sandbox_profile:"docker"
+      ()
+  in
+  let action_radius =
+    Keeper_runtime_contract.action_radius_json
+      ~tool_name:"keeper_bash"
+      ~input:(`Assoc [("cwd", `String "/tmp/work")])
+      ~success:true
+      ~duration_ms:25.0
+      ()
+  in
+  let json =
+    Trajectory.entry_to_json ~runtime_contract ~action_radius entry
+  in
+  let open Yojson.Safe.Util in
+  Alcotest.(check string) "runtime keeper" "alpha"
+    (json |> member "runtime_contract" |> member "keeper_name" |> to_string);
+  Alcotest.(check string) "action tool" "keeper_bash"
+    (json |> member "action_radius" |> member "tool_name" |> to_string);
+  Alcotest.(check string) "observed path" "/tmp/work"
+    (json |> member "action_radius" |> member "observed_paths" |> to_list
+     |> List.hd |> to_string)
+
 (* ================================================================ *)
 (* Test: read_entries_since (file-based)                             *)
 (* ================================================================ *)
@@ -424,6 +467,37 @@ let test_read_entries_since () =
     (* Read since ts=0 should get all 3 *)
     let all = Trajectory.read_entries_since ~masc_root ~keeper_name:keeper ~since:0.0 in
     Alcotest.(check int) "all entries" 3 (List.length all))
+
+let test_read_entries_since_result_parses_gate_summary () =
+  with_tmpdir (fun dir ->
+    let masc_root = dir in
+    let keeper = "test-keeper" in
+    let traj_dir = Filename.concat masc_root (Printf.sprintf "trajectories/%s" keeper) in
+    ignore (Sys.command (Printf.sprintf "mkdir -p %s" (Filename.quote traj_dir)));
+    let path = Filename.concat traj_dir "trace-101.jsonl" in
+    let rows =
+      [
+        {|{"ts":1000.0,"ts_iso":"2026-04-06T10:00:00Z","turn":1,"round":1,"tool_name":"keeper_bash","args":{},"gate":{"status":"pass"},"result":"ok","duration_ms":100,"error":null,"cost_usd":0.001}|};
+        {|{"ts":2000.0,"ts_iso":"2026-04-06T10:01:00Z","turn":1,"round":2,"tool_name":"keeper_bash","args":{},"gate":{"status":"reject","reason":"blocked"},"result":null,"duration_ms":0,"error":"blocked","cost_usd":0.0}|};
+        {|{"ts":3000.0,"ts_iso":"2026-04-06T10:02:00Z","turn":1,"round":3,"tool_name":"keeper_bash","args":{},"result":"legacy","duration_ms":10,"error":null,"cost_usd":0.001}|};
+      ]
+    in
+    let oc = open_out path in
+    List.iter (Printf.fprintf oc "%s\n") rows;
+    close_out oc;
+    let result =
+      Trajectory.read_entries_since_result ~masc_root ~keeper_name:keeper
+        ~since:0.0
+    in
+    Alcotest.(check int) "three entries" 3 (List.length result.Trajectory.entries);
+    Alcotest.(check int) "parsed gate count" 2
+      result.Trajectory.gate_decode.parsed_gate_count;
+    Alcotest.(check int) "legacy default count" 1
+      result.Trajectory.gate_decode.legacy_default_count;
+    match List.nth result.Trajectory.entries 1 with
+    | { Trajectory.gate_decision = Trajectory.Reject reason; _ } ->
+      Alcotest.(check string) "reject reason parsed" "blocked" reason
+    | _ -> Alcotest.fail "expected persisted reject gate")
 
 let test_read_entries_since_no_dir () =
   with_tmpdir (fun dir ->
@@ -483,9 +557,13 @@ let () =
     ("json_serialization", [
       Alcotest.test_case "tool_stat to json" `Quick test_tool_stat_json_roundtrip;
       Alcotest.test_case "hourly_bucket to json" `Quick test_hourly_bucket_json;
+      Alcotest.test_case "entry carries runtime/action telemetry" `Quick
+        test_entry_to_json_includes_contract_and_radius;
     ]);
     ("read_entries_since", [
       Alcotest.test_case "filter by timestamp" `Quick test_read_entries_since;
+      Alcotest.test_case "parses persisted gate summary" `Quick
+        test_read_entries_since_result_parses_gate_summary;
       Alcotest.test_case "nonexistent directory" `Quick test_read_entries_since_no_dir;
     ]);
   ]

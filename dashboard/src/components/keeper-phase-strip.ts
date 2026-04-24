@@ -28,6 +28,13 @@ function phaseInlineStyle(phase: string): string {
   return `color: ${style.color}; background: ${style.bg}; border: 1px solid ${style.border};`
 }
 
+function signalColor(t: KeeperTransition): string {
+  const severity = t.operator_signal?.severity
+  if (severity === 'bad') return 'var(--bad)'
+  if (severity === 'warn') return 'var(--warn)'
+  return phaseColor(t.new_phase)
+}
+
 /** selected_event comes as object {type: "...", ...} from the server */
 export function eventLabel(event: unknown): string {
   if (typeof event === 'string') return event
@@ -58,7 +65,8 @@ async function loadAll() {
 }
 
 function TransitionDot({ t, idx }: { t: KeeperTransition; idx: number }) {
-  const color = phaseColor(t.new_phase)
+  const color = signalColor(t)
+  const signal = t.operator_signal
   return html`
     <div class="group relative flex flex-col items-center" key=${idx}>
       <div
@@ -68,7 +76,15 @@ function TransitionDot({ t, idx }: { t: KeeperTransition; idx: number }) {
       <div class="absolute bottom-full mb-2 hidden group-hover:flex flex-col items-center z-10">
         <div class="rounded border border-[var(--card-border)] bg-[var(--card)] px-3 py-2 shadow-sm text-2xs whitespace-nowrap">
           <div class="font-semibold">${t.prev_phase} → ${t.new_phase}</div>
-          <div class="text-[var(--text-muted)] mt-0.5">${eventLabel(t.selected_event)}</div>
+          <div class="text-[var(--text-muted)] mt-0.5">${t.event_type ?? eventLabel(t.selected_event)}</div>
+          ${signal ? html`
+            <div class="mt-1 text-[var(--text-body)]">${signal.summary}</div>
+            ${signal.requires_operator_decision ? html`
+              <div class="mt-1 font-semibold text-[var(--warn)]">
+                decision required${signal.next_human_action ? ` · ${signal.next_human_action}` : ''}
+              </div>
+            ` : null}
+          ` : null}
           <div class="text-[var(--text-muted)]"><${TimeAgo} timestamp=${t.wall_clock_at_decision * 1000} /></div>
         </div>
       </div>

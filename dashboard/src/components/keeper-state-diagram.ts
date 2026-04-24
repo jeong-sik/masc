@@ -67,6 +67,17 @@ function transitionType(selectedEvent: unknown): string {
   return 'event'
 }
 
+function signalTone(severity: string | null | undefined): string {
+  switch (severity) {
+    case 'bad':
+      return 'border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--bad)]'
+    case 'warn':
+      return 'border-[var(--warn-24)] bg-[var(--warn-8)] text-[var(--warn)]'
+    default:
+      return 'border-[rgba(34,197,94,0.24)] bg-[var(--emerald-8)] text-[var(--ok)]'
+  }
+}
+
 function badgeTone(ok: boolean): string {
   return ok
     ? 'border-[rgba(34,197,94,0.24)] bg-[var(--emerald-8)] text-[var(--ok)]'
@@ -208,9 +219,22 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
                 <span class="text-[var(--text-dim)]">→</span>
                 <span class="font-mono text-[var(--accent)]">${normalizePhase(transition.new_phase) ?? transition.new_phase}</span>
                 <span class="rounded-sm border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5 text-3xs text-[var(--text-muted)]">
-                  ${transitionType(transition.selected_event)}
+                  ${transition.event_type ?? transitionType(transition.selected_event)}
                 </span>
+                ${transition.operator_signal ? html`
+                  <span class=${`rounded-sm border px-2 py-0.5 text-3xs ${signalTone(transition.operator_signal.severity)}`}>
+                    ${transition.operator_signal.requires_operator_decision ? 'decision required' : transition.operator_signal.class}
+                  </span>
+                ` : null}
               </div>
+              ${transition.operator_signal ? html`
+                <div class="mt-1 text-[var(--text-muted)]">
+                  ${transition.operator_signal.summary}
+                  ${transition.operator_signal.next_human_action
+                    ? html`<span class="text-[var(--warn)]"> · ${transition.operator_signal.next_human_action}</span>`
+                    : null}
+                </div>
+              ` : null}
             </div>
           `)}
         </div>

@@ -10,7 +10,134 @@ type transition_record = {
   wall_clock_at_decision : float;
 }
 
+type operator_signal = {
+  signal_class : string;
+  severity : string;
+  requires_operator_decision : bool;
+  next_human_action : string option;
+  summary : string;
+}
+
+let event_type_of_event event =
+  match Keeper_state_machine.event_to_json event with
+  | `Assoc fields -> (
+      match List.assoc_opt "type" fields with
+      | Some (`String value) -> value
+      | _ -> Keeper_state_machine.event_to_string event)
+  | _ -> Keeper_state_machine.event_to_string event
+
+let operator_signal ?next_human_action ~signal_class ~severity
+    ~requires_operator_decision summary =
+  {
+    signal_class;
+    severity;
+    requires_operator_decision;
+    next_human_action;
+    summary;
+  }
+
+let operator_signal_to_json signal =
+  `Assoc
+    [
+      ("class", `String signal.signal_class);
+      ("severity", `String signal.severity);
+      ("requires_operator_decision", `Bool signal.requires_operator_decision);
+      ("next_human_action", Json_util.string_opt_to_json signal.next_human_action);
+      ("summary", `String signal.summary);
+    ]
+
+let operator_signal_of_transition (r : transition_record) =
+  let open Keeper_state_machine in
+  let phase_name = Keeper_state_machine.phase_to_string in
+  match r.selected_event with
+  | Operator_pause ->
+      operator_signal ~signal_class:"operator_gate" ~severity:"warn"
+        ~requires_operator_decision:true
+        ~next_human_action:"resume_or_update_policy"
+        "keeper paused; operator decision is required"
+  | Operator_resume ->
+      operator_signal ~signal_class:"operator_gate" ~severity:"ok"
+        ~requires_operator_decision:false "keeper resumed by operator"
+  | Operator_stop _ | Stop_requested ->
+      operator_signal ~signal_class:"operator_stop" ~severity:"warn"
+        ~requires_operator_decision:false "keeper stop requested"
+  | Restart_budget_exhausted ->
+      operator_signal ~signal_class:"runtime_alert" ~severity:"bad"
+        ~requires_operator_decision:true
+        ~next_human_action:"inspect_or_restart_keeper"
+        "restart budget exhausted; operator must choose recovery"
+  | Guardrail_stop { reason } ->
+      operator_signal ~signal_class:"runtime_alert" ~severity:"bad"
+        ~requires_operator_decision:true
+        ~next_human_action:"inspect_guardrail_and_resume"
+        (Printf.sprintf "guardrail stopped keeper: %s" reason)
+  | Compact_retry_exhausted ->
+      operator_signal ~signal_class:"context_management" ~severity:"bad"
+        ~requires_operator_decision:true
+        ~next_human_action:"approve_handoff_or_reduce_context"
+        "auto-compact retry budget exhausted"
+  | Compaction_failed { reason } ->
+      operator_signal ~signal_class:"context_management" ~severity:"bad"
+        ~requires_operator_decision:true
+        ~next_human_action:"retry_compaction_or_handoff"
+        (Printf.sprintf "compaction failed: %s" reason)
+  | Handoff_failed { reason } ->
+      operator_signal ~signal_class:"handoff" ~severity:"bad"
+        ~requires_operator_decision:true
+        ~next_human_action:"retry_handoff_or_resume"
+        (Printf.sprintf "handoff failed: %s" reason)
+  | Context_overflow_detected _ ->
+      operator_signal ~signal_class:"context_management" ~severity:"warn"
+        ~requires_operator_decision:false
+        "context overflow detected; recovery path should continue"
+  | _ -> (
+      match r.new_phase with
+      | Paused ->
+          operator_signal ~signal_class:"operator_gate" ~severity:"warn"
+            ~requires_operator_decision:true
+            ~next_human_action:"resume_or_update_policy"
+            (Printf.sprintf "%s -> paused; operator decision is required"
+               (phase_name r.prev_phase))
+      | Crashed ->
+          operator_signal ~signal_class:"runtime_alert" ~severity:"bad"
+            ~requires_operator_decision:true
+            ~next_human_action:"inspect_or_restart_keeper"
+            "keeper crashed; operator must inspect recovery"
+      | Dead ->
+          operator_signal ~signal_class:"runtime_alert" ~severity:"bad"
+            ~requires_operator_decision:true
+            ~next_human_action:"inspect_or_recreate_keeper"
+            "keeper reached dead phase"
+      | Failing ->
+          operator_signal ~signal_class:"runtime_recovery" ~severity:"warn"
+            ~requires_operator_decision:false
+            "keeper entered failing recovery lane"
+      | Overflowed ->
+          operator_signal ~signal_class:"context_management" ~severity:"warn"
+            ~requires_operator_decision:false
+            "keeper overflowed context and should compact or hand off"
+      | Compacting ->
+          operator_signal ~signal_class:"context_management" ~severity:"warn"
+            ~requires_operator_decision:false "keeper is compacting context"
+      | HandingOff ->
+          operator_signal ~signal_class:"handoff" ~severity:"warn"
+            ~requires_operator_decision:false "keeper handoff is in progress"
+      | Draining ->
+          operator_signal ~signal_class:"operator_stop" ~severity:"warn"
+            ~requires_operator_decision:false "keeper is draining toward stop"
+      | Restarting ->
+          operator_signal ~signal_class:"runtime_recovery" ~severity:"warn"
+            ~requires_operator_decision:false "keeper restart is scheduled"
+      | Running when r.prev_phase <> Running ->
+          operator_signal ~signal_class:"healthy" ~severity:"ok"
+            ~requires_operator_decision:false "keeper recovered to running"
+      | Offline | Running | Stopped ->
+          operator_signal ~signal_class:"healthy" ~severity:"ok"
+            ~requires_operator_decision:false "phase transition observed")
+
 let to_json (r : transition_record) : Yojson.Safe.t =
+  let event_type = event_type_of_event r.selected_event in
+  let operator_signal = operator_signal_of_transition r in
   `Assoc [
     "snapshot", (match r.snapshot with
       | Some s -> Keeper_measurement.measurement_snapshot_to_json s
@@ -18,9 +145,11 @@ let to_json (r : transition_record) : Yojson.Safe.t =
     "events_fired",
       `List (List.map Keeper_state_machine.event_to_json r.events_fired);
     "selected_event", Keeper_state_machine.event_to_json r.selected_event;
+    "event_type", `String event_type;
     "prev_phase", Keeper_state_machine.phase_to_json r.prev_phase;
     "new_phase", Keeper_state_machine.phase_to_json r.new_phase;
     "transition_outcome", `String r.transition_outcome;
+    "operator_signal", operator_signal_to_json operator_signal;
     "wall_clock_at_decision", `Float r.wall_clock_at_decision;
   ]
 

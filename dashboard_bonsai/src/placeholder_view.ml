@@ -217,7 +217,7 @@ let blueprint_of_route : Route.t -> blueprint = function
 let panel ~title ~text ~code =
   Node.div
     ~attrs:[ Style.panel; Attr.role "listitem"; Attr.arialabel title ]
-    [ Node.h3 ~attrs:[ Style.panel_title ] [ Node.text title ]
+    [ Node.h2 ~attrs:[ Style.panel_title ] [ Node.text title ]
     ; Node.p ~attrs:[ Style.panel_text ] [ Node.text text ]
     ; Node.div ~attrs:[ Style.panel_code ] [ Node.text code ]
     ]

@@ -784,7 +784,7 @@ let short_base path =
 ;;
 
 let aside_title ?right text =
-  Node.h3
+  Node.h2
     ~attrs:[ Style.aside_title ]
     ([ Node.text text ]
      @

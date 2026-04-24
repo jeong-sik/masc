@@ -2149,7 +2149,7 @@ let render_response
         [ Node.div
             ~attrs:[ Style.header_lead ]
             [ Node.p ~attrs:[ Style.eyebrow ] [ Node.text "log ring · in-memory" ]
-            ; Node.h1
+            ; Node.h2
                 ~attrs:[ Style.title ]
                 [ Node.span ~attrs:[ Style.versal ] [ Node.text "J" ]
                 ; Node.span ~attrs:[ Style.title_rest ] [ Node.text "ournal" ]

@@ -26,7 +26,7 @@ stylesheet
     min-height: 100vh;
     background:
       radial-gradient(circle at 88% 14%, rgba(138, 106, 40, 0.10), transparent 22%),
-      radial-gradient(circle at 8% 88%, rgba(160, 24, 24, 0.05), transparent 28%),
+      radial-gradient(circle at 8% 88%, rgba(232, 80, 80, 0.05), transparent 28%),
       var(--bg-deep);
     color: var(--text-primary);
     font-family: 'EB Garamond', 'Noto Sans KR', Georgia, serif;
@@ -186,7 +186,7 @@ stylesheet
   }
 
   .heartbeat_bar_warn  { background: linear-gradient(180deg, var(--status-warn) 0%, #6a3c10 100%); }
-  .heartbeat_bar_error { background: linear-gradient(180deg, #e84848 0%, #8a1010 100%); box-shadow: 0 0 6px rgba(160, 24, 24, 0.45); }
+  .heartbeat_bar_error { background: linear-gradient(180deg, var(--accent-blood) 0%, var(--accent-blood-dim) 100%); box-shadow: 0 0 6px rgba(232, 80, 80, 0.45); }
   .heartbeat_bar_idle  { background: var(--border-main); opacity: 0.6; }
 
   /* hud CSS → Hud 모듈로 이관 (shell 추출 Phase 2.A) */
@@ -203,7 +203,7 @@ stylesheet
       linear-gradient(90deg,
         rgba(138, 106, 40, 0.10) 0%,
         transparent 45%,
-        rgba(160, 24, 24, 0.06) 100%),
+        rgba(232, 80, 80, 0.06) 100%),
       #0f0b09;
     border: 1px solid var(--border-main);
     border-radius: 2px;
@@ -341,6 +341,7 @@ stylesheet
     transition: color 0.18s, border-color 0.18s;
   }
   .btn_ghost:hover { color: var(--accent-brass); border-color: var(--border-highlight); }
+  .btn_ghost:focus-visible { outline: 2px solid var(--accent-brass); outline-offset: -2px; }
 
   .header {
     display: flex;
@@ -510,7 +511,7 @@ stylesheet
   }
 
   .sigil_warn  { color: var(--status-warn); border-color: var(--status-warn); box-shadow: inset 0 0 0 1px rgba(232,216,184,0.06), 0 0 8px rgba(160, 106, 26, 0.35); }
-  .sigil_error { color: var(--text-bright); border-color: var(--accent-blood); background: radial-gradient(circle at 35% 30%, rgba(232,216,184,0.28), transparent 55%), #3a1410; box-shadow: inset 0 0 0 1px rgba(232,216,184,0.08), 0 0 10px rgba(160, 24, 24, 0.45); }
+  .sigil_error { color: var(--text-bright); border-color: var(--accent-blood); background: radial-gradient(circle at 35% 30%, rgba(232,216,184,0.28), transparent 55%), #3a1410; box-shadow: inset 0 0 0 1px rgba(232,216,184,0.08), 0 0 10px rgba(232, 80, 80, 0.45); }
 
   .message_lead::first-letter {
     font-family: 'Cinzel', 'EB Garamond', serif;
@@ -537,13 +538,13 @@ stylesheet
   }
 
   .row_error {
-    background: linear-gradient(90deg, rgba(160, 24, 24, 0.08) 0%, transparent 60%);
+    background: linear-gradient(90deg, rgba(232, 80, 80, 0.08) 0%, transparent 60%);
     border-left-color: var(--accent-blood);
   }
 
   .row_error:hover {
-    background: linear-gradient(90deg, rgba(160, 24, 24, 0.18) 0%, transparent 65%);
-    box-shadow: inset 1px 0 0 0 rgba(160, 24, 24, 0.55);
+    background: linear-gradient(90deg, rgba(232, 80, 80, 0.18) 0%, transparent 65%);
+    box-shadow: inset 1px 0 0 0 rgba(232, 80, 80, 0.55);
     border-left-color: #c94a3a;
   }
 
@@ -587,7 +588,7 @@ stylesheet
   .level_debug { color: var(--text-dim); }
   .level_info  { color: var(--text-primary); }
   .level_warn  { color: var(--status-warn); }
-  .level_error { color: var(--accent-blood); text-shadow: 0 0 12px rgba(160, 24, 24, 0.32); }
+  .level_error { color: var(--accent-blood); text-shadow: 0 0 12px rgba(232, 80, 80, 0.32); }
 
   .mod_col {
     font-family: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
@@ -683,7 +684,7 @@ stylesheet
       inset 0 0 0 1px rgba(232, 216, 184, 0.18),
       inset -6px -8px 14px rgba(0, 0, 0, 0.55),
       inset 5px 4px 10px rgba(232, 216, 184, 0.15),
-      0 6px 14px rgba(160, 24, 24, 0.35),
+      0 6px 14px rgba(232, 80, 80, 0.35),
       0 0 22px rgba(138, 106, 40, 0.22);
     transform: rotate(-14deg);
     z-index: 4;
@@ -1087,7 +1088,7 @@ stylesheet
   }
   .evrow_bad .evrow_b_code {
     color: var(--accent-blood);
-    background: rgba(160, 24, 24, 0.08);
+    background: rgba(232, 80, 80, 0.08);
   }
 
   /* ─── page-head (hero) ───
@@ -1177,6 +1178,7 @@ stylesheet
     border-color: var(--accent-brass);
     color: var(--accent-brass);
   }
+  .pbtn:focus-visible { outline: 2px solid var(--accent-brass); outline-offset: -2px; }
   .pbtn_primary {
     background: linear-gradient(180deg, #3a2a16 0%, #241810 100%);
     border-color: var(--accent-brass);
@@ -1364,7 +1366,7 @@ let view_entry ~is_first (e : Logs_types.entry) =
     ; Node.div ~attrs:[ Style.mod_col ] [ Node.text e.module_ ]
     ; Node.div
         ~attrs:[ Style.source_badge ]
-        [ Node.span ~attrs:[ Style.dot; dot_class e.normalized_level ] []
+        [ Node.span ~attrs:[ Style.dot; dot_class e.normalized_level; Attr.create "aria-hidden" "true" ] []
         ; Node.text e.source
         ]
     ; Node.div message_block
@@ -1667,7 +1669,7 @@ let render_response
            head @ runtime_seg @ tail)
       ; Node.div
           ~attrs:[ Style.pulse_slot ]
-          [ Node.span ~attrs:[ Style.pulse ] []
+          [ Node.span ~attrs:[ Style.pulse; Attr.create "aria-hidden" "true" ] []
           ; Node.span ~attrs:[ Style.pulse_label ] [ Node.text "live · 3s" ]
           ]
       ]
@@ -1676,18 +1678,14 @@ let render_response
     Node.div
       ~attrs:[ Style.toolbar ]
       [ (let filter_chip ~level ~label =
-           let click =
-             Attr.on_click (fun _ev ->
-               let effect =
-                 Effect.of_sync_fun
-                   (fun () ->
-                     let doc = Js_of_ocaml.Dom_html.document in
-                     doc##.documentElement##setAttribute
-                       (Js_of_ocaml.Js.string "data-log-level")
-                       (Js_of_ocaml.Js.string level))
-                   ()
-               in
-               effect)
+           let fire () =
+             Effect.of_sync_fun
+               (fun () ->
+                 let doc = Js_of_ocaml.Dom_html.document in
+                 doc##.documentElement##setAttribute
+                   (Js_of_ocaml.Js.string "data-log-level")
+                   (Js_of_ocaml.Js.string level))
+               ()
            in
            Node.span
              ~attrs:
@@ -1695,7 +1693,13 @@ let render_response
                ; Attr.create "data-filter-level" level
                ; Attr.role "button"
                ; Attr.tabindex 0
-               ; click
+               ; Attr.on_click (fun _ev -> fire ())
+               ; Attr.on_key_down (fun ev ->
+                   let open Virtual_dom.Vdom.Event.Keyboard in
+                   if Key.equal ev.key Key.Enter
+                      || Key.equal ev.key (Key.of_string " ")
+                   then fire ()
+                   else Effect.of_sync_fun (fun () -> ()) ())
                ]
              [ Node.text label ]
          in
@@ -1737,7 +1741,7 @@ let render_response
   let moonrise =
     Node.div
       ~attrs:[ Style.moonrise ]
-      [ Node.span ~attrs:[ Style.moon_glyph ] []
+      [ Node.span ~attrs:[ Style.moon_glyph; Attr.create "aria-hidden" "true" ] []
       ; Node.span ~attrs:[ Style.moon_lead ] [ Node.text moon_lead_text ]
       ; Node.span ~attrs:[ Style.moon_sep ] [ Node.text "·" ]
       ; Node.span [ Node.text "lit by a half moon" ]
@@ -1779,7 +1783,7 @@ let render_response
     in
     Node.a
       ~attrs:(Attr.href (Route.path route) :: base)
-      ([ Node.span ~attrs:[ Style.nav_link_glyph ] []
+      ([ Node.span ~attrs:[ Style.nav_link_glyph; Attr.create "aria-hidden" "true" ] []
        ; Node.text (Route.label route)
        ]
        @ tail_node)
@@ -1834,18 +1838,26 @@ let render_response
          nav_link Dead_keepers ~tail)
       ; nav_link Archive_runs
       ; (let chip name label =
+           let fire () =
+             Effect.of_sync_fun
+               (fun () ->
+                 Dom_html.window##.location##.hash
+                 := Js.string ("#" ^ name))
+               ()
+           in
            Node.div
              ~attrs:
                [ Style.theme_chip
                ; Attr.create "data-chip-theme" name
                ; Attr.role "button"
                ; Attr.tabindex 0
-               ; Attr.on_click (fun _ ->
-                   Effect.of_sync_fun
-                     (fun () ->
-                       Dom_html.window##.location##.hash
-                       := Js.string ("#" ^ name))
-                     ())
+               ; Attr.on_click (fun _ -> fire ())
+               ; Attr.on_key_down (fun ev ->
+                   let open Virtual_dom.Vdom.Event.Keyboard in
+                   if Key.equal ev.key Key.Enter
+                      || Key.equal ev.key (Key.of_string " ")
+                   then fire ()
+                   else Effect.of_sync_fun (fun () -> ()) ())
                ]
              [ Node.text label ]
          in
@@ -1933,7 +1945,7 @@ let render_response
               ]
           ; Node.div
               ~attrs:[ Style.vial ]
-              [ Node.span ~attrs:[ Style.vial_fill; vial_style ] [] ]
+              [ Node.span ~attrs:[ Style.vial_fill; vial_style; Attr.create "aria-hidden" "true" ] [] ]
           ]
       ; Node.div
           ~attrs:[ Style.focus_stats ]
@@ -2116,12 +2128,16 @@ let render_response
             ~attrs:[ Style.page_actions ]
             [ Node.button
                 ~attrs:[ Style.pbtn ]
-                [ Node.span ~attrs:[ Style.pbtn_glyph ] []
+                [ Node.span
+                    ~attrs:[ Style.pbtn_glyph; Attr.create "aria-hidden" "true" ]
+                    []
                 ; Node.text "preflight"
                 ]
             ; Node.button
                 ~attrs:[ Style.pbtn; Style.pbtn_primary ]
-                [ Node.span ~attrs:[ Style.pbtn_glyph ] []
+                [ Node.span
+                    ~attrs:[ Style.pbtn_glyph; Attr.create "aria-hidden" "true" ]
+                    []
                 ; Node.text "advance round"
                 ]
             ]
@@ -2137,7 +2153,7 @@ let render_response
                 ~attrs:[ Style.title ]
                 [ Node.span ~attrs:[ Style.versal ] [ Node.text "J" ]
                 ; Node.span ~attrs:[ Style.title_rest ] [ Node.text "ournal" ]
-                ; Node.span ~attrs:[ Style.title_rule ] []
+                ; Node.span ~attrs:[ Style.title_rule; Attr.create "aria-hidden" "true" ] []
                 ; Node.span
                     ~attrs:[ Style.folio ]
                     [ Node.text "folio xii · recto" ]
@@ -2149,12 +2165,12 @@ let render_response
         ]
     ; Node.div
         ~attrs:[ Style.sec ]
-        [ Node.span ~attrs:[ Style.sec_glyph ] []
+        [ Node.span ~attrs:[ Style.sec_glyph; Attr.create "aria-hidden" "true" ] []
         ; Node.div ~attrs:[ Style.sec_h ] [ Node.text "log ring" ]
         ; Node.span
             ~attrs:[ Style.sec_sub ]
             [ Node.text "in-memory journal · newest on top" ]
-        ; Node.span ~attrs:[ Style.sec_hr ] []
+        ; Node.span ~attrs:[ Style.sec_hr; Attr.create "aria-hidden" "true" ] []
         ; Node.span
             ~attrs:[ Style.sec_r ]
             [ Node.text "rows "
@@ -2173,12 +2189,12 @@ let render_response
     ; tape
     ; Node.div
         ~attrs:[ Style.sec ]
-        [ Node.span ~attrs:[ Style.sec_glyph ] []
+        [ Node.span ~attrs:[ Style.sec_glyph; Attr.create "aria-hidden" "true" ] []
         ; Node.div ~attrs:[ Style.sec_h ] [ Node.text "keepers" ]
         ; Node.span
             ~attrs:[ Style.sec_sub ]
             [ Node.text "sorted by heartbeat · ctx spark = last 10 min" ]
-        ; Node.span ~attrs:[ Style.sec_hr ] []
+        ; Node.span ~attrs:[ Style.sec_hr; Attr.create "aria-hidden" "true" ] []
         ; Node.span
             ~attrs:[ Style.sec_r ]
             [ Node.text "slot "
@@ -2194,12 +2210,12 @@ let render_response
     ; Roster.view ~keepers ()
     ; Node.div
         ~attrs:[ Style.sec ]
-        [ Node.span ~attrs:[ Style.sec_glyph ] []
+        [ Node.span ~attrs:[ Style.sec_glyph; Attr.create "aria-hidden" "true" ] []
         ; Node.div ~attrs:[ Style.sec_h ] [ Node.text "cycle activity" ]
         ; Node.span
             ~attrs:[ Style.sec_sub ]
             [ Node.text "last 60 minutes · one lane per keeper" ]
-        ; Node.span ~attrs:[ Style.sec_hr ] []
+        ; Node.span ~attrs:[ Style.sec_hr; Attr.create "aria-hidden" "true" ] []
         ; Node.span
             ~attrs:[ Style.sec_r ]
             [ Node.text "mock · trace endpoint "
@@ -2209,12 +2225,12 @@ let render_response
     ; Swim.view ~keepers ()
     ; Node.div
         ~attrs:[ Style.sec ]
-        [ Node.span ~attrs:[ Style.sec_glyph ] []
+        [ Node.span ~attrs:[ Style.sec_glyph; Attr.create "aria-hidden" "true" ] []
         ; Node.div ~attrs:[ Style.sec_h ] [ Node.text "context pressure" ]
         ; Node.span
             ~attrs:[ Style.sec_sub ]
             [ Node.text "60m rolling · % of window · warn 75 / danger 90" ]
-        ; Node.span ~attrs:[ Style.sec_hr ] []
+        ; Node.span ~attrs:[ Style.sec_hr; Attr.create "aria-hidden" "true" ] []
         ; Node.span
             ~attrs:[ Style.sec_r ]
             [ Node.text "mock · keepers endpoint "
@@ -2224,12 +2240,12 @@ let render_response
     ; Ctx_chart.view ~keepers ()
     ; Node.div
         ~attrs:[ Style.sec ]
-        [ Node.span ~attrs:[ Style.sec_glyph ] []
+        [ Node.span ~attrs:[ Style.sec_glyph; Attr.create "aria-hidden" "true" ] []
         ; Node.div ~attrs:[ Style.sec_h ] [ Node.text "keeper rites · 12 states" ]
         ; Node.span
             ~attrs:[ Style.sec_sub ]
             [ Node.text "Offline → Running → {Failing · Overflowed · Compacting · Draining} → Paused / Stopped / Crashed → Restarting → Dead" ]
-        ; Node.span ~attrs:[ Style.sec_hr ] []
+        ; Node.span ~attrs:[ Style.sec_hr; Attr.create "aria-hidden" "true" ] []
         ; Node.span
             ~attrs:[ Style.sec_r ]
             [ Node.text "mock · keeper phase wire "

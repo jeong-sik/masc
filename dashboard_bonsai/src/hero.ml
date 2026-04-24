@@ -24,7 +24,7 @@ stylesheet
     font-size: 11px;
     letter-spacing: 0.3em;
     text-transform: uppercase;
-    color: var(--text-dim, #6a5848);
+    color: var(--text-dim, #9a846e);
     margin: 0;
   }
 
@@ -38,13 +38,13 @@ stylesheet
   }
 
   .tail_brass {
-    color: var(--accent-brass, #8a6a28);
+    color: var(--accent-brass, #968228);
     font-size: 18px;
     margin-left: 14px;
   }
 
   .tail_blood {
-    color: var(--accent-blood, #a01818);
+    color: var(--accent-blood, #e85050);
     font-size: 18px;
     margin-left: 14px;
   }

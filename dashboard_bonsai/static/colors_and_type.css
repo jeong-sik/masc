@@ -29,26 +29,26 @@
   /* Text — bone and bandage */
   --text-bright:  #e8d8b8;       /* clean bone */
   --text-primary: #b8a488;       /* dirty bandage */
-  --text-dim:     #6a5848;       /* mold dust */
+  --text-dim:     #9a846e;       /* mold dust — WCAG AA compliant */
 
   /* Accents — blood is primary now; brass demoted to warning */
-  --accent-blood:    #a01818;    /* fresh arterial */
-  --accent-blood-dim:#5a0f0f;    /* dried clot */
+  --accent-blood:    #e85050;    /* WCAG AA compliant on all surfaces */
+  --accent-blood-dim:#8a2828;    /* dried clot — dim companion */
   --accent-viscera:  #c94a3a;    /* raw flesh / inflamed */
   --accent-bile:     #6a7a3a;    /* sickly yellow-green */
   --accent-mold:     #3a5a48;    /* cold mold */
-  --accent-brass:    #8a6a28;    /* tarnished gold, rare */
-  --accent-brass-dim:#5a4618;
+  --accent-brass:    #968228;    /* WCAG AA compliant on all surfaces */
+  --accent-brass-dim:#6a5620;
   --accent-bone:     #d8c8a0;
   --accent-ink:      #3a2a5a;    /* arcane violet, rarer */
   --accent-ember:    #c4461a;    /* dying ember */
-  --accent-glow:     rgba(160, 24, 24, 0.28);
-  --accent-blood-glow: rgba(201, 74, 58, 0.32);
+  --accent-glow:     rgba(232, 80, 80, 0.28);
+  --accent-blood-glow: rgba(232, 80, 80, 0.32);
 
   /* Status — blood, bile, mold */
-  --status-ok:    #5a7a3a;       /* bile / queasy green */
-  --status-warn:  #a06a1a;       /* burnt ember */
-  --status-bad:   #a01818;       /* blood */
+  --status-ok:    #6a9a4a;       /* WCAG AA compliant on all surfaces */
+  --status-warn:  #b87828;       /* WCAG AA compliant on all surfaces */
+  --status-bad:   #e85050;       /* WCAG AA — synced with --accent-blood */
   --status-idle:  #4a3a32;       /* dried mold */
 
   /* Trace frame palette — swimlane / flame / tool-category bars */

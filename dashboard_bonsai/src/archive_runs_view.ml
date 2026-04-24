@@ -142,7 +142,7 @@ stylesheet
   .pill_failed {
     color: var(--accent-blood);
     border-color: var(--accent-blood-dim);
-    background: rgba(160,24,24,0.14);
+    background: rgba(232,80,80,0.14);
   }
   .pill_stopped {
     color: var(--text-dim);

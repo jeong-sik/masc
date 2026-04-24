@@ -1521,7 +1521,7 @@ let test_cascade_provider_labels_preserve_registered_openai_compat_family () =
   Alcotest.(check string) "openrouter model label"
     "openrouter:anthropic/claude-3.5" model_label
 
-let test_cascade_provider_labels_detect_kimi_from_model_and_base_url () =
+let test_cascade_provider_labels_detect_kimi_from_endpoint_metadata () =
   let provider_name = Masc_mcp.Oas_worker_cascade.provider_name_of_config
       (make_kimi_provider_cfg ()) in
   let model_label = Masc_mcp.Oas_worker_cascade.model_label_of_config
@@ -3418,8 +3418,8 @@ let () =
         test_cascade_provider_labels_keep_glm_and_glm_coding_distinct;
       Alcotest.test_case "cascade provider labels preserve registered openai_compat family" `Quick
         test_cascade_provider_labels_preserve_registered_openai_compat_family;
-      Alcotest.test_case "cascade provider labels detect kimi from model/base_url" `Quick
-        test_cascade_provider_labels_detect_kimi_from_model_and_base_url;
+      Alcotest.test_case "cascade provider labels detect kimi from endpoint metadata" `Quick
+        test_cascade_provider_labels_detect_kimi_from_endpoint_metadata;
       Alcotest.test_case "sdk_error_is_hard_quota detects Gemini CLI wrapper" `Quick
         test_sdk_error_is_hard_quota_detects_gemini_cli_network_wrapper;
       Alcotest.test_case "sdk_error_is_hard_quota detects Claude CLI limit wrapper" `Quick

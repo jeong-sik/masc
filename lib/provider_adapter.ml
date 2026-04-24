@@ -144,6 +144,8 @@ let telemetry_reported = { usage_reporting = Reported; runtime_reporting = Repor
 let telemetry_unknown = { usage_reporting = Unknown; runtime_reporting = Unknown }
 let telemetry_usage_missing =
   { usage_reporting = Missing_by_design; runtime_reporting = Unknown }
+let telemetry_usage_missing_runtime_reported =
+  { usage_reporting = Missing_by_design; runtime_reporting = Reported }
 
 (* ── Canonical adapter names (single definition point) ──────── *)
 
@@ -209,9 +211,10 @@ let glm_api_url () =
 let glm_coding_api_url () =
   env_url_or ~env:"ZAI_CODING_BASE_URL" ~default:Llm_provider.Zai_catalog.coding_base_url
 
+let moonshot_compat_base_url = "https://api.moonshot.ai/v1"
+
 let kimi_api_url () =
-  env_url_or ~env:"KIMI_BASE_URL"
-    ~default:(registry_default_base_url "kimi")
+  env_url_or ~env:"KIMI_BASE_URL" ~default:moonshot_compat_base_url
 (** SSOT cascade prefix for local llama-server instances.
     All cascade label construction for local models must use this constant.
     Format: [local_cascade_prefix ^ ":" ^ model_id] → e.g. "llama:qwen3.5" *)
@@ -297,7 +300,7 @@ let direct_adapters =
           family = Generic;
         };
       tool_policy = no_tool_http_headers;
-      telemetry_policy = telemetry_reported;
+      telemetry_policy = telemetry_usage_missing_runtime_reported;
     };
     {
       canonical_name = cn_claude;
@@ -324,7 +327,7 @@ let direct_adapters =
           family = Generic;
         };
       tool_policy = runtime_mcp_http_headers;
-      telemetry_policy = telemetry_reported;
+      telemetry_policy = telemetry_usage_missing_runtime_reported;
     };
     {
       canonical_name = cn_codex;
@@ -358,7 +361,7 @@ let direct_adapters =
           family = Generic;
         };
       tool_policy = no_tool_http_headers;
-      telemetry_policy = telemetry_reported;
+      telemetry_policy = telemetry_usage_missing_runtime_reported;
     };
     {
       canonical_name = cn_gemini;
@@ -393,7 +396,7 @@ let direct_adapters =
           family = Generic;
         };
       tool_policy = no_tool_http_headers;
-      telemetry_policy = telemetry_reported;
+      telemetry_policy = telemetry_usage_missing_runtime_reported;
     };
     {
       canonical_name = cn_kimi;
@@ -1261,45 +1264,36 @@ let provider_prefix_of_label_result label =
            "Default model label must be provider:model, got: %s"
            normalized)
 
-(** Provider names recognised as prefix tokens in "<provider>:<model>" labels.
+let provider_label_of_provider_kind
+    (kind : Llm_provider.Provider_config.provider_kind) : string =
+  let cn = adapter_canonical_name_of_provider_kind kind in
+  match resolve_direct_adapter cn with
+  | Some adapter -> adapter.cascade_prefix
+  | None -> cn
 
-    Used by {!provider_of_model_label} when a label carries an explicit
-    prefix, so telemetry groups costs.jsonl rows without misclassifying
-    idiosyncratic or private vendor names. *)
-let prefix_classification_vocabulary = [
-  "glm-coding"; "glm"; "claude"; "claude_code";
-  "gemini"; "gemini_cli"; "codex_cli"; "ollama";
-  "openai"; "kimi"; "kimi_cli";
-]
+let provider_label_of_explicit_prefix (prefix : string) : string option =
+  let normalized = normalize_label prefix in
+  match resolve_adapter_by_cascade_prefix normalized with
+  | Some adapter -> Some adapter.cascade_prefix
+  | None ->
+      if String.equal normalized cn_custom then Some cn_custom else None
 
-(** Classify a raw model label to a provider name for telemetry grouping.
+(** Classify a model label to a provider name for telemetry grouping.
 
-    Callers feed heterogeneous model strings — OAS transports may emit
-    either prefixed (["glm-coding:glm-5-turbo"]) or bare
-    (["claude-haiku-4-5-20251001"]) labels. Prefer the explicit prefix
-    when present; fall back to a minimal heuristic over known bare-name
-    shapes. Returns ["unknown"] rather than guessing when no rule fits
-    so analysis queries can filter those rows out rather than miscount
-    them. *)
-let provider_of_model_label (model : string) : string =
-  let bare_heuristic () =
-    let starts_with prefix =
-      String.length model >= String.length prefix
-      && String.sub model 0 (String.length prefix) = prefix
-    in
-    if starts_with "glm-" then "glm-coding"
-    else if starts_with "claude-" then "claude"
-    else if starts_with "gemini-" then "gemini"
-    else if starts_with "gpt-" then "openai"
-    else if starts_with "qwen" || starts_with "llama" then "ollama"
-    else "unknown"
+    This is intentionally conservative. ["provider:model"] labels use the
+    adapter registry as the typed boundary. Bare model ids are classified only
+    when OAS supplies a typed [provider_kind]; otherwise they remain
+    ["unknown"] so metrics do not pretend a substring guess is ground truth. *)
+let provider_of_model_label ?provider_kind (model : string) : string =
+  let explicit =
+    match provider_prefix_of_label_result model with
+    | Ok prefix -> provider_label_of_explicit_prefix prefix
+    | Error _ -> None
   in
-  match String.index_opt model ':' with
-  | Some i ->
-      let prefix = String.sub model 0 i in
-      if List.mem prefix prefix_classification_vocabulary then prefix
-      else bare_heuristic ()
-  | None -> bare_heuristic ()
+  match explicit, provider_kind with
+  | Some provider, _ -> provider
+  | None, Some kind -> provider_label_of_provider_kind kind
+  | None, None -> "unknown"
 
 (** Whether a provider emits no usage tokens in its standard response.
 
@@ -1309,7 +1303,15 @@ let provider_of_model_label (model : string) : string =
     the CLI-class providers where the CLI strips or elides usage before
     returning to the caller. *)
 let is_structurally_unmetered_provider (provider : string) : bool =
-  List.mem provider [ "kimi_cli"; "codex_cli"; "gemini_cli" ]
+  let adapter =
+    match resolve_adapter_by_cascade_prefix provider with
+    | Some adapter -> Some adapter
+    | None -> resolve_direct_adapter provider
+  in
+  match adapter with
+  | Some { telemetry_policy = { usage_reporting = Missing_by_design; _ }; _ } ->
+      true
+  | Some _ | None -> false
 
 let default_model_provider_prefix_result () =
   match default_model_label_result () with
@@ -1352,25 +1354,26 @@ let gemini_vertex_openai_base_url ~project ~location =
     "https://aiplatform.googleapis.com/v1/projects/%s/locations/%s/endpoints/openapi"
     project location
 
-let starts_with ~prefix s = Base.String.is_prefix s ~prefix
+let same_base_url left right =
+  String.equal (normalize_base_url left) (normalize_base_url right)
 
-let is_kimi_model_id model_id =
-  let normalized = String.trim model_id |> String.lowercase_ascii in
-  starts_with ~prefix:"kimi-" normalized
-  || starts_with ~prefix:"moonshot-" normalized
-
-let is_moonshot_base_url base_url =
-  match Uri.host (Uri.of_string base_url) with
-  | Some host -> String.equal (String.lowercase_ascii host) "api.moonshot.ai"
-  | None -> false
+let openai_compat_adapter_by_endpoint (cfg : Llm_provider.Provider_config.t) =
+  if cfg.kind <> Llm_provider.Provider_config.OpenAI_compat then None
+  else
+    List.find_opt
+      (fun (adapter : adapter) ->
+        adapter.runtime_kind = Direct_api
+        &&
+        match adapter.endpoint_url with
+        | Some endpoint when endpoint <> "" ->
+            same_base_url endpoint cfg.base_url
+        | Some _ | None -> false)
+      direct_adapters
 
 let provider_label_from_registry (cfg : Llm_provider.Provider_config.t) =
-  if cfg.kind = Llm_provider.Provider_config.OpenAI_compat
-     && (is_kimi_model_id cfg.model_id || is_moonshot_base_url cfg.base_url)
-  then
-    "kimi"
-  else
-    Llm_provider.Provider_registry.provider_name_of_config cfg
+  match openai_compat_adapter_by_endpoint cfg with
+  | Some adapter -> adapter.cascade_prefix
+  | None -> Llm_provider.Provider_registry.provider_name_of_config cfg
 
 let adapter_of_provider_config (cfg : Llm_provider.Provider_config.t) =
   match cfg.kind with

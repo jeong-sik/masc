@@ -79,6 +79,30 @@ let test_emit_cost_event_marks_usage_missing () =
   check bool "usage_missing" true
     (json |> member "usage_missing" |> to_bool)
 
+let test_emit_cost_event_uses_typed_provider_kind_for_bare_model () =
+  let root = temp_dir () in
+  let telemetry : Agent_sdk.Types.inference_telemetry =
+    {
+      system_fingerprint = None;
+      timings = None;
+      reasoning_tokens = None;
+      request_latency_ms = 0;
+      peak_memory_gb = None;
+      provider_kind = Some Llm_provider.Provider_kind.Kimi_cli;
+      reasoning_effort = None;
+      canonical_model_id = None;
+      effective_context_window = None;
+      provider_internal_action_count = None;
+    }
+  in
+  Hooks.emit_cost_event ~masc_root:root ~agent_name:"keeper"
+    ~task_id:None ~model:"kimi-for-coding"
+    ~input_tokens:0 ~output_tokens:0 ~cost_usd:0.0
+    ~telemetry ();
+  let json = read_jsonl_line (Filename.concat root "costs.jsonl") in
+  check string "provider from provider_kind" "kimi_cli"
+    (json |> member "provider" |> to_string)
+
 let test_cost_usd_for_usage_falls_back_for_paid_provider () =
   let model = "openai:gpt-4.1" in
   let usage = make_usage ~input_tokens:1000 ~output_tokens:500 () in
@@ -99,6 +123,14 @@ let test_cost_usd_for_usage_keeps_cli_provider_zero () =
   let usage = make_usage ~input_tokens:1000 ~output_tokens:500 () in
   check (float 0.000001) "cli cost stays zero" 0.0
     (Hooks.cost_usd_for_usage ~model usage)
+
+let test_cost_usd_for_usage_keeps_typed_cli_provider_zero () =
+  let model = "kimi-for-coding" in
+  let usage = make_usage ~input_tokens:1000 ~output_tokens:500 () in
+  check (float 0.000001) "typed cli cost stays zero" 0.0
+    (Hooks.cost_usd_for_usage
+       ~provider_kind:Llm_provider.Provider_kind.Kimi_cli
+       ~model usage)
 
 let test_tool_execution_summary_derives_provider_and_outcome () =
   let summary =
@@ -332,12 +364,16 @@ let () =
             test_emit_cost_event_writes_inference_telemetry
         ; test_case "emit_cost_event marks usage_missing" `Quick
             test_emit_cost_event_marks_usage_missing
+        ; test_case "emit_cost_event uses typed provider kind for bare model" `Quick
+            test_emit_cost_event_uses_typed_provider_kind_for_bare_model
         ; test_case "cost fallback estimates paid provider usage" `Quick
             test_cost_usd_for_usage_falls_back_for_paid_provider
         ; test_case "cost fallback preserves reported cost" `Quick
             test_cost_usd_for_usage_preserves_reported_cost
         ; test_case "cost fallback keeps CLI provider zero" `Quick
             test_cost_usd_for_usage_keeps_cli_provider_zero
+        ; test_case "cost fallback keeps typed CLI provider zero" `Quick
+            test_cost_usd_for_usage_keeps_typed_cli_provider_zero
         ] )
     ; ( "tool_telemetry",
         [ test_case "tool execution summary derives provider and outcome" `Quick

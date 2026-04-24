@@ -265,6 +265,13 @@ let metric_fd_warn_threshold = "masc_process_fd_warn_threshold"
 (* Core counters / gauges — used outside init. *)
 let metric_mcp_requests = "masc_mcp_requests_total"
 let metric_llm_inference_duration = "masc_llm_inference_duration_seconds"
+(* Throughput histograms — derived from Agent_sdk inference_telemetry.timings.
+   Split from masc_llm_inference_duration_seconds because wall-clock latency
+   mixes prefill and decode phases; operators need them separately to tell
+   "prompt ingestion is slow" apart from "generation is slow". Silent when
+   the backend does not emit timings (Anthropic/Gemini). *)
+let metric_llm_prompt_tok_per_sec = "masc_llm_prompt_tok_per_sec"
+let metric_llm_decode_tok_per_sec = "masc_llm_decode_tok_per_sec"
 let metric_after_turn_hook = "masc_after_turn_hook_total"
 let metric_after_turn_telemetry_missing =
   "masc_after_turn_telemetry_missing_total"
@@ -315,6 +322,18 @@ let init () =
   in
   add metric_mcp_requests "Total MCP requests received" Counter;
   add metric_llm_inference_duration "LLM inference request duration in seconds" Histogram;
+  add metric_llm_prompt_tok_per_sec
+    "LLM prefill (prompt_eval) throughput in tokens/second from \
+     inference_telemetry.timings.prompt_per_second. Per-turn observation \
+     labelled by model and provider_kind. Silent for providers that do not \
+     emit timings (Anthropic/Gemini); use masc_after_turn_telemetry_missing_total \
+     to detect that." Histogram;
+  add metric_llm_decode_tok_per_sec
+    "LLM decode (predicted) throughput in tokens/second from \
+     inference_telemetry.timings.predicted_per_second. Per-turn observation \
+     labelled by model and provider_kind. Distinct from \
+     masc_llm_prompt_tok_per_sec: decode rate is the hardware generation \
+     speed, prompt rate is the prefill ingestion speed." Histogram;
   add metric_after_turn_hook
     "Times the keeper AfterTurn hook ran (labeled by model). Divergence from \
      masc_llm_inference_duration_seconds_count identifies missing telemetry." Counter;

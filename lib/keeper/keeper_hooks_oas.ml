@@ -95,6 +95,49 @@ let record_keeper_tool_duration_metric
       ]
     (summary.duration_ms /. 1000.0)
 
+(** Emit prompt/decode tokens-per-second histograms from an OAS turn
+    response.  Safe to call with [telemetry = None] (no-op) and with
+    positive [None] timing fields (per-metric no-op).  The histograms are
+    labelled by [model], the coarse [provider] string derived from the
+    model id, and the finer [provider_kind] reported by OAS.  Split from
+    [masc_llm_inference_duration_seconds] because wall-clock latency
+    mixes prefill and decode phases.
+
+    Extracted so the after_turn hook is unit-testable without
+    constructing a full [Oas.Hooks.AfterTurn] event. *)
+let record_llm_tok_s_metrics
+    ~(model : string)
+    ~(telemetry : Oas.Types.inference_telemetry option)
+  : unit =
+  let prompt_tok_s_opt, decode_tok_s_opt =
+    match telemetry with
+    | Some { timings = Some t; _ } ->
+      t.prompt_per_second, t.predicted_per_second
+    | _ -> None, None
+  in
+  let provider_kind_label =
+    match telemetry with
+    | Some { provider_kind = Some pk; _ } ->
+      Llm_provider.Provider_kind.to_string pk
+    | _ -> "unknown"
+  in
+  let labels =
+    [ "model", model
+    ; "provider", provider_of_model model
+    ; "provider_kind", provider_kind_label
+    ]
+  in
+  (match prompt_tok_s_opt with
+   | Some v when v > 0.0 ->
+     Prometheus.observe_histogram
+       Prometheus.metric_llm_prompt_tok_per_sec ~labels v
+   | _ -> ());
+  (match decode_tok_s_opt with
+   | Some v when v > 0.0 ->
+     Prometheus.observe_histogram
+       Prometheus.metric_llm_decode_tok_per_sec ~labels v
+   | _ -> ())
+
 (** Append a cost event to .masc/costs.jsonl for per-task cost attribution.
     Schema matches bin/masc_cost.ml with an additional "source" field to
     distinguish automatic entries from manual CLI entries.
@@ -398,14 +441,26 @@ let make_hooks
           | Some v -> Printf.sprintf "%.1f" v
           | None -> "-"
         in
-        let prompt_tok_s, decode_tok_s, latency_ms =
+        (* Capture each telemetry projection independently.  Anthropic and
+           Gemini populate [request_latency_ms] (patched in OAS api.ml) but
+           leave [timings = None]; the previous single-match folded those
+           three fields together and surfaced [latency_ms=0] whenever tok/s
+           were missing, which hid Anthropic/Gemini latency on the log line
+           and in downstream dashboards. *)
+        let prompt_tok_s_opt, decode_tok_s_opt =
           match response.telemetry with
-          | Some { timings = Some t; request_latency_ms; _ } ->
-              fmt_tok_s t.prompt_per_second,
-              fmt_tok_s t.predicted_per_second,
-              request_latency_ms
-          | _ -> "-", "-", 0
+          | Some { timings = Some t; _ } ->
+              t.prompt_per_second, t.predicted_per_second
+          | _ -> None, None
         in
+        let latency_ms =
+          match response.telemetry with
+          | Some t -> t.request_latency_ms
+          | None -> 0
+        in
+        record_llm_tok_s_metrics ~model ~telemetry:response.telemetry;
+        let prompt_tok_s = fmt_tok_s prompt_tok_s_opt in
+        let decode_tok_s = fmt_tok_s decode_tok_s_opt in
         Log.Keeper.info
           "keeper:%s turn=%d total_turns=%d model=%s tokens=%d prompt_tok_s=%s decode_tok_s=%s latency_ms=%d"
           meta.name turn meta.runtime.usage.total_turns model total_tok

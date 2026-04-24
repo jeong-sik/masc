@@ -42,6 +42,9 @@ let json_string_list_member key json =
        | `String value when String.trim value <> "" -> Some value
        | _ -> None)
 
+let string_list_json values =
+  `List (List.map (fun value -> `String value) values)
+
 let assoc_bool_default key ~default fields =
   match List.assoc_opt key fields with
   | Some (`Bool value) -> value
@@ -593,25 +596,97 @@ let execution_summary_json ~meta ~latest_receipt =
         |> json_string_opt_member "network_mode"
     | None -> Some (Keeper_types.network_mode_to_string meta.network_mode)
   in
+  let sandbox_root =
+    match latest_receipt with
+    | Some receipt ->
+        receipt |> json_member "sandbox"
+        |> json_string_opt_member "sandbox_root"
+    | None -> None
+  in
   let tool_contract_result =
     Option.bind latest_receipt (json_string_opt_member "tool_contract_result")
+  in
+  let requested_tools =
+    match latest_receipt with
+    | Some receipt -> json_string_list_member "requested_tools" receipt
+    | None -> []
+  in
+  let tools_used =
+    match latest_receipt with
+    | Some receipt -> json_string_list_member "tools_used" receipt
+    | None -> []
+  in
+  let required_tools, missing_required_tools =
+    match latest_receipt with
+    | Some receipt ->
+        let surface = json_member "tool_surface" receipt in
+        ( json_string_list_member "required_tools" surface,
+          json_string_list_member "missing_required_tools" surface )
+    | None -> [], []
+  in
+  let cascade_json =
+    match latest_receipt with
+    | Some receipt -> json_member "cascade" receipt
+    | None -> `Null
+  in
+  let cascade_attempt_count =
+    match cascade_json with
+    | `Null -> None
+    | json -> json_int_opt_member "attempt_count" json
+  in
+  let cascade_fallback_applied =
+    match cascade_json with
+    | `Null -> None
+    | json -> json_bool_opt_member "fallback_applied" json
+  in
+  let cascade_outcome =
+    match cascade_json with
+    | `Null -> None
+    | json -> json_string_opt_member "outcome" json
+  in
+  let cascade_selected_model =
+    match cascade_json with
+    | `Null -> None
+    | json -> json_string_opt_member "selected_model" json
   in
   let mutation_guard_summary =
     match tool_contract_result with
     | Some "violated" -> "mutation_contract_violated"
-    | Some "satisfied" -> "mutation_contract_satisfied"
+    | Some ("satisfied" | "satisfied_execution" | "satisfied_completion") ->
+        "mutation_contract_satisfied"
     | Some other -> other
     | None -> "mutation_contract_not_observed"
   in
   `Assoc
     [
       ("tool_contract_result", Json_util.string_opt_to_json tool_contract_result);
+      ( "runtime_proof_status",
+        Json_util.string_opt_to_json tool_contract_result );
+      ("required_tools", string_list_json required_tools);
+      ("missing_required_tools", string_list_json missing_required_tools);
+      ("requested_tools", string_list_json requested_tools);
+      ("tools_used", string_list_json tools_used);
+      ("requested_tool_count", `Int (List.length requested_tools));
+      ("tools_used_count", `Int (List.length tools_used));
+      ( "provider_attempt_count",
+        match cascade_attempt_count with
+        | Some value -> `Int value
+        | None -> `Null );
+      ( "provider_fallback_applied",
+        match cascade_fallback_applied with
+        | Some value -> `Bool value
+        | None -> `Null );
+      ( "provider_selected_model",
+        Json_util.string_opt_to_json cascade_selected_model );
+      ( "cascade_outcome",
+        Json_util.string_opt_to_json cascade_outcome );
       ( "sandbox_summary",
         match (sandbox_kind, network_mode) with
         | Some kind, Some mode -> `String (Printf.sprintf "%s / %s" kind mode)
         | Some kind, None -> `String kind
         | None, Some mode -> `String mode
         | None, None -> `Null );
+      ("sandbox_root", Json_util.string_opt_to_json sandbox_root);
       ("mutation_guard_summary", `String mutation_guard_summary);
       ( "latest_receipt_at",
         match Option.bind latest_receipt (json_string_opt_member "ended_at") with

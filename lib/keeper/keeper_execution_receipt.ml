@@ -5,6 +5,8 @@ type tool_surface =
   ; visible_tool_count : int
   ; tool_gate_enabled : bool
   ; tool_surface_fallback_used : bool
+  ; required_tools : string list
+  ; missing_required_tools : string list
   }
 
 type cascade_rotation_attempt =
@@ -109,6 +111,9 @@ let string_contains_ci haystack needle =
 let operator_disposition (receipt : t) =
   let cascade_outcome = String.lowercase_ascii receipt.cascade_outcome in
   let terminal_reason = String.lowercase_ascii receipt.terminal_reason_code in
+  let tool_contract_result =
+    String.lowercase_ascii receipt.tool_contract_result
+  in
   let error_kind =
     Option.map String.lowercase_ascii receipt.error_kind
   in
@@ -119,7 +124,17 @@ let operator_disposition (receipt : t) =
   then ("alert_exhausted", "cascade_exhausted")
   else if
     String.equal receipt.tool_surface.tool_requirement "required"
-    && (not (String.equal receipt.tool_contract_result "satisfied")
+    && (List.mem tool_contract_result
+          [
+            "violated";
+            "unknown";
+            "needs_execution_progress";
+            "missing_required_tool_use";
+            "passive_only";
+            "claim_only_after_owned_task";
+            "tool_surface_mismatch";
+            "no_tool_capable_provider";
+          ]
         || receipt.tools_used = [])
   then ("pause_human", "tool_required_unsatisfied")
   else if
@@ -213,6 +228,9 @@ let to_json (receipt : t) =
             ("tool_gate_enabled", `Bool receipt.tool_surface.tool_gate_enabled);
             ( "tool_surface_fallback_used",
               `Bool receipt.tool_surface.tool_surface_fallback_used );
+            ("required_tools", list_json receipt.tool_surface.required_tools);
+            ( "missing_required_tools",
+              list_json receipt.tool_surface.missing_required_tools );
           ] );
       ( "sandbox",
         `Assoc

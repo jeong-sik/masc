@@ -622,6 +622,8 @@ let append_execution_receipt config ~keeper_name =
           visible_tool_count = 2;
           tool_gate_enabled = true;
           tool_surface_fallback_used = false;
+          required_tools = [];
+          missing_required_tools = [];
         };
       sandbox_kind =
         Masc_mcp.Keeper_execution_receipt.sandbox_kind_of_meta meta;

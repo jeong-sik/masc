@@ -799,6 +799,8 @@ let run_turn
         visible_tool_count = 0;
         tool_gate_enabled = false;
         tool_surface_fallback_used = false;
+        required_tool_names = [];
+        missing_required_tool_names = [];
         config_root;
         cascade_config_path;
         gemini_mcp_disabled;
@@ -823,6 +825,33 @@ let run_turn
   let tool_calls_ref : tool_call_detail list ref = ref [] in
   let keeper_has_owned_active_task () =
     Option.is_some (owned_active_task_id_for_meta ~config ~meta:!meta_ref)
+  in
+  let current_task_required_tools () =
+    match owned_active_task_id_for_meta ~config ~meta:!meta_ref with
+    | None -> []
+    | Some task_id ->
+      let task_id = Keeper_id.Task_id.to_string task_id in
+      let tasks =
+        try Coord.get_tasks_raw config
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+          Log.Keeper.warn
+            "keeper:%s failed to load current task contract for %s: %s"
+            meta.name
+            task_id
+            (Printexc.to_string exn);
+          []
+      in
+      match
+        List.find_opt (fun (task : Types.task) -> String.equal task.id task_id)
+          tasks
+      with
+      | Some (task : Types.task) -> (
+        match task.contract with
+        | Some contract -> Keeper_types.dedupe_keep_order contract.required_tools
+        | None -> [])
+      | None -> []
   in
   let validate_allow_list ~turn raw =
     let raw = Tool_portal.filter_visible_tool_names portal_ctx raw in
@@ -1000,6 +1029,19 @@ let run_turn
         ~discovered
       |> Tool_portal.filter_visible_tool_names portal_ctx
     in
+    let required_tool_names =
+      current_task_required_tools ()
+      |> Keeper_types.dedupe_keep_order
+    in
+    let visible_required_tool_names =
+      required_tool_names
+      |> Tool_portal.filter_visible_tool_names portal_ctx
+      |> validate_allow_list ~turn
+      |> Keeper_types.dedupe_keep_order
+    in
+    let merged =
+      Keeper_types.dedupe_keep_order (merged @ visible_required_tool_names)
+    in
     let selection_mode =
       if llm_rerank_enabled
       then "deterministic_plus_llm_hint"
@@ -1032,7 +1074,8 @@ let run_turn
     let is_last_turn = per_call_turn >= max_turns in
     let is_warning_zone = per_call_turn >= max_turns - 1 in
     let tool_gate_requested =
-      tool_gate_requested_for_turn ~current_tool_choice ~is_last_turn
+      required_tool_names <> []
+      || tool_gate_requested_for_turn ~current_tool_choice ~is_last_turn
     in
     let all_allowed, tool_surface_fallback_used =
       if all_allowed = [] then
@@ -1045,7 +1088,7 @@ let run_turn
       Keeper_tool_policy.last_turn_safe_tool_names ()
     in
     let all_allowed =
-      if is_last_turn then
+      if is_last_turn && required_tool_names = [] then
         Oas.Tool_op.apply
           (Oas.Tool_op.Intersect_with safe_last_turn_tools)
           all_allowed
@@ -1059,7 +1102,8 @@ let run_turn
           (List.length all_allowed)
           max_tools;
         let required_turn_essential_tool_names =
-          if tool_gate_requested
+          if required_tool_names <> [] then visible_required_tool_names
+          else if tool_gate_requested
              && has_task_claim_affordance turn_affordances
           then [ "keeper_task_claim" ]
           else []
@@ -1080,6 +1124,11 @@ let run_turn
         essential @ List.filteri (fun i _ -> i < budget) non_essential)
       else
         all_allowed
+    in
+    let missing_required_tool_names =
+      List.filter
+        (fun name -> not (List.mem name all_allowed))
+        required_tool_names
     in
     let visible_tool_count = List.length all_allowed in
     let tool_surface_class =
@@ -1120,6 +1169,8 @@ let run_turn
       tool_requirement;
       tool_gate_requested;
       tool_surface_fallback_used;
+      required_tool_names;
+      missing_required_tool_names;
       lane;
       query_text;
     }
@@ -1139,24 +1190,46 @@ let run_turn
       visible_tool_count = List.length initial_tool_surface.all_allowed;
       tool_gate_enabled = initial_tool_surface.tool_gate_requested;
       tool_surface_fallback_used = initial_tool_surface.tool_surface_fallback_used;
+      required_tool_names = initial_tool_surface.required_tool_names;
+      missing_required_tool_names =
+        initial_tool_surface.missing_required_tool_names;
       config_root;
       cascade_config_path;
       gemini_mcp_disabled;
       approval_mode_effective;
       approval_mode_derived;
     };
+  let initial_tool_surface_blocker_ref : Oas.Error.sdk_error option ref =
+    ref None
+  in
   let initial_tool_surface_result =
-    if initial_tool_surface.tool_gate_requested
-       && initial_tool_surface.all_allowed = []
-    then
-      Error
-        (sdk_error_of_keeper_internal_error
-           (Keeper_tool_surface_empty
-              { keeper_name = meta.name
-              ; turn_lane = initial_tool_surface.lane
-              ; affordances = turn_affordances
-              ; fallback_used = initial_tool_surface.tool_surface_fallback_used
-              }))
+    if initial_tool_surface.missing_required_tool_names <> [] then (
+      receipt_tool_contract_result_ref := "tool_surface_mismatch";
+      initial_tool_surface_blocker_ref :=
+        Some
+          (sdk_error_of_keeper_internal_error
+             (Keeper_tool_surface_mismatch
+                { keeper_name = meta.name
+                ; required_tools = initial_tool_surface.required_tool_names
+                ; missing_required_tools =
+                    initial_tool_surface.missing_required_tool_names
+                ; visible_tools = initial_tool_surface.all_allowed
+                }));
+      Ok initial_tool_surface)
+    else if initial_tool_surface.tool_gate_requested
+            && initial_tool_surface.all_allowed = []
+    then (
+      receipt_tool_contract_result_ref := "no_tool_capable_provider";
+      initial_tool_surface_blocker_ref :=
+        Some
+          (sdk_error_of_keeper_internal_error
+             (Keeper_tool_surface_empty
+                { keeper_name = meta.name
+                ; turn_lane = initial_tool_surface.lane
+                ; affordances = turn_affordances
+                ; fallback_used = initial_tool_surface.tool_surface_fallback_used
+                }));
+      Ok initial_tool_surface)
     else
       Ok initial_tool_surface
   in
@@ -1580,6 +1653,9 @@ let run_turn
                   visible_tool_count = List.length all_allowed;
                   tool_gate_enabled = computed_surface.tool_gate_requested;
                   tool_surface_fallback_used = computed_surface.tool_surface_fallback_used;
+                  required_tool_names = computed_surface.required_tool_names;
+                  missing_required_tool_names =
+                    computed_surface.missing_required_tool_names;
                   config_root;
                   cascade_config_path;
                   gemini_mcp_disabled;
@@ -1841,6 +1917,9 @@ let run_turn
             meta.name (Printexc.to_string exn)
     in
     let turn_result =
+      match !initial_tool_surface_blocker_ref with
+      | Some err -> Error err
+      | None ->
       match
        Keeper_llm_bridge.run_with_timeout_and_fallback ~timeout_s (fun () ->
          Oas_worker.run_named
@@ -2070,9 +2149,9 @@ let run_turn
              meta.name
              (String.concat ", " unexpected_tool_names);
          let actual_keeper_tool_names =
-           observed_tool_names
-           |> Keeper_tool_alias.canonicalize_observed
+           canonical_tool_names
            |> List.filter (fun tool_name -> List.mem tool_name all_tool_names)
+           |> Keeper_types.dedupe_keep_order
          in
          actual_keeper_tool_names_ref := actual_keeper_tool_names;
          let usage = Keeper_exec_context.usage_of_response result.response in
@@ -2134,6 +2213,49 @@ let run_turn
                   reason;
                 })
          in
+         let tool_contract_status () =
+           let required_tool_names = (!tool_surface_ref).required_tool_names in
+           let missing_visible_required =
+             (!tool_surface_ref).missing_required_tool_names
+           in
+           let class_of name =
+             Keeper_tool_disclosure.classify_tool_progress name
+           in
+           let classes = List.map class_of actual_keeper_tool_names in
+           let has_class wanted =
+             List.exists (( = ) wanted) classes
+           in
+           let all_class wanted =
+             classes <> [] && List.for_all (( = ) wanted) classes
+           in
+           let all_required_used =
+             List.for_all
+               (fun name -> List.mem name actual_keeper_tool_names)
+               required_tool_names
+           in
+           if missing_visible_required <> [] then "tool_surface_mismatch"
+           else if required_tool_names <> [] && not all_required_used then
+             if actual_keeper_tool_names = [] then "missing_required_tool_use"
+             else if all_class Keeper_tool_disclosure.Claim_context
+                     && keeper_has_owned_active_task ()
+             then "claim_only_after_owned_task"
+             else if all_class Keeper_tool_disclosure.Claim_context
+             then "needs_execution_progress"
+             else if all_class Keeper_tool_disclosure.Passive_status then "passive_only"
+             else "missing_required_tool_use"
+           else if actual_keeper_tool_names = [] then "satisfied_completion"
+           else if all_class Keeper_tool_disclosure.Claim_context
+                   && keeper_has_owned_active_task ()
+           then "claim_only_after_owned_task"
+           else if all_class Keeper_tool_disclosure.Claim_context
+           then "needs_execution_progress"
+           else if all_class Keeper_tool_disclosure.Passive_status then "passive_only"
+           else if has_class Keeper_tool_disclosure.Completion then
+             "satisfied_completion"
+           else if has_class Keeper_tool_disclosure.Execution then
+             "satisfied_execution"
+           else "needs_execution_progress"
+         in
          (* Required-tool turns are filtered onto providers that declare
             tool support plus tool_choice support. If a text-only response
             still reaches this point, treat it as a contract failure. *)
@@ -2150,7 +2272,7 @@ let run_turn
              , actionable_tool_contract_violation_reason
            with
            | Ok (), Some reason ->
-               receipt_tool_contract_result_ref := "violated";
+               receipt_tool_contract_result_ref := tool_contract_status ();
                Log.Keeper.error
                  "keeper:%s required tool contract violated \
                   (turn=%d, tools=%d). Rejecting no-op/passive actionable turn. \
@@ -2160,10 +2282,12 @@ let run_turn
                  reason;
                Error (contract_violation_error reason)
            | Ok (), None ->
-               receipt_tool_contract_result_ref := "satisfied";
+               receipt_tool_contract_result_ref := tool_contract_status ();
                Ok (`Provider_text text)
            | Error reason, _ ->
-               receipt_tool_contract_result_ref := "violated";
+               receipt_tool_contract_result_ref :=
+                 if actual_keeper_tool_names = [] then "missing_required_tool_use"
+                 else tool_contract_status ();
                let contract_str =
                  match effective_completion_contract with
                  | Keeper_tool_disclosure.Allow_text_or_tool -> "Allow_text_or_tool"
@@ -2538,7 +2662,10 @@ let run_turn
     let tool_contract_result =
       match turn_result with
       | Error (Oas.Error.Agent (Oas.Error.CompletionContractViolation _)) ->
-        "violated"
+        if String.equal !receipt_tool_contract_result_ref "unknown" then
+          "violated"
+        else
+          !receipt_tool_contract_result_ref
       | _ ->
         !receipt_tool_contract_result_ref
     in
@@ -2585,6 +2712,9 @@ let run_turn
             tool_gate_enabled = (!tool_surface_ref).tool_gate_enabled;
             tool_surface_fallback_used =
               (!tool_surface_ref).tool_surface_fallback_used;
+            required_tools = (!tool_surface_ref).required_tool_names;
+            missing_required_tools =
+              (!tool_surface_ref).missing_required_tool_names;
           };
         sandbox_kind = Keeper_execution_receipt.sandbox_kind_of_meta meta;
         sandbox_root = Some keeper_sandbox_root;

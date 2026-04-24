@@ -183,7 +183,24 @@ function normalizeKeeperTrust(raw: unknown): Keeper['trust'] {
     execution_summary: isRecord(raw.execution_summary)
       ? {
           tool_contract_result: asString(raw.execution_summary.tool_contract_result) ?? null,
+          runtime_proof_status: asString(raw.execution_summary.runtime_proof_status) ?? null,
+          required_tools: asStringArray(raw.execution_summary.required_tools) ?? [],
+          missing_required_tools:
+            asStringArray(raw.execution_summary.missing_required_tools) ?? [],
+          requested_tools: asStringArray(raw.execution_summary.requested_tools) ?? [],
+          tools_used: asStringArray(raw.execution_summary.tools_used) ?? [],
+          requested_tool_count:
+            asNumber(raw.execution_summary.requested_tool_count) ?? null,
+          tools_used_count: asNumber(raw.execution_summary.tools_used_count) ?? null,
+          provider_attempt_count:
+            asNumber(raw.execution_summary.provider_attempt_count) ?? null,
+          provider_fallback_applied:
+            asBoolean(raw.execution_summary.provider_fallback_applied) ?? null,
+          provider_selected_model:
+            asString(raw.execution_summary.provider_selected_model) ?? null,
+          cascade_outcome: asString(raw.execution_summary.cascade_outcome) ?? null,
           sandbox_summary: asString(raw.execution_summary.sandbox_summary) ?? null,
+          sandbox_root: asString(raw.execution_summary.sandbox_root) ?? null,
           mutation_guard_summary:
             asString(raw.execution_summary.mutation_guard_summary) ?? null,
           latest_receipt_at: asString(raw.execution_summary.latest_receipt_at) ?? null,

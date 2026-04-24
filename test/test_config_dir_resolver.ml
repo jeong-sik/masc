@@ -118,6 +118,13 @@ let test_sanitize_inherited_test_env_opt_keeps_value_with_opt_in () =
   check (option string) "opt-in preserves config-path override"
     (Some "/Users/dancer/me/workspace/yousleepwhen/masc-mcp/config") actual
 
+let test_normalize_masc_base_path_input_canonicalizes_explicit_path () =
+  let actual =
+    Env_config_core.normalize_masc_base_path_input
+      "/Users/dancer/me/././/.masc//"
+  in
+  check string "canonical explicit base path" "/Users/dancer/me" actual
+
 let test_env_override_valid () =
   with_temp_dir "config-dir-env" @@ fun root ->
   let config = make_config_root root in
@@ -382,5 +389,7 @@ let () =
             test_sanitize_inherited_test_env_opt_keeps_runtime_override;
           test_case "opt-in preserves config-path override" `Quick
             test_sanitize_inherited_test_env_opt_keeps_value_with_opt_in;
+          test_case "canonicalizes explicit base path" `Quick
+            test_normalize_masc_base_path_input_canonicalizes_explicit_path;
         ] );
     ]

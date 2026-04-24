@@ -396,21 +396,86 @@ let recalculate_reply_counts store =
   let total = Hashtbl.fold (fun _ (p : post) acc -> acc + p.reply_count) store.posts 0 in
   Log.BoardLog.debug "recalculated reply_counts: %d total comments across posts" total
 
+(** #9921 / #9903: fixture-pattern detection for persisted votes.
+
+    Rationale: test fixture patterns should never appear in the
+    production vote ledger. If they do, the ledger was corrupted at
+    some earlier point (e.g. a pre-2026-04-18 test run that
+    inherited the operator's MASC_BASE_PATH before the
+    [(MASC_BASE_PATH "")] dune env-vars block landed in #8274).
+    The detector surfaces the contamination at load time so
+    operators see the problem immediately instead of the silent-
+    persist failure mode that caused #9903.
+
+    Pattern set is deliberately narrow: only names that could never
+    be real keeper/agent identities. Known production patterns are
+    [keeper-*], [<name>-keeper-agent], bare agent IDs — none of
+    which collide with the fixture patterns below.
+
+    Env var: [MASC_BOARD_VOTE_QUARANTINE=1] promotes detection from
+    warn-and-load to skip-fixture-rows. Defaults to warn-only to
+    avoid surprising live operators.  *)
+let is_fixture_voter_target target =
+  let contains ~needle haystack =
+    let nl = String.length needle in
+    let hl = String.length haystack in
+    if nl > hl then false
+    else
+      let rec scan i =
+        if i + nl > hl then false
+        else if String.sub haystack i nl = needle then true
+        else scan (i + 1)
+      in
+      scan 0
+  in
+  contains ~needle:"hot-voter-" target
+  || contains ~needle:"synthetic-voter-" target
+  || contains ~needle:":test-voter-" target
+
+let quarantine_enabled () =
+  match Sys.getenv_opt "MASC_BOARD_VOTE_QUARANTINE" with
+  | Some v -> v = "1" || String.lowercase_ascii v = "true"
+  | None -> false
+
 let load_persisted_votes store =
   let path = vote_log_path () in
   if Fs_compat.file_exists path then begin
     try
       let loaded = ref 0 in
+      let quarantined = ref 0 in
+      let fixture_detected = ref 0 in
+      let quarantine = quarantine_enabled () in
       let lines = Fs_compat.load_jsonl path in
       List.iter (fun json ->
         match Safe_ops.json_string_opt "target" json,
               Safe_ops.json_string_opt "direction" json with
         | Some target, Some dir_str ->
           let direction = if dir_str = "down" then Down else Up in
-          Hashtbl.replace store.vote_log target direction;
-          incr loaded
+          if is_fixture_voter_target target then begin
+            incr fixture_detected;
+            if quarantine then incr quarantined
+            else begin
+              Hashtbl.replace store.vote_log target direction;
+              incr loaded
+            end
+          end else begin
+            Hashtbl.replace store.vote_log target direction;
+            incr loaded
+          end
         | _ -> ()
       ) lines;
+      if !fixture_detected > 0 then begin
+        Prometheus.inc_counter
+          "masc_board_vote_fixture_detected_total"
+          ~delta:(Float.of_int !fixture_detected) ();
+        Log.BoardLog.warn
+          "#9921 fixture contamination: %d vote rows match fixture patterns \
+           (hot-voter-*, synthetic-voter-*, :test-voter-*) in %s. Live \
+           ledger was written by a test fixture at some point. Loaded=%d \
+           quarantined=%d (MASC_BOARD_VOTE_QUARANTINE=%b). Truncation \
+           is an operator decision; see #9921."
+          !fixture_detected path !loaded !quarantined quarantine
+      end;
       if !loaded > 0 then
         Log.BoardLog.info "loaded %d vote entries from %s" !loaded path
       else

@@ -2055,7 +2055,7 @@ let render_response
   in
   let aside =
     Node.div
-      ~attrs:[ Style.aside ]
+      ~attrs:[ Style.aside; Attr.role "complementary"; Attr.create "aria-label" "Keeper details" ]
       [ Node.div
           ~attrs:[]
           [ aside_h

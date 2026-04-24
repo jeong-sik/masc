@@ -1483,7 +1483,7 @@ let aside
   match selected_row rows selected_name with
   | None ->
     Node.div
-      ~attrs:[ Shell_view.Style.aside ]
+      ~attrs:[ Shell_view.Style.aside; Attr.role "complementary"; Attr.create "aria-label" "Keeper details" ]
       [ Shell_view.aside_title ~right:"fleet quiet" "Focus"
       ; Node.div
           ~attrs:[ Style.quiet; Attr.role "status"; Attr.create "aria-label" "No directory row selected" ]
@@ -1491,7 +1491,7 @@ let aside
       ]
   | Some row ->
     Node.div
-      ~attrs:[ Shell_view.Style.aside ]
+      ~attrs:[ Shell_view.Style.aside; Attr.role "complementary"; Attr.create "aria-label" "Keeper details" ]
       [ focus_card row
       ; note_section row
       ; data_section row execution mission

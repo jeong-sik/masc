@@ -4,8 +4,8 @@
     반복되던 border + uppercase + letter-spacing 박스를 하나로 통합.
 
     [size] 는 탭별 밀도 차이를 수용:
-    - [`Md] : font 10px / padding 4px 8px  (archive_runs 기본)
-    - [`Sm] : font 9px  / padding 2px 6px  (goals inline compact)
+    - [`Md] : font 11px / padding 4px 8px  (archive_runs 기본)
+    - [`Sm] : font 11px / padding 2px 6px  (goals inline compact)
 
     [color] 는 Meta와 동일한 4색 + status-specific 2색:
     - [`Ok]      live/active/running        (status-ok, green)

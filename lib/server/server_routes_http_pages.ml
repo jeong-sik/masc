@@ -308,7 +308,7 @@ let bonsai_index_html () =
      the <link> 404s and the inline <style> fallback keeps the page readable. *)
   Printf.sprintf
     {|<!doctype html>
-<html lang="en" data-theme="dark-fantasy">
+<html lang="ko" data-theme="dark-fantasy">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">

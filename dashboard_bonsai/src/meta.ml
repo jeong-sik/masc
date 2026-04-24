@@ -35,8 +35,8 @@ stylesheet
 
   .k {
     font-family: 'Noto Sans KR', sans-serif;
-    font-size: 9px;
-    letter-spacing: 0.24em;
+    font-size: 11px;
+    letter-spacing: 0.2em;
     text-transform: uppercase;
     color: var(--text-dim, #6a5848);
   }
@@ -68,6 +68,12 @@ let cell ?(color : value_color = `Default) ~(k : string) ~(v : string) () : Node
     ]
 ;;
 
-let strip (cells : Node.t list) : Node.t =
-  Node.div ~attrs:[ Style.strip ] cells
+let strip ?(label : string option) (cells : Node.t list) : Node.t =
+  let base = [ Style.strip ] in
+  let attrs =
+    match label with
+    | Some l -> Attr.arialabel l :: base
+    | None -> base
+  in
+  Node.div ~attrs cells
 ;;

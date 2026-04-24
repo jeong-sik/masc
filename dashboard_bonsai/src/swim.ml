@@ -46,7 +46,7 @@ stylesheet
     border-right: 1px solid var(--border-main);
     padding: 6px 14px;
     font-family: 'Noto Sans KR', sans-serif;
-    font-size: 9px;
+    font-size: 11px;
     letter-spacing: 0.24em;
     text-transform: uppercase;
     color: var(--text-dim);
@@ -108,7 +108,7 @@ stylesheet
   }
   .stat {
     font-family: 'Noto Sans KR', sans-serif;
-    font-size: 9px;
+    font-size: 11px;
     letter-spacing: 0.18em;
     color: var(--text-dim);
     text-transform: uppercase;
@@ -150,6 +150,14 @@ let frame_class = function
   | `Think -> Style.frame_think
 ;;
 
+let kind_label = function
+  | `Llm -> "LLM"
+  | `Tool -> "Tool"
+  | `Think -> "Think"
+  | `Err -> "Error"
+  | `Wait -> "Wait"
+;;
+
 let frame ~(kind : frame_kind) ~left ~width ~label =
   let style =
     Attr.create
@@ -157,7 +165,8 @@ let frame ~(kind : frame_kind) ~left ~width ~label =
       (Printf.sprintf "left:%d%%; width:%d%%" left width)
   in
   Node.div
-    ~attrs:[ Style.frame; frame_class kind; style ]
+    ~attrs:[ Style.frame; frame_class kind; style
+           ; Attr.title (Printf.sprintf "%s: %s" (kind_label kind) label) ]
     [ Node.text label ]
 ;;
 
@@ -192,7 +201,7 @@ let view_lane ~name ~stat ~(status : lane_status) ~frames =
     | `Live | `Warn -> [ Style.nm ]
   in
   Node.div
-    ~attrs:[ Style.lane ]
+    ~attrs:[ Style.lane; Attr.role "listitem"; Attr.arialabel (name ^ ": " ^ stat) ]
     [ Node.div
         ~attrs:[ Style.lane_meta ]
         [ Node.span ~attrs:[ Style.dot; dot_cls ] []
@@ -283,7 +292,7 @@ let view ?(keepers : Keepers_types.response = Keepers_types.fixture) () =
     | live_keepers -> List.map live_keepers ~f:view_lane_of_keeper
   in
   Node.div
-    ~attrs:[ Style.swim ]
+    ~attrs:[ Style.swim; Attr.role "list"; Attr.arialabel "Keeper activity timeline" ]
     ([ Node.div
          ~attrs:[ Style.axis ]
          [ Node.div

@@ -119,7 +119,7 @@ stylesheet
     align-items: center;
     gap: 6px;
     font-family: var(--font-ui, 'Noto Sans KR', sans-serif);
-    font-size: 9px;
+    font-size: 11px;
     letter-spacing: 0.2em;
     text-transform: uppercase;
     padding: 4px 8px;
@@ -164,8 +164,8 @@ stylesheet
   .nav_section {
     padding: 14px 18px 6px;
     font-family: var(--font-ui, 'Noto Sans KR', sans-serif);
-    font-size: 9px;
-    letter-spacing: 0.3em;
+    font-size: 11px;
+    letter-spacing: 0.25em;
     text-transform: uppercase;
     color: var(--text-dim);
     display: flex;
@@ -198,6 +198,12 @@ stylesheet
   .nav_link:hover {
     color: var(--accent-brass);
     background: rgba(212,169,64,0.05);
+  }
+
+  .nav_link:focus-visible {
+    outline: 2px solid var(--accent-brass);
+    outline-offset: -2px;
+    background: rgba(212,169,64,0.08);
   }
 
   .nav_link_active {
@@ -268,8 +274,8 @@ stylesheet
 
   .hud_k {
     font-family: var(--font-ui, 'Noto Sans KR', sans-serif);
-    font-size: 9px;
-    letter-spacing: 0.28em;
+    font-size: 11px;
+    letter-spacing: 0.22em;
     text-transform: uppercase;
     color: var(--text-dim);
   }
@@ -443,8 +449,8 @@ stylesheet
 
   .stat_l {
     font-family: var(--font-ui, 'Noto Sans KR', sans-serif);
-    font-size: 9px;
-    letter-spacing: 0.22em;
+    font-size: 11px;
+    letter-spacing: 0.18em;
     color: var(--text-dim);
     text-transform: uppercase;
   }
@@ -592,6 +598,30 @@ stylesheet
       padding: 18px 16px 44px;
     }
   }
+
+  .skip_nav {
+    position: absolute;
+    left: -9999px;
+    top: auto;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    z-index: 100;
+    font-family: 'Noto Sans KR', sans-serif;
+    font-size: 13px;
+    padding: 8px 16px;
+    background: var(--bg-panel);
+    color: var(--accent-brass);
+    border: 2px solid var(--accent-brass);
+    text-decoration: none;
+  }
+  .skip_nav:focus {
+    position: fixed;
+    top: 8px;
+    left: 8px;
+    width: auto;
+    height: auto;
+  }
 |}]
 
 type tone =
@@ -615,11 +645,20 @@ let route_tail = function
 ;;
 
 let nav_link ~(active : Route.t) (route : Route.t) =
+  let is_active = Route.equal active route in
   let attrs =
     let base = [ Style.nav_link ] in
-    let base = if Route.equal active route then Style.nav_link_active :: base else base in
+    let base = if is_active then Style.nav_link_active :: base else base in
     let base =
       if Route.is_implemented route then base else Style.nav_link_soon :: base
+    in
+    let base =
+      if is_active then Attr.create "aria-current" "page" :: base else base
+    in
+    let base =
+      if not (Route.is_implemented route)
+      then Attr.create "aria-disabled" "true" :: base
+      else base
     in
     Attr.href (Route.path route) :: base
   in
@@ -639,7 +678,7 @@ let nav_link ~(active : Route.t) (route : Route.t) =
 let nav ~(active : Route.t) =
   let lnk = nav_link ~active in
   Node.div
-    ~attrs:[ Style.nav ]
+    ~attrs:[ Style.nav; Attr.role "navigation"; Attr.arialabel "Main navigation" ]
     [ section "watch"
     ; lnk Overview
     ; lnk Logs
@@ -675,7 +714,7 @@ let pill ?(tone : tone = `Neutral) text =
 
 let topbar ~(active : Route.t) =
   Node.div
-    ~attrs:[ Style.topbar ]
+    ~attrs:[ Style.topbar; Attr.role "banner" ]
     [ Node.div
         ~attrs:[ Style.brand ]
         [ Node.div ~attrs:[ Style.brand_mark ] [ Node.span [ Node.text "M" ] ]
@@ -716,7 +755,7 @@ let hud_cell ?(tone : tone = `Neutral) ~k ~v () =
     | `Bad -> [ Style.hud_v; Style.hud_bad ]
   in
   Node.div
-    ~attrs:[ Style.hud_cell ]
+    ~attrs:[ Style.hud_cell; Attr.arialabel (k ^ ": " ^ v) ]
     [ Node.div ~attrs:[ Style.hud_k ] [ Node.text k ]
     ; Node.div ~attrs:v_attrs [ Node.text v ]
     ]
@@ -932,7 +971,7 @@ let watch_feed () =
 
 let default_aside ~(shell : Overview_types.response) ~(active : Route.t) =
   Node.div
-    ~attrs:[ Style.aside ]
+    ~attrs:[ Style.aside; Attr.role "complementary"; Attr.arialabel "Sidebar details" ]
     [ focus_card ~shell ~active
     ; flame ()
     ; watch_feed ()
@@ -952,12 +991,19 @@ let view ?(shell = Overview_types.fixture) ?hud ?aside ~(active : Route.t) (chil
   in
   Node.div
     ~attrs:[ Style.shell ]
-    [ topbar ~active
+    [ Node.a
+        ~attrs:
+          [ Style.skip_nav
+          ; Attr.href "#main-content"
+          ; Attr.arialabel "Skip to main content"
+          ]
+        [ Node.text "Skip to main content" ]
+    ; topbar ~active
     ; nav ~active
     ; Node.div
-        ~attrs:[ Style.main ]
-        [ Node.div ~attrs:[ Style.hud ] hud_nodes
-        ; Node.div ~attrs:[ Style.page ] children
+        ~attrs:[ Style.main; Attr.role "main" ]
+        [ Node.div ~attrs:[ Style.hud; Attr.arialabel "Key metrics" ] hud_nodes
+        ; Node.div ~attrs:[ Style.page; Attr.id "main-content" ] children
         ]
     ; aside_node
     ]

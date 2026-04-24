@@ -87,7 +87,7 @@ stylesheet
     border-bottom: 1px solid rgba(120, 100, 80, 0.16);
     background: linear-gradient(180deg, #1c140e, #160f0a);
     font-family: var(--font-ui, 'Noto Sans KR', sans-serif);
-    font-size: 9px;
+    font-size: 11px;
     letter-spacing: 0.28em;
     text-transform: uppercase;
     color: var(--text-dim);
@@ -107,8 +107,14 @@ stylesheet
 
   .row:last-child { border-bottom: 0; }
 
-  .row:hover {
+  .row:hover,
+  .row:focus-visible {
     background: rgba(160, 140, 110, 0.04);
+  }
+
+  .row:focus-visible {
+    outline: 1px solid var(--accent-brass);
+    outline-offset: -1px;
   }
 
   .row_selected {
@@ -174,7 +180,7 @@ stylesheet
 
   .summary_k {
     font-family: var(--font-ui, 'Noto Sans KR', sans-serif);
-    font-size: 9px;
+    font-size: 11px;
     letter-spacing: 0.2em;
     text-transform: uppercase;
     color: var(--text-dim);
@@ -253,7 +259,7 @@ stylesheet
 
   .note_k {
     font-family: var(--font-ui, 'Noto Sans KR', sans-serif);
-    font-size: 9px;
+    font-size: 11px;
     letter-spacing: 0.22em;
     text-transform: uppercase;
     color: var(--text-dim);
@@ -281,7 +287,7 @@ stylesheet
   .list_k {
     min-width: 92px;
     font-family: var(--font-ui, 'Noto Sans KR', sans-serif);
-    font-size: 9px;
+    font-size: 11px;
     letter-spacing: 0.22em;
     text-transform: uppercase;
     color: var(--text-dim);
@@ -307,7 +313,7 @@ stylesheet
 
   .preview_label {
     font-family: var(--font-ui, 'Noto Sans KR', sans-serif);
-    font-size: 9px;
+    font-size: 11px;
     letter-spacing: 0.22em;
     text-transform: uppercase;
     color: var(--text-dim);
@@ -336,6 +342,12 @@ stylesheet
     .row {
       grid-template-columns: 44px minmax(0, 1fr) minmax(0, 1.1fr) 144px 82px;
       gap: 10px;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      transition-duration: 0.01ms !important;
     }
   }
 |}]
@@ -1026,10 +1038,14 @@ let selected_row rows selected_name =
 ;;
 
 let row_click_effect name =
-  Attr.on_click (fun _ ->
-    Effect.of_sync_fun
-      (fun () -> Bonsai.Expert.Var.set selected_name_var (Some name))
-      ())
+  let select () = Bonsai.Expert.Var.set selected_name_var (Some name) in
+  [ Attr.on_click (fun _ -> Effect.of_sync_fun select ())
+  ; Attr.on_key_down (fun ev ->
+      let open Virtual_dom.Vdom.Event.Keyboard in
+      if Key.equal ev.key Key.Enter || Key.equal ev.key (Key.of_string " ")
+      then Effect.of_sync_fun select ()
+      else Effect.of_sync_fun (fun () -> ()) ())
+  ]
 ;;
 
 let context_class pct =
@@ -1054,6 +1070,7 @@ let view_summary_strip
   in
   let summary = coverage rows in
   Meta.strip
+    ~label:"Keepers summary"
     [ Meta.cell
         ~color:
           (if String.is_empty execution_generated_at then `Default else `Ok)
@@ -1110,14 +1127,14 @@ let view
   | _ ->
     let selected = selected_row rows selected_name in
     Node.div
-      ~attrs:[ Style.directory ]
+      ~attrs:[ Style.directory; Attr.role "grid" ]
       ([ Node.div
-           ~attrs:[ Style.head ]
-           [ Node.div [ Node.text "Sigil" ]
-           ; Node.div [ Node.text "Keeper" ]
-           ; Node.div [ Node.text "Brief" ]
-           ; Node.div [ Node.text "State" ]
-           ; Node.div ~attrs:[ Style.metric ] [ Node.text "Recent" ]
+           ~attrs:[ Style.head; Attr.role "row" ]
+           [ Node.div ~attrs:[ Attr.role "columnheader" ] [ Node.text "Sigil" ]
+           ; Node.div ~attrs:[ Attr.role "columnheader" ] [ Node.text "Keeper" ]
+           ; Node.div ~attrs:[ Attr.role "columnheader" ] [ Node.text "Brief" ]
+           ; Node.div ~attrs:[ Attr.role "columnheader" ] [ Node.text "State" ]
+           ; Node.div ~attrs:[ Attr.role "columnheader"; Style.metric ] [ Node.text "Recent" ]
            ]
        ]
        @ List.map rows ~f:(fun row ->
@@ -1153,8 +1170,11 @@ let view
          in
          let row_attrs =
            [ Style.row
-           ; row_click_effect row.name
+           ; Attr.tabindex 0
+           ; Attr.role "row"
+           ; Attr.arialabel row.name
            ]
+           @ row_click_effect row.name
            @ if is_selected then [ Style.row_selected ] else []
          in
          Node.div

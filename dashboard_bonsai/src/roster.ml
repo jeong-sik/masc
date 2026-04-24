@@ -100,7 +100,7 @@ stylesheet
     align-items: center;
     gap: 6px;
     font-family: 'Noto Sans KR', -apple-system, sans-serif;
-    font-size: 9px;
+    font-size: 11px;
     letter-spacing: 0.22em;
     text-transform: uppercase;
     color: var(--text-dim);
@@ -126,6 +126,10 @@ stylesheet
     color: var(--text-dim);
     flex-shrink: 0;
   }
+
+  @media (prefers-reduced-motion: reduce) {
+    .dot_live, .dot_thinking { animation: none; }
+  }
 |}]
 
 (** Keeper 상태 → roster dot 상태 매핑. `Warn` → `Thinking` (뭔가
@@ -146,7 +150,7 @@ let view_slot ~(state : state) ~sigil ~name ~state_label ~when_ =
     | `Failed -> Style.dot_failed
   in
   Node.div
-    ~attrs:[ Style.slot ]
+    ~attrs:[ Style.slot; Attr.role "listitem" ]
     [ Node.div ~attrs:[ Style.sigil ] [ Node.text sigil ]
     ; Node.div
         ~attrs:[ Style.body ]
@@ -200,5 +204,5 @@ let view ?(keepers : Keepers_types.response = Keepers_types.fixture) () =
     | [] -> view_static ()
     | live -> List.map live ~f:view_slot_of_keeper
   in
-  Node.div ~attrs:[ Style.roster ] slots
+  Node.div ~attrs:[ Style.roster; Attr.role "list" ] slots
 ;;

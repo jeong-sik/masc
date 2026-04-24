@@ -42,8 +42,8 @@ stylesheet
 
   .eyebrow {
     font-family: 'Noto Sans KR', sans-serif;
-    font-size: 10px;
-    letter-spacing: 0.3em;
+    font-size: 11px;
+    letter-spacing: 0.25em;
     text-transform: uppercase;
     color: var(--text-dim);
     margin: 0;
@@ -83,8 +83,8 @@ stylesheet
   .meta_item { display: flex; align-items: baseline; gap: 8px; }
   .meta_k {
     font-family: 'Noto Sans KR', sans-serif;
-    font-size: 9px;
-    letter-spacing: 0.24em;
+    font-size: 11px;
+    letter-spacing: 0.2em;
     text-transform: uppercase;
     color: var(--text-dim);
   }
@@ -113,6 +113,7 @@ let hhmmss_of_iso (s : string) : string =
 
 let view_meta_strip ~(total : int) ~(dead : int) ~(synced : string) =
   Meta.strip
+    ~label:"Dead keepers summary"
     [ Meta.cell ~k:"fleet" ~v:(Printf.sprintf "%02d" total) ()
     ; Meta.cell ~color:`Blood ~k:"dead" ~v:(Printf.sprintf "%02d" dead) ()
     ; Meta.cell ~k:"synced" ~v:synced ()
@@ -127,7 +128,7 @@ let view_dead_list (dead : Keepers_types.keeper list) =
       [ Node.text "fleet is whole — no keepers have fallen." ]
   | ks ->
     Node.div
-      ~attrs:[]
+      ~attrs:[ Attr.role "list"; Attr.arialabel "Dead keepers list" ]
       (List.map ks ~f:Roster.view_slot_of_keeper)
 ;;
 

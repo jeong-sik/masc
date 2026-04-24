@@ -128,8 +128,8 @@ stylesheet
 
   .pulse_label {
     font-family: 'Noto Sans KR', -apple-system, sans-serif;
-    font-size: 9px;
-    letter-spacing: 0.3em;
+    font-size: 11px;
+    letter-spacing: 0.25em;
     text-transform: uppercase;
     color: var(--text-dim);
   }
@@ -154,17 +154,17 @@ stylesheet
 
   .heartbeat_eyebrow {
     font-family: 'Noto Sans KR', -apple-system, sans-serif;
-    font-size: 9px;
-    letter-spacing: 0.3em;
+    font-size: 11px;
+    letter-spacing: 0.25em;
     text-transform: uppercase;
     color: var(--text-dim);
   }
 
   .heartbeat_scale {
     font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace;
-    font-size: 9px;
+    font-size: 11px;
     letter-spacing: 0.12em;
-    color: #4a3a32;
+    color: var(--text-dim);
   }
 
   .heartbeat_track {
@@ -278,7 +278,7 @@ stylesheet
 
   .chip {
     font-family: 'Noto Sans KR', -apple-system, sans-serif;
-    font-size: 10px;
+    font-size: 11px;
     letter-spacing: 0.2em;
     text-transform: uppercase;
     padding: 4px 12px;
@@ -289,6 +289,7 @@ stylesheet
   }
 
   .chip:hover { color: var(--text-primary); }
+  .chip:focus-visible { outline: 2px solid var(--accent-brass); outline-offset: 1px; }
   .chip_active {
     color: var(--text-bright);
     background: rgba(138, 106, 40, 0.14);
@@ -321,14 +322,14 @@ stylesheet
     color: var(--text-dim);
   }
 
-  .input_shell_label { letter-spacing: 0.25em; text-transform: uppercase; color: #4a3a32; font-size: 9px; }
+  .input_shell_label { letter-spacing: 0.2em; text-transform: uppercase; color: var(--text-dim); font-size: 11px; }
   .input_shell_value { font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 11px; color: var(--text-primary); }
 
   .toolbar_spacer { flex: 1; }
 
   .btn_ghost {
     font-family: 'Noto Sans KR', -apple-system, sans-serif;
-    font-size: 10px;
+    font-size: 11px;
     letter-spacing: 0.2em;
     text-transform: uppercase;
     padding: 5px 12px;
@@ -354,8 +355,8 @@ stylesheet
 
   .eyebrow {
     font-family: 'Noto Sans KR', -apple-system, sans-serif;
-    font-size: 10px;
-    letter-spacing: 0.3em;
+    font-size: 11px;
+    letter-spacing: 0.25em;
     text-transform: uppercase;
     color: var(--text-dim);
     margin: 0 0 0.25rem 0;
@@ -569,15 +570,15 @@ stylesheet
 
   .ts_rel {
     font-family: 'Noto Sans KR', -apple-system, sans-serif;
-    font-size: 9px;
-    letter-spacing: 0.2em;
+    font-size: 11px;
+    letter-spacing: 0.18em;
     text-transform: uppercase;
-    color: #4a3a32;
+    color: var(--text-dim);
   }
 
   .level {
     font-family: 'Noto Sans KR', -apple-system, sans-serif;
-    font-size: 10px;
+    font-size: 11px;
     letter-spacing: 0.25em;
     text-transform: uppercase;
     font-weight: 500;
@@ -599,7 +600,7 @@ stylesheet
     align-items: center;
     gap: 6px;
     font-family: 'Noto Sans KR', -apple-system, sans-serif;
-    font-size: 9px;
+    font-size: 11px;
     letter-spacing: 0.2em;
     text-transform: uppercase;
     padding: 3px 8px;
@@ -652,12 +653,12 @@ stylesheet
   .empty_attr {
     display: block;
     margin-top: 0.75rem;
-    font-size: 10px;
+    font-size: 11px;
     letter-spacing: 0.3em;
     text-transform: uppercase;
     font-family: 'Noto Sans KR', -apple-system, sans-serif;
     font-style: normal;
-    color: #4a3a32;
+    color: var(--text-dim);
   }
 
   /* Wrapper kept for backward compatibility with the existing render
@@ -713,7 +714,7 @@ stylesheet
     left: 50%;
     transform: translateX(-50%) rotate(14deg);
     font-family: 'Noto Sans KR', sans-serif;
-    font-size: 8px;
+    font-size: 10px;
     letter-spacing: 0.3em;
     text-transform: uppercase;
     color: var(--border-highlight);
@@ -755,7 +756,7 @@ stylesheet
     display: grid;
     place-items: center;
     font-family: 'Cinzel', serif;
-    font-size: 9px;
+    font-size: 11px;
     transform: rotate(45deg);
   }
   .nav_brand_rune > span { transform: rotate(-45deg); display: block; }
@@ -771,8 +772,8 @@ stylesheet
   .nav_section {
     padding: 14px 18px 6px;
     font-family: 'Noto Sans KR', sans-serif;
-    font-size: 9px;
-    letter-spacing: 0.3em;
+    font-size: 11px;
+    letter-spacing: 0.25em;
     text-transform: uppercase;
     color: var(--text-dim);
     display: flex;
@@ -833,9 +834,9 @@ stylesheet
     padding: 14px 18px 0;
     border-top: 1px solid var(--border-main);
     font-family: 'JetBrains Mono', ui-monospace, monospace;
-    font-size: 9px;
+    font-size: 10px;
     letter-spacing: 0.16em;
-    color: var(--border-highlight);
+    color: var(--text-dim);
     text-transform: uppercase;
   }
   .nav_foot_v { color: var(--text-dim); }
@@ -854,7 +855,7 @@ stylesheet
   }
   .theme_chip {
     font-family: 'Noto Sans KR', sans-serif;
-    font-size: 8px;
+    font-size: 10px;
     letter-spacing: 0.22em;
     text-transform: uppercase;
     padding: 3px 6px;
@@ -869,6 +870,7 @@ stylesheet
     border-color: var(--accent-brass-dim);
     color: var(--accent-brass);
   }
+  .theme_chip:focus-visible { outline: 2px solid var(--accent-brass); outline-offset: 1px; }
   .theme_chip_active {
     border-color: var(--accent-brass);
     color: var(--accent-brass);
@@ -1027,8 +1029,8 @@ stylesheet
   }
   .focus_stat_l {
     font-family: 'Noto Sans KR', sans-serif;
-    font-size: 9px;
-    letter-spacing: 0.22em;
+    font-size: 11px;
+    letter-spacing: 0.18em;
     color: var(--text-dim);
     text-transform: uppercase;
   }
@@ -1262,7 +1264,7 @@ stylesheet
   .tomb {
     padding: 5px 8px;
     font-family: 'Cinzel', 'Cormorant SC', serif;
-    font-size: 9px;
+    font-size: 11px;
     letter-spacing: 0.16em;
     text-transform: uppercase;
     color: var(--text-dim);
@@ -1283,6 +1285,10 @@ stylesheet
     opacity: 0.5;
     text-decoration: line-through;
     text-decoration-color: var(--accent-blood);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .pulse { animation: none; }
   }
 |}]
 
@@ -1325,8 +1331,8 @@ let sigil_char source =
 let view_entry ~is_first (e : Logs_types.entry) =
   let row_attrs =
     match row_tint e.normalized_level with
-    | None -> [ Style.row ]
-    | Some tint -> [ Style.row; tint ]
+    | None -> [ Style.row; Attr.role "listitem" ]
+    | Some tint -> [ Style.row; tint; Attr.role "listitem" ]
   in
   let sigil_attrs =
     match sigil_class e.normalized_level with
@@ -1504,7 +1510,7 @@ let view_tombstrip ?(states = keeper_fsm_states) () =
       [ Node.text label ]
   in
   Node.div
-    ~attrs:[ Style.tombstrip ]
+    ~attrs:[ Style.tombstrip; Attr.arialabel "Keeper FSM states" ]
     (List.map states ~f:tile)
 ;;
 
@@ -1536,7 +1542,7 @@ let view_hud
     | "" -> "—"
     | ts -> Printf.sprintf "%s UTC" (Hud.hhmmss_of_iso ts)
   in
-  Hud.strip
+  Hud.strip ~label:"Log controls"
     [ Hud.cell ~k:"Source" ~v:"Log.Ring" ()
     ; Hud.cell ~k:"Total" ~v:(Printf.sprintf "%d" response.total) ()
     ; Hud.cell ~k:"Level" ~v:"INFO+" ()
@@ -1631,7 +1637,7 @@ let render_response
       in
       Node.div
         ~attrs:[ Style.tape_fade ]
-        [ Node.div ~attrs:[ Style.tape ] rendered
+        [ Node.div ~attrs:[ Style.tape; Attr.role "log"; Attr.arialabel "Log entries" ] rendered
         ; Node.div ~attrs:[ Style.tape_end ] []
         ]
   in
@@ -1687,6 +1693,8 @@ let render_response
              ~attrs:
                [ Style.chip
                ; Attr.create "data-filter-level" level
+               ; Attr.role "button"
+               ; Attr.tabindex 0
                ; click
                ]
              [ Node.text label ]
@@ -1830,6 +1838,8 @@ let render_response
              ~attrs:
                [ Style.theme_chip
                ; Attr.create "data-chip-theme" name
+               ; Attr.role "button"
+               ; Attr.tabindex 0
                ; Attr.on_click (fun _ ->
                    Effect.of_sync_fun
                      (fun () ->

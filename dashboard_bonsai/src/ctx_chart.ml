@@ -33,7 +33,7 @@ stylesheet
     justify-content: center;
     gap: 4px;
     font-family: 'Noto Sans KR', sans-serif;
-    font-size: 9px;
+    font-size: 11px;
     letter-spacing: 0.22em;
     text-transform: uppercase;
     color: var(--text-dim);
@@ -207,6 +207,8 @@ let view ?(keepers : Keepers_types.response = Keepers_types.fixture) () =
         [ svg_a "viewBox" "0 0 600 100"
         ; svg_a "preserveAspectRatio" "none"
         ; Style.svg
+        ; Attr.role "img"
+        ; Attr.arialabel "Context usage chart over 60 minutes"
         ]
       (hairlines @ guides @ polylines)
   in

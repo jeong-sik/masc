@@ -105,5 +105,5 @@ let view_mini ~(segments : (kind * int) list) =
                [ Node.text (Printf.sprintf "%d" pct) ]
            ]))
   in
-  Node.div ~attrs:[ Style.flame ] [ bar; legend ]
+  Node.div ~attrs:[ Style.flame; Attr.role "img"; Attr.arialabel "Tool category time distribution" ] [ bar; legend ]
 ;;

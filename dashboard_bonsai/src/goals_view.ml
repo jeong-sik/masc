@@ -36,8 +36,8 @@ stylesheet
 
   .eyebrow {
     font-family: 'Noto Sans KR', sans-serif;
-    font-size: 10px;
-    letter-spacing: 0.3em;
+    font-size: 11px;
+    letter-spacing: 0.25em;
     text-transform: uppercase;
     color: var(--text-dim);
     margin: 0;
@@ -77,8 +77,8 @@ stylesheet
   .meta_item { display: flex; align-items: baseline; gap: 8px; }
   .meta_k {
     font-family: 'Noto Sans KR', sans-serif;
-    font-size: 9px;
-    letter-spacing: 0.24em;
+    font-size: 11px;
+    letter-spacing: 0.2em;
     text-transform: uppercase;
     color: var(--text-dim);
   }
@@ -122,6 +122,7 @@ stylesheet
   .goal_title {
     font-family: 'Cinzel', serif;
     font-size: 16px;
+    font-weight: normal;
     letter-spacing: 0.08em;
     color: var(--text-bright);
     text-transform: uppercase;
@@ -129,10 +130,11 @@ stylesheet
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    margin: 0;
   }
   .goal_horizon {
     font-family: 'JetBrains Mono', ui-monospace, monospace;
-    font-size: 10px;
+    font-size: 11px;
     color: var(--text-dim);
     letter-spacing: 0.14em;
     text-transform: uppercase;
@@ -172,8 +174,8 @@ stylesheet
 
   .status_pill {
     font-family: 'JetBrains Mono', ui-monospace, monospace;
-    font-size: 9px;
-    letter-spacing: 0.16em;
+    font-size: 11px;
+    letter-spacing: 0.14em;
     text-transform: uppercase;
     padding: 2px 6px;
     border: 1px solid var(--border-main);
@@ -213,8 +215,8 @@ stylesheet
 
   .blocker_k {
     font-family: 'JetBrains Mono', ui-monospace, monospace;
-    font-size: 9px;
-    letter-spacing: 0.18em;
+    font-size: 11px;
+    letter-spacing: 0.16em;
     text-transform: uppercase;
     color: var(--status-warn);
   }
@@ -228,7 +230,7 @@ stylesheet
 
   .blocker_meta {
     font-family: 'JetBrains Mono', ui-monospace, monospace;
-    font-size: 10px;
+    font-size: 11px;
     color: var(--text-dim);
   }
 |}]
@@ -368,14 +370,16 @@ let rec view_node ~(depth : int) (n : Goals_types.node) : Node.t =
           ]
       ]
   in
+  let title_node =
+    if depth = 0 then Node.h2 ~attrs:[ Style.goal_title ] [ Node.text (truncate ~max_len:60 n.title) ]
+    else Node.h3 ~attrs:[ Style.goal_title ] [ Node.text (truncate ~max_len:60 n.title) ]
+  in
   Node.div
-    ~attrs:(Style.goal :: indent_attr)
+    ~attrs:(Style.goal :: Attr.role "treeitem" :: Attr.arialabel n.title :: indent_attr)
     (List.concat
        [ [ Node.div
              ~attrs:[ Style.goal_head ]
-             [ Node.div
-                 ~attrs:[ Style.goal_title ]
-                 [ Node.text (truncate ~max_len:60 n.title) ]
+             [ title_node
              ; Node.div
                  ~attrs:[ Style.goal_horizon ]
                  [ Node.text horizon_text ]
@@ -383,7 +387,10 @@ let rec view_node ~(depth : int) (n : Goals_types.node) : Node.t =
                  ~attrs:[ Style.conv_bar_wrap ]
                  [ Node.text (Printf.sprintf "%d%%" n.convergence_pct)
                  ; Node.div
-                     ~attrs:[ Style.conv_bar ]
+                     ~attrs:[ Style.conv_bar; Attr.role "progressbar"
+                            ; Attr.create "aria-valuenow" (Int.to_string n.convergence_pct)
+                            ; Attr.create "aria-valuemin" "0"
+                            ; Attr.create "aria-valuemax" "100" ]
                      [ Node.div
                          ~attrs:[ Style.conv_bar_fill; bar_fill_style ]
                          []
@@ -438,6 +445,7 @@ let rec view_node ~(depth : int) (n : Goals_types.node) : Node.t =
 let view_meta_strip (r : Goals_types.response) =
   let s = r.summary in
   Meta.strip
+    ~label:"Goals summary"
     [ Meta.cell ~k:"goals" ~v:(Printf.sprintf "%d" s.total_goals) ()
     ; Meta.cell ~color:`Ok ~k:"active"
         ~v:(Printf.sprintf "%d" s.active_goals) ()
@@ -469,7 +477,7 @@ let render ~(shell : Overview_types.response) (r : Goals_types.response) : Node.
            [ Node.text "goal tree is empty." ]
        | nodes ->
          Node.div
-           ~attrs:[ Style.tree ]
+           ~attrs:[ Style.tree; Attr.role "tree"; Attr.arialabel "Goal tree" ]
            (List.map nodes ~f:(view_node ~depth:0)))
     ]
 ;;

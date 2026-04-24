@@ -252,7 +252,7 @@ let component ~(route : Route.t) (_graph @ local) =
               ~code:(Route.path Logs)
           ]
       ; Node.div
-          ~attrs:[ Style.cta ]
+          ~attrs:[ Style.cta; Attr.role "group"; Attr.create "aria-label" "Quick navigation" ]
           [ Node.a
               ~attrs:[ Attr.href (Route.path Logs); Style.btn; Style.btn_primary; Attr.create "aria-label" "Open keeper journal (logs)" ]
               [ Node.text "journal" ]

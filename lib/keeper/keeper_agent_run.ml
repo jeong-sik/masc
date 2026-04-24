@@ -1872,6 +1872,30 @@ let run_turn
           Keeper_runtime_resolved.oas_timeout_for_estimated_input_tokens
             ~estimated_input_tokens
     in
+    (* Observability for issue #10049: CLI-backed providers
+       (claude_code, kimi_cli) need claude_mcp_config to reach the masc-mcp
+       HTTP MCP endpoint; otherwise the MCP tool catalog is invisible to
+       the subprocess and the model will correctly report that no shell
+       tools are bound. Codex CLI has a separate sync path
+       (MASC_SYNC_CODEX_MCP_CONFIG) so it is not affected. *)
+    (if keeper_oas_context.claude_mcp_config = None then
+       let uses_cli_missing_sync =
+         List.exists
+           (fun label ->
+              let lbl = String.lowercase_ascii label in
+              let starts p =
+                String.length lbl >= String.length p
+                && String.equal (String.sub lbl 0 (String.length p)) p
+              in
+              starts "claude_code" || starts "kimi_cli")
+           meta.models
+       in
+       if uses_cli_missing_sync then
+         Log.Keeper.warn
+           "keeper %s (cascade=%s): cli-backed providers selected but \
+            claude_mcp_config is None; MCP tool catalog will not be \
+            visible to the subprocess (see issue #10049 for fix plan)"
+           meta.name cascade_name);
     let cli_transport_overrides =
       Some
         ({

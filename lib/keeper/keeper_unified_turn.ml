@@ -1640,7 +1640,16 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             ?fallback_reason
             ~social_state
             ~error:e_str ();
-          (match write_meta_with_retry config updated_meta with
+          (* #9769 root fix: heartbeat-field-merge prevents the
+             turn-failure retry from clobbering heartbeat-owned fields
+             (joined_room_ids, last_seen_seq_by_room), which was the
+             dominant source of the observed CAS race exhaustion after
+             keeper OAS timeout. *)
+          (match
+             write_meta_with_merge
+               ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
+               config updated_meta
+           with
            | Ok () -> ()
            | Error msg ->
                if is_version_conflict_error msg then
@@ -1939,8 +1948,15 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             outcome_str;
           (* 7. Persist updated meta — RMW retry to avoid losing the cycle's
              usage/trace data when a heartbeat fiber bumps meta_version
-             between the cycle's read and its write. See #9764. *)
-          (match write_meta_with_retry config updated_meta with
+             between the cycle's read and its write. #9764 / #9769:
+             field-level merge preserves heartbeat-owned fields from
+             disk so the retry does not clobber concurrent heartbeat
+             writes (previous "caller wins" retry was losing the race). *)
+          (match
+             write_meta_with_merge
+               ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
+               config updated_meta
+           with
            | Ok () -> ()
            | Error msg ->
                if is_version_conflict_error msg then

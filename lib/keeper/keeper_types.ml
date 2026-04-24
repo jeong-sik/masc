@@ -2004,6 +2004,43 @@ let write_meta_with_retry
   attempt 0 m
 ;;
 
+(* #9769 root fix: like [write_meta_with_retry], but lets the caller
+   declare field ownership via [merge]. The turn-failure/cycle path
+   uses [Keeper_meta_merge.heartbeat_fields_from_disk] so its retry
+   does not clobber heartbeat-owned fields ([joined_room_ids],
+   [last_seen_seq_by_room]). *)
+let write_meta_with_merge
+      ?(max_retries = 3)
+      ~(merge : latest:keeper_meta -> caller:keeper_meta -> keeper_meta)
+      config
+      (m : keeper_meta)
+  : (unit, string) result
+  =
+  let path = keeper_meta_path config m.name in
+  let rec attempt n (caller : keeper_meta) =
+    match write_meta config caller with
+    | Ok () -> Ok ()
+    | Error msg when n >= max_retries -> Error msg
+    | Error msg when not (is_version_conflict_error msg) -> Error msg
+    | Error _ ->
+      (match read_meta_file_path path with
+       | Ok (Some latest) ->
+         Log.Keeper.warn
+           "write_meta CAS retry %d/%d for %s (caller had %d, disk %d; field-level merge)"
+           (n + 1) max_retries caller.name caller.meta_version
+           latest.meta_version;
+         attempt (n + 1) (merge ~latest ~caller)
+       | Ok None ->
+         (* Disk file vanished between attempts; fall back to fresh write. *)
+         attempt (n + 1) { caller with meta_version = 0 }
+       | Error read_msg ->
+         Error
+           (Printf.sprintf
+              "write_meta retry: failed to re-read for CAS: %s" read_msg))
+  in
+  attempt 0 m
+;;
+
 (** Fiber-level health for keeper supervisor monitoring.
     Defined here (not in Keeper_supervisor) to avoid circular
     dependencies between keeper_exec_status and the keeper supervisor. *)

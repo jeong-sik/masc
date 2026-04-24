@@ -5,6 +5,7 @@ open Keeper_types
 open Keeper_exec_persona
 
 module Turn = Keeper_turn
+module Authoring = Keeper_persona_authoring
 type tool_result = Keeper_types.tool_result
 
 let handle_persona_list _ctx args : tool_result =
@@ -24,6 +25,12 @@ let handle_persona_list _ctx args : tool_result =
       ]
   in
   (true, Yojson.Safe.to_string json)
+
+let handle_persona_schema = Authoring.handle_persona_schema
+
+let handle_persona_generate = Authoring.handle_persona_generate
+
+let handle_persona_save = Authoring.handle_persona_save
 
 let handle_keeper_create_from_persona ctx args : tool_result =
   match resolved_keeper_args_from_persona args with

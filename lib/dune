@@ -472,6 +472,7 @@
    keeper_exec_status_metrics
    keeper_exec_status
    keeper_exec_persona
+   keeper_persona_authoring
    keeper_model_labels
    keeper_fs
    keeper_identity

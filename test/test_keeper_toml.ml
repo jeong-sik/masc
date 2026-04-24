@@ -2,6 +2,7 @@ open Alcotest
 
 module TL = Masc_mcp.Keeper_toml_loader
 module KTP = Masc_mcp.Keeper_types_profile
+module KPA = Masc_mcp.Keeper_persona_authoring
 
 let contains_substring s needle =
   let s_len = String.length s in
@@ -989,6 +990,92 @@ let test_persona_resolver_preserves_canonical_tool_access_and_allowed_paths () =
          | `String _ -> true
          | _ -> false)
 
+let authoring_minimal_profile =
+  `Assoc
+    [
+      ("name", `String "Probe");
+      ("role", `String "research critic");
+      ("trait", `String "skeptical and concise");
+      ( "keeper",
+        `Assoc
+          [
+            ("goal", `String "Find weak assumptions and make concrete tasks.");
+          ] );
+    ]
+
+let test_persona_authoring_schema_explains_effects () =
+  let json = KPA.schema_json () in
+  let rendered = Yojson.Safe.to_string json in
+  check bool "documents keeper.goal" true
+    (contains_substring rendered "keeper.goal");
+  check bool "documents tool presets" true
+    (contains_substring rendered "tool_preset");
+  check bool "documents archetype axes" true
+    (contains_substring rendered "archetype_axes")
+
+let test_persona_authoring_normalizes_keeper_defaults () =
+  match KPA.normalize_profile ~handle:"probe" authoring_minimal_profile with
+  | Error e -> fail e
+  | Ok json ->
+      let keeper = Yojson.Safe.Util.member "keeper" json in
+      check string "handle written" "probe"
+        (Yojson.Safe.Util.member "handle" json |> Yojson.Safe.Util.to_string);
+      check string "goal preserved"
+        "Find weak assumptions and make concrete tasks."
+        (Yojson.Safe.Util.member "goal" keeper |> Yojson.Safe.Util.to_string);
+      check string "short_goal defaults to goal"
+        "Find weak assumptions and make concrete tasks."
+        (Yojson.Safe.Util.member "short_goal" keeper
+         |> Yojson.Safe.Util.to_string);
+      check (list string) "mention target defaults to handle" [ "probe" ]
+        (Yojson.Safe.Util.member "mention_targets" keeper
+         |> Yojson.Safe.Util.to_list
+         |> List.map Yojson.Safe.Util.to_string);
+      check string "tool preset defaults to research" "research"
+        (Yojson.Safe.Util.member "tool_preset" keeper
+         |> Yojson.Safe.Util.to_string)
+
+let test_persona_authoring_rejects_unknown_keeper_fields () =
+  let profile =
+    `Assoc
+      [
+        ( "keeper",
+          `Assoc
+            [
+              ("goal", `String "test");
+              ("evil_chaos_knob", `String "11");
+            ] );
+      ]
+  in
+  match KPA.normalize_profile ~handle:"probe" profile with
+  | Ok _ -> fail "expected unknown keeper field rejection"
+  | Error e ->
+      check bool "mentions unknown keeper fields" true
+        (contains_substring e "unknown keeper fields");
+      check bool "mentions schema tool" true
+        (contains_substring e "masc_persona_schema")
+
+let test_persona_authoring_save_dry_run_does_not_write () =
+  with_personas_dir @@ fun personas_dir ->
+  match KPA.save_persona ~dry_run:true ~handle:"probe" authoring_minimal_profile with
+  | Error e -> fail e
+  | Ok result ->
+      check string "root" personas_dir result.personas_root;
+      check bool "profile not written" false (Sys.file_exists result.profile_path)
+
+let test_persona_authoring_save_writes_profile_and_loader_reads_it () =
+  with_personas_dir @@ fun _personas_dir ->
+  match KPA.save_persona ~handle:"probe" authoring_minimal_profile with
+  | Error e -> fail e
+  | Ok result ->
+      check bool "profile written" true (Sys.file_exists result.profile_path);
+      (match KTP.load_persona_summary "probe" with
+       | None -> fail "saved persona summary not loaded"
+       | Some summary ->
+           check string "loaded persona name" "probe" summary.persona_name;
+           check string "loaded display" "Probe" summary.display_name;
+           check bool "has keeper defaults" true summary.has_keeper_defaults)
+
 (* ================================================================ *)
 (* Unknown-key detection                                             *)
 (* ================================================================ *)
@@ -1313,5 +1400,15 @@ let () =
             test_persona_resolver_preserves_autoboot_enabled_arg;
           test_case "persona resolver preserves canonical tool_access and allowed_paths" `Quick
             test_persona_resolver_preserves_canonical_tool_access_and_allowed_paths;
+          test_case "persona authoring schema explains effects" `Quick
+            test_persona_authoring_schema_explains_effects;
+          test_case "persona authoring normalizes defaults" `Quick
+            test_persona_authoring_normalizes_keeper_defaults;
+          test_case "persona authoring rejects unknown keeper fields" `Quick
+            test_persona_authoring_rejects_unknown_keeper_fields;
+          test_case "persona authoring dry-run does not write" `Quick
+            test_persona_authoring_save_dry_run_does_not_write;
+          test_case "persona authoring save is loader-visible" `Quick
+            test_persona_authoring_save_writes_profile_and_loader_reads_it;
         ] );
     ]

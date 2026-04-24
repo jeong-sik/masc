@@ -153,6 +153,9 @@ let test_permissions_promoted_to_metadata_ssot () =
       ("masc_tool_admin_snapshot", Types.CanAdmin);
       ("masc_runtime_verify", Types.CanReadState);
       ("masc_persona_list", Types.CanReadState);
+      ("masc_persona_schema", Types.CanReadState);
+      ("masc_persona_generate", Types.CanBroadcast);
+      ("masc_persona_save", Types.CanBroadcast);
       ("masc_keeper_reset", Types.CanBroadcast);
       ("masc_join", Types.CanJoin);
       ("masc_broadcast", Types.CanBroadcast);

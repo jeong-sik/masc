@@ -1139,6 +1139,9 @@ let dispatch ctx ~name ~args : tool_result option =
   let ctx = resolve_ctx ctx ~name args in
   match name with
   | "masc_persona_list" -> Some (Persona.handle_persona_list ctx args)
+  | "masc_persona_schema" -> Some (Persona.handle_persona_schema ctx args)
+  | "masc_persona_generate" -> Some (Persona.handle_persona_generate ctx args)
+  | "masc_persona_save" -> Some (Persona.handle_persona_save ctx args)
   | "masc_keeper_create_from_persona" -> Some (handle_keeper_create_from_persona ctx args)
   | "masc_keeper_up" -> Some (handle_keeper_up ctx args)
   | "masc_keeper_status" -> Some (handle_keeper_status ctx args)
@@ -1171,12 +1174,14 @@ let dispatch_stream ~on_text_delta ctx ~name ~args : tool_result option =
 (* ================================================================ *)
 
 let _tool_spec_read_only =
-  [ "masc_keeper_list"; "masc_keeper_status"; "masc_keeper_sandbox_status" ]
+  [ "masc_persona_list"; "masc_persona_schema"; "masc_keeper_list";
+    "masc_keeper_status"; "masc_keeper_sandbox_status" ]
 
 let tool_required_permission = function
-  | "masc_persona_list" | "masc_keeper_list" | "masc_keeper_status"
-  | "masc_keeper_sandbox_status" ->
+  | "masc_persona_list" | "masc_persona_schema" | "masc_keeper_list"
+  | "masc_keeper_status" | "masc_keeper_sandbox_status" ->
       Some Types.CanReadState
+  | "masc_persona_generate" | "masc_persona_save"
   | "masc_keeper_create_from_persona" | "masc_keeper_up"
   | "masc_keeper_msg" | "masc_keeper_msg_result"
   | "masc_keeper_repair"

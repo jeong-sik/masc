@@ -20,6 +20,7 @@ let legacy_permission_entries : (string * permission) list =
     ("masc_operator_snapshot", CanReadState);
     ("masc_operator_digest", CanReadState);
     ("masc_surface_audit", CanReadState);
+    ("masc_persona_schema", CanReadState);
     ("masc_keeper_status", CanReadState);
     ("masc_keeper_list", CanReadState);
     ("masc_runtime_verify", CanReadState);
@@ -64,6 +65,8 @@ let legacy_permission_entries : (string * permission) list =
     ("masc_keeper_reset", CanBroadcast);
     ("masc_keeper_compact", CanBroadcast);
     ("masc_keeper_clear", CanBroadcast);
+    ("masc_persona_generate", CanBroadcast);
+    ("masc_persona_save", CanBroadcast);
     ("masc_keeper_create_from_persona", CanBroadcast);
     ("masc_approval_resolve", CanAdmin);
     ("masc_operator_confirm", CanBroadcast);

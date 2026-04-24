@@ -1014,8 +1014,8 @@ let run_turn
       List.length (Keeper_discovered_tools.active_names !discovered_ref ~turn)
     in
     let per_call_turn = turn - start_turn_count in
-    let is_last_turn = per_call_turn >= max_turns - 1 in
-    let is_warning_zone = per_call_turn >= max_turns - 2 in
+    let is_last_turn = per_call_turn >= max_turns in
+    let is_warning_zone = per_call_turn >= max_turns - 1 in
     let tool_gate_requested =
       tool_gate_requested_for_turn ~current_tool_choice ~is_last_turn
     in

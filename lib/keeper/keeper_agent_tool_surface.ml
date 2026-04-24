@@ -77,7 +77,7 @@ let turn_affordances_require_tool_gate turn_affordances =
 let should_require_tools_for_initial_turn ~(max_turns : int)
     ~(turn_affordances : string list) =
   let initial_per_call_turn = 1 in
-  let initial_turn_is_last = initial_per_call_turn >= max_turns - 1 in
+  let initial_turn_is_last = initial_per_call_turn >= max_turns in
   max_turns > 1
   && not initial_turn_is_last
   && turn_affordances_require_tool_gate turn_affordances
@@ -247,4 +247,3 @@ let tool_index_entry_of_tool
     | None -> []
   in
   Oas.Tool_index.{ name; description = t.schema.description; group; aliases }
-

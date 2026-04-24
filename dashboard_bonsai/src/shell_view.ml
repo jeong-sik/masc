@@ -678,7 +678,7 @@ let nav_link ~(active : Route.t) (route : Route.t) =
 let nav ~(active : Route.t) =
   let lnk = nav_link ~active in
   Node.div
-    ~attrs:[ Style.nav; Attr.role "navigation"; Attr.arialabel "Main navigation" ]
+    ~attrs:[ Style.nav; Attr.role "navigation"; Attr.create "aria-label" "Main navigation" ]
     [ section "watch"
     ; lnk Overview
     ; lnk Logs
@@ -755,7 +755,7 @@ let hud_cell ?(tone : tone = `Neutral) ~k ~v () =
     | `Bad -> [ Style.hud_v; Style.hud_bad ]
   in
   Node.div
-    ~attrs:[ Style.hud_cell; Attr.arialabel (k ^ ": " ^ v) ]
+    ~attrs:[ Style.hud_cell; Attr.create "aria-label" (k ^ ": " ^ v) ]
     [ Node.div ~attrs:[ Style.hud_k ] [ Node.text k ]
     ; Node.div ~attrs:v_attrs [ Node.text v ]
     ]
@@ -971,7 +971,7 @@ let watch_feed () =
 
 let default_aside ~(shell : Overview_types.response) ~(active : Route.t) =
   Node.div
-    ~attrs:[ Style.aside; Attr.role "complementary"; Attr.arialabel "Sidebar details" ]
+    ~attrs:[ Style.aside; Attr.role "complementary"; Attr.create "aria-label" "Sidebar details" ]
     [ focus_card ~shell ~active
     ; flame ()
     ; watch_feed ()
@@ -995,14 +995,14 @@ let view ?(shell = Overview_types.fixture) ?hud ?aside ~(active : Route.t) (chil
         ~attrs:
           [ Style.skip_nav
           ; Attr.href "#main-content"
-          ; Attr.arialabel "Skip to main content"
+          ; Attr.create "aria-label" "Skip to main content"
           ]
         [ Node.text "Skip to main content" ]
     ; topbar ~active
     ; nav ~active
     ; Node.div
         ~attrs:[ Style.main; Attr.role "main" ]
-        [ Node.div ~attrs:[ Style.hud; Attr.arialabel "Key metrics" ] hud_nodes
+        [ Node.div ~attrs:[ Style.hud; Attr.create "aria-label" "Key metrics" ] hud_nodes
         ; Node.div ~attrs:[ Style.page; Attr.id "main-content" ] children
         ]
     ; aside_node

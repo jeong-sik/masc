@@ -204,5 +204,5 @@ let view ?(keepers : Keepers_types.response = Keepers_types.fixture) () =
     | [] -> view_static ()
     | live -> List.map live ~f:view_slot_of_keeper
   in
-  Node.div ~attrs:[ Style.roster; Attr.role "list"; Attr.arialabel "Keeper slots" ] slots
+  Node.div ~attrs:[ Style.roster; Attr.role "list"; Attr.create "aria-label" "Keeper slots" ] slots
 ;;

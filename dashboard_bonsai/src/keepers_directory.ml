@@ -1356,7 +1356,7 @@ let note_section row =
        | [] ->
          Node.div
            ~attrs:[ Style.quiet ]
-           [ Node.text "trust/note/current_work evidence가 아직 없습니다." ]
+           [ Node.span ~attrs:[ Attr.create "lang" "ko" ] [ Node.text "trust/note/current_work evidence가 아직 없습니다." ] ]
        | entries ->
          Node.div
            ~attrs:[ Style.list ]
@@ -1455,7 +1455,7 @@ let preview_section row =
       [ Shell_view.aside_title "Preview"
       ; Node.div
           ~attrs:[ Style.quiet ]
-          [ Node.text "agent brief preview가 아직 없습니다." ]
+          [ Node.span ~attrs:[ Attr.create "lang" "ko" ] [ Node.text "agent brief preview가 아직 없습니다." ] ]
       ]
   else
     Node.div
@@ -1485,7 +1485,7 @@ let aside
       [ Shell_view.aside_title ~right:"fleet quiet" "Focus"
       ; Node.div
           ~attrs:[ Style.quiet ]
-          [ Node.text "선택 가능한 directory row가 아직 없습니다." ]
+          [ Node.span ~attrs:[ Attr.create "lang" "ko" ] [ Node.text "선택 가능한 directory row가 아직 없습니다." ] ]
       ]
   | Some row ->
     Node.div

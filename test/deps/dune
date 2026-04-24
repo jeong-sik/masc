@@ -27,6 +27,7 @@
    (re_export masc_eio_context)
    (re_export masc_log)
    (re_export masc_mcp)
+   (re_export masc_mcp.oas_compat)
    (re_export masc_mcp.activity_graph)
    (re_export masc_mcp.ag_ui)
    (re_export masc_mcp.config)

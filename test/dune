@@ -106,6 +106,7 @@
         test_env_git_noninteractive
         test_gh_exit_class
         test_stay_silent_loop_detector
+        test_oas_compat_cascade_fallback
         test_heuristic_metrics_boot_wireup
         test_cap_blocker_structured_error
         test_keeper_fs_edit_patch
@@ -229,6 +230,7 @@
           test_env_git_noninteractive
           test_gh_exit_class
           test_stay_silent_loop_detector
+          test_oas_compat_cascade_fallback
           test_heuristic_metrics_boot_wireup
           test_cap_blocker_structured_error
           test_keeper_fs_edit_patch

@@ -50,14 +50,18 @@ module Http_client : sig
       signals context overflow / provider parse error.
       [CliTransportRequired] cascades — the CLI provider cannot serve
       this request over HTTP, so the next provider must.
-      [AcceptRejected] cascades only when the [reason] string carries a
-      provider-capability-mismatch marker (e.g. "does not support"). This
-      covers MASC's worker-layer wrapping of OAS [InvalidConfig] errors
-      for [runtime_mcp_auth] and [tool_support], whose cascade intent is
-      documented at [oas_worker_named.ml:661-678]. Permanent provider
-      failures such as [kimi_cli] exit 1 ("permanent auth/config/model
-      error") do not match any marker and remain non-cascading. See
-      masc-mcp #9850 for the motivating codex_cli case. *)
+      [AcceptRejected] cascades when the [reason] string carries a
+      per-provider failure marker:
+      - "does not support" — MASC's worker-layer wrapping of OAS
+        [InvalidConfig] errors for [runtime_mcp_auth] and [tool_support]
+        (documented at [oas_worker_named.ml:661-678]).
+      - "rejected the request" — kimi_cli exit 1. The auth/config error
+        is Moonshot-specific; another provider can succeed.
+      - "startup crash" — gemini_cli top-level await / yoga_wasm. The
+        CLI source explicitly marks this "so the cascade can move on".
+      All of these are per-provider, not cascade-wide; a fallback provider
+      may succeed where the current one rejected. See masc-mcp #9932
+      (kimi fallback), #9850 (codex_cli runtime_mcp_auth). *)
 end
 
 module Metrics : sig

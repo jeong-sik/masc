@@ -23,3 +23,17 @@ include module type of Coord_agent
 (** Initialize MASC room with optional auto-join.
     Wraps [Coord_init.init] and calls [join] when [agent_name] is provided. *)
 val init : config -> agent_name:string option -> string
+
+(** {1 FSM drift observability (#9795)} *)
+
+val fsm_drift_metric : string
+(** Canonical Prometheus metric name for task FSM drift events.
+    Labels: [("variant", <drift_variant>); ("force", "true" | "false")].
+    Exposed so tests and Grafana rules can pin the name. *)
+
+val record_fsm_drift : variant:string -> force:bool -> unit
+(** Increment {!fsm_drift_metric} with the supplied labels.
+    Wired to {!Coord_hooks.fsm_drift_observer_fn} at module load
+    so [Coord_task.transition] signals every detected drift
+    through this path without [masc_coord] needing a direct
+    [Prometheus] dependency. *)

@@ -141,6 +141,16 @@ let subscribe_messages_fn
   : (subscriber:string -> unit) Atomic.t
   = Atomic.make (fun ~subscriber:_ -> ())
 
+(** #9795: FSM drift observability.  [Coord_task.transition]
+    signals TLA+ KeeperTaskInterlock violations (currently the
+    [Claimed_to_done_skip] branch) through this hook; [lib/coord.ml]
+    wires it to a Prometheus counter emit at startup.  Keeping the
+    hook here avoids a [masc_coord → masc_mcp.Prometheus]
+    dependency cycle. *)
+let fsm_drift_observer_fn
+  : (variant:string -> force:bool -> unit) Atomic.t
+  = Atomic.make (fun ~variant:_ ~force:_ -> ())
+
 (** Tool assignment telemetry — wraps Tool_assignment_telemetry.emit_assigned.
     Wired at startup to record which tools were provisioned to which agent. *)
 let tool_assigned_fn

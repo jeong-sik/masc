@@ -300,9 +300,12 @@ let handle_heartbeat
     let rec loop () =
       match Grpc_eio.Stream.take request_stream with
       | bytes ->
+        (match T.HeartbeatPing.of_bytes_result bytes with
+         | Error msg ->
+           Log.Transport.warn "gRPC Heartbeat decode failed: %s" msg
+         | Ok ping ->
         (try
           let t0 = Unix.gettimeofday () in
-          let ping = T.HeartbeatPing.of_bytes bytes in
           (* Update agent last_seen *)
           (try
             let agent_file =
@@ -370,7 +373,7 @@ let handle_heartbeat
          | exn ->
            Log.Transport.error
              "gRPC heartbeat iteration crashed: %s"
-             (Printexc.to_string exn));
+             (Printexc.to_string exn)));
         loop ()
       | exception End_of_file ->
         cleanup ()

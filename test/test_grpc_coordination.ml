@@ -9,6 +9,11 @@
 module T = Masc_mcp.Masc_grpc_types
 let malformed_protobuf = "\x0a\x05ab"
 
+let latest_log_seq () =
+  match Log.Ring.recent ~limit:1 () with
+  | (entry : Log.Ring.entry) :: _ -> entry.seq
+  | [] -> -1
+
 let rec rm_rf path =
   if Sys.file_exists path then
     if Sys.is_directory path then begin
@@ -383,6 +388,59 @@ let test_subscribe_handler_invalid_bytes_raise_grpc_status () =
                     (Printexc.to_string exn)))
       | _ -> Alcotest.fail "Subscribe server-streaming handler missing")
 
+let test_heartbeat_handler_invalid_bytes_warns_and_continues () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  with_temp_dir "masc-grpc-invalid-heartbeat" (fun dir ->
+      let room_config = Coord_utils.default_config dir in
+      let service =
+        Masc_mcp.Masc_grpc_service.create_service
+          ~room_config
+          ~tool_dispatcher:(fun _tool _payload -> Ok "{}")
+      in
+      match Grpc_eio.Service.get_method service "Heartbeat" with
+      | Some { handler = `Bidi handler; _ } ->
+          let baseline = latest_log_seq () in
+          Eio.Switch.run @@ fun sw ->
+          let request_stream = Grpc_eio.Stream.create 16 in
+          let response_stream = handler ~sw request_stream in
+          Grpc_eio.Stream.add request_stream malformed_protobuf;
+          Grpc_eio.Stream.add request_stream
+            (T.HeartbeatPing.to_bytes
+               {
+                 agent_name = "test-agent";
+                 session_id = "sess-1";
+                 timestamp_ms = 1700000000000L;
+                 current_task_id = "";
+               });
+          let ack_bytes =
+            Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 1.0 (fun () ->
+                Grpc_eio.Stream.take response_stream)
+          in
+          let ack = T.HeartbeatAck.of_bytes ack_bytes in
+          Alcotest.(check int) "active agents" 0 ack.active_agent_count;
+          let logs =
+            Log.Ring.recent ~limit:20 ~module_filter:"Transport"
+              ~since_seq:baseline ()
+          in
+          Alcotest.(check bool) "decode failure logged as warn" true
+            (List.exists
+               (fun (entry : Log.Ring.entry) ->
+                 String.equal entry.normalized_level "WARN"
+                 && String.starts_with
+                      ~prefix:"gRPC Heartbeat decode failed:"
+                      entry.message)
+               logs);
+          Alcotest.(check bool) "decode failure not logged as crash" false
+            (List.exists
+               (fun (entry : Log.Ring.entry) ->
+                 String.starts_with
+                   ~prefix:"gRPC heartbeat iteration crashed:"
+                   entry.message)
+               logs);
+          Grpc_eio.Stream.close request_stream
+      | _ -> Alcotest.fail "Heartbeat bidi handler missing")
+
 (* ====== Test suite ====== *)
 
 let () =
@@ -418,6 +476,8 @@ let () =
             test_join_handler_invalid_bytes_raise_grpc_status;
           Alcotest.test_case "subscribe invalid bytes raise grpc status" `Quick
             test_subscribe_handler_invalid_bytes_raise_grpc_status;
+          Alcotest.test_case "heartbeat invalid bytes warn and continue" `Quick
+            test_heartbeat_handler_invalid_bytes_warns_and_continues;
         ] );
       ( "server_config",
         [

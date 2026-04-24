@@ -472,10 +472,10 @@ let persona_profile_path_opt name =
 (* ================================================================ *)
 
 (** Scan a flat TOML doc for keys under [[keeper.oas_env]].  Only keys
-    matching ^OAS_(CLAUDE|CODEX|GEMINI)_.+ are accepted — any other
-    entries are dropped silently.  This guards against arbitrary
-    process env injection via keeper TOML.  Values are coerced to
-    strings via [string_of_toml_value_for_env] (bool → "1"/"0"), so
+    matching ^(OAS_(CLAUDE|CODEX|GEMINI)_|MASC_KEEPER_OAS_) are accepted
+    — any other entries are dropped silently.  This guards against
+    arbitrary process env injection via keeper TOML.  Values are coerced
+    to strings via [string_of_toml_value_for_env] (bool → "1"/"0"), so
     integers and booleans in TOML map to the string shapes the OAS
     transport build_args already understand. *)
 let string_of_toml_value_for_env = function
@@ -489,13 +489,14 @@ let string_of_toml_value_for_env = function
 let oas_env_key_prefix = "keeper.oas_env."
 
 let oas_env_key_is_allowed suffix =
-  let allowed_prefixes = [ "OAS_CLAUDE_"; "OAS_CODEX_"; "OAS_GEMINI_" ] in
-  String.length suffix
-    > (List.fold_left (fun acc p -> max acc (String.length p)) 0 allowed_prefixes)
-  && List.exists (fun p ->
-       String.length suffix >= String.length p
-       && String.sub suffix 0 (String.length p) = p)
-       allowed_prefixes
+  let allowed_prefixes =
+    [ "OAS_CLAUDE_"; "OAS_CODEX_"; "OAS_GEMINI_"; "MASC_KEEPER_OAS_" ]
+  in
+  List.exists
+    (fun p ->
+      String.length suffix > String.length p
+      && String.sub suffix 0 (String.length p) = p)
+    allowed_prefixes
 
 let extract_oas_env_from_doc (doc : Keeper_toml_loader.toml_doc)
     : (string * string) list =
@@ -1343,12 +1344,15 @@ let load_keeper_profile_defaults name : keeper_profile_defaults =
      | None -> ());
     load_keeper_profile_defaults_from_persona name
 
-(** Clamp a profile-provided max-turns override to [1, 50] — the same range
-    enforced by [Env_config_keeper.KeeperKeepalive.oas_max_turns_per_call].
+(** Clamp a profile-provided max-turns override to [1, 100] — the same range
+    enforced by [Keeper_runtime_resolved.reactive_max_turns_per_call].
     Values outside the range are rejected so a typo in TOML cannot silently
     bypass the budget envelope. *)
 let clamp_max_turns_override : int option -> int option = function
-  | Some n when n >= 1 && n <= 100 -> Some n
+  | Some n
+    when n >= Keeper_runtime_resolved.max_turns_per_call_min
+      && n <= Keeper_runtime_resolved.max_turns_per_call_max ->
+    Some n
   | _ -> None
 
 let effective_max_turns_per_call (profile : keeper_profile_defaults) : int =

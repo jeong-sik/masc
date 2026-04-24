@@ -329,14 +329,14 @@ module KeeperKeepalive = struct
       Otherwise, {!oas_timeout_for_estimated_input_tokens} computes an
       adaptive timeout:
         base + estimated_input_tokens/1K × per_1k + min(max_turns, 40) × per_turn
-      References {!oas_max_turns_per_call} (default 15) directly to avoid
+      References {!oas_max_turns_per_call} (default 30) directly to avoid
       default drift.  Previous formula used 4× headroom on a default of 5,
       producing min(5, 40)=5 effective turns.  Using the actual per-call
       turn budget keeps scheduled-autonomous and reactive channels aligned
       with the timeout heuristic.
 
-      At 262K context, 15 turns/call:
-        120 + 393 + min(15,40)×30 = 120+393+450 = 963
+      At 262K context, 30 turns/call:
+        120 + 393 + min(30,40)×30 = 120+393+900 = 1413
 
       Env: [MASC_KEEPER_OAS_TIMEOUT_SEC]. Default: adaptive.
       Range: [30, turn_timeout_sec]. *)
@@ -352,33 +352,31 @@ module KeeperKeepalive = struct
       {!Oas_worker.TurnBudgetExhausted} is returned.
       Previous default of 200 caused "ambiguous partial commit" errors:
       the 300s timeout would fire mid-turn after tools had already executed,
-      leaving the keeper in an ambiguous state. With 15 turns per call and
+      leaving the keeper in an ambiguous state. With 30 turns per call and
       adaptive timeout, each turn gets a realistic time budget. Budget=5
       was too low: mutation boundary blocks tools after the first write,
       leaving only 1 productive action per cycle.
-      Env: [MASC_KEEPER_OAS_MAX_TURNS_PER_CALL]. Default: 15. Range: [1, 50]. *)
+      Env: [MASC_KEEPER_OAS_MAX_TURNS_PER_CALL]. Default: 30. Range: [1, 100]. *)
   let oas_max_turns_per_call =
-    max 1 (min 50 (get_int ~default:30 "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL"))
+    max 1 (min 100 (get_int ~default:30 "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL"))
 
   (** Smaller turn budget for scheduled autonomous cycles so one keeper does
       not monopolize the autonomous semaphore for minutes at a time.
       Reactive turns keep the general budget because they correspond to
       explicit external stimuli.
 
-      Default lowered from 5 to 2 (masc-mcp#6810): with LLM turns at ~22s
-      and [semaphore_wait_timeout_sec] = 60s, a budget of 5 meant one
-      keeper could hold the autonomous slot for 110s+, causing peers
-      queued behind it to time out at 60s.  Budget of 2 caps hold time
-      around 44s (~60s with tools), keeping peers within the wait window.
+      Default raised to 10 after Docker oas_env propagation was restored so
+      autonomous keepers can complete deeper handoff tasks without relying on
+      per-profile overrides.
       Reactive turns retain the larger budget.
 
       Env: [MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS].
-      Default: min(global, 2). Range: [1, global]. *)
+      Default: min(global, 10). Range: [1, global]. *)
   let oas_max_turns_per_call_scheduled_autonomous =
     let default = min oas_max_turns_per_call 10 in
     max 1
       (min oas_max_turns_per_call
-         (min 50
+         (min 100
             (get_int ~default
                "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS")))
 

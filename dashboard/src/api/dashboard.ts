@@ -81,6 +81,7 @@ export type {
   CascadeConfigResponse,
   CascadeHealthProvider,
   CascadeHealthResponse,
+  CascadeProviderStatus,
   CascadeInvalidProfile,
   CascadeKeeperProfile,
   CascadeProfile,

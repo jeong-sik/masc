@@ -9,6 +9,9 @@ import {
   sourceLabel,
   sourceTone,
   providerTone,
+  providerStatusTone,
+  fmtPerfTokPerSec,
+  fmtPerfLatencyPair,
   capacityTone,
   eventKindTone,
   eventKindLabel,
@@ -232,6 +235,58 @@ describe('providerTone', () => {
 
   it('returns ok for healthy provider', () => {
     expect(providerTone(makeProvider())).toBe('ok')
+  })
+})
+
+describe('providerStatusTone', () => {
+  it('maps active to ok', () => {
+    expect(providerStatusTone('active')).toBe('ok')
+  })
+  it('maps cooldown to bad', () => {
+    expect(providerStatusTone('cooldown')).toBe('bad')
+  })
+  it('maps configured to neutral', () => {
+    // A declared-but-untouched provider is informational, not warning —
+    // the operator chose to declare it and traffic simply has not hit
+    // it yet. Rendering as `warn` would flag every dormant candidate
+    // as a problem.
+    expect(providerStatusTone('configured')).toBe('neutral')
+  })
+  it('defaults undefined (pre-0.173 server) to neutral', () => {
+    expect(providerStatusTone(undefined)).toBe('neutral')
+  })
+})
+
+describe('fmtPerfTokPerSec', () => {
+  it('renders "—" for undefined (field absent on older server)', () => {
+    expect(fmtPerfTokPerSec(undefined)).toBe('—')
+  })
+  it('renders "no data" for null (aggregator ran, nothing reported)', () => {
+    // The distinction matters: "—" tells the operator "this server
+    // does not know about perf" while "no data" tells them "the server
+    // looked but no contributing model reported the field"
+    // (Anthropic/Gemini path).
+    expect(fmtPerfTokPerSec(null)).toBe('no data')
+  })
+  it('renders a numeric value to one decimal', () => {
+    expect(fmtPerfTokPerSec(42.678)).toBe('42.7')
+  })
+  it('does not collapse zero to a dash', () => {
+    expect(fmtPerfTokPerSec(0)).toBe('0.0')
+  })
+})
+
+describe('fmtPerfLatencyPair', () => {
+  it('renders both values as rounded integers with ms suffix', () => {
+    expect(fmtPerfLatencyPair(1500.6, 3200.4)).toBe('1501 / 3200 ms')
+  })
+  it('uses "—" for undefined and "ø" for null inside the pair', () => {
+    expect(fmtPerfLatencyPair(undefined, undefined)).toBe('— / — ms')
+    expect(fmtPerfLatencyPair(null, null)).toBe('ø / ø ms')
+    expect(fmtPerfLatencyPair(1500, null)).toBe('1500 / ø ms')
+  })
+  it('renders zero as 0 (not a dash)', () => {
+    expect(fmtPerfLatencyPair(0, 0)).toBe('0 / 0 ms')
   })
 })
 

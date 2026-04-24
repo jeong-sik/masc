@@ -106,10 +106,6 @@ let work_kind_of_turn_mode = function
   | Noop -> "noop"
   | Text_response | Skip_text -> "text_turn"
 
-let has_substantive_tool_calls (tools_used : string list) : bool =
-  let stay_silent = Tool_name.Keeper.to_string Tool_name.Keeper.Stay_silent in
-  List.exists (fun name -> not (String.equal name stay_silent)) tools_used
-
 (** Observation-only tools that do not constitute productive work.
     A cycle using only these tools (or none) is a "noop" and triggers
     exponential cooldown backoff to prevent token waste. *)
@@ -120,12 +116,19 @@ let observation_only_tool_strings =
   ; Tool_name.Keeper.to_string Tool_name.Keeper.Tool_search
   ]
 
+let is_observation_only_tool_name name =
+  List.mem name observation_only_tool_strings
+
+let has_substantive_tool_calls (tools_used : string list) : bool =
+  List.exists
+    (fun name -> not (is_observation_only_tool_name name))
+    tools_used
+
 (** A cycle is noop when it produced no text AND all tools used (if any)
     are observation-only.  Productive cycles reset consecutive_noop_count. *)
 let is_noop_cycle ~has_text ~(tools_used : string list) : bool =
   not has_text
-  && List.for_all (fun name ->
-       List.mem name observation_only_tool_strings) tools_used
+  && List.for_all is_observation_only_tool_name tools_used
 
 let visible_run_validation (result : Keeper_agent_run.run_result) :
     Oas.Raw_trace.run_validation option =
@@ -732,11 +735,9 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
       ~input_tokens:result.usage.input_tokens
       ~output_tokens:result.usage.output_tokens ()
   in
-  let stay_silent = Tool_name.Keeper.to_string Tool_name.Keeper.Stay_silent in
   let substantive_tool_call_count =
     result.tools_used
-    |> List.filter (fun name ->
-         not (String.equal name stay_silent))
+    |> List.filter (fun name -> not (is_observation_only_tool_name name))
     |> List.length
   in
   let has_substantive_tools = has_substantive_tool_calls result.tools_used in

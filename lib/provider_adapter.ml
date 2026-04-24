@@ -1269,6 +1269,7 @@ let provider_prefix_of_label_result label =
 let prefix_classification_vocabulary = [
   "glm-coding"; "glm"; "claude"; "claude_code";
   "gemini"; "gemini_cli"; "codex_cli"; "ollama";
+  "openai"; "kimi"; "kimi_cli";
 ]
 
 (** Classify a raw model label to a provider name for telemetry grouping.

@@ -15,6 +15,9 @@ let cases_prefix = [
   "gemini:gemini-2.5-flash",               "gemini";
   "gemini_cli:gemini-2.5-flash",           "gemini_cli";
   "codex_cli:gpt-5.4",                     "codex_cli";
+  "openai:gpt-5.4",                        "openai";
+  "kimi:kimi-k2.5",                        "kimi";
+  "kimi_cli:kimi-for-coding",              "kimi_cli";
   "ollama:qwen3.5:35b-a3b-nvfp4",          "ollama";
 ]
 

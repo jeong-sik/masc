@@ -329,6 +329,7 @@ let run
       config.name (Masc_grpc_transport.to_string t));
   Option.iter (fun bus ->
     publish_lifecycle bus ~name:config.name ~event:"build" ~detail:goal
+      ()
   ) config.event_bus;
   let agent_result = match oas_checkpoint with
     | Some checkpoint ->
@@ -346,6 +347,10 @@ let run
     Option.iter (fun bus ->
       publish_lifecycle bus ~name:config.name ~event:"build_error"
         ~detail:(Oas.Error.to_string e)
+        ~error:(Oas.Error.to_string e)
+        ~status:"build_error"
+        ~session_id
+        ()
     ) config.event_bus;
     Error e
   | Ok agent ->
@@ -380,8 +385,17 @@ let run
     in
     Option.iter (fun bus ->
       let status = match result with Ok _ -> "completed" | Error _ -> "failed" in
+      let error =
+        match result with
+        | Ok _ -> None
+        | Error e -> Some (Oas.Error.to_string e)
+      in
       publish_lifecycle bus ~name:config.name ~event:status
         ~detail:(Printf.sprintf "session=%s" session_id)
+        ?error
+        ~session_id
+        ~status
+        ()
     ) config.event_bus;
     let turns = (Oas.Agent.state agent).turn_count in
     let trace_ref = Oas.Agent.last_raw_trace_run agent in

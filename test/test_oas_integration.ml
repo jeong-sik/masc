@@ -94,6 +94,35 @@ let test_event_bus_heartbeat () =
     Alcotest.(check int) "turn" 5 turn
   | _ -> Alcotest.fail "expected Custom masc.heartbeat event"
 
+let test_oas_worker_failed_lifecycle_includes_error () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let bus = Event_bus.create () in
+  Masc_event_bus.set bus;
+  let sub = Event_bus.subscribe bus in
+  Oas_worker_exec.publish_lifecycle bus
+    ~name:"worker-a"
+    ~event:"failed"
+    ~detail:"session=session-1"
+    ~error:"tool call rejected"
+    ~session_id:"session-1"
+    ~status:"failed"
+    ();
+  let events = Event_bus.drain sub in
+  Alcotest.(check int) "one event" 1 (List.length events);
+  match (List.hd events : Event_bus.event).payload with
+  | Event_bus.Custom ("masc.oas_worker.failed", payload) ->
+      let open Yojson.Safe.Util in
+      Alcotest.(check string) "agent" "worker-a"
+        (payload |> member "agent" |> to_string);
+      Alcotest.(check string) "error" "tool call rejected"
+        (payload |> member "error" |> to_string);
+      Alcotest.(check string) "session_id" "session-1"
+        (payload |> member "session_id" |> to_string);
+      Alcotest.(check string) "status" "failed"
+        (payload |> member "status" |> to_string)
+  | _ -> Alcotest.fail "expected Custom masc.oas_worker.failed event"
+
 let test_event_bus_task_transition () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -752,6 +781,8 @@ let () =
     "oas_events", [
       Alcotest.test_case "broadcast event" `Quick test_event_bus_broadcast;
       Alcotest.test_case "heartbeat event" `Quick test_event_bus_heartbeat;
+      Alcotest.test_case "oas worker failed lifecycle includes error" `Quick
+        test_oas_worker_failed_lifecycle_includes_error;
       Alcotest.test_case "task transition event" `Quick
         test_event_bus_task_transition;
       Alcotest.test_case "keeper lifecycle includes phase" `Quick

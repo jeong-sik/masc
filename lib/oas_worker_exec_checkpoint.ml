@@ -3,20 +3,27 @@
     Keeps side-effecting run helpers separate from the main build/resume/run
     orchestration in {!Oas_worker_exec}. *)
 
-let publish_lifecycle _bus ~name ~event ~detail =
+let publish_lifecycle _bus ~name ~event ~detail ?error ?session_id ?status () =
   match Masc_event_bus.get () with
   | None -> ()
   | Some mb ->
+      let optional_string_field key = function
+        | Some value when String.trim value <> "" -> [ (key, `String value) ]
+        | _ -> []
+      in
       Oas_bus_instrument.publish mb
         (Oas.Event_bus.mk_event
            (Custom
               ( Printf.sprintf "masc.oas_worker.%s" event,
                 `Assoc
-                  [
-                    ("agent", `String name);
-                    ("detail", `String detail);
-                    ("timestamp", `Float (Time_compat.now ()));
-                  ] )))
+                  ([
+                     ("agent", `String name);
+                     ("detail", `String detail);
+                     ("timestamp", `Float (Time_compat.now ()));
+                   ]
+                   @ optional_string_field "error" error
+                   @ optional_string_field "session_id" session_id
+                   @ optional_string_field "status" status) )))
 
 let persist_checkpoint ~dir ~session_id (ckpt : Oas.Checkpoint.t) =
   let path = Filename.concat dir (session_id ^ ".json") in

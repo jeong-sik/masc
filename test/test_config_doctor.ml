@@ -163,6 +163,43 @@ let test_initialized_local_base_config () =
   check bool "keeper runtime optional" false report.keeper_runtime_toml_present;
   check (list string) "no warnings" [] report.warnings
 
+let test_persona_tool_preset_conflict_warns () =
+  with_temp_dir "config-doctor-persona-conflict" @@ fun dir ->
+  let base_path = Filename.concat dir "base" in
+  let config_root = Filename.concat base_path ".masc/config" in
+  initialize_config_root config_root;
+  write_file
+    (Filename.concat config_root "keepers/sangsu.toml")
+    {|
+[keeper]
+name = "sangsu"
+persona_name = "sangsu"
+tool_preset = "delivery"
+|};
+  write_file
+    (Filename.concat config_root "personas/sangsu/profile.json")
+    {|{"keeper":{"tool_preset":"coding"}}|};
+  let report =
+    Config_doctor.analyze_with
+      (make_inputs ~cwd:dir ~base_path_input:base_path ())
+  in
+  check string "status warns" "warn" (status report.status);
+  check int "one conflict" 1
+    (List.length report.persona_tool_preset_conflicts);
+  check bool "warning names keeper" true
+    (list_contains_substring
+       ~needle:"Keeper sangsu TOML tool_preset \"delivery\" overrides persona sangsu tool_preset \"coding\""
+       report.warnings);
+  check bool "next action tells operator to remove override" true
+    (list_contains_substring
+       ~needle:"Remove tool_preset from"
+       report.next_actions);
+  let json = Config_doctor.to_yojson report in
+  let conflicts =
+    Yojson.Safe.Util.(json |> member "persona_tool_preset_conflicts" |> to_list)
+  in
+  check int "json conflict count" 1 (List.length conflicts)
+
 let test_shadowed_explicit_config_dir () =
   with_temp_dir "config-doctor-shadowed" @@ fun dir ->
   let base_path = Filename.concat dir "base" in
@@ -325,6 +362,8 @@ let () =
              test_missing_init_without_explicit_config;
            test_case "initialized local base config" `Quick
              test_initialized_local_base_config;
+           test_case "persona/TOML tool_preset conflict warns" `Quick
+             test_persona_tool_preset_conflict_warns;
            test_case "shadowed explicit config dir" `Quick
            test_shadowed_explicit_config_dir;
            test_case "broken cascade catalog surfaces errors" `Quick

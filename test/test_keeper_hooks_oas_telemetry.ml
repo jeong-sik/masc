@@ -19,6 +19,16 @@ let read_jsonl_line path =
   Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
       input_line ic |> Yojson.Safe.from_string)
 
+let make_usage ?cost_usd ~input_tokens ~output_tokens ()
+    : Agent_sdk.Types.api_usage =
+  {
+    input_tokens;
+    output_tokens;
+    cache_creation_input_tokens = 0;
+    cache_read_input_tokens = 0;
+    cost_usd;
+  }
+
 let test_emit_cost_event_writes_inference_telemetry () =
   let root = temp_dir () in
   let telemetry : Agent_sdk.Types.inference_telemetry = {
@@ -58,6 +68,37 @@ let test_emit_cost_event_writes_inference_telemetry () =
     (json |> member "hw_decode_tokens_per_second" |> to_float);
   check (float 0.001) "peak_memory_gb" 52.66
     (json |> member "peak_memory_gb" |> to_float)
+
+let test_emit_cost_event_marks_usage_missing () =
+  let root = temp_dir () in
+  Hooks.emit_cost_event ~masc_root:root ~agent_name:"keeper"
+    ~task_id:None ~model:"kimi_cli:kimi-for-coding"
+    ~input_tokens:0 ~output_tokens:0 ~cost_usd:0.0
+    ~usage_missing:true ();
+  let json = read_jsonl_line (Filename.concat root "costs.jsonl") in
+  check bool "usage_missing" true
+    (json |> member "usage_missing" |> to_bool)
+
+let test_cost_usd_for_usage_falls_back_for_paid_provider () =
+  let model = "openai:gpt-4.1" in
+  let usage = make_usage ~input_tokens:1000 ~output_tokens:500 () in
+  let expected = Hooks.estimate_usage_cost_usd ~model usage in
+  check (float 0.000001) "estimated fallback" expected
+    (Hooks.cost_usd_for_usage ~model usage)
+
+let test_cost_usd_for_usage_preserves_reported_cost () =
+  let model = "openai:gpt-4.1" in
+  let usage =
+    make_usage ~cost_usd:0.42 ~input_tokens:1000 ~output_tokens:500 ()
+  in
+  check (float 0.000001) "reported cost" 0.42
+    (Hooks.cost_usd_for_usage ~model usage)
+
+let test_cost_usd_for_usage_keeps_cli_provider_zero () =
+  let model = "kimi_cli:kimi-for-coding" in
+  let usage = make_usage ~input_tokens:1000 ~output_tokens:500 () in
+  check (float 0.000001) "cli cost stays zero" 0.0
+    (Hooks.cost_usd_for_usage ~model usage)
 
 let test_tool_execution_summary_derives_provider_and_outcome () =
   let summary =
@@ -243,7 +284,7 @@ let test_record_llm_tok_s_metrics_zero_value_is_skipped () =
   in
   let labels =
     [ "model", "openai:gpt-5.4"
-    ; "provider", "unknown"
+    ; "provider", "openai"
     ; "provider_kind", "openai_compat"
     ]
   in
@@ -288,7 +329,16 @@ let () =
   run "keeper_hooks_oas/telemetry"
     [ ( "costs_jsonl",
         [ test_case "emit_cost_event keeps throughput and memory fields" `Quick
-            test_emit_cost_event_writes_inference_telemetry ] )
+            test_emit_cost_event_writes_inference_telemetry
+        ; test_case "emit_cost_event marks usage_missing" `Quick
+            test_emit_cost_event_marks_usage_missing
+        ; test_case "cost fallback estimates paid provider usage" `Quick
+            test_cost_usd_for_usage_falls_back_for_paid_provider
+        ; test_case "cost fallback preserves reported cost" `Quick
+            test_cost_usd_for_usage_preserves_reported_cost
+        ; test_case "cost fallback keeps CLI provider zero" `Quick
+            test_cost_usd_for_usage_keeps_cli_provider_zero
+        ] )
     ; ( "tool_telemetry",
         [ test_case "tool execution summary derives provider and outcome" `Quick
             test_tool_execution_summary_derives_provider_and_outcome

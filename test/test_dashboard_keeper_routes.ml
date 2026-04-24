@@ -639,6 +639,18 @@ let append_execution_receipt config ~keeper_name =
       degraded_retry_cascade =
         Some Masc_mcp.Keeper_config.local_recovery_cascade_name;
       fallback_reason = Some "turn_timeout";
+      cascade_rotation_attempts =
+        [
+          {
+            from_cascade = meta.cascade_name;
+            to_cascade = Masc_mcp.Keeper_config.local_recovery_cascade_name;
+            reason = "turn_timeout";
+            outcome = "retry_scheduled";
+            error_kind = Some "internal";
+            error_message = Some "turn timeout";
+            recorded_at = ended_at;
+          };
+        ];
       stop_reason = Some "completed";
       error_kind = None;
       error_message = None;

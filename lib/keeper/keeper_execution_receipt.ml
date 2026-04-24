@@ -7,6 +7,16 @@ type tool_surface =
   ; tool_surface_fallback_used : bool
   }
 
+type cascade_rotation_attempt =
+  { from_cascade : string
+  ; to_cascade : string
+  ; reason : string
+  ; outcome : string
+  ; error_kind : string option
+  ; error_message : string option
+  ; recorded_at : string
+  }
+
 type t =
   { keeper_name : string
   ; agent_name : string
@@ -40,6 +50,7 @@ type t =
   ; degraded_retry_applied : bool
   ; degraded_retry_cascade : string option
   ; fallback_reason : string option
+  ; cascade_rotation_attempts : cascade_rotation_attempt list
   ; stop_reason : string option
   ; error_kind : string option
   ; error_message : string option
@@ -65,6 +76,22 @@ let sandbox_kind_of_meta (meta : Keeper_types.keeper_meta) =
 
 let list_json values =
   `List (List.map (fun value -> `String value) values)
+
+let string_opt_json = function
+  | Some value -> `String value
+  | None -> `Null
+
+let cascade_rotation_attempt_to_json attempt =
+  `Assoc
+    [
+      ("from_cascade", `String attempt.from_cascade);
+      ("to_cascade", `String attempt.to_cascade);
+      ("reason", `String attempt.reason);
+      ("outcome", `String attempt.outcome);
+      ("error_kind", string_opt_json attempt.error_kind);
+      ("error_message", string_opt_json attempt.error_message);
+      ("recorded_at", `String attempt.recorded_at);
+    ]
 
 let to_json (receipt : t) =
   let error_json =
@@ -164,6 +191,10 @@ let to_json (receipt : t) =
               match receipt.fallback_reason with
               | Some value -> `String value
               | None -> `Null );
+            ( "rotation_attempts",
+              `List
+                (List.map cascade_rotation_attempt_to_json
+                   receipt.cascade_rotation_attempts) );
           ] );
       ( "stop_reason",
         match receipt.stop_reason with

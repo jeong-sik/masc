@@ -71,6 +71,18 @@ val degraded_retry_after_recoverable_error :
   Oas.Error.sdk_error ->
   degraded_retry option
 
+(** Returns the next untried cascade in the same-turn recovery group for a
+    whole-cascade failure. This broadens beyond the legacy one-hop
+    local_recovery fallback, while keeping required-tool turns on lanes that
+    can still be filtered for tool-capable providers. *)
+val degraded_rotation_after_recoverable_error :
+  base_cascade:string ->
+  effective_cascade:string ->
+  tool_requirement:string ->
+  attempted_cascades:string list ->
+  Oas.Error.sdk_error ->
+  degraded_retry option
+
 val max_transient_retries : int
 
 val transient_backoff_sec : int -> float

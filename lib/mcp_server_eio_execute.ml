@@ -152,9 +152,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   in
 
   let token =
-    match arg_get_string_opt "token" with
-    | Some t -> Some t
-    | None -> auth_token
+    match auth_token with
+    | Some _ as token -> token
+    | None -> arg_get_string_opt "token"
   in
 
   let resolve_owner_keeper_identity owner_name =

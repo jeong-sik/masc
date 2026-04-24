@@ -1529,6 +1529,27 @@ let test_resolve_tool_lane_for_codex_cli_public_tools_with_agent_name_strips_run
         "expected codex_cli public MCP tools with agent_name to use runtime MCP lane"
   | Error err -> Alcotest.fail (Oas.Error.to_string err)
 
+let test_resolve_tool_lane_for_codex_cli_keeper_bound_public_tools_rejects () =
+  with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
+  with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token" @@ fun () ->
+  let tools =
+    [ make_named_noop_tool "masc_status"; make_named_noop_tool "masc_claim_next" ]
+  in
+  match
+    Oas_worker_exec.resolve_tool_lane_for_oas_tools
+      ~agent_name:"keeper-sangsu-agent"
+      ~provider_cfg:(make_codex_cli_provider_cfg ())
+      ~tools ()
+  with
+  | Ok _ ->
+      Alcotest.fail
+        "expected codex_cli keeper-bound public MCP tools to reject runtime lane"
+  | Error (Oas.Error.Config (Oas.Error.InvalidConfig { field; detail })) ->
+      Alcotest.(check string) "field" "runtime_mcp_auth" field;
+      Alcotest.(check bool) "detail mentions bound tool" true
+        (contains_substring ~needle:"masc_claim_next" detail)
+  | Error err -> Alcotest.fail (Oas.Error.to_string err)
+
 let test_resolve_tool_lane_for_kimi_cli_public_tools_uses_runtime_mcp_policy () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
   let tools =
@@ -1812,6 +1833,33 @@ let test_runtime_mcp_policy_with_masc_agent_name_prefers_internal_keeper_token (
             (Some "sangsu")
             (List.assoc_opt "x-masc-keeper-name" server.headers)
       | _ -> Alcotest.fail "expected single masc runtime server")
+
+let test_public_mcp_runtime_policy_binds_keeper_internal_headers () =
+  with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
+  with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token" @@ fun () ->
+  with_env "MASC_MCP_TOKEN" "ambient-bearer-token" @@ fun () ->
+  match
+    Oas_worker_exec.public_mcp_runtime_policy_of_tool_names
+      ~agent_name:"keeper-sangsu-agent" [ "masc_status" ]
+  with
+  | Some policy -> (
+      match policy.servers with
+      | [ Llm_provider.Llm_transport.Http_server server ] ->
+          Alcotest.(check (option string)) "internal token injected"
+            (Some "internal-keeper-token")
+            (List.assoc_opt "x-masc-internal-token" server.headers);
+          Alcotest.(check (option string)) "keeper name injected"
+            (Some "sangsu")
+            (List.assoc_opt "x-masc-keeper-name" server.headers);
+          Alcotest.(check (option string)) "agent name injected"
+            (Some "keeper-sangsu-agent")
+            (List.assoc_opt "x-masc-agent-name" server.headers);
+          Alcotest.(check (option string)) "ambient bearer not mixed with internal"
+            None
+            (List.assoc_opt "Authorization" server.headers)
+      | _ -> Alcotest.fail "expected single masc runtime server")
+  | None -> Alcotest.fail "expected public MCP runtime policy"
+
 let test_runtime_mcp_policy_for_provider_skips_codex_cli_header_injection () =
   let policy =
     {
@@ -3244,6 +3292,10 @@ let () =
         "public MCP tools on codex_cli strip unsupported runtime MCP headers"
         `Quick
         test_resolve_tool_lane_for_codex_cli_public_tools_with_agent_name_strips_runtime_headers;
+      Alcotest.test_case
+        "keeper-bound public MCP tools on codex_cli reject runtime MCP lane"
+        `Quick
+        test_resolve_tool_lane_for_codex_cli_keeper_bound_public_tools_rejects;
       Alcotest.test_case "public MCP tools on kimi_cli use runtime MCP lane" `Quick
         test_resolve_tool_lane_for_kimi_cli_public_tools_uses_runtime_mcp_policy;
       Alcotest.test_case
@@ -3268,6 +3320,8 @@ let () =
         test_runtime_mcp_policy_with_masc_agent_name_upserts_header;
       Alcotest.test_case "runtime MCP policy injects internal keeper token when configured" `Quick
         test_runtime_mcp_policy_with_masc_agent_name_prefers_internal_keeper_token;
+      Alcotest.test_case "public MCP policy binds keeper internal headers" `Quick
+        test_public_mcp_runtime_policy_binds_keeper_internal_headers;
       Alcotest.test_case "provider-aware runtime MCP policy skips codex_cli agent header injection" `Quick
         test_runtime_mcp_policy_for_provider_skips_codex_cli_header_injection;
       Alcotest.test_case "kimi request runtime MCP config is merged" `Quick

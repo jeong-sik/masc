@@ -1811,6 +1811,68 @@ let test_execute_tool_add_task_with_admin_token_without_join () =
     (Types.task_status_to_string task.task_status);
   cleanup_dir base_path
 
+let test_execute_tool_http_auth_token_overrides_stale_argument_token () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  ignore (Masc_mcp.Coord.init state.room_config ~agent_name:None);
+  ignore (Masc_mcp.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
+  let raw_token =
+    match Masc_mcp.Auth.create_token base_path ~agent_name:"stable-admin" ~role:Types.Admin with
+    | Ok (token, _cred) -> token
+    | Error e -> Alcotest.fail (Types.masc_error_to_string e)
+  in
+  let ok, msg =
+    Mcp_eio.execute_tool_eio ~sw ~clock ~auth_token:raw_token state
+      ~name:"masc_status"
+      ~arguments:
+        (`Assoc
+          [
+            ("token", `String "stale-argument-token");
+          ])
+  in
+  Alcotest.(check bool) "status succeeds" true ok;
+  Alcotest.(check bool) "does not report stale token mismatch" false
+    (contains_substring msg "Token mismatch");
+  cleanup_dir base_path
+
+let test_execute_tool_legacy_argument_token_still_authorizes_without_http_auth () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  ignore (Masc_mcp.Coord.init state.room_config ~agent_name:None);
+  ignore (Masc_mcp.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
+  let raw_token =
+    match Masc_mcp.Auth.create_token base_path ~agent_name:"stable-admin" ~role:Types.Admin with
+    | Ok (token, _cred) -> token
+    | Error e -> Alcotest.fail (Types.masc_error_to_string e)
+  in
+  let ok, msg =
+    Mcp_eio.execute_tool_eio ~sw ~clock state
+      ~name:"masc_status"
+      ~arguments:
+        (`Assoc
+          [
+            ("token", `String raw_token);
+          ])
+  in
+  Alcotest.(check bool) "status succeeds" true ok;
+  Alcotest.(check bool) "status response returned" true
+    (String.length msg > 0);
+  cleanup_dir base_path
+
 let test_execute_tool_mcp_session_ignores_term_persistence () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -2935,6 +2997,10 @@ let eio_tests = [
     test_execute_tool_transition_requires_auth_before_mutation;
   "add_task admin token works without join", `Quick,
     test_execute_tool_add_task_with_admin_token_without_join;
+  "http auth token overrides stale argument token", `Quick,
+    test_execute_tool_http_auth_token_overrides_stale_argument_token;
+  "legacy argument token still authorizes without http auth", `Quick,
+    test_execute_tool_legacy_argument_token_still_authorizes_without_http_auth;
   "mcp session ignores term persistence", `Quick, test_execute_tool_mcp_session_ignores_term_persistence;
   (* Legacy governance convo room test removed *)
 ]

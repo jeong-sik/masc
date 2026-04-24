@@ -111,6 +111,7 @@ type blocker_class =
   | Autonomous_slot_wait_timeout
   | Admission_queue_wait_timeout
   | Turn_timeout_after_queue_wait
+  | Oas_timeout_budget
   | Turn_timeout
   | Completion_contract_violation
   | No_tool_capable_provider

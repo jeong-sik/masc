@@ -326,8 +326,9 @@ module KeeperKeepalive = struct
       Guards against indefinite LLM response waits within a turn.
 
       When [MASC_KEEPER_OAS_TIMEOUT_SEC] is set, that value is used directly.
-      Otherwise, {!oas_timeout_for_context} computes an adaptive timeout:
-        base + ctx/1K × per_1k + min(max_turns, 40) × per_turn
+      Otherwise, {!oas_timeout_for_estimated_input_tokens} computes an
+      adaptive timeout:
+        base + estimated_input_tokens/1K × per_1k + min(max_turns, 40) × per_turn
       References {!oas_max_turns_per_call} (default 15) directly to avoid
       default drift.  Previous formula used 4× headroom on a default of 5,
       producing min(5, 40)=5 effective turns.  Using the actual per-call
@@ -381,8 +382,8 @@ module KeeperKeepalive = struct
             (get_int ~default
                "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS")))
 
-  let oas_timeout_for_context_with_turn_budget ~(max_context : int)
-      ~(max_turns : int) : float =
+  let oas_timeout_for_estimated_input_tokens_with_turn_budget
+      ~(estimated_input_tokens : int) ~(max_turns : int) : float =
     match oas_timeout_sec_override with
     | Some v -> v
     | None ->
@@ -393,7 +394,9 @@ module KeeperKeepalive = struct
       let per_turn =
         get_float ~default:30.0 "MASC_KEEPER_OAS_TIMEOUT_PER_TURN"
       in
-      let context_time = Float.of_int max_context /. 1000.0 *. per_1k in
+      let input_time =
+        Float.of_int (max 0 estimated_input_tokens) /. 1000.0 *. per_1k
+      in
       (* Cap at 40 effective turns even if the configured per-call turn
          budget is higher. This is a deliberate safety cap: with
          per_turn=30s, 40 turns alone consume 1200s — the entire
@@ -404,14 +407,17 @@ module KeeperKeepalive = struct
       in
       let turn_time = effective_turns *. per_turn in
       Float.max 30.0
-        (Float.min turn_timeout_sec (base +. context_time +. turn_time))
+        (Float.min turn_timeout_sec (base +. input_time +. turn_time))
 
-  let oas_timeout_for_context ~(max_context : int) : float =
-    oas_timeout_for_context_with_turn_budget ~max_context
+  let oas_timeout_for_estimated_input_tokens
+      ~(estimated_input_tokens : int) : float =
+    oas_timeout_for_estimated_input_tokens_with_turn_budget
+      ~estimated_input_tokens
       ~max_turns:oas_max_turns_per_call
 
   (** Backward-compatible accessor: returns the env override or 300s default.
-      Prefer {!oas_timeout_for_context} when max_context is available. *)
+      Prefer {!oas_timeout_for_estimated_input_tokens} when a live prompt
+      estimate is available. *)
   let oas_timeout_sec =
     Option.value ~default:300.0 oas_timeout_sec_override
 

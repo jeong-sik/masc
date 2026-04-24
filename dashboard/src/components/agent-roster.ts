@@ -19,7 +19,9 @@ import { TextInput } from './common/input'
 import { EmptyState } from './common/empty-state'
 import { TimeAgo } from './common/time-ago'
 import {
+  keeperIdentityKeys,
   keeperIdentitySearchTerms,
+  keeperPrincipalKey,
   keeperPrimaryName,
 } from './common/keeper-identity'
 import { AgentAvatar } from './overview/agent-avatar'
@@ -142,11 +144,11 @@ export function rosterStateNote(
   return null
 }
 
-function registerKeeperLookup<T extends Pick<Keeper, 'name' | 'agent_name'>>(
+function registerKeeperLookup<T extends Pick<Keeper, 'keeper_id' | 'name' | 'agent_name'>>(
   lookup: Map<string, T>,
   source: T,
 ) {
-  const candidates = [source.agent_name, source.name]
+  const candidates = keeperIdentityKeys(source.keeper_id ?? null, source.name, source.agent_name)
   for (const candidate of candidates) {
     const key = candidate?.trim()
     if (!key || lookup.has(key)) continue
@@ -163,12 +165,22 @@ function buildKeeperRuntimeLookup(keeperList: Keeper[]): Map<string, Keeper> {
 function findKeeperRuntime(agentName: string, keeperList: Keeper[]): Keeper | null {
   const target = agentName.trim()
   if (!target) return null
-  for (const k of keeperList) {
-    const keeperName = k.name?.trim()
-    const keeperAgentName = k.agent_name?.trim()
-    if (keeperName === target || keeperAgentName === target) {
-      return k
-    }
+  const lookup = buildKeeperRuntimeLookup(keeperList)
+  return lookup.get(target) ?? lookup.get(target.toLowerCase()) ?? null
+}
+
+function findKeeperRuntimeForAgent(
+  agent: Pick<Agent, 'name' | 'keeper_id' | 'keeper_name'>,
+  lookup: Map<string, Keeper>,
+): Keeper | null {
+  const candidates = keeperIdentityKeys(
+    agent.keeper_id ?? null,
+    agent.keeper_name ?? null,
+    agent.name,
+  )
+  for (const candidate of candidates) {
+    const keeper = lookup.get(candidate)
+    if (keeper) return keeper
   }
   return null
 }
@@ -250,12 +262,12 @@ export function uniqueToolNames(...groups: Array<string[] | null | undefined>): 
 }
 
 function matchesKeeperFilter(
-  agentName: string,
-  keeperList: Keeper[],
+  agent: Pick<Agent, 'name' | 'keeper_id' | 'keeper_name'>,
+  keeperLookup: Map<string, Keeper>,
   keeperFilter: KeeperFilterMode,
 ): boolean {
   if (keeperFilter === 'all') return true
-  const isKeeper = findKeeperRuntime(agentName, keeperList) != null
+  const isKeeper = findKeeperRuntimeForAgent(agent, keeperLookup) != null
   return keeperFilter === 'keeper-only' ? isKeeper : !isKeeper
 }
 
@@ -263,9 +275,10 @@ function scopeAgentsByKeeperFilter(
   agentList: Agent[],
   keeperList: Keeper[],
   keeperFilter: KeeperFilterMode,
+  keeperLookup: Map<string, Keeper> = buildKeeperRuntimeLookup(keeperList),
 ): Agent[] {
   return agentList.filter((agent: Agent) =>
-    matchesKeeperFilter(agent.name, keeperList, keeperFilter))
+    matchesKeeperFilter(agent, keeperLookup, keeperFilter))
 }
 
 export function keeperRuntimeName(source: Pick<Keeper, 'name' | 'agent_name'>): string {
@@ -274,8 +287,8 @@ export function keeperRuntimeName(source: Pick<Keeper, 'name' | 'agent_name'>): 
 }
 
 function synthesizeAgentFromKeeper(source: Keeper): Agent | null {
-  const runtimeName = keeperRuntimeName(source)
-  if (!runtimeName) return null
+  const displayName = keeperPrimaryName(source.name, source.agent_name) ?? keeperRuntimeName(source)
+  if (!displayName) return null
 
   const linkedAgent = source.agent
   const liveCurrentTask =
@@ -286,7 +299,9 @@ function synthesizeAgentFromKeeper(source: Keeper): Agent | null {
     ?? null
 
   return {
-    name: runtimeName,
+    name: displayName,
+    keeper_name: source.name,
+    keeper_id: source.keeper_id ?? null,
     agent_type: linkedAgent?.agent_type,
     status: (linkedAgent?.status as Agent['status'] | undefined) ?? (source.status as Agent['status'] | undefined),
     current_task: linkedAgent?.current_task ?? liveCurrentTask,
@@ -308,6 +323,9 @@ export function mergeRosterAgent(existing: Agent | undefined, next: Agent): Agen
   if (!existing) return next
   return {
     ...existing,
+    name: next.synthetic && !existing.synthetic ? next.name : existing.name,
+    keeper_name: existing.keeper_name ?? next.keeper_name ?? null,
+    keeper_id: existing.keeper_id ?? next.keeper_id ?? null,
     agent_type: existing.agent_type ?? next.agent_type,
     status: existing.status ?? next.status,
     current_task: existing.current_task ?? next.current_task,
@@ -328,16 +346,34 @@ function buildAgentRoster(
   agentList: Agent[],
   keeperList: Keeper[],
 ): Agent[] {
+  const keeperLookup = buildKeeperRuntimeLookup(keeperList)
   const roster = new Map<string, Agent>()
 
   for (const agent of agentList) {
-    roster.set(agent.name, agent)
+    const keeper = findKeeperRuntimeForAgent(agent, keeperLookup)
+    const key =
+      keeperPrincipalKey(
+        keeper?.keeper_id ?? agent.keeper_id ?? null,
+        keeper?.name ?? agent.keeper_name ?? null,
+        keeper?.agent_name ?? agent.name,
+      )
+      ?? agent.name
+    const normalizedAgent =
+      keeper != null
+        ? {
+            ...agent,
+            keeper_name: agent.keeper_name ?? keeper.name,
+            keeper_id: agent.keeper_id ?? keeper.keeper_id ?? null,
+          }
+        : agent
+    roster.set(key, mergeRosterAgent(roster.get(key), normalizedAgent))
   }
 
   for (const source of keeperList) {
     const synthetic = synthesizeAgentFromKeeper(source)
     if (!synthetic) continue
-    roster.set(synthetic.name, mergeRosterAgent(roster.get(synthetic.name), synthetic))
+    const key = keeperPrincipalKey(source.keeper_id ?? null, source.name, source.agent_name) ?? synthetic.name
+    roster.set(key, mergeRosterAgent(roster.get(key), synthetic))
   }
 
   return Array.from(roster.values())
@@ -347,6 +383,7 @@ function countAgentsByStatus(
   agentList: Agent[],
   keeperList: Keeper[],
 ): Record<StatusFilter, number> {
+  const keeperLookup = buildKeeperRuntimeLookup(keeperList)
   const counts: Record<StatusFilter, number> = {
     all: agentList.length,
     active: 0,
@@ -356,7 +393,7 @@ function countAgentsByStatus(
   }
 
   for (const agent of agentList) {
-    const keeperRuntime = findKeeperRuntime(agent.name, keeperList)
+    const keeperRuntime = findKeeperRuntimeForAgent(agent, keeperLookup)
     const band = runtimeBandMetaForAgent(agent, keeperRuntime).key
     counts[band] += 1
   }
@@ -369,8 +406,9 @@ export function countRuntimeKinds(
   keeperList: Keeper[],
 ): { agents: number; keepers: number; totalRuntimes: number } {
   const rosterAgents = buildAgentRoster(agentList, keeperList)
-  const keeperCount = scopeAgentsByKeeperFilter(rosterAgents, keeperList, 'keeper-only').length
-  const agentCount = scopeAgentsByKeeperFilter(rosterAgents, keeperList, 'agent-only').length
+  const keeperLookup = buildKeeperRuntimeLookup(keeperList)
+  const keeperCount = scopeAgentsByKeeperFilter(rosterAgents, keeperList, 'keeper-only', keeperLookup).length
+  const agentCount = scopeAgentsByKeeperFilter(rosterAgents, keeperList, 'agent-only', keeperLookup).length
 
   return {
     agents: agentCount,
@@ -400,10 +438,10 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
   // Derive runtime kind counts from memoized roster (avoids duplicate buildAgentRoster call)
   const liveRuntimeCounts = useMemo(() => {
-    const keeperCount = scopeAgentsByKeeperFilter(rosterAgents, keeperList, 'keeper-only').length
-    const agentCount = scopeAgentsByKeeperFilter(rosterAgents, keeperList, 'agent-only').length
+    const keeperCount = scopeAgentsByKeeperFilter(rosterAgents, keeperList, 'keeper-only', keeperRuntimeLookup).length
+    const agentCount = scopeAgentsByKeeperFilter(rosterAgents, keeperList, 'agent-only', keeperRuntimeLookup).length
     return { agents: agentCount, keepers: keeperCount, totalRuntimes: rosterAgents.length }
-  }, [rosterAgents, keeperList])
+  }, [rosterAgents, keeperList, keeperRuntimeLookup])
 
   const runtimeCounts = resolveRuntimeCounts({
     executionLoaded: executionLoaded.value,
@@ -420,16 +458,18 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
   const namespaceName = namespaceStatus?.project ?? 'default'
 
   const scopedAgents = useMemo(
-    () => scopeAgentsByKeeperFilter(rosterAgents, keeperList, keeperFilter),
-    [rosterAgents, keeperList, keeperFilter],
+    () => scopeAgentsByKeeperFilter(rosterAgents, keeperList, keeperFilter, keeperRuntimeLookup),
+    [rosterAgents, keeperList, keeperFilter, keeperRuntimeLookup],
   )
   const bandByAgent = useMemo(
     () => new Map(
       scopedAgents.map(agent => [
         agent.name,
         runtimeBandMetaForAgent(
-          agent,
-          keeperRuntimeLookup.get(agent.name) ?? findKeeperRuntime(agent.name, keeperList),
+        agent,
+          keeperRuntimeLookup.get(agent.name)
+            ?? findKeeperRuntimeForAgent(agent, keeperRuntimeLookup)
+            ?? findKeeperRuntime(agent.name, keeperList),
         ),
       ] as const),
     ),
@@ -439,7 +479,10 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
   const searchTermsByAgent = useMemo(
     () => new Map(
       scopedAgents.map(agent => {
-        const keeper = keeperRuntimeLookup.get(agent.name) ?? findKeeperRuntime(agent.name, keeperList)
+        const keeper =
+          keeperRuntimeLookup.get(agent.name)
+          ?? findKeeperRuntimeForAgent(agent, keeperRuntimeLookup)
+          ?? findKeeperRuntime(agent.name, keeperList)
         return [
           agent.name,
           keeperIdentitySearchTerms(
@@ -598,7 +641,10 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
       <div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
         ${filtered.map((agent: Agent) => {
-          const keeperRuntime = keeperRuntimeLookup.get(agent.name) ?? findKeeperRuntime(agent.name, keeperList)
+          const keeperRuntime =
+            keeperRuntimeLookup.get(agent.name)
+            ?? findKeeperRuntimeForAgent(agent, keeperRuntimeLookup)
+            ?? findKeeperRuntime(agent.name, keeperList)
           const band = bandByAgent.get(agent.name) ?? runtimeBandMeta('attention')
           const keeperMonitoring = keeperRuntime ? summarizeKeeperMonitoring(keeperRuntime) : null
           const monitoringEvidence = keeperMonitoring ? summarizeMonitoringEvidence(keeperMonitoring) : null

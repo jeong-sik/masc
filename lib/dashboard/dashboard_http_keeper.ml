@@ -894,6 +894,11 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
             ] @ runtime_blocker_fields @ attention_fields @ [
               ("supervisor_diagnostics", supervisor_diagnostics);
               ("agent_name", `String m.agent_name);
+              ( "keeper_id",
+                match m.keeper_id with
+                | Some keeper_id ->
+                    `String (Keeper_id.Uid.to_string keeper_id)
+                | None -> `Null );
               ("emoji", `String (let (e, _) = get_agent_identity m.name in e));
               ("koreanName", `String (let (_, k) = get_agent_identity m.name in k));
               ("trace_id", `String (Keeper_id.Trace_id.to_string m.runtime.trace_id));
@@ -1150,6 +1155,7 @@ let execution_trust_dashboard_json (config : Coord.config) : Yojson.Safe.t =
                    [
                      ("name", Yojson.Safe.Util.member "name" row);
                      ("agent_name", Yojson.Safe.Util.member "agent_name" row);
+                     ("keeper_id", Yojson.Safe.Util.member "keeper_id" row);
                      ("phase", Yojson.Safe.Util.member "phase" row);
                      ( "pipeline_stage",
                        Yojson.Safe.Util.member "pipeline_stage" row );

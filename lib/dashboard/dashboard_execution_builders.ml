@@ -168,6 +168,14 @@ let worker_state_of_agent
         [
           ("name", `String agent.name);
           ("agent_name", `String agent.name);
+          ("keeper_name",
+            match agent.meta with
+            | Some meta -> json_string_option meta.keeper_name
+            | None -> `Null);
+          ("keeper_id",
+            match agent.meta with
+            | Some meta -> json_string_option meta.keeper_id
+            | None -> `Null);
           ("status", `String status_string);
           ("tone", `String (string_of_tone tone));
           ("state", `String state);
@@ -311,6 +319,7 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
         ([
            ("name", `String name);
            ("agent_name", member_assoc "agent_name" keeper);
+           ("keeper_id", member_assoc "keeper_id" keeper);
            ("status", `String status);
            ("tone", `String (string_of_tone tone));
            ("state", `String (keeper_exec_state_to_string state));

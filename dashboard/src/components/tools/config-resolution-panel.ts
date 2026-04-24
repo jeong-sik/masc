@@ -296,7 +296,7 @@ const KEEPER_RUNTIME_ROWS: Array<{
   { key: 'turn_timeout_sec', label: 'turn timeout', fmt: 'duration' },
   { key: 'admission_wait_timeout_sec', label: 'admission wait timeout', fmt: 'duration' },
   { key: 'oas_timeout_override_sec', label: 'OAS timeout override', fmt: 'duration' },
-  { key: 'oas_timeout_per_1k', label: 'OAS timeout per 1k ctx', fmt: 'float' },
+  { key: 'oas_timeout_per_1k', label: 'OAS timeout per 1k est input', fmt: 'float' },
   { key: 'oas_timeout_per_turn', label: 'OAS timeout per turn', fmt: 'duration' },
 ]
 

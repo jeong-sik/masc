@@ -69,27 +69,27 @@ let test_keepalive_jitter_range () =
 
 (* ── OAS adaptive timeout tests ───────────────────────── *)
 
-let adaptive = Cfg.KeeperKeepalive.oas_timeout_for_context
+let adaptive = Cfg.KeeperKeepalive.oas_timeout_for_estimated_input_tokens
 
 let test_oas_timeout_32k () =
-  let v = adaptive ~max_context:32_000 in
+  let v = adaptive ~estimated_input_tokens:32_000 in
   (* 120 + 32*1.5 + min(15,40)*30 = 120+48+450 = 618 *)
   check (float 1.0) "32K → 618s" 618.0 v
 
 let test_oas_timeout_128k () =
-  let v = adaptive ~max_context:128_000 in
+  let v = adaptive ~estimated_input_tokens:128_000 in
   (* 120 + 128*1.5 + 450 = 762 *)
   check (float 1.0) "128K → 762s" 762.0 v
 
 let test_oas_timeout_262k () =
-  let v = adaptive ~max_context:262_144 in
+  let v = adaptive ~estimated_input_tokens:262_144 in
   (* 120 + 262.144*1.5 + min(15,40)*30 = 120+393.216+450 = 963.216 *)
   check bool "262K → [960, 970]" true (v >= 960.0 && v <= 970.0)
 
 let test_oas_timeout_262k_scheduled_autonomous () =
   let v =
-    Cfg.KeeperKeepalive.oas_timeout_for_context_with_turn_budget
-      ~max_context:262_144
+    Cfg.KeeperKeepalive.oas_timeout_for_estimated_input_tokens_with_turn_budget
+      ~estimated_input_tokens:262_144
       ~max_turns:Cfg.KeeperKeepalive.oas_max_turns_per_call_scheduled_autonomous
   in
   (* #6810: default lowered 5→2 to keep semaphore hold under wait timeout.
@@ -98,20 +98,20 @@ let test_oas_timeout_262k_scheduled_autonomous () =
     (v >= 570.0 && v <= 580.0)
 
 let test_oas_timeout_zero () =
-  let v = adaptive ~max_context:0 in
+  let v = adaptive ~estimated_input_tokens:0 in
   (* 120 + 0 + min(15,40)*30 = 570 *)
   check (float 1.0) "0 context → base+turn budget 570s" 570.0 v
 
 let test_oas_timeout_monotonic () =
-  let v1 = adaptive ~max_context:32_000 in
-  let v2 = adaptive ~max_context:128_000 in
-  let v3 = adaptive ~max_context:262_144 in
+  let v1 = adaptive ~estimated_input_tokens:32_000 in
+  let v2 = adaptive ~estimated_input_tokens:128_000 in
+  let v3 = adaptive ~estimated_input_tokens:262_144 in
   check bool "32K < 128K" true (v1 < v2);
   check bool "128K < 262K" true (v2 < v3)
 
 let test_oas_timeout_cap () =
-  let v = adaptive ~max_context:1_000_000 in
-  check (float 0.1) "1M context → capped at turn timeout 1200" 1200.0 v
+  let v = adaptive ~estimated_input_tokens:1_000_000 in
+  check (float 0.1) "1M estimated input tokens → capped at turn timeout 1200" 1200.0 v
 
 let test_turn_timeout_default () =
   check (float 0.1) "default turn timeout 1200s" 1200.0

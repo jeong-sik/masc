@@ -544,6 +544,7 @@ let append_decision_record
                 | Some co ->
                     [
                       ("cascade_name", `String co.cascade_name);
+                      ("strategy", Json_util.string_opt_to_json co.strategy);
                       ("primary_model", match co.primary_model with Some m -> `String m | None -> `Null);
                       ("selected_model", match co.selected_model with Some m -> `String m | None -> `Null);
                       ("fallback_applied", `Bool co.fallback_applied);
@@ -925,7 +926,7 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
     ~(message_count : int)
     ~(compaction : Keeper_exec_context.compaction_event)
     ~(handoff_json : Yojson.Safe.t option)
-    ?deliberation_execution () : unit =
+    ?timeout_budget_json ?deliberation_execution () : unit =
   let now_ts = Time_compat.now () in
   let _observation = observation in
   let turn_mode = turn_mode_of_result result in
@@ -969,6 +970,10 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
         ("model_used", `String surface_model_used);
         ("prompt_fingerprint", `String result.prompt_metrics.fingerprint);
         ("prompt", Keeper_agent_run.prompt_metrics_to_json result.prompt_metrics);
+        ( "timeout_budget",
+          match timeout_budget_json with
+          | Some value -> value
+          | None -> `Null );
         ("ctx_composition", Keeper_agent_run.ctx_composition_to_json result.ctx_composition);
         ("usage", usage_json);
         ("latency_ms", `Int latency_ms);
@@ -1139,6 +1144,17 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
         | Some (Oas_worker_named.Resumable_cli_session { detail; _ }) ->
             let trimmed = String.trim detail in
             if trimmed = "" then reason else trimmed
+        | Some
+            (Oas_worker_named.Oas_timeout_budget
+               {
+                 budget_sec;
+                 keeper_turn_timeout_sec;
+                 estimated_input_tokens;
+                 source;
+               }) ->
+            Printf.sprintf
+              "OAS budget timeout after %.1fs (%s, estimated input %d tokens, keeper hard cap %.1fs)"
+              budget_sec source estimated_input_tokens keeper_turn_timeout_sec
         | _ -> reason)
     | None -> reason
   in

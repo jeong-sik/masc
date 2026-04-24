@@ -1532,6 +1532,7 @@ function normalizeRuntimeBlockerClass(value: unknown): KeeperConfig['runtime']['
     case 'autonomous_slot_wait_timeout':
     case 'admission_queue_wait_timeout':
     case 'turn_timeout_after_queue_wait':
+    case 'oas_timeout_budget':
     case 'turn_timeout':
     case 'completion_contract_violation':
     case 'cascade_exhausted':

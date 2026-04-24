@@ -433,6 +433,7 @@ let test_cascade_observation_json_includes_fallback_fields () =
   let observation : Oas_worker.cascade_observation =
     {
       cascade_name = Masc_mcp.Keeper_config.default_cascade_name;
+      strategy = Some "round_robin";
       configured_labels = [ "glm:auto"; "llama:auto" ];
       candidate_models = [ "glm:glm-5.1"; "openai:qwen3.5-35b" ];
       primary_model = Some "glm:glm-5.1";
@@ -588,6 +589,7 @@ let test_cascade_audit_persists_observation () =
       let observation : Masc_mcp.Oas_worker_cascade.cascade_observation =
         {
           cascade_name = "audit-cascade";
+          strategy = Some "round_robin";
           configured_labels = [ "glm:auto"; "openai:auto" ];
           candidate_models = [ "glm:glm-5.1"; "openai:qwen3.5-35b" ];
           primary_model = Some "glm:glm-5.1";

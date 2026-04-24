@@ -113,6 +113,7 @@ let is_auto_recoverable_cascade_exhausted_error (err : Oas.Error.sdk_error) : bo
   | Some (Oas_worker_named.Admission_queue_rejected _)
   | Some (Oas_worker_named.Admission_queue_timeout _)
   | Some (Oas_worker_named.Turn_timeout _)
+  | Some (Oas_worker_named.Oas_timeout_budget _)
   | Some (Oas_worker_named.Ambiguous_post_commit _)
   | None ->
       false
@@ -126,6 +127,7 @@ let is_resumable_cli_session_error (err : Oas.Error.sdk_error) : bool =
   | Some (Oas_worker_named.Admission_queue_timeout _)
   | Some (Oas_worker_named.Admission_queue_rejected _)
   | Some (Oas_worker_named.Turn_timeout _)
+  | Some (Oas_worker_named.Oas_timeout_budget _)
   | Some (Oas_worker_named.Ambiguous_post_commit _)
   | None ->
       false
@@ -185,6 +187,8 @@ let degraded_retry_after_recoverable_error
         local_recovery_retry "resumable_cli_session"
     | Some (Oas_worker_named.Admission_queue_timeout _) ->
         local_recovery_retry "admission_queue_timeout"
+    | Some (Oas_worker_named.Oas_timeout_budget _) ->
+        local_recovery_retry "oas_timeout_budget"
     | Some (Oas_worker_named.Turn_timeout _) ->
         local_recovery_retry "turn_timeout"
     | Some
@@ -322,6 +326,7 @@ let is_cascade_exhausted_error (err : Oas.Error.sdk_error) : bool =
   | Some (Oas_worker_named.Accept_rejected _) -> true
   | Some (Oas_worker_named.Admission_queue_timeout _)
   | Some (Oas_worker_named.Admission_queue_rejected _)
+  | Some (Oas_worker_named.Oas_timeout_budget _)
   | Some (Oas_worker_named.Turn_timeout _)
   | Some (Oas_worker_named.Ambiguous_post_commit _) -> false
   | None -> false

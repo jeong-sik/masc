@@ -157,6 +157,12 @@ type masc_internal_error =
   | Turn_timeout of {
       elapsed_sec : float;
     }
+  | Oas_timeout_budget of {
+      budget_sec : float;
+      keeper_turn_timeout_sec : float;
+      estimated_input_tokens : int;
+      source : string;
+    }
   | Ambiguous_post_commit of {
       is_timeout : bool;
       tools : string list;
@@ -224,6 +230,21 @@ let masc_internal_error_to_json = function
       [
         ("kind", `String "turn_timeout");
         ("elapsed_sec", `Float elapsed_sec);
+      ]
+  | Oas_timeout_budget
+      {
+        budget_sec;
+        keeper_turn_timeout_sec;
+        estimated_input_tokens;
+        source;
+      } ->
+    `Assoc
+      [
+        ("kind", `String "oas_timeout_budget");
+        ("budget_sec", `Float budget_sec);
+        ("keeper_turn_timeout_sec", `Float keeper_turn_timeout_sec);
+        ("estimated_input_tokens", `Int estimated_input_tokens);
+        ("source", `String source);
       ]
   | Ambiguous_post_commit { is_timeout; tools; original_error } ->
     `Assoc
@@ -366,6 +387,29 @@ let classify_masc_internal_error (err : Oas.Error.sdk_error) :
                    match List.assoc_opt "elapsed_sec" fields with
                    | Some (`Float v) ->
                      Some (Turn_timeout { elapsed_sec = v })
+                   | _ -> None)
+               | _ -> None)
+           | Some (`String "oas_timeout_budget") -> (
+               match json with
+               | `Assoc fields -> (
+                   match
+                     List.assoc_opt "budget_sec" fields,
+                     List.assoc_opt "keeper_turn_timeout_sec" fields,
+                     List.assoc_opt "estimated_input_tokens" fields,
+                     List.assoc_opt "source" fields
+                   with
+                   | Some (`Float budget_sec),
+                     Some (`Float keeper_turn_timeout_sec),
+                     Some (`Int estimated_input_tokens),
+                     Some (`String source) ->
+                       Some
+                         (Oas_timeout_budget
+                            {
+                              budget_sec;
+                              keeper_turn_timeout_sec;
+                              estimated_input_tokens;
+                              source;
+                            })
                    | _ -> None)
                | _ -> None)
            | Some (`String "ambiguous_post_commit") -> (
@@ -869,6 +913,7 @@ let run_named
       candidate_cfgs
   in
   let capture, _metrics = Oas_worker_cascade.cascade_metrics_for_candidates ~candidate_cfgs () in
+  let cascade_strategy_name_ref = ref None in
   let name = Printf.sprintf "oas-%s" cascade_name in
   match candidate_cfgs with
   | [] ->
@@ -1057,8 +1102,9 @@ let run_named
         | None -> Keeper_types.No_providers_available
       in
       let observation =
-        Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name ~configured_labels
-          ~candidate_cfgs ~selected_model_raw:None ~capture
+        Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name
+          ?strategy:!cascade_strategy_name_ref ~configured_labels
+          ~candidate_cfgs ~selected_model_raw:None ~capture ()
       in
       Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Failure ~observation:(Some observation);
       let terminal_error =
@@ -1112,8 +1158,10 @@ let run_named
         Cascade_health_tracker.(record_success global ~provider_key:provider_cfg.model_id);
         (* FSM: Call_ok → Accept *)
         let observation =
-          Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name ~configured_labels
-            ~candidate_cfgs ~selected_model_raw:(Some result.response.model) ~capture
+          Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name
+            ?strategy:!cascade_strategy_name_ref ~configured_labels
+            ~candidate_cfgs ~selected_model_raw:(Some result.response.model)
+            ~capture ()
         in
         let result = { result with cascade_observation = Some observation } in
         Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Success ~observation:(Some observation);
@@ -1136,8 +1184,10 @@ let run_named
         (match Cascade_fsm.decide ~accept_on_exhaustion:false ~is_last outcome with
          | Cascade_fsm.Accept_on_exhaustion { response; _ } ->
            let observation =
-             Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name ~configured_labels
-               ~candidate_cfgs ~selected_model_raw:(Some response.model) ~capture
+             Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name
+               ?strategy:!cascade_strategy_name_ref ~configured_labels
+               ~candidate_cfgs ~selected_model_raw:(Some response.model)
+               ~capture ()
            in
            let result = { result with cascade_observation = Some observation } in
            Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Success ~observation:(Some observation);
@@ -1153,8 +1203,10 @@ let run_named
            try_cascade ?resume_checkpoint:next_resume rest new_err
          | Cascade_fsm.Exhausted _ ->
            let observation =
-             Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name ~configured_labels
-               ~candidate_cfgs ~selected_model_raw:(Some result.response.model) ~capture
+             Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name
+               ?strategy:!cascade_strategy_name_ref ~configured_labels
+               ~candidate_cfgs ~selected_model_raw:(Some result.response.model)
+               ~capture ()
            in
            Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Rejected ~observation:(Some observation);
            Log.Misc.error "cascade %s exhausted: all tiers rejected by accept predicate (last model=%s, reason=%s)"
@@ -1171,8 +1223,9 @@ let run_named
            (* Should be unreachable with accept_on_exhaustion:false, but handle gracefully *)
            Log.Misc.warn "cascade %s: unexpected Accept in Accept_rejected branch (model=%s)" cascade_name resp.model;
            let observation =
-             Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name ~configured_labels
-               ~candidate_cfgs ~selected_model_raw:(Some resp.model) ~capture
+             Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name
+               ?strategy:!cascade_strategy_name_ref ~configured_labels
+               ~candidate_cfgs ~selected_model_raw:(Some resp.model) ~capture ()
            in
            let result = { result with cascade_observation = Some observation } in
            Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Success ~observation:(Some observation);
@@ -1209,8 +1262,9 @@ let run_named
               try_cascade ?resume_checkpoint:next_resume rest new_err
             | Cascade_fsm.Exhausted _ ->
               let observation =
-                Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name ~configured_labels
-                  ~candidate_cfgs ~selected_model_raw:None ~capture
+                Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name
+                  ?strategy:!cascade_strategy_name_ref ~configured_labels
+                  ~candidate_cfgs ~selected_model_raw:None ~capture ()
               in
               Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Failure ~observation:(Some observation);
               Log.Misc.error "cascade %s exhausted: all tiers failed (last model=%s, error=%s)"
@@ -1220,8 +1274,9 @@ let run_named
          | None ->
            (* Non-API error (agent, config, etc.) — not cascadeable *)
            let observation =
-             Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name ~configured_labels
-               ~candidate_cfgs ~selected_model_raw:None ~capture
+             Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name
+               ?strategy:!cascade_strategy_name_ref ~configured_labels
+               ~candidate_cfgs ~selected_model_raw:None ~capture ()
            in
            Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Failure ~observation:(Some observation);
            Log.Misc.error "cascade %s: non-cascadable error from %s: %s"
@@ -1242,6 +1297,8 @@ let run_named
         Log.Misc.error "cascade %s: %s" cascade_name detail;
         Error (cascade_catalog_error_to_sdk_error detail)
   in
+  let strategy_name = Cascade_strategy.kind_to_string strategy.kind in
+  let () = cascade_strategy_name_ref := Some strategy_name in
   let* ollama_max =
     match
       Cascade_catalog_runtime.resolve_ollama_max_concurrent ~name:cascade_name ()
@@ -1340,7 +1397,8 @@ let run_named
   let cascade_exhausted_after_filter ~cycle =
     let observation =
       Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name
-        ~configured_labels ~candidate_cfgs ~selected_model_raw:None ~capture
+        ?strategy:!cascade_strategy_name_ref ~configured_labels
+        ~candidate_cfgs ~selected_model_raw:None ~capture ()
     in
     Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Failure
       ~observation:(Some observation);
@@ -1352,7 +1410,7 @@ let run_named
     Cascade_strategy_trace.record {
       ts = Unix.gettimeofday ();
       cascade_name;
-      strategy = Cascade_strategy.kind_to_string strategy.kind;
+      strategy = strategy_name;
       cycle;
       candidates_in = List.length candidate_cfgs;
       candidates_out;
@@ -1376,7 +1434,7 @@ let run_named
         ~kind:Filtered_empty;
       Log.Misc.info
         "cascade %s: cycle %d (%s) filtered all candidates, retrying"
-        cascade_name n (Cascade_strategy.kind_to_string strategy.kind);
+        cascade_name n strategy_name;
       do_backoff (n + 1);
       cycle_loop (n + 1)
     | _ ->
@@ -1391,7 +1449,7 @@ let run_named
        | Error _ ->
          Log.Misc.info
            "cascade %s: cycle %d exhausted, backoff before retry (strategy=%s)"
-           cascade_name n (Cascade_strategy.kind_to_string strategy.kind);
+           cascade_name n strategy_name;
          do_backoff (n + 1);
          cycle_loop (n + 1))
   in

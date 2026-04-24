@@ -725,10 +725,13 @@ let dashboard_task_json config (task : Types.task) =
 
 let dashboard_agent_json (agent : Types.agent) =
   let profile = Dashboard_execution_helpers.get_agent_profile agent.name in
+  let meta = agent.meta in
   `Assoc
     [
       ("name", `String agent.name);
       ("agent_type", `String agent.agent_type);
+      ("keeper_name", Json_util.string_opt_to_json (Option.bind meta (fun m -> m.keeper_name)));
+      ("keeper_id", Json_util.string_opt_to_json (Option.bind meta (fun m -> m.keeper_id)));
       ("status", `String (Types.string_of_agent_status agent.status));
       ("current_task", Json_util.string_opt_to_json agent.current_task);
       ("joined_at", `String agent.joined_at);

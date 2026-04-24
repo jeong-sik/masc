@@ -234,7 +234,8 @@ let is_passive_status_tool_name name =
 
 let is_claim_tool_name name =
   match Tool_name.of_string name with
-  | Some (Keeper Task_claim) | Some (Masc Claim_next) -> true
+  | Some (Keeper Task_claim) | Some (Masc Claim_next) | Some (Masc Claim_task) ->
+    true
   | _ -> false
 
 let is_claim_context_tool_name name =

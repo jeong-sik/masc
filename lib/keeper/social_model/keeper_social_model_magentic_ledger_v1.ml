@@ -51,7 +51,7 @@ let active_desire_of_phase = function
 
 let current_intention_of_phase ~(phase : Fsm.phase) ~(tools_used : string list)
     ~(has_text_reply : bool) =
-  if List.mem "keeper_task_claim" tools_used || List.mem "masc_claim_next" tools_used
+  if List.exists Keeper_tool_disclosure.is_claim_tool_name tools_used
   then Some "capture_next_task"
   else if tools_used <> [] then Some "record_progress_evidence"
   else if has_text_reply then Some "publish_progress_update"

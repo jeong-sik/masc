@@ -4128,6 +4128,18 @@ let test_actionable_tool_contract_rejects_claim_context_when_already_claimed () 
        ~actionable_signal_context:true
        ~tool_names:[ "keeper_task_claim" ])
 
+let test_claim_tool_classification_covers_masc_claim_task () =
+  check bool "keeper claim is claim tool" true
+    (KTD.is_claim_tool_name "keeper_task_claim");
+  check bool "masc claim next is claim tool" true
+    (KTD.is_claim_tool_name "masc_claim_next");
+  check bool "masc claim task is claim tool" true
+    (KTD.is_claim_tool_name "masc_claim_task");
+  check bool "task creation is not claim tool" false
+    (KTD.is_claim_tool_name "keeper_task_create");
+  check bool "task list is not claim tool" false
+    (KTD.is_claim_tool_name "keeper_tasks_list")
+
 let test_actionable_tool_contract_allows_execution_tools () =
   check (option string) "execution tool satisfies actionable signal" None
     (KTD.actionable_tool_contract_violation_reason
@@ -4528,6 +4540,24 @@ let test_social_model_infers_board_comment_from_tool_use () =
   check (list string) "tool list preserved"
     ["keeper_board_comment"; "masc_status"] routed.tools_used
 
+let test_social_model_infers_masc_claim_task_from_tool_use () =
+  let result =
+    make_run_result ~text:"" ~tools:["masc_claim_task"]
+      ~model:"test-model" ~input_tok:10 ~output_tok:1 ()
+  in
+  let routed, state, transition_reason =
+    KSM.apply_to_result ~meta:minimal_meta
+      ~observation:base_observation ~previous_state:None result
+  in
+  check string "speech act" "claim_task"
+    (KSM.speech_act_to_string state.speech_act);
+  check string "delivery surface" "task_claim"
+    (KSM.delivery_surface_to_string state.delivery_surface);
+  check string "transition reason" "tool_only:claim_task"
+    (KSM.transition_reason_to_string transition_reason);
+  check (list string) "tool list preserved" ["masc_claim_task"]
+    routed.tools_used
+
 let test_social_model_magentic_ledger_silences_tool_only_turn () =
   let meta = { minimal_meta with social_model = "magentic_ledger_v1" } in
   let result =
@@ -4553,6 +4583,25 @@ let test_social_model_magentic_ledger_silences_tool_only_turn () =
     (contains_substring state.belief_summary "ledger:phase=advancing");
   check string "visible response suppressed" "" routed.response_text;
   check (list string) "tool list preserved" ["masc_status"] routed.tools_used
+
+let test_social_model_magentic_ledger_tracks_masc_claim_task () =
+  let meta = { minimal_meta with social_model = "magentic_ledger_v1" } in
+  let result =
+    make_run_result ~text:"" ~tools:["masc_claim_task"]
+      ~model:"test-model" ~input_tok:10 ~output_tok:1 ()
+  in
+  let routed, state, transition_reason =
+    KSM.apply_to_result ~meta ~observation:base_observation
+      ~previous_state:None result
+  in
+  check string "social model" "magentic_ledger_v1" state.social_model;
+  check (option string) "current intention tracks claim"
+    (Some "capture_next_task") state.current_intention;
+  check string "transition reason" "tool_only:claim_task"
+    (KSM.transition_reason_to_string transition_reason);
+  check string "visible response suppressed" "" routed.response_text;
+  check (list string) "tool list preserved" ["masc_claim_task"]
+    routed.tools_used
 
 let test_social_model_magentic_ledger_hides_nonvisible_tool_text () =
   let meta = { minimal_meta with social_model = "magentic_ledger_v1" } in
@@ -5181,6 +5230,8 @@ let () =
             "actionable signal rejects claim context after ownership"
             `Quick
             test_actionable_tool_contract_rejects_claim_context_when_already_claimed;
+          test_case "claim tool classification covers masc claim task" `Quick
+            test_claim_tool_classification_covers_masc_claim_task;
           test_case "actionable signal allows execution tools" `Quick
             test_actionable_tool_contract_allows_execution_tools;
           test_case "tool usage delta uses registry counts" `Quick
@@ -5222,8 +5273,12 @@ let () =
             test_social_model_tool_only_turn_carries_previous_state;
           test_case "social model infers board comment from tool use" `Quick
             test_social_model_infers_board_comment_from_tool_use;
+          test_case "social model infers masc claim task from tool use" `Quick
+            test_social_model_infers_masc_claim_task_from_tool_use;
           test_case "magentic ledger silences tool-only turn" `Quick
             test_social_model_magentic_ledger_silences_tool_only_turn;
+          test_case "magentic ledger tracks masc claim task" `Quick
+            test_social_model_magentic_ledger_tracks_masc_claim_task;
           test_case "magentic ledger hides non-visible tool text" `Quick
             test_social_model_magentic_ledger_hides_nonvisible_tool_text;
           test_case "magentic ledger restores previous state model" `Quick

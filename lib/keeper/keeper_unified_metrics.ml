@@ -393,7 +393,9 @@ let append_decision_record
   let pending_approval_count =
     Keeper_approval_queue.pending_count_for_keeper ~keeper_name:meta.name
   in
-  let claim_executed = List.mem "keeper_task_claim" tools_used in
+  let claim_executed =
+    List.exists Keeper_tool_disclosure.is_claim_tool_name tools_used
+  in
   let social_fields =
     match social_state with
     | None -> []

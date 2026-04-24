@@ -1842,6 +1842,14 @@ let test_metrics_execution_tools_are_substantive () =
     (UM.has_substantive_tool_calls [ "keeper_task_claim" ]);
   check bool "task listing is not execution progress" false
     (UM.has_substantive_tool_calls [ "keeper_tasks_list" ]);
+  check bool "task creation is execution progress" true
+    (UM.has_substantive_tool_calls [ "keeper_task_create" ]);
+  check bool "masc task creation is execution progress" true
+    (UM.has_substantive_tool_calls [ "masc_add_task" ]);
+  check bool "masc batch task creation is execution progress" true
+    (UM.has_substantive_tool_calls [ "masc_batch_add_tasks" ]);
+  check bool "force release is execution progress" true
+    (UM.has_substantive_tool_calls [ "keeper_task_force_release" ]);
   check bool "bash is execution progress" true
     (UM.has_substantive_tool_calls [ "keeper_bash" ]);
   check bool "completion is execution progress" true

@@ -196,15 +196,7 @@ let passive_status_tool_names : string list =
 
 let claim_context_tool_names : string list =
   Tool_name.
-    [
-      Masc Add_task;
-      Masc Batch_add_tasks;
-      Masc Claim_next;
-      Masc Claim_task;
-      Keeper Task_claim;
-      Keeper Task_create;
-      Keeper Task_force_release;
-    ]
+    [ Masc Claim_next; Masc Claim_task; Keeper Task_claim ]
   |> List.map Tool_name.to_string
 
 let completion_tool_names : string list =
@@ -216,6 +208,7 @@ let completion_tool_names : string list =
       Masc Release_task;
       Keeper Task_done;
       Keeper Task_force_done;
+      Keeper Task_force_release;
       Keeper Task_submit_for_verification;
     ]
   |> List.map Tool_name.to_string

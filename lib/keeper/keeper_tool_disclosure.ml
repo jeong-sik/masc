@@ -152,6 +152,36 @@ let validate_completion_contract
        Error
          "keeper turn violated required tool contract: no tools were called")
 
+let is_passive_status_tool_name = function
+  | "masc_status"
+  | "keeper_context_status"
+  | "masc_plan_get"
+  | "keeper_time_now"
+  | "keeper_board_list"
+  | "keeper_board_get"
+  | "keeper_tasks_list"
+  | "masc_tasks" ->
+      true
+  | _ -> false
+
+let actionable_tool_contract_violation_reason
+      ~(actionable_signal_context : bool)
+      ~(tool_names : string list)
+  : string option
+  =
+  if not actionable_signal_context then None
+  else
+    match tool_names with
+    | [] ->
+      Some
+        "actionable keeper signal was present, but the model called no keeper tools"
+    | names when List.for_all is_passive_status_tool_name names ->
+      Some
+        (Printf.sprintf
+           "actionable keeper signal was present, but the model only used passive status/read tools: %s"
+           (String.concat ", " names))
+    | _ -> None
+
 let normalize_response_text ~(text : string) ~(tool_names : string list) ()
   : (string, string) result
   =

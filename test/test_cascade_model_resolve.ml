@@ -238,6 +238,56 @@ let test_order_weighted_entries_rotation_scope_rotates_generically () =
       "codex_cli:gpt-5.2"
       (List.hd other_scope))
 
+let test_order_weighted_entries_rotation_scope_rotates_top_level_providers () =
+  with_clean_env (fun () ->
+    State.clear_all ();
+    let entry model =
+      {
+        Masc_mcp.Cascade_config_loader.model = model;
+        weight = 1;
+        supports_tool_choice = None;
+      }
+    in
+    let entries =
+      [
+        entry "claude_code:auto";
+        entry "codex_cli:auto";
+        entry "gemini_cli:auto";
+      ]
+    in
+    let first =
+      C.order_weighted_entries ~rotation_scope:"big_three" entries
+      |> List.map (fun (e : Masc_mcp.Cascade_config_loader.weighted_entry) ->
+             e.model)
+    in
+    let second =
+      C.order_weighted_entries ~rotation_scope:"big_three" entries
+      |> List.map (fun (e : Masc_mcp.Cascade_config_loader.weighted_entry) ->
+             e.model)
+    in
+    let third =
+      C.order_weighted_entries ~rotation_scope:"big_three" entries
+      |> List.map (fun (e : Masc_mcp.Cascade_config_loader.weighted_entry) ->
+             e.model)
+    in
+    let other_scope =
+      C.order_weighted_entries ~rotation_scope:"tool_rerank" entries
+      |> List.map (fun (e : Masc_mcp.Cascade_config_loader.weighted_entry) ->
+             e.model)
+    in
+    check string "first call starts with declared provider"
+      "claude_code:auto"
+      (List.hd first);
+    check string "second call rotates to codex provider"
+      "codex_cli:gpt-5.3-codex-spark"
+      (List.hd second);
+    check string "third call rotates to gemini provider"
+      "gemini_cli:gemini-2.5-flash"
+      (List.hd third);
+    check string "different scope restarts top-level provider order"
+      "claude_code:auto"
+      (List.hd other_scope))
+
 let () =
   run "Cascade_model_resolve" [
     "gemini auto", [
@@ -269,5 +319,8 @@ let () =
         `Quick test_expand_model_strings_for_execution_rotation_scope_rotates;
       test_case "weighted ordering rotates auto by scope"
         `Quick test_order_weighted_entries_rotation_scope_rotates_generically;
+      test_case "weighted ordering rotates provider order by scope"
+        `Quick
+        test_order_weighted_entries_rotation_scope_rotates_top_level_providers;
     ];
   ]

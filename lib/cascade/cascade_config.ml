@@ -411,6 +411,22 @@ let maybe_rotate_auto_models ?rotation_scope ~spec models =
     rotate_list_by cursor models
   | _ -> models
 
+let maybe_rotate_weighted_entries
+    ?rotation_scope
+    (entries : Cascade_config_loader.weighted_entry list) =
+  match rotation_scope, entries with
+  | Some scope, _ :: _ :: _
+    when List.for_all
+        (fun (e : Cascade_config_loader.weighted_entry) -> e.weight = 1)
+        entries ->
+    let cursor =
+      Cascade_state.rotate_round_robin
+        ~cascade:(Printf.sprintf "entry-order:%s" scope)
+        ~bound:(List.length entries)
+    in
+    rotate_list_by cursor entries
+  | _ -> entries
+
 let expand_provider_auto ?rotation_scope ~spec provider models =
   maybe_rotate_auto_models ?rotation_scope ~spec models
   |> List.map (fun model -> provider ^ ":" ^ model)
@@ -682,6 +698,7 @@ let order_weighted_entries
     ?(rand_int = weighted_random_int)
     ?rotation_scope
     (entries : Cascade_config_loader.weighted_entry list) =
+  let entries = maybe_rotate_weighted_entries ?rotation_scope entries in
   let entries = expand_weighted_auto_entries ?rotation_scope entries in
   let has_weights = List.exists
       (fun (e : Cascade_config_loader.weighted_entry) -> e.weight <> 1)

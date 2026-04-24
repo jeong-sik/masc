@@ -1,135 +1,129 @@
-# RFC-0007: `keeper_shell op=gh` Harness Audit (Samchon 4-layer)
+# RFC-0007: Pragmatic `keeper_shell op=gh` Hardening
 
-- **Status**: Draft
+- **Status**: Draft (rev.2)
 - **Author**: vincent (with Claude)
 - **Created**: 2026-04-24
-- **Related**: RFC-0005 (typed capability substrate), RFC-0006 (surface + symmetric sandbox), #8773, #6814
-- **Drives**: tighter keeper GitHub surface so LLM errors become repairable (not silent), plus clarifies identity boundary vs. label
+- **Revised**: 2026-04-24 — replaced Samchon 4-layer big-bang with a claude-code-inspired 3-PR phasing (rev.1 sketch preserved in §8 Appendix)
+- **Related**: RFC-0005 (typed capability substrate), RFC-0006 (surface + symmetric sandbox), RFC-0008 (CredentialProvider — same review cycle), #8773, #6814
+- **Drives**: reduce LLM-facing tool error rate without rewriting the gh surface; keep every change landable in a single PR
 
 ## 1. Problem
 
-Two observations from a 2026-04-24 audit of the keeper × docker × GitHub path (evidence record: `memory/procedural-memory/2026-04-24-keeper-docker-github-provider-evidence-record.md` on the `me` repo) reframe what is currently shipped.
+Two concrete failures observed on 2026-04-24 (evidence record `memory/procedural-memory/2026-04-24-keeper-docker-github-provider-evidence-record.md` on the `me` repo, decision id `keeper-docker-gh-provider-audit-2026-04-24`):
 
-| # | Symptom | Mechanism |
-|---|---------|-----------|
-| A | The "keeper-scoped" identity `anyang-keepers` holds the same token as the operator host. SHA-256 prefixes match (`406d098bd41b`). | `scripts/rotate-keeper-gh-token.sh` targets legacy `~/.masc/gh-auth`, which no longer exists; the running code reads `~/.masc/github-identities/<identity>/gh`; operators manually seed the bundle by copying the operator PAT. |
-| B | LLM calls of `keeper_shell op=gh` have no compile-time shape; a malformed `cmd` string reaches `validate_gh_command` which returns a single-line `Error string` that does not point to a specific flag or token. | `lib/gh_command_validation.ml:215-251` accepts a raw `string` and splits by whitespace (`extract_gh_command_pair`, line 184-213). Validate layer is strong on allowlist; Type/Parse/Feedback layers are thin. |
+1. **Tool error shape is a single string.** `lib/gh_command_validation.ml:215-251` returns `Error "<message>"`. An LLM can read the message but cannot programmatically distinguish *transient* input errors (typo, wrong flag type) from *policy* errors (R2 irreversible, out-of-org repo). No retry contract exists.
+2. **Non-interactive defaults are not enforced in every caller.** `lib/keeper/keeper_shell_docker.ml` sets `GIT_ASKPASS=''` and `GIT_TERMINAL_PROMPT=0` inline; the same constants are scattered across other callers. A new callsite that forgets one of these hangs the container on a credential prompt — silent timeout.
 
-Framed in the harness vocabulary from Samchon's 2025 function-calling study (dev.to/samchon/qwen-meetup-function-calling-harness, 6.75% → 100% via a 4-layer harness):
+Both are fixable without the Samchon 4-layer rewrite proposed in rev.1. Splitting the rewrite into 3 PRs keeps every step reviewable and reversible.
 
-| Layer | masc-mcp today | Gap |
-|-------|----------------|-----|
-| Type | `cmd: string` | No per-subcommand record; LLM emits free-form strings. |
-| Parse | whitespace split → `(command, subcommand)` | No shell-quote / JSON-body / heredoc support. No markdown/backtick strip. |
-| Validate | `forbidden_shell_chars` + top-level allowlist + `(command, subcommand)` blocklist + `allowed_orgs`; R0/R1/R2 taxonomy. | No flag-value type coercion (`--limit` int, `--state` enum); no flag-combination rules (`--jq` only on `gh api`). |
-| Feedback | Single `Error <printf string>`; some include Good/Bad examples. | No structured `{code, path, expected, received, hint}` object; no retry contract in keeper prompt. |
+## 2. Design principles (directly borrowed from `~/me/workspace/yousleepwhen/claude-code`)
 
-Both observations share one root: **the harness collapses several concerns (identity, command shape, retry) into opaque strings.** Below, the RFC separates them.
+| # | Principle | claude-code source | masc-mcp analog |
+|---|-----------|--------------------|-----------------|
+| P1 | **Permission → Sandbox → Exec, strictly serial.** Any gate must be in front of subprocess spawn. | `src/tools/BashTool/BashTool.tsx:540, 881` — `checkPermissions() → runShellCommand(shouldUseSandbox(), subprocessEnv())` | `validate_gh_command → effective_sandbox_profile → run_docker_shell_command_with_status`. Preserve. |
+| P2 | **Scrub vs pass-through is decided by token scoping.** Long-lived host secrets are scrubbed; job-scoped tokens pass through. | `src/utils/subprocessEnv.ts:15-53` — `GHA_SUBPROCESS_SCRUB` list; `GH_TOKEN` explicitly NOT scrubbed | Curate `KEEPER_ENV_SCRUB` and `KEEPER_ENV_PASS` as a single file. |
+| P3 | **Non-interactive defaults are a constant, not an opinion.** | `src/utils/worktree.ts:199-202` — `GIT_NO_PROMPT_ENV = { GIT_TERMINAL_PROMPT:'0', GIT_ASKPASS:'' }` | Introduce `lib/env_git_noninteractive.ml` with the same record. All docker/exec callsites read from it. |
+| P4 | **Errors have shape.** Structured result ≠ scripting nightmare; `{stdout, stderr, exit_code, interpretation?}` is enough to drive LLM retry. | `src/tools/BashTool/BashTool.tsx:280` — `outputSchema` Zod with `returnCodeInterpretation` | `type gh_result = { stdout; stderr; exit_code; class_; interpretation : string option; reversibility }`. Interpretation is a lookup on `(exit_code × class)`, not a parser. |
+| P5 | **Do not reinvent parsers or sandbox runtimes.** claude-code wraps tree-sitter and `@anthropic-ai/sandbox-runtime`; it does **not** write its own. | `src/utils/bash/bashParser.ts` (tree-sitter wrapper), `src/utils/sandbox/sandbox-adapter.ts` (external runtime wrapper) | Keep `extract_gh_command_pair` and the docker CLI exactly as is; no lenient parser, no custom daemon. |
 
-## 2. Goals / Non-Goals
+These principles are the whole RFC. Everything below is mechanical execution.
 
-**Goals**
-- G1. Typed `gh_request.t` variant that every caller emits; a string façade is kept for one migration window.
-- G2. Lenient JSON-aware parser that accepts markdown-fenced, trailing-comma, and double-stringified bodies, and unwinds them to typed fields.
-- G3. Flag-value coercion (integer limits, enum states) and flag-combination rules as a compile-time check on the typed variant.
-- G4. Structured `gh_error.t` returned to the caller so the keeper prompt can implement a bounded retry loop (capped like Samchon's 10 iterations).
-- G5. Document `CredentialProvider.bootstrap_finalize` as the hook responsible for `hosts.yml:user` rewrite after `gh auth login --with-token` (Option B path).
+## 3. Three-PR phasing
 
-**Non-Goals**
-- Introduce a `CredentialProvider` trait in OCaml — scoped to a follow-up RFC-0008 that carves Option A/B into one module. This RFC only links the requirement.
-- Replace `gh_command_validation.ml`'s R0/R1/R2 taxonomy — it is kept verbatim; Validate layer is strengthened additively.
-- Touch `op=git_clone`; a parallel audit belongs in its own RFC.
-- Extend coverage to kepeer actions beyond `keeper_shell op=gh`.
+### PR-1 — `env_git_noninteractive` + scrub list (≈80 lines + tests)
 
-## 3. Design
+- **What**: new `lib/env_git_noninteractive.mli` exposing a single value `val env : (string * string) list`. Callers in `keeper_shell_docker.ml`, `keeper_exec_shell.ml` (op=gh / op=git_clone branches) replace their local inline `("GIT_ASKPASS","")` pairs with `@ Env_git_noninteractive.env`.
+- **Also**: `lib/env_keeper_scrub.ml` with two lists `scrub : string list` (Anthropic keys, AWS creds, OIDC tokens — copy from claude-code) and `pass : string list` (`GH_TOKEN`, `GITHUB_TOKEN`, `SSH_AUTH_SOCK`, `GIT_*`). docker run argv construction uses both.
+- **Why safe**: additive; any missed callsite is caught by `test_env_git_noninteractive.ml` that greps for forgotten `GIT_ASKPASS` literals under `lib/`.
+- **Observability**: metric `keeper_shell_docker.git_prompt_env_missing_total` (should be 0 after PR).
 
-### 3.1 Type layer — `gh_request.t`
+### PR-2 — structured `gh_result.t` (≈120 lines)
 
-```ocaml
-(* lib/gh_request.mli *)
-type pr_state = Open | Closed | Merged | All
-type gh_request =
-  | Pr_list  of { repo : string option; limit : int option; state : pr_state option; json_fields : string list }
-  | Pr_view  of { repo : string option; pr_number : int;  json_fields : string list }
-  | Issue_list of { repo : string option; state : pr_state option; json_fields : string list }
-  | Issue_view of { repo : string option; issue_number : int; json_fields : string list }
-  | Api_get  of { path : string; jq : string option }
-  | Api_graphql_query of { query_name : string; variables : (string * string) list }
-  (* extend as allowlist grows *)
-```
+- **What**: new type in `lib/gh_command_validation.ml` (or a sibling for clarity):
+  ```ocaml
+  type gh_exit_class =
+    | Ok_0
+    | Policy_blocked       (* 1xxN internal — matches R1/R2 blocks *)
+    | Type_mismatch        (* argparse failure shape *)
+    | Auth_failed          (* gh auth error surface *)
+    | Network              (* curl/tls *)
+    | Unknown
+  type gh_result = {
+    stdout         : string;
+    stderr         : string;
+    exit_code      : int;
+    class_         : gh_exit_class;
+    reversibility  : gh_reversibility;  (* already exists *)
+    interpretation : string option;     (* ready-to-show hint *)
+  }
+  ```
+  Exit-class classifier is a lookup on `(exit_code, stderr-pattern)` stored in `config/tool_policy.toml` — **no regex over stdout**, just a small table.
+- **Why safe**: wraps existing call paths; a backward-compat alias `Error string` stays one release cycle, derived from the new record.
+- **Observability**: metric `keeper_shell_gh_result_class_total{class=Policy_blocked|Type_mismatch|…}` gives the rollup we don't currently have.
+- **Unlocks**: the keeper prompt can say "retry only when class=Type_mismatch" without extra context.
 
-- Each constructor corresponds to a `(command, subcommand)` pair already in `gh_allowed_commands` / `gh_blocked_operations`.
-- Free-form R1 mutations keep arriving through a **`Mutation_raw` variant** until we typed-gate them in RFC-0007-follow-up; this preserves hot-path availability without weakening Validate.
+### PR-3 — typed `Api_get` / `Api_graphql_query` only (≈200 lines)
 
-### 3.2 Parse layer — `gh_cmd_parse.ml`
+- **What**: introduce `gh_request.t` with **two** constructors (not the full sum type from rev.1):
+  ```ocaml
+  type gh_request =
+    | Api_get           of { path : string; jq : string option }
+    | Api_graphql_query of { query_name : string; variables : (string * string) list }
+    | Raw_string        of string    (* everything else keeps flowing through as before *)
+  ```
+  Parsing a raw string into the typed variants happens in `gh_request_parse.ml` with **no lenient recovery** — if the input is not an exact match for the typed shape, it falls through to `Raw_string` and the current string validator runs.
+- **Why `gh api` first**: highest-leverage call for LLM retry (jq path, variables), the most likely to benefit from type-directed retry later.
+- **Why safe**: `Raw_string` is literally a compile-time constant that means "behave like 2026-04-24". Zero behavior change for R1/R2 mutations.
+- **Observability**: metrics `keeper_shell_gh_request_typed_total` / `keeper_shell_gh_request_raw_total` tell us whether callers are migrating.
 
-- Accept three input shapes: typed JSON (preferred), quoted shell string (legacy), markdown-fenced code block (lenient).
-- Strip triple-backtick fences (`gh` language tag or no tag) before parsing.
-- Handle double-quoted segments and `--flag='{"x":1}'` bodies so JSON body values survive.
-- Unwind double-stringified union values (`"{\"type\":\"...\"}"`) once.
-- Output: `(gh_request, parse_warnings list)`; never throw.
+All three PRs rebase onto `main`, gate on the Keeper Sandbox Integration Test + existing CI matrix, and are independently revertable.
 
-### 3.3 Validate layer — additive checks on top of R0/R1/R2
+## 4. Hard non-goals (this RFC will not do these)
 
-- Int parsing for `limit`, `pr_number`, `issue_number` with range (1…1000 for limit, 1…2^31-1 for numbers).
-- Enum membership for `state`.
-- `json_fields` intersected against a per-resource allowlist (curated at boot from a small TOML in `config/tool_policy.toml`; RFC's non-goal to hit GitHub for schema discovery).
-- Flag combination rules (e.g., `Api_get.jq` requires `path` starting with `/`).
-- Reuse of existing `allowed_orgs`, `gh_blocked_operations`, `gh_graphql_r2_mutations` verbatim.
+1. **Full `gh_request.t` sum type with every subcommand** — deferred indefinitely until PR-3 metrics justify it. Without concrete retry-loop data, typing `pr view` / `pr list` / `issue ...` gives low marginal value over string + validator.
+2. **Lenient JSON-aware parser** — explicitly disallowed in this RFC's timeline. A leniency layer that strips markdown fences and unwinds double-stringified bodies is attractive but is new attack surface. Samchon's lenient parser protects *correctness*, not *safety*; masc-mcp needs safety first.
+3. **Retry contract embedded in keeper prompt** — deferred to the PR after PR-2 lands. The retry contract has teeth only when `class_` is populated; adding the prompt text earlier is cargo-cult.
+4. **Self-written shell parser** (tree-sitter, OCaml Menhir, regex-based) — forbidden. If we ever need quoted-string / heredoc awareness, the path is to call `bash -n` or `tree-sitter-bash` via FFI in a dedicated RFC.
+5. **Touching `op=git_clone`** — separate audit. Only PR-1 (env constant) crosses that boundary.
 
-### 3.4 Feedback layer — `gh_error.t`
+## 5. Risks and open questions
 
-```ocaml
-type gh_error = {
-  code     : string;  (* FORBIDDEN_CHARS | BLOCKED_OP | TYPE_MISMATCH | UNKNOWN_FLAG | OUT_OF_ORG *)
-  path     : string;  (* "$input.flags.limit" *)
-  expected : string;  (* "integer in [1, 1000]" *)
-  received : string;  (* "one thousand" *)
-  hint     : string;  (* ready-to-paste replacement *)
-}
-```
+1. **PR-2's exit-class table drift.** If GitHub or the `gh` CLI changes exit-code semantics, the table goes stale. Mitigation: the table lives in `config/tool_policy.toml` (non-code), unknown codes bucket to `Unknown` rather than misclassify.
+2. **PR-3 being worthless.** If no keeper actually calls `gh api` today, PR-3 has zero telemetry value and should be deprioritized. Sanity check before merging PR-3: grep `keeper_shell op=gh cmd="api ` in the last 7 days of logs.
+3. **Scrub list false positives.** If the operator depends on a scrubbed env var reaching the sandbox (unlikely for keepers, more likely for experimental tooling), they must explicitly add it to `pass`. Documented in `config/tool_policy.toml` commentary.
 
-Serialized as JSON to the keeper. Human-readable string (`code: path – expected, got received (hint)`) is computed once at the edge for backwards compatibility.
+## 6. Cross-link to RFC-0008 (CredentialProvider)
 
-### 3.5 Retry contract (keeper prompt section)
+`keeper_shell_docker.ml`'s env composition in PR-1 becomes consumable by `CredentialProvider.binding.env` once RFC-0008 lands. Merge order:
 
-Add to `config/prompts/keeper.capabilities.md`:
+1. This RFC's PR-1 (env constants) — does **not** depend on RFC-0008.
+2. RFC-0008 PR-1 (`Credential_provider` module + `Host_config_provider`) — reads `Env_git_noninteractive.env` from this RFC's PR-1.
+3. This RFC's PR-2 and PR-3 can land independently once PR-1 is in.
 
-- On `gh_error.code ∈ {TYPE_MISMATCH, UNKNOWN_FLAG, PARSE_WARNING}`: emit a corrected `gh_request` up to 3 times (hard cap).
-- On `gh_error.code ∈ {BLOCKED_OP, FORBIDDEN_CHARS, OUT_OF_ORG}`: **do not retry.** These are policy.
-- `R2_Irreversible` commands are *never* auto-retried regardless of error code.
+No circular dependency; both RFCs can be reviewed in parallel and merged in the above order.
 
-### 3.6 Identity boundary (cross-link to CredentialProvider RFC-0008)
+## 7. Migration cost
 
-- Findings F-1 and F-2 (evidence record) show identity separation is cosmetic today. Fix belongs in the provider, not the harness.
-- This RFC only specifies the hook name (`bootstrap_finalize`) and obligation ("after `gh auth login --with-token`, rewrite `hosts.yml:user`") so future RFC-0008 can land against a stable contract.
+| Item                           | Lines changed (est.) | Test added (est.) | Risk                          |
+|--------------------------------|---------------------:|------------------:|-------------------------------|
+| PR-1 env constants             |                   80 |                60 | low                           |
+| PR-2 structured result         |                  120 |               100 | medium (alias maintained)     |
+| PR-3 typed `Api_*`             |                  200 |               150 | medium (new module)           |
+| **Total**                      |              **400** |           **310** | —                             |
 
-## 4. Migration plan
+Compare to rev.1's estimated 1200+ lines in a single cycle; 3-PR split is ~a third of the surface and reversible per step.
 
-| Step | PR size | Observability |
-|------|---------|---------------|
-| 1. Add `gh_request.ml` + façade `validate_gh_command_of_string` | small | no behavior change |
-| 2. Typed-build `Api_get`/`Api_graphql_query` (highest-leverage for LLM retry) | small | metric: retry count per `op=gh` invocation |
-| 3. Migrate `Pr_list`/`Pr_view`/`Issue_list`/`Issue_view` | medium | same |
-| 4. Keeper prompt updates (retry contract) | small | metric: `unexpected tool names` should stay at 0 (RFC-0006 goal) |
-| 5. Remove string façade after two keeper generations without legacy callers | small | deprecation warning first |
+## 8. Appendix — original aspirational sketch (rev.1, retained for discussion)
 
-Each step is a separate Draft PR that rebases onto main, gated by CI + Keeper Sandbox Integration Test.
+The rev.1 Samchon 4-layer design (typed `gh_request.t` with full subcommand coverage, lenient JSON-aware parser, structured error with `{code, path, expected, received, hint}`, retry contract in keeper prompt) is kept in commit `aa8cab475` on this branch and in the PR discussion thread. It remains the aspirational target *if* PR-2/PR-3 telemetry shows LLM retry failures justify further typing work. Until then, this RFC supersedes it.
 
-## 5. Risks
+## Appendix B — evidence
 
-- **Typed JSON increases prompt tokens** marginally. Mitigation: keeper prompt caches the tool schema block via Anthropic prompt caching.
-- **Legacy callers** in scripts (if any) that build raw `gh pr list --limit X` strings. Addressed by string façade retaining behavior until step 5.
-- **Parse leniency is security risk surface.** Mitigation: lenient → typed pipeline; strict schema check runs *after* recovery; never route raw string to docker exec.
-
-## 6. Open questions
-
-- Q1. Does a `JSON_fields` curated allowlist drift with GitHub API changes? How often do we refresh it?
-- Q2. Do we generate `gh_request` JSON schema and inject it into the keeper system prompt, or only into tool description? Prompt-cache interaction differs.
-- Q3. Should `R1_Reversible` commands be typed in this RFC's scope, or deferred? Current sketch keeps `Mutation_raw` to cap blast radius.
-
-## Appendix — audit trail
-
-- PoC shim: `/Users/dancer/me/.tmp/keeper-docker-gh/provider-shim.sh` (Option A vs Option B traversing identical `main(provider, …)` signature).
-- Evidence record: `memory/procedural-memory/2026-04-24-keeper-docker-github-provider-evidence-record.md` (on the `me` repo), decision ID `keeper-docker-gh-provider-audit-2026-04-24`.
-- masc-mcp commit used for static audit: `0e408ffc1d5b34badb0cc1b9f3704a9e725fb8c6`.
+- PoC artifacts: `~/me/.tmp/keeper-docker-gh/` — Option A (RO mount) and Option B (`gh auth login --with-token`) both passed end-to-end.
+- Evidence record: `~/me/memory/procedural-memory/2026-04-24-keeper-docker-github-provider-evidence-record.md`.
+- masc-mcp commit audited: `0e408ffc1d5b34badb0cc1b9f3704a9e725fb8c6`.
+- claude-code reference points (read-only observation):
+  - `src/tools/BashTool/BashTool.tsx:540, 881` — execute pipeline order.
+  - `src/tools/BashTool/shouldUseSandbox.ts:18-20, 130-153` — "sandbox permission is the actual security control" (contrast: our docker-is-primary).
+  - `src/utils/subprocessEnv.ts:15-53` — scrub/pass lists.
+  - `src/utils/worktree.ts:199-202` — `GIT_NO_PROMPT_ENV` record.

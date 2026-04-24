@@ -967,6 +967,9 @@ function ConnectorLivePanel({
                 <span aria-hidden="true">⚠</span>
                 <span>Directory error</span>
               </span>
+              ${connector?.gate_health_checked_at
+                ? html`<span class="text-3xs text-[var(--text-dim)]">checked ${timeAgo(connector.gate_health_checked_at)}</span>`
+                : null}
               <div class="mt-1">
                 <span class="font-medium">Cause: </span> keeper directory unavailable, manual entry only.
               </div>
@@ -1034,6 +1037,9 @@ function ConnectorLivePanel({
                       <span>Not running</span>
                     </span>
                     <span class="font-medium text-[var(--text-body)]">Sidecar not started</span>
+                    ${connector?.updated_at
+                      ? html`<span class="text-3xs text-[var(--text-dim)]">last seen ${timeAgo(connector.updated_at)}</span>`
+                      : null}
                   </div>
                   <div class="flex items-center gap-2">
                     <${ActionButton}

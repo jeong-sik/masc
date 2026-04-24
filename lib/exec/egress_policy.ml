@@ -78,21 +78,17 @@ type check_result =
 
 (** Check a command against the policy.
 
-    If the policy has no allowed domains, the command is allowed
-    (no policy = no restriction; network_mode handles the default
-    block via [Network_none]).
+    If the policy has no allowed domains, commands with extracted outbound
+    domains are blocked. Commands without extracted domains are allowed.
 
     If the policy has allowed domains, any URL in the command must
     match at least one allowed domain. *)
 let check_command policy cmd =
-  if policy.allowed = [] then Allowed
-  else begin
-    let domains = extract_domains_from_command cmd in
-    match List.find_opt (fun d -> not (domain_allowed policy d)) domains with
-    | None -> Allowed
-    | Some blocked_domain ->
-        Blocked { attempted = blocked_domain; allowed = policy.allowed }
-  end
+  let domains = extract_domains_from_command cmd in
+  match List.find_opt (fun d -> not (domain_allowed policy d)) domains with
+  | None -> Allowed
+  | Some blocked_domain ->
+      Blocked { attempted = blocked_domain; allowed = policy.allowed }
 
 (** Format a blocked result as a structured JSON string. *)
 let blocked_to_json (blocked : check_result) =

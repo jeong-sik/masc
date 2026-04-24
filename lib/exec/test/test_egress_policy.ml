@@ -3,8 +3,16 @@
 
 open Masc_exec
 
-let test_empty_allows_all () =
+let test_empty_blocks_outbound () =
   let result = Egress_policy.check_command Egress_policy.empty "curl https://evil.com" in
+  match result with
+  | Egress_policy.Blocked { attempted; allowed } ->
+      assert (attempted = "evil.com");
+      assert (allowed = [])
+  | Allowed -> assert false
+
+let test_empty_allows_commands_without_urls () =
+  let result = Egress_policy.check_command Egress_policy.empty "ls -la /tmp" in
   match result with
   | Egress_policy.Allowed -> ()
   | Blocked _ -> assert false
@@ -119,16 +127,36 @@ let test_of_json_string_invalid () =
     Egress_policy.of_json_string ~source:"(test)" "not valid json"
   in
   (* Fail-closed: empty policy *)
-  assert (Egress_policy.to_allowed_domains policy = [])
+  assert (Egress_policy.to_allowed_domains policy = []);
+  match Egress_policy.check_command policy "curl https://evil.com" with
+  | Egress_policy.Blocked { attempted; allowed } ->
+      assert (attempted = "evil.com");
+      assert (allowed = [])
+  | Allowed -> assert false
 
 let test_of_json_string_not_array () =
   let policy =
     Egress_policy.of_json_string ~source:"(test)" {| {"domains": []} |}
   in
-  assert (Egress_policy.to_allowed_domains policy = [])
+  assert (Egress_policy.to_allowed_domains policy = []);
+  match Egress_policy.check_command policy "curl https://evil.com" with
+  | Egress_policy.Blocked { attempted; allowed } ->
+      assert (attempted = "evil.com");
+      assert (allowed = [])
+  | Allowed -> assert false
+
+let test_of_json_string_empty_array_blocks_outbound () =
+  let policy = Egress_policy.of_json_string ~source:"(test)" "[]" in
+  assert (Egress_policy.to_allowed_domains policy = []);
+  match Egress_policy.check_command policy "curl https://evil.com" with
+  | Egress_policy.Blocked { attempted; allowed } ->
+      assert (attempted = "evil.com");
+      assert (allowed = [])
+  | Allowed -> assert false
 
 let () =
-  test_empty_allows_all ();
+  test_empty_blocks_outbound ();
+  test_empty_allows_commands_without_urls ();
   test_exact_match_allows ();
   test_wildcard_match ();
   test_extract_domains ();
@@ -142,4 +170,5 @@ let () =
   test_of_json_string ();
   test_of_json_string_invalid ();
   test_of_json_string_not_array ();
+  test_of_json_string_empty_array_blocks_outbound ();
   print_endline "[test_egress_policy] all tests passed"

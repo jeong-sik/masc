@@ -1120,7 +1120,7 @@ let view
   match rows with
   | [] ->
     Node.div
-      ~attrs:[ Style.quiet ]
+      ~attrs:[ Style.quiet; Attr.role "status" ]
       [ Node.text
           "runtime/mission snapshot이 아직 조용합니다. keepers summary만 먼저 올라왔을 가능성이 있습니다."
       ]
@@ -1355,7 +1355,7 @@ let note_section row =
     ; (match notes with
        | [] ->
          Node.div
-           ~attrs:[ Style.quiet ]
+           ~attrs:[ Style.quiet; Attr.role "status" ]
            [ Node.span ~attrs:[ Attr.create "lang" "ko" ] [ Node.text "trust/note/current_work evidence가 아직 없습니다." ] ]
        | entries ->
          Node.div
@@ -1454,7 +1454,7 @@ let preview_section row =
     Node.div
       [ Shell_view.aside_title "Preview"
       ; Node.div
-          ~attrs:[ Style.quiet ]
+          ~attrs:[ Style.quiet; Attr.role "status" ]
           [ Node.span ~attrs:[ Attr.create "lang" "ko" ] [ Node.text "agent brief preview가 아직 없습니다." ] ]
       ]
   else
@@ -1484,7 +1484,7 @@ let aside
       ~attrs:[ Shell_view.Style.aside ]
       [ Shell_view.aside_title ~right:"fleet quiet" "Focus"
       ; Node.div
-          ~attrs:[ Style.quiet ]
+          ~attrs:[ Style.quiet; Attr.role "status" ]
           [ Node.span ~attrs:[ Attr.create "lang" "ko" ] [ Node.text "선택 가능한 directory row가 아직 없습니다." ] ]
       ]
   | Some row ->

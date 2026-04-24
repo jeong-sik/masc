@@ -473,7 +473,7 @@ let render ~(shell : Overview_types.response) (r : Goals_types.response) : Node.
     ; (match r.tree with
        | [] ->
          Node.div
-           ~attrs:[ Style.quiet ]
+           ~attrs:[ Style.quiet; Attr.role "status" ]
            [ Node.text "goal tree is empty." ]
        | nodes ->
          Node.div

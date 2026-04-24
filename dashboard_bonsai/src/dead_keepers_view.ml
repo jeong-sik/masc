@@ -124,7 +124,7 @@ let view_dead_list (dead : Keepers_types.keeper list) =
   match dead with
   | [] ->
     Node.div
-      ~attrs:[ Style.quiet ]
+      ~attrs:[ Style.quiet; Attr.role "status" ]
       [ Node.text "fleet is whole — no keepers have fallen." ]
   | ks ->
     Node.div

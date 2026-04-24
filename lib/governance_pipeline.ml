@@ -333,6 +333,7 @@ let to_oas_approval_callback
       in
       if (not forbidden) && always_approve then (
         Keeper_approval_queue.audit_approval_event
+          ?base_path
           ~event_type:"auto_approved_always"
           ~id:(Printf.sprintf "auto_always_%s_%s" keeper_name tool_name)
           ~keeper_name ~tool_name ~risk_level ?turn_id ?task_id ?goal_id
@@ -344,6 +345,7 @@ let to_oas_approval_callback
         match rule_match with
         | Some matched ->
             Keeper_approval_queue.audit_approval_event
+              ?base_path
               ~event_type:"auto_approved_rule_match"
               ~id:(Printf.sprintf "auto_%s_%s" keeper_name matched.rule_id)
               ~keeper_name ~tool_name ~risk_level ?turn_id ?task_id ?goal_id

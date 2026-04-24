@@ -203,10 +203,10 @@ let make_generated_id prefix =
   let digest = Digestif.SHA256.(digest_string entropy |> to_hex) in
   prefix ^ "_" ^ String.sub digest 0 12
 
-let rules_mu = Eio.Mutex.create ()
+let rules_mu = Stdlib.Mutex.create ()
 
 let with_rules_lock f =
-  Eio.Mutex.use_rw ~protect:true rules_mu (fun () -> f ())
+  Stdlib.Mutex.protect rules_mu f
 
 let rules_path ?base_path () =
   let base_path =
@@ -320,16 +320,16 @@ let upsert_rule ?base_path ~keeper_name ~tool_name ~input ~risk_level
            Log.Keeper.warn "upsert_rule: save failed: %s" msg);
         (candidate, true))
 
-let delete_rule ~id =
+let delete_rule ?base_path ~id () =
   with_rules_lock (fun () ->
-    let rules = load_rules_unlocked () in
+    let rules = load_rules_unlocked ?base_path () in
     match List.find_opt (fun rule -> String.equal rule.id id) rules with
     | None -> Error (Printf.sprintf "approval rule %s not found" id)
     | Some deleted ->
         let remaining =
           List.filter (fun rule -> not (String.equal rule.id id)) rules
         in
-        (match save_rules_unlocked remaining with
+        (match save_rules_unlocked ?base_path remaining with
          | Ok () -> Ok deleted
          | Error msg -> Error msg))
 
@@ -376,30 +376,46 @@ let find_matching_rule ?base_path ~keeper_name ~tool_name ~input ~risk_level
 
 (** Dated JSONL audit trail for approval events.
     Stored at [<base_path>/.masc/audit-approvals/YYYY-MM/DD.jsonl].
-    Independent of Coord.config — approval is a global resource. *)
-let audit_store_ref : Dated_jsonl.t option ref = ref None
+    Dashboard and room-scoped keeper runs pass [base_path] explicitly so approval
+    history stays with the room that made the decision. *)
+let audit_stores_mu = Stdlib.Mutex.create ()
+let audit_io_mu = Stdlib.Mutex.create ()
+let audit_stores : (string, Dated_jsonl.t) Hashtbl.t = Hashtbl.create 4
 
-let get_audit_store () =
-  match !audit_store_ref with
-  | Some s -> Some s
-  | None ->
-    let base = Env_config_core.base_path () in
-    let dir = Filename.concat base ".masc/audit-approvals" in
-    (match Dated_jsonl.create ~base_dir:dir () with
-     | store ->
-       audit_store_ref := Some store;
-       Some store
-     | exception (Eio.Cancel.Cancelled _ as e) -> raise e
-     | exception exn ->
-       Log.Keeper.warn "approval_queue: audit store creation failed: %s"
-         (Printexc.to_string exn);
-       None)
+let audit_today_path base_dir =
+  let open Unix in
+  let tm = gmtime (gettimeofday ()) in
+  let month =
+    Printf.sprintf "%04d-%02d" (tm.tm_year + 1900) (tm.tm_mon + 1)
+  in
+  let day = Printf.sprintf "%02d.jsonl" tm.tm_mday in
+  let dir = Filename.concat base_dir month in
+  Fs_compat.mkdir_p dir;
+  Filename.concat dir day
 
-let audit_approval_event ~event_type ~id ~keeper_name ~tool_name
+let get_audit_store ?base_path () =
+  let base = Option.value ~default:(Env_config_core.base_path ()) base_path in
+  try
+    Stdlib.Mutex.protect audit_stores_mu (fun () ->
+      match Hashtbl.find_opt audit_stores base with
+      | Some store -> Some store
+      | None ->
+          let dir = Filename.concat base ".masc/audit-approvals" in
+          let store = Dated_jsonl.create ~base_dir:dir () in
+          Hashtbl.replace audit_stores base store;
+          Some store)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+      Log.Keeper.warn "approval_queue: audit store creation failed: %s"
+        (Printexc.to_string exn);
+      None
+
+let audit_approval_event ?base_path ~event_type ~id ~keeper_name ~tool_name
     ~risk_level ?turn_id ?task_id ?goal_id ?(goal_ids = [])
     ?runtime_contract ?selected_model ?disposition ?disposition_reason
     ?rule_match ?source_approval_id ?auto_approved ?(decision = "") () =
-  match get_audit_store () with
+  match get_audit_store ?base_path () with
   | None -> ()
   | Some store ->
     let json =
@@ -438,10 +454,13 @@ let audit_approval_event ~event_type ~id ~keeper_name ~tool_name
          | None -> []))
     in
     Safe_ops.protect ~default:() (fun () ->
-      Dated_jsonl.append store json)
+      Stdlib.Mutex.protect audit_io_mu (fun () ->
+        Fs_compat.append_jsonl
+          (audit_today_path (Dated_jsonl.base_dir store))
+          json))
 
-let audit_rule_event ~event_type (rule : approval_rule) =
-  audit_approval_event ~event_type ~id:rule.id
+let audit_rule_event ?base_path ~event_type (rule : approval_rule) =
+  audit_approval_event ?base_path ~event_type ~id:rule.id
     ~keeper_name:rule.keeper_name ~tool_name:rule.tool_name
     ~risk_level:rule.max_risk ?source_approval_id:rule.source_approval_id ()
 
@@ -454,10 +473,10 @@ let audit_scan_window ?keeper_name n =
          busy fleet cannot hide the target keeper behind unrelated events. *)
       max 500 (max n 1 * 64)
 
-let read_recent_audit ?keeper_name ?(n = 20) () : Yojson.Safe.t list =
+let read_recent_audit ?base_path ?keeper_name ?(n = 20) () : Yojson.Safe.t list =
   if n <= 0 then []
   else
-    match get_audit_store () with
+    match get_audit_store ?base_path () with
     | None -> []
     | Some store ->
         let raw = Dated_jsonl.read_recent store (audit_scan_window ?keeper_name n) in
@@ -475,7 +494,9 @@ let read_recent_audit ?keeper_name ?(n = 20) () : Yojson.Safe.t list =
         |> List.filteri (fun idx _ -> idx < n)
 
 module For_testing = struct
-  let reset_audit_store () = audit_store_ref := None
+  let reset_audit_store () =
+    Stdlib.Mutex.protect audit_stores_mu (fun () ->
+      Hashtbl.clear audit_stores)
 end
 
 let generate_id () =
@@ -632,7 +653,7 @@ let record_pending (entry : pending_approval) =
     ?disposition_reason:entry.disposition_reason ();
   broadcast_pending entry
 
-let resolve_entry (entry : pending_approval) (decision : decision) =
+let resolve_entry ?base_path (entry : pending_approval) (decision : decision) =
   let decision_str = match decision with
     | Oas.Hooks.Approve -> "approve"
     | Oas.Hooks.Reject reason -> "reject:" ^ reason
@@ -641,7 +662,7 @@ let resolve_entry (entry : pending_approval) (decision : decision) =
   Log.Keeper.info
     "HITL_APPROVAL_RESOLVED: id=%s keeper=%s tool=%s decision=%s"
     entry.id entry.keeper_name entry.tool_name decision_str;
-  audit_approval_event ~event_type:"resolved" ~id:entry.id
+  audit_approval_event ?base_path ~event_type:"resolved" ~id:entry.id
     ~keeper_name:entry.keeper_name ~tool_name:entry.tool_name
     ~risk_level:entry.risk_level ?turn_id:entry.turn_id ?task_id:entry.task_id
     ?goal_id:entry.goal_id ~goal_ids:entry.goal_ids
@@ -797,7 +818,7 @@ let remember_rule_for_entry ?base_path ?created_by (entry : pending_approval) =
         ?runtime_contract:entry.runtime_contract ?created_by
         ~source_approval_id:entry.id ()
     in
-    if created then audit_rule_event ~event_type:"rule_created" rule;
+    if created then audit_rule_event ?base_path ~event_type:"rule_created" rule;
     Some rule
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -826,7 +847,7 @@ let resolve_with_policy ?base_path ~id ~(decision : Oas.Hooks.approval_decision)
             remember_rule_for_entry ?base_path ?created_by entry
         | _ -> None
       in
-      resolve_entry entry decision;
+      resolve_entry ?base_path entry decision;
       Ok { remembered_rule }
 
 (** Resolve a pending approval. Returns [Ok ()] if found and resolved,

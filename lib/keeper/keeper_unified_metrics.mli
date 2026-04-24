@@ -23,7 +23,7 @@ type turn_mode =
   | Skip_text
   | Noop
 
-type usage_trust =
+type usage_trust = Keeper_usage_trust.t =
   | Usage_missing
   | Usage_trusted
   | Usage_untrusted of string list

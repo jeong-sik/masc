@@ -493,6 +493,7 @@
    keeper_exec_context
    keeper_tools_oas
    keeper_guards
+   keeper_usage_trust
    keeper_hooks_oas
    keeper_extend_turns
    keeper_llm_bridge

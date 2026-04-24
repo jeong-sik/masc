@@ -69,6 +69,58 @@ let record_tool_use_failure ~keeper_name ~tool_name =
   Prometheus.inc_counter tool_use_failure_metric
     ~labels:[ ("keeper", keeper_name); ("tool", tool_name) ] ()
 
+let zero_usage : Oas.Types.api_usage =
+  {
+    input_tokens = 0;
+    output_tokens = 0;
+    cache_creation_input_tokens = 0;
+    cache_read_input_tokens = 0;
+    cost_usd = None;
+  }
+
+let canonical_model_id_of_telemetry ~model
+    (telemetry : Oas.Types.inference_telemetry option) =
+  match telemetry with
+  | Some { canonical_model_id = Some id; _ } when String.trim id <> "" ->
+      String.trim id
+  | _ -> model
+
+let context_max_of_telemetry
+    (telemetry : Oas.Types.inference_telemetry option) =
+  match telemetry with
+  | Some { effective_context_window = Some n; _ } when n > 0 -> n
+  | _ -> 0
+
+let classify_usage_trust ?usage ~model ~telemetry () =
+  let usage_reported, usage =
+    match usage with
+    | Some usage -> true, usage
+    | None -> false, zero_usage
+  in
+  Keeper_usage_trust.classify ~usage_reported ~usage ~model_used:model
+    ~resolved_model_id:(canonical_model_id_of_telemetry ~model telemetry)
+    ~context_max:(context_max_of_telemetry telemetry)
+
+let record_usage_anomaly_metrics ~keeper_name ~model usage_trust =
+  if not (Keeper_usage_trust.is_trusted usage_trust) then
+    let reasons =
+      match Keeper_usage_trust.reasons usage_trust with
+      | [] -> [Keeper_usage_trust.to_string usage_trust]
+      | reasons -> reasons
+    in
+    List.iter
+      (fun reason ->
+         Prometheus.inc_counter
+           Prometheus.metric_keeper_usage_anomalies
+           ~labels:
+             [
+               ("keeper_name", keeper_name);
+               ("model", model);
+               ("reason", reason);
+             ]
+           ())
+      reasons
+
 (* #9868: use [pricing_for_model_opt] so unknown models surface as
    [None] and get a loud catalog-miss signal instead of silently
    returning $0. [pricing_for_model] (non-opt) collapses unknown into
@@ -218,6 +270,7 @@ let emit_cost_event
     ~(output_tokens : int)
     ~(cost_usd : float)
     ?(usage_missing : bool = false)
+    ?usage_trust
     ?(telemetry : Oas.Types.inference_telemetry option)
     () : unit =
   let path = Filename.concat masc_root "costs.jsonl" in
@@ -228,6 +281,36 @@ let emit_cost_event
   let float_field name = function
     | Some v -> [ (name, `Float v) ]
     | None -> []
+  in
+  let usage_for_trust : Oas.Types.api_usage =
+    {
+      input_tokens;
+      output_tokens;
+      cache_creation_input_tokens = 0;
+      cache_read_input_tokens = 0;
+      cost_usd = Some cost_usd;
+    }
+  in
+  let usage_trust =
+    match usage_trust with
+    | Some usage_trust -> usage_trust
+    | None ->
+        classify_usage_trust
+          ?usage:(if usage_missing then None else Some usage_for_trust)
+          ~model ~telemetry ()
+  in
+  let usage_trusted = Keeper_usage_trust.is_trusted usage_trust in
+  let safe_input_tokens = if usage_trusted then input_tokens else 0 in
+  let safe_output_tokens = if usage_trusted then output_tokens else 0 in
+  let safe_cost_usd = if usage_trusted then cost_usd else 0.0 in
+  let raw_usage_fields =
+    if usage_missing || usage_trusted then []
+    else
+      [
+        ("raw_input_tokens", `Int input_tokens);
+        ("raw_output_tokens", `Int output_tokens);
+        ("raw_cost_usd", `Float cost_usd);
+      ]
   in
   let telemetry_fields = match telemetry with
     | Some t ->
@@ -245,7 +328,9 @@ let emit_cost_event
   in
   let wall_tok_s_fields =
     float_field "tokens_per_second"
-      (wall_tokens_per_second ~usage_missing ~output_tokens ~telemetry)
+      (if usage_trusted then
+         wall_tokens_per_second ~usage_missing ~output_tokens ~telemetry
+       else None)
   in
   let entry = `Assoc ([
     ("agent", `String agent_name);
@@ -253,13 +338,16 @@ let emit_cost_event
     ( "provider",
       `String (provider_of_model_with_telemetry ~model ~telemetry) );
     ("model", `String model);
-    ("input_tokens", `Int input_tokens);
-    ("output_tokens", `Int output_tokens);
-    ("cost_usd", `Float cost_usd);
+    ("input_tokens", `Int safe_input_tokens);
+    ("output_tokens", `Int safe_output_tokens);
+    ("cost_usd", `Float safe_cost_usd);
     ("usage_missing", `Bool usage_missing);
     ("timestamp", `String (Types.now_iso ()));
     ("source", `String "auto_trajectory");
-  ] @ wall_tok_s_fields @ telemetry_fields) in
+  ]
+  @ Keeper_usage_trust.json_fields usage_trust
+  @ raw_usage_fields
+  @ wall_tok_s_fields @ telemetry_fields) in
   let line = Yojson.Safe.to_string entry ^ "\n" in
   (try Fs_compat.append_file path line
    with Eio.Cancel.Cancelled _ as e -> raise e
@@ -467,21 +555,51 @@ let make_hooks
       | Oas.Hooks.AfterTurn { turn; response } ->
         let meta = !meta_ref in
         let model = response.model in
+        let usage_trust =
+          classify_usage_trust ?usage:response.usage ~model
+            ~telemetry:response.telemetry ()
+        in
+        let usage_trusted = Keeper_usage_trust.is_trusted usage_trust in
+        record_usage_anomaly_metrics ~keeper_name:meta.name ~model usage_trust;
+        let raw_input_tok, raw_output_tok =
+          match response.usage with
+          | Some u -> u.input_tokens, u.output_tokens
+          | None -> 0, 0
+        in
         let input_tok, output_tok, turn_cost_usd, usage_missing =
           match response.usage with
-          | Some u ->
+          | Some u when usage_trusted ->
               let provider_kind = provider_kind_of_telemetry response.telemetry in
               ( u.input_tokens,
                 u.output_tokens,
                 cost_usd_for_usage ?provider_kind ~model u,
                 false )
+          | Some _ -> (0, 0, 0.0, false)
           | None -> (0, 0, 0.0, true)
         in
+        let cost_usd_for_event =
+          if usage_trusted then turn_cost_usd
+          else
+            match response.usage with
+            | Some { cost_usd = Some cost; _ } when cost > 0.0 -> cost
+            | Some _ | None -> 0.0
+        in
         let total_tok = input_tok + output_tok in
+        if (not usage_missing) && not usage_trusted then
+          Log.Keeper.warn
+            "keeper:%s after_turn usage telemetry untrusted model=%s resolved_model=%s reasons=%s input=%d output=%d context_max=%d"
+            meta.name model
+            (canonical_model_id_of_telemetry ~model response.telemetry)
+            (String.concat ","
+               (match Keeper_usage_trust.reasons usage_trust with
+                | [] -> [Keeper_usage_trust.to_string usage_trust]
+                | reasons -> reasons))
+            raw_input_tok raw_output_tok
+            (context_max_of_telemetry response.telemetry);
         (* Provider prefix cache token tracking (Anthropic).
            Non-Anthropic providers report 0 for these fields. *)
         (match response.usage with
-         | Some u ->
+         | Some u when usage_trusted ->
            let cc = u.cache_creation_input_tokens in
            let cr = u.cache_read_input_tokens in
            if cc > 0 then
@@ -492,7 +610,7 @@ let make_hooks
              Prometheus.inc_counter
                "masc_provider_prefix_cache_read_tokens_total"
                ~delta:(Float.of_int cr) ()
-         | None -> ());
+         | Some _ | None -> ());
         (* Inference latency histogram for /metrics endpoint.
            Split observations into three buckets so we can tell "metric is
            silent because no telemetry" apart from "metric is silent because
@@ -537,8 +655,10 @@ let make_hooks
           | None -> 0
         in
         let wall_tok_s_opt =
-          wall_tokens_per_second ~usage_missing ~output_tokens:output_tok
-            ~telemetry:response.telemetry
+          if usage_trusted then
+            wall_tokens_per_second ~usage_missing ~output_tokens:output_tok
+              ~telemetry:response.telemetry
+          else None
         in
         record_llm_tok_s_metrics ~model ~telemetry:response.telemetry;
         let wall_tok_s = fmt_tok_s wall_tok_s_opt in
@@ -554,8 +674,9 @@ let make_hooks
          | Some acc ->
            emit_cost_event ~masc_root:acc.masc_root
              ~agent_name:meta.name ~task_id:acc.task_id
-             ~model ~input_tokens:input_tok ~output_tokens:output_tok
-             ~cost_usd:turn_cost_usd ~usage_missing
+             ~model ~input_tokens:raw_input_tok ~output_tokens:raw_output_tok
+             ~cost_usd:cost_usd_for_event ~usage_missing
+             ~usage_trust
              ?telemetry:response.telemetry ()
          | None -> ());
         let text = Oas.Types.text_of_content response.content in

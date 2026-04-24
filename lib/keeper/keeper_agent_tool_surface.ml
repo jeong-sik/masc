@@ -56,16 +56,28 @@ type turn_affordance =
   | Message_sweep
   | Task_claim
   | Task_audit
+  | Task_verify
+  | Work_discovery
+  | Inspect_worktree_delta
 
 let turn_affordance_of_string = function
   | "board_post_or_comment" -> Some Board_post_or_comment
   | "message_sweep" -> Some Message_sweep
   | "task_claim" -> Some Task_claim
   | "task_audit" -> Some Task_audit
+  | "task_verify" -> Some Task_verify
+  | "work_discovery" -> Some Work_discovery
+  | "inspect_worktree_delta" -> Some Inspect_worktree_delta
   | _ -> None
 
 let should_tool_gate_affordance = function
-  | Board_post_or_comment | Message_sweep | Task_claim | Task_audit -> true
+  | Board_post_or_comment
+  | Message_sweep
+  | Task_claim
+  | Task_audit
+  | Task_verify
+  | Work_discovery
+  | Inspect_worktree_delta -> true
 
 let turn_affordances_require_tool_gate turn_affordances =
   List.exists
@@ -82,13 +94,15 @@ let should_require_tools_for_initial_turn ~(max_turns : int)
   && not initial_turn_is_last
   && turn_affordances_require_tool_gate turn_affordances
 
-let has_task_claim_affordance turn_affordances =
+let has_turn_affordance expected turn_affordances =
   List.exists
     (fun affordance ->
        match turn_affordance_of_string affordance with
-       | Some Task_claim -> true
-       | Some (Board_post_or_comment | Message_sweep | Task_audit) | None -> false)
+       | Some affordance -> affordance = expected
+       | None -> false)
     turn_affordances
+
+let has_task_claim_affordance = has_turn_affordance Task_claim
 
 let preferred_tool_choice_for_required_turn ~(has_current_task : bool)
     ~(turn_affordances : string list) ~(allowed_tool_names : string list) =
@@ -96,6 +110,12 @@ let preferred_tool_choice_for_required_turn ~(has_current_task : bool)
      && has_task_claim_affordance turn_affordances
      && List.mem "keeper_task_claim" allowed_tool_names
   then Oas.Types.Tool "keeper_task_claim"
+  else if has_turn_affordance Task_audit turn_affordances
+          && List.mem "keeper_tasks_audit" allowed_tool_names
+  then Oas.Types.Tool "keeper_tasks_audit"
+  else if has_turn_affordance Task_verify turn_affordances
+          && List.mem "keeper_tasks_list" allowed_tool_names
+  then Oas.Types.Tool "keeper_tasks_list"
   else Oas.Types.Any
 
 let owned_active_task_id_for_meta ~(config : Coord.config)

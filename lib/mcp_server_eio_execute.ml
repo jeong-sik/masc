@@ -40,7 +40,8 @@ let direct_call_block_message name =
       "Tool '%s' is hidden from the default tool surface and not callable directly."
       name
 
-let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~arguments =
+let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
+    ?mcp_session_id ?auth_token state ~name ~arguments =
   (* clock parameter used for Session_eio.wait_for_message *)
   (* mcp_session_id: HTTP MCP session ID for agent_name persistence across tool calls *)
   let module U = Yojson.Safe.Util in
@@ -333,6 +334,52 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       with_system_internal_audit ~agent_name
         (false, Types.masc_error_to_string err)
   | Ok () ->
+  let dedupe_string_list values =
+    values
+    |> List.map String.trim
+    |> List.filter (fun value -> value <> "")
+    |> List.sort_uniq String.compare
+  in
+  let tool_authorized_for_request tool_name =
+    (not auth_enabled)
+    ||
+    match
+      Auth.authorize_tool_v2 config.base_path ~agent_name ~token ~tool_name
+    with
+    | Ok () -> true
+    | Error _ -> false
+  in
+  let profile_tool_names =
+    Mcp_server_eio_tool_profile.tool_schemas_for_profile state profile
+    |> List.map (fun (schema : Types.tool_schema) -> schema.name)
+    |> List.filter (fun tool_name ->
+           Tool_catalog.allow_direct_call tool_name
+           && Mcp_server_eio_tool_profile.tool_allowed_in_profile state profile
+                tool_name
+           && tool_authorized_for_request tool_name)
+  in
+  let keeper_tool_names =
+    let candidates =
+      [
+        Keeper_types.canonical_keeper_name agent_name;
+        Keeper_types.canonical_keeper_name_from_agent_name agent_name;
+      ]
+      |> List.filter_map Fun.id
+      |> List.sort_uniq String.compare
+    in
+    let rec loop = function
+      | [] -> []
+      | keeper_name :: rest -> (
+          match Keeper_types.read_meta_resolved config keeper_name with
+          | Ok (Some (_, meta)) ->
+            Keeper_tool_policy.keeper_allowed_tool_names meta
+          | Ok None | Error _ -> loop rest)
+    in
+    loop candidates
+  in
+  let caller_tool_names =
+    Some (dedupe_string_list (profile_tool_names @ keeper_tool_names))
+  in
   let extract_nickname_from_join_result ~fallback result =
     try
       let prefix = "  Nickname: " in
@@ -584,8 +631,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     | Mod_agent ->
         Tool_agent.dispatch { Tool_agent.config; agent_name } ~name ~args:coerced_args
     | Mod_task ->
-        Tool_task.dispatch { Tool_task.config; agent_name; sw = Some sw }
-          ~name ~args:coerced_args
+        Tool_task.dispatch ?agent_tool_names:caller_tool_names
+          { Tool_task.config; agent_name; sw = Some sw } ~name
+          ~args:coerced_args
     | Mod_room ->
         Tool_coord.dispatch { Tool_coord.config; agent_name } ~name ~args:coerced_args
     | Mod_control ->

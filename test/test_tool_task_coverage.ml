@@ -71,6 +71,38 @@ let str_contains s substring =
     in
     loop 0
 
+let contract_requiring_tools tools =
+  `Assoc [ ("required_tools", `List (List.map (fun tool -> `String tool) tools)) ]
+
+let add_task_requiring_tools ctx ~title tools =
+  let success, result =
+    Tool_task.handle_add_task ctx
+      (`Assoc
+        [
+          ("title", `String title);
+          ("priority", `Int 1);
+          ("contract", contract_requiring_tools tools);
+        ])
+  in
+  if not success then failwith result
+
+let only_task ctx =
+  match Coord.get_tasks_raw ctx.Tool_task.config with
+  | [ task ] -> task
+  | tasks ->
+      failwith
+        (Printf.sprintf "expected exactly one task, got %d" (List.length tasks))
+
+let assert_task_todo ctx =
+  match (only_task ctx).Types.task_status with
+  | Types.Todo -> ()
+  | _ -> failwith "expected task to remain todo"
+
+let assert_task_claimed_by ctx agent_name =
+  match (only_task ctx).Types.task_status with
+  | Types.Claimed { assignee; _ } -> assert (assignee = agent_name)
+  | _ -> failwith "expected task to be claimed"
+
 (* Test dispatch returns None for unknown tool *)
 let () = test "dispatch_unknown_tool" (fun () ->
   let ctx = make_test_ctx () in
@@ -745,6 +777,35 @@ let () = test "handle_claim_sets_planning_current_task" (fun () ->
   assert (Planning_eio.get_current_task ctx.config = Some "task-001")
 )
 
+let () = test "handle_claim_blocks_required_tools_without_server_surface" (fun () ->
+  let ctx = make_test_ctx () in
+  add_task_requiring_tools ctx ~title:"Needs bash" [ "keeper_bash" ];
+  let success, result =
+    Tool_task.handle_claim ~agent_tool_names:[ "masc_status" ] ctx
+      (`Assoc
+        [
+          ("task_id", `String "task-001");
+          ("agent_tool_names", `List [ `String "keeper_bash" ]);
+        ])
+  in
+  assert (not success);
+  assert (str_contains result "requires tool(s) unavailable");
+  assert_task_todo ctx;
+  assert (Planning_eio.get_current_task ctx.config = None)
+)
+
+let () = test "handle_claim_allows_required_tools_with_server_surface" (fun () ->
+  let ctx = make_test_ctx () in
+  add_task_requiring_tools ctx ~title:"Needs bash" [ "keeper_bash" ];
+  let success, result =
+    Tool_task.handle_claim ~agent_tool_names:[ "masc_status"; "keeper_bash" ] ctx
+      (`Assoc [ ("task_id", `String "task-001") ])
+  in
+  if not success then failwith result;
+  assert_task_claimed_by ctx ctx.agent_name;
+  assert (Planning_eio.get_current_task ctx.config = Some "task-001")
+)
+
 let () = test "handle_add_task_rejects_removed_required_preset_argument" (fun () ->
   let agent_name = "test-agent" in
   let ctx = make_test_ctx_with_agent agent_name in
@@ -801,6 +862,32 @@ let () = test "handle_claim_next_sets_planning_current_task" (fun () ->
   assert success;
   assert (Planning_eio.get_current_task ctx.config = Some "task-001")
 )
+
+let () =
+  test "handle_claim_next_blocks_required_tools_without_server_surface" (fun () ->
+    let ctx = make_test_ctx () in
+    add_task_requiring_tools ctx ~title:"Needs bash" [ "keeper_bash" ];
+    let success, result =
+      Tool_task.handle_claim_next ~agent_tool_names:[ "masc_status" ] ctx
+        (`Assoc [])
+    in
+    assert success;
+    assert (str_contains result "No eligible tasks available");
+    assert_task_todo ctx;
+    assert (Planning_eio.get_current_task ctx.config = None))
+
+let () =
+  test "handle_claim_next_allows_required_tools_with_server_surface" (fun () ->
+    let ctx = make_test_ctx () in
+    add_task_requiring_tools ctx ~title:"Needs bash" [ "keeper_bash" ];
+    let success, result =
+      Tool_task.handle_claim_next
+        ~agent_tool_names:[ "masc_status"; "keeper_bash" ]
+        ctx (`Assoc [])
+    in
+    if not success then failwith result;
+    assert_task_claimed_by ctx ctx.agent_name;
+    assert (Planning_eio.get_current_task ctx.config = Some "task-001"))
 
 let () = test "handle_claim_next_ignores_keeper_preset_for_open_claims" (fun () ->
   let agent_name = "keeper-social-sync-agent" in
@@ -859,6 +946,44 @@ let () = test "transition_claim_sets_planning_current_task" (fun () ->
   in
   assert success;
   assert (Planning_eio.get_current_task ctx.config = Some "task-001")
+)
+
+let () = test "transition_claim_blocks_required_tools_even_with_force" (fun () ->
+  let ctx = make_test_ctx () in
+  add_task_requiring_tools ctx ~title:"Needs bash" [ "keeper_bash" ];
+  let success, result =
+    Tool_task.handle_transition ~agent_tool_names:[ "masc_status" ] ctx
+      (`Assoc
+        [
+          ("task_id", `String "task-001");
+          ("action", `String "claim");
+          ("force", `Bool true);
+        ])
+  in
+  assert (not success);
+  assert (str_contains result "requires tool(s) unavailable");
+  assert_task_todo ctx;
+  assert (Planning_eio.get_current_task ctx.config = None)
+)
+
+let () = test "dispatch_claim_task_uses_server_surface_not_payload_surface" (fun () ->
+  let ctx = make_test_ctx () in
+  add_task_requiring_tools ctx ~title:"Needs bash" [ "keeper_bash" ];
+  match
+    Tool_task.dispatch ~agent_tool_names:[ "masc_status" ] ctx
+      ~name:"masc_claim_task"
+      ~args:
+        (`Assoc
+          [
+            ("task_id", `String "task-001");
+            ("agent_tool_names", `List [ `String "keeper_bash" ]);
+          ])
+  with
+  | Some (success, result) ->
+      assert (not success);
+      assert (str_contains result "requires tool(s) unavailable");
+      assert_task_todo ctx
+  | None -> failwith "dispatch returned None"
 )
 
 let () = test "transition_release_clears_planning_current_task" (fun () ->

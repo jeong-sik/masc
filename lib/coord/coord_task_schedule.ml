@@ -215,29 +215,22 @@ let json_string_list key json =
         items
   | _ -> []
 
-let latest_receipt_blocks_required_tool_claim config ~agent_name =
+let latest_receipt_blocks_required_tool_claim config ~agent_name ~required_tools =
   match latest_execution_receipt_json config ~agent_name with
   | None -> false
   | Some receipt ->
       let operator_reason =
         json_string_path [ "operator_disposition_reason" ] receipt
       in
-      let tool_contract_result =
-        json_string_path [ "tool_contract_result" ] receipt
-      in
-      let tool_requirement =
-        json_string_path [ "tool_surface"; "tool_requirement" ] receipt
-      in
-      let tools_used = json_string_list "tools_used" receipt in
-      let degraded_contract =
-        match tool_contract_result with
-        | Some ("violated" | "unknown" | "satisfied_by_deterministic_fallback") ->
-            true
-        | Some _ | None -> false
+      let visible_tools =
+        json_string_list "requested_tools" receipt
+        @ json_string_list "canonical_tools" receipt
       in
       operator_reason = Some "tool_required_no_tools"
-      || degraded_contract
-      || (tool_requirement = Some "required" && tools_used = [])
+      && not
+           (List.exists
+              (fun required_tool -> string_list_contains visible_tools required_tool)
+              required_tools)
 
 let agent_current_task_matches_backlog backlog ~agent_name task_id =
   match
@@ -416,14 +409,19 @@ let claim_next_r
         | Some rid -> rid :: (blocked_ids @ exclude_task_ids)
         | None -> blocked_ids @ exclude_task_ids
       in
-      let required_tool_receipt_blocked =
-        List.exists (fun task -> task_required_tools task <> []) unclaimed
-        && latest_receipt_blocks_required_tool_claim config ~agent_name
+      let receipt_blocks_task (task : task) =
+        match agent_tool_names with
+        | Some _ -> false
+        | None ->
+          let required_tools = task_required_tools task in
+          required_tools <> []
+          && latest_receipt_blocks_required_tool_claim config ~agent_name
+               ~required_tools
       in
       let required_tool_claim_allowed (task : task) =
         let required_tools = task_required_tools task in
         required_tools_allowed ?agent_tool_names required_tools
-        && (required_tools = [] || not required_tool_receipt_blocked)
+        && not (receipt_blocks_task task)
       in
       let required_tool_excluded =
         List.filter
@@ -439,7 +437,7 @@ let claim_next_r
              "{\"type\":\"task_claim_next_skip_required_tools\",\"agent\":\"%s\",\"blocked\":%d,\"receipt_blocked\":%b,\"agent_tool_names_known\":%b,\"ts\":\"%s\"}"
              agent_name
              (List.length required_tool_excluded)
-             required_tool_receipt_blocked
+             (List.exists receipt_blocks_task required_tool_excluded)
              (Option.is_some agent_tool_names)
              (now_iso ()));
       let effective_task_filter task =

@@ -88,7 +88,12 @@ val claim_task :
   config -> agent_name:string -> task_id:string -> string
 
 val claim_task_r :
-  config -> agent_name:string -> task_id:string -> unit -> string Types.masc_result
+  config ->
+  agent_name:string ->
+  task_id:string ->
+  ?agent_tool_names:string list ->
+  unit ->
+  string Types.masc_result
 
 val do_not_reclaim_reason_blocks_claim : string option -> string option
 (** Returns [Some reason] only when [reason] is an explicit hard-stop that
@@ -104,7 +109,10 @@ val transition_task_r :
   config -> agent_name:string -> task_id:string -> action:Types_core.task_action ->
   ?expected_version:int -> ?notes:string -> ?reason:string ->
   ?handoff_context:Types.task_handoff_context ->
-  ?force:bool -> unit -> string Types.masc_result
+  ?force:bool ->
+  ?agent_tool_names:string list ->
+  unit ->
+  string Types.masc_result
 
 val release_task_r :
   config -> agent_name:string -> task_id:string ->

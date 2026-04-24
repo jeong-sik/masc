@@ -10,19 +10,24 @@ type context = {
 
 val handle_add_task : context -> Yojson.Safe.t -> tool_result
 val handle_batch_add_tasks : context -> Yojson.Safe.t -> tool_result
-val handle_claim : context -> Yojson.Safe.t -> tool_result
-val handle_claim_next : context -> Yojson.Safe.t -> tool_result
+val handle_claim : ?agent_tool_names:string list -> context -> Yojson.Safe.t -> tool_result
+val handle_claim_next : ?agent_tool_names:string list -> context -> Yojson.Safe.t -> tool_result
 val handle_release : context -> Yojson.Safe.t -> tool_result
 val handle_done : context -> Yojson.Safe.t -> tool_result
 val handle_cancel_task : context -> Yojson.Safe.t -> tool_result
-val handle_transition : context -> Yojson.Safe.t -> tool_result
+val handle_transition : ?agent_tool_names:string list -> context -> Yojson.Safe.t -> tool_result
 val handle_update_priority : context -> Yojson.Safe.t -> tool_result
 val handle_tasks : context -> Yojson.Safe.t -> tool_result
 val handle_task_history : context -> Yojson.Safe.t -> tool_result
 val task_history_events_json :
   Coord.config -> task_id:string -> limit:int -> Yojson.Safe.t
 
-val dispatch : context -> name:string -> args:Yojson.Safe.t -> tool_result option
+val dispatch :
+  ?agent_tool_names:string list ->
+  context ->
+  name:string ->
+  args:Yojson.Safe.t ->
+  tool_result option
 
 val schemas : Types.tool_schema list
 

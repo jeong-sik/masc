@@ -116,6 +116,7 @@ val handle_request :
 val execute_tool_eio :
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  ?profile:tool_profile ->
   ?mcp_session_id:string ->
   ?auth_token:string ->
   server_state ->

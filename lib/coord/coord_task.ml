@@ -665,6 +665,41 @@ let clear_soft_do_not_reclaim_reason (task : Types.task) =
   | Some _ | None -> task
 ;;
 
+let task_required_tools (task : Types.task) =
+  match task.contract with
+  | Some contract ->
+    contract.required_tools
+    |> List.map String.trim
+    |> List.filter (fun name -> name <> "")
+    |> List.sort_uniq String.compare
+  | None -> []
+;;
+
+let missing_required_tools ?agent_tool_names (task : Types.task) =
+  match task_required_tools task, agent_tool_names with
+  | [], _ | _ :: _, None -> []
+  | required, Some allowed ->
+    let allowed =
+      allowed
+      |> List.map String.trim
+      |> List.filter (fun name -> name <> "")
+      |> List.sort_uniq String.compare
+    in
+    List.filter
+      (fun required_name ->
+         not (List.exists (String.equal required_name) allowed))
+      required
+;;
+
+let claim_required_tools_error ~agent_name ~task_id missing =
+  Types.TaskInvalidState
+    (Printf.sprintf
+       "Task %s requires tool(s) unavailable to %s: %s"
+       task_id
+       agent_name
+       (String.concat ", " missing))
+;;
+
 (** Claim task with file locking (TOCTOU prevention) *)
 let claim_task config ~agent_name ~task_id =
   ensure_initialized config;
@@ -770,7 +805,7 @@ let claim_task config ~agent_name ~task_id =
 ;;
 
 (** Result-returning version of claim_task for type-safe error handling. *)
-let claim_task_r config ~agent_name ~task_id ()
+let claim_task_r config ~agent_name ~task_id ?agent_tool_names ()
   : string Types.masc_result
   =
   let open Result.Syntax in
@@ -801,6 +836,12 @@ let claim_task_r config ~agent_name ~task_id ()
            match target_task with
            | None -> Error (Types.TaskNotFound task_id)
            | Some task -> Ok task
+         in
+         let* () =
+           match missing_required_tools ?agent_tool_names task with
+           | [] -> Ok ()
+           | missing ->
+             Error (claim_required_tools_error ~agent_name ~task_id missing)
          in
          (* Cycle-prevention gate: refuse claim when do_not_reclaim_reason is set.
          The reason can come from cancel/release hard-stop logic or be applied
@@ -970,6 +1011,7 @@ let transition_task_r
       ?(reason = "")
       ?handoff_context
       ?(force = false)
+      ?agent_tool_names
       ()
   : string Types.masc_result
   =
@@ -1009,6 +1051,12 @@ let transition_task_r
           match task_opt with
           | None -> Error (Types.TaskNotFound task_id)
           | Some task -> Ok task
+        in
+        let* () =
+          match action, missing_required_tools ?agent_tool_names task with
+          | Types.Claim, missing when missing <> [] ->
+            Error (claim_required_tools_error ~agent_name ~task_id missing)
+          | _ -> Ok ()
         in
         let* () =
           match action, do_not_reclaim_reason_blocks_claim task.do_not_reclaim_reason with

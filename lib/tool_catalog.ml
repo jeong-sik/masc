@@ -196,6 +196,7 @@ let explicit_metadata : (string * metadata) list =
     ("masc_tool_help", readonly_tool);
     ("masc_keeper_list", readonly_tool);
     ("masc_keeper_status", readonly_tool);
+    ("masc_keeper_persona_audit", readonly_tool);
     ("masc_plan_get", readonly_tool);
     ("masc_worktree_list", readonly_tool);
     ( "masc_join",

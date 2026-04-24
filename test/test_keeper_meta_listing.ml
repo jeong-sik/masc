@@ -73,6 +73,50 @@ let write_keeper_toml_exn ?autoboot_enabled config ~name =
         proactive_enabled = false\n"
        autoboot_line)
 
+let write_keeper_persona_toml_exn ?autoboot_enabled config ~name ~persona_name =
+  let keepers_dir =
+    Filename.concat (Coord.masc_root_dir config) "config/keepers"
+  in
+  let autoboot_line =
+    match autoboot_enabled with
+    | Some value -> Printf.sprintf "autoboot_enabled = %b\n" value
+    | None -> ""
+  in
+  Fs_compat.mkdir_p keepers_dir;
+  Fs_compat.save_file
+    (Filename.concat keepers_dir (name ^ ".toml"))
+    (Printf.sprintf
+       "[keeper]\n\
+        persona_name = %S\n\
+        goal = \"test persona keeper\"\n\
+        %s\
+        proactive_enabled = false\n"
+       persona_name autoboot_line)
+
+let write_persona_profile_exn config ~name =
+  let persona_dir =
+    Filename.concat
+      (Filename.concat (Coord.masc_root_dir config) "config/personas")
+      name
+  in
+  Fs_compat.mkdir_p persona_dir;
+  write_json
+    (Filename.concat persona_dir "profile.json")
+    (`Assoc
+       [
+         ("name", `String name);
+         ("role", `String "test persona");
+         ( "keeper",
+           `Assoc
+             [
+               ("goal", `String "test persona keeper");
+               ("tool_preset", `String "research");
+             ] );
+       ])
+
+let write_corrupt_keeper_meta_exn config ~name =
+  write_file (Keeper_types.keeper_meta_path config name) "{not-json"
+
 let write_keeper_meta_exn ?(autoboot_enabled = true)
     ?(social_model = "bdi_speech_v1")
     ?(last_social_transition_reason = "") config ~name ~trace_id =
@@ -113,6 +157,15 @@ let keeper_json_by_name json name =
   Yojson.Safe.Util.(json |> member "keepers" |> to_list)
   |> List.find_opt (fun keeper ->
          Yojson.Safe.Util.(keeper |> member "name" |> to_string = name))
+
+let audit_item_by_name json name =
+  Yojson.Safe.Util.(json |> member "items" |> to_list)
+  |> List.find_opt (fun item ->
+         Yojson.Safe.Util.(item |> member "name" |> to_string = name))
+
+let string_list_of_json json =
+  Yojson.Safe.Util.to_list json
+  |> List.filter_map (function `String value -> Some value | _ -> None)
 
 let keeper_ctx env sw config agent_name : _ Tool_keeper.context =
   {
@@ -375,6 +428,194 @@ let test_keeper_list_exposes_last_social_transition_reason () =
               keeper |> member "last_social_transition_reason" |> to_string)
       | None -> fail "expected sangsu row in keeper list")
 
+let test_keeper_persona_audit_reports_durable_live_persona_keeper () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  with_clean_base_path_env @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Config_dir_resolver.reset ();
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      write_persona_profile_exn config ~name:"analyst";
+      write_keeper_persona_toml_exn config ~name:"analyst"
+        ~persona_name:"analyst";
+      write_keeper_meta_exn config ~name:"analyst" ~trace_id:"trace-analyst";
+      let config_root = Filename.concat (Coord.masc_root_dir config) "config" in
+      Unix.putenv "MASC_CONFIG_DIR" config_root;
+      Config_dir_resolver.reset ();
+      (match Keeper_types.read_meta config "analyst" with
+       | Ok (Some meta) ->
+           ignore
+             (Keeper_registry.register ~base_path:config.base_path "analyst"
+                meta)
+       | Ok None -> fail "expected analyst meta"
+       | Error e -> fail ("read_meta failed: " ^ e));
+      let ctx = keeper_ctx env sw config "operator" in
+      let ok, body =
+        match
+          Tool_keeper.dispatch ctx ~name:"masc_keeper_persona_audit"
+            ~args:(`Assoc [ ("name", `String "analyst") ])
+        with
+        | Some result -> result
+        | None -> fail "expected masc_keeper_persona_audit dispatch"
+      in
+      check bool "tool audit ok" true ok;
+      let json = parse_json_exn body in
+      check int "summary total" 1
+        Yojson.Safe.Util.(json |> member "summary" |> member "total" |> to_int);
+      check int "summary ok" 1
+        Yojson.Safe.Util.(json |> member "summary" |> member "ok" |> to_int);
+      match audit_item_by_name json "analyst" with
+      | None -> fail "expected analyst audit item"
+      | Some item ->
+          check bool "item ok" true
+            Yojson.Safe.Util.(item |> member "ok" |> to_bool);
+          check string "default source" "toml"
+            Yojson.Safe.Util.(item |> member "default_source_kind" |> to_string);
+          check string "persona name" "analyst"
+            Yojson.Safe.Util.(item |> member "persona_name" |> to_string);
+          check bool "keeper toml exists" true
+            Yojson.Safe.Util.(
+              item |> member "keeper_toml" |> member "exists" |> to_bool);
+          check bool "persona profile exists" true
+            Yojson.Safe.Util.(
+              item |> member "persona_profile" |> member "exists" |> to_bool);
+          check bool "runtime meta exists" true
+            Yojson.Safe.Util.(
+              item |> member "runtime_meta" |> member "exists" |> to_bool);
+          check bool "registry present" true
+            Yojson.Safe.Util.(item |> member "registry_present" |> to_bool);
+          check bool "keepalive running" true
+            Yojson.Safe.Util.(item |> member "keepalive_running" |> to_bool);
+          check int "no issues" 0
+            Yojson.Safe.Util.(item |> member "issues" |> to_list |> List.length))
+
+let test_keeper_persona_audit_flags_missing_persona_runtime () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  with_clean_base_path_env @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Config_dir_resolver.reset ();
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      write_keeper_persona_toml_exn config ~name:"ghost"
+        ~persona_name:"missing-persona";
+      let config_root = Filename.concat (Coord.masc_root_dir config) "config" in
+      Unix.putenv "MASC_CONFIG_DIR" config_root;
+      Config_dir_resolver.reset ();
+      let ctx = keeper_ctx env sw config "operator" in
+      let ok, body =
+        match
+          Tool_keeper.dispatch ctx ~name:"masc_keeper_persona_audit"
+            ~args:(`Assoc [ ("name", `String "ghost") ])
+        with
+        | Some result -> result
+        | None -> fail "expected masc_keeper_persona_audit dispatch"
+      in
+      check bool "tool audit ok" true ok;
+      let json = parse_json_exn body in
+      check int "missing persona count" 1
+        Yojson.Safe.Util.(
+          json |> member "summary" |> member "missing_persona_profile"
+          |> to_int);
+      check int "missing runtime count" 1
+        Yojson.Safe.Util.(
+          json |> member "summary" |> member "missing_runtime_meta" |> to_int);
+      match audit_item_by_name json "ghost" with
+      | None -> fail "expected ghost audit item"
+      | Some item ->
+          let issues =
+            Yojson.Safe.Util.(item |> member "issues") |> string_list_of_json
+          in
+          check bool "flags missing persona" true
+            (List.mem "missing_persona_profile" issues);
+          check bool "flags missing runtime" true
+            (List.mem "missing_runtime_meta" issues);
+          check bool "keeper toml exists" true
+            Yojson.Safe.Util.(
+              item |> member "keeper_toml" |> member "exists" |> to_bool);
+          check bool "persona profile missing" false
+            Yojson.Safe.Util.(
+              item |> member "persona_profile" |> member "exists" |> to_bool);
+          check string "persona profile candidate path surfaced"
+            (Filename.concat
+               (Filename.concat
+                  (Filename.concat config_root "personas")
+                  "missing-persona")
+               "profile.json")
+            Yojson.Safe.Util.(
+              item |> member "persona_profile" |> member "path" |> to_string))
+
+let test_keeper_persona_audit_flags_runtime_meta_parse_error () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  with_clean_base_path_env @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Config_dir_resolver.reset ();
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      write_persona_profile_exn config ~name:"broken";
+      write_keeper_persona_toml_exn config ~name:"broken" ~persona_name:"broken";
+      write_corrupt_keeper_meta_exn config ~name:"broken";
+      let config_root = Filename.concat (Coord.masc_root_dir config) "config" in
+      Unix.putenv "MASC_CONFIG_DIR" config_root;
+      Config_dir_resolver.reset ();
+      let ctx = keeper_ctx env sw config "operator" in
+      let ok, body =
+        match
+          Tool_keeper.dispatch ctx ~name:"masc_keeper_persona_audit"
+            ~args:(`Assoc [ ("name", `String "broken") ])
+        with
+        | Some result -> result
+        | None -> fail "expected masc_keeper_persona_audit dispatch"
+      in
+      check bool "tool audit ok" true ok;
+      let json = parse_json_exn body in
+      check int "runtime meta parse error count" 1
+        Yojson.Safe.Util.(
+          json |> member "summary" |> member "runtime_meta_error" |> to_int);
+      check int "runtime meta file is not missing" 0
+        Yojson.Safe.Util.(
+          json |> member "summary" |> member "missing_runtime_meta" |> to_int);
+      match audit_item_by_name json "broken" with
+      | None -> fail "expected broken audit item"
+      | Some item ->
+          let issues =
+            Yojson.Safe.Util.(item |> member "issues") |> string_list_of_json
+          in
+          check bool "flags runtime meta error" true
+            (List.mem "runtime_meta_error" issues);
+          check bool "item not ok" false
+            Yojson.Safe.Util.(item |> member "ok" |> to_bool);
+          check bool "runtime meta file exists" true
+            Yojson.Safe.Util.(
+              item |> member "runtime_meta" |> member "exists" |> to_bool);
+          check bool "runtime meta error surfaced" true
+            (Yojson.Safe.Util.(
+               item |> member "runtime_meta" |> member "error" |> to_string)
+             <> ""))
+
 let test_keeper_list_preserves_known_social_model () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -432,5 +673,11 @@ let () =
             test_keeper_list_preserves_known_social_model;
           test_case "tool keeper list exposes last social transition reason"
             `Quick test_keeper_list_exposes_last_social_transition_reason;
+          test_case "keeper persona audit reports durable live keeper" `Quick
+            test_keeper_persona_audit_reports_durable_live_persona_keeper;
+          test_case "keeper persona audit flags missing persona runtime" `Quick
+            test_keeper_persona_audit_flags_missing_persona_runtime;
+          test_case "keeper persona audit flags runtime meta parse error" `Quick
+            test_keeper_persona_audit_flags_runtime_meta_parse_error;
         ] );
     ]

@@ -59,6 +59,15 @@ type ids =
   ; agent_name : string option
   }
 
+module Ref_key : sig
+  val goal_id : string
+  val task_id : string
+  val task_ids : string
+  val post_id : string
+  val post_ids : string
+  val agent_name : string
+end
+
 val empty_ids : ids
 
 type task_counts =
@@ -86,9 +95,35 @@ type facts =
 
 val default_facts : facts
 
+type evidence_source =
+  | Source_goal_store
+  | Source_task_store
+  | Source_board
+  | Source_economy
+  | Source_telemetry
+
+val evidence_source_to_string : evidence_source -> string
+
+type evidence_kind =
+  | Evidence_goal_phase
+  | Evidence_task_status
+  | Evidence_board_post
+  | Evidence_economy_earn_task_done
+  | Evidence_economy_earn_board_post
+  | Evidence_economy_earn_upvote
+  | Evidence_economy_earn_mention_response
+  | Evidence_economy_spend_model_call
+  | Evidence_economy_spend_deliberation
+  | Evidence_economy_adjustment
+  | Evidence_telemetry_task_started
+  | Evidence_telemetry_task_completed
+  | Evidence_telemetry_tool_called
+
+val evidence_kind_to_string : evidence_kind -> string
+
 type evidence =
-  { source : string
-  ; kind : string
+  { source : evidence_source
+  ; kind : evidence_kind
   ; id : string option
   ; label : string
   ; detail : string
@@ -136,5 +171,10 @@ type snapshot =
   ; violations : violation list
   }
 
+val schema_version_current : int
+
+type snapshot_mode = Advisory
+
+val snapshot_mode_to_string : snapshot_mode -> string
 val snapshot : product list -> snapshot
-val snapshot_to_yojson : snapshot -> Yojson.Safe.t
+val snapshot_to_yojson : ?projection_error:string -> snapshot -> Yojson.Safe.t

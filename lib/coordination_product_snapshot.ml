@@ -104,14 +104,19 @@ let spend_kind = function
     false
 ;;
 
-let transaction_kind_to_string = function
-  | Agent_economy.Earn_task_done -> "earn_task_done"
-  | Agent_economy.Earn_board_post -> "earn_board_post"
-  | Agent_economy.Earn_upvote -> "earn_upvote"
-  | Agent_economy.Earn_mention_response -> "earn_mention_response"
-  | Agent_economy.Spend_model_call -> "spend_model_call"
-  | Agent_economy.Spend_deliberation -> "spend_deliberation"
-  | Agent_economy.Adjustment -> "adjustment"
+let transaction_kind_to_evidence_kind = function
+  | Agent_economy.Earn_task_done ->
+    Coordination_product.Evidence_economy_earn_task_done
+  | Agent_economy.Earn_board_post ->
+    Coordination_product.Evidence_economy_earn_board_post
+  | Agent_economy.Earn_upvote -> Coordination_product.Evidence_economy_earn_upvote
+  | Agent_economy.Earn_mention_response ->
+    Coordination_product.Evidence_economy_earn_mention_response
+  | Agent_economy.Spend_model_call ->
+    Coordination_product.Evidence_economy_spend_model_call
+  | Agent_economy.Spend_deliberation ->
+    Coordination_product.Evidence_economy_spend_deliberation
+  | Agent_economy.Adjustment -> Coordination_product.Evidence_economy_adjustment
 ;;
 
 let json_links_any (ids : Coordination_product.ids) json =
@@ -124,12 +129,12 @@ let json_links_any (ids : Coordination_product.ids) json =
     assoc_string_list key json |> List.exists (fun value -> List.mem value values)
   in
   (match ids.goal_id with
-   | Some goal_id -> matches_one "goal_id" [ goal_id ]
+   | Some goal_id -> matches_one Coordination_product.Ref_key.goal_id [ goal_id ]
    | None -> false)
-  || matches_one "task_id" ids.task_ids
-  || matches_many "task_ids" ids.task_ids
-  || matches_one "post_id" ids.post_ids
-  || matches_many "post_ids" ids.post_ids
+  || matches_one Coordination_product.Ref_key.task_id ids.task_ids
+  || matches_many Coordination_product.Ref_key.task_ids ids.task_ids
+  || matches_one Coordination_product.Ref_key.post_id ids.post_ids
+  || matches_many Coordination_product.Ref_key.post_ids ids.post_ids
 ;;
 
 let transaction_links_any ids (txn : Agent_economy.transaction) =
@@ -178,8 +183,8 @@ let reward_facts ~(ids : Coordination_product.ids) transactions =
 let task_evidence (ids : Coordination_product.ids) (task : Types.task)
   : Coordination_product.evidence
   =
-  { source = "task_store"
-  ; kind = "task_status"
+  { source = Coordination_product.Source_task_store
+  ; kind = Coordination_product.Evidence_task_status
   ; id = Some task.id
   ; label = truncate ~limit:80 task.title
   ; detail =
@@ -196,8 +201,8 @@ let task_evidence (ids : Coordination_product.ids) (task : Types.task)
 let goal_evidence (ids : Coordination_product.ids) (goal : Goal_store.goal)
   : Coordination_product.evidence
   =
-  { source = "goal_store"
-  ; kind = "goal_phase"
+  { source = Coordination_product.Source_goal_store
+  ; kind = Coordination_product.Evidence_goal_phase
   ; id = Some goal.id
   ; label = truncate ~limit:80 goal.title
   ; detail =
@@ -215,8 +220,8 @@ let board_evidence (ids : Coordination_product.ids) (post : Board.post)
   : Coordination_product.evidence
   =
   let body = if String.trim post.content <> "" then post.content else post.body in
-  { source = "board"
-  ; kind = "post"
+  { source = Coordination_product.Source_board
+  ; kind = Coordination_product.Evidence_board_post
   ; id = Some (post_id_string post)
   ; label = truncate ~limit:80 post.title
   ; detail =
@@ -233,11 +238,12 @@ let board_evidence (ids : Coordination_product.ids) (post : Board.post)
 let economy_evidence (ids : Coordination_product.ids) (txn : Agent_economy.transaction)
   : Coordination_product.evidence
   =
-  { source = "economy"
-  ; kind = transaction_kind_to_string txn.kind
+  let kind = transaction_kind_to_evidence_kind txn.kind in
+  { source = Coordination_product.Source_economy
+  ; kind
   ; id = Some txn.id
   ; label =
-      Printf.sprintf "%s %.2f" (transaction_kind_to_string txn.kind) txn.amount
+      Printf.sprintf "%s %.2f" (Coordination_product.evidence_kind_to_string kind) txn.amount
   ; detail =
       Printf.sprintf
         "agent=%s; balance_after=%.2f; reason=%s"
@@ -258,8 +264,8 @@ let telemetry_evidence_for_event
   | Telemetry_eio.Task_started { task_id; agent_id } when List.mem task_id ids.task_ids
     ->
     Some
-      { source = "telemetry"
-      ; kind = "task_started"
+      { source = Coordination_product.Source_telemetry
+      ; kind = Coordination_product.Evidence_telemetry_task_started
       ; id = Some task_id
       ; label = "task started"
       ; detail = Printf.sprintf "agent=%s" agent_id
@@ -269,8 +275,8 @@ let telemetry_evidence_for_event
   | Telemetry_eio.Task_completed { task_id; duration_ms; success }
     when List.mem task_id ids.task_ids ->
     Some
-      { source = "telemetry"
-      ; kind = "task_completed"
+      { source = Coordination_product.Source_telemetry
+      ; kind = Coordination_product.Evidence_telemetry_task_completed
       ; id = Some task_id
       ; label = "task completed"
       ; detail = Printf.sprintf "success=%b; duration_ms=%d" success duration_ms
@@ -281,8 +287,8 @@ let telemetry_evidence_for_event
       { tool_name; success; duration_ms; agent_id = Some agent_id; source }
     when Option.equal String.equal ids.agent_name (Some agent_id) ->
     Some
-      { source = "telemetry"
-      ; kind = "tool_called"
+      { source = Coordination_product.Source_telemetry
+      ; kind = Coordination_product.Evidence_telemetry_tool_called
       ; id = Some tool_name
       ; label = tool_name
       ; detail =
@@ -329,16 +335,16 @@ let evidence_for ~ids ~tasks ~linked_posts ~transactions ~telemetry_events =
 let post_links_ids (ids : Coordination_product.ids) (post : Board.post) =
   let post_goal =
     match ids.goal_id with
-    | Some goal_id -> meta_string "goal_id" post = Some goal_id
+    | Some goal_id -> meta_string Coordination_product.Ref_key.goal_id post = Some goal_id
     | None -> false
   in
   let post_task =
-    match meta_string "task_id" post with
+    match meta_string Coordination_product.Ref_key.task_id post with
     | Some task_id -> List.mem task_id ids.task_ids
     | None -> false
   in
   let post_tasks =
-    meta_string_list "task_ids" post
+    meta_string_list Coordination_product.Ref_key.task_ids post
     |> List.exists (fun task_id -> List.mem task_id ids.task_ids)
   in
   post_goal || post_task || post_tasks
@@ -432,7 +438,7 @@ let product_for_goal ~all_tasks ~posts ~transactions ~telemetry_events ~persist_
     (goal : Goal_store.goal)
   =
   let tasks =
-    all_tasks |> List.filter (Convergence.task_matches_goal ~goal_id:goal.id)
+    all_tasks |> List.filter (Convergence.task_has_goal_id ~goal_id:goal.id)
   in
   let product =
     product_for
@@ -517,7 +523,7 @@ let severity_counts (snapshot : Coordination_product.snapshot) =
   }
 ;;
 
-let to_yojson = Coordination_product.snapshot_to_yojson
+let to_yojson snapshot = Coordination_product.snapshot_to_yojson snapshot
 let build_yojson config = build config |> to_yojson
 
 let safe_build_yojson config =
@@ -525,20 +531,7 @@ let safe_build_yojson config =
   | exn ->
     let message = Printexc.to_string exn in
     Log.Coord.warn "coordination product snapshot failed: %s" message;
-    `Assoc
-      [ "schema_version", `Int 1
-      ; "mode", `String "advisory"
-      ; ( "summary"
-        , `Assoc
-            [ "products", `Int 0
-            ; "violations", `Int 0
-            ; "evidence", `Int 0
-            ; ( "severity_counts"
-              , `Assoc [ "info", `Int 0; "warn", `Int 0; "error", `Int 0 ] )
-            ] )
-      ; "products", `List []
-      ; "evidence", `List []
-      ; "violations", `List []
-      ; "projection_error", `String message
-      ]
+    Coordination_product.snapshot_to_yojson
+      ~projection_error:message
+      (Coordination_product.snapshot [])
 ;;

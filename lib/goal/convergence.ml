@@ -51,11 +51,16 @@ let title_has_goal_marker ~goal_id title =
     done;
     !found
 
+let task_has_goal_id ~goal_id (task : Types.task) =
+  match task.goal_id with
+  | Some linked_goal_id -> String.equal linked_goal_id goal_id
+  | None -> false
+
 (** A task belongs to a goal when its structured goal_id matches or its title
     carries the legacy [goal:<id>] marker. *)
 let task_matches_goal ~goal_id (task : Types.task) =
   match task.goal_id with
-  | Some linked_goal_id -> String.equal linked_goal_id goal_id
+  | Some _ -> task_has_goal_id ~goal_id task
   | None -> title_has_goal_marker ~goal_id task.title
 
 let is_terminal (task : Types.task) =

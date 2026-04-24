@@ -430,6 +430,7 @@
    keeper_deliberation
    keeper_id
    keeper_types_profile
+   keeper_meta_tool_access
    keeper_meta_contract
    keeper_meta_json_scrub
    keeper_meta_json_parse
@@ -636,6 +637,7 @@
  dashboard_mission_agents
  dashboard_mission_assembly
  keeper_types_profile
+ keeper_meta_tool_access
  keeper_meta_contract
  keeper_meta_json_scrub
  keeper_meta_json_parse

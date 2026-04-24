@@ -137,11 +137,10 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
       | Some o -> o | None -> "*"
     in
     let cors = cors_headers origin in
-    (* [with_server_state] (#9793): HTTP-layer replacement for the
-       [get_server_state] raise-wrapper. Returns a controlled 500 JSON
-       error when server state is not initialized, instead of raising
-       [Failure] and crashing the request fiber. Mirrors the pattern
-       [handle_post_graphql] already uses via [get_server_state_result]. *)
+    (* [with_server_state] (#9793): HTTP-layer wrapper around
+       [get_server_state_result]. Returns a controlled 500 JSON error when
+       server state is not initialized, instead of crashing the request
+       fiber. Mirrors the pattern [handle_post_graphql] already uses. *)
     let with_server_state h2_reqd f =
       match get_server_state_result () with
       | Ok state -> f state
@@ -233,51 +232,51 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           if not (Server_webrtc_transport.is_enabled ()) then
             h2_respond_json h2_reqd {|{"error":"webrtc transport disabled"}|}
               ~status:`Not_found ~extra_headers:cors
-          else (
-            let state = get_server_state () in
-            match
-              authorize_tool_request
-                ~base_path:state.Mcp_server.room_config.base_path
-                ~tool_name:"masc_webrtc_offer"
-                httpun_request
-            with
-            | Error err ->
-                let status = http_status_of_auth_error err in
-                h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
-            | Ok () ->
-                h2_read_body h2_reqd (fun body_str ->
-                  match Server_webrtc_transport.handle_offer_request body_str with
-                  | Ok body ->
-                      h2_respond_json h2_reqd body ~extra_headers:cors
-                  | Error msg ->
-                      h2_respond_json h2_reqd
-                        (Yojson.Safe.to_string (`Assoc [ ("error", `String msg) ]))
-                        ~status:`Bad_request ~extra_headers:cors))
+          else
+            with_server_state h2_reqd (fun state ->
+              match
+                authorize_tool_request
+                  ~base_path:state.Mcp_server.room_config.base_path
+                  ~tool_name:"masc_webrtc_offer"
+                  httpun_request
+              with
+              | Error err ->
+                  let status = http_status_of_auth_error err in
+                  h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
+              | Ok () ->
+                  h2_read_body h2_reqd (fun body_str ->
+                    match Server_webrtc_transport.handle_offer_request body_str with
+                    | Ok body ->
+                        h2_respond_json h2_reqd body ~extra_headers:cors
+                    | Error msg ->
+                        h2_respond_json h2_reqd
+                          (Yojson.Safe.to_string (`Assoc [ ("error", `String msg) ]))
+                          ~status:`Bad_request ~extra_headers:cors))
 
       | `POST, "/webrtc/answer" ->
           if not (Server_webrtc_transport.is_enabled ()) then
             h2_respond_json h2_reqd {|{"error":"webrtc transport disabled"}|}
               ~status:`Not_found ~extra_headers:cors
-          else (
-            let state = get_server_state () in
-            match
-              authorize_tool_request
-                ~base_path:state.Mcp_server.room_config.base_path
-                ~tool_name:"masc_webrtc_answer"
-                httpun_request
-            with
-            | Error err ->
-                let status = http_status_of_auth_error err in
-                h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
-            | Ok () ->
-                h2_read_body h2_reqd (fun body_str ->
-                  match Server_webrtc_transport.handle_answer_request body_str with
-                  | Ok body ->
-                      h2_respond_json h2_reqd body ~extra_headers:cors
-                  | Error msg ->
-                      h2_respond_json h2_reqd
-                        (Yojson.Safe.to_string (`Assoc [ ("error", `String msg) ]))
-                        ~status:`Bad_request ~extra_headers:cors))
+          else
+            with_server_state h2_reqd (fun state ->
+              match
+                authorize_tool_request
+                  ~base_path:state.Mcp_server.room_config.base_path
+                  ~tool_name:"masc_webrtc_answer"
+                  httpun_request
+              with
+              | Error err ->
+                  let status = http_status_of_auth_error err in
+                  h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
+              | Ok () ->
+                  h2_read_body h2_reqd (fun body_str ->
+                    match Server_webrtc_transport.handle_answer_request body_str with
+                    | Ok body ->
+                        h2_respond_json h2_reqd body ~extra_headers:cors
+                    | Error msg ->
+                        h2_respond_json h2_reqd
+                          (Yojson.Safe.to_string (`Assoc [ ("error", `String msg) ]))
+                          ~status:`Bad_request ~extra_headers:cors))
 
       | `GET, "/metrics" ->
           let body = Prometheus.to_prometheus_text () in
@@ -388,37 +387,36 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                                  let accept_warn_headers =
                                    legacy_accept_warning_headers accept_mode
                                  in
-                                 let state = get_server_state ()
-                                 in
-                                 let profile =
-                                   mcp_eio_profile_of_transport_profile profile
-                                 in
-                                 let response_json =
-                                   Mcp_eio.handle_request ~clock ~sw ~profile
-                                     ~mcp_session_id:session_id ?auth_token state body_str
-                                 in
-                                 (match protocol_version_from_body body_str with
-                                 | Some v -> remember_protocol_version session_id v
-                                 | None -> ());
-                                 let protocol_version =
-                                   get_protocol_version_for_session ~session_id
-                                     httpun_request
-                                 in
-                                 let mcp_hdrs =
-                                   accept_warn_headers @ mcp_headers session_id protocol_version
-                                   @ cors
-                                 in
-                                 match response_json with
-                                 | `Null ->
-                                     h2_respond_empty h2_reqd ~status:`Accepted
-                                       ~extra_headers:mcp_hdrs
-                                 | json when is_http_error_response json ->
-                                     let body = Yojson.Safe.to_string json in
-                                     h2_respond_json h2_reqd body ~status:`Bad_request
-                                       ~extra_headers:mcp_hdrs
-                                 | json ->
-                                     let body = Yojson.Safe.to_string json in
-                                     h2_respond_json h2_reqd body ~extra_headers:mcp_hdrs))))
+                                 with_server_state h2_reqd (fun state ->
+                                   let profile =
+                                     mcp_eio_profile_of_transport_profile profile
+                                   in
+                                   let response_json =
+                                     Mcp_eio.handle_request ~clock ~sw ~profile
+                                       ~mcp_session_id:session_id ?auth_token state body_str
+                                   in
+                                   (match protocol_version_from_body body_str with
+                                   | Some v -> remember_protocol_version session_id v
+                                   | None -> ());
+                                   let protocol_version =
+                                     get_protocol_version_for_session ~session_id
+                                       httpun_request
+                                   in
+                                   let mcp_hdrs =
+                                     accept_warn_headers @ mcp_headers session_id protocol_version
+                                     @ cors
+                                   in
+                                   match response_json with
+                                   | `Null ->
+                                       h2_respond_empty h2_reqd ~status:`Accepted
+                                         ~extra_headers:mcp_hdrs
+                                   | json when is_http_error_response json ->
+                                       let body = Yojson.Safe.to_string json in
+                                       h2_respond_json h2_reqd body ~status:`Bad_request
+                                         ~extra_headers:mcp_hdrs
+                                   | json ->
+                                       let body = Yojson.Safe.to_string json in
+                                       h2_respond_json h2_reqd body ~extra_headers:mcp_hdrs)))))
 
       | `DELETE, "/mcp/operator" ->
           h2_respond_removed_surface h2_reqd ~surface:"operator_remote" ~extra_headers:cors
@@ -497,12 +495,10 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
 
       | `POST, "/graphql" ->
           h2_read_body h2_reqd (fun body_str ->
-            let state = get_server_state ()
-            in
-            let response = Graphql_api.handle_request ~config:state.room_config body_str in
-            let status = match response.status with `OK -> `OK | `Bad_request -> `Bad_request in
-            h2_respond_json h2_reqd response.body ~status ~extra_headers:cors
-          )
+            with_server_state h2_reqd (fun state ->
+              let response = Graphql_api.handle_request ~config:state.room_config body_str in
+              let status = match response.status with `OK -> `OK | `Bad_request -> `Bad_request in
+              h2_respond_json h2_reqd response.body ~status ~extra_headers:cors))
 
       (* ─────────────────────────────────────────────────────────────────────
          REST API
@@ -519,16 +515,16 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
             ~status:`Gone ~extra_headers:cors
 
       | `GET, "/api/v1/dashboard/shell" ->
-          let state = get_server_state () in
-          let light =
-            Server_utils.bool_query_param httpun_request "light" ~default:false
-          in
-          let json =
-            dashboard_shell_http_json ?clock:state.Mcp_server.clock
-              ~request:httpun_request ~light
-              state.Mcp_server.room_config
-          in
-          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+          with_server_state h2_reqd (fun state ->
+            let light =
+              Server_utils.bool_query_param httpun_request "light" ~default:false
+            in
+            let json =
+              dashboard_shell_http_json ?clock:state.Mcp_server.clock
+                ~request:httpun_request ~light
+                state.Mcp_server.room_config
+            in
+            h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/config" ->
           let json = Env_config_introspect.to_json () in
@@ -614,45 +610,45 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
             h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/goals/detail" ->
-          let state = get_server_state () in
-          let goal_id =
-            match Server_utils.query_param httpun_request "goal_id" with
-            | Some value -> String.trim value
-            | None -> ""
-          in
-          if goal_id = "" then
-            h2_respond_json h2_reqd
-              {|{"ok":false,"error":"goal_id query param is required"}|}
-              ~status:`Bad_request ~extra_headers:cors
-          else
-            let json =
-              dashboard_goal_detail_http_json
-                ~config:state.Mcp_server.room_config ~goal_id
+          with_server_state h2_reqd (fun state ->
+            let goal_id =
+              match Server_utils.query_param httpun_request "goal_id" with
+              | Some value -> String.trim value
+              | None -> ""
             in
-            h2_respond_json h2_reqd (Yojson.Safe.to_string json)
-              ~extra_headers:cors
+            if goal_id = "" then
+              h2_respond_json h2_reqd
+                {|{"ok":false,"error":"goal_id query param is required"}|}
+                ~status:`Bad_request ~extra_headers:cors
+            else
+              let json =
+                dashboard_goal_detail_http_json
+                  ~config:state.Mcp_server.room_config ~goal_id
+              in
+              h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+                ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/tasks/history" ->
-          let state = get_server_state () in
-          let task_id =
-            match Server_utils.query_param httpun_request "task_id" with
-            | Some value -> String.trim value
-            | None -> ""
-          in
-          if task_id = "" then
-            h2_respond_json h2_reqd {|{"error":"task_id is required"}|}
-              ~status:`Bad_request ~extra_headers:cors
-          else
-            let limit =
-              Server_utils.int_query_param httpun_request "limit" ~default:50
-              |> Server_utils.clamp ~min_v:1 ~max_v:200
+          with_server_state h2_reqd (fun state ->
+            let task_id =
+              match Server_utils.query_param httpun_request "task_id" with
+              | Some value -> String.trim value
+              | None -> ""
             in
-            let json =
-              Tool_task.task_history_events_json state.Mcp_server.room_config
-                ~task_id ~limit
-            in
-            h2_respond_json h2_reqd (Yojson.Safe.to_string json)
-              ~extra_headers:cors
+            if task_id = "" then
+              h2_respond_json h2_reqd {|{"error":"task_id is required"}|}
+                ~status:`Bad_request ~extra_headers:cors
+            else
+              let limit =
+                Server_utils.int_query_param httpun_request "limit" ~default:50
+                |> Server_utils.clamp ~min_v:1 ~max_v:200
+              in
+              let json =
+                Tool_task.task_history_events_json state.Mcp_server.room_config
+                  ~task_id ~limit
+              in
+              h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+                ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/mission" ->
           with_server_state h2_reqd (fun state ->
@@ -683,68 +679,68 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
             h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors)
 
       | `GET, "/api/v1/autoresearch/loops" ->
-          let state = get_server_state () in
-          let base_path = state.Mcp_server.room_config.base_path in
-          let json =
-            Dashboard_http_autoresearch.autoresearch_loops_json ~base_path ()
-          in
-          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+          with_server_state h2_reqd (fun state ->
+            let base_path = state.Mcp_server.room_config.base_path in
+            let json =
+              Dashboard_http_autoresearch.autoresearch_loops_json ~base_path ()
+            in
+            h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors)
 
       | `GET, "/api/v1/autoresearch/loops/csv" ->
-          let state = get_server_state () in
-          let base_path = state.Mcp_server.room_config.base_path in
-          let csv = Dashboard_http_autoresearch.autoresearch_loops_csv ~base_path in
-          let headers =
-            H2.Headers.of_list
-              [
-                ("content-type", "text/csv; charset=utf-8");
-                ("content-disposition", "attachment; filename=\"autoresearch_loops.csv\"");
-              ]
-          in
-          let response = H2.Response.create ~headers `OK in
-          let body = H2.Reqd.respond_with_streaming h2_reqd response in
-          H2.Body.Writer.write_string body csv;
-          H2.Body.Writer.close body
+          with_server_state h2_reqd (fun state ->
+            let base_path = state.Mcp_server.room_config.base_path in
+            let csv = Dashboard_http_autoresearch.autoresearch_loops_csv ~base_path in
+            let headers =
+              H2.Headers.of_list
+                [
+                  ("content-type", "text/csv; charset=utf-8");
+                  ("content-disposition", "attachment; filename=\"autoresearch_loops.csv\"");
+                ]
+            in
+            let response = H2.Response.create ~headers `OK in
+            let body = H2.Reqd.respond_with_streaming h2_reqd response in
+            H2.Body.Writer.write_string body csv;
+            H2.Body.Writer.close body)
 
       | `GET, p when String.length p > 27
                    && String.sub p 0 27 = "/api/v1/autoresearch/loops/" ->
-          let state = get_server_state () in
-          let base_path = state.Mcp_server.room_config.base_path in
-          let loop_id = String.trim (String.sub p 27 (String.length p - 27)) in
-          if String.length loop_id = 0 then
-            h2_respond_json h2_reqd {|{"error":"loop_id is required"}|}
-              ~status:`Bad_request ~extra_headers:cors
-          else
-            (match
-               Dashboard_http_autoresearch.autoresearch_loop_detail_json
-                 ~base_path ~loop_id ~history_limit:100
-             with
-             | Ok json ->
-                 h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
-             | Error msg ->
-                 h2_respond_json h2_reqd
-                   (Printf.sprintf {|{"error":"%s"}|} (String.escaped msg))
-                   ~status:`Not_found ~extra_headers:cors
-             | exception Invalid_argument msg ->
-                 h2_respond_json h2_reqd
-                   (Printf.sprintf {|{"error":"%s"}|} (String.escaped msg))
-                   ~status:`Not_found ~extra_headers:cors)
+          with_server_state h2_reqd (fun state ->
+            let base_path = state.Mcp_server.room_config.base_path in
+            let loop_id = String.trim (String.sub p 27 (String.length p - 27)) in
+            if String.length loop_id = 0 then
+              h2_respond_json h2_reqd {|{"error":"loop_id is required"}|}
+                ~status:`Bad_request ~extra_headers:cors
+            else
+              (match
+                 Dashboard_http_autoresearch.autoresearch_loop_detail_json
+                   ~base_path ~loop_id ~history_limit:100
+               with
+               | Ok json ->
+                   h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+               | Error msg ->
+                   h2_respond_json h2_reqd
+                     (Printf.sprintf {|{"error":"%s"}|} (String.escaped msg))
+                     ~status:`Not_found ~extra_headers:cors
+               | exception Invalid_argument msg ->
+                   h2_respond_json h2_reqd
+                     (Printf.sprintf {|{"error":"%s"}|} (String.escaped msg))
+                     ~status:`Not_found ~extra_headers:cors))
 
       | `GET, p when String.starts_with ~prefix:"/api/v1/command-plane" p ->
           h2_respond_removed_surface h2_reqd ~surface:"command_plane" ~extra_headers:cors
 
       | `GET, "/api/v1/status" ->
-          let state = get_server_state () in
-          let config = state.Mcp_server.room_config in
-          let room_state = Coord.read_state config in
-          let tempo = Tempo.get_tempo config in
-          let json = `Assoc [
-            ("cluster", `String (Env_config_core.cluster_name ()));
-            ("project", `String room_state.project);
-            ("tempo_interval_s", `Float tempo.current_interval_s);
-            ("paused", `Bool room_state.paused);
-          ] in
-          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+          with_server_state h2_reqd (fun state ->
+            let config = state.Mcp_server.room_config in
+            let room_state = Coord.read_state config in
+            let tempo = Tempo.get_tempo config in
+            let json = `Assoc [
+              ("cluster", `String (Env_config_core.cluster_name ()));
+              ("project", `String room_state.project);
+              ("tempo_interval_s", `Float tempo.current_interval_s);
+              ("paused", `Bool room_state.paused);
+            ] in
+            h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors)
 
       | `GET, "/api/v1/credits" ->
           h2_respond_json h2_reqd (Credits_dashboard.json_api ()) ~extra_headers:cors

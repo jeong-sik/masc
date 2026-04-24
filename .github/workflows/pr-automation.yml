@@ -143,6 +143,9 @@ jobs:
 
             const actions = [];
             const failedActions = [];
+            // Soft failures: non-critical actions that don't affect draft safety.
+            // auto-merge disable is cosmetic because GitHub never auto-merges a draft PR.
+            const softFailures = [];
             const policyFailures = bypassPolicyFailures.map((failure) =>
               `unverified bypass label ${failure}`
             );
@@ -161,6 +164,11 @@ jobs:
               failedActions.push(`${actionName}: ${summary}`);
               core.warning(`Draft PR guard failed to ${actionName}: ${summary}`);
             };
+            const recordSoftFailure = (actionName, error) => {
+              const summary = summarizeError(error);
+              softFailures.push(`${actionName}: ${summary}`);
+              core.info(`Draft PR guard soft-failure (${actionName}): ${summary}`);
+            };
 
             if (current.autoMergeRequest) {
               try {
@@ -175,7 +183,7 @@ jobs:
                 `, { pullRequestId: current.id });
                 actions.push("disabled auto-merge");
               } catch (error) {
-                recordFailure("disable auto-merge", error);
+                recordSoftFailure("disable auto-merge", error);
               }
             }
 
@@ -205,13 +213,16 @@ jobs:
             const bypassLabelList =
               bypassLabels.length > 0 ? bypassLabels.join(", ") : "(no configured bypass labels)";
             const statusLine =
-              failedActions.length > 0 || policyFailures.length > 0
+              failedActions.length > 0
                 ? "Draft PR guard could not fully reapply protection."
+                : softFailures.length > 0 || policyFailures.length > 0
+                ? "Draft PR guard applied with non-critical notes."
                 : `Draft PR guard reapplied: ${actions.join(", ")}.`;
             const actionLines = [
               actions.length > 0 ? `Completed actions: ${actions.join(", ")}.` : "",
               policyFailures.length > 0 ? `Policy findings: ${policyFailures.join("; ")}.` : "",
-              failedActions.length > 0 ? `Failed actions: ${failedActions.join("; ")}.` : ""
+              failedActions.length > 0 ? `Failed actions: ${failedActions.join("; ")}.` : "",
+              softFailures.length > 0 ? `Non-critical: ${softFailures.join("; ")}.` : ""
             ].filter(Boolean);
             const body = [
               marker,
@@ -220,10 +231,15 @@ jobs:
               ...actionLines,
               "",
               `This repository treats draft PRs as draft-only until a human explicitly opts in by adding one of these labels: ${bypassLabelList}.`,
-              ...(failedActions.length > 0 || policyFailures.length > 0
+              ...(failedActions.length > 0
                 ? [
                     "",
-                    "Manual action required: restore draft state or disable auto-merge, remove unverified bypass labels, or add a bypass label only after explicit human approval."
+                    "Manual action required: restore draft state, or add a bypass label only after explicit human approval."
+                  ]
+                : softFailures.length > 0 || policyFailures.length > 0
+                ? [
+                    "",
+                    "Non-critical notes above. Draft state is maintained — no manual action needed."
                   ]
                 : [])
             ].join("\n");
@@ -256,15 +272,16 @@ jobs:
             const summary = [
               policyFailures.length > 0 ? `policy failures: ${policyFailures.join("; ")}` : "",
               actions.length > 0 ? actions.join(", ") : "",
-              failedActions.length > 0 ? `manual recovery required after failed automation: ${failedActions.join("; ")}` : ""
+              failedActions.length > 0 ? `manual recovery required: ${failedActions.join("; ")}` : "",
+              softFailures.length > 0 ? `non-critical: ${softFailures.join("; ")}` : ""
             ].filter(Boolean).join("; ");
 
-            // Hard-fail only on actions that actually violate the Draft invariants:
-            //   - automation step itself failed (failedActions), or
+            // Hard-fail only on critical failures that violate Draft invariants:
+            //   - convert-to-draft failed (PR is still Ready when it shouldn't be)
             //   - someone tried to enable auto-merge / flip to draft while a policy is breached.
-            // A plain `ready_for_review` must not block the downstream label-and-review job
-            // (which depends on `needs: draft-automerge-guard.result == 'success'`). Otherwise
-            // every Ready PR ends up BLOCKED on this required check.
+            // auto-merge disable failure is NOT a hard failure because:
+            //   1. GitHub never auto-merges a draft PR regardless of auto-merge setting
+            //   2. The convert-to-draft action is the real safety mechanism
             const hardFailure = failedActions.length > 0;
             const draftSafetyViolation =
               (action === "auto_merge_enabled" || action === "converted_to_draft") &&
@@ -272,8 +289,8 @@ jobs:
 
             if (hardFailure || draftSafetyViolation) {
               core.setFailed(`Draft PR guard blocked ${action}: ${summary}.`);
-            } else if (policyFailures.length > 0) {
-              core.warning(`Draft PR guard non-blocking policy note (${action}): ${summary}`);
+            } else if (policyFailures.length > 0 || softFailures.length > 0) {
+              core.warning(`Draft PR guard non-blocking note (${action}): ${summary}`);
             }
 
   label-and-review:

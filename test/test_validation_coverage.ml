@@ -237,6 +237,54 @@ let test_agent_id_double_dot () =
   | Error _ -> ()
 
 (* ============================================================
+   Sound-partial quote stripping (#9787)
+   ============================================================ *)
+
+let test_task_id_single_quoted_recoverable () =
+  match Validation.Task_id.validate "'task-031'" with
+  | Ok t -> check string "stripped to inner" "task-031" (Validation.Task_id.to_string t)
+  | Error msg -> failf "expected recovery, got: %s" msg
+
+let test_task_id_double_quoted_recoverable () =
+  match Validation.Task_id.validate "\"task-041\"" with
+  | Ok t -> check string "stripped to inner" "task-041" (Validation.Task_id.to_string t)
+  | Error msg -> failf "expected recovery, got: %s" msg
+
+let test_task_id_quoted_inner_invalid () =
+  (* Outer quotes match but inner contains invalid char — must surface a
+     quote-aware error and not silently accept the inner. *)
+  match Validation.Task_id.validate "'bad/id'" with
+  | Ok _ -> fail "should reject quoted but invalid inner"
+  | Error msg ->
+      check bool "mentions quotes" true
+        (try ignore (Re.exec (Re.Pcre.re "quotes" |> Re.compile) msg); true
+         with Not_found -> false)
+
+let test_task_id_mismatched_quotes_not_stripped () =
+  (* Single + double mismatch must NOT be stripped — keep strict error. *)
+  match Validation.Task_id.validate "'task-031\"" with
+  | Ok _ -> fail "should reject mismatched outer quotes"
+  | Error _ -> ()
+
+let test_task_id_unquoted_still_works () =
+  match Validation.Task_id.validate "task-099" with
+  | Ok t -> check string "preserved" "task-099" (Validation.Task_id.to_string t)
+  | Error msg -> failf "should accept bare id: %s" msg
+
+let test_agent_id_single_quoted_recoverable () =
+  match Validation.Agent_id.validate "'keeper'" with
+  | Ok t -> check string "stripped to inner" "keeper" (Validation.Agent_id.to_string t)
+  | Error msg -> failf "expected recovery, got: %s" msg
+
+let test_agent_id_quoted_inner_invalid () =
+  match Validation.Agent_id.validate "'has space'" with
+  | Ok _ -> fail "should reject quoted but invalid inner"
+  | Error msg ->
+      check bool "mentions quotes" true
+        (try ignore (Re.exec (Re.Pcre.re "quotes" |> Re.compile) msg); true
+         with Not_found -> false)
+
+(* ============================================================
    Test Runners
    ============================================================ *)
 
@@ -297,5 +345,14 @@ let () =
       test_case "agent dot only" `Quick test_agent_id_dot_only;
       test_case "agent single dot" `Quick test_agent_id_single_dot;
       test_case "agent double dot" `Quick test_agent_id_double_dot;
+    ];
+    "quote_stripping_9787", [
+      test_case "task single-quoted recoverable" `Quick test_task_id_single_quoted_recoverable;
+      test_case "task double-quoted recoverable" `Quick test_task_id_double_quoted_recoverable;
+      test_case "task quoted inner invalid" `Quick test_task_id_quoted_inner_invalid;
+      test_case "task mismatched quotes" `Quick test_task_id_mismatched_quotes_not_stripped;
+      test_case "task unquoted still works" `Quick test_task_id_unquoted_still_works;
+      test_case "agent single-quoted recoverable" `Quick test_agent_id_single_quoted_recoverable;
+      test_case "agent quoted inner invalid" `Quick test_agent_id_quoted_inner_invalid;
     ];
   ]

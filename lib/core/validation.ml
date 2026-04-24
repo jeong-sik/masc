@@ -35,6 +35,14 @@ let log_rejection ~validator ~input ~reason =
   Log.Misc.warn "%s rejected input '%s': %s"
     validator safe_input reason
 
+(* #9787: LLMs emit ids wrapped in stray ASCII quotes ('task-031'). Caller
+   re-runs strict validation on the inner; smart quotes left untouched. *)
+let try_strip_outer_quotes s =
+  let len = String.length s in
+  if len >= 2 && s.[0] = s.[len - 1] && (s.[0] = '\'' || s.[0] = '"') then
+    Some (String.sub s 1 (len - 2))
+  else None
+
 (** Agent ID validation *)
 module Agent_id : sig
   type t
@@ -49,23 +57,40 @@ end = struct
      are rejected. *)
   let valid_pattern = Re.Pcre.re {|^[a-zA-Z0-9_-]+(:[a-zA-Z0-9_-]+)?$|} |> Re.compile
 
+  let strict s =
+    if String.length s = 0 then
+      Error "agent_id cannot be empty"
+    else if String.length s > 64 then
+      Error (Printf.sprintf "agent_id too long: %d chars (max 64)" (String.length s))
+    else if String.contains s '/' || String.contains s '\\' then
+      Error "agent_id cannot contain path separators"
+    else if String.contains s '.' && Base.String.is_prefix s ~prefix:".." then
+      Error "agent_id cannot contain path traversal"
+    else if not (Re.execp valid_pattern s) then
+      Error (Printf.sprintf "agent_id contains invalid characters: %s (only a-z, A-Z, 0-9, _, -, : allowed)" s)
+    else
+      Ok s
+
   let validate s =
-    let reject reason =
+    let log_and_err reason =
       log_rejection ~validator:"Agent_id" ~input:s ~reason;
       Error reason
     in
-    if String.length s = 0 then
-      reject "agent_id cannot be empty"
-    else if String.length s > 64 then
-      reject (Printf.sprintf "agent_id too long: %d chars (max 64)" (String.length s))
-    else if String.contains s '/' || String.contains s '\\' then
-      reject "agent_id cannot contain path separators"
-    else if String.contains s '.' && Base.String.is_prefix s ~prefix:".." then
-      reject "agent_id cannot contain path traversal"
-    else if not (Re.execp valid_pattern s) then
-      reject (Printf.sprintf "agent_id contains invalid characters: %s (only a-z, A-Z, 0-9, _, -, : allowed)" s)
-    else
-      Ok s
+    match strict s with
+    | Ok t -> Ok t
+    | Error orig_reason ->
+        match try_strip_outer_quotes s with
+        | Some inner ->
+            (match strict inner with
+             | Ok t ->
+                 Log.Misc.info
+                   "Agent_id: stripped surrounding quotes (#9787): '%s' -> '%s'"
+                   s inner;
+                 Ok t
+             | Error _ ->
+                 log_and_err
+                   "agent_id appears wrapped in surrounding quotes; supply the bare id without quotes")
+        | None -> log_and_err orig_reason
 
   let to_string t = t
   let of_string_unsafe s = s
@@ -83,23 +108,40 @@ end = struct
   (* Allow alphanumeric, dash, underscore, colon (for namespacing) *)
   let valid_pattern = Re.Pcre.re {|^[a-zA-Z0-9_:-]+$|} |> Re.compile
 
+  let strict s =
+    if String.length s = 0 then
+      Error "task_id cannot be empty"
+    else if String.length s > 128 then
+      Error (Printf.sprintf "task_id too long: %d chars (max 128)" (String.length s))
+    else if String.contains s '/' || String.contains s '\\' then
+      Error "task_id cannot contain path separators"
+    else if String.contains s '.' && Base.String.is_prefix s ~prefix:".." then
+      Error "task_id cannot contain path traversal"
+    else if not (Re.execp valid_pattern s) then
+      Error (Printf.sprintf "task_id contains invalid characters: %s (only a-z, A-Z, 0-9, _, -, : allowed)" s)
+    else
+      Ok s
+
   let validate s =
-    let reject reason =
+    let log_and_err reason =
       log_rejection ~validator:"Task_id" ~input:s ~reason;
       Error reason
     in
-    if String.length s = 0 then
-      reject "task_id cannot be empty"
-    else if String.length s > 128 then
-      reject (Printf.sprintf "task_id too long: %d chars (max 128)" (String.length s))
-    else if String.contains s '/' || String.contains s '\\' then
-      reject "task_id cannot contain path separators"
-    else if String.contains s '.' && Base.String.is_prefix s ~prefix:".." then
-      reject "task_id cannot contain path traversal"
-    else if not (Re.execp valid_pattern s) then
-      reject (Printf.sprintf "task_id contains invalid characters: %s (only a-z, A-Z, 0-9, _, -, : allowed)" s)
-    else
-      Ok s
+    match strict s with
+    | Ok t -> Ok t
+    | Error orig_reason ->
+        match try_strip_outer_quotes s with
+        | Some inner ->
+            (match strict inner with
+             | Ok t ->
+                 Log.Misc.info
+                   "Task_id: stripped surrounding quotes (#9787): '%s' -> '%s'"
+                   s inner;
+                 Ok t
+             | Error _ ->
+                 log_and_err
+                   "task_id appears wrapped in surrounding quotes; supply the bare id without quotes")
+        | None -> log_and_err orig_reason
 
   let to_string t = t
   let of_string_unsafe s = s

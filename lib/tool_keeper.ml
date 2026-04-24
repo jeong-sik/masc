@@ -947,12 +947,10 @@ let handle_keeper_compact ctx args : tool_result =
             ~base_dir ~meta ~model ~primary_model_max_tokens:max_tokens
         with
         | Some recovery ->
-          Keeper_exec_context.dispatch_keeper_phase_event
+          Keeper_exec_context.dispatch_compaction_completed
             ~config:ctx.config ~keeper_name:name
-            (Keeper_state_machine.Compaction_completed {
-               before_tokens = recovery.compaction.before_tokens;
-               after_tokens = recovery.compaction.after_tokens;
-            });
+            ~before_tokens:recovery.compaction.before_tokens
+            ~after_tokens:recovery.compaction.after_tokens;
           invalidate_status_cache name;
           Prometheus.inc_counter Prometheus.metric_keeper_operator_compact
             ~labels:[("keeper", name); ("result", "ok")] ();

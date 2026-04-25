@@ -2707,6 +2707,34 @@ let test_append_metrics_snapshot_persists_cache_usage () =
       check int "cache read persisted"
         300 (usage |> member "cache_read_tokens" |> to_int))
 
+let test_estimate_trusted_usage_cost_uses_cache_usage () =
+  let result =
+    make_run_result
+      ~text:"Claude reported cache usage."
+      ~tools:[]
+      ~model:"claude:claude-sonnet-4-6"
+      ~input_tok:1_000_000
+      ~output_tok:0
+      ~cache_creation_tokens:100_000
+      ~cache_read_tokens:200_000
+      ()
+  in
+  let cost =
+    UM.estimate_trusted_usage_cost_usd
+      ~usage_trusted:true
+      ~model:"claude-sonnet-4-6"
+      result.usage
+  in
+  (* regular input 700k * $3/M + cache write 100k * $3/M * 1.25
+     + cache read 200k * $3/M * 0.1 = $2.535.  This pins the unified
+     keeper path to the same cache-aware pricing semantics as OAS. *)
+  check (float 0.001) "cache-aware trusted cost" 2.535 cost;
+  check (float 0.001) "untrusted usage is zero cost" 0.0
+    (UM.estimate_trusted_usage_cost_usd
+       ~usage_trusted:false
+       ~model:"claude-sonnet-4-6"
+       result.usage)
+
 let test_append_metrics_snapshot_marks_untrusted_usage () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -6312,6 +6340,8 @@ let () =
             test_append_metrics_snapshot_nulls_unreported_usage;
           test_case "snapshot persists cache usage" `Quick
             test_append_metrics_snapshot_persists_cache_usage;
+          test_case "trusted usage cost uses cache token pricing" `Quick
+            test_estimate_trusted_usage_cost_uses_cache_usage;
           test_case "snapshot marks untrusted usage" `Quick
             test_append_metrics_snapshot_marks_untrusted_usage;
           test_case "decision record persists tool call details" `Quick

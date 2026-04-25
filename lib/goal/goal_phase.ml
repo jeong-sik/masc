@@ -103,6 +103,18 @@ let decide_transition ~phase ~(action : action) ~has_effective_verifier_policy
   | Awaiting_approval, Approve_completion -> Ok Complete
   | Awaiting_approval, Reject_completion -> Ok (Move_to Blocked)
   | Awaiting_approval, Drop -> Ok (Move_to Dropped)
+  (* #10411: pre-fix [Awaiting_verification] only had a [Drop]
+     transition, so a goal that entered verification (via
+     [verifier_policy] on [Request_complete]) could never exit
+     to [Completed] or [Blocked] — the verifier emitted its
+     verdict but the goal stayed pinned indefinitely.  Mirror
+     the [Awaiting_approval] outcomes for verification verdicts
+     and add the [Pause] / [Operator_block] manual escapes that
+     sibling phases already carry. *)
+  | Awaiting_verification, Approve_completion -> Ok Complete
+  | Awaiting_verification, Reject_completion -> Ok (Move_to Blocked)
+  | Awaiting_verification, Pause -> Ok (Move_to Paused)
+  | Awaiting_verification, Operator_block -> Ok (Move_to Blocked)
   | Awaiting_verification, Drop -> Ok (Move_to Dropped)
   | Completed, Reopen -> Ok (Move_to Executing)
   | Completed, Drop -> Ok (Move_to Dropped)

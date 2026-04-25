@@ -162,32 +162,33 @@ function IdePlane({ branch, keepers }) {
       <window.IxPrChecks {...ctx}/>
     </div>;
 
+  const centerPanelId = `ide-v2-center-${mode}`;
   return (
-    <div className="plane ide-v2">
+    <div className="plane ide-v2" role="region" aria-label="IDE Plane">
       <PlaneHeader title="IDE Plane" subtitle="Tree · editor · PR · graph · terminal/search." branch={branch} keepers={keepers} />
       <div className="ide-v2-modebar">
-        <div className="ide-v2-branch">
+        <div className="ide-v2-branch" aria-label={`Active branch ${branch || "main"}, ${keeperCount} keepers, worktree active`}>
           <span className="lbl">branch</span>
           <span className="name">{branch || "main"}</span>
           <span className="meta">{keeperCount} keepers · worktree active</span>
         </div>
-        <div className="ide-v2-modes">
+        <div className="ide-v2-modes" role="tablist" aria-label="IDE mode">
           {["edit","review","merge","graph","search"].map(m => (
-            <button key={m} className={mode === m ? "active" : ""} onClick={() => setMode(m)}>{m}</button>
+            <button key={m} type="button" role="tab" id={`ide-v2-mode-${m}`} aria-selected={mode === m} aria-controls={`ide-v2-center-${m}`} tabIndex={mode === m ? 0 : -1} className={mode === m ? "active" : ""} onClick={() => setMode(m)}>{m}</button>
           ))}
         </div>
-        <button className={`ide-v2-terminal-toggle ${terminalOpen ? "active" : ""}`} onClick={() => setTerminalOpen(v => !v)}>
+        <button type="button" aria-pressed={terminalOpen} aria-controls="ide-v2-terminal" className={`ide-v2-terminal-toggle ${terminalOpen ? "active" : ""}`} onClick={() => setTerminalOpen(v => !v)}>
           terminal
         </button>
       </div>
       <div className={`ide-v2-body ${right ? "" : "wide"} ${terminalOpen ? "term-open" : ""}`}>
-        <div className="ide-v2-tree">
+        <div className="ide-v2-tree" role="region" aria-label="File tree">
           <window.IxTreeDiff {...ctx}/>
         </div>
-        <div className="ide-v2-center">{center}</div>
-        {right && <div className="ide-v2-right">{right}</div>}
+        <div className="ide-v2-center" role="tabpanel" id={centerPanelId} aria-labelledby={`ide-v2-mode-${mode}`}>{center}</div>
+        {right && <div className="ide-v2-right" role="region" aria-label="PR context rail">{right}</div>}
         {terminalOpen && (
-          <div className="ide-v2-terminal">
+          <div className="ide-v2-terminal" id="ide-v2-terminal" role="region" aria-label="Cascade-aware terminal">
             <window.IxTerm {...ctx}/>
           </div>
         )}

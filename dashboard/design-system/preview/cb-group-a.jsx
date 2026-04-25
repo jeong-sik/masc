@@ -1,37 +1,42 @@
 // cb-group-a.jsx — Topbar, Ticker, KPI Strip, Lifeline (with variants)
 const D = window.MASC_DATA;
 
+// ─── density label helper ──────────────────────────────────────────
+const DENSITY_LABEL = { c: 'Compact', n: 'Normal', l: 'Loose' };
+
 // ─── TOPBAR variants ───────────────────────────────────────────────
 function TopbarStandard() {
   const [mode, setMode] = useState('dash');
   const [density, setDensity] = useState('n');
   return (
     <div className="cb-board">
-      <header className="cb-topbar">
+      <header className="cb-topbar" aria-label="MASC topbar">
         <div className="brand">
-          <span className="brand-mark" />
+          <span className="brand-mark" aria-hidden="true" />
           <span className="brand-name">MASC</span>
           <span className="ver">v0.42.1</span>
         </div>
-        <div className="sep" />
-        <button className="goal-switch">
+        <div className="sep" aria-hidden="true" />
+        <button type="button" className="goal-switch" aria-haspopup="menu" aria-label="Switch goal: goal-merge-blockers">
           <Dot kind="brass" size="sm" />
           <span>goal-merge-blockers</span>
-          <span className="caret">▾</span>
+          <span className="caret" aria-hidden="true">▾</span>
         </button>
-        <div className="mode-tabs">
+        <div className="mode-tabs" role="tablist" aria-label="View mode">
           {[['dash','Dash'],['code','Code'],['split','Split']].map(([k,l]) => (
-            <button key={k} className={mode===k?'on':''} onClick={()=>setMode(k)}>{l}</button>
+            <button key={k} type="button" role="tab" aria-selected={mode===k} tabIndex={mode===k?0:-1} className={mode===k?'on':''} onClick={()=>setMode(k)}>{l}</button>
           ))}
         </div>
         <div className="right">
-          <div className="density">
-            {['c','n','l'].map(d => <button key={d} className={density===d?'on':''} onClick={()=>setDensity(d)}>{d}</button>)}
+          <div className="density" role="radiogroup" aria-label="Display density">
+            {['c','n','l'].map(d => (
+              <button key={d} type="button" role="radio" aria-checked={density===d} aria-label={DENSITY_LABEL[d]} className={density===d?'on':''} onClick={()=>setDensity(d)}>{d}</button>
+            ))}
           </div>
           <span className="stamp">BUILD 2604 · 16:32:45Z</span>
         </div>
       </header>
-      <div style={{flex:1, background:'var(--bg-0)'}} />
+      <div style={{flex:1, background:'var(--bg-0)'}} aria-hidden="true" />
     </div>
   );
 }
@@ -40,37 +45,37 @@ function TopbarExpanded() {
   const [mode, setMode] = useState('split');
   return (
     <div className="cb-board">
-      <header className="cb-topbar">
+      <header className="cb-topbar" aria-label="MASC topbar with branch and fleet">
         <div className="brand">
-          <span className="brand-mark" />
+          <span className="brand-mark" aria-hidden="true" />
           <span className="brand-name">MASC</span>
           <span className="ver">v0.42.1</span>
         </div>
-        <div className="sep" />
-        <button className="goal-switch">
+        <div className="sep" aria-hidden="true" />
+        <button type="button" className="goal-switch" aria-haspopup="menu" aria-label="Switch goal: goal-merge-blockers">
           <Dot kind="brass" size="sm" />
           <span>goal-merge-blockers</span>
-          <span className="caret">▾</span>
+          <span className="caret" aria-hidden="true">▾</span>
         </button>
-        <span className="branch">release-0.42</span>
-        <div className="sep" />
-        <div className="mode-tabs">
+        <span className="branch" aria-label="Active branch: release-0.42">release-0.42</span>
+        <div className="sep" aria-hidden="true" />
+        <div className="mode-tabs" role="tablist" aria-label="View mode">
           {[['dash','Dash'],['code','Code'],['split','Split']].map(([k,l]) => (
-            <button key={k} className={mode===k?'on':''} onClick={()=>setMode(k)}>{l}</button>
+            <button key={k} type="button" role="tab" aria-selected={mode===k} tabIndex={mode===k?0:-1} className={mode===k?'on':''} onClick={()=>setMode(k)}>{l}</button>
           ))}
         </div>
         <div className="right">
-          <div className="avatars">
-            <span className="av" style={{background:'var(--k-nick)'}} />
-            <span className="av" style={{background:'var(--k-masc)'}} />
-            <span className="av" style={{background:'var(--k-sangsu)'}} />
-            <span className="av" style={{background:'var(--k-qa)'}} />
-            <span className="av" style={{background:'var(--k-rama)'}} />
+          <div className="avatars" role="group" aria-label="5 active keepers">
+            <span className="av" style={{background:'var(--k-nick)'}} aria-hidden="true" />
+            <span className="av" style={{background:'var(--k-masc)'}} aria-hidden="true" />
+            <span className="av" style={{background:'var(--k-sangsu)'}} aria-hidden="true" />
+            <span className="av" style={{background:'var(--k-qa)'}} aria-hidden="true" />
+            <span className="av" style={{background:'var(--k-rama)'}} aria-hidden="true" />
           </div>
           <span className="stamp">5 ACTIVE · 2 IDLE</span>
         </div>
       </header>
-      <div style={{flex:1, background:'var(--bg-0)'}} />
+      <div style={{flex:1, background:'var(--bg-0)'}} aria-hidden="true" />
     </div>
   );
 }
@@ -78,20 +83,20 @@ function TopbarExpanded() {
 function TopbarMinimal() {
   return (
     <div className="cb-board">
-      <header className="cb-topbar minimal">
+      <header className="cb-topbar minimal" aria-label="MASC topbar (minimal)">
         <div className="brand">
-          <span className="brand-mark" />
+          <span className="brand-mark" aria-hidden="true" />
           <span className="brand-name">MASC</span>
         </div>
-        <div className="mode-tabs">
-          <button className="on">Dash</button>
-          <button>Code</button>
+        <div className="mode-tabs" role="tablist" aria-label="View mode">
+          <button type="button" role="tab" aria-selected="true" tabIndex={0} className="on">Dash</button>
+          <button type="button" role="tab" aria-selected="false" tabIndex={-1}>Code</button>
         </div>
         <div className="right">
           <span className="stamp">16:32:45Z</span>
         </div>
       </header>
-      <div style={{flex:1, background:'var(--bg-0)'}} />
+      <div style={{flex:1, background:'var(--bg-0)'}} aria-hidden="true" />
     </div>
   );
 }
@@ -104,7 +109,7 @@ function TickerMarquee() {
   const evs = [...tickerEvents(), ...tickerEvents()];
   return (
     <div className="cb-board">
-      <div className="cb-ticker">
+      <div className="cb-ticker" role="region" aria-label="Fleet event ticker (marquee)">
         <div className="tape">
           {evs.map((e, i) => (
             <span key={i} className={`evt ${e.kind}`}>
@@ -116,7 +121,7 @@ function TickerMarquee() {
           ))}
         </div>
       </div>
-      <div style={{flex:1, background:'var(--bg-0)'}} />
+      <div style={{flex:1, background:'var(--bg-0)'}} aria-hidden="true" />
     </div>
   );
 }
@@ -124,7 +129,7 @@ function TickerChunks() {
   const evs = [...tickerEvents(), ...tickerEvents()];
   return (
     <div className="cb-board">
-      <div className="cb-ticker chunks">
+      <div className="cb-ticker chunks" role="region" aria-label="Fleet event ticker (chunked)">
         <div className="tape">
           {evs.map((e, i) => (
             <span key={i} className={`evt ${e.kind}`}>
@@ -135,7 +140,7 @@ function TickerChunks() {
           ))}
         </div>
       </div>
-      <div style={{flex:1, background:'var(--bg-0)'}} />
+      <div style={{flex:1, background:'var(--bg-0)'}} aria-hidden="true" />
     </div>
   );
 }
@@ -143,7 +148,7 @@ function TickerVertical() {
   const evs = [...tickerEvents(), ...tickerEvents()];
   return (
     <div className="cb-board">
-      <div className="cb-ticker vertical">
+      <div className="cb-ticker vertical" role="region" aria-label="Fleet event ticker (side rail)">
         <div className="tape">
           {evs.map((e, i) => (
             <span key={i} className={`evt ${e.kind}`} style={{display:'flex', alignItems:'center', gap:6}}>
@@ -155,7 +160,7 @@ function TickerVertical() {
           ))}
         </div>
       </div>
-      <div style={{flex:1, background:'var(--bg-0)'}} />
+      <div style={{flex:1, background:'var(--bg-0)'}} aria-hidden="true" />
     </div>
   );
 }
@@ -169,51 +174,59 @@ const KPI_CELLS = [
   { lbl:'TASKS',  val:'12', cap:'IN FLIGHT', live:false },
   { lbl:'CASCADE',val:'2', cap:'HIT @STEP', live:false, spark:true },
 ];
+
+function kpiCellAriaLabel(c) {
+  const live = c.live ? ' (live)' : '';
+  const delta = c.delta ? `, ${c.deltaKind === 'pos' ? 'up' : 'down'} ${c.delta}` : '';
+  const kind = c.kind === 'ok' ? ' (passing)' : c.kind === 'err' ? ' (failing)' : '';
+  return `${c.lbl}: ${c.val} ${c.cap}${delta}${kind}${live}`;
+}
+
 function KpiStandard() {
   return (
     <div className="cb-board">
-      <div className="cb-kpi">
+      <div className="cb-kpi" role="list" aria-label="Fleet KPI strip">
         {KPI_CELLS.map((c, i) => (
-          <div key={i} className={`cell ${c.live?'live':''} ${c.kind?`is-${c.kind}`:''}`}>
-            <span className="lbl">{c.lbl}</span>
-            <span className="val">{c.val}</span>
-            <span className="cap">{c.cap}{c.delta ? <> · <span className={`delta ${c.deltaKind}`}>{c.delta}</span></> : null}</span>
+          <div key={i} role="listitem" aria-label={kpiCellAriaLabel(c)} className={`cell ${c.live?'live':''} ${c.kind?`is-${c.kind}`:''}`}>
+            <span className="lbl" aria-hidden="true">{c.lbl}</span>
+            <span className="val" aria-hidden="true">{c.val}</span>
+            <span className="cap" aria-hidden="true">{c.cap}{c.delta ? <> · <span className={`delta ${c.deltaKind}`}>{c.delta}</span></> : null}</span>
             {c.spark ? <Spark color={c.live?'brass':'brass'} bars={14} /> : null}
           </div>
         ))}
       </div>
-      <div style={{flex:1, background:'var(--bg-0)'}} />
+      <div style={{flex:1, background:'var(--bg-0)'}} aria-hidden="true" />
     </div>
   );
 }
 function KpiCompact() {
   return (
     <div className="cb-board">
-      <div className="cb-kpi compact">
+      <div className="cb-kpi compact" role="list" aria-label="Fleet KPI strip (compact)">
         {KPI_CELLS.map((c, i) => (
-          <div key={i} className={`cell ${c.live?'live':''} ${c.kind?`is-${c.kind}`:''}`}>
-            <span className="lbl">{c.lbl}</span>
-            <span className="val">{c.val}</span>
+          <div key={i} role="listitem" aria-label={kpiCellAriaLabel(c)} className={`cell ${c.live?'live':''} ${c.kind?`is-${c.kind}`:''}`}>
+            <span className="lbl" aria-hidden="true">{c.lbl}</span>
+            <span className="val" aria-hidden="true">{c.val}</span>
           </div>
         ))}
       </div>
-      <div style={{flex:1, background:'var(--bg-0)'}} />
+      <div style={{flex:1, background:'var(--bg-0)'}} aria-hidden="true" />
     </div>
   );
 }
 function KpiStacked() {
   return (
     <div className="cb-board">
-      <div className="cb-kpi stacked">
+      <div className="cb-kpi stacked" role="list" aria-label="Fleet KPI strip (stacked)">
         {KPI_CELLS.slice(0,6).map((c, i) => (
-          <div key={i} className={`cell ${c.live?'live':''} ${c.kind?`is-${c.kind}`:''}`}>
-            <span className="lbl">{c.lbl}</span>
-            <span className="val big">{c.val}</span>
-            <span className="cap">{c.cap}</span>
+          <div key={i} role="listitem" aria-label={kpiCellAriaLabel(c)} className={`cell ${c.live?'live':''} ${c.kind?`is-${c.kind}`:''}`}>
+            <span className="lbl" aria-hidden="true">{c.lbl}</span>
+            <span className="val big" aria-hidden="true">{c.val}</span>
+            <span className="cap" aria-hidden="true">{c.cap}</span>
           </div>
         ))}
       </div>
-      <div style={{flex:1, background:'var(--bg-0)'}} />
+      <div style={{flex:1, background:'var(--bg-0)'}} aria-hidden="true" />
     </div>
   );
 }
@@ -227,12 +240,12 @@ function LifelineBeat() {
   }, []);
   return (
     <div className="cb-board">
-      <div className="cb-lifeline">
-        <span className="label">LIFELINE</span>
+      <div className="cb-lifeline" role="img" aria-label="Lifeline heartbeat at 72 BPM, 60 second window">
+        <span className="label" aria-hidden="true">LIFELINE</span>
         <Heartbeat phase={phase} />
-        <span className="bpm"><span className="n">72</span> BPM · 60s</span>
+        <span className="bpm" aria-hidden="true"><span className="n">72</span> BPM · 60s</span>
       </div>
-      <div style={{flex:1, background:'var(--bg-0)'}} />
+      <div style={{flex:1, background:'var(--bg-0)'}} aria-hidden="true" />
     </div>
   );
 }
@@ -242,16 +255,16 @@ function LifelineStacked() {
   const fleet = D.keepers.slice(0, 5);
   return (
     <div className="cb-board">
-      <div className="cb-lifeline stack">
+      <div className="cb-lifeline stack" role="list" aria-label="Per-keeper heartbeat lifelines">
         {fleet.map((k, i) => (
-          <div className="row" key={k.id}>
-            <span className="name">{k.id}</span>
+          <div className="row" key={k.id} role="listitem" aria-label={`${k.id} heartbeat, ${k.status === 'running' ? 'running' : k.status}`}>
+            <span className="name" aria-hidden="true">{k.id}</span>
             <Heartbeat width={240} height={14} phase={(phase + i*0.07) % 1} />
             <Dot kind={kClass(k.id)} size="sm" beat={k.status==='running'} />
           </div>
         ))}
       </div>
-      <div style={{flex:1, background:'var(--bg-0)'}} />
+      <div style={{flex:1, background:'var(--bg-0)'}} aria-hidden="true" />
     </div>
   );
 }

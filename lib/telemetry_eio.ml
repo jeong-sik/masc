@@ -1,13 +1,4 @@
-(** MASC Telemetry - Event Tracking and Analytics (Eio Native)
-
-    Tracks:
-    - Agent lifecycle events
-    - Task progress and completion
-    - Handoff triggers
-    - Error occurrences
-
-    Storage: .masc/telemetry.jsonl (append-only log)
-*)
+(** MASC Telemetry - event tracking and analytics on date-split JSONL. *)
 
 
 (** Config type alias *)
@@ -30,6 +21,10 @@ type event =
       session_id: string option;
       operation_id: string option;
       worker_run_id: string option;
+      error_kind: string option;
+      error_message: string option;
+      exit_code: int option;
+      stderr_excerpt: string option;
     }
   | Tool_assigned of { agent_id: string; profile: string; preset: string option; tool_count: int; assignment_id: string }
 [@@deriving yojson, show]
@@ -109,67 +104,45 @@ let get_telemetry_store config : Dated_jsonl.t =
       Hashtbl.replace telemetry_store_cache base store;
       store)
 
-let assoc_opt name fields = List.assoc_opt name fields
-
-let error_field context name = Error (context ^ "." ^ name)
-
-let json_string context name fields =
-  match assoc_opt name fields with
-  | Some (`String value) -> Ok value
-  | Some _ | None -> error_field context name
-
-let json_bool context name fields =
-  match assoc_opt name fields with
-  | Some (`Bool value) -> Ok value
-  | Some _ | None -> error_field context name
-
-let json_int context name fields =
-  match assoc_opt name fields with
-  | Some (`Int value) -> Ok value
-  | Some (`Intlit value) -> (
-      try Ok (int_of_string value) with Failure _ -> error_field context name)
-  | Some _ | None -> error_field context name
-
-let json_float context name fields =
-  match assoc_opt name fields with
-  | Some (`Float value) -> Ok value
-  | Some (`Int value) -> Ok (float_of_int value)
-  | Some (`Intlit value) -> (
-      try Ok (float_of_string value) with Failure _ -> error_field context name)
-  | Some _ | None -> error_field context name
-
-let json_string_opt context name fields =
-  match assoc_opt name fields with
-  | None | Some `Null -> Ok None
-  | Some (`String value) -> Ok (Some value)
-  | Some _ -> error_field context name
-
 let event_record_of_yojson_lenient json =
   match event_record_of_yojson json with
   | Ok record -> Ok record
   | Error original_error -> (
       match json with
       | `Assoc fields -> (
-          match assoc_opt "event" fields with
+          match Telemetry_json_fields.assoc_opt "event" fields with
           | Some (`List [ `String "Tool_called"; `Assoc event_fields ]) ->
               let context = "Telemetry_eio.event" in
               let ( let* ) = Result.bind in
               let* timestamp =
-                json_float "Telemetry_eio.event_record" "timestamp" fields
+                Telemetry_json_fields.float
+                  "Telemetry_eio.event_record" "timestamp" fields
               in
-              let* tool_name = json_string context "tool_name" event_fields in
-              let* success = json_bool context "success" event_fields in
-              let* duration_ms = json_int context "duration_ms" event_fields in
-              let* agent_id = json_string_opt context "agent_id" event_fields in
-              let* source = json_string_opt context "source" event_fields in
+              let* tool_name = Telemetry_json_fields.string context "tool_name" event_fields in
+              let* success = Telemetry_json_fields.bool context "success" event_fields in
+              let* duration_ms = Telemetry_json_fields.int context "duration_ms" event_fields in
+              let* agent_id = Telemetry_json_fields.string_opt context "agent_id" event_fields in
+              let* source = Telemetry_json_fields.string_opt context "source" event_fields in
               let* session_id =
-                json_string_opt context "session_id" event_fields
+                Telemetry_json_fields.string_opt context "session_id" event_fields
               in
               let* operation_id =
-                json_string_opt context "operation_id" event_fields
+                Telemetry_json_fields.string_opt context "operation_id" event_fields
               in
               let* worker_run_id =
-                json_string_opt context "worker_run_id" event_fields
+                Telemetry_json_fields.string_opt context "worker_run_id" event_fields
+              in
+              let* error_kind =
+                Telemetry_json_fields.string_opt context "error_kind" event_fields
+              in
+              let* error_message =
+                Telemetry_json_fields.string_opt context "error_message" event_fields
+              in
+              let* exit_code =
+                Telemetry_json_fields.int_opt context "exit_code" event_fields
+              in
+              let* stderr_excerpt =
+                Telemetry_json_fields.string_opt context "stderr_excerpt" event_fields
               in
               Ok
                 {
@@ -185,6 +158,10 @@ let event_record_of_yojson_lenient json =
                         session_id;
                         operation_id;
                         worker_run_id;
+                        error_kind;
+                        error_message;
+                        exit_code;
+                        stderr_excerpt;
                       };
                 }
           | _ -> Error original_error)
@@ -435,8 +412,25 @@ let track_handoff ?fs config ~from_agent ~to_agent ~reason =
 let track_error ?fs config ~code ~message ~context =
   track ?fs config (Error_occurred { code; message; context })
 
+(** #10358: persist classified tool-call failure diagnostics and
+    emit paired [Error_occurred] rows for callers that provide an
+    [error_kind]. All diagnostic fields are additive/nullable. *)
+let nonempty_opt value =
+  match value with
+  | Some s ->
+      let trimmed = String.trim s in
+      if trimmed = "" then None else Some trimmed
+  | None -> None
+
 let track_tool_called ?fs config ~tool_name ~success ~duration_ms ?agent_id
-    ?source ?session_id ?operation_id ?worker_run_id () =
+    ?source ?session_id ?operation_id ?worker_run_id ?error_kind
+    ?error_message ?exit_code ?stderr_excerpt () =
+  let error_kind = if success then None else nonempty_opt error_kind in
+  let error_message = if success then None else nonempty_opt error_message in
+  let exit_code = if success then None else exit_code in
+  let stderr_excerpt =
+    if success then None else nonempty_opt stderr_excerpt
+  in
   track ?fs config
     (Tool_called
        {
@@ -448,7 +442,40 @@ let track_tool_called ?fs config ~tool_name ~success ~duration_ms ?agent_id
          session_id;
          operation_id;
          worker_run_id;
-       })
+         error_kind;
+         error_message;
+         exit_code;
+         stderr_excerpt;
+       });
+  if not success then
+    match error_kind with
+    | None -> ()
+    | Some trimmed_kind ->
+          let message =
+            match error_message with
+            | Some m -> m
+            | _ ->
+                Printf.sprintf "tool %s failed (%s)" tool_name
+                  trimmed_kind
+          in
+          let context_parts =
+            List.filter_map
+              (fun (k, v) ->
+                match v with
+                | Some s when String.trim s <> "" ->
+                    Some (Printf.sprintf "%s=%s" k s)
+                | _ -> None)
+              [
+                ("tool", Some tool_name);
+                ("agent", agent_id);
+                ("source", source);
+                ("session", session_id);
+                ("op", operation_id);
+              ]
+          in
+          let context = String.concat " " context_parts in
+          track ?fs config
+            (Error_occurred { code = trimmed_kind; message; context })
 
 let track_tool_assigned ?fs config ~agent_id ~profile ?preset ~tool_count ~assignment_id () =
   track ?fs config (Tool_assigned { agent_id; profile; preset; tool_count; assignment_id })

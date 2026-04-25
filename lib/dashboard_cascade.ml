@@ -494,6 +494,73 @@ let provider_entry_to_json ~(declared : bool)
 let provider_info_to_json (info : Health.provider_info) : Yojson.Safe.t =
   provider_entry_to_json ~declared:false info
 
+(* ── Phase 2a: low-trust operator recommendations ─────────────────────
+
+   Surfaces a dashboard nudge when [trust_score] indicates a provider
+   is dragging the cascade.  Observation only — the user runs the
+   suggested config edit themselves.  Phase 2b is what would make these
+   self-applying, and it is gated by [MASC_CASCADE_TRUST_PERSIST]. *)
+
+type recommendation_action =
+  | Reduce_weight  (* unreliable but partially working *)
+  | Disable        (* effectively dead *)
+  | Investigate    (* high-volume same-fingerprint failures — config bug *)
+
+let recommendation_action_to_string = function
+  | Reduce_weight -> "reduce_weight"
+  | Disable -> "disable"
+  | Investigate -> "investigate"
+
+type recommendation = {
+  rec_provider_key : string;
+  rec_trust_score : float;
+  rec_same_fingerprint_count : int;
+  rec_events_in_window : int;
+  rec_top_fingerprint : string option;
+  rec_action : recommendation_action;
+  rec_rationale : string;
+}
+
+(* Classifier — see RFC-0009 §"Phase 2a".
+
+   #10441: Phase 1 was reverted in #10412, removing [trust_score] and
+   [same_fingerprint_count] from [Health.provider_info].  This classifier was
+   shipped by #10416 against a base that still had those fields, so its
+   per-provider trust thresholds no longer have any input data.  Stub it to
+   always emit [None] until the trust pipeline is reinstated; the type
+   surface stays alive so consumers ([low_trust_recommendations],
+   [recommendations_json]) keep their signatures.  See #10428 for the
+   redesign discussion. *)
+let classify_recommendation (info : Health.provider_info) :
+    recommendation option =
+  let _ = info in
+  None
+
+let low_trust_recommendations (infos : Health.provider_info list) :
+    recommendation list =
+  List.filter_map classify_recommendation infos
+  |> List.sort (fun a b ->
+      Float.compare a.rec_trust_score b.rec_trust_score)
+
+let recommendation_to_json (r : recommendation) : Yojson.Safe.t =
+  `Assoc
+    [ ("provider_key", `String r.rec_provider_key)
+    ; ("trust_score", `Float r.rec_trust_score)
+    ; ("same_fingerprint_count", `Int r.rec_same_fingerprint_count)
+    ; ("events_in_window", `Int r.rec_events_in_window)
+    ; ( "top_fingerprint"
+      , match r.rec_top_fingerprint with
+        | Some fp -> `String fp
+        | None -> `Null )
+    ; ("action", `String (recommendation_action_to_string r.rec_action))
+    ; ("rationale", `String r.rec_rationale)
+    ]
+
+let recommendations_json () : Yojson.Safe.t =
+  let infos = Health.all_providers Health.global in
+  `List
+    (List.map recommendation_to_json (low_trust_recommendations infos))
+
 (** [provider_scheme_of_model_string s] returns the text before the first
     [:] in [s], or [s] itself if no colon is present.  The scheme
     corresponds to the provider_key produced by
@@ -621,6 +688,15 @@ let health_json ?(window_minutes = 30)
      | Some _ -> `Int window_minutes
      | None -> `Null);
     ("providers", `List (tracked_entries @ untouched_entries));
+    (* Phase 2a: low-trust recommendations attached to health_json so
+       operators can see action items next to the raw trust scores.
+       The recommendation list reads the same [Health.global] snapshot
+       that produced [tracked] above; we recompute from [tracked] rather
+       than re-scanning the tracker so both views are temporally
+       consistent under concurrent updates. *)
+    ("recommendations",
+     `List (List.map recommendation_to_json
+              (low_trust_recommendations tracked)));
   ]
 
 (* ── Client capacity projection ─────────────────────── *)

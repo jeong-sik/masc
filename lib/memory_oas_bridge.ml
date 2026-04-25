@@ -466,28 +466,8 @@ let store_episode_from_snapshot
   in
   Oas.Memory.store_episode memory episode
 
-(** #10341: emit an [Agent_stress] event when an institution
-    failure carries a timeout-shaped [error_kind].
-
-    Pre-fix [Agent_stress] had a single emit site
-    ([keeper_keepalive.ml:1141]) that recorded only
-    [Failure_streak] for empty room presence — fleet-wide RFC-0001
-    Phase 0.2 stress detection saw 1 entry / 24h despite a 35%
-    keeper turn failure rate.  The [stress_kind] variant already
-    declared a [Timeout] case but no caller emitted it.
-
-    This adds the most direct wiring: when [store_failed_turn_episode]
-    receives an [error_kind] from the OAS internal-error vocabulary
-    that names a timeout-class failure, fan out one [Timeout]
-    stress event so dashboards reading [agent_stress.jsonl] see
-    fleet timeout pressure.
-
-    Bounded to three [error_kind] values that semantically ARE
-    timeouts.  Other failure modes (cascade_exhausted,
-    resumable_cli_session, accept_rejected, …) stay unmapped this
-    cycle — they need different stress kinds (Fallback_approval,
-    Parse_degraded, Task_released) whose semantics deserve their
-    own audit before being wired. *)
+(** #10341 (#10350): emit Agent_stress Timeout event for timeout-shaped
+    error_kind from institution failure path. *)
 let timeout_error_kinds =
   [ "oas_timeout_budget"; "turn_timeout"; "admission_queue_timeout" ]
 
@@ -504,15 +484,44 @@ let emit_stress_for_failure ~keeper_name ~error_kind =
       Agent_stress.record
         {
           agent_name = keeper_name;
-          (* No room context inside institution-failure path — the
-             receiver tolerates an empty string (existing
-             [Agent_stress.record] callsite at
-             keeper_keepalive.ml:1143 falls back to "" when the
-             keeper has not joined any room yet). *)
           room_id = "";
           kind = stress_kind;
           timestamp = Unix.gettimeofday ();
         }
+
+(** #10325 (#10339): per-failure-kind counter + structured learnings replacing
+    boilerplate. Was 97% identical static string before. *)
+let institution_episode_failure_kind_metric =
+  "masc_institution_episode_failure_kind_total"
+
+let () =
+  Prometheus.register_counter
+    ~name:institution_episode_failure_kind_metric
+    ~help:
+      "Total institution_episodes failure entries grouped by \
+       error_kind. Pre-#10325 the [learnings] field was a static \
+       boilerplate string in 97% of failure rows; this counter \
+       surfaces the actual failure-mode distribution so operators \
+       can see which kind dominates without grepping the JSONL.  \
+       Labels: error_kind."
+    ()
+
+let normalize_error_kind kind =
+  let trimmed = String.trim kind in
+  if trimmed = "" then "unspecified" else trimmed
+
+let failure_learnings ~error_kind ~error_preview =
+  let kind_part =
+    Printf.sprintf "failure_kind: %s" (normalize_error_kind error_kind)
+  in
+  let preview_part =
+    let trimmed = String.trim error_preview in
+    if trimmed = "" then None
+    else Some (Printf.sprintf "error_preview: %s" trimmed)
+  in
+  match preview_part with
+  | Some p -> [ kind_part; p ]
+  | None -> [ kind_part ]
 
 let store_failed_turn_episode
     ~(memory : Oas.Memory.t)
@@ -534,12 +543,18 @@ let store_failed_turn_episode
     Printf.sprintf "keeper turn %d failed (%s): %s" turn error_kind
       error_preview
   in
+  Prometheus.inc_counter institution_episode_failure_kind_metric
+    ~labels:[ ("error_kind", normalize_error_kind error_kind) ]
+    ();
   let ts = Time_compat.now () in
   let episode_id =
     Printf.sprintf "keeper-%s-t%d-failure-%d" keeper_name turn
       (int_of_float (ts *. 1000.0) mod 1_000_000)
   in
   emit_stress_for_failure ~keeper_name ~error_kind;
+  let learnings =
+    failure_learnings ~error_kind ~error_preview
+  in
   let episode : Oas.Memory.episode =
     {
       id = episode_id;
@@ -553,13 +568,16 @@ let store_failed_turn_episode
           ("event_type", `String "keeper_turn");
           ("institution_summary", `String summary);
           ("institution_outcome", `String "failure");
+          (* #10325: emit failure-specific learning tags from the
+             structured error metadata.  Generic boilerplate
+             ("persist failed keeper turns ...") was removed because
+             it filled 97% of failure entries with no per-failure
+             information, defeating the institution-memory contract.
+             When neither error_kind nor error_message has signal,
+             emit the explicit [NO_LEARNING] sentinel so downstream
+             readers can distinguish absent data from a placeholder. *)
           ( "learnings",
-            `List
-              [
-                `String
-                  "persist failed keeper turns so future runs can learn from \
-                   failure patterns";
-              ] );
+            `List (List.map (fun s -> `String s) learnings) );
           ( "context",
             `Assoc
               [

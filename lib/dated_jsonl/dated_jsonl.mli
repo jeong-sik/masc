@@ -47,3 +47,16 @@ val load_tail_lines : string -> max_lines:int -> string list
 (** [load_tail_lines file ~max_lines] efficiently reads the last [max_lines]
     from a large file without loading the whole file into memory.
     Reads backwards in chunks. Returns chronologically (oldest first). *)
+
+module For_testing : sig
+  val mutex : t -> Eio.Mutex.t
+  (** Expose the internal mutex so tests can verify sharing. *)
+
+  val mutex_for_base_dir : string -> Eio.Mutex.t
+  (** Lookup or insert the registry entry for [base_dir].
+      Equivalent to the default-mutex path of {!create}. *)
+
+  val registry_size : unit -> int
+  (** Number of distinct [base_dir] keys currently held by the
+      file-scope mutex registry. *)
+end

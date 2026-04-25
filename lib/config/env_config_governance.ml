@@ -11,32 +11,17 @@ module Inference = struct
   let timeout_seconds_int =
     max 1 (int_of_float timeout_seconds)
 
-  (** Background operator judge timeout.
-      Falls back to the global inference timeout unless explicitly overridden. *)
-  let operator_judge_timeout_seconds =
-    max 5
-      (get_int ~default:timeout_seconds_int "MASC_OPERATOR_JUDGE_TIMEOUT_SEC")
-
-  (** Dashboard governance judge timeout (seconds).
-      Reads [MASC_DASHBOARD_GOVERNANCE_JUDGE_TIMEOUT_SEC] when set; otherwise
-      falls back to a 60s default that gives glm-5-turbo room for cold-start.
-      Floored at 5 seconds.
-
-      Previously this silently used the global 30s inference timeout with no
-      override path, so the judge flapped offline whenever the upstream model
-      took longer than 30s — see dashboard "Timeout: Execution timed out
-      after 30.0s" reports. Now operators can raise/lower via env var, and
-      the default is high enough that one slow turn no longer marks the
-      judge offline. *)
-  let dashboard_governance_judge_timeout_seconds =
-    let dedicated =
-      get_int ~default:0 "MASC_DASHBOARD_GOVERNANCE_JUDGE_TIMEOUT_SEC"
-    in
-    let chosen =
-      if dedicated > 0 then dedicated
-      else max 300 timeout_seconds_int
-    in
-    max 5 chosen
+  (* #9629: [operator_judge_timeout_seconds] and
+     [dashboard_governance_judge_timeout_seconds] used to live here as
+     dedicated [int] configs.  The two judges
+     (governance compute_judgments / operator compute_judgments) now
+     resolve their timeout through [Env_config_oas_bridge] alongside
+     the other LLM-via-OAS-worker callers, so this module no longer
+     exposes them.  The legacy env-var names
+     ([MASC_OPERATOR_JUDGE_TIMEOUT_SEC],
+     [MASC_DASHBOARD_GOVERNANCE_JUDGE_TIMEOUT_SEC]) remain honoured
+     by [Env_config_oas_bridge.timeout_sec] as a per-caller alias
+     during the migration window. *)
 
   (** Enable inference response cache (L1+L2). *)
   let cache_enabled =

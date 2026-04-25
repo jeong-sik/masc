@@ -12,6 +12,7 @@ let () = Mirage_crypto_rng_unix.use_default ()
 open Alcotest
 
 module Auth = Masc_mcp.Auth
+module Prometheus = Masc_mcp.Prometheus
 module Types = Types
 
 (* ============================================================
@@ -821,6 +822,38 @@ let test_sanitized_dashboard_actor_for_request_uses_token_owner () =
         (Some "stable-admin")
         (SA.sanitized_dashboard_actor_for_request ~base_path:dir request))
 
+let test_dashboard_actor_invalid_token_fallback_is_counted () =
+  let module SA = Masc_mcp.Server_auth in
+  let dir = setup_test_room () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_room dir)
+    (fun () ->
+      ignore (Auth.enable_auth dir ~require_token:true ~agent_name:"bootstrap-admin");
+      let before =
+        Prometheus.metric_value_or_zero
+          Prometheus.metric_silent_dashboard_actor_fallback
+          ~labels:[ ("outcome", "error") ]
+          ()
+      in
+      let headers =
+        Httpun.Headers.of_list
+          [
+            ("authorization", "Bearer definitely-invalid-token");
+            ("x-masc-agent", "dashboard-admin");
+          ]
+      in
+      let request = Httpun.Request.create ~headers `GET "/dashboard" in
+      check (option string) "falls back to actor hint"
+        (Some "dashboard-admin")
+        (SA.dashboard_actor_for_request ~base_path:dir request);
+      let after =
+        Prometheus.metric_value_or_zero
+          Prometheus.metric_silent_dashboard_actor_fallback
+          ~labels:[ ("outcome", "error") ]
+          ()
+      in
+      check bool "counter increments" true (after > before))
+
 let test_resolve_agent_name_rejects_invalid_token () =
   let module SA = Masc_mcp.Server_auth in
   let dir = setup_test_room () in
@@ -1056,6 +1089,8 @@ let () =
         test_resolve_agent_name_rejects_internal_keeper_without_name;
       test_case "sanitized dashboard actor uses token owner" `Quick
         test_sanitized_dashboard_actor_for_request_uses_token_owner;
+      test_case "dashboard actor invalid token fallback is counted" `Quick
+        test_dashboard_actor_invalid_token_fallback_is_counted;
       test_case "invalid token fails" `Quick
         test_resolve_agent_name_rejects_invalid_token;
       test_case "read request uses token owner" `Quick

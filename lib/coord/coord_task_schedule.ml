@@ -7,6 +7,20 @@ open Types
 include Coord_utils
 include Coord_state
 
+(** #10421: stable lowercase string label for a [task_status] suitable
+    for embedding in JSONL diagnostic events.  Mirrors what the
+    [task_transition] from→to fields already use so dashboards can
+    join the new auto-release rows on identical vocabulary.  Pure;
+    exposed for tests. *)
+let task_status_label (status : Types.task_status) : string =
+  match status with
+  | Todo -> "todo"
+  | Claimed _ -> "claimed"
+  | InProgress _ -> "in_progress"
+  | AwaitingVerification _ -> "awaiting_verification"
+  | Done _ -> "done"
+  | Cancelled _ -> "cancelled"
+
 let task_is_claim_pool_candidate (task : Types.task) =
   match task.task_status with
   | Todo ->
@@ -360,9 +374,18 @@ let claim_next_r
       let released_task_id, working_tasks = match previous_claim with
         | None -> None, backlog.tasks
         | Some prev ->
+            (* #10421: include [reason] and [from_status] in the JSONL
+               event so the auto-release tail (43/24 release/claim
+               ratio, 5x hot-potato on task-056) is discriminable
+               without cross-referencing observe_task_transition.
+               [from_status] separates Claimed (most cases) from
+               InProgress (rare; signals a keeper that started work
+               and then re-entered claim_next).  Same reason vocabulary
+               the structured observation already uses. *)
+            let from_status = task_status_label prev.task_status in
             log_event config (Printf.sprintf
-              "{\"type\":\"task_claim_next_auto_release\",\"agent\":\"%s\",\"released_task\":\"%s\",\"ts\":\"%s\"}"
-              agent_name prev.id (now_iso ()));
+              "{\"type\":\"task_claim_next_auto_release\",\"agent\":\"%s\",\"released_task\":\"%s\",\"from_status\":\"%s\",\"reason\":\"prev_claim_implicit_replaced\",\"ts\":\"%s\"}"
+              agent_name prev.id from_status (now_iso ()));
             (* No broadcast — internal state transition, log_event suffices. *)
             let updated = List.map (fun (t : Types.task) ->
               if String.equal t.id prev.id then { t with task_status = Todo }

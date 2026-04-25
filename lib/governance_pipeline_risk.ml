@@ -199,9 +199,54 @@ let rec collect_string_list_values ~keys json =
   | `List values -> List.concat_map (collect_string_list_values ~keys) values
   | _ -> []
 
+(** Lazily-built set of canonical destructive substring patterns from
+    {!Eval_gate.destructive_patterns}. Used to discriminate "real" destructive
+    payloads (rm -rf, drop table, git push --force, ...) from
+    {!Eval_gate.detect_evasion} indicator hits (variable expansion, hex
+    escapes, ...).
+
+    PR-J (2026-04-25): Before this split, [Eval_gate.detect_destructive]
+    folded both pattern lists into a single [(string * string) option]
+    return.  A normal [keeper_bash echo "x: $(date)" && pwd] payload has
+    no destructive substring but trips the [\$[({]] evasion regex,
+    causing [classify_with_payload] to escalate every keeper subprocess
+    that uses command substitution to Critical — which is the bulk of
+    real-world keeper bash invocations.  Splitting the severity here lets
+    governance treat the two cases differently (Critical vs Medium). *)
+let _destructive_pattern_strings =
+  lazy (List.map fst Eval_gate.destructive_patterns)
+
+(** Outcome of inspecting a tool input payload for shell-style risk.
+    Strictly internal — drives {!classify_with_payload}'s level decision. *)
+type payload_severity =
+  | Payload_clean
+  | Payload_evasion_only
+  | Payload_destructive
+
+(** Walk every string value in [input] and report the worst severity hit.
+    Stops early once a destructive pattern is found.  An [Evasion_only]
+    result means the payload contains a suspicious meta-pattern (command
+    substitution, hex escape, base64 decode, ...) that does not match any
+    canonical destructive substring — these still warrant a confirmation
+    gate but should not collapse to Critical. *)
+let payload_severity input : payload_severity =
+  let dest_pats = Lazy.force _destructive_pattern_strings in
+  let strings = collect_all_string_values input in
+  let rec loop acc = function
+    | [] -> acc
+    | text :: rest ->
+        (match Eval_gate.detect_destructive text with
+         | None -> loop acc rest
+         | Some (pat, _) ->
+             if List.mem pat dest_pats then Payload_destructive
+             else loop Payload_evasion_only rest)
+  in
+  loop Payload_clean strings
+
 let has_destructive_payload input =
-  collect_all_string_values input
-  |> List.exists (fun text -> Eval_gate.detect_destructive text <> None)
+  match payload_severity input with
+  | Payload_destructive -> true
+  | _ -> false
 
 let has_empty_overwrite_payload input =
   collect_string_values ~keys:empty_overwrite_payload_keys input
@@ -224,10 +269,19 @@ let classify_with_metadata ~tool_name =
   | _ -> None
 
 let classify_with_payload ~tool_name ~input =
-  if has_destructive_payload input then Some Critical
-  else if List.mem tool_name overwrite_sensitive_tools && has_empty_overwrite_payload input
-  then Some Critical
-  else None
+  match payload_severity input with
+  | Payload_destructive -> Some Critical
+  | Payload_evasion_only ->
+      (* PR-J: command substitution / hex escape / base64 decode hits in the
+         payload don't auto-imply destructive intent (e.g. `$(date -u +%FT%TZ)`
+         in a CI helper).  Surface them at Medium so a confirmation gate
+         fires only at higher governance levels, instead of unconditionally
+         flagging every script that uses normal shell features as Critical. *)
+      Some Medium
+  | Payload_clean ->
+      if List.mem tool_name overwrite_sensitive_tools && has_empty_overwrite_payload input
+      then Some Critical
+      else None
 
 let baseline_risk ~tool_name ~input =
   match classify_with_metadata ~tool_name with

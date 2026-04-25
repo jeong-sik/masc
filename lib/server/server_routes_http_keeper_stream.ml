@@ -91,9 +91,13 @@ let execute_keeper_stream_tool ~sw ~clock ?auth_token:_ state ~agent_name ~argum
     match state.Mcp_server.fs with
     | Some fs ->
         (try
+           let telemetry_error_kind =
+             if success then None else Some "tool_failure"
+           in
            Telemetry_eio.track_tool_called ~fs state.Mcp_server.room_config
              ~tool_name:"masc_keeper_msg" ~agent_id:agent_name ~success ~duration_ms
-             ~source:(Tool_registry.string_of_source Keeper_internal) ()
+             ~source:(Tool_registry.string_of_source Keeper_internal)
+             ?error_kind:telemetry_error_kind ?error_message:error_msg ()
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
@@ -317,9 +321,13 @@ let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ state
     match state.Mcp_server.fs with
     | Some fs ->
         (try
+           let telemetry_error_kind =
+             if success then None else Some "tool_failure"
+           in
            Telemetry_eio.track_tool_called ~fs state.Mcp_server.room_config
              ~tool_name:"masc_keeper_msg" ~agent_id:agent_name ~success
-             ~duration_ms ~source:(Tool_registry.string_of_source Keeper_internal) ()
+             ~duration_ms ~source:(Tool_registry.string_of_source Keeper_internal)
+             ?error_kind:telemetry_error_kind ?error_message:error_msg ()
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->

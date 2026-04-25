@@ -110,6 +110,10 @@ let test_event_tool_called () =
     session_id = Some "mcp-session-1";
     operation_id = Some "op-1";
     worker_run_id = Some "run-1";
+    error_kind = Some "timeout";
+    error_message = Some "timed out after 30s";
+    exit_code = None;
+    stderr_excerpt = None;
   } in
   match e with
   | Telemetry_eio.Tool_called r ->
@@ -117,7 +121,10 @@ let test_event_tool_called () =
       check bool "success" true r.success;
       check (option string) "session_id" (Some "mcp-session-1") r.session_id;
       check (option string) "operation_id" (Some "op-1") r.operation_id;
-      check (option string) "worker_run_id" (Some "run-1") r.worker_run_id
+      check (option string) "worker_run_id" (Some "run-1") r.worker_run_id;
+      check (option string) "error_kind" (Some "timeout") r.error_kind;
+      check (option string) "error_message" (Some "timed out after 30s")
+        r.error_message
   | _ -> fail "expected Tool_called"
 
 (* ============================================================

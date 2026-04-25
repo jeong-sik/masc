@@ -143,6 +143,115 @@ let explicit_keeper_name raw_name =
   else if Keeper_config.validate_name trimmed then Some trimmed
   else None
 
+type name_bundle = {
+  persona_name : string;
+  keeper_name : string;
+  agent_name : string;
+  credential_stem : string;
+}
+
+type validation_error =
+  | Empty_input
+  | Persona_not_found of {
+      input : string;
+      resolved : string;
+      searched : string;
+    }
+  | Credential_missing of {
+      input : string;
+      resolved : string;
+      searched : string;
+    }
+  | Name_ambiguous of { input : string; candidates : string list }
+  | Ephemeral_suffix_rejected of { input : string; stripped : string }
+
+let pp_validation_error fmt = function
+  | Empty_input -> Format.fprintf fmt "Empty_input"
+  | Persona_not_found { input; resolved; searched } ->
+      Format.fprintf fmt
+        "Persona_not_found { input=%S; resolved=%S; searched=%S }" input
+        resolved searched
+  | Credential_missing { input; resolved; searched } ->
+      Format.fprintf fmt
+        "Credential_missing { input=%S; resolved=%S; searched=%S }" input
+        resolved searched
+  | Name_ambiguous { input; candidates } ->
+      Format.fprintf fmt "Name_ambiguous { input=%S; candidates=[%s] }" input
+        (String.concat "; " (List.map (Printf.sprintf "%S") candidates))
+  | Ephemeral_suffix_rejected { input; stripped } ->
+      Format.fprintf fmt
+        "Ephemeral_suffix_rejected { input=%S; stripped=%S }" input stripped
+
+let show_validation_error err =
+  let buf = Buffer.create 64 in
+  let fmt = Format.formatter_of_buffer buf in
+  pp_validation_error fmt err;
+  Format.pp_print_flush fmt ();
+  Buffer.contents buf
+
+(* Strip a generated nickname suffix (adj-animal[-hex4]) once if present.
+   Returns the canonical agent prefix when applicable, else the input. *)
+let strip_nickname_once name =
+  if Nickname.is_generated_nickname name then
+    match Nickname.extract_agent_type name with
+    | Some prefix when Keeper_config.validate_name prefix -> prefix
+    | _ -> name
+  else name
+
+let normalize_all_names ~input_agent_name ?(base_path = "")
+    ?(check_persona = false) ?(check_credential = false) () :
+    (name_bundle, validation_error) result =
+  let trimmed = String.trim input_agent_name in
+  if trimmed = "" then Error Empty_input
+  else
+    match canonical_keeper_name trimmed with
+    | None ->
+        let masc_dir = Common.masc_dir_from_base_path ~base_path in
+        Error
+          (Persona_not_found
+             {
+               input = input_agent_name;
+               resolved = trimmed;
+               searched = Filename.concat (Filename.concat masc_dir "personas") trimmed;
+             })
+    | Some keeper_first_pass ->
+        let keeper_name = strip_nickname_once keeper_first_pass in
+        let persona_name = keeper_name in
+        let credential_stem = keeper_name in
+        let bundle =
+          {
+            persona_name;
+            keeper_name;
+            agent_name = input_agent_name;
+            credential_stem;
+          }
+        in
+        let masc_dir () = Common.masc_dir_from_base_path ~base_path in
+        let persona_check () =
+          if not check_persona then Ok ()
+          else
+            let path = Filename.concat (Filename.concat (masc_dir ()) "personas") persona_name in
+            if Sys.file_exists path then Ok ()
+            else
+              Error
+                (Persona_not_found
+                   { input = input_agent_name; resolved = persona_name; searched = path })
+        in
+        let credential_check () =
+          if not check_credential then Ok ()
+          else
+            let path =
+              Filename.concat (Auth.agents_dir base_path) (credential_stem ^ ".json")
+            in
+            if Sys.file_exists path then Ok ()
+            else
+              Error
+                (Credential_missing
+                   { input = input_agent_name; resolved = credential_stem; searched = path })
+        in
+        Result.bind (persona_check ()) (fun () ->
+            Result.bind (credential_check ()) (fun () -> Ok bundle))
+
 type parsed_identity = {
   keeper_name : string;
   agent_name : string;

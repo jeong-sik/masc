@@ -652,11 +652,16 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
            with
            | None -> ()
            | Some result ->
-               if result.removed > 0 || result.errors <> [] then
+               if result.removed > 0 || result.errors <> [] then begin
                  Log.Server.info
                    "Sandbox cleanup: scanned=%d removed=%d errors=%d"
                    result.scanned result.removed
-                   (List.length result.errors));
+                   (List.length result.errors);
+                 List.iter
+                   (fun err ->
+                     Log.Server.warn "Sandbox cleanup error: %s" err)
+                   result.errors
+               end);
           (* Periodic JSONL prune: every 24h, clean dated JSONL files *)
           let now = Unix.gettimeofday () in
           if now -. !last_prune >= Masc_time_constants.day then begin

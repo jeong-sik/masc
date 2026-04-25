@@ -5,6 +5,7 @@ module Keeper_types = Masc_mcp.Keeper_types
 module KSM = Masc_mcp.Keeper_state_machine
 module Audit = Masc_mcp.Keeper_transition_audit
 module Meas = Masc_mcp.Keeper_measurement
+module Pages = Masc_mcp.Server_routes_http_pages
 module Json = Yojson.Safe.Util
 
 let bp = "/tmp/test"
@@ -45,6 +46,59 @@ let make_meta name =
   match Keeper_types.meta_of_json json with
   | Ok meta -> meta
   | Error err -> Alcotest.fail ("make_meta failed: " ^ err)
+
+let test_bonsai_keepers_summary_uses_scoped_registry () =
+  let base_path = temp_base_path "bonsai-summary" in
+  let other_base_path = temp_base_path "bonsai-summary-other" in
+  Fun.protect
+    ~finally:(fun () ->
+      R.unregister ~base_path "live-keeper";
+      R.unregister ~base_path:other_base_path "foreign-keeper";
+      rm_rf base_path;
+      rm_rf other_base_path)
+    (fun () ->
+      let base_meta = make_meta "live-keeper" in
+      let meta =
+        { base_meta with
+          max_context_override = Some 1000;
+          runtime =
+            { base_meta.runtime with
+              usage =
+                { base_meta.runtime.usage with
+                  total_turns = 7;
+                  last_total_tokens = 250;
+                  last_latency_ms = 1234;
+                };
+            };
+        }
+      in
+      ignore (R.register ~base_path "live-keeper" meta);
+      ignore
+        (R.register
+           ~base_path:other_base_path
+           "foreign-keeper"
+           (make_meta "foreign-keeper"));
+      R.record_tool_use
+        ~base_path
+        "live-keeper"
+        ~tool_name:"keeper_tasks_list"
+        ~success:true;
+      let summary = Pages.keepers_summary_from_registry ~base_path in
+      check int "scoped keeper count" 1 (List.length summary.keepers);
+      match summary.keepers with
+      | [ keeper ] ->
+          check string "live name" "live-keeper" keeper.name;
+          check int "turns from runtime usage" 7 keeper.turn;
+          check int "ctx pct from runtime usage" 25 keeper.ctx_pct;
+          check int "latency from runtime usage" 1234 keeper.latency_ms;
+          check
+            (option string)
+            "latest tool"
+            (Some "keeper_tasks_list")
+            keeper.last_tool;
+          check bool "mock keeper omitted" true
+            (not (String.equal keeper.name "luna"))
+      | _ -> fail "expected exactly one scoped keeper")
 
 (** Wrap each test body in Eio_main.run for Eio.Mutex support. *)
 let eio_test name fn =
@@ -1094,6 +1148,8 @@ let () =
     [
       ( "basic",
         [
+          eio_test "bonsai summary uses scoped registry"
+            test_bonsai_keepers_summary_uses_scoped_registry;
           eio_test "register and get" test_register_and_get;
           eio_test "register offline and start" test_register_offline_and_start;
           eio_test "register restarting and start" test_register_restarting_and_start;

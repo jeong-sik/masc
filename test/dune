@@ -125,14 +125,18 @@
         test_stay_silent_loop_detector
         test_oas_compat_cascade_fallback
         test_heuristic_metrics_boot_wireup
+        test_heuristic_metrics_periodic_flush_10348
         test_cap_blocker_structured_error
         test_context_overflow_action_tracker
         test_keeper_fs_edit_patch
         test_keeper_docker_read
+        test_keeper_path_ssot
         test_keeper_github_read_only
         test_worktree_live_context
         test_worktree_status_single_flight_9632
         test_tool_input_validation
+        test_failure_learnings_10325
+        test_agent_stress_emit_10341
         test_autoresearch_codegen
         test_autoresearch_oas_primitives
         test_autoresearch_target_score
@@ -170,10 +174,12 @@
         test_keeper_overflow_recovery
         test_team_memory
         test_telemetry_unified
+        test_telemetry_error_occurred_wire_10358
         test_keeper_topk_llm
         test_warn_root_causes
         test_memory_hooks
         test_agent_stress_timeout_wire_10341
+        test_institution_episodes_failure_learnings_10325
         test_mid_turn_resume
         test_lockfree_atomic)
  (modules test_attribution test_attribution_tagged test_autoresearch_result_bridge test_dashboard_attribution test_masc_runtime_events test_room test_room_state_recovery test_types test_exec_tap test_auth test_auth_doctor test_auth_login test_audit_log test_governance_anomaly test_http_negotiation
@@ -270,14 +276,18 @@
           test_stay_silent_loop_detector
           test_oas_compat_cascade_fallback
           test_heuristic_metrics_boot_wireup
+          test_heuristic_metrics_periodic_flush_10348
           test_cap_blocker_structured_error
           test_context_overflow_action_tracker
           test_keeper_fs_edit_patch
           test_keeper_docker_read
+          test_keeper_path_ssot
           test_keeper_github_read_only
           test_worktree_live_context
           test_worktree_status_single_flight_9632
           test_tool_input_validation
+          test_failure_learnings_10325
+          test_agent_stress_emit_10341
           test_autoresearch_codegen
           test_autoresearch_oas_primitives
           test_autoresearch_target_score
@@ -315,10 +325,12 @@
           test_keeper_overflow_recovery
           test_team_memory
           test_telemetry_unified
+          test_telemetry_error_occurred_wire_10358
           test_keeper_topk_llm
           test_warn_root_causes
           test_memory_hooks
           test_agent_stress_timeout_wire_10341
+          test_institution_episodes_failure_learnings_10325
           test_mid_turn_resume
           test_lockfree_atomic
           )
@@ -343,8 +355,18 @@
  (libraries masc_test_deps))
 
 (test
+ (name test_telemetry_task_transition_10358)
+ (modules test_telemetry_task_transition_10358)
+ (libraries masc_test_deps))
+
+(test
  (name test_base_path_prod_guard)
  (modules test_base_path_prod_guard)
+ (libraries masc_test_deps))
+
+(test
+ (name test_dashboard_keeper_metrics_10286)
+ (modules test_dashboard_keeper_metrics_10286)
  (libraries masc_test_deps))
 
 (test
@@ -440,6 +462,7 @@
     (run %{test}))))
  (libraries masc_test_deps))
 
+
 ; #10091: dedicated stanza so MASC_BASE_PATH is set BEFORE the
 ; test executable loads — the top-level Masc_mcp init includes
 ; [Cdal_verdict_gate.default_base_path] which triggers the #9903
@@ -525,6 +548,18 @@
     (run %{test}))))
  (libraries masc_test_deps))
 
+; #9629: judge callers (Governance_judge, Operator_judge) added to
+; the OAS bridge SSOT.  Dedicated stanza for the same MASC_BASE_PATH
+; reason as #10094.
+(test
+ (name test_oas_bridge_judge_callers_9629)
+ (modules test_oas_bridge_judge_callers_9629)
+ (action
+  (setenv MASC_BASE_PATH /tmp/test-oas-bridge-judge-callers-9629
+   (setenv MASC_BASE_PATH_INPUT /tmp/test-oas-bridge-judge-callers-9629
+    (run %{test}))))
+ (libraries masc_test_deps))
+
 ; #10115: dedicated stanza so MASC_BASE_PATH is set BEFORE the
 ; test executable loads. Same rationale as #10091/#10097/#10101.
 (test
@@ -583,6 +618,7 @@
         test_keeper_cli_mcp_config
         test_board_vote_quarantine
         test_keeper_identity_parse
+        test_keeper_identity_normalize
         test_worker_runtime
         test_capability_registry
         test_tool_local_runtime_verify
@@ -624,6 +660,8 @@
         test_keeper_runtime_denylist
         test_keeper_runtime_config_ssot
         test_dashboard_render_timing_9766
+        test_task_status_label_10421
+        test_personality_field_diff_10269
         test_keeper_task_dispatch
         test_keeper_tag_dispatch
         test_autoresearch_knowledge
@@ -761,6 +799,7 @@
         test_keeper_cli_mcp_config
         test_board_vote_quarantine
         test_keeper_identity_parse
+        test_keeper_identity_normalize
         test_worker_runtime
         test_capability_registry
         test_tool_local_runtime_verify
@@ -802,6 +841,8 @@
         test_keeper_runtime_denylist
         test_keeper_runtime_config_ssot
         test_dashboard_render_timing_9766
+        test_task_status_label_10421
+        test_personality_field_diff_10269
         test_keeper_task_dispatch
         test_keeper_tag_dispatch
         test_autoresearch_knowledge
@@ -1407,6 +1448,17 @@
  (name test_dated_jsonl)
  (modules test_dated_jsonl)
  (libraries dated_jsonl fs_compat alcotest eio eio_main yojson unix))
+
+(test
+ (name test_goal_phase_awaiting_verification_10411)
+ (modules test_goal_phase_awaiting_verification_10411)
+ (libraries masc_mcp alcotest))
+
+(test
+ (name test_dated_jsonl_mutex_registry_10372)
+ (modules test_dated_jsonl_mutex_registry_10372)
+ (libraries dated_jsonl fs_compat alcotest eio eio_main yojson unix))
+
 
 ; ============================================================
 ; Special: Heartbeat/keeper minimal deps

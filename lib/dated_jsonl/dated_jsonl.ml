@@ -19,8 +19,52 @@ type t = {
   mutex : Eio.Mutex.t;
 }
 
+(* #10372: file-scope mutex registry keyed on canonical [base_dir].
+
+   Pre-fix every [create] minted a fresh [Eio.Mutex.t]. When two
+   stores pointed at the same JSONL directory their mutexes were
+   distinct, so concurrent [append] calls did not coordinate.
+   [oas_sse_bridge.ml:483] in particular re-creates the store on
+   every relay error while another fiber still holds the previous
+   instance, opening a window where 4-8 KB [oas_worker:build]
+   payloads interleave inside the same line — POSIX [O_APPEND]
+   only guarantees atomicity up to PIPE_BUF (4096 B Linux,
+   512 B macOS) and [output_string] is buffered, so the kernel
+   sees several [write(2)] calls per logical line.
+
+   The registry forces every store rooted at the same directory
+   to share one mutex. An explicit [?mutex] argument still wins,
+   keeping test isolation patterns intact. *)
+let registry : (string, Eio.Mutex.t) Hashtbl.t = Hashtbl.create 16
+let registry_guard = Stdlib.Mutex.create ()
+
+let canonicalize_base_dir base_dir =
+  try Unix.realpath base_dir
+  with Unix.Unix_error _ ->
+    let len = String.length base_dir in
+    if len > 1 && base_dir.[len - 1] = '/' then
+      String.sub base_dir 0 (len - 1)
+    else base_dir
+
+let mutex_for_base_dir base_dir =
+  let canon = canonicalize_base_dir base_dir in
+  Stdlib.Mutex.lock registry_guard;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock registry_guard)
+    (fun () ->
+      match Hashtbl.find_opt registry canon with
+      | Some m -> m
+      | None ->
+          let m = Eio.Mutex.create () in
+          Hashtbl.add registry canon m;
+          m)
+
 let create ~base_dir ?mutex () =
-  let mutex = match mutex with Some m -> m | None -> Eio.Mutex.create () in
+  let mutex =
+    match mutex with
+    | Some m -> m
+    | None -> mutex_for_base_dir base_dir
+  in
   { base_dir; mutex }
 
 let base_dir t = t.base_dir
@@ -314,3 +358,15 @@ let prune t ~days =
   end
 
 (* Duplicate count_entries removed — canonical definition at line 225 *)
+
+module For_testing = struct
+  let mutex t = t.mutex
+
+  let mutex_for_base_dir = mutex_for_base_dir
+
+  let registry_size () =
+    Stdlib.Mutex.lock registry_guard;
+    Fun.protect
+      ~finally:(fun () -> Stdlib.Mutex.unlock registry_guard)
+      (fun () -> Hashtbl.length registry)
+end

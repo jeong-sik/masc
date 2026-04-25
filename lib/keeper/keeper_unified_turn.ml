@@ -2258,16 +2258,12 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               ~context_max:0
           in
           let turn_cost =
-            if Keeper_unified_metrics.usage_trust_is_trusted
-                 usage_trust_for_cost
-            then
-              let pricing =
-                Llm_provider.Pricing.pricing_for_model used_model_id
-              in
-              Llm_provider.Pricing.estimate_cost ~pricing
-                ~input_tokens:result.usage.input_tokens
-                ~output_tokens:result.usage.output_tokens ()
-            else 0.0
+            Keeper_unified_metrics.estimate_trusted_usage_cost_usd
+              ~usage_trusted:
+                (Keeper_unified_metrics.usage_trust_is_trusted
+                   usage_trust_for_cost)
+              ~model:used_model_id
+              result.usage
           in
           let lifecycle =
             apply_post_turn_lifecycle ~base_dir

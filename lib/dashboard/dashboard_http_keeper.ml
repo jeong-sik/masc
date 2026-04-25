@@ -1430,9 +1430,8 @@ let keeper_config_json (config : Coord.config) (name : string)
       in
       let tools_access =
         let allowed = Keeper_exec_tools.keeper_allowed_tool_names m in
-        let masc_tools =
-          allowed
-          |> List.filter (fun n -> String.starts_with ~prefix:"masc_" n)
+        let masc_tool_count =
+          List.length (Keeper_exec_tools.keeper_masc_tool_names m)
         in
         let tool_preset = Keeper_types.tool_access_preset m.tool_access in
         let tool_also_allow = Keeper_types.tool_access_also_allowlist m.tool_access in
@@ -1459,9 +1458,9 @@ let keeper_config_json (config : Coord.config) (name : string)
                  (Option.value ~default:[] custom_allowlist)));
           ("resolved_allowlist", `List (List.map (fun s -> `String s) allowed));
           ("tool_denylist", `List (List.map (fun s -> `String s) m.tool_denylist));
-          ("active_masc_tool_count", `Int (List.length masc_tools));
+          ("active_masc_tool_count", `Int masc_tool_count);
           ("active_keeper_tool_count",
-            `Int (List.length allowed - List.length masc_tools));
+            `Int (List.length allowed - masc_tool_count));
           ("total_active", `Int (List.length allowed));
         ]
       in

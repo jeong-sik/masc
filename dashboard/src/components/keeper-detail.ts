@@ -271,17 +271,19 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
 
   return html`
     <div class="px-6 pt-4">
-      <div class="rounded border ${toneClass} px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-[var(--text-body)]">
+      <div class="rounded border ${toneClass} px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-[var(--text-body)]" role="status" aria-label="키퍼 상태 경고">
         ${keeper.paused
           ? html`<span class="inline-flex items-center rounded-sm px-2 py-0.5 text-2xs font-semibold bg-[var(--warn-14)] text-[var(--warn)]">일시정지</span>
             ${hasActivitySignal ? html`<span class="text-[var(--text-muted)]">${renderActivitySignal()}</span>` : null}
             <button
               class="inline-flex items-center rounded px-2 py-0.5 text-2xs font-medium bg-[var(--white-6)] hover:bg-[var(--white-8)] text-[var(--text-strong)] transition-colors disabled:opacity-50"
+              aria-label="키퍼 재개"
               disabled=${directiveLoading.value}
               onClick=${() => handleDirective('resume')}
             >재개</button>`
           : html`<button
               class="inline-flex items-center rounded px-2 py-0.5 text-2xs font-medium bg-[var(--white-6)] hover:bg-[var(--white-8)] text-[var(--text-strong)] transition-colors disabled:opacity-50"
+              aria-label="키퍼 일시정지"
               disabled=${directiveLoading.value}
               onClick=${() => handleDirective('pause')}
             >일시정지</button>`}
@@ -400,6 +402,7 @@ function KeeperLifecycleButtons({ keeper, effectiveStatus }: { keeper: Keeper; e
 
   if (isOffline) return html`
     <button type="button"
+      aria-label="${keeper.name} 기동"
       class="py-1 px-3 rounded text-2xs font-semibold cursor-pointer border border-[rgba(34,197,94,0.4)] bg-[var(--emerald-8)] text-[var(--ok)] hover:bg-[rgba(34,197,94,0.15)] transition-colors"
       onClick=${() => {
         void (async () => {
@@ -420,6 +423,7 @@ function KeeperLifecycleButtons({ keeper, effectiveStatus }: { keeper: Keeper; e
 
   if (isRunning) return html`
     <button type="button"
+      aria-label="${keeper.name} 종료"
       class="py-1 px-3 rounded text-2xs font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--rose-light)] hover:bg-[var(--bad-soft)] transition-colors"
       onClick=${() => {
         void (async () => {
@@ -834,12 +838,14 @@ export function KeeperDetailPage() {
           <div class="flex items-center gap-2">
             <button
               type="button"
+              aria-label="${keeper.name} 컨텍스트 비우기"
               class="py-1 px-3 rounded text-2xs font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--rose-light)] hover:bg-[var(--bad-soft)] transition-colors"
               onClick=${() => setClearDialogOpen(true)}
             >비우기</button>
             <button
               type="button"
               disabled=${purgePending}
+              aria-label="${keeper.name} 완전 삭제"
               class="py-1 px-3 rounded text-2xs font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--rose-light)] hover:bg-[var(--bad-soft)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               onClick=${submitPurgeKeeper}
             >${purgePending ? '삭제 중...' : '완전 삭제'}</button>

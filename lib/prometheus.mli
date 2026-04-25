@@ -83,10 +83,12 @@ val metric_keeper_context_max_observed : string
 val metric_keeper_turn_starts : string
 val metric_keeper_turn_reattempts : string
 val metric_keeper_turn_regressions : string
+val metric_keeper_turn_livelock_blocks : string
 (** #10121: keeper turn livelock observer counters.  Labels:
     [keeper].  Re-attempt = same turn id started again before
     the counter advanced; regression = turn id moved strictly
-    backwards (write_meta race symptom — #9733). *)
+    backwards (write_meta race symptom — #9733); livelock blocks
+    are labeled by [keeper, reason]. *)
 val metric_keeper_turn_latency_bucket : string
 (** #9943: per-keeper turn latency distribution.  Labels:
     [keeper, bucket].  Bucket vocabulary:

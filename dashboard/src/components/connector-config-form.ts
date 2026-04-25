@@ -554,7 +554,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
                           target="_blank"
                           rel="noopener noreferrer"
                           class="ml-1 underline hover:text-[var(--accent)]"
-                        >열기 ↗</a>
+                        >열기 ↗<span class="sr-only"> (새 창)</span></a>
                       `
                     : null}
                 </div>

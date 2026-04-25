@@ -44,7 +44,11 @@ function previewCard(preview: LinkPreview) {
         ${description
           ? html`<div class="mt-1 line-clamp-3 text-2xs leading-relaxed text-[var(--text-muted)]">${description}</div>`
           : null}
+        ${description
+          ? html`<div class="mt-1 line-clamp-3 text-2xs leading-relaxed text-[var(--text-muted)]">${description}</div>`
+          : null}
       </div>
+      <span class="sr-only">(새 창)</span>
     </a>
   `
 }

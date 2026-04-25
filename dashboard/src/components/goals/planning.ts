@@ -57,6 +57,7 @@ function ExternalDocLink({ href, label }: { href: string; label: string }) {
     >
       ${label}
       <span aria-hidden="true">\u2197</span>
+      <span class="sr-only">(\uc0c8 \ucc3d)</span>
     </a>
   `
 }

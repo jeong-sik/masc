@@ -256,7 +256,7 @@ export function BuildIdentityBadge() {
                         class="text-right font-bold text-[color:var(--text-strong)] underline decoration-dotted underline-offset-2 decoration-[color:var(--text-dim)] hover:decoration-[color:var(--accent)] hover:text-[color:var(--accent)]"
                         data-build-commit-link
                         title="GitHub에서 이 커밋 보기"
-                      >${text} ↗</a>`
+                      >${text} ↗<span class="sr-only"> (새 창)</span></a>`
                     : html`<strong class="text-[color:var(--text-strong)] text-right">${text}</strong>`
                 })()}
               </div>

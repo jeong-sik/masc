@@ -78,7 +78,8 @@ function ExternalLinkChip({ href, label }: { href: string; label: string }) {
       class="inline-flex items-center gap-1 rounded border border-[var(--white-8)] bg-[var(--white-2)] px-1.5 py-0.5 text-3xs text-[var(--text-body)] transition-colors hover:bg-[var(--white-8)]"
     >
       ${label}
-      <${ExternalLink} size=${10} />
+      <${ExternalLink} size=${10} aria-hidden="true" />
+      <span class="sr-only">(새 창)</span>
     </a>
   `
 }

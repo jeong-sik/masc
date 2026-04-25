@@ -11,6 +11,37 @@ type t =
 
 let absurd_token_threshold = 1_000_000
 
+(* #9959: Anthropic prompt caching minimum cacheable input size.
+
+   Anthropic's prompt caching (the [cache_control] field on
+   message content blocks) only kicks in when the cached prefix
+   contains at least 1024 input tokens for sonnet/opus and 2048
+   for haiku.  Below that threshold,
+   [cache_creation_input_tokens] and [cache_read_input_tokens]
+   legitimately stay at zero.  The conservative minimum (1024)
+   avoids false positives on tiny keepalive prompts while still
+   catching the #9959 case where 1078/1078 turn rows (every
+   claude_code:auto turn over a full day) reported
+   cache_creation = cache_read = 0 despite typical keeper system
+   prompts running 5K-30K tokens. *)
+let anthropic_cache_min_input_tokens = 1024
+
+let model_uses_anthropic_caching ~(model_used : string)
+    ~(resolved_model_id : string) : bool =
+  let s = String.lowercase_ascii (model_used ^ "|" ^ resolved_model_id) in
+  let contains substr =
+    let n = String.length s and m = String.length substr in
+    if m = 0 || m > n then false
+    else
+      let rec loop i =
+        if i + m > n then false
+        else if String.sub s i m = substr then true
+        else loop (i + 1)
+      in
+      loop 0
+  in
+  contains "claude" || contains "anthropic"
+
 let is_trusted = function
   | Usage_trusted -> true
   | Usage_missing | Usage_untrusted _ -> false
@@ -66,6 +97,22 @@ let classify ~(usage_reported : bool)
       add "output_tokens_gt_1m";
     if context_max > 0 && usage.input_tokens > context_max * 2 then
       add "input_tokens_gt_2x_context_max";
+    (* #9959 facet 1: Anthropic prompt caching silently disabled.
+       claude_code:auto and similar Anthropic-routed models report
+       [cache_creation_input_tokens = cache_read_input_tokens = 0]
+       across every turn even though keeper system prompts run far
+       above the minimum cacheable size.  This costs roughly 90%
+       of the input-token bill the cache would otherwise eliminate.
+       We classify it as an anomaly per turn whose input passes the
+       cache-eligibility threshold; dashboards convert that into a
+       per-keeper rate and alert when the rate is sustained
+       (one-shot anomalies on tiny prompts are correctly noise). *)
+    if
+      model_uses_anthropic_caching ~model_used ~resolved_model_id
+      && usage.input_tokens >= anthropic_cache_min_input_tokens
+      && usage.cache_creation_input_tokens = 0
+      && usage.cache_read_input_tokens = 0
+    then add "anthropic_caching_likely_disabled";
     match List.rev !reasons with
     | [] -> Usage_trusted
     | reasons -> Usage_untrusted reasons

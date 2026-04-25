@@ -2,6 +2,7 @@ open Alcotest
 
 module KEC = Masc_mcp.Keeper_exec_context
 module KCC = Masc_mcp.Keeper_context_core
+module KAR = Masc_mcp.Keeper_agent_run
 module KMP = Masc_mcp.Keeper_memory_policy
 module KT = Masc_mcp.Keeper_types
 module KR = Masc_mcp.Keeper_registry
@@ -1799,6 +1800,127 @@ let test_compact_if_needed_records_saved_tokens_metric () =
     (KCC.token_count compacted_ctx < KCC.token_count ctx);
   check bool "saved tokens metric increased" true (after_metric > before_metric)
 
+let test_pre_dispatch_resume_checkpoint_uses_loaded_working_context () =
+  let meta = make_gate_only_meta () in
+  let ctx =
+    KEC.create ~system_prompt:"sp" ~max_tokens:4096
+    |> fun c -> KEC.append c (Agent_sdk.Types.user_msg "sanitized user")
+    |> KEC.sync_oas_context
+  in
+  let checkpoint =
+    {
+      (KEC.checkpoint_of_context ctx) with
+      turn_count = 7;
+      messages = KEC.messages_of_context ctx;
+    }
+  in
+  let ctx = { ctx with checkpoint } in
+  let save_called = ref false in
+  let result =
+    KAR.prepare_resume_checkpoint_for_dispatch
+      ~meta
+      ~now_ts:1000.0
+      ~loaded_checkpoint_present:true
+      ~save_checkpoint:(fun _ ->
+        save_called := true;
+        Error "unexpected save without compaction")
+      ctx
+  in
+  check bool "no compaction save for below-threshold context" false !save_called;
+  check bool "below threshold does not apply compaction" false result.applied;
+  check bool "resume checkpoint is present for loaded context" true
+    (Option.is_some result.resume_checkpoint);
+  let resume_checkpoint =
+    match result.resume_checkpoint with
+    | Some checkpoint -> checkpoint
+    | None -> Alcotest.fail "expected resume checkpoint"
+  in
+  check int "resume turn count comes from sanitized working context" 7
+    resume_checkpoint.turn_count;
+  check int "resume messages come from sanitized working context"
+    (List.length (KEC.messages_of_context ctx))
+    (List.length resume_checkpoint.messages);
+  let fresh_result =
+    KAR.prepare_resume_checkpoint_for_dispatch
+      ~meta
+      ~now_ts:1000.0
+      ~loaded_checkpoint_present:false
+      ~save_checkpoint:(fun _ -> Error "fresh context should not save")
+      ctx
+  in
+  check bool "fresh context does not force Agent.resume" false
+    (Option.is_some fresh_result.resume_checkpoint)
+
+let test_pre_dispatch_resume_checkpoint_saves_compacted_context () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let now_ts = 30_000.0 in
+  let base_meta =
+    make_gate_only_meta
+      ~last_continuity_update_ts:now_ts
+      ~cooldown_sec:3600
+      ()
+  in
+  let meta =
+    {
+      base_meta with
+      compaction =
+        {
+          base_meta.compaction with
+          ratio_gate = 0.1;
+        };
+    }
+  in
+  let long_text = String.make emergency_test_text_length 'x' in
+  let ctx =
+    KEC.create ~system_prompt:"sp" ~max_tokens:1000
+    |> fun c -> KEC.append c (Agent_sdk.Types.user_msg long_text)
+    |> fun c -> KEC.append c (Agent_sdk.Types.assistant_msg long_text)
+    |> KEC.sync_oas_context
+  in
+  let checkpoint =
+    {
+      (KEC.checkpoint_of_context ctx) with
+      turn_count = 11;
+      messages = KEC.messages_of_context ctx;
+    }
+  in
+  let ctx = { ctx with checkpoint } in
+  let save_called = ref false in
+  let saved_message_count = ref 0 in
+  let result =
+    KAR.prepare_resume_checkpoint_for_dispatch
+      ~meta
+      ~now_ts
+      ~loaded_checkpoint_present:true
+      ~save_checkpoint:(fun compacted_ctx ->
+        save_called := true;
+        saved_message_count := List.length (KEC.messages_of_context compacted_ctx);
+        Ok
+          {
+            (KEC.checkpoint_of_context compacted_ctx) with
+            turn_count = 42;
+          })
+      ctx
+  in
+  check bool "pre-dispatch compaction applied despite fresh cooldown" true
+    result.applied;
+  check bool "compaction reduced token pressure" true
+    result.meaningful_reduction;
+  check bool "compacted checkpoint is saved before resume" true !save_called;
+  let resume_checkpoint =
+    match result.resume_checkpoint with
+    | Some checkpoint -> checkpoint
+    | None -> Alcotest.fail "expected compacted resume checkpoint"
+  in
+  check int "resume checkpoint is the saved compacted checkpoint" 42
+    resume_checkpoint.turn_count;
+  check int "context carries the same saved checkpoint" 42
+    result.context.checkpoint.turn_count;
+  check int "saved checkpoint received compacted messages"
+    !saved_message_count
+    (List.length resume_checkpoint.messages)
+
 let test_dispatch_keeper_phase_event_uses_room_base_path () =
   let base_dir = temp_dir "keeper_lifecycle_registry_phase" in
   Fun.protect
@@ -1977,6 +2099,10 @@ let () =
             test_compact_if_needed_emergency_bypass_ignores_cooldown;
           test_case "compaction records saved tokens metric" `Quick
             test_compact_if_needed_records_saved_tokens_metric;
+          test_case "pre-dispatch resume uses loaded working context" `Quick
+            test_pre_dispatch_resume_checkpoint_uses_loaded_working_context;
+          test_case "pre-dispatch resume saves compacted context" `Quick
+            test_pre_dispatch_resume_checkpoint_saves_compacted_context;
         ] );
       ( "registry_dispatch",
         [

@@ -11,6 +11,77 @@ include Keeper_agent_error
 
 (* Post-turn telemetry logging — extracted to Keeper_turn_telemetry (#5732) *)
 
+type pre_dispatch_checkpoint_hygiene_result =
+  { context : Keeper_types.working_context
+  ; resume_checkpoint : Oas.Checkpoint.t option
+  ; compacted : bool
+  ; applied : bool
+  ; meaningful_reduction : bool
+  ; before_tokens : int
+  ; after_tokens : int
+  ; trigger : string option
+  ; decision : string
+  ; save_error : string option
+  }
+
+let prepare_resume_checkpoint_for_dispatch
+      ~(meta : Keeper_types.keeper_meta)
+      ~(now_ts : float)
+      ~(loaded_checkpoint_present : bool)
+      ~(save_checkpoint :
+           Keeper_types.working_context -> (Oas.Checkpoint.t, string) result)
+      (ctx_work : Keeper_types.working_context)
+  : pre_dispatch_checkpoint_hygiene_result
+  =
+  let before_tokens = Keeper_exec_context.token_count ctx_work in
+  let pre_dispatch_meta =
+    {
+      meta with
+      compaction =
+        {
+          meta.compaction with
+          cooldown_sec = 0;
+        };
+    }
+  in
+  let compacted_ctx, trigger, decision =
+    Keeper_compact_policy.compact_if_needed
+      ~meta:pre_dispatch_meta
+      ~now_ts
+      ctx_work
+  in
+  let after_tokens = Keeper_exec_context.token_count compacted_ctx in
+  let applied = Option.is_some trigger in
+  let meaningful_reduction = after_tokens < before_tokens in
+  let checkpoint_opt, save_error =
+    if not loaded_checkpoint_present then
+      (None, None)
+    else if not applied then
+      (Some (Keeper_exec_context.checkpoint_of_context compacted_ctx), None)
+    else
+      match save_checkpoint compacted_ctx with
+      | Ok checkpoint -> (Some checkpoint, None)
+      | Error detail ->
+          (Some (Keeper_exec_context.checkpoint_of_context compacted_ctx), Some detail)
+  in
+  let context =
+    match checkpoint_opt with
+    | Some checkpoint -> { compacted_ctx with checkpoint }
+    | None -> compacted_ctx
+  in
+  {
+    context;
+    resume_checkpoint = checkpoint_opt;
+    compacted = applied;
+    applied;
+    meaningful_reduction;
+    before_tokens;
+    after_tokens;
+    trigger;
+    decision;
+    save_error;
+  }
+
 (** Run a single keeper turn via OAS Agent.run().
 
     Loads checkpoint, creates working context with the base keeper system
@@ -145,27 +216,7 @@ let run_turn
       ~primary_model_max_tokens:max_context
       ~base_dir
   in
-  (* 2b. Load raw OAS checkpoint for Agent.resume path.
-     Preserves turn_count, usage_stats, and lifecycle state across turns.
-     Falls back to fresh build when unavailable (first turn, rollover). *)
-  let raw_oas_checkpoint =
-    match
-      Keeper_checkpoint_store.load_oas
-        ~session_dir:session.session_dir
-        ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-    with
-    | Ok cp -> Some cp
-    | Error _ ->
-        Eio.traceln "[KeeperAgentRun] load_oas checkpoint failed";
-        None
-  in
-  (* Starting turn count for per-call budget calculation in hooks.
-     With Agent.resume, turn count is cumulative from checkpoint. *)
-  let start_turn_count =
-    match raw_oas_checkpoint with
-    | Some cp -> cp.turn_count
-    | None -> 0
-  in
+  let loaded_checkpoint_present = Option.is_some ctx_opt in
   (* 3. Build base system prompt from meta *)
   let profile_defaults = Keeper_types_profile.load_keeper_profile_defaults meta.name in
   let keeper_oas_context =
@@ -230,6 +281,53 @@ let run_turn
   in
   let ctx_work =
     Keeper_exec_context.set_system_prompt base_ctx ~system_prompt:base_system_prompt
+  in
+  (* Pre-dispatch checkpoint hygiene.
+
+     [load_context_from_checkpoint] already sanitizes and trims into
+     [ctx_work], but the previous Agent.resume path reloaded and passed the
+     raw checkpoint to OAS.  That bypassed MASC-side compaction and let local
+     keepers repeatedly dispatch over-budget histories until the 20 minute
+     turn timeout fired.  Use the sanitized working context as the single
+     resume source, and persist any pre-dispatch compaction before calling
+     OAS so a timed-out turn does not reload the same bloated checkpoint. *)
+  let checkpoint_hygiene =
+    prepare_resume_checkpoint_for_dispatch
+      ~meta
+      ~now_ts:(Time_compat.now ())
+      ~loaded_checkpoint_present
+      ~save_checkpoint:(fun compacted_ctx ->
+        Keeper_exec_context.save_oas_checkpoint
+          ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages
+          ~session
+          ~agent_name:meta.agent_name
+          ~model:(Keeper_exec_context.checkpoint_model_of_meta meta)
+          ~ctx:compacted_ctx
+          ~generation)
+      ctx_work
+  in
+  let ctx_work = checkpoint_hygiene.context in
+  let resume_oas_checkpoint = checkpoint_hygiene.resume_checkpoint in
+  let pre_dispatch_compacted = checkpoint_hygiene.compacted in
+  (match checkpoint_hygiene.save_error with
+   | Some detail ->
+       Log.Keeper.error
+         "%s: pre-dispatch checkpoint compaction save failed: %s"
+         meta.name detail
+   | None -> ());
+  (if checkpoint_hygiene.applied then
+     Log.Keeper.info
+       "%s: pre-dispatch compaction %s trigger=%s tokens=%d->%d max_context=%d"
+       meta.name
+       (if checkpoint_hygiene.meaningful_reduction then "applied" else "attempted")
+       (Option.value ~default:checkpoint_hygiene.decision checkpoint_hygiene.trigger)
+       checkpoint_hygiene.before_tokens checkpoint_hygiene.after_tokens max_context);
+  (* Starting turn count for per-call budget calculation in hooks.
+     With Agent.resume, turn count is cumulative from checkpoint. *)
+  let start_turn_count =
+    match resume_oas_checkpoint with
+    | Some cp -> cp.turn_count
+    | None -> 0
   in
   (* 5. Build final turn system prompt via caller callback.
      Hard constraints stay in system_prompt; soft context is injected
@@ -1834,7 +1932,7 @@ let run_turn
               ~message_count:sizes.message_count
               ~role_counts:sizes.role_counts
               ~tool_count:sizes.tool_count
-              ~has_compact_happened:false
+              ~has_compact_happened:pre_dispatch_compacted
           in
           ()
         with
@@ -1911,7 +2009,7 @@ let run_turn
            ~enable_thinking:(Keeper_config.keeper_enable_thinking ())
            (* exit_condition removed with mutation_boundary — OAS runs to
               natural completion (max_turns or model end_turn). *)
-           ?oas_checkpoint:raw_oas_checkpoint
+           ?oas_checkpoint:resume_oas_checkpoint
            ?event_bus
            ?per_provider_timeout_s:meta.per_provider_timeout_s
            ())

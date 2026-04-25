@@ -992,7 +992,7 @@ let resolved_max_context_for_turn
        meta.name requested resolution.turn_budget resolution.primary_budget
        resolution.effective_budget
    | None -> ());
-  resolution.turn_budget
+  resolution.effective_budget
 
 
 (* Extracted to Keeper_unified_metrics — see keeper_unified_metrics.ml *)
@@ -1793,8 +1793,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                       Log.Keeper.warn
                         "%s: transient network error cascade=%s max_context=%d context_budget=%d primary_budget=%d requested_override=%s retry=%d/%d backoff=%.0fs: %s"
                         meta.name execution.cascade_name
-                        execution.max_context_resolution.effective_budget
                         execution.max_context
+                        execution.max_context_resolution.effective_budget
                         execution.max_context_resolution.primary_budget
                         (match execution.max_context_resolution.requested_override with
                          | Some requested -> string_of_int requested
@@ -2032,8 +2032,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           Log.Keeper.error
             "%s: keeper cycle FAILED cascade=%s max_context=%d context_budget=%d primary_budget=%d requested_override=%s latency=%dms%s error=%s"
             meta.name final_execution.cascade_name
-            final_execution.max_context_resolution.effective_budget
             final_execution.max_context
+            final_execution.max_context_resolution.effective_budget
             final_execution.max_context_resolution.primary_budget
             (match final_execution.max_context_resolution.requested_override with
              | Some requested -> string_of_int requested

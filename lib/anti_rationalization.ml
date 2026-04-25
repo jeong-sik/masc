@@ -82,7 +82,7 @@ type review_result = {
    like "나중에", "범위 밖", "재현 안됨".  English false-positives
    remain (substring has no word boundary) and are tracked under
    the same issue's option C/D follow-up. *)
-let default_excuse_patterns = [
+let legacy_english_excuse_patterns = [
   ("pre-existing",        "claiming the problem already existed");
   ("out of scope",        "declaring work out of scope");
   ("beyond the scope",    "declaring work beyond scope");
@@ -96,6 +96,9 @@ let default_excuse_patterns = [
   ("not reproducible",    "dismissing without investigation");
   ("not my responsibility", "responsibility deflection");
   ("cannot reproduce",    "dismissing without investigation");
+]
+
+let korean_excuse_patterns = [
   (* Korean rationalization markers — same semantic classes as
      the English entries above.  See issue #10385 for the
      institution_episodes evidence. *)
@@ -114,6 +117,27 @@ let default_excuse_patterns = [
   ("후속 pr",             "deferring to a follow-up (ko)");
   ("다음 pr",             "deferring to a follow-up (ko)");
 ]
+
+let default_excuse_patterns =
+  legacy_english_excuse_patterns @ korean_excuse_patterns
+
+let same_pattern_list a b =
+  try
+    List.length a = List.length b
+    && List.for_all2
+         (fun (apat, areason) (bpat, breason) ->
+           String.equal apat bpat && String.equal areason breason)
+         a b
+  with Invalid_argument _ -> false
+
+let migrate_loaded_excuse_patterns patterns =
+  if same_pattern_list patterns legacy_english_excuse_patterns then (
+    Log.Misc.info
+      "excuse_patterns: legacy default config detected; applying current \
+       built-in defaults at runtime";
+    default_excuse_patterns
+  ) else
+    patterns
 
 (** Cached patterns. Loaded once from disk; invalidated by [save_excuse_patterns]. *)
 let cached_patterns : (string * string) list option ref = ref None
@@ -163,7 +187,7 @@ let load_excuse_patterns () : (string * string) list =
       | Error _ -> default_excuse_patterns
       | Ok json ->
         match parse_excuse_patterns_json json with
-        | Ok p -> p
+        | Ok p -> migrate_loaded_excuse_patterns p
         | Error msg ->
           Log.Misc.warn "excuse_patterns: parse error, using defaults: %s" msg;
           default_excuse_patterns

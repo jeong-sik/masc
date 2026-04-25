@@ -26,17 +26,40 @@ open Alcotest
 module A = Masc_mcp.Anti_rationalization
 
 (* Isolate the loader from the real user's
-   [~/.masc/config/excuse_patterns.json] so the test exercises
-   the in-tree [default_excuse_patterns].  [MASC_CONFIG_DIR]
-   pointing at a directory that does not exist puts the resolver
-   into [Invalid_env]; the loader falls back to defaults. *)
+   [~/.masc/config/excuse_patterns.json], but still reproduce the
+   important deployment case: an older persisted default config
+   exists and contains only the English patterns.  Without the
+   runtime migration in [load_excuse_patterns], Korean detection
+   would stay at 0% for existing installs even after the built-in
+   defaults changed. *)
 let () =
   let isolated =
     Filename.concat (Filename.get_temp_dir_name ())
       (Printf.sprintf "anti_rat_korean_10385_%d_%.0f"
          (Unix.getpid ()) (Unix.gettimeofday ()))
   in
-  Unix.putenv "MASC_CONFIG_DIR" isolated
+  Unix.mkdir isolated 0o700;
+  let path = Filename.concat isolated "excuse_patterns.json" in
+  let oc = open_out path in
+  output_string oc
+    {|[
+  ["pre-existing", "claiming the problem already existed"],
+  ["out of scope", "declaring work out of scope"],
+  ["beyond the scope", "declaring work beyond scope"],
+  ["will do later", "deferring work to later"],
+  ["will fix later", "deferring fix to later"],
+  ["will address later", "deferring to later"],
+  ["follow-up", "deferring to a follow-up"],
+  ["follow up", "deferring to a follow-up"],
+  ["works on my end", "unverifiable claim"],
+  ["works on my machine", "unverifiable claim"],
+  ["not reproducible", "dismissing without investigation"],
+  ["not my responsibility", "responsibility deflection"],
+  ["cannot reproduce", "dismissing without investigation"]
+]|};
+  close_out oc;
+  Unix.putenv "MASC_CONFIG_DIR" isolated;
+  Masc_mcp.Config_dir_resolver.reset ()
 
 let assert_match ~msg ~text ~expected_pattern =
   match A.find_excuse_pattern text with

@@ -1141,7 +1141,7 @@ function CascadeRawConfigEditor({
               ${editorDirty.value ? 'unsaved changes' : 'in sync with disk'}
             </span>
             ${syntaxError
-              ? html`<span class="text-[var(--bad-light)]">syntax: ${syntaxError}</span>`
+              ? html`<span class="text-[var(--bad-light)]" role="alert">syntax: ${syntaxError}</span>`
               : html`
                 <span class="text-[var(--ok)]">
                   ${raw?.source_kind === 'toml' ? 'syntax: validated on save (TOML)' : 'syntax: valid JSON'}

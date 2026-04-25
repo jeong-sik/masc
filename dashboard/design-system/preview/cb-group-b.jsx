@@ -21,7 +21,7 @@ function SidebarFleet() {
           <div key={k.id}
                role="listitem"
                aria-label={`${k.id} · ${k.task} · ${k.status}${sel===k.id ? ' · selected' : ''}`}
-               aria-selected={sel===k.id}
+               aria-current={sel===k.id ? 'true' : undefined}
                tabIndex={0}
                onClick={()=>setSel(k.id)}
                onKeyDown={activateOnEnterOrSpace(()=>setSel(k.id))}
@@ -65,7 +65,7 @@ function SidebarGrouped() {
           <div key={k.id}
                role="listitem"
                aria-label={`${k.id} · ${k.t || k.task}${sel===k.id ? ' · selected' : ''}`}
-               aria-selected={sel===k.id}
+               aria-current={sel===k.id ? 'true' : undefined}
                tabIndex={0}
                onClick={()=>setSel(k.id)}
                onKeyDown={activateOnEnterOrSpace(()=>setSel(k.id))}
@@ -100,7 +100,7 @@ function SidebarIcons() {
           <div key={k.id}
                role="listitem"
                aria-label={`${k.role}: ${k.id} · ${k.task}${sel===k.id ? ' · selected' : ''}`}
-               aria-selected={sel===k.id}
+               aria-current={sel===k.id ? 'true' : undefined}
                tabIndex={0}
                onClick={()=>setSel(k.id)}
                onKeyDown={activateOnEnterOrSpace(()=>setSel(k.id))}
@@ -126,12 +126,12 @@ function SwimlanesGlyph() {
       <div className="axis" aria-hidden="true">
         <span>-60s</span><span>-45s</span><span>-30s</span><span>-15s</span><span>NOW</span>
       </div>
-      <div className="lanes-body">
+      <div className="lanes-body" role="list" aria-label="Keeper timelines">
         {lanes.map(k => (
           <div key={k.id}
-               role="group"
+               role="listitem"
                aria-label={`${k.id} timeline${sel===k.id ? ' · selected' : ''}`}
-               aria-selected={sel===k.id}
+               aria-current={sel===k.id ? 'true' : undefined}
                tabIndex={0}
                onClick={()=>setSel(k.id)}
                onKeyDown={activateOnEnterOrSpace(()=>setSel(k.id))}
@@ -162,9 +162,9 @@ function SwimlanesDense() {
       <div className="axis" aria-hidden="true">
         <span>-60s</span><span>-45s</span><span>-30s</span><span>-15s</span><span>NOW</span>
       </div>
-      <div className="lanes-body">
+      <div className="lanes-body" role="list" aria-label="Keeper timelines (dense)">
         {lanes.map(k => (
-          <div key={k.id} role="group" aria-label={`${k.id} timeline`} className="lane">
+          <div key={k.id} role="listitem" aria-label={`${k.id} timeline`} className="lane">
             <div className="lane-head">
               <Dot kind={kClass(k.id)} size="sm" beat={k.status==='running'} />
               <span className="name" aria-hidden="true">{k.id}</span>
@@ -198,9 +198,9 @@ function SwimlanesBars() {
       <div className="axis" aria-hidden="true">
         <span>-60s</span><span>-45s</span><span>-30s</span><span>-15s</span><span>NOW</span>
       </div>
-      <div className="lanes-body">
+      <div className="lanes-body" role="list" aria-label="Keeper aggregated timelines">
         {lanes.map(k => (
-          <div key={k.id} role="group" aria-label={`${k.id} aggregated timeline`} className="lane">
+          <div key={k.id} role="listitem" aria-label={`${k.id} aggregated timeline`} className="lane">
             <div className="lane-head">
               <Dot kind={kClass(k.id)} size="sm" beat={k.status==='running'} />
               <span className="name" aria-hidden="true">{k.id}</span>
@@ -258,7 +258,7 @@ function DeckTasks() {
             {D2.tasks.map(t => (
               <tr key={t.id}
                   className={sel===t.id?'sel':''}
-                  aria-selected={sel===t.id}
+                  aria-current={sel===t.id ? 'true' : undefined}
                   tabIndex={0}
                   onClick={()=>setSel(t.id)}
                   onKeyDown={activateOnEnterOrSpace(()=>setSel(t.id))}>
@@ -287,9 +287,9 @@ function DeckKanban() {
   return (
     <div className="cb-deck">
       <DeckTabs active="board" />
-      <div className="cb-kanban" role="tabpanel" aria-label="Board">
+      <div className="cb-kanban" role="tabpanel" aria-label="Kanban board">
         {cols.map(([title, items]) => (
-          <div key={title} role="group" aria-label={`${title} · ${items.length} tasks`} className="col">
+          <div key={title} role="region" aria-label={`${title} · ${items.length} tasks`} className="col">
             <div className="col-h" role="heading" aria-level={4}>{title} <span className="ct" aria-hidden="true">{items.length}</span></div>
             <div role="list" aria-label={`${title} tasks`}>
               {items.map(t => (
@@ -317,19 +317,20 @@ function DeckProviders() {
     <div className="cb-deck">
       <DeckTabs active="prov" />
       <div className="cb-pmatrix" role="tabpanel" aria-label="Providers">
-        <div className="row h" role="row" aria-hidden="true"><span>PROVIDER</span><span>MODEL</span><span style={{textAlign:'right'}}>TPS</span><span style={{textAlign:'right'}}>CAS</span><span>TREND</span><span style={{textAlign:'right'}}>ST</span></div>
-        <div role="list" aria-label="Provider matrix">
-          {D2.providers.map(p => (
+        <div role="table" aria-label="Provider capability matrix" aria-rowcount={D2.providers.length + 1}>
+          <div className="row h" role="row" aria-rowindex={1} aria-hidden="true"><span>PROVIDER</span><span>MODEL</span><span style={{textAlign:'right'}}>TPS</span><span style={{textAlign:'right'}}>CAS</span><span>TREND</span><span style={{textAlign:'right'}}>ST</span></div>
+          {D2.providers.map((p, i) => (
             <div key={p.id}
-                 role="listitem"
+                 role="row"
+                 aria-rowindex={i + 2}
                  aria-label={`${p.id} · ${p.model} · TPS ${p.tps} · cascade ${p.cascade} · status ${p.status}`}
                  className="row">
-              <span className="pname" aria-hidden="true">{p.id}</span>
-              <span className="model" aria-hidden="true">{p.model}</span>
-              <span className="tps" aria-hidden="true">{p.tps}</span>
-              <span className="cas" aria-hidden="true">@{p.cascade}</span>
-              <span aria-hidden="true"><Spark color={p.status==='ok'?'ok':p.status==='warn'?'warn':'brass'} bars={18} /></span>
-              <span style={{textAlign:'right'}} aria-hidden="true">
+              <span className="pname" role="cell" aria-hidden="true">{p.id}</span>
+              <span className="model" role="cell" aria-hidden="true">{p.model}</span>
+              <span className="tps" role="cell" aria-hidden="true">{p.tps}</span>
+              <span className="cas" role="cell" aria-hidden="true">@{p.cascade}</span>
+              <span role="cell" aria-hidden="true"><Spark color={p.status==='ok'?'ok':p.status==='warn'?'warn':'brass'} bars={18} /></span>
+              <span style={{textAlign:'right'}} role="cell" aria-hidden="true">
                 <Chip kind={p.status==='ok'?'ok':p.status==='warn'?'warn':'ghost'}>{p.status.toUpperCase()}</Chip>
               </span>
             </div>
@@ -349,7 +350,7 @@ function RailActivity() {
         <div className="body" role="log" aria-live="polite" aria-label="Recent fleet events" style={{maxHeight:320, overflow:'auto'}}>
           {D2.events.map((e, i) => (
             <div key={i}
-                 role="listitem"
+                 role="article"
                  aria-label={`${e.t.slice(0,8)} · ${e.keeper} ${e.kind}: ${e.text}`}
                  className={`ev ${e.kind}`}>
               <span className="t" aria-hidden="true">{e.t.slice(0,8)}</span>
@@ -392,7 +393,7 @@ function RailCascade() {
         <div className="body" role="log" aria-live="polite" aria-label="Recent events">
           {D2.events.slice(0,3).map((e,i) => (
             <div key={i}
-                 role="listitem"
+                 role="article"
                  aria-label={`${e.t.slice(0,8)} · ${e.keeper} ${e.kind}: ${e.text}`}
                  className={`ev ${e.kind}`}>
               <span className="t" aria-hidden="true">{e.t.slice(0,8)}</span>

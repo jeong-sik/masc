@@ -242,6 +242,35 @@ let test_emit_cost_event_records_auto_resolution_source () =
   check string "cost status" "priced"
     (json |> member "cost_status" |> to_string)
 
+let test_emit_cost_event_records_provider_prefixed_auto_resolution_source () =
+  let root = temp_dir () in
+  let telemetry : Agent_sdk.Types.inference_telemetry =
+    {
+      system_fingerprint = None;
+      timings = None;
+      reasoning_tokens = None;
+      request_latency_ms = 100;
+      peak_memory_gb = None;
+      provider_kind = Some Llm_provider.Provider_kind.Kimi_cli;
+      reasoning_effort = None;
+      canonical_model_id = Some "kimi-for-coding";
+      effective_context_window = Some 128000;
+      provider_internal_action_count = None;
+    }
+  in
+  Hooks.emit_cost_event ~masc_root:root ~agent_name:"keeper"
+    ~task_id:None ~model:"kimi_cli:auto"
+    ~input_tokens:1000 ~output_tokens:500 ~cost_usd:0.0
+    ~telemetry ();
+  let json = read_jsonl_line (Filename.concat root "costs.jsonl") in
+  check string "provider" "kimi_cli" (json |> member "provider" |> to_string);
+  check string "pricing model" "kimi-for-coding"
+    (json |> member "cost_pricing_model" |> to_string);
+  check string "model resolution source" "telemetry_canonical_alias"
+    (json |> member "model_resolution_source" |> to_string);
+  check string "cost status" "known_free"
+    (json |> member "cost_status" |> to_string)
+
 let test_cost_usd_for_usage_falls_back_for_paid_provider () =
   let model = "openai:gpt-4.1" in
   let usage = make_usage ~input_tokens:1000 ~output_tokens:500 () in
@@ -513,6 +542,10 @@ let () =
             test_emit_cost_event_marks_unpriced_paid_model
         ; test_case "emit_cost_event records auto resolution source" `Quick
             test_emit_cost_event_records_auto_resolution_source
+        ; test_case
+            "emit_cost_event records provider-prefixed auto resolution source"
+            `Quick
+            test_emit_cost_event_records_provider_prefixed_auto_resolution_source
         ; test_case "cost fallback estimates paid provider usage" `Quick
             test_cost_usd_for_usage_falls_back_for_paid_provider
         ; test_case "cost fallback preserves reported cost" `Quick

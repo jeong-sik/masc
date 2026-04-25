@@ -7,14 +7,16 @@
     [awaiting_approval] indefinitely. Operators are not always present to
     approve every routine claim/heartbeat/done.
 
-    This module defines a narrow, code-only allowlist of (tool, action)
-    pairs that are safe for autonomous keeper flow. The rules are checked
-    by [Governance_pipeline.to_oas_approval_callback] AFTER the existing
-    [auto_approval_forbidden] gate, so:
+    This module defines a narrow, code-only allowlist of (tool,
+    routine action/op) pairs that are safe for autonomous keeper flow.
+    The rules are checked by
+    [Governance_pipeline.to_oas_approval_callback] before the soft
+    destructive tool/op substring gate, but hard blockers still win, so:
 
-    - destructive_tool_or_op shell or git tools still gate
     - Critical risk still gates
     - runtime_auto_approval_blocked (cascade_exhausted etc.) still gates
+    - shell or git tool names still gate unless an exact routine rule
+      matches the tool plus op/action
     - force_* actions still gate (classified as Critical via "force"
       pattern in {!Governance_pipeline_risk.classify_name})
 
@@ -24,6 +26,8 @@
     - [keeper_board_post]: any post at risk Low or Medium.
     - [keeper_task_claim], [keeper_task_done],
       [keeper_task_submit_for_verification]: standard autonomous flow.
+    - [keeper_shell]: only [op=git_clone]. Shell semantics come from
+      [op], so [op] takes precedence over any incidental [action] field.
 
     These rules are not persisted; they are part of the policy code surface
     and require code review to change. Operator-managed rules continue to
@@ -39,7 +43,7 @@
     {!Governance_pipeline.assess_risk}. [keeper_board_post] is
     rejected at [High]/[Critical].
 
-    Returns [false] for any tool/action pair not on the allowlist;
+    Returns [false] for any tool/action/op pair not on the allowlist;
     this preserves the human-loop for non-routine flows. *)
 val matches :
   tool_name:string ->
@@ -56,5 +60,5 @@ val rule_label :
   string option
 
 (** Returns the static rule list as JSON for dashboard inspection.
-    Shape: [[ { tool, allowed_actions, max_risk, note } ... ]]. *)
+    Shape: [[ { tool, allowed_actions, max_risk, label } ... ]]. *)
 val rules_summary : unit -> Yojson.Safe.t

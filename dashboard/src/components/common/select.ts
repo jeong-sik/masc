@@ -29,6 +29,8 @@ interface SelectProps {
   ariaLabel?: string
   /** Reference an external label by id. */
   ariaLabelledby?: string
+  /** Reference a help/hint text by id so screen readers announce it on focus. */
+  ariaDescribedBy?: string
   /** Rendered as `data-testid` so E2E / unit tests can target this
       <select> without coupling to option text (which may be i18n'd). */
   testId?: string
@@ -50,6 +52,7 @@ export function Select({
   name,
   ariaLabel,
   ariaLabelledby,
+  ariaDescribedBy,
   testId,
   required,
   onInput,
@@ -66,6 +69,7 @@ export function Select({
       disabled=${disabled}
       aria-label=${ariaLabel}
       aria-labelledby=${ariaLabelledby}
+      aria-describedby=${ariaDescribedBy}
       data-testid=${testId}
       required=${required}
       onChange=${handleChange}

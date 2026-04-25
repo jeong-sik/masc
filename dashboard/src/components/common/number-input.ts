@@ -28,6 +28,8 @@ interface NumberInputProps {
   ariaLabel?: string
   /** Reference an external label by id (e.g. a shared heading). */
   ariaLabelledby?: string
+  /** Reference a help/hint text by id so screen readers announce it on focus. */
+  ariaDescribedBy?: string
   /** Browser autofill hint — "off" for sensitive fields, or a token
       like "one-time-code". */
   autoComplete?: string
@@ -55,6 +57,7 @@ export function NumberInput({
   name,
   ariaLabel,
   ariaLabelledby,
+  ariaDescribedBy,
   autoComplete,
   testId,
   onInput,
@@ -81,6 +84,7 @@ export function NumberInput({
       max=${max}
       aria-label=${ariaLabel}
       aria-labelledby=${ariaLabelledby}
+      aria-describedby=${ariaDescribedBy}
       autocomplete=${autoComplete}
       data-testid=${testId}
       onInput=${handleInput}

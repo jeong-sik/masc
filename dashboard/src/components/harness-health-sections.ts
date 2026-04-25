@@ -248,9 +248,9 @@ export function GateChart({ distribution }: { distribution: GateDistribution }) 
     return html`<${EmptySignal} text="아직 verdict 기록이 없습니다." />`
   }
   return html`
-    <div class="space-y-2">
+    <div class="space-y-2" role="list" aria-label="게이트 분포">
       ${entries.map(([gate, count]) => html`
-        <div class="flex items-center gap-2">
+        <div class="flex items-center gap-2" role="listitem">
           <span class="w-20 text-right font-mono text-xs text-[var(--text-muted)]">${gate}</span>
           <div class="h-4 flex-1 overflow-hidden rounded bg-[var(--white-6)]">
             <div
@@ -374,7 +374,7 @@ export function RecentVerdictsList({ items }: { items: HarnessVerdictItem[] }) {
         />
       </div>
       ${isFiltering && visibleItems.length === 0
-        ? html`<div class="py-4 text-center text-2xs text-[var(--text-dim)]">필터 결과 없음 (${items.length} items)</div>`
+        ? html`<div class="py-4 text-center text-2xs text-[var(--text-dim)]" role="status">필터 결과 없음 (${items.length} items)</div>`
         : visibleItems.map(item => html`
           <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-3">
             <div class="flex items-start justify-between gap-3">
@@ -421,7 +421,7 @@ export function PreCompactList({ section }: { section: HarnessSignalSection<PreC
         />
       </div>
       ${isFiltering && visibleItems.length === 0
-        ? html`<div class="py-4 text-center text-2xs text-[var(--text-dim)]">필터 결과 없음 (${section.recent_events.length} items)</div>`
+        ? html`<div class="py-4 text-center text-2xs text-[var(--text-dim)]" role="status">필터 결과 없음 (${section.recent_events.length} items)</div>`
         : visibleItems.map(item => html`
           <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-3">
             <div class="flex items-start justify-between gap-3">
@@ -473,7 +473,7 @@ export function HandoffList({ section }: { section: HarnessSignalSection<Handoff
         />
       </div>
       ${isFiltering && visibleItems.length === 0
-        ? html`<div class="py-4 text-center text-2xs text-[var(--text-dim)]">필터 결과 없음 (${section.recent_events.length} items)</div>`
+        ? html`<div class="py-4 text-center text-2xs text-[var(--text-dim)]" role="status">필터 결과 없음 (${section.recent_events.length} items)</div>`
         : visibleItems.map(item => html`
           <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-3">
             <div class="flex items-start justify-between gap-3">

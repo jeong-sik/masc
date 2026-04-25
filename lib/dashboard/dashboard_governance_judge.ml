@@ -494,12 +494,15 @@ let compute_judgments
     ~(masc_tools : Types.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
     ~build_facts =
-  let timeout_s = Float.of_int Env_config.Inference.dashboard_governance_judge_timeout_seconds in
   match
     (* build_facts() is moved inside the bridge so a deadlock in
-       get_agents_status is bounded by [timeout_s]
-       rather than hanging the daemon fiber indefinitely (#8319). *)
-    Masc_oas_bridge.run_safe ~timeout_s (fun () ->
+       get_agents_status is bounded by the resolved timeout rather
+       than hanging the daemon fiber indefinitely (#8319).
+       #9629: caller migrated from legacy run_safe to run_with_caller
+       so this judge resolves its budget through Env_config_oas_bridge
+       and surfaces in the per-caller Prometheus counter. *)
+    Masc_oas_bridge.run_with_caller
+      ~caller:Env_config_oas_bridge.Governance_judge (fun () ->
       let factual_json = build_facts () in
       let prompt = prompt_for_facts factual_json in
       Oas_worker.run_named_with_masc_tools ~cascade_name:"governance_judge"

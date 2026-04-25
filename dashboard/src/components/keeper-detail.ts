@@ -495,9 +495,10 @@ function KeeperClearContextDialog({
           </p>
         </div>
 
-        <label class="flex flex-col gap-2">
+        <label class="flex flex-col gap-2" for="keeper-reason-input">
           <span class="text-2xs font-semibold uppercase tracking-1 text-[var(--text-muted)]">사유</span>
           <textarea
+            id="keeper-reason-input"
             ref=${reasonRef}
             class="min-h-[112px] resize-y rounded border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-2 text-sm leading-paragraph text-[var(--text-body)] outline-none focus:border-[var(--accent-45)] focus:ring-2 focus:ring-[var(--accent-18)]"
             placeholder="예: stale continuity replay 제거"

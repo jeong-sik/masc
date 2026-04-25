@@ -212,11 +212,18 @@ function transportTone(configured: boolean, listening: boolean, active: boolean)
 }
 
 function grpcTone(data: TransportHealthData): StatusTone {
-  return transportTone(
+  const base = transportTone(
     data.grpc.configured,
     data.grpc.listening,
     data.grpc.subscribers > 0 || data.grpc.active_streams > 0,
   )
+  // Subscriber capacity pressure (buffer-full drops) is worth an
+  // operator nudge but does not downgrade a ['bad'] base — a dead
+  // listener stays dead, drops on top are downstream of that.
+  if (base === 'ok' && data.grpc.events_dropped > 0) {
+    return 'warn'
+  }
+  return base
 }
 
 function websocketTone(data: TransportHealthData): StatusTone {
@@ -459,6 +466,11 @@ export function TransportHealthPanel() {
               <${MetricRow} label="Active Streams" value=${data.grpc.active_streams} />
               <${MetricRow} label="Heartbeat Avg" value=${formatLatency(data.grpc.heartbeat_avg_seconds)} />
               <${MetricRow} label="Events Delivered" value=${data.grpc.events_delivered} />
+              <${MetricRow}
+                label="Events Dropped"
+                value=${data.grpc.events_dropped}
+                sub=${data.grpc.events_dropped > 0 ? '버퍼 포화' : '정상'}
+              />
             <//>
 
             <${SectionCard} title="WebSocket" status=${wsStatus} eyebrow=${transportEyebrow(data.websocket.configured, data.websocket.listening, data.websocket.port)}>

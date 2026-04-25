@@ -43,6 +43,7 @@ function sampleResponse(overrides?: Partial<Record<string, unknown>>) {
       subscribers: 0,
       heartbeat_avg_seconds: 0,
       events_delivered: 0,
+      events_dropped: 0,
     },
     websocket: {
       enabled: true,
@@ -299,6 +300,58 @@ describe('TransportHealthPanel', () => {
     expect(container.textContent).toContain('Lifecycle Rejects')
     expect(container.textContent).toContain('append 1 · broadcast 3')
     expect(container.textContent).toContain('queue 1 · append 1 · broadcast 0')
+  })
+
+  it('renders gRPC events_dropped row and flags buffer saturation when non-zero', async () => {
+    const fetchTransportHealth = vi.fn<() => Promise<unknown>>().mockResolvedValue(
+      sampleResponse({
+        grpc: {
+          enabled: true,
+          configured: true,
+          listening: true,
+          port: 50052,
+          active_streams: 1,
+          subscribers: 1,
+          heartbeat_avg_seconds: 0,
+          events_delivered: 100,
+          events_dropped: 7,
+        },
+      }),
+    )
+
+    const { TransportHealthPanel } = await loadComponentWithApi({
+      fetchTransportHealth,
+      lastEvent: signal(null),
+    })
+
+    render(html`<${TransportHealthPanel} />`, container)
+    await flushUi()
+
+    expect(fetchTransportHealth).toHaveBeenCalled()
+    expect(container.textContent).toContain('Events Dropped')
+    expect(container.textContent).toContain('7')
+    // The '서킷 오픈' counterpart on the WebSocket card is '버퍼 포화'
+    // on gRPC — both variants convey "capacity pressure, attention
+    // required" without using the same word for different paths.
+    expect(container.textContent).toContain('버퍼 포화')
+  })
+
+  it('renders gRPC events_dropped with 정상 sub when no drops have happened', async () => {
+    const fetchTransportHealth = vi.fn<() => Promise<unknown>>().mockResolvedValue(
+      sampleResponse(),
+    )
+
+    const { TransportHealthPanel } = await loadComponentWithApi({
+      fetchTransportHealth,
+      lastEvent: signal(null),
+    })
+
+    render(html`<${TransportHealthPanel} />`, container)
+    await flushUi()
+
+    expect(container.textContent).toContain('Events Dropped')
+    expect(container.textContent).toContain('정상')
+    expect(container.textContent).not.toContain('버퍼 포화')
   })
 
   it('debounces SSE-driven transport refreshes through FetchScheduler', async () => {

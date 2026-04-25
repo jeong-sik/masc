@@ -223,7 +223,7 @@ let () = Atomic.set Coord_hooks.fsm_drift_observer_fn record_fsm_drift_with_agen
    "which command is timing out, and is 15s/60s the right budget?"
    without log-scraping the WARN line.  Cardinality is bounded by
    the small set of commands MASC actually invokes (~10-20 series). *)
-let process_timeout_metric = "masc_process_timeout_total"
+let process_timeout_metric = Prometheus.metric_process_timeout
 
 let record_process_timeout ~program ~timeout_sec =
   Prometheus.inc_counter process_timeout_metric

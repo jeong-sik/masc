@@ -30,8 +30,25 @@ let counter_for ~program ~timeout_sec =
 let test_metric_name_stable () =
   Alcotest.(check string)
     "process timeout canonical metric name"
-    "masc_process_timeout_total"
+    Masc_mcp.Prometheus.metric_process_timeout
     Masc_mcp.Coord.process_timeout_metric
+
+let test_metric_registered_at_init () =
+  let text = Masc_mcp.Prometheus.to_prometheus_text () in
+  let has literal =
+    try
+      ignore (Str.search_forward (Str.regexp_string literal) text 0);
+      true
+    with Not_found -> false
+  in
+  Alcotest.(check bool)
+    "process timeout HELP registered"
+    true
+    (has "# HELP masc_process_timeout_total");
+  Alcotest.(check bool)
+    "process timeout TYPE registered"
+    true
+    (has "# TYPE masc_process_timeout_total counter")
 
 let test_argv_program_basename () =
   Alcotest.(check string)
@@ -99,6 +116,8 @@ let () =
         [
           Alcotest.test_case "canonical name stable" `Quick
             test_metric_name_stable;
+          Alcotest.test_case "registered in Prometheus init" `Quick
+            test_metric_registered_at_init;
         ] );
       ( "argv_program",
         [

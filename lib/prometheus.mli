@@ -228,6 +228,9 @@ val metric_oas_bus_subscriber_stream_depth : string
 val metric_oas_bus_publish_block_seconds : string
 val metric_oas_bus_publish : string
 val metric_runtime_ollama_probe_generate_skips : string
+val metric_process_timeout : string
+(** #9632: subprocess executions that exceeded their configured
+    timeout. Labels: [program, timeout_sec]. *)
 
 (** #10130: boot-time sweep of save_file_atomic orphan temp files.
     Labels: [size_class = empty | with_data]. *)

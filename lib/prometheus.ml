@@ -524,6 +524,7 @@ let metric_oas_bus_publish_block_seconds = "masc_oas_bus_publish_block_seconds_t
 let metric_oas_bus_publish = "masc_oas_bus_publish_total"
 let metric_runtime_ollama_probe_generate_skips =
   "masc_runtime_ollama_probe_generate_skips_total"
+let metric_process_timeout = "masc_process_timeout_total"
 
 (* #10130: boot-time sweep of [save_file_atomic] orphan temp
    files.  Labels: [size_class = empty | with_data].  The
@@ -854,6 +855,10 @@ let init () =
   add metric_runtime_ollama_probe_generate_skips
     "Total Ollama runtime probes that intentionally skipped /api/generate. \
      Labeled by reason=status_only|model_unloaded|ps_error|no_effective_model|policy_skip."
+    Counter;
+  add metric_process_timeout
+    "Total subprocess executions that exceeded their configured timeout. \
+     Labeled by program and timeout_sec."
     Counter;
   (* #10130: boot-time sweep of save_file_atomic orphans. *)
   add metric_fs_atomic_orphans_cleaned

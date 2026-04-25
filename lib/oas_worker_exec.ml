@@ -141,6 +141,9 @@ let kimi_mcp_config_json_of_policy =
 let kimi_cli_model_for_provider =
   Oas_worker_exec_transport.kimi_cli_model_for_provider
 
+let kimi_cli_config_json_for_provider =
+  Oas_worker_exec_transport.kimi_cli_config_json_for_provider
+
 let provider_supports_inline_tools =
   Oas_worker_exec_transport.provider_supports_inline_tools
 

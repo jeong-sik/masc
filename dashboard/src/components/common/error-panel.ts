@@ -52,7 +52,7 @@ export function ErrorPanel({ onClose }: ErrorPanelProps) {
             <${X} size=${14} aria-hidden="true" />
           </button>
         </div>
-        <div class="flex items-center justify-center py-6 text-xs text-[var(--text-muted)]">
+        <div class="flex items-center justify-center py-6 text-xs text-[var(--text-muted)]" role="status">
           모든 에러를 확인했습니다.
         </div>
       </div>

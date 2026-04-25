@@ -334,7 +334,7 @@ export function ChatTranscript({
     >
       ${entries.length === 0
         ? html`
-            <div class="flex min-h-55 flex-col items-center justify-center rounded-card border border-dashed border-[rgba(148,163,184,0.18)] bg-[var(--white-3)] px-6 text-center">
+            <div class="flex min-h-55 flex-col items-center justify-center rounded-card border border-dashed border-[rgba(148,163,184,0.18)] bg-[var(--white-3)] px-6 text-center" role="status">
               <div class="text-2xs font-semibold uppercase tracking-5 text-[var(--text-muted)]">직접 메시지 없음</div>
               <div class="mt-3 max-w-[34rem] text-sm leading-airy text-[var(--text-secondary)]">${emptyText}</div>
             </div>

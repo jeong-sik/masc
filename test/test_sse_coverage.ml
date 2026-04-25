@@ -169,6 +169,49 @@ let test_client_count_increments () =
   Sse.unregister session_id;
   check bool "incremented" true (after > before || after = before)
 
+let test_client_count_exact_unregister_decrement () =
+  let before = Sse.client_count () in
+  let session1 = "test_count_exact_1_" ^ string_of_int (Random.bits ()) in
+  let session2 = "test_count_exact_2_" ^ string_of_int (Random.bits ()) in
+  Fun.protect
+    ~finally:(fun () ->
+      Sse.unregister session1;
+      Sse.unregister session2)
+    (fun () ->
+      let (_id1, _, _) = Sse.register session1 ~last_event_id:0 in
+      let (_id2, _, _) = Sse.register session2 ~last_event_id:0 in
+      check int "two registrations increment count by two"
+        (before + 2) (Sse.client_count ());
+      Sse.unregister session1;
+      check int "first unregister decrements count by one"
+        (before + 1) (Sse.client_count ());
+      Sse.unregister session2;
+      check int "second unregister restores original count"
+        before (Sse.client_count ()))
+
+let test_unregister_if_current_replacement_count () =
+  let before = Sse.client_count () in
+  let session_id =
+    "test_unreg_replacement_" ^ string_of_int (Random.bits ())
+  in
+  Fun.protect
+    ~finally:(fun () -> Sse.unregister session_id)
+    (fun () ->
+      let (old_client_id, _, _) = Sse.register session_id ~last_event_id:0 in
+      let (new_client_id, _, _) = Sse.register session_id ~last_event_id:0 in
+      check int "replacement keeps one live session"
+        (before + 1) (Sse.client_count ());
+      Sse.unregister_if_current session_id old_client_id;
+      check bool "old cleanup cannot remove replacement"
+        true (Sse.exists session_id);
+      check int "stale cleanup leaves count unchanged"
+        (before + 1) (Sse.client_count ());
+      Sse.unregister_if_current session_id new_client_id;
+      check bool "current cleanup removes replacement"
+        false (Sse.exists session_id);
+      check int "current cleanup restores original count"
+        before (Sse.client_count ()))
+
 (* ============================================================
    buffer_event / get_events_after Tests
    ============================================================ *)
@@ -371,6 +414,8 @@ let () =
       test_case "matches" `Quick test_unregister_if_current_matches;
       test_case "no match" `Quick test_unregister_if_current_no_match;
       test_case "nonexistent" `Quick test_unregister_if_current_nonexistent;
+      test_case "replacement count invariant" `Quick
+        test_unregister_if_current_replacement_count;
     ];
     "update_last_event_id", [
       test_case "exists" `Quick test_update_last_event_id_exists;
@@ -379,6 +424,8 @@ let () =
     "client_count", [
       test_case "nonnegative" `Quick test_client_count_nonnegative;
       test_case "increments" `Quick test_client_count_increments;
+      test_case "unregister decrements exactly" `Quick
+        test_client_count_exact_unregister_decrement;
     ];
     "event_buffer", [
       test_case "buffer and retrieve" `Quick test_buffer_event_and_retrieve;

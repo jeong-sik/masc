@@ -12,6 +12,18 @@ let validate_task_id id =
   (* Delegate to Validation module for consistent security checks *)
   Validation.Task_id.validate id
 
+(* Allowed character class for room ids: [A-Za-z0-9._-]+, anchored.
+   Hoisted to module load so room-id validation (called per MCP
+   request that takes a [room]/[coord] parameter) doesn't pay
+   [Re.compile] per call. *)
+let room_id_allowed_re =
+  Re.(compile
+        (whole_string
+           (rep1 (alt [
+             rg 'A' 'Z'; rg 'a' 'z'; rg '0' '9';
+             char '.'; char '_'; char '-';
+           ]))))
+
 let validate_room_id room_id =
   let room_id = String.trim room_id in
   if room_id = "" then Error "Coord id cannot be empty"
@@ -21,7 +33,7 @@ let validate_room_id room_id =
     Error "Coord id cannot contain path separators"
   else if contains_substring room_id ".." then
     Error "Coord id cannot contain traversal segments"
-  else if not (Re.execp (Re.compile (Re.(whole_string (rep1 (alt [rg 'A' 'Z'; rg 'a' 'z'; rg '0' '9'; char '.'; char '_'; char '-']))))) room_id) then
+  else if not (Re.execp room_id_allowed_re room_id) then
     Error "Coord id may only contain letters, digits, dot, underscore, and hyphen"
   else Ok room_id
 

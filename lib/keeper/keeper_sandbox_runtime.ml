@@ -112,6 +112,7 @@ let required_commands =
     "make";
     "opam";
     "dune";
+    "ssh";
   ]
 
 let option_field name = function

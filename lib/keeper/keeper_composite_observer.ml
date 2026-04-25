@@ -118,6 +118,10 @@ type snapshot = {
   invariants : invariants_check;
   is_live : bool;
   last_outcome : last_outcome option;
+  fiber_stop_flag : bool;
+  fiber_wakeup_flag : bool;
+  consecutive_noop_count : int;
+  idle_seconds : int;
 }
 
 let ksm_phase_to_string = function
@@ -458,6 +462,14 @@ let observe
            selected_model = lc.ct_selected_model;
          }
        | None -> None);
+    fiber_stop_flag = Atomic.get entry.fiber_stop;
+    fiber_wakeup_flag = Atomic.get entry.fiber_wakeup;
+    consecutive_noop_count =
+      entry.meta.runtime.proactive_rt.consecutive_noop_count;
+    idle_seconds =
+      (let last = entry.meta.runtime.proactive_rt.last_ts in
+       if last <= 0.0 then 0
+       else int_of_float (max 0.0 (Time_compat.now () -. last)));
   }
 
 (* Fleet fold — observe every currently-registered keeper under
@@ -542,4 +554,8 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
              | None -> `Null);
         ]
       | None -> `Null);
+    "fiber_stop_flag", `Bool s.fiber_stop_flag;
+    "fiber_wakeup_flag", `Bool s.fiber_wakeup_flag;
+    "consecutive_noop_count", `Int s.consecutive_noop_count;
+    "idle_seconds", `Int s.idle_seconds;
   ]

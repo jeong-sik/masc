@@ -101,6 +101,7 @@ val run_named :
   ?initial_messages:Oas.Types.message list ->
   ?max_turns:int ->
   ?max_idle_turns:int ->
+  ?stream_idle_timeout_s:float ->
   ?temperature:float ->
   ?max_tokens:int ->
   ?max_input_tokens:int ->
@@ -154,6 +155,7 @@ val run_model_by_label :
   ?tools:Oas.Tool.t list ->
   ?max_turns:int ->
   ?max_idle_turns:int ->
+  ?stream_idle_timeout_s:float ->
   ?temperature:float ->
   ?max_tokens:int ->
   ?max_input_tokens:int ->
@@ -183,6 +185,7 @@ val run_named_with_masc_tools :
   masc_tools:Types.tool_schema list ->
   dispatch:(name:string -> args:Yojson.Safe.t -> bool * string) ->
   ?max_turns:int ->
+  ?stream_idle_timeout_s:float ->
   ?temperature:float ->
   ?max_tokens:int ->
   ?max_input_tokens:int ->
@@ -216,6 +219,7 @@ val run_model_with_masc_tools :
   masc_tools:Types.tool_schema list ->
   dispatch:(name:string -> args:Yojson.Safe.t -> bool * string) ->
   ?max_turns:int ->
+  ?stream_idle_timeout_s:float ->
   ?temperature:float ->
   ?max_tokens:int ->
   ?max_input_tokens:int ->

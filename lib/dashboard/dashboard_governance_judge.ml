@@ -127,17 +127,7 @@ let status_offline = "offline"
 let status_backoff = "backoff"
 
 let contains_substring haystack needle =
-  let haystack_len = String.length haystack in
-  let needle_len = String.length needle in
-  if needle_len = 0 then true
-  else if needle_len > haystack_len then false
-  else
-    let rec loop index =
-      if index + needle_len > haystack_len then false
-      else if String.sub haystack index needle_len = needle then true
-      else loop (index + 1)
-    in
-    loop 0
+  String_util.contains_substring haystack needle
 
 let degraded_reason_of_error message =
   let lower = String.lowercase_ascii message in

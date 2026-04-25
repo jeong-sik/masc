@@ -132,15 +132,7 @@ let contains_forbidden_shell_chars_coding cmd =
   String.exists (fun ch -> List.mem ch forbidden_shell_chars_coding_base) cmd
   || has_dangerous_ampersand cmd
 
-let contains_substring s needle =
-  let s_len = String.length s in
-  let needle_len = String.length needle in
-  let rec loop i =
-    if i + needle_len > s_len then false
-    else if String.sub s i needle_len = needle then true
-    else loop (i + 1)
-  in
-  if needle_len = 0 then true else loop 0
+let contains_substring s needle = String_util.contains_substring s needle
 
 let has_process_substitution cmd =
   contains_substring cmd "<(" || contains_substring cmd ">("

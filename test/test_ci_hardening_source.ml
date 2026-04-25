@@ -975,20 +975,20 @@ let test_masc_dirname_ssot_contracts () =
     "lib/mcp_server_eio_resource.ml";
     "lib/oas_worker_cascade.ml";
     "lib/procedural_memory.ml";
-    (* batch 3 (this PR: relative-path Printf.sprintf and additional Filename.concat sites)
-       — keeper_gh_env.ml dropped: main #10275 migrated it via [Coord.masc_dir]
-       which the strict matcher does not recognize.  keeper_accountability.ml
-       continues to use Common.masc_dir_from_base_path so it stays in the list. *)
+    (* batch 3 (#10257) *)
     "lib/tool_team_memory.ml";
     "lib/exec_core.ml";
     "lib/keeper/keeper_accountability.ml";
+    (* batch 4 (this PR — dashboard token paths and approval queue audit store) *)
+    "lib/server/server_routes_http_routes_dashboard.ml";
+    "lib/keeper/keeper_approval_queue.ml";
   ] in
   List.iter
     (fun file ->
        check bool
-         (Printf.sprintf "%s uses Common.masc_dir_from_base_path" file)
+         (Printf.sprintf "%s uses masc_dir_from_base_path helper" file)
          true
-         (file_contains_pattern file "Common.masc_dir_from_base_path");
+         (file_contains_pattern file "masc_dir_from_base_path");
        check bool
          (Printf.sprintf "%s no longer inlines \".masc/\"" file)
          true

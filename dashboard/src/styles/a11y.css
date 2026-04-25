@@ -1,5 +1,18 @@
 /* Accessibility — global focus-visible indicator + prefers-reduced-motion overrides. */
 
+/* Screen-reader only utility — hidden visually but available to assistive tech. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
 /* Keyboard-only focus ring. Mouse/touch clicks produce :focus but not :focus-visible,
    so this only appears during Tab/Shift+Tab navigation. */
 :focus-visible {

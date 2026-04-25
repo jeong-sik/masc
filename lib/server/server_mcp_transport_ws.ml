@@ -463,6 +463,33 @@ type parsed_sse_event = {
 let parse_cache : (string * parsed_sse_event option) Atomic.t =
   Atomic.make ("", None)
 
+(** Extract the JSON body from an SSE-formatted event string.
+
+    Sse.format_event always emits exactly four lines:
+    [{|id: <N>\nevent: <type>\ndata: <body>\n\n|}].  The body line
+    starts with [data: ] (6-char prefix) and is the JSON payload that
+    parse_sse_dashboard_event needs.  External subscribers receive the
+    full SSE-formatted string (gRPC stuffs it into payload_json verbatim
+    and lets the gRPC client re-parse), so the WS callback must peel
+    the SSE wrapper before feeding [Yojson.Safe.from_string].
+
+    The earlier implementation skipped this step, so every production
+    parse failed and dashboard_delta_for_sse always fell through to
+    raw-SSE-forward — defeating the parse cache, slice-aware fanout
+    (Phase 2 of #10119), and delta-built counter.  Pure-JSON inputs
+    (the unit-test path) still work via the [_ -> Some sse_event]
+    fallback. *)
+let extract_sse_data_line sse_event =
+  match String.split_on_char '\n' sse_event with
+  | _id :: _event :: data_line :: _
+    when String.length data_line >= 6
+         && String.sub data_line 0 6 = "data: " ->
+      Some (String.sub data_line 6 (String.length data_line - 6))
+  | _ ->
+      (* Not the 4-line format we emit — pass through as-is so unit
+         tests that hand us pure JSON keep working. *)
+      Some sse_event
+
 let parse_sse_dashboard_event sse_event =
   let cached_str, cached_val = Atomic.get parse_cache in
   if cached_str == sse_event then begin
@@ -472,21 +499,24 @@ let parse_sse_dashboard_event sse_event =
   else begin
     Transport_metrics.inc_ws_parse_cache_miss ();
     let result =
-      match Yojson.Safe.from_string sse_event with
-      | exception _ -> None
-      | `Assoc fields as event_json -> (
-          match List.assoc_opt "type" fields with
-          | Some (`String event_type) ->
-              let payload =
-                match List.assoc_opt "payload" fields with
-                | Some payload -> payload
-                | None -> event_json
-              in
-              let slice = dashboard_slice_for_sse_type event_type in
-              let broadcast_ts = Time_compat.now () in
-              Some { event_type; slice; payload; broadcast_ts }
-          | _ -> None)
-      | _ -> None
+      match extract_sse_data_line sse_event with
+      | None -> None
+      | Some json_body ->
+        match Yojson.Safe.from_string json_body with
+        | exception _ -> None
+        | `Assoc fields as event_json -> (
+            match List.assoc_opt "type" fields with
+            | Some (`String event_type) ->
+                let payload =
+                  match List.assoc_opt "payload" fields with
+                  | Some payload -> payload
+                  | None -> event_json
+                in
+                let slice = dashboard_slice_for_sse_type event_type in
+                let broadcast_ts = Time_compat.now () in
+                Some { event_type; slice; payload; broadcast_ts }
+            | _ -> None)
+        | _ -> None
     in
     Atomic.set parse_cache (sse_event, result);
     result

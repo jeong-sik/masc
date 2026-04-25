@@ -126,6 +126,102 @@ let test_repo_toml_renders_to_committed_json () =
     (read_file (repo_json_path ()))
     rendered
 
+let test_fallback_cascade_field_is_parsed () =
+  match
+    Masc_mcp.Cascade_toml_materializer.render_toml_string_to_json_string
+      {|
+[ollama_only]
+models = ["ollama:qwen3.6:27b-coding-nvfp4"]
+fallback_cascade = "big_three"
+|}
+  with
+  | Error msg -> failf "expected fallback_cascade to parse, got: %s" msg
+  | Ok json_str ->
+      let json = Yojson.Safe.from_string json_str in
+      check string "fallback_cascade key is rendered"
+        "big_three"
+        (json |> member "ollama_only_fallback_cascade" |> to_string)
+
+let test_fallback_cascade_absent_is_backward_compatible () =
+  match
+    Masc_mcp.Cascade_toml_materializer.render_toml_string_to_json_string
+      {|
+[ollama_only]
+models = ["ollama:qwen3.6:27b-coding-nvfp4"]
+|}
+  with
+  | Error msg -> failf "minimal profile must parse, got: %s" msg
+  | Ok json_str ->
+      let json = Yojson.Safe.from_string json_str in
+      check bool "fallback_cascade key absent when not declared" true
+        (match json |> member "ollama_only_fallback_cascade" with
+         | `Null -> true
+         | _ -> false)
+
+let test_loader_catalog_exposes_fallback_cascade () =
+  with_temp_dir "cascade-fallback-loader" @@ fun dir ->
+  let json_path = Filename.concat dir "cascade.json" in
+  write_file json_path
+    {|{
+       "ollama_only_models": ["ollama:qwen3.6:27b-coding-nvfp4"],
+       "ollama_only_fallback_cascade": "big_three",
+       "big_three_models": ["codex_cli:auto"]
+     }|};
+  match
+    Masc_mcp.Cascade_config_loader.load_catalog ~config_path:json_path
+  with
+  | Error msg -> failf "load_catalog failed: %s" msg
+  | Ok entries ->
+      let find_entry name =
+        List.find_opt
+          (fun (e : Masc_mcp.Cascade_config_loader.catalog_entry) ->
+            String.equal e.name name)
+          entries
+      in
+      (match find_entry "ollama_only" with
+       | None -> fail "ollama_only entry missing"
+       | Some entry ->
+           check (option string) "ollama_only fallback_cascade hint"
+             (Some "big_three") entry.fallback_cascade);
+      (match find_entry "big_three" with
+       | None -> fail "big_three entry missing"
+       | Some entry ->
+           check (option string) "big_three has no fallback_cascade"
+             None entry.fallback_cascade)
+
+let test_keeper_profile_drops_unknown_fallback_target () =
+  with_temp_dir "cascade-fallback-unknown" @@ fun dir ->
+  let config_dir = Filename.concat dir "config" in
+  init_config_root config_dir;
+  let json_path = Filename.concat config_dir "cascade.json" in
+  write_file json_path
+    {|{
+       "ollama_only_models": ["ollama:qwen3.6:27b-coding-nvfp4"],
+       "ollama_only_fallback_cascade": "does_not_exist",
+       "big_three_models": ["codex_cli:auto"]
+     }|};
+  with_config_dir config_dir @@ fun () ->
+  check (option string)
+    "unknown fallback target is dropped, not propagated"
+    None
+    (Masc_mcp.Keeper_cascade_profile.fallback_cascade_for "ollama_only")
+
+let test_keeper_profile_resolves_known_fallback_target () =
+  with_temp_dir "cascade-fallback-known" @@ fun dir ->
+  let config_dir = Filename.concat dir "config" in
+  init_config_root config_dir;
+  let json_path = Filename.concat config_dir "cascade.json" in
+  write_file json_path
+    {|{
+       "ollama_only_models": ["ollama:qwen3.6:27b-coding-nvfp4"],
+       "ollama_only_fallback_cascade": "big_three",
+       "big_three_models": ["codex_cli:auto"]
+     }|};
+  with_config_dir config_dir @@ fun () ->
+  check (option string) "known fallback target is exposed"
+    (Some "big_three")
+    (Masc_mcp.Keeper_cascade_profile.fallback_cascade_for "ollama_only")
+
 let test_unknown_profile_field_is_rejected () =
   match
     Masc_mcp.Cascade_toml_materializer.render_toml_string_to_json_string
@@ -212,6 +308,16 @@ let () =
         [
           test_case "unknown profile field is rejected" `Quick
             test_unknown_profile_field_is_rejected;
+          test_case "fallback_cascade field is parsed" `Quick
+            test_fallback_cascade_field_is_parsed;
+          test_case "fallback_cascade absent is backward compatible" `Quick
+            test_fallback_cascade_absent_is_backward_compatible;
+          test_case "loader catalog exposes fallback_cascade" `Quick
+            test_loader_catalog_exposes_fallback_cascade;
+          test_case "keeper profile drops unknown fallback target" `Quick
+            test_keeper_profile_drops_unknown_fallback_target;
+          test_case "keeper profile resolves known fallback target" `Quick
+            test_keeper_profile_resolves_known_fallback_target;
         ] );
       ( "runtime",
         [

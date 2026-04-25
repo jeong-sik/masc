@@ -76,9 +76,17 @@ val degraded_retry_after_recoverable_error :
     runtime/catalog-owned candidate order; otherwise the legacy
     base/default/local_recovery group is used. Required-tool turns keep the
     tool requirement and leave concrete provider filtering to the cascade
-    resolver. *)
+    resolver.
+
+    [fallback_hint], when provided, is prepended to the candidate list so
+    that single-provider profiles can declare an immediate escalation
+    target via [cascade.toml]. The hint is normalized and deduplicated like
+    any other candidate; if it duplicates the effective cascade or has
+    already been attempted, the next legal candidate is returned.
+    @since 0.174.0 *)
 val degraded_rotation_after_recoverable_error :
   ?rotation_cascades:string list ->
+  ?fallback_hint:string ->
   base_cascade:string ->
   effective_cascade:string ->
   tool_requirement:string ->

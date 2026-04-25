@@ -49,6 +49,17 @@ type catalog_entry = {
   keeper_assignable : bool;
   (** Whether the profile may be assigned to keepers. Defaults to [true]
       when ["{name}_keeper_assignable"] is absent. *)
+  fallback_cascade : string option;
+  (** Optional declarative escalation hint. When set, the cascade
+      rotation logic prefers this name as the immediate next cascade
+      after a recoverable cascade failure (single-provider profiles
+      otherwise have no internal escalation path).
+
+      JSON key: ["{name}_fallback_cascade"]. The loader does not
+      validate that the target profile exists; consumers are expected
+      to drop the hint when it does not match a live catalog entry.
+
+      @since 0.174.0 *)
 }
 
 (** Load the cascade catalog from [config_path].

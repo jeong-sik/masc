@@ -139,6 +139,7 @@ let parse_weighted_item = function
 type catalog_entry = {
   name : string;
   keeper_assignable : bool;
+  fallback_cascade : string option;
 }
 
 module StringMap = Map.Make (String)
@@ -146,6 +147,7 @@ module StringMap = Map.Make (String)
 type catalog_field =
   | Schema_field
   | Keeper_assignable_field
+  | Fallback_cascade_field
 
 let catalog_key_specs =
   [
@@ -164,6 +166,7 @@ let catalog_key_specs =
     ("_keep_alive", Schema_field);
     ("_num_ctx", Schema_field);
     ("_keeper_assignable", Keeper_assignable_field);
+    ("_fallback_cascade", Fallback_cascade_field);
   ]
 
 let split_catalog_key key =
@@ -182,11 +185,13 @@ let split_catalog_key key =
 type catalog_builder = {
   has_schema_field : bool;
   keeper_assignable : bool option;
+  fallback_cascade : string option;
 }
 
 let empty_catalog_builder = {
   has_schema_field = false;
   keeper_assignable = None;
+  fallback_cascade = None;
 }
 
 let update_catalog_builder builder field value =
@@ -199,6 +204,15 @@ let update_catalog_builder builder field value =
         | _ -> builder.keeper_assignable
       in
       { builder with keeper_assignable }
+  | Fallback_cascade_field ->
+      let fallback_cascade =
+        match value with
+        | `String s ->
+            let trimmed = String.trim s in
+            if String.equal trimmed "" then None else Some trimmed
+        | _ -> builder.fallback_cascade
+      in
+      { builder with fallback_cascade }
 
 let load_catalog ~config_path =
   match load_json config_path with
@@ -230,6 +244,7 @@ let load_catalog ~config_path =
                      name;
                      keeper_assignable =
                        Option.value builder.keeper_assignable ~default:true;
+                     fallback_cascade = builder.fallback_cascade;
                    })
       in
       Ok entries

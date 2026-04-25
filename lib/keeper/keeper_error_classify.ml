@@ -279,16 +279,26 @@ let normalize_rotation_candidates candidates =
 
 let degraded_rotation_candidates
     ~(rotation_cascades : string list option)
+    ~(fallback_hint : string option)
     ~(base_cascade : string)
     ~(effective_cascade : string)
     ~(tool_requirement : string) =
   let normalized_effective = normalized_cascade_name effective_cascade in
-  let candidates =
+  let raw_candidates =
     match rotation_cascades with
     | None ->
         legacy_degraded_rotation_candidates ~base_cascade ~tool_requirement
     | Some catalog ->
         normalize_rotation_candidates (base_cascade :: catalog)
+  in
+  let candidates =
+    match fallback_hint with
+    | None -> raw_candidates
+    | Some hint ->
+        let trimmed = String.trim hint in
+        if String.equal trimmed "" then raw_candidates
+        else
+          normalize_rotation_candidates (trimmed :: raw_candidates)
   in
   candidates
   |> List.filter (fun candidate ->
@@ -298,6 +308,7 @@ let degraded_rotation_candidates
 
 let degraded_rotation_after_recoverable_error
     ?rotation_cascades
+    ?fallback_hint
     ~(base_cascade : string)
     ~(effective_cascade : string)
     ~(tool_requirement : string)
@@ -313,6 +324,7 @@ let degraded_rotation_after_recoverable_error
       in
       degraded_rotation_candidates
         ~rotation_cascades
+        ~fallback_hint
         ~base_cascade ~effective_cascade ~tool_requirement
       |> List.find_opt (fun candidate ->
              not (List.exists (String.equal candidate) attempted))

@@ -654,12 +654,21 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
             let all_valid = compile_known @ phase_routing @ catalog in
             if List.mem normalized all_valid then Ok ()
             else
+              (* #10158: include cascade.toml [catalog] entries in the
+                 operator-visible "known:" list.  Previously this
+                 printed only [compile_known @ phase_routing] (4
+                 names on prod), so an operator trying to add a
+                 valid name from cascade.toml ([tool_use_strict],
+                 [local_only], etc.) saw a misleading rejection
+                 that did not even mention the name they wanted to
+                 use.  Sort + dedupe so the message is stable
+                 across runs even when [catalog] reorders. *)
+              let dedup_sorted xs = List.sort_uniq String.compare xs in
               Error
                 (Printf.sprintf
                    "invalid cascade_name '%s' (known: %s)"
                    raw
-                   (String.concat ", "
-                      (compile_known @ phase_routing))))
+                   (String.concat ", " (dedup_sorted all_valid))))
   in
   Result.map
     (fun () ->

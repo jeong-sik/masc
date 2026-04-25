@@ -59,6 +59,18 @@ let canonical (raw : string) : t =
   | Some t -> t
   | None -> default
 
+(* #10158: cascade.toml load failures used to silently return [None].
+   That made every downstream caller (catalog_names,
+   keeper_catalog_names, system_catalog_names) return [], which
+   made [keeper_types_profile] reject every TOML keeper config
+   whose cascade_name lived only in cascade.toml
+   ([tool_use_strict] etc.) — six configs were silently dropped
+   on 2026-04-25.  Surface the failure once per process so the
+   root cause is visible without spamming dashboard render
+   loops; reset on success so a fixed config flips the alarm
+   off. *)
+let cascade_load_warn_emitted : bool Atomic.t = Atomic.make false
+
 let catalog_entries ?config_path () =
   let path_opt =
     match config_path with
@@ -69,8 +81,17 @@ let catalog_entries ?config_path () =
   | None -> None
   | Some path -> (
       match Cascade_config_loader.load_catalog ~config_path:path with
-      | Ok entries -> Some entries
-      | Error _ -> None)
+      | Ok entries ->
+          Atomic.set cascade_load_warn_emitted false;
+          Some entries
+      | Error e ->
+          if not (Atomic.exchange cascade_load_warn_emitted true) then
+            Log.Keeper.warn
+              "cascade catalog load failed for %s: %s — keeper TOML \
+               configs whose cascade_name is defined only in \
+               cascade.toml will be silently rejected (see #10158)"
+              path e;
+          None)
 
 let catalog_names ?config_path () =
   match catalog_entries ?config_path () with

@@ -141,6 +141,92 @@ let test_cascade_name_accepts_catalog_entry () =
       if catalog = [] then ()
       else fail (Printf.sprintf "%s should be accepted: %s" test_name e)
 
+(* #10158: when a cascade_name is rejected, the operator-visible
+   error message must include cascade.toml [catalog] entries —
+   otherwise an operator who tried [tool_use_strict] (a real
+   catalog entry) would see the rejection list missing that name
+   and conclude the system does not support it.  Pre-fix the
+   message printed only [compile_known @ phase_routing] (4 names
+   on prod). *)
+let test_invalid_cascade_name_message_includes_catalog () =
+  let catalog =
+    try Masc_mcp.Keeper_cascade_profile.catalog_names ()
+    with _ -> []
+  in
+  let unique_catalog_name =
+    List.find_opt
+      (fun n ->
+        not (List.mem n Masc_mcp.Keeper_cascade_profile.known_cascades)
+        && not (List.mem n [ "local_only"; "local_recovery" ]))
+      catalog
+  in
+  match unique_catalog_name with
+  | None ->
+      (* Catalog unavailable in test environment — the fix is still
+         correct (it just degrades to the old behaviour); skip. *)
+      ()
+  | Some name ->
+      let result =
+        with_temp_toml
+          "[keeper]\nname = \"foo\"\n\
+           cascade_name = \"definitely_not_real_xyz_10158\"\n"
+          KTP.load_keeper_toml
+      in
+      (match result with
+       | Ok _ -> fail "should reject"
+       | Error e ->
+           let contains needle s =
+             let n = String.length s and m = String.length needle in
+             if m > n then false
+             else
+               let rec loop i =
+                 if i + m > n then false
+                 else if String.sub s i m = needle then true
+                 else loop (i + 1)
+               in
+               loop 0
+           in
+           check bool
+             (Printf.sprintf "message mentions catalog entry %s" name)
+             true (contains name e))
+
+(* The "(known: ...)" list must be sorted + deduplicated so
+   operators see a stable, readable enumeration even when
+   compile_known and the catalog overlap or reorder. *)
+let test_invalid_cascade_name_message_sorted_and_unique () =
+  let result =
+    with_temp_toml
+      "[keeper]\nname = \"foo\"\n\
+       cascade_name = \"definitely_not_real_xyz_10158_dup\"\n"
+      KTP.load_keeper_toml
+  in
+  match result with
+  | Ok _ -> fail "should reject"
+  | Error e ->
+      let prefix = "(known: " in
+      let plen = String.length prefix in
+      let n = String.length e in
+      let rec find i =
+        if i + plen > n then None
+        else if String.sub e i plen = prefix then Some (i + plen)
+        else find (i + 1)
+      in
+      (match find 0 with
+       | None -> fail (Printf.sprintf "no (known: ...) in: %s" e)
+       | Some start ->
+           (* End at the matching ')' *)
+           let close = String.index_from e start ')' in
+           let body = String.sub e start (close - start) in
+           let names =
+             String.split_on_char ',' body |> List.map String.trim
+           in
+           let sorted = List.sort String.compare names in
+           check (list string) "names are sorted alphabetically"
+             sorted names;
+           let unique = List.sort_uniq String.compare names in
+           check int "no duplicates"
+             (List.length names) (List.length unique))
+
 let test_tool_preset_accepts_dispatch () =
   let result =
     with_temp_toml
@@ -228,6 +314,10 @@ let () =
             test_cascade_name_accepts_known;
           test_case "accepts catalog entry (legacy alias)" `Quick
             test_cascade_name_accepts_catalog_entry;
+          test_case "rejection message includes catalog entries (#10158)" `Quick
+            test_invalid_cascade_name_message_includes_catalog;
+          test_case "rejection message is sorted + deduped (#10158)" `Quick
+            test_invalid_cascade_name_message_sorted_and_unique;
           test_case "accepts dispatch tool_preset" `Quick
             test_tool_preset_accepts_dispatch;
         ] );

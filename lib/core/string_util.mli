@@ -10,6 +10,13 @@ val contains_substring_ci : string -> string -> bool
     Returns [false] when [needle] is empty, matching the behavior
     of the original per-module [contains_ci] helpers. *)
 
+val replace_substring : needle:string -> by:string -> string -> string
+(** [replace_substring ~needle ~by haystack] substitutes [by] for every
+    non-overlapping occurrence of [needle] in [haystack]. Returns
+    [haystack] unchanged when [needle] is empty or longer than the
+    haystack. Matches [Re.replace_string (Re.str needle |> Re.compile)]
+    semantics for ASCII / byte-equal patterns. *)
+
 type truncation =
   | Untouched of string
   | Truncated of { prefix : string; suffix : string; dropped_bytes : int }

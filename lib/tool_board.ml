@@ -925,14 +925,12 @@ let handle_board_cleanup args =
   let author_pattern = get_string_opt args "author_pattern" in
   let now = Time_compat.now () in
   let age_threshold = now -. (float_of_int max_age_hours *. 3600.0) in
-  let title_re = Option.map (fun p ->
-    Re.str (String.lowercase_ascii p) |> Re.compile) title_pattern in
-  let author_re = Option.map (fun p ->
-    Re.str (String.lowercase_ascii p) |> Re.compile) author_pattern in
-  let matches_opt re s =
-    match re with
+  let title_needle = Option.map String.lowercase_ascii title_pattern in
+  let author_needle = Option.map String.lowercase_ascii author_pattern in
+  let matches_opt needle s =
+    match needle with
     | None -> true
-    | Some compiled -> Re.execp compiled (String.lowercase_ascii s)
+    | Some n -> String_util.contains_substring (String.lowercase_ascii s) n
   in
   let all_posts =
     Board_dispatch.list_posts ~sort_by:Recent ~limit:500 ()
@@ -942,8 +940,8 @@ let handle_board_cleanup args =
       p.created_at < age_threshold
       && (not require_no_comments || p.reply_count = 0)
       && (not require_no_votes || (p.votes_up = 0 && p.votes_down = 0))
-      && matches_opt title_re p.title
-      && matches_opt author_re (Board.Agent_id.to_string p.author))
+      && matches_opt title_needle p.title
+      && matches_opt author_needle (Board.Agent_id.to_string p.author))
       all_posts
   in
   let targets = List.filteri (fun i _ -> i < limit) candidates in

@@ -60,6 +60,120 @@ let is_keeper_board_write_tool_name tool_name =
   | Some tool -> Tool_name.Keeper.is_board_write tool
   | None -> false
 
+let current_keeper_model meta =
+  let m = meta.Keeper_types.runtime.usage.last_model_used in
+  if m = "" then meta.Keeper_types.cascade_name else m
+
+let render_pre_tool_gate_output (event : Keeper_guards.gate_decision_event) =
+  if String.equal event.decision "approval_required" then
+    Printf.sprintf
+      "[tool_approval_required] tool=%s source=keeper_hook code=%s reason=%s"
+      (Keeper_guards.escape_field event.tool_name)
+      (Keeper_guards.escape_field event.reason_code)
+      (Keeper_guards.escape_field event.reason_text)
+  else
+    Keeper_guards.render_inline_skip_reason
+      ~tool_name:event.tool_name
+      ~reason_code:event.reason_code
+      ~reason_text:event.reason_text
+
+let pre_tool_gate_error (event : Keeper_guards.gate_decision_event) =
+  Printf.sprintf "%s:%s: %s"
+    event.decision event.reason_code event.reason_text
+
+let record_pre_tool_gate_attempt
+    ~(meta_ref : Keeper_types.keeper_meta ref)
+    ~(tool_call_count_ref : int ref)
+    ?(trajectory_acc : Trajectory.accumulator option)
+    (event : Keeper_guards.gate_decision_event) =
+  incr tool_call_count_ref;
+  let meta = !meta_ref in
+  let keeper_name = meta.name in
+  let model = current_keeper_model meta in
+  let safe_input = Observability_redact.redact_json_value event.input in
+  let output_text = render_pre_tool_gate_output event in
+  let error = pre_tool_gate_error event in
+  let duration_ms = Float.max 0.0 event.stage_latency_ms in
+  (try
+     Keeper_tool_call_log.log_call
+       ~keeper_name
+       ~tool_name:event.tool_name
+       ~input:safe_input
+       ~output_text
+       ~success:false
+       ~duration_ms
+       ~model
+       ~result_bytes:(String.length output_text)
+       ()
+   with
+   | Eio.Cancel.Cancelled _ as e -> raise e
+   | exn ->
+       Log.Keeper.warn
+         "keeper:%s pre_tool_use gate tool_call log failed tool=%s err=%s"
+         keeper_name event.tool_name (Printexc.to_string exn));
+  match trajectory_acc with
+  | None -> ()
+  | Some acc ->
+      let trace_id = acc.Trajectory.trace_id in
+      let runtime_contract =
+        Keeper_tool_call_log.runtime_contract_json_for_call
+          ~keeper_name
+          ~model
+          ()
+      in
+      let action_radius =
+        Keeper_tool_call_log.action_radius_json_for_call
+          ~keeper_name
+          ~tool_name:event.tool_name
+          ~input:safe_input
+          ~success:false
+          ~duration_ms
+          ~error
+          ()
+      in
+      let now = Time_compat.now () in
+      let turn = if event.turn > 0 then event.turn else acc.Trajectory.turn in
+      let round =
+        acc.Trajectory.entries
+        |> List.filter (fun (e : Trajectory.tool_call_entry) -> e.turn = turn)
+        |> List.length
+        |> ( + ) 1
+      in
+      let entry : Trajectory.tool_call_entry =
+        {
+          ts = now;
+          ts_iso = Types.iso8601_of_unix_seconds now;
+          turn;
+          round;
+          tool_name = event.tool_name;
+          args_json = Yojson.Safe.to_string safe_input;
+          gate_decision = Trajectory.Reject error;
+          result = Some output_text;
+          duration_ms = int_of_float (Float.round duration_ms);
+          error = Some error;
+          cost_usd = 0.0;
+        }
+      in
+      Trajectory.record_entry
+        ~runtime_contract
+        ~action_radius
+        ~on_persist_error:(fun exn ->
+          Telemetry_coverage_gap.record
+            ~masc_root:acc.Trajectory.masc_root
+            ~source:"trajectory_tool_call"
+            ~producer:"keeper_hooks_oas.pre_tool_use"
+            ~durable_store:
+              (Trajectory.trajectory_path acc.Trajectory.masc_root
+                 acc.Trajectory.keeper_name trace_id)
+            ~dashboard_surface:"/api/v1/keepers/:name/tool-stats"
+            ~stale_reason:"trajectory_append_failed"
+            ~keeper_name
+            ~trace_id
+            ~error:(Printexc.to_string exn)
+            ())
+        acc
+        entry
+
 (* #9919: counter for post_tool_use_failure events.
 
    Replaces an earlier [Heuristic_metrics.record] emit that produced
@@ -549,9 +663,18 @@ let make_hooks
      [make_hooks] closure — one state per keeper. *)
   let streak_state = Keeper_guards.make_streak_state () in
   let streak_threshold = 5 in
+  let record_gate_decision event =
+    record_pre_tool_gate_attempt
+      ~meta_ref
+      ~tool_call_count_ref
+      ?trajectory_acc
+      event
+  in
   (* Build the pre_tool_use guard chain via Hooks.compose. Each guard
      lives in Keeper_guards and emits its own masc:keeper_gate event
-     on override/approval decisions. *)
+     on override/approval decisions. The observer persists the same
+     attempted action into tool-call and trajectory lanes so blocked
+     pre-tool attempts are not invisible to tool-stats. *)
   let guard_chain =
     Keeper_guards.build_chain
       ~meta_ref
@@ -561,6 +684,7 @@ let make_hooks
       ~denied:keeper_denied_tools
       ~max_cost_usd
       ~destructive_check
+      ~on_gate_decision:record_gate_decision
       ~pre_tool_use_guard
   in
   let non_gate_hooks =

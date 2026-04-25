@@ -70,6 +70,8 @@ let override_text (d : Agent_sdk.Hooks.hook_decision) : string =
   | Override s -> s
   | _ -> failwith ("expected Override, got " ^ decision_kind d)
 
+let no_gate_observer = KG.ignore_gate_decision
+
 (* ----------------------------------------------------------------- *)
 (* Utility tests                                                      *)
 (* ----------------------------------------------------------------- *)
@@ -89,6 +91,16 @@ let contains_substring (haystack : string) (needle : string) : bool =
     let _ = Str.search_forward (Str.regexp_string needle) haystack 0 in
     true
   with Not_found -> false
+
+let with_env name value f =
+  let old = Sys.getenv_opt name in
+  Unix.putenv name value;
+  Fun.protect
+    ~finally:(fun () ->
+      match old with
+      | Some old_value -> Unix.putenv name old_value
+      | None -> Unix.putenv name "")
+    f
 
 let test_render_inline_skip_reason () =
   let s = KG.render_inline_skip_reason
@@ -110,7 +122,8 @@ let test_render_inline_skip_reason () =
 let test_deny_guard_blocks () =
   let meta_ref = make_meta_ref "test_keeper" in
   let hook =
-    KG.deny_guard ~meta_ref ~denied:["dangerous_tool"]
+    KG.deny_guard ~meta_ref ~on_gate_decision:no_gate_observer
+      ~denied:["dangerous_tool"]
   in
   let d = invoke hook (pre_tool_use_event ~tool_name:"dangerous_tool" ()) in
   check string "denied tool -> Override" "Override" (decision_kind d);
@@ -118,10 +131,39 @@ let test_deny_guard_blocks () =
   check bool "override mentions deny list" true
     (contains_substring text "code=keeper_deny")
 
+let test_deny_guard_notifies_gate_observer () =
+  let meta_ref = make_meta_ref "test_keeper" in
+  let observed = ref [] in
+  let on_gate_decision event = observed := event :: !observed in
+  let hook =
+    KG.deny_guard ~meta_ref ~on_gate_decision ~denied:["dangerous_tool"]
+  in
+  let d =
+    invoke hook
+      (pre_tool_use_event ~tool_name:"dangerous_tool"
+         ~input:(`Assoc [ ("path", `String "/tmp/secret") ])
+         ~turn:4 ())
+  in
+  check string "denied tool -> Override" "Override" (decision_kind d);
+  match !observed with
+  | [ event ] ->
+    check string "stage" "keeper_deny" event.KG.stage;
+    check string "decision" "override" event.KG.decision;
+    check string "reason_code" "keeper_deny" event.KG.reason_code;
+    check string "tool_name" "dangerous_tool" event.KG.tool_name;
+    check int "turn" 4 event.KG.turn;
+    check bool "input preserved" true
+      (match event.KG.input with
+       | `Assoc [ ("path", `String "/tmp/secret") ] -> true
+       | _ -> false)
+  | events ->
+    failf "expected one observer event, got %d" (List.length events)
+
 let test_deny_guard_continues () =
   let meta_ref = make_meta_ref "test_keeper" in
   let hook =
-    KG.deny_guard ~meta_ref ~denied:["other_tool"]
+    KG.deny_guard ~meta_ref ~on_gate_decision:no_gate_observer
+      ~denied:["other_tool"]
   in
   let d = invoke hook (pre_tool_use_event ~tool_name:"allowed_tool" ()) in
   check string "allowed tool -> Continue" "Continue" (decision_kind d)
@@ -129,7 +171,8 @@ let test_deny_guard_continues () =
 let test_cost_guard_blocks () =
   let meta_ref = make_meta_ref "test_keeper" in
   let hook =
-    KG.cost_guard ~meta_ref ~max_cost_usd:(Some 0.10)
+    KG.cost_guard ~meta_ref ~on_gate_decision:no_gate_observer
+      ~max_cost_usd:(Some 0.10)
   in
   let d = invoke hook
     (pre_tool_use_event ~tool_name:"expensive" ~accumulated_cost_usd:0.15 ())
@@ -139,7 +182,8 @@ let test_cost_guard_blocks () =
 let test_cost_guard_under_limit () =
   let meta_ref = make_meta_ref "test_keeper" in
   let hook =
-    KG.cost_guard ~meta_ref ~max_cost_usd:(Some 0.10)
+    KG.cost_guard ~meta_ref ~on_gate_decision:no_gate_observer
+      ~max_cost_usd:(Some 0.10)
   in
   let d = invoke hook
     (pre_tool_use_event ~tool_name:"cheap" ~accumulated_cost_usd:0.05 ())
@@ -148,7 +192,10 @@ let test_cost_guard_under_limit () =
 
 let test_cost_guard_disabled () =
   let meta_ref = make_meta_ref "test_keeper" in
-  let hook = KG.cost_guard ~meta_ref ~max_cost_usd:None in
+  let hook =
+    KG.cost_guard ~meta_ref ~on_gate_decision:no_gate_observer
+      ~max_cost_usd:None
+  in
   let d = invoke hook
     (pre_tool_use_event ~tool_name:"any" ~accumulated_cost_usd:999.0 ())
   in
@@ -158,7 +205,8 @@ let test_streak_guard_under_threshold () =
   let meta_ref = make_meta_ref "test_keeper" in
   let state = KG.make_streak_state () in
   let hook =
-    KG.streak_guard ~meta_ref ~state ~threshold:5
+    KG.streak_guard ~meta_ref ~on_gate_decision:no_gate_observer
+      ~state ~threshold:5
   in
   (* 4 consecutive calls — should all Continue *)
   for _ = 1 to 4 do
@@ -170,7 +218,8 @@ let test_streak_guard_at_threshold () =
   let meta_ref = make_meta_ref "test_keeper" in
   let state = KG.make_streak_state () in
   let hook =
-    KG.streak_guard ~meta_ref ~state ~threshold:5
+    KG.streak_guard ~meta_ref ~on_gate_decision:no_gate_observer
+      ~state ~threshold:5
   in
   (* 4 calls Continue, 5th blocks *)
   for _ = 1 to 4 do
@@ -187,7 +236,8 @@ let test_streak_guard_resets_on_different_tool () =
   let meta_ref = make_meta_ref "test_keeper" in
   let state = KG.make_streak_state () in
   let hook =
-    KG.streak_guard ~meta_ref ~state ~threshold:3
+    KG.streak_guard ~meta_ref ~on_gate_decision:no_gate_observer
+      ~state ~threshold:3
   in
   (* 2 calls of tool_a, then tool_b resets counter *)
   let _ = invoke hook (pre_tool_use_event ~tool_name:"tool_a" ()) in
@@ -203,7 +253,8 @@ let test_streak_state_manual_reset () =
   let meta_ref = make_meta_ref "test_keeper" in
   let state = KG.make_streak_state () in
   let hook =
-    KG.streak_guard ~meta_ref ~state ~threshold:3
+    KG.streak_guard ~meta_ref ~on_gate_decision:no_gate_observer
+      ~state ~threshold:3
   in
   let _ = invoke hook (pre_tool_use_event ~tool_name:"t" ()) in
   let _ = invoke hook (pre_tool_use_event ~tool_name:"t" ()) in
@@ -217,16 +268,43 @@ let test_custom_guard_blocks () =
   let guard ~tool_name ~input:_ =
     if tool_name = "bad" then Some "user blocked" else None
   in
-  let hook = KG.custom_guard ~meta_ref ~guard in
+  let hook =
+    KG.custom_guard ~meta_ref ~on_gate_decision:no_gate_observer ~guard
+  in
   let d = invoke hook (pre_tool_use_event ~tool_name:"bad" ()) in
   check string "custom blocked -> Override" "Override" (decision_kind d)
 
 let test_custom_guard_passthrough () =
   let meta_ref = make_meta_ref "test_keeper" in
   let guard ~tool_name:_ ~input:_ = None in
-  let hook = KG.custom_guard ~meta_ref ~guard in
+  let hook =
+    KG.custom_guard ~meta_ref ~on_gate_decision:no_gate_observer ~guard
+  in
   let d = invoke hook (pre_tool_use_event ~tool_name:"ok" ()) in
   check string "custom None -> Continue" "Continue" (decision_kind d)
+
+let test_governance_approval_notifies_gate_observer () =
+  with_env "MASC_GOVERNANCE_LEVEL" "production" (fun () ->
+    let meta_ref = make_meta_ref "test_keeper" in
+    let observed = ref [] in
+    let on_gate_decision event = observed := event :: !observed in
+    let hook = KG.governance_approval_guard ~meta_ref ~on_gate_decision in
+    let d =
+      invoke hook
+        (pre_tool_use_event ~tool_name:"keeper_fs_edit"
+           ~input:(`Assoc [ ("path", `String "/tmp/file"); ("content", `String "x") ])
+           ())
+    in
+    check string "high-risk tool -> ApprovalRequired"
+      "ApprovalRequired" (decision_kind d);
+    match !observed with
+    | [ event ] ->
+      check string "stage" "governance_approval" event.KG.stage;
+      check string "decision" "approval_required" event.KG.decision;
+      check string "reason_code" "governance_approval" event.KG.reason_code;
+      check string "tool_name" "keeper_fs_edit" event.KG.tool_name
+    | events ->
+      failf "expected one observer event, got %d" (List.length events))
 
 let test_timing_guard_sets_time_and_continues () =
   let tool_start_time = ref 0.0 in
@@ -248,8 +326,9 @@ let test_compose_all_empty () =
 let test_compose_all_continue_all () =
   let meta_ref = make_meta_ref "test_keeper" in
   let hooks = KG.compose_all [
-    KG.deny_guard ~meta_ref ~denied:[];
-    KG.cost_guard ~meta_ref ~max_cost_usd:None;
+    KG.deny_guard ~meta_ref ~on_gate_decision:no_gate_observer ~denied:[];
+    KG.cost_guard ~meta_ref ~on_gate_decision:no_gate_observer
+      ~max_cost_usd:None;
   ] in
   let d = invoke hooks (pre_tool_use_event ~tool_name:"anything" ()) in
   check string "all Continue -> Continue" "Continue" (decision_kind d)
@@ -258,8 +337,10 @@ let test_compose_all_short_circuits_at_first_override () =
   let meta_ref = make_meta_ref "test_keeper" in
   (* deny_guard blocks first -> cost_guard should not fire *)
   let hooks = KG.compose_all [
-    KG.deny_guard ~meta_ref ~denied:["blocked_tool"];
-    KG.cost_guard ~meta_ref ~max_cost_usd:(Some 0.10);
+    KG.deny_guard ~meta_ref ~on_gate_decision:no_gate_observer
+      ~denied:["blocked_tool"];
+    KG.cost_guard ~meta_ref ~on_gate_decision:no_gate_observer
+      ~max_cost_usd:(Some 0.10);
   ] in
   let d = invoke hooks
     (pre_tool_use_event ~tool_name:"blocked_tool"
@@ -276,8 +357,10 @@ let test_compose_all_preserves_order () =
   let streak_state = KG.make_streak_state () in
   (* streak_guard fires first; after 3 calls it blocks before reaching cost_guard *)
   let hooks = KG.compose_all [
-    KG.streak_guard ~meta_ref ~state:streak_state ~threshold:3;
-    KG.cost_guard ~meta_ref ~max_cost_usd:(Some 0.10);
+    KG.streak_guard ~meta_ref ~on_gate_decision:no_gate_observer
+      ~state:streak_state ~threshold:3;
+    KG.cost_guard ~meta_ref ~on_gate_decision:no_gate_observer
+      ~max_cost_usd:(Some 0.10);
   ] in
   let _ = invoke hooks (pre_tool_use_event ~tool_name:"x"
                           ~accumulated_cost_usd:0.05 ()) in
@@ -316,6 +399,8 @@ let () = run "Keeper_guards" [
   ];
   "deny_guard", [
     test_case "blocks denied tool" `Quick test_deny_guard_blocks;
+    test_case "notifies observer on block" `Quick
+      test_deny_guard_notifies_gate_observer;
     test_case "continues for allowed tool" `Quick test_deny_guard_continues;
   ];
   "cost_guard", [
@@ -332,6 +417,10 @@ let () = run "Keeper_guards" [
   "custom_guard", [
     test_case "user blocks" `Quick test_custom_guard_blocks;
     test_case "user passes through" `Quick test_custom_guard_passthrough;
+  ];
+  "governance_approval_guard", [
+    test_case "notifies observer on approval required" `Quick
+      test_governance_approval_notifies_gate_observer;
   ];
   "timing_guard", [
     test_case "sets time and continues" `Quick test_timing_guard_sets_time_and_continues;

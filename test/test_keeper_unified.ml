@@ -2937,6 +2937,120 @@ let test_run_keeper_cycle_records_trajectory_source_contract () =
     (source_file_contains "lib/keeper/keeper_unified_turn.ml"
        "Printf.sprintf \"turn_livelock:%s\"")
 
+let test_pre_tool_gate_records_durable_attempt_telemetry () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      KTCL.reset_for_testing ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let keeper_name = "pre-tool-gate-keeper" in
+      let meta_ref = ref (make_meta keeper_name) in
+      let config = Masc_mcp.Coord.default_config base_dir in
+      let masc_root = Masc_mcp.Coord.masc_root_dir config in
+      let trace_id = "trace-pre-tool-gate" in
+      let acc =
+        Masc_mcp.Trajectory.create_accumulator
+          ~masc_root ~keeper_name ~trace_id ~generation:9
+      in
+      KTCL.reset_for_testing ();
+      KTCL.init ~base_path:base_dir ();
+      KTCL.set_turn_context
+        ~keeper_name
+        ~agent_name:"pre-tool-gate-agent"
+        ~trace_id
+        ~session_id:"session-pre-tool-gate"
+        ~generation:9
+        ~turn:3
+        ~keeper_turn_id:3
+        ~task_id:"task-pre-tool"
+        ~goal_ids:["goal-pre-tool"]
+        ~approval_mode:"manual"
+        ~tool_surface_class:"execution"
+        ~visible_tool_count:1
+        ~required_tools:["keeper_bash"]
+        ();
+      let hooks =
+        HK.make_hooks
+          ~meta_ref
+          ~generation:9
+          ~pre_tool_use_guard:(fun ~tool_name:_ ~input:_ ->
+            Some "operator approval required before dispatch")
+          ~trajectory_acc:acc
+          ()
+      in
+      let schedule : Agent_sdk.Hooks.tool_schedule =
+        {
+          planned_index = 0;
+          batch_index = 0;
+          batch_size = 1;
+          concurrency_class = "default";
+          batch_kind = "sequential";
+        }
+      in
+      let decision =
+        Agent_sdk.Hooks.invoke hooks.pre_tool_use
+          (Agent_sdk.Hooks.PreToolUse
+             {
+               tool_use_id = "toolu_pre_gate";
+               tool_name = "keeper_bash";
+               input = `Assoc [ ("cmd", `String "git status --short") ];
+               accumulated_cost_usd = 0.0;
+               turn = 3;
+               schedule;
+             })
+      in
+      check string "custom gate blocked"
+        "Override"
+        (Agent_sdk.Hooks.decision_kind_to_string
+           (Agent_sdk.Hooks.classify_decision decision));
+      let entries =
+        Masc_mcp.Trajectory.read_entries ~masc_root ~keeper_name ~trace_id
+      in
+      check int "trajectory entry count" 1 (List.length entries);
+      (match entries with
+       | [ entry ] ->
+         check string "trajectory tool" "keeper_bash" entry.tool_name;
+         check int "trajectory turn" 3 entry.turn;
+         (match entry.gate_decision with
+          | Masc_mcp.Trajectory.Reject reason ->
+            check bool "reject reason names pre-tool guard" true
+              (contains_substring reason "pre_tool_use_guard")
+          | Masc_mcp.Trajectory.Pass ->
+            fail "expected rejected gate decision");
+         check bool "trajectory error present" true
+           (Option.is_some entry.error)
+       | _ -> fail "expected one trajectory entry");
+      let raw_trajectory =
+        read_jsonl_line
+          (Masc_mcp.Trajectory.trajectory_path masc_root keeper_name trace_id)
+      in
+      let runtime_contract =
+        Yojson.Safe.Util.member "runtime_contract" raw_trajectory
+      in
+      check string "runtime contract keeper" keeper_name
+        Yojson.Safe.Util.(runtime_contract |> member "keeper_name" |> to_string);
+      check string "runtime contract trace" trace_id
+        Yojson.Safe.Util.(runtime_contract |> member "trace_id" |> to_string);
+      let action_radius =
+        Yojson.Safe.Util.member "action_radius" raw_trajectory
+      in
+      check string "action radius tool" "keeper_bash"
+        Yojson.Safe.Util.(action_radius |> member "tool_name" |> to_string);
+      check bool "action radius failed" false
+        Yojson.Safe.Util.(action_radius |> member "success" |> to_bool);
+      let tool_call_entries = KTCL.read_recent ~keeper_name ~n:1 () in
+      check int "tool-call log entry count" 1 (List.length tool_call_entries);
+      let tool_call = List.hd tool_call_entries in
+      check string "tool-call log tool" "keeper_bash"
+        (Safe_ops.json_string ~default:"" "tool" tool_call);
+      check bool "tool-call log failed" false
+        (Safe_ops.json_bool ~default:true "success" tool_call);
+      check string "tool-call trace" trace_id
+        (Safe_ops.json_string ~default:"" "trace_id" tool_call))
+
 let test_run_keeper_cycle_surfaces_side_effect_failures_source_contract () =
   check bool "keeper cycle records side-effect issues in registry" true
     (source_file_contains "lib/keeper/keeper_unified_turn.ml"
@@ -6357,6 +6471,8 @@ let () =
             test_run_keeper_cycle_skips_non_executable_phase;
           test_case "run_keeper_cycle records trajectory contract" `Quick
             test_run_keeper_cycle_records_trajectory_source_contract;
+          test_case "pre-tool gates record durable attempt telemetry" `Quick
+            test_pre_tool_gate_records_durable_attempt_telemetry;
           test_case "run_keeper_cycle surfaces side-effect failures contract"
             `Quick
             test_run_keeper_cycle_surfaces_side_effect_failures_source_contract;

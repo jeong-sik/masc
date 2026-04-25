@@ -148,6 +148,37 @@ let test_format_timestamp_relative () =
   let s3 = Tool_board.format_timestamp_relative minutes_ago in
   Alcotest.(check bool) "2min ago has 'm'" true (String.contains s3 'm')
 
+let json_member_string json key =
+  match Yojson.Safe.Util.member key json with
+  | `String value -> value
+  | _ -> Alcotest.failf "expected string field %s" key
+
+let test_board_actor_identity_canonicalizes_keeper_alias () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let json = Server_utils.board_actor_identity_json "keeper-analyst-agent" in
+  Alcotest.(check string) "kind" "keeper" (json_member_string json "kind");
+  Alcotest.(check string) "id" "analyst" (json_member_string json "id");
+  Alcotest.(check string) "key" "keeper:analyst" (json_member_string json "key");
+  Alcotest.(check string) "raw" "keeper-analyst-agent"
+    (json_member_string json "raw");
+  Alcotest.(check string) "source" "keeper_alias_contract"
+    (json_member_string json "source");
+  Alcotest.(check string) "runtime agent" "keeper-analyst-agent"
+    (json_member_string json "runtime_agent_name")
+
+let test_board_actor_identity_keeps_non_keeper_agent () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let json = Server_utils.board_actor_identity_json "codex" in
+  Alcotest.(check string) "kind" "agent" (json_member_string json "kind");
+  Alcotest.(check string) "id" "codex" (json_member_string json "id");
+  Alcotest.(check string) "key" "agent:codex" (json_member_string json "key");
+  Alcotest.(check string) "source" "raw_agent"
+    (json_member_string json "source")
+
 (** {2 Group 2: JSON helper functions} *)
 
 let test_get_string () =
@@ -724,6 +755,10 @@ let () =
           Alcotest.test_case "board_error_to_string" `Quick test_board_error_to_string;
           Alcotest.test_case "is_agent" `Quick test_is_agent;
           Alcotest.test_case "format_timestamp_relative" `Quick test_format_timestamp_relative;
+          Alcotest.test_case "board actor identity canonicalizes keeper alias"
+            `Quick test_board_actor_identity_canonicalizes_keeper_alias;
+          Alcotest.test_case "board actor identity keeps non-keeper agent"
+            `Quick test_board_actor_identity_keeps_non_keeper_agent;
         ] );
       ( "json_helpers",
         [

@@ -286,12 +286,12 @@ function nodeScore(node: ActivityGraphNode): number {
 
 function NodeLeaderboard({ nodes }: { nodes: ActivityGraphNode[] }) {
   const agentNodes = nodes
-    .filter(n => n.kind === 'agent')
+    .filter(n => n.kind === 'agent' || n.kind === 'keeper')
     .sort((a, b) => nodeScore(b) - nodeScore(a))
     .slice(0, 15)
 
   if (agentNodes.length === 0) {
-    return html`<${EmptyState} message="활동 집계에 포함된 에이전트가 없습니다." compact />`
+    return html`<${EmptyState} message="활동 집계에 포함된 키퍼/에이전트가 없습니다." compact />`
   }
 
   const maxScore = nodeScore(agentNodes[0]!) || 1

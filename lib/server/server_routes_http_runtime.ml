@@ -196,7 +196,7 @@ let board_post_detail_json ~response_format ~post_id =
         | Error _ -> []
       in
       let post_json = board_post_dashboard_json ~author_karma post in
-      let comments_json = `List (List.map Board.comment_to_yojson comments) in
+      let comments_json = `List (List.map board_comment_dashboard_json comments) in
       let json =
         if String.equal (String.lowercase_ascii (String.trim response_format)) "flat" then
           match post_json with

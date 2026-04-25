@@ -349,6 +349,7 @@ function handleBoardPostCreated(event: SSEEvent): boolean {
   const post: BoardPost = {
     id: postId,
     author: event.author ?? '',
+    author_identity: event.author_identity ?? null,
     title: event.title ?? '',
     body: content,
     content,

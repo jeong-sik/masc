@@ -51,6 +51,66 @@ let filter_board_posts ~exclude_system ~exclude_automation posts =
   |> List.filter
        (Board.post_matches_filters ~exclude_system ~exclude_automation)
 
+let board_actor_key ~kind id =
+  kind ^ ":" ^ String.lowercase_ascii (String.trim id)
+
+let board_actor_keeper_identity raw =
+  let raw = String.trim raw in
+  if raw = "" then None
+  else
+    match Keeper_registry.find_by_agent_name raw with
+    | Some entry ->
+        Some (entry.name, Some entry.meta.agent_name, "keeper_registry_agent_name")
+    | None -> (
+        match Keeper_registry.find_by_name raw with
+        | Some entry ->
+            Some (entry.name, Some entry.meta.agent_name, "keeper_registry_name")
+        | None -> (
+            match Keeper_identity.canonical_keeper_name_from_agent_name raw with
+            | Some name -> Some (name, Some raw, "keeper_alias_contract")
+            | None -> None))
+
+let board_actor_identity_json raw : Yojson.Safe.t =
+  let raw = String.trim raw in
+  match board_actor_keeper_identity raw with
+  | Some (keeper_name, runtime_agent_name, source) ->
+      let runtime_fields =
+        match runtime_agent_name with
+        | Some runtime when String.trim runtime <> "" && not (String.equal runtime keeper_name) ->
+            [ ("runtime_agent_name", `String runtime) ]
+        | _ -> []
+      in
+      `Assoc
+        ([
+           ("kind", `String "keeper");
+           ("id", `String keeper_name);
+           ("key", `String (board_actor_key ~kind:"keeper" keeper_name));
+           ("display_name", `String keeper_name);
+           ("raw", `String raw);
+           ("source", `String source);
+         ]
+        @ runtime_fields)
+  | None ->
+      `Assoc
+        [
+          ("kind", `String "agent");
+          ("id", `String raw);
+          ("key", `String (board_actor_key ~kind:"agent" raw));
+          ("display_name", `String raw);
+          ("raw", `String raw);
+          ("source", `String "raw_agent");
+        ]
+
+let board_actor_entity raw =
+  match board_actor_keeper_identity raw with
+  | Some (keeper_name, _, _) -> Activity_graph.entity ~kind:"keeper" keeper_name
+  | None -> Activity_graph.entity ~kind:"agent" (String.trim raw)
+
+let board_actor_author_for_write raw =
+  match board_actor_keeper_identity raw with
+  | Some (keeper_name, _, _) -> keeper_name
+  | None -> String.trim raw
+
 let max_filtered_board_window = 5200
 
 let board_fetch_limit ~exclude_system ~exclude_automation ~limit ~offset =
@@ -58,7 +118,15 @@ let board_fetch_limit ~exclude_system ~exclude_automation ~limit ~offset =
   if exclude_system || exclude_automation then max base max_filtered_board_window
   else base
 
+let board_comment_dashboard_json (c : Board.comment) : Yojson.Safe.t =
+  let author = Board.Agent_id.to_string c.author in
+  match Board.comment_to_yojson c with
+  | `Assoc fields ->
+      `Assoc (fields @ [ ("author_identity", board_actor_identity_json author) ])
+  | other -> other
+
 let board_post_dashboard_json ~author_karma (p : Board.post) : Yojson.Safe.t =
+  let author = Board.Agent_id.to_string p.author in
   let base_fields =
     match Board_dispatch.post_to_yojson_with_karma p ~author_karma with
     | `Assoc fields -> fields
@@ -84,6 +152,7 @@ let board_post_dashboard_json ~author_karma (p : Board.post) : Yojson.Safe.t =
           ("created_at_iso", `String (iso8601_of_unix p.created_at));
           ("updated_at_iso", `String (iso8601_of_unix p.updated_at));
           ("hearth_count", `Int (match p.hearth with Some _ -> 1 | None -> 0));
+          ("author_identity", board_actor_identity_json author);
         ] )
 
 let dashboard_compact_mode request =

@@ -1,7 +1,7 @@
 import { get, post, withRetries, defaultBoardVoter } from './core'
 import { isRecord, asNullableString, asString, asNumber, asInt, asStringList } from '../components/common/normalize'
 import type {
-  BoardPost, BoardComment, BoardSortMode,
+  BoardActorIdentity, BoardPost, BoardComment, BoardSortMode,
   GovernanceContextRef,
   GovernanceDecisionItem, GovernanceExecutedRoute,
   GovernanceGuardrailState, GovernanceJudgeSummary, GovernanceJudgment,
@@ -300,6 +300,31 @@ function normalizeBoardMeta(raw: unknown): BoardPost['meta'] {
   return Object.keys(next).length > 0 ? next : null
 }
 
+function normalizeBoardActorIdentity(
+  raw: unknown,
+  fallbackRaw: string,
+): BoardActorIdentity | null {
+  if (!isRecord(raw)) return null
+  const kindRaw = asString(raw.kind, '').trim().toLowerCase()
+  const kind = kindRaw === 'keeper' ? 'keeper' : kindRaw === 'agent' ? 'agent' : null
+  const id = asString(raw.id, '').trim()
+  if (!kind || !id) return null
+  const key = asString(raw.key, '').trim() || `${kind}:${id.toLowerCase()}`
+  const displayName = asString(raw.display_name, '').trim() || id
+  const original = asString(raw.raw, '').trim() || fallbackRaw
+  const source = asString(raw.source, '').trim()
+  const runtimeAgentName = asString(raw.runtime_agent_name, '').trim()
+  return {
+    kind,
+    id,
+    key,
+    display_name: displayName,
+    raw: original,
+    source: source || undefined,
+    runtime_agent_name: runtimeAgentName || undefined,
+  }
+}
+
 function normalizeBoardPost(raw: unknown): BoardPost | null {
   if (!isRecord(raw)) return null
   const id = asString(raw.id, '').trim()
@@ -337,6 +362,7 @@ function normalizeBoardPost(raw: unknown): BoardPost | null {
   return {
     id,
     author,
+    author_identity: normalizeBoardActorIdentity(raw.author_identity, author),
     post_kind:
       (() => {
         const rawKind = asString(raw.post_kind, '').trim().toLowerCase()
@@ -379,6 +405,7 @@ function normalizeBoardComment(raw: unknown): BoardComment | null {
     post_id: postId,
     parent_id: parentId,
     author,
+    author_identity: normalizeBoardActorIdentity(raw.author_identity, author),
     content: asString(raw.content, ''),
     created_at: toIsoTimestamp(raw.created_at) ?? '',
   }

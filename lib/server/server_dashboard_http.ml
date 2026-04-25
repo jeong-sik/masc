@@ -25,6 +25,7 @@ let dashboard_board_json ?hearth ?author_filter
     Yojson.Safe.t =
   let limit = clamp ~min_v:1 ~max_v:500 limit in
   let offset = clamp ~min_v:0 ~max_v:5000 offset in
+  let author_filter = Option.map board_actor_author_for_write author_filter in
   let cache_key =
     Printf.sprintf "board:memory:%s;%s;%s;%b;%b;%d;%d"
       (Option.value ~default:"-" hearth)
@@ -85,7 +86,8 @@ let dashboard_memory_http_json request : Yojson.Safe.t =
   let author_filter =
     query_param request "author"
     |> Option.map String.trim
-    |> Fun.flip Option.bind (fun s -> if s = "" then None else Some s)
+    |> Fun.flip Option.bind (fun s ->
+         if s = "" then None else Some (board_actor_author_for_write s))
   in
   let sort_by = board_sort_order_of_request request in
   let exclude_system = bool_query_param request "exclude_system" ~default:false in

@@ -14,6 +14,7 @@ const hoveredNodeId = signal<string | null>(null)
 function nodeColor(kind: string, status: string): string {
   if (status === 'offline' || status === 'retired') return 'var(--slate-500)'
   switch (kind) {
+    case 'keeper': return 'var(--ok)'
     case 'agent': return 'var(--cyan)'
     case 'task': return 'var(--warn)'
     case 'decision': return 'var(--purple)'
@@ -46,6 +47,7 @@ function edgeColor(kind: string, active: boolean): string {
 
 function kindLabel(kind: string): string {
   switch (kind) {
+    case 'keeper': return '키퍼'
     case 'agent': return '에이전트'
     case 'task': return '작업'
     case 'decision': return '결정'
@@ -176,8 +178,8 @@ export function GraphView({ data }: GraphViewProps) {
       if (params.nodes.length > 0) {
         const found = params.nodes[0]
         selectedNodeId.value = found
-        if (found && found.startsWith('agent:')) {
-          highlightedAgentId.value = found.slice(6)
+        if (found && (found.startsWith('agent:') || found.startsWith('keeper:'))) {
+          highlightedAgentId.value = found.slice(found.indexOf(':') + 1)
         } else {
           highlightedAgentId.value = null
         }
@@ -245,6 +247,7 @@ export function GraphView({ data }: GraphViewProps) {
     </div>
     <div class="flex flex-wrap gap-x-4 gap-y-1 mt-1 px-1">
       ${[
+        { label: '키퍼', color: 'var(--ok)' },
         { label: '에이전트', color: 'var(--cyan)' },
         { label: '작업', color: 'var(--warn)' },
         { label: '결정', color: 'var(--purple)' },

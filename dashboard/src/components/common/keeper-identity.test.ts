@@ -39,6 +39,10 @@ describe('keeper identity helpers', () => {
     expect(canonicalKeeperName('keeper-sangsu-agent')).toBe('sangsu')
   })
 
+  it('canonicalizes board runtime aliases to keeper names', () => {
+    expect(canonicalKeeperNameFromAgentName('keeper-analyst-agent')).toBe('analyst')
+  })
+
   it('prefers keeper_id for principal keys', () => {
     expect(keeperPrincipalKey('uuid-1', 'ramarama', 'ramarama-fierce-panda')).toBe('keeper_id:uuid-1')
   })

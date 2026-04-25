@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   derivePostTitle,
+  fetchBoard,
   sanitizeBoardTitle,
   asNullableIsoTimestamp,
   normalizePendingConfirmation,
@@ -10,6 +11,10 @@ import {
   normalizeGovernanceTimelineEvent,
   normalizeGovernanceJudgeSummary,
 } from './board'
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
 
 // ================================================================
 // board title helpers (existing)
@@ -414,5 +419,52 @@ describe('normalizeGovernanceJudgeSummary', () => {
   it('returns undefined for non-boolean judge_online', () => {
     const result = normalizeGovernanceJudgeSummary({ judge_online: 'yes' })
     expect(result!.judge_online).toBeUndefined()
+  })
+})
+
+// ================================================================
+// fetchBoard
+// ================================================================
+
+describe('fetchBoard', () => {
+  it('preserves board actor identity provenance from the server', async () => {
+    const rawResponse = {
+      posts: [
+        {
+          id: 'post-1',
+          author: 'analyst',
+          title: 'Status',
+          body: 'Working',
+          created_at: 1_713_000_000,
+          updated_at: 1_713_000_000,
+          author_identity: {
+            kind: 'keeper',
+            id: 'analyst',
+            key: 'keeper:analyst',
+            display_name: 'analyst',
+            raw: 'keeper-analyst-agent',
+            source: 'keeper_alias_contract',
+            runtime_agent_name: 'keeper-analyst-agent',
+          },
+        },
+      ],
+    }
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(rawResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchBoard()
+
+    expect(result.posts[0]?.author_identity).toMatchObject({
+      kind: 'keeper',
+      id: 'analyst',
+      raw: 'keeper-analyst-agent',
+      source: 'keeper_alias_contract',
+      runtime_agent_name: 'keeper-analyst-agent',
+    })
   })
 })

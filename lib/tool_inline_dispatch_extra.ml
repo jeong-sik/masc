@@ -5,9 +5,17 @@
 
 let emit_activity config ~kind ~actor ?subject ?(tags = []) ~payload () =
   try
+    let payload =
+      match payload with
+      | `Assoc fields ->
+          `Assoc
+            (("actor_identity", Server_utils.board_actor_identity_json actor)
+            :: List.filter (fun (k, _) -> k <> "actor_identity") fields)
+      | other -> other
+    in
     ignore
       (Activity_graph.emit config
-         ~actor:(Activity_graph.entity ~kind:"agent" actor)
+         ~actor:(Server_utils.board_actor_entity actor)
          ?subject ~kind ~payload ~tags ())
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -31,29 +39,64 @@ let extract_board_post_id (message : string) =
       | Invalid_argument _
       | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
 
+let json_upsert_assoc_field name value fields =
+  (name, value) :: List.filter (fun (k, _) -> k <> name) fields
+
+let json_upsert_meta_string_field name value fields =
+  let value = String.trim value in
+  if value = "" then fields
+  else
+    let meta_json =
+      match List.assoc_opt "meta" fields with
+      | Some (`Assoc meta_fields) ->
+          `Assoc (json_upsert_assoc_field name (`String value) meta_fields)
+      | _ -> `Assoc [ (name, `String value) ]
+    in
+    json_upsert_assoc_field "meta" meta_json fields
+
+let canonicalize_board_actor_field field arguments =
+  match arguments with
+  | `Assoc fields -> (
+      match List.assoc_opt field fields with
+      | Some (`String raw) ->
+          let raw = String.trim raw in
+          if raw = "" then arguments
+          else
+            let canonical = Server_utils.board_actor_author_for_write raw in
+            if String.equal canonical raw then arguments
+            else
+              `Assoc
+                (json_upsert_assoc_field field (`String canonical) fields)
+      | _ -> arguments)
+  | _ -> arguments
+
 (** Fill [author] from the caller's agent identity when the arg is absent or
     blank. Keepers, the HTTP surface, and autonomous callers routinely omit
     [author] — we used to reject those calls at pre-hook validation, which
-    forced every caller to know about the legacy schema field. Canonical
-    identity lives in [agent_name]; mirror it into the arg object so the
-    downstream [Tool_board.handle_post_create] author check passes. *)
+    forced every caller to know about the legacy schema field. The board store
+    keeps canonical keeper names as principals while preserving raw runtime
+    agent names in metadata. *)
 let ensure_board_post_author ~agent_name arguments =
   match arguments with
-  | `Assoc fields ->
-    let existing =
-      match List.assoc_opt "author" fields with
-      | Some (`String s) -> String.trim s
-      | _ -> ""
-    in
-    if existing <> "" && existing <> "anonymous" then arguments
-    else
-      let injected = String.trim agent_name in
-      if injected = "" then arguments
+  | `Assoc fields -> (
+      let existing =
+        match List.assoc_opt "author" fields with
+        | Some (`String s) -> String.trim s
+        | _ -> ""
+      in
+      let raw_author =
+        if existing <> "" && existing <> "anonymous" then existing
+        else String.trim agent_name
+      in
+      if raw_author = "" then arguments
       else
-        let stripped =
-          List.filter (fun (k, _) -> k <> "author") fields
+        let canonical = Server_utils.board_actor_author_for_write raw_author in
+        let fields = json_upsert_assoc_field "author" (`String canonical) fields in
+        let fields =
+          if String.equal canonical raw_author then fields
+          else json_upsert_meta_string_field "author_raw_agent_name" raw_author fields
         in
-        `Assoc (("author", `String injected) :: stripped)
+        `Assoc fields)
   | _ -> arguments
 
 let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~sw ~clock ~name =
@@ -61,6 +104,9 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
   let arguments =
     match name with
     | "masc_board_post" -> ensure_board_post_author ~agent_name arguments
+    | "masc_board_comment" -> canonicalize_board_actor_field "author" arguments
+    | "masc_board_vote" | "masc_board_comment_vote" ->
+        canonicalize_board_actor_field "voter" arguments
     | _ -> arguments
   in
   let arg_get_string key default =
@@ -110,6 +156,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
         let notification = `Assoc [
           ("type", `String "masc/board_post");
           ("author", `String author);
+          ("author_identity", Server_utils.board_actor_identity_json author);
           ("content", `String (String.sub content 0 (min 200 (String.length content))));
           ("post_id", `String (Option.value post_id ~default:"unknown"));
           ("timestamp", `String (Types.now_iso ()));
@@ -177,6 +224,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
         let notification = `Assoc [
           ("type", `String "board_comment");
           ("author", `String author);
+          ("author_identity", Server_utils.board_actor_identity_json author);
           ("post_id", `String post_id);
           ("content", `String (String.sub content 0 (min 200 (String.length content))));
           ("timestamp", `String (Types.now_iso ()));

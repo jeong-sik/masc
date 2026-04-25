@@ -330,6 +330,30 @@ let test_keeper_board_post_preserves_meta_reason () =
   Alcotest.(check string) "author forced from keeper meta" "judge-keeper"
     Yojson.Safe.Util.(json |> member "author" |> to_string)
 
+let test_keeper_board_dispatch_uses_typed_tool_names () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let keeper_meta = make_keeper_meta ~name:"typed-keeper" () in
+  let fake =
+    Keeper_exec_board.handle_keeper_board_tool
+      ~meta:keeper_meta
+      ~name:"keeper_board_fake"
+      ~args:(make_args [])
+  in
+  Alcotest.(check bool) "fake board name rejected" true
+    (contains_substring fake "unknown_board_tool");
+  let comment_vote =
+    Keeper_exec_board.handle_keeper_board_tool
+      ~meta:keeper_meta
+      ~name:"keeper_board_comment_vote"
+      ~args:(make_args [ ("comment_id", `String "") ])
+  in
+  Alcotest.(check bool) "typed comment vote reaches board handler" true
+    (contains_substring comment_vote "comment_id required");
+  Alcotest.(check bool) "typed comment vote is not unknown" false
+    (contains_substring comment_vote "unknown_board_tool")
+
 let test_post_create_accepts_automation_rejects_system () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -776,6 +800,8 @@ let () =
             test_post_create_judgment_roundtrip;
           Alcotest.test_case "keeper board post preserves meta reason" `Quick
             test_keeper_board_post_preserves_meta_reason;
+          Alcotest.test_case "keeper board dispatch uses typed names" `Quick
+            test_keeper_board_dispatch_uses_typed_tool_names;
           Alcotest.test_case "accept automation reject system" `Quick
             test_post_create_accepts_automation_rejects_system;
           Alcotest.test_case "create empty content" `Quick test_post_create_empty_content;

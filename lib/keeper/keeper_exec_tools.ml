@@ -104,7 +104,11 @@ let success_tool_result raw_output =
 let failure_tool_result raw_output =
   make_executed_tool_result ~outcome:`Failure raw_output
 
-
+let is_keeper_board_tool_name name =
+  match Tool_name.Keeper.of_string name with
+  | Some tool -> Tool_name.Keeper.is_board tool
+  | None -> false
+;;
 
 (* ── Tool execution dispatch ──────────────────────────────────── *)
 
@@ -187,6 +191,9 @@ let execute_keeper_tool_call_with_outcome
          ]))
   else (
     match name with
+    | _ when is_keeper_board_tool_name name ->
+      make_executed_tool_result
+        (Keeper_exec_board.handle_keeper_board_tool ~meta ~name ~args)
     | "keeper_tool_search" ->
       let query =
         Safe_ops.json_string ~default:"" "query" args |> String.trim
@@ -234,17 +241,6 @@ let execute_keeper_tool_call_with_outcome
       in
       if ok then success_tool_result msg
       else failure_tool_result (error_json msg)
-    | "keeper_board_post"
-    | "keeper_board_list"
-    | "keeper_board_get"
-    | "keeper_board_comment"
-    | "keeper_board_vote"
-    | "keeper_board_stats"
-    | "keeper_board_search"
-    | "keeper_board_delete"
-    | "keeper_board_cleanup" ->
-      make_executed_tool_result
-        (Keeper_exec_board.handle_keeper_board_tool ~meta ~name ~args)
     | "keeper_fs_read" ->
       make_executed_tool_result
         (Keeper_exec_fs.handle_keeper_fs_read ~turn_sandbox_runtime ~config ~meta ~args)

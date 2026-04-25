@@ -12,7 +12,7 @@ is effectively advisory.
 |-------|------|-------------|-----------------|
 | `Tool` | per-tool HTTP / shell invocation | 10–60 s | `Env_config_runtime.*`, `lib/tool_local_runtime_http.ml` |
 | `Oas_bridge` | single OAS `Agent.run` / `Model.call` | 60–300 s (adaptive) | `Env_config_keeper.oas_timeout_sec*` |
-| `Keeper_turn` | one keeper turn (may issue many OAS calls) | 1200 s | `MASC_KEEPER_TURN_TIMEOUT_SEC` |
+| `Keeper_turn` | one keeper turn (may issue many OAS calls) | 3600 s | `MASC_KEEPER_TURN_TIMEOUT_SEC` |
 | `Keeper_cycle` | full keeper lifecycle | N×turn | cycle supervisor |
 | `Shutdown` | graceful shutdown board flush | 2 s | `bin/main_eio.ml` |
 

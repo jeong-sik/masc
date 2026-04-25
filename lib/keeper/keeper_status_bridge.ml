@@ -181,6 +181,11 @@ let blocker_class_of_string (reason : string) : blocker_class option =
   else if String_util.contains_substring_ci trimmed "admission queue wait timeout"
   then
     Some Admission_queue_wait_timeout
+  else if
+    String_util.contains_substring_ci trimmed
+      "autonomous turn slot wait timeout"
+  then
+    Some Autonomous_slot_wait_timeout
   else if String_util.contains_substring_ci trimmed "oas budget timeout"
   then
     Some Oas_timeout_budget
@@ -240,6 +245,13 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
   in
   { blocker_class = str; summary; continue_gate }
 
+let runtime_blocker_surface_of_legacy_string reason cls =
+  match cls with
+  | Cascade_exhausted _ ->
+      runtime_blocker_surface_of_typed_class cls
+  | _ ->
+      runtime_blocker_surface_of_typed_class ~summary:reason cls
+
 let runtime_blocker_surface_of_failure_reason
     (reason : Keeper_registry.failure_reason) =
   match reason with
@@ -287,16 +299,14 @@ let runtime_blocker_surface_opt (config : Coord_utils.config)
     | None -> (
         match blocker_class_of_string meta.runtime.last_blocker with
         | Some cls ->
-            Some
-              (runtime_blocker_surface_of_typed_class
-                 ~summary:meta.runtime.last_blocker cls)
+            Some (runtime_blocker_surface_of_legacy_string
+                    meta.runtime.last_blocker cls)
         | None
           when proactive_runtime_reason_is_current meta ->
             (match blocker_class_of_string meta.runtime.proactive_rt.last_reason with
              | Some cls ->
-                 Some
-                   (runtime_blocker_surface_of_typed_class
-                     ~summary:meta.runtime.proactive_rt.last_reason cls)
+                 Some (runtime_blocker_surface_of_legacy_string
+                         meta.runtime.proactive_rt.last_reason cls)
              | None -> None)
         | None -> None)
   in

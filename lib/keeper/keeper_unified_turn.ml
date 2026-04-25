@@ -923,22 +923,6 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
       (match saturation_skip_meta with
        | Some meta_after_skip -> Ok meta_after_skip
        | None ->
-      let turn_id = meta.runtime.usage.total_turns in
-      (match
-         Keeper_turn_livelock.guard_and_record_turn_start
-           ~keeper:meta.name
-           ~turn_id
-           ~max_attempts:(turn_livelock_max_attempts ())
-           ~stuck_after_sec:(turn_livelock_stuck_after_sec ())
-           ()
-       with
-       | Keeper_turn_livelock.Blocked reason ->
-           Log.Keeper.error
-             "%s: keeper turn livelock guard blocked dispatch turn=%d: %s"
-             meta.name turn_id
-             (Keeper_turn_livelock.gate_reason_to_string reason);
-           Ok meta
-       | Keeper_turn_livelock.Started _ ->
       let build_cascade_execution ~(cascade_name : string) :
           (cascade_execution, Oas.Error.sdk_error) result =
         let meta_for_cascade = { meta with cascade_name } in
@@ -985,6 +969,22 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
       match build_cascade_execution ~cascade_name:effective_cascade_name with
       | Error err -> Error err
       | Ok initial_execution ->
+      let turn_id = meta.runtime.usage.total_turns in
+      (match
+         Keeper_turn_livelock.guard_and_record_turn_start
+           ~keeper:meta.name
+           ~turn_id
+           ~max_attempts:(turn_livelock_max_attempts ())
+           ~stuck_after_sec:(turn_livelock_stuck_after_sec ())
+           ()
+       with
+       | Keeper_turn_livelock.Blocked reason ->
+           Log.Keeper.error
+             "%s: keeper turn livelock guard blocked dispatch turn=%d: %s"
+             meta.name turn_id
+             (Keeper_turn_livelock.gate_reason_to_string reason);
+           Ok meta
+       | Keeper_turn_livelock.Started _ ->
       (* Yield before CPU-bound prompt construction so the Eio scheduler
          can service HTTP handlers between keeper turn setups. *)
       Eio.Fiber.yield ();

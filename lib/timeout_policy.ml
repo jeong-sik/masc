@@ -53,7 +53,7 @@ let default_overshoot_slack_s = 5.0
                 not user-supplied identifiers.
 
    Cardinality: ~5 layers × ~20 origins = ~100 series. *)
-let metric_overshoot_total = "masc_timeout_policy_overshoot_total"
+let metric_overshoot_total = Prometheus.metric_timeout_policy_overshoot
 
 let overshoot_warn ?(slack_s = default_overshoot_slack_s) ~deadline ~actual_wall_s () =
   let excess = actual_wall_s -. deadline.Deadline.wall_cap_s in

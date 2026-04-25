@@ -2258,10 +2258,32 @@ let run_turn
          in
          let actionable_signal_context =
            let haystack = user_message ^ "\n" ^ dynamic_context in
-           turn_affordances_require_tool_gate turn_affordances
-           || String_util.contains_substring_ci haystack "## Discovered Work"
-           || has_positive_count_after_marker haystack "### Board Activity"
-           || has_positive_count_after_marker haystack "Unclaimed tasks"
+           let has_any_tool tools =
+             List.exists (fun t -> List.mem t all_tool_names) tools
+           in
+           (* P1 affordance-tool intersection: an actionable signal only
+              counts when the keeper actually has a tool that can act on
+              it.  Without this filter, presets like [social] see
+              "Unclaimed tasks=N" or board activity but lack the
+              corresponding action tools, so [Require_tool_use] becomes
+              unwinnable and the turn fails as [Failure_run_error]. *)
+           Keeper_agent_tool_surface
+             .turn_affordances_require_tool_gate_with_allowed
+             ~allowed_tool_names:all_tool_names turn_affordances
+           || (String_util.contains_substring_ci haystack "## Discovered Work"
+               && has_any_tool
+                    [ "keeper_task_claim"; "masc_claim_next";
+                      "masc_claim_task";
+                      "keeper_board_post"; "masc_add_task";
+                      "keeper_tasks_audit" ])
+           || (has_positive_count_after_marker haystack "### Board Activity"
+               && has_any_tool
+                    [ "keeper_board_post"; "keeper_board_comment";
+                      "masc_broadcast"; "masc_keeper_msg" ])
+           || (has_positive_count_after_marker haystack "Unclaimed tasks"
+               && has_any_tool
+                    [ "keeper_task_claim"; "masc_claim_next";
+                      "masc_claim_task" ])
          in
          let actionable_tool_contract_violation_reason =
            Keeper_tool_disclosure.actionable_tool_contract_violation_reason

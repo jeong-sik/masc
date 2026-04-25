@@ -100,6 +100,16 @@ val preferred_tool_choice_for_required_turn :
   -> allowed_tool_names:string list
   -> Oas.Types.tool_choice
 
+(** Filtered variant of [turn_affordances_require_tool_gate] (in
+    {!Keeper_agent_tool_surface}): only counts an affordance when at
+    least one tool capable of satisfying it appears in
+    [allowed_tool_names].  Used at the [Require_tool_use] contract gate
+    so keepers without the relevant action tools (e.g. a [social]
+    preset facing unclaimed tasks) aren't forced into unwinnable
+    contract violations. *)
+val turn_affordances_require_tool_gate_with_allowed :
+  allowed_tool_names:string list -> string list -> bool
+
 (** Canonical model label for MASC status/metrics surfaces.
     Prefers the final cascade attempt label when available, then the
     selected/primary configured cascade label, and finally falls back to the

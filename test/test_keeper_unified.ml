@@ -5105,6 +5105,66 @@ let test_should_require_tools_for_initial_turn_covers_actionable_affordances () 
   check bool "worktree inspection requires tool gate" true
     (require "inspect_worktree_delta")
 
+let test_turn_affordances_require_tool_gate_with_allowed_filters_by_tool () =
+  (* P1: an affordance must have a matching tool in the keeper's
+     visible surface to count as a "tool-gated" affordance.  This
+     prevents Require_tool_use from firing on keepers that cannot
+     satisfy the demanded action class. *)
+  let gate ~tools affordances =
+    KAR.turn_affordances_require_tool_gate_with_allowed
+      ~allowed_tool_names:tools affordances
+  in
+  check bool
+    "task_claim affordance with claim tool present -> gate fires" true
+    (gate ~tools:[ "keeper_task_claim" ] [ "task_claim" ]);
+  check bool
+    "task_claim affordance without any claim tool -> gate suppressed" false
+    (gate ~tools:[ "keeper_board_post"; "keeper_context_status" ]
+       [ "task_claim" ]);
+  check bool
+    "board_post_or_comment with comment tool -> gate fires" true
+    (gate ~tools:[ "keeper_board_comment" ] [ "board_post_or_comment" ]);
+  check bool
+    "board_post_or_comment without any post tool -> gate suppressed" false
+    (gate ~tools:[ "keeper_task_claim"; "keeper_tasks_list" ]
+       [ "board_post_or_comment" ]);
+  check bool
+    "any matching affordance is enough" true
+    (gate
+       ~tools:[ "masc_claim_next" ]
+       [ "task_claim"; "task_audit"; "board_post_or_comment" ]);
+  check bool
+    "all gated affordances missing tools -> gate suppressed" false
+    (gate
+       ~tools:[ "keeper_context_status"; "keeper_time_now" ]
+       [ "task_claim"; "task_verify"; "board_post_or_comment" ]);
+  check bool "empty affordances -> gate stays off" false
+    (gate ~tools:[ "keeper_task_claim" ] []);
+  check bool
+    "unknown affordance string is ignored" false
+    (gate ~tools:[ "keeper_task_claim" ] [ "totally_unknown_affordance" ])
+
+let test_tools_for_gated_affordance_covers_each_variant () =
+  (* Compile-time exhaustiveness already ensures every variant is
+     handled; this asserts the runtime mapping is non-empty so a
+     well-meaning future edit cannot silently break the gate by
+     returning [] for an affordance. *)
+  let module Surface = Masc_mcp.Keeper_agent_tool_surface in
+  let nonempty label affordance =
+    let tools = Surface.tools_for_gated_affordance affordance in
+    check bool
+      (Printf.sprintf "tools_for_gated_affordance non-empty for %s" label)
+      true (tools <> [])
+  in
+  nonempty "Board_post_or_comment" Surface.Board_post_or_comment;
+  nonempty "Message_sweep" Surface.Message_sweep;
+  nonempty "Reply_in_room" Surface.Reply_in_room;
+  nonempty "Task_claim" Surface.Task_claim;
+  nonempty "Task_audit" Surface.Task_audit;
+  nonempty "Task_verify" Surface.Task_verify;
+  nonempty "Work_discovery" Surface.Work_discovery;
+  nonempty "Inspect_worktree_delta" Surface.Inspect_worktree_delta
+
 let test_preferred_tool_choice_for_required_turn_claims_first () =
   let choose ?(has_current_task = false) ?(turn_affordances = [ "task_claim" ])
       ?(allowed_tool_names =
@@ -5927,6 +5987,11 @@ let () =
             test_should_require_tools_for_initial_turn_covers_actionable_affordances;
           test_case "task backlog required turn prefers claim tool choice"
             `Quick test_preferred_tool_choice_for_required_turn_claims_first;
+          test_case "affordance gate filters by allowed_tool_names"
+            `Quick
+            test_turn_affordances_require_tool_gate_with_allowed_filters_by_tool;
+          test_case "tools_for_gated_affordance non-empty for every variant"
+            `Quick test_tools_for_gated_affordance_covers_each_variant;
         ] );
       ( "verification_surface",
         [

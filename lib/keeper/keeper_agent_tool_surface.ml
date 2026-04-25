@@ -93,6 +93,56 @@ let turn_affordances_require_tool_gate turn_affordances =
       | None -> false)
     (List.map turn_affordance_of_string turn_affordances)
 
+(* Affordance -> minimum viable tools that can satisfy that affordance.
+   The list is intentionally narrow ("at least one of these is enough").
+   Keepers without any matching tool cannot satisfy a [Require_tool_use]
+   contract for that affordance and must be allowed to respond with
+   text instead. *)
+let tools_for_gated_affordance = function
+  | Board_post_or_comment ->
+    [ "keeper_board_post"; "keeper_board_comment"; "masc_broadcast" ]
+  | Message_sweep ->
+    [ "keeper_messages_read"; "masc_messages"; "keeper_keeper_msg" ]
+  | Reply_in_room ->
+    [ "keeper_board_post"; "keeper_board_comment";
+      "masc_keeper_msg"; "masc_broadcast" ]
+  | Task_claim ->
+    [ "keeper_task_claim"; "masc_claim_next"; "masc_claim_task" ]
+  | Task_audit ->
+    [ "keeper_tasks_audit"; "keeper_tasks_list"; "masc_tasks" ]
+  | Task_verify ->
+    [ "keeper_tasks_list"; "keeper_tasks_audit";
+      "keeper_task_done"; "keeper_task_submit_for_verification";
+      "masc_transition" ]
+  | Work_discovery ->
+    [ "keeper_task_claim"; "masc_claim_next";
+      "keeper_board_post"; "masc_add_task";
+      "keeper_tasks_audit" ]
+  | Inspect_worktree_delta ->
+    [ "keeper_shell"; "keeper_bash"; "masc_code_git";
+      "keeper_fs_read" ]
+
+(* Filtered variant of [turn_affordances_require_tool_gate]:  a gated
+   affordance only counts when the keeper actually has a tool that can
+   satisfy it.  Without this filter, presets such as [social] (which
+   excludes claim/execution tools) get [Require_tool_use] forced on
+   them whenever the board lists unclaimed tasks, leading to repeated
+   [Failure_run_error] turns the keeper cannot resolve. *)
+let turn_affordances_require_tool_gate_with_allowed
+    ~(allowed_tool_names : string list) turn_affordances : bool =
+  let has_matching_tool affordance =
+    List.exists
+      (fun tool -> List.mem tool allowed_tool_names)
+      (tools_for_gated_affordance affordance)
+  in
+  List.exists
+    (function
+      | Some affordance ->
+        should_tool_gate_affordance affordance
+        && has_matching_tool affordance
+      | None -> false)
+    (List.map turn_affordance_of_string turn_affordances)
+
 let should_require_tools_for_initial_turn ~(max_turns : int)
     ~(turn_affordances : string list) =
   let initial_per_call_turn = 1 in

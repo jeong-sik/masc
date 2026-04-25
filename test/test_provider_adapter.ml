@@ -311,7 +311,20 @@ let test_runtime_mcp_header_support_uses_declared_policy () =
   check bool "kimi cli supports runtime MCP headers" true
     (Adapter.supports_runtime_mcp_http_headers_for_config kimi_cli_cfg);
   check bool "codex cli does not support runtime MCP headers" false
-    (Adapter.supports_runtime_mcp_http_headers_for_config codex_cli_cfg)
+    (Adapter.supports_runtime_mcp_http_headers_for_config codex_cli_cfg);
+  check bool "claude code model label supports runtime MCP headers" true
+    (Adapter.supports_runtime_mcp_http_headers_for_model_label
+       "claude_code:auto");
+  check bool "kimi cli model label supports runtime MCP headers" true
+    (Adapter.supports_runtime_mcp_http_headers_for_model_label
+       "kimi_cli:kimi-for-coding");
+  check bool "bare exact cascade prefix uses registry" true
+    (Adapter.supports_runtime_mcp_http_headers_for_model_label "kimi_cli");
+  check bool "codex cli model label keeps declared false" false
+    (Adapter.supports_runtime_mcp_http_headers_for_model_label
+       "codex_cli:gpt-5.4");
+  check bool "bare model id does not guess by substring" false
+    (Adapter.supports_runtime_mcp_http_headers_for_model_label "gpt-5.4")
 
 let test_provider_label_of_config_preserves_cli_vs_api_identity () =
   let kimi_api_cfg =

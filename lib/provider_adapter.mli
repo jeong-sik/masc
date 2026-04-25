@@ -303,6 +303,13 @@ val provider_prefix_of_label_result : string -> (string, string) result
 val provider_of_model_label :
   ?provider_kind:Llm_provider.Provider_config.provider_kind -> string -> string
 
+(** Whether the model label resolves to a provider that supports runtime MCP
+    HTTP headers. Bare labels are accepted only when they exactly match an
+    adapter/cascade registry entry or when [provider_kind] supplies the typed
+    provider boundary. *)
+val supports_runtime_mcp_http_headers_for_model_label :
+  ?provider_kind:Llm_provider.Provider_config.provider_kind -> string -> bool
+
 (** True when the provider emits no usage tokens in its standard response.
     Used by metrics coverage gating so text-only turns against CLI-class
     providers that strip usage do not count as coverage gaps. *)

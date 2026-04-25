@@ -83,7 +83,7 @@ const CHIP_CLASS_BY_STATE: Record<string, string> = {
   Crashed:      'bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-20)]',
   Restarting:   'bg-[var(--accent-10)] text-[var(--accent)] border-[var(--accent-20)]',
   Dead:         'bg-[var(--white-5)] text-[var(--bad-light)] border-[var(--bad-20)]',
-  Offline:      'bg-[var(--white-5)] text-[var(--text-muted)]0 border-[var(--white-10)]',
+  Offline:      'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--white-10)]',
   // KTC
   idle:         'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--white-10)]',
   prompting:    'bg-[var(--accent-10)] text-[var(--accent)] border-[var(--accent-20)]',
@@ -355,7 +355,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
     >
       <header class="flex flex-wrap items-baseline gap-3 border-b border-[var(--white-10)] p-3">
         <h2 class="text-sm font-semibold text-[var(--text-muted)]">Fleet composite (KSM × KTC × KDP × KCL × KMC)</h2>
-        <span class="text-xs text-[var(--text-muted)]0">
+        <span class="text-xs text-[var(--text-muted)]">
           ${data.count} keepers · <${TimeAgo} timestamp=${data.generated_at} mode="both" />
         </span>
         <input
@@ -365,7 +365,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
           aria-label="Keeper 필터"
           data-testid="fleet-fsm-matrix-filter"
           onInput=${(e: Event) => setQuery((e.target as HTMLInputElement).value)}
-          class="min-w-40 max-w-65 rounded border border-[var(--white-10)] bg-[var(--white-5)] px-2 py-0.5 text-xs text-[var(--text-muted)] placeholder:text-[var(--text-muted)]0 focus:border-[var(--white-10)]0 focus:outline-none"
+          class="min-w-40 max-w-65 rounded border border-[var(--white-10)] bg-[var(--white-5)] px-2 py-0.5 text-xs text-[var(--text-muted)] placeholder:text-[var(--text-muted)] focus:border-[var(--white-10)] focus:outline-none"
         />
         ${tallies
           ? html`
@@ -393,7 +393,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
         ? html`
             <div
               data-testid="fleet-fsm-matrix-empty"
-              class="p-4 text-center text-xs text-[var(--text-muted)]0"
+              class="p-4 text-center text-xs text-[var(--text-muted)]"
             >
               필터 결과 없음 (${data.snapshots.length} keepers)
             </div>
@@ -406,7 +406,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
               <th scope="col" class="px-3 py-2 text-left font-semibold">Keeper</th>
               ${AXES.map(a => html`
                 <th scope="col" class="px-3 py-2 text-left font-semibold" title=${a.label}>
-                  ${a.acronym} <span class="text-[var(--text-muted)]0">${a.label}</span>
+                  ${a.acronym} <span class="text-[var(--text-muted)]">${a.label}</span>
                 </th>
               `)}
             </tr>

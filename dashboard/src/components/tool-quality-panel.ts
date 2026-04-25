@@ -171,7 +171,7 @@ function ToolTable({
               : t.success_pct >= 80 ? 'text-[var(--warn)]' : 'text-[var(--bad-light)]'
             const isHighlighted = highlightTool && t.name === highlightTool
             const rowClass = isHighlighted
-              ? 'border-b border-[var(--warn-20)] bg-[var(--warn-10)] ring-1 ring-[var(--warn-20)]0/40'
+              ? 'border-b border-[var(--warn-20)] bg-[var(--warn-10)] ring-1 ring-[var(--warn-20)]/40'
               : 'border-b border-[var(--card-border)] border-opacity-30'
             return html`
               <tr class=${rowClass} ref=${isHighlighted ? ((el: HTMLElement | null) => el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })) : undefined}>

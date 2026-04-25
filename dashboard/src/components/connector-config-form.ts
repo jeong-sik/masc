@@ -544,7 +544,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
               const hint = getFieldHint(field.name)
               if (hint === null) return null
               return html`
-                <div class="rounded border border-[var(--accent-20)] bg-[var(--accent-10)]0/5 px-2 py-1 text-3xs text-[var(--accent)]" data-field-hint=${field.name}>
+                <div class="rounded border border-[var(--accent-20)] bg-[var(--accent-10)]/5 px-2 py-1 text-3xs text-[var(--accent)]" data-field-hint=${field.name}>
                   <span class="mr-1" aria-hidden="true">📍</span>
                   <span>${hint.where}</span>
                   ${hint.url

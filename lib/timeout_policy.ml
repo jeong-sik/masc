@@ -31,6 +31,30 @@ end
 
 let default_overshoot_slack_s = 5.0
 
+(* #9662: counter for cooperative-cancel overshoot events.
+
+   The 2026-04-23 production trace observed [keeper_llm_bridge]
+   timing out at 596.6s against a 573s budget — a 23.6s overshoot.
+   Eio's cooperative cancellation only fires at the next yield, so
+   a fiber blocked inside an uncancellable region (native HTTP
+   read, syscall, non-yielding loop) keeps running past the
+   [with_timeout_exn] deadline.  The WARN log already surfaces
+   the excess; this counter lets operators alert on the rate
+   without log scraping and attribute overshoots to a specific
+   [(layer, origin)] pair.
+
+   Labels:
+     [layer]  : Layer.to_string output (oas_bridge / tool /
+                keeper_turn / keeper_cycle / shutdown)
+     [origin] : free-form site name passed by caller (e.g.,
+                "keeper_llm_bridge", a tool name).  Caller
+                discipline keeps cardinality bounded — origin
+                strings are intended to be small, named sites,
+                not user-supplied identifiers.
+
+   Cardinality: ~5 layers × ~20 origins = ~100 series. *)
+let metric_overshoot_total = "masc_timeout_policy_overshoot_total"
+
 let overshoot_warn ?(slack_s = default_overshoot_slack_s) ~deadline ~actual_wall_s () =
   let excess = actual_wall_s -. deadline.Deadline.wall_cap_s in
   if excess > slack_s then begin
@@ -42,6 +66,10 @@ let overshoot_warn ?(slack_s = default_overshoot_slack_s) ~deadline ~actual_wall
       actual_wall_s
       excess
       slack_s;
+    Prometheus.inc_counter metric_overshoot_total
+      ~labels:[ ("layer", Layer.to_string deadline.Deadline.layer);
+                ("origin", deadline.Deadline.origin) ]
+      ();
     true
   end
   else

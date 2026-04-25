@@ -1035,6 +1035,7 @@ let transition_task_r
       ~action
       ?agent_tool_names
       ?prepare_verification_request
+      ?prepare_verification_verdict
       ?expected_version
       ?(notes = "")
       ?(reason = "")
@@ -1205,8 +1206,9 @@ let transition_task_r
         let new_status = decision.Coord_task_lifecycle.new_status in
         let set_current = decision.set_current in
         let* () =
-          match action, new_status, prepare_verification_request with
+          match action, task.task_status, new_status, prepare_verification_request with
           | ( Types.Submit_for_verification,
+              _,
               Types.AwaitingVerification { assignee; verification_id; _ },
               Some prepare ) ->
             let evidence_refs =
@@ -1225,7 +1227,7 @@ let transition_task_r
                        task_id
                        verification_id
                        e)))
-          | Types.Submit_for_verification, _, Some _ ->
+          | Types.Submit_for_verification, _, _, Some _ ->
             Error
               (Types.TaskInvalidState
                  (Printf.sprintf
@@ -1240,6 +1242,7 @@ let transition_task_r
             | Types.Approve_verification
             | Types.Reject_verification ),
             _,
+            _,
             Some _ ->
             Ok ()
           | ( Types.Claim
@@ -1250,6 +1253,78 @@ let transition_task_r
             | Types.Approve_verification
             | Types.Reject_verification
             | Types.Submit_for_verification ),
+            _,
+            _,
+            None ->
+            Ok ()
+        in
+        let* () =
+          match action, task.task_status, prepare_verification_verdict with
+          | ( Types.Approve_verification,
+              Types.AwaitingVerification { verification_id; _ },
+              Some prepare ) ->
+            (match
+               prepare
+                 ~task
+                 ~verifier:agent_name
+                 ~verification_id
+                 ~decision:(`Approve notes)
+             with
+             | Ok () -> Ok ()
+             | Error e ->
+               Error
+                 (Types.IoError
+                    (Printf.sprintf
+                       "verification verdict persistence failed before status transition \
+                        (task=%s vrf=%s): %s"
+                       task_id
+                       verification_id
+                       e)))
+          | ( Types.Reject_verification,
+              Types.AwaitingVerification { verification_id; _ },
+              Some prepare ) ->
+            let reject_reason = if notes <> "" then notes else reason in
+            (match
+               prepare
+                 ~task
+                 ~verifier:agent_name
+                 ~verification_id
+                 ~decision:(`Reject reject_reason)
+             with
+             | Ok () -> Ok ()
+             | Error e ->
+               Error
+                 (Types.IoError
+                    (Printf.sprintf
+                       "verification verdict persistence failed before status transition \
+                        (task=%s vrf=%s): %s"
+                       task_id
+                       verification_id
+                       e)))
+          | (Types.Approve_verification | Types.Reject_verification), _, Some _ ->
+            Error
+              (Types.TaskInvalidState
+                 (Printf.sprintf
+                    "verification verdict action did not start from AwaitingVerification \
+                     for task %s"
+                    task_id))
+          | ( Types.Claim
+            | Types.Start
+            | Types.Done_action
+            | Types.Cancel
+            | Types.Release
+            | Types.Submit_for_verification ),
+            _,
+            Some _ ->
+            Ok ()
+          | ( Types.Claim
+            | Types.Start
+            | Types.Done_action
+            | Types.Cancel
+            | Types.Release
+            | Types.Submit_for_verification
+            | Types.Approve_verification
+            | Types.Reject_verification ),
             _,
             None ->
             Ok ()

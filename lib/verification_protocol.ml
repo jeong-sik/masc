@@ -177,22 +177,32 @@ let on_submit_for_verification ~(config : Coord.config)
     notify_submit_for_verification ~config ~task ~assignee ~verification_id ~evidence_refs;
     Ok ()
 
-let on_approve_verification ~(config : Coord.config)
+let record_approve_verification ~(config : Coord.config)
     ~task_id ~verifier ~verification_id ~notes =
   let base_path = config.Coord.base_path in
   (* Update Verification.ml state machine: Pending -> Completed Pass.
      Issue #7544. *)
-  (if verification_id <> "" then
-    match Verification.submit_verdict ~base_path
-            ~req_id:verification_id ~verifier
-            ~verdict:Verification.Pass with
+  if verification_id = "" then
+    Error "verification_id is required for approval verdict persistence"
+  else
+    match
+      Verification.submit_verdict
+        ~base_path
+        ~req_id:verification_id
+        ~verifier
+        ~verdict:Verification.Pass
+    with
     | Ok updated ->
       Verification.attribution_of_request updated
-      |> Option.iter Dashboard_attribution.record
+      |> Option.iter Dashboard_attribution.record;
+      Ok ()
     | Error e ->
       Log.Task.error
         "verification submit_verdict failed (task=%s vrf=%s verifier=%s): %s"
-        task_id verification_id verifier e);
+        task_id verification_id verifier e;
+      Error e
+
+let notify_approve_verification ~task_id ~verifier ~verification_id ~notes =
   let meta_json = `Assoc [
     ("type", `String "verification_verdict");
     ("task_id", `String task_id);
@@ -227,22 +237,42 @@ let on_approve_verification ~(config : Coord.config)
     ("timestamp", `Float (Time_compat.now ()));
   ])
 
-let on_reject_verification ~(config : Coord.config)
+let on_approve_verification ~(config : Coord.config)
+    ~task_id ~verifier ~verification_id ~notes =
+  match
+    record_approve_verification ~config ~task_id ~verifier ~verification_id ~notes
+  with
+  | Error e -> Error e
+  | Ok () ->
+    notify_approve_verification ~task_id ~verifier ~verification_id ~notes;
+    Ok ()
+
+let record_reject_verification ~(config : Coord.config)
     ~task_id ~verifier ~verification_id ~reason =
   let base_path = config.Coord.base_path in
   (* Update Verification.ml state machine: Pending -> Completed (Fail reason).
      Issue #7544. *)
-  (if verification_id <> "" then
-    match Verification.submit_verdict ~base_path
-            ~req_id:verification_id ~verifier
-            ~verdict:(Verification.Fail reason) with
+  if verification_id = "" then
+    Error "verification_id is required for rejection verdict persistence"
+  else
+    match
+      Verification.submit_verdict
+        ~base_path
+        ~req_id:verification_id
+        ~verifier
+        ~verdict:(Verification.Fail reason)
+    with
     | Ok updated ->
       Verification.attribution_of_request updated
-      |> Option.iter Dashboard_attribution.record
+      |> Option.iter Dashboard_attribution.record;
+      Ok ()
     | Error e ->
       Log.Task.error
         "verification submit_verdict failed (task=%s vrf=%s verifier=%s): %s"
-        task_id verification_id verifier e);
+        task_id verification_id verifier e;
+      Error e
+
+let notify_reject_verification ~task_id ~verifier ~verification_id ~reason =
   let meta_json = `Assoc [
     ("type", `String "verification_verdict");
     ("task_id", `String task_id);
@@ -274,6 +304,16 @@ let on_reject_verification ~(config : Coord.config)
     ("reason", `String reason);
     ("timestamp", `Float (Time_compat.now ()));
   ])
+
+let on_reject_verification ~(config : Coord.config)
+    ~task_id ~verifier ~verification_id ~reason =
+  match
+    record_reject_verification ~config ~task_id ~verifier ~verification_id ~reason
+  with
+  | Error e -> Error e
+  | Ok () ->
+    notify_reject_verification ~task_id ~verifier ~verification_id ~reason;
+    Ok ()
 
 let check_timeouts ~(config : Coord.config) =
   if not (Env_config_runtime.Verification.fsm_enabled ()) then ()

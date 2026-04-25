@@ -4354,6 +4354,99 @@ let test_bounded_oas_timeout_refuses_too_little_budget () =
     (UT.bounded_oas_timeout_for_turn_budget
        ~estimated_input_tokens:2_000 ~remaining_turn_budget_s:20.0)
 
+let test_oas_timeout_reclassifies_only_current_attempt_budget () =
+  let err =
+    Agent_sdk.Error.Api
+      (Timeout { message = "Timeout after 273.0s (budget=273s)" })
+  in
+  match
+    UT.resolve_bounded_oas_timeout_budget_with_turn_budget
+      ~estimated_input_tokens:2_000 ~max_turns:4
+      ~remaining_turn_budget_s:1200.0
+  with
+  | None -> fail "expected timeout budget"
+  | Some timeout_budget ->
+      let classified =
+        UT.reclassify_oas_timeout_for_attempt
+          ~timeout_budget:(Some timeout_budget)
+          err
+      in
+      (match
+         Masc_mcp.Oas_worker_named.classify_masc_internal_error classified
+       with
+       | Some (Masc_mcp.Oas_worker_named.Oas_timeout_budget budget) ->
+           check int "estimated tokens preserved" 2_000
+             budget.estimated_input_tokens;
+           check string "source preserved" timeout_budget.source budget.source
+       | _ -> fail "expected OAS timeout budget classification")
+
+let test_pre_retry_budget_exhaustion_not_reclassified_with_stale_budget () =
+  let err =
+    Agent_sdk.Error.Api
+      (Timeout
+         {
+           message =
+             "Turn wall-clock budget exhausted before retry (remaining=2.0s)";
+         })
+  in
+  let classified =
+    UT.reclassify_oas_timeout_for_attempt ~timeout_budget:None err
+  in
+  check bool "pre-dispatch exhaustion remains raw timeout" true
+    (Option.is_none
+       (Masc_mcp.Oas_worker_named.classify_masc_internal_error classified))
+
+let oas_timeout_budget_error () =
+  Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
+    (Masc_mcp.Oas_worker_named.Oas_timeout_budget
+       {
+         budget_sec = 273.0;
+         keeper_turn_timeout_sec = 1200.0;
+         estimated_input_tokens = 2_000;
+         source = "adaptive_estimated_input_tokens";
+       })
+
+let test_degraded_retry_budget_gate_allows_remaining_budget () =
+  match
+    UT.next_fail_open_cascade_for_turn_with_budget
+      ~base_cascade:"underdog"
+      ~effective_cascade:"underdog"
+      ~tool_requirement:"optional"
+      ~attempted_cascades:[ "underdog" ]
+      ~estimated_input_tokens:2_000
+      ~max_turns:4
+      ~remaining_turn_budget_s:1200.0
+      (oas_timeout_budget_error ())
+  with
+  | UT.Degraded_retry_allowed retry ->
+      check string "retry cascade" KC.local_recovery_cascade_name
+        retry.next_cascade;
+      check string "fallback reason" "oas_timeout_budget"
+        retry.fallback_reason
+  | UT.Degraded_retry_budget_exhausted _ ->
+      fail "expected retry budget to remain"
+  | UT.No_degraded_retry -> fail "expected degraded retry"
+
+let test_degraded_retry_budget_gate_blocks_exhausted_budget () =
+  match
+    UT.next_fail_open_cascade_for_turn_with_budget
+      ~base_cascade:"underdog"
+      ~effective_cascade:"underdog"
+      ~tool_requirement:"optional"
+      ~attempted_cascades:[ "underdog" ]
+      ~estimated_input_tokens:2_000
+      ~max_turns:4
+      ~remaining_turn_budget_s:20.0
+      (oas_timeout_budget_error ())
+  with
+  | UT.Degraded_retry_budget_exhausted retry ->
+      check string "retry cascade candidate" KC.local_recovery_cascade_name
+        retry.next_cascade;
+      check string "fallback reason" "oas_timeout_budget"
+        retry.fallback_reason
+  | UT.Degraded_retry_allowed _ -> fail "expected exhausted retry budget"
+  | UT.No_degraded_retry -> fail "expected recoverable retry candidate"
+
 let test_pure_local_labels_detection () =
   check bool "ollama-only cascade is pure local" true
     (OMR.labels_are_pure_local [ "ollama:qwen3.5:35b-a3b-nvfp4" ]);
@@ -6164,6 +6257,14 @@ let () =
             test_bounded_oas_timeout_uses_channel_turn_budget_override;
           test_case "bounded OAS timeout refuses too little remaining budget" `Quick
             test_bounded_oas_timeout_refuses_too_little_budget;
+          test_case "OAS timeout classification uses current attempt budget" `Quick
+            test_oas_timeout_reclassifies_only_current_attempt_budget;
+          test_case "pre-retry budget exhaustion does not reuse stale budget" `Quick
+            test_pre_retry_budget_exhaustion_not_reclassified_with_stale_budget;
+          test_case "degraded retry is allowed when turn budget remains" `Quick
+            test_degraded_retry_budget_gate_allows_remaining_budget;
+          test_case "degraded retry is blocked when turn budget is exhausted" `Quick
+            test_degraded_retry_budget_gate_blocks_exhausted_budget;
           test_case "pure local label detection" `Quick
             test_pure_local_labels_detection;
           test_case "pure local context clamp" `Quick

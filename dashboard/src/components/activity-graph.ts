@@ -194,6 +194,7 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
             class="inline-flex items-center gap-1.5 rounded border px-2.5 py-1.5 text-2xs transition-all duration-150 ${showLifecycle.value
               ? 'border-[var(--border-slate-22)] bg-[var(--accent-soft)] text-[var(--text-strong)]'
               : 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--text-dim)] hover:bg-[var(--white-8)]'}"
+            aria-pressed=${showLifecycle.value}
             onClick=${() => { showLifecycle.value = !showLifecycle.value }}
           >
             생명주기 ${showLifecycle.value ? '표시 중' : '숨김'}
@@ -204,7 +205,7 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
 
       ${filteredGroups.length === 0
         ? (isFiltering && categoryFilteredGroups.length > 0
-          ? html`<div class="py-4 text-center text-2xs text-[var(--text-dim)]">필터 결과 없음 (${categoryFilteredGroups.length} items)</div>`
+          ? html`<div class="py-4 text-center text-2xs text-[var(--text-dim)]" role="status">필터 결과 없음 (${categoryFilteredGroups.length} items)</div>`
           : html`<${EmptyState} message="선택한 필터에 맞는 액션 그룹이 없습니다." compact />`)
         : filteredGroups.map(group => {
             const expanded = expandedActionGroups.value.has(group.id)

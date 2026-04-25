@@ -18,7 +18,7 @@
  */
 
 import { html } from 'htm/preact'
-import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 
 import { fetchKeepersComposite } from '../api/keeper'
 import type {
@@ -411,43 +411,58 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState<boolean>(true)
   const [query, setQuery] = useState<string>('')
+  const lastStreamedAtRef = useRef<number | null>(null)
   // Observation ring. Ref rather than state because pushObservation
   // returns a fresh record per tick and we pair it with a setData call
   // which triggers the re-render — avoids a redundant state subscription.
   const historyRef = useRef<KeeperFleetHistory>({})
 
+  const applySnapshot = useCallback((snap: FleetCompositeSnapshot) => {
+    historyRef.current = pushObservation(
+      historyRef.current,
+      snap.snapshots,
+      FLEET_HISTORY_LEN,
+    )
+    setData(snap)
+    setError(null)
+    setLoading(false)
+  }, [])
+
   useEffect(() => {
     if (!allowStreamedData) return
     const applyStreamedSnapshot = (snap: FleetCompositeSnapshot | null) => {
       if (!snap) return
-      historyRef.current = pushObservation(
-        historyRef.current,
-        snap.snapshots,
-        FLEET_HISTORY_LEN,
-      )
-      setData(snap)
-      setError(null)
-      setLoading(false)
+      lastStreamedAtRef.current = Date.now()
+      applySnapshot(snap)
     }
     applyStreamedSnapshot(fleetCompositeSnapshot.value)
     return fleetCompositeSnapshot.subscribe(applyStreamedSnapshot)
-  }, [allowStreamedData])
+  }, [allowStreamedData, applySnapshot])
 
   useEffect(() => {
     let cancelled = false
     let timer: ReturnType<typeof setTimeout> | null = null
+    const streamStaleAfterMs = Math.max(intervalMs * 2, 1)
+    // In live mode the pushed fleet snapshot is primary; polling is only a
+    // seed/watchdog path so this matrix does not double-hit the backend every
+    // interval while the stream is healthy.
+    const shouldFetchFallback = (): boolean => {
+      if (!allowStreamedData) return true
+      const lastStreamedAt = lastStreamedAtRef.current
+      if (lastStreamedAt == null) return true
+      return Date.now() - lastStreamedAt >= streamStaleAfterMs
+    }
     const tick = async () => {
+      if (!shouldFetchFallback()) {
+        if (!cancelled) {
+          timer = setTimeout(tick, intervalMs)
+        }
+        return
+      }
       try {
         const snap = await fetcher()
         if (!cancelled) {
-          historyRef.current = pushObservation(
-            historyRef.current,
-            snap.snapshots,
-            FLEET_HISTORY_LEN,
-          )
-          setData(snap)
-          setError(null)
-          setLoading(false)
+          applySnapshot(snap)
         }
       } catch (e) {
         if (!cancelled) {
@@ -460,12 +475,16 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
         }
       }
     }
-    tick()
+    if (allowStreamedData && fleetCompositeSnapshot.value) {
+      timer = setTimeout(tick, intervalMs)
+    } else {
+      void tick()
+    }
     return () => {
       cancelled = true
       if (timer) clearTimeout(timer)
     }
-  }, [fetcher, intervalMs])
+  }, [allowStreamedData, applySnapshot, fetcher, intervalMs])
 
   const tallies = useMemo(
     () => (data ? tallyInvariantViolations(data.snapshots) : null),
@@ -609,11 +628,12 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
             ${visibleSnapshots.map(snap => {
               const anyViolated = INVARIANT_KEYS.some(k => !snap.invariants[k])
               const attention = runtimeAttentionForSnapshot(snap, data.generated_at)
-              const rowTone = anyViolated || attention.level === 'blocked'
-                ? 'border-l-2 border-[var(--bad-20)]'
-                : attention.level === 'stale' || attention.level === 'idle'
-                  ? 'border-l-2 border-[var(--warn-20)]'
-                  : ''
+              let rowTone = ''
+              if (anyViolated || attention.level === 'blocked') {
+                rowTone = 'border-l-2 border-[var(--bad-20)]'
+              } else if (attention.level === 'stale' || attention.level === 'idle') {
+                rowTone = 'border-l-2 border-[var(--warn-20)]'
+              }
               const name = inferKeeperNameFrom(snap)
               return html`
                 <tr

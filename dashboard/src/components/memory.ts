@@ -12,7 +12,13 @@ import { RichContent } from './common/rich-content'
 import { stripStateBlocks } from '../keeper-message'
 import { navigate, navigateToPost, route } from '../router'
 import { PostDetail } from './memory-post-detail'
-import { stripInlineMarkdown, navigateToAuthor } from '../lib/board-utils'
+import {
+  boardActorAvatarKey,
+  boardActorDisplayName,
+  boardActorTitle,
+  navigateToAuthor,
+  stripInlineMarkdown,
+} from '../lib/board-utils'
 import { hasRichMarkdownSignals } from './common/rich-content-utils'
 import {
   boardPosts,
@@ -351,6 +357,9 @@ function PostCard({ post }: { post: BoardPost }) {
   const isDeleting = deletingPostId.value === post.id
   const previewBody = stripStateBlocks(post.body)
   const richPreview = hasRichMarkdownSignals(previewBody)
+  const authorLabel = boardActorDisplayName(post.author, post.author_identity)
+  const authorAvatarKey = boardActorAvatarKey(post.author, post.author_identity)
+  const authorTitle = boardActorTitle(post.author, post.author_identity)
 
   const handleVote = async (dir: 'up' | 'down', event: Event) => {
     event.stopPropagation()
@@ -427,11 +436,12 @@ function PostCard({ post }: { post: BoardPost }) {
         <!-- Footer: author + meta + badges -->
         <div class="flex items-center gap-2 flex-wrap">
           <!-- Author line -->
-          <span class="text-xs text-[var(--text-muted)]">${authorAvatar(post.author)}</span>
+          <span class="text-xs text-[var(--text-muted)]">${authorAvatar(authorAvatarKey)}</span>
           <a
             class="text-xs text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors cursor-pointer"
-            onClick=${(e: Event) => navigateToAuthor(post.author, e)}
-          >${post.author}</a>
+            title=${authorTitle}
+            onClick=${(e: Event) => navigateToAuthor(post.author, e, post.author_identity)}
+          >${authorLabel}</a>
           <span class="text-2xs text-[var(--text-muted)] opacity-60"><${TimeAgo} timestamp=${post.created_at} /></span>
           ${isUpdated(post) ? html`<span class="text-3xs text-[var(--text-muted)] opacity-50">(수정됨)</span>` : null}
 

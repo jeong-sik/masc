@@ -108,9 +108,19 @@ type BoardPostMeta = Record<string, unknown> & {
   judgment?: unknown
 }
 
+export interface BoardActorIdentity {
+  kind: 'keeper' | 'agent'
+  id: string
+  key: string
+  display_name: string
+  raw: string
+  runtime_agent_name?: string
+}
+
 export interface BoardPost {
   id: string
   author: string
+  author_identity?: BoardActorIdentity | null
   post_kind?: 'direct' | 'automation' | 'system'
   classification_reason?: string | null
   title: string
@@ -135,6 +145,7 @@ export interface BoardComment {
   post_id: string
   parent_id?: string | null
   author: string
+  author_identity?: BoardActorIdentity | null
   content: string
   created_at: string
 }

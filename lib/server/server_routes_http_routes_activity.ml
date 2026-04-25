@@ -53,6 +53,29 @@ let json_ensure_meta_source source = function
   | _non_object ->
       Error "json_ensure_meta_source: expected JSON object"
 
+let json_ensure_meta_string_field name value = function
+  | `Assoc fields ->
+      let value = String.trim value in
+      if value = "" then Ok (`Assoc fields)
+      else
+        let meta_json =
+          match List.assoc_opt "meta" fields with
+          | Some (`Assoc meta_fields as existing_meta) -> (
+              match List.assoc_opt name meta_fields with
+              | Some (`String current) when String.trim current <> "" -> existing_meta
+              | _ ->
+                  `Assoc
+                    ((name, `String value)
+                    :: List.filter (fun (k, _) -> k <> name) meta_fields))
+          | _ -> `Assoc [ (name, `String value) ]
+        in
+        let fields =
+          ("meta", meta_json) :: List.filter (fun (k, _) -> k <> "meta") fields
+        in
+        Ok (`Assoc fields)
+  | _non_object ->
+      Error "json_ensure_meta_string_field: expected JSON object"
+
 let governance_surface_for_param_key param_key =
   Governance_registry.surfaces
   |> List.find_opt (fun (surface : Governance_registry.surface) ->
@@ -155,7 +178,8 @@ let add_routes ~sw ~clock router =
          let author_filter =
            query_param req "author"
            |> Option.map String.trim
-           |> Fun.flip Option.bind (fun s -> if s = "" then None else Some s)
+           |> Fun.flip Option.bind (fun s ->
+                if s = "" then None else Some (board_actor_author_for_write s))
          in
          let limit = int_query_param req "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
          let offset = int_query_param req "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
@@ -241,7 +265,8 @@ let add_routes ~sw ~clock router =
                try Ok (Yojson.Safe.from_string body_str)
                with Yojson.Json_error msg -> Error ("Invalid JSON: " ^ msg)
              in
-             let* args = json_upsert_string_field "voter" agent_name args in
+             let voter = board_actor_author_for_write agent_name in
+             let* args = json_upsert_string_field "voter" voter args in
              let (ok, msg) = Tool_board.handle_tool "masc_board_vote" args in
              let status = if ok then `OK else `Bad_request in
              respond_json_with_cors ~status request reqd
@@ -277,7 +302,12 @@ let add_routes ~sw ~clock router =
                try Ok (Yojson.Safe.from_string body_str)
                with Yojson.Json_error msg -> Error ("Invalid JSON: " ^ msg)
              in
-             let* args = json_upsert_string_field "author" agent_name args in
+             let author = board_actor_author_for_write agent_name in
+             let* args = json_upsert_string_field "author" author args in
+             let* args =
+               if String.equal author (String.trim agent_name) then Ok args
+               else json_ensure_meta_string_field "author_raw_agent_name" agent_name args
+             in
              let* args = json_ensure_meta_source "dashboard_board_post" args in
              let (ok, msg) = Tool_board.handle_tool "masc_board_post" args in
              let status = if ok then `Created else `Bad_request in
@@ -314,7 +344,8 @@ let add_routes ~sw ~clock router =
                try Ok (Yojson.Safe.from_string body_str)
                with Yojson.Json_error msg -> Error ("Invalid JSON: " ^ msg)
              in
-             let* args = json_upsert_string_field "author" agent_name args in
+             let author = board_actor_author_for_write agent_name in
+             let* args = json_upsert_string_field "author" author args in
              let (ok, msg) = Tool_board.handle_tool "masc_board_comment" args in
              let status = if ok then `Created else `Bad_request in
              respond_json_with_cors ~status request reqd

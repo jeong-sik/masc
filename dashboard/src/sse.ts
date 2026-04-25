@@ -99,6 +99,11 @@ function actorLabel(name: string | undefined): string {
   return normalized || 'system'
 }
 
+function projectedActorLabel(raw: string | undefined, displayName: string | undefined): string {
+  const projected = displayName?.trim()
+  return actorLabel(projected || raw)
+}
+
 function asString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() !== '' ? value : undefined
 }
@@ -350,38 +355,44 @@ function handleEvent(event: SSEEvent): void {
       break
     case 'board_post':
     case 'masc/board_post':
-      addTypedJournalEntry(
-        agent,
-        formatBoardJournalText('Post', event.content ?? event.message),
-        'board',
-        'board_post',
-        {
-          author: event.author ?? agent,
-          severity: event.severity,
-          source: event.source,
-          narrativeText: formatBoardNarrative('게시글', event.author ?? agent, event.content ?? event.message),
-          preview: normalizePreview(event.content ?? event.message),
-          postId: event.post_id,
-        },
-      )
-      break
+      {
+        const author = projectedActorLabel(event.author ?? agent, event.author_identity?.display_name)
+        addTypedJournalEntry(
+          author,
+          formatBoardJournalText('Post', event.content ?? event.message),
+          'board',
+          'board_post',
+          {
+            author,
+            severity: event.severity,
+            source: event.source,
+            narrativeText: formatBoardNarrative('게시글', author, event.content ?? event.message),
+            preview: normalizePreview(event.content ?? event.message),
+            postId: event.post_id,
+          },
+        )
+        break
+      }
     case 'board_comment':
     case 'masc/board_comment':
-      addTypedJournalEntry(
-        agent,
-        formatBoardJournalText('Comment', event.content ?? event.message),
-        'board',
-        'board_comment',
-        {
-          author: event.author ?? agent,
-          severity: event.severity,
-          source: event.source,
-          narrativeText: formatBoardNarrative('댓글', event.author ?? agent, event.content ?? event.message),
-          preview: normalizePreview(event.content ?? event.message),
-          postId: event.post_id,
-        },
-      )
-      break
+      {
+        const author = projectedActorLabel(event.author ?? agent, event.author_identity?.display_name)
+        addTypedJournalEntry(
+          author,
+          formatBoardJournalText('Comment', event.content ?? event.message),
+          'board',
+          'board_comment',
+          {
+            author,
+            severity: event.severity,
+            source: event.source,
+            narrativeText: formatBoardNarrative('댓글', author, event.content ?? event.message),
+            preview: normalizePreview(event.content ?? event.message),
+            postId: event.post_id,
+          },
+        )
+        break
+      }
     case 'board_delete':
     case 'masc/board_delete':
       removeBoardPost(event.post_id)
@@ -402,66 +413,78 @@ function handleEvent(event: SSEEvent): void {
     // Path A board events — emitted by server_bootstrap_loops.ml via
     // JSON-RPC notifications/board envelope (unwrapped to params.type).
     case 'post_created':
-      addTypedJournalEntry(
-        event.author ?? agent,
-        formatBoardJournalText('Post', event.content ?? event.title),
-        'board',
-        'board_post',
-        {
-          author: event.author ?? agent,
-          severity: event.severity,
-          source: event.source,
-          narrativeText: formatBoardNarrative('게시글', event.author ?? agent, event.content ?? event.title),
-          preview: normalizePreview(event.content ?? event.title),
-          postId: event.post_id,
-        },
-      )
-      break
+      {
+        const author = projectedActorLabel(event.author ?? agent, event.author_identity?.display_name)
+        addTypedJournalEntry(
+          author,
+          formatBoardJournalText('Post', event.content ?? event.title),
+          'board',
+          'board_post',
+          {
+            author,
+            severity: event.severity,
+            source: event.source,
+            narrativeText: formatBoardNarrative('게시글', author, event.content ?? event.title),
+            preview: normalizePreview(event.content ?? event.title),
+            postId: event.post_id,
+          },
+        )
+        break
+      }
     case 'comment_added':
-      addTypedJournalEntry(
-        event.author ?? agent,
-        formatBoardJournalText('Comment', event.content),
-        'board',
-        'board_comment',
-        {
-          author: event.author ?? agent,
-          severity: event.severity,
-          source: event.source,
-          narrativeText: formatBoardNarrative('댓글', event.author ?? agent, event.content),
-          preview: normalizePreview(event.content),
-          postId: event.post_id,
-        },
-      )
-      break
+      {
+        const author = projectedActorLabel(event.author ?? agent, event.author_identity?.display_name)
+        addTypedJournalEntry(
+          author,
+          formatBoardJournalText('Comment', event.content),
+          'board',
+          'board_comment',
+          {
+            author,
+            severity: event.severity,
+            source: event.source,
+            narrativeText: formatBoardNarrative('댓글', author, event.content),
+            preview: normalizePreview(event.content),
+            postId: event.post_id,
+          },
+        )
+        break
+      }
     case 'post_voted':
-      addTypedJournalEntry(
-        event.voter ?? agent,
-        `Vote ${event.direction ?? '?'} on post ${event.post_id ?? ''}`,
-        'board',
-        'board_vote',
-        {
-          author: event.voter ?? agent,
-          severity: event.severity,
-          source: event.source,
-          narrativeText: `${actorLabel(event.voter ?? agent)}가 게시글에 ${event.direction === 'up' ? '추천' : '비추천'} 투표했습니다`,
-          postId: event.post_id,
-        },
-      )
-      break
+      {
+        const voter = projectedActorLabel(event.voter ?? agent, event.voter_identity?.display_name)
+        addTypedJournalEntry(
+          voter,
+          `Vote ${event.direction ?? '?'} on post ${event.post_id ?? ''}`,
+          'board',
+          'board_vote',
+          {
+            author: voter,
+            severity: event.severity,
+            source: event.source,
+            narrativeText: `${actorLabel(voter)}가 게시글에 ${event.direction === 'up' ? '추천' : '비추천'} 투표했습니다`,
+            postId: event.post_id,
+          },
+        )
+        break
+      }
     case 'comment_voted':
-      addTypedJournalEntry(
-        event.voter ?? agent,
-        `Vote ${event.direction ?? '?'} on comment ${event.comment_id ?? ''}`,
-        'board',
-        'board_vote',
-        {
-          author: event.voter ?? agent,
-          severity: event.severity,
-          source: event.source,
-          narrativeText: `${actorLabel(event.voter ?? agent)}가 댓글에 ${event.direction === 'up' ? '추천' : '비추천'} 투표했습니다`,
-        },
-      )
-      break
+      {
+        const voter = projectedActorLabel(event.voter ?? agent, event.voter_identity?.display_name)
+        addTypedJournalEntry(
+          voter,
+          `Vote ${event.direction ?? '?'} on comment ${event.comment_id ?? ''}`,
+          'board',
+          'board_vote',
+          {
+            author: voter,
+            severity: event.severity,
+            source: event.source,
+            narrativeText: `${actorLabel(voter)}가 댓글에 ${event.direction === 'up' ? '추천' : '비추천'} 투표했습니다`,
+          },
+        )
+        break
+      }
     case 'keeper_turn_complete':
       addTypedJournalEntry(
         event.name ?? agent,

@@ -145,6 +145,7 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
           let base = [("type", `String "post_created");
                       ("post_id", `String post_id);
                       ("author", `String author);
+                      ("author_identity", Server_utils.board_actor_identity_json author);
                       ("title", `String title);
                       ("content", `String preview)] in
           `Assoc (match hearth with
@@ -154,18 +155,21 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
           `Assoc [("type", `String "comment_added");
                   ("post_id", `String post_id);
                   ("comment_id", `String comment_id);
-                  ("author", `String author)]
+                  ("author", `String author);
+                  ("author_identity", Server_utils.board_actor_identity_json author)]
       | Board_dispatch.Post_voted { post_id; voter; direction } ->
           let dir = Board_votes.vote_direction_to_string direction in
           `Assoc [("type", `String "post_voted");
                   ("post_id", `String post_id);
                   ("voter", `String voter);
+                  ("voter_identity", Server_utils.board_actor_identity_json voter);
                   ("direction", `String dir)]
       | Board_dispatch.Comment_voted { comment_id; voter; direction } ->
           let dir = Board_votes.vote_direction_to_string direction in
           `Assoc [("type", `String "comment_voted");
                   ("comment_id", `String comment_id);
                   ("voter", `String voter);
+                  ("voter_identity", Server_utils.board_actor_identity_json voter);
                   ("direction", `String dir)]
     in
     Sse.broadcast (`Assoc [
@@ -177,33 +181,39 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
     let activity_kind, activity_actor, activity_subject, activity_payload = match event with
       | Board_dispatch.Post_created { post_id; author; title; content; hearth } ->
           let base = [("post_id", `String post_id); ("title", `String title);
-                      ("content", `String content); ("author", `String author)] in
+                      ("content", `String content); ("author", `String author);
+                      ("author_identity", Server_utils.board_actor_identity_json author)] in
           let payload_fields = match hearth with
             | Some h -> ("hearth", `String h) :: base
             | None -> base
           in
           (Event_kind.Board.to_string Event_kind.Board.Posted,
-           Activity_graph.entity ~kind:"agent" author,
+           Server_utils.board_actor_entity author,
            Some (Activity_graph.entity ~kind:"post" post_id),
            `Assoc payload_fields)
       | Board_dispatch.Comment_added { post_id; comment_id; author } ->
           (Event_kind.Board.to_string Event_kind.Board.Commented,
-           Activity_graph.entity ~kind:"agent" author,
+           Server_utils.board_actor_entity author,
            Some (Activity_graph.entity ~kind:"post" post_id),
            `Assoc [("post_id", `String post_id); ("comment_id", `String comment_id);
-                   ("author", `String author)])
+                   ("author", `String author);
+                   ("author_identity", Server_utils.board_actor_identity_json author)])
       | Board_dispatch.Post_voted { post_id; voter; direction } ->
           let dir = Board_votes.vote_direction_to_string direction in
           (Event_kind.Board.to_string Event_kind.Board.Voted,
-           Activity_graph.entity ~kind:"agent" voter,
+           Server_utils.board_actor_entity voter,
            Some (Activity_graph.entity ~kind:"post" post_id),
-           `Assoc [("post_id", `String post_id); ("direction", `String dir)])
+           `Assoc [("post_id", `String post_id); ("voter", `String voter);
+                   ("voter_identity", Server_utils.board_actor_identity_json voter);
+                   ("direction", `String dir)])
       | Board_dispatch.Comment_voted { comment_id; voter; direction } ->
           let dir = Board_votes.vote_direction_to_string direction in
           (Event_kind.Board.to_string Event_kind.Board.Voted,
-           Activity_graph.entity ~kind:"agent" voter,
+           Server_utils.board_actor_entity voter,
            Some (Activity_graph.entity ~kind:"comment" comment_id),
-           `Assoc [("comment_id", `String comment_id); ("direction", `String dir)])
+           `Assoc [("comment_id", `String comment_id); ("voter", `String voter);
+                   ("voter_identity", Server_utils.board_actor_identity_json voter);
+                   ("direction", `String dir)])
     in
     ignore (Activity_graph.emit state.room_config
       ~actor:activity_actor ?subject:activity_subject

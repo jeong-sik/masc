@@ -37,6 +37,11 @@ import {
   normalizeKeepers,
 } from './keeper-store-normalize'
 import { buildAgentMotion, normalizeAgentKey, type AgentMotionSnapshot } from './components/common/agent-motion'
+import {
+  canonicalKeeperNameFromAgentName,
+  keeperIdentityKeys,
+  keeperPrincipalKey,
+} from './components/common/keeper-identity'
 import { groupByKey } from './components/common/collection'
 import { setArrayByKeyIfChanged } from './signal-utils'
 import { FetchScheduler } from './lib/fetch-scheduler'
@@ -308,6 +313,41 @@ export const tasksByStatus = computed(() => {
   }
 })
 
+function keeperPrincipalLookup(keeperList: Keeper[]): Map<string, string> {
+  const lookup = new Map<string, string>()
+  for (const keeper of keeperList) {
+    const principal =
+      keeperPrincipalKey(keeper.keeper_id, keeper.name, keeper.agent_name)
+      ?? normalizeAgentKey(keeper.name)
+    for (const key of keeperIdentityKeys(keeper.keeper_id, keeper.name, keeper.agent_name)) {
+      lookup.set(normalizeAgentKey(key), principal)
+    }
+  }
+  return lookup
+}
+
+function actorPrincipalKey(
+  value: string | null | undefined,
+  lookup: ReadonlyMap<string, string>,
+): string {
+  const raw = normalizeAgentKey(value)
+  if (!raw) return raw
+  const known = lookup.get(raw)
+  if (known) return known
+  const alias = canonicalKeeperNameFromAgentName(value)
+  return alias ? `keeper:${alias.toLowerCase()}` : raw
+}
+
+function boardPostPrincipalKey(
+  post: BoardPost,
+  lookup: ReadonlyMap<string, string>,
+): string {
+  const rawResolved = actorPrincipalKey(post.author, lookup)
+  if (rawResolved !== normalizeAgentKey(post.author)) return rawResolved
+  const projected = post.author_identity?.key
+  return projected ? normalizeAgentKey(projected) : rawResolved
+}
+
 export const agentMotionMap: ReadonlySignal<Map<string, AgentMotionSnapshot>> = computed(() => {
   const map = new Map<string, AgentMotionSnapshot>()
   const taskList = tasks.value
@@ -315,17 +355,22 @@ export const agentMotionMap: ReadonlySignal<Map<string, AgentMotionSnapshot>> = 
   const journalList = journal.value
   const boardPostList = boardPosts.value
   const keeperList = keepers.value
+  const keeperLookup = keeperPrincipalLookup(keeperList)
 
   // Pre-index: one pass per array — O(N) total instead of O(N * agents)
-  const tasksByAgent = groupByKey(taskList, t => normalizeAgentKey(t.assignee))
-  const messagesByAgent = groupByKey(messageList, m => normalizeAgentKey(m.from ?? ''))
-  const journalByAgent = groupByKey(journalList, e => normalizeAgentKey(e.agent))
-  const journalByAuthor = groupByKey(journalList, e => normalizeAgentKey(e.author))
-  const boardByAgent = groupByKey(boardPostList, p => normalizeAgentKey(p.author))
-  const keepersByAgent = groupByKey(keeperList, k => normalizeAgentKey(k.name))
+  const tasksByAgent = groupByKey(taskList, t => actorPrincipalKey(t.assignee, keeperLookup))
+  const messagesByAgent = groupByKey(messageList, m => actorPrincipalKey(m.from ?? '', keeperLookup))
+  const journalByAgent = groupByKey(journalList, e => actorPrincipalKey(e.agent, keeperLookup))
+  const journalByAuthor = groupByKey(journalList, e => actorPrincipalKey(e.author, keeperLookup))
+  const boardByAgent = groupByKey(boardPostList, p => boardPostPrincipalKey(p, keeperLookup))
+  const keepersByAgent = groupByKey(
+    keeperList,
+    k => keeperPrincipalKey(k.keeper_id, k.name, k.agent_name) ?? normalizeAgentKey(k.name),
+  )
 
   for (const agent of agents.value) {
-    const key = normalizeAgentKey(agent.name)
+    const rawKey = normalizeAgentKey(agent.name)
+    const key = actorPrincipalKey(agent.name, keeperLookup)
     // Merge journal entries matched by agent OR author (deduplicate)
     const agentJournal = journalByAgent.get(key) ?? []
     const authorJournal = journalByAuthor.get(key) ?? []
@@ -335,20 +380,19 @@ export const agentMotionMap: ReadonlySignal<Map<string, AgentMotionSnapshot>> = 
         ? agentJournal
         : agentJournal.concat(authorJournal)
 
-    map.set(
-      key,
-      buildAgentMotion(
-        tasksByAgent.get(key) ?? [],
-        messagesByAgent.get(key) ?? [],
-        mergedJournal,
-        {
-          currentTask: agent.current_task,
-          lastSeen: agent.last_seen,
-          boardPosts: boardByAgent.get(key) ?? [],
-          keepers: keepersByAgent.get(key) ?? [],
-        },
-      ),
+    const snapshot = buildAgentMotion(
+      tasksByAgent.get(key) ?? [],
+      messagesByAgent.get(key) ?? [],
+      mergedJournal,
+      {
+        currentTask: agent.current_task,
+        lastSeen: agent.last_seen,
+        boardPosts: boardByAgent.get(key) ?? [],
+        keepers: keepersByAgent.get(key) ?? [],
+      },
     )
+    map.set(rawKey, snapshot)
+    map.set(key, snapshot)
   }
   return map
 })
@@ -728,8 +772,21 @@ function sameStringArray(a: string[] | undefined, b: string[] | undefined): bool
   return left.length === right.length && left.every((value, index) => value === right[index])
 }
 
+function sameBoardAuthorIdentity(previous: BoardPost, next: BoardPost): boolean {
+  const left = previous.author_identity
+  const right = next.author_identity
+  return (left?.kind ?? null) === (right?.kind ?? null)
+    && (left?.id ?? null) === (right?.id ?? null)
+    && (left?.key ?? null) === (right?.key ?? null)
+    && (left?.display_name ?? null) === (right?.display_name ?? null)
+    && (left?.raw ?? null) === (right?.raw ?? null)
+    && (left?.runtime_agent_name ?? null) === (right?.runtime_agent_name ?? null)
+}
+
 function canReuseBoardPost(previous: BoardPost, next: BoardPost): boolean {
   return previous.updated_at === next.updated_at
+    && previous.author === next.author
+    && sameBoardAuthorIdentity(previous, next)
     && previous.votes === next.votes
     && previous.vote_balance === next.vote_balance
     && previous.comment_count === next.comment_count

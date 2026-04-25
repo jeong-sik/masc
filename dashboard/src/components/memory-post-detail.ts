@@ -10,7 +10,12 @@ import { RichComposer } from './common/rich-composer'
 import { RichContent } from './common/rich-content'
 import { stripStateBlocks } from '../keeper-message'
 import { navigate } from '../router'
-import { navigateToAuthor } from '../lib/board-utils'
+import {
+  boardActorAvatarKey,
+  boardActorDisplayName,
+  boardActorTitle,
+  navigateToAuthor,
+} from '../lib/board-utils'
 import {
   detailComments,
   detailLoading,
@@ -129,13 +134,16 @@ function CommentItem({
   const isReplying = replyingTo.value === comment.id
   const indent = depth > 0 ? `ml-${Math.min(depth * 4, 12)}` : ''
   const replies = childrenMap.get(comment.id) ?? []
+  const authorLabel = boardActorDisplayName(comment.author, comment.author_identity)
+  const authorAvatarKey = boardActorAvatarKey(comment.author, comment.author_identity)
+  const authorTitle = boardActorTitle(comment.author, comment.author_identity)
 
   return html`
     <div class="${indent}">
       <div class="board-comment rounded p-3 bg-[var(--white-3)] border border-[var(--border-slate-12)] ${depth > 0 ? 'border-l-2 border-l-[var(--accent-20)]' : ''}">
         <div class="flex items-center gap-2 mb-1.5">
-          <span class="text-xs">${authorAvatar(comment.author)}</span>
-          <button type="button" class="text-xs font-medium text-[var(--text-body)] hover:text-[var(--accent)] transition-colors cursor-pointer bg-transparent border-none p-0" onClick=${() => navigateToAuthor(comment.author)}>${comment.author}</button>
+          <span class="text-xs">${authorAvatar(authorAvatarKey)}</span>
+          <button type="button" class="text-xs font-medium text-[var(--text-body)] hover:text-[var(--accent)] transition-colors cursor-pointer bg-transparent border-none p-0" title=${authorTitle} onClick=${() => navigateToAuthor(comment.author, undefined, comment.author_identity)}>${authorLabel}</button>
           <span class="text-2xs text-[var(--text-muted)] opacity-60"><${TimeAgo} timestamp=${comment.created_at} /></span>
           <button type="button"
             class="text-2xs text-[var(--text-muted)] hover:text-[var(--accent)] cursor-pointer bg-transparent border-0 ml-auto"
@@ -285,6 +293,9 @@ export function PostDetail({ post }: { post: BoardPost }) {
       showToast('투표에 실패했습니다', 'error')
     }
   }
+  const authorLabel = boardActorDisplayName(post.author, post.author_identity)
+  const authorAvatarKey = boardActorAvatarKey(post.author, post.author_identity)
+  const authorTitle = boardActorTitle(post.author, post.author_identity)
 
   return html`
     <div>
@@ -305,8 +316,8 @@ export function PostDetail({ post }: { post: BoardPost }) {
 
           <!-- Author and meta -->
           <div class="flex gap-2.5 items-center flex-wrap pt-3 border-t border-[var(--border-slate-12)]">
-            <span class="text-sm">${authorAvatar(post.author)}</span>
-            <button type="button" class="text-xs text-[var(--text-body)] hover:text-[var(--accent)] transition-colors cursor-pointer bg-transparent border-none p-0" onClick=${() => navigateToAuthor(post.author)}>${post.author}</button>
+            <span class="text-sm">${authorAvatar(authorAvatarKey)}</span>
+            <button type="button" class="text-xs text-[var(--text-body)] hover:text-[var(--accent)] transition-colors cursor-pointer bg-transparent border-none p-0" title=${authorTitle} onClick=${() => navigateToAuthor(post.author, undefined, post.author_identity)}>${authorLabel}</button>
             <span class="text-2xs text-[var(--text-muted)]"><${TimeAgo} timestamp=${post.created_at} /></span>
             <span class="text-2xs text-[var(--text-muted)]">${post.votes ?? 0} votes</span>
           </div>

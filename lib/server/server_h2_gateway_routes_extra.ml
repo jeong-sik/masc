@@ -29,7 +29,8 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path
       let author_filter =
         query_param httpun_request "author"
         |> Option.map String.trim
-        |> Fun.flip Option.bind (fun s -> if s = "" then None else Some s)
+        |> Fun.flip Option.bind (fun s ->
+             if s = "" then None else Some (board_actor_author_for_write s))
       in
       let limit = int_query_param httpun_request "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
       let offset = int_query_param httpun_request "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in

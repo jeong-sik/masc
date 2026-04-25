@@ -1,3 +1,5 @@
+import type { BoardActorIdentity } from './core'
+
 // --- SSE Events ---
 
 export type SSEEventType =
@@ -130,7 +132,9 @@ export interface SSEEvent {
   comment_id?: string
   title?: string
   author?: string
+  author_identity?: BoardActorIdentity | null
   voter?: string
+  voter_identity?: BoardActorIdentity | null
   direction?: 'up' | 'down' | string
   hearth?: string
   agent_name?: string

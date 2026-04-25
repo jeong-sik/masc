@@ -828,7 +828,9 @@ button { font: inherit; }
   cursor: pointer;
 }
 .ide-v2-modes button.active,
-.ide-v2-terminal-toggle.active {
+.ide-v2-modes button[aria-selected="true"],
+.ide-v2-terminal-toggle.active,
+.ide-v2-terminal-toggle[aria-pressed="true"] {
   color: var(--brass-1);
   border-color: var(--brass-3);
   background: rgb(var(--brass-glow)/.08);

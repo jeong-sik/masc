@@ -154,13 +154,12 @@ describe('FSM Hub integration — API response shape', () => {
       )
     })
 
-    it('coerces unknown phase values to Stable fallback (forward compat)', () => {
+    it('preserves unknown phase values for operator visibility', () => {
       const future = { ...REAL_COMPOSITE_PAYLOAD, phase: 'SomeNewPhase' }
       const parsed = parseKeeperCompositeSnapshot(future)
-      // unknown enum value → fallback, not a hard error. Prevents
-      // backend-added states from bricking the dashboard before the
-      // frontend can ship a matching union member.
-      expect(parsed.phase).toBe('Stable')
+      // Unknown FSM values are explicit drift signals. The dashboard
+      // should render the raw value instead of hiding it as Stable.
+      expect(parsed.phase).toBe('SomeNewPhase')
     })
 
     it('carries all 5 sub-FSM fields the FsmHub renders', () => {

@@ -288,6 +288,7 @@ jobs:
           bash scripts/ci/check-enum-string-safety.sh
           bash scripts/ci/check-masc-oas-boundary.sh
           bash scripts/ci/check-tla-variant-sync.sh
+          bash scripts/ci/check-tla-harness-coverage.sh
           bash scripts/ci/check-telemetry-coverage.sh
           bash scripts/ci/check-determinism-contract.sh
           bash scripts/audit-hardcoding-truth.sh --fail-on-confirmed

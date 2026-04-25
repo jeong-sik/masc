@@ -10,10 +10,9 @@ export type CompositeObservation = {
   decision: KeeperCompositeSnapshot['decision']['stage']
   cascade: KeeperCompositeSnapshot['cascade']['state']
   compaction: KeeperCompositeSnapshot['compaction']['stage']
-  // 6th axis (LT-16-KCB Phase 3). `'clean'` when the backend omits
-  // `circuit_breaker` — Phase 2 backends that have not yet picked up
-  // the schema still render a sensible cell rather than a blank.
-  breaker: 'clean' | 'warning' | 'cooling'
+  // 6th axis (LT-16-KCB Phase 3). Unknown backend-ahead values are kept
+  // as raw strings; only a missing rollout-era key falls back to `clean`.
+  breaker: string
 }
 
 export type LaneKey = keyof Omit<CompositeObservation, 'ts'>

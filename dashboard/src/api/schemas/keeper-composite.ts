@@ -21,12 +21,10 @@
 import {
   array,
   boolean,
-  fallback,
   nullable,
   number,
   object,
   optional,
-  picklist,
   string,
   unknown,
   type BaseIssue,
@@ -35,60 +33,26 @@ import {
 
 import { SchemaDriftError, parseOrThrow } from './drift-error'
 
-// The FSM enums below use `fallback` (not hard-rejection) because
-// Keeper state machines evolve asymmetrically: the OCaml backend
-// (`keeper_composite_observer.ml`) can ship a new state variant in a
-// release ahead of the dashboard. Hard-failing the parse would brick
-// the entire operator view for the window between backend-deploy and
-// frontend-deploy. The fallback state is intentionally the safest
-// visible default — "Stable" / "idle" / "undecided" — so an unknown
-// value renders as "nothing happening" rather than a misleading live
-// state. When backend adds a new enum member, this file must be
-// updated in the next dashboard release; the fallback buys time, not
-// permanent tolerance. See docs/API_CONTRACT.md §Drift policy.
+// FSM state fields stay open strings. The backend can ship new variants
+// ahead of the dashboard, and coercing an unknown state to Stable/idle/clean
+// hides the exact operator signal we need during a drift event. Consumers
+// already render unknown strings opaquely through `displayState`.
+const KeeperCompositePhaseSchema = string()
 
-const KeeperCompositePhaseSchema = fallback(
-  picklist([
-    'Running',
-    'Failing',
-    'Overflowed',
-    'Compacting',
-    'HandingOff',
-    'Draining',
-    'Stable',
-  ]),
-  'Stable',
-)
+const KeeperCompositeTurnPhaseSchema = string()
 
-const KeeperCompositeTurnPhaseSchema = fallback(
-  picklist(['idle', 'prompting', 'executing', 'compacting', 'finalizing']),
-  'idle',
-)
+const KeeperCompositeDecisionStageSchema = string()
 
-const KeeperCompositeDecisionStageSchema = fallback(
-  picklist(['undecided', 'guard_ok', 'gate_rejected', 'tool_policy_selected']),
-  'undecided',
-)
+const KeeperCompositeCascadeStateSchema = string()
 
-const KeeperCompositeCascadeStateSchema = fallback(
-  picklist(['idle', 'selecting', 'trying', 'done', 'exhausted']),
-  'idle',
-)
-
-const KeeperCompositeCompactionStageSchema = fallback(
-  picklist(['accumulating', 'compacting', 'done']),
-  'accumulating',
-)
+const KeeperCompositeCompactionStageSchema = string()
 
 // LT-16-KCB Phase 3: 6th axis. KCB is counter-based, not a classical
 // Closed/Open/Half_open FSM — only three states are observable between
 // tool calls because `record_failure` resets `consecutive_count` to 0
 // inside the trip transition. See
 // `lib/keeper/keeper_failure_circuit_breaker.mli`.
-const KeeperCompositeCircuitBreakerStateSchema = fallback(
-  picklist(['clean', 'warning', 'cooling']),
-  'clean',
-)
+const KeeperCompositeCircuitBreakerStateSchema = string()
 
 const KeeperCompositeAutoRulesSchema = object({
   reflect: boolean(),

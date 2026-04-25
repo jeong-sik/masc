@@ -402,6 +402,32 @@ let extract_query_hints query =
   |> List.filter (fun w -> String.length w > 2)
   |> List.filter (fun w -> not (List.mem (String.lowercase_ascii w) common_words))
 
+(* Byte-wise substring search (haystack already lowered, needle lowered
+   inline).  Replaces a per-hint [Re.compile] that ran inside a
+   [List.exists]: with K hints and N items in [fetch_context_smart],
+   the old form built K × N regex DFAs even though each pattern was a
+   plain literal. *)
+let contains_lowered_substring ~haystack_lower needle =
+  let nlen = String.length needle in
+  let hlen = String.length haystack_lower in
+  if nlen = 0 then true
+  else if nlen > hlen then false
+  else
+    let rec match_at i j =
+      if j = nlen then true
+      else
+        let h = String.unsafe_get haystack_lower (i + j) in
+        let n = Char.lowercase_ascii (String.unsafe_get needle j) in
+        if h <> n then false else match_at i (j + 1)
+    in
+    let last = hlen - nlen in
+    let rec loop i =
+      if i > last then false
+      else if match_at i 0 then true
+      else loop (i + 1)
+    in
+    loop 0
+
 (** Check if content matches query (simple keyword matching) *)
 let content_matches_query content query =
   if query = "" then true
@@ -409,8 +435,8 @@ let content_matches_query content query =
     let hints = extract_query_hints query in
     let content_lower = String.lowercase_ascii content in
     List.exists (fun hint ->
-      String.length hint >= 3 &&
-      Re.execp (Re.str (String.lowercase_ascii hint) |> Re.compile) content_lower
+      String.length hint >= 3
+      && contains_lowered_substring ~haystack_lower:content_lower hint
     ) hints
 
 (** Fetch context with query-based relevance boosting *)

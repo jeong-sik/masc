@@ -196,6 +196,7 @@ export function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
                   size="sm"
                   tone="accent"
                   class="mb-2"
+                  ariaLabel="크래시 카테고리 필터"
                 />
               ` : null}
               <div class="space-y-1 ${crashShowAll.value ? 'max-h-64' : 'max-h-32'} overflow-y-auto">

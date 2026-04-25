@@ -20,6 +20,7 @@ interface FilterChipsProps<T extends string> {
   class?: string
   size?: 'sm' | 'md'
   tone?: 'gold' | 'accent'
+  ariaLabel?: string
 }
 
 export function FilterChips<T extends string>({
@@ -30,6 +31,7 @@ export function FilterChips<T extends string>({
   class: cx,
   size = 'sm',
   tone = 'gold',
+  ariaLabel,
 }: FilterChipsProps<T>) {
   const activeKey = active?.value ?? value
   const chipClass = size === 'md'
@@ -43,7 +45,7 @@ export function FilterChips<T extends string>({
     : 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--text-dim)] hover:bg-[var(--white-8)] hover:border-[rgba(200,168,78,0.4)]'
 
   return html`
-    <div class="flex flex-wrap gap-1.5 ${cx ?? ''}" role="tablist">
+    <div class="flex flex-wrap gap-1.5 ${cx ?? ''}" role="tablist" aria-label=${ariaLabel}>
       ${chips.map(chip => html`
         <button type="button"
           key=${chip.key}

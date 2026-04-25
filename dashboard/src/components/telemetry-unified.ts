@@ -539,7 +539,7 @@ function GroupRow({ item }: { item: Extract<TelemetryDisplayItem, { kind: 'group
         ` : null}
         <span class="flex-shrink-0 w-4 text-[var(--text-muted)]">${expanded.value ? '-' : '+'}</span>
       </button>
-      <div id=${contentId} class=${expanded.value ? 'px-3 pb-3 flex flex-col gap-2' : 'hidden'} role="region">
+      <div id=${contentId} class=${expanded.value ? 'px-3 pb-3 flex flex-col gap-2' : 'hidden'} role="region" aria-label=${`${meta.label} 상세`}>
         ${expanded.value ? html`
           <div class="rounded bg-[var(--white-3)] px-2 py-1.5 text-2xs text-[var(--text-dim)]">
             Latest: <span class="font-mono text-[var(--text-strong)]">${latestPreview}</span>

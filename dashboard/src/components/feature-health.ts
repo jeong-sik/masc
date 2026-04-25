@@ -251,6 +251,7 @@ export function FeatureHealth() {
                           : data.all_features.filter((f) => f.status === opt.value).length,
                     }))}
                     active=${statusFilter}
+                    ariaLabel="기능 상태 필터"
                   />
                   <${TextInput}
                     class="sm:max-w-65"

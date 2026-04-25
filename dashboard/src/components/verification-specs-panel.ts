@@ -170,6 +170,7 @@ export function VerificationSpecsPanel() {
           active=${categoryFilter}
           size="sm"
           tone="accent"
+          ariaLabel="검증 스펙 카테고리 필터"
         />
         <${TextInput}
           class="max-w-50"

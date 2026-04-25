@@ -607,6 +607,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                 onChange=${(key: StatusFilter) => setFilter(key)}
                 size="md"
                 tone="accent"
+                ariaLabel="에이전트 상태 필터"
               />
             </div>
           </div>

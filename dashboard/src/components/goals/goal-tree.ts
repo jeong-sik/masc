@@ -1074,6 +1074,7 @@ export function GoalTree() {
               active=${treePhaseFilter}
               tone="accent"
               size="sm"
+              ariaLabel="Goal 단계 필터"
             />
           </div>
         ` : null}

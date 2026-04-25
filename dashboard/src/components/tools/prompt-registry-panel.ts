@@ -195,6 +195,7 @@ export function PromptRegistryPanel() {
                 count: counts[key],
               }))}
               active=${sourceFilter}
+              ariaLabel="프롬프트 소스 필터"
             />
           </div>
           <div class="mb-2 px-2">

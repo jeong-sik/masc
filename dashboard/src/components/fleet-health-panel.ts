@@ -74,6 +74,7 @@ export function FleetHealthPanel() {
         onChange=${updateViewParam}
         size="sm"
         tone="accent"
+        ariaLabel="Fleet 뷰 선택"
       />
       <div class="transition-opacity duration-200">
         ${view === 'default'

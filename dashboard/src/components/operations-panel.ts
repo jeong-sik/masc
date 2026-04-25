@@ -63,6 +63,7 @@ export function OperationsPanel() {
         size="md"
         tone="accent"
         class="w-fit"
+        ariaLabel="운영 뷰 선택"
       />
       ${view === 'ops'
         ? html`<${Ops} />`

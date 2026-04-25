@@ -605,6 +605,7 @@ export function VerificationRequestsPanel() {
             : null,
         }))}
         active=${statusFilter}
+        ariaLabel="검증 요청 상태 필터"
       />
 
       <${TextInput}

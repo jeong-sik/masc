@@ -176,6 +176,7 @@ export function KeeperMemoryTierPanel({
           ] as const}
           value=${filter}
           onChange=${(key: MemoryTierFilter) => setFilter(key)}
+          ariaLabel="메모리 티어 필터"
         />
       </div>
 

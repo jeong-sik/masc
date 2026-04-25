@@ -265,6 +265,21 @@ let metric_keeper_supervisor_sweep_starts =
 let metric_keeper_supervisor_last_sweep_unixtime =
   "masc_keeper_supervisor_last_sweep_unixtime"
 
+(* #9770: counter for the [join_required] guard firing in
+   [Mcp_server_eio_execute].  Production observed agents calling
+   [masc_claim_next] (and similar) without [masc_join] first; the
+   guard returns a polite error message but no fleet-wide signal
+   exists for "how often does this happen, and which agent / tool
+   pair is most affected".  Labels:
+     [tool]: tool name that hit the guard (bounded by tool surface
+       size, ~50).
+     [agent_name]: agent that called the tool (bounded by fleet
+       size, ~10).
+     [reason]: ["room_uninitialized" | "agent_not_joined"].
+   Cardinality: ~50 × ~10 × 2 = ~1000 series, safe for Prometheus. *)
+let metric_tool_join_required_guard =
+  "masc_tool_join_required_guard_total"
+
 
 (* Keeper compaction (keeper_compact_policy.ml, tool_keeper.ml). *)
 let metric_keeper_compactions = "masc_keeper_compactions_total"

@@ -98,6 +98,12 @@ val metric_keeper_turn_latency_bucket : string
 val metric_keeper_supervisor_sweep_starts : string
 val metric_keeper_supervisor_last_sweep_unixtime : string
 
+val metric_tool_join_required_guard : string
+(** #9770: count fires of the [join_required] guard in
+    [Mcp_server_eio_execute].  Labels:
+    [tool, agent_name, reason] with reason
+    [room_uninitialized | agent_not_joined]. *)
+
 val metric_keeper_compactions : string
 val metric_keeper_compaction_ratio_change : string
 val metric_keeper_compaction_saved_tokens : string

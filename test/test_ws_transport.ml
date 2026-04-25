@@ -71,6 +71,23 @@ let test_parse_sse_dashboard_event_known_type () =
         (Some "execution") parsed.slice
   | None -> Alcotest.fail "expected parsed event"
 
+let test_parse_sse_dashboard_event_composite_change_maps_to_composite () =
+  let event_str =
+    Yojson.Safe.to_string
+      (`Assoc [
+        ("type", `String "keeper_composite_changed");
+        ("name", `String "qa-king");
+        ("ts_unix", `Float 1_774_000_000.0);
+      ])
+  in
+  match Ws.parse_sse_dashboard_event event_str with
+  | Some parsed ->
+      Alcotest.(check string) "event_type preserved"
+        "keeper_composite_changed" parsed.event_type;
+      Alcotest.(check (option string)) "composite change maps to composite"
+        (Some "composite") parsed.slice
+  | None -> Alcotest.fail "expected parsed composite event"
+
 let test_parse_sse_dashboard_event_unknown_type () =
   let event_str =
     Yojson.Safe.to_string
@@ -598,6 +615,8 @@ let () =
     ("parse_cache", [
       Alcotest.test_case "known type maps to slice" `Quick
         test_parse_sse_dashboard_event_known_type;
+      Alcotest.test_case "composite change maps to composite slice" `Quick
+        test_parse_sse_dashboard_event_composite_change_maps_to_composite;
       Alcotest.test_case "unknown type yields None slice" `Quick
         test_parse_sse_dashboard_event_unknown_type;
       Alcotest.test_case "malformed input returns None" `Quick

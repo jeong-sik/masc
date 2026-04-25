@@ -251,6 +251,8 @@ let dashboard_slice_for_sse_type = function
       Some "operator"
   | "transport_health_snapshot" ->
       Some "transport"
+  | "keeper_composite_changed" ->
+      Some "composite"
   | _ -> None
 
 let dashboard_session_result session =

@@ -136,6 +136,17 @@ val metric_keeper_compaction_noop : string
 
 val metric_keeper_operator_compact : string
 val metric_keeper_operator_clear : string
+
+(** #10349: counter incremented whenever
+    [Keeper_alerting_path.resolve_keeper_read_path] rejects a
+    path.  Replaces the previous user-facing leak of resolver
+    allowed roots ([(roots=[<list>])] and
+    [(sandbox roots: [<list>])]) which became a side-channel
+    oracle for sibling sandboxes when keeper identity drifted
+    across contract/gate/FS-resolver layers.  Labels:
+    [kind="out_of_roots"|"not_found_relative"]. *)
+val metric_keeper_path_rejection : string
+
 val metric_keeper_heartbeat_successes : string
 val metric_keeper_heartbeat_failures : string
 val metric_keeper_tool_call_duration : string

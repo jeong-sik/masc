@@ -1467,6 +1467,18 @@
  (name test_anti_rationalization_korean_10385)
  (modules test_anti_rationalization_korean_10385)
  (libraries masc_mcp alcotest unix))
+
+(test
+ (name test_keeper_path_roots_leak_10349)
+ (modules test_keeper_path_roots_leak_10349)
+ (libraries
+  masc_mcp
+  fs_compat
+  astring
+  alcotest
+  eio
+  eio_main
+  unix))
 ; ============================================================
 ; Special: Heartbeat/keeper minimal deps
 ; ============================================================

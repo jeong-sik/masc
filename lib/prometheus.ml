@@ -341,6 +341,24 @@ let metric_keeper_operator_clear = "masc_keeper_operator_clear_total"
 let metric_keeper_compaction_noop =
   "masc_keeper_compaction_noop_total"
 
+(* #10349: keeper FS path rejection counter.  Pre-fix the
+   user-facing read-path rejection strings carried the resolver's
+   view of allowed sandbox roots (for example [(roots=[<list>])]
+   and [(sandbox roots: [<list>])]) to the LLM.  Combined with
+   the keeper identity drift documented in the issue (turn 433:
+   contract emitted [masc-improver/Docker] while the resolver
+   enumerated [analyst]'s sandbox), the error became a
+   side-channel oracle for sibling sandboxes.
+
+   The leak lives strictly in the user-visible string; the
+   structured side-channel (Eio.traceln + this counter) keeps
+   the rejection observable for operators without echoing the
+   roots list back to the LLM.  Labels:
+   - [kind] = "out_of_roots" (path resolved outside allowed)
+              | "not_found_relative" (relative path matched no root) *)
+let metric_keeper_path_rejection =
+  "masc_keeper_path_rejection_total"
+
 (* Keeper keepalive (keeper_keepalive.ml). *)
 let metric_keeper_heartbeat_successes =
   "masc_keeper_heartbeat_successes_total"

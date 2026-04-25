@@ -576,7 +576,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             <div class="flex min-w-0 flex-col gap-2">
               <div class="flex flex-wrap items-center gap-3">
                 <span class="text-2xs font-semibold uppercase tracking-1 text-[var(--text-muted)]">디렉터리 필터</span>
-                <span class="inline-flex items-center rounded-sm border border-[var(--border-slate-22)] bg-[var(--accent-soft)] px-2.5 py-1 text-2xs font-medium text-[var(--text-strong)]">${resultCountLabel}</span>
+                <span class="inline-flex items-center rounded-sm border border-[var(--border-slate-22)] bg-[var(--accent-soft)] px-2.5 py-1 text-2xs font-medium text-[var(--text-strong)]" role="status">${resultCountLabel}</span>
               </div>
               <p class="m-0 max-w-180 text-sm leading-loose text-[var(--text-body)]">${pageDescription}</p>
             </div>

@@ -131,6 +131,10 @@ type last_outcome = {
 }
 
 type snapshot = {
+  keeper_name : string;
+      (** Canonical keeper identity from the registry entry. This is separate
+          from [correlation_id], which may come from an external event envelope
+          and is not a stable row key for fleet dashboards. *)
   correlation_id : string;
   run_id : string;
   ts : float;
@@ -160,6 +164,26 @@ type snapshot = {
       (** Most recent completed turn, surfaced separately from live
           state so operators can see "what just finished" without
           confusing it with "what's running now". *)
+  fiber_stop_flag : bool;
+      (** Snapshot of [registry_entry.fiber_stop] at observation time.
+          When [true] without a corresponding stopped/dead phase, the
+          keepalive loop will exit on its next iteration — used to
+          discriminate fiber-supervisor wedge from cycle-gate wedge in
+          fleet silence diagnoses. *)
+  fiber_wakeup_flag : bool;
+      (** Snapshot of [registry_entry.fiber_wakeup]. [true] means a
+          wake signal is queued; the next [interruptible_sleep] chunk
+          will return early. Stale [true] points at a wake source
+          that was set but never consumed. *)
+  consecutive_noop_count : int;
+      (** Lifetime [consecutive_noop_count] from the proactive runtime.
+          Increments per cycle that produced no text and only used
+          observation-only tools; resets on substantive output. Reaching
+          ≥3 caps the noop backoff multiplier at 8x. *)
+  idle_seconds : int;
+      (** Wall-clock seconds since the keeper last did something the
+          metrics layer treated as substantive. Compared against
+          [proactive.idle_sec] to gate scheduled-autonomous turns. *)
 }
 
 (** Derive a composite snapshot from a live registry entry.

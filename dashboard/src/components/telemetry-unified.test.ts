@@ -232,6 +232,30 @@ describe('TelemetryUnified', () => {
     expect(copyButton?.getAttribute('title')).toBe('Copy telemetry entry JSON')
   })
 
+  it('surfaces a raw JSON copy action inside an expanded telemetry entry', async () => {
+    const fetchTelemetry = vi.fn().mockResolvedValue(baseTelemetry)
+    const fetchTelemetrySummary = vi.fn().mockResolvedValue(baseSummary)
+    const { TelemetryUnified } = await loadPanel(fetchTelemetry, fetchTelemetrySummary)
+
+    await act(async () => {
+      render(html`<${TelemetryUnified} />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    const rowToggle = container.querySelector('button[aria-expanded="false"]') as HTMLButtonElement | null
+    expect(rowToggle).not.toBeNull()
+    await act(async () => {
+      rowToggle?.click()
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    const expandedCopyButton = container.querySelector('[aria-label="Copy expanded telemetry entry JSON"]') as HTMLButtonElement | null
+    expect(expandedCopyButton).not.toBeNull()
+    expect(expandedCopyButton?.getAttribute('title')).toBe('Copy expanded telemetry entry JSON')
+  })
+
   it('condenses consecutive noisy telemetry into grouped categories', async () => {
     const fetchTelemetry = vi.fn().mockResolvedValue({
       ...baseTelemetry,
@@ -299,6 +323,19 @@ describe('TelemetryUnified', () => {
     expect(container.textContent).toContain('Polling / no-op')
     expect(container.textContent).toContain('Polling / no-op · masc_status · 3 events')
     expect(container.textContent).toContain('task_claimed: keeper-alpha')
+
+    const groupToggle = Array.from(container.querySelectorAll('button[aria-expanded="false"]'))
+      .find(button => button.textContent?.includes('Polling / no-op')) as HTMLButtonElement | undefined
+    expect(groupToggle).toBeTruthy()
+    await act(async () => {
+      groupToggle?.click()
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    const expandedCopyButton = container.querySelector('[aria-label="Copy expanded telemetry group JSON"]') as HTMLButtonElement | null
+    expect(expandedCopyButton).not.toBeNull()
+    expect(expandedCopyButton?.getAttribute('title')).toBe('Copy expanded telemetry group JSON')
   })
 
   it('groups heartbeat keeper metrics into a heartbeat category', async () => {

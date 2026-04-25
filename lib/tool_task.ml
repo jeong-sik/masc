@@ -857,6 +857,35 @@ and handle_transition ?agent_tool_names ctx args =
     | Types.Reject_verification ->
       None
   in
+  let prepare_verification_verdict =
+    match action with
+    | Types.Approve_verification
+    | Types.Reject_verification ->
+      Some
+        (fun ~(task : Types.task) ~verifier ~verification_id ~decision ->
+           match decision with
+           | `Approve notes ->
+             Verification_protocol.record_approve_verification
+               ~config:ctx.config
+               ~task_id:task.id
+               ~verifier
+               ~verification_id
+               ~notes
+           | `Reject reason ->
+             Verification_protocol.record_reject_verification
+               ~config:ctx.config
+               ~task_id:task.id
+               ~verifier
+               ~verification_id
+               ~reason)
+    | Types.Claim
+    | Types.Start
+    | Types.Done_action
+    | Types.Cancel
+    | Types.Release
+    | Types.Submit_for_verification ->
+      None
+  in
   let rec try_transition attempt =
     let ev = if attempt = 0 then expected_version else None in
     let agent_tool_names =
@@ -866,7 +895,8 @@ and handle_transition ?agent_tool_names ctx args =
     in
     let r = Coord.transition_task_r ctx.config ~agent_name:ctx.agent_name
               ~task_id ~action ?expected_version:ev ~notes ~reason
-              ?handoff_context ?agent_tool_names ?prepare_verification_request () in
+              ?handoff_context ?agent_tool_names ?prepare_verification_request
+              ?prepare_verification_verdict () in
     if is_version_mismatch r && attempt < max_cas_retries then begin
       Log.Task.info "CAS version mismatch on %s (attempt %d/%d), retrying in %.0fms"
         task_id (attempt + 1) max_cas_retries (cas_retry_delay_s *. 1000.0);
@@ -925,9 +955,8 @@ and handle_transition ?agent_tool_names ctx args =
            | None -> ())
         | Types.Approve_verification ->
           let verification_id = Option.value ~default:"" verification_id_before in
-          Verification_protocol.on_approve_verification
-            ~config:ctx.config ~task_id ~verifier:ctx.agent_name
-            ~verification_id ~notes;
+          Verification_protocol.notify_approve_verification
+            ~task_id ~verifier:ctx.agent_name ~verification_id ~notes;
           (* Record a CDAL verdict attribution on the approval leg so the
              dashboard gets a complete audit line.  With the verification
              FSM enabled, tasks reach Done via approve_verification rather
@@ -943,9 +972,8 @@ and handle_transition ?agent_tool_names ctx args =
         | Types.Reject_verification ->
           let reason = if notes <> "" then notes else reason in
           let verification_id = Option.value ~default:"" verification_id_before in
-          Verification_protocol.on_reject_verification
-            ~config:ctx.config ~task_id ~verifier:ctx.agent_name
-            ~verification_id ~reason;
+          Verification_protocol.notify_reject_verification
+            ~task_id ~verifier:ctx.agent_name ~verification_id ~reason;
           if Env_config_runtime.Cdal.gate_enabled () then
             ignore (Cdal_verdict_gate.gate_check ~task_id ())
         | Types.Claim | Types.Start | Types.Done_action | Types.Cancel | Types.Release -> ())

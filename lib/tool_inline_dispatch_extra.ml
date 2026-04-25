@@ -70,12 +70,19 @@ let canonicalize_board_actor_field field arguments =
       | _ -> arguments)
   | _ -> arguments
 
+let canonical_board_author raw =
+  Server_utils.board_actor_author_for_write (String.trim raw)
+
 (** Fill [author] from the caller's agent identity when the arg is absent or
     blank. Keepers, the HTTP surface, and autonomous callers routinely omit
     [author] — we used to reject those calls at pre-hook validation, which
     forced every caller to know about the legacy schema field. The board store
     keeps canonical keeper names as principals while preserving raw runtime
-    agent names in metadata. *)
+    agent names in metadata.
+
+    If a caller supplies a different [author], the trusted runtime
+    [agent_name] wins. The caller's claim is retained in [meta] for forensics,
+    but the stored principal must match the dispatch context. *)
 let ensure_board_post_author ~agent_name arguments =
   match arguments with
   | `Assoc fields -> (
@@ -84,14 +91,38 @@ let ensure_board_post_author ~agent_name arguments =
         | Some (`String s) -> String.trim s
         | _ -> ""
       in
+      let trusted_raw = String.trim agent_name in
+      let trusted_author =
+        if trusted_raw = "" then "" else canonical_board_author trusted_raw
+      in
       let raw_author =
-        if existing <> "" && existing <> "anonymous" then existing
-        else String.trim agent_name
+        if existing = "" || existing = "anonymous" then trusted_raw
+        else if
+          trusted_author <> ""
+          && not
+               (String.equal (canonical_board_author existing) trusted_author)
+        then trusted_raw
+        else existing
       in
       if raw_author = "" then arguments
       else
         let canonical = Server_utils.board_actor_author_for_write raw_author in
         let fields = json_upsert_assoc_field "author" (`String canonical) fields in
+        let fields =
+          if
+            existing <> "" && existing <> "anonymous" && trusted_author <> ""
+            && not
+                 (String.equal
+                    (canonical_board_author existing)
+                    trusted_author)
+          then
+            fields
+            |> json_upsert_meta_string_field
+                 "caller_supplied_author" existing
+            |> json_upsert_meta_string_field
+                 "author_rewrite_reason" "caller_author_mismatch"
+          else fields
+        in
         let fields =
           if String.equal canonical raw_author then fields
           else json_upsert_meta_string_field "author_raw_agent_name" raw_author fields

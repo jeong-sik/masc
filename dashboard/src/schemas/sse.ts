@@ -141,6 +141,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
 
+function isIgnorableMcpNotification(value: unknown): boolean {
+  if (!isRecord(value)) return false
+  if (value.jsonrpc !== '2.0') return false
+  if (typeof value.method !== 'string') return false
+  if (value.method === 'notifications/board') return false
+  return value.method.startsWith('notifications/')
+}
+
 function isSSEEventType(value: unknown): value is SSEEventType {
   return typeof value === 'string' && (
     FIXED_SSE_EVENT_TYPES.has(value) || value.startsWith('oas:')
@@ -280,6 +288,7 @@ export class SSESchemaDriftError extends Error {
  *  On failure logs a console.warn with the drift issue and returns null;
  *  the caller drops the event. */
 export function parseSSEMessage(raw: unknown): SSEMessage | null {
+  if (isIgnorableMcpNotification(raw)) return null
   const result = SSEMessageSchema.safeParse(raw)
   if (result.success) return result.data
   // Surface drift in dev tools without crashing the stream. Aggregate issues

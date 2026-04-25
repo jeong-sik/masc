@@ -687,10 +687,12 @@ let available_flairs = [
   ("meta", "🔧", "Meta");
 ]
 
+(* Flair tag pattern — pure literal, hoist out of per-post extraction. *)
+let flair_tag_re = Re.Pcre.re {|\[flair:([a-z]+)\]|} |> Re.compile
+
 (** Extract flair from content (format: [flair:name] at start) *)
 let extract_flair content =
-  let re = Re.Pcre.re {|\[flair:([a-z]+)\]|} |> Re.compile in
-  match Re.exec_opt re content with
+  match Re.exec_opt flair_tag_re content with
   | Some g ->
     let flair_name = Re.Group.get g 1 in
     (match List.find_opt (fun (name, _, _) -> name = flair_name) available_flairs with

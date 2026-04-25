@@ -144,21 +144,13 @@ let is_memory_recall_query (s : string) : bool =
     "뭐라고 물어봤"; (* "what did I ask" *)
   ] in
   let needles = en_keywords @ ko_keywords in
-  List.exists (fun n ->
-    Re.execp (Re.str n |> Re.compile) q
-  ) needles
+  List.exists (String_util.contains_substring q) needles
 
 let expected_topic_hint (s : string) : string option =
   let q = String.lowercase_ascii s in
-  let has_ko needle =
-    Re.execp (Re.str needle |> Re.compile) s
-  in
-  let has_en needle =
-    Re.execp (Re.str needle |> Re.compile) q
-  in
-  if Re.execp (Re.str "날씨" |> Re.compile) s
-     || Re.execp (Re.str "weather" |> Re.compile) q
-  then
+  let has_ko needle = String_util.contains_substring s needle in
+  let has_en needle = String_util.contains_substring q needle in
+  if has_ko "날씨" || has_en "weather" then
     Some "weather"
   else if has_ko "첫 질문"
        || has_en "first question"

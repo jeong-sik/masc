@@ -253,7 +253,7 @@ let dispatch (ctx : context) ~(name : string) : tool_result option =
                  let desc_l = String.lowercase_ascii schema.description in
                  let haystack = name_l ^ " " ^ desc_l in
                  words |> List.exists (fun w ->
-                   Re.execp (Re.str w |> Re.compile) haystack))
+                   String_util.contains_substring haystack w))
           |> List.filteri (fun i _ -> i < limit)
         in
         let results = List.map (fun (schema : Types.tool_schema) ->

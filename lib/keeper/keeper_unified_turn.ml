@@ -102,6 +102,155 @@ let finalize_trajectory_acc
         ~severity:`Error
         (Printexc.to_string exn)
 
+let record_execution_receipt_gap
+    ~(config : Coord.config)
+    ~(meta : keeper_meta)
+    ~(stale_reason : string)
+    ~(error : string)
+    () : unit =
+  try
+    let masc_root = Coord.masc_root_dir config in
+    Telemetry_coverage_gap.record
+      ~masc_root
+      ~source:"execution_receipt"
+      ~producer:"keeper_unified_turn.pre_dispatch"
+      ~durable_store:
+        (Filename.concat
+           (Filename.concat (Filename.concat masc_root "keepers") meta.name)
+           "execution-receipts")
+      ~dashboard_surface:"/api/v1/dashboard/execution-trust"
+      ~stale_reason
+      ~keeper_name:meta.name
+      ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+      ~error
+      ()
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+      Log.Keeper.warn
+        "keeper:%s pre-dispatch execution_receipt coverage gap append failed: %s"
+        meta.name
+        (Printexc.to_string exn)
+
+let pre_dispatch_tool_surface : Keeper_execution_receipt.tool_surface =
+  {
+    turn_lane = "pre_dispatch";
+    tool_surface_class = "none";
+    tool_requirement = "none";
+    visible_tool_count = 0;
+    tool_gate_enabled = false;
+    tool_surface_fallback_used = false;
+    required_tools = [];
+    missing_required_tools = [];
+  }
+
+let record_pre_dispatch_terminal_observation
+    ~(config : Coord.config)
+    ~(meta : keeper_meta)
+    ~(generation : int)
+    ~(cascade_name : string)
+    ~(outcome : string)
+    ~(terminal_reason_code : string)
+    ~(activity_kind : string)
+    ~(trajectory_outcome : Trajectory.trajectory_outcome)
+    ?error_kind
+    ?error_message
+    () : unit =
+  let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+  let started_at = now_iso () in
+  let masc_root = Coord.masc_root_dir config in
+  let trajectory_acc =
+    Trajectory.create_accumulator
+      ~masc_root
+      ~keeper_name:meta.name
+      ~trace_id
+      ~generation
+  in
+  finalize_trajectory_acc ~config ~keeper_name:meta.name trajectory_acc
+    trajectory_outcome;
+  let ended_at = now_iso () in
+  let receipt : Keeper_execution_receipt.t =
+    {
+      keeper_name = meta.name;
+      agent_name = meta.agent_name;
+      trace_id;
+      generation;
+      turn_count = Some meta.runtime.usage.total_turns;
+      current_task_id = Option.map Keeper_id.Task_id.to_string meta.current_task_id;
+      goal_ids = meta.active_goal_ids;
+      outcome;
+      terminal_reason_code;
+      response_text_present = false;
+      model_used = None;
+      requested_tools = [];
+      reported_tools = [];
+      observed_tools = [];
+      canonical_tools = [];
+      unexpected_tools = [];
+      tools_used = [];
+      tool_contract_result = "not_dispatched";
+      tool_surface = pre_dispatch_tool_surface;
+      sandbox_kind = Keeper_execution_receipt.sandbox_kind_of_meta meta;
+      sandbox_root = Some (Keeper_sandbox.host_root_abs_of_meta ~config meta);
+      network_mode = Keeper_types.network_mode_to_string meta.network_mode;
+      approval_profile = None;
+      approval_profile_derived = false;
+      cascade_name;
+      cascade_selected_model = None;
+      cascade_attempt_count = 0;
+      cascade_fallback_applied = false;
+      cascade_outcome = "not_dispatched";
+      degraded_retry_applied = false;
+      degraded_retry_cascade = None;
+      fallback_reason = None;
+      cascade_rotation_attempts = [];
+      stop_reason = None;
+      error_kind;
+      error_message;
+      started_at;
+      ended_at;
+    }
+  in
+  (try
+     Keeper_execution_receipt.append config receipt
+   with
+   | Eio.Cancel.Cancelled _ as e -> raise e
+   | exn ->
+      let error = Printexc.to_string exn in
+      Log.Keeper.warn
+        "keeper:%s pre-dispatch execution_receipt append failed: %s"
+        meta.name error;
+      record_execution_receipt_gap ~config ~meta
+        ~stale_reason:"pre_dispatch_execution_receipt_append_failed"
+        ~error
+        ());
+  (try
+     let event =
+       Activity_graph.emit config
+         ~actor:{ kind = "agent"; id = meta.agent_name }
+         ~kind:activity_kind
+         ~payload:
+           (`Assoc
+              [
+                ("keeper_name", `String meta.name);
+                ("trace_id", `String trace_id);
+                ("outcome", `String outcome);
+                ("terminal_reason_code", `String terminal_reason_code);
+                ("cascade_name", `String cascade_name);
+              ])
+         ()
+     in
+     Log.Keeper.debug "%s: activity graph %s emitted seq=%d" meta.name
+       activity_kind event.seq
+   with
+   | Eio.Cancel.Cancelled _ as e -> raise e
+   | exn ->
+      report_keeper_cycle_side_effect_issue
+        ~config
+        ~keeper_name:meta.name
+        ~side_effect:(activity_kind ^ " emit")
+        (Printexc.to_string exn))
+
 let ensure_local_discovery_ready
     ?refresh
     (labels : string list) : (unit, string) result =
@@ -864,9 +1013,23 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
   let previous_social_state = Social.previous_state_of_meta meta in
   match Keeper_registry.get_phase ~base_path:registry_base_path meta.name with
   | Some phase when not (Keeper_state_machine.can_execute_turn phase) ->
+      let phase_string = Keeper_state_machine.phase_to_string phase in
       Log.Keeper.info
         "%s: keeper cycle skipped in non-executable phase=%s"
-        meta.name (Keeper_state_machine.phase_to_string phase);
+        meta.name phase_string;
+      let terminal_reason_code =
+        Printf.sprintf "non_executable_phase:%s" phase_string
+      in
+      record_pre_dispatch_terminal_observation
+        ~config
+        ~meta
+        ~generation
+        ~cascade_name:meta.cascade_name
+        ~outcome:"skipped"
+        ~terminal_reason_code
+        ~activity_kind:"keeper.turn_skipped"
+        ~trajectory_outcome:(Trajectory.Gated terminal_reason_code)
+        ();
       Ok meta
   | phase_opt ->
       (* State-aware cascade routing (TLA+ KeeperCoreTriad.SelectCascade).
@@ -955,6 +1118,16 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                  available=%d \xe2\x80\x94 skipping turn"
                 meta.name meta.name effective_cascade_name queue_len
                 available;
+              record_pre_dispatch_terminal_observation
+                ~config
+                ~meta
+                ~generation
+                ~cascade_name:effective_cascade_name
+                ~outcome:"skipped"
+                ~terminal_reason_code:"ollama_saturated"
+                ~activity_kind:"keeper.turn_skipped"
+                ~trajectory_outcome:(Trajectory.Gated "ollama_saturated")
+                ();
               Prometheus.inc_counter
                 Prometheus.metric_keeper_ollama_saturation_skip
                 ~labels:[ ("keeper", meta.name);
@@ -1019,7 +1192,25 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                   })
       in
       match build_cascade_execution ~cascade_name:effective_cascade_name with
-      | Error err -> Error err
+      | Error err ->
+          let terminal_reason_code =
+            Printf.sprintf "pre_dispatch_%s"
+              (Keeper_agent_error.terminal_reason_code_of_sdk_error err)
+          in
+          let error_message = Oas.Error.to_string err in
+          record_pre_dispatch_terminal_observation
+            ~config
+            ~meta
+            ~generation
+            ~cascade_name:effective_cascade_name
+            ~outcome:"error"
+            ~terminal_reason_code
+            ~activity_kind:"keeper.turn_blocked"
+            ~trajectory_outcome:(Trajectory.Failed terminal_reason_code)
+            ~error_kind:(sdk_error_kind err)
+            ~error_message
+            ();
+          Error err
       | Ok initial_execution ->
       let turn_id = meta.runtime.usage.total_turns in
       (match
@@ -1031,10 +1222,26 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
            ()
        with
        | Keeper_turn_livelock.Blocked reason ->
+           let reason_string =
+             Keeper_turn_livelock.gate_reason_to_string reason
+           in
+           let terminal_reason_code =
+             Printf.sprintf "turn_livelock:%s" reason_string
+           in
            Log.Keeper.error
              "%s: keeper turn livelock guard blocked dispatch turn=%d: %s"
              meta.name turn_id
-             (Keeper_turn_livelock.gate_reason_to_string reason);
+             reason_string;
+           record_pre_dispatch_terminal_observation
+             ~config
+             ~meta
+             ~generation
+             ~cascade_name:initial_execution.cascade_name
+             ~outcome:"blocked"
+             ~terminal_reason_code
+             ~activity_kind:"keeper.turn_blocked"
+             ~trajectory_outcome:(Trajectory.Gated terminal_reason_code)
+             ();
            Ok meta
        | Keeper_turn_livelock.Started _ ->
       (* Yield before CPU-bound prompt construction so the Eio scheduler

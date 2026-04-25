@@ -2872,7 +2872,47 @@ let test_run_keeper_cycle_skips_non_executable_phase () =
           check (option string) "phase remains paused after skipped turn"
             (Some "paused")
             (Option.map KP.phase_to_string
-               (KR.get_phase ~base_path:base_dir meta.name)))
+               (KR.get_phase ~base_path:base_dir meta.name));
+          (match
+             Masc_mcp.Keeper_execution_receipt.latest_json config meta.name
+           with
+           | None -> fail "expected skipped turn execution receipt"
+           | Some receipt ->
+               check string "skipped receipt outcome" "skipped"
+                 Yojson.Safe.Util.(receipt |> member "outcome" |> to_string);
+               check string "skipped receipt terminal reason"
+                 "non_executable_phase:paused"
+                 Yojson.Safe.Util.(
+                   receipt |> member "terminal_reason_code" |> to_string);
+               check string "skipped receipt action radius tool"
+                 "keeper_turn"
+                 Yojson.Safe.Util.(
+                   receipt |> member "action_radius" |> member "tool_name"
+                   |> to_string);
+               check string "skipped receipt runtime contract keeper"
+                 meta.name
+                 Yojson.Safe.Util.(
+                   receipt |> member "runtime_contract" |> member "keeper_name"
+                   |> to_string));
+          let trajectory_path =
+            Masc_mcp.Trajectory.trajectory_path
+              (Masc_mcp.Coord.masc_root_dir config)
+              meta.name
+              (Masc_mcp.Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+          in
+          let trajectory_summary = read_jsonl_line trajectory_path in
+          check string "skipped trajectory summary type" "trajectory_summary"
+            Yojson.Safe.Util.(
+              trajectory_summary |> member "type" |> to_string);
+          check string "skipped trajectory outcome status" "gated"
+            Yojson.Safe.Util.(
+              trajectory_summary |> member "outcome" |> member "status"
+              |> to_string);
+          check string "skipped trajectory outcome reason"
+            "non_executable_phase:paused"
+            Yojson.Safe.Util.(
+              trajectory_summary |> member "outcome" |> member "reason"
+              |> to_string))
 
 let test_run_keeper_cycle_records_trajectory_source_contract () =
   check bool "keeper cycle creates trajectory accumulator" true
@@ -2886,7 +2926,16 @@ let test_run_keeper_cycle_records_trajectory_source_contract () =
        "Coord.masc_root_dir config");
   check bool "keeper cycle finalizes trajectory on completion/failure" true
     (source_file_contains "lib/keeper/keeper_unified_turn.ml"
-       "Trajectory.finalize trajectory_acc")
+       "Trajectory.finalize trajectory_acc");
+  check bool "pre-dispatch exits record terminal receipt" true
+    (source_file_contains "lib/keeper/keeper_unified_turn.ml"
+       "record_pre_dispatch_terminal_observation");
+  check bool "saturation skip has durable terminal reason" true
+    (source_file_contains "lib/keeper/keeper_unified_turn.ml"
+       "~terminal_reason_code:\"ollama_saturated\"");
+  check bool "livelock block has durable terminal reason" true
+    (source_file_contains "lib/keeper/keeper_unified_turn.ml"
+       "Printf.sprintf \"turn_livelock:%s\"")
 
 let test_run_keeper_cycle_surfaces_side_effect_failures_source_contract () =
   check bool "keeper cycle records side-effect issues in registry" true

@@ -34,6 +34,15 @@ val hard_quota_cooldown_sec : float
 
     @since 0.161.0 *)
 
+val terminal_failure_cooldown_sec : float
+(** Cooldown duration applied immediately on a terminal structural
+    provider/adapter failure, such as a Kimi CLI resumable-session conflict.
+    Unlike {!cooldown_sec}, no threshold is required.  Default 3600.0 (1h).
+
+    Env: [MASC_CASCADE_TERMINAL_FAILURE_COOLDOWN_SEC] (with deprecated
+    [OAS_CASCADE_TERMINAL_FAILURE_COOLDOWN_SEC] alias). *)
+
+
 (** Opaque health tracker state. *)
 type t
 
@@ -112,6 +121,14 @@ val record_hard_quota :
   ?error_reason:string ->
   unit ->
   unit
+
+(** Record a provider call that failed with a terminal structural
+    provider/adapter error.
+
+    This uses immediate long cooldown semantics like {!record_hard_quota},
+    but is kept distinct from quota exhaustion so the caller can classify
+    adapter/session failures without pretending the account is out of credit. *)
+val record_terminal_failure : t -> provider_key:string -> unit
 
 (** Drop tracker entries whose rolling window is empty AND whose cooldown
     has expired.  Intended as opportunistic maintenance — idle providers

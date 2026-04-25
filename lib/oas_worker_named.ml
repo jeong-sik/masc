@@ -954,7 +954,24 @@ let sdk_error_to_resumable_cli_session ~cascade_name
 let sdk_error_is_resumable_cli_session (err : Oas.Error.sdk_error) : bool =
   match classify_masc_internal_error err with
   | Some (Resumable_cli_session _) -> true
-  | _ -> message_looks_like_resumable_cli_session (Oas.Error.to_string err)
+  | _ ->
+      let direct_api_message =
+        match err with
+        | Oas.Error.Api
+            (Llm_provider.Retry.NetworkError { message; _ }
+            | Llm_provider.Retry.Overloaded { message }
+            | Llm_provider.Retry.ServerError { message; _ }
+            | Llm_provider.Retry.InvalidRequest { message }
+            | Llm_provider.Retry.RateLimited { message; _ }
+            | Llm_provider.Retry.AuthError { message }
+            | Llm_provider.Retry.NotFound { message }
+            | Llm_provider.Retry.ContextOverflow { message; _ }
+            | Llm_provider.Retry.Timeout { message }) ->
+            message_looks_like_resumable_cli_session message
+        | _ -> false
+      in
+      direct_api_message
+      || message_looks_like_resumable_cli_session (Oas.Error.to_string err)
 
 let sdk_error_is_hard_quota (err : Oas.Error.sdk_error) : bool =
   match err with

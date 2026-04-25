@@ -100,6 +100,42 @@ let classify_usage_trust ~(usage_reported : bool)
   Keeper_usage_trust.classify ~usage_reported ~usage ~model_used
     ~resolved_model_id ~context_max
 
+(* #9953: bucket the raw [context_max] integer into a tightly
+   bounded vocabulary so the Prometheus label cardinality stays
+   small AND the dashboards see the same drift the issue
+   reported (42% / 17% / 41% three-way split for one model).
+
+   Boundaries match observed deployments:
+   - [zero]  : context_max = 0 (uninitialised / pre-resolve)
+   - [64k]   : (0, 64_000]
+   - [128k]  : (64_000, 128_000]
+   - [200k]  : (128_000, 200_000]   — anthropic claude-sonnet-4
+   - [256k]  : (200_000, 262_144]   — kimi / claude haiku 4.5
+   - [1m]    : (262_144, 1_048_576] — claude opus 4.7 / 1M
+   - [other] : everything else (sanity check / future caps) *)
+let context_max_bucket (n : int) : string =
+  if n <= 0 then "zero"
+  else if n <= 64_000 then "64k"
+  else if n <= 128_000 then "128k"
+  else if n <= 200_000 then "200k"
+  else if n <= 262_144 then "256k"
+  else if n <= 1_048_576 then "1m"
+  else "other"
+
+let record_context_max_observation
+    ~(keeper : string)
+    ~(model_used : string)
+    ~(resolved_model_id : string)
+    ~(context_max : int) : unit =
+  Prometheus.inc_counter
+    Prometheus.metric_keeper_context_max_observed
+    ~labels:[
+      ("keeper", keeper);
+      ("model_used", model_used);
+      ("resolved_model_id", resolved_model_id);
+      ("context_max_bucket", context_max_bucket context_max);
+    ] ()
+
 let usage_trust_is_trusted = Keeper_usage_trust.is_trusted
 
 let usage_trust_to_string = Keeper_usage_trust.to_string
@@ -1042,6 +1078,16 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
       ~resolved_model_id
       ~context_max
   in
+  (* #9953: record the (keeper, model_used, resolved_model_id,
+     context_max_bucket) tuple so dashboards can directly count
+     drift.  A model whose label takes >1 bucket on a single
+     deployment indicates the resolution path produced
+     different ceilings on different turns. *)
+  record_context_max_observation
+    ~keeper:meta.name
+    ~model_used:surface_model_used
+    ~resolved_model_id
+    ~context_max;
   let scheduled_autonomous_outcome =
     if is_scheduled_autonomous_channel channel then
       Some (scheduled_autonomous_outcome_for_result result)

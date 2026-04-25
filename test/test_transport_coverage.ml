@@ -615,6 +615,37 @@ let test_rest_parse_request_api_broadcast () =
   check string "method_name" "masc_broadcast" req.method_name;
   check bool "has params" true (req.params <> `Null)
 
+let test_rest_parse_request_roundtrips_direct_bindings () =
+  let direct_operations =
+    [
+      "masc_status";
+      "masc_tasks";
+      "masc_who";
+      "masc_messages";
+      "masc_operator_snapshot";
+      "masc_operator_digest";
+      "masc_operator_action";
+      "masc_operator_confirm";
+      "masc_websocket_discovery";
+      "masc_webrtc_offer";
+      "masc_webrtc_answer";
+      "masc_broadcast";
+      "masc_agent_card";
+    ]
+  in
+  List.iter
+    (fun operation ->
+      let method_, path = Transport.Rest.tool_to_endpoint operation in
+      let req =
+        Transport.Rest.parse_request
+          ~http_method:(Transport.Rest.method_to_string method_)
+          ~path ~query_params:[] ~body:""
+      in
+      check string
+        (Printf.sprintf "%s endpoint parses back to operation" operation)
+        operation req.method_name)
+    direct_operations
+
 let test_rest_parse_request_root () =
   let req = Transport.Rest.parse_request ~http_method:"GET" ~path:"/" ~query_params:[] ~body:"" in
   check string "method_name" "masc_status" req.method_name
@@ -957,6 +988,8 @@ let () =
       test_case "root" `Quick test_rest_parse_request_root;
       test_case "broadcast" `Quick test_rest_parse_request_broadcast;
       test_case "api_broadcast" `Quick test_rest_parse_request_api_broadcast;
+      test_case "direct binding roundtrip" `Quick
+        test_rest_parse_request_roundtrips_direct_bindings;
     ];
     "rest.generate_openapi_paths", [
       test_case "paths" `Quick test_rest_generate_openapi_paths;

@@ -216,6 +216,62 @@ module Rest = struct
 
   let auth_mode_of_mcp_path () = Conditional_bearer
 
+  let operation_rest_bindings =
+    [
+      ("masc_status", [ (GET, "/api/v1/status") ]);
+      ("masc_tasks", [ (GET, "/api/v1/tasks") ]);
+      ("masc_who", [ (GET, "/api/v1/agents") ]);
+      ("masc_messages", [ (GET, "/api/v1/messages") ]);
+      ("masc_operator_snapshot", [ (GET, "/api/v1/operator") ]);
+      ("masc_operator_digest", [ (GET, "/api/v1/operator/digest") ]);
+      ("masc_operator_action", [ (POST, "/api/v1/operator/action") ]);
+      ("masc_operator_confirm", [ (POST, "/api/v1/operator/confirm") ]);
+      ("masc_websocket_discovery", [ (GET, "/ws") ]);
+      ("masc_webrtc_offer", [ (POST, "/webrtc/offer") ]);
+      ("masc_webrtc_answer", [ (POST, "/webrtc/answer") ]);
+      ("masc_broadcast", [ (POST, "/api/v1/broadcast") ]);
+      ("masc_agent_card", [ (GET, "/.well-known/agent.json") ]);
+    ]
+
+  let actual_rest_bindings_for_operation name =
+    operation_rest_bindings
+    |> List.find_map (fun (operation, bindings) ->
+           if String.equal operation name then Some bindings else None)
+    |> Option.value ~default:[]
+
+  let same_rest_route ~http_method ~path (method_, candidate_path) =
+    String.equal (String.uppercase_ascii (String.trim http_method))
+      (method_to_string method_)
+    && String.equal path candidate_path
+
+  let operation_of_actual_rest_route ~http_method ~path =
+    operation_rest_bindings
+    |> List.find_map (fun (operation, bindings) ->
+           if List.exists (same_rest_route ~http_method ~path) bindings then
+             Some operation
+           else None)
+
+  let legacy_rest_route_operations =
+    [
+      ("GET", "/", "masc_status");
+      ("POST", "/broadcast", "masc_broadcast");
+      ("GET", "/.well-known/agent-card.json", "masc_agent_card");
+    ]
+
+  let operation_of_legacy_rest_route ~http_method ~path =
+    legacy_rest_route_operations
+    |> List.find_map (fun (method_, candidate_path, operation) ->
+           if
+             String.equal (String.uppercase_ascii (String.trim http_method)) method_
+             && String.equal path candidate_path
+           then Some operation
+           else None)
+
+  let operation_of_rest_route ~http_method ~path =
+    match operation_of_actual_rest_route ~http_method ~path with
+    | Some _ as operation -> operation
+    | None -> operation_of_legacy_rest_route ~http_method ~path
+
   let auth_response_entries mode =
     match mode with
     | Public -> []
@@ -240,22 +296,6 @@ module Rest = struct
     | Public | Same_origin_or_bearer -> base
     | Conditional_bearer | Bearer_required ->
         ("security", openapi_bearer_security) :: base
-
-  let actual_rest_bindings_for_operation = function
-    | "masc_status" -> [ (GET, "/api/v1/status") ]
-    | "masc_tasks" -> [ (GET, "/api/v1/tasks") ]
-    | "masc_who" -> [ (GET, "/api/v1/agents") ]
-    | "masc_messages" -> [ (GET, "/api/v1/messages") ]
-    | "masc_operator_snapshot" -> [ (GET, "/api/v1/operator") ]
-    | "masc_operator_digest" -> [ (GET, "/api/v1/operator/digest") ]
-    | "masc_operator_action" -> [ (POST, "/api/v1/operator/action") ]
-    | "masc_operator_confirm" -> [ (POST, "/api/v1/operator/confirm") ]
-    | "masc_websocket_discovery" -> [ (GET, "/ws") ]
-    | "masc_webrtc_offer" -> [ (POST, "/webrtc/offer") ]
-    | "masc_webrtc_answer" -> [ (POST, "/webrtc/answer") ]
-    | "masc_broadcast" -> [ (POST, "/api/v1/broadcast") ]
-    | "masc_agent_card" -> [ (GET, "/.well-known/agent.json") ]
-    | _ -> []
 
   let find_schema name =
     List.find_opt
@@ -624,24 +664,14 @@ module Rest = struct
   (** Parse REST request to internal request *)
   let parse_request ~http_method ~path ~query_params ~body : request =
     let method_name =
-      (* Try to reverse map from path to tool name *)
-      match http_method, path with
-      | "GET", "/" | "GET", "/api/v1/status" -> "masc_status"
-      | "GET", "/ws" -> "masc_websocket_discovery"
-      | "POST", "/webrtc/offer" -> "masc_webrtc_offer"
-      | "POST", "/webrtc/answer" -> "masc_webrtc_answer"
-      | "GET", "/api/v1/tasks" -> "masc_tasks"
-      | "GET", "/api/v1/agents" -> "masc_who"
-      | "GET", "/api/v1/operator" -> "masc_operator_snapshot"
-      | "GET", "/api/v1/operator/digest" -> "masc_operator_digest"
-      | "POST", "/api/v1/operator/action" -> "masc_operator_action"
-      | "POST", "/api/v1/operator/confirm" -> "masc_operator_confirm"
-      | "POST", "/api/v1/broadcast" | "POST", "/broadcast" -> "masc_broadcast"
-      | "GET", "/.well-known/agent.json"
-      | "GET", "/.well-known/agent-card.json" -> "masc_agent_card"
-      | _, p when String.length p > 14 && String.sub p 0 14 = "/api/v1/tools/" ->
-          String.sub p 14 (String.length p - 14)
-      | _ -> "unknown"
+      match operation_of_rest_route ~http_method ~path with
+      | Some operation -> operation
+      | None -> (
+          match http_method, path with
+          | _, p
+            when String.length p > 14 && String.sub p 0 14 = "/api/v1/tools/" ->
+              String.sub p 14 (String.length p - 14)
+          | _ -> "unknown")
     in
     let params = match body with
       | "" -> `Assoc query_params

@@ -29,6 +29,14 @@ stylesheet
     font-size: 14px;
     color: var(--text-dim);
   }
+
+  @media (prefers-contrast: more) {
+    .quiet { border-width: 2px; border-style: solid; border-color: var(--text-bright); color: var(--text-bright); }
+  }
+
+  @media (forced-colors: active) {
+    .quiet { border-color: CanvasText; color: CanvasText; }
+  }
 |}]
 
 let hhmmss_of_iso (s : string) : string =

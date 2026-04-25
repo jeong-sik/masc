@@ -15,6 +15,8 @@
 /* ── Dark Fantasy (default) — Visceral · decay-forward ── */
 :root,
 [data-theme="dark-fantasy"] {
+  color-scheme: dark;
+
   /* Base surfaces — wet stone, blood-soaked wood */
   --bg-deep:        #0a0706;     /* pitch with a red undertone */
   --bg-panel:       #14100d;     /* rotted wood */
@@ -95,6 +97,7 @@
 
 /* ── Cyberpunk ─────────────────────────────────────────── */
 [data-theme="cyberpunk"] {
+  color-scheme: dark;
   --bg-deep:      #05000f;
   --bg-panel:     #0d0821;
   --bg-panel-alt: #130e2a;
@@ -129,6 +132,7 @@
 
 /* ── Terminal ──────────────────────────────────────────── */
 [data-theme="terminal"] {
+  color-scheme: dark;
   --bg-deep:      #000800;
   --bg-panel:     #001200;
   --bg-panel-alt: #001a00;
@@ -163,6 +167,7 @@
 
 /* ── Parchment (in-app warm theme) ─────────────────────── */
 [data-theme="parchment"] {
+  color-scheme: dark;
   --bg-deep:      #1a1610;
   --bg-panel:     #241f18;
   --bg-panel-alt: #2e2820;
@@ -363,7 +368,7 @@ hr {
   border-radius: var(--radius-xs);
   color: var(--text-primary);
 }
-.input:focus { outline: none; border-color: var(--accent-brass-dim); }
+.input:focus { border-color: var(--accent-brass-dim); }
 
 .dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; background: var(--text-dim); }
 .dot.ok   { background: var(--status-ok);   box-shadow: 0 0 6px var(--status-ok); }
@@ -468,7 +473,68 @@ hr {
   text-shadow: 0 0 24px var(--accent-blood-glow);
 }
 
+/* Focus ring baseline — all interactive elements */
+:focus-visible {
+  outline: 2px solid var(--accent-brass);
+  outline-offset: 2px;
+}
+:focus:not(:focus-visible) { outline: none; }
+
+@media (forced-colors: active) {
+  a { color: LinkText; }
+  a:hover { color: LinkText; border-bottom-color: LinkText; }
+  :focus-visible { outline-color: Highlight; }
+  hr { border-top-color: CanvasText; }
+  .dot { background: CanvasText; }
+  .dot.ok, .dot.warn, .dot.bad { background: CanvasText; box-shadow: none; }
+  h2, h3 { color: CanvasText; }
+  .pill { border-color: CanvasText; color: CanvasText; }
+  .btn { border-color: ButtonText; color: ButtonText; }
+  .input { border-color: ButtonText; color: CanvasText; }
+}
+
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb, var(--border-main)); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover, var(--border-highlight)); }
+
+@media (prefers-reduced-motion: reduce) {
+  .btn { transition-duration: 0.01ms !important; }
+  .btn:active { transform: none; }
+  *, *::before, *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@media (prefers-contrast: more) {
+  :root, [data-theme="dark-fantasy"], [data-theme="cyberpunk"],
+  [data-theme="terminal"], [data-theme="parchment"] {
+    --text-dim: var(--text-bright);
+    --border-main: var(--border-highlight);
+  }
+  a { border-bottom-style: solid; }
+  .btn { border-width: 2px; }
+  .input { border-width: 2px; }
+  .card, .panel { border-width: 2px; }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   PRINT — high-contrast B&W, hide chrome
+   ══════════════════════════════════════════════════════════════ */
+@media print {
+  *, *::before, *::after {
+    background: white !important;
+    color: black !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+  .nav, [role="navigation"], .skip-link, .dot, [aria-hidden="true"],
+  .tex-parchment, .tex-blood, .tex-wax, .tex-scratch, .tex-mold, .tex-viscera, .tex-noise {
+    display: none !important;
+  }
+  .btn { border: 1px solid black !important; }
+  .frame-gothic::before, .frame-gothic::after { display: none !important; }
+  .frame-arch, .frame-sarc { border: 1px solid black !important; clip-path: none; border-radius: 0; }
+}

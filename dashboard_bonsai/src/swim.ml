@@ -34,7 +34,7 @@ stylesheet
   {|
   .swim {
     border: 1px solid var(--border-main);
-    background: rgba(14, 10, 8, 0.4);
+    background: color-mix(in oklab, var(--bg-deep) 40%, transparent);
     margin-top: 6px;
   }
   .axis {
@@ -116,7 +116,7 @@ stylesheet
   .track {
     position: relative;
     height: 32px;
-    background: repeating-linear-gradient(to right, transparent 0 99px, rgba(120, 100, 80, 0.05) 99px 100px);
+    background: repeating-linear-gradient(to right, transparent 0 99px, color-mix(in oklab, var(--border-highlight) 5%, transparent) 99px 100px);
   }
   .frame {
     position: absolute;
@@ -140,6 +140,25 @@ stylesheet
   .frame_err  { background: var(--t-err); color: var(--text-bright); }
   .frame_wait { background: var(--t-wait); color: var(--text-dim); }
   .frame_think { background: var(--t-think); color: var(--text-primary); }
+
+  @media (prefers-contrast: more) {
+    .track { outline: 1px solid var(--text-bright); }
+    .frame { border: 1px solid var(--text-bright); }
+    .stat { color: var(--text-bright); }
+    .nm_dead { color: var(--text-bright); }
+  }
+
+  @media (forced-colors: active) {
+    .frame_llm, .frame_tool { background: Highlight; }
+    .frame_think { background: ButtonText; }
+    .frame_wait { background: GrayText; }
+    .frame_err { background: MarkText; }
+    .nm_dead { color: GrayText; }
+  }
+
+  @media (max-width: 760px) {
+    .axis, .lane { grid-template-columns: 80px 1fr; }
+  }
 |}]
 
 let frame_class = function
@@ -166,7 +185,7 @@ let frame ~(kind : frame_kind) ~left ~width ~label =
   in
   Node.div
     ~attrs:[ Style.frame; frame_class kind; style
-           ; Attr.title (Printf.sprintf "%s: %s" (kind_label kind) label) ]
+           ; Attr.create "aria-label" (Printf.sprintf "%s: %s" (kind_label kind) label) ]
     [ Node.text label ]
 ;;
 

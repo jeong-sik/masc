@@ -89,7 +89,7 @@ stylesheet
   .conv_bar {
     margin-top: 4px;
     height: 4px;
-    background: rgba(58,90,72,0.12);
+    background: color-mix(in oklab, var(--status-ok) 12%, transparent);
     position: relative;
   }
   .conv_bar_fill {
@@ -120,8 +120,8 @@ stylesheet
   .task_title { color: var(--text-primary); }
 
   .blocker {
-    border: 1px solid rgba(160,106,26,0.28);
-    background: rgba(160,106,26,0.08);
+    border: 1px solid color-mix(in oklab, var(--accent-brass) 28%, transparent);
+    background: color-mix(in oklab, var(--accent-brass) 8%, transparent);
     padding: 8px 10px;
     display: flex;
     flex-direction: column;
@@ -158,6 +158,21 @@ stylesheet
     .conv_bar_wrap { text-align: left; }
     .goal_indent { margin-left: 12px; padding-left: 10px; }
   }
+
+  @media (prefers-contrast: more) {
+    .goal { border-width: 2px; border-color: var(--text-bright); }
+    .goal_head { border-bottom-width: 2px; border-color: var(--text-bright); }
+    .k { color: var(--text-bright); }
+    .conv_bar { outline: 1px solid var(--text-bright); }
+    .task_dot { color: var(--text-bright); }
+  }
+
+  @media (forced-colors: active) {
+    .task_dot_done { color: Highlight; }
+    .task_dot_run { color: Mark; }
+    .conv_bar_fill { background: Highlight; }
+    .goal_meta_v_ok { color: Highlight; }
+  }
 |}]
 
 let status_pill_color (s : string) : Pill.color =
@@ -187,7 +202,7 @@ let view_task_chip (t : Goals_types.task) =
   Node.div
     ~attrs:[ Style.task ]
     [ Node.span
-        ~attrs:[ Style.task_dot; task_dot_class t.status ]
+        ~attrs:[ Style.task_dot; task_dot_class t.status; Attr.create "aria-hidden" "true" ]
         [ Node.text (task_glyph t.status) ]
     ; Node.span ~attrs:[ Style.task_title ] [ Node.text t.title ]
     ]

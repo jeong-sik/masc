@@ -64,7 +64,7 @@ stylesheet
     padding: 14px 16px;
     border: 1px solid var(--border-highlight);
     background:
-      linear-gradient(180deg, rgba(42,30,20,0.4), rgba(20,12,8,0.7));
+      linear-gradient(180deg, color-mix(in oklab, var(--bg-card) 40%, transparent), color-mix(in oklab, var(--bg-deep) 70%, transparent));
   }
 
   .btn {
@@ -107,6 +107,21 @@ stylesheet
     .grid { grid-template-columns: 1fr; }
     .panel { min-height: 0; }
     .cta_note { width: 100%; margin-left: 0; }
+  }
+
+  @media (prefers-contrast: more) {
+    .panel { border-width: 2px; border-color: var(--text-bright); }
+    .panel_title { color: var(--text-bright); }
+    .panel_code { color: var(--text-bright); }
+    .cta { border-width: 2px; border-color: var(--text-bright); }
+    .btn { border-width: 2px; border-color: var(--text-bright); }
+    .cta_note { color: var(--text-bright); }
+  }
+
+  @media (forced-colors: active) {
+    .panel { border-color: CanvasText; }
+    .btn { border-color: LinkText; color: LinkText; }
+    .btn_primary { border-color: Highlight; color: Highlight; }
   }
 |}]
 

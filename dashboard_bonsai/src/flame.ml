@@ -36,7 +36,7 @@ stylesheet
   }
   .flame_seg {
     height: 100%;
-    border-right: 1px solid rgba(0, 0, 0, 0.35);
+    border-right: 1px solid color-mix(in oklab, var(--bg-deep) 35%, transparent);
   }
   .flame_seg:last-child { border-right: 0; }
   .flame_seg_llm   { background: var(--t-llm); }
@@ -59,12 +59,25 @@ stylesheet
     width: 10px;
     height: 10px;
     display: inline-block;
-    border: 1px solid rgba(0, 0, 0, 0.45);
+    border: 1px solid color-mix(in oklab, var(--bg-deep) 45%, transparent);
   }
   .flame_lbl { color: var(--text-primary); }
   .flame_pct {
     color: var(--text-bright);
     font-variant-numeric: tabular-nums;
+  }
+
+  @media (prefers-contrast: more) {
+    .flame_bar { border-width: 2px; border-color: var(--text-bright); }
+    .flame_chip { border-width: 2px; }
+  }
+
+  @media (forced-colors: active) {
+    .flame_seg_llm, .flame_seg_tool { background: Highlight; }
+    .flame_seg_think { background: ButtonText; }
+    .flame_seg_wait { background: GrayText; }
+    .flame_seg_err { background: MarkText; }
+    .flame_chip { border-color: CanvasText; }
   }
 |}]
 
@@ -105,5 +118,11 @@ let view_mini ~(segments : (kind * int) list) =
                [ Node.text (Printf.sprintf "%d" pct) ]
            ]))
   in
-  Node.div ~attrs:[ Style.flame; Attr.role "img"; Attr.create "aria-label" "Tool category time distribution" ] [ bar; legend ]
+  let aria_desc =
+    "Tool category time distribution: "
+    ^ String.concat ~sep:", "
+        (List.map segments ~f:(fun (kind, pct) ->
+             Printf.sprintf "%s %d%%" (label kind) pct))
+  in
+  Node.div ~attrs:[ Style.flame; Attr.role "img"; Attr.create "aria-label" aria_desc ] [ bar; legend ]
 ;;

@@ -49,8 +49,8 @@ stylesheet
     position: relative;
     height: 120px;
     background: linear-gradient(180deg,
-      rgba(232,80,80,0.04) 0%,
-      rgba(232,80,80,0.02) 10%,
+      color-mix(in oklab, var(--accent-blood) 4%, transparent) 0%,
+      color-mix(in oklab, var(--accent-blood) 2%, transparent) 10%,
       transparent 25%,
       transparent 100%);
   }
@@ -65,6 +65,22 @@ stylesheet
   }
   .lbl_warn { top: 22px; color: color-mix(in oklab, var(--accent-brass) 80%, var(--text-dim)); }
   .lbl_dang { top: 6px;  color: color-mix(in oklab, var(--accent-blood) 80%, var(--text-dim)); }
+
+  @media (prefers-contrast: more) {
+    .meta { border-right-width: 2px; border-right-color: var(--text-bright); color: var(--text-bright); }
+    .track { outline: 1px solid var(--text-bright); }
+    .lbl_warn, .lbl_dang { color: var(--text-bright); }
+  }
+
+  @media (forced-colors: active) {
+    .meta { border-right-color: CanvasText; }
+    .lbl_warn { color: Mark; }
+    .lbl_dang { color: MarkText; }
+  }
+
+  @media (max-width: 760px) {
+    .chart { grid-template-columns: 80px 1fr; }
+  }
 |}]
 
 let svg_a k v = Attr.create k v
@@ -201,6 +217,14 @@ let view ?(keepers : Keepers_types.response = Keepers_types.fixture) () =
     | [] -> polylines_static ()
     | live_keepers -> polylines_of_keepers live_keepers
   in
+  let meta_lines =
+    match keepers.keepers with
+    | [] -> [ "luna 38 · brass-owl 67"; "moth 12 · ash ×" ]
+    | live -> meta_lines_of live
+  in
+  let aria_desc =
+    "Context usage chart over 60 minutes. " ^ String.concat ~sep:"; " meta_lines
+  in
   let svg =
     Node.create_svg "svg"
       ~attrs:
@@ -208,14 +232,10 @@ let view ?(keepers : Keepers_types.response = Keepers_types.fixture) () =
         ; svg_a "preserveAspectRatio" "none"
         ; Style.svg
         ; Attr.role "img"
-        ; Attr.create "aria-label" "Context usage chart over 60 minutes"
+        ; Attr.create "aria-label" aria_desc
         ]
       (hairlines @ guides @ polylines)
   in
-  let meta_lines =
-    match keepers.keepers with
-    | [] -> [ "luna 38 · brass-owl 67"; "moth 12 · ash ×" ]
-    | live -> meta_lines_of live
   in
   Node.div
     ~attrs:[ Swim.Style.swim ]

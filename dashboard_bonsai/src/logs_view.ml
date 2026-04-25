@@ -25,8 +25,8 @@ stylesheet
     position: relative;
     min-height: 100vh;
     background:
-      radial-gradient(circle at 88% 14%, rgba(138, 106, 40, 0.10), transparent 22%),
-      radial-gradient(circle at 8% 88%, rgba(232, 80, 80, 0.05), transparent 28%),
+      radial-gradient(circle at 88% 14%, color-mix(in oklab, var(--accent-brass) 10%, transparent), transparent 22%),
+      radial-gradient(circle at 8% 88%, color-mix(in oklab, var(--accent-blood) 5%, transparent), transparent 28%),
       var(--bg-deep);
     color: var(--text-primary);
     font-family: 'EB Garamond', 'Noto Sans KR', Georgia, serif;
@@ -36,6 +36,29 @@ stylesheet
     flex-direction: column;
     gap: 1.25rem;
     isolation: isolate;
+  }
+  .skip_nav {
+    position: absolute;
+    left: -9999px;
+    top: auto;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    z-index: 100;
+    font-family: 'Noto Sans KR', sans-serif;
+    font-size: 13px;
+    padding: 8px 16px;
+    background: var(--bg-panel);
+    color: var(--accent-brass);
+    border: 2px solid var(--accent-brass);
+    text-decoration: none;
+  }
+  .skip_nav:focus {
+    position: fixed;
+    top: 8px;
+    left: 8px;
+    width: auto;
+    height: auto;
   }
 
   @media (max-width: 1280px) {
@@ -117,7 +140,7 @@ stylesheet
     height: 6px;
     border-radius: 50%;
     background: var(--accent-brass);
-    box-shadow: 0 0 8px rgba(138, 106, 40, 0.55);
+    box-shadow: 0 0 8px color-mix(in oklab, var(--accent-brass) 55%, transparent);
     animation: pulse-beat 2.4s ease-in-out infinite;
   }
 
@@ -143,7 +166,7 @@ stylesheet
       linear-gradient(180deg, var(--bg-panel) 0%, var(--bg-deep) 100%);
     border: 1px solid var(--border-main);
     border-radius: 2px;
-    box-shadow: inset 0 0 0 1px rgba(196, 162, 101, 0.04);
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent-brass) 4%, transparent);
   }
 
   .heartbeat_head {
@@ -186,7 +209,7 @@ stylesheet
   }
 
   .heartbeat_bar_warn  { background: linear-gradient(180deg, var(--status-warn) 0%, color-mix(in oklab, var(--status-warn) 40%, var(--bg-deep)) 100%); }
-  .heartbeat_bar_error { background: linear-gradient(180deg, var(--accent-blood) 0%, var(--accent-blood-dim) 100%); box-shadow: 0 0 6px rgba(232, 80, 80, 0.45); }
+  .heartbeat_bar_error { background: linear-gradient(180deg, var(--accent-blood) 0%, var(--accent-blood-dim) 100%); box-shadow: 0 0 6px color-mix(in oklab, var(--accent-blood) 45%, transparent); }
   .heartbeat_bar_idle  { background: var(--border-main); opacity: 0.6; }
 
   /* hud CSS → Hud 모듈로 이관 (shell 추출 Phase 2.A) */
@@ -201,9 +224,9 @@ stylesheet
     padding: 8px 14px;
     background:
       linear-gradient(90deg,
-        rgba(138, 106, 40, 0.10) 0%,
+        color-mix(in oklab, var(--accent-brass) 10%, transparent) 0%,
         transparent 45%,
-        rgba(232, 80, 80, 0.06) 100%),
+        color-mix(in oklab, var(--accent-blood) 6%, transparent) 100%),
       var(--bg-deep);
     border: 1px solid var(--border-main);
     border-radius: 2px;
@@ -220,8 +243,8 @@ stylesheet
     border-radius: 50%;
     background: radial-gradient(circle at 28% 28%, var(--text-bright) 0%, var(--accent-brass) 55%, var(--border-highlight) 100%);
     box-shadow:
-      0 0 10px rgba(232, 216, 184, 0.22),
-      inset 0 0 0 1px rgba(232, 216, 184, 0.12);
+      0 0 10px color-mix(in oklab, var(--text-bright) 22%, transparent),
+      inset 0 0 0 1px color-mix(in oklab, var(--text-bright) 12%, transparent);
     flex-shrink: 0;
   }
 
@@ -281,7 +304,7 @@ stylesheet
     font-size: 11px;
     letter-spacing: 0.2em;
     text-transform: uppercase;
-    padding: 4px 12px;
+    padding: 7px 12px;
     border-radius: 999px;
     color: var(--text-dim);
     cursor: pointer;
@@ -292,7 +315,7 @@ stylesheet
   .chip:focus-visible { outline: 2px solid var(--accent-brass); outline-offset: 1px; }
   .chip_active {
     color: var(--text-bright);
-    background: rgba(138, 106, 40, 0.14);
+    background: color-mix(in oklab, var(--accent-brass) 14%, transparent);
     box-shadow: inset 0 0 0 1px var(--accent-brass);
   }
 
@@ -305,7 +328,7 @@ stylesheet
   html[data-log-level="error"] .chip[data-filter-level="error"],
   html:not([data-log-level])   .chip[data-filter-level="info"] {
     color: var(--text-bright);
-    background: rgba(138, 106, 40, 0.14);
+    background: color-mix(in oklab, var(--accent-brass) 14%, transparent);
     box-shadow: inset 0 0 0 1px var(--accent-brass);
   }
 
@@ -332,7 +355,7 @@ stylesheet
     font-size: 11px;
     letter-spacing: 0.2em;
     text-transform: uppercase;
-    padding: 5px 12px;
+    padding: 7px 12px;
     border: 1px solid var(--border-main);
     border-radius: 2px;
     background: transparent;
@@ -387,7 +410,7 @@ stylesheet
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
-    text-shadow: 0 0 18px rgba(138, 106, 40, 0.28);
+    text-shadow: 0 0 18px color-mix(in oklab, var(--accent-brass) 28%, transparent);
     margin-right: 4px;
     align-self: flex-start;
     padding-top: 6px;
@@ -462,7 +485,7 @@ stylesheet
     right: 0;
     top: 0;
     height: 28px;
-    background: linear-gradient(180deg, var(--bg-deep) 0%, rgba(10, 7, 6, 0) 100%);
+    background: linear-gradient(180deg, var(--bg-deep) 0%, transparent 100%);
     pointer-events: none;
     z-index: 2;
   }
@@ -473,7 +496,7 @@ stylesheet
   .tape_end {
     position: relative;
     height: 32px;
-    background: linear-gradient(180deg, rgba(10, 7, 6, 0) 0%, var(--bg-deep) 100%);
+    background: linear-gradient(180deg, transparent 0%, var(--bg-deep) 100%);
     margin-top: -8px;
     pointer-events: none;
   }
@@ -495,7 +518,7 @@ stylesheet
     border-radius: 50%;
     border: 1px solid var(--accent-brass);
     background:
-      radial-gradient(circle at 35% 30%, rgba(232, 216, 184, 0.18), transparent 55%),
+      radial-gradient(circle at 35% 30%, color-mix(in oklab, var(--text-bright) 18%, transparent), transparent 55%),
       var(--bg-panel);
     display: grid;
     place-items: center;
@@ -505,13 +528,13 @@ stylesheet
     color: var(--accent-brass);
     text-transform: uppercase;
     box-shadow:
-      inset 0 0 0 1px rgba(232, 216, 184, 0.06),
-      0 0 6px rgba(138, 106, 40, 0.18);
+      inset 0 0 0 1px color-mix(in oklab, var(--text-bright) 6%, transparent),
+      0 0 6px color-mix(in oklab, var(--accent-brass) 18%, transparent);
     align-self: center;
   }
 
-  .sigil_warn  { color: var(--status-warn); border-color: var(--status-warn); box-shadow: inset 0 0 0 1px rgba(232,216,184,0.06), 0 0 8px rgba(160, 106, 26, 0.35); }
-  .sigil_error { color: var(--text-bright); border-color: var(--accent-blood); background: radial-gradient(circle at 35% 30%, rgba(232,216,184,0.28), transparent 55%), color-mix(in oklab, var(--accent-blood) 25%, var(--bg-deep)); box-shadow: inset 0 0 0 1px rgba(232,216,184,0.08), 0 0 10px color-mix(in oklab, var(--accent-blood) 45%, transparent); }
+  .sigil_warn  { color: var(--status-warn); border-color: var(--status-warn); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--text-bright) 6%, transparent), 0 0 8px color-mix(in oklab, var(--accent-brass) 35%, transparent); }
+  .sigil_error { color: var(--text-bright); border-color: var(--accent-blood); background: radial-gradient(circle at 35% 30%, color-mix(in oklab, var(--text-bright) 28%, transparent), transparent 55%), color-mix(in oklab, var(--accent-blood) 25%, var(--bg-deep)); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--text-bright) 8%, transparent), 0 0 10px color-mix(in oklab, var(--accent-blood) 45%, transparent); }
 
   .message_lead::first-letter {
     font-family: 'Cinzel', 'EB Garamond', serif;
@@ -525,37 +548,37 @@ stylesheet
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
-    text-shadow: 0 0 14px rgba(138, 106, 40, 0.25);
+    text-shadow: 0 0 14px color-mix(in oklab, var(--accent-brass) 25%, transparent);
   }
 
   .row_debug { border-left-color: var(--status-idle); }
   .row_info  { border-left-color: var(--accent-mold); }
 
   .row:hover {
-    background: linear-gradient(90deg, rgba(138, 106, 40, 0.08), transparent 70%);
-    box-shadow: inset 1px 0 0 0 rgba(138, 106, 40, 0.35);
+    background: linear-gradient(90deg, color-mix(in oklab, var(--accent-brass) 8%, transparent), transparent 70%);
+    box-shadow: inset 1px 0 0 0 color-mix(in oklab, var(--accent-brass) 35%, transparent);
     border-left-color: var(--accent-brass);
   }
 
   .row_error {
-    background: linear-gradient(90deg, rgba(232, 80, 80, 0.08) 0%, transparent 60%);
+    background: linear-gradient(90deg, color-mix(in oklab, var(--accent-blood) 8%, transparent) 0%, transparent 60%);
     border-left-color: var(--accent-blood);
   }
 
   .row_error:hover {
-    background: linear-gradient(90deg, rgba(232, 80, 80, 0.18) 0%, transparent 65%);
-    box-shadow: inset 1px 0 0 0 rgba(232, 80, 80, 0.55);
+    background: linear-gradient(90deg, color-mix(in oklab, var(--accent-blood) 18%, transparent) 0%, transparent 65%);
+    box-shadow: inset 1px 0 0 0 color-mix(in oklab, var(--accent-blood) 55%, transparent);
     border-left-color: var(--accent-viscera);
   }
 
   .row_warn {
-    background: linear-gradient(90deg, rgba(160, 106, 26, 0.06) 0%, transparent 60%);
+    background: linear-gradient(90deg, color-mix(in oklab, var(--accent-brass) 6%, transparent) 0%, transparent 60%);
     border-left-color: var(--status-warn);
   }
 
   .row_warn:hover {
-    background: linear-gradient(90deg, rgba(160, 106, 26, 0.15) 0%, transparent 65%);
-    box-shadow: inset 1px 0 0 0 rgba(160, 106, 26, 0.5);
+    background: linear-gradient(90deg, color-mix(in oklab, var(--accent-brass) 15%, transparent) 0%, transparent 65%);
+    box-shadow: inset 1px 0 0 0 color-mix(in oklab, var(--accent-brass) 50%, transparent);
     border-left-color: var(--accent-ember);
   }
 
@@ -588,7 +611,7 @@ stylesheet
   .level_debug { color: var(--text-dim); }
   .level_info  { color: var(--text-primary); }
   .level_warn  { color: var(--status-warn); }
-  .level_error { color: var(--accent-blood); text-shadow: 0 0 12px rgba(232, 80, 80, 0.32); }
+  .level_error { color: var(--accent-blood); text-shadow: 0 0 12px color-mix(in oklab, var(--accent-blood) 32%, transparent); }
 
   .mod_col {
     font-family: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
@@ -637,8 +660,9 @@ stylesheet
     color: var(--text-dim);
     font-family: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
     font-size: 11px;
+    line-height: 1.45;
     margin-top: 0.25rem;
-    opacity: 0.75;
+    overflow-wrap: anywhere;
   }
 
   .empty {
@@ -681,11 +705,11 @@ stylesheet
     background: radial-gradient(circle at 32% 28%, var(--accent-viscera) 0%, var(--accent-blood) 40%, color-mix(in oklab, var(--accent-blood) 50%, var(--bg-deep)) 80%, color-mix(in oklab, var(--accent-blood) 20%, var(--bg-deep)) 100%);
     border: 2px solid var(--accent-brass);
     box-shadow:
-      inset 0 0 0 1px rgba(232, 216, 184, 0.18),
-      inset -6px -8px 14px rgba(0, 0, 0, 0.55),
-      inset 5px 4px 10px rgba(232, 216, 184, 0.15),
-      0 6px 14px rgba(232, 80, 80, 0.35),
-      0 0 22px rgba(138, 106, 40, 0.22);
+      inset 0 0 0 1px color-mix(in oklab, var(--text-bright) 18%, transparent),
+      inset -6px -8px 14px color-mix(in oklab, var(--bg-deep) 55%, transparent),
+      inset 5px 4px 10px color-mix(in oklab, var(--text-bright) 15%, transparent),
+      0 6px 14px color-mix(in oklab, var(--accent-blood) 35%, transparent),
+      0 0 22px color-mix(in oklab, var(--accent-brass) 22%, transparent);
     transform: rotate(-14deg);
     z-index: 4;
     pointer-events: none;
@@ -696,7 +720,7 @@ stylesheet
     color: var(--text-bright);
     font-size: 22px;
     letter-spacing: 0.04em;
-    text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6), 0 0 8px rgba(232, 216, 184, 0.35);
+    text-shadow: 0 1px 0 color-mix(in oklab, var(--bg-deep) 60%, transparent), 0 0 8px color-mix(in oklab, var(--text-bright) 35%, transparent);
   }
 
   .signet::before {
@@ -704,7 +728,7 @@ stylesheet
     position: absolute;
     inset: 6px;
     border-radius: 50%;
-    border: 1px dashed rgba(232, 216, 184, 0.22);
+    border: 1px dashed color-mix(in oklab, var(--text-bright) 22%, transparent);
     transform: rotate(14deg);
   }
 
@@ -734,7 +758,7 @@ stylesheet
     padding: 18px 0 24px;
     background: linear-gradient(180deg, var(--bg-panel) 0%, var(--bg-deep) 100%);
     border-right: 1px solid var(--border-main);
-    box-shadow: inset -1px 0 0 rgba(138, 106, 40, 0.08);
+    box-shadow: inset -1px 0 0 color-mix(in oklab, var(--accent-brass) 8%, transparent);
     display: flex;
     flex-direction: column;
     overflow-y: auto;
@@ -792,7 +816,7 @@ stylesheet
     display: flex;
     align-items: center;
     gap: 11px;
-    padding: 8px 18px;
+    padding: 14px 18px;
     color: var(--text-primary);
     font-family: 'Noto Sans KR', sans-serif;
     font-size: 11px;
@@ -804,12 +828,16 @@ stylesheet
   }
   .nav_link:hover {
     color: var(--accent-brass);
-    background: rgba(138, 106, 40, 0.05);
+    background: color-mix(in oklab, var(--accent-brass) 5%, transparent);
+  }
+  .nav_link:focus-visible {
+    outline: 2px solid var(--accent-brass);
+    outline-offset: -2px;
   }
   .nav_link_active {
     color: var(--accent-brass);
     border-left-color: var(--accent-brass);
-    background: linear-gradient(90deg, rgba(138, 106, 40, 0.10), transparent 70%);
+    background: linear-gradient(90deg, color-mix(in oklab, var(--accent-brass) 10%, transparent), transparent 70%);
   }
   .nav_link_glyph {
     width: 6px;
@@ -821,6 +849,10 @@ stylesheet
   .nav_link_active .nav_link_glyph {
     background: var(--accent-brass);
     box-shadow: 0 0 6px var(--accent-brass);
+  }
+  .nav_link_soon {
+    color: var(--text-dim);
+    font-style: italic;
   }
   .nav_link_tail {
     margin-left: auto;
@@ -859,7 +891,7 @@ stylesheet
     font-size: 11px;
     letter-spacing: 0.22em;
     text-transform: uppercase;
-    padding: 3px 6px;
+    padding: 7px 8px;
     background: var(--bg-panel);
     border: 1px solid var(--border-main);
     color: var(--text-dim);
@@ -876,7 +908,7 @@ stylesheet
     border-color: var(--accent-brass);
     color: var(--accent-brass);
     background: linear-gradient(180deg, var(--bg-panel), var(--bg-deep));
-    box-shadow: 0 0 0 1px rgba(138, 106, 40, 0.25) inset;
+    box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent-brass) 25%, transparent) inset;
   }
 
   /* active chip via declarative CSS only — listener가 <html data-theme>
@@ -890,7 +922,7 @@ stylesheet
     border-color: var(--accent-brass);
     color: var(--accent-brass);
     background: linear-gradient(180deg, var(--bg-panel), var(--bg-deep));
-    box-shadow: 0 0 0 1px rgba(138, 106, 40, 0.25) inset;
+    box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent-brass) 25%, transparent) inset;
   }
 
   /* ─── right aside (340px, fixed) ───
@@ -905,7 +937,7 @@ stylesheet
     padding: 22px 18px 28px;
     background: linear-gradient(180deg, var(--bg-panel) 0%, var(--bg-deep) 100%);
     border-left: 1px solid var(--border-main);
-    box-shadow: inset 1px 0 0 rgba(138, 106, 40, 0.06);
+    box-shadow: inset 1px 0 0 color-mix(in oklab, var(--accent-brass) 6%, transparent);
     display: flex;
     flex-direction: column;
     gap: 22px;
@@ -1011,13 +1043,13 @@ stylesheet
     height: 100%;
     width: 64%;
     background: linear-gradient(90deg, var(--accent-brass-dim), var(--accent-brass));
-    box-shadow: 0 0 6px rgba(138, 106, 40, 0.45);
+    box-shadow: 0 0 6px color-mix(in oklab, var(--accent-brass) 45%, transparent);
   }
   .vial::after {
     content: "";
     position: absolute;
     inset: 0;
-    background-image: repeating-linear-gradient(90deg, transparent 0 19px, rgba(0, 0, 0, 0.5) 19px 20px);
+    background-image: repeating-linear-gradient(90deg, transparent 0 19px, color-mix(in oklab, var(--bg-deep) 50%, transparent) 19px 20px);
     pointer-events: none;
   }
 
@@ -1082,13 +1114,13 @@ stylesheet
     font-family: 'JetBrains Mono', ui-monospace, monospace;
     font-size: 11px;
     color: var(--accent-brass);
-    background: rgba(138, 106, 40, 0.08);
+    background: color-mix(in oklab, var(--accent-brass) 8%, transparent);
     padding: 0 5px;
     border: 1px solid var(--border-main);
   }
   .evrow_bad .evrow_b_code {
     color: var(--accent-blood);
-    background: rgba(232, 80, 80, 0.08);
+    background: color-mix(in oklab, var(--accent-blood) 8%, transparent);
   }
 
   /* ─── page-head (hero) ───
@@ -1135,15 +1167,15 @@ stylesheet
   }
   .page_h1_blood {
     color: var(--accent-blood);
-    text-shadow: 0 0 18px rgba(201, 74, 58, 0.32);
+    text-shadow: 0 0 18px color-mix(in oklab, var(--accent-blood) 32%, transparent);
   }
   .page_h1_brass {
     color: var(--accent-brass);
-    text-shadow: 0 0 18px rgba(138, 106, 40, 0.32);
+    text-shadow: 0 0 18px color-mix(in oklab, var(--accent-brass) 32%, transparent);
   }
   .page_h1_bright {
     color: var(--text-bright);
-    text-shadow: 0 0 18px rgba(216, 200, 160, 0.24);
+    text-shadow: 0 0 18px color-mix(in oklab, var(--text-primary) 24%, transparent);
   }
   .page_sub {
     font-family: 'EB Garamond', 'Noto Sans KR', Georgia, serif;
@@ -1185,7 +1217,7 @@ stylesheet
     color: var(--accent-brass);
   }
   .pbtn_primary:hover {
-    background: rgba(138, 106, 40, 0.12);
+    background: color-mix(in oklab, var(--accent-brass) 12%, transparent);
     color: var(--text-bright);
   }
   .pbtn_glyph {
@@ -1211,7 +1243,7 @@ stylesheet
     height: 6px;
     border-radius: 50%;
     background: var(--accent-brass);
-    box-shadow: 0 0 6px rgba(138, 106, 40, 0.35);
+    box-shadow: 0 0 6px color-mix(in oklab, var(--accent-brass) 35%, transparent);
     align-self: center;
   }
   .sec_h {
@@ -1284,9 +1316,20 @@ stylesheet
   }
   .tomb_dead {
     color: var(--text-dim);
-    opacity: 0.5;
     text-decoration: line-through;
     text-decoration-color: var(--accent-blood);
+  }
+
+  @media (max-width: 760px) {
+    .row {
+      grid-template-columns: 1.75rem minmax(0, 1fr);
+      grid-template-rows: auto auto;
+      gap: 4px 8px;
+      padding: 0.5rem 0.5rem;
+    }
+    .ts, .level, .mod_col, .source_badge { font-size: 10px; }
+    .message { font-size: 13px; }
+    .filter_bar { flex-wrap: wrap; gap: 6px; }
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -1294,6 +1337,23 @@ stylesheet
     *, *::before, *::after {
       transition-duration: 0.01ms !important;
     }
+  }
+
+  @media (prefers-contrast: more) {
+    .row { border-bottom-width: 1px; border-bottom-color: var(--text-dim); }
+    .level, .source_badge { border-width: 2px; }
+    .level_error { border-color: var(--accent-blood); }
+    .level_warn  { border-color: var(--status-warn); }
+    .filter_bar { border-width: 2px; border-color: var(--text-bright); }
+    .search_input { border-width: 2px; border-color: var(--text-bright); }
+    .chip, .btn_ghost { border-width: 2px; border-color: var(--text-bright); }
+  }
+
+  @media (forced-colors: active) {
+    .level_error { color: MarkText; border-color: MarkText; text-shadow: none; }
+    .level_warn { color: Mark; border-color: Mark; }
+    .level_debug { color: GrayText; }
+    .source_badge { border-color: GrayText; }
   }
 |}]
 
@@ -1336,13 +1396,13 @@ let sigil_char source =
 let view_entry ~is_first (e : Logs_types.entry) =
   let row_attrs =
     match row_tint e.normalized_level with
-    | None -> [ Style.row; Attr.create "aria-label" (e.normalized_level ^ " " ^ e.module_ ^ ": " ^ e.message) ]
-    | Some tint -> [ Style.row; tint; Attr.create "aria-label" (e.normalized_level ^ " " ^ e.module_ ^ ": " ^ e.message) ]
+    | None -> [ Style.row; Attr.role "listitem"; Attr.create "aria-label" (e.normalized_level ^ " " ^ e.module_ ^ ": " ^ e.message) ]
+    | Some tint -> [ Style.row; tint; Attr.role "listitem"; Attr.create "aria-label" (e.normalized_level ^ " " ^ e.module_ ^ ": " ^ e.message) ]
   in
   let sigil_attrs =
     match sigil_class e.normalized_level with
-    | None -> [ Style.sigil ]
-    | Some c -> [ Style.sigil; c ]
+    | None -> [ Style.sigil; Attr.create "aria-hidden" "true" ]
+    | Some c -> [ Style.sigil; c; Attr.create "aria-hidden" "true" ]
   in
   let message_attrs =
     if is_first then [ Style.message; Style.message_lead ] else [ Style.message ]
@@ -1425,6 +1485,13 @@ let view_heartbeat ?(entries : Logs_types.entry list = []) () =
     | [] -> heartbeat_bars
     | _ -> heartbeat_bars_of_entries entries
   in
+  let active = List.count ~f:(fun (_, l) -> l <> `Idle) bars in
+  let max_height = List.fold bars ~init:0 ~f:(fun acc (h, _) -> Int.max acc h) in
+  let aria_desc =
+    Printf.sprintf
+      "Cycle pulse: %d of 60 ticks active, peak density %d"
+      active max_height
+  in
   let bar i (height, level) =
     let cls =
       match level with
@@ -1458,7 +1525,7 @@ let view_heartbeat ?(entries : Logs_types.entry list = []) () =
     Node.div ~attrs:(Attr.create "aria-hidden" "true" :: title_attr :: style :: base_attrs) []
   in
   Node.div
-    ~attrs:[ Style.heartbeat; Attr.role "img"; Attr.create "aria-label" "Cycle pulse: event density across last 60 ticks" ]
+    ~attrs:[ Style.heartbeat; Attr.role "img"; Attr.create "aria-label" aria_desc ]
     [ Node.div
         ~attrs:[ Style.heartbeat_head ]
         [ Node.span
@@ -1642,7 +1709,7 @@ let render_response
       in
       Node.div
         ~attrs:[ Style.tape_fade ]
-        [ Node.div ~attrs:[ Style.tape; Attr.role "log"; Attr.create "aria-label" "Log entries" ] rendered
+        [ Node.div ~attrs:[ Style.tape; Attr.role "log"; Attr.create "aria-live" "polite"; Attr.create "aria-label" "Log entries" ] rendered
         ; Node.div ~attrs:[ Style.tape_end ] []
         ]
   in
@@ -1735,7 +1802,7 @@ let render_response
           ; Node.span ~attrs:[ Style.input_shell_value ] [ Node.text "200" ]
           ]
       ; Node.div ~attrs:[ Style.toolbar_spacer ] []
-      ; Node.button ~attrs:[ Style.btn_ghost ] [ Node.text "refresh" ]
+      ; Node.button ~attrs:[ Style.btn_ghost; Attr.create "type" "button" ] [ Node.text "refresh" ]
       ]
   in
   let tally = tally_fleet keepers.keepers in
@@ -1790,6 +1857,12 @@ let render_response
     let active = Route.equal route current_route in
     let base = [ Style.nav_link ] in
     let base = if active then Style.nav_link_active :: base else base in
+    let base = if active then Attr.create "aria-current" "page" :: base else base in
+    let base =
+      if not (Route.is_implemented route)
+      then Style.nav_link_soon :: Attr.create "aria-disabled" "true" :: base
+      else base
+    in
     let tail_node =
       match tail with
       | None -> []
@@ -1889,7 +1962,7 @@ let render_response
              [ Node.text label ]
          in
          Node.div
-           ~attrs:[ Style.theme_chips ]
+           ~attrs:[ Style.theme_chips; Attr.role "group"; Attr.create "aria-label" "Theme selector" ]
            [ chip "dark" "dark"
            ; chip "cyber" "cyber"
            ; chip "term" "term"
@@ -2087,7 +2160,14 @@ let render_response
   in
   Node.div
     ~attrs:[ Style.root ]
-    [ nav
+    [ Node.a
+        ~attrs:
+          [ Style.skip_nav
+          ; Attr.href "#main-content"
+          ; Attr.create "aria-label" "Skip to main content"
+          ]
+        [ Node.text "Skip to main content" ]
+    ; nav
     ; brand_row
     ; view_heartbeat ~entries:response.entries ()
     ; view_hud ~keepers response
@@ -2130,7 +2210,7 @@ let render_response
            "in vigil", Style.page_h1_bright
        in
        Node.div
-         ~attrs:[ Style.page_head ]
+         ~attrs:[ Style.page_head; Attr.id "main-content" ]
          [ Node.div
              ~attrs:[ Style.page_head_lead ]
              [ Node.div
@@ -2154,14 +2234,14 @@ let render_response
         ; Node.div
             ~attrs:[ Style.page_actions ]
             [ Node.button
-                ~attrs:[ Style.pbtn ]
+                ~attrs:[ Style.pbtn; Attr.create "type" "button" ]
                 [ Node.span
                     ~attrs:[ Style.pbtn_glyph; Attr.create "aria-hidden" "true" ]
                     []
                 ; Node.text "preflight"
                 ]
             ; Node.button
-                ~attrs:[ Style.pbtn; Style.pbtn_primary ]
+                ~attrs:[ Style.pbtn; Style.pbtn_primary; Attr.create "type" "button" ]
                 [ Node.span
                     ~attrs:[ Style.pbtn_glyph; Attr.create "aria-hidden" "true" ]
                     []

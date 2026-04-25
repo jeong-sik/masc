@@ -21,6 +21,29 @@ stylesheet
     flex-direction: column;
     gap: 1rem;
   }
+  .skip_nav {
+    position: absolute;
+    left: -9999px;
+    top: auto;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    z-index: 100;
+    font-family: 'Noto Sans KR', sans-serif;
+    font-size: 13px;
+    padding: 8px 16px;
+    background: var(--bg-panel);
+    color: var(--accent-brass);
+    border: 2px solid var(--accent-brass);
+    text-decoration: none;
+  }
+  .skip_nav:focus {
+    position: fixed;
+    top: 8px;
+    left: 8px;
+    width: auto;
+    height: auto;
+  }
 
   .eyebrow {
     font-family: 'Noto Sans KR', -apple-system, sans-serif;
@@ -39,7 +62,7 @@ stylesheet
     text-transform: uppercase;
     color: var(--text-bright);
     margin: 0;
-    text-shadow: 0 0 40px rgba(232, 80, 80, 0.28);
+    text-shadow: 0 0 40px color-mix(in oklab, var(--accent-blood) 28%, transparent);
   }
 
   .sub {
@@ -63,13 +86,36 @@ stylesheet
     font-size: 0.75rem;
     color: var(--text-dim);
   }
+
+  @media (prefers-contrast: more) {
+    .divider { border-top-width: 2px; border-top-color: var(--text-bright); }
+    .eyebrow { color: var(--text-bright); }
+    .meta { color: var(--text-bright); }
+  }
+
+  @media (forced-colors: active) {
+    .title { color: CanvasText; text-shadow: none; }
+    .divider { border-top-color: CanvasText; }
+  }
+
+  @media (max-width: 760px) {
+    .root { padding: 1.5rem 1rem; }
+    .title { font-size: 1.5rem; letter-spacing: 0.12em; }
+  }
 |}]
 
 let component (_graph @ local) =
   Bonsai.return
     (Node.div
-       ~attrs:[ Style.root; Attr.role "main" ]
-       [ Node.p ~attrs:[ Style.eyebrow ] [ Node.text "masc · runtime" ]
+       ~attrs:[ Style.root; Attr.role "main"; Attr.id "main-content"; Attr.create "aria-label" "Dashboard landing" ]
+       [ Node.a
+           ~attrs:
+             [ Style.skip_nav
+             ; Attr.href "#main-content"
+             ; Attr.create "aria-label" "Skip to main content"
+             ]
+           [ Node.text "Skip to main content" ]
+       ; Node.p ~attrs:[ Style.eyebrow ] [ Node.text "masc · runtime" ]
        ; Node.h1 ~attrs:[ Style.title ] [ Node.text "dark manor · bonsai" ]
        ; Node.p
            ~attrs:[ Style.sub; Attr.create "lang" "ko" ]

@@ -41,7 +41,7 @@ stylesheet
   }
   .loop:hover {
     border-color: var(--border-highlight);
-    background: linear-gradient(180deg, rgba(46,33,28,0.8), rgba(20,14,10,0.9));
+    background: linear-gradient(180deg, color-mix(in oklab, var(--bg-card) 80%, transparent), color-mix(in oklab, var(--bg-deep) 90%, transparent));
   }
 
   .pill {
@@ -57,7 +57,7 @@ stylesheet
   .pill_running {
     color: var(--status-ok);
     border-color: var(--status-ok);
-    background: rgba(90,122,58,0.12);
+    background: color-mix(in oklab, var(--status-ok) 12%, transparent);
   }
   .pill_completed {
     color: var(--accent-brass);
@@ -67,7 +67,7 @@ stylesheet
   .pill_failed {
     color: var(--accent-blood);
     border-color: var(--accent-blood-dim);
-    background: rgba(232,80,80,0.14);
+    background: color-mix(in oklab, var(--accent-blood) 14%, transparent);
   }
   .pill_stopped {
     color: var(--text-dim);
@@ -76,7 +76,7 @@ stylesheet
   .pill_paused {
     color: var(--status-warn);
     border-color: var(--status-warn);
-    background: rgba(160,106,26,0.10);
+    background: color-mix(in oklab, var(--accent-brass) 10%, transparent);
   }
   .pill_unknown {
     color: var(--text-dim);
@@ -152,6 +152,21 @@ stylesheet
     .cycle, .kd, .elapsed {
       text-align: left;
     }
+  }
+
+  @media (prefers-contrast: more) {
+    .goal { border-width: 2px; border-color: var(--text-bright); }
+    .goal_header { border-bottom-width: 2px; border-color: var(--text-bright); }
+    .k { color: var(--text-bright); }
+  }
+
+  @media (forced-colors: active) {
+    .pill_running { color: Highlight; border-color: Highlight; }
+    .pill_completed { color: ButtonText; border-color: ButtonText; }
+    .pill_failed { color: MarkText; border-color: MarkText; }
+    .pill_stopped { color: GrayText; border-color: GrayText; }
+    .pill_paused { color: Mark; border-color: Mark; }
+    .kd_keep { color: Highlight; }
   }
 |}]
 

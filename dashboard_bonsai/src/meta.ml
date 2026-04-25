@@ -23,8 +23,8 @@ stylesheet
     border: 1px solid var(--border-main, #3a2e20);
     background: linear-gradient(
       180deg,
-      rgba(42, 20, 14, 0.35),
-      rgba(20, 12, 8, 0.65)
+      color-mix(in oklab, var(--bg-card) 35%, transparent),
+      color-mix(in oklab, var(--bg-deep) 65%, transparent)
     );
     font-family: 'JetBrains Mono', ui-monospace, monospace;
     font-size: 11px;
@@ -49,6 +49,16 @@ stylesheet
   .v_ok    { color: var(--status-ok, #6a9a4a); font-variant-numeric: tabular-nums; }
   .v_brass { color: var(--accent-brass, #968228); font-variant-numeric: tabular-nums; }
   .v_blood { color: var(--accent-blood, #e85050); font-variant-numeric: tabular-nums; }
+
+  @media (prefers-contrast: more) {
+    .strip { border-width: 2px; border-color: var(--text-bright); }
+    .k { color: var(--text-bright); }
+  }
+
+  @media (forced-colors: active) {
+    .v_ok { color: Highlight; }
+    .v_blood { color: MarkText; }
+  }
 |}]
 
 type value_color = [ `Default | `Ok | `Brass | `Blood ]

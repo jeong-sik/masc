@@ -42,9 +42,9 @@ stylesheet
     border: 1px solid var(--border-highlight);
     border-radius: 2px;
     box-shadow:
-      inset 0 0 0 1px rgba(196, 162, 101, 0.08),
-      0 2px 12px rgba(0, 0, 0, 0.6),
-      0 16px 24px -16px rgba(0, 0, 0, 0.9);
+      inset 0 0 0 1px color-mix(in oklab, var(--accent-brass) 8%, transparent),
+      0 2px 12px color-mix(in oklab, var(--bg-deep) 60%, transparent),
+      0 16px 24px -16px color-mix(in oklab, var(--bg-deep) 90%, transparent);
     backdrop-filter: blur(2px);
   }
 
@@ -99,6 +99,17 @@ stylesheet
   .v_ok   { color: var(--status-ok); }
   .v_warn { color: var(--status-warn); }
   .v_bad  { color: var(--status-bad); }
+
+  @media (prefers-contrast: more) {
+    .hud { border-width: 2px; border-color: var(--text-bright); }
+    .k { color: var(--text-bright); }
+  }
+
+  @media (forced-colors: active) {
+    .v_ok { color: Highlight; }
+    .v_warn { color: Mark; }
+    .v_bad { color: MarkText; }
+  }
 |}]
 
 let v_class_attr = function

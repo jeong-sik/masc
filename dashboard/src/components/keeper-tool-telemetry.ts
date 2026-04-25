@@ -5,18 +5,58 @@
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import { fetchKeeperToolStats } from '../api/dashboard'
-import type { ToolStat, HourlyBucket, ToolStatsResponse } from '../api/dashboard'
+import type { ToolStat, HourlyBucket, ToolStatsResponse, TelemetryFreshnessMetadata } from '../api/dashboard'
 import { toolCategory, formatDuration, durationColor } from './tool-call-shared'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { SectionCap } from './common/section-cap'
+import { formatElapsedCompact } from '../lib/format-time'
 
 // ── Types ─────────────────────────────────────────────
 
-interface TelemetryState {
+interface TelemetryState extends TelemetryFreshnessMetadata {
   tools: ToolStat[]
   timeline: HourlyBucket[]
   totalEntries: number
   windowHours: number
+}
+
+function sourceHealthClass(health?: string | null): string {
+  switch ((health ?? '').toLowerCase()) {
+    case 'ok':
+      return 'text-[var(--ok)]'
+    case 'stale':
+    case 'coverage_gap':
+    case 'empty':
+      return 'text-[var(--warn)]'
+    case 'missing':
+      return 'text-[var(--bad-light)]'
+    default:
+      return 'text-[var(--text-dim)]'
+  }
+}
+
+function freshnessText(d: TelemetryFreshnessMetadata): string {
+  if (d.stale_reason) return d.stale_reason
+  if (typeof d.latest_age_s !== 'number' || !Number.isFinite(d.latest_age_s)) {
+    return 'latest n/a'
+  }
+  return `latest ${formatElapsedCompact(d.latest_age_s)}`
+}
+
+function FreshnessLine({ data }: { data: TelemetryFreshnessMetadata }) {
+  return html`
+    <div class="text-3xs text-[var(--text-dim)]">
+      <span class="font-mono">${data.source ?? 'trajectory_tool_call'}</span>
+      <span class="mx-1">·</span>
+      <span class="font-mono ${sourceHealthClass(data.health)}">${data.health ?? 'unknown'}</span>
+      <span class="mx-1">·</span>
+      <span>${freshnessText(data)}</span>
+      ${typeof data.entry_count === 'number' ? html`
+        <span class="mx-1">·</span>
+        <span>${data.entry_count.toLocaleString()} rows</span>
+      ` : null}
+    </div>
+  `
 }
 
 /**
@@ -136,6 +176,18 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
     void resource.load(async (signal) => {
       const data: ToolStatsResponse = await fetchKeeperToolStats(keeperName, 24, { signal })
       return {
+        source: data.source,
+        producer: data.producer,
+        durable_store: data.durable_store,
+        dashboard_surface: data.dashboard_surface,
+        freshness_slo_s: data.freshness_slo_s,
+        latest_ts_unix: data.latest_ts_unix,
+        latest_ts_iso: data.latest_ts_iso,
+        latest_age_s: data.latest_age_s,
+        health: data.health,
+        stale_reason: data.stale_reason,
+        entry_count: data.entry_count,
+        exists: data.exists,
         tools: data.tools,
         timeline: data.timeline,
         totalEntries: data.total_entries,
@@ -155,11 +207,20 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
     windowHours: 24,
   }
 
-  // Loading and empty states return null — the section card
-  // is only rendered when there is actual telemetry data to show.
-  if (asyncState.loading || s.tools.length === 0) return null
+  // Loading stays quiet; an empty result still renders source freshness so
+  // operators can distinguish no calls from a broken trajectory lane.
+  if (asyncState.loading) return null
   if (asyncState.error) {
     return html`<div class="text-xs text-[var(--bad)] py-2 px-3">텔레메트리 로드 실패: ${asyncState.error}</div>`
+  }
+
+  if (s.tools.length === 0) {
+    return html`
+      <div class="p-4 rounded border border-[var(--card-border)] bg-card/30">
+        <div class="text-xs text-[var(--text-muted)]">도구 텔레메트리 데이터 없음</div>
+        <${FreshnessLine} data=${s} />
+      </div>
+    `
   }
 
   const totalCost = s.tools.reduce((sum, t) => sum + t.total_cost_usd, 0)
@@ -198,6 +259,7 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
           ${s.windowHours}h 기간
         </span>
       </div>
+      <${FreshnessLine} data=${s} />
 
       ${'' /* Hourly timeline sparkline */}
       ${s.timeline.length > 1 ? html`

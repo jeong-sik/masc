@@ -567,6 +567,132 @@ let test_summary_tool_metric_surface_points_to_raw_metrics () =
     "/api/v1/tool-metrics"
     (json_string_field "dashboard_surface" summary)
 
+let test_summary_includes_trajectory_and_execution_receipt_sources () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "telem_summary_tool_lanes" in
+  let root = masc_root dir in
+  let now = Unix.gettimeofday () in
+  let trajectory_dir = Filename.concat root "trajectories/alice" in
+  Fs_compat.mkdir_p trajectory_dir;
+  Fs_compat.append_file
+    (Filename.concat trajectory_dir "trace-1.jsonl")
+    (Yojson.Safe.to_string
+       (`Assoc
+          [
+            ("ts", `Float now);
+            ("ts_iso", `String (Types.iso8601_of_unix_seconds now));
+            ("turn", `Int 1);
+            ("round", `Int 1);
+            ("tool_name", `String "keeper_bash");
+            ("args", `Assoc []);
+            ("gate", `Assoc [ ("status", `String "pass") ]);
+            ("result", `String "ok");
+            ("duration_ms", `Int 7);
+            ("error", `Null);
+            ("cost_usd", `Float 0.0);
+            ( "runtime_contract",
+              `Assoc [ ("keeper_name", `String "alice") ] );
+            ( "action_radius",
+              `Assoc [ ("tool_name", `String "keeper_bash") ] );
+          ])
+     ^ "\n");
+  let receipt_dir = Filename.concat root "keepers/alice/execution-receipts" in
+  Fs_compat.mkdir_p receipt_dir;
+  write_jsonl receipt_dir
+    [ `Assoc
+        [
+          ("recorded_at", `String (Types.iso8601_of_unix_seconds now));
+          ("ended_at", `String (Types.iso8601_of_unix_seconds now));
+          ("keeper_name", `String "alice");
+          ("trace_id", `String "trace-1");
+          ("outcome", `String "completed");
+        ] ];
+  let json = Telemetry_unified.summary_json ~base_path:dir ~masc_root:root () in
+  let trajectory_summary = source_summary "trajectory_tool_call" json in
+  let receipt_summary = source_summary "execution_receipt" json in
+  Alcotest.(check int) "trajectory count" 1
+    (json_int_field "entry_count" trajectory_summary);
+  Alcotest.(check int) "trajectory keeper count" 1
+    (json_int_field "keeper_count" trajectory_summary);
+  Alcotest.(check string) "trajectory health" "ok"
+    (json_string_field "health" trajectory_summary);
+  Alcotest.(check string) "trajectory dashboard surface"
+    "/api/v1/keepers/:name/tool-stats"
+    (json_string_field "dashboard_surface" trajectory_summary);
+  Alcotest.(check int) "execution receipt count" 1
+    (json_int_field "entry_count" receipt_summary);
+  Alcotest.(check int) "execution receipt keeper count" 1
+    (json_int_field "keeper_count" receipt_summary);
+  Alcotest.(check string) "execution receipt health" "ok"
+    (json_string_field "health" receipt_summary);
+  Alcotest.(check string) "execution receipt dashboard surface"
+    "/api/v1/dashboard/execution-trust"
+    (json_string_field "dashboard_surface" receipt_summary)
+
+let test_read_unified_reads_trajectory_and_execution_receipts () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "telem_read_tool_lanes" in
+  let root = masc_root dir in
+  let trajectory_dir = Filename.concat root "trajectories/alice" in
+  Fs_compat.mkdir_p trajectory_dir;
+  Fs_compat.append_file
+    (Filename.concat trajectory_dir "trace-1.jsonl")
+    (Yojson.Safe.to_string
+       (`Assoc
+          [
+            ("ts", `Float 2000.0);
+            ("ts_iso", `String "1970-01-01T00:33:20Z");
+            ("turn", `Int 1);
+            ("round", `Int 1);
+            ("tool_name", `String "keeper_bash");
+            ("args", `Assoc []);
+            ("gate", `Assoc [ ("status", `String "pass") ]);
+            ("result", `String "ok");
+            ("duration_ms", `Int 7);
+            ("error", `Null);
+            ("cost_usd", `Float 0.0);
+            ( "runtime_contract",
+              `Assoc [ ("keeper_name", `String "alice") ] );
+            ( "action_radius",
+              `Assoc [ ("tool_name", `String "keeper_bash") ] );
+          ])
+     ^ "\n");
+  let receipt_dir = Filename.concat root "keepers/alice/execution-receipts" in
+  Fs_compat.mkdir_p receipt_dir;
+  write_jsonl receipt_dir
+    [ `Assoc
+        [
+          ("recorded_at", `String "1970-01-01T00:16:40Z");
+          ("ended_at", `String "1970-01-01T00:16:40Z");
+          ("keeper_name", `String "alice");
+          ("trace_id", `String "trace-1");
+          ("outcome", `String "completed");
+        ] ];
+  let entries =
+    Telemetry_unified.read_unified
+      ~base_path:dir
+      ~masc_root:root
+      ~sources:
+        [
+          Telemetry_unified.Trajectory_tool_call;
+          Telemetry_unified.Execution_receipt;
+        ]
+      ~keeper_name:"alice"
+      ~n:10
+      ()
+  in
+  if List.length entries <> 2 then
+    Alcotest.failf "expected two entries, got sources: %s"
+      (entries
+       |> List.map (json_string_field "source")
+       |> String.concat ",");
+  Alcotest.(check string) "newest source" "trajectory_tool_call"
+    (List.hd entries |> json_string_field "source");
+  Alcotest.(check string) "oldest source" "execution_receipt"
+    (List.nth entries 1 |> json_string_field "source")
+
 let test_summary_surfaces_coverage_gaps () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -695,6 +821,8 @@ let () =
             test_time_window_reads_matching_day_files;
           Alcotest.test_case "time window n=0 disables truncation" `Quick
             test_time_window_n_zero_disables_truncation;
+          Alcotest.test_case "trajectory and receipts" `Quick
+            test_read_unified_reads_trajectory_and_execution_receipts;
         ] );
       ( "summary",
         [
@@ -704,6 +832,9 @@ let () =
             test_summary_includes_freshness_metadata;
           Alcotest.test_case "tool_metric surface points to raw metrics" `Quick
             test_summary_tool_metric_surface_points_to_raw_metrics;
+          Alcotest.test_case "includes trajectory and execution receipt sources"
+            `Quick
+            test_summary_includes_trajectory_and_execution_receipt_sources;
           Alcotest.test_case "surfaces coverage gaps" `Quick
             test_summary_surfaces_coverage_gaps;
           Alcotest.test_case "counts all rows beyond recent cap" `Quick

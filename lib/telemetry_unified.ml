@@ -10,8 +10,11 @@
     - [<masc_root>/keepers/<name>/metrics/]  — Per-keeper turn metrics
     - [<masc_root>/telemetry/]               — Agent lifecycle + tool call events
     - [<masc_root>/tool_calls/]              — Full I/O for keeper tool calls
+    - [<masc_root>/trajectories/<keeper>/]   — Keeper trajectory tool-call rows
     - [<masc_root>/tool_usage/]              — System_internal surface tool calls
     - [<masc_root>/oas-events/]              — Durable OAS native/custom events
+    - [<masc_root>/keepers/<name>/execution-receipts/]
+                                             — Keeper execution receipts
     - [<base_path>/data/tool-metrics/]       — Tool duration/success metrics
     @since 2.251.0 *)
 
@@ -19,24 +22,30 @@ type source =
   | Keeper_metric  (** Per-keeper turn/heartbeat metrics *)
   | Agent_event    (** Agent lifecycle, task, handoff events *)
   | Tool_call_io   (** Keeper tool calls with full input/output *)
+  | Trajectory_tool_call  (** Keeper trajectory-backed tool call rows *)
   | Tool_usage     (** System_internal surface tool invocations *)
   | Oas_event      (** Durable OAS native/custom event bus relays *)
+  | Execution_receipt  (** Keeper execution receipt rows *)
   | Tool_metric    (** Tool duration and success metrics *)
 
 let source_to_string = function
   | Keeper_metric -> "keeper_metric"
   | Agent_event -> "agent_event"
   | Tool_call_io -> "tool_call_io"
+  | Trajectory_tool_call -> "trajectory_tool_call"
   | Tool_usage -> "tool_usage"
   | Oas_event -> "oas_event"
+  | Execution_receipt -> "execution_receipt"
   | Tool_metric -> "tool_metric"
 
 let source_of_string = function
   | "keeper_metric" -> Some Keeper_metric
   | "agent_event" -> Some Agent_event
   | "tool_call_io" -> Some Tool_call_io
+  | "trajectory_tool_call" -> Some Trajectory_tool_call
   | "tool_usage" -> Some Tool_usage
   | "oas_event" -> Some Oas_event
+  | "execution_receipt" -> Some Execution_receipt
   | "tool_metric" -> Some Tool_metric
   | _ -> None
 
@@ -44,8 +53,10 @@ let all_sources =
   [ Keeper_metric
   ; Agent_event
   ; Tool_call_io
+  ; Trajectory_tool_call
   ; Tool_usage
   ; Oas_event
+  ; Execution_receipt
   ; Tool_metric
   ]
 
@@ -68,11 +79,14 @@ let fixed_store_dir ~masc_root ~base_path = function
   | Tool_usage   -> Some (Filename.concat masc_root "tool_usage")
   | Oas_event    -> Some (Filename.concat masc_root "oas-events")
   | Tool_metric  -> Some (Filename.concat base_path "data/tool-metrics")
-  | Keeper_metric -> None  (* handled separately *)
+  | Keeper_metric | Trajectory_tool_call | Execution_receipt -> None
+    (* handled separately *)
 
 let source_freshness_slo_s = function
   | Keeper_metric -> 300.0
   | Tool_call_io -> 300.0
+  | Trajectory_tool_call -> 300.0
+  | Execution_receipt -> 300.0
   | Oas_event -> 300.0
   | Agent_event -> 900.0
   | Tool_usage -> 900.0
@@ -82,20 +96,26 @@ let source_producer = function
   | Keeper_metric -> "keeper_unified_metrics"
   | Agent_event -> "telemetry_eio"
   | Tool_call_io -> "keeper_hooks_oas|mcp_server_eio_call_tool"
+  | Trajectory_tool_call -> "keeper_hooks_oas|mcp_server_eio_call_tool"
   | Tool_usage -> "tool_usage_log"
   | Oas_event -> "oas_event_bus"
+  | Execution_receipt -> "keeper_agent_run.execution_receipt"
   | Tool_metric -> "tool_metrics_persist"
 
 let source_dashboard_surface = function
   | Keeper_metric -> "/api/v1/dashboard/telemetry/summary"
   | Agent_event -> "/api/v1/dashboard/telemetry"
   | Tool_call_io -> "/api/v1/keepers/:name/tool-calls"
+  | Trajectory_tool_call -> "/api/v1/keepers/:name/tool-stats"
   | Tool_usage -> "/api/v1/dashboard/tools"
   | Oas_event -> "/api/v1/dashboard/telemetry"
+  | Execution_receipt -> "/api/v1/dashboard/execution-trust"
   | Tool_metric -> "/api/v1/tool-metrics"
 
 let source_durable_store ~masc_root ~base_path = function
   | Keeper_metric -> Filename.concat masc_root "keepers/*/metrics"
+  | Trajectory_tool_call -> Filename.concat masc_root "trajectories/*/*.jsonl"
+  | Execution_receipt -> Filename.concat masc_root "keepers/*/execution-receipts"
   | source -> (
       match fixed_store_dir ~masc_root ~base_path source with
       | Some dir -> dir
@@ -116,31 +136,77 @@ let discover_keeper_metric_dirs masc_root : (string * string) list =
       else None
     ) entries
 
+let is_directory path =
+  Safe_ops.protect ~default:false (fun () ->
+    Sys.file_exists path && Sys.is_directory path)
+
+let is_jsonl_file path =
+  Safe_ops.protect ~default:false (fun () ->
+    Sys.file_exists path && (not (Sys.is_directory path))
+    && Filename.check_suffix path ".jsonl")
+
+let discover_trajectory_keeper_dirs masc_root : (string * string) list =
+  let trajectories_root = Filename.concat masc_root "trajectories" in
+  if not (is_directory trajectories_root) then []
+  else
+    Safe_ops.protect ~default:[] (fun () ->
+      Sys.readdir trajectories_root
+      |> Array.to_list
+      |> List.filter_map (fun name ->
+           let dir = Filename.concat trajectories_root name in
+           if is_directory dir then Some (name, dir) else None))
+
+let discover_execution_receipt_dirs masc_root : (string * string) list =
+  let keepers_dir = Filename.concat masc_root "keepers" in
+  if not (is_directory keepers_dir) then []
+  else
+    Safe_ops.protect ~default:[] (fun () ->
+      Sys.readdir keepers_dir
+      |> Array.to_list
+      |> List.filter_map (fun name ->
+           let dir =
+             Filename.concat (Filename.concat keepers_dir name)
+               "execution-receipts"
+           in
+           if is_directory dir then Some (name, dir) else None))
+
+let trajectory_tool_call_json = function
+  | `Assoc fields -> (
+      match List.assoc_opt "type" fields with
+      | Some (`String ("trajectory_summary" | "thinking")) -> false
+      | _ ->
+          List.mem_assoc "tool_name" fields
+          && List.mem_assoc "ts" fields)
+  | _ -> false
+
 (* ── Timestamp extraction ───────────────────────────── *)
 
 let extract_ts (json : Yojson.Safe.t) : float =
   match json with
   | `Assoc fields ->
-    (* Try ts_unix first (keeper metrics), then ts, then timestamp *)
-    let try_field name =
+    let try_numeric_field name =
       match List.assoc_opt name fields with
       | Some (`Float f) -> Some f
       | Some (`Int i) -> Some (Float.of_int i)
       | _ -> None
     in
-    (match try_field "ts_unix" with
-     | Some f -> f
+    let try_iso_field name =
+      match List.assoc_opt name fields with
+      | Some (`String iso) -> Types.parse_iso8601_opt iso
+      | _ -> None
+    in
+    let rec first_some f = function
+      | [] -> None
+      | name :: rest -> (
+          match f name with
+          | Some value -> Some value
+          | None -> first_some f rest)
+    in
+    (match first_some try_numeric_field [ "ts_unix"; "ts"; "timestamp" ] with
+     | Some ts -> ts
      | None ->
-       match try_field "ts" with
-       | Some f -> f
-       | None ->
-         match try_field "timestamp" with
-         | Some f -> f
-         | None ->
-           (match List.assoc_opt "ts_iso" fields with
-            | Some (`String iso) ->
-                Option.value ~default:0.0 (Types.parse_iso8601_opt iso)
-            | _ -> 0.0))
+       first_some try_iso_field [ "ts_iso"; "recorded_at"; "ended_at"; "started_at" ]
+       |> Option.value ~default:0.0)
   | _ -> 0.0
 
 let day_string_of_unix_seconds ts =
@@ -376,13 +442,23 @@ let matches_keeper name (json : Yojson.Safe.t) : bool =
       | Some (`String k) -> String.equal k name
       | _ -> false
     in
+    let check_runtime_contract () =
+      match List.assoc_opt "runtime_contract" fields with
+      | Some (`Assoc runtime_fields) -> (
+          match List.assoc_opt "keeper_name" runtime_fields with
+          | Some (`String k) -> String.equal k name
+          | _ -> false)
+      | _ -> false
+    in
     (* keeper_metric: "name" field; tool_call_io: "keeper"; oas_event: "agent_name" *)
     check "name"
     || check "keeper"
+    || check "keeper_name"
     || check "caller"
     || check "agent_id"
     || check "agent_name"
     || check "agent"
+    || check_runtime_contract ()
   | _ -> false
 
 let matches_string_field field expected (json : Yojson.Safe.t) : bool =
@@ -472,6 +548,87 @@ let read_keeper_metrics_fast_top ~masc_root ~n () : Yojson.Safe.t list =
   in
   loop [] probes
 
+let dated_jsonl_entries store ~n ?since_ts ?until_ts () =
+  let entries =
+    match effective_day_window ?since_ts ?until_ts () with
+    | Some (since_day, until_day) ->
+        Dated_jsonl.read_range store ~since:since_day ~until:until_day
+    | None when n <= 0 ->
+        let until_ts = Unix.gettimeofday () in
+        let since_day = "1970-01-01" in
+        let until_day = day_string_of_unix_seconds until_ts in
+        Dated_jsonl.read_range store ~since:since_day ~until:until_day
+    | None -> Dated_jsonl.read_recent store n
+  in
+  List.filter (within_requested_window ?since_ts ?until_ts) entries
+
+let read_execution_receipts ~masc_root ?keeper_name ?since_ts ?until_ts ~n ()
+    : Yojson.Safe.t list =
+  let dirs = discover_execution_receipt_dirs masc_root in
+  let dirs =
+    match keeper_name with
+    | None -> dirs
+    | Some name -> List.filter (fun (k, _) -> String.equal k name) dirs
+  in
+  List.concat_map
+    (fun (_name, dir) ->
+      try
+        let store = Dated_jsonl.create ~base_dir:dir () in
+        dated_jsonl_entries store ~n ?since_ts ?until_ts ()
+        |> List.map (tag_entry Execution_receipt)
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+        Log.Telemetry.warn
+          "read_execution_receipts: store open failed for %s: %s"
+          dir (Printexc.to_string exn);
+        [])
+    dirs
+
+let read_trajectory_file path ?since_ts ?until_ts () =
+  if not (is_jsonl_file path) then []
+  else
+    try
+      Fs_compat.load_file path
+      |> String.split_on_char '\n'
+      |> List.filter_map (fun line ->
+           let line = String.trim line in
+           if line = "" then None
+           else
+             try
+               let json = Yojson.Safe.from_string line in
+               if trajectory_tool_call_json json
+                  && within_requested_window ?since_ts ?until_ts json
+               then Some json
+               else None
+             with Yojson.Json_error _ -> None)
+    with Sys_error _ -> []
+
+let read_trajectory_tool_calls ~masc_root ?keeper_name ?since_ts ?until_ts ~n ()
+    : Yojson.Safe.t list =
+  let dirs = discover_trajectory_keeper_dirs masc_root in
+  let dirs =
+    match keeper_name with
+    | None -> dirs
+    | Some name -> List.filter (fun (k, _) -> String.equal k name) dirs
+  in
+  let entries =
+    List.concat_map
+      (fun (_name, dir) ->
+        Safe_ops.protect ~default:[] (fun () ->
+          Sys.readdir dir
+          |> Array.to_list
+          |> List.filter (fun name -> Filename.check_suffix name ".jsonl")
+          |> List.concat_map (fun name ->
+               read_trajectory_file
+                 (Filename.concat dir name)
+                 ?since_ts ?until_ts ())))
+      dirs
+  in
+  let entries = sort_newest_first entries in
+  let entries = if n <= 0 then entries else take_first n entries in
+  List.map (tag_entry Trajectory_tool_call) entries
+
 (* ── Unified read ───────────────────────────────────── *)
 
 let read_unified_result ~base_path ~masc_root ?(sources = all_sources)
@@ -497,6 +654,12 @@ let read_unified_result ~base_path ~masc_root ?(sources = all_sources)
         else
           read_keeper_metrics ~masc_root ?keeper_name ?since_ts ?until_ts
             ~n:per_source ()
+      | Trajectory_tool_call ->
+        read_trajectory_tool_calls ~masc_root ?keeper_name ?since_ts ?until_ts
+          ~n:per_source ()
+      | Execution_receipt ->
+        read_execution_receipts ~masc_root ?keeper_name ?since_ts ?until_ts
+          ~n:per_source ()
       | _ ->
         match fixed_store_dir ~masc_root ~base_path source with
         | Some dir ->
@@ -558,6 +721,44 @@ let count_fixed_source_entries ~masc_root ~base_path source : int =
            (source_to_string source) (Printexc.to_string exn);
          0)
 
+let execution_receipt_summary_stats ~masc_root =
+  discover_execution_receipt_dirs masc_root
+  |> List.fold_left
+       (fun (count_acc, latest_acc) (_name, dir) ->
+         match Dated_jsonl.create ~base_dir:dir () with
+         | store ->
+           let count = Dated_jsonl.count_entries store in
+           let latest = latest_store_ts dir "execution_receipt" in
+           ( count_acc + count,
+             match latest with
+             | Some ts -> max_ts_opt latest_acc ts
+             | None -> latest_acc )
+         | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+         | exception exn ->
+           Log.Telemetry.warn
+             "execution_receipt_summary_stats: store open failed for %s: %s"
+             dir (Printexc.to_string exn);
+           (count_acc, latest_acc))
+       (0, None)
+
+let trajectory_tool_call_summary_stats ~masc_root =
+  discover_trajectory_keeper_dirs masc_root
+  |> List.fold_left
+       (fun (count_acc, latest_acc) (_name, dir) ->
+         let entries =
+           Safe_ops.protect ~default:[] (fun () ->
+             Sys.readdir dir
+             |> Array.to_list
+             |> List.filter (fun name -> Filename.check_suffix name ".jsonl")
+             |> List.concat_map (fun name ->
+                  read_trajectory_file (Filename.concat dir name) ()))
+         in
+         ( count_acc + List.length entries,
+           match latest_ts_of_entries entries with
+           | Some ts -> max_ts_opt latest_acc ts
+           | None -> latest_acc ))
+       (0, None)
+
 let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
   let now = Unix.gettimeofday () in
   let coverage_gaps = Telemetry_coverage_gap.read_recent ~masc_root ~n:50 in
@@ -594,6 +795,17 @@ let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
       ]
     in
     let coverage_gap = latest_coverage_gap_for_source coverage_gaps source in
+    let keeper_dir_fields dirs =
+      [
+        ( "keepers",
+          `List
+            (List.map
+               (fun (name, dir) ->
+                 `Assoc [ ("name", `String name); ("path", `String dir) ])
+               dirs) );
+        ("keeper_count", `Int (List.length dirs));
+      ]
+    in
     match source with
     | Keeper_metric ->
       let exists = keeper_dirs <> [] in
@@ -614,6 +826,48 @@ let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
           @ source_health_fields ~now ~exists ~entry_count:keeper_total
               ~latest_ts:keeper_latest_ts ~freshness_slo_s ?coverage_gap ()),
         keeper_total )
+    | Trajectory_tool_call ->
+      let trajectories_root = Filename.concat masc_root "trajectories" in
+      let dirs = discover_trajectory_keeper_dirs masc_root in
+      let exists = is_directory trajectories_root in
+      let count, latest_ts =
+        if exists then trajectory_tool_call_summary_stats ~masc_root
+        else (0, None)
+      in
+      ( `Assoc
+          ([
+             ("source", `String (source_to_string source));
+             ("path", `String trajectories_root);
+             ("exists", `Bool exists);
+             ("entry_count", `Int count);
+           ]
+          @ keeper_dir_fields dirs
+          @ metadata_fields
+          @ freshness_fields ~now latest_ts
+          @ source_health_fields ~now ~exists ~entry_count:count ~latest_ts
+              ~freshness_slo_s ?coverage_gap ()),
+        count )
+    | Execution_receipt ->
+      let keepers_root = Filename.concat masc_root "keepers" in
+      let dirs = discover_execution_receipt_dirs masc_root in
+      let exists = is_directory keepers_root in
+      let count, latest_ts =
+        if exists then execution_receipt_summary_stats ~masc_root
+        else (0, None)
+      in
+      ( `Assoc
+          ([
+             ("source", `String (source_to_string source));
+             ("path", `String (Filename.concat keepers_root "*/execution-receipts"));
+             ("exists", `Bool exists);
+             ("entry_count", `Int count);
+           ]
+          @ keeper_dir_fields dirs
+          @ metadata_fields
+          @ freshness_fields ~now latest_ts
+          @ source_health_fields ~now ~exists ~entry_count:count ~latest_ts
+              ~freshness_slo_s ?coverage_gap ()),
+        count )
     | _ ->
       let dir = match fixed_store_dir ~masc_root ~base_path source with
         | Some d -> d | None -> "" in

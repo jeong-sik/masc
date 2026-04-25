@@ -137,6 +137,11 @@ function normalizeStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && item.trim() !== '') : []
 }
 
+function recordField(value: unknown, key: string): unknown {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
+  return (value as Record<string, unknown>)[key]
+}
+
 function uniqueStrings(values: Array<string | null | undefined>): string[] {
   const seen = new Set<string>()
   const result: string[] = []
@@ -164,8 +169,13 @@ function telemetryScopeBadges(entry: TelemetryEntry): string[] {
 
 function telemetryToolName(entry: TelemetryEntry): string | null {
   if (entry.source === 'tool_call_io') return normalizeText(entry.tool)
-  if (entry.source === 'tool_usage' || entry.source === 'tool_metric') {
+  if (entry.source === 'tool_usage' || entry.source === 'tool_metric' || entry.source === 'trajectory_tool_call') {
     return normalizeText(entry.tool_name)
+      ?? normalizeText(recordField(entry.action_radius, 'tool_name'))
+  }
+  if (entry.source === 'execution_receipt') {
+    return normalizeStringArray(entry.canonical_tools)[0]
+      ?? normalizeText(recordField(entry.action_radius, 'tool_name'))
   }
   return null
 }
@@ -206,8 +216,10 @@ function entryGroupingDescriptor(entry: TelemetryEntry): {
     ?? normalizeText(entry.operation_id)
     ?? normalizeText(entry.worker_run_id)
     ?? normalizeText(entry.keeper)
+    ?? normalizeText(entry.keeper_name)
     ?? normalizeText(entry.name)
     ?? normalizeText(entry.caller)
+    ?? normalizeText(entry.agent_name)
     ?? 'global'
 
   return {
@@ -250,6 +262,15 @@ function entryPreview(e: TelemetryEntry): string {
       const keeper = normalizeText(e.keeper) ?? ''
       return `${keeper} -> ${tool}`
     }
+    case 'trajectory_tool_call': {
+      const tool = telemetryToolName(e) ?? 'tool'
+      const keeper =
+        normalizeText(e.keeper_name)
+        ?? normalizeText(recordField(e.runtime_contract, 'keeper_name'))
+        ?? normalizeText(e.keeper)
+        ?? 'unknown'
+      return `${keeper} -> ${tool}`
+    }
     case 'tool_usage': {
       const tool = normalizeText(e.tool_name) ?? ''
       const caller = normalizeText(e.caller) ?? ''
@@ -268,6 +289,12 @@ function entryPreview(e: TelemetryEntry): string {
         taskId,
       ].filter(Boolean)
       return parts.length > 0 ? `${eventType}: ${parts.join(' · ')}` : eventType
+    }
+    case 'execution_receipt': {
+      const keeper = normalizeText(e.keeper_name) ?? normalizeText(e.agent_name) ?? 'unknown'
+      const outcome = normalizeText(e.outcome) ?? normalizeText(e.operator_disposition) ?? 'recorded'
+      const reason = normalizeText(e.terminal_reason_code)
+      return reason ? `${keeper} receipt ${outcome} (${reason})` : `${keeper} receipt ${outcome}`
     }
     case 'tool_metric': {
       const tool = normalizeText(e.tool_name) ?? ''

@@ -363,6 +363,50 @@ describe('TelemetryUnified', () => {
     expect(container.textContent).toContain('Heartbeat · keeper-heart heartbeat · 2 events')
   })
 
+  it('uses trajectory and execution receipt fields for telemetry previews', async () => {
+    const { buildTelemetryDisplayItems, filterTelemetryDisplayItems } = await loadPanel(
+      vi.fn().mockResolvedValue(baseTelemetry),
+      vi.fn().mockResolvedValue(baseSummary),
+    )
+
+    const items = buildTelemetryDisplayItems([
+      {
+        source: 'trajectory_tool_call',
+        ts: 1_775_709_300,
+        session_id: 'sess-tool',
+        keeper_name: 'keeper-alpha',
+        tool_name: 'keeper_tasks_list',
+      },
+      {
+        source: 'trajectory_tool_call',
+        ts: 1_775_709_299,
+        session_id: 'sess-tool',
+        runtime_contract: { keeper_name: 'keeper-alpha' },
+        action_radius: { tool_name: 'keeper_tasks_list' },
+      },
+      {
+        source: 'execution_receipt',
+        recorded_at: '2026-04-09T05:10:00Z',
+        keeper_name: 'keeper-alpha',
+        outcome: 'completed',
+        terminal_reason_code: 'turn_done',
+      },
+    ])
+
+    expect(items[0]).toMatchObject({
+      kind: 'group',
+      category: 'polling',
+      label: 'keeper_tasks_list',
+      count: 2,
+    })
+    expect(items[1]).toMatchObject({ kind: 'entry' })
+    if (items[1]?.kind === 'entry') {
+      expect(items[1].entry.source).toBe('execution_receipt')
+    }
+    const receiptMatches = filterTelemetryDisplayItems(items, 'turn_done')
+    expect(receiptMatches).toHaveLength(1)
+  })
+
   it('expands grouped rows to reveal the condensed raw entries', async () => {
     const fetchTelemetry = vi.fn().mockResolvedValue({
       ...baseTelemetry,

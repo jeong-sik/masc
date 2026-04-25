@@ -1300,7 +1300,24 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
          | None -> `Null);
       ]
   in
-  Dated_jsonl.append metrics_store snapshot
+  Dated_jsonl.append metrics_store snapshot;
+  (* #9943: a compaction trigger that produced no token reduction
+     is invisible in [masc_keeper_compactions_total] (which counts
+     trigger fires).  Emit a dedicated counter here so dashboards
+     can alert on the noop rate — production audit (2026-04-24)
+     showed 956/972 = 98.4% of compaction snapshots were silent
+     noops.  Emit only when a trigger fired and before/after match
+     at a non-zero token count; the [trigger] label uses the
+     human-readable reason already present in the snapshot. *)
+  (match compaction.trigger with
+   | Some trigger
+     when compaction.before_tokens > 0
+       && compaction.before_tokens = compaction.after_tokens ->
+       Prometheus.inc_counter
+         Prometheus.metric_keeper_compaction_noop
+         ~labels:[ ("keeper", meta.name); ("trigger", trigger) ]
+         ()
+   | _ -> ())
 
 let broadcast_lifecycle_events ~(name : string)
     ~(turn_generation : int)

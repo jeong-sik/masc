@@ -30,6 +30,14 @@ type event =
       session_id: string option;
       operation_id: string option;
       worker_run_id: string option;
+      (* #10358: 17.3% of Tool_called events have success=false but
+         no diagnostic fields — operators cannot tell timeout from
+         OOM/4xx/cancel.  Both fields stay optional so existing call
+         sites that lack error context (worker_container, http
+         keeper streams) remain valid; only the MCP dispatcher
+         currently populates them. *)
+      error_kind: string option;
+      error_message: string option;
     }
   | Tool_assigned of { agent_id: string; profile: string; preset: string option; tool_count: int; assignment_id: string }
 [@@deriving yojson, show]
@@ -171,6 +179,16 @@ let event_record_of_yojson_lenient json =
               let* worker_run_id =
                 json_string_opt context "worker_run_id" event_fields
               in
+              (* #10358: lenient parser must accept rows from before the
+                 error fields existed (they appear as missing) and rows
+                 from after (Some "..." or None).  Both keys are
+                 [json_string_opt] so missing collapses to [None]. *)
+              let* error_kind =
+                json_string_opt context "error_kind" event_fields
+              in
+              let* error_message =
+                json_string_opt context "error_message" event_fields
+              in
               Ok
                 {
                   timestamp;
@@ -185,6 +203,8 @@ let event_record_of_yojson_lenient json =
                         session_id;
                         operation_id;
                         worker_run_id;
+                        error_kind;
+                        error_message;
                       };
                 }
           | _ -> Error original_error)
@@ -436,7 +456,8 @@ let track_error ?fs config ~code ~message ~context =
   track ?fs config (Error_occurred { code; message; context })
 
 let track_tool_called ?fs config ~tool_name ~success ~duration_ms ?agent_id
-    ?source ?session_id ?operation_id ?worker_run_id () =
+    ?source ?session_id ?operation_id ?worker_run_id
+    ?error_kind ?error_message () =
   track ?fs config
     (Tool_called
        {
@@ -448,6 +469,8 @@ let track_tool_called ?fs config ~tool_name ~success ~duration_ms ?agent_id
          session_id;
          operation_id;
          worker_run_id;
+         error_kind;
+         error_message;
        })
 
 let track_tool_assigned ?fs config ~agent_id ~profile ?preset ~tool_count ~assignment_id () =

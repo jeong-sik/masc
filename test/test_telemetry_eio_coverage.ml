@@ -110,6 +110,8 @@ let test_event_tool_called () =
     session_id = Some "mcp-session-1";
     operation_id = Some "op-1";
     worker_run_id = Some "run-1";
+    error_kind = None;
+    error_message = None;
   } in
   match e with
   | Telemetry_eio.Tool_called r ->

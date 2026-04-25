@@ -714,12 +714,34 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
   if telemetry_enabled then
     (match state.Mcp_server.fs with
      | Some fs ->
+         (* #10358: classify failures so the 17.3% [success=false]
+            tail in [telemetry/YYYY-MM/DD.jsonl] becomes diagnosable
+            without cross-referencing audit_log.  [error_kind] keeps a
+            small closed vocabulary (timeout vs other) so dashboards
+            can group; [error_message] carries the already-truncated
+            preview that [audit_log.log_tool_call] received. *)
+         let telemetry_error_kind =
+           if success then None
+           else if !timeout_hit then Some "timeout"
+           else Some "tool_failure"
+         in
+         let telemetry_error_message =
+           if success then None
+           else
+             let preview =
+               String_util.utf8_safe ~max_bytes:200 ~suffix:"..." message
+               |> String_util.to_string
+             in
+             if String.length preview = 0 then None else Some preview
+         in
          (try Telemetry_eio.track_tool_called ~fs state.Mcp_server.room_config
                 ~tool_name:name ~agent_id:agent_name ~success ~duration_ms
                 ~source:(Tool_registry.string_of_source source)
                 ?session_id:telemetry_session_id
                 ?operation_id:telemetry_operation_id
                 ?worker_run_id:telemetry_worker_run_id
+                ?error_kind:telemetry_error_kind
+                ?error_message:telemetry_error_message
                 ()
           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
             log_mcp_exn ~label:"telemetry tracking failed" exn)

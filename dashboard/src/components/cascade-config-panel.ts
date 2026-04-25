@@ -400,6 +400,7 @@ function ProfileCard({
       ${profile.keeper_assignable
         ? html`
           <form
+            aria-label="Keeper assignment"
             class="rounded border border-[var(--card-border)] bg-[var(--bg-panel)] p-2 mb-3"
             onSubmit=${handleAssignKeeper}
           >
@@ -1115,7 +1116,7 @@ function CascadeRawConfigEditor({
           ${mode.secondary}
         </p>
 
-        <form class="flex flex-col gap-3" onSubmit=${handleSave}>
+        <form aria-label="설정 소스 편집" class="flex flex-col gap-3" onSubmit=${handleSave}>
           <textarea
             aria-label="설정 소스 편집"
             class="h-96 w-full rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-3 py-2 font-mono text-xs text-[var(--text-strong)]"

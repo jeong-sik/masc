@@ -77,7 +77,7 @@ export function ExcusePatterns() {
           The format must be a JSON array of arrays, each containing two strings: <code>["pattern", "reason"]</code>.
         </p>
 
-        <form onSubmit=${handleSave}>
+        <form aria-label="핑계 패턴 편집" onSubmit=${handleSave}>
           <textarea
             name="patterns"
             class="w-full h-96 p-3 bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded font-mono text-sm mb-4 text-[var(--text-primary)]"

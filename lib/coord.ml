@@ -258,6 +258,19 @@ let () =
   Atomic.set Coord_hooks.distributed_lock_acquire_failed_fn
     record_distributed_lock_acquire_failed
 
+(* #10421: task_claim_next auto-release observability.
+   [Coord_task_schedule] emits a labelled hook on every auto-
+   release; wire it to the Prometheus counter here so the
+   masc_coord sub-library never depends on Prometheus. *)
+let record_task_claim_auto_release ~agent ~reason =
+  Prometheus.inc_counter Prometheus.metric_task_claim_auto_release
+    ~labels:[ ("agent", agent); ("reason", reason) ]
+    ()
+
+let () =
+  Atomic.set Coord_hooks.task_claim_auto_release_emit_fn
+    record_task_claim_auto_release
+
 (* Activity graph emit — wraps Activity_graph for room sub-modules *)
 let () = Atomic.set Coord_hooks.activity_emit_fn (fun config ~actor ?subject ~kind ~payload ~tags () ->
     (try

@@ -134,6 +134,12 @@ val metric_keeper_compaction_saved_tokens : string
     triggers rather than savings.  Labels: [keeper, trigger]. *)
 val metric_keeper_compaction_noop : string
 
+(** #10421: counter incremented when
+    [Coord_task_schedule.task_claim_next] auto-releases a
+    previous claim.  Labels:
+    [agent, reason="rapid_replacement"|"stale_replacement"|"unknown_age"]. *)
+val metric_task_claim_auto_release : string
+
 val metric_keeper_operator_compact : string
 val metric_keeper_operator_clear : string
 val metric_keeper_heartbeat_successes : string

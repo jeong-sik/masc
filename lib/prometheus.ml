@@ -341,6 +341,20 @@ let metric_keeper_operator_clear = "masc_keeper_operator_clear_total"
 let metric_keeper_compaction_noop =
   "masc_keeper_compaction_noop_total"
 
+(* #10421: counter incremented every time
+   [Coord_task_schedule.task_claim_next] auto-releases a
+   previous claim.  Pre-fix the only signal was an opaque
+   [task_claim_next_auto_release] JSON event; day 25 carried
+   20 of those across the fleet but operators couldn't
+   distinguish "claim dropped within seconds (polling abuse)"
+   from "long-held claim swapped after real work (legitimate
+   cleanup)".  Labelled by [agent, reason] with reason
+   vocabulary {rapid_replacement, stale_replacement,
+   unknown_age} — bounded so the agent label drives all the
+   real cardinality (one series per fleet member). *)
+let metric_task_claim_auto_release =
+  "masc_task_claim_auto_release_total"
+
 (* Keeper keepalive (keeper_keepalive.ml). *)
 let metric_keeper_heartbeat_successes =
   "masc_keeper_heartbeat_successes_total"

@@ -7,11 +7,8 @@ open Types
 include Coord_utils
 include Coord_state
 
-(** #10421: stable lowercase string label for a [task_status] suitable
-    for embedding in JSONL diagnostic events.  Mirrors what the
-    [task_transition] from→to fields already use so dashboards can
-    join the new auto-release rows on identical vocabulary.  Pure;
-    exposed for tests. *)
+(** #10421: lowercase string label for [task_status] used in JSONL
+    diagnostic events. Matches [task_transition] vocabulary. *)
 let task_status_label (status : Types.task_status) : string =
   match status with
   | Todo -> "todo"
@@ -20,6 +17,29 @@ let task_status_label (status : Types.task_status) : string =
   | AwaitingVerification _ -> "awaiting_verification"
   | Done _ -> "done"
   | Cancelled _ -> "cancelled"
+
+(** #10421: helpers for classifying auto-release events on
+    [task_claim_next]. Distinguish poll-abuse from legitimate cleanup. *)
+let auto_release_rapid_threshold_sec = 30.0
+
+let prev_claim_age_seconds ~(now : float) (task : Types.task) : float option =
+  let parse = Types_core.parse_iso8601_opt in
+  let started_at_opt =
+    match task.task_status with
+    | Claimed { claimed_at; _ } -> parse claimed_at
+    | InProgress { started_at; _ } -> parse started_at
+    | Todo | AwaitingVerification _ | Done _ | Cancelled _ -> None
+  in
+  match started_at_opt with
+  | None -> None
+  | Some started -> Some (Float.max 0.0 (now -. started))
+
+let auto_release_reason_for_age (age_sec : float option) : string =
+  match age_sec with
+  | None -> "unknown_age"
+  | Some s when s < auto_release_rapid_threshold_sec -> "rapid_replacement"
+  | Some _ -> "stale_replacement"
+
 
 let task_is_claim_pool_candidate (task : Types.task) =
   match task.task_status with
@@ -371,21 +391,34 @@ let claim_next_r
                    ~reason:"auto_release_before_claim_next" ())
         | None -> ()
       in
+      (* #10421: classify the auto-release so dashboards can split
+         the polling-abuse signal (claim immediately replaced) from
+         the legitimate cleanup signal (long-held claim swapped in).
+         Day 25 evidence: 35/37 of analyst's claims terminated as
+         auto-release with no work output — task-056 was claimed
+         and dropped 5x.  Reason vocabulary is small to bound
+         Prometheus cardinality. *)
+      let now_t = Time_compat.now () in
       let released_task_id, working_tasks = match previous_claim with
         | None -> None, backlog.tasks
         | Some prev ->
-            (* #10421: include [reason] and [from_status] in the JSONL
-               event so the auto-release tail (43/24 release/claim
-               ratio, 5x hot-potato on task-056) is discriminable
-               without cross-referencing observe_task_transition.
-               [from_status] separates Claimed (most cases) from
-               InProgress (rare; signals a keeper that started work
-               and then re-entered claim_next).  Same reason vocabulary
-               the structured observation already uses. *)
+            (* #10421: include [from_status], [reason] (poll-abuse vs
+               cleanup), and [prev_age_sec] so the auto-release tail
+               (43/24 release/claim ratio, 5x hot-potato on task-056)
+               is discriminable. *)
             let from_status = task_status_label prev.task_status in
+            let prev_age_sec = prev_claim_age_seconds ~now:now_t prev in
+            let reason = auto_release_reason_for_age prev_age_sec in
+            (Atomic.get Coord_hooks.task_claim_auto_release_emit_fn)
+              ~agent:agent_name ~reason;
+            let prev_age_field =
+              match prev_age_sec with
+              | Some s -> Printf.sprintf ",\"prev_age_sec\":%.1f" s
+              | None -> ""
+            in
             log_event config (Printf.sprintf
-              "{\"type\":\"task_claim_next_auto_release\",\"agent\":\"%s\",\"released_task\":\"%s\",\"from_status\":\"%s\",\"reason\":\"prev_claim_implicit_replaced\",\"ts\":\"%s\"}"
-              agent_name prev.id from_status (now_iso ()));
+              "{\"type\":\"task_claim_next_auto_release\",\"agent\":\"%s\",\"released_task\":\"%s\",\"from_status\":\"%s\",\"reason\":\"%s\"%s,\"ts\":\"%s\"}"
+              agent_name prev.id from_status reason prev_age_field (now_iso ()));
             (* No broadcast — internal state transition, log_event suffices. *)
             let updated = List.map (fun (t : Types.task) ->
               if String.equal t.id prev.id then { t with task_status = Todo }

@@ -170,6 +170,21 @@ let distributed_lock_acquire_failed_fn
   : (key:string -> attempts:int -> unit) Atomic.t
   = Atomic.make (fun ~key:_ ~attempts:_ -> ())
 
+(** #10421: task_claim_next auto-release observability.
+    [Coord_task_schedule.task_claim_next] auto-releases any
+    previous claim held by the calling agent before picking a
+    new task.  This hook surfaces the auto-release as a labelled
+    Prometheus counter so operators can split polling-abuse
+    (claim dropped within seconds) from legitimate cleanup
+    (long-held claim swapped after work).  [reason] vocabulary
+    is bounded: rapid_replacement | stale_replacement |
+    unknown_age.  Wired at startup from [lib/coord.ml]; the
+    default no-op keeps unit tests that build [masc_coord] in
+    isolation working. *)
+let task_claim_auto_release_emit_fn
+  : (agent:string -> reason:string -> unit) Atomic.t
+  = Atomic.make (fun ~agent:_ ~reason:_ -> ())
+
 (** Tool assignment telemetry — wraps Tool_assignment_telemetry.emit_assigned.
     Wired at startup to record which tools were provisioned to which agent. *)
 let tool_assigned_fn

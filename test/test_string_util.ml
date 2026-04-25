@@ -179,6 +179,45 @@ let test_find_substring_rejects_negative_pos () =
     "String_util.find_substring: negative position")
     (fun () -> ignore (SU.find_substring ~pos:(-1) "abc" "a"))
 
+(* ---- substring containment ---- *)
+
+let test_contains_substring_basic () =
+  check bool "middle" true (SU.contains_substring "hello world" "lo wo");
+  check bool "exact" true (SU.contains_substring "abc" "abc");
+  check bool "absent" false (SU.contains_substring "abc" "xyz");
+  check bool "needle longer" false (SU.contains_substring "ab" "abc")
+
+let test_contains_substring_empty_needle () =
+  check bool "empty needle" true (SU.contains_substring "abc" "");
+  check bool "both empty" true (SU.contains_substring "" "")
+
+let test_contains_substring_literal_metacharacters () =
+  check bool "regex chars are literal" true
+    (SU.contains_substring "literal .* needle" ".*");
+  check bool "regex wildcard is not magic" false
+    (SU.contains_substring "literal abc needle" ".*")
+
+let test_contains_substring_utf8_bytes () =
+  check bool "Korean substring" true (SU.contains_substring korean_title "머지");
+  check bool "emoji substring" true (SU.contains_substring three_smileys "😀")
+
+let test_contains_substring_ci_ascii () =
+  check bool "ASCII case-insensitive" true
+    (SU.contains_substring_ci "Keeper Board POST" "board post");
+  check bool "mixed-case needle" true
+    (SU.contains_substring_ci "sandbox profile" "BOX PRO");
+  check bool "absent" false
+    (SU.contains_substring_ci "sandbox profile" "keeper")
+
+let test_contains_substring_ci_empty_and_literal () =
+  check bool "empty needle stays false" false
+    (SU.contains_substring_ci "abc" "");
+  check bool "regex chars are literal" true
+    (SU.contains_substring_ci "literal .* needle" ".*");
+  check bool "regex wildcard is not magic" false
+    (SU.contains_substring_ci "literal abc needle" ".*")
+
+
 (* ---- Test runner ---- *)
 
 let () =
@@ -208,4 +247,15 @@ let () =
           test_case "boundaries" `Quick test_find_substring_boundaries;
           test_case "empty needle" `Quick test_find_substring_empty_needle;
           test_case "negative pos rejected" `Quick
-            test_find_substring_rejects_negative_pos ] ) ]
+            test_find_substring_rejects_negative_pos ] );
+      ( "contains_substring",
+        [ test_case "basic" `Quick test_contains_substring_basic;
+          test_case "empty needle" `Quick
+            test_contains_substring_empty_needle;
+          test_case "literal metacharacters" `Quick
+            test_contains_substring_literal_metacharacters;
+          test_case "UTF-8 bytes" `Quick test_contains_substring_utf8_bytes ] );
+      ( "contains_substring_ci",
+        [ test_case "ASCII" `Quick test_contains_substring_ci_ascii;
+          test_case "empty and literal" `Quick
+            test_contains_substring_ci_empty_and_literal ] ) ]

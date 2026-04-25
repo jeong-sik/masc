@@ -40,3 +40,13 @@ a {
 a:hover {
   text-decoration: underline;
 }
+
+/* Global focus-visible for all interactive elements without per-element styles.
+   Matches ActionButton's focus ring: accent-45 ring + bg-1 offset. */
+button:focus-visible,
+[role="button"]:focus-visible,
+summary:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--bg-1), 0 0 0 4px rgba(71, 184, 255, 0.45);
+  border-radius: 4px;
+}

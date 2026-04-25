@@ -178,6 +178,7 @@
         test_warn_root_causes
         test_memory_hooks
         test_agent_stress_timeout_wire_10341
+        test_institution_episodes_failure_learnings_10325
         test_mid_turn_resume
         test_lockfree_atomic)
  (modules test_attribution test_attribution_tagged test_autoresearch_result_bridge test_dashboard_attribution test_masc_runtime_events test_room test_room_state_recovery test_types test_exec_tap test_auth test_auth_doctor test_auth_login test_audit_log test_governance_anomaly test_http_negotiation
@@ -327,6 +328,7 @@
           test_warn_root_causes
           test_memory_hooks
           test_agent_stress_timeout_wire_10341
+          test_institution_episodes_failure_learnings_10325
           test_mid_turn_resume
           test_lockfree_atomic
           )
@@ -457,6 +459,7 @@
    (setenv MASC_BASE_PATH_INPUT /tmp/test-personality-diff-summary-10269
     (run %{test}))))
  (libraries masc_test_deps))
+
 
 ; #10091: dedicated stanza so MASC_BASE_PATH is set BEFORE the
 ; test executable loads — the top-level Masc_mcp init includes

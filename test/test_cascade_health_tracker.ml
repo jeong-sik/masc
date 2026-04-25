@@ -277,6 +277,132 @@ let test_last_failure_at_none_for_pure_success () =
   check bool "last_failure_at stays None after success-only events"
     true (info.last_failure_at = None)
 
+(* ── Phase 1 trust_score tests ───────────────── *)
+
+(* All trust assertions use a tolerance of 1e-9 so floating-point
+   reordering in the EWMA arithmetic does not cause flakes. *)
+let approx ~tol expected actual =
+  Float.abs (expected -. actual) < tol
+
+let check_trust msg ~expected actual =
+  if not (approx ~tol:1e-9 expected actual) then
+    failwith
+      (Printf.sprintf "%s: expected %.6f got %.6f" msg expected actual)
+
+let test_trust_initial_unknown_is_one () =
+  let t = H.create () in
+  check_trust "unknown trust = 1.0"
+    ~expected:1.0 (H.trust_score t ~provider_key:"never_recorded")
+
+let test_trust_success_adds_reward_clipped () =
+  let t = H.create () in
+  H.record_success t ~provider_key:"p";
+  check_trust "trust after first success = 1.0 + reward"
+    ~expected:(1.0 +. H.trust_reward_on_success)
+    (H.trust_score t ~provider_key:"p");
+  (* Push enough successes that trust would exceed ceiling without clamp.
+     With reward=0.15 and ceiling=2.0, 8 successes from 1.0 → 2.2 → clamped *)
+  for _ = 1 to 20 do H.record_success t ~provider_key:"p" done;
+  check_trust "trust clamped at ceiling"
+    ~expected:H.trust_ceiling
+    (H.trust_score t ~provider_key:"p")
+
+let test_trust_transient_failure_decays_once () =
+  let t = H.create () in
+  H.record_failure t ~provider_key:"p"
+    ~error_kind:"timeout" ~error_reason:"first" ();
+  check_trust "trust after one failure = 1.0 * decay_transient"
+    ~expected:H.trust_decay_transient
+    (H.trust_score t ~provider_key:"p")
+
+let test_trust_persistent_after_repeat () =
+  let t = H.create () in
+  (* Same fingerprint twice within the persistence window.  With
+     threshold=2 the second event is persistent. *)
+  H.record_failure t ~provider_key:"p"
+    ~error_kind:"timeout" ~error_reason:"same" ();
+  H.record_failure t ~provider_key:"p"
+    ~error_kind:"timeout" ~error_reason:"same" ();
+  let expected =
+    1.0 *. H.trust_decay_transient *. H.trust_decay_persistent
+  in
+  check_trust "second same-fingerprint failure → persistent decay"
+    ~expected
+    (H.trust_score t ~provider_key:"p")
+
+let test_trust_distinct_fingerprints_stay_transient () =
+  let t = H.create () in
+  H.record_failure t ~provider_key:"p"
+    ~error_kind:"timeout" ~error_reason:"r1" ();
+  H.record_failure t ~provider_key:"p"
+    ~error_kind:"failure" ~error_reason:"r2" ();
+  let expected =
+    1.0 *. H.trust_decay_transient *. H.trust_decay_transient
+  in
+  check_trust "distinct fingerprints → both transient"
+    ~expected
+    (H.trust_score t ~provider_key:"p")
+
+let test_trust_success_resets_persistence () =
+  let t = H.create () in
+  H.record_failure t ~provider_key:"p"
+    ~error_kind:"timeout" ~error_reason:"same" ();
+  H.record_failure t ~provider_key:"p"
+    ~error_kind:"timeout" ~error_reason:"same" ();
+  H.record_success t ~provider_key:"p";
+  (* Next same-fingerprint failure should be transient again because
+     the success reset the persistence detector. *)
+  let trust_after_success = H.trust_score t ~provider_key:"p" in
+  H.record_failure t ~provider_key:"p"
+    ~error_kind:"timeout" ~error_reason:"same" ();
+  let expected = trust_after_success *. H.trust_decay_transient in
+  check_trust "post-success failure is transient"
+    ~expected
+    (H.trust_score t ~provider_key:"p");
+  let info = info_or_fail t ~provider_key:"p" in
+  check int "same_fingerprint_count after success-then-failure" 1
+    info.same_fingerprint_count
+
+let test_trust_hard_quota_zeroes_trust () =
+  let t = H.create () in
+  H.record_success t ~provider_key:"p";
+  H.record_success t ~provider_key:"p";
+  H.record_hard_quota t ~provider_key:"p"
+    ~error_kind:"hard_quota" ~error_reason:"balance_zero" ();
+  check_trust "hard_quota → trust = 0"
+    ~expected:0.0
+    (H.trust_score t ~provider_key:"p")
+
+let test_effective_weight_uses_trust () =
+  let t = H.create () in
+  H.record_failure t ~provider_key:"p"
+    ~error_kind:"timeout" ~error_reason:"same" ();
+  H.record_failure t ~provider_key:"p"
+    ~error_kind:"timeout" ~error_reason:"same" ();
+  (* Two persistent decays from 1.0:
+     1.0 * 0.7 * 0.15 = 0.105 → int(10 * 0.105) = 1, max 1 *)
+  let w = H.effective_weight t ~provider_key:"p" ~config_weight:10 in
+  check bool "effective_weight reflects low trust"
+    true (w <= 2);
+  (* A healthy provider with successes should exceed config_weight when
+     trust climbs above 1.0. *)
+  let t2 = H.create () in
+  for _ = 1 to 10 do H.record_success t2 ~provider_key:"q" done;
+  let w2 = H.effective_weight t2 ~provider_key:"q" ~config_weight:1 in
+  check bool "effective_weight grows above 1 when trust > 1"
+    true (w2 >= 2)
+
+let test_provider_info_exposes_trust_fields () =
+  let t = H.create () in
+  H.record_failure t ~provider_key:"p"
+    ~error_kind:"timeout" ~error_reason:"same" ();
+  H.record_failure t ~provider_key:"p"
+    ~error_kind:"timeout" ~error_reason:"same" ();
+  let info = info_or_fail t ~provider_key:"p" in
+  check bool "trust_score < 1.0 after failures"
+    true (info.trust_score < 1.0);
+  check int "same_fingerprint_count = 2" 2 info.same_fingerprint_count
+
 let test_fingerprint_top_sorted_descending () =
   let t = H.create () in
   (* low: 1, medium: 2, high: 3 *)
@@ -360,5 +486,25 @@ let () =
         test_last_failure_at_none_for_pure_success;
       test_case "top_fingerprints sorted descending" `Quick
         test_fingerprint_top_sorted_descending;
+    ];
+    "trust_score", [
+      test_case "unknown provider trust = 1.0" `Quick
+        test_trust_initial_unknown_is_one;
+      test_case "success rewards and clamps at ceiling" `Quick
+        test_trust_success_adds_reward_clipped;
+      test_case "transient failure decays once" `Quick
+        test_trust_transient_failure_decays_once;
+      test_case "persistent (same fingerprint repeats)" `Quick
+        test_trust_persistent_after_repeat;
+      test_case "distinct fingerprints stay transient" `Quick
+        test_trust_distinct_fingerprints_stay_transient;
+      test_case "success resets persistence detector" `Quick
+        test_trust_success_resets_persistence;
+      test_case "hard_quota zeroes trust" `Quick
+        test_trust_hard_quota_zeroes_trust;
+      test_case "effective_weight tracks trust" `Quick
+        test_effective_weight_uses_trust;
+      test_case "provider_info exposes trust fields" `Quick
+        test_provider_info_exposes_trust_fields;
     ];
   ]

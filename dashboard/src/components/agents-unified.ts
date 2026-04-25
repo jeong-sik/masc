@@ -79,7 +79,7 @@ export function AgentsUnified() {
   }))
 
   return html`
-    <div class="flex flex-col gap-4">
+    <div class="flex flex-col gap-4" role="region" aria-label="에이전트 및 키퍼 목록">
       <${FilterChips}
         chips=${viewChips}
         value=${currentView}

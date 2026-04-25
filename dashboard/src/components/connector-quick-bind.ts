@@ -101,6 +101,8 @@ export function QuickBindForm({ connectorId, keepers }: {
     <div
       class="mt-3 flex flex-wrap items-end gap-2 rounded border border-dashed border-[var(--card-border)] bg-[var(--white-2)] px-3 py-2.5"
       data-quick-bind=${connectorId}
+      role="form"
+      aria-label="빠른 채널 연결"
     >
       <div class="min-w-0 flex-1 basis-[160px]">
         <label class="mb-1 block text-3xs uppercase tracking-4 text-[var(--text-dim)]" for=${`qb-channel-${connectorId}`}>

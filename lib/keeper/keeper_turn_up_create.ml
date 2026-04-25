@@ -245,6 +245,23 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                        p.profile_defaults.desires)
                   p.desires_opt
               in
+              (* Layer 1 boundary check: warn (not truncate) when persona
+                 fields exceed the prompt-render cap.  Disk preserves the
+                 raw value; only prompt rendering applies the cap.  This
+                 surfaces the situation at create time so the operator can
+                 decide whether to shorten the source. *)
+              let warn_personality_cap field value =
+                let len = String.length value in
+                if len > Keeper_config.prompt_render_max_bytes then
+                  Log.Keeper.warn
+                    "create_keeper personality.%s for %s exceeds prompt cap \
+                     (%d bytes > %d). Stored as-is; truncated only at prompt \
+                     rendering."
+                    field p.name len Keeper_config.prompt_render_max_bytes
+              in
+              warn_personality_cap "will" will;
+              warn_personality_cap "needs" needs;
+              warn_personality_cap "desires" desires;
               let (short_goal, mid_goal, long_goal) =
                 resolve_goal_horizons
                   ~goal

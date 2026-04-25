@@ -103,14 +103,17 @@ let parse_keeper_identity (json : Yojson.Safe.t) : (parsed_keeper_identity, stri
     let pk_will =
       Safe_ops.json_string ~default:(Env_config_core.keeper_will ()) "will" json
       |> normalize_self_model_text
+        ~max_bytes:Keeper_config.prompt_render_max_bytes
     in
     let pk_needs =
       Safe_ops.json_string ~default:(Env_config_core.keeper_needs ()) "needs" json
       |> normalize_self_model_text
+        ~max_bytes:Keeper_config.prompt_render_max_bytes
     in
     let pk_desires =
       Safe_ops.json_string ~default:(Env_config_core.keeper_desires ()) "desires" json
       |> normalize_self_model_text
+        ~max_bytes:Keeper_config.prompt_render_max_bytes
     in
     let pk_instructions = Safe_ops.json_string ~default:"" "instructions" json in
     let pk_cascade_name =

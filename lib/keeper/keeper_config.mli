@@ -55,7 +55,15 @@ val default_proactive_cooldown_sec : int
 val default_room_signal_prompt_enabled : bool
 val default_goal_horizon_max_chars : int
 val default_drift_max_clauses : int
+
+(** Maximum bytes of personality text included in the rendered keeper prompt.
+    Drives [normalize_self_model_text] when called from prompt rendering.
+    NOTE: persistence layer does NOT enforce this — disk JSON may hold
+    longer values; the cap applies at prompt build time. *)
+val prompt_render_max_bytes : int
+
 val default_drift_max_chars : int
+  [@@deprecated "Use prompt_render_max_bytes. Alias removed in Layer 2 follow-up."]
 
 (** {1 Environment Variable Parsing} *)
 
@@ -115,7 +123,10 @@ val utf8_repair_string : string -> string
 
 (** {1 Text Normalization} *)
 
-val normalize_self_model_text : ?max_len:int -> string -> string
+(** Trim and truncate self-model text (will/needs/desires) to [max_bytes]
+    on a UTF-8 character boundary. Caller MUST pass [max_bytes] explicitly so
+    the unit (bytes, not chars) is visible at every call site. *)
+val normalize_self_model_text : max_bytes:int -> string -> string
 val normalize_goal_horizon_text : ?max_len:int -> string -> string
 val normalize_goal_horizon_opt : string option -> string option
 val parse_goal_horizon_opt : Yojson.Safe.t -> string -> string option
@@ -131,9 +142,9 @@ val resolve_goal_horizons :
 val split_semicolon_clauses : string -> string list
 val take_last : int -> 'a list -> 'a list
 
-(** Compact self-model text: take last N clauses, truncate to max chars. *)
+(** Compact self-model text: take last N clauses, truncate to [max_bytes]. *)
 val compact_self_model_text :
-  ?max_clauses:int -> ?max_chars:int -> string -> string
+  ?max_clauses:int -> max_bytes:int -> string -> string
 
 val parse_self_model_opt : Yojson.Safe.t -> string -> string option
 

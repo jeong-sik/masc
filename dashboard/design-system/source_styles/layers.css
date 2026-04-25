@@ -1,0 +1,392 @@
+/* layers.css — L2 Layer system for Code editor
+   Stacked observational overlays on top of source code.
+   Toggle each independently with opacity sliders. */
+
+/* ════════ LAYER CONTROL BAR ════════ */
+.layer-bar {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: 0 var(--sp-3);
+  height: 28px;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--line-1);
+  font-size: var(--fs-10);
+  flex-shrink: 0;
+  overflow-x: auto;
+}
+.layer-bar-label {
+  color: var(--fg-3);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  font-weight: 600;
+  font-size: var(--fs-9);
+  flex-shrink: 0;
+}
+.layer-toggle {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 8px;
+  height: 20px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-1);
+  background: var(--bg-2);
+  color: var(--fg-3);
+  font-size: var(--fs-10);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  letter-spacing: .04em;
+  flex-shrink: 0;
+  transition: all var(--t-fast) var(--ease);
+}
+.layer-toggle:hover { color: var(--fg-1); background: var(--bg-3); }
+.layer-toggle .glyph {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--fg-4);
+  transition: all var(--t-fast) var(--ease);
+}
+.layer-toggle.is-on .glyph { transform: scale(1.2); }
+.layer-toggle.is-on[data-layer="time"]     { color: var(--warn);   border-color: rgb(var(--warn-glow) / .4); background: rgb(var(--warn-glow) / .06); }
+.layer-toggle.is-on[data-layer="time"]     .glyph { background: var(--warn); box-shadow: 0 0 5px rgb(var(--warn-glow) / .6); }
+.layer-toggle.is-on[data-layer="parallel"] { color: var(--info);   border-color: rgb(var(--info-glow) / .4); background: rgb(var(--info-glow) / .06); }
+.layer-toggle.is-on[data-layer="parallel"] .glyph { background: var(--info); box-shadow: 0 0 5px rgb(var(--info-glow) / .6); }
+.layer-toggle.is-on[data-layer="tools"]    { color: var(--brass-1); border-color: var(--brass-3); background: rgb(var(--brass-glow) / .08); }
+.layer-toggle.is-on[data-layer="tools"]    .glyph { background: var(--brass-1); box-shadow: 0 0 5px rgb(var(--brass-glow) / .6); }
+.layer-toggle.is-on[data-layer="approve"]  { color: var(--ok);     border-color: rgb(var(--ok-glow) / .4); background: rgb(var(--ok-glow) / .06); }
+.layer-toggle.is-on[data-layer="approve"]  .glyph { background: var(--ok); box-shadow: 0 0 5px rgb(var(--ok-glow) / .6); }
+.layer-toggle.is-on[data-layer="notes"]    { color: var(--stalled); border-color: rgb(var(--stalled-glow) / .4); background: rgb(var(--stalled-glow) / .06); }
+.layer-toggle.is-on[data-layer="notes"]    .glyph { background: var(--stalled); box-shadow: 0 0 5px rgb(var(--stalled-glow) / .6); }
+
+.layer-opacity {
+  display: none;
+  align-items: center; gap: 4px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.layer-opacity.is-show { display: inline-flex; }
+.layer-opacity label {
+  font-size: var(--fs-9);
+  color: var(--fg-3);
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+.layer-opacity input[type="range"] {
+  width: 80px; height: 4px;
+  -webkit-appearance: none; appearance: none;
+  background: var(--bg-3);
+  border-radius: 2px; outline: none;
+}
+.layer-opacity input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--brass-1); cursor: pointer;
+  box-shadow: 0 0 4px rgb(var(--brass-glow) / .6);
+}
+
+.layer-explode {
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 20px; padding: 0 8px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-1);
+  background: var(--bg-2);
+  color: var(--fg-2);
+  font-size: var(--fs-10);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.layer-explode:hover { background: var(--bg-3); color: var(--fg-1); }
+.layer-explode.is-on {
+  background: rgb(var(--brass-glow) / .12);
+  color: var(--brass-1);
+  border-color: var(--brass-3);
+}
+
+/* ════════ DOT-MATRIX BACKGROUND ════════ */
+.editor-scroll {
+  --dot-op: 0.12;
+  --dot-size: 14px;
+  background-image:
+    radial-gradient(circle at center, rgb(var(--brass-glow) / var(--dot-op)) 0.7px, transparent 1.2px);
+  background-size: var(--dot-size) var(--dot-size);
+  background-position: 0 0;
+  background-color: var(--bg-0);
+}
+
+/* ════════ LAYER STACK — z-axis arrangement ════════ */
+.editor-scroll {
+  perspective: 1800px;
+  perspective-origin: 50% 20%;
+}
+.editor-lines-wrap {
+  position: relative;
+  transform-style: preserve-3d;
+  transition: transform var(--t-slow) var(--ease-out);
+  will-change: transform;
+}
+/* exploded state — lift each layer out of the plane */
+body[data-explode="1"] .editor-lines-wrap {
+  transform: rotateX(58deg) rotateZ(-4deg) translateY(-20px) scale(.92);
+}
+
+/* each overlay layer sits at a different Z */
+.lyr {
+  position: absolute; inset: 0;
+  pointer-events: none;
+  transform-origin: 50% 0%;
+  transition: opacity var(--t-med) var(--ease), transform var(--t-slow) var(--ease-out);
+  will-change: transform, opacity;
+}
+.lyr.is-off { opacity: 0 !important; }
+body[data-explode="1"] .lyr-time     { transform: translateZ(40px); }
+body[data-explode="1"] .lyr-parallel { transform: translateZ(80px); }
+body[data-explode="1"] .lyr-tools    { transform: translateZ(120px); }
+body[data-explode="1"] .lyr-approve  { transform: translateZ(160px); }
+body[data-explode="1"] .lyr-notes    { transform: translateZ(200px); }
+
+/* In exploded state, each layer gets a faint "glass" aura */
+body[data-explode="1"] .lyr::before {
+  content: "";
+  position: absolute; inset: -4px;
+  border: 1px dashed rgb(var(--brass-glow) / .15);
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+/* ════════ LYR: TIME ════════
+   Left-margin stripe showing recency per block.
+   Bright for last-touch < 2m, fading toward cold for older. */
+.lyr-time {
+  left: 0; width: 40px;
+  overflow: hidden;
+}
+.time-stripe {
+  position: absolute; left: 4px; width: 3px;
+  border-radius: 1px;
+  background: var(--warn);
+  opacity: 0;
+  transition: opacity var(--t-med) var(--ease), top var(--t-slow) var(--ease-out), height var(--t-slow) var(--ease-out);
+}
+.time-stripe.age-recent   { opacity: 1;   background: var(--warn);   box-shadow: 0 0 8px rgb(var(--warn-glow) / .6); }
+.time-stripe.age-near     { opacity: .7;  background: var(--warn); }
+.time-stripe.age-mid      { opacity: .4;  background: var(--fg-3); }
+.time-stripe.age-far      { opacity: .2;  background: var(--fg-4); }
+.time-stripe .time-label {
+  position: absolute; left: 6px; top: 0;
+  font-family: var(--font-mono); font-size: var(--fs-9);
+  color: var(--fg-3);
+  white-space: nowrap; padding: 1px 4px;
+  background: var(--bg-1); border-radius: 2px;
+  opacity: 0; transition: opacity var(--t-fast);
+}
+.time-stripe:hover .time-label { opacity: 1; }
+
+/* ════════ LYR: PARALLEL ════════
+   SVG streaks showing keeper cursor trails. */
+.lyr-parallel {
+  left: 40px; right: 60px;
+}
+.parallel-svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.parallel-streak {
+  fill: none; stroke-width: 1.2;
+  stroke-linecap: round;
+  opacity: 0.6;
+  filter: drop-shadow(0 0 3px currentColor);
+  animation: streak-pulse 3s ease-in-out infinite;
+}
+@keyframes streak-pulse {
+  0%, 100% { opacity: 0.35; }
+  50%      { opacity: 0.75; }
+}
+.parallel-streak.k-nick    { stroke: var(--k-nick); color: var(--k-nick); }
+.parallel-streak.k-masc    { stroke: var(--k-masc); color: var(--k-masc); }
+.parallel-streak.k-sangsu  { stroke: var(--k-sangsu); color: var(--k-sangsu); }
+.parallel-streak.k-qa      { stroke: var(--k-qa); color: var(--k-qa); }
+.parallel-streak.k-rama    { stroke: var(--k-rama); color: var(--k-rama); }
+.parallel-cursor-dot {
+  r: 3;
+  filter: drop-shadow(0 0 4px currentColor);
+}
+.parallel-cursor-dot.k-nick    { fill: var(--k-nick); color: var(--k-nick); }
+.parallel-cursor-dot.k-masc    { fill: var(--k-masc); color: var(--k-masc); }
+.parallel-cursor-dot.k-sangsu  { fill: var(--k-sangsu); color: var(--k-sangsu); }
+.parallel-cursor-dot.k-qa      { fill: var(--k-qa); color: var(--k-qa); }
+.parallel-cursor-dot.k-rama    { fill: var(--k-rama); color: var(--k-rama); }
+
+/* ════════ LYR: TOOLS ════════
+   Per-block left margin icons with use-frequency bars. */
+.lyr-tools {
+  left: 0; width: 40px;
+}
+.tool-mark {
+  position: absolute; left: 16px;
+  display: flex; flex-direction: column; align-items: center; gap: 1px;
+  font-family: var(--font-mono);
+  transition: top var(--t-slow) var(--ease-out);
+  pointer-events: auto;
+}
+.tool-mark .tool-icon {
+  font-size: 10px;
+  color: var(--brass-1);
+  text-shadow: 0 0 4px rgb(var(--brass-glow) / .6);
+  line-height: 1;
+}
+.tool-mark .tool-bar {
+  width: 16px; height: 2px;
+  background: linear-gradient(90deg, var(--brass-1), transparent);
+  border-radius: 1px;
+  box-shadow: 0 0 3px rgb(var(--brass-glow) / .4);
+}
+.tool-mark .tool-count {
+  font-size: var(--fs-9);
+  color: var(--fg-4);
+  font-family: var(--font-mono);
+}
+
+/* ════════ LYR: APPROVE ════════
+   Big translucent stamp fill over entire block. */
+.lyr-approve {
+  left: 40px; right: 60px;
+  overflow: hidden;
+}
+.approve-stamp {
+  position: absolute; left: 0; right: 0;
+  border-radius: 2px;
+  display: flex; align-items: center; justify-content: flex-end;
+  padding-right: 24px;
+  transition: top var(--t-slow) var(--ease-out), height var(--t-slow) var(--ease-out);
+}
+.approve-stamp.k-approve {
+  background: rgb(var(--ok-glow) / .05);
+  border-left: 2px solid var(--ok);
+  box-shadow: inset 0 0 40px rgb(var(--ok-glow) / .04);
+}
+.approve-stamp.k-flag {
+  background: rgb(var(--err-glow) / .07);
+  border-left: 2px solid var(--err);
+  box-shadow: inset 0 0 40px rgb(var(--err-glow) / .06);
+  animation: flag-pulse 2.4s ease-in-out infinite;
+}
+@keyframes flag-pulse {
+  0%, 100% { background: rgb(var(--err-glow) / .05); }
+  50%      { background: rgb(var(--err-glow) / .10); }
+}
+.approve-stamp .stamp-glyph {
+  font-family: var(--font-mono);
+  font-size: 56px;
+  font-weight: 700;
+  line-height: 1;
+  opacity: 0.08;
+  letter-spacing: .08em;
+  transform: rotate(-12deg);
+  text-transform: uppercase;
+}
+.approve-stamp.k-approve .stamp-glyph { color: var(--ok); }
+.approve-stamp.k-flag    .stamp-glyph { color: var(--err); }
+
+/* ════════ LYR: NOTES ════════
+   Append-able pinned note cards, anchored to blocks. */
+.lyr-notes {
+  left: 0; right: 0;
+  pointer-events: none;
+}
+.note-pin {
+  position: absolute;
+  right: 70px;
+  pointer-events: auto;
+  width: 240px;
+  background: linear-gradient(180deg, rgb(138 106 160 / .16), rgb(138 106 160 / .06));
+  border: 1px solid rgb(var(--stalled-glow) / .35);
+  border-radius: var(--r-1);
+  padding: 6px 8px 8px;
+  box-shadow: 0 4px 16px rgb(0 0 0 / .5), 0 0 0 1px rgb(var(--stalled-glow) / .15), inset 0 1px 0 rgb(255 255 255 / .04);
+  font-size: var(--fs-10);
+  color: var(--fg-2);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  transition: top var(--t-slow) var(--ease-out), transform var(--t-fast) var(--ease);
+}
+.note-pin:hover { transform: translateY(-1px); border-color: rgb(var(--stalled-glow) / .6); }
+.note-pin::before {
+  content: "";
+  position: absolute; left: -8px; top: 10px;
+  width: 8px; height: 1px;
+  background: rgb(var(--stalled-glow) / .5);
+}
+.note-pin::after {
+  content: "";
+  position: absolute; left: -10px; top: 7px;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--stalled);
+  box-shadow: 0 0 5px rgb(var(--stalled-glow) / .6);
+}
+.note-pin .np-head {
+  display: flex; align-items: baseline; gap: 6px;
+  margin-bottom: 4px;
+  font-family: var(--font-mono); font-size: var(--fs-9);
+  color: var(--stalled);
+  letter-spacing: .06em; text-transform: uppercase;
+}
+.note-pin .np-head .np-author { color: var(--fg-3); text-transform: none; letter-spacing: 0; }
+.note-pin .np-head .np-ts { margin-left: auto; color: var(--fg-4); }
+.note-pin .np-body { line-height: 1.4; color: var(--fg-1); font-size: var(--fs-11); }
+.note-pin .np-actions {
+  display: flex; gap: 4px; margin-top: 6px;
+  font-size: var(--fs-9);
+  color: var(--fg-4);
+  font-family: var(--font-mono);
+}
+.note-pin .np-actions button {
+  background: transparent; border: none; padding: 0;
+  color: var(--fg-3); cursor: pointer; font-size: var(--fs-9);
+  letter-spacing: .06em; text-transform: uppercase;
+}
+.note-pin .np-actions button:hover { color: var(--stalled); }
+.note-pin .np-actions .np-spacer { flex: 1; }
+
+/* Append-note composer at the bottom of notes layer */
+.note-append-btn {
+  position: absolute;
+  right: 70px; bottom: 12px;
+  width: 240px;
+  background: rgb(var(--stalled-glow) / .05);
+  border: 1px dashed rgb(var(--stalled-glow) / .3);
+  border-radius: var(--r-1);
+  padding: 8px;
+  color: var(--stalled);
+  font-size: var(--fs-10);
+  font-family: var(--font-mono);
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  text-align: center;
+  pointer-events: auto;
+  transition: all var(--t-fast) var(--ease);
+}
+.note-append-btn:hover {
+  background: rgb(var(--stalled-glow) / .12);
+  border-style: solid;
+  color: var(--fg-1);
+}
+
+/* ════════ Depth-of-field when hovering a specific block ════════ */
+.editor-scroll.is-focus-block .code-line:not(.is-focused) {
+  filter: blur(0.4px);
+  opacity: 0.55;
+}
+.code-line.is-focused {
+  filter: none;
+  background: rgb(var(--brass-glow) / .04);
+}
+
+/* ════════ Block recency aura (active when time layer on) ════════ */
+body[data-layer-time="1"] .code-line.is-recent {
+  background: linear-gradient(90deg, rgb(var(--warn-glow) / .06), transparent 30%);
+}
+body[data-layer-time="1"] .code-line.is-very-recent {
+  background: linear-gradient(90deg, rgb(var(--warn-glow) / .12), transparent 40%);
+  box-shadow: inset 3px 0 0 var(--warn);
+}
+
+/* when explode is on, hide minimap (clutters the 3D view) */
+body[data-explode="1"] .editor-minimap { opacity: 0.3; }

@@ -463,17 +463,50 @@ let audit_token_uniqueness config : (string * string list) list =
     by_token []
   |> List.sort (fun (a, _) (b, _) -> String.compare a b)
 
-(** Find credential by raw token (hash lookup + expiry check) *)
+(** Find credential by raw token (hash lookup + expiry check).
+
+    #9786 runtime complement: when N>=2 credentials share the
+    token hash, [List.find_opt] silently routed to the first
+    match - the root of the [bearer token belongs to X]
+    regression.  We keep the legacy first-match return so
+    existing callers do not need migration, but we WARN and
+    increment {!Prometheus.metric_auth_credential_ambiguous_lookup}
+    so an alert can fire on the live blast radius rather than
+    just the one-shot boot audit. *)
 let find_credential_by_token config ~token : (agent_credential, masc_error) result =
   let token_hash = sha256_hash token in
-  match List.find_opt (fun cred -> cred.token = token_hash) (list_credentials config) with
-  | None -> Error (InvalidToken "Token mismatch")
-  | Some cred ->
-      (match cred.expires_at with
-       | None -> Ok cred
+  let matches =
+    List.filter (fun cred -> cred.token = token_hash)
+      (list_credentials config)
+  in
+  match matches with
+  | [] -> Error (InvalidToken "Token mismatch")
+  | first :: rest ->
+      (match rest with
+       | [] -> ()
+       | _ :: _ ->
+           let names =
+             List.map
+               (fun (c : agent_credential) -> c.agent_name)
+               matches
+           in
+           Log.Misc.warn
+             "auth: token shared by %d agents [%s] - routing to %s \
+              (first match); rotate via Auth.create_token to disambiguate \
+              (#9786)"
+             (List.length matches)
+             (String.concat ", " names)
+             first.agent_name;
+           Prometheus.inc_counter
+             Prometheus.metric_auth_credential_ambiguous_lookup
+             ~labels:[ ("first_match", first.agent_name) ]
+             ());
+      (match first.expires_at with
+       | None -> Ok first
        | Some exp_str ->
            let now = now_iso () in
-           if now > exp_str then Error (TokenExpired cred.agent_name) else Ok cred)
+           if now > exp_str then Error (TokenExpired first.agent_name)
+           else Ok first)
 
 (** Resolve agent_name from raw token *)
 let resolve_agent_from_token config ~token : (string, masc_error) result =

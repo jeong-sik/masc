@@ -584,6 +584,22 @@ let metric_auth_strict_unknown_tool_denials =
 let metric_auth_credential_token_duplicate =
   "masc_auth_credential_token_duplicate_total"
 
+(* #9786 runtime complement: every [find_credential_by_token]
+   lookup that hits N>=2 matches fires this counter.  The
+   boot-time audit ({!metric_auth_credential_token_duplicate})
+   detects shared tokens once at startup, but operators have no
+   visibility on whether subsequent requests actually exercise
+   the ambiguity - the silent route-to-first behavior continues
+   to fire while the alert is just an open ticket.  This counter
+   surfaces the live blast radius (per-request rate) so an
+   alerting rule can distinguish "audit warning, no traffic"
+   from "duplicate token actively serving the wrong agent".
+
+   Cardinality: [first_match] is the agent_name that wins the
+   List.find race (~10 fleet keepers), bounded. *)
+let metric_auth_credential_ambiguous_lookup =
+  "masc_auth_credential_ambiguous_lookup_total"
+
 
 (** {1 Built-in Metrics} *)
 
@@ -934,6 +950,12 @@ let init () =
      stale_reason. Any positive rate means a telemetry lane is missing, \
      stale, or failed to append and dashboards should mark the source \
      coverage_gap."
+    Counter;
+  add metric_auth_credential_ambiguous_lookup
+    "Total runtime credential lookups where N>=2 credentials share the \
+     same token hash. Labels: first_match (the agent_name that List.find \
+     routed to). Distinguishes \"audit warning, no traffic\" from \
+     \"duplicate token actively serving the wrong agent\"."
     Counter;
   (* Transport metrics — registered here so transport_metrics.ml can use
      module constants instead of string literals. *)

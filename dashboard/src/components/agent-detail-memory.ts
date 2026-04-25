@@ -241,11 +241,14 @@ export function AgentDetailMemory({ agentName }: Props) {
                             : ep.outcome === 'partial'
                               ? 'text-[var(--warn)]'
                               : 'text-[var(--bad-light)]'
+                        const outcomeLabel =
+                          ep.outcome === 'success' ? '성공' : ep.outcome === 'partial' ? '부분 성공' : '실패'
                         return html`
                           <div class="border border-[var(--white-10)] rounded px-2 py-1.5 text-xs">
                             <div class="flex items-center justify-between gap-2">
                               <div class="flex items-center gap-2 min-w-0">
-                                <span class="${outcomeColor}">${outcomeIcon}</span>
+                                <span class="${outcomeColor}" aria-hidden="true">${outcomeIcon}</span>
+                                <span class="sr-only">${outcomeLabel}</span>
                                 <span class="truncate text-[var(--text-muted)]" title=${ep.summary}>${highlightMatch(ep.summary, episodeQuery.value)}</span>
                               </div>
                               <span class="text-3xs text-[var(--text-muted)]0 shrink-0">${formatTimeAgo(ep.timestamp * 1000)}</span>

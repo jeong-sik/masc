@@ -412,11 +412,14 @@ function EpisodeCard({ ep }: { ep: MemorySubsystemsEpisode }) {
         : 'text-[var(--bad-light)]'
   const outcomeIcon =
     ep.outcome === 'success' ? '●' : ep.outcome === 'partial' ? '◐' : '○'
+  const outcomeLabel =
+    ep.outcome === 'success' ? '성공' : ep.outcome === 'partial' ? '부분 성공' : '실패'
   return html`
     <div class="border border-[var(--white-10)] rounded p-3 mb-2 hover:border-[var(--white-10)] transition-colors">
       <div class="flex items-start justify-between gap-2 mb-1">
         <div class="flex items-center gap-2 min-w-0">
-          <span class="${outcomeColor} text-xs">${outcomeIcon}</span>
+          <span class="${outcomeColor} text-xs" aria-hidden="true">${outcomeIcon}</span>
+          <span class="sr-only">${outcomeLabel}</span>
           <span class="text-sm font-medium text-[var(--text-muted)] truncate" title=${ep.summary}>${ep.summary}</span>
         </div>
         <span class="text-xs text-[var(--text-muted)]0 shrink-0">${formatTimeAgo(ep.timestamp * 1000)}</span>

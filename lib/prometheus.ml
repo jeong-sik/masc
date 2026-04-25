@@ -240,6 +240,31 @@ let metric_keeper_turn_regressions = "masc_keeper_turn_regressions_total"
 let metric_keeper_turn_latency_bucket =
   "masc_keeper_turn_latency_bucket_total"
 
+(* #10125: keeper supervisor sweep observability.
+
+   The supervisor sweep is a Pulse loop that recovers crashed
+   keepers.  When the loop fails to start (or stops), the fleet
+   silently dies — keepers exit on cascade exhaustion and nobody
+   restarts them.  Observed 2026-04-24: 14 keepers dead, supervisor
+   "started" log line missing for 4h+ across a server restart.
+
+   Two metrics surface the sweep liveness directly so dashboards
+   can alert on absence instead of relying on a log grep:
+
+   - [metric_keeper_supervisor_sweep_starts_total] — increments
+     once each time [start_supervisor_sweep] actually creates a
+     Pulse (i.e., once per process unless explicitly stopped).
+     If the counter does not advance after a server restart, the
+     supervisor never came up.
+   - [metric_keeper_supervisor_last_sweep_unixtime] — gauge updated
+     on every successful sweep beat.  Operator alert:
+     [time() - masc_keeper_supervisor_last_sweep_unixtime > 90]
+     means the sweep is stalled (default sweep interval is 30s). *)
+let metric_keeper_supervisor_sweep_starts =
+  "masc_keeper_supervisor_sweep_starts_total"
+let metric_keeper_supervisor_last_sweep_unixtime =
+  "masc_keeper_supervisor_last_sweep_unixtime"
+
 
 (* Keeper compaction (keeper_compact_policy.ml, tool_keeper.ml). *)
 let metric_keeper_compactions = "masc_keeper_compactions_total"
@@ -510,6 +535,17 @@ let init () =
     "Total keeper turn completions, bucketed by latency (labels: keeper, \
      bucket=under_60s|60-300s|300-600s|600-1200s|over_1200s)"
     Counter;
+  (* #10125: supervisor sweep liveness.  Counter increments on
+     each [start_supervisor_sweep] that actually creates a Pulse;
+     gauge advances on every successful sweep beat. *)
+  add metric_keeper_supervisor_sweep_starts
+    "Total times keeper supervisor sweep Pulse was started (labels: base_path)"
+    Counter;
+  add metric_keeper_supervisor_last_sweep_unixtime
+    "Wall-clock unixtime of the most recent successful supervisor \
+     sweep beat (labels: base_path).  Stale (> 2 × interval) means \
+     the sweep stalled."
+    Gauge;
   (* Keeper compaction metrics — emitted by keeper_compact_policy.ml *)
   add metric_keeper_compactions
     "Total keeper compactions performed" Counter;

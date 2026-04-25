@@ -54,6 +54,11 @@ val catalog_names : ?config_path:string -> unit -> string list
 (** Live profile catalog discovered from the active [cascade.json].
     When the file cannot be read, returns [[]]. *)
 
+val catalog_names_result : ?config_path:string -> unit -> (string list, string) result
+(** Like {!catalog_names}, but preserves the loader error so validation
+    boundaries can fail loud instead of collapsing catalog drift into an empty
+    dynamic profile set. *)
+
 val keeper_catalog_names : ?config_path:string -> unit -> string list
 (** Assignable live profile names from {!catalog_names}, filtered by
     [keeper_assignable] metadata. *)

@@ -558,7 +558,7 @@ export function MemorySubsystems() {
       </div>
 
       <!-- Architecture Flow (collapsible) -->
-      <section>
+      <section aria-label="아키텍처 데이터 흐름도">
         <button type="button"
           onClick=${() => (showArch.value = !showArch.value)}
           aria-expanded=${showArch.value}
@@ -589,7 +589,7 @@ export function MemorySubsystems() {
       </section>
 
       <!-- Hebbian Synapses -->
-      <section>
+      <section aria-label="Hebbian 시냅스 그래프">
         <div class="flex items-center justify-between mb-3">
           <h3 class="text-base font-semibold text-[var(--text-muted)]">Hebbian 시냅스 그래프</h3>
           <div class="flex items-center gap-3 text-xs text-[var(--text-muted)]0">
@@ -663,7 +663,7 @@ export function MemorySubsystems() {
       </section>
 
       <!-- Episodes -->
-      <section>
+      <section aria-label="에피소드 기록">
         <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
           <h3 class="text-base font-semibold text-[var(--text-muted)]">에피소드 기록</h3>
           <span class="text-xs text-[var(--text-muted)]0">

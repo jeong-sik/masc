@@ -570,7 +570,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
   return html`
     <div class="agent-page flex w-full flex-col gap-5 px-0 py-1">
-      <section class="monitor-surface-card monitor-surface-card-strong p-5">
+      <section class="monitor-surface-card monitor-surface-card-strong p-5" aria-label="에이전트 필터 및 목록">
         <div class="flex flex-col gap-5">
           <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px] xl:items-end">
             <div class="flex min-w-0 flex-col gap-2">

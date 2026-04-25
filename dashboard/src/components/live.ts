@@ -18,7 +18,7 @@ export function Live({ variant = 'full' }: LiveProps) {
   return html`
     <div class="flex flex-col gap-5" role="region" aria-label="라이브 모니터">
       ${!observatoryMode ? html`
-        <section class="monitor-surface-card monitor-surface-card-strong px-5 py-4">
+        <section class="monitor-surface-card monitor-surface-card-strong px-5 py-4" aria-label="라이브 모니터 헤더">
           <div class="flex flex-col gap-2">
             <div class="flex flex-col gap-2">
               <h2 class="m-0 text-[1.25rem] font-semibold text-[var(--text-strong)]">라이브 모니터</h2>

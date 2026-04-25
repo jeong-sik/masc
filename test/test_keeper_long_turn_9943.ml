@@ -42,6 +42,21 @@ let bucket_count ~keeper ~bucket =
     ~labels:[ ("keeper", keeper); ("bucket", bucket) ]
     ()
 
+let model_bucket_count ~keeper ~channel ~provider_kind ~model_used
+    ~resolved_model_id ~cascade_profile ~bucket =
+  Prom.metric_value_or_zero
+    Prom.metric_keeper_turn_latency_by_model_bucket
+    ~labels:
+      [ ("keeper", keeper)
+      ; ("channel", channel)
+      ; ("provider_kind", provider_kind)
+      ; ("model_used", model_used)
+      ; ("resolved_model_id", resolved_model_id)
+      ; ("cascade_profile", cascade_profile)
+      ; ("bucket", bucket)
+      ]
+    ()
+
 (* Bucket vocabulary is exactly five labels.  Shrinking or
    exploding this set is a breaking dashboard change. *)
 let test_bucket_vocabulary () =
@@ -144,6 +159,58 @@ let test_warn_threshold_reads_env () =
    | Some v -> Unix.putenv "MASC_KEEPER_LONG_TURN_WARN_MS" v
    | None -> Unix.putenv "MASC_KEEPER_LONG_TURN_WARN_MS" "")
 
+let test_provider_kind_of_model_used () =
+  Alcotest.(check string) "claude_code label"
+    "claude_code" (M.provider_kind_of_model_used "claude_code:auto");
+  Alcotest.(check string) "kimi_cli label"
+    "kimi_cli" (M.provider_kind_of_model_used " kimi_cli:kimi-for-coding ");
+  Alcotest.(check string) "unprefixed"
+    "unknown" (M.provider_kind_of_model_used "gpt-5.4");
+  Alcotest.(check string) "empty"
+    "unknown" (M.provider_kind_of_model_used "")
+
+let test_record_by_model_bucket () =
+  let keeper = "test-keeper-provider-latency-9933" in
+  let before =
+    model_bucket_count
+      ~keeper
+      ~channel:"scheduled_autonomous"
+      ~provider_kind:"claude_code"
+      ~model_used:"claude_code:auto"
+      ~resolved_model_id:"claude-sonnet-4.7"
+      ~cascade_profile:"big_three"
+      ~bucket:"over_1200s"
+  in
+  M.record_turn_latency_by_model_bucket
+    ~keeper
+    ~channel:"scheduled_autonomous"
+    ~model_used:"claude_code:auto"
+    ~resolved_model_id:"claude-sonnet-4.7"
+    ~cascade_profile:"big_three"
+    ~latency_ms:1_200_000;
+  Alcotest.(check (float 0.0001))
+    "by-model over_1200s bucket +1"
+    (before +. 1.0)
+    (model_bucket_count
+       ~keeper
+       ~channel:"scheduled_autonomous"
+       ~provider_kind:"claude_code"
+       ~model_used:"claude_code:auto"
+       ~resolved_model_id:"claude-sonnet-4.7"
+       ~cascade_profile:"big_three"
+       ~bucket:"over_1200s");
+  Alcotest.(check (float 0.0001))
+    "different cascade unchanged"
+    0.0
+    (model_bucket_count
+       ~keeper
+       ~channel:"scheduled_autonomous"
+       ~provider_kind:"claude_code"
+       ~model_used:"claude_code:auto"
+       ~resolved_model_id:"claude-sonnet-4.7"
+       ~cascade_profile:"tool_use_strict"
+       ~bucket:"over_1200s")
+
 let () =
   Alcotest.run "keeper_long_turn_9943"
     [
@@ -167,5 +234,12 @@ let () =
             test_warn_threshold_default_is_ten_minutes;
           Alcotest.test_case "reads env per call" `Quick
             test_warn_threshold_reads_env;
+        ] );
+      ( "provider-model",
+        [
+          Alcotest.test_case "provider kind from model surface" `Quick
+            test_provider_kind_of_model_used;
+          Alcotest.test_case "records by model/cascade bucket" `Quick
+            test_record_by_model_bucket;
         ] );
     ]

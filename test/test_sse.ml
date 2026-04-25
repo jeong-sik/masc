@@ -21,13 +21,13 @@ let run_domains_together count fn =
 let test_unregister_if_current () =
   let open Masc_mcp.Sse in
   let session_id = "test_session" in
-  let noop _ = () in
+  let _noop _ = () in
 
-  let (id1, _, _) = register session_id ~push:noop ~last_event_id:0 in
+  let (id1, _, _) = register session_id ~last_event_id:0 in
   check bool "registered" true (exists session_id);
 
   (* Re-register same session_id (simulates reconnect) *)
-  let (id2, _, _) = register session_id ~push:noop ~last_event_id:0 in
+  let (id2, _, _) = register session_id ~last_event_id:0 in
   check bool "still registered" true (exists session_id);
 
   (* Old connection cleanup must not unregister the new connection *)
@@ -43,9 +43,9 @@ let test_cleanup_stale_respects_touch () =
   let open Masc_mcp.Sse in
   let stale_sid = "stale_session_" ^ string_of_int (Random.int 1000000) in
   let alive_sid = "alive_session_" ^ string_of_int (Random.int 1000000) in
-  let noop _ = () in
-  let (_id1, _, _) = register stale_sid ~push:noop ~last_event_id:0 in
-  let (_id2, _, _) = register alive_sid ~push:noop ~last_event_id:0 in
+  let _noop _ = () in
+  let (_id1, _, _) = register stale_sid ~last_event_id:0 in
+  let (_id2, _, _) = register alive_sid ~last_event_id:0 in
 
   Unix.sleepf 0.05;
   touch alive_sid;
@@ -63,7 +63,7 @@ let test_concurrent_register_unregister () =
   let open Masc_mcp.Sse in
   let n = 50 in
   let prefix = "conc_" ^ string_of_int (Random.int 1000000) ^ "_" in
-  let noop _ = () in
+  let _noop _ = () in
   let count_before = client_count () in
   (* N fibers register, then unregister concurrently.
      Switch.run waits for all forked fibers before returning. *)
@@ -71,7 +71,7 @@ let test_concurrent_register_unregister () =
     for i = 0 to n - 1 do
       Eio.Fiber.fork ~sw (fun () ->
         let sid = prefix ^ string_of_int i in
-        let (_id, _, _) = register sid ~push:noop ~last_event_id:0 in
+        let (_id, _, _) = register sid ~last_event_id:0 in
         Eio.Fiber.yield ();
         unregister sid)
     done);
@@ -83,7 +83,7 @@ let test_client_count_linearized_under_domain_contention () =
   let open Masc_mcp.Sse in
   let worker_count = 24 in
   let prefix = "count_linearized_" ^ string_of_int (Random.int 1_000_000) ^ "_" in
-  let noop _ = () in
+  let _noop _ = () in
   let session_id index = prefix ^ string_of_int index in
   let count_before = client_count () in
   Fun.protect
@@ -93,7 +93,7 @@ let test_client_count_linearized_under_domain_contention () =
       done)
     (fun () ->
       run_domains_together worker_count (fun index ->
-        ignore (register (session_id index) ~push:noop ~last_event_id:0));
+        ignore (register (session_id index) ~last_event_id:0));
       check int "count after concurrent register" (count_before + worker_count)
         (client_count ());
       run_domains_together worker_count (fun index ->

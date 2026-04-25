@@ -572,15 +572,8 @@ let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Full)
           let writer = Httpun.Reqd.respond_with_streaming reqd response in
           let mutex = Eio.Mutex.create () in
           let info_ref : sse_conn_info option ref = ref None in
-          let push event =
-            match !info_ref with
-            | None -> ()
-            | Some info ->
-                if not (send_raw info event) then
-                  Log.Server.debug "SSE push failed for session %s" info.session_id
-          in
           let client_id, event_stream, evicted =
-            Sse.register ~kind:sse_kind session_id ~push
+            Sse.register ~kind:sse_kind session_id
               ~last_event_id:(Option.value ~default:0 last_event_id)
           in
           (match evicted with

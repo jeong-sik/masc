@@ -9,7 +9,7 @@ open Masc_mcp
 
 let reset () = ignore (Sse.close_all_clients ())
 
-let dummy_push _s = ()
+let _dummy_push _s = ()
 
 (* ============================================================
    pop / try_pop
@@ -22,14 +22,14 @@ let test_try_pop_empty () =
 
 let test_try_pop_no_events () =
   reset ();
-  ignore (Sse.register "s-pop-empty" ~push:dummy_push ~last_event_id:0);
+  ignore (Sse.register "s-pop-empty" ~last_event_id:0);
   let result = Sse.try_pop "s-pop-empty" in
   Alcotest.(check bool) "None when stream empty" true (result = None);
   Sse.unregister "s-pop-empty"
 
 let test_broadcast_popable () =
   reset ();
-  ignore (Sse.register "s-pop-bc" ~push:dummy_push ~last_event_id:0);
+  ignore (Sse.register "s-pop-bc" ~last_event_id:0);
   Sse.broadcast (`Assoc [("key", `String "val")]);
   let ev = Sse.try_pop "s-pop-bc" in
   Alcotest.(check bool) "got event from stream" true (ev <> None);
@@ -40,9 +40,9 @@ let test_broadcast_popable () =
 
 let test_broadcast_multiple_clients_streams () =
   reset ();
-  ignore (Sse.register "s-mc-1" ~push:dummy_push ~last_event_id:0);
-  ignore (Sse.register "s-mc-2" ~push:dummy_push ~last_event_id:0);
-  ignore (Sse.register "s-mc-3" ~push:dummy_push ~last_event_id:0);
+  ignore (Sse.register "s-mc-1" ~last_event_id:0);
+  ignore (Sse.register "s-mc-2" ~last_event_id:0);
+  ignore (Sse.register "s-mc-3" ~last_event_id:0);
   Sse.broadcast (`Assoc [("multi", `Bool true)]);
   let got1 = Sse.try_pop "s-mc-1" in
   let got2 = Sse.try_pop "s-mc-2" in
@@ -56,8 +56,8 @@ let test_broadcast_multiple_clients_streams () =
 
 let test_send_to_popable () =
   reset ();
-  ignore (Sse.register "s-st-1" ~push:dummy_push ~last_event_id:0);
-  ignore (Sse.register "s-st-2" ~push:dummy_push ~last_event_id:0);
+  ignore (Sse.register "s-st-1" ~last_event_id:0);
+  ignore (Sse.register "s-st-2" ~last_event_id:0);
   Sse.send_to "s-st-1" (`Assoc [("direct", `Bool true)]);
   let got1 = Sse.try_pop "s-st-1" in
   let got2 = Sse.try_pop "s-st-2" in
@@ -68,7 +68,7 @@ let test_send_to_popable () =
 
 let test_pop_blocks_then_receives () =
   reset ();
-  ignore (Sse.register "s-block" ~push:dummy_push ~last_event_id:0);
+  ignore (Sse.register "s-block" ~last_event_id:0);
   (* pop in a sub-fiber, broadcast from main fiber *)
   Eio.Fiber.both
     (fun () ->
@@ -83,7 +83,7 @@ let test_pop_blocks_then_receives () =
 let test_broadcast_skips_already_seen () =
   reset ();
   (* Register with a high last_event_id so events are skipped *)
-  ignore (Sse.register "s-skip" ~push:dummy_push ~last_event_id:999_999_999);
+  ignore (Sse.register "s-skip" ~last_event_id:999_999_999);
   Sse.broadcast (`Assoc [("skip", `Bool true)]);
   let ev = Sse.try_pop "s-skip" in
   Alcotest.(check bool) "skipped (already seen)" true (ev = None);
@@ -91,7 +91,7 @@ let test_broadcast_skips_already_seen () =
 
 let test_broadcast_event_contains_data () =
   reset ();
-  ignore (Sse.register "s-data" ~push:dummy_push ~last_event_id:0);
+  ignore (Sse.register "s-data" ~last_event_id:0);
   Sse.broadcast (`Assoc [("payload", `Int 42)]);
   match Sse.try_pop "s-data" with
   | None -> Alcotest.fail "expected an event"
@@ -113,8 +113,8 @@ let test_broadcast_event_contains_data () =
 
 let test_broadcast_to_observers_only () =
   reset ();
-  ignore (Sse.register ~kind:Observer "s-obs" ~push:dummy_push ~last_event_id:0);
-  ignore (Sse.register ~kind:Coordinator "s-coord" ~push:dummy_push ~last_event_id:0);
+  ignore (Sse.register ~kind:Observer "s-obs" ~last_event_id:0);
+  ignore (Sse.register ~kind:Coordinator "s-coord" ~last_event_id:0);
   Sse.broadcast_to Observers (`Assoc [("target", `String "observers")]);
   let got_obs = Sse.try_pop "s-obs" in
   let got_coord = Sse.try_pop "s-coord" in
@@ -125,8 +125,8 @@ let test_broadcast_to_observers_only () =
 
 let test_broadcast_to_coordinators_only () =
   reset ();
-  ignore (Sse.register ~kind:Observer "s-obs2" ~push:dummy_push ~last_event_id:0);
-  ignore (Sse.register ~kind:Coordinator "s-coord2" ~push:dummy_push ~last_event_id:0);
+  ignore (Sse.register ~kind:Observer "s-obs2" ~last_event_id:0);
+  ignore (Sse.register ~kind:Coordinator "s-coord2" ~last_event_id:0);
   Sse.broadcast_to Coordinators (`Assoc [("target", `String "coordinators")]);
   let got_obs = Sse.try_pop "s-obs2" in
   let got_coord = Sse.try_pop "s-coord2" in
@@ -137,8 +137,8 @@ let test_broadcast_to_coordinators_only () =
 
 let test_broadcast_to_all () =
   reset ();
-  ignore (Sse.register ~kind:Observer "s-all-obs" ~push:dummy_push ~last_event_id:0);
-  ignore (Sse.register ~kind:Coordinator "s-all-coord" ~push:dummy_push ~last_event_id:0);
+  ignore (Sse.register ~kind:Observer "s-all-obs" ~last_event_id:0);
+  ignore (Sse.register ~kind:Coordinator "s-all-coord" ~last_event_id:0);
   Sse.broadcast_to All (`Assoc [("target", `String "all")]);
   let got_obs = Sse.try_pop "s-all-obs" in
   let got_coord = Sse.try_pop "s-all-coord" in
@@ -149,8 +149,8 @@ let test_broadcast_to_all () =
 
 let test_broadcast_equals_broadcast_to_all () =
   reset ();
-  ignore (Sse.register ~kind:Observer "s-eq-obs" ~push:dummy_push ~last_event_id:0);
-  ignore (Sse.register ~kind:Coordinator "s-eq-coord" ~push:dummy_push ~last_event_id:0);
+  ignore (Sse.register ~kind:Observer "s-eq-obs" ~last_event_id:0);
+  ignore (Sse.register ~kind:Coordinator "s-eq-coord" ~last_event_id:0);
   (* broadcast (no target) should reach everyone, same as broadcast_to All *)
   Sse.broadcast (`Assoc [("compat", `Bool true)]);
   let got_obs = Sse.try_pop "s-eq-obs" in
@@ -163,7 +163,7 @@ let test_broadcast_equals_broadcast_to_all () =
 let test_register_defaults_to_coordinator () =
   reset ();
   (* Register without explicit kind *)
-  ignore (Sse.register "s-default" ~push:dummy_push ~last_event_id:0);
+  ignore (Sse.register "s-default" ~last_event_id:0);
   (* Should be Coordinator: receives Coordinators-targeted broadcast *)
   Sse.broadcast_to Coordinators (`Assoc [("default_kind", `Bool true)]);
   let got = Sse.try_pop "s-default" in

@@ -22,7 +22,6 @@ type client = {
   id : int;
   kind : session_kind;
   event_stream : string Eio.Stream.t;
-  push : string -> unit;
   last_event_id : int Atomic.t;
   created_at : float;
   last_seen_at : float Atomic.t;
@@ -50,7 +49,7 @@ val buffer_ttl_seconds : float
 (** {1 Session Management} *)
 
 val register :
-  ?kind:session_kind -> string -> push:(string -> unit) -> last_event_id:int ->
+  ?kind:session_kind -> string -> last_event_id:int ->
   int * string Eio.Stream.t * string option
 val unregister : string -> unit
 val unregister_if_current : string -> int -> unit

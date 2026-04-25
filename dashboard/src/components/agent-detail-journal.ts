@@ -16,7 +16,7 @@ export function AgentJournalStream({ agentName }: { agentName: string }) {
       ${entries.length === 0
         ? html`<${EmptyState} message="아직 활동 기록이 없습니다" compact />`
         : html`
-            <div class="flex flex-col gap-0.5 max-h-70 overflow-y-auto">
+            <div role="log" aria-label="에이전트 활동 로그" class="flex flex-col gap-0.5 max-h-70 overflow-y-auto">
               ${entries.map((entry: JournalEntry, idx: number) => html`
                 <div class="agent-journal-entry flex items-baseline gap-1.5 py-1 px-2 text-sm transition-[background] duration-100 rounded hover:bg-[var(--white-4)]" key=${idx}>
                   <span class="agent-journal-kind">${journalKindIcon(entry)}</span>

@@ -186,6 +186,31 @@ let publish_keeper_lifecycle (_bus : Oas.Event_bus.t)
   masc_publish
     (Oas.Event_bus.mk_event (Custom ("masc.keeper.lifecycle", payload)))
 
+(** Publish a structured keeper-Dead event.
+
+    Emitted when [Keeper_supervisor.sweep_and_recover] gives up on a keeper
+    after [restart_count >= max_restarts]. Operators should treat this as
+    actionable: the supervisor will NOT retry the keeper. Independent from
+    the [event="dead"] entry on [masc.keeper.lifecycle] (which is unstructured
+    free-form [detail]) so subscribers can filter on a stable topic and pull
+    the structured fields directly. Topic: [masc.keeper.dead]. *)
+let publish_keeper_dead (_bus : Oas.Event_bus.t)
+    ~keeper_name ~reason ~restart_count ~last_failure_reason () =
+  let last_failure_json =
+    match last_failure_reason with
+    | Some s -> `String s
+    | None -> `Null
+  in
+  let payload = `Assoc [
+    ("keeper_name", `String keeper_name);
+    ("reason", `String reason);
+    ("restart_count", `Int restart_count);
+    ("last_failure_reason", last_failure_json);
+    ("timestamp", `Float (Time_compat.now ()));
+  ] in
+  masc_publish
+    (Oas.Event_bus.mk_event (Custom ("masc.keeper.dead", payload)))
+
 (** {1 Phase 4: Social Events}
 
     These two publishers were scaffolded in #1060 (OAS v0.23

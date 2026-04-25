@@ -361,6 +361,8 @@ let metric_board_truncated_posts = "masc_board_truncated_posts_total"
 let metric_cascade_strategy_decisions = "masc_cascade_strategy_decisions_total"
 let metric_cascade_capacity_events = "masc_cascade_capacity_events_total"
 let metric_keeper_invariant_violations = "masc_keeper_invariant_violations_total"
+let metric_keeper_dead_total = "masc_keeper_dead_total"
+let metric_keeper_near_exhaustion_total = "masc_keeper_near_exhaustion_total"
 let metric_oas_bus_subscriber_stream_depth = "masc_oas_bus_subscriber_stream_depth"
 let metric_oas_bus_publish_block_seconds = "masc_oas_bus_publish_block_seconds_total"
 let metric_oas_bus_publish = "masc_oas_bus_publish_total"
@@ -487,6 +489,15 @@ let init () =
     "Total keeper turns that tolerated unexpected tool names because at least \
      one valid keeper tool call was present. Labeled by keeper_name and \
      logged=true|false so WARN suppression remains observable."
+    Counter;
+  add metric_keeper_dead_total
+    "Total keeper transitions to Dead phase after the supervisor exhausts \
+     max_restarts. Labeled by keeper and reason. Any rate >0 is operator-\
+     actionable: the supervisor will not retry the keeper."
+    Counter;
+  add metric_keeper_near_exhaustion_total
+    "Total keeper restart attempts at restart_count = max_restarts - 1, \
+     i.e. one failure away from Dead. Soft pre-warning; labeled by keeper."
     Counter;
   add metric_keeper_tool_alias_canonicalizations
     "Total observed LLM-facing tool names canonicalized to keeper internal \

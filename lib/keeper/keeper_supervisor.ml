@@ -588,11 +588,38 @@ let sweep_and_recover (ctx : _ context) =
     ignore (Keeper_registry.dispatch_event ~base_path entry.name
       Keeper_state_machine.Restart_budget_exhausted);
     Keeper_registry.mark_dead ~base_path entry.name ~at:now;
+    let detail =
+      Printf.sprintf "restart budget exhausted (%d), last: %s"
+        max_restarts msg
+    in
     publish_phase_lifecycle ~phase:Keeper_state_machine.Dead entry.name
-      (Printf.sprintf "restart budget exhausted (%d), last: %s"
-         max_restarts msg) ();
-    Log.Keeper.error "%s: restart budget exhausted (%d). Dead."
-      entry.name max_restarts
+      detail ();
+    (* Loud alert: structured Dead event + Prometheus counter so a fleet-wide
+       silent crash (8 keepers, 2026-04-25) is impossible to miss in dashboard
+       or PromQL. The free-form [event="dead"] on masc.keeper.lifecycle does
+       not carry restart_count or the structured failure reason. *)
+    let last_fr_str =
+      Option.map Keeper_registry.failure_reason_to_string
+        entry.last_failure_reason
+    in
+    (match Keeper_keepalive.get_bus () with
+     | Some bus ->
+         Oas_events.publish_keeper_dead bus
+           ~keeper_name:entry.name
+           ~reason:msg
+           ~restart_count:entry.restart_count
+           ~last_failure_reason:last_fr_str
+           ()
+     | None -> ());
+    Prometheus.inc_counter Prometheus.metric_keeper_dead_total
+      ~labels:[
+        ("keeper", entry.name);
+        ("reason", Option.value last_fr_str ~default:"unknown");
+      ] ();
+    Log.Keeper.error
+      "keeper DEAD (max_restarts exhausted): name=%s reason=%s \
+       restart_count=%d — operator action required"
+      entry.name msg entry.restart_count
   ) !to_mark_dead;
   List.iter (cleanup_dead_tombstone ctx) !to_cleanup_dead;
   let active_count =
@@ -626,7 +653,17 @@ let sweep_and_recover (ctx : _ context) =
           old_entry.name
           (Printf.sprintf "attempt %d" attempt) ();
         Log.Keeper.info "%s: restarted (attempt %d, backoff %.0fs)"
-          old_entry.name attempt (backoff_delay (attempt - 1))
+          old_entry.name attempt (backoff_delay (attempt - 1));
+        (* Soft pre-warning when this is the FINAL allowed restart: next
+           crash will trip the budget and mark Dead. Operator-actionable
+           but not yet a fault — investigate root cause now. *)
+        if attempt >= max_restarts then begin
+          Log.Keeper.warn
+            "keeper near-exhaustion: name=%s restart=%d/%d — investigate"
+            old_entry.name attempt max_restarts;
+          Prometheus.inc_counter Prometheus.metric_keeper_near_exhaustion_total
+            ~labels:[("keeper", old_entry.name)] ()
+        end
     | _ ->
         Log.Keeper.error "%s: cannot read meta for restart, removing"
           old_entry.name;

@@ -1278,33 +1278,45 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
          atomic-save data loss) are preserved in
          [<base_path>/.recovered/] for forensic inspection.  Always
          runs at boot so each restart publishes fresh cleanup
-         counters. *)
-      (try
-        let deleted, preserved =
-          Fs_compat.cleanup_atomic_orphans ~base_path ()
-        in
-        if deleted > 0 then
-          Prometheus.inc_counter
-            Prometheus.metric_fs_atomic_orphans_cleaned
-            ~labels:[ ("size_class", "empty") ]
-            ~delta:(float_of_int deleted)
-            ();
-        if preserved > 0 then
-          Prometheus.inc_counter
-            Prometheus.metric_fs_atomic_orphans_cleaned
-            ~labels:[ ("size_class", "with_data") ]
-            ~delta:(float_of_int preserved)
-            ();
-        if deleted + preserved > 0 then
-          Log.Server.warn
-            "boot: cleaned %d save_file_atomic orphans (%d empty, \
-             %d preserved with data in .recovered/ — see #10130)"
-            (deleted + preserved) deleted preserved
-       with Eio.Cancel.Cancelled _ as e -> raise e
-          | exn ->
-            Log.Server.error
-              "boot: atomic orphan sweep failed: %s"
-              (Printexc.to_string exn));
+         counters.
+
+         #10205 finding 5: the sweep walks every keeper subdirectory
+         under [base_path] ([Sys.readdir] per directory + [Unix.stat]
+         per orphan candidate).  It does NOT need to gate
+         [install_tooling] or the [Bootstrap completed] log line —
+         the sweep results are advisory diagnostics, not a
+         precondition for serving.  Fork it into a background fiber
+         so the boot hot path completes immediately; the counter
+         and WARN publish asynchronously, which is the right shape
+         for operator dashboards (delta-from-zero, not synchronous
+         readback). *)
+      Eio.Fiber.fork ~sw (fun () ->
+        try
+          let deleted, preserved =
+            Fs_compat.cleanup_atomic_orphans ~base_path ()
+          in
+          if deleted > 0 then
+            Prometheus.inc_counter
+              Prometheus.metric_fs_atomic_orphans_cleaned
+              ~labels:[ ("size_class", "empty") ]
+              ~delta:(float_of_int deleted)
+              ();
+          if preserved > 0 then
+            Prometheus.inc_counter
+              Prometheus.metric_fs_atomic_orphans_cleaned
+              ~labels:[ ("size_class", "with_data") ]
+              ~delta:(float_of_int preserved)
+              ();
+          if deleted + preserved > 0 then
+            Log.Server.warn
+              "boot: cleaned %d save_file_atomic orphans (%d empty, \
+               %d preserved with data in .recovered/ — see #10130)"
+              (deleted + preserved) deleted preserved
+        with Eio.Cancel.Cancelled _ as e -> raise e
+           | exn ->
+             Log.Server.error
+               "boot: atomic orphan sweep failed: %s"
+               (Printexc.to_string exn));
       (* #9786: audit credential store for shared bearer tokens.
          When two credentials hash to the same token,
          [find_credential_by_token] silently routes to the FIRST

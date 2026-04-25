@@ -97,11 +97,11 @@ describe('FleetHealthPanel', () => {
     expect(screen.getByText('거버넌스')).toBeTruthy()
   })
 
-  it('marks the default chip as active (aria-pressed)', () => {
+  it('marks the default chip as active (aria-selected)', () => {
     render(html`<${FleetHealthPanel} />`)
 
     const defaultChip = screen.getByText('개요').closest('button')
-    expect(defaultChip?.getAttribute('aria-pressed')).toBe('true')
+    expect(defaultChip?.getAttribute('aria-selected')).toBe('true')
   })
 
   it('clicking a chip dispatches hashchange to switch view', () => {

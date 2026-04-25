@@ -11,5 +11,15 @@
   ["works on my machine", "unverifiable claim"],
   ["not reproducible", "dismissing without investigation"],
   ["not my responsibility", "responsibility deflection"],
-  ["cannot reproduce", "dismissing without investigation"]
+  ["cannot reproduce", "dismissing without investigation"],
+  ["나중에", "deferring work to later (ko)"],
+  ["범위 밖", "declaring work out of scope (ko)"],
+  ["의도 외", "declaring work outside intent (ko)"],
+  ["재현 안", "dismissing without investigation (ko)"],
+  ["재현되지 않", "dismissing without investigation (ko)"],
+  ["기존 문제", "claiming the problem already existed (ko)"],
+  ["내 환경에선", "unverifiable claim (ko)"],
+  ["내 환경에서는", "unverifiable claim (ko)"],
+  ["후속 pr", "deferring to a follow-up (ko)"],
+  ["다음 pr", "deferring to a follow-up (ko)"]
 ]

@@ -1461,7 +1461,10 @@
  (modules test_dated_jsonl_mutex_registry_10372)
  (libraries dated_jsonl fs_compat alcotest eio eio_main yojson unix))
 
-
+(test
+ (name test_anti_rationalization_korean_10385)
+ (modules test_anti_rationalization_korean_10385)
+ (libraries masc_mcp alcotest unix))
 ; ============================================================
 ; Special: Heartbeat/keeper minimal deps
 ; ============================================================

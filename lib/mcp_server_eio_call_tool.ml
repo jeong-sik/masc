@@ -731,6 +731,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
                 ?operation_id:telemetry_operation_id
                 ?worker_run_id:telemetry_worker_run_id
                 ?error_kind:telemetry_error_kind
+                ?error_message:error_detail
                 ()
           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
             log_mcp_exn ~label:"telemetry tracking failed" exn)

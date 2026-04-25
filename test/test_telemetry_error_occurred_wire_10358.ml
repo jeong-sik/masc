@@ -6,9 +6,9 @@
     ([dashboard_tool_host_events]), so 4 days of fleet failures
     accumulated with no classification trail in the JSONL.
 
-    [Telemetry_eio.track_tool_called] now takes an optional
-    [?error_kind] (and [?error_message]).  When [success=false]
-    AND [error_kind=Some _], it fans out a paired [Error_occurred]
+    [Telemetry_eio.track_tool_called] now persists optional error
+    fields on [Tool_called].  When [success=false] AND
+    [error_kind=Some _], it also fans out a paired [Error_occurred]
     event so the previously-dead variant carries the failure mode
     + tool/agent/session context.
 
@@ -17,8 +17,9 @@
     1. success=true  + error_kind=Some _   → only Tool_called.
     2. success=false + error_kind=None     → only Tool_called
        (back-compat for the 3 callers that don't classify).
-    3. success=false + error_kind=Some k   → Tool_called +
-       Error_occurred with [code=k] and a structured [context].
+    3. success=false + error_kind=Some k   → Tool_called carries
+       [error_kind]/[error_message] and emits Error_occurred with
+       [code=k] plus a structured [context].
     4. success=false + error_kind=Some "  " → no Error_occurred
        (whitespace-only kind treated as no signal).
     5. success=false + custom error_message → message preserved
@@ -122,11 +123,24 @@ let test_failure_with_error_kind_pairs () =
     ~source:"keeper_internal"
     ~session_id:"sess-10358"
     ~error_kind:"timeout"
+    ~error_message:"timeout=1|duration_ms=30000|detail=deadline"
     ();
   let kinds = recent_events_kinds config 5 in
   check (list string)
     "fan-out: Tool_called then Error_occurred"
-    [ "Tool_called"; "Error_occurred" ] kinds
+    [ "Tool_called"; "Error_occurred" ] kinds;
+  match T.read_all_events config |> List.filter (fun (r : T.event_record) ->
+    match r.event with
+    | T.Agent_joined _ -> false
+    | _ -> true)
+  with
+  | { T.event = T.Tool_called tool; _ } :: _ ->
+      check (option string) "Tool_called.error_kind"
+        (Some "timeout") tool.error_kind;
+      check (option string) "Tool_called.error_message"
+        (Some "timeout=1|duration_ms=30000|detail=deadline")
+        tool.error_message
+  | _ -> failf "expected Tool_called as first explicit record"
 
 (* --- 4. whitespace error_kind suppresses the pair -------------- *)
 

@@ -97,6 +97,14 @@ let status_string config task_id =
   | None -> "not_found"
   | Some t -> Types.string_of_task_status t.task_status
 
+let verification_id_of_task config task_id =
+  match get_task config task_id with
+  | None -> Alcotest.fail "task not found"
+  | Some (t : Types.task) ->
+    (match t.task_status with
+     | Types.AwaitingVerification { verification_id; _ } -> verification_id
+     | _ -> Alcotest.fail "task is not awaiting verification")
+
 let expect_claim_next_claimed result ~task_id ~released_task_id =
   match result with
   | Coord.Claim_next_claimed
@@ -310,6 +318,111 @@ let test_reject_by_other_agent_moves_to_in_progress () =
       Alcotest.(check string) "status" "in_progress"
         (status_string config task_id))
 
+let test_approve_prepare_failure_keeps_task_awaiting () =
+  with_temp_config ~fsm_enabled:true (fun config ->
+    let task_id = add_strict_task config in
+    claim_and_start config "worker" task_id;
+    (match
+       Coord.transition_task_r
+         config
+         ~agent_name:"worker"
+         ~task_id
+         ~action:Types.Submit_for_verification
+         ()
+     with
+     | Ok _ -> ()
+     | Error e -> Alcotest.fail ("submit failed: " ^ Types.show_masc_error e));
+    let verification_id = verification_id_of_task config task_id in
+    let req =
+      create_pending_request
+        config
+        ~task_id
+        ~worker:"worker"
+        ~request_id:verification_id
+    in
+    let prepare_called = ref false in
+    let result =
+      Coord.transition_task_r
+        config
+        ~agent_name:"verifier"
+        ~task_id
+        ~action:Types.Approve_verification
+        ~prepare_verification_verdict:
+          (fun ~task:_ ~verifier:_ ~verification_id:_ ~decision:_ ->
+             prepare_called := true;
+             Error "simulated verdict store failure")
+        ()
+    in
+    match result with
+    | Ok _ -> Alcotest.fail "approve should fail when verdict persistence fails"
+    | Error e ->
+      Alcotest.(check bool) "prepare called" true !prepare_called;
+      Alcotest.(check string) "status remains awaiting_verification"
+        "awaiting_verification" (status_string config task_id);
+      let msg = Types.show_masc_error e in
+      Alcotest.(check bool) "error mentions verdict persistence" true
+        (Astring.String.is_infix
+           ~affix:"verification verdict persistence failed"
+           msg);
+      (match Verification.load_request config.Coord.base_path req.id with
+       | Error err -> Alcotest.fail ("load_request failed: " ^ err)
+       | Ok updated ->
+         Alcotest.(check bool) "request remains pending" true
+           (match updated.status with Pending -> true | _ -> false)))
+
+let test_reject_prepare_failure_keeps_task_awaiting () =
+  with_temp_config ~fsm_enabled:true (fun config ->
+    let task_id = add_strict_task config in
+    claim_and_start config "worker" task_id;
+    (match
+       Coord.transition_task_r
+         config
+         ~agent_name:"worker"
+         ~task_id
+         ~action:Types.Submit_for_verification
+         ()
+     with
+     | Ok _ -> ()
+     | Error e -> Alcotest.fail ("submit failed: " ^ Types.show_masc_error e));
+    let verification_id = verification_id_of_task config task_id in
+    let req =
+      create_pending_request
+        config
+        ~task_id
+        ~worker:"worker"
+        ~request_id:verification_id
+    in
+    let prepare_called = ref false in
+    let result =
+      Coord.transition_task_r
+        config
+        ~agent_name:"verifier"
+        ~task_id
+        ~action:Types.Reject_verification
+        ~reason:"missing evidence"
+        ~prepare_verification_verdict:
+          (fun ~task:_ ~verifier:_ ~verification_id:_ ~decision:_ ->
+             prepare_called := true;
+             Error "simulated verdict store failure")
+        ()
+    in
+    match result with
+    | Ok _ -> Alcotest.fail "reject should fail when verdict persistence fails"
+    | Error e ->
+      Alcotest.(check bool) "prepare called" true !prepare_called;
+      Alcotest.(check string) "status remains awaiting_verification"
+        "awaiting_verification" (status_string config task_id);
+      let msg = Types.show_masc_error e in
+      Alcotest.(check bool) "error mentions verdict persistence" true
+        (Astring.String.is_infix
+           ~affix:"verification verdict persistence failed"
+           msg);
+      (match Verification.load_request config.Coord.base_path req.id with
+       | Error err -> Alcotest.fail ("load_request failed: " ^ err)
+       | Ok updated ->
+         Alcotest.(check bool) "request remains pending" true
+           (match updated.status with Pending -> true | _ -> false)))
+
 let test_claim_next_skips_pending_verification_tasks () =
   with_temp_config ~fsm_enabled:true (fun config ->
     let task_1 = add_strict_task config in
@@ -495,6 +608,10 @@ let () =
         test_approve_by_other_agent_moves_to_done;
       Alcotest.test_case "cross-agent reject moves to in_progress" `Quick
         test_reject_by_other_agent_moves_to_in_progress;
+      Alcotest.test_case "approve prepare failure keeps task awaiting" `Quick
+        test_approve_prepare_failure_keeps_task_awaiting;
+      Alcotest.test_case "reject prepare failure keeps task awaiting" `Quick
+        test_reject_prepare_failure_keeps_task_awaiting;
       Alcotest.test_case "claim_next skips pending verification tasks" `Quick
         test_claim_next_skips_pending_verification_tasks;
       Alcotest.test_case "claim_next skips rejected verification tasks" `Quick

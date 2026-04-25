@@ -70,9 +70,12 @@ let autonomous_max_idle_turns_live () =
   max 2 (min 50 (get_int ~default:10 "MASC_KEEPER_MAX_IDLE_TURNS_AUTONOMOUS"))
 
 let turn_timeout_sec_live () =
+  (* SSOT: must match Env_config_keeper.KeeperKeepalive.turn_timeout_sec
+     (range [60, 7200], default 3600 post-#9637). Drift here was the
+     mathematical root of #10388 (1200 - 30 oas_guard = 1170s budget). *)
   Float.max 60.0
-    (Float.min 3600.0
-       (get_float ~default:1200.0 "MASC_KEEPER_TURN_TIMEOUT_SEC"))
+    (Float.min 7200.0
+       (get_float ~default:3600.0 "MASC_KEEPER_TURN_TIMEOUT_SEC"))
 
 let admission_wait_timeout_sec_live () =
   Float.max 5.0

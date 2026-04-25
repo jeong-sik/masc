@@ -139,7 +139,7 @@ export function PersonaGenerator() {
           </label>
           <label class="grid gap-1 text-3xs text-[var(--text-muted)]">
             preset
-            <select
+            <select autoComplete="off"
               aria-label="도구 프리셋"
               value=${toolPreset.value}
               onChange=${(e: Event) => { toolPreset.value = (e.target as HTMLSelectElement).value }}

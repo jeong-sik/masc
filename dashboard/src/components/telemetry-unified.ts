@@ -778,7 +778,7 @@ export function TelemetryUnified() {
       </div>
 
       <div class="flex items-center gap-3 flex-wrap">
-        <select
+        <select autoComplete="off"
           aria-label="텔레메트리 소스 필터"
           class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--text-strong)]"
           value=${sourceFilter.value}
@@ -832,7 +832,7 @@ export function TelemetryUnified() {
           value=${entrySearch.value}
           onInput=${(e: Event) => { entrySearch.value = (e.target as HTMLInputElement).value }}
         />
-        <select
+        <select autoComplete="off"
           aria-label="표시 개수 제한"
           class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--text-strong)]"
           value=${String(limit.value)}

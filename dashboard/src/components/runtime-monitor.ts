@@ -353,7 +353,7 @@ export function RuntimeMonitor() {
   return html`
     <div class="flex flex-col gap-4">
       <div class="flex items-center gap-3 flex-wrap">
-        <select
+        <select autoComplete="off"
           class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--text-strong)]"
           aria-label="시간 범위"
           value=${String(windowMinutes.value)}

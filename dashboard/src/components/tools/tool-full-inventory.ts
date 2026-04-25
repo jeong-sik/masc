@@ -139,7 +139,7 @@ export function FullInventoryView({
             searchQuery.value = (e.target as HTMLInputElement).value
           }}
         />
-        <select
+        <select autoComplete="off"
           class="px-3 py-2 rounded bg-[var(--white-3)] border border-[var(--card-border)] text-[var(--text-body)] text-sm focus:border-[var(--accent)]/50 outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]/50"
           name="tool_inventory_category"
           aria-label="도구 카테고리 필터"

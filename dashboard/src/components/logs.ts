@@ -365,7 +365,7 @@ export function LogViewer() {
       <section class="flex min-h-0 flex-1 flex-col overflow-hidden rounded border border-[rgba(138,163,211,0.16)] bg-[rgba(7,13,24,0.86)]" aria-label="로그 뷰어">
         <div class="logs-toolbar flex shrink-0 flex-wrap items-center justify-between gap-4 border-b border-[var(--white-5)] px-4 py-4">
           <div class="logs-filters flex flex-wrap gap-2 items-center">
-            <select
+            <select autoComplete="off"
               name="log-level"
               aria-label="로그 레벨"
               class="logs-select rounded border border-[var(--white-10)] bg-[var(--white-3)] px-3 py-2 text-xs text-[var(--text-body)]"
@@ -402,7 +402,7 @@ export function LogViewer() {
               }}
             />
 
-            <select
+            <select autoComplete="off"
               name="log-limit"
               aria-label="로그 개수"
               class="logs-select rounded border border-[var(--white-10)] bg-[var(--white-3)] px-3 py-2 text-xs text-[var(--text-body)]"

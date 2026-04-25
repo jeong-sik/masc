@@ -493,7 +493,7 @@ function InlineSelectRow({
   return html`
     <div class="flex items-center justify-between py-2 px-3 rounded-xl border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-sm mb-1.5 gap-3">
       <span class="text-xs font-medium text-text-muted">${label}</span>
-      <select
+      <select autoComplete="off"
         aria-label=${label}
         class="text-xs bg-card/60 border border-card-border rounded px-2 py-1 text-text-strong"
         value=${value}
@@ -807,7 +807,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         ? html`
             <label class="flex flex-col gap-1.5 py-2 px-3 rounded border border-card-border/50 bg-card/20 backdrop-blur-sm mb-1.5">
               <span class="text-xs font-medium text-text-muted">활성 cascade profile</span>
-              <select
+              <select autoComplete="off"
                 aria-label="활성 cascade profile"
                 class="rounded border border-card-border/60 bg-[var(--white-4)] px-3 py-2 text-xs font-semibold text-text-strong disabled:opacity-60"
                 value=${currentCascade}

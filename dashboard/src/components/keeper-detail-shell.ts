@@ -78,7 +78,7 @@ function KeeperCascadeSelector({ keeper }: { keeper: Keeper }) {
 
   return html`
     <div class="flex items-center gap-1.5">
-      <select
+      <select autoComplete="off"
         class="py-0.5 px-1 rounded text-3xs font-mono bg-[var(--white-5)] text-[var(--text-muted)] border border-[var(--white-8)] cursor-pointer"
         aria-label="Cascade profile"
         title=${invalidProfiles.length > 0

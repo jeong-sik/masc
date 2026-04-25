@@ -59,16 +59,22 @@ let new_session ~id ~wsd =
     inbound_partial_text = None;
   }
 
-(** Send a text frame to a WebSocket client. *)
-let send_text session text =
+(** Send a pre-allocated frame to a WebSocket client.
+
+    The caller owns the [bytes] buffer; this function only reads it.  In
+    server mode httpun-ws does not mask (see httpun-ws 0.2.0
+    [Serialize.serialize_bytes]: [apply_mask_bytes] is only called when
+    [mode = `Client]), and [Faraday.write_bytes] copies into its internal
+    buffer synchronously, so the same [bytes] value can safely be passed
+    to multiple sessions in one broadcast without re-allocation. *)
+let send_frame_bytes session bytes ~len =
   if session.closed || Httpun_ws.Wsd.is_closed session.wsd then begin
     session.closed <- true;
     false
   end else begin
     try
-      let bytes = Bytes.of_string text in
       Httpun_ws.Wsd.send_bytes session.wsd
-        ~kind:`Text bytes ~off:0 ~len:(Bytes.length bytes);
+        ~kind:`Text bytes ~off:0 ~len;
       true
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
@@ -79,8 +85,51 @@ let send_text session text =
       false
   end
 
+(** Send a text frame to a WebSocket client.
+    Allocates [Bytes.t] per call — fine for single-destination sends.
+    Multicast paths should go through [send_text_shared] instead so the
+    bytes allocation is paid once per broadcast, not once per session. *)
+let send_text session text =
+  let bytes = Bytes.of_string text in
+  send_frame_bytes session bytes ~len:(Bytes.length bytes)
+
+(** Module-local cache of the last [Bytes.of_string sse_event] result.
+
+    [Sse.notify_external_subscribers] delivers the same [event: string]
+    reference to every subscribed WS session in sequence.  Before this
+    cache, every session ran [Bytes.of_string] independently in the
+    raw-SSE-forward path, producing O(sessions) identical allocations.
+    Keyed by physical equality so a fresh broadcast invalidates it. *)
+let bytes_cache : (string * Bytes.t) Atomic.t =
+  Atomic.make ("", Bytes.empty)
+
+let bytes_of_shared_text text =
+  let cached_str, cached_bytes = Atomic.get bytes_cache in
+  if cached_str == text then begin
+    Transport_metrics.inc_ws_bytes_cache_hit ();
+    cached_bytes
+  end
+  else begin
+    Transport_metrics.inc_ws_bytes_cache_miss ();
+    let bytes = Bytes.of_string text in
+    Atomic.set bytes_cache (text, bytes);
+    bytes
+  end
+
+(** Send a text frame that will also be sent to other sessions in this
+    broadcast.  Allocates [Bytes.of_string text] once per unique string
+    reference; subsequent sessions in the same fanout reuse the bytes. *)
+let send_text_shared session text =
+  let bytes = bytes_of_shared_text text in
+  send_frame_bytes session bytes ~len:(Bytes.length bytes)
+
 let send_text_checked ~context session text =
   let sent = send_text session text in
+  if not sent then log_ws_delivery_dropped ~context session.id;
+  sent
+
+let send_text_shared_checked ~context session text =
+  let sent = send_text_shared session text in
   if not sent then log_ws_delivery_dropped ~context session.id;
   sent
 
@@ -355,11 +404,16 @@ let send_dashboard_or_raw_sse session sse_event =
   if session.dashboard_authenticated then
     match dashboard_delta_for_sse session sse_event with
     | Some delta ->
+        (* Delta carries a per-session [seq], so the encoded text is unique
+           per session and cannot be shared. *)
         send_json_checked ~context:"dashboard-delta" session delta
     | None ->
-        send_text_checked ~context:"sse-forward" session sse_event
+        (* Same event string is forwarded verbatim to every session that
+           does not match a subscribed dashboard slice; the shared cache
+           collapses N identical [Bytes.of_string] allocations into 1. *)
+        send_text_shared_checked ~context:"sse-forward" session sse_event
   else
-    send_text_checked ~context:"sse-forward" session sse_event
+    send_text_shared_checked ~context:"sse-forward" session sse_event
 
 let read_payload_string payload ~len ~on_complete =
   let buffer = Bytes.create len in

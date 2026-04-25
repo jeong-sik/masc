@@ -66,6 +66,12 @@ let inc_ws_parse_cache_hit () =
 let inc_ws_parse_cache_miss () =
   Prometheus.inc_counter Prometheus.metric_ws_parse_cache_misses ()
 
+let inc_ws_bytes_cache_hit () =
+  Prometheus.inc_counter Prometheus.metric_ws_bytes_cache_hits ()
+
+let inc_ws_bytes_cache_miss () =
+  Prometheus.inc_counter Prometheus.metric_ws_bytes_cache_misses ()
+
 (** {1 Environment-derived Transport Config} *)
 
 let grpc_runtime_listening : bool Atomic.t = Atomic.make false

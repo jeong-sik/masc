@@ -268,6 +268,8 @@ let metric_grpc_events_delivered = "masc_grpc_events_delivered_total"
 let metric_ws_sessions = "masc_ws_sessions_total"
 let metric_ws_parse_cache_hits = "masc_ws_parse_cache_hits_total"
 let metric_ws_parse_cache_misses = "masc_ws_parse_cache_misses_total"
+let metric_ws_bytes_cache_hits = "masc_ws_bytes_cache_hits_total"
+let metric_ws_bytes_cache_misses = "masc_ws_bytes_cache_misses_total"
 
 (* Admission queue metrics — used in admission_queue_metrics.ml. *)
 let metric_inference_queue_depth = "masc_inference_queue_depth"
@@ -582,6 +584,12 @@ let init () =
     Counter;
   add metric_ws_parse_cache_misses
     "WS dashboard delta parse cache misses (fresh JSON parse required)"
+    Counter;
+  add metric_ws_bytes_cache_hits
+    "WS raw-SSE-forward Bytes cache hits (same event reused across sessions)"
+    Counter;
+  add metric_ws_bytes_cache_misses
+    "WS raw-SSE-forward Bytes cache misses (fresh allocation required)"
     Counter
 
 let start_time = Time_compat.now ()

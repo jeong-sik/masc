@@ -195,13 +195,17 @@ keeper_assignable = false
 let test_cascade_name_accepts_catalog_entry () =
   (* "tool_use_strict" is a known catalog entry in cascade.json,
      distinct from compile-time variants.  Tests that the live catalog
-     is consulted during validation. *)
+     is consulted during validation.
+
+     #10388: must filter out system-only ([keeper_assignable=false])
+     entries — the validator now rejects those, and a real-catalog
+     entry like [cross_verifier] is system-only. *)
   let catalog =
-    try Masc_mcp.Keeper_cascade_profile.catalog_names ()
+    try Masc_mcp.Keeper_cascade_profile.keeper_catalog_names ()
     with _ -> []
   in
   let test_name =
-    (* Pick a catalog entry that is NOT a compile-time variant *)
+    (* Pick an assignable catalog entry that is NOT a compile-time variant *)
     match
       List.find_opt
         (fun n ->
@@ -224,6 +228,66 @@ let test_cascade_name_accepts_catalog_entry () =
       (* If catalog is unavailable, skip rather than fail *)
       if catalog = [] then ()
       else fail (Printf.sprintf "%s should be accepted: %s" test_name e)
+
+(** #10388: keepers must not reference cascades flagged
+    [keeper_assignable=false].  Pre-fix the validator only checked
+    catalog membership; system-only cascades (e.g. [tool_use_strict])
+    passed and the keeper failed every reconcile tick at runtime
+    (4 keepers / 59 events/day on 2026-04-25). *)
+let test_cascade_name_rejects_system_only () =
+  with_config_dir
+    {|
+[everyday_assignable]
+models = ["ollama:auto"]
+keeper_assignable = true
+
+[system_only_lane]
+models = ["ollama:auto"]
+keeper_assignable = false
+|}
+    (fun _dir ->
+      let result =
+        with_temp_toml
+          "[keeper]\nname = \"testkeeper\"\ncascade_name = \"system_only_lane\"\n"
+          KTP.load_keeper_toml
+      in
+      match result with
+      | Ok _ -> fail "system-only cascade_name should be rejected"
+      | Error e ->
+          check bool "error mentions system-only" true
+            (contains ~needle:"system-only" e);
+          check bool "error mentions keeper_assignable" true
+            (contains ~needle:"keeper_assignable=false" e);
+          check bool "error lists assignable subset" true
+            (contains ~needle:"everyday_assignable" e))
+
+let test_cascade_name_accepts_assignable_after_system_only_added () =
+  (* Sanity: the new gate must not regress assignable cascades when a
+     sibling profile happens to be system-only. *)
+  with_config_dir
+    {|
+[everyday_assignable]
+models = ["ollama:auto"]
+keeper_assignable = true
+
+[system_only_lane]
+models = ["ollama:auto"]
+keeper_assignable = false
+|}
+    (fun _dir ->
+      let result =
+        with_temp_toml
+          "[keeper]\nname = \"testkeeper\"\ncascade_name = \"everyday_assignable\"\n"
+          KTP.load_keeper_toml
+      in
+      match result with
+      | Ok _ -> ()
+      | Error e ->
+          fail
+            (Printf.sprintf
+               "everyday_assignable (keeper_assignable=true) should be \
+                accepted: %s"
+               e))
 
 let test_tool_preset_accepts_dispatch () =
   let result =
@@ -316,6 +380,10 @@ let () =
             test_cascade_name_error_lists_live_catalog;
           test_case "accepts catalog entry (legacy alias)" `Quick
             test_cascade_name_accepts_catalog_entry;
+          test_case "rejects system-only cascade (keeper_assignable=false)"
+            `Quick test_cascade_name_rejects_system_only;
+          test_case "accepts assignable when system-only sibling exists"
+            `Quick test_cascade_name_accepts_assignable_after_system_only_added;
           test_case "accepts dispatch tool_preset" `Quick
             test_tool_preset_accepts_dispatch;
         ] );

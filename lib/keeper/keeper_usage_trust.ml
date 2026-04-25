@@ -26,21 +26,33 @@ let absurd_token_threshold = 1_000_000
    prompts running 5K-30K tokens. *)
 let anthropic_cache_min_input_tokens = 1024
 
+let provider_kind_uses_anthropic_caching
+    (kind : Llm_provider.Provider_config.provider_kind) : bool =
+  match kind with
+  | Anthropic | Claude_code -> true
+  | OpenAI_compat | Ollama | Gemini | Gemini_cli | Kimi | Kimi_cli | Glm
+  | Codex_cli ->
+      false
+
+let model_label_provider_kind label =
+  Provider_kind_resolver.kind_of_spec label
+
+let model_uses_anthropic_caching_with_provider_kind ~provider_kind ~(model_used : string)
+    ~(resolved_model_id : string) : bool =
+  match provider_kind with
+  | Some kind -> provider_kind_uses_anthropic_caching kind
+  | None ->
+      List.exists
+        (fun label ->
+           match model_label_provider_kind label with
+           | Some kind -> provider_kind_uses_anthropic_caching kind
+           | None -> false)
+        [ model_used; resolved_model_id ]
+
 let model_uses_anthropic_caching ~(model_used : string)
     ~(resolved_model_id : string) : bool =
-  let s = String.lowercase_ascii (model_used ^ "|" ^ resolved_model_id) in
-  let contains substr =
-    let n = String.length s and m = String.length substr in
-    if m = 0 || m > n then false
-    else
-      let rec loop i =
-        if i + m > n then false
-        else if String.sub s i m = substr then true
-        else loop (i + 1)
-      in
-      loop 0
-  in
-  contains "claude" || contains "anthropic"
+  model_uses_anthropic_caching_with_provider_kind ~provider_kind:None
+    ~model_used ~resolved_model_id
 
 let is_trusted = function
   | Usage_trusted -> true
@@ -70,7 +82,7 @@ let json_fields trust =
 let add_reason reason reasons =
   if List.mem reason reasons then reasons else reason :: reasons
 
-let classify ~(usage_reported : bool)
+let classify_with_provider_kind ~provider_kind ~(usage_reported : bool)
     ~(usage : Oas.Types.api_usage)
     ~(model_used : string)
     ~(resolved_model_id : string)
@@ -108,7 +120,8 @@ let classify ~(usage_reported : bool)
        per-keeper rate and alert when the rate is sustained
        (one-shot anomalies on tiny prompts are correctly noise). *)
     if
-      model_uses_anthropic_caching ~model_used ~resolved_model_id
+      model_uses_anthropic_caching_with_provider_kind ~provider_kind ~model_used
+        ~resolved_model_id
       && usage.input_tokens >= anthropic_cache_min_input_tokens
       && usage.cache_creation_input_tokens = 0
       && usage.cache_read_input_tokens = 0
@@ -116,3 +129,11 @@ let classify ~(usage_reported : bool)
     match List.rev !reasons with
     | [] -> Usage_trusted
     | reasons -> Usage_untrusted reasons
+
+let classify ~(usage_reported : bool)
+    ~(usage : Oas.Types.api_usage)
+    ~(model_used : string)
+    ~(resolved_model_id : string)
+    ~(context_max : int) : t =
+  classify_with_provider_kind ~provider_kind:None ~usage_reported ~usage
+    ~model_used ~resolved_model_id ~context_max

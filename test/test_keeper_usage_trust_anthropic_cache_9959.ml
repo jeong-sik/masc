@@ -40,8 +40,25 @@ let mk_usage
     cost_usd;
   }
 
-let classify_with ~model ~usage =
+let provider_kind_of_spec spec =
+  match Masc_mcp.Provider_kind_resolver.kind_of_spec spec with
+  | Some kind -> kind
+  | None -> Alcotest.failf "expected provider kind for %S" spec
+
+let anthropic_kind =
+  provider_kind_of_spec "claude:claude-sonnet-4-6"
+
+let openai_compat_kind =
+  provider_kind_of_spec "openrouter:anthropic/claude-3.5"
+
+let classify_without_kind ~model ~usage =
   T.classify ~usage_reported:true ~usage
+    ~model_used:model ~resolved_model_id:model
+    ~context_max:200_000
+
+let classify_with_kind ~provider_kind ~model ~usage =
+  T.classify_with_provider_kind ~provider_kind:(Some provider_kind)
+    ~usage_reported:true ~usage
     ~model_used:model ~resolved_model_id:model
     ~context_max:200_000
 
@@ -60,22 +77,34 @@ let test_threshold_is_1024 () =
   Alcotest.(check int) "anthropic cache threshold = 1024"
     1024 T.anthropic_cache_min_input_tokens
 
-(* Helper: model_uses_anthropic_caching is case-insensitive,
-   substring-based, and matches both [model_used] and
-   [resolved_model_id]. *)
+(* Helper: model_uses_anthropic_caching is provider-kind based. Typed
+   telemetry is authoritative; without it only explicit provider:model labels
+   resolve through the provider registry. Bare model substrings do not count. *)
 let test_model_detector_recognizes_anthropic () =
   let yes m =
     Alcotest.(check bool) (Printf.sprintf "%s -> Anthropic" m) true
       (T.model_uses_anthropic_caching ~model_used:m ~resolved_model_id:m)
   in
+  let yes_kind kind m =
+    Alcotest.(check bool) (Printf.sprintf "%s -> Anthropic" m) true
+      (T.model_uses_anthropic_caching_with_provider_kind
+         ~provider_kind:(Some kind) ~model_used:m ~resolved_model_id:m)
+  in
   let no m =
     Alcotest.(check bool) (Printf.sprintf "%s -> not Anthropic" m) false
       (T.model_uses_anthropic_caching ~model_used:m ~resolved_model_id:m)
   in
-  yes "claude-sonnet-4-6";
-  yes "claude_code:auto";
-  yes "Claude-3-Opus";
-  yes "anthropic/claude-haiku";
+  let no_kind kind m =
+    Alcotest.(check bool) (Printf.sprintf "%s -> not Anthropic" m) false
+      (T.model_uses_anthropic_caching_with_provider_kind
+         ~provider_kind:(Some kind) ~model_used:m ~resolved_model_id:m)
+  in
+  yes "claude:claude-sonnet-4-6";
+  yes_kind anthropic_kind "Claude-3-Opus";
+  no "Claude-3-Opus";
+  no "anthropic/claude-haiku";
+  no "openrouter:anthropic/claude-3.5";
+  no_kind openai_compat_kind "anthropic/claude-haiku";
   no "qwen3-coder";
   no "gpt-5.3";
   no "gemini-2.5-pro";
@@ -86,7 +115,11 @@ let test_model_detector_recognizes_anthropic () =
    = #9959 facet 1.  Classify must flag. *)
 let test_anthropic_with_zero_cache_above_threshold_flags () =
   let usage = mk_usage ~input:5000 ~output:500 () in
-  let t = classify_with ~model:"claude-sonnet-4-6" ~usage in
+  let t =
+    classify_with_kind
+      ~provider_kind:anthropic_kind
+      ~model:"claude-sonnet-4-6" ~usage
+  in
   Alcotest.(check bool)
     "anthropic_caching_likely_disabled flagged"
     true (has_reason t "anthropic_caching_likely_disabled");
@@ -99,7 +132,11 @@ let test_anthropic_with_zero_cache_above_threshold_flags () =
    first cacheable size. *)
 let test_threshold_boundary_1024_inclusive () =
   let usage = mk_usage ~input:1024 ~output:50 () in
-  let t = classify_with ~model:"claude_code:auto" ~usage in
+  let t =
+    classify_with_kind
+      ~provider_kind:anthropic_kind
+      ~model:"claude_code:auto" ~usage
+  in
   Alcotest.(check bool)
     "1024 tokens: cache anomaly fires"
     true (has_reason t "anthropic_caching_likely_disabled")
@@ -108,7 +145,11 @@ let test_threshold_boundary_1024_inclusive () =
    zero caches and must NOT be flagged. *)
 let test_below_threshold_does_not_flag () =
   let usage = mk_usage ~input:1023 ~output:50 () in
-  let t = classify_with ~model:"claude_code:auto" ~usage in
+  let t =
+    classify_with_kind
+      ~provider_kind:anthropic_kind
+      ~model:"claude_code:auto" ~usage
+  in
   Alcotest.(check bool)
     "1023 tokens: cache anomaly does NOT fire"
     false (has_reason t "anthropic_caching_likely_disabled")
@@ -118,18 +159,23 @@ let test_below_threshold_does_not_flag () =
 let test_non_anthropic_does_not_flag () =
   let usage = mk_usage ~input:50_000 ~output:1_000 () in
   List.iter (fun model ->
-    let t = classify_with ~model ~usage in
+    let t = classify_without_kind ~model ~usage in
     Alcotest.(check bool)
       (Printf.sprintf "%s: no anthropic anomaly" model)
       false (has_reason t "anthropic_caching_likely_disabled"))
     [ "qwen3-coder"; "gpt-5.3-codex"; "gemini-2.5-pro";
-      "ollama-local"; "kimi-for-coding"; "ramarama" ]
+      "ollama-local"; "kimi-for-coding"; "ramarama";
+      "openrouter:anthropic/claude-3.5" ]
 
 (* Caching working as intended: cache_read > 0 — no anomaly. *)
 let test_cache_read_positive_does_not_flag () =
   let usage = mk_usage ~input:5000 ~output:500
     ~cache_creation:0 ~cache_read:4500 () in
-  let t = classify_with ~model:"claude-sonnet-4-6" ~usage in
+  let t =
+    classify_with_kind
+      ~provider_kind:anthropic_kind
+      ~model:"claude-sonnet-4-6" ~usage
+  in
   Alcotest.(check bool)
     "cache_read > 0 means caching is working"
     false (has_reason t "anthropic_caching_likely_disabled")
@@ -139,7 +185,11 @@ let test_cache_read_positive_does_not_flag () =
 let test_cache_creation_positive_does_not_flag () =
   let usage = mk_usage ~input:5000 ~output:500
     ~cache_creation:4500 ~cache_read:0 () in
-  let t = classify_with ~model:"claude-sonnet-4-6" ~usage in
+  let t =
+    classify_with_kind
+      ~provider_kind:anthropic_kind
+      ~model:"claude-sonnet-4-6" ~usage
+  in
   Alcotest.(check bool)
     "cache_creation > 0 (cold cache) is not an anomaly"
     false (has_reason t "anthropic_caching_likely_disabled")
@@ -148,7 +198,11 @@ let test_cache_creation_positive_does_not_flag () =
    reason composes additively with negative_*, gt_1m, etc. *)
 let test_multiple_anomalies_compose () =
   let usage = mk_usage ~input:1_500_000 ~output:500 () in
-  let t = classify_with ~model:"claude_code:auto" ~usage in
+  let t =
+    classify_with_kind
+      ~provider_kind:anthropic_kind
+      ~model:"claude_code:auto" ~usage
+  in
   Alcotest.(check bool) "input_tokens_gt_1m present"
     true (has_reason t "input_tokens_gt_1m");
   Alcotest.(check bool) "anthropic_caching_likely_disabled present"
@@ -164,7 +218,7 @@ let () =
         ] );
       ( "model-detector",
         [
-          Alcotest.test_case "claude/anthropic substrings" `Quick
+          Alcotest.test_case "provider-kind contract" `Quick
             test_model_detector_recognizes_anthropic;
         ] );
       ( "fires-when-it-should",

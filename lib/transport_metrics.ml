@@ -99,6 +99,18 @@ let inc_grpc_bytes_sent ~bytes =
 let inc_ws_delta_built () =
   Prometheus.inc_counter Prometheus.metric_ws_delta_built ()
 
+let inc_grpc_backlog_replay_lines_scanned ?(delta=1) () =
+  if delta > 0 then
+    Prometheus.inc_counter
+      Prometheus.metric_grpc_backlog_replay_lines_scanned
+      ~delta:(float_of_int delta) ()
+
+let inc_grpc_backlog_replay_events_replayed ?(delta=1) () =
+  if delta > 0 then
+    Prometheus.inc_counter
+      Prometheus.metric_grpc_backlog_replay_events_replayed
+      ~delta:(float_of_int delta) ()
+
 (** {1 Environment-derived Transport Config} *)
 
 let grpc_runtime_listening : bool Atomic.t = Atomic.make false

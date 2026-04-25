@@ -441,6 +441,16 @@ let metric_ws_slice_fanout_skipped = "masc_ws_slice_fanout_skipped_total"
 let metric_ws_bytes_sent = "masc_ws_bytes_sent_total"
 let metric_grpc_bytes_sent = "masc_grpc_bytes_sent_total"
 let metric_ws_delta_built = "masc_ws_delta_built_total"
+(* Backlog-replay attribution: every gRPC Subscribe RPC reads
+   [.masc/backlog.jsonl] from disk before the live broadcast hook
+   takes over.  These two counters separate replay cost from live
+   delivery so a Subscribe burst can be billed against backlog IO,
+   not [grpc_bytes_sent] / [grpc_events_delivered] which lump init
+   + replay + live into one bucket. *)
+let metric_grpc_backlog_replay_lines_scanned =
+  "masc_grpc_backlog_replay_lines_scanned_total"
+let metric_grpc_backlog_replay_events_replayed =
+  "masc_grpc_backlog_replay_events_replayed_total"
 
 (* Admission queue metrics — used in admission_queue_metrics.ml. *)
 let metric_inference_queue_depth = "masc_inference_queue_depth"
@@ -947,6 +957,18 @@ let init () =
     "Per-session dashboard deltas constructed (one Yojson.Safe.t \
      allocation + jsonrpc_notification wrap per delta). Divide by \
      broadcast count to estimate fanout amplification."
+    Counter;
+  add metric_grpc_backlog_replay_lines_scanned
+    "Lines walked while replaying .masc/backlog.jsonl on a gRPC \
+     Subscribe RPC (every line, including those filtered by \
+     since_seq). Use with backlog file size to estimate disk read \
+     cost amplification under a Subscribe burst."
+    Counter;
+  add metric_grpc_backlog_replay_events_replayed
+    "Backlog events actually delivered (post-since_seq filter) on \
+     gRPC Subscribe. Subset of grpc_events_delivered; the difference \
+     between scanned-lines and replayed-events isolates wasted \
+     scan cost."
     Counter
 
 let start_time = Time_compat.now ()

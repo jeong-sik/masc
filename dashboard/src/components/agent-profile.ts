@@ -349,7 +349,7 @@ export function AgentProfile({ name }: { name: string }) {
   const isKeeper = keeper != null
 
   return html`
-    <div class="px-1 ${isKeeper ? 'ff-profile--keeper' : ''}">
+    <div class="px-1 ${isKeeper ? 'ff-profile--keeper' : ''}" role="region" aria-label="에이전트 프로필">
       <div class="flex gap-2 mb-3">
         <${ActionButton} variant="ghost" onClick=${() => navigate('monitoring', { section: 'agents' })}>← 목록<//>
         <${ActionButton} variant="ghost" onClick=${() => { void loadProfile(name) }} disabled=${profileLoading}>
@@ -358,7 +358,7 @@ export function AgentProfile({ name }: { name: string }) {
       </div>
 
       ${ps.status === 'error'
-        ? html`<div class="rounded border border-[var(--bad-30)] bg-[var(--bad-10)] px-3 py-2">${ps.message}</div>`
+        ? html`<div class="rounded border border-[var(--bad-30)] bg-[var(--bad-10)] px-3 py-2" role="alert">${ps.message}</div>`
         : null}
 
       <${CharacterPlate} name=${name} />

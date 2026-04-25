@@ -164,7 +164,7 @@ function OperationalHealth({ keeper }: { keeper: Keeper }) {
   if (!hasAny) return null
 
   return html`
-    <div class="rounded border border-[var(--card-border)] bg-[var(--white-2)] p-3">
+    <div class="rounded border border-[var(--card-border)] bg-[var(--white-2)] p-3" role="region" aria-label="운영 건강도">
       <div class="mb-2 text-3xs font-semibold tracking-1 uppercase text-[var(--text-muted)]">운영 건강도</div>
       <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
         ${hb ? html`
@@ -241,7 +241,7 @@ function OutcomesLedger({ keeper, outcomes }: {
     : 'var(--bad)'
 
   return html`
-    <div class="flex flex-col gap-3">
+    <div class="flex flex-col gap-3" role="region" aria-label="성과">
       ${'' /* Row 1 — Success / Failure Ledger */}
       <div class="rounded border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-2">
         <div class="flex items-baseline justify-between gap-2 mb-1.5">
@@ -381,7 +381,7 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
   const outcomes = keeper.outcomes
 
   return html`
-    <div class="flex flex-col gap-3 mb-5">
+    <div class="flex flex-col gap-3 mb-5" role="region" aria-label="키퍼 KPI">
       <${KpiSection} title="정체성" question="얼마나 오래 살았나?">
         <div class="grid grid-cols-3 gap-2">
           <${KpiCard}
@@ -1192,9 +1192,10 @@ export function RawDataDebug({ keeper }: { keeper: Keeper }) {
     : fields
 
   return html`
-    <div class="max-h-[460px] overflow-y-auto">
+    <div class="max-h-[460px] overflow-y-auto" role="region" aria-label="키퍼 디버그 데이터">
       <${TextInput}
         placeholder="필드 검색..."
+        ariaLabel="키퍼 필드 검색"
         value=${fieldSearch.value}
         onInput=${(e: Event) => { fieldSearch.value = (e.target as HTMLInputElement).value }}
       />

@@ -240,7 +240,7 @@ function LoopOverview({ loop }: { loop: AutoresearchLoopSummary }) {
     </div>
 
     ${loop.error ? html`
-      <div class="mt-3 px-3 py-2 rounded bg-[var(--bad-10)] border border-[var(--bad-20)] text-[var(--bad)] text-xs">
+      <div class="mt-3 px-3 py-2 rounded bg-[var(--bad-10)] border border-[var(--bad-20)] text-[var(--bad)] text-xs" role="alert">
         ${loop.error}
       </div>
     ` : null}
@@ -442,7 +442,7 @@ function LoopDetailView() {
 
   if (detailError.value) {
     return html`
-      <div class="px-3 py-2 rounded bg-[var(--bad-10)] border border-[var(--bad-20)] text-[var(--bad)] text-xs">
+      <div class="px-3 py-2 rounded bg-[var(--bad-10)] border border-[var(--bad-20)] text-[var(--bad)] text-xs" role="alert">
         ${detailError.value}
       </div>
     `
@@ -483,7 +483,7 @@ function LoopDetailView() {
         </div>
         <${LoopOverview} loop=${loop} />
         ${loopActionError.value ? html`
-          <div class="mt-3 px-3 py-2 rounded bg-[var(--bad-10)] border border-[var(--bad-20)] text-[var(--bad)] text-xs">
+          <div class="mt-3 px-3 py-2 rounded bg-[var(--bad-10)] border border-[var(--bad-20)] text-[var(--bad)] text-xs" role="alert">
             ${loopActionError.value}
           </div>
         ` : null}
@@ -535,6 +535,7 @@ export function Autoresearch() {
         </div>
         <button type="button"
           class="self-start px-3 py-1.5 rounded text-xs font-medium border border-card-border text-[var(--text-muted)] hover:text-[var(--text-body)] hover:border-accent/40 transition-colors"
+          aria-label="오토리서치 다시 불러오기"
           onClick=${() => loadLoops()}
         >
           다시 시도
@@ -559,7 +560,7 @@ export function Autoresearch() {
   }
 
   return html`
-    <div class="flex flex-col gap-5">
+    <div class="flex flex-col gap-5" role="region" aria-label="오토리서치">
       <${OutcomeVsHarnessCallout} loopCount=${loops.length} />
 
       <div class="flex items-center justify-between">
@@ -577,6 +578,7 @@ export function Autoresearch() {
           </a>
           <button type="button"
             class="px-2.5 py-1 rounded text-2xs text-[var(--text-muted)] border border-card-border hover:text-[var(--text-body)] hover:border-accent/40 transition-colors"
+            aria-label="오토리서치 새로고침"
             onClick=${() => { void refreshAutoresearchSurface() }}
           >
             새로고침

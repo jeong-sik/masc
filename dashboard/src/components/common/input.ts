@@ -22,6 +22,7 @@ interface TextInputProps {
   type?: string
   name?: string
   ariaLabel?: string
+  ariaDescribedBy?: string
   autoComplete?: string
   onInput?: (e: Event) => void
   onKeyDown?: (e: KeyboardEvent) => void
@@ -37,6 +38,7 @@ export function TextInput({
   type = 'text',
   name,
   ariaLabel,
+  ariaDescribedBy,
   autoComplete,
   onInput,
   onKeyDown,
@@ -52,6 +54,7 @@ export function TextInput({
       required=${required}
       name=${name}
       aria-label=${ariaLabel}
+      aria-describedby=${ariaDescribedBy}
       autocomplete=${autoComplete}
       onInput=${onInput}
       onKeyDown=${onKeyDown}
@@ -67,6 +70,7 @@ interface TextAreaProps {
   class?: string
   name?: string
   ariaLabel?: string
+  ariaDescribedBy?: string
   disabled?: boolean
   required?: boolean
   onInput?: (e: Event) => void
@@ -80,6 +84,7 @@ export function TextArea({
   class: cx,
   name,
   ariaLabel,
+  ariaDescribedBy,
   disabled,
   required,
   onInput,
@@ -92,6 +97,7 @@ export function TextArea({
       rows=${rows}
       name=${name}
       aria-label=${ariaLabel}
+      aria-describedby=${ariaDescribedBy}
       disabled=${disabled}
       required=${required}
       value=${value}

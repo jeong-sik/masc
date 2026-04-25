@@ -26,6 +26,8 @@ export function RichComposer({
 }) {
   const [mode, setMode] = useState<ComposerMode>('write')
 
+  const helpId = helpText ? 'rich-composer-help' : undefined
+
   return html`
     <div class="rounded border border-[var(--card-border)] bg-[rgba(8,13,22,0.88)]">
       <div class="flex items-center justify-between gap-3 border-b border-[var(--card-border)] px-3 py-2">
@@ -62,6 +64,7 @@ export function RichComposer({
                 disabled=${disabled}
                 class="min-h-35"
                 ariaLabel=${ariaLabel}
+                ariaDescribedBy=${helpId}
                 onInput=${(event: Event) => onValueChange((event.target as HTMLTextAreaElement).value)}
               />
             `
@@ -77,7 +80,7 @@ export function RichComposer({
                 </div>
               `}
         ${helpText
-          ? html`<div class="mt-2 text-2xs leading-relaxed text-[var(--text-muted)]">${helpText}</div>`
+          ? html`<div id=${helpId} class="mt-2 text-2xs leading-relaxed text-[var(--text-muted)]">${helpText}</div>`
           : null}
       </div>
     </div>

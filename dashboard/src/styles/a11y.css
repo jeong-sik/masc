@@ -32,6 +32,14 @@ summary:focus-visible,
   outline-offset: 2px;
 }
 
+/* WCAG 2.5.8 Target Size Minimum — native checkboxes default to ~13-16px.
+   20px is the practical floor that avoids layout disruption while moving
+   closer to the 24px minimum; individual components can override larger. */
+input[type="checkbox"] {
+  min-width: 20px;
+  min-height: 20px;
+}
+
 /* Accessibility — prefers-reduced-motion overrides. Extracted from global.css for #3915. */
 
 @media (prefers-reduced-motion: reduce) {

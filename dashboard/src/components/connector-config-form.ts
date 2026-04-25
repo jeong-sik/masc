@@ -320,7 +320,7 @@ export function ConnectorConfigToggle({ connectorId }: { connectorId: string }) 
       aria-expanded=${entry.open}
       aria-controls=${`connector-config-${connectorId}`}
       onClick=${onClick}
-    >⚙ Config</button>
+    ><span aria-hidden="true">⚙</span> Config</button>
   `
 }
 
@@ -480,7 +480,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
                   title="POST /sidecar/stop → 800ms → POST /sidecar/start"
                   onClick=${() => { void restartSidecar(connectorId) }}
                 >
-                  ${entry.restarting ? '재시작 중...' : '🔄 재시작'}
+                  ${entry.restarting ? '재시작 중...' : html`<span aria-hidden="true">🔄</span> 재시작`}
                 </button>
               `
             : null}

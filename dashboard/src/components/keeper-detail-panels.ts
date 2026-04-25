@@ -131,7 +131,7 @@ function KpiCard({ label, value, hint, tone = 'default', progress }: {
     <div class="p-3.5 rounded border ${KPI_TONE[tone]} flex flex-col gap-1.5 transition-colors">
       <div class="flex items-center justify-between">
         <span class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">${label}</span>
-        ${icon ? html`<span class="text-2xs opacity-60">${icon}</span>` : null}
+        ${icon ? html`<span class="text-2xs opacity-60" aria-hidden="true">${icon}</span>` : null}
       </div>
       <div class="text-2xl font-bold ${KPI_VALUE_TONE[tone]} tabular-nums leading-none">${value}</div>
       ${progress != null ? html`

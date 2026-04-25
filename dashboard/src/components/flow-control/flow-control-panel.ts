@@ -34,7 +34,7 @@ export function FlowControlPanel() {
   const isInitializing = state === 'initializing'
   const mutationAccess = dashboardAuthAccess(shellAuthSummary.value, 'worker')
   return html`
-    <${SurfaceCard} variant="compact" class="mb-4">
+    <${SurfaceCard} variant="compact" class="mb-4" role="region" aria-label="흐름 제어">
       <div class="flex items-center gap-3 mb-3">
         <h3 class="text-sm text-[var(--text-strong)] font-medium">흐름 제어</h3>
         <${CountBadge} tone=${stateTone(state)}>${stateLabel(state)}<//>

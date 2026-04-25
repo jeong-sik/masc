@@ -40,6 +40,7 @@ export function TaskCreateForm(props: { goalId?: string | null; goalTitle?: stri
           variant="primary"
           size="md"
           block=${true}
+          ariaExpanded=${false}
           onClick=${() => { showTaskCreate.value = true }}
         >태스크 추가<//>
       </div>
@@ -47,7 +48,7 @@ export function TaskCreateForm(props: { goalId?: string | null; goalTitle?: stri
   }
 
   return html`
-    <div class="rounded border border-card-border/70 bg-[rgba(8,13,22,0.88)] p-4">
+    <div class="rounded border border-card-border/70 bg-[rgba(8,13,22,0.88)] p-4" role="form" aria-label="태스크 생성">
       <div class="mb-3 flex items-start justify-between gap-3">
         <div>
           <h3 class="text-base font-semibold text-text-strong">새 태스크</h3>

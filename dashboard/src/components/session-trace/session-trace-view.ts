@@ -75,7 +75,7 @@ function LiveIndicator({ events }: { events: readonly { ts: number }[] }) {
   if (!isRecent) return null
 
   return html`
-    <div class="flex items-center gap-2 px-3 py-2 text-2xs text-[var(--text-muted)]">
+    <div class="flex items-center gap-2 px-3 py-2 text-2xs text-[var(--text-muted)]" role="status">
       <span class="relative flex size-2">
         <span class="animate-ping absolute inline-flex h-full w-full rounded-sm bg-[var(--ok)] opacity-75"></span>
         <span class="relative inline-flex size-2 rounded-sm bg-[var(--ok)]"></span>
@@ -184,6 +184,7 @@ export function SessionTraceView({ agentName, isKeeper, keeperStatus, keeperGene
       <div
         ref=${listRef}
         class="flex flex-col gap-0.5 max-h-[500px] overflow-y-auto rounded border border-[var(--card-border)] bg-[var(--white-2)]"
+        role="log" aria-label="활동 추적"
       >
         ${events.map(evt => html`<${SessionTraceEntry} key=${evt.id} event=${evt} searchQuery=${searchQuery} />`)}
         <${LiveIndicator} events=${events} />

@@ -61,6 +61,7 @@ export function SessionTraceFilter({ agentName }: { agentName: string }) {
         <input
           type="text"
           placeholder="이벤트 검색..."
+          aria-label="이벤트 검색"
           value=${searchQuery}
           onInput=${(e: Event) => {
             const v = (e.target as HTMLInputElement).value
@@ -71,6 +72,7 @@ export function SessionTraceFilter({ agentName }: { agentName: string }) {
         ${searchQuery ? html`
           <button
             onClick=${() => setTraceSearchQuery(agentName, '')}
+            aria-label="\uac80\uc0c9\uc5b4 \uc9c0\uc6b0\uae30"
             class="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-dim)] hover:text-[var(--text-body)] text-base leading-none"
           >\u00d7</button>
         ` : null}

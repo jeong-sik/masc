@@ -31,7 +31,7 @@ export function AgentRuntimeStrip({ name }: { name: string }) {
   const activity = keeperActivityDisplay(keeper, keeper.agent?.last_seen)
 
   return html`
-    <div class="agent-runtime-strip">
+    <div class="agent-runtime-strip" role="status" aria-label="런타임 상태">
       <div class="flex items-center gap-1.5 text-sm">
         <${PipelineStageBadge} stage=${stage} />
       </div>
@@ -39,7 +39,7 @@ export function AgentRuntimeStrip({ name }: { name: string }) {
       ${ctxPct != null ? html`
         <div class="flex items-center gap-1.5 text-sm">
           <span class="text-3xs text-[var(--text-muted)] uppercase tracking-wider">CTX</span>
-          <div class="w-16 h-1.5 bg-[#1a1a2e] rounded-sm overflow-hidden">
+          <div class="w-16 h-1.5 bg-[#1a1a2e] rounded-sm overflow-hidden" role="progressbar" aria-valuenow=${ctxPct} aria-valuemin=${0} aria-valuemax=${100} aria-label="컨텍스트 사용률">
             <div
               class="agent-runtime-ctx-fill rounded-sm ${ctxBarClass(ctxRatio)}"
               style=${{ width: `${ctxPct}%` }}

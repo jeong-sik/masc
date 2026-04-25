@@ -158,6 +158,7 @@ export function AgentLiveTimeline({ name }: { name: string }) {
               ? 'border-[rgba(34,197,94,0.4)] text-[var(--ok)] bg-[var(--white-4)]'
               : 'border-[var(--white-10)] text-[var(--text-dim)] bg-[var(--white-4)]'}"
             onClick=${() => { autoScroll.value = !autoScroll.value }}
+            aria-pressed=${autoScroll.value}
             title=${autoScroll.value ? 'Auto-scroll ON' : 'Auto-scroll OFF'}
           >
             ${autoScroll.value ? 'AUTO' : 'MANUAL'}
@@ -165,7 +166,7 @@ export function AgentLiveTimeline({ name }: { name: string }) {
         </div>
       </div>
 
-      <div class="flex flex-col gap-0.5 max-h-80 overflow-y-auto" ref=${scrollRef}>
+      <div class="flex flex-col gap-0.5 max-h-80 overflow-y-auto" ref=${scrollRef} role="log" aria-label="이벤트 타임라인">
         ${filtered.length === 0
           ? html`<${EmptyState} message="필터에 맞는 이벤트 없음" compact />`
           : filtered.map((entry: JournalEntry, idx: number) => html`

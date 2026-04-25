@@ -172,6 +172,7 @@
         test_keeper_overflow_recovery
         test_team_memory
         test_telemetry_unified
+        test_telemetry_error_occurred_wire_10358
         test_keeper_topk_llm
         test_warn_root_causes
         test_memory_hooks
@@ -319,6 +320,7 @@
           test_keeper_overflow_recovery
           test_team_memory
           test_telemetry_unified
+          test_telemetry_error_occurred_wire_10358
           test_keeper_topk_llm
           test_warn_root_causes
           test_memory_hooks
@@ -344,6 +346,11 @@
 (test
  (name test_meta_cognition_snapshot)
  (modules test_meta_cognition_snapshot)
+ (libraries masc_test_deps))
+
+(test
+ (name test_telemetry_task_transition_10358)
+ (modules test_telemetry_task_transition_10358)
  (libraries masc_test_deps))
 
 (test

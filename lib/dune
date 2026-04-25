@@ -291,6 +291,7 @@
    subsystem_health
    subscriptions
    telemetry_eio
+   telemetry_json_fields
    telemetry_coverage_gap
    telemetry_unified
    tempo

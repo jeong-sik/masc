@@ -278,6 +278,10 @@ let test_event_serialization_roundtrip () =
           session_id = None;
           operation_id = None;
           worker_run_id = None;
+          error_kind = None;
+          error_message = None;
+          exit_code = None;
+          stderr_excerpt = None;
         };
       T.Error_occurred { code = "E001"; message = "test"; context = "test" } ]
   in

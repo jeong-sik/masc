@@ -48,7 +48,7 @@ export function ErrorPanel({ onClose }: ErrorPanelProps) {
       <div class="absolute right-0 top-full mt-1.5 z-[var(--z-overlay-dropdown,3050)] w-96 max-h-80 overflow-hidden rounded-lg border border-[var(--card-border)] bg-[rgba(10,18,34,0.98)] shadow-xl backdrop-blur-xl" role="region" aria-label="에러 패널">
         <div class="flex items-center justify-between px-3 py-2 border-b border-[var(--white-5)]">
           <span class="text-xs font-medium text-[var(--text-muted)]">에러 없음</span>
-          <button type="button" class="text-[var(--text-muted)] hover:text-[var(--text-body)] cursor-pointer p-0.5" onClick=${onClose} aria-label="닫기">
+          <button type="button" class="text-[var(--text-muted)] hover:text-[var(--text-body)] cursor-pointer p-1.5" onClick=${onClose} aria-label="닫기">
             <${X} size=${14} aria-hidden="true" />
           </button>
         </div>
@@ -68,7 +68,7 @@ export function ErrorPanel({ onClose }: ErrorPanelProps) {
             class="text-2xs px-2 py-0.5 rounded border border-[var(--card-border)] bg-[var(--white-4)] text-[var(--text-muted)] hover:bg-[var(--white-10)] cursor-pointer transition-colors"
             onClick=${() => { clearAllErrors(); onClose() }}
           >모두 확인</button>
-          <button type="button" class="text-[var(--text-muted)] hover:text-[var(--text-body)] cursor-pointer p-0.5" onClick=${onClose} aria-label="닫기">
+          <button type="button" class="text-[var(--text-muted)] hover:text-[var(--text-body)] cursor-pointer p-1.5" onClick=${onClose} aria-label="닫기">
             <${X} size=${14} aria-hidden="true" />
           </button>
         </div>

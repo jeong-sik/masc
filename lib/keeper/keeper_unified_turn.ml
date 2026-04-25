@@ -506,8 +506,24 @@ let pause_keeper_for_overflow
       updated_at = now_iso ();
     }
   in
-  (match write_meta config paused_meta with
+  (* #9733: [paused = true] is cycle-owned (the overflow-recovery
+     fiber decided the keeper must pause); heartbeat-owned fields
+     (joined_room_ids, last_seen_seq_by_room) must come from disk so
+     a parallel heartbeat write doesn't fight us for [meta_version].
+     Bare [write_meta] here drops the pause silently in the lost-CAS
+     case — the keeper then reports unpaused while the caller
+     believes it succeeded.  Same pattern as the unified-turn
+     failure path. *)
+  (match
+     write_meta_with_merge
+       ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
+       config paused_meta
+   with
    | Ok () -> ()
+   | Error err when is_version_conflict_error err ->
+       Log.Keeper.warn
+         "%s: overflow pause write_meta lost CAS race after retries: %s"
+         meta.name err
    | Error err ->
        Log.Keeper.error
          "%s: overflow pause write_meta failed: %s"
@@ -546,7 +562,18 @@ let sync_keeper_paused_state
       updated_at = now_iso ();
     }
   in
-  match write_meta config synced_meta with
+  (* #9733: pause/resume sync is operator-driven; the [paused]
+     field is cycle-owned at this site, so use the same merged-CAS
+     write as overflow pause + unified-turn failure paths.  Without
+     this, an operator pause/resume that races a heartbeat tick
+     can land partially (paused field correct on disk, but write
+     reports failure) which leaves the registry update unsync'd
+     with disk. *)
+  match
+    write_meta_with_merge
+      ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
+      config synced_meta
+  with
   | Error err ->
       report_keeper_cycle_side_effect_issue
         ~config

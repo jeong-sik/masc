@@ -99,6 +99,75 @@ let catalog_names_result ?config_path () =
            (fun (entry : Cascade_config_loader.catalog_entry) -> entry.name)
            entries)
 
+(** #10259 — degraded fallback for the keeper cascade-name validator.
+
+    Materializer regressions of the form
+    [unknown field "X" in profile Y] make the full catalog load fail even
+    though [cascade.toml] is parseable and already enumerates every
+    cascade the operator has configured.  In that state
+    {!catalog_names_result} returns [Error _], the validator collapses to
+    the compile-time reserved list, and operator-defined cascades like
+    [ollama_only] get reconcile-rejected fleet-wide while the runtime
+    keeps running on a stale cached catalog — silent regression, log
+    spam only.
+
+    [catalog_names_with_toml_fallback] decouples the cascade-name accept
+    list from strict materialization:
+
+    - On [Ok catalog]: forward the live names ([Live_catalog]).
+    - On [Error _]: parse [cascade.toml] with a lenient reader that
+      enumerates only top-level table sections; if the TOML is
+      parseable, return those names tagged
+      [Toml_section_fallback { catalog_error }] so callers can still
+      surface the degraded mode in WARN logs.
+    - If neither path produces names, return [Error _] with both errors
+      attached for diagnosis.
+
+    The validator wires this in so that a materializer field-whitelist
+    regression no longer manifests as "every keeper config rejected" —
+    it stays as a WARN about the materializer, which is the correct
+    blast radius. *)
+type catalog_names_source =
+  | Live_catalog
+  | Toml_section_fallback of { catalog_error : string }
+
+let catalog_names_with_toml_fallback ?config_path () =
+  let path_opt =
+    match config_path with
+    | Some path -> Some path
+    | None -> Config_dir_resolver.cascade_path_opt ()
+  in
+  match path_opt with
+  | None -> Error "cascade catalog path is not resolved"
+  | Some path -> (
+      match Cascade_config_loader.load_catalog ~config_path:path with
+      | Ok entries ->
+          let names =
+            List.map
+              (fun (entry : Cascade_config_loader.catalog_entry) -> entry.name)
+              entries
+          in
+          Ok (names, Live_catalog)
+      | Error catalog_error -> (
+          match
+            Cascade_toml_materializer.toml_section_names_result
+              ~config_path:path
+          with
+          | Ok [] ->
+              Error
+                (Printf.sprintf
+                   "live catalog unavailable: %s; toml section fallback \
+                    returned no cascade profile names"
+                   catalog_error)
+          | Ok names ->
+              Ok (names, Toml_section_fallback { catalog_error })
+          | Error toml_error ->
+              Error
+                (Printf.sprintf
+                   "live catalog unavailable: %s; toml section fallback \
+                    also failed: %s"
+                   catalog_error toml_error)))
+
 let is_system_only_cascade raw =
   let name = String.trim raw in
   match catalog_entries () with

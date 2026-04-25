@@ -657,27 +657,42 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
             in
             if List.mem normalized reserved_cascade_names then Ok ()
             else
-              match Keeper_cascade_profile.catalog_names_result () with
-              | Ok catalog ->
+              (* #10259: don't collapse to the reserved list when only the
+                 strict materializer fails — fall back to top-level TOML
+                 section names so operator-defined cascades stay valid. *)
+              match
+                Keeper_cascade_profile.catalog_names_with_toml_fallback ()
+              with
+              | Ok (catalog, source) ->
                   let all_valid =
                     List.sort_uniq String.compare
                       (reserved_cascade_names @ catalog)
                   in
                   if List.mem normalized all_valid then Ok ()
                   else
+                    let suffix =
+                      match source with
+                      | Keeper_cascade_profile.Live_catalog -> ""
+                      | Keeper_cascade_profile.Toml_section_fallback
+                          { catalog_error } ->
+                          Printf.sprintf
+                            " [degraded toml-section fallback; live \
+                             catalog unavailable: %s]"
+                            catalog_error
+                    in
                     Error
                       (Printf.sprintf
-                         "invalid cascade_name '%s' (known: %s)"
+                         "invalid cascade_name '%s' (known: %s)%s"
                          raw
-                         (String.concat ", " all_valid))
-              | Error catalog_error ->
+                         (String.concat ", " all_valid)
+                         suffix)
+              | Error fallback_error ->
                   Error
                     (Printf.sprintf
-                       "invalid cascade_name '%s' (reserved: %s; live catalog \
-                        unavailable: %s)"
+                       "invalid cascade_name '%s' (reserved: %s; %s)"
                        raw
                        (String.concat ", " reserved_cascade_names)
-                       catalog_error))
+                       fallback_error))
   in
   Result.map
     (fun () ->

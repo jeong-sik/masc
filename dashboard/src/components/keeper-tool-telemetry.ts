@@ -264,7 +264,7 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
           <${SectionCap} tone="dim" weight="semibold" class="mb-1">성공률<//>
           ${s.tools.filter(st => st.failure_count > 0).map(stat => html`
             <div class="flex items-center gap-2">
-              <span class="w-28 flex-shrink-0 text-2xs font-mono text-[var(--text-muted)] truncate">
+              <span class="w-28 flex-shrink-0 text-2xs font-mono text-[var(--text-muted)] truncate" title=${stat.name}>
                 ${stat.name.replace(/^(keeper_|masc_)/, '')}
               </span>
               <${SuccessRateBar} stat=${stat} />

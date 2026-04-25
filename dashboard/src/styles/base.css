@@ -53,6 +53,10 @@ button:disabled {
   cursor: not-allowed;
 }
 
+summary {
+  cursor: pointer;
+}
+
 /* Global focus-visible for all interactive elements without per-element styles.
    Matches ActionButton's focus ring: accent-45 ring + bg-1 offset. */
 button:focus-visible,

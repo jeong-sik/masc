@@ -179,6 +179,51 @@ let test_board_actor_identity_keeps_non_keeper_agent () =
   Alcotest.(check string) "source" "raw_agent"
     (json_member_string json "source")
 
+let test_inline_board_post_author_rewrites_caller_claim () =
+  let args =
+    make_args
+      [
+        ("content", `String "ctx-owned post");
+        ("author", `String "analyst");
+        ("meta", `Assoc [ ("trace", `String "probe-10297") ]);
+      ]
+  in
+  let normalized =
+    Tool_inline_dispatch_extra.ensure_board_post_author
+      ~agent_name:"keeper-velvet-hammer-agent" args
+  in
+  Alcotest.(check string) "author from ctx" "velvet-hammer"
+    Yojson.Safe.Util.(normalized |> member "author" |> to_string);
+  Alcotest.(check string) "caller claim preserved" "analyst"
+    Yojson.Safe.Util.(
+      normalized |> member "meta" |> member "caller_supplied_author" |> to_string);
+  Alcotest.(check string) "rewrite reason preserved" "caller_author_mismatch"
+    Yojson.Safe.Util.(
+      normalized |> member "meta" |> member "author_rewrite_reason" |> to_string);
+  Alcotest.(check string) "raw ctx agent preserved" "keeper-velvet-hammer-agent"
+    Yojson.Safe.Util.(
+      normalized |> member "meta" |> member "author_raw_agent_name" |> to_string);
+  Alcotest.(check string) "existing meta preserved" "probe-10297"
+    Yojson.Safe.Util.(normalized |> member "meta" |> member "trace" |> to_string)
+
+let test_inline_board_post_author_accepts_matching_alias () =
+  let args =
+    make_args
+      [
+        ("content", `String "ctx-owned post");
+        ("author", `String "keeper-analyst-agent");
+      ]
+  in
+  let normalized =
+    Tool_inline_dispatch_extra.ensure_board_post_author
+      ~agent_name:"keeper-analyst-agent" args
+  in
+  Alcotest.(check string) "author canonical" "analyst"
+    Yojson.Safe.Util.(normalized |> member "author" |> to_string);
+  Alcotest.(check bool) "no mismatch claim" true
+    Yojson.Safe.Util.(
+      normalized |> member "meta" |> member "caller_supplied_author" = `Null)
+
 (** {2 Group 2: JSON helper functions} *)
 
 let test_get_string () =
@@ -783,6 +828,10 @@ let () =
             `Quick test_board_actor_identity_canonicalizes_keeper_alias;
           Alcotest.test_case "board actor identity keeps non-keeper agent"
             `Quick test_board_actor_identity_keeps_non_keeper_agent;
+          Alcotest.test_case "inline board post author rewrites caller claim"
+            `Quick test_inline_board_post_author_rewrites_caller_claim;
+          Alcotest.test_case "inline board post author accepts matching alias"
+            `Quick test_inline_board_post_author_accepts_matching_alias;
         ] );
       ( "json_helpers",
         [

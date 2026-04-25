@@ -304,7 +304,7 @@ function NodeLeaderboard({ nodes }: { nodes: ActivityGraphNode[] }) {
             <span class="w-[22px] text-center text-sm font-bold text-text-slate">${i + 1}</span>
             <div class="flex-1 flex flex-col gap-1 min-w-0">
               <div class="flex items-center gap-2">
-                <span class="text-base font-semibold text-[var(--text-near-white)] whitespace-nowrap overflow-hidden text-ellipsis">${node.label}</span>
+                <span class="text-base font-semibold text-[var(--text-near-white)] whitespace-nowrap overflow-hidden text-ellipsis" title=${node.label}>${node.label}</span>
                 <span class="text-2xs text-[var(--text-muted)]">${node.weight}회</span>
               </div>
               <div class="h-1 rounded-sm bg-[var(--slate-gray-10)] overflow-hidden">

@@ -1021,7 +1021,7 @@ function ClientCapacityTable({ capacity }: { capacity: CascadeClientCapacityResp
           const tone = capacityTone(e)
           return html`
           <tr class="border-b border-[var(--card-border)] last:border-b-0 even:bg-[var(--white-3)]">
-            <td class="py-1"><span class=${`inline-block w-2 h-2 rounded-full ${TONE_DOT[tone]}`}></span></td>
+            <td class="py-1"><span class=${`inline-block w-2 h-2 rounded-full ${TONE_DOT[tone]}`} aria-hidden="true"></span></td>
             <td class="py-1"><${StatusChip} tone=${tone === 'ok' ? 'neutral' : tone}>${capacityKindLabel(e.kind)}<//></td>
             <td class="py-1"><code class="text-[var(--text-strong)]">${e.key}</code></td>
             <td class="py-1 text-right tabular-nums">${e.active}</td>

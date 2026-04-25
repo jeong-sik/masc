@@ -164,6 +164,7 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
           type="text"
           placeholder="Filter tool..."
           aria-label="도구 필터"
+          aria-label="도구 필터"
           class="text-xs font-mono bg-[var(--bg-deep)] border border-[var(--card-border)] rounded px-2 py-1 w-40 text-[var(--text-strong)]"
           value=${filterTool.value}
           onInput=${(e: Event) => { filterTool.value = (e.target as HTMLInputElement).value }}

@@ -266,9 +266,9 @@ let dashboard_actor_for_request ~base_path request =
       | Ok None ->
           (* PR-I: surface the silent fallback. Token did not resolve to any
              agent, so we drop to the request actor hint (header / query
-             param) — masking identity drift in the HTTP transport. *)
+             param), masking identity drift in the HTTP transport. *)
           Log.Auth.warn
-            "[silent:dashboard_actor_fallback] outcome=none — bearer token \
+            "[silent:dashboard_actor_fallback] outcome=none - bearer token \
              resolved to no agent, falling back to request actor hint";
           Prometheus.inc_counter
             Prometheus.metric_silent_dashboard_actor_fallback
@@ -277,7 +277,7 @@ let dashboard_actor_for_request ~base_path request =
           request_actor_hint request
       | Error _ ->
           Log.Auth.warn
-            "[silent:dashboard_actor_fallback] outcome=error — bearer token \
+            "[silent:dashboard_actor_fallback] outcome=error - bearer token \
              resolution errored, falling back to request actor hint";
           Prometheus.inc_counter
             Prometheus.metric_silent_dashboard_actor_fallback

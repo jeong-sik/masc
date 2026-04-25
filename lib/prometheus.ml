@@ -605,7 +605,7 @@ let metric_auth_credential_ambiguous_lookup =
    Background: 14 keepers fleet runs for hours producing 0 git_clone calls
    and operators cannot tell from logs *why* — many fallback branches in the
    keeper request path use [| Error _ -> default] / [| None -> fallback]
-   without any structured log emit. The "원인불명의 침묵" symptom.
+   without any structured log emit. The unknown-silence symptom.
 
    These counters surface the live rate of each silent fallback so the
    dashboard can distinguish "code path is dead" from "code path fires

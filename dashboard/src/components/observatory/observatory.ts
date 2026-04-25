@@ -315,7 +315,7 @@ export function Observatory() {
       </div>
 
       ${activeView.value === 'timeline' && data.error ? html`
-        <div class="rounded border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs text-[var(--warn)]">
+        <div class="rounded border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs text-[var(--warn)]" role="alert">
           일부 데이터 불러오기 실패: ${data.error}
         </div>
       ` : null}
@@ -329,7 +329,7 @@ export function Observatory() {
         : !hasTrackData && data.loading
         ? html`<${LoadingState}>관찰소 데이터 불러오는 중...<//>`
         : html`
-            <div class="flex flex-col gap-2 rounded border border-card-border bg-card/30 p-4">
+            <div class="flex flex-col gap-2 rounded border border-card-border bg-card/30 p-4" role="group" aria-label="관찰소 트랙">
               <${TimeAxis} windowStart=${data.windowStart} windowEnd=${data.windowEnd} />
               <${EventTrack}
                 events=${data.events}

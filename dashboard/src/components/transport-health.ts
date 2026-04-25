@@ -291,7 +291,7 @@ function SectionCard({
   children: ComponentChildren
 }) {
   return html`
-    <div class="rounded border border-card-border bg-bg-1/60 p-4">
+    <div class="rounded border border-card-border bg-bg-1/60 p-4" role="group" aria-label=${`${title} 상태`}>
       <div class="flex items-center justify-between gap-3 mb-3">
         <div class="flex items-center gap-2 min-w-0">
           <${StatusDot} size="sm" class=${statusDot(status)} />
@@ -308,7 +308,7 @@ function SectionCard({
 
 function CaseCard({ item, data }: { item: PracticalCase; data: TransportHealthData }) {
   return html`
-    <div class="rounded border border-card-border/70 bg-card/40 p-4">
+    <div class="rounded border border-card-border/70 bg-card/40 p-4" role="group" aria-label=${item.title}>
       <div class="flex items-center justify-between gap-3 mb-2">
         <div class="text-sm font-semibold text-text-strong">${item.title}</div>
         <div class="text-3xs uppercase tracking-wider text-text-muted">${item.transport}</div>
@@ -347,11 +347,11 @@ export function TransportHealthPanel() {
   const { data, loading, error } = transportHealthResource.state.value
 
   if (loading && !data) {
-    return html`<div class="p-6 text-center text-text-muted text-sm">트랜스포트 상태 로딩 중...</div>`
+    return html`<div class="p-6 text-center text-text-muted text-sm" role="status">트랜스포트 상태 로딩 중...</div>`
   }
 
   if (error && !data) {
-    return html`<div class="p-6 text-center text-[var(--bad)] text-sm">${error}</div>`
+    return html`<div class="p-6 text-center text-[var(--bad)] text-sm" role="alert">${error}</div>`
   }
 
   if (!data) return null

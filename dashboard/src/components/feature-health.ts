@@ -141,7 +141,7 @@ function StatusPill({ status }: { status: FeatureStatus }) {
 
 function FeatureItem({ item }: { item: FeatureHealthItem }) {
   return html`
-    <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-3">
+    <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-3" role="listitem" aria-label=${`${item.env_name}: ${statusLabel(item.status)}, ${item.is_enabled ? '활성' : '비활성'}`}>
       <div class="flex items-start justify-between gap-3">
         <div class="flex-1">
           <div class="flex items-center gap-2">
@@ -173,7 +173,7 @@ function CategorySection({ category, categoryData }: { category: string; categor
   const enabledRatio = categoryData.total > 0 ? Math.round((categoryData.enabled / categoryData.total) * 100) : 0
 
   return html`
-    <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] p-4">
+    <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] p-4" role="group" aria-label=${`${categoryLabel}: ${categoryData.enabled} / ${categoryData.total} 활성화`}>
       <div class="mb-3 flex items-center justify-between">
         <div>
           <div class="text-sm font-medium text-[var(--text-strong)]">${categoryLabel}</div>
@@ -185,7 +185,7 @@ function CategorySection({ category, categoryData }: { category: string; categor
           ${categoryData.total}
         </div>
       </div>
-      <div class="space-y-2">
+      <div class="space-y-2" role="list">
         ${categoryData.features.map(feature => html`<${FeatureItem} item=${feature} />`)}
       </div>
     </div>
@@ -284,7 +284,7 @@ export function FeatureHealth() {
                   )
                   if (filtered.length === 0) {
                     return html`
-                      <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] p-4 text-xs text-[var(--text-dim)]">
+                      <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] p-4 text-xs text-[var(--text-dim)]" role="status">
                         조건에 맞는 기능이 없습니다.
                       </div>
                     `
@@ -294,7 +294,7 @@ export function FeatureHealth() {
                       <div class="mb-3 text-xs text-[var(--text-muted)]">
                         ${filtered.length} / ${data.all_features.length}개 기능
                       </div>
-                      <div class="space-y-2">
+                      <div class="space-y-2" role="list">
                         ${filtered.map((feature) => html`<${FeatureItem} item=${feature} />`)}
                       </div>
                     </div>

@@ -38,10 +38,18 @@ function keeperColor(id) {
 
 function BranchSelector() {
   const [sel, setSel] = useState('main');
+  const [open, setOpen] = useState(true);
   const cur = P2i.branches.find(b => b.name === sel);
   return (
     <section aria-label="Branch selector" style={{display:'flex',flexDirection:'column',gap:'8px'}}>
-      <div className="br-bar" role="region" aria-label={`Active branch ${cur.name} · ${cur.ahead} ahead, ${cur.behind} behind · HEAD ${cur.head} · ${cur.keepers.length} keepers`}>
+      <button
+        type="button"
+        className="br-bar"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={`Switch branch: ${cur.name}`}
+        onClick={() => setOpen(o => !o)}
+      >
         <span className="lbl" aria-hidden="true">branch</span>
         <span className="sel" aria-hidden="true">
           <span className="nm">{cur.name}</span>
@@ -55,36 +63,39 @@ function BranchSelector() {
           <span>·</span>
           <span style={{color:'var(--fg-3)'}}>{cur.keepers.length} keepers</span>
         </span>
-      </div>
+      </button>
 
       <div role="heading" aria-level={3} style={{padding:'4px 8px',background:'var(--bg-2)',border:'1px solid var(--line-2)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--fg-4)',display:'flex',gap:'8px'}}>
-        <span>switch branch · {P2i.branches.length} known</span>
-        <span style={{marginLeft:'auto',color:'var(--brass-1)'}}>active · {sel}</span>
+        <span aria-hidden="true">switch branch · {P2i.branches.length} known</span>
+        <span aria-hidden="true" style={{marginLeft:'auto',color:'var(--brass-1)'}}>active · {sel}</span>
       </div>
-      <div className="br-list" role="radiogroup" aria-label="Branch list">
-        {P2i.branches.map(b => (
-          <div key={b.name}
-               role="radio"
-               aria-checked={b.name === sel}
-               aria-label={`${b.name} · ${b.tag} · ${b.status} · ${b.ahead} ahead, ${b.behind} behind · HEAD ${b.head}`}
-               tabIndex={0}
-               onClick={() => setSel(b.name)}
-               onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSel(b.name); } }}
-               className={`row ${b.name === sel ? 'on' : ''}`}>
-            <span className="glyph" aria-hidden="true">⎇</span>
-            <span className="nm" aria-hidden="true">
-              {b.name}
-              <span className={`tag ${b.tag}`}>{b.tag}</span>
-            </span>
-            <span className={`st ${b.status}`} aria-hidden="true">{b.status}</span>
-            <span className="ahbh" aria-hidden="true">
-              <span className="ah">↑{b.ahead}</span>
-              <span className="bh">↓{b.behind}</span>
-            </span>
-            <span className="head" aria-hidden="true">{b.head}</span>
-            <span style={{display:'none'}} />
-          </div>
-        ))}
+      <div className="br-list" role="listbox" aria-label="Available branches">
+        {P2i.branches.map(b => {
+          const isCurrent = b.name === sel;
+          return (
+            <div key={b.name}
+                 role="option"
+                 aria-selected={isCurrent}
+                 aria-label={`${b.name} · ${b.tag} · ${b.status} · ${b.ahead} ahead, ${b.behind} behind · HEAD ${b.head}`}
+                 tabIndex={0}
+                 onClick={() => setSel(b.name)}
+                 onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSel(b.name); } }}
+                 className={`row ${isCurrent ? 'on' : ''}`}>
+              <span className="glyph" aria-hidden="true">⎇</span>
+              <span className="nm" aria-hidden="true">
+                {b.name}
+                <span className={`tag ${b.tag}`}>{b.tag}</span>
+              </span>
+              <span className={`st ${b.status}`} aria-hidden="true">{b.status}</span>
+              <span className="ahbh" aria-hidden="true">
+                <span className="ah">↑{b.ahead}</span>
+                <span className="bh">↓{b.behind}</span>
+              </span>
+              <span className="head" aria-hidden="true">{b.head}</span>
+              <span style={{display:'none'}} aria-hidden="true" />
+            </div>
+          );
+        })}
       </div>
       <div role="list" aria-label={`Active branch keepers · ${cur.keepers.length}`} style={{padding:'5px 10px',background:'var(--bg-1)',border:'1px solid var(--line-1)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-10)',color:'var(--fg-3)',display:'flex',gap:'8px',alignItems:'center'}}>
         <span aria-hidden="true" style={{color:'var(--fg-4)'}}>active branch keepers ·</span>
@@ -112,7 +123,7 @@ function KeeperMultiSelect() {
     setSel(next);
   };
   return (
-    <section className="km-bar" aria-label={`Keeper multi-select · ${sel.size} of ${allKeepers.length} selected`}>
+    <section className="km-bar" role="group" aria-label="Keeper filter">
       <div className="h" role="toolbar" aria-label="Keeper filter controls">
         <span className="lbl" aria-hidden="true">keeper filter</span>
         <span className="cnt" aria-live="polite">{sel.size} of {allKeepers.length} selected</span>
@@ -125,8 +136,9 @@ function KeeperMultiSelect() {
           return (
             <button key={k.id}
                     type="button"
-                    aria-pressed={on}
-                    aria-label={`${k.id} · ${k.role}${on ? ' · selected' : ''}`}
+                    role="checkbox"
+                    aria-checked={on}
+                    aria-label={k.id}
                     onClick={() => toggle(k.id)}
                     className={`km-chip ${on ? 'on' : ''}`}>
               <span aria-hidden="true" style={{display:'inline-block',width:'7px',height:'7px',borderRadius:'50%',background:keeperColor(k.id)}}/>
@@ -164,9 +176,9 @@ function OperatorNudgeLog() {
         <span>operator · nudge log</span>
         <span style={{marginLeft:'auto',color:'var(--brass-1)'}}>{P2i.nudges.length} nudges · {P2i.nudges.filter(n => !n.ack).length} pending ack</span>
       </div>
-      <div role="log" aria-live="polite" aria-label={`${P2i.nudges.length} nudges`} style={{background:'var(--bg-0)'}}>
+      <div role="log" aria-live="polite" aria-label="Operator nudge history" style={{background:'var(--bg-0)'}}>
         {P2i.nudges.map(n => (
-          <div key={n.id} className="nd-row" role="listitem" aria-label={`${n.at.replace('Z','')} · ${n.channel} · to ${n.to.map(k => '@' + k).join(', ')} · ${n.body} · ${n.ack ? 'acknowledged' : 'pending acknowledgment'}`}>
+          <article key={n.id} className="nd-row" aria-label={`${n.at.replace('Z','')} · ${n.channel} · to ${n.to.map(k => '@' + k).join(', ')} · ${n.body} · ${n.ack ? 'acknowledged' : 'pending acknowledgment'}`}>
             <span className="ts" aria-hidden="true">{n.at.replace('Z','')}</span>
             <span className={`ch ${n.channel}`} aria-hidden="true">{n.channel}</span>
             <span className="to" aria-hidden="true">
@@ -174,7 +186,7 @@ function OperatorNudgeLog() {
             </span>
             <span className="body" aria-hidden="true">{n.body}</span>
             <span className={`ack ${n.ack ? 'y' : 'n'}`} aria-hidden="true">{n.ack ? '✓ ack' : '… pending'}</span>
-          </div>
+          </article>
         ))}
       </div>
       <form className="nd-compose" aria-label="Compose new nudge" onSubmit={(e) => e.preventDefault()}>
@@ -187,8 +199,9 @@ function OperatorNudgeLog() {
           </div>
         </div>
         <textarea
+          aria-label="Compose nudge"
           aria-labelledby="nudge-compose-label"
-          aria-label="Nudge body"
+          aria-multiline="true"
           placeholder="훈수만 두세요 — '실행은 keeper들이 알아서…'"
           value={body}
           onChange={e => setBody(e.target.value)}

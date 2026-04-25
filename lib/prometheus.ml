@@ -374,6 +374,7 @@ let metric_ws_bytes_cache_misses = "masc_ws_bytes_cache_misses_total"
 let metric_ws_client_buffered_bytes = "masc_ws_client_buffered_bytes"
 let metric_ws_client_acks = "masc_ws_client_acks_total"
 let metric_ws_throttled_deliveries = "masc_ws_throttled_deliveries_total"
+let metric_ws_slice_fanout_skipped = "masc_ws_slice_fanout_skipped_total"
 
 (* Admission queue metrics — used in admission_queue_metrics.ml. *)
 let metric_inference_queue_depth = "masc_inference_queue_depth"
@@ -821,6 +822,11 @@ let init () =
   add metric_ws_throttled_deliveries
     "WS dashboard deliveries skipped because the client's last reported \
      bufferedAmount exceeded MASC_WS_CLIENT_BUFFER_LIMIT_BYTES"
+    Counter;
+  add metric_ws_slice_fanout_skipped
+    "WS sessions skipped during slice-scoped fanout because their route \
+     does not subscribe to the event's slice (gated by \
+     MASC_WS_SLICE_INDEX_ENABLED, RFC #10119 Phase 2)"
     Counter
 
 let start_time = Time_compat.now ()

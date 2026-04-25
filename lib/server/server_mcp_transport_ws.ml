@@ -522,6 +522,17 @@ let session_is_backpressured session =
     let limit = client_buffer_limit_bytes () in
     limit > 0 && session.dashboard_last_buffered_amount >= limit
 
+(** RFC #10119 Phase 2 gate.  When enabled, slice-scoped events skip the
+    raw-SSE-forward to authenticated sessions whose route does not
+    subscribe to the event's slice.  Default [false] — Phase 1
+    (#10155) only adds bookkeeping; Phase 2 flips behaviour, so the
+    rollout is staged via this flag.  The env var is read on every
+    fanout call so operators can flip without a restart; the read is
+    cheap (atomic hash lookup in [Env_config_core]). *)
+let slice_index_enabled () =
+  Env_config_core.get_bool ~default:false
+    "MASC_WS_SLICE_INDEX_ENABLED"
+
 let send_dashboard_or_raw_sse session sse_event =
   if session_is_backpressured session then begin
     (* Drop the delivery rather than queue it.  Next ack after the client
@@ -540,10 +551,38 @@ let send_dashboard_or_raw_sse session sse_event =
            per session and cannot be shared. *)
         send_json_checked ~context:"dashboard-delta" session delta
     | None ->
-        (* Same event string is forwarded verbatim to every session that
-           does not match a subscribed dashboard slice; the shared cache
-           collapses N identical [Bytes.of_string] allocations into 1. *)
-        send_text_shared_checked ~context:"sse-forward" session sse_event
+        (* Two sub-cases lead here:
+           1. The event has a parsed slice but this session's route is
+              not subscribed.  Today we raw-forward anyway so the client
+              can hydrate its store via [handleRawPush].  With the
+              slice-index gate enabled (RFC #10119 Phase 2) we skip
+              instead, since the client cannot do anything useful with
+              a slice it did not request and the wire write is pure
+              waste at the dashboard fleet's scale.
+           2. The event has no slice mapping (parse miss or unknown
+              event_type).  This is the catch-all path and must still
+              raw-forward so events outside the slice vocabulary still
+              reach authenticated sessions.
+
+           [parse_sse_dashboard_event] is the cached source of truth
+           for which case applies.  A [Some _] result with a [Some
+           slice] field means case 1 (slice known, session did not
+           subscribe — [dashboard_delta_for_sse] would have returned
+           [Some] otherwise).  Anything else is case 2. *)
+        let is_slice_mismatch =
+          match parse_sse_dashboard_event sse_event with
+          | Some { slice = Some _; _ } -> true
+          | _ -> false
+        in
+        if is_slice_mismatch && slice_index_enabled () then begin
+          Transport_metrics.inc_ws_slice_fanout_skipped ();
+          true
+        end
+        else
+          (* Same event string is forwarded verbatim to every session that
+             does not match a subscribed dashboard slice; the shared cache
+             collapses N identical [Bytes.of_string] allocations into 1. *)
+          send_text_shared_checked ~context:"sse-forward" session sse_event
   else
     send_text_shared_checked ~context:"sse-forward" session sse_event
 

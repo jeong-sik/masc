@@ -487,6 +487,49 @@ let test_slice_index_add_is_idempotent () =
       1 occurrences;
     Ws.__test_slice_index_remove_session sid)
 
+(* ====== Slice fanout gate (Phase 2) ====== *)
+
+(* Phase 2 turns on the slice-aware fanout: when the env flag is set,
+   slice-scoped events skip raw-SSE-forwards to authenticated sessions
+   whose route does not subscribe.  The counter
+   [masc_ws_slice_fanout_skipped_total] advances per skip.  Catch-all
+   events (no slice mapping) still raw-forward to every session. *)
+
+let read_skip_counter () =
+  Masc_mcp.Prometheus.metric_value_or_zero
+    Masc_mcp.Prometheus.metric_ws_slice_fanout_skipped ()
+
+let with_env_var key value f =
+  let prev = Sys.getenv_opt key in
+  Unix.putenv key value;
+  Fun.protect
+    ~finally:(fun () ->
+      match prev with
+      | Some v -> Unix.putenv key v
+      | None -> Unix.putenv key "")
+    f
+
+let test_slice_fanout_skip_counter_metric_registered () =
+  (* The counter is registered at startup; reading it must succeed
+     without raising even before any skip occurs. *)
+  let v = read_skip_counter () in
+  Alcotest.(check bool) "counter readable (>= 0)" true (v >= 0.0)
+
+let test_slice_fanout_flag_default_is_off () =
+  Eio_main.run (fun _env ->
+    with_env_var "MASC_WS_SLICE_INDEX_ENABLED" "" (fun () ->
+        Alcotest.(check bool) "default off"
+          false (Ws.slice_index_enabled ())))
+
+let test_slice_fanout_flag_reads_env () =
+  Eio_main.run (fun _env ->
+    with_env_var "MASC_WS_SLICE_INDEX_ENABLED" "true" (fun () ->
+        Alcotest.(check bool) "env=true → enabled"
+          true (Ws.slice_index_enabled ()));
+    with_env_var "MASC_WS_SLICE_INDEX_ENABLED" "false" (fun () ->
+        Alcotest.(check bool) "env=false → disabled"
+          false (Ws.slice_index_enabled ())))
+
 let () =
   Alcotest.run "WebSocket Transport" [
     ("session_registry", [
@@ -567,5 +610,13 @@ let () =
         test_slice_index_size_reflects_pairs;
       Alcotest.test_case "duplicate add is idempotent" `Quick
         test_slice_index_add_is_idempotent;
+    ]);
+    ("slice_fanout_gate", [
+      Alcotest.test_case "skip counter registered" `Quick
+        test_slice_fanout_skip_counter_metric_registered;
+      Alcotest.test_case "flag default is off" `Quick
+        test_slice_fanout_flag_default_is_off;
+      Alcotest.test_case "flag reads env var" `Quick
+        test_slice_fanout_flag_reads_env;
     ]);
   ]

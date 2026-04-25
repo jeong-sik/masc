@@ -181,6 +181,55 @@ let test_oas_event_source_and_scope_filter () =
     Alcotest.(check string) "event type preserved" "turn_completed" event_type
   | _ -> Alcotest.fail "expected Assoc"
 
+let test_agent_tool_called_scope_promoted_for_filters () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "telem_agent_tool_scope" in
+  let telemetry_dir = Filename.concat dir ".masc/telemetry" in
+  Fs_compat.mkdir_p telemetry_dir;
+  write_jsonl telemetry_dir
+    [
+      `Assoc
+        [
+          ("timestamp", `Float 1100.0);
+          ( "event",
+            `List
+              [
+                `String "Tool_called";
+                `Assoc
+                  [
+                    ("tool_name", `String "masc_claim_next");
+                    ("success", `Bool true);
+                    ("duration_ms", `Int 42);
+                    ("agent_id", `String "codex-mcp-client");
+                    ("session_id", `String "mcp-session-1");
+                    ("operation_id", `String "op-1");
+                    ("worker_run_id", `String "worker-1");
+                  ];
+              ] );
+        ];
+    ];
+  let result =
+    Telemetry_unified.read_unified_result ~base_path:dir
+      ~masc_root:(masc_root dir) ~sources:[ Telemetry_unified.Agent_event ]
+      ~session_id:"mcp-session-1" ~operation_id:"op-1"
+      ~worker_run_id:"worker-1" ()
+  in
+  Alcotest.(check int) "scoped agent tool event visible" 1
+    result.total_matching_entries;
+  match List.hd result.entries with
+  | `Assoc fields ->
+    let json = `Assoc fields in
+    Alcotest.(check string) "tool promoted" "masc_claim_next"
+      (json_string_field "tool_name" json);
+    Alcotest.(check string) "session promoted" "mcp-session-1"
+      (json_string_field "session_id" json);
+    Alcotest.(check string) "operation promoted" "op-1"
+      (json_string_field "operation_id" json);
+    Alcotest.(check string) "worker promoted" "worker-1"
+      (json_string_field "worker_run_id" json)
+  | _ -> Alcotest.fail "expected Assoc"
+
 let test_shadow_agent_tool_called_deduped_from_unified_view () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -822,6 +871,8 @@ let () =
           Alcotest.test_case "agent events" `Quick test_agent_event_source;
           Alcotest.test_case "oas events + scope filter" `Quick
             test_oas_event_source_and_scope_filter;
+          Alcotest.test_case "agent tool_called scope promotion" `Quick
+            test_agent_tool_called_scope_promoted_for_filters;
           Alcotest.test_case "dedupe shadow agent tool_called" `Quick
             test_shadow_agent_tool_called_deduped_from_unified_view;
           Alcotest.test_case "keeper metrics" `Quick test_keeper_metrics_per_keeper;

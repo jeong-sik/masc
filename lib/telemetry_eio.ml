@@ -21,7 +21,16 @@ type event =
   | Task_completed of { task_id: string; duration_ms: int; success: bool }
   | Handoff_triggered of { from_agent: string; to_agent: string; reason: string }
   | Error_occurred of { code: string; message: string; context: string }
-  | Tool_called of { tool_name: string; success: bool; duration_ms: int; agent_id: string option; source: string option }
+  | Tool_called of {
+      tool_name: string;
+      success: bool;
+      duration_ms: int;
+      agent_id: string option;
+      source: string option;
+      session_id: string option;
+      operation_id: string option;
+      worker_run_id: string option;
+    }
   | Tool_assigned of { agent_id: string; profile: string; preset: string option; tool_count: int; assignment_id: string }
 [@@deriving yojson, show]
 
@@ -345,8 +354,20 @@ let track_handoff ?fs config ~from_agent ~to_agent ~reason =
 let track_error ?fs config ~code ~message ~context =
   track ?fs config (Error_occurred { code; message; context })
 
-let track_tool_called ?fs config ~tool_name ~success ~duration_ms ?agent_id ?source () =
-  track ?fs config (Tool_called { tool_name; success; duration_ms; agent_id; source })
+let track_tool_called ?fs config ~tool_name ~success ~duration_ms ?agent_id
+    ?source ?session_id ?operation_id ?worker_run_id () =
+  track ?fs config
+    (Tool_called
+       {
+         tool_name;
+         success;
+         duration_ms;
+         agent_id;
+         source;
+         session_id;
+         operation_id;
+         worker_run_id;
+       })
 
 let track_tool_assigned ?fs config ~agent_id ~profile ?preset ~tool_count ~assignment_id () =
   track ?fs config (Tool_assigned { agent_id; profile; preset; tool_count; assignment_id })

@@ -623,6 +623,13 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
       let resolved = identity.Agent_identity.agent_name in
       if resolved <> "" then resolved else "unknown"
   in
+  let telemetry_session_id =
+    match json_nonempty_string_opt "session_id" arguments with
+    | Some _ as session_id -> session_id
+    | None -> nonempty_string_opt mcp_session_id
+  in
+  let telemetry_operation_id = json_nonempty_string_opt "operation_id" arguments in
+  let telemetry_worker_run_id = json_nonempty_string_opt "worker_run_id" arguments in
   let error_detail =
     if success then None
     else
@@ -684,7 +691,11 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
      | Some fs ->
          (try Telemetry_eio.track_tool_called ~fs state.Mcp_server.room_config
                 ~tool_name:name ~agent_id:agent_name ~success ~duration_ms
-                ~source:(Tool_registry.string_of_source source) ()
+                ~source:(Tool_registry.string_of_source source)
+                ?session_id:telemetry_session_id
+                ?operation_id:telemetry_operation_id
+                ?worker_run_id:telemetry_worker_run_id
+                ()
           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
             log_mcp_exn ~label:"telemetry tracking failed" exn)
      | None -> ());

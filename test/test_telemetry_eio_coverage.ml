@@ -107,11 +107,17 @@ let test_event_tool_called () =
     duration_ms = 100;
     agent_id = Some "claude-001";
     source = Some "external_mcp";
+    session_id = Some "mcp-session-1";
+    operation_id = Some "op-1";
+    worker_run_id = Some "run-1";
   } in
   match e with
   | Telemetry_eio.Tool_called r ->
       check string "tool_name" "masc_status" r.tool_name;
-      check bool "success" true r.success
+      check bool "success" true r.success;
+      check (option string) "session_id" (Some "mcp-session-1") r.session_id;
+      check (option string) "operation_id" (Some "op-1") r.operation_id;
+      check (option string) "worker_run_id" (Some "run-1") r.worker_run_id
   | _ -> fail "expected Tool_called"
 
 (* ============================================================

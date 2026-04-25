@@ -5,6 +5,7 @@ code_refs:
   - lib/server/server_mcp_transport_ws.ml
   - lib/sse.ml
   - lib/transport_metrics.ml
+  - lib/grpc/masc_grpc_service.ml
   - dashboard/src/dashboard-ws.ts
   - dashboard/src/sse.ts
   - dashboard/src/components/transport-health.ts
@@ -14,7 +15,8 @@ code_refs:
 
 > Status: Draft
 > Date: 2026-04-25
-> PRs: #10089, #10096, #10098, #10102, #10104, #10106, #10107
+> PRs: #10089, #10096, #10098, #10102, #10104, #10106, #10107,
+> #10112, #10114, #10117, #10119 (RFC), #10120 (chore)
 
 ## 1. Context
 
@@ -210,6 +212,86 @@ Two format helpers (`formatHitRate`, `formatAvgBufferedBytes`) return
 `"—"` on idle inputs so a freshly-started server does not render
 `0%` as if the cache were failing.
 
+### 3.8 #10112 — gRPC events_dropped counter (server, observability)
+
+Mirrors #10104's drop signal for the gRPC subscriber path.  The
+gRPC callback in `lib/grpc/masc_grpc_service.ml:484` already drops
+events when its output stream's buffer is near capacity, but the
+drop was visible only in logs.
+
+Adds `masc_grpc_events_dropped_total` (Counter) and surfaces it in
+the `grpc` section of `transport_health_json` alongside
+`events_delivered`.  The client schema's `GrpcSchema` gains
+`events_dropped` with `fallback(number(), 0)` for cross-version
+compatibility.
+
+No behaviour change in the drop path itself — same threshold, same
+log line.  The PR only makes the existing pressure visible in
+metrics.
+
+### 3.9 #10114 — dashboard UI for gRPC drops (rendering)
+
+Stacked on #10112.  Adds an `Events Dropped` row to the gRPC
+SectionCard:
+
+| label | value | sub |
+|-------|-------|-----|
+| Events Dropped | counter | `정상` / `버퍼 포화` |
+
+`grpcTone` downgrades `'ok'` → `'warn'` on `events_dropped > 0`,
+matching the `websocketTone` behaviour from #10107.
+
+The sub text uses `'버퍼 포화'` for gRPC vs `'서킷 오픈'` for WS
+deliberately — both mean "capacity pressure, attention required",
+but they describe the actual mechanism faithfully (gate threshold
+vs buffer-full drop).  Same word for different mechanisms would
+obscure the distinction operators need when triaging.
+
+### 3.10 #10117 — gRPC stream buffer threshold tunable (server, control)
+
+Closes the WS/gRPC symmetry on the control side.  WS got
+`MASC_WS_CLIENT_BUFFER_LIMIT_BYTES` in #10104; gRPC's drop
+threshold remained hard-coded at 48.
+
+Adds `MASC_GRPC_STREAM_MAX_BUFFER` (default 48) read once per
+subscribe — existing streams are not disturbed mid-flight by a
+config change; newly-subscribing clients pick up the new value.
+Exported as `Masc_grpc_service.stream_max_buffer ()` so tests can
+assert the effective value without instrumenting the full subscribe
+handler.
+
+Together with #10112's counter and #10114's UI, this completes the
+operator-visible "observe + control" pair for the gRPC drop path
+that mirrors the WS path.
+
+### 3.11 #10119 — slice-indexed fanout RFC (design)
+
+Documentation only.  Captures the proposal for the largest deferred
+perf lever — replacing `Sse.notify_external_subscribers`'s `O(N)`
+iteration with a `slice → session set` side index in the WS
+transport, so slice-scoped events skip the `N - S` unnecessary
+raw-SSE-forward writes.
+
+Phased: bookkeeping (Phase 1) and fanout rewiring (Phase 2) can
+land independently.  Includes alternatives considered, concurrency
+analysis, performance projection (`N=20, S=5` → 75% fewer Wsd
+writes per slice-scoped event), and a flagged rollout plan.
+
+No code change.  See §5 for status against the deferred-decisions
+list.
+
+### 3.12 #10120 — micro-cleanup in dashboard_snapshot (chore)
+
+One-line chore.  Removes an identity `List.map` that was a no-op
+at the end of `dashboard_snapshot`'s pipeline and switches the
+sort comparator from polymorphic `compare` to typed
+`String.compare`.  No behaviour change.
+
+Standalone PR rather than bundling into a larger one keeps each
+PR's scope honest — the cleanup is reviewable in 30 seconds and
+mixing it into a parse-cache or schema PR would have made those
+slightly less reviewable.
+
 ## 4. Design principles applied
 
 ### Physical equality on the broadcast reference
@@ -267,27 +349,27 @@ actual state of the system.
 
 ## 5. Deferred decisions
 
-### Slice-indexed fan-out (not yet addressed)
+### Slice-indexed fan-out (RFC: #10119)
 
 `Sse.notify_external_subscribers` still iterates every external
 subscriber per broadcast.  Each WS session's callback runs the
 `Hashtbl.mem session.dashboard_slices slice` filter individually, so
-with `N` sessions there are `N` filter checks per event even when
-the event maps to a slice only a subset cares about.
+with `N` sessions there are `N` filter checks per event — and, more
+costly, the catch-all `send_text_shared_checked` issues `N - S`
+unnecessary `Wsd.send_bytes` writes for sessions whose route does
+not match the event's slice.
 
-A slice-indexed fan-out (`slice → session set` index, only iterate
-matching sessions) would cut that to `O(subscribed)`, but:
+A slice-indexed fan-out (`slice → session set` index, deliver only
+to matching sessions) would eliminate the `N - S` writes.  The
+detailed proposal — including the catch-all preservation strategy
+for events without a slice mapping, the concurrency model that
+reuses `sessions_mutex`, the phased rollout (Phase 1 bookkeeping,
+Phase 2 rewiring), and the new `masc_ws_slice_fanout_skipped_total`
+counter for verifying the win — lives in the RFC at
+`docs/design/ws-slice-indexed-fanout-rfc.md` (#10119).
 
-- It requires either changing `Sse.subscribe_external`'s signature or
-  maintaining a side index that is kept consistent with
-  session slice changes.
-- Raw-SSE-forward (for events without a slice mapping) still needs
-  the full fan-out, so the win is only on slice-scoped events.
-- The parse cache (#10089) already makes the most expensive part of
-  each per-session iteration cheap.
-
-Target for a follow-up after the current series lands; not in scope
-for this document.
+Status: proposal published, awaiting design review before
+implementation.  Not in scope for the current series.
 
 ### Deletion of `/sse` and the direct SSE client path
 
@@ -303,13 +385,24 @@ production and held at it for a sustained period, a follow-up should:
 
 No timeline; depends on production confidence in the WS path.
 
-### gRPC subscriber symmetry
+### gRPC subscriber symmetry (addressed in #10112, #10114, #10117)
 
-The gRPC subscriber in `lib/grpc/masc_grpc_service.ml:477` has a
-similar fan-out shape to WS but does not currently surface a
-`delivery` block in transport-health.  The same observability
-pattern could be mirrored into the `grpc` section of the payload.
-Independent follow-up.
+The gRPC subscriber in `lib/grpc/masc_grpc_service.ml:477` had a
+similar fan-out shape to WS but no drop signal.  This is now
+covered:
+
+- #10112 — `masc_grpc_events_dropped_total` counter and
+  `grpc.events_dropped` payload field.
+- #10114 — operator-visible row in the dashboard gRPC card.
+- #10117 — `MASC_GRPC_STREAM_MAX_BUFFER` env knob to retune the
+  drop threshold.
+
+A wider `delivery` sub-object covering parse / encoding stats was
+considered but skipped: gRPC has no parse cache (the SSE event is
+forwarded as-is in the protobuf payload), and the encoding cost is
+per-subscriber unique because of the per-session `seq` counter.
+The four counters above are the meaningful surface; mirroring the
+full WS `delivery` block would have added zero-valued fields.
 
 ## 6. Operational playbook
 
@@ -374,3 +467,4 @@ All seven PRs are additive and flagged.  Emergency rollback steps:
 | Date | Change |
 |------|--------|
 | 2026-04-25 | Initial draft, covers #10089 through #10107. |
+| 2026-04-25 | Add §3.8–§3.12 for the four post-draft PRs (gRPC observability triple #10112/#10114/#10117, the slice-indexed RFC #10119, and the dashboard_snapshot chore #10120).  Update §5 deferred decisions: slice-indexed fan-out has an RFC (#10119); gRPC subscriber symmetry has landed.  Add `lib/grpc/masc_grpc_service.ml` to `code_refs`. |

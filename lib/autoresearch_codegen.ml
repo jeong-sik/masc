@@ -138,7 +138,8 @@ let generate_code_change ~goal ~baseline ~lower_is_better ~history ~insights
   let prompt = build_code_change_prompt ~goal ~baseline ~lower_is_better ~history ~insights
     ~file_content ~target_file in
   match
-    Masc_oas_bridge.run_with_caller ~caller:"autoresearch_codegen" (fun () ->
+    Masc_oas_bridge.run_with_caller
+      ~caller:Env_config_oas_bridge.Autoresearch_codegen (fun () ->
       Oas_worker.run_named ~cascade_name:"autoresearch"
         ~goal:prompt ~max_turns:1
         ~temperature:(Cascade_inference.resolve_temperature

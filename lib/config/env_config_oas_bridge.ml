@@ -12,16 +12,25 @@
          (50–700s) and produced 27 timeouts/session;
       3. the operator can override any single caller's budget via
          [MASC_OAS_BRIDGE_TIMEOUT_<CALLER>_SEC];
-      4. the operator can shift every default in lockstep via
-         [MASC_OAS_BRIDGE_TIMEOUT_DEFAULT_SEC] without per-caller
-         tuning, useful when an OAS deployment is uniformly slow.
+      4. the operator can set a fallback for unknown / future callers
+         via [MASC_OAS_BRIDGE_TIMEOUT_DEFAULT_SEC].
 
     The lookup order is per-caller env > per-caller hardcoded default
     > [MASC_OAS_BRIDGE_TIMEOUT_DEFAULT_SEC] > 300.0.  An unknown
-    caller (string typo or future caller without a default) falls
-    through to the global default rather than failing closed — the
-    operator will see [metric_oas_bridge_timeout{caller=...}] in
-    Prometheus regardless. *)
+    caller (future caller without a typed default) falls through to
+    the global default rather than failing closed — the operator will
+    see [metric_oas_bridge_timeout{caller=...}] in Prometheus
+    regardless. *)
+
+type caller =
+  | Auto_responder
+  | Dashboard_provider_runs
+  | Autoresearch_codegen
+  | Keeper_persona_authoring
+  | Server_openai_compat
+  | Tool_deep_review
+  | Anti_rationalization
+  | Unknown of string
 
 (** Hardcoded default seconds for each known caller.  When the
     original literal was 60s on a path with observed p50 above 60s,
@@ -32,21 +41,40 @@
     autoresearch / deep_review / anti_rationalization. *)
 let global_default_sec = 300.0
 
-let known_caller_defaults : (string * float) list = [
+let caller_key = function
+  | Auto_responder -> "auto_responder"
+  | Dashboard_provider_runs -> "dashboard_provider_runs"
+  | Autoresearch_codegen -> "autoresearch_codegen"
+  | Keeper_persona_authoring -> "keeper_persona_authoring"
+  | Server_openai_compat -> "server_openai_compat"
+  | Tool_deep_review -> "tool_deep_review"
+  | Anti_rationalization -> "anti_rationalization"
+  | Unknown caller -> caller
+
+(** Exported for tests that pin the per-caller default table. *)
+let known_callers () =
+  [
+    Auto_responder;
+    Dashboard_provider_runs;
+    Autoresearch_codegen;
+    Keeper_persona_authoring;
+    Server_openai_compat;
+    Tool_deep_review;
+    Anti_rationalization;
+  ]
+
+let known_default_sec = function
   (* #10094: was hardcoded 60s, raised to global_default.  p50 of
      the underlying LLM call is in the 50–700s range; 60s timed out
      27 times per session. *)
-  "auto_responder", global_default_sec;
-  "dashboard_provider_runs", global_default_sec;
-
+  | Auto_responder | Dashboard_provider_runs -> Some global_default_sec
   (* Preserved at original literal — these were tuned for the
      specific compute pattern of the caller. *)
-  "autoresearch_codegen", 120.0;
-  "keeper_persona_authoring", 120.0;
-  "server_openai_compat", 120.0;
-  "tool_deep_review", 180.0;
-  "anti_rationalization", 180.0;
-]
+  | Autoresearch_codegen
+  | Keeper_persona_authoring
+  | Server_openai_compat -> Some 120.0
+  | Tool_deep_review | Anti_rationalization -> Some 180.0
+  | Unknown _ -> None
 
 let upper_case s =
   s
@@ -57,7 +85,7 @@ let upper_case s =
        else c)
 
 let per_caller_env_var ~caller =
-  Printf.sprintf "MASC_OAS_BRIDGE_TIMEOUT_%s_SEC" (upper_case caller)
+  Printf.sprintf "MASC_OAS_BRIDGE_TIMEOUT_%s_SEC" (upper_case (caller_key caller))
 
 let global_env_var = "MASC_OAS_BRIDGE_TIMEOUT_DEFAULT_SEC"
 
@@ -77,7 +105,7 @@ let trimmed_value_opt name =
       1. Per-caller env [MASC_OAS_BRIDGE_TIMEOUT_<CALLER>_SEC]
          — wins unconditionally.  Lets the operator tune one
          caller without touching others.
-      2. Per-caller hardcoded default ([known_caller_defaults]).
+      2. Per-caller checked-in default ([known_default_sec]).
          Preserves intentional 120/180s budgets for compute-heavy
          callers; raises the fantasy 60s budgets to
          [global_default_sec] (300s).
@@ -94,7 +122,7 @@ let timeout_sec ~caller () =
     Safe_ops.float_of_string_with_default
       ~default:global_default_sec v
   | None ->
-    match List.assoc_opt caller known_caller_defaults with
+    match known_default_sec caller with
     | Some d -> d
     | None ->
       (* Unknown caller: fall to global env, then global default. *)
@@ -103,7 +131,3 @@ let timeout_sec ~caller () =
         Safe_ops.float_of_string_with_default
           ~default:global_default_sec v
       | None -> global_default_sec
-
-(** Exported for tests that pin the per-caller default table. *)
-let known_callers () : string list =
-  List.map fst known_caller_defaults

@@ -21,6 +21,6 @@ val run_safe :
     env-overridable per-caller budget.  See [Env_config_oas_bridge]
     for the per-caller default table and env-var layout. *)
 val run_with_caller :
-  caller:string ->
+  caller:Env_config_oas_bridge.caller ->
   (unit -> ('a, Oas.Error.sdk_error) result) ->
   ('a, Oas.Error.sdk_error) result

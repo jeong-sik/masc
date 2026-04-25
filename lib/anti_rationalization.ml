@@ -488,7 +488,8 @@ let review
         (false, sprintf "Invalid verdict format: %s" msg)
     in
     (match
-       Masc_oas_bridge.run_with_caller ~caller:"anti_rationalization" (fun () ->
+       Masc_oas_bridge.run_with_caller
+         ~caller:Env_config_oas_bridge.Anti_rationalization (fun () ->
          Oas_worker.run_named_with_masc_tools
            ~cascade_name:evaluator_cascade
            ~goal:prompt

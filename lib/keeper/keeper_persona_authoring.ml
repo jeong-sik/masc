@@ -1020,7 +1020,7 @@ let handle_persona_generate ctx args =
            in
            match
              Masc_oas_bridge.run_with_caller
-               ~caller:"keeper_persona_authoring"
+               ~caller:Env_config_oas_bridge.Keeper_persona_authoring
                (fun () ->
                  Oas_worker.run_named
                    ~cascade_name

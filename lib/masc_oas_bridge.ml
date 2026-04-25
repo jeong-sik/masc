@@ -13,7 +13,8 @@
     when both fire timeouts in the same session.  Defaults to
     "unknown" so legacy callers still compile; new code should
     pass [~caller] explicitly or use {!run_with_caller}, which
-    also pulls the configured budget from [Env_config_oas_bridge]. *)
+    accepts a typed caller and pulls the configured budget from
+    [Env_config_oas_bridge]. *)
 let run_safe ?(caller = "unknown") ~timeout_s fn =
   let do_timeout fn =
     match Masc_eio_env.get_opt () with
@@ -62,4 +63,4 @@ let run_safe ?(caller = "unknown") ~timeout_s fn =
     env-var override layout. *)
 let run_with_caller ~caller fn =
   let timeout_s = Env_config_oas_bridge.timeout_sec ~caller () in
-  run_safe ~caller ~timeout_s fn
+  run_safe ~caller:(Env_config_oas_bridge.caller_key caller) ~timeout_s fn

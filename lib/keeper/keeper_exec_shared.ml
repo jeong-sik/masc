@@ -382,14 +382,57 @@ let tag_dispatch_fn
 
 let keeper_tools_list_json ~(meta : keeper_meta) =
   let names = Keeper_tool_policy.keeper_allowed_tool_names meta in
+  let categorize_keeper_tool = function
+    | Tool_name.Keeper.Board_cleanup
+    | Tool_name.Keeper.Board_comment
+    | Tool_name.Keeper.Board_comment_vote
+    | Tool_name.Keeper.Board_delete
+    | Tool_name.Keeper.Board_get
+    | Tool_name.Keeper.Board_list
+    | Tool_name.Keeper.Board_post
+    | Tool_name.Keeper.Board_search
+    | Tool_name.Keeper.Board_stats
+    | Tool_name.Keeper.Board_vote ->
+      "board"
+    | Tool_name.Keeper.Voice_agent
+    | Tool_name.Keeper.Voice_listen
+    | Tool_name.Keeper.Voice_session_end
+    | Tool_name.Keeper.Voice_session_start
+    | Tool_name.Keeper.Voice_sessions
+    | Tool_name.Keeper.Voice_speak ->
+      "voice"
+    | Tool_name.Keeper.Task_claim
+    | Tool_name.Keeper.Task_create
+    | Tool_name.Keeper.Task_done
+    | Tool_name.Keeper.Task_force_done
+    | Tool_name.Keeper.Task_force_release
+    | Tool_name.Keeper.Task_submit_for_verification
+    | Tool_name.Keeper.Tasks_audit
+    | Tool_name.Keeper.Tasks_list ->
+      "coordination"
+    | Tool_name.Keeper.Bash
+    | Tool_name.Keeper.Bash_kill
+    | Tool_name.Keeper.Bash_output
+    | Tool_name.Keeper.Shell ->
+      "shell"
+    | Tool_name.Keeper.Fs_edit
+    | Tool_name.Keeper.Fs_read
+    | Tool_name.Keeper.Write ->
+      "fs"
+    | Tool_name.Keeper.Library_read
+    | Tool_name.Keeper.Library_search
+    | Tool_name.Keeper.Memory_search ->
+      "memory"
+    | _ -> "core"
+  in
   let categorize n =
-    if String.starts_with ~prefix:"keeper_board" n then "board"
-    else if String.starts_with ~prefix:"keeper_voice" n then "voice"
-    else if String.starts_with ~prefix:"keeper_task" n then "coordination"
-    else if String.starts_with ~prefix:"keeper_shell" n || n = "keeper_bash" then "shell"
-    else if String.starts_with ~prefix:"keeper_fs" n then "fs"
-    else if String.starts_with ~prefix:"keeper_memory" n then "memory"
-    else "core"
+    match Tool_name.of_string n with
+    | Some (Tool_name.Keeper tool) -> categorize_keeper_tool tool
+    | Some typed ->
+      (match Tool_catalog.tool_group (Tool_name.to_string typed) with
+       | Some group -> Tool_catalog.tool_group_to_string group
+       | None -> "core")
+    | None -> "core"
   in
   let map =
     List.fold_left (fun acc n ->

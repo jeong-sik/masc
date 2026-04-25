@@ -1,6 +1,7 @@
 open Alcotest
 
 module KET = Masc_mcp.Keeper_exec_tools
+module KES = Masc_mcp.Keeper_exec_shared
 
 let temp_dir prefix =
   let dir = Filename.temp_file prefix "" in
@@ -67,6 +68,20 @@ let check_kind ~msg expected payload =
   check string msg expected
     (payload_kind (KET.classify_tool_result_payload payload))
 
+let json_list_contains name = function
+  | `List values ->
+      List.exists
+        (function
+          | `String value -> String.equal value name
+          | _ -> false)
+        values
+  | _ -> false
+
+let json_contains_tool name = function
+  | `Assoc fields ->
+      List.exists (fun (_, value) -> json_list_contains name value) fields
+  | _ -> false
+
 let test_plain_text_is_success_shape () =
   check_kind
     ~msg:"plain text stays plain_text"
@@ -126,6 +141,40 @@ let test_execute_with_outcome_policy_gate_is_non_failure () =
       let json = Yojson.Safe.from_string result.raw_output in
       check string "policy gate error" "tool_not_allowed"
         Yojson.Safe.Util.(member "error" json |> to_string))
+
+let test_keeper_tools_list_json_uses_typed_groups () =
+  let meta =
+    make_meta
+      ~tool_access:
+        (Masc_mcp.Keeper_types.Custom
+           [ "keeper_board_post";
+             "keeper_board_fake";
+             "keeper_voice_speak";
+             "keeper_task_claim";
+             "keeper_shell";
+             "keeper_fs_read";
+             "keeper_memory_search";
+           ])
+      ()
+  in
+  let json = Yojson.Safe.from_string (KES.keeper_tools_list_json ~meta) in
+  let member group name =
+    json_list_contains name Yojson.Safe.Util.(member group json)
+  in
+  check bool "board canonical tool grouped" true
+    (member "board" "keeper_board_post");
+  check bool "fake board-looking tool excluded" false
+    (json_contains_tool "keeper_board_fake" json);
+  check bool "voice tool grouped" true
+    (member "voice" "keeper_voice_speak");
+  check bool "task tool grouped as coordination" true
+    (member "coordination" "keeper_task_claim");
+  check bool "shell tool grouped" true
+    (member "shell" "keeper_shell");
+  check bool "fs tool grouped" true
+    (member "fs" "keeper_fs_read");
+  check bool "memory tool grouped" true
+    (member "memory" "keeper_memory_search")
 
 let test_execute_with_outcome_missing_file_is_failure () =
   with_exec_fixture "keeper_exec_tools_missing_file"
@@ -316,6 +365,10 @@ let () =
         test_execute_with_outcome_bad_query_is_failure;
       test_case "registered dispatch does not require masc_ prefix" `Quick
         test_registered_tool_dispatch_without_masc_prefix;
+    ]);
+    ("keeper_tools_list_json", [
+      test_case "uses typed groups" `Quick
+        test_keeper_tools_list_json_uses_typed_groups;
     ]);
     ("exec_cache", [
       test_case "miss then hit" `Quick test_exec_cache_miss_then_hit;

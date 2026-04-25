@@ -575,6 +575,7 @@
         test_keeper_cli_mcp_config
         test_board_vote_quarantine
         test_keeper_identity_parse
+        test_keeper_identity_normalize
         test_worker_runtime
         test_capability_registry
         test_tool_local_runtime_verify
@@ -753,6 +754,7 @@
         test_keeper_cli_mcp_config
         test_board_vote_quarantine
         test_keeper_identity_parse
+        test_keeper_identity_normalize
         test_worker_runtime
         test_capability_registry
         test_tool_local_runtime_verify

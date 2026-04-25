@@ -21,7 +21,8 @@ let sha256_hash input =
 (* Auth directory management                    *)
 (* ============================================ *)
 
-let auth_dir config = Filename.concat config ".masc/auth"
+let auth_dir config =
+  Filename.concat (Common.masc_dir_from_base_path ~base_path:config) "auth"
 let agents_dir config = Filename.concat (auth_dir config) "agents"
 let room_secret_file config = Filename.concat (auth_dir config) "room_secret.hash"
 let auth_config_file config = Filename.concat (auth_dir config) "config.json"

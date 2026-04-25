@@ -950,6 +950,38 @@ let test_runtime_precondition_contracts () =
      remaining routes do not need server state guard. *)
   ()
 
+(* #9571: MASC dirname SSOT — every runtime path that lives under
+   [base_path/.masc/...] must go through [Common.masc_dir_from_base_path]
+   instead of inlining the literal [".masc/<sub>"].  These contracts
+   cover the first migration batch (issue triage 2026-04-25); a future
+   PR can extend them as remaining call sites are migrated.
+
+   Each entry asserts: the migrated file uses the helper AND no
+   longer contains the inlined literal.  Either side regressing breaks
+   the SSOT and this test catches it before merge. *)
+let test_masc_dirname_ssot_contracts () =
+  let migrated_files = [
+    "lib/auth.ml";
+    "lib/board_votes.ml";
+    "lib/discovery_history.ml";
+    "lib/handover_eio.ml";
+    "lib/hebbian_eio.ml";
+    "lib/institution_eio.ml";
+    "lib/repo_synthesis_benchmark.ml";
+    "lib/tool_blob_store/tool_blob_store.ml";
+  ] in
+  List.iter
+    (fun file ->
+       check bool
+         (Printf.sprintf "%s uses Common.masc_dir_from_base_path" file)
+         true
+         (file_contains_pattern file "Common.masc_dir_from_base_path");
+       check bool
+         (Printf.sprintf "%s no longer inlines \".masc/\"" file)
+         true
+         (file_not_contains_pattern file "\".masc/"))
+    migrated_files
+
 let () =
   run "ci_hardening_source"
     [
@@ -1009,5 +1041,7 @@ let () =
              test_runtime_precondition_contracts;
            test_case "router contract alignment" `Quick
              test_router_contract_alignment;
+           test_case "masc_dirname SSOT contracts (#9571 batch 1)" `Quick
+             test_masc_dirname_ssot_contracts;
          ]);
     ]

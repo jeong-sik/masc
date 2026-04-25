@@ -23,7 +23,9 @@ let vote_direction_of_string_opt raw =
 
 let vote_log_path () =
   let base = board_base_path () in
-  Filename.concat base ".masc/board_votes.jsonl"
+  Filename.concat
+    (Common.masc_dir_from_base_path ~base_path:base)
+    "board_votes.jsonl"
 
 (* #10086: [ts] is the cast timestamp supplied by the caller.  Both
    the append (line-append on cast) and the rewrite (atomic flush

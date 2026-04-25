@@ -76,7 +76,10 @@ let default_params () = {
 
 (** Get synapses file path *)
 let synapses_file (config : config) =
-  Filename.concat config.Coord_utils.base_path ".masc/synapses/graph.json"
+  Filename.concat
+    (Common.masc_dir_from_base_path
+       ~base_path:config.Coord_utils.base_path)
+    "synapses/graph.json"
 
 (** Get lock file path *)
 let synapses_lock_file (config : config) =

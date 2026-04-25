@@ -18,7 +18,12 @@ let make_preview bytes =
   Buffer.contents buf
 
 let create ~base_path =
-  { root = Filename.concat base_path ".masc/tool_blobs" }
+  {
+    root =
+      Filename.concat
+        (Common.masc_dir_from_base_path ~base_path)
+        "tool_blobs";
+  }
 
 let root_dir t = t.root
 

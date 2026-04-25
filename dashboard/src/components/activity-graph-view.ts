@@ -259,7 +259,7 @@ export function GraphView({ data }: GraphViewProps) {
     </div>
 
     ${selectedNode ? html`
-      <div class="rounded border border-[var(--card-border)] bg-[var(--card)] p-4 mt-2">
+      <div class="rounded border border-[var(--card-border)] bg-[var(--card)] p-4 mt-2" role="region" aria-label="노드 상세">
         <div class="flex items-center gap-3 mb-3">
           <strong class="text-lg text-[var(--text-near-white)]">${selectedNode.label}</strong>
           <span class="py-0.5 px-2 bg-[var(--slate-gray-15)] text-2xs text-[var(--text-slate)] rounded">${kindLabel(selectedNode.kind)}</span>

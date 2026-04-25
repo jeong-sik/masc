@@ -261,6 +261,7 @@ export function AgentSessionReport({ agentName }: { agentName: string }) {
   const hasQuery = query.trim() !== ''
 
   return html`
+    <div role="region" aria-label="세션 활동 리포트">
     <${Card} title="세션 활동 리포트" class="mb-5">
       <${SessionMeta} agentName=${agentName} />
 
@@ -317,5 +318,6 @@ export function AgentSessionReport({ agentName }: { agentName: string }) {
         <div class="text-xs text-text-muted py-2">검색 결과 없음 (태스크)</div>
       ` : null}
     <//>
+    </div>
   `
 }

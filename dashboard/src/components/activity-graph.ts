@@ -171,7 +171,7 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
   }
 
   return html`
-    <div class="flex flex-col gap-3">
+    <div class="flex flex-col gap-3" role="region" aria-label="액션 타임라인">
       <div class="flex flex-col gap-3 rounded border border-[var(--card-border)] bg-[var(--card)]/50 p-4">
         <div class="flex flex-col gap-1">
           <div class="text-base font-semibold text-[var(--text-strong)]">원본 실행 이벤트를 최근 액션 단위로 묶어 보여줍니다.</div>
@@ -324,7 +324,7 @@ function NodeLeaderboard({ nodes }: { nodes: ActivityGraphNode[] }) {
 
 function EmptyActivityGraph() {
   return html`
-    <div class="flex flex-col gap-5">
+    <div class="flex flex-col gap-5" role="status">
       <${Card} title="활동 분석" class="section mb-4" testId="activity_graph.graph">
         <div class="mb-4">
           <h2 class="monitor-headline">활동 분석 데이터가 비어 있습니다</h2>
@@ -416,13 +416,13 @@ export function ObservatoryActivityPanels() {
   const actionCount = data ? buildActionTimelineGroups(data.timeline).length : 0
 
   return html`
-    <div class="flex flex-col gap-5">
+    <div class="flex flex-col gap-5" role="region" aria-label="관찰소 활동">
       ${state.loading && !data
         ? html`<${LoadingState}>활동 분석 패널 불러오는 중...<//>`
         : state.error && !data
           ? html`
               <${Card} title="활동 분석" class="section" testId="activity_graph.error">
-                <${EmptyState} message=${'활동 그래프를 불러올 수 없습니다: ' + state.error} compact />
+                <div role="alert"><${EmptyState} message=${'활동 그래프를 불러올 수 없습니다: ' + state.error} compact /></div>
                 <${ActionButton} variant="ghost" onClick=${() => { void loadGraph() }}>다시 시도<//>
               <//>
             `

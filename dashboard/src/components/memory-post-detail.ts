@@ -287,10 +287,11 @@ export function PostDetail({ post }: { post: BoardPost }) {
   }
 
   return html`
-    <div>
+    <div role="region" aria-label="게시글 상세">
       <button type="button"
         class="mb-4 px-3 py-1.5 rounded text-xs font-medium text-[var(--text-muted)] bg-transparent border border-[var(--border-slate-16)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] transition-all cursor-pointer"
         onClick=${() => navigate('workspace', { section: 'board' })}
+        aria-label="게시판으로 돌아가기"
       >← 게시판으로 돌아가기</button>
 
       <${Card}>

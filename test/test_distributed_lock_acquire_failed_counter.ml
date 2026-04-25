@@ -16,7 +16,7 @@ let counter_for ~key ~attempts =
 let test_metric_name_stable () =
   Alcotest.(check string)
     "distributed lock acquire failed canonical name"
-    "masc_distributed_lock_acquire_failed_total"
+    Masc_mcp.Prometheus.metric_distributed_lock_acquire_failed
     Masc_mcp.Coord.distributed_lock_acquire_failed_metric
 
 let test_record_increments () =

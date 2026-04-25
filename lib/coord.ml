@@ -242,7 +242,7 @@ let () =
    alert on chronic lock contention (production observed
    tasks:.backlog starvation under 16-keeper fleet load). *)
 let distributed_lock_acquire_failed_metric =
-  "masc_distributed_lock_acquire_failed_total"
+  Prometheus.metric_distributed_lock_acquire_failed
 
 let record_distributed_lock_acquire_failed ~key ~attempts =
   Prometheus.inc_counter distributed_lock_acquire_failed_metric

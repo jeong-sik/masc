@@ -600,6 +600,27 @@ let metric_auth_credential_token_duplicate =
 let metric_auth_credential_ambiguous_lookup =
   "masc_auth_credential_ambiguous_lookup_total"
 
+(** Silent failure observability (PR-I, 2026-04-25)
+
+   Background: 14 keepers fleet runs for hours producing 0 git_clone calls
+   and operators cannot tell from logs *why* — many fallback branches in the
+   keeper request path use [| Error _ -> default] / [| None -> fallback]
+   without any structured log emit. The "원인불명의 침묵" symptom.
+
+   These counters surface the live rate of each silent fallback so the
+   dashboard can distinguish "code path is dead" from "code path fires
+   constantly and silently corrupts identity / risk classification". Each
+   silent point gets a distinct counter with [agent] / [reason] labels so
+   we can attribute the silence back to a specific keeper.
+
+   Pair these counters with [Log.<area>.warn] emits at the same call sites
+   so grep-based debugging works in addition to dashboard alerts. *)
+let metric_silent_auth_token_resolve_error =
+  "masc_silent_auth_token_resolve_error_total"
+
+let metric_silent_dashboard_actor_fallback =
+  "masc_silent_dashboard_actor_fallback_total"
+
 
 (** {1 Built-in Metrics} *)
 
@@ -956,6 +977,19 @@ let init () =
      same token hash. Labels: first_match (the agent_name that List.find \
      routed to). Distinguishes \"audit warning, no traffic\" from \
      \"duplicate token actively serving the wrong agent\"."
+    Counter;
+  add metric_silent_auth_token_resolve_error
+    "Total times mcp_server_eio_execute fell back to the requester-supplied \
+     agent_name because Auth.resolve_agent_from_token returned an Error. \
+     Labels: error_kind (token_mismatch | token_expired | other), \
+     agent (the alias the request kept). Non-zero rate means token-based \
+     identity rewrite is silently disabled in production."
+    Counter;
+  add metric_silent_dashboard_actor_fallback
+    "Total times Server_auth.dashboard_actor_for_request resolved no agent \
+     from the bearer token (Ok None / Error _) and fell back to \
+     request_actor_hint. Labels: outcome (none | error). Counter exposes \
+     the path that masks identity drift in the HTTP transport."
     Counter;
   (* Transport metrics — registered here so transport_metrics.ml can use
      module constants instead of string literals. *)

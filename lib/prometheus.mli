@@ -274,6 +274,17 @@ val metric_auth_credential_ambiguous_lookup : string
     [List.find] race.  Distinguishes a stale audit warning
     from active wrong-agent serving. *)
 
+val metric_silent_auth_token_resolve_error : string
+(** PR-I (2026-04-25): mcp_server_eio_execute silently fell back to
+    the caller's agent_name when [Auth.resolve_agent_from_token]
+    returned [Error _].  Labels: [error_kind], [agent]. *)
+
+val metric_silent_dashboard_actor_fallback : string
+(** PR-I (2026-04-25): Server_auth.dashboard_actor_for_request
+    silently fell back to [request_actor_hint] because the bearer
+    token resolved to no agent ([Ok None]) or an error.
+    Labels: [outcome] = "none" | "error". *)
+
 
 (** {1 Transport metrics} *)
 

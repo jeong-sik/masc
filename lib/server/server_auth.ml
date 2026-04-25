@@ -263,7 +263,27 @@ let dashboard_actor_for_request ~base_path request =
   | Some token -> (
       match resolve_agent_name_for_auth_raw ~base_path request ~token:(Some token) with
       | Ok (Some agent_name) -> Some agent_name
-      | Ok None | Error _ -> request_actor_hint request)
+      | Ok None ->
+          (* PR-I: surface the silent fallback. Token did not resolve to any
+             agent, so we drop to the request actor hint (header / query
+             param) — masking identity drift in the HTTP transport. *)
+          Log.Auth.warn
+            "[silent:dashboard_actor_fallback] outcome=none — bearer token \
+             resolved to no agent, falling back to request actor hint";
+          Prometheus.inc_counter
+            Prometheus.metric_silent_dashboard_actor_fallback
+            ~labels:[ ("outcome", "none") ]
+            ();
+          request_actor_hint request
+      | Error _ ->
+          Log.Auth.warn
+            "[silent:dashboard_actor_fallback] outcome=error — bearer token \
+             resolution errored, falling back to request actor hint";
+          Prometheus.inc_counter
+            Prometheus.metric_silent_dashboard_actor_fallback
+            ~labels:[ ("outcome", "error") ]
+            ();
+          request_actor_hint request)
   | None -> request_actor_hint request
 
 let is_verified_internal_keeper_request ~base_path request =

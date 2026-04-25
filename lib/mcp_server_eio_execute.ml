@@ -262,7 +262,20 @@ let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
     | Some t when (not has_explicit_agent_name) && is_transient_agent_name agent_name ->
         (match Auth.resolve_agent_from_token config.base_path ~token:t with
          | Ok resolved -> resolved
-         | Error _ -> agent_name)
+         | Error _ ->
+             (* PR-I: surface the silent fallback. The pre-#9786 branch silently
+                kept the caller-supplied alias when the bearer token did not
+                resolve to any credential, masking identity drift in production.
+                Emit a warn + counter so operators can grep [silent:auth_token]. *)
+             Log.Auth.warn
+               "[silent:auth_token_resolve_error] agent=%s — token resolve \
+                failed, keeping caller alias"
+               agent_name;
+             Prometheus.inc_counter
+               Prometheus.metric_silent_auth_token_resolve_error
+               ~labels:[ ("agent", agent_name) ]
+               ();
+             agent_name)
     | _ -> agent_name
   in
 

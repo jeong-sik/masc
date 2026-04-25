@@ -137,7 +137,7 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
   }
 
   if (resource.state.value.error) {
-    return html`<div class="text-xs text-[var(--bad)] p-4">${resource.state.value.error}</div>`
+    return html`<div class="text-xs text-[var(--bad)] p-4" role="alert">${resource.state.value.error}</div>`
   }
 
   const entries = allEntries
@@ -154,7 +154,7 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
   const uniqueTools = new Set(entries.map(e => e.tool)).size
 
   return html`
-    <div class="space-y-3">
+    <div class="space-y-3" role="region" aria-label="도구 호출 검사">
       <div class="flex items-center justify-between gap-3">
         <div class="flex gap-4 text-xs text-[var(--text-muted)]">
           <span>${totalCalls} calls</span>
@@ -164,6 +164,7 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
         <input
           type="text"
           placeholder="Filter tool..."
+          aria-label="도구 필터"
           class="text-xs font-mono bg-[var(--bg-deep)] border border-[var(--card-border)] rounded px-2 py-1 w-40 text-[var(--text-strong)]"
           value=${filterTool.value}
           onInput=${(e: Event) => { filterTool.value = (e.target as HTMLInputElement).value }}

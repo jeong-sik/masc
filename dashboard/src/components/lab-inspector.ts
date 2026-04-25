@@ -111,7 +111,7 @@ export function LabInspector() {
   const current = inspectorSection.value
 
   return html`
-    <div class="flex flex-col gap-4">
+    <div class="flex flex-col gap-4" role="region" aria-label="운영 인스펙터">
       <${Card} title="운영 인스펙터" class="section">
         <div class="flex flex-col gap-3">
           <div class="text-sm leading-airy text-[var(--text-body)]">

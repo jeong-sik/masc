@@ -211,8 +211,7 @@ let dashboard_snapshot session =
         | Some json -> (slice, json) :: acc
         | None -> acc)
       session.dashboard_slices []
-    |> List.sort (fun (a, _) (b, _) -> compare a b)
-    |> List.map (fun (slice, json) -> (slice, json))
+    |> List.sort (fun (a, _) (b, _) -> String.compare a b)
   in
   `Assoc
     [

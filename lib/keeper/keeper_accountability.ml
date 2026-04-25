@@ -97,7 +97,7 @@ let normalize_keeper_name keeper_name =
   | None -> String.trim keeper_name
 
 let accountability_dir base_path =
-  Filename.concat base_path ".masc/accountability"
+  Filename.concat (Common.masc_dir_from_base_path ~base_path) "accountability"
 
 let get_store (config : Coord_query.config) : Dated_jsonl.t =
   let base_path = config.base_path in

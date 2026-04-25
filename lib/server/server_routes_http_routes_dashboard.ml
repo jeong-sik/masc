@@ -6,7 +6,6 @@ open Server_routes_http_keeper_stream
 
 module Http = Http_server_eio
 module Mcp_eio = Mcp_server_eio
-module Common = Server_routes_http_common
 module Pages = Server_routes_http_pages
 module Runtime = Server_routes_http_runtime
 module Keeper_stream = Server_routes_http_keeper_stream
@@ -97,10 +96,14 @@ let sync_keeper_cascade_meta ~(config : Coord.config) ~(name : string)
 let dashboard_dev_actor_name = "dashboard"
 
 let dashboard_dev_token_path base_path =
-  Filename.concat base_path ".masc/auth/dashboard.token"
+  Filename.concat
+    (Filename.concat (Common.masc_dir_from_base_path ~base_path) "auth")
+    "dashboard.token"
 
 let legacy_dashboard_dev_token_path base_path =
-  Filename.concat base_path ".masc/auth/dashboard-dev.token"
+  Filename.concat
+    (Filename.concat (Common.masc_dir_from_base_path ~base_path) "auth")
+    "dashboard-dev.token"
 
 let remove_dashboard_dev_token_file_if_exists path =
   if Fs_compat.file_exists path then

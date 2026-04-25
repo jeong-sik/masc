@@ -592,16 +592,33 @@ let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
   Log.Misc.debug "tool=%s agent_name=%s join_required=%b room_initialized=%b is_joined=%b"
     name agent_name join_required room_initialized is_joined;
 
-  if join_required && not room_initialized then
+  if join_required && not room_initialized then begin
+    (* #9770: surface guard fires as a fleet-wide metric so
+       operators can see which (tool, agent) pairs repeatedly skip
+       masc_join without log-scraping. *)
+    Prometheus.inc_counter
+      Prometheus.metric_tool_join_required_guard
+      ~labels:[ ("tool", name);
+                ("agent_name", agent_name);
+                ("reason", "room_uninitialized") ]
+      ();
     with_system_internal_audit ~agent_name
       (false, Printf.sprintf
          "⚠️ MASC room not initialized.\n\n💡 Fastest: masc_start(path=\"<project>\") — one-step init+join, then call %s.\n💡 Alternative: masc_init → masc_join → masc_status → %s\n📚 See: @~/me/instructions/masc-workflow.md\n[DEBUG] agent_name=%s room_initialized=%b"
          name name agent_name room_initialized)
-  else if join_required && not is_joined then
+  end
+  else if join_required && not is_joined then begin
+    Prometheus.inc_counter
+      Prometheus.metric_tool_join_required_guard
+      ~labels:[ ("tool", name);
+                ("agent_name", agent_name);
+                ("reason", "agent_not_joined") ]
+      ();
     with_system_internal_audit ~agent_name
       (false, Printf.sprintf
          "❌ Join required before using %s.\n\n💡 Fastest: masc_start(path=\"<project>\") — one-step join with room scope.\n💡 Alternative: masc_join → masc_status → %s\n📚 See: @~/me/instructions/masc-workflow.md\n[DEBUG] agent_name=%s is_joined=%b"
          name name agent_name is_joined)
+  end
   else (
 
   (* === Fix 1: Tag-based lazy context dispatch ===

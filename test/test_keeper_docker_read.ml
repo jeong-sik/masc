@@ -717,6 +717,80 @@ let test_hard_mode_forces_policy_helpers () =
   Alcotest.(check string) "hard mode drops GH_TOKEN forwarding" ""
     (Env_config_keeper.KeeperSandbox.gh_token ())
 
+let test_gh_token_prefers_explicit_override () =
+  let calls = ref 0 in
+  Env_config_keeper.KeeperSandbox.For_testing.with_gh_token_probe
+    (fun () ->
+      incr calls;
+      Some "probe-token")
+    (fun () ->
+      with_env "MASC_KEEPER_SANDBOX_HARD_MODE" "" @@ fun () ->
+      with_env "GH_TOKEN" "host-token" @@ fun () ->
+      with_env "MASC_KEEPER_SANDBOX_GH_TOKEN" "explicit-token" @@ fun () ->
+      Alcotest.(check string) "explicit override wins" "explicit-token"
+        (Env_config_keeper.KeeperSandbox.gh_token ());
+      Alcotest.(check int) "probe not called" 0 !calls)
+
+let test_gh_token_prefers_host_env_over_keychain_probe () =
+  let calls = ref 0 in
+  Env_config_keeper.KeeperSandbox.For_testing.with_gh_token_probe
+    (fun () ->
+      incr calls;
+      Some "probe-token")
+    (fun () ->
+      with_env "MASC_KEEPER_SANDBOX_HARD_MODE" "" @@ fun () ->
+      with_env "MASC_KEEPER_SANDBOX_GH_TOKEN" "" @@ fun () ->
+      with_env "GH_TOKEN" "host-token" @@ fun () ->
+      Alcotest.(check string) "host GH_TOKEN wins" "host-token"
+        (Env_config_keeper.KeeperSandbox.gh_token ());
+      Alcotest.(check int) "probe not called" 0 !calls)
+
+let test_gh_token_uses_cached_keychain_probe () =
+  let calls = ref 0 in
+  Env_config_keeper.KeeperSandbox.For_testing.with_gh_token_probe
+    (fun () ->
+      incr calls;
+      Some "  probe-token\n")
+    (fun () ->
+      with_env "MASC_KEEPER_SANDBOX_HARD_MODE" "" @@ fun () ->
+      with_env "MASC_KEEPER_SANDBOX_GH_TOKEN" "" @@ fun () ->
+      with_env "GH_TOKEN" "" @@ fun () ->
+      Alcotest.(check string) "keychain fallback token" "probe-token"
+        (Env_config_keeper.KeeperSandbox.gh_token ());
+      Alcotest.(check string) "cached keychain fallback" "probe-token"
+        (Env_config_keeper.KeeperSandbox.gh_token ());
+      Alcotest.(check int) "probe called once" 1 !calls)
+
+let test_gh_token_caches_empty_keychain_probe () =
+  let calls = ref 0 in
+  Env_config_keeper.KeeperSandbox.For_testing.with_gh_token_probe
+    (fun () ->
+      incr calls;
+      None)
+    (fun () ->
+      with_env "MASC_KEEPER_SANDBOX_HARD_MODE" "" @@ fun () ->
+      with_env "MASC_KEEPER_SANDBOX_GH_TOKEN" "" @@ fun () ->
+      with_env "GH_TOKEN" "" @@ fun () ->
+      Alcotest.(check string) "empty keychain fallback" ""
+        (Env_config_keeper.KeeperSandbox.gh_token ());
+      Alcotest.(check string) "cached empty keychain fallback" ""
+        (Env_config_keeper.KeeperSandbox.gh_token ());
+      Alcotest.(check int) "probe called once" 1 !calls)
+
+let test_gh_token_hard_mode_skips_keychain_probe () =
+  let calls = ref 0 in
+  Env_config_keeper.KeeperSandbox.For_testing.with_gh_token_probe
+    (fun () ->
+      incr calls;
+      Some "probe-token")
+    (fun () ->
+      with_env "MASC_KEEPER_SANDBOX_HARD_MODE" "true" @@ fun () ->
+      with_env "MASC_KEEPER_SANDBOX_GH_TOKEN" "explicit-token" @@ fun () ->
+      with_env "GH_TOKEN" "host-token" @@ fun () ->
+      Alcotest.(check string) "hard mode drops token" ""
+        (Env_config_keeper.KeeperSandbox.gh_token ());
+      Alcotest.(check int) "probe not called" 0 !calls)
+
 let test_hard_mode_rejects_relaxed_fs_without_docker () =
   with_env "MASC_KEEPER_SANDBOX_HARD_MODE" "true" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_RELAX_FS" "true" @@ fun () ->
@@ -823,6 +897,16 @@ let run_tests () =
             test_relaxed_fs_helpers;
           Alcotest.test_case "hard mode forces policy helpers" `Quick
             test_hard_mode_forces_policy_helpers;
+          Alcotest.test_case "GH_TOKEN explicit override wins" `Quick
+            test_gh_token_prefers_explicit_override;
+          Alcotest.test_case "GH_TOKEN host env wins before keychain" `Quick
+            test_gh_token_prefers_host_env_over_keychain_probe;
+          Alcotest.test_case "GH_TOKEN keychain probe is cached" `Quick
+            test_gh_token_uses_cached_keychain_probe;
+          Alcotest.test_case "GH_TOKEN empty keychain probe is cached"
+            `Quick test_gh_token_caches_empty_keychain_probe;
+          Alcotest.test_case "GH_TOKEN hard mode skips keychain probe"
+            `Quick test_gh_token_hard_mode_skips_keychain_probe;
           Alcotest.test_case "hard mode rejects relaxed fs without docker"
             `Quick test_hard_mode_rejects_relaxed_fs_without_docker;
           Alcotest.test_case "turn runtime reuses single container" `Quick

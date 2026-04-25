@@ -677,6 +677,129 @@ module KeeperSandbox = struct
     else
       get_string ~default:"" "MASC_KEEPER_SANDBOX_SSH_DIR"
 
+  let gh_token_probe_timeout_sec () =
+    get_float ~default:2.0 "MASC_KEEPER_SANDBOX_GH_TOKEN_PROBE_TIMEOUT_SEC"
+    |> max 0.1 |> min 10.0
+
+  let close_fd_noerr fd =
+    try Unix.close fd with
+    | Unix.Unix_error _ -> ()
+
+  let waitpid_nohang pid =
+    try
+      match Unix.waitpid [ Unix.WNOHANG ] pid with
+      | 0, _ -> None
+      | _, status -> Some status
+    with
+    | Unix.Unix_error (Unix.ECHILD, _, _) -> Some (Unix.WEXITED 127)
+
+  let terminate_process pid =
+    (try Unix.kill pid Sys.sigterm with
+     | Unix.Unix_error _ -> ());
+    let deadline = Unix.gettimeofday () +. 0.2 in
+    let rec wait_for_exit () =
+      match waitpid_nohang pid with
+      | Some _ -> ()
+      | None when Unix.gettimeofday () < deadline ->
+          ignore (Unix.select [] [] [] 0.02);
+          wait_for_exit ()
+      | None ->
+          (try Unix.kill pid Sys.sigkill with
+           | Unix.Unix_error _ -> ());
+          (try
+             let _status = Unix.waitpid [] pid in
+             ()
+           with
+           | Unix.Unix_error _ -> ())
+    in
+    wait_for_exit ()
+
+  let read_available fd buf =
+    let chunk = Bytes.create 512 in
+    let rec loop () =
+      match Unix.read fd chunk 0 (Bytes.length chunk) with
+      | 0 -> ()
+      | n ->
+          Buffer.add_subbytes buf chunk 0 n;
+          loop ()
+      | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK), _, _) ->
+          ()
+      | exception Unix.Unix_error (Unix.EINTR, _, _) -> loop ()
+    in
+    loop ()
+
+  let run_gh_auth_token_probe () =
+    let stdout_rd, stdout_wr = Unix.pipe () in
+    let stdin_fd = Unix.openfile "/dev/null" [ Unix.O_RDONLY ] 0 in
+    let stderr_fd = Unix.openfile "/dev/null" [ Unix.O_WRONLY ] 0 in
+    let pid_ref = ref None in
+    Fun.protect
+      ~finally:(fun () ->
+        close_fd_noerr stdout_rd;
+        close_fd_noerr stdout_wr;
+        close_fd_noerr stdin_fd;
+        close_fd_noerr stderr_fd)
+      (fun () ->
+        let pid =
+          Unix.create_process "gh"
+            [| "gh"; "auth"; "token"; "--hostname"; "github.com" |]
+            stdin_fd stdout_wr stderr_fd
+        in
+        pid_ref := Some pid;
+        close_fd_noerr stdout_wr;
+        Unix.set_nonblock stdout_rd;
+        let deadline = Unix.gettimeofday () +. gh_token_probe_timeout_sec () in
+        let buf = Buffer.create 128 in
+        let rec loop () =
+          read_available stdout_rd buf;
+          match waitpid_nohang pid with
+          | Some (Unix.WEXITED 0) ->
+              read_available stdout_rd buf;
+              let token = String.trim (Buffer.contents buf) in
+              if token = "" then None else Some token
+          | Some _ -> None
+          | None ->
+              let remaining = deadline -. Unix.gettimeofday () in
+              if remaining <= 0.0 then (
+                terminate_process pid;
+                None)
+              else (
+                ignore (Unix.select [ stdout_rd ] [] [] (min 0.05 remaining));
+                loop ())
+        in
+        loop ())
+    |> fun result ->
+    match result, !pid_ref with
+    | None, Some pid ->
+        (match waitpid_nohang pid with
+        | None -> terminate_process pid
+        | Some _ -> ());
+        None
+    | _ -> result
+
+  type gh_token_probe_cache =
+    | Unchecked
+    | Checked of string
+
+  let gh_token_probe = Atomic.make run_gh_auth_token_probe
+  let gh_token_probe_cache = Atomic.make Unchecked
+
+  let gh_token_from_probe_cache () =
+    match Atomic.get gh_token_probe_cache with
+    | Checked token -> token
+    | Unchecked ->
+        let token =
+          try
+            match (Atomic.get gh_token_probe) () with
+            | Some token -> String.trim token
+            | None -> ""
+          with _ -> ""
+        in
+        ignore (Atomic.compare_and_set gh_token_probe_cache Unchecked (Checked token));
+        (match Atomic.get gh_token_probe_cache with
+        | Checked cached -> cached
+        | Unchecked -> token)
+
   (** GitHub token forwarded as GH_TOKEN env into the docker git-creds
       execution path. Resolution order:
         1. MASC_KEEPER_SANDBOX_GH_TOKEN env override
@@ -702,18 +825,22 @@ module KeeperSandbox = struct
           | None -> ""
         in
         if from_env <> "" then from_env
-        else
-          try
-            let ic =
-              Unix.open_process_in
-                "gh auth token --hostname github.com 2>/dev/null"
-            in
-            let token =
-              try input_line ic with End_of_file -> ""
-            in
-            let _ = Unix.close_process_in ic in
-            String.trim token
-          with _ -> ""
+        else gh_token_from_probe_cache ()
+
+  module For_testing = struct
+    let reset_gh_token_probe_cache () =
+      Atomic.set gh_token_probe_cache Unchecked
+
+    let with_gh_token_probe probe f =
+      let prior = Atomic.get gh_token_probe in
+      Atomic.set gh_token_probe probe;
+      reset_gh_token_probe_cache ();
+      Fun.protect
+        ~finally:(fun () ->
+          Atomic.set gh_token_probe prior;
+          reset_gh_token_probe_cache ())
+        f
+  end
 
   (** Legacy RFC-0006 Phase B-1 flag.
 

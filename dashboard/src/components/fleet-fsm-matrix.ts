@@ -33,6 +33,7 @@ import {
   TRANSITION_FIELDS,
   type LaneKey,
 } from './fsm-hub-types'
+import { TimeAgo } from './common/time-ago'
 
 const POLL_INTERVAL_MS = 10_000
 
@@ -355,7 +356,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
       <header class="flex flex-wrap items-baseline gap-3 border-b border-[var(--white-10)] p-3">
         <h2 class="text-sm font-semibold text-[var(--text-muted)]">Fleet composite (KSM × KTC × KDP × KCL × KMC)</h2>
         <span class="text-xs text-[var(--text-muted)]0">
-          ${data.count} keepers · updated ${new Date(data.generated_at * 1000).toLocaleTimeString()}
+          ${data.count} keepers · <${TimeAgo} timestamp=${data.generated_at} mode="both" />
         </span>
         <input
           type="search"

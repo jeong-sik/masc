@@ -24,6 +24,7 @@ import { ActionButton } from './common/button'
 import { CopyableCode } from './common/copyable-code'
 import { LoadingState } from './common/feedback-state'
 import { showToast } from './common/toast'
+import { TimeAgo } from './common/time-ago'
 
 type FieldType = 'string' | 'integer' | 'number' | 'boolean' | 'unknown'
 
@@ -464,7 +465,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
           ${entry.fields.length} fields · ${entry.fields.filter(f => f.required).length} required
           ${entry.lastSavedAt
             ? html`
-                <span class="ml-2 text-[var(--ok)]">· 저장됨 ${new Date(entry.lastSavedAt).toLocaleTimeString()}</span>
+                <span class="ml-2 text-[var(--ok)]">· 저장됨 <${TimeAgo} timestamp=${entry.lastSavedAt} /></span>
                 <button type="button"
                   class="ml-2 cursor-pointer rounded border border-[var(--ok-20)] bg-[var(--ok-10)] px-1.5 py-0.5 text-3xs text-[var(--ok)] hover:bg-[var(--ok-10)] disabled:cursor-not-allowed disabled:opacity-50"
                   disabled=${entry.restarting}

@@ -3,7 +3,8 @@
   "_comment_default": "System-only fallback profile for unknown/missing cascade names. Mirrors big_three without Claude CLI so automatic recovery does not pull Claude by default.",
   "default_models": [
     { "model": "codex_cli:auto", "weight": 1 },
-    { "model": "gemini_cli:auto", "weight": 1 }
+    { "model": "gemini_cli:auto", "weight": 1 },
+    { "model": "codex_cli:gpt-5.3-codex-spark", "weight": 1 }
   ],
   "default_temperature": 0.2,
   "default_max_tokens": 16384,
@@ -11,7 +12,8 @@
   "_comment_big_three": "Canonical keeper bootstrap profile exposed by the checked-in seed. Automatic keepers stay off Claude CLI unless an operator opts in via live config.",
   "big_three_models": [
     { "model": "codex_cli:auto", "weight": 1 },
-    { "model": "gemini_cli:auto", "weight": 1 }
+    { "model": "gemini_cli:auto", "weight": 1 },
+    { "model": "codex_cli:gpt-5.3-codex-spark", "weight": 1 }
   ],
   "big_three_temperature": 0.2,
   "big_three_max_tokens": 16384,

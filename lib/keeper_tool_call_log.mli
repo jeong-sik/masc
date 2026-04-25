@@ -94,6 +94,9 @@ val init : ?cluster_name:string -> base_path:string -> unit -> unit
 (** [init ?cluster_name ~base_path ()] creates the cluster-aware Dated_jsonl
     store. Call once at startup. *)
 
+val store_dir : unit -> string option
+(** [store_dir ()] returns the initialized durable store directory, if any. *)
+
 val log_call :
   keeper_name:string ->
   tool_name:string ->

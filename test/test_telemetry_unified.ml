@@ -66,6 +66,17 @@ let json_string_field name = function
       | _ -> "")
   | _ -> ""
 
+let source_summary source_name = function
+  | `Assoc fields -> (
+      match List.assoc_opt "sources" fields with
+      | Some (`List sources) ->
+        List.find
+          (fun source_json ->
+            String.equal source_name (json_string_field "source" source_json))
+          sources
+      | _ -> Alcotest.fail "expected sources")
+  | _ -> Alcotest.fail "expected summary object"
+
 (* ── Source roundtrip ────────────────────────────── *)
 
 let test_source_roundtrip () =
@@ -539,6 +550,23 @@ let test_summary_includes_freshness_metadata () =
     Alcotest.(check (float 0.1)) "freshness SLO" 900.0 freshness_slo_s
   | None -> Alcotest.fail "expected agent_event source summary"
 
+let test_summary_tool_metric_surface_points_to_raw_metrics () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "telem_summary_tool_metric_surface" in
+  let metrics_dir = Filename.concat dir "data/tool-metrics" in
+  Fs_compat.mkdir_p metrics_dir;
+  write_jsonl metrics_dir
+    [ `Assoc [ ("timestamp", `Float (Unix.gettimeofday ()));
+               ("tool_name", `String "keeper_fs_read");
+               ("duration_ms", `Float 12.0);
+               ("success", `Bool true) ] ];
+  let json = Telemetry_unified.summary_json ~base_path:dir ~masc_root:(masc_root dir) () in
+  let summary = source_summary "tool_metric" json in
+  Alcotest.(check string) "tool_metric dashboard surface"
+    "/api/v1/tool-metrics"
+    (json_string_field "dashboard_surface" summary)
+
 let test_summary_surfaces_coverage_gaps () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -674,6 +702,8 @@ let () =
           Alcotest.test_case "with data" `Quick test_summary_with_data;
           Alcotest.test_case "includes freshness metadata" `Quick
             test_summary_includes_freshness_metadata;
+          Alcotest.test_case "tool_metric surface points to raw metrics" `Quick
+            test_summary_tool_metric_surface_points_to_raw_metrics;
           Alcotest.test_case "surfaces coverage gaps" `Quick
             test_summary_surfaces_coverage_gaps;
           Alcotest.test_case "counts all rows beyond recent cap" `Quick

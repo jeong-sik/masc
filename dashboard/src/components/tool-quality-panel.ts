@@ -4,6 +4,7 @@ import { useEffect } from 'preact/hooks'
 import { type ToolQualityResponse } from '../api/dashboard'
 import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
 import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
+import { formatElapsedCompact } from '../lib/format-time'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import { TextInput } from './common/input'
 import {
@@ -98,6 +99,28 @@ const successColor = computed(() => {
   if (rate >= 90) return 'text-[var(--warn)]'
   return 'text-[var(--bad-light)]'
 })
+
+function sourceHealthClass(health?: string | null): string {
+  switch ((health ?? '').toLowerCase()) {
+    case 'ok':
+      return 'text-[var(--ok)]'
+    case 'stale':
+    case 'coverage_gap':
+    case 'empty':
+      return 'text-[var(--warn)]'
+    case 'missing':
+      return 'text-[var(--bad-light)]'
+    default:
+      return 'text-[var(--text-dim)]'
+  }
+}
+
+function freshnessText(d: ToolQualityData): string {
+  if (typeof d.latest_age_s !== 'number' || !Number.isFinite(d.latest_age_s)) {
+    return 'latest n/a'
+  }
+  return `latest ${formatElapsedCompact(d.latest_age_s)}`
+}
 
 // Per-tool search (case-insensitive substring on raw tool name).
 // Kept as a pure function so it can be tested in isolation and re-used if the
@@ -310,6 +333,15 @@ export function ToolQualityPanel() {
             ${d.sampling_mode === 'recent_n'
               ? `최근 ${d.sample_limit.toLocaleString()}건 기준 집계`
               : `최근 ${(d.window_hours ?? TOOL_QUALITY_WINDOW_HOURS).toLocaleString()}시간 기준 집계`}
+          </div>
+          <div class="mt-0.5 text-3xs text-[var(--text-dim)]">
+            <span class="font-mono">${d.source ?? 'tool_call_io'}</span>
+            <span class="mx-1">·</span>
+            <span class="font-mono ${sourceHealthClass(d.health)}">${d.health ?? 'unknown'}</span>
+            <span class="mx-1">·</span>
+            <span>${freshnessText(d)}</span>
+            <span class="mx-1">·</span>
+            <span>${(d.entry_count ?? d.total).toLocaleString()} rows</span>
           </div>
         </div>
         <button

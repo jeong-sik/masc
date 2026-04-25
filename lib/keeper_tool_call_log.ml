@@ -208,6 +208,35 @@ let reset_for_testing () =
   Hashtbl.reset pending_truncation;
   Hashtbl.reset pending_turn_context
 
+let store_dir () =
+  match !store_ref with
+  | Some store -> Some (Dated_jsonl.base_dir store)
+  | None -> None
+
+let record_append_coverage_gap ~store ~keeper_name ~tool_name ?trace_id exn =
+  let durable_store = Dated_jsonl.base_dir store in
+  let masc_root = Filename.dirname durable_store in
+  try
+    Telemetry_coverage_gap.record
+      ~masc_root
+      ~source:"tool_call_io"
+      ~producer:"keeper_hooks_oas|mcp_server_eio_call_tool"
+      ~durable_store
+      ~dashboard_surface:"/api/v1/keepers/:name/tool-calls"
+      ~stale_reason:"tool_call_io_append_failed"
+      ~keeper_name
+      ?trace_id
+      ~error:
+        (Printf.sprintf "%s/%s: %s"
+           keeper_name tool_name (Printexc.to_string exn))
+      ()
+  with
+  | Eio.Cancel.Cancelled _ as cancel -> raise cancel
+  | gap_exn ->
+    Log.Misc.warn
+      "keeper_tool_call_log: coverage gap append failed for %s/%s: %s"
+      keeper_name tool_name (Printexc.to_string gap_exn)
+
 (** [blob_aware_output_json safe_output] wraps a tool-output string for
     persistence as the [output] field. When [safe_output] is the OCaml
     [%S]-quoted [masc:blob ...] sentinel produced by
@@ -510,7 +539,11 @@ let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
       (try Dated_jsonl.append store safe_json
        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
          Log.Misc.warn "keeper_tool_call_log: append failed for %s/%s: %s"
-           keeper_name tool_name (Printexc.to_string exn))
+           keeper_name tool_name (Printexc.to_string exn);
+         record_append_coverage_gap
+           ~store ~keeper_name ~tool_name
+           ?trace_id
+           exn)
 
 let read_recent ?keeper_name ?(n = 100) () : Yojson.Safe.t list =
   if n <= 0 then []

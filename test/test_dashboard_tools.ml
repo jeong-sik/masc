@@ -31,6 +31,7 @@ let test_dashboard_tools_projection () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config = Coord_utils.default_config dir in
       ignore (Lib.Coord.init config ~agent_name:(Some "dashboard"));
+      Lib.Tool_usage_log.init ~base_path:dir ();
       let json = Lib.Server_dashboard_http.dashboard_tools_http_json config in
       let open Yojson.Safe.Util in
       let inventory = json |> member "tool_inventory" in
@@ -42,6 +43,20 @@ let test_dashboard_tools_projection () =
       (* Verify registered_count is a valid integer field *)
       let reg_count = usage |> member "registered_count" |> to_int in
       check bool "registered_count is non-negative" true (reg_count >= 0);
+      check string "tool usage source" "tool_usage"
+        (usage |> member "source" |> to_string);
+      check string "tool usage producer" "tool_usage_log"
+        (usage |> member "producer" |> to_string);
+      check string "tool usage dashboard surface" "/api/v1/dashboard/tools"
+        (usage |> member "dashboard_surface" |> to_string);
+      check bool "tool usage durable store present" true
+        (match usage |> member "durable_store" with
+         | `String value -> String.length value > 0
+         | _ -> false);
+      check int "tool usage durable rows initially empty" 0
+        (usage |> member "entry_count" |> to_int);
+      check string "tool usage health empty" "empty"
+        (usage |> member "health" |> to_string);
       check bool "config root path surfaced" true
         (match config_resolution |> member "config_root" |> member "path" with
          | `String value -> String.length value > 0
@@ -190,11 +205,75 @@ let test_dashboard_tools_projection () =
                   | `String "public_mcp" -> true
                   | _ -> false)))
 
+let test_dashboard_tools_usage_surfaces_coverage_gap () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let config = Coord_utils.default_config dir in
+      ignore (Lib.Coord.init config ~agent_name:(Some "dashboard"));
+      Lib.Tool_usage_log.init ~base_path:dir ();
+      let masc_root = Lib.Coord.masc_root_dir config in
+      Lib.Telemetry_coverage_gap.record
+        ~masc_root
+        ~source:"tool_usage"
+        ~producer:"tool_usage_log"
+        ~durable_store:(Filename.concat masc_root "tool_usage")
+        ~dashboard_surface:"/api/v1/dashboard/tools"
+        ~stale_reason:"tool_usage_append_failed"
+        ~error:"synthetic append failure"
+        ();
+      let json = Lib.Server_dashboard_http.dashboard_tools_http_json config in
+      let open Yojson.Safe.Util in
+      let usage = json |> member "tool_usage" in
+      check string "tool usage coverage gap health" "coverage_gap"
+        (usage |> member "health" |> to_string);
+      check string "tool usage coverage gap stale reason"
+        "tool_usage_append_failed"
+        (usage |> member "stale_reason" |> to_string);
+      check int "tool usage coverage gap count" 1
+        (usage |> member "coverage_gap_count" |> to_int))
+
+let test_tool_usage_store_failure_records_coverage_gap () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let masc_root = Filename.concat dir ".masc" in
+      Fs_compat.mkdir_p masc_root;
+      Fs_compat.save_file (Filename.concat masc_root "tool_usage")
+        "not a directory";
+      Lib.Tool_usage_log.init ~base_path:dir ();
+      Lib.Tool_usage_log.log_call
+        ~tool_name:"keeper_tasks_list"
+        ~success:true
+        ~caller:(Some "oracle");
+      let gaps = Lib.Telemetry_coverage_gap.read_recent ~masc_root ~n:10 in
+      let reasons =
+        List.filter_map
+          (fun gap -> Safe_ops.json_string_opt "stale_reason" gap)
+          gaps
+      in
+      check bool "tool usage store failure records coverage gap" true
+        (List.exists
+           (fun reason ->
+             reason = "tool_usage_init_failed"
+             || reason = "tool_usage_append_failed")
+           reasons))
+
 let () =
   run "dashboard_tools"
     [
       ("projection", [
            test_case "full inventory + usage summary" `Quick
              test_dashboard_tools_projection;
+           test_case "tool usage surfaces coverage gap" `Quick
+             test_dashboard_tools_usage_surfaces_coverage_gap;
+           test_case "tool usage store failure records coverage gap" `Quick
+             test_tool_usage_store_failure_records_coverage_gap;
          ]);
     ]

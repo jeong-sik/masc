@@ -19,6 +19,14 @@ val log_call : tool_name:string -> success:bool -> caller:string option -> unit
 (** [log_call ~tool_name ~success ~caller] appends a single entry to the
     JSONL store. Primarily used by the post-hook; exposed for testing. *)
 
+val source_metadata_json : masc_root:string -> Yojson.Safe.t
+(** [source_metadata_json ~masc_root] reports durable [.masc/tool_usage]
+    lineage, freshness, and coverage-gap state for dashboard projections. *)
+
+val attach_source_metadata : masc_root:string -> Yojson.Safe.t -> Yojson.Safe.t
+(** [attach_source_metadata ~masc_root json] overlays {!source_metadata_json}
+    fields onto an existing tool usage summary object. *)
+
 val is_system_internal : string -> bool
 (** [is_system_internal name] returns true if [name] is on the
     System_internal surface. O(1) hashtable lookup. *)

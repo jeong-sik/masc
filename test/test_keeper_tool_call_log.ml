@@ -40,6 +40,23 @@ let with_tmp_log_dir f =
       ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir))))
     (fun () -> f dir)
 
+let with_tmp_corrupt_tool_call_store f =
+  incr counter;
+  let dir = Filename.concat (Filename.get_temp_dir_name ())
+    (Printf.sprintf "test-keeper-tool-call-log-corrupt-%d-%d-%d"
+       (Unix.getpid ()) !counter
+       (int_of_float (Unix.gettimeofday () *. 1000.0))) in
+  let masc_root = Filename.concat dir ".masc" in
+  Fs_compat.mkdir_p masc_root;
+  Fs_compat.save_file (Filename.concat masc_root "tool_calls") "not a directory";
+  Keeper_tool_call_log.reset_for_testing ();
+  Keeper_tool_call_log.init ~base_path:dir ();
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_tool_call_log.reset_for_testing ();
+      ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir))))
+    (fun () -> f ~dir ~masc_root)
+
 (* ── read_recent edge cases ─────────────────────────── *)
 
 let test_read_recent_n_zero () =
@@ -304,6 +321,26 @@ let test_dashboard_aggregate_groups_runtime_fields () =
       (Safe_ops.json_string_opt "sampling_mode" summary);
     Alcotest.(check int) "sample limit echoed" 10
       (Safe_ops.json_int ~default:0 "sample_limit" summary);
+    Alcotest.(check (option string)) "dashboard source"
+      (Some "tool_call_io")
+      (Safe_ops.json_string_opt "source" summary);
+    Alcotest.(check (option string)) "dashboard producer"
+      (Some "keeper_hooks_oas|mcp_server_eio_call_tool")
+      (Safe_ops.json_string_opt "producer" summary);
+    Alcotest.(check (option string)) "dashboard surface"
+      (Some "/api/v1/dashboard/tool-quality")
+      (Safe_ops.json_string_opt "dashboard_surface" summary);
+    Alcotest.(check bool) "dashboard durable store present" true
+      (Safe_ops.json_string ~default:"" "durable_store" summary <> "");
+    Alcotest.(check int) "source entry count" 2
+      (Safe_ops.json_int ~default:0 "entry_count" summary);
+    Alcotest.(check bool) "source store exists" true
+      (Safe_ops.json_bool ~default:false "exists" summary);
+    Alcotest.(check (option string)) "source health ok"
+      (Some "ok")
+      (Safe_ops.json_string_opt "health" summary);
+    Alcotest.(check bool) "latest age present" true
+      (Safe_ops.json_float_opt "latest_age_s" summary |> Option.is_some);
     let by_model = Yojson.Safe.Util.member "by_model" summary in
     let by_lane = Yojson.Safe.Util.member "by_lane" summary in
     let by_thinking = Yojson.Safe.Util.member "by_thinking_mode" summary in
@@ -404,6 +441,54 @@ let test_dashboard_aggregate_window_hours () =
     Alcotest.(check (option (float 0.0001))) "window echoed"
       (Some 24.0)
       (Safe_ops.json_float_opt "window_hours" summary))
+
+let test_append_failure_records_coverage_gap () =
+  with_tmp_corrupt_tool_call_store (fun ~dir:_ ~masc_root ->
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"k" ~tool_name:"masc_status"
+      ~input:(`Assoc []) ~output_text:"ok"
+      ~success:true ~duration_ms:2.0
+      ~trace_id:"trace-gap" ();
+    let gaps = Telemetry_coverage_gap.read_recent ~masc_root ~n:10 in
+    Alcotest.(check int) "one coverage gap" 1 (List.length gaps);
+    match gaps with
+    | [ gap ] ->
+      Alcotest.(check (option string)) "coverage source"
+        (Some "tool_call_io")
+        (Safe_ops.json_string_opt "source" gap);
+      Alcotest.(check (option string)) "coverage stale reason"
+        (Some "tool_call_io_append_failed")
+        (Safe_ops.json_string_opt "stale_reason" gap);
+      Alcotest.(check (option string)) "coverage keeper"
+        (Some "k")
+        (Safe_ops.json_string_opt "keeper_name" gap);
+      Alcotest.(check (option string)) "coverage trace"
+        (Some "trace-gap")
+      (Safe_ops.json_string_opt "trace_id" gap)
+    | _ -> Alcotest.fail "expected exactly one coverage gap")
+
+let test_dashboard_aggregate_surfaces_coverage_gap () =
+  with_tmp_log_dir (fun dir ->
+    let masc_root = Filename.concat dir ".masc" in
+    Telemetry_coverage_gap.record
+      ~masc_root
+      ~source:"tool_call_io"
+      ~producer:"keeper_hooks_oas"
+      ~durable_store:(Filename.concat masc_root "tool_calls")
+      ~dashboard_surface:"/api/v1/keepers/:name/tool-calls"
+      ~stale_reason:"tool_call_io_append_failed"
+      ~keeper_name:"k"
+      ~trace_id:"trace-gap"
+      ();
+    let summary = Dashboard_http_tool_quality.aggregate ~n:10 () in
+    Alcotest.(check (option string)) "coverage gap health"
+      (Some "coverage_gap")
+      (Safe_ops.json_string_opt "health" summary);
+    Alcotest.(check (option string)) "coverage gap stale reason"
+      (Some "tool_call_io_append_failed")
+      (Safe_ops.json_string_opt "stale_reason" summary);
+    Alcotest.(check int) "coverage gap count" 1
+      (Safe_ops.json_int ~default:0 "coverage_gap_count" summary))
 
 (* ── UTF-8 sanitization ────────────────────────────── *)
 
@@ -543,6 +628,10 @@ let () =
             test_dashboard_hourly_trend_numeric_ts
         ; eio_test "dashboard aggregate window hours"
             test_dashboard_aggregate_window_hours
+        ; eio_test "append failure records coverage gap"
+            test_append_failure_records_coverage_gap
+        ; eio_test "dashboard aggregate surfaces coverage gap"
+            test_dashboard_aggregate_surfaces_coverage_gap
         ] )
     ; ( "utf8_sanitize",
         [ eio_test "invalid UTF-8 bytes scrubbed before persist"

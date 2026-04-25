@@ -92,7 +92,7 @@ let source_dashboard_surface = function
   | Tool_call_io -> "/api/v1/keepers/:name/tool-calls"
   | Tool_usage -> "/api/v1/dashboard/tools"
   | Oas_event -> "/api/v1/dashboard/telemetry"
-  | Tool_metric -> "/api/v1/dashboard/tool-quality"
+  | Tool_metric -> "/api/v1/tool-metrics"
 
 let source_durable_store ~masc_root ~base_path = function
   | Keeper_metric -> Filename.concat masc_root "keepers/*/metrics"

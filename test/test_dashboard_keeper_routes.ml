@@ -1175,6 +1175,13 @@ let test_execution_trust_route_surfaces_trust_summary_fields () =
   require_status "execution trust GET returns 200" 200 result;
   let open Yojson.Safe.Util in
   let json = Yojson.Safe.from_string result.body in
+  check string "route surfaces execution trust source" "execution_receipt"
+    (json |> member "source" |> to_string);
+  check string "route surfaces execution trust health" "ok"
+    (json |> member "health" |> to_string);
+  check string "route surfaces execution trust dashboard surface"
+    "/api/v1/dashboard/execution-trust"
+    (json |> member "dashboard_surface" |> to_string);
   let row =
     match json |> member "keepers" |> to_list with
     | keeper :: _ -> keeper
@@ -1250,6 +1257,39 @@ let test_composite_routes_surface_latest_execution_receipt () =
     (fleet_execution |> member "latest_receipt_present" |> to_bool);
   check string "fleet composite exposes selected model" "custom:mock"
     (fleet_execution |> member "cascade" |> member "selected_model" |> to_string)
+;;
+
+let test_tool_calls_route_surfaces_coverage_gap_health () =
+  with_seeded_server
+  @@ fun ~port ~config ~admin_token:_ ~keeper_name ->
+  let masc_root = Masc_mcp.Coord.masc_root_dir config in
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Masc_mcp.Telemetry_coverage_gap.record
+    ~masc_root
+    ~source:"tool_call_io"
+    ~producer:"keeper_hooks_oas"
+    ~durable_store:(Filename.concat masc_root "tool_calls")
+    ~dashboard_surface:"/api/v1/keepers/:name/tool-calls"
+    ~stale_reason:"tool_call_io_append_failed"
+    ~keeper_name
+    ~trace_id:"trace-tool-call-gap"
+    ();
+  let result =
+    run_curl_get ~port
+      ~path:(Printf.sprintf "/api/v1/keepers/%s/tool-calls" keeper_name)
+      ()
+  in
+  require_status "tool calls GET returns 200" 200 result;
+  let open Yojson.Safe.Util in
+  let json = Yojson.Safe.from_string result.body in
+  check string "route surfaces tool_call_io source" "tool_call_io"
+    (json |> member "source" |> to_string);
+  check string "route surfaces coverage gap health" "coverage_gap"
+    (json |> member "health" |> to_string);
+  check string "route surfaces coverage gap stale reason"
+    "tool_call_io_append_failed"
+    (json |> member "stale_reason" |> to_string)
 ;;
 
 let test_merge_keeper_trace_lines_includes_internal_history () =
@@ -1436,6 +1476,10 @@ let () =
             "composite routes surface latest execution receipt"
             `Slow
             test_composite_routes_surface_latest_execution_receipt
+        ; test_case
+            "tool calls route surfaces coverage gap health"
+            `Slow
+            test_tool_calls_route_surfaces_coverage_gap_health
         ; test_case
             "dashboard dev token rotates legacy dashboard-dev owner"
             `Quick

@@ -1166,17 +1166,34 @@ let handle_keeper_get_subroutes state req request reqd =
           None entries
       in
       let freshness_slo_s = 300.0 in
+      let dashboard_surface = "/api/v1/keepers/:name/tool-calls" in
       let latest_age_s =
         match latest_ts with
         | Some ts -> Some (max 0.0 (Time_compat.now () -. ts))
         | None -> None
       in
+      let coverage_gaps =
+        Telemetry_coverage_gap.read_recent ~masc_root ~n:32
+        |> List.filter (fun gap ->
+             String.equal "tool_call_io"
+               (Safe_ops.json_string ~default:"" "source" gap)
+             &&
+             match Safe_ops.json_string_opt "keeper_name" gap with
+             | Some keeper_name -> String.equal keeper_name name
+             | None -> true)
+      in
+      let latest_gap = List.rev coverage_gaps |> List.find_opt (fun _ -> true) in
       let health, stale_reason =
-        match latest_age_s with
-        | None -> ("empty", "no_entries")
-        | Some age when age > freshness_slo_s ->
-            ("stale", "freshness_slo_exceeded")
-        | Some _ -> ("ok", "")
+        match latest_gap with
+        | Some gap ->
+          ( "coverage_gap",
+            Safe_ops.json_string ~default:"coverage_gap" "stale_reason" gap )
+        | None -> (
+            match latest_age_s with
+            | None -> ("empty", "no_entries")
+            | Some age when age > freshness_slo_s ->
+                ("stale", "freshness_slo_exceeded")
+            | Some _ -> ("ok", ""))
       in
       let json = `Assoc [
         ("keeper", `String name);
@@ -1186,7 +1203,7 @@ let handle_keeper_get_subroutes state req request reqd =
           `String
             "keeper_hooks_oas.post_tool_use|mcp_server_eio_call_tool.runtime_mcp" );
         ("durable_store", `String (Filename.concat masc_root "tool_calls"));
-        ("dashboard_surface", `String "/api/v1/keepers/:name/tool-calls");
+        ("dashboard_surface", `String dashboard_surface);
         ("freshness_slo_s", `Float freshness_slo_s);
         ( "latest_ts_unix",
           match latest_ts with Some ts -> `Float ts | None -> `Null );
@@ -1199,6 +1216,7 @@ let handle_keeper_get_subroutes state req request reqd =
         ("health", `String health);
         ( "stale_reason",
           if stale_reason = "" then `Null else `String stale_reason );
+        ("coverage_gaps", `List coverage_gaps);
         ("entries", `List entries);
       ] in
       Http.Response.json ~compress:true ~request:req

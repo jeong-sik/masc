@@ -322,7 +322,7 @@ function ConvergenceBar({ pct, size = 'md' }: { pct: number; size?: 'sm' | 'md' 
   const h = size === 'sm' ? 'h-1.5' : 'h-2.5'
   return html`
     <div class="flex items-center gap-2">
-      <div class="flex-1 ${h} rounded-sm bg-white/10 overflow-hidden">
+      <div class="flex-1 ${h} rounded-sm bg-white/10 overflow-hidden" role="progressbar" aria-valuenow=${clamped} aria-valuemin=${0} aria-valuemax=${100} aria-label="목표 진행률">
         <div class="${h} rounded-sm transition-all duration-500" style="width:${clamped}%;background:${barColor}"></div>
       </div>
       <span class="text-2xs font-semibold tabular-nums text-text-muted w-9 text-right">${clamped}%</span>

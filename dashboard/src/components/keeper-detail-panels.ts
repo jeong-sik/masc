@@ -135,7 +135,7 @@ function KpiCard({ label, value, hint, tone = 'default', progress }: {
       </div>
       <div class="text-2xl font-bold ${KPI_VALUE_TONE[tone]} tabular-nums leading-none">${value}</div>
       ${progress != null ? html`
-        <div class="w-full h-1 bg-[var(--white-6)] rounded-sm overflow-hidden mt-0.5">
+        <div class="w-full h-1 bg-[var(--white-6)] rounded-sm overflow-hidden mt-0.5" role="progressbar" aria-valuenow=${Math.round(progress)} aria-valuemin=${0} aria-valuemax=${100} aria-label=${label}>
           <div class="h-full rounded-sm transition-all duration-500" style="width:${Math.min(progress, 100)}%;background:${ctxColor(progress)}"></div>
         </div>
       ` : null}

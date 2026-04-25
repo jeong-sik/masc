@@ -418,7 +418,7 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
         ${responseText ? html`
           <details class="mt-1">
             <summary class="text-3xs text-[var(--text-dim)] cursor-pointer hover:text-[var(--text-body)]">응답 텍스트</summary>
-            <pre class="mt-1 p-2 rounded bg-[var(--white-3)] text-2xs font-mono text-[var(--text-body)] whitespace-pre-wrap break-all max-h-75 overflow-auto" tabindex="0">${responseText}</pre>
+            <pre class="mt-1 p-2 rounded bg-[var(--white-3)] text-2xs font-mono text-[var(--text-body)] whitespace-pre-wrap break-all max-h-75 overflow-auto leading-[1.4]" tabindex="0">${responseText}</pre>
           </details>
         ` : null}
       </div>

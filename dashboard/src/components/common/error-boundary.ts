@@ -45,7 +45,7 @@ export class ErrorBoundary extends Component<Props, State> {
           </div>
           <div class="flex-1 min-w-0">
             <h3 class="text-base font-semibold text-[var(--bad)] tracking-tight mb-1">${this.props.label ?? 'Component'} 렌더링 오류</h3>
-            <pre class="text-sm whitespace-pre-wrap opacity-80 text-[var(--text-body)] overflow-x-auto bg-[var(--black-20)] p-2 rounded" tabindex="0">${this.state.error.message}</pre>
+            <pre class="text-sm whitespace-pre-wrap opacity-80 text-[var(--text-body)] overflow-x-auto bg-[var(--black-20)] p-2 rounded leading-[1.4]" tabindex="0">${this.state.error.message}</pre>
             <button type="button"
               class="mt-3 inline-flex items-center justify-center gap-1.5 px-3 py-1.5 cursor-pointer rounded border border-[var(--card-border)] bg-[var(--white-5)] text-[var(--text-strong)] text-sm hover:bg-[var(--white-10)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--bad)]"
               onClick=${this.reset}

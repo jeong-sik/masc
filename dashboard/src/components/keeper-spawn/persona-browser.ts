@@ -116,7 +116,7 @@ export function PersonaBrowser() {
         `}
       ${spawnResult.value ? html`
         <${SurfaceCard} class="mt-3" variant="compact">
-          <pre class="text-2xs font-mono overflow-x-auto max-h-50 overflow-y-auto custom-scrollbar
+          <pre class="text-2xs font-mono leading-[1.4] overflow-x-auto max-h-50 overflow-y-auto custom-scrollbar
             ${spawnResult.value.success ? 'text-[var(--text-body)]' : 'text-[var(--bad)]'}" tabindex="0" aria-label="spawn 결과">${spawnResult.value.message}</pre>
         <//>` : null}
     </div>

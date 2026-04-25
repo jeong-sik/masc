@@ -107,7 +107,7 @@ export function DetailPane() {
         <summary class="cursor-pointer px-3 py-1.5 text-2xs text-text-dim hover:text-text-strong">
           raw entry (JSON)
         </summary>
-        <pre class="max-h-64 overflow-auto px-3 py-2 text-3xs font-mono text-text-strong bg-[var(--white-5)]/30" tabindex="0">${formatJson(selection.entry)}</pre>
+        <pre class="max-h-64 overflow-auto px-3 py-2 text-3xs font-mono text-text-strong bg-[var(--white-5)]/30 leading-[1.4]" tabindex="0">${formatJson(selection.entry)}</pre>
       </details>
     </div>
   `

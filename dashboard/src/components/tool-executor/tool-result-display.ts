@@ -88,7 +88,7 @@ function StoredBlobView({
               const { isJson, parsed } = tryParseJson(fullText.value ?? '')
               return isJson
                 ? html`<${JsonViewer} data=${parsed} />`
-                : html`<pre class="text-xs font-mono ${success ? 'text-[var(--text-body)]' : 'text-[var(--bad-light)]'}">${fullText.value}</pre>`
+                : html`<pre class="text-xs font-mono ${success ? 'text-[var(--text-body)]' : 'text-[var(--bad-light)]'} leading-[1.4]">${fullText.value}</pre>`
             })()}
           </div>
         </div>
@@ -117,7 +117,7 @@ function StoredBlobView({
           <//>
         </div>
         <div class="px-3 py-2 overflow-x-auto max-h-50 overflow-y-auto custom-scrollbar" tabindex="0">
-          <pre class="text-xs font-mono text-[var(--text-muted)] whitespace-pre-wrap">${marker.preview}</pre>
+          <pre class="text-xs font-mono text-[var(--text-muted)] whitespace-pre-wrap leading-[1.4]">${marker.preview}</pre>
         </div>
         ${error.value ? html`
           <div role="alert" class="px-3 py-1.5 border-t border-[var(--card-border)] text-2xs text-[var(--bad-light)]">
@@ -166,7 +166,7 @@ export function ToolResultDisplay({ success, text, toolName, timestamp }: ToolRe
           <div class="px-3 py-2 overflow-x-auto max-h-100 overflow-y-auto custom-scrollbar" tabindex="0">
             ${isJson
               ? html`<${JsonViewer} data=${parsed} />`
-              : html`<pre class="text-xs font-mono ${success ? 'text-[var(--text-body)]' : 'text-[var(--bad-light)]'}">${text}</pre>`
+              : html`<pre class="text-xs font-mono ${success ? 'text-[var(--text-body)]' : 'text-[var(--bad-light)]'} leading-[1.4]">${text}</pre>`
             }
           </div>
         ` : null}

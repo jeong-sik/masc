@@ -493,7 +493,7 @@ function EntryRow({ entry }: { entry: TelemetryEntry }) {
               ${scopeBadges.map(badge => html`<span class="rounded bg-[var(--white-4)] px-2 py-1 text-3xs text-[var(--text-dim)] font-mono">${badge}</span>`)}
             </div>
           ` : null}
-          <pre class="text-3xs font-mono text-[var(--text-muted)] bg-[rgba(0,0,0,0.3)] rounded p-2 overflow-x-auto max-h-75 overflow-y-auto custom-scrollbar whitespace-pre-wrap break-all" tabindex="0" aria-label="항목 JSON">
+          <pre class="text-3xs font-mono text-[var(--text-muted)] bg-[rgba(0,0,0,0.3)] rounded p-2 overflow-x-auto max-h-75 overflow-y-auto custom-scrollbar whitespace-pre-wrap break-all leading-[1.4]" tabindex="0" aria-label="항목 JSON">
 ${JSON.stringify(entry, null, 2)}</pre>
         </div>
       ` : null}
@@ -558,7 +558,7 @@ function GroupRow({ item }: { item: Extract<TelemetryDisplayItem, { kind: 'group
           })}
           <details class="rounded bg-[var(--black-20)] px-2 py-1.5">
             <summary class="cursor-pointer text-3xs text-[var(--text-dim)]">Raw JSON</summary>
-            <pre class="mt-2 text-3xs font-mono text-[var(--text-muted)] overflow-x-auto max-h-70 overflow-y-auto custom-scrollbar whitespace-pre-wrap break-all" tabindex="0">
+            <pre class="mt-2 text-3xs font-mono text-[var(--text-muted)] overflow-x-auto max-h-70 overflow-y-auto custom-scrollbar whitespace-pre-wrap break-all leading-[1.4]" tabindex="0">
 ${JSON.stringify(item.entries, null, 2)}</pre>
           </details>
         ` : null}

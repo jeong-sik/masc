@@ -95,11 +95,11 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
           ` : null}
           <div>
             <${SectionCap} class="mb-1">Input<//>
-            <pre class="text-xs font-mono bg-[var(--bg-deep)] rounded p-2 overflow-x-auto max-h-48 whitespace-pre-wrap text-[var(--text-strong)]" tabindex="0" aria-label="도구 입력">${formatInput(entry.input)}</pre>
+            <pre class="text-xs font-mono bg-[var(--bg-deep)] rounded p-2 overflow-x-auto max-h-48 whitespace-pre-wrap text-[var(--text-strong)] leading-[1.4]" tabindex="0" aria-label="도구 입력">${formatInput(entry.input)}</pre>
           </div>
           <div>
             <${SectionCap} class="mb-1">Output<//>
-            <pre class="text-xs font-mono bg-[var(--bg-deep)] rounded p-2 overflow-x-auto max-h-64 whitespace-pre-wrap text-[var(--text-strong)]" tabindex="0" aria-label="도구 출력">${formatOutput(entry.output)}</pre>
+            <pre class="text-xs font-mono bg-[var(--bg-deep)] rounded p-2 overflow-x-auto max-h-64 whitespace-pre-wrap text-[var(--text-strong)] leading-[1.4]" tabindex="0" aria-label="도구 출력">${formatOutput(entry.output)}</pre>
           </div>
         </div>
       ` : null}

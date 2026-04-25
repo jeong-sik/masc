@@ -8,6 +8,16 @@
 
 open Printf
 
+(* Static frontmatter patterns used during candidate promotion.
+   Hoisted to module load — promotion is rare relative to keeper
+   message paths but the patterns are pure literals, so there is no
+   reason to rebuild them per call. *)
+let promote_confidence_re =
+  Re.Pcre.re {|confidence: [0-9.]+|} |> Re.compile
+
+let promote_verified_by_re =
+  Re.Pcre.re {|verified_by: \[\]|} |> Re.compile
+
 (** Confidence threshold for routing documents to library vs candidates. *)
 let library_confidence_threshold = 0.5
 
@@ -276,16 +286,16 @@ let handle_promote ctx args =
     | src_path :: _ ->
         try
           let content = In_channel.with_open_text src_path In_channel.input_all in
-          (* Update confidence in frontmatter *)
-          let updated = Re.replace_string
-            (Re.Pcre.re {|confidence: [0-9.]+|} |> Re.compile)
-            ~by:(sprintf "confidence: %.2f" new_confidence)
-            content in
-          (* Add verifier *)
-          let with_verifier = Re.replace_string
-            (Re.Pcre.re {|verified_by: \[\]|} |> Re.compile)
-            ~by:(sprintf "verified_by: [%s]" ctx.agent_name)
-            updated in
+          let updated =
+            Re.replace_string promote_confidence_re
+              ~by:(sprintf "confidence: %.2f" new_confidence)
+              content
+          in
+          let with_verifier =
+            Re.replace_string promote_verified_by_re
+              ~by:(sprintf "verified_by: [%s]" ctx.agent_name)
+              updated
+          in
           (* Move to library *)
           let dest_path = Filename.concat (library_root ()) (Filename.basename src_path) in
           Out_channel.with_open_text dest_path (fun oc -> Out_channel.output_string oc with_verifier);

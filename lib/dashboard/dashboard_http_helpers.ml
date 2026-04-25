@@ -156,3 +156,11 @@ let count_where items predicate =
   List.fold_left
     (fun acc item -> if predicate item then acc + 1 else acc)
     0 items
+
+(** Collapse multi-line text into a single trimmed line, dropping blank
+    rows.  Used by judge modules to normalize LLM output before scoring,
+    so this is the SSOT — Dashboard_governance_judge and
+    Dashboard_operator_judge previously each carried an identical fork. *)
+let normalize_text raw =
+  raw |> String.trim |> String.split_on_char '\n' |> List.map String.trim
+  |> List.filter (fun item -> item <> "") |> String.concat " " |> String.trim

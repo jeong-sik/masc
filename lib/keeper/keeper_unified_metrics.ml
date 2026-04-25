@@ -1194,6 +1194,8 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
         ([
           ("input_tokens", `Int result.usage.input_tokens);
           ("output_tokens", `Int result.usage.output_tokens);
+          ("cache_creation_tokens", `Int result.usage.cache_creation_input_tokens);
+          ("cache_read_tokens", `Int result.usage.cache_read_input_tokens);
           ("total_tokens",
            `Int (Keeper_exec_context.total_tokens result.usage));
         ]
@@ -1203,6 +1205,8 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
         ([
           ("input_tokens", `Null);
           ("output_tokens", `Null);
+          ("cache_creation_tokens", `Null);
+          ("cache_read_tokens", `Null);
           ("total_tokens", `Null);
         ]
         @ usage_trust_json_fields usage_trust)

@@ -1111,6 +1111,25 @@ let test_oas_worker_exec_build_applies_retry_policy () =
       Oas.Agent.close agent
   | Error err -> Alcotest.fail (Oas.Error.to_string err)
 
+let test_oas_worker_exec_build_applies_stream_idle_timeout () =
+  let base_config =
+    Oas_worker_exec.default_config
+      ~name:"oas-worker-stream-idle"
+      ~provider_cfg:(make_local_provider_cfg ())
+      ~system_prompt:"system"
+      ~tools:[ make_noop_tool () ]
+  in
+  let config = { base_config with stream_idle_timeout_s = Some 12.5 } in
+  Eio.Switch.run @@ fun sw ->
+  match Oas_worker_exec.build ~sw ~net:(require_test_net ()) ~config with
+  | Ok agent ->
+      let timeout_s = (Oas.Agent.options agent).stream_idle_timeout_s in
+      Alcotest.(check (option (float 0.0001)))
+        "stream idle timeout is propagated through build" (Some 12.5)
+        timeout_s;
+      Oas.Agent.close agent
+  | Error err -> Alcotest.fail (Oas.Error.to_string err)
+
 let test_oas_worker_exec_build_default_priority_unset () =
   let config =
     Oas_worker_exec.default_config
@@ -1281,7 +1300,30 @@ let test_resume_propagates_summarizer () =
            let _ = f [] in
            Alcotest.(check bool) "summarizer identity preserved" true
              !summarizer_called
-       | None -> ());
+      | None -> ());
+      Oas.Agent.close agent
+  | Error err -> Alcotest.fail (Oas.Error.to_string err)
+
+let test_resume_propagates_stream_idle_timeout () =
+  let base_config =
+    Oas_worker_exec.default_config
+      ~name:"resume-stream-idle"
+      ~provider_cfg:(make_local_provider_cfg ())
+      ~system_prompt:"system"
+      ~tools:[ make_noop_tool () ]
+  in
+  let config = { base_config with stream_idle_timeout_s = Some 12.5 } in
+  let checkpoint = make_checkpoint () in
+  Eio.Switch.run @@ fun sw ->
+  match
+    Oas_worker_exec.resume_from_checkpoint
+      ~sw ~net:(require_test_net ()) ~config ~checkpoint
+  with
+  | Ok agent ->
+      let timeout_s = (Oas.Agent.options agent).stream_idle_timeout_s in
+      Alcotest.(check (option (float 0.0001)))
+        "stream idle timeout is propagated through resume" (Some 12.5)
+        timeout_s;
       Oas.Agent.close agent
   | Error err -> Alcotest.fail (Oas.Error.to_string err)
 
@@ -3599,6 +3641,8 @@ let () =
         test_oas_worker_exec_build_defaults_without_retry_policy;
       Alcotest.test_case "oas_worker opt-in applies retry policy" `Quick
         test_oas_worker_exec_build_applies_retry_policy;
+      Alcotest.test_case "oas_worker applies stream idle timeout" `Quick
+        test_oas_worker_exec_build_applies_stream_idle_timeout;
       Alcotest.test_case "oas_worker default priority remains unset" `Quick
         test_oas_worker_exec_build_default_priority_unset;
       Alcotest.test_case "oas_worker applies explicit priority" `Quick
@@ -3613,6 +3657,8 @@ let () =
         test_resume_propagates_slot_id;
       Alcotest.test_case "resume propagates summarizer" `Quick
         test_resume_propagates_summarizer;
+      Alcotest.test_case "resume propagates stream idle timeout" `Quick
+        test_resume_propagates_stream_idle_timeout;
       Alcotest.test_case "resume propagates priority" `Quick
         test_resume_propagates_priority;
       Alcotest.test_case "CLI transports release fd resources per call" `Quick

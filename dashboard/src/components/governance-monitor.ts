@@ -200,7 +200,7 @@ export function GovernanceMonitor() {
           ${allRejections.length === 0
             ? html`<${EmptyState} message="선택한 시간 범위에 tool rejection이 없습니다." compact />`
             : isFiltering && visibleRejections.length === 0
-              ? html`<div class="py-4 text-center text-2xs text-[var(--text-muted)]">필터 결과 없음 (${allRejections.length} items)</div>`
+              ? html`<div class="py-4 text-center text-2xs text-[var(--text-muted)]" role="status">필터 결과 없음 (${allRejections.length} items)</div>`
               : html`
                 <div class="overflow-x-auto">
                   <table class="w-full text-xs" aria-label="거버넌스 거절 이력">

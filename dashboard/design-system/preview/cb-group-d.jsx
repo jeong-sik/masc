@@ -9,13 +9,13 @@ const P2 = window.MASC_P2;
 function ZoneHeader({ title, branch = "main", keepers = [], meta, right }) {
   const headingId = `zh-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
   return (
-    <div className="ph" role="toolbar" aria-labelledby={headingId}>
+    <div className="ph" role="group" aria-labelledby={headingId}>
       <span className="ttl" id={headingId} role="heading" aria-level={3}>{title}</span>
       <span className="br-pill" aria-label={`Branch ${branch}`}>{branch}</span>
       {keepers.slice(0, 3).map(k => (
-        <span key={k} className="kpr-pill" aria-label={`Keeper ${k}`}><span className="dot" aria-hidden="true" />{k}</span>
+        <span key={k} className="kpr-pill" role="img" aria-label={`Keeper ${k}`}><span className="dot" aria-hidden="true" />{k}</span>
       ))}
-      {keepers.length > 3 && <span className="kpr-pill" aria-label={`Plus ${keepers.length - 3} more keepers`}>+{keepers.length - 3}</span>}
+      {keepers.length > 3 && <span className="kpr-pill" role="img" aria-label={`Plus ${keepers.length - 3} more keepers`}>+{keepers.length - 3}</span>}
       {meta && <span className="meta" style={{marginLeft: 8}}>{meta}</span>}
       <span className="grow" aria-hidden="true" />
       {right}
@@ -265,16 +265,16 @@ function TaskBacklog() {
 function TaskStaleAlert() {
   const stale = P2.tasks.filter(t => t.drift || (t.claim_age && t.claim_age !== '—' && (t.claim_age.endsWith('h') || parseInt(t.claim_age) > 10)));
   return (
-    <section className="cbp" aria-label="Task stale claims alert">
+    <section className="cbp" role="region" aria-label={`Task stale claims · ${stale.length} need attention`}>
       <ZoneHeader
         title="TASK · STALE CLAIMS"
         branch="main"
         keepers={["taskmaster","velvet-hammer"]}
         meta={`${stale.length} need attention · check age > 10m or drift=true`}
-        right={<span className="meta" role="status" style={{color:'var(--err-fg)'}}><span aria-hidden="true">● </span>action required</span>}
+        right={<span className="meta" role="status" aria-live="polite" style={{color:'var(--err-fg)'}}><span aria-hidden="true">● </span>action required</span>}
       />
       <div className="body">
-        <div className="tz-alert" role="list" aria-label={`${stale.length} stale claims`}>
+        <div className="tz-alert" role="list" aria-label={`${stale.length} stale claims requiring attention`}>
           {stale.map(t => (
             <div key={t.id}
                  className="row"
@@ -366,11 +366,10 @@ function AccountabilityLedger() {
         right={<span className="meta">approved 3 · flagged 2 · rejected 1 · deferred 1</span>}
       />
       <div className="body flat" style={{overflow:'auto'}}>
-        <div role="log" aria-label="Daily verdict ledger" aria-live="polite">
+        <div role="log" aria-label="Daily verdict ledger" aria-live="polite" aria-relevant="additions">
           {P2.ledger.map((row, i) => (
-            <div key={i}
+            <article key={i}
                  className="ac-row"
-                 role="listitem"
                  aria-label={`${row.ts} · ${row.verdict} · ${row.subject} · evidence ${row.evidence} · signed by ${row.signed_by} · scope ${row.scope}`}>
               <span className="ts" aria-hidden="true">{row.ts}</span>
               <span className={`vd ${row.verdict}`} aria-hidden="true">{row.verdict}</span>
@@ -382,7 +381,7 @@ function AccountabilityLedger() {
                 {row.signed_by}
                 <span className="scope">{row.scope}</span>
               </span>
-            </div>
+            </article>
           ))}
         </div>
       </div>

@@ -252,7 +252,7 @@ export function GraphView({ data }: GraphViewProps) {
         { label: '게시글', color: '#f472b6' },
       ].map(({ label, color }) => html`
         <div class="flex items-center gap-1.5 text-2xs text-[var(--text-muted)]" key=${label}>
-          <span class="w-2.5 h-2.5 rounded-full inline-block" style="background:${color}"></span>
+          <span class="w-2.5 h-2.5 rounded-full inline-block" style="background:${color}" aria-hidden="true"></span>
           ${label}
         </div>
       `)}
@@ -288,7 +288,7 @@ export function GraphView({ data }: GraphViewProps) {
                 <div class="flex items-center gap-2 text-sm py-1 px-2 rounded bg-[rgba(15,23,42,0.4)]" key=${edge.id ?? `${edge.source}-${edge.kind}-${edge.target}`}>
                   <span class="text-[var(--text-slate-light)]">${otherLabel}</span>
                   <span class="text-2xs text-[var(--text-muted)]">${edgeKindLabel(edge.kind)}</span>
-                  ${edge.active ? html`<span class="w-1.5 h-1.5 rounded-full bg-[var(--ok)]"></span>` : null}
+                  ${edge.active ? html`<span class="w-1.5 h-1.5 rounded-full bg-[var(--ok)]" aria-label="active"></span>` : null}
                 </div>
               `)}
             </div>

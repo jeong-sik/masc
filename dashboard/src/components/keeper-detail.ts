@@ -878,7 +878,7 @@ export function KeeperDetailPage() {
         <${PipelineStageBar} stage=${keeper.pipeline_stage} />
         <details class="rounded border border-[var(--white-8)] bg-[var(--white-2)]">
           <summary class="cursor-pointer py-2 px-4 text-3xs font-semibold uppercase tracking-widest text-[var(--text-muted)] list-none select-none flex items-center gap-2">
-            <span class="w-1.5 h-1.5 rounded-full bg-[rgba(71,184,255,0.5)]"></span>
+            <span class="w-1.5 h-1.5 rounded-full bg-[rgba(71,184,255,0.5)]" aria-hidden="true"></span>
             Phase State Machine
           </summary>
           <div class="px-4 pb-4 pt-1">
@@ -888,7 +888,7 @@ export function KeeperDetailPage() {
 
         <details class="rounded border border-[var(--white-8)] bg-[var(--white-2)]">
           <summary class="cursor-pointer py-2 px-4 text-3xs font-semibold uppercase tracking-widest text-[var(--text-muted)] list-none select-none flex items-center gap-2">
-            <span class="w-1.5 h-1.5 rounded-full bg-[rgba(99,102,241,0.5)]"></span>
+            <span class="w-1.5 h-1.5 rounded-full bg-[rgba(99,102,241,0.5)]" aria-hidden="true"></span>
             Memory Tier & Compaction
           </summary>
           <div class="px-4 pb-4 pt-1">
@@ -993,7 +993,7 @@ export function KeeperDetailPage() {
           onToggle=${(e: Event) => setDiagOpen((e.currentTarget as HTMLDetailsElement).open)}
         >
           <summary class="cursor-pointer py-3 px-5 text-2xs font-semibold uppercase tracking-widest text-text-muted list-none select-none flex items-center gap-2">
-            <span class="w-1.5 h-1.5 rounded-full bg-accent/50"></span>
+            <span class="w-1.5 h-1.5 rounded-full bg-accent/50" aria-hidden="true"></span>
             런타임 진단
           </summary>
           <div class="flex flex-col gap-3 px-5 pb-5 pt-2">
@@ -1012,7 +1012,7 @@ export function KeeperDetailPage() {
         </details>
             <details class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-sm shadow-sm">
               <summary class="cursor-pointer text-2xs font-semibold uppercase tracking-widest text-text-muted list-none select-none flex items-center gap-2">
-                <span class="w-1.5 h-1.5 rounded-full bg-accent/50"></span>
+                <span class="w-1.5 h-1.5 rounded-full bg-accent/50" aria-hidden="true"></span>
                 품질 시그널 (고급 지표)
               </summary>
               <div class="mt-3 text-2xs text-[var(--text-muted)] mb-3">폴백 비율, 정렬 품질, 자율 행동 비율 등 metrics_window 기반 런타임 품질 지표</div>
@@ -1079,7 +1079,7 @@ export function KeeperDetailPage() {
 
           <details class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-sm shadow-sm">
             <summary class="cursor-pointer text-2xs font-semibold uppercase tracking-widest text-text-muted list-none select-none flex items-center gap-2">
-              <span class="w-1.5 h-1.5 rounded-full bg-accent/50"></span>
+              <span class="w-1.5 h-1.5 rounded-full bg-accent/50" aria-hidden="true"></span>
               Checkpoint & Snapshots
             </summary>
             <div class="mt-4">
@@ -1100,7 +1100,7 @@ export function KeeperDetailPage() {
             <${TurnBudgetSection} keeper=${keeper} />
             <details class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-sm shadow-sm">
               <summary class="cursor-pointer text-2xs font-semibold uppercase tracking-widest text-text-muted list-none select-none flex items-center gap-2">
-                <span class="w-1.5 h-1.5 rounded-full bg-accent/50"></span>
+                <span class="w-1.5 h-1.5 rounded-full bg-accent/50" aria-hidden="true"></span>
                 도구 정책
               </summary>
               <div class="mt-3">
@@ -1110,7 +1110,7 @@ export function KeeperDetailPage() {
             <${PlaygroundReposPanel} keeperName=${keeper.name} />
             <details class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-sm shadow-sm">
               <summary class="cursor-pointer text-2xs font-semibold uppercase tracking-widest text-text-muted list-none select-none flex items-center gap-2">
-                <span class="w-1.5 h-1.5 rounded-full bg-accent/50"></span>
+                <span class="w-1.5 h-1.5 rounded-full bg-accent/50" aria-hidden="true"></span>
                 Keeper 설정
               </summary>
               <div class="mt-4">
@@ -1127,7 +1127,7 @@ export function KeeperDetailPage() {
           >
             <details class="mt-0">
           <summary class="cursor-pointer py-3 px-4 text-2xs font-semibold uppercase tracking-widest text-[var(--text-muted)] list-none select-none rounded border border-[var(--card-border)] bg-[var(--white-3)] hover:bg-[var(--white-6)] transition-colors flex items-center gap-2">
-            <span class="w-1.5 h-1.5 rounded-full bg-[var(--text-dim)]"></span>
+            <span class="w-1.5 h-1.5 rounded-full bg-[var(--text-dim)]" aria-hidden="true"></span>
             디버그
           </summary>
           <div class="mt-2 flex flex-col gap-4">

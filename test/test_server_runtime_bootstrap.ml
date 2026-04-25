@@ -1627,7 +1627,7 @@ let test_main_eio_self_heals_codex_mcp_token_file () =
               Alcotest.failf "repaired raw token should verify: %s"
                 (Types.masc_error_to_string err)))
 
-let test_codex_mcp_config_sync_updates_only_masc_header () =
+let test_codex_mcp_config_sync_updates_only_masc_section () =
   let raw_token = "fresh-\"codex\"\\\\token" in
   let content =
     {|[mcp_servers.other]
@@ -1637,6 +1637,7 @@ http_headers = { Authorization = "Bearer keep-other" }
 url = "http://127.0.0.1:8935/mcp"
 http_headers_extra = "keep-extra"
 http_headers = { Authorization = "Bearer stale" }
+bearer_token_env_var = "OLD_TOKEN"
 
 [mcp_servers.masc.tools.status]
 http_headers = { Authorization = "Bearer nested-should-stay" }
@@ -1649,7 +1650,8 @@ http_headers = { Authorization = "Bearer keep-other" }
 [mcp_servers.masc]
 url = "http://127.0.0.1:8935/mcp"
 http_headers_extra = "keep-extra"
-http_headers = { Authorization = "Bearer fresh-\"codex\"\\\\token" }
+http_headers = { "Accept" = "application/json, text/event-stream", "X-MASC-Agent" = "codex-mcp-client" }
+bearer_token_env_var = "MASC_MCP_TOKEN"
 
 [mcp_servers.masc.tools.status]
 http_headers = { Authorization = "Bearer nested-should-stay" }
@@ -1659,23 +1661,30 @@ http_headers = { Authorization = "Bearer nested-should-stay" }
     Server_runtime_bootstrap.sync_codex_mcp_auth_header_content ~raw_token
       content
   in
-  Alcotest.(check string) "masc header updated" expected updated;
+  Alcotest.(check string) "masc section updated" expected updated;
   Alcotest.(check bool) "reported updated" true
     (status = Server_runtime_bootstrap.Codex_mcp_config_updated)
 
-let test_codex_mcp_config_sync_missing_header_is_noop () =
+let test_codex_mcp_config_sync_missing_header_is_inserted () =
   let content =
     {|[mcp_servers.masc]
 url = "http://127.0.0.1:8935/mcp"
+|}
+  in
+  let expected =
+    {|[mcp_servers.masc]
+url = "http://127.0.0.1:8935/mcp"
+http_headers = { "Accept" = "application/json, text/event-stream", "X-MASC-Agent" = "codex-mcp-client" }
+bearer_token_env_var = "MASC_MCP_TOKEN"
 |}
   in
   let updated, status =
     Server_runtime_bootstrap.sync_codex_mcp_auth_header_content
       ~raw_token:"fresh-token" content
   in
-  Alcotest.(check string) "content unchanged" content updated;
-  Alcotest.(check bool) "reported missing header" true
-    (status = Server_runtime_bootstrap.Codex_mcp_config_header_missing)
+  Alcotest.(check string) "missing config inserted" expected updated;
+  Alcotest.(check bool) "reported updated" true
+    (status = Server_runtime_bootstrap.Codex_mcp_config_updated)
 
 let test_sync_bootable_keeper_credentials_mints_keeper_alias_token () =
   with_temp_dir "startup-keeper-credential-sync" (fun dir ->
@@ -2222,11 +2231,11 @@ let () =
             "main_eio self-heals codex mcp token file"
             `Slow test_main_eio_self_heals_codex_mcp_token_file;
           Alcotest.test_case
-            "codex mcp config sync updates only masc header"
-            `Quick test_codex_mcp_config_sync_updates_only_masc_header;
+            "codex mcp config sync updates only masc section"
+            `Quick test_codex_mcp_config_sync_updates_only_masc_section;
           Alcotest.test_case
-            "codex mcp config sync missing header is noop"
-            `Quick test_codex_mcp_config_sync_missing_header_is_noop;
+            "codex mcp config sync inserts missing bearer env config"
+            `Quick test_codex_mcp_config_sync_missing_header_is_inserted;
           Alcotest.test_case
             "startup sync mints bootable keeper credentials"
             `Quick test_sync_bootable_keeper_credentials_mints_keeper_alias_token;

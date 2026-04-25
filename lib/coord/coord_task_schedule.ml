@@ -337,14 +337,14 @@ let claim_next_r
 
       (* BUG-004: Detect and auto-release previous claim to prevent orphaned tasks.
          If this agent already holds a Claimed or InProgress task, release it
-         back to Todo before proceeding. This prevents "claimed but orphaned"
-         tasks that permanently block the backlog. *)
+         back to Todo before proceeding. AwaitingVerification is deliberately
+         excluded: releasing it would drop the verification FSM edge and reopen
+         work before a verifier approve/reject decision. *)
       let previous_claim = List.find_opt (fun (t : Types.task) ->
         match t.task_status with
-        | Claimed { assignee; _ } | InProgress { assignee; _ }
-        | AwaitingVerification { assignee; _ } ->
+        | Claimed { assignee; _ } | InProgress { assignee; _ } ->
             String.equal assignee agent_name
-        | Todo | Done _ | Cancelled _ -> false
+        | Todo | AwaitingVerification _ | Done _ | Cancelled _ -> false
       ) backlog.tasks in
       let observe_auto_release () =
         match previous_claim with

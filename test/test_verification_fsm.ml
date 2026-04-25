@@ -116,6 +116,18 @@ let expect_claim_next_no_eligible result =
       Alcotest.failf "expected claim_next to report no_eligible, got error: %s"
         message
 
+let expect_claim_next_no_unclaimed result =
+  match result with
+  | Coord.Claim_next_no_unclaimed -> ()
+  | Coord.Claim_next_no_eligible _ ->
+      Alcotest.fail "expected claim_next to report no_unclaimed, got no_eligible"
+  | Coord.Claim_next_claimed { task_id; _ } ->
+      Alcotest.failf "expected claim_next to report no_unclaimed, got %s"
+        task_id
+  | Coord.Claim_next_error message ->
+      Alcotest.failf "expected claim_next to report no_unclaimed, got error: %s"
+        message
+
 (* ================================================================ *)
 (* FSM transitions (enabled)                                         *)
 (* ================================================================ *)
@@ -271,9 +283,11 @@ let test_claim_next_skips_pending_verification_tasks () =
       (create_pending_request config ~task_id:task_1 ~worker:"worker"
          ~request_id:"vrf-pending-claim-next");
     Coord.claim_next_r config ~agent_name:"worker" ()
-    |> expect_claim_next_claimed ~task_id:task_2 ~released_task_id:(Some task_1);
+    |> expect_claim_next_claimed ~task_id:task_2 ~released_task_id:None;
+    Alcotest.(check string) "pending task remains awaiting_verification"
+      "awaiting_verification" (status_string config task_1);
     Coord.claim_next_r config ~agent_name:"other" ()
-    |> expect_claim_next_no_eligible)
+    |> expect_claim_next_no_unclaimed)
 
 let test_claim_next_skips_rejected_verification_tasks () =
   with_temp_config ~fsm_enabled:true (fun config ->

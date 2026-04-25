@@ -125,6 +125,82 @@ let do_flush () =
           Queue.clear buffer
     end
 
+(* #9919: the pre-fix emit at [keeper_hooks_oas.post_tool_use_failure]
+   produced an exact tuple [(site="post_tool_use_failure", raw=1.0,
+   threshold=0.0, triggered=true)] that carried no diagnostic signal
+   (51 identical rows observed in 48h of production).  The live
+   emitter is now a Prometheus counter; this scrub clears the legacy
+   residue so boot-time diagnostics and external readers (dashboards,
+   governance judgments) stop getting a false-positive degenerate
+   site warning for data that is no longer produced. *)
+let is_known_degenerate (json : Yojson.Safe.t) : bool =
+  match json with
+  | `Assoc fields ->
+      let get k =
+        match List.assoc_opt k fields with Some v -> Some v | None -> None
+      in
+      (match get "site", get "raw_value", get "threshold", get "triggered" with
+       | Some (`String "post_tool_use_failure"),
+         Some (`Float 1.0 | `Int 1),
+         Some (`Float 0.0 | `Int 0),
+         Some (`Bool true) -> true
+       | _ -> false)
+  | _ -> false
+
+let scrub_legacy_degenerate_rows path =
+  if not (Sys.file_exists path) then 0
+  else
+    match Safe_ops.read_file_safe path with
+    | Error msg ->
+        Log.warn ~ctx:"heuristic_metrics"
+          "#9919 scrub skipped — read failed: %s" msg;
+        0
+    | Ok content ->
+        let lines =
+          String.split_on_char '\n' content
+          |> List.filter (fun l -> String.length (String.trim l) > 0)
+        in
+        let kept, dropped =
+          List.partition
+            (fun line ->
+              match Yojson.Safe.from_string line with
+              | json -> not (is_known_degenerate json)
+              | exception Yojson.Json_error _ ->
+                  (* Keep malformed lines — let the existing
+                     diagnostics path log them. *)
+                  true)
+            lines
+        in
+        let ndrop = List.length dropped in
+        if ndrop = 0 then 0
+        else begin
+          (* Rewrite the file with the kept rows only.  Use atomic
+             rename to avoid tearing the file if the process is
+             interrupted during init. *)
+          let tmp = path ^ ".9919-scrub.tmp" in
+          (try
+             let oc =
+               open_out_gen [Open_wronly; Open_creat; Open_trunc] 0o644 tmp
+             in
+             Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+               List.iter (fun line ->
+                 output_string oc line;
+                 output_char oc '\n') kept);
+             Sys.rename tmp path;
+             Log.Server.info
+               "#9919 scrubbed %d legacy degenerate rows from %s \
+                (pattern: post_tool_use_failure raw=1.0 threshold=0.0 \
+                triggered=true) — emitter has migrated to Prometheus \
+                counter [masc_keeper_tool_use_failure_total]"
+               ndrop path;
+             ndrop
+           with Sys_error msg ->
+             Log.warn ~ctx:"heuristic_metrics"
+               "#9919 scrub skipped — write failed: %s" msg;
+             (try Sys.remove tmp with Sys_error _ -> ());
+             0)
+        end
+
 let init ~base_path =
   Stdlib.Mutex.protect mu (fun () ->
     match !store_path_ref with
@@ -132,6 +208,7 @@ let init ~base_path =
     | None ->
       let masc_dir = Coord_utils.masc_dir_from_base_path ~base_path in
       let path = Filename.concat masc_dir "heuristic_metrics.jsonl" in
+      let _ = scrub_legacy_degenerate_rows path in
       store_path_ref := Some path)
 
 let record (e : event) =

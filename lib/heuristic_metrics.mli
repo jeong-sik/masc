@@ -50,7 +50,17 @@ val record : event -> unit
 
 val init : base_path:string -> unit
 (** Initialize the JSONL store under [base_path/.masc/heuristic_metrics.jsonl].
-    Idempotent; second call is a no-op. *)
+    Idempotent; second call is a no-op.  Also runs a one-time
+    {!scrub_legacy_degenerate_rows} against the existing file to clear
+    the #9919 legacy degenerate signature. *)
+
+val scrub_legacy_degenerate_rows : string -> int
+(** Filter out rows matching the #9919 legacy degenerate signature
+    (site=post_tool_use_failure, raw_value=1.0, threshold=0.0,
+    triggered=true) from the JSONL file at [path] in-place.  Returns
+    the number of rows dropped.  Returns [0] without writing the file
+    when no rows match, preserving mtime.  Exposed for test coverage
+    and for operators who want to run a manual scrub. *)
 
 val flush : unit -> unit
 (** Force flush pending writes (useful in tests). *)

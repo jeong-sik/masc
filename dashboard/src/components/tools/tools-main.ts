@@ -34,7 +34,7 @@ export function Tools() {
   }, [])
 
   return html`
-    <div>
+    <div role="region" aria-label="도구">
       <div class="flex gap-2 mb-4">
         <${ActionButton} variant=${activeView.value === 'inventory' ? 'primary' : 'ghost'} size="md"
           ariaPressed=${activeView.value === 'inventory'}

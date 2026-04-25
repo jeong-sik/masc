@@ -538,7 +538,7 @@ export function ToolAllowlistEditor({
   }
 
   return html`
-    <div class="flex flex-col gap-3 mt-2 p-3 rounded border border-[var(--card-border)] bg-[var(--panel-dark-60)]">
+    <div class="flex flex-col gap-3 mt-2 p-3 rounded border border-[var(--card-border)] bg-[var(--panel-dark-60)]" role="region" aria-label="도구 정책 편집">
       <div class="flex items-center justify-between">
         <span class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">도구 정책 편집</span>
         <button type="button"

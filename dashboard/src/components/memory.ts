@@ -404,11 +404,13 @@ function PostCard({ post }: { post: BoardPost }) {
       <div class="flex flex-col items-center gap-0.5 pt-0.5 min-w-9">
         <button type="button"
           class="vote-btn upvote w-7 h-5 flex items-center justify-center rounded text-2xs text-[var(--text-muted)] hover:text-[var(--warn-bright)] hover:bg-[var(--warn-10)] transition-colors cursor-pointer border-0 bg-transparent"
+          aria-label="추천"
           onClick=${(event: Event) => handleVote('up', event)}
         >▲</button>
         <span class="text-sm font-semibold tabular-nums text-[var(--text-strong)]">${post.votes ?? 0}</span>
         <button type="button"
           class="vote-btn downvote w-7 h-5 flex items-center justify-center rounded text-2xs text-[var(--text-muted)] hover:text-[var(--accent)] hover:bg-[var(--accent-10)] transition-colors cursor-pointer border-0 bg-transparent"
+          aria-label="비추천"
           onClick=${(event: Event) => handleVote('down', event)}
         >▼</button>
       </div>

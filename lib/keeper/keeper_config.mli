@@ -26,6 +26,12 @@ val tool_use_strict_cascade_name : string
 (** Minimum context window (tokens) for any keeper turn. *)
 val min_keeper_context_tokens : int
 
+(** Maximum context window (tokens) accepted for [max_context_override].
+    Matches the largest published context window among supported
+    providers (Claude Opus 4.7 / Sonnet 4.6 = 1M).  #9953 SSOT — do not
+    re-hardcode [1_000_000] elsewhere. *)
+val max_keeper_context_tokens : int
+
 (** {2 Alert Preview Truncation Lengths}
 
     Invariant: [excerpt_min < message_max < reply_max]. *)

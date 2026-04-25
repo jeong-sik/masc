@@ -35,6 +35,58 @@ val bounded_oas_timeout_for_turn_budget_with_turn_budget :
   remaining_turn_budget_s:float ->
   float option
 
+(** Full timeout-budget resolution used by the unified turn loop.
+    Exposed for regression tests that need to distinguish "an OAS
+    call had a bounded budget" from "the turn had no retry budget
+    left before dispatch". *)
+type oas_timeout_budget_resolution = {
+  effective_timeout_sec : float;
+  adaptive_timeout_sec : float;
+  keeper_turn_timeout_sec : float;
+  remaining_turn_budget_sec : float;
+  estimated_input_tokens : int;
+  max_turns : int;
+  source : string;
+}
+
+val resolve_bounded_oas_timeout_budget_with_turn_budget :
+  estimated_input_tokens:int ->
+  max_turns:int ->
+  remaining_turn_budget_s:float ->
+  oas_timeout_budget_resolution option
+
+val oas_retry_budget_available_for_turn :
+  estimated_input_tokens:int ->
+  max_turns:int ->
+  remaining_turn_budget_s:float ->
+  bool
+
+(** Reclassify a structural OAS timeout only when the current attempt
+    actually dispatched with an OAS timeout budget. This prevents a
+    pre-retry turn-budget exhaustion from borrowing a stale previous
+    attempt budget and incorrectly rotating cascades. *)
+val reclassify_oas_timeout_for_attempt :
+  timeout_budget:oas_timeout_budget_resolution option ->
+  Oas.Error.sdk_error ->
+  Oas.Error.sdk_error
+
+type degraded_retry_budget_decision =
+  | No_degraded_retry
+  | Degraded_retry_budget_exhausted of Keeper_error_classify.degraded_retry
+  | Degraded_retry_allowed of Keeper_error_classify.degraded_retry
+
+val next_fail_open_cascade_for_turn_with_budget :
+  ?rotation_cascades:string list ->
+  base_cascade:string ->
+  effective_cascade:string ->
+  tool_requirement:string ->
+  attempted_cascades:string list ->
+  estimated_input_tokens:int ->
+  max_turns:int ->
+  remaining_turn_budget_s:float ->
+  Oas.Error.sdk_error ->
+  degraded_retry_budget_decision
+
 (** Turn-local overflow hint published by the OAS event bus before a
     proactive compaction attempt. Exposed for regression tests. *)
 type turn_event_bus_overflow = {

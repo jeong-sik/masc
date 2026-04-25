@@ -444,6 +444,58 @@ let bounded_oas_timeout_for_turn_budget ~(estimated_input_tokens : int)
     ~max_turns:(Keeper_runtime_resolved.reactive_max_turns_per_call ())
     ~remaining_turn_budget_s
 
+let oas_retry_budget_available_for_turn ~(estimated_input_tokens : int)
+    ~(max_turns : int) ~(remaining_turn_budget_s : float) : bool =
+  Option.is_some
+    (resolve_bounded_oas_timeout_budget_with_turn_budget
+       ~estimated_input_tokens ~max_turns ~remaining_turn_budget_s)
+
+let reclassify_oas_timeout_for_attempt
+    ~(timeout_budget : oas_timeout_budget_resolution option)
+    (err : Oas.Error.sdk_error) : Oas.Error.sdk_error =
+  match err, timeout_budget with
+  | Oas.Error.Api (Timeout { message }), Some timeout_budget
+    when EC.is_structural_oas_timeout_message message ->
+      Oas_worker_named.sdk_error_of_masc_internal_error
+        (Oas_worker_named.Oas_timeout_budget
+           {
+             budget_sec = timeout_budget.effective_timeout_sec;
+             keeper_turn_timeout_sec =
+               timeout_budget.keeper_turn_timeout_sec;
+             estimated_input_tokens = timeout_budget.estimated_input_tokens;
+             source = timeout_budget.source;
+           })
+  | _ -> err
+
+type degraded_retry_budget_decision =
+  | No_degraded_retry
+  | Degraded_retry_budget_exhausted of EC.degraded_retry
+  | Degraded_retry_allowed of EC.degraded_retry
+
+let next_fail_open_cascade_for_turn_with_budget
+    ?rotation_cascades
+    ~(base_cascade : string)
+    ~(effective_cascade : string)
+    ~(tool_requirement : string)
+    ~(attempted_cascades : string list)
+    ~(estimated_input_tokens : int)
+    ~(max_turns : int)
+    ~(remaining_turn_budget_s : float)
+    (err : Oas.Error.sdk_error) : degraded_retry_budget_decision =
+  match
+    next_fail_open_cascade_for_turn
+      ?rotation_cascades
+      ~base_cascade ~effective_cascade ~tool_requirement
+      ~attempted_cascades err
+  with
+  | None -> No_degraded_retry
+  | Some retry ->
+      if
+        oas_retry_budget_available_for_turn
+          ~estimated_input_tokens ~max_turns ~remaining_turn_budget_s
+      then Degraded_retry_allowed retry
+      else Degraded_retry_budget_exhausted retry
+
 type overflow_retry_plan = {
   retry_max_context : int;
   retry_generation : int;
@@ -1332,10 +1384,11 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                   ~base_path:config.base_path meta.name
                   Keeper_registry.Cascade_exhausted
               else
-                Keeper_registry.set_turn_phase
-                  ~base_path:config.base_path meta.name
-                  Keeper_registry.Turn_finalizing
+                  Keeper_registry.set_turn_phase
+                    ~base_path:config.base_path meta.name
+                    Keeper_registry.Turn_finalizing
             in
+            let attempt_timeout_budget = ref None in
             let max_turns =
               match channel with
               | Keeper_world_observation.Reactive ->
@@ -1364,6 +1417,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                                 (remaining_turn_budget_s ());
                           }))
               | Some timeout_budget ->
+                  attempt_timeout_budget := Some timeout_budget;
                   last_timeout_budget := Some timeout_budget;
                   Keeper_registry.set_turn_cascade_state
                     ~base_path:config.base_path meta.name
@@ -1387,20 +1441,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 Ok result
             | Error err ->
                 let err =
-                  match err, !last_timeout_budget with
-                  | Oas.Error.Api (Timeout { message }), Some timeout_budget
-                    when EC.is_structural_oas_timeout_message message ->
-                      Oas_worker_named.sdk_error_of_masc_internal_error
-                        (Oas_worker_named.Oas_timeout_budget
-                           {
-                             budget_sec = timeout_budget.effective_timeout_sec;
-                             keeper_turn_timeout_sec =
-                               timeout_budget.keeper_turn_timeout_sec;
-                             estimated_input_tokens =
-                               timeout_budget.estimated_input_tokens;
-                             source = timeout_budget.source;
-                           })
-                  | _ -> err
+                  reclassify_oas_timeout_for_attempt
+                    ~timeout_budget:!attempt_timeout_budget err
                 in
                 let _ = drain_turn_event_bus () in
                 let committed_tools = committed_mutating_tools_snapshot () in
@@ -1468,15 +1510,19 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                   Error reclassified
                 end else
                   match
-                    next_fail_open_cascade_for_turn
+                    next_fail_open_cascade_for_turn_with_budget
                       ?rotation_cascades:fail_open_rotation_cascades
                       ~base_cascade:meta.cascade_name
                       ~effective_cascade:execution.cascade_name
                       ~tool_requirement:initial_tool_requirement
                       ~attempted_cascades
+                      ~estimated_input_tokens:
+                        prompt_timeout_estimate_tokens
+                      ~max_turns
+                      ~remaining_turn_budget_s:(remaining_turn_budget_s ())
                       err
                   with
-                  | Some degraded_retry -> (
+                  | Degraded_retry_allowed degraded_retry -> (
                       match
                         build_cascade_execution
                           ~cascade_name:degraded_retry.next_cascade
@@ -1524,7 +1570,17 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                             ~overflow_retry_used
                             ~attempted_cascades:
                               (next_execution.cascade_name :: attempted_cascades))
-                  | None when EC.is_transient_network_error err
+                  | Degraded_retry_budget_exhausted degraded_retry ->
+                      Log.Keeper.warn
+                        "%s: recoverable cascade failure in %s suggested degraded retry to %s (reason=%s), but remaining turn budget %.1fs is below the OAS retry guard/minimum; ending this cycle: %s"
+                        meta.name execution.cascade_name
+                        degraded_retry.next_cascade
+                        degraded_retry.fallback_reason
+                        (remaining_turn_budget_s ())
+                        (short_preview (Oas.Error.to_string err));
+                      mark_terminal_error err;
+                      Error err
+                  | No_degraded_retry when EC.is_transient_network_error err
                               && attempt <= EC.max_transient_retries ->
                       let delay = EC.transient_backoff_sec attempt in
                       Log.Keeper.warn
@@ -1543,7 +1599,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                         ~attempt:(attempt + 1)
                         ~is_retry:true ~overflow_retry_used
                         ~attempted_cascades
-                  | None when EC.is_context_overflow err ->
+                  | No_degraded_retry when EC.is_context_overflow err ->
                   let current_turn_event_bus = drain_turn_event_bus () in
                   dispatch_keeper_phase_event
                     ~config
@@ -1618,12 +1674,12 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                     mark_paused_after_overflow
                       ~run_meta
                       ~reason:"overflow_persisted_after_auto_compact_retry";
-                    Keeper_registry.set_turn_phase
-                      ~base_path:config.base_path meta.name
-                      Keeper_registry.Turn_finalizing;
+                      Keeper_registry.set_turn_phase
+                        ~base_path:config.base_path meta.name
+                        Keeper_registry.Turn_finalizing;
                     Error err
                   end
-                | None ->
+                | No_degraded_retry ->
                     mark_terminal_error err;
                     Error err
           in

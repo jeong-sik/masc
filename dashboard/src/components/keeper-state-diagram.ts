@@ -169,7 +169,7 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
   }
 
   return html`
-    <div class="flex flex-col gap-3">
+    <div class="flex flex-col gap-3" role="region" aria-label="키퍼 상태 다이어그램">
       <div class="flex flex-wrap items-center gap-2 text-3xs text-[var(--text-dim)]">
         <span class="inline-flex items-center rounded-sm border border-[var(--accent-30)] bg-[var(--accent-10)] px-2 py-0.5 text-[var(--accent)]">
           composite ${snapshot.phase}

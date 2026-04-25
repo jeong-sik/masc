@@ -129,7 +129,7 @@ export function ToolMetrics() {
   }, [])
 
   return html`
-    <div class="flex flex-col gap-4">
+    <div class="flex flex-col gap-4" role="region" aria-label="도구 사용 현황">
       <div class="flex justify-between items-center">
         <h3 class="text-[var(--text-strong)] text-lg font-semibold m-0">도구 사용 현황</h3>
         <${ActionButton}

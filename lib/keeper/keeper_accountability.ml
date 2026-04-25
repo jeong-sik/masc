@@ -33,6 +33,11 @@ type claim_event = {
 
 type resolution_event = {
   claim_id : string;
+  agent_name : string option;
+  keeper_name : string option;
+  task_id : string option;
+  kind : claim_kind option;
+  subject : string option;
   status : claim_status;
   resolved_at : string;
   reason : string option;
@@ -183,6 +188,10 @@ let option_int_field key = function
   | Some value -> [ (key, `Int value) ]
   | None -> []
 
+let option_claim_kind_field key = function
+  | Some value -> [ (key, `String (claim_kind_to_string value)) ]
+  | None -> []
+
 let claim_event_to_json (event : claim_event) =
   `Assoc
     ([
@@ -211,6 +220,11 @@ let resolution_event_to_json (event : resolution_event) =
        ( "supporting_evidence_refs",
          `List (List.map (fun r -> `String r) event.supporting_evidence_refs) );
      ]
+    @ option_string_field "agent_name" event.agent_name
+    @ option_string_field "keeper_name" event.keeper_name
+    @ option_string_field "task_id" event.task_id
+    @ option_claim_kind_field "kind" event.kind
+    @ option_string_field "subject" event.subject
     @ option_string_field "reason" event.reason)
 
 let event_date_string ts =
@@ -219,6 +233,13 @@ let event_date_string ts =
     (tm.Unix.tm_year + 1900)
     (tm.Unix.tm_mon + 1)
     tm.Unix.tm_mday
+
+let iso8601_of_unix ts =
+  let tm = Unix.gmtime ts in
+  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+    (tm.Unix.tm_year + 1900)
+    (tm.Unix.tm_mon + 1)
+    tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
 
 let claim_event_of_json json =
   match json_string_opt "event_type" json with
@@ -265,6 +286,14 @@ let resolution_event_of_json json =
             Some
               {
                 claim_id;
+                agent_name = json_string_opt "agent_name" json;
+                keeper_name = json_string_opt "keeper_name" json;
+                task_id = json_string_opt "task_id" json;
+                kind =
+                  (match json_string_opt "kind" json with
+                  | Some value -> claim_kind_of_string value
+                  | None -> None);
+                subject = json_string_opt "subject" json;
                 status;
                 resolved_at;
                 reason = json_string_opt "reason" json;
@@ -282,6 +311,95 @@ let read_window_entries (config : Coord_query.config) =
   let since = event_date_string (now -. (float_of_int summary_window_days *. 86400.0)) in
   let until = event_date_string now in
   Dated_jsonl.read_range (get_store config) ~since ~until
+
+type decision_activity = {
+  decision_signal_count : int;
+  latest_decision_at : string option;
+  latest_decision_age_s : float option;
+}
+
+let decision_ts_unix_opt json =
+  let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" json in
+  if ts_unix > 0.0 then Some ts_unix
+  else
+    match json_string_opt "ts" json with
+    | Some value -> Types_core.parse_iso8601_opt value
+    | None -> None
+
+let candidate_decision_keeper_names keeper_name =
+  let raw = String.trim keeper_name in
+  let canonical = normalize_keeper_name raw in
+  [ raw; canonical; "keeper-" ^ canonical ]
+  |> List.filter (fun value -> value <> "" && value <> "keeper-")
+  |> List.sort_uniq String.compare
+
+let keeper_decision_log_path (config : Coord_query.config) name =
+  let keepers_dir =
+    Filename.concat (Common.masc_dir_from_base_path ~base_path:config.base_path)
+      "keepers"
+  in
+  Filename.concat keepers_dir (name ^ ".decisions.jsonl")
+
+let read_file_tail_lines path ~max_bytes ~max_lines =
+  if max_lines <= 0 || not (Sys.file_exists path) || Sys.is_directory path then
+    []
+  else
+    try
+      let size =
+        match (Unix.stat path).Unix.st_size with
+        | size when size > 0 -> size
+        | _ -> 0
+      in
+      let start = max 0 (size - max_bytes) in
+      let ic = open_in_bin path in
+      Fun.protect
+        ~finally:(fun () -> close_in_noerr ic)
+        (fun () ->
+          seek_in ic start;
+          if start > 0 then (
+            match input_line ic with
+            | _partial_prefix -> ()
+            | exception End_of_file -> ());
+          let lines = ref [] in
+          (try
+             while true do
+               lines := input_line ic :: !lines
+             done
+           with End_of_file -> ());
+          !lines |> List.filteri (fun idx _ -> idx < max_lines) |> List.rev)
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | _ -> []
+
+let recent_decision_timestamps config ~keeper_name ~now =
+  let cutoff = now -. (float_of_int summary_window_days *. 86400.0) in
+  candidate_decision_keeper_names keeper_name
+  |> List.concat_map (fun candidate ->
+         let path = keeper_decision_log_path config candidate in
+         read_file_tail_lines path ~max_bytes:500000 ~max_lines:128)
+  |> List.filter_map (fun line ->
+         try Yojson.Safe.from_string line |> decision_ts_unix_opt
+         with
+         | Eio.Cancel.Cancelled _ as exn -> raise exn
+         | Yojson.Json_error _ -> None)
+  |> List.filter (fun ts -> ts >= cutoff && ts <= now +. 60.0)
+
+let decision_activity_for_keeper config ~keeper_name ~now =
+  let timestamps = recent_decision_timestamps config ~keeper_name ~now in
+  let latest =
+    List.fold_left
+      (fun acc ts ->
+        match acc with
+        | None -> Some ts
+        | Some prev -> Some (Float.max prev ts))
+      None timestamps
+  in
+  {
+    decision_signal_count = List.length timestamps;
+    latest_decision_at = Option.map iso8601_of_unix latest;
+    latest_decision_age_s =
+      Option.map (fun ts -> Float.max 0.0 (now -. ts)) latest;
+  }
 
 let materialize_claims jsons =
   let claims : (string, claim_snapshot) Hashtbl.t = Hashtbl.create 64 in
@@ -356,6 +474,21 @@ let append_claim (config : Coord_query.config) (event : claim_event) =
 let append_resolution (config : Coord_query.config) (event : resolution_event) =
   Dated_jsonl.append (get_store config) (resolution_event_to_json event)
 
+let resolution_for_claim ?(resolved_at = Types.now_iso ()) ?reason ~status
+    ~evidence_refs (claim : claim_event) =
+  {
+    claim_id = claim.claim_id;
+    agent_name = Some claim.agent_name;
+    keeper_name = Some claim.keeper_name;
+    task_id = claim.task_id;
+    kind = Some claim.kind;
+    subject = Some claim.subject;
+    status;
+    resolved_at;
+    reason;
+    supporting_evidence_refs = normalize_refs evidence_refs;
+  }
+
 let task_title_for_id (config : Coord_query.config) task_id =
   Coord_query.get_tasks_safe config
   |> List.find_opt (fun (task : Types.task) -> String.equal task.id task_id)
@@ -406,13 +539,7 @@ let resolve_recent_task_commitment config ~agent_name ~task_id ~status ~reason
   with
   | Some snapshot ->
       append_resolution config
-        {
-          claim_id = snapshot.claim.claim_id;
-          status;
-          resolved_at = Types.now_iso ();
-          reason;
-          supporting_evidence_refs = normalize_refs evidence_refs;
-        }
+        (resolution_for_claim snapshot.claim ~status ?reason ~evidence_refs)
   | None -> ()
 
 let maybe_support_recent_completion_claim config ~agent_name ~task_id ~evidence_refs =
@@ -428,20 +555,15 @@ let maybe_support_recent_completion_claim config ~agent_name ~task_id ~evidence_
   with
   | Some snapshot ->
       append_resolution config
-        {
-          claim_id = snapshot.claim.claim_id;
-          status = Supported;
-          resolved_at = Types.now_iso ();
-          reason = Some "task_done";
-          supporting_evidence_refs = normalize_refs evidence_refs;
-        }
+        (resolution_for_claim snapshot.claim ~status:Supported
+           ~reason:"task_done" ~evidence_refs)
   | None ->
       let created_at = Types.now_iso () in
       let claim_id =
         make_claim_id ~agent_name ~kind:Completion_claim ~subject:title
           ~task_id:(Some task_id) ~created_at
       in
-      append_claim config
+      let claim =
         {
           claim_id;
           agent_name;
@@ -455,15 +577,12 @@ let maybe_support_recent_completion_claim config ~agent_name ~task_id ~evidence_
           created_at;
           evidence_refs = normalize_refs evidence_refs;
           synthetic = true;
-        };
-      append_resolution config
-        {
-          claim_id;
-          status = Supported;
-          resolved_at = created_at;
-          reason = Some "task_done";
-          supporting_evidence_refs = normalize_refs evidence_refs;
         }
+      in
+      append_claim config claim;
+      append_resolution config
+        (resolution_for_claim claim ~resolved_at:created_at ~status:Supported
+           ~reason:"task_done" ~evidence_refs)
 
 (* #8605 family: exhaustive on [Types.task_action]. The previous
    string match silently no-oped for typos and any future transition
@@ -532,16 +651,16 @@ let record_completion_claim (config : Coord_query.config) ~keeper_name ~agent_na
         open_recent_claim ~now snapshots ~agent_name ~kind:Completion_claim
           ~subject ~task_id:normalized_task_id ~max_age_sec:dedupe_window_sec
       in
-      let claim_id =
+      let resolution_claim =
         match recent_existing with
-        | Some snapshot -> snapshot.claim.claim_id
+        | Some snapshot -> snapshot.claim
         | None ->
             let created_at = Types.now_iso () in
             let claim_id =
               make_claim_id ~agent_name ~kind:Completion_claim ~subject
                 ~task_id:normalized_task_id ~created_at
             in
-            append_claim config
+            let claim =
               {
                 claim_id;
                 agent_name;
@@ -555,20 +674,18 @@ let record_completion_claim (config : Coord_query.config) ~keeper_name ~agent_na
                 created_at;
                 evidence_refs = normalize_refs evidence_refs;
                 synthetic = false;
-              };
-            claim_id
+              }
+            in
+            append_claim config claim;
+            claim
       in
       if strong_evidence then
         append_resolution config
-          {
-            claim_id;
-            status = Supported;
-            resolved_at = Types.now_iso ();
-            reason = Some "same_turn_evidence";
-            supporting_evidence_refs =
-              supporting_refs_for_turn ~trace_id ~turn_number
-                strong_evidence_refs;
-          }
+          (resolution_for_claim resolution_claim ~status:Supported
+             ~reason:"same_turn_evidence"
+             ~evidence_refs:
+               (supporting_refs_for_turn ~trace_id ~turn_number
+                  strong_evidence_refs))
 
 let risk_band_of_metrics ~evidence_coverage ~unsupported_completion_rate
     ~open_overdue_commitments =
@@ -593,6 +710,8 @@ let summary_json_of_snapshots ~keeper_name ~agent_name ~now snapshots =
   let resolved_claims = ref 0 in
   let unsupported_completion_claims = ref 0 in
   let total_completion_claims = ref 0 in
+  let task_commitment_count = ref 0 in
+  let completion_claim_count = ref 0 in
   let open_overdue_commitments = ref 0 in
   let supported_task_commitments = ref 0 in
   let resolved_task_commitments = ref 0 in
@@ -604,6 +723,7 @@ let summary_json_of_snapshots ~keeper_name ~agent_name ~now snapshots =
       let created_unix = created_at_unix snapshot.claim in
       (match snapshot.claim.kind with
       | Task_commitment -> (
+          incr task_commitment_count;
           match status with
           | Supported ->
               incr supported_task_commitments;
@@ -614,6 +734,7 @@ let summary_json_of_snapshots ~keeper_name ~agent_name ~now snapshots =
           | Pending -> ()
           | Unsupported -> ())
       | Completion_claim ->
+          incr completion_claim_count;
           if status <> Pending && not snapshot.claim.synthetic then
             incr total_completion_claims;
           if status = Unsupported && not snapshot.claim.synthetic then
@@ -702,27 +823,91 @@ let summary_json_of_snapshots ~keeper_name ~agent_name ~now snapshots =
       ("unsupported_completion_rate", `Float unsupported_completion_rate);
       ("open_overdue_commitments", `Int !open_overdue_commitments);
       ("recent_supported_claims", `Int !recent_supported_claims);
+      ("accountability_claim_count", `Int (List.length snapshots));
+      ("task_commitment_count", `Int !task_commitment_count);
+      ("completion_claim_count", `Int !completion_claim_count);
       ("risk_band", `String risk_band);
       ("routing_hint", `String routing_hint);
       ("history", `List history);
     ]
 
-let source_label ~source ~keeper_name =
+let source_label ~source ~keeper_name ~coverage_gap =
   match source with
   | "direct_agent" -> "Direct runtime alias history"
   | "canonical_keeper_fallback" ->
       Printf.sprintf "Inherited from canonical identity: %s" keeper_name
+  | _ when coverage_gap ->
+      "No accountability history; recent decision activity exists"
   | _ -> "No accountability history"
 
-let with_accountability_source ~source ~keeper_name json =
+let with_accountability_source ~source ~keeper_name ~coverage_gap json =
   match json with
   | `Assoc fields ->
       `Assoc
         (fields
          @ [
              ("source", `String source);
-             ("source_label", `String (source_label ~source ~keeper_name));
+             ("source_label", `String (source_label ~source ~keeper_name ~coverage_gap));
            ])
+  | other -> other
+
+let assoc_replace key value fields =
+  let replaced = ref false in
+  let mapped =
+    List.map
+      (fun (field_key, field_value) ->
+        if String.equal field_key key then (
+          replaced := true;
+          (field_key, value))
+        else
+          (field_key, field_value))
+      fields
+  in
+  if !replaced then mapped else mapped @ [ (key, value) ]
+
+let with_accountability_coverage ~coverage_gap ~decision_activity json =
+  let coverage_health =
+    if coverage_gap then "coverage_gap"
+    else if decision_activity.decision_signal_count = 0 then
+      "no_recent_activity"
+    else
+      "ok"
+  in
+  let coverage_routing_hint =
+    if coverage_gap then "accountability_coverage_gap_review"
+    else "normal"
+  in
+  let coverage_fields =
+    [
+      ("coverage_health", `String coverage_health);
+      ("coverage_gap", `Bool coverage_gap);
+      ( "coverage_gap_reason",
+        if coverage_gap then
+          `String "recent_decisions_without_accountability_claims"
+        else
+          `Null );
+      ("decision_signal_count", `Int decision_activity.decision_signal_count);
+      ( "latest_decision_at",
+        match decision_activity.latest_decision_at with
+        | Some value -> `String value
+        | None -> `Null );
+      ( "latest_decision_age_s",
+        match decision_activity.latest_decision_age_s with
+        | Some value -> `Float value
+        | None -> `Null );
+      ("coverage_routing_hint", `String coverage_routing_hint);
+    ]
+  in
+  match json with
+  | `Assoc fields ->
+      let fields =
+        if coverage_gap then
+          assoc_replace "routing_hint"
+            (`String "accountability_coverage_gap_review") fields
+        else
+          fields
+      in
+      `Assoc (fields @ coverage_fields)
   | other -> other
 
 let accountability_summary_lookup (config : Coord_query.config) =
@@ -755,8 +940,17 @@ let accountability_summary_lookup (config : Coord_query.config) =
           | Some items -> ("canonical_keeper_fallback", items)
           | None -> ("none", []))
     in
+    let decision_activity =
+      decision_activity_for_keeper config ~keeper_name ~now
+    in
+    let coverage_gap =
+      String.equal source "none"
+      && snapshots = []
+      && decision_activity.decision_signal_count > 0
+    in
     summary_json_of_snapshots ~keeper_name ~agent_name ~now snapshots
-    |> with_accountability_source ~source ~keeper_name
+    |> with_accountability_source ~source ~keeper_name ~coverage_gap
+    |> with_accountability_coverage ~coverage_gap ~decision_activity
 
 let accountability_summary_json (config : Coord_query.config) ~keeper_name
     ~agent_name =

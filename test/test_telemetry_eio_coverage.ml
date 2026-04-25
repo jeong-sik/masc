@@ -134,6 +134,76 @@ let test_event_record_type () =
   } in
   check (float 0.1) "timestamp" 1704067200.0 r.timestamp
 
+let check_one_tool_called_record label json ~operation_id ~worker_run_id =
+  match Telemetry_eio.parse_event_records [json] with
+  | [ record ] -> (
+      match record.event with
+      | Telemetry_eio.Tool_called r ->
+          check string (label ^ " tool_name") "keeper_bash" r.tool_name;
+          check bool (label ^ " success") false r.success;
+          check int (label ^ " duration_ms") 658 r.duration_ms;
+          check (option string) (label ^ " agent_id")
+            (Some "keeper-masc-improver-agent") r.agent_id;
+          check (option string) (label ^ " operation_id") operation_id
+            r.operation_id;
+          check (option string) (label ^ " worker_run_id") worker_run_id
+            r.worker_run_id
+      | _ -> fail (label ^ ": expected Tool_called"))
+  | records ->
+      fail
+        (Printf.sprintf "%s: expected one parsed record, got %d" label
+           (List.length records))
+
+let test_parse_event_records_tool_called_null_options () =
+  let json =
+    `Assoc
+      [
+        ("timestamp", `Float 1777120367.858374);
+        ( "event",
+          `List
+            [
+              `String "Tool_called";
+              `Assoc
+                [
+                  ("tool_name", `String "keeper_bash");
+                  ("success", `Bool false);
+                  ("duration_ms", `Int 658);
+                  ("agent_id", `String "keeper-masc-improver-agent");
+                  ("source", `String "keeper_internal");
+                  ("session_id", `String "mcp-session");
+                  ("operation_id", `Null);
+                  ("worker_run_id", `Null);
+                ];
+            ] );
+      ]
+  in
+  check_one_tool_called_record "null options" json ~operation_id:None
+    ~worker_run_id:None
+
+let test_parse_event_records_tool_called_missing_options () =
+  let json =
+    `Assoc
+      [
+        ("timestamp", `Int 1777120367);
+        ( "event",
+          `List
+            [
+              `String "Tool_called";
+              `Assoc
+                [
+                  ("tool_name", `String "keeper_bash");
+                  ("success", `Bool false);
+                  ("duration_ms", `Int 658);
+                  ("agent_id", `String "keeper-masc-improver-agent");
+                  ("source", `String "keeper_internal");
+                  ("session_id", `String "mcp-session");
+                ];
+            ] );
+      ]
+  in
+  check_one_tool_called_record "missing options" json ~operation_id:None
+    ~worker_run_id:None
+
 (* ============================================================
    metrics Type Tests
    ============================================================ *)
@@ -396,6 +466,10 @@ let () =
     ];
     "event_record", [
       test_case "type" `Quick test_event_record_type;
+      test_case "tool_called null option fields" `Quick
+        test_parse_event_records_tool_called_null_options;
+      test_case "tool_called missing option fields" `Quick
+        test_parse_event_records_tool_called_missing_options;
     ];
     "metrics", [
       test_case "type" `Quick test_metrics_type;

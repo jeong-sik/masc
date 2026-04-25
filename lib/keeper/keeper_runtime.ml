@@ -10,6 +10,54 @@ open Keeper_types
     hot-reload tick unless the compare normalizes whitespace. *)
 let personality_text_equal a b = String.equal (String.trim a) (String.trim b)
 
+(** #10269: when [personality_text_equal] reports a mismatch, the
+    operator needs to know WHICH personality field differs and HOW
+    badly.  Pre-fix the re-sync log was opaque
+    ([re-syncing [personality] for <name>]) so a fleet of repeated
+    re-syncs (371 events / 3000 logs on [nick0cave] alone, 12% of all
+    log volume) carried no information about whether the drift was a
+    1-byte trailing newline or a structural divergence between the
+    TOML source and the persisted JSON.
+
+    [personality_diff_summary] returns one entry per differing field
+    formatted as [<field>(cur=<len>,tgt=<len>,diff@<pos>)] where [pos]
+    is the byte index of the first character that disagrees AFTER the
+    same trimming used by {!personality_text_equal}.  [pos = -1] means
+    the trimmed strings agree byte-for-byte (impossible by
+    construction here since the entry is only emitted when
+    [personality_text_equal] is false; kept as a defensive sentinel).
+
+    The summary is cheap: only invoked on the cycle that actually
+    performs a re-sync, never on the stable steady-state path. *)
+let first_byte_diff a b =
+  let len_a = String.length a and len_b = String.length b in
+  let limit = min len_a len_b in
+  let rec loop i =
+    if i >= limit then
+      if len_a = len_b then -1 else limit
+    else if Char.equal a.[i] b.[i] then loop (i + 1)
+    else i
+  in
+  loop 0
+
+let personality_field_diff_entry name current target =
+  if personality_text_equal current target then None
+  else
+    let cur_t = String.trim current and tgt_t = String.trim target in
+    let pos = first_byte_diff cur_t tgt_t in
+    Some
+      (Printf.sprintf "%s(cur=%d,tgt=%d,diff@%d)"
+         name
+         (String.length cur_t)
+         (String.length tgt_t)
+         pos)
+
+let personality_diff_summary fields =
+  List.filter_map
+    (fun (name, current, target) ->
+      personality_field_diff_entry name current target)
+    fields
+
 type boot_meta_resolution = {
   meta : keeper_meta;
   materialized : bool;
@@ -257,19 +305,23 @@ let ensure_keeper_meta config name =
        writes/day on nick0cave alone; other 13 keepers: 0 events).
        Normalise both sides with [String.trim] so only meaningful
        content drives resync. *)
-    let personality_field_differs current target =
-      not (personality_text_equal current target)
+    (* #10269: name the diverging fields so the re-sync log carries
+       the diagnostic upstream (length and first-diff offset) instead
+       of the opaque [personality] category. *)
+    let personality_diff_entries =
+      personality_diff_summary
+        [
+          ("goal", meta.goal, target_goal);
+          ("short_goal", meta.short_goal, target_short_goal);
+          ("mid_goal", meta.mid_goal, target_mid_goal);
+          ("long_goal", meta.long_goal, target_long_goal);
+          ("will", meta.will, target_will);
+          ("needs", meta.needs, target_needs);
+          ("desires", meta.desires, target_desires);
+          ("instructions", meta.instructions, target_instructions);
+        ]
     in
-    let personality_changed =
-      personality_field_differs meta.goal target_goal
-      || personality_field_differs meta.short_goal target_short_goal
-      || personality_field_differs meta.mid_goal target_mid_goal
-      || personality_field_differs meta.long_goal target_long_goal
-      || personality_field_differs meta.will target_will
-      || personality_field_differs meta.needs target_needs
-      || personality_field_differs meta.desires target_desires
-      || personality_field_differs meta.instructions target_instructions
-    in
+    let personality_changed = personality_diff_entries <> [] in
     let policy_changed =
       meta.policy_voice_enabled <> target_policy_voice_enabled
       || meta.autoboot_enabled <> target_autoboot_enabled
@@ -308,7 +360,11 @@ let ensure_keeper_meta config name =
         (if models_changed then Some "models" else None);
         (if social_model_changed then Some "social_model" else None);
         (if cascade_changed then Some "cascade" else None);
-        (if personality_changed then Some "personality" else None);
+        (if personality_changed then
+           Some
+             (Printf.sprintf "personality:%s"
+                (String.concat "+" personality_diff_entries))
+         else None);
         (if policy_changed then Some "policy" else None);
         (if discovery_changed then Some "discovery" else None);
         (if telemetry_changed then Some "telemetry" else None);

@@ -1594,7 +1594,17 @@ let test_work_discovery_nudge_uses_registered_keeper_tool_schemas () =
        "Requires an active claimed task/current_task_id");
   check bool "keeper_shell gh runtime allows sandbox fallback" true
     (source_file_contains "lib/keeper/keeper_shell_gh_context.ml"
-       "task_id = \"(sandbox)\"")
+       "task_id = \"(sandbox)\"");
+  check bool
+    "work discovery nudge avoids pre-filter policy tool names"
+    false
+    (source_file_contains "lib/keeper/keeper_agent_run.ml"
+       "render_preferred_tools ~allowed_tool_names");
+  check bool
+    "claimed-task nudge avoids hard-coded execution tool names"
+    false
+    (source_file_contains "lib/keeper/keeper_agent_run.ml"
+       "Use keeper_bash, keeper_shell, keeper_fs_read")
 
 (* ---------- Config tests ---------- *)
 
@@ -1673,6 +1683,8 @@ let sample_tool_surface_metrics () : Masc_mcp.Keeper_agent_run.tool_surface_metr
   }
 let make_run_result ~text ~tools ~model ~input_tok ~output_tok
     ?(usage_reported = true)
+    ?(cache_creation_tokens = 0)
+    ?(cache_read_tokens = 0)
     ?(tool_calls = [])
     ?proof
     ?trace_ref
@@ -1687,7 +1699,14 @@ let make_run_result ~text ~tools ~model ~input_tok ~output_tok
     cascade_observation;
     turn_count = 1;
     tool_calls_made = List.length tools;
-    usage = { input_tokens = input_tok; output_tokens = output_tok; cache_creation_input_tokens = 0; cache_read_input_tokens = 0; cost_usd = None };
+    usage =
+      {
+        input_tokens = input_tok;
+        output_tokens = output_tok;
+        cache_creation_input_tokens = cache_creation_tokens;
+        cache_read_input_tokens = cache_read_tokens;
+        cost_usd = None;
+      };
     usage_reported;
     tools_used = tools;
     tool_calls;
@@ -2618,8 +2637,75 @@ let test_append_metrics_snapshot_nulls_unreported_usage () =
         (match usage |> member "output_tokens" with `Null -> true | _ -> false);
       check bool "snapshot total_tokens null when usage unreported" true
         (match usage |> member "total_tokens" with `Null -> true | _ -> false);
+      check bool "snapshot cache_creation_tokens null when usage unreported" true
+        (match usage |> member "cache_creation_tokens" with `Null -> true | _ -> false);
+      check bool "snapshot cache_read_tokens null when usage unreported" true
+        (match usage |> member "cache_read_tokens" with `Null -> true | _ -> false);
       check bool "snapshot cost_usd null when usage unreported" true
         (match json |> member "cost_usd" with `Null -> true | _ -> false))
+
+let test_append_metrics_snapshot_persists_cache_usage () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      let result =
+        make_run_result
+          ~text:"Claude reported cache usage."
+          ~tools:[]
+          ~model:"claude:claude-sonnet-4-6"
+          ~input_tok:2000
+          ~output_tok:200
+          ~cache_creation_tokens:1500
+          ~cache_read_tokens:300
+          ()
+      in
+      UM.append_metrics_snapshot
+        ~config
+        ~meta:minimal_meta
+        ~observation:base_observation
+        ~result
+        ~latency_ms:321
+        ~turn_cost:0.42
+        ~turn_generation:1
+        ~channel:"turn"
+        ~snapshot_source:"test"
+        ~context_ratio:0.1
+        ~context_tokens:10
+        ~context_max:100_000
+        ~message_count:2
+        ~compaction:
+          {
+            Masc_mcp.Keeper_exec_context.applied = false;
+            attempted = false;
+            failure_reason = None;
+            trigger = None;
+            decision = "no_compaction";
+            before_tokens = 0;
+            after_tokens = 0;
+            saved_tokens = 0;
+          }
+        ~handoff_json:None
+        ();
+      let metrics_store =
+        Masc_mcp.Keeper_types.keeper_metrics_store config minimal_meta.name
+      in
+      let line =
+        match Dated_jsonl.read_recent_lines metrics_store 1 with
+        | [ line ] -> line
+        | _ -> fail "expected one metrics line"
+      in
+      let usage =
+        Yojson.Safe.Util.(Yojson.Safe.from_string line |> member "usage")
+      in
+      let open Yojson.Safe.Util in
+      check int "cache creation persisted"
+        1500 (usage |> member "cache_creation_tokens" |> to_int);
+      check int "cache read persisted"
+        300 (usage |> member "cache_read_tokens" |> to_int))
 
 let test_append_metrics_snapshot_marks_untrusted_usage () =
   Eio_main.run @@ fun env ->
@@ -4681,6 +4767,17 @@ let test_max_context_resolution_separates_override_and_effective_budget () =
   check int "effective budget caps to primary budget"
     resolution.primary_budget resolution.effective_budget
 
+let test_resolved_max_context_for_turn_uses_effective_budget () =
+  let labels = [ "unknown:model" ] in
+  let meta = { minimal_meta with max_context_override = Some 1_000_000 } in
+  let resolution =
+    KEC.resolve_max_context_resolution
+      ~requested_override:meta.max_context_override labels
+  in
+  check int "turn dispatch budget is capped to effective budget"
+    resolution.effective_budget
+    (UT.resolved_max_context_for_turn ~meta labels)
+
 let test_side_effect_reclassification_ignores_keeper_read_only_tools () =
   let original =
     Agent_sdk.Error.Api
@@ -6213,6 +6310,8 @@ let () =
             test_append_metrics_snapshot_counts_only_mode_violation_refs;
           test_case "snapshot nulls unreported usage" `Quick
             test_append_metrics_snapshot_nulls_unreported_usage;
+          test_case "snapshot persists cache usage" `Quick
+            test_append_metrics_snapshot_persists_cache_usage;
           test_case "snapshot marks untrusted usage" `Quick
             test_append_metrics_snapshot_marks_untrusted_usage;
           test_case "decision record persists tool call details" `Quick
@@ -6479,6 +6578,8 @@ let () =
             test_resolved_max_context_for_turn_uses_primary_budget;
           test_case "max_context resolution separates override and effective budget" `Quick
             test_max_context_resolution_separates_override_and_effective_budget;
+          test_case "resolved max_context dispatch uses effective budget" `Quick
+            test_resolved_max_context_for_turn_uses_effective_budget;
           test_case "read-only keeper tools do not become ambiguous partial" `Quick
             test_side_effect_reclassification_ignores_keeper_read_only_tools;
           test_case "mixed tool sets only keep mutating keeper tools" `Quick

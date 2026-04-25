@@ -400,17 +400,58 @@ let update_metrics ~id ~version ~score () : unit =
 
 (** {1 Template Rendering} *)
 
+(* Static unresolved-var detector — same pattern, hoisted out of
+   [render_template] so [Re.compile] runs once at module load instead
+   of per render call. *)
+let unresolved_var_re =
+  Re.Pcre.re {|\{\{[^}]+\}\}|} |> Re.compile
+
+(* Byte-wise [pattern → replacement] substring substitution.
+
+   Replaces [Re.replace_string (Re.str pattern |> Re.compile)] which
+   compiled a fresh DFA per variable.  [render_template] is hot —
+   keeper prompts call it per turn with ~15 vars, so the prior form
+   built O(vars × calls) regexes for what is just literal substring
+   replace.  Empty pattern short-circuits to the input string to match
+   [Re.str ""] semantics. *)
+let replace_substring_all ~pattern ~replacement s =
+  let plen = String.length pattern in
+  let slen = String.length s in
+  if plen = 0 then s
+  else
+    let rec match_at i j =
+      if j = plen then true
+      else if String.unsafe_get s (i + j) <> String.unsafe_get pattern j
+      then false
+      else match_at i (j + 1)
+    in
+    let buf = Buffer.create slen in
+    let last = slen - plen in
+    let rec loop i =
+      if i > last then begin
+        Buffer.add_substring buf s i (slen - i);
+        Buffer.contents buf
+      end
+      else if match_at i 0 then begin
+        Buffer.add_string buf replacement;
+        loop (i + plen)
+      end
+      else begin
+        Buffer.add_char buf (String.unsafe_get s i);
+        loop (i + 1)
+      end
+    in
+    loop 0
+
 (** Render a prompt template with the given variables *)
 let render_template ~template ~vars () : (string, string) result =
   try
     let result = ref template in
     List.iter (fun (name, value) ->
       let pattern = Printf.sprintf "{{%s}}" name in
-      result := Re.replace_string (Re.str pattern |> Re.compile) ~by:value !result
+      result := replace_substring_all ~pattern ~replacement:value !result
     ) vars;
-    (* Check for unresolved variables anywhere in the result *)
-    let regex = Re.Pcre.re {|\{\{[^}]+\}\}|} |> Re.compile in
-    let has_unresolved = Re.execp regex !result in
+    let has_unresolved = Re.execp unresolved_var_re !result in
     if has_unresolved then
       Error "Unresolved variables in template"
     else

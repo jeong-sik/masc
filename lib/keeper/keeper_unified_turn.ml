@@ -516,6 +516,32 @@ let sdk_error_kind = function
   | Oas.Error.A2a _ -> "a2a"
   | Oas.Error.Internal _ -> "internal"
 
+let record_turn_failure_stress
+    ~(meta : keeper_meta)
+    ~(is_auto_recoverable : bool)
+    ~(consecutive : int)
+    ~(threshold : int)
+    ~(err : Oas.Error.sdk_error)
+  : unit =
+  let room_id =
+    match meta.joined_room_ids with
+    | room_id :: _ -> room_id
+    | [] -> ""
+  in
+  Agent_stress.record {
+    agent_name = meta.name;
+    room_id;
+    kind =
+      Turn_failure {
+        consecutive;
+        threshold;
+        counted_toward_crash = not is_auto_recoverable;
+        recoverable = is_auto_recoverable;
+        error_kind = Some (sdk_error_kind err);
+      };
+    timestamp = Unix.gettimeofday ();
+  }
+
 let oas_timeout_guard_sec = 30.0
 
 let min_oas_timeout_budget_sec = 30.0
@@ -992,7 +1018,7 @@ let resolved_max_context_for_turn
        meta.name requested resolution.turn_budget resolution.primary_budget
        resolution.effective_budget
    | None -> ());
-  resolution.turn_budget
+  resolution.effective_budget
 
 
 (* Extracted to Keeper_unified_metrics — see keeper_unified_metrics.ml *)
@@ -1793,8 +1819,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                       Log.Keeper.warn
                         "%s: transient network error cascade=%s max_context=%d context_budget=%d primary_budget=%d requested_override=%s retry=%d/%d backoff=%.0fs: %s"
                         meta.name execution.cascade_name
-                        execution.max_context_resolution.effective_budget
                         execution.max_context
+                        execution.max_context_resolution.effective_budget
                         execution.max_context_resolution.primary_budget
                         (match execution.max_context_resolution.requested_override with
                          | Some requested -> string_of_int requested
@@ -2032,8 +2058,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           Log.Keeper.error
             "%s: keeper cycle FAILED cascade=%s max_context=%d context_budget=%d primary_budget=%d requested_override=%s latency=%dms%s error=%s"
             meta.name final_execution.cascade_name
-            final_execution.max_context_resolution.effective_budget
             final_execution.max_context
+            final_execution.max_context_resolution.effective_budget
             final_execution.max_context_resolution.primary_budget
             (match final_execution.max_context_resolution.requested_override with
              | Some requested -> string_of_int requested
@@ -2190,6 +2216,12 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           let threshold =
             Runtime_params.get Governance_registry.keeper_max_turn_failures
           in
+          record_turn_failure_stress
+            ~meta
+            ~is_auto_recoverable
+            ~consecutive:count
+            ~threshold
+            ~err;
           if count >= threshold then begin
             Log.Keeper.error
               "%s: %d consecutive persistent turn failures (threshold=%d), escalating to supervisor crash path"

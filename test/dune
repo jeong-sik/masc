@@ -1383,6 +1383,11 @@
  (libraries masc_mcp fs_compat alcotest eio eio_main unix))
 
 (test
+ (name test_keeper_compaction_noop_counter_9943)
+ (modules test_keeper_compaction_noop_counter_9943)
+ (libraries masc_mcp alcotest unix))
+
+(test
  (name test_keeper_usage_trust_anthropic_cache_9959)
  (modules test_keeper_usage_trust_anthropic_cache_9959)
  (libraries masc_mcp alcotest))

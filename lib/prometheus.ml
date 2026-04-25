@@ -292,6 +292,24 @@ let metric_keeper_compaction_saved_tokens =
 let metric_keeper_operator_compact = "masc_keeper_operator_compact_total"
 let metric_keeper_operator_clear = "masc_keeper_operator_clear_total"
 
+(* #9943: per-keeper counter of "compaction triggered but
+   resulted in no token reduction".  2026-04-24 audit found
+   956/972 (98.4%) of recorded compaction snapshots had
+   [compaction_before_tokens = compaction_after_tokens > 0],
+   meaning a trigger fired but the strategy returned the same
+   token budget — a silent failure mode that
+   [masc_keeper_compactions_total] hides because that counter
+   is incremented on the trigger rather than the savings.  This
+   counter labels by [keeper, trigger] so dashboards separate
+   "context_overflow_imminent triggered noop" from "manual
+   trigger noop" etc. and operators can attribute blame.  Pair
+   with [masc_keeper_compaction_saved_tokens_total] (already
+   shipping) — that one tracks the bytes saved by the 1.6%
+   that DID save anything; this one tracks the 98.4% that
+   ran for nothing. *)
+let metric_keeper_compaction_noop =
+  "masc_keeper_compaction_noop_total"
+
 (* Keeper keepalive (keeper_keepalive.ml). *)
 let metric_keeper_heartbeat_successes =
   "masc_keeper_heartbeat_successes_total"
@@ -596,6 +614,13 @@ let init () =
     "Context ratio change after compaction (pre - post)" Gauge;
   add metric_keeper_compaction_saved_tokens
     "Total tokens removed by keeper context compaction" Counter;
+  (* #9943: noop compactions — trigger fired but strategy did
+     not reduce token budget. *)
+  add metric_keeper_compaction_noop
+    "Total compaction snapshots where before_tokens == \
+     after_tokens > 0 (compaction triggered but produced no \
+     savings; labels: keeper, trigger)"
+    Counter;
   (* Operator-initiated overflow recovery — emitted by tool_keeper.ml *)
   add metric_keeper_operator_compact
     "Total operator-invoked masc_keeper_compact calls (labels: result=ok|no_checkpoint|precondition|not_found)" Counter;

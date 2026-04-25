@@ -109,6 +109,16 @@ val metric_tool_join_required_guard : string
 val metric_keeper_compactions : string
 val metric_keeper_compaction_ratio_change : string
 val metric_keeper_compaction_saved_tokens : string
+
+(** #9943: per-keeper noop compaction counter.  Increments when
+    a snapshot records [compaction_before_tokens =
+    compaction_after_tokens > 0] — the trigger fired but the
+    strategy returned the same token budget.  Pre-fix, 956/972
+    (98.4%) of compaction snapshots in production were silent
+    noops because [masc_keeper_compactions_total] counts
+    triggers rather than savings.  Labels: [keeper, trigger]. *)
+val metric_keeper_compaction_noop : string
+
 val metric_keeper_operator_compact : string
 val metric_keeper_operator_clear : string
 val metric_keeper_heartbeat_successes : string

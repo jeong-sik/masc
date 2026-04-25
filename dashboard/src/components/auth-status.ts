@@ -144,6 +144,8 @@ export function AuthStatus() {
     <div class="relative">
       <button type="button"
         class="flex items-center gap-1.5 text-2xs py-1 px-2 rounded border border-solid border-[var(--card-border)] bg-[var(--white-4)] cursor-pointer font-[inherit] transition-colors duration-150 hover:bg-[var(--white-8)] text-[var(--text-muted)]"
+        aria-expanded=${popoverOpen.value}
+        aria-haspopup="true"
         onClick=${() => { popoverOpen.value ? (popoverOpen.value = false) : openPopover() }}
         title="인증 상태"
       >
@@ -253,15 +255,17 @@ export function RemoteWarningBanner() {
         : '원격 접속이 감지되었습니다. Mutation 작업을 위해 검증된 Bearer token을 설정하세요.'
 
   return html`
-    <div class="shrink-0 flex items-center justify-between gap-3 px-4 py-2 bg-[var(--warn-10)] border-b border-[var(--warn-20)] text-xs text-[var(--warn)]">
+    <div role="alert" class="shrink-0 flex items-center justify-between gap-3 px-4 py-2 bg-[var(--warn-10)] border-b border-[var(--warn-20)] text-xs text-[var(--warn)]">
       <span>${message}</span>
       <div class="flex items-center gap-2 shrink-0">
         <button type="button"
           class="px-2 py-0.5 rounded text-2xs border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--accent)] hover:bg-[var(--accent-15)] cursor-pointer transition-colors"
+          aria-label="인증 패널 열기"
           onClick=${openPopover}
         >인증 열기</button>
         <button type="button"
           class="text-[var(--text-muted)] hover:text-[var(--text-body)] cursor-pointer text-2xs transition-colors"
+          aria-label="\uacbd\uace0 \ub2eb\uae30"
           onClick=${() => { bannerDismissed.value = true }}
         >\u2715</button>
       </div>

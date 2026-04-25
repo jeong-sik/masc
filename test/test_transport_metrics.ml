@@ -126,6 +126,17 @@ let test_grpc_events_delivered () =
     "masc_grpc_events_delivered_total" () in
   check (float 0.01) "grpc events delta" 5.0 (after -. before)
 
+let test_grpc_events_dropped () =
+  let before = Prometheus.metric_value_or_zero
+    "masc_grpc_events_dropped_total" () in
+  TM.inc_grpc_events_dropped ();
+  TM.inc_grpc_events_dropped ();
+  TM.inc_grpc_events_dropped ();
+  let after = Prometheus.metric_value_or_zero
+    "masc_grpc_events_dropped_total" () in
+  check (float 0.01) "three drop observations advance counter by 3"
+    3.0 (after -. before)
+
 let test_grpc_runtime_listening_cache () =
   TM.set_grpc_runtime_listening true;
   check bool "grpc listening uses runtime cache" true (TM.grpc_listening ());
@@ -248,6 +259,9 @@ let test_transport_health_json () =
     (grpc_json |> U.member "active_streams" |> U.to_int);
   check int "grpc subscribers" 2
     (grpc_json |> U.member "subscribers" |> U.to_int);
+  check bool "grpc events_dropped field present" true
+    (match grpc_json |> U.member "events_dropped" with
+     | `Int _ -> true | _ -> false);
   check bool "grpc listening field exists" true
     (match grpc_json |> U.member "listening" with `Bool _ -> true | _ -> false);
   check bool "grpc reachable field exists" true
@@ -376,6 +390,7 @@ let () =
       test_case "observe_grpc_heartbeat_latency" `Quick test_grpc_heartbeat_latency;
       test_case "set_grpc_subscribers" `Quick test_grpc_subscribers;
       test_case "inc_grpc_events_delivered" `Quick test_grpc_events_delivered;
+      test_case "inc_grpc_events_dropped" `Quick test_grpc_events_dropped;
       test_case "runtime listening cache" `Quick test_grpc_runtime_listening_cache;
     ]);
     ("websocket", [

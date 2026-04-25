@@ -103,6 +103,7 @@ const GrpcSchema = object({
   subscribers: fallback(number(), 0),
   heartbeat_avg_seconds: fallback(number(), 0),
   events_delivered: fallback(number(), 0),
+  events_dropped: fallback(number(), 0),
 })
 
 // Diagnostic counters for the WS delivery path.  Each field falls back

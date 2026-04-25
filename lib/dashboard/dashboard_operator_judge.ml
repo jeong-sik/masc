@@ -193,10 +193,14 @@ let compute_judgments
     ~(masc_tools : Types.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
     ~facts_json =
-  let timeout_s = Float.of_int Env_config.Inference.operator_judge_timeout_seconds in
   let prompt = prompt_for_facts facts_json in
   match
-    Masc_oas_bridge.run_safe ~timeout_s (fun () ->
+    (* #9629: caller migrated from legacy run_safe (which fell back to
+       the global 30s inference timeout) to run_with_caller so this
+       judge inherits Operator_judge's 300s default and surfaces in the
+       per-caller Prometheus counter. *)
+    Masc_oas_bridge.run_with_caller
+      ~caller:Env_config_oas_bridge.Operator_judge (fun () ->
       Oas_worker.run_named_with_masc_tools ~cascade_name:"operator_judge"
         ~goal:prompt ~masc_tools ~dispatch ~max_turns:3
         ~approval:Approval_callbacks.auto_approve

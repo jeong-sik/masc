@@ -534,6 +534,18 @@
     (run %{test}))))
  (libraries masc_test_deps))
 
+; #9629: judge callers (Governance_judge, Operator_judge) added to
+; the OAS bridge SSOT.  Dedicated stanza for the same MASC_BASE_PATH
+; reason as #10094.
+(test
+ (name test_oas_bridge_judge_callers_9629)
+ (modules test_oas_bridge_judge_callers_9629)
+ (action
+  (setenv MASC_BASE_PATH /tmp/test-oas-bridge-judge-callers-9629
+   (setenv MASC_BASE_PATH_INPUT /tmp/test-oas-bridge-judge-callers-9629
+    (run %{test}))))
+ (libraries masc_test_deps))
+
 ; #10115: dedicated stanza so MASC_BASE_PATH is set BEFORE the
 ; test executable loads. Same rationale as #10091/#10097/#10101.
 (test

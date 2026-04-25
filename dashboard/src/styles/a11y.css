@@ -47,4 +47,9 @@ a:focus-visible,
   [style*="workingPulse"] { animation: none; }
   [style*="keeperPulse"] { animation: none; }
   [style*="activityFadeIn"] { animation: none; }
+  /* Tailwind animation utilities — disable spin/pulse/bounce for motion-sensitive users. */
+  .animate-spin { animation: none; }
+  .animate-pulse { animation: none; }
+  .animate-bounce { animation: none; }
+  .animate-ping { animation: none; }
 }

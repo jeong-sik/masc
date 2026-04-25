@@ -1,3 +1,23 @@
+/* Accessibility — global focus-visible indicator + prefers-reduced-motion overrides. */
+
+/* Keyboard-only focus ring. Mouse/touch clicks produce :focus but not :focus-visible,
+   so this only appears during Tab/Shift+Tab navigation. */
+:focus-visible {
+  outline: 2px solid var(--accent, #47b8ff);
+  outline-offset: 2px;
+}
+
+/* Elements that reset outline in component CSS must re-assert it for keyboard users. */
+textarea:focus-visible,
+input:focus-visible,
+select:focus-visible,
+button:focus-visible,
+a:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--accent, #47b8ff);
+  outline-offset: 2px;
+}
+
 /* Accessibility — prefers-reduced-motion overrides. Extracted from global.css for #3915. */
 
 @media (prefers-reduced-motion: reduce) {

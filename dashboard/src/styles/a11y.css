@@ -26,6 +26,7 @@ input:focus-visible,
 select:focus-visible,
 button:focus-visible,
 a:focus-visible,
+summary:focus-visible,
 [tabindex]:focus-visible {
   outline: 2px solid var(--accent, #47b8ff);
   outline-offset: 2px;
@@ -67,6 +68,7 @@ a:focus-visible,
   [role="button"],
   button,
   a,
+  summary,
   [tabindex] {
     forced-color-adjust: none;
   }

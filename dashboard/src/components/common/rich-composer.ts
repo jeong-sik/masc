@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useState } from 'preact/hooks'
+import { useId, useState } from 'preact/hooks'
 import { TextArea } from './input'
 import { RichContent } from './rich-content'
 
@@ -26,7 +26,8 @@ export function RichComposer({
 }) {
   const [mode, setMode] = useState<ComposerMode>('write')
 
-  const helpId = helpText ? 'rich-composer-help' : undefined
+  const uid = useId()
+  const helpId = helpText ? `rich-composer-help-${uid}` : undefined
 
   return html`
     <div class="rounded border border-[var(--card-border)] bg-[rgba(8,13,22,0.88)]">

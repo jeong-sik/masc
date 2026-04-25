@@ -101,8 +101,7 @@ let turn_affordances_require_tool_gate turn_affordances =
 let tools_for_gated_affordance = function
   | Board_post_or_comment ->
     [ "keeper_board_post"; "keeper_board_comment"; "masc_broadcast" ]
-  | Message_sweep ->
-    [ "keeper_messages_read"; "masc_messages"; "keeper_keeper_msg" ]
+  | Message_sweep -> [ "masc_messages"; "masc_keeper_msg" ]
   | Reply_in_room ->
     [ "keeper_board_post"; "keeper_board_comment";
       "masc_keeper_msg"; "masc_broadcast" ]

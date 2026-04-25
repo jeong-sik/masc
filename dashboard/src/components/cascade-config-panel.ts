@@ -461,7 +461,7 @@ function ProfileCard({
       ${profile.candidates.length === 0
         ? html`<div class="text-xs text-[var(--text-muted)]">no candidates resolved</div>`
         : html`
-          <ol class="flex flex-col gap-1 text-xs">
+          <ol class="flex flex-col gap-1 text-xs" aria-label="Cascade 후보 순서">
             ${profile.candidates.map((c, idx) => {
               const expanded = c.expanded_models ?? []
               const displayModel = c.display_model ?? c.model

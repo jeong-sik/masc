@@ -387,7 +387,7 @@ export function ChatComposer({
         <div class="text-2xs font-semibold uppercase tracking-4 text-[var(--text-muted)]">메시지</div>
         <div class="text-2xs text-[var(--text-muted)]">Enter로 전송, Shift+Enter로 줄바꿈</div>
       </div>
-      <textarea
+      <textarea autoComplete="off"
         aria-label="메시지 입력"
         class="control-textarea min-h-24 rounded-card border border-[var(--slate-gray-16)] bg-[var(--white-3)] px-3 py-3 text-base leading-loose"
         placeholder=${placeholder}

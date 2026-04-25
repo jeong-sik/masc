@@ -94,7 +94,7 @@ export function PersonaGenerator() {
       <div class="space-y-3">
         <div class="grid gap-2">
           <label class="text-3xs text-[var(--text-muted)]" for="persona-concept">컨셉</label>
-          <textarea
+          <textarea autoComplete="off"
             id="persona-concept"
             rows=${5}
             value=${concept.value}
@@ -224,7 +224,7 @@ export function PersonaGenerator() {
             <label class="text-3xs text-[var(--text-muted)]" for="persona-profile-json">profile.json</label>
             ${draft ? html`<span class="text-3xs text-[var(--text-muted)]">${draft.handle}</span>` : null}
           </div>
-          <textarea
+          <textarea autoComplete="off"
             id="persona-profile-json"
             rows=${18}
             value=${profileText.value}

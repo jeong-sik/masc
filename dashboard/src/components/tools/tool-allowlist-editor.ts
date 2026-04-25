@@ -592,7 +592,7 @@ export function ToolAllowlistEditor({
             <${SectionHeader} label="also allow" section="also_allow" listSig=${alsoAllowItems} />
             ${textInputSection.value === 'also_allow'
               ? html`
-                <textarea
+                <textarea autoComplete="off"
                   aria-label="also allow 도구 입력"
                   class="min-h-18 w-full px-3 py-2 rounded border border-[var(--card-border)] bg-[var(--white-3)] text-2xs text-[var(--text-body)] placeholder:text-[var(--text-muted)]"
                   placeholder="쉼표 또는 줄바꿈으로 구분"
@@ -636,7 +636,7 @@ export function ToolAllowlistEditor({
 
             ${textInputSection.value === 'custom'
               ? html`
-                <textarea
+                <textarea autoComplete="off"
                   aria-label="custom 도구 입력"
                   class="min-h-[88px] w-full px-3 py-2 rounded border border-[var(--card-border)] bg-[var(--white-3)] text-2xs text-[var(--text-body)] placeholder:text-[var(--text-muted)]"
                   placeholder="쉼표 또는 줄바꿈으로 구분"
@@ -660,7 +660,7 @@ export function ToolAllowlistEditor({
         <${SectionHeader} label="denylist" section="deny" listSig=${denyItems} />
         ${textInputSection.value === 'deny'
           ? html`
-            <textarea
+            <textarea autoComplete="off"
               aria-label="denylist 도구 입력"
               class="min-h-18 w-full px-3 py-2 rounded border border-[var(--card-border)] bg-[var(--white-3)] text-2xs text-[var(--text-body)] placeholder:text-[var(--text-muted)]"
               placeholder="쉼표 또는 줄바꿈으로 구분"

@@ -78,7 +78,7 @@ export function ExcusePatterns() {
         </p>
 
         <form aria-label="핑계 패턴 편집" onSubmit=${handleSave}>
-          <textarea
+          <textarea autoComplete="off"
             name="patterns"
             class="w-full h-96 p-3 bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded font-mono text-sm mb-4 text-[var(--text-primary)]"
             spellcheck="false"

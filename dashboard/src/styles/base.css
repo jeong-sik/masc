@@ -41,6 +41,18 @@ a:hover {
   text-decoration: underline;
 }
 
+/* Global cursor for all interactive buttons. Tailwind v4 preflight
+   resets cursor to default on <button>, which confuses mouse users. */
+button[type="button"],
+button[type="submit"],
+button:not([type]) {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
 /* Global focus-visible for all interactive elements without per-element styles.
    Matches ActionButton's focus ring: accent-45 ring + bg-1 offset. */
 button:focus-visible,

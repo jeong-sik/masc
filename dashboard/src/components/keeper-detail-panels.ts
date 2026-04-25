@@ -278,7 +278,7 @@ function OutcomesLedger({ keeper, outcomes }: {
         </div>
         ${verdictTotal > 0 ? html`
           <div class="flex items-center gap-2">
-            <div class="flex-1 h-1.5 bg-[var(--white-6)] rounded-sm overflow-hidden">
+            <div class="flex-1 h-1.5 bg-[var(--white-6)] rounded-sm overflow-hidden" role="progressbar" aria-valuenow=${Math.round(passRatePct)} aria-valuemin=${0} aria-valuemax=${100} aria-label="판정 통과율">
               <div class="h-full rounded-sm transition-all duration-300" style="width:${passRatePct}%;background:${passBarColor}"></div>
             </div>
             <span class="shrink-0 text-sm font-semibold tabular-nums" style="color:${passBarColor}">${passRatePct}%</span>
@@ -509,7 +509,7 @@ export function ContextChart({ keeper }: { keeper: Keeper }) {
     const color = ctxColor(pct)
     return html`
       <div class="flex items-center gap-3 mb-5 p-3 rounded border border-[var(--card-border)] bg-[var(--white-3)]">
-        <div class="flex-1 h-2 bg-[var(--white-6)] rounded-sm overflow-hidden">
+        <div class="flex-1 h-2 bg-[var(--white-6)] rounded-sm overflow-hidden" role="progressbar" aria-valuenow=${Math.round(pct)} aria-valuemin=${0} aria-valuemax=${100} aria-label="컨텍스트 사용률">
           <div class="h-full rounded-sm transition-all duration-300" style="width:${pct.toFixed(1)}%;background:${color}"></div>
         </div>
         <span class="text-sm font-semibold tabular-nums text-[var(--text-strong)]">${pct.toFixed(1)}%</span>

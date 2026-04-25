@@ -223,7 +223,7 @@ function MissionPartyCard({ active }: { active: DashboardMissionSessionCard | nu
       ${pct !== null
         ? html`
             <div class="flex items-center gap-2" data-testid="overview-party-progress">
-              <div class="flex-1 h-2 rounded bg-card-border/40 overflow-hidden">
+              <div class="flex-1 h-2 rounded bg-card-border/40 overflow-hidden" role="progressbar" aria-valuenow=${pct} aria-valuemin=${0} aria-valuemax=${100} aria-label="진행률">
                 <div class="h-full bg-[var(--ok)]" style=${`width: ${pct}%`}></div>
               </div>
               <span class="text-2xs tabular-nums text-[var(--text-muted)]">${pct}%</span>

@@ -25,6 +25,7 @@ type codex_mcp = {
   token_can_read_state : bool option;
   login_supported : bool;
   login_note : string;
+  config : Codex_mcp_config_doctor.t;
 }
 
 type t = {
@@ -214,6 +215,7 @@ let admin_bearer_sources ~base_path ~auth_dir ~dashboard_dev_token_available
   |> dedupe_keep_order
 
 let codex_mcp_report ~base_path =
+  let config = Codex_mcp_config_doctor.analyze_default () in
   match
     Sys.getenv_opt codex_mcp_token_env_var |> Env_config_core.trim_opt
   with
@@ -229,6 +231,7 @@ let codex_mcp_report ~base_path =
         token_can_read_state = None;
         login_supported = false;
         login_note = codex_mcp_login_note;
+        config;
       }
   | Some raw_token -> (
       match Auth.find_credential_by_token base_path ~token:raw_token with
@@ -245,6 +248,7 @@ let codex_mcp_report ~base_path =
               Some (has_permission cred.role CanReadState);
             login_supported = false;
             login_note = codex_mcp_login_note;
+            config;
           }
       | Error _ ->
           {
@@ -258,6 +262,7 @@ let codex_mcp_report ~base_path =
             token_can_read_state = None;
             login_supported = false;
             login_note = codex_mcp_login_note;
+            config;
           })
 
 let analyze ~base_path_input ~default_base_path () =
@@ -376,6 +381,7 @@ let analyze ~base_path_input ~default_base_path () =
          None);
     ]
     |> List.filter_map Fun.id
+    |> (fun values -> values @ Codex_mcp_config_doctor.warnings codex_mcp.config)
     |> dedupe_keep_order
   in
   let next_actions =
@@ -420,9 +426,11 @@ let analyze ~base_path_input ~default_base_path () =
            "For Codex MCP, run `masc-mcp login --agent codex-mcp-client --role worker --shell` and export MASC_MCP_TOKEN; do not run `codex mcp login masc`."
        else
          None);
+      Some "For Codex MCP pipeline drift, inspect the codex_mcp.config.stages section from `masc-mcp doctor auth --json`.";
       Some "Rerun `masc-mcp doctor auth` after editing auth files or rotating tokens.";
     ]
     |> List.filter_map Fun.id
+    |> (fun values -> values @ Codex_mcp_config_doctor.next_actions codex_mcp.config)
     |> dedupe_keep_order
   in
   let status =
@@ -492,6 +500,7 @@ let codex_mcp_to_yojson codex_mcp =
         | None -> `Null );
       ("login_supported", `Bool codex_mcp.login_supported);
       ("login_note", `String codex_mcp.login_note);
+      ("config", Codex_mcp_config_doctor.to_yojson codex_mcp.config);
     ]
 
 let to_yojson (report : t) =
@@ -640,6 +649,26 @@ let render_text (report : t) =
     (Printf.sprintf "- login_supported: %s"
        (yes_no report.codex_mcp.login_supported));
   add_line (Printf.sprintf "- login_note: %s" report.codex_mcp.login_note);
+  add_line "- config:";
+  add_line
+    (Printf.sprintf "  path: %s"
+       (option_value report.codex_mcp.config.config_path));
+  add_line
+    (Printf.sprintf "  file_present: %s"
+       (yes_no report.codex_mcp.config.file_present));
+  add_line
+    (Printf.sprintf "  server_names: %s"
+       (match report.codex_mcp.config.server_names with
+        | [] -> "(none)"
+        | names -> String.concat ", " names));
+  add_line "  stages:";
+  List.iter
+    (fun (stage : Codex_mcp_config_doctor.stage) ->
+      add_line
+        (Printf.sprintf "  - %s: %s - %s" stage.name
+           (Codex_mcp_config_doctor.stage_status_to_string stage.status)
+           stage.detail))
+    report.codex_mcp.config.stages;
   if report.warnings <> [] then begin
     add_line "";
     add_line "warnings:";

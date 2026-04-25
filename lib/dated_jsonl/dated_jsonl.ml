@@ -143,9 +143,15 @@ let load_tail_lines path ~max_lines =
           Bytes.blit c 0 combined off len;
           off + len
         ) 0 !chunks in
-        let all_lines =
+        let raw_lines =
           Bytes.to_string combined
           |> String.split_on_char '\n'
+        in
+        let raw_lines =
+          if !pos > 0 && raw_lines <> [] then List.tl raw_lines else raw_lines
+        in
+        let all_lines =
+          raw_lines
           |> List.filter (fun l -> String.trim l <> "")
         in
         let total = List.length all_lines in

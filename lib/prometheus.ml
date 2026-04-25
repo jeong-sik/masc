@@ -292,6 +292,24 @@ let metric_keeper_supervisor_last_sweep_unixtime =
 let metric_tool_join_required_guard =
   "masc_tool_join_required_guard_total"
 
+(* #9771: keeper turn-slot semaphore wait timeout counter.
+
+   Production observed multiple keepers ([sangsu], [janitor],
+   [ramarama], [qa-king], [taskmaster]) repeatedly skipping turns
+   with [semaphore wait > 60s, peers holding slot] — peers holding
+   the slot for a long-running OAS call (276s-963s observed) ran
+   past the 60s wait budget, every waiting keeper timed out, and
+   the WARN log was the only signal.
+
+   Three observable channels at which the timeout fires:
+     - [autonomous_queue_head]: fairness-FIFO head wait exceeded
+     - [autonomous]: autonomous-track semaphore acquire timed out
+     - [turn]: shared turn semaphore acquire timed out
+
+   Labels: [keeper, channel].  Cardinality = ~10 keepers × 3
+   channels = ~30 series, well within Prometheus best practice. *)
+let metric_keeper_semaphore_wait_timeout =
+  "masc_keeper_semaphore_wait_timeout_total"
 
 (* Keeper compaction (keeper_compact_policy.ml, tool_keeper.ml). *)
 let metric_keeper_compactions = "masc_keeper_compactions_total"

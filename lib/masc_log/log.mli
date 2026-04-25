@@ -90,6 +90,13 @@ module Ring : sig
 
   val cleanup_old_files : ?keep_days:int -> string -> unit
   (** Remove log files older than [keep_days] (default 7). *)
+
+  module For_testing : sig
+    val date_string : unit -> string
+    (** UTC date string ([YYYY-MM-DD]) used for the current
+        [system_log_<date>.jsonl] filename.  Exposed so tests
+        can pin the boundary against the entry-timestamp TZ. *)
+  end
 end
 
 val client_tool_host_error :

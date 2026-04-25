@@ -1377,6 +1377,11 @@
  (modules test_dated_jsonl)
  (libraries dated_jsonl fs_compat alcotest eio eio_main yojson unix))
 
+(test
+ (name test_log_filename_utc_10392)
+ (modules test_log_filename_utc_10392)
+ (libraries masc_log time_compat alcotest unix))
+
 ; ============================================================
 ; Special: Heartbeat/keeper minimal deps
 ; ============================================================

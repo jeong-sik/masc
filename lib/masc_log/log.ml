@@ -176,9 +176,16 @@ module Ring = struct
   let file_current_date : string ref = ref ""
   let file_base_dir : string ref = ref ""
 
+  (* #10392: filename uses UTC so the boundary aligns with the
+     entry timestamps (which are written by [timestamp_iso] as
+     UTC ISO8601, line 130).  Pre-fix the rotation crossed at
+     KST 00:00:00 (= UTC 15:00:00), so [system_log_2026-04-26.jsonl]
+     held entries dated [2026-04-25T15:xx:xxZ] — date-grep on
+     the filename returned 0 hits.  Aligns with [Dated_jsonl]
+     which already rotates on UTC. *)
   let date_string () =
     let t = Time_compat.now () in
-    let tm = Unix.localtime t in
+    let tm = Unix.gmtime t in
     Printf.sprintf "%04d-%02d-%02d"
       (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
 
@@ -279,10 +286,13 @@ module Ring = struct
   let load_from_file dir =
     ensure_dir dir;
     let today = date_string () in
-    (* Load today's and yesterday's logs *)
+    (* Load today's and yesterday's logs.  #10392: must use UTC
+       so the [yesterday] computation lines up with the UTC
+       filename produced by [date_string]; otherwise the lookup
+       lands on a file the writer never created. *)
     let yesterday =
       let t = Time_compat.now () -. 86400.0 in
-      let tm = Unix.localtime t in
+      let tm = Unix.gmtime t in
       Printf.sprintf "%04d-%02d-%02d"
         (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
     in
@@ -331,8 +341,13 @@ module Ring = struct
     if Sys.file_exists dir then begin
       let files = protect ~default:[||] (fun () -> Sys.readdir dir) in
       let cutoff =
+        (* #10392: must use UTC so the cutoff string lexically
+           compares against the UTC-named files produced by
+           [date_string].  Pre-fix the localtime cutoff drifted
+           by up to 9 hours from the filename TZ, intermittently
+           skipping or doubly-deleting boundary days. *)
         let t = Time_compat.now () -. (float_of_int keep_days *. 86400.0) in
-        let tm = Unix.localtime t in
+        let tm = Unix.gmtime t in
         Printf.sprintf "%04d-%02d-%02d"
           (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
       in
@@ -416,6 +431,10 @@ module Ring = struct
       ("total", `Int (Atomic.get total));
       ("entries", `List (List.map entry_to_json entries));
     ]
+
+  module For_testing = struct
+    let date_string = date_string
+  end
 end
 
 (** Log a message at given level with optional context *)

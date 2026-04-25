@@ -16,8 +16,10 @@ let rm_rf dir =
   in
   try rm dir with _ -> ()
 
+(* #10392: writer rotates on UTC so the expected filename
+   must compute the date with [Unix.gmtime], not localtime. *)
 let today_log_path dir =
-  let tm = Unix.localtime (Unix.gettimeofday ()) in
+  let tm = Unix.gmtime (Unix.gettimeofday ()) in
   Filename.concat dir
     (Printf.sprintf "system_log_%04d-%02d-%02d.jsonl"
        (tm.Unix.tm_year + 1900)

@@ -23,6 +23,30 @@ type runtime = {
     after [init] has published the runtime on the main domain. *)
 let runtime_state : runtime option Atomic.t = Atomic.make None
 
+(** Observability hook: invoked when an Eio process call hits its
+    [timeout_sec] budget.  Default no-op so the lower [masc_process]
+    layer carries no [Prometheus] dependency.  Wired from [lib/coord.ml]
+    at module load to emit [masc_process_timeout_total].
+
+    Cardinality: callers should pass [program = Filename.basename argv0]
+    (~10-20 distinct programs fleet-wide); [timeout_sec] is the per-call
+    budget (a few discrete values: 15.0, 60.0, ...). *)
+let process_timeout_observer_fn :
+    (program:string -> timeout_sec:float -> unit) Atomic.t =
+  Atomic.make (fun ~program:_ ~timeout_sec:_ -> ())
+
+let argv_program = function
+  | [] -> "<empty>"
+  | prog :: _ -> Filename.basename prog
+
+let observe_process_timeout argv ~timeout_sec =
+  try
+    (Atomic.get process_timeout_observer_fn)
+      ~program:(argv_program argv) ~timeout_sec
+  with exn ->
+    Log.Misc.warn "[Process_eio] timeout observer failed: %s"
+      (Printexc.to_string exn)
+
 let init ~cwd_default ~proc_mgr ~clock =
   Atomic.set runtime_state (Some { proc_mgr; clock; cwd_default })
 
@@ -334,6 +358,8 @@ let with_unix_capture ?env ?cwd ?stdin_content ?(capture_stderr = false)
                   ()
               else stderr
             in
+            if !timed_out then
+              observe_process_timeout argv ~timeout_sec;
             cleanup ();
             on_success status stdout stderr)
      with
@@ -472,6 +498,7 @@ let run_argv ?(timeout_sec = 60.0) ?env (argv : string list) : string =
         | Eio.Time.Timeout ->
             Log.Misc.warn "[Process_eio] Timeout after %.0fs: %s"
               timeout_sec label;
+            observe_process_timeout argv ~timeout_sec;
             process_error_output ~label
               ~reason:(Printf.sprintf "timeout after %.0fs" timeout_sec) ()
         | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -507,6 +534,7 @@ let run_argv_with_stdin ?(timeout_sec = 60.0) ?env ~(stdin_content : string) (ar
         | Eio.Time.Timeout ->
             Log.Misc.warn "[Process_eio] Timeout after %.0fs: %s"
               timeout_sec label;
+            observe_process_timeout argv ~timeout_sec;
             process_error_output ~label
               ~reason:(Printf.sprintf "timeout after %.0fs" timeout_sec) ()
         | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -558,6 +586,7 @@ let run_argv_with_stdin_and_status_split
         | Eio.Time.Timeout ->
             Log.Misc.warn "[Process_eio] Timeout after %.0fs: %s"
               timeout_sec label;
+            observe_process_timeout argv ~timeout_sec;
             let timeout_status = Unix.WEXITED 124 in
             let stdout = Buffer.contents stdout_buf in
             let stderr = Buffer.contents stderr_buf in
@@ -626,6 +655,7 @@ let run_argv_with_status_split ?(timeout_sec = 60.0) ?env ?cwd
         | Eio.Time.Timeout ->
             Log.Misc.warn "[Process_eio] Timeout after %.0fs: %s"
               timeout_sec label;
+            observe_process_timeout argv ~timeout_sec;
             let timeout_status = Unix.WEXITED 124 in
             let stdout = Buffer.contents stdout_buf in
             let stderr = Buffer.contents stderr_buf in

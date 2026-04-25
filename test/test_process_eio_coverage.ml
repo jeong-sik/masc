@@ -74,6 +74,31 @@ let test_run_argv_with_status_fallback_enforces_timeout () =
   let code = match status with Unix.WEXITED c -> c | _ -> -1 in
   check int "fallback timeout exit code" 124 code
 
+let with_timeout_observer f =
+  let previous = Atomic.get Process_eio.process_timeout_observer_fn in
+  let seen = ref [] in
+  Atomic.set Process_eio.process_timeout_observer_fn
+    (fun ~program ~timeout_sec ->
+       seen := (program, timeout_sec) :: !seen);
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set Process_eio.process_timeout_observer_fn previous)
+    (fun () -> f seen)
+
+let test_run_argv_with_status_fallback_observes_timeout () =
+  Process_eio.reset_for_testing ();
+  with_timeout_observer (fun seen ->
+      let status, _output =
+        Process_eio.run_argv_with_status ~timeout_sec:0.02 [ "/bin/sleep"; "5" ]
+      in
+      let code = match status with Unix.WEXITED c -> c | _ -> -1 in
+      check int "fallback timeout exit code" 124 code;
+      check
+        (list (pair string (float 0.0001)))
+        "fallback timeout observer payload"
+        [ ("sleep", 0.02) ]
+        (List.rev !seen))
+
 let test_init_exposes_complete_runtime () =
   Eio_main.run @@ fun env ->
   let proc_mgr = Eio.Stdenv.process_mgr env in
@@ -223,6 +248,8 @@ let () =
             test_run_argv_with_status_fallback_surfaces_spawn_error;
           test_case "argv-with-status-fallback-enforces-timeout" `Quick
             test_run_argv_with_status_fallback_enforces_timeout;
+          test_case "argv-with-status-fallback-observes-timeout" `Quick
+            test_run_argv_with_status_fallback_observes_timeout;
           test_case "init-exposes-complete-runtime" `Quick
             test_init_exposes_complete_runtime;
         ] );

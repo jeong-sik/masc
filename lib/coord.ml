@@ -217,6 +217,23 @@ let record_fsm_drift_with_agent ~variant ~force ~agent_name =
 
 let () = Atomic.set Coord_hooks.fsm_drift_observer_fn record_fsm_drift_with_agent
 
+(* #9632: Process_eio timeout observability.
+   Fleet-wide rate of subprocess timeouts, broken down by program
+   (argv[0] basename) and configured budget.  Lets operators answer
+   "which command is timing out, and is 15s/60s the right budget?"
+   without log-scraping the WARN line.  Cardinality is bounded by
+   the small set of commands MASC actually invokes (~10-20 series). *)
+let process_timeout_metric = Prometheus.metric_process_timeout
+
+let record_process_timeout ~program ~timeout_sec =
+  Prometheus.inc_counter process_timeout_metric
+    ~labels:[ ("program", program);
+              ("timeout_sec", Printf.sprintf "%.0f" timeout_sec) ]
+    ()
+
+let () =
+  Atomic.set Process_eio.process_timeout_observer_fn record_process_timeout
+
 (* Activity graph emit — wraps Activity_graph for room sub-modules *)
 let () = Atomic.set Coord_hooks.activity_emit_fn (fun config ~actor ?subject ~kind ~payload ~tags () ->
     (try

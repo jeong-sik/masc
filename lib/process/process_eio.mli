@@ -23,6 +23,21 @@ val get_cwd_default : unit -> (Eio.Fs.dir_ty Eio.Path.t, string) result
     fallback path (e.g. bind-related subprocess transport errors on macOS). *)
 val should_retry_unix_fallback : exn -> bool
 
+(** {1 Observability hook (#9632)} *)
+
+val process_timeout_observer_fn :
+  (program:string -> timeout_sec:float -> unit) Atomic.t
+(** Hook fired from every [run_argv*] timeout branch.  Default no-op so
+    [masc_process] carries no [Prometheus] dependency.  [lib/coord.ml]
+    wires it at module load to emit [masc_process_timeout_total].
+    [program] is [Filename.basename argv0] (~10-20 distinct programs
+    fleet-wide). *)
+
+val argv_program : string list -> string
+(** [argv_program argv] returns [Filename.basename argv0] (or
+    ["<empty>"] for an empty argv).  Exposed for tests and parity with
+    the hook payload. *)
+
 (** {1 Eio-native process execution (global refs)} *)
 
 (** Run command with explicit argv (no shell). Safe from injection.

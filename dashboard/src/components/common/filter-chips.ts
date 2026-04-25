@@ -44,13 +44,28 @@ export function FilterChips<T extends string>({
     ? 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--text-dim)] hover:bg-[var(--white-8)] hover:border-[var(--border-slate-22)] hover:text-[var(--text-body)]'
     : 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--text-dim)] hover:bg-[var(--white-8)] hover:border-[rgba(200,168,78,0.4)]'
 
+  function handleKeyDown(e: KeyboardEvent) {
+    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return
+    const idx = chips.findIndex(c => c.key === activeKey)
+    if (idx < 0) return
+    const next = e.key === 'ArrowRight'
+      ? (idx + 1) % chips.length
+      : (idx - 1 + chips.length) % chips.length
+    const key = chips[next].key
+    if (active) active.value = key
+    onChange?.(key)
+    ;(e.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('[role="tab"]')[next]?.focus()
+    e.preventDefault()
+  }
+
   return html`
-    <div class="flex flex-wrap gap-1.5 ${cx ?? ''}" role="tablist" aria-label=${ariaLabel}>
+    <div class="flex flex-wrap gap-1.5 ${cx ?? ''}" role="tablist" aria-label=${ariaLabel} onKeyDown=${handleKeyDown}>
       ${chips.map(chip => html`
         <button type="button"
           key=${chip.key}
           title=${chip.title}
           role="tab"
+          tabIndex=${activeKey === chip.key ? 0 : -1}
           aria-selected=${activeKey === chip.key}
           class="${chipClass} cursor-pointer transition-all duration-150 ${activeKey === chip.key
             ? activeToneClass

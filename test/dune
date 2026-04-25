@@ -129,6 +129,7 @@
         test_context_overflow_action_tracker
         test_keeper_fs_edit_patch
         test_keeper_docker_read
+        test_keeper_path_ssot
         test_keeper_github_read_only
         test_worktree_live_context
         test_worktree_status_single_flight_9632
@@ -275,6 +276,7 @@
           test_context_overflow_action_tracker
           test_keeper_fs_edit_patch
           test_keeper_docker_read
+          test_keeper_path_ssot
           test_keeper_github_read_only
           test_worktree_live_context
           test_worktree_status_single_flight_9632

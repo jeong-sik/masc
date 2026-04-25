@@ -67,6 +67,29 @@ let read_int_setting ~primary ~deprecated ~default =
           primary raw default;
         default
 
+let finite_float value =
+  match classify_float value with
+  | FP_nan | FP_infinite -> false
+  | FP_normal | FP_subnormal | FP_zero -> true
+
+let read_bounded_float_setting ~primary ~default ~valid =
+  let value = read_float_setting ~primary ~deprecated:"" ~default in
+  if valid value && finite_float value then value
+  else begin
+    Log.Misc.warn "Out-of-range float for %s, using default %.2f"
+      primary default;
+    default
+  end
+
+let read_min_int_setting ~primary ~default ~min_value =
+  let value = read_int_setting ~primary ~deprecated:"" ~default in
+  if value >= min_value then value
+  else begin
+    Log.Misc.warn "Out-of-range int for %s=%d, using default %d"
+      primary value default;
+    default
+  end
+
 (** Rolling window duration in seconds.  Events older than this are
     discarded on read.  Default: 300s (5 minutes), matching OpenRouter's
     rolling percentile window. *)
@@ -134,40 +157,40 @@ let hard_quota_cooldown_sec =
 
     @since 0.175.0 *)
 let trust_reward_on_success =
-  read_float_setting
+  read_bounded_float_setting
     ~primary:"MASC_CASCADE_TRUST_REWARD_ON_SUCCESS"
-    ~deprecated:""
     ~default:0.15
+    ~valid:(fun value -> value >= 0.0)
 
 let trust_decay_transient =
-  read_float_setting
+  read_bounded_float_setting
     ~primary:"MASC_CASCADE_TRUST_DECAY_TRANSIENT"
-    ~deprecated:""
     ~default:0.7
+    ~valid:(fun value -> value >= 0.0 && value <= 1.0)
 
 let trust_decay_persistent =
-  read_float_setting
+  read_bounded_float_setting
     ~primary:"MASC_CASCADE_TRUST_DECAY_PERSISTENT"
-    ~deprecated:""
     ~default:0.15
+    ~valid:(fun value -> value >= 0.0 && value <= 1.0)
 
 let trust_ceiling =
-  read_float_setting
+  read_bounded_float_setting
     ~primary:"MASC_CASCADE_TRUST_CEILING"
-    ~deprecated:""
     ~default:2.0
+    ~valid:(fun value -> value >= 1.0)
 
 let trust_persistent_threshold =
-  read_int_setting
+  read_min_int_setting
     ~primary:"MASC_CASCADE_TRUST_PERSISTENT_THRESHOLD"
-    ~deprecated:""
     ~default:2
+    ~min_value:1
 
 let trust_persistent_window_sec =
-  read_float_setting
+  read_bounded_float_setting
     ~primary:"MASC_CASCADE_TRUST_PERSISTENT_WINDOW_SEC"
-    ~deprecated:""
     ~default:600.0
+    ~valid:(fun value -> value > 0.0)
 
 (* ── Types ────────────────────────────────────── *)
 

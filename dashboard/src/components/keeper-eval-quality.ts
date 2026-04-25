@@ -169,7 +169,7 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
   const trend = computeTrend(data.snapshots)
 
   return html`
-    <div class="p-4 rounded border ${coverageTone(coverage)} transition-colors">
+    <div class="p-4 rounded border ${coverageTone(coverage)} transition-colors" role="region" aria-label="Eval Quality">
       ${'' /* Header */}
       <div class="flex items-center justify-between mb-3">
         <div class="flex items-center gap-2">

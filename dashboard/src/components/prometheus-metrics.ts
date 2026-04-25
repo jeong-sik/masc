@@ -325,7 +325,7 @@ export function PrometheusMetrics() {
       />
 
       ${query && html`
-        <span class="text-xs text-[var(--text-muted)]">
+        <span class="text-xs text-[var(--text-muted)]" role="status">
           ${totalMetrics} / ${metrics.value.length} 메트릭 일치
         </span>
       `}
@@ -351,7 +351,7 @@ export function PrometheusMetrics() {
               onClick=${() => toggleCategory(cat)}
             >
               <div class="flex items-center gap-2">
-                <span class="text-xs font-mono ${expanded ? 'text-[var(--text-body)]' : 'text-[var(--text-muted)]'}">${expanded ? '▼' : '▶'}</span>
+                <span class="text-xs font-mono ${expanded ? 'text-[var(--text-body)]' : 'text-[var(--text-muted)]'}" aria-hidden="true">${expanded ? '▼' : '▶'}</span>
                 <span class="font-medium text-[var(--text-heading)]">${meta.label}</span>
                 <span class="text-xs text-[var(--text-muted)]">${meta.description}</span>
               </div>

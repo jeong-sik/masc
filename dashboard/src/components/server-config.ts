@@ -108,7 +108,7 @@ function CategoryPanel({ name, entries }: { name: string; entries: ConfigEntry[]
         onClick=${() => toggleCategory(name)}
       >
         <div class="flex items-center gap-2">
-          <span class="text-xs text-[var(--text-muted)]">${isExpanded ? '\u25BC' : '\u25B6'}</span>
+          <span class="text-xs text-[var(--text-muted)]" aria-hidden="true">${isExpanded ? '\u25BC' : '\u25B6'}</span>
           <span class="text-sm font-medium text-[var(--text-primary)] capitalize">${name}</span>
           <span class="text-xs text-[var(--text-muted)]">(${filtered.length})</span>
         </div>

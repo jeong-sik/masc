@@ -24,6 +24,7 @@
    auth
    auth_doctor
    auth_login
+   codex_mcp_config_doctor
    board
    board_core
    board_core_classify

@@ -372,6 +372,7 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
               trackTone="muted"
               trackClass="flex-1"
               class="bg-[var(--sky-400)]"
+              ariaLabel=${`토큰 절약 ${(ratio ?? 0).toFixed(0)}%`}
             />
             <span class="text-3xs font-mono text-[var(--sky-400)]">-${saved.toLocaleString()}tok (${(ratio ?? 0).toFixed(0)}%)</span>
           </div>

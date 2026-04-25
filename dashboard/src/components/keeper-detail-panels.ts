@@ -442,6 +442,7 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
                         tone="accent"
                         trackTone="dim"
                         trackClass="flex-1"
+                        ariaLabel=${`${model} 사용 비율 ${pct.toFixed(0)}%`}
                       />
                       <span class="shrink-0 w-10 text-right text-[var(--text-muted)]">${count}회</span>
                     </div>

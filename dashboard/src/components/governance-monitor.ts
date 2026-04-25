@@ -203,7 +203,7 @@ export function GovernanceMonitor() {
               ? html`<div class="py-4 text-center text-2xs text-[var(--text-muted)]">필터 결과 없음 (${allRejections.length} items)</div>`
               : html`
                 <div class="overflow-x-auto">
-                  <table class="w-full text-xs">
+                  <table class="w-full text-xs" aria-label="거버넌스 거절 이력">
                     <thead>
                       <tr class="text-left text-[var(--text-muted)] border-b border-[var(--card-border)]">
                         <th scope="col" class="py-1.5 pr-4 font-medium">Tool</th>

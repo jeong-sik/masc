@@ -399,7 +399,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
           `
         : null}
       <div class="overflow-x-auto">
-        <table class="min-w-full text-xs">
+        <table class="min-w-full text-xs" aria-label="Fleet FSM 상태 매트릭스">
           <thead class="bg-[var(--white-5)] text-[var(--text-muted)]">
             <tr>
               <th scope="col" class="px-3 py-2 text-left font-semibold">Keeper</th>

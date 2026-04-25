@@ -640,7 +640,7 @@ export function MemorySubsystems() {
                         필터 결과 없음 (${synapses.length} items)
                       </div>`
                     : html`<div class="overflow-x-auto">
-                        <table class="w-full text-left">
+                        <table class="w-full text-left" aria-label="시냅스 연결 목록">
                           <thead>
                             <tr class="border-b border-[var(--white-10)] text-xs text-[var(--text-muted)]0">
                               <th scope="col" class="py-1.5 px-2">From</th>

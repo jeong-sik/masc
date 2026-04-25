@@ -495,7 +495,7 @@ function RequestsTable({
   }
   return html`
     <div class="overflow-x-auto">
-      <table class="w-full text-xs">
+      <table class="w-full text-xs" aria-label="검증 요청 목록">
         <thead>
           <tr class="text-[var(--text-muted)] border-b border-[var(--card-border)]">
             <th scope="col" class="text-left py-1 pr-2">상태</th>

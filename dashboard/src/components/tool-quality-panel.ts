@@ -155,7 +155,7 @@ function ToolTable({
   }
   return html`
     <div class="overflow-x-auto">
-      <table class="w-full text-2xs">
+      <table class="w-full text-2xs" aria-label="도구 품질 지표">
         <thead>
           <tr class="text-[var(--text-dim)] border-b border-[var(--card-border)]">
             <th scope="col" class="text-left py-1 font-normal">Tool</th>

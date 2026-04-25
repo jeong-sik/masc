@@ -725,6 +725,14 @@ jobs:
             if [ -n "$live_labels" ]; then
               export PR_LIVE_LABELS="$live_labels"
             fi
+            # #10192: CI Gate runs that fire after auto-merge can
+            # see the bypass label cleaned up by post-merge
+            # automation; pass live state to the policy script so
+            # it skips the check when the PR is no longer open.
+            live_state="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json state --jq '.state' 2>/dev/null || true)"
+            if [ -n "$live_state" ]; then
+              export PR_LIVE_STATE="$live_state"
+            fi
           fi
           scripts/ci/check-agent-draft-policy.sh
 

@@ -83,6 +83,10 @@ let test_ci_sync_and_asset_contracts () =
     (file_contains_pattern ".github/workflows/ci.yml" "PR_LIVE_IS_DRAFT");
   check bool "ci gate refreshes live labels" true
     (file_contains_pattern ".github/workflows/ci.yml" "PR_LIVE_LABELS");
+  (* #10192: ci gate must also pass live PR state to the
+     policy script so already-merged PRs do not flip red. *)
+  check bool "ci gate refreshes live PR state" true
+    (file_contains_pattern ".github/workflows/ci.yml" "PR_LIVE_STATE");
   check bool "pr hygiene no longer checks dashboard assets (gitignored)" true
     (not (file_contains_pattern "scripts/check-pr-hygiene.sh" "dashboard source or Vite config changed but assets/dashboard was not updated"))
 
@@ -127,7 +131,24 @@ let test_agent_draft_policy_script () =
          ("PR_TITLE", "fix: human authored branch");
          ("PR_HEAD_REF", "feature/human-branch");
          ("PR_LABELS", "enhancement");
-       ])
+       ]);
+  (* #10192: post-merge gate race.  When the live PR state is
+     MERGED or CLOSED, the policy is moot (the merge already
+     happened) and a missing bypass label must NOT resurrect a
+     red check on a shipped PR. *)
+  check int "ready agent PR with live state MERGED is skipped" 0
+    (run_agent_draft_policy
+       (("PR_IS_DRAFT", "false") :: ("PR_LIVE_STATE", "MERGED") :: base));
+  check int "ready agent PR with live state CLOSED is skipped" 0
+    (run_agent_draft_policy
+       (("PR_IS_DRAFT", "false") :: ("PR_LIVE_STATE", "CLOSED") :: base));
+  check int "live state lower-case merged is also skipped" 0
+    (run_agent_draft_policy
+       (("PR_IS_DRAFT", "false") :: ("PR_LIVE_STATE", "merged") :: base));
+  check bool "live state OPEN does NOT bypass policy" true
+    (run_agent_draft_policy
+       (("PR_IS_DRAFT", "false") :: ("PR_LIVE_STATE", "OPEN") :: base)
+     <> 0)
 
 let test_health_and_ci_runner_diagnostics () =
   check bool "health snapshot records baseline source" true

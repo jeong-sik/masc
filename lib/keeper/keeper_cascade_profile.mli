@@ -59,6 +59,34 @@ val catalog_names_result : ?config_path:string -> unit -> (string list, string) 
     boundaries can fail loud instead of collapsing catalog drift into an empty
     dynamic profile set. *)
 
+(** Provenance of the names returned by {!catalog_names_with_toml_fallback}. *)
+type catalog_names_source =
+  | Live_catalog
+      (** The full strict catalog ([Cascade_config_loader.load_catalog])
+          succeeded; names are the live, validated catalog entries. *)
+  | Toml_section_fallback of { catalog_error : string }
+      (** Strict catalog load failed but [cascade.toml] was parseable.
+          Names come from the top-level table sections; [catalog_error]
+          is the original loader error so callers can WARN about the
+          degraded mode. *)
+
+val catalog_names_with_toml_fallback :
+  ?config_path:string ->
+  unit ->
+  (string list * catalog_names_source, string) result
+(** #10259 — accept-list source for the keeper cascade-name validator.
+
+    On strict-load success, returns the live catalog names tagged
+    [Live_catalog].  On strict-load failure, falls back to enumerating
+    [cascade.toml]'s top-level table sections (filtering meta-keys
+    starting with ['_']) and tags the result [Toml_section_fallback].
+    Returns [Error _] only when neither source produces a name list.
+
+    This decouples the validator's accept list from full strict
+    materialization so a localized field-whitelist regression in the
+    materializer does not silently reject every operator-defined
+    cascade across the fleet. *)
+
 val keeper_catalog_names : ?config_path:string -> unit -> string list
 (** Assignable live profile names from {!catalog_names}, filtered by
     [keeper_assignable] metadata. *)

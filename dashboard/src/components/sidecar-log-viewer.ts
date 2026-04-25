@@ -218,6 +218,7 @@ export function SidecarLogViewer({ connectorId }: { connectorId: string }) {
                 type="search"
                 value=${entry.keyword}
                 placeholder="keyword 필터 (case-insensitive)"
+                aria-label="로그 키워드 필터"
                 class="min-w-0 flex-1 rounded border border-[var(--white-8)] bg-[var(--bg-0)] px-2 py-0.5 text-2xs text-[var(--text-body)] focus:border-[var(--accent-1)] focus:outline-none"
                 data-log-keyword
                 onInput=${(ev: Event) => {
@@ -230,6 +231,7 @@ export function SidecarLogViewer({ connectorId }: { connectorId: string }) {
                     <button
                       type="button"
                       class="cursor-pointer rounded border border-[var(--white-8)] px-1.5 py-0.5 text-3xs uppercase tracking-4 text-[var(--text-dim)] hover:bg-[var(--white-8)] hover:text-[var(--text-body)]"
+                      aria-label="필터 초기화"
                       data-log-filter-clear
                       onClick=${() => setEntry(connectorId, { level: 'all', keyword: '' })}
                     >clear</button>
@@ -239,7 +241,7 @@ export function SidecarLogViewer({ connectorId }: { connectorId: string }) {
           `
         : null}
       ${entry.error
-        ? html`<div class="rounded border border-[var(--bad-20)] bg-[var(--bad-10)] px-2 py-1 text-2xs text-[var(--bad-light)]">${entry.error}</div>`
+        ? html`<div role="alert" class="rounded border border-[var(--bad-20)] bg-[var(--bad-10)] px-2 py-1 text-2xs text-[var(--bad-light)]">${entry.error}</div>`
         : entry.loading && entry.lines.length === 0
           ? html`
               <div class="rounded bg-[var(--bg-0)] p-2">
@@ -257,7 +259,7 @@ export function SidecarLogViewer({ connectorId }: { connectorId: string }) {
                   </div>
                 `
               : html`
-                  <pre class="max-h-[40vh] overflow-auto whitespace-pre-wrap break-words rounded bg-[var(--bg-0)] p-2 font-mono text-3xs leading-[1.4] text-[var(--text-body)]">${filtered.join('\n')}</pre>
+                  <pre role="log" aria-label="${connectorId} 로그" class="max-h-[40vh] overflow-auto whitespace-pre-wrap break-words rounded bg-[var(--bg-0)] p-2 font-mono text-3xs leading-[1.4] text-[var(--text-body)]">${filtered.join('\n')}</pre>
                 `
             : html`
                 <div class="rounded border border-dashed border-[var(--white-8)] px-3 py-3 text-center text-2xs text-[var(--text-dim)]">

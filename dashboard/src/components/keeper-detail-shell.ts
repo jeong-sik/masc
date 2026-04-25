@@ -80,6 +80,7 @@ function KeeperCascadeSelector({ keeper }: { keeper: Keeper }) {
     <div class="flex items-center gap-1.5">
       <select
         class="py-0.5 px-1 rounded text-3xs font-mono bg-[var(--white-5)] text-[var(--text-muted)] border border-[var(--white-8)] cursor-pointer"
+        aria-label="Cascade profile"
         title=${invalidProfiles.length > 0
           ? `Cascade profile\n\nDisabled invalid presets:\n${invalidSummary}`
           : 'Cascade profile'}
@@ -144,6 +145,7 @@ export function KeeperDetailMissingState({
         <div class="mt-4">
           <button
             type="button"
+            aria-label="목록으로 돌아가기"
             class="inline-flex items-center gap-2 rounded-full border border-[var(--white-10)] bg-[var(--white-4)] px-4 py-2 text-sm font-medium text-[var(--text-strong)] transition-colors hover:bg-[var(--white-8)]"
             onClick=${onClose}
           >
@@ -170,6 +172,7 @@ export function KeeperDetailHeaderInfo({
     <div class="flex min-w-0 items-start gap-4">
       <button
         type="button"
+        aria-label="목록으로 돌아가기"
         onClick=${onClose}
         class="inline-flex shrink-0 items-center gap-2 rounded-full border border-[var(--white-10)] bg-[var(--white-4)] px-3.5 py-2 text-sm font-medium text-[var(--text-strong)] transition-colors hover:bg-[var(--white-8)]"
       >
@@ -310,6 +313,7 @@ export function KeeperDetailOverviewSidebar({
               <button
                 type="button"
                 class="rounded-2xl border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-left transition-colors hover:bg-[var(--white-6)]"
+                aria-label=${`${section.label} 섹션으로 이동`}
                 onClick=${() => scrollToKeeperDetailSection(section.id)}
               >
                 <div class="text-sm font-medium text-[var(--text-strong)]">${section.label}</div>
@@ -339,6 +343,7 @@ export function KeeperDetailSection({
   return html`
     <section
       id=${id}
+      aria-label=${title}
       class="scroll-mt-24 rounded-[28px] border border-[var(--card-border)] bg-[linear-gradient(180deg,rgba(12,19,34,0.94),rgba(8,13,24,0.98))] shadow-[0_24px_48px_rgba(0,0,0,0.22)]"
     >
       <div class="border-b border-[var(--white-8)] px-5 py-4 sm:px-6">

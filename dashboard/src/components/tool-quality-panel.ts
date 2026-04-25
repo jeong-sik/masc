@@ -223,7 +223,7 @@ function TrendSparkline({ points }: { points: HourlyPoint[] }) {
         <span class="text-3xs uppercase tracking-wider text-[var(--text-muted)]">성공률 추이</span>
         <span class="text-xs font-mono" style="color:${lineColor}">${lastRate.toFixed(1)}%</span>
       </div>
-      <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:var(--bg-deepest);">
+      <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:var(--bg-deepest);" aria-hidden="true">
         ${bars.map(b => html`
           <rect x="${b.x.toFixed(1)}" y="${b.y.toFixed(1)}" width="${b.w.toFixed(1)}" height="${b.h.toFixed(1)}" fill="${b.failures > 0 ? 'rgba(239,68,68,0.3)' : 'var(--ok-soft)'}" rx="0.5" />
         `)}
@@ -302,7 +302,7 @@ export function ToolQualityPanel() {
   if (!d || d.total === 0) return html`<div class="p-4 text-2xs text-[var(--text-dim)]">도구 호출 데이터 없음</div>`
 
   return html`
-    <div class="flex flex-col gap-4 p-4">
+    <div class="flex flex-col gap-4 p-4" role="region" aria-label="도구 호출 품질">
       <div class="flex items-center justify-between">
         <div>
           <h2 class="text-sm font-medium">도구 호출 품질</h2>

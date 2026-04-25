@@ -166,6 +166,22 @@ let test_auto_raw_falls_back_to_canonical_model_id () =
     (before +. 1.0)
     (alias_counter_for ~keeper ~alias:"auto" ~source:"telemetry_canonical")
 
+let test_provider_prefixed_auto_falls_back_to_canonical_model_id () =
+  let keeper = "test-keeper-prefixed-auto-canonical-10318" in
+  let before =
+    alias_counter_for ~keeper ~alias:"auto" ~source:"telemetry_canonical"
+  in
+  let telemetry = make_telemetry ~canonical_model_id:"claude-sonnet-4-6" () in
+  let response = make_response ~model:"claude_code:auto" ~telemetry () in
+  let resolved = Hooks.resolve_after_turn_model ~keeper_name:keeper ~response in
+  Alcotest.(check string)
+    "provider-prefixed auto resolved to canonical"
+    "claude-sonnet-4-6" resolved;
+  Alcotest.(check (float 0.0001))
+    "prefixed alias fallback counter +1"
+    (before +. 1.0)
+    (alias_counter_for ~keeper ~alias:"auto" ~source:"telemetry_canonical")
+
 let () =
   Alcotest.run "response_model_empty_10083"
     [
@@ -181,5 +197,8 @@ let () =
             test_empty_canonical_id_falls_through_to_sentinel;
           Alcotest.test_case "raw auto -> telemetry canonical" `Quick
             test_auto_raw_falls_back_to_canonical_model_id;
+          Alcotest.test_case "provider-prefixed auto -> telemetry canonical"
+            `Quick
+            test_provider_prefixed_auto_falls_back_to_canonical_model_id;
         ] );
     ]

@@ -44,26 +44,27 @@ let git_exit ~cwd args =
   | Unix.WSIGNALED _, _ -> 128
   | Unix.WSTOPPED _, _ -> 128
 
+(* Worktree-message regexes are static — hoist so the DFAs are built
+   once at module init instead of per [extract_*] call. *)
+let abs_path_re = Re.Pcre.re {|Path: (/[^ \t\n\r]+)|} |> Re.compile
+let rel_worktree_re = Re.Pcre.re {|\.worktrees/[^ \t\n\r]+|} |> Re.compile
+let branch_name_re = Re.Pcre.re {|Branch: ([^ \t\n\r]+)|} |> Re.compile
+
 (** Extract absolute worktree path from [Coord_worktree.worktree_create_r]
     success message. Tries "Path: <absolute>" first, then falls back to
     constructing from a relative [.worktrees/...] segment. *)
 let extract_worktree_path ~base_path msg =
-  (* Try absolute path from "Path: /..." *)
-  let abs_re = Re.Pcre.re {|Path: (/[^ \t\n\r]+)|} |> Re.compile in
-  match Re.exec_opt abs_re msg with
+  match Re.exec_opt abs_path_re msg with
   | Some g -> Some (Re.Group.get g 1)
   | None ->
-    (* Fallback: relative path *)
-    let rel_re = Re.Pcre.re {|\.worktrees/[^ \t\n\r]+|} |> Re.compile in
-    (match Re.exec_opt rel_re msg with
+    (match Re.exec_opt rel_worktree_re msg with
     | Some g -> Some (Filename.concat base_path (Re.Group.get g 0))
     | None -> None)
 
 (** Extract branch name from success message.
     Format: "Branch: agent/task-NNN" *)
 let extract_branch_name msg =
-  let re = Re.Pcre.re {|Branch: ([^ \t\n\r]+)|} |> Re.compile in
-  match Re.exec_opt re msg with
+  match Re.exec_opt branch_name_re msg with
   | Some g -> Some (Re.Group.get g 1)
   | None -> None
 

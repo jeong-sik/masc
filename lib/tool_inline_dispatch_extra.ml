@@ -54,90 +54,170 @@ let json_upsert_meta_string_field name value fields =
     in
     json_upsert_assoc_field "meta" meta_json fields
 
-let canonicalize_board_actor_field field arguments =
-  match arguments with
-  | `Assoc fields -> (
-      match List.assoc_opt field fields with
-      | Some (`String raw) ->
-          let raw = String.trim raw in
-          if raw = "" then arguments
-          else
-            let canonical = Server_utils.board_actor_author_for_write raw in
-            if String.equal canonical raw then arguments
-            else
-              `Assoc
-                (json_upsert_assoc_field field (`String canonical) fields)
-      | _ -> arguments)
-  | _ -> arguments
+(** #10297: Prometheus counter recording the cycle when a board-tool
+    caller supplied an identity field whose canonical form disagrees
+    with the runtime contract's [agent_name].  Pre-fix the caller's
+    value was accepted unconditionally; the counter makes spoof
+    attempts (or persona/system-prompt confusion) visible to
+    operators instead of leaving them as silent audit drift.
+
+    Cardinality is bounded: 4 board tools x 2 identity fields ([author],
+    [voter]) = 8 series at most. *)
+let board_actor_identity_spoof_metric =
+  "masc_board_actor_identity_spoof_total"
+
+let () =
+  Prometheus.register_counter
+    ~name:board_actor_identity_spoof_metric
+    ~help:
+      "Total board-tool calls where the caller-supplied identity field \
+       (author / voter) canonicalised to a different keeper than the \
+       runtime contract's agent_name. The dispatcher rewrites the field \
+       to the trusted ctx value and preserves the caller's claim in \
+       [meta.<field>_caller_claim]; this counter surfaces the rewrite \
+       so operators can rate-alert on identity drift. \
+       Labels: [tool, field]."
+    ()
 
 let canonical_board_author raw =
   Server_utils.board_actor_author_for_write (String.trim raw)
 
-(** Fill [author] from the caller's agent identity when the arg is absent or
-    blank. Keepers, the HTTP surface, and autonomous callers routinely omit
-    [author] — we used to reject those calls at pre-hook validation, which
-    forced every caller to know about the legacy schema field. The board store
-    keeps canonical keeper names as principals while preserving raw runtime
-    agent names in metadata.
+let record_identity_raw_surface field raw canonical fields =
+  if raw = "" || String.equal raw canonical then fields
+  else json_upsert_meta_string_field (field ^ "_raw_agent_name") raw fields
 
-    If a caller supplies a different [author], the trusted runtime
-    [agent_name] wins. The caller's claim is retained in [meta] for forensics,
-    but the stored principal must match the dispatch context. *)
-let ensure_board_post_author ~agent_name arguments =
+let record_author_legacy_mismatch claim fields =
+  fields
+  |> json_upsert_meta_string_field "caller_supplied_author" claim
+  |> json_upsert_meta_string_field "author_rewrite_reason"
+       "caller_author_mismatch"
+
+(** #10297: enforce that a board-tool caller cannot author / vote under
+    a principal other than the runtime contract's [agent_name].  Pre-fix
+    [ensure_board_post_author] only consulted [agent_name] when the
+    caller's [author] field was empty, so any LLM that wrote a non-blank
+    [author] argument bypassed identity verification.
+    [canonicalize_board_actor_field] (board_comment, board_vote,
+    comment_vote) didn't consult [agent_name] at all.
+
+    Both paths now route through this helper, which compares the
+    canonical form of the caller's claim against the canonical form
+    of [agent_name]:
+
+    1. Empty / "anonymous" -> fill from [agent_name].
+    2. Caller's canonical equals ctx canonical -> keep the caller's
+       canonicalisation (same keeper, possibly different surface form
+       like [keeper-velvet-hammer-agent] vs [velvet-hammer]).
+    3. Caller's canonical disagrees -> rewrite the field to ctx
+       canonical, preserve the caller's claim in
+       [meta.<field>_caller_claim] for forensics, retain the older
+       author-specific mismatch fields for compatibility, and increment
+       [masc_board_actor_identity_spoof_total{tool, field}].
+
+    Lenient mode (rewrite + preserve) is preferred over strict
+    fail-closed because the LLM occasionally supplies a wrong
+    [author] under persona confusion; rejecting the call would
+    break the chain and lose the post entirely, while the rewrite
+    preserves the post with correct attribution and surfaces the
+    drift to metrics. *)
+let enforce_caller_identity ~tool ~field ~agent_name arguments =
+  let ctx_raw = String.trim agent_name in
+  let ctx_canonical =
+    if ctx_raw = "" then "" else canonical_board_author ctx_raw
+  in
   match arguments with
   | `Assoc fields -> (
-      let existing =
-        match List.assoc_opt "author" fields with
+      let raw_existing =
+        match List.assoc_opt field fields with
         | Some (`String s) -> String.trim s
         | _ -> ""
       in
-      let trusted_raw = String.trim agent_name in
-      let trusted_author =
-        if trusted_raw = "" then "" else canonical_board_author trusted_raw
-      in
-      let raw_author =
-        if existing = "" || existing = "anonymous" then trusted_raw
-        else if
-          trusted_author <> ""
-          && not
-               (String.equal (canonical_board_author existing) trusted_author)
-        then trusted_raw
-        else existing
-      in
-      if raw_author = "" then arguments
-      else
-        let canonical = Server_utils.board_actor_author_for_write raw_author in
-        let fields = json_upsert_assoc_field "author" (`String canonical) fields in
-        let fields =
-          if
-            existing <> "" && existing <> "anonymous" && trusted_author <> ""
-            && not
-                 (String.equal
-                    (canonical_board_author existing)
-                    trusted_author)
-          then
-            fields
-            |> json_upsert_meta_string_field
-                 "caller_supplied_author" existing
-            |> json_upsert_meta_string_field
-                 "author_rewrite_reason" "caller_author_mismatch"
-          else fields
-        in
-        let fields =
-          if String.equal canonical raw_author then fields
-          else json_upsert_meta_string_field "author_raw_agent_name" raw_author fields
-        in
-        `Assoc fields)
+      match raw_existing with
+      | "" | "anonymous" ->
+          (* Fill from ctx when caller left the field blank or
+             explicitly marked it anonymous; if ctx is also empty,
+             leave the original arguments untouched. *)
+          if ctx_canonical = "" then arguments
+          else
+            let fields =
+              json_upsert_assoc_field field (`String ctx_canonical) fields
+            in
+            let fields =
+              record_identity_raw_surface field ctx_raw ctx_canonical fields
+            in
+            `Assoc fields
+      | claim ->
+          let claim_canonical = canonical_board_author claim in
+          if ctx_canonical = "" then
+            (* No ctx to compare against - preserve the caller's
+               canonicalisation as the legacy code did. *)
+            if String.equal claim_canonical claim then arguments
+            else
+              `Assoc
+                (json_upsert_assoc_field field (`String claim_canonical)
+                   fields)
+          else if String.equal claim_canonical ctx_canonical then
+            (* Caller's claim resolves to the same keeper as ctx.
+               Store the canonical keeper name and preserve the raw
+               surface that actually differed from the canonical form. *)
+            let fields =
+              json_upsert_assoc_field field (`String ctx_canonical) fields
+            in
+            let fields =
+              record_identity_raw_surface field claim ctx_canonical fields
+            in
+            `Assoc fields
+          else (
+            (* Mismatch: caller tried to author / vote under a different
+               principal. Rewrite to ctx, preserve the claim, and count
+               the rewrite. *)
+            Prometheus.inc_counter board_actor_identity_spoof_metric
+              ~labels:[ ("tool", tool); ("field", field) ]
+              ();
+            let fields =
+              json_upsert_assoc_field field (`String ctx_canonical) fields
+            in
+            let fields =
+              json_upsert_meta_string_field
+                (field ^ "_caller_claim") claim fields
+            in
+            let fields =
+              record_identity_raw_surface field ctx_raw ctx_canonical fields
+            in
+            let fields =
+              if String.equal field "author" then
+                record_author_legacy_mismatch claim fields
+              else fields
+            in
+            `Assoc fields))
   | _ -> arguments
+
+(** Backward-compatible aliases retained for direct callers (tests,
+    HTTP handlers).  New dispatch sites should call
+    {!enforce_caller_identity} with an explicit [tool] label. *)
+let canonicalize_board_actor_field ?(tool = "unknown") ?agent_name field
+    arguments =
+  enforce_caller_identity ~tool ~field
+    ~agent_name:(Option.value ~default:"" agent_name)
+    arguments
+
+let ensure_board_post_author ~agent_name arguments =
+  enforce_caller_identity ~tool:"masc_board_post" ~field:"author"
+    ~agent_name arguments
 
 let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~sw ~clock ~name =
   ignore (config, state, sw, clock);
   let arguments =
     match name with
-    | "masc_board_post" -> ensure_board_post_author ~agent_name arguments
-    | "masc_board_comment" -> canonicalize_board_actor_field "author" arguments
+    | "masc_board_post" ->
+        enforce_caller_identity ~tool:name ~field:"author" ~agent_name
+          arguments
+    | "masc_board_comment" ->
+        enforce_caller_identity ~tool:name ~field:"author" ~agent_name
+          arguments
     | "masc_board_vote" | "masc_board_comment_vote" ->
-        canonicalize_board_actor_field "voter" arguments
+        enforce_caller_identity ~tool:name ~field:"voter" ~agent_name
+          arguments
     | _ -> arguments
   in
   let arg_get_string key default =

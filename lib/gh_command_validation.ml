@@ -12,16 +12,6 @@ let forbidden_shell_chars =
 let contains_forbidden_shell_chars cmd =
   String.exists (fun ch -> List.mem ch forbidden_shell_chars) cmd
 
-let contains_substring s needle =
-  let s_len = String.length s in
-  let needle_len = String.length needle in
-  let rec loop i =
-    if i + needle_len > s_len then false
-    else if String.sub s i needle_len = needle then true
-    else loop (i + 1)
-  in
-  loop 0
-
 (** Top-level gh CLI commands allowed. Commands not in this list are
     rejected at the allowlist gate. *)
 let gh_allowed_commands =
@@ -134,7 +124,7 @@ let extract_gh_api_method cmd =
     are wide; only the destructive-verb-prefix set is R2. *)
 let gh_api_graphql_is_destructive cmd =
   let lower = String.lowercase_ascii cmd in
-  let has s = contains_substring lower s in
+  let has s = String_util.contains_substring lower s in
   has "graphql"
   && List.exists has gh_graphql_r2_mutations
 
@@ -382,7 +372,7 @@ let is_gh_workflow_operation cmd =
   | "api" :: _ ->
     let joined = String.concat " " parts in
     has_mutating_http_method parts
-    && List.exists (fun pat -> contains_substring joined pat)
+    && List.exists (fun pat -> String_util.contains_substring joined pat)
          [ "/merge"; "/merges"; "state=closed"; "state=\"closed\""; "state='closed'" ]
   | _ -> false
 
@@ -399,7 +389,7 @@ let gh_raw_parts cmd =
 
 let gh_option_takes_value tok =
   let tok = String.lowercase_ascii tok in
-  not (contains_substring tok "=")
+  not (String_util.contains_substring tok "=")
   && List.mem tok
        [ "-r"; "--repo";
          "-b"; "--body";
@@ -462,7 +452,7 @@ let is_gh_dangerous_operation cmd =
     let joined = String.concat " " parts in
     List.mem "delete" parts
     || (List.mem "graphql" parts
-        && List.exists (fun m -> contains_substring joined m)
+        && List.exists (fun m -> String_util.contains_substring joined m)
              gh_graphql_destructive_mutations)
   | _ -> false
 

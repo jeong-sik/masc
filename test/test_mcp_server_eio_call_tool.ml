@@ -231,6 +231,45 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
         (row |> U.member "task_id" |> U.to_string);
       check int "goal id count" 1
         (row |> U.member "goal_ids" |> U.to_list |> List.length);
+      let masc_root =
+        Filename.concat base_path Common.masc_dirname
+      in
+      let trace_id = "trace-test-" ^ keeper_name in
+      let trajectory_entries =
+        Masc_mcp.Trajectory.read_entries
+          ~masc_root
+          ~keeper_name
+          ~trace_id
+      in
+      check int "trajectory row count" 1 (List.length trajectory_entries);
+      let trajectory_entry = List.hd trajectory_entries in
+      check string "trajectory tool" "keeper_bash"
+        trajectory_entry.Masc_mcp.Trajectory.tool_name;
+      check int "trajectory turn" 1
+        trajectory_entry.Masc_mcp.Trajectory.turn;
+      check int "trajectory round" 1
+        trajectory_entry.Masc_mcp.Trajectory.round;
+      let trajectory_json =
+        let path =
+          Masc_mcp.Trajectory.trajectory_path masc_root keeper_name trace_id
+        in
+        let ic = open_in path in
+        let content =
+          Fun.protect
+            ~finally:(fun () -> close_in_noerr ic)
+            (fun () -> really_input_string ic (in_channel_length ic))
+        in
+        content
+        |> String.split_on_char '\n'
+        |> List.find (fun line -> String.trim line <> "")
+        |> Yojson.Safe.from_string
+      in
+      check string "trajectory runtime keeper" keeper_name
+        (trajectory_json |> U.member "runtime_contract" |> U.member "keeper_name"
+         |> U.to_string);
+      check string "trajectory action tool" "keeper_bash"
+        (trajectory_json |> U.member "action_radius" |> U.member "tool_name"
+         |> U.to_string);
       let sse_payload =
         match !received_sse with
         | Some payload -> extract_json_from_text payload

@@ -25,8 +25,8 @@ Primary mismatch: keeper/OAS tool calls reached `.masc/tool_calls`, but the traj
 
 | Surface / Store | Producer | Durable Store | Result |
 | --- | --- | --- | --- |
-| `/api/v1/keepers/:name/tool-calls` | `keeper_hooks_oas.post_tool_use` | `.masc/tool_calls/YYYY-MM/DD.jsonl` | Full I/O rows now include `runtime_contract` and `action_radius`. |
-| `/api/v1/keepers/:name/tool-stats` | `keeper_hooks_oas.post_tool_use` | `.masc/trajectories/<keeper>/<trace>.jsonl` | Post-tool-use now records trajectory `Tool_call` rows when `trajectory_acc` exists. |
+| `/api/v1/keepers/:name/tool-calls` | `keeper_hooks_oas.post_tool_use`, `mcp_server_eio_call_tool.runtime_mcp` | `.masc/tool_calls/YYYY-MM/DD.jsonl` | Full I/O rows now include `runtime_contract` and `action_radius`. |
+| `/api/v1/keepers/:name/tool-stats` | `keeper_hooks_oas.post_tool_use`, `mcp_server_eio_call_tool.runtime_mcp` | `.masc/trajectories/<keeper>/<trace>.jsonl` | Post-tool-use and runtime-MCP keeper tool traces now record trajectory `Tool_call` rows. |
 | `/api/v1/dashboard/execution-trust` | `keeper_agent_run.execution_receipt` | `.masc/keepers/<keeper>/execution-receipts` | Execution receipts now include `runtime_contract` and `action_radius`. |
 | `/api/v1/dashboard/telemetry/summary` | `Telemetry_unified.summary_json` | all unified telemetry stores | Each source now reports `health`, `freshness_slo_s`, `producer`, `durable_store`, `dashboard_surface`, and `stale_reason`. |
 | `.masc/telemetry-coverage-gaps` | trajectory/receipt failure reporters | `.masc/telemetry-coverage-gaps/YYYY-MM/DD.jsonl` | Trajectory append and receipt append failures are durable coverage gaps. |
@@ -99,6 +99,8 @@ Runtime acceptance with a fresh live keeper turn was not executed in this worktr
 - `/api/v1/dashboard/telemetry/summary` shows fresh `keeper_metric`, `tool_call_io`, and `oas_event`.
 - `/tool-stats` and `/tool-calls` agree on recent keeper tool executions.
 - A sample execution receipt and trajectory row both include `runtime_contract` and `action_radius`.
+
+Additional runtime-MCP delta found during 2026-04-25 re-verification: the live server had `sangsu` `/tool-calls` rows with `lane=runtime_mcp`, `runtime_contract`, and `action_radius`, while `/tool-stats` was empty for the same keeper because that direct runtime-MCP trace path bypassed `keeper_hooks_oas`. This report now includes the follow-up fix: `mcp_server_eio_call_tool.runtime_mcp` appends the matching trajectory row and reports append failures to `.masc/telemetry-coverage-gaps`.
 
 ## External Currentness Evidence
 

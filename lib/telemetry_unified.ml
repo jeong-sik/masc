@@ -81,7 +81,7 @@ let source_freshness_slo_s = function
 let source_producer = function
   | Keeper_metric -> "keeper_unified_metrics"
   | Agent_event -> "telemetry_eio"
-  | Tool_call_io -> "keeper_hooks_oas"
+  | Tool_call_io -> "keeper_hooks_oas|mcp_server_eio_call_tool"
   | Tool_usage -> "tool_usage_log"
   | Oas_event -> "oas_event_bus"
   | Tool_metric -> "tool_metrics_persist"

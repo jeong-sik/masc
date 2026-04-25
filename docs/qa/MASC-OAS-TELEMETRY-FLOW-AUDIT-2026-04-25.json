@@ -29,15 +29,15 @@
   "surfaces": [
     {
       "surface": "/api/v1/keepers/:name/tool-calls",
-      "producer": "keeper_hooks_oas.post_tool_use",
+      "producer": "keeper_hooks_oas.post_tool_use|mcp_server_eio_call_tool.runtime_mcp",
       "durable_store": ".masc/tool_calls/YYYY-MM/DD.jsonl",
       "status": "contract_and_action_radius_added"
     },
     {
       "surface": "/api/v1/keepers/:name/tool-stats",
-      "producer": "keeper_hooks_oas.post_tool_use",
+      "producer": "keeper_hooks_oas.post_tool_use|mcp_server_eio_call_tool.runtime_mcp",
       "durable_store": ".masc/trajectories/<keeper>/<trace>.jsonl",
-      "status": "trajectory_tool_call_rows_added"
+      "status": "trajectory_tool_call_rows_added_in_post_tool_and_runtime_mcp_paths"
     },
     {
       "surface": "/api/v1/dashboard/execution-trust",
@@ -86,7 +86,11 @@
       "status": "passed"
     },
     "dashboard_full_suite_note": "A package-script invocation with an extra argument separator ran the full dashboard suite and failed in unrelated locale-sensitive TimeAgo tests where Korean absolute-time text contained the excluded character.",
-    "live_keeper_turn_acceptance": "not_run"
+    "live_keeper_turn_acceptance": "not_run",
+    "live_runtime_mcp_delta": {
+      "observed": "sangsu /tool-calls had runtime_mcp rows while /tool-stats was empty for the same keeper",
+      "status": "fixed_by_runtime_mcp_trajectory_append"
+    }
   },
   "external_evidence": [
     {

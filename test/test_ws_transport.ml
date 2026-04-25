@@ -338,6 +338,7 @@ let test_backpressure_gate_unauthenticated_ignored () =
 let test_backpressure_gate_zero_disables () =
   (* MASC_WS_CLIENT_BUFFER_LIMIT_BYTES=0 means gate disabled. Even if a
      session has a huge buffered_amount, the helper should pass. *)
+  Ws.__test_reset_env_caches ();
   with_env_var "MASC_WS_CLIENT_BUFFER_LIMIT_BYTES" "0" (fun () ->
     let limit = Ws.client_buffer_limit_bytes () in
     Alcotest.(check int) "zero limit disables gate" 0 limit)
@@ -347,6 +348,7 @@ let test_backpressure_gate_default_is_one_mib () =
      any inherited value explicitly to avoid passing through the test
      harness's environment. *)
   Unix.putenv "MASC_WS_CLIENT_BUFFER_LIMIT_BYTES" "";
+  Ws.__test_reset_env_caches ();
   let limit = Ws.client_buffer_limit_bytes () in
   Alcotest.(check int) "default limit is 1 MiB"
     1048576 limit
@@ -560,6 +562,7 @@ let test_slice_fanout_skip_counter_metric_registered () =
 
 let test_slice_fanout_flag_default_is_on () =
   Eio_main.run (fun _env ->
+    Ws.__test_reset_env_caches ();
     with_env_var "MASC_WS_SLICE_INDEX_ENABLED" "" (fun () ->
         (* Bandwidth-burst hardening flipped the default from false to
            true.  Operators set false only as an emergency rollback. *)
@@ -568,9 +571,11 @@ let test_slice_fanout_flag_default_is_on () =
 
 let test_slice_fanout_flag_reads_env () =
   Eio_main.run (fun _env ->
+    Ws.__test_reset_env_caches ();
     with_env_var "MASC_WS_SLICE_INDEX_ENABLED" "true" (fun () ->
         Alcotest.(check bool) "env=true → enabled"
           true (Ws.slice_index_enabled ()));
+    Ws.__test_reset_env_caches ();
     with_env_var "MASC_WS_SLICE_INDEX_ENABLED" "false" (fun () ->
         Alcotest.(check bool) "env=false → disabled"
           false (Ws.slice_index_enabled ())))

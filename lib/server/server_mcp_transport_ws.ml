@@ -554,15 +554,39 @@ let dashboard_delta_for_sse session sse_event =
              ]))
   | _ -> None
 
-(** Backpressure gate threshold in bytes.  Reads the env var on each call
-    so operators can retune without a restart; the read is cheap (atomic
-    hash lookup in [Env_config_core]).  A value of 0 disables the gate
-    entirely — appropriate for environments that have not yet accumulated
-    enough production data from the [masc_ws_client_buffered_bytes]
-    histogram to pick a threshold and prefer observation-only mode. *)
+(** TTL cache for env-var reads on the fan-out hot path.
+
+    [client_buffer_limit_bytes] and [slice_index_enabled] are both
+    invoked once per session per broadcast, so a 100-session fanout
+    at 1000 broadcasts/sec produced 200k [Sys.getenv_opt] calls per
+    second per var.  The earlier docstring claimed the read was
+    "atomic hash lookup", but [Env_config_core.raw_value_opt] runs
+    [Sys.getenv_opt] which on glibc is a linear search of the
+    process [environ] array — far from free.
+
+    Cache the resolved value with a short TTL ([env_cache_ttl_s])
+    so an operator-initiated retune still takes effect within the
+    next half-second, while steady-state fanout pays the full env
+    read at most twice per second per var.  CAS races on
+    [Atomic.set] are benign because the env value did not change
+    in the cached window — both racers compute the same number. *)
+let env_cache_ttl_s = 0.5
+
+let client_buffer_limit_cache : (float * int) Atomic.t =
+  Atomic.make (Float.neg_infinity, 0)
+
 let client_buffer_limit_bytes () =
-  Env_config_core.get_int ~default:1048576
-    "MASC_WS_CLIENT_BUFFER_LIMIT_BYTES"
+  let now = Time_compat.now () in
+  let last_at, cached = Atomic.get client_buffer_limit_cache in
+  if now -. last_at < env_cache_ttl_s then cached
+  else begin
+    let value =
+      Env_config_core.get_int ~default:1048576
+        "MASC_WS_CLIENT_BUFFER_LIMIT_BYTES"
+    in
+    Atomic.set client_buffer_limit_cache (now, value);
+    value
+  end
 
 (** True when the session has reported enough outstanding bytes that
     another push will only grow the client's buffer further.  Only
@@ -579,12 +603,31 @@ let session_is_backpressured session =
     to authenticated sessions whose route does not subscribe to the
     event's slice.  Catch-all events (no slice mapping) still reach
     every session.  Set [MASC_WS_SLICE_INDEX_ENABLED=false] only as an
-    emergency rollback.  The env var is read on every fanout call so
-    operators can flip without a restart; the read is cheap (atomic
-    hash lookup in [Env_config_core]). *)
+    emergency rollback.  TTL-cached so a fanout pays at most one env
+    resolution per [env_cache_ttl_s] window; same CAS-race semantics
+    as [client_buffer_limit_bytes]. *)
+let slice_index_enabled_cache : (float * bool) Atomic.t =
+  Atomic.make (Float.neg_infinity, true)
+
 let slice_index_enabled () =
-  Env_config_core.get_bool ~default:true
-    "MASC_WS_SLICE_INDEX_ENABLED"
+  let now = Time_compat.now () in
+  let last_at, cached = Atomic.get slice_index_enabled_cache in
+  if now -. last_at < env_cache_ttl_s then cached
+  else begin
+    let value =
+      Env_config_core.get_bool ~default:true
+        "MASC_WS_SLICE_INDEX_ENABLED"
+    in
+    Atomic.set slice_index_enabled_cache (now, value);
+    value
+  end
+
+(** Test-only: invalidate the env-var TTL caches above so back-to-back
+    tests that flip [Unix.putenv] do not see stale resolved values.
+    Production code never calls this. *)
+let __test_reset_env_caches () =
+  Atomic.set client_buffer_limit_cache (Float.neg_infinity, 0);
+  Atomic.set slice_index_enabled_cache (Float.neg_infinity, true)
 
 let send_dashboard_or_raw_sse session sse_event =
   if session_is_backpressured session then begin

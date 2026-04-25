@@ -132,6 +132,7 @@ let direct_turn_observation (meta : keeper_meta) :
     context_ratio = 0.0;
     economic_pressure = Agent_economy.Normal;
     unclaimed_task_count = 0;
+    claimable_task_count = 0;
     failed_task_count = 0;
     pending_verification_count = 0;
     backlog_updated_since_last_scheduled_autonomous = false;

@@ -1286,7 +1286,11 @@ let run_keepalive_unified_turn
   else (
     try
       let obs =
+        let allowed_tool_names =
+          Keeper_tool_policy.keeper_allowed_tool_names meta_after_triage
+        in
         Keeper_world_observation.observe
+          ~allowed_tool_names:(Some allowed_tool_names)
           ~pending_board_events:(Some pending_board_events)
           ~config:ctx.config
           ~meta:meta_after_triage

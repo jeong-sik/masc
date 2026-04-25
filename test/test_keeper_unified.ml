@@ -132,6 +132,7 @@ let base_observation : WO.world_observation =
     context_ratio = 0.0;
     economic_pressure = AE.Normal;
     unclaimed_task_count = 0;
+    claimable_task_count = 0;
     failed_task_count = 0;
     pending_verification_count = 0;
     backlog_updated_since_last_scheduled_autonomous = false;
@@ -163,6 +164,7 @@ let test_observation_defaults () =
   check int "idle_seconds default" 0 obs.idle_seconds;
   check (float 0.001) "context_ratio default" 0.0 obs.context_ratio;
   check int "unclaimed default" 0 obs.unclaimed_task_count;
+  check int "claimable default" 0 obs.claimable_task_count;
   check int "failed default" 0 obs.failed_task_count;
   check int "active_agents default" 0 obs.active_agent_count;
   check bool "no mentions" true (obs.pending_mentions = []);
@@ -217,6 +219,22 @@ let minimal_policy_meta =
 let room_signal_meta =
   { minimal_meta with room_signal_prompt_enabled = true }
 
+let contract_requiring_tools required_tools : Types.task_contract =
+  {
+    strict = false;
+    completion_contract = [];
+    required_tools;
+    required_evidence = [];
+    inspect_gate_evidence = [];
+    verify_gate_evidence = [];
+    links =
+      {
+        operation_id = None;
+        session_id = None;
+        autoresearch_loop_id = None;
+      };
+  }
+
 let test_observe_uses_precollected_board_events () =
   let base_dir = temp_dir () in
   Fun.protect
@@ -243,13 +261,35 @@ let test_observe_uses_precollected_board_events () =
           ~meta:minimal_meta
       in
       let obs =
-        WO.observe ~pending_board_events:(Some events)
+        WO.observe ~allowed_tool_names:None
+          ~pending_board_events:(Some events)
           ~config ~meta:minimal_meta
       in
       check int "precollected board events preserved" (List.length events)
         (List.length obs.pending_board_events);
       check bool "board event schedules turn" true
         (WO.should_run_keeper_cycle ~meta:minimal_meta obs))
+
+let test_observe_splits_absolute_and_claimable_backlog () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
+      ignore
+        (Masc_mcp.Coord.add_task config ~title:"Open task" ~priority:1
+           ~description:"");
+      ignore
+        (Masc_mcp.Coord.add_task config ~title:"Bash task" ~priority:1
+           ~description:""
+           ~contract:(contract_requiring_tools [ "keeper_bash" ]));
+      let obs =
+        WO.observe ~allowed_tool_names:(Some [ "keeper_task_claim" ])
+          ~pending_board_events:(Some []) ~config ~meta:minimal_meta
+      in
+      check int "absolute todo backlog" 2 obs.unclaimed_task_count;
+      check int "matched claimable backlog" 1 obs.claimable_task_count)
 
 let test_collect_board_events_keeps_non_mentions_as_followup_signal () =
   let base_dir = temp_dir () in
@@ -438,7 +478,8 @@ let test_observe_ignores_scope_messages_without_room_signal_opt_in () =
       ignore (Masc_mcp.Coord.broadcast config ~from_agent:"alice" ~content:"general room update");
       let meta = { minimal_meta with joined_room_ids = [ "default" ] } in
       let obs =
-        WO.observe ~pending_board_events:(Some [])
+        WO.observe ~allowed_tool_names:None
+          ~pending_board_events:(Some [])
           ~config ~meta
       in
       check int "mentions stay empty" 0 (List.length obs.pending_mentions);
@@ -458,7 +499,8 @@ let test_observe_collects_scope_messages_for_room_signal_keepers () =
       ignore (Masc_mcp.Coord.broadcast config ~from_agent:"alice" ~content:"general room update");
       let meta = { room_signal_meta with joined_room_ids = [ "default" ] } in
       let obs =
-        WO.observe ~pending_board_events:(Some [])
+        WO.observe ~allowed_tool_names:None
+          ~pending_board_events:(Some [])
           ~config ~meta
       in
       check int "mentions stay empty" 0 (List.length obs.pending_mentions);
@@ -781,6 +823,45 @@ let test_scheduled_turn_decision_uses_backlog_acceleration () =
          List.mem WO.Task_reactive_cooldown_elapsed (first :: rest)
      | WO.Skip _ -> false)
 
+let test_scheduled_turn_ignores_unclaimable_backlog () =
+  let meta =
+    {
+      minimal_meta with
+      proactive =
+        { enabled = true; idle_sec = 600; cooldown_sec = 900 };
+      runtime =
+        {
+          minimal_meta.runtime with
+          proactive_rt =
+            { minimal_meta.runtime.proactive_rt with
+              last_ts = Time_compat.now () -. 320.0;
+            };
+        };
+    }
+  in
+  let obs =
+    {
+      base_observation with
+      idle_seconds = 120;
+      unclaimed_task_count = 3;
+      claimable_task_count = 0;
+      backlog_updated_since_last_scheduled_autonomous = true;
+    }
+  in
+  let decision =
+    WO.keeper_cycle_decision
+      ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> None)
+      ~meta obs
+  in
+  check bool "absolute-only backlog does not wake keeper" false
+    decision.should_run;
+  check bool "no task backlog reason for unclaimable backlog" true
+    (match decision.verdict with
+     | WO.Skip { reasons = (first, rest)} ->
+         List.exists (function WO.No_signal -> true | _ -> false)
+           (first :: rest)
+     | WO.Run _ -> false)
+
 let test_verdict_reasons_to_strings_uses_structured_run_tags () =
   let verdict =
     WO.Run
@@ -934,6 +1015,7 @@ let test_task_backlog_cooldown_applies_noop_backoff_once () =
         base_observation with
         idle_seconds = 1000;
         unclaimed_task_count = 1;
+        claimable_task_count = 1;
       }
     in
     let decision =
@@ -967,6 +1049,7 @@ let test_scheduled_turn_decision_runs_immediately_on_fresh_backlog_update () =
     {
       base_observation with
       unclaimed_task_count = 1;
+      claimable_task_count = 1;
       backlog_updated_since_last_scheduled_autonomous = true;
     }
   in
@@ -1196,6 +1279,7 @@ let test_prompt_continuity_drops_stale_tool_surface_claims () =
          Next plan: call keeper_task_claim after checking live policy\n\
          Constraints: tool surface: masc_* only; no keeper_* tools visible";
       unclaimed_task_count = 3;
+      claimable_task_count = 3;
     }
   in
   let _sys, user =
@@ -1323,6 +1407,7 @@ let test_prompt_orders_stable_sections_before_reactive_sections () =
       context_ratio = 0.42;
       idle_seconds = 45;
       unclaimed_task_count = 2;
+      claimable_task_count = 2;
       active_agent_count = 3;
     }
   in
@@ -1345,6 +1430,7 @@ let test_prompt_room_state_section () =
   let obs =
     { base_observation with
       unclaimed_task_count = 3;
+      claimable_task_count = 3;
       failed_task_count = 1;
       active_agent_count = 5;
     }
@@ -1363,6 +1449,7 @@ let test_prompt_includes_claim_first_guidance () =
   let obs =
     { base_observation with
       unclaimed_task_count = 3;
+      claimable_task_count = 3;
       active_agent_count = 5;
     }
   in
@@ -1380,6 +1467,24 @@ let test_prompt_includes_claim_first_guidance () =
   check bool "user prompt explains gh requires claim first" true
     (contains_substring user "If you need keeper_shell op=gh, claim first")
 
+let test_prompt_omits_claim_first_guidance_when_no_claimable_tasks () =
+  let obs =
+    { base_observation with
+      unclaimed_task_count = 3;
+      claimable_task_count = 0;
+      active_agent_count = 5;
+    }
+  in
+  let sys, user =
+    UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:obs ()
+  in
+  check bool "system prompt omits auto-claim for unclaimable backlog" false
+    (contains_substring sys "Call keeper_task_claim with {}");
+  check bool "user prompt omits immediate task move for unclaimable backlog" false
+    (contains_substring user "### Immediate Task Move");
+  check bool "namespace exposes zero matched availability" true
+    (contains_substring user "Claimable tasks for this keeper: 0")
+
 let test_prompt_omits_claim_first_guidance_when_task_claimed () =
   let current_task_id =
     match Masc_mcp.Keeper_id.Task_id.of_string "task-123" with
@@ -1390,6 +1495,7 @@ let test_prompt_omits_claim_first_guidance_when_task_claimed () =
   let obs =
     { base_observation with
       unclaimed_task_count = 3;
+      claimable_task_count = 3;
       active_agent_count = 5;
     }
   in
@@ -1403,6 +1509,7 @@ let test_prompt_omits_claim_first_guidance_when_claim_tool_unavailable () =
   let obs =
     { base_observation with
       unclaimed_task_count = 3;
+      claimable_task_count = 3;
       active_agent_count = 5;
     }
   in
@@ -1419,6 +1526,7 @@ let test_prompt_omits_claim_first_guidance_when_paused () =
   let obs =
     { base_observation with
       unclaimed_task_count = 3;
+      claimable_task_count = 3;
       active_agent_count = 5;
     }
   in
@@ -5095,7 +5203,13 @@ let test_social_model_previous_state_of_meta_falls_back_for_unknown_model () =
         (KSM.delivery_surface_to_string state.delivery_surface)
 
 let test_social_model_bdi_failure_state_rewrites_claim_retry_loop () =
-  let observation = { base_observation with unclaimed_task_count = 12 } in
+  let observation =
+    {
+      base_observation with
+      unclaimed_task_count = 12;
+      claimable_task_count = 12;
+    }
+  in
   let previous_state =
     Some
       KSM.
@@ -5548,6 +5662,8 @@ let () =
           test_case "with mentions" `Quick test_observation_with_mentions;
           test_case "uses precollected board events" `Quick
             test_observe_uses_precollected_board_events;
+          test_case "splits absolute and claimable backlog" `Quick
+            test_observe_splits_absolute_and_claimable_backlog;
           test_case "default keepers ignore unmatched non-mention board events" `Quick
             test_collect_board_events_keeps_non_mentions_as_followup_signal;
           test_case "room-signal keepers keep unmatched non-mention board events" `Quick
@@ -5596,6 +5712,8 @@ let () =
             test_idle_decay_triggers_turn;
           test_case "scheduled decision uses backlog acceleration" `Quick
             test_scheduled_turn_decision_uses_backlog_acceleration;
+          test_case "scheduled decision ignores unclaimable backlog" `Quick
+            test_scheduled_turn_ignores_unclaimable_backlog;
           test_case "verdict reasons use structured run tags" `Quick
             test_verdict_reasons_to_strings_uses_structured_run_tags;
           test_case "verdict reasons use structured skip tags" `Quick
@@ -5652,6 +5770,8 @@ let () =
           test_case "room state section" `Quick test_prompt_room_state_section;
           test_case "claim first guidance" `Quick
             test_prompt_includes_claim_first_guidance;
+          test_case "claim first guidance omitted when no task is claimable" `Quick
+            test_prompt_omits_claim_first_guidance_when_no_claimable_tasks;
           test_case "claim first guidance omitted when task claimed" `Quick
             test_prompt_omits_claim_first_guidance_when_task_claimed;
           test_case "claim first guidance omitted when tool unavailable" `Quick
@@ -6193,6 +6313,48 @@ let () =
               in
               check bool "work_discovery present" true
                 (List.mem "work_discovery" affordances));
+          test_case "affordance: task claim requires matched backlog" `Quick
+            (fun () ->
+              let obs =
+                {
+                  base_observation with
+                  unclaimed_task_count = 3;
+                  claimable_task_count = 0;
+                }
+              in
+              let affordances =
+                UM.observed_affordances_of_observation obs
+              in
+              check bool "task_claim absent for unclaimable backlog" false
+                (List.mem "task_claim" affordances));
+          test_case "affordance: task claim present for claimable backlog" `Quick
+            (fun () ->
+              let obs =
+                {
+                  base_observation with
+                  unclaimed_task_count = 3;
+                  claimable_task_count = 1;
+                }
+              in
+              let affordances =
+                UM.observed_affordances_of_observation obs
+              in
+              check bool "task_claim present for matched backlog" true
+                (List.mem "task_claim" affordances));
+          test_case "trigger: absolute and matched backlog split" `Quick
+            (fun () ->
+              let obs =
+                {
+                  base_observation with
+                  unclaimed_task_count = 3;
+                  claimable_task_count = 1;
+                }
+              in
+              let triggers = UM.observed_triggers_of_observation obs in
+              check bool "absolute backlog trigger remains visible" true
+                (List.mem "new_unclaimed_task" triggers);
+              check bool "matched backlog trigger is explicit" true
+                (List.mem "claimable_task" triggers));
           test_case "trigger: keeper sees pending_verification"
             `Quick (fun () ->
               let meta =

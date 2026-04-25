@@ -37,6 +37,7 @@ type world_observation = {
   context_ratio : float;
   economic_pressure : Agent_economy.pressure_mode;
   unclaimed_task_count : int;
+  claimable_task_count : int;
   failed_task_count : int;
   pending_verification_count : int;
   backlog_updated_since_last_scheduled_autonomous : bool;
@@ -242,15 +243,33 @@ let backlog_updated_since_last_scheduled_autonomous
     | None -> false
 
 (** Read room backlog counts. *)
-let read_backlog_counts ~(config : Coord.config) ~(meta : keeper_meta) :
-    int * int * int * bool =
+let read_backlog_counts ~allowed_tool_names ~(config : Coord.config)
+    ~(meta : keeper_meta) :
+    int * int * int * int * bool =
   try
     let backlog = Coord.read_backlog config in
-    let unclaimed =
+    let unclaimed_tasks =
+      List.filter
+        (fun (t : Types.task) -> t.task_status = Types.Todo)
+        backlog.tasks
+    in
+    let unclaimed = List.length unclaimed_tasks in
+    let required_tools_allowed required_tools =
+      match allowed_tool_names with
+      | Some names ->
+          Coord_task_schedule.required_tools_allowed ~agent_tool_names:names
+            required_tools
+      | None ->
+          Coord_task_schedule.required_tools_allowed required_tools
+    in
+    let claimable =
       List.length
         (List.filter
-           (fun (t : Types.task) -> t.task_status = Types.Todo)
-           backlog.tasks)
+           (fun task ->
+             Coord_task_schedule.task_is_claim_pool_candidate task
+             && required_tools_allowed
+                  (Coord_task_schedule.task_required_tools task))
+           unclaimed_tasks)
     in
     let failed =
       List.length
@@ -276,6 +295,7 @@ let read_backlog_counts ~(config : Coord.config) ~(meta : keeper_meta) :
       backlog_updated_since_last_scheduled_autonomous ~meta ~backlog
     in
     ( unclaimed,
+      claimable,
       failed,
       pending_verification,
       backlog_updated_since_last_scheduled_autonomous )
@@ -283,7 +303,7 @@ let read_backlog_counts ~(config : Coord.config) ~(meta : keeper_meta) :
   | Eio.Cancel.Cancelled _ as e -> raise e
   | ex ->
       Log.Keeper.warn "read_backlog_counts failed: %s" (Printexc.to_string ex);
-      (0, 0, 0, false)
+      (0, 0, 0, 0, false)
 
 (** Count active agents in room. *)
 let count_active_agents ~(config : Coord.config) : int =
@@ -701,7 +721,8 @@ let collect_board_events ~(base_path : string) ~(continuity_summary : string)
       (Printexc.to_string exn);
     ([], 0, 0)
 
-let observe ~(pending_board_events : pending_board_event list option)
+let observe ~allowed_tool_names
+    ~(pending_board_events : pending_board_event list option)
     ~(config : Coord.config)
     ~(meta : keeper_meta) :
     world_observation =
@@ -709,10 +730,11 @@ let observe ~(pending_board_events : pending_board_event list option)
     collect_message_scope ~config ~meta
   in
   let ( unclaimed_task_count,
+        claimable_task_count,
         failed_task_count,
         pending_verification_count,
         backlog_updated_since_last_scheduled_autonomous ) =
-    read_backlog_counts ~config ~meta
+    read_backlog_counts ~allowed_tool_names ~config ~meta
   in
   let active_agent_count = count_active_agents ~config in
   let idle_seconds = compute_idle_seconds ~meta in
@@ -765,6 +787,7 @@ let observe ~(pending_board_events : pending_board_event list option)
     context_ratio;
     economic_pressure;
     unclaimed_task_count;
+    claimable_task_count;
     failed_task_count;
     pending_verification_count;
     backlog_updated_since_last_scheduled_autonomous;
@@ -779,7 +802,7 @@ let actionable_signal_present (observation : world_observation) =
   || observation.pending_board_events <> []
   || observation.pending_scope_messages <> []
   || Option.is_some observation.worktree_change_summary
-  || observation.unclaimed_task_count > 0
+  || observation.claimable_task_count > 0
   || observation.failed_task_count > 0
   || observation.pending_verification_count > 0
   || observation.work_discovery_due
@@ -954,7 +977,7 @@ let keeper_cycle_decision
             (effective_cooldown / max 1 task_cooldown_divisor)
         in
         let has_actionable_tasks =
-          observation.unclaimed_task_count > 0 || observation.failed_task_count > 0
+          observation.claimable_task_count > 0 || observation.failed_task_count > 0
         in
         let idle_gate_elapsed = observation.idle_seconds >= idle_gate_sec in
         let cooldown_elapsed =
@@ -1022,7 +1045,7 @@ let keeper_cycle_decision
                 (if cooldown_elapsed then Some Cooldown_elapsed else None);
                 (if has_actionable_tasks
                  then Some (Task_backlog
-                              { unclaimed = observation.unclaimed_task_count;
+                              { unclaimed = observation.claimable_task_count;
                                 failed = observation.failed_task_count }) else None);
                 (if backlog_fresh || backlog_elapsed
                  then Some Task_reactive_cooldown_elapsed else None);

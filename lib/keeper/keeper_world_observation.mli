@@ -66,6 +66,10 @@ type world_observation = {
   unclaimed_task_count : int;
   (** Number of unclaimed tasks in the room backlog. *)
 
+  claimable_task_count : int;
+  (** Number of unclaimed tasks this keeper can claim with its current tool
+      surface. This is a matched subset of [unclaimed_task_count]. *)
+
   failed_task_count : int;
   (** Number of failed/cancelled tasks in the room backlog. *)
 
@@ -207,6 +211,7 @@ val read_continuity_summary :
     @param config Coord configuration for I/O operations
     @param meta Current keeper metadata *)
 val observe :
+  allowed_tool_names:string list option ->
   pending_board_events:pending_board_event list option ->
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->

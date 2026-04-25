@@ -393,6 +393,7 @@ let observed_triggers_of_observation
   if observation.pending_board_events <> [] then add "board_activity";
   if observation.pending_scope_messages <> [] then add "scope_message";
   if observation.unclaimed_task_count > 0 then add "new_unclaimed_task";
+  if observation.claimable_task_count > 0 then add "claimable_task";
   if observation.failed_task_count > 0 then add "failed_task";
   let _ = meta in
   if observation.pending_verification_count > 0 then
@@ -410,7 +411,7 @@ let observed_affordances_of_observation
   if observation.pending_mentions <> [] then add "reply_in_room";
   if observation.pending_board_events <> [] then add "board_post_or_comment";
   if observation.pending_scope_messages <> [] then add "message_sweep";
-  if observation.unclaimed_task_count > 0 then add "task_claim";
+  if observation.claimable_task_count > 0 then add "task_claim";
   if observation.failed_task_count > 0 then add "task_audit";
   let _ = meta in
   if observation.pending_verification_count > 0 then
@@ -607,6 +608,12 @@ let append_decision_record
               ("idle_seconds", `Int observation.idle_seconds);
               ("context_ratio", `Float observation.context_ratio);
               ("unclaimed_task_count", `Int observation.unclaimed_task_count);
+              ("claimable_task_count", `Int observation.claimable_task_count);
+              ( "claim_blocked_task_count",
+                `Int
+                  (max 0
+                     (observation.unclaimed_task_count
+                      - observation.claimable_task_count)) );
               ("failed_task_count", `Int observation.failed_task_count);
               ("pending_verification_count", `Int observation.pending_verification_count);
               ("active_agent_count", `Int observation.active_agent_count);
@@ -615,7 +622,9 @@ let append_decision_record
         ("tool_call_count", `Int tool_call_count);
         ("tools_used", `List (List.map (fun s -> `String s) tools_used));
         ("tool_calls", `List (List.map tool_call_detail_to_json tool_calls));
-        ("claim_was_available", `Bool (observation.unclaimed_task_count > 0));
+        ("claim_absolute_available", `Bool (observation.unclaimed_task_count > 0));
+        ("claim_matched_available", `Bool (observation.claimable_task_count > 0));
+        ("claim_was_available", `Bool (observation.claimable_task_count > 0));
         ("claim_executed", `Bool claim_executed);
         ( "action_source",
           match deliberation_execution with

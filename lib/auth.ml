@@ -467,7 +467,7 @@ let audit_token_uniqueness config : (string * string list) list =
 
     #9786 runtime complement: when N>=2 credentials share the
     token hash, [List.find_opt] silently routed to the first
-    match — the root of the [bearer token belongs to X]
+    match - the root of the [bearer token belongs to X]
     regression.  We keep the legacy first-match return so
     existing callers do not need migration, but we WARN and
     increment {!Prometheus.metric_auth_credential_ambiguous_lookup}
@@ -491,7 +491,7 @@ let find_credential_by_token config ~token : (agent_credential, masc_error) resu
                matches
            in
            Log.Misc.warn
-             "auth: token shared by %d agents [%s] — routing to %s \
+             "auth: token shared by %d agents [%s] - routing to %s \
               (first match); rotate via Auth.create_token to disambiguate \
               (#9786)"
              (List.length matches)

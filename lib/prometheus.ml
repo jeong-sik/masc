@@ -589,7 +589,7 @@ let metric_auth_credential_token_duplicate =
    boot-time audit ({!metric_auth_credential_token_duplicate})
    detects shared tokens once at startup, but operators have no
    visibility on whether subsequent requests actually exercise
-   the ambiguity — the silent route-to-first behavior continues
+   the ambiguity - the silent route-to-first behavior continues
    to fire while the alert is just an open ticket.  This counter
    surfaces the live blast radius (per-request rate) so an
    alerting rule can distinguish "audit warning, no traffic"

@@ -5,7 +5,7 @@
    to [List.find]'s first match.  The boot-time audit
    ([audit_token_uniqueness] + masc_auth_credential_token_duplicate_total)
    detects the duplicate once at startup, but operators have no
-   per-request signal — a stale audit warning vs. an actively
+   per-request signal: a stale audit warning vs. an actively
    wrong-agent-serving keeper looks identical.
 
    This counter
@@ -14,8 +14,8 @@
    alert can use rate(...) to distinguish the two cases.
 
    This test pins:
-   - Single match → no counter increment
-   - Two creds with same hash → counter increments by 1, returns
+   - Single match -> no counter increment
+   - Two creds with same hash -> counter increments by 1, returns
      the first credential (legacy behavior preserved)
    - first_match label is the routed agent_name (so operators
      can attribute the wrong serving) *)
@@ -65,6 +65,16 @@ let counter_for ~first_match =
     ~labels:[ ("first_match", first_match) ]
     ()
 
+let ambiguous_lookup_total () =
+  Masc_mcp.Prometheus.metric_total
+    Masc_mcp.Prometheus.metric_auth_credential_ambiguous_lookup
+
+let first_match_for_hash ~base ~token_hash =
+  Masc_mcp.Auth.list_credentials base
+  |> List.find (fun (cred : Types.agent_credential) ->
+       String.equal cred.token token_hash)
+  |> fun cred -> cred.agent_name
+
 let test_metric_name_stable () =
   Alcotest.(check string)
     "canonical metric name"
@@ -77,27 +87,36 @@ let test_single_match_no_counter () =
     let hash = Masc_mcp.Auth.sha256_hash raw_token in
     write_cred ~base ~agent_name:"keeper-only" ~token_hash:hash;
     let before = counter_for ~first_match:"keeper-only" in
+    let before_total = ambiguous_lookup_total () in
     let _ =
       Masc_mcp.Auth.find_credential_by_token base ~token:raw_token
     in
     Alcotest.(check (float 0.0001))
       "no counter on single match"
       before
-      (counter_for ~first_match:"keeper-only"))
+      (counter_for ~first_match:"keeper-only");
+    Alcotest.(check (float 0.0001))
+      "no hidden ambiguous counter series on single match"
+      before_total
+      (ambiguous_lookup_total ()))
 
 let test_duplicate_hash_increments_counter () =
   with_temp_base (fun base ->
     let raw_token = "duplicate_raw_token_9786" in
     let hash = Masc_mcp.Auth.sha256_hash raw_token in
-    (* Two credentials hashing to the same token — exactly the
+    (* Two credentials hashing to the same token, matching the
        2026-04-23 audit shape (codex-mcp-client + keeper-name). *)
     write_cred ~base ~agent_name:"alpha-keeper" ~token_hash:hash;
-    write_cred ~base ~agent_name:"zeta-keeper"  ~token_hash:hash;
-    (* alpha-keeper sorts before zeta — list_credentials reads
-       directory entries in lexicographic order, so List.find
-       routes to alpha-keeper. *)
-    let before_alpha = counter_for ~first_match:"alpha-keeper" in
-    let before_zeta  = counter_for ~first_match:"zeta-keeper" in
+    write_cred ~base ~agent_name:"zeta-keeper" ~token_hash:hash;
+    let first_match = first_match_for_hash ~base ~token_hash:hash in
+    let other_match =
+      if String.equal first_match "alpha-keeper" then
+        "zeta-keeper"
+      else
+        "alpha-keeper"
+    in
+    let before_first = counter_for ~first_match in
+    let before_other = counter_for ~first_match:other_match in
     let result =
       Masc_mcp.Auth.find_credential_by_token base ~token:raw_token
     in
@@ -105,18 +124,18 @@ let test_duplicate_hash_increments_counter () =
      | Ok cred ->
          Alcotest.(check string)
            "first match returned (legacy preserved)"
-           "alpha-keeper"
+           first_match
            cred.agent_name
      | Error _ ->
          Alcotest.fail "expected Ok on ambiguous lookup");
     Alcotest.(check (float 0.0001))
-      "alpha-keeper counter +1"
-      (before_alpha +. 1.0)
-      (counter_for ~first_match:"alpha-keeper");
+      "routed keeper counter +1"
+      (before_first +. 1.0)
+      (counter_for ~first_match);
     Alcotest.(check (float 0.0001))
-      "zeta-keeper counter unchanged (it was not the routed match)"
-      before_zeta
-      (counter_for ~first_match:"zeta-keeper"))
+      "non-routed keeper counter unchanged"
+      before_other
+      (counter_for ~first_match:other_match))
 
 let test_repeated_lookups_accumulate () =
   with_temp_base (fun base ->
@@ -124,7 +143,8 @@ let test_repeated_lookups_accumulate () =
     let hash = Masc_mcp.Auth.sha256_hash raw_token in
     write_cred ~base ~agent_name:"repeat-a" ~token_hash:hash;
     write_cred ~base ~agent_name:"repeat-b" ~token_hash:hash;
-    let before = counter_for ~first_match:"repeat-a" in
+    let first_match = first_match_for_hash ~base ~token_hash:hash in
+    let before = counter_for ~first_match in
     for _ = 1 to 3 do
       let _ =
         Masc_mcp.Auth.find_credential_by_token base ~token:raw_token
@@ -134,7 +154,7 @@ let test_repeated_lookups_accumulate () =
     Alcotest.(check (float 0.0001))
       "+3 over 3 lookups"
       (before +. 3.0)
-      (counter_for ~first_match:"repeat-a"))
+      (counter_for ~first_match))
 
 let () =
   Random.self_init ();
@@ -144,9 +164,9 @@ let () =
         test_metric_name_stable;
     ];
     "lookup", [
-      Alcotest.test_case "single match → no counter" `Quick
+      Alcotest.test_case "single match -> no counter" `Quick
         test_single_match_no_counter;
-      Alcotest.test_case "duplicate hash → counter +1, first match returned"
+      Alcotest.test_case "duplicate hash -> counter +1, first match returned"
         `Quick
         test_duplicate_hash_increments_counter;
       Alcotest.test_case "repeated lookups accumulate" `Quick

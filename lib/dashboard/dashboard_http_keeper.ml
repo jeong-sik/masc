@@ -361,6 +361,110 @@ let keeper_trust_json ?(include_receipt = false)
           `Null );
     ]
 
+let execution_trust_source = "execution_receipt"
+let execution_trust_producer = "keeper_agent_run.execution_receipt"
+let execution_trust_dashboard_surface = "/api/v1/dashboard/execution-trust"
+let execution_trust_freshness_slo_s = 900.0
+
+let execution_receipt_dir config keeper_name =
+  Filename.concat
+    (Filename.concat (Filename.concat (Coord.masc_root_dir config) "keepers")
+       keeper_name)
+    "execution-receipts"
+
+let execution_receipt_store_pattern config =
+  Filename.concat
+    (Filename.concat (Coord.masc_root_dir config) "keepers")
+    "*/execution-receipts"
+
+let count_execution_receipt_entries config keeper_names =
+  keeper_names
+  |> List.fold_left
+       (fun acc keeper_name ->
+         let dir = execution_receipt_dir config keeper_name in
+         if not (Sys.file_exists dir) then acc
+         else
+           acc
+           +
+           (match Dated_jsonl.create ~base_dir:dir () with
+            | store -> Dated_jsonl.count_entries store
+            | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+            | exception exn ->
+              Log.Dashboard.warn
+                "execution_trust receipt count failed for %s: %s"
+                dir
+                (Printexc.to_string exn);
+              0))
+       0
+
+let max_ts_opt current candidate =
+  match current with
+  | Some existing when existing >= candidate -> current
+  | _ -> Some candidate
+
+let latest_receipt_ts_of_keeper_rows rows =
+  rows
+  |> List.fold_left
+       (fun acc row ->
+         match
+           Yojson.Safe.Util.member "trust" row
+           |> Yojson.Safe.Util.member "last_receipt_at"
+         with
+         | `String iso -> (
+             match Types.parse_iso8601_opt iso with
+             | Some ts -> max_ts_opt acc ts
+             | None -> acc)
+         | _ -> acc)
+       None
+
+let freshness_fields ~now latest_ts =
+  match latest_ts with
+  | Some ts ->
+    [
+      ("latest_ts_unix", `Float ts);
+      ("latest_ts_iso", `String (Types.iso8601_of_unix_seconds ts));
+      ("latest_age_s", `Float (max 0.0 (now -. ts)));
+    ]
+  | None ->
+    [
+      ("latest_ts_unix", `Null);
+      ("latest_ts_iso", `Null);
+      ("latest_age_s", `Null);
+    ]
+
+let source_health_fields ~now ~exists ~entry_count ~latest_ts ?coverage_gap () =
+  let health, stale_reason =
+    match coverage_gap with
+    | Some gap ->
+      ( "coverage_gap",
+        Safe_ops.json_string ~default:"coverage_gap" "stale_reason" gap )
+    | None ->
+      if not exists then ("missing", "store_missing")
+      else if entry_count = 0 then ("empty", "no_entries")
+      else
+        match latest_ts with
+        | None -> ("empty", "no_entries")
+        | Some ts ->
+          let latest_age_s = max 0.0 (now -. ts) in
+          if latest_age_s > execution_trust_freshness_slo_s then
+            ("stale", "freshness_slo_exceeded")
+          else
+            ("ok", "")
+  in
+  [
+    ("health", `String health);
+    ( "stale_reason",
+      if stale_reason = "" then `Null else `String stale_reason );
+  ]
+
+let execution_receipt_coverage_gaps config =
+  Telemetry_coverage_gap.read_recent
+    ~masc_root:(Coord.masc_root_dir config)
+    ~n:50
+  |> List.filter (fun gap ->
+       String.equal execution_trust_source
+         (Safe_ops.json_string ~default:"" "source" gap))
+
 let keeper_names (config : Coord.config) =
   Keeper_types.keeper_names config
 
@@ -1190,12 +1294,32 @@ let execution_trust_dashboard_json (config : Coord.config) : Yojson.Safe.t =
         | _ -> [])
     | _ -> []
   in
+  let now = Unix.gettimeofday () in
+  let keeper_names = keeper_names config in
+  let keepers_root = Filename.concat (Coord.masc_root_dir config) "keepers" in
+  let exists = Sys.file_exists keepers_root in
+  let entry_count = count_execution_receipt_entries config keeper_names in
+  let latest_ts = latest_receipt_ts_of_keeper_rows keepers in
+  let coverage_gaps = execution_receipt_coverage_gaps config in
+  let coverage_gap = List.rev coverage_gaps |> List.find_opt (fun _ -> true) in
   `Assoc
-    [
+    ([
+      ("source", `String execution_trust_source);
+      ("producer", `String execution_trust_producer);
+      ("durable_store", `String (execution_receipt_store_pattern config));
+      ("dashboard_surface", `String execution_trust_dashboard_surface);
+      ("freshness_slo_s", `Float execution_trust_freshness_slo_s);
+      ("entry_count", `Int entry_count);
+      ("exists", `Bool exists);
       ("generated_at", `String (Types.now_iso ()));
       ("keepers", `List keepers);
       ("total", `Int (List.length keepers));
+      ("coverage_gaps", `List coverage_gaps);
+      ("coverage_gap_count", `Int (List.length coverage_gaps));
     ]
+    @ freshness_fields ~now latest_ts
+    @ source_health_fields
+        ~now ~exists ~entry_count ~latest_ts ?coverage_gap ())
 
 (** Build a structured config JSON for a single keeper, grouped by category.
     Returns (http_status, json). *)

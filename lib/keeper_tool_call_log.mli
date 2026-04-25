@@ -94,6 +94,14 @@ val init : ?cluster_name:string -> base_path:string -> unit -> unit
 (** [init ?cluster_name ~base_path ()] creates the cluster-aware Dated_jsonl
     store. Call once at startup. *)
 
+val store_dir : unit -> string option
+(** [store_dir ()] returns the initialized durable store directory, if any. *)
+
+val configured_masc_root : unit -> string option
+(** [configured_masc_root ()] returns the cluster-aware MASC root passed to
+    [init], even if the store failed to open. Runtime sidecars use this to
+    keep their durable projections in the same cluster namespace. *)
+
 val log_call :
   keeper_name:string ->
   tool_name:string ->

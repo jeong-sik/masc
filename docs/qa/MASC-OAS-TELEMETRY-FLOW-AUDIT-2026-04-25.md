@@ -28,7 +28,7 @@ Primary mismatch: keeper/OAS tool calls reached `.masc/tool_calls`, but the traj
 | `/api/v1/keepers/:name/tool-calls` | `keeper_hooks_oas.post_tool_use`, `mcp_server_eio_call_tool.runtime_mcp` | `.masc/tool_calls/YYYY-MM/DD.jsonl` | Full I/O rows now include `runtime_contract` and `action_radius`. |
 | `/api/v1/keepers/:name/tool-stats` | `keeper_hooks_oas.post_tool_use`, `mcp_server_eio_call_tool.runtime_mcp` | `.masc/trajectories/<keeper>/<trace>.jsonl` | Post-tool-use and runtime-MCP keeper tool traces now record trajectory `Tool_call` rows. |
 | `/api/v1/dashboard/execution-trust` | `keeper_agent_run.execution_receipt` | `.masc/keepers/<keeper>/execution-receipts` | Execution receipts now include `runtime_contract` and `action_radius`. |
-| `/api/v1/dashboard/telemetry/summary` | `Telemetry_unified.summary_json` | all unified telemetry stores | Each source now reports `health`, `freshness_slo_s`, `producer`, `durable_store`, `dashboard_surface`, and `stale_reason`. |
+| `/api/v1/dashboard/telemetry/summary` | `Telemetry_unified.summary_json` | all unified telemetry stores | Each source now reports `health`, `freshness_slo_s`, `producer`, `durable_store`, `dashboard_surface`, and `stale_reason`; trajectory rows and execution receipts are first-class sources. |
 | `.masc/telemetry-coverage-gaps` | trajectory/receipt failure reporters | `.masc/telemetry-coverage-gaps/YYYY-MM/DD.jsonl` | Trajectory append and receipt append failures are durable coverage gaps. |
 
 ## Runtime Contract
@@ -90,9 +90,10 @@ Dashboard checks:
 ```sh
 pnpm --dir dashboard exec vitest run --no-file-parallelism --maxWorkers=1 src/components/keeper-tool-telemetry.test.ts src/components/telemetry-unified.test.ts src/api/dashboard.test.ts
 pnpm --dir dashboard typecheck
+pnpm --dir dashboard test -- keeper-tool-telemetry.test.ts telemetry-unified.test.ts api/dashboard.test.ts
 ```
 
-Result: targeted telemetry/API tests passed (3 files, 49 tests) and typecheck passed. An earlier package-script invocation with an extra argument separator ran the full dashboard suite and hit an unrelated locale-sensitive `TimeAgo` assertion where the Korean absolute-time marker `오전` matched the test's `/전/` exclusion.
+Result: targeted telemetry/API tests passed, typecheck passed, and the package-script invocation completed the full dashboard suite successfully (241 files, 4045 tests). The full-suite command emitted repeated `--localstorage-file` warnings and one transient `ECONNREFUSED localhost:3000` log line from an optional browser/server probe, but the suite still exited 0.
 
 Runtime acceptance with a fresh live keeper turn was not executed in this worktree. The code path is covered by focused tests and the next live acceptance check should confirm:
 
@@ -101,6 +102,12 @@ Runtime acceptance with a fresh live keeper turn was not executed in this worktr
 - A sample execution receipt and trajectory row both include `runtime_contract` and `action_radius`.
 
 Additional runtime-MCP delta found during 2026-04-25 re-verification: the live server had `sangsu` `/tool-calls` rows with `lane=runtime_mcp`, `runtime_contract`, and `action_radius`, while `/tool-stats` was empty for the same keeper because that direct runtime-MCP trace path bypassed `keeper_hooks_oas`. This report now includes the follow-up fix: `mcp_server_eio_call_tool.runtime_mcp` appends the matching trajectory row and reports append failures to `.masc/telemetry-coverage-gaps`.
+
+Additional root-cause pass after PR review found three read-side leaks:
+
+- Runtime-MCP trajectory rows used the ambient `Env_config_core.cluster_name` instead of the already configured keeper tool-call store root. Runtime-MCP now derives the trajectory root from `Keeper_tool_call_log.configured_masc_root`, keeping `/tool-calls` and `/tool-stats` in the same cluster namespace.
+- Runtime-MCP read-before-append failures on existing trajectory files could abort the trajectory lane without a coverage gap. The read is now protected, records `runtime_mcp_trajectory_read_failed`, and still attempts the append with a conservative round value.
+- Unified telemetry and the dashboard frontend did not treat `trajectory_tool_call` and `execution_receipt` as first-class sources. `/telemetry/summary`, source filters, previews, `/tool-stats`, and `/tool-calls` now preserve and render the same freshness/source metadata.
 
 ## External Currentness Evidence
 

@@ -186,27 +186,101 @@ let action_radius_json_for_call ~keeper_name ~tool_name ~input ~success
     ()
 
 let store_ref : Dated_jsonl.t option ref = ref None
+let configured_store_ref : (string * string) option ref = ref None
 
 let init ?cluster_name ~base_path () =
   let cluster_name =
     Option.value ~default:(Env_config_core.cluster_name ()) cluster_name
   in
-  let dir =
-    Filename.concat
-      (Coord_utils.masc_root_dir_from ~base_path ~cluster_name)
-      "tool_calls"
-  in
+  let masc_root = Coord_utils.masc_root_dir_from ~base_path ~cluster_name in
+  let dir = Filename.concat masc_root "tool_calls" in
+  configured_store_ref := Some (masc_root, dir);
   (try
      let store = Dated_jsonl.create ~base_dir:dir () in
      store_ref := Some store
    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+     store_ref := None;
      Log.Misc.warn "keeper_tool_call_log: init failed: %s"
-       (Printexc.to_string exn))
+       (Printexc.to_string exn);
+     (try
+        Telemetry_coverage_gap.record
+          ~masc_root
+          ~source:"tool_call_io"
+          ~producer:"keeper_tool_call_log.init"
+          ~durable_store:dir
+          ~dashboard_surface:"/api/v1/keepers/:name/tool-calls"
+          ~stale_reason:"tool_call_io_init_failed"
+          ~error:(Printexc.to_string exn)
+          ()
+      with
+      | Eio.Cancel.Cancelled _ as cancel -> raise cancel
+      | gap_exn ->
+        Log.Misc.warn
+          "keeper_tool_call_log: init coverage gap append failed: %s"
+          (Printexc.to_string gap_exn)))
 
 let reset_for_testing () =
   store_ref := None;
+  configured_store_ref := None;
   Hashtbl.reset pending_truncation;
   Hashtbl.reset pending_turn_context
+
+let store_dir () =
+  match !store_ref with
+  | Some store -> Some (Dated_jsonl.base_dir store)
+  | None -> None
+
+let configured_masc_root () =
+  Option.map fst !configured_store_ref
+
+let record_append_coverage_gap ~store ~keeper_name ~tool_name ?trace_id exn =
+  let durable_store = Dated_jsonl.base_dir store in
+  let masc_root = Filename.dirname durable_store in
+  try
+    Telemetry_coverage_gap.record
+      ~masc_root
+      ~source:"tool_call_io"
+      ~producer:"keeper_hooks_oas|mcp_server_eio_call_tool"
+      ~durable_store
+      ~dashboard_surface:"/api/v1/keepers/:name/tool-calls"
+      ~stale_reason:"tool_call_io_append_failed"
+      ~keeper_name
+      ?trace_id
+      ~error:
+        (Printf.sprintf "%s/%s: %s"
+           keeper_name tool_name (Printexc.to_string exn))
+      ()
+  with
+  | Eio.Cancel.Cancelled _ as cancel -> raise cancel
+  | gap_exn ->
+    Log.Misc.warn
+      "keeper_tool_call_log: coverage gap append failed for %s/%s: %s"
+      keeper_name tool_name (Printexc.to_string gap_exn)
+
+let record_unavailable_coverage_gap ~keeper_name ~tool_name ?trace_id () =
+  match !configured_store_ref with
+  | None -> ()
+  | Some (masc_root, durable_store) ->
+    try
+      Telemetry_coverage_gap.record
+        ~masc_root
+        ~source:"tool_call_io"
+        ~producer:"keeper_hooks_oas|mcp_server_eio_call_tool"
+        ~durable_store
+        ~dashboard_surface:"/api/v1/keepers/:name/tool-calls"
+        ~stale_reason:"tool_call_io_store_unavailable"
+        ~keeper_name
+        ?trace_id
+        ~error:
+          (Printf.sprintf "%s/%s: tool call store unavailable"
+             keeper_name tool_name)
+        ()
+    with
+    | Eio.Cancel.Cancelled _ as cancel -> raise cancel
+    | gap_exn ->
+      Log.Misc.warn
+        "keeper_tool_call_log: unavailable coverage gap append failed for %s/%s: %s"
+        keeper_name tool_name (Printexc.to_string gap_exn)
 
 (** [blob_aware_output_json safe_output] wraps a tool-output string for
     persistence as the [output] field. When [safe_output] is the OCaml
@@ -260,7 +334,7 @@ let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
   if Observability_redact.is_denied_tool ~tool_name then ()
   else
     match !store_ref with
-    | None -> ()
+    | None -> record_unavailable_coverage_gap ~keeper_name ~tool_name ?trace_id ()
     | Some store ->
       let ctx = get_turn_context_record ~keeper_name () in
       let ( ctx_lane
@@ -510,7 +584,11 @@ let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
       (try Dated_jsonl.append store safe_json
        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
          Log.Misc.warn "keeper_tool_call_log: append failed for %s/%s: %s"
-           keeper_name tool_name (Printexc.to_string exn))
+           keeper_name tool_name (Printexc.to_string exn);
+         record_append_coverage_gap
+           ~store ~keeper_name ~tool_name
+           ?trace_id
+           exn)
 
 let read_recent ?keeper_name ?(n = 100) () : Yojson.Safe.t list =
   if n <= 0 then []

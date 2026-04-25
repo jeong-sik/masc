@@ -471,7 +471,10 @@ let dashboard_tools_http_json ?actor (config : Coord.config) : Yojson.Safe.t =
       ( "tool_inventory",
         Tool_misc.tool_inventory_json ctx ~include_hidden:true
           ~include_deprecated:true );
-      ("tool_usage", Tool_unified.summary_report ());
+      ( "tool_usage",
+        Tool_unified.summary_report ()
+        |> Tool_usage_log.attach_source_metadata
+             ~masc_root:(Coord.masc_root_dir config) );
     ]
 
 type dashboard_perf_row = {

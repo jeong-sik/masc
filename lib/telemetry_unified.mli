@@ -1,13 +1,16 @@
 (** Telemetry_unified — Read-only aggregation of scattered telemetry stores.
 
-    Provides a single, time-sorted view over six separate JSONL stores.
+    Provides a single, time-sorted view over independent telemetry stores.
     Paths under [.masc/] are resolved via the cluster-aware [masc_root]
     (use [Coord.masc_root_dir config]):
     - [<masc_root>/keepers/<name>/metrics/] — Per-keeper turn metrics
     - [<masc_root>/telemetry/]              — Agent lifecycle + tool call events
     - [<masc_root>/tool_calls/]             — Full I/O for keeper tool calls
+    - [<masc_root>/trajectories/<keeper>/]  — Trajectory tool-call rows
     - [<masc_root>/tool_usage/]             — System_internal surface tool calls
     - [<masc_root>/oas-events/]             — Durable OAS native/custom bus events
+    - [<masc_root>/keepers/<name>/execution-receipts/]
+                                              — Keeper execution receipts
     - [<base_path>/data/tool-metrics/]      — Tool duration/success metrics
 
     Each returned entry is tagged with a ["source"] field for discrimination.
@@ -20,8 +23,10 @@ type source =
   | Keeper_metric  (** Per-keeper turn/heartbeat metrics *)
   | Agent_event    (** Agent lifecycle, task, handoff events *)
   | Tool_call_io   (** Keeper tool calls with full input/output *)
+  | Trajectory_tool_call  (** Trajectory-backed keeper tool call rows *)
   | Tool_usage     (** System_internal surface tool invocations *)
   | Oas_event      (** Durable OAS native/custom event bus relays *)
+  | Execution_receipt  (** Keeper execution receipt rows *)
   | Tool_metric    (** Tool duration and success metrics *)
 
 val source_to_string : source -> string
@@ -49,7 +54,7 @@ val read_unified :
   Yojson.Safe.t list
 (** [read_unified ~base_path ~masc_root ?sources ?keeper_name ?session_id
       ?operation_id ?worker_run_id ?since_ts ?until_ts ?n ()]
-    reads entries from [sources] (default: all six), optionally filtered
+    reads entries from [sources] (default: all sources), optionally filtered
     by [keeper_name], generic correlation keys, and an optional unix-second
     window. Returns at most [n] entries (default 100) sorted by timestamp
     descending (newest first).  When [n <= 0], no truncation is applied.

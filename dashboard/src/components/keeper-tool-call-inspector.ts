@@ -5,8 +5,8 @@ import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
 import { fetchKeeperToolCalls } from '../api/dashboard'
-import type { ToolCallEntry } from '../api/dashboard'
-import { formatTimeHms } from '../lib/format-time'
+import type { ToolCallEntry, ToolCallsResponse, TelemetryFreshnessMetadata } from '../api/dashboard'
+import { formatTimeHms, formatElapsedCompact } from '../lib/format-time'
 import { LoadingState } from './common/feedback-state'
 import { SectionCap } from './common/section-cap'
 import { toolCategory, formatDuration, durationColor } from './tool-call-shared'
@@ -15,6 +15,45 @@ import { parseToolBlobMarker } from '../lib/tool-blob-marker'
 
 // Delegated to lib/format-time (SSOT)
 const formatTimestamp = formatTimeHms
+
+function sourceHealthClass(health?: string | null): string {
+  switch ((health ?? '').toLowerCase()) {
+    case 'ok':
+      return 'text-[var(--ok)]'
+    case 'stale':
+    case 'coverage_gap':
+    case 'empty':
+      return 'text-[var(--warn)]'
+    case 'missing':
+      return 'text-[var(--bad-light)]'
+    default:
+      return 'text-[var(--text-dim)]'
+  }
+}
+
+function freshnessText(d: TelemetryFreshnessMetadata): string {
+  if (d.stale_reason) return d.stale_reason
+  if (typeof d.latest_age_s !== 'number' || !Number.isFinite(d.latest_age_s)) {
+    return 'latest n/a'
+  }
+  return `latest ${formatElapsedCompact(d.latest_age_s)}`
+}
+
+function FreshnessLine({ data }: { data: TelemetryFreshnessMetadata }) {
+  return html`
+    <div class="text-3xs text-[var(--text-dim)]">
+      <span class="font-mono">${data.source ?? 'tool_call_io'}</span>
+      <span class="mx-1">·</span>
+      <span class="font-mono ${sourceHealthClass(data.health)}">${data.health ?? 'unknown'}</span>
+      <span class="mx-1">·</span>
+      <span>${freshnessText(data)}</span>
+      ${typeof data.entry_count === 'number' ? html`
+        <span class="mx-1">·</span>
+        <span>${data.entry_count.toLocaleString()} rows</span>
+      ` : null}
+    </div>
+  `
+}
 
 export function formatInput(input: unknown): string {
   if (input == null) return '-'
@@ -110,20 +149,20 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
 // ── Main component ──────────────────────────────────────
 
 export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) {
-  const resource = useManagedAsyncResource<ToolCallEntry[]>([])
+  const resource = useManagedAsyncResource<ToolCallsResponse | null>(null)
   const filterTool = useSignal('')
 
   useEffect(() => {
     void resource.load(async (signal) => {
-      const response = await fetchKeeperToolCalls(keeperName, 100, { signal })
-      return response.entries ?? []
+      return await fetchKeeperToolCalls(keeperName, 100, { signal })
     })
     return () => {
       resource.cancel()
     }
   }, [keeperName, resource])
 
-  const allEntries = resource.state.value.data ?? []
+  const response = resource.state.value.data
+  const allEntries = response?.entries ?? []
   const filter = filterTool.value.toLowerCase()
   const filtered = !filter
     ? allEntries
@@ -143,7 +182,12 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
   const entries = allEntries
 
   if (entries.length === 0) {
-    return html`<div class="text-xs text-[var(--text-muted)] p-4">도구 호출 데이터 없음. 서버 재시작 후 기록됩니다.</div>`
+    return html`
+      <div class="p-4">
+        <div class="text-xs text-[var(--text-muted)]">도구 호출 데이터 없음</div>
+        <${FreshnessLine} data=${response ?? { source: 'tool_call_io' }} />
+      </div>
+    `
   }
 
   // Summary stats
@@ -155,12 +199,13 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
 
   return html`
     <div class="space-y-3">
-      <div class="flex items-center justify-between gap-3">
+      <div class="flex items-center justify-between gap-3 flex-wrap">
         <div class="flex gap-4 text-xs text-[var(--text-muted)]">
           <span>${totalCalls} calls</span>
           <span>${uniqueTools} tools</span>
           <span class=${successRate < 80 ? 'text-[var(--warn)]' : ''}>${successRate}% ok</span>
         </div>
+        <${FreshnessLine} data=${response ?? { source: 'tool_call_io' }} />
         <input
           type="text"
           placeholder="Filter tool..."

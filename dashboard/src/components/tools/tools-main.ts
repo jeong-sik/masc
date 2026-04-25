@@ -16,9 +16,32 @@ import { PromptRegistryPanel } from './prompt-registry-panel'
 import { ConfigResolutionPanel } from './config-resolution-panel'
 import { ActionButton } from '../common/button'
 import { ToolExecutor } from '../tool-executor/tool-executor'
+import { formatElapsedCompact } from '../../lib/format-time'
 
 type ToolsView = 'inventory' | 'executor'
 const activeView = signal<ToolsView>('inventory')
+
+function sourceHealthClass(health?: string | null): string {
+  switch ((health ?? '').toLowerCase()) {
+    case 'ok':
+      return 'text-[var(--ok)]'
+    case 'stale':
+    case 'coverage_gap':
+    case 'empty':
+      return 'text-[var(--warn)]'
+    case 'missing':
+      return 'text-[var(--bad-light)]'
+    default:
+      return 'text-[var(--text-muted)]'
+  }
+}
+
+function sourceFreshnessLabel(latestAge: number | null | undefined): string {
+  if (typeof latestAge !== 'number' || !Number.isFinite(latestAge)) {
+    return 'latest n/a'
+  }
+  return `latest ${formatElapsedCompact(latestAge)}`
+}
 
 export function Tools() {
   const data = toolsData.value
@@ -60,6 +83,15 @@ export function Tools() {
           ? html`
               <div class="text-xs text-[var(--text-muted)] mb-2">
                 등록됨 ${usage.registered_count} (모든 MCP 서버 합산) · 사용된 ${usage.distinct_tools_called} · 미사용 ${usage.never_called_count}
+              </div>
+              <div class="text-3xs text-[var(--text-muted)] mb-2">
+                <span class="font-mono">${usage.source ?? 'tool_usage'}</span>
+                <span class="mx-1">·</span>
+                <span class="font-mono ${sourceHealthClass(usage.health)}">${usage.health ?? 'unknown'}</span>
+                <span class="mx-1">·</span>
+                <span>${usage.stale_reason ?? sourceFreshnessLabel(usage.latest_age_s)}</span>
+                <span class="mx-1">·</span>
+                <span>${(usage.entry_count ?? 0).toLocaleString()} durable rows</span>
               </div>
             `
           : null}

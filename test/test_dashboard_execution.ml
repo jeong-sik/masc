@@ -655,6 +655,20 @@ let test_execution_trust_surfaces_latest_receipt () =
               Lib.Dashboard_http_keeper.execution_trust_dashboard_json config
             in
             let open Yojson.Safe.Util in
+            check string "execution trust source" "execution_receipt"
+              (trust_json |> member "source" |> to_string);
+            check string "execution trust producer"
+              "keeper_agent_run.execution_receipt"
+              (trust_json |> member "producer" |> to_string);
+            check string "execution trust dashboard surface"
+              "/api/v1/dashboard/execution-trust"
+              (trust_json |> member "dashboard_surface" |> to_string);
+            check int "execution trust entry count" 1
+              (trust_json |> member "entry_count" |> to_int);
+            check string "execution trust health" "ok"
+              (trust_json |> member "health" |> to_string);
+            check bool "execution trust latest age present" true
+              (trust_json |> member "latest_age_s" <> `Null);
             let compact_row =
               compact_json |> member "keepers" |> to_list
               |> List.find (fun keeper ->
@@ -708,6 +722,39 @@ let test_execution_trust_surfaces_latest_receipt () =
               [ "WebSearch" ]
               (trust_row |> member "trust" |> member "unexpected_tools"
              |> to_list |> List.map to_string))))
+
+let test_execution_trust_surfaces_coverage_gap_health () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let config = Coord_utils.default_config dir in
+      ignore (Lib.Coord.init config ~agent_name:None);
+      let masc_root = Lib.Coord.masc_root_dir config in
+      Lib.Telemetry_coverage_gap.record
+        ~masc_root
+        ~source:"execution_receipt"
+        ~producer:"keeper_agent_run.execution_receipt"
+        ~durable_store:(Filename.concat masc_root "keepers/*/execution-receipts")
+        ~dashboard_surface:"/api/v1/dashboard/execution-trust"
+        ~stale_reason:"execution_receipt_append_failed"
+        ~keeper_name:"sangsu"
+        ~trace_id:"trace-exec-gap"
+        ();
+      let trust_json =
+        Lib.Dashboard_http_keeper.execution_trust_dashboard_json config
+      in
+      let open Yojson.Safe.Util in
+      check string "execution trust coverage gap health"
+        "coverage_gap"
+        (trust_json |> member "health" |> to_string);
+      check string "execution trust coverage gap stale reason"
+        "execution_receipt_append_failed"
+        (trust_json |> member "stale_reason" |> to_string);
+      check int "execution trust coverage gap count" 1
+        (trust_json |> member "coverage_gap_count" |> to_int))
 
 let test_patch_keeper_dependent_caches_tolerates_null_agent () =
   let execution_json =
@@ -836,6 +883,8 @@ let () =
             test_dashboard_execution_surfaces_keeper_diagnostic;
           Alcotest.test_case "execution trust surfaces latest receipt" `Quick
             test_execution_trust_surfaces_latest_receipt;
+          Alcotest.test_case "execution trust surfaces coverage gap health" `Quick
+            test_execution_trust_surfaces_coverage_gap_health;
           Alcotest.test_case "lifecycle patch tolerates null agent" `Quick
             test_patch_keeper_dependent_caches_tolerates_null_agent;
           Alcotest.test_case "running keeper patch tolerates null agent" `Quick

@@ -478,6 +478,15 @@ function formatSourceAge(seconds: number | null | undefined): string | null {
 }
 
 export function sourceCountClass(source: TelemetrySourceSummary): string {
+  switch ((source.health ?? '').toLowerCase()) {
+    case 'missing':
+      return 'text-[var(--bad-light)]'
+    case 'stale':
+    case 'coverage_gap':
+      return 'text-[var(--warn)]'
+    case 'ok':
+      return 'text-[var(--ok)]'
+  }
   if (source.exists === false) return 'text-[var(--bad-light)]'
   if (source.entry_count <= 0) return 'text-[var(--text-dim)]'
   const age = numericAge(source.latest_age_s)
@@ -498,6 +507,9 @@ export function sourceDetail(source: TelemetrySourceSummary): string {
   if (source.entry_count > 0) {
     const age = formatSourceAge(source.latest_age_s)
     parts.push(age ? `last ${age} ago` : 'latest ts unavailable')
+  }
+  if (source.health) {
+    parts.push(source.stale_reason ? `${source.health}: ${source.stale_reason}` : source.health)
   }
 
   return parts.join(' · ')

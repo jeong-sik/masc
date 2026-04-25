@@ -150,9 +150,16 @@ let render_rate_table ~field table =
   |> List.sort (fun (a, _) (b, _) -> Int.compare b a)
   |> List.map snd
 
+let dashboard_surface = "/api/v1/dashboard/tool-quality"
+
+let source_metadata_fields () =
+  Dashboard_tool_source_freshness.keeper_tool_call_io_fields
+    ~dashboard_surface ()
+
 let empty_summary ~window_hours ~n ~sampling_mode =
   `Assoc
-    [ ("generated_at", `String (Types.now_iso ()))
+    (source_metadata_fields ()
+    @ [ ("generated_at", `String (Types.now_iso ()))
     ; ("sampling_mode", `String sampling_mode)
     ; ( "sample_limit",
         match sampling_mode with
@@ -174,7 +181,7 @@ let empty_summary ~window_hours ~n ~sampling_mode =
     ; ("by_tool_choice", `List [])
     ; ("failure_categories", `List [])
     ; ("hourly_trend", `List [])
-    ]
+    ])
 
 let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
   let records, sampling_mode, window_hours =
@@ -393,7 +400,9 @@ let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
     |> List.sort (fun (a, _) (b, _) -> String.compare a b)
     |> List.map snd
   in
-  `Assoc [
+  `Assoc (
+    source_metadata_fields ()
+    @ [
     ("generated_at", `String (Types.now_iso ()));
     ("sampling_mode", `String sampling_mode);
     ( "sample_limit",
@@ -416,4 +425,4 @@ let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
     ("by_tool_choice", `List by_tool_choice);
     ("failure_categories", `List failure_categories);
     ("hourly_trend", `List hourly);
-  ]
+  ])

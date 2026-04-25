@@ -233,6 +233,18 @@ export type ToolQualityHourlyPoint = {
 }
 
 export type ToolQualityResponse = {
+  source?: string
+  producer?: string
+  durable_store?: string
+  dashboard_surface?: string
+  freshness_slo_s?: number
+  latest_ts_unix?: number | null
+  latest_ts_iso?: string | null
+  latest_age_s?: number | null
+  health?: string
+  stale_reason?: string | null
+  entry_count?: number
+  exists?: boolean
   generated_at?: string
   sampling_mode?: 'recent_n' | 'window_hours' | string
   sample_limit?: number | null
@@ -1225,6 +1237,18 @@ export interface ToolMetricsTopEntry {
 }
 
 export interface ToolMetricsResponse {
+  source?: string
+  producer?: string
+  durable_store?: string
+  dashboard_surface?: string
+  freshness_slo_s?: number | null
+  latest_ts_unix?: number | null
+  latest_ts_iso?: string | null
+  latest_age_s?: number | null
+  health?: string
+  stale_reason?: string | null
+  entry_count?: number
+  exists?: boolean
   total_calls: number
   distinct_tools_called: number
   top_20: ToolMetricsTopEntry[]
@@ -1886,7 +1910,39 @@ export type HourlyBucket = {
   error_count: number
 }
 
-export type ToolStatsResponse = {
+export type TelemetryFreshnessMetadata = {
+  source?: string
+  producer?: string
+  durable_store?: string
+  dashboard_surface?: string
+  freshness_slo_s?: number | null
+  latest_ts_unix?: number | null
+  latest_ts_iso?: string | null
+  latest_age_s?: number | null
+  health?: string
+  stale_reason?: string | null
+  entry_count?: number
+  exists?: boolean
+}
+
+function decodeTelemetryFreshnessMetadata(raw: Record<string, unknown>): TelemetryFreshnessMetadata {
+  return {
+    source: asString(raw.source),
+    producer: asString(raw.producer),
+    durable_store: asString(raw.durable_store),
+    dashboard_surface: asString(raw.dashboard_surface),
+    freshness_slo_s: asNumber(raw.freshness_slo_s),
+    latest_ts_unix: asNumber(raw.latest_ts_unix),
+    latest_ts_iso: asNullableString(raw.latest_ts_iso),
+    latest_age_s: asNumber(raw.latest_age_s),
+    health: asString(raw.health),
+    stale_reason: asNullableString(raw.stale_reason),
+    entry_count: asNumber(raw.entry_count),
+    exists: asBoolean(raw.exists),
+  }
+}
+
+export type ToolStatsResponse = TelemetryFreshnessMetadata & {
   keeper: string
   window_hours: number
   total_entries: number
@@ -1927,6 +1983,7 @@ function decodeToolStatsResponse(raw: unknown): ToolStatsResponse | null {
   const keeper = asString(raw.keeper)
   if (!keeper) return null
   return {
+    ...decodeTelemetryFreshnessMetadata(raw),
     keeper,
     window_hours: asNumber(raw.window_hours, 24),
     total_entries: asNumber(raw.total_entries, 0),
@@ -1986,7 +2043,7 @@ export type ToolCallEntry = {
   lane?: string
 }
 
-export type ToolCallsResponse = {
+export type ToolCallsResponse = TelemetryFreshnessMetadata & {
   keeper: string
   count: number
   entries: ToolCallEntry[]
@@ -2042,6 +2099,7 @@ function decodeToolCallsResponse(raw: unknown): ToolCallsResponse | null {
   const keeper = asString(raw.keeper)
   if (!keeper) return null
   return {
+    ...decodeTelemetryFreshnessMetadata(raw),
     keeper,
     count: asNumber(raw.count, 0),
     entries: asRecordArray(raw.entries)
@@ -2072,8 +2130,10 @@ export type TelemetrySource =
   | 'keeper_metric'
   | 'agent_event'
   | 'tool_call_io'
+  | 'trajectory_tool_call'
   | 'tool_usage'
   | 'oas_event'
+  | 'execution_receipt'
   | 'tool_metric'
 
 export type TelemetryEntry = Record<string, unknown> & {
@@ -2099,9 +2159,15 @@ export type TelemetrySourceSummary = {
   entry_count: number
   keepers?: Array<{ name: string; path: string }>
   keeper_count?: number
+  freshness_slo_s?: number | null
+  producer?: string
+  durable_store?: string
+  dashboard_surface?: string
   latest_ts_unix?: number | null
   latest_ts_iso?: string | null
   latest_age_s?: number | null
+  health?: string
+  stale_reason?: string | null
 }
 
 export type TelemetrySummaryResponse = {
@@ -2115,8 +2181,10 @@ function decodeTelemetrySource(value: unknown): TelemetrySource | null {
     case 'keeper_metric':
     case 'agent_event':
     case 'tool_call_io':
+    case 'trajectory_tool_call':
     case 'tool_usage':
     case 'oas_event':
+    case 'execution_receipt':
     case 'tool_metric':
       return value
     default:
@@ -2170,9 +2238,15 @@ function decodeTelemetrySourceSummary(raw: unknown): TelemetrySourceSummary | nu
       })
       .filter((keeper): keeper is { name: string; path: string } => keeper !== null),
     keeper_count: asNumber(raw.keeper_count),
+    freshness_slo_s: asNumber(raw.freshness_slo_s),
+    producer: asString(raw.producer),
+    durable_store: asString(raw.durable_store),
+    dashboard_surface: asString(raw.dashboard_surface),
     latest_ts_unix: asNumber(raw.latest_ts_unix),
     latest_ts_iso: asString(raw.latest_ts_iso),
     latest_age_s: asNumber(raw.latest_age_s),
+    health: asString(raw.health),
+    stale_reason: asNullableString(raw.stale_reason),
   }
 }
 

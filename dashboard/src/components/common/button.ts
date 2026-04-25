@@ -80,7 +80,7 @@ export function ActionButton({
   ].filter(Boolean).join(' ')
 
   return html`
-    <button type="button"
+    <button
       type=${type}
       id=${id}
       class=${cls}

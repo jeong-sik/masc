@@ -29,7 +29,7 @@ export function SectionHeader({
 }: SectionHeaderProps) {
   return html`
     <div class="flex items-center justify-between gap-2 ${cx ?? ''}">
-      <h4 class="m-0 ${SIZE_CLASSES[size]} uppercase tracking-[0.06em] text-[var(--text-muted)] font-medium">${children}</h4>
+      <h2 class="m-0 ${SIZE_CLASSES[size]} uppercase tracking-[0.06em] text-[var(--text-muted)] font-medium">${children}</h2>
       ${right ?? null}
     </div>
   `

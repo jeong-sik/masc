@@ -10,6 +10,12 @@ val contains_substring_ci : string -> string -> bool
     Returns [false] when [needle] is empty, matching the behavior
     of the original per-module [contains_ci] helpers. *)
 
+val find_substring : ?pos:int -> string -> string -> int option
+(** [find_substring ?pos haystack needle] returns the byte index of the
+    first occurrence of [needle] in [haystack] at or after [pos]
+    (default 0), or [None] if absent. Empty needle returns [Some pos],
+    matching [Re.exec_opt (Re.str "" |> Re.compile)] semantics. *)
+
 val replace_substring : needle:string -> by:string -> string -> string
 (** [replace_substring ~needle ~by haystack] substitutes [by] for every
     non-overlapping occurrence of [needle] in [haystack]. Returns

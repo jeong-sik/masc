@@ -11,21 +11,27 @@ const spawnMode = signal<SpawnMode>('persona')
 export function KeeperSpawnPanel() {
   if (!showSpawnPanel.value) {
     return html`<div class="mb-4">
-      <${ActionButton} variant="primary" size="md" onClick=${() => { showSpawnPanel.value = true }}>+ 키퍼 생성<//>
+      <${ActionButton} variant="primary" size="md"
+        ariaExpanded=${false}
+        onClick=${() => { showSpawnPanel.value = true }}>+ 키퍼 생성<//>
     </div>`
   }
   return html`
     <div class="mb-4 rounded border border-[var(--card-border)] bg-[var(--bg-1)] p-4">
       <div class="flex items-center justify-between mb-3">
         <h3 class="text-sm text-[var(--text-strong)] font-medium">키퍼 생성</h3>
-        <${ActionButton} variant="subtle" size="sm" onClick=${() => { showSpawnPanel.value = false }}>닫기<//>
+        <${ActionButton} variant="subtle" size="sm" ariaLabel="닫기"
+          onClick=${() => { showSpawnPanel.value = false }}>닫기<//>
       </div>
       <div class="flex gap-2 mb-3">
         <${ActionButton} variant=${spawnMode.value === 'persona' ? 'primary' : 'ghost'} size="sm"
+          ariaPressed=${spawnMode.value === 'persona'}
           onClick=${() => { spawnMode.value = 'persona' }}>페르소나에서 생성<//>
         <${ActionButton} variant=${spawnMode.value === 'generate' ? 'primary' : 'ghost'} size="sm"
+          ariaPressed=${spawnMode.value === 'generate'}
           onClick=${() => { spawnMode.value = 'generate' }}>새 페르소나<//>
         <${ActionButton} variant=${spawnMode.value === 'direct' ? 'primary' : 'ghost'} size="sm"
+          ariaPressed=${spawnMode.value === 'direct'}
           onClick=${() => { spawnMode.value = 'direct' }}>직접 생성<//>
       </div>
       ${spawnMode.value === 'persona'

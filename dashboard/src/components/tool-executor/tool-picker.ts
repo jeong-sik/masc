@@ -42,6 +42,7 @@ export function ToolPicker() {
             ${tierFilter.value === opt.value
               ? 'bg-[var(--accent-12)] text-[var(--text-strong)] border border-[var(--accent-30)]'
               : 'text-[var(--text-muted)] hover:text-[var(--text-body)] border border-transparent hover:bg-[var(--white-6)]'}"
+            aria-pressed=${tierFilter.value === opt.value}
             onClick=${() => { tierFilter.value = opt.value }}>${opt.label}</button>
         `)}
         <span class="text-3xs text-[var(--text-muted)] ml-auto self-center">${tools.length}개</span>

@@ -13,7 +13,7 @@ import {
 
 function ConfirmDialog({ toolName, onConfirm, onCancel }: { toolName: string; onConfirm: () => void; onCancel: () => void }) {
   return html`
-    <div class="rounded border border-[rgba(251,113,133,0.4)] bg-[var(--bad-10)] p-3">
+    <div class="rounded border border-[rgba(251,113,133,0.4)] bg-[var(--bad-10)] p-3" role="alertdialog" aria-label="파괴적 도구 실행 확인">
       <p class="text-xs text-[var(--bad-light)] mb-2"><strong>${toolName}</strong> 은 파괴적(destructive) 도구입니다. 실행하시겠습니까?</p>
       <div class="flex gap-2">
         <${ActionButton} variant="danger" size="sm" onClick=${onConfirm}>실행<//>
@@ -67,10 +67,10 @@ function ToolDetail() {
 export function ToolExecutor() {
   useEffect(() => { void loadToolSchemas() }, [])
   if (schemasLoading.value && !selectedTool.value) {
-    return html`<${SurfaceCard}><p class="text-xs text-[var(--text-muted)] py-8 text-center">도구 스키마 로딩 중...</p><//>`
+    return html`<${SurfaceCard}><p class="text-xs text-[var(--text-muted)] py-8 text-center" role="status">도구 스키마 로딩 중...</p><//>`
   }
   if (schemasError.value) {
-    return html`<${SurfaceCard}><div class="py-4 text-center">
+    return html`<${SurfaceCard}><div class="py-4 text-center" role="alert">
       <p class="text-xs text-[var(--bad)] mb-2">${schemasError.value}</p>
       <${ActionButton} variant="ghost" size="sm" onClick=${() => void loadToolSchemas(true)}>재시도<//>
     </div><//>`

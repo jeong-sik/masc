@@ -37,8 +37,10 @@ export function Tools() {
     <div>
       <div class="flex gap-2 mb-4">
         <${ActionButton} variant=${activeView.value === 'inventory' ? 'primary' : 'ghost'} size="md"
+          ariaPressed=${activeView.value === 'inventory'}
           onClick=${() => { activeView.value = 'inventory' }}>인벤토리<//>
         <${ActionButton} variant=${activeView.value === 'executor' ? 'primary' : 'ghost'} size="md"
+          ariaPressed=${activeView.value === 'executor'}
           onClick=${() => { activeView.value = 'executor' }}>도구 실행기<//>
       </div>
       ${activeView.value === 'executor' ? html`<${ToolExecutor} />` : html`<div>

@@ -76,6 +76,7 @@ function StoredBlobView({
         <div class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] overflow-hidden">
           <div class="flex items-center justify-between px-3 py-1.5 border-b border-[var(--card-border)]">
             <button type="button" class="text-3xs text-[var(--text-muted)] cursor-pointer hover:text-[var(--text-body)]"
+              aria-expanded="true"
               onClick=${() => { expanded.value = false }}>
               접기 (${marker.bytes.toLocaleString()}B)
             </button>
@@ -119,7 +120,7 @@ function StoredBlobView({
           <pre class="text-xs font-mono text-[var(--text-muted)] whitespace-pre-wrap">${marker.preview}</pre>
         </div>
         ${error.value ? html`
-          <div class="px-3 py-1.5 border-t border-[var(--card-border)] text-2xs text-[var(--bad-light)]">
+          <div role="alert" class="px-3 py-1.5 border-t border-[var(--card-border)] text-2xs text-[var(--bad-light)]">
             ${error.value}
           </div>
         ` : null}
@@ -155,6 +156,7 @@ export function ToolResultDisplay({ success, text, toolName, timestamp }: ToolRe
       <div class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] overflow-hidden">
         <div class="flex items-center justify-between px-3 py-1.5 border-b border-[var(--card-border)]">
           <button type="button" class="text-3xs text-[var(--text-muted)] cursor-pointer hover:text-[var(--text-body)]"
+            aria-expanded=${expanded.value}
             onClick=${() => { expanded.value = !expanded.value }}>
             ${expanded.value ? '접기' : '펼치기'} (${lines}줄)
           </button>

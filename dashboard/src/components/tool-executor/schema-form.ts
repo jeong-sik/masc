@@ -25,7 +25,7 @@ export function SchemaForm({ schema, values, onChange }: SchemaFormProps) {
   }
 
   return html`
-    <div class="flex flex-col gap-3">
+    <div class="flex flex-col gap-3" role="form" aria-label="도구 파라미터">
       ${sorted.map(([name, prop]) => html`
         <${SchemaField} key=${name} name=${name} schema=${prop} value=${values[name]}
           required=${required.has(name)} onChange=${handleFieldChange} />

@@ -108,6 +108,8 @@
   50% { opacity: 0.5; }
 }
 
+.animate-loading-pulse { animation: loadingPulse 2.5s ease-in-out infinite; }
+
 @keyframes spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }

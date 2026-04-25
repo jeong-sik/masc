@@ -50,7 +50,7 @@ function ToolDetail() {
           실행 차단: ${toolAccess.reason ?? `${toolAccess.required_role} 권한이 필요합니다.`}
         </p>
       `}
-      ${missing.length > 0 ? html`<p class="text-2xs text-[var(--bad)]">필수 필드 누락: ${missing.join(', ')}</p>` : null}
+      ${missing.length > 0 ? html`<p class="text-2xs text-[var(--bad)]" role="alert">필수 필드 누락: ${missing.join(', ')}</p>` : null}
       ${showConfirm.value
         ? html`<${ConfirmDialog} toolName=${tool.name} onConfirm=${handleConfirmedExecute} onCancel=${() => { showConfirm.value = false }} />`
         : html`

@@ -52,4 +52,7 @@ a:focus-visible,
   .animate-pulse { animation: none; }
   .animate-bounce { animation: none; }
   .animate-ping { animation: none; }
+  /* Phase indicator loading pulse + toast entrance animation. */
+  .animate-loading-pulse { animation: none; }
+  [class*="slideInRight"] { animation: none; }
 }

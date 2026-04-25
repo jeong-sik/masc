@@ -7,6 +7,7 @@
 import { html } from 'htm/preact'
 import type { TelemetryEntry } from '../../api/dashboard'
 import { detailSelection, clearSelection, type DetailSelection } from './detail-selection-store'
+import { TimeAgo } from '../common/time-ago'
 
 function selectionTitle(selection: DetailSelection): string {
   const source = typeof selection.entry.source === 'string' ? selection.entry.source : '?'
@@ -86,7 +87,10 @@ export function DetailPane() {
         </button>
       </div>
       <div class="grid grid-cols-1 gap-1.5 px-3 py-2 md:grid-cols-2">
-        <${MetaRow} label="시각" value=${new Date(selection.ts).toLocaleString()} />
+        <div class="flex items-baseline gap-2 text-2xs">
+          <span class="w-20 shrink-0 text-text-dim">시각</span>
+          <span class="font-mono text-text-strong"><${TimeAgo} timestamp=${selection.ts} mode="both" /></span>
+        </div>
         ${selection.bucketCount > 1 ? html`
           <${MetaRow} label="bucket" value=${`${selection.bucketCount} events`} />
         ` : null}

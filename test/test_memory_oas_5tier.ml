@@ -476,6 +476,53 @@ let test_flush_episodes_appends_only_new_records () =
   Alcotest.(check bool) "new record appended" true (List.mem "new-episode-id" ids);
   cleanup_tmp_dir dir
 
+let test_failed_turn_episode_flushes_failure_outcome () =
+  let dir = setup_tmp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tmp_dir dir)
+    (fun () ->
+      let memory =
+        Memory_oas_bridge.create_memory ~agent_name:"test-failed-turn" ()
+      in
+      Memory_oas_bridge.store_failed_turn_episode
+        ~memory
+        ~keeper_name:"test-failed-turn"
+        ~turn:7
+        ~trace_id:"trace-failed-turn"
+        ~error_kind:"provider_timeout"
+        ~error_message:"provider timed out before producing a tool-using turn"
+        ();
+      let flushed =
+        Memory_oas_bridge.flush_episodes
+          ~memory
+          ~agent_name:"test-failed-turn"
+      in
+      Alcotest.(check int) "failure episode flushed" 1 flushed;
+      let persisted = Institution_eio.load_recent_episodes_jsonl ~limit:10 in
+      let episode =
+        List.find_opt
+          (fun (episode : Institution_eio.episode) ->
+            String.equal episode.event_type "keeper_turn"
+            && List.mem "test-failed-turn" episode.participants)
+          persisted
+      in
+      match episode with
+      | None -> Alcotest.fail "expected failed keeper_turn episode"
+      | Some episode ->
+        Alcotest.(check bool) "outcome is failure" true
+          (match episode.outcome with
+           | `Failure -> true
+           | `Success | `Partial -> false);
+        Alcotest.(check string) "trace_id preserved" "trace-failed-turn"
+          (List.assoc "trace_id" episode.context);
+        Alcotest.(check string) "turn preserved" "7"
+          (List.assoc "turn" episode.context);
+        Alcotest.(check string) "error kind preserved" "provider_timeout"
+          (List.assoc "error_kind" episode.context);
+        Alcotest.(check string) "error message preserved"
+          "provider timed out before producing a tool-using turn"
+          (List.assoc "error_message" episode.context))
+
 (* ================================================================ *)
 (* Test Suite                                                        *)
 (* ================================================================ *)
@@ -519,5 +566,7 @@ let () =
         test_jsonl_backend_uses_explicit_base_dir;
       Alcotest.test_case "flush_episodes appends only new" `Quick
         test_flush_episodes_appends_only_new_records;
+      Alcotest.test_case "failed keeper turn flushes failure outcome" `Quick
+        test_failed_turn_episode_flushes_failure_outcome;
     ]);
   ]

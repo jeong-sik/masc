@@ -166,6 +166,10 @@ val metric_oas_bus_publish_block_seconds : string
 val metric_oas_bus_publish : string
 val metric_runtime_ollama_probe_generate_skips : string
 
+(** #10130: boot-time sweep of save_file_atomic orphan temp files.
+    Labels: [size_class = empty | with_data]. *)
+val metric_fs_atomic_orphans_cleaned : string
+
 (** {1 Transport metrics} *)
 
 val metric_sse_sessions : string

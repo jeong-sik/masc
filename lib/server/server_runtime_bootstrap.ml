@@ -1231,6 +1231,39 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       Runtime_params.restore ~base_path;
       Log.Server.info "Runtime_params restored from %s" base_path;
       Keeper_crash_persistence.start_drain_fiber ~sw ~clock;
+      (* #10130: sweep [save_file_atomic] orphan temp files left by
+         SIGKILL'd or ENFILE-crashed prior processes.  Zero-byte
+         orphans are deleted; non-zero orphans (evidence of silent
+         atomic-save data loss) are preserved in
+         [<base_path>/.recovered/] for forensic inspection.  Always
+         runs at boot so each restart publishes fresh cleanup
+         counters. *)
+      (try
+        let deleted, preserved =
+          Fs_compat.cleanup_atomic_orphans ~base_path ()
+        in
+        if deleted > 0 then
+          Prometheus.inc_counter
+            Prometheus.metric_fs_atomic_orphans_cleaned
+            ~labels:[ ("size_class", "empty") ]
+            ~delta:(float_of_int deleted)
+            ();
+        if preserved > 0 then
+          Prometheus.inc_counter
+            Prometheus.metric_fs_atomic_orphans_cleaned
+            ~labels:[ ("size_class", "with_data") ]
+            ~delta:(float_of_int preserved)
+            ();
+        if deleted + preserved > 0 then
+          Log.Server.warn
+            "boot: cleaned %d save_file_atomic orphans (%d empty, \
+             %d preserved with data in .recovered/ — see #10130)"
+            (deleted + preserved) deleted preserved
+       with Eio.Cancel.Cancelled _ as e -> raise e
+          | exn ->
+            Log.Server.error
+              "boot: atomic orphan sweep failed: %s"
+              (Printexc.to_string exn));
       let t2 = Eio.Time.now clock in
       Log.Server.info "Bootstrap completed in %.1fs" (t2 -. t1);
       Server_bootstrap_loops.install_tooling ~governance_level state;

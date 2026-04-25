@@ -382,6 +382,14 @@ let metric_oas_bus_publish = "masc_oas_bus_publish_total"
 let metric_runtime_ollama_probe_generate_skips =
   "masc_runtime_ollama_probe_generate_skips_total"
 
+(* #10130: boot-time sweep of [save_file_atomic] orphan temp
+   files.  Labels: [size_class = empty | with_data].  The
+   [with_data] rate is the interesting operator signal — each
+   non-zero orphan represents a silent atomic-save failure
+   (SIGKILL / ENFILE mid-write) that dropped the payload. *)
+let metric_fs_atomic_orphans_cleaned =
+  "masc_fs_atomic_orphans_cleaned_total"
+
 (** {1 Built-in Metrics} *)
 
 let init () =
@@ -628,6 +636,13 @@ let init () =
   add metric_runtime_ollama_probe_generate_skips
     "Total Ollama runtime probes that intentionally skipped /api/generate. \
      Labeled by reason=status_only|model_unloaded|ps_error|no_effective_model|policy_skip."
+    Counter;
+  (* #10130: boot-time sweep of save_file_atomic orphans. *)
+  add metric_fs_atomic_orphans_cleaned
+    "Total save_file_atomic orphan temp files cleaned at boot \
+     (labels: size_class=empty|with_data).  [with_data] rate > 0 \
+     indicates silent atomic-save failures (SIGKILL / ENFILE) that \
+     dropped payloads; moved to [<base_path>/.recovered/]."
     Counter;
   (* Transport metrics — registered here so transport_metrics.ml can use
      module constants instead of string literals. *)

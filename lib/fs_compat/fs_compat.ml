@@ -191,6 +191,87 @@ let save_file_atomic (path : string) (content : string) : (unit, string) result 
     (try Sys.remove tmp with Sys_error _ -> ());
     Error (Printf.sprintf "save_file_atomic %s: %s" path (Printexc.to_string exn))
 
+(* #10130: orphaned [.atomic_*.tmp] files from [save_file_atomic]
+   that accumulated because the owning process was SIGKILL'd or
+   [Filename.temp_file] raised ENFILE/EMFILE (so the with-handler
+   never ran).  The 2026-04-24 audit found 33 orphans in
+   [~/me/.masc/] with 6 non-zero files carrying real keeper-meta
+   JSON — evidence of 6 silent atomic-save failures that
+   dropped data.
+
+   [cleanup_atomic_orphans] is a boot-time sweep.  Zero-byte
+   orphans are deleted (they lost the rename race but never
+   held data).  Non-zero orphans are MOVED to
+   [<base_path>/<recovered_subdir>/] instead of deleted so
+   operators can forensically inspect them — a data-loss event
+   deserves preservation, not silent cleanup.
+
+   Returns [(deleted, preserved)]:
+   - [deleted]: number of zero-byte orphans removed.
+   - [preserved]: number of non-zero orphans moved to the
+     recovered directory. *)
+let is_atomic_orphan_name name =
+  let prefix = ".atomic_" and suffix = ".tmp" in
+  let n = String.length name in
+  let p = String.length prefix in
+  let s = String.length suffix in
+  n >= p + s
+  && String.sub name 0 p = prefix
+  && String.sub name (n - s) s = suffix
+
+let cleanup_atomic_orphans
+    ~(base_path : string)
+    ?(recovered_subdir = ".recovered")
+    () : int * int =
+  let recovered_dir = Filename.concat base_path recovered_subdir in
+  let deleted = ref 0 in
+  let preserved = ref 0 in
+  let ensure_recovered_dir () =
+    if not (Sys.file_exists recovered_dir) then
+      try Unix.mkdir recovered_dir 0o755
+      with Unix.Unix_error _ -> ()
+  in
+  let handle_file dir name =
+    let path = Filename.concat dir name in
+    match Unix.stat path with
+    | exception Unix.Unix_error _ -> ()
+    | stat when stat.Unix.st_size = 0 ->
+        (try Sys.remove path; incr deleted
+         with Sys_error _ -> ())
+    | _stat ->
+        ensure_recovered_dir ();
+        let target =
+          Filename.concat recovered_dir
+            (Printf.sprintf "%s.%.0f" name (Unix.gettimeofday () *. 1000.0))
+        in
+        (try Sys.rename path target; incr preserved
+         with Sys_error _ | Unix.Unix_error _ -> ())
+  in
+  let scan_dir dir =
+    match Sys.readdir dir with
+    | exception Sys_error _ -> ()
+    | entries ->
+        Array.iter
+          (fun name ->
+            if is_atomic_orphan_name name then handle_file dir name)
+          entries
+  in
+  scan_dir base_path;
+  (match Sys.readdir base_path with
+   | exception Sys_error _ -> ()
+   | entries ->
+       Array.iter
+         (fun name ->
+           if name = recovered_subdir then ()
+           else
+             let sub = Filename.concat base_path name in
+             match Unix.stat sub with
+             | exception Unix.Unix_error _ -> ()
+             | stat when stat.Unix.st_kind = Unix.S_DIR -> scan_dir sub
+             | _ -> ())
+         entries);
+  (!deleted, !preserved)
+
 (** Append string to file.
     Eio-native when available, fallback to Unix.
     @raises Sys_error on all I/O failures. Eio.Io is normalized internally. *)

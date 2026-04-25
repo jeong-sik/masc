@@ -113,7 +113,7 @@ function ToolCallEventRow({ evt, idx }: { evt: AgentTimelineEvent; idx: number }
         ${evt.ts ? html`<${TimeAgo} timestamp=${evt.ts} />` : null}
       </div>
       ${args ? html`
-        <div class="ml-8 mt-0.5 text-3xs text-[var(--text-dim)] font-mono truncate">
+        <div class="ml-8 mt-0.5 text-3xs text-[var(--text-dim)] font-mono truncate" title=${typeof args === 'string' ? args : formatArgs(args)}>
           ${typeof args === 'string' ? trimText(args, 60) : formatArgs(args)}
         </div>
       ` : null}

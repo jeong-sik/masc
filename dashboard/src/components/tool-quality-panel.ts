@@ -266,7 +266,7 @@ function FailureList({ categories }: { categories: FailureCategory[] }) {
     <div class="flex flex-col gap-1">
       ${top.map(c => html`
         <div class="flex items-center justify-between text-2xs">
-          <span class="font-mono text-[var(--bad-light)]/80 truncate flex-1 mr-2">${c.category}</span>
+          <span class="font-mono text-[var(--bad-light)]/80 truncate flex-1 mr-2" title=${c.category}>${c.category}</span>
           <span class="text-[var(--text-dim)] shrink-0">${c.count}x</span>
         </div>
       `)}

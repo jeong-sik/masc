@@ -549,7 +549,7 @@ export function DwellHistogramPanel({
                       class=${`flex items-center gap-1.5 text-3xs font-mono leading-tight ${rowCls}`}
                       title=${`${displayState(entry.value)}: ${fmtDuration(entry.seconds)} (${entry.pct.toFixed(1)}%)`}
                     >
-                      <span class="w-15 shrink-0 text-[var(--text-body)] truncate">${displayState(entry.value)}</span>
+                      <span class="w-15 shrink-0 text-[var(--text-body)] truncate" title=${displayState(entry.value)}>${displayState(entry.value)}</span>
                       <span class="flex-1 h-1.5 rounded-sm bg-[var(--white-8)] overflow-hidden">
                         <span
                           class=${`block h-full ${barColor}`}

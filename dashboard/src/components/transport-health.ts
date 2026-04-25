@@ -260,8 +260,8 @@ function MetricRow({ label, value, sub }: { label: string; value: string | numbe
     <div class="flex items-center justify-between gap-3 py-1.5">
       <span class="text-xs text-text-muted">${label}</span>
       <div class="flex items-center gap-2 min-w-0">
-        <span class="text-sm font-mono font-medium text-text-strong truncate">${value}</span>
-        ${sub ? html`<span class="text-3xs text-text-muted truncate">${sub}</span>` : null}
+        <span class="text-sm font-mono font-medium text-text-strong truncate" title=${value}>${value}</span>
+        ${sub ? html`<span class="text-3xs text-text-muted truncate" title=${sub}>${sub}</span>` : null}
       </div>
     </div>
   `
@@ -295,7 +295,7 @@ function SectionCard({
       <div class="flex items-center justify-between gap-3 mb-3">
         <div class="flex items-center gap-2 min-w-0">
           <${StatusDot} size="sm" class=${statusDot(status)} />
-          <span class="text-xs font-semibold text-text-strong uppercase tracking-wider truncate">${title}</span>
+          <span class="text-xs font-semibold text-text-strong uppercase tracking-wider truncate" title=${title}>${title}</span>
         </div>
         ${eyebrow ? html`<span class=${`text-3xs uppercase tracking-wider ${toneClass(status)}`}>${eyebrow}</span>` : null}
       </div>
@@ -504,7 +504,7 @@ export function TransportHealthPanel() {
                       <div key=${session.session_id} class="rounded border border-card-border/60 bg-bg-1/60 p-3">
                         <div class="flex items-center justify-between gap-2 mb-1">
                           <div class="flex min-w-0 items-center gap-1">
-                            <span class="truncate text-2xs font-mono text-text-strong">${compactId(session.session_id)}</span>
+                            <span class="truncate text-2xs font-mono text-text-strong" title=${session.session_id}>${compactId(session.session_id)}</span>
                             <${CopyIdButton} value=${session.session_id} label="session_id" />
                           </div>
                           <span class="text-3xs uppercase tracking-wider text-text-muted">${session.kind}</span>

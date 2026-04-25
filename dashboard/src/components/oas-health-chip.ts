@@ -161,7 +161,7 @@ export function OasHealthChip() {
               <ul class="space-y-1">
                 ${recentEvents.value.map(evt => html`
                   <li class="flex items-baseline justify-between gap-2 text-2xs">
-                    <span class="text-[var(--text-body)] truncate">
+                    <span class="text-[var(--text-body)] truncate" title=${`${evt.agent_name} · ${describeAgentEvent(evt)}`}>
                       <span class="font-mono text-[var(--text-dim)]">${evt.agent_name}</span>
                       <span class="text-[var(--text-muted)]"> · </span>
                       ${describeAgentEvent(evt)}
@@ -182,7 +182,7 @@ export function OasHealthChip() {
               <ul class="space-y-1">
                 ${recentKeepers.value.map(snap => html`
                   <li class="flex items-baseline justify-between gap-2 text-2xs">
-                    <span class="text-[var(--text-body)] truncate">
+                    <span class="text-[var(--text-body)] truncate" title=${`${snap.keeper_name} · gen ${snap.generation} · ${Math.round(snap.context_ratio * 100)}%`}>
                       <span class="font-mono text-[var(--text-dim)]">${snap.keeper_name}</span>
                       <span class="text-[var(--text-muted)]"> · gen ${snap.generation} · ${Math.round(snap.context_ratio * 100)}%</span>
                     </span>

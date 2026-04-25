@@ -1070,7 +1070,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
                     }}
                   />
                   <span class="min-w-[4.5rem] font-mono text-3xs text-[var(--text-muted)]">${goal.horizon}</span>
-                  <span class="flex-1 truncate">${goal.title}</span>
+                  <span class="flex-1 truncate" title=${goal.title}>${goal.title}</span>
                   <span class="font-mono text-3xs text-[var(--text-dim)]">${goal.id}</span>
                 </label>
               `

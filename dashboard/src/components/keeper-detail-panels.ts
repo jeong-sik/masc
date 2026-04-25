@@ -349,7 +349,7 @@ function KpiSection({ title, question, children }: {
     <section class="rounded border border-[var(--card-border)] bg-[var(--white-2)] p-3" aria-label=${title}>
       <header class="mb-2 flex items-baseline justify-between gap-2">
         <h3 class="text-2xs font-semibold tracking-1 uppercase text-[var(--text-muted)]">${title}</h3>
-        <span class="text-3xs text-[var(--text-dim)] truncate">${question}</span>
+        <span class="text-3xs text-[var(--text-dim)] truncate" title=${question}>${question}</span>
       </header>
       ${children}
     </section>
@@ -900,7 +900,7 @@ export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
                 <div class="flex items-center justify-between gap-2 text-2xs">
                   <span class="inline-flex items-center gap-2 min-w-0">
                     <span class="inline-block w-2.5 h-2.5 rounded-full shrink-0" style=${`background:${ctxSegmentColor(key)};`}></span>
-                    <span class="truncate text-[var(--text-body)]">${ctxSegmentLabel(key)}</span>
+                    <span class="truncate text-[var(--text-body)]" title=${ctxSegmentLabel(key)}>${ctxSegmentLabel(key)}</span>
                   </span>
                   <span class="font-mono tabular-nums text-[var(--text-dim)] whitespace-nowrap">
                     ${pct.toFixed(1)}% · ${formatTokens(segment.estimated_tokens)}

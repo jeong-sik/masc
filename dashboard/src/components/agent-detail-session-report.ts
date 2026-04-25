@@ -192,7 +192,7 @@ function TaskEventTimeline({ events }: { events: AgentTimelineEvent[] }) {
           return html`
             <div key=${idx} class="flex items-center gap-2 py-1.5 px-3 rounded hover:bg-white/3 transition-colors">
               <span class="text-3xs font-bold uppercase tracking-wider ${color} bg-white/5 px-2 py-0.5 rounded">${icon}</span>
-              <span class="text-xs text-text-body flex-1 truncate">${title}</span>
+              <span class="text-xs text-text-body flex-1 truncate" title=${title}>${title}</span>
               ${evt.ts ? html`<${TimeAgo} timestamp=${evt.ts} />` : null}
             </div>
           `

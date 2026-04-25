@@ -414,7 +414,7 @@ function EpisodeCard({ ep }: { ep: MemorySubsystemsEpisode }) {
       <div class="flex items-start justify-between gap-2 mb-1">
         <div class="flex items-center gap-2 min-w-0">
           <span class="${outcomeColor} text-xs">${outcomeIcon}</span>
-          <span class="text-sm font-medium text-[var(--text-muted)] truncate">${ep.summary}</span>
+          <span class="text-sm font-medium text-[var(--text-muted)] truncate" title=${ep.summary}>${ep.summary}</span>
         </div>
         <span class="text-xs text-[var(--text-muted)]0 shrink-0">${formatTimeAgo(ep.timestamp * 1000)}</span>
       </div>

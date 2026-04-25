@@ -181,7 +181,7 @@ function EventRow({
       <span class="${outcomeToneClass(a.outcome.kind)} shrink-0 w-20">
         ${outcomeLabel(a)}
       </span>
-      <span class="text-[var(--text-muted)] truncate grow min-w-0">
+      <span class="text-[var(--text-muted)] truncate grow min-w-0" title=${reasonText ?? ''}>
         ${reasonText ? highlightMatch(reasonText, query) : '—'}
       </span>
     </button>

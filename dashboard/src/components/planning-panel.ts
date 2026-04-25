@@ -88,7 +88,7 @@ function CoordinationEvidenceRow({ evidence }: { evidence: DashboardCoordination
         <span class="rounded border border-card-border/50 bg-black/15 px-1.5 py-0.5 text-3xs font-semibold uppercase text-text-muted">
           ${evidenceLabel(evidence)}
         </span>
-        <span class="min-w-0 truncate text-2xs font-medium text-text-strong">
+        <span class="min-w-0 truncate text-2xs font-medium text-text-strong" title=${evidence.label ?? evidence.id ?? 'evidence'}>
           ${evidence.label ?? evidence.id ?? 'evidence'}
         </span>
       </div>

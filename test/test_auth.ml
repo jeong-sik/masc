@@ -748,6 +748,16 @@ let test_authorize_unknown_non_masc_tool_strict_denied () =
   | Error e -> fail (Printf.sprintf "wrong error: %s" (Types.masc_error_to_string e))
 
 let test_authorize_unknown_canonical_tool_strict_worker_allowed () =
+  (* #10205 finding 1: lock the [internal_tool_prefixes] vocabulary
+     (masc_, decision., experiment., client.) so a future refactor
+     that drops one silently is caught here.  Each prefix's
+     unmapped tool must pass strict-mode check for a Worker. *)
+  let prefixes_with_unlisted_tool = [
+    "masc_unlisted_tool";
+    "decision.unlisted_tool";
+    "experiment.unlisted_tool";
+    "client.unlisted_tool";
+  ] in
   let dir = setup_test_room () in
   let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
   let create_result = Auth.create_token dir ~agent_name:"worker_agent" ~role:Types.Worker in
@@ -755,8 +765,15 @@ let test_authorize_unknown_canonical_tool_strict_worker_allowed () =
     match create_result with
     | Ok (raw_token, _) ->
         with_env "MASC_TOOL_AUTH_STRICT" "1" (fun () ->
-            Auth.authorize_tool dir ~agent_name:"worker_agent" ~token:(Some raw_token)
-              ~tool_name:"decision.unlisted_tool")
+            List.fold_left
+              (fun acc tool_name ->
+                 match acc with
+                 | Error _ as e -> e
+                 | Ok () ->
+                     Auth.authorize_tool dir ~agent_name:"worker_agent"
+                       ~token:(Some raw_token) ~tool_name)
+              (Ok ())
+              prefixes_with_unlisted_tool)
     | Error e -> Error e
   in
   cleanup_test_room dir;

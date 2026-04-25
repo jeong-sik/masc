@@ -389,12 +389,18 @@ let () =
           (Preset { preset = Minimal; also_allow = [] });
         check_access "minimal board opt-in listens" true
           (Preset { preset = Minimal; also_allow = [ "keeper_board_post" ] });
+        check_access "minimal fake keeper board prefix stays quiet" false
+          (Preset { preset = Minimal; also_allow = [ "keeper_board_fake" ] });
         check_access "delivery listens to board by default" true
           (Preset { preset = Delivery; also_allow = [] });
         check_access "messaging listens to board by default" true
           (Preset { preset = Messaging; also_allow = [] });
         check_access "custom without board stays quiet" false
           (Custom [ "keeper_time_now" ]);
+        check_access "custom masc board allowlist listens" true
+          (Custom [ "masc_board_post" ]);
+        check_access "custom fake masc board prefix stays quiet" false
+          (Custom [ "masc_board_fake" ]);
         check_access "custom board allowlist listens" true
           (Custom [ "keeper_board_post" ]));
       Alcotest.test_case "Social, Dispatch, and Delivery present" `Quick (fun () ->

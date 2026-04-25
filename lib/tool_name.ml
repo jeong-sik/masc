@@ -153,6 +153,19 @@ module Keeper = struct
 
   let board_write_tool_names = List.map to_string board_write_tools
 
+  let is_board = function
+    | Board_cleanup
+    | Board_comment
+    | Board_comment_vote
+    | Board_delete
+    | Board_get
+    | Board_list
+    | Board_post
+    | Board_search
+    | Board_stats
+    | Board_vote -> true
+    | _ -> false
+
   let is_board_write = function
     | Board_post | Board_comment | Board_vote -> true
     | _ -> false
@@ -489,6 +502,21 @@ module Masc = struct
     | "masc_webrtc_offer" -> Some Webrtc_offer
     | _ -> None
 
+  let is_board = function
+    | Board_cleanup
+    | Board_comment
+    | Board_comment_vote
+    | Board_delete
+    | Board_get
+    | Board_hearths
+    | Board_list
+    | Board_post
+    | Board_profile
+    | Board_search
+    | Board_stats
+    | Board_vote -> true
+    | _ -> false
+
   let pp fmt t = Format.pp_print_string fmt (to_string t)
 end
 
@@ -562,3 +590,8 @@ let pp fmt t = Format.pp_print_string fmt (to_string t)
 let is_keeper = function Keeper _ -> true | _ -> false
 let is_masc = function Masc _ -> true | _ -> false
 let is_masc_keeper = function Masc_keeper _ -> true | _ -> false
+
+let is_board = function
+  | Keeper k -> Keeper.is_board k
+  | Masc m -> Masc.is_board m
+  | Masc_keeper _ -> false

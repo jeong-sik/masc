@@ -574,6 +574,7 @@ export function ToolAllowlistEditor({
           <label class="flex flex-col gap-1">
             <span class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">preset</span>
             <select
+              aria-label="프리셋"
               class="w-full px-3 py-2 rounded border border-[var(--card-border)] bg-[var(--white-3)] text-2xs text-[var(--text-body)]"
               value=${preset.value}
               onChange=${(e: Event) => { preset.value = (e.target as HTMLSelectElement).value as typeof preset.value }}

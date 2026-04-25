@@ -140,6 +140,7 @@ export function PersonaGenerator() {
           <label class="grid gap-1 text-3xs text-[var(--text-muted)]">
             preset
             <select
+              aria-label="도구 프리셋"
               value=${toolPreset.value}
               onChange=${(e: Event) => { toolPreset.value = (e.target as HTMLSelectElement).value }}
               class="rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1.5 text-2xs text-[var(--text-body)] focus:outline-none focus:border-[var(--accent)]"

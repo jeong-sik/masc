@@ -356,7 +356,7 @@ export function TransportHealthPanel() {
 
   if (!data) return null
   if (!data.summary || !data.agent_health) {
-    return html`<div class="p-6 text-center text-text-muted text-sm">트랜스포트 데이터 불완전. <button class="underline" onClick=${() => void refreshTransportHealth()}>재시도</button></div>`
+    return html`<div class="p-6 text-center text-text-muted text-sm">트랜스포트 데이터 불완전. <button type="button" class="underline" onClick=${() => void refreshTransportHealth()}>재시도</button></div>`
   }
 
   const sseStatus = sseTone(data)

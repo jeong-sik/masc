@@ -113,6 +113,7 @@ function LoopSelector() {
       <div class="flex items-center gap-2">
         <label class="text-2xs text-[var(--text-muted)] font-medium">실행자 필터</label>
         <select
+          aria-label="실행자 필터"
           class="bg-card border border-card-border text-[var(--text-body)] text-xs rounded px-2 py-1 outline-none focus:border-accent"
           value=${authorFilter.value}
           onChange=${(e: Event) => {

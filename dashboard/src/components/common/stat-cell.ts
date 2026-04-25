@@ -26,7 +26,7 @@ const VALUE_SIZE = {
 
 export function StatCell({ label, value, detail, tone, size = 'md', bg = 'white-4', class: className }: StatCellProps) {
   return html`
-    <div class="p-4 rounded ${BG[bg]} border border-[var(--white-6)] grid gap-1.5 ${tone ?? ''} ${className ?? ''}">
+    <div class="p-4 rounded ${BG[bg]} border border-[var(--white-6)] grid gap-1.5 ${tone ?? ''} ${className ?? ''}" role="group" aria-label="${label}: ${value}${detail != null ? ` (${detail})` : ''}">
       <span class="text-3xs text-[var(--text-muted)] tracking-wider uppercase font-medium">${label}</span>
       <strong class="text-[var(--text-strong)] ${VALUE_SIZE[size]} leading-tight tabular-nums">${value}</strong>
       ${detail != null ? html`<small class="text-[var(--text-muted)] text-3xs leading-relaxed">${detail}</small>` : null}

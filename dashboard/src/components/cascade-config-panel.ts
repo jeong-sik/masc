@@ -712,7 +712,7 @@ function HealthTable({
         : null}
     </div>
     ${isFiltering && filtered.length === 0
-      ? html`<div class="py-4 text-center text-2xs text-[var(--text-muted)]">필터 결과 없음 (${health.providers.length} providers)</div>`
+      ? html`<div class="py-4 text-center text-2xs text-[var(--text-muted)]" role="status">필터 결과 없음 (${health.providers.length} providers)</div>`
       : html`
         <table class="w-full text-xs" aria-label="Cascade 공급자 상태">
           <thead>
@@ -763,7 +763,7 @@ function HealthTable({
               const orphaned = p.declared === false
               return html`
               <tr class="border-b border-[var(--card-border)] last:border-b-0 even:bg-[var(--white-3)]">
-                <td class="py-1"><span class=${`inline-block w-2 h-2 rounded-full ${TONE_DOT[tone]}`}></span></td>
+                <td class="py-1"><span class=${`inline-block w-2 h-2 rounded-full ${TONE_DOT[tone]}`} aria-hidden="true"></span></td>
                 <td class="py-1">
                   <code class="text-[var(--text-strong)]">${p.provider_key}</code>
                   ${orphaned
@@ -1151,6 +1151,7 @@ function CascadeRawConfigEditor({
                 <span class=${saveMessage.value.startsWith('Failed') || saveMessage.value.startsWith('Invalid')
                   ? 'text-[var(--bad-light)]'
                   : 'text-[var(--text-muted)]'}
+                  role="status"
                 >
                   ${saveMessage.value}
                 </span>

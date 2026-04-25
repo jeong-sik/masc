@@ -75,9 +75,9 @@ let test_failover_preserves_order () =
 
 let test_failover_filters_cooldown () =
   let h = H.create () in
-  H.record_failure h ~provider_key:"a";
-  H.record_failure h ~provider_key:"a";
-  H.record_failure h ~provider_key:"a";
+  H.record_failure h ~provider_key:"a" ();
+  H.record_failure h ~provider_key:"a" ();
+  H.record_failure h ~provider_key:"a" ();
   let cands = [mk_cand "a"; mk_cand "b"; mk_cand "c"] in
   let ctx = mk_ctx ~health:h () in
   let ordered = S.order_candidates S.failover ~adapter ~ctx ~cycle:0 cands in
@@ -141,9 +141,9 @@ let test_weighted_random_all_cooldown_yields_empty () =
      and let the caller surface a filtered-empty cascade state. *)
   let h = H.create () in
   let cool_down k =
-    H.record_failure h ~provider_key:k;
-    H.record_failure h ~provider_key:k;
-    H.record_failure h ~provider_key:k
+    H.record_failure h ~provider_key:k ();
+    H.record_failure h ~provider_key:k ();
+    H.record_failure h ~provider_key:k ()
   in
   cool_down "a"; cool_down "b";
   let cands = [mk_cand ~w:50 "a"; mk_cand ~w:30 "b"] in
@@ -157,9 +157,9 @@ let test_weighted_random_all_cooldown_yields_empty () =
 
 let test_cb_cycling_excludes_cooldown_and_busy () =
   let h = H.create () in
-  H.record_failure h ~provider_key:"a";
-  H.record_failure h ~provider_key:"a";
-  H.record_failure h ~provider_key:"a";
+  H.record_failure h ~provider_key:"a" ();
+  H.record_failure h ~provider_key:"a" ();
+  H.record_failure h ~provider_key:"a" ();
   let cands = [mk_cand "a"; mk_cand "b"; mk_cand "c"] in
   let table = [
     (List.nth cands 1).url, mk_capacity_info ~total:1 ~active:1;

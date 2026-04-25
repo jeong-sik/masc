@@ -148,10 +148,41 @@ let test_safe_invalid_utf8_best_effort () =
       (* Best-effort: ASCII "A" should be preserved, orphan dropped *)
       check string "best-effort keeps ASCII" "A" prefix
 
+(* ---- find_substring ---- *)
+
+let check_int_option = check (option int)
+
+let test_find_substring_basic () =
+  check_int_option "first occurrence" (Some 0)
+    (SU.find_substring "abcabc" "abc");
+  check_int_option "respects pos" (Some 3)
+    (SU.find_substring ~pos:1 "abcabc" "abc");
+  check_int_option "absent" None
+    (SU.find_substring "abcabc" "z")
+
+let test_find_substring_boundaries () =
+  check_int_option "match at last valid index" (Some 2)
+    (SU.find_substring ~pos:2 "aaaa" "aa");
+  check_int_option "pos past last valid index" None
+    (SU.find_substring ~pos:3 "aaaa" "aa");
+  check_int_option "pos at end" None
+    (SU.find_substring ~pos:4 "aaaa" "a")
+
+let test_find_substring_empty_needle () =
+  check_int_option "empty returns pos" (Some 2)
+    (SU.find_substring ~pos:2 "abc" "");
+  check_int_option "empty can return end" (Some 3)
+    (SU.find_substring ~pos:3 "abc" "")
+
+let test_find_substring_rejects_negative_pos () =
+  check_raises "negative pos" (Invalid_argument
+    "String_util.find_substring: negative position")
+    (fun () -> ignore (SU.find_substring ~pos:(-1) "abc" "a"))
+
 (* ---- Test runner ---- *)
 
 let () =
-  run "string_util UTF-8 safety"
+  run "string_util"
     [ ( "utf8_char_boundary",
         [ test_case "ASCII in-bounds" `Quick test_boundary_ascii_in_bounds;
           test_case "Korean cuts back" `Quick test_boundary_korean_cuts_back;
@@ -171,4 +202,10 @@ let () =
           test_case "was_truncated + to_string" `Quick
             test_was_truncated_and_to_string;
           test_case "invalid UTF-8 best-effort" `Quick
-            test_safe_invalid_utf8_best_effort ] ) ]
+            test_safe_invalid_utf8_best_effort ] );
+      ( "find_substring",
+        [ test_case "basic" `Quick test_find_substring_basic;
+          test_case "boundaries" `Quick test_find_substring_boundaries;
+          test_case "empty needle" `Quick test_find_substring_empty_needle;
+          test_case "negative pos rejected" `Quick
+            test_find_substring_rejects_negative_pos ] ) ]

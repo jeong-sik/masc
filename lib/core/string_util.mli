@@ -10,6 +10,20 @@ val contains_substring_ci : string -> string -> bool
     Returns [false] when [needle] is empty, matching the behavior
     of the original per-module [contains_ci] helpers. *)
 
+val find_substring : ?pos:int -> string -> string -> int option
+(** [find_substring ?pos haystack needle] returns the byte index of the
+    first occurrence of [needle] in [haystack] at or after [pos]
+    (default 0), or [None] if absent. Empty needle returns [Some pos],
+    matching [Re.exec_opt (Re.str "" |> Re.compile)] semantics. Raises
+    [Invalid_argument] when [pos] is negative. *)
+
+val replace_substring : needle:string -> by:string -> string -> string
+(** [replace_substring ~needle ~by haystack] substitutes [by] for every
+    non-overlapping occurrence of [needle] in [haystack]. Returns
+    [haystack] unchanged when [needle] is empty or longer than the
+    haystack. Matches [Re.replace_string (Re.str needle |> Re.compile)]
+    semantics for ASCII / byte-equal patterns. *)
+
 type truncation =
   | Untouched of string
   | Truncated of { prefix : string; suffix : string; dropped_bytes : int }

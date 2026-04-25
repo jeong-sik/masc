@@ -83,7 +83,7 @@ export function DetailPane() {
           onClick=${clearSelection}
           aria-label="상세 패널 닫기"
         >
-          ✕
+          <span aria-hidden="true">✕</span>
         </button>
       </div>
       <div class="grid grid-cols-1 gap-1.5 px-3 py-2 md:grid-cols-2">

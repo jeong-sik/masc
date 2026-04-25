@@ -181,7 +181,7 @@ function ToolTable({
               : 'border-b border-[var(--card-border)] border-opacity-30'
             return html`
               <tr class=${rowClass} ref=${isHighlighted ? ((el: HTMLElement | null) => el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })) : undefined}>
-                <td class="py-0.5 font-mono">${t.name.replace('keeper_', '').replace('masc_', 'm:')}${isHighlighted ? html`<span class="ml-1 text-3xs text-[var(--warn)]">◀ selected</span>` : null}</td>
+                <td class="py-0.5 font-mono">${t.name.replace('keeper_', '').replace('masc_', 'm:')}${isHighlighted ? html`<span class="ml-1 text-3xs text-[var(--warn)]"><span aria-hidden="true">◀</span> selected</span>` : null}</td>
                 <td class="text-right py-0.5 text-[var(--text-dim)]">${t.calls}</td>
                 <td class="text-right py-0.5 font-mono ${color}">${t.success_pct.toFixed(0)}%</td>
                 <td class="text-right py-0.5 text-[var(--text-dim)]">${t.avg_ms.toFixed(0)}</td>

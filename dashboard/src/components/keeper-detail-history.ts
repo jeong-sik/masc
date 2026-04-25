@@ -238,7 +238,7 @@ export function KeeperCheckpointPanel({
               const visibleHistory = filterCheckpointHistory(inventory.history, historyQuery)
               const isFiltering = historyQuery.trim() !== ''
               if (isFiltering && visibleHistory.length === 0) {
-                return html`<div class="px-3 py-4 text-center text-2xs text-[var(--text-dim)]">필터 결과 없음 (${inventory.history.length} items)</div>`
+                return html`<div class="px-3 py-4 text-center text-2xs text-[var(--text-dim)]" role="status">필터 결과 없음 (${inventory.history.length} items)</div>`
               }
               return html`
                 <div class="flex flex-col">

@@ -180,6 +180,68 @@ let test_emit_cost_event_marks_untrusted_usage () =
      | `Null -> true
      | _ -> false)
 
+let test_emit_cost_event_marks_unpriced_paid_model () =
+  let root = temp_dir () in
+  let telemetry : Agent_sdk.Types.inference_telemetry =
+    {
+      system_fingerprint = None;
+      timings = None;
+      reasoning_tokens = None;
+      request_latency_ms = 100;
+      peak_memory_gb = None;
+      provider_kind = Some Llm_provider.Provider_kind.OpenAI_compat;
+      reasoning_effort = None;
+      canonical_model_id = Some "future-openai-model-v9";
+      effective_context_window = Some 128000;
+      provider_internal_action_count = None;
+    }
+  in
+  Hooks.emit_cost_event ~masc_root:root ~agent_name:"keeper"
+    ~task_id:None ~model:"future-openai-model-v9"
+    ~input_tokens:1000 ~output_tokens:500 ~cost_usd:0.0
+    ~telemetry ();
+  let json = read_jsonl_line (Filename.concat root "costs.jsonl") in
+  check string "provider" "openai" (json |> member "provider" |> to_string);
+  check string "cost status" "unpriced_model"
+    (json |> member "cost_status" |> to_string);
+  check string "cost reason" "pricing_catalog_miss"
+    (json |> member "cost_status_reason" |> to_string);
+  check string "pricing model" "future-openai-model-v9"
+    (json |> member "cost_pricing_model" |> to_string);
+  check string "pricing catalog" "miss"
+    (json |> member "cost_pricing_catalog" |> to_string)
+
+let test_emit_cost_event_records_auto_resolution_source () =
+  let root = temp_dir () in
+  let telemetry : Agent_sdk.Types.inference_telemetry =
+    {
+      system_fingerprint = None;
+      timings = None;
+      reasoning_tokens = None;
+      request_latency_ms = 100;
+      peak_memory_gb = None;
+      provider_kind = Some Llm_provider.Provider_kind.OpenAI_compat;
+      reasoning_effort = None;
+      canonical_model_id = Some "gpt-4.1";
+      effective_context_window = Some 128000;
+      provider_internal_action_count = None;
+    }
+  in
+  Hooks.emit_cost_event ~masc_root:root ~agent_name:"keeper"
+    ~task_id:None ~model:"auto"
+    ~input_tokens:1000 ~output_tokens:500 ~cost_usd:0.01
+    ~telemetry ();
+  let json = read_jsonl_line (Filename.concat root "costs.jsonl") in
+  check string "provider" "openai" (json |> member "provider" |> to_string);
+  check string "pricing model" "gpt-4.1"
+    (json |> member "cost_pricing_model" |> to_string);
+  check string "model resolution source" "telemetry_canonical_alias"
+    (json |> member "model_resolution_source" |> to_string);
+  check string "pricing catalog" "hit_paid"
+    (json |> member "cost_pricing_catalog" |> to_string);
+  check string "cost status" "priced"
+    (json |> member "cost_status" |> to_string)
+
 let test_cost_usd_for_usage_falls_back_for_paid_provider () =
   let model = "openai:gpt-4.1" in
   let usage = make_usage ~input_tokens:1000 ~output_tokens:500 () in
@@ -447,6 +509,10 @@ let () =
             test_emit_cost_event_writes_wall_tok_s_without_provider_timings
         ; test_case "emit_cost_event marks untrusted usage" `Quick
             test_emit_cost_event_marks_untrusted_usage
+        ; test_case "emit_cost_event marks unpriced paid model" `Quick
+            test_emit_cost_event_marks_unpriced_paid_model
+        ; test_case "emit_cost_event records auto resolution source" `Quick
+            test_emit_cost_event_records_auto_resolution_source
         ; test_case "cost fallback estimates paid provider usage" `Quick
             test_cost_usd_for_usage_falls_back_for_paid_provider
         ; test_case "cost fallback preserves reported cost" `Quick

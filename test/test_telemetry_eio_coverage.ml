@@ -211,6 +211,66 @@ let test_parse_event_records_tool_called_missing_options () =
   check_one_tool_called_record "missing options" json ~operation_id:None
     ~worker_run_id:None
 
+let check_one_tool_assigned_record label json ~preset =
+  match Telemetry_eio.parse_event_records [json] with
+  | [ record ] -> (
+      match record.event with
+      | Telemetry_eio.Tool_assigned r ->
+          check string (label ^ " agent_id")
+            "keeper-masc-improver-agent" r.agent_id;
+          check string (label ^ " profile") "default" r.profile;
+          check (option string) (label ^ " preset") preset r.preset;
+          check int (label ^ " tool_count") 32 r.tool_count;
+          check string (label ^ " assignment_id") "asg-001" r.assignment_id
+      | _ -> fail (label ^ ": expected Tool_assigned"))
+  | records ->
+      fail
+        (Printf.sprintf "%s: expected one parsed record, got %d" label
+           (List.length records))
+
+let test_parse_event_records_tool_assigned_null_preset () =
+  let json =
+    `Assoc
+      [
+        ("timestamp", `Float 1777120367.858374);
+        ( "event",
+          `List
+            [
+              `String "Tool_assigned";
+              `Assoc
+                [
+                  ("agent_id", `String "keeper-masc-improver-agent");
+                  ("profile", `String "default");
+                  ("preset", `Null);
+                  ("tool_count", `Int 32);
+                  ("assignment_id", `String "asg-001");
+                ];
+            ] );
+      ]
+  in
+  check_one_tool_assigned_record "null preset" json ~preset:None
+
+let test_parse_event_records_tool_assigned_missing_preset () =
+  let json =
+    `Assoc
+      [
+        ("timestamp", `Int 1777120367);
+        ( "event",
+          `List
+            [
+              `String "Tool_assigned";
+              `Assoc
+                [
+                  ("agent_id", `String "keeper-masc-improver-agent");
+                  ("profile", `String "default");
+                  ("tool_count", `Int 32);
+                  ("assignment_id", `String "asg-001");
+                ];
+            ] );
+      ]
+  in
+  check_one_tool_assigned_record "missing preset" json ~preset:None
+
 (* ============================================================
    metrics Type Tests
    ============================================================ *)
@@ -477,6 +537,10 @@ let () =
         test_parse_event_records_tool_called_null_options;
       test_case "tool_called missing option fields" `Quick
         test_parse_event_records_tool_called_missing_options;
+      test_case "tool_assigned null preset field" `Quick
+        test_parse_event_records_tool_assigned_null_preset;
+      test_case "tool_assigned missing preset field" `Quick
+        test_parse_event_records_tool_assigned_missing_preset;
     ];
     "metrics", [
       test_case "type" `Quick test_metrics_type;

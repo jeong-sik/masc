@@ -8,6 +8,12 @@ val get_string : Yojson.Safe.t -> string -> string option
 val get_string_with_default : Yojson.Safe.t -> key:string -> default:string -> string
 (** [get_string_with_default json key ~default] extracts string with fallback *)
 
+val get_string_nonempty : Yojson.Safe.t -> string -> string option
+(** [get_string_nonempty json key] returns [Some s] only when the field
+    is a non-empty string after [String.trim]; whitespace-only inputs
+    yield [None].  SSOT for the bespoke trim+empty filter previously
+    duplicated in keeper/judge JSON parsers. *)
+
 val get_int : Yojson.Safe.t -> string -> int option
 (** [get_int json key] extracts int field, supports Int and Intlit *)
 

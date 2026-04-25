@@ -102,12 +102,7 @@ let transaction_to_json (t : transaction) : Yojson.Safe.t =
   ]
 
 let json_string_field ~default key json =
-  match json with
-  | `Assoc fields ->
-    (match List.assoc_opt key fields with
-     | Some (`String s) -> s
-     | _ -> default)
-  | _ -> default
+  Json_util.get_string_with_default json ~key ~default
 
 let json_float_field ~default key json =
   match json with

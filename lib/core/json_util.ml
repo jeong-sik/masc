@@ -23,6 +23,16 @@ let get_string_with_default json ~key ~default =
   | `String s -> s
   | _ -> default
 
+(** Like [get_string] but rejects whitespace-only strings.  Returns
+    [Some] only when the field is a non-empty string after [String.trim].
+    Several modules carried bespoke [json_string_field] helpers with
+    this exact filter (typed-LLM output, keeper contract introspection,
+    etc.) — this is the SSOT for that pattern. *)
+let get_string_nonempty json key : string option =
+  match Yojson.Safe.Util.member key json with
+  | `String s when String.trim s <> "" -> Some s
+  | _ -> None
+
 let get_int : Yojson.Safe.t -> string -> int option = fun json key ->
   match Yojson.Safe.Util.member key json with
   | `Int n -> Some n

@@ -36,7 +36,7 @@ function Chip({
         onClick=${onClear}
         aria-label=${`${label} 필터 제거`}
       >
-        <${X} size=${10} />
+        <${X} size=${10} aria-hidden="true" />
       </button>
     </span>
   `

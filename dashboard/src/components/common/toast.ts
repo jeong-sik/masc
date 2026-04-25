@@ -203,7 +203,7 @@ export function ToastContainer() {
               dismissToast(t.id)
             }}
           >
-            <${X} size=${14} />
+            <${X} size=${14} aria-hidden="true" />
           </button>
         </div>
       `)}

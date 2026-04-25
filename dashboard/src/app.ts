@@ -180,7 +180,7 @@ export function App() {
                   })
                 }}
               >
-                ${mobileMenuOpen.value ? html`<${X} size=${20} />` : html`<${Menu} size=${20} />`}
+                ${mobileMenuOpen.value ? html`<${X} size=${20} aria-hidden="true" />` : html`<${Menu} size=${20} aria-hidden="true" />`}
               </button>
               <div class="flex size-7 shrink-0 items-center justify-center rounded border border-[var(--white-10)] bg-[var(--white-4)] text-sm text-[var(--text-strong)]">
                 ${currentView?.icon ?? 'M'}

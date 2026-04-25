@@ -434,7 +434,7 @@ export function TaskDetailOverlay() {
           class="shrink-0 size-8 flex items-center justify-center rounded border border-[var(--white-10)] bg-[var(--white-5)] text-text-muted cursor-pointer transition-colors hover:bg-[var(--white-10)] hover:text-text-strong"
           onClick=${closeTaskDetail}
           aria-label="닫기"
-        ><${X} size=${16} /></button>
+        ><${X} size=${16} aria-hidden="true" /></button>
       </div>
 
       ${'' /* Tab bar */}

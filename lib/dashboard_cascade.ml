@@ -521,59 +521,20 @@ type recommendation = {
   rec_rationale : string;
 }
 
-(* Classifier — see RFC-0009 §"Phase 2a".  Order matters: more specific
-   buckets first.  Returns [None] when the provider is healthy enough to
-   not warrant any operator action (default: trust >= 0.5 with no
-   stuck-fingerprint streak).
+(* Classifier — see RFC-0009 §"Phase 2a".
 
-   Boundaries are the calibrated trust_score zones from the same 4044-
-   record analysis that calibrated Phase 1 — not magic numbers.  Below
-   0.1 a provider is "essentially zero": multiplicative decays only
-   reach < 0.1 after 5+ persistent strikes. *)
+   #10441: Phase 1 was reverted in #10412, removing [trust_score] and
+   [same_fingerprint_count] from [Health.provider_info].  This classifier was
+   shipped by #10416 against a base that still had those fields, so its
+   per-provider trust thresholds no longer have any input data.  Stub it to
+   always emit [None] until the trust pipeline is reinstated; the type
+   surface stays alive so consumers ([low_trust_recommendations],
+   [recommendations_json]) keep their signatures.  See #10428 for the
+   redesign discussion. *)
 let classify_recommendation (info : Health.provider_info) :
     recommendation option =
-  let top_fp =
-    match info.top_fingerprints with
-    | (fp, _) :: _ -> Some fp
-    | [] -> None
-  in
-  let stuck_streak = info.same_fingerprint_count >= 5 in
-  let very_low = info.trust_score < 0.1 in
-  let low = info.trust_score < 0.3 in
-  let high_volume = info.events_in_window >= 30 in
-  let mk action rationale =
-    Some
-      {
-        rec_provider_key = info.provider_key;
-        rec_trust_score = info.trust_score;
-        rec_same_fingerprint_count = info.same_fingerprint_count;
-        rec_events_in_window = info.events_in_window;
-        rec_top_fingerprint = top_fp;
-        rec_action = action;
-        rec_rationale = rationale;
-      }
-  in
-  if stuck_streak then
-    mk Investigate
-      (Printf.sprintf
-         "stuck on the same fingerprint %d times — likely a config or auth issue, not provider quality"
-         info.same_fingerprint_count)
-  else if very_low && high_volume then
-    mk Investigate
-      (Printf.sprintf
-         "trust=%.2f after %d failures in the rolling window — high-volume failure pattern, inspect cascade_audit before reducing weight"
-         info.trust_score info.events_in_window)
-  else if very_low then
-    mk Disable
-      (Printf.sprintf
-         "trust=%.2f — provider has decayed to effectively zero across multiple persistent failures"
-         info.trust_score)
-  else if low then
-    mk Reduce_weight
-      (Printf.sprintf
-         "trust=%.2f — provider is partially working; halving the cascade.toml weight reduces wasted turns"
-         info.trust_score)
-  else None
+  let _ = info in
+  None
 
 let low_trust_recommendations (infos : Health.provider_info list) :
     recommendation list =

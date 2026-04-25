@@ -241,6 +241,51 @@ let test_promote_nonexistent () =
       (msg_contains ~needle:"not found" msg || msg_contains ~needle:"no" msg)
   )
 
+let test_promote_updates_frontmatter () =
+  with_temp_home (fun ctx ->
+    let candidate_path =
+      Filename.concat (Tool_library.candidates_dir ()) "regex-topic-20260425.md"
+    in
+    Out_channel.with_open_text candidate_path (fun oc ->
+      Out_channel.output_string oc
+        {|---
+title: Regex Topic
+source: direct_experience
+confidence: 0.30
+author: test-agent
+created: 2026-04-25
+updated: 2026-04-25
+tags: []
+verified_by: []
+---
+
+Promotion should preserve the body.
+|});
+    let args =
+      `Assoc [
+        ("topic", `String "regex-topic");
+        ("confidence", `Float 0.91);
+      ]
+    in
+    let (ok, msg) = dispatch_exn ctx ~name:"masc_library_promote" ~args in
+    Alcotest.(check bool) "promote succeeds" true ok;
+    Alcotest.(check bool) "response mentions promoted" true
+      (msg_contains ~needle:"promoted" msg);
+    Alcotest.(check bool) "candidate removed" false
+      (Sys.file_exists candidate_path);
+    let promoted_path =
+      Filename.concat (Tool_library.library_root ())
+        (Filename.basename candidate_path)
+    in
+    Alcotest.(check bool) "library file exists" true
+      (Sys.file_exists promoted_path);
+    let promoted = In_channel.with_open_text promoted_path In_channel.input_all in
+    Alcotest.(check bool) "confidence updated" true
+      (msg_contains ~needle:"confidence: 0.91" promoted);
+    Alcotest.(check bool) "verifier added" true
+      (msg_contains ~needle:"verified_by: [test-agent]" promoted)
+  )
+
 (* ============================================================
    Workflow: add → list → read → search
    ============================================================ *)
@@ -305,6 +350,8 @@ let () =
     ("library_promote", [
       Alcotest.test_case "empty topic" `Quick test_promote_empty_topic;
       Alcotest.test_case "nonexistent" `Quick test_promote_nonexistent;
+      Alcotest.test_case "updates frontmatter" `Quick
+        test_promote_updates_frontmatter;
     ]);
     ("workflow", [
       Alcotest.test_case "add list search read" `Quick test_full_workflow;

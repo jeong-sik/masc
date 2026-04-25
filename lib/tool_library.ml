@@ -277,9 +277,10 @@ let handle_promote ctx args =
   if topic = "" then (false, "topic is required")
   else if new_confidence < 0.5 then (false, "confidence must be >= 0.5 to promote")
   else begin
-    let candidates = list_documents () |> List.filter (fun f ->
+    let topic_lower = String.lowercase_ascii topic in
+    let candidates = list_documents ~include_candidates:true () |> List.filter (fun f ->
       string_contains ~sub:"/candidates/" f &&
-      string_contains ~sub:topic (String.lowercase_ascii (Filename.basename f))
+      string_contains ~sub:topic_lower (String.lowercase_ascii (Filename.basename f))
     ) in
     match candidates with
     | [] -> (false, sprintf "No candidate matching '%s'" topic)

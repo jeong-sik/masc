@@ -455,6 +455,7 @@ export function AgentProfile({ name }: { name: string }) {
                       value=${activityQuery.value}
                       placeholder="활동 필터 (메시지 본문)"
                       aria-label="프로젝트 활동 필터"
+                      autoComplete="off"
                       onInput=${(e: Event) => { activityQuery.value = (e.target as HTMLInputElement).value }}
                       class="w-full rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
                     />

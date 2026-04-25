@@ -613,6 +613,7 @@ export function VerificationRequestsPanel() {
         class="max-w-65"
         placeholder="request / task / 제출자 / 승인자 필터"
         ariaLabel="검증 요청 필터"
+        autoComplete="off"
         value=${searchQuery.value}
         onInput=${(e: Event) => { searchQuery.value = (e.target as HTMLInputElement).value }}
       />

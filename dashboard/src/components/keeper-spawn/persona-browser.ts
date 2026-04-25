@@ -97,6 +97,7 @@ export function PersonaBrowser() {
           value=${searchQuery.value}
           placeholder="페르소나 검색 (이름/역할/모드/설명)"
           aria-label="페르소나 검색"
+          autoComplete="off"
           onInput=${(e: Event) => { searchQuery.value = (e.target as HTMLInputElement).value }}
           class="min-w-45 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)] focus-visible:ring-2 focus-visible:ring-[var(--accent)]/50"
         />

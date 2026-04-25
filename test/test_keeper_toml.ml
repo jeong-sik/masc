@@ -1436,6 +1436,25 @@ also_allow = ["x"]
     check (list string) "also_allow alias is stale drift"
       ["keeper.also_allow"] unknown
 
+let test_load_keeper_toml_captures_unknown_keys_on_profile () =
+  let tmp = Filename.temp_file "keeper_unknown" ".toml" in
+  let oc = open_out tmp in
+  output_string oc {|[keeper]
+name = "scout"
+goal = "g"
+legacy_scope = "removed"
+typo_field = 42
+|};
+  close_out oc;
+  match KTP.load_keeper_toml tmp with
+  | Error e -> Sys.remove tmp; fail e
+  | Ok (_, defaults) ->
+    Sys.remove tmp;
+    check (slist string String.compare)
+      "unknown keys captured on profile defaults"
+      [ "legacy_scope"; "typo_field" ]
+      defaults.KTP.unknown_toml_keys
+
 (* ================================================================ *)
 (* Test suite                                                        *)
 (* ================================================================ *)
@@ -1537,6 +1556,8 @@ let () =
             test_detect_unknown_keys_flags_also_allow_alias;
           test_case "oas_env keys not flagged as unknown" `Quick
             test_oas_env_not_flagged_as_unknown;
+          test_case "load_keeper_toml captures unknown keys on profile" `Quick
+            test_load_keeper_toml_captures_unknown_keys_on_profile;
         ] );
       ( "oas_env",
         [

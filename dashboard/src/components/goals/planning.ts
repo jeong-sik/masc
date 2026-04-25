@@ -52,7 +52,7 @@ function ExternalDocLink({ href, label }: { href: string; label: string }) {
     <a
       href=${href}
       target="_blank"
-      rel="noreferrer"
+      rel="noopener noreferrer"
       class="inline-flex items-center gap-1 rounded border border-card-border/70 bg-white/3 px-2.5 py-1.5 text-2xs font-medium text-text-body transition-colors hover:border-accent/35 hover:text-text-strong"
     >
       ${label}

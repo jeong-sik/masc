@@ -154,7 +154,7 @@ function KanbanCard({ task }: { task: Task }) {
         <a
           href=${link.href}
           target="_blank"
-          rel="noreferrer"
+          rel="noopener noreferrer"
           class="inline-flex items-center gap-1 rounded border border-card-border/70 bg-white/4 px-2 py-1 text-text-body transition-colors hover:border-accent/35 hover:text-text-strong"
         >
           ${link.label}

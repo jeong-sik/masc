@@ -86,6 +86,42 @@ let normalize_refs refs =
 let is_keeper_agent_name agent_name =
   Option.is_some (Keeper_identity.canonical_keeper_name_from_agent_name agent_name)
 
+(** #10314: surface accountability ledger emit drops as a Prometheus
+    counter so operators can distinguish "no emits because no work"
+    from "no emits because the agent_name gate rejected the call".
+
+    Pre-fix the [is_keeper_agent_name] gate at the top of
+    [record_task_transition] and [record_completion_claim] silently
+    returned unit when the caller's [agent_name] did not parse as
+    a [keeper-<name>-agent] alias.  Production evidence (#10314):
+    9 of 14 keepers (executor, taskmaster, qa-king, issue_king, ...)
+    had decisions.jsonl traffic of 43KB-1MB+ but zero accountability
+    events, while 5 keepers dominated the ledger (analyst alone at
+    47%).  The skew was invisible because the drop emitted no signal.
+
+    Labels stay bounded:
+      [kind]   ∈ task_transition | completion_claim
+      [reason] currently "not_keeper_agent_name" or "empty_subject";
+               future gate additions get their own reason string. *)
+let accountability_emit_skip_metric = "masc_accountability_emit_skip_total"
+
+let () =
+  Prometheus.register_counter
+    ~name:accountability_emit_skip_metric
+    ~help:
+      "Total accountability ledger calls dropped before append \
+       because a precondition gate rejected the call. Labels: kind \
+       (task_transition | completion_claim), reason \
+       (not_keeper_agent_name | empty_subject). A non-zero rate on \
+       a keeper that has decisions.jsonl traffic is the fleet \
+       observability gap from #10314."
+    ()
+
+let record_emit_skip ~kind ~reason =
+  Prometheus.inc_counter accountability_emit_skip_metric
+    ~labels:[ ("kind", kind); ("reason", reason) ]
+    ()
+
 let keeper_name_of_agent agent_name =
   match Keeper_identity.canonical_keeper_name_from_agent_name agent_name with
   | Some keeper_name -> keeper_name
@@ -437,7 +473,9 @@ let maybe_support_recent_completion_claim config ~agent_name ~task_id ~evidence_
    accountability tracking lives in [record_completion_claim]. *)
 let record_task_transition (config : Coord_query.config) ~agent_name ~task_id
     ~(transition : Types.task_action) ~details =
-  if not (is_keeper_agent_name agent_name) then ()
+  if not (is_keeper_agent_name agent_name) then
+    (* #10314: drop is now visible. *)
+    record_emit_skip ~kind:"task_transition" ~reason:"not_keeper_agent_name"
   else
     match transition with
     | Types.Claim | Types.Start ->
@@ -470,10 +508,16 @@ let supporting_refs_for_turn ~trace_id ~turn_number strong_evidence_refs =
 let record_completion_claim (config : Coord_query.config) ~keeper_name ~agent_name
     ~trace_id ~turn_number ~subject ?task_id ?(evidence_refs = [])
     ?(surface = "keeper_turn") ~strong_evidence ~strong_evidence_refs () =
-  if not (is_keeper_agent_name agent_name) then ()
+  if not (is_keeper_agent_name agent_name) then
+    (* #10314: drop is now visible. *)
+    record_emit_skip ~kind:"completion_claim" ~reason:"not_keeper_agent_name"
   else
     let subject = String.trim subject in
-    if subject = "" then ()
+    if subject = "" then
+      (* #10314: empty subject is a separate failure mode — agent
+         called but produced no claim text. Distinct reason so
+         operators can split the diagnosis. *)
+      record_emit_skip ~kind:"completion_claim" ~reason:"empty_subject"
     else
       let now = Time_compat.now () in
       let snapshots = materialize_claims (read_window_entries config) in

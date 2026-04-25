@@ -9,6 +9,14 @@ type claim_status =
   | Expired
   | Partial
 
+val accountability_emit_skip_metric : string
+(** #10314: Prometheus counter name surfaced for tests and dashboards.
+    Labels:
+    - [kind] ∈ task_transition | completion_claim
+    - [reason] ∈ not_keeper_agent_name | empty_subject
+    A non-zero rate on a keeper that has decisions.jsonl traffic
+    indicates the fleet observability gap from #10314. *)
+
 val record_task_transition :
   Coord_query.config ->
   agent_name:string ->

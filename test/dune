@@ -69,6 +69,7 @@
         test_keeper_wake_telemetry
         test_keeper_memory
         test_keeper_accountability
+        test_accountability_emit_skip_10314
         test_keeper_exec_status
         test_keeper_adaptive_thinking
         test_keeper_turn_intent
@@ -208,6 +209,7 @@
           test_keeper_wake_telemetry
           test_keeper_memory
           test_keeper_accountability
+          test_accountability_emit_skip_10314
           test_keeper_exec_status
         test_keeper_adaptive_thinking
           test_keeper_turn_intent

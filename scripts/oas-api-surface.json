@@ -1,5 +1,5 @@
 {
-  "pinned_sha": "b98b391ff3f141916cd95bfec438e9d2d3db03f9",
+  "pinned_sha": "367de4e5a406e07af844c370c23b7c05c572a5e0",
   "pinned_version": "v0.176.0",
   "surfaces": {
     "event_bus_payload_variants": [
@@ -15,6 +15,7 @@
       "ElicitationCompleted",
       "HandoffCompleted",
       "HandoffRequested",
+      "InferenceTelemetry",
       "SlotSchedulerObserved",
       "ToolCalled",
       "ToolCompleted",

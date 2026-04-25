@@ -371,7 +371,7 @@ function ProfileCard({
   }
 
   return html`
-    <article class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] p-3">
+    <article class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] p-3" role="group" aria-label=${`Cascade profile: ${profile.name}`}>
       <header class="flex items-center gap-2 mb-2 flex-wrap">
         <span class="font-semibold text-[var(--text-strong)]">${profile.name}</span>
         <${StatusChip} tone=${sourceTone(profile.source)}>
@@ -447,6 +447,7 @@ function ProfileCard({
                       ? 'text-[var(--bad-light)]'
                       : 'text-[var(--text-muted)]'
                   }`}
+                  role="status"
                 >
                   ${assignmentMessage.value}
                 </div>
@@ -507,7 +508,7 @@ function ProfileCard({
 function OrphanKeeperList({ orphans }: { orphans: readonly CascadeKeeperProfile[] }) {
   if (orphans.length === 0) return null
   return html`
-    <div class="rounded border border-[var(--warn)] bg-[var(--bg-0)] p-3 text-xs">
+    <div class="rounded border border-[var(--warn)] bg-[var(--bg-0)] p-3 text-xs" role="alert">
       <div class="font-semibold text-[var(--text-strong)] mb-1">
         등록된 프로필 없음 (${orphans.length})
       </div>
@@ -553,7 +554,7 @@ function CascadeValidationBanner({ config }: { config: CascadeConfigResponse }) 
   const visibleErrors = config.validation_errors.slice(0, 3)
   const visibleProfiles = config.invalid_profiles.slice(0, 4)
   return html`
-    <div class=${`rounded border ${boxTone} p-3 text-xs mb-3`}>
+    <div class=${`rounded border ${boxTone} p-3 text-xs mb-3`} role="alert">
       <div class="flex items-center gap-2 flex-wrap mb-2">
         <${StatusChip} tone=${tone}>${validationLabel(config.validation_status)}<//>
         <span class="text-[var(--text-muted)]">
@@ -1224,11 +1225,12 @@ export function CascadeConfigPanel() {
       <div class="flex items-center gap-3 flex-wrap">
         <button
           class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-3 py-1 text-xs text-[var(--text-strong)] hover:bg-[var(--bg-panel-hover)]"
+          aria-label="Cascade 데이터 새로고침"
           onClick=${() => void loadCascadeData(resource)}
         >
           새로고침
         </button>
-        ${current.loading ? html`<span class="text-xs text-[var(--text-muted)]">로딩 중...</span>` : null}
+        ${current.loading ? html`<span class="text-xs text-[var(--text-muted)]" role="status">로딩 중...</span>` : null}
         ${config?.updated_at
           ? html`<span class="text-xs text-[var(--text-muted)]">config · ${config.updated_at}</span>`
           : null}

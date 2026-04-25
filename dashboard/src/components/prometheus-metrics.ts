@@ -300,6 +300,7 @@ export function PrometheusMetrics() {
           ${lastUpdated.value && html`<span class="text-xs text-[var(--text-muted)]">${lastUpdated.value}</span>`}
           <button
             class="rounded border border-[var(--card-border)] bg-[var(--bg-1)] px-3 py-1.5 text-xs text-[var(--text-body)] hover:bg-[var(--bg-2)] transition-colors"
+            aria-label="Prometheus 메트릭 새로고침"
             onClick=${refresh}
             disabled=${loading.value}
           >
@@ -309,7 +310,7 @@ export function PrometheusMetrics() {
       </div>
 
       ${error.value && html`
-        <div class="rounded bg-[var(--bad-10)] border border-[var(--bad-20)] px-3 py-2 text-xs text-[var(--bad-light)]">
+        <div class="rounded bg-[var(--bad-10)] border border-[var(--bad-20)] px-3 py-2 text-xs text-[var(--bad-light)]" role="alert">
           ${error.value}
         </div>
       `}
@@ -345,6 +346,7 @@ export function PrometheusMetrics() {
           <${Card}>
             <button
               class="flex w-full items-center justify-between text-left"
+              aria-expanded=${expanded}
               onClick=${() => toggleCategory(cat)}
             >
               <div class="flex items-center gap-2">

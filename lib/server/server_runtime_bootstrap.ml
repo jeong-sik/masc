@@ -1402,7 +1402,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
         | "composite" ->
             Some
               (Server_dashboard_http.dashboard_fleet_composite_json
-                 ~base_path:state.Mcp_server.room_config.base_path ())
+                 ~config:state.Mcp_server.room_config ())
         | "board" ->
             Some
               (Server_dashboard_http.dashboard_board_json

@@ -1208,6 +1208,50 @@ let test_execution_trust_route_surfaces_trust_summary_fields () =
      | _ -> false)
 ;;
 
+let test_composite_routes_surface_latest_execution_receipt () =
+  with_seeded_server
+  @@ fun ~port ~config ~admin_token ~keeper_name ->
+  let boot_path = Printf.sprintf "/api/v1/keepers/%s/boot" keeper_name in
+  let boot_result =
+    run_curl_post ~body:"{}" ~token:admin_token ~port ~path:boot_path ()
+  in
+  require_status "boot route registers keeper before composite read" 200 boot_result;
+  append_execution_receipt config ~keeper_name;
+  let per_keeper_path =
+    Printf.sprintf "/api/v1/keepers/%s/composite" keeper_name
+  in
+  let per_keeper = run_curl_get ~port ~path:per_keeper_path () in
+  require_status "per-keeper composite GET returns 200" 200 per_keeper;
+  let open Yojson.Safe.Util in
+  let per_keeper_json = Yojson.Safe.from_string per_keeper.body in
+  let execution = per_keeper_json |> member "execution" in
+  check bool "composite exposes latest receipt presence" true
+    (execution |> member "latest_receipt_present" |> to_bool);
+  check string "composite exposes terminal reason" "completed"
+    (execution |> member "terminal_reason_code" |> to_string);
+  check bool "composite exposes receipt duration" true
+    (match execution |> member "duration_ms" with
+     | `Float _ | `Int _ -> true
+     | _ -> false);
+  check string "composite exposes cascade fallback reason" "turn_timeout"
+    (execution |> member "cascade" |> member "fallback_reason" |> to_string);
+  check int "composite exposes provider attempt count" 2
+    (execution |> member "cascade" |> member "attempt_count" |> to_int);
+  let fleet = run_curl_get ~port ~path:"/api/v1/keepers/composite" () in
+  require_status "fleet composite GET returns 200" 200 fleet;
+  let fleet_json = Yojson.Safe.from_string fleet.body in
+  let fleet_snapshot =
+    match fleet_json |> member "snapshots" |> to_list with
+    | snapshot :: _ -> snapshot
+    | [] -> fail "expected at least one fleet composite snapshot"
+  in
+  let fleet_execution = fleet_snapshot |> member "execution" in
+  check bool "fleet composite exposes latest receipt presence" true
+    (fleet_execution |> member "latest_receipt_present" |> to_bool);
+  check string "fleet composite exposes selected model" "custom:mock"
+    (fleet_execution |> member "cascade" |> member "selected_model" |> to_string)
+;;
+
 let test_merge_keeper_trace_lines_includes_internal_history () =
   let base_path = Filename.temp_file "dashboard-keeper-trajectory-" "" in
   (try Sys.remove base_path with
@@ -1388,6 +1432,10 @@ let () =
             "execution trust route surfaces trust summary fields"
             `Slow
             test_execution_trust_route_surfaces_trust_summary_fields
+        ; test_case
+            "composite routes surface latest execution receipt"
+            `Slow
+            test_composite_routes_surface_latest_execution_receipt
         ; test_case
             "dashboard dev token rotates legacy dashboard-dev owner"
             `Quick

@@ -4,6 +4,7 @@ import { InlineSpinner } from './common/inline-spinner'
 
 import {
   fetchKeeperComposite,
+  type KeeperCompositeExecution,
   type KeeperCompositeSnapshot,
 } from '../api/keeper'
 import { fetchGateKeepers } from '../api/gate'
@@ -109,6 +110,66 @@ export function filterKeeperNames(
 
 export function isCompositeFetchNotFound(err: unknown): boolean {
   return err instanceof Error && /composite fetch failed: 404$/.test(err.message)
+}
+
+function shortText(value: string | null | undefined, max = 80): string {
+  const text = (value ?? '').trim()
+  if (!text) return ''
+  return text.length > max ? `${text.slice(0, max)}...` : text
+}
+
+function formatMs(ms: number | null | undefined): string {
+  if (ms == null || !Number.isFinite(ms) || ms < 0) return ''
+  if (ms >= 1000) return `${Math.round(ms / 1000)}s`
+  return `${Math.round(ms)}ms`
+}
+
+function executionReceiptTone(execution: KeeperCompositeExecution | undefined): 'ok' | 'warn' | 'bad' | 'muted' {
+  if (!execution?.latest_receipt_present) return 'muted'
+  const outcome = execution.outcome?.toLowerCase()
+  const terminal = execution.terminal_reason_code?.toLowerCase() ?? ''
+  if (outcome === 'ok' || terminal === 'completed') return 'ok'
+  if (terminal.includes('config') || terminal.includes('exhausted') || outcome === 'error') return 'bad'
+  return 'warn'
+}
+
+function executionReceiptLabel(execution: KeeperCompositeExecution | undefined): string | null {
+  if (!execution) return null
+  if (!execution.latest_receipt_present) return 'receipt 없음'
+  const terminal = shortText(execution.terminal_reason_code, 32)
+  const model = shortText(execution.cascade?.selected_model ?? execution.model_used, 36)
+  const elapsed = formatMs(execution.duration_ms)
+  return [
+    execution.outcome ?? 'unknown',
+    terminal,
+    model,
+    elapsed,
+  ].filter(Boolean).join(' · ')
+}
+
+function executionReceiptTitle(execution: KeeperCompositeExecution | undefined): string {
+  if (!execution?.latest_receipt_present) return '아직 execution receipt가 없습니다.'
+  return [
+    execution.recorded_at ? `recorded_at: ${execution.recorded_at}` : '',
+    execution.operator_disposition ? `operator: ${execution.operator_disposition}` : '',
+    execution.operator_disposition_reason ? `reason: ${execution.operator_disposition_reason}` : '',
+    execution.cascade?.fallback_reason ? `fallback: ${execution.cascade.fallback_reason}` : '',
+    execution.error?.kind ? `error: ${execution.error.kind}` : '',
+    execution.error?.message_preview ? execution.error.message_preview : '',
+  ].filter(Boolean).join('\n')
+}
+
+function executionReceiptClass(execution: KeeperCompositeExecution | undefined): string {
+  switch (executionReceiptTone(execution)) {
+    case 'ok':
+      return 'border-[var(--ok-20)] text-[var(--ok)] bg-[var(--ok-10)]'
+    case 'bad':
+      return 'border-[rgba(248,113,113,0.36)] text-[var(--bad-light)] bg-[rgba(248,113,113,0.08)]'
+    case 'warn':
+      return 'border-[var(--warn-20)] text-[var(--warn)] bg-[var(--warn-10)]'
+    case 'muted':
+      return 'border-[var(--white-8)] text-[var(--text-dim)] bg-[var(--white-3)]'
+  }
 }
 
 // ── State Reducer ──────────────────────────────────────
@@ -651,6 +712,7 @@ function StatusBar({
       ? html`<span class="px-2 py-0.5 rounded-sm border text-3xs font-mono text-[var(--ok)] border-[var(--ok-20)] bg-[var(--ok-10)] animate-pulse">● 실행 중</span>`
       : html`<span class="px-2 py-0.5 rounded-sm border text-3xs font-mono ${idleIsLong ? 'text-[var(--text-muted)] border-[var(--warn-20)]' : 'text-[var(--text-dim)] border-white/10'}">○ 대기 ${idleDuration}${snapshot.last_outcome ? html` <span class="text-4xs opacity-70">· 턴 #${snapshot.last_outcome.turn_id}</span>` : ''}</span>`
     : null
+  const receiptLabel = snapshot ? executionReceiptLabel(snapshot.execution) : null
 
   const staleSec = lastFetchAt > 0 ? Math.max(0, now - lastFetchAt) : 0
 
@@ -694,6 +756,14 @@ function StatusBar({
             ${density === 'compact' ? '▣ 조밀' : '▢ 여유'}
           </button>
           ${liveBadge}
+          ${snapshot && receiptLabel ? html`
+            <span
+              class=${`inline-block max-w-[28rem] truncate align-middle px-2 py-0.5 rounded-sm border text-3xs font-mono ${executionReceiptClass(snapshot.execution)}`}
+              title=${executionReceiptTitle(snapshot.execution)}
+            >
+              receipt ${receiptLabel}
+            </span>
+          ` : null}
           ${loading ? html`<${InlineSpinner} size="xs" />` : null}
           ${paused ? html`
             <span

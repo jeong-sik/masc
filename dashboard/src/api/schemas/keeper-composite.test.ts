@@ -77,6 +77,50 @@ describe('parseKeeperCompositeSnapshot', () => {
     expect(result.last_outcome!.selected_model).toBe('claude-sonnet')
   })
 
+  it('parses optional execution receipt summary', () => {
+    const result = parseKeeperCompositeSnapshot({
+      ...VALID_SNAPSHOT,
+      execution: {
+        latest_receipt_present: true,
+        recorded_at: '2026-04-25T05:07:00Z',
+        outcome: 'error',
+        terminal_reason_code: 'config_error',
+        operator_disposition: 'pause_human',
+        operator_disposition_reason: 'tool_required_unsatisfied',
+        model_used: 'claude_code:auto',
+        stop_reason: 'max_turns',
+        tool_contract_result: 'violated',
+        duration_ms: 87736,
+        error: {
+          kind: 'config',
+          message_preview: 'unknown field fallback_cascade',
+          message_truncated: false,
+        },
+        cascade: {
+          name: 'big_three',
+          selected_model: 'claude_code:auto',
+          attempt_count: 2,
+          fallback_applied: true,
+          outcome: 'exhausted',
+          degraded_retry_applied: false,
+          degraded_retry_cascade: null,
+          fallback_reason: 'turn_timeout',
+        },
+        tool_surface: {
+          tool_requirement: 'required',
+          tool_gate_enabled: true,
+          missing_required_tools: ['keeper_task_claim'],
+          required_tools: ['keeper_task_claim'],
+        },
+      },
+    })
+
+    expect(result.execution?.latest_receipt_present).toBe(true)
+    expect(result.execution?.terminal_reason_code).toBe('config_error')
+    expect(result.execution?.cascade?.fallback_reason).toBe('turn_timeout')
+    expect(result.execution?.error?.message_preview).toContain('fallback_cascade')
+  })
+
   it('parses snapshot with measurement auto_rules', () => {
     const result = parseKeeperCompositeSnapshot({
       ...VALID_SNAPSHOT,

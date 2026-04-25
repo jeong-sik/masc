@@ -32,6 +32,24 @@ type state = {
   mutable judgments : (string, Yojson.Safe.t) Hashtbl.t;
 }
 
+(* #9880 facet 4: per-cycle counter for empty [response.model] in
+   governance compute_judgments.  Mirrors the keeper-side
+   [masc_after_turn_response_model_empty_total] introduced by
+   #10083; separate metric name keeps governance vs keeper
+   attribution clean while sharing the [unknown_provider]
+   sentinel string so PromQL can union-aggregate across both. *)
+let governance_response_model_empty_metric =
+  "masc_governance_response_model_empty_total"
+
+let () =
+  Prometheus.register_counter
+    ~name:governance_response_model_empty_metric
+    ~help:
+      "Count of governance compute_judgments cycles where \
+       [response.model] was empty.  Labels: \
+       [source=telemetry_resolved | unknown_sentinel]."
+    ()
+
 let governance_dir base_path =
   Filename.concat
     (Coord_utils.masc_dir_from_base_path ~base_path)
@@ -514,13 +532,54 @@ let compute_judgments
               | `List rows -> rows
               | _ -> []
             in
+            (* #9880 facet 4: 17% of yesterday's judgment records had
+               [model_used = ""] because OAS transports occasionally
+               return [response.model = ""] (Kimi/Codex CLI silent
+               failure path; CompletionContractViolation
+               retry-exhausted synthetic responses).  An empty
+               [model_used] field destroys attribution downstream
+               (cost rollups, per-model latency p50/p99, daily
+               judgments-by-model breakdown).
+
+               Same shape as keeper-side fix #10083: layered
+               fallback (raw → telemetry canonical_model_id → named
+               sentinel) plus a counter so the operator can see
+               WHICH transport leaked.  Sentinel matches the
+               keeper-side string [unknown_provider] so dashboards
+               can union-aggregate empty-model events across both
+               callers. *)
+            let resolved_model =
+              let raw = response.model in
+              if String.trim raw <> "" then raw
+              else begin
+                let canonical =
+                  match response.telemetry with
+                  | Some { canonical_model_id = Some id; _ }
+                    when String.trim id <> "" ->
+                      String.trim id
+                  | _ -> ""
+                in
+                let resolved, source =
+                  if canonical <> "" then canonical, "telemetry_resolved"
+                  else "unknown_provider", "unknown_sentinel"
+                in
+                Prometheus.inc_counter
+                  governance_response_model_empty_metric
+                  ~labels:[ ("source", source) ]
+                  ();
+                Log.Governance.warn
+                  "compute_judgments: response.model empty → fallback=%s resolved=%s (#9880)"
+                  source resolved;
+                resolved
+              end
+            in
             let judgments =
               items
               |> List.filter_map
                    (parse_item_judgment ~generated_at ~expires_at
-                      ~model_used:response.model)
+                      ~model_used:resolved_model)
             in
-            Ok (response.model, generated_at, expires_at, judgments)
+            Ok (resolved_model, generated_at, expires_at, judgments)
       with
       | Yojson.Json_error msg ->
           Error (Printf.sprintf "Governance judge returned invalid JSON: %s" msg)

@@ -1410,6 +1410,11 @@
  (libraries masc_mcp alcotest))
 
 (test
+ (name test_governance_response_model_empty_9880)
+ (modules test_governance_response_model_empty_9880)
+ (libraries masc_mcp alcotest unix))
+
+(test
  (name test_keeper_autoboot_supervisor_start_10125)
  (modules test_keeper_autoboot_supervisor_start_10125)
  (action

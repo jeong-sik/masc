@@ -117,6 +117,12 @@ val metric_keeper_require_tool_use_violations : string
 val metric_keeper_tool_alias_canonicalizations : string
 val metric_keeper_profile_config_conflicts : string
 val metric_keeper_oas_timeout_classifications : string
+val metric_keeper_ollama_saturation_skip : string
+(** PR-B: counter incremented when [run_keeper_cycle] skips a turn
+    because the keeper's resolved cascade is ollama-only and the
+    [/api/ps] probe reports zero process_available slots.  Labelled
+    by [keeper] and [cascade] so dashboards can attribute starvation
+    to specific cascade profiles. *)
 val metric_persistence_read_drops : string
 val metric_codex_cli_mcp_tool_omission : string
 (** #10097: per-tool counter for codex_cli keeper-bound runtime

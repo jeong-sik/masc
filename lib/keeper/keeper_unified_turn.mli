@@ -117,6 +117,23 @@ val fail_open_local_only_when_unavailable :
   string list ->
   string
 
+(** PR-B: when every label in the resolved cascade points at the
+    same ollama [base_url] return [Some url], else [None].  Purely
+    structural: does not probe the network. *)
+val resolve_ollama_only_base_url :
+  ?resolve_label:(string -> Llm_provider.Provider_config.t option) ->
+  string list ->
+  string option
+
+(** PR-B: read the [Cascade_ollama_probe] cache and report whether
+    the endpoint is saturated (no available slots while at least one
+    request is active or queued).  No cache / failed probe returns
+    [false] (fail-open) so a flaky probe never starves the keeper. *)
+val is_ollama_saturated :
+  ?capacity_lookup:(string -> Cascade_throttle.capacity_info option) ->
+  string ->
+  bool
+
 (** Pure merge step for runtime-owned fail-open rotation candidates. The
     active path feeds this from the live cascade catalog: catalog order is
     preserved while retaining only reserved recovery profiles and

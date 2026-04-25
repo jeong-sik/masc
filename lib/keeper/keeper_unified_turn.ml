@@ -207,6 +207,91 @@ let fail_open_local_only_when_unavailable
          if List.exists probe ollama_base_urls then effective_cascade
          else fallback_cascade)
 
+(** PR-B: ollama saturation pre-skip support.
+
+    When every label in the resolved cascade points at the same
+    ollama [base_url] (single-provider profile), we can pre-check the
+    [Cascade_ollama_probe] cache before paying an [Agent.run] dispatch.
+    If the probe reports [process_available <= 0] the request would
+    queue on a busy slot and very likely blow the keeper turn budget,
+    causing a cascading FAILED cycle.  Skipping the turn here keeps
+    the keeper alive without burning the budget. *)
+
+(** [resolve_ollama_only_base_url ?resolve_label labels] returns
+    [Some url] when [labels] is non-empty AND every label parses to
+    an ollama provider config sharing the same [base_url].  Returns
+    [None] when the cascade has zero candidates, when any candidate
+    is non-ollama, when ollama candidates point at different hosts,
+    or when any label fails to parse.
+
+    Pure: [resolve_label] is the only injected dependency for tests. *)
+let resolve_ollama_only_base_url
+    ?resolve_label
+    (labels : string list) : string option =
+  let resolve_label =
+    match resolve_label with
+    | Some f -> f
+    | None -> fun label -> Cascade_config.parse_model_string label
+  in
+  match labels with
+  | [] -> None
+  | first :: rest ->
+      let is_ollama_cfg (cfg : Llm_provider.Provider_config.t) =
+        match cfg.kind with
+        | Llm_provider.Provider_config.Ollama -> true
+        | _ -> false
+      in
+      (match resolve_label first with
+       | Some cfg when is_ollama_cfg cfg ->
+           let base_url = cfg.base_url in
+           let same_ollama_host label =
+             match resolve_label label with
+             | Some other when is_ollama_cfg other ->
+                 String.equal other.base_url base_url
+             | _ -> false
+           in
+           if List.for_all same_ollama_host rest then Some base_url
+           else None
+       | _ -> None)
+
+(** [is_ollama_saturated ?capacity_lookup base_url] returns [true]
+    only when the cache has a fresh entry whose
+    [process_available <= 0] AND there is at least one queued or
+    active request.  [None] (no cache entry / probe never ran) and
+    failed probes are deliberately treated as "not saturated" so a
+    flaky probe never starves the keeper.  Mirrors the conservative
+    fail-open policy in [Cascade_ollama_probe.try_probe]. *)
+let is_ollama_saturated
+    ?capacity_lookup
+    (base_url : string) : bool =
+  let capacity_lookup =
+    match capacity_lookup with
+    | Some f -> f
+    | None -> fun url -> Cascade_ollama_probe.cached_capacity url
+  in
+  match capacity_lookup base_url with
+  | None -> false
+  | Some (info : Cascade_throttle.capacity_info) ->
+      info.process_available <= 0
+      && (info.process_active > 0 || info.process_queue_length > 0)
+
+(** Backoff sleep applied after a saturation skip so the keeper does
+    not hot-spin against a busy ollama instance. Short by design:
+    the heartbeat loop already has its own pacing (see
+    [keeper_keepalive.ml]); this only covers the case where multiple
+    keepers race the probe cache. *)
+let saturation_skip_backoff_sec = 5.0
+
+let saturation_skip_jitter_factor = 0.4
+
+let saturation_skip_sleep_duration () =
+  let jitter =
+    saturation_skip_backoff_sec
+    *. saturation_skip_jitter_factor
+    *. Random.float 1.0
+  in
+  saturation_skip_backoff_sec +. jitter
+
 (* Extracted to Keeper_error_classify — see keeper_error_classify.ml *)
 
 module EC = Keeper_error_classify
@@ -769,6 +854,61 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
              | _ -> effective_cascade_name)
         | None -> effective_cascade_name
       in
+      (* PR-B: ollama saturation pre-skip.  If the resolved cascade
+         is ollama-only and the [/api/ps] cache reports zero
+         available slots, skip this cycle BEFORE [Agent.run] dispatch
+         so the queued request cannot exceed the keeper turn budget
+         and trip a FAILED cycle.  Probe failures fall through to the
+         normal dispatch path (fail-open) so a flaky probe never
+         starves the keeper. *)
+      let saturation_skip_meta =
+        let meta_for_check =
+          { meta with cascade_name = effective_cascade_name }
+        in
+        let labels =
+          Keeper_coordination.effective_model_labels_for_turn meta_for_check
+        in
+        match resolve_ollama_only_base_url labels with
+        | None -> None
+        | Some base_url ->
+            if not (is_ollama_saturated base_url) then None
+            else
+              let info = Cascade_ollama_probe.cached_capacity base_url in
+              let queue_len =
+                match info with
+                | Some i -> i.process_queue_length
+                | None -> 0
+              in
+              let available =
+                match info with
+                | Some i -> i.process_available
+                | None -> 0
+              in
+              Log.Keeper.info
+                "%s: ollama saturated for keeper=%s cascade=%s queue=%d \
+                 available=%d \xe2\x80\x94 skipping turn"
+                meta.name meta.name effective_cascade_name queue_len
+                available;
+              Prometheus.inc_counter
+                Prometheus.metric_keeper_ollama_saturation_skip
+                ~labels:[ ("keeper", meta.name);
+                          ("cascade", effective_cascade_name) ]
+                ();
+              (match Eio_context.get_clock_opt () with
+               | Some clock ->
+                   (try Eio.Time.sleep clock (saturation_skip_sleep_duration ())
+                    with
+                    | Eio.Cancel.Cancelled _ as e -> raise e
+                    | exn ->
+                        Log.Keeper.debug
+                          "%s: saturation skip sleep failed: %s"
+                          meta.name (Printexc.to_string exn))
+               | None -> ());
+              Some meta
+      in
+      (match saturation_skip_meta with
+       | Some meta_after_skip -> Ok meta_after_skip
+       | None ->
       let build_cascade_execution ~(cascade_name : string) :
           (cascade_execution, Oas.Error.sdk_error) result =
         let meta_for_cascade = { meta with cascade_name } in
@@ -2159,6 +2299,6 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
            | Oas_worker.Completed ->
              Keeper_registry.reset_turn_failures ~base_path:config.base_path
                updated_meta.name);
-          Ok updated_meta
+          Ok updated_meta)
 
 let run_unified_turn = run_keeper_cycle

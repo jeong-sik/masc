@@ -92,6 +92,28 @@ let mu = Stdlib.Mutex.create ()
 let buffer : Yojson.Safe.t Queue.t = Queue.create ()
 let buffer_cap = 64
 
+(* #10348: time-based flush so sub-cap emit rates produce visible ledger output.
+   Without this, the file stays at 0 bytes for low-rate sites (drift_guard
+   handoff, env-gated keeper_alert_signal) until the buffer reaches
+   [buffer_cap] or shutdown_hooks runs — neither happens in steady-state
+   keeper daemons.  Exposed setter is for tests; production code lets the
+   30 s default stand. *)
+let flush_interval_sec_ref = ref 30.0
+let last_flush_ref = ref 0.0
+
+let set_flush_interval_for_test sec = flush_interval_sec_ref := sec
+
+(* #10348: tests need to re-[init] against fresh tmp paths.  Production
+   code only calls [init] once at boot. *)
+let reset_for_test () =
+  Stdlib.Mutex.protect mu (fun () ->
+    store_path_ref := None;
+    Queue.clear buffer;
+    (* Initialize the clock to "now" rather than 0.0 so tests that pin a
+       large flush interval can verify batching without the [now -.
+       last_flush] term swamping it on the first record. *)
+    last_flush_ref := Unix.gettimeofday ())
+
 let ensure_dir path =
   let dir = Filename.dirname path in
   if not (Sys.file_exists dir) then
@@ -101,29 +123,32 @@ let ensure_dir path =
       Log.warn ~ctx:"heuristic_metrics" "cannot mkdir %s: %s" dir msg
 
 let do_flush () =
-  match !store_path_ref with
-  | None -> ()
-  | Some path ->
-    if Queue.is_empty buffer then ()
-    else begin
-      ensure_dir path;
-      match
-        try Ok (open_out_gen [Open_append; Open_creat; Open_text] 0o644 path)
-        with Sys_error msg ->
-          Log.warn ~ctx:"heuristic_metrics" "cannot open %s: %s" path msg;
-          Error msg
-      with
-      | Error _ ->
-          Log.warn ~ctx:"heuristic_metrics" "flush skipped: %d records remain buffered"
-            (Queue.length buffer)
-      | Ok oc ->
-          Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
-            Queue.iter (fun json ->
-              output_string oc (Yojson.Safe.to_string json);
-              output_char oc '\n'
-            ) buffer);
-          Queue.clear buffer
-    end
+  (match !store_path_ref with
+   | None -> ()
+   | Some path ->
+     if Queue.is_empty buffer then ()
+     else begin
+       ensure_dir path;
+       match
+         try Ok (open_out_gen [Open_append; Open_creat; Open_text] 0o644 path)
+         with Sys_error msg ->
+           Log.warn ~ctx:"heuristic_metrics" "cannot open %s: %s" path msg;
+           Error msg
+       with
+       | Error _ ->
+           Log.warn ~ctx:"heuristic_metrics" "flush skipped: %d records remain buffered"
+             (Queue.length buffer)
+       | Ok oc ->
+           Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+             Queue.iter (fun json ->
+               output_string oc (Yojson.Safe.to_string json);
+               output_char oc '\n'
+             ) buffer);
+           Queue.clear buffer
+     end);
+  (* #10348: bump last_flush even on no-op / failed open so the time-based
+     re-evaluation in [record] doesn't hammer this path on every event. *)
+  last_flush_ref := Unix.gettimeofday ()
 
 (* #9919: the pre-fix emit at [keeper_hooks_oas.post_tool_use_failure]
    produced an exact tuple [(site="post_tool_use_failure", raw=1.0,
@@ -215,8 +240,11 @@ let record (e : event) =
   Stdlib.Mutex.protect mu (fun () ->
     let json = event_to_json e in
     Queue.add json buffer;
-    if Queue.length buffer >= buffer_cap then
-      do_flush ())
+    let now = Unix.gettimeofday () in
+    let elapsed = now -. !last_flush_ref in
+    if Queue.length buffer >= buffer_cap
+       || elapsed >= !flush_interval_sec_ref
+    then do_flush ())
 
 let flush () =
   Stdlib.Mutex.protect mu (fun () ->

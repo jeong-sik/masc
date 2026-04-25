@@ -308,8 +308,15 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason ~now () =
          state and fail again.  Cool down immediately to keep fallback from
          becoming a hidden tax on every request. *)
       state.consecutive_failures <- state.consecutive_failures + 1;
-      let persistent = bump_failure_fp () in
-      apply_trust_failure_locked state ~persistent;
+      bump_failure_fp ();
+      (* #10443: previous code called [apply_trust_failure_locked] with a
+         [persistent] flag returned by [bump_failure_fp].  That function
+         and its [persistent] return shape were introduced by Phase 1
+         (#10365) and removed by the Phase 1 revert (#10412), but
+         #10300's call site here was not updated, leaving an unbound
+         reference.  Drop the trust-failure side effect; cooldown still
+         engages via [cooldown_until] below.  The Phase 1 trust algorithm
+         is being redesigned (#10428 RFC); restore through that path. *)
       let new_until = now +. terminal_failure_cooldown_sec in
       if new_until > state.cooldown_until then
         state.cooldown_until <- new_until)

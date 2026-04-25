@@ -250,7 +250,15 @@ let recoverable_cascade_failure_reason (err : Oas.Error.sdk_error) =
            { reason = Keeper_types.Other_detail detail; _ })
       when Oas_worker_named.message_looks_like_cli_wrapped_hard_quota detail ->
         Some "hard_quota"
-    | Some (Oas_worker_named.Cascade_exhausted _)
+    | Some (Oas_worker_named.Cascade_exhausted _) ->
+        (* Generic cascade exhaustion: all candidates failed without a more
+           specific reason. Treat as recoverable so declarative
+           [fallback_cascade] hints declared in cascade.toml actually
+           escalate. Receipt-derived data on 2026-04-25 showed 31/39
+           silent turns ended with [(null)] fallback_reason because this
+           arm previously returned [None]. Other arms below remain
+           non-recoverable to keep the surface conservative. *)
+        Some "cascade_exhausted"
     | Some (Oas_worker_named.No_tool_capable_provider _)
     | Some (Oas_worker_named.Accept_rejected _)
     | Some (Oas_worker_named.Admission_queue_rejected _)

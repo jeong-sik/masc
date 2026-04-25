@@ -62,6 +62,16 @@ val fallback_cascade_for_unavailable_profile :
   effective_cascade:string ->
   string option
 
+(** Classifies an SDK error into a fallback reason label when the cascade
+    failure is recoverable via [fallback_cascade] or [degraded_rotation].
+    Returns [None] for terminal errors (e.g. accept-rejected, ambiguous
+    post-commit) that should not trigger same-turn escalation.
+    Exposed for unit tests; production callers go through
+    [degraded_retry_after_recoverable_error] or
+    [degraded_rotation_after_recoverable_error]. *)
+val recoverable_cascade_failure_reason :
+  Oas.Error.sdk_error -> string option
+
 (** Returns the one-shot degraded retry lane for recoverable whole-cascade
     failures. Required-tool turns stay terminal, and already-degraded lanes
     do not broaden further. *)

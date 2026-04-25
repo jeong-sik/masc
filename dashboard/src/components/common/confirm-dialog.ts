@@ -90,7 +90,7 @@ export function ConfirmDialogOverlay() {
       <div class="w-full max-w-100 bg-[rgba(13,21,38,0.98)] rounded-md border border-[var(--card-border)] shadow-[0_24px_64px_rgba(0,0,0,0.6)] overflow-hidden" onClick=${stopPropagation} role="dialog" aria-modal="true" aria-labelledby="confirm-dialog-title">
         <div class="p-5">
           <div class="flex items-start gap-4">
-            <div class="shrink-0 size-10 rounded-sm border flex items-center justify-center ${iconBg} ${iconColor}">
+            <div class="shrink-0 size-10 rounded-sm border flex items-center justify-center ${iconBg} ${iconColor}" aria-hidden="true">
               <${IconComponent} size=${20} />
             </div>
             <div class="flex-1 min-w-0 pt-0.5">

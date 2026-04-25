@@ -390,7 +390,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
           onClick=${onToggle}
           title=${collapsed ? '사이드바 펼치기' : '사이드바 접기'}
         >
-          ${collapsed ? html`<${ChevronRight} size=${16} />` : html`<${ChevronLeft} size=${16} />`}
+          ${collapsed ? html`<${ChevronRight} size=${16} aria-hidden="true" />` : html`<${ChevronLeft} size=${16} aria-hidden="true" />`}
         </button>
       </div>
 

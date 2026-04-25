@@ -118,7 +118,7 @@ export function CopyableCode({
         data-copy-button
         onClick=${onCopy}
       >
-        ${justCopied ? html`<${Check} size=${14} />` : html`<${Copy} size=${14} />`}
+        ${justCopied ? html`<${Check} size=${14} aria-hidden="true" />` : html`<${Copy} size=${14} aria-hidden="true" />`}
       </button>
     </div>
   `

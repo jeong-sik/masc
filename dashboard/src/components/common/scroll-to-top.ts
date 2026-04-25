@@ -76,6 +76,6 @@ export function ScrollToTopButton({
     data-testid=${testId}
     onClick=${scrollWindowToTop}
   >
-    <${ChevronUp} size=${18} />
+    <${ChevronUp} size=${18} aria-hidden="true" />
   </button>`
 }

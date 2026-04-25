@@ -52,9 +52,9 @@ const ICON_COLOR: Record<ToastType, string> = {
 }
 
 const ICON: Record<ToastType, () => ComponentChildren> = {
-  success: () => html`<${CheckCircle2} size=${14} />`,
-  warning: () => html`<${AlertTriangle} size=${14} />`,
-  error: () => html`<${XCircle} size=${14} />`
+  success: () => html`<${CheckCircle2} size=${14} aria-hidden="true" />`,
+  warning: () => html`<${AlertTriangle} size=${14} aria-hidden="true" />`,
+  error: () => html`<${XCircle} size=${14} aria-hidden="true" />`
 }
 
 /** Pure: default dismiss duration per toast type. Reference — Sentry

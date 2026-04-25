@@ -122,7 +122,7 @@ export function SetupGuideCard({ connectorId }: { connectorId: string }) {
       >
         <div class="flex items-center gap-2">
           <span class=${`inline-block transition-transform ${isOpen ? 'rotate-90' : ''}`}>
-            <${ChevronRight} size=${14} />
+            <${ChevronRight} size=${14} aria-hidden="true" />
           </span>
           <span class="font-medium">처음 설치하나요? · ${guide.title}</span>
           ${tone === 'complete'

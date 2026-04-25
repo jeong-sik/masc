@@ -70,6 +70,7 @@ function InspectorTabButton({
       onClick=${() => {
         inspectorSection.value = id
       }}
+      aria-pressed=${active}
     >
       ${label}
     </button>

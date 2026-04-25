@@ -181,7 +181,7 @@ export function KeeperDiagnosticSummary({
   }
 
   return html`
-    <div class="py-3 px-4 rounded border border-[var(--card-border)] bg-[rgba(5,14,31,0.55)]">
+    <div class="py-3 px-4 rounded border border-[var(--card-border)] bg-[rgba(5,14,31,0.55)]" role="region" aria-label="명시적 상태 조회">
       <div class="mb-3 flex items-center justify-between gap-3">
         <div class="text-2xs font-semibold uppercase tracking-4 text-[var(--text-muted)]">명시적 상태 조회</div>
         <button
@@ -189,6 +189,7 @@ export function KeeperDiagnosticSummary({
           class="rounded border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-1.5 text-2xs text-[var(--text-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--text-body)]"
           disabled=${busy}
           onClick=${() => { void refreshStatus() }}
+          aria-label="상태 새로고침"
         >
           ${busy ? '불러오는 중...' : (detail ? '상태 새로고침' : '상태 불러오기')}
         </button>
@@ -309,6 +310,7 @@ export function KeeperConversationPanel({
               type="button"
               class="rounded border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-1.5 text-2xs text-[var(--text-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--text-body)]"
               onClick=${toggleMetadata}
+              aria-pressed=${showMetadata}
             >
               ${showMetadata ? '메타데이터 숨김' : '메타데이터 표시'}
             </button>
@@ -316,6 +318,7 @@ export function KeeperConversationPanel({
               type="button"
               class="rounded border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-1.5 text-2xs text-[var(--text-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--text-body)] ${showInternal ? 'border-[rgba(167,139,250,0.3)] text-[var(--purple)]' : ''}"
               onClick=${toggleInternal}
+              aria-pressed=${showInternal}
             >
               ${showInternal ? '내부 메시지 숨김' : '내부 메시지 표시'}
             </button>
@@ -376,7 +379,7 @@ export function KeeperConversationPanel({
         </div>
       </div>
 
-      ${error ? html`<div class="text-xs text-[var(--bad-light)] leading-relaxed">${error}</div>` : null}
+      ${error ? html`<div class="text-xs text-[var(--bad-light)] leading-relaxed" role="alert">${error}</div>` : null}
     </div>
   `
 }

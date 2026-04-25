@@ -14,6 +14,17 @@ let service_name = "masc.coordination.v1.MascCoordination"
 (** Current timestamp in milliseconds. *)
 let now_ms () = Int64.of_float (Unix.gettimeofday () *. 1000.0)
 
+(** Per-subscriber outbound buffer drop threshold.
+
+    Reads [MASC_GRPC_STREAM_MAX_BUFFER] on each call so tests and
+    operators can drive it without wiring in-process state.  The
+    default 48 leaves headroom under the 64-slot stream capacity; a
+    value at or above stream capacity effectively disables the gate
+    and lets Grpc_eio.Stream itself decide (usually the wrong
+    choice, but available for debugging). *)
+let stream_max_buffer () =
+  Env_config_core.get_int ~default:48 "MASC_GRPC_STREAM_MAX_BUFFER"
+
 let decode_request_or_raise ~rpc decode bytes =
   match decode bytes with
   | Ok req -> req
@@ -473,7 +484,10 @@ let handle_subscribe
      capacity before adding. If the stream is full or closed, the event
      is dropped and the subscriber auto-unregisters. *)
   let seq_counter = Atomic.make (Int64.to_int req.since_seq + 1) in
-  let max_buffer = 48 in (* stream capacity is 64; leave headroom *)
+  (* Read once per subscribe so existing streams are not disturbed
+     mid-flight by a config change; newly-subscribing clients pick up
+     the new value. *)
+  let max_buffer = stream_max_buffer () in
   Sse.subscribe_external ~id:sub_id
     ~is_alive:(fun () ->
       not (Atomic.get stream_closed) && not (Grpc_eio.Stream.is_closed stream))

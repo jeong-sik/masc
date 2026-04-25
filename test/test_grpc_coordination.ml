@@ -236,6 +236,34 @@ let test_grpc_default_port () =
   Alcotest.(check int) "default port" 8936
     Masc_mcp.Masc_grpc_server.default_port
 
+let test_grpc_stream_max_buffer_default () =
+  (* Without the env override, the drop threshold defaults to 48 —
+     the value below the 64-slot Grpc_eio.Stream capacity.  Clear any
+     inherited value from the test harness so the default applies. *)
+  let was_set = Sys.getenv_opt "MASC_GRPC_STREAM_MAX_BUFFER" in
+  Unix.putenv "MASC_GRPC_STREAM_MAX_BUFFER" "";
+  Fun.protect
+    ~finally:(fun () ->
+      match was_set with
+      | Some v -> Unix.putenv "MASC_GRPC_STREAM_MAX_BUFFER" v
+      | None -> Unix.putenv "MASC_GRPC_STREAM_MAX_BUFFER" "")
+    (fun () ->
+      Alcotest.(check int) "default is 48"
+        48 (Masc_mcp.Masc_grpc_service.stream_max_buffer ()))
+
+let test_grpc_stream_max_buffer_env_override () =
+  (* Operators retune the drop threshold without a code change. *)
+  let was_set = Sys.getenv_opt "MASC_GRPC_STREAM_MAX_BUFFER" in
+  Unix.putenv "MASC_GRPC_STREAM_MAX_BUFFER" "12";
+  Fun.protect
+    ~finally:(fun () ->
+      match was_set with
+      | Some v -> Unix.putenv "MASC_GRPC_STREAM_MAX_BUFFER" v
+      | None -> Unix.putenv "MASC_GRPC_STREAM_MAX_BUFFER" "")
+    (fun () ->
+      Alcotest.(check int) "env override applied"
+        12 (Masc_mcp.Masc_grpc_service.stream_max_buffer ()))
+
 let test_grpc_default_on_enablement () =
   (* With no MASC_GRPC_ENABLED env var, gRPC stays enabled. *)
   let was_set = Sys.getenv_opt "MASC_GRPC_ENABLED" in
@@ -483,6 +511,10 @@ let () =
         [
           Alcotest.test_case "default_port" `Quick test_grpc_default_port;
           Alcotest.test_case "default_on_enablement" `Quick test_grpc_default_on_enablement;
+          Alcotest.test_case "stream_max_buffer default" `Quick
+            test_grpc_stream_max_buffer_default;
+          Alcotest.test_case "stream_max_buffer env override" `Quick
+            test_grpc_stream_max_buffer_env_override;
           Alcotest.test_case "registers_health_service" `Quick
             test_grpc_server_registers_health_service;
         ] );

@@ -30,6 +30,7 @@ module Dashboard_mission_briefing = Masc_mcp.Dashboard_mission_briefing
 module Build_identity = Masc_mcp.Build_identity
 module Config_doctor = Masc_mcp.Config_doctor
 module Auth_doctor = Masc_mcp.Auth_doctor
+module Auth_login = Masc_mcp.Auth_login
 module Graphql_api = Masc_mcp.Graphql_api
 module Types = Types
 module Tempo = Masc_mcp.Tempo
@@ -301,6 +302,30 @@ let base_path =
 let doctor_json =
   let doc = "Emit machine-readable JSON instead of text output" in
   Arg.(value & flag & info ["json"] ~doc)
+
+let parse_login_role value =
+  match Types.agent_role_of_string (String.lowercase_ascii value) with
+  | Ok role -> Ok role
+  | Error msg -> Error (`Msg msg)
+
+let login_role =
+  let doc = "Role for the minted bearer token: admin or worker" in
+  let role_printer fmt role =
+    Format.pp_print_string fmt (Types.agent_role_to_string role)
+  in
+  let role_conv = Arg.conv (parse_login_role, role_printer) in
+  Arg.(value & opt role_conv Types.Admin & info ["role"] ~docv:"ROLE" ~doc)
+
+let login_agent =
+  let doc = "Agent identity bound to the minted bearer token" in
+  Arg.(
+    value
+    & opt string "codex-local-admin"
+    & info ["agent"] ~docv:"AGENT" ~doc)
+
+let login_shell =
+  let doc = "Emit shell export commands only" in
+  Arg.(value & flag & info ["shell"] ~doc)
 
 (** Graceful shutdown exception *)
 (* Shutdown exception removed: graceful shutdown returns normally from
@@ -883,6 +908,36 @@ let doctor_cmd =
     info
     [ doctor_config_cmd; doctor_auth_cmd; doctor_sidecar_cmd; doctor_all_cmd ]
 
+let login_cmd_exit base_path host port agent role as_json as_shell =
+  match
+    Auth_login.mint ~base_path ~host ~port ~agent_name:agent ~role ()
+  with
+  | Error err ->
+      Printf.eprintf "login failed: %s\n" (Types.masc_error_to_string err);
+      1
+  | Ok report ->
+      let output =
+        if as_shell then
+          Auth_login.render_shell report
+        else if as_json then
+          Auth_login.to_yojson report |> Yojson.Safe.pretty_to_string
+        else
+          Auth_login.render_text report
+      in
+      print_endline output;
+      0
+
+let login_cmd =
+  let doc =
+    "Mint a local bearer token, persist its raw token file, and print \
+     dashboard/Codex MCP auth exports"
+  in
+  let info = Cmd.info "login" ~doc in
+  Cmd.v info
+    Term.(
+      const login_cmd_exit $ base_path $ host $ port $ login_agent
+      $ login_role $ doctor_json $ login_shell)
+
 let init_force =
   let doc = "Overwrite existing config files instead of skipping them" in
   Arg.(value & flag & info ["force"] ~doc)
@@ -932,6 +987,6 @@ let cmd =
   let doc = "MASC MCP Server and operator diagnostics" in
   let info = Cmd.info "masc-mcp" ~version:Masc_mcp.Version.version ~doc in
   Cmd.group ~default:Term.(const run_cmd_exit $ host $ port $ base_path)
-    info [ doctor_cmd; init_cmd ]
+    info [ doctor_cmd; init_cmd; login_cmd ]
 
 let () = exit (Cmd.eval' cmd)

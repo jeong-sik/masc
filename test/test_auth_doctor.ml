@@ -75,6 +75,7 @@ let test_warns_for_codex_worker_admin_route_mismatch () =
   with_env "MASC_HOST" "127.0.0.1" @@ fun () ->
   with_env "MASC_HTTP_AUTH_STRICT" "" @@ fun () ->
   with_env "MASC_ADMIN_TOKEN" "" @@ fun () ->
+  with_env "MASC_MCP_TOKEN" "" @@ fun () ->
   let report =
     Auth_doctor.analyze ~base_path_input:base_path
       ~default_base_path:base_path ()
@@ -115,6 +116,7 @@ let test_errors_when_no_admin_bearer_source_exists () =
   with_env "MASC_HOST" "0.0.0.0" @@ fun () ->
   with_env "MASC_HTTP_AUTH_STRICT" "1" @@ fun () ->
   with_env "MASC_ADMIN_TOKEN" "" @@ fun () ->
+  with_env "MASC_MCP_TOKEN" "" @@ fun () ->
   let report =
     Auth_doctor.analyze ~base_path_input:base_path
       ~default_base_path:base_path ()
@@ -153,6 +155,7 @@ let test_ignores_stale_admin_raw_token_file () =
   with_env "MASC_HOST" "0.0.0.0" @@ fun () ->
   with_env "MASC_HTTP_AUTH_STRICT" "1" @@ fun () ->
   with_env "MASC_ADMIN_TOKEN" "" @@ fun () ->
+  with_env "MASC_MCP_TOKEN" "" @@ fun () ->
   let report =
     Auth_doctor.analyze ~base_path_input:base_path
       ~default_base_path:base_path ()
@@ -169,6 +172,54 @@ let test_ignores_stale_admin_raw_token_file () =
        ~needle:"No usable admin bearer source was detected"
        report.warnings)
 
+let test_reports_codex_mcp_bearer_env () =
+  with_temp_dir "auth-doctor-codex-mcp" @@ fun base_path ->
+  let auth_cfg =
+    Types.
+      {
+        enabled = true;
+        room_secret_hash = None;
+        require_token = true;
+        token_expiry_hours = 24;
+      }
+  in
+  Auth.save_auth_config base_path auth_cfg;
+  save_credential_or_fail base_path ~agent_name:"admin" ~role:Types.Admin
+    ~raw_token:"admin-token";
+  Auth.save_private_text_file (raw_token_file base_path "admin")
+    "admin-token";
+  save_credential_or_fail base_path ~agent_name:"codex-mcp-client"
+    ~role:Types.Worker ~raw_token:"codex-mcp-token";
+  with_env "MASC_HOST" "127.0.0.1" @@ fun () ->
+  with_env "MASC_HTTP_AUTH_STRICT" "" @@ fun () ->
+  with_env "MASC_ADMIN_TOKEN" "" @@ fun () ->
+  with_env "MASC_MCP_TOKEN" "codex-mcp-token" @@ fun () ->
+  let report =
+    Auth_doctor.analyze ~base_path_input:base_path
+      ~default_base_path:base_path ()
+  in
+  check string "codex server name" "masc"
+    report.codex_mcp.server_name;
+  check string "codex auth model" "bearer_token_env"
+    report.codex_mcp.auth_model;
+  check string "codex token status" "live"
+    report.codex_mcp.token_status;
+  check (option string) "codex token agent"
+    (Some "codex-mcp-client")
+    report.codex_mcp.token_agent;
+  check (option string) "codex token role" (Some "worker")
+    report.codex_mcp.token_role;
+  check (option bool) "codex can read state" (Some true)
+    report.codex_mcp.token_can_read_state;
+  check bool "codex login unsupported" false
+    report.codex_mcp.login_supported;
+  check bool "doctor text names bearer env" true
+    (contains_substring ~needle:"token_env_var: MASC_MCP_TOKEN"
+       (Auth_doctor.render_text report));
+  check bool "no codex login warning when env is live" false
+    (list_contains_substring ~needle:"codex mcp login"
+       report.warnings)
+
 let () =
   run "auth_doctor"
     [
@@ -180,5 +231,7 @@ let () =
             test_errors_when_no_admin_bearer_source_exists;
           test_case "ignores stale admin raw token file" `Quick
             test_ignores_stale_admin_raw_token_file;
+          test_case "reports Codex MCP bearer env" `Quick
+            test_reports_codex_mcp_bearer_env;
         ] );
     ]

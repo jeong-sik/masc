@@ -14,6 +14,19 @@ type watched_agent = {
   raw_token_file_present : bool;
 }
 
+type codex_mcp = {
+  server_name : string;
+  auth_model : string;
+  token_env_var : string;
+  token_env_configured : bool;
+  token_status : string;
+  token_agent : string option;
+  token_role : string option;
+  token_can_read_state : bool option;
+  login_supported : bool;
+  login_note : string;
+}
+
 type t = {
   status : status;
   base_path : string;
@@ -37,6 +50,7 @@ type t = {
   credential_count : int;
   role_counts : (string * int) list;
   watched_agents : watched_agent list;
+  codex_mcp : codex_mcp;
   warnings : string list;
   next_actions : string list;
 }
@@ -51,6 +65,11 @@ let status_to_string = function
   | Ok -> "ok"
   | Warn -> "warn"
   | Error -> "error"
+
+let codex_mcp_token_env_var = "MASC_MCP_TOKEN"
+
+let codex_mcp_login_note =
+  "`codex mcp login` is OAuth-only; masc-mcp uses bearer token auth."
 
 let canonicalize_path path =
   try Unix.realpath path with
@@ -194,6 +213,53 @@ let admin_bearer_sources ~base_path ~auth_dir ~dashboard_dev_token_available
   env_sources @ dashboard_sources @ token_file_sources
   |> dedupe_keep_order
 
+let codex_mcp_report ~base_path =
+  match
+    Sys.getenv_opt codex_mcp_token_env_var |> Env_config_core.trim_opt
+  with
+  | None ->
+      {
+        server_name = "masc";
+        auth_model = "bearer_token_env";
+        token_env_var = codex_mcp_token_env_var;
+        token_env_configured = false;
+        token_status = "unset";
+        token_agent = None;
+        token_role = None;
+        token_can_read_state = None;
+        login_supported = false;
+        login_note = codex_mcp_login_note;
+      }
+  | Some raw_token -> (
+      match Auth.find_credential_by_token base_path ~token:raw_token with
+      | Ok cred ->
+          {
+            server_name = "masc";
+            auth_model = "bearer_token_env";
+            token_env_var = codex_mcp_token_env_var;
+            token_env_configured = true;
+            token_status = "live";
+            token_agent = Some cred.agent_name;
+            token_role = Some (agent_role_to_string cred.role);
+            token_can_read_state =
+              Some (has_permission cred.role CanReadState);
+            login_supported = false;
+            login_note = codex_mcp_login_note;
+          }
+      | Error _ ->
+          {
+            server_name = "masc";
+            auth_model = "bearer_token_env";
+            token_env_var = codex_mcp_token_env_var;
+            token_env_configured = true;
+            token_status = "invalid_or_expired";
+            token_agent = None;
+            token_role = None;
+            token_can_read_state = None;
+            login_supported = false;
+            login_note = codex_mcp_login_note;
+          })
+
 let analyze ~base_path_input ~default_base_path () =
   let normalized_base_path =
     Env_config_core.normalize_masc_base_path_input base_path_input
@@ -228,6 +294,7 @@ let analyze ~base_path_input ~default_base_path () =
     admin_bearer_sources ~base_path ~auth_dir
       ~dashboard_dev_token_available ~admin_token_env_state credentials
   in
+  let codex_mcp = codex_mcp_report ~base_path in
   let token_bound_admin_http_ready =
     auth_cfg.enabled && auth_cfg.require_token && admin_bearer_sources <> []
   in
@@ -295,6 +362,18 @@ let analyze ~base_path_input ~default_base_path () =
            "Dashboard dev-token bootstrap is unavailable because the bind host is non-loopback or HTTP strict auth is enabled."
        else
          None);
+      (if auth_cfg.enabled && auth_cfg.require_token then
+         match codex_mcp.token_status with
+         | "unset" ->
+             Some
+               "Codex MCP bearer env var MASC_MCP_TOKEN is unset; Codex should use bearer_token_env_var, not `codex mcp login`."
+         | "invalid_or_expired" ->
+             Some
+               "Codex MCP bearer env var MASC_MCP_TOKEN is set, but it does not resolve to a live credential in this base path."
+         | "live" -> None
+         | _ -> None
+       else
+         None);
     ]
     |> List.filter_map Fun.id
     |> dedupe_keep_order
@@ -335,6 +414,12 @@ let analyze ~base_path_input ~default_base_path () =
            "Follow docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md to bootstrap an admin bearer under the live auth root."
        else
          None);
+      (if auth_cfg.enabled && auth_cfg.require_token
+          && not (String.equal codex_mcp.token_status "live") then
+         Some
+           "For Codex MCP, run `masc-mcp login --agent codex-mcp-client --role worker --shell` and export MASC_MCP_TOKEN; do not run `codex mcp login masc`."
+       else
+         None);
       Some "Rerun `masc-mcp doctor auth` after editing auth files or rotating tokens.";
     ]
     |> List.filter_map Fun.id
@@ -372,6 +457,7 @@ let analyze ~base_path_input ~default_base_path () =
     credential_count = List.length credentials;
     role_counts = role_counts_of_credentials credentials;
     watched_agents;
+    codex_mcp;
     warnings;
     next_actions;
   }
@@ -388,6 +474,24 @@ let watched_agent_to_yojson agent =
         | None -> `Null );
       (option_field "expires_at" agent.expires_at);
       ("raw_token_file_present", `Bool agent.raw_token_file_present);
+    ]
+
+let codex_mcp_to_yojson codex_mcp =
+  `Assoc
+    [
+      ("server_name", `String codex_mcp.server_name);
+      ("auth_model", `String codex_mcp.auth_model);
+      ("token_env_var", `String codex_mcp.token_env_var);
+      ("token_env_configured", `Bool codex_mcp.token_env_configured);
+      ("token_status", `String codex_mcp.token_status);
+      (option_field "token_agent" codex_mcp.token_agent);
+      (option_field "token_role" codex_mcp.token_role);
+      ( "token_can_read_state",
+        match codex_mcp.token_can_read_state with
+        | Some value -> `Bool value
+        | None -> `Null );
+      ("login_supported", `Bool codex_mcp.login_supported);
+      ("login_note", `String codex_mcp.login_note);
     ]
 
 let to_yojson (report : t) =
@@ -429,6 +533,7 @@ let to_yojson (report : t) =
              report.role_counts) );
       ( "watched_agents",
         `List (List.map watched_agent_to_yojson report.watched_agents) );
+      ("codex_mcp", codex_mcp_to_yojson report.codex_mcp);
       ("warnings", `List (List.map (fun value -> `String value) report.warnings));
       ("next_actions", `List (List.map (fun value -> `String value) report.next_actions));
     ]
@@ -505,6 +610,36 @@ let render_text (report : t) =
            (yes_no agent.raw_token_file_present)
            (option_value agent.expires_at)))
     report.watched_agents;
+  add_line "";
+  add_line "codex_mcp:";
+  add_line
+    (Printf.sprintf "- server_name: %s" report.codex_mcp.server_name);
+  add_line
+    (Printf.sprintf "- auth_model: %s" report.codex_mcp.auth_model);
+  add_line
+    (Printf.sprintf "- token_env_var: %s"
+       report.codex_mcp.token_env_var);
+  add_line
+    (Printf.sprintf "- token_env_configured: %s"
+       (yes_no report.codex_mcp.token_env_configured));
+  add_line
+    (Printf.sprintf "- token_status: %s"
+       report.codex_mcp.token_status);
+  add_line
+    (Printf.sprintf "- token_agent: %s"
+       (option_value report.codex_mcp.token_agent));
+  add_line
+    (Printf.sprintf "- token_role: %s"
+       (option_value report.codex_mcp.token_role));
+  add_line
+    (Printf.sprintf "- token_can_read_state: %s"
+       (match report.codex_mcp.token_can_read_state with
+        | Some value -> yes_no value
+        | None -> "(n/a)"));
+  add_line
+    (Printf.sprintf "- login_supported: %s"
+       (yes_no report.codex_mcp.login_supported));
+  add_line (Printf.sprintf "- login_note: %s" report.codex_mcp.login_note);
   if report.warnings <> [] then begin
     add_line "";
     add_line "warnings:";

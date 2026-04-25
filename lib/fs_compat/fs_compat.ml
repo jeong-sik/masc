@@ -44,6 +44,67 @@ let with_io ~path f =
   with Eio.Io _ as e ->
     raise (Sys_error (Printf.sprintf "%s: %s" path (Printexc.to_string e)))
 
+(* #9921: defense-in-depth write-boundary guard.
+
+   [Env_config_core.base_path_prod_guard] stops HOME fallback during path
+   resolution.  This stops writes when the resolved path nevertheless
+   points under HOME — any code that caches a stale [base_path ()] result
+   or builds a HOME-relative path directly hits this gate before the
+   write lands on the production ledger.
+
+   The prod ledger observed 106 test-pattern rows
+   ([hot-voter-*], [flipper], [same-voter], [judge]) written pre-#9920.
+   This guard prevents regression if any new code path slips past the
+   resolution guard.
+
+   Active only for test executables (basename starts with [test_]).
+   Escape hatch [MASC_TEST_ALLOW_HOME_BASE_PATH=1] matches
+   [base_path_prod_guard] for the rare test that legitimately writes
+   under HOME.  Reads remain unguarded — this is about preventing
+   silent corruption, not restricting observability. *)
+exception Test_isolation_breach of string
+
+let test_exec_home_guard ~op path =
+  let basename =
+    Sys.executable_name |> Filename.basename |> String.lowercase_ascii
+  in
+  let is_test_exec =
+    String.length basename >= 5 && String.sub basename 0 5 = "test_"
+  in
+  if not is_test_exec then ()
+  else
+    let allow =
+      match Sys.getenv_opt "MASC_TEST_ALLOW_HOME_BASE_PATH" with
+      | Some v ->
+          let v = String.lowercase_ascii (String.trim v) in
+          v = "1" || v = "true" || v = "yes"
+      | None -> false
+    in
+    if allow then ()
+    else
+      match Sys.getenv_opt "HOME" with
+      | None | Some "" -> ()
+      | Some home ->
+          let home_norm =
+            let trimmed = String.trim home in
+            let len = String.length trimmed in
+            if len > 1 && trimmed.[len - 1] = '/' then
+              String.sub trimmed 0 (len - 1)
+            else
+              trimmed
+          in
+          let home_len = String.length home_norm in
+          if home_len > 0
+             && String.length path >= home_len
+             && String.sub path 0 home_len = home_norm then
+            raise (Test_isolation_breach
+              (Printf.sprintf
+                 "#9921 %s blocked under HOME=%S (path=%S) in test executable %S. \
+                  MASC_BASE_PATH override did not apply — fix the test setup or \
+                  set MASC_TEST_ALLOW_HOME_BASE_PATH=1."
+                 op home_norm path
+                 (Filename.basename Sys.executable_name)))
+
 let with_fs_or_fallback ~path ~fallback f =
   match Atomic.get global_fs with
   | Some fs -> (
@@ -93,6 +154,7 @@ let load_file (path : string) : string =
     Eio-native when available, fallback to Unix.
     @raises Sys_error on all I/O failures. Eio.Io is normalized internally. *)
 let save_file (path : string) (content : string) : unit =
+  test_exec_home_guard ~op:"save_file" path;
   with_fs_or_fallback ~path ~fallback:(fun () -> save_file_unix path content) (fun fs ->
       let eio_path = Eio.Path.(fs / path) in
       Eio.Path.save ~create:(`Or_truncate 0o644) eio_path content)
@@ -133,6 +195,7 @@ let save_file_atomic (path : string) (content : string) : (unit, string) result 
     Eio-native when available, fallback to Unix.
     @raises Sys_error on all I/O failures. Eio.Io is normalized internally. *)
 let append_file (path : string) (content : string) : unit =
+  test_exec_home_guard ~op:"append_file" path;
   with_fs_or_fallback ~path ~fallback:(fun () -> append_file_unix path content) (fun fs ->
       let eio_path = Eio.Path.(fs / path) in
       Eio.Path.save ~append:true ~create:(`If_missing 0o644) eio_path content)
@@ -177,6 +240,7 @@ let realpath (path : string) : string =
 (** Create directory recursively if not exists.
     @raises Sys_error on all I/O failures. Eio.Io is normalized internally. *)
 let mkdir_p (path : string) : unit =
+  test_exec_home_guard ~op:"mkdir_p" path;
   with_fs_or_fallback ~path ~fallback:(fun () -> mkdir_p_unix path) (fun fs ->
       let eio_path = Eio.Path.(fs / path) in
       Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 eio_path)

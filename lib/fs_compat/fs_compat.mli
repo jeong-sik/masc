@@ -3,6 +3,13 @@
     @since 2026-02 - Keeper Emergent Identity v2.0
 *)
 
+exception Test_isolation_breach of string
+(** #9921: raised by mutating [Fs_compat] entry points
+    ([append_file], [save_file], [mkdir_p]) when the target path falls
+    under [HOME] and the process is a test executable. Defense in depth
+    behind [Env_config_core.base_path_prod_guard]. Bypass with
+    [MASC_TEST_ALLOW_HOME_BASE_PATH=1]. *)
+
 val set_fs : Eio.Fs.dir_ty Eio.Path.t -> unit
 (** Set global Eio filesystem. Call at server startup. *)
 

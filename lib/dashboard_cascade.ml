@@ -407,6 +407,8 @@ let zero_provider_info (key : string) : Health.provider_info =
   ; cooldown_expires_at = None
   ; events_in_window = 0
   ; rejected_in_window = 0
+  ; top_fingerprints = []
+  ; last_failure_at = None
   }
 
 (** [provider_entry_to_json ~declared info] serialises a provider_info
@@ -453,6 +455,14 @@ let provider_entry_to_json ~(declared : bool)
       ; ("request_count", `Int stats.ps_entry_count)
       ]
   in
+  let top_fingerprints_json =
+    `List
+      (List.map
+         (fun (fp, count) ->
+           `Assoc
+             [ ("fingerprint", `String fp); ("count", `Int count) ])
+         info.top_fingerprints)
+  in
   `Assoc ([
     ("provider_key", `String info.provider_key);
     ("success_rate", `Float info.success_rate);
@@ -468,6 +478,12 @@ let provider_entry_to_json ~(declared : bool)
        so dashboards can distinguish "provider down" from "provider
        returns unusable output". *)
     ("rejected_in_window", `Int info.rejected_in_window);
+    (* top_fingerprints / last_failure_at are Phase 0 trust observability
+       anchors (cumulative, not window-bounded).  Surfaced so dashboards
+       can show "which error keeps recurring" alongside the existing
+       success-rate snapshot. *)
+    ("top_fingerprints", top_fingerprints_json);
+    ("last_failure_at", opt_float info.last_failure_at);
     ("declared", `Bool declared);
     ("status", `String (provider_status info));
   ] @ perf_fields)

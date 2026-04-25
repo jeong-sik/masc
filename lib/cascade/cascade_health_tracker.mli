@@ -45,8 +45,23 @@ val create : unit -> t
 val record_success : t -> provider_key:string -> unit
 
 (** Record a failed provider call. Increments consecutive failure
-    counter; triggers cooldown when threshold is reached. *)
-val record_failure : t -> provider_key:string -> unit
+    counter; triggers cooldown when threshold is reached.
+
+    Optional [error_kind] (e.g. "auth", "timeout", "schema") and
+    [error_reason] (raw error string) are folded into a stable
+    fingerprint [error_kind|hash8(reason)] and accumulated in
+    [provider_info.top_fingerprints] for observability. Both default
+    to [None] (unclassified) which is still recorded under the synthetic
+    fingerprint ["unclassified"].
+
+    @since 0.174.0 *)
+val record_failure :
+  t ->
+  provider_key:string ->
+  ?error_kind:string ->
+  ?error_reason:string ->
+  unit ->
+  unit
 
 (** Record a provider call where the response arrived but was rejected
     by the cascade's [accept] predicate (e.g. empty body, schema gate).
@@ -62,8 +77,16 @@ val record_failure : t -> provider_key:string -> unit
     could rank 100% healthy while every call fell through to the next
     cascade tier.
 
+    See {!record_failure} for [error_kind] / [error_reason] semantics.
+
     @since 0.160.0 *)
-val record_rejected : t -> provider_key:string -> unit
+val record_rejected :
+  t ->
+  provider_key:string ->
+  ?error_kind:string ->
+  ?error_reason:string ->
+  unit ->
+  unit
 
 (** Record a provider call that failed with a hard-quota error (balance
     depleted, monthly quota reached, resource exhausted — classified
@@ -79,8 +102,16 @@ val record_rejected : t -> provider_key:string -> unit
     Counts toward [consecutive_failures] for dashboard continuity and
     toward [events_in_window] in {!provider_info}.
 
+    See {!record_failure} for [error_kind] / [error_reason] semantics.
+
     @since 0.161.0 *)
-val record_hard_quota : t -> provider_key:string -> unit
+val record_hard_quota :
+  t ->
+  provider_key:string ->
+  ?error_kind:string ->
+  ?error_reason:string ->
+  unit ->
+  unit
 
 (** Drop tracker entries whose rolling window is empty AND whose cooldown
     has expired.  Intended as opportunistic maintenance — idle providers
@@ -120,6 +151,16 @@ type provider_info = {
   cooldown_expires_at : float option; (** Unix timestamp, Some iff [in_cooldown] *)
   events_in_window : int;             (** Events retained in rolling window *)
   rejected_in_window : int;           (** Subset of [events_in_window] whose outcome was [Rejected]. @since 0.160.0 *)
+  top_fingerprints : (string * int) list;
+  (** Top-N error fingerprints with cumulative counts (descending), capped
+      at 3.  Fingerprint format: ["error_kind|hash8(error_reason)"] —
+      built by {!record_failure} / {!record_rejected} / {!record_hard_quota}
+      from caller-provided classifications.  Empty list when no failures
+      have been recorded.  @since 0.174.0 *)
+  last_failure_at : float option;
+  (** Unix timestamp of the most recent non-success event, or [None] if
+      none.  Phase 0 observability anchor for "did this provider fail
+      recently".  @since 0.174.0 *)
 }
 
 (** Structured info for a single provider. Returns [None] if untracked.

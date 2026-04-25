@@ -77,6 +77,36 @@ let test_read_recent_more_than_exists () =
   let result = Dated_jsonl.read_recent store 100 in
   check int "returns all 2" 2 (List.length result)
 
+let test_load_tail_lines_drops_partial_chunk_prefix () =
+  let dir = tmpdir "dated_jsonl_partial_tail" in
+  let path = Filename.concat dir "tail.jsonl" in
+  let expected = List.init 5 (fun i -> Printf.sprintf "{\"i\":%d}" (i + 1)) in
+  let content =
+    String.make 9000 'x' ^ "\n"
+    ^ String.make 31 '\n'
+    ^ String.concat "\n" expected
+    ^ "\n"
+  in
+  Fs_compat.append_file path content;
+  let lines = Dated_jsonl.load_tail_lines path ~max_lines:10 in
+  check (list string) "drops partial chunk prefix" expected lines
+
+let test_load_tail_lines_keeps_first_data_after_blank_prefix () =
+  let dir = tmpdir "dated_jsonl_blank_partial_tail" in
+  let path = Filename.concat dir "tail.jsonl" in
+  let first = Printf.sprintf "{\"payload\":\"%s\"}" (String.make 8120 'a') in
+  let rest = List.init 4 (fun i -> Printf.sprintf "{\"i\":%d}" (i + 1)) in
+  let expected = first :: rest in
+  let content =
+    String.make 256 'x' ^ "\n"
+    ^ String.make 40 '\n'
+    ^ String.concat "\n" expected
+    ^ "\n"
+  in
+  Fs_compat.append_file path content;
+  let lines = Dated_jsonl.load_tail_lines path ~max_lines:10 in
+  check (list string) "keeps first data row after blank partial prefix" expected lines
+
 (* ── read_recent_lines returns raw strings ─────────────── *)
 
 let test_read_recent_lines () =
@@ -212,6 +242,9 @@ let () =
           test_case "returns newest N chronological" `Quick test_read_recent;
           test_case "returns 0 for n=0" `Quick test_read_recent_zero;
           test_case "returns all when n > count" `Quick test_read_recent_more_than_exists;
+          test_case "drops partial chunk prefix" `Quick test_load_tail_lines_drops_partial_chunk_prefix;
+          test_case "keeps first data row after blank partial prefix" `Quick
+            test_load_tail_lines_keeps_first_data_after_blank_prefix;
         ] );
       ( "read_recent_lines",
         [

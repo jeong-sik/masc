@@ -8,6 +8,7 @@ import { StatCard } from './common/stat-card'
 import { JsonViewerCard } from './common/json-viewer'
 import { EmptyState } from './common/empty-state'
 import { formatTimeAgo } from '../lib/format-time'
+import { TimeAgo } from './common/time-ago'
 import {
   asBoolean,
   asNumber,
@@ -317,7 +318,7 @@ function TimelineList({ timeline }: { timeline: TimelineItem[] }) {
               </div>
             </div>
             <div class="shrink-0 text-3xs text-[var(--text-muted)]">
-              ${item.ts_iso ? formatTimeAgo(item.ts_iso) : '정보 없음'}
+              ${item.ts_iso ? html`<${TimeAgo} timestamp=${item.ts_iso} />` : '정보 없음'}
             </div>
           </div>
         </div>
@@ -356,7 +357,7 @@ export function SafeAutonomyPanel() {
                       audit trail completeness를 keeper별로 한 번에 보여줍니다.
                     </div>
                     <div class="mt-2 text-3xs text-[var(--text-muted)]">
-                      generated ${data.generated_at ? formatTimeAgo(data.generated_at) : '정보 없음'}
+                      generated ${data.generated_at ? html`<${TimeAgo} timestamp=${data.generated_at} />` : '정보 없음'}
                     </div>
                   </div>
                   <div class="grid grid-cols-2 gap-2 xl:grid-cols-4">

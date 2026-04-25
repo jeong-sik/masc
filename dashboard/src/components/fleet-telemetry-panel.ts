@@ -18,6 +18,7 @@ import { useSavedSignal } from '../lib/saved-signal'
 import { normalizeKeepers } from '../keeper-store-normalize'
 import { normalizeNamespaceTruth } from '../namespace-truth-normalizers'
 import { formatTimeAgo } from '../lib/format-time'
+import { TimeAgo } from './common/time-ago'
 import { isAbortError } from '../lib/async-state'
 import { requestConfirm } from './common/confirm-dialog'
 import { Sparkline } from './common/sparkline'
@@ -438,7 +439,7 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
               <td class="py-1.5 text-right font-mono ${statusClass(row)}">${row.status}</td>
               <td class="py-1.5 text-right text-[var(--text-dim)]">${formatActivitySignal(row)}</td>
               <td class="py-1.5 text-right text-3xs ${auditFreshnessClass(row.tool_audit_at)}" title=${row.tool_audit_at ?? ''}>
-                ${row.tool_audit_at ? formatTimeAgo(row.tool_audit_at) : '-'}
+                ${row.tool_audit_at ? html`<${TimeAgo} timestamp=${row.tool_audit_at} />` : '-'}
               </td>
               <${TrendCell}
                 name=${row.name} metric="tool_calls"
@@ -697,7 +698,7 @@ export function FleetTelemetryPanel() {
         </div>
         <div class="flex items-center gap-2">
           <span class="text-3xs text-[var(--text-dim)]">
-            ${value.updated_at ? `${formatTimeAgo(value.updated_at)} 갱신` : ''}
+            ${value.updated_at ? html`<${TimeAgo} timestamp=${value.updated_at} /> 갱신` : ''}
           </span>
           <button type="button"
             class="rounded bg-[var(--bg-subtle)] px-2 py-0.5 text-3xs text-[var(--text-dim)] hover:text-[var(--text)]"

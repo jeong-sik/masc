@@ -776,6 +776,119 @@ let test_keeper_profile_stale_builtin_falls_back_to_live_default () =
       check bool "raw and canonical differ for inactive built-in"
         true (lookup fs "cascade_name" <> lookup fs "canonical"))
 
+(* ── Phase 2a: low-trust recommendations ──────────── *)
+
+module DC = Masc_mcp.Dashboard_cascade
+
+let mk_info ?(success_rate = 1.0) ?(consecutive_failures = 0)
+    ?(in_cooldown = false) ?(cooldown_expires_at = None)
+    ?(events_in_window = 0) ?(rejected_in_window = 0)
+    ?(top_fingerprints = []) ?(last_failure_at = None)
+    ?(trust_score = 1.0) ?(same_fingerprint_count = 0) provider_key
+  : Masc_mcp.Cascade_health_tracker.provider_info =
+  { provider_key
+  ; success_rate
+  ; consecutive_failures
+  ; in_cooldown
+  ; cooldown_expires_at
+  ; events_in_window
+  ; rejected_in_window
+  ; top_fingerprints
+  ; last_failure_at
+  ; trust_score
+  ; same_fingerprint_count
+  }
+
+let test_recommendation_healthy_returns_none () =
+  let info = mk_info "p" ~trust_score:1.0 ~events_in_window:10 in
+  match DC.classify_recommendation info with
+  | None -> ()
+  | Some _ -> failwith "healthy provider should not yield a recommendation"
+
+let test_recommendation_reduce_weight_for_partial_failure () =
+  let info =
+    mk_info "p" ~trust_score:0.2 ~events_in_window:10
+      ~same_fingerprint_count:1
+      ~top_fingerprints:[("timeout|abc12345", 4)]
+  in
+  match DC.classify_recommendation info with
+  | Some r -> check string "reduce_weight"
+      "reduce_weight"
+      (DC.recommendation_action_to_string r.rec_action)
+  | None -> failwith "expected reduce_weight recommendation"
+
+let test_recommendation_disable_for_decayed_provider () =
+  let info =
+    mk_info "p" ~trust_score:0.05 ~events_in_window:10
+      ~same_fingerprint_count:2
+      ~top_fingerprints:[("failure|deadbeef", 3)]
+  in
+  match DC.classify_recommendation info with
+  | Some r -> check string "disable"
+      "disable"
+      (DC.recommendation_action_to_string r.rec_action)
+  | None -> failwith "expected disable recommendation"
+
+let test_recommendation_investigate_for_stuck_streak () =
+  let info =
+    mk_info "p" ~trust_score:0.5  (* trust above the disable/reduce
+                                      thresholds, so the stuck-streak
+                                      branch is what trips the rule *)
+      ~events_in_window:8 ~same_fingerprint_count:6
+      ~top_fingerprints:[("runtime_mcp_auth|cafed00d", 6)]
+  in
+  match DC.classify_recommendation info with
+  | Some r -> check string "investigate (stuck streak)"
+      "investigate"
+      (DC.recommendation_action_to_string r.rec_action)
+  | None -> failwith "expected investigate recommendation"
+
+let test_recommendation_investigate_high_volume_overrides_disable () =
+  let info =
+    mk_info "p" ~trust_score:0.05 ~events_in_window:50
+      ~same_fingerprint_count:1  (* not stuck-streak *)
+      ~top_fingerprints:[("failure|11223344", 12)]
+  in
+  match DC.classify_recommendation info with
+  | Some r -> check string "investigate (high volume + very low trust)"
+      "investigate"
+      (DC.recommendation_action_to_string r.rec_action)
+  | None -> failwith "expected investigate recommendation"
+
+let test_recommendations_sorted_by_trust () =
+  let infos = [
+    mk_info "high" ~trust_score:0.25 ~events_in_window:5;
+    mk_info "low"  ~trust_score:0.05 ~events_in_window:5;
+    mk_info "mid"  ~trust_score:0.15 ~events_in_window:5;
+    mk_info "ok"   ~trust_score:0.9  ~events_in_window:5;  (* skipped *)
+  ] in
+  let recs = DC.low_trust_recommendations infos in
+  check int "count" 3 (List.length recs);
+  let keys = List.map (fun r -> r.DC.rec_provider_key) recs in
+  check (list string) "ascending trust order" ["low"; "mid"; "high"] keys
+
+let test_recommendation_to_json_shape () =
+  let info =
+    mk_info "p" ~trust_score:0.05 ~events_in_window:30
+      ~same_fingerprint_count:1
+      ~top_fingerprints:[("timeout|f00d", 3)]
+  in
+  match DC.classify_recommendation info with
+  | None -> failwith "expected recommendation"
+  | Some r ->
+    let j = DC.recommendation_to_json r in
+    let member k = Yojson.Safe.Util.member k j in
+    check string "provider_key"
+      "p"
+      (Yojson.Safe.Util.to_string (member "provider_key"));
+    check string "action present"
+      "investigate"
+      (Yojson.Safe.Util.to_string (member "action"));
+    (match member "top_fingerprint" with
+     | `String s -> check bool "top_fingerprint preserved"
+                       true (String.length s > 0)
+     | _ -> failwith "top_fingerprint missing")
+
 (* ── Suite ─────────────────────────────────────────── *)
 
 let () =
@@ -839,5 +952,21 @@ let () =
         `Quick test_keeper_profile_stale_builtin_falls_back_to_live_default;
       test_case "canonical cascade: raw == canonical (UI renders —)"
         `Quick test_keeper_profile_canonical_matches_when_raw_is_canonical;
+    ];
+    "recommendations", [
+      test_case "healthy provider yields no recommendation" `Quick
+        test_recommendation_healthy_returns_none;
+      test_case "trust ∈ [0.1, 0.3) → reduce_weight" `Quick
+        test_recommendation_reduce_weight_for_partial_failure;
+      test_case "trust < 0.1 (decayed) → disable" `Quick
+        test_recommendation_disable_for_decayed_provider;
+      test_case "stuck-fingerprint streak → investigate" `Quick
+        test_recommendation_investigate_for_stuck_streak;
+      test_case "high-volume + very low trust → investigate" `Quick
+        test_recommendation_investigate_high_volume_overrides_disable;
+      test_case "list sorted ascending by trust" `Quick
+        test_recommendations_sorted_by_trust;
+      test_case "JSON shape preserves fields" `Quick
+        test_recommendation_to_json_shape;
     ];
   ]

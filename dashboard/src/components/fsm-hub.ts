@@ -555,6 +555,33 @@ function ShortcutsOverlay({
   open: boolean
   onClose: () => void
 }) {
+  const panelRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const restoreTarget = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+
+    requestAnimationFrame(() => {
+      panelRef.current?.focus()
+    })
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        onClose()
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+
+    return () => {
+      document.removeEventListener('keydown', onKeyDown)
+      document.body.style.overflow = previousOverflow
+      restoreTarget?.focus()
+    }
+  }, [open, onClose])
+
   if (!open) return null
   const rows: Array<{ keys: string; desc: string }> = [
     { keys: '1 – 9', desc: 'N번째 키퍼로 이동' },
@@ -575,8 +602,10 @@ function ShortcutsOverlay({
       aria-label="키보드 단축키"
     >
       <div
+        ref=${panelRef}
         class="rounded border border-[var(--white-10)] bg-[var(--bg-0)] p-5 min-w-70 shadow-sm"
         onClick=${(e: MouseEvent) => e.stopPropagation()}
+        tabindex=${-1}
       >
         <div class="flex items-center justify-between mb-3">
           <div class="text-2xs font-semibold uppercase tracking-2 text-[var(--text-muted)]">
@@ -586,7 +615,6 @@ function ShortcutsOverlay({
             class="text-3xs text-[var(--text-dim)] hover:text-[var(--text-body)] cursor-pointer"
             onClick=${onClose}
             aria-label="닫기"
-            autofocus
           >Esc</button>
         </div>
         <div class="flex flex-col gap-1.5">

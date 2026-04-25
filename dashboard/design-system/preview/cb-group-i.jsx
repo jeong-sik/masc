@@ -40,15 +40,14 @@ function BranchSelector() {
   const [sel, setSel] = useState('main');
   const cur = P2i.branches.find(b => b.name === sel);
   return (
-    <div style={{display:'flex',flexDirection:'column',gap:'8px'}}>
-      {/* header bar — looks like topbar branch widget */}
-      <div className="br-bar">
-        <span className="lbl">branch</span>
-        <span className="sel">
+    <section aria-label="Branch selector" style={{display:'flex',flexDirection:'column',gap:'8px'}}>
+      <div className="br-bar" role="region" aria-label={`Active branch ${cur.name} · ${cur.ahead} ahead, ${cur.behind} behind · HEAD ${cur.head} · ${cur.keepers.length} keepers`}>
+        <span className="lbl" aria-hidden="true">branch</span>
+        <span className="sel" aria-hidden="true">
           <span className="nm">{cur.name}</span>
           <span className="ca">▾</span>
         </span>
-        <span className="meta">
+        <span className="meta" aria-hidden="true">
           <span className="ah">↑{cur.ahead}</span>
           <span className="bh">↓{cur.behind}</span>
           <span>·</span>
@@ -58,39 +57,45 @@ function BranchSelector() {
         </span>
       </div>
 
-      {/* full branch list */}
-      <div style={{padding:'4px 8px',background:'var(--bg-2)',border:'1px solid var(--line-2)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--fg-4)',display:'flex',gap:'8px'}}>
+      <div role="heading" aria-level={3} style={{padding:'4px 8px',background:'var(--bg-2)',border:'1px solid var(--line-2)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--fg-4)',display:'flex',gap:'8px'}}>
         <span>switch branch · {P2i.branches.length} known</span>
         <span style={{marginLeft:'auto',color:'var(--brass-1)'}}>active · {sel}</span>
       </div>
-      <div className="br-list">
+      <div className="br-list" role="radiogroup" aria-label="Branch list">
         {P2i.branches.map(b => (
-          <div key={b.name} className={`row ${b.name === sel ? 'on' : ''}`} onClick={() => setSel(b.name)}>
-            <span className="glyph">⎇</span>
-            <span className="nm">
+          <div key={b.name}
+               role="radio"
+               aria-checked={b.name === sel}
+               aria-label={`${b.name} · ${b.tag} · ${b.status} · ${b.ahead} ahead, ${b.behind} behind · HEAD ${b.head}`}
+               tabIndex={0}
+               onClick={() => setSel(b.name)}
+               onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSel(b.name); } }}
+               className={`row ${b.name === sel ? 'on' : ''}`}>
+            <span className="glyph" aria-hidden="true">⎇</span>
+            <span className="nm" aria-hidden="true">
               {b.name}
               <span className={`tag ${b.tag}`}>{b.tag}</span>
             </span>
-            <span className={`st ${b.status}`}>{b.status}</span>
-            <span className="ahbh">
+            <span className={`st ${b.status}`} aria-hidden="true">{b.status}</span>
+            <span className="ahbh" aria-hidden="true">
               <span className="ah">↑{b.ahead}</span>
               <span className="bh">↓{b.behind}</span>
             </span>
-            <span className="head">{b.head}</span>
+            <span className="head" aria-hidden="true">{b.head}</span>
             <span style={{display:'none'}} />
           </div>
         ))}
       </div>
-      <div style={{padding:'5px 10px',background:'var(--bg-1)',border:'1px solid var(--line-1)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-10)',color:'var(--fg-3)',display:'flex',gap:'8px',alignItems:'center'}}>
-        <span style={{color:'var(--fg-4)'}}>active branch keepers ·</span>
+      <div role="list" aria-label={`Active branch keepers · ${cur.keepers.length}`} style={{padding:'5px 10px',background:'var(--bg-1)',border:'1px solid var(--line-1)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-10)',color:'var(--fg-3)',display:'flex',gap:'8px',alignItems:'center'}}>
+        <span aria-hidden="true" style={{color:'var(--fg-4)'}}>active branch keepers ·</span>
         {cur.keepers.map(k => (
-          <span key={k} style={{display:'inline-flex',alignItems:'center',gap:'4px'}}>
-            <span style={{display:'inline-block',width:'8px',height:'8px',borderRadius:'50%',background:keeperColor(k)}}/>
-            <span style={{color:'var(--brass-1)'}}>{k}</span>
+          <span key={k} role="listitem" aria-label={k} style={{display:'inline-flex',alignItems:'center',gap:'4px'}}>
+            <span aria-hidden="true" style={{display:'inline-block',width:'8px',height:'8px',borderRadius:'50%',background:keeperColor(k)}}/>
+            <span aria-hidden="true" style={{color:'var(--brass-1)'}}>{k}</span>
           </span>
         ))}
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -107,37 +112,41 @@ function KeeperMultiSelect() {
     setSel(next);
   };
   return (
-    <div className="km-bar">
-      <div className="h">
-        <span className="lbl">keeper filter</span>
-        <span className="cnt">{sel.size} of {allKeepers.length} selected</span>
-        <button className="clr" onClick={() => setSel(new Set())}>clear</button>
-        <button className="clr" onClick={() => setSel(new Set(allKeepers.map(k => k.id)))}>all</button>
+    <section className="km-bar" aria-label={`Keeper multi-select · ${sel.size} of ${allKeepers.length} selected`}>
+      <div className="h" role="toolbar" aria-label="Keeper filter controls">
+        <span className="lbl" aria-hidden="true">keeper filter</span>
+        <span className="cnt" aria-live="polite">{sel.size} of {allKeepers.length} selected</span>
+        <button type="button" className="clr" aria-label="Clear all keepers" onClick={() => setSel(new Set())}>clear</button>
+        <button type="button" className="clr" aria-label="Select all keepers" onClick={() => setSel(new Set(allKeepers.map(k => k.id)))}>all</button>
       </div>
-      <div className="km-chips">
+      <div className="km-chips" role="group" aria-label={`${allKeepers.length} keepers · multi-select`}>
         {allKeepers.map(k => {
           const on = sel.has(k.id);
           return (
-            <span key={k.id} className={`km-chip ${on ? 'on' : ''}`} onClick={() => toggle(k.id)}>
-              <span style={{display:'inline-block',width:'7px',height:'7px',borderRadius:'50%',background:keeperColor(k.id)}}/>
-              <span>{k.id}</span>
-              <span className="role">· {k.role}</span>
-              <span className="x">{on ? '×' : '+'}</span>
-            </span>
+            <button key={k.id}
+                    type="button"
+                    aria-pressed={on}
+                    aria-label={`${k.id} · ${k.role}${on ? ' · selected' : ''}`}
+                    onClick={() => toggle(k.id)}
+                    className={`km-chip ${on ? 'on' : ''}`}>
+              <span aria-hidden="true" style={{display:'inline-block',width:'7px',height:'7px',borderRadius:'50%',background:keeperColor(k.id)}}/>
+              <span aria-hidden="true">{k.id}</span>
+              <span className="role" aria-hidden="true">· {k.role}</span>
+              <span className="x" aria-hidden="true">{on ? '×' : '+'}</span>
+            </button>
           );
         })}
       </div>
-      {/* echo: where this filter applies */}
-      <div style={{padding:'5px 10px',background:'var(--bg-2)',border:'1px solid var(--line-2)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-10)',color:'var(--fg-3)',display:'flex',flexWrap:'wrap',gap:'4px',alignItems:'center'}}>
-        <span style={{color:'var(--fg-4)'}}>filter applied to ·</span>
+      <div role="status" aria-live="polite" aria-label={`Filter applied to 8 zones · ${sel.size === 0 ? 'all hidden' : sel.size + '-way scope'}`} style={{padding:'5px 10px',background:'var(--bg-2)',border:'1px solid var(--line-2)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-10)',color:'var(--fg-3)',display:'flex',flexWrap:'wrap',gap:'4px',alignItems:'center'}}>
+        <span aria-hidden="true" style={{color:'var(--fg-4)'}}>filter applied to ·</span>
         {['Swimlanes','Activity','Audit','Decisions','Memory','Cost','Stress','Episodes'].map(z => (
-          <span key={z} style={{padding:'1px 5px',background:'var(--bg-1)',border:'1px solid var(--line-1)',color:'var(--fg-2)'}}>{z}</span>
+          <span key={z} aria-hidden="true" style={{padding:'1px 5px',background:'var(--bg-1)',border:'1px solid var(--line-1)',color:'var(--fg-2)'}}>{z}</span>
         ))}
-        <span style={{marginLeft:'auto',color: sel.size === 0 ? 'var(--err-fg)' : 'var(--brass-1)'}}>
+        <span aria-hidden="true" style={{marginLeft:'auto',color: sel.size === 0 ? 'var(--err-fg)' : 'var(--brass-1)'}}>
           {sel.size === 0 ? '⚠ all hidden' : `→ ${sel.size}-way scope`}
         </span>
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -150,44 +159,49 @@ function OperatorNudgeLog() {
   const [body, setBody] = useState('');
   const [targets] = useState(['sangsu']);
   return (
-    <div style={{display:'flex',flexDirection:'column',gap:'6px'}}>
-      <div style={{padding:'4px 8px',background:'var(--bg-2)',border:'1px solid var(--line-2)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--fg-4)',display:'flex',gap:'8px'}}>
+    <section aria-label={`Operator nudge log · ${P2i.nudges.length} total · ${P2i.nudges.filter(n => !n.ack).length} pending ack`} style={{display:'flex',flexDirection:'column',gap:'6px'}}>
+      <div role="heading" aria-level={3} style={{padding:'4px 8px',background:'var(--bg-2)',border:'1px solid var(--line-2)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--fg-4)',display:'flex',gap:'8px'}}>
         <span>operator · nudge log</span>
         <span style={{marginLeft:'auto',color:'var(--brass-1)'}}>{P2i.nudges.length} nudges · {P2i.nudges.filter(n => !n.ack).length} pending ack</span>
       </div>
-      <div style={{background:'var(--bg-0)'}}>
+      <div role="log" aria-live="polite" aria-label={`${P2i.nudges.length} nudges`} style={{background:'var(--bg-0)'}}>
         {P2i.nudges.map(n => (
-          <div key={n.id} className="nd-row">
-            <span className="ts">{n.at.replace('Z','')}</span>
-            <span className={`ch ${n.channel}`}>{n.channel}</span>
-            <span className="to">
+          <div key={n.id} className="nd-row" role="listitem" aria-label={`${n.at.replace('Z','')} · ${n.channel} · to ${n.to.map(k => '@' + k).join(', ')} · ${n.body} · ${n.ack ? 'acknowledged' : 'pending acknowledgment'}`}>
+            <span className="ts" aria-hidden="true">{n.at.replace('Z','')}</span>
+            <span className={`ch ${n.channel}`} aria-hidden="true">{n.channel}</span>
+            <span className="to" aria-hidden="true">
               {n.to.map(k => <span key={k} className="k">@{k}</span>)}
             </span>
-            <span className="body">{n.body}</span>
-            <span className={`ack ${n.ack ? 'y' : 'n'}`}>{n.ack ? '✓ ack' : '… pending'}</span>
+            <span className="body" aria-hidden="true">{n.body}</span>
+            <span className={`ack ${n.ack ? 'y' : 'n'}`} aria-hidden="true">{n.ack ? '✓ ack' : '… pending'}</span>
           </div>
         ))}
       </div>
-      <div className="nd-compose">
+      <form className="nd-compose" aria-label="Compose new nudge" onSubmit={(e) => e.preventDefault()}>
         <div className="h">
-          <span className="lbl">new nudge</span>
-          <div className="channels">
+          <span className="lbl" id="nudge-compose-label" role="heading" aria-level={4}>new nudge</span>
+          <div className="channels" role="radiogroup" aria-label="Nudge channel">
             {['hint','approve','reject','redirect'].map(c => (
-              <button key={c} className={channel === c ? 'on' : ''} onClick={() => setChannel(c)}>{c}</button>
+              <button key={c} type="button" role="radio" aria-checked={channel === c} className={channel === c ? 'on' : ''} onClick={() => setChannel(c)}>{c}</button>
             ))}
           </div>
         </div>
         <textarea
+          aria-labelledby="nudge-compose-label"
+          aria-label="Nudge body"
           placeholder="훈수만 두세요 — '실행은 keeper들이 알아서…'"
           value={body}
           onChange={e => setBody(e.target.value)}
         />
         <div className="ft">
-          <span className="targets">to · {targets.map(t => `@${t}`).join(', ') || '<none>'}</span>
-          <button className="send" disabled={!body.trim()}>send nudge ⏎</button>
+          <span className="targets" aria-label={`Sending to ${targets.map(t => '@' + t).join(', ') || 'no targets'}`}>
+            <span aria-hidden="true">to · </span>
+            <span aria-hidden="true">{targets.map(t => `@${t}`).join(', ') || '<none>'}</span>
+          </span>
+          <button type="submit" className="send" disabled={!body.trim()} aria-label="Send nudge">send nudge ⏎</button>
         </div>
-      </div>
-    </div>
+      </form>
+    </section>
   );
 }
 

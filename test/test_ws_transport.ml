@@ -121,6 +121,30 @@ let test_parse_sse_dashboard_event_invalidated_on_new_ref () =
   Alcotest.(check (option string)) "second parse distinct"
     (Some "transport_health_snapshot") (et r2)
 
+(* The production wire format is SSE — Sse.format_event emits
+   "id: N\nevent: message\ndata: <json>\n\n".  parse_sse_dashboard_event
+   must extract the data line before parsing or every production parse
+   fails (pre-fix behaviour, mistakenly hidden by unit tests that fed
+   pure JSON). *)
+let test_parse_sse_dashboard_event_handles_sse_format () =
+  let body =
+    Yojson.Safe.to_string
+      (`Assoc [
+        ("type", `String "execution_snapshot");
+        ("payload", `Assoc [("keepers", `Int 7)]);
+      ])
+  in
+  let sse_formatted =
+    Printf.sprintf "id: 42\nevent: message\ndata: %s\n\n" body
+  in
+  match Ws.parse_sse_dashboard_event sse_formatted with
+  | Some parsed ->
+      Alcotest.(check string) "event_type extracted from SSE wrapper"
+        "execution_snapshot" parsed.event_type;
+      Alcotest.(check (option string)) "slice resolved past the wrapper"
+        (Some "execution") parsed.slice
+  | None -> Alcotest.fail "expected parse to succeed on SSE-formatted input"
+
 (* Counter observability: reuse of the same event string reference
    must register as a hit, distinct strings must register as misses.
    Read counter deltas because the global state is shared across tests. *)
@@ -558,6 +582,8 @@ let () =
         test_parse_sse_dashboard_event_stable_on_repeat;
       Alcotest.test_case "cache invalidates on new ref" `Quick
         test_parse_sse_dashboard_event_invalidated_on_new_ref;
+      Alcotest.test_case "handles production SSE wire format" `Quick
+        test_parse_sse_dashboard_event_handles_sse_format;
       Alcotest.test_case "hit/miss counters track reuse" `Quick
         test_parse_cache_counters;
     ]);

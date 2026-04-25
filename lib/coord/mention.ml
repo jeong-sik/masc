@@ -34,6 +34,40 @@ let is_nickname mention =
   let parts = String.split_on_char '-' mention in
   List.length parts >= 3
 
+(* The three mention patterns are static.  [Re.compile] runs the
+   DFA construction once at module load instead of per [parse] call;
+   on a high-broadcast room every message previously paid three
+   compilations + three DFA builds before [Re.exec_opt] could
+   even start. *)
+let broadcast_re =
+  Re.(compile
+        (seq [
+          str "@@";
+          group (rep1 (alt [rg 'a' 'z'; rg 'A' 'Z'; rg '0' '9'; char '_']));
+        ]))
+
+let stateful_re =
+  Re.(compile
+        (seq [
+          char '@';
+          group (seq [
+            rep1 (alt [rg 'a' 'z'; rg 'A' 'Z'; rg '0' '9'; char '_']);
+            char '-';
+            rep1 (alt [rg 'a' 'z'; rg 'A' 'Z'; rg '0' '9']);
+            char '-';
+            rep1 (alt [rg 'a' 'z'; rg 'A' 'Z'; rg '0' '9']);
+          ]);
+        ]))
+
+let mention_re =
+  Re.(compile
+        (seq [
+          char '@';
+          group (rep1 (alt [
+            rg 'a' 'z'; rg 'A' 'Z'; rg '0' '9'; char '_'; char '-';
+          ]));
+        ]))
+
 (** Parse @mention from message content
 
     Priority order:
@@ -42,27 +76,12 @@ let is_nickname mention =
     3. @agent → Stateless
 *)
 let parse content =
-  (* Pattern 1: @@agent (broadcast) *)
-  let broadcast_re = Re.(compile (seq [str "@@"; group (rep1 (alt [rg 'a' 'z'; rg 'A' 'Z'; rg '0' '9'; char '_']))])) in
   match Re.exec_opt broadcast_re content with
   | Some g -> Broadcast (Re.Group.get g 1)
   | None ->
-    (* Pattern 2: @agent-xxx-yyy (stateful - 3+ parts, alphanumeric allowed) *)
-    let stateful_re = Re.(compile (seq [
-      char '@';
-      group (seq [
-        rep1 (alt [rg 'a' 'z'; rg 'A' 'Z'; rg '0' '9'; char '_']);
-        char '-';
-        rep1 (alt [rg 'a' 'z'; rg 'A' 'Z'; rg '0' '9']);
-        char '-';
-        rep1 (alt [rg 'a' 'z'; rg 'A' 'Z'; rg '0' '9'])
-      ])
-    ])) in
     match Re.exec_opt stateful_re content with
     | Some g -> Stateful (Re.Group.get g 1)
     | None ->
-      (* Pattern 3: @agent (stateless) or @agent-something (stateful) *)
-      let mention_re = Re.(compile (seq [char '@'; group (rep1 (alt [rg 'a' 'z'; rg 'A' 'Z'; rg '0' '9'; char '_'; char '-']))])) in
       match Re.exec_opt mention_re content with
       | Some g ->
         let matched = Re.Group.get g 1 in

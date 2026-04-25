@@ -528,7 +528,7 @@ let test_save_raw_token_credential_uses_provided_token () =
            "provided raw token should verify after save_raw_token_credential: %s"
            (Types.masc_error_to_string e))
 
-let test_ensure_keeper_credential_uses_shared_internal_token () =
+let test_ensure_keeper_credential_uses_per_keeper_token () =
   let dir = setup_test_room () in
   Fun.protect
     ~finally:(fun () -> cleanup_test_room dir)
@@ -539,21 +539,41 @@ let test_ensure_keeper_credential_uses_shared_internal_token () =
       in
       match ensure_result with
       | Ok (raw_token, cred) ->
+          let raw_token_path =
+            Filename.concat (Auth.auth_dir dir)
+              "keeper-masc-improver-agent.token"
+          in
           check string "keeper credential exact name" "keeper-masc-improver-agent" cred.agent_name;
           check bool "keeper credential has uuid id" true (Option.is_some cred.id);
           check bool "keeper credential is worker" true (cred.role = Types.Worker);
-          check bool "shared internal token verifies" true
+          check bool "keeper bearer is not the shared internal token" false
             (Auth.verify_internal_keeper_token dir ~token:raw_token);
           check bool "internal keeper token hash persisted" true
             (Sys.file_exists (Auth.internal_keeper_token_hash_file dir));
+          check bool "persisted raw token file created" true
+            (Sys.file_exists raw_token_path);
+          check string "raw token hashes to keeper credential"
+            cred.token (Auth.sha256_hash raw_token);
           check bool "keeper credential persisted by exact name" true
             (Option.is_some (Auth.load_credential dir "keeper-masc-improver-agent"));
           check bool "no normalized keeper credential persisted" true
-            (Option.is_none (Auth.load_credential dir "masc-improver"))
+            (Option.is_none (Auth.load_credential dir "masc-improver"));
+          (match
+             Auth.verify_token dir ~agent_name:"keeper-masc-improver-agent"
+               ~token:raw_token
+           with
+           | Ok verified ->
+               check string "keeper bearer verifies exact agent"
+                 "keeper-masc-improver-agent" verified.agent_name
+           | Error e ->
+               fail
+                 (Printf.sprintf
+                    "per-keeper bearer token should verify: %s"
+                    (Types.masc_error_to_string e)))
       | Error e ->
           fail
             (Printf.sprintf
-               "ensure_keeper_credential should mint a shared internal token: %s"
+               "ensure_keeper_credential should mint a per-keeper token: %s"
                (Types.masc_error_to_string e)))
 
 let test_ensure_keeper_credential_reuses_persisted_raw_token_when_env_mismatched () =
@@ -915,8 +935,8 @@ let () =
         test_verify_token_dashboard_legacy_alias_fallback;
       test_case "save_raw_token_credential uses provided token" `Quick
         test_save_raw_token_credential_uses_provided_token;
-      test_case "ensure_keeper_credential uses shared internal token" `Quick
-        test_ensure_keeper_credential_uses_shared_internal_token;
+      test_case "ensure_keeper_credential uses per-keeper token" `Quick
+        test_ensure_keeper_credential_uses_per_keeper_token;
       test_case "ensure_keeper_credential reuses uuid" `Quick
         test_ensure_keeper_credential_reuses_uuid;
     ];

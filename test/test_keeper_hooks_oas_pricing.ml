@@ -43,6 +43,20 @@ let test_known_model_returns_nonzero_cost () =
     "sonnet-4-6 exact"
     4.5 cost
 
+let test_cache_tokens_use_provider_cache_rates () =
+  let usage =
+    mk_usage ~input:1_000_000 ~output:0
+      ~cache_creation:100_000 ~cache_read:200_000 ()
+  in
+  let cost = Hooks.estimate_usage_cost_usd
+    ~model:"claude-sonnet-4-6" usage
+  in
+  (* regular input 700k * $3/M + cache write 100k * $3/M * 1.25
+     + cache read 200k * $3/M * 0.1 = $2.535 *)
+  Alcotest.(check (float 0.001))
+    "cache tokens use Anthropic cache multipliers"
+    2.535 cost
+
 let test_unknown_model_emits_catalog_miss () =
   let sentinel_model = "pricing-test-unknown-xyz-2026-04-24" in
   let before = catalog_miss_for sentinel_model in
@@ -110,6 +124,8 @@ let () =
         [
           Alcotest.test_case "known model → non-zero cost"
             `Quick test_known_model_returns_nonzero_cost;
+          Alcotest.test_case "cache tokens use provider cache rates"
+            `Quick test_cache_tokens_use_provider_cache_rates;
           Alcotest.test_case "unknown model → catalog miss metric"
             `Quick test_unknown_model_emits_catalog_miss;
           Alcotest.test_case "repeated miss accumulates"

@@ -1854,6 +1854,7 @@ let run_turn
           Keeper_runtime_resolved.oas_timeout_for_estimated_input_tokens
             ~estimated_input_tokens
     in
+    let stream_idle_timeout_s = Some (Float.max 5.0 (timeout_s -. 5.0)) in
     (* Observability for issue #10049: providers that declare runtime MCP
        HTTP header support need claude_mcp_config to reach the masc-mcp
        HTTP MCP endpoint; otherwise the MCP tool catalog is invisible to
@@ -1984,6 +1985,7 @@ let run_turn
              Keeper_tool_disclosure.required_tool_satisfaction
            ~max_turns
            ~max_idle_turns
+           ?stream_idle_timeout_s
            ~temperature
            ~max_tokens
            ?max_cost_usd

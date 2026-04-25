@@ -82,9 +82,7 @@ let runtime_status base_path =
         last_error = st.last_error;
       })
 
-let normalize_text raw =
-  raw |> String.trim |> String.split_on_char '\n' |> List.map String.trim
-  |> List.filter (fun item -> item <> "") |> String.concat " " |> String.trim
+let normalize_text = Dashboard_http_helpers.normalize_text
 
 let parse_string_list json key =
   match json |> member key with

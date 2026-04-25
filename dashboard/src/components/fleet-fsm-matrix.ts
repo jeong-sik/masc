@@ -35,6 +35,7 @@ import {
 } from './fsm-hub-types'
 
 const POLL_INTERVAL_MS = 10_000
+const LONG_IDLE_SECONDS = 10 * 60
 
 /**
  * Time-axis window (LT-16c). 30 snapshots × 10s poll = 5-minute
@@ -136,6 +137,172 @@ export function sparkClassFor(value: string): string {
 export type KeeperFleetHistory = Record<string, Record<LaneKey, string[]>>
 
 const AXIS_KEYS: LaneKey[] = ['phase', 'turn', 'decision', 'cascade', 'compaction', 'breaker']
+
+export type FleetRuntimeAttentionLevel = 'ok' | 'stale' | 'idle' | 'blocked'
+
+export type FleetRuntimeAttention = {
+  level: FleetRuntimeAttentionLevel
+  label: string
+  reason: string
+  title: string
+  ageSec: number | null
+}
+
+export type FleetRuntimeTallies = {
+  live: number
+  blocked: number
+  stale: number
+  idle: number
+  total: number
+}
+
+const RUNTIME_ATTENTION_CLASS: Record<FleetRuntimeAttentionLevel, string> = {
+  ok: 'bg-[var(--ok-10)] text-[var(--ok)] border-[var(--ok-20)]',
+  stale: 'bg-[var(--warn-10)] text-[var(--warn)] border-[var(--warn-20)]',
+  idle: 'bg-[var(--warn-10)] text-[var(--warn)] border-[var(--warn-20)]',
+  blocked: 'bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-20)]',
+}
+
+function parseEpochSeconds(value: string | null | undefined): number | null {
+  if (!value) return null
+  const ms = Date.parse(value)
+  if (!Number.isFinite(ms)) return null
+  return ms / 1000
+}
+
+export function latestRuntimeActivityEpoch(snapshot: KeeperCompositeSnapshot): number | null {
+  const candidates: number[] = []
+  if (snapshot.last_outcome?.ended_at != null) {
+    candidates.push(snapshot.last_outcome.ended_at)
+  }
+  const recordedAt = parseEpochSeconds(snapshot.execution?.recorded_at)
+  if (recordedAt != null) {
+    candidates.push(recordedAt)
+  }
+  if (candidates.length === 0) return null
+  return Math.max(...candidates)
+}
+
+function formatAge(seconds: number | null): string {
+  if (seconds == null) return 'no activity timestamp'
+  if (seconds < 60) return `${seconds}s ago`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  const rest = minutes % 60
+  return rest > 0 ? `${hours}h ${rest}m ago` : `${hours}h ago`
+}
+
+function isIdleComposite(snapshot: KeeperCompositeSnapshot): boolean {
+  return snapshot.turn_phase === 'idle'
+    && snapshot.decision.stage === 'undecided'
+    && snapshot.cascade.state === 'idle'
+    && snapshot.compaction.stage === 'accumulating'
+    && (snapshot.circuit_breaker?.state ?? 'clean') === 'clean'
+}
+
+function executionEvidence(snapshot: KeeperCompositeSnapshot): string[] {
+  const execution = snapshot.execution
+  const parts: string[] = []
+  if (!snapshot.is_live) parts.push('is_live=false')
+  if (execution?.operator_disposition) {
+    parts.push(`operator=${execution.operator_disposition}`)
+  }
+  if (execution?.operator_disposition_reason) {
+    parts.push(`reason=${execution.operator_disposition_reason}`)
+  }
+  if (execution?.terminal_reason_code) {
+    parts.push(`terminal=${execution.terminal_reason_code}`)
+  }
+  if (execution?.tool_contract_result) {
+    parts.push(`tool=${execution.tool_contract_result}`)
+  }
+  if (execution?.error?.kind) {
+    parts.push(`error=${execution.error.kind}`)
+  }
+  return parts
+}
+
+function hasBlockingExecutionEvidence(snapshot: KeeperCompositeSnapshot): boolean {
+  const execution = snapshot.execution
+  if (!execution) return false
+  if (execution.operator_disposition === 'pause_human') return true
+  if (execution.outcome === 'error') return true
+  if (execution.terminal_reason_code && execution.terminal_reason_code !== 'completed') return true
+  if (execution.tool_contract_result === 'missing_required_tool_use') return true
+  if (execution.tool_contract_result === 'unknown' && execution.error != null) return true
+  return false
+}
+
+export function runtimeAttentionForSnapshot(
+  snapshot: KeeperCompositeSnapshot,
+  generatedAt: number,
+): FleetRuntimeAttention {
+  const latest = latestRuntimeActivityEpoch(snapshot)
+  const ageSec = latest == null ? null : Math.max(0, Math.floor(generatedAt - latest))
+  const ageText = formatAge(ageSec)
+  const evidence = executionEvidence(snapshot)
+  const evidenceText = evidence.length > 0 ? evidence.join(' · ') : 'no blocking evidence'
+  const title = `${evidenceText} · latest activity ${ageText}`
+  const blocked = hasBlockingExecutionEvidence(snapshot)
+  const idleComposite = isIdleComposite(snapshot)
+
+  if (blocked) {
+    return {
+      level: 'blocked',
+      label: '정체',
+      reason: evidenceText,
+      title,
+      ageSec,
+    }
+  }
+  if (!snapshot.is_live) {
+    return {
+      level: 'stale',
+      label: 'stale',
+      reason: evidenceText,
+      title,
+      ageSec,
+    }
+  }
+  if (idleComposite && ageSec != null && ageSec >= LONG_IDLE_SECONDS) {
+    return {
+      level: 'idle',
+      label: '무전환',
+      reason: `idle composite · latest activity ${ageText}`,
+      title,
+      ageSec,
+    }
+  }
+  return {
+    level: 'ok',
+    label: 'live',
+    reason: ageText,
+    title,
+    ageSec,
+  }
+}
+
+export function tallyRuntimeAttention(
+  snapshots: readonly KeeperCompositeSnapshot[],
+  generatedAt: number,
+): FleetRuntimeTallies {
+  const tallies: FleetRuntimeTallies = {
+    live: 0,
+    blocked: 0,
+    stale: 0,
+    idle: 0,
+    total: snapshots.length,
+  }
+  for (const snap of snapshots) {
+    if (snap.is_live) tallies.live += 1
+    const attention = runtimeAttentionForSnapshot(snap, generatedAt)
+    if (attention.level === 'blocked') tallies.blocked += 1
+    if (attention.level === 'stale') tallies.stale += 1
+    if (attention.level === 'idle') tallies.idle += 1
+  }
+  return tallies
+}
 
 /**
  * Fold an incoming batch of snapshots into the running history, capping
@@ -304,6 +471,10 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
     () => (data ? tallyInvariantViolations(data.snapshots) : null),
     [data],
   )
+  const runtimeTallies = useMemo(
+    () => (data ? tallyRuntimeAttention(data.snapshots, data.generated_at) : null),
+    [data],
+  )
   const visibleSnapshots = useMemo(
     () => (data ? filterKeeperSnapshots(data.snapshots, query) : []),
     [data, query],
@@ -349,7 +520,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
       class="rounded border border-[var(--white-10)] bg-[var(--white-5)]"
     >
       <header class="flex flex-wrap items-baseline gap-3 border-b border-[var(--white-10)] p-3">
-        <h2 class="text-sm font-semibold text-[var(--text-muted)]">Fleet composite (KSM × KTC × KDP × KCL × KMC)</h2>
+        <h2 class="text-sm font-semibold text-[var(--text-muted)]">Fleet composite (KSM × KTC × KDP × KCL × KMC × KCB)</h2>
         <span class="text-xs text-[var(--text-muted)]0">
           ${data.count} keepers · updated ${new Date(data.generated_at * 1000).toLocaleTimeString()}
         </span>
@@ -362,6 +533,33 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
           onInput=${(e: Event) => setQuery((e.target as HTMLInputElement).value)}
           class="min-w-40 max-w-65 rounded border border-[var(--white-10)] bg-[var(--white-5)] px-2 py-0.5 text-xs text-[var(--text-muted)] placeholder:text-[var(--text-muted)]0 focus:border-[var(--white-10)]0 focus:outline-none"
         />
+        ${runtimeTallies
+          ? html`
+              <div class="flex flex-wrap gap-2" data-testid="runtime-truth-strip">
+                <span
+                  data-runtime-truth="live"
+                  class="rounded border px-2 py-0.5 text-xs ${runtimeTallies.live === runtimeTallies.total ? RUNTIME_ATTENTION_CLASS.ok : RUNTIME_ATTENTION_CLASS.stale}"
+                  title="Composite observer is_live count"
+                >
+                  Runtime live: ${runtimeTallies.live}/${runtimeTallies.total}
+                </span>
+                <span
+                  data-runtime-truth="blocked"
+                  class="rounded border px-2 py-0.5 text-xs ${runtimeTallies.blocked === 0 ? RUNTIME_ATTENTION_CLASS.ok : RUNTIME_ATTENTION_CLASS.blocked}"
+                  title="Rows with operator disposition, terminal error, or failed tool contract evidence"
+                >
+                  Evidence blocked: ${runtimeTallies.blocked}
+                </span>
+                <span
+                  data-runtime-truth="stale"
+                  class="rounded border px-2 py-0.5 text-xs ${runtimeTallies.stale + runtimeTallies.idle === 0 ? RUNTIME_ATTENTION_CLASS.ok : RUNTIME_ATTENTION_CLASS.stale}"
+                  title="Rows that are not live or stayed in the idle composite longer than the operator threshold"
+                >
+                  Idle/stale: ${runtimeTallies.stale + runtimeTallies.idle}
+                </span>
+              </div>
+            `
+          : null}
         ${tallies
           ? html`
               <div class="ml-auto flex flex-wrap gap-2" data-testid="invariant-strip">
@@ -399,6 +597,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
           <thead class="bg-[var(--white-5)] text-[var(--text-muted)]">
             <tr>
               <th class="px-3 py-2 text-left font-semibold">Keeper</th>
+              <th class="px-3 py-2 text-left font-semibold">Runtime</th>
               ${AXES.map(a => html`
                 <th class="px-3 py-2 text-left font-semibold" title=${a.label}>
                   ${a.acronym} <span class="text-[var(--text-muted)]0">${a.label}</span>
@@ -409,7 +608,12 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
           <tbody>
             ${visibleSnapshots.map(snap => {
               const anyViolated = INVARIANT_KEYS.some(k => !snap.invariants[k])
-              const rowTone = anyViolated ? 'border-l-2 border-[var(--bad-20)]' : ''
+              const attention = runtimeAttentionForSnapshot(snap, data.generated_at)
+              const rowTone = anyViolated || attention.level === 'blocked'
+                ? 'border-l-2 border-[var(--bad-20)]'
+                : attention.level === 'stale' || attention.level === 'idle'
+                  ? 'border-l-2 border-[var(--warn-20)]'
+                  : ''
               const name = inferKeeperNameFrom(snap)
               return html`
                 <tr
@@ -418,6 +622,23 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
                   onClick=${props.onSelectKeeper ? () => props.onSelectKeeper?.(name) : undefined}
                 >
                   <td class="px-3 py-2 font-mono text-[var(--text-muted)]">${name}</td>
+                  <td class="px-3 py-2 align-top">
+                    <div class="flex max-w-56 flex-col gap-1">
+                      <span
+                        data-runtime-attention
+                        data-runtime-level=${attention.level}
+                        class="inline-block self-start rounded border px-2 py-0.5 ${RUNTIME_ATTENTION_CLASS[attention.level]}"
+                        title=${attention.title}
+                      >${attention.label}</span>
+                      <span
+                        data-runtime-evidence
+                        class="truncate text-3xs text-[var(--text-muted)]0"
+                        title=${attention.title}
+                      >
+                        ${attention.reason}
+                      </span>
+                    </div>
+                  </td>
                   ${AXES.map(a => {
                     const raw = extractLaneValue(snap, a.key)
                     const cls = chipClassFor(raw)

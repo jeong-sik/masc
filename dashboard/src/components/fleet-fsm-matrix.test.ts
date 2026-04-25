@@ -5,12 +5,15 @@ import {
   filterKeeperSnapshots,
   FLEET_HISTORY_LEN,
   inferKeeperNameFrom,
+  latestRuntimeActivityEpoch,
   pushObservation,
+  runtimeAttentionForSnapshot,
   sparkClassFor,
   tallyInvariantViolations,
+  tallyRuntimeAttention,
   type KeeperFleetHistory,
 } from './fleet-fsm-matrix'
-import type { KeeperCompositeSnapshot } from '../api/keeper'
+import type { KeeperCompositeExecution, KeeperCompositeSnapshot } from '../api/keeper'
 
 function snapshot(
   overrides: Partial<KeeperCompositeSnapshot> & {
@@ -42,6 +45,27 @@ function snapshot(
     last_outcome: null,
   }
   return { ...base, ...overrides }
+}
+
+function execution(
+  overrides: Partial<KeeperCompositeExecution> = {},
+): KeeperCompositeExecution {
+  return {
+    latest_receipt_present: true,
+    recorded_at: '2026-04-25T07:30:00Z',
+    outcome: 'ok',
+    terminal_reason_code: 'completed',
+    operator_disposition: 'pass',
+    operator_disposition_reason: 'healthy',
+    model_used: 'auto',
+    stop_reason: 'completed',
+    tool_contract_result: 'satisfied_execution',
+    duration_ms: 12_000,
+    error: null,
+    cascade: null,
+    tool_surface: null,
+    ...overrides,
+  }
 }
 
 describe('chipClassFor', () => {
@@ -107,6 +131,116 @@ describe('tallyInvariantViolations', () => {
       compaction_atomicity: 0,
       event_priority_monotone: 0,
     })
+  })
+})
+
+describe('runtimeAttentionForSnapshot', () => {
+  const generatedAt = Date.parse('2026-04-25T07:40:00Z') / 1000
+
+  it('flags a Running-but-not-live keeper with pause_human evidence as blocked', () => {
+    const snap = snapshot({
+      is_live: false,
+      execution: execution({
+        outcome: 'error',
+        terminal_reason_code: 'api_error',
+        operator_disposition: 'pause_human',
+        operator_disposition_reason: 'tool_required_unsatisfied',
+        tool_contract_result: 'unknown',
+        error: {
+          kind: 'api',
+          message_preview: 'Timeout after 1170s',
+          message_truncated: false,
+        },
+      }),
+    })
+
+    const attention = runtimeAttentionForSnapshot(snap, generatedAt)
+    expect(attention.level).toBe('blocked')
+    expect(attention.label).toBe('정체')
+    expect(attention.reason).toContain('is_live=false')
+    expect(attention.reason).toContain('operator=pause_human')
+    expect(attention.reason).toContain('reason=tool_required_unsatisfied')
+    expect(attention.title).toContain('latest activity 10m ago')
+  })
+
+  it('keeps raw lifecycle separate by flagging stale liveness without changing phase', () => {
+    const snap = snapshot({
+      is_live: false,
+      phase: 'Running',
+      execution: execution(),
+    })
+
+    const attention = runtimeAttentionForSnapshot(snap, generatedAt)
+    expect(snap.phase).toBe('Running')
+    expect(attention.level).toBe('stale')
+    expect(attention.reason).toContain('is_live=false')
+  })
+
+  it('flags a live idle composite after the operator threshold', () => {
+    const snap = snapshot({
+      is_live: true,
+      execution: execution({
+        recorded_at: '2026-04-25T07:20:00Z',
+      }),
+    })
+
+    const attention = runtimeAttentionForSnapshot(snap, generatedAt)
+    expect(attention.level).toBe('idle')
+    expect(attention.label).toBe('무전환')
+    expect(attention.reason).toContain('idle composite')
+  })
+
+  it('counts live, blocked, stale, and idle runtime truth separately', () => {
+    const live = snapshot({
+      name: 'live',
+      is_live: true,
+      turn_phase: 'executing',
+      execution: execution(),
+    })
+    const blocked = snapshot({
+      name: 'blocked',
+      is_live: false,
+      execution: execution({
+        outcome: 'error',
+        terminal_reason_code: 'api_error',
+        operator_disposition: 'pause_human',
+      }),
+    })
+    const stale = snapshot({
+      name: 'stale',
+      is_live: false,
+      execution: execution(),
+    })
+    const idle = snapshot({
+      name: 'idle',
+      is_live: true,
+      execution: execution({ recorded_at: '2026-04-25T07:20:00Z' }),
+    })
+
+    expect(tallyRuntimeAttention([live, blocked, stale, idle], generatedAt)).toEqual({
+      live: 2,
+      blocked: 1,
+      stale: 1,
+      idle: 1,
+      total: 4,
+    })
+  })
+
+  it('uses the newest receipt or last outcome timestamp as activity evidence', () => {
+    const snap = snapshot({
+      last_outcome: {
+        turn_id: 7,
+        ended_at: generatedAt - 300,
+        decision_stage: 'guard_ok',
+        cascade_state: 'done',
+        selected_model: 'custom:mock',
+      },
+      execution: execution({
+        recorded_at: '2026-04-25T07:20:00Z',
+      }),
+    })
+
+    expect(latestRuntimeActivityEpoch(snap)).toBe(generatedAt - 300)
   })
 })
 

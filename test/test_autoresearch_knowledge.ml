@@ -254,6 +254,18 @@ let test_search_dispatch_limit_returns_recent_matches () =
   check (list string) "most recent limited matches"
     ["fn-limit-3"; "fn-limit-2"] ids
 
+let test_lineage_contract_normalizes_finding_tags () =
+  check (list string) "cycle participants"
+    [
+      Autoresearch_lineage.lesson_reviewer_actor_name;
+      Autoresearch_lineage.cycle_runner_actor_name;
+    ]
+    Autoresearch_lineage.cycle_failure_participants;
+  check (list string) "lineage tags"
+    [ Autoresearch_lineage.domain_tag; "main.txt"; "diff-guard" ]
+    (Autoresearch_lineage.finding_tags ~target_file:" main.txt "
+       ~extra:[ "diff-guard"; ""; "autoresearch"; "main.txt"; "diff-guard" ])
+
 let test_finding_serde_roundtrip () =
   let f : Autoresearch_knowledge.finding = {
     id = "fn-test-serde";
@@ -293,6 +305,10 @@ let () =
         test_search_dispatch_rejects_invalid_input;
       test_case "search dispatch limit returns recent matches" `Quick
         test_search_dispatch_limit_returns_recent_matches;
+    ];
+    "lineage", [
+      test_case "lineage contract normalizes finding tags" `Quick
+        test_lineage_contract_normalizes_finding_tags;
     ];
     "serialization", [
       test_case "finding JSON roundtrip" `Quick test_finding_serde_roundtrip;

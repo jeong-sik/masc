@@ -607,6 +607,7 @@
    autoresearch
    autoresearch_codegen
    autoresearch_knowledge
+   autoresearch_lineage
    tool_autoresearch_context
    tool_autoresearch_schemas
    tool_autoresearch_registry
@@ -740,6 +741,7 @@
   ;; godsplit-phase2: additional sub-modules
   autoresearch_codegen
   autoresearch_knowledge
+  autoresearch_lineage
   tool_autoresearch_context
   tool_autoresearch_schemas
   tool_autoresearch_registry

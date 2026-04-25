@@ -1210,39 +1210,32 @@ let run_turn
           chunks
           @ (match guidance_section with Some s -> [s] | None -> [])
         in
+        let allowed_tool_names =
+          Keeper_exec_tools.keeper_allowed_tool_names meta
+        in
+        let preferred_tools =
+          Keeper_tool_guidance.render_preferred_tools ~allowed_tool_names
+        in
+        let gh_workflow =
+          Keeper_tool_guidance.render_gh_workflow ~allowed_tool_names
+          |> Option.map (Printf.sprintf "\n\n%s")
+          |> Option.value ~default:""
+        in
+        let unknown_tool_guard =
+          Keeper_tool_guidance.render_unknown_tool_guard ()
+        in
         (match sections with
          | [] -> None
          | _ ->
            Some (Printf.sprintf
              "## Discovered Work (auto, %ds interval)\n\n%s\n\n\
               ### Use the smallest real action now\n\
-              Preferred keeper tools (copy the name and schema verbatim):\n\
-             \  - `keeper_task_claim` {} \
-              — reserve the next eligible task\n\
-             \  - `keeper_shell` { op: \"gh\", cmd: \"pr list --state open\" } \
-              — inspect GitHub PRs/issues/checks after you already hold a claimed task/current_task_id\n\
-             \  - `keeper_bash` { cmd: \"<single shell command>\" } \
-              — run one shell command, including raw git in a worktree\n\
-             \  - `masc_worktree_create` { task_id: \"<task-id>\", repo_name: \"masc-mcp\" } \
-              — create a worktree before editing code\n\
-             \  - `keeper_board_post` { content: \"<note>\" } \
-              — coordinate via board\n\
-             \  - `keeper_stay_silent` {} \
-              — none of the above fit my role\n\n\
-              GitHub/code workflow: if you do not already hold a task, call `keeper_task_claim` first; \
-              `keeper_shell op=gh` derives repo context from the active task worktree/current_task_id. \
-              Then inspect with `keeper_shell op=gh`; \
-              if code change is needed, `masc_worktree_create` -> edit -> \
-              `keeper_bash` for `git add` / `git commit` / `git push` -> \
-              `keeper_shell op=gh` with `cmd=\"pr create --draft ...\"` -> \
-              `keeper_task_submit_for_verification` with notes and `pr_url`.\n\n\
-              Anti-pattern: `Bash`, `Read`, `Skill`, `Agent` are NOT \
-              registered tools. Calling them is a hallucination — the \
-              call fails silently and the turn is wasted. Use the \
-              `keeper_*` names exactly as shown above.\n\n\
+              %s%s\n\n\
+              %s\n\n\
               Do not print fenced pseudo-calls. Pick the smallest viable \
               action and emit one or more structured tool calls now."
-             interval (String.concat "\n\n" sections)))
+             interval (String.concat "\n\n" sections) preferred_tools
+             gh_workflow unknown_tool_guard))
   in
   let base_hooks =
     (* Issue #8597 #3-5: dropped ~config / ~session / ~ctx_snapshot —

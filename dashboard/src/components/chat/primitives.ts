@@ -204,6 +204,7 @@ function ChatMessageBubble({
                 class=${`border border-[var(--card-border)] bg-[var(--white-3)] text-2xs font-medium text-[var(--text-muted)] transition-colors hover:bg-[var(--white-10)] hover:text-[var(--text-body)] ${
                   isMessenger ? 'rounded px-2.5 py-1' : 'rounded-sm px-3 py-1'
                 }`}
+                aria-expanded=${expanded}
                 onClick=${() => { setExpandedRaw(!expandedRaw) }}
               >
                 ${expanded ? '상세 숨기기' : '상세 보기'}
@@ -227,7 +228,7 @@ function ChatMessageBubble({
       </div>
       ${entry.error
         ? html`
-            <div class="rounded border border-[rgba(239,68,68,0.24)] bg-[rgba(127,29,29,0.28)] px-3 py-2 text-xs leading-paragraph text-[var(--bad-light)]">
+            <div role="alert" class="rounded border border-[rgba(239,68,68,0.24)] bg-[rgba(127,29,29,0.28)] px-3 py-2 text-xs leading-paragraph text-[var(--bad-light)]">
               ${entry.error}
             </div>
           `
@@ -280,6 +281,7 @@ function ChatMessageBubble({
                       <button
                         type="button"
                         class="self-start rounded-sm border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-1 text-2xs font-medium text-[var(--text-muted)] transition-colors hover:bg-[var(--white-10)] hover:text-[var(--text-body)]"
+                        aria-expanded=${rawExpanded}
                         onClick=${() => { setRawExpandedRaw(!rawExpandedRaw) }}
                       >
                         ${rawExpanded ? '원본 숨기기' : '원본 보기'}
@@ -322,6 +324,8 @@ export function ChatTranscript({
 
   return html`
     <div
+      role="log"
+      aria-label="대화 기록"
       class=${`chat-transcript flex min-h-75 max-h-130 flex-col overflow-y-auto border border-[var(--slate-gray-14)] shadow-[inset_0_1px_0_var(--white-3)] ${
         variant === 'messenger'
           ? 'gap-4 rounded-[26px] px-4 py-5 sm:px-5'
@@ -380,12 +384,13 @@ export function ChatComposer({
   const isStreamWarning = streaming && elapsed > 60
 
   return html`
-    <div class="chat-composer flex flex-col gap-3">
+    <div role="form" aria-label="메시지 작성" class="chat-composer flex flex-col gap-3">
       <div class="flex flex-wrap items-center justify-between gap-2">
         <div class="text-2xs font-semibold uppercase tracking-4 text-[var(--text-muted)]">메시지</div>
         <div class="text-2xs text-[var(--text-muted)]">Enter로 전송, Shift+Enter로 줄바꿈</div>
       </div>
       <textarea
+        aria-label="메시지 입력"
         class="control-textarea min-h-24 rounded-card border border-[var(--slate-gray-16)] bg-[var(--white-3)] px-3 py-3 text-base leading-loose"
         placeholder=${placeholder}
         value=${draft}

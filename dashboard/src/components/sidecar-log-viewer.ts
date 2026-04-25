@@ -193,7 +193,7 @@ export function SidecarLogViewer({ connectorId }: { connectorId: string }) {
           ${entry.logPath || '(log path unknown)'}
         </div>
         <div class="flex items-center gap-2">
-          <span class="text-3xs uppercase tracking-4 text-[var(--text-dim)]" data-log-count>
+          <span class="text-3xs uppercase tracking-4 text-[var(--text-dim)]" data-log-count role="status">
             ${entry.available
               ? hasFilter
                 ? `${filtered.length} / ${entry.lines.length} lines`
@@ -248,7 +248,7 @@ export function SidecarLogViewer({ connectorId }: { connectorId: string }) {
           : entry.available
             ? filtered.length === 0 && hasFilter
               ? html`
-                  <div class="rounded border border-dashed border-[var(--white-8)] px-3 py-3 text-center text-2xs text-[var(--text-dim)]">
+                  <div role="status" class="rounded border border-dashed border-[var(--white-8)] px-3 py-3 text-center text-2xs text-[var(--text-dim)]">
                     필터 조건에 맞는 라인이 없습니다.
                     ${entry.lines.length > MAX_FILTER_WINDOW
                       ? ` (최근 ${MAX_FILTER_WINDOW}줄만 검색)`
@@ -259,7 +259,7 @@ export function SidecarLogViewer({ connectorId }: { connectorId: string }) {
                   <pre role="log" aria-label="${connectorId} 로그" class="max-h-[40vh] overflow-auto whitespace-pre-wrap break-words rounded bg-[var(--bg-0)] p-2 font-mono text-3xs leading-[1.4] text-[var(--text-body)]">${filtered.join('\n')}</pre>
                 `
             : html`
-                <div class="rounded border border-dashed border-[var(--white-8)] px-3 py-3 text-center text-2xs text-[var(--text-dim)]">
+                <div role="status" class="rounded border border-dashed border-[var(--white-8)] px-3 py-3 text-center text-2xs text-[var(--text-dim)]">
                   오늘 날짜 로그 파일이 아직 없습니다. sidecar를 시작하면 자동 생성됩니다.
                 </div>
               `}

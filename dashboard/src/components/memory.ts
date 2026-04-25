@@ -450,7 +450,7 @@ function PostCard({ post }: { post: BoardPost }) {
 
           <!-- Delete button -->
           <button type="button"
-            class="ml-auto px-2 py-0.5 rounded text-3xs font-semibold border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--bad-light)] hover:bg-[var(--bad-20)] transition-all cursor-pointer opacity-0 group-hover:opacity-100 disabled:opacity-50 disabled:cursor-not-allowed"
+            class="ml-auto px-2 py-0.5 rounded text-3xs font-semibold border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--bad-light)] hover:bg-[var(--bad-20)] transition-all cursor-pointer opacity-0 group-hover:opacity-100 focus-visible:opacity-100 disabled:opacity-50 disabled:cursor-not-allowed"
             onClick=${handleDelete}
             disabled=${isDeleting}
           >

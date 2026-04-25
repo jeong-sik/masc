@@ -671,7 +671,7 @@ function PlaygroundReposPanel({ keeperName }: { keeperName: string }) {
                   <span class="text-xs text-[var(--text-strong)] truncate flex-1" title=${pr.title}>${pr.title}</span>
                   <span class="text-3xs font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-15)]">${pr.branch}</span>
                   ${pr.draft ? html`<span class="text-3xs px-1 py-0.5 rounded bg-[var(--warn-10)] text-[var(--warn)] border border-[var(--warn-20)]">draft</span>` : null}
-                  <a href=${pr.pr_url} target="_blank" rel="noopener" class="text-3xs text-[var(--accent)] hover:underline flex-shrink-0">PR<span class="sr-only"> (새 창)</span></a>
+                  <a href=${pr.pr_url} target="_blank" rel="noopener noreferrer" class="text-3xs text-[var(--accent)] hover:underline flex-shrink-0">PR<span class="sr-only"> (새 창)</span></a>
                 </div>
               `)}
             </div>

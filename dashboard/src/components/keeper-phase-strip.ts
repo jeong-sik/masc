@@ -68,12 +68,12 @@ function TransitionDot({ t, idx }: { t: KeeperTransition; idx: number }) {
   const color = signalColor(t)
   const signal = t.operator_signal
   return html`
-    <div class="group relative flex flex-col items-center" key=${idx}>
+    <div class="group relative flex flex-col items-center" key=${idx} tabindex="0" role="img" aria-label="${t.prev_phase} → ${t.new_phase}${t.event_type ? ` · ${t.event_type}` : ''}${signal?.summary ? ` · ${signal.summary}` : ''}">
       <div
         class="w-3 h-3 rounded-full border-2 cursor-default transition-transform hover:scale-125"
         style="border-color: ${color}; background: ${color}33"
       />
-      <div class="absolute bottom-full mb-2 hidden group-hover:flex flex-col items-center z-10">
+      <div class="absolute bottom-full mb-2 hidden group-hover:flex group-focus-within:flex flex-col items-center z-10">
         <div class="rounded border border-[var(--card-border)] bg-[var(--card)] px-3 py-2 shadow-sm text-2xs whitespace-nowrap">
           <div class="font-semibold">${t.prev_phase} → ${t.new_phase}</div>
           <div class="text-[var(--text-muted)] mt-0.5">${t.event_type ?? eventLabel(t.selected_event)}</div>

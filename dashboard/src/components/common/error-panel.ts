@@ -96,7 +96,7 @@ export function ErrorPanel({ onClose }: ErrorPanelProps) {
               <span class="mt-0.5 block text-2xs text-[var(--text-muted)]">${formatElapsedCompact((Date.now() - e.timestamp) / 1000)} 전</span>
             </div>
             <button type="button"
-              class="shrink-0 mt-0.5 p-1 rounded opacity-0 group-hover:opacity-100 text-[var(--text-muted)] hover:text-[var(--ok)] hover:bg-[var(--white-8)] cursor-pointer transition-all"
+              class="shrink-0 mt-0.5 p-1 rounded opacity-0 group-hover:opacity-100 focus-visible:opacity-100 text-[var(--text-muted)] hover:text-[var(--ok)] hover:bg-[var(--white-8)] cursor-pointer transition-all"
               title="확인"
               aria-label="에러 확인"
               onClick=${() => acknowledgeError(e.id)}

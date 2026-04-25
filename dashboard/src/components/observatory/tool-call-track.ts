@@ -123,8 +123,11 @@ export function ToolCallTrack({ events, windowStart, windowEnd }: Props) {
               const ringClass = isSelected ? 'ring-2 ring-accent ring-offset-1 ring-offset-bg-1' : ''
               return html`
                 <span
+                  role="button"
+                  tabindex="0"
                   class="absolute top-1 bottom-1 w-[3px] ${color} rounded-[1px] hover:w-1.5 transition-all cursor-pointer ${ringClass}"
                   style="left: ${pct}%;"
+                  aria-label=${`${name} · ${outcome}${count > 1 ? ` · ${count}건` : ''}`}
                   title=${`${new Date(ts).toLocaleTimeString()} · ${name} · ${outcome}${count > 1 ? ` · ${count} calls` : ''}`}
                   onClick=${(e: MouseEvent) => {
                     e.stopPropagation()

@@ -75,8 +75,11 @@ export function EventTrack({ events, windowStart, windowEnd }: Props) {
               const ringClass = isSelected ? 'ring-2 ring-accent ring-offset-1 ring-offset-bg-1' : ''
               return html`
                 <span
+                  role="button"
+                  tabindex="0"
                   class="absolute top-1 bottom-1 w-[2px] ${color} hover:w-1 transition-all cursor-pointer ${ringClass}"
                   style="left: ${pct}%;"
+                  aria-label=${`${label}${count > 1 ? ` · ${count}건` : ''}`}
                   title=${`${new Date(ts).toLocaleTimeString()} · ${label}${count > 1 ? ` · ${count} events` : ''}`}
                   onClick=${(e: MouseEvent) => {
                     e.stopPropagation()

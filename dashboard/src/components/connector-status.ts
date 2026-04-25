@@ -1238,7 +1238,7 @@ function ConnectorLivePanel({
               ${unknownGroups.map(group => html`
                 <div class="rounded border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2" data-keeper=${group.name}>
                   <div class="flex items-baseline gap-2">
-                    <span class="text-[var(--warn)]">⚠</span>
+                    <span class="text-[var(--warn)]" aria-hidden="true">⚠</span>
                     <div class="min-w-0">
                       <div class="text-sm font-medium text-[var(--text-body)]">${group.name}</div>
                       <div class="text-3xs text-[var(--warn)]/90">binding references undefined keeper</div>

@@ -142,10 +142,10 @@ function GateCard({
             <span class="text-3xs text-[var(--text-muted)]">${total}건</span>
           </div>
           <div class="grid grid-cols-2 gap-1 text-2xs">
-            <span class="text-[var(--ok)]">✓ ${passed}</span>
-            <span class="text-[var(--warn)]">◐ ${partial}</span>
-            <span class="text-[var(--bad-light)]">✗ ${policyFailed}</span>
-            <span class="text-[var(--bad-light)]">⊘ ${blocked}</span>
+            <span class="text-[var(--ok)]"><span aria-hidden="true">✓</span> ${passed}</span>
+            <span class="text-[var(--warn)]"><span aria-hidden="true">◐</span> ${partial}</span>
+            <span class="text-[var(--bad-light)]"><span aria-hidden="true">✗</span> ${policyFailed}</span>
+            <span class="text-[var(--bad-light)]"><span aria-hidden="true">⊘</span> ${blocked}</span>
           </div>
         </div>
       </${SurfaceCard}>

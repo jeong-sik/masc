@@ -687,7 +687,7 @@ function StatusBar({
             aria-label="강제 새로고침"
             aria-keyshortcuts="r"
           >
-            ${refreshFlash ? '✓' : '↻'}
+            <span aria-hidden="true">${refreshFlash ? '✓' : '↻'}</span>
           </button>
           <button type="button"
             class="text-3xs font-mono px-1.5 py-0.5 rounded border border-[var(--white-10)] bg-[var(--white-3)] text-[var(--text-dim)] hover:text-[var(--text-body)] hover:border-[var(--accent-30)] cursor-pointer"
@@ -763,7 +763,7 @@ function StatusBar({
                 }}
               >
                 ${i < 9 ? html`<span class="opacity-50 mr-0.5">${i + 1}</span>` : null}${name.replace(/^keeper-|-agent$/g, '')}${active && hasAnomaly ? html`
-                  <span class="ml-1 text-[var(--bad-light)]" title=${anomalyTitle} aria-label="이상 신호">⚠</span>
+                  <span class="ml-1 text-[var(--bad-light)]" title=${anomalyTitle} aria-label="이상 신호"><span aria-hidden="true">⚠</span></span>
                 ` : null}
               </button>
             `

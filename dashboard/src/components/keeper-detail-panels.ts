@@ -249,9 +249,9 @@ function OutcomesLedger({ keeper, outcomes }: {
           <span class="text-3xs text-[var(--text-dim)]">${ledgerTotal > 0 ? `합계 ${ledgerTotal}` : '관측 없음'}</span>
         </div>
         <div class="flex items-center gap-3 text-xs">
-          <span class="tabular-nums"><span class="text-[var(--ok)]">✅</span> ${successes.substantive_turns} 성공</span>
-          <span class="tabular-nums"><span class="text-[var(--warn)]">⚠️</span> ${failures.turn_failed} 실패</span>
-          <span class="tabular-nums"><span class="text-[var(--bad)]">🚫</span> ${failures.gate_rejected} 거절</span>
+          <span class="tabular-nums"><span class="text-[var(--ok)]" aria-hidden="true">✅</span> ${successes.substantive_turns} 성공</span>
+          <span class="tabular-nums"><span class="text-[var(--warn)]" aria-hidden="true">⚠️</span> ${failures.turn_failed} 실패</span>
+          <span class="tabular-nums"><span class="text-[var(--bad)]" aria-hidden="true">🚫</span> ${failures.gate_rejected} 거절</span>
         </div>
         <div class="mt-2 w-full h-1.5 bg-[var(--white-6)] rounded-sm overflow-hidden flex" aria-label="성공/실패 비율 바">
           <div class="h-full bg-[var(--ok)]" style="width:${pctSuccess}%" title=${`성공 ${pctSuccess.toFixed(0)}%`}></div>

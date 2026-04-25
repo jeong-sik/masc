@@ -2292,8 +2292,7 @@ let publish_keeper_started ~(live_meta : keeper_meta) : unit =
 ;;
 
 let dispatch_fiber_started ~base_path keeper_name =
-  match Keeper_registry.dispatch_event ~base_path keeper_name
-          Keeper_state_machine.Fiber_started with
+  match Keeper_registry.prepare_fiber_launch ~base_path keeper_name with
   | Ok _ -> ()
   | Error err ->
       Log.Keeper.warn

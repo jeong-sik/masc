@@ -120,6 +120,29 @@ let test_register_restarting_and_start () =
       check bool "running after Fiber_started" true
         (R.is_running ~base_path:bp "k1-restart")
 
+let test_prepare_fiber_launch_resets_stale_runtime_latches () =
+  R.clear ();
+  let name = "k1-stale-stop" in
+  let entry = R.register_restarting ~base_path:bp name (make_meta name) in
+  Atomic.set entry.fiber_stop true;
+  Atomic.set entry.fiber_wakeup true;
+  Atomic.set entry.waiting_for_inference true;
+  (match R.prepare_fiber_launch ~base_path:bp name with
+   | Ok _ -> ()
+   | Error err -> fail (KSM.transition_error_to_string err));
+  match R.get ~base_path:bp name with
+  | None -> fail "expected k1-stale-stop"
+  | Some updated ->
+      check bool "fiber_stop reset before launch" false
+        (Atomic.get updated.fiber_stop);
+      check bool "fiber_wakeup reset before launch" false
+        (Atomic.get updated.fiber_wakeup);
+      check bool "waiting_for_inference reset before launch" false
+        (Atomic.get updated.waiting_for_inference);
+      check string "running after prepare launch" "running"
+        (KSM.phase_to_string updated.phase);
+      check bool "fsm stop_requested reset" false updated.conditions.stop_requested
+
 let test_dispatch_event_with_audit_preserves_snapshot () =
   R.clear ();
   let keeper_name = "k-audit-guardrail" in
@@ -1074,6 +1097,8 @@ let () =
           eio_test "register and get" test_register_and_get;
           eio_test "register offline and start" test_register_offline_and_start;
           eio_test "register restarting and start" test_register_restarting_and_start;
+          eio_test "prepare fiber launch resets stale latches"
+            test_prepare_fiber_launch_resets_stale_runtime_latches;
           eio_test "dispatch event with audit preserves snapshot"
             test_dispatch_event_with_audit_preserves_snapshot;
           eio_test "mark_turn_finished records completed turn outcome once"

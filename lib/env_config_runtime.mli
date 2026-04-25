@@ -160,6 +160,15 @@ module Verification : sig
   val timeout_check_interval_seconds : float
 end
 
+(** #10405: periodic Goal_janitor sweep.  Pre-fix the only caller was
+    the dashboard DELETE handler, so 4 active goals stagnated for 4
+    days with [last_review_at = null].  The bootstrap loop reads
+    these to spawn a periodic sweep fiber. *)
+module Goal_janitor : sig
+  val enabled : unit -> bool
+  val interval_seconds : float
+end
+
 module Board : sig
   type backend =
     | Jsonl

@@ -329,6 +329,33 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
       loop ()
     in
     loop ());
+  (* #10405: Goal_janitor.run was previously only invoked by the
+     dashboard DELETE handler, so stagnated [Active] goals never got
+     promoted to [Dropped] and [last_review_at] stayed null indefinitely
+     (4 goals stale for 4 days observed on 2026-04-25).  Spawn a
+     periodic sweep fiber on a 1-hour cadence so the existing
+     [stagnant_days] / [dropped_ttl_days] thresholds actually fire.
+     [enabled ()] is true by default; flipping it to false leaves the
+     dashboard DELETE path as the only caller (pre-fix behaviour). *)
+  fork_subsystem "goal_janitor" (fun () ->
+    if not (Env_config_runtime.Goal_janitor.enabled ()) then
+      Log.Server.info "goal_janitor: disabled via MASC_GOAL_JANITOR_ENABLED=false"
+    else begin
+      let interval = Env_config_runtime.Goal_janitor.interval_seconds in
+      let rec loop () =
+        Eio.Time.sleep clock interval;
+        (try
+           let _result = Goal_janitor.run state.room_config in
+           ()
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
+           Log.Server.warn "goal_janitor: sweep failed: %s"
+             (Printexc.to_string exn));
+        loop ()
+      in
+      loop ()
+    end);
   (* Auto-boot keepers from keeper meta and start keepalive loops.
      Retries unbooted keepers up to [max_retries] times so transient
      failures (model resolution, discovery timing) don't permanently

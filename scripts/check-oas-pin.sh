@@ -310,9 +310,10 @@ if [[ -x "${SCRIPT_DIR}/oas-drift-check.sh" ]]; then
     drift_exit=$?
     if [[ "${drift_exit}" -eq 2 ]]; then
       # Count delta entries across all sections for a one-line summary.
+      metadata_n="$(printf '%s\n' "${drift_output}" | grep -c '^      ~ ' || true)"
       added_n="$(printf '%s\n' "${drift_output}" | grep -c '^      + ' || true)"
       removed_n="$(printf '%s\n' "${drift_output}" | grep -c '^      - ' || true)"
-      echo "OAS API surface: ⚠ drift (added ${added_n}, removed ${removed_n}) — run 'make doctor-oas-drift' for detail"
+      echo "OAS API surface: ⚠ drift (metadata ${metadata_n}, added ${added_n}, removed ${removed_n}) — run 'make doctor-oas-drift' for detail"
     else
       echo "OAS API surface: (could not compute — ${drift_exit}; run 'bash scripts/oas-drift-check.sh' for detail)"
     fi

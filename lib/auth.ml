@@ -720,13 +720,36 @@ let is_protocol_canonical_tool_name tool_name =
   || String.starts_with ~prefix:"experiment." tool_name
   || String.starts_with ~prefix:"client." tool_name
 
+(* #10183: keeper-bound runtime tools ([keeper_shell], [keeper_bash],
+   [keeper_task_claim], …) are not [masc_*] but ARE first-class
+   internal tools dispatched by every keeper.  When
+   [permission_for_tool] does not have an entry for them, the
+   strict-mode gate below treats them as foreign and rejects with
+   [Forbidden "unknown non-masc tool"].  Production audit
+   (2026-04-25) caught the analyst keeper hitting this path 116
+   times — keeper_shell x22, keeper_bash x10, keeper_task_claim
+   x10, etc. — across 12+ tools.  The 13 other keepers were
+   unaffected because their token resolves through a credential
+   path whose tools [permission_for_tool] already maps; analyst's
+   token took the codex_cli path and fell through to the
+   unmapped branch.
+
+   Until that token-routing regression
+   (#9786 / #10183 Option D) is addressed, broaden the prefix
+   gate so [keeper_*] tools survive the auth boundary regardless
+   of which credential path resolved them. *)
+let is_keeper_runtime_tool_name tool_name =
+  String.starts_with ~prefix:"keeper_" tool_name
+
 (** Check permission for a tool call *)
 let authorize_tool config ~agent_name ~token ~tool_name : (unit, masc_error) result =
   match permission_for_tool tool_name with
   | None ->
       if not (is_tool_auth_strict_enabled ()) then
         Ok ()  (* Legacy fail-open *)
-      else if is_masc_tool_name tool_name || is_protocol_canonical_tool_name tool_name then
+      else if is_masc_tool_name tool_name
+              || is_protocol_canonical_tool_name tool_name
+              || is_keeper_runtime_tool_name tool_name then
         (* Conservative default in strict mode for unmapped internal tools. *)
         check_permission config ~agent_name ~token ~permission:CanBroadcast
       else
@@ -780,7 +803,8 @@ let authorize_tool_for_role ~agent_name ~role ~tool_name :
     | Some _ -> Ok ()  (* Mapped tool — policy already checked *)
     | None ->
         if is_masc_tool_name tool_name
-           || is_protocol_canonical_tool_name tool_name then
+           || is_protocol_canonical_tool_name tool_name
+           || is_keeper_runtime_tool_name tool_name then
           (* Unmapped internal tool: require at least Worker *)
           if has_permission role CanBroadcast then Ok ()
           else Error (Forbidden { agent = agent_name; action = tool_name })

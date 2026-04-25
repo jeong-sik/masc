@@ -1099,3 +1099,43 @@
   .ix-commit-row .branch, .ix-commit-row .diff { display:none; }
   .ix-find, .ix-search-bar, .ix-tree-filter { grid-template-columns:1fr 1fr; }
 }
+
+/* ─────────── a11y · focus indicators (Phase 3.5) ───────────
+   :focus-visible draws a 2px brass ring on keyboard focus only.
+   Mouse clicks suppress the ring. Token --color-focus-ring is
+   reused by every Ix* interactive surface. */
+:root {
+  --color-focus-ring: var(--brass-1);
+}
+.ix-tree button:focus-visible,
+.ix-tree input:focus-visible,
+.ix-tree [role="treeitem"]:focus-visible,
+.ix-edit button:focus-visible,
+.ix-edit input:focus-visible,
+.ix-edit [role="radio"]:focus-visible,
+.ix-pr button:focus-visible,
+.ix-pr input:focus-visible,
+.ix-pr [role="treeitem"]:focus-visible,
+.ix-graph button:focus-visible,
+.ix-graph [role="listitem"]:focus-visible,
+.ix-term:focus-visible,
+.ix-search button:focus-visible,
+.ix-search input:focus-visible {
+  outline:2px solid var(--color-focus-ring);
+  outline-offset:1px;
+  z-index:1;
+}
+
+/* Active state for buttons that act as tabs/radios — ARIA-driven, not class-driven. */
+.ix-tree-tabs button[aria-selected="true"],
+.ix-edit-merge .ix-merge-actions button[aria-pressed="true"],
+.ix-pr-files .ix-sort button[aria-pressed="true"],
+.ix-graph-filters button[aria-pressed="true"] {
+  color:var(--brass-1); border-color:var(--brass-3); background:rgb(var(--brass-glow)/.08);
+}
+
+/* Visually-hidden caption for SVGs and icon-only labels. */
+.ix-sr-only {
+  position:absolute; width:1px; height:1px; padding:0; margin:-1px;
+  overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0;
+}

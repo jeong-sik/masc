@@ -175,9 +175,9 @@ function P3KeeperDots({ ids, compact }) {
 function P3CodeLine({ line, activeKeeper, reviewLine }) {
   const k = p3Keeper(line.keeper);
   return (
-    <div className={`ix-edit-line ${activeKeeper === line.keeper ? "spot" : ""} ${reviewLine === line.n ? "review-hot" : ""}`}>
-      <span className="ix-edit-attrib" style={{ borderColor: k.color, color: k.color }}>{k.initials}</span>
-      <span className="ix-edit-num">{line.n}</span>
+    <div role="listitem" aria-label={`Line ${line.n}, last touched by ${k.id} ${line.age} ago`} className={`ix-edit-line ${activeKeeper === line.keeper ? "spot" : ""} ${reviewLine === line.n ? "review-hot" : ""}`}>
+      <span className="ix-edit-attrib" aria-hidden="true" style={{ borderColor: k.color, color: k.color }}>{k.initials}</span>
+      <span className="ix-edit-num" aria-hidden="true">{line.n}</span>
       <span className="ix-edit-src">
         {line.tokens.map((part, i) => <span key={i} className={part[0]}>{part[1]}</span>)}
       </span>
@@ -194,19 +194,19 @@ function IxTreeAllowed({ branch = "main", keepers }) {
   const selected = p3KeeperIds(keepers);
   const rows = P3J.files.filter(f => !focus || f.owners.includes(focus));
   return (
-    <div className="ix-tree">
+    <div className="ix-tree" role="region" aria-label="File tree with allowed_paths overlay">
       <P3Header title="E1-A · allowed_paths overlay" meta={`${branch} · ${selected.length} keeper scope`} right="hover keeper chip to spotlight" />
-      <div className="ix-tree-keepers" onMouseLeave={() => setFocus(null)}>
+      <div className="ix-tree-keepers" role="toolbar" aria-label="Spotlight keeper" onMouseLeave={() => setFocus(null)}>
         {P3J.keepers.map(k => (
-          <button key={k.id} onMouseEnter={() => setFocus(k.id)} className={focus === k.id ? "on" : ""}>
-            <span style={{ background: k.color }} />{k.id}
+          <button key={k.id} type="button" onMouseEnter={() => setFocus(k.id)} onFocus={() => setFocus(k.id)} aria-pressed={focus === k.id} className={focus === k.id ? "on" : ""}>
+            <span aria-hidden="true" style={{ background: k.color }} />{k.id}
           </button>
         ))}
       </div>
-      <div className="ix-tree-list">
+      <div className="ix-tree-list" role="tree" aria-label={`${rows.length} files, owned by ${selected.length} keepers`}>
         {rows.map(file => (
-          <div key={file.path} className={`ix-tree-row ${file.status} ${focus && !file.owners.includes(focus) ? "dim" : ""}`}>
-            <span className="ix-tree-icon">{file.path.includes("/") ? "▸" : "·"}</span>
+          <div key={file.path} role="treeitem" aria-level="1" aria-label={`${file.path}, ${file.status}, +${file.adds} −${file.dels}`} tabIndex={-1} className={`ix-tree-row ${file.status} ${focus && !file.owners.includes(focus) ? "dim" : ""}`}>
+            <span className="ix-tree-icon" aria-hidden="true">{file.path.includes("/") ? "▸" : "·"}</span>
             <span className="ix-tree-path">{file.path}</span>
             <P3KeeperDots ids={file.owners} />
             <span className="ix-tree-diff">+{file.adds} −{file.dels}</span>
@@ -230,19 +230,21 @@ function IxTreeFilter({ branch = "main", keepers }) {
     return qOk && extOk && recentOk && keeperOk;
   });
   return (
-    <div className="ix-tree">
+    <div className="ix-tree" role="region" aria-label="File tree with live filters">
       <P3Header title="E1-B · filter bar" meta={`${branch} · live path/ext/keeper filters`} right={`${rows.length} visible`} />
-      <div className="ix-tree-filter">
-        <input value={q} onChange={e => setQ(e.target.value)} placeholder="path glob / search" />
-        {["all", ".ml", ".tsx", ".ts", ".md"].map(x => (
-          <button key={x} className={ext === x ? "on" : ""} onClick={() => setExt(x)}>{x}</button>
-        ))}
-        <button className={recent ? "on" : ""} onClick={() => setRecent(v => !v)}>recent</button>
+      <div className="ix-tree-filter" role="search">
+        <input value={q} onChange={e => setQ(e.target.value)} placeholder="path glob / search" aria-label="Filter file paths" />
+        <span role="radiogroup" aria-label="File extension filter" style={{display:"contents"}}>
+          {["all", ".ml", ".tsx", ".ts", ".md"].map(x => (
+            <button key={x} type="button" role="radio" aria-checked={ext === x} className={ext === x ? "on" : ""} onClick={() => setExt(x)}>{x}</button>
+          ))}
+        </span>
+        <button type="button" aria-pressed={recent} className={recent ? "on" : ""} onClick={() => setRecent(v => !v)}>recent</button>
       </div>
-      <div className="ix-tree-list">
+      <div className="ix-tree-list" role="tree" aria-label={`${rows.length} files match filters`}>
         {rows.map(file => (
-          <div key={file.path} className={`ix-tree-row ${file.status}`}>
-            <span className="ix-tree-icon">{file.ext}</span>
+          <div key={file.path} role="treeitem" aria-level="1" aria-label={`${file.path}, touched ${file.touched}`} tabIndex={-1} className={`ix-tree-row ${file.status}`}>
+            <span className="ix-tree-icon" aria-hidden="true">{file.ext}</span>
             <span className="ix-tree-path">{file.path}</span>
             <P3KeeperDots ids={file.owners} />
             <span className="ix-tree-age">{file.touched}</span>
@@ -261,16 +263,19 @@ function IxTreeTabs({ branch = "main" }) {
     changed: P3J.files.filter(f => f.status !== "unchanged"),
     search: P3J.files.filter(f => f.path.includes("fsm") || f.path.includes("keeper")),
   }[tab];
+  const panelId = `ix-tree-tabs-panel-${tab}`;
   return (
-    <div className="ix-tree">
+    <div className="ix-tree" role="region" aria-label="File memory tabs (recent / pinned / changed / search)">
       <P3Header title="E1-C · recent / pinned / changed / search" meta={`${branch} · file memory`} right={`${rows.length} rows`} />
-      <div className="ix-tree-tabs">
-        {["recent", "pinned", "changed", "search"].map(t => <button key={t} className={tab === t ? "on" : ""} onClick={() => setTab(t)}>{t}</button>)}
+      <div className="ix-tree-tabs" role="tablist" aria-label="File memory category">
+        {["recent", "pinned", "changed", "search"].map(t => (
+          <button key={t} type="button" role="tab" id={`ix-tree-tabs-tab-${t}`} aria-selected={tab === t} aria-controls={`ix-tree-tabs-panel-${t}`} tabIndex={tab === t ? 0 : -1} className={tab === t ? "on" : ""} onClick={() => setTab(t)}>{t}</button>
+        ))}
       </div>
-      <div className="ix-tree-list">
+      <div className="ix-tree-list" role="tabpanel" id={panelId} aria-labelledby={`ix-tree-tabs-tab-${tab}`}>
         {rows.map(file => (
-          <div key={file.path} className={`ix-tree-row ${file.status}`}>
-            <span className="ix-tree-icon">{file.pinned ? "◆" : "·"}</span>
+          <div key={file.path} role="treeitem" aria-level="1" aria-label={`${file.path}, ${file.status}, touched ${file.touched}`} tabIndex={-1} className={`ix-tree-row ${file.status}`}>
+            <span className="ix-tree-icon" aria-hidden="true">{file.pinned ? "◆" : "·"}</span>
             <span className="ix-tree-path">{file.path}</span>
             <span className={`ix-tree-status ${file.status}`}>{file.status}</span>
             <span className="ix-tree-age">{file.touched}</span>
@@ -292,19 +297,19 @@ function IxTreeDiff({ branch = "main", keepers }) {
     dirs[dir].n += 1;
   });
   return (
-    <div className="ix-tree">
+    <div className="ix-tree" role="region" aria-label="Diff annotated file tree">
       <P3Header title="E1-D · diff annotated tree" meta={`${branch} · ${selected.length} keepers`} right="+/- rolled up by directory" />
-      <div className="ix-tree-list">
+      <div className="ix-tree-list" role="tree" aria-label={`${P3J.files.length} files across ${Object.keys(dirs).length} directories`}>
         {Object.entries(dirs).map(([dir, d]) => (
-          <div key={dir} className="ix-tree-row dir">
-            <span className="ix-tree-icon">▾</span>
+          <div key={dir} role="treeitem" aria-level="1" aria-expanded="true" aria-label={`Directory ${dir}, ${d.n} files, +${d.adds} −${d.dels}`} tabIndex={-1} className="ix-tree-row dir">
+            <span className="ix-tree-icon" aria-hidden="true">▾</span>
             <span className="ix-tree-path">{dir}/ <span className="muted">{d.n} files</span></span>
             <span className="ix-tree-diff">+{d.adds} −{d.dels}</span>
           </div>
         ))}
         {P3J.files.map(file => (
-          <div key={file.path} className={`ix-tree-row ${file.status}`}>
-            <span className="ix-tree-icon">·</span>
+          <div key={file.path} role="treeitem" aria-level="2" aria-label={`${file.path}, ${file.status}, +${file.adds} −${file.dels}`} tabIndex={-1} className={`ix-tree-row ${file.status}`}>
+            <span className="ix-tree-icon" aria-hidden="true">·</span>
             <span className="ix-tree-path">{file.path}</span>
             <span className={`ix-tree-status ${file.status}`}>{file.status}</span>
             <span className="ix-tree-diff">+{file.adds} −{file.dels}</span>
@@ -323,12 +328,16 @@ function IxEditAttrib({ branch = "main", keepers }) {
   const [active, setActive] = useState(null);
   const selected = p3KeeperIds(keepers);
   return (
-    <div className="ix-edit">
+    <div className="ix-edit" role="region" aria-label="Editor with keeper attribution gutter">
       <P3Header title="E2-A · attribution gutter" meta={`${branch} · ${selected.length} keeper scope`} right={active || "hover a keeper"} />
-      <div className="ix-edit-keepers" onMouseLeave={() => setActive(null)}>
-        {P3J.keepers.map(k => <button key={k.id} onMouseEnter={() => setActive(k.id)} className={active === k.id ? "on" : ""}><span style={{ background: k.color }} />{k.id}</button>)}
+      <div className="ix-edit-keepers" role="toolbar" aria-label="Spotlight keeper" onMouseLeave={() => setActive(null)}>
+        {P3J.keepers.map(k => (
+          <button key={k.id} type="button" onMouseEnter={() => setActive(k.id)} onFocus={() => setActive(k.id)} aria-pressed={active === k.id} className={active === k.id ? "on" : ""}>
+            <span aria-hidden="true" style={{ background: k.color }} />{k.id}
+          </button>
+        ))}
       </div>
-      <div className="ix-edit-code">
+      <div className="ix-edit-code" role="list" aria-label={`${P3J.editorLines.length} editor lines`}>
         {P3J.editorLines.map(line => <P3CodeLine key={line.n} line={line} activeKeeper={active} />)}
       </div>
     </div>
@@ -346,21 +355,21 @@ function IxEditSplit({ branch = "main" }) {
     if (src && dst) dst.scrollTop = src.scrollTop;
   };
   return (
-    <div className="ix-edit ix-edit-split">
-      <P3Header title="E2-B · split 2-pane" meta={`${branch} · prod vs feature`} right={<button onClick={() => setSync(v => !v)}>{sync ? "sync scroll on" : "sync scroll off"}</button>} />
+    <div className="ix-edit ix-edit-split" role="region" aria-label="Two-pane split editor">
+      <P3Header title="E2-B · split 2-pane" meta={`${branch} · prod vs feature`} right={<button type="button" aria-pressed={sync} onClick={() => setSync(v => !v)}>{sync ? "sync scroll on" : "sync scroll off"}</button>} />
       <div className="ix-edit-split-grid">
-        <div className="ix-edit-pane">
+        <div className="ix-edit-pane" role="region" aria-label="Left pane: main · dashboard_fleet_fsm.ml">
           <div className="ix-edit-bc">main · dashboard_fleet_fsm.ml</div>
-          <div ref={leftRef} onScroll={() => onScroll("left")} className="ix-edit-scroll">
+          <div ref={leftRef} onScroll={() => onScroll("left")} className="ix-edit-scroll" role="list" aria-label="Left pane lines">
             {P3J.editorLines.slice(0, 8).map(line => <P3CodeLine key={line.n} line={line} />)}
           </div>
         </div>
-        <div className="ix-edit-pane">
+        <div className="ix-edit-pane" role="region" aria-label="Right pane: feature · FleetFSMPanel.tsx">
           <div className="ix-edit-bc">feature · FleetFSMPanel.tsx</div>
-          <div ref={rightRef} onScroll={() => onScroll("right")} className="ix-edit-scroll">
+          <div ref={rightRef} onScroll={() => onScroll("right")} className="ix-edit-scroll" role="list" aria-label="Right pane lines">
             {P3J.splitLines.concat(P3J.splitLines).map((line, i) => (
-              <div key={`${line.n}-${i}`} className="ix-edit-line">
-                <span className="ix-edit-num">{line.n + i}</span>
+              <div key={`${line.n}-${i}`} role="listitem" className="ix-edit-line">
+                <span className="ix-edit-num" aria-hidden="true">{line.n + i}</span>
                 <span className="ix-edit-src">{line.text}</span>
               </div>
             ))}
@@ -376,23 +385,25 @@ function IxEditMerge({ branch = "main" }) {
   const pick = (id, v) => setChoice(prev => ({ ...prev, [id]: v }));
   const resolved = Object.values(choice).filter(Boolean).length;
   return (
-    <div className="ix-edit ix-edit-merge">
+    <div className="ix-edit ix-edit-merge" role="region" aria-label={`3-way merge resolver, ${resolved} of ${P3J.mergeHunks.length} hunks resolved`}>
       <P3Header title="E2-C · 3-way merge resolver" meta={`${branch} · ${resolved}/${P3J.mergeHunks.length} resolved`} right="base · ours · theirs · result" />
-      <div className="ix-merge-grid ix-merge-hdr"><span>base</span><span>ours</span><span>theirs</span><span>result</span></div>
-      {P3J.mergeHunks.map(h => (
-        <div key={h.id} className="ix-merge-block">
-          <div className="ix-merge-file">{h.file}:{h.line}</div>
-          <div className="ix-merge-grid">
-            <pre>{h.base}</pre>
-            <pre>{h.ours}</pre>
-            <pre>{h.theirs}</pre>
-            <pre className="result">{choice[h.id] === "ours" ? h.ours : choice[h.id] === "theirs" ? h.theirs : `${h.ours}\n${h.theirs}`}</pre>
+      <div className="ix-merge-grid ix-merge-hdr" role="presentation"><span>base</span><span>ours</span><span>theirs</span><span>result</span></div>
+      <div role="list" aria-label="Merge hunks">
+        {P3J.mergeHunks.map(h => (
+          <div key={h.id} role="listitem" aria-label={`Hunk ${h.file}:${h.line}, resolved as ${choice[h.id]}`} className="ix-merge-block">
+            <div className="ix-merge-file">{h.file}:{h.line}</div>
+            <div className="ix-merge-grid">
+              <pre>{h.base}</pre>
+              <pre>{h.ours}</pre>
+              <pre>{h.theirs}</pre>
+              <pre className="result">{choice[h.id] === "ours" ? h.ours : choice[h.id] === "theirs" ? h.theirs : `${h.ours}\n${h.theirs}`}</pre>
+            </div>
+            <div className="ix-merge-actions" role="radiogroup" aria-label={`Resolution for ${h.file}:${h.line}`}>
+              {["ours", "theirs", "manual"].map(v => <button key={v} type="button" role="radio" aria-checked={choice[h.id] === v} className={choice[h.id] === v ? "on" : ""} onClick={() => pick(h.id, v)}>{v}</button>)}
+            </div>
           </div>
-          <div className="ix-merge-actions">
-            {["ours", "theirs", "manual"].map(v => <button key={v} className={choice[h.id] === v ? "on" : ""} onClick={() => pick(h.id, v)}>{v}</button>)}
-          </div>
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   );
 }
@@ -400,18 +411,18 @@ function IxEditMerge({ branch = "main" }) {
 function IxEditReview({ branch = "main" }) {
   const [hot, setHot] = useState(null);
   return (
-    <div className="ix-edit ix-edit-review">
+    <div className="ix-edit ix-edit-review" role="region" aria-label="Inline code review">
       <P3Header title="E2-D · inline review" meta={`${branch} · ${P3J.reviewThreads.length} threads`} right="line-pinned comments" />
       <div className="ix-review-grid">
-        <div className="ix-edit-code">
+        <div className="ix-edit-code" role="list" aria-label="Editor lines under review">
           {P3J.editorLines.map(line => <P3CodeLine key={line.n} line={line} reviewLine={hot} />)}
         </div>
-        <div className="ix-review-side">
+        <div className="ix-review-side" role="list" aria-label={`${P3J.reviewThreads.length} review threads`}>
           {P3J.reviewThreads.map(t => (
-            <div key={t.id} className={`ix-review-thread ${t.verdict}`} onMouseEnter={() => setHot(t.line)} onMouseLeave={() => setHot(null)}>
+            <div key={t.id} role="listitem" tabIndex={0} aria-label={`Review on line ${t.line} by ${t.keeper}, verdict ${t.verdict}, ${t.replies} replies`} className={`ix-review-thread ${t.verdict}`} onMouseEnter={() => setHot(t.line)} onMouseLeave={() => setHot(null)} onFocus={() => setHot(t.line)} onBlur={() => setHot(null)}>
               <div className="h"><span className="ln">L{t.line}</span><span className="who">@{t.keeper}</span><span className={`chip is-${t.verdict === "approve" ? "ok" : t.verdict === "flag" ? "warn" : "idle"}`}>{t.verdict}</span></div>
               <div className="body">{t.body}</div>
-              <div className="ft">↩ {t.replies} replies · resolve</div>
+              <div className="ft" aria-hidden="true">↩ {t.replies} replies · resolve</div>
             </div>
           ))}
         </div>
@@ -422,15 +433,15 @@ function IxEditReview({ branch = "main" }) {
 
 function IxEditBlame({ branch = "main" }) {
   return (
-    <div className="ix-edit ix-edit-blame">
+    <div className="ix-edit ix-edit-blame" role="region" aria-label="Blame gutter editor">
       <P3Header title="E2-E · blame gutter" meta={`${branch} · hash · keeper · age`} right="hover rows for commit metadata" />
-      <div className="ix-edit-code">
+      <div className="ix-edit-code" role="list" aria-label={`${P3J.editorLines.length} lines with blame metadata`}>
         {P3J.editorLines.map(line => {
           const k = p3Keeper(line.keeper);
           return (
-            <div key={line.n} className={`ix-edit-line age-${line.age.endsWith("m") ? "fresh" : "old"}`} title={`${line.hash} · ${line.keeper} · ${line.age} · ${line.text}`}>
-              <span className="ix-blame-cell"><b>{line.hash}</b><i style={{ color: k.color }}>{k.initials}</i><em>{line.age}</em></span>
-              <span className="ix-edit-num">{line.n}</span>
+            <div key={line.n} role="listitem" aria-label={`Line ${line.n}, commit ${line.hash} by ${line.keeper} ${line.age} ago`} className={`ix-edit-line age-${line.age.endsWith("m") ? "fresh" : "old"}`} title={`${line.hash} · ${line.keeper} · ${line.age} · ${line.text}`}>
+              <span className="ix-blame-cell" aria-hidden="true"><b>{line.hash}</b><i style={{ color: k.color }}>{k.initials}</i><em>{line.age}</em></span>
+              <span className="ix-edit-num" aria-hidden="true">{line.n}</span>
               <span className="ix-edit-src">{line.tokens.map((part, i) => <span key={i} className={part[0]}>{part[1]}</span>)}</span>
             </div>
           );

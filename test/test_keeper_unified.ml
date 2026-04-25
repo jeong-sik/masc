@@ -3127,6 +3127,25 @@ let wrapped_claude_limit_error () =
          kind = Llm_provider.Http_client.Unknown;
        })
 
+let wrapped_claude_max_turns_message =
+  "claude exited with code 1: {\"type\":\"result\",\"subtype\":\"error_max_turns\",\"is_error\":true,\"stop_reason\":\"tool_use\",\"terminal_reason\":\"max_turns\",\"errors\":[\"Reached maximum number of turns (10)\"]}"
+
+let wrapped_claude_max_turns_error () =
+  Agent_sdk.Error.Api
+    (NetworkError
+       {
+         message = wrapped_claude_max_turns_message;
+         kind = Llm_provider.Http_client.Unknown;
+       })
+
+let wrapped_cascade_max_turns_error () =
+  Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
+    (Masc_mcp.Oas_worker_named.Cascade_exhausted
+       {
+         cascade_name = Masc_mcp.Keeper_config.default_cascade_name;
+         reason = Keeper_types.Other_detail wrapped_claude_max_turns_message;
+       })
+
 let required_tool_contract_violation_error () =
   Agent_sdk.Error.Agent
     (CompletionContractViolation
@@ -3212,6 +3231,16 @@ let test_degraded_retry_after_recoverable_error_includes_oas_timeout_budget () =
   in
   expect_degraded_retry "oas timeout budget degraded retry"
     KC.local_recovery_cascade_name "oas_timeout_budget" degraded_retry
+
+let test_degraded_retry_after_recoverable_error_includes_max_turns () =
+  let degraded_retry =
+    EC.degraded_retry_after_recoverable_error
+      ~effective_cascade:"underdog"
+      ~tool_requirement:"optional"
+      (wrapped_cascade_max_turns_error ())
+  in
+  expect_degraded_retry "max turns degraded retry"
+    KC.local_recovery_cascade_name "max_turns" degraded_retry
 
 let test_degraded_retry_after_recoverable_error_blocks_required_tools () =
   let degraded_retry =
@@ -4121,6 +4150,10 @@ let test_auto_recoverable_turn_error_includes_wrapped_hard_quota () =
   check bool "wrapped hard quota is auto-recoverable" true
     (EC.is_auto_recoverable_turn_error err)
 
+let test_auto_recoverable_turn_error_includes_wrapped_max_turns () =
+  check bool "wrapped CLI max-turns is auto-recoverable" true
+    (EC.is_auto_recoverable_turn_error (wrapped_claude_max_turns_error ()))
+
 let test_required_tool_contract_violation_detected () =
   let err =
     Agent_sdk.Error.Agent
@@ -4196,6 +4229,10 @@ let test_auto_recoverable_turn_error_includes_wrapped_cascade_exhausted_hard_quo
   in
   check bool "wrapped cascade hard quota is auto-recoverable" true
     (EC.is_auto_recoverable_turn_error err)
+
+let test_auto_recoverable_turn_error_includes_wrapped_cascade_max_turns () =
+  check bool "wrapped cascade max-turns is auto-recoverable" true
+    (EC.is_auto_recoverable_turn_error (wrapped_cascade_max_turns_error ()))
 
 let test_auto_recoverable_turn_error_includes_filtered_candidates_cascade_exhaustion () =
   let err =
@@ -6093,6 +6130,8 @@ let () =
             test_auto_recoverable_turn_error_includes_server_parse_rejection;
           test_case "auto-recoverable includes wrapped hard quota" `Quick
             test_auto_recoverable_turn_error_includes_wrapped_hard_quota;
+          test_case "auto-recoverable includes wrapped CLI max turns" `Quick
+            test_auto_recoverable_turn_error_includes_wrapped_max_turns;
           test_case "required tool contract violation detected from structured error" `Quick
             test_required_tool_contract_violation_detected;
           test_case "legacy internal contract violation is ignored" `Quick
@@ -6107,6 +6146,8 @@ let () =
             test_auto_recoverable_turn_error_excludes_persistent_errors;
           test_case "auto-recoverable includes wrapped cascade hard quota" `Quick
             test_auto_recoverable_turn_error_includes_wrapped_cascade_exhausted_hard_quota;
+          test_case "auto-recoverable includes wrapped cascade max turns" `Quick
+            test_auto_recoverable_turn_error_includes_wrapped_cascade_max_turns;
           test_case "auto-recoverable includes filtered candidates cascade exhaustion" `Quick
             test_auto_recoverable_turn_error_includes_filtered_candidates_cascade_exhaustion;
           test_case "auto-recoverable includes resumable CLI session error" `Quick
@@ -6206,6 +6247,8 @@ let () =
             test_degraded_retry_after_recoverable_error_includes_turn_timeout;
           test_case "OAS timeout budget is degraded-retry eligible" `Quick
             test_degraded_retry_after_recoverable_error_includes_oas_timeout_budget;
+          test_case "max turns is degraded-retry eligible" `Quick
+            test_degraded_retry_after_recoverable_error_includes_max_turns;
           test_case "required tool turns block degraded retry" `Quick
             test_degraded_retry_after_recoverable_error_blocks_required_tools;
           test_case "local_only stays terminal for degraded retry" `Quick

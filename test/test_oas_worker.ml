@@ -695,6 +695,21 @@ let test_sdk_error_is_hard_quota_detects_claude_org_monthly_limit_wrapper () =
   Alcotest.(check bool) "Claude org monthly usage limit counts as hard quota" true
     (Oas_worker_named.sdk_error_is_hard_quota err)
 
+let test_sdk_error_is_max_turns_detects_claude_cli_wrapper () =
+  let err =
+    Oas.Error.Api
+      (Llm_provider.Retry.NetworkError
+         {
+           message =
+             "claude exited with code 1: {\"type\":\"result\",\"subtype\":\"error_max_turns\",\"is_error\":true,\"terminal_reason\":\"max_turns\",\"errors\":[\"Reached maximum number of turns (10)\"]}";
+           kind = Llm_provider.Http_client.Unknown;
+         })
+  in
+  Alcotest.(check bool) "Claude CLI max turns counts as max-turns" true
+    (Oas_worker_named.sdk_error_is_max_turns_exceeded err);
+  Alcotest.(check bool) "Claude CLI max turns is not hard quota" false
+    (Oas_worker_named.sdk_error_is_hard_quota err)
+
 let test_sdk_error_is_hard_quota_keeps_transient_network_errors_false () =
   let err =
     Oas.Error.Api
@@ -3550,6 +3565,8 @@ let () =
         test_sdk_error_is_hard_quota_detects_claude_cli_limit_wrapper;
       Alcotest.test_case "sdk_error_is_hard_quota detects Claude org monthly limit wrapper" `Quick
         test_sdk_error_is_hard_quota_detects_claude_org_monthly_limit_wrapper;
+      Alcotest.test_case "sdk_error_is_max_turns detects Claude CLI wrapper" `Quick
+        test_sdk_error_is_max_turns_detects_claude_cli_wrapper;
       Alcotest.test_case "sdk_error_is_hard_quota keeps transient network errors false" `Quick
         test_sdk_error_is_hard_quota_keeps_transient_network_errors_false;
       Alcotest.test_case "sdk_error_is_hard_quota preserves RateLimited detection" `Quick

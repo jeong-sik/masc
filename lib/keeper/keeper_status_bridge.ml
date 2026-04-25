@@ -164,6 +164,13 @@ let blocker_class_of_string (reason : string) : blocker_class option =
         String_util.contains_substring_ci trimmed "no providers available"
       then
         No_providers_available
+      else if
+        String_util.contains_substring_ci trimmed "error_max_turns"
+        || String_util.contains_substring_ci trimmed
+             "reached maximum number of turns"
+        || String_util.contains_substring_ci trimmed "max turns exceeded"
+      then
+        Max_turns_exceeded
       else if String_util.contains_substring_ci trimmed "all providers failed"
       then
         All_providers_failed

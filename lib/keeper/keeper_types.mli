@@ -105,6 +105,7 @@ type cascade_exhaustion_reason =
   | No_providers_available
   | All_providers_failed
   | Candidates_filtered_after_cycles
+  | Max_turns_exceeded
   | Other_detail of string
 
 type blocker_class =

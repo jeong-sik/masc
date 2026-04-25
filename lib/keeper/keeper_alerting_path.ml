@@ -375,18 +375,24 @@ let resolve_keeper_read_path ~(config : Coord.config)
         (match maybe_resolve_missing_relative_read_path ~roots:search_roots ~raw_path:raw with
          | Ok (Some resolved) -> Ok resolved
          | Ok None ->
+             (* #10349: keep the rejection signal in the
+                Prometheus counter; do NOT echo the resolved
+                roots back to the LLM.  When keeper identity
+                drifts (turn 433 evidence), the roots can
+                belong to a sibling sandbox, leaking its
+                directory layout to the wrong keeper. *)
+             Prometheus.inc_counter Prometheus.metric_keeper_path_rejection
+               ~labels:[ ("kind", "not_found_relative") ] ();
              Error
-               (Printf.sprintf
-                  "path_not_found_under_allowed_roots: %s (roots=[%s])"
-                  raw (String.concat ", " search_roots))
+               (Printf.sprintf "path_not_found_under_allowed_roots: %s" raw)
          | Error e -> Error e)
-      else
+      else begin
+        Prometheus.inc_counter Prometheus.metric_keeper_path_rejection
+          ~labels:[ ("kind", "out_of_roots") ] ();
         Error
-          (Printf.sprintf
-             "path_not_found_under_allowed_roots: %s (roots=[%s])"
-             target_norm
-             (String.concat ", "
-                (if allowed_norms = [] then [root_norm] else allowed_norms)))
+          (Printf.sprintf "path_not_found_under_allowed_roots: %s"
+             target_norm)
+      end
 
 let process_status_to_json (st : Unix.process_status) : Yojson.Safe.t =
   let sem = Masc_exec.Exit_code.of_process_status st in

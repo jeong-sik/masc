@@ -109,7 +109,6 @@ function KanbanCard({ task }: { task: Task }) {
           ${scope ? html`<span class="rounded border border-card-border/70 bg-white/5 px-2 py-0.5 text-2xs font-medium text-text-body">${scope}</span>` : null}
         </div>
         <button type="button"
-          type="button"
           class="rounded border border-[var(--bad-30)] bg-[var(--bad-10)] px-2 py-1 text-3xs font-semibold text-[var(--bad-light)] transition-colors hover:bg-[rgba(239,68,68,0.16)] disabled:opacity-50 disabled:cursor-not-allowed"
           onClick=${handleDelete}
           disabled=${isDeleting}
@@ -119,7 +118,6 @@ function KanbanCard({ task }: { task: Task }) {
       </div>
 
       <button type="button"
-        type="button"
         class="text-left text-base font-semibold leading-snug text-text-strong whitespace-pre-wrap break-words cursor-pointer bg-transparent border-none p-0 font-[inherit] transition-colors hover:text-accent"
         onClick=${() => openTaskDetail(task)}
       >${task.title}</button>
@@ -131,7 +129,6 @@ function KanbanCard({ task }: { task: Task }) {
           </div>
           ${canExpand ? html`
             <button type="button"
-              type="button"
               class="w-fit rounded border border-card-border/70 bg-white/4 px-2 py-1 text-2xs text-text-muted transition-colors hover:text-text-strong"
               onClick=${() => toggleTaskExpand(task.id)}
             >
@@ -287,7 +284,6 @@ export function TaskBacklog() {
         </div>
         ${hasSearch ? html`
           <button type="button"
-            type="button"
             class="rounded border border-card-border/70 bg-white/4 px-3 py-2 text-xs text-text-muted transition-colors hover:border-accent/35 hover:text-text-strong"
             onClick=${() => {
               resetTaskSearch()
@@ -339,7 +335,6 @@ export function TaskBacklog() {
             : visibleDone.map(t => html`<${KanbanCard} key=${t.id} task=${t} />`)}
           ${hasMoreDone ? html`
             <button type="button"
-              type="button"
               class="w-full rounded border border-card-border/60 bg-white/3 px-3 py-2 text-xs font-medium text-text-muted transition-colors hover:border-accent/35 hover:text-text-strong"
               onClick=${() => {
                 if (hasSearch) searchDoneVisibleCount.value += DONE_PAGE_SIZE

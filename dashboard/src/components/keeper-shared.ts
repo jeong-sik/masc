@@ -185,7 +185,6 @@ export function KeeperDiagnosticSummary({
       <div class="mb-3 flex items-center justify-between gap-3">
         <div class="text-2xs font-semibold uppercase tracking-4 text-[var(--text-muted)]">명시적 상태 조회</div>
         <button type="button"
-          type="button"
           class="rounded border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-1.5 text-2xs text-[var(--text-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--text-body)]"
           disabled=${busy}
           onClick=${() => { void refreshStatus() }}
@@ -307,7 +306,6 @@ export function KeeperConversationPanel({
           </div>
           <div class="flex flex-wrap items-center gap-2">
             <button type="button"
-              type="button"
               class="rounded border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-1.5 text-2xs text-[var(--text-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--text-body)]"
               onClick=${toggleMetadata}
               aria-pressed=${showMetadata}
@@ -315,7 +313,6 @@ export function KeeperConversationPanel({
               ${showMetadata ? '메타데이터 숨김' : '메타데이터 표시'}
             </button>
             <button type="button"
-              type="button"
               class="rounded border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-1.5 text-2xs text-[var(--text-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--text-body)] ${showInternal ? 'border-[rgba(167,139,250,0.3)] text-[var(--purple)]' : ''}"
               onClick=${toggleInternal}
               aria-pressed=${showInternal}
@@ -325,7 +322,6 @@ export function KeeperConversationPanel({
             ${!historyExpanded
               ? html`
                   <button type="button"
-                    type="button"
                     class="rounded border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-1.5 text-2xs text-[var(--text-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--text-body)]"
                     disabled=${hydrating}
                     onClick=${() => { void expandHistory() }}

@@ -144,7 +144,6 @@ export function KeeperDetailMissingState({
         </p>
         <div class="mt-4">
           <button type="button"
-            type="button"
             aria-label="목록으로 돌아가기"
             class="inline-flex items-center gap-2 rounded-full border border-[var(--white-10)] bg-[var(--white-4)] px-4 py-2 text-sm font-medium text-[var(--text-strong)] transition-colors hover:bg-[var(--white-8)]"
             onClick=${onClose}
@@ -171,7 +170,6 @@ export function KeeperDetailHeaderInfo({
   return html`
     <div class="flex min-w-0 items-start gap-4">
       <button type="button"
-        type="button"
         aria-label="목록으로 돌아가기"
         onClick=${onClose}
         class="inline-flex shrink-0 items-center gap-2 rounded-full border border-[var(--white-10)] bg-[var(--white-4)] px-3.5 py-2 text-sm font-medium text-[var(--text-strong)] transition-colors hover:bg-[var(--white-8)]"
@@ -311,7 +309,6 @@ export function KeeperDetailOverviewSidebar({
           <div class="mt-3 flex flex-col gap-2">
             ${KEEPER_DETAIL_SECTIONS.map((section) => html`
               <button type="button"
-                type="button"
                 class="rounded-2xl border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-left transition-colors hover:bg-[var(--white-6)]"
                 aria-label=${`${section.label} 섹션으로 이동`}
                 onClick=${() => scrollToKeeperDetailSection(section.id)}

@@ -184,7 +184,6 @@ export function ToastContainer() {
           <span class="flex-1 text-sm text-[var(--text-body)] leading-[1.4]">${t.message}</span>
           ${t.action ? html`
             <button type="button"
-              type="button"
               class="shrink-0 text-2xs px-2 py-1 rounded border border-[var(--card-border)] bg-[var(--white-5)] text-[var(--accent)] hover:bg-[var(--white-10)] cursor-pointer transition-colors duration-150"
               onClick=${(e: Event) => {
                 e.stopPropagation()
@@ -196,7 +195,6 @@ export function ToastContainer() {
             </button>
           ` : null}
           <button type="button"
-            type="button"
             class="shrink-0 text-[var(--text-muted)] hover:text-[var(--text-body)] cursor-pointer p-1 rounded hover:bg-[var(--white-5)] transition-colors duration-150 flex items-center justify-center"
             aria-label="닫기"
             title="닫기"

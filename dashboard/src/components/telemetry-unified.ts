@@ -463,7 +463,6 @@ function EntryRow({ entry }: { entry: TelemetryEntry }) {
       style="content-visibility:auto;contain-intrinsic-size:36px"
     >
       <button type="button"
-        type="button"
         class="w-full flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer select-none text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
         onClick=${() => { expanded.value = !expanded.value }}
         aria-expanded=${expanded.value}
@@ -515,7 +514,6 @@ function GroupRow({ item }: { item: Extract<TelemetryDisplayItem, { kind: 'group
       style="content-visibility:auto;contain-intrinsic-size:36px"
     >
       <button type="button"
-        type="button"
         class="w-full flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer select-none text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
         aria-expanded=${expanded.value}
         aria-controls=${contentId}

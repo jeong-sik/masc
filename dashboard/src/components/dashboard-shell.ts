@@ -126,7 +126,6 @@ export function ErrorCounterBadge() {
   return html`
     <div class="relative" role="status">
       <button type="button"
-        type="button"
         class="flex items-center gap-1.5 cursor-pointer rounded px-1 py-0.5 transition-colors hover:bg-[var(--white-5)] ${count > 0 ? 'text-[var(--bad)]' : 'text-[var(--text-muted)]'}"
         title=${count > 0 ? `미확인 에러 ${count}건` : '에러 없음'}
         onClick=${() => { errorPanelOpen.value = !errorPanelOpen.value }}

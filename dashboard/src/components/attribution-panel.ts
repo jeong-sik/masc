@@ -132,7 +132,6 @@ function GateCard({
 
   return html`
     <button type="button"
-      type="button"
       class="text-left w-full focus:outline-none focus:ring-2 focus:ring-[var(--accent-20)]0/50 rounded ${toneClass}"
       onClick=${onSelect}
     >
@@ -169,7 +168,6 @@ function EventRow({
   const reasonText = reasonOf(a)
   return html`
     <button type="button"
-      type="button"
       class="w-full text-left px-3 py-2 border-b border-[var(--card-border)] flex items-center gap-3 text-xs ${rowBg}"
       onClick=${onSelect}
     >

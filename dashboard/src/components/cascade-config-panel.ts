@@ -1161,7 +1161,6 @@ function CascadeRawConfigEditor({
               ${saving.value ? 'Saving...' : mode.saveLabel}
             </button>
             <button type="button"
-              type="button"
               class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-3 py-1 text-xs text-[var(--text-strong)] hover:bg-[var(--bg-panel-hover)] disabled:opacity-50"
               onClick=${handleReset}
               disabled=${saving.value || !editorDirty.value}
@@ -1169,7 +1168,6 @@ function CascadeRawConfigEditor({
               Reset to disk
             </button>
             <button type="button"
-              type="button"
               class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-3 py-1 text-xs text-[var(--text-strong)] hover:bg-[var(--bg-panel-hover)] disabled:opacity-50"
               onClick=${() => void onRefresh()}
               disabled=${saving.value}

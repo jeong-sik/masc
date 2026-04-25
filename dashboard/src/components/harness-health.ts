@@ -251,13 +251,11 @@ export function HarnessHealth() {
             </div>
             <div class="flex items-center gap-2">
               <button type="button"
-                type="button"
                 class="rounded border border-[var(--white-8)] px-2.5 py-1 text-2xs text-[var(--text-muted)] transition-colors hover:border-[var(--accent)] hover:text-[var(--text-body)]"
                 onClick=${() => { void loadHarnessHealth() }}
                 aria-label="안전 감시 새로고침"
               >새로고침</button>
               <button type="button"
-                type="button"
                 class="rounded border border-[var(--white-8)] px-2.5 py-1 text-2xs text-[var(--text-muted)] transition-colors hover:border-[var(--ok-30)] hover:text-[var(--text-body)]"
                 onClick=${() => navigate('lab', { section: 'autoresearch' })}
                 aria-label="오토리서치 보기"

@@ -362,7 +362,6 @@ export function HandoffTimeline({
                   <div class="flex items-center gap-3">
                     ${clickable
                       ? html`<button type="button"
-                          type="button"
                           class=${rowLabelCls}
                           title=${row.keeper}
                           aria-label=${`${row.keeper} 이벤트 보기`}

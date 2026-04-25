@@ -180,7 +180,6 @@ export function KeeperCheckpointPanel({
       <div class="rounded border border-[var(--bad-30)] bg-[var(--bad-10)] px-3 py-3 text-xs text-[#fda4af]" role="alert">
         ${error}
         <button type="button"
-          type="button"
           class="ml-2 rounded border border-[var(--card-border)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] hover:bg-[var(--white-8)] cursor-pointer"
           onClick=${loadInventory}
         >다시 로드</button>
@@ -199,12 +198,10 @@ export function KeeperCheckpointPanel({
         </div>
         <div class="flex items-center gap-2">
           <button type="button"
-            type="button"
             class="rounded border border-[var(--card-border)] bg-[var(--white-4)] px-3 py-1.5 text-2xs font-semibold text-[var(--text-body)] hover:bg-[var(--white-8)] cursor-pointer"
             onClick=${loadInventory}
           >새로고침</button>
           <button type="button"
-            type="button"
             class="rounded border border-[var(--bad-30)] bg-[var(--bad-10)] px-3 py-1.5 text-2xs font-semibold text-[var(--rose-light)] hover:bg-[var(--bad-soft)] cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
             disabled=${deleting || selectedIds.length === 0}
             onClick=${deleteSelected}

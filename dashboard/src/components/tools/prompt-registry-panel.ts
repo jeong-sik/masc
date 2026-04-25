@@ -213,7 +213,6 @@ export function PromptRegistryPanel() {
             ` : null}
             ${visiblePrompts.map(prompt => html`
               <button type="button"
-                type="button"
                 role="option"
                 aria-selected=${selectedPrompt?.key === prompt.key}
                 class="rounded border px-3 py-2 text-left transition-colors ${selectedPrompt?.key === prompt.key

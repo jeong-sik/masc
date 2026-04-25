@@ -432,7 +432,6 @@ export function LogViewer() {
               자동
             </label>
             <button type="button"
-              type="button"
               class="logs-refresh-btn rounded border border-[var(--accent-22)] bg-[var(--accent-10)] px-3 py-2 text-2xs font-medium text-[#dff3ff]"
               aria-label="로그 새로고침"
               onClick=${() => {

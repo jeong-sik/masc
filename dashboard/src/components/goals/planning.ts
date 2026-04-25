@@ -274,7 +274,6 @@ export function Planning() {
             </h3>
           </div>
           <button type="button"
-            type="button"
             class="inline-flex items-center gap-1.5 rounded border border-accent/25 bg-[var(--accent-12)] px-3 py-1.5 text-xs font-medium text-accent transition-colors hover:border-accent/40 hover:bg-[var(--accent-15)]"
             onClick=${() => navigate('workspace', { section: 'planning', view: 'goal-tree' })}
           >

@@ -202,7 +202,6 @@ function MatrixCellButton({ cell }: { cell: MatrixCell }) {
   }
   return html`
     <button type="button"
-      type="button"
       class=${`flex h-full w-full cursor-pointer items-center justify-center gap-1 rounded px-1 py-1 text-2xs transition-colors ${tone.bg} ${tone.text} hover:brightness-125 disabled:cursor-not-allowed disabled:opacity-40`}
       onClick=${onClick}
       disabled=${disabled}
@@ -262,7 +261,6 @@ export function ConnectorKeeperMatrix({ matrix }: { matrix: MatrixData }) {
                 <div class="px-1 py-1 text-3xs uppercase tracking-4 text-[var(--text-dim)]">Keeper ↓ / Connector →</div>
                 ${matrix.columns.map(colId => html`
                   <button type="button"
-                    type="button"
                     class="flex cursor-pointer items-center justify-center gap-1 rounded px-1 py-1 text-3xs uppercase tracking-3 text-[var(--text-dim)] hover:text-[var(--text-body)]"
                     onClick=${() => scrollToConnectorRow(colId)}
                     title=${`${CONNECTOR_DISPLAY_NAMES[colId] ?? colId} — 행으로 이동`}
@@ -352,7 +350,6 @@ function MatrixRowRender({ row }: { row: MatrixRow }) {
   const counts = summarizeMatrixRow(row)
   return html`
     <button type="button"
-      type="button"
       class=${`flex cursor-pointer items-center gap-2 truncate rounded px-2 py-1 text-left text-xs hover:bg-[var(--white-4)] ${row.known ? 'text-[var(--text-body)]' : 'text-[var(--warn)]'}`}
       onClick=${() => scrollToKeeper(row.keeperName)}
       title=${row.known ? row.keeperName : `${row.keeperName} — directory 밖 keeper`}

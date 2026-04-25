@@ -108,7 +108,6 @@ export function StartupCheckBanner({ connectorId, sidecarUp }: {
         </div>
       </div>
       <button type="button"
-        type="button"
         class="shrink-0 cursor-pointer rounded border border-[var(--warn-20)] bg-[var(--warn-10)] px-2 py-1 text-3xs uppercase tracking-4 text-[var(--warn)] hover:bg-[var(--warn-10)]"
         onClick=${() => {
           openSidecarLogs(connectorId)
@@ -118,7 +117,6 @@ export function StartupCheckBanner({ connectorId, sidecarUp }: {
         }}
       >📋 로그 열기</button>
       <button type="button"
-        type="button"
         class="shrink-0 cursor-pointer rounded border border-[var(--warn-20)] px-1.5 py-0.5 text-base leading-none text-[var(--warn)]/70 hover:text-[var(--warn)]"
         aria-label="dismiss startup warning"
         onClick=${() => clearStartAttempt(connectorId)}

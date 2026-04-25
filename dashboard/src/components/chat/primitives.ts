@@ -200,7 +200,6 @@ function ChatMessageBubble({
         ${canExpand
           ? html`
               <button type="button"
-                type="button"
                 class=${`border border-[var(--card-border)] bg-[var(--white-3)] text-2xs font-medium text-[var(--text-muted)] transition-colors hover:bg-[var(--white-10)] hover:text-[var(--text-body)] ${
                   isMessenger ? 'rounded px-2.5 py-1' : 'rounded-sm px-3 py-1'
                 }`}
@@ -279,7 +278,6 @@ function ChatMessageBubble({
                 ? html`
                     <div class="flex flex-col gap-2">
                       <button type="button"
-                        type="button"
                         class="self-start rounded-sm border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-1 text-2xs font-medium text-[var(--text-muted)] transition-colors hover:bg-[var(--white-10)] hover:text-[var(--text-body)]"
                         aria-expanded=${rawExpanded}
                         onClick=${() => { setRawExpandedRaw(!rawExpandedRaw) }}

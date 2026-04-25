@@ -242,7 +242,6 @@ function OverviewTile({ id, connector, keeperCount, selected, onSelectConnector,
       data-overview-selected=${selected ? 'true' : 'false'}
     >
       <button type="button"
-        type="button"
         class="flex min-w-0 cursor-pointer items-start gap-3 text-left"
         onClick=${() => selectConnector(true)}
         aria-label=${`${displayName} 상세 보기`}
@@ -361,7 +360,6 @@ function TilePrimaryAction({ id, sidecarUp }: { id: KnownConnectorId; sidecarUp:
   const tone = TILE_ACTION_TONE_CLASS[view.tone]
   return html`
     <button type="button"
-      type="button"
       class=${`w-full cursor-pointer rounded border px-2 py-1.5 text-xs font-semibold tracking-wide transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${tone}`}
       disabled=${view.busy}
       aria-busy=${view.busy ? 'true' : 'false'}
@@ -524,7 +522,6 @@ function BulkActions({ connectors }: { connectors: GateConnectorInfo[] }) {
   return html`
     <div class="flex items-center gap-2 text-2xs text-[var(--text-dim)]">
       <button type="button"
-        type="button"
         class="cursor-pointer rounded border border-[var(--ok-20)] bg-[var(--ok-10)] px-2 py-1 text-2xs text-[var(--ok)] hover:bg-[var(--ok-10)] disabled:cursor-not-allowed disabled:opacity-40"
         disabled=${startBusy || downCount === 0}
         title=${downCount === 0 ? '모두 이미 실행 중' : `${downCount} 개 sidecar 시작`}
@@ -536,7 +533,6 @@ function BulkActions({ connectors }: { connectors: GateConnectorInfo[] }) {
         ${startBusy ? '시작 중...' : `▶ Start All (${downCount})`}
       </button>
       <button type="button"
-        type="button"
         class="cursor-pointer rounded border border-[var(--bad-20)] bg-[var(--bad-10)] px-2 py-1 text-2xs text-[var(--bad-light)] hover:bg-[var(--bad-10)] disabled:cursor-not-allowed disabled:opacity-40"
         disabled=${stopBusy || upCount === 0}
         title=${upCount === 0 ? '실행 중인 sidecar 없음' : `${upCount} 개 sidecar 정지`}

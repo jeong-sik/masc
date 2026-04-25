@@ -221,7 +221,6 @@ export function FeatureHealth() {
                       </div>
                     </div>
                     <button type="button"
-                      type="button"
                       class="rounded border border-[var(--white-8)] px-2.5 py-1 text-2xs text-[var(--text-muted)] transition-colors hover:border-[var(--accent)] hover:text-[var(--text-body)]"
                       onClick=${() => { void loadFeatureHealth() }}
                     >새로고침</button>

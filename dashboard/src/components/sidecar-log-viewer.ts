@@ -123,7 +123,6 @@ export function SidecarLogToggle({ connectorId }: { connectorId: string }) {
   }
   return html`
     <button type="button"
-      type="button"
       class="cursor-pointer rounded border border-[var(--white-8)] px-2 py-0.5 text-3xs uppercase tracking-4 text-[var(--text-dim)] hover:bg-[var(--white-8)] hover:text-[var(--text-body)]"
       aria-expanded=${entry.open}
       aria-controls=${`sidecar-log-${connectorId}`}
@@ -151,7 +150,6 @@ function LevelPills({ connectorId, active }: { connectorId: string; active: LogL
         const idleCls = 'border-[var(--white-8)] text-[var(--text-dim)] hover:bg-[var(--white-8)] hover:text-[var(--text-body)]'
         return html`
           <button type="button"
-            type="button"
             role="radio"
             aria-checked=${isActive}
             class=${`${base} ${isActive ? activeCls : idleCls}`}
@@ -229,7 +227,6 @@ export function SidecarLogViewer({ connectorId }: { connectorId: string }) {
               ${hasFilter
                 ? html`
                     <button type="button"
-                      type="button"
                       class="cursor-pointer rounded border border-[var(--white-8)] px-1.5 py-0.5 text-3xs uppercase tracking-4 text-[var(--text-dim)] hover:bg-[var(--white-8)] hover:text-[var(--text-body)]"
                       aria-label="필터 초기화"
                       data-log-filter-clear

@@ -926,7 +926,6 @@ function CollapsibleZone({
   return html`
     <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] overflow-hidden">
       <button type="button"
-        type="button"
         class="w-full flex items-center justify-between px-4 py-2 text-left hover:bg-[var(--white-3)] transition-colors cursor-pointer select-none"
         onClick=${toggle}
         aria-expanded=${!collapsed}

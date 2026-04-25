@@ -441,7 +441,6 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
   return html`
     <div class="flex flex-col" style="margin-left:${indent}px">
       <button type="button"
-        type="button"
         class="${headerBase} ${hasContent ? 'cursor-pointer' : ''} focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
         onClick=${() => {
           selectGoal(node.id)

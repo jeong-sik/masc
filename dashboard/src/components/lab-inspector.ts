@@ -60,7 +60,6 @@ function InspectorTabButton({
   const active = inspectorSection.value === id
   return html`
     <button type="button"
-      type="button"
       class=${[
         'rounded-sm border px-3 py-1.5 text-2xs font-semibold transition-colors',
         active
@@ -92,7 +91,6 @@ function InspectorOverview() {
                 <div class="text-xs font-semibold text-[var(--text-strong)]">${surface.title}</div>
                 <div class="mt-2 text-2xs leading-loose text-[var(--text-muted)]">${surface.description}</div>
                 <button type="button"
-                  type="button"
                   class="mt-3 rounded border border-accent/25 bg-[var(--accent-10)] px-2.5 py-1.5 text-2xs font-semibold text-[var(--accent)] transition-colors hover:bg-[var(--accent-20)]"
                   onClick=${() => navigate(surface.tab, surface.params)}
                 >

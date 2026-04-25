@@ -213,7 +213,6 @@ export function SwimlaneTimeline({
                   const ariaLabel = `${lane.label}, ${displayState(seg.value)}, ${fmtAbs(seg.from)} ~ ${fmtAbs(seg.to)}, ${holdFor}`
                   return html`
                     <button type="button"
-                      type="button"
                       data-fsm-swimlane="true"
                       data-lane-key=${lane.key}
                       data-lane-index=${laneIndex}

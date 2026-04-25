@@ -114,7 +114,6 @@ export function SetupGuideCard({ connectorId }: { connectorId: string }) {
       data-setup-guide-tone=${tone}
     >
       <button type="button"
-        type="button"
         class="flex w-full cursor-pointer items-center justify-between gap-2 px-3 py-2 text-left text-xs text-[var(--text-body)] hover:bg-[var(--white-4)]"
         aria-expanded=${isOpen}
         aria-controls=${`setup-guide-${connectorId}`}

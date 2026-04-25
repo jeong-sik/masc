@@ -527,13 +527,11 @@ function KeeperClearContextDialog({
 
         <div class="flex items-center justify-end gap-2">
           <button type="button"
-            type="button"
             class="px-4 py-2 rounded text-sm font-medium border border-[var(--card-border)] bg-[var(--white-4)] text-[var(--text-body)] hover:bg-[var(--white-8)] transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
             disabled=${pending}
             onClick=${onClose}
           >취소</button>
           <button type="button"
-            type="button"
             class="px-4 py-2 rounded text-sm font-medium border border-transparent bg-[var(--bad)] text-white hover:bg-[rgba(239,68,68,0.88)] transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
             disabled=${pending || reason.trim() === ''}
             onClick=${onSubmit}
@@ -837,13 +835,11 @@ export function KeeperDetailPage() {
           />
           <div class="flex items-center gap-2">
             <button type="button"
-              type="button"
               aria-label="${keeper.name} 컨텍스트 비우기"
               class="py-1 px-3 rounded text-2xs font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--rose-light)] hover:bg-[var(--bad-soft)] transition-colors"
               onClick=${() => setClearDialogOpen(true)}
             >비우기</button>
             <button type="button"
-              type="button"
               disabled=${purgePending}
               aria-label="${keeper.name} 완전 삭제"
               class="py-1 px-3 rounded text-2xs font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--rose-light)] hover:bg-[var(--bad-soft)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
@@ -851,7 +847,6 @@ export function KeeperDetailPage() {
             >${purgePending ? '삭제 중...' : '완전 삭제'}</button>
             <${KeeperLifecycleButtons} keeper=${keeper} effectiveStatus=${effectiveStatus} />
             <button type="button"
-              type="button"
               onClick=${() => closeKeeperDetail()}
               class="flex items-center justify-center size-8 rounded border border-[var(--card-border)] bg-[var(--white-3)] text-[var(--text-muted)] hover:text-[var(--text-strong)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[#0d1526]"
               aria-label="키퍼 상세 종료"

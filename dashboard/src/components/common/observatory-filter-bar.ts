@@ -32,7 +32,6 @@ function Chip({
       <span class="text-text-dim font-medium">${label}:</span>
       <span class="font-mono text-text-strong">${value}</span>
       <button type="button"
-        type="button"
         class="ml-0.5 rounded-sm p-0.5 text-text-muted hover:bg-white/10 hover:text-text-strong transition-colors"
         onClick=${onClear}
         aria-label=${`${label} 필터 제거`}
@@ -87,7 +86,6 @@ export function ObservatoryFilterBar() {
         />
       ` : null}
       <button type="button"
-        type="button"
         class="ml-auto rounded text-2xs font-medium text-text-muted underline decoration-dotted underline-offset-2 hover:text-text-strong transition-colors"
         onClick=${() => clearObservatoryFilters()}
       >

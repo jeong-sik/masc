@@ -181,7 +181,6 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
           ${baseline ? html`<span class="text-3xs font-medium ${baseline.cls}">${baseline.text}</span>` : null}
         </div>
         <button type="button"
-          type="button"
           class="text-3xs text-[var(--text-dim)] hover:text-[var(--text-muted)] cursor-pointer bg-transparent border-0 p-0"
           onClick=${() => void loadEvalData(keeperName)}
           title="새로고침"

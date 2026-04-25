@@ -138,7 +138,6 @@ function Pill({ pill }: { pill: RailPill }) {
   // "진행 중…" to AT without a separate visually-hidden span.
   return html`
     <button type="button"
-      type="button"
       class=${`group flex min-w-0 flex-1 cursor-pointer flex-col items-center gap-1 overflow-hidden rounded border px-1.5 py-2 text-center transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-1)] ${tone.gradient} ${tone.border} hover:brightness-125 ${inflight ? 'animate-pulse' : ''}`}
       title=${pill.hint ?? pill.detail}
       aria-label=${railPillAriaLabel(pill)}

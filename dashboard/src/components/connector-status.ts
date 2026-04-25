@@ -849,7 +849,6 @@ function ConnectorLivePanel({
           ${connector?.available
             ? html`
                 <button type="button"
-                  type="button"
                   class="cursor-pointer rounded border border-[var(--bad-20)] bg-[var(--bad-10)] px-2 py-0.5 text-3xs uppercase tracking-4 text-[var(--bad-light)] hover:bg-[var(--bad-10)] disabled:opacity-50"
                   disabled=${isActionLoading}
                   aria-label=${`stop ${connectorName} sidecar`}
@@ -863,7 +862,6 @@ function ConnectorLivePanel({
             ? html`<span class="cursor-help text-3xs text-[var(--text-dim)]" title=${sidecarLogPath}>↗</span>`
             : null}
           <button type="button"
-            type="button"
             class="cursor-pointer rounded border border-[var(--card-border)] px-1.5 text-2xs text-[var(--text-dim)] hover:text-[var(--text-body)]"
             aria-label="toggle header details"
             onClick=${() => { patchConnectorUiState(connectorId, { headerExpanded: !ui.headerExpanded }) }}
@@ -1179,7 +1177,6 @@ function ConnectorLivePanel({
                       ? html`
                           <div class="mt-2">
                             <button type="button"
-                              type="button"
                               class="cursor-pointer text-2xs text-[var(--text-dim)] hover:text-[var(--text-body)]"
                               aria-label=${`add channel to ${group.name}`}
                               onClick=${toggleExpand}
@@ -1204,7 +1201,6 @@ function ConnectorLivePanel({
                                             const humanized = humanizeChannel(names, roomId)
                                             return html`
                                               <button type="button"
-                                                type="button"
                                                 class="cursor-pointer rounded-sm border border-[var(--card-border)] bg-[var(--white-4)] px-2 py-0.5 text-3xs text-[var(--text-body)] hover:bg-[var(--white-8)]"
                                                 title=${roomId}
                                                 onClick=${() => { patchConnectorUiState(connectorId, { channelDraft: roomId }) }}

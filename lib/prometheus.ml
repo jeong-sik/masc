@@ -224,6 +224,22 @@ let metric_keeper_turn_starts = "masc_keeper_turn_starts_total"
 let metric_keeper_turn_reattempts = "masc_keeper_turn_reattempts_total"
 let metric_keeper_turn_regressions = "masc_keeper_turn_regressions_total"
 
+(* #9943: per-keeper turn-latency bucket counter.  Each completed
+   turn lands in exactly one [latency_bucket] label so a Prometheus
+   query like
+     rate(masc_keeper_turn_latency_bucket_total{bucket="600-1200s"}[5m])
+   directly surfaces slow-turn keepers without needing the JSONL
+   ledger.  20-minute turns from oas_timeout_budget exhaustion
+   (#9933, observed 1,204,542 ms = 20 min on taskmaster
+   2026-04-24) appear in the [over_1200s] bucket and operators can
+   alert on its rate.  Existing [masc_llm_inference_duration_seconds]
+   histogram is labelled by [model] only (per-LLM-call latency); this
+   counter labels by [keeper] (per-turn latency) and uses bucket
+   strings instead of histogram observations so dashboards can group
+   counts directly. *)
+let metric_keeper_turn_latency_bucket =
+  "masc_keeper_turn_latency_bucket_total"
+
 
 (* Keeper compaction (keeper_compact_policy.ml, tool_keeper.ml). *)
 let metric_keeper_compactions = "masc_keeper_compactions_total"
@@ -486,6 +502,13 @@ let init () =
     "Total keeper turn regressions: turn id moved to a strictly LOWER \
      value than previously observed (write_meta race losing an in-memory \
      counter increment — #9733 / #10121)"
+    Counter;
+  (* #9943: per-keeper turn latency bucket distribution.  Each
+     completed turn increments exactly one bucket.  Bucket vocabulary
+     [under_60s | 60-300s | 300-600s | 600-1200s | over_1200s]. *)
+  add metric_keeper_turn_latency_bucket
+    "Total keeper turn completions, bucketed by latency (labels: keeper, \
+     bucket=under_60s|60-300s|300-600s|600-1200s|over_1200s)"
     Counter;
   (* Keeper compaction metrics — emitted by keeper_compact_policy.ml *)
   add metric_keeper_compactions

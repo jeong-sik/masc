@@ -291,19 +291,19 @@ export function HandoffTimeline({
         </div>
         <div class="flex gap-2 text-3xs text-text-muted">
           <span class="flex items-center gap-1">
-            <span class="w-2 h-2 rounded-full bg-[var(--ok-10)]"></span>lifecycle
+            <span class="w-2 h-2 rounded-full bg-[var(--ok-10)]" aria-hidden="true"></span>lifecycle
           </span>
           <span class="flex items-center gap-1">
-            <span class="w-2 h-2 rounded-full bg-[var(--accent-10)]"></span>tool
+            <span class="w-2 h-2 rounded-full bg-[var(--accent-10)]" aria-hidden="true"></span>tool
           </span>
           <span class="flex items-center gap-1">
-            <span class="w-2 h-2 rounded-full bg-[var(--warn-10)]"></span>handoff
+            <span class="w-2 h-2 rounded-full bg-[var(--warn-10)]" aria-hidden="true"></span>handoff
           </span>
           <span class="flex items-center gap-1">
-            <span class="w-2 h-2 rounded-full bg-[var(--accent-10)]"></span>context
+            <span class="w-2 h-2 rounded-full bg-[var(--accent-10)]" aria-hidden="true"></span>context
           </span>
           <span class="flex items-center gap-1">
-            <span class="w-2 h-2 rounded-full bg-[var(--bad-10)]"></span>failure
+            <span class="w-2 h-2 rounded-full bg-[var(--bad-10)]" aria-hidden="true"></span>failure
           </span>
         </div>
       </header>

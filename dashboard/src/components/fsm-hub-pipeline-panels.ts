@@ -405,7 +405,7 @@ export function PipelineStep({
       <div class=${`flex-1 rounded border px-3 py-2 transition-all duration-500 ${borderCls} ${bgCls} ${limited && !isActive ? 'opacity-60' : ''}`}>
         <div class="flex items-center justify-between gap-1.5">
           <div class="flex items-center gap-1.5 min-w-0">
-            ${isActive ? html`<span class="h-1.5 w-1.5 rounded-full bg-[var(--indigo)] ${activePulse} shrink-0"></span>` : null}
+            ${isActive ? html`<span class="h-1.5 w-1.5 rounded-full bg-[var(--indigo)] ${activePulse} shrink-0" aria-hidden="true"></span>` : null}
             <span class="text-3xs font-semibold tracking-[0.04em] text-[var(--text-muted)]">${label}</span>
             ${limited ? html`<span class="text-[7px] font-mono text-[var(--text-dim)] border border-[var(--white-10)] rounded px-1" title="Event_bus 구독 미구현으로 일부 상태만 관찰 가능">제한</span>` : null}
           </div>

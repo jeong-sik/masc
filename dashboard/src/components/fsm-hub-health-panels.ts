@@ -145,7 +145,7 @@ export function InvariantsPanel({
           const tooltip = `${entry.label} — ${entry.ok ? 'holds' : 'BROKEN'}\n${desc}${rate ? `\n누적: ${rate}` : ''}`
           return html`
             <li class="flex gap-2 text-3xs cursor-help" title=${tooltip}>
-              <span class=${`mt-[5px] h-1.5 w-1.5 rounded-full shrink-0 ${entry.ok ? 'bg-[var(--emerald)]' : 'bg-[var(--bad)]'}`}></span>
+              <span class=${`mt-[5px] h-1.5 w-1.5 rounded-full shrink-0 ${entry.ok ? 'bg-[var(--emerald)]' : 'bg-[var(--bad)]'}`} aria-hidden="true"></span>
               <div class="min-w-0 flex-1">
                 <div class="flex items-center gap-1.5">
                   <span class=${entry.ok ? 'text-[var(--text-body)]' : 'text-[var(--bad-light)] font-semibold'}>

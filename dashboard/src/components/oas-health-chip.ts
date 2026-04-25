@@ -117,7 +117,7 @@ export function OasHealthChip() {
 
   return html`
     <${Card} title="OAS 런타임">
-      <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
+      <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2" role="region" aria-label="OAS 런타임 상태">
         <${StatCell}
           label="총 이벤트"
           value=${summary.value.totalEvents}

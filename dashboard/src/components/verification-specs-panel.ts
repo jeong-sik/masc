@@ -141,11 +141,12 @@ export function VerificationSpecsPanel() {
       <div class="flex items-center gap-3 flex-wrap">
         <button
           class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-3 py-1 text-xs text-[var(--text-strong)] hover:bg-[var(--bg-panel-hover)]"
+          aria-label="스펙 새로고침"
           onClick=${() => void loadSpecs(resource)}
         >
           새로고침
         </button>
-        ${current.loading ? html`<span class="text-xs text-[var(--text-muted)]">로딩 중...</span>` : null}
+        ${current.loading ? html`<span class="text-xs text-[var(--text-muted)]" role="status">로딩 중...</span>` : null}
         ${data?.updated_at
           ? html`<span class="text-xs text-[var(--text-muted)]">specs · ${data.updated_at}</span>`
           : null}

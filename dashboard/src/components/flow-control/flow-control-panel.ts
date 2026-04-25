@@ -71,7 +71,7 @@ export function FlowControlPanel() {
             ${maintenanceLoading.value ? '...' : '좀비 정리'}<//>
         </div>
         ${maintenanceResult.value ? html`
-          <pre class="mt-3 p-3 rounded border border-card-border/50 bg-card/30 text-2xs text-text-body font-mono max-h-40 overflow-auto custom-scrollbar whitespace-pre-wrap">${maintenanceResult.value}</pre>
+          <pre class="mt-3 p-3 rounded border border-card-border/50 bg-card/30 text-2xs text-text-body font-mono max-h-40 overflow-auto custom-scrollbar whitespace-pre-wrap" tabindex="0">${maintenanceResult.value}</pre>
         ` : null}
       </details>
     <//>

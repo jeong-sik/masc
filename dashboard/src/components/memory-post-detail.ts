@@ -340,7 +340,7 @@ export function PostDetail({ post }: { post: BoardPost }) {
                   <div class="mt-2 p-3 rounded bg-[var(--white-3)] border border-[var(--border-slate-12)]">
                     ${post.meta.source ? html`<div class="text-xs text-[var(--text-body)]"><span class="text-[var(--text-muted)]">출처:</span> ${post.meta.source}</div>` : null}
                     ${post.meta.state_block
-                      ? html`<pre class="whitespace-pre-wrap mt-2 text-2xs text-[var(--text-muted)] leading-relaxed max-h-40 overflow-y-auto custom-scrollbar">${post.meta.state_block}</pre>`
+                      ? html`<pre class="whitespace-pre-wrap mt-2 text-2xs text-[var(--text-muted)] leading-relaxed max-h-40 overflow-y-auto custom-scrollbar" tabindex="0">${post.meta.state_block}</pre>`
                       : null}
                   </div>
                 </details>

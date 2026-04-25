@@ -263,7 +263,7 @@ function DoctorEntryCard({ entry }: { entry: DoctorEntry }) {
   const onToggle = () => { expanded.value = !expanded.value }
   return html`
     <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-3" role="group" aria-label=${`${doctorHeading(entry)}: ${label}`}>
-      <button
+      <button type="button"
         type="button"
         class="flex w-full items-baseline justify-between gap-2 text-left"
         aria-expanded=${expanded.value}
@@ -314,7 +314,7 @@ export function DoctorPanel() {
                       ${data.title} · <code class="text-[var(--text-muted)]">masc-mcp doctor all</code> 과 동일 결과.
                     </div>
                   </div>
-                  <button
+                  <button type="button"
                     type="button"
                     class="rounded border border-[var(--white-8)] px-2.5 py-1 text-2xs text-[var(--text-muted)] transition-colors hover:border-[var(--accent)] hover:text-[var(--text-body)]"
                     aria-label="Doctor 결과 새로고침"

@@ -428,7 +428,7 @@ export function TaskDetailOverlay() {
             ${task.assignee ? html`<span class="text-2xs text-accent">@${task.assignee}${assigneeKind ? ` (${assigneeKind})` : ''}</span>` : null}
           </div>
         </div>
-        <button
+        <button type="button"
           ref=${closeButtonRef}
           type="button"
           class="shrink-0 size-8 flex items-center justify-center rounded border border-[var(--white-10)] bg-[var(--white-5)] text-text-muted cursor-pointer transition-colors hover:bg-[var(--white-10)] hover:text-text-strong"
@@ -441,7 +441,7 @@ export function TaskDetailOverlay() {
       ${hasActivityTab(task) ? html`
         <div class="flex items-center gap-1 px-6 pt-3 pb-0">
           ${(['overview', 'activity'] as TaskDetailTab[]).map(tab => html`
-            <button
+            <button type="button"
               key=${tab}
               type="button"
               class="px-3 py-1.5 rounded text-xs font-medium border cursor-pointer transition-colors ${

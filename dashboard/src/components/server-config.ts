@@ -102,7 +102,7 @@ function CategoryPanel({ name, entries }: { name: string; entries: ConfigEntry[]
 
   return html`
     <div class="border border-[var(--border-subtle)] rounded overflow-hidden mb-3">
-      <button
+      <button type="button"
         class="w-full flex items-center justify-between px-4 py-2.5 bg-[var(--bg-surface)] hover:bg-[var(--bg-panel-hover)] transition-colors text-left"
         aria-expanded=${isExpanded}
         onClick=${() => toggleCategory(name)}
@@ -177,7 +177,7 @@ export function ServerConfig() {
           value=${searchQuery.value}
           onInput=${(e: Event) => { searchQuery.value = (e.target as HTMLInputElement).value }}
         />
-        <button
+        <button type="button"
           class="px-3 py-1.5 text-xs rounded bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-panel-hover)] transition-colors"
           aria-label="서버 설정 새로고침"
           onClick=${() => void refreshServerConfig()}

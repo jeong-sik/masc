@@ -314,7 +314,7 @@ export function ConnectorConfigToggle({ connectorId }: { connectorId: string }) 
     }
   }
   return html`
-    <button
+    <button type="button"
       type="button"
       class="cursor-pointer rounded border border-[var(--white-8)] px-2 py-0.5 text-3xs uppercase tracking-4 text-[var(--text-dim)] hover:bg-[var(--white-8)] hover:text-[var(--text-body)]"
       aria-expanded=${entry.open}
@@ -384,7 +384,7 @@ function FieldWidget({ id, field, value, revealed }: {
               placeholder=${field.required ? '필수 — 토큰을 붙여넣으세요' : ''}
               class=${baseInput}
             />
-            <button
+            <button type="button"
               type="button"
               class="shrink-0 cursor-pointer rounded border border-[var(--white-8)] p-1 text-[var(--text-dim)] hover:bg-[var(--white-8)] hover:text-[var(--text-body)]"
               aria-label=${revealed ? 'Hide value' : 'Reveal value'}
@@ -437,7 +437,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
       <div id=${`connector-config-${connectorId}`} role="alert" class="mt-3 rounded border border-[var(--bad-20)] bg-[var(--bad-10)] p-3 text-2xs text-[var(--bad-light)]">
         <div class="font-semibold">schema 가져오기 실패</div>
         <div class="mt-1 text-3xs opacity-80">${entry.error}</div>
-        <button
+        <button type="button"
           type="button"
           class="mt-2 cursor-pointer rounded border border-[var(--bad-20)] px-2 py-1 text-3xs hover:bg-[var(--bad-10)]"
           aria-label="schema 다시 불러오기"
@@ -465,7 +465,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
           ${entry.lastSavedAt
             ? html`
                 <span class="ml-2 text-[var(--ok)]">· 저장됨 ${new Date(entry.lastSavedAt).toLocaleTimeString()}</span>
-                <button
+                <button type="button"
                   type="button"
                   class="ml-2 cursor-pointer rounded border border-[var(--ok-20)] bg-[var(--ok-10)] px-1.5 py-0.5 text-3xs text-[var(--ok)] hover:bg-[var(--ok-10)] disabled:cursor-not-allowed disabled:opacity-50"
                   disabled=${entry.restarting}

@@ -48,7 +48,7 @@ const MONO_CLASS = 'font-mono'
 
 /** Pure: class string for an IdPill, with optional monospace and
     extra class composition. Exposed so callers that wrap the pill
-    in a non-span element (e.g. a `<button>` with IdPill shape)
+    in a non-span element (e.g. a `<button type="button">` with IdPill shape)
     stay visually consistent without mounting the component. */
 export function idPillClasses(
   mono: boolean = false,

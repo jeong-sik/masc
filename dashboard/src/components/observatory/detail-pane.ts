@@ -77,7 +77,7 @@ export function DetailPane() {
             </span>
           ` : null}
         </div>
-        <button
+        <button type="button"
           type="button"
           class="rounded px-2 py-0.5 text-2xs text-text-dim hover:text-text-strong hover:bg-white/5"
           onClick=${clearSelection}

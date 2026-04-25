@@ -578,7 +578,7 @@ function ShortcutsOverlay({
           <div class="text-2xs font-semibold uppercase tracking-2 text-[var(--text-muted)]">
             키보드 단축키
           </div>
-          <button
+          <button type="button"
             class="text-3xs text-[var(--text-dim)] hover:text-[var(--text-body)] cursor-pointer"
             onClick=${onClose}
             aria-label="닫기"
@@ -673,7 +673,7 @@ function StatusBar({
         <div class="flex items-center gap-3">
           <span class="text-3xs font-semibold uppercase tracking-3 text-[var(--text-muted)]">FSM Hub</span>
           <${Kbd} size="sm" class="hidden md:inline-flex" title="단축키 목록 (?)">?<//>
-          <button
+          <button type="button"
             class=${`text-3xs font-mono px-1.5 py-0.5 rounded border cursor-pointer transition-all ${
               refreshFlash
                 ? 'border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--accent)]'
@@ -685,7 +685,7 @@ function StatusBar({
           >
             ${refreshFlash ? '✓' : '↻'}
           </button>
-          <button
+          <button type="button"
             class="text-3xs font-mono px-1.5 py-0.5 rounded border border-[var(--white-10)] bg-[var(--white-3)] text-[var(--text-dim)] hover:text-[var(--text-body)] hover:border-[var(--accent-30)] cursor-pointer"
             onClick=${onDensityToggle}
             title=${`현재 밀도: ${density === 'compact' ? '조밀' : '여유'} (단축키 d)`}
@@ -734,7 +734,7 @@ function StatusBar({
               ? 'bg-[var(--accent-10)] border-[var(--accent-30)] text-[var(--accent)]'
               : 'bg-[var(--white-3)] border-[var(--white-8)] text-[var(--text-dim)] hover:text-[var(--text-body)] hover:border-[var(--accent-30)]'
             return html`
-              <button
+              <button type="button"
                 role="tab"
                 aria-selected=${active}
                 tabindex=${active ? 0 : -1}
@@ -925,7 +925,7 @@ function CollapsibleZone({
 
   return html`
     <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] overflow-hidden">
-      <button
+      <button type="button"
         type="button"
         class="w-full flex items-center justify-between px-4 py-2 text-left hover:bg-[var(--white-3)] transition-colors cursor-pointer select-none"
         onClick=${toggle}

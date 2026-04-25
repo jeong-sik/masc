@@ -29,7 +29,7 @@ export function RichComposer({
       <div class="flex items-center justify-between gap-3 border-b border-[var(--card-border)] px-3 py-2">
         <div class="flex items-center gap-1.5">
           ${(['write', 'preview'] as ComposerMode[]).map(tab => html`
-            <button
+            <button type="button"
               key=${tab}
               type="button"
               class=${`rounded border px-2.5 py-1 text-2xs font-medium transition-colors ${

@@ -364,7 +364,7 @@ export function RuntimeMonitor() {
           <option value="60">60분</option>
           <option value="180">180분</option>
         </select>
-        <button
+        <button type="button"
           class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-3 py-1 text-xs text-[var(--text-strong)] hover:bg-[var(--bg-panel-hover)]"
           aria-label="런타임 데이터 새로고침"
           onClick=${() => void load()}
@@ -591,7 +591,7 @@ export function RuntimeMonitor() {
                     : null}
                   ${(metric.recent_entries ?? []).length > 0
                     ? html`
-                      <button
+                      <button type="button"
                         class="text-2xs text-[var(--text-muted)] hover:text-[var(--text-strong)] mt-1 text-left"
                         aria-expanded=${expandedModel.value === metric.model_id}
                         onClick=${() => { expandedModel.value = expandedModel.value === metric.model_id ? null : metric.model_id }}

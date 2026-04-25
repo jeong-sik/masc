@@ -361,7 +361,7 @@ export function HandoffTimeline({
                   return html`
                   <div class="flex items-center gap-3">
                     ${clickable
-                      ? html`<button
+                      ? html`<button type="button"
                           type="button"
                           class=${rowLabelCls}
                           title=${row.keeper}

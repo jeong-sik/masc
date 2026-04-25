@@ -469,7 +469,7 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
                     : html`<span class="text-3xs text-[var(--text-dim)]">\u2014</span>`}
               </td>
               <td class="py-1.5 text-center">
-                <button
+                <button type="button"
                   class="rounded p-0.5 text-[var(--text-dim)] hover:text-[var(--bad-light)] hover:bg-[var(--bad-10)] transition-colors"
                   onClick=${() => onReset(row.name)}
                   title="초기화"
@@ -699,7 +699,7 @@ export function FleetTelemetryPanel() {
           <span class="text-3xs text-[var(--text-dim)]">
             ${value.updated_at ? `${formatTimeAgo(value.updated_at)} 갱신` : ''}
           </span>
-          <button
+          <button type="button"
             class="rounded bg-[var(--bg-subtle)] px-2 py-0.5 text-3xs text-[var(--text-dim)] hover:text-[var(--text)]"
             onClick=${() => { void loadFleetTelemetry() }}
             aria-label="Keeper 텔레메트리 새로고침"

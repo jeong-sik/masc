@@ -298,7 +298,7 @@ export function ScopePairing() {
               <${SectionCap}>실험 루프<//>
               <div class="mt-1 text-sm font-medium text-[var(--text-strong)]">오토리서치가 답하는 것</div>
             </div>
-            <button
+            <button type="button"
               type="button"
               class="rounded border border-[var(--white-8)] px-2.5 py-1 text-2xs text-[var(--text-muted)] transition-colors hover:border-[var(--ok-30)] hover:text-[var(--text-body)]"
               onClick=${() => navigate('lab', { section: 'autoresearch' })}

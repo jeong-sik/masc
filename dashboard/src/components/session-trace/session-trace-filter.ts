@@ -70,7 +70,7 @@ export function SessionTraceFilter({ agentName }: { agentName: string }) {
           class="w-full px-3 py-1.5 text-xs rounded bg-[var(--white-3)] border border-[var(--white-6)] text-[var(--text-body)] placeholder:text-[var(--text-dim)] outline-none focus:border-[var(--accent)]"
         />
         ${searchQuery ? html`
-          <button
+          <button type="button"
             onClick=${() => setTraceSearchQuery(agentName, '')}
             aria-label="\uac80\uc0c9\uc5b4 \uc9c0\uc6b0\uae30"
             class="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-dim)] hover:text-[var(--text-body)] text-base leading-none"

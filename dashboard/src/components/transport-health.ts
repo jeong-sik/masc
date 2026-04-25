@@ -394,7 +394,7 @@ export function TransportHealthPanel() {
             ? html`<div class="mt-1 text-2xs text-text-muted">${truthLine}</div>`
             : null}
         </div>
-        <button
+        <button type="button"
           class="text-3xs text-text-muted hover:text-text-body transition-colors"
           onClick=${() => void refreshTransportHealth()}
         >새로고침</button>

@@ -143,7 +143,7 @@ export function GovernanceMonitor() {
           <option value="180">180m</option>
           <option value="720">12h</option>
         </select>
-        <button
+        <button type="button"
           class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-3 py-1 text-xs text-[var(--text-strong)] hover:bg-[var(--bg-panel-hover)]"
           aria-label="governance 데이터 새로고침"
           onClick=${() => void load()}

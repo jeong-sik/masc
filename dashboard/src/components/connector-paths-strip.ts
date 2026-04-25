@@ -85,7 +85,7 @@ export function ConnectorPathsStrip({ connectors }: { connectors: GateConnectorI
       class="mb-3 rounded border border-[var(--card-border)] bg-[var(--bg-1)]"
       data-panel="connector-paths-strip"
     >
-      <button
+      <button type="button"
         type="button"
         class="flex w-full cursor-pointer items-center justify-between gap-3 px-3 py-2 text-left text-2xs text-[var(--text-dim)] hover:text-[var(--text-body)]"
         onClick=${() => { pathsExpanded.value = !open }}

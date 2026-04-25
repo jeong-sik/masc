@@ -113,7 +113,7 @@ export function SetupGuideCard({ connectorId }: { connectorId: string }) {
       class="mt-2 overflow-hidden rounded border border-[var(--white-8)] bg-[var(--white-2)]"
       data-setup-guide-tone=${tone}
     >
-      <button
+      <button type="button"
         type="button"
         class="flex w-full cursor-pointer items-center justify-between gap-2 px-3 py-2 text-left text-xs text-[var(--text-body)] hover:bg-[var(--white-4)]"
         aria-expanded=${isOpen}

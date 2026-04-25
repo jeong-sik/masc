@@ -131,7 +131,7 @@ function GateCard({
   const total = summary?.total ?? 0
 
   return html`
-    <button
+    <button type="button"
       type="button"
       class="text-left w-full focus:outline-none focus:ring-2 focus:ring-[var(--accent-20)]0/50 rounded ${toneClass}"
       onClick=${onSelect}
@@ -168,7 +168,7 @@ function EventRow({
     : 'hover:bg-white/5'
   const reasonText = reasonOf(a)
   return html`
-    <button
+    <button type="button"
       type="button"
       class="w-full text-left px-3 py-2 border-b border-[var(--card-border)] flex items-center gap-3 text-xs ${rowBg}"
       onClick=${onSelect}
@@ -320,7 +320,7 @@ export function AttributionPanel() {
           ? html`
             <div class="text-2xs text-[var(--text-muted)]">
               필터: <span class="font-mono text-[var(--text-primary)]">${filterGate.value}</span>
-              <button
+              <button type="button"
                 class="ml-2 underline"
                 onClick=${() => { filterGate.value = null }}
               >

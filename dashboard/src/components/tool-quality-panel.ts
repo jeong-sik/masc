@@ -312,7 +312,7 @@ export function ToolQualityPanel() {
               : `최근 ${(d.window_hours ?? TOOL_QUALITY_WINDOW_HOURS).toLocaleString()}시간 기준 집계`}
           </div>
         </div>
-        <button
+        <button type="button"
           class="text-3xs px-2 py-0.5 rounded bg-[var(--bg-subtle)] text-[var(--text-dim)] hover:text-[var(--text)]"
           onClick=${handleRefreshToolQualityClick}
           aria-label="도구 품질 새로고침"

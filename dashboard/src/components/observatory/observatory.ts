@@ -125,7 +125,7 @@ function RangeSelector() {
   return html`
     <div class="inline-flex items-center gap-0.5 rounded border border-card-border p-0.5 text-2xs">
       ${TIME_RANGE_PRESETS.map((preset: TimeRangePreset) => html`
-        <button
+        <button type="button"
           type="button"
           class="rounded px-2 py-0.5 font-medium transition-colors ${
             current === preset
@@ -155,7 +155,7 @@ function ViewSelector({
         { key: 'timeline', label: '타임라인' },
         { key: 'live', label: '라이브' },
       ] as const).map(view => html`
-        <button
+        <button type="button"
           type="button"
           class="rounded px-2 py-0.5 font-medium transition-colors ${
             current === view.key
@@ -289,7 +289,7 @@ export function Observatory() {
           />
           ${activeView.value === 'timeline' ? html`
             <${RangeSelector} />
-            <button
+            <button type="button"
               type="button"
               class="inline-flex items-center gap-1.5 rounded border px-2.5 py-1 text-2xs font-medium transition-colors ${
                 liveMode.value

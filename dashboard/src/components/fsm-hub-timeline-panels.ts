@@ -212,7 +212,7 @@ export function SwimlaneTimeline({
                   const dimmed = hoveredSegment != null && !isHovered
                   const ariaLabel = `${lane.label}, ${displayState(seg.value)}, ${fmtAbs(seg.from)} ~ ${fmtAbs(seg.to)}, ${holdFor}`
                   return html`
-                    <button
+                    <button type="button"
                       type="button"
                       data-fsm-swimlane="true"
                       data-lane-key=${lane.key}

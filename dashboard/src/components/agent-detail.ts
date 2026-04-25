@@ -281,7 +281,7 @@ export function AgentDetailOverlay() {
                   <div class="mt-1 flex gap-3 flex-wrap text-text-muted text-sm font-medium">
                     ${keeper
                       ? html`<span class="flex items-center gap-1.5">연결된 키퍼:
-                          <button
+                          <button type="button"
                             type="button"
                             class="text-text-strong font-semibold hover:text-accent underline underline-offset-2 decoration-dotted transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 rounded"
                             onClick=${() => { closeAgentDetail(); openKeeperDetail(keeper) }}
@@ -316,7 +316,7 @@ export function AgentDetailOverlay() {
             >
               ${purgePending.value ? '삭제 중...' : '완전 삭제'}
             <//>
-            <button
+            <button type="button"
               ref=${closeButtonRef}
               type="button"
               class="px-4 py-2 text-sm font-semibold rounded border border-transparent bg-white/10 text-text-strong hover:bg-white/20 transition-colors duration-200 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-1)]"

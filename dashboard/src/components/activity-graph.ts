@@ -190,7 +190,7 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
             onInput=${(e: Event) => { actionQuery.value = (e.target as HTMLInputElement).value }}
             class="min-w-40 max-w-60 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
           />
-          <button
+          <button type="button"
             type="button"
             class="inline-flex items-center gap-1.5 rounded border px-2.5 py-1.5 text-2xs transition-all duration-150 ${showLifecycle.value
               ? 'border-[var(--border-slate-22)] bg-[var(--accent-soft)] text-[var(--text-strong)]'
@@ -244,7 +244,7 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
                         href=${hashForRoute('monitoring', { section: 'observatory', keeper: group.actor, range: activityRange() })}
                       >이 keeper로 보기</a>
                     ` : null}
-                    <button
+                    <button type="button"
                       type="button"
                       class="rounded border border-[var(--white-10)] bg-[var(--white-4)] px-3 py-1.5 text-2xs text-[var(--text-body)] transition-all duration-150 hover:bg-[var(--white-8)]"
                       onClick=${() => toggleExpandedGroup(group.id)}

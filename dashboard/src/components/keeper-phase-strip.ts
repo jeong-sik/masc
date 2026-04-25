@@ -143,7 +143,7 @@ export function KeeperPhaseTimeline() {
     <div class="flex flex-col gap-2" role="list" aria-label="키퍼 페이즈 전환 타임라인">
       <div class="flex items-center justify-between mb-1">
         <div class="text-2xs text-[var(--text-muted)] uppercase tracking-wider font-medium">페이즈 전환 (최근 30건)</div>
-        <button
+        <button type="button"
           type="button"
           class="text-2xs text-[var(--text-dim)] hover:text-[var(--text-body)] transition-colors"
           onClick=${() => { void loadAll() }}

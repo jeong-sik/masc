@@ -212,7 +212,7 @@ export function PromptRegistryPanel() {
               </div>
             ` : null}
             ${visiblePrompts.map(prompt => html`
-              <button
+              <button type="button"
                 type="button"
                 role="option"
                 aria-selected=${selectedPrompt?.key === prompt.key}

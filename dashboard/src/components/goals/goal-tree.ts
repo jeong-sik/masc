@@ -440,7 +440,7 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
 
   return html`
     <div class="flex flex-col" style="margin-left:${indent}px">
-      <button
+      <button type="button"
         type="button"
         class="${headerBase} ${hasContent ? 'cursor-pointer' : ''} focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
         onClick=${() => {
@@ -612,7 +612,7 @@ function DetailTabs({ active }: { active: GoalDetailTab }) {
   return html`
     <div class="flex flex-wrap gap-2">
       ${tabs.map(tab => html`
-        <button
+        <button type="button"
           key=${tab}
           type="button"
           class="rounded border px-3 py-1.5 text-xs font-semibold uppercase tracking-wider transition-colors ${active === tab

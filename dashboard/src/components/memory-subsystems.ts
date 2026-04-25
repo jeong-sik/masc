@@ -339,19 +339,19 @@ function HebbianTopLinks({ synapses }: { synapses: MemorySubsystemsSynapse[] }) 
           const active = isActivePair(s.from_agent, s.to_agent)
           return html`
             <div class="flex items-center gap-2 text-xs font-mono px-1 py-0.5 rounded ${active ? 'ring-1 ring-[var(--white-10)] bg-[var(--white-5)]' : 'hover:bg-[var(--white-5)]'}">
-              <button
+              <button type="button"
                 type="button"
                 class="text-[var(--text-muted)] hover:text-[var(--accent)] truncate w-32 text-right focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
                 onClick=${() => openAgentDetail(s.from_agent)}
               >${shortAgentLabel(s.from_agent)}</button>
-              <button
+              <button type="button"
                 type="button"
                 aria-pressed=${active ? 'true' : 'false'}
                 title="이 쌍의 에피소드만 필터"
                 class="text-[var(--text-muted)] hover:text-[var(--accent)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent ${active ? 'text-[var(--accent)]' : ''}"
                 onClick=${() => toggleSynapsePairFilter(s.from_agent, s.to_agent)}
               >→</button>
-              <button
+              <button type="button"
                 type="button"
                 class="text-[var(--text-muted)] hover:text-[var(--accent)] truncate w-32 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
                 onClick=${() => openAgentDetail(s.to_agent)}
@@ -376,14 +376,14 @@ function SynapseRow({ s }: { s: MemorySubsystemsSynapse }) {
   return html`
     <tr class="border-b border-[var(--white-10)]">
       <td class="py-1.5 px-2 text-sm font-mono">
-        <button
+        <button type="button"
           class="hover:text-[var(--accent)] hover:underline focus:outline-none focus:text-[var(--accent)]"
           onClick=${() => openAgentDetail(s.from_agent)}
         >${s.from_agent}</button>
       </td>
       <td class="py-1.5 px-2 text-sm text-[var(--text-muted)] text-center">→</td>
       <td class="py-1.5 px-2 text-sm font-mono">
-        <button
+        <button type="button"
           class="hover:text-[var(--accent)] hover:underline focus:outline-none focus:text-[var(--accent)]"
           onClick=${() => openAgentDetail(s.to_agent)}
         >${s.to_agent}</button>
@@ -562,7 +562,7 @@ export function MemorySubsystems() {
 
       <!-- Architecture Flow (collapsible) -->
       <section>
-        <button
+        <button type="button"
           onClick=${() => (showArch.value = !showArch.value)}
           aria-expanded=${showArch.value}
           aria-label="아키텍처 데이터 흐름도 토글"
@@ -679,7 +679,7 @@ export function MemorySubsystems() {
             ? html`<div class="flex items-center gap-2 mb-2 px-2 py-1 bg-[var(--white-5)] border border-[var(--white-10)] rounded text-xs">
                 <span class="text-[var(--text-muted)]0">시냅스 쌍 필터</span>
                 <span class="text-[var(--text-muted)] font-mono">${shortAgentLabel(pairFilter.from)} → ${shortAgentLabel(pairFilter.to)}</span>
-                <button
+                <button type="button"
                   class="ml-auto text-[var(--text-muted)] hover:text-[var(--text-muted)]"
                   onClick=${() => setSynapsePairFilter(null)}
                   aria-label="시냅스 쌍 필터 해제"
@@ -722,7 +722,7 @@ export function MemorySubsystems() {
           </select>
           ${
             hasFilter
-              ? html`<button
+              ? html`<button type="button"
                   onClick=${clearFilters}
                   aria-label="모든 필터 해제"
                   class="text-xs text-[var(--text-muted)] hover:text-[var(--text-muted)] px-2 py-1 border border-[var(--white-10)] rounded hover:border-[var(--white-10)]0"

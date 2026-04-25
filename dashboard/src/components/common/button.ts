@@ -4,10 +4,10 @@
 // Props are a strict whitelist — htm/preact function components do not
 // implicitly spread unlisted props to children (see the parallel note
 // in ../common/input.ts). If you want a new attribute to reach the
-// <button>, add it to the interface AND forward it below. Missing
+// <button type="button">, add it to the interface AND forward it below. Missing
 // entries silently drop, which is how the pre-refactor callers that
 // passed `aria-busy` / `data-*` ended up rendering plain buttons and
-// forced a couple of sites to fall back to raw <button>.
+// forced a couple of sites to fall back to raw <button type="button">.
 
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
@@ -80,7 +80,7 @@ export function ActionButton({
   ].filter(Boolean).join(' ')
 
   return html`
-    <button
+    <button type="button"
       type=${type}
       id=${id}
       class=${cls}

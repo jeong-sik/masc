@@ -164,7 +164,7 @@ function labelPills(labels: Record<string, string>): ReturnType<typeof html> | n
   if (entries.length === 0) return null
   return html`<span class="ml-2 inline-flex gap-1 flex-wrap">${entries.map(([k, v]) => {
     if (k === 'keeper') {
-      return html`<button
+      return html`<button type="button"
         class="rounded bg-[var(--accent-10)] px-1 py-0.5 text-3xs text-[var(--accent)] font-mono hover:bg-[var(--accent-10)] hover:text-[var(--accent)] transition-colors cursor-pointer"
         title="View keeper detail"
         onClick=${(e: Event) => {
@@ -174,7 +174,7 @@ function labelPills(labels: Record<string, string>): ReturnType<typeof html> | n
       >${k}=${v}</button>`
     }
     if (k === 'tool_name' || k === 'tool') {
-      return html`<button
+      return html`<button type="button"
         class="rounded bg-[var(--warn-10)] px-1 py-0.5 text-3xs text-[var(--warn)] font-mono hover:bg-[var(--warn-10)] hover:text-[var(--warn)] transition-colors cursor-pointer"
         title="View tool quality"
         onClick=${(e: Event) => {
@@ -298,7 +298,7 @@ export function PrometheusMetrics() {
         </div>
         <div class="flex items-center gap-3">
           ${lastUpdated.value && html`<span class="text-xs text-[var(--text-muted)]">${lastUpdated.value}</span>`}
-          <button
+          <button type="button"
             class="rounded border border-[var(--card-border)] bg-[var(--bg-1)] px-3 py-1.5 text-xs text-[var(--text-body)] hover:bg-[var(--bg-2)] transition-colors"
             aria-label="Prometheus 메트릭 새로고침"
             onClick=${refresh}
@@ -344,7 +344,7 @@ export function PrometheusMetrics() {
 
         return html`
           <${Card}>
-            <button
+            <button type="button"
               class="flex w-full items-center justify-between text-left"
               aria-expanded=${expanded}
               onClick=${() => toggleCategory(cat)}

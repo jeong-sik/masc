@@ -158,7 +158,7 @@ export function TaskActivityList({
       />
       <div class="flex items-center gap-1.5">
         ${filterChips.map(chip => html`
-          <button
+          <button type="button"
             key=${chip.key}
             type="button"
             class="px-2 py-1 rounded text-2xs font-medium border cursor-pointer transition-colors ${

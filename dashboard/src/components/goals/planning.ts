@@ -156,7 +156,7 @@ function KeeperToolActivity() {
             <div class="text-2xs font-semibold uppercase tracking-5 text-text-muted mb-2">활성 keeper</div>
             <div class="flex flex-wrap gap-2">
               ${activeKeepers.map(k => html`
-                <button
+                <button type="button"
                   key=${k.name}
                   type="button"
                   class="inline-flex items-center gap-1.5 rounded border border-card-border/60 bg-white/4 px-3 py-1.5 text-xs text-text-body transition-colors hover:border-accent/35 hover:text-text-strong"
@@ -273,7 +273,7 @@ export function Planning() {
               장기 목표 ${hasGoals ? `(${goals.value.length})` : ''}
             </h3>
           </div>
-          <button
+          <button type="button"
             type="button"
             class="inline-flex items-center gap-1.5 rounded border border-accent/25 bg-[var(--accent-12)] px-3 py-1.5 text-xs font-medium text-accent transition-colors hover:border-accent/40 hover:bg-[var(--accent-15)]"
             onClick=${() => navigate('workspace', { section: 'planning', view: 'goal-tree' })}

@@ -426,7 +426,7 @@ function ProfileCard({
                       <option value=${name}>${name}</option>
                     `)}
                   </select>
-                  <button
+                  <button type="button"
                     type="submit"
                     class="rounded border border-[var(--accent-primary)] bg-[var(--accent-primary)] px-3 py-1 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
                     disabled=${assigning.value || selectedKeeper.value === ''}
@@ -1153,14 +1153,14 @@ function CascadeRawConfigEditor({
           </div>
 
           <div class="flex items-center gap-3 flex-wrap">
-            <button
+            <button type="button"
               type="submit"
               class="rounded border border-[var(--accent-primary)] bg-[var(--accent-primary)] px-3 py-1 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
               disabled=${saveDisabled}
             >
               ${saving.value ? 'Saving...' : mode.saveLabel}
             </button>
-            <button
+            <button type="button"
               type="button"
               class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-3 py-1 text-xs text-[var(--text-strong)] hover:bg-[var(--bg-panel-hover)] disabled:opacity-50"
               onClick=${handleReset}
@@ -1168,7 +1168,7 @@ function CascadeRawConfigEditor({
             >
               Reset to disk
             </button>
-            <button
+            <button type="button"
               type="button"
               class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-3 py-1 text-xs text-[var(--text-strong)] hover:bg-[var(--bg-panel-hover)] disabled:opacity-50"
               onClick=${() => void onRefresh()}
@@ -1226,7 +1226,7 @@ export function CascadeConfigPanel() {
   return html`
     <div class="flex flex-col gap-4">
       <div class="flex items-center gap-3 flex-wrap">
-        <button
+        <button type="button"
           class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-3 py-1 text-xs text-[var(--text-strong)] hover:bg-[var(--bg-panel-hover)]"
           aria-label="Cascade 데이터 새로고침"
           onClick=${() => void loadCascadeData(resource)}

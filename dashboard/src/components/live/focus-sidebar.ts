@@ -43,7 +43,7 @@ function FocusSidebarContent({ compact = false }: FocusSidebarProps) {
         ${list.length === 0
           ? html`<div class="py-6 text-center text-[var(--text-muted)] text-sm">활성 에이전트 없음. masc_join으로 접속하면 여기에 표시됩니다.</div>`
           : list.map(agent => html`
-            <button
+            <button type="button"
               type="button"
               key=${agent.name}
               class="focus-agent-card w-full rounded border border-[var(--border-slate-12)] bg-[var(--white-3)] p-3.5 transition-colors duration-200 text-left cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent ${selected === agent.name ? 'focus-agent-selected' : ''}"

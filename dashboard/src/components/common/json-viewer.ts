@@ -65,7 +65,7 @@ export function JsonViewer({ data, label, initialCollapsed = false, level = 0, a
 
   return html`
     <div class="font-mono text-sm leading-relaxed flex flex-col py-0.5 w-full min-w-0">
-      <button
+      <button type="button"
         type="button"
         class="flex items-center gap-1.5 cursor-pointer hover:bg-[var(--white-4)] rounded px-1 -mx-1 select-none w-max max-w-full text-left bg-transparent border-0"
         onClick=${() => setCollapsed(!collapsed)}

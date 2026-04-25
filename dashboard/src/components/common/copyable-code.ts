@@ -112,7 +112,7 @@ export function CopyableCode({
       ${justCopied
         ? html`<span class="shrink-0 text-3xs font-semibold text-[var(--ok)]" data-copied-badge aria-live="polite">✓ Copied</span>`
         : null}
-      <button
+      <button type="button"
         type="button"
         class="shrink-0 cursor-pointer rounded border border-transparent p-1 text-[var(--text-dim)] opacity-60 transition-opacity hover:bg-[var(--white-8)] hover:text-[var(--text-body)] focus-visible:opacity-100 group-hover:opacity-100"
         aria-label=${ariaLabel || (label ? `Copy ${label}` : 'Copy command')}

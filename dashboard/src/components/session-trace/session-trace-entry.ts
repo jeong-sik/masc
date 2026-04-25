@@ -217,7 +217,7 @@ function ResultViewer({ text, hint, isError: isErr }: { text: string; hint: Cont
           ` : null}
         </div>
         ${needsCollapse ? html`
-          <button
+          <button type="button"
             type="button"
             class="w-full py-1.5 text-3xs font-medium text-[var(--accent)] hover:text-[var(--text-strong)] hover:bg-[var(--white-5)] transition-colors cursor-pointer border-t border-[var(--white-6)] bg-transparent"
             aria-expanded=${expanded.value}

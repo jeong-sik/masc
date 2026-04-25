@@ -31,7 +31,7 @@ function Chip({
     <span class="inline-flex items-center gap-1.5 rounded-sm border border-card-border bg-card/50 px-2.5 py-1 text-2xs">
       <span class="text-text-dim font-medium">${label}:</span>
       <span class="font-mono text-text-strong">${value}</span>
-      <button
+      <button type="button"
         type="button"
         class="ml-0.5 rounded-sm p-0.5 text-text-muted hover:bg-white/10 hover:text-text-strong transition-colors"
         onClick=${onClear}
@@ -86,7 +86,7 @@ export function ObservatoryFilterBar() {
           onClear=${() => setObservatoryFilter({ range: null })}
         />
       ` : null}
-      <button
+      <button type="button"
         type="button"
         class="ml-auto rounded text-2xs font-medium text-text-muted underline decoration-dotted underline-offset-2 hover:text-text-strong transition-colors"
         onClick=${() => clearObservatoryFilters()}

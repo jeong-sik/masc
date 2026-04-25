@@ -416,7 +416,7 @@ function OutcomeVsHarnessCallout({ loopCount }: { loopCount: number }) {
           <div class="mt-2 text-sm leading-loose text-[var(--text-body)]">
             평가 모델, 압축 전 상태, 세대 교체 rail 상태는 하네스에서 봅니다.
           </div>
-          <button
+          <button type="button"
             type="button"
             class="mt-3 rounded border border-[var(--white-8)] px-2.5 py-1 text-2xs text-[var(--text-muted)] transition-colors hover:border-[var(--ok-30)] hover:text-[var(--text-body)]"
             onClick=${() => navigate('lab', { section: 'harness' })}
@@ -463,7 +463,7 @@ function LoopDetailView() {
           <div class="text-3xs uppercase tracking-wider text-[var(--text-muted)] font-medium">루프 개요</div>
           ${canRepairErrorLoop ? html`
             <div class="flex items-center gap-2">
-              <button
+              <button type="button"
                 type="button"
                 class="px-2.5 py-1 rounded text-2xs text-[var(--text-body)] border border-card-border hover:border-accent/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 disabled=${loopActionBusy.value}
@@ -471,7 +471,7 @@ function LoopDetailView() {
               >
                 ${loopActionBusy.value ? '복구 중...' : '재시도'}
               </button>
-              <button
+              <button type="button"
                 type="button"
                 class="px-2.5 py-1 rounded text-2xs text-[var(--bad)] border border-[var(--bad-30)] hover:border-[var(--bad)] opacity-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 disabled=${loopActionBusy.value}

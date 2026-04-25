@@ -632,7 +632,7 @@ function JourneyCard({ record }: { record: JourneyRecord }) {
         </div>
 
         <div class="flex items-center gap-3 border-t border-[var(--white-8)] pt-3">
-          <button
+          <button type="button"
             class="inline-flex items-center rounded px-3 py-1.5 text-xs font-medium text-[var(--text-muted)] transition hover:text-[var(--text-body)] hover:bg-[var(--white-5)]"
             aria-expanded=${showExtended.value}
             aria-label="추가 정보 펼치기"

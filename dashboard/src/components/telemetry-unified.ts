@@ -462,7 +462,7 @@ function EntryRow({ entry }: { entry: TelemetryEntry }) {
       class="border-b border-[var(--card-border)] hover:bg-[var(--bg-panel-hover)] transition-colors"
       style="content-visibility:auto;contain-intrinsic-size:36px"
     >
-      <button
+      <button type="button"
         type="button"
         class="w-full flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer select-none text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
         onClick=${() => { expanded.value = !expanded.value }}
@@ -514,7 +514,7 @@ function GroupRow({ item }: { item: Extract<TelemetryDisplayItem, { kind: 'group
       class="border-b border-[var(--card-border)] bg-[rgba(255,255,255,0.015)] hover:bg-[var(--bg-panel-hover)] transition-colors"
       style="content-visibility:auto;contain-intrinsic-size:36px"
     >
-      <button
+      <button type="button"
         type="button"
         class="w-full flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer select-none text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
         aria-expanded=${expanded.value}
@@ -839,7 +839,7 @@ export function TelemetryUnified() {
           <option value="200">200</option>
           <option value="500">500</option>
         </select>
-        <button
+        <button type="button"
           class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-3 py-1 text-xs text-[var(--text-strong)] hover:bg-[var(--bg-panel-hover)]"
           onClick=${() => void load()}
         >

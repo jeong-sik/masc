@@ -107,7 +107,7 @@ export function StartupCheckBanner({ connectorId, sidecarUp }: {
           토큰 검증 실패 / 의존성 누락이 가장 흔한 원인 — 로그를 확인하세요.
         </div>
       </div>
-      <button
+      <button type="button"
         type="button"
         class="shrink-0 cursor-pointer rounded border border-[var(--warn-20)] bg-[var(--warn-10)] px-2 py-1 text-3xs uppercase tracking-4 text-[var(--warn)] hover:bg-[var(--warn-10)]"
         onClick=${() => {
@@ -117,7 +117,7 @@ export function StartupCheckBanner({ connectorId, sidecarUp }: {
           // actually comes up.
         }}
       >📋 로그 열기</button>
-      <button
+      <button type="button"
         type="button"
         class="shrink-0 cursor-pointer rounded border border-[var(--warn-20)] px-1.5 py-0.5 text-base leading-none text-[var(--warn)]/70 hover:text-[var(--warn)]"
         aria-label="dismiss startup warning"

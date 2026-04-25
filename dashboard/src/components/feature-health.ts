@@ -220,7 +220,7 @@ export function FeatureHealth() {
                         ${overview.overridden_count ? `${overview.overridden_count}개 플래그가 환경변수로 오버라이드되었습니다.` : ''}
                       </div>
                     </div>
-                    <button
+                    <button type="button"
                       type="button"
                       class="rounded border border-[var(--white-8)] px-2.5 py-1 text-2xs text-[var(--text-muted)] transition-colors hover:border-[var(--accent)] hover:text-[var(--text-body)]"
                       onClick=${() => { void loadFeatureHealth() }}

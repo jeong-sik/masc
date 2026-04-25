@@ -194,7 +194,7 @@ export function PersonaGenerator() {
             <div class="border-b border-[var(--white-10)] px-2 py-1.5 text-3xs text-[var(--text-muted)]">
               ${schema.personasRoot ?? ''} · ${schema.handleRules ?? ''}
             </div>
-            <div class="max-h-56 overflow-auto">
+            <div class="max-h-56 overflow-auto" tabindex="0" role="region" aria-label="스키마 필드 목록">
               <table class="w-full text-left text-3xs" aria-label="스키마 필드 카탈로그">
                 <thead class="sr-only">
                   <tr>

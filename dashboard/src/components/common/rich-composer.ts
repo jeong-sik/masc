@@ -70,7 +70,7 @@ export function RichComposer({
             `
           : value.trim()
             ? html`
-                <div class="max-h-80 overflow-auto rounded border border-[var(--card-border)] bg-[var(--bg-0)] p-3 custom-scrollbar">
+                <div class="max-h-80 overflow-auto rounded border border-[var(--card-border)] bg-[var(--bg-0)] p-3 custom-scrollbar" tabindex="0" aria-label="미리보기">
                   <${RichContent} text=${value} previewLimit=${previewLimit} />
                 </div>
               `

@@ -222,7 +222,7 @@ export function KeeperDiagnosticSummary({
         ? html`<div class="text-xs text-[var(--bad-light)] leading-relaxed mt-1">${diagnostic.last_error}</div>`
         : null}
       ${showRawStatus
-        ? html`<div class="mt-3 max-h-60 overflow-auto rounded border border-[var(--card-border)] bg-[var(--bg-0)] custom-scrollbar"><${Markdown} text=${'```text\n' + (detail?.rawText ?? '키퍼 상태를 아직 불러오지 않았습니다.') + '\n```'} /></div>`
+        ? html`<div class="mt-3 max-h-60 overflow-auto rounded border border-[var(--card-border)] bg-[var(--bg-0)] custom-scrollbar" tabindex="0" aria-label="키퍼 원시 상태"><${Markdown} text=${'```text\n' + (detail?.rawText ?? '키퍼 상태를 아직 불러오지 않았습니다.') + '\n```'} /></div>`
         : null}
     </div>
   `

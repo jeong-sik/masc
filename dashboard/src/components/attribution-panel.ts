@@ -292,7 +292,7 @@ export function AttributionPanel() {
     : null
 
   return html`
-    <div class="flex flex-col gap-4">
+    <div class="flex flex-col gap-4" role="region" aria-label="Attribution">
       <div class="flex flex-col gap-1">
         <div class="text-2xs font-semibold uppercase tracking-1 text-[var(--text-muted)]">
           Attribution — gate chain 관찰

@@ -135,18 +135,15 @@ let load_all_findings ~base_path () : finding list =
            Log.Keeper.warn "Skipping malformed finding: %s" msg;
            None)
 
+(* Empty needle preserves the legacy "matches all" semantic; non-empty
+   matching delegates to [String_util.contains_substring_ci]. The
+   helper is misleadingly named — the body was case-sensitive — but
+   the caller in [search_findings] already lowercases both sides, so
+   the SSOT (which does inline byte-wise lowercasing) is a drop-in
+   replacement. Future cleanup: drop the upstream pre-lowering. *)
 let contains_ci ~needle haystack =
-  let nlen = String.length needle in
-  let hlen = String.length haystack in
-  if nlen = 0 then true
-  else if nlen > hlen then false
-  else
-    let rec scan i =
-      if i + nlen > hlen then false
-      else if String.sub haystack i nlen = needle then true
-      else scan (i + 1)
-    in
-    scan 0
+  String.length needle = 0
+  || String_util.contains_substring_ci haystack needle
 
 let rec take n = function
   | [] -> []

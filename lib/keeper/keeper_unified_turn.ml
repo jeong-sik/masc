@@ -516,6 +516,32 @@ let sdk_error_kind = function
   | Oas.Error.A2a _ -> "a2a"
   | Oas.Error.Internal _ -> "internal"
 
+let record_turn_failure_stress
+    ~(meta : keeper_meta)
+    ~(is_auto_recoverable : bool)
+    ~(consecutive : int)
+    ~(threshold : int)
+    ~(err : Oas.Error.sdk_error)
+  : unit =
+  let room_id =
+    match meta.joined_room_ids with
+    | room_id :: _ -> room_id
+    | [] -> ""
+  in
+  Agent_stress.record {
+    agent_name = meta.name;
+    room_id;
+    kind =
+      Turn_failure {
+        consecutive;
+        threshold;
+        counted_toward_crash = not is_auto_recoverable;
+        recoverable = is_auto_recoverable;
+        error_kind = Some (sdk_error_kind err);
+      };
+    timestamp = Unix.gettimeofday ();
+  }
+
 let oas_timeout_guard_sec = 30.0
 
 let min_oas_timeout_budget_sec = 30.0
@@ -2190,6 +2216,12 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           let threshold =
             Runtime_params.get Governance_registry.keeper_max_turn_failures
           in
+          record_turn_failure_stress
+            ~meta
+            ~is_auto_recoverable
+            ~consecutive:count
+            ~threshold
+            ~err;
           if count >= threshold then begin
             Log.Keeper.error
               "%s: %d consecutive persistent turn failures (threshold=%d), escalating to supervisor crash path"

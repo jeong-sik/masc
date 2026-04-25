@@ -11,21 +11,9 @@ type issue = {
 module StringMap = Map.Make (String)
 
 let contains_substring ~needle s =
-  let needle_len = String.length needle in
-  let s_len = String.length s in
-  if needle_len = 0 || needle_len > s_len then
-    false
-  else
-    let limit = s_len - needle_len in
-    let rec loop i =
-      if i > limit then
-        false
-      else if String.sub s i needle_len = needle then
-        true
-      else
-        loop (i + 1)
-    in
-    loop 0
+  (* Empty needle returns false here, distinct from String_util.contains_substring's
+     Re-compatible empty=true.  Guard preserves the original validator contract. *)
+  String.length needle > 0 && String_util.contains_substring s needle
 
 let has_suffix ~suffix s =
   let suffix_len = String.length suffix in

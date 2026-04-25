@@ -145,6 +145,11 @@ type provider_state = {
   mutable events: event list;  (* newest first *)
   mutable consecutive_failures: int;
   mutable cooldown_until: float;  (* 0.0 = not in cooldown *)
+  fingerprint_counts: (string, int) Hashtbl.t;
+  (* Per-fingerprint cumulative counter (lifetime, no rolling decay).
+     Phase 0 observability anchor for "which error keeps recurring".
+     Updated under [t.mu]. *)
+  mutable last_failure_at: float;  (* 0.0 = none *)
 }
 
 type t = {
@@ -193,9 +198,42 @@ let get_or_create_state t key =
       events = [];
       consecutive_failures = 0;
       cooldown_until = 0.0;
+      fingerprint_counts = Hashtbl.create 4;
+      last_failure_at = 0.0;
     } in
     Hashtbl.replace t.providers key s;
     s
+
+(* Build a stable fingerprint from caller-provided classification.
+   Format: "kind|hash8(reason)" — kind defaults to "unclassified",
+   hash suffix is omitted when reason is absent or empty.  Hash is
+   MD5-truncated to 8 hex chars: collision-tolerant for an
+   observability-only counter. *)
+let make_fingerprint ?error_kind ?error_reason () =
+  let kind =
+    match error_kind with
+    | Some k when String.trim k <> "" -> String.trim k
+    | _ -> "unclassified"
+  in
+  match error_reason with
+  | None -> kind
+  | Some r ->
+    let r = String.trim r in
+    if r = "" then kind
+    else
+      let h = Digest.to_hex (Digest.string r) in
+      let h_short =
+        if String.length h >= 8 then String.sub h 0 8 else h
+      in
+      kind ^ "|" ^ h_short
+
+let bump_fingerprint state fp =
+  let prev =
+    match Hashtbl.find_opt state.fingerprint_counts fp with
+    | Some n -> n
+    | None -> 0
+  in
+  Hashtbl.replace state.fingerprint_counts fp (prev + 1)
 
 (* ── Recording ────────────────────────────────── *)
 
@@ -203,11 +241,16 @@ let prune_old_events now events =
   let cutoff = now -. window_sec in
   List.filter (fun e -> e.time >= cutoff) events
 
-let record t ~provider_key ~outcome ~now =
+let record t ~provider_key ~outcome ?error_kind ?error_reason ~now () =
   with_lock t (fun () ->
     let state = get_or_create_state t provider_key in
     let event = { time = now; outcome } in
     state.events <- event :: prune_old_events now state.events;
+    let bump_failure_fp () =
+      let fp = make_fingerprint ?error_kind ?error_reason () in
+      bump_fingerprint state fp;
+      state.last_failure_at <- now
+    in
     match outcome with
     | Success ->
       state.consecutive_failures <- 0;
@@ -221,6 +264,7 @@ let record t ~provider_key ~outcome ~now =
          responds.  The outcome tag is preserved in [events] so
          [provider_info] can count Rejected separately for dashboards. *)
       state.consecutive_failures <- state.consecutive_failures + 1;
+      bump_failure_fp ();
       if state.consecutive_failures >= cooldown_threshold then
         state.cooldown_until <- now +. cooldown_sec
     | Hard_quota ->
@@ -231,21 +275,25 @@ let record t ~provider_key ~outcome ~now =
          an already-longer cooldown (e.g. if two hard-quota events fire
          concurrently and the second arrives first in wall time). *)
       state.consecutive_failures <- state.consecutive_failures + 1;
+      bump_failure_fp ();
       let new_until = now +. hard_quota_cooldown_sec in
       if new_until > state.cooldown_until then
         state.cooldown_until <- new_until)
 
 let record_success t ~provider_key =
-  record t ~provider_key ~outcome:Success ~now:(Unix.gettimeofday ())
+  record t ~provider_key ~outcome:Success ~now:(Unix.gettimeofday ()) ()
 
-let record_failure t ~provider_key =
-  record t ~provider_key ~outcome:Failure ~now:(Unix.gettimeofday ())
+let record_failure t ~provider_key ?error_kind ?error_reason () =
+  record t ~provider_key ~outcome:Failure ?error_kind ?error_reason
+    ~now:(Unix.gettimeofday ()) ()
 
-let record_rejected t ~provider_key =
-  record t ~provider_key ~outcome:Rejected ~now:(Unix.gettimeofday ())
+let record_rejected t ~provider_key ?error_kind ?error_reason () =
+  record t ~provider_key ~outcome:Rejected ?error_kind ?error_reason
+    ~now:(Unix.gettimeofday ()) ()
 
-let record_hard_quota t ~provider_key =
-  record t ~provider_key ~outcome:Hard_quota ~now:(Unix.gettimeofday ())
+let record_hard_quota t ~provider_key ?error_kind ?error_reason () =
+  record t ~provider_key ~outcome:Hard_quota ?error_kind ?error_reason
+    ~now:(Unix.gettimeofday ()) ()
 
 (* ── Queries ──────────────────────────────────── *)
 
@@ -322,7 +370,17 @@ type provider_info = {
   cooldown_expires_at : float option;
   events_in_window : int;
   rejected_in_window : int;
+  top_fingerprints : (string * int) list;
+  last_failure_at : float option;
 }
+
+let take_first_n n lst =
+  let rec loop k acc = function
+    | [] -> List.rev acc
+    | _ when k <= 0 -> List.rev acc
+    | x :: rest -> loop (k - 1) (x :: acc) rest
+  in
+  loop n [] lst
 
 let build_info_locked ~now ~key state =
   let recent = prune_old_events now state.events in
@@ -336,6 +394,15 @@ let build_info_locked ~now ~key state =
     else float_of_int successes /. float_of_int total
   in
   let in_cd = state.cooldown_until > now in
+  let top_fingerprints =
+    Hashtbl.fold (fun fp count acc -> (fp, count) :: acc)
+      state.fingerprint_counts []
+    |> List.sort (fun (_, a) (_, b) -> compare b a)
+    |> take_first_n 3
+  in
+  let last_failure_at =
+    if state.last_failure_at > 0.0 then Some state.last_failure_at else None
+  in
   {
     provider_key = key;
     success_rate = rate;
@@ -344,6 +411,8 @@ let build_info_locked ~now ~key state =
     cooldown_expires_at = (if in_cd then Some state.cooldown_until else None);
     events_in_window = total;
     rejected_in_window = rejected;
+    top_fingerprints;
+    last_failure_at;
   }
 
 let provider_info t ~provider_key =

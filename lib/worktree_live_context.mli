@@ -45,6 +45,10 @@ val git_status_timeout_sec : unit -> float
     deterministic "no previous hash" state. *)
 val clear_status_cache_for_tests : unit -> unit
 
+(** Reset the per-repo single-flight registry so tests observe an
+    uncontended gate. Pairs with {!clear_status_cache_for_tests}. *)
+val clear_single_flight_for_tests : unit -> unit
+
 (** [current_status_lines ~repo_root] returns the cached
     [git status --porcelain] lines for [repo_root], refreshing from
     disk on cache miss. *)

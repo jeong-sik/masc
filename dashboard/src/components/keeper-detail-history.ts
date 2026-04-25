@@ -169,7 +169,7 @@ export function KeeperCheckpointPanel({
 
   if (loading) {
     return html`
-      <div class="rounded border border-[var(--card-border)] bg-[var(--white-2)] px-3 py-3 text-xs text-[var(--text-muted)]">
+      <div class="rounded border border-[var(--card-border)] bg-[var(--white-2)] px-3 py-3 text-xs text-[var(--text-muted)]" role="status">
         checkpoint inventory 로딩 중...
       </div>
     `

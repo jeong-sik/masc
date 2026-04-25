@@ -661,6 +661,7 @@
         test_keeper_runtime_config_ssot
         test_dashboard_render_timing_9766
         test_task_status_label_10421
+        test_task_completion_path_10449
         test_personality_field_diff_10269
         test_toml_skip_dedup_10259
         test_discovery_history_models_10404
@@ -845,6 +846,7 @@
         test_keeper_runtime_config_ssot
         test_dashboard_render_timing_9766
         test_task_status_label_10421
+        test_task_completion_path_10449
         test_personality_field_diff_10269
         test_toml_skip_dedup_10259
         test_discovery_history_models_10404

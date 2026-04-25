@@ -19,6 +19,39 @@ val drift_variant_label : Coord_task_lifecycle.drift -> string
     cannot call Prometheus directly — it sits below that module
     in the library dep graph. *)
 
+(** {1 Task completion path observability (#10449)} *)
+
+val classify_contract_state : Types.task_contract option -> string
+(** Three-way classification of a task's contract surface:
+    - ["no_contract"] — [task.contract = None]
+    - ["empty_contract"] — contract record present but both
+      [completion_contract] and [required_evidence] are empty lists
+    - ["with_contract"] — at least one of those lists is non-empty,
+      so the verifier-gate redirect in [Tool_task] would fire on a
+      [Done_action]
+
+    Used as the [contract_state] label of
+    [masc_task_completion_path_total]. *)
+
+val classify_completion_path :
+  action:Types.task_action ->
+  drift:Coord_task_lifecycle.drift option ->
+  force:bool ->
+  string
+(** Classify the FSM path that produced a [Done] new_status:
+    - ["via_verification"] — [Approve_verification] action (verifier
+      redirect path)
+    - ["forced_done"] — [force=true] override regardless of drift
+    - ["claimed_to_done_skip"] — drift signal from
+      {!Coord_task_lifecycle.Claimed_to_done_skip} without force
+    - ["in_progress_to_done"] — normal [InProgress → Done] transition
+
+    Used as the [path] label of
+    [masc_task_completion_path_total].  Together with
+    {!classify_contract_state} this lets operators split the
+    bypass-rate documented in issue #10449 by creation-side
+    (missing contracts) vs. gate-side (redirect mis-firing). *)
+
 (** {1 Task activity helpers} *)
 
 val update_local_agent_state :

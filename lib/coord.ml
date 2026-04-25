@@ -222,6 +222,26 @@ let record_fsm_drift_with_agent ~variant ~force ~agent_name =
 
 let () = Atomic.set Coord_hooks.fsm_drift_observer_fn record_fsm_drift_with_agent
 
+(* #10449: Task completion path + contract-presence observability.
+   Splits the per-Done emit by [path] (claimed_to_done_skip /
+   in_progress_to_done / via_verification / forced_done) and
+   [contract_state] (no_contract / empty_contract / with_contract)
+   so operators can attribute bypass-rate to the creation-side
+   (missing contracts) vs. the gate-side (verifier-redirect not
+   firing). Cardinality bounded at ~4 × 3 × fleet_size. *)
+let task_completion_path_metric = "masc_task_completion_path_total"
+
+let record_task_completion_path ~path ~contract_state ~agent_name =
+  Prometheus.inc_counter task_completion_path_metric
+    ~labels:[ ("path", path);
+              ("contract_state", contract_state);
+              ("agent_name", agent_name) ]
+    ()
+
+let () =
+  Atomic.set Coord_hooks.task_completion_path_observed_fn
+    record_task_completion_path
+
 (* #9632: Process_eio timeout observability.
    Fleet-wide rate of subprocess timeouts, broken down by program
    (argv[0] basename) and configured budget.  Lets operators answer

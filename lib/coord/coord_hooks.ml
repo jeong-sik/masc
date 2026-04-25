@@ -184,3 +184,34 @@ let tool_assigned_fn
      unit ->
      string) Atomic.t
   = Atomic.make (fun ~agent_id:_ ~profile:_ ?preset:_ ~tool_list:_ ?allow_set:_ ?deny_set:_ ?config_hash:_ ?reason:_ () -> "")
+
+(** #10449: Task completion path observability.
+
+    Issue #10449 documented that 16 task done transitions over 3
+    days saw only 1 (6.25%) traverse the [awaiting_verification]
+    gate. The [verifier-gate redirect] in [Tool_task] only fires
+    when [task.contract] has a non-empty [completion_contract] or
+    [required_evidence] list, so tasks created without contracts
+    bypass verification entirely.
+
+    The pre-existing [fsm_drift_observer_fn] only counts the
+    [Claimed → Done] skip pattern (skipping [in_progress]); it
+    does not split by contract presence, so operators cannot tell
+    whether the bypass rate comes from missing contracts
+    (creation-side problem) or from the redirect mis-firing
+    (gate-side problem).
+
+    This hook fires once per successful transition into [Done] and
+    classifies the path along two axes:
+
+    - [path]: ["claimed_to_done_skip"] / ["in_progress_to_done"] /
+      ["via_verification"] / ["forced_done"]
+    - [contract_state]: ["no_contract"] / ["empty_contract"] /
+      ["with_contract"]
+
+    Cardinality is bounded at ~4 × 3 × fleet_size series, safe
+    for Prometheus.  Emit lives in [lib/coord.ml] to avoid a
+    [masc_coord → Prometheus] dep cycle. *)
+let task_completion_path_observed_fn
+  : (path:string -> contract_state:string -> agent_name:string -> unit) Atomic.t
+  = Atomic.make (fun ~path:_ ~contract_state:_ ~agent_name:_ -> ())

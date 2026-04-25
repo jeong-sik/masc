@@ -18,6 +18,36 @@ include Coord_broadcast
 let drift_variant_label = function
   | Coord_task_lifecycle.Claimed_to_done_skip -> "claimed_to_done_skip"
 
+(* #10449: classify a task's contract surface so the completion-path
+   metric can split bypass-rate by creation-side data presence.
+   Three states: missing field, present-but-empty, populated. *)
+let classify_contract_state (contract : Types.task_contract option) =
+  match contract with
+  | None -> "no_contract"
+  | Some c when c.completion_contract = [] && c.required_evidence = [] ->
+    "empty_contract"
+  | Some _ -> "with_contract"
+;;
+
+(* #10449: classify which FSM path produced a [Done] new_status.
+   Approve_verification trumps drift inspection because the verifier
+   redirect already cleared the drift signal upstream.  [forced_done]
+   only fires when [force=true] short-circuited the same-agent guard;
+   the lifecycle module emits the same drift variant for both forced
+   and consensual claimed→done jumps, so the [force] flag is the
+   only distinguisher. *)
+let classify_completion_path
+    ~(action : Types.task_action)
+    ~(drift : Coord_task_lifecycle.drift option)
+    ~(force : bool) =
+  match action, drift, force with
+  | Types.Approve_verification, _, _ -> "via_verification"
+  | _, _, true -> "forced_done"
+  | _, Some Coord_task_lifecycle.Claimed_to_done_skip, false ->
+    "claimed_to_done_skip"
+  | _, None, false -> "in_progress_to_done"
+;;
+
 let task_actor_kind agent_name =
   let normalized = String.lowercase_ascii (String.trim agent_name) in
   if normalized = "" || normalized = "system"
@@ -1353,6 +1383,21 @@ let transition_task_r
              agent_name
              force
          | None -> ());
+        (* #10449: Observe task completion path + contract presence so
+           operators can split bypass-rate by cause (no contract vs.
+           gate mis-fire). Fires once per successful transition into
+           [Done]; emit goes through [task_completion_path_observed_fn]
+           so [masc_coord] keeps no direct [Prometheus] dep. *)
+        (match new_status with
+         | Types.Done _ ->
+           let contract_state = classify_contract_state task.contract in
+           let path =
+             classify_completion_path ~action ~drift:decision.drift ~force
+           in
+           (Atomic.get Coord_hooks.task_completion_path_observed_fn)
+             ~path ~contract_state ~agent_name
+         | Types.Todo | Types.Claimed _ | Types.InProgress _
+         | Types.AwaitingVerification _ | Types.Cancelled _ -> ());
         (match action, task.task_status with
          | Types.Release, Types.Todo ->
            (* Idempotent: already in backlog, nothing to release.

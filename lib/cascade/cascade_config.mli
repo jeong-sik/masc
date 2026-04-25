@@ -377,6 +377,12 @@ val filter_healthy :
 
 (** {1 Context Window Resolution} *)
 
+(** Resolve the Kimi context window from the OAS capability SSOT.
+
+    This is shared by cascade profile generation and Kimi CLI transport config
+    so those paths do not drift through local "256k" constants. *)
+val resolve_kimi_max_context : string -> int
+
 (** Effective max context tokens for a provider entry.
 
     Returns [caps.max_context_tokens] when known (per-model), otherwise

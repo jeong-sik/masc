@@ -2196,6 +2196,28 @@ let test_kimi_cli_model_for_provider_keeps_explicit_model () =
     (Some "kimi-k2.5")
     (Oas_worker_exec.kimi_cli_model_for_provider provider_cfg)
 
+let test_kimi_cli_config_uses_oas_context_ssot () =
+  let model_id = "kimi-for-coding" in
+  let provider_cfg =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.Kimi_cli
+      ~model_id
+      ~base_url:""
+      ~api_key:"test-key" ()
+  in
+  match Oas_worker_exec.kimi_cli_config_json_for_provider provider_cfg with
+  | None -> Alcotest.fail "expected kimi_cli config json"
+  | Some raw ->
+      let json = _parse_json raw in
+      let actual =
+        Yojson.Safe.Util.(
+          json |> member "models" |> member model_id
+          |> member "max_context_size" |> to_int)
+      in
+      let expected = Cascade_config.resolve_kimi_max_context model_id in
+      Alcotest.(check int) "max_context_size from OAS capabilities SSOT"
+        expected actual
+
 let test_kimi_cli_should_log_stderr_line_filters_resume_noise () =
   let should_log =
     Oas_worker_exec.Kimi_cli_transport_local.should_log_stderr_line
@@ -3654,6 +3676,8 @@ let () =
         test_kimi_cli_model_for_provider_keeps_transport_default_on_auto;
       Alcotest.test_case "kimi explicit model is preserved" `Quick
         test_kimi_cli_model_for_provider_keeps_explicit_model;
+      Alcotest.test_case "kimi config max context uses OAS SSOT" `Quick
+        test_kimi_cli_config_uses_oas_context_ssot;
       Alcotest.test_case "kimi stderr resume noise is filtered" `Quick
         test_kimi_cli_should_log_stderr_line_filters_resume_noise;
       Alcotest.test_case "kimi exit 75 detail is redacted" `Quick

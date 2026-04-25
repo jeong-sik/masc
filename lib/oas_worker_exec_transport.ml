@@ -446,6 +446,7 @@ let kimi_cli_config_json_for_provider
   match kimi_cli_model_for_provider provider_cfg, kimi_cli_auth_value provider_cfg with
   | Some model_name, Some _ ->
       let provider_name = "masc-kimi" in
+      let max_context_size = Cascade_config.resolve_kimi_max_context model_name in
       let config_json =
         `Assoc
           [
@@ -469,7 +470,7 @@ let kimi_cli_config_json_for_provider
                       [
                         ("provider", `String provider_name);
                         ("model", `String model_name);
-                        ("max_context_size", `Int 262144);
+                        ("max_context_size", `Int max_context_size);
                       ] );
                 ] );
           ]

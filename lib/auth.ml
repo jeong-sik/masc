@@ -443,22 +443,18 @@ let list_credentials config : agent_credential list =
     hash is unique. *)
 (** #10304: indexed credential view used by both
     {!audit_token_uniqueness} (detection) and {!rotate_shared_tokens}
-    (prevention).  Returns [(token_hash, [(name, role) pairs])] so
-    rotation can look up each agent's role without re-walking the
-    credential store. *)
-let group_credentials_by_token config :
-    (string * (string * agent_role) list) list =
+    (prevention).  Returns [(token_hash, credentials)] so rotation
+    can preserve credential IDs / roles while minting fresh bearer
+    material. *)
+let group_credentials_by_token config : (string * agent_credential list) list =
   let creds = list_credentials config in
-  let by_token : (string, (string * agent_role) list) Hashtbl.t =
-    Hashtbl.create 16
-  in
+  let by_token : (string, agent_credential list) Hashtbl.t = Hashtbl.create 16 in
   List.iter
     (fun (cred : agent_credential) ->
       let prev =
         Hashtbl.find_opt by_token cred.token |> Option.value ~default:[]
       in
-      Hashtbl.replace by_token cred.token
-        ((cred.agent_name, cred.role) :: prev))
+      Hashtbl.replace by_token cred.token (cred :: prev))
     creds;
   Hashtbl.fold
     (fun token_hash entries acc -> (token_hash, entries) :: acc)
@@ -475,7 +471,7 @@ let audit_token_uniqueness config : (string * string list) list =
          | [] | [ _ ] -> None
          | xs ->
              let names =
-               List.map (fun (name, _role) -> name) xs
+               List.map (fun (cred : agent_credential) -> cred.agent_name) xs
                |> List.sort String.compare
              in
              Some (token_hash_prefix_of token_hash, names))
@@ -598,9 +594,37 @@ type rotation_outcome = {
   rotated_agents : (string * (unit, masc_error) result) list;
 }
 
-let rotate_shared_tokens config : rotation_outcome list =
+let save_rotated_raw_token config (cred : agent_credential) ~raw_token :
+    (agent_credential, masc_error) result =
+  let auth_cfg = load_auth_config config in
+  let rotated =
+    {
+      cred with
+      token = sha256_hash raw_token;
+      created_at = now_iso ();
+      expires_at = expires_at_for_auth_config auth_cfg;
+    }
+  in
+  try
+    persist_raw_token config ~agent_name:rotated.agent_name raw_token;
+    save_credential config rotated;
+    Ok rotated
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+    let msg =
+      Printf.sprintf "Failed to rotate agent credential for %s: %s"
+        rotated.agent_name (Printexc.to_string exn)
+    in
+    Log.Auth.error "%s" msg;
+    Error (IoError msg)
+
+let rotate_shared_tokens_matching config ~include_agent : rotation_outcome list =
   group_credentials_by_token config
   |> List.filter_map (fun (token_hash, entries) ->
+         let entries =
+           List.filter
+             (fun (cred : agent_credential) -> include_agent cred.agent_name)
+             entries
+         in
          match entries with
          | [] | [ _ ] -> None
          | xs ->
@@ -609,24 +633,33 @@ let rotate_shared_tokens config : rotation_outcome list =
                 operators diffing successive logs see no phantom
                 reorderings. *)
              let sorted =
-               List.sort (fun (a, _) (b, _) -> String.compare a b) xs
+               List.sort
+                 (fun (a : agent_credential) (b : agent_credential) ->
+                   String.compare a.agent_name b.agent_name)
+                 xs
              in
              Some (prefix, sorted))
   |> List.sort (fun (a, _) (b, _) -> String.compare a b)
   |> List.map (fun (token_hash_prefix, sorted_entries) ->
          let rotated_agents =
            List.map
-             (fun (agent_name, role) ->
+             (fun (cred : agent_credential) ->
                let raw_token = generate_token () in
-               match
-                 save_raw_token_credential config ~agent_name ~role
-                   ~raw_token
-               with
-               | Ok _ -> (agent_name, Ok ())
-               | Error e -> (agent_name, Error e))
+               match save_rotated_raw_token config cred ~raw_token with
+               | Ok _ -> (cred.agent_name, Ok ())
+               | Error e -> (cred.agent_name, Error e))
              sorted_entries
          in
          { token_hash_prefix; rotated_agents })
+
+let rotate_shared_tokens config : rotation_outcome list =
+  rotate_shared_tokens_matching config ~include_agent:(fun _ -> true)
+
+let rotate_shared_tokens_for_agents config ~agent_names : rotation_outcome list =
+  let include_agent agent_name =
+    List.exists (String.equal agent_name) agent_names
+  in
+  rotate_shared_tokens_matching config ~include_agent
 
 (* #9786: record bearer-token mismatch for observability.  Shared
    helper so both reject sites feed the same counter with the same
@@ -713,26 +746,40 @@ let verify_token config ~agent_name ~token : (agent_credential, masc_error) resu
 
 let ensure_keeper_credential config ~agent_name :
     (string * agent_credential, masc_error) result =
-  let raw_token = ensure_internal_keeper_token config in
-  let id =
-    match load_credential config agent_name with
-    | Some { id = Some existing; _ } -> existing
-    | _ -> Credential_id.generate ()
-  in
-  let cred =
-    {
-      id = Some id;
-      agent_id = None;
-      agent_name;
-      token = sha256_hash raw_token;
-      role = Worker;
-      created_at = now_iso ();
-      expires_at = None;
-    }
+  ignore (ensure_internal_keeper_token config);
+  let existing = load_credential config agent_name in
+  let create_fresh_keeper_token () =
+    let raw_token = generate_token () in
+    let id, agent_id =
+      match existing with
+      | Some cred ->
+          ( (match cred.id with Some id -> id | None -> Credential_id.generate ()),
+            cred.agent_id )
+      | None -> (Credential_id.generate (), None)
+    in
+    let cred =
+      {
+        id = Some id;
+        agent_id;
+        agent_name;
+        token = sha256_hash raw_token;
+        role = Worker;
+        created_at = now_iso ();
+        expires_at = None;
+      }
+    in
+    persist_raw_token config ~agent_name raw_token;
+    save_credential config cred;
+    (raw_token, cred)
   in
   try
-    save_credential config cred;
-    Ok (raw_token, cred)
+    match load_raw_token config ~agent_name with
+    | Some raw_token -> (
+        match verify_token config ~agent_name ~token:raw_token with
+        | Ok cred when String.equal cred.agent_name agent_name ->
+            Ok (raw_token, cred)
+        | Ok _ | Error _ -> Ok (create_fresh_keeper_token ()))
+    | None -> Ok (create_fresh_keeper_token ())
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     let msg =
       Printf.sprintf "Failed to save keeper credential: %s"

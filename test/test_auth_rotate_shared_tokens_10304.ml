@@ -76,6 +76,17 @@ let credential_role base_path agent_name =
   | Some cred -> cred.role
   | None -> failf "credential missing: %s" agent_name
 
+let raw_token_file base_path agent_name =
+  Filename.concat (Auth.auth_dir base_path) (agent_name ^ ".token")
+
+let raw_token_value base_path agent_name =
+  let path = raw_token_file base_path agent_name in
+  if Sys.file_exists path then
+    In_channel.with_open_bin path (fun ic ->
+        String.trim (In_channel.input_all ic))
+  else
+    failf "raw token file missing: %s" path
+
 (* --- 1. clean store -> empty rotation --------------------------- *)
 
 let test_no_shared_returns_empty () =
@@ -133,6 +144,20 @@ let test_shared_group_rotates_to_unique () =
   check int "3 distinct token hashes after rotation"
     3
     (List.sort_uniq String.compare tokens |> List.length);
+  [ "keeper-a"; "keeper-b"; "keeper-c" ]
+  |> List.iter (fun agent_name ->
+         let raw_token = raw_token_value base agent_name in
+         check string
+           (agent_name ^ " raw token file hashes to rotated credential")
+           (credential_token base agent_name)
+           (Auth.sha256_hash raw_token);
+         match Auth.verify_token base ~agent_name ~token:raw_token with
+         | Ok cred ->
+             check string (agent_name ^ " raw token verifies")
+               agent_name cred.agent_name
+         | Error e ->
+             failf "%s raw token should verify after rotation: %s"
+               agent_name (Types.masc_error_to_string e));
   (* Audit is empty after rotation. *)
   check int "audit is clean after rotation"
     0 (List.length (Auth.audit_token_uniqueness base))
@@ -200,6 +225,43 @@ let test_idempotent_after_rotation () =
   check int "second rotation finds nothing to rotate"
     0 (List.length second_outcomes)
 
+(* --- 6. scoped rotation leaves non-target agents alone ---------- *)
+
+let test_scoped_rotation_only_rotates_selected_agents () =
+  with_temp_base @@ fun base ->
+  let shared = "scoped-shared-token" in
+  ignore
+    (seed_shared_credential base ~agent_name:"keeper-a"
+       ~role:Types.Worker ~raw_token:shared);
+  ignore
+    (seed_shared_credential base ~agent_name:"keeper-b"
+       ~role:Types.Worker ~raw_token:shared);
+  ignore
+    (seed_shared_credential base ~agent_name:"admin"
+       ~role:Types.Admin ~raw_token:shared);
+  let outcomes =
+    Auth.rotate_shared_tokens_for_agents base
+      ~agent_names:[ "keeper-a"; "keeper-b" ]
+  in
+  check int "one scoped outcome" 1 (List.length outcomes);
+  let outcome = List.hd outcomes in
+  check (list string) "only selected keepers rotated"
+    [ "keeper-a"; "keeper-b" ]
+    (outcome_names_of outcome);
+  check string "admin kept old shared token hash"
+    (Auth.sha256_hash shared) (credential_token base "admin");
+  let keeper_tokens =
+    [ "keeper-a"; "keeper-b" ] |> List.map (credential_token base)
+  in
+  check int "selected keepers now unique"
+    2 (List.sort_uniq String.compare keeper_tokens |> List.length);
+  check bool "keeper-a no longer shares with admin" false
+    (String.equal (credential_token base "keeper-a")
+       (credential_token base "admin"));
+  check bool "keeper-b no longer shares with admin" false
+    (String.equal (credential_token base "keeper-b")
+       (credential_token base "admin"))
+
 let () =
   run "auth_rotate_shared_tokens_10304"
     [
@@ -224,5 +286,10 @@ let () =
         [
           test_case "second call is a no-op" `Quick
             test_idempotent_after_rotation;
+        ] );
+      ( "scoped",
+        [
+          test_case "selected agents rotate without admin blast radius" `Quick
+            test_scoped_rotation_only_rotates_selected_agents;
         ] );
     ]

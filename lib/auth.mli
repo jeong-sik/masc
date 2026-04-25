@@ -80,9 +80,10 @@ val rotate_shared_tokens : string -> rotation_outcome list
 (** #10304 follow-up to #9786: when {!audit_token_uniqueness} reports
     a group of agents sharing one bearer token, generate a fresh
     unique token for EACH agent in the group and persist the
-    credential.  Returns one [rotation_outcome] per group, in the
-    same order as the audit, so callers can attach a structured WARN
-    or counter to every rotation.
+    credential plus its raw token file.  Returns one
+    [rotation_outcome] per group, in the same order as the audit, so
+    callers can attach a structured WARN or counter to every
+    rotation.
 
     A single shared-token incident on the production fleet flips
     14 keeper credentials at once (#10304 evidence: 3 distinct
@@ -95,6 +96,14 @@ val rotate_shared_tokens : string -> rotation_outcome list
     of that token to re-fetch credentials.  Callers should hold
     rotation to boot-time or operator-driven contexts where the
     re-auth burst is acceptable. *)
+
+val rotate_shared_tokens_for_agents :
+  string -> agent_names:string list -> rotation_outcome list
+(** Guarded variant of {!rotate_shared_tokens}.  Only credentials
+    whose [agent_name] is present in [agent_names] are eligible for
+    rotation.  Boot-time keeper repair uses this to avoid rotating
+    operator/admin tokens while still breaking shared keeper bearer
+    groups. *)
 
 val find_credential_by_token :
   string -> token:string -> (agent_credential, masc_error) result
@@ -120,7 +129,9 @@ val ensure_keeper_credential :
   string -> agent_name:string ->
   (string * agent_credential, masc_error) result
 (** [ensure_keeper_credential config ~agent_name] returns a valid credential,
-    backed by the shared internal keeper token. *)
+    backed by a per-keeper raw bearer token file.  The internal
+    keeper MCP token remains separate and is only used for the
+    [x-masc-internal-token] trust path. *)
 
 (** {1 Token Lifecycle} *)
 

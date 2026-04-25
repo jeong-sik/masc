@@ -119,6 +119,36 @@ let clear_status_cache_for_tests () =
     ~finally:(fun () -> Stdlib.Mutex.unlock status_cache_mu)
     (fun () -> Hashtbl.clear status_cache)
 
+(* Single-flight gates: per-repo Stdlib.Mutex serialising concurrent cache
+   misses so only one [git status] runs per repo at a time.  Without this
+   gate N keepers + dashboard fibers hitting an expired cache simultaneously
+   each fork+exec git, multiplying the I/O contention that was already
+   making git status take 10s+ on a 13-line working tree (#9632).  After
+   the winner refreshes the cache, followers re-check and reuse it.
+   Pattern: Go [singleflight.Group], Caffeine loading cache. *)
+let single_flight_registry : (string, Stdlib.Mutex.t) Hashtbl.t =
+  Hashtbl.create 4
+
+let single_flight_registry_mu = Stdlib.Mutex.create ()
+
+let single_flight_gate repo_root =
+  Stdlib.Mutex.lock single_flight_registry_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock single_flight_registry_mu)
+    (fun () ->
+      match Hashtbl.find_opt single_flight_registry repo_root with
+      | Some mu -> mu
+      | None ->
+          let mu = Stdlib.Mutex.create () in
+          Hashtbl.replace single_flight_registry repo_root mu;
+          mu)
+
+let clear_single_flight_for_tests () =
+  Stdlib.Mutex.lock single_flight_registry_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock single_flight_registry_mu)
+    (fun () -> Hashtbl.clear single_flight_registry)
+
 let current_status_lines_uncached ~repo_root =
   run_git_capture_lines ~workdir:repo_root
     [ "--no-optional-locks"; "status"; "--porcelain"; "--untracked-files=no" ]
@@ -127,14 +157,26 @@ let current_status_lines_uncached ~repo_root =
   |> List.filter (fun line -> line <> "")
 
 let current_status_lines ~repo_root =
-  let now = Time_compat.now () in
   let ttl = status_cache_ttl_sec () in
-  match status_cache_lookup repo_root ~now ~ttl with
+  match status_cache_lookup repo_root ~now:(Time_compat.now ()) ~ttl with
   | Some lines -> lines
   | None ->
-      let lines = current_status_lines_uncached ~repo_root in
-      status_cache_store repo_root lines ~now:(Time_compat.now ()) ~ttl;
-      lines
+      let gate = single_flight_gate repo_root in
+      Stdlib.Mutex.lock gate;
+      Fun.protect
+        ~finally:(fun () -> Stdlib.Mutex.unlock gate)
+        (fun () ->
+          (* Double-check: the caller that won the race may have refreshed
+             the cache while we were blocked on [gate]. *)
+          match
+            status_cache_lookup repo_root ~now:(Time_compat.now ()) ~ttl
+          with
+          | Some lines -> lines
+          | None ->
+              let lines = current_status_lines_uncached ~repo_root in
+              status_cache_store repo_root lines
+                ~now:(Time_compat.now ()) ~ttl;
+              lines)
 
 let state_dir ~repo_root =
   Filename.concat

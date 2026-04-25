@@ -25,6 +25,31 @@ let contains_substring haystack needle =
     in
     loop 0
 
+(* Byte-wise substring search: returns the index of the first match at or
+   after [pos] (default 0), or [None] if absent. Empty needle returns
+   [Some pos], matching [Re.exec_opt (Re.str "" |> Re.compile)] semantics. *)
+let find_substring ?(pos = 0) haystack needle =
+  if pos < 0 then invalid_arg "String_util.find_substring: negative position";
+  let hay_len = String.length haystack in
+  let needle_len = String.length needle in
+  if needle_len = 0 then Some pos
+  else if pos + needle_len > hay_len then None
+  else
+    let rec match_at i j =
+      if j = needle_len then true
+      else if String.unsafe_get haystack (i + j)
+            <> String.unsafe_get needle j
+      then false
+      else match_at i (j + 1)
+    in
+    let last = hay_len - needle_len in
+    let rec loop i =
+      if i > last then None
+      else if match_at i 0 then Some i
+      else loop (i + 1)
+    in
+    loop pos
+
 (* ASCII case-insensitive substring containment without lowercasing
    either string.  Lowering happens byte-by-byte during compare. *)
 let contains_substring_ci haystack needle =
@@ -47,6 +72,39 @@ let contains_substring_ci haystack needle =
       else loop (i + 1)
     in
     loop 0
+
+(* Byte-wise non-overlapping replace: scans [haystack] for [needle] and
+   substitutes [by] for each occurrence. Empty needle is a no-op (would
+   loop forever otherwise). Skips ahead by [needle_len] after a match,
+   matching [Re.replace_string] semantics for non-overlapping replacement. *)
+let replace_substring ~needle ~by haystack =
+  let hay_len = String.length haystack in
+  let needle_len = String.length needle in
+  if needle_len = 0 || needle_len > hay_len then haystack
+  else
+    let buf = Buffer.create hay_len in
+    let rec match_at i j =
+      if j = needle_len then true
+      else if String.unsafe_get haystack (i + j)
+            <> String.unsafe_get needle j
+      then false
+      else match_at i (j + 1)
+    in
+    let last = hay_len - needle_len in
+    let rec loop i =
+      if i > last then
+        Buffer.add_substring buf haystack i (hay_len - i)
+      else if match_at i 0 then begin
+        Buffer.add_string buf by;
+        loop (i + needle_len)
+      end
+      else begin
+        Buffer.add_char buf (String.unsafe_get haystack i);
+        loop (i + 1)
+      end
+    in
+    loop 0;
+    Buffer.contents buf
 
 type truncation =
   | Untouched of string

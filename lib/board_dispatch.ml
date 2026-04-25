@@ -407,8 +407,9 @@ let search ~query ~limit =
   match backend () with
   | Jsonl store ->
       let query_lower = String.lowercase_ascii query in
-      let pattern = Re.str query_lower |> Re.compile in
-      let matches_str s = Re.execp pattern (String.lowercase_ascii s) in
+      let matches_str s =
+        String_util.contains_substring (String.lowercase_ascii s) query_lower
+      in
       let predicate (p : Board.post) =
         matches_str p.title
         || matches_str p.content

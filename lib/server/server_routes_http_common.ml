@@ -103,17 +103,9 @@ let state_net_opt = function
   | None -> Eio_context.get_net_opt ()
 
 let contains_substring ~needle haystack =
-  let needle_len = String.length needle in
-  let haystack_len = String.length haystack in
-  let rec loop idx =
-    if idx + needle_len > haystack_len then
-      false
-    else if String.sub haystack idx needle_len = needle then
-      true
-    else
-      loop (idx + 1)
-  in
-  needle_len > 0 && loop 0
+  (* Empty needle returns false (unlike String_util's Re-compatible
+     empty=true).  Guard preserves the prior caller contract. *)
+  String.length needle > 0 && String_util.contains_substring haystack needle
 
 let host_header_has_forbidden_authority_chars value =
   let has_forbidden_char =

@@ -498,6 +498,15 @@ let metric_fs_atomic_orphans_cleaned =
 let metric_auth_bearer_token_mismatch =
   "masc_auth_bearer_token_mismatch_total"
 
+(* #9786 follow-up: boot-time audit counter for credentials
+   sharing the same token hash.  Distinct from
+   [bearer_token_mismatch]: the mismatch counter fires per
+   request, this fires once per boot per detected duplicate
+   group.  Operators alert on a non-zero value at all — every
+   shared-token group is a routing ambiguity. *)
+let metric_auth_credential_token_duplicate =
+  "masc_auth_credential_token_duplicate_total"
+
 
 (** {1 Built-in Metrics} *)
 

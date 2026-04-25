@@ -1264,6 +1264,36 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
             Log.Server.error
               "boot: atomic orphan sweep failed: %s"
               (Printexc.to_string exn));
+      (* #9786: audit credential store for shared bearer tokens.
+         When two credentials hash to the same token,
+         [find_credential_by_token] silently routes to the FIRST
+         match — which is exactly the [bearer token belongs to X]
+         rejection observed when the second agent's name does not
+         match the first agent's credential.  Surface the
+         duplicate at boot so operators can rotate tokens before
+         requests start failing. *)
+      (try
+         let groups = Auth.audit_token_uniqueness base_path in
+         List.iter
+           (fun (token_hash_prefix, agent_names) ->
+             Prometheus.inc_counter
+               Prometheus.metric_auth_credential_token_duplicate
+               ~labels:[ ("token_hash_prefix", token_hash_prefix) ]
+               ();
+             Log.Server.warn
+               "#9786 credential token shared by %d agents \
+                [%s] (token_hash_prefix=%s) — rotate via \
+                Auth.create_token to prevent bearer-token routing \
+                ambiguity"
+               (List.length agent_names)
+               (String.concat ", " agent_names)
+               token_hash_prefix)
+           groups
+       with Eio.Cancel.Cancelled _ as e -> raise e
+          | exn ->
+            Log.Server.error
+              "boot: credential token uniqueness audit failed: %s"
+              (Printexc.to_string exn));
       let t2 = Eio.Time.now clock in
       Log.Server.info "Bootstrap completed in %.1fs" (t2 -. t1);
       Server_bootstrap_loops.install_tooling ~governance_level state;

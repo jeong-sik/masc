@@ -218,6 +218,12 @@ val metric_fs_atomic_orphans_cleaned : string
     signal of shared credential state (connection pool / fork). *)
 val metric_auth_bearer_token_mismatch : string
 
+val metric_auth_credential_token_duplicate : string
+(** #9786 follow-up: boot-time audit counter for credentials
+    sharing the same token hash.  Increments once per boot per
+    duplicate group.  Operator alert: any non-zero rate is a
+    routing-ambiguity that must be rotated. *)
+
 
 (** {1 Transport metrics} *)
 

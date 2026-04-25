@@ -51,6 +51,19 @@ val delete_credential : string -> string -> unit
 
 val list_credentials : string -> agent_credential list
 
+val audit_token_uniqueness : string -> (string * string list) list
+(** #9786: walk all credentials under [config] and return groups of
+    agent names that share the same token hash.  Each entry is
+    [(token_hash_prefix, agent_names)] where [agent_names] has at
+    least 2 elements (a unique token would not appear in the
+    result).  [token_hash_prefix] is the first 12 chars of the
+    SHA-256 hash, so logs / dashboards can correlate without
+    leaking the full credential.
+
+    Used at server bootstrap to surface the
+    [bearer-token-belongs-to-X] failure mode (#9786) BEFORE
+    runtime requests start failing.  Empty list = healthy. *)
+
 val find_credential_by_token :
   string -> token:string -> (agent_credential, masc_error) result
 

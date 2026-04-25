@@ -421,6 +421,47 @@ let list_credentials config : agent_credential list =
   else
     []
 
+(** #9786: detect credentials sharing the same bearer token.
+
+    The 2026-04-23 audit found [codex-mcp-client] and [admin]
+    tokens being presented for [keeper-sangsu-agent] /
+    [nick0cave-sage-heron] requests — symptom of multiple
+    credentials hashing to the same token, or a single MCP
+    client connection being reused across agent identities.
+
+    [find_credential_by_token]'s [List.find_opt] returns the FIRST
+    matching credential, so when two credentials share a token the
+    second agent's auth silently routes to the first agent's
+    identity — which is exactly the [bearer token belongs to X]
+    rejection observed in #9786 once the requested name does not
+    match the routed credential's owner.
+
+    This audit walks the credential store and returns groups of
+    [(token_hash_prefix, agent_names)] where [List.length
+    agent_names >= 2].  Empty list means every credential's token
+    hash is unique. *)
+let audit_token_uniqueness config : (string * string list) list =
+  let creds = list_credentials config in
+  let by_token : (string, string list) Hashtbl.t = Hashtbl.create 16 in
+  List.iter
+    (fun (cred : agent_credential) ->
+      let prev = Hashtbl.find_opt by_token cred.token |> Option.value ~default:[] in
+      Hashtbl.replace by_token cred.token (cred.agent_name :: prev))
+    creds;
+  Hashtbl.fold
+    (fun token_hash agents acc ->
+      match agents with
+      | [] | [ _ ] -> acc
+      | xs ->
+        let prefix =
+          if String.length token_hash >= 12
+          then String.sub token_hash 0 12
+          else token_hash
+        in
+        (prefix, List.sort String.compare xs) :: acc)
+    by_token []
+  |> List.sort (fun (a, _) (b, _) -> String.compare a b)
+
 (** Find credential by raw token (hash lookup + expiry check) *)
 let find_credential_by_token config ~token : (agent_credential, masc_error) result =
   let token_hash = sha256_hash token in

@@ -208,6 +208,52 @@ let test_risk_medium_transition_start () =
   Alcotest.(check string) "transition start is medium"
     "medium" (Gp.risk_level_to_string risk)
 
+(* ── PR-J: payload severity discrimination ──────────────────── *)
+(* Background: pre-PR-J, [classify_with_payload] used a single
+   [Eval_gate.detect_destructive] check that conflated canonical
+   destructive substrings (rm -rf, drop table) with evasion-only
+   indicators (command substitution `$(...)`, hex escapes).  Every
+   keeper_bash payload that used [$(date ...)] tripped the evasion
+   regex and was escalated to Critical, blocking benign helpers like
+   `echo "ts: $(date)" && pwd` (see masc-improver evidence
+   2026-04-25T18:33Z).  These regression tests pin the new behavior:
+   - destructive substring → Critical
+   - evasion-only meta-pattern → Medium (not Critical)
+   - clean payload → fall back to tool-name baseline *)
+
+let test_risk_payload_destructive_rm_rf () =
+  let input = `Assoc [ ("cmd", `String "rm -rf /tmp/x") ] in
+  let risk = Gp.assess_risk ~tool_name:"keeper_bash" ~input in
+  Alcotest.(check string) "rm -rf payload remains critical"
+    "critical" (Gp.risk_level_to_string risk)
+
+let test_risk_payload_evasion_only_command_substitution () =
+  let input =
+    `Assoc
+      [
+        ("cmd", `String "echo \"ts: $(date -u +%FT%TZ)\" && pwd");
+      ]
+  in
+  let risk = Gp.assess_risk ~tool_name:"keeper_bash" ~input in
+  Alcotest.(check string)
+    "command-substitution evasion alone is medium, not critical"
+    "medium" (Gp.risk_level_to_string risk)
+
+let test_risk_payload_evasion_only_hex_escape () =
+  let input = `Assoc [ ("cmd", `String "printf '\\x72\\x6d'") ] in
+  let risk = Gp.assess_risk ~tool_name:"keeper_bash" ~input in
+  Alcotest.(check string) "hex escape evasion alone is medium"
+    "medium" (Gp.risk_level_to_string risk)
+
+let test_risk_payload_destructive_inside_substitution () =
+  (* Even though `$(...)` triggers evasion, the inner `rm -rf` substring
+     remains visible to detect_destructive after normalize_command, so
+     the result must still escalate to Critical. *)
+  let input = `Assoc [ ("cmd", `String "echo $(rm -rf /)") ] in
+  let risk = Gp.assess_risk ~tool_name:"keeper_bash" ~input in
+  Alcotest.(check string) "destructive inside $(...) stays critical"
+    "critical" (Gp.risk_level_to_string risk)
+
 let test_risk_low_unknown () =
   let risk = Gp.assess_risk ~tool_name:"masc_foobar" ~input:no_args in
   Alcotest.(check string) "unknown is low"
@@ -852,6 +898,14 @@ let () =
       Alcotest.test_case "medium: resume" `Quick test_risk_medium_resume;
       Alcotest.test_case "medium: transition start" `Quick
         test_risk_medium_transition_start;
+      Alcotest.test_case "payload: rm -rf is critical" `Quick
+        test_risk_payload_destructive_rm_rf;
+      Alcotest.test_case "payload: $(date) is medium not critical" `Quick
+        test_risk_payload_evasion_only_command_substitution;
+      Alcotest.test_case "payload: hex escape alone is medium" `Quick
+        test_risk_payload_evasion_only_hex_escape;
+      Alcotest.test_case "payload: destructive inside $(...) is critical"
+        `Quick test_risk_payload_destructive_inside_substitution;
       Alcotest.test_case "high: goal upsert" `Quick test_risk_high_goal_upsert;
       Alcotest.test_case "high: goal transition" `Quick
         test_risk_high_goal_transition;

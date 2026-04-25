@@ -273,7 +273,6 @@ function OverviewTile({ id, connector, keeperCount, selected, onSelectConnector,
                   class="mt-1 block truncate text-3xs text-[var(--text-dim)]"
                   title=${identity}
                   data-tile-identity=${id}
-                  title=${identity}
                 >${identity}</span>`
               : null
           })()}

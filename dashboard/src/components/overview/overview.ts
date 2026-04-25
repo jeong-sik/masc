@@ -294,6 +294,7 @@ function KeeperStrip({ keeperList }: { keeperList: readonly Keeper[] }) {
                 tab="monitoring"
                 params=${{ section: 'keepers', keeper: k.name }}
                 class="text-sm text-[var(--text-strong)] truncate hover:underline"
+                title=${k.koreanName !== undefined && k.koreanName !== '' ? k.koreanName : k.name}
               >
                 ${k.koreanName !== undefined && k.koreanName !== '' ? k.koreanName : k.name}
               <//>

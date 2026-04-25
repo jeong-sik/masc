@@ -337,17 +337,17 @@ function ARFindingCard() {
           <span className="conf">{(f.confidence*100).toFixed(0)}% confidence</span>
         </div>
         <section aria-labelledby={`ar-${f.id}-hyp`}>
-          <div className="sec-h" id={`ar-${f.id}-hyp`} role="heading" aria-level={4}>hypothesis</div>
+          <SectionHeading title="hypothesis" level={4} id={`ar-${f.id}-hyp`} />
           <div className="hy">{f.hypothesis}</div>
         </section>
         <section aria-labelledby={`ar-${f.id}-ev`}>
-          <div className="sec-h" id={`ar-${f.id}-ev`} role="heading" aria-level={4}>evidence ({f.evidence.length})</div>
+          <SectionHeading title={`evidence (${f.evidence.length})`} level={4} id={`ar-${f.id}-ev`} />
           <ul className="ev-list" role="list" style={{listStyle:'none', margin:0, padding:0}}>
             {f.evidence.map((e, i) => <li key={i} className="ev">{e}</li>)}
           </ul>
         </section>
         <section aria-labelledby={`ar-${f.id}-co`}>
-          <div className="sec-h" id={`ar-${f.id}-co`} role="heading" aria-level={4}>conclusion</div>
+          <SectionHeading title="conclusion" level={4} id={`ar-${f.id}-co`} />
           <div className="co">{f.conclusion}</div>
         </section>
       </article>

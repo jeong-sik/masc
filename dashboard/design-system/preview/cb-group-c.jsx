@@ -196,7 +196,7 @@ function DrawerTask() {
       </div>
       <div className="body">
         <section aria-labelledby="drawer-task-details">
-          <div className="sec-title" id="drawer-task-details" role="heading" aria-level={3}>DETAILS</div>
+          <SectionHeading variant="title" title="DETAILS" id="drawer-task-details" />
           <dl className="kv">
             <dt>KEEPER</dt><dd>nick0cave</dd>
             <dt>TOOL</dt><dd>tool.write_file</dd>
@@ -206,7 +206,7 @@ function DrawerTask() {
           </dl>
         </section>
         <section aria-labelledby="drawer-task-review">
-          <div className="sec-title" id="drawer-task-review" role="heading" aria-level={3}>REVIEW · 3</div>
+          <SectionHeading variant="title" title="REVIEW · 3" id="drawer-task-review" />
           <div className="thread" role="log" aria-live="polite" aria-label="Review thread, 3 comments">
             <div className="cmt flag" role="article" aria-label="Flag from sangsu, 3 minutes ago: drift detected at pipeline.ts L187 — signature mismatch">
               <div className="h" aria-hidden="true">
@@ -265,7 +265,7 @@ function DrawerGoal() {
       </div>
       <div className="body">
         <section aria-labelledby="drawer-goal-tasks">
-          <div className="sec-title" id="drawer-goal-tasks" role="heading" aria-level={3}>TASKS · 5</div>
+          <SectionHeading variant="title" title="TASKS · 5" id="drawer-goal-tasks" />
           <div role="list" aria-label="Tasks under this goal" style={{display:'flex', flexDirection:'column', gap:4}}>
             {(() => {
               const seen = new Set();
@@ -284,7 +284,7 @@ function DrawerGoal() {
           </div>
         </section>
         <section aria-labelledby="drawer-goal-keepers">
-          <div className="sec-title" id="drawer-goal-keepers" role="heading" aria-level={3}>KEEPERS</div>
+          <SectionHeading variant="title" title="KEEPERS" id="drawer-goal-keepers" />
           <dl className="kv">
             <dt>OWNER</dt><dd>masc-improver</dd>
             <dt>CONTRIB</dt><dd>nick0cave · sangsu</dd>
@@ -324,13 +324,13 @@ function DrawerKeeper() {
       </div>
       <div className="body">
         <section aria-labelledby="drawer-keeper-heartbeat">
-          <div className="sec-title" id="drawer-keeper-heartbeat" role="heading" aria-level={3}>HEARTBEAT</div>
+          <SectionHeading variant="title" title="HEARTBEAT" id="drawer-keeper-heartbeat" />
           <div aria-label="Heartbeat trace, 60-second window" style={{background:'var(--bg-1)', padding:6, border:'1px solid var(--line-1)', borderRadius:3}}>
             <span aria-hidden="true"><Heartbeat width={260} height={40} /></span>
           </div>
         </section>
         <section aria-labelledby="drawer-keeper-current">
-          <div className="sec-title" id="drawer-keeper-current" role="heading" aria-level={3}>CURRENT</div>
+          <SectionHeading variant="title" title="CURRENT" id="drawer-keeper-current" />
           <dl className="kv">
             <dt>TASK</dt><dd>t-9f2a</dd>
             <dt>GOAL</dt><dd>goal-merge-blockers</dd>
@@ -340,7 +340,7 @@ function DrawerKeeper() {
           </dl>
         </section>
         <section aria-labelledby="drawer-keeper-events">
-          <div className="sec-title" id="drawer-keeper-events" role="heading" aria-level={3}>LAST 3 EVENTS</div>
+          <SectionHeading variant="title" title="LAST 3 EVENTS" id="drawer-keeper-events" />
           <div role="log" aria-live="polite" aria-label="Last 3 events from nick0cave" style={{display:'flex', flexDirection:'column', gap:4, fontSize:11}}>
             {D3.events.filter(e=>e.keeper==='nick0cave').slice(0,3).map((e,i)=>(
               <div key={i}

@@ -74,7 +74,7 @@ export function ErrorPanel({ onClose }: ErrorPanelProps) {
         </div>
       </div>
 
-      <div class="overflow-y-auto flex-1 divide-y divide-[var(--white-5)]">
+      <div class="overflow-y-auto custom-scrollbar flex-1 divide-y divide-[var(--white-5)]">
         ${items.map(e => {
           const sev = e.severity
           const iconColor = SEVERITY_ICON_COLOR[sev]

@@ -4,8 +4,6 @@
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
-import { html } from 'htm/preact'
-import { signal } from '@preact/signals'
 import { TimeAgo } from './common/time-ago'
 import { FilterChips } from './common/filter-chips'
 import {

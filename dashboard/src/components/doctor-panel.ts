@@ -266,11 +266,12 @@ function DoctorEntryCard({ entry }: { entry: DoctorEntry }) {
       <button type="button"
         class="flex w-full items-baseline justify-between gap-2 text-left"
         aria-expanded=${expanded.value}
+        aria-controls=${`doctor-detail-${entry.name}`}
         onClick=${onToggle}
       >
         <div class="text-sm font-semibold text-[var(--text-strong)]">
           ${doctorHeading(entry)}
-          <span class="ml-2 text-[10px] text-[var(--text-muted)]">${expanded.value ? '▾' : '▸'}</span>
+          <span class="ml-2 text-[10px] text-[var(--text-muted)]" aria-hidden="true">${expanded.value ? '▾' : '▸'}</span>
         </div>
         <span class="rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wider ${chip}">
           ${label}
@@ -279,11 +280,13 @@ function DoctorEntryCard({ entry }: { entry: DoctorEntry }) {
       <div class="mt-1 text-xs text-[var(--text-muted)]">
         ${entry.kind === 'config' ? 'Config Doctor' : `${entry.name} sidecar`} · exit ${entry.exit_code}
       </div>
-      ${expanded.value
-        ? entry.kind === 'sidecar'
-          ? html`<${SidecarChecksList} checks=${extractSidecarChecks(entry.payload)} />`
-          : html`<${ConfigNotesList} notes=${extractConfigNotes(entry.payload)} />`
-        : ''}
+      <div id=${`doctor-detail-${entry.name}`} role="region" aria-label=${`${doctorHeading(entry)} 상세`}>
+        ${expanded.value
+          ? entry.kind === 'sidecar'
+            ? html`<${SidecarChecksList} checks=${extractSidecarChecks(entry.payload)} />`
+            : html`<${ConfigNotesList} notes=${extractConfigNotes(entry.payload)} />`
+          : ''}
+      </div>
     </div>
   `
 }

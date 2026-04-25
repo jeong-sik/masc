@@ -342,7 +342,7 @@ export function AttributionPanel() {
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <${SurfaceCard} variant="light">
           <div class="flex flex-col">
-            <div class="px-3 py-2 border-b border-[var(--card-border)] text-2xs font-semibold uppercase tracking-1 text-[var(--text-muted)]">
+            <div class="px-3 py-2 border-b border-[var(--card-border)] text-2xs font-semibold uppercase tracking-1 text-[var(--text-muted)]" role="status">
               최근 이벤트 (${isFiltering
                 ? `${visibleEvents.length}/${gateFiltered.length}`
                 : gateFiltered.length})

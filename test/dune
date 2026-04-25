@@ -661,6 +661,7 @@
         test_keeper_runtime_config_ssot
         test_dashboard_render_timing_9766
         test_task_status_label_10421
+        test_personality_field_diff_10269
         test_keeper_task_dispatch
         test_keeper_tag_dispatch
         test_autoresearch_knowledge
@@ -841,6 +842,7 @@
         test_keeper_runtime_config_ssot
         test_dashboard_render_timing_9766
         test_task_status_label_10421
+        test_personality_field_diff_10269
         test_keeper_task_dispatch
         test_keeper_tag_dispatch
         test_autoresearch_knowledge

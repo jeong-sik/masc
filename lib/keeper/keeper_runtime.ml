@@ -58,6 +58,33 @@ let personality_diff_summary fields =
       personality_field_diff_entry name current target)
     fields
 
+(** #10269: per-call helper used at runtime re-sync sites (this PR).
+    Complements [personality_diff_summary] (batch over a list) by
+    emitting raw + trimmed previews on a single field at the moment a
+    re-sync fires.  Different output shape from
+    [personality_field_diff_entry] above:
+    [field(raw_meta_len=N raw_target_len=N trim_meta=S trim_target=S)]
+    so dashboards can distinguish raw-length drift from trimmed-content
+    drift (TOML triple-quote drop vs JSON encoding drift vs persona
+    overlay).  Returns [None] when the two trim-equal so steady-state
+    keepers stay quiet.  Trimmed previews truncated to 32 bytes each
+    to keep a wide [instructions] field log-friendly. *)
+let personality_field_diff_summary ~field ~current ~target =
+  if personality_text_equal current target then None
+  else
+    let preview s =
+      let trimmed = String.trim s in
+      if String.length trimmed <= 32 then trimmed
+      else String.sub trimmed 0 32 ^ "..."
+    in
+    Some
+      (Printf.sprintf
+         "%s(raw_meta_len=%d raw_target_len=%d trim_meta=%S trim_target=%S)"
+         field
+         (String.length current) (String.length target)
+         (preview current) (preview target))
+
+
 type boot_meta_resolution = {
   meta : keeper_meta;
   materialized : bool;
@@ -375,6 +402,39 @@ let ensure_keeper_meta config name =
         "ensure_keeper_meta: re-syncing [%s] for %s"
         (String.concat "," cats)
         meta.name;
+      (* #10269: nick0cave alone re-syncs [personality] on every reconcile
+         tick (~371 events / 3000 logs).  When personality is in [cats],
+         emit a follow-up info line listing the specific fields that
+         differ along with their raw lengths and trim-normalised
+         previews so root cause (TOML triple-quote, JSON encoding drift,
+         persona overlay) is visible without code-reading. *)
+      if personality_changed then begin
+        let diffs =
+          List.filter_map Fun.id
+            [
+              personality_field_diff_summary ~field:"goal"
+                ~current:meta.goal ~target:target_goal;
+              personality_field_diff_summary ~field:"short_goal"
+                ~current:meta.short_goal ~target:target_short_goal;
+              personality_field_diff_summary ~field:"mid_goal"
+                ~current:meta.mid_goal ~target:target_mid_goal;
+              personality_field_diff_summary ~field:"long_goal"
+                ~current:meta.long_goal ~target:target_long_goal;
+              personality_field_diff_summary ~field:"will"
+                ~current:meta.will ~target:target_will;
+              personality_field_diff_summary ~field:"needs"
+                ~current:meta.needs ~target:target_needs;
+              personality_field_diff_summary ~field:"desires"
+                ~current:meta.desires ~target:target_desires;
+              personality_field_diff_summary ~field:"instructions"
+                ~current:meta.instructions ~target:target_instructions;
+            ]
+        in
+        Log.Keeper.info
+          "ensure_keeper_meta: personality drift fields for %s: %s"
+          meta.name
+          (String.concat "; " diffs)
+      end;
       let updated = { meta with
         proactive = {
           enabled = target_proactive;

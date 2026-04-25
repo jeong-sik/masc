@@ -1,21 +1,52 @@
+(* Byte-wise substring containment.
+
+   Old form allocated [String.sub] per inner-loop step; this version
+   uses [String.unsafe_get] with index-checked match.  Empty-needle
+   short-circuits to [true] (matching [Re.str ""] / [Re.execp]
+   semantics that callers relied on). *)
 let contains_substring haystack needle =
   let hay_len = String.length haystack in
   let needle_len = String.length needle in
   if needle_len = 0 then true
   else if needle_len > hay_len then false
   else
-    let rec loop idx =
-      if idx + needle_len > hay_len then false
-      else if String.sub haystack idx needle_len = needle then true
-      else loop (idx + 1)
+    let rec match_at i j =
+      if j = needle_len then true
+      else if String.unsafe_get haystack (i + j)
+            <> String.unsafe_get needle j
+      then false
+      else match_at i (j + 1)
+    in
+    let last = hay_len - needle_len in
+    let rec loop i =
+      if i > last then false
+      else if match_at i 0 then true
+      else loop (i + 1)
     in
     loop 0
 
+(* ASCII case-insensitive substring containment without lowercasing
+   either string.  Lowering happens byte-by-byte during compare. *)
 let contains_substring_ci haystack needle =
-  needle <> "" &&
-  contains_substring
-    (String.lowercase_ascii haystack)
-    (String.lowercase_ascii needle)
+  let hay_len = String.length haystack in
+  let needle_len = String.length needle in
+  if needle_len = 0 then false
+  else if needle_len > hay_len then false
+  else
+    let rec match_at i j =
+      if j = needle_len then true
+      else
+        let h = Char.lowercase_ascii (String.unsafe_get haystack (i + j)) in
+        let n = Char.lowercase_ascii (String.unsafe_get needle j) in
+        if h <> n then false else match_at i (j + 1)
+    in
+    let last = hay_len - needle_len in
+    let rec loop i =
+      if i > last then false
+      else if match_at i 0 then true
+      else loop (i + 1)
+    in
+    loop 0
 
 type truncation =
   | Untouched of string

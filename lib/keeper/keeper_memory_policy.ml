@@ -837,13 +837,11 @@ let priority_for_kind ~(kind : string) : int =
   | "progress" -> 66
   | _ -> 60
 
+(* Byte-wise containment via [String_util.contains_substring_ci] —
+   per-call [Re.compile] is gone and the two [String.lowercase_ascii]
+   allocations are avoided since the helper folds case inline. *)
 let contains_any_ci (text : string) (needles : string list) : bool =
-  let hay = String.lowercase_ascii text in
-  List.exists
-    (fun needle ->
-      let n = String.lowercase_ascii needle in
-      n <> "" && Re.execp (Re.str n |> Re.compile) hay)
-    needles
+  List.exists (String_util.contains_substring_ci text) needles
 
 let signal_bonus ~(text : string) : int =
   let high_priority_words = [

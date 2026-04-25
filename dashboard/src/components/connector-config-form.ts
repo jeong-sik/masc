@@ -330,6 +330,7 @@ function FieldWidget({ id, field, value, revealed }: {
   value: string
   revealed: boolean
 }) {
+  const fieldId = `field-${id}-${field.name}`
   const onInput = (ev: Event) => {
     const target = ev.target as HTMLInputElement
     setEntry(id, { values: { ...getEntry(id).values, [field.name]: target.value } })
@@ -350,6 +351,7 @@ function FieldWidget({ id, field, value, revealed }: {
         <label class="flex items-center gap-2 text-2xs text-[var(--text-body)]">
           <input
             type="checkbox"
+            id=${fieldId}
             checked=${value === 'true'}
             onInput=${onCheckbox}
             class="cursor-pointer"
@@ -362,6 +364,7 @@ function FieldWidget({ id, field, value, revealed }: {
       return html`
         <input
           type="number"
+          id=${fieldId}
           value=${value}
           onInput=${onInput}
           step=${field.type === 'integer' ? 1 : 'any'}
@@ -375,6 +378,7 @@ function FieldWidget({ id, field, value, revealed }: {
           <div class="flex items-center gap-1">
             <input
               type=${revealed ? 'text' : 'password'}
+              id=${fieldId}
               value=${value}
               onInput=${onInput}
               placeholder=${field.required ? '필수 — 토큰을 붙여넣으세요' : ''}
@@ -394,6 +398,7 @@ function FieldWidget({ id, field, value, revealed }: {
       return html`
         <input
           type="text"
+          id=${fieldId}
           value=${value}
           onInput=${onInput}
           placeholder=${defaultToString(field.default)}

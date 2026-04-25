@@ -268,6 +268,7 @@ function RowActions({
       <div class="flex items-center gap-1 flex-wrap">
         <input
           type="text"
+          aria-label="반려 사유"
           class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 text-2xs text-[var(--text-body)] w-50"
           placeholder="반려 사유 (필수)"
           value=${reason}

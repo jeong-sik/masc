@@ -329,6 +329,39 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
       loop ()
     in
     loop ());
+  (* #10405: Goal_janitor periodic sweep.  Pre-fix the only caller
+     was the dashboard DELETE handler, so the
+     [stagnant_days]/[dropped_ttl_days] policy never fired
+     automatically — 4 active goals sat 4 days untouched, the
+     [goals_snapshots/] directory stayed empty (0 B), and stale
+     [active_goal_ids] never got pruned from keeper meta.  Run
+     hourly by default; the env knob lets operators dial down
+     for testing or set to [0] to opt out. *)
+  fork_subsystem "goal_janitor" (fun () ->
+    let interval = Env_config_runtime.InternalTimers.goal_janitor_interval_sec in
+    if interval <= 0.0 then
+      Log.Misc.info
+        "[GoalJanitor] periodic sweep disabled (interval=%.1fs)"
+        interval
+    else
+      let rec loop () =
+        Eio.Time.sleep clock interval;
+        (try
+           let result = Goal_janitor.run state.room_config in
+           if result.purged > 0 || result.stagnated > 0 || result.orphans > 0
+           then
+             Log.Misc.info
+               "[GoalJanitor] periodic sweep: purged=%d stagnated=%d orphans=%d"
+               result.purged result.stagnated result.orphans
+         with
+         | Eio.Cancel.Cancelled _ as exn -> raise exn
+         | exn ->
+             Log.Misc.error
+               "[GoalJanitor] periodic sweep raised: %s"
+               (Printexc.to_string exn));
+        loop ()
+      in
+      loop ());
   (* Auto-boot keepers from keeper meta and start keepalive loops.
      Retries unbooted keepers up to [max_retries] times so transient
      failures (model resolution, discovery timing) don't permanently

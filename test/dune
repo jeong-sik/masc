@@ -1460,6 +1460,17 @@
  (libraries dated_jsonl fs_compat alcotest eio eio_main yojson unix))
 
 
+ (name test_goal_janitor_scheduler_10405)
+ (modules test_goal_janitor_scheduler_10405)
+ (libraries
+  masc_mcp
+  masc_mcp.config
+  masc_mcp.masc_types
+  fs_compat
+  alcotest
+  eio
+  eio_main
+  unix))
 ; ============================================================
 ; Special: Heartbeat/keeper minimal deps
 ; ============================================================

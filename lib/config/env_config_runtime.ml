@@ -625,6 +625,18 @@ module InternalTimers = struct
       churn. [Rate_limit.cleanup] takes an int, so this is int-typed. *)
   let rate_limit_bucket_ttl_sec =
     get_int ~default:300 "MASC_RATE_LIMIT_BUCKET_TTL_SEC"
+
+  (** #10405: Goal_janitor sweep loop interval (seconds).  Pre-fix
+      [Goal_janitor.run] was wired only to a manual dashboard
+      DELETE handler, so 4 active goals went 4 days without
+      [last_review_at] ever being set and the [goals_snapshots/]
+      directory stayed at 0 bytes.  The sweep is cheap (read
+      [goals.json], check timestamps, prune orphaned
+      [active_goal_ids]) so an hourly cadence balances
+      responsiveness against runtime overhead.  [<= 0] disables
+      the loop entirely (regression knob). *)
+  let goal_janitor_interval_sec =
+    get_float ~default:3600.0 "MASC_GOAL_JANITOR_INTERVAL_SEC"
 end
 
 (** {1 Sidecar reconcile loop}

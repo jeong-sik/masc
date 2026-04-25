@@ -50,6 +50,23 @@ let () =
        [source=telemetry_resolved | unknown_sentinel]."
     ()
 
+type governance_model_source =
+  | Response_model
+  | Telemetry_resolved
+  | Unknown_sentinel
+
+let governance_model_source_to_string = function
+  | Response_model -> "response_model"
+  | Telemetry_resolved -> "telemetry_resolved"
+  | Unknown_sentinel -> "unknown_sentinel"
+
+let resolve_governance_model_used ~raw_model ~canonical_model_id =
+  if String.trim raw_model <> "" then raw_model, Response_model
+  else
+    match canonical_model_id with
+    | Some id when String.trim id <> "" -> String.trim id, Telemetry_resolved
+    | _ -> "unknown_provider", Unknown_sentinel
+
 let governance_dir base_path =
   Filename.concat
     (Coord_utils.masc_dir_from_base_path ~base_path)
@@ -548,31 +565,27 @@ let compute_judgments
                keeper-side string [unknown_provider] so dashboards
                can union-aggregate empty-model events across both
                callers. *)
-            let resolved_model =
-              let raw = response.model in
-              if String.trim raw <> "" then raw
-              else begin
-                let canonical =
-                  match response.telemetry with
-                  | Some { canonical_model_id = Some id; _ }
-                    when String.trim id <> "" ->
-                      String.trim id
-                  | _ -> ""
-                in
-                let resolved, source =
-                  if canonical <> "" then canonical, "telemetry_resolved"
-                  else "unknown_provider", "unknown_sentinel"
-                in
+            let canonical_model_id =
+              match response.telemetry with
+              | Some { canonical_model_id = Some id; _ } -> Some id
+              | _ -> None
+            in
+            let resolved_model, model_source =
+              resolve_governance_model_used ~raw_model:response.model ~canonical_model_id
+            in
+            begin
+              match model_source with
+              | Response_model -> ()
+              | Telemetry_resolved | Unknown_sentinel ->
+                let source = governance_model_source_to_string model_source in
                 Prometheus.inc_counter
                   governance_response_model_empty_metric
                   ~labels:[ ("source", source) ]
                   ();
                 Log.Governance.warn
                   "compute_judgments: response.model empty → fallback=%s resolved=%s (#9880)"
-                  source resolved;
-                resolved
-              end
-            in
+                  source resolved_model;
+            end;
             let judgments =
               items
               |> List.filter_map

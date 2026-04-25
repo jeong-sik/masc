@@ -4,10 +4,9 @@
     judgment records had [model_used = ""] with zero
     visibility.
 
-    Full integration testing of [compute_judgments] requires a
-    masc_tools fixture + dispatch wiring; these tests pin the
-    metric surface and label shape so a future refactor cannot
-    silently rename or drop the counter. *)
+    The fallback resolver is tested directly so this cannot
+    degrade into a metric-only smoke test that never proves
+    [model_used] is actually filled. *)
 
 let () =
   let dir =
@@ -18,6 +17,7 @@ let () =
   Unix.putenv "MASC_BASE_PATH" dir
 
 module Prom = Masc_mcp.Prometheus
+module Judge = Masc_mcp.Dashboard_governance_judge
 
 let metric_name = "masc_governance_response_model_empty_total"
 
@@ -80,6 +80,45 @@ let test_distinct_sources_separate_rows () =
   Alcotest.(check (float 0.0001)) "unknown_sentinel +1"
     (before_u +. 1.0) (count_for ~source:"unknown_sentinel")
 
+let check_resolution ~msg ~raw_model ~canonical_model_id ~expected_model
+    ~expected_source =
+  let model, source =
+    Judge.resolve_governance_model_used ~raw_model ~canonical_model_id
+  in
+  Alcotest.(check string) (msg ^ " model") expected_model model;
+  Alcotest.(check string)
+    (msg ^ " source")
+    expected_source
+    (Judge.governance_model_source_to_string source)
+
+let test_non_empty_raw_model_wins () =
+  check_resolution ~msg:"raw model"
+    ~raw_model:"claude-code:auto"
+    ~canonical_model_id:(Some "anthropic:claude-opus-4-7")
+    ~expected_model:"claude-code:auto"
+    ~expected_source:"response_model"
+
+let test_empty_raw_falls_back_to_telemetry () =
+  check_resolution ~msg:"telemetry fallback"
+    ~raw_model:""
+    ~canonical_model_id:(Some " anthropic:claude-opus-4-7 ")
+    ~expected_model:"anthropic:claude-opus-4-7"
+    ~expected_source:"telemetry_resolved"
+
+let test_empty_everywhere_uses_unknown_sentinel () =
+  check_resolution ~msg:"unknown sentinel"
+    ~raw_model:""
+    ~canonical_model_id:None
+    ~expected_model:"unknown_provider"
+    ~expected_source:"unknown_sentinel"
+
+let test_empty_canonical_id_uses_unknown_sentinel () =
+  check_resolution ~msg:"empty canonical"
+    ~raw_model:""
+    ~canonical_model_id:(Some "")
+    ~expected_model:"unknown_provider"
+    ~expected_source:"unknown_sentinel"
+
 (* Prometheus text export must include the metric name and
    the [source] label key — PromQL queries depend on this. *)
 let test_export () =
@@ -117,6 +156,17 @@ let () =
             test_unknown_sentinel_branch;
           Alcotest.test_case "distinct sources distinct rows" `Quick
             test_distinct_sources_separate_rows;
+        ] );
+      ( "fallback-tiers",
+        [
+          Alcotest.test_case "raw model wins" `Quick
+            test_non_empty_raw_model_wins;
+          Alcotest.test_case "empty raw -> telemetry canonical" `Quick
+            test_empty_raw_falls_back_to_telemetry;
+          Alcotest.test_case "empty everywhere -> sentinel" `Quick
+            test_empty_everywhere_uses_unknown_sentinel;
+          Alcotest.test_case "empty canonical_model_id -> sentinel" `Quick
+            test_empty_canonical_id_uses_unknown_sentinel;
         ] );
       ( "export",
         [

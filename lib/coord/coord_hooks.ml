@@ -151,6 +151,25 @@ let fsm_drift_observer_fn
   : (variant:string -> force:bool -> agent_name:string -> unit) Atomic.t
   = Atomic.make (fun ~variant:_ ~force:_ ~agent_name:_ -> ())
 
+(** #9645: distributed lock acquire failure observability.
+
+    [Coord_utils_ops.with_distributed_lock] / [..._r] raise
+    [Invalid_argument] (or return [Error]) after exhausting the
+    retry budget when keeper fleet contention prevents acquiring
+    a lock (production observed [tasks:.backlog] starvation under
+    16-keeper load).  The error path is the only signal — there
+    is no fleet-wide rate metric for "how often does this fail,
+    on which key?".
+
+    This hook decouples the emit from [masc_mcp.Prometheus] (which
+    sits above [masc_coord] in the dep graph).  [lib/coord.ml]
+    wires it to a Prometheus counter at startup; [masc_coord]
+    callers fire it from the failure branches without taking a
+    direct Prometheus dependency. *)
+let distributed_lock_acquire_failed_fn
+  : (key:string -> attempts:int -> unit) Atomic.t
+  = Atomic.make (fun ~key:_ ~attempts:_ -> ())
+
 (** Tool assignment telemetry — wraps Tool_assignment_telemetry.emit_assigned.
     Wired at startup to record which tools were provisioned to which agent. *)
 let tool_assigned_fn

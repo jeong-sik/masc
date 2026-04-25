@@ -235,6 +235,9 @@ val metric_runtime_ollama_probe_generate_skips : string
 val metric_process_timeout : string
 (** #9632: subprocess executions that exceeded their configured
     timeout. Labels: [program, timeout_sec]. *)
+val metric_distributed_lock_acquire_failed : string
+(** #9645: distributed lock acquire retry-budget exhaustions.
+    Labels: [key, attempts]. *)
 
 (** #10130: boot-time sweep of save_file_atomic orphan temp files.
     Labels: [size_class = empty | with_data]. *)

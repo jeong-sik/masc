@@ -234,6 +234,25 @@ let record_process_timeout ~program ~timeout_sec =
 let () =
   Atomic.set Process_eio.process_timeout_observer_fn record_process_timeout
 
+(* #9645: distributed lock acquire exhaustion observability.
+
+   [Coord_utils_ops.with_distributed_lock]/[..._r] now signal
+   exhaustion via [Coord_hooks.distributed_lock_acquire_failed_fn].
+   Wire that hook to a Prometheus counter so operators can rate-
+   alert on chronic lock contention (production observed
+   tasks:.backlog starvation under 16-keeper fleet load). *)
+let distributed_lock_acquire_failed_metric =
+  Prometheus.metric_distributed_lock_acquire_failed
+
+let record_distributed_lock_acquire_failed ~key ~attempts =
+  Prometheus.inc_counter distributed_lock_acquire_failed_metric
+    ~labels:[ ("key", key); ("attempts", string_of_int attempts) ]
+    ()
+
+let () =
+  Atomic.set Coord_hooks.distributed_lock_acquire_failed_fn
+    record_distributed_lock_acquire_failed
+
 (* Activity graph emit — wraps Activity_graph for room sub-modules *)
 let () = Atomic.set Coord_hooks.activity_emit_fn (fun config ~actor ?subject ~kind ~payload ~tags () ->
     (try

@@ -331,7 +331,7 @@ export function HeroPhase({
             </div>
           ` : null}
         </div>
-        ${flash ? html`<span class="text-3xs text-[var(--accent)] animate-pulse font-mono" aria-live="assertive">상태 변경</span>` : null}
+        ${flash ? html`<span class="text-3xs text-[var(--accent)] animate-pulse font-mono" aria-live="polite">상태 변경</span>` : null}
       </div>
       <${PhaseSparkline} observations=${observations} now=${now} />
     </div>

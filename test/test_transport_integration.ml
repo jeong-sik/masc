@@ -121,6 +121,41 @@ let test_ws_external_subscriber_receives_broadcast () =
             with Not_found -> false);
     Masc_mcp.Sse.unsubscribe_external sub_id)
 
+(* Regression test for #10194: parse_sse_dashboard_event used to feed
+   the full SSE-formatted string into Yojson.Safe.from_string and
+   silently always returned None in production.  Unit tests passed
+   because they fed pure JSON.  This test fires a real Sse.broadcast
+   so the WS callback receives the production wire format, then asserts
+   parse extracts the event_type — closing the gap that hid the bug
+   for the entire WS perf series. *)
+let test_ws_parse_handles_real_broadcast_wire_format () =
+  Eio_main.run (fun _env ->
+    let sub_id = "integration-test-ws-parse-wire" in
+    let captured = ref None in
+    Masc_mcp.Sse.subscribe_external ~id:sub_id
+      ~callback:(fun sse_event -> captured := Some sse_event) ();
+    Masc_mcp.Sse.broadcast
+      (`Assoc [
+        ("type", `String "execution_snapshot");
+        ("payload", `Assoc [("keepers", `Int 4)]);
+      ]);
+    Masc_mcp.Sse.unsubscribe_external sub_id;
+    match !captured with
+    | None -> Alcotest.fail "callback never fired"
+    | Some sse_event ->
+        match Masc_mcp.Server_mcp_transport_ws.parse_sse_dashboard_event
+                sse_event with
+        | None ->
+            Alcotest.fail
+              "parse returned None on real broadcast wire format \
+               (regression of #10194)"
+        | Some parsed ->
+            Alcotest.(check string) "event_type extracted"
+              "execution_snapshot" parsed.event_type;
+            Alcotest.(check (option string))
+              "execution_snapshot maps to execution slice"
+              (Some "execution") parsed.slice)
+
 (* ============================================================
    3. WebRTC Signaling Full Flow
    ============================================================ *)
@@ -258,6 +293,8 @@ let () =
     ("ws_sse", [
       Alcotest.test_case "broadcast reaches WS subscriber" `Quick
         test_ws_external_subscriber_receives_broadcast;
+      Alcotest.test_case "parse handles real broadcast wire format" `Quick
+        test_ws_parse_handles_real_broadcast_wire_format;
     ]);
     ("webrtc_signaling",
       if Sys.getenv_opt "MASC_TEST_WEBRTC" = Some "1" then [

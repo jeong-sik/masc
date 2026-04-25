@@ -85,6 +85,10 @@ let belief_summary_of_observation
            Some
              (Printf.sprintf "unclaimed_tasks=%d" observation.unclaimed_task_count)
          else None);
+        (if observation.claimable_task_count > 0 then
+           Some
+             (Printf.sprintf "claimable_tasks=%d" observation.claimable_task_count)
+         else None);
         (if observation.failed_task_count > 0 then
            Some (Printf.sprintf "failed_tasks=%d" observation.failed_task_count)
          else None);
@@ -428,7 +432,7 @@ let derive_failure_state ~(meta : keeper_meta)
     | value -> Some (short_preview value)
   in
   let state =
-    if is_auto_recoverable && observation.unclaimed_task_count > 0 then
+    if is_auto_recoverable && observation.claimable_task_count > 0 then
       make_state ~meta ~observation ?previous_state
         ~active_desire:"recover_tool_route"
         ~current_intention:"retry_claim_after_recovery"

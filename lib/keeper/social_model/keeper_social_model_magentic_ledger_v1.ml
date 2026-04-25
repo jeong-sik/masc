@@ -21,7 +21,7 @@ let reactive_signal_count
   + List.length observation.pending_scope_messages
 
 let backlog_count (observation : Keeper_world_observation.world_observation) =
-  observation.unclaimed_task_count + observation.failed_task_count
+  observation.claimable_task_count + observation.failed_task_count
 
 let belief_summary_of_snapshot ~(snapshot : Fsm.snapshot)
     ~(event : Fsm.event)
@@ -33,6 +33,8 @@ let belief_summary_of_snapshot ~(snapshot : Fsm.snapshot)
       "event=" ^ Fsm.event_to_string event;
       "reactive=" ^ string_of_int (reactive_signal_count observation);
       "backlog=" ^ string_of_int (backlog_count observation);
+      "unclaimed=" ^ string_of_int observation.unclaimed_task_count;
+      "claimable=" ^ string_of_int observation.claimable_task_count;
       "goals=" ^ string_of_int (List.length observation.active_goals);
       "tools=" ^ string_of_int tool_count;
       "idle=" ^ string_of_int observation.idle_seconds ^ "s";

@@ -106,11 +106,11 @@ let autonomous_trigger_lines
            | _ -> None);
           (match decision.task_reactive_cooldown with
            | Some cooldown
-             when observation.unclaimed_task_count > 0
+             when observation.claimable_task_count > 0
                   || observation.failed_task_count > 0 ->
                Some
                  (Printf.sprintf
-                    "- Backlog acceleration cooldown: %ds for unclaimed/failed tasks"
+                    "- Backlog acceleration cooldown: %ds for claimable/failed tasks"
                     cooldown)
            | _ -> None);
         ]
@@ -169,7 +169,7 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
     |> List.mem "keeper_task_claim"
   in
   let show_claim_guidance =
-    observation.unclaimed_task_count > 0
+    observation.claimable_task_count > 0
     && claim_tool_available
     && not meta.paused
     && Option.is_none meta.current_task_id
@@ -244,6 +244,7 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
   (* 2. Namespace state — usually lower churn than inbox/board detail *)
   if
     observation.unclaimed_task_count > 0
+    || observation.claimable_task_count > 0
     || observation.failed_task_count > 0
     || observation.active_agent_count > 0
   then (
@@ -252,6 +253,15 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
       Buffer.add_string ubuf
         (Printf.sprintf "- Unclaimed tasks: %d\n"
            observation.unclaimed_task_count);
+    if observation.claimable_task_count > 0 then
+      Buffer.add_string ubuf
+        (Printf.sprintf "- Claimable tasks for this keeper: %d\n"
+           observation.claimable_task_count);
+    if observation.unclaimed_task_count > 0
+       && observation.claimable_task_count = 0
+    then
+      Buffer.add_string ubuf
+        "- Claimable tasks for this keeper: 0\n";
     if observation.failed_task_count > 0 then
       Buffer.add_string ubuf
         (Printf.sprintf "- Failed tasks: %d\n" observation.failed_task_count);

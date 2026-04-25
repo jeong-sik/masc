@@ -410,6 +410,38 @@ let get_graph_data config : (synapse list * string list) =
     passive cancellation — we do NOT run a final consolidation on
     shutdown because pruning on an unclean exit is riskier than
     skipping one cycle. *)
+let run_consolidation_once config ~decay_after_days =
+  let t0 = Time_compat.now () in
+  (try
+     let pruned = consolidate config ~decay_after_days () in
+     let elapsed = Time_compat.now () -. t0 in
+     Prometheus.inc_counter
+       "masc_hebbian_consolidate_total"
+       ~labels:[("outcome", "ok")] ();
+     if pruned > 0 then
+       Prometheus.inc_counter
+         "masc_hebbian_consolidate_pruned_total"
+         ~delta:(Float.of_int pruned) ();
+     Prometheus.observe_histogram
+       "masc_hebbian_consolidate_duration_seconds" elapsed;
+     if pruned > 0 then
+       Log.Coord.info
+         "hebbian: consolidated graph, pruned=%d duration=%.3fs"
+         pruned elapsed
+     else
+       Log.Coord.debug
+         "hebbian: consolidated graph, pruned=0 duration=%.3fs"
+         elapsed
+   with
+   | Eio.Cancel.Cancelled _ as e -> raise e
+   | exn ->
+     Prometheus.inc_counter
+       "masc_hebbian_consolidate_total"
+       ~labels:[("outcome", "error")] ();
+     Log.Coord.error
+       "hebbian: consolidation iteration failed: %s"
+       (Printexc.to_string exn))
+
 let start_consolidation_fiber ~sw ~clock config =
   let interval_s = Level2_config.Hebbian.consolidation_interval_s () in
   let decay_after_days =
@@ -419,38 +451,22 @@ let start_consolidation_fiber ~sw ~clock config =
     "hebbian: consolidation fiber starting (interval=%.0fs decay_after=%dd)"
     interval_s decay_after_days;
   Eio.Fiber.fork ~sw (fun () ->
+    (* #9876 followup: run one consolidation pass immediately so
+       [last_consolidation] never reads epoch zero on a live server.
+       Operators have hit the [last_consolidation = 0.0] signature
+       repeatedly as a "fiber never started" silent-failure
+       indicator; advancing the field on first iteration makes the
+       three observable states distinguishable:
+         - [0.0]: fiber actually never started (binary mismatch).
+         - [start_time + small delta]: fiber ran once, healthy.
+         - [stale + > interval_s old]: fiber wedged, real failure.
+       Pruning on a fresh graph is a no-op (every synapse's
+       [last_updated >= boot_time > cutoff]), so this changes no
+       data — only the [last_consolidation] timestamp. *)
+    run_consolidation_once config ~decay_after_days;
     let rec loop () =
       Eio.Time.sleep clock interval_s;
-      let t0 = Time_compat.now () in
-      (try
-         let pruned = consolidate config ~decay_after_days () in
-         let elapsed = Time_compat.now () -. t0 in
-         Prometheus.inc_counter
-           "masc_hebbian_consolidate_total"
-           ~labels:[("outcome", "ok")] ();
-         if pruned > 0 then
-           Prometheus.inc_counter
-             "masc_hebbian_consolidate_pruned_total"
-             ~delta:(Float.of_int pruned) ();
-         Prometheus.observe_histogram
-           "masc_hebbian_consolidate_duration_seconds" elapsed;
-         if pruned > 0 then
-           Log.Coord.info
-             "hebbian: consolidated graph, pruned=%d duration=%.3fs"
-             pruned elapsed
-         else
-           Log.Coord.debug
-             "hebbian: consolidated graph, pruned=0 duration=%.3fs"
-             elapsed
-       with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | exn ->
-         Prometheus.inc_counter
-           "masc_hebbian_consolidate_total"
-           ~labels:[("outcome", "error")] ();
-         Log.Coord.error
-           "hebbian: consolidation iteration failed: %s"
-           (Printexc.to_string exn));
+      run_consolidation_once config ~decay_after_days;
       loop ()
     in
     loop ())

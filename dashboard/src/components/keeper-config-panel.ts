@@ -443,6 +443,8 @@ function InlineToggleRow({ label, value, onChange }: { label: string; value: boo
       <span class="text-xs font-medium text-text-muted">${label}</span>
       <button type="button"
         class="relative inline-flex h-5 w-9 items-center rounded-sm transition-colors cursor-pointer ${value ? 'bg-ok/60' : 'bg-white/10'}"
+        aria-pressed=${value}
+        aria-label=${label}
         onClick=${() => onChange(!value)}
       >
         <span class="inline-block h-3.5 w-3.5 rounded-sm bg-white shadow-sm transition-transform ${value ? 'translate-x-[18px]' : 'translate-x-[3px]'}" />
@@ -460,6 +462,7 @@ function InlineNumberRow({ label, value, onChange, min, max, step, suffix }: {
       <span class="text-xs font-medium text-text-muted">${label}</span>
       <div class="flex items-center gap-1.5">
         <input type="number"
+          aria-label=${label}
           class="w-20 text-right bg-card/60 text-text-strong text-xs font-semibold border border-card-border rounded py-1 px-2 focus:outline-none focus:border-accent/50 transition-colors"
           value=${value}
           min=${min}
@@ -518,6 +521,7 @@ function EditTextarea({ field, label, rows = 3 }: { field: keyof EditDraft; labe
     <div class="mt-3">
       <div class="text-2xs font-semibold uppercase tracking-wider text-text-muted mb-1.5">${label}</div>
       <textarea
+        aria-label=${label}
         class="${fieldStyle} resize-y custom-scrollbar"
         rows=${rows}
         value=${val}
@@ -705,7 +709,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
           onClick=${enterEditMode}
         >편집</button>
       `}
-      ${saveError.value ? html`<span class="text-xs text-[var(--bad)]">${saveError.value}</span>` : null}
+      ${saveError.value ? html`<span class="text-xs text-[var(--bad)]" role="alert">${saveError.value}</span>` : null}
     </div>
   `
 
@@ -804,6 +808,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
             <label class="flex flex-col gap-1.5 py-2 px-3 rounded border border-card-border/50 bg-card/20 backdrop-blur-sm mb-1.5">
               <span class="text-xs font-medium text-text-muted">활성 cascade profile</span>
               <select
+                aria-label="활성 cascade profile"
                 class="rounded border border-card-border/60 bg-[var(--white-4)] px-3 py-2 text-xs font-semibold text-text-strong disabled:opacity-60"
                 value=${currentCascade}
                 disabled=${cascadeSaving.value || cascadeState.status === 'loading' || cascadeOptions.length === 0}
@@ -827,7 +832,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
                     : '변경 시 keeper manifest의 cascade_name 이 즉시 갱신됩니다.'}
               </span>
               ${cascadeSaveError.value
-                ? html`<span class="text-2xs text-[var(--bad)]">${cascadeSaveError.value}</span>`
+                ? html`<span class="text-2xs text-[var(--bad)]" role="alert">${cascadeSaveError.value}</span>`
                 : null}
               ${invalidCascadeProfiles.length > 0
                 ? html`<span class="text-2xs text-[var(--warn)]">invalid profile ${invalidCascadeProfiles.length}개: ${invalidCascadeSummary}</span>`

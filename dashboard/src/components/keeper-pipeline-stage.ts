@@ -28,7 +28,7 @@ export function PipelineStageBar({ stage }: { stage?: PipelineStage | null }) {
 
   if (current === 'offline' || currentIdx === -1) {
     return html`
-      <div class="flex items-center py-1.5">
+      <div class="flex items-center py-1.5" role="status" aria-label=${`파이프라인: ${current}`}>
         <div class="pipeline-stage-node active stage-${current}">
           <span class="pipeline-stage-dot transition-all duration-300"></span>
           <span class="pipeline-stage-label">${current}</span>
@@ -38,7 +38,7 @@ export function PipelineStageBar({ stage }: { stage?: PipelineStage | null }) {
   }
 
   return html`
-    <div class="flex items-center py-1.5">
+    <div class="flex items-center py-1.5" role="status" aria-label=${`파이프라인: ${STAGES[currentIdx]?.label ?? current}`}>
       ${STAGES.map((s, i) => {
         const isActive = s.key === current
         const isPassed = i < currentIdx
@@ -79,7 +79,7 @@ export function PipelineStageBadge({
     STAGES.find((s) => s.key === current)?.label ?? current
 
   return html`
-    <span class="pipeline-stage-badge rounded-sm stage-${current}">
+    <span class="pipeline-stage-badge rounded-sm stage-${current}" role="status" aria-label=${`파이프라인: ${label}`}>
       ${label}
     </span>
   `

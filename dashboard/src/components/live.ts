@@ -29,7 +29,7 @@ export function Live({ variant = 'full' }: LiveProps) {
       ` : null}
 
       ${!observatoryMode ? html`
-        <section class="rounded-[var(--radius-xl)] border border-[var(--border-slate-12)] bg-[var(--white-3)] p-4">
+        <section class="rounded-[var(--radius-xl)] border border-[var(--border-slate-12)] bg-[var(--white-3)] p-4" aria-label="펄스 스트립">
           <${PulseStrip} />
         </section>
       ` : null}
@@ -37,7 +37,7 @@ export function Live({ variant = 'full' }: LiveProps) {
       ${!observatoryMode ? html`<${KeeperHealthStrip} />` : null}
 
       ${observatoryMode ? html`
-        <section class="live-panel-main monitor-surface-card monitor-surface-card-medium p-4">
+        <section class="live-panel-main monitor-surface-card monitor-surface-card-medium p-4" aria-label="활동 스트림">
           <${ActivityStream} />
         </section>
 
@@ -46,10 +46,10 @@ export function Live({ variant = 'full' }: LiveProps) {
         <//>
       ` : html`
         <div class="live-panels grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.9fr)]">
-          <section class="live-panel-main monitor-surface-card monitor-surface-card-medium min-h-[420px] xl:min-h-130 p-4">
+          <section class="live-panel-main monitor-surface-card monitor-surface-card-medium min-h-[420px] xl:min-h-130 p-4" aria-label="활동 스트림">
             <${ActivityStream} />
           </section>
-          <section class="live-panel-side monitor-surface-card monitor-surface-card-medium min-h-[420px] xl:min-h-130 p-4">
+          <section class="live-panel-side monitor-surface-card monitor-surface-card-medium min-h-[420px] xl:min-h-130 p-4" aria-label="에이전트 상태">
             <${FocusSidebar} />
           </section>
         </div>

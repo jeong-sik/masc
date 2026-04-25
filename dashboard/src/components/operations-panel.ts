@@ -55,7 +55,7 @@ export function OperationsPanel() {
   const view = currentView()
 
   return html`
-    <div class="flex flex-col gap-4">
+    <div class="flex flex-col gap-4" role="region" aria-label="운영 패널">
       <${FilterChips}
         chips=${VIEW_CHIPS}
         value=${view}

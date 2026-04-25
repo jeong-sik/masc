@@ -4,8 +4,6 @@ open Tool_args
 open Tool_autoresearch_registry
 open Tool_autoresearch_broadcast
 
-let autoresearch_lesson_agent_name = "autoresearch-reviewer"
-
 let clip text max_len =
   String_util.utf8_safe ~max_bytes:(max_len + 3) ~suffix:"..." text |> String_util.to_string
 
@@ -32,7 +30,7 @@ let make_loop_memory (ctx : Tool_autoresearch_context.t)
   | None ->
     let mem =
       Memory_oas_bridge.create_memory
-        ~agent_name:autoresearch_lesson_agent_name
+        ~agent_name:Autoresearch_lineage.lesson_reviewer_actor_name
         ~base_dir:(Common.masc_dir_from_base_path ~base_path:ctx.base_path)
         ~session_id:("autoresearch-" ^ state.loop_id)
         ()
@@ -44,7 +42,7 @@ let flush_loop_memory memory =
   ignore
     (Memory_oas_bridge.flush_incremental
        ~memory
-       ~agent_name:autoresearch_lesson_agent_name)
+       ~agent_name:Autoresearch_lineage.lesson_reviewer_actor_name)
 
 let render_recent_findings findings =
   match findings with
@@ -115,7 +113,7 @@ let persist_failure_feedback
          (fun _ -> Autoresearch_metric.default_metric_name)
          metric_error)
     ?metric_error
-    ~participants:[ autoresearch_lesson_agent_name; "autoresearch_cycle" ]
+    ~participants:Autoresearch_lineage.cycle_failure_participants
     ~metadata
     ();
   flush_loop_memory memory;
@@ -123,14 +121,16 @@ let persist_failure_feedback
     {
       id = Autoresearch_knowledge.generate_finding_id ();
       loop_id = state.loop_id;
-      keeper_name = autoresearch_lesson_agent_name;
+      keeper_name = Autoresearch_lineage.lesson_reviewer_actor_name;
       goal = state.goal;
       hypothesis;
       evidence = if evidence = "" then summary else evidence;
       conclusion =
         Option.value ~default:(clip summary 240) conclusion;
       confidence = Autoresearch_knowledge.Medium;
-      tags = "autoresearch" :: state.target_file :: tags;
+      tags =
+        Autoresearch_lineage.finding_tags ~target_file:state.target_file
+          ~extra:tags;
       related_findings = [];
       cycle_range = Some (state.current_cycle, state.current_cycle);
       timestamp = Unix.gettimeofday ();

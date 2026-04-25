@@ -177,6 +177,30 @@ let test_cycle_reinjects_diff_guard_lesson () =
     (Fs_compat.load_file (Filename.concat repo "main.txt"));
   check string "external drift preserved" "drifted\n"
     (Fs_compat.load_file (Filename.concat repo "notes.txt"));
+  let feedback_findings =
+    Lib.Autoresearch_knowledge.search_findings ~base_path:root
+      ~query:"Diff guard rejected patch" ~limit:5 ()
+  in
+  let feedback_finding =
+    match
+      List.find_opt
+        (fun (finding : Lib.Autoresearch_knowledge.finding) ->
+           finding.loop_id = state.loop_id)
+        feedback_findings
+    with
+    | Some finding -> finding
+    | None -> fail "diff guard finding was not persisted"
+  in
+  check string "finding keeper uses lineage actor"
+    Lib.Autoresearch_lineage.lesson_reviewer_actor_name
+    feedback_finding.keeper_name;
+  check (list string) "finding tags use lineage contract"
+    [
+      Lib.Autoresearch_lineage.domain_tag;
+      state.target_file;
+      "diff-guard";
+    ]
+    feedback_finding.tags;
   write_file (Filename.concat repo "notes.txt") "notes\n";
   let captured_goal = ref None in
   Lib.Tool_autoresearch_registry.set_generator state.loop_id

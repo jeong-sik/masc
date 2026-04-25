@@ -149,7 +149,7 @@ export function AuthStatus() {
         onClick=${() => { popoverOpen.value ? (popoverOpen.value = false) : openPopover() }}
         title="인증 상태"
       >
-        <span class="size-[7px] rounded-sm inline-block ${dotColor}"></span>
+        <span class="size-[7px] rounded-sm inline-block ${dotColor}" aria-hidden="true"></span>
         <span>${label}</span>
       </button>
       ${popoverOpen.value ? html`<${AuthPopover} />` : null}

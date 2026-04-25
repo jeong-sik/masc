@@ -17,6 +17,11 @@ cd "$(git rev-parse --show-toplevel)"
 
 exit_code=0
 
+print_first_lines() {
+  local limit="$1"
+  awk -v limit="$limit" 'NR <= limit { print }'
+}
+
 # 1. Deterministic code branching on non-deterministic values
 echo "=== Scan: deterministic branch on non-deterministic source ==="
 nd_patterns=$(
@@ -24,7 +29,7 @@ nd_patterns=$(
 )
 if [ -n "$nd_patterns" ]; then
   echo "WARN: Non-deterministic source used in lib/ (ensure wrapped at boundary):"
-  echo "$nd_patterns" | head -20
+  print_first_lines 20 <<< "$nd_patterns"
 fi
 
 # 2. Sound partial check: Option.value ~default on parsed external input
@@ -35,7 +40,7 @@ permissive=$(
 )
 if [ -n "$permissive" ]; then
   echo "WARN: Option.value with default on potentially unknown input (sound partial?):"
-  echo "$permissive" | head -20
+  print_first_lines 20 <<< "$permissive"
 fi
 
 # 3. Unknown -> catch-all default in match (the "permissive default" anti-pattern)
@@ -45,7 +50,7 @@ catch_all=$(
 )
 if [ -n "$catch_all" ]; then
   echo "WARN: catch-all branch returning Some (possible unsound default):"
-  echo "$catch_all" | head -20
+  print_first_lines 20 <<< "$catch_all"
 fi
 
 # 4. Hashtbl.iter / Map.iter used where order matters for deterministic replay
@@ -55,7 +60,7 @@ unordered=$(
 )
 if [ -n "$unordered" ]; then
   echo "INFO: unordered collection iteration (verify order does not affect output):"
-  echo "$unordered" | head -10
+  print_first_lines 10 <<< "$unordered"
 fi
 
 if [ "$exit_code" -eq 0 ]; then

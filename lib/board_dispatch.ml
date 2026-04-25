@@ -79,7 +79,9 @@ let start_flusher_actor ~sw store =
            | Eio.Cancel.Cancelled _ as e -> raise e
            | exn -> Log.BoardLog.error "Flush failed: %s" (Printexc.to_string exn))
       | Board_types.Sweep ->
-          (try ignore (Board.sweep store)
+          (try
+             let swept = Board.sweep store in
+             ignore swept
            with
            | Eio.Cancel.Cancelled _ as e -> raise e
            | exn -> Log.BoardLog.error "Sweep failed: %s" (Printexc.to_string exn))

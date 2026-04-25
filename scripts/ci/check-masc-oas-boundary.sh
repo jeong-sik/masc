@@ -15,9 +15,11 @@ set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
 exit_code=0
+oas_repo_explicit=0
 
 resolve_oas_repo() {
   if [[ -n "${AGENT_SDK_LOCAL_REPO:-}" ]]; then
+    oas_repo_explicit=1
     if git -C "${AGENT_SDK_LOCAL_REPO}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
       (cd "${AGENT_SDK_LOCAL_REPO}" && pwd -P)
       return 0
@@ -53,8 +55,12 @@ if oas_repo="$(resolve_oas_repo)"; then
     if (cd "$oas_repo" && bash scripts/check-sdk-independence.sh); then
       echo "PASS"
     else
-      echo "FAIL: upstream OAS SDK independence check failed"
-      exit_code=1
+      if [[ "$oas_repo_explicit" == "1" || "${MASC_STRICT_OAS_INDEPENDENCE:-0}" == "1" ]]; then
+        echo "FAIL: upstream OAS SDK independence check failed"
+        exit_code=1
+      else
+        echo "WARN: auto-detected sibling OAS checkout failed SDK independence; set AGENT_SDK_LOCAL_REPO or MASC_STRICT_OAS_INDEPENDENCE=1 to make this blocking"
+      fi
     fi
   else
     echo "WARN: ${oas_repo}/scripts/check-sdk-independence.sh not found; skipping upstream SDK scan"

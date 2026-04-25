@@ -4,7 +4,18 @@ Scope: active `masc-mcp` source, tests, scripts, and CI surfaces. The goal is to
 separate confirmed semantic debt from broad grep noise, then remove the most
 dangerous hardcoded boundary.
 
-## Confirmed Findings
+## Current Findings
+
+As of this branch, strict mode reports no confirmed active issue groups:
+
+```bash
+bash scripts/audit-hardcoding-truth.sh --fail-on-confirmed
+# Confirmed active issue groups: 0
+# Status: pass
+```
+
+Historical findings that shaped the audit are kept below so future changes can
+avoid reintroducing the same stringly-typed or advisory truth paths.
 
 ### Fixed in this branch: main-worktree mutation boundary
 
@@ -24,26 +35,29 @@ This branch moves the decision to typed `Tool_catalog.effect_domain` metadata:
 to `Tool_catalog.is_main_worktree_boundary_exempt` after the existing input-aware
 read-only checks.
 
-### Still confirmed: keeper agent affordance grouping
+### No longer confirmed by current audit: keeper agent affordance grouping
 
-`lib/keeper/keeper_agent_run.ml` still has string-derived tool grouping and
-fallback surfaces (`tool_required_affordances`, `String.starts_with`,
-`fallback_tool_surface`, `is_claim_only_turn`). This should be migrated to the
-same typed metadata/catalog pattern rather than adding more name checks.
+The previous `keeper_agent_run.ml` audit handles (`tool_required_affordances`,
+`String.starts_with`, direct keeper/masc tool-name comparisons) no longer match
+active source. Future affordance routing should keep using typed helpers and
+catalog metadata instead of reintroducing local string grouping.
 
-### Still confirmed: provider label heuristics
+### No longer confirmed by current audit: provider label heuristics
 
-`lib/provider_adapter.ml` still infers provider identity from model labels and
-hardcoded CLI provider names in telemetry/metring logic. The current behavior is
-not the same blast radius as dispatch safety, but it is still heuristic and
-should be replaced by provider capability metadata.
+The previous `provider_adapter.ml` audit handles (`prefix_classification_vocabulary`,
+`bare_heuristic`, model-prefix provider guesses) no longer match active source.
+Provider identity should remain metadata/capability-driven rather than inferred
+from display labels.
 
-### Still confirmed: advisory CI bug-class gates
+### Fixed in this branch: advisory CI bug-class gates
 
-`.github/workflows/ci.yml` keeps the meta bug-class gates advisory via
-`continue-on-error: true` and `|| true`. This is visible now through
-`scripts/audit-hardcoding-truth.sh`, but the existing gates are not merge
-blockers.
+`.github/workflows/ci.yml` now runs the meta bug-class gates as blocking checks:
+the `Meta bug-class gates (SSOT, SIL, STR, BND)` step no longer has
+`continue-on-error: true`, individual gate commands no longer use `|| true`, and
+`scripts/audit-hardcoding-truth.sh` runs with `--fail-on-confirmed`.
+
+`scripts/audit-hardcoding-truth.sh` now scopes this check to the meta gate block
+instead of matching unrelated advisory summary steps elsewhere in CI.
 
 ### Improved: anti-fake detector noise
 
@@ -66,44 +80,29 @@ Optional strict mode:
 bash scripts/audit-hardcoding-truth.sh --fail-on-confirmed
 ```
 
-The default mode is non-blocking so it can run in CI and preserve visibility
-while the remaining confirmed debt is paid down incrementally.
+The default mode is non-blocking for local exploration. CI uses strict mode so
+confirmed hardcoding/truth debt blocks the meta gate.
 
 ## Verification
 
-Executed in this branch:
+Executed for the current strict-gate branch:
 
 ```bash
-bash scripts/anti-fake-audit.sh
-# Good: 445, Suspect: 2, Fake: 0, Harness: 9, Total: 456
+bash scripts/ci/check-silent-failure-patterns.sh
+# SIL gate: PASS (no critical silent failures detected)
 
-bash scripts/audit-hardcoding-truth.sh
-# Status: findings
-# Confirmed active issue groups: 3
-#   1. keeper_agent_run string-derived affordance grouping
-#   2. provider_adapter provider/model heuristics
-#   3. advisory CI bug-class gates
+bash scripts/ci/check-masc-oas-boundary.sh
+# BND gate: PASS
 
-bash scripts/lint/no-unknown-permissive-default.sh
-# Scanned 738 .ml files. No #8605 family violations found.
+bash scripts/audit-hardcoding-truth.sh --fail-on-confirmed
+# Confirmed active issue groups: 0
+# Status: pass
 
-bash scripts/ci/check-enum-string-safety.sh
-# STR gate: PASS
-
-scripts/dune-local.sh build @check
+env MASC_DUNE_THROTTLE=0 DUNE_BUILD_DIR=... DUNE_JOBS=1 \
+  scripts/dune-local.sh build ./test/test_board_dispatch.exe
 # PASS
 
-scripts/dune-local.sh exec ./test/test_tool_spec.exe
-# PASS, 14 tests
+env -u MASC_BASE_PATH_INPUT MASC_BASE_PATH=/tmp/masc-hardcoding-gate-board-test \
+  _build-hardcoding-gate/default/test/test_board_dispatch.exe
+# PASS, 27 tests
 ```
-
-`scripts/dune-local.sh exec ./test/test_keeper_github_read_only.exe` was started
-as an extra focused check but was stopped while waiting behind unrelated global
-`/tmp/me-dune-local.lock` holders. The boundary code is type-checked by the
-successful `@check` run above; this extra executable run should be retried when
-the lock is free.
-
-After the successful `@check`, one unused helper introduced by the branch was
-removed. A second `@check` rerun was attempted and stopped while waiting behind
-the same unrelated global dune lock holders; `rg "playground_write_tool"` now
-returns no references.

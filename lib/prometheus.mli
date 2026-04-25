@@ -80,6 +80,13 @@ val metric_keeper_context_max_observed : string
     Labels: [keeper, model_used, resolved_model_id,
     context_max_bucket].  Bucket vocabulary:
     [64k | 128k | 200k | 256k | 1m | other | zero]. *)
+val metric_keeper_turn_starts : string
+val metric_keeper_turn_reattempts : string
+val metric_keeper_turn_regressions : string
+(** #10121: keeper turn livelock observer counters.  Labels:
+    [keeper].  Re-attempt = same turn id started again before
+    the counter advanced; regression = turn id moved strictly
+    backwards (write_meta race symptom — #9733). *)
 val metric_keeper_compactions : string
 val metric_keeper_compaction_ratio_change : string
 val metric_keeper_compaction_saved_tokens : string

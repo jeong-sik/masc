@@ -210,6 +210,21 @@ let metric_keeper_metric_emit_dropped =
 let metric_keeper_context_max_observed =
   "masc_keeper_context_max_observed_total"
 
+(* #10121: keeper turn livelock observer.  Each turn-start
+   bumps [metric_keeper_turn_starts]; a re-start of the SAME
+   turn id (turn counter did not advance) bumps the dedicated
+   [metric_keeper_turn_reattempts].  Operators alert on
+   [rate(masc_keeper_turn_reattempts_total[5m]) > 0] and pick
+   up stuck-turn pairs without grepping log lines.  See also
+   [metric_keeper_turn_regressions] when the FSM moves to a
+   strictly LOWER turn id (very unusual; indicative of
+   write_meta race losing an in-memory counter increment,
+   #9733). *)
+let metric_keeper_turn_starts = "masc_keeper_turn_starts_total"
+let metric_keeper_turn_reattempts = "masc_keeper_turn_reattempts_total"
+let metric_keeper_turn_regressions = "masc_keeper_turn_regressions_total"
+
+
 (* Keeper compaction (keeper_compact_policy.ml, tool_keeper.ml). *)
 let metric_keeper_compactions = "masc_keeper_compactions_total"
 let metric_keeper_compaction_ratio_change =
@@ -419,6 +434,22 @@ let init () =
   add metric_keeper_context_max_observed
     "Total observed keeper context_max values, bucketed (labels: keeper, \
      model_used, resolved_model_id, context_max_bucket=64k|128k|200k|256k|1m|other|zero)"
+    Counter;
+  (* #10121: keeper turn livelock observer counters.  Operator
+     alert: rate(masc_keeper_turn_reattempts_total[5m]) > 0
+     surfaces stuck (keeper, turn) pairs without grepping logs. *)
+  add metric_keeper_turn_starts
+    "Total keeper turn starts (every dispatch increments, regardless of \
+     whether the turn id is new or repeated)"
+    Counter;
+  add metric_keeper_turn_reattempts
+    "Total keeper turn re-attempts: same turn id started again before \
+     the counter advanced (livelock signal — #10121)"
+    Counter;
+  add metric_keeper_turn_regressions
+    "Total keeper turn regressions: turn id moved to a strictly LOWER \
+     value than previously observed (write_meta race losing an in-memory \
+     counter increment — #9733 / #10121)"
     Counter;
   (* Keeper compaction metrics — emitted by keeper_compact_policy.ml *)
   add metric_keeper_compactions

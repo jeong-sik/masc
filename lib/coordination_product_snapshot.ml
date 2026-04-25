@@ -104,7 +104,8 @@ let telemetry_event_sort_key = function
     Printf.sprintf "handoff:%s:%s:%s" from_agent to_agent reason
   | Telemetry_eio.Error_occurred { code; message; context } ->
     Printf.sprintf "error:%s:%s:%s" code message context
-  | Telemetry_eio.Tool_called { tool_name; success; duration_ms; agent_id; source } ->
+  | Telemetry_eio.Tool_called
+      { tool_name; success; duration_ms; agent_id; source; _ } ->
     Printf.sprintf
       "tool_called:%s:%b:%d:%s:%s"
       tool_name

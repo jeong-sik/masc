@@ -381,13 +381,18 @@ let tool_call_io_signature json =
      | _ -> None)
   | _ -> None
 
-let tool_called_event_detail json =
-  match string_field "source" json, assoc_field "event" json with
-  | Some "agent_event", Some (`List (`String tag :: detail :: _))
+let tool_called_detail_from_fields fields =
+  match List.assoc_opt "event" fields with
+  | Some (`List (`String tag :: detail :: _))
     when tag = "Tool_called" || tag = "tool_called" -> (
       match detail with
       | `Assoc _ -> Some detail
       | _ -> None)
+  | _ -> None
+
+let tool_called_event_detail json =
+  match string_field "source" json, json with
+  | Some "agent_event", `Assoc fields -> tool_called_detail_from_fields fields
   | _ -> None
 
 let agent_tool_called_signature json =
@@ -425,9 +430,40 @@ let suppress_shadow_agent_tool_events entries =
 
 (* ── Entry tagging ──────────────────────────────────── *)
 
+let promote_detail_field_if_absent name detail_fields fields =
+  if List.mem_assoc name fields then fields
+  else
+    match List.assoc_opt name detail_fields with
+    | Some (`String value) when String.trim value <> "" ->
+        (name, `String value) :: fields
+    | Some (`Bool _ as value)
+    | Some (`Int _ as value)
+    | Some (`Float _ as value)
+    | Some (`Intlit _ as value) ->
+        (name, value) :: fields
+    | Some _ | None -> fields
+
+let promote_agent_tool_called_scope source fields =
+  match source, tool_called_detail_from_fields fields with
+  | Agent_event, Some (`Assoc detail_fields) ->
+      List.fold_left
+        (fun acc name -> promote_detail_field_if_absent name detail_fields acc)
+        fields
+        [
+          "agent_id";
+          "tool_name";
+          "success";
+          "duration_ms";
+          "session_id";
+          "operation_id";
+          "worker_run_id";
+        ]
+  | _ -> fields
+
 let tag_entry source (json : Yojson.Safe.t) : Yojson.Safe.t =
   match json with
   | `Assoc fields ->
+    let fields = promote_agent_tool_called_scope source fields in
     `Assoc (("source", `String (source_to_string source)) :: fields)
   | other ->
     `Assoc [("source", `String (source_to_string source)); ("data", other)]

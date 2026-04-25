@@ -282,6 +282,8 @@ let metric_ws_parse_cache_hits = "masc_ws_parse_cache_hits_total"
 let metric_ws_parse_cache_misses = "masc_ws_parse_cache_misses_total"
 let metric_ws_bytes_cache_hits = "masc_ws_bytes_cache_hits_total"
 let metric_ws_bytes_cache_misses = "masc_ws_bytes_cache_misses_total"
+let metric_ws_client_buffered_bytes = "masc_ws_client_buffered_bytes"
+let metric_ws_client_acks = "masc_ws_client_acks_total"
 
 (* Admission queue metrics — used in admission_queue_metrics.ml. *)
 let metric_inference_queue_depth = "masc_inference_queue_depth"
@@ -602,6 +604,11 @@ let init () =
     Counter;
   add metric_ws_bytes_cache_misses
     "WS raw-SSE-forward Bytes cache misses (fresh allocation required)"
+    Counter;
+  register_histogram ~name:metric_ws_client_buffered_bytes
+    ~help:"Dashboard client WebSocket.bufferedAmount reported on each ack" ();
+  add metric_ws_client_acks
+    "Total dashboard/ack notifications received from WS clients"
     Counter
 
 let start_time = Time_compat.now ()

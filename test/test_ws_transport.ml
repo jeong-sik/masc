@@ -223,6 +223,44 @@ let test_bytes_cache_counters () =
   Alcotest.(check (float 0.001)) "fresh allocation forces another miss"
     2.0 (read_counter misses_name -. misses0)
 
+(* ====== dashboard/ack observability metrics ====== *)
+
+(* The server needs to see how fast each dashboard client is draining its
+   delta queue.  The client already reports [WebSocket.bufferedAmount] on
+   every ack; these tests cover the server-side observability helper that
+   the dispatcher calls with the extracted value. *)
+
+module Metrics = Masc_mcp.Transport_metrics
+module Prom = Masc_mcp.Prometheus
+
+let read_counter name = Prom.metric_value_or_zero name ()
+
+let test_observe_ws_client_buffered_bytes_accumulates () =
+  let sum_name = Prom.metric_ws_client_buffered_bytes in
+  let count_name = sum_name ^ "_count" in
+  let ack_name = Prom.metric_ws_client_acks in
+  let sum0 = read_counter sum_name in
+  let cnt0 = read_counter count_name in
+  let ack0 = read_counter ack_name in
+  Metrics.observe_ws_client_buffered_bytes 100;
+  Metrics.observe_ws_client_buffered_bytes 250;
+  Alcotest.(check (float 0.001)) "sum increased by 350"
+    350.0 (read_counter sum_name -. sum0);
+  Alcotest.(check (float 0.001)) "count increased by 2"
+    2.0 (read_counter count_name -. cnt0);
+  Alcotest.(check (float 0.001)) "ack counter increased by 2"
+    2.0 (read_counter ack_name -. ack0)
+
+let test_observe_ws_client_buffered_bytes_clamps_negative () =
+  let sum_name = Prom.metric_ws_client_buffered_bytes in
+  let sum0 = read_counter sum_name in
+  (* A misbehaving client cannot drive the gauge below zero.  The helper
+     should floor to 0 rather than leak negative observations into
+     cumulative sums. *)
+  Metrics.observe_ws_client_buffered_bytes (-500);
+  Alcotest.(check (float 0.001)) "negative observation floors to 0"
+    0.0 (read_counter sum_name -. sum0)
+
 (* ====== External Subscriber Broadcast (WS delivery path) ====== *)
 
 let test_ws_external_subscriber_receives_broadcast () =
@@ -340,6 +378,12 @@ let () =
         test_bytes_of_shared_text_invalidates_on_new_ref;
       Alcotest.test_case "hit/miss counters track reuse" `Quick
         test_bytes_cache_counters;
+    ]);
+    ("ack_observability", [
+      Alcotest.test_case "buffered_bytes sum and count track observations" `Quick
+        test_observe_ws_client_buffered_bytes_accumulates;
+      Alcotest.test_case "negative buffered_bytes floor to zero" `Quick
+        test_observe_ws_client_buffered_bytes_clamps_negative;
     ]);
     ("external_subscriber", [
       Alcotest.test_case "single subscriber receives broadcast" `Quick

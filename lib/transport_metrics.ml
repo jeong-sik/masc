@@ -72,6 +72,11 @@ let inc_ws_bytes_cache_hit () =
 let inc_ws_bytes_cache_miss () =
   Prometheus.inc_counter Prometheus.metric_ws_bytes_cache_misses ()
 
+let observe_ws_client_buffered_bytes n =
+  let bytes = float_of_int (max 0 n) in
+  Prometheus.observe_histogram Prometheus.metric_ws_client_buffered_bytes bytes;
+  Prometheus.inc_counter Prometheus.metric_ws_client_acks ()
+
 (** {1 Environment-derived Transport Config} *)
 
 let grpc_runtime_listening : bool Atomic.t = Atomic.make false

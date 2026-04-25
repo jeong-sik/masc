@@ -137,7 +137,7 @@ export function VerificationSpecsPanel() {
   const otherCount = allEntries.filter((e: TlaSpecEntry) => e.category === 'other').length
 
   return html`
-    <div class="flex flex-col gap-4">
+    <div class="flex flex-col gap-4" role="region" aria-label="TLA+ 스펙 검증">
       <div class="flex items-center gap-3 flex-wrap">
         <button
           class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-3 py-1 text-xs text-[var(--text-strong)] hover:bg-[var(--bg-panel-hover)]"

@@ -99,7 +99,7 @@ function KeeperStrip({ name, data }: { name: string; data: KeeperTransitionsResp
   return html`
     <div class="flex items-center gap-3 py-2 px-3 rounded border border-[var(--white-6)] bg-[var(--white-3)]" role="listitem" aria-label="${name}: ${getPhaseStyle(toPascalPhase(phase)).label}, 전환 ${transitions.length}건">
       <div class="w-24 shrink-0">
-        <div class="text-sm font-semibold text-[var(--text-strong)] truncate">${name}</div>
+        <div class="text-sm font-semibold text-[var(--text-strong)] truncate" title=${name}>${name}</div>
         <div
           class="inline-flex items-center rounded px-2 py-0.5 text-3xs font-semibold tracking-wide mt-1"
           style="${phaseInlineStyle(phase)}"
@@ -154,7 +154,7 @@ export function KeeperPhaseTimeline() {
           ? html`<${KeeperStrip} name=${k.name} data=${d} key=${k.name} />`
           : html`
             <div class="flex items-center gap-3 py-2 px-3 rounded border border-[var(--white-6)] bg-[var(--white-3)]" key=${k.name}>
-              <div class="w-24 text-sm font-semibold text-[var(--text-strong)] truncate">${k.name}</div>
+              <div class="w-24 text-sm font-semibold text-[var(--text-strong)] truncate" title=${k.name}>${k.name}</div>
               <span class="text-2xs text-[var(--text-muted)]">데이터 없음</span>
             </div>
           `

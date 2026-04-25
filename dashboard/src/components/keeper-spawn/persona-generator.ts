@@ -264,7 +264,7 @@ export function PersonaGenerator() {
         </div>
 
         ${personaAuthoringResult.value ? html`
-          <pre class="max-h-48 overflow-auto rounded border border-[var(--white-10)] bg-[var(--white-4)] p-2 text-3xs ${personaAuthoringResult.value.success ? 'text-[var(--text-body)]' : 'text-[var(--bad)]'}">${personaAuthoringResult.value.message}</pre>
+          <pre class="max-h-48 overflow-auto rounded border border-[var(--white-10)] bg-[var(--white-4)] p-2 text-3xs ${personaAuthoringResult.value.success ? 'text-[var(--text-body)]' : 'text-[var(--bad)]'}" tabindex="0" aria-label="페르소나 생성 결과">${personaAuthoringResult.value.message}</pre>
         ` : null}
       </div>
     </div>

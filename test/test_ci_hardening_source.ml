@@ -950,6 +950,16 @@ let test_runtime_precondition_contracts () =
      remaining routes do not need server state guard. *)
   ()
 
+let file_uses_masc_dir_helper file =
+  List.exists
+    (fun pattern -> file_contains_pattern file pattern)
+    [
+      "Common.masc_dir_from_base_path";
+      "Common.masc_dirname";
+      "Masc_paths.masc_dir_from_base_path";
+      "Masc_paths.masc_dirname";
+    ]
+
 (* #9571: MASC dirname SSOT — every runtime path that lives under
    [base_path/.masc/...] must go through [Common.masc_dir_from_base_path]
    instead of inlining the literal [".masc/<sub>"].  These contracts
@@ -1011,7 +1021,11 @@ let test_masc_dirname_ssot_contracts () =
        check bool
          (Printf.sprintf "%s no longer inlines \".masc/\"" file)
          true
-         (file_not_contains_pattern file "\".masc/"))
+         (file_not_contains_pattern file "\".masc/");
+       check bool
+         (Printf.sprintf "%s no longer inlines standalone \".masc\"" file)
+         true
+         (file_not_contains_pattern file "\".masc\""))
     migrated_files
 
 let () =

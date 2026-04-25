@@ -157,7 +157,7 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
 
   if (loading) {
     return html`
-      <div class="flex items-center justify-center gap-2 py-6 text-2xs text-[var(--text-dim)]">
+      <div class="flex items-center justify-center gap-2 py-6 text-2xs text-[var(--text-dim)]" role="status">
         <${InlineSpinner} />
         composite lifecycle 로딩중
       </div>
@@ -199,7 +199,7 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
       </div>
 
       ${phaseMismatch ? html`
-        <div class="rounded border border-[var(--warn-24)] bg-[var(--warn-8)] px-3 py-2 text-2xs leading-normal text-[var(--text-body)]">
+        <div class="rounded border border-[var(--warn-24)] bg-[var(--warn-8)] px-3 py-2 text-2xs leading-normal text-[var(--text-body)]" role="alert">
           keeper row phase와 composite snapshot phase가 다릅니다. composite snapshot을 authoritative runtime-truth로 사용합니다.
         </div>
       ` : null}

@@ -104,6 +104,7 @@ function CategoryPanel({ name, entries }: { name: string; entries: ConfigEntry[]
     <div class="border border-[var(--border-subtle)] rounded overflow-hidden mb-3">
       <button
         class="w-full flex items-center justify-between px-4 py-2.5 bg-[var(--bg-surface)] hover:bg-[var(--bg-panel-hover)] transition-colors text-left"
+        aria-expanded=${isExpanded}
         onClick=${() => toggleCategory(name)}
       >
         <div class="flex items-center gap-2">
@@ -172,11 +173,13 @@ export function ServerConfig() {
         <${TextInput}
           class="flex-1"
           placeholder="환경변수 또는 설명으로 검색..."
+          ariaLabel="설정 검색"
           value=${searchQuery.value}
           onInput=${(e: Event) => { searchQuery.value = (e.target as HTMLInputElement).value }}
         />
         <button
           class="px-3 py-1.5 text-xs rounded bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-panel-hover)] transition-colors"
+          aria-label="서버 설정 새로고침"
           onClick=${() => void refreshServerConfig()}
           disabled=${loading}
         >
@@ -185,7 +188,7 @@ export function ServerConfig() {
       </div>
 
       ${error ? html`
-        <div class="text-sm text-[var(--bad)] mb-3">${error}</div>
+        <div class="text-sm text-[var(--bad)] mb-3" role="alert">${error}</div>
       ` : null}
 
       ${loading && !data ? html`

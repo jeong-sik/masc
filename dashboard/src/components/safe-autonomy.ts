@@ -250,7 +250,7 @@ function KeeperCard({ item }: { item: KeeperItem }) {
           </div>
           ${item.last_blocker
             ? html`
-              <div class="mt-3 rounded border border-[var(--warn-30)] bg-[var(--warn-12)] px-3 py-2 text-xs text-[var(--warn)]">
+              <div class="mt-3 rounded border border-[var(--warn-30)] bg-[var(--warn-12)] px-3 py-2 text-xs text-[var(--warn)]" role="alert">
                 blocker: ${item.last_blocker}
               </div>
             `

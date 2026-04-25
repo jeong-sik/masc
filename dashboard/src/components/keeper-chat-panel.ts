@@ -221,7 +221,7 @@ export function KeeperChatPanel({ name }: { name: string }) {
 
       <div class="px-4 py-4">
         ${chatAccess.message
-          ? html`<div class="mb-4 rounded-card border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2.5 text-xs leading-loose text-[var(--warn-bright)]">${chatAccess.message}</div>`
+          ? html`<div class="mb-4 rounded-card border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2.5 text-xs leading-loose text-[var(--warn-bright)]" role="alert">${chatAccess.message}</div>`
           : null}
         <${ChatTranscript}
           entries=${transcriptEntries}
@@ -233,7 +233,7 @@ export function KeeperChatPanel({ name }: { name: string }) {
       </div>
 
       ${chatError.value
-        ? html`<div class="mx-4 mb-4 rounded-card border border-[rgba(239,68,68,0.24)] bg-[rgba(127,29,29,0.24)] px-3 py-2.5 text-xs leading-loose text-[var(--bad-light)]">${chatError.value}</div>`
+        ? html`<div class="mx-4 mb-4 rounded-card border border-[rgba(239,68,68,0.24)] bg-[rgba(127,29,29,0.24)] px-3 py-2.5 text-xs leading-loose text-[var(--bad-light)]" role="alert">${chatError.value}</div>`
         : null}
 
       <div class="border-t border-[var(--slate-gray-12)] bg-[var(--white-3)] px-4 py-4">

@@ -22,6 +22,8 @@
         the FIRST start of the current turn id (so a future
         gate can compute "stuck for X minutes" without
         re-deriving the timeline).
+     7. The guard blocks attempt 4 when [max_attempts=3],
+        gates on stuck age, and resets on forward turn advance.
 *)
 
 let () =
@@ -46,6 +48,10 @@ let reattempts_for ~keeper =
 let regressions_for ~keeper =
   Prom.metric_value_or_zero Prom.metric_keeper_turn_regressions
     ~labels:[ ("keeper", keeper) ] ()
+
+let blocks_for ~keeper ~reason =
+  Prom.metric_value_or_zero Prom.metric_keeper_turn_livelock_blocks
+    ~labels:[ ("keeper", keeper); ("reason", reason) ] ()
 
 (* Fresh start: no prior state → [Fresh] outcome, starts counter
    +1, reattempt counter unchanged. *)
@@ -162,6 +168,94 @@ let test_seconds_since_first_attempt () =
       "elapsed >= 50ms (sleep) and < 60s (test budget)"
       true (t >= 0.04 && t < 60.0)
 
+let test_guard_blocks_after_max_attempts () =
+  L.reset_for_tests ();
+  let keeper = "test-keeper-guard-max-10121" in
+  let now = ref 1000.0 in
+  let call () =
+    L.guard_and_record_turn_start
+      ~now:(fun () -> !now)
+      ~keeper
+      ~turn_id:91
+      ~max_attempts:3
+      ~stuck_after_sec:3600.0
+      ()
+  in
+  let before_starts = starts_for ~keeper in
+  let before_blocks =
+    blocks_for ~keeper ~reason:"attempts_exhausted"
+  in
+  (match call () with
+   | L.Started L.Fresh -> ()
+   | _ -> Alcotest.fail "attempt 1 should start fresh");
+  (match call () with
+   | L.Started (L.Reattempt { previous_attempts = 1; _ }) -> ()
+   | _ -> Alcotest.fail "attempt 2 should start");
+  (match call () with
+   | L.Started (L.Reattempt { previous_attempts = 2; _ }) -> ()
+   | _ -> Alcotest.fail "attempt 3 should start");
+  (match call () with
+   | L.Blocked (L.Attempts_exhausted { attempts; max_attempts; _ }) ->
+     Alcotest.(check int) "attempts held at 3" 3 attempts;
+     Alcotest.(check int) "max attempts" 3 max_attempts
+   | _ -> Alcotest.fail "attempt 4 should be blocked");
+  Alcotest.(check (float 0.0001))
+    "only the three dispatches increment starts"
+    (before_starts +. 3.0) (starts_for ~keeper);
+  Alcotest.(check (float 0.0001))
+    "block counter +1"
+    (before_blocks +. 1.0)
+    (blocks_for ~keeper ~reason:"attempts_exhausted")
+
+let test_guard_blocks_on_stuck_age () =
+  L.reset_for_tests ();
+  let keeper = "test-keeper-guard-age-10121" in
+  let now = ref 10.0 in
+  let call () =
+    L.guard_and_record_turn_start
+      ~now:(fun () -> !now)
+      ~keeper
+      ~turn_id:24
+      ~max_attempts:10
+      ~stuck_after_sec:30.0
+      ()
+  in
+  (match call () with
+   | L.Started L.Fresh -> ()
+   | _ -> Alcotest.fail "first attempt should start");
+  now := 41.0;
+  (match call () with
+   | L.Blocked
+       (L.Stuck_age_exceeded { attempts; age_sec; threshold_sec; _ }) ->
+     Alcotest.(check int) "only one prior attempt" 1 attempts;
+     Alcotest.(check bool) "age crosses threshold" true (age_sec >= 30.0);
+     Alcotest.(check (float 0.0001)) "threshold" 30.0 threshold_sec
+   | _ -> Alcotest.fail "stuck age should block");
+  Alcotest.(check (float 0.0001))
+    "age block counter +1"
+    1.0 (blocks_for ~keeper ~reason:"stuck_age_exceeded")
+
+let test_guard_forward_advance_resets () =
+  L.reset_for_tests ();
+  let keeper = "test-keeper-guard-advance-10121" in
+  let call turn_id =
+    L.guard_and_record_turn_start
+      ~now:(fun () -> 100.0)
+      ~keeper
+      ~turn_id
+      ~max_attempts:2
+      ~stuck_after_sec:3600.0
+      ()
+  in
+  ignore (call 7 : L.guarded_start_outcome);
+  ignore (call 7 : L.guarded_start_outcome);
+  (match call 7 with
+   | L.Blocked (L.Attempts_exhausted _) -> ()
+   | _ -> Alcotest.fail "third attempt for turn 7 should block");
+  (match call 8 with
+   | L.Started L.Fresh -> ()
+   | _ -> Alcotest.fail "turn 8 should reset guard state")
+
 let () =
   Alcotest.run "keeper_turn_livelock_10121"
     [
@@ -193,5 +287,14 @@ let () =
         [
           Alcotest.test_case "seconds_since_first_attempt" `Quick
             test_seconds_since_first_attempt;
+        ] );
+      ( "guard",
+        [
+          Alcotest.test_case "max attempts gates attempt 4" `Quick
+            test_guard_blocks_after_max_attempts;
+          Alcotest.test_case "stuck age gates dispatch" `Quick
+            test_guard_blocks_on_stuck_age;
+          Alcotest.test_case "forward advance resets guard" `Quick
+            test_guard_forward_advance_resets;
         ] );
     ]

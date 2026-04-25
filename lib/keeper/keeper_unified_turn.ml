@@ -292,6 +292,16 @@ let saturation_skip_sleep_duration () =
   in
   saturation_skip_backoff_sec +. jitter
 
+let turn_livelock_max_attempts () =
+  Int.max 1
+    (Env_config_core.get_int ~default:3
+       "MASC_KEEPER_TURN_LIVELOCK_MAX_ATTEMPTS")
+
+let turn_livelock_stuck_after_sec () =
+  Float.max 1.0
+    (Env_config_core.get_float ~default:1800.0
+       "MASC_KEEPER_TURN_LIVELOCK_STUCK_AFTER_SEC")
+
 (* Extracted to Keeper_error_classify — see keeper_error_classify.ml *)
 
 module EC = Keeper_error_classify
@@ -913,6 +923,22 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
       (match saturation_skip_meta with
        | Some meta_after_skip -> Ok meta_after_skip
        | None ->
+      let turn_id = meta.runtime.usage.total_turns in
+      (match
+         Keeper_turn_livelock.guard_and_record_turn_start
+           ~keeper:meta.name
+           ~turn_id
+           ~max_attempts:(turn_livelock_max_attempts ())
+           ~stuck_after_sec:(turn_livelock_stuck_after_sec ())
+           ()
+       with
+       | Keeper_turn_livelock.Blocked reason ->
+           Log.Keeper.error
+             "%s: keeper turn livelock guard blocked dispatch turn=%d: %s"
+             meta.name turn_id
+             (Keeper_turn_livelock.gate_reason_to_string reason);
+           Ok meta
+       | Keeper_turn_livelock.Started _ ->
       let build_cascade_execution ~(cascade_name : string) :
           (cascade_execution, Oas.Error.sdk_error) result =
         let meta_for_cascade = { meta with cascade_name } in
@@ -1157,17 +1183,6 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
         ~base_path:config.base_path meta.name;
       Keeper_registry.mark_turn_measurement
         ~base_path:config.base_path meta.name;
-      (* #10121: livelock observer — emit reattempt counter when
-         the same turn id starts again before the counter
-         advanced.  The classification result is intentionally
-         dropped here (no behaviour change yet); a follow-up PR
-         can act on [Reattempt { previous_attempts = N; _ }] to
-         gate dispatch above a threshold. *)
-      let _ : Keeper_turn_livelock.start_outcome =
-        Keeper_turn_livelock.record_turn_start
-          ~keeper:meta.name
-          ~turn_id:meta.runtime.usage.total_turns
-      in
       (match Keeper_registry.get ~base_path:config.base_path meta.name with
        | Some { current_turn_observation = Some { measurement = Some _; _ }; _ } ->
            Keeper_registry.set_turn_decision_stage
@@ -2303,6 +2318,6 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
            | Oas_worker.Completed ->
              Keeper_registry.reset_turn_failures ~base_path:config.base_path
                updated_meta.name);
-          Ok updated_meta)
+          Ok updated_meta))
 
 let run_unified_turn = run_keeper_cycle

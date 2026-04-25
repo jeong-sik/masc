@@ -6,7 +6,8 @@
     backwards regressions emit dedicated Prometheus counters so
     operators can alert without grepping log lines.
 
-    This module does NOT gate dispatch — that's a follow-up.
+    [guard_and_record_turn_start] can also gate dispatch once a
+    turn exhausts its retry budget or stays stuck too long.
     State is process-local; a server restart resets the
     bookkeeping. *)
 
@@ -21,12 +22,45 @@ type start_outcome =
   | Reattempt of { previous_attempts : int; first_started_at : float }
   | Regression of { previous_turn_id : int }
 
+type gate_reason =
+  | Attempts_exhausted of {
+      attempts : int;
+      max_attempts : int;
+      first_started_at : float;
+    }
+  | Stuck_age_exceeded of {
+      attempts : int;
+      age_sec : float;
+      threshold_sec : float;
+      first_started_at : float;
+    }
+
+type guarded_start_outcome =
+  | Started of start_outcome
+  | Blocked of gate_reason
+
 (** [record_turn_start ~keeper ~turn_id] increments the
     [masc_keeper_turn_starts_total] counter and, when the start
     classifies as [Reattempt] or [Regression], the matching
     counter as well.  Returns the classification for the caller.
     Thread-safe across keeper fibers / domains. *)
 val record_turn_start : keeper:string -> turn_id:int -> start_outcome
+
+val guard_and_record_turn_start :
+  ?now:(unit -> float) ->
+  keeper:string ->
+  turn_id:int ->
+  max_attempts:int ->
+  stuck_after_sec:float ->
+  unit ->
+  guarded_start_outcome
+(** Atomically enforce a per-turn retry/age budget before recording a start.
+    With [max_attempts = 3], attempts 1, 2, and 3 are started; the fourth
+    start for the same [(keeper, turn_id)] is [Blocked].  Blocked starts do
+    not increment [metric_keeper_turn_starts], because no dispatch occurs. *)
+
+val gate_reason_kind : gate_reason -> string
+val gate_reason_to_string : gate_reason -> string
 
 (** Read-only view of the current attempt state for a keeper.
     Returns [None] when no state has been recorded yet. *)

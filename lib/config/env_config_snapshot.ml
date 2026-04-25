@@ -727,6 +727,10 @@ let keeper_keepalive_entries =
       "Interruptible sleep chunk size (seconds, clamped 0.1-10)";
     entry ~default:"(none)" "MASC_KEEPER_SMART_HEARTBEAT"
       "Adaptive heartbeat scheduling in keepalive loop (feature flag)";
+    entry ~default:"3" "MASC_KEEPER_TURN_LIVELOCK_MAX_ATTEMPTS"
+      "Max dispatch attempts for the same keeper turn id before livelock guard blocks";
+    entry ~default:"1800.0" "MASC_KEEPER_TURN_LIVELOCK_STUCK_AFTER_SEC"
+      "Max seconds a keeper turn id may stay active before livelock guard blocks";
     entry ~default:"1200.0" "MASC_KEEPER_TURN_TIMEOUT_SEC"
       "Wall-clock timeout for a single unified turn (clamped 60-3600 seconds)";
     entry ~default:"(none)" "MASC_KEEPER_WORK_AS_HEARTBEAT"

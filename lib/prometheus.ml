@@ -223,6 +223,8 @@ let metric_keeper_context_max_observed =
 let metric_keeper_turn_starts = "masc_keeper_turn_starts_total"
 let metric_keeper_turn_reattempts = "masc_keeper_turn_reattempts_total"
 let metric_keeper_turn_regressions = "masc_keeper_turn_regressions_total"
+let metric_keeper_turn_livelock_blocks =
+  "masc_keeper_turn_livelock_blocks_total"
 
 (* #9943: per-keeper turn-latency bucket counter.  Each completed
    turn lands in exactly one [latency_bucket] label so a Prometheus
@@ -547,6 +549,10 @@ let init () =
     "Total keeper turn regressions: turn id moved to a strictly LOWER \
      value than previously observed (write_meta race losing an in-memory \
      counter increment — #9733 / #10121)"
+    Counter;
+  add metric_keeper_turn_livelock_blocks
+    "Total keeper turn dispatches blocked by the stuck-turn livelock guard \
+     (labels: keeper, reason=attempts_exhausted|stuck_age_exceeded)"
     Counter;
   (* #9943: per-keeper turn latency bucket distribution.  Each
      completed turn increments exactly one bucket.  Bucket vocabulary

@@ -472,8 +472,8 @@ function EntryRow({ entry }: { entry: TelemetryEntry }) {
         <span class="font-mono font-bold ${meta.color} w-4 text-center flex-shrink-0" aria-hidden="true">${meta.icon}</span>
         <${TimeAgo} timestamp=${ts} class="font-mono text-[var(--text-muted)] w-28 flex-shrink-0" />
         ${success != null ? html`
-          <span class="flex-shrink-0 w-4 ${success ? 'text-[var(--ok)]' : 'text-[var(--bad-light)]'}">
-            ${success ? 'O' : 'X'}
+          <span class="flex-shrink-0 w-4 ${success ? 'text-[var(--ok)]' : 'text-[var(--bad-light)]'}" aria-label=${success ? '성공' : '실패'}>
+            <span aria-hidden="true">${success ? 'O' : 'X'}</span>
           </span>
         ` : html`<span class="w-4"></span>`}
         <span class="font-mono text-[var(--text-strong)] truncate flex-1" title=${entryPreview(entry)}>

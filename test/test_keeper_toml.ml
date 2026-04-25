@@ -1116,6 +1116,29 @@ let test_persona_authoring_social_model_choices_follow_variant_ssot () =
     Masc_mcp.Keeper_social_model.valid_model_id_strings
     KTP.valid_social_model_strings
 
+let test_persona_authoring_allowed_keeper_fields_follow_catalog () =
+  let json = KPA.schema_json () in
+  let keeper_prefix = "keeper." in
+  let keeper_fields =
+    Yojson.Safe.Util.member "field_catalog" json
+    |> Yojson.Safe.Util.to_list
+    |> List.filter_map (fun entry ->
+           let path =
+             Yojson.Safe.Util.member "path" entry |> Yojson.Safe.Util.to_string
+           in
+           if String.starts_with ~prefix:keeper_prefix path
+           then
+             Some
+               (String.sub
+                  path
+                  (String.length keeper_prefix)
+                  (String.length path - String.length keeper_prefix))
+           else None)
+    |> List.sort String.compare
+  in
+  check (list string) "allowed keeper fields follow schema catalog" keeper_fields
+    (List.sort String.compare KPA.allowed_keeper_fields)
+
 let test_persona_authoring_axes_validate_and_default_preset () =
   let args =
     `Assoc
@@ -1558,6 +1581,8 @@ let () =
             test_persona_authoring_schema_explains_effects;
           test_case "persona authoring social_model choices follow variant SSOT" `Quick
             test_persona_authoring_social_model_choices_follow_variant_ssot;
+          test_case "persona authoring allowed keeper fields follow catalog" `Quick
+            test_persona_authoring_allowed_keeper_fields_follow_catalog;
           test_case "persona authoring axes validate and default preset" `Quick
             test_persona_authoring_axes_validate_and_default_preset;
           test_case "persona authoring axes reject unknown choices" `Quick

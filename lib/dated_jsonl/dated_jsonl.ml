@@ -160,6 +160,13 @@ let load_tail_lines path ~max_lines =
           raw_lines
           |> List.filter (fun l -> String.trim l <> "")
         in
+        let all_lines =
+          if !pos > 0 then
+            match all_lines with
+            | _resume_overlap :: rest -> rest
+            | [] -> []
+          else all_lines
+        in
         let total = List.length all_lines in
         if total <= max_lines then all_lines
         else

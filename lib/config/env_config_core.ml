@@ -449,6 +449,26 @@ let admin_token_opt () =
 let tool_auth_strict () =
   get_bool ~default:true tool_auth_strict_env_key
 
+(** {1 Git operations} *)
+
+(** [git fetch origin] before worktree creation is network-bound and
+    can stall behind a slow Docker bridge or a large remote.  The
+    previous hardcoded 30s budget at [coord_worktree.run_argv_exit]
+    rejected legitimately slow fetches inside the keeper sandbox
+    (#9587) — observed at [/Users/dancer/me/.masc/playground/docker/
+    masc-improver/repos/masc-mcp]).  Default 120s gives enough
+    headroom for a cold fetch on a non-trivial repo while still
+    bounding hung connections.  Operators can override via
+    [MASC_GIT_FETCH_TIMEOUT_SEC] when running on faster networks
+    (e.g. 60s in CI) or slower ones (e.g. 300s on a constrained
+    laptop tether).  Floor 10s prevents a footgun setting like
+    [0] from disabling the cap entirely. *)
+let git_fetch_timeout_sec_env_key = "MASC_GIT_FETCH_TIMEOUT_SEC"
+
+let git_fetch_timeout_sec () =
+  Float.max 10.0
+    (get_float ~default:120.0 git_fetch_timeout_sec_env_key)
+
 (** {1 Logging / Telemetry} *)
 
 (** SSOT for logging / observability env-var names (issue 8352). *)

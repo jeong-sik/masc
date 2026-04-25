@@ -3,13 +3,14 @@
 open Masc_mcp
 
 let all_keeper : Tool_name.Keeper.t list =
-  [ Bash; Board_cleanup; Board_comment; Board_comment_vote; Board_delete
+  [ Bash; Bash_kill; Bash_output; Board_cleanup; Board_comment; Board_comment_vote; Board_delete
   ; Board_get; Board_list; Board_post; Board_search; Board_stats; Board_vote
   ; Broadcast; Code_read; Context_status; Discovery; Fs_edit; Fs_read
   ; Handoff; Library_read; Library_search; Memory_search
   ; Pr_review_comment; Pr_review_read; Pr_review_reply
   ; Preflight_check; Shell; Stay_silent
-  ; Task_claim; Task_create; Task_done; Task_force_done; Task_force_release
+  ; Task_claim; Task_create; Task_done; Task_submit_for_verification
+  ; Task_force_done; Task_force_release
   ; Tasks_audit; Tasks_list; Time_now; Tool_search; Tools_list
   ; Voice_agent; Voice_listen; Voice_session_end; Voice_session_start
   ; Voice_sessions; Voice_speak; Write ]
@@ -135,6 +136,49 @@ let test_unknown_returns_none () =
       None (Tool_name.of_string s)
   ) unknowns
 
+let test_keeper_board_write_helpers () =
+  let open Tool_name.Keeper in
+  Alcotest.(check (list string)) "canonical board write names"
+    [ "keeper_board_post"; "keeper_board_comment"; "keeper_board_vote" ]
+    board_write_tool_names;
+  List.iter
+    (fun tool ->
+       Alcotest.(check bool)
+         (Printf.sprintf "%s is board write" (to_string tool))
+         true
+         (is_board_write tool))
+    board_write_tools;
+  List.iter
+    (fun tool ->
+       Alcotest.(check bool)
+         (Printf.sprintf "%s is not board write" (to_string tool))
+         false
+         (is_board_write tool))
+    [ Board_list; Board_get; Board_comment_vote; Task_done; Write ];
+  Alcotest.(check (option string)) "post action kind"
+    (Some "post") (board_write_action_kind Board_post);
+  Alcotest.(check (option string)) "comment action kind"
+    (Some "comment") (board_write_action_kind Board_comment);
+  Alcotest.(check (option string)) "vote action kind"
+    (Some "vote") (board_write_action_kind Board_vote);
+  Alcotest.(check (option string)) "non-board action kind"
+    None (board_write_action_kind Board_list)
+
+let test_keeper_board_write_facade_uses_typed_contract () =
+  Alcotest.(check (list string)) "exec context names mirror Tool_name"
+    Tool_name.Keeper.board_write_tool_names
+    Keeper_exec_context.keeper_board_write_tool_names;
+  Alcotest.(check bool) "comment is board write" true
+    (Keeper_exec_context.keeper_write_done [ "keeper_board_comment" ]);
+  Alcotest.(check bool) "comment vote is not board write" false
+    (Keeper_exec_context.keeper_write_done [ "keeper_board_comment_vote" ]);
+  Alcotest.(check string) "post has stable priority" "post"
+    (Keeper_exec_context.keeper_action_kind_of_tool_names
+       [ "keeper_board_vote"; "keeper_board_post" ]);
+  Alcotest.(check string) "non-board action kind is none" "none"
+    (Keeper_exec_context.keeper_action_kind_of_tool_names
+       [ "keeper_board_comment_vote"; "unknown" ])
+
 (* ── Group predicates ──────────────────────────────────────── *)
 
 let test_is_keeper () =
@@ -191,6 +235,10 @@ let () =
       Alcotest.test_case "masc_keeper prefix" `Quick test_masc_keeper_prefix;
       Alcotest.test_case "all unique" `Quick test_all_names_unique;
       Alcotest.test_case "unknown -> None" `Quick test_unknown_returns_none;
+      Alcotest.test_case "keeper board write helpers" `Quick
+        test_keeper_board_write_helpers;
+      Alcotest.test_case "keeper board write facade" `Quick
+        test_keeper_board_write_facade_uses_typed_contract;
       Alcotest.test_case "is_keeper" `Quick test_is_keeper;
     ];
     "coverage", [

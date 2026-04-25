@@ -149,6 +149,20 @@ module Keeper = struct
     | "keeper_write" -> Some Write
     | _ -> None
 
+  let board_write_tools = [ Board_post; Board_comment; Board_vote ]
+
+  let board_write_tool_names = List.map to_string board_write_tools
+
+  let is_board_write = function
+    | Board_post | Board_comment | Board_vote -> true
+    | _ -> false
+
+  let board_write_action_kind = function
+    | Board_post -> Some "post"
+    | Board_comment -> Some "comment"
+    | Board_vote -> Some "vote"
+    | _ -> None
+
   let pp fmt t = Format.pp_print_string fmt (to_string t)
 end
 

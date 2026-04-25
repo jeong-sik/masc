@@ -247,17 +247,28 @@ let dispatch_post_turn_lifecycle_events
 
 let generate_trace_id = Keeper_identity.generate_trace_id
 
-let keeper_board_write_tool_names =
-  [ "keeper_board_post"; "keeper_board_comment"; "keeper_board_vote" ]
+let keeper_board_write_tool_names = Tool_name.Keeper.board_write_tool_names
+
+let keeper_tool_name_matches tool name =
+  match Tool_name.Keeper.of_string name with
+  | Some parsed -> parsed = tool
+  | None -> false
 
 let keeper_write_done tool_names =
-  List.exists (fun name -> List.mem name keeper_board_write_tool_names) tool_names
+  List.exists
+    (fun name ->
+       match Tool_name.Keeper.of_string name with
+       | Some tool -> Tool_name.Keeper.is_board_write tool
+       | None -> false)
+    tool_names
 
 let keeper_action_kind_of_tool_names tool_names =
-  if List.mem "keeper_board_post" tool_names then "post"
-  else if List.mem "keeper_board_comment" tool_names then "comment"
-  else if List.mem "keeper_board_vote" tool_names then "vote"
-  else "none"
+  Tool_name.Keeper.board_write_tools
+  |> List.find_map (fun tool ->
+    if List.exists (keeper_tool_name_matches tool) tool_names then
+      Tool_name.Keeper.board_write_action_kind tool
+    else None)
+  |> Option.value ~default:"none"
 
 let effective_model_labels_for_turn (m : keeper_meta) : string list =
   (* provider filtering now handled by OAS cascade via ~provider_filter *)

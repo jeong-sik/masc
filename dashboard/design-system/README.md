@@ -161,6 +161,79 @@ Bundled as `--elev-0 … --elev-6` (bg + border + shadow). Low-level elements st
 
 ---
 
+## Token tiers & theming
+
+Tokens are arranged in three layers. Components should reference the
+**semantic** layer when possible so theme overrides flow without
+touching component CSS.
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│ raw         #0c0b08    #d4a14a    #6b9e6b                    │
+│             --bg-0     --brass-1  --ok                       │
+│ ▼                                                            │
+│ semantic    --color-bg-page   --color-accent-fg              │
+│             --color-fg-primary  --color-status-added         │
+│             --color-keeper-1..5  --color-focus-ring          │
+│ ▼                                                            │
+│ component   .ix-tree { background: var(--color-bg-surface) } │
+│             .chip   { color: var(--color-accent-fg) }        │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**Raw tier** — palette anchors. Defined in `source_styles/tokens.css` and
+mirrored in `colors_and_type.css`. Treat as private-ish: prefer the
+semantic alias unless you genuinely need a literal palette pick.
+
+**Semantic tier** — meaning over hex. The full alias matrix:
+
+| Alias | Maps to (dark default) | Used for |
+|-------|------------------------|----------|
+| `--color-bg-page` | `--bg-0` | top-level page bg |
+| `--color-bg-surface` | `--bg-1` | resting panel / chrome |
+| `--color-bg-elevated` | `--bg-2` | card / popover |
+| `--color-fg-primary` | `--fg-1` | body text |
+| `--color-fg-secondary` | `--fg-2` | label / dim text |
+| `--color-fg-muted` | `--fg-3` | caption / disabled |
+| `--color-border-default` | `--line-1` | hairline border |
+| `--color-border-strong` | `--line-2` | emphasized border |
+| `--color-accent` | `--brass-1` | active/running marker |
+| `--color-accent-fg` | `--brass-1` | text/glyph on accent |
+| `--color-status-added` | `--ok` | diff added / created |
+| `--color-status-modified` | `--warn` | diff modified / at-risk |
+| `--color-status-deleted` | `--err` | diff deleted / failed |
+| `--color-keeper-1..5` | `--k-{nick,masc,sangsu,qa,rama}` | fleet attribution |
+| `--color-focus-ring` | `--brass-1` | `:focus-visible` outline color |
+
+**Component tier** — the actual component CSS. References semantic
+aliases. Migrating a component from raw to semantic is a one-line swap.
+
+### Theming
+
+The system is **dark-by-design**. A `[data-theme="light"]` override
+exists as foundation infrastructure for future surfaces but the dark
+brass aesthetic remains the canonical look.
+
+```js
+import { setTheme, getTheme } from './preview/cb-shared.jsx';
+
+setTheme('light');   // flips semantic aliases, persists to localStorage
+setTheme('dark');    // explicit dark
+setTheme(null);      // clear → falls back to prefers-color-scheme
+```
+
+The override only redefines the **semantic** alias values. Raw tokens
+(`--bg-0`, `--brass-1`) keep their dark values. A component still using
+raw tokens stays dark in light mode — this is intentional. Migration is
+gradual: swap component CSS from raw to semantic and the theme starts
+working for that component.
+
+`@media (prefers-color-scheme: light)` is honored only when no explicit
+`data-theme` is set, so a user's chosen theme is never overridden by OS
+preference.
+
+---
+
 ## Iconography
 
 MASC uses **essentially no icons**. This is deliberate.

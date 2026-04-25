@@ -368,12 +368,95 @@ body[data-density="comfortable"]  { --density: 1.15; }
   --_motion-scope: 1;
 }
 
+/* ─────────────────────────────────────────────────────────────────
+   Semantic color tier — alias layer over raw tokens.
+   Components SHOULD reference --color-* over raw --bg-*/--fg-*/--brass-*
+   so theme overrides (data-theme / prefers-color-scheme) work without
+   touching component CSS. Raw tokens remain valid for escape hatches.
+   Tracking: issue #10389. */
+:root {
+  --color-bg-page:        var(--bg-0);
+  --color-bg-surface:     var(--bg-1);
+  --color-bg-elevated:    var(--bg-2);
+
+  --color-fg-primary:     var(--fg-1);
+  --color-fg-secondary:   var(--fg-2);
+  --color-fg-muted:       var(--fg-3);
+
+  --color-border-default: var(--line-1);
+  --color-border-strong:  var(--line-2);
+
+  --color-accent-fg:      var(--brass-1);
+  /* --color-accent already defined in colors_and_type.css */
+
+  --color-status-added:    var(--ok);
+  --color-status-modified: var(--warn);
+  --color-status-deleted:  var(--err);
+
+  --color-keeper-1: var(--k-nick);
+  --color-keeper-2: var(--k-masc);
+  --color-keeper-3: var(--k-sangsu);
+  --color-keeper-4: var(--k-qa);
+  --color-keeper-5: var(--k-rama);
+
+  /* outline color used by component :focus-visible rules.
+     Pairs with PR #10394 introducing this token in components.css. */
+  --color-focus-ring: var(--brass-1);
+}
+
+/* Light theme override — semantic layer only.
+   Raw tokens stay dark; components migrated to --color-* flip with theme,
+   un-migrated components stay dark. This is the gradual migration path. */
+:root[data-theme="light"] {
+  --color-bg-page:        #f7f5f0;
+  --color-bg-surface:     #fdfcf8;
+  --color-bg-elevated:    #ffffff;
+
+  --color-fg-primary:     #1a1612;
+  --color-fg-secondary:   #4a423a;
+  --color-fg-muted:       #7a7065;
+
+  --color-border-default: #d8d2c4;
+  --color-border-strong:  #b8b0a0;
+
+  --color-accent-fg:      var(--brass-3);
+
+  --color-status-added:    #3d7a3d;
+  --color-status-modified: #8a6a1a;
+  --color-status-deleted:  #a04030;
+
+  /* Keeper hues are attribution markers; keep saturation the same so a
+     person stays recognizable across themes. */
+
+  --color-focus-ring: var(--brass-3);
+}
+
+/* Auto light theme when user has no explicit data-theme set.
+   :not([data-theme]) prevents this from overriding an explicit choice. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    --color-bg-page:        #f7f5f0;
+    --color-bg-surface:     #fdfcf8;
+    --color-bg-elevated:    #ffffff;
+    --color-fg-primary:     #1a1612;
+    --color-fg-secondary:   #4a423a;
+    --color-fg-muted:       #7a7065;
+    --color-border-default: #d8d2c4;
+    --color-border-strong:  #b8b0a0;
+    --color-accent-fg:      var(--brass-3);
+    --color-status-added:    #3d7a3d;
+    --color-status-modified: #8a6a1a;
+    --color-status-deleted:  #a04030;
+    --color-focus-ring: var(--brass-3);
+  }
+}
+
 /* Reset / base */
 *, *::before, *::after { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; height: 100%; }
 body {
-  background: var(--bg-0);
-  color: var(--fg-1);
+  background: var(--color-bg-page);
+  color: var(--color-fg-primary);
   font: var(--fs-13)/var(--lh-body) var(--font-sans);
   -webkit-font-smoothing: antialiased;
   font-feature-settings: "cv08", "ss01";

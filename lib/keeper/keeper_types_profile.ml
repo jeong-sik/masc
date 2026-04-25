@@ -204,6 +204,9 @@ let normalize_social_model_opt = function
           Some (Keeper_social_model_types.model_id_to_string model_id)
       | None -> None)
 
+let valid_social_model_strings =
+  Keeper_social_model_types.valid_model_id_strings
+
 let lower_string_list_opt = function
   | [] -> None
   | xs -> Some (List.map String.lowercase_ascii xs)
@@ -597,8 +600,9 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
             | None ->
                 Error
                   (Printf.sprintf
-                     "invalid social_model '%s' (allowed: bdi_speech_v1, magentic_ledger_v1)"
-                     raw))
+                     "invalid social_model '%s' (allowed: %s)"
+                     raw
+                     (String.concat ", " valid_social_model_strings)))
         | None -> Ok ())
   in
   let result =

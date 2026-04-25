@@ -105,7 +105,7 @@ let tool_preset_choices_json =
 ;;
 
 let social_model_choices_json =
-  string_list_to_json [ "bdi_speech_v1"; "magentic_ledger_v1" ]
+  string_list_to_json Keeper_types_profile.valid_social_model_strings
 ;;
 
 let alignment_choices = Archetypes.alignment_choices
@@ -418,8 +418,9 @@ let normalize_social_model raw =
   | None ->
     Error
       (Printf.sprintf
-         "invalid keeper.social_model '%s' (allowed: bdi_speech_v1, magentic_ledger_v1)"
-         raw)
+         "invalid keeper.social_model '%s' (allowed: %s)"
+         raw
+         (String.concat ", " Keeper_types_profile.valid_social_model_strings))
 ;;
 
 let normalize_cascade_name raw =

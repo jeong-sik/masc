@@ -1101,6 +1101,21 @@ let test_persona_authoring_schema_explains_effects () =
      |> Yojson.Safe.Util.member "save_tool"
      |> Yojson.Safe.Util.to_string)
 
+let test_persona_authoring_social_model_choices_follow_variant_ssot () =
+  let json = KPA.schema_json () in
+  let choices =
+    Yojson.Safe.Util.member "choice_sets" json
+    |> Yojson.Safe.Util.member "social_model"
+    |> Yojson.Safe.Util.to_list
+    |> List.map Yojson.Safe.Util.to_string
+  in
+  check (list string) "persona schema social_model choices"
+    Masc_mcp.Keeper_social_model.valid_model_id_strings
+    choices;
+  check (list string) "profile parser social_model choices"
+    Masc_mcp.Keeper_social_model.valid_model_id_strings
+    KTP.valid_social_model_strings
+
 let test_persona_authoring_axes_validate_and_default_preset () =
   let args =
     `Assoc
@@ -1541,6 +1556,8 @@ let () =
             test_persona_resolver_rejects_custom_tool_access_durable_toml;
           test_case "persona authoring schema explains effects" `Quick
             test_persona_authoring_schema_explains_effects;
+          test_case "persona authoring social_model choices follow variant SSOT" `Quick
+            test_persona_authoring_social_model_choices_follow_variant_ssot;
           test_case "persona authoring axes validate and default preset" `Quick
             test_persona_authoring_axes_validate_and_default_preset;
           test_case "persona authoring axes reject unknown choices" `Quick

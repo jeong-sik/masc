@@ -257,11 +257,20 @@ let provider_opt_of_model (model : string) : string option =
   let provider = Keeper_hooks_oas.provider_of_model model in
   if String.equal provider "unknown" then None else Some provider
 
+let provider_kind_opt_of_fields (fields : (string * Yojson.Safe.t) list) =
+  match List.assoc_opt "provider_kind" fields with
+  | Some (`String s) ->
+      Llm_provider.Provider_config.provider_kind_of_string s
+  | _ -> None
+
 let provider_opt_of_fields ~(model : string) (fields : (string * Yojson.Safe.t) list)
     : string option =
   match List.assoc_opt "provider" fields with
   | Some (`String s) when String.trim s <> "" -> Some s
-  | _ -> provider_opt_of_model model
+  | _ ->
+      let provider_kind = provider_kind_opt_of_fields fields in
+      let provider = Keeper_hooks_oas.provider_of_model ?provider_kind model in
+      if String.equal provider "unknown" then None else Some provider
 
 let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option =
   let ts = Safe_ops.json_float_opt "ts_unix" json |> Option.value ~default:0.0 in

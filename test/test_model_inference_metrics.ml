@@ -71,7 +71,7 @@ let now_unix () = Unix.gettimeofday ()
 
 let success_entry ~model ~ts ?(input_tokens=100) ?(output_tokens=50)
     ?(latency_ms=500) ?prompt_per_second ?peak_memory_gb
-    ?provider ?usage_trust ?(usage_anomaly_reasons=[])
+    ?provider ?provider_kind ?usage_trust ?(usage_anomaly_reasons=[])
     ?(cost_usd=0.01) ?(tools_used=[]) () =
   let extra_telemetry_fields =
     (match prompt_per_second with
@@ -84,6 +84,10 @@ let success_entry ~model ~ts ?(input_tokens=100) ?(output_tokens=50)
     @
     (match provider with
      | Some v -> [("provider", `String v)]
+     | None -> [])
+    @
+    (match provider_kind with
+     | Some v -> [("provider_kind", `String v)]
      | None -> [])
     @
     (match usage_trust with
@@ -116,16 +120,22 @@ let success_entry ~model ~ts ?(input_tokens=100) ?(output_tokens=50)
   ]
 
 let cost_entry ~model ~ts ?(input_tokens=100) ?(output_tokens=50)
-    ?(latency_ms=500) ?tokens_per_second ?(provider="ollama") () =
+    ?(latency_ms=500) ?tokens_per_second ?provider
+    ?(provider_kind="ollama") () =
   let tok_fields =
     match tokens_per_second with
     | Some v -> [("tokens_per_second", `Float v)]
     | None -> []
   in
+  let provider_fields =
+    match provider with
+    | Some value -> [ ("provider", `String value) ]
+    | None -> []
+  in
   `Assoc ([
     ("timestamp", `String (iso_of_unix ts));
     ("agent", `String "keeper");
-    ("provider", `String provider);
+    ("provider_kind", `String provider_kind);
     ("model", `String model);
     ("input_tokens", `Int input_tokens);
     ("output_tokens", `Int output_tokens);
@@ -133,7 +143,7 @@ let cost_entry ~model ~ts ?(input_tokens=100) ?(output_tokens=50)
     ("usage_missing", `Bool false);
     ("source", `String "auto_trajectory");
     ("request_latency_ms", `Int latency_ms);
-  ] @ tok_fields)
+  ] @ provider_fields @ tok_fields)
 
 let error_entry ~cascade_name ~ts ?provider () =
   `Assoc [
@@ -236,6 +246,33 @@ let test_single_model_success () =
       (Option.value ~default:0.0 s.avg_latency_ms > 0.0);
     check bool "tok/s > 0" true
       (Option.value ~default:0.0 s.avg_tok_per_sec > 0.0))
+
+let test_provider_kind_classifies_bare_model_provider () =
+  let base = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let path = make_keeper_dir base "kinded" in
+    let ts = now_unix () in
+    let provider_kind =
+      Llm_provider.Provider_config.string_of_provider_kind
+        Llm_provider.Provider_config.Kimi_cli
+    in
+    write_decisions path [
+      success_entry ~model:"kimi-k2.5" ~ts:(ts -. 5.0)
+        ~provider_kind ();
+    ];
+    let agg = M.compute ~base_path:base ~window_minutes:60 in
+    check int "total_entries" 1 agg.total_entries;
+    let s = List.hd agg.models in
+    check string "model stays bare" "kimi-k2.5" s.model_id;
+    check (option string) "provider from provider_kind"
+      (Some "kimi_cli") s.provider;
+    let recent = List.hd s.recent_entries in
+    check (option string) "recent provider from provider_kind"
+      (Some "kimi_cli") recent.re_provider;
+    let rollup = M.provider_rollup agg in
+    check int "provider rollup keeps entry" 1 (List.length rollup);
+    check string "rollup provider" "kimi_cli"
+      (List.hd rollup).M.ps_provider)
 
 let test_untrusted_usage_excluded_from_aggregates () =
   let base = test_dir () in
@@ -922,6 +959,8 @@ let () =
     "basics", [
       test_case "empty dir" `Quick test_empty_dir;
       test_case "single model success" `Quick test_single_model_success;
+      test_case "provider_kind classifies bare model provider" `Quick
+        test_provider_kind_classifies_bare_model_provider;
       test_case "untrusted usage excluded from aggregates" `Quick
         test_untrusted_usage_excluded_from_aggregates;
       test_case "error turns counted" `Quick test_error_turns_counted;

@@ -122,6 +122,12 @@ val transition_task_r :
      verification_id:string ->
      evidence_refs:string list ->
      (unit, string) result) ->
+  ?prepare_verification_verdict:
+    (task:Types.task ->
+     verifier:string ->
+     verification_id:string ->
+     decision:[ `Approve of string | `Reject of string ] ->
+     (unit, string) result) ->
   ?expected_version:int -> ?notes:string -> ?reason:string ->
   ?handoff_context:Types.task_handoff_context ->
   ?force:bool -> unit -> string Types.masc_result

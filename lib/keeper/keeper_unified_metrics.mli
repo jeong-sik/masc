@@ -38,6 +38,15 @@ val classify_usage_trust :
 
 val usage_trust_is_trusted : usage_trust -> bool
 
+val estimate_trusted_usage_cost_usd :
+  usage_trusted:bool ->
+  model:string ->
+  Oas.Types.api_usage ->
+  float
+(** Estimate turn cost for trusted usage using the OAS pricing catalog,
+    including cache creation/read token multipliers.  Returns [0.0] for
+    untrusted or missing usage. *)
+
 val usage_trust_to_string : usage_trust -> string
 
 val usage_trust_reasons : usage_trust -> string list

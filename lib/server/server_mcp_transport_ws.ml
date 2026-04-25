@@ -167,12 +167,18 @@ let send_frame_bytes session bytes ~len =
       false
   end
 
+(** WebSocket text frames must contain valid UTF-8.  Raw SSE broadcasts can
+    include tool/provider output bytes that are valid for local persistence but
+    invalid as browser WebSocket text, so repair at the final wire boundary. *)
+let websocket_text_payload text =
+  Inference_utils.sanitize_text_utf8 text
+
 (** Send a text frame to a WebSocket client.
     Allocates [Bytes.t] per call — fine for single-destination sends.
     Multicast paths should go through [send_text_shared] instead so the
     bytes allocation is paid once per broadcast, not once per session. *)
 let send_text session text =
-  let bytes = Bytes.of_string text in
+  let bytes = Bytes.of_string (websocket_text_payload text) in
   send_frame_bytes session bytes ~len:(Bytes.length bytes)
 
 (** Module-local cache of the last [Bytes.of_string sse_event] result.
@@ -193,7 +199,7 @@ let bytes_of_shared_text text =
   end
   else begin
     Transport_metrics.inc_ws_bytes_cache_miss ();
-    let bytes = Bytes.of_string text in
+    let bytes = Bytes.of_string (websocket_text_payload text) in
     Atomic.set bytes_cache (text, bytes);
     bytes
   end

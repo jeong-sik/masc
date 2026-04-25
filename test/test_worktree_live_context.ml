@@ -157,9 +157,9 @@ let test_current_status_lines_caches_clean_status () =
         (Wlc.current_status_lines ~repo_root:"/tmp/repo");
       check int "clean status is cached" 1 !calls)
 
-let test_git_status_timeout_defaults_to_15_seconds () =
+let test_git_status_timeout_defaults_to_30_seconds () =
   with_env "MASC_WORKTREE_GIT_STATUS_TIMEOUT_SEC" "" (fun () ->
-      check (float 0.01) "default git status timeout" 15.0
+      check (float 0.01) "default git status timeout" 30.0
         (Wlc.git_status_timeout_sec ()))
 
 let test_git_status_timeout_honors_env_override () =
@@ -181,8 +181,8 @@ let () =
             test_current_status_lines_uses_short_cache_and_no_optional_locks;
           test_case "status cache keeps clean status" `Quick
             test_current_status_lines_caches_clean_status;
-          test_case "git status timeout defaults to 15s" `Quick
-            test_git_status_timeout_defaults_to_15_seconds;
+          test_case "git status timeout defaults to 30s" `Quick
+            test_git_status_timeout_defaults_to_30_seconds;
           test_case "git status timeout honors env override" `Quick
             test_git_status_timeout_honors_env_override;
         ] );

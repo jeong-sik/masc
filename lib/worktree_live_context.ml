@@ -24,7 +24,7 @@ let clear_git_capture_hook_for_tests () =
    [status_cache_ttl_sec] below), so the full budget is paid at most
    once per TTL window per repo. Env var stays the escape hatch for
    unusually slow or unusually fast hosts. *)
-let default_git_status_timeout_sec = 15.0
+let default_git_status_timeout_sec = 30.0
 
 let git_status_timeout_sec () =
   Env_config_core.get_float ~default:default_git_status_timeout_sec

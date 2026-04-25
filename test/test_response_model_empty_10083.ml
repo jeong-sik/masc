@@ -26,11 +26,18 @@ module Hooks = Masc_mcp.Keeper_hooks_oas
 module Prom = Masc_mcp.Prometheus
 
 let metric_name = Hooks.empty_response_model_metric
+let alias_metric_name = Hooks.alias_response_model_metric
 
 let counter_for ~keeper ~source =
   Prom.metric_value_or_zero
     metric_name
     ~labels:[ ("keeper", keeper); ("source", source) ]
+    ()
+
+let alias_counter_for ~keeper ~alias ~source =
+  Prom.metric_value_or_zero
+    alias_metric_name
+    ~labels:[ ("keeper", keeper); ("alias", alias); ("source", source) ]
     ()
 
 let make_zero_usage : Agent_sdk.Types.api_usage =
@@ -141,6 +148,40 @@ let test_empty_canonical_id_falls_through_to_sentinel () =
     before_telemetry
     (counter_for ~keeper ~source:"telemetry_resolved")
 
+(* Raw model [auto] is non-empty, but it is not a billable model ID.
+   When OAS supplies [canonical_model_id], use that for downstream
+   metrics and pricing attribution instead of poisoning costs.jsonl with
+   model="auto". *)
+let test_auto_raw_falls_back_to_canonical_model_id () =
+  let keeper = "test-keeper-auto-canonical-10318" in
+  let before =
+    alias_counter_for ~keeper ~alias:"auto" ~source:"telemetry_canonical"
+  in
+  let telemetry = make_telemetry ~canonical_model_id:"gpt-4.1" () in
+  let response = make_response ~model:"auto" ~telemetry () in
+  let resolved = Hooks.resolve_after_turn_model ~keeper_name:keeper ~response in
+  Alcotest.(check string) "auto resolved to canonical" "gpt-4.1" resolved;
+  Alcotest.(check (float 0.0001))
+    "alias fallback counter +1"
+    (before +. 1.0)
+    (alias_counter_for ~keeper ~alias:"auto" ~source:"telemetry_canonical")
+
+let test_provider_prefixed_auto_falls_back_to_canonical_model_id () =
+  let keeper = "test-keeper-prefixed-auto-canonical-10318" in
+  let before =
+    alias_counter_for ~keeper ~alias:"auto" ~source:"telemetry_canonical"
+  in
+  let telemetry = make_telemetry ~canonical_model_id:"claude-sonnet-4-6" () in
+  let response = make_response ~model:"claude_code:auto" ~telemetry () in
+  let resolved = Hooks.resolve_after_turn_model ~keeper_name:keeper ~response in
+  Alcotest.(check string)
+    "provider-prefixed auto resolved to canonical"
+    "claude-sonnet-4-6" resolved;
+  Alcotest.(check (float 0.0001))
+    "prefixed alias fallback counter +1"
+    (before +. 1.0)
+    (alias_counter_for ~keeper ~alias:"auto" ~source:"telemetry_canonical")
+
 let () =
   Alcotest.run "response_model_empty_10083"
     [
@@ -154,5 +195,10 @@ let () =
             test_empty_everywhere_uses_sentinel;
           Alcotest.test_case "empty canonical_model_id falls through" `Quick
             test_empty_canonical_id_falls_through_to_sentinel;
+          Alcotest.test_case "raw auto -> telemetry canonical" `Quick
+            test_auto_raw_falls_back_to_canonical_model_id;
+          Alcotest.test_case "provider-prefixed auto -> telemetry canonical"
+            `Quick
+            test_provider_prefixed_auto_falls_back_to_canonical_model_id;
         ] );
     ]

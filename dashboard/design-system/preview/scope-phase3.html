@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<title>MASC · Phase 3 Scope</title>
+<link rel="stylesheet" href="../colors_and_type.css" />
+<link rel="stylesheet" href="../source_styles/tokens.css" />
+<link rel="stylesheet" href="../source_styles/primitives.css" />
+<link rel="stylesheet" href="components.css" />
+<link rel="stylesheet" href="_preview.css" />
+<style>
+  body { margin:0; padding:0 0 96px; background:var(--bg-0); color:var(--fg-1); font:13px/1.45 var(--font-sans); }
+  .pg { max-width:1320px; margin:0 auto; padding:32px 40px 0; }
+  .pg-head { display:grid; grid-template-columns:1fr auto; gap:24px; align-items:end; padding-bottom:20px; margin-bottom:28px; border-bottom:1px solid var(--line-3); }
+  .eyebrow { font:500 10px/1 var(--font-mono); letter-spacing:.12em; text-transform:uppercase; color:var(--brass-1); margin-bottom:10px; }
+  h1 { margin:0 0 8px; font:500 26px/1.15 var(--font-sans); color:var(--fg-0); }
+  .sub { max-width:760px; color:var(--fg-3); }
+  .meta { text-align:right; font:10px/1.5 var(--font-mono); color:var(--fg-3); letter-spacing:.08em; text-transform:uppercase; }
+  .meta b { color:var(--brass-1); font-weight:500; }
+  .toc { display:grid; grid-template-columns:repeat(5,1fr); gap:1px; background:var(--line-3); border:1px solid var(--line-3); margin-bottom:34px; }
+  .toc a { display:block; padding:12px 14px; background:var(--bg-1); color:var(--fg-2); text-decoration:none; font:11px/1.55 var(--font-mono); }
+  .toc a b { display:block; color:var(--brass-1); font-size:10px; letter-spacing:.1em; text-transform:uppercase; margin-bottom:6px; }
+  .zones { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; margin-bottom:36px; }
+  .zone { background:var(--bg-1); border:1px solid var(--line-2); padding:16px 18px 18px; }
+  .zhead { display:flex; align-items:baseline; gap:10px; padding-bottom:10px; margin-bottom:12px; border-bottom:1px dashed var(--line-2); }
+  .zid { font:500 10px/1 var(--font-mono); color:var(--bg-0); background:var(--brass-1); padding:4px 6px; }
+  .ztitle { margin:0; flex:1; color:var(--fg-1); font:500 14px/1.2 var(--font-sans); }
+  .zkind { color:var(--fg-3); font:10px/1 var(--font-mono); letter-spacing:.08em; text-transform:uppercase; }
+  .lead { margin:0 0 14px; color:var(--fg-2); font-size:12px; }
+  .lbl { margin:0 0 5px; color:var(--fg-3); font:500 9px/1 var(--font-mono); letter-spacing:.1em; text-transform:uppercase; }
+  ul { margin:0 0 14px; padding:0; list-style:none; display:grid; gap:4px; }
+  li { color:var(--fg-2); font:11px/1.45 var(--font-mono); }
+  li::before { content:"- "; color:var(--brass-1); }
+  code { color:var(--brass-1); font-family:var(--font-mono); }
+  table { width:100%; border-collapse:collapse; background:var(--bg-1); border:1px solid var(--line-2); font:11px/1.45 var(--font-mono); }
+  th, td { padding:8px 10px; border-bottom:1px solid var(--line-1); text-align:left; vertical-align:top; }
+  th { color:var(--fg-4); background:var(--bg-2); text-transform:uppercase; letter-spacing:.08em; }
+  td:first-child { color:var(--brass-1); white-space:nowrap; }
+  .accept { margin-top:30px; padding:16px 18px; background:var(--bg-1); border:1px solid var(--line-2); border-left:2px solid var(--brass-1); }
+  .accept h2 { margin:0 0 10px; font:500 15px/1.2 var(--font-sans); }
+  @media (max-width:900px) { .pg-head, .zones, .toc { grid-template-columns:1fr; } .meta { text-align:left; } }
+</style>
+</head>
+<body>
+<div class="pg">
+  <header class="pg-head">
+    <div>
+      <div class="eyebrow">Phase 3 · Code IDE v2</div>
+      <h1>MASC Cockpit IDE Plane</h1>
+      <div class="sub">The cockpit becomes code-aware: tree ownership, editor attribution, PR review, branch topology, terminal traces, and project search all share branch + keeper context.</div>
+    </div>
+    <div class="meta">zones <b>5</b><br/>variants <b>20</b><br/>files <b>j+k</b><br/>prototype <b>IDE</b></div>
+  </header>
+
+  <nav class="toc">
+    <a href="#e1"><b>E1</b>File tree explorer<br/>4 variants</a>
+    <a href="#e2"><b>E2</b>Editor surfaces<br/>5 variants</a>
+    <a href="#e3"><b>E3</b>PR inspector<br/>4 variants</a>
+    <a href="#e4"><b>E4</b>Branch / graph<br/>4 variants</a>
+    <a href="#e5"><b>E5</b>Terminal / search<br/>3 variants</a>
+  </nav>
+
+  <div class="zones">
+    <section class="zone" id="e1">
+      <div class="zhead"><span class="zid">E1</span><h2 class="ztitle">File Tree Explorer</h2><span class="zkind">navigation</span></div>
+      <p class="lead">The tree shows ownership, change state, and recent/pinned memory before the operator opens a file.</p>
+      <div class="lbl">Variants</div>
+      <ul><li>allowed_paths overlay</li><li>filter bar</li><li>recent / pinned / changed / search tabs</li><li>diff annotated tree</li></ul>
+      <div class="lbl">Public components</div>
+      <code>IxTreeAllowed · IxTreeFilter · IxTreeTabs · IxTreeDiff</code>
+    </section>
+
+    <section class="zone" id="e2">
+      <div class="zhead"><span class="zid">E2</span><h2 class="ztitle">Editor Surfaces</h2><span class="zkind">code</span></div>
+      <p class="lead">The editor explains who touched each line, what changed, what reviewers said, and how conflicts resolve.</p>
+      <div class="lbl">Variants</div>
+      <ul><li>attribution gutter</li><li>split 2-pane</li><li>3-way merge resolver</li><li>inline review</li><li>blame gutter</li></ul>
+      <div class="lbl">Public components</div>
+      <code>IxEditAttrib · IxEditSplit · IxEditMerge · IxEditReview · IxEditBlame</code>
+    </section>
+
+    <section class="zone" id="e3">
+      <div class="zhead"><span class="zid">E3</span><h2 class="ztitle">PR Inspector</h2><span class="zkind">review</span></div>
+      <p class="lead">PR state, file diffs, comment threads, and CI/SafeAuto status stay inside the cockpit.</p>
+      <div class="lbl">Variants</div>
+      <ul><li>PR header</li><li>files changed</li><li>comment thread</li><li>CI checks panel</li></ul>
+      <div class="lbl">Public components</div>
+      <code>IxPrHeader · IxPrFiles · IxPrThread · IxPrChecks</code>
+    </section>
+
+    <section class="zone" id="e4">
+      <div class="zhead"><span class="zid">E4</span><h2 class="ztitle">Branch / Git Graph</h2><span class="zkind">topology</span></div>
+      <p class="lead">Parallel keeper work becomes navigable through branch DAGs, attributed commits, worktrees, and stashes.</p>
+      <div class="lbl">Variants</div>
+      <ul><li>SVG branch DAG</li><li>commit list with keeper attribution</li><li>worktree picker</li><li>stash list</li></ul>
+      <div class="lbl">Public components</div>
+      <code>IxGraphDag · IxGraphCommits · IxGraphWorktrees · IxGraphStashes</code>
+    </section>
+
+    <section class="zone" id="e5">
+      <div class="zhead"><span class="zid">E5</span><h2 class="ztitle">Terminal / Search</h2><span class="zkind">tools</span></div>
+      <p class="lead">The terminal is cascade-aware, while search and find/replace share the active branch and editor context.</p>
+      <div class="lbl">Variants</div>
+      <ul><li>cascade-aware terminal</li><li>rg-style project search</li><li>find / replace overlay</li></ul>
+      <div class="lbl">Public components</div>
+      <code>IxTerm · IxSearch · IxFindReplace</code>
+    </section>
+  </div>
+
+  <table>
+    <thead><tr><th>Surface</th><th>Wiring</th><th>Design constraint</th></tr></thead>
+    <tbody>
+      <tr><td>Preview canvas</td><td><code>components.html</code> loads <code>cb-group-j.jsx</code> and <code>cb-group-k.jsx</code>; <code>cb-root.jsx</code> adds five sections.</td><td>All component classes use the <code>.ix-*</code> prefix.</td></tr>
+      <tr><td>Cockpit prototype</td><td><code>IdePlane</code> composes tree, editor, PR, graph, search, and terminal modes from the same public components.</td><td>No duplicate cockpit-only component implementation.</td></tr>
+      <tr><td>Seed data</td><td><code>window.MASC_P3</code> keeps realistic keeper, PR, git, file, and search fixtures in one place.</td><td>Data stays plausible MASC content; no lorem ipsum.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="accept">
+    <h2>Acceptance Criteria</h2>
+    <ul>
+      <li>All 20 variants render under <code>preview/components.html</code>.</li>
+      <li>Every public component accepts <code>{ branch, keepers }</code> and tolerates <code>Set</code> or array keeper context.</li>
+      <li>Cockpit IDE mode toggles between edit, review, merge, graph, and search without console errors.</li>
+      <li>Bottom terminal is collapsible in the cockpit prototype.</li>
+      <li>Visual language remains dark brass, mono-first, dense, hairline-bordered, and icon-light.</li>
+    </ul>
+  </div>
+</div>
+</body>
+</html>

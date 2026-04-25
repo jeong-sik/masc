@@ -1234,8 +1234,9 @@ let handle_keeper_status ctx args : tool_result =
              ("history", `String history_path);
              ("history_internal", `String internal_history_path);
              ("evidence_dir", `String
-               (Filename.concat ctx.config.base_path
-                 (Printf.sprintf ".masc/evidence/%s/%s"
+               (Filename.concat
+                 (Common.masc_dir_from_base_path ~base_path:ctx.config.base_path)
+                 (Printf.sprintf "evidence/%s/%s"
                    (Coord_utils.safe_filename m.name)
                    (Coord_utils.safe_filename (Keeper_id.Trace_id.to_string m.runtime.trace_id)))));
            ]);

@@ -7,10 +7,19 @@
 
 type stress_kind =
   | Failure_streak of int
+  | Turn_failure of turn_failure
   | Fallback_approval
   | Timeout
   | Parse_degraded
   | Task_released
+
+and turn_failure = {
+  consecutive : int;
+  threshold : int;
+  counted_toward_crash : bool;
+  recoverable : bool;
+  error_kind : string option;
+}
 
 type event = {
   agent_name : string;
@@ -26,6 +35,20 @@ type event = {
 let stress_kind_to_json = function
   | Failure_streak n ->
     `Assoc [("type", `String "failure_streak"); ("count", `Int n)]
+  | Turn_failure f ->
+    let base = [
+      ("type", `String "turn_failure");
+      ("consecutive", `Int f.consecutive);
+      ("threshold", `Int f.threshold);
+      ("counted_toward_crash", `Bool f.counted_toward_crash);
+      ("recoverable", `Bool f.recoverable);
+    ] in
+    let fields =
+      match f.error_kind with
+      | None -> base
+      | Some kind -> base @ [("error_kind", `String kind)]
+    in
+    `Assoc fields
   | Fallback_approval ->
     `Assoc [("type", `String "fallback_approval")]
   | Timeout ->

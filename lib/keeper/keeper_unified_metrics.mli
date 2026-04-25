@@ -90,6 +90,30 @@ val record_context_max_observation :
     snapshot-write so the counter rate equals the per-turn
     rate. *)
 
+(** {1 #9943: long-turn observer}
+
+    [turn_latency_bucket ms] returns the bucket label for a turn that
+    took [ms] milliseconds.  The vocabulary is bounded
+    ([under_60s | 60-300s | 300-600s | 600-1200s | over_1200s]) so
+    Prometheus cardinality stays at [keeper × 5].
+
+    [record_turn_latency_bucket] increments
+    {!Prometheus.metric_keeper_turn_latency_bucket} on the matching
+    bucket and emits a [Log.Keeper.warn] line when [latency_ms]
+    crosses {!long_turn_warn_threshold_ms}.  Threshold reads
+    [MASC_KEEPER_LONG_TURN_WARN_MS] (ms, default
+    [long_turn_warn_threshold_ms_default = 600_000] = 10 min) on each
+    call so operators can dial it without restart. *)
+val turn_latency_bucket : int -> string
+
+val long_turn_warn_threshold_ms_default : int
+
+val long_turn_warn_threshold_ms : unit -> int
+
+val record_turn_latency_bucket :
+  keeper:string -> latency_ms:int -> unit
+
+
 val update_metrics_from_result :
   Keeper_types.keeper_meta ->
   latency_ms:int ->

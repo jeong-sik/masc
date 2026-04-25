@@ -136,6 +136,57 @@ let record_context_max_observation
       ("context_max_bucket", context_max_bucket context_max);
     ] ()
 
+(* #9943: per-keeper turn-latency bucket counter.  Buckets are
+   chosen so each name a reachable operator state:
+
+   - [under_60s]:    routine turn; no signal.
+   - [60-300s]:      acceptable for cloud-LLM heavy turns.
+   - [300-600s]:     unusually slow; investigate if persistent.
+   - [600-1200s]:    long turn — approaches but does not exceed
+                     the 1200s [oas_timeout_budget] cap (#9933).
+                     Operator-actionable warning.
+   - [over_1200s]:   turn longer than the OAS budget cap.
+                     Almost always indicates the budget fired
+                     and the keeper retried.  Direct evidence
+                     of #9943's 1,204,542 ms taskmaster sample.
+
+   Boundaries are inclusive on the upper edge so 60.0 → 60-300,
+   600.0 → 600-1200, 1200.0 → over_1200s.  This matches the
+   typical "alert on turn > 600s" threshold operators use. *)
+let turn_latency_bucket (latency_ms : int) : string =
+  let s = float_of_int latency_ms /. 1000.0 in
+  if s < 60.0 then "under_60s"
+  else if s < 300.0 then "60-300s"
+  else if s < 600.0 then "300-600s"
+  else if s < 1200.0 then "600-1200s"
+  else "over_1200s"
+
+(* Default WARN threshold (10 minutes).  Picks up the 600-1200s
+   and over_1200s buckets without firing on routine cloud-LLM
+   turns. Env-overridable. *)
+let long_turn_warn_threshold_ms_default = 600_000
+
+let long_turn_warn_threshold_ms () : int =
+  Env_config_core.get_int
+    ~default:long_turn_warn_threshold_ms_default
+    "MASC_KEEPER_LONG_TURN_WARN_MS"
+
+let record_turn_latency_bucket
+    ~(keeper : string)
+    ~(latency_ms : int) : unit =
+  let bucket = turn_latency_bucket latency_ms in
+  Prometheus.inc_counter
+    Prometheus.metric_keeper_turn_latency_bucket
+    ~labels:[ ("keeper", keeper); ("bucket", bucket) ]
+    ();
+  let threshold = long_turn_warn_threshold_ms () in
+  if latency_ms >= threshold then
+    Log.Keeper.warn
+      "[long-turn] keeper=%s latency_ms=%d (>= %d ms threshold) bucket=%s \
+       — investigate cascade exhaustion / oas_timeout_budget (#9933, #9943)"
+      keeper latency_ms threshold bucket
+
+
 let usage_trust_is_trusted = Keeper_usage_trust.is_trusted
 
 let usage_trust_to_string = Keeper_usage_trust.to_string
@@ -1118,6 +1169,11 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
       `Float turn_cost
     else `Null
   in
+  (* #9943: per-keeper turn-latency bucket counter + WARN if the
+     turn crossed the long-turn threshold (default 600s, env-
+     overridable).  Emitted once per snapshot write so the
+     counter rate matches the JSONL row rate. *)
+  record_turn_latency_bucket ~keeper:meta.name ~latency_ms;
   let snapshot =
     `Assoc
       [

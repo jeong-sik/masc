@@ -87,6 +87,10 @@ val metric_keeper_turn_regressions : string
     [keeper].  Re-attempt = same turn id started again before
     the counter advanced; regression = turn id moved strictly
     backwards (write_meta race symptom — #9733). *)
+val metric_keeper_turn_latency_bucket : string
+(** #9943: per-keeper turn latency distribution.  Labels:
+    [keeper, bucket].  Bucket vocabulary:
+    [under_60s | 60-300s | 300-600s | 600-1200s | over_1200s]. *)
 val metric_keeper_compactions : string
 val metric_keeper_compaction_ratio_change : string
 val metric_keeper_compaction_saved_tokens : string

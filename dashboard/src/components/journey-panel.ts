@@ -27,6 +27,7 @@ import { RouteLink } from './common/route-link'
 import { StatusBadge } from './common/status-badge'
 import { StatusChip, keeperStateTone } from './common/status-chip'
 import { TimeAgo } from './common/time-ago'
+import { keeperActivityDisplay, keeperDisplayModel } from '../lib/keeper-runtime-display'
 
 type JourneyMissionSession = {
   session_id: string
@@ -139,8 +140,9 @@ function pipelineTone(stage?: string | null): string {
 
 function shouldShowStandaloneKeeper(keeper: Keeper): boolean {
   const status = (keeper.status ?? '').trim().toLowerCase()
+  const activity = keeperActivityDisplay(keeper, keeper.agent?.last_seen)
   if (keeper.keepalive_running === true) return true
-  if (keeper.last_turn_ago_s != null) return true
+  if (activity.source !== 'none') return true
   if (keeper.pipeline_stage && keeper.pipeline_stage !== 'offline') return true
   return !['offline', 'inactive', 'stopped', 'dead'].includes(status)
 }
@@ -344,8 +346,8 @@ export function buildJourneyRecords(input: JourneyBuildInput): JourneyRecord[] {
     .filter(shouldShowStandaloneKeeper)
     .slice()
     .sort((left, right) => {
-      const leftAge = left.last_activity_ago_s ?? left.last_turn_ago_s ?? Number.POSITIVE_INFINITY
-      const rightAge = right.last_activity_ago_s ?? right.last_turn_ago_s ?? Number.POSITIVE_INFINITY
+      const leftAge = keeperActivityDisplay(left, left.agent?.last_seen).ageSeconds ?? Number.POSITIVE_INFINITY
+      const rightAge = keeperActivityDisplay(right, right.agent?.last_seen).ageSeconds ?? Number.POSITIVE_INFINITY
       return leftAge - rightAge
     })
 
@@ -421,6 +423,7 @@ export function filterJourneyRecords(
       record.keeper?.name,
       record.keeper?.agent_name,
       record.keeper?.cascade_name,
+      record.keeper ? keeperDisplayModel(record.keeper)?.value : null,
       record.keeper?.active_model,
       record.keeper?.model,
       record.continuity?.model,
@@ -489,6 +492,8 @@ function JourneyCard({ record }: { record: JourneyRecord }) {
   const contextSummary = keeper?.context_tokens != null && keeper?.context_max != null
     ? `${formatTokens(keeper.context_tokens)} / ${formatTokens(keeper.context_max)}`
     : null
+  const keeperActivity = keeper ? keeperActivityDisplay(keeper, keeper.agent?.last_seen) : null
+  const keeperModel = keeper ? keeperDisplayModel(keeper) : null
   const showExtended = useSignal(false)
 
   return html`
@@ -616,7 +621,7 @@ function JourneyCard({ record }: { record: JourneyRecord }) {
                   <div class="flex flex-wrap gap-3 text-xs text-[var(--text-muted)]">
                     <span>ctx ${formatPct(keeper.context_ratio)}</span>
                     ${contextSummary ? html`<span>${contextSummary}</span>` : null}
-                    ${keeper.last_activity_ago_s != null ? html`<span>활동 ${formatAgeSeconds(keeper.last_activity_ago_s)}</span>` : null}
+                    ${keeperActivity?.ageSeconds != null ? html`<span>${keeperActivity.label} ${formatAgeSeconds(keeperActivity.ageSeconds)}</span>` : null}
                   </div>
                   ${trimText(record.continuity?.continuity_summary ?? record.continuity?.note, 100)
                     ? html`<div class="text-xs leading-relaxed text-[var(--text-muted)]">${trimText(record.continuity?.continuity_summary ?? record.continuity?.note, 100)}</div>`
@@ -706,10 +711,10 @@ function JourneyCard({ record }: { record: JourneyRecord }) {
                     ? html`
                         <div class="flex flex-wrap items-center gap-2">
                           ${keeper.cascade_name ? html`<${StatusChip} tone="info">${keeper.cascade_name}<//>` : null}
-                          ${keeper.active_model ? html`<${StatusChip} tone="neutral" uppercase=${false}>${keeper.active_model}<//>` : null}
+                          ${keeperModel ? html`<${StatusChip} tone="neutral" uppercase=${false}>${keeperModel.value}<//>` : null}
                         </div>
                         <div class="text-xs text-[var(--text-muted)]">
-                          ${keeper.last_model_used || keeper.model ? html`last ${keeper.last_model_used ?? keeper.model}` : 'model 기록 없음'}
+                          ${keeperModel ? html`${keeperModel.label} ${keeperModel.value}` : 'model 기록 없음'}
                         </div>
                         ${keeper.next_model_hint
                           ? html`<div class="text-xs text-[var(--text-muted)]">next ${keeper.next_model_hint}</div>`

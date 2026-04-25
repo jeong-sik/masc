@@ -19,6 +19,7 @@ import {
   formatPercent,
   formatLatency,
   formatActivity,
+  formatActivitySignal,
   numericAge,
   toneForToolSuccess,
   toneForPressure,
@@ -43,6 +44,8 @@ function makeRow(overrides: Partial<FleetRow> = {}): FleetRow {
     turn_count: 10,
     last_latency_ms: 500,
     last_activity_ago_s: 60,
+    activity_label: '최근 활동',
+    activity_source: 'last_activity',
     model: 'test-model',
     tool_calls: 5,
     tool_success_pct: 95,
@@ -313,6 +316,16 @@ describe('formatActivity', () => {
   it('returns dash for null/negative', () => {
     expect(formatActivity(null)).toBe('-')
     expect(formatActivity(-1)).toBe('-')
+  })
+})
+
+describe('formatActivitySignal', () => {
+  it('prefixes the age with the selected keeper activity label', () => {
+    expect(formatActivitySignal(makeRow({ activity_label: '하트비트', last_activity_ago_s: 360 }))).toBe('하트비트 6m 0s')
+  })
+
+  it('returns dash when the activity age is unknown', () => {
+    expect(formatActivitySignal(makeRow({ last_activity_ago_s: null }))).toBe('-')
   })
 })
 

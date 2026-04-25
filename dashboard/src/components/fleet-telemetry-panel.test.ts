@@ -19,6 +19,8 @@ function makeRow(overrides: Partial<FleetRow> = {}): FleetRow {
     turn_count: 0,
     last_latency_ms: 0,
     last_activity_ago_s: null,
+    activity_label: '최근 활동',
+    activity_source: 'none',
     model: '',
     tool_calls: 0,
     tool_success_pct: null,
@@ -511,7 +513,8 @@ describe('FleetTelemetryPanel', () => {
     expect(rows[0]?.recent_tools).toEqual(['masc_status', 'keeper_stay_silent'])
   })
 
-  it('prefers active_model over placeholder metric model strings', async () => {
+  it('uses display model and freshest keeper activity helpers for fleet rows', async () => {
+    vi.setSystemTime(new Date('2026-04-24T18:00:00Z'))
     const { buildFleetRows } = await loadPanel({
       fetchDashboardExecution: vi.fn().mockResolvedValue(executionResponse),
       fetchToolQuality: vi.fn().mockResolvedValue(toolQualityResponse),
@@ -525,7 +528,9 @@ describe('FleetTelemetryPanel', () => {
         keepalive_running: true,
         context_ratio: 0.3,
         total_turns: 5,
-        last_activity_ago_s: 60,
+        last_model_used: 'unknown',
+        last_autonomous_action_at: '2026-04-24T12:00:00Z',
+        last_heartbeat: '2026-04-24T17:54:00Z',
         active_model: 'gpt-5.4',
         metrics_series: [
           { ...metricSeriesPoint, model_used: 'unknown' },
@@ -540,6 +545,11 @@ describe('FleetTelemetryPanel', () => {
 
     expect(rows).toHaveLength(1)
     expect(rows[0]?.model).toBe('gpt-5.4')
+    expect(rows[0]).toMatchObject({
+      activity_label: '하트비트',
+      activity_source: 'heartbeat',
+      last_activity_ago_s: 360,
+    })
   })
 
   it('sorts attention keepers ahead of healthy and offline rows', async () => {

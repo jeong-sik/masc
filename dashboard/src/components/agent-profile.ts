@@ -39,6 +39,7 @@ import { missionSnapshot } from '../mission-store'
 import { navigate } from '../router'
 import { formatDuration } from './mission-utils'
 import { trimText } from '../lib/truncate'
+import { keeperActivityDisplay, keeperDisplayModel } from '../lib/keeper-runtime-display'
 import type {
   Agent,
   DashboardExecutionContinuityBrief,
@@ -211,12 +212,16 @@ function CharacterPlate({ name }: { name: string }) {
   const headerStatus = keeper?.status ?? agent?.status ?? brief?.status ?? 'unknown'
   const agentEmoji = agent?.emoji ?? keeper?.emoji
   const currentWork = brief?.current_work ?? agent?.current_task ?? null
-  const lastSeenAt = agent?.last_seen ?? brief?.last_activity_at ?? null
-  const lastActivity = keeper?.last_turn_ago_s ?? brief?.last_activity_age_sec ?? null
+  const keeperActivity = keeper
+    ? keeperActivityDisplay(keeper, agent?.last_seen ?? brief?.last_activity_at ?? null)
+    : null
+  const lastSeenAt = keeperActivity?.timestamp ?? agent?.last_seen ?? brief?.last_activity_at ?? null
+  const lastActivity = keeperActivity?.ageSeconds ?? brief?.last_activity_age_sec ?? null
+  const activityLabel = keeperActivity?.label ?? '마지막 확인'
   const ctxRatio = keeper?.context_ratio
   const ctxPct = ctxRatio != null ? Math.round(ctxRatio * 100) : null
   const generation = keeper?.generation
-  const model = agent?.model ?? keeper?.model ?? null
+  const model = keeper ? keeperDisplayModel(keeper)?.value ?? agent?.model ?? null : agent?.model ?? null
   const keeperIdent = keeperIdentityHint(keeper?.name, keeper?.agent_name)
   const signalTruth = brief?.signal_truth
   const continuitySummary =
@@ -285,8 +290,10 @@ function CharacterPlate({ name }: { name: string }) {
 
         ${lastSeenAt || lastActivity != null ? html`
           <div class="flex gap-3 flex-wrap text-sm text-[var(--text-muted)]">
-            ${lastSeenAt ? html`<span>마지막 확인: <${TimeAgo} timestamp=${lastSeenAt} /></span>` : null}
-            ${lastActivity != null ? html`<span>${formatDuration(lastActivity)} 전 활동</span>` : null}
+            ${lastSeenAt ? html`<span>${activityLabel}: <${TimeAgo} timestamp=${lastSeenAt} /></span>` : null}
+            ${lastActivity != null && (!keeperActivity || !lastSeenAt)
+              ? html`<span>${activityLabel} ${formatDuration(lastActivity)} 전</span>`
+              : null}
           </div>
         ` : null}
 

@@ -1,11 +1,12 @@
 // AgentRuntimeStrip — compact horizontal strip showing keeper live metrics.
-// Renders pipeline stage badge, context ratio bar, generation, active model, last turn age.
+// Renders pipeline stage badge, context ratio bar, generation, display model, and latest activity signal.
 // Only renders if the agent has a linked keeper.
 
 import { html } from 'htm/preact'
 import { PipelineStageBadge } from '../keeper-pipeline-stage'
 import { findKeeper } from '../../lib/keeper-utils'
 import { formatDuration } from '../mission-utils'
+import { keeperActivityDisplay, keeperDisplayModel } from '../../lib/keeper-runtime-display'
 
 function ctxBarClass(ratio: number | null | undefined): string {
   if (ratio == null) return ''
@@ -26,8 +27,8 @@ export function AgentRuntimeStrip({ name }: { name: string }) {
   const ctxRatio = keeper.context_ratio
   const ctxPct = ctxRatio != null ? Math.round(ctxRatio * 100) : null
   const generation = keeper.generation
-  const model = keeper.active_model ?? keeper.model ?? null
-  const lastTurnAge = keeper.last_turn_ago_s
+  const model = keeperDisplayModel(keeper)
+  const activity = keeperActivityDisplay(keeper, keeper.agent?.last_seen)
 
   return html`
     <div class="agent-runtime-strip">
@@ -57,15 +58,15 @@ export function AgentRuntimeStrip({ name }: { name: string }) {
 
       ${model ? html`
         <div class="flex items-center gap-1.5 text-sm">
-          <span class="text-3xs text-[var(--text-muted)] uppercase tracking-wider">MODEL</span>
-          <span class="text-sm text-[var(--text-body)] font-mono truncate max-w-50">${model}</span>
+          <span class="text-3xs text-[var(--text-muted)] uppercase tracking-wider">${model.label}</span>
+          <span class="text-sm text-[var(--text-body)] font-mono truncate max-w-50">${model.value}</span>
         </div>
       ` : null}
 
-      ${lastTurnAge != null ? html`
+      ${activity.ageSeconds != null ? html`
         <div class="flex items-center gap-1.5 text-sm">
-          <span class="text-3xs text-[var(--text-muted)] uppercase tracking-wider">TURN</span>
-          <span class="text-sm text-[var(--text-body)] tabular-nums">${formatDuration(lastTurnAge)} ago</span>
+          <span class="text-3xs text-[var(--text-muted)] uppercase tracking-wider">ACTIVITY</span>
+          <span class="text-sm text-[var(--text-body)] tabular-nums">${activity.label} ${formatDuration(activity.ageSeconds)} 전</span>
         </div>
       ` : null}
     </div>

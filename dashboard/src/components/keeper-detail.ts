@@ -35,6 +35,7 @@ import {
   KeeperDiagnosticSummary,
   KeeperRuntimeActions,
 } from './keeper-shared'
+import { formatDuration } from './mission-utils'
 import { showToast } from './common/toast'
 import { purgeAgent } from '../api/actions'
 import {
@@ -215,7 +216,14 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const hbAgeMs = hbTs != null && !Number.isNaN(hbTs) ? Date.now() - hbTs : null
   const hbStale = hbAgeMs != null && hbAgeMs > 300_000 // 5 minutes
   const needsAttention = keeperNeedsDiagnosticAttention(keeper)
-  if (!needsAttention && !keeper.last_autonomous_action_at) return null
+  const activity = keeperActivityDisplay(keeper, keeper.agent?.last_seen)
+  const hasActivitySignal = activity.timestamp != null || activity.ageSeconds != null
+  const renderActivitySignal = () => activity.timestamp
+    ? html`${activity.label} <${TimeAgo} timestamp=${activity.timestamp} />`
+    : activity.ageSeconds != null
+      ? html`${activity.label} ${formatDuration(activity.ageSeconds)} 전`
+      : null
+  if (!needsAttention && !hasActivitySignal) return null
 
   const directiveLoading = signal(false)
   const handleDirective = async (action: 'pause' | 'resume') => {
@@ -266,9 +274,7 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
       <div class="rounded border ${toneClass} px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-[var(--text-body)]">
         ${keeper.paused
           ? html`<span class="inline-flex items-center rounded-sm px-2 py-0.5 text-2xs font-semibold bg-[var(--warn-14)] text-[var(--warn)]">일시정지</span>
-            ${keeper.last_autonomous_action_at
-              ? html`<span class="text-[var(--text-muted)]">마지막 행동 이후 <${TimeAgo} timestamp=${keeper.last_autonomous_action_at} /></span>`
-              : null}
+            ${hasActivitySignal ? html`<span class="text-[var(--text-muted)]">${renderActivitySignal()}</span>` : null}
             <button
               class="inline-flex items-center rounded px-2 py-0.5 text-2xs font-medium bg-[var(--white-6)] hover:bg-[var(--white-8)] text-[var(--text-strong)] transition-colors disabled:opacity-50"
               disabled=${directiveLoading.value}
@@ -293,27 +299,21 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
               <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-2xs font-semibold bg-[var(--warn-14)] text-[var(--warn)]">
                 계속 진행 승인 대기
               </span>
-              ${keeper.last_autonomous_action_at
-                ? html`<span class="text-[var(--text-muted)]">마지막 행동 이후 <${TimeAgo} timestamp=${keeper.last_autonomous_action_at} /></span>`
-                : null}
+              ${hasActivitySignal ? html`<span class="text-[var(--text-muted)]">${renderActivitySignal()}</span>` : null}
             `
           : socialFallbackActive
           ? html`
               <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-2xs font-semibold bg-[var(--warn-14)] text-[var(--warn)]">
                 Social fallback
               </span>
-              ${keeper.last_autonomous_action_at
-                ? html`<span class="text-[var(--text-muted)]">마지막 행동 이후 <${TimeAgo} timestamp=${keeper.last_autonomous_action_at} /></span>`
-                : null}
+              ${hasActivitySignal ? html`<span class="text-[var(--text-muted)]">${renderActivitySignal()}</span>` : null}
             `
           : runtimeBlockerClass
           ? html`
               <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-2xs font-semibold bg-[var(--bad-soft)] text-[var(--bad)]">
                 ${runtimeBlockerLabel ?? 'Runtime blocker'}
               </span>
-              ${keeper.last_autonomous_action_at
-                ? html`<span class="text-[var(--text-muted)]">마지막 행동 이후 <${TimeAgo} timestamp=${keeper.last_autonomous_action_at} /></span>`
-                : null}
+              ${hasActivitySignal ? html`<span class="text-[var(--text-muted)]">${renderActivitySignal()}</span>` : null}
             `
           : null}
         ${runtimeBlocker
@@ -384,8 +384,8 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
         ${typeof goalConvergence === 'number'
           ? html`<span><strong class="text-[var(--text-strong)]">Goal Progress</strong> · ${Math.round(goalConvergence * 100)}%</span>`
           : null}
-        ${keeper.last_autonomous_action_at
-          ? html`<span><strong class="text-[var(--text-strong)]">마지막 행동</strong> · <${TimeAgo} timestamp=${keeper.last_autonomous_action_at} /></span>`
+        ${hasActivitySignal
+          ? html`<span><strong class="text-[var(--text-strong)]">최근 신호</strong> · ${renderActivitySignal()}</span>`
           : null}
       </div>
     </div>

@@ -33,7 +33,7 @@ import {
   emptyState,
   errorMessage,
   fleetBand,
-  formatActivity,
+  formatActivitySignal,
   formatLatency,
   formatPercent,
   pressureClass,
@@ -309,13 +309,13 @@ function PressureWatchlist({ rows }: { rows: FleetRow[] }) {
             <div class="font-mono text-[var(--text)]">${row.name}</div>
             <div class="text-[var(--text-dim)]">
               ${row.last_activity_ago_s != null && row.last_activity_ago_s >= STALE_ACTIVITY_SEC
-                ? `stale ${formatActivity(row.last_activity_ago_s)}`
+                ? `stale ${formatActivitySignal(row)}`
                 : `ctx ${formatPercent(row.context_ratio * 100, 1)}`}
             </div>
           </div>
           <div class="text-right">
             <div class="font-mono ${pressureClass(row.context_ratio)}">${formatPercent(row.context_ratio * 100, 1)}</div>
-            <div class="text-[var(--text-dim)]">${formatActivity(row.last_activity_ago_s)}</div>
+            <div class="text-[var(--text-dim)]">${formatActivitySignal(row)}</div>
           </div>
         </div>
       `)}
@@ -436,7 +436,7 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
                   : null}
               </td>
               <td class="py-1.5 text-right font-mono ${statusClass(row)}">${row.status}</td>
-              <td class="py-1.5 text-right text-[var(--text-dim)]">${formatActivity(row.last_activity_ago_s)}</td>
+              <td class="py-1.5 text-right text-[var(--text-dim)]">${formatActivitySignal(row)}</td>
               <td class="py-1.5 text-right text-3xs ${auditFreshnessClass(row.tool_audit_at)}" title=${row.tool_audit_at ?? ''}>
                 ${row.tool_audit_at ? formatTimeAgo(row.tool_audit_at) : '-'}
               </td>

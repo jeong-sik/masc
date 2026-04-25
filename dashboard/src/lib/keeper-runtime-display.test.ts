@@ -119,6 +119,16 @@ describe('keeperDisplayModel', () => {
     ).toEqual({ label: '현재 모델', value: 'claude_code:auto' })
   })
 
+  it('skips placeholder model sentinels before falling back to active runtime labels', () => {
+    expect(
+      keeperDisplayModel({
+        last_model_used: 'unknown',
+        active_model: 'claude_code:auto',
+        model: 'claude',
+      }),
+    ).toEqual({ label: '현재 모델', value: 'claude_code:auto' })
+  })
+
   it('uses the latest metrics model when structured runtime model is absent', () => {
     expect(
       keeperDisplayModel({

@@ -11,6 +11,8 @@ function makeRow(name: string, overrides: Partial<FleetRow> = {}): FleetRow {
     turn_count: 0,
     last_latency_ms: 100,
     last_activity_ago_s: 10,
+    activity_label: '최근 활동',
+    activity_source: 'last_activity',
     model: 'test-model',
     tool_calls: 5,
     tool_success_pct: 95,

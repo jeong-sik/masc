@@ -3,6 +3,11 @@ import type { DashboardNamespaceTruthResponse } from '../types'
 import { telemetrySourceLabel } from '../config/telemetry-sources'
 import type { Keeper } from '../types'
 import { formatElapsedCompact } from '../lib/format-time'
+import {
+  keeperActivityDisplay,
+  keeperDisplayModel,
+  type KeeperActivitySource,
+} from '../lib/keeper-runtime-display'
 
 export const PRESSURE_HOT_RATIO = 0.75
 export const PRESSURE_WARN_RATIO = 0.5
@@ -21,6 +26,8 @@ export interface FleetRow {
   turn_count: number
   last_latency_ms: number
   last_activity_ago_s: number | null
+  activity_label: string
+  activity_source: KeeperActivitySource
   model: string
   tool_calls: number
   tool_success_pct: number | null
@@ -120,29 +127,15 @@ export function uniqueStrings(values: Array<string | null | undefined>): string[
   return items
 }
 
-function keeperLatestMetricModel(keeper: Keeper): string | null {
-  const series = keeper.metrics_series ?? []
-  for (let index = series.length - 1; index >= 0; index -= 1) {
-    const model = normalizeModelText(series[index]?.model_used)
-    if (model) return model
-  }
-  return null
-}
-
 function keeperMetricsWindowModel(keeper: Keeper): string | null {
   const primary = keeper.metrics_window?.primary_model
   return typeof primary === 'string' ? normalizeModelText(primary) : null
 }
 
 function keeperModel(keeper: Keeper): string {
-  return firstNonEmptyString(
-    keeper.last_model_used,
-    keeperLatestMetricModel(keeper),
-    keeperMetricsWindowModel(keeper),
-    keeper.active_model,
-    keeper.model,
-    keeper.primary_model,
-  ) ?? 'unknown'
+  return normalizeModelText(keeperDisplayModel(keeper)?.value)
+    ?? keeperMetricsWindowModel(keeper)
+    ?? 'unknown'
 }
 
 function keeperLastLatencyMs(keeper: Keeper): number {
@@ -333,6 +326,7 @@ export function buildFleetRows(keepers: Keeper[], toolQuality: ToolQualityRespon
           const toolQualityForKeeper = toolStats.get(keeper.name)
           const recentTools = keeperRecentTools(keeper)
           const toolCalls = keeperToolCallCount(keeper, toolQualityForKeeper?.calls)
+          const activity = keeperActivityDisplay(keeper, keeper.agent?.last_seen)
           return {
             name: keeper.name,
             status: keeper.status ?? (keeper.keepalive_running ? 'active' : 'offline'),
@@ -343,7 +337,9 @@ export function buildFleetRows(keepers: Keeper[], toolQuality: ToolQualityRespon
             context_ratio: keeper.context_ratio ?? 0,
             turn_count: keeper.total_turns ?? keeper.turn_count ?? 0,
             last_latency_ms: keeperLastLatencyMs(keeper),
-            last_activity_ago_s: keeper.last_activity_ago_s ?? null,
+            last_activity_ago_s: activity.ageSeconds,
+            activity_label: activity.label,
+            activity_source: activity.source,
             model: keeperModel(keeper),
             tool_calls: toolCalls,
             tool_success_pct: toolQualityForKeeper?.success_pct ?? null,
@@ -382,6 +378,8 @@ export function buildFleetRows(keepers: Keeper[], toolQuality: ToolQualityRespon
           turn_count: 0,
           last_latency_ms: 0,
           last_activity_ago_s: null,
+          activity_label: '최근 활동',
+          activity_source: 'none',
           model: 'unknown',
           tool_calls: keeper.calls,
           tool_success_pct: keeper.success_pct,
@@ -460,6 +458,14 @@ export function formatLatency(ms: number): string {
 export function formatActivity(seconds: number | null): string {
   if (seconds == null || !Number.isFinite(seconds) || seconds < 0) return '-'
   return formatElapsedCompact(seconds)
+}
+
+export function formatActivitySignal(
+  row: Pick<FleetRow, 'activity_label' | 'last_activity_ago_s'>,
+): string {
+  const activity = formatActivity(row.last_activity_ago_s)
+  if (activity === '-') return '-'
+  return `${row.activity_label} ${activity}`
 }
 
 export function numericAge(value: number | null | undefined): number | null {

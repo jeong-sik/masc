@@ -296,67 +296,67 @@ let execute_keeper_tool_call_with_outcome
     | "keeper_task_submit_for_verification" ->
       make_executed_tool_result
         (Keeper_exec_task.handle_keeper_task_tool ~config ~meta ~name ~args)
-    | n when String.starts_with ~prefix:"masc_autoresearch_" n ->
-      make_executed_tool_result
-        (Keeper_exec_masc.handle_keeper_autoresearch_tool ~config ~meta ~name ~args)
-    | n when String.starts_with ~prefix:"masc_" n ->
-      make_executed_tool_result
-        (Keeper_exec_masc.handle_keeper_masc_tool ~config ~meta ~name ~args)
     | other ->
-      let suggestion =
-        let candidates = keeper_allowed_tool_names meta in
-        let scored =
-          candidates
-          |> List.filter_map (fun c ->
-            if String.length c > 2 && String.length other > 2 then
-              let other_lower = String.lowercase_ascii other in
-              let c_lower = String.lowercase_ascii c in
-              let contains haystack needle =
-                let nlen = String.length needle in
-                let hlen = String.length haystack in
-                if nlen = 0 then true
-                else if nlen > hlen then false
-                else
-                  let found = ref false in
-                  for i = 0 to hlen - nlen do
-                    if not !found
-                       && String.sub haystack i nlen = needle
-                    then found := true
-                  done;
-                  !found
-              in
-              if contains c_lower other_lower
-                 || contains other_lower c_lower
-              then Some c
-              else None
-            else None)
-          |> List.filteri (fun i _ -> i < 3)
-        in
-        scored
-      in
-      let masc_schemas = !Keeper_tool_registry.masc_schemas_ref in
-      let enrich_suggestion name =
-        let schema_opt =
-          List.find_opt (fun (s : Types.tool_schema) -> s.name = name) masc_schemas
-        in
-        match schema_opt with
-        | Some s ->
-          `Assoc [
-            ("name", `String name);
-            ("description", `String s.description);
-            ("input_schema", s.input_schema);
-          ]
-        | None -> `String name
-      in
-      let fields =
-        [ ("error", `String "unknown_tool"); ("tool", `String other) ]
-        @ (match suggestion with
-           | [] -> [("hint", `String "Use keeper_tool_search to find available tools.")]
-           | names ->
-             [ ("did_you_mean", `List (List.map enrich_suggestion names));
-               ("hint", `String "Call one of these tools with the correct parameters.") ])
-      in
-      make_executed_tool_result (Yojson.Safe.to_string (`Assoc fields))))
+      (match
+         Keeper_exec_masc.handle_registered_keeper_tool
+           ~config ~meta ~name:other ~args
+       with
+       | Some raw_output -> make_executed_tool_result raw_output
+       | None ->
+         let suggestion =
+           let candidates = keeper_allowed_tool_names meta in
+           let scored =
+             candidates
+             |> List.filter_map (fun c ->
+               if String.length c > 2 && String.length other > 2 then
+                 let other_lower = String.lowercase_ascii other in
+                 let c_lower = String.lowercase_ascii c in
+                 let contains haystack needle =
+                   let nlen = String.length needle in
+                   let hlen = String.length haystack in
+                   if nlen = 0 then true
+                   else if nlen > hlen then false
+                   else
+                     let found = ref false in
+                     for i = 0 to hlen - nlen do
+                       if not !found
+                          && String.sub haystack i nlen = needle
+                       then found := true
+                     done;
+                     !found
+                 in
+                 if contains c_lower other_lower
+                    || contains other_lower c_lower
+                 then Some c
+                 else None
+               else None)
+             |> List.filteri (fun i _ -> i < 3)
+           in
+           scored
+         in
+         let masc_schemas = !Keeper_tool_registry.masc_schemas_ref in
+         let enrich_suggestion name =
+           let schema_opt =
+             List.find_opt (fun (s : Types.tool_schema) -> s.name = name) masc_schemas
+           in
+           match schema_opt with
+           | Some s ->
+             `Assoc [
+               ("name", `String name);
+               ("description", `String s.description);
+               ("input_schema", s.input_schema);
+             ]
+           | None -> `String name
+         in
+         let fields =
+           [ ("error", `String "unknown_tool"); ("tool", `String other) ]
+           @ (match suggestion with
+              | [] -> [("hint", `String "Use keeper_tool_search to find available tools.")]
+              | names ->
+                [ ("did_you_mean", `List (List.map enrich_suggestion names));
+                  ("hint", `String "Call one of these tools with the correct parameters.") ])
+         in
+         make_executed_tool_result (Yojson.Safe.to_string (`Assoc fields)))))
 
 let execute_keeper_tool_call
       ~(config : Coord.config)

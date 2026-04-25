@@ -192,4 +192,20 @@ let handle_keeper_masc_tool
                      [ "error", `String "unregistered_masc_tool"; "tool", `String name ]))))
 ;;
 
+let handle_registered_keeper_tool
+      ~(config : Coord.config)
+      ~(meta : keeper_meta)
+      ~(name : string)
+      ~(args : Yojson.Safe.t)
+  =
+  match Tool_dispatch.lookup_tag name with
+  | Some Tool_dispatch.Mod_autoresearch ->
+    Some (handle_keeper_autoresearch_tool ~config ~meta ~name ~args)
+  | Some _ ->
+    Some (handle_keeper_masc_tool ~config ~meta ~name ~args)
+  | None when Tool_dispatch.is_registered name ->
+    Some (handle_keeper_masc_tool ~config ~meta ~name ~args)
+  | None -> None
+;;
+
 (* ── Tool execution dispatch ──────────────────────────────────── *)

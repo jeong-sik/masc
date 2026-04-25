@@ -143,8 +143,9 @@ let dispatch
           "tool '%s' belongs to the removed operator surface; keeper runtime stays on OAS Agent.run" name)
 
   | Mod_autoresearch ->
-      (* Keeper already handles masc_autoresearch_* before reaching this path.
-         If we get here, provide a minimal context without team session starter. *)
+      (* Registered keeper dispatch handles autoresearch explicitly when
+         possible. This fallback still provides a minimal context for tools
+         that reach the generic tag dispatcher. *)
       let ctx : Tool_autoresearch.context =
         {
           base_path = config.base_path;

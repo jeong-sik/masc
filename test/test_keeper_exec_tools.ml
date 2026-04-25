@@ -157,6 +157,45 @@ let test_execute_with_outcome_bad_query_is_failure () =
       check string "bad query payload shape" "structured_error"
         (payload_kind result.payload_shape))
 
+let registered_dispatch_probe_tool = "test_keeper_registered_dispatch_probe"
+
+let register_registered_dispatch_probe () =
+  Masc_mcp.Tool_dispatch.register_name_tag
+    ~tool_name:registered_dispatch_probe_tool
+    ~tag:Masc_mcp.Tool_dispatch.Mod_misc;
+  Masc_mcp.Tool_dispatch.register
+    ~tool_name:registered_dispatch_probe_tool
+    ~handler:(fun ~name ~args:_ ->
+      Some
+        ( true
+        , Yojson.Safe.to_string
+            (`Assoc
+              [ ("ok", `Bool true)
+              ; ("tool", `String name)
+              ; ("route", `String "registered")
+              ]) ))
+
+let test_registered_tool_dispatch_without_masc_prefix () =
+  register_registered_dispatch_probe ();
+  check bool "probe has no masc_ prefix" false
+    (String.starts_with ~prefix:"masc_" registered_dispatch_probe_tool);
+  with_exec_fixture "keeper_exec_registered_dispatch"
+    (fun ~config ~meta ~ctx_work:_ ->
+      match
+        Masc_mcp.Keeper_exec_masc.handle_registered_keeper_tool
+          ~config
+          ~meta
+          ~name:registered_dispatch_probe_tool
+          ~args:(`Assoc [])
+      with
+      | None -> fail "expected registered keeper tool dispatch"
+      | Some raw ->
+        let json = Yojson.Safe.from_string raw in
+        check string "registered tool name" registered_dispatch_probe_tool
+          Yojson.Safe.Util.(member "tool" json |> to_string);
+        check string "registered route" "registered"
+          Yojson.Safe.Util.(member "route" json |> to_string))
+
 (* ── Exec cache integration tests ──────────────────────────── *)
 
 let test_exec_cache_miss_then_hit () =
@@ -275,6 +314,8 @@ let () =
         test_execute_with_outcome_missing_file_is_failure;
       test_case "bad query is failure" `Quick
         test_execute_with_outcome_bad_query_is_failure;
+      test_case "registered dispatch does not require masc_ prefix" `Quick
+        test_registered_tool_dispatch_without_masc_prefix;
     ]);
     ("exec_cache", [
       test_case "miss then hit" `Quick test_exec_cache_miss_then_hit;

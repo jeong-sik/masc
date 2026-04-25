@@ -214,7 +214,9 @@ let inspect
         ]
     else
       let status =
-        run_git ~timeout_sec:10.0 ~clone_path [ "status"; "--porcelain" ]
+        run_git
+          ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Repo_readiness ())
+          ~clone_path [ "status"; "--porcelain" ]
       in
       let dirty = status.ok && String.trim status.output <> "" in
       let branch =
@@ -235,7 +237,9 @@ let inspect
         | None -> None, None
         | Some _ -> (
             let counts =
-              run_git ~timeout_sec:10.0 ~clone_path
+              run_git
+                ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Repo_readiness ())
+                ~clone_path
                 [ "rev-list"; "--left-right"; "--count"; "@{upstream}...HEAD" ]
             in
             if counts.ok then

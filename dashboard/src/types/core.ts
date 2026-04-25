@@ -114,6 +114,7 @@ export interface BoardActorIdentity {
   key: string
   display_name: string
   raw: string
+  source?: 'keeper_registry_agent_name' | 'keeper_registry_name' | 'keeper_alias_contract' | 'raw_agent' | string
   runtime_agent_name?: string
 }
 

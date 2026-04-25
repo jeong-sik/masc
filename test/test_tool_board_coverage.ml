@@ -163,6 +163,8 @@ let test_board_actor_identity_canonicalizes_keeper_alias () =
   Alcotest.(check string) "key" "keeper:analyst" (json_member_string json "key");
   Alcotest.(check string) "raw" "keeper-analyst-agent"
     (json_member_string json "raw");
+  Alcotest.(check string) "source" "keeper_alias_contract"
+    (json_member_string json "source");
   Alcotest.(check string) "runtime agent" "keeper-analyst-agent"
     (json_member_string json "runtime_agent_name")
 
@@ -173,7 +175,9 @@ let test_board_actor_identity_keeps_non_keeper_agent () =
   let json = Server_utils.board_actor_identity_json "codex" in
   Alcotest.(check string) "kind" "agent" (json_member_string json "kind");
   Alcotest.(check string) "id" "codex" (json_member_string json "id");
-  Alcotest.(check string) "key" "agent:codex" (json_member_string json "key")
+  Alcotest.(check string) "key" "agent:codex" (json_member_string json "key");
+  Alcotest.(check string) "source" "raw_agent"
+    (json_member_string json "source")
 
 (** {2 Group 2: JSON helper functions} *)
 

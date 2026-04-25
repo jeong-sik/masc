@@ -312,6 +312,7 @@ function normalizeBoardActorIdentity(
   const key = asString(raw.key, '').trim() || `${kind}:${id.toLowerCase()}`
   const displayName = asString(raw.display_name, '').trim() || id
   const original = asString(raw.raw, '').trim() || fallbackRaw
+  const source = asString(raw.source, '').trim()
   const runtimeAgentName = asString(raw.runtime_agent_name, '').trim()
   return {
     kind,
@@ -319,6 +320,7 @@ function normalizeBoardActorIdentity(
     key,
     display_name: displayName,
     raw: original,
+    source: source || undefined,
     runtime_agent_name: runtimeAgentName || undefined,
   }
 }

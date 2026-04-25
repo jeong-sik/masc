@@ -82,7 +82,7 @@ function GuideCard({
   children?: ComponentChildren
 }) {
   return html`
-    <section class="flex flex-col gap-3 rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
+    <section class="flex flex-col gap-3 rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4" aria-label=${eyebrow}>
       <div class="flex items-start justify-between gap-3">
         <div>
           <div class="text-2xs font-semibold uppercase tracking-5 text-text-muted">${eyebrow}</div>
@@ -212,7 +212,7 @@ export function Planning() {
 
   return html`
     <div class="flex flex-col gap-6" role="region" aria-label="계획">
-      <section class="rounded border border-card-border/70 bg-[rgba(9,14,24,0.88)] p-5">
+      <section class="rounded border border-card-border/70 bg-[rgba(9,14,24,0.88)] p-5" aria-label="계획 상태">
         <div class="flex flex-wrap items-start justify-between gap-4">
           <div class="max-w-190">
             <div class="text-2xs font-semibold uppercase tracking-[0.18em] text-text-muted">Planning Status</div>
@@ -238,7 +238,7 @@ export function Planning() {
         </div>
 
         <div class="mt-5 grid gap-4 xl:grid-cols-2">
-          <section class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
+          <section class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4" aria-label="태스크 추가">
             <div class="mb-3">
               <div class="text-2xs font-semibold uppercase tracking-5 text-text-muted">Backlog Entry</div>
               <h3 class="mt-1 text-md font-semibold text-text-strong">태스크 추가</h3>
@@ -266,7 +266,7 @@ export function Planning() {
 
       <${KeeperToolActivity} />
 
-      <section class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
+      <section class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4" aria-label="목표 파이프라인">
         <div class="flex items-center justify-between gap-3">
           <div>
             <div class="text-2xs font-semibold uppercase tracking-5 text-text-muted">Goal Pipeline</div>

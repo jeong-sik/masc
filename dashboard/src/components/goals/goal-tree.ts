@@ -1015,7 +1015,7 @@ export function GoalTree() {
 
   return html`
     <div class="flex flex-col gap-5" role="region" aria-label="목표 트리">
-      <section class="rounded border border-card-border/70 bg-[rgba(9,14,24,0.88)] p-5">
+      <section class="rounded border border-card-border/70 bg-[rgba(9,14,24,0.88)] p-5" aria-label="목표 관리자">
         <div class="mb-4 flex flex-wrap items-start justify-between gap-4">
           <div class="max-w-190">
             <div class="text-2xs font-semibold uppercase tracking-[0.18em] text-text-muted">Goal Manager</div>
@@ -1095,12 +1095,12 @@ export function GoalTree() {
       ` : data && data.tree.length === 0 ? html`
         <${EmptyState} message="등록된 목표가 없습니다. masc_goal_upsert로 목표를 등록하세요. 연결 태스크는 task.goal_id가 우선이고, 제목의 [goal:<id>]는 레거시 fallback으로만 읽습니다." />
       ` : data && isFiltering && visibleTree.length === 0 ? html`
-        <section class="py-4 text-center text-xs text-text-dim">
+        <section class="py-4 text-center text-xs text-text-dim" aria-label="필터 결과 없음">
           필터 결과 없음 (${data.tree.length} 목표)
         </section>
       ` : data ? html`
         <div class="grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(360px,0.95fr)]">
-          <section class="flex flex-col gap-2">
+          <section class="flex flex-col gap-2" aria-label="목표 트리 목록">
             ${visibleTree.map(node => html`<${TreeNode} key=${node.id} node=${node} depth=${0} />`)}
           </section>
           <${GoalDetailPanel} selectedNode=${selectedNode} />

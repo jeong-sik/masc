@@ -400,7 +400,11 @@ let get_audit_store ?base_path () =
       match Hashtbl.find_opt audit_stores base with
       | Some store -> Some store
       | None ->
-          let dir = Filename.concat base ".masc/audit-approvals" in
+          let dir =
+            Filename.concat
+              (Common.masc_dir_from_base_path ~base_path:base)
+              "audit-approvals"
+          in
           let store = Dated_jsonl.create ~base_dir:dir () in
           Hashtbl.replace audit_stores base store;
           Some store)

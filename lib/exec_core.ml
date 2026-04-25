@@ -509,8 +509,9 @@ let persist_artifact_if_needed ~base_path ~keeper_name ~cmd ~output =
     let tm = Unix.localtime now in
     let keeper = Playground_paths.sanitize_keeper_name keeper_name in
     let dir =
-      Filename.concat base_path
-        (Printf.sprintf ".masc/exec-artifacts/%s/%04d-%02d-%02d"
+      Filename.concat
+        (Common.masc_dir_from_base_path ~base_path)
+        (Printf.sprintf "exec-artifacts/%s/%04d-%02d-%02d"
            keeper
            (tm.tm_year + 1900)
            (tm.tm_mon + 1)

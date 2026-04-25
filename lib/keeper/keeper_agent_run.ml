@@ -374,128 +374,12 @@ let run_turn
   let tool_usage_before =
     Keeper_tool_disclosure.keeper_tool_usage_snapshot ~base_path:config.base_path ~keeper_name:meta.name
   in
-  (* Progressive tool disclosure via OAS Tool_selector.
-     Delegates BM25 retrieval, confidence gating, fallback, and optional
-     LLM reranking to Tool_selector.select instead of manual Tool_index
-     calls.  See OAS boundary violation #6.
-
-     Korean keyword aliases: Tool_selector.select uses Tool_index.of_tools
-     internally (aliases=[], group=None).  To preserve bilingual BM25
-     matching, we append Korean keywords directly into tool descriptions.
-     This gives equivalent BM25 term overlap.
-
-     Trade-off vs previous manual approach:
-     - Lost: group co-retrieval (e.g. matching keeper_board_post would
-       pull keeper_board_comment).  Mitigated by k=20 which already
-       retrieves enough related tools.
-     - Lost: pre-built index reuse across turns.  Tool_selector rebuilds
-       per call, but Tool_index construction is O(n) with n~30-60 for
-       preset-scoped tools — sub-millisecond on M3.
-     - Gained: single-point-of-truth for BM25+confidence+fallback+rerank
-       logic.  ~120 fewer lines of manual retrieval code.
-
-     TODO(OAS): Add Tool_selector.select_with_index that accepts a
-     pre-built Tool_index.t to support aliases, groups, and index reuse.
-     When that lands, this code can drop the description augmentation. *)
-  (* Korean keyword map for bilingual BM25 matching.
-     Tool descriptions are English; Korean users issue Korean queries.
-     Appending Korean keywords to descriptions gives BM25 term overlap
-     across languages.
-     Keys must match actual tool names from keeper_tools. *)
-  let korean_keywords =
-    [ "keeper_board_post", "게시판 글 작성 올리기 포스트"
-    ; "keeper_board_get", "게시판 글 읽기 조회 확인"
-    ; "keeper_board_list", "게시판 목록 최근글"
-    ; "keeper_board_comment", "게시판 댓글 답글 코멘트"
-    ; "keeper_board_vote", "게시판 투표 추천 반대"
-    ; "keeper_board_search", "게시판 검색 키워드 글찾기"
-    ; "keeper_board_delete", "게시판 삭제 제거 글삭제"
-    ; "keeper_board_stats", "게시판 통계 활동 참여 게시글수"
-    ; "keeper_stay_silent", "침묵 대기 아무것도 안함 넘어가기"
-    ; "keeper_write", "파일 작성 저장 새파일 생성 쓰기"
-    ; "keeper_tool_search", "도구 검색 발견 찾기 어떤도구"
-    ; "keeper_voice_listen", "음성 듣기 마이크 녹음 입력"
-    ; "keeper_fs_read", "파일 읽기 소스코드 설정"
-    ; "keeper_fs_edit", "파일 쓰기 편집 저장 수정 생성"
-    ; "keeper_shell", "명령어 조회 검색 탐색 gh github pull request issue pr ci draft 생성 풀리퀘스트 이슈"
-    ; "keeper_bash", "명령어 실행 쉘 빌드 테스트 git add commit push"
-    ; "keeper_memory_search", "기억 검색 대화 이전 메시지"
-    ; "keeper_library_search", "라이브러리 지식 문서 검색"
-    ; "keeper_library_read", "라이브러리 문서 읽기 지식"
-    ; "keeper_time_now", "시간 현재 타임스탬프"
-    ; "keeper_context_status", "컨텍스트 상태 토큰 사용량"
-    ; "keeper_tools_list", "도구 목록 기능 할수있는것 능력"
-    ; "keeper_broadcast", "브로드캐스트 알림 공지 전달"
-    ; "keeper_tasks_list", "태스크 목록 할일 백로그"
-    ; "keeper_tasks_audit", "태스크 감사 고아 방치"
-    ; "keeper_task_claim", "태스크 가져오기 할당"
-    ; "keeper_task_create", "태스크 생성 만들기 일감"
-    ; "keeper_task_done", "태스크 완료 마감"
-    ; "keeper_task_submit_for_verification", "태스크 검증제출 리뷰요청 PR검토"
-    ; "keeper_task_force_release", "태스크 강제해제 반환"
-    ; "keeper_task_force_done", "태스크 강제완료"
-    ; "keeper_voice_speak", "음성 말하기 보이스"
-    ; "keeper_voice_agent", "음성 설정 보이스"
-    ; "keeper_voice_sessions", "음성 세션 목록"
-    ; "keeper_voice_session_start", "음성 세션 시작"
-    ; "keeper_voice_session_end", "음성 세션 종료"
-    ; (* masc_* tools: Korean keywords for cross-language BM25 retrieval.
-       Without these, Korean queries like "코드 검색" only match keeper_*
-       tools that have Korean aliases, systematically deprioritizing
-       masc_* tools.  See #4520. *)
-      "masc_code_search", "코드 검색 소스코드 찾기 심볼"
-    ; "masc_code_read", "코드 읽기 파일 소스코드"
-    ; "masc_code_edit", "코드 편집 수정 파일 변경"
-    ; "masc_code_write", "코드 작성 파일 생성 쓰기"
-    ; "masc_code_symbols", "코드 심볼 함수 클래스 정의"
-    ; "masc_code_shell", "코드 명령어 쉘 실행"
-    ; "masc_code_git", "깃 커밋 브랜치 로그 이력"
-    ; "masc_governance_status", "거버넌스 상태 규칙 정책"
-    ; "masc_governance_feed", "거버넌스 피드 이벤트 로그"
-    ; "masc_autoresearch_start", "자동연구 리서치 시작"
-    ; "masc_autoresearch_status", "자동연구 리서치 상태"
-    ; "masc_autoresearch_stop", "자동연구 리서치 중지"
-    ; "masc_autoresearch_cycle", "자동연구 리서치 사이클 실행"
-    ; "masc_plan_get", "계획 플랜 마일스톤 로드맵 프로젝트 전략"
-    ; "masc_plan_update", "계획 플랜 수정 업데이트"
-    ; "masc_plan_init", "계획 플랜 초기화 생성"
-    ; "masc_plan_set_task", "계획 태스크 설정 할당"
-    ; "masc_plan_get_task", "계획 태스크 조회"
-    ; "masc_agent_card", "에이전트 카드 프로필 정보"
-    ; "masc_agents", "에이전트 목록 현황 누구"
-    ; "masc_agent_update", "에이전트 업데이트 상태변경"
-    ; "masc_keeper_up", "키퍼 시작 기동 생성"
-    ; "masc_keeper_down", "키퍼 중지 종료"
-    ; "masc_keeper_list", "키퍼 목록 현황"
-    ; "masc_keeper_msg", "키퍼 메시지 전달 대화"
-    ; "masc_keeper_status", "키퍼 상태 확인"
-    ; "masc_keeper_compact", "키퍼 컨텍스트 압축 컴팩트 요약"
-    ; "masc_keeper_clear", "키퍼 컨텍스트 초기화 클리어 비우기"
-    ; "masc_worktree_create", "워크트리 생성 브랜치 격리 작업공간"
-    ; "masc_worktree_list", "워크트리 목록 현황"
-    ; "masc_worktree_remove", "워크트리 삭제 정리"
-    ; "masc_tasks", "태스크 목록 할일 작업"
-    ; "masc_add_task", "태스크 추가 등록 생성"
-    ; "masc_status", "상태 현황 방 룸 요약"
-    ; "masc_dashboard", "대시보드 현황 대시 보드 개요"
-    ; "masc_plan_clear_task", "계획 태스크 제거 해제 클리어"
-    ; "masc_agent_fitness", "에이전트 평가 점수 피트니스"
-    ; "masc_web_search", "웹 검색 인터넷 온라인 구글"
-    ; "masc_broadcast", "브로드캐스트 방송 알림 공지"
-    ; "masc_claim_next", "다음태스크 가져오기 할당"
-    ; "masc_messages", "메시지 대화 채팅 로그"
-    ; "masc_leave", "퇴장 나가기 오프라인 종료"
-      (* masc_broadcast, masc_who, masc_messages require MCP session context
-       and fail in keeper. Use keeper_broadcast instead. (#4694) *)
-    ]
-  in
-  (* Convert to Hashtbl for O(1) lookup — used in augment_tool_description
-     and tool_entries aliases.  75 static entries, built once per session. *)
-  let korean_kw_tbl =
-    let tbl = Hashtbl.create 80 in
-    List.iter (fun (k, v) -> Hashtbl.replace tbl k v) korean_keywords;
-    tbl
-  in
+  (* Progressive tool disclosure.
+     Deterministic BM25 prefiltering uses a Tool_index built from
+     Keeper_agent_tool_surface.tool_index_entry_of_tool, so Korean aliases and
+     group metadata have one production SSOT.  Optional LLM rerank still calls
+     OAS Tool_selector.select_names on the raw OAS tool schemas, but the
+     deterministic prefilter remains part of the merged floor. *)
   (* Full-universe search index for keeper_tool_search.
      Separate from the preset-scoped Tool_selector used for progressive disclosure:
      search needs access to ALL tools so the keeper can discover beyond its preset.
@@ -508,9 +392,7 @@ let run_turn
       top_k = Keeper_config.keeper_tool_search_top_k ()
     }
   in
-  let tool_entries =
-    List.map (tool_index_entry_of_tool ~korean_kw_tbl) keeper_tools
-  in
+  let tool_entries = List.map tool_index_entry_of_tool keeper_tools in
   (* Full-universe search index for keeper_tool_search.
      Separate from the preset-scoped Tool_selector used for progressive disclosure:
      search needs access to ALL tools so the keeper can discover beyond its preset.
@@ -534,9 +416,7 @@ let run_turn
       { Oas.Tool_index.default_config with
         top_k = keeper_selection_bm25_prefilter_n }
     in
-    let preset_tool_entries =
-      List.map (tool_index_entry_of_tool ~korean_kw_tbl) preset_tools
-    in
+    let preset_tool_entries = List.map tool_index_entry_of_tool preset_tools in
     (preset_tools,
      Oas.Tool_index.build ~config:progressive_tool_index_config
        preset_tool_entries)

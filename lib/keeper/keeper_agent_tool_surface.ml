@@ -311,19 +311,95 @@ let keeper_selection_top_k = 10
    improve results, but still bounded and deterministic. *)
 let keeper_selection_bm25_prefilter_n = 30
 
-let tool_index_entry_of_tool
-    ~(korean_kw_tbl : (string, string) Hashtbl.t)
-    (t : Oas.Tool.t) : Oas.Tool_index.entry =
-  let name = t.schema.name in
+(* Bilingual BM25 aliases for keeper tool search.  Keep this beside the
+   production Tool_index entry builder so tests cannot drift by copying a
+   second alias/group table. *)
+let tool_search_alias_entries =
+  [ "keeper_board_post", "게시판 글 작성 올리기 포스트"
+  ; "keeper_board_get", "게시판 글 읽기 조회 확인"
+  ; "keeper_board_list", "게시판 목록 최근글"
+  ; "keeper_board_comment", "게시판 댓글 답글 코멘트"
+  ; "keeper_board_vote", "게시판 투표 추천 반대"
+  ; "keeper_board_search", "게시판 검색 키워드 글찾기"
+  ; "keeper_board_delete", "게시판 삭제 제거 글삭제"
+  ; "keeper_board_stats", "게시판 통계 활동 참여 게시글수"
+  ; "keeper_stay_silent", "침묵 대기 아무것도 안함 넘어가기"
+  ; "keeper_tool_search", "도구 검색 발견 찾기 어떤도구"
+  ; "keeper_voice_listen", "음성 듣기 마이크 녹음 입력"
+  ; "keeper_fs_read", "파일 읽기 소스코드 설정"
+  ; "keeper_fs_edit", "파일 쓰기 편집 저장 수정 생성"
+  ; "keeper_shell", "명령어 조회 검색 탐색 gh github pull request issue pr ci draft 생성 풀리퀘스트 이슈"
+  ; "keeper_bash", "명령어 실행 쉘 빌드 테스트 git add commit push"
+  ; "keeper_memory_search", "기억 검색 대화 이전 메시지"
+  ; "keeper_library_search", "라이브러리 지식 문서 검색"
+  ; "keeper_library_read", "라이브러리 문서 읽기 지식"
+  ; "keeper_time_now", "시간 현재 타임스탬프"
+  ; "keeper_context_status", "컨텍스트 상태 토큰 사용량"
+  ; "keeper_tools_list", "도구 목록 기능 할수있는것 능력"
+  ; "keeper_broadcast", "브로드캐스트 알림 공지 전달"
+  ; "keeper_tasks_list", "태스크 목록 할일 백로그"
+  ; "keeper_tasks_audit", "태스크 감사 고아 방치"
+  ; "keeper_task_claim", "태스크 가져오기 할당"
+  ; "keeper_task_create", "태스크 생성 만들기 일감"
+  ; "keeper_task_done", "태스크 완료 마감"
+  ; "keeper_task_submit_for_verification", "태스크 검증제출 리뷰요청 PR검토"
+  ; "keeper_task_force_release", "태스크 강제해제 반환"
+  ; "keeper_task_force_done", "태스크 강제완료"
+  ; "keeper_voice_speak", "음성 말하기 보이스"
+  ; "keeper_voice_agent", "음성 설정 보이스"
+  ; "keeper_voice_sessions", "음성 세션 목록"
+  ; "keeper_voice_session_start", "음성 세션 시작"
+  ; "keeper_voice_session_end", "음성 세션 종료"
+  ; "masc_code_search", "코드 검색 소스코드 찾기 심볼"
+  ; "masc_code_read", "코드 읽기 파일 소스코드"
+  ; "masc_code_edit", "코드 편집 수정 파일 변경"
+  ; "masc_code_write", "코드 작성 파일 생성 쓰기"
+  ; "masc_code_symbols", "코드 심볼 함수 클래스 정의"
+  ; "masc_code_shell", "코드 명령어 쉘 실행"
+  ; "masc_code_git", "깃 커밋 브랜치 로그 이력"
+  ; "masc_autoresearch_start", "자동연구 리서치 시작"
+  ; "masc_autoresearch_status", "자동연구 리서치 상태"
+  ; "masc_autoresearch_stop", "자동연구 리서치 중지"
+  ; "masc_autoresearch_cycle", "자동연구 리서치 사이클 실행"
+  ; "masc_plan_get", "계획 플랜 마일스톤 로드맵 프로젝트 전략"
+  ; "masc_plan_update", "계획 플랜 수정 업데이트"
+  ; "masc_plan_init", "계획 플랜 초기화 생성"
+  ; "masc_plan_set_task", "계획 태스크 설정 할당"
+  ; "masc_plan_get_task", "계획 태스크 조회"
+  ; "masc_agent_card", "에이전트 카드 프로필 정보"
+  ; "masc_agents", "에이전트 목록 현황 누구"
+  ; "masc_agent_update", "에이전트 업데이트 상태변경"
+  ; "masc_keeper_list", "키퍼 목록 현황"
+  ; "masc_keeper_msg", "키퍼 메시지 전달 대화"
+  ; "masc_keeper_status", "키퍼 상태 확인"
+  ; "masc_worktree_create", "워크트리 생성 브랜치 격리 작업공간"
+  ; "masc_worktree_list", "워크트리 목록 현황"
+  ; "masc_worktree_remove", "워크트리 삭제 정리"
+  ; "masc_tasks", "태스크 목록 할일 작업"
+  ; "masc_add_task", "태스크 추가 등록 생성"
+  ; "masc_status", "상태 현황 방 룸 요약"
+  ; "masc_dashboard", "대시보드 현황 대시 보드 개요"
+  ; "masc_plan_clear_task", "계획 태스크 제거 해제 클리어"
+  ; "masc_agent_fitness", "에이전트 평가 점수 피트니스"
+  ; "masc_web_search", "웹 검색 인터넷 온라인 구글"
+  ; "masc_claim_next", "다음태스크 가져오기 할당"
+  ]
+
+let tool_search_aliases name =
+  match List.assoc_opt name tool_search_alias_entries with
+  | Some aliases ->
+      aliases
+      |> String.split_on_char ' '
+      |> List.filter (fun alias -> alias <> "")
+  | None -> []
+
+let tool_index_entry ~name ~description : Oas.Tool_index.entry =
   let group =
     Tool_catalog.tool_group name
     |> Option.map Tool_catalog.tool_group_to_string
   in
-  let aliases =
-    match Hashtbl.find_opt korean_kw_tbl name with
-    | Some kw ->
-        String.split_on_char ' ' kw
-        |> List.filter (fun s -> s <> "")
-    | None -> []
-  in
-  Oas.Tool_index.{ name; description = t.schema.description; group; aliases }
+  let aliases = tool_search_aliases name in
+  Oas.Tool_index.{ name; description; group; aliases }
+
+let tool_index_entry_of_tool (t : Oas.Tool.t) : Oas.Tool_index.entry =
+  tool_index_entry ~name:t.schema.name ~description:t.schema.description

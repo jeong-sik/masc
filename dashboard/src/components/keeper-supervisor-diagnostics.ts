@@ -130,7 +130,7 @@ export function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
   const hsColor = hs >= 80 ? 'var(--ok)' : hs >= 50 ? 'var(--amber-bright)' : 'var(--bad)'
   return html`
     <${SectionCard} title="감독 진단">
-      <div class="space-y-3">
+      <div class="space-y-3" role="region" aria-label="감독 진단">
         <div class="flex items-center justify-between">
           <span class="text-xs text-[var(--text-muted)]">건강도</span>
           <span class="text-sm font-bold font-mono" style="color: ${hsColor}">${hs}</span>

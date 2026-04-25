@@ -159,7 +159,7 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
   // is only rendered when there is actual telemetry data to show.
   if (asyncState.loading || s.tools.length === 0) return null
   if (asyncState.error) {
-    return html`<div class="text-xs text-[var(--bad)] py-2 px-3">텔레메트리 로드 실패: ${asyncState.error}</div>`
+    return html`<div class="text-xs text-[var(--bad)] py-2 px-3" role="alert">텔레메트리 로드 실패: ${asyncState.error}</div>`
   }
 
   const totalCost = s.tools.reduce((sum, t) => sum + t.total_cost_usd, 0)
@@ -174,7 +174,7 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
   const trimmedQuery = query.trim()
 
   return html`
-    <div class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-sm shadow-sm transition-[border-color,box-shadow] duration-200 hover:border-accent/30 hover:shadow-sm">
+    <div class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-sm shadow-sm transition-[border-color,box-shadow] duration-200 hover:border-accent/30 hover:shadow-sm" role="region" aria-label="도구 텔레메트리">
       <div class="text-2xs font-semibold uppercase tracking-widest text-text-muted mb-4 flex items-center gap-2">
         <span class="w-1.5 h-1.5 rounded-full bg-accent/50"></span>
         도구 텔레메트리

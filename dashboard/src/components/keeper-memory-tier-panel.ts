@@ -115,7 +115,7 @@ export function KeeperMemoryTierPanel({
 
   if (loading) {
     return html`
-      <div class="flex items-center justify-center gap-2 py-6 text-2xs text-[var(--text-dim)]">
+      <div class="flex items-center justify-center gap-2 py-6 text-2xs text-[var(--text-dim)]" role="status">
         <${InlineSpinner} />
         메모리 티어 로딩중
       </div>
@@ -142,7 +142,7 @@ export function KeeperMemoryTierPanel({
   const compactionSpec = buildCompactionSpec(compactionStage, phase)
 
   return html`
-    <div class="flex flex-col gap-3">
+    <div class="flex flex-col gap-3" role="region" aria-label="메모리 티어">
       <div class="flex flex-wrap items-center gap-2 text-3xs text-[var(--text-dim)]">
         <span class="inline-flex items-center rounded-sm border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">
           total ${totalUsed} / ${totalCap}

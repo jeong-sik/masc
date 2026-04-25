@@ -193,7 +193,7 @@ function AuthPopover() {
               type="text"
               placeholder="dashboard actor"
               aria-label="Dashboard actor"
-              class="min-w-0 flex-1 py-1.5 px-2 rounded text-2xs border border-[var(--card-border)] bg-[var(--white-4)] text-[var(--text-body)] placeholder-[var(--text-muted)] outline-none focus:border-[rgba(71,184,255,0.5)]"
+              class="min-w-0 flex-1 py-1.5 px-2 rounded text-2xs border border-[var(--card-border)] bg-[var(--white-4)] text-[var(--text-body)] placeholder-[var(--text-muted)] outline-none focus:border-[rgba(71,184,255,0.5)] focus-visible:ring-2 focus-visible:ring-[var(--accent)]/50"
               value=${actorInput.value}
               disabled=${actorOverrideLocked}
               onInput=${(e: Event) => { actorInput.value = (e.target as HTMLInputElement).value }}
@@ -226,7 +226,7 @@ function AuthPopover() {
                 type="password"
                 placeholder="Bearer token"
                 aria-label="Bearer token"
-                class="w-full py-1.5 px-2 rounded text-2xs border border-[var(--card-border)] bg-[var(--white-4)] text-[var(--text-body)] placeholder-[var(--text-muted)] outline-none focus:border-[rgba(71,184,255,0.5)]"
+                class="w-full py-1.5 px-2 rounded text-2xs border border-[var(--card-border)] bg-[var(--white-4)] text-[var(--text-body)] placeholder-[var(--text-muted)] outline-none focus:border-[rgba(71,184,255,0.5)] focus-visible:ring-2 focus-visible:ring-[var(--accent)]/50"
                 value=${tokenInput.value}
                 onInput=${(e: Event) => { tokenInput.value = (e.target as HTMLInputElement).value }}
                 onKeyDown=${(e: KeyboardEvent) => { if (e.key === 'Enter') void handleSetToken() }}

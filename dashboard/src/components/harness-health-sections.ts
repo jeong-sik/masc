@@ -370,7 +370,7 @@ export function RecentVerdictsList({ items }: { items: HarnessVerdictItem[] }) {
           placeholder="task / agent / gate / cascade 필터"
           aria-label="판정 필터"
           onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
-          class="min-w-40 max-w-65 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+          class="min-w-40 max-w-65 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)] focus-visible:ring-2 focus-visible:ring-[var(--accent)]/50"
         />
       </div>
       ${isFiltering && visibleItems.length === 0
@@ -417,7 +417,7 @@ export function PreCompactList({ section }: { section: HarnessSignalSection<PreC
           placeholder="keeper / trigger / model / strategy 필터"
           aria-label="압축 이벤트 필터"
           onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
-          class="min-w-40 max-w-65 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+          class="min-w-40 max-w-65 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)] focus-visible:ring-2 focus-visible:ring-[var(--accent)]/50"
         />
       </div>
       ${isFiltering && visibleItems.length === 0
@@ -469,7 +469,7 @@ export function HandoffList({ section }: { section: HarnessSignalSection<Handoff
           placeholder="keeper / model / trace_id 필터"
           aria-label="세대 교체 필터"
           onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
-          class="min-w-40 max-w-65 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+          class="min-w-40 max-w-65 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)] focus-visible:ring-2 focus-visible:ring-[var(--accent)]/50"
         />
       </div>
       ${isFiltering && visibleItems.length === 0

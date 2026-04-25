@@ -314,7 +314,7 @@ export function HandoffTimeline({
           placeholder="keeper / event / task / peer 필터"
           aria-label="Handoff timeline 필터"
           onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
-          class="min-w-40 max-w-65 flex-1 rounded border border-card-border bg-bg-1/40 px-2 py-1 text-2xs text-text placeholder:text-text-dim focus:outline-none focus:border-accent"
+          class="min-w-40 max-w-65 flex-1 rounded border border-card-border bg-bg-1/40 px-2 py-1 text-2xs text-text placeholder:text-text-dim focus:outline-none focus:border-accent focus-visible:ring-2 focus-visible:ring-[var(--accent)]/50"
         />
       </div>
       ${error !== null

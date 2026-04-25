@@ -1033,7 +1033,7 @@ export function GoalTree() {
                 placeholder="목표 / 태스크 제목 필터"
                 aria-label="목표 트리 필터"
                 onInput=${(e: Event) => { filterQuery.value = (e.target as HTMLInputElement).value }}
-                class="min-w-45 max-w-65 rounded border border-white/10 bg-white/5 px-2 py-1 text-xs text-text-body placeholder:text-text-dim focus:outline-none focus:border-accent"
+                class="min-w-45 max-w-65 rounded border border-white/10 bg-white/5 px-2 py-1 text-xs text-text-body placeholder:text-text-dim focus:outline-none focus:border-accent focus-visible:ring-2 focus-visible:ring-[var(--accent)]/50"
               />
               <${ActionButton} variant="ghost" size="sm" onClick=${() => expandAll(data.tree)}>
                 모두 펼치기

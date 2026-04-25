@@ -463,7 +463,7 @@ function InlineNumberRow({ label, value, onChange, min, max, step, suffix }: {
       <div class="flex items-center gap-1.5">
         <input type="number"
           aria-label=${label}
-          class="w-20 text-right bg-card/60 text-text-strong text-xs font-semibold border border-card-border rounded py-1 px-2 focus:outline-none focus:border-accent/50 transition-colors"
+          class="w-20 text-right bg-card/60 text-text-strong text-xs font-semibold border border-card-border rounded py-1 px-2 focus:outline-none focus:border-accent/50 focus-visible:ring-2 focus-visible:ring-[var(--accent)]/50 transition-colors"
           value=${value}
           min=${min}
           max=${max}
@@ -1152,7 +1152,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
               placeholder="슬롯 이름 / source / gate 필터"
               aria-label="훅 슬롯 필터"
               onInput=${(e: Event) => { hookFilterQuery.value = (e.target as HTMLInputElement).value }}
-              class="min-w-40 max-w-65 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+              class="min-w-40 max-w-65 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)] focus-visible:ring-2 focus-visible:ring-[var(--accent)]/50"
             />
           </div>
           ${isFiltering && visibleEntries.length === 0 && allEntries.length > 0

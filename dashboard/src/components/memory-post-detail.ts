@@ -215,7 +215,7 @@ export function CommentThread({ comments, postId }: { comments: BoardComment[]; 
           placeholder="댓글 내용 검색"
           aria-label="댓글 필터"
           onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
-          class="ml-auto min-w-35 max-w-55 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+          class="ml-auto min-w-35 max-w-55 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)] focus-visible:ring-2 focus-visible:ring-[var(--accent)]/50"
         />
       </div>
       ${isFiltering && filteredRoots.length === 0 ? html`

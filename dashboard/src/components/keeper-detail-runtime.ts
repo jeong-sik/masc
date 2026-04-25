@@ -453,7 +453,7 @@ export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
             <div class="flex items-center gap-2">
               <input
                 type="search"
-                class="flex-1 min-w-0 py-1.5 px-2 rounded border border-[var(--card-border)] bg-[var(--white-3)] text-2xs text-[var(--text-body)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-30)]"
+                class="flex-1 min-w-0 py-1.5 px-2 rounded border border-[var(--card-border)] bg-[var(--white-3)] text-2xs text-[var(--text-body)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-30)] focus-visible:ring-2 focus-visible:ring-[var(--accent)]/50"
                 placeholder="신호 지표 필터 (예: 폴백, 메모리, 컴팩션)"
                 aria-label="런타임 신호 지표 필터"
                 value=${signalQuery}

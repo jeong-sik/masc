@@ -100,7 +100,7 @@ export function PersonaGenerator() {
             value=${concept.value}
             placeholder="good evil chaos research keeper"
             onInput=${(e: Event) => { concept.value = (e.target as HTMLTextAreaElement).value }}
-            class="w-full rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-2 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+            class="w-full rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-2 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)] focus-visible:ring-2 focus-visible:ring-[var(--accent)]/50"
           />
         </div>
 
@@ -125,7 +125,7 @@ export function PersonaGenerator() {
               value=${handle.value}
               placeholder="auto"
               onInput=${(e: Event) => { handle.value = (e.target as HTMLInputElement).value }}
-              class="rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1.5 text-2xs text-[var(--text-body)] focus:outline-none focus:border-[var(--accent)]"
+              class="rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1.5 text-2xs text-[var(--text-body)] focus:outline-none focus:border-[var(--accent)] focus-visible:ring-2 focus-visible:ring-[var(--accent)]/50"
             />
           </label>
           <label class="grid gap-1 text-3xs text-[var(--text-muted)]">
@@ -134,7 +134,7 @@ export function PersonaGenerator() {
               value=${displayName.value}
               placeholder="auto"
               onInput=${(e: Event) => { displayName.value = (e.target as HTMLInputElement).value }}
-              class="rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1.5 text-2xs text-[var(--text-body)] focus:outline-none focus:border-[var(--accent)]"
+              class="rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1.5 text-2xs text-[var(--text-body)] focus:outline-none focus:border-[var(--accent)] focus-visible:ring-2 focus-visible:ring-[var(--accent)]/50"
             />
           </label>
           <label class="grid gap-1 text-3xs text-[var(--text-muted)]">
@@ -143,7 +143,7 @@ export function PersonaGenerator() {
               aria-label="도구 프리셋"
               value=${toolPreset.value}
               onChange=${(e: Event) => { toolPreset.value = (e.target as HTMLSelectElement).value }}
-              class="rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1.5 text-2xs text-[var(--text-body)] focus:outline-none focus:border-[var(--accent)]"
+              class="rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1.5 text-2xs text-[var(--text-body)] focus:outline-none focus:border-[var(--accent)] focus-visible:ring-2 focus-visible:ring-[var(--accent)]/50"
             >
               ${presetChoices.map(choice => html`<option key=${choice} value=${choice}>${choice}</option>`)}
             </select>
@@ -223,7 +223,7 @@ export function PersonaGenerator() {
             value=${profileText.value}
             placeholder="초안을 생성하면 profile.json이 표시됩니다"
             onInput=${(e: Event) => { profileText.value = (e.target as HTMLTextAreaElement).value }}
-            class="w-full rounded border border-[var(--white-10)] bg-[var(--bg-0)] px-2 py-2 font-mono text-3xs leading-5 text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+            class="w-full rounded border border-[var(--white-10)] bg-[var(--bg-0)] px-2 py-2 font-mono text-3xs leading-5 text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)] focus-visible:ring-2 focus-visible:ring-[var(--accent)]/50"
           />
         </div>
 

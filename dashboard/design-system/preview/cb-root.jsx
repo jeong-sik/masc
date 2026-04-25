@@ -78,6 +78,43 @@ function App() {
         <DCArtboard id="ib-nd"  label="C · Operator nudge log + compose"        width={780} height={500}><OperatorNudgeLog/></DCArtboard>
       </DCSection>
 
+      {/* ════════ PHASE 3 · CODE IDE v2 ════════ */}
+
+      <DCSection id="ide-tree" title="E1 · File Tree Explorer" subtitle="allowed_paths overlay · live filters · recent/pinned/changing memory · diff rollups.">
+        <DCArtboard id="e1-allowed" label="A · Tree + allowed_paths overlay" width={920} height={520}><IxTreeAllowed branch="main" keepers={["nick0cave","sangsu","masc-improver"]}/></DCArtboard>
+        <DCArtboard id="e1-filter"  label="B · Filter bar" width={920} height={420}><IxTreeFilter branch="feat/keeper-clarity" keepers={["sangsu","masc-improver"]}/></DCArtboard>
+        <DCArtboard id="e1-tabs"    label="C · Recent / pinned / changed / search" width={780} height={420}><IxTreeTabs branch="main"/></DCArtboard>
+        <DCArtboard id="e1-diff"    label="D · Diff-annotated tree" width={920} height={520}><IxTreeDiff branch="main" keepers={["nick0cave","qa-king"]}/></DCArtboard>
+      </DCSection>
+
+      <DCSection id="ide-edit" title="E2 · Editor Surfaces" subtitle="attribution · split panes · 3-way merge · inline review · blame gutter.">
+        <DCArtboard id="e2-attrib" label="A · Single editor + attribution gutter" width={920} height={420}><IxEditAttrib branch="main" keepers={["nick0cave","sangsu","qa-king"]}/></DCArtboard>
+        <DCArtboard id="e2-split"  label="B · Split 2-pane" width={1080} height={420}><IxEditSplit branch="feat/keeper-clarity"/></DCArtboard>
+        <DCArtboard id="e2-merge"  label="C · 3-way merge resolver" width={1080} height={520}><IxEditMerge branch="codex/fleet-fsm-runtime-cause"/></DCArtboard>
+        <DCArtboard id="e2-review" label="D · Inline review with comments" width={1080} height={460}><IxEditReview branch="main"/></DCArtboard>
+        <DCArtboard id="e2-blame"  label="E · Blame gutter" width={920} height={420}><IxEditBlame branch="main"/></DCArtboard>
+      </DCSection>
+
+      <DCSection id="ide-pr" title="E3 · PR Inspector" subtitle="PR header · files changed · comment thread · CI checks with SafeAuto.">
+        <DCArtboard id="e3-head"   label="A · PR header" width={920} height={300}><IxPrHeader branch="codex/fleet-fsm-runtime-cause" keepers={["nick0cave","sangsu"]}/></DCArtboard>
+        <DCArtboard id="e3-files"  label="B · Files changed list" width={1080} height={480}><IxPrFiles branch="codex/fleet-fsm-runtime-cause"/></DCArtboard>
+        <DCArtboard id="e3-thread" label="C · Comment thread" width={780} height={320}><IxPrThread branch="codex/fleet-fsm-runtime-cause"/></DCArtboard>
+        <DCArtboard id="e3-checks" label="D · CI checks panel" width={920} height={360}><IxPrChecks branch="codex/fleet-fsm-runtime-cause"/></DCArtboard>
+      </DCSection>
+
+      <DCSection id="ide-graph" title="E4 · Branch / Git Graph" subtitle="DAG · keeper-attributed commits · worktree picker · stash recovery.">
+        <DCArtboard id="e4-dag"   label="A · Branch DAG (SVG)" width={920} height={340}><IxGraphDag branch="main"/></DCArtboard>
+        <DCArtboard id="e4-comm"  label="B · Commit list with keeper attribution" width={1080} height={460}><IxGraphCommits branch="main" keepers={["nick0cave","sangsu","masc-improver","qa-king","rama"]}/></DCArtboard>
+        <DCArtboard id="e4-wt"    label="C · Worktree picker" width={920} height={360}><IxGraphWorktrees branch="main"/></DCArtboard>
+        <DCArtboard id="e4-stash" label="D · Stash list" width={920} height={340}><IxGraphStashes branch="main"/></DCArtboard>
+      </DCSection>
+
+      <DCSection id="ide-term" title="E5 · Terminal / Search" subtitle="cascade-aware terminal · project search · find/replace overlay.">
+        <DCArtboard id="e5-term" label="A · Cascade-aware terminal pane" width={920} height={440}><IxTerm branch="codex/design-system-phase3-ide-v2"/></DCArtboard>
+        <DCArtboard id="e5-rg"   label="B · Project search (rg-style)" width={920} height={420}><IxSearch branch="main"/></DCArtboard>
+        <DCArtboard id="e5-find" label="C · Find / replace in file" width={920} height={360}><IxFindReplace branch="main"/></DCArtboard>
+      </DCSection>
+
       {/* ════════ PHASE 2 · TRACK 1 · WORK PLANE ════════ */}
 
       <DCSection id="goal-zone" title="G1 · Goal Zone" subtitle="Real goals.json — horizon, phase, metric, parent tree, snapshot diff.">

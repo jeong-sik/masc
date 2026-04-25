@@ -332,7 +332,7 @@ export function SafeAutonomyPanel() {
   }, [])
 
   return html`
-    <div class="space-y-4">
+    <div class="space-y-4" role="region" aria-label="세이프 오토노미">
       <${Card} title="Safe Autonomy" class="section">
         <${AsyncContainer}
           state=${safeAutonomy.state}

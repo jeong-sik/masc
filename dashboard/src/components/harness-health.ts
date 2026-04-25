@@ -236,9 +236,9 @@ export function HarnessHealth() {
   let overviewContent = html`<${EmptySignal} text="안전 감시 데이터가 없습니다." />`
 
   if (isLoading) {
-    overviewContent = html`<div class="text-sm text-[var(--text-dim)]">로딩 중...</div>`
+    overviewContent = html`<div class="text-sm text-[var(--text-dim)]" role="status">로딩 중...</div>`
   } else if (isError) {
-    overviewContent = html`<div class="text-sm text-[var(--bad)]">${s.message}</div>`
+    overviewContent = html`<div class="text-sm text-[var(--bad)]" role="alert">${s.message}</div>`
   } else if (data) {
     overviewContent = html`
       <div class="space-y-4">
@@ -254,11 +254,13 @@ export function HarnessHealth() {
                 type="button"
                 class="rounded border border-[var(--white-8)] px-2.5 py-1 text-2xs text-[var(--text-muted)] transition-colors hover:border-[var(--accent)] hover:text-[var(--text-body)]"
                 onClick=${() => { void loadHarnessHealth() }}
+                aria-label="안전 감시 새로고침"
               >새로고침</button>
               <button
                 type="button"
                 class="rounded border border-[var(--white-8)] px-2.5 py-1 text-2xs text-[var(--text-muted)] transition-colors hover:border-[var(--ok-30)] hover:text-[var(--text-body)]"
                 onClick=${() => navigate('lab', { section: 'autoresearch' })}
+                aria-label="오토리서치 보기"
               >오토리서치 보기</button>
             </div>
           </div>
@@ -299,7 +301,7 @@ export function HarnessHealth() {
   }
 
   return html`
-    <div class="space-y-4">
+    <div class="space-y-4" role="region" aria-label="안전 감시">
       <${Card} title="안전 감시" class="section">
         ${overviewContent}
       <//>

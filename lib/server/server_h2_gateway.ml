@@ -702,8 +702,9 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
             H2.Body.Writer.write_string body csv;
             H2.Body.Writer.close body)
 
-      | `GET, p when String.length p > 27
-                   && String.sub p 0 27 = "/api/v1/autoresearch/loops/" ->
+      | `GET, p
+        when String.starts_with ~prefix:"/api/v1/autoresearch/loops/" p
+             && String.length p > 27 ->
           with_server_state h2_reqd (fun state ->
             let base_path = state.Mcp_server.room_config.base_path in
             let loop_id = String.trim (String.sub p 27 (String.length p - 27)) in

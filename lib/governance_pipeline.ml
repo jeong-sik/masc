@@ -246,6 +246,30 @@ let auto_approval_forbidden ~tool_name ~input ~risk meta =
   || destructive_tool_or_op ~tool_name ~input
   || runtime_auto_approval_blocked meta
 
+(** PR-E (Plan v3 Leak 1): split the legacy [auto_approval_forbidden]
+    into a "hard" component that always wins and a "soft" pattern
+    component that a narrowly-scoped routine allowlist match is
+    permitted to override.
+
+    - Hard forbidden = the request is at Critical risk OR a runtime
+      blocker (cascade_exhausted, completion_contract_violation,
+      sandbox/manual block) is set.  Routine matchers must not
+      bypass these — this is where real safety walls live.
+    - Soft forbidden = the tool name or op string trips
+      [destructive_tool_or_op] (a substring filter on "shell"/"git"
+      plus a small list of bash/git ops).  Today this fires on
+      [keeper_shell op=git_clone] even though the routine allowlist
+      explicitly blesses that op pair, which is the immediate cause
+      of the 0 git_clone calls observed across the 14-keeper fleet.
+
+    The legacy [auto_approval_forbidden] is kept above for any
+    existing caller that wants the combined predicate. *)
+let auto_approval_hard_forbidden ~risk meta =
+  risk = Critical || runtime_auto_approval_blocked meta
+
+let auto_approval_soft_forbidden ~tool_name ~input =
+  destructive_tool_or_op ~tool_name ~input
+
 let to_oas_approval_callback
     ?config ~governance_level ~keeper_name ?meta () : Oas.Hooks.approval_callback =
   let queue_risk_level = function
@@ -318,23 +342,31 @@ let to_oas_approval_callback
       let base_path =
         Option.map (fun (config : Coord.config) -> config.base_path) config
       in
-      let forbidden = auto_approval_forbidden ~tool_name ~input ~risk meta in
+      (* PR-E (Plan v3 Leak 1+3): evaluate the routine allowlist BEFORE
+         the soft-forbidden check.  A routine match is the operator's
+         pre-blessed exception to the substring-based
+         [destructive_tool_or_op] filter (which today blocks every
+         keeper_shell call regardless of op).  The hard-forbidden
+         component (Critical risk or a runtime blocker) is still
+         evaluated, so a routine match cannot bypass real safety
+         walls — only the pattern-matching overlay. *)
+      let routine_label =
+        Keeper_routine_allowlist.rule_label ~tool_name ~input ~risk_level
+      in
+      let hard_forbidden = auto_approval_hard_forbidden ~risk meta in
+      let soft_forbidden =
+        if Option.is_some routine_label then false
+        else auto_approval_soft_forbidden ~tool_name ~input
+      in
+      let forbidden = hard_forbidden || soft_forbidden in
+      (* If the hard wall fires we still want the routine_label
+         downstream-suppressed so the audit log shows
+         "auto_approved_keeper_routine" only when the routine path
+         actually wins.  Recompute after-the-fact. *)
+      let routine_label = if hard_forbidden then None else routine_label in
       let always_approve =
         Option.bind meta (fun (m : Keeper_types.keeper_meta) -> m.always_approve)
         |> Option.value ~default:false
-      in
-      (* Routine allowlist: code-defined narrow auto-approval for keeper
-         task lifecycle. Covers masc_transition routine actions
-         (claim, start, heartbeat, done, release), keeper_board_post at
-         Low or Medium risk, and keeper_task_claim or _done or
-         _submit_for_verification. Gated by [forbidden] so destructive
-         actions (force_ prefixed, shell, git, Critical risk) still
-         require operator approval. See keeper_routine_allowlist.mli. *)
-      let routine_label =
-        if forbidden then None
-        else
-          Keeper_routine_allowlist.rule_label ~tool_name ~input
-            ~risk_level
       in
       let rule_match =
         if forbidden || Option.is_some routine_label then

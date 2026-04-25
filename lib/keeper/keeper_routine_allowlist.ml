@@ -5,17 +5,31 @@ module RL = Keeper_approval_queue
 
 (* ── Action extraction ───────────────────────────────────── *)
 
-(** Extract the [action] field from a tool input JSON, lowercased and
-    trimmed. Returns [None] when the field is missing or non-string. *)
+(** Extract a routine action from a tool input JSON.
+
+    Tools in the allowlist use either an [action] key (masc_transition
+    family) or an [op] key (keeper_shell, keeper_bash); we accept both
+    so a single rule type can describe both surfaces.  PR-E
+    (Plan v3 Leak 3): added [op] fallback so the new keeper_shell
+    op=git_clone rule can match without inventing a parallel
+    op_of_input helper that the rule tester would have to wire
+    separately. *)
 let action_of_input (input : Yojson.Safe.t) : string option =
+  let trimmed_lc raw =
+    let s = String.trim raw in
+    if s = "" then None
+    else Some (String.lowercase_ascii s)
+  in
   match input with
   | `Assoc fields ->
-      (match List.assoc_opt "action" fields with
-       | Some (`String s) ->
-           let trimmed = String.trim s in
-           if trimmed = "" then None
-           else Some (String.lowercase_ascii trimmed)
-       | _ -> None)
+      let read key =
+        match List.assoc_opt key fields with
+        | Some (`String s) -> trimmed_lc s
+        | _ -> None
+      in
+      (match read "action" with
+       | Some _ as found -> found
+       | None -> read "op")
   | _ -> None
 
 (* ── Static rule table ────────────────────────────────────── *)
@@ -84,6 +98,21 @@ let rules : rule list =
       max_risk = RL.Medium;
       allowed_actions = None;
       label = "keeper_routine.keeper_task_submit_for_verification";
+    };
+
+    (* PR-E (Plan v3 Leak 3): keeper_shell op=git_clone is the canonical
+       way for a keeper to bring its work tree into the docker sandbox.
+       Without this rule the [keeper_shell] tool name itself trips
+       Governance.destructive_tool_or_op (the "shell" substring filter)
+       and every git_clone is queued for operator approval, even though
+       the [op] is one of the safest possible.  Narrow the allowlist to
+       just [op=git_clone]; force_*, sh -c, and write-side ops still
+       pass through the standard approval path. *)
+    {
+      tool = "keeper_shell";
+      max_risk = RL.Medium;
+      allowed_actions = Some [ "git_clone" ];
+      label = "keeper_routine.keeper_shell.git_clone";
     };
   ]
 

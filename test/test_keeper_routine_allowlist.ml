@@ -134,12 +134,43 @@ let test_keeper_task_submit_for_verification_matches () =
 
 (* ── matches: unrelated tools never match ──────────────────── *)
 
-let test_keeper_shell_does_not_match () =
-  Alcotest.(check bool) "keeper_shell never auto-approved by routine list"
+let test_keeper_shell_arbitrary_action_does_not_match () =
+  (* The keeper_shell rule is intentionally narrow — only op=git_clone
+     auto-approves.  A bare action="ls" (no op key) must NOT match. *)
+  Alcotest.(check bool) "keeper_shell action=ls is not auto-approved"
     false
     (RA.matches ~tool_name:"keeper_shell"
        ~input:(`Assoc [ ("action", `String "ls") ])
        ~risk_level:RL.Low)
+
+let test_keeper_shell_git_clone_matches () =
+  (* PR-E (Plan v3 Leak 3): keeper_shell op=git_clone is the canonical
+     keeper bootstrap action and must auto-approve at Medium risk. *)
+  Alcotest.(check bool) "keeper_shell op=git_clone is auto-approved"
+    true
+    (RA.matches ~tool_name:"keeper_shell"
+       ~input:(`Assoc [ ("op", `String "git_clone") ])
+       ~risk_level:RL.Medium)
+
+let test_keeper_shell_force_op_does_not_match () =
+  (* allowed_actions=[git_clone] — anything else (including dangerous
+     ops like force_push, sh, exec) must still go through operator
+     approval. *)
+  Alcotest.(check bool) "keeper_shell op=force_push is NOT auto-approved"
+    false
+    (RA.matches ~tool_name:"keeper_shell"
+       ~input:(`Assoc [ ("op", `String "force_push") ])
+       ~risk_level:RL.Medium)
+
+let test_keeper_shell_git_clone_above_max_risk_rejected () =
+  (* Critical risk overrides routine — even a normally-allowlisted
+     op must not auto-approve when risk has been escalated. *)
+  Alcotest.(check bool)
+    "keeper_shell op=git_clone at Critical does NOT auto-approve"
+    false
+    (RA.matches ~tool_name:"keeper_shell"
+       ~input:(`Assoc [ ("op", `String "git_clone") ])
+       ~risk_level:RL.Critical)
 
 let test_keeper_fs_edit_does_not_match () =
   Alcotest.(check bool) "keeper_fs_edit never auto-approved"
@@ -258,12 +289,21 @@ let () =
         ] );
       ( "non_routine_tools_never_match",
         [
-          Alcotest.test_case "keeper_shell" `Quick
-            test_keeper_shell_does_not_match;
+          Alcotest.test_case "keeper_shell action=ls" `Quick
+            test_keeper_shell_arbitrary_action_does_not_match;
           Alcotest.test_case "keeper_fs_edit" `Quick
             test_keeper_fs_edit_does_not_match;
           Alcotest.test_case "unknown tool" `Quick
             test_unknown_tool_does_not_match;
+        ] );
+      ( "keeper_shell_git_clone_allowlist",
+        [
+          Alcotest.test_case "op=git_clone matches" `Quick
+            test_keeper_shell_git_clone_matches;
+          Alcotest.test_case "op=force_push rejected" `Quick
+            test_keeper_shell_force_op_does_not_match;
+          Alcotest.test_case "Critical risk overrides routine" `Quick
+            test_keeper_shell_git_clone_above_max_risk_rejected;
         ] );
       ( "rule_label",
         [

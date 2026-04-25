@@ -677,19 +677,43 @@ module KeeperSandbox = struct
     else
       get_string ~default:"" "MASC_KEEPER_SANDBOX_SSH_DIR"
 
-  (** Optional GitHub token forwarded as GH_TOKEN env into the docker
-      git-creds execution path. Defaults to the host GH_TOKEN; empty
-      disables forwarding. *)
+  (** GitHub token forwarded as GH_TOKEN env into the docker git-creds
+      execution path. Resolution order:
+        1. MASC_KEEPER_SANDBOX_GH_TOKEN env override
+        2. host GH_TOKEN env (the historical default)
+        3. host `gh auth token` keychain fallback — required on macOS where
+           gh stores tokens in the OS keyring rather than hosts.yml; without
+           this, mounting ~/.config/gh into the container yields metadata only
+           and every gh/git HTTPS operation fails with HTTP 401.
+
+      Returns "" when the host has no token configured at all; the caller
+      then skips the -e GH_TOKEN injection and the container falls back to
+      whatever credentials are present in the mounted hosts.yml. *)
   let gh_token () =
     if hard_mode () then
       ""
     else
-      let default =
-        match Sys.getenv_opt "GH_TOKEN" with
-        | Some token -> token
-        | None -> ""
-      in
-      get_string ~default "MASC_KEEPER_SANDBOX_GH_TOKEN"
+      let override = get_string ~default:"" "MASC_KEEPER_SANDBOX_GH_TOKEN" in
+      if override <> "" then override
+      else
+        let from_env =
+          match Sys.getenv_opt "GH_TOKEN" with
+          | Some token -> token
+          | None -> ""
+        in
+        if from_env <> "" then from_env
+        else
+          try
+            let ic =
+              Unix.open_process_in
+                "gh auth token --hostname github.com 2>/dev/null"
+            in
+            let token =
+              try input_line ic with End_of_file -> ""
+            in
+            let _ = Unix.close_process_in ic in
+            String.trim token
+          with _ -> ""
 
   (** Legacy RFC-0006 Phase B-1 flag.
 

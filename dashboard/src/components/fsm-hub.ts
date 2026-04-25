@@ -586,6 +586,7 @@ function ShortcutsOverlay({
             class="text-3xs text-[var(--text-dim)] hover:text-[var(--text-body)] cursor-pointer"
             onClick=${onClose}
             aria-label="닫기"
+            autofocus
           >Esc</button>
         </div>
         <div class="flex flex-col gap-1.5">

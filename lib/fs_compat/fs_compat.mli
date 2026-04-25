@@ -32,6 +32,34 @@ val save_file_atomic : string -> string -> (unit, string) result
 (** Write content to path via temp file + rename.
     Returns [Error msg] on I/O failure instead of raising. *)
 
+val is_atomic_orphan_name : string -> bool
+(** [true] iff [name] matches the [.atomic_*.tmp] pattern produced
+    by [Filename.temp_file ~temp_dir:dir ".atomic_" ".tmp"] inside
+    {!save_file_atomic}.  Exposed for tests and for a potential
+    periodic sweep. *)
+
+val cleanup_atomic_orphans :
+  base_path:string ->
+  ?recovered_subdir:string ->
+  unit ->
+  int * int
+(** #10130: boot-time sweep for [.atomic_*.tmp] orphans left
+    behind when [save_file_atomic]'s with-handler never ran (the
+    owning process was SIGKILL'd, or [Filename.temp_file] itself
+    raised ENFILE/EMFILE before the cleanup was registered).
+
+    Scans [base_path] and its immediate subdirectories (skipping
+    [recovered_subdir] and anything that isn't a directory).
+    - Zero-byte orphans are deleted.
+    - Non-zero orphans are moved to
+      [<base_path>/<recovered_subdir>/<original-name>.<ts-ms>]
+      so operators can forensically inspect data-loss events
+      instead of having them silently cleaned up.
+
+    Returns [(deleted, preserved)]:
+    - [deleted]: zero-byte orphans removed.
+    - [preserved]: non-zero orphans moved to [recovered_subdir]. *)
+
 val append_file : string -> string -> unit
 (** Append string to file. *)
 

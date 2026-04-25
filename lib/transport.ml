@@ -676,7 +676,8 @@ module Rest = struct
       | None -> (
           match http_method, path with
           | _, p
-            when String.length p > 14 && String.sub p 0 14 = "/api/v1/tools/" ->
+            when String.starts_with ~prefix:"/api/v1/tools/" p
+                 && String.length p > 14 ->
               String.sub p 14 (String.length p - 14)
           | _ -> "unknown")
     in

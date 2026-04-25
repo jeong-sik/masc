@@ -630,11 +630,37 @@ let existing_keepalive_bootstrap_done : (string, unit) Hashtbl.t =
 let has_boot_entries config =
   bootable_keeper_names config <> []
 
+(* #10125: extracted predicate so it can be unit-tested without
+   spinning up an Eio + Pulse runtime.  See [maybe_start_supervisor_sweep]
+   for the WHY. *)
+let should_start_supervisor_sweep
+    ~(config : Coord.config)
+    ~(stats : keeper_bootstrap_stats) : bool =
+  let _ = stats.enabled in
+  stats.started > 0
+  || Keeper_registry.count_running ~base_path:config.base_path () > 0
+  || has_boot_entries config
+
 let maybe_start_supervisor_sweep ctx (stats : keeper_bootstrap_stats) =
-  if stats.enabled
-     && (stats.started > 0
-         || Keeper_registry.count_running ~base_path:ctx.config.base_path () > 0
-         || has_boot_entries ctx.config)
+  (* #10125: drop the [stats.enabled] precondition.  The previous
+     gate required bootstrap to have processed at least one keeper
+     successfully ([enabled = true] only when [bootable_keeper_names]
+     was non-empty AND at least one entry got past
+     [load_or_materialize_boot_meta]).  In the 2026-04-24 production
+     incident every bootstrap entry hit a transient
+     [load_or_materialize_boot_meta] error after a server restart,
+     so [stats.enabled] stayed [false] even though 14 keeper meta
+     files were on disk — supervisor never started, fleet stayed
+     dead for 4h+.
+
+     Decouple supervisor startup from bootstrap success: if there
+     are bootable keepers on disk OR any are already running OR
+     any started this boot, run the sweep.  The supervisor can
+     recover keepers that bootstrap failed to load, which is
+     exactly what the sweep is for.  Without this change, a
+     transient load failure during bootstrap silently disables
+     auto-recovery for the rest of the server lifetime. *)
+  if should_start_supervisor_sweep ~config:ctx.config ~stats
   then start_supervisor_sweep ctx
 
 let start_existing_keepalives ctx =

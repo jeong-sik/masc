@@ -268,7 +268,7 @@ function CharacterPlate({ name }: { name: string }) {
 
         ${ctxPct != null ? html`
           <div class="flex items-center gap-2 mt-0.5">
-            <span class="text-2xs font-bold text-[var(--ff-gold)] tracking-[1px] w-7">CTX</span>
+            <span class="text-2xs font-bold text-[var(--ff-gold)] tracking-[1px] w-7" title="Context 사용량">CTX</span>
             <div class="h-1.5 mt-1.5 rounded-sm overflow-hidden bg-[var(--white-10)]"
               style="flex:1"
               role="progressbar"

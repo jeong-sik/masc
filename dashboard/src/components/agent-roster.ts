@@ -788,7 +788,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                 </span>
                 ${isKeeper && contextMeta ? html`
                   <span class="inline-flex items-center gap-1.5 rounded-sm border border-[var(--white-8)] bg-[var(--white-2)] px-2.5 py-1">
-                    <span>CTX</span>
+                    <span title="Context 사용량">CTX</span>
                     <span class="font-mono font-medium ${contextMeta.pct > 85 ? 'text-[var(--bad)]' : contextMeta.pct > 60 ? 'text-[var(--warn)]' : 'text-[var(--text-strong)]'}">${contextMeta.pct}%</span>
                     ${contextMeta.detail ? html`
                       <span class="font-mono text-3xs text-[var(--text-muted)]">${contextMeta.detail}</span>

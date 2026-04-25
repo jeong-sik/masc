@@ -210,7 +210,7 @@ function AttentionEventList({ events }: { events: DashboardAttentionEvent[] }) {
               <div class="mt-0.5 text-3xs leading-relaxed">${event.summary}</div>
             </div>
             ${event.requires_decision
-              ? html`<span class="rounded bg-[var(--white-8)] px-1.5 py-0.5 text-3xs font-semibold">DECISION</span>`
+              ? html`<span class="rounded bg-[var(--white-8)] px-1.5 py-0.5 text-3xs font-semibold" title="결정 필요">DECISION</span>`
               : null}
           </div>
           ${event.recommended_action

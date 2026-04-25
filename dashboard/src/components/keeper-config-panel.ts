@@ -398,7 +398,7 @@ function LongText({ text, truncateAt = 200 }: { text: string; truncateAt?: numbe
     truncateAt !== null && truncateAt >= 0 && text.length > truncateAt
       ? text.slice(0, truncateAt) + '...'
       : text
-  return html`<div class="text-xs text-text-body whitespace-pre-wrap max-h-35 overflow-y-auto custom-scrollbar border border-card-border bg-card/40 backdrop-blur-sm p-3 rounded mt-1.5 leading-relaxed shadow-inner hover:bg-card/60 transition-colors">${truncated}</div>`
+  return html`<div class="text-xs text-text-body whitespace-pre-wrap max-h-35 overflow-y-auto custom-scrollbar border border-card-border bg-card/40 backdrop-blur-sm p-3 rounded mt-1.5 leading-relaxed shadow-inner hover:bg-card/60 transition-colors">${truncated}</div tabindex="0">`
 }
 
 

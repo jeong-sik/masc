@@ -425,7 +425,7 @@ export function AgentProfile({ name }: { name: string }) {
         <${Card} title="타임라인" class="ff-card rounded">
           ${!timeline || (timeline.events ?? []).length === 0
             ? html`<${EmptyState} message="이벤트 없음" compact />`
-            : html`<div class="flex flex-col gap-0.5 max-h-75 overflow-y-auto custom-scrollbar">${(timeline.events ?? []).map((evt: AgentTimelineEvent, idx: number) => {
+            : html`<div class="flex flex-col gap-0.5 max-h-75 overflow-y-auto custom-scrollbar" tabindex="0">${(timeline.events ?? []).map((evt: AgentTimelineEvent, idx: number) => {
                 const detail = evt.detail as Record<string, string | undefined>
                 const title = detail.title ?? detail.content ?? ''
                 return html`
@@ -461,7 +461,7 @@ export function AgentProfile({ name }: { name: string }) {
                     />
                     ${isFiltering && visible.length === 0
                       ? html`<div class="py-4 text-center text-2xs text-[var(--text-dim)]">필터 결과 없음 (${lines.length} items)</div>`
-                      : html`<div class="max-h-[210px] overflow-y-auto custom-scrollbar flex flex-col gap-1.5">${visible.map((line: string, idx: number) =>
+                      : html`<div class="max-h-[210px] overflow-y-auto custom-scrollbar flex flex-col gap-1.5" tabindex="0">${visible.map((line: string, idx: number) =>
                           html`<div key=${idx} class="border border-[var(--card-border)] bg-[var(--white-3)] px-2.5 py-2 font-[family-name:'IBM_Plex_Mono','Fira_Code',monospace] text-sm text-[var(--text-body)] leading-[1.4] rounded">${line}</div>`)}</div>`}
                   </div>
                 `

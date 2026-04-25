@@ -402,7 +402,7 @@ export function TransitionTrail({
       ${isFiltering && visibleHistory.length === 0
         ? html`<div class="py-3 text-center text-3xs text-[var(--text-dim)]" role="status">필터 결과 없음 (${history.length} items)</div>`
         : html`
-      <div ref=${scrollRef} class="flex flex-col gap-0.5 max-h-30 overflow-y-auto custom-scrollbar">
+      <div ref=${scrollRef} class="flex flex-col gap-0.5 max-h-30 overflow-y-auto custom-scrollbar" tabindex="0">
         ${visibleHistory.map((entry, trailIndex) => {
           const ago = fmtDuration(Math.max(0, now - entry.ts))
           const color = FIELD_COLOR[entry.field] ?? 'text-[var(--text-body)]'

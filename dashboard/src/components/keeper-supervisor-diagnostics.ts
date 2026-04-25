@@ -97,7 +97,7 @@ function SpEventsPanel({ sp_events }: { sp_events?: unknown[] }) {
   return html`
     <div>
       <div class="text-3xs font-semibold uppercase tracking-widest text-[var(--text-muted)] mb-2">자기 보호 발동 이력</div>
-      <div class="space-y-1 max-h-28 overflow-y-auto custom-scrollbar">
+      <div class="space-y-1 max-h-28 overflow-y-auto custom-scrollbar" tabindex="0">
         ${entries.map((e) => html`
           <div class="flex items-center justify-between py-1 px-2 rounded text-2xs bg-[rgba(139,92,246,0.06)]">
             <${TimeAgo} timestamp=${e.ts ?? 0} class="font-mono text-[var(--text-muted)]" />
@@ -199,7 +199,7 @@ export function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
                   ariaLabel="크래시 카테고리 필터"
                 />
               ` : null}
-              <div class="space-y-1 ${crashShowAll.value ? 'max-h-64' : 'max-h-32'} overflow-y-auto custom-scrollbar">
+              <div class="space-y-1 ${crashShowAll.value ? 'max-h-64' : 'max-h-32'} overflow-y-auto custom-scrollbar" tabindex="0">
                 ${visible.length === 0 ? html`
                   <div class="py-2 px-2 text-2xs text-[var(--text-muted)] italic" role="status">선택된 카테고리에 해당하는 장애가 없습니다.</div>
                 ` : visible.map((e) => html`

@@ -148,8 +148,8 @@ let subscribe_messages_fn
     hook here avoids a [masc_coord → masc_mcp.Prometheus]
     dependency cycle. *)
 let fsm_drift_observer_fn
-  : (variant:string -> force:bool -> unit) Atomic.t
-  = Atomic.make (fun ~variant:_ ~force:_ -> ())
+  : (variant:string -> force:bool -> agent_name:string -> unit) Atomic.t
+  = Atomic.make (fun ~variant:_ ~force:_ ~agent_name:_ -> ())
 
 (** Tool assignment telemetry — wraps Tool_assignment_telemetry.emit_assigned.
     Wired at startup to record which tools were provisioned to which agent. *)

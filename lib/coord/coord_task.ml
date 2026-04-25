@@ -1219,7 +1219,8 @@ let transition_task_r
            (Atomic.get Coord_hooks.fsm_drift_observer_fn)
              ~variant:(drift_variant_label
                          Coord_task_lifecycle.Claimed_to_done_skip)
-             ~force;
+             ~force
+             ~agent_name;
            Log.RoomTask.warn
              "fsm_drift claimed_to_done_skip task=%s agent=%s force=%b"
              task_id

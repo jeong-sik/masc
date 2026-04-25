@@ -200,10 +200,18 @@ let buffer_event event_id event_str =
 (** Get events after given ID for replay (MCP spec MUST) *)
 let get_events_after last_id =
   let lst = Atomic.get event_buffer in
+  (* [event_buffer] is newest-first (each [buffer_event] [cons]es onto
+     the head).  Folding it left-to-right and prepending every match to
+     [acc] visits newest first and pushes oldest last, so [acc] ends as
+     oldest-first directly — no surrounding [List.rev] needed.
+
+     The previous shape was [List.rev lst |> fold prepend |> List.rev],
+     which walked the buffer three times to produce the same result.
+     Each SSE replay (client reconnect with [Last-Event-Id]) saves
+     2 × O(buffer) over the old form; max_buffer_size=100. *)
   List.fold_left (fun acc (id, ev, _ts) ->
     if id > last_id then ev :: acc else acc
-  ) [] (List.rev lst)
-  |> List.rev
+  ) [] lst
 
 (** Remove events older than [buffer_ttl_seconds] from the front of the buffer.
     Returns count of evicted events. *)

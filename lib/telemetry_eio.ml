@@ -164,6 +164,36 @@ let event_record_of_yojson_lenient json =
                         stderr_excerpt;
                       };
                 }
+          | Some (`List [ `String "Tool_assigned"; `Assoc event_fields ]) ->
+              let context = "Telemetry_eio.event" in
+              let ( let* ) = Result.bind in
+              let* timestamp =
+                Telemetry_json_fields.float
+                  "Telemetry_eio.event_record" "timestamp" fields
+              in
+              let* agent_id =
+                Telemetry_json_fields.string context "agent_id" event_fields
+              in
+              let* profile =
+                Telemetry_json_fields.string context "profile" event_fields
+              in
+              let* preset =
+                Telemetry_json_fields.string_opt context "preset" event_fields
+              in
+              let* tool_count =
+                Telemetry_json_fields.int context "tool_count" event_fields
+              in
+              let* assignment_id =
+                Telemetry_json_fields.string context "assignment_id"
+                  event_fields
+              in
+              Ok
+                {
+                  timestamp;
+                  event =
+                    Tool_assigned
+                      { agent_id; profile; preset; tool_count; assignment_id };
+                }
           | _ -> Error original_error)
       | _ -> Error original_error)
 

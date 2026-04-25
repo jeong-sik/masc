@@ -468,11 +468,13 @@ export function FsmHub(props: FsmHubProps = {}) {
         <${EmptyState} message=${keeperNames.length > 0
           ? `위 탭에서 키퍼를 선택하면 composite FSM 스냅샷을 표시합니다 (${keeperNames.length}개 사용 가능)`
           : '등록된 키퍼가 없습니다 — MASC에 키퍼를 기동하면 자동으로 표시됩니다'} />
-      ` : loading && !snapshot ? html`
-        <${SkeletonLayout} />
-      ` : error ? html`
-        <${EmptyState} message=${error} compact />
-      ` : snapshot ? html`
+      ` : html`
+        <div role="tabpanel" aria-labelledby=${`fsm-tab-${activeSelected}`}>
+        ${loading && !snapshot ? html`
+          <${SkeletonLayout} />
+        ` : error ? html`
+          <${EmptyState} message=${error} compact />
+        ` : snapshot ? html`
         <${OperationalMeaningPanel}
           snapshot=${snapshot}
           observations=${view.observations}
@@ -539,6 +541,8 @@ export function FsmHub(props: FsmHubProps = {}) {
           </div>
         </details>
       ` : null}
+        </div>
+      `}
       <${ShortcutsOverlay} open=${shortcutsOpen} onClose=${() => setShortcutsOpen(false)} />
     </div>
   `
@@ -736,6 +740,7 @@ function StatusBar({
             return html`
               <button type="button"
                 role="tab"
+                id=${`fsm-tab-${name}`}
                 aria-selected=${active}
                 tabindex=${active ? 0 : -1}
                 class=${`rounded-sm border px-2.5 py-0.5 text-3xs font-mono transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--bg-0)] ${cls}`}

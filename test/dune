@@ -336,6 +336,11 @@
  (libraries masc_test_deps))
 
 (test
+ (name test_dashboard_keeper_metrics_10286)
+ (modules test_dashboard_keeper_metrics_10286)
+ (libraries masc_test_deps))
+
+(test
  (name test_distributed_lock_acquire_failed_counter)
  (modules test_distributed_lock_acquire_failed_counter)
  (libraries masc_test_deps))

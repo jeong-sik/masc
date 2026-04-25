@@ -136,11 +136,11 @@ function ServerMeta() {
   return html`
     <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
       <div class="px-3 py-2 rounded bg-[var(--bg-surface)] border border-[var(--border-subtle)]">
-        <div class="text-3xs uppercase tracking-wider text-[var(--text-muted)]">Version</div>
+        <div class="text-3xs uppercase tracking-wider text-[var(--text-muted)]">버전</div>
         <div class="text-sm font-mono text-[var(--text-primary)]">${server.version}</div>
       </div>
       <div class="px-3 py-2 rounded bg-[var(--bg-surface)] border border-[var(--border-subtle)]">
-        <div class="text-3xs uppercase tracking-wider text-[var(--text-muted)]">Uptime</div>
+        <div class="text-3xs uppercase tracking-wider text-[var(--text-muted)]">가동 시간</div>
         <div class="text-sm font-mono text-[var(--text-primary)]">${formatUptime(server.uptime_seconds)}</div>
       </div>
       <div class="px-3 py-2 rounded bg-[var(--bg-surface)] border border-[var(--border-subtle)]">

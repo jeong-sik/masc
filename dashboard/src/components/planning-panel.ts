@@ -173,7 +173,7 @@ function CoordinationHealthPanel() {
       `}
       ${topEvidence.length > 0 ? html`
         <div class="mt-3">
-          <div class="mb-1 text-3xs font-semibold uppercase text-text-muted">Evidence</div>
+          <div class="mb-1 text-3xs font-semibold uppercase text-text-muted">근거</div>
           <ul class="grid gap-1 md:grid-cols-2">
             ${topEvidence.map((item, index) => html`
               <${CoordinationEvidenceRow} key=${`${item.source ?? 'evidence'}-${item.kind ?? 'kind'}-${item.id ?? index}`} evidence=${item} />

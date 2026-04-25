@@ -93,7 +93,7 @@ export function OperationalMeaningPanel({
     >
       <div class="flex items-start justify-between gap-3 flex-wrap">
         <div class="min-w-0">
-          <div class="text-3xs font-semibold uppercase tracking-2 text-[var(--text-muted)]">Operator Meaning</div>
+          <div class="text-3xs font-semibold uppercase tracking-2 text-[var(--text-muted)]">운영자 의미</div>
           <div class="mt-1 text-xl font-semibold text-[var(--text-strong)]">${insight.headline}</div>
           <div class="mt-1 text-2xs text-[var(--text-dim)] leading-relaxed">${insight.detail}</div>
         </div>

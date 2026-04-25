@@ -169,7 +169,7 @@ function OperationalHealth({ keeper }: { keeper: Keeper }) {
       <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
         ${hb ? html`
           <div class="p-2 rounded border ${KPI_TONE[hbTone]} flex flex-col gap-0.5">
-            <span class="text-3xs uppercase tracking-wider text-[var(--text-muted)]">Heartbeat</span>
+            <span class="text-3xs uppercase tracking-wider text-[var(--text-muted)]">하트비트</span>
             <span class="text-xs font-mono ${KPI_VALUE_TONE[hbTone]}">${hb.replace('T', ' ').slice(0, 19)}</span>
           </div>
         ` : null}
@@ -595,7 +595,7 @@ export function TokenTrendChart({ keeper }: { keeper: Keeper }) {
   return html`
     <div class="mb-5">
       <div class="flex items-center gap-2 mb-2">
-        <span class="text-2xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Turn Token Trend</span>
+        <span class="text-2xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">턴 토큰 추이</span>
         <span class="text-3xs text-[var(--text-dim)]">${points.length} turns</span>
       </div>
       <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -676,7 +676,7 @@ export function PromptTelemetryPanel({ keeper }: { keeper: Keeper }) {
   return html`
     <div class="mb-5">
       <div class="flex items-center gap-2 mb-2">
-        <span class="text-2xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Prompt Fingerprint</span>
+        <span class="text-2xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">프롬프트 핑거프린트</span>
         <span class="text-3xs text-[var(--text-dim)]">${promptPoints.length} snapshots</span>
         ${latest?.prompt_fingerprint
           ? html`<span class="inline-flex items-center gap-1">
@@ -804,7 +804,7 @@ export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
   return html`
     <div class="mb-5">
       <div class="flex items-center gap-2 mb-2">
-        <span class="text-2xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">CTX Composition</span>
+        <span class="text-2xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">CTX 구성</span>
         <span class="text-3xs text-[var(--text-dim)]">${points.length} snapshots</span>
       </div>
       <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
@@ -984,7 +984,7 @@ export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
   return html`
     <div class="mb-5">
       <div class="flex items-center gap-2 mb-2">
-        <span class="text-2xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Inference Telemetry</span>
+        <span class="text-2xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">추론 Telemetry</span>
         <span class="text-3xs text-[var(--text-dim)]">${telemetryPoints.length} points</span>
         ${lastFp ? html`<span class="text-3xs px-1.5 py-0.5 rounded bg-[var(--white-5)] text-[var(--text-dim)] font-mono">${lastFp}</span>` : null}
       </div>
@@ -1028,14 +1028,14 @@ export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
 
         ${'' /* cache hits */}
         <div class="p-3 rounded border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col justify-between">
-          <span class="text-3xs uppercase tracking-wider text-[var(--text-muted)]">KV Cache</span>
+          <span class="text-3xs uppercase tracking-wider text-[var(--text-muted)]">KV 캐시</span>
           <span class="text-lg font-mono tabular-nums text-[var(--purple)]">${totalCacheN > 0 ? totalCacheN.toLocaleString() : '-'}</span>
           <span class="text-3xs text-[var(--text-dim)]">cumulative tokens</span>
         </div>
 
         ${'' /* reasoning tokens */}
         <div class="p-3 rounded border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col justify-between">
-          <span class="text-3xs uppercase tracking-wider text-[var(--text-muted)]">Reasoning</span>
+          <span class="text-3xs uppercase tracking-wider text-[var(--text-muted)]">추론</span>
           <span class="text-lg font-mono tabular-nums text-[var(--warn)]">${totalReasoning > 0 ? totalReasoning.toLocaleString() : '-'}</span>
           <span class="text-3xs text-[var(--text-dim)]">total tokens</span>
         </div>
@@ -1124,7 +1124,7 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
       ${fallbackCount > 0 ? html`
         <div class="md:col-span-2 p-3 rounded border border-[var(--bad-20)] bg-[var(--bad-6)]">
           <div class="flex items-center justify-between mb-1.5">
-            <span class="text-3xs uppercase tracking-wider text-[var(--text-muted)]">Cascade Fallback</span>
+            <span class="text-3xs uppercase tracking-wider text-[var(--text-muted)]">Cascade 폴백</span>
             <span class="text-3xs text-[var(--bad)]">${fallbackCount}회</span>
           </div>
           <div class="flex flex-wrap gap-1.5">

@@ -726,7 +726,7 @@ export function TelemetryUnified() {
   return html`
     <div class="flex flex-col gap-4">
       <div class="rounded border border-[var(--card-border)] bg-[var(--white-1)] p-4">
-        <div class="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Runtime Diagnosis</div>
+        <div class="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">런타임 진단</div>
         <div class="mt-1 text-base leading-relaxed text-[var(--text-body)]">
           MASC telemetry store (keeper/tool/agent) 진단 뷰.
         </div>

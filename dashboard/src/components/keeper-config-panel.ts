@@ -861,11 +861,11 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         <${LongText} text=${c.sources.default_manifest_path} />
       ` : null}
       ${c.sources.cascade_catalog_source_path ? html`
-        <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">Cascade catalog source</div>
+        <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">Cascade 카탈로그 소스</div>
         <${LongText} text=${c.sources.cascade_catalog_source_path} />
       ` : null}
       ${c.sources.cascade_runtime_json_path ? html`
-        <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">Generated runtime JSON</div>
+        <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">생성된 런타임 JSON</div>
         <${LongText} text=${c.sources.cascade_runtime_json_path} />
       ` : null}
       <div class="flex items-center justify-between py-2 px-3 rounded bg-[var(--white-3)]">

@@ -458,7 +458,7 @@ export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
           ? html`
             <div class="rounded border border-[var(--accent-20)] bg-[var(--accent-8)] p-3 mb-3">
               <div class="flex flex-wrap items-center gap-2 mb-1">
-                <span class="text-3xs font-semibold uppercase tracking-wider text-[var(--accent)]">Latest Handoff</span>
+                <span class="text-3xs font-semibold uppercase tracking-wider text-[var(--accent)]">최근 인계</span>
                 <span class="text-3xs font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-15)]">
                   ${lineageTransitionLabel(latestEntry.parent_generation, latestEntry.generation)}
                 </span>
@@ -481,17 +481,17 @@ export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
 
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
           <div class="px-3 py-2 rounded border border-[var(--white-8)] bg-[var(--white-2)]">
-            <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Current Gen</div>
+            <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">현재 세대</div>
             <div class="mt-1 text-lg font-semibold text-[var(--text-strong)]">${currentGeneration ?? '-'}</div>
             ${generationId ? html`<div class="text-3xs text-[var(--text-dim)] font-mono truncate" title=${generationId}>${generationId}</div>` : null}
           </div>
           <div class="px-3 py-2 rounded border border-[var(--white-8)] bg-[var(--white-2)]">
-            <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Trace Lineage</div>
+            <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">추적 계보</div>
             <div class="mt-1 text-lg font-semibold text-[var(--text-strong)]">${traceHistoryCount}</div>
             <div class="text-3xs text-[var(--text-dim)]">historical traces retained in meta.trace_history</div>
           </div>
           <div class="px-3 py-2 rounded border border-[var(--white-8)] bg-[var(--white-2)]">
-            <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Current Trace</div>
+            <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">현재 추적</div>
             <div class="mt-1 text-sm font-mono text-[var(--text-strong)] truncate" title=${currentTraceId ?? ''}>${currentTraceId ? compactTraceId(currentTraceId) : '-'}</div>
             <div class="text-3xs text-[var(--text-dim)]">artifact appears after the first successful handoff</div>
           </div>
@@ -501,7 +501,7 @@ export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
           ? html`
             <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] p-3 mb-3">
               <div class="flex flex-wrap items-center gap-2 mb-2">
-                <span class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Current Manifest</span>
+                <span class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">현재 매니페스트</span>
                 <span class="text-3xs font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-15)]">gen ${manifest.generation}</span>
                 ${continuity?.verdict
                   ? html`<span class="text-3xs px-1.5 py-0.5 rounded ${verdictBadgeClass(continuity.verdict)}">${continuityMeta.badgeLabel}</span>`
@@ -512,14 +512,14 @@ export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
               </div>
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-2xs">
                 <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] px-3 py-2">
-                  <div class="text-3xs text-[var(--text-muted)] uppercase tracking-wider mb-1">Parent</div>
+                  <div class="text-3xs text-[var(--text-muted)] uppercase tracking-wider mb-1">부모</div>
                   <div class="text-[var(--text-strong)]">${manifest.parent_generation != null ? `gen ${manifest.parent_generation}` : 'root generation'}</div>
                   ${manifest.parent_trace_id
                     ? html`<div class="font-mono text-[var(--text-dim)] truncate" title=${manifest.parent_trace_id}>${compactTraceId(manifest.parent_trace_id)}</div>`
                     : null}
                 </div>
                 <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] px-3 py-2">
-                  <div class="text-3xs text-[var(--text-muted)] uppercase tracking-wider mb-1">Trigger</div>
+                  <div class="text-3xs text-[var(--text-muted)] uppercase tracking-wider mb-1">트리거</div>
                   <div class="text-[var(--text-strong)]">${manifest.trigger_reason ?? '-'}</div>
                   <div class="text-[var(--text-dim)]">context ratio ${formatLineageRatio(manifest.context_ratio)}</div>
                 </div>
@@ -557,7 +557,7 @@ export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
           `}
 
         <div>
-          <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">Recent Handoffs</div>
+          <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">최근 인계 목록</div>
           <div class="text-2xs text-[var(--text-dim)] mb-2">Latest recorded rollover appears first so operators can compare the current trace against recent history.</div>
           ${recent.length > 0
             ? html`

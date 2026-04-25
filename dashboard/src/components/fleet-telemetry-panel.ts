@@ -269,13 +269,13 @@ function ControlRoomPanel({ state }: { state: FleetTelemetryState }) {
 
       <div class="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,2fr)_minmax(0,1.3fr)]">
         <div>
-          <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--text-dim)]">Readiness Pillars</div>
+          <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--text-dim)]">준비 상태 핵심 지표</div>
           <div class="grid grid-cols-1 gap-2 md:grid-cols-2">
             ${readiness.pillars.map(pillar => html`<${ReadinessPillarCard} pillar=${pillar} />`)}
           </div>
         </div>
         <div>
-          <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--text-dim)]">Attention Queue</div>
+          <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--text-dim)]">주의 이벤트</div>
           <${AttentionEventList} events=${attentionEvents} />
         </div>
       </div>
@@ -748,12 +748,12 @@ export function FleetTelemetryPanel() {
       </div>
 
       <div>
-        <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--text-dim)]">Fleet Control Room</div>
+        <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--text-dim)]">Fleet 제어반</div>
         <${ControlRoomPanel} state=${value} />
       </div>
 
       <div>
-        <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--text-dim)]">Pressure Watchlist</div>
+        <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--text-dim)]">부하 감시 목록</div>
         <${PressureWatchlist} rows=${value.rows} />
       </div>
 
@@ -775,12 +775,12 @@ export function FleetTelemetryPanel() {
       </div>
 
       <div>
-        <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--text-dim)]">Telemetry Sources</div>
+        <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--text-dim)]">Telemetry 소스</div>
         <${TelemetrySourcesPanel} sources=${value.telemetry_sources} />
       </div>
 
       <div>
-        <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--text-dim)]">Failure Categories</div>
+        <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--text-dim)]">실패 카테고리</div>
         <${FailureCategoryPanel} toolQuality=${value.tool_quality} />
       </div>
     </div>

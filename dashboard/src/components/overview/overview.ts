@@ -144,7 +144,7 @@ function Highlight({ attention }: { attention: OperatorAttentionItem | null }) {
   if (attention === null) {
     return html`
       <section class=${CARD} aria-label="오늘의 하이라이트" data-testid="overview-highlight-empty">
-        <p class="text-sm text-[var(--text-muted)]">특별한 신호 없음</p>
+        <p class="text-sm text-[var(--text-muted)]" role="status">특별한 신호 없음</p>
       </section>
     `
   }
@@ -188,7 +188,7 @@ function MissionPartyCard({ active }: { active: DashboardMissionSessionCard | nu
     return html`
       <section class=${CARD} aria-label="진행 중 파티" data-testid="overview-party-empty">
         <header class="text-xs font-semibold uppercase tracking-wider text-[var(--text-strong)] mb-2">진행 중 파티</header>
-        <p class="text-sm text-[var(--text-muted)]">활성 미션 없음</p>
+        <p class="text-sm text-[var(--text-muted)]" role="status">활성 미션 없음</p>
       </section>
     `
   }
@@ -278,7 +278,7 @@ function KeeperStrip({ keeperList }: { keeperList: readonly Keeper[] }) {
   if (top.length === 0) {
     return html`
       <section class=${CARD} aria-label="활성 keeper" data-testid="overview-keepers-empty">
-        <p class="text-sm text-[var(--text-muted)]">활성 keeper 없음</p>
+        <p class="text-sm text-[var(--text-muted)]" role="status">활성 keeper 없음</p>
       </section>
     `
   }

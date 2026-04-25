@@ -504,13 +504,35 @@ let store_failed_turn_episode
           ("event_type", `String "keeper_turn");
           ("institution_summary", `String summary);
           ("institution_outcome", `String "failure");
+          (* #10325: emit failure-specific learning tags from the
+             structured error metadata.  Generic boilerplate
+             ("persist failed keeper turns ...") was removed because
+             it filled 97% of failure entries with no per-failure
+             information, defeating the institution-memory contract.
+             When neither error_kind nor error_message has signal,
+             emit the explicit [NO_LEARNING] sentinel so downstream
+             readers can distinguish absent data from a placeholder. *)
           ( "learnings",
             `List
-              [
-                `String
-                  "persist failed keeper turns so future runs can learn from \
-                   failure patterns";
-              ] );
+              (let trimmed_kind = String.trim error_kind in
+               let trimmed_msg = String.trim error_preview in
+               let tags =
+                 List.filter_map Fun.id
+                   [
+                     (if trimmed_kind = "" then None
+                      else
+                        Some
+                          (Printf.sprintf "error_kind:%s" trimmed_kind));
+                     (if trimmed_msg = "" then None
+                      else
+                        Some
+                          (Printf.sprintf "error_message:%s" trimmed_msg));
+                   ]
+               in
+               let strings =
+                 if tags = [] then [ "[NO_LEARNING]" ] else tags
+               in
+               List.map (fun s -> `String s) strings) );
           ( "context",
             `Assoc
               [

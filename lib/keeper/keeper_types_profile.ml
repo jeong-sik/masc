@@ -668,24 +668,42 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
                     List.sort_uniq String.compare
                       (reserved_cascade_names @ catalog)
                   in
-                  if List.mem normalized all_valid then Ok ()
-                  else
-                    let suffix =
-                      match source with
-                      | Keeper_cascade_profile.Live_catalog -> ""
-                      | Keeper_cascade_profile.Toml_section_fallback
-                          { catalog_error } ->
-                          Printf.sprintf
-                            " [degraded toml-section fallback; live \
-                             catalog unavailable: %s]"
-                            catalog_error
-                    in
+                  let suffix =
+                    match source with
+                    | Keeper_cascade_profile.Live_catalog -> ""
+                    | Keeper_cascade_profile.Toml_section_fallback
+                        { catalog_error } ->
+                        Printf.sprintf
+                          " [degraded toml-section fallback; live \
+                           catalog unavailable: %s]"
+                          catalog_error
+                  in
+                  if not (List.mem normalized all_valid) then
                     Error
                       (Printf.sprintf
                          "invalid cascade_name '%s' (known: %s)%s"
                          raw
                          (String.concat ", " all_valid)
                          suffix)
+                  (* #10388: keeper_assignable=false cascades must reject
+                     at config-load to avoid runtime reconcile failures. *)
+                  else if Keeper_cascade_profile.is_system_only_cascade normalized
+                  then
+                    let assignable =
+                      Keeper_cascade_profile.keeper_catalog_names ()
+                    in
+                    let assignable_hint =
+                      if assignable = [] then "(none)"
+                      else String.concat ", " assignable
+                    in
+                    Error
+                      (Printf.sprintf
+                         "cascade_name '%s' is system-only \
+                          (keeper_assignable=false); keepers must \
+                          reference an assignable cascade. \
+                          Assignable: %s"
+                         raw assignable_hint)
+                  else Ok ()
               | Error fallback_error ->
                   Error
                     (Printf.sprintf

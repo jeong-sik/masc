@@ -105,7 +105,7 @@ describe('OperationsPanel', () => {
     expect(container.textContent).toContain('Governance')
   })
 
-  it('marks the active chip with aria-pressed=true', async () => {
+  it('marks the active chip with aria-selected=true', async () => {
     route.value.params = { section: 'operations', view: 'governance' }
     const { OperationsPanel } = await loadPanel()
     render(html`<${OperationsPanel} />`, container)
@@ -113,9 +113,9 @@ describe('OperationsPanel', () => {
 
     const buttons = container.querySelectorAll('button[type="button"]')
     const governanceBtn = Array.from(buttons).find(b => b.textContent?.trim() === '거버넌스')
-    expect(governanceBtn?.getAttribute('aria-pressed')).toBe('true')
+    expect(governanceBtn?.getAttribute('aria-selected')).toBe('true')
 
     const defaultBtn = Array.from(buttons).find(b => b.textContent?.trim() === '전체')
-    expect(defaultBtn?.getAttribute('aria-pressed')).toBe('false')
+    expect(defaultBtn?.getAttribute('aria-selected')).toBe('false')
   })
 })

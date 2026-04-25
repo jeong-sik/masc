@@ -97,12 +97,13 @@ function KeeperStrip({ name, data }: { name: string; data: KeeperTransitionsResp
   const transitions = data.transitions
 
   return html`
-    <div class="flex items-center gap-3 py-2 px-3 rounded border border-[var(--white-6)] bg-[var(--white-3)]">
+    <div class="flex items-center gap-3 py-2 px-3 rounded border border-[var(--white-6)] bg-[var(--white-3)]" role="listitem" aria-label="${name}: ${getPhaseStyle(toPascalPhase(phase)).label}, 전환 ${transitions.length}건">
       <div class="w-24 shrink-0">
         <div class="text-sm font-semibold text-[var(--text-strong)] truncate">${name}</div>
         <div
           class="inline-flex items-center rounded px-2 py-0.5 text-3xs font-semibold tracking-wide mt-1"
           style="${phaseInlineStyle(phase)}"
+          role="status"
         >
           ${getPhaseStyle(toPascalPhase(phase)).icon} ${getPhaseStyle(toPascalPhase(phase)).label}
         </div>
@@ -139,7 +140,7 @@ export function KeeperPhaseTimeline() {
   }
 
   return html`
-    <div class="flex flex-col gap-2">
+    <div class="flex flex-col gap-2" role="list" aria-label="키퍼 페이즈 전환 타임라인">
       <div class="flex items-center justify-between mb-1">
         <div class="text-2xs text-[var(--text-muted)] uppercase tracking-wider font-medium">페이즈 전환 (최근 30건)</div>
         <button

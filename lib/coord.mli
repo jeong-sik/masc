@@ -53,3 +53,20 @@ val record_fsm_drift_with_agent :
     attribution.  This lets ratchet readiness ("which keepers are
     skipping Start?") be answered from Prometheus without
     log-scraping the WARN line. *)
+
+(** {1 Process timeout observability (#9632)} *)
+
+val process_timeout_metric : string
+(** Canonical Prometheus metric for [Process_eio] timeouts
+    ([masc_process_timeout_total]).  Labels: [program] (argv0
+    basename, e.g. ["git"], ["gh"]), [timeout_sec] (configured budget,
+    e.g. ["15"], ["60"]).  Exposed so tests and Grafana rules can pin
+    the name. *)
+
+val record_process_timeout : program:string -> timeout_sec:float -> unit
+(** Increment {!process_timeout_metric}.  Wired to
+    {!Process_eio.process_timeout_observer_fn} at module load so every
+    [Eio.Time.Timeout] in [run_argv] / [run_argv_with_stdin] /
+    [run_argv_with_stdin_and_status_split] / [run_argv_with_status_split]
+    surfaces in Prometheus without taking a direct dependency on
+    [masc_mcp.Prometheus] from the lower [masc_process] layer. *)

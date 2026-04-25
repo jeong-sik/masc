@@ -29,13 +29,15 @@ Aggregate of 185 commits since v0.14.0 (26 feat / 93 fix / 30 perf-refactor-obs-
 - WS perf: dashboard delta gating on client `bufferedAmount` (#10104).
 
 ### Performance
-- Slice-aware fanout gate Phase 2 (#10160), WS slice-aware fanout (#10119), keeper supervisor sweep liveness counter + age gauge (#10126), context window utilization tightening across multiple paths.
+- Slice-aware fanout: Phase 1 slice index bookkeeping (#10155), Phase 2 fanout gate (#10160). Keeper supervisor sweep liveness counter + age gauge (#10126), dashboard delta gating on client `bufferedAmount` (#10104).
 
 ### Refactor
-- Keeper meta types facade refactor, OAS-pin bumps to v0.173.0 (#10149) and earlier intermediate pins, dedup of redundant code paths in oas-bridge / keeper-runtime / telemetry-flow.
+- Keeper meta types facade refactor (`refactor-keeper-meta-types-facade`).
+- Dedup of redundant code paths in oas-bridge, keeper-runtime, and telemetry-flow.
 
 ### Chore
-- OAS-pin bumps with version-floor synchronisation, advisory pruning, miscellaneous typo and docstring fixes.
+- OAS-pin bump to agent_sdk v0.173.0 (#10149) with version-floor synchronisation.
+- RFC documentation: WS slice-indexed fanout design (#10119).
 
 ## [0.14.0] - 2026-04-24
 

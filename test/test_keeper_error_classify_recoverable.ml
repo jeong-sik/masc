@@ -91,6 +91,22 @@ let test_accept_rejected_non_recoverable () =
       (Printf.sprintf "Accept_rejected should stay None, got %s" reason)
   | None -> ()
 
+let test_catalog_rotation_preserves_order_without_base_injection () =
+  let err = make_cascade_exhausted KT.All_providers_failed in
+  match
+    KEC.degraded_rotation_after_recoverable_error
+      ~rotation_cascades:[ "catalog_first"; "base_only" ]
+      ~base_cascade:"base_only"
+      ~effective_cascade:"tool_use_strict"
+      ~tool_requirement:"optional"
+      ~attempted_cascades:[ "tool_use_strict" ]
+      err
+  with
+  | Some retry ->
+    check string "catalog order wins" "catalog_first" retry.next_cascade;
+    check string "fallback reason" "cascade_exhausted" retry.fallback_reason
+  | None -> fail "Expected catalog-ordered degraded retry"
+
 let () =
   run "keeper_error_classify_recoverable"
     [
@@ -110,5 +126,10 @@ let () =
             test_no_tool_capable_non_recoverable;
           test_case "Accept_rejected stays non-recoverable" `Quick
             test_accept_rejected_non_recoverable;
+        ] );
+      ( "degraded_rotation_after_recoverable_error",
+        [
+          test_case "catalog order is not prefixed by base cascade" `Quick
+            test_catalog_rotation_preserves_order_without_base_injection;
         ] );
     ]

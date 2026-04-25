@@ -1104,7 +1104,9 @@ let handle_keeper_get_subroutes state req request reqd =
         ("window_hours", `Int window_hours);
         ("total_entries", `Int (List.length entries));
         ("source", `String "trajectory_tool_call");
-        ("producer", `String "keeper_hooks_oas.post_tool_use");
+        ( "producer",
+          `String
+            "keeper_hooks_oas.post_tool_use|mcp_server_eio_call_tool.runtime_mcp" );
         ("durable_store", `String (Trajectory.trajectories_dir masc_root name));
         ("dashboard_surface", `String dashboard_surface);
         ("freshness_slo_s", `Float freshness_slo_s);
@@ -1180,7 +1182,9 @@ let handle_keeper_get_subroutes state req request reqd =
         ("keeper", `String name);
         ("count", `Int (List.length entries));
         ("source", `String "tool_call_io");
-        ("producer", `String "keeper_hooks_oas.post_tool_use");
+        ( "producer",
+          `String
+            "keeper_hooks_oas.post_tool_use|mcp_server_eio_call_tool.runtime_mcp" );
         ("durable_store", `String (Filename.concat masc_root "tool_calls"));
         ("dashboard_surface", `String "/api/v1/keepers/:name/tool-calls");
         ("freshness_slo_s", `Float freshness_slo_s);

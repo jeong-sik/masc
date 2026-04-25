@@ -178,6 +178,110 @@ let runtime_mcp_keeper_tool_call_sse_payload
   in
   `Assoc (base_fields @ error_fields)
 
+let record_runtime_mcp_keeper_trajectory
+    (ctx : keeper_runtime_mcp_log_context)
+    ~(base_path : string)
+    ~(tool_name : string)
+    ~(arguments : Yojson.Safe.t)
+    ~(message : string)
+    ~(success : bool)
+    ~(duration_ms : int) : unit =
+  let trace_id = Option.value ~default:"runtime-mcp" ctx.trace_id in
+  let masc_root =
+    Coord_utils.masc_root_dir_from
+      ~base_path
+      ~cluster_name:(Env_config_core.cluster_name ())
+  in
+  let safe_input = Observability_redact.redact_json_value arguments in
+  let safe_output =
+    Observability_redact.redact_preview ~max_len:4000 message
+  in
+  let existing_entries =
+    Trajectory.read_entries
+      ~masc_root
+      ~keeper_name:ctx.keeper_name
+      ~trace_id
+  in
+  let turn = Option.value ~default:0 ctx.turn in
+  let round =
+    existing_entries
+    |> List.fold_left
+         (fun acc (entry : Trajectory.tool_call_entry) ->
+           if entry.turn = turn then acc + 1 else acc)
+         1
+  in
+  let runtime_contract =
+    Keeper_runtime_contract.runtime_contract_json_from_fields
+      ~keeper_name:ctx.keeper_name
+      ?trace_id:ctx.trace_id
+      ?session_id:ctx.session_id
+      ?keeper_turn_id:ctx.keeper_turn_id
+      ?task_id:ctx.task_id
+      ?goal_ids:ctx.goal_ids
+      ?sandbox_profile:ctx.sandbox_profile
+      ?network_mode:ctx.network_mode
+      ?shared_memory_scope:ctx.shared_memory_scope
+      ?model:(Some ctx.model)
+      ()
+  in
+  let error = if success then None else Some safe_output in
+  let action_radius =
+    Keeper_runtime_contract.action_radius_json
+      ~tool_name
+      ~input:safe_input
+      ~success
+      ~duration_ms:(float_of_int duration_ms)
+      ?error
+      ?sandbox_target:ctx.sandbox_profile
+      ()
+  in
+  let now = Time_compat.now () in
+  let entry : Trajectory.tool_call_entry =
+    {
+      ts = now;
+      ts_iso = Types.iso8601_of_unix_seconds now;
+      turn;
+      round;
+      tool_name;
+      args_json = Yojson.Safe.to_string safe_input;
+      gate_decision = Trajectory.Pass;
+      result = Some safe_output;
+      duration_ms;
+      error;
+      cost_usd = Trajectory.tool_cost_estimate tool_name;
+    }
+  in
+  try
+    Trajectory.append_entry
+      ~runtime_contract
+      ~action_radius
+      ~masc_root
+      ~keeper_name:ctx.keeper_name
+      ~trace_id
+      entry
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+      (try
+         Telemetry_coverage_gap.record
+           ~masc_root
+           ~source:"trajectory_tool_call"
+           ~producer:"mcp_server_eio_call_tool.runtime_mcp"
+           ~durable_store:
+             (Trajectory.trajectory_path masc_root ctx.keeper_name trace_id)
+           ~dashboard_surface:"/api/v1/keepers/:name/tool-stats"
+           ~stale_reason:"runtime_mcp_trajectory_append_failed"
+           ~keeper_name:ctx.keeper_name
+           ~trace_id
+           ~error:(Printexc.to_string exn)
+           ()
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | gap_exn ->
+           log_mcp_exn
+             ~label:"runtime MCP trajectory coverage gap append failed"
+             gap_exn)
+
 let record_runtime_mcp_keeper_tool_trace
     ?mcp_session_id
     (entry : Keeper_registry.registry_entry)
@@ -212,6 +316,14 @@ let record_runtime_mcp_keeper_tool_trace
     ?shared_memory_scope:ctx.shared_memory_scope
     ~result_bytes:(String.length message)
     ();
+  record_runtime_mcp_keeper_trajectory
+    ctx
+    ~base_path:entry.base_path
+    ~tool_name
+    ~arguments
+    ~message
+    ~success
+    ~duration_ms;
   Sse.broadcast
     (runtime_mcp_keeper_tool_call_sse_payload
        ~keeper_name:ctx.keeper_name

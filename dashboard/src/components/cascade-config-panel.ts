@@ -757,7 +757,7 @@ function HealthTable({
               // too old to carry the field — don't decorate in that case.
               const orphaned = p.declared === false
               return html`
-              <tr class="border-b border-[var(--card-border)] last:border-b-0">
+              <tr class="border-b border-[var(--card-border)] last:border-b-0 even:bg-[var(--white-3)]">
                 <td class="py-1"><span class=${`inline-block w-2 h-2 rounded-full ${TONE_DOT[tone]}`}></span></td>
                 <td class="py-1">
                   <code class="text-[var(--text-strong)]">${p.provider_key}</code>
@@ -948,7 +948,7 @@ function StrategyTraceTable({
         ${filtered.map((e: CascadeStrategyTraceEvent) => {
           const tone = traceKindTone(e.kind)
           return html`
-          <tr class="border-b border-[var(--card-border)] last:border-b-0">
+          <tr class="border-b border-[var(--card-border)] last:border-b-0 even:bg-[var(--white-3)]">
             <td class="py-1 text-[var(--text-muted)] tabular-nums">${fmtRelativeTime(e.ts)}</td>
             <td class="py-1"><code class="text-[var(--text-strong)]">${e.cascade_name}</code></td>
             <td class="py-1 text-[var(--text-muted)]">${e.strategy}</td>
@@ -983,7 +983,7 @@ function ClientCapacityHistoryTable({
         ${history.events.map((e: CascadeClientCapacityHistoryEvent) => {
           const tone = eventKindTone(e.kind)
           return html`
-          <tr class="border-b border-[var(--card-border)] last:border-b-0">
+          <tr class="border-b border-[var(--card-border)] last:border-b-0 even:bg-[var(--white-3)]">
             <td class="py-1 text-[var(--text-muted)] tabular-nums">${fmtRelativeTime(e.ts)}</td>
             <td class="py-1"><${StatusChip} tone=${tone}>${eventKindLabel(e.kind)}<//></td>
             <td class="py-1"><code class="text-[var(--text-strong)]">${e.key}</code></td>
@@ -1015,7 +1015,7 @@ function ClientCapacityTable({ capacity }: { capacity: CascadeClientCapacityResp
         ${capacity.entries.map((e: CascadeClientCapacityEntry) => {
           const tone = capacityTone(e)
           return html`
-          <tr class="border-b border-[var(--card-border)] last:border-b-0">
+          <tr class="border-b border-[var(--card-border)] last:border-b-0 even:bg-[var(--white-3)]">
             <td class="py-1"><span class=${`inline-block w-2 h-2 rounded-full ${TONE_DOT[tone]}`}></span></td>
             <td class="py-1"><${StatusChip} tone=${tone === 'ok' ? 'neutral' : tone}>${capacityKindLabel(e.kind)}<//></td>
             <td class="py-1"><code class="text-[var(--text-strong)]">${e.key}</code></td>

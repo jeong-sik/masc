@@ -290,7 +290,7 @@ function CycleHistoryTable({ cycles }: { cycles: AutoresearchCycleRecord[] }) {
               </thead>
               <tbody>
                 ${visibleCycles.map(c => html`
-                  <tr key=${c.cycle} class="border-b border-[var(--white-5)] hover:bg-[var(--white-4)] transition-colors duration-150">
+                  <tr key=${c.cycle} class="border-b border-[var(--white-5)] even:bg-[var(--white-3)] hover:bg-[var(--white-4)] transition-colors duration-150">
                     <td class="py-2 px-3 font-mono text-[var(--text-muted)]">${c.cycle}</td>
                     <td class="py-2 px-3 text-[var(--text-body)] max-w-50 truncate" title=${c.hypothesis}>${c.hypothesis}</td>
                     <td class="py-2 px-3 text-right font-mono text-[var(--text-body)]">${c.score_before.toFixed(4)}</td>

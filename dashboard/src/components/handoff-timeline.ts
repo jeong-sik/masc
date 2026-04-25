@@ -320,9 +320,9 @@ export function HandoffTimeline({
       ${error !== null
         ? html`<p role="alert" class="text-2xs text-[var(--bad-light)]">오류: ${error}</p>`
         : rows.length === 0
-          ? html`<p class="text-2xs text-text-dim">이 시간 범위에 A2A 이벤트 없음.</p>`
+          ? html`<p class="text-2xs text-text-dim" role="status">이 시간 범위에 A2A 이벤트 없음.</p>`
           : isFiltering && visibleRows.length === 0
-            ? html`<p class="text-2xs text-text-dim">필터 결과 없음 (${rows.length} handoffs)</p>`
+            ? html`<p class="text-2xs text-text-dim" role="status">필터 결과 없음 (${rows.length} handoffs)</p>`
             : html`
               <div class="flex flex-col gap-1 relative">
                 ${(() => {

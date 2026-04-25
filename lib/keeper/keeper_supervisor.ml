@@ -301,8 +301,24 @@ let resume_keeper_after_reconcile_gate (ctx : _ context) (meta : keeper_meta) =
         };
     }
   in
-  (match write_meta ctx.config resumed_meta with
+  (* #9733: same race shape as keeper_msg/overflow-pause/sync paths
+     already migrated by #10135 / #10145.  The supervisor reconcile
+     fiber clears [paused] and [runtime.last_blocker] (cycle-owned
+     fields); a heartbeat fiber bumping [joined_room_ids] /
+     [last_seen_seq_by_room] in parallel can still steal the CAS
+     write and silently leave the keeper paused while
+     [Keeper_registry.update_meta] applies the resume in-memory —
+     a registry/disk split that hides the failure. *)
+  (match
+     write_meta_with_merge
+       ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
+       ctx.config resumed_meta
+   with
    | Ok () -> ()
+   | Error err when is_version_conflict_error err ->
+       Log.Keeper.warn
+         "%s: reconcile gate resume write_meta lost CAS race after retries: %s"
+         resumed_meta.name err
    | Error err ->
        Log.Keeper.error
          "%s: reconcile gate resume write_meta failed: %s"
@@ -436,8 +452,24 @@ let cleanup_dead_tombstone (ctx : _ context)
       let persisted_paused =
         if meta.paused then true
         else
-          match write_meta ctx.config { meta with paused = true } with
+          (* #9733: dead tombstone cleanup writes [paused = true] —
+             cycle-owned field — while heartbeat fibers can still
+             update the same record's heartbeat-owned fields.  Use
+             the same merged-CAS retry as the resume + overflow-pause
+             paths so a parallel heartbeat write doesn't make this
+             write fail and leave the keeper unpaused on disk while
+             the supervisor proceeds to unregister it. *)
+          match
+            write_meta_with_merge
+              ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
+              ctx.config { meta with paused = true }
+          with
           | Ok () -> true
+          | Error err when is_version_conflict_error err ->
+              Log.Keeper.warn
+                "%s: dead tombstone cleanup paused write lost CAS race after retries: %s"
+                entry.name err;
+              false
           | Error err ->
               Log.Keeper.warn
                 "%s: dead tombstone cleanup paused write failed: %s"

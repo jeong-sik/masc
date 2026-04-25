@@ -550,9 +550,62 @@ let wall_tokens_per_second
          /. (Float.of_int t.request_latency_ms /. 1000.0))
   | _ -> None
 
+(** #10318: classify why [cost_usd] ended up as it did so the
+    ledger entry is self-describing.  Pre-fix [costs.jsonl] showed
+    100% [cost_usd=0] across 1697 entries with no way to tell
+    "untrusted usage zeroed it" apart from "pricing catalog miss"
+    apart from "free local provider".  Each silent path collapsed
+    to the same [0.0] field and the operator could only see
+    "tracking is broken" without the next concrete action.
+
+    Bounded source values:
+    - [computed]              — cost > 0 written by the pricing path.
+    - [missing_usage]         — no usage payload from the provider.
+    - [untrusted_usage]       — usage_trust gate suppressed the value.
+    - [unmetered_provider]    — local LLM (ollama, etc.); 0 by design.
+    - [pricing_catalog_miss]  — model not in
+                                [Llm_provider.Pricing] catalog;
+                                [estimate_usage_cost_usd] returned 0.
+    - [zero_token_call]       — trusted+priced but tokens=0
+                                (tool-only call or empty completion). *)
+let cost_emit_source_metric = "masc_cost_emit_zero_source_total"
+
+let () =
+  Prometheus.register_counter
+    ~name:cost_emit_source_metric
+    ~help:
+      "Total cost.jsonl emits where cost_usd ended up as 0.0 due to a \
+       known classification path (vs an actually-zero call).  Labels: \
+       source ∈ {missing_usage, untrusted_usage, unmetered_provider, \
+       pricing_catalog_miss, zero_token_call}.  A high \
+       [pricing_catalog_miss] rate is the hint to add upstream OAS \
+       pricing entries; a high [untrusted_usage] rate points at the \
+       trust classifier; a high [missing_usage] rate points at the \
+       provider adapter not surfacing usage.  See #10318."
+    ()
+
+let classify_cost_usd_source ~usage_missing ~usage_trusted ~provider
+    ~model ~cost_usd =
+  if usage_missing then "missing_usage"
+  else if not usage_trusted then "untrusted_usage"
+  else if structurally_unmetered_provider provider then "unmetered_provider"
+  else if cost_usd > 0.0 then "computed"
+  else
+    match Llm_provider.Pricing.pricing_for_model_opt model with
+    | None -> "pricing_catalog_miss"
+    | Some _ -> "zero_token_call"
+
+let record_cost_emit_source source =
+  if not (String.equal source "computed") then
+    Prometheus.inc_counter cost_emit_source_metric
+      ~labels:[ ("source", source) ]
+      ()
+
 (** Append a cost event to .masc/costs.jsonl for per-task cost attribution.
     Schema matches bin/masc_cost.ml with an additional "source" field to
-    distinguish automatic entries from manual CLI entries.
+    distinguish automatic entries from manual CLI entries.  #10318 adds
+    a [cost_usd_source] field so each row is self-describing about
+    why [cost_usd] is what it is.
 
     Called from [after_turn] hook when a trajectory accumulator is present. *)
 let emit_cost_event
@@ -649,6 +702,11 @@ let emit_cost_event
          wall_tokens_per_second ~usage_missing ~output_tokens ~telemetry
        else None)
   in
+  let cost_usd_source =
+    classify_cost_usd_source ~usage_missing ~usage_trusted
+      ~provider ~model:pricing_model ~cost_usd:safe_cost_usd
+  in
+  record_cost_emit_source cost_usd_source;
   let entry = `Assoc ([
     ("agent", `String agent_name);
     ("task_id", Json_util.string_opt_to_json task_id);
@@ -665,6 +723,8 @@ let emit_cost_event
     ( "model_resolution_source",
       `String
         (model_resolution_source_for_ledger ~model ~pricing_model) );
+    (* #10318: self-describing reason for [cost_usd]'s value. *)
+    ("cost_usd_source", `String cost_usd_source);
     ("usage_missing", `Bool usage_missing);
     ("timestamp", `String (Types.now_iso ()));
     ("source", `String "auto_trajectory");

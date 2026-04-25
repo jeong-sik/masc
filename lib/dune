@@ -519,6 +519,7 @@
    keeper_agent_tool_surface
    keeper_agent_result
    keeper_agent_error
+   keeper_agent_memory_episode
    keeper_agent_run
    keeper_world_observation
    keeper_decision_audit
@@ -716,6 +717,7 @@
   keeper_agent_tool_surface
   keeper_agent_result
   keeper_agent_error
+  keeper_agent_memory_episode
   keeper_exec_context
   keeper_guards
   keeper_turn_setup

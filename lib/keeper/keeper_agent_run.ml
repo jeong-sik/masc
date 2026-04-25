@@ -2590,48 +2590,18 @@ let run_turn
                 "keeper:%s memory_write failed: %s"
                 meta.name
                 (Printexc.to_string exn));
-           (* Episodic memory: create OAS episode from [STATE] snapshot.
-              store_episode adds to Memory.t, then flush_incremental
-              persists to institution_episodes.jsonl. The explicit flush
-              is required because this runs AFTER Agent.run returns, so
-              the AfterTurn hook has already fired for the last turn.
-              Collaboration learning (Hebbian strengthen/weaken) is not
-              recorded here; it is owned by the task lifecycle path. *)
-           (try
-              Memory_oas_bridge.store_episode_from_snapshot ~memory
-                ~keeper_name:meta.name ~turn:result.turns
-                ~trace_id:
-                  (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-                state_snapshot;
-              let ep, pr =
-                Memory_oas_bridge.flush_incremental ~memory
-                  ~agent_name:meta.name
-              in
-              if ep > 0 || pr > 0 then begin
-                Log.Keeper.debug
-                  "keeper:%s post-run flush episodes=%d procedures=%d"
-                  meta.name ep pr;
-                (* Emit activity event so episode flushes appear in
-                   the activity graph / telemetry surface. *)
-                (try
-                   (Atomic.get Coord_hooks.activity_emit_fn) config
-                     ~actor:Coord_hooks.{ kind = "keeper"; id = meta.name }
-                     ~kind:"episode.flush"
-                     ~payload:(`Assoc [
-                       ("keeper", `String meta.name);
-                       ("episodes", `Int ep);
-                       ("procedures", `Int pr);
-                       ("turn", `Int result.turns);
-                     ])
-                     ~tags:[ "memory"; "episode"; "flush" ]
-                     ()
-                 with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ())
-              end
-            with
-            | Eio.Cancel.Cancelled _ as e -> raise e
-            | exn ->
-                Log.Keeper.error "keeper:%s episode_create failed: %s"
-                  meta.name (Printexc.to_string exn));
+           (* Episodic memory: create an episode from [STATE] after
+              Agent.run returns, then persist and emit activity through the
+              post-run memory adapter. Collaboration learning (Hebbian
+              strengthen/weaken) is owned by the task lifecycle path. *)
+           Keeper_agent_memory_episode.record_success
+             ~config
+             ~keeper_name:meta.name
+             ~memory
+             ~turn:result.turns
+             ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+             ~snapshot:state_snapshot
+             ();
            (* Memory bank compaction: dedup + consolidate if over threshold. *)
            (try
               let compaction =
@@ -2762,51 +2732,20 @@ let run_turn
     (match turn_result with
      | Ok _ -> ()
      | Error err ->
-       (try
-          let turn =
-            match !receipt_turn_count_ref with
-            | Some turns -> turns
-            | None -> start_turn_count + 1
-          in
-          Memory_oas_bridge.store_failed_turn_episode
-            ~memory
-            ~keeper_name:meta.name
-            ~turn
-            ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-            ~error_kind:(sdk_error_kind err)
-            ~error_message:(Oas.Error.to_string err)
-            ();
-          let ep, pr =
-            Memory_oas_bridge.flush_incremental ~memory ~agent_name:meta.name
-          in
-          if ep > 0 || pr > 0 then begin
-            Log.Keeper.debug
-              "keeper:%s post-run failure flush episodes=%d procedures=%d"
-              meta.name ep pr;
-            (try
-               (Atomic.get Coord_hooks.activity_emit_fn) config
-                 ~actor:Coord_hooks.{ kind = "keeper"; id = meta.name }
-                 ~kind:"episode.flush"
-                 ~payload:
-                   (`Assoc
-                     [
-                       ("keeper", `String meta.name);
-                       ("episodes", `Int ep);
-                       ("procedures", `Int pr);
-                       ("turn", `Int turn);
-                       ("outcome", `String "failure");
-                     ])
-                 ~tags:[ "memory"; "episode"; "flush"; "failure" ]
-                 ()
-             with
-             | Eio.Cancel.Cancelled _ as e -> raise e
-             | _ -> ())
-          end
-        with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | exn ->
-          Log.Keeper.error "keeper:%s failed_turn_episode_create failed: %s"
-            meta.name (Printexc.to_string exn)))
+       let turn =
+         match !receipt_turn_count_ref with
+         | Some turns -> turns
+         | None -> start_turn_count + 1
+       in
+       Keeper_agent_memory_episode.record_failure
+         ~config
+         ~keeper_name:meta.name
+         ~memory
+         ~turn
+         ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+         ~error_kind:(sdk_error_kind err)
+         ~error_message:(Oas.Error.to_string err)
+         ())
     ;
     let receipt_ended_at = Types.now_iso () in
     let error_kind, error_message =

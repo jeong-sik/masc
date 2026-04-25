@@ -122,6 +122,22 @@ const WebsocketDeliverySchema = object({
   client_buffered_bytes_count: fallback(number(), 0),
 })
 
+// Diagnostic counters for the WS delivery path.  Each field falls back
+// to 0 so this remains forward-compatible with servers that have not
+// yet landed the corresponding Prometheus metric (e.g. a dashboard
+// pointed at an older build should not surface schema errors, it
+// should show zeroes and let the operator know the metric is absent).
+const WebsocketDeliverySchema = object({
+  parse_cache_hits: fallback(number(), 0),
+  parse_cache_misses: fallback(number(), 0),
+  bytes_cache_hits: fallback(number(), 0),
+  bytes_cache_misses: fallback(number(), 0),
+  client_acks: fallback(number(), 0),
+  throttled_deliveries: fallback(number(), 0),
+  client_buffered_bytes_sum: fallback(number(), 0),
+  client_buffered_bytes_count: fallback(number(), 0),
+})
+
 const WebsocketSchema = object({
   enabled: fallback(boolean(), false),
   configured: fallback(boolean(), false),

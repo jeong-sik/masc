@@ -497,7 +497,7 @@ export function TransportHealthPanel() {
                   <div class="mb-2 text-2xs text-text-muted">${filtered.length} / ${data.sse.hot_sessions.length}개 세션</div>
                 ` : null}
                 ${filtered.length === 0 ? html`
-                  <div class="text-2xs text-text-muted py-3">검색 결과 없음</div>
+                  <div class="text-2xs text-text-muted py-3" role="status">검색 결과 없음</div>
                 ` : html`
                   <div class="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3">
                     ${filtered.map((session) => html`

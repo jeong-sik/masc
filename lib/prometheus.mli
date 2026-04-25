@@ -282,6 +282,15 @@ val metric_ws_bytes_sent : string
 val metric_grpc_bytes_sent : string
 val metric_ws_delta_built : string
 
+val metric_grpc_backlog_replay_lines_scanned : string
+(** Lines walked while replaying [.masc/backlog.jsonl] on a gRPC
+    Subscribe RPC, including those filtered out by [since_seq]. *)
+
+val metric_grpc_backlog_replay_events_replayed : string
+(** Backlog events actually delivered (post-[since_seq] filter)
+    on a gRPC Subscribe RPC. The gap between scanned-lines and
+    replayed-events isolates wasted scan cost. *)
+
 (** {1 Admission queue metrics} *)
 
 val metric_inference_queue_depth : string

@@ -459,8 +459,11 @@ let handle_subscribe
     let content = Fs_compat.load_file backlog_file in
     let lines = String.split_on_char '\n' content in
     let seq = ref 1L in
+    let scanned = ref 0 in
+    let replayed = ref 0 in
     List.iter (fun line ->
       if String.length line > 0 then begin
+        incr scanned;
         let msg_seq = !seq in
         if Int64.compare msg_seq req.since_seq > 0 then begin
           let event = T.Event.{
@@ -474,11 +477,20 @@ let handle_subscribe
           Transport_metrics.inc_grpc_bytes_sent
             ~bytes:(String.length event_bytes);
           Grpc_eio.Stream.add stream event_bytes;
-          incr events_count
+          incr events_count;
+          incr replayed
         end;
         seq := Int64.add !seq 1L
       end
-    ) lines
+    ) lines;
+    (* Attribution: scanned vs replayed splits wasted scan cost from
+       useful catch-up delivery on this Subscribe RPC. *)
+    if !scanned > 0 then
+      Transport_metrics.inc_grpc_backlog_replay_lines_scanned
+        ~delta:!scanned ();
+    if !replayed > 0 then
+      Transport_metrics.inc_grpc_backlog_replay_events_replayed
+        ~delta:!replayed ()
   end;
   (* Record delivered events from backlog replay *)
   Transport_metrics.inc_grpc_events_delivered ~delta:!events_count ();

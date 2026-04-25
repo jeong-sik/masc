@@ -28,35 +28,13 @@ let int_of_env_default name ~default ~min_v ~max_v =
       in
       max min_v (min max_v parsed)
 
-(* Substring containment, ASCII case-insensitive.
-
-   Old version compiled a fresh [Re.t] from the needle on every call —
-   ~20 hot call-sites, all string literals, mostly tool-error
-   classification on the per-call path.  The needles are short
-   (< 30 chars) and haystacks are bounded error messages, so a naive
-   byte-wise scan with inline [Char.lowercase_ascii] is strictly
-   cheaper than DFA construction and avoids the two
-   [String.lowercase_ascii] allocations the old form needed. *)
+(* Substring containment, ASCII case-insensitive.  Delegates to
+   [String_util.contains_substring_ci] (which scans byte-wise without
+   allocating) and preserves the local "empty needle matches all"
+   semantic with an explicit guard. *)
 let contains_casefold haystack needle =
-  let nlen = String.length needle in
-  let hlen = String.length haystack in
-  if nlen = 0 then true
-  else if nlen > hlen then false
-  else
-    let rec match_at i j =
-      if j = nlen then true
-      else if Char.lowercase_ascii (String.unsafe_get haystack (i + j))
-            <> Char.lowercase_ascii (String.unsafe_get needle j)
-      then false
-      else match_at i (j + 1)
-    in
-    let last = hlen - nlen in
-    let rec loop i =
-      if i > last then false
-      else if match_at i 0 then true
-      else loop (i + 1)
-    in
-    loop 0
+  String.length needle = 0
+  || String_util.contains_substring_ci haystack needle
 
 let parse_status_from_message ~success ~message =
   if not success then

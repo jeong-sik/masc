@@ -20,18 +20,14 @@ let keeper_chat_stream_error_json message =
         `Assoc [ ("message", `String message) ] );
     ]
 
+(* Empty needle preserves the legacy "matches all" semantic; non-empty
+   matching delegates to the SSOT helper, which scans byte-wise with
+   inline [Char.lowercase_ascii] and avoids the two
+   [String.lowercase_ascii] allocations plus the per-position
+   [String.sub] of the old form. *)
 let contains_casefold haystack needle =
-  let haystack = String.lowercase_ascii haystack in
-  let needle = String.lowercase_ascii needle in
-  let hlen = String.length haystack in
-  let nlen = String.length needle in
-  let rec loop idx =
-    if nlen = 0 then true
-    else if idx + nlen > hlen then false
-    else if String.sub haystack idx nlen = needle then true
-    else loop (idx + 1)
-  in
-  loop 0
+  String.length needle = 0
+  || String_util.contains_substring_ci haystack needle
 
 
 (* No external timeout for keeper_msg. Keeper has its own internal limits

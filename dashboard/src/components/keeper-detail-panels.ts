@@ -883,6 +883,7 @@ export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
           </div>
           <input
             type="search"
+            autoComplete="off"
             value=${ctxCompositionSearch.value}
             placeholder="세그먼트 필터 (예: history, memory)"
             aria-label="context composition 세그먼트 필터"

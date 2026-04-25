@@ -191,6 +191,7 @@ export function GovernanceMonitor() {
         <div class="flex flex-col gap-2">
           <input
             type="search"
+            autoComplete="off"
             value=${query.value}
             placeholder="tool / reason 필터"
             aria-label="Tool rejection 필터"

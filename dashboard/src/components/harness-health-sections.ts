@@ -366,6 +366,7 @@ export function RecentVerdictsList({ items }: { items: HarnessVerdictItem[] }) {
       <div class="flex justify-end">
         <input
           type="search"
+          autoComplete="off"
           value=${query.value}
           placeholder="task / agent / gate / cascade 필터"
           aria-label="판정 필터"
@@ -413,6 +414,7 @@ export function PreCompactList({ section }: { section: HarnessSignalSection<PreC
       <div class="flex justify-end">
         <input
           type="search"
+          autoComplete="off"
           value=${query.value}
           placeholder="keeper / trigger / model / strategy 필터"
           aria-label="압축 이벤트 필터"
@@ -465,6 +467,7 @@ export function HandoffList({ section }: { section: HarnessSignalSection<Handoff
       <div class="flex justify-end">
         <input
           type="search"
+          autoComplete="off"
           value=${query.value}
           placeholder="keeper / model / trace_id 필터"
           aria-label="세대 교체 필터"

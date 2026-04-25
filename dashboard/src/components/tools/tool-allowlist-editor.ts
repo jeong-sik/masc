@@ -226,6 +226,7 @@ export function ResolvedPreview({ tools, catMap }: { tools: string[]; catMap: Ma
         </span>
         <input
           type="search"
+          autoComplete="off"
           value=${query}
           placeholder="도구/카테고리 필터"
           aria-label="도구 검색 필터"

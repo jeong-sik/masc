@@ -625,6 +625,7 @@ export function MemorySubsystems() {
                 <div class="flex items-center gap-2 mb-2 flex-wrap">
                   <input
                     type="search"
+                    autoComplete="off"
                     value=${synapseQueryValue}
                     placeholder="시냅스 검색 (from/to 에이전트 이름)"
                     aria-label="시냅스 필터"

@@ -216,6 +216,7 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
           <div class="flex items-center gap-2">
             <input
               type="search"
+              autoComplete="off"
               value=${query}
               placeholder="도구 검색 (이름/카테고리)"
               aria-label="도구 텔레메트리 검색"

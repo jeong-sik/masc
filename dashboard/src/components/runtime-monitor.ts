@@ -451,6 +451,7 @@ export function RuntimeMonitor() {
         <div class="flex items-center justify-end mb-2">
           <${TextInput}
             type="search"
+            autoComplete="off"
             ariaLabel="모델 ID 검색"
             placeholder="model_id 또는 도구 이름"
             class="min-w-55 flex-1 !py-1 !text-2xs"

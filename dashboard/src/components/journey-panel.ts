@@ -786,6 +786,7 @@ export function JourneyPanel() {
         <div class="flex flex-wrap items-center gap-3">
           <${TextInput}
             type="search"
+            autoComplete="off"
             value=${query.value}
             placeholder="task / keeper / session / operation / model / life 검색"
             ariaLabel="journey 검색"

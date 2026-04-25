@@ -149,6 +149,7 @@ export function TaskActivityList({
     <div class="flex flex-col gap-2" role="region" aria-label="활동 목록">
       <${TextInput}
         type="search"
+        autoComplete="off"
         value=${query}
         placeholder="활동 검색 (summary, tool, error)"
         ariaLabel="활동 검색"

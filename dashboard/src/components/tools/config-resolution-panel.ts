@@ -614,6 +614,7 @@ export function ConfigResolutionPanel({
                     ? html`
                         <input
                           type="search"
+                          autoComplete="off"
                           value=${diagnosticsQuery.value}
                           placeholder="kind / signal / message 필터"
                           aria-label="Diagnostics 필터"

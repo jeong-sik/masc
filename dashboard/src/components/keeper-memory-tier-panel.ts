@@ -163,6 +163,7 @@ export function KeeperMemoryTierPanel({
       <div class="flex flex-wrap items-center gap-2">
         <input
           type="search"
+          autoComplete="off"
           value=${query}
           placeholder="kind 필터"
           aria-label="memory kind 필터"

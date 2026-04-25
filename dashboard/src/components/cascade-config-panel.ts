@@ -701,6 +701,7 @@ function HealthTable({
     <div class="flex items-center gap-3 mb-2">
       <${TextInput}
         type="search"
+        autoComplete="off"
         class="max-w-70"
         placeholder="provider 필터 (key, cooldown...)"
         ariaLabel="health provider 검색"

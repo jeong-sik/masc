@@ -213,6 +213,7 @@ export function CommentThread({ comments, postId }: { comments: BoardComment[]; 
         <div class="text-2xs text-[var(--text-muted)]" aria-live="polite">댓글 ${comments.length}개${isFiltering ? ` · 일치 ${filteredRoots.length}` : ''}</div>
         <input
           type="search"
+          autoComplete="off"
           value=${query.value}
           placeholder="댓글 내용 검색"
           aria-label="댓글 필터"

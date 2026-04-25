@@ -837,6 +837,26 @@ and handle_transition ?agent_tool_names ctx args =
         && String.sub msg 0 (String.length prefix) = prefix
     | _ -> false
   in
+  let prepare_verification_request =
+    match action with
+    | Types.Submit_for_verification ->
+      Some
+        (fun ~task ~assignee ~verification_id ~evidence_refs ->
+           Verification_protocol.create_submit_request
+             ~config:ctx.config
+             ~task
+             ~assignee
+             ~verification_id
+             ~evidence_refs)
+    | Types.Claim
+    | Types.Start
+    | Types.Done_action
+    | Types.Cancel
+    | Types.Release
+    | Types.Approve_verification
+    | Types.Reject_verification ->
+      None
+  in
   let rec try_transition attempt =
     let ev = if attempt = 0 then expected_version else None in
     let agent_tool_names =
@@ -846,7 +866,7 @@ and handle_transition ?agent_tool_names ctx args =
     in
     let r = Coord.transition_task_r ctx.config ~agent_name:ctx.agent_name
               ~task_id ~action ?expected_version:ev ~notes ~reason
-              ?handoff_context ?agent_tool_names () in
+              ?handoff_context ?agent_tool_names ?prepare_verification_request () in
     if is_version_mismatch r && attempt < max_cas_retries then begin
       Log.Task.info "CAS version mismatch on %s (attempt %d/%d), retrying in %.0fms"
         task_id (attempt + 1) max_cas_retries (cas_retry_delay_s *. 1000.0);
@@ -898,7 +918,7 @@ and handle_transition ?agent_tool_names ctx args =
                | None -> [] in
              (match task.task_status with
               | Types.AwaitingVerification { verification_id; assignee; _ } ->
-                Verification_protocol.on_submit_for_verification
+                Verification_protocol.notify_submit_for_verification
                   ~config:ctx.config ~task ~assignee ~verification_id ~evidence_refs
               | Types.Todo | Types.Claimed _ | Types.InProgress _
               | Types.Done _ | Types.Cancelled _ -> ())

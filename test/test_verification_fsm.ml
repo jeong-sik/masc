@@ -80,6 +80,14 @@ let create_pending_request config ~task_id ~worker ~request_id =
   | Ok req -> req
   | Error e -> Alcotest.fail ("create_request failed: " ^ e)
 
+let submit_protocol_or_fail config task ~assignee ~verification_id ~evidence_refs =
+  match
+    Verification_protocol.on_submit_for_verification ~config ~task
+      ~assignee ~verification_id ~evidence_refs
+  with
+  | Ok () -> ()
+  | Error e -> Alcotest.fail ("on_submit_for_verification failed: " ^ e)
+
 let get_task config task_id =
   let backlog = Coord.read_backlog config in
   List.find_opt (fun (t : Types.task) -> t.id = task_id) backlog.tasks
@@ -156,6 +164,38 @@ let test_submit_for_verification_from_claimed_moves_to_awaiting () =
       Alcotest.(check string) "status" "awaiting_verification"
         (status_string config task_id))
 
+let test_submit_prepare_failure_keeps_task_in_progress () =
+  with_temp_config ~fsm_enabled:true (fun config ->
+    let task_id = add_strict_task config in
+    claim_and_start config "worker" task_id;
+    let prepare_called = ref false in
+    let result =
+      Coord.transition_task_r config ~agent_name:"worker"
+        ~task_id ~action:Types.Submit_for_verification
+        ~prepare_verification_request:
+          (fun ~task:_ ~assignee:_ ~verification_id:_ ~evidence_refs:_ ->
+             prepare_called := true;
+             Error "simulated verification store failure")
+        ()
+    in
+    match result with
+    | Ok _ -> Alcotest.fail "submit should fail when verification request creation fails"
+    | Error e ->
+      Alcotest.(check bool) "prepare called" true !prepare_called;
+      Alcotest.(check string) "status remains in_progress" "in_progress"
+        (status_string config task_id);
+      let msg = Types.show_masc_error e in
+      Alcotest.(check bool) "error mentions verification request" true
+        (Astring.String.is_infix
+           ~affix:"verification request creation failed"
+           msg);
+      let reqs =
+        Verification.list_requests config.Coord.base_path
+        |> List.filter (fun (r : Verification.verification_request) ->
+          r.task_id = task_id)
+      in
+      Alcotest.(check int) "no orphan request" 0 (List.length reqs))
+
 (* Regression for the criteria ← completion_contract vs
    evidence_refs ← verify_gate_evidence split. Prior to the fix both
    sides pulled from verify_gate_evidence, so criteria ended up
@@ -176,7 +216,7 @@ let test_submit_populates_criteria_from_completion_contract () =
       | Some c -> c.verify_gate_evidence
       | None -> []
     in
-    Verification_protocol.on_submit_for_verification ~config ~task
+    submit_protocol_or_fail config task
       ~assignee:"verifier-agent" ~verification_id:"vrf-wiring"
       ~evidence_refs;
     let reqs = Verification.list_requests config.Coord.base_path in
@@ -216,7 +256,7 @@ let test_submit_marks_conflict_triage_when_deliverable_claims_completion () =
       | Some c -> c.verify_gate_evidence
       | None -> []
     in
-    Verification_protocol.on_submit_for_verification ~config ~task
+    submit_protocol_or_fail config task
       ~assignee:"verifier-agent" ~verification_id:"vrf-conflict"
       ~evidence_refs;
     let reqs = Verification.list_requests config.Coord.base_path in
@@ -445,6 +485,8 @@ let () =
         test_submit_for_verification_moves_to_awaiting;
       Alcotest.test_case "submit from claimed moves to awaiting_verification"
         `Quick test_submit_for_verification_from_claimed_moves_to_awaiting;
+      Alcotest.test_case "submit prepare failure keeps task in_progress"
+        `Quick test_submit_prepare_failure_keeps_task_in_progress;
       Alcotest.test_case "submit splits criteria/evidence by contract field"
         `Quick test_submit_populates_criteria_from_completion_contract;
       Alcotest.test_case "submit marks conflict triage from completed deliverable"

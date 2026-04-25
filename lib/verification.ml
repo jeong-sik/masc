@@ -278,12 +278,22 @@ let request_path base_path req_id =
   Coord_verification_store.request_path base_path req_id
 
 let save_request base_path req =
-  let dir = verifications_dir base_path in
-  ensure_dir dir;
-  let json = request_to_yojson req in
-  let path = request_path base_path req.id in
-  Fs_compat.save_file path (Yojson.Safe.pretty_to_string json);
-  Ok req.id
+  try
+    let dir = verifications_dir base_path in
+    ensure_dir dir;
+    let json = request_to_yojson req in
+    let path = request_path base_path req.id in
+    match Fs_compat.save_file_atomic path (Yojson.Safe.pretty_to_string json) with
+    | Ok () -> Ok req.id
+    | Error e -> Error e
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+      Error
+        (Printf.sprintf
+           "save_request %s: %s"
+           req.id
+           (Printexc.to_string exn))
 
 let load_request base_path req_id =
   let path = request_path base_path req_id in

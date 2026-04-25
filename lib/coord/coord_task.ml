@@ -1034,6 +1034,7 @@ let transition_task_r
       ~task_id
       ~action
       ?agent_tool_names
+      ?prepare_verification_request
       ?expected_version
       ?(notes = "")
       ?(reason = "")
@@ -1203,6 +1204,56 @@ let transition_task_r
         in
         let new_status = decision.Coord_task_lifecycle.new_status in
         let set_current = decision.set_current in
+        let* () =
+          match action, new_status, prepare_verification_request with
+          | ( Types.Submit_for_verification,
+              Types.AwaitingVerification { assignee; verification_id; _ },
+              Some prepare ) ->
+            let evidence_refs =
+              match task.contract with
+              | Some c -> c.verify_gate_evidence
+              | None -> []
+            in
+            (match prepare ~task ~assignee ~verification_id ~evidence_refs with
+             | Ok () -> Ok ()
+             | Error e ->
+               Error
+                 (Types.IoError
+                    (Printf.sprintf
+                       "verification request creation failed before status transition \
+                        (task=%s vrf=%s): %s"
+                       task_id
+                       verification_id
+                       e)))
+          | Types.Submit_for_verification, _, Some _ ->
+            Error
+              (Types.TaskInvalidState
+                 (Printf.sprintf
+                    "submit_for_verification did not produce AwaitingVerification \
+                     for task %s"
+                    task_id))
+          | ( Types.Claim
+            | Types.Start
+            | Types.Done_action
+            | Types.Cancel
+            | Types.Release
+            | Types.Approve_verification
+            | Types.Reject_verification ),
+            _,
+            Some _ ->
+            Ok ()
+          | ( Types.Claim
+            | Types.Start
+            | Types.Done_action
+            | Types.Cancel
+            | Types.Release
+            | Types.Approve_verification
+            | Types.Reject_verification
+            | Types.Submit_for_verification ),
+            _,
+            None ->
+            Ok ()
+        in
         (match decision.drift with
          | Some Coord_task_lifecycle.Claimed_to_done_skip ->
            (* FSM drift: TLA+ KeeperTaskInterlock.DoneTask requires in_progress.

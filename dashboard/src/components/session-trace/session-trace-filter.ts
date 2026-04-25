@@ -55,7 +55,7 @@ export function SessionTraceFilter({ agentName }: { agentName: string }) {
   const searchQuery = getTraceSearchQuery(agentName)
 
   return html`
-    <div class="space-y-2">
+    <div class="space-y-2" role="search" aria-label="추적 필터">
       <!-- Search -->
       <div class="relative">
         <input

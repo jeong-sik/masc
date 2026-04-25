@@ -199,7 +199,7 @@ function ResultViewer({ text, hint, isError: isErr }: { text: string; hint: Cont
   const displayText = isTruncatedPlain ? text.slice(0, MAX_TEXT_LEN) + '\n\n... (Output truncated for performance) ...' : text
 
   return html`
-    <div>
+    <div role="group" aria-label=${titleLabel}>
       <div class="flex items-center justify-between mb-1">
         <span class="text-3xs font-semibold uppercase tracking-wider ${titleColor}">${titleLabel}</span>
         ${hint !== 'plain' ? html`
@@ -540,7 +540,7 @@ export function SessionTraceEntry({ event, searchQuery }: { event: UnifiedTraceE
   if (!hasDetail) return row
 
   return html`
-    <details class="rounded hover:bg-[var(--white-3)] transition-colors group">
+    <details class="rounded hover:bg-[var(--white-3)] transition-colors group" aria-label=${summaryText ?? kindStyle.label}>
       <summary class="list-none cursor-pointer relative pr-8">
         ${row}
         <div class="absolute right-3 top-1/2 -translate-y-1/2 opacity-40 group-hover:opacity-100 transition-opacity">

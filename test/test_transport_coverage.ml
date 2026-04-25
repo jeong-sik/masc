@@ -680,13 +680,25 @@ let test_rest_generate_openapi_document () =
   check bool "mcp security present" true
     (mcp_post |> member "security" <> `Null);
   let operations = mcp_post |> member "x-mcp-operations" |> to_list in
-  let status_entry =
+  let operation_entry operation_id =
     operations
     |> List.find (fun row ->
-           row |> member "operationId" |> to_string = "masc_status")
+           row |> member "operationId" |> to_string = operation_id)
   in
+  let check_operation_tags operation_id expected =
+    let tags =
+      operation_entry operation_id |> member "tags" |> to_list
+      |> List.map to_string
+    in
+    check (list string) (operation_id ^ " tags") expected tags
+  in
+  let status_entry = operation_entry "masc_status" in
   check bool "status summary non-empty" true
     (String.length (status_entry |> member "summary" |> to_string) > 0);
+  check_operation_tags "masc_status" [ "tasks" ];
+  check_operation_tags "masc_plan_init" [ "planning" ];
+  check_operation_tags "masc_broadcast" [ "messaging" ];
+  check_operation_tags "masc_join" [ "masc" ];
   let sdk_aliases =
     status_entry |> member "x-agent-sdk" |> member "aliases" |> to_list
   in
@@ -694,19 +706,11 @@ let test_rest_generate_openapi_document () =
     (List.exists
        (fun row -> row |> member "name" |> to_string = "masc_room_status")
        sdk_aliases);
-  let add_task_entry =
-    operations
-    |> List.find (fun row ->
-           row |> member "operationId" |> to_string = "masc_add_task")
-  in
+  let add_task_entry = operation_entry "masc_add_task" in
   check int "add_task has no fake rest binding"
     0
     (add_task_entry |> member "x-rest-bindings" |> to_list |> List.length);
-  let broadcast_entry =
-    operations
-    |> List.find (fun row ->
-           row |> member "operationId" |> to_string = "masc_broadcast")
-  in
+  let broadcast_entry = operation_entry "masc_broadcast" in
   check bool "broadcast rest binding is real" true
     (List.exists
        (fun row ->
@@ -715,6 +719,8 @@ let test_rest_generate_openapi_document () =
   let broadcast_post =
     doc |> member "paths" |> member "/api/v1/broadcast" |> member "post"
   in
+  check (list string) "broadcast REST operation tags" [ "messaging" ]
+    (broadcast_post |> member "tags" |> to_list |> List.map to_string);
   check string "broadcast auth mode" "bearer_required"
     (broadcast_post |> member "x-auth-mode" |> to_string);
   check bool "broadcast security present" true

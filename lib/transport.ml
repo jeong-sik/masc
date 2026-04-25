@@ -319,47 +319,54 @@ module Rest = struct
               prompt_hints = [];
             })
 
+  let operation_tag_groups =
+    [
+      ( "transport",
+        [
+          "masc_transport_status";
+          "masc_websocket_discovery";
+          "masc_webrtc_offer";
+          "masc_webrtc_answer";
+        ] );
+      ( "tasks",
+        [
+          "masc_status";
+          "masc_tasks";
+          "masc_add_task";
+          "masc_batch_add_tasks";
+          "masc_transition";
+          "masc_claim_next";
+        ] );
+      ( "planning",
+        [
+          "masc_plan_init";
+          "masc_plan_get";
+          "masc_plan_update";
+          "masc_note_add";
+          "masc_deliver";
+        ] );
+      ( "messaging",
+        [
+          "masc_broadcast";
+          "masc_messages";
+          "masc_a2a_delegate";
+          "masc_a2a_subscribe";
+        ] );
+      ( "decision",
+        [
+          "decision_create";
+          "decision_finalize";
+          "decision_status";
+          "masc_execution_orders";
+        ] );
+    ]
+
   let tags_for_operation name =
-    if
-      String.equal name "masc_transport_status"
-      || String.equal name "masc_websocket_discovery"
-      || String.equal name "masc_webrtc_offer"
-      || String.equal name "masc_webrtc_answer"
-    then
-      [ "transport" ]
-    else if
-      String.equal name "masc_status"
-      || String.equal name "masc_tasks"
-      || String.equal name "masc_add_task"
-      || String.equal name "masc_batch_add_tasks"
-      || String.equal name "masc_transition"
-      || String.equal name "masc_claim_next"
-    then
-      [ "tasks" ]
-    else if
-      String.equal name "masc_plan_init"
-      || String.equal name "masc_plan_get"
-      || String.equal name "masc_plan_update"
-      || String.equal name "masc_note_add"
-      || String.equal name "masc_deliver"
-    then
-      [ "planning" ]
-    else if
-      String.equal name "masc_broadcast"
-      || String.equal name "masc_messages"
-      || String.equal name "masc_a2a_delegate"
-      || String.equal name "masc_a2a_subscribe"
-    then
-      [ "messaging" ]
-    else if
-      String.equal name "decision_create"
-      || String.equal name "decision_finalize"
-      || String.equal name "decision_status"
-      || String.equal name "masc_execution_orders"
-    then
-      [ "decision" ]
-    else
-      [ "masc" ]
+    operation_tag_groups
+    |> List.find_map (fun (tag, operations) ->
+           if List.exists (String.equal name) operations then Some [ tag ]
+           else None)
+    |> Option.value ~default:[ "masc" ]
 
   let parameters_from_schema (schema : Yojson.Safe.t) =
     let required = Sdk_tool_contract.required_names schema in

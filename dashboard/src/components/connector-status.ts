@@ -934,7 +934,7 @@ function ConnectorLivePanel({
 
       ${connectorError || connector?.error
         ? html`
-            <div class="mt-3 rounded border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs text-[var(--warn)]" data-connector-warning-panel>
+            <div class="mt-3 rounded border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs text-[var(--warn)]" data-connector-warning-panel role="alert">
               <div class="font-semibold text-[var(--text-body)]">
                 ${connectorError ? 'Connector API unavailable' : 'Sidecar status warning'}
               </div>
@@ -1302,10 +1302,10 @@ function ChannelCard({ ch }: { ch: ChannelInfo }) {
   const lastError = shortText(ch.last_error)
 
   return html`
-    <div class="rounded border border-[var(--card-border)] bg-[var(--white-4)] p-3">
+    <div class="rounded border border-[var(--card-border)] bg-[var(--white-4)] p-3" role="group" aria-label=${`${ch.channel} 채널: ${tone.label}`}>
       <div class="mb-3 flex items-start justify-between gap-3">
         <div class="flex items-center gap-2">
-          <span class="text-lg">${channelIcon(ch.channel)}</span>
+          <span class="text-lg" aria-hidden="true">${channelIcon(ch.channel)}</span>
           <div>
             <div class="text-sm font-medium text-[var(--text-body)]">${ch.channel}</div>
             <div class="text-3xs uppercase tracking-[0.18em] text-[var(--text-dim)]">
@@ -1369,7 +1369,7 @@ function ChannelCard({ ch }: { ch: ChannelInfo }) {
 
       ${lastError
         ? html`
-            <div class="mt-3 rounded border border-[var(--bad-20)] bg-[var(--bad-10)] px-3 py-2 text-2xs text-[var(--bad-light)]">
+            <div class="mt-3 rounded border border-[var(--bad-20)] bg-[var(--bad-10)] px-3 py-2 text-2xs text-[var(--bad-light)]" role="alert">
               <div class="mb-1 uppercase tracking-5 text-[var(--bad-light)]/80">
                 ${ch.last_error_kind || 'error'} · ${timeAgo(ch.last_error_at)}
               </div>
@@ -1386,7 +1386,7 @@ function BindingRow({ binding }: { binding: BindingInfo }) {
   const lastError = shortText(binding.last_error, 72)
 
   return html`
-    <div class="rounded border border-[var(--card-border)] bg-[var(--white-4)] px-3 py-2">
+    <div class="rounded border border-[var(--card-border)] bg-[var(--white-4)] px-3 py-2" role="group" aria-label=${`${binding.channel} binding: ${tone.label}`}>
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0">
           <div class="text-xs font-medium text-[var(--text-body)]">
@@ -1416,7 +1416,7 @@ function BindingRow({ binding }: { binding: BindingInfo }) {
       </div>
       ${lastError
         ? html`
-            <div class="mt-2 rounded border border-[var(--bad-20)] bg-[var(--bad-10)] px-2 py-1 text-3xs text-[var(--bad-light)]">
+            <div class="mt-2 rounded border border-[var(--bad-20)] bg-[var(--bad-10)] px-2 py-1 text-3xs text-[var(--bad-light)]" role="alert">
               ${binding.last_error_kind || 'error'} · ${lastError}
             </div>
           `
@@ -1432,7 +1432,7 @@ function EventRow({ event }: { event: GateEventInfo }) {
     : 'border border-[var(--card-border)] bg-[var(--white-4)] text-[var(--text-dim)]'
 
   return html`
-    <div class="rounded border border-[var(--card-border)] bg-[var(--white-4)] px-3 py-2">
+    <div class="rounded border border-[var(--card-border)] bg-[var(--white-4)] px-3 py-2" role="group" aria-label=${`${event.channel} event: ${event.outcome}`}>
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0 text-2xs text-[var(--text-dim)]">
           <div class="font-medium text-[var(--text-body)]">
@@ -1451,7 +1451,7 @@ function EventRow({ event }: { event: GateEventInfo }) {
       </div>
       ${event.error
         ? html`
-            <div class="mt-2 text-3xs text-[var(--bad-light)]">
+            <div class="mt-2 text-3xs text-[var(--bad-light)]" role="alert">
               ${event.error_kind || 'error'} · ${shortText(event.error, 96)}
             </div>
           `

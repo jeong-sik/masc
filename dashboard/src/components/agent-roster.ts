@@ -613,7 +613,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
           ${showExecutionFallbackState
             ? html`
-                <div class="rounded border ${executionError.value ? 'border-[rgba(251,191,36,0.28)] bg-[var(--warn-10)]' : 'border-[var(--accent-20)] bg-[var(--accent-10)]'} px-4 py-3 shadow-[0_10px_28px_rgba(0,0,0,0.12)]">
+                <div class="rounded border ${executionError.value ? 'border-[rgba(251,191,36,0.28)] bg-[var(--warn-10)]' : 'border-[var(--accent-20)] bg-[var(--accent-10)]'} px-4 py-3 shadow-[0_10px_28px_rgba(0,0,0,0.12)]" role="alert">
                   <div class="flex flex-col gap-2">
                     <div class="flex flex-wrap items-center gap-2">
                       <strong class="text-xs font-semibold text-[var(--text-strong)]">${fallbackStateTitle}</strong>
@@ -631,7 +631,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
         </div>
       </section>
 
-      <div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3" role="list">
         ${filtered.map((agent: Agent) => {
           const keeperRuntime =
             keeperRuntimeLookup.get(agent.name)
@@ -706,6 +706,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
           return html`
             <button type="button"
               class="monitor-surface-card monitor-surface-card-medium group flex w-full flex-col gap-3.5 rounded-card p-4 text-left transition-all duration-200 cursor-pointer hover:border-[var(--border-slate-22)] hover:bg-[var(--bg-1)] hover:-translate-y-0.5"
+              role="listitem"
               key=${agent.name}
               aria-label=${detailLabel}
               onClick=${openDetail}

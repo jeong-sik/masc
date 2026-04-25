@@ -697,6 +697,7 @@ export function MemorySubsystems() {
         <div class="flex items-center gap-2 mb-3 flex-wrap">
           <input
             type="text"
+          autoComplete="off"
             aria-label="에피소드 검색"
             placeholder="검색 (summary, learnings, event_type...)"
             value=${searchQuery.value}

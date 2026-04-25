@@ -279,6 +279,7 @@ function SortBar() {
         })}
         <input
           type="text"
+          autoComplete="off"
           placeholder="작성자"
           aria-label="작성자 필터"
           value=${boardAuthorFilter.value}

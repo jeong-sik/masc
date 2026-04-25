@@ -403,6 +403,7 @@ function FieldWidget({ id, field, value, revealed, describedById }: {
       return html`
         <input
           type="text"
+          autoComplete="off"
           id=${fieldId}
           aria-label=${field.name}
           aria-describedby=${describedById}

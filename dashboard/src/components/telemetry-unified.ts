@@ -789,6 +789,7 @@ export function TelemetryUnified() {
         </select>
         <input
           type="text"
+          autoComplete="off"
           placeholder="키퍼 이름..."
           aria-label="키퍼 이름 필터"
           class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--text-strong)] w-32"
@@ -797,6 +798,7 @@ export function TelemetryUnified() {
         />
         <input
           type="text"
+          autoComplete="off"
           placeholder="session_id"
           aria-label="session_id 필터"
           class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--text-strong)] w-40 font-mono"
@@ -805,6 +807,7 @@ export function TelemetryUnified() {
         />
         <input
           type="text"
+          autoComplete="off"
           placeholder="operation_id"
           aria-label="operation_id 필터"
           class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--text-strong)] w-40 font-mono"
@@ -813,6 +816,7 @@ export function TelemetryUnified() {
         />
         <input
           type="text"
+          autoComplete="off"
           placeholder="worker_run_id"
           aria-label="worker_run_id 필터"
           class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--text-strong)] w-40 font-mono"

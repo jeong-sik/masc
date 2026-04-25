@@ -60,6 +60,7 @@ export function SessionTraceFilter({ agentName }: { agentName: string }) {
       <div class="relative">
         <input
           type="text"
+          autoComplete="off"
           placeholder="이벤트 검색..."
           aria-label="이벤트 검색"
           value=${searchQuery}

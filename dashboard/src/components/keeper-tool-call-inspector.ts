@@ -163,6 +163,7 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
         </div>
         <input
           type="text"
+          autoComplete="off"
           placeholder="도구 필터"
           aria-label="도구 필터"
           aria-label="도구 필터"

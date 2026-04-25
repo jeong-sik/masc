@@ -553,7 +553,7 @@ export function MemorySubsystems() {
   const showArch = useSignal(false)
 
   return html`
-    <div class="space-y-6">
+    <div class="space-y-6" role="region" aria-label="메모리 서브시스템">
       <div class="rounded border border-[var(--white-10)] bg-[var(--white-5)] px-3 py-2 text-xs text-[var(--text-muted)]">
         이 화면은 <span class="text-[var(--text-muted)] font-medium">global memory surface</span>만 보여줍니다.
         institution episodes와 Hebbian graph는 여기서 보고,
@@ -564,6 +564,8 @@ export function MemorySubsystems() {
       <section>
         <button
           onClick=${() => (showArch.value = !showArch.value)}
+          aria-expanded=${showArch.value}
+          aria-label="아키텍처 데이터 흐름도 토글"
           class="w-full flex items-center justify-between p-2 bg-[var(--white-5)] rounded hover:bg-[var(--white-5)] transition-colors"
         >
           <span class="text-sm font-semibold text-[var(--text-muted)] flex items-center gap-2">
@@ -690,12 +692,14 @@ export function MemorySubsystems() {
         <div class="flex items-center gap-2 mb-3 flex-wrap">
           <input
             type="text"
+            aria-label="에피소드 검색"
             placeholder="검색 (summary, learnings, event_type...)"
             value=${searchQuery.value}
             onInput=${onSearchInput}
             class="flex-1 min-w-50 bg-[var(--white-5)] border border-[var(--white-10)] rounded px-2 py-1 text-sm text-[var(--text-muted)] placeholder:text-[var(--text-muted)] focus:border-[var(--white-10)]0 focus:outline-none"
           />
           <select
+            aria-label="키퍼 필터"
             value=${keeperFilter.value}
             onChange=${(e: Event) => (keeperFilter.value = (e.target as HTMLSelectElement).value)}
             class="bg-[var(--white-5)] border border-[var(--white-10)] rounded px-2 py-1 text-sm text-[var(--text-muted)] focus:border-[var(--white-10)]0 focus:outline-none"
@@ -706,6 +710,7 @@ export function MemorySubsystems() {
             )}
           </select>
           <select
+            aria-label="결과 필터"
             value=${outcomeFilter.value}
             onChange=${(e: Event) => (outcomeFilter.value = (e.target as HTMLSelectElement).value)}
             class="bg-[var(--white-5)] border border-[var(--white-10)] rounded px-2 py-1 text-sm text-[var(--text-muted)] focus:border-[var(--white-10)]0 focus:outline-none"
@@ -719,6 +724,7 @@ export function MemorySubsystems() {
             hasFilter
               ? html`<button
                   onClick=${clearFilters}
+                  aria-label="모든 필터 해제"
                   class="text-xs text-[var(--text-muted)] hover:text-[var(--text-muted)] px-2 py-1 border border-[var(--white-10)] rounded hover:border-[var(--white-10)]0"
                 >
                   필터 해제
@@ -750,7 +756,7 @@ export function MemorySubsystems() {
 
       ${
         error
-          ? html`<div class="text-xs text-[var(--warn)] mt-2">refresh error: ${error}</div>`
+          ? html`<div class="text-xs text-[var(--warn)] mt-2" role="alert">refresh error: ${error}</div>`
           : null
       }
     </div>

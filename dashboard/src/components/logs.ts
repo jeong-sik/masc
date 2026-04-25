@@ -434,6 +434,7 @@ export function LogViewer() {
             <button
               type="button"
               class="logs-refresh-btn rounded border border-[var(--accent-22)] bg-[var(--accent-10)] px-3 py-2 text-2xs font-medium text-[#dff3ff]"
+              aria-label="로그 새로고침"
               onClick=${() => {
                 latestSeq.value = null
                 logResource.reset()
@@ -447,7 +448,7 @@ export function LogViewer() {
         </div>
 
         ${logError ? html`
-          <div class="mx-4 mt-4 rounded border border-solid border-[#e05050] bg-[var(--brick-soft)] px-4 py-3 text-xs text-[#ffb3b3]">${logError}</div>
+          <div role="alert" class="mx-4 mt-4 rounded border border-solid border-[#e05050] bg-[var(--brick-soft)] px-4 py-3 text-xs text-[#ffb3b3]">${logError}</div>
         ` : null}
 
         <div class="px-3 pt-3">
@@ -462,7 +463,7 @@ export function LogViewer() {
 
         ${logEntries.length === 0
           ? html`
-              <div class="flex flex-1 items-center justify-center px-6 text-sm text-[var(--text-muted)]">
+              <div class="flex flex-1 items-center justify-center px-6 text-sm text-[var(--text-muted)]" role=${logLoading ? 'status' : undefined}>
                 ${logLoading ? '로그를 불러오는 중...' : '조건에 맞는 로그가 없습니다.'}
               </div>
             `

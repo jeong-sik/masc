@@ -567,16 +567,17 @@ export function VerificationRequestsPanel() {
   const showNoPendingHint = rows.length > 0 && pendingCount === 0
 
   return html`
-    <div class="flex flex-col gap-4">
+    <div class="flex flex-col gap-4" role="region" aria-label="검증 요청">
       <div class="flex items-center gap-3 flex-wrap">
         <button
           class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-3 py-1 text-xs text-[var(--text-strong)] hover:bg-[var(--bg-panel-hover)]"
+          aria-label="검증 요청 새로고침"
           onClick=${() => void loadData(resource)}
         >
           새로고침
         </button>
         ${current.loading
-          ? html`<span class="text-xs text-[var(--text-muted)]">로딩 중...</span>`
+          ? html`<span class="text-xs text-[var(--text-muted)]" role="status">로딩 중...</span>`
           : null}
         ${data?.updated_at
           ? html`<span class="text-xs text-[var(--text-muted)]">

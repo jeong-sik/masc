@@ -924,18 +924,18 @@ let sync_bootable_keeper_credentials (state : Mcp_server.server_state) =
   let keeper_names =
     Keeper_runtime.bootable_keeper_names state.Mcp_server.room_config
   in
+  let keeper_agent_names =
+    List.map Keeper_types_profile.keeper_agent_name keeper_names
+  in
   let synced_count, failed =
-    List.fold_left
-      (fun (synced_count, failed) keeper_name ->
-        let agent_name =
-          Keeper_types_profile.keeper_agent_name keeper_name
-        in
+    List.fold_left2
+      (fun (synced_count, failed) keeper_name agent_name ->
         match Auth.ensure_keeper_credential base_path ~agent_name with
         | Ok _ -> (synced_count + 1, failed)
         | Error err ->
             ( synced_count,
               (keeper_name, Types.masc_error_to_string err) :: failed ))
-      (0, []) keeper_names
+      (0, []) keeper_names keeper_agent_names
   in
   if synced_count > 0 then
     Log.Server.info
@@ -945,7 +945,46 @@ let sync_bootable_keeper_credentials (state : Mcp_server.server_state) =
   |> List.iter (fun (keeper_name, detail) ->
          Log.Server.error
            "startup keeper credential sync failed for %s: %s"
-           keeper_name detail)
+           keeper_name detail);
+  let rotation_outcomes =
+    Auth.rotate_shared_tokens_for_agents base_path
+      ~agent_names:keeper_agent_names
+  in
+  List.iter
+    (fun (outcome : Auth.rotation_outcome) ->
+      let successes, failures =
+        List.fold_left
+          (fun (ok, failed) (agent_name, result) ->
+             match result with
+             | Ok () -> (agent_name :: ok, failed)
+             | Error err ->
+                 ( ok,
+                   (agent_name, Types.masc_error_to_string err) :: failed ))
+          ([], []) outcome.rotated_agents
+      in
+      let success_count = List.length successes in
+      if success_count > 0 then begin
+        Prometheus.inc_counter
+          Prometheus.metric_auth_credential_token_rotated
+          ~labels:[
+            ("token_hash_prefix", outcome.token_hash_prefix);
+            ("scope", "bootable_keepers");
+          ]
+          ~delta:(float_of_int success_count)
+          ();
+        Log.Server.warn
+          "#10304 rotated %d bootable keeper credential(s) out of shared \
+           token group %s: [%s]"
+          success_count outcome.token_hash_prefix
+          (String.concat ", " (List.rev successes))
+      end;
+      List.rev failures
+      |> List.iter (fun (agent_name, detail) ->
+             Log.Server.error
+               "#10304 failed to rotate shared keeper credential for %s \
+                (token_hash_prefix=%s): %s"
+               agent_name outcome.token_hash_prefix detail))
+    rotation_outcomes
 
 let bootstrap_prompt_state (state : Mcp_server.server_state) =
   Config_dir_resolver.log_warnings ~context:"ServerBootstrap" ();

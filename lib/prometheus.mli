@@ -180,6 +180,15 @@ val metric_anti_rationalization_excuse_pattern : string
 val metric_cascade_strategy_decisions : string
 val metric_cascade_capacity_events : string
 val metric_keeper_invariant_violations : string
+val metric_keeper_dead_total : string
+(** Total keeper transitions to [Dead] phase after restart-budget exhaustion.
+    Labeled by [keeper] and [reason]. Operators should alert on any rate >0:
+    by construction Dead means the supervisor gave up and no further
+    restart will be attempted. *)
+val metric_keeper_near_exhaustion_total : string
+(** Total times a keeper restart attempt landed at
+    [restart_count = max_restarts - 1], i.e. one attempt away from Dead.
+    Soft pre-warning; labeled by [keeper]. *)
 val metric_oas_bus_subscriber_stream_depth : string
 val metric_oas_bus_publish_block_seconds : string
 val metric_oas_bus_publish : string

@@ -302,6 +302,72 @@ let test_sweep_restores_reconcile_gate_for_paused_keeper () =
       check bool "keeper registered after approval" true
         (Reg.is_registered ~base_path:config.base_path meta.name))
 
+(* ── Dead-state loud alert (PR-C) ──────────────────────── *)
+
+(* Reproduces the 2026-04-25 incident pattern: 8 keepers crashed silently
+   after the supervisor exhausted max_restarts. The ERROR log + Prometheus
+   counter + structured OAS event emitted from sweep_and_recover give
+   operators the signal that was missing. *)
+let test_max_restarts_exhaustion_emits_dead_alert () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.clear ();
+      Masc_mcp.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let name = "dead-alert-keeper" in
+      let meta = make_meta name in
+      (match KT.write_meta config meta with
+       | Ok () -> ()
+       | Error err -> fail err);
+      let reg = Reg.register ~base_path:config.base_path name meta in
+      (* Drive the entry to Crashed with restart_count already at the
+         default budget (5) so sweep takes the Dead branch on the first
+         pass, not the restart branch. *)
+      Eio.Promise.resolve reg.done_r (`Crashed "synthetic exhaustion");
+      Reg.set_failure_reason ~base_path:config.base_path name
+        (Some (Reg.Heartbeat_consecutive_failures 9));
+      let max_restarts =
+        Masc_mcp.Runtime_params.get
+          Masc_mcp.Governance_registry.keeper_supervisor_max_restarts
+      in
+      Reg.restore_supervisor_state ~base_path:config.base_path name
+        ~restart_count:max_restarts ~last_restart_ts:0.0 ~crash_log:[];
+      let baseline =
+        Masc_mcp.Prometheus.metric_total
+          Masc_mcp.Prometheus.metric_keeper_dead_total
+      in
+      let ctx : _ KT.context =
+        {
+          config;
+          agent_name = "supervisor";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = Some (Eio.Stdenv.net env);
+        }
+      in
+      Sup.sweep_and_recover ctx;
+      let after =
+        Masc_mcp.Prometheus.metric_total
+          Masc_mcp.Prometheus.metric_keeper_dead_total
+      in
+      check (float 0.001) "metric_keeper_dead_total incremented by 1"
+        (baseline +. 1.0) after;
+      (* Phase advanced to Dead. *)
+      let phase =
+        Reg.get_phase ~base_path:config.base_path name
+        |> Option.value ~default:Masc_mcp.Keeper_state_machine.Running
+      in
+      check bool "keeper phase advanced to Dead"
+        true (phase = Masc_mcp.Keeper_state_machine.Dead))
+
 (* ── Test runner ────────────────────────────────────────── *)
 
 let () =
@@ -341,5 +407,9 @@ let () =
     "reconcile_gate_recovery", [
       test_case "sweep restores reconcile gate for paused keeper" `Quick
         test_sweep_restores_reconcile_gate_for_paused_keeper;
+    ];
+    "dead_state_alert", [
+      test_case "max_restarts exhaustion emits Dead alert" `Quick
+        test_max_restarts_exhaustion_emits_dead_alert;
     ];
   ]

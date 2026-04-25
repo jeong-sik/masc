@@ -58,7 +58,7 @@ export function MeasurementCard({ snapshot }: { snapshot: KeeperCompositeSnapsho
           ` : null}
         </div>
       ` : html`
-        <div class="text-3xs text-[var(--text-dim)]">키퍼가 첫 턴을 완료하면 auto-rules가 여기 표시됩니다</div>
+        <div class="text-3xs text-[var(--text-dim)]" role="status">키퍼가 첫 턴을 완료하면 auto-rules가 여기 표시됩니다</div>
       `}
     </div>
   `

@@ -638,7 +638,7 @@ function JourneyCard({ record }: { record: JourneyRecord }) {
             aria-label="추가 정보 펼치기"
             onClick=${() => { showExtended.value = !showExtended.value }}
           >
-            ${showExtended.value ? '▼' : '▶'} 추가 정보
+            <span aria-hidden="true">${showExtended.value ? '▼' : '▶'}</span> 추가 정보
           </button>
           <div class="text-2xs text-[var(--text-dim)]">
             thinking, memory, turn, lifecycle, cascade
@@ -794,7 +794,7 @@ export function JourneyPanel() {
               query.value = (event.target as HTMLInputElement).value
             }}
           />
-          <div class="text-xs text-[var(--text-muted)]">
+          <div class="text-xs text-[var(--text-muted)]" role="status">
             ${query.value.trim() !== '' ? `${visible.length} / ${records.length}개 표시` : `${records.length}개 흐름`}
           </div>
         </div>

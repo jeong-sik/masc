@@ -196,6 +196,7 @@ export function PlanningPanel() {
         onChange=${updateViewParam}
         size="sm"
         tone="accent"
+        ariaLabel="기획 뷰 선택"
       />
       <${CoordinationHealthPanel} />
       ${view === 'goal-tree'

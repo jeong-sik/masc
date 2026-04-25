@@ -213,7 +213,7 @@ export function KeeperChatPanel({ name }: { name: string }) {
             value=${query}
             onInput=${(e: Event) => { searchQuery.value = (e.target as HTMLInputElement).value }}
           />
-          <span class="inline-flex items-center rounded-sm border border-[var(--accent-20)] bg-[var(--accent-10)] px-2.5 py-1 text-2xs font-medium text-[var(--text-strong)]">
+          <span class="inline-flex items-center rounded-sm border border-[var(--accent-20)] bg-[var(--accent-10)] px-2.5 py-1 text-2xs font-medium text-[var(--text-strong)]" role="status">
             ${hasQuery ? `${filteredMessages.length} / ${messages.length}개 메시지` : `${messages.length}개 메시지`}
           </span>
         </div>

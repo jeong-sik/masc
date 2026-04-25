@@ -151,7 +151,7 @@ export function VerificationSpecsPanel() {
           ? html`<span class="text-xs text-[var(--text-muted)]">specs · ${data.updated_at}</span>`
           : null}
         ${data
-          ? html`<span class="text-xs text-[var(--text-muted)]">
+          ? html`<span class="text-xs text-[var(--text-muted)]" role="status">
               ${categoryFilter.value === 'all' && !searchQuery.value
                 ? `총 ${data.count}건`
                 : `${filtered.length} / ${data.count}건`}

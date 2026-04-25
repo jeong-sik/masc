@@ -20,12 +20,15 @@
 import { html } from 'htm/preact'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 
+import { currentDashboardActor } from '../api/core'
 import { fetchKeepersComposite } from '../api/keeper'
 import type {
   FleetCompositeSnapshot,
   KeeperCompositeSnapshot,
 } from '../api/keeper'
 import { fleetCompositeSnapshot } from '../composite-signals'
+import { dispatchOperatorAction } from '../operator-store'
+import { showToast } from './common/toast'
 import {
   displayState,
   extractLaneValue,
@@ -144,6 +147,8 @@ export type FleetRuntimeAttention = {
   level: FleetRuntimeAttentionLevel
   label: string
   reason: string
+  cause: string
+  nextStep: string
   title: string
   ageSec: number | null
 }
@@ -156,11 +161,50 @@ export type FleetRuntimeTallies = {
   total: number
 }
 
+export type FleetRuntimeAssistRequest = {
+  keeperName: string
+  snapshot: KeeperCompositeSnapshot
+  attention: FleetRuntimeAttention
+  message: string
+}
+
+export type FleetRuntimeAssistHandler =
+  (request: FleetRuntimeAssistRequest) => Promise<void> | void
+
 const RUNTIME_ATTENTION_CLASS: Record<FleetRuntimeAttentionLevel, string> = {
   ok: 'bg-[var(--ok-10)] text-[var(--ok)] border-[var(--ok-20)]',
   stale: 'bg-[var(--warn-10)] text-[var(--warn)] border-[var(--warn-20)]',
   idle: 'bg-[var(--warn-10)] text-[var(--warn)] border-[var(--warn-20)]',
   blocked: 'bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-20)]',
+}
+
+export type FleetCellPresentation = {
+  label: string
+  className: string
+  title: string
+  runtimePhaseConflict: boolean
+}
+
+export function fleetCellPresentation(
+  axis: LaneKey,
+  raw: string,
+  attention: FleetRuntimeAttention,
+): FleetCellPresentation {
+  const baseLabel = displayState(raw)
+  if (axis === 'phase' && attention.level !== 'ok') {
+    return {
+      label: `${baseLabel} · ${attention.label}`,
+      className: RUNTIME_ATTENTION_CLASS[attention.level],
+      title: `KSM ${raw} · runtime ${attention.label} · 원인: ${attention.cause} · 다음: ${attention.nextStep}`,
+      runtimePhaseConflict: true,
+    }
+  }
+  return {
+    label: baseLabel,
+    className: chipClassFor(raw),
+    title: raw,
+    runtimePhaseConflict: false,
+  }
 }
 
 function parseEpochSeconds(value: string | null | undefined): number | null {
@@ -234,6 +278,125 @@ function hasBlockingExecutionEvidence(snapshot: KeeperCompositeSnapshot): boolea
   return false
 }
 
+function blockingCause(snapshot: KeeperCompositeSnapshot): string {
+  const execution = snapshot.execution
+  if (!execution) return 'blocking execution evidence present'
+  const parts: string[] = []
+  if (execution.operator_disposition === 'pause_human') {
+    parts.push(
+      execution.operator_disposition_reason
+        ? `operator pause: ${execution.operator_disposition_reason}`
+        : 'operator pause requested',
+    )
+  }
+  if (execution.tool_contract_result === 'missing_required_tool_use') {
+    parts.push('tool contract: missing_required_tool_use')
+  } else if (execution.tool_contract_result === 'unknown' && execution.error != null) {
+    parts.push('tool contract unknown with execution error')
+  }
+  if (execution.terminal_reason_code && execution.terminal_reason_code !== 'completed') {
+    parts.push(`terminal: ${execution.terminal_reason_code}`)
+  }
+  if (execution.error?.kind) {
+    parts.push(`error: ${execution.error.kind}`)
+  }
+  if (execution.outcome === 'error' && parts.length === 0) {
+    parts.push('execution outcome: error')
+  }
+  return parts.length > 0 ? parts.join(' · ') : 'blocking execution evidence present'
+}
+
+function blockingNextStep(snapshot: KeeperCompositeSnapshot): string {
+  const execution = snapshot.execution
+  if (!execution) return 'latest execution receipt 확인'
+  if (execution.tool_contract_result === 'missing_required_tool_use') {
+    return '필수 tool contract를 만족시키거나 task/preset 조정'
+  }
+  if (execution.operator_disposition === 'pause_human') {
+    return 'operator gate/approval 상태와 최신 receipt 확인'
+  }
+  if (execution.terminal_reason_code && execution.terminal_reason_code !== 'completed') {
+    return `terminal=${execution.terminal_reason_code} receipt 확인`
+  }
+  if (execution.error?.kind) {
+    return `error=${execution.error.kind} 로그와 receipt 확인`
+  }
+  return 'latest execution receipt 확인'
+}
+
+function staleCause(snapshot: KeeperCompositeSnapshot, ageText: string): string {
+  const receiptReason = snapshot.execution?.operator_disposition_reason
+  const base = snapshot.phase === 'Running'
+    ? 'KSM=Running이지만 live turn 없음'
+    : `live turn 없음 · KSM=${snapshot.phase}`
+  const receipt = receiptReason ? ` · last receipt: ${receiptReason}` : ''
+  return `${base} · latest ${ageText}${receipt}`
+}
+
+function staleNextStep(snapshot: KeeperCompositeSnapshot, latest: number | null): string {
+  if (latest == null) {
+    return 'turn 시작/keepalive 이벤트가 composite로 들어오는지 확인'
+  }
+  if (snapshot.phase === 'Running') {
+    return 'keeper keepalive와 turn 시작 이벤트 경로 확인'
+  }
+  return `phase=${snapshot.phase} 전환 또는 재시작 경로 확인`
+}
+
+export function buildRuntimeAssistPrompt(
+  keeperName: string,
+  snapshot: KeeperCompositeSnapshot,
+  attention: FleetRuntimeAttention,
+): string {
+  const breaker = snapshot.circuit_breaker?.state ?? 'clean'
+  const receipt = snapshot.execution
+    ? JSON.stringify({
+      outcome: snapshot.execution.outcome,
+      terminal_reason_code: snapshot.execution.terminal_reason_code,
+      operator_disposition: snapshot.execution.operator_disposition,
+      operator_disposition_reason: snapshot.execution.operator_disposition_reason,
+      tool_contract_result: snapshot.execution.tool_contract_result,
+      error_kind: snapshot.execution.error?.kind ?? null,
+      error_preview: snapshot.execution.error?.message_preview ?? null,
+    })
+    : 'none'
+  return [
+    `감독형 런타임 진단 요청: ${keeperName}`,
+    '',
+    'Fleet FSM에서 이 keeper가 attention 상태입니다. 자동 복구를 바로 실행하지 말고 원인, 증거, 안전한 해결 후보를 짧게 제안하세요.',
+    '',
+    `attention=${attention.level} label=${attention.label}`,
+    `cause=${attention.cause}`,
+    `next_hint=${attention.nextStep}`,
+    `evidence=${attention.reason}`,
+    `is_live=${String(snapshot.is_live)}`,
+    `KSM=${snapshot.phase} KTC=${snapshot.turn_phase} KDP=${snapshot.decision.stage} KCL=${snapshot.cascade.state} KMC=${snapshot.compaction.stage} KCB=${breaker}`,
+    `last_receipt=${receipt}`,
+    '',
+    '응답 형식:',
+    '1. 판정: 실제 막힘인지, 단순 idle/stale 표시인지',
+    '2. 근거: 어떤 receipt/FSM 신호를 봤는지',
+    '3. resolve 후보: keeper_probe, keeper_recover, operator 승인, task/preset 수정 중 무엇이 맞는지',
+    '4. 위험: 실행 전 사람 확인이 필요한 항목',
+  ].join('\n')
+}
+
+async function requestRuntimeAssistViaOperator(
+  request: FleetRuntimeAssistRequest,
+): Promise<void> {
+  await dispatchOperatorAction({
+    actor: currentDashboardActor(),
+    action_type: 'keeper_message',
+    target_type: 'keeper',
+    target_id: request.keeperName,
+    payload: {
+      direct_reply: true,
+      message: request.message,
+    },
+  })
+  showToast(`${request.keeperName} AI 진단 요청을 보냈습니다`, 'success')
+}
+
 export function runtimeAttentionForSnapshot(
   snapshot: KeeperCompositeSnapshot,
   generatedAt: number,
@@ -243,42 +406,58 @@ export function runtimeAttentionForSnapshot(
   const ageText = formatAge(ageSec)
   const evidence = executionEvidence(snapshot)
   const evidenceText = evidence.length > 0 ? evidence.join(' · ') : 'no blocking evidence'
-  const title = `${evidenceText} · latest activity ${ageText}`
   const blocked = hasBlockingExecutionEvidence(snapshot)
   const idleComposite = isIdleComposite(snapshot)
 
   if (blocked) {
+    const cause = blockingCause(snapshot)
+    const nextStep = blockingNextStep(snapshot)
     return {
       level: 'blocked',
       label: '정체',
       reason: evidenceText,
-      title,
+      cause,
+      nextStep,
+      title: `원인: ${cause} · 다음: ${nextStep} · 증거: ${evidenceText} · latest activity ${ageText}`,
       ageSec,
     }
   }
   if (!snapshot.is_live) {
+    const cause = staleCause(snapshot, ageText)
+    const nextStep = staleNextStep(snapshot, latest)
     return {
       level: 'stale',
       label: 'stale',
       reason: evidenceText,
-      title,
+      cause,
+      nextStep,
+      title: `원인: ${cause} · 다음: ${nextStep} · 증거: ${evidenceText}`,
       ageSec,
     }
   }
   if (idleComposite && ageSec != null && ageSec >= LONG_IDLE_SECONDS) {
+    const cause = `idle composite가 ${ageText} 유지`
+    const nextStep = 'backlog, admission, trigger가 없는지 확인'
     return {
       level: 'idle',
       label: '무전환',
       reason: `idle composite · latest activity ${ageText}`,
-      title,
+      cause,
+      nextStep,
+      title: `원인: ${cause} · 다음: ${nextStep} · 증거: ${evidenceText}`,
       ageSec,
     }
   }
+  const cause = snapshot.is_live
+    ? `live turn 관측 중 · latest ${ageText}`
+    : `latest ${ageText}`
   return {
     level: 'ok',
     label: 'live',
     reason: ageText,
-    title,
+    cause,
+    nextStep: '조치 불필요',
+    title: `원인: ${cause} · 증거: ${evidenceText}`,
     ageSec,
   }
 }
@@ -398,6 +577,7 @@ export function tallyInvariantViolations(
 
 interface FleetFsmMatrixProps {
   onSelectKeeper?: (name: string) => void
+  onRequestRuntimeAssist?: FleetRuntimeAssistHandler
   // Injectable for tests.
   fetcher?: () => Promise<FleetCompositeSnapshot>
   pollIntervalMs?: number
@@ -411,6 +591,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState<boolean>(true)
   const [query, setQuery] = useState<string>('')
+  const [assistBusy, setAssistBusy] = useState<Set<string>>(() => new Set())
   const lastStreamedAtRef = useRef<number | null>(null)
   // Observation ring. Ref rather than state because pushObservation
   // returns a fresh record per tick and we pair it with a setData call
@@ -427,6 +608,28 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
     setError(null)
     setLoading(false)
   }, [])
+
+  const requestRuntimeAssist = useCallback(async (
+    keeperName: string,
+    snapshot: KeeperCompositeSnapshot,
+    attention: FleetRuntimeAttention,
+  ) => {
+    const handler = props.onRequestRuntimeAssist ?? requestRuntimeAssistViaOperator
+    const message = buildRuntimeAssistPrompt(keeperName, snapshot, attention)
+    setAssistBusy(prev => new Set(prev).add(keeperName))
+    try {
+      await handler({ keeperName, snapshot, attention, message })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'AI 진단 요청에 실패했습니다'
+      showToast(message, 'error')
+    } finally {
+      setAssistBusy(prev => {
+        const next = new Set(prev)
+        next.delete(keeperName)
+        return next
+      })
+    }
+  }, [props.onRequestRuntimeAssist])
 
   useEffect(() => {
     if (!allowStreamedData) return
@@ -635,6 +838,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
                 rowTone = 'border-l-2 border-[var(--warn-20)]'
               }
               const name = inferKeeperNameFrom(snap)
+              const assisting = assistBusy.has(name)
               return html`
                 <tr
                   data-keeper=${name}
@@ -643,7 +847,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
                 >
                   <td class="px-3 py-2 font-mono text-[var(--text-muted)]">${name}</td>
                   <td class="px-3 py-2 align-top">
-                    <div class="flex max-w-56 flex-col gap-1">
+                    <div class="flex max-w-72 flex-col gap-1">
                       <span
                         data-runtime-attention
                         data-runtime-level=${attention.level}
@@ -652,16 +856,41 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
                       >${attention.label}</span>
                       <span
                         data-runtime-evidence
-                        class="truncate text-3xs text-[var(--text-muted)]0"
+                        data-runtime-cause
+                        class="text-3xs leading-snug text-[var(--text-muted)]0"
                         title=${attention.title}
                       >
-                        ${attention.reason}
+                        원인: ${attention.cause}
                       </span>
+                      <span
+                        data-runtime-next
+                        class="text-3xs leading-snug text-[var(--text-muted)]0"
+                        title=${attention.title}
+                      >
+                        다음: ${attention.nextStep}
+                      </span>
+                      ${attention.level !== 'ok'
+                        ? html`
+                            <button
+                              type="button"
+                              data-runtime-assist
+                              class="self-start rounded border border-[var(--white-10)] bg-[var(--white-5)] px-2 py-0.5 text-3xs font-semibold text-[var(--accent)] hover:bg-[var(--white-10)] disabled:cursor-not-allowed disabled:opacity-50"
+                              title="현재 원인/증거를 keeper LLM에 보내 감독형 진단을 요청합니다"
+                              disabled=${assisting}
+                              onClick=${(event: MouseEvent) => {
+                                event.stopPropagation()
+                                void requestRuntimeAssist(name, snap, attention)
+                              }}
+                            >
+                              ${assisting ? '진단 중' : 'AI 진단'}
+                            </button>
+                          `
+                        : null}
                     </div>
                   </td>
                   ${AXES.map(a => {
                     const raw = extractLaneValue(snap, a.key)
-                    const cls = chipClassFor(raw)
+                    const cell = fleetCellPresentation(a.key, raw, attention)
                     const series = historyRef.current[name]?.[a.key] ?? [raw]
                     return html`
                       <td class="px-3 py-2 align-top">
@@ -669,8 +898,10 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
                           <span
                             data-cell
                             data-axis=${a.key}
-                            class="inline-block self-start rounded border px-2 py-0.5 ${cls}"
-                          >${displayState(raw)}</span>
+                            data-runtime-phase-conflict=${cell.runtimePhaseConflict ? 'true' : 'false'}
+                            class="inline-block self-start rounded border px-2 py-0.5 ${cell.className}"
+                            title=${cell.title}
+                          >${cell.label}</span>
                           <div
                             data-spark
                             data-axis=${a.key}

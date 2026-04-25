@@ -1,0 +1,49 @@
+(** Per-caller subprocess execution timeout SSOT (#10426).
+
+    See {!Env_config_oas_bridge} for the original precedent (#10094). *)
+
+(** Caller variants — one per code site that previously held a
+    hardcoded [~timeout_sec:N.N] literal.  Add a new variant when a
+    new exec-timeout site emerges; otherwise use [Unknown of string]. *)
+type caller =
+  | Shell
+  | Fs
+  | Preflight
+  | Repo_readiness
+  | Sandbox
+  | Pr_review
+  | Dispatch
+  | Memory_audit
+  | Alerting
+  | Gh_shared
+  | Status_detail
+  | Turn_sandbox
+  | Turn_up
+  | Unknown of string
+
+(** [caller_key c] is the lowercase identifier embedded in env var
+    names and Prometheus labels. *)
+val caller_key : caller -> string
+
+(** [known_callers ()] exposes the typed-default table for pinning
+    in tests. *)
+val known_callers : unit -> caller list
+
+(** [known_default_sec c] is the hardcoded default for [c],
+    or [None] for [Unknown _].  Tests use this to verify the
+    per-caller defaults haven't drifted. *)
+val known_default_sec : caller -> float option
+
+(** [per_caller_env_var ~caller] is [MASC_EXEC_TIMEOUT_<CALLER>_SEC]. *)
+val per_caller_env_var : caller:caller -> string
+
+(** [global_env_var] is [MASC_EXEC_TIMEOUT_DEFAULT_SEC] — only
+    consulted for [Unknown] callers. *)
+val global_env_var : string
+
+(** [global_default_sec] is the final fallback (30.0s). *)
+val global_default_sec : float
+
+(** [timeout_sec ~caller ()] resolves the subprocess timeout for
+    [caller].  See module doc for lookup order. *)
+val timeout_sec : caller:caller -> unit -> float

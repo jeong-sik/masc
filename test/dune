@@ -1672,3 +1672,9 @@
  (name keeper_tool_matrix_case_runner)
  (modules keeper_tool_matrix_case_runner)
  (libraries masc_test_deps keeper_tool_matrix_cases_lib))
+
+; Per-caller subprocess exec timeout SSOT (#10426)
+(test
+ (name test_env_config_exec_timeout_10426)
+ (modules test_env_config_exec_timeout_10426)
+ (libraries masc_test_deps))

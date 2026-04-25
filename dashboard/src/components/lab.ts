@@ -19,7 +19,7 @@ export function Lab() {
   const section = currentSection()
 
   return html`
-    <div>
+    <div role="region" aria-label="Lab">
       ${section === 'tools' ? html`
         <${Tools} />
       ` : null}

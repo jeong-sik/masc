@@ -661,7 +661,7 @@ export function FleetTelemetryPanel() {
   }
 
   if (value.error) {
-    return html`<div class="p-4 text-2xs text-[var(--bad-light)]">${value.error}</div>`
+    return html`<div class="p-4 text-2xs text-[var(--bad-light)]" role="alert">${value.error}</div>`
   }
 
   const handleReset = async (name: string) => {
@@ -684,7 +684,7 @@ export function FleetTelemetryPanel() {
   const offlineCount = value.rows.length - activeCount
 
   return html`
-    <div class="flex flex-col gap-4 p-4">
+    <div class="flex flex-col gap-4 p-4" role="region" aria-label="Keeper 텔레메트리">
       <div class="flex items-start justify-between gap-3">
         <div class="flex items-center gap-3">
           <h2 class="text-sm font-medium">Keeper 텔레메트리</h2>

@@ -16,7 +16,7 @@ export function Live({ variant = 'full' }: LiveProps) {
   const observatoryMode = variant === 'observatory'
 
   return html`
-    <div class="flex flex-col gap-5">
+    <div class="flex flex-col gap-5" role="region" aria-label="라이브 모니터">
       ${!observatoryMode ? html`
         <section class="monitor-surface-card monitor-surface-card-strong px-5 py-4">
           <div class="flex flex-col gap-2">

@@ -7,7 +7,7 @@ import { OperationsPanel } from './operations-panel'
 
 export function Operations() {
   return html`
-    <div class="flex flex-col gap-5">
+    <div class="flex flex-col gap-5" role="region" aria-label="운영">
       <div class="transition-opacity duration-300">
         <${OperationsPanel} />
       </div>

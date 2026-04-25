@@ -174,9 +174,20 @@ let fsync_path path =
            is still durable to the extent the underlying FS offers. *)
         ())
 
+(* #10205 finding 2: keep the atomic-tmp filename shape in one place
+   so the writer ([save_file_atomic]) and the orphan-sweep matcher
+   ([is_atomic_orphan_name]) cannot drift independently.  A
+   prefix/suffix change on one side without the other would cause
+   the sweep to either miss live orphans or scoop unrelated tmp
+   files. *)
+let atomic_tmp_prefix = ".atomic_"
+let atomic_tmp_suffix = ".tmp"
+
 let save_file_atomic (path : string) (content : string) : (unit, string) result =
   let dir = Filename.dirname path in
-  let tmp = Filename.temp_file ~temp_dir:dir ".atomic_" ".tmp" in
+  let tmp =
+    Filename.temp_file ~temp_dir:dir atomic_tmp_prefix atomic_tmp_suffix
+  in
   try
     save_file tmp content;
     fsync_path tmp;
@@ -211,13 +222,12 @@ let save_file_atomic (path : string) (content : string) : (unit, string) result 
    - [preserved]: number of non-zero orphans moved to the
      recovered directory. *)
 let is_atomic_orphan_name name =
-  let prefix = ".atomic_" and suffix = ".tmp" in
   let n = String.length name in
-  let p = String.length prefix in
-  let s = String.length suffix in
+  let p = String.length atomic_tmp_prefix in
+  let s = String.length atomic_tmp_suffix in
   n >= p + s
-  && String.sub name 0 p = prefix
-  && String.sub name (n - s) s = suffix
+  && String.sub name 0 p = atomic_tmp_prefix
+  && String.sub name (n - s) s = atomic_tmp_suffix
 
 let cleanup_atomic_orphans
     ~(base_path : string)
@@ -226,10 +236,14 @@ let cleanup_atomic_orphans
   let recovered_dir = Filename.concat base_path recovered_subdir in
   let deleted = ref 0 in
   let preserved = ref 0 in
+  (* #10205 finding 3: previous body reinvented [mkdir_p] inline with
+     [Sys.file_exists]+[Unix.mkdir]+[Unix.Unix_error _] swallowing.  The
+     same module already exposes [mkdir_p_unix], which is recursive,
+     idempotent (handles [EEXIST] precisely instead of swallowing every
+     [Unix_error]), and correct when [base_path] itself does not exist
+     yet (boot-time race). *)
   let ensure_recovered_dir () =
-    if not (Sys.file_exists recovered_dir) then
-      try Unix.mkdir recovered_dir 0o755
-      with Unix.Unix_error _ -> ()
+    try mkdir_p_unix recovered_dir with Unix.Unix_error _ -> ()
   in
   let handle_file dir name =
     let path = Filename.concat dir name in
@@ -247,29 +261,34 @@ let cleanup_atomic_orphans
         (try Sys.rename path target; incr preserved
          with Sys_error _ | Unix.Unix_error _ -> ())
   in
-  let scan_dir dir =
-    match Sys.readdir dir with
-    | exception Sys_error _ -> ()
-    | entries ->
-        Array.iter
-          (fun name ->
-            if is_atomic_orphan_name name then handle_file dir name)
-          entries
+  let scan_dir dir entries =
+    Array.iter
+      (fun name ->
+        if is_atomic_orphan_name name then handle_file dir name)
+      entries
   in
-  scan_dir base_path;
-  (match Sys.readdir base_path with
-   | exception Sys_error _ -> ()
-   | entries ->
-       Array.iter
-         (fun name ->
-           if name = recovered_subdir then ()
-           else
-             let sub = Filename.concat base_path name in
-             match Unix.stat sub with
-             | exception Unix.Unix_error _ -> ()
-             | stat when stat.Unix.st_kind = Unix.S_DIR -> scan_dir sub
-             | _ -> ())
-         entries);
+  let read_dir_entries dir =
+    match Sys.readdir dir with
+    | exception Sys_error _ -> [||]
+    | entries -> entries
+  in
+  (* #10205 finding 4: previous body called [Sys.readdir base_path]
+     twice — once via [scan_dir] for orphan-find, once for the
+     subdirectory recursion pass.  Read once, run both passes against
+     the cached entry array. *)
+  let entries = read_dir_entries base_path in
+  scan_dir base_path entries;
+  Array.iter
+    (fun name ->
+      if name = recovered_subdir then ()
+      else
+        let sub = Filename.concat base_path name in
+        match Unix.stat sub with
+        | exception Unix.Unix_error _ -> ()
+        | stat when stat.Unix.st_kind = Unix.S_DIR ->
+            scan_dir sub (read_dir_entries sub)
+        | _ -> ())
+    entries;
   (!deleted, !preserved)
 
 (** Append string to file.

@@ -47,6 +47,74 @@ let sessions_mutex = Eio.Mutex.create ()
 
 let with_sessions_rw f = Eio_guard.with_mutex sessions_mutex f
 
+(** Side index mapping each dashboard slice to the set of session IDs
+    currently subscribed to it.  Phase 1 of the slice-indexed fanout RFC
+    (#10119): the index is maintained at subscribe / unsubscribe / cleanup
+    time but the broadcast fanout still iterates every session.  Phase 2
+    consults this index to skip raw-SSE-forwards to sessions whose route
+    does not subscribe to the event's slice.
+
+    Inner [Hashtbl.t] is keyed by [session_id] with [unit] values — a set.
+    Mutated only under [sessions_mutex], so the consistency invariant
+    matches [sessions]: a session present in [slice_index.(s)] is present
+    in [sessions] until [cleanup_session] runs. *)
+let slice_index : (string, (string, unit) Hashtbl.t) Hashtbl.t =
+  Hashtbl.create 8
+
+let slice_index_add_locked ~session_id ~slice =
+  let set =
+    match Hashtbl.find_opt slice_index slice with
+    | Some s -> s
+    | None ->
+        let s = Hashtbl.create 4 in
+        Hashtbl.add slice_index slice s;
+        s
+  in
+  Hashtbl.replace set session_id ()
+
+let slice_index_remove_locked ~session_id ~slice =
+  match Hashtbl.find_opt slice_index slice with
+  | None -> ()
+  | Some set ->
+      Hashtbl.remove set session_id;
+      if Hashtbl.length set = 0 then Hashtbl.remove slice_index slice
+
+let slice_index_remove_session_locked session_id =
+  Hashtbl.iter
+    (fun _slice set -> Hashtbl.remove set session_id)
+    slice_index;
+  Hashtbl.filter_map_inplace
+    (fun _slice set -> if Hashtbl.length set = 0 then None else Some set)
+    slice_index
+
+(** Test/debug helper: return the session IDs currently indexed under
+    [slice], in unspecified order.  Acquires [sessions_mutex]. *)
+let slice_index_subscribers slice =
+  with_sessions_rw (fun () ->
+      match Hashtbl.find_opt slice_index slice with
+      | None -> []
+      | Some set -> Hashtbl.fold (fun sid () acc -> sid :: acc) set [])
+
+(** Test/debug helper: total (slice × session) entries across all slices.
+    Equals the sum of subscribed-slice counts over every session. *)
+let slice_index_size () =
+  with_sessions_rw (fun () ->
+      Hashtbl.fold
+        (fun _slice set acc -> acc + Hashtbl.length set)
+        slice_index 0)
+
+(** Test-only: drive the slice index without needing a fully constructed
+    WS session.  Production code paths reach the same helpers via
+    [dashboard_subscribe] / [dashboard_unsubscribe] / [cleanup_session]. *)
+let __test_slice_index_add ~session_id ~slice =
+  with_sessions_rw (fun () -> slice_index_add_locked ~session_id ~slice)
+
+let __test_slice_index_remove ~session_id ~slice =
+  with_sessions_rw (fun () -> slice_index_remove_locked ~session_id ~slice)
+
+let __test_slice_index_remove_session session_id =
+  with_sessions_rw (fun () -> slice_index_remove_session_locked session_id)
+
 (** Generate a unique session ID. *)
 let next_id =
   let counter = Atomic.make 0 in
@@ -300,10 +368,14 @@ let dashboard_subscribe ~session_id ?route ~slices () =
         | bad :: _ ->
             Error (Printf.sprintf "unsupported dashboard slice: %s" bad)
         | [] ->
-            Hashtbl.clear session.dashboard_slices;
-            List.iter
-              (fun slice -> Hashtbl.replace session.dashboard_slices slice ())
-              slices;
+            with_sessions_rw (fun () ->
+                slice_index_remove_session_locked session_id;
+                Hashtbl.clear session.dashboard_slices;
+                List.iter
+                  (fun slice ->
+                    Hashtbl.replace session.dashboard_slices slice ();
+                    slice_index_add_locked ~session_id ~slice)
+                  slices);
             session.dashboard_route <- route;
             Ok
               (`Assoc
@@ -320,11 +392,17 @@ let dashboard_unsubscribe ~session_id ?slices () =
       if not session.dashboard_authenticated then
         Error "dashboard/unsubscribe requires dashboard/hello first"
       else begin
-        (match slices with
-         | None -> Hashtbl.clear session.dashboard_slices
-         | Some slices ->
-             List.iter (fun slice -> Hashtbl.remove session.dashboard_slices slice)
-               slices);
+        with_sessions_rw (fun () ->
+            match slices with
+            | None ->
+                Hashtbl.clear session.dashboard_slices;
+                slice_index_remove_session_locked session_id
+            | Some slices ->
+                List.iter
+                  (fun slice ->
+                    Hashtbl.remove session.dashboard_slices slice;
+                    slice_index_remove_locked ~session_id ~slice)
+                  slices);
         Ok (`Assoc [ ("session", dashboard_session_result session) ])
       end
 
@@ -533,6 +611,7 @@ let cleanup_session session_id =
              with Eio.Cancel.Cancelled _ as e -> raise e
                 | exn -> Log.Server.warn "WS close failed for %s: %s" session_id (Printexc.to_string exn));
             Hashtbl.remove sessions session_id;
+            slice_index_remove_session_locked session_id;
             true)
   in
   Transport_metrics.set_ws_sessions

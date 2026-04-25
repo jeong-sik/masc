@@ -396,6 +396,97 @@ let test_ws_external_subscriber_count () =
     let final = Sse.external_subscriber_count () in
     Alcotest.(check int) "back to before" before final)
 
+(* ====== Slice index (Phase 1: bookkeeping only) ====== *)
+
+(* The slice index maps each dashboard slice to the set of session IDs
+   currently subscribed to it.  Phase 1 maintains the index at subscribe
+   / unsubscribe / cleanup time but does NOT yet rewire the broadcast
+   fanout (RFC #10119).  These tests pin add/remove/sweep semantics so
+   Phase 2 can rely on them. *)
+
+let test_slice_index_starts_empty_for_unknown_slice () =
+  Eio_main.run (fun _env ->
+    let subs = Ws.slice_index_subscribers "execution" in
+    (* The index is process-global state shared across tests, so we cannot
+       assert it is empty.  We can assert this specific session id is
+       not in it, which is the property the index exists to answer. *)
+    Alcotest.(check bool) "fresh session id not present"
+      true (not (List.mem "ws-slice-test-fresh" subs)))
+
+let test_slice_index_add_records_session () =
+  Eio_main.run (fun _env ->
+    let sid = "ws-slice-add-1" in
+    Ws.__test_slice_index_remove_session sid; (* defensive cleanup *)
+    Ws.__test_slice_index_add ~session_id:sid ~slice:"execution";
+    let subs = Ws.slice_index_subscribers "execution" in
+    Alcotest.(check bool) "session present after add"
+      true (List.mem sid subs);
+    Ws.__test_slice_index_remove_session sid)
+
+let test_slice_index_remove_specific_slice () =
+  Eio_main.run (fun _env ->
+    let sid = "ws-slice-remove-1" in
+    Ws.__test_slice_index_remove_session sid;
+    Ws.__test_slice_index_add ~session_id:sid ~slice:"execution";
+    Ws.__test_slice_index_add ~session_id:sid ~slice:"keepers";
+    Ws.__test_slice_index_remove ~session_id:sid ~slice:"execution";
+    let exec = Ws.slice_index_subscribers "execution" in
+    let keepers = Ws.slice_index_subscribers "keepers" in
+    Alcotest.(check bool) "removed from execution"
+      true (not (List.mem sid exec));
+    Alcotest.(check bool) "still in keepers"
+      true (List.mem sid keepers);
+    Ws.__test_slice_index_remove_session sid)
+
+let test_slice_index_remove_session_clears_all_slices () =
+  Eio_main.run (fun _env ->
+    let sid = "ws-slice-cleanup-1" in
+    Ws.__test_slice_index_remove_session sid;
+    List.iter
+      (fun slice -> Ws.__test_slice_index_add ~session_id:sid ~slice)
+      ["execution"; "keepers"; "transport"; "shell"];
+    Ws.__test_slice_index_remove_session sid;
+    List.iter
+      (fun slice ->
+        let subs = Ws.slice_index_subscribers slice in
+        Alcotest.(check bool)
+          (Printf.sprintf "session removed from %s" slice)
+          true (not (List.mem sid subs)))
+      ["execution"; "keepers"; "transport"; "shell"])
+
+let test_slice_index_size_reflects_pairs () =
+  Eio_main.run (fun _env ->
+    let sid_a = "ws-slice-size-a" in
+    let sid_b = "ws-slice-size-b" in
+    Ws.__test_slice_index_remove_session sid_a;
+    Ws.__test_slice_index_remove_session sid_b;
+    let baseline = Ws.slice_index_size () in
+    Ws.__test_slice_index_add ~session_id:sid_a ~slice:"execution";
+    Ws.__test_slice_index_add ~session_id:sid_a ~slice:"keepers";
+    Ws.__test_slice_index_add ~session_id:sid_b ~slice:"execution";
+    let after = Ws.slice_index_size () in
+    (* 2 entries for sid_a + 1 for sid_b = +3 over baseline *)
+    Alcotest.(check int) "size grew by exactly the new pair count"
+      3 (after - baseline);
+    Ws.__test_slice_index_remove_session sid_a;
+    Ws.__test_slice_index_remove_session sid_b;
+    let final = Ws.slice_index_size () in
+    Alcotest.(check int) "size returns to baseline after sweep"
+      baseline final)
+
+let test_slice_index_add_is_idempotent () =
+  Eio_main.run (fun _env ->
+    let sid = "ws-slice-idem" in
+    Ws.__test_slice_index_remove_session sid;
+    Ws.__test_slice_index_add ~session_id:sid ~slice:"execution";
+    Ws.__test_slice_index_add ~session_id:sid ~slice:"execution";
+    Ws.__test_slice_index_add ~session_id:sid ~slice:"execution";
+    let subs = Ws.slice_index_subscribers "execution" in
+    let occurrences = List.length (List.filter ((=) sid) subs) in
+    Alcotest.(check int) "session appears at most once after duplicate adds"
+      1 occurrences;
+    Ws.__test_slice_index_remove_session sid)
+
 let () =
   Alcotest.run "WebSocket Transport" [
     ("session_registry", [
@@ -462,5 +553,19 @@ let () =
         test_ws_dead_subscriber_auto_removed;
       Alcotest.test_case "subscriber count tracking" `Quick
         test_ws_external_subscriber_count;
+    ]);
+    ("slice_index", [
+      Alcotest.test_case "unknown slice yields no subscribers" `Quick
+        test_slice_index_starts_empty_for_unknown_slice;
+      Alcotest.test_case "add records session under slice" `Quick
+        test_slice_index_add_records_session;
+      Alcotest.test_case "remove targets only the named slice" `Quick
+        test_slice_index_remove_specific_slice;
+      Alcotest.test_case "remove_session sweeps every slice" `Quick
+        test_slice_index_remove_session_clears_all_slices;
+      Alcotest.test_case "size tracks (slice × session) pair count" `Quick
+        test_slice_index_size_reflects_pairs;
+      Alcotest.test_case "duplicate add is idempotent" `Quick
+        test_slice_index_add_is_idempotent;
     ]);
   ]

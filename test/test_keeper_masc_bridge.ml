@@ -242,6 +242,37 @@ let test_custom_keeps_registered_inline_board_tool () =
   Alcotest.(check bool) "drops unsupported inline tool" false
     (List.mem "masc_who" names)
 
+let with_masc_schema_ref schemas f =
+  let previous = !(KET.masc_schemas_ref) in
+  Fun.protect
+    ~finally:(fun () -> KET.masc_schemas_ref := previous)
+    (fun () ->
+      KET.masc_schemas_ref := schemas;
+      f ())
+
+let test_dashboard_tool_count_uses_schema_ssot () =
+  let bridge_name = "mcp__masc__masc_status" in
+  let schema : Types.tool_schema =
+    { name = bridge_name; description = ""; input_schema = `Assoc [] }
+  in
+  with_masc_schema_ref [ schema ] (fun () ->
+      let meta =
+        make_meta
+          ~tool_access:
+            (Masc_mcp.Keeper_types.Custom [ bridge_name ])
+          ()
+      in
+      let allowed = KET.keeper_allowed_tool_names meta in
+      Alcotest.(check bool) "schema bridge is allowed" true
+        (List.mem bridge_name allowed);
+      let json =
+        Masc_mcp.Server_dashboard_http_keeper_api.keeper_tools_response_json meta
+      in
+      let count =
+        Yojson.Safe.Util.(json |> member "active_masc_tool_count" |> to_int)
+      in
+      Alcotest.(check int) "dashboard counts schema-derived masc tools" 1 count)
+
 let test_tool_access_missing_migrates_legacy_standard_policy () =
   let names =
     allowed_names_of_json
@@ -700,6 +731,8 @@ let () =
             test_preset_with_also_allow_opens_extra_tool;
           Alcotest.test_case "custom filters board tools with keeper wrappers" `Quick
             test_custom_keeps_registered_inline_board_tool;
+          Alcotest.test_case "dashboard count uses schema SSOT" `Quick
+            test_dashboard_tool_count_uses_schema_ssot;
         ] );
       ( "custom_policy",
         [

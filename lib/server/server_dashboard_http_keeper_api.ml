@@ -100,10 +100,7 @@ let merge_keeper_trace_lines ~(config : Coord.config) ~(trace_id : string)
 
 let keeper_tools_response_json (meta : Keeper_types.keeper_meta) =
   let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  let masc_count =
-    List.length
-      (List.filter (fun name -> String.starts_with ~prefix:"masc_" name) allowed)
-  in
+  let masc_count = List.length (Keeper_exec_tools.keeper_masc_tool_names meta) in
   let tool_preset = Keeper_types.tool_access_preset meta.tool_access in
   let tool_also_allow = Keeper_types.tool_access_also_allowlist meta.tool_access in
   let tool_custom_allowlist =

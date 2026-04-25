@@ -25,11 +25,19 @@ let get_or_create_store ~base_path : Dated_jsonl.t =
 
 (* ── Serialization ────────────────────────────────────────── *)
 
+(* #10404: pre-fix this record stored only the head of [e.models] in
+   [model_id], silently discarding 6 of 7 loaded ollama models.  Across
+   2026-04-22..25 every one of 164 probes recorded "qwen3:8b" while
+   four cascades reference "qwen3.6:27b-coding-nvfp4".  Add a [models]
+   list that preserves the full probe payload, and keep [model_id]
+   populated with the head for any external reader that already
+   indexes by it. *)
 type probe_record = {
   ts : float;
   endpoint_url : string;
   healthy : bool;
   model_id : string option;
+  models : string list;
   ctx_size : int option;
   total_slots : int option;
   busy_slots : int option;
@@ -38,11 +46,13 @@ type probe_record = {
 
 let endpoint_to_record (e : Llm_provider.Discovery.endpoint_status) : probe_record =
   let open Llm_provider.Discovery in
+  let models = List.map (fun m -> m.id) e.models in
   {
     ts = Time_compat.now ();
     endpoint_url = e.url;
     healthy = e.healthy;
-    model_id = (match e.models with m :: _ -> Some m.id | [] -> None);
+    model_id = (match models with m :: _ -> Some m | [] -> None);
+    models;
     ctx_size = Option.map (fun (p : server_props) -> p.ctx_size) e.props;
     total_slots = Option.map (fun (s : slot_status) -> s.total) e.slots;
     busy_slots = Option.map (fun (s : slot_status) -> s.busy) e.slots;
@@ -57,8 +67,14 @@ let record_to_json (r : probe_record) : Yojson.Safe.t =
     ]
   in
   let opt key f = function Some v -> [(key, f v)] | None -> [] in
+  let models_field =
+    if r.models = [] then []
+    else
+      [ ("models", `List (List.map (fun s -> `String s) r.models)) ]
+  in
   let extras =
     opt "model_id" (fun s -> `String s) r.model_id
+    @ models_field
     @ opt "ctx_size" (fun n -> `Int n) r.ctx_size
     @ opt "total_slots" (fun n -> `Int n) r.total_slots
     @ opt "busy_slots" (fun n -> `Int n) r.busy_slots

@@ -10,6 +10,27 @@ val record_probe :
 (** Append probe results for all endpoints to today's JSONL file.
     Silently catches I/O failures (best-effort persistence). *)
 
+(** #10404: probe records previously stored only the head model in
+    [model_id], silently discarding additional models loaded on the
+    same endpoint.  [models] now carries the full list; [model_id]
+    stays populated with the head for backward compatibility with
+    existing JSONL readers that index by it. *)
+type probe_record = {
+  ts : float;
+  endpoint_url : string;
+  healthy : bool;
+  model_id : string option;
+  models : string list;
+  ctx_size : int option;
+  total_slots : int option;
+  busy_slots : int option;
+  idle_slots : int option;
+}
+
+val record_to_json : probe_record -> Yojson.Safe.t
+(** Serialise a probe record.  Exposed for unit tests; production code
+    calls it through [record_probe]. *)
+
 val read_recent :
   base_path:string -> count:int -> Yojson.Safe.t list
 (** Read the most recent [count] probe entries in chronological order. *)

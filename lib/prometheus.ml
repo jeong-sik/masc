@@ -289,6 +289,8 @@ let metric_after_turn_telemetry_missing =
   "masc_after_turn_telemetry_missing_total"
 let metric_after_turn_telemetry_zero_latency =
   "masc_after_turn_telemetry_zero_latency_total"
+let metric_after_turn_empty_model =
+  "masc_after_turn_empty_model_total"
 let metric_tasks = "masc_tasks_total"
 let metric_errors = "masc_errors_total"
 let metric_error_events = "masc_error_events_total"
@@ -355,6 +357,10 @@ let init () =
     "AfterTurn responses where response.telemetry was None." Counter;
   add metric_after_turn_telemetry_zero_latency
     "AfterTurn responses where telemetry was present but request_latency_ms was 0." Counter;
+  add metric_after_turn_empty_model
+    "AfterTurn responses whose top-level response.model was empty and had \
+     to be resolved from telemetry or an explicit sentinel (labels: \
+     keeper_name, source=telemetry_resolved|unknown_sentinel)." Counter;
   add metric_tasks "Total tasks processed" Counter;
   add metric_errors "Total errors" Counter;
   add metric_error_events

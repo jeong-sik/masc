@@ -117,6 +117,7 @@ val metric_llm_decode_tok_per_sec : string
 val metric_after_turn_hook : string
 val metric_after_turn_telemetry_missing : string
 val metric_after_turn_telemetry_zero_latency : string
+val metric_after_turn_empty_model : string
 val metric_tasks : string
 val metric_errors : string
 val metric_error_events : string

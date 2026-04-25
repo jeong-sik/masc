@@ -85,6 +85,46 @@ let canonical_model_id_of_telemetry ~model
       String.trim id
   | _ -> model
 
+(* #10083: sentinel label for metrics when [response.model] arrives
+   empty AND telemetry provides no canonical_model_id.  Keep the
+   merged #10103 vocabulary so existing dashboards keep one explicit
+   bucket for unattributed provider turns. [pricing_catalog_miss_total]
+   still fires; the sentinel only makes the miss debuggable. *)
+let empty_model_sentinel = "unknown_provider"
+
+let record_empty_model_fallback ~keeper_name ~source =
+  Prometheus.inc_counter
+    Prometheus.metric_after_turn_empty_model
+    ~labels:[ ("keeper_name", keeper_name); ("source", source) ] ()
+
+(* Normalize [response.model] for metric labels.  Three layers:
+     1. [response.model] if non-empty (normal path).
+     2. [canonical_model_id] from telemetry if non-empty (transport
+        omitted the top-level field but telemetry recovered it).
+     3. [empty_model_sentinel] - fail-loud so the metric bucket is
+        still searchable and [pricing_catalog_miss] carries a
+        diagnostic label.
+   Every fallback increments the AfterTurn empty-model counter with
+   [keeper_name] and [source] labels so we can see how often each
+   layer fires. *)
+let observed_model_label_of_response ?(keeper_name = "unknown_keeper")
+    (response : Oas.Types.api_response) =
+  let raw = response.model in
+  if String.trim raw <> "" then raw
+  else
+    let from_telemetry =
+      canonical_model_id_of_telemetry ~model:"" response.telemetry
+    in
+    if String.trim from_telemetry <> "" then begin
+      record_empty_model_fallback ~keeper_name
+        ~source:"telemetry_resolved";
+      from_telemetry
+    end else begin
+      record_empty_model_fallback ~keeper_name
+        ~source:"unknown_sentinel";
+      empty_model_sentinel
+    end
+
 let context_max_of_telemetry
     (telemetry : Oas.Types.inference_telemetry option) =
   match telemetry with
@@ -554,21 +594,14 @@ let make_hooks
       match event with
       | Oas.Hooks.AfterTurn { turn; response } ->
         let meta = !meta_ref in
-        (* #10083: OAS provider transports can return [response.model = ""]
-           on silent failure paths (kimi_cli empty-usage fallback, cascade
-           contract retry exhaustion).  Leaving it empty propagates to
-           every downstream metric label ([masc_after_turn_hook_total],
-           [masc_pricing_catalog_miss_total], [masc_llm_inference_duration_seconds])
-           as the literal key `""`, contaminating per-provider latency
-           histograms and making pricing catalog miss unobservable (which
-           provider is missing?).  Normalise to a stable sentinel
-           `unknown_provider` so the miss becomes grepable and
-           dashboards distinguish empty-model turns from legitimate ones.
-           CLAUDE.md anti-pattern #2: Unknown -> Permissive Default. *)
+        (* #10083: normalize empty [response.model] so metric labels
+           stay searchable and [pricing_catalog_miss] carries a
+           diagnostic label instead of the silent empty string.
+           Internal pricing/usage paths still see the resolved
+           [model] - pricing_for_model_opt on "unknown_provider" correctly
+           misses the catalog, matching the prior behaviour. *)
         let model =
-          match String.trim response.model with
-          | "" -> "unknown_provider"
-          | s -> s
+          observed_model_label_of_response ~keeper_name:meta.name response
         in
         let usage_trust =
           classify_usage_trust ?usage:response.usage ~model

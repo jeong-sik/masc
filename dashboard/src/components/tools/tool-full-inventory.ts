@@ -82,8 +82,8 @@ export function FullInventoryView({
   const directCallCount = inventory.filter(item => item.direct_call_allowed).length
 
   return html`
-    <div class="sticky top-[var(--header-h)] z-[var(--z-tab-sticky)] bg-[var(--backdrop-modal)] backdrop-blur-[8px] py-3 border-b border-[var(--card-border)]">
-      <div class="grid grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-3 my-4">
+    <div class="sticky top-[var(--header-h)] z-[var(--z-tab-sticky)] bg-[var(--backdrop-modal)] backdrop-blur-[8px] py-3 border-b border-[var(--card-border)]" role="region" aria-label="도구 인벤토리">
+      <div class="grid grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-3 my-4" role="group" aria-label="도구 통계">
         <div class="p-4 rounded border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col gap-1.5">
           <span class="text-[var(--text-strong)] text-3xl font-bold leading-none tabular-nums">${totalCount}</span>
           <span class="text-2xs text-[var(--text-muted)] uppercase tracking-wider font-medium">전체 도구</span>
@@ -118,6 +118,7 @@ export function FullInventoryView({
         ${(Object.keys(SURFACE_LABELS) as SurfaceFilter[]).map(key => html`
           <button type="button"
             class=${`px-3 py-1.5 rounded text-sm font-medium border transition-colors cursor-pointer ${surfaceFilter.value === key ? 'border-[var(--accent)]/40 text-[var(--accent)] bg-[var(--accent-8)]' : 'border-[var(--card-border)] bg-[var(--white-4)] hover:bg-[var(--white-8)] text-[var(--text-body)]'}`}
+            aria-pressed=${surfaceFilter.value === key}
             onClick=${() => { surfaceFilter.value = key }}
           >
             ${SURFACE_LABELS[key]}

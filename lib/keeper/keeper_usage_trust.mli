@@ -12,15 +12,32 @@ type t =
     that want to use the same threshold. *)
 val anthropic_cache_min_input_tokens : int
 
-(** Returns [true] when the model identifier indicates an
-    Anthropic-routed model (claude_code, anthropic-direct, etc.)
-    that would normally exercise prompt caching.  The check is
-    case-insensitive and looks for ["claude"] or ["anthropic"]
-    anywhere in [model_used] or [resolved_model_id]. *)
+(** Returns [true] when typed provider evidence indicates an
+    Anthropic-routed model (Anthropic API, Claude Code, etc.) that
+    would normally exercise prompt caching.
+
+    The [provider_kind] from OAS telemetry is authoritative when supplied.
+    Without it, only explicit [provider:model] labels are resolved via
+    the provider registry. Bare model ids intentionally stay unknown so
+    substring matches such as [openrouter:anthropic/...] cannot produce
+    false cache-anomaly trust signals. *)
 val model_uses_anthropic_caching :
   model_used:string -> resolved_model_id:string -> bool
 
+val model_uses_anthropic_caching_with_provider_kind :
+  provider_kind:Llm_provider.Provider_config.provider_kind option ->
+  model_used:string -> resolved_model_id:string -> bool
+
 val classify :
+  usage_reported:bool ->
+  usage:Oas.Types.api_usage ->
+  model_used:string ->
+  resolved_model_id:string ->
+  context_max:int ->
+  t
+
+val classify_with_provider_kind :
+  provider_kind:Llm_provider.Provider_config.provider_kind option ->
   usage_reported:bool ->
   usage:Oas.Types.api_usage ->
   model_used:string ->

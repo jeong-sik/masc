@@ -142,7 +142,9 @@ let classify_usage_trust ?usage ~model ~telemetry () =
     | Some usage -> true, usage
     | None -> false, zero_usage
   in
-  Keeper_usage_trust.classify ~usage_reported ~usage ~model_used:model
+  let provider_kind = provider_kind_of_telemetry telemetry in
+  Keeper_usage_trust.classify_with_provider_kind ~provider_kind ~usage_reported ~usage
+    ~model_used:model
     ~resolved_model_id:(canonical_model_id_of_telemetry ~model telemetry)
     ~context_max:(context_max_of_telemetry telemetry)
 

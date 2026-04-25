@@ -146,7 +146,7 @@ export function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
             <span class="text-xs text-[var(--text-muted)]">재시작 예산</span>
             <span class="text-xs font-mono text-[var(--text-body)]">${restart_count}/${max_restarts}</span>
           </div>
-          <div class="w-full h-1.5 rounded-sm bg-[var(--white-5)] overflow-hidden">
+          <div class="w-full h-1.5 rounded-sm bg-[var(--white-5)] overflow-hidden" role="progressbar" aria-valuenow=${Math.round(budgetPct)} aria-valuemin=${0} aria-valuemax=${100} aria-label="재시작 예산 사용률">
             <div class="h-full rounded-sm transition-all duration-300" style="width: ${budgetPct}%; background: ${budgetColor}"></div>
           </div>
         </div>

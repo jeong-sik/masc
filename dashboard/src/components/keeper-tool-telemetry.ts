@@ -107,7 +107,7 @@ function SuccessRateBar({ stat }: { stat: ToolStat }) {
 
   return html`
     <div class="flex items-center gap-2 w-full">
-      <div class="flex-1 h-1.5 rounded-sm bg-[var(--white-5)] overflow-hidden">
+      <div class="flex-1 h-1.5 rounded-sm bg-[var(--white-5)] overflow-hidden" role="progressbar" aria-valuenow=${Math.round(successPct)} aria-valuemin=${0} aria-valuemax=${100} aria-label="성공률">
         <div class="h-full rounded-sm transition-all duration-300" style="width: ${successPct}%; background: ${barColor}"></div>
       </div>
       <span class="text-3xs font-mono w-10 text-right" style="color: ${barColor}">

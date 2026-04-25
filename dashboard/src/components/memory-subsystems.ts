@@ -618,7 +618,7 @@ export function MemorySubsystems() {
         }
         ${
           synapses.length === 0
-            ? html`<div class="text-sm text-[var(--text-muted)] bg-[var(--white-5)] rounded p-4 text-center">
+            ? html`<div class="text-sm text-[var(--text-muted)] bg-[var(--white-5)] rounded p-4 text-center" role="status">
                 시냅스 데이터 없음. keeper task 완료 시 자동 생성됩니다.
               </div>`
             : html`
@@ -641,7 +641,7 @@ export function MemorySubsystems() {
                 </div>
                 ${
                   isSynapseFiltering && visibleSynapses.length === 0
-                    ? html`<div class="text-sm text-[var(--text-muted)] bg-[var(--white-5)] rounded p-4 text-center">
+                    ? html`<div class="text-sm text-[var(--text-muted)] bg-[var(--white-5)] rounded p-4 text-center" role="status">
                         필터 결과 없음 (${synapses.length} items)
                       </div>`
                     : html`<div class="overflow-x-auto">
@@ -739,7 +739,7 @@ export function MemorySubsystems() {
 
         ${
           visibleEpisodes.length === 0
-            ? html`<div class="text-sm text-[var(--text-muted)] bg-[var(--white-5)] rounded p-4 text-center">
+            ? html`<div class="text-sm text-[var(--text-muted)] bg-[var(--white-5)] rounded p-4 text-center" role="status">
                 ${hasFilter
                   ? '필터 조건에 맞는 에피소드가 없습니다.'
                   : '에피소드 없음. keeper [STATE] 출력 시 자동 기록됩니다.'}

@@ -1111,7 +1111,7 @@ function ConnectorLivePanel({
                 />
               </div>
               ${isFilteringKeepers && visibleKnownGroups.length === 0
-                ? html`<div class="py-4 text-center text-2xs text-[var(--text-dim)]">필터 결과 없음 (${knownGroups.length} keepers)</div>`
+                ? html`<div class="py-4 text-center text-2xs text-[var(--text-dim)]" role="status">필터 결과 없음 (${knownGroups.length} keepers)</div>`
                 : null}
               ${visibleKnownGroups.map(group => {
                 const keeper = group.keeper
@@ -1538,7 +1538,7 @@ function GateAnalyticsSection({
                     Observed room bindings
                   </div>
                   ${gate.bindings.length === 0
-                    ? html`<div class="rounded border border-dashed border-[var(--card-border)] px-3 py-4 text-xs text-[var(--text-dim)]">관찰된 room 바인딩 없음</div>`
+                    ? html`<div class="rounded border border-dashed border-[var(--card-border)] px-3 py-4 text-xs text-[var(--text-dim)]" role="status">관찰된 room 바인딩 없음</div>`
                     : html`
                         <div class="space-y-2">
                           ${gate.bindings.slice(0, 6).map(binding => html`<${BindingRow} binding=${binding} />`)}
@@ -1551,7 +1551,7 @@ function GateAnalyticsSection({
                     Recent gate events
                   </div>
                   ${gate.recent_events.length === 0
-                    ? html`<div class="rounded border border-dashed border-[var(--card-border)] px-3 py-4 text-xs text-[var(--text-dim)]">커넥터 이벤트 기록 없음</div>`
+                    ? html`<div class="rounded border border-dashed border-[var(--card-border)] px-3 py-4 text-xs text-[var(--text-dim)]" role="status">커넥터 이벤트 기록 없음</div>`
                     : html`
                         <div class="space-y-2">
                           ${gate.recent_events.slice(0, 8).map(event => html`<${EventRow} event=${event} />`)}
@@ -1561,7 +1561,7 @@ function GateAnalyticsSection({
               </div>
 
               ${gate.channels.length === 0
-                ? html`<div class="py-4 text-center text-xs text-[var(--text-dim)]">활성 커넥터 없음</div>`
+                ? html`<div class="py-4 text-center text-xs text-[var(--text-dim)]" role="status">활성 커넥터 없음</div>`
                 : html`
                     <div class="grid grid-cols-2 gap-2 max-[900px]:grid-cols-1">
                       ${gate.channels.map(ch => html`<${ChannelCard} ch=${ch} />`)}

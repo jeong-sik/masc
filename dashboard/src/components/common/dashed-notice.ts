@@ -60,6 +60,7 @@ export function DashedNotice({
   const cls = dashedNoticeClasses(size, borderTone, cx)
   return html`<div
     class=${cls}
+    role="status"
     data-dashed-notice
     data-dashed-notice-size=${size}
     data-dashed-notice-border=${borderTone}

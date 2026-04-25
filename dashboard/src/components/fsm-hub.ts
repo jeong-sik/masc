@@ -725,7 +725,7 @@ function StatusBar({
             />
           ` : null}
           ${keeperFilterHasNoMatch ? html`
-            <span class="text-3xs font-mono text-[var(--text-dim)]">
+            <span class="text-3xs font-mono text-[var(--text-dim)]" role="status">
               필터 결과 없음 (${keeperNames.length} keepers)
             </span>
           ` : visibleKeeperNames.map((name, i) => {

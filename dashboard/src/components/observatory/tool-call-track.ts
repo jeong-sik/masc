@@ -102,6 +102,8 @@ export function ToolCallTrack({ events, windowStart, windowEnd }: Props) {
       <div
         ref=${trackRef}
         class="relative flex-1 h-8 rounded bg-bg-1/40 border border-card-border/50 cursor-crosshair"
+        role="img"
+        aria-label=${`도구 호출 트랙: ${markers.length}건${failureCount > 0 ? `, 실패 ${failureCount}건` : ''}`}
         onMouseMove=${(e: MouseEvent) => {
           if (trackRef.current) setCursorFromEvent(e, trackRef.current, windowStart, windowEnd)
         }}

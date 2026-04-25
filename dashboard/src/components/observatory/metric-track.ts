@@ -66,6 +66,8 @@ export function MetricTrack({ points, windowStart, windowEnd }: Props) {
       <div
         ref=${trackRef}
         class="relative flex-1 h-12 rounded bg-bg-1/40 border border-card-border/50 cursor-crosshair"
+        role="img"
+        aria-label=${lastRate != null ? `도구 성공률 그래프: ${lastRate.toFixed(1)}%${anomalyCount > 0 ? `, 이상 ${anomalyCount}건` : ''}` : '도구 성공률 그래프: 데이터 없음'}
         onMouseMove=${(e: MouseEvent) => {
           if (trackRef.current) setCursorFromEvent(e, trackRef.current, windowStart, windowEnd)
         }}

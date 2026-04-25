@@ -7,6 +7,17 @@ include Coord_broadcast
 
 (* activity_room_id removed — namespace retired (#unify-namespace). *)
 
+(* #9795: FSM drift observability. [masc_coord] sits below the
+   [masc_mcp] library in the dep graph, so it cannot call
+   [Prometheus.inc_counter] directly. The variant→label mapping
+   stays here (pattern-matches the sealed drift enum), and the
+   emit runs through a [Coord_hooks] callback wired by
+   [lib/coord.ml] at startup.  Exhaustive pattern-match forces
+   any new drift variant to be named alongside existing
+   dashboards. *)
+let drift_variant_label = function
+  | Coord_task_lifecycle.Claimed_to_done_skip -> "claimed_to_done_skip"
+
 let task_actor_kind agent_name =
   let normalized = String.lowercase_ascii (String.trim agent_name) in
   if normalized = "" || normalized = "system"
@@ -1197,7 +1208,18 @@ let transition_task_r
            (* FSM drift: TLA+ KeeperTaskInterlock.DoneTask requires in_progress.
               Log WARN so dashboards can surface keepers that skip Start. The
               jump is still permitted for client compatibility; strictness
-              ratchet follows once keeper_task_start is exposed. *)
+              ratchet follows once keeper_task_start is exposed.
+
+              #9795: also tick the [fsm_drift_observer_fn] hook so
+              ratchet readiness ("is the skip pattern rare enough
+              to promote to a hard error?") has a measurable
+              baseline instead of relying on log-scraping. Hook is
+              wired by [lib/coord.ml] at startup to emit a
+              Prometheus counter. *)
+           (Atomic.get Coord_hooks.fsm_drift_observer_fn)
+             ~variant:(drift_variant_label
+                         Coord_task_lifecycle.Claimed_to_done_skip)
+             ~force;
            Log.RoomTask.warn
              "fsm_drift claimed_to_done_skip task=%s agent=%s force=%b"
              task_id

@@ -61,6 +61,7 @@
         test_hebbian_edge_update_counter
         test_keeper_proactive_skip_counter
         test_oas_error_kind_counter
+        test_fsm_drift_counter
         test_keeper_wake_telemetry
         test_keeper_memory
         test_keeper_accountability
@@ -194,6 +195,7 @@
           test_hebbian_edge_update_counter
           test_keeper_proactive_skip_counter
           test_oas_error_kind_counter
+          test_fsm_drift_counter
           test_keeper_wake_telemetry
           test_keeper_memory
           test_keeper_accountability

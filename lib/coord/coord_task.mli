@@ -7,6 +7,18 @@
 include module type of Coord_utils
 include module type of Coord_state
 
+(** {1 Task FSM drift observability (#9795)} *)
+
+val drift_variant_label : Coord_task_lifecycle.drift -> string
+(** Canonical label string for each [Coord_task_lifecycle.drift]
+    variant.  Exhaustive — adding a new drift case forces reviewers
+    to update both the match and dashboards that consume the
+    [variant] label.  The emit runs through
+    {!Coord_hooks.fsm_drift_observer_fn}, wired to
+    {!Coord.record_fsm_drift} by [lib/coord.ml].  [masc_coord]
+    cannot call Prometheus directly — it sits below that module
+    in the library dep graph. *)
+
 (** {1 Task activity helpers} *)
 
 val update_local_agent_state :

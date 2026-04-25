@@ -183,6 +183,24 @@ let observe_task_transition_event config ~agent_name ~task_id
 let () = Atomic.set Coord_hooks.force_release_task_fn (fun config ~agent_name ~task_id () ->
     force_release_task_r config ~agent_name ~task_id ())
 
+(* #9795: wire the FSM drift hook to a Prometheus counter emit.
+   [Coord_task.transition] calls the hook whenever
+   [Coord_task_lifecycle.decide] returns a [drift]; this side
+   puts the signal on
+   [masc_task_fsm_drift_total{variant, force}] so Grafana /
+   ratchet-readiness dashboards can see it.  The emit lives at
+   [masc_mcp] layer because [masc_coord] sits below [Prometheus]
+   in the library dep graph. *)
+let fsm_drift_metric = "masc_task_fsm_drift_total"
+
+let record_fsm_drift ~variant ~force =
+  Prometheus.inc_counter fsm_drift_metric
+    ~labels:[ ("variant", variant);
+              ("force", if force then "true" else "false") ]
+    ()
+
+let () = Atomic.set Coord_hooks.fsm_drift_observer_fn record_fsm_drift
+
 (* Activity graph emit — wraps Activity_graph for room sub-modules *)
 let () = Atomic.set Coord_hooks.activity_emit_fn (fun config ~actor ?subject ~kind ~payload ~tags () ->
     (try

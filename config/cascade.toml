@@ -5,6 +5,7 @@ comment = "System-only fallback profile for unknown/missing cascade names. Mirro
 models = [
   { model = "codex_cli:auto", weight = 1 },
   { model = "gemini_cli:auto", weight = 1 },
+  { model = "codex_cli:gpt-5.3-codex-spark", weight = 1 },
 ]
 temperature = 0.2
 max_tokens = 16384
@@ -15,6 +16,7 @@ comment = "Canonical keeper bootstrap profile exposed by the checked-in seed. Au
 models = [
   { model = "codex_cli:auto", weight = 1 },
   { model = "gemini_cli:auto", weight = 1 },
+  { model = "codex_cli:gpt-5.3-codex-spark", weight = 1 },
 ]
 temperature = 0.2
 max_tokens = 16384

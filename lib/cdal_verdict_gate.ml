@@ -77,15 +77,127 @@ let lookup_latest_verdict ?base_dir
        | _ -> acc)
     | _ -> acc
   ) None recent in
-  (* If we scanned the full limit and still no match, the verdict may exist
-     in older entries outside the scan window. Log a WARN so debugging is
-     possible instead of silent skipping. Issue #7546. *)
-  (if result = None && List.length recent >= limit then
-    Log.Task.warn
-      "[cdal-gate] lookup_latest_verdict: scanned limit=%d without finding task_id=%s; \
-       older verdicts beyond window are silently skipped (MASC_CDAL_VERDICT_LOOKUP_LIMIT)"
-      limit task_id);
+  (* #10115: distinguish three "verdict not found" cases so the
+     operator gets an accurate diagnosis.  The previous WARN
+     unconditionally said "older verdicts beyond window are
+     silently skipped" — true when the scan saturated [limit],
+     misleading when the ledger is empty or the writer pipeline
+     is dormant (12-day gap observed in production).  If the
+     operator follows the WARN's hint and bumps
+     [MASC_CDAL_VERDICT_LOOKUP_LIMIT], they spend cycles
+     investigating the wrong layer. *)
+  (match result, recent with
+   | Some _, _ -> ()
+   | None, [] ->
+     Log.Task.warn
+       "[cdal-gate] task_id=%s: cdal_verdicts ledger is EMPTY at %s. \
+        Writer pipeline likely dormant — check that OAS Agent.run \
+        emits result.proof and Cdal_eval_v1.persist is reached. (#10115)"
+       task_id base_dir
+   | None, _ when List.length recent >= limit ->
+     Log.Task.warn
+       "[cdal-gate] task_id=%s: scanned newest %d entries without \
+        match; older verdicts beyond window are silently skipped \
+        (raise MASC_CDAL_VERDICT_LOOKUP_LIMIT to widen the window)"
+       task_id limit
+   | None, _ ->
+     Log.Task.warn
+       "[cdal-gate] task_id=%s: no verdict in current ledger window \
+        (%d entries scanned, below limit=%d).  Either the task has \
+        never been verified, or the writer pipeline is dormant — \
+        bumping MASC_CDAL_VERDICT_LOOKUP_LIMIT will not help. (#10115)"
+       task_id (List.length recent) limit);
   result
+
+(* #10115: ledger health introspection.  Walks [base_dir/YYYY-MM/]
+   to find the newest [DD.jsonl] file's mtime; lets a boot-time
+   health check catch a dormant writer pipeline before any
+   strict-contract task tries to gate on a verdict that will
+   never arrive. *)
+type ledger_health = {
+  base_dir : string;
+  total_files : int;
+  latest_mtime : float option;
+  age_seconds : float option;
+}
+
+let ledger_health_report ?base_dir () : ledger_health =
+  let base_dir =
+    match base_dir with
+    | Some dir -> dir
+    | None -> default_base_path ()
+  in
+  let collect_jsonl_mtimes () =
+    if not (Sys.file_exists base_dir) then []
+    else
+      let month_dirs =
+        try
+          Sys.readdir base_dir
+          |> Array.to_list
+          |> List.filter (fun name ->
+               let full = Filename.concat base_dir name in
+               try Sys.is_directory full with Sys_error _ -> false)
+        with Sys_error _ -> []
+      in
+      List.concat_map
+        (fun month ->
+          let dir = Filename.concat base_dir month in
+          try
+            Sys.readdir dir
+            |> Array.to_list
+            |> List.filter_map (fun name ->
+                 if Filename.check_suffix name ".jsonl" then
+                   let full = Filename.concat dir name in
+                   try Some (Unix.stat full).st_mtime
+                   with Unix.Unix_error _ -> None
+                 else None)
+          with Sys_error _ -> [])
+        month_dirs
+  in
+  let mtimes = collect_jsonl_mtimes () in
+  let latest_mtime =
+    match mtimes with
+    | [] -> None
+    | _ -> Some (List.fold_left max neg_infinity mtimes)
+  in
+  let age_seconds =
+    Option.map (fun m -> Time_compat.now () -. m) latest_mtime
+  in
+  {
+    base_dir;
+    total_files = List.length mtimes;
+    latest_mtime;
+    age_seconds;
+  }
+
+(* Threshold for boot-time staleness WARN.  7 days picks up the
+   12-day production dormancy from #10115 with margin while not
+   firing on transient quiet periods. *)
+let stale_age_seconds_default = 7. *. 86400.
+
+let log_ledger_health_warn_if_stale ?base_dir
+    ?(stale_age_seconds = stale_age_seconds_default) () : ledger_health =
+  let report = ledger_health_report ?base_dir () in
+  (match report.latest_mtime, report.age_seconds with
+   | None, _ ->
+     Log.Task.warn
+       "[cdal-gate] ledger health: %s has NO verdict files. \
+        Writer pipeline likely never started or never reached \
+        Cdal_eval_v1.persist. (#10115)"
+       report.base_dir
+   | Some _, Some age when age > stale_age_seconds ->
+     let days = age /. 86400. in
+     Log.Task.warn
+       "[cdal-gate] ledger health: latest verdict file is %.1f \
+        days old (threshold %.1f days; %d files scanned in %s).  \
+        Writer pipeline likely dormant — strict-contract tasks \
+        will fail until restored. (#10115)"
+       days
+       (stale_age_seconds /. 86400.)
+       report.total_files
+       report.base_dir
+   | Some _, _ -> ());
+  report
 
 (* --- Attribution envelope conversion ---
    Layer 1 of the attribution rollout. Lets emitters surface a typed

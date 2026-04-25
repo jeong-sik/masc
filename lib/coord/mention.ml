@@ -123,19 +123,55 @@ let resolve_targets mode ~available_agents =
       available_agents
       |> List.filter (fun name -> agent_type_of_mention name = agent_type)
 
+(* Target-keyed cache for [is_mentioned]'s compiled regex.
+
+   The pattern interpolates [target] (an agent name) so it cannot
+   be compiled at module load like the static parse patterns above.
+   But the set of distinct targets is bounded by the agent fleet
+   (~20 in production), so a Hashtbl keyed by trimmed target is
+   enough — no LRU needed, the cache stabilises after warm-up.
+
+   Without this cache, [any_mentioned ~targets content] for N
+   targets re-ran [Re.compile] N times per call.  Per-keeper
+   message-policy evaluation (keeper_memory_policy /
+   keeper_exec_context / keeper_prompt) re-paid that on every
+   message, so with 14 keepers × per-message direct-mention checks
+   the compile cost was a sustained tax.
+
+   [Stdlib.Mutex] (not [Eio.Mutex]) because callers may run from
+   non-Eio contexts and the hold time is bounded by a
+   [Hashtbl.find_opt] + occasional one-shot compile per new target. *)
+let is_mentioned_cache : (string, Re.re) Hashtbl.t = Hashtbl.create 32
+
+let is_mentioned_cache_mu = Stdlib.Mutex.create ()
+
+let compile_target_pattern target =
+  Re.(compile (seq [
+    (* Start of string or non-mention character *)
+    group (alt [bos; compl [rg 'A' 'Z'; rg 'a' 'z'; rg '0' '9'; char '@'; char '_'; char '-']]);
+    no_case (seq [char '@'; str target]);
+    (* End of string or non-mention character *)
+    group (alt [eos; compl [rg 'A' 'Z'; rg 'a' 'z'; rg '0' '9'; char '_'; char '-']])
+  ]))
+
+let target_re target =
+  Stdlib.Mutex.lock is_mentioned_cache_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock is_mentioned_cache_mu)
+    (fun () ->
+      match Hashtbl.find_opt is_mentioned_cache target with
+      | Some re -> re
+      | None ->
+          let re = compile_target_pattern target in
+          Hashtbl.add is_mentioned_cache target re;
+          re)
+
 let is_mentioned target content =
   let target = String.trim target in
   if target = "" then
     false
   else
-    let re = Re.(compile (seq [
-      (* Start of string or non-mention character *)
-      group (alt [bos; compl [rg 'A' 'Z'; rg 'a' 'z'; rg '0' '9'; char '@'; char '_'; char '-']]);
-      no_case (seq [char '@'; str target]);
-      (* End of string or non-mention character *)
-      group (alt [eos; compl [rg 'A' 'Z'; rg 'a' 'z'; rg '0' '9'; char '_'; char '-']])
-    ])) in
-    Re.execp re content
+    Re.execp (target_re target) content
 
 let any_mentioned ~targets content =
   targets

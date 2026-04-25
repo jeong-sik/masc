@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>MASC · Colors</title>
+<link rel="stylesheet" href="_preview.css">
+<style>
+  /* Colors-specific */
+  .sw { display: flex; flex-direction: column; gap: 0; }
+  .sw-chip {
+    height: 88px;
+    border-radius: 3px;
+    border: 1px solid var(--line-1);
+    position: relative;
+    overflow: hidden;
+    display: flex; flex-direction: column; justify-content: space-between;
+    padding: 10px 12px;
+  }
+  .sw-chip.border-none { border-color: transparent; }
+  .sw-top { display: flex; justify-content: space-between; align-items: flex-start; }
+  .sw-name {
+    font: 600 10px/1.2 var(--font-mono);
+    letter-spacing: var(--track-caps);
+    text-transform: uppercase;
+  }
+  .sw-hex {
+    font: 10px/1.2 var(--font-mono);
+    letter-spacing: var(--track-wide);
+    opacity: .7;
+  }
+  .sw-role {
+    font: 9px/1.2 var(--font-mono);
+    letter-spacing: var(--track-caps);
+    text-transform: uppercase;
+    opacity: .55;
+  }
+
+  /* Status stack: 4 slots (fg, soft, border, ring) */
+  .status-row {
+    display: grid;
+    grid-template-columns: 110px 1fr;
+    gap: 12px;
+    align-items: center;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--line-1);
+  }
+  .status-row:last-child { border-bottom: none; }
+  .status-name {
+    font: 600 11px/1.2 var(--font-mono);
+    letter-spacing: var(--track-caps);
+    text-transform: uppercase;
+  }
+  .status-slots {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+  }
+  .slot {
+    height: 44px;
+    border-radius: 3px;
+    padding: 6px 8px;
+    display: flex; flex-direction: column; justify-content: space-between;
+  }
+  .slot-label { font: 9px/1 var(--font-mono); letter-spacing: var(--track-caps); text-transform: uppercase; opacity: .7; }
+  .slot-hex { font: 9px/1 var(--font-mono); opacity: .6; }
+
+  /* Keeper dots */
+  .keeper-row {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 12px;
+  }
+  .keeper-chip {
+    display: flex; align-items: center; gap: 10px;
+    padding: 12px;
+    background: var(--bg-1);
+    border: 1px solid var(--line-1);
+    border-radius: 3px;
+  }
+  .keeper-dot {
+    width: 12px; height: 12px; border-radius: 50%;
+    box-shadow: 0 0 0 1px rgb(0 0 0 / .3), 0 0 8px currentColor;
+    flex: 0 0 auto;
+  }
+  .keeper-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .keeper-name { font: 600 11px/1.2 var(--font-mono); color: var(--fg-1); }
+  .keeper-role { font: 9px/1.2 var(--font-mono); letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--fg-3); }
+
+  /* "Use and don't-use" example */
+  .rules {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  .rule {
+    padding: 14px;
+    background: var(--bg-1);
+    border: 1px solid var(--line-1);
+    border-radius: 3px;
+  }
+  .rule-h {
+    display: flex; align-items: center; gap: 8px;
+    font: 600 10px/1 var(--font-mono);
+    letter-spacing: var(--track-caps);
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+  .rule-h.good { color: var(--ok-fg); }
+  .rule-h.bad  { color: var(--err-fg); }
+  .rule-h::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .rule p { font: var(--type-caption); color: var(--fg-3); line-height: 1.5; }
+
+  /* Mini UI preview with active row brass */
+  .ui-row {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--line-1);
+    display: grid;
+    grid-template-columns: 10px 1fr auto;
+    gap: 10px;
+    align-items: center;
+    font: 11px/1.2 var(--font-mono);
+  }
+  .ui-row:last-child { border-bottom: none; }
+  .ui-row .d { width: 8px; height: 8px; border-radius: 50%; justify-self: center; }
+  .ui-row.active {
+    background: linear-gradient(90deg, rgb(var(--brass-glow)/.08), transparent 60%);
+    border-left: 2px solid var(--brass-1);
+    padding-left: 10px;
+  }
+  .ui-row.active .name { color: var(--brass-1); }
+  .ui-row .name { color: var(--fg-1); }
+  .ui-row .meta { color: var(--fg-3); font-size: 9px; }
+</style>
+</head>
+<body class="masc-ds">
+<div class="pv-root">
+
+  <header class="pv-head">
+    <div class="pv-eyebrow">MASC Cockpit · Colors</div>
+    <h1 class="pv-title">Dark Brass Ops Terminal</h1>
+    <p class="pv-sub">Warm near-black surface stack. Brass (<code class="mono">#d4a14a</code>) as the single accent — reserved for active/running state only. Status colors are muted, never neon. Keepers reuse status colors for fleet attribution.</p>
+  </header>
+
+  <!-- SURFACE STACK -->
+  <section class="pv-sect">
+    <div class="pv-sect-h">
+      <h2>Surface Stack</h2>
+      <span class="sub">5 steps from page to active-row, all warm near-black</span>
+    </div>
+    <div class="pv-grid-5">
+      <div class="sw-chip" style="background:#0c0b08">
+        <div class="sw-top"><span class="sw-name" style="color:#f0e9dc">bg-0</span><span class="sw-hex" style="color:#b8ad9a">#0C0B08</span></div>
+        <div class="sw-role" style="color:#7a7065">Page</div>
+      </div>
+      <div class="sw-chip" style="background:#141210">
+        <div class="sw-top"><span class="sw-name" style="color:#f0e9dc">bg-1</span><span class="sw-hex" style="color:#b8ad9a">#141210</span></div>
+        <div class="sw-role" style="color:#7a7065">Topbar / Chrome</div>
+      </div>
+      <div class="sw-chip" style="background:#1a1815">
+        <div class="sw-top"><span class="sw-name" style="color:#f0e9dc">bg-2</span><span class="sw-hex" style="color:#b8ad9a">#1A1815</span></div>
+        <div class="sw-role" style="color:#7a7065">Panel Surface</div>
+      </div>
+      <div class="sw-chip" style="background:#211e1a">
+        <div class="sw-top"><span class="sw-name" style="color:#f0e9dc">bg-3</span><span class="sw-hex" style="color:#b8ad9a">#211E1A</span></div>
+        <div class="sw-role" style="color:#7a7065">Elevated Card</div>
+      </div>
+      <div class="sw-chip" style="background:#2a2621">
+        <div class="sw-top"><span class="sw-name" style="color:#f0e9dc">bg-4</span><span class="sw-hex" style="color:#b8ad9a">#2A2621</span></div>
+        <div class="sw-role" style="color:#7a7065">Hover / Row Active</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- BRASS -->
+  <section class="pv-sect">
+    <div class="pv-sect-h">
+      <h2>Brass — The One Accent</h2>
+      <span class="sub">Only for running / active / focused / primary — never hover</span>
+    </div>
+    <div class="pv-grid-3">
+      <div class="sw-chip" style="background:#d4a14a; border:none">
+        <div class="sw-top"><span class="sw-name" style="color:#0c0b08">brass-1</span><span class="sw-hex" style="color:#0c0b08">#D4A14A</span></div>
+        <div class="sw-role" style="color:#0c0b08">Active / Running</div>
+      </div>
+      <div class="sw-chip" style="background:#b8843a; border:none">
+        <div class="sw-top"><span class="sw-name" style="color:#0c0b08">brass-2</span><span class="sw-hex" style="color:#0c0b08">#B8843A</span></div>
+        <div class="sw-role" style="color:#0c0b08">Pressed / Border</div>
+      </div>
+      <div class="sw-chip" style="background:#8a5f28; border:none">
+        <div class="sw-top"><span class="sw-name" style="color:#f0e9dc">brass-3</span><span class="sw-hex" style="color:#f0e9dc">#8A5F28</span></div>
+        <div class="sw-role" style="color:#f0e9dc">Dim / Inactive-Accent</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FG -->
+  <section class="pv-sect">
+    <div class="pv-sect-h">
+      <h2>Foreground Scale</h2>
+      <span class="sub">Never pure white — warm cream top</span>
+    </div>
+    <div class="pv-grid-4">
+      <div class="sw-chip" style="background:#f0e9dc; border:none">
+        <div class="sw-top"><span class="sw-name" style="color:#0c0b08">fg-1</span><span class="sw-hex" style="color:#0c0b08">#F0E9DC</span></div>
+        <div class="sw-role" style="color:#0c0b08">Primary Text</div>
+      </div>
+      <div class="sw-chip" style="background:#b8ad9a; border:none">
+        <div class="sw-top"><span class="sw-name" style="color:#0c0b08">fg-2</span><span class="sw-hex" style="color:#0c0b08">#B8AD9A</span></div>
+        <div class="sw-role" style="color:#0c0b08">Secondary</div>
+      </div>
+      <div class="sw-chip" style="background:#7a7065">
+        <div class="sw-top"><span class="sw-name" style="color:#f0e9dc">fg-3</span><span class="sw-hex" style="color:#f0e9dc">#7A7065</span></div>
+        <div class="sw-role" style="color:#f0e9dc">Tertiary / Labels</div>
+      </div>
+      <div class="sw-chip" style="background:#4a453e">
+        <div class="sw-top"><span class="sw-name" style="color:#f0e9dc">fg-4</span><span class="sw-hex" style="color:#f0e9dc">#4A453E</span></div>
+        <div class="sw-role" style="color:#f0e9dc">Disabled</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- STATUS -->
+  <section class="pv-sect">
+    <div class="pv-sect-h">
+      <h2>Status Colors</h2>
+      <span class="sub">Muted, never neon — 4-slot role system per status</span>
+    </div>
+    <div class="pv-cell" style="padding:0">
+
+      <div style="padding:14px 16px">
+        <div class="status-row">
+          <div class="status-name" style="color:#8ebc8e">ok</div>
+          <div class="status-slots">
+            <div class="slot" style="background:#6b9e6b"><span class="slot-label" style="color:#0c0b08">base</span><span class="slot-hex" style="color:#0c0b08">#6B9E6B</span></div>
+            <div class="slot" style="background:#8ebc8e"><span class="slot-label" style="color:#0c0b08">fg</span><span class="slot-hex" style="color:#0c0b08">#8EBC8E</span></div>
+            <div class="slot" style="background:rgb(107 158 107 / .12); border:1px solid rgb(107 158 107 / .3)"><span class="slot-label" style="color:#8ebc8e">soft</span><span class="slot-hex" style="color:#8ebc8e">.12</span></div>
+            <div class="slot" style="background:rgb(107 158 107 / .04); box-shadow:0 0 0 2px rgb(107 158 107 / .3)"><span class="slot-label" style="color:#8ebc8e">ring</span><span class="slot-hex" style="color:#8ebc8e">focus</span></div>
+          </div>
+        </div>
+        <div class="status-row">
+          <div class="status-name" style="color:#d9b764">warn</div>
+          <div class="status-slots">
+            <div class="slot" style="background:#c9a24a"><span class="slot-label" style="color:#0c0b08">base</span><span class="slot-hex" style="color:#0c0b08">#C9A24A</span></div>
+            <div class="slot" style="background:#d9b764"><span class="slot-label" style="color:#0c0b08">fg</span><span class="slot-hex" style="color:#0c0b08">#D9B764</span></div>
+            <div class="slot" style="background:rgb(201 162 74 / .12); border:1px solid rgb(201 162 74 / .3)"><span class="slot-label" style="color:#d9b764">soft</span><span class="slot-hex" style="color:#d9b764">.12</span></div>
+            <div class="slot" style="background:rgb(201 162 74 / .04); box-shadow:0 0 0 2px rgb(201 162 74 / .3)"><span class="slot-label" style="color:#d9b764">ring</span><span class="slot-hex" style="color:#d9b764">focus</span></div>
+          </div>
+        </div>
+        <div class="status-row">
+          <div class="status-name" style="color:#d8806f">err</div>
+          <div class="status-slots">
+            <div class="slot" style="background:#c46a5a"><span class="slot-label" style="color:#0c0b08">base</span><span class="slot-hex" style="color:#0c0b08">#C46A5A</span></div>
+            <div class="slot" style="background:#d8806f"><span class="slot-label" style="color:#0c0b08">fg</span><span class="slot-hex" style="color:#0c0b08">#D8806F</span></div>
+            <div class="slot" style="background:rgb(196 106 90 / .12); border:1px solid rgb(196 106 90 / .3)"><span class="slot-label" style="color:#d8806f">soft</span><span class="slot-hex" style="color:#d8806f">.12</span></div>
+            <div class="slot" style="background:rgb(196 106 90 / .04); box-shadow:0 0 0 2px rgb(196 106 90 / .3)"><span class="slot-label" style="color:#d8806f">ring</span><span class="slot-hex" style="color:#d8806f">focus</span></div>
+          </div>
+        </div>
+        <div class="status-row">
+          <div class="status-name" style="color:#8aa6c4">info</div>
+          <div class="status-slots">
+            <div class="slot" style="background:#6a8eb0"><span class="slot-label" style="color:#0c0b08">base</span><span class="slot-hex" style="color:#0c0b08">#6A8EB0</span></div>
+            <div class="slot" style="background:#8aa6c4"><span class="slot-label" style="color:#0c0b08">fg</span><span class="slot-hex" style="color:#0c0b08">#8AA6C4</span></div>
+            <div class="slot" style="background:rgb(106 142 176 / .12); border:1px solid rgb(106 142 176 / .3)"><span class="slot-label" style="color:#8aa6c4">soft</span><span class="slot-hex" style="color:#8aa6c4">.12</span></div>
+            <div class="slot" style="background:rgb(106 142 176 / .04); box-shadow:0 0 0 2px rgb(106 142 176 / .3)"><span class="slot-label" style="color:#8aa6c4">ring</span><span class="slot-hex" style="color:#8aa6c4">focus</span></div>
+          </div>
+        </div>
+        <div class="status-row">
+          <div class="status-name" style="color:#a88ac0">stalled</div>
+          <div class="status-slots">
+            <div class="slot" style="background:#8a6aa0"><span class="slot-label" style="color:#0c0b08">base</span><span class="slot-hex" style="color:#0c0b08">#8A6AA0</span></div>
+            <div class="slot" style="background:#a88ac0"><span class="slot-label" style="color:#0c0b08">fg</span><span class="slot-hex" style="color:#0c0b08">#A88AC0</span></div>
+            <div class="slot" style="background:rgb(138 106 160 / .12); border:1px solid rgb(138 106 160 / .3)"><span class="slot-label" style="color:#a88ac0">soft</span><span class="slot-hex" style="color:#a88ac0">.12</span></div>
+            <div class="slot" style="background:rgb(138 106 160 / .04); box-shadow:0 0 0 2px rgb(138 106 160 / .3)"><span class="slot-label" style="color:#a88ac0">ring</span><span class="slot-hex" style="color:#a88ac0">focus</span></div>
+          </div>
+        </div>
+        <div class="status-row">
+          <div class="status-name" style="color:#a0a0a0">idle</div>
+          <div class="status-slots">
+            <div class="slot" style="background:#6a6a6a"><span class="slot-label" style="color:#0c0b08">base</span><span class="slot-hex" style="color:#0c0b08">#6A6A6A</span></div>
+            <div class="slot" style="background:#a0a0a0"><span class="slot-label" style="color:#0c0b08">fg</span><span class="slot-hex" style="color:#0c0b08">#A0A0A0</span></div>
+            <div class="slot" style="background:rgb(106 106 106 / .12); border:1px solid rgb(106 106 106 / .3)"><span class="slot-label" style="color:#a0a0a0">soft</span><span class="slot-hex" style="color:#a0a0a0">.12</span></div>
+            <div class="slot" style="background:rgb(106 106 106 / .04); box-shadow:0 0 0 2px rgb(106 106 106 / .3)"><span class="slot-label" style="color:#a0a0a0">ring</span><span class="slot-hex" style="color:#a0a0a0">focus</span></div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- KEEPER FLEET -->
+  <section class="pv-sect">
+    <div class="pv-sect-h">
+      <h2>Keeper Fleet Palette</h2>
+      <span class="sub">Fleet attribution reuses status colors — no new hues</span>
+    </div>
+    <div class="keeper-row">
+      <div class="keeper-chip"><span class="keeper-dot" style="background:#d4a14a; color:#d4a14a"></span>
+        <div class="keeper-meta"><span class="keeper-name">nick0cave</span><span class="keeper-role">Captain · brass</span></div></div>
+      <div class="keeper-chip"><span class="keeper-dot" style="background:#6b9e6b; color:#6b9e6b"></span>
+        <div class="keeper-meta"><span class="keeper-name">masc-improver</span><span class="keeper-role">Improver · ok</span></div></div>
+      <div class="keeper-chip"><span class="keeper-dot" style="background:#6a8eb0; color:#6a8eb0"></span>
+        <div class="keeper-meta"><span class="keeper-name">sangsu</span><span class="keeper-role">Analyst · info</span></div></div>
+      <div class="keeper-chip"><span class="keeper-dot" style="background:#c46a5a; color:#c46a5a"></span>
+        <div class="keeper-meta"><span class="keeper-name">qa-king</span><span class="keeper-role">QA · err</span></div></div>
+      <div class="keeper-chip"><span class="keeper-dot" style="background:#8a6aa0; color:#8a6aa0"></span>
+        <div class="keeper-meta"><span class="keeper-name">rama</span><span class="keeper-role">Researcher · stalled</span></div></div>
+    </div>
+  </section>
+
+  <!-- APPLIED: selected row demo -->
+  <section class="pv-sect">
+    <div class="pv-sect-h">
+      <h2>Applied — Row States</h2>
+      <span class="sub">Brass = selection. Bg-4 = hover. Never both.</span>
+    </div>
+    <div class="pv-cell" style="padding:0">
+      <div class="ui-row">
+        <span class="d" style="background:#6b9e6b"></span>
+        <div><span class="name">nick0cave</span> <span class="meta"> · claimed t-9f2a · 2m ago</span></div>
+        <span class="pv-tok">idle</span>
+      </div>
+      <div class="ui-row active">
+        <span class="d" style="background:#d4a14a; box-shadow:0 0 8px rgb(var(--brass-glow)/.6)"></span>
+        <div><span class="name">masc-improver</span> <span class="meta"> · tool.write_file · running</span></div>
+        <span class="pv-tok" style="color:var(--brass-1); border-color:rgb(var(--brass-glow)/.4)">active</span>
+      </div>
+      <div class="ui-row" style="background:var(--bg-2)">
+        <span class="d" style="background:#6a8eb0"></span>
+        <div><span class="name">sangsu</span> <span class="meta"> · hover state</span></div>
+        <span class="pv-tok">hover</span>
+      </div>
+      <div class="ui-row">
+        <span class="d" style="background:#c46a5a"></span>
+        <div><span class="name">qa-king</span> <span class="meta"> · 3 fail / 47 pass</span></div>
+        <span class="pv-tok" style="color:var(--err-fg)">err</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- RULES -->
+  <section class="pv-sect">
+    <div class="pv-sect-h">
+      <h2>Usage Rules</h2>
+      <span class="sub">The short list</span>
+    </div>
+    <div class="rules">
+      <div class="rule">
+        <div class="rule-h good">Do</div>
+        <p>Use <b>brass</b> for one and only one element per view: the active row, the focused tab, the primary button. Use <b>status colors</b> for data. Use <b>fg-3</b> for all labels.</p>
+      </div>
+      <div class="rule">
+        <div class="rule-h bad">Don't</div>
+        <p>Never use brass for hover. Never use pure white for text. Never saturate status colors past their base — no neon red, no electric green. No gradients on data surfaces.</p>
+      </div>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>

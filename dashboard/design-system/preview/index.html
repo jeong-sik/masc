@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MASC Cockpit — Design System</title>
+  <link rel="stylesheet" href="../colors_and_type.css" />
+  <link rel="stylesheet" href="../source_styles/tokens.css" />
+  <link rel="stylesheet" href="../source_styles/primitives.css" />
+  <style>
+    html, body { margin:0; padding:0; background: var(--bg-0); color: var(--fg-1); font-family: var(--font-sans); min-height:100vh; }
+    .hub { max-width: 1200px; margin: 0 auto; padding: 48px 32px 120px; }
+    .brand { display:flex; align-items:center; gap:12px; margin-bottom: 6px; }
+    .brand-mark { width:28px; height:28px; border-radius:4px; background: linear-gradient(135deg, var(--brass-1), var(--brass-3)); box-shadow: 0 0 12px rgb(var(--brass-glow)/.35), inset 0 0 6px rgb(var(--brass-glow)/.3); }
+    h1 { font: var(--type-title); font-size: 22px; font-weight: 600; letter-spacing: -.01em; margin: 0; font-family: var(--font-mono); }
+    .sub { color: var(--fg-3); font-size: 13px; margin-top: 4px; }
+    h2 { font: var(--type-label); text-transform: uppercase; letter-spacing: .08em; color: var(--fg-3); font-weight: 600; font-size: 11px; margin: 40px 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--line-2); }
+    .grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+    a.card { display:flex; flex-direction:column; gap:6px; padding: 14px 16px; background: var(--bg-1); border:1px solid var(--line-1); border-radius: var(--r-1); text-decoration:none; color: inherit; transition: background .15s, border-color .15s, transform .15s; position:relative; overflow:hidden; }
+    a.card:hover { background: var(--bg-2); border-color: var(--line-2); }
+    a.card .n { font: var(--type-micro); color: var(--fg-4); letter-spacing: .08em; }
+    a.card .title { font-size: 14px; color: var(--fg-1); font-weight: 500; }
+    a.card .desc { font-size: 12px; color: var(--fg-3); line-height: 1.4; }
+    a.card .stripe { position:absolute; left:0; top:0; bottom:0; width:2px; background: var(--line-2); }
+    a.card:hover .stripe { background: var(--brass-1); }
+    a.card .count { margin-top: 4px; font-family: var(--font-mono); font-size: 10px; color: var(--fg-4); letter-spacing: .04em; }
+    .tag { display:inline-block; font-family: var(--font-mono); font-size: 10px; padding: 1px 6px; border:1px solid var(--line-2); border-radius: 2px; color: var(--fg-3); letter-spacing: .04em; margin-right: 4px; }
+    .stamp { position: absolute; top: 24px; right: 32px; font-family: var(--font-mono); font-size: 10px; color: var(--fg-4); letter-spacing: .06em; }
+  </style>
+</head>
+<body>
+  <div class="stamp">MASC · v0.42.1 · design-system</div>
+  <div class="hub">
+    <div class="brand"><span class="brand-mark"></span>
+      <div>
+        <h1>MASC Cockpit — Design System</h1>
+        <div class="sub">Dark brass ops terminal. Dense, diagnostic, bilingual KR/EN.</div>
+      </div>
+    </div>
+
+    <h2>Foundations</h2>
+    <div class="grid">
+      <a class="card" href="colors.html"><span class="stripe"></span><span class="n">01</span><span class="title">Colors</span><span class="desc">Surface stack, brass accent, status 6-tone, keeper palette.</span></a>
+      <a class="card" href="type.html"><span class="stripe"></span><span class="n">02</span><span class="title">Typography</span><span class="desc">Mono-first. 11 type roles. Tabular numerals.</span></a>
+      <a class="card" href="spacing.html"><span class="stripe"></span><span class="n">03</span><span class="title">Spacing & shape</span><span class="desc">4px base, tiny radii, density switch, 7-step elevation.</span></a>
+      <a class="card" href="brand.html"><span class="stripe"></span><span class="n">04</span><span class="title">Brand</span><span class="desc">Wordmark, fleet colors, cascade chain, glyph vocabulary.</span></a>
+    </div>
+
+    <h2>Cockpit zones</h2>
+    <div class="grid">
+      <a class="card" href="components.html"><span class="stripe"></span><span class="n">11 components · 31 variants</span><span class="title">Zone library</span><span class="desc">Topbar, ticker, KPI, lifeline, sidebar, swimlanes, deck, rail, composer, status bar, drawer.</span><span class="count">pannable design canvas</span></a>
+      <a class="card" href="code-mode.html"><span class="stripe"></span><span class="n">9 sections · split + 3D explode</span><span class="title">Code Mode</span><span class="desc">IDE layer: tree · editor · review · activity · split · z-axis exploded overlays.</span></a>
+      <a class="card" href="swimlanes.html"><span class="stripe"></span><span class="n">5 extensions</span><span class="title">Swimlanes · extended</span><span class="desc">Empty · waterfall · handoff · collapsed groups · 3 density modes.</span></a>
+      <a class="card" href="layers.html"><span class="stripe"></span><span class="n">5 overlays</span><span class="title">Stacked Overlays</span><span class="desc">Time · Parallel · Tools · Approve · Notes. Exploded 3D z-axis view.</span></a>
+      <a class="card" href="tokrate.html"><span class="stripe"></span><span class="n">6 components</span><span class="title">Tok/sec</span><span class="desc">KPI tile · dial · sparkline · provider table · streaming cursor · budget bar.</span></a>
+    </div>
+
+    <h2>Common patterns</h2>
+    <div class="grid">
+      <a class="card" href="primitives.html"><span class="stripe"></span><span class="n">20+ primitives</span><span class="title">Atoms</span><span class="desc">Chip, pill, bar, spark, band, kv-row, kbd, tk, button variants, status surfaces.</span></a>
+      <a class="card" href="forms.html"><span class="stripe"></span><span class="n">9 controls</span><span class="title">Forms</span><span class="desc">Text input, textarea, select, checkbox, radio, toggle, slider, number, segmented.</span></a>
+      <a class="card" href="overlays.html"><span class="stripe"></span><span class="n">6 overlays</span><span class="title">Overlays</span><span class="desc">Modal, popover, tooltip, toast, context menu, command palette (⌘K).</span></a>
+    </div>
+
+    <h2>Reference</h2>
+    <div class="grid">
+      <a class="card" href="../README.md"><span class="stripe"></span><span class="n">README</span><span class="title">Full system doc</span><span class="desc">Content fundamentals, visual foundations, iconography, index.</span></a>
+      <a class="card" href="../SKILL.md"><span class="stripe"></span><span class="n">SKILL</span><span class="title">Agent skill manifest</span><span class="desc">Hard rules, component vocabulary, do/don't list.</span></a>
+      <a class="card" href="../ui_kits/cockpit/index.html"><span class="stripe"></span><span class="n">UI KIT</span><span class="title">Cockpit prototype</span><span class="desc">Full single-pane cockpit, all zones wired together.</span></a>
+    </div>
+  </div>
+</body>
+</html>

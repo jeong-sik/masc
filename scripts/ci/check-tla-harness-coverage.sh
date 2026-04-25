@@ -48,6 +48,8 @@ is_checked() {
   local spec="$1"
   local dir="${spec%/*}"
   local file="${spec##*/}"
+  local tla_dir_arg
+  local line
 
   # scripts/tla-check.sh dynamically runs every non-symlink spec in bug-models
   # that has a matching clean or -buggy cfg.
@@ -55,7 +57,16 @@ is_checked() {
     return 0
   fi
 
-  grep -Fq "\"$file\"" scripts/tla-check.sh
+  # Match both directory and file on the same harness invocation. A basename-only
+  # grep can false-pass if another directory later adds a spec with the same
+  # file name.
+  tla_dir_arg="\$REPO_ROOT/$dir"
+  while IFS= read -r line; do
+    if [[ "$line" == *"\"$tla_dir_arg\""* && "$line" == *"\"$file\""* ]]; then
+      return 0
+    fi
+  done < scripts/tla-check.sh
+  return 1
 }
 
 missing=()

@@ -1296,6 +1296,24 @@ let provider_of_model_label ?provider_kind (model : string) : string =
   | None, Some kind -> provider_label_of_provider_kind kind
   | None, None -> "unknown"
 
+let adapter_of_registry_label label =
+  match resolve_adapter_by_cascade_prefix label with
+  | Some adapter -> Some adapter
+  | None -> resolve_direct_adapter label
+
+let supports_runtime_mcp_http_headers_for_model_label ?provider_kind model =
+  let provider_label =
+    match provider_prefix_of_label_result model with
+    | Ok prefix -> prefix
+    | Error _ -> (
+        match provider_kind with
+        | Some kind -> provider_label_of_provider_kind kind
+        | None -> model)
+  in
+  match adapter_of_registry_label provider_label with
+  | Some adapter -> adapter.tool_policy.supports_runtime_mcp_http_headers
+  | None -> false
+
 (** Whether a provider emits no usage tokens in its standard response.
 
     Used by metrics coverage gating: a text-only turn against one of

@@ -139,20 +139,58 @@ function CognitionPlane({ branch, keepers }) {
 }
 
 // ═════════════════════════════════════════════════════════════
-// IDE PLANE — I0 IDE Backbone (branch · keepers · operator nudges)
+// IDE PLANE — Phase 3 Code IDE v2
 // ═════════════════════════════════════════════════════════════
 function IdePlane({ branch, keepers }) {
+  const [mode, setMode] = usePlaneState("edit");
+  const [terminalOpen, setTerminalOpen] = usePlaneState(true);
+  const ctx = { branch, keepers };
+  const keeperCount = keepers ? keepers.size : 0;
+
+  const center =
+    mode === "review" ? <window.IxEditReview {...ctx}/> :
+    mode === "merge"  ? <window.IxEditMerge {...ctx}/> :
+    mode === "graph"  ? <window.IxGraphDag {...ctx}/> :
+    mode === "search" ? <window.IxSearch {...ctx}/> :
+    <window.IxEditAttrib {...ctx}/>;
+
+  const right =
+    mode === "review" ? <window.IxPrThread {...ctx}/> :
+    mode === "merge" || mode === "graph" || mode === "search" ? null :
+    <div className="ide-v2-right-stack">
+      <window.IxPrHeader {...ctx}/>
+      <window.IxPrChecks {...ctx}/>
+    </div>;
+
   return (
-    <div className="plane">
-      <PlaneHeader title="IDE Backbone" subtitle="Operator just observes & nudges; keepers do the work." branch={branch} keepers={keepers} />
-      <div className="plane-body">
-        <div className="plane-ide-grid">
-          <div><window.BranchSelector/></div>
-          <div style={{display:"flex",flexDirection:"column",gap:12}}>
-            <window.KeeperMultiSelect/>
-            <window.OperatorNudgeLog/>
-          </div>
+    <div className="plane ide-v2">
+      <PlaneHeader title="IDE Plane" subtitle="Tree · editor · PR · graph · terminal/search." branch={branch} keepers={keepers} />
+      <div className="ide-v2-modebar">
+        <div className="ide-v2-branch">
+          <span className="lbl">branch</span>
+          <span className="name">{branch || "main"}</span>
+          <span className="meta">{keeperCount} keepers · worktree active</span>
         </div>
+        <div className="ide-v2-modes">
+          {["edit","review","merge","graph","search"].map(m => (
+            <button key={m} className={mode === m ? "active" : ""} onClick={() => setMode(m)}>{m}</button>
+          ))}
+        </div>
+        <button className={`ide-v2-terminal-toggle ${terminalOpen ? "active" : ""}`} onClick={() => setTerminalOpen(v => !v)}>
+          terminal
+        </button>
+      </div>
+      <div className={`ide-v2-body ${right ? "" : "wide"} ${terminalOpen ? "term-open" : ""}`}>
+        <div className="ide-v2-tree">
+          <window.IxTreeDiff {...ctx}/>
+        </div>
+        <div className="ide-v2-center">{center}</div>
+        {right && <div className="ide-v2-right">{right}</div>}
+        {terminalOpen && (
+          <div className="ide-v2-terminal">
+            <window.IxTerm {...ctx}/>
+          </div>
+        )}
       </div>
     </div>
   );

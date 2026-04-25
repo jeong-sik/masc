@@ -12,6 +12,7 @@ import { SectionCap } from './common/section-cap'
 import { toolCategory, formatDuration, durationColor } from './tool-call-shared'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { parseToolBlobMarker } from '../lib/tool-blob-marker'
+import { CopyIdButton } from './common/copy-id-button'
 
 // Delegated to lib/format-time (SSOT)
 const formatTimestamp = formatTimeHms
@@ -99,9 +100,38 @@ export function formatOutput(output: string | { _blob: { sha256: string; bytes: 
 
 // ── Single tool call row (expandable) ───────────────────
 
+function CopyableToolCallBlock({
+  title,
+  value,
+  maxHeightClass,
+  ariaLabel,
+}: {
+  title: string
+  value: string
+  maxHeightClass: string
+  ariaLabel: string
+}) {
+  return html`
+    <div>
+      <div class="mb-1 flex items-center justify-between gap-2">
+        <${SectionCap}>${title}<//>
+        <${CopyIdButton}
+          value=${value}
+          label=${`tool call ${title.toLowerCase()}`}
+          ariaLabel=${ariaLabel}
+          size=${12}
+        />
+      </div>
+      <pre class=${`text-xs font-mono bg-[var(--bg-deep)] rounded p-2 overflow-x-auto ${maxHeightClass} whitespace-pre-wrap text-[var(--text-strong)]`}>${value}</pre>
+    </div>
+  `
+}
+
 function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
   const expanded = useSignal(false)
   const cat = toolCategory(entry.tool)
+  const formattedInput = formatInput(entry.input)
+  const formattedOutput = formatOutput(entry.output)
 
   return html`
     <div
@@ -132,14 +162,18 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
           ${entry.model ? html`
             <div class="text-3xs text-[var(--text-muted)]">model: <span class="text-[var(--text-strong)] font-mono">${entry.model}</span></div>
           ` : null}
-          <div>
-            <${SectionCap} class="mb-1">Input<//>
-            <pre class="text-xs font-mono bg-[var(--bg-deep)] rounded p-2 overflow-x-auto max-h-48 whitespace-pre-wrap text-[var(--text-strong)]">${formatInput(entry.input)}</pre>
-          </div>
-          <div>
-            <${SectionCap} class="mb-1">Output<//>
-            <pre class="text-xs font-mono bg-[var(--bg-deep)] rounded p-2 overflow-x-auto max-h-64 whitespace-pre-wrap text-[var(--text-strong)]">${formatOutput(entry.output)}</pre>
-          </div>
+          <${CopyableToolCallBlock}
+            title="Input"
+            value=${formattedInput}
+            maxHeightClass="max-h-48"
+            ariaLabel="Copy tool call input"
+          />
+          <${CopyableToolCallBlock}
+            title="Output"
+            value=${formattedOutput}
+            maxHeightClass="max-h-64"
+            ariaLabel="Copy tool call output"
+          />
         </div>
       ` : null}
     </div>

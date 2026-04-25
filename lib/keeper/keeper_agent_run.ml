@@ -11,6 +11,77 @@ include Keeper_agent_error
 
 (* Post-turn telemetry logging — extracted to Keeper_turn_telemetry (#5732) *)
 
+type pre_dispatch_checkpoint_hygiene_result =
+  { context : Keeper_types.working_context
+  ; resume_checkpoint : Oas.Checkpoint.t option
+  ; compacted : bool
+  ; applied : bool
+  ; meaningful_reduction : bool
+  ; before_tokens : int
+  ; after_tokens : int
+  ; trigger : string option
+  ; decision : string
+  ; save_error : string option
+  }
+
+let prepare_resume_checkpoint_for_dispatch
+      ~(meta : Keeper_types.keeper_meta)
+      ~(now_ts : float)
+      ~(loaded_checkpoint_present : bool)
+      ~(save_checkpoint :
+           Keeper_types.working_context -> (Oas.Checkpoint.t, string) result)
+      (ctx_work : Keeper_types.working_context)
+  : pre_dispatch_checkpoint_hygiene_result
+  =
+  let before_tokens = Keeper_exec_context.token_count ctx_work in
+  let pre_dispatch_meta =
+    {
+      meta with
+      compaction =
+        {
+          meta.compaction with
+          cooldown_sec = 0;
+        };
+    }
+  in
+  let compacted_ctx, trigger, decision =
+    Keeper_compact_policy.compact_if_needed
+      ~meta:pre_dispatch_meta
+      ~now_ts
+      ctx_work
+  in
+  let after_tokens = Keeper_exec_context.token_count compacted_ctx in
+  let applied = Option.is_some trigger in
+  let meaningful_reduction = after_tokens < before_tokens in
+  let checkpoint_opt, save_error =
+    if not loaded_checkpoint_present then
+      (None, None)
+    else if not applied then
+      (Some (Keeper_exec_context.checkpoint_of_context compacted_ctx), None)
+    else
+      match save_checkpoint compacted_ctx with
+      | Ok checkpoint -> (Some checkpoint, None)
+      | Error detail ->
+          (Some (Keeper_exec_context.checkpoint_of_context compacted_ctx), Some detail)
+  in
+  let context =
+    match checkpoint_opt with
+    | Some checkpoint -> { compacted_ctx with checkpoint }
+    | None -> compacted_ctx
+  in
+  {
+    context;
+    resume_checkpoint = checkpoint_opt;
+    compacted = applied;
+    applied;
+    meaningful_reduction;
+    before_tokens;
+    after_tokens;
+    trigger;
+    decision;
+    save_error;
+  }
+
 (** Run a single keeper turn via OAS Agent.run().
 
     Loads checkpoint, creates working context with the base keeper system
@@ -145,27 +216,7 @@ let run_turn
       ~primary_model_max_tokens:max_context
       ~base_dir
   in
-  (* 2b. Load raw OAS checkpoint for Agent.resume path.
-     Preserves turn_count, usage_stats, and lifecycle state across turns.
-     Falls back to fresh build when unavailable (first turn, rollover). *)
-  let raw_oas_checkpoint =
-    match
-      Keeper_checkpoint_store.load_oas
-        ~session_dir:session.session_dir
-        ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-    with
-    | Ok cp -> Some cp
-    | Error _ ->
-        Eio.traceln "[KeeperAgentRun] load_oas checkpoint failed";
-        None
-  in
-  (* Starting turn count for per-call budget calculation in hooks.
-     With Agent.resume, turn count is cumulative from checkpoint. *)
-  let start_turn_count =
-    match raw_oas_checkpoint with
-    | Some cp -> cp.turn_count
-    | None -> 0
-  in
+  let loaded_checkpoint_present = Option.is_some ctx_opt in
   (* 3. Build base system prompt from meta *)
   let profile_defaults = Keeper_types_profile.load_keeper_profile_defaults meta.name in
   let keeper_oas_context =
@@ -230,6 +281,53 @@ let run_turn
   in
   let ctx_work =
     Keeper_exec_context.set_system_prompt base_ctx ~system_prompt:base_system_prompt
+  in
+  (* Pre-dispatch checkpoint hygiene.
+
+     [load_context_from_checkpoint] already sanitizes and trims into
+     [ctx_work], but the previous Agent.resume path reloaded and passed the
+     raw checkpoint to OAS.  That bypassed MASC-side compaction and let local
+     keepers repeatedly dispatch over-budget histories until the 20 minute
+     turn timeout fired.  Use the sanitized working context as the single
+     resume source, and persist any pre-dispatch compaction before calling
+     OAS so a timed-out turn does not reload the same bloated checkpoint. *)
+  let checkpoint_hygiene =
+    prepare_resume_checkpoint_for_dispatch
+      ~meta
+      ~now_ts:(Time_compat.now ())
+      ~loaded_checkpoint_present
+      ~save_checkpoint:(fun compacted_ctx ->
+        Keeper_exec_context.save_oas_checkpoint
+          ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages
+          ~session
+          ~agent_name:meta.agent_name
+          ~model:(Keeper_exec_context.checkpoint_model_of_meta meta)
+          ~ctx:compacted_ctx
+          ~generation)
+      ctx_work
+  in
+  let ctx_work = checkpoint_hygiene.context in
+  let resume_oas_checkpoint = checkpoint_hygiene.resume_checkpoint in
+  let pre_dispatch_compacted = checkpoint_hygiene.compacted in
+  (match checkpoint_hygiene.save_error with
+   | Some detail ->
+       Log.Keeper.error
+         "%s: pre-dispatch checkpoint compaction save failed: %s"
+         meta.name detail
+   | None -> ());
+  (if checkpoint_hygiene.applied then
+     Log.Keeper.info
+       "%s: pre-dispatch compaction %s trigger=%s tokens=%d->%d max_context=%d"
+       meta.name
+       (if checkpoint_hygiene.meaningful_reduction then "applied" else "attempted")
+       (Option.value ~default:checkpoint_hygiene.decision checkpoint_hygiene.trigger)
+       checkpoint_hygiene.before_tokens checkpoint_hygiene.after_tokens max_context);
+  (* Starting turn count for per-call budget calculation in hooks.
+     With Agent.resume, turn count is cumulative from checkpoint. *)
+  let start_turn_count =
+    match resume_oas_checkpoint with
+    | Some cp -> cp.turn_count
+    | None -> 0
   in
   (* 5. Build final turn system prompt via caller callback.
      Hard constraints stay in system_prompt; soft context is injected
@@ -1210,16 +1308,16 @@ let run_turn
           chunks
           @ (match guidance_section with Some s -> [s] | None -> [])
         in
-        let allowed_tool_names =
-          Keeper_exec_tools.keeper_allowed_tool_names meta
-        in
-        let preferred_tools =
-          Keeper_tool_guidance.render_preferred_tools ~allowed_tool_names
-        in
-        let gh_workflow =
-          Keeper_tool_guidance.render_gh_workflow ~allowed_tool_names
-          |> Option.map (Printf.sprintf "\n\n%s")
-          |> Option.value ~default:""
+        (* [discover_work_nudge] runs in [before_turn], before the
+           [before_turn_params] hook computes the final per-turn
+           [tool_filter_override].  That final surface can be narrower
+           than keeper policy metadata (for example on last-turn
+           safety narrowing), so this nudge must not advertise concrete
+           tool names derived from the broader static policy. *)
+        let active_schema_guard =
+          "Use only tool schemas currently shown by the runtime. If an \
+           execution tool is absent from the active schema list, do not name \
+           or call it; emit [STATE] or use a visible handoff/status tool."
         in
         let unknown_tool_guard =
           Keeper_tool_guidance.render_unknown_tool_guard ()
@@ -1230,12 +1328,12 @@ let run_turn
            Some (Printf.sprintf
              "## Discovered Work (auto, %ds interval)\n\n%s\n\n\
               ### Use the smallest real action now\n\
-              %s%s\n\n\
+              %s\n\n\
               %s\n\n\
               Do not print fenced pseudo-calls. Pick the smallest viable \
               action and emit one or more structured tool calls now."
-             interval (String.concat "\n\n" sections) preferred_tools
-             gh_workflow unknown_tool_guard))
+             interval (String.concat "\n\n" sections) active_schema_guard
+             unknown_tool_guard))
   in
   let base_hooks =
     (* Issue #8597 #3-5: dropped ~config / ~session / ~ctx_snapshot —
@@ -1394,8 +1492,10 @@ let run_turn
                       let nudge =
                         Printf.sprintf
                           "[CLAIMED TASK] You hold %s. Do NOT call claim_next again. \
-                           Use keeper_bash, keeper_shell, keeper_fs_read, or other \
-                           execution tools to start working on it now."
+                           Use an execution tool visible in your active runtime schema \
+                           to start working on it now. If no execution tool is visible, \
+                           emit [STATE] with the blocker instead of inventing a tool \
+                           name."
                           (Keeper_id.Task_id.to_string task_id)
                       in
                       (match ctx with
@@ -1754,6 +1854,7 @@ let run_turn
           Keeper_runtime_resolved.oas_timeout_for_estimated_input_tokens
             ~estimated_input_tokens
     in
+    let stream_idle_timeout_s = Some (Float.max 5.0 (timeout_s -. 5.0)) in
     (* Observability for issue #10049: providers that declare runtime MCP
        HTTP header support need claude_mcp_config to reach the masc-mcp
        HTTP MCP endpoint; otherwise the MCP tool catalog is invisible to
@@ -1834,7 +1935,7 @@ let run_turn
               ~message_count:sizes.message_count
               ~role_counts:sizes.role_counts
               ~tool_count:sizes.tool_count
-              ~has_compact_happened:false
+              ~has_compact_happened:pre_dispatch_compacted
           in
           ()
         with
@@ -1884,6 +1985,7 @@ let run_turn
              Keeper_tool_disclosure.required_tool_satisfaction
            ~max_turns
            ~max_idle_turns
+           ?stream_idle_timeout_s
            ~temperature
            ~max_tokens
            ?max_cost_usd
@@ -1911,7 +2013,7 @@ let run_turn
            ~enable_thinking:(Keeper_config.keeper_enable_thinking ())
            (* exit_condition removed with mutation_boundary — OAS runs to
               natural completion (max_turns or model end_turn). *)
-           ?oas_checkpoint:raw_oas_checkpoint
+           ?oas_checkpoint:resume_oas_checkpoint
            ?event_bus
            ?per_provider_timeout_s:meta.per_provider_timeout_s
            ())

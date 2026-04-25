@@ -152,6 +152,17 @@ module Safe_path : sig
   val validate_relative : string -> (string, string) result
   val sanitize_filename : string -> string
 end = struct
+  (* Static patterns hoisted to module load.  [Safe_path] is on every
+     MCP tool argument-validation path, so the prior per-call form
+     paid 4 [Re.compile] for every parameter check. *)
+  let traversal_re = Re.Pcre.re {|\.\./|} |> Re.compile
+
+  let path_separator_re = Re.Pcre.re {|[/\\]|} |> Re.compile
+
+  let dotdot_re = Re.Pcre.re {|\.\.|} |> Re.compile
+
+  let unsafe_char_re = Re.Pcre.re {|[^a-zA-Z0-9_.\-]|} |> Re.compile
+
   let validate_relative path =
     let reject reason =
       log_rejection ~validator:"Safe_path" ~input:path ~reason;
@@ -163,17 +174,16 @@ end = struct
       reject "absolute paths not allowed"
     else if Base.String.is_prefix path ~prefix:".." then
       reject "path traversal not allowed"
-    else if Re.execp (Re.Pcre.re {|\.\./|} |> Re.compile) path then
+    else if Re.execp traversal_re path then
       reject "path traversal not allowed"
     else
       Ok path
 
   let sanitize_filename name =
-    (* Remove any path separators and dangerous characters *)
     name
-    |> Re.replace_string (Re.Pcre.re {|[/\\]|} |> Re.compile) ~by:"_"
-    |> Re.replace_string (Re.Pcre.re {|\.\.|} |> Re.compile) ~by:"_"
-    |> Re.replace_string (Re.Pcre.re {|[^a-zA-Z0-9_.\-]|} |> Re.compile) ~by:"_"
+    |> Re.replace_string path_separator_re ~by:"_"
+    |> Re.replace_string dotdot_re ~by:"_"
+    |> Re.replace_string unsafe_char_re ~by:"_"
 end
 
 (** Numeric validation *)

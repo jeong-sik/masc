@@ -39,6 +39,7 @@ type config =
     Llm_provider.Llm_transport.runtime_mcp_policy option;
   max_turns : int;
   max_idle_turns : int;
+  stream_idle_timeout_s : float option;
   max_tokens : int;
   max_input_tokens : int option;
   max_cost_usd : float option;

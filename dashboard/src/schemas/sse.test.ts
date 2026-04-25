@@ -137,6 +137,37 @@ describe('parseSSEMessage', () => {
     expect(msg?.type).toBe('oas:slot_scheduler_observed')
   })
 
+  it('silently ignores MCP JSON-RPC control notifications on the SSE stream', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    expect(parseSSEMessage({
+      jsonrpc: '2.0',
+      method: 'notifications/tools/list_changed',
+    })).toBeNull()
+    expect(parseSSEMessage({
+      jsonrpc: '2.0',
+      method: 'notifications/resources/updated',
+      params: { uri: 'status.json' },
+    })).toBeNull()
+    expect(parseSSEMessage({
+      jsonrpc: '2.0',
+      method: 'notifications/message',
+      params: { level: 'info', data: 'ready' },
+    })).toBeNull()
+    expect(warnSpy).not.toHaveBeenCalled()
+    warnSpy.mockRestore()
+  })
+
+  it('still warns when a dashboard board notification is missing its event type', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    expect(parseSSEMessage({
+      jsonrpc: '2.0',
+      method: 'notifications/board',
+      params: { post_id: 'p1' },
+    })).toBeNull()
+    expect(warnSpy).toHaveBeenCalledOnce()
+    warnSpy.mockRestore()
+  })
+
   it('returns null and warns on invalid input', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const msg = parseSSEMessage({ type: 'not_a_real_type' })

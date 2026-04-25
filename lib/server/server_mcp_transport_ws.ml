@@ -489,6 +489,7 @@ let dashboard_delta_for_sse session sse_event =
   match parse_sse_dashboard_event sse_event with
   | Some { event_type; slice = Some slice; payload }
     when Hashtbl.mem session.dashboard_slices slice ->
+      Transport_metrics.inc_ws_delta_built ();
       Some
         (jsonrpc_notification "dashboard/delta"
            (`Assoc

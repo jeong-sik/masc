@@ -394,6 +394,7 @@ let metric_ws_throttled_deliveries = "masc_ws_throttled_deliveries_total"
 let metric_ws_slice_fanout_skipped = "masc_ws_slice_fanout_skipped_total"
 let metric_ws_bytes_sent = "masc_ws_bytes_sent_total"
 let metric_grpc_bytes_sent = "masc_grpc_bytes_sent_total"
+let metric_ws_delta_built = "masc_ws_delta_built_total"
 
 (* Admission queue metrics — used in admission_queue_metrics.ml. *)
 let metric_inference_queue_depth = "masc_inference_queue_depth"
@@ -860,6 +861,11 @@ let init () =
     "Bytes serialised into gRPC Subscribe stream events delivered to \
      subscribers. Same purpose as masc_ws_bytes_sent_total but for the \
      gRPC transport."
+    Counter;
+  add metric_ws_delta_built
+    "Per-session dashboard deltas constructed (one Yojson.Safe.t \
+     allocation + jsonrpc_notification wrap per delta). Divide by \
+     broadcast count to estimate fanout amplification."
     Counter
 
 let start_time = Time_compat.now ()

@@ -1307,6 +1307,14 @@
  (modules test_keeper_usage_trust_anthropic_cache_9959)
  (libraries masc_mcp alcotest))
 
+(test
+ (name test_keeper_autoboot_supervisor_start_10125)
+ (modules test_keeper_autoboot_supervisor_start_10125)
+ (action
+  (setenv MASC_BASE_PATH /tmp/test-keeper-autoboot-sup-10125
+   (run %{test})))
+ (libraries masc_mcp alcotest unix))
+
 ; ============================================================
 ; Executables (benchmarks, distributed tests, tools)
 ; ============================================================

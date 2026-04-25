@@ -453,7 +453,27 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
           end
         in
         retry_loop 1
-      end
+      end;
+      (* #10125: start the supervisor sweep here, after autoboot
+         completes.  Without this call the sweep would only fire
+         on the first [masc_keeper_msg] tool dispatch (the single
+         caller of [start_existing_keepalives] in [tool_keeper.ml]
+         — see #10125 timeline 2026-04-24, where 14 keepers ran
+         under autoboot but the sweep never came up because no
+         operator [masc_keeper_msg] arrived after the restart;
+         four hours later the entire fleet was dead with no
+         supervisor to recover them).
+
+         [start_supervisor_sweep] is idempotent — its internal
+         [supervisor_sweep_running] guard makes a second call a
+         noop, so this stays correct if [masc_keeper_msg] later
+         races into [start_existing_keepalives] anyway. *)
+      (try Keeper_runtime.start_supervisor_sweep keeper_boot_ctx
+       with Eio.Cancel.Cancelled _ as e -> raise e
+          | exn ->
+            Log.Keeper.error
+              "autoboot: supervisor sweep failed to start: %s"
+              (Printexc.to_string exn))
     end);
   (* Phase 5: unified startup subsystem summary *)
   Log.info ~ctx:"startup" "subsystems: keeper loops started"

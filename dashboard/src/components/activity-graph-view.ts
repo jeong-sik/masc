@@ -243,7 +243,7 @@ export function GraphView({ data }: GraphViewProps) {
 
   return html`
     <div class="relative w-full my-3 rounded border border-[var(--card-border)] bg-[#0f1117]">
-      <div ref=${containerRef} class="w-full h-90"></div>
+      <div ref=${containerRef} class="w-full h-90" role="img" aria-label="에이전트 활동 네트워크 그래프"></div>
     </div>
     <div class="flex flex-wrap gap-x-4 gap-y-1 mt-1 px-1">
       ${[

@@ -213,11 +213,30 @@ let test_buffer_event_timestamps_successful_commit_after_retry () =
           fail "buffer should contain the fresh event")
 
 let test_get_events_after_filters () =
-  let base_id = Sse.current_id () in
-  Sse.buffer_event (base_id + 2000) "event A";
-  Sse.buffer_event (base_id + 2001) "event B";
-  let events = Sse.get_events_after (base_id + 2000) in
-  check bool "filtered" true (List.length events >= 1)
+  let original_buffer = Atomic.get Sse.event_buffer in
+  Fun.protect
+    ~finally:(fun () -> Atomic.set Sse.event_buffer original_buffer)
+    (fun () ->
+      Atomic.set Sse.event_buffer [];
+      Sse.buffer_event 802_000 "event A";
+      Sse.buffer_event 802_001 "event B";
+      check (list string) "filtered exact replay" [ "event B" ]
+        (Sse.get_events_after 802_000))
+
+let test_get_events_after_preserves_oldest_first_order () =
+  let original_buffer = Atomic.get Sse.event_buffer in
+  Fun.protect
+    ~finally:(fun () -> Atomic.set Sse.event_buffer original_buffer)
+    (fun () ->
+      Atomic.set Sse.event_buffer [];
+      Sse.buffer_event 803_000 "event A";
+      Sse.buffer_event 803_001 "event B";
+      Sse.buffer_event 803_002 "event C";
+      check (list string) "all replayed oldest-first"
+        [ "event A"; "event B"; "event C" ]
+        (Sse.get_events_after 802_999);
+      check (list string) "tail replayed oldest-first" [ "event B"; "event C" ]
+        (Sse.get_events_after 803_000))
 
 let test_get_events_after_empty () =
   let future_id = Sse.current_id () + 100000 in
@@ -385,6 +404,8 @@ let () =
       test_case "buffer retry timestamps on successful commit" `Quick
         test_buffer_event_timestamps_successful_commit_after_retry;
       test_case "filters" `Quick test_get_events_after_filters;
+      test_case "preserves oldest-first order" `Quick
+        test_get_events_after_preserves_oldest_first_order;
       test_case "empty for future" `Quick test_get_events_after_empty;
       test_case "cleanup exact under domain contention" `Quick
         test_cleanup_expired_events_exact_under_domain_contention;

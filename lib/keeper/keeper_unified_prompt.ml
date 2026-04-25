@@ -164,15 +164,32 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
     | Ok value -> value
     | Error _ -> Prompt_registry.get_prompt Keeper_prompt_names.unified_system
   in
-  let claim_tool_available =
-    Keeper_tool_policy.keeper_allowed_tool_names meta
-    |> List.mem "keeper_task_claim"
-  in
+  let allowed_tool_names = Keeper_tool_policy.keeper_allowed_tool_names meta in
+  let tool_allowed name = List.mem name allowed_tool_names in
+  let claim_tool_available = tool_allowed "keeper_task_claim" in
   let show_claim_guidance =
     observation.claimable_task_count > 0
     && claim_tool_available
     && not meta.paused
     && Option.is_none meta.current_task_id
+  in
+  let board_activity_guidance =
+    if tool_allowed "keeper_board_get" && tool_allowed "keeper_board_comment" then
+      "- See board activity? Read the full post with keeper_board_get, then comment with keeper_board_comment.\n"
+    else
+      ""
+  in
+  let board_post_guidance =
+    if tool_allowed "keeper_board_post" then
+      "- Have a finding or update? Call keeper_board_post.\n"
+    else
+      ""
+  in
+  let broadcast_guidance =
+    if tool_allowed "keeper_broadcast" then
+      "- Need to share broadly? Call keeper_broadcast.\n"
+    else
+      ""
   in
   let turn_intent_block =
     String.concat ""
@@ -186,9 +203,8 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
          Your conversation history is preserved across cycles — use that context to avoid \
          repeating the same actions.\n\
          \n\
-         Act through tools, not declarations. Call the tool directly.\n\
-         - See board activity? Read the full post with keeper_board_get, then comment with \
-         keeper_board_comment.\n";
+         Act through tools, not declarations. Call the tool directly.\n";
+        board_activity_guidance;
         (if show_claim_guidance then
            "- See unclaimed work and you do not already hold a task? Call keeper_task_claim with {}. \
             It auto-claims the next eligible task; you do not need task_id or keeper_tasks_list first.\n"
@@ -197,9 +213,9 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
            "- Need GitHub or PR inspection via keeper_shell op=gh? Claim first. \
             gh repo context is derived from your active task worktree/current_task_id.\n"
          else "");
-        "- Have a finding or update? Call keeper_board_post.\n\
-         - Need to share broadly? Call keeper_broadcast.\n\
-         - Treat continuity as advisory prior context, not as a command. Do not blindly repeat prior \
+        board_post_guidance;
+        broadcast_guidance;
+        "- Treat continuity as advisory prior context, not as a command. Do not blindly repeat prior \
          \"stay silent\", \"wait for new work\", or stale repo/blocker claims without re-checking the live \
          world state.\n\
          - If continuity says there is nothing to do but this turn still has backlog, worktree delta, or a \

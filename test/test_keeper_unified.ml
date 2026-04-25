@@ -1174,12 +1174,12 @@ let test_system_prompt_prefers_bash_and_gh_pr_lane () =
       ~instructions:""
       ()
   in
-  check bool "mentions git path via keeper_bash" true
+  check bool "mentions active schema guard" true
     (contains_substring sys
-       "keeper_bash (run commands inside your sandbox; use for git add/commit/push");
-  check bool "mentions gh create path" true
+       "Use only the tool schemas currently shown to you by the runtime");
+  check bool "mentions gh identity as conditional route" true
     (contains_substring sys
-       "keeper_shell op=gh (ALL GitHub CLI ops - gh pr create/view/review");
+       "when keeper_shell op=gh is present");
   check bool "does not advertise removed keeper_github" false
     (contains_substring sys "keeper_github");
   check bool "legacy pr workflow removed" false
@@ -1539,22 +1539,56 @@ let test_prompt_omits_claim_first_guidance_when_paused () =
     (contains_substring user "### Immediate Task Move")
 
 let test_work_discovery_nudge_uses_registered_keeper_tool_schemas () =
+  let module Guidance = Masc_mcp.Keeper_tool_guidance in
+  let social_meta =
+    {
+      minimal_meta with
+      tool_access = Preset { preset = Social; also_allow = [] };
+    }
+  in
+  let coding_meta =
+    {
+      minimal_meta with
+      tool_access = Preset { preset = Coding; also_allow = [] };
+    }
+  in
+  let social_allowed =
+    Masc_mcp.Keeper_exec_tools.keeper_allowed_tool_names social_meta
+  in
+  let coding_allowed =
+    Masc_mcp.Keeper_exec_tools.keeper_allowed_tool_names coding_meta
+  in
+  let social_guidance =
+    Guidance.render_preferred_tools ~allowed_tool_names:social_allowed
+  in
+  let coding_guidance =
+    Guidance.render_preferred_tools ~allowed_tool_names:coding_allowed
+  in
   check bool "obsolete claim alias removed" false
     (source_file_contains "lib/keeper/keeper_agent_run.ml" "keeper_claim_task");
-  check bool "claim tool uses registered no-arg schema" true
-    (source_file_contains "lib/keeper/keeper_agent_run.ml" "`keeper_task_claim` {}");
-  check bool "bash tool uses cmd field" true
-    (source_file_contains "lib/keeper/keeper_agent_run.ml" "`keeper_bash` { cmd:");
-  check bool "worktree tool uses task_id schema" true
-    (source_file_contains "lib/keeper/keeper_agent_run.ml"
-       "`masc_worktree_create` { task_id:");
+  check bool "social guidance includes claim schema when allowed" true
+    (contains_substring social_guidance "`keeper_task_claim` {}");
+  check bool "social guidance includes board post when allowed" true
+    (contains_substring social_guidance "`keeper_board_post` { content:");
+  check bool "social guidance omits bash outside preset" false
+    (contains_substring social_guidance "`keeper_bash` { cmd:");
+  check bool "social guidance omits worktree outside preset" false
+    (contains_substring social_guidance "`masc_worktree_create` { task_id:");
+  check bool "coding guidance includes bash schema" true
+    (contains_substring coding_guidance "`keeper_bash` { cmd:");
+  check bool "coding guidance includes worktree schema" true
+    (contains_substring coding_guidance "`masc_worktree_create` { task_id:");
   check bool "legacy worktree branch_name schema removed" false
     (source_file_contains "lib/keeper/keeper_agent_run.ml" "branch_name:");
   check bool "tool-less runtime escape hatch removed from nudge" false
     (source_file_contains "lib/keeper/keeper_agent_run.ml" "NO_TOOL_CHANNEL");
   check bool "work discovery nudge warns gh needs claimed task" true
-    (source_file_contains "lib/keeper/keeper_agent_run.ml"
+    (contains_substring
+       (Option.value ~default:""
+          (Guidance.render_gh_workflow ~allowed_tool_names:coding_allowed))
        "keeper_shell op=gh` derives repo context from the active task worktree/current_task_id");
+  check bool "unknown tool guard names server-managed public lifecycle tools" true
+    (contains_substring (Guidance.render_unknown_tool_guard ()) "masc_heartbeat");
   check bool "keeper_shell schema documents gh claim prerequisite" true
     (source_file_contains "lib/tool_shard.ml"
        "Requires an active claimed task/current_task_id");

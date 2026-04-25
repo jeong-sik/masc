@@ -511,6 +511,7 @@
    keeper_llm_bridge
    keeper_tool_alias
    keeper_tool_disclosure
+   keeper_tool_guidance
    keeper_turn_telemetry
    keeper_wake_telemetry
    keeper_approval_queue

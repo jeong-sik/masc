@@ -74,7 +74,9 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path
       h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors;
       true
 
-  | `GET, p when String.length p > 14 && String.sub p 0 14 = "/api/v1/board/" ->
+  | `GET, p
+    when String.starts_with ~prefix:"/api/v1/board/" p
+         && String.length p > 14 ->
       let post_id = String.sub p 14 (String.length p - 14) in
       let format = Option.value ~default:"nested" (query_param httpun_request "format") in
       let (status, body) = board_post_detail_json ~response_format:format ~post_id in
@@ -120,8 +122,9 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path
        | Error _ -> h2_respond_text h2_reqd "404 Not Found" ~status:`Not_found);
       true
 
-  | `GET, p when String.length p > 18
-               && String.sub p 0 18 = "/dashboard/assets/" ->
+  | `GET, p
+    when String.starts_with ~prefix:"/dashboard/assets/" p
+         && String.length p > 18 ->
       let filename = String.sub p 18 (String.length p - 18) in
       if not (Web_dashboard.is_safe_asset_relative_path filename) then begin
         h2_respond_text h2_reqd "404 Not Found" ~status:`Not_found;

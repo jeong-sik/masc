@@ -70,6 +70,14 @@ function App() {
         <DCArtboard id="dr-keep" label="C · Keeper inspector" width={360} height={520}><DrawerKeeper/></DCArtboard>
       </DCSection>
 
+      {/* ════════ PHASE 2 · I0 · IDE BACKBONE (foundation) ════════ */}
+
+      <DCSection id="ide-backbone" title="I0 · IDE Backbone" subtitle="Game-changer. Operator just observes & nudges; keepers do the work. Branch + keeper multi-select + nudge log.">
+        <DCArtboard id="ib-br"  label="A · Branch selector (header + list)"     width={780} height={500}><BranchSelector/></DCArtboard>
+        <DCArtboard id="ib-km"  label="B · Keeper multi-select (chip filter)"   width={780} height={300}><KeeperMultiSelect/></DCArtboard>
+        <DCArtboard id="ib-nd"  label="C · Operator nudge log + compose"        width={780} height={500}><OperatorNudgeLog/></DCArtboard>
+      </DCSection>
+
       {/* ════════ PHASE 2 · TRACK 1 · WORK PLANE ════════ */}
 
       <DCSection id="goal-zone" title="G1 · Goal Zone" subtitle="Real goals.json — horizon, phase, metric, parent tree, snapshot diff.">
@@ -139,6 +147,30 @@ function App() {
         <DCArtboard id="hr-log" label="A · Heuristic firing log"           width={1080} height={420}><HeuristicLog/></DCArtboard>
         <DCArtboard id="hr-st"  label="B · Stress board (per-agent)"       width={920}  height={240}><StressBoard/></DCArtboard>
         <DCArtboard id="hr-mod" label="C · Firing rate by module"          width={920}  height={300}><HeuristicByModule/></DCArtboard>
+      </DCSection>
+
+      {/* ════════ PHASE 2 · TRACK 4 · COGNITION PLANE ════════ */}
+
+      <DCSection id="keeper-v2" title="K1 · Keeper Inspector v2" subtitle="BDI (will/needs/desires) · tool access · token & handoff stats — real keepers/*.json">
+        <DCArtboard id="ki-bdi"    label="A · BDI panel (will / needs / desires / goals)" width={920} height={400}><KeeperBDIPanel/></DCArtboard>
+        <DCArtboard id="ki-acc"    label="B · Tool access + cascade config"                width={920} height={360}><KeeperToolAccess/></DCArtboard>
+        <DCArtboard id="ki-stats"  label="C · Token / handoff stats (all keepers)"         width={920} height={360}><KeeperTokenStats/></DCArtboard>
+      </DCSection>
+
+      <DCSection id="decisions" title="K2 · Decisions / Memory" subtitle="decisions.jsonl + memory.jsonl — belief · intention · blocker · latency per turn">
+        <DCArtboard id="dc-stream" label="A · Decisions stream (all keepers, filterable)"  width={1080} height={500}><DecisionsStream/></DCArtboard>
+        <DCArtboard id="dc-mem"    label="B · Memory entries (verified / learned / plan)"  width={920}  height={320}><MemoryEntries/></DCArtboard>
+      </DCSection>
+
+      <DCSection id="episodes" title="K3 · Institution Episodes" subtitle="institution_episodes.jsonl — per-turn learning records, click to expand">
+        <DCArtboard id="ep-cards" label="A · Turn cards (click to expand learnings)"       width={920}  height={480}><EpisodeCards/></DCArtboard>
+        <DCArtboard id="ep-learn" label="B · Learnings extraction (all episodes grouped)"  width={920}  height={420}><EpisodeLearnings/></DCArtboard>
+      </DCSection>
+
+      <DCSection id="autoresearch" title="K4 · Autoresearch" subtitle="ar-* loops + findings.jsonl — hypothesis · evidence · conclusion · confidence">
+        <DCArtboard id="ar-list"  label="A · Loop list (6 loops, open / closed)"           width={1080} height={380}><ARLoopList/></DCArtboard>
+        <DCArtboard id="ar-find"  label="B · Finding card (select f-001/002/003)"          width={920}  height={500}><ARFindingCard/></DCArtboard>
+        <DCArtboard id="ar-flow"  label="C · Hypothesis → evidence → conclusion flow"      width={780}  height={480}><ARHypothesisFlow/></DCArtboard>
       </DCSection>
 
     </DesignCanvas>

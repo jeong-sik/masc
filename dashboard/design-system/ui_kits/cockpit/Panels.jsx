@@ -5,7 +5,8 @@ const keeperTone = { "nick0cave":"brass", "masc-improver":"ok", "sangsu":"info",
 const statusColor = s => ({ running:"running", ok:"ok", pending:"info", fail:"err", stalled:"stalled", idle:"idle", queued:"queued", done:"done", active:"active" }[s] || "idle");
 
 // ============== Sidebar ==============
-function Sidebar({ keepers, goals, selKeeper, setSelKeeper, selGoal, setSelGoal }) {
+function Sidebar({ keepers, goals, selKeeper, setSelKeeper, selGoal, setSelGoal, selectedKeepers, toggleKeeper }) {
+  const sk = selectedKeepers || new Set();
   return (
     <aside className="side">
       <div className="side-sect">
@@ -20,6 +21,31 @@ function Sidebar({ keepers, goals, selKeeper, setSelKeeper, selGoal, setSelGoal 
               <span className="meta">{k.task}</span>
             </div>
           ))}
+        </div>
+      </div>
+      <div className="side-sect">
+        <div className="side-sect-h side-keepers">
+          <div className="h" style={{display:"flex",alignItems:"center",gap:6,width:"100%"}}>
+            <span>Filter</span>
+            <span className="cnt">{sk.size}/{keepers.length}</span>
+          </div>
+        </div>
+        <div className="side-sect-body" style={{paddingTop:0}}>
+          <div className="side-keepers">
+            <div className="chips">
+              {keepers.map(k => {
+                const on = sk.has(k.id);
+                return (
+                  <span key={k.id}
+                        className={"ch " + (on ? "on" : "")}
+                        onClick={() => toggleKeeper && toggleKeeper(k.id)}>
+                    <span className={"d " + k.status}></span>
+                    <span>{k.id}</span>
+                  </span>
+                );
+              })}
+            </div>
+          </div>
         </div>
       </div>
       <div className="side-sect" style={{flex:1, minHeight:0}}>
@@ -250,6 +276,7 @@ function Deck({ tasks, goals, providers, cascade }) {
 
 // ============== Rail ==============
 function Rail({ events, cascade }) {
+  const nudges = (window.MASC_P2 && window.MASC_P2.nudges) || [];
   return (
     <aside className="rail">
       <div className="rail-sect flex">
@@ -263,6 +290,25 @@ function Rail({ events, cascade }) {
                 <span className={"kn "+keeperTone[ev.keeper]}>{ev.keeper}</span>
                 {ev.text}
               </span>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="rail-sect">
+        <div className="rail-sect-h">
+          <span>Operator Nudges</span>
+          <span className="count">{nudges.filter(n => !n.ack).length}/{nudges.length}</span>
+        </div>
+        <div className="rail-nudges">
+          {nudges.slice(0, 5).map(n => (
+            <div key={n.id} className="rail-nudge">
+              <span className={"ch "+n.channel}>{n.channel}</span>
+              <span className="body">
+                {n.to.map(t => <span key={t} className="to">@{t}</span>)}
+                {n.body}
+                <span className="ts">{n.at.replace("Z","")}</span>
+              </span>
+              <span className={"ack "+(n.ack ? "y" : "n")}>{n.ack ? "✓" : "…"}</span>
             </div>
           ))}
         </div>

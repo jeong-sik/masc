@@ -1,14 +1,54 @@
-/* global React */
-const { useState, useMemo, useEffect } = React;
+/* global React, MASC_P2 */
+const { useState, useMemo, useEffect, useRef } = React;
+
+const PLANES = ["Dashboard", "Work", "Comms", "Observe", "Cognition", "IDE"];
 
 // ============== Topbar ==============
-function Topbar({ goal, goals, mode, setMode, density, setDensity }) {
+function Topbar({ goal, goals, mode, setMode, density, setDensity, branch, setBranch }) {
+  const [brOpen, setBrOpen] = useState(false);
+  const branches = (window.MASC_P2 && window.MASC_P2.branches) || [];
+  const cur = branches.find(b => b.name === branch) || branches[0] || { name:"main", ahead:0, behind:0, head:"—" };
+  const popRef = useRef(null);
+
+  useEffect(() => {
+    if (!brOpen) return;
+    const close = (e) => {
+      if (popRef.current && !popRef.current.contains(e.target)) setBrOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [brOpen]);
+
   return (
-    <div className="topbar">
+    <div className="topbar" style={{position:"relative"}}>
       <div className="tb-brand">
         <span className="tb-dot"></span>
         <span className="tb-name">MASC</span>
       </div>
+      <span className="tb-sep"></span>
+      <div className="tb-branch" onClick={() => setBrOpen(o => !o)} title={`HEAD ${cur.head}`}>
+        <span className="nm">{cur.name}</span>
+        <span className="ahbh">
+          <span className="ah">↑{cur.ahead}</span>
+          <span className="bh">↓{cur.behind}</span>
+        </span>
+        <span className="chev">▾</span>
+      </div>
+      {brOpen && (
+        <div className="tb-branch-pop" ref={popRef}>
+          <div className="h">switch branch · {branches.length} known</div>
+          {branches.map(b => (
+            <div key={b.name}
+                 className={"row " + (b.name === branch ? "on" : "")}
+                 onClick={() => { setBranch(b.name); setBrOpen(false); }}>
+              <span className="glyph">⎇</span>
+              <span className="nm">{b.name}</span>
+              <span className="ahbh"><span className="ah">↑{b.ahead}</span><span className="bh">↓{b.behind}</span></span>
+              <span className={"st " + b.status}>{b.status}</span>
+            </div>
+          ))}
+        </div>
+      )}
       <span className="tb-sep"></span>
       <div className="tb-goal" title={goal.id}>
         <span className="chip active"><span className="d"></span>{goal.id.replace("goal-","")}</span>
@@ -17,7 +57,7 @@ function Topbar({ goal, goals, mode, setMode, density, setDensity }) {
       </div>
       <span className="tb-sep"></span>
       <div className="tb-modes">
-        {["Dashboard","Split","Code"].map(m => (
+        {PLANES.map(m => (
           <button key={m} className={"tb-mode" + (mode===m ? " active":"")} onClick={()=>setMode(m)}>{m}</button>
         ))}
       </div>
@@ -27,7 +67,7 @@ function Topbar({ goal, goals, mode, setMode, density, setDensity }) {
           <button key={d} className={density===d ? "active":""} onClick={()=>setDensity(d)}>{d}</button>
         ))}
       </div>
-      <span className="tb-build">v0.42.1 · build 2847 · main@e81a7f</span>
+      <span className="tb-build">v0.42.1 · build 2847 · {cur.name}@{cur.head.slice(0,7)}</span>
     </div>
   );
 }

@@ -587,3 +587,193 @@ button { font: inherit; }
 .status .prov .d.ok { background: var(--ok-fg); }
 .status .prov .d.warn { background: var(--warn-fg); }
 .status .prov .d.idle { background: #6a6a6a; }
+
+/* ══════════════════════════════════════════════════════════════════
+   PHASE 2 ADDITIONS — IDE backbone integration into the cockpit
+   ══════════════════════════════════════════════════════════════════ */
+
+/* ─── Topbar: branch picker (between brand and goal) ─── */
+.tb-branch {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 10px;
+  background: var(--bg-0);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-1);
+  color: var(--fg-2);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.tb-branch:hover { background: var(--bg-2); border-color: var(--line-3); }
+.tb-branch::before { content: "⎇"; color: var(--fg-4); }
+.tb-branch .nm { color: var(--brass-1); font-weight: 600; }
+.tb-branch .ahbh { display: inline-flex; gap: 4px; color: var(--fg-3); font-size: 10px; }
+.tb-branch .ahbh .ah { color: var(--ok-fg); }
+.tb-branch .ahbh .bh { color: var(--warn-fg); }
+.tb-branch .chev { color: var(--fg-3); font-size: 9px; }
+
+/* Branch dropdown panel */
+.tb-branch-pop {
+  position: absolute;
+  top: calc(var(--h-topbar) + 2px);
+  left: 8px;
+  width: 360px;
+  background: var(--bg-1);
+  border: 1px solid var(--line-3);
+  box-shadow: 0 8px 24px rgba(0,0,0,.4);
+  z-index: 50;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.tb-branch-pop .h {
+  padding: 6px 10px;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--line-2);
+  font-size: 9px; letter-spacing: .12em; text-transform: uppercase; color: var(--fg-4);
+}
+.tb-branch-pop .row {
+  display: grid; grid-template-columns: auto 1fr auto auto;
+  gap: 6px; align-items: center;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line-1);
+  cursor: pointer;
+}
+.tb-branch-pop .row:hover { background: var(--bg-2); }
+.tb-branch-pop .row.on { background: var(--bg-2); border-left: 2px solid var(--brass-1); padding-left: 8px; }
+.tb-branch-pop .row .glyph { color: var(--fg-4); }
+.tb-branch-pop .row.on .glyph { color: var(--brass-1); }
+.tb-branch-pop .row .nm { color: var(--fg-1); }
+.tb-branch-pop .row .ahbh { color: var(--fg-3); font-size: 10px; }
+.tb-branch-pop .row .ahbh .ah { color: var(--ok-fg); }
+.tb-branch-pop .row .ahbh .bh { color: var(--warn-fg); }
+.tb-branch-pop .row .st {
+  font-size: 9px; padding: 1px 5px; border: 1px solid var(--line-2); text-transform: uppercase; letter-spacing: .06em;
+}
+.tb-branch-pop .row .st.clean    { color: var(--ok-fg); border-color: var(--ok-border); }
+.tb-branch-pop .row .st.dirty    { color: var(--warn-fg); border-color: var(--warn-border, var(--warn)); }
+.tb-branch-pop .row .st.stale    { color: var(--err-fg); border-color: var(--err-border); }
+.tb-branch-pop .row .st.research { color: var(--brass-1); border-color: var(--brass-3); }
+
+/* ─── Sidebar: keeper multi-select section ─── */
+.side-keepers {
+  display: flex; flex-direction: column; gap: 4px;
+}
+.side-keepers .h { display: flex; align-items: center; gap: 6px; }
+.side-keepers .h .cnt { margin-left: auto; color: var(--brass-1); font-family: var(--font-mono); font-size: 10px; }
+.side-keepers .chips {
+  display: flex; flex-wrap: wrap; gap: 3px;
+  padding: 4px 0;
+}
+.side-keepers .ch {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 6px;
+  background: var(--bg-0);
+  border: 1px solid var(--line-1);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--fg-3);
+  cursor: pointer;
+  user-select: none;
+}
+.side-keepers .ch:hover { background: var(--bg-2); color: var(--fg-1); }
+.side-keepers .ch.on   { background: rgb(var(--brass-glow)/.12); border-color: var(--brass-3); color: var(--brass-1); }
+.side-keepers .ch .d   { width: 5px; height: 5px; border-radius: 50%; }
+
+/* ─── Rail: nudge log section ─── */
+.rail-nudges { display: flex; flex-direction: column; gap: 1px; padding: 0 var(--sp-3) var(--sp-3); }
+.rail-nudge {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 6px;
+  align-items: flex-start;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--line-1);
+  font-family: var(--font-mono); font-size: 10px;
+}
+.rail-nudge:last-child { border-bottom: 0; }
+.rail-nudge .ch {
+  font-size: 9px; padding: 1px 4px; border: 1px solid var(--line-2);
+  text-transform: uppercase; letter-spacing: .06em; white-space: nowrap;
+}
+.rail-nudge .ch.hint     { color: var(--brass-1); border-color: var(--brass-3); }
+.rail-nudge .ch.approve  { color: var(--ok-fg); border-color: var(--ok-border); }
+.rail-nudge .ch.reject   { color: var(--err-fg); border-color: var(--err-border); }
+.rail-nudge .ch.redirect { color: var(--info-fg, var(--info)); border-color: var(--info); }
+.rail-nudge .body { color: var(--fg-1); line-height: 1.4; }
+.rail-nudge .body .to { color: var(--brass-1); margin-right: 4px; }
+.rail-nudge .body .ts { color: var(--fg-4); display: block; font-size: 9px; margin-top: 2px; }
+.rail-nudge .ack {
+  font-size: 9px; padding: 0 4px; text-transform: uppercase; letter-spacing: .06em;
+  align-self: flex-start;
+}
+.rail-nudge .ack.y { color: var(--ok-fg); }
+.rail-nudge .ack.n { color: var(--warn-fg); }
+
+/* ─── Plane content area (replaces center when not Dashboard) ─── */
+.plane {
+  display: flex; flex-direction: column;
+  height: 100%; overflow: hidden;
+  background: var(--bg-0);
+}
+.plane-hdr {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 12px;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--line-2);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.plane-hdr .ti { font-size: 12px; color: var(--fg-1); font-weight: 600; }
+.plane-hdr .sub { color: var(--fg-3); font-size: 10px; }
+.plane-hdr .ctx {
+  margin-left: auto;
+  display: inline-flex; gap: 8px; align-items: center;
+  font-size: 10px; color: var(--fg-3);
+}
+.plane-hdr .ctx .br { color: var(--brass-1); }
+.plane-hdr .ctx .kp { color: var(--info-fg, var(--info)); }
+
+.plane-tabs {
+  display: flex; gap: 0;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--line-2);
+  padding: 0 8px;
+  overflow-x: auto;
+}
+.plane-tabs::-webkit-scrollbar { display: none; }
+.plane-tabs button {
+  padding: 6px 12px;
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--fg-3);
+  font: 10px/1 var(--font-mono);
+  letter-spacing: .08em; text-transform: uppercase;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.plane-tabs button:hover { color: var(--fg-1); }
+.plane-tabs button.active {
+  color: var(--brass-1);
+  border-bottom-color: var(--brass-1);
+}
+
+.plane-body {
+  flex: 1; overflow: auto;
+  padding: 14px 16px;
+  background: var(--bg-0);
+}
+.plane-body::-webkit-scrollbar { width: 8px; height: 8px; }
+.plane-body::-webkit-scrollbar-thumb { background: var(--line-2); }
+
+/* IDE plane uses 2-col layout */
+.plane-ide-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  align-items: start;
+}
+
+/* Mode tabs need to scroll horizontally on narrow screens (now 6 modes) */
+.tb-modes { overflow-x: auto; max-width: 360px; flex-shrink: 0; }
+.tb-modes::-webkit-scrollbar { display: none; }

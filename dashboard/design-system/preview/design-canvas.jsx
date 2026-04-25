@@ -347,7 +347,7 @@ function DCSection({ id, title, subtitle, children, gap = 48 }) {
   const byId = Object.fromEntries(artboards.map((a) => [a.props.id ?? a.props.label, a]));
 
   return (
-    <div data-dc-section={sid} style={{ marginBottom: 80, position: 'relative' }}>
+    <div id={sid} data-dc-section={sid} style={{ marginBottom: 80, position: 'relative', scrollMarginTop: 24 }}>
       <div style={{ padding: '0 60px 56px' }}>
         <DCEditable tag="div" value={sec.title ?? title}
           onChange={(v) => ctx && sid && ctx.patchSection(sid, { title: v })}

@@ -528,6 +528,8 @@ function BulkActions({ connectors }: { connectors: GateConnectorInfo[] }) {
         class="cursor-pointer rounded border border-[var(--ok-20)] bg-[var(--ok-10)] px-2 py-1 text-2xs text-[var(--ok)] hover:bg-[var(--ok-10)] disabled:cursor-not-allowed disabled:opacity-40"
         disabled=${startBusy || downCount === 0}
         title=${downCount === 0 ? '모두 이미 실행 중' : `${downCount} 개 sidecar 시작`}
+        aria-label=${startBusy ? '모든 sidecar 시작 중' : downCount === 0 ? '모두 이미 실행 중' : `${downCount} 개 sidecar 시작`}
+        aria-busy=${startBusy ? 'true' : 'false'}
         onClick=${() => { void runBulk('start', c => c?.available !== true, connectors) }}
         data-bulk-action="start"
       >
@@ -538,6 +540,8 @@ function BulkActions({ connectors }: { connectors: GateConnectorInfo[] }) {
         class="cursor-pointer rounded border border-[var(--bad-20)] bg-[var(--bad-10)] px-2 py-1 text-2xs text-[var(--bad-light)] hover:bg-[var(--bad-10)] disabled:cursor-not-allowed disabled:opacity-40"
         disabled=${stopBusy || upCount === 0}
         title=${upCount === 0 ? '실행 중인 sidecar 없음' : `${upCount} 개 sidecar 정지`}
+        aria-label=${stopBusy ? '모든 sidecar 정지 중' : upCount === 0 ? '실행 중인 sidecar 없음' : `${upCount} 개 sidecar 정지`}
+        aria-busy=${stopBusy ? 'true' : 'false'}
         onClick=${() => { void runBulk('stop', c => c?.available === true, connectors) }}
         data-bulk-action="stop"
       >
@@ -718,6 +722,8 @@ export function ConnectorOverviewStrip({
   const summary = summarizeConnectorStrip(connectors, keeperCount)
   return html`
     <div
+      role="region"
+      aria-label="커넥터 상태 요약"
       class="mb-4 rounded border border-[var(--card-border)] bg-[var(--bg-1)] p-3"
       data-overview-strip-root
     >

@@ -207,6 +207,7 @@ function MatrixCellButton({ cell }: { cell: MatrixCell }) {
       onClick=${onClick}
       disabled=${disabled}
       title=${title}
+      aria-label=${title}
       data-matrix-cell=${`${cell.keeperName}:${cell.connectorId}`}
       data-matrix-state=${cell.state}
     >
@@ -226,7 +227,7 @@ export function ConnectorKeeperMatrix({ matrix }: { matrix: MatrixData }) {
   const gridCols = `grid-template-columns: minmax(160px, 1fr) repeat(${matrix.columns.length}, minmax(80px, 1fr)) minmax(90px, auto);`
 
   return html`
-    <section class="mb-4 rounded border border-[var(--card-border)] bg-[var(--bg-1)] p-3" data-panel="connector-keeper-matrix">
+    <section role="region" aria-label="Keeper 커넥터 바인딩 매트릭스" class="mb-4 rounded border border-[var(--card-border)] bg-[var(--bg-1)] p-3" data-panel="connector-keeper-matrix">
       <header class="mb-2 flex items-baseline justify-between gap-3">
         <div>
           <h4 class="text-xs font-semibold uppercase tracking-4 text-[var(--text-body)]">
@@ -265,6 +266,7 @@ export function ConnectorKeeperMatrix({ matrix }: { matrix: MatrixData }) {
                     class="flex cursor-pointer items-center justify-center gap-1 rounded px-1 py-1 text-3xs uppercase tracking-3 text-[var(--text-dim)] hover:text-[var(--text-body)]"
                     onClick=${() => scrollToConnectorRow(colId)}
                     title=${`${CONNECTOR_DISPLAY_NAMES[colId] ?? colId} — 행으로 이동`}
+                    aria-label=${`${CONNECTOR_DISPLAY_NAMES[colId] ?? colId} — 행으로 이동`}
                   >
                     <span aria-hidden="true">${channelIcon(colId)}</span>
                     <span>${CONNECTOR_DISPLAY_NAMES[colId] ?? colId}</span>
@@ -354,6 +356,7 @@ function MatrixRowRender({ row }: { row: MatrixRow }) {
       class=${`flex cursor-pointer items-center gap-2 truncate rounded px-2 py-1 text-left text-xs hover:bg-[var(--white-4)] ${row.known ? 'text-[var(--text-body)]' : 'text-[var(--warn)]'}`}
       onClick=${() => scrollToKeeper(row.keeperName)}
       title=${row.known ? row.keeperName : `${row.keeperName} — directory 밖 keeper`}
+      aria-label=${row.known ? `${row.keeperName} keeper로 이동` : `${row.keeperName} — directory 밖 keeper`}
     >
       ${row.known ? null : html`<span class="text-[var(--warn)]" aria-hidden="true">⚠</span>`}
       <span class="truncate">${row.keeperName}</span>

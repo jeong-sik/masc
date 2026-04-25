@@ -55,6 +55,7 @@ function OnboardingCard({ connectorId }: { connectorId: KnownConnectorId }) {
           class=${`rounded cursor-pointer transition-all duration-200 font-medium border border-solid border-[var(--accent-30)] bg-[var(--accent-12)] text-[var(--text-strong)] hover:bg-[var(--accent-20)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-1)] py-1 px-2 text-3xs ${starting ? 'opacity-50 pointer-events-none' : 'active:scale-[0.97]'}`}
           disabled=${starting}
           aria-busy=${starting ? 'true' : 'false'}
+          aria-label=${`${CONNECTOR_DISPLAY_NAMES[connectorId]} sidecar 시작`}
           data-onboarding-start=${connectorId}
           onClick=${() => { void onStart() }}
         >${onboardingStartLabel(starting)}</button>

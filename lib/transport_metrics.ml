@@ -83,6 +83,9 @@ let observe_ws_client_buffered_bytes n =
 let inc_ws_throttled_delivery () =
   Prometheus.inc_counter Prometheus.metric_ws_throttled_deliveries ()
 
+let inc_ws_slice_fanout_skipped () =
+  Prometheus.inc_counter Prometheus.metric_ws_slice_fanout_skipped ()
+
 (** {1 Environment-derived Transport Config} *)
 
 let grpc_runtime_listening : bool Atomic.t = Atomic.make false

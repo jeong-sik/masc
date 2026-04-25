@@ -75,7 +75,7 @@ function StoredBlobView({
         </div>
         <div class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] overflow-hidden">
           <div class="flex items-center justify-between px-3 py-1.5 border-b border-[var(--card-border)]">
-            <button type="button" class="text-3xs text-[var(--text-muted)] cursor-pointer hover:text-[var(--text-body)]"
+            <button type="button" class="text-3xs py-1 text-[var(--text-muted)] cursor-pointer hover:text-[var(--text-body)]"
               aria-expanded="true"
               onClick=${() => { expanded.value = false }}>
               접기 (${marker.bytes.toLocaleString()}B)

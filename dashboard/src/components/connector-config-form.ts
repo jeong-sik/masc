@@ -364,6 +364,7 @@ function FieldWidget({ id, field, value, revealed }: {
         <input
           type="number"
           id=${fieldId}
+          aria-label=${field.name}
           value=${value}
           onInput=${onInput}
           step=${field.type === 'integer' ? 1 : 'any'}
@@ -378,6 +379,7 @@ function FieldWidget({ id, field, value, revealed }: {
             <input
               type=${revealed ? 'text' : 'password'}
               id=${fieldId}
+              aria-label=${field.name}
               value=${value}
               onInput=${onInput}
               placeholder=${field.required ? '필수 — 토큰을 붙여넣으세요' : ''}
@@ -397,6 +399,7 @@ function FieldWidget({ id, field, value, revealed }: {
         <input
           type="text"
           id=${fieldId}
+          aria-label=${field.name}
           value=${value}
           onInput=${onInput}
           placeholder=${defaultToString(field.default)}

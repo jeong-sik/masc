@@ -177,6 +177,16 @@ let test_snapshot_omits_collapsed_from_for_active_phase () =
       (Some "Running")
       (Json.member "phase" snapshot |> Json.to_string_option))
 
+let test_snapshot_reports_keeper_identity () =
+  with_registry (fun () ->
+    let base_path = "/tmp/keeper-composite-identity" in
+    let keeper_name = "analyst" in
+    let entry = Reg.register ~base_path keeper_name (make_meta keeper_name) in
+    let snapshot = Obs.observe entry |> Obs.snapshot_to_json in
+    check (option string) "snapshot exposes registry keeper identity"
+      (Some keeper_name)
+      (Json.member "keeper" snapshot |> Json.to_string_option))
+
 let test_direct_turn_mutations_emit_composite_changed () =
   with_registry (fun () ->
     let base_path = "/tmp/keeper-composite-turn-ticks" in
@@ -210,6 +220,7 @@ let () =
     "snapshot projection",
     [ test_case "stable phase exposes collapsed_from" `Quick test_snapshot_reports_collapsed_from_for_stable_phase
     ; test_case "active phase leaves collapsed_from null" `Quick test_snapshot_omits_collapsed_from_for_active_phase
+    ; test_case "snapshot exposes keeper identity" `Quick test_snapshot_reports_keeper_identity
     ];
     "composite change signals",
     [ test_case "direct turn mutations emit composite tick" `Quick test_direct_turn_mutations_emit_composite_changed ];

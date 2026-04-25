@@ -125,6 +125,9 @@ const KeeperCompositeExecutionSchema = object({
 })
 
 export const KeeperCompositeSnapshotSchema = object({
+  // Explicit registry identity from new backends. Optional so pinned older
+  // backends keep rendering; UI falls back to canonical correlation_id parsing.
+  keeper: optional(string()),
   correlation_id: string(),
   run_id: string(),
   ts: number(),

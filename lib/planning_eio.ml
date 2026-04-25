@@ -77,14 +77,7 @@ let write_file_content path content =
   Fs_compat.save_file path content
 
 let find_substring_from haystack ~needle ~from =
-  let haystack_len = String.length haystack in
-  let needle_len = String.length needle in
-  let rec loop i =
-    if i + needle_len > haystack_len then None
-    else if String.sub haystack i needle_len = needle then Some i
-    else loop (i + 1)
-  in
-  loop from
+  String_util.find_substring ~pos:from haystack needle
 
 let normalize_placeholder value =
   match String.trim value with

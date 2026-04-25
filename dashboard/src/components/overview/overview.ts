@@ -205,7 +205,7 @@ function MissionPartyCard({ active }: { active: DashboardMissionSessionCard | nu
           ? html`<${TimeAgo} timestamp=${startedAt} class="text-2xs text-[var(--text-muted)]" />`
           : null}
       </header>
-      <p class="text-sm text-[var(--text-strong)] mb-3 line-clamp-2" data-testid="overview-party-goal">
+      <p class="text-sm text-[var(--text-strong)] mb-3 line-clamp-2" data-testid="overview-party-goal" title=${active.goal !== '' ? active.goal : undefined}>
         🎯 ${active.goal !== '' ? active.goal : '(목표 없음)'}
       </p>
       ${members.length > 0

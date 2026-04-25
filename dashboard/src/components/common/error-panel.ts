@@ -92,7 +92,7 @@ export function ErrorPanel({ onClose }: ErrorPanelProps) {
                 ${e.taskId ? html`<span class="text-[var(--text-muted)] truncate max-w-20" title=${e.taskId}>${e.taskId}</span>` : null}
                 ${e.count > 1 ? html`<span class="shrink-0 text-2xs text-[var(--warn)]" aria-label=${`${e.count}회 반복`}>×${e.count}</span>` : null}
               </div>
-              <p class="mt-0.5 text-xs text-[var(--text-body)] leading-[1.4] line-clamp-2">${e.message}</p>
+              <p class="mt-0.5 text-xs text-[var(--text-body)] leading-[1.4] line-clamp-2" title=${e.message}>${e.message}</p>
               <span class="mt-0.5 block text-2xs text-[var(--text-muted)]">${formatElapsedCompact((Date.now() - e.timestamp) / 1000)} 전</span>
             </div>
             <button type="button"

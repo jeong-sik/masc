@@ -463,7 +463,7 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
               ${horizonLabel(node.horizon)}
             </span>
             <${StatusBadge} status=${goalPhaseStatus(node.phase)} label=${goalPhaseLabel(node.phase)} />
-            <span class="break-words text-base font-semibold text-text-strong line-clamp-2">${node.title}</span>
+            <span class="break-words text-base font-semibold text-text-strong line-clamp-2" title=${node.title}>${node.title}</span>
             <span class="text-2xs text-text-dim">${priorityStars(node.priority)}</span>
           </div>
 

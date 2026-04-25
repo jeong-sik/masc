@@ -24,7 +24,7 @@ function ToolRow({ tool, isSelected }: { tool: McpToolSchema; isSelected: boolea
         ${isDestructive ? html`<${CountBadge} tone="bad">D<//>` : null}
         ${isReadOnly ? html`<${CountBadge} tone="ok">R<//>` : null}
       </div>
-      <div class="text-3xs text-[var(--text-muted)] mt-0.5 line-clamp-1">${tool.description}</div>
+      <div class="text-3xs text-[var(--text-muted)] mt-0.5 line-clamp-1" title=${tool.description}>${tool.description}</div>
     </button>
   `
 }

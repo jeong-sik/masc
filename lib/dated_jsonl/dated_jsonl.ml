@@ -148,7 +148,11 @@ let load_tail_lines path ~max_lines =
           |> String.split_on_char '\n'
         in
         let raw_lines =
-          if !pos > 0 && raw_lines <> [] then List.tl raw_lines else raw_lines
+          if !pos > 0 then
+            match raw_lines with
+            | _partial :: rest -> rest
+            | [] -> []
+          else raw_lines
         in
         let all_lines =
           raw_lines

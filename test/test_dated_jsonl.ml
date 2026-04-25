@@ -104,7 +104,7 @@ let test_load_tail_lines_keeps_first_data_after_blank_prefix () =
     ^ "\n"
   in
   Fs_compat.append_file path content;
-  let lines = Dated_jsonl.load_tail_lines path ~max_lines:10 in
+  let lines = Dated_jsonl.load_tail_lines path ~max_lines:5 in
   check (list string) "keeps first data row after blank partial prefix" expected lines
 
 (* ── read_recent_lines returns raw strings ─────────────── *)

@@ -426,7 +426,7 @@ export function TransitionTrail({
               <span class="text-[var(--text-dim)]">${entry.from}</span>
               <span class="text-[var(--text-muted)]">→</span>
               <span class="text-[var(--text-strong)]">${entry.to}</span>
-              ${reason ? html`<span class="ml-1 text-3xs text-[var(--text-dim)] opacity-50">ⓘ</span>` : null}
+              ${reason ? html`<span class="ml-1 text-3xs text-[var(--text-dim)] opacity-70" title=${reason}>ⓘ</span>` : null}
             </div>
           `
         })}

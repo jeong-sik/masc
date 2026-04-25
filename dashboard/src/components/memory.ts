@@ -436,10 +436,10 @@ function PostCard({ post }: { post: BoardPost }) {
             onClick=${(e: Event) => navigateToAuthor(post.author, e)}
           >${post.author}</a>
           <span class="text-2xs text-[var(--text-muted)] opacity-60"><${TimeAgo} timestamp=${post.created_at} /></span>
-          ${isUpdated(post) ? html`<span class="text-3xs text-[var(--text-muted)] opacity-50">(수정됨)</span>` : null}
+          ${isUpdated(post) ? html`<span class="text-3xs text-[var(--text-muted)] opacity-70">(수정됨)</span>` : null}
 
           <!-- Separator -->
-          <span class="text-[var(--text-muted)] opacity-30">|</span>
+          <span class="text-[var(--text-muted)] opacity-30" aria-hidden="true">|</span>
 
           <!-- Counts -->
           <span class="text-2xs text-[var(--text-muted)]">댓글 ${post.comment_count}</span>

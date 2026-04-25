@@ -21,3 +21,24 @@ val read_range :
 val prune :
   base_path:string -> days:int -> unit
 (** Delete discovery day-files older than [days] days. *)
+
+module For_testing : sig
+  type probe_record = {
+    ts : float;
+    endpoint_url : string;
+    healthy : bool;
+    model_id : string option;
+    models : string list;
+    ctx_size : int option;
+    total_slots : int option;
+    busy_slots : int option;
+    idle_slots : int option;
+  }
+
+  val endpoint_to_record :
+    Llm_provider.Discovery.endpoint_status -> probe_record
+  (** #10404: pinned so tests can verify [models] preserves the
+      full [/api/tags] surface, not just the head. *)
+
+  val record_to_json : probe_record -> Yojson.Safe.t
+end

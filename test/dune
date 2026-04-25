@@ -1460,6 +1460,10 @@
  (libraries dated_jsonl fs_compat alcotest eio eio_main yojson unix))
 
 
+ (name test_discovery_history_multimodel_10404)
+ (modules test_discovery_history_multimodel_10404)
+ (libraries masc_mcp agent_sdk.llm_provider alcotest yojson))
+
 ; ============================================================
 ; Special: Heartbeat/keeper minimal deps
 ; ============================================================

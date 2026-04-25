@@ -29,7 +29,18 @@ type probe_record = {
   ts : float;
   endpoint_url : string;
   healthy : bool;
+  (* #10404: pre-fix only the head [m :: _] of [e.models] was
+     captured, so 164/164 ollama probes recorded [qwen3:8b] (the
+     first /api/tags entry) while every cascade.toml profile
+     actually drove [qwen3.6:27b-coding-nvfp4].  Discovery turned
+     into noise: operators saw the wrong model, fallback models
+     never appeared, and load-balanced cascades were
+     unobservable.  Keep [model_id] for backward-compat readers
+     (it now means "primary == first loaded") and add the full
+     [models] list so consumers can reconstruct the actual fleet
+     surface. *)
   model_id : string option;
+  models : string list;
   ctx_size : int option;
   total_slots : int option;
   busy_slots : int option;
@@ -38,11 +49,16 @@ type probe_record = {
 
 let endpoint_to_record (e : Llm_provider.Discovery.endpoint_status) : probe_record =
   let open Llm_provider.Discovery in
+  let models = List.map (fun (m : model_info) -> m.id) e.models in
+  let model_id =
+    match models with [] -> None | first :: _ -> Some first
+  in
   {
     ts = Time_compat.now ();
     endpoint_url = e.url;
     healthy = e.healthy;
-    model_id = (match e.models with m :: _ -> Some m.id | [] -> None);
+    model_id;
+    models;
     ctx_size = Option.map (fun (p : server_props) -> p.ctx_size) e.props;
     total_slots = Option.map (fun (s : slot_status) -> s.total) e.slots;
     busy_slots = Option.map (fun (s : slot_status) -> s.busy) e.slots;
@@ -54,6 +70,7 @@ let record_to_json (r : probe_record) : Yojson.Safe.t =
     [ ("ts", `Float r.ts)
     ; ("endpoint_url", `String r.endpoint_url)
     ; ("healthy", `Bool r.healthy)
+    ; ("models", `List (List.map (fun s -> `String s) r.models))
     ]
   in
   let opt key f = function Some v -> [(key, f v)] | None -> [] in
@@ -111,3 +128,22 @@ let prune ~base_path ~days =
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Log.Discovery.error "discovery_history: prune failed: %s"
       (Printexc.to_string exn)
+
+(* ── Test surface ─────────────────────────────────────────── *)
+
+module For_testing = struct
+  type nonrec probe_record = probe_record = {
+    ts : float;
+    endpoint_url : string;
+    healthy : bool;
+    model_id : string option;
+    models : string list;
+    ctx_size : int option;
+    total_slots : int option;
+    busy_slots : int option;
+    idle_slots : int option;
+  }
+
+  let endpoint_to_record = endpoint_to_record
+  let record_to_json = record_to_json
+end

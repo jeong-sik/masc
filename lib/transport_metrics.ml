@@ -80,6 +80,9 @@ let observe_ws_client_buffered_bytes n =
   Prometheus.observe_histogram Prometheus.metric_ws_client_buffered_bytes bytes;
   Prometheus.inc_counter Prometheus.metric_ws_client_acks ()
 
+let inc_ws_throttled_delivery () =
+  Prometheus.inc_counter Prometheus.metric_ws_throttled_deliveries ()
+
 (** {1 Environment-derived Transport Config} *)
 
 let grpc_runtime_listening : bool Atomic.t = Atomic.make false

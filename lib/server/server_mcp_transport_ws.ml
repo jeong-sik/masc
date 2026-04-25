@@ -424,8 +424,38 @@ let dashboard_delta_for_sse session sse_event =
              ]))
   | _ -> None
 
+(** Backpressure gate threshold in bytes.  Reads the env var on each call
+    so operators can retune without a restart; the read is cheap (atomic
+    hash lookup in [Env_config_core]).  A value of 0 disables the gate
+    entirely — appropriate for environments that have not yet accumulated
+    enough production data from the [masc_ws_client_buffered_bytes]
+    histogram to pick a threshold and prefer observation-only mode. *)
+let client_buffer_limit_bytes () =
+  Env_config_core.get_int ~default:1048576
+    "MASC_WS_CLIENT_BUFFER_LIMIT_BYTES"
+
+(** True when the session has reported enough outstanding bytes that
+    another push will only grow the client's buffer further.  Only
+    authenticated dashboard sessions track bufferedAmount; anonymous
+    sessions always pass. *)
+let session_is_backpressured session =
+  if not session.dashboard_authenticated then false
+  else
+    let limit = client_buffer_limit_bytes () in
+    limit > 0 && session.dashboard_last_buffered_amount >= limit
+
 let send_dashboard_or_raw_sse session sse_event =
-  if session.dashboard_authenticated then
+  if session_is_backpressured session then begin
+    (* Drop the delivery rather than queue it.  Next ack after the client
+       drains will let traffic resume; in the meantime [masc_ws_throttled_
+       deliveries_total] advances so operators can see the circuit is
+       open.  Returning [true] keeps the SSE external-subscriber loop
+       from treating this as a fatal send failure — the session is still
+       live, just temporarily silenced. *)
+    Transport_metrics.inc_ws_throttled_delivery ();
+    true
+  end
+  else if session.dashboard_authenticated then
     match dashboard_delta_for_sse session sse_event with
     | Some delta ->
         (* Delta carries a per-session [seq], so the encoded text is unique

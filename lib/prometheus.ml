@@ -369,6 +369,7 @@ let metric_ws_bytes_cache_hits = "masc_ws_bytes_cache_hits_total"
 let metric_ws_bytes_cache_misses = "masc_ws_bytes_cache_misses_total"
 let metric_ws_client_buffered_bytes = "masc_ws_client_buffered_bytes"
 let metric_ws_client_acks = "masc_ws_client_acks_total"
+let metric_ws_throttled_deliveries = "masc_ws_throttled_deliveries_total"
 
 (* Admission queue metrics — used in admission_queue_metrics.ml. *)
 let metric_inference_queue_depth = "masc_inference_queue_depth"
@@ -776,6 +777,10 @@ let init () =
     ~help:"Dashboard client WebSocket.bufferedAmount reported on each ack" ();
   add metric_ws_client_acks
     "Total dashboard/ack notifications received from WS clients"
+    Counter;
+  add metric_ws_throttled_deliveries
+    "WS dashboard deliveries skipped because the client's last reported \
+     bufferedAmount exceeded MASC_WS_CLIENT_BUFFER_LIMIT_BYTES"
     Counter
 
 let start_time = Time_compat.now ()

@@ -306,10 +306,12 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason ~now () =
       (* Terminal structural errors are not quota exhaustion, but they have the
          same retry shape: the next cascade tick will hit the same provider
          state and fail again.  Cool down immediately to keep fallback from
-         becoming a hidden tax on every request. *)
+         becoming a hidden tax on every request.  #10441: the
+         [apply_trust_failure_locked] step was removed by #10412 (Phase 1
+         revert).  Keep [bump_failure_fp] for fingerprint history but discard
+         its return value — there's no trust adjustment to feed it into. *)
       state.consecutive_failures <- state.consecutive_failures + 1;
-      let persistent = bump_failure_fp () in
-      apply_trust_failure_locked state ~persistent;
+      bump_failure_fp ();
       let new_until = now +. terminal_failure_cooldown_sec in
       if new_until > state.cooldown_until then
         state.cooldown_until <- new_until)

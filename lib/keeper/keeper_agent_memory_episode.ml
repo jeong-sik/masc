@@ -64,6 +64,47 @@ let record_success
     Log.Keeper.error "keeper:%s episode_create failed: %s"
       keeper_name (Printexc.to_string exn)
 
+(** #10341: classify [error_kind] into the matching {!Agent_stress.stress_kind}
+    so the stress ledger receives signal for failure modes other than the
+    keepalive-only [Failure_streak] currently emitted by
+    [keeper_keepalive].  Returns [None] for kinds that do not map to a
+    pre-existing stress dimension (those are still recorded in the
+    institution episode store via [store_failed_turn_episode]).
+
+    Mapping rationale:
+    - [*_timeout] / [*_timeout_*] / [oas_timeout_budget] → [Timeout]
+      (matches the Timeout dimension defined in agent_stress.mli).
+    - [completion_contract_violation] → [Parse_degraded] (the LLM
+      response failed contract parse — semantically a parse-degraded
+      output, not a timeout or hard failure streak). *)
+let stress_kind_of_error_kind error_kind : Agent_stress.stress_kind option =
+  let trimmed = String.trim error_kind in
+  let ends_with suffix s =
+    let ls = String.length s in
+    let lp = String.length suffix in
+    ls >= lp && String.equal (String.sub s (ls - lp) lp) suffix
+  in
+  let contains needle s =
+    let ln = String.length needle in
+    let ls = String.length s in
+    if ln = 0 || ln > ls then false
+    else
+      let rec loop i =
+        if i + ln > ls then false
+        else if String.equal (String.sub s i ln) needle then true
+        else loop (i + 1)
+      in
+      loop 0
+  in
+  if trimmed = "" then None
+  else if ends_with "_timeout" trimmed
+       || contains "_timeout_" trimmed
+       || String.equal trimmed "oas_timeout_budget"
+  then Some Agent_stress.Timeout
+  else if String.equal trimmed "completion_contract_violation"
+  then Some Agent_stress.Parse_degraded
+  else None
+
 let record_failure
     ~(config : Coord_utils.config)
     ~(keeper_name : string)
@@ -76,6 +117,19 @@ let record_failure
   try
     Memory_oas_bridge.store_failed_turn_episode ~memory
       ~keeper_name ~turn ~trace_id ~error_kind ~error_message ();
+    (* #10341: surface non-keepalive failure modes (timeout, parse) into
+       the Agent_stress ledger so the stress dimensions defined in
+       agent_stress.mli stop being write-only-for-Failure_streak. *)
+    (match stress_kind_of_error_kind error_kind with
+     | None -> ()
+     | Some kind ->
+         Agent_stress.record
+           {
+             agent_name = keeper_name;
+             room_id = "";
+             kind;
+             timestamp = Unix.gettimeofday ();
+           });
     let episodes, procedures =
       Memory_oas_bridge.flush_incremental ~memory ~agent_name:keeper_name
     in

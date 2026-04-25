@@ -780,12 +780,19 @@ let test_keeper_profile_stale_builtin_falls_back_to_live_default () =
 
 module DC = Masc_mcp.Dashboard_cascade
 
+(* #10441: [trust_score] and [same_fingerprint_count] were removed from
+   [provider_info] by the Phase 1 revert (#10412).  Drop them from the
+   constructor signature and ignore the optional args so existing call
+   sites that still pass them keep type-checking until the recommendation
+   tests below are updated. *)
 let mk_info ?(success_rate = 1.0) ?(consecutive_failures = 0)
     ?(in_cooldown = false) ?(cooldown_expires_at = None)
     ?(events_in_window = 0) ?(rejected_in_window = 0)
     ?(top_fingerprints = []) ?(last_failure_at = None)
     ?(trust_score = 1.0) ?(same_fingerprint_count = 0) provider_key
   : Masc_mcp.Cascade_health_tracker.provider_info =
+  let _ = trust_score in
+  let _ = same_fingerprint_count in
   { provider_key
   ; success_rate
   ; consecutive_failures
@@ -795,8 +802,6 @@ let mk_info ?(success_rate = 1.0) ?(consecutive_failures = 0)
   ; rejected_in_window
   ; top_fingerprints
   ; last_failure_at
-  ; trust_score
-  ; same_fingerprint_count
   }
 
 let test_recommendation_healthy_returns_none () =
@@ -953,20 +958,23 @@ let () =
       test_case "canonical cascade: raw == canonical (UI renders —)"
         `Quick test_keeper_profile_canonical_matches_when_raw_is_canonical;
     ];
+    (* #10441: Phase 1 was reverted in #10412, removing [trust_score]
+       and [same_fingerprint_count] from [provider_info].  The
+       Phase-2a classifier reads those fields and now stubs to
+       [None] until the trust pipeline is reinstated, so the six
+       recommendation-firing tests (reduce_weight / disable /
+       stuck-streak / high-volume / sort / JSON shape) have no
+       data to exercise.  Keep the healthy-provider test which is
+       still meaningful (verifies the stub path) and drop the
+       rest until #10428 redesigns the classifier. *)
     "recommendations", [
       test_case "healthy provider yields no recommendation" `Quick
         test_recommendation_healthy_returns_none;
-      test_case "trust ∈ [0.1, 0.3) → reduce_weight" `Quick
-        test_recommendation_reduce_weight_for_partial_failure;
-      test_case "trust < 0.1 (decayed) → disable" `Quick
-        test_recommendation_disable_for_decayed_provider;
-      test_case "stuck-fingerprint streak → investigate" `Quick
-        test_recommendation_investigate_for_stuck_streak;
-      test_case "high-volume + very low trust → investigate" `Quick
-        test_recommendation_investigate_high_volume_overrides_disable;
-      test_case "list sorted ascending by trust" `Quick
-        test_recommendations_sorted_by_trust;
-      test_case "JSON shape preserves fields" `Quick
-        test_recommendation_to_json_shape;
     ];
   ]
+let _ = test_recommendation_reduce_weight_for_partial_failure
+let _ = test_recommendation_disable_for_decayed_provider
+let _ = test_recommendation_investigate_for_stuck_streak
+let _ = test_recommendation_investigate_high_volume_overrides_disable
+let _ = test_recommendations_sorted_by_trust
+let _ = test_recommendation_to_json_shape

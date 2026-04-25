@@ -136,6 +136,7 @@
         test_worktree_status_single_flight_9632
         test_tool_input_validation
         test_failure_learnings_10325
+        test_agent_stress_emit_10341
         test_autoresearch_codegen
         test_autoresearch_oas_primitives
         test_autoresearch_target_score
@@ -178,6 +179,7 @@
         test_warn_root_causes
         test_memory_hooks
         test_agent_stress_timeout_wire_10341
+        test_institution_episodes_failure_learnings_10325
         test_mid_turn_resume
         test_lockfree_atomic)
  (modules test_attribution test_attribution_tagged test_autoresearch_result_bridge test_dashboard_attribution test_masc_runtime_events test_room test_room_state_recovery test_types test_exec_tap test_auth test_auth_doctor test_auth_login test_audit_log test_governance_anomaly test_http_negotiation
@@ -285,6 +287,7 @@
           test_worktree_status_single_flight_9632
           test_tool_input_validation
           test_failure_learnings_10325
+          test_agent_stress_emit_10341
           test_autoresearch_codegen
           test_autoresearch_oas_primitives
           test_autoresearch_target_score
@@ -327,6 +330,7 @@
           test_warn_root_causes
           test_memory_hooks
           test_agent_stress_timeout_wire_10341
+          test_institution_episodes_failure_learnings_10325
           test_mid_turn_resume
           test_lockfree_atomic
           )
@@ -457,6 +461,7 @@
    (setenv MASC_BASE_PATH_INPUT /tmp/test-personality-diff-summary-10269
     (run %{test}))))
  (libraries masc_test_deps))
+
 
 ; #10091: dedicated stanza so MASC_BASE_PATH is set BEFORE the
 ; test executable loads — the top-level Masc_mcp init includes
@@ -656,6 +661,7 @@
         test_keeper_runtime_config_ssot
         test_dashboard_render_timing_9766
         test_task_status_label_10421
+        test_personality_field_diff_10269
         test_keeper_task_dispatch
         test_keeper_tag_dispatch
         test_autoresearch_knowledge
@@ -836,6 +842,7 @@
         test_keeper_runtime_config_ssot
         test_dashboard_render_timing_9766
         test_task_status_label_10421
+        test_personality_field_diff_10269
         test_keeper_task_dispatch
         test_keeper_tag_dispatch
         test_autoresearch_knowledge
@@ -1446,6 +1453,12 @@
  (name test_goal_phase_awaiting_verification_10411)
  (modules test_goal_phase_awaiting_verification_10411)
  (libraries masc_mcp alcotest))
+
+(test
+ (name test_dated_jsonl_mutex_registry_10372)
+ (modules test_dated_jsonl_mutex_registry_10372)
+ (libraries dated_jsonl fs_compat alcotest eio eio_main yojson unix))
+
 
 ; ============================================================
 ; Special: Heartbeat/keeper minimal deps

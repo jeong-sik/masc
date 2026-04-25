@@ -209,24 +209,22 @@ let request_of_yojson = function
 let generate_id () =
   Random_id.prefixed ~prefix:"vrf-" ~bytes:16
 
-(* Byte-wise substring containment.
+(* Byte-wise non-empty literal substring containment.
 
    [Contains]/[Not_contains] criteria interpolate user-supplied needles,
    so [Re.compile] cannot be hoisted.  But these are pure substring
-   checks with no regex semantics — every criterion evaluation
+   checks with no regex semantics: every criterion evaluation
    previously paid a fresh DFA build before [execp] could run.  Replace
-   with a naive scan; needle/haystack are bounded by criterion shape
-   and serialised JSON output so there is no DFA gain to lose. *)
-let needle_in_string ~needle haystack =
+   with a bounded scan and keep the empty-needle contract local to this
+   helper: [Contains ""] must fail and [Not_contains ""] must pass. *)
+let contains_nonempty_literal ~needle haystack =
   let nlen = String.length needle in
   let hlen = String.length haystack in
-  if nlen = 0 then true
-  else if nlen > hlen then false
+  if nlen = 0 || nlen > hlen then false
   else
     let rec match_at i j =
       if j = nlen then true
-      else if String.unsafe_get haystack (i + j) <> String.unsafe_get needle j
-      then false
+      else if String.get haystack (i + j) <> String.get needle j then false
       else match_at i (j + 1)
     in
     let last = hlen - nlen in
@@ -246,11 +244,11 @@ let evaluate_criterion output criterion =
        | `Null -> Fail "output is null"
        | _ -> Pass)
   | Contains needle ->
-      if String.length needle > 0 && needle_in_string ~needle output_str
+      if contains_nonempty_literal ~needle output_str
       then Pass
       else Fail (Printf.sprintf "output does not contain '%s'" needle)
   | Not_contains needle ->
-      if String.length needle > 0 && needle_in_string ~needle output_str
+      if contains_nonempty_literal ~needle output_str
       then Fail (Printf.sprintf "output contains forbidden '%s'" needle)
       else Pass
   | Custom _ ->

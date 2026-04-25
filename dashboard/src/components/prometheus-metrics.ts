@@ -371,9 +371,9 @@ export function PrometheusMetrics() {
                 <table class="w-full text-xs">
                   <thead>
                     <tr class="border-b border-[var(--card-border)] text-[var(--text-muted)]">
-                      <th class="pb-2 text-left font-normal">Metric</th>
-                      <th class="pb-2 text-left font-normal w-16">Type</th>
-                      <th class="pb-2 text-right font-normal w-24">Value</th>
+                      <th scope="col" class="pb-2 text-left font-normal">Metric</th>
+                      <th scope="col" class="pb-2 text-left font-normal w-16">Type</th>
+                      <th scope="col" class="pb-2 text-right font-normal w-24">Value</th>
                     </tr>
                   </thead>
                   <tbody>

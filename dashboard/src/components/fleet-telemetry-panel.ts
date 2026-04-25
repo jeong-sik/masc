@@ -357,17 +357,17 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
       <table class="w-full text-2xs">
         <thead>
           <tr class="border-b border-[var(--card-border)] text-[var(--text-dim)]">
-            <th class="py-1 text-left font-normal">Keeper</th>
-            <th class="py-1 text-right font-normal">Status</th>
-            <th class="py-1 text-right font-normal">Activity</th>
-            <th class="py-1 text-right font-normal">측정</th>
-            <th class="py-1 text-right font-normal">Tools</th>
-            <th class="py-1 text-right font-normal">Success</th>
-            <th class="py-1 text-right font-normal">Ctx</th>
-            <th class="py-1 text-right font-normal">Latency</th>
-            <th class="py-1 text-right font-normal">Model</th>
-            <th class="py-1 text-center font-normal">Budget</th>
-            <th class="w-8 py-1"></th>
+            <th scope="col" class="py-1 text-left font-normal">Keeper</th>
+            <th scope="col" class="py-1 text-right font-normal">Status</th>
+            <th scope="col" class="py-1 text-right font-normal">Activity</th>
+            <th scope="col" class="py-1 text-right font-normal">측정</th>
+            <th scope="col" class="py-1 text-right font-normal">Tools</th>
+            <th scope="col" class="py-1 text-right font-normal">Success</th>
+            <th scope="col" class="py-1 text-right font-normal">Ctx</th>
+            <th scope="col" class="py-1 text-right font-normal">Latency</th>
+            <th scope="col" class="py-1 text-right font-normal">Model</th>
+            <th scope="col" class="py-1 text-center font-normal">Budget</th>
+            <th scope="col" class="w-8 py-1"></th>
           </tr>
         </thead>
         <tbody>

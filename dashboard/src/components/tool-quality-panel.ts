@@ -158,11 +158,11 @@ function ToolTable({
       <table class="w-full text-2xs">
         <thead>
           <tr class="text-[var(--text-dim)] border-b border-[var(--card-border)]">
-            <th class="text-left py-1 font-normal">Tool</th>
-            <th class="text-right py-1 font-normal">Calls</th>
-            <th class="text-right py-1 font-normal">Success</th>
-            <th class="text-right py-1 font-normal">Avg ms</th>
-            <th class="text-right py-1 font-normal">Output</th>
+            <th scope="col" class="text-left py-1 font-normal">Tool</th>
+            <th scope="col" class="text-right py-1 font-normal">Calls</th>
+            <th scope="col" class="text-right py-1 font-normal">Success</th>
+            <th scope="col" class="text-right py-1 font-normal">Avg ms</th>
+            <th scope="col" class="text-right py-1 font-normal">Output</th>
           </tr>
         </thead>
         <tbody>

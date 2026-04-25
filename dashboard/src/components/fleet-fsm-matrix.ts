@@ -402,9 +402,9 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
         <table class="min-w-full text-xs">
           <thead class="bg-[var(--white-5)] text-[var(--text-muted)]">
             <tr>
-              <th class="px-3 py-2 text-left font-semibold">Keeper</th>
+              <th scope="col" class="px-3 py-2 text-left font-semibold">Keeper</th>
               ${AXES.map(a => html`
-                <th class="px-3 py-2 text-left font-semibold" title=${a.label}>
+                <th scope="col" class="px-3 py-2 text-left font-semibold" title=${a.label}>
                   ${a.acronym} <span class="text-[var(--text-muted)]0">${a.label}</span>
                 </th>
               `)}

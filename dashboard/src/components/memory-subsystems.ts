@@ -641,13 +641,13 @@ export function MemorySubsystems() {
                         <table class="w-full text-left">
                           <thead>
                             <tr class="border-b border-[var(--white-10)] text-xs text-[var(--text-muted)]0">
-                              <th class="py-1.5 px-2">From</th>
-                              <th class="py-1.5 px-2"></th>
-                              <th class="py-1.5 px-2">To</th>
-                              <th class="py-1.5 px-2 text-right">Weight</th>
-                              <th class="py-1.5 px-2 text-center">성공</th>
-                              <th class="py-1.5 px-2 text-center">실패</th>
-                              <th class="py-1.5 px-2">마지막</th>
+                              <th scope="col" class="py-1.5 px-2">From</th>
+                              <th scope="col" class="py-1.5 px-2"></th>
+                              <th scope="col" class="py-1.5 px-2">To</th>
+                              <th scope="col" class="py-1.5 px-2 text-right">Weight</th>
+                              <th scope="col" class="py-1.5 px-2 text-center">성공</th>
+                              <th scope="col" class="py-1.5 px-2 text-center">실패</th>
+                              <th scope="col" class="py-1.5 px-2">마지막</th>
                             </tr>
                           </thead>
                           <tbody>

@@ -716,15 +716,15 @@ function HealthTable({
         <table class="w-full text-xs">
           <thead>
             <tr class="text-[var(--text-muted)] border-b border-[var(--card-border)]">
-              <th class="text-left py-1 w-4"></th>
-              <th class="text-left py-1">Provider</th>
+              <th scope="col" class="text-left py-1 w-4"></th>
+              <th scope="col" class="text-left py-1">Provider</th>
               <th
                 class="text-left py-1"
                 title="Operational state: active (recent events), cooldown (blocked), configured (declared but untouched)"
               >Status</th>
-              <th class="text-right py-1">Success</th>
-              <th class="text-right py-1">Consec. fail</th>
-              <th class="text-right py-1">Events</th>
+              <th scope="col" class="text-right py-1">Success</th>
+              <th scope="col" class="text-right py-1">Consec. fail</th>
+              <th scope="col" class="text-right py-1">Events</th>
               <th
                 class="text-right py-1"
                 title="응답은 왔지만 accept 게이트에서 거부된 이벤트 수"
@@ -741,7 +741,7 @@ function HealthTable({
                 class="text-right py-1"
                 title="Latency p50 / p95 in milliseconds (approximation: weighted mean of per-model percentiles)"
               >Latency p50/p95</th>
-              <th class="text-right py-1">Cooldown</th>
+              <th scope="col" class="text-right py-1">Cooldown</th>
             </tr>
           </thead>
           <tbody>
@@ -934,13 +934,13 @@ function StrategyTraceTable({
     <table class="w-full text-xs">
       <thead>
         <tr class="text-[var(--text-muted)] border-b border-[var(--card-border)]">
-          <th class="text-left py-1 w-20">시간</th>
-          <th class="text-left py-1">Cascade</th>
-          <th class="text-left py-1">Strategy</th>
-          <th class="text-right py-1">Cycle</th>
-          <th class="text-right py-1">In/Out</th>
-          <th class="text-right py-1">Backoff(ms)</th>
-          <th class="text-left py-1">결과</th>
+          <th scope="col" class="text-left py-1 w-20">시간</th>
+          <th scope="col" class="text-left py-1">Cascade</th>
+          <th scope="col" class="text-left py-1">Strategy</th>
+          <th scope="col" class="text-right py-1">Cycle</th>
+          <th scope="col" class="text-right py-1">In/Out</th>
+          <th scope="col" class="text-right py-1">Backoff(ms)</th>
+          <th scope="col" class="text-left py-1">결과</th>
         </tr>
       </thead>
       <tbody>
@@ -972,10 +972,10 @@ function ClientCapacityHistoryTable({
     <table class="w-full text-xs">
       <thead>
         <tr class="text-[var(--text-muted)] border-b border-[var(--card-border)]">
-          <th class="text-left py-1 w-20">시간</th>
-          <th class="text-left py-1">종류</th>
-          <th class="text-left py-1">키</th>
-          <th class="text-right py-1">활성</th>
+          <th scope="col" class="text-left py-1 w-20">시간</th>
+          <th scope="col" class="text-left py-1">종류</th>
+          <th scope="col" class="text-left py-1">키</th>
+          <th scope="col" class="text-right py-1">활성</th>
         </tr>
       </thead>
       <tbody>
@@ -1002,12 +1002,12 @@ function ClientCapacityTable({ capacity }: { capacity: CascadeClientCapacityResp
     <table class="w-full text-xs">
       <thead>
         <tr class="text-[var(--text-muted)] border-b border-[var(--card-border)]">
-          <th class="text-left py-1 w-4"></th>
-          <th class="text-left py-1">Kind</th>
-          <th class="text-left py-1">Key</th>
-          <th class="text-right py-1">Active</th>
-          <th class="text-right py-1">Available</th>
-          <th class="text-right py-1">Total</th>
+          <th scope="col" class="text-left py-1 w-4"></th>
+          <th scope="col" class="text-left py-1">Kind</th>
+          <th scope="col" class="text-left py-1">Key</th>
+          <th scope="col" class="text-right py-1">Active</th>
+          <th scope="col" class="text-right py-1">Available</th>
+          <th scope="col" class="text-right py-1">Total</th>
         </tr>
       </thead>
       <tbody>

@@ -1311,7 +1311,7 @@ function ChannelCard({ ch }: { ch: ChannelInfo }) {
           </div>
         </div>
         <div class="flex items-center gap-2">
-          <div class="h-2 w-2 rounded-full" style="background: ${tone.dot}"></div>
+          <div class="h-2 w-2 rounded-full" style="background: ${tone.dot}" aria-hidden="true"></div>
           <span class=${`rounded-sm px-2 py-1 text-3xs uppercase tracking-5 ${tone.badge}`}>
             ${tone.label}
           </span>

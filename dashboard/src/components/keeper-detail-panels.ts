@@ -899,7 +899,7 @@ export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
               return html`
                 <div class="flex items-center justify-between gap-2 text-2xs">
                   <span class="inline-flex items-center gap-2 min-w-0">
-                    <span class="inline-block w-2.5 h-2.5 rounded-full shrink-0" style=${`background:${ctxSegmentColor(key)};`}></span>
+                    <span class="inline-block w-2.5 h-2.5 rounded-full shrink-0" style=${`background:${ctxSegmentColor(key)};`} aria-hidden="true"></span>
                     <span class="truncate text-[var(--text-body)]" title=${ctxSegmentLabel(key)}>${ctxSegmentLabel(key)}</span>
                   </span>
                   <span class="font-mono tabular-nums text-[var(--text-dim)] whitespace-nowrap">

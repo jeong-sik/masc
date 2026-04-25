@@ -77,7 +77,7 @@ function CrashCohortBar({ crash_log }: { crash_log: KeeperSupervisorCrashLogEntr
       <div class="flex flex-wrap gap-x-3 gap-y-1 mt-1.5">
         ${entries.map(([key, count]) => html`
           <span class="text-3xs text-[var(--text-muted)] flex items-center gap-1">
-            <span class="inline-block w-2 h-2 rounded-full" style="background: ${COHORT_COLORS[key]}"></span>
+            <span class="inline-block w-2 h-2 rounded-full" style="background: ${COHORT_COLORS[key]}" aria-hidden="true"></span>
             ${key} ${count}
           </span>
         `)}

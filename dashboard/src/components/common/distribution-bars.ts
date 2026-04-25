@@ -168,7 +168,7 @@ export function SegmentedBar({
                       class="inline-flex items-center gap-1.5 rounded-sm border px-2 py-0.5 text-3xs font-medium"
                       style=${`color:${palette.text};background:${palette.chipBg};border-color:${palette.chipBorder};`}
                     >
-                      <span class="inline-block h-1.5 w-1.5 rounded-full" style=${`background:${palette.fill};`}></span>
+                      <span class="inline-block h-1.5 w-1.5 rounded-full" style=${`background:${palette.fill};`} aria-hidden="true"></span>
                       <span>${item.label}</span>
                       <span aria-hidden="true">:</span>
                       <span class="font-semibold">${formattedValue}</span>

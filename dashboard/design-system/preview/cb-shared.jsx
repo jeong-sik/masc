@@ -67,6 +67,37 @@ function kClass(id) {
   })[id] || 'idle';
 }
 
+// Theme — read/write the active data-theme on <html>.
+// Persists to localStorage under "masc-ds-theme" so a reload survives the
+// choice. Pass null to clear and fall back to prefers-color-scheme.
+const THEME_STORAGE_KEY = 'masc-ds-theme';
+
+function getTheme() {
+  return document.documentElement.dataset.theme || null;
+}
+
+function setTheme(theme) {
+  if (theme === null || theme === undefined) {
+    delete document.documentElement.dataset.theme;
+    try { localStorage.removeItem(THEME_STORAGE_KEY); } catch (_) {}
+    return;
+  }
+  document.documentElement.dataset.theme = theme;
+  try { localStorage.setItem(THEME_STORAGE_KEY, theme); } catch (_) {}
+}
+
+// Restore persisted theme on first script load. Safe to call from
+// any page that imports cb-shared.jsx; subsequent calls are no-ops
+// because dataset.theme is already set.
+(function restoreTheme() {
+  if (document.documentElement.dataset.theme) return;
+  let saved = null;
+  try { saved = localStorage.getItem(THEME_STORAGE_KEY); } catch (_) {}
+  if (saved === 'light' || saved === 'dark') {
+    document.documentElement.dataset.theme = saved;
+  }
+})();
+
 // Typing hook — types a string into state, char by char, looping
 function useTyping(strings, cps = 18) {
   const [text, setText] = useState('');
@@ -90,4 +121,4 @@ function useTyping(strings, cps = 18) {
   return text;
 }
 
-Object.assign(window, { Dot, Spark, Heartbeat, Chip, Pill, Vhead, kClass, useTyping });
+Object.assign(window, { Dot, Spark, Heartbeat, Chip, Pill, Vhead, kClass, useTyping, getTheme, setTheme });

@@ -13,8 +13,12 @@
     [".masc/playground"] and sanitization rules exist in one place. *)
 
 (** Shared prefix for all keeper playgrounds, relative to the
-    server's [base_path]. *)
-let all_playgrounds_prefix : string = ".masc/playground"
+    server's [base_path].  Built from {!Common.masc_dirname} so the
+    literal ["".masc""] lives in a single place
+    ([Common.masc_dirname]); this module remains the SSOT for the
+    [<.masc>/playground] sub-tree. *)
+let all_playgrounds_prefix : string =
+  Filename.concat Common.masc_dirname "playground"
 
 (** Strip the [keeper-...-agent] canonical wrapper when present,
     returning the inner short name.  E.g.

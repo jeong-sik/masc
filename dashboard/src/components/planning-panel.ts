@@ -133,7 +133,7 @@ function CoordinationHealthPanel() {
   const warnCount = coordinationCount(snapshot, 'warn')
   const evidenceCount = coordinationCount(snapshot, 'evidence')
   return html`
-    <section class="rounded border border-card-border/70 bg-[rgba(8,13,22,0.74)] p-3">
+    <section class="rounded border border-card-border/70 bg-[rgba(8,13,22,0.74)] p-3" aria-label="Coordination Health">
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div>
           <div class="text-sm font-semibold text-text-strong">Coordination Health</div>
@@ -158,7 +158,7 @@ function CoordinationHealthPanel() {
         </div>
       </div>
       ${snapshot.projection_error ? html`
-        <div class="mt-2 rounded border border-warn/30 bg-warn/10 px-2 py-1 text-xs text-warn">
+        <div class="mt-2 rounded border border-warn/30 bg-warn/10 px-2 py-1 text-xs text-warn" role="alert">
           projection: ${snapshot.projection_error}
         </div>
       ` : null}

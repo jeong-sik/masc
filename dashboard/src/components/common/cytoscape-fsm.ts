@@ -289,7 +289,7 @@ export function CytoscapeFsm({ spec, height = '280px', class: className = '' }: 
   return html`
     <div class=${`relative rounded border border-[var(--white-8)] bg-[rgba(9,12,20,0.7)] overflow-hidden ${className}`.trim()}>
       ${loading ? html`
-        <div class="absolute inset-0 flex items-center justify-center text-2xs text-[var(--text-dim)]">
+        <div class="absolute inset-0 flex items-center justify-center text-2xs text-[var(--text-dim)]" role="status" aria-live="polite">
           <${InlineSpinner} class="mr-2" />
           그래프 로딩중
         </div>

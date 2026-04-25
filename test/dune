@@ -459,6 +459,7 @@
         test_a2a_e2e
         test_board_dispatch
         test_board_fixture_detector
+        test_vote_ts_preservation_10086
 
         test_task_dispatch
         test_drift_guard_core
@@ -633,6 +634,7 @@
         test_a2a_e2e
         test_board_dispatch
         test_board_fixture_detector
+        test_vote_ts_preservation_10086
 
         test_task_dispatch
         test_drift_guard_core

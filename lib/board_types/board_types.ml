@@ -184,7 +184,12 @@ type flusher_msg =
 type store = {
   posts: (string, post) Hashtbl.t;
   comments: (string, comment) Hashtbl.t;
-  vote_log: (string, vote_direction) Hashtbl.t;
+  (* #10086: value carries [(direction, cast_ts)] so
+     [rewrite_vote_log] persists the original vote timestamp on
+     every flush instead of overwriting it with the wall clock.
+     The float is Unix seconds at which the vote was first cast,
+     or the flip time on a direction change. *)
+  vote_log: (string, vote_direction * float) Hashtbl.t;
   post_count: int ref;
   mutable last_sweep: float;
   mutex: Eio.Mutex.t;

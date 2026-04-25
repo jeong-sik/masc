@@ -22,8 +22,9 @@ let make_meta () =
   | Ok meta -> meta
   | Error e -> failwith ("make_meta: " ^ e)
 
-(** Rebuild the keeper BM25 tool index identically to keeper_agent_run.ml.
-    Uses the same Korean keywords, groups, and config. *)
+(** Rebuild the keeper BM25 tool index with the same production entry builder
+    used by keeper_agent_run.ml.  This intentionally avoids a copied alias or
+    group table in the test. *)
 let build_keeper_index () =
   let meta = make_meta () in
   (* Inject masc_* schemas so the universe includes governance, agent, etc. *)
@@ -31,114 +32,13 @@ let build_keeper_index () =
   let tool_schemas = Keeper_exec_tools.keeper_universe_model_tools meta in
   let tool_index_config =
     { Agent_sdk.Tool_index.default_config with top_k = 20 } in
-  let korean_keywords = [
-    "keeper_board_post", "게시판 글 작성 올리기 포스트";
-    "keeper_board_get", "게시판 글 읽기 조회 확인";
-    "keeper_board_list", "게시판 목록 최근글";
-    "keeper_board_comment", "게시판 댓글 답글 코멘트";
-    "keeper_board_vote", "게시판 투표 추천 반대";
-    "keeper_board_search", "게시판 검색 키워드 글찾기";
-    "keeper_board_delete", "게시판 삭제 제거 글삭제";
-    "keeper_board_stats", "게시판 통계 활동 참여 게시글수";
-    "keeper_fs_read", "파일 읽기 소스코드 설정";
-    "keeper_fs_edit", "파일 쓰기 편집 저장 수정 생성";
-    "keeper_shell", "명령어 조회 검색 탐색 gh github pull request issue pr ci 풀리퀘스트 이슈";
-    "keeper_bash", "명령어 실행 쉘 빌드 테스트";
-    "keeper_memory_search", "기억 검색 대화 이전 메시지";
-    "keeper_library_search", "라이브러리 지식 문서 검색";
-    "keeper_library_read", "라이브러리 문서 읽기 지식";
-    "keeper_time_now", "시간 현재 타임스탬프";
-    "keeper_context_status", "컨텍스트 상태 토큰 사용량";
-    "keeper_broadcast", "브로드캐스트 알림 공지 전달";
-    "keeper_tasks_list", "태스크 목록 할일 백로그";
-    "keeper_tasks_audit", "태스크 감사 고아 방치";
-    "keeper_task_claim", "태스크 가져오기 할당";
-    "keeper_task_done", "태스크 완료 마감";
-    "keeper_task_force_release", "태스크 강제해제 반환";
-    "keeper_task_force_done", "태스크 강제완료";
-    "keeper_voice_speak", "음성 말하기 보이스";
-    "keeper_voice_agent", "음성 설정 보이스";
-    "keeper_voice_listen", "음성 듣기 마이크 녹음 입력";
-    "keeper_voice_sessions", "음성 세션 목록";
-    "keeper_voice_session_start", "음성 세션 시작";
-    "keeper_voice_session_end", "음성 세션 종료";
-    "keeper_stay_silent", "침묵 대기 아무것도 안함 넘어가기";
-    "keeper_write", "파일 작성 저장 새파일";
-    "keeper_tool_search", "도구 검색 발견 찾기 어떤도구";
-    "masc_code_search", "코드 검색 소스코드 찾기 심볼";
-    "masc_code_read", "코드 읽기 파일 소스코드";
-    "masc_code_edit", "코드 편집 수정 파일 변경";
-    "masc_code_write", "코드 작성 파일 생성 쓰기";
-    "masc_code_symbols", "코드 심볼 함수 클래스 정의";
-    "masc_code_shell", "코드 명령어 쉘 실행";
-    "masc_code_git", "깃 커밋 브랜치 로그 이력";
-    "masc_autoresearch_start", "자동연구 리서치 시작";
-    "masc_autoresearch_status", "자동연구 리서치 상태";
-    "masc_autoresearch_stop", "자동연구 리서치 중지";
-    "masc_autoresearch_cycle", "자동연구 리서치 사이클 실행";
-    "masc_plan_get", "계획 플랜 마일스톤 로드맵 프로젝트 전략";
-    "masc_plan_update", "계획 플랜 수정 업데이트";
-    "masc_plan_init", "계획 플랜 초기화 생성";
-    "masc_plan_set_task", "계획 태스크 설정 할당";
-    "masc_plan_get_task", "계획 태스크 조회";
-    "masc_plan_clear_task", "계획 태스크 제거 해제 클리어";
-    "masc_agent_card", "에이전트 카드 프로필 정보";
-    "masc_agents", "에이전트 목록 현황 누구";
-    "masc_agent_update", "에이전트 업데이트 상태변경";
-    "masc_agent_fitness", "에이전트 적합도 평가";
-    (* masc_auth_status, masc_auth_refresh removed during tool-registry-pruning *)
-    "masc_web_search", "웹 검색 인터넷 온라인 구글";
-    "masc_keeper_up", "키퍼 시작 기동 생성";
-    "masc_keeper_down", "키퍼 중지 종료";
-    "masc_keeper_list", "키퍼 목록 현황";
-    "masc_keeper_msg", "키퍼 메시지 전달 대화";
-    "masc_keeper_status", "키퍼 상태 확인";
-    (* team session tool entries removed — team session cleanup *)
-    "masc_worktree_create", "워크트리 생성 브랜치";
-    "masc_worktree_list", "워크트리 목록 현황";
-    "masc_worktree_remove", "워크트리 삭제 정리";
-    "masc_tasks", "태스크 목록 할일 작업";
-    "masc_add_task", "태스크 추가 등록 생성";
-    "masc_status", "상태 현황 방 룸 요약";
-    "masc_heartbeat", "하트비트 살아있음 생존";
-    "masc_dashboard", "대시보드 현황 대시 보드 개요";
-    "masc_broadcast", "브로드캐스트 방송 알림 공지";
-    "masc_claim_next", "다음태스크 가져오기 할당";
-    "masc_messages", "메시지 대화 채팅 로그";
-    "masc_leave", "퇴장 나가기 오프라인 종료";
-  ] in
-  let tool_entries = List.map (fun (t : Types.tool_schema) ->
-    let name = t.name in
-    let group =
-      if String.starts_with ~prefix:"keeper_board_" name then Some "board"
-      else if String.starts_with ~prefix:"keeper_memory_" name
-           || String.starts_with ~prefix:"keeper_library_" name then Some "knowledge"
-      else if String.starts_with ~prefix:"keeper_task" name then Some "tasks"
-      else if String.starts_with ~prefix:"keeper_voice_" name then Some "voice"
-      else if String.starts_with ~prefix:"keeper_fs_" name
-           || name = "keeper_shell"
-           || name = "keeper_bash"
-           || name = "keeper_write" then Some "filesystem"
-      else if String.starts_with ~prefix:"masc_board_" name then Some "masc_board"
-      else if String.starts_with ~prefix:"masc_keeper_" name then Some "masc_keeper"
-      else if String.starts_with ~prefix:"masc_plan_" name then Some "masc_plan"
-
-      else if String.starts_with ~prefix:"masc_worktree_" name then Some "masc_worktree"
-      else if String.starts_with ~prefix:"masc_code_" name then Some "masc_code"
-      else if String.starts_with ~prefix:"masc_autoresearch_" name then Some "masc_autoresearch"
-      else if String.starts_with ~prefix:"masc_agent_" name
-           || name = "masc_agents" then Some "masc_agent"
-      else if String.starts_with ~prefix:"masc_" name then Some "masc_core"
-      else None
-    in
-    let aliases = match List.assoc_opt name korean_keywords with
-      | Some kw ->
-        String.split_on_char ' ' kw
-        |> List.filter (fun s -> s <> "")
-      | None -> []
-    in
-    Agent_sdk.Tool_index.{ name; description = t.description; group; aliases }
-  ) tool_schemas in
+  let tool_entries =
+    List.map
+      (fun (t : Types.tool_schema) ->
+         Keeper_agent_tool_surface.tool_index_entry
+           ~name:t.name ~description:t.description)
+      tool_schemas
+  in
   Agent_sdk.Tool_index.build ~config:tool_index_config tool_entries
 
 (** Check that [expected_tool] appears in BM25 top-k results for [query]. *)
@@ -359,6 +259,21 @@ let test_index_size () =
   Alcotest.(check bool) (Printf.sprintf "index has %d tools (>= 25)" size)
     true (size >= 25)
 
+let test_search_alias_entries_target_keeper_universe () =
+  let meta = make_meta () in
+  Keeper_exec_tools.inject_masc_schemas Config.raw_all_tool_schemas;
+  let tool_names =
+    Keeper_exec_tools.keeper_universe_model_tools meta
+    |> List.map (fun (schema : Types.tool_schema) -> schema.name)
+  in
+  let missing =
+    Keeper_agent_tool_surface.tool_search_alias_entries
+    |> List.map fst
+    |> List.filter (fun name -> not (List.mem name tool_names))
+  in
+  Alcotest.(check (list string))
+    "alias entries resolve to keeper universe tools" [] missing
+
 (* ================================================================ *)
 (* Scenarios: keeper_tool_search discovery                          *)
 (* ================================================================ *)
@@ -450,5 +365,7 @@ let () =
       ( "stats",
         [
           Alcotest.test_case "index size >= 25 tools" `Quick test_index_size;
+          Alcotest.test_case "search aliases target real tools" `Quick
+            test_search_alias_entries_target_keeper_universe;
         ] );
     ]

@@ -983,12 +983,16 @@ let test_masc_dirname_ssot_contracts () =
     "lib/server/server_routes_http_routes_dashboard.ml";
     "lib/keeper/keeper_approval_queue.ml";
   ] in
+  let file_uses_masc_dir_helper file =
+    file_contains_pattern file "Common.masc_dir_from_base_path"
+    || file_contains_pattern file "Masc_paths.masc_dir_from_base_path"
+  in
   List.iter
     (fun file ->
        check bool
-         (Printf.sprintf "%s uses masc_dir_from_base_path helper" file)
+         (Printf.sprintf "%s uses an approved masc_dir_from_base_path helper" file)
          true
-         (file_contains_pattern file "masc_dir_from_base_path");
+         (file_uses_masc_dir_helper file);
        check bool
          (Printf.sprintf "%s no longer inlines \".masc/\"" file)
          true

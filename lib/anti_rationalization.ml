@@ -69,6 +69,19 @@ type review_result = {
 (* Excuse pattern detection (local, no LLM)                         *)
 (* ================================================================ *)
 
+(* #10385: detection patterns are byte-wise substring matched
+   over [String.lowercase_ascii notes].  [lowercase_ascii] is a
+   no-op for non-ASCII bytes, and [String_util.contains_substring]
+   is byte-level over self-synchronising UTF-8, so non-ASCII
+   needles like the Korean entries below match correctly without
+   needing a Unicode-aware lowercase pass.
+
+   Korean coverage is the immediate gap to close — the keeper
+   fleet's 한국어 LLM output produced 0% detection pre-fix while
+   `~/.masc/institution_episodes.jsonl` carried real entries
+   like "나중에", "범위 밖", "재현 안됨".  English false-positives
+   remain (substring has no word boundary) and are tracked under
+   the same issue's option C/D follow-up. *)
 let default_excuse_patterns = [
   ("pre-existing",        "claiming the problem already existed");
   ("out of scope",        "declaring work out of scope");
@@ -83,6 +96,23 @@ let default_excuse_patterns = [
   ("not reproducible",    "dismissing without investigation");
   ("not my responsibility", "responsibility deflection");
   ("cannot reproduce",    "dismissing without investigation");
+  (* Korean rationalization markers — same semantic classes as
+     the English entries above.  See issue #10385 for the
+     institution_episodes evidence. *)
+  ("나중에",              "deferring work to later (ko)");
+  ("범위 밖",             "declaring work out of scope (ko)");
+  ("의도 외",             "declaring work outside intent (ko)");
+  ("재현 안",             "dismissing without investigation (ko)");
+  ("재현되지 않",         "dismissing without investigation (ko)");
+  ("기존 문제",           "claiming the problem already existed (ko)");
+  ("내 환경에선",         "unverifiable claim (ko)");
+  ("내 환경에서는",       "unverifiable claim (ko)");
+  (* Patterns are matched against [String.lowercase_ascii notes],
+     so the ASCII portion of any needle must be pre-lowercased.
+     Korean characters pass through unchanged (high-bit bytes
+     are not affected by [lowercase_ascii]). *)
+  ("후속 pr",             "deferring to a follow-up (ko)");
+  ("다음 pr",             "deferring to a follow-up (ko)");
 ]
 
 (** Cached patterns. Loaded once from disk; invalidated by [save_excuse_patterns]. *)

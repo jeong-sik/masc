@@ -114,6 +114,20 @@ let coverage_gaps masc_root =
 let latest_coverage_gap gaps =
   List.rev gaps |> List.find_opt (fun _ -> true)
 
+let synthetic_store_gap ~durable_store ~stale_reason ~error =
+  let now = Time_compat.now () in
+  `Assoc
+    [
+      ("ts_unix", `Float now);
+      ("ts_iso", `String (Types.iso8601_of_unix_seconds now));
+      ("source", `String source_name);
+      ("producer", `String source_producer);
+      ("durable_store", `String durable_store);
+      ("dashboard_surface", `String dashboard_surface);
+      ("stale_reason", `String stale_reason);
+      ("error", `String error);
+    ]
+
 let record_coverage_gap ~masc_root ~durable_store ~stale_reason ?caller
     ?tool_name exn =
   let context =
@@ -265,14 +279,32 @@ let source_metadata_json ~masc_root =
   let now = Time_compat.now () in
   let durable_store = store_dir masc_root in
   let exists = Sys.file_exists durable_store in
+  let store_not_directory =
+    exists
+    &&
+    try not (Sys.is_directory durable_store) with
+    | Sys_error _ -> true
+  in
   let entry_count, latest_ts =
-    if exists then
+    if exists && not store_not_directory then
       let store = Dated_jsonl.create ~base_dir:durable_store () in
       (count_entries store, latest_ts store)
     else
       (0, None)
   in
-  let coverage_gaps = coverage_gaps masc_root in
+  let coverage_gaps =
+    let gaps = coverage_gaps masc_root in
+    if store_not_directory then
+      gaps
+      @ [
+          synthetic_store_gap
+            ~durable_store
+            ~stale_reason:"tool_usage_store_not_directory"
+            ~error:"tool_usage durable store path exists but is not a directory";
+        ]
+    else
+      gaps
+  in
   let coverage_gap = latest_coverage_gap coverage_gaps in
   `Assoc
     ([

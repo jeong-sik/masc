@@ -265,6 +265,31 @@ let test_tool_usage_store_failure_records_coverage_gap () =
              || reason = "tool_usage_append_failed")
            reasons))
 
+let test_dashboard_tools_usage_marks_store_path_collision () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let config = Coord_utils.default_config dir in
+      ignore (Lib.Coord.init config ~agent_name:(Some "dashboard"));
+      let masc_root = Lib.Coord.masc_root_dir config in
+      Fs_compat.mkdir_p masc_root;
+      Fs_compat.save_file (Filename.concat masc_root "tool_usage")
+        "not a directory";
+      let json = Lib.Server_dashboard_http.dashboard_tools_http_json config in
+      let open Yojson.Safe.Util in
+      let usage = json |> member "tool_usage" in
+      check string "tool usage path collision is coverage gap"
+        "coverage_gap"
+        (usage |> member "health" |> to_string);
+      check string "tool usage path collision stale reason"
+        "tool_usage_store_not_directory"
+        (usage |> member "stale_reason" |> to_string);
+      check int "tool usage path collision has synthetic gap" 1
+        (usage |> member "coverage_gap_count" |> to_int))
+
 let () =
   run "dashboard_tools"
     [
@@ -275,5 +300,7 @@ let () =
              test_dashboard_tools_usage_surfaces_coverage_gap;
            test_case "tool usage store failure records coverage gap" `Quick
              test_tool_usage_store_failure_records_coverage_gap;
+           test_case "tool usage marks store path collision" `Quick
+             test_dashboard_tools_usage_marks_store_path_collision;
          ]);
     ]

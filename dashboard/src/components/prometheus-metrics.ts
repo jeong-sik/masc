@@ -10,6 +10,7 @@ import { ErrorState, LoadingState } from './common/feedback-state'
 import { TextInput } from './common/input'
 import { fetchWithTimeout, authHeaders } from '../api/core'
 import { navigate } from '../router'
+import { TimeAgo } from './common/time-ago'
 
 // --- Prometheus text format parser ---
 
@@ -217,7 +218,7 @@ export function PrometheusMetrics() {
   const loading = useSignal(true)
   const error = useSignal<string | null>(null)
   const metrics = useSignal<ParsedMetric[]>([])
-  const lastUpdated = useSignal<string | null>(null)
+  const lastUpdated = useSignal<number | null>(null)
   const searchQuery = useSignal('')
   const expandedCategories = useSignal<Set<MetricCategory>>(new Set(['server', 'agent', 'keeper', 'inference']))
 
@@ -227,7 +228,7 @@ export function PrometheusMetrics() {
     try {
       const text = await fetchPrometheusText()
       metrics.value = parsePrometheusText(text)
-      lastUpdated.value = new Date().toLocaleTimeString('ko-KR')
+      lastUpdated.value = Date.now()
     } catch (e) {
       error.value = e instanceof Error ? e.message : String(e)
     } finally {
@@ -297,7 +298,7 @@ export function PrometheusMetrics() {
           </p>
         </div>
         <div class="flex items-center gap-3">
-          ${lastUpdated.value && html`<span class="text-xs text-[var(--text-muted)]">${lastUpdated.value}</span>`}
+          ${lastUpdated.value && html`<span class="text-xs text-[var(--text-muted)]"><${TimeAgo} timestamp=${lastUpdated.value} /></span>`}
           <button type="button"
             class="rounded border border-[var(--card-border)] bg-[var(--bg-1)] px-3 py-1.5 text-xs text-[var(--text-body)] hover:bg-[var(--bg-2)] transition-colors"
             aria-label="Prometheus 메트릭 새로고침"

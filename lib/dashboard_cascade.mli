@@ -200,6 +200,58 @@ val provider_entry_to_json :
   Cascade_health_tracker.provider_info ->
   Yojson.Safe.t
 
+(** {1 Phase 2a operator recommendations}
+
+    Observation-only nudges based on [trust_score] from Phase 1.  The
+    classifier never writes config — it only surfaces actionable hints
+    in the dashboard JSON.  Phase 2b is what makes these self-applying.
+
+    @since 0.176.0 *)
+
+(** Recommended operator action for a low-trust provider. *)
+type recommendation_action =
+  | Reduce_weight
+      (** Trust ∈ [0.1, 0.3): partially working but unreliable.
+          Suggested response: halve the cascade.toml weight. *)
+  | Disable
+      (** Trust < 0.1 with no stuck-fingerprint streak: provider has
+          decayed across multiple persistent failures. *)
+  | Investigate
+      (** Stuck on the same fingerprint ≥ 5 times, OR trust < 0.1 with
+          high-volume failures: likely a config / auth issue, not a
+          provider quality problem.  Operator should inspect
+          [cascade_audit] before reducing weight. *)
+
+val recommendation_action_to_string : recommendation_action -> string
+
+type recommendation = {
+  rec_provider_key : string;
+  rec_trust_score : float;
+  rec_same_fingerprint_count : int;
+  rec_events_in_window : int;
+  rec_top_fingerprint : string option;
+  rec_action : recommendation_action;
+  rec_rationale : string;
+}
+
+val classify_recommendation :
+  Cascade_health_tracker.provider_info -> recommendation option
+(** Classify a single provider snapshot.  Returns [None] for healthy
+    providers (no operator action recommended). *)
+
+val low_trust_recommendations :
+  Cascade_health_tracker.provider_info list -> recommendation list
+(** Apply {!classify_recommendation} to each provider, drop the
+    healthy ones, and sort ascending by [trust_score] so the most
+    urgent items render first. *)
+
+val recommendation_to_json : recommendation -> Yojson.Safe.t
+
+val recommendations_json : unit -> Yojson.Safe.t
+(** Standalone endpoint — reads {!Cascade_health_tracker.global},
+    runs {!low_trust_recommendations}, returns a JSON array.
+    Also embedded under ["recommendations"] in {!health_json}. *)
+
 (** [provider_scheme_of_model_string s] returns the scheme prefix of a
     [cascade.json] model spec (the text before the first [:]), or [s]
     unchanged when no [:] is present.  The scheme corresponds to the

@@ -113,7 +113,7 @@ function CoordinationViolationRow({ violation }: { violation: DashboardCoordinat
       <div class="mt-1 text-xs leading-relaxed text-text-body">${violation.message ?? 'Coordination invariant needs attention.'}</div>
       <div class="mt-1 truncate text-3xs text-text-dim" title=${refsLabel(violation.refs)}>${refsLabel(violation.refs)}</div>
       ${evidence.length > 0 ? html`
-        <ul class="mt-2 grid gap-1">
+        <ul class="mt-2 grid gap-1" aria-label="증거 목록">
           ${evidence.map((item, index) => html`
             <${CoordinationEvidenceRow} key=${`${item.source ?? 'evidence'}-${item.kind ?? 'kind'}-${item.id ?? index}`} evidence=${item} />
           `)}
@@ -165,7 +165,7 @@ function CoordinationHealthPanel() {
       ${violations.length === 0 ? html`
         <div class="mt-2 text-xs text-text-muted">Aligned</div>
       ` : html`
-        <ul class="mt-2 grid gap-2">
+        <ul class="mt-2 grid gap-2" aria-label="조정 위반 목록">
           ${topViolations.map((violation, index) => html`
             <${CoordinationViolationRow} key=${`${violation.code ?? violation.axis ?? 'coordination'}-${index}`} violation=${violation} />
           `)}
@@ -174,7 +174,7 @@ function CoordinationHealthPanel() {
       ${topEvidence.length > 0 ? html`
         <div class="mt-3">
           <div class="mb-1 text-3xs font-semibold uppercase text-text-muted">근거</div>
-          <ul class="grid gap-1 md:grid-cols-2">
+          <ul class="grid gap-1 md:grid-cols-2" aria-label="근거 목록">
             ${topEvidence.map((item, index) => html`
               <${CoordinationEvidenceRow} key=${`${item.source ?? 'evidence'}-${item.kind ?? 'kind'}-${item.id ?? index}`} evidence=${item} />
             `)}

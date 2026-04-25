@@ -488,7 +488,7 @@ function ProfileCard({
                     : null}
                   ${expanded.length > 1
                     ? html`
-                      <ol class="mt-1 flex flex-col gap-0.5 text-[11px] text-[var(--text-muted)]">
+                      <ol class="mt-1 flex flex-col gap-0.5 text-[11px] text-[var(--text-muted)]" aria-label="확장 모델 목록">
                         ${expanded.map((model, expandedIdx) => html`
                           <li><span class="tabular-nums">${expandedIdx + 1}.</span> <code>${model}</code></li>
                         `)}
@@ -517,7 +517,7 @@ function OrphanKeeperList({ orphans }: { orphans: readonly CascadeKeeperProfile[
       <div class="text-[var(--text-muted)] mb-2">
         아래 keeper 는 canonical cascade 가 현재 profile 목록에 없어 해당 cascade 로 라우팅할 수 없습니다.
       </div>
-      <ul class="flex flex-col gap-1">
+      <ul class="flex flex-col gap-1" aria-label="연결되지 않은 Keeper">
         ${orphans.map(o => html`
           <li class="flex gap-2">
             <span class="font-semibold text-[var(--text-strong)]">${o.keeper}</span>

@@ -168,7 +168,7 @@ export function SetupGuideCard({ connectorId }: { connectorId: string }) {
         ? html`
             <div id=${`setup-guide-${connectorId}`} class="border-t border-[var(--white-8)] px-3 py-2.5 text-2xs text-[var(--text-body)]">
               <p class="mb-2 text-[var(--text-dim)]">${guide.intro}</p>
-              <ol class="list-none space-y-2" data-setup-step-list>
+              <ol class="list-none space-y-2" data-setup-step-list aria-label="설정 단계">
                 ${guide.steps.map((step, idx) => {
                   const done = completedMap?.[idx] === true
                   // Plane / Notion step wizard pattern: numbered circle

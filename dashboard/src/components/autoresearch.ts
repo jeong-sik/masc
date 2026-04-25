@@ -326,7 +326,7 @@ function InsightsList({ insights }: { insights: string[] }) {
   }
 
   return html`
-    <ul class="flex flex-col gap-1.5">
+    <ul class="flex flex-col gap-1.5" aria-label="자율 연구 인사이트">
       ${insights.map((insight, i) => html`
         <li key=${i} class="flex items-start gap-2 text-xs text-[var(--text-body)]">
           <span class="text-[var(--text-muted)] mt-0.5 shrink-0">${i + 1}.</span>

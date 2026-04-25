@@ -10,11 +10,11 @@ function TopbarStandard() {
   const [density, setDensity] = useState('n');
   return (
     <div className="cb-board">
-      <header className="cb-topbar" aria-label="MASC topbar">
+      <header className="cb-topbar" role="banner" aria-label="MASC topbar">
         <div className="brand">
           <span className="brand-mark" aria-hidden="true" />
           <span className="brand-name">MASC</span>
-          <span className="ver">v0.42.1</span>
+          <span className="ver" aria-label="Build version 0.42.1">v0.42.1</span>
         </div>
         <div className="sep" aria-hidden="true" />
         <button type="button" className="goal-switch" aria-haspopup="menu" aria-label="Switch goal: goal-merge-blockers">
@@ -33,7 +33,7 @@ function TopbarStandard() {
               <button key={d} type="button" role="radio" aria-checked={density===d} aria-label={DENSITY_LABEL[d]} className={density===d?'on':''} onClick={()=>setDensity(d)}>{d}</button>
             ))}
           </div>
-          <span className="stamp">BUILD 2604 · 16:32:45Z</span>
+          <span className="stamp" aria-label="Build 2604, 16:32:45 UTC">BUILD 2604 · 16:32:45Z</span>
         </div>
       </header>
       <div style={{flex:1, background:'var(--bg-0)'}} aria-hidden="true" />
@@ -45,11 +45,11 @@ function TopbarExpanded() {
   const [mode, setMode] = useState('split');
   return (
     <div className="cb-board">
-      <header className="cb-topbar" aria-label="MASC topbar with branch and fleet">
+      <header className="cb-topbar" role="banner" aria-label="MASC topbar with branch and fleet">
         <div className="brand">
           <span className="brand-mark" aria-hidden="true" />
           <span className="brand-name">MASC</span>
-          <span className="ver">v0.42.1</span>
+          <span className="ver" aria-label="Build version 0.42.1">v0.42.1</span>
         </div>
         <div className="sep" aria-hidden="true" />
         <button type="button" className="goal-switch" aria-haspopup="menu" aria-label="Switch goal: goal-merge-blockers">
@@ -65,14 +65,14 @@ function TopbarExpanded() {
           ))}
         </div>
         <div className="right">
-          <div className="avatars" role="group" aria-label="5 active keepers">
-            <span className="av" style={{background:'var(--k-nick)'}} aria-hidden="true" />
-            <span className="av" style={{background:'var(--k-masc)'}} aria-hidden="true" />
-            <span className="av" style={{background:'var(--k-sangsu)'}} aria-hidden="true" />
-            <span className="av" style={{background:'var(--k-qa)'}} aria-hidden="true" />
-            <span className="av" style={{background:'var(--k-rama)'}} aria-hidden="true" />
+          <div className="avatars" role="list" aria-label="Active keepers: nick0cave, masc-improver, sangsu, qa-king, rama">
+            <span className="av" role="listitem" aria-label="nick0cave" style={{background:'var(--k-nick)'}} />
+            <span className="av" role="listitem" aria-label="masc-improver" style={{background:'var(--k-masc)'}} />
+            <span className="av" role="listitem" aria-label="sangsu" style={{background:'var(--k-sangsu)'}} />
+            <span className="av" role="listitem" aria-label="qa-king" style={{background:'var(--k-qa)'}} />
+            <span className="av" role="listitem" aria-label="rama" style={{background:'var(--k-rama)'}} />
           </div>
-          <span className="stamp">5 ACTIVE · 2 IDLE</span>
+          <span className="stamp" aria-label="5 active keepers, 2 idle">5 ACTIVE · 2 IDLE</span>
         </div>
       </header>
       <div style={{flex:1, background:'var(--bg-0)'}} aria-hidden="true" />
@@ -83,7 +83,7 @@ function TopbarExpanded() {
 function TopbarMinimal() {
   return (
     <div className="cb-board">
-      <header className="cb-topbar minimal" aria-label="MASC topbar (minimal)">
+      <header className="cb-topbar minimal" role="banner" aria-label="MASC topbar (minimal)">
         <div className="brand">
           <span className="brand-mark" aria-hidden="true" />
           <span className="brand-name">MASC</span>
@@ -93,7 +93,7 @@ function TopbarMinimal() {
           <button type="button" role="tab" aria-selected="false" tabIndex={-1}>Code</button>
         </div>
         <div className="right">
-          <span className="stamp">16:32:45Z</span>
+          <span className="stamp" aria-label="16:32:45 UTC">16:32:45Z</span>
         </div>
       </header>
       <div style={{flex:1, background:'var(--bg-0)'}} aria-hidden="true" />
@@ -109,14 +109,14 @@ function TickerMarquee() {
   const evs = [...tickerEvents(), ...tickerEvents()];
   return (
     <div className="cb-board">
-      <div className="cb-ticker" role="region" aria-label="Fleet event ticker (marquee)">
+      <div className="cb-ticker" role="log" aria-live="polite" aria-label="Fleet event ticker (marquee)">
         <div className="tape">
           {evs.map((e, i) => (
-            <span key={i} className={`evt ${e.kind}`}>
+            <span key={i} className={`evt ${e.kind}`} role="listitem" aria-label={`${e.keeper} ${e.kind}: ${e.text}, at ${e.t.slice(0,8)}`}>
               <Dot kind={kClass(e.keeper)} size="sm" />
-              <span className="k">{e.keeper}</span>
-              <span className="body">{e.text}</span>
-              <span className="t">{e.t.slice(0,8)}</span>
+              <span className="k" aria-hidden="true">{e.keeper}</span>
+              <span className="body" aria-hidden="true">{e.text}</span>
+              <span className="t" aria-hidden="true">{e.t.slice(0,8)}</span>
             </span>
           ))}
         </div>
@@ -129,13 +129,13 @@ function TickerChunks() {
   const evs = [...tickerEvents(), ...tickerEvents()];
   return (
     <div className="cb-board">
-      <div className="cb-ticker chunks" role="region" aria-label="Fleet event ticker (chunked)">
+      <div className="cb-ticker chunks" role="log" aria-live="polite" aria-label="Fleet event ticker (chunked)">
         <div className="tape">
           {evs.map((e, i) => (
-            <span key={i} className={`evt ${e.kind}`}>
+            <span key={i} className={`evt ${e.kind}`} role="listitem" aria-label={`${e.keeper} ${e.kind}: ${e.text.slice(0,40)}`}>
               <Dot kind={kClass(e.keeper)} size="sm" />
-              <span className="k">{e.keeper}</span>
-              <span className="body">{e.text.slice(0, 40)}</span>
+              <span className="k" aria-hidden="true">{e.keeper}</span>
+              <span className="body" aria-hidden="true">{e.text.slice(0, 40)}</span>
             </span>
           ))}
         </div>
@@ -148,14 +148,14 @@ function TickerVertical() {
   const evs = [...tickerEvents(), ...tickerEvents()];
   return (
     <div className="cb-board">
-      <div className="cb-ticker vertical" role="region" aria-label="Fleet event ticker (side rail)">
+      <div className="cb-ticker vertical" role="log" aria-live="polite" aria-label="Fleet event ticker (vertical)">
         <div className="tape">
           {evs.map((e, i) => (
-            <span key={i} className={`evt ${e.kind}`} style={{display:'flex', alignItems:'center', gap:6}}>
-              <span className="t">{e.t.slice(0,8)}</span>
+            <span key={i} className={`evt ${e.kind}`} role="listitem" aria-label={`${e.t.slice(0,8)} ${e.keeper} ${e.kind}: ${e.text}`} style={{display:'flex', alignItems:'center', gap:6}}>
+              <span className="t" aria-hidden="true">{e.t.slice(0,8)}</span>
               <Dot kind={kClass(e.keeper)} size="sm" />
-              <span className="k">{e.keeper}</span>
-              <span className="body">{e.text}</span>
+              <span className="k" aria-hidden="true">{e.keeper}</span>
+              <span className="body" aria-hidden="true">{e.text}</span>
             </span>
           ))}
         </div>

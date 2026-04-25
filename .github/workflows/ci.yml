@@ -715,15 +715,27 @@ jobs:
           AGENT_DRAFT_GUARD_BYPASS_LABELS: ${{ vars.AGENT_DRAFT_GUARD_BYPASS_LABELS }}
         run: |
           if command -v gh >/dev/null 2>&1 && [ -n "${PR_NUMBER:-}" ]; then
-            live_is_draft="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft' 2>/dev/null || true)"
-            if [ "$live_is_draft" = "true" ] || [ "$live_is_draft" = "false" ]; then
-              export PR_LIVE_IS_DRAFT="$live_is_draft"
+            # #10192: collect state, draft, labels in one query so the
+            # post-merge skip and the live-label refresh see the same
+            # snapshot.
+            live_pr_json="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json state,isDraft,labels 2>/dev/null || true)"
+            if [ -n "$live_pr_json" ]; then
+              live_state="$(printf '%s' "$live_pr_json" | jq -r '.state // empty')"
+              if [ -n "$live_state" ]; then
+                export PR_LIVE_STATE="$live_state"
+              fi
+              live_is_draft="$(printf '%s' "$live_pr_json" | jq -r '.isDraft // empty')"
+              if [ "$live_is_draft" = "true" ] || [ "$live_is_draft" = "false" ]; then
+                export PR_LIVE_IS_DRAFT="$live_is_draft"
+              else
+                echo "::warning::Could not resolve live PR draft state; falling back to pull_request event payload."
+              fi
+              live_labels="$(printf '%s' "$live_pr_json" | jq -r '[.labels[].name] | join(",")')"
+              if [ -n "$live_labels" ]; then
+                export PR_LIVE_LABELS="$live_labels"
+              fi
             else
-              echo "::warning::Could not resolve live PR draft state; falling back to pull_request event payload."
-            fi
-            live_labels="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json labels --jq '[.labels[].name] | join(",")' 2>/dev/null || true)"
-            if [ -n "$live_labels" ]; then
-              export PR_LIVE_LABELS="$live_labels"
+              echo "::warning::Could not fetch live PR snapshot; falling back to pull_request event payload."
             fi
           fi
           scripts/ci/check-agent-draft-policy.sh

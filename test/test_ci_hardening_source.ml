@@ -83,6 +83,17 @@ let test_ci_sync_and_asset_contracts () =
     (file_contains_pattern ".github/workflows/ci.yml" "PR_LIVE_IS_DRAFT");
   check bool "ci gate refreshes live labels" true
     (file_contains_pattern ".github/workflows/ci.yml" "PR_LIVE_LABELS");
+  (* #10192: keep ci.yml's `gh pr view` query and the policy script's
+     skip branch in sync.  Either side drifting silently re-introduces
+     the post-merge red mark. *)
+  check bool "ci gate exports live PR state" true
+    (file_contains_pattern ".github/workflows/ci.yml" "PR_LIVE_STATE");
+  check bool "agent draft policy script reads live PR state" true
+    (file_contains_pattern "scripts/ci/check-agent-draft-policy.sh"
+       "PR_LIVE_STATE");
+  check bool "agent draft policy script skips MERGED PRs" true
+    (file_contains_pattern "scripts/ci/check-agent-draft-policy.sh"
+       "MERGED");
   check bool "pr hygiene no longer checks dashboard assets (gitignored)" true
     (not (file_contains_pattern "scripts/check-pr-hygiene.sh" "dashboard source or Vite config changed but assets/dashboard was not updated"))
 
@@ -127,7 +138,26 @@ let test_agent_draft_policy_script () =
          ("PR_TITLE", "fix: human authored branch");
          ("PR_HEAD_REF", "feature/human-branch");
          ("PR_LABELS", "enhancement");
-       ])
+       ]);
+  (* #10192: post-merge skip.  An agent PR that would otherwise FAIL
+     (ready + no bypass) must pass when the live PR state is MERGED,
+     because label cleanup turns the live snapshot into a post-merge
+     artifact rather than the approval state at merge time.  Without
+     this skip, CI Gate posts a permanent red mark with no recovery
+     action against an already-merged PR. *)
+  check int "MERGED state skips check (no bypass label)" 0
+    (run_agent_draft_policy
+       (("PR_LIVE_STATE", "MERGED") :: ("PR_IS_DRAFT", "false") :: base));
+  check int "CLOSED state skips check" 0
+    (run_agent_draft_policy
+       (("PR_LIVE_STATE", "CLOSED") :: ("PR_IS_DRAFT", "false") :: base));
+  check int "lower-case merged also skips" 0
+    (run_agent_draft_policy
+       (("PR_LIVE_STATE", "merged") :: ("PR_IS_DRAFT", "false") :: base));
+  check bool "OPEN state still enforces (regression guard)" true
+    (run_agent_draft_policy
+       (("PR_LIVE_STATE", "OPEN") :: ("PR_IS_DRAFT", "false") :: base)
+    <> 0)
 
 let test_health_and_ci_runner_diagnostics () =
   check bool "health snapshot records baseline source" true

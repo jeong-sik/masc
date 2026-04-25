@@ -11,6 +11,18 @@ if [[ "$event_name" != "pull_request" ]]; then
   exit 0
 fi
 
+# #10192: CI Gate is a `needs:` aggregator that runs after every other
+# job, so on auto-merge it can fire after the PR is already merged and
+# label-cleanup has stripped `human-approved-ready`.  At that point the
+# live label snapshot no longer reflects the approval state that
+# permitted the merge — a post-merge red mark with no recovery action.
+# Treat MERGED/CLOSED as a hard skip; the gate has nothing to enforce.
+pr_state="$(printf '%s' "${PR_LIVE_STATE:-${PR_STATE:-OPEN}}" | tr '[:lower:]' '[:upper:]')"
+if [[ "$pr_state" == "MERGED" || "$pr_state" == "CLOSED" ]]; then
+  echo "agent draft policy: skipped — PR already ${pr_state} (post-merge live-label artifact, #10192)"
+  exit 0
+fi
+
 pr_is_draft="${PR_LIVE_IS_DRAFT:-${PR_IS_DRAFT:-false}}"
 pr_title="${PR_TITLE:-}"
 pr_head_ref="${PR_HEAD_REF:-}"

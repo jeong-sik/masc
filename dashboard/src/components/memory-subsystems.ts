@@ -10,6 +10,7 @@ import {
   type MemorySubsystemsEpisode,
 } from '../api/dashboard'
 import { formatTimeAgo } from '../lib/format-time'
+import { TimeAgo } from './common/time-ago'
 import { isAbortError } from '../lib/async-state'
 import { setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { openAgentDetail } from './agent-detail-state'
@@ -398,7 +399,7 @@ function SynapseRow({ s }: { s: MemorySubsystemsSynapse }) {
       </td>
       <td class="py-1.5 px-2 text-sm text-[var(--ok)] text-center">${s.success_count}</td>
       <td class="py-1.5 px-2 text-sm text-[var(--bad-light)] text-center">${s.failure_count}</td>
-      <td class="py-1.5 px-2 text-xs text-[var(--text-muted)]0">${formatTimeAgo(s.last_updated * 1000)}</td>
+      <td class="py-1.5 px-2 text-xs text-[var(--text-muted)]"><${TimeAgo} timestamp=${s.last_updated * 1000} /></td>
     </tr>
   `
 }
@@ -422,7 +423,7 @@ function EpisodeCard({ ep }: { ep: MemorySubsystemsEpisode }) {
           <span class="sr-only">${outcomeLabel}</span>
           <span class="text-sm font-medium text-[var(--text-muted)] truncate" title=${ep.summary}>${ep.summary}</span>
         </div>
-        <span class="text-xs text-[var(--text-muted)]0 shrink-0">${formatTimeAgo(ep.timestamp * 1000)}</span>
+        <${TimeAgo} timestamp=${ep.timestamp * 1000} class="text-xs text-[var(--text-muted)] shrink-0" />
       </div>
       <div class="flex items-center gap-2 text-xs text-[var(--text-muted)]0 mb-1 flex-wrap">
         <span class="bg-[var(--white-5)] px-1.5 py-0.5 rounded">${ep.event_type}</span>
@@ -602,7 +603,7 @@ export function MemorySubsystems() {
             <span>${synapses.length}개 시냅스</span>
             ${
               lastConsolidation > 0
-                ? html`<span>마지막 통합: ${formatTimeAgo(lastConsolidation * 1000)}</span>`
+                ? html`<span>마지막 통합: <${TimeAgo} timestamp=${lastConsolidation * 1000} /></span>`
                 : null
             }
           </div>

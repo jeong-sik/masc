@@ -10,6 +10,7 @@ import {
   type MemorySubsystemsEpisode,
 } from '../api/dashboard'
 import { formatTimeAgo } from '../lib/format-time'
+import { TimeAgo } from './common/time-ago'
 import { isAbortError } from '../lib/async-state'
 import { highlightMatch } from '../lib/highlight-match'
 
@@ -251,7 +252,7 @@ export function AgentDetailMemory({ agentName }: Props) {
                                 <span class="sr-only">${outcomeLabel}</span>
                                 <span class="truncate text-[var(--text-muted)]" title=${ep.summary}>${highlightMatch(ep.summary, episodeQuery.value)}</span>
                               </div>
-                              <span class="text-3xs text-[var(--text-muted)]0 shrink-0">${formatTimeAgo(ep.timestamp * 1000)}</span>
+                              <${TimeAgo} timestamp=${ep.timestamp * 1000} class="text-3xs text-[var(--text-muted)] shrink-0" />
                             </div>
                             ${ep.learnings.length > 0
                               ? html`<div class="mt-1 text-2xs text-[var(--text-muted)] pl-3 border-l border-[var(--white-10)]">${highlightMatch(ep.learnings[0]!, episodeQuery.value)}</div>`

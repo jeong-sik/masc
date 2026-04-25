@@ -4,7 +4,9 @@
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
-import { formatTimeAgo } from '../lib/format-time'
+import { html } from 'htm/preact'
+import { signal } from '@preact/signals'
+import { TimeAgo } from './common/time-ago'
 import { FilterChips } from './common/filter-chips'
 import {
   groupCrashCohorts,
@@ -100,7 +102,7 @@ function SpEventsPanel({ sp_events }: { sp_events?: unknown[] }) {
       <div class="space-y-1 max-h-28 overflow-y-auto custom-scrollbar">
         ${entries.map((e) => html`
           <div class="flex items-center justify-between py-1 px-2 rounded text-2xs bg-[rgba(139,92,246,0.06)]">
-            <span class="font-mono text-[var(--text-muted)]">${formatTimeAgo(e.ts ?? 0)}</span>
+            <${TimeAgo} timestamp=${e.ts ?? 0} class="font-mono text-[var(--text-muted)]" />
             <span class="text-[#8b5cf6]">${e.suppressed_count ?? 0}/${e.total ?? 0} 억제 (${e.dominant_cohort ?? '--'})</span>
           </div>
         `)}
@@ -162,7 +164,7 @@ export function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
         ` : null}
         ${dead_since ? html`
           <div class="py-2 px-3 rounded bg-[var(--bad-6)] border border-[var(--bad-soft)] text-xs text-[var(--rose-light)]">
-            ${formatTimeAgo(dead_since)} 이후 중단됨. 재기동 필요.
+            <${TimeAgo} timestamp=${dead_since} /> 이후 중단됨. 재기동 필요.
           </div>
         ` : null}
         <${CrashCohortBar} crash_log=${crash_log} />
@@ -204,7 +206,7 @@ export function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
                   <div class="py-2 px-2 text-2xs text-[var(--text-muted)] italic">선택된 카테고리에 해당하는 장애가 없습니다.</div>
                 ` : visible.map((e) => html`
                   <div class="flex items-center justify-between py-1 px-2 rounded text-2xs bg-[var(--white-3)]">
-                    <span class="font-mono text-[var(--text-muted)]">${formatTimeAgo(e.ts ?? 0)}</span>
+                    <${TimeAgo} timestamp=${e.ts ?? 0} class="font-mono text-[var(--text-muted)]" />
                     <span class="text-[var(--rose-light)]">${e.reason ?? 'unknown'}</span>
                   </div>
                 `)}

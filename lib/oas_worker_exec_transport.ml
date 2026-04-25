@@ -302,10 +302,21 @@ let runtime_mcp_policy_for_provider
     if String.equal trimmed "" then None else Some trimmed
   in
   match policy_opt, provider_cfg.kind, agent_name with
-  | Some policy, Llm_provider.Provider_config.Codex_cli, _ ->
-      (* Codex CLI runtime MCP currently rejects per-request HTTP headers.
-         Keep the runtime lane, but strip request-scoped headers so ambient
-         env auth continues to work. *)
+  | Some policy, Llm_provider.Provider_config.Codex_cli, Some agent_name ->
+      (* PR-F (Plan v3 Leak 2a): Codex CLI runtime MCP rejects most
+         per-request HTTP headers, but the masc HTTP server still needs
+         the keeper's identity to avoid collapsing to
+         [Auth.find_credential_by_token]'s alphabetical first-match
+         (the #9786 root cause behind the [bearer token belongs to X]
+         rejection storm).  Strip ambient/auth headers as before, then
+         re-inject the identity-only whitelist
+         (x-masc-agent-name, x-masc-keeper-name, x-masc-internal-token)
+         so the server side resolves the requester correctly even when
+         ambient-env auth is the primary channel. *)
+      let stripped = runtime_mcp_policy_without_http_headers policy in
+      Some (runtime_mcp_policy_with_masc_agent_name ~agent_name stripped)
+  | Some policy, Llm_provider.Provider_config.Codex_cli, None ->
+      (* No agent_name to inject — preserve the legacy strip-all behavior. *)
       Some (runtime_mcp_policy_without_http_headers policy)
   | Some policy, _, Some agent_name ->
       Some (runtime_mcp_policy_with_masc_agent_name ~agent_name policy)

@@ -986,6 +986,17 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
         ~base_path:config.base_path meta.name;
       Keeper_registry.mark_turn_measurement
         ~base_path:config.base_path meta.name;
+      (* #10121: livelock observer — emit reattempt counter when
+         the same turn id starts again before the counter
+         advanced.  The classification result is intentionally
+         dropped here (no behaviour change yet); a follow-up PR
+         can act on [Reattempt { previous_attempts = N; _ }] to
+         gate dispatch above a threshold. *)
+      let _ : Keeper_turn_livelock.start_outcome =
+        Keeper_turn_livelock.record_turn_start
+          ~keeper:meta.name
+          ~turn_id:meta.runtime.usage.total_turns
+      in
       (match Keeper_registry.get ~base_path:config.base_path meta.name with
        | Some { current_turn_observation = Some { measurement = Some _; _ }; _ } ->
            Keeper_registry.set_turn_decision_stage

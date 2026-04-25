@@ -289,12 +289,12 @@ export function SwimlaneTimeline({
           </div>
         </div>
       ` : null}
-      <div class="mt-2 flex flex-wrap items-center gap-2 text-3xs text-[var(--text-dim)]">
-        <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm bg-[var(--indigo-45)]"></span>active</span>
-        <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm bg-[var(--amber-bright-45)]"></span>compact</span>
-        <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm bg-[var(--purple-50)]"></span>handoff</span>
-        <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm bg-[rgba(239,68,68,0.5)]"></span>alarm</span>
-        <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm border border-[var(--white-8)] bg-[var(--white-3)]"></span>idle</span>
+      <div class="mt-2 flex flex-wrap items-center gap-2 text-3xs text-[var(--text-dim)]" aria-label="상태 범례">
+        <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm bg-[var(--indigo-45)]" aria-hidden="true"></span>active</span>
+        <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm bg-[var(--amber-bright-45)]" aria-hidden="true"></span>compact</span>
+        <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm bg-[var(--purple-50)]" aria-hidden="true"></span>handoff</span>
+        <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm bg-[rgba(239,68,68,0.5)]" aria-hidden="true"></span>alarm</span>
+        <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm border border-[var(--white-8)] bg-[var(--white-3)]" aria-hidden="true"></span>idle</span>
       </div>
     </div>
   `

@@ -86,8 +86,7 @@ export function ExcusePatterns() {
           >${jsonStr}</textarea>
           
           <div class="flex items-center gap-3">
-            <button type="button"
-              type="submit"
+            <button type="submit"
               class="px-4 py-2 bg-[var(--accent-primary)] text-white rounded hover:opacity-90 disabled:opacity-50 text-sm font-medium"
               disabled=${saving.value}
             >

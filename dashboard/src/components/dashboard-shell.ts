@@ -105,7 +105,7 @@ export function ConnectionStatus() {
       class="flex items-center gap-1.5 whitespace-nowrap text-xs ${isConnected ? 'text-[#9af3ba]' : 'text-[#f7b7b7]'}"
       title=${titleAttr || undefined}
     >
-      <span class="inline-block size-[8px] rounded-sm ${isConnected ? 'bg-[var(--ok)] shadow-[0_0_7px_rgba(74,222,128,0.75)]' : 'bg-[var(--bad)]'}"></span>
+      <span class="inline-block size-[8px] rounded-sm ${isConnected ? 'bg-[var(--ok)] shadow-[0_0_7px_rgba(74,222,128,0.75)]' : 'bg-[var(--bad)]'}" aria-hidden="true"></span>
       <span class="status-text">${statusLabel}</span>
       ${attentionCount > 0 ? html`
         <${RouteLink}

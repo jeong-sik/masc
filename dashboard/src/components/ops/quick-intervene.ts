@@ -50,7 +50,7 @@ export function QuickIntervene() {
   const onlineKeepers = keepers.filter(k => normalizeStatus(k.status) !== 'offline')
 
   return html`
-    <section class="${CARD_STANDARD} flex flex-col gap-3">
+    <section class="${CARD_STANDARD} flex flex-col gap-3" role="region" aria-label="빠른 개입">
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0">
           <h3 class="text-sm font-semibold text-[var(--text-strong)]">빠른 개입</h3>

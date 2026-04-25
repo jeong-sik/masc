@@ -190,7 +190,7 @@ function TaskColumn({
   }, [listRef])
 
   return html`
-    <section class="flex min-h-60 flex-col gap-4 rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
+    <section class="flex min-h-60 flex-col gap-4 rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4" role="group" aria-label=${title}>
       <div class="flex items-start justify-between gap-3 border-b border-card-border/50 pb-3">
         <div>
           <h3 class="text-md font-semibold text-text-strong">${title}</h3>

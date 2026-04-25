@@ -85,7 +85,7 @@ export function PersonaBrowser() {
   if (personas.value.length === 0) return html`<p class="text-xs text-[var(--text-muted)] py-4">등록된 페르소나가 없습니다.</p>`
   const visible = filterPersonas(personas.value, searchQuery.value)
   return html`
-    <div>
+    <div role="region" aria-label="페르소나 목록">
       ${spawnAccess.allowed ? null : html`
         <p class="mb-3 text-2xs text-[var(--warn)]">
           키퍼 생성 차단: ${spawnAccess.reason ?? 'worker 권한이 필요합니다.'}

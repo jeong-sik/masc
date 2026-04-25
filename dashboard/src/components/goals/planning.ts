@@ -210,7 +210,7 @@ export function Planning() {
       : '아직 등록된 항목이 없습니다.'
 
   return html`
-    <div class="flex flex-col gap-6">
+    <div class="flex flex-col gap-6" role="region" aria-label="계획">
       <section class="rounded border border-card-border/70 bg-[rgba(9,14,24,0.88)] p-5">
         <div class="flex flex-wrap items-start justify-between gap-4">
           <div class="max-w-190">

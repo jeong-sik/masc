@@ -146,7 +146,7 @@ export function TaskActivityList({
   ]
 
   return html`
-    <div class="flex flex-col gap-2">
+    <div class="flex flex-col gap-2" role="region" aria-label="활동 목록">
       <${TextInput}
         type="search"
         value=${query}
@@ -166,6 +166,7 @@ export function TaskActivityList({
                 ? 'border-accent/40 bg-accent/12 text-[var(--accent)]'
                 : 'border-[var(--white-10)] bg-[var(--white-4)] text-text-muted hover:bg-[var(--white-8)]'
             }"
+            aria-pressed=${filter === chip.key}
             onClick=${() => { activeFilter.value = chip.key }}
           >${chip.label}</button>
         `)}

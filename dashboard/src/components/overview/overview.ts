@@ -323,7 +323,7 @@ export function Overview() {
   const counts = useMemo(() => computeFunnelCounts(taskList, active), [taskList, active])
   const attention = snap?.summary?.top_attention ?? null
   return html`
-    <div class="flex flex-col gap-5">
+    <div class="flex flex-col gap-5" role="region" aria-label="개요">
       <${Highlight} attention=${attention} />
       <${FunnelCard} counts=${counts} />
       <${MissionPartyCard} active=${active} />

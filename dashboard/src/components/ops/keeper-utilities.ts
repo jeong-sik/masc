@@ -72,7 +72,7 @@ export function KeeperUtilitiesPanel() {
   }
 
   return html`
-    <section class="${CARD_STANDARD} flex flex-col gap-3" data-testid="keeper-utilities-panel">
+    <section class="${CARD_STANDARD} flex flex-col gap-3" role="region" aria-label="키퍼 유틸리티" data-testid="keeper-utilities-panel">
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0">
           <h3 class="text-sm font-semibold text-[var(--text-strong)]">키퍼 유틸리티</h3>

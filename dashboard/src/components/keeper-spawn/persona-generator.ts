@@ -90,7 +90,7 @@ export function PersonaGenerator() {
     : ['minimal', 'social', 'messaging', 'dispatch', 'coding', 'research', 'delivery', 'full']
 
   return html`
-    <div class="grid gap-4 lg:grid-cols-[minmax(260px,0.9fr)_minmax(360px,1.2fr)]">
+    <div class="grid gap-4 lg:grid-cols-[minmax(260px,0.9fr)_minmax(360px,1.2fr)]" role="region" aria-label="페르소나 생성기">
       <div class="space-y-3">
         <div class="grid gap-2">
           <label class="text-3xs text-[var(--text-muted)]" for="persona-concept">컨셉</label>

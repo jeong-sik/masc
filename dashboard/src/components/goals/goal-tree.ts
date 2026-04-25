@@ -618,6 +618,7 @@ function DetailTabs({ active }: { active: GoalDetailTab }) {
           class="rounded border px-3 py-1.5 text-xs font-semibold uppercase tracking-wider transition-colors ${active === tab
             ? 'border-accent/35 bg-[var(--accent-10)] text-accent'
             : 'border-card-border/60 bg-white/3 text-text-body hover:border-card-border/90'}"
+          aria-pressed=${active === tab}
           onClick=${() => { detailTab.value = tab }}
         >
           ${tab}
@@ -750,7 +751,7 @@ function GoalDetailPanel({
 
   if (!selectedNode) {
     return html`
-      <section class="rounded border border-card-border/70 bg-[rgba(9,14,24,0.88)] p-5">
+      <section class="rounded border border-card-border/70 bg-[rgba(9,14,24,0.88)] p-5" role="region" aria-label="목표 상세">
         <${EmptyState} message="왼쪽에서 목표를 선택하면 Summary / Tasks / Evidence가 표시됩니다." />
       </section>
     `
@@ -760,7 +761,7 @@ function GoalDetailPanel({
   const verificationSummary = selectedNode.verification_summary ?? EMPTY_GOAL_VERIFICATION_SUMMARY
 
   return html`
-    <section class="flex flex-col gap-4 rounded border border-card-border/70 bg-[rgba(9,14,24,0.88)] p-5">
+    <section class="flex flex-col gap-4 rounded border border-card-border/70 bg-[rgba(9,14,24,0.88)] p-5" role="region" aria-label="목표 상세">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="max-w-150">
           <div class="text-2xs font-semibold uppercase tracking-[0.18em] text-text-muted">Goal Detail</div>
@@ -1014,7 +1015,7 @@ export function GoalTree() {
   const isFiltering = query.trim() !== '' || activePhaseFilter !== 'all'
 
   return html`
-    <div class="flex flex-col gap-5">
+    <div class="flex flex-col gap-5" role="region" aria-label="목표 트리">
       <section class="rounded border border-card-border/70 bg-[rgba(9,14,24,0.88)] p-5">
         <div class="mb-4 flex flex-wrap items-start justify-between gap-4">
           <div class="max-w-190">

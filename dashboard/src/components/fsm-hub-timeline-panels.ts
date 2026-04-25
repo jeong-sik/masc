@@ -556,7 +556,7 @@ export function DwellHistogramPanel({
                       title=${`${displayState(entry.value)}: ${fmtDuration(entry.seconds)} (${entry.pct.toFixed(1)}%)`}
                     >
                       <span class="w-15 shrink-0 text-[var(--text-body)] truncate" title=${displayState(entry.value)}>${displayState(entry.value)}</span>
-                      <span class="flex-1 h-1.5 rounded-sm bg-[var(--white-8)] overflow-hidden">
+                      <span class="flex-1 h-1.5 rounded-sm bg-[var(--white-8)] overflow-hidden" role="progressbar" aria-valuenow=${Math.round(entry.pct)} aria-valuemin=${0} aria-valuemax=${100} aria-label=${`${displayState(entry.value)} 체류 비율`}>
                         <span
                           class=${`block h-full ${barColor}`}
                           style=${`width: ${Math.max(2, entry.pct)}%`}

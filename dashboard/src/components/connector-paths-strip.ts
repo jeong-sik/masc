@@ -96,7 +96,7 @@ export function ConnectorPathsStrip({ connectors }: { connectors: GateConnectorI
           <span class="font-mono">${paths.connectorsDir ?? paths.sidecarsDir}</span>
           <span class="ml-2 text-[var(--text-dim)]">${paths.connectorsDir ? '' : '(런타임 미관찰 · sidecar 경로만 표시)'}</span>
         </span>
-        <span>${open ? '▴' : '▾'}</span>
+        <span aria-hidden="true">${open ? '▴' : '▾'}</span>
       </button>
       ${open
         ? html`

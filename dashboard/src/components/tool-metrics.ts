@@ -213,7 +213,7 @@ export function ToolMetrics() {
                   />
                 </div>
                 ${(categoryFilter.value !== 'all' || searchQuery.value.trim() !== '') ? html`
-                  <div class="mb-2 text-2xs text-[var(--text-muted)]">
+                  <div class="mb-2 text-2xs text-[var(--text-muted)]" role="status">
                     ${filtered.length} / ${data.top_20.length}개 도구
                   </div>
                 ` : null}

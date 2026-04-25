@@ -77,7 +77,8 @@ let write_file_content path content =
   Fs_compat.save_file path content
 
 let find_substring_from haystack ~needle ~from =
-  String_util.find_substring ~pos:from haystack needle
+  if from > String.length haystack then None
+  else String_util.find_substring ~pos:from haystack needle
 
 let normalize_placeholder value =
   match String.trim value with

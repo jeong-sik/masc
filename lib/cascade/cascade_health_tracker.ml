@@ -308,8 +308,7 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason ~now () =
          state and fail again.  Cool down immediately to keep fallback from
          becoming a hidden tax on every request. *)
       state.consecutive_failures <- state.consecutive_failures + 1;
-      let persistent = bump_failure_fp () in
-      apply_trust_failure_locked state ~persistent;
+      bump_failure_fp ();
       let new_until = now +. terminal_failure_cooldown_sec in
       if new_until > state.cooldown_until then
         state.cooldown_until <- new_until)

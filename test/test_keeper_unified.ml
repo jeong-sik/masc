@@ -5449,13 +5449,22 @@ let test_tools_for_gated_affordance_covers_each_variant () =
   (* Compile-time exhaustiveness already ensures every variant is
      handled; this asserts the runtime mapping is non-empty so a
      well-meaning future edit cannot silently break the gate by
-     returning [] for an affordance. *)
+     returning [] for an affordance.  It also checks each mapped name
+     against tool-name/surface SSOTs so typoed affordance tools do not
+     silently turn into dead gate entries. *)
   let module Surface = Masc_mcp.Keeper_agent_tool_surface in
+  let known_tool_name name =
+    Masc_mcp.Tool_name.of_string name <> None
+    || Masc_mcp.Tool_catalog_surfaces.surfaces_for_tool name <> []
+  in
   let nonempty label affordance =
     let tools = Surface.tools_for_gated_affordance affordance in
     check bool
       (Printf.sprintf "tools_for_gated_affordance non-empty for %s" label)
-      true (tools <> [])
+      true (tools <> []);
+    check (list string)
+      (Printf.sprintf "tools_for_gated_affordance known tools for %s" label)
+      [] (List.filter (fun name -> not (known_tool_name name)) tools)
   in
   nonempty "Board_post_or_comment" Surface.Board_post_or_comment;
   nonempty "Message_sweep" Surface.Message_sweep;

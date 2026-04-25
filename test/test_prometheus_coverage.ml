@@ -199,6 +199,12 @@ let test_to_prometheus_text_has_sse_metrics () =
   check bool "has sse write failure counter" true (has "masc_sse_write_failures_total");
   check bool "has sse reject counter" true (has "masc_sse_rejects_total")
 
+let text_has_literal text literal =
+  try
+    ignore (Str.search_forward (Str.regexp_string literal) text 0);
+    true
+  with Not_found -> false
+
 let test_keeper_metrics_registered () =
   let text = Prometheus.to_prometheus_text () in
   let has metric =
@@ -225,6 +231,18 @@ let test_keeper_metrics_registered () =
     (has "masc_keeper_operator_clear_total");
   check bool "has tool call counter" true
     (has "masc_tool_call_total")
+
+let test_review_blocker_metrics_registered () =
+  let text = Prometheus.to_prometheus_text () in
+  let check_registered metric =
+    check bool (metric ^ " HELP") true
+      (text_has_literal text ("# HELP " ^ metric ^ " "));
+    check bool (metric ^ " TYPE") true
+      (text_has_literal text ("# TYPE " ^ metric ^ " counter"))
+  in
+  check_registered Prometheus.metric_tool_join_required_guard;
+  check_registered Prometheus.metric_timeout_policy_overshoot;
+  check_registered Prometheus.metric_auth_credential_token_duplicate
 
 let test_histogram_exported_as_summary () =
   let name = "test_hist_export_fmt" in
@@ -391,6 +409,8 @@ let () =
       test_case "has uptime" `Quick test_to_prometheus_text_has_uptime;
       test_case "has sse metrics" `Quick test_to_prometheus_text_has_sse_metrics;
       test_case "keeper metrics registered" `Quick test_keeper_metrics_registered;
+      test_case "review blocker metrics registered" `Quick
+        test_review_blocker_metrics_registered;
       test_case "histogram exported as summary with _sum/_count"
         `Quick test_histogram_exported_as_summary;
     ];

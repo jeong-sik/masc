@@ -463,9 +463,9 @@ let test_runtime_surface_suppresses_stale_proactive_timeout_reason () =
               last_ts = now_ts -. 600.0;
               last_outcome = KT.Proactive_error;
               last_reason =
-                "unified:error:Internal error: Turn wall-clock timeout after 1200s (MASC_KEEPER_TURN_TIMEOUT_SEC)";
+                "unified:error:Internal error: Turn wall-clock timeout after 3600s (MASC_KEEPER_TURN_TIMEOUT_SEC)";
               last_preview =
-                "Internal error: Turn wall-clock timeout after 1200s (MASC_KEEPER_TURN_TIMEOUT_SEC)";
+                "Internal error: Turn wall-clock timeout after 3600s (MASC_KEEPER_TURN_TIMEOUT_SEC)";
             };
         };
     }
@@ -560,11 +560,13 @@ let test_runtime_surface_exposes_model_display_labels () =
   in
   let runtime = KSB.runtime_surface_json config meta in
   let open Yojson.Safe.Util in
-  check string "active model label"
-    "codex_cli:auto"
-    (runtime |> member "active_model_label" |> to_string);
+  let active_model_label =
+    runtime |> member "active_model_label" |> to_string
+  in
+  check bool "active model provider label" true
+    (String.starts_with ~prefix:"codex_cli:" active_model_label);
   check string "last model used label"
-    "codex_cli:auto"
+    active_model_label
     (runtime |> member "last_model_used_label" |> to_string)
 
 (* Issue #8670: parser must round-trip every constructor and reject

@@ -311,6 +311,9 @@ let metric_tool_join_required_guard =
 let metric_keeper_semaphore_wait_timeout =
   "masc_keeper_semaphore_wait_timeout_total"
 
+let metric_timeout_policy_overshoot =
+  "masc_timeout_policy_overshoot_total"
+
 (* Keeper compaction (keeper_compact_policy.ml, tool_keeper.ml). *)
 let metric_keeper_compactions = "masc_keeper_compactions_total"
 let metric_keeper_compaction_ratio_change =
@@ -651,6 +654,14 @@ let init () =
      sweep beat (labels: base_path).  Stale (> 2 × interval) means \
      the sweep stalled."
     Gauge;
+  add metric_tool_join_required_guard
+    "Total join-required guard rejections before tool execution \
+     (labels: tool, agent_name, reason=room_uninitialized|agent_not_joined)"
+    Counter;
+  add metric_timeout_policy_overshoot
+    "Total cooperative-cancel timeout overshoots \
+     (labels: layer, origin)"
+    Counter;
   (* Keeper compaction metrics — emitted by keeper_compact_policy.ml *)
   add metric_keeper_compactions
     "Total keeper compactions performed" Counter;
@@ -869,6 +880,11 @@ let init () =
      requested agent_name (labels: expected_agent, actual_agent). Rate \
      advancing after a server restart indicates shared credential state \
      (connection pool / process fork) across agent identities."
+    Counter;
+  add metric_auth_credential_token_duplicate
+    "Total boot-time credential token duplicate groups detected \
+     (labels: token_hash_prefix). Any non-zero value means credential tokens \
+     must be rotated."
     Counter;
   (* Transport metrics — registered here so transport_metrics.ml can use
      module constants instead of string literals. *)

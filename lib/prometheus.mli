@@ -117,6 +117,10 @@ val metric_keeper_semaphore_wait_timeout : string
     Labels: [keeper, channel] with channel in
     [autonomous_queue_head | autonomous | turn]. *)
 
+val metric_timeout_policy_overshoot : string
+(** #9662: cooperative-cancel timeout overshoot counter emitted by
+    [Timeout_policy].  Labels: [layer, origin]. *)
+
 val metric_keeper_compactions : string
 val metric_keeper_compaction_ratio_change : string
 val metric_keeper_compaction_saved_tokens : string

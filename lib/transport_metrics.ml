@@ -176,6 +176,29 @@ let hot_session_json (session : hot_queue_session) =
       ("idle_seconds", `Float session.idle_seconds);
     ]
 
+type ws_delivery_metric_names = {
+  parse_cache_hits : string;
+  parse_cache_misses : string;
+  bytes_cache_hits : string;
+  bytes_cache_misses : string;
+  client_acks : string;
+  throttled_deliveries : string;
+  client_buffered_bytes : string;
+  client_buffered_bytes_count : string;
+}
+
+let ws_delivery_metric_names =
+  {
+    parse_cache_hits = "masc_ws_parse_cache_hits_total";
+    parse_cache_misses = "masc_ws_parse_cache_misses_total";
+    bytes_cache_hits = "masc_ws_bytes_cache_hits_total";
+    bytes_cache_misses = "masc_ws_bytes_cache_misses_total";
+    client_acks = "masc_ws_client_acks_total";
+    throttled_deliveries = "masc_ws_throttled_deliveries_total";
+    client_buffered_bytes = "masc_ws_client_buffered_bytes";
+    client_buffered_bytes_count = "masc_ws_client_buffered_bytes_count";
+  }
+
 let transport_health_json ~config =
   let v name ?(labels=[]) () =
     Prometheus.metric_value_or_zero name ~labels ()
@@ -242,6 +265,7 @@ let transport_health_json ~config =
       (Prometheus.metric_total
          Prometheus.metric_keeper_lifecycle_dispatch_rejections)
   in
+  let ws_delivery_metrics = ws_delivery_metric_names in
   let ws_sessions = int_of_float (v Prometheus.metric_ws_sessions ()) in
   let grpc_configured = grpc_enabled () in
   let grpc_live = grpc_listening () in
@@ -330,32 +354,30 @@ let transport_health_json ~config =
       ("port", `Int (ws_port ()));
       ("sessions", `Int ws_sessions);
       ("relay_source", `String "sse_external_subscriber");
-      (* Diagnostic counters for the WS delivery path.  Read by literal
-         metric name so this surface does not take a compile-time
-         dependency on any particular WS perf/observability PR.  If the
-         metric has not been registered yet [metric_value_or_zero]
-         returns 0.0, which reads naturally as "nothing has happened" —
-         the same thing the caller would see immediately after server
-         startup before the first event. *)
+      (* Diagnostic counters for the WS delivery path.  The metric names
+         are catalogued here so this surface does not take a compile-time
+         dependency on any particular WS perf/observability PR.  If a
+         producing PR has not registered a metric yet, [metric_value_or_zero]
+         returns 0.0, which reads naturally as "nothing has happened". *)
       ("delivery", `Assoc [
         ("parse_cache_hits",
-         `Int (int_of_float (v "masc_ws_parse_cache_hits_total" ())));
+         `Int (int_of_float (v ws_delivery_metrics.parse_cache_hits ())));
         ("parse_cache_misses",
-         `Int (int_of_float (v "masc_ws_parse_cache_misses_total" ())));
+         `Int (int_of_float (v ws_delivery_metrics.parse_cache_misses ())));
         ("bytes_cache_hits",
-         `Int (int_of_float (v "masc_ws_bytes_cache_hits_total" ())));
+         `Int (int_of_float (v ws_delivery_metrics.bytes_cache_hits ())));
         ("bytes_cache_misses",
-         `Int (int_of_float (v "masc_ws_bytes_cache_misses_total" ())));
+         `Int (int_of_float (v ws_delivery_metrics.bytes_cache_misses ())));
         ("client_acks",
-         `Int (int_of_float (v "masc_ws_client_acks_total" ())));
+         `Int (int_of_float (v ws_delivery_metrics.client_acks ())));
         ("throttled_deliveries",
-         `Int (int_of_float (v "masc_ws_throttled_deliveries_total" ())));
+         `Int (int_of_float (v ws_delivery_metrics.throttled_deliveries ())));
         (* Histogram sum + auto _count give operators enough to compute
            average buffered bytes per ack without scraping /metrics. *)
         ("client_buffered_bytes_sum",
-         `Float (v "masc_ws_client_buffered_bytes" ()));
+         `Float (v ws_delivery_metrics.client_buffered_bytes ()));
         ("client_buffered_bytes_count",
-         `Int (int_of_float (v "masc_ws_client_buffered_bytes_count" ())));
+         `Int (int_of_float (v ws_delivery_metrics.client_buffered_bytes_count ())));
       ]);
     ]);
     ("webrtc", `Assoc [

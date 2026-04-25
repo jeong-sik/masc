@@ -308,6 +308,10 @@ let metric_keeper_profile_config_conflicts =
   "masc_keeper_profile_config_conflicts_total"
 let metric_keeper_oas_timeout_classifications =
   "masc_keeper_oas_timeout_classifications_total"
+(* PR-B: keeper turn skipped due to ollama saturation pre-check.
+   Labelled by [keeper] and [cascade]. *)
+let metric_keeper_ollama_saturation_skip =
+  "masc_keeper_ollama_saturation_skip_total"
 let metric_persistence_read_drops =
   "masc_persistence_read_drops_total"
 
@@ -649,6 +653,11 @@ let init () =
   add metric_keeper_oas_timeout_classifications
     "Total keeper OAS timeout classifications. Labeled by \
      classification=transient_network|structural_budget|other_timeout."
+    Counter;
+  add metric_keeper_ollama_saturation_skip
+    "Total keeper turns skipped because the resolved cascade is \
+     ollama-only and the /api/ps probe reported zero available slots. \
+     Labeled by keeper and cascade."
     Counter;
   add metric_persistence_read_drops
     "Total persisted read-model entries dropped during filesystem scans, \

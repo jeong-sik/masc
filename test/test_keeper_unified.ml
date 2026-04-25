@@ -2925,6 +2925,91 @@ let test_fail_open_local_only_preserves_healthy_local_only () =
   in
   check string "healthy ollama keeps local_only" "local_only" cascade
 
+(* PR-B: ollama saturation pre-skip helpers. *)
+
+let make_capacity_info ?(total = 1) ?(active = 0) ?(available = 1)
+    ?(queue = 0) () : Masc_mcp.Cascade_throttle.capacity_info =
+  {
+    total;
+    process_active = active;
+    process_available = available;
+    process_queue_length = queue;
+    source = Llm_provider.Provider_throttle.Discovered;
+  }
+
+let test_resolve_ollama_only_base_url_empty_returns_none () =
+  match UT.resolve_ollama_only_base_url [] with
+  | None -> ()
+  | Some _ -> fail "empty labels should not resolve to ollama-only"
+
+let test_resolve_ollama_only_base_url_single_ollama () =
+  let label = "ollama:qwen3.6:35b-a3b-mlx-bf16" in
+  let cfg = provider_config_of_label label in
+  match UT.resolve_ollama_only_base_url [ label ] with
+  | Some url -> check string "single ollama base url" cfg.base_url url
+  | None -> fail "single ollama label should resolve"
+
+let test_resolve_ollama_only_base_url_mixed_provider () =
+  match
+    UT.resolve_ollama_only_base_url
+      [ "ollama:qwen3.6:35b-a3b-mlx-bf16"; "claude:sonnet-4-5" ]
+  with
+  | None -> ()
+  | Some _ -> fail "mixed provider must not be classified as ollama-only"
+
+let test_resolve_ollama_only_base_url_different_hosts () =
+  let resolve_label = function
+    | "ollama:a" ->
+        Some
+          (Llm_provider.Provider_config.make
+             ~kind:Llm_provider.Provider_config.Ollama
+             ~model_id:"a"
+             ~base_url:"http://127.0.0.1:11434"
+             ())
+    | "ollama:b" ->
+        Some
+          (Llm_provider.Provider_config.make
+             ~kind:Llm_provider.Provider_config.Ollama
+             ~model_id:"b"
+             ~base_url:"http://10.0.0.5:11434"
+             ())
+    | _ -> None
+  in
+  match
+    UT.resolve_ollama_only_base_url ~resolve_label
+      [ "ollama:a"; "ollama:b" ]
+  with
+  | None -> ()
+  | Some _ -> fail "different ollama hosts must not collapse"
+
+let test_is_ollama_saturated_returns_false_when_cache_missing () =
+  let url = "http://127.0.0.1:11434" in
+  check bool "missing cache treated as healthy" false
+    (UT.is_ollama_saturated ~capacity_lookup:(fun _ -> None) url)
+
+let test_is_ollama_saturated_returns_false_when_idle () =
+  let url = "http://127.0.0.1:11434" in
+  let info = make_capacity_info ~active:0 ~available:1 ~queue:0 () in
+  check bool "idle endpoint not saturated" false
+    (UT.is_ollama_saturated
+       ~capacity_lookup:(fun _ -> Some info) url)
+
+let test_is_ollama_saturated_returns_true_when_full_with_queue () =
+  let url = "http://127.0.0.1:11434" in
+  let info = make_capacity_info ~active:1 ~available:0 ~queue:3 () in
+  check bool "full endpoint with queue is saturated" true
+    (UT.is_ollama_saturated
+       ~capacity_lookup:(fun _ -> Some info) url)
+
+let test_is_ollama_saturated_ignores_zero_available_when_idle () =
+  (* Defensive: discovery may report 0 available before any traffic.
+     Without active or queued requests the keeper should still dispatch. *)
+  let url = "http://127.0.0.1:11434" in
+  let info = make_capacity_info ~active:0 ~available:0 ~queue:0 () in
+  check bool "idle endpoint with no slots is fail-open" false
+    (UT.is_ollama_saturated
+       ~capacity_lookup:(fun _ -> Some info) url)
+
 let wrapped_claude_limit_error () =
   Agent_sdk.Error.Api
     (NetworkError
@@ -5905,6 +5990,22 @@ let () =
             test_fail_open_local_only_preserves_explicit_local_only_base;
           test_case "healthy local_only stays selected" `Quick
             test_fail_open_local_only_preserves_healthy_local_only;
+          test_case "PR-B: empty labels are not ollama-only" `Quick
+            test_resolve_ollama_only_base_url_empty_returns_none;
+          test_case "PR-B: single ollama label is ollama-only" `Quick
+            test_resolve_ollama_only_base_url_single_ollama;
+          test_case "PR-B: mixed providers are not ollama-only" `Quick
+            test_resolve_ollama_only_base_url_mixed_provider;
+          test_case "PR-B: different ollama hosts are not ollama-only" `Quick
+            test_resolve_ollama_only_base_url_different_hosts;
+          test_case "PR-B: missing cache is fail-open" `Quick
+            test_is_ollama_saturated_returns_false_when_cache_missing;
+          test_case "PR-B: idle endpoint not saturated" `Quick
+            test_is_ollama_saturated_returns_false_when_idle;
+          test_case "PR-B: full endpoint with queue is saturated" `Quick
+            test_is_ollama_saturated_returns_true_when_full_with_queue;
+          test_case "PR-B: zero available without traffic is fail-open" `Quick
+            test_is_ollama_saturated_ignores_zero_available_when_idle;
           test_case "hard quota degraded retry uses local_recovery" `Quick
             test_degraded_retry_after_recoverable_error_uses_local_recovery_for_hard_quota;
           test_case "resumable session degraded retry uses local_recovery"

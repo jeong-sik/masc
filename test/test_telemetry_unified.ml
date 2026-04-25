@@ -798,6 +798,58 @@ let test_scope_filter_matches_runtime_contract_fields () =
       (json_string_field "tool_name" entry)
   | _ -> Alcotest.fail "expected one scoped trajectory row"
 
+let test_goal_event_source_and_summary () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "telem_goal_event" in
+  let root = masc_root dir in
+  Fs_compat.mkdir_p root;
+  let newer_ts = Unix.gettimeofday () in
+  let older_ts = newer_ts -. 1.0 in
+  let path = Filename.concat root "goal_events.jsonl" in
+  Fs_compat.append_file path
+    (Yojson.Safe.to_string
+       (`Assoc
+          [
+            ("ts", `String (Types.iso8601_of_unix_seconds older_ts));
+            ("goal_id", `String "goal-1");
+            ("event_type", `String "transition_requested");
+            ("payload", `Assoc [ ("phase", `String "active") ]);
+          ])
+     ^ "\n");
+  Fs_compat.append_file path
+    (Yojson.Safe.to_string
+       (`Assoc
+          [
+            ("ts", `String (Types.iso8601_of_unix_seconds newer_ts));
+            ("goal_id", `String "goal-1");
+            ("event_type", `String "transition_completed");
+            ("payload", `Assoc [ ("phase", `String "done") ]);
+          ])
+     ^ "\n");
+  let entries =
+    Telemetry_unified.read_unified
+      ~base_path:dir
+      ~masc_root:root
+      ~sources:[ Telemetry_unified.Goal_event ]
+      ~n:10
+      ()
+  in
+  Alcotest.(check int) "two goal events" 2 (List.length entries);
+  Alcotest.(check string) "newest source" "goal_event"
+    (List.hd entries |> json_string_field "source");
+  Alcotest.(check string) "newest event" "transition_completed"
+    (List.hd entries |> json_string_field "event_type");
+  let summary = Telemetry_unified.summary_json ~base_path:dir ~masc_root:root () in
+  let goal_summary = source_summary "goal_event" summary in
+  Alcotest.(check int) "goal event count" 2
+    (json_int_field "entry_count" goal_summary);
+  Alcotest.(check string) "goal event health" "ok"
+    (json_string_field "health" goal_summary);
+  Alcotest.(check string) "goal dashboard surface"
+    "/api/v1/dashboard/goals"
+    (json_string_field "dashboard_surface" goal_summary)
+
 let test_summary_surfaces_coverage_gaps () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -948,6 +1000,8 @@ let () =
             test_read_unified_reads_trajectory_and_execution_receipts;
           Alcotest.test_case "runtime contract scope filter" `Quick
             test_scope_filter_matches_runtime_contract_fields;
+          Alcotest.test_case "goal events" `Quick
+            test_goal_event_source_and_summary;
         ] );
       ( "summary",
         [

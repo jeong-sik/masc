@@ -296,6 +296,11 @@ function entryPreview(e: TelemetryEntry): string {
       const reason = normalizeText(e.terminal_reason_code)
       return reason ? `${keeper} receipt ${outcome} (${reason})` : `${keeper} receipt ${outcome}`
     }
+    case 'goal_event': {
+      const goal = normalizeText(e.goal_id) ?? 'unknown-goal'
+      const eventType = normalizeText(e.event_type) ?? 'goal_event'
+      return `${goal} ${eventType}`
+    }
     case 'tool_metric': {
       const tool = normalizeText(e.tool_name) ?? ''
       const dur = typeof e.duration_ms === 'number' ? e.duration_ms : null

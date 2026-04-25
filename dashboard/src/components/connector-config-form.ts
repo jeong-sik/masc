@@ -324,11 +324,12 @@ export function ConnectorConfigToggle({ connectorId }: { connectorId: string }) 
   `
 }
 
-function FieldWidget({ id, field, value, revealed }: {
+function FieldWidget({ id, field, value, revealed, describedById }: {
   id: string
   field: FieldShape
   value: string
   revealed: boolean
+  describedById?: string
 }) {
   const fieldId = `field-${id}-${field.name}`
   const onInput = (ev: Event) => {
@@ -354,6 +355,7 @@ function FieldWidget({ id, field, value, revealed }: {
             id=${fieldId}
             checked=${value === 'true'}
             onInput=${onCheckbox}
+            aria-describedby=${describedById}
             class="cursor-pointer"
           />
           <span>${value === 'true' ? 'enabled' : 'disabled'}</span>
@@ -366,6 +368,7 @@ function FieldWidget({ id, field, value, revealed }: {
           type="number"
           id=${fieldId}
           aria-label=${field.name}
+          aria-describedby=${describedById}
           value=${value}
           onInput=${onInput}
           step=${field.type === 'integer' ? 1 : 'any'}
@@ -381,6 +384,7 @@ function FieldWidget({ id, field, value, revealed }: {
               type=${revealed ? 'text' : 'password'}
               id=${fieldId}
               aria-label=${field.name}
+              aria-describedby=${describedById}
               value=${value}
               onInput=${onInput}
               placeholder=${field.required ? '필수 — 토큰을 붙여넣으세요' : ''}
@@ -401,6 +405,7 @@ function FieldWidget({ id, field, value, revealed }: {
           type="text"
           id=${fieldId}
           aria-label=${field.name}
+          aria-describedby=${describedById}
           value=${value}
           onInput=${onInput}
           placeholder=${defaultToString(field.default)}
@@ -530,9 +535,10 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
               field=${field}
               value=${entry.values[field.name] ?? ''}
               revealed=${entry.reveal[field.name] === true}
+              describedById=${field.description ? `desc-field-${connectorId}-${field.name}` : undefined}
             />
             ${field.description
-              ? html`<div class="text-3xs text-[var(--text-dim)]">${field.description}</div>`
+              ? html`<div id=${`desc-field-${connectorId}-${field.name}`} class="text-3xs text-[var(--text-dim)]">${field.description}</div>`
               : null}
             ${(() => {
               const hint = getFieldHint(field.name)

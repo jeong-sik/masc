@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# Ensure cfg-backed TLA+ specs are either checked by scripts/tla-check.sh or
+# explicitly recorded as known unchecked debt.
+
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+
+known_unchecked_specs() {
+  cat <<'EOF'
+specs/boundary/CascadeKeeperRecovery.tla
+specs/boundary/CascadeStrategy.tla
+specs/boundary/CascadeStrategyStateful.tla
+specs/boundary/KeeperRecoveryOrchestration.tla
+specs/boundary/KeeperTurnScheduler.tla
+specs/checkpoint-trim/CheckpointTrim.tla
+specs/closure/ContractClosure.tla
+specs/keeper-state-machine/KeeperConditionsGovernPhase.tla
+specs/keeper-state-machine/KeeperCounterCausality.tla
+specs/keeper-state-machine/KeeperDwellMonotone.tla
+specs/keeper-state-machine/KeeperMemoryLifecycle.tla
+specs/keeper-state-machine/KeeperOutcomesConservation.tla
+specs/keeper-state-machine/KeeperReconcileLiveness.tla
+specs/keeper-state-machine/KeeperSocialModelMagenticLedger.tla
+specs/keeper-state-machine/KeeperWorkPipeline.tla
+specs/server-state/ServerState.tla
+specs/social-state-cap/SocialStateCap.tla
+EOF
+}
+
+has_cfg() {
+  local spec="$1"
+  local dir="${spec%/*}"
+  local file="${spec##*/}"
+  local stem="${file%.tla}"
+
+  [[ -f "$dir/$stem.cfg" ]] && return 0
+  [[ -f "$dir/$stem-buggy.cfg" ]] && return 0
+  compgen -G "$dir/$stem-*.cfg" >/dev/null
+}
+
+is_known_unchecked() {
+  local spec="$1"
+  known_unchecked_specs | grep -Fxq "$spec"
+}
+
+is_checked() {
+  local spec="$1"
+  local dir="${spec%/*}"
+  local file="${spec##*/}"
+
+  # scripts/tla-check.sh dynamically runs every non-symlink spec in bug-models
+  # that has a matching clean or -buggy cfg.
+  if [[ "$dir" == "specs/bug-models" ]]; then
+    return 0
+  fi
+
+  grep -Fq "\"$file\"" scripts/tla-check.sh
+}
+
+missing=()
+known=()
+
+while IFS= read -r spec; do
+  [[ -n "$spec" ]] || continue
+  has_cfg "$spec" || continue
+
+  if is_checked "$spec"; then
+    continue
+  fi
+  if is_known_unchecked "$spec"; then
+    known+=("$spec")
+    continue
+  fi
+  missing+=("$spec")
+done < <(find specs -name '*.tla' -type f | sort)
+
+if ((${#missing[@]} > 0)); then
+  echo "FAIL: cfg-backed TLA+ specs not covered by scripts/tla-check.sh:" >&2
+  printf '  %s\n' "${missing[@]}" >&2
+  echo >&2
+  echo "Either wire the spec into scripts/tla-check.sh or add it to the known_unchecked_specs list with an audit note." >&2
+  exit 1
+fi
+
+echo "=== TLA harness coverage: PASS ==="
+if ((${#known[@]} > 0)); then
+  echo "Known unchecked cfg-backed specs (${#known[@]}):"
+  printf '  %s\n' "${known[@]}"
+fi

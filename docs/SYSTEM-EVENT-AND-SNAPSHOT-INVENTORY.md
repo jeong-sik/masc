@@ -50,10 +50,11 @@ This document is the operator-facing SSOT for:
 
 - `Keeper_registry.dispatch_event_with_audit` emits `keeper_composite_changed` after the registry entry is updated.
 - This happens in both the phase-change branch and the no-phase-change success branch.
+- Turn sub-FSM mutation helpers also emit `keeper_composite_changed` after they update observer-visible turn/composite fields.
 
-### Important non-trigger cases
+### Direct turn helper trigger cases
 
-The following direct registry mutation helpers update fields that the composite observer reads, but they do not emit `keeper_composite_changed` by themselves:
+The following direct registry mutation helpers update fields that the composite observer reads, and now emit `keeper_composite_changed` when they actually change a live turn observation:
 
 - `mark_turn_started`
 - `mark_turn_measurement`
@@ -64,27 +65,22 @@ The following direct registry mutation helpers update fields that the composite 
 - `mark_turn_finished`
 
 Current code cross-check: `keeper_unified_turn.ml` still calls these helpers directly in the live turn path
-(`1711-1731`, `1781-1836`, `1934-2074` in the 2026-04-18 tree), so this is not dead API
-surface. The helpers are active, but they remain silent with respect to
-`keeper_composite_changed`.
+(`mark_turn_started`, `mark_turn_measurement`, `set_turn_*`, `mark_turn_finished`), so this is not dead API surface. The helpers are active and are part of the composite freshness contract.
 
 | Helper | Current direct caller(s) | Composite fields touched | Emits `keeper_composite_changed`? |
 | --- | --- | --- | --- |
-| `mark_turn_started` | `keeper_unified_turn.ml:1716` | installs `current_turn_observation`, initializes `turn_phase=prompting`, resets compaction stage | No |
-| `mark_turn_measurement` | `keeper_unified_turn.ml:1718` | binds pending measurement into the current turn snapshot | No |
-| `set_turn_decision_stage` | `keeper_unified_turn.ml:1722` | updates `decision_stage` to `guard_ok` when measurement is present | No |
-| `set_turn_cascade_state` | `keeper_unified_turn.ml:1782`, `1818`, `1834` | updates `cascade_state`, and via `turn_phase_of_cascade_state` also changes `turn_phase` | No |
-| `set_turn_phase` | `keeper_unified_turn.ml:1786`, `1934`, `1979`, `1987`, `2033`, `2067`, `2072` | forces `turn_phase` during terminal/compaction/error paths | No |
-| `set_turn_selected_model` | `keeper_unified_turn.ml:1831` | stores `selected_model` after a successful cascade attempt | No |
-| `mark_turn_finished` | `keeper_unified_turn.ml:1730` (finally block) | clears `current_turn_observation`, ending the live turn snapshot | No |
+| `mark_turn_started` | live turn entry | installs `current_turn_observation`, initializes `turn_phase=prompting`, resets compaction stage | Yes |
+| `mark_turn_measurement` | live turn measurement bind | binds pending measurement into the current turn snapshot | Yes, when a pending measurement exists |
+| `set_turn_decision_stage` | live turn decision path | updates `decision_stage` to `guard_ok` when measurement is present | Yes, when a live turn exists |
+| `set_turn_cascade_state` | cascade attempt path | updates `cascade_state`, and via `turn_phase_of_cascade_state` also changes `turn_phase` | Yes, when a live turn exists |
+| `set_turn_phase` | terminal/compaction/error paths | forces `turn_phase` during terminal/compaction/error paths | Yes, when a live turn exists |
+| `set_turn_selected_model` | successful cascade attempt path | stores `selected_model` after a successful cascade attempt | Yes, when a live turn exists |
+| `mark_turn_finished` | turn finally block | clears `current_turn_observation`, ending the live turn snapshot and freezing `last_completed_turn` | Yes, when a live turn exists |
 
 By contrast, the nearby `dispatch_keeper_phase_event` calls in the overflow-retry path
 (`keeper_unified_turn.ml:1939-1946`) eventually go through
 `Keeper_registry.dispatch_event_with_audit`, so those phase-machine events *do* emit
-`keeper_composite_changed`. The gap is therefore real: direct turn-mutation helpers update
-observer-visible composite fields without producing the composite tick.
-
-That means `keeper_composite_changed` is not a complete “all composite mutations” stream. It is specifically tied to successful `dispatch_event*` applications.
+`keeper_composite_changed`. Direct turn-mutation helpers and state-machine dispatch now both produce the same signal-only tick, while consumers still re-fetch `/api/v1/keepers/:name/composite` for the authoritative payload.
 
 ## Keeper Heartbeat Snapshot Timing
 

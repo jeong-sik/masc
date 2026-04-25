@@ -53,6 +53,24 @@ let with_registry f =
     ~finally:(fun () -> Reg.clear ())
     f
 
+let contains needle haystack =
+  try
+    ignore (Str.search_forward (Str.regexp_string needle) haystack 0);
+    true
+  with Not_found -> false
+
+let with_sse_capture id f =
+  let events = ref [] in
+  Masc_mcp.Sse.subscribe_external ~id
+    ~callback:(fun event -> events := event :: !events)
+    ();
+  Fun.protect
+    ~finally:(fun () -> Masc_mcp.Sse.unsubscribe_external id)
+    (fun () -> f events)
+
+let saw_composite_changed events =
+  List.exists (contains "\"type\":\"keeper_composite_changed\"") !events
+
 (* --- bump: no-op when all satisfied ------------------------------- *)
 
 let test_bump_noop_when_all_satisfied () =
@@ -159,6 +177,26 @@ let test_snapshot_omits_collapsed_from_for_active_phase () =
       (Some "Running")
       (Json.member "phase" snapshot |> Json.to_string_option))
 
+let test_direct_turn_mutations_emit_composite_changed () =
+  with_registry (fun () ->
+    let base_path = "/tmp/keeper-composite-turn-ticks" in
+    let keeper_name = "turn-tick" in
+    ignore (Reg.register ~base_path keeper_name (make_meta keeper_name));
+    with_sse_capture "test-direct-turn-composite-tick" (fun events ->
+      Reg.mark_turn_started ~base_path keeper_name;
+      check bool "turn start emits composite tick" true
+        (saw_composite_changed events);
+      events := [];
+
+      Reg.set_turn_cascade_state ~base_path keeper_name Reg.Cascade_trying;
+      check bool "turn cascade update emits composite tick" true
+        (saw_composite_changed events);
+      events := [];
+
+      Reg.mark_turn_finished ~base_path keeper_name;
+      check bool "turn finish emits composite tick" true
+        (saw_composite_changed events)))
+
 let () =
   run "keeper_composite_observer" [
     "bump_invariant_violations",
@@ -173,4 +211,6 @@ let () =
     [ test_case "stable phase exposes collapsed_from" `Quick test_snapshot_reports_collapsed_from_for_stable_phase
     ; test_case "active phase leaves collapsed_from null" `Quick test_snapshot_omits_collapsed_from_for_active_phase
     ];
+    "composite change signals",
+    [ test_case "direct turn mutations emit composite tick" `Quick test_direct_turn_mutations_emit_composite_changed ];
   ]

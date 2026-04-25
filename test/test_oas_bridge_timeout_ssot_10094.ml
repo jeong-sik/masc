@@ -46,7 +46,9 @@ let clear_envs () =
     (Cfg.known_callers ());
   (* Clear an unknown-caller override too so the global-fallback
      test starts clean. *)
-  Unix.putenv (Cfg.per_caller_env_var ~caller:"unknown_caller_test_10094") ""
+  Unix.putenv
+    (Cfg.per_caller_env_var ~caller:(Cfg.Unknown "unknown_caller_test_10094"))
+    ""
 
 (* The intentional 120s / 180s budgets must remain after this
    PR.  If a future refactor accidentally drops them (e.g. by
@@ -57,18 +59,18 @@ let test_intentional_budgets_preserved () =
   clear_envs ();
   let cases =
     [
-      "autoresearch_codegen", 120.0;
-      "keeper_persona_authoring", 120.0;
-      "server_openai_compat", 120.0;
-      "tool_deep_review", 180.0;
-      "anti_rationalization", 180.0;
+      Cfg.Autoresearch_codegen, 120.0;
+      Cfg.Keeper_persona_authoring, 120.0;
+      Cfg.Server_openai_compat, 120.0;
+      Cfg.Tool_deep_review, 180.0;
+      Cfg.Anti_rationalization, 180.0;
     ]
   in
   List.iter
     (fun (caller, expected) ->
       let got = Cfg.timeout_sec ~caller () in
       Alcotest.(check (float 0.0001))
-        (Printf.sprintf "preserved budget for %s" caller)
+        (Printf.sprintf "preserved budget for %s" (Cfg.caller_key caller))
         expected got)
     cases
 
@@ -79,27 +81,27 @@ let test_fantasy_60s_budgets_raised () =
   Alcotest.(check (float 0.0001))
     "auto_responder raised to global default"
     Cfg.global_default_sec
-    (Cfg.timeout_sec ~caller:"auto_responder" ());
+    (Cfg.timeout_sec ~caller:Cfg.Auto_responder ());
   Alcotest.(check (float 0.0001))
     "dashboard_provider_runs raised to global default"
     Cfg.global_default_sec
-    (Cfg.timeout_sec ~caller:"dashboard_provider_runs" ())
+    (Cfg.timeout_sec ~caller:Cfg.Dashboard_provider_runs ())
 
 (* Per-caller env override beats the hardcoded default. *)
 let test_per_caller_env_override () =
   clear_envs ();
   Unix.putenv
-    (Cfg.per_caller_env_var ~caller:"auto_responder")
+    (Cfg.per_caller_env_var ~caller:Cfg.Auto_responder)
     "45.5";
   Alcotest.(check (float 0.0001))
     "auto_responder env overrides default"
     45.5
-    (Cfg.timeout_sec ~caller:"auto_responder" ());
+    (Cfg.timeout_sec ~caller:Cfg.Auto_responder ());
   (* Other callers must NOT be affected by this single override. *)
   Alcotest.(check (float 0.0001))
     "tool_deep_review unaffected"
     180.0
-    (Cfg.timeout_sec ~caller:"tool_deep_review" ());
+    (Cfg.timeout_sec ~caller:Cfg.Tool_deep_review ());
   clear_envs ()
 
 (* Global env var (MASC_OAS_BRIDGE_TIMEOUT_DEFAULT_SEC) is a
@@ -113,11 +115,11 @@ let test_global_env_does_not_override_known_callers () =
   Alcotest.(check (float 0.0001))
     "tool_deep_review keeps 180.0 (global env is a fallback, not an override)"
     180.0
-    (Cfg.timeout_sec ~caller:"tool_deep_review" ());
+    (Cfg.timeout_sec ~caller:Cfg.Tool_deep_review ());
   Alcotest.(check (float 0.0001))
     "unknown caller picks up global env"
     999.0
-    (Cfg.timeout_sec ~caller:"unknown_caller_test_10094" ());
+    (Cfg.timeout_sec ~caller:(Cfg.Unknown "unknown_caller_test_10094") ());
   clear_envs ()
 
 (* Per-caller env var beats global env var.  Operator should
@@ -127,12 +129,12 @@ let test_per_caller_env_beats_global_env () =
   clear_envs ();
   Unix.putenv Cfg.global_env_var "999.0";
   Unix.putenv
-    (Cfg.per_caller_env_var ~caller:"tool_deep_review")
+    (Cfg.per_caller_env_var ~caller:Cfg.Tool_deep_review)
     "42.0";
   Alcotest.(check (float 0.0001))
     "per-caller env wins over global env"
     42.0
-    (Cfg.timeout_sec ~caller:"tool_deep_review" ());
+    (Cfg.timeout_sec ~caller:Cfg.Tool_deep_review ());
   clear_envs ()
 
 (* Per-caller env-var name follows the documented convention.
@@ -142,11 +144,11 @@ let test_env_var_name_convention () =
   Alcotest.(check string)
     "auto_responder env var"
     "MASC_OAS_BRIDGE_TIMEOUT_AUTO_RESPONDER_SEC"
-    (Cfg.per_caller_env_var ~caller:"auto_responder");
+    (Cfg.per_caller_env_var ~caller:Cfg.Auto_responder);
   Alcotest.(check string)
     "tool_deep_review env var"
     "MASC_OAS_BRIDGE_TIMEOUT_TOOL_DEEP_REVIEW_SEC"
-    (Cfg.per_caller_env_var ~caller:"tool_deep_review");
+    (Cfg.per_caller_env_var ~caller:Cfg.Tool_deep_review);
   Alcotest.(check string)
     "global env var"
     "MASC_OAS_BRIDGE_TIMEOUT_DEFAULT_SEC"

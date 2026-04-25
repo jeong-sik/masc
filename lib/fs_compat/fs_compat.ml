@@ -174,9 +174,19 @@ let fsync_path path =
            is still durable to the extent the underlying FS offers. *)
         ())
 
+(* #10205: SSOT for the [.atomic_*.tmp] naming used by
+   [save_file_atomic] (writer) and [is_atomic_orphan_name]
+   (reader, via the boot-time sweep in [cleanup_atomic_orphans]).
+   Without these constants the writer at line ~180 and the
+   reader at line ~217 carried duplicate string literals that
+   had to agree by hand.  See instructions/software-development.md
+   anti-pattern #1 (hardcoded scatter). *)
+let atomic_tmp_prefix = ".atomic_"
+let atomic_tmp_suffix = ".tmp"
+
 let save_file_atomic (path : string) (content : string) : (unit, string) result =
   let dir = Filename.dirname path in
-  let tmp = Filename.temp_file ~temp_dir:dir ".atomic_" ".tmp" in
+  let tmp = Filename.temp_file ~temp_dir:dir atomic_tmp_prefix atomic_tmp_suffix in
   try
     save_file tmp content;
     fsync_path tmp;
@@ -211,13 +221,12 @@ let save_file_atomic (path : string) (content : string) : (unit, string) result 
    - [preserved]: number of non-zero orphans moved to the
      recovered directory. *)
 let is_atomic_orphan_name name =
-  let prefix = ".atomic_" and suffix = ".tmp" in
   let n = String.length name in
-  let p = String.length prefix in
-  let s = String.length suffix in
+  let p = String.length atomic_tmp_prefix in
+  let s = String.length atomic_tmp_suffix in
   n >= p + s
-  && String.sub name 0 p = prefix
-  && String.sub name (n - s) s = suffix
+  && String.sub name 0 p = atomic_tmp_prefix
+  && String.sub name (n - s) s = atomic_tmp_suffix
 
 let cleanup_atomic_orphans
     ~(base_path : string)
@@ -226,10 +235,15 @@ let cleanup_atomic_orphans
   let recovered_dir = Filename.concat base_path recovered_subdir in
   let deleted = ref 0 in
   let preserved = ref 0 in
+  (* #10205 finding 3: reuse the existing recursive-idempotent
+     [mkdir_p_unix] in the same module instead of an inline
+     [Sys.file_exists + Unix.mkdir] reinvention.  Behaviour is
+     identical for the leaf case here (recovered_dir lives
+     directly under base_path) but stays correct if a future
+     caller passes a deeper [recovered_subdir]. *)
   let ensure_recovered_dir () =
-    if not (Sys.file_exists recovered_dir) then
-      try Unix.mkdir recovered_dir 0o755
-      with Unix.Unix_error _ -> ()
+    try mkdir_p_unix recovered_dir
+    with Unix.Unix_error _ -> ()
   in
   let handle_file dir name =
     let path = Filename.concat dir name in
@@ -247,30 +261,38 @@ let cleanup_atomic_orphans
         (try Sys.rename path target; incr preserved
          with Sys_error _ | Unix.Unix_error _ -> ())
   in
-  let scan_dir dir =
-    match Sys.readdir dir with
-    | exception Sys_error _ -> ()
-    | entries ->
-        Array.iter
-          (fun name ->
-            if is_atomic_orphan_name name then handle_file dir name)
-          entries
+  let scan_orphans_in dir entries =
+    Array.iter
+      (fun name ->
+        if is_atomic_orphan_name name then handle_file dir name)
+      entries
   in
-  scan_dir base_path;
-  (match Sys.readdir base_path with
-   | exception Sys_error _ -> ()
-   | entries ->
-       Array.iter
-         (fun name ->
-           if name = recovered_subdir then ()
-           else
-             let sub = Filename.concat base_path name in
-             match Unix.stat sub with
-             | exception Unix.Unix_error _ -> ()
-             | stat when stat.Unix.st_kind = Unix.S_DIR -> scan_dir sub
-             | _ -> ())
-         entries);
-  (!deleted, !preserved)
+  let read_subdir name =
+    match Sys.readdir name with
+    | exception Sys_error _ -> [||]
+    | entries -> entries
+  in
+  (* #10205 finding 4: read [base_path] once and feed both the
+     orphan-scan pass and the subdirectory-recursion pass.
+     Pre-fix, [scan_dir base_path] called [Sys.readdir base_path]
+     and the recursion loop called it again — two enumerations
+     of the same directory on every boot. *)
+  match Sys.readdir base_path with
+  | exception Sys_error _ -> (!deleted, !preserved)
+  | base_entries ->
+      scan_orphans_in base_path base_entries;
+      Array.iter
+        (fun name ->
+          if name = recovered_subdir then ()
+          else
+            let sub = Filename.concat base_path name in
+            match Unix.stat sub with
+            | exception Unix.Unix_error _ -> ()
+            | stat when stat.Unix.st_kind = Unix.S_DIR ->
+                scan_orphans_in sub (read_subdir sub)
+            | _ -> ())
+        base_entries;
+      (!deleted, !preserved)
 
 (** Append string to file.
     Eio-native when available, fallback to Unix.

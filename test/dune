@@ -664,6 +664,7 @@
         test_personality_field_diff_10269
         test_toml_skip_dedup_10259
         test_discovery_history_models_10404
+        test_masc_log_utc_filename_10392
         test_keeper_task_dispatch
         test_keeper_tag_dispatch
         test_autoresearch_knowledge
@@ -847,6 +848,7 @@
         test_personality_field_diff_10269
         test_toml_skip_dedup_10259
         test_discovery_history_models_10404
+        test_masc_log_utc_filename_10392
         test_keeper_task_dispatch
         test_keeper_tag_dispatch
         test_autoresearch_knowledge

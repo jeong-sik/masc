@@ -1049,13 +1049,9 @@ let dashboard_shell_payload_json ?(light = false) (config : Coord.config) : Yojs
 let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Coord.config) :
     Yojson.Safe.t =
   let contains_substring haystack needle =
-    let haystack_len = String.length haystack in
-    let needle_len = String.length needle in
-    let rec loop idx =
-      idx + needle_len <= haystack_len
-      && (String.sub haystack idx needle_len = needle || loop (idx + 1))
-    in
-    needle_len > 0 && loop 0
+    (* Empty-needle returns false here, unlike String_util.contains_substring's
+       Re.execp-compatible empty=true. Guard preserves the original contract. *)
+    String.length needle > 0 && String_util.contains_substring haystack needle
   in
   let dashboard_auth_error_code = function
     | Types.InvalidToken _ -> Some "invalid_token"

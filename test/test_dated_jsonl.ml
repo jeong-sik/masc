@@ -107,6 +107,16 @@ let test_load_tail_lines_keeps_first_data_after_blank_prefix () =
   let lines = Dated_jsonl.load_tail_lines path ~max_lines:5 in
   check (list string) "keeps first data row after blank partial prefix" expected lines
 
+let test_load_tail_lines_keeps_first_when_full_file_spans_chunks () =
+  let dir = tmpdir "dated_jsonl_full_file_tail" in
+  let path = Filename.concat dir "tail.jsonl" in
+  let first = Printf.sprintf "{\"payload\":\"%s\"}" (String.make 9000 'a') in
+  let rest = List.init 2 (fun i -> Printf.sprintf "{\"i\":%d}" (i + 1)) in
+  let expected = first :: rest in
+  Fs_compat.append_file path (String.concat "\n" expected ^ "\n");
+  let lines = Dated_jsonl.load_tail_lines path ~max_lines:10 in
+  check (list string) "keeps first row when full file spans chunks" expected lines
+
 (* ── read_recent_lines returns raw strings ─────────────── *)
 
 let test_read_recent_lines () =
@@ -245,6 +255,8 @@ let () =
           test_case "drops partial chunk prefix" `Quick test_load_tail_lines_drops_partial_chunk_prefix;
           test_case "keeps first data row after blank partial prefix" `Quick
             test_load_tail_lines_keeps_first_data_after_blank_prefix;
+          test_case "keeps first row when full file spans chunks" `Quick
+            test_load_tail_lines_keeps_first_when_full_file_spans_chunks;
         ] );
       ( "read_recent_lines",
         [

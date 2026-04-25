@@ -52,6 +52,7 @@
    cascade_strategy
    cascade_strategy_trace
    cascade_throttle
+   cascade_trust_persist
    cancellation
    context_overflow_action_tracker
    gate_keeper_backend

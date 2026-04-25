@@ -54,6 +54,7 @@
         test_keeper_hooks_oas_provider
         test_keeper_hooks_oas_pricing
         test_keeper_hooks_oas_telemetry
+        test_agent_stress
         test_keeper_tool_use_failure_counter
         test_keeper_compaction_outcome_counter
         test_keeper_usage_trust_counter
@@ -62,6 +63,7 @@
         test_hebbian_edge_update_counter
         test_keeper_proactive_skip_counter
         test_oas_error_kind_counter
+        test_board_author_identity_10297
         test_fsm_drift_counter
         test_process_timeout_counter
         test_git_fetch_timeout_9587
@@ -193,6 +195,7 @@
           test_keeper_hooks_oas_provider
           test_keeper_hooks_oas_pricing
           test_keeper_hooks_oas_telemetry
+          test_agent_stress
           test_keeper_tool_use_failure_counter
           test_keeper_compaction_outcome_counter
           test_keeper_usage_trust_counter
@@ -201,6 +204,7 @@
           test_hebbian_edge_update_counter
           test_keeper_proactive_skip_counter
           test_oas_error_kind_counter
+          test_board_author_identity_10297
           test_fsm_drift_counter
           test_process_timeout_counter
           test_git_fetch_timeout_9587
@@ -366,6 +370,11 @@
  (libraries masc_test_deps))
 
 (test
+ (name test_auth_rotate_shared_tokens_10304)
+ (modules test_auth_rotate_shared_tokens_10304)
+ (libraries masc_test_deps))
+
+(test
  (name test_keeper_semaphore_wait_counter)
  (modules test_keeper_semaphore_wait_counter)
  (libraries masc_test_deps))
@@ -416,6 +425,15 @@
  (action
   (setenv MASC_BASE_PATH /tmp/test-personality-text-equal
    (setenv MASC_BASE_PATH_INPUT /tmp/test-personality-text-equal
+    (run %{test}))))
+ (libraries masc_test_deps))
+
+(test
+ (name test_personality_diff_summary_10269)
+ (modules test_personality_diff_summary_10269)
+ (action
+  (setenv MASC_BASE_PATH /tmp/test-personality-diff-summary-10269
+   (setenv MASC_BASE_PATH_INPUT /tmp/test-personality-diff-summary-10269
     (run %{test}))))
  (libraries masc_test_deps))
 
@@ -602,6 +620,7 @@
         test_keeper_tool_exposure
         test_keeper_runtime_denylist
         test_keeper_runtime_config_ssot
+        test_dashboard_render_timing_9766
         test_keeper_task_dispatch
         test_keeper_tag_dispatch
         test_autoresearch_knowledge
@@ -695,6 +714,7 @@
         test_eval_calibration
         test_goal_janitor
         test_goal_tools
+        test_goal_upsert_fsm_bypass_10247
         test_goal_store
         test_goal_verification
         test_string_util
@@ -778,6 +798,7 @@
         test_keeper_tool_exposure
         test_keeper_runtime_denylist
         test_keeper_runtime_config_ssot
+        test_dashboard_render_timing_9766
         test_keeper_task_dispatch
         test_keeper_tag_dispatch
         test_autoresearch_knowledge
@@ -871,6 +892,7 @@
         test_eval_calibration
         test_goal_janitor
         test_goal_tools
+        test_goal_upsert_fsm_bypass_10247
         test_goal_store
         test_goal_verification
         test_string_util
@@ -979,6 +1001,11 @@
 (test
  (name test_cascade_strategy)
  (modules test_cascade_strategy)
+ (libraries masc_test_deps))
+
+(test
+ (name test_cascade_trust_persist)
+ (modules test_cascade_trust_persist)
  (libraries masc_test_deps))
 
 (test

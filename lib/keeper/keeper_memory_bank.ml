@@ -100,23 +100,34 @@ let dedup_memory_candidates
     in
     go [] exact
 
+(* Punctuation strip used by the dedup key — fully static, hoist to
+   module level so the DFA is built once per process. *)
+let normalize_punct_re =
+  Re.Pcre.re {re|[ \t\n\r!"#$%&'()*+,\-./:;<=>?@\[\]^_`{|}~]+|re} |> Re.compile
+
 let normalize_memory_text_key (s : string) : string =
   s
   |> String.trim
   |> String.lowercase_ascii
-  |> Re.replace_string (Re.Pcre.re {re|[ \t\n\r!"#$%&'()*+,\-./:;<=>?@\[\]^_`{|}~]+|re} |> Re.compile) ~by:""
+  |> Re.replace_string normalize_punct_re ~by:""
 
-let consensus_re () =
-  let default = Re.Pcre.re {|\d{6,}ep\+?|} |> Re.compile in
+(* Consensus marker: env var is process-lifetime constant, so build the
+   compiled regex once and cache it.  Stdlib.Lazy is safe here: the thunk
+   is a pure regex compile (no effects, no I/O) and produces an
+   identical value on any racing force, so the OCaml 5 multi-domain
+   "double force" concern collapses to redundant computation. *)
+let consensus_default_re = Re.Pcre.re {|\d{6,}ep\+?|} |> Re.compile
+
+let consensus_re_cached = lazy (
   match Sys.getenv_opt "MASC_KEEPER_MEMORY_CONSENSUS_PATTERN" with
-  | None -> default
+  | None -> consensus_default_re
   | Some raw ->
       let pat = String.trim raw in
-      if pat = "" then default
-      else Re.Pcre.re pat |> Re.compile
+      if pat = "" then consensus_default_re
+      else Re.Pcre.re pat |> Re.compile)
 
 let has_inflated_consensus_marker (s : string) : bool =
-  Re.execp (consensus_re ()) s
+  Re.execp (Lazy.force consensus_re_cached) s
 
 let memory_placeholders () =
   let base =

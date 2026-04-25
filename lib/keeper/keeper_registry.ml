@@ -1095,6 +1095,15 @@ let rec dispatch_event_with_audit
 let dispatch_event ~base_path name event =
   dispatch_event_with_audit ~base_path name event
 
+let prepare_fiber_launch ~base_path name =
+  (match get ~base_path name with
+   | Some entry ->
+       Atomic.set entry.fiber_stop false;
+       Atomic.set entry.fiber_wakeup false;
+       Atomic.set entry.waiting_for_inference false
+   | None -> ());
+  dispatch_event ~base_path name Keeper_state_machine.Fiber_started
+
 let get_phase ~base_path name =
   match get ~base_path name with
   | Some entry -> Some entry.phase

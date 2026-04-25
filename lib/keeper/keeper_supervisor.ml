@@ -120,8 +120,7 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
   let base_path = ctx.config.base_path in
   let keepers_dir =
     Filename.concat (Coord.masc_root_dir ctx.config) "keepers" in
-  (match Keeper_registry.dispatch_event ~base_path meta.name
-           Keeper_state_machine.Fiber_started with
+  (match Keeper_registry.prepare_fiber_launch ~base_path meta.name with
    | Ok _ -> ()
    | Error err ->
        Log.Keeper.warn

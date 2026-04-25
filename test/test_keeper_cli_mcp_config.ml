@@ -23,11 +23,21 @@ let test_feature_flag_env_name () =
     "MASC_AUTO_CONSTRUCT_CLAUDE_MCP" K.feature_flag_env
 
 let test_try_construct_disabled_by_default () =
-  (* No env set, no token file: should return None regardless. *)
+  (* Flag default flipped to true (#10059 validation): explicit "false"
+     disables auto-construct and returns None even when token file would
+     have been resolvable. *)
+  Unix.putenv K.feature_flag_env "false";
+  let base = Filename.get_temp_dir_name () in
+  let out = K.try_construct_for_keeper ~base_path:base ~agent_name:"nobody" in
+  check (option string) "explicit-false flag returns None" None out
+
+let test_try_construct_default_true_no_token () =
+  (* Flag default true: still returns None when no token file exists for
+     the keeper, so auto-construct fails closed without a credential. *)
   Unix.putenv K.feature_flag_env "";
   let base = Filename.get_temp_dir_name () in
   let out = K.try_construct_for_keeper ~base_path:base ~agent_name:"nobody" in
-  check (option string) "disabled flag returns None" None out
+  check (option string) "missing token returns None" None out
 
 let () =
   run "keeper_cli_mcp_config" [
@@ -37,6 +47,8 @@ let () =
     ];
     "flag", [
       test_case "env key stable" `Quick test_feature_flag_env_name;
-      test_case "disabled → None" `Quick test_try_construct_disabled_by_default;
+      test_case "explicit false → None" `Quick test_try_construct_disabled_by_default;
+      test_case "default true + no token → None" `Quick
+        test_try_construct_default_true_no_token;
     ]
   ]

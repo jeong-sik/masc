@@ -8,13 +8,19 @@
    registry". See #10049 for the full root-cause analysis and the
    codex_cli sibling path in [server_runtime_bootstrap.sync_codex_mcp_config].
 
-   Gated behind [MASC_AUTO_CONSTRUCT_CLAUDE_MCP] (default false) so the
-   existing explicit-env path stays unchanged until operators opt in. *)
+   Gated behind [MASC_AUTO_CONSTRUCT_CLAUDE_MCP] (default true since
+   #10059 validation; the legacy explicit-env path still wins when
+   [OAS_CLAUDE_MCP_CONFIG] is set, and operators can opt out with
+   [MASC_AUTO_CONSTRUCT_CLAUDE_MCP=false]). *)
 
 let feature_flag_env = "MASC_AUTO_CONSTRUCT_CLAUDE_MCP"
 
+(* Default true: PR #10059 validated the auto-construct path under flag-gated
+   rollout; running without it leaves CLI keeper subprocesses with empty
+   mcpServers, which breaks every keeper_* tool call. Operators can still
+   opt out with [MASC_AUTO_CONSTRUCT_CLAUDE_MCP=false]. *)
 let feature_enabled () =
-  Env_config_core.get_bool ~default:false feature_flag_env
+  Env_config_core.get_bool ~default:true feature_flag_env
 
 let build_json ~url ~bearer_token =
   let json =

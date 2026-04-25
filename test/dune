@@ -65,6 +65,7 @@
         test_fsm_drift_counter
         test_process_timeout_counter
         test_git_fetch_timeout_9587
+        test_auth_ambiguous_lookup_9786
         test_keeper_wake_telemetry
         test_keeper_memory
         test_keeper_accountability
@@ -203,6 +204,7 @@
           test_fsm_drift_counter
           test_process_timeout_counter
           test_git_fetch_timeout_9587
+          test_auth_ambiguous_lookup_9786
           test_keeper_wake_telemetry
           test_keeper_memory
           test_keeper_accountability

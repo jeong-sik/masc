@@ -60,26 +60,38 @@ let with_cache_state preview cache_state =
   | `Assoc fields -> `Assoc (assoc_upsert fields "cache_state" (`String cache_state))
   | _ -> preview
 
+(* Static replacement table — both the entity needles and the
+   compiled regexes are fixed.  Old form rebuilt 7 [Re.t] DFAs per
+   [decode_html_entities] call; on a meta-rich page [normalize_text]
+   fires per [meta_content]/[link_href] hit, so a typical preview
+   parse paid dozens of unnecessary compilations. *)
+let html_entity_replacements =
+  [
+    ("&amp;", "&");
+    ("&quot;", "\"");
+    ("&#39;", "'");
+    ("&apos;", "'");
+    ("&lt;", "<");
+    ("&gt;", ">");
+    ("&nbsp;", " ");
+  ]
+  |> List.map (fun (needle, replacement) ->
+       (Re.compile (Re.str needle), replacement))
+
 let decode_html_entities value =
-  let replacements =
-    [
-      ("&amp;", "&");
-      ("&quot;", "\"");
-      ("&#39;", "'");
-      ("&apos;", "'");
-      ("&lt;", "<");
-      ("&gt;", ">");
-      ("&nbsp;", " ");
-    ]
-  in
   List.fold_left
-    (fun acc (needle, replacement) ->
-      Re.replace_string (Re.compile (Re.str needle)) ~all:true ~by:replacement acc)
-    value replacements
+    (fun acc (re, replacement) ->
+      Re.replace_string re ~all:true ~by:replacement acc)
+    value html_entity_replacements
+
+(* Static whitespace-collapse PCRE, hoisted out of the per-call hot
+   path that runs once per normalised meta value. *)
+let whitespace_collapse_re =
+  Re.Pcre.re "[ \t\r\n]+" |> Re.compile
 
 let collapse_whitespace value =
   value
-  |> Re.replace_string (Re.Pcre.re "[ \t\r\n]+" |> Re.compile) ~all:true ~by:" "
+  |> Re.replace_string whitespace_collapse_re ~all:true ~by:" "
   |> String.trim
 
 let normalize_text value =
@@ -178,16 +190,16 @@ let infer_image_url url =
   let lower = String.lowercase_ascii url in
   List.exists (fun ext -> Filename.check_suffix lower ext) image_extensions
 
+(* Static [<head>...</head>] extractor — every link-preview parse hit
+   the per-call [Re.compile] before this hoist. *)
+let head_fragment_re =
+  Re.Pcre.re ~flags:[ `CASELESS; `DOTALL ] "<head[^>]*>(.*?)</head>"
+  |> Re.compile
+
 let first_head_fragment body =
-  let re =
-    Re.Pcre.re ~flags:[ `CASELESS; `DOTALL ] "<head[^>]*>(.*?)</head>"
-    |> Re.compile
-  in
-  match Re.exec_opt re body with
-  | Some groups ->
-      Re.Group.get groups 1
-  | None ->
-      String.sub body 0 (min (String.length body) max_html_chars)
+  match Re.exec_opt head_fragment_re body with
+  | Some groups -> Re.Group.get groups 1
+  | None -> String.sub body 0 (min (String.length body) max_html_chars)
 
 let first_match body pattern =
   let re =

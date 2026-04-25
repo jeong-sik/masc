@@ -33,7 +33,23 @@ val fsm_drift_metric : string
 
 val record_fsm_drift : variant:string -> force:bool -> unit
 (** Increment {!fsm_drift_metric} with the supplied labels.
-    Wired to {!Coord_hooks.fsm_drift_observer_fn} at module load
-    so [Coord_task.transition] signals every detected drift
-    through this path without [masc_coord] needing a direct
-    [Prometheus] dependency. *)
+    Kept for tests and direct callers that don't carry agent
+    attribution.  Production drift events flow through
+    {!record_fsm_drift_with_agent} via
+    {!Coord_hooks.fsm_drift_observer_fn}. *)
+
+val fsm_drift_per_agent_metric : string
+(** Per-agent variant of {!fsm_drift_metric}. Labels:
+    [("variant", _); ("agent_name", _); ("force", "true" | "false")].
+    Cardinality is bounded by fleet size (~10 keepers in masc-mcp),
+    so the per-agent breakout is safe for Prometheus. *)
+
+val record_fsm_drift_with_agent :
+  variant:string -> force:bool -> agent_name:string -> unit
+(** Emit BOTH the variant-only {!fsm_drift_metric} and the
+    per-agent {!fsm_drift_per_agent_metric}.  Wired to
+    {!Coord_hooks.fsm_drift_observer_fn} at module load so every
+    drift detected by [Coord_task.transition] surfaces with agent
+    attribution.  This lets ratchet readiness ("which keepers are
+    skipping Start?") be answered from Prometheus without
+    log-scraping the WARN line. *)

@@ -199,7 +199,23 @@ let record_fsm_drift ~variant ~force =
               ("force", if force then "true" else "false") ]
     ()
 
-let () = Atomic.set Coord_hooks.fsm_drift_observer_fn record_fsm_drift
+(* #9795 follow-up: per-agent breakout so operators can identify
+   which keepers most often skip [in_progress] before [done].
+   Cardinality is bounded by fleet size (~10 keepers in masc-mcp),
+   keeping the additional series count safe for Prometheus.  Emit
+   the variant-only counter alongside so existing dashboards keep
+   working — the new metric is purely additive. *)
+let fsm_drift_per_agent_metric = "masc_task_fsm_drift_per_agent_total"
+
+let record_fsm_drift_with_agent ~variant ~force ~agent_name =
+  record_fsm_drift ~variant ~force;
+  Prometheus.inc_counter fsm_drift_per_agent_metric
+    ~labels:[ ("variant", variant);
+              ("agent_name", agent_name);
+              ("force", if force then "true" else "false") ]
+    ()
+
+let () = Atomic.set Coord_hooks.fsm_drift_observer_fn record_fsm_drift_with_agent
 
 (* Activity graph emit — wraps Activity_graph for room sub-modules *)
 let () = Atomic.set Coord_hooks.activity_emit_fn (fun config ~actor ?subject ~kind ~payload ~tags () ->

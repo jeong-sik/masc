@@ -186,6 +186,40 @@ let record_turn_latency_bucket
        — investigate cascade exhaustion / oas_timeout_budget (#9933, #9943)"
       keeper latency_ms threshold bucket
 
+let label_or_unknown raw =
+  let trimmed = String.trim raw in
+  if trimmed = "" then "unknown" else trimmed
+
+let provider_kind_of_model_used raw =
+  let model_used = label_or_unknown raw in
+  match String.index_opt model_used ':' with
+  | Some idx when idx > 0 -> String.sub model_used 0 idx
+  | _ -> "unknown"
+
+let record_turn_latency_by_model_bucket
+    ~(keeper : string)
+    ~(channel : string)
+    ~(model_used : string)
+    ~(resolved_model_id : string)
+    ~(cascade_profile : string)
+    ~(latency_ms : int) : unit =
+  let bucket = turn_latency_bucket latency_ms in
+  let model_used = label_or_unknown model_used in
+  let resolved_model_id = label_or_unknown resolved_model_id in
+  let cascade_profile = label_or_unknown cascade_profile in
+  Prometheus.inc_counter
+    Prometheus.metric_keeper_turn_latency_by_model_bucket
+    ~labels:
+      [ ("keeper", label_or_unknown keeper)
+      ; ("channel", label_or_unknown channel)
+      ; ("provider_kind", provider_kind_of_model_used model_used)
+      ; ("model_used", model_used)
+      ; ("resolved_model_id", resolved_model_id)
+      ; ("cascade_profile", cascade_profile)
+      ; ("bucket", bucket)
+      ]
+    ()
+
 
 let usage_trust_is_trusted = Keeper_usage_trust.is_trusted
 
@@ -1183,6 +1217,21 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
      overridable).  Emitted once per snapshot write so the
      counter rate matches the JSONL row rate. *)
   record_turn_latency_bucket ~keeper:meta.name ~latency_ms;
+  let cascade_profile =
+    match result.cascade_observation with
+    | Some observation -> observation.Oas_worker.cascade_name
+    | None -> meta.cascade_name
+  in
+  (* #9933: same latency bucket, split by provider/model/cascade.
+     This keeps the existing keeper-only counter stable while making
+     timeout-budget burn attributable to a concrete model surface. *)
+  record_turn_latency_by_model_bucket
+    ~keeper:meta.name
+    ~channel
+    ~model_used:surface_model_used
+    ~resolved_model_id
+    ~cascade_profile
+    ~latency_ms;
   let snapshot =
     `Assoc
       [

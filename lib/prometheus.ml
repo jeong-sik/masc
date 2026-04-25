@@ -242,6 +242,16 @@ let metric_keeper_turn_livelock_blocks =
 let metric_keeper_turn_latency_bucket =
   "masc_keeper_turn_latency_bucket_total"
 
+(* #9933 follow-up: per-turn latency buckets split by the effective
+   provider/model/cascade surface.  [metric_keeper_turn_latency_bucket]
+   tells operators which keeper is slow; this counter answers the next
+   operational question: which provider/cascade/profile is burning the
+   timeout budget.  Labels are bounded by fleet size, configured model
+   labels, configured cascades, channel vocabulary, and the five bucket
+   names from [Keeper_unified_metrics.turn_latency_bucket]. *)
+let metric_keeper_turn_latency_by_model_bucket =
+  "masc_keeper_turn_latency_by_model_bucket_total"
+
 (* #10125: keeper supervisor sweep observability.
 
    The supervisor sweep is a Pulse loop that recovers crashed
@@ -604,6 +614,12 @@ let init () =
      [under_60s | 60-300s | 300-600s | 600-1200s | over_1200s]. *)
   add metric_keeper_turn_latency_bucket
     "Total keeper turn completions, bucketed by latency (labels: keeper, \
+     bucket=under_60s|60-300s|300-600s|600-1200s|over_1200s)"
+    Counter;
+  add metric_keeper_turn_latency_by_model_bucket
+    "Total keeper turn completions, bucketed by latency and effective \
+     model surface (labels: keeper, channel, provider_kind, model_used, \
+     resolved_model_id, cascade_profile, \
      bucket=under_60s|60-300s|300-600s|600-1200s|over_1200s)"
     Counter;
   (* #10125: supervisor sweep liveness.  Counter increments on

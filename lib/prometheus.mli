@@ -94,6 +94,12 @@ val metric_keeper_turn_latency_bucket : string
     [keeper, bucket].  Bucket vocabulary:
     [under_60s | 60-300s | 300-600s | 600-1200s | over_1200s]. *)
 
+val metric_keeper_turn_latency_by_model_bucket : string
+(** #9933: per-keeper turn latency distribution split by effective
+    model/cascade surface.  Labels:
+    [keeper, channel, provider_kind, model_used, resolved_model_id,
+    cascade_profile, bucket]. *)
+
 (** #10125: supervisor sweep liveness counters.  See {!Prometheus.ml}
     for the rationale.  Counter increments on each Pulse start;
     gauge advances on every successful beat. *)

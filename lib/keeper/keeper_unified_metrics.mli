@@ -113,6 +113,20 @@ val long_turn_warn_threshold_ms : unit -> int
 val record_turn_latency_bucket :
   keeper:string -> latency_ms:int -> unit
 
+val provider_kind_of_model_used : string -> string
+(** Derive the bounded provider label from a keeper [model_used]
+    surface such as [claude_code:auto] or [kimi_cli:kimi-for-coding].
+    Empty or unprefixed values collapse to [unknown]. *)
+
+val record_turn_latency_by_model_bucket :
+  keeper:string ->
+  channel:string ->
+  model_used:string ->
+  resolved_model_id:string ->
+  cascade_profile:string ->
+  latency_ms:int ->
+  unit
+
 
 val update_metrics_from_result :
   Keeper_types.keeper_meta ->

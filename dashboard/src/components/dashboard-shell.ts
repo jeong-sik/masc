@@ -133,7 +133,7 @@ export function ErrorCounterBadge() {
         aria-expanded=${open}
         aria-haspopup="true"
       >
-        <${Bell} size=${14} />
+        <${Bell} size=${14} aria-hidden="true" />
         ${count > 0 ? html`
           <span class="inline-flex items-center justify-center min-w-4 h-4 px-1 rounded-full bg-[var(--bad)] text-2xs font-semibold text-white tabular-nums">${count > 99 ? '99+' : count}</span>
         ` : null}

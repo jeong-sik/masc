@@ -49,7 +49,7 @@ export function ErrorPanel({ onClose }: ErrorPanelProps) {
         <div class="flex items-center justify-between px-3 py-2 border-b border-[var(--white-5)]">
           <span class="text-xs font-medium text-[var(--text-muted)]">에러 없음</span>
           <button type="button" class="text-[var(--text-muted)] hover:text-[var(--text-body)] cursor-pointer p-0.5" onClick=${onClose} aria-label="닫기">
-            <${X} size=${14} />
+            <${X} size=${14} aria-hidden="true" />
           </button>
         </div>
         <div class="flex items-center justify-center py-6 text-xs text-[var(--text-muted)]">
@@ -69,7 +69,7 @@ export function ErrorPanel({ onClose }: ErrorPanelProps) {
             onClick=${() => { clearAllErrors(); onClose() }}
           >모두 확인</button>
           <button type="button" class="text-[var(--text-muted)] hover:text-[var(--text-body)] cursor-pointer p-0.5" onClick=${onClose} aria-label="닫기">
-            <${X} size=${14} />
+            <${X} size=${14} aria-hidden="true" />
           </button>
         </div>
       </div>

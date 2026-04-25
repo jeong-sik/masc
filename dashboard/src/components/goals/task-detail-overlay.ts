@@ -96,7 +96,7 @@ function TaskEventsSection() {
         const key = evt.ts ? `${evt.ts}-${i}` : `${evt.label}-${i}`
         return html`
           <div key=${key} class="flex items-start gap-3 py-2 px-3 rounded hover:bg-[var(--white-3)] transition-colors">
-            <div class="size-7 shrink-0 rounded bg-[var(--white-5)] border border-[var(--white-8)] flex items-center justify-center text-2xs font-mono font-bold ${color}">
+            <div class="size-7 shrink-0 rounded bg-[var(--white-5)] border border-[var(--white-8)] flex items-center justify-center text-2xs font-mono font-bold ${color}" aria-hidden="true">
               ${icon}
             </div>
             <div class="flex-1 min-w-0">

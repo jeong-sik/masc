@@ -475,7 +475,7 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
                   title="초기화"
                   aria-label=${`${row.name} 초기화`}
                 >
-                  <${RotateCcw} size=${12} />
+                  <${RotateCcw} size=${12} aria-hidden="true" />
                 </button>
               </td>
             </tr>

@@ -207,7 +207,7 @@ export function ResolvedPreview({ tools, catMap }: { tools: string[]; catMap: Ma
     return html`
       <div class="flex flex-col gap-1">
         <span class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">resolved allowlist (0)</span>
-        <span class="text-2xs text-[var(--text-muted)] italic">resolved allowlist 없음</span>
+        <span class="text-2xs text-[var(--text-muted)] italic" role="status">resolved allowlist 없음</span>
       </div>
     `
   }
@@ -234,7 +234,7 @@ export function ResolvedPreview({ tools, catMap }: { tools: string[]; catMap: Ma
         />
       </div>
       ${isFiltering && visibleTools.length === 0
-        ? html`<div class="py-3 text-center text-2xs text-[var(--text-muted)]">필터 결과 없음 (${tools.length}개 도구)</div>`
+        ? html`<div class="py-3 text-center text-2xs text-[var(--text-muted)]" role="status">필터 결과 없음 (${tools.length}개 도구)</div>`
         : html`
           <div class="flex flex-col gap-2">
             ${visibleGroups.map(group => {

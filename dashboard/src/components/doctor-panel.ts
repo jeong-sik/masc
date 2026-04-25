@@ -184,7 +184,7 @@ function chipClassForSidecarSeverity(severity: string): string {
 
 function SidecarChecksList({ checks }: { checks: SidecarCheckView[] }) {
   if (checks.length === 0) {
-    return html`<div class="text-xs text-[var(--text-muted)]">세부 검사 없음.</div>`
+    return html`<div class="text-xs text-[var(--text-muted)]" role="status">세부 검사 없음.</div>`
   }
   return html`
     <ul class="mt-3 space-y-2" aria-label="진단 검사 목록">
@@ -228,7 +228,7 @@ function SidecarChecksList({ checks }: { checks: SidecarCheckView[] }) {
 function ConfigNotesList({ notes }: { notes: ConfigNotesView }) {
   const { warnings, next_actions } = notes
   if (warnings.length === 0 && next_actions.length === 0) {
-    return html`<div class="text-xs text-[var(--text-muted)]">추가 메모 없음.</div>`
+    return html`<div class="text-xs text-[var(--text-muted)]" role="status">추가 메모 없음.</div>`
   }
   return html`
     <div class="mt-3 space-y-3">

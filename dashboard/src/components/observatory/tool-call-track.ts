@@ -110,7 +110,7 @@ export function ToolCallTrack({ events, windowStart, windowEnd }: Props) {
         onMouseLeave=${clearCursor}
       >
         ${markers.length === 0
-          ? html`<div class="absolute inset-0 flex items-center justify-center text-3xs text-text-dim">이 시간 범위에 도구 호출 없음</div>`
+          ? html`<div class="absolute inset-0 flex items-center justify-center text-3xs text-text-dim" role="status">이 시간 범위에 도구 호출 없음</div>`
           : markers.map(({ entry, ts, count, failureCount: bucketFailures }) => {
               const pct = ((ts - windowStart) / span) * 100
               const outcome = bucketFailures > 0 ? 'failure' : toolCallOutcome(entry)

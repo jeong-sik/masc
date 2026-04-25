@@ -632,7 +632,7 @@ export function ConfigResolutionPanel({
                       `
                     : isFilteringDiagnostics && visibleDiagnostics.length === 0
                       ? html`
-                          <div class="rounded border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-3 text-center text-xs text-[var(--text-muted)]">
+                          <div class="rounded border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-3 text-center text-xs text-[var(--text-muted)]" role="status">
                             필터 결과 없음 (${runtimeResolution.diagnostics.length} diagnostics)
                           </div>
                         `

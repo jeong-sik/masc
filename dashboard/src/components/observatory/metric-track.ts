@@ -58,7 +58,7 @@ export function MetricTrack({ points, windowStart, windowEnd }: Props) {
           <div class="text-sm font-mono font-semibold ${lastRateColor}">
             ${lastRate.toFixed(1)}%
           </div>
-        ` : html`<div class="text-3xs text-text-dim">데이터 없음</div>`}
+        ` : html`<div class="text-3xs text-text-dim" role="status">데이터 없음</div>`}
         ${anomalyCount > 0 ? html`
           <div class="text-3xs font-mono text-[var(--bad-light)]">${anomalyCount} anomaly</div>
         ` : null}

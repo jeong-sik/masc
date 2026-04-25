@@ -1,6 +1,7 @@
 (** Keeper tool schemas — MCP tool definitions for keeper agents. *)
 
 open Types
+module Persona_contract = Keeper_persona_authoring_contract
 
 (** Issue #8430: canonical [tool_preset] strings. Mirrors
     [Keeper_types.valid_tool_preset_strings]. Direct dependency would
@@ -41,6 +42,13 @@ let string_array_schema =
     ("type", `String "array");
     ("items", `Assoc [ ("type", `String "string") ]);
   ]
+
+let persona_axis_schema (axis : Persona_contract.archetype_axis) =
+  `Assoc
+    [ "type", `String "string"
+    ; "enum", Persona_contract.string_list_to_json axis.choices
+    ; "description", `String axis.schema_description
+    ]
 
 let tool_access_schema description =
   let preset_shape =
@@ -127,55 +135,40 @@ let keeper_schemas : tool_schema list = [
         ]);
         ("language", `Assoc [
           ("type", `String "string");
-          ("default", `String "ko");
+          ("default", `String Persona_contract.default_generation_language);
           ("description", `String "Preferred language for generated text.");
         ]);
-        ("alignment", `Assoc [
-          ("type", `String "string");
-          ("enum", `List [
-            `String "helpful"; `String "skeptical"; `String "protective";
-            `String "chaotic"; `String "ruthless";
-          ]);
-          ("description", `String "Optional archetype axis. Influences generated role, trait, goals, and instructions. Call masc_persona_schema for per-choice effects.");
-        ]);
-        ("operating_style", `Assoc [
-          ("type", `String "string");
-          ("enum", `List [
-            `String "research"; `String "coding"; `String "dispatch";
-            `String "social"; `String "delivery";
-          ]);
-          ("description", `String "Optional archetype axis. If tool_preset is omitted, this also selects the default keeper.tool_preset. Call masc_persona_schema for per-choice effects.");
-        ]);
-        ("risk_posture", `Assoc [
-          ("type", `String "string");
-          ("enum", `List [
-            `String "cautious"; `String "balanced"; `String "high-autonomy";
-          ]);
-          ("description", `String "Optional archetype axis. Influences generated autonomy and safety language while save still validates concrete fields. Call masc_persona_schema for per-choice effects.");
-        ]);
+        ("alignment", persona_axis_schema Persona_contract.alignment_axis);
+        ("operating_style", persona_axis_schema Persona_contract.operating_style_axis);
+        ("risk_posture", persona_axis_schema Persona_contract.risk_posture_axis);
         ("tool_preset", `Assoc [
           ("type", `String "string");
-          ("default", `String "research");
+          ("default", `String Persona_contract.default_tool_preset);
           ("enum", `List (List.map (fun s -> `String s) tool_preset_enum_strings));
-          ("description", `String "Default keeper.tool_preset for the draft. When omitted, operating_style is used if present, otherwise research.");
+          ( "description"
+          , `String
+              (Printf.sprintf
+                 "Default keeper.tool_preset for the draft. When omitted, \
+                  operating_style is used if present, otherwise %s."
+                 Persona_contract.default_tool_preset) );
         ]);
         ("proactive_enabled", `Assoc [
           ("type", `String "boolean");
-          ("default", `Bool false);
+          ("default", `Bool Persona_contract.default_proactive_enabled);
           ("description", `String "Default keeper.proactive_enabled for the draft.");
         ]);
         ("cascade_name", `Assoc [
           ("type", `String "string");
-          ("default", `String "operator_judge");
+          ("default", `String Persona_contract.default_generation_cascade_name);
           ("description", `String "Named cascade used to draft the persona.");
         ]);
         ("temperature", `Assoc [
           ("type", `String "number");
-          ("default", `Float 0.7);
+          ("default", `Float Persona_contract.default_temperature);
         ]);
         ("max_tokens", `Assoc [
           ("type", `String "integer");
-          ("default", `Int 2500);
+          ("default", `Int Persona_contract.default_max_tokens);
         ]);
       ]);
       ("required", `List [`String "concept"]);

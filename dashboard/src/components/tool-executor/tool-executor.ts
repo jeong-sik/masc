@@ -35,7 +35,7 @@ function ToolDetail() {
   const handleConfirmedExecute = () => { showConfirm.value = false; void executeTool() }
 
   return html`
-    <div class="flex flex-col gap-3 h-full overflow-y-auto">
+    <div class="flex flex-col gap-3 h-full overflow-y-auto custom-scrollbar">
       <div>
         <h3 class="text-base text-[var(--text-strong)] font-mono font-medium">${tool.name}</h3>
         <p class="text-xs text-[var(--text-muted)] mt-1">${tool.description}</p>

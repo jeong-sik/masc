@@ -394,7 +394,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
         </button>
       </div>
 
-      <div class="flex-1 overflow-y-auto px-2 py-1.5">
+      <div class="flex-1 overflow-y-auto custom-scrollbar px-2 py-1.5">
         <div class="flex flex-col gap-2">
           ${visibleSurfaces.map(surface => {
             const isSurfaceActive = surface.id === currentTab

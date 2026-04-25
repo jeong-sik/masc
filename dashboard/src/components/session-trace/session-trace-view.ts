@@ -183,7 +183,7 @@ export function SessionTraceView({ agentName, isKeeper, keeperStatus, keeperGene
       ${'' /* Event list */}
       <div
         ref=${listRef}
-        class="flex flex-col gap-0.5 max-h-[500px] overflow-y-auto rounded border border-[var(--card-border)] bg-[var(--white-2)]"
+        class="flex flex-col gap-0.5 max-h-[500px] overflow-y-auto custom-scrollbar rounded border border-[var(--card-border)] bg-[var(--white-2)]"
         role="log" aria-label="활동 추적"
       >
         ${events.map(evt => html`<${SessionTraceEntry} key=${evt.id} event=${evt} searchQuery=${searchQuery} />`)}

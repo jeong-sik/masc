@@ -493,7 +493,7 @@ function EntryRow({ entry }: { entry: TelemetryEntry }) {
               ${scopeBadges.map(badge => html`<span class="rounded bg-[var(--white-4)] px-2 py-1 text-3xs text-[var(--text-dim)] font-mono">${badge}</span>`)}
             </div>
           ` : null}
-          <pre class="text-3xs font-mono text-[var(--text-muted)] bg-[rgba(0,0,0,0.3)] rounded p-2 overflow-x-auto max-h-75 overflow-y-auto whitespace-pre-wrap break-all">
+          <pre class="text-3xs font-mono text-[var(--text-muted)] bg-[rgba(0,0,0,0.3)] rounded p-2 overflow-x-auto max-h-75 overflow-y-auto custom-scrollbar whitespace-pre-wrap break-all">
 ${JSON.stringify(entry, null, 2)}</pre>
         </div>
       ` : null}
@@ -557,7 +557,7 @@ function GroupRow({ item }: { item: Extract<TelemetryDisplayItem, { kind: 'group
           })}
           <details class="rounded bg-[var(--black-20)] px-2 py-1.5">
             <summary class="cursor-pointer text-3xs text-[var(--text-dim)]">Raw JSON</summary>
-            <pre class="mt-2 text-3xs font-mono text-[var(--text-muted)] overflow-x-auto max-h-70 overflow-y-auto whitespace-pre-wrap break-all">
+            <pre class="mt-2 text-3xs font-mono text-[var(--text-muted)] overflow-x-auto max-h-70 overflow-y-auto custom-scrollbar whitespace-pre-wrap break-all">
 ${JSON.stringify(item.entries, null, 2)}</pre>
           </details>
         ` : null}
@@ -877,7 +877,7 @@ export function TelemetryUnified() {
             })}
           </div>
         ` : null}
-        <div class="max-h-150 overflow-y-auto">
+        <div class="max-h-150 overflow-y-auto custom-scrollbar">
           ${displayItems.length > 0
             ? displayItems.map(item => item.kind === 'group'
               ? html`<${GroupRow} key=${item.key} item=${item} />`

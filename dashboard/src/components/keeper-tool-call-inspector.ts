@@ -170,7 +170,7 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
         />
       </div>
 
-      <div class="border border-[var(--card-border)] rounded overflow-hidden max-h-[500px] overflow-y-auto">
+      <div class="border border-[var(--card-border)] rounded overflow-hidden max-h-[500px] overflow-y-auto custom-scrollbar">
         <${SectionCap} class="flex items-center gap-2 px-3 py-1.5 bg-[var(--bg-deep)] border-b border-[var(--card-border)]">
           <span class="w-4"></span>
           <span class="w-16">Time</span>

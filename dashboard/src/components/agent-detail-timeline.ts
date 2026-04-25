@@ -183,7 +183,7 @@ export function AgentTimelineSection() {
             ${filtered.length === 0
               ? html`<${EmptyState} message="조건에 맞는 이벤트가 없습니다" compact />`
               : html`
-                  <div role="log" aria-label="활동 타임라인" class="flex flex-col gap-0.5 max-h-100 overflow-y-auto">
+                  <div role="log" aria-label="활동 타임라인" class="flex flex-col gap-0.5 max-h-100 overflow-y-auto custom-scrollbar">
                     ${filtered.map((evt: AgentTimelineEvent, idx: number) => {
                       if (evt.type === 'tool_call') {
                         return html`<${ToolCallEventRow} evt=${evt} idx=${idx} />`

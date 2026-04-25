@@ -166,7 +166,7 @@ export function AgentLiveTimeline({ name }: { name: string }) {
         </div>
       </div>
 
-      <div class="flex flex-col gap-0.5 max-h-80 overflow-y-auto" ref=${scrollRef} role="log" aria-label="이벤트 타임라인">
+      <div class="flex flex-col gap-0.5 max-h-80 overflow-y-auto custom-scrollbar" ref=${scrollRef} role="log" aria-label="이벤트 타임라인">
         ${filtered.length === 0
           ? html`<${EmptyState} message="필터에 맞는 이벤트 없음" compact />`
           : filtered.map((entry: JournalEntry, idx: number) => html`

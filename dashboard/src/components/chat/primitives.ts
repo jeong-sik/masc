@@ -324,7 +324,7 @@ export function ChatTranscript({
     <div
       role="log"
       aria-label="대화 기록"
-      class=${`chat-transcript flex min-h-75 max-h-130 flex-col overflow-y-auto border border-[var(--slate-gray-14)] shadow-[inset_0_1px_0_var(--white-3)] ${
+      class=${`chat-transcript flex min-h-75 max-h-130 flex-col overflow-y-auto custom-scrollbar border border-[var(--slate-gray-14)] shadow-[inset_0_1px_0_var(--white-3)] ${
         variant === 'messenger'
           ? 'gap-4 rounded-[26px] px-4 py-5 sm:px-5'
           : 'gap-3 rounded-[var(--radius-xl)] px-3 py-4'

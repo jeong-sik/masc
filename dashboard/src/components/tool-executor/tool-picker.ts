@@ -47,7 +47,7 @@ export function ToolPicker() {
         `)}
         <span class="text-3xs text-[var(--text-muted)] ml-auto self-center">${tools.length}개</span>
       </div>
-      <div class="flex flex-col gap-0.5 overflow-y-auto flex-1 min-h-0 pr-1">
+      <div class="flex flex-col gap-0.5 overflow-y-auto custom-scrollbar flex-1 min-h-0 pr-1">
         ${tools.length === 0
           ? html`<p class="text-xs text-[var(--text-muted)] py-4 text-center">결과 없음</p>`
           : tools.map(tool => html`<${ToolRow} key=${tool.name} tool=${tool} isSelected=${selected?.name === tool.name} />`)}

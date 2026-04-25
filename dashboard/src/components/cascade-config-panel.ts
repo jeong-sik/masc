@@ -720,6 +720,7 @@ function HealthTable({
               <th scope="col" class="text-left py-1 w-4"></th>
               <th scope="col" class="text-left py-1">Provider</th>
               <th
+                scope="col"
                 class="text-left py-1"
                 title="Operational state: active (recent events), cooldown (blocked), configured (declared but untouched)"
               >Status</th>
@@ -727,18 +728,22 @@ function HealthTable({
               <th scope="col" class="text-right py-1">Consec. fail</th>
               <th scope="col" class="text-right py-1">Events</th>
               <th
+                scope="col"
                 class="text-right py-1"
                 title="응답은 왔지만 accept 게이트에서 거부된 이벤트 수"
               >Rejected</th>
               <th
+                scope="col"
                 class="text-right py-1"
                 title="Prompt prefill throughput (entry-weighted mean across this provider's models)"
               >Prefill tok/s</th>
               <th
+                scope="col"
                 class="text-right py-1"
                 title="Decode throughput (predicted tokens / second, entry-weighted)"
               >Decode tok/s</th>
               <th
+                scope="col"
                 class="text-right py-1"
                 title="Latency p50 / p95 in milliseconds (approximation: weighted mean of per-model percentiles)"
               >Latency p50/p95</th>

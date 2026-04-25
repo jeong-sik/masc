@@ -367,7 +367,7 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
             <th scope="col" class="py-1 text-right font-normal">Latency</th>
             <th scope="col" class="py-1 text-right font-normal">Model</th>
             <th scope="col" class="py-1 text-center font-normal">Budget</th>
-            <th scope="col" class="w-8 py-1"></th>
+            <th scope="col" class="w-8 py-1"><span class="sr-only">확장</span></th>
           </tr>
         </thead>
         <tbody>

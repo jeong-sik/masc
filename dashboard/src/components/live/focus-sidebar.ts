@@ -30,7 +30,7 @@ function FocusSidebarContent({ compact = false }: FocusSidebarProps) {
   const selected = selectedAgentName.value
 
   return html`
-    <div class="grid gap-3 grid-rows-[auto_1fr] min-h-0">
+    <div class="grid gap-3 grid-rows-[auto_1fr] min-h-0" role="region" aria-label="에이전트 상태">
       ${compact
         ? null
         : html`

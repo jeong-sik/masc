@@ -503,7 +503,7 @@ export function Memory() {
   }
 
   return html`
-    <div>
+    <div role="region" aria-label="메모리 게시판">
       <${MemorySummary} />
       <${SortBar} />
       ${hint ? html`

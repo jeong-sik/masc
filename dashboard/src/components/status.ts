@@ -101,7 +101,7 @@ export function Status() {
   const section = currentSection()
 
   return html`
-    <div class="flex flex-col gap-5">
+    <div class="flex flex-col gap-5" role="region" aria-label="상태">
       <div class="transition-opacity duration-300">
         <${Suspense} fallback=${sectionFallback(sectionLabel(section))}>
           ${renderSection(section)}

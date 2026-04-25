@@ -173,7 +173,7 @@ export function ConnectorReadinessRail({ pills }: { pills: RailPill[] }) {
   // strip, and labels truncate symmetrically when the tile is narrow instead
   // of each pill truncating at a different point.
   return html`
-    <div class="mt-2 grid grid-cols-4 items-stretch gap-2" data-rail-layout="grid-4">
+    <div class="mt-2 grid grid-cols-4 items-stretch gap-2" role="group" aria-label="커넥터 준비 상태" data-rail-layout="grid-4">
       ${pills.map(pill => html`<${Pill} pill=${pill} />`)}
     </div>
   `

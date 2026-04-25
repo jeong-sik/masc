@@ -1594,7 +1594,17 @@ let test_work_discovery_nudge_uses_registered_keeper_tool_schemas () =
        "Requires an active claimed task/current_task_id");
   check bool "keeper_shell gh runtime allows sandbox fallback" true
     (source_file_contains "lib/keeper/keeper_shell_gh_context.ml"
-       "task_id = \"(sandbox)\"")
+       "task_id = \"(sandbox)\"");
+  check bool
+    "work discovery nudge avoids pre-filter policy tool names"
+    false
+    (source_file_contains "lib/keeper/keeper_agent_run.ml"
+       "render_preferred_tools ~allowed_tool_names");
+  check bool
+    "claimed-task nudge avoids hard-coded execution tool names"
+    false
+    (source_file_contains "lib/keeper/keeper_agent_run.ml"
+       "Use keeper_bash, keeper_shell, keeper_fs_read")
 
 (* ---------- Config tests ---------- *)
 

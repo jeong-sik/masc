@@ -434,11 +434,17 @@ let dashboard_ack ~session_id ~seq ?buffered_amount () =
 
 (** Shape of an SSE event after dashboard-oriented parsing.
     [slice] is [None] when the event does not map to a dashboard slice,
-    in which case delivery falls through to raw SSE forwarding. *)
+    in which case delivery falls through to raw SSE forwarding.
+    [broadcast_ts] is sampled once at parse-cache miss and reused for
+    every session in the same fanout, so all deltas built from one
+    broadcast carry identical [ts_unix].  This is semantic correctness
+    (one logical emission moment) and a prerequisite for future
+    per-broadcast delta-template caching. *)
 type parsed_sse_event = {
   event_type: string;
   slice: string option;
   payload: Yojson.Safe.t;
+  broadcast_ts: float;
 }
 
 (** Per-broadcast parse cache.
@@ -477,7 +483,8 @@ let parse_sse_dashboard_event sse_event =
                 | None -> event_json
               in
               let slice = dashboard_slice_for_sse_type event_type in
-              Some { event_type; slice; payload }
+              let broadcast_ts = Time_compat.now () in
+              Some { event_type; slice; payload; broadcast_ts }
           | _ -> None)
       | _ -> None
     in
@@ -487,7 +494,7 @@ let parse_sse_dashboard_event sse_event =
 
 let dashboard_delta_for_sse session sse_event =
   match parse_sse_dashboard_event sse_event with
-  | Some { event_type; slice = Some slice; payload }
+  | Some { event_type; slice = Some slice; payload; broadcast_ts }
     when Hashtbl.mem session.dashboard_slices slice ->
       Transport_metrics.inc_ws_delta_built ();
       Some
@@ -500,7 +507,7 @@ let dashboard_delta_for_sse session sse_event =
                ("event_type", `String event_type);
                ("mode", `String "snapshot");
                ("payload", payload);
-               ("ts_unix", `Float (Time_compat.now ()));
+               ("ts_unix", `Float broadcast_ts);
              ]))
   | _ -> None
 

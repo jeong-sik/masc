@@ -13,28 +13,83 @@ type cli_transport_overrides = {
   gemini_yolo : bool option;
 }
 
-(* #10097: codex_cli omits the same set of keeper-bound runtime MCP
-   tools on every request because the structural limitation
-   (request-scoped auth headers) cannot be carried through codex's
-   transport.  The previous Log.warn fired 143×/session with one
-   distinct tool list — pure noise that masked other warnings.  Track
-   the most recent tool list per [agent_name] and only emit when it
-   changes (initial fire, or tool surface drift).  Stdlib.Mutex
-   guards concurrent access from heartbeat/turn fibers across
-   domains. *)
+(* #10097: codex_cli omits keeper-bound runtime MCP tools that require
+   request-scoped auth headers.  That omission is a structural provider
+   limitation, not a per-call incident:
+
+     - [WARN] emits only when an agent first sees an omitted-tool
+       fingerprint, or when that agent's omitted tool set changes.
+     - [Prometheus] per-tool counters increment on every omission so
+       dashboards retain the frequency signal.
+
+   Fingerprint = sorted, comma-joined tool list.  Stdlib.Mutex guards
+   concurrent access from heartbeat/turn fibers across domains. *)
 let codex_omission_state_mu = Stdlib.Mutex.create ()
 let codex_omission_state : (string, string) Hashtbl.t = Hashtbl.create 16
 
-let codex_omission_should_log ~agent_name ~tool_list_key =
+let codex_cli_omission_fingerprint (tools : string list) : string =
+  tools
+  |> List.sort String.compare
+  |> String.concat ","
+
+let codex_omission_agent_key = function
+  | Some agent_name ->
+      let agent_name = String.trim agent_name in
+      if String.equal agent_name "" then "<no_agent>" else agent_name
+  | None -> "<no_agent>"
+
+let codex_omission_should_log ~agent_name ~tool_fingerprint =
   Stdlib.Mutex.lock codex_omission_state_mu;
   Fun.protect
     ~finally:(fun () -> Stdlib.Mutex.unlock codex_omission_state_mu)
     (fun () ->
        match Hashtbl.find_opt codex_omission_state agent_name with
-       | Some prev when String.equal prev tool_list_key -> false
+       | Some prev when String.equal prev tool_fingerprint -> false
        | _ ->
-         Hashtbl.replace codex_omission_state agent_name tool_list_key;
+         Hashtbl.replace codex_omission_state agent_name tool_fingerprint;
          true)
+
+let codex_cli_omission_fingerprint_seen fingerprint =
+  not
+    (codex_omission_should_log ~agent_name:"<no_agent>"
+       ~tool_fingerprint:fingerprint)
+
+(* For tests: reset the dedup state so each test starts clean. *)
+let reset_codex_cli_omission_dedup_for_tests () =
+  Stdlib.Mutex.lock codex_omission_state_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock codex_omission_state_mu)
+    (fun () -> Hashtbl.clear codex_omission_state)
+
+let record_codex_cli_omission_for_agent
+    ~(agent_name : string option)
+    ~(tools : string list)
+  : unit =
+  match tools with
+  | [] -> ()
+  | _ ->
+    List.iter (fun tool ->
+      Prometheus.inc_counter
+        Prometheus.metric_codex_cli_mcp_tool_omission
+        ~labels:[ ("tool", tool) ] ())
+      tools;
+    let tool_fingerprint = codex_cli_omission_fingerprint tools in
+    let agent_name_key = codex_omission_agent_key agent_name in
+    if
+      codex_omission_should_log ~agent_name:agent_name_key
+        ~tool_fingerprint
+    then
+      Log.warn ~ctx:"oas_worker_exec"
+        "codex_cli omitting keeper-bound runtime MCP tool(s) that \
+         require request-scoped auth headers: %s \
+         (structural provider limitation for %s; subsequent omissions \
+         of this same set are counted in \
+         masc_codex_cli_mcp_tool_omission_total and not re-logged)"
+        (String.concat ", " (List.sort String.compare tools))
+        agent_name_key
+
+let record_codex_cli_omission ~(tools : string list) : unit =
+  record_codex_cli_omission_for_agent ~agent_name:None ~tools
 
 (** Resolve a model label string to an OAS Provider.config.
     Uses MASC [Cascade_config.parse_model_string] (with Provider_registry as SSOT).
@@ -461,17 +516,10 @@ let resolve_tool_lane_for_oas_tools
           (public_tool_names @ keeper_internal_tool_names)
     | _ -> []
   in
-  (if codex_keeper_bound_actor_tools <> [] then
-    let tool_list_key = String.concat "," codex_keeper_bound_actor_tools in
-    let agent_name_key =
-      Option.value ~default:"<no_agent>" requested_agent_name
-    in
-    if codex_omission_should_log ~agent_name:agent_name_key ~tool_list_key
-    then
-      Log.warn ~ctx:"oas_worker_exec"
-        "codex_cli omitting keeper-bound runtime MCP tool(s) that require request-scoped auth headers: %s (subsequent identical omissions for %s suppressed)"
-        tool_list_key
-        agent_name_key);
+  (* #10097: WARN once per distinct fingerprint + always-emit
+     per-tool counter.  See [record_codex_cli_omission] docs. *)
+  record_codex_cli_omission_for_agent ~agent_name:requested_agent_name
+    ~tools:codex_keeper_bound_actor_tools;
   let public_tool_names =
     if codex_keeper_bound_actor_tools = [] then
       public_tool_names

@@ -228,6 +228,17 @@ let metric_keeper_oas_timeout_classifications =
 let metric_persistence_read_drops =
   "masc_persistence_read_drops_total"
 
+(* #10097: codex_cli provider cannot carry keeper-bound runtime MCP
+   tools that need request-scoped auth headers.  Every time
+   oas_worker_exec_transport strips such a tool, this counter
+   increments with the tool name so dashboards can track WHICH
+   tools are being omitted and at WHAT rate.  Paired with a
+   once-per-session WARN log ([fingerprint]-deduplicated) so the
+   operator sees the structural fact exactly once while the
+   counter carries the frequency signal. *)
+let metric_codex_cli_mcp_tool_omission =
+  "masc_codex_cli_mcp_tool_omission_total"
+
 (* OAS SSE relay (oas_sse_bridge.ml). *)
 let metric_oas_sse_relay_retries =
   "masc_oas_sse_relay_retries_total"

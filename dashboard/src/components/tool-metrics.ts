@@ -136,6 +136,7 @@ export function ToolMetrics() {
           variant="ghost"
           onClick=${() => void loadMetrics()}
           disabled=${loading}
+          ariaLabel="도구 통계 새로고침"
         >
           ${loading ? '불러오는 중...' : data ? '새로고침' : '불러오기'}
         <//>

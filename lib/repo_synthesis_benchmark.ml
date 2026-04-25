@@ -70,7 +70,9 @@ type run_record = {
 }
 
 let bench_root ~base_path =
-  Filename.concat base_path ".masc/repo-synthesis-benchmarks"
+  Filename.concat
+    (Common.masc_dir_from_base_path ~base_path)
+    "repo-synthesis-benchmarks"
 
 let contains_substring = String_util.contains_substring
 

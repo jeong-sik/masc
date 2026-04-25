@@ -136,8 +136,9 @@ let handover_of_json (json : Yojson.Safe.t) : handover_record option =
 
 (** Storage paths *)
 let handover_dir_path (config : Coord_utils.config) =
-  let path = Filename.concat config.base_path ".masc/handovers" in
-  path
+  Filename.concat
+    (Common.masc_dir_from_base_path ~base_path:config.base_path)
+    "handovers"
 
 let handover_file_path config handover_id =
   Filename.concat (handover_dir_path config) (handover_id ^ ".json")

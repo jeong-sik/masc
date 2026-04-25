@@ -62,6 +62,7 @@
         test_hebbian_edge_update_counter
         test_keeper_proactive_skip_counter
         test_oas_error_kind_counter
+        test_board_author_identity_10297
         test_fsm_drift_counter
         test_process_timeout_counter
         test_git_fetch_timeout_9587
@@ -201,6 +202,7 @@
           test_hebbian_edge_update_counter
           test_keeper_proactive_skip_counter
           test_oas_error_kind_counter
+          test_board_author_identity_10297
           test_fsm_drift_counter
           test_process_timeout_counter
           test_git_fetch_timeout_9587

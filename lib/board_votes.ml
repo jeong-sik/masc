@@ -436,13 +436,9 @@ let is_fixture_voter_target target =
         String.sub target (idx + 1) (String.length target - idx - 1)
     | _ -> target
   in
-  let has_prefix ~prefix s =
-    let prefix_len = String.length prefix in
-    String.length s >= prefix_len && String.sub s 0 prefix_len = prefix
-  in
-  has_prefix ~prefix:"hot-voter-" voter
-  || has_prefix ~prefix:"synthetic-voter-" voter
-  || has_prefix ~prefix:"test-voter-" voter
+  String.starts_with ~prefix:"hot-voter-" voter
+  || String.starts_with ~prefix:"synthetic-voter-" voter
+  || String.starts_with ~prefix:"test-voter-" voter
 
 let quarantine_enabled () =
   (* #9886: production ledger observed 112/112 (100%) fixture-pattern

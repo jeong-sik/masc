@@ -4,9 +4,7 @@ let normalize p =
   Keeper_alerting_path.normalize_path_for_check p
   |> Keeper_alerting_path.strip_trailing_slashes
 
-let starts_with ~prefix s =
-  String.length s >= String.length prefix
-  && String.sub s 0 (String.length prefix) = prefix
+let starts_with ~prefix s = String.starts_with ~prefix s
 
 (** Build the absolute, normalized playground bundle root for [meta]
     under [config.base_path]. *)

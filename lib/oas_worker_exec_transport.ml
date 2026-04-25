@@ -827,10 +827,7 @@ module Kimi_cli_transport_local = struct
             index + 1)
       start_index blocks
 
-  let starts_with text prefix =
-    let prefix_len = String.length prefix in
-    String.length text >= prefix_len
-    && String.sub text 0 prefix_len = prefix
+  let starts_with text prefix = String.starts_with ~prefix text
 
   let resumable_session_detail =
     "kimi_cli reported a resumable CLI session. Resumable session available via -r."

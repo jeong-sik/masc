@@ -154,9 +154,7 @@ module Reflection_bridge = struct
   let masc_symbols =
     [ Masc_grpc_service.service_name ]
 
-  let has_prefix ~prefix value =
-    String.length value >= String.length prefix
-    && String.sub value 0 (String.length prefix) = prefix
+  let has_prefix ~prefix value = String.starts_with ~prefix value
 
   let decode_varint (bytes : string) (pos : int ref) : int =
     let result = ref 0 in

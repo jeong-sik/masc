@@ -28,10 +28,10 @@ let contains_substring ~needle s =
     loop 0
 
 let has_suffix ~suffix s =
-  let suffix_len = String.length suffix in
-  let s_len = String.length s in
-  s_len > suffix_len
-  && String.sub s (s_len - suffix_len) suffix_len = suffix
+  (* Original strict-greater length: rejects [s = suffix] case where the
+     entire string is the suffix.  String.ends_with admits equality, so
+     guard preserves the prior validator contract. *)
+  String.length s > String.length suffix && String.ends_with ~suffix s
 
 let is_provider_unavailable_error msg =
   contains_substring ~needle:"unavailable" msg

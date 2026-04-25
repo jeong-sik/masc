@@ -62,10 +62,7 @@ let source_to_string = function
   | Legacy_traceln -> "legacy_traceln"
   | Client_tool_host -> "client_tool_host"
 
-let has_prefix ~prefix value =
-  let prefix_len = String.length prefix in
-  String.length value >= prefix_len
-  && String.sub value 0 prefix_len = prefix
+let has_prefix ~prefix value = String.starts_with ~prefix value
 
 let infer_legacy_level message =
   let trimmed = String.trim message in

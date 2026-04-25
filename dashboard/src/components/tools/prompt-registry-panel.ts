@@ -205,7 +205,7 @@ export function PromptRegistryPanel() {
               onInput=${(e: Event) => { searchQuery.value = (e.target as HTMLInputElement).value }}
             />
           </div>
-          <div class="flex max-h-130 flex-col gap-2 overflow-y-auto pr-1">
+          <div class="flex max-h-130 flex-col gap-2 overflow-y-auto pr-1" role="listbox" aria-label="프롬프트 목록">
             ${visiblePrompts.length === 0 ? html`
               <div class="rounded border border-dashed border-[var(--card-border)] px-3 py-6 text-center text-2xs text-[var(--text-muted)]">
                 조건에 맞는 프롬프트가 없습니다.
@@ -214,6 +214,8 @@ export function PromptRegistryPanel() {
             ${visiblePrompts.map(prompt => html`
               <button
                 type="button"
+                role="option"
+                aria-selected=${selectedPrompt?.key === prompt.key}
                 class="rounded border px-3 py-2 text-left transition-colors ${selectedPrompt?.key === prompt.key
                   ? 'border-[var(--accent-30)] bg-[var(--accent-10)]'
                   : 'border-[var(--card-border)] bg-[var(--white-2)] hover:bg-[var(--white-4)]'}"

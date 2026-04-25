@@ -324,7 +324,7 @@ function KeeperRuntimePanel({ runtime }: { runtime: KeeperRuntimeResolved | null
   const envCount = KEEPER_RUNTIME_ROWS.filter(r => runtime[r.key]?.source === 'env').length
 
   return html`
-    <div class="mt-4 rounded border border-[var(--card-border)] bg-[var(--white-3)] px-4 py-4">
+    <div class="mt-4 rounded border border-[var(--card-border)] bg-[var(--white-3)] px-4 py-4" role="group" aria-label="keeper runtime limits">
       <div class="mb-3 flex flex-wrap items-center gap-2">
         <div class="text-2xs uppercase tracking-1 text-[var(--text-muted)]">keeper runtime limits</div>
         ${tomlCount > 0 ? html`
@@ -391,7 +391,7 @@ function RuntimeProbePanel() {
   const signal = assessment?.signal ?? null
 
   return html`
-    <div class="mt-4 rounded border border-[var(--card-border)] bg-[var(--white-3)] px-4 py-4">
+    <div class="mt-4 rounded border border-[var(--card-border)] bg-[var(--white-3)] px-4 py-4" role="group" aria-label="ollama warm / kv probe">
       <div class="mb-3 flex flex-wrap items-center gap-2">
         <div class="text-2xs uppercase tracking-1 text-[var(--text-muted)]">ollama warm / kv probe</div>
         <${StatusChip} tone=${probeTone(signal, probe?.probe_ok)}>${probeSignalLabel(signal)}<//>
@@ -605,7 +605,7 @@ export function ConfigResolutionPanel({
                 <${RuntimeMetaRow} label="started at" value=${runtimeResolution.build.started_at} />
               </div>
 
-              <div class="mt-4">
+              <div class="mt-4" role="group" aria-label="runtime diagnostics">
                 <div class="mb-2 flex items-center justify-between gap-2">
                   <div class="text-2xs uppercase tracking-1 text-[var(--text-muted)]">
                     recent diagnostics

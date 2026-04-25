@@ -75,7 +75,14 @@ let canonicalize_board_actor_field field arguments =
     [author] — we used to reject those calls at pre-hook validation, which
     forced every caller to know about the legacy schema field. The board store
     keeps canonical keeper names as principals while preserving raw runtime
-    agent names in metadata. *)
+    agent names in metadata.
+
+    Identity SSOT (#10297): when [args.author] is non-empty and disagrees with
+    [ctx.agent_name] (after canonicalisation), the dispatcher rewrites the
+    field to the trusted ctx name and preserves the caller-supplied claim
+    under [meta.author_claim_overridden] for forensics.  This prevents an
+    LLM-controlled keeper from impersonating another principal by writing
+    a foreign name into [author]. *)
 let ensure_board_post_author ~agent_name arguments =
   match arguments with
   | `Assoc fields -> (
@@ -84,9 +91,23 @@ let ensure_board_post_author ~agent_name arguments =
         | Some (`String s) -> String.trim s
         | _ -> ""
       in
-      let raw_author =
-        if existing <> "" && existing <> "anonymous" then existing
-        else String.trim agent_name
+      let ctx_name = String.trim agent_name in
+      let canonical_from_ctx =
+        if ctx_name = "" then ""
+        else Server_utils.board_actor_author_for_write ctx_name
+      in
+      let raw_author, claim_overridden =
+        match existing with
+        | "" -> (ctx_name, None)
+        | "anonymous" -> (ctx_name, None)
+        | other ->
+            let canonical_from_caller =
+              Server_utils.board_actor_author_for_write other
+            in
+            if canonical_from_ctx <> ""
+               && String.equal canonical_from_caller canonical_from_ctx
+            then (other, None)
+            else (ctx_name, Some other)
       in
       if raw_author = "" then arguments
       else
@@ -95,6 +116,12 @@ let ensure_board_post_author ~agent_name arguments =
         let fields =
           if String.equal canonical raw_author then fields
           else json_upsert_meta_string_field "author_raw_agent_name" raw_author fields
+        in
+        let fields =
+          match claim_overridden with
+          | None -> fields
+          | Some claim ->
+              json_upsert_meta_string_field "author_claim_overridden" claim fields
         in
         `Assoc fields)
   | _ -> arguments

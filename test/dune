@@ -129,6 +129,7 @@
         test_worktree_live_context
         test_worktree_status_single_flight_9632
         test_tool_input_validation
+        test_inline_dispatch_author_ssot
         test_autoresearch_codegen
         test_autoresearch_oas_primitives
         test_autoresearch_target_score
@@ -268,6 +269,7 @@
           test_worktree_live_context
           test_worktree_status_single_flight_9632
           test_tool_input_validation
+          test_inline_dispatch_author_ssot
           test_autoresearch_codegen
           test_autoresearch_oas_primitives
           test_autoresearch_target_score

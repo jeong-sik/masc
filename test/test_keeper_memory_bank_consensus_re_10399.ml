@@ -22,7 +22,7 @@
     2. Repeated calls return a consistent boolean — the
        memoised [Re.re] is reused, not recompiled, and never
        throws.
-    3. Many concurrent calls in parallel do not raise (no
+    3. Many concurrent calls across domains do not raise (no
        [CamlinternalLazy.Undefined]).
 
     Env-override behaviour ([MASC_KEEPER_MEMORY_CONSENSUS_PATTERN])
@@ -63,36 +63,39 @@ let test_repeated_calls_consistent () =
       (M.has_inflated_consensus_marker "ordinary text")
   done
 
-(* --- 3. concurrent fiber forcing does not raise --------- *)
+(* --- 3. concurrent first forcing does not raise --------- *)
 
-(* Spawn many fibers that simultaneously force the cached
-   regex.  Pre-fix [Stdlib.Lazy.force] could raise
-   [CamlinternalLazy.Undefined] when one fiber suspended
-   mid-force; post-fix [Atomic.t] + [Stdlib.Mutex.protect]
-   serialises the slow path so concurrent reads return the
-   memoised value or block briefly on the lock. *)
-let test_concurrent_forcing_no_raise () =
-  Eio_main.run @@ fun _env ->
-  Eio.Switch.run @@ fun sw ->
-  let n = 32 in
-  let count_ok = Atomic.make 0 in
-  for i = 1 to n do
-    Eio.Fiber.fork ~sw (fun () ->
-      let needle =
-        if i mod 2 = 0 then "8888888ep run" else "no marker here"
-      in
-      let _ = M.has_inflated_consensus_marker needle in
-      Atomic.incr count_ok)
-  done;
-  (* The switch waits for forks; once it returns every fiber
-     completed normally.  If any had raised, [Switch.run] would
-     have re-raised here. *)
-  check int "all fibers completed without raising" n
-    (Atomic.get count_ok)
+(* This suite runs before the default-pattern checks below so the cache is still
+   empty.  Spawn real OCaml domains, not Eio fibers, because the pre-fix
+   [Stdlib.Lazy.force] race is a domain-level first-force race. *)
+let test_concurrent_first_forcing_no_raise () =
+  let n = 16 in
+  let start = Atomic.make false in
+  let domains =
+    List.init n (fun i ->
+      Domain.spawn (fun () ->
+        while not (Atomic.get start) do
+          Domain.cpu_relax ()
+        done;
+        let needle =
+          if i mod 2 = 0 then "8888888ep run" else "no marker here"
+        in
+        M.has_inflated_consensus_marker needle))
+  in
+  Atomic.set start true;
+  let results = List.map Domain.join domains in
+  check int "all domains completed without raising" n (List.length results);
+  check int "half of probes matched the marker" (n / 2)
+    (List.length (List.filter Fun.id results))
 
 let () =
   run "keeper_memory_bank_consensus_re_10399"
     [
+      ( "domain-safety",
+        [
+          test_case "concurrent first forcing does not raise" `Quick
+            test_concurrent_first_forcing_no_raise;
+        ] );
       ( "default-pattern",
         [
           test_case "inflated markers detected" `Quick
@@ -104,10 +107,5 @@ let () =
         [
           test_case "repeated calls stay consistent" `Quick
             test_repeated_calls_consistent;
-        ] );
-      ( "fiber-safety",
-        [
-          test_case "concurrent forcing does not raise" `Quick
-            test_concurrent_forcing_no_raise;
         ] );
     ]

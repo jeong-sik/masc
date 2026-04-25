@@ -12,10 +12,19 @@
 (** Stress event kinds -- each maps to a measurable condition. *)
 type stress_kind =
   | Failure_streak of int        (** consecutive failure count *)
+  | Turn_failure of turn_failure (** keeper turn ended in an error/partial outcome *)
   | Fallback_approval            (** anti-rat or post-verifier fell back to approve *)
   | Timeout                      (** OAS/LLM call timed out *)
   | Parse_degraded               (** LLM response required fallback parsing *)
   | Task_released                (** agent released a task (gave up) *)
+
+and turn_failure = {
+  consecutive : int;             (** persistent turn-failure streak after this turn *)
+  threshold : int;               (** crash threshold used for the decision *)
+  counted_toward_crash : bool;   (** false for auto-recoverable/transient failures *)
+  recoverable : bool;            (** whether keeper can continue without crash escalation *)
+  error_kind : string option;    (** coarse sdk error family; never the raw error text *)
+}
 
 (** A single stress observation. *)
 type event = {

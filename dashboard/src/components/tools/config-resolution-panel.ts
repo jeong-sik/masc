@@ -418,7 +418,7 @@ function RuntimeProbePanel() {
 
       ${!state.value.error && !probe
         ? html`
-            <div class="text-xs text-[var(--text-muted)]">
+            <div class="text-xs text-[var(--text-muted)]" role="status">
               ${state.value.loading ? 'runtime probe를 불러오는 중입니다.' : 'probe result가 아직 없습니다.'}
             </div>
           `

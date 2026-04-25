@@ -150,6 +150,9 @@ export function App() {
     cancelPendingSSERefreshes()
     void subscribeDashboardRoute(route.value)
     refreshCurrentRoute({ recordVisit: true })
+    // Move screen reader focus into main content on route change
+    const main = document.getElementById('main-content')
+    if (main) { main.focus() }
   }, [route.value.tab, route.value.params.section, route.value.params.view, route.value.params.q])
 
   const currentTab = route.value.tab
@@ -220,7 +223,7 @@ export function App() {
           <${SideRail} collapsed=${sidebarCollapsed.value} onToggle=${() => { sidebarCollapsed.value = !sidebarCollapsed.value }} />
         </aside>
 
-        <main id="main-content" class="min-w-0 flex-1 overflow-hidden rounded-xl border border-[var(--white-5)] bg-[rgba(10,15,26,0.68)] backdrop-blur-lg max-[1100px]:min-h-0">
+        <main id="main-content" tabindex="-1" class="min-w-0 flex-1 overflow-hidden rounded-xl border border-[var(--white-5)] bg-[rgba(10,15,26,0.68)] backdrop-blur-lg max-[1100px]:min-h-0 focus:outline-none">
           <div class="h-full overflow-y-auto p-4">
             <${DashboardMain} />
           </div>

@@ -103,6 +103,19 @@ let decide_transition ~phase ~(action : action) ~has_effective_verifier_policy
   | Awaiting_approval, Approve_completion -> Ok Complete
   | Awaiting_approval, Reject_completion -> Ok (Move_to Blocked)
   | Awaiting_approval, Drop -> Ok (Move_to Dropped)
+  (* #10411: Awaiting_verification previously had only the Drop
+     transition.  A goal that entered verification (Executing +
+     Request_complete + has_effective_verifier_policy) had no FSM
+     path back out for verifier success/failure or operator
+     pause/block — verifier output could not propagate to goal
+     completion.  Mirror Awaiting_approval semantics for the verifier
+     outcome (Approve = pass, Reject = fail) and add operator
+     pause/block escapes so manual recovery does not require
+     side-stepping the FSM through direct phase assignment. *)
+  | Awaiting_verification, Approve_completion -> Ok Complete
+  | Awaiting_verification, Reject_completion -> Ok (Move_to Blocked)
+  | Awaiting_verification, Pause -> Ok (Move_to Paused)
+  | Awaiting_verification, Operator_block -> Ok (Move_to Blocked)
   | Awaiting_verification, Drop -> Ok (Move_to Dropped)
   | Completed, Reopen -> Ok (Move_to Executing)
   | Completed, Drop -> Ok (Move_to Dropped)

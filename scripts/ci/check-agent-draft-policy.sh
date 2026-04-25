@@ -15,6 +15,7 @@ pr_is_draft="${PR_LIVE_IS_DRAFT:-${PR_IS_DRAFT:-false}}"
 pr_title="${PR_TITLE:-}"
 pr_head_ref="${PR_HEAD_REF:-}"
 pr_labels_csv="${PR_LIVE_LABELS:-${PR_LABELS:-}}"
+pr_live_state="${PR_LIVE_STATE:-}"
 
 if [[ -n "${PR_LIVE_IS_DRAFT:-}" ]]; then
   echo "agent draft policy: using live PR draft state ${PR_LIVE_IS_DRAFT}"
@@ -26,6 +27,22 @@ fi
 lower() {
   printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
 }
+
+# #10192: CI Gate runs that fire after auto-merge (observed
+# 12 min post-merge) sometimes query live PR labels AFTER
+# post-merge automation has cleaned the bypass label.  The
+# gate then evaluates an already-merged PR as ready-without-
+# bypass and fails — a red check on a PR that has already
+# shipped (PR #10181, run 24924336433).  Skip when the live
+# state says the PR is no longer open: the policy is moot
+# for closed/merged PRs and the merge-time CI Gate already
+# gated the merge itself.
+case "$(lower "${pr_live_state}")" in
+  merged|closed)
+    echo "agent draft policy: skipped, PR live state is ${pr_live_state} (post-merge gate race, see #10192)"
+    exit 0
+    ;;
+esac
 
 csv_has_label() {
   local csv="$1"

@@ -454,9 +454,8 @@ let tool_auth_strict () =
 (** [git fetch origin] before worktree creation is network-bound and
     can stall behind a slow Docker bridge or a large remote.  The
     previous hardcoded 30s budget at [coord_worktree.run_argv_exit]
-    rejected legitimately slow fetches inside the keeper sandbox
-    (#9587) — observed at [/Users/dancer/me/.masc/playground/docker/
-    masc-improver/repos/masc-mcp]).  Default 120s gives enough
+    rejected legitimately slow fetches inside a Docker keeper
+    playground clone (#9587).  Default 120s gives enough
     headroom for a cold fetch on a non-trivial repo while still
     bounding hung connections.  Operators can override via
     [MASC_GIT_FETCH_TIMEOUT_SEC] when running on faster networks

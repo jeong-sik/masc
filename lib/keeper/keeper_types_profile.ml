@@ -35,6 +35,12 @@ let sandbox_profile_to_string = function
   | Local -> "local"
   | Docker -> "docker"
 
+let reserved_cascade_names =
+  List.sort_uniq String.compare
+    (Keeper_cascade_profile.known_cascades
+     @ phase_routing_cascade_names
+     @ [ tool_use_strict_cascade_name ])
+
 (** Parse a sandbox profile string. Canonical values are ["local"] and
     ["docker"]. Legacy names ["legacy_local"], ["docker_hardened"], and
     ["docker_with_git"] are still accepted for backward compatibility
@@ -645,21 +651,29 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
               Keeper_cascade_profile.normalize_declared_name raw
               |> String.lowercase_ascii
             in
-            let compile_known = Keeper_cascade_profile.known_cascades in
-            let phase_routing = phase_routing_cascade_names in
-            let catalog =
-              try Keeper_cascade_profile.catalog_names ()
-              with _ -> []
-            in
-            let all_valid = compile_known @ phase_routing @ catalog in
-            if List.mem normalized all_valid then Ok ()
+            if List.mem normalized reserved_cascade_names then Ok ()
             else
-              Error
-                (Printf.sprintf
-                   "invalid cascade_name '%s' (known: %s)"
-                   raw
-                   (String.concat ", "
-                      (compile_known @ phase_routing))))
+              match Keeper_cascade_profile.catalog_names_result () with
+              | Ok catalog ->
+                  let all_valid =
+                    List.sort_uniq String.compare
+                      (reserved_cascade_names @ catalog)
+                  in
+                  if List.mem normalized all_valid then Ok ()
+                  else
+                    Error
+                      (Printf.sprintf
+                         "invalid cascade_name '%s' (known: %s)"
+                         raw
+                         (String.concat ", " all_valid))
+              | Error catalog_error ->
+                  Error
+                    (Printf.sprintf
+                       "invalid cascade_name '%s' (reserved: %s; live catalog \
+                        unavailable: %s)"
+                       raw
+                       (String.concat ", " reserved_cascade_names)
+                       catalog_error))
   in
   Result.map
     (fun () ->

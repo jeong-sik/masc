@@ -71,24 +71,54 @@ let with_temp_toml content f =
     ~finally:(fun () -> try Sys.remove path with _ -> ())
     (fun () -> f path)
 
+let write_file path contents =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc contents)
+
+let contains ~needle haystack =
+  let len = String.length haystack in
+  let nlen = String.length needle in
+  let found = ref false in
+  if nlen <= len then
+    for i = 0 to len - nlen do
+      if String.sub haystack i nlen = needle then found := true
+    done;
+  !found
+
+let with_config_dir contents f =
+  let dir = Filename.temp_file "keeper_config_dir_" "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o755;
+  let toml_path = Filename.concat dir "cascade.toml" in
+  let json_path = Filename.concat dir "cascade.json" in
+  write_file toml_path contents;
+  let prior = Sys.getenv_opt "MASC_CONFIG_DIR" in
+  Unix.putenv "MASC_CONFIG_DIR" dir;
+  Masc_mcp.Config_dir_resolver.reset ();
+  Fun.protect
+    ~finally:(fun () ->
+      (match prior with
+       | Some value -> Unix.putenv "MASC_CONFIG_DIR" value
+       | None -> Unix.putenv "MASC_CONFIG_DIR" "");
+      Masc_mcp.Config_dir_resolver.reset ();
+      (try Sys.remove json_path with _ -> ());
+      (try Sys.remove toml_path with _ -> ());
+      try Unix.rmdir dir with _ -> ())
+    (fun () -> f dir)
+
 let test_cascade_name_rejects_unknown () =
   let result =
     with_temp_toml
-      "[keeper]\nname = \"testkeeper\"\ncascade_name = \"nick0cave\"\n"
+      "[keeper]\nname = \"testkeeper\"\ncascade_name = \"definitely_missing_profile\"\n"
       KTP.load_keeper_toml
   in
   match result with
-  | Ok _ -> fail "nick0cave cascade_name should be rejected"
+  | Ok _ -> fail "definitely_missing_profile cascade_name should be rejected"
   | Error e ->
       check bool "error mentions cascade_name" true
-        (let len = String.length e in
-         let needle = "invalid cascade_name" in
-         let nlen = String.length needle in
-         let found = ref false in
-         for i = 0 to len - nlen do
-           if String.sub e i nlen = needle then found := true
-         done;
-         !found)
+        (contains ~needle:"invalid cascade_name" e)
 
 let test_cascade_name_accepts_known () =
   let check_ok label cascade_name =
@@ -106,7 +136,61 @@ let test_cascade_name_accepts_known () =
   in
   check_ok "big_three variant" "big_three";
   check_ok "local_only phase-routing" "local_only";
-  check_ok "local_recovery phase-routing" "local_recovery"
+  check_ok "local_recovery phase-routing" "local_recovery";
+  check_ok "tool_use_strict reserved tool lane" "tool_use_strict"
+
+let test_cascade_name_accepts_tool_lane_without_catalog () =
+  let missing_dir =
+    Filename.concat (Filename.get_temp_dir_name ())
+      "missing-masc-config-for-tool-use-strict"
+  in
+  let prior = Sys.getenv_opt "MASC_CONFIG_DIR" in
+  Unix.putenv "MASC_CONFIG_DIR" missing_dir;
+  Masc_mcp.Config_dir_resolver.reset ();
+  Fun.protect
+    ~finally:(fun () ->
+      (match prior with
+       | Some value -> Unix.putenv "MASC_CONFIG_DIR" value
+       | None -> Unix.putenv "MASC_CONFIG_DIR" "");
+      Masc_mcp.Config_dir_resolver.reset ())
+    (fun () ->
+      let result =
+        with_temp_toml
+          "[keeper]\nname = \"testkeeper\"\ncascade_name = \"tool_use_strict\"\n"
+          KTP.load_keeper_toml
+      in
+      match result with
+      | Ok _ -> ()
+      | Error e ->
+          fail
+            (Printf.sprintf
+               "tool_use_strict is a reserved tool lane and should not require \
+                a readable live catalog: %s"
+               e))
+
+let test_cascade_name_error_lists_live_catalog () =
+  with_config_dir
+    {|
+[custom_live]
+models = ["ollama:auto"]
+
+[tool_use_strict]
+models = ["ollama:auto"]
+keeper_assignable = false
+|}
+    (fun _dir ->
+      let result =
+        with_temp_toml
+          "[keeper]\nname = \"testkeeper\"\ncascade_name = \"missing_profile\"\n"
+          KTP.load_keeper_toml
+      in
+      match result with
+      | Ok _ -> fail "missing_profile cascade_name should be rejected"
+      | Error e ->
+          check bool "error lists live catalog profile" true
+            (contains ~needle:"custom_live" e);
+          check bool "error lists reserved tool lane" true
+            (contains ~needle:"tool_use_strict" e))
 
 let test_cascade_name_accepts_catalog_entry () =
   (* "tool_use_strict" is a known catalog entry in cascade.json,
@@ -226,6 +310,10 @@ let () =
             test_cascade_name_rejects_unknown;
           test_case "accepts known cascade names" `Quick
             test_cascade_name_accepts_known;
+          test_case "accepts reserved tool lane without live catalog" `Quick
+            test_cascade_name_accepts_tool_lane_without_catalog;
+          test_case "invalid cascade message lists live catalog" `Quick
+            test_cascade_name_error_lists_live_catalog;
           test_case "accepts catalog entry (legacy alias)" `Quick
             test_cascade_name_accepts_catalog_entry;
           test_case "accepts dispatch tool_preset" `Quick

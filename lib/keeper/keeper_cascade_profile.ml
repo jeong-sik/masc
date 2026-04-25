@@ -72,12 +72,32 @@ let catalog_entries ?config_path () =
       | Ok entries -> Some entries
       | Error _ -> None)
 
+let catalog_entries_result ?config_path () =
+  let path_opt =
+    match config_path with
+    | Some path -> Some path
+    | None -> Config_dir_resolver.cascade_path_opt ()
+  in
+  match path_opt with
+  | None -> Error "cascade catalog path is not resolved"
+  | Some path ->
+      Cascade_config_loader.load_catalog ~config_path:path
+
 let catalog_names ?config_path () =
   match catalog_entries ?config_path () with
   | Some entries ->
       List.map (fun (entry : Cascade_config_loader.catalog_entry) -> entry.name)
         entries
   | None -> []
+
+let catalog_names_result ?config_path () =
+  match catalog_entries_result ?config_path () with
+  | Error _ as err -> err
+  | Ok entries ->
+      Ok
+        (List.map
+           (fun (entry : Cascade_config_loader.catalog_entry) -> entry.name)
+           entries)
 
 let is_system_only_cascade raw =
   let name = String.trim raw in

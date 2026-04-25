@@ -1357,7 +1357,9 @@ let run_named
            [record_rejected] behaves like a failure for cooldown /
            weight but keeps the [Rejected] tag so the dashboard can
            distinguish it from hard errors. *)
-        Cascade_health_tracker.(record_rejected global ~provider_key:provider_cfg.model_id);
+        Cascade_health_tracker.(
+          record_rejected global ~provider_key:provider_cfg.model_id
+            ~error_kind:"accept_rejected" ());
         (* FSM: Accept_rejected → decide *)
         let reason = Printf.sprintf "response rejected by accept (model=%s)" result.response.model in
         let outcome = Cascade_fsm.Accept_rejected
@@ -1425,10 +1427,15 @@ let run_named
            ([hard_quota_cooldown_sec], default 1h) so weighted_random
            re-selection doesn't waste cascade turns on a provider that
            is terminally unavailable. *)
+        let err_str = Oas.Error.to_string sdk_err in
         if sdk_error_is_hard_quota sdk_err then
-          Cascade_health_tracker.(record_hard_quota global ~provider_key:provider_cfg.model_id)
+          Cascade_health_tracker.(
+            record_hard_quota global ~provider_key:provider_cfg.model_id
+              ~error_kind:"hard_quota" ~error_reason:err_str ())
         else
-          Cascade_health_tracker.(record_failure global ~provider_key:provider_cfg.model_id);
+          Cascade_health_tracker.(
+            record_failure global ~provider_key:provider_cfg.model_id
+              ~error_kind:"failure" ~error_reason:err_str ());
         (* FSM: Call_err → decide *)
         (match sdk_error_to_cascade_outcome sdk_err with
          | Some outcome ->

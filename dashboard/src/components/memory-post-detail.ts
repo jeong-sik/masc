@@ -147,6 +147,7 @@ function CommentItem({
           <button type="button"
             class="mt-1 text-2xs text-[var(--accent)] hover:underline cursor-pointer bg-transparent border-0"
             onClick=${() => setExpanded(!expanded)}
+            aria-expanded=${expanded}
           >${expanded ? '접기' : '더 보기...'}</button>
         ` : null}
         ${isReplying ? html`

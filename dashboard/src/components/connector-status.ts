@@ -1179,6 +1179,7 @@ function ConnectorLivePanel({
                             <button type="button"
                               class="cursor-pointer text-2xs text-[var(--text-dim)] hover:text-[var(--text-body)]"
                               aria-label=${`add channel to ${group.name}`}
+                              aria-expanded=${expanded}
                               onClick=${toggleExpand}
                             >${expanded ? '− close' : '+ add channel'}</button>
                           </div>

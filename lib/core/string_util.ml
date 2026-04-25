@@ -29,6 +29,7 @@ let contains_substring haystack needle =
    after [pos] (default 0), or [None] if absent. Empty needle returns
    [Some pos], matching [Re.exec_opt (Re.str "" |> Re.compile)] semantics. *)
 let find_substring ?(pos = 0) haystack needle =
+  if pos < 0 then invalid_arg "String_util.find_substring: negative position";
   let hay_len = String.length haystack in
   let needle_len = String.length needle in
   if needle_len = 0 then Some pos

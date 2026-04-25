@@ -8,6 +8,7 @@ interface RouteLinkProps {
   params?: Record<string, string>
   class?: string
   title?: string
+  role?: string
   ariaCurrent?: 'page' | 'location' | undefined
   children: ComponentChildren
 }
@@ -17,6 +18,7 @@ export function RouteLink({
   params,
   class: className,
   title,
+  role,
   ariaCurrent,
   children,
 }: RouteLinkProps) {
@@ -31,6 +33,7 @@ export function RouteLink({
       href=${href}
       class=${classNameWithFocus}
       title=${title}
+      role=${role}
       aria-current=${ariaCurrent}
       onClick=${(event: MouseEvent) => {
         if (

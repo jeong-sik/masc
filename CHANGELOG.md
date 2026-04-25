@@ -1,5 +1,42 @@
 # Changelog
 
+## [0.15.0] - 2026-04-25
+
+Aggregate of 185 commits since v0.14.0 (26 feat / 93 fix / 30 perf-refactor-obs-docs / 10 chore / 26 misc). No breaking API changes.
+
+### Added (feat)
+- Keeper observability counters: per-keeper turn-latency buckets (#10124), livelock observer (#10123), context_max drift (#10122), require_tool_use violations (#10099), proactive skip-reason (#10060), compaction outcome (#10011), usage-trust Prometheus (#10021), Hebbian per-outcome edge (#10048), metric-emit drops (#10053).
+- Keeper runtime: affordance-tool intersection at `Require_tool_use` gate (#10141), Ollama `keep_alive`/`num_ctx` forwarding from cascade.toml (#9985), wire `Gh_exit_class` into docker sandbox (#9974), persona authoring wizard (#9940).
+- Coord/FSM: per-agent FSM drift counter (#10152), Prometheus task FSM drift (#10082).
+- Dashboard: gRPC `events_dropped` strip (#10114), WS delivery counters (#10106, #10107), WS-only cutover flag (#10102), websocket route slice expansion (#9963), a11y high-contrast + forced-colors support (#10080).
+- OAS/cascade: per-kind `masc_oas_error` counter (#10039), resolved_model_id metric label (#9962), context_overflow_imminent action signal (#9954).
+- Keeper CLI: auto-construct Claude Code / Kimi CLI MCP config behind flag (#10059).
+
+### Fixed
+- Keeper: backlog gating on claimable tasks (#10159), supervisor sweep startup (#10161), max_restart loud alert (#10147), Ollama saturation skip (#10150), runtime MCP trajectory record (#10154), failed-turn episode persist (#10144), Hebbian first consolidation on fork (#10137), per-model telemetry empty-response defense (#10090), `keeper_msg` merged-CAS retry (#10135), Anthropic cache silent-disable flag (#10128), smart-heartbeat starvation (#10078), per_turn multiplier removed in favor of wall-clock cap (#10074), unified turn write_meta CAS retry (#10145).
+- OAS: API fingerprint metadata drift detection (#10156), oas-bridge timeout SSOT (#10108), oas-bridge typed contract (#10153), `codex_cli` MCP omission WARN dedup (#10100), suppress repeated omission warnings (#10109).
+- Cascade: declarative `fallback_cascade` for single-provider profiles (life-support escalation) (#10157).
+- Telemetry: dedupe websocket delivery schema (#10151), legacy degenerate row scrub at init (#10095), heuristic-theatre Prometheus migration follow-up (#10044).
+- Governance: auto-approve `masc_transition` + `keeper_board_post` for autonomous flow (#10148), default judge timeout raised to 180s (#10132), anti-rationalization gate-2 demoted to LLM advisory (#10116).
+- Filesystem: `save_file_atomic` orphan boot sweep (#10131), test-executable HOME guard (#10085).
+- Board/coord: keeper actor identity unified (#10133), original vote timestamp persisted across flush (#10093), fixture-vote quarantine (#10079).
+- A11y: ARIA on vis-timeline/vis-network/filter chips (#10138), keeper-phase ARIA (#10142), GraphQL Playground viewport zoom (#10134).
+- Auth/usage: bearer-token cross-agent mismatch counter (#10129), Anthropic cache provider-kind evidence requirement (#10163).
+- Tool registry: shard tool registration completeness (#10105).
+- Dashboard SSOT: keeper display source unified (#10084).
+- PR automation: draft guard skip for owner-authored PRs (#10143).
+- CDAL gate: dormancy diagnostics + ledger health surface (#10118).
+- WS perf: dashboard delta gating on client `bufferedAmount` (#10104).
+
+### Performance
+- Slice-aware fanout gate Phase 2 (#10160), WS slice-aware fanout (#10119), keeper supervisor sweep liveness counter + age gauge (#10126), context window utilization tightening across multiple paths.
+
+### Refactor
+- Keeper meta types facade refactor, OAS-pin bumps to v0.173.0 (#10149) and earlier intermediate pins, dedup of redundant code paths in oas-bridge / keeper-runtime / telemetry-flow.
+
+### Chore
+- OAS-pin bumps with version-floor synchronisation, advisory pruning, miscellaneous typo and docstring fixes.
+
 ## [0.14.0] - 2026-04-24
 
 ### Added

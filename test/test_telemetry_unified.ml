@@ -742,6 +742,62 @@ let test_read_unified_reads_trajectory_and_execution_receipts () =
   Alcotest.(check string) "oldest source" "execution_receipt"
     (List.nth entries 1 |> json_string_field "source")
 
+let test_scope_filter_matches_runtime_contract_fields () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "telem_runtime_contract_scope" in
+  let root = masc_root dir in
+  let trajectory_dir = Filename.concat root "trajectories/alice" in
+  Fs_compat.mkdir_p trajectory_dir;
+  Fs_compat.append_file
+    (Filename.concat trajectory_dir "trace-1.jsonl")
+    (Yojson.Safe.to_string
+       (`Assoc
+          [
+            ("ts", `Float 3000.0);
+            ("ts_iso", `String "1970-01-01T00:50:00Z");
+            ("turn", `Int 1);
+            ("round", `Int 1);
+            ("tool_name", `String "keeper_bash");
+            ("args", `Assoc []);
+            ("gate", `Assoc [ ("status", `String "pass") ]);
+            ("result", `String "ok");
+            ("duration_ms", `Int 7);
+            ("error", `Null);
+            ("cost_usd", `Float 0.0);
+            ( "runtime_contract",
+              `Assoc
+                [
+                  ("keeper_name", `String "alice");
+                  ("session_id", `String "sess-nested");
+                  ("operation_id", `String "op-nested");
+                  ("trace_id", `String "run-nested");
+                ] );
+            ( "action_radius",
+              `Assoc [ ("tool_name", `String "keeper_bash") ] );
+          ])
+     ^ "\n");
+  let result =
+    Telemetry_unified.read_unified_result
+      ~base_path:dir
+      ~masc_root:root
+      ~sources:[ Telemetry_unified.Trajectory_tool_call ]
+      ~session_id:"sess-nested"
+      ~operation_id:"op-nested"
+      ~worker_run_id:"run-nested"
+      ~n:10
+      ()
+  in
+  Alcotest.(check int) "runtime contract scoped row visible" 1
+    result.total_matching_entries;
+  match result.entries with
+  | [ entry ] ->
+    Alcotest.(check string) "source" "trajectory_tool_call"
+      (json_string_field "source" entry);
+    Alcotest.(check string) "tool" "keeper_bash"
+      (json_string_field "tool_name" entry)
+  | _ -> Alcotest.fail "expected one scoped trajectory row"
+
 let test_summary_surfaces_coverage_gaps () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -890,6 +946,8 @@ let () =
             test_time_window_n_zero_disables_truncation;
           Alcotest.test_case "trajectory and receipts" `Quick
             test_read_unified_reads_trajectory_and_execution_receipts;
+          Alcotest.test_case "runtime contract scope filter" `Quick
+            test_scope_filter_matches_runtime_contract_fields;
         ] );
       ( "summary",
         [

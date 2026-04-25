@@ -497,23 +497,39 @@ let matches_keeper name (json : Yojson.Safe.t) : bool =
     || check_runtime_contract ()
   | _ -> false
 
-let matches_string_field field expected (json : Yojson.Safe.t) : bool =
-  match json with
-  | `Assoc fields -> (
-      match List.assoc_opt field fields with
-      | Some (`String value) -> String.equal value expected
-      | _ -> false)
+let matches_field fields field expected =
+  match List.assoc_opt field fields with
+  | Some (`String value) -> String.equal value expected
   | _ -> false
 
 let matches_scope ?session_id ?operation_id ?worker_run_id (json : Yojson.Safe.t) :
     bool =
-  let matches field = function
+  let matches ~top_fields ~runtime_contract_fields = function
     | None -> true
-    | Some expected -> matches_string_field field expected json
+    | Some expected -> (
+        match json with
+        | `Assoc fields ->
+          List.exists
+            (fun field -> matches_field fields field expected)
+            top_fields
+          ||
+          (match List.assoc_opt "runtime_contract" fields with
+           | Some (`Assoc runtime_fields) ->
+             List.exists
+               (fun field -> matches_field runtime_fields field expected)
+               runtime_contract_fields
+           | _ -> false)
+        | _ -> false)
   in
-  matches "session_id" session_id
-  && matches "operation_id" operation_id
-  && matches "worker_run_id" worker_run_id
+  matches ~top_fields:[ "session_id" ]
+    ~runtime_contract_fields:[ "session_id" ]
+    session_id
+  && matches ~top_fields:[ "operation_id" ]
+       ~runtime_contract_fields:[ "operation_id" ]
+       operation_id
+  && matches ~top_fields:[ "worker_run_id" ]
+       ~runtime_contract_fields:[ "worker_run_id"; "trace_id" ]
+       worker_run_id
 
 (* ── Read from a single fixed-path source ───────────── *)
 

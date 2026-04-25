@@ -429,11 +429,16 @@ let with_distributed_lock ?clock config _path key f =
             in
             Log.Coord.warn "lock release failed for %s: %s" key msg)
       f
-  else
+  else begin
+    (* #9645: surface lock acquire exhaustion as a fleet-wide
+       metric.  Hook is wired by [lib/coord.ml] at startup. *)
+    (Atomic.get Coord_hooks.distributed_lock_acquire_failed_fn)
+      ~key ~attempts:50;
     invalid_arg
       (Printf.sprintf
          "Failed to acquire distributed lock for key: %s (50 attempts exhausted)"
          key)
+  end
 
 let with_distributed_lock_r ?clock config path key f : ('a, masc_error) result =
   let owner = config.backend_config.node_id in
@@ -461,11 +466,15 @@ let with_distributed_lock_r ?clock config path key f : ('a, masc_error) result =
             in
             Log.Coord.warn "lock release failed for %s: %s" key msg)
       (fun () -> Ok (f ()))
-  else
+  else begin
+    (* #9645: see [with_distributed_lock] above. *)
+    (Atomic.get Coord_hooks.distributed_lock_acquire_failed_fn)
+      ~key ~attempts:50;
     Error
       (IoError
          (Printf.sprintf "Failed to acquire distributed lock for %s"
             path))
+  end
 
 let with_file_lock_impl ?clock config path f =
   match key_of_path config path with

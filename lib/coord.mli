@@ -70,3 +70,19 @@ val record_process_timeout : program:string -> timeout_sec:float -> unit
     [run_argv_with_stdin_and_status_split] / [run_argv_with_status_split]
     surfaces in Prometheus without taking a direct dependency on
     [masc_mcp.Prometheus] from the lower [masc_process] layer. *)
+
+(** {1 Distributed lock observability (#9645)} *)
+
+val distributed_lock_acquire_failed_metric : string
+(** Canonical Prometheus metric for distributed lock acquire
+    exhaustion ([masc_distributed_lock_acquire_failed_total]).
+    Labels: [key, attempts].  Exposed so tests and Grafana
+    rules can pin the name. *)
+
+val record_distributed_lock_acquire_failed :
+  key:string -> attempts:int -> unit
+(** Increment {!distributed_lock_acquire_failed_metric} with
+    [(key, attempts)] labels.  Wired to
+    {!Coord_hooks.distributed_lock_acquire_failed_fn} so
+    [Coord_utils_ops] can fire the metric without taking a
+    direct [Prometheus] dependency. *)

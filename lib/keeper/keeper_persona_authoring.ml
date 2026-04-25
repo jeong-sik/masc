@@ -5,6 +5,7 @@
     keeps writes constrained to the resolved personas root. *)
 
 open Tool_args
+module Archetypes = Keeper_persona_authoring_contract
 
 type save_result =
   { handle : string
@@ -20,20 +21,8 @@ type archetype_axes =
   ; risk_posture : string option
   }
 
-type archetype_choice_effect =
-  { value : string
-  ; effect_text : string
-  ; generated_fields : string list
-  ; default_tool_preset : string option
-  }
-
-let string_list_to_json values = `List (List.map (fun value -> `String value) values)
-
-let option_field name value =
-  match value with
-  | Some json -> [ name, json ]
-  | None -> []
-;;
+let string_list_to_json = Archetypes.string_list_to_json
+let option_field = Archetypes.option_field
 
 let assoc_without key fields =
   List.filter (fun (candidate, _) -> not (String.equal candidate key)) fields
@@ -119,120 +108,15 @@ let social_model_choices_json =
   string_list_to_json [ "bdi_speech_v1"; "magentic_ledger_v1" ]
 ;;
 
-let alignment_choices = [ "helpful"; "skeptical"; "protective"; "chaotic"; "ruthless" ]
-
-let operating_style_choices =
-  [ "research"; "coding"; "dispatch"; "social"; "delivery" ]
-;;
-
-let risk_posture_choices = [ "cautious"; "balanced"; "high-autonomy" ]
-
-let choice_effect ?default_tool_preset ~value ~effect_text ~generated_fields () =
-  { value; effect_text; generated_fields; default_tool_preset }
-;;
-
-let choice_effect_fields choice =
-  [ "value", `String choice.value
-  ; "effect", `String choice.effect_text
-  ; "generated_fields", string_list_to_json choice.generated_fields
-  ]
-  @ option_field
-      "default_tool_preset"
-      (Option.map (fun value -> `String value) choice.default_tool_preset)
-;;
-
-let choice_effect_to_json choice = `Assoc (choice_effect_fields choice)
-
-let alignment_choice_effects =
-  [ choice_effect
-      ~value:"helpful"
-      ~effect_text:"Biases the draft toward cooperative task support and clear next actions."
-      ~generated_fields:[ "role"; "trait"; "keeper.goal"; "keeper.instructions" ]
-      ()
-  ; choice_effect
-      ~value:"skeptical"
-      ~effect_text:"Biases the draft toward critique, evidence checks, and assumption testing."
-      ~generated_fields:[ "role"; "trait"; "keeper.goal"; "keeper.instructions" ]
-      ()
-  ; choice_effect
-      ~value:"protective"
-      ~effect_text:"Biases the draft toward guardrails, risk spotting, and escalation language."
-      ~generated_fields:[ "role"; "trait"; "keeper.goal"; "keeper.instructions" ]
-      ()
-  ; choice_effect
-      ~value:"chaotic"
-      ~effect_text:
-        "Biases the draft toward divergent options while keeping keeper goals executable."
-      ~generated_fields:[ "role"; "trait"; "keeper.goal"; "keeper.instructions" ]
-      ()
-  ; choice_effect
-      ~value:"ruthless"
-      ~effect_text:"Biases the draft toward prioritization, pruning, and direct tradeoff calls."
-      ~generated_fields:[ "role"; "trait"; "keeper.goal"; "keeper.instructions" ]
-      ()
-  ]
-;;
-
-let operating_style_choice_effects =
-  [ choice_effect
-      ~value:"research"
-      ~effect_text:"Favors evidence gathering, synthesis, and source-grounded analysis."
-      ~generated_fields:[ "keeper.tool_preset"; "keeper.goal"; "keeper.instructions" ]
-      ~default_tool_preset:"research"
-      ()
-  ; choice_effect
-      ~value:"coding"
-      ~effect_text:"Favors repo-local implementation, test repair, and code review loops."
-      ~generated_fields:[ "keeper.tool_preset"; "keeper.goal"; "keeper.instructions" ]
-      ~default_tool_preset:"coding"
-      ()
-  ; choice_effect
-      ~value:"dispatch"
-      ~effect_text:"Favors triage, routing, task assignment, and operational follow-through."
-      ~generated_fields:[ "keeper.tool_preset"; "keeper.goal"; "keeper.instructions" ]
-      ~default_tool_preset:"dispatch"
-      ()
-  ; choice_effect
-      ~value:"social"
-      ~effect_text:"Favors conversation tracking, replies, coordination, and social context."
-      ~generated_fields:[ "keeper.tool_preset"; "keeper.goal"; "keeper.instructions" ]
-      ~default_tool_preset:"social"
-      ()
-  ; choice_effect
-      ~value:"delivery"
-      ~effect_text:"Favors milestone tracking, completion pressure, and release readiness."
-      ~generated_fields:[ "keeper.tool_preset"; "keeper.goal"; "keeper.instructions" ]
-      ~default_tool_preset:"delivery"
-      ()
-  ]
-;;
-
-let risk_posture_choice_effects =
-  [ choice_effect
-      ~value:"cautious"
-      ~effect_text:"Biases the draft toward dry runs, explicit approvals, and low autonomy."
-      ~generated_fields:[ "keeper.instructions"; "keeper.proactive_enabled" ]
-      ()
-  ; choice_effect
-      ~value:"balanced"
-      ~effect_text:"Biases the draft toward normal autonomous help with explicit escalation."
-      ~generated_fields:[ "keeper.instructions"; "keeper.proactive_enabled" ]
-      ()
-  ; choice_effect
-      ~value:"high-autonomy"
-      ~effect_text:
-        "Biases the draft toward proactive follow-through while concrete fields still \
-         require validation."
-      ~generated_fields:[ "keeper.instructions"; "keeper.proactive_enabled" ]
-      ()
-  ]
-;;
-
-let choice_effects_to_json effects = `List (List.map choice_effect_to_json effects)
-
-let choice_effect_for value effects =
-  List.find_opt (fun choice -> String.equal choice.value value) effects
-;;
+let alignment_choices = Archetypes.alignment_choices
+let operating_style_choices = Archetypes.operating_style_choices
+let risk_posture_choices = Archetypes.risk_posture_choices
+let alignment_choice_effects = Archetypes.alignment_choice_effects
+let operating_style_choice_effects = Archetypes.operating_style_choice_effects
+let risk_posture_choice_effects = Archetypes.risk_posture_choice_effects
+let choice_effect_fields = Archetypes.choice_effect_fields
+let choice_effect_for = Archetypes.choice_effect_for
+let archetype_axes_json = Archetypes.archetype_axes_json
 
 let field_catalog_json () =
   `List
@@ -312,7 +196,7 @@ let field_catalog_json () =
     ; field_catalog_entry
         ~path:"keeper.tool_preset"
         ~typ:"enum"
-        ~default:(`String "research")
+        ~default:(`String Archetypes.default_tool_preset)
         ~choices:tool_preset_choices_json
         ~field_effect:"Preset used to derive the keeper tool policy during creation."
         ()
@@ -418,38 +302,6 @@ let field_catalog_json () =
     ]
 ;;
 
-let archetype_axes_json () =
-  `List
-    [ `Assoc
-        [ "name", `String "alignment"
-        ; "choices", string_list_to_json alignment_choices
-        ; "choice_effects", choice_effects_to_json alignment_choice_effects
-        ; ( "effect"
-          , `String
-              "Generation prompt input only. The saved effect appears through role, \
-               trait, goal, and instructions." )
-        ]
-    ; `Assoc
-        [ "name", `String "operating_style"
-        ; "choices", string_list_to_json operating_style_choices
-        ; "choice_effects", choice_effects_to_json operating_style_choice_effects
-        ; ( "effect"
-          , `String
-              "Maps naturally to keeper.tool_preset and instructions when drafting a \
-               persona." )
-        ]
-    ; `Assoc
-        [ "name", `String "risk_posture"
-        ; "choices", string_list_to_json risk_posture_choices
-        ; "choice_effects", choice_effects_to_json risk_posture_choice_effects
-        ; ( "effect"
-          , `String
-              "Generation prompt input only. Save still validates concrete keeper fields."
-          )
-        ]
-    ]
-;;
-
 let personas_root_candidate () =
   let resolution = Config_dir_resolver.resolve () in
   resolution.personas.path
@@ -478,7 +330,7 @@ let schema_json ?(include_examples = false) () =
                           , `String
                               "Find weak assumptions and turn them into actionable tasks."
                           )
-                        ; "tool_preset", `String "research"
+                        ; "tool_preset", `String Archetypes.default_tool_preset
                         ; "mention_targets", string_list_to_json [ "sharp-researcher" ]
                         ] )
                   ] )
@@ -578,7 +430,9 @@ let normalize_cascade_name raw =
     | _ -> []
   in
   let known =
-    Keeper_cascade_profile.known_cascades @ [ "local_only"; "local_recovery" ] @ catalog
+    Keeper_cascade_profile.known_cascades
+    @ Keeper_config.phase_routing_cascade_names
+    @ catalog
   in
   if List.mem (String.lowercase_ascii normalized) known
   then Ok normalized
@@ -640,7 +494,7 @@ let normalize_keeper_json ~handle keeper_json =
       Result.bind result (fun goal ->
         let tool_preset_result =
           match json_trimmed_string_opt "tool_preset" keeper_json with
-          | None -> Ok "research"
+          | None -> Ok Archetypes.default_tool_preset
           | Some raw -> normalize_tool_preset raw
         in
         Result.bind tool_preset_result (fun tool_preset ->
@@ -1000,7 +854,7 @@ let generation_tool_preset args axes =
   | None ->
     (match axes.operating_style with
      | Some style -> normalize_tool_preset style
-     | None -> Ok "research")
+     | None -> Ok Archetypes.default_tool_preset)
 ;;
 
 let generation_prompt
@@ -1130,13 +984,29 @@ let handle_persona_generate ctx args =
          | Error msg -> false, error_response_typed ~code:Validation_error msg
          | Ok tool_preset ->
            let cascade_name =
-             get_string args "cascade_name" "operator_judge" |> String.trim
+             get_string args "cascade_name" Archetypes.default_generation_cascade_name
+             |> String.trim
            in
-           let cascade_name = if cascade_name = "" then "operator_judge" else cascade_name in
-           let temperature = get_float_opt args "temperature" |> Option.value ~default:0.7 in
-           let max_tokens = get_int_opt args "max_tokens" |> Option.value ~default:2500 in
-           let proactive_enabled = get_bool args "proactive_enabled" false in
-           let language = get_string args "language" "ko" |> String.trim in
+           let cascade_name =
+             if cascade_name = ""
+             then Archetypes.default_generation_cascade_name
+             else cascade_name
+           in
+           let temperature =
+             get_float_opt args "temperature"
+             |> Option.value ~default:Archetypes.default_temperature
+           in
+           let max_tokens =
+             get_int_opt args "max_tokens"
+             |> Option.value ~default:Archetypes.default_max_tokens
+           in
+           let proactive_enabled =
+             get_bool args "proactive_enabled" Archetypes.default_proactive_enabled
+           in
+           let language =
+             get_string args "language" Archetypes.default_generation_language
+             |> String.trim
+           in
            let display_name_opt = get_string_opt args "display_name" in
            let prompt =
              generation_prompt

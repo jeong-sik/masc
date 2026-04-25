@@ -401,6 +401,7 @@
    exec_core
    eval_calibration
    ;; Keeper contract
+   keeper_persona_authoring_contract
    keeper_schema
    keeper_social_model_types
    keeper_social_model_protocol
@@ -638,6 +639,7 @@
  briefing_sections
  dashboard_mission_agents
  dashboard_mission_assembly
+ keeper_persona_authoring_contract
  keeper_types_profile
  keeper_meta_tool_access
  keeper_meta_contract

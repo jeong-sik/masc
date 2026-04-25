@@ -646,7 +646,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
               |> String.lowercase_ascii
             in
             let compile_known = Keeper_cascade_profile.known_cascades in
-            let phase_routing = [ "local_only"; "local_recovery" ] in
+            let phase_routing = phase_routing_cascade_names in
             let catalog =
               try Keeper_cascade_profile.catalog_names ()
               with _ -> []

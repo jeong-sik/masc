@@ -20,6 +20,10 @@ val local_recovery_cascade_name : string
     @since Core Triad *)
 val local_only_cascade_name : string
 
+(** Cascade names that are selected by keeper phase-routing rather than by
+    keeper-assignable profile choice. *)
+val phase_routing_cascade_names : string list
+
 (** Cascade name for turns that must use a tool-capable provider lane. *)
 val tool_use_strict_cascade_name : string
 

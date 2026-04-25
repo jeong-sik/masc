@@ -523,7 +523,46 @@ let test_masc_persona_authoring_schemas () =
           Alcotest.(check bool) "generate has operating_style axis" true
             (List.mem_assoc "operating_style" props);
           Alcotest.(check bool) "generate has risk_posture axis" true
-            (List.mem_assoc "risk_posture" props)
+            (List.mem_assoc "risk_posture" props);
+          let enum_strings name =
+            match List.assoc_opt name props with
+            | Some (`Assoc fields) ->
+                (match List.assoc_opt "enum" fields with
+                 | Some (`List values) -> List.map Yojson.Safe.Util.to_string values
+                 | _ -> [])
+            | _ -> []
+          in
+          let default_string name =
+            match List.assoc_opt name props with
+            | Some (`Assoc fields) ->
+                (match List.assoc_opt "default" fields with
+                 | Some (`String value) -> value
+                 | _ -> "")
+            | _ -> ""
+          in
+          let default_bool name =
+            match List.assoc_opt name props with
+            | Some (`Assoc fields) ->
+                (match List.assoc_opt "default" fields with
+                 | Some (`Bool value) -> value
+                 | _ -> false)
+            | _ -> false
+          in
+          let module Contract = Masc_mcp.Keeper_persona_authoring_contract in
+          Alcotest.(check (list string)) "alignment enum follows contract"
+            Contract.alignment_choices (enum_strings "alignment");
+          Alcotest.(check (list string)) "operating_style enum follows contract"
+            Contract.operating_style_choices (enum_strings "operating_style");
+          Alcotest.(check (list string)) "risk_posture enum follows contract"
+            Contract.risk_posture_choices (enum_strings "risk_posture");
+          Alcotest.(check string) "language default follows contract"
+            Contract.default_generation_language (default_string "language");
+          Alcotest.(check string) "tool_preset default follows contract"
+            Contract.default_tool_preset (default_string "tool_preset");
+          Alcotest.(check string) "cascade default follows contract"
+            Contract.default_generation_cascade_name (default_string "cascade_name");
+          Alcotest.(check bool) "proactive default follows contract"
+            Contract.default_proactive_enabled (default_bool "proactive_enabled")
       | None -> Alcotest.fail "masc_persona_generate missing properties"));
   match find_tool "masc_persona_save" with
   | None -> Alcotest.fail "masc_persona_save not found"

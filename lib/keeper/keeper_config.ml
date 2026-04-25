@@ -15,6 +15,10 @@ let local_recovery_cascade_name = "local_recovery"
     Maps to local_only_* entries in cascade.json. *)
 let local_only_cascade_name = "local_only"
 
+let phase_routing_cascade_names =
+  [ local_only_cascade_name; local_recovery_cascade_name ]
+;;
+
 (** Cascade name for turns that must use a tool-capable provider lane. *)
 let tool_use_strict_cascade_name = "tool_use_strict"
 

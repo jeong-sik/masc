@@ -144,15 +144,7 @@ let runtime_contract_json_from_fields ~keeper_name ?agent_name ?trace_id
     ]
 
 let contains_substring haystack needle =
-  let haystack_len = String.length haystack in
-  let needle_len = String.length needle in
-  let rec loop i =
-    if needle_len = 0 then true
-    else if i + needle_len > haystack_len then false
-    else if String.sub haystack i needle_len = needle then true
-    else loop (i + 1)
-  in
-  loop 0
+  String_util.contains_substring haystack needle
 
 let json_string_field name = function
   | `Assoc fields -> (

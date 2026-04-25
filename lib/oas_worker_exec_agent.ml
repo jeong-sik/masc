@@ -22,6 +22,7 @@ type config = {
     Llm_provider.Llm_transport.runtime_mcp_policy option;
   max_turns : int;
   max_idle_turns : int;
+  stream_idle_timeout_s : float option;
   max_tokens : int;
   max_input_tokens : int option;
   max_cost_usd : float option;
@@ -107,6 +108,7 @@ let default_config
     runtime_mcp_policy = None;
     max_turns = 20;
     max_idle_turns = 3;
+    stream_idle_timeout_s = None;
     max_tokens = Oas_worker_cascade.default_max_tokens;
     max_input_tokens = None;
     max_cost_usd = None;
@@ -174,6 +176,11 @@ let builder_without_approval
     |> Oas.Builder.with_provider config.provider
     |> Oas.Builder.with_tools config.tools
     |> Oas.Builder.with_guardrails guardrails
+  in
+  let builder =
+    match config.stream_idle_timeout_s with
+    | Some timeout_s -> Oas.Builder.with_stream_idle_timeout timeout_s builder
+    | None -> builder
   in
   let builder =
     if config.tools <> [] then
@@ -351,6 +358,7 @@ let prepare_resume ~(config : config) ~(checkpoint : Oas.Checkpoint.t) :
       provider = Some config.provider;
       hooks = Option.value ~default:Oas.Hooks.empty config.hooks;
       max_idle_turns = config.max_idle_turns;
+      stream_idle_timeout_s = config.stream_idle_timeout_s;
       guardrails = guardrails_of_config config;
       context_reducer = config.context_reducer;
       context_injector = config.context_injector;

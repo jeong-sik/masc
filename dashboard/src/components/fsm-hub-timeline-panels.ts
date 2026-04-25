@@ -246,7 +246,7 @@ export function SwimlaneTimeline({
                   style=${`left: ${leftPct.toFixed(2)}%; transform: translateX(-50%)`}
                 >
                   <div class="h-1 w-px bg-[var(--white-10)]"></div>
-                  <div class="text-4xs font-mono leading-none mt-0.5">${tick.label}</div>
+                  <div class="text-3xs font-mono leading-none mt-0.5">${tick.label}</div>
                 </div>
               `
             })}
@@ -255,7 +255,7 @@ export function SwimlaneTimeline({
       ` : null}
       ${observations.length > 1 ? html`
         <div class="mt-0.5 flex items-center gap-2" aria-hidden="true">
-          <div class="w-11 shrink-0 text-4xs text-[var(--text-dim)] text-right">obs</div>
+          <div class="w-11 shrink-0 text-3xs text-[var(--text-dim)] text-right">obs</div>
           <div class="relative flex-1 h-2.5">
             ${observations.map((obs, obsIndex) => {
               const leftPct = ((obs.ts - spanStart) / spanWidth) * 100
@@ -426,7 +426,7 @@ export function TransitionTrail({
               <span class="text-[var(--text-dim)]">${entry.from}</span>
               <span class="text-[var(--text-muted)]">→</span>
               <span class="text-[var(--text-strong)]">${entry.to}</span>
-              ${reason ? html`<span class="ml-1 text-4xs text-[var(--text-dim)] opacity-50">ⓘ</span>` : null}
+              ${reason ? html`<span class="ml-1 text-3xs text-[var(--text-dim)] opacity-50">ⓘ</span>` : null}
             </div>
           `
         })}

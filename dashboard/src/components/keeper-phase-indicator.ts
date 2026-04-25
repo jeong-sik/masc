@@ -81,7 +81,7 @@ export function KeeperPhaseBadge({ phase, compact }: { phase?: KeeperPhase | str
       role="status"
       aria-label="${style.label}"
     >
-      <span class="text-4xs leading-none" aria-hidden="true">${style.icon}</span>
+      <span class="text-3xs leading-none" aria-hidden="true">${style.icon}</span>
       ${style.label}
     </span>
   `

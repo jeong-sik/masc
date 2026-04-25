@@ -152,12 +152,12 @@ export function InvariantsPanel({
                     ${entry.label}
                   </span>
                   ${vCount > 0 ? html`
-                    <span class="ml-auto text-4xs font-mono tabular-nums text-[var(--bad-light)]">
+                    <span class="ml-auto text-3xs font-mono tabular-nums text-[var(--bad-light)]">
                       ${vCount}/${sampleCount}
                     </span>
                   ` : null}
                 </div>
-                <div class="text-4xs leading-relaxed text-[var(--text-dim)]">
+                <div class="text-3xs leading-relaxed text-[var(--text-dim)]">
                   ${entry.detail}
                 </div>
               </div>

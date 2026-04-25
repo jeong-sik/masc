@@ -648,7 +648,7 @@ function StatusBar({
   const liveBadge = snapshot
     ? snapshot.is_live
       ? html`<span class="px-2 py-0.5 rounded-sm border text-3xs font-mono text-[var(--ok)] border-[var(--ok-20)] bg-[var(--ok-10)] animate-pulse" role="status"><span aria-hidden="true">●</span> 실행 중</span>`
-      : html`<span class="px-2 py-0.5 rounded-sm border text-3xs font-mono ${idleIsLong ? 'text-[var(--text-muted)] border-[var(--warn-20)]' : 'text-[var(--text-dim)] border-white/10'}" role="status"><span aria-hidden="true">○</span> 대기 ${idleDuration}${snapshot.last_outcome ? html` <span class="text-4xs opacity-70">· 턴 #${snapshot.last_outcome.turn_id}</span>` : ''}</span>`
+      : html`<span class="px-2 py-0.5 rounded-sm border text-3xs font-mono ${idleIsLong ? 'text-[var(--text-muted)] border-[var(--warn-20)]' : 'text-[var(--text-dim)] border-white/10'}" role="status"><span aria-hidden="true">○</span> 대기 ${idleDuration}${snapshot.last_outcome ? html` <span class="text-3xs opacity-70">· 턴 #${snapshot.last_outcome.turn_id}</span>` : ''}</span>`
     : null
 
   const staleSec = lastFetchAt > 0 ? Math.max(0, now - lastFetchAt) : 0

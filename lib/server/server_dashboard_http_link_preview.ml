@@ -201,10 +201,37 @@ let first_head_fragment body =
   | Some groups -> Re.Group.get groups 1
   | None -> String.sub body 0 (min (String.length body) max_html_chars)
 
+(* Pattern cache for [first_match].  Patterns are constructed dynamically
+   per call site (via [Printf.sprintf] inside [meta_content]/[link_href])
+   but the [attr]/[key]/[rel_value] inputs are drawn from a fixed
+   OG/Twitter/HTML vocabulary, so the unique-pattern set across a process
+   lifetime is ≤30.  Caching collapses repeat link-preview calls to a
+   single PCRE compile per distinct pattern.
+
+   [Stdlib.Mutex] (not [Eio.Mutex]) is correct here: the dashboard HTTP
+   handler may run across multiple Eio domains, and we never block
+   inside the critical section.  The compile itself happens outside the
+   lock — [Re.compile] is pure, so a racing duplicate compile is
+   harmless: both fibers produce structurally identical [Re.re] values
+   and last-writer-wins gives the same observable result. *)
+let pattern_cache : (string, Re.re) Hashtbl.t = Hashtbl.create 32
+let pattern_cache_mu = Mutex.create ()
+
+let get_or_compile_pattern pattern =
+  Mutex.lock pattern_cache_mu;
+  let cached = Hashtbl.find_opt pattern_cache pattern in
+  Mutex.unlock pattern_cache_mu;
+  match cached with
+  | Some re -> re
+  | None ->
+    let re = Re.Pcre.re ~flags:[ `CASELESS; `DOTALL ] pattern |> Re.compile in
+    Mutex.lock pattern_cache_mu;
+    Hashtbl.replace pattern_cache pattern re;
+    Mutex.unlock pattern_cache_mu;
+    re
+
 let first_match body pattern =
-  let re =
-    Re.Pcre.re ~flags:[ `CASELESS; `DOTALL ] pattern |> Re.compile
-  in
+  let re = get_or_compile_pattern pattern in
   match Re.exec_opt re body with
   | Some groups -> normalize_text (Re.Group.get groups 1)
   | None -> None

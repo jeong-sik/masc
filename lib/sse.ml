@@ -356,10 +356,17 @@ let unregister session_id =
     Lockfree_atomic.update_with_commit clients (fun state ->
       if SMap.mem session_id state.entries then
         let next_entries = SMap.remove session_id state.entries in
+        (* [state.count] is the authoritative cardinality maintained
+           by every other [update_with_commit] in this module, so
+           re-walking [next_entries] with [SMap.cardinal] (O(N) for
+           [Stdlib.Map]) is wasted work.  Slow-client storms that
+           fire [unregister] for each dropped session in
+           [broadcast_impl]'s failed list paid this O(N) cost per
+           call: N dropped × O(N) sweep = O(N²). *)
         {
           next_state = {
             entries = next_entries;
-            count = SMap.cardinal next_entries;
+            count = state.count - 1;
           };
           result = true;
         }
@@ -381,10 +388,12 @@ let unregister_if_current session_id client_id =
       match SMap.find_opt session_id state.entries with
       | Some client when client.id = client_id ->
           let next_entries = SMap.remove session_id state.entries in
+          (* Same rationale as [unregister]: state.count is
+             authoritative, [SMap.cardinal] is O(N) and unnecessary. *)
           {
             next_state = {
               entries = next_entries;
-              count = SMap.cardinal next_entries;
+              count = state.count - 1;
             };
             result = true;
           }

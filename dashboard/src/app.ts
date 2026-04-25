@@ -17,6 +17,7 @@ import { requestNamespaceTruthNow, disposeNamespaceTruthScheduler } from './name
 import { cancelPendingSSERefreshes, registerMissionRefresh, setupSSEReaction, startPeriodicRefresh, stopPeriodicRefresh } from './sse-store'
 import { refreshShell } from './store'
 import { connectDashboardWS, disconnectDashboardWS, subscribeDashboardRoute } from './dashboard-ws'
+import { dashboardWsOnlyEnabled } from './dashboard-ws-cutover'
 import { ensureDevToken } from './api/dev-token'
 import {
   BuildIdentityBadge,
@@ -84,6 +85,11 @@ function refreshCurrentRoute(options?: { recordVisit?: boolean }): void {
 export function App() {
   useEffect(() => {
     let cancelled = false
+    // Resolved once per mount; runtime changes require a reload.  The
+    // server-side fanout guarantees every event that hits /sse also hits
+    // the WS external-subscriber path, so turning SSE off is safe when
+    // operators have validated the WS channel in their environment.
+    const wsOnly = dashboardWsOnlyEnabled()
 
     // Initialize hash router and compatible deep links
     initRouter()
@@ -109,7 +115,13 @@ export function App() {
           .finally(() => {
             if (cancelled) return
             void connectDashboardWS(route.value)
-            connectSSE()
+            // In cutover mode the WS channel is trusted to carry every
+            // broadcast (it is already registered as an Sse external
+            // subscriber on the server).  Opening the /sse EventSource in
+            // parallel only duplicates delivery; skip it.
+            if (!wsOnly) {
+              connectSSE()
+            }
             resumeQueuedOasRuntimeIngress()
           })
       })
@@ -136,7 +148,9 @@ export function App() {
     return () => {
       cancelled = true
       disconnectDashboardWS()
-      disconnectSSE()
+      if (!wsOnly) {
+        disconnectSSE()
+      }
       unsubSSE()
       stopPeriodicRefresh()
       stopErrorCleanup()

@@ -79,8 +79,8 @@ function IxPrFiles({ branch = "main" }) {
       <K3Header title="E3-B · files changed" meta={`${branch} · ${rows.length} files`} right={<span className="ix-sort" role="radiogroup" aria-label="Sort files by">{["review", "alpha", "size"].map(s => <button key={s} type="button" role="radio" aria-checked={sort === s} className={sort === s ? "on" : ""} onClick={() => setSort(s)}>{s}</button>)}</span>} />
       <div className="ix-pr-files" role="tree" aria-label={`${rows.length} changed files`}>
         {rows.map(file => (
-          <div key={file.path} role="treeitem" aria-level="1" aria-expanded={open.has(file.path)} aria-label={`${file.path}, ${file.status}, +${file.adds} −${file.dels}, review ${file.review}`} className="ix-pr-file">
-            <div className="row" tabIndex={0} onClick={() => toggle(file.path)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(file.path); } }}>
+          <div key={file.path} role="treeitem" aria-level="1" aria-expanded={open.has(file.path)} aria-label={`${file.path}, ${file.status}, +${file.adds} −${file.dels}, review ${file.review}`} tabIndex={0} className="ix-pr-file" onClick={() => toggle(file.path)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(file.path); } }}>
+            <div className="row">
               <span className="tw" aria-hidden="true">{open.has(file.path) ? "▾" : "▸"}</span>
               <span className="path">{file.path}</span>
               <span className={`st ${file.status}`}>{file.status}</span>

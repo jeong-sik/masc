@@ -1113,12 +1113,15 @@
 .ix-edit button:focus-visible,
 .ix-edit input:focus-visible,
 .ix-edit [role="radio"]:focus-visible,
+.ix-edit [role="listitem"][tabindex="0"]:focus-visible,
 .ix-pr button:focus-visible,
 .ix-pr input:focus-visible,
 .ix-pr [role="treeitem"]:focus-visible,
+.ix-pr [role="button"]:focus-visible,
 .ix-graph button:focus-visible,
 .ix-graph [role="listitem"]:focus-visible,
-.ix-term:focus-visible,
+.ix-graph [role="button"]:focus-visible,
+.ix-term-body:focus-visible,
 .ix-search button:focus-visible,
 .ix-search input:focus-visible {
   outline:2px solid var(--color-focus-ring);
@@ -1128,9 +1131,14 @@
 
 /* Active state for buttons that act as tabs/radios — ARIA-driven, not class-driven. */
 .ix-tree-tabs button[aria-selected="true"],
-.ix-edit-merge .ix-merge-actions button[aria-pressed="true"],
-.ix-pr-files .ix-sort button[aria-pressed="true"],
-.ix-graph-filters button[aria-pressed="true"] {
+.ix-tree-filter button[aria-checked="true"],
+.ix-edit-merge .ix-merge-actions button[aria-checked="true"],
+.ix-pr-files .ix-sort button[aria-checked="true"],
+.ix-graph-filters button[aria-checked="true"],
+.ix-tree button[aria-pressed="true"],
+.ix-edit button[aria-pressed="true"],
+.ix-pr button[aria-pressed="true"],
+.ix-search button[aria-pressed="true"] {
   color:var(--brass-1); border-color:var(--brass-3); background:rgb(var(--brass-glow)/.08);
 }
 

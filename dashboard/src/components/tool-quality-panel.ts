@@ -122,7 +122,13 @@ function RateGauge({ rate, label }: { rate: number; label: string }) {
     <div class="flex flex-col gap-1">
       <div class="text-3xs text-[var(--text-dim)] uppercase tracking-wider">${label}</div>
       <div class="flex items-center gap-2">
-        <div class="flex-1 h-1.5 bg-[var(--bg-subtle)] rounded-sm overflow-hidden">
+        <div class="flex-1 h-1.5 bg-[var(--bg-subtle)] rounded-sm overflow-hidden"
+          role="progressbar"
+          aria-valuenow=${rate.toFixed(1)}
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-label=${`${label} ${rate.toFixed(1)}%`}
+        >
           <div class="${color} h-full rounded-sm transition-all" style="width: ${Math.min(rate, 100)}%" />
         </div>
         <span class="text-xs font-mono ${rate >= 95 ? 'text-[var(--ok)]' : rate >= 90 ? 'text-[var(--warn)]' : 'text-[var(--bad-light)]'}">${rate.toFixed(1)}%</span>
@@ -247,7 +253,13 @@ function KeeperRateBars({ keepers }: { keepers: KeeperStat[] }) {
         return html`
           <div class="flex items-center gap-2 text-2xs">
             <span class="w-24 truncate text-[var(--text-dim)] font-mono" title=${k.name}>${k.name}</span>
-            <div class="flex-1 h-1.5 bg-[var(--bg-subtle)] rounded-sm overflow-hidden">
+            <div class="flex-1 h-1.5 bg-[var(--bg-subtle)] rounded-sm overflow-hidden"
+              role="progressbar"
+              aria-valuenow=${k.success_pct.toFixed(1)}
+              aria-valuemin="0"
+              aria-valuemax="100"
+              aria-label=${`${k.name} 성공률 ${k.success_pct.toFixed(1)}%`}
+            >
               <div class="${color} h-full rounded-sm transition-all" style="width:${Math.min(k.success_pct, 100)}%" />
             </div>
             <span class="w-12 text-right font-mono ${textColor}">${k.success_pct.toFixed(1)}%</span>

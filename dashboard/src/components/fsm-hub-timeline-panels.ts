@@ -480,7 +480,13 @@ export function TopTransitionsPanel({
               <span class="text-[var(--text-muted)]">→</span>
               <span class="text-[var(--text-strong)]">${displayState(entry.to)}</span>
               <span class="ml-auto flex items-center gap-1.5 shrink-0">
-                <span class="h-1 w-12 rounded-sm bg-[var(--white-8)] overflow-hidden">
+                <span class="h-1 w-12 rounded-sm bg-[var(--white-8)] overflow-hidden"
+                  role="progressbar"
+                  aria-valuenow=${entry.count}
+                  aria-valuemin="0"
+                  aria-valuemax=${maxCount}
+                  aria-label=${`${entry.state} ${entry.count}회`}
+                >
                   <span
                     class="block h-full bg-[var(--accent)]"
                     style=${`width: ${widthPct}%`}

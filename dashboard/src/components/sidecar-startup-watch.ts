@@ -120,7 +120,7 @@ export function StartupCheckBanner({ connectorId, sidecarUp }: {
         class="shrink-0 cursor-pointer rounded border border-[var(--warn-20)] px-1.5 py-0.5 text-base leading-none text-[var(--warn)]/70 hover:text-[var(--warn)]"
         aria-label="dismiss startup warning"
         onClick=${() => clearStartAttempt(connectorId)}
-      >×</button>
+      ><span aria-hidden="true">×</span></button>
     </div>
   `
 }

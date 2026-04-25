@@ -938,7 +938,7 @@ function CollapsibleZone({
         aria-controls=${`zone-${id}`}
       >
         <span class="text-3xs font-semibold uppercase tracking-1 text-[var(--text-muted)]">${zoneTitle}</span>
-        <span class=${`text-3xs text-[var(--text-dim)] transition-transform duration-200 ${collapsed ? '' : 'rotate-180'}`}>▾</span>
+        <span class=${`text-3xs text-[var(--text-dim)] transition-transform duration-200 ${collapsed ? '' : 'rotate-180'}`} aria-hidden="true">▾</span>
       </button>
       ${!collapsed ? html`<div id=${`zone-${id}`} class="px-4 pb-3">${children}</div>` : null}
     </div>

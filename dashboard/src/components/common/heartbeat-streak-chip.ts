@@ -73,7 +73,7 @@ export function HeartbeatStreakChip({
   >
     <span aria-hidden="true">${STATE_GLYPH[streak.state]}</span>
     <span>${STATE_LABEL[streak.state]}</span>
-    <span class="text-[var(--text-dim)]">×</span>
+    <span class="text-[var(--text-dim)]" aria-hidden="true">×</span>
     <span>${streak.samples}</span>
   </span>`
 }

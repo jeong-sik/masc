@@ -865,7 +865,7 @@ function ConnectorLivePanel({
             class="cursor-pointer rounded border border-[var(--card-border)] px-1.5 text-2xs text-[var(--text-dim)] hover:text-[var(--text-body)]"
             aria-label="toggle header details"
             onClick=${() => { patchConnectorUiState(connectorId, { headerExpanded: !ui.headerExpanded }) }}
-          >${ui.headerExpanded ? '▴' : '▾'}</button>
+          ><span aria-hidden="true">${ui.headerExpanded ? '▴' : '▾'}</span></button>
         </span>
       </div>
 

@@ -573,7 +573,7 @@ export function MemorySubsystems() {
           class="w-full flex items-center justify-between p-2 bg-[var(--white-5)] rounded hover:bg-[var(--white-5)] transition-colors"
         >
           <span class="text-sm font-semibold text-[var(--text-muted)] flex items-center gap-2">
-            <span class="text-xs">${showArch.value ? '▼' : '▶'}</span>
+            <span class="text-xs" aria-hidden="true">${showArch.value ? '▼' : '▶'}</span>
             아키텍처 — 데이터 흐름도
           </span>
           <span class="text-xs text-[var(--text-muted)]">
@@ -687,7 +687,7 @@ export function MemorySubsystems() {
                   class="ml-auto text-[var(--text-muted)] hover:text-[var(--text-muted)]"
                   onClick=${() => setSynapsePairFilter(null)}
                   aria-label="시냅스 쌍 필터 해제"
-                >✕</button>
+                ><span aria-hidden="true">✕</span></button>
               </div>`
             : null
         }

@@ -26,9 +26,12 @@ let default_binding_audit_path = ".gate/runtime/imessage/binding_audit.jsonl"
 (* Legacy paths from the pre-v0.9.0 layout. Read-fallback picks these up
    once so operators see a transparent migration on the next write — see
    configured_read_path below. *)
-let legacy_status_path = ".masc/connectors/imessage/status.json"
-let legacy_binding_store_path = ".masc/connectors/imessage/bindings.json"
-let legacy_binding_audit_path = ".masc/connectors/imessage/binding_audit.jsonl"
+let legacy_status_path =
+  Filename.concat Common.masc_dirname "connectors/imessage/status.json"
+let legacy_binding_store_path =
+  Filename.concat Common.masc_dirname "connectors/imessage/bindings.json"
+let legacy_binding_audit_path =
+  Filename.concat Common.masc_dirname "connectors/imessage/binding_audit.jsonl"
 
 let stale_after_sec () =
   Env_config_core.get_int ~default:30 "MASC_IMESSAGE_STATUS_STALE_SEC"

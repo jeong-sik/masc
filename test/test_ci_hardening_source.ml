@@ -982,18 +982,30 @@ let test_masc_dirname_ssot_contracts () =
     (* batch 4 (#10262) *)
     "lib/server/server_routes_http_routes_dashboard.ml";
     "lib/keeper/keeper_approval_queue.ml";
-    (* batch 5 (this PR — sidecar relative paths and keeper_status_detail evidence dir) *)
+    (* batch 5 (#10266) *)
     "lib/server/server_routes_http_routes_sidecar.ml";
     "lib/keeper/keeper_status_detail.ml";
+    (* batch 6 (this PR — gate channel state legacy paths, relative-only) *)
+    "lib/gate/channel_gate_discord_state.ml";
+    "lib/gate/channel_gate_imessage_state.ml";
+    "lib/gate/channel_gate_discord_names.ml";
+  ] in
+  (* Accepted SSOT helper references.  Listed explicitly rather than using
+     a substring matcher so each form is auditable.  Add new references
+     here when a future batch introduces a new alias or helper. *)
+  let masc_dir_helper_patterns = [
+    "Common.masc_dir_from_base_path";       (* base-rooted helper *)
+    "Masc_paths.masc_dir_from_base_path";   (* alias re-export *)
+    "Common.masc_dirname";                  (* relative-only constant *)
   ] in
   let file_uses_masc_dir_helper file =
-    file_contains_pattern file "Common.masc_dir_from_base_path"
-    || file_contains_pattern file "Masc_paths.masc_dir_from_base_path"
+    List.exists (fun p -> file_contains_pattern file p)
+      masc_dir_helper_patterns
   in
   List.iter
     (fun file ->
        check bool
-         (Printf.sprintf "%s uses an approved masc_dir_from_base_path helper" file)
+         (Printf.sprintf "%s references an approved masc_dir SSOT helper" file)
          true
          (file_uses_masc_dir_helper file);
        check bool

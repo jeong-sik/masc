@@ -34,9 +34,12 @@ let default_binding_audit_path = ".gate/runtime/discord/binding_audit.jsonl"
    `sidecars/discord-bot/.gate/*` layouts from the 2026-Q1 era are no
    longer auto-discovered; operators using them must set the explicit
    MASC_DISCORD_*_PATH env vars. *)
-let legacy_status_path = ".masc/connectors/discord/status.json"
-let legacy_binding_store_path = ".masc/connectors/discord/bindings.json"
-let legacy_binding_audit_path = ".masc/connectors/discord/binding_audit.jsonl"
+let legacy_status_path =
+  Filename.concat Common.masc_dirname "connectors/discord/status.json"
+let legacy_binding_store_path =
+  Filename.concat Common.masc_dirname "connectors/discord/bindings.json"
+let legacy_binding_audit_path =
+  Filename.concat Common.masc_dirname "connectors/discord/binding_audit.jsonl"
 
 let stale_after_sec () =
   Env_config_core.get_int ~default:30 "MASC_DISCORD_STATUS_STALE_SEC"

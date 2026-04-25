@@ -467,8 +467,9 @@ function EntryRow({ entry }: { entry: TelemetryEntry }) {
         class="w-full flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer select-none text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
         onClick=${() => { expanded.value = !expanded.value }}
         aria-expanded=${expanded.value}
+        aria-label=${`${meta.label} 텔레메트리 항목${expanded.value ? ' 축소' : ' 확장'}`}
       >
-        <span class="font-mono font-bold ${meta.color} w-4 text-center flex-shrink-0">${meta.icon}</span>
+        <span class="font-mono font-bold ${meta.color} w-4 text-center flex-shrink-0" aria-hidden="true">${meta.icon}</span>
         <${TimeAgo} timestamp=${ts} class="font-mono text-[var(--text-muted)] w-28 flex-shrink-0" />
         ${success != null ? html`
           <span class="flex-shrink-0 w-4 ${success ? 'text-[var(--ok)]' : 'text-[var(--bad-light)]'}">
@@ -516,9 +517,10 @@ function GroupRow({ item }: { item: Extract<TelemetryDisplayItem, { kind: 'group
         class="w-full flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer select-none text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
         aria-expanded=${expanded.value}
         aria-controls=${contentId}
+        aria-label=${`${meta.label} · ${item.label} · ${item.count}건${expanded.value ? ' 축소' : ' 확장'}`}
         onClick=${() => { expanded.value = !expanded.value }}
       >
-        <span class="font-mono font-bold ${meta.color} w-4 text-center flex-shrink-0">${meta.icon}</span>
+        <span class="font-mono font-bold ${meta.color} w-4 text-center flex-shrink-0" aria-hidden="true">${meta.icon}</span>
         <span class="font-mono text-[var(--text-muted)] w-28 flex-shrink-0" title=${`${formatTs(item.oldestTs)} → ${formatTs(item.latestTs)}`}>
           ${timeAgoSafe(item.latestTs)}
         </span>

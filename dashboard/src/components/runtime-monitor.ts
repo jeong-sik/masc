@@ -595,6 +595,7 @@ export function RuntimeMonitor() {
                         class="text-2xs text-[var(--text-muted)] hover:text-[var(--text-strong)] mt-1 text-left"
                         aria-expanded=${expandedModel.value === metric.model_id}
                         aria-controls=${`recent-entries-${metric.model_id}`}
+                        aria-label=${`${metric.model_id} 최근 ${metric.recent_entries?.length ?? 0}건${expandedModel.value === metric.model_id ? ' 축소' : ' 확장'}`}
                         onClick=${() => { expandedModel.value = expandedModel.value === metric.model_id ? null : metric.model_id }}
                       >
                         <span aria-hidden="true">${expandedModel.value === metric.model_id ? '▾' : '▸'}</span> recent ${metric.recent_entries?.length ?? 0} turns

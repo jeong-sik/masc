@@ -196,6 +196,13 @@ export function PersonaGenerator() {
             </div>
             <div class="max-h-56 overflow-auto">
               <table class="w-full text-left text-3xs" aria-label="스키마 필드 카탈로그">
+                <thead class="sr-only">
+                  <tr>
+                    <th scope="col">경로</th>
+                    <th scope="col">타입</th>
+                    <th scope="col">설명</th>
+                  </tr>
+                </thead>
                 <tbody>
                   ${schema.fieldCatalog.map(field => html`
                     <tr key=${field.path} class="border-b border-[var(--white-6)] align-top">

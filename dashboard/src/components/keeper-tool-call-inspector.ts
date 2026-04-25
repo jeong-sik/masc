@@ -71,6 +71,7 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
       <button type="button"
         class="w-full flex items-center gap-2 px-3 py-2 text-xs cursor-pointer text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
         aria-expanded=${expanded.value}
+        aria-label=${`${entry.tool} 도구 호출${expanded.value ? ' 접기' : ' 펼치기'}`}
         onClick=${() => { expanded.value = !expanded.value }}
       >
         <span class="font-mono ${cat.color} w-4 text-center flex-shrink-0">${cat.icon}</span>

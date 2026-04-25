@@ -217,6 +217,7 @@ function BroadcastReport({ report, index }: { report: { ts: string; content: str
         class="w-full flex items-center justify-between px-4 py-2.5 bg-white/3 border-b border-card-border/40 cursor-pointer select-none text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
         onClick=${() => setExpanded(!expanded)}
         aria-expanded=${expanded}
+        aria-label=${`세션 리포트${expanded ? ' 접기' : ' 펼치기'}`}
       >
         <div class="flex items-center gap-2">
           <span class="size-2 rounded-sm ${index === 0 ? 'bg-accent' : 'bg-white/20'}"></span>

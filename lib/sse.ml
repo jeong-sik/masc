@@ -533,13 +533,16 @@ let remove_external_subscribers ids =
     Dead subscribers (where [is_alive] returns [false]) are automatically
     removed during iteration, preventing resource leaks. *)
 let notify_external_subscribers event =
-  let snapshot =
-    SMap.fold
-      (fun _ v acc -> v :: acc)
-      (Atomic.get external_subscribers).subscribers []
-  in
+  (* [Atomic.get] returns an immutable [SMap.t] snapshot — concurrent
+     subscribe/unsubscribe builds a new map via [Lockfree_atomic.update_with_commit]
+     and never mutates the one we hold here. So we can iterate the map
+     directly without first materializing it as a list, saving one [cons]
+     per subscriber per broadcast. At fleet sizes (14 keepers × dashboard
+     subs ≈ 30-50) and high event rates this trims sustained allocation
+     pressure on the hot fanout path. *)
+  let subscribers = (Atomic.get external_subscribers).subscribers in
   let dead = ref [] in
-  List.iter (fun (sub : external_subscriber) ->
+  SMap.iter (fun _ (sub : external_subscriber) ->
     if not (sub.is_alive ()) then
       dead := sub.sub_id :: !dead
     else begin
@@ -550,7 +553,7 @@ let notify_external_subscribers event =
         Log.Misc.warn "External subscriber %s failed: %s"
           sub.sub_id (Printexc.to_string exn)
     end
-  ) snapshot;
+  ) subscribers;
   (* Remove dead subscribers *)
   if !dead <> [] then begin
     let removed_ids, count = remove_external_subscribers !dead in
@@ -567,16 +570,15 @@ let notify_external_subscribers event =
     removes dead ones.  Call periodically from the background maintenance loop
     to prevent stale subscribers from accumulating when no broadcasts occur. *)
 let reap_dead_external_subscribers () =
-  let snapshot =
-    SMap.fold
-      (fun _ v acc -> v :: acc)
-      (Atomic.get external_subscribers).subscribers []
-  in
+  (* Same rationale as [notify_external_subscribers]: the [SMap.t] from
+     [Atomic.get] is immutable, so we iterate it directly instead of
+     allocating a list snapshot first. *)
+  let subscribers = (Atomic.get external_subscribers).subscribers in
   let dead = ref [] in
-  List.iter (fun (sub : external_subscriber) ->
+  SMap.iter (fun _ (sub : external_subscriber) ->
     if not (sub.is_alive ()) then
       dead := sub.sub_id :: !dead
-  ) snapshot;
+  ) subscribers;
   let removed_ids =
     if !dead <> [] then begin
       let removed_ids, count = remove_external_subscribers !dead in

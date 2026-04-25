@@ -15,17 +15,27 @@ pr_is_draft="${PR_LIVE_IS_DRAFT:-${PR_IS_DRAFT:-false}}"
 pr_title="${PR_TITLE:-}"
 pr_head_ref="${PR_HEAD_REF:-}"
 pr_labels_csv="${PR_LIVE_LABELS:-${PR_LABELS:-}}"
+pr_live_state="${PR_LIVE_STATE:-}"
 
+lower() {
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
+}
+
+if [[ -n "$pr_live_state" ]]; then
+  echo "agent draft policy: using live PR state ${pr_live_state}"
+  case "$(lower "$pr_live_state")" in
+    merged|closed)
+      echo "agent draft policy: skipped for ${pr_live_state} PR"
+      exit 0
+      ;;
+  esac
+fi
 if [[ -n "${PR_LIVE_IS_DRAFT:-}" ]]; then
   echo "agent draft policy: using live PR draft state ${PR_LIVE_IS_DRAFT}"
 fi
 if [[ -n "${PR_LIVE_LABELS:-}" ]]; then
   echo "agent draft policy: using live PR labels ${PR_LIVE_LABELS}"
 fi
-
-lower() {
-  printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
-}
 
 csv_has_label() {
   local csv="$1"

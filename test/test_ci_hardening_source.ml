@@ -83,6 +83,8 @@ let test_ci_sync_and_asset_contracts () =
     (file_contains_pattern ".github/workflows/ci.yml" "PR_LIVE_IS_DRAFT");
   check bool "ci gate refreshes live labels" true
     (file_contains_pattern ".github/workflows/ci.yml" "PR_LIVE_LABELS");
+  check bool "ci gate refreshes live PR state" true
+    (file_contains_pattern ".github/workflows/ci.yml" "PR_LIVE_STATE");
   check bool "pr hygiene no longer checks dashboard assets (gitignored)" true
     (not (file_contains_pattern "scripts/check-pr-hygiene.sh" "dashboard source or Vite config changed but assets/dashboard was not updated"))
 
@@ -112,6 +114,9 @@ let test_agent_draft_policy_script () =
        :: ("PR_LIVE_LABELS", "enhancement,human-approved-ready")
        :: ("PR_IS_DRAFT", "true")
        :: base));
+  check int "merged PR no longer fails late label cleanup" 0
+    (run_agent_draft_policy
+       (("PR_LIVE_STATE", "MERGED") :: ("PR_IS_DRAFT", "false") :: base));
   check bool "ready agent PR without bypass fails" true
     (run_agent_draft_policy (("PR_IS_DRAFT", "false") :: base) <> 0);
   check int "ready agent PR with bypass label passes" 0

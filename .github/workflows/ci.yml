@@ -715,6 +715,10 @@ jobs:
           AGENT_DRAFT_GUARD_BYPASS_LABELS: ${{ vars.AGENT_DRAFT_GUARD_BYPASS_LABELS }}
         run: |
           if command -v gh >/dev/null 2>&1 && [ -n "${PR_NUMBER:-}" ]; then
+            live_state="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json state --jq '.state' 2>/dev/null || true)"
+            if [ -n "$live_state" ]; then
+              export PR_LIVE_STATE="$live_state"
+            fi
             live_is_draft="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft' 2>/dev/null || true)"
             if [ "$live_is_draft" = "true" ] || [ "$live_is_draft" = "false" ]; then
               export PR_LIVE_IS_DRAFT="$live_is_draft"

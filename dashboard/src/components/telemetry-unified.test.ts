@@ -216,6 +216,22 @@ describe('TelemetryUnified', () => {
     expect(container.textContent).toContain('5 public')
   })
 
+  it('renders a telemetry entry raw JSON copy action', async () => {
+    const fetchTelemetry = vi.fn().mockResolvedValue(baseTelemetry)
+    const fetchTelemetrySummary = vi.fn().mockResolvedValue(baseSummary)
+    const { TelemetryUnified } = await loadPanel(fetchTelemetry, fetchTelemetrySummary)
+
+    await act(async () => {
+      render(html`<${TelemetryUnified} />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    const copyButton = container.querySelector('[aria-label="Copy telemetry entry JSON"]') as HTMLButtonElement | null
+    expect(copyButton).not.toBeNull()
+    expect(copyButton?.getAttribute('title')).toBe('Copy telemetry entry JSON')
+  })
+
   it('condenses consecutive noisy telemetry into grouped categories', async () => {
     const fetchTelemetry = vi.fn().mockResolvedValue({
       ...baseTelemetry,

@@ -69,8 +69,6 @@ let provider_info_to_json (info : H.provider_info) : Yojson.Safe.t =
     ; ("rejected_in_window", `Int info.rejected_in_window)
     ; ("top_fingerprints", fingerprints)
     ; ("last_failure_at", last_failure_at)
-    ; ("trust_score", `Float info.trust_score)
-    ; ("same_fingerprint_count", `Int info.same_fingerprint_count)
     ]
 
 let snapshot_to_json ~ts (infos : H.provider_info list) : Yojson.Safe.t =

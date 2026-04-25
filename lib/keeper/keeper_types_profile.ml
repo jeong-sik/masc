@@ -932,6 +932,28 @@ let load_keeper_toml (path : string)
           let id = Ids.Keeper_id.generate ~name ~path in
           Ok (name, { defaults with manifest_path = Some path; id = Some id })
 
+(* #10259: every reconcile cycle calls [discover_keepers_toml], so a
+   persistent fail mode (4 keepers stuck on cascade_name "ollama_only"
+   while the materializer rejects it) emits 4 identical WARNs per
+   cycle — 16+ events in a 43-minute window of system_log.  Dedup by
+   [(filename, error_text)] so an unchanged failure is logged only on
+   first observation; a *new* error text for the same file still
+   emits, and a fresh process starts the table empty so restart
+   diagnoses survive.  Mirrors the [logged_invalid_fallback] pattern
+   in [Keeper_cascade_profile]. *)
+let logged_toml_skip : (string * string, unit) Hashtbl.t = Hashtbl.create 8
+
+let log_toml_skip_once ~file ~error =
+  let key = (file, error) in
+  if Hashtbl.mem logged_toml_skip key then false
+  else begin
+    Hashtbl.add logged_toml_skip key ();
+    Log.Keeper.warn "toml_loader: skipping %s: %s" file error;
+    true
+  end
+
+let reset_logged_toml_skip_for_test () = Hashtbl.clear logged_toml_skip
+
 let discover_keepers_toml (dir : string)
     : (string * keeper_profile_defaults) list =
   if not (Fs_compat.file_exists dir && Sys.is_directory dir) then []
@@ -946,7 +968,7 @@ let discover_keepers_toml (dir : string)
          match load_keeper_toml path with
          | Ok pair -> Some pair
          | Error e ->
-           Log.Keeper.warn "toml_loader: skipping %s: %s" f e;
+           let _emitted = log_toml_skip_once ~file:f ~error:e in
            None)
 
 let keeper_toml_path_opt name =

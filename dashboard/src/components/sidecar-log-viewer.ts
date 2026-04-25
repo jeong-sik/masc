@@ -127,7 +127,7 @@ export function SidecarLogToggle({ connectorId }: { connectorId: string }) {
       aria-expanded=${entry.open}
       aria-controls=${`sidecar-log-${connectorId}`}
       onClick=${onClick}
-    >📋 Logs</button>
+    ><span aria-hidden="true">📋</span> Logs</button>
   `
 }
 

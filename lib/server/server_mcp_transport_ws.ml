@@ -535,8 +535,13 @@ let parse_sse_dashboard_event sse_event =
     result
   end
 
-let dashboard_delta_for_sse session sse_event =
-  match parse_sse_dashboard_event sse_event with
+(** Build a dashboard/delta notification from an already-parsed SSE
+    event when the session subscribes to its slice.  Pulled out of the
+    earlier [dashboard_delta_for_sse] so callers that already have the
+    parsed event in hand do not re-enter [parse_sse_dashboard_event]
+    just to feed it back through; see [send_dashboard_or_raw_sse]. *)
+let dashboard_delta_for_parsed session parsed =
+  match parsed with
   | Some { event_type; slice = Some slice; payload; broadcast_ts }
     when Hashtbl.mem session.dashboard_slices slice ->
       Transport_metrics.inc_ws_delta_built ();
@@ -553,6 +558,9 @@ let dashboard_delta_for_sse session sse_event =
                ("ts_unix", `Float broadcast_ts);
              ]))
   | _ -> None
+
+let dashboard_delta_for_sse session sse_event =
+  dashboard_delta_for_parsed session (parse_sse_dashboard_event sse_event)
 
 (** TTL cache for env-var reads on the fan-out hot path.
 
@@ -640,8 +648,17 @@ let send_dashboard_or_raw_sse session sse_event =
     Transport_metrics.inc_ws_throttled_delivery ();
     true
   end
-  else if session.dashboard_authenticated then
-    match dashboard_delta_for_sse session sse_event with
+  else if session.dashboard_authenticated then begin
+    (* Parse once and reuse for both the delta-build branch and the
+       slice-mismatch decision.  parse_sse_dashboard_event hits a
+       single-slot Atomic cache after the broadcast's first call, but
+       even the cache-hit path costs an Atomic.get + physical eq +
+       counter increment per invocation — so calling it twice per
+       session per broadcast doubles those constants for no signal
+       difference.  At fanout fleet scale (100+ authenticated dashboard
+       sessions) the second call is pure overhead. *)
+    let parsed = parse_sse_dashboard_event sse_event in
+    match dashboard_delta_for_parsed session parsed with
     | Some delta ->
         (* Delta carries a per-session [seq], so the encoded text is unique
            per session and cannot be shared. *)
@@ -660,13 +677,13 @@ let send_dashboard_or_raw_sse session sse_event =
               raw-forward so events outside the slice vocabulary still
               reach authenticated sessions.
 
-           [parse_sse_dashboard_event] is the cached source of truth
-           for which case applies.  A [Some _] result with a [Some
-           slice] field means case 1 (slice known, session did not
-           subscribe — [dashboard_delta_for_sse] would have returned
-           [Some] otherwise).  Anything else is case 2. *)
+           [parsed] (captured above) is the source of truth for which
+           case applies.  A [Some _] result with a [Some slice] field
+           means case 1 (slice known, session did not subscribe —
+           [dashboard_delta_for_parsed] would have returned [Some]
+           otherwise).  Anything else is case 2. *)
         let is_slice_mismatch =
-          match parse_sse_dashboard_event sse_event with
+          match parsed with
           | Some { slice = Some _; _ } -> true
           | _ -> false
         in
@@ -679,6 +696,7 @@ let send_dashboard_or_raw_sse session sse_event =
              does not match a subscribed dashboard slice; the shared cache
              collapses N identical [Bytes.of_string] allocations into 1. *)
           send_text_shared_checked ~context:"sse-forward" session sse_event
+  end
   else
     send_text_shared_checked ~context:"sse-forward" session sse_event
 

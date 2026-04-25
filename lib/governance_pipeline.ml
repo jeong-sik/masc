@@ -323,8 +323,21 @@ let to_oas_approval_callback
         Option.bind meta (fun (m : Keeper_types.keeper_meta) -> m.always_approve)
         |> Option.value ~default:false
       in
+      (* Routine allowlist: code-defined narrow auto-approval for keeper
+         task lifecycle. Covers masc_transition routine actions
+         (claim, start, heartbeat, done, release), keeper_board_post at
+         Low or Medium risk, and keeper_task_claim or _done or
+         _submit_for_verification. Gated by [forbidden] so destructive
+         actions (force_ prefixed, shell, git, Critical risk) still
+         require operator approval. See keeper_routine_allowlist.mli. *)
+      let routine_label =
+        if forbidden then None
+        else
+          Keeper_routine_allowlist.rule_label ~tool_name ~input
+            ~risk_level
+      in
       let rule_match =
-        if forbidden then
+        if forbidden || Option.is_some routine_label then
           None
         else
           Keeper_approval_queue.find_matching_rule
@@ -340,6 +353,20 @@ let to_oas_approval_callback
           ~goal_ids:(Option.value ~default:[] goal_ids) ?runtime_contract
           ?selected_model ~disposition:"Pass"
           ~disposition_reason:"always_approve_enabled" ~auto_approved:true ();
+        Oas.Hooks.Approve
+      ) else if Option.is_some routine_label then (
+        let label = Option.get routine_label in
+        Keeper_approval_queue.audit_approval_event
+          ?base_path
+          ~event_type:"auto_approved_keeper_routine"
+          ~id:(Printf.sprintf "auto_routine_%s_%s" keeper_name tool_name)
+          ~keeper_name ~tool_name ~risk_level ?turn_id ?task_id ?goal_id
+          ~goal_ids:(Option.value ~default:[] goal_ids) ?runtime_contract
+          ?selected_model ~disposition:"Pass"
+          ~disposition_reason:label ~auto_approved:true ();
+        Log.Governance.debug
+          "[%s] keeper-routine auto-approve tool=%s risk=%s label=%s"
+          keeper_name tool_name (risk_level_to_string risk) label;
         Oas.Hooks.Approve
       ) else
         match rule_match with

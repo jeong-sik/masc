@@ -605,6 +605,7 @@
         test_tool_result
         test_tool_hooks
         test_governance_pipeline
+        test_keeper_routine_allowlist
         test_keeper_agent_isolation
         test_sse_external_sub
         test_ws_transport
@@ -780,6 +781,7 @@
         test_tool_result
         test_tool_hooks
         test_governance_pipeline
+        test_keeper_routine_allowlist
         test_keeper_agent_isolation
         test_sse_external_sub
         test_ws_transport

@@ -354,6 +354,25 @@ module Verification = struct
     get_float ~default:60.0 "MASC_VERIFICATION_TIMEOUT_CHECK_INTERVAL_SEC"
 end
 
+(** {1 Goal Janitor}
+
+    #10405: Goal_janitor.run was only invoked from the dashboard
+    DELETE handler.  4 goals stagnated for 4 days with [last_review_at
+    = null] and [goals_snapshots/] empty.  Add a periodic background
+    fiber that sweeps stagnated goals on a 1-hour cadence by default. *)
+module Goal_janitor = struct
+  (** Enable the periodic goal_janitor sweep fiber.  Default: true.
+      Set MASC_GOAL_JANITOR_ENABLED=false to disable when debugging. *)
+  let enabled () =
+    get_bool ~default:true "MASC_GOAL_JANITOR_ENABLED"
+
+  (** Sweep interval in seconds.  Default: 3600 (1 hour).
+      Goal stagnation is measured in days, so the cadence does not need
+      to be tight; a coarse sweep keeps the fleet log uncluttered. *)
+  let interval_seconds =
+    get_float ~default:3600.0 "MASC_GOAL_JANITOR_INTERVAL_SEC"
+end
+
 (** {1 Slot Scheduling} *)
 
 module Slot = struct

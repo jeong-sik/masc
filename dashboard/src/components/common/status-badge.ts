@@ -36,7 +36,7 @@ export function statusDotColor(status: string): string {
 export function StatusBadge({ status, label }: StatusBadgeProps) {
   return html`
     <span class="border border-solid border-[var(--card-border)] ${status} ${status === 'offline' ? 'text-[var(--text-dim)]' : ''}">
-      <span class="size-1.5 rounded-sm inline-block ${statusDotColor(status)}"></span>
+      <span class="size-1.5 rounded-sm inline-block ${statusDotColor(status)}" aria-hidden="true"></span>
       ${label ?? statusLabel(status)}
     </span>
   `

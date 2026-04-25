@@ -5068,6 +5068,28 @@ let test_social_model_infers_board_comment_from_tool_use () =
   check (list string) "tool list preserved"
     ["keeper_board_comment"; "masc_status"] routed.tools_used
 
+let test_social_model_does_not_infer_comment_vote_as_board_comment () =
+  let result =
+    make_run_result ~text:""
+      ~tools:["keeper_board_comment_vote"; "masc_status"]
+      ~model:"test-model" ~input_tok:10 ~output_tok:1 ()
+  in
+  let routed, state, transition_reason =
+    KSM.apply_to_result ~meta:minimal_meta
+      ~observation:base_observation ~previous_state:None result
+  in
+  check string "speech act" "inform"
+    (KSM.speech_act_to_string state.speech_act);
+  check string "delivery surface" "visible_reply"
+    (KSM.delivery_surface_to_string state.delivery_surface);
+  check string "transition reason" "tool_only:visible_reply"
+    (KSM.transition_reason_to_string transition_reason);
+  check bool "tool-only turn synthesizes visible response" true
+    (contains_substring routed.response_text
+       "Tools used: keeper_board_comment_vote, masc_status.");
+  check (list string) "tool list preserved"
+    ["keeper_board_comment_vote"; "masc_status"] routed.tools_used
+
 let test_social_model_infers_masc_claim_task_from_tool_use () =
   let result =
     make_run_result ~text:"" ~tools:["masc_claim_task"]
@@ -5953,6 +5975,9 @@ let () =
             test_social_model_tool_only_turn_carries_previous_state;
           test_case "social model infers board comment from tool use" `Quick
             test_social_model_infers_board_comment_from_tool_use;
+          test_case
+            "social model does not infer comment vote as board comment" `Quick
+            test_social_model_does_not_infer_comment_vote_as_board_comment;
           test_case "social model infers masc claim task from tool use" `Quick
             test_social_model_infers_masc_claim_task_from_tool_use;
           test_case "magentic ledger silences tool-only turn" `Quick

@@ -147,23 +147,33 @@ let inferred_text_reply_state ~(meta : keeper_meta)
   ( make_state ~meta ~observation ?previous_state (),
     { speech_act = Types.Inform; delivery_surface = Types.Visible_reply } )
 
+let keeper_tool_name tool = Tool_name.Keeper.to_string tool
+
+let keeper_tool_name_matches tool name =
+  match Tool_name.Keeper.of_string name with
+  | Some parsed -> parsed = tool
+  | None -> false
+
+let tools_include_keeper tool tools =
+  List.exists (keeper_tool_name_matches tool) tools
+
 let inferred_tool_surface tools =
-  if tools = [ Tool_name.Keeper.to_string Tool_name.Keeper.Stay_silent ] then
+  if tools = [ keeper_tool_name Tool_name.Keeper.Stay_silent ] then
     Some
       ( { speech_act = Types.Stay_silent; delivery_surface = Types.Silent }
       , Types.Tool_only_stay_silent )
-  else if List.mem "keeper_board_comment" tools then
+  else if tools_include_keeper Tool_name.Keeper.Board_comment tools then
     Some
       ( {
           speech_act = Types.Comment_board;
           delivery_surface = Types.Board_comment;
         }
       , Types.Tool_only_comment_board )
-  else if List.mem "keeper_board_post" tools then
+  else if tools_include_keeper Tool_name.Keeper.Board_post tools then
     Some
       ( { speech_act = Types.Post_board; delivery_surface = Types.Board_post }
       , Types.Tool_only_post_board )
-  else if List.mem "keeper_broadcast" tools then
+  else if tools_include_keeper Tool_name.Keeper.Broadcast tools then
     Some
       ( {
           speech_act = Types.Broadcast;
@@ -294,7 +304,7 @@ let deliver_request_help_post ~(meta : keeper_meta)
         Some
           (`Assoc
             [
-              ("source", `String "keeper_board_post");
+              ("source", `String (keeper_tool_name Tool_name.Keeper.Board_post));
               ("social_model", `String state.social_model);
               ( "speech_act",
                 `String (Types.speech_act_to_string state.speech_act) );
@@ -367,7 +377,8 @@ let apply_output_to_result ~(meta : keeper_meta)
       (match deliver_request_help_post ~meta ~state with
       | Request_help_posted ->
           let tools_used =
-            dedupe_keep_order ("keeper_board_post" :: result.tools_used)
+            dedupe_keep_order
+              (keeper_tool_name Tool_name.Keeper.Board_post :: result.tools_used)
           in
           ( { result with
               response_text = "";

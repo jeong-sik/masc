@@ -256,22 +256,9 @@ let coverage_report_of_events events =
     Hashtbl.create 16
   in
   let unique_tuples : (string, unit) Hashtbl.t = Hashtbl.create 16 in
-  let json_string_field name json =
-    match Yojson.Safe.Util.member name json with
-    | `String value -> Some value
-    | _ -> None
-  in
-  let json_float_field name json =
-    match Yojson.Safe.Util.member name json with
-    | `Float value -> Some value
-    | `Int value -> Some (Float.of_int value)
-    | _ -> None
-  in
-  let json_bool_field name json =
-    match Yojson.Safe.Util.member name json with
-    | `Bool value -> Some value
-    | _ -> None
-  in
+  let json_string_field name json = Json_util.get_string json name in
+  let json_float_field name json = Json_util.get_float json name in
+  let json_bool_field name json = Json_util.get_bool json name in
   List.iter
     (fun json ->
        match json_string_field "module" json, json_string_field "site" json with

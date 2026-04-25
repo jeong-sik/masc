@@ -470,7 +470,7 @@ export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
         : null}
       ${showEmptyState
         ? html`
-            <div class="py-3 px-3 rounded border border-dashed border-[var(--card-border)] text-2xs text-[var(--text-muted)] italic">
+            <div class="py-3 px-3 rounded border border-dashed border-[var(--card-border)] text-2xs text-[var(--text-muted)] italic" role="status">
               필터 결과 없음 (${totalRows} items)
             </div>
           `

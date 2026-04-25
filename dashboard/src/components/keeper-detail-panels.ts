@@ -890,7 +890,7 @@ export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
             class="mb-2 w-full rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)] focus-visible:ring-2 focus-visible:ring-[var(--accent)]/50"
           />
           ${visibleCtxEntries.length === 0 ? html`
-            <div class="py-4 text-center text-2xs text-[var(--text-dim)]">
+            <div class="py-4 text-center text-2xs text-[var(--text-dim)]" role="status">
               필터 결과 없음 (${latestEntries.length} items)
             </div>
           ` : null}
@@ -1222,7 +1222,7 @@ export function RawDataDebug({ keeper }: { keeper: Keeper }) {
 // ── Equipment, Relationships, Traits ───────────────
 
 export function EquipmentList({ items }: { items: string[] }) {
-  if (items.length === 0) return html`<div class="py-2 px-3 text-xs text-[var(--text-muted)] italic">장비 없음</div>`
+  if (items.length === 0) return html`<div class="py-2 px-3 text-xs text-[var(--text-muted)] italic" role="status">장비 없음</div>`
 
   return html`
     <div class="flex flex-col gap-1.5">
@@ -1238,7 +1238,7 @@ export function EquipmentList({ items }: { items: string[] }) {
 
 export function RelationshipList({ rels }: { rels: Record<string, string> }) {
   const entries = Object.entries(rels)
-  if (entries.length === 0) return html`<div class="py-2 px-3 text-xs text-[var(--text-muted)] italic">관계 없음</div>`
+  if (entries.length === 0) return html`<div class="py-2 px-3 text-xs text-[var(--text-muted)] italic" role="status">관계 없음</div>`
 
   return html`
     <div class="max-h-55 overflow-y-auto custom-scrollbar flex flex-col gap-1.5">

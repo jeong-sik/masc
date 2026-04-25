@@ -16,17 +16,23 @@ type event =
       tool_name: string;
       success: bool;
       duration_ms: int;
-      agent_id: string option;
-      source: string option;
-      session_id: string option;
-      operation_id: string option;
-      worker_run_id: string option;
-      error_kind: string option;
-      error_message: string option;
-      exit_code: int option;
-      stderr_excerpt: string option;
+      agent_id: string option [@default None];
+      source: string option [@default None];
+      session_id: string option [@default None];
+      operation_id: string option [@default None];
+      worker_run_id: string option [@default None];
+      error_kind: string option [@default None];
+      error_message: string option [@default None];
+      exit_code: int option [@default None];
+      stderr_excerpt: string option [@default None];
     }
-  | Tool_assigned of { agent_id: string; profile: string; preset: string option; tool_count: int; assignment_id: string }
+  | Tool_assigned of {
+      agent_id: string;
+      profile: string;
+      preset: string option [@default None];
+      tool_count: int;
+      assignment_id: string;
+    }
 [@@deriving yojson, show]
 
 (** Timestamped event record for storage *)
@@ -104,102 +110,9 @@ let get_telemetry_store config : Dated_jsonl.t =
       Hashtbl.replace telemetry_store_cache base store;
       store)
 
-let event_record_of_yojson_lenient json =
-  match event_record_of_yojson json with
-  | Ok record -> Ok record
-  | Error original_error -> (
-      match json with
-      | `Assoc fields -> (
-          match Telemetry_json_fields.assoc_opt "event" fields with
-          | Some (`List [ `String "Tool_called"; `Assoc event_fields ]) ->
-              let context = "Telemetry_eio.event" in
-              let ( let* ) = Result.bind in
-              let* timestamp =
-                Telemetry_json_fields.float
-                  "Telemetry_eio.event_record" "timestamp" fields
-              in
-              let* tool_name = Telemetry_json_fields.string context "tool_name" event_fields in
-              let* success = Telemetry_json_fields.bool context "success" event_fields in
-              let* duration_ms = Telemetry_json_fields.int context "duration_ms" event_fields in
-              let* agent_id = Telemetry_json_fields.string_opt context "agent_id" event_fields in
-              let* source = Telemetry_json_fields.string_opt context "source" event_fields in
-              let* session_id =
-                Telemetry_json_fields.string_opt context "session_id" event_fields
-              in
-              let* operation_id =
-                Telemetry_json_fields.string_opt context "operation_id" event_fields
-              in
-              let* worker_run_id =
-                Telemetry_json_fields.string_opt context "worker_run_id" event_fields
-              in
-              let* error_kind =
-                Telemetry_json_fields.string_opt context "error_kind" event_fields
-              in
-              let* error_message =
-                Telemetry_json_fields.string_opt context "error_message" event_fields
-              in
-              let* exit_code =
-                Telemetry_json_fields.int_opt context "exit_code" event_fields
-              in
-              let* stderr_excerpt =
-                Telemetry_json_fields.string_opt context "stderr_excerpt" event_fields
-              in
-              Ok
-                {
-                  timestamp;
-                  event =
-                    Tool_called
-                      {
-                        tool_name;
-                        success;
-                        duration_ms;
-                        agent_id;
-                        source;
-                        session_id;
-                        operation_id;
-                        worker_run_id;
-                        error_kind;
-                        error_message;
-                        exit_code;
-                        stderr_excerpt;
-                      };
-                }
-          | Some (`List [ `String "Tool_assigned"; `Assoc event_fields ]) ->
-              let context = "Telemetry_eio.event" in
-              let ( let* ) = Result.bind in
-              let* timestamp =
-                Telemetry_json_fields.float
-                  "Telemetry_eio.event_record" "timestamp" fields
-              in
-              let* agent_id =
-                Telemetry_json_fields.string context "agent_id" event_fields
-              in
-              let* profile =
-                Telemetry_json_fields.string context "profile" event_fields
-              in
-              let* preset =
-                Telemetry_json_fields.string_opt context "preset" event_fields
-              in
-              let* tool_count =
-                Telemetry_json_fields.int context "tool_count" event_fields
-              in
-              let* assignment_id =
-                Telemetry_json_fields.string context "assignment_id"
-                  event_fields
-              in
-              Ok
-                {
-                  timestamp;
-                  event =
-                    Tool_assigned
-                      { agent_id; profile; preset; tool_count; assignment_id };
-                }
-          | _ -> Error original_error)
-      | _ -> Error original_error)
-
 let parse_event_records (jsons : Yojson.Safe.t list) : event_record list =
   List.filter_map (fun json ->
-    match event_record_of_yojson_lenient json with
+    match event_record_of_yojson json with
     | Ok record -> Some record
     | Error msg ->
         Eio.traceln "[TelemetryEio] parse_event_records drop: %s" msg;
@@ -215,7 +128,7 @@ let read_all_events_from_path (file : string) : event_record list =
     |> List.filter (fun line -> String.trim line <> "")
     |> List.filter_map (fun line ->
         try
-          match event_record_of_yojson_lenient (Yojson.Safe.from_string line) with
+          match event_record_of_yojson (Yojson.Safe.from_string line) with
           | Ok record -> Some record
           | Error msg ->
               Eio.traceln "[TelemetryEio] read_all_events_from_path drop: %s" msg;

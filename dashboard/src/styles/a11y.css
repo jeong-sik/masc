@@ -56,3 +56,22 @@ a:focus-visible,
   .animate-loading-pulse { animation: none; }
   [class*="slideInRight"] { animation: none; }
 }
+
+/* Windows High Contrast Mode — ensure borders and focus rings remain visible
+   when CSS custom properties and rgba colors are overridden by the OS. */
+@media (forced-colors: active) {
+  :focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
+  [role="button"],
+  button,
+  a,
+  [tabindex] {
+    forced-color-adjust: none;
+  }
+  [role="alert"],
+  [role="status"] {
+    forced-color-adjust: none;
+  }
+}

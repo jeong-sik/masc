@@ -379,7 +379,7 @@ export function TransportHealthPanel() {
   const truthLine = transportTruthLine(data)
 
   return html`
-    <div class="space-y-4">
+    <div class="space-y-4" role="region" aria-label="트랜스포트 상태">
       <div class="flex items-start justify-between gap-4">
         <div>
           <div class="flex items-center gap-2">

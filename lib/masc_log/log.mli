@@ -39,6 +39,13 @@ val init_from_env : unit -> unit
 val timestamp : unit -> string
 (** Get current timestamp as formatted string. *)
 
+val format_utc_date_of : float -> string
+(** #10392: format the [YYYY-MM-DD] UTC date for a Unix timestamp.
+    Used internally for [system_log_<date>.jsonl] filename construction
+    so the filename matches the entry [ts] field (also UTC).  Exposed
+    for unit tests; production code calls [Ring.date_string] which
+    delegates here. *)
+
 val log : level -> ?ctx:string -> ('a, unit, string, unit) format4 -> 'a
 (** Log a message at the given level with optional context. *)
 

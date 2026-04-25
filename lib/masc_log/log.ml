@@ -131,6 +131,18 @@ let timestamp_iso () =
     (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
     tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
 
+(** #10392: pure helper that formats the UTC date for filename
+    construction.  Both [Ring.date_string] and the yesterday/cutoff
+    computations in [Ring.load_from_file] / [Ring.cleanup_old_files]
+    feed through this helper so the UTC convention is pinned at a
+    single site.  Exposed for unit tests that need to verify the
+    KST/UTC boundary case (KST midnight = UTC 15:00) without
+    depending on the host clock. *)
+let format_utc_date_of (t : float) =
+  let tm = Unix.gmtime t in
+  Printf.sprintf "%04d-%02d-%02d"
+    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+
 (** In-memory ring buffer for dashboard log viewer.
     Fixed capacity, oldest entries evicted on overflow.
     Lock-free: single-writer (log functions), multi-reader (API).
@@ -173,11 +185,7 @@ module Ring = struct
   let file_current_date : string ref = ref ""
   let file_base_dir : string ref = ref ""
 
-  let date_string () =
-    let t = Time_compat.now () in
-    let tm = Unix.localtime t in
-    Printf.sprintf "%04d-%02d-%02d"
-      (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+  let date_string () = format_utc_date_of (Time_compat.now ())
 
   let log_file_path dir date =
     Filename.concat dir (Printf.sprintf "system_log_%s.jsonl" date)
@@ -277,12 +285,11 @@ module Ring = struct
     ensure_dir dir;
     let today = date_string () in
     (* Load today's and yesterday's logs *)
-    let yesterday =
-      let t = Time_compat.now () -. 86400.0 in
-      let tm = Unix.localtime t in
-      Printf.sprintf "%04d-%02d-%02d"
-        (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
-    in
+    (* #10392: yesterday's filename uses the same UTC convention as
+       [date_string] so [load_from_file] re-reads what was actually
+       written.  Pre-fix this used [Unix.localtime] which on KST hosts
+       loaded a file 9 hours skewed from the today computation. *)
+    let yesterday = format_utc_date_of (Time_compat.now () -. 86400.0) in
     let load_file path =
       if Sys.file_exists path then begin
         let ic = open_in path in
@@ -327,11 +334,13 @@ module Ring = struct
   let cleanup_old_files ?(keep_days = 7) dir =
     if Sys.file_exists dir then begin
       let files = protect ~default:[||] (fun () -> Sys.readdir dir) in
+      (* #10392: cutoff date uses UTC because [date_string] now writes
+         filenames in UTC.  Mixed timezones here would cause [keep_days]
+         retention to be off by ~1 day at the KST/UTC boundary and
+         occasionally delete a file that is still within retention. *)
       let cutoff =
-        let t = Time_compat.now () -. (float_of_int keep_days *. 86400.0) in
-        let tm = Unix.localtime t in
-        Printf.sprintf "%04d-%02d-%02d"
-          (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+        format_utc_date_of
+          (Time_compat.now () -. (float_of_int keep_days *. 86400.0))
       in
       Array.iter (fun fname ->
         if has_prefix ~prefix:"system_log_" fname

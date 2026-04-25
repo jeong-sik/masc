@@ -169,7 +169,13 @@ export function App() {
                 aria-expanded=${mobileMenuOpen.value}
                 aria-label=${mobileMenuOpen.value ? '탐색 메뉴 닫기' : '탐색 메뉴 열기'}
                 aria-controls="dashboard-side-rail"
-                onClick=${() => { mobileMenuOpen.value = !mobileMenuOpen.value }}
+                onClick=${() => {
+                  mobileMenuOpen.value = !mobileMenuOpen.value
+                  if (!mobileMenuOpen.value) return
+                  requestAnimationFrame(() => {
+                    document.getElementById('dashboard-side-rail')?.querySelector<HTMLElement>('a, button')?.focus()
+                  })
+                }}
               >
                 ${mobileMenuOpen.value ? html`<${X} size=${20} />` : html`<${Menu} size=${20} />`}
               </button>

@@ -420,7 +420,7 @@ export function LogViewer() {
           </div>
 
           <div class="logs-actions flex flex-wrap gap-3 items-center text-2xs text-[color:var(--text-muted)]">
-            <span class="rounded-sm border border-[var(--white-10)] bg-[var(--white-3)] px-2.5 py-1 tabular-nums">${logEntries.length.toLocaleString()} / ${logTotal.toLocaleString()}</span>
+            <span class="rounded-sm border border-[var(--white-10)] bg-[var(--white-3)] px-2.5 py-1 tabular-nums" role="status">${logEntries.length.toLocaleString()} / ${logTotal.toLocaleString()}</span>
             <label class="logs-auto-label flex items-center gap-1.5 cursor-pointer">
               <input
                 type="checkbox"
@@ -450,7 +450,7 @@ export function LogViewer() {
           <div role="alert" class="mx-4 mt-4 rounded border border-solid border-[#e05050] bg-[var(--brick-soft)] px-4 py-3 text-xs text-[#ffb3b3]">${logError}</div>
         ` : null}
 
-        <div class="px-3 pt-3">
+        <div class="px-3 pt-3" aria-hidden="true">
           <div class="grid grid-cols-[11rem_5rem_10rem_8rem_minmax(0,1fr)] gap-3 px-3 py-2 text-left text-3xs font-semibold uppercase tracking-4 text-[var(--text-muted)]">
             <div>timestamp</div>
             <div>level</div>

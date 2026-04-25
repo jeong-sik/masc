@@ -342,12 +342,13 @@ let metric_keeper_compaction_noop =
   "masc_keeper_compaction_noop_total"
 
 (* #10349: keeper FS path rejection counter.  Pre-fix the
-   user-facing error string carried [(roots=[<list>])] which
-   exposes the resolver's view of allowed sandbox roots to the
-   LLM.  Combined with the keeper identity drift documented in
-   the issue (turn 433: contract emitted [masc-improver/Docker]
-   while the resolver enumerated [analyst]'s sandbox), the
-   error became a side-channel oracle for sibling sandboxes.
+   user-facing read-path rejection strings carried the resolver's
+   view of allowed sandbox roots (for example [(roots=[<list>])]
+   and [(sandbox roots: [<list>])]) to the LLM.  Combined with
+   the keeper identity drift documented in the issue (turn 433:
+   contract emitted [masc-improver/Docker] while the resolver
+   enumerated [analyst]'s sandbox), the error became a
+   side-channel oracle for sibling sandboxes.
 
    The leak lives strictly in the user-visible string; the
    structured side-channel (Eio.traceln + this counter) keeps

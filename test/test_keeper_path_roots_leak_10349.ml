@@ -17,10 +17,11 @@
     [masc_keeper_path_rejection_total{kind}].
 
     Tests pin:
-    1. Out-of-roots rejection: error has no [roots=] substring.
-    2. Not-found-relative rejection: same.
-    3. Counter labels: each kind ticks its own label.
-    4. The legacy prefix [path_not_found_under_allowed_roots:]
+    1. Outside-sandbox rejection: error has no resolver roots.
+    2. Out-of-roots rejection: error has no [roots=] substring.
+    3. Not-found-relative rejection: same.
+    4. Counter labels: each kind ticks its own label.
+    5. The legacy prefix [path_not_found_under_allowed_roots:]
        remains, so existing classifiers and circuit breaker
        matchers keep recognising the error class. *)
 
@@ -75,11 +76,45 @@ let assert_no_roots_leak msg err =
     (Astring.String.is_infix ~affix:"(roots=" err);
   check bool (msg ^ ": no 'roots=[' substring") false
     (Astring.String.is_infix ~affix:"roots=[" err);
+  check bool (msg ^ ": no sandbox roots substring") false
+    (Astring.String.is_infix ~affix:"sandbox roots:" err);
+  check bool (msg ^ ": no resolved path hint") false
+    (Astring.String.is_infix ~affix:"resolved=" err)
+
+let assert_legacy_not_found_prefix msg err =
   check bool (msg ^ ": legacy prefix preserved") true
     (Astring.String.is_prefix
        ~affix:"path_not_found_under_allowed_roots:" err)
 
-(* --- 1. out-of-roots rejection: opaque error + counter --- *)
+(* --- 1. outside-sandbox rejection: opaque error + counter --- *)
+
+let test_path_outside_sandbox_no_leak () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  with_clean_env @@ fun () ->
+  let dir = mk_dir "kpath_sandbox" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf dir)
+    (fun () ->
+      let config = Coord.default_config dir in
+      let labels = [ ("kind", "out_of_roots") ] in
+      let before = counter_value labels in
+      let result =
+        Keeper_alerting_path.resolve_keeper_read_path ~config
+          ~allowed_paths:[ "lib" ] ~raw_path:"README.md"
+      in
+      check bool "rejection occurred" true (Result.is_error result);
+      let err = Result.get_error result in
+      assert_no_roots_leak "path_outside_sandbox" err;
+      check bool "path_outside_sandbox prefix preserved" true
+        (Astring.String.is_prefix ~affix:"path_outside_sandbox:" err);
+      check bool "allowed root path is not leaked" false
+        (Astring.String.is_infix ~affix:(Filename.concat dir "lib") err);
+      check (float 0.0001) "out_of_roots counter +1"
+        (before +. 1.0)
+        (counter_value labels))
+
+(* --- 2. out-of-roots rejection: opaque error + counter --- *)
 
 let test_out_of_roots_no_leak () =
   Eio_main.run @@ fun env ->
@@ -104,11 +139,12 @@ let test_out_of_roots_no_leak () =
       check bool "rejection occurred" true (Result.is_error result);
       let err = Result.get_error result in
       assert_no_roots_leak "out_of_roots" err;
+      assert_legacy_not_found_prefix "out_of_roots" err;
       check (float 0.0001) "out_of_roots counter +1"
         (before +. 1.0)
         (counter_value labels))
 
-(* --- 2. not-found-relative rejection: opaque + counter --- *)
+(* --- 3. not-found-relative rejection: opaque + counter --- *)
 
 let test_not_found_relative_no_leak () =
   Eio_main.run @@ fun env ->
@@ -128,11 +164,12 @@ let test_not_found_relative_no_leak () =
       check bool "rejection occurred" true (Result.is_error result);
       let err = Result.get_error result in
       assert_no_roots_leak "not_found_relative" err;
+      assert_legacy_not_found_prefix "not_found_relative" err;
       check (float 0.0001) "not_found_relative counter +1"
         (before +. 1.0)
         (counter_value labels))
 
-(* --- 3. counter labels are isolated per kind ------------- *)
+(* --- 4. counter labels are isolated per kind ------------- *)
 
 let test_counter_labels_isolated () =
   Eio_main.run @@ fun env ->
@@ -159,6 +196,8 @@ let () =
     [
       ( "no-roots-leak",
         [
+          test_case "path_outside_sandbox error is opaque" `Quick
+            test_path_outside_sandbox_no_leak;
           test_case "out_of_roots error is opaque" `Quick
             test_out_of_roots_no_leak;
           test_case "not_found_relative error is opaque" `Quick

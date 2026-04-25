@@ -197,28 +197,24 @@ let format_path_rejection ~(raw : string) ~(resolved : string)
     ~(allowed_norms : string list) : string =
   let resolved_hint =
     if Filename.is_relative raw && resolved <> raw then
-      Printf.sprintf
-        "; relative paths are checked against your sandbox boundary (resolved=%s)"
-        resolved
+      "; relative paths are checked against your sandbox boundary"
     else
       ""
   in
   let playground_hint =
     if raw_looks_like_playground_subdir raw then
       match playground_root_of_allowed allowed_norms with
-      | Some pg ->
+      | Some _ ->
         Printf.sprintf
           ". Your raw path already looks sandbox-relative. Use it as-is \
-           (for example path=%S) and do not prepend %s; call \
-           keeper_context_status and use sandbox_repos / sandbox_mind if \
-           unsure."
-          raw pg
+           (for example path=%S); call keeper_context_status and use \
+           sandbox_repos / sandbox_mind if unsure."
+          raw
       | None -> ""
     else ""
   in
-  Printf.sprintf
-    "path_outside_sandbox: %s%s (sandbox roots: [%s])%s"
-    raw resolved_hint (String.concat ", " allowed_norms) playground_hint
+  Printf.sprintf "path_outside_sandbox: %s%s%s" raw resolved_hint
+    playground_hint
 
 let resolve_keeper_target_path ~(config : Coord.config)
     ~(allowed_paths : string list) ~(raw_path : string)
@@ -358,17 +354,19 @@ let resolve_keeper_read_path ~(config : Coord.config)
       let search_roots =
         if allowed_norms = [] then [root_norm] else allowed_norms
       in
+      let reject_outside_sandbox () =
+        Prometheus.inc_counter Prometheus.metric_keeper_path_rejection
+          ~labels:[ ("kind", "out_of_roots") ] ();
+        Error
+          (format_path_rejection ~raw ~resolved:target_norm ~allowed_norms)
+      in
       if not within_allowed then
         if Filename.is_relative raw then
           (match maybe_resolve_missing_relative_read_path ~roots:search_roots ~raw_path:raw with
            | Ok (Some resolved) -> Ok resolved
-           | Ok None ->
-               Error
-                 (format_path_rejection ~raw ~resolved:target_norm ~allowed_norms)
+           | Ok None -> reject_outside_sandbox ()
            | Error e -> Error e)
-        else
-          Error
-            (format_path_rejection ~raw ~resolved:target_norm ~allowed_norms)
+        else reject_outside_sandbox ()
       else if path_exists candidate || allows_missing_leaf_read ~raw ~candidate then
         Ok candidate
       else if Filename.is_relative raw then

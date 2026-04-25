@@ -139,10 +139,11 @@ val metric_keeper_operator_clear : string
 
 (** #10349: counter incremented whenever
     [Keeper_alerting_path.resolve_keeper_read_path] rejects a
-    path.  Replaces the previous user-facing leak of
-    [(roots=[<list>])] which became a side-channel oracle for
-    sibling sandboxes when keeper identity drifted across
-    contract/gate/FS-resolver layers.  Labels:
+    path.  Replaces the previous user-facing leak of resolver
+    allowed roots ([(roots=[<list>])] and
+    [(sandbox roots: [<list>])]) which became a side-channel
+    oracle for sibling sandboxes when keeper identity drifted
+    across contract/gate/FS-resolver layers.  Labels:
     [kind="out_of_roots"|"not_found_relative"]. *)
 val metric_keeper_path_rejection : string
 

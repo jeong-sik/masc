@@ -31,6 +31,7 @@ export function PulseStrip() {
           key=${p.name}
           class="pulse-bubble ${pulseStateClass(p.state)} ${selected === p.name ? 'pulse-selected' : ''}"
           onClick=${() => openAgentDetail(p.name)}
+          aria-pressed=${selected === p.name}
           title="${p.koreanName ? `${p.name} (${p.koreanName})` : p.name}${p.currentTask ? ` — ${p.currentTask}` : ''}"
         >
           <span class="text-[1.15rem] leading-none">${p.emoji || p.name.charAt(0).toUpperCase()}</span>

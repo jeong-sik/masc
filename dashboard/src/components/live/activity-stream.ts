@@ -32,6 +32,7 @@ function FilterBar() {
             ? 'border-[var(--border-slate-22)] bg-[var(--accent-soft)] text-[var(--text-strong)]'
             : 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--text-dim)] hover:bg-[var(--white-8)] hover:border-[var(--border-slate-22)] hover:text-[var(--text-body)]'}"
           onClick=${() => toggleLiveFilter(opt.kind)}
+          aria-pressed=${active.has(opt.kind)}
         >
           ${opt.label}
         </button>
@@ -50,7 +51,7 @@ export function ActivityStream() {
         <span class="text-xs text-[var(--text-muted)]">${totalEvents.value} 수신 · ${entries.length} 표시</span>
       </div>
       <${FilterBar} />
-      <div class="activity-stream-list grid max-h-[52vh] min-h-0 content-start gap-2 overflow-y-auto pr-1">
+      <div class="activity-stream-list grid max-h-[52vh] min-h-0 content-start gap-2 overflow-y-auto pr-1" role="log" aria-label="활동 이벤트">
         ${entries.length === 0
           ? !connected.value
             ? html`<${ErrorState} message="실시간 연결이 끊겨있습니다. 서버 상태를 확인하세요." />`

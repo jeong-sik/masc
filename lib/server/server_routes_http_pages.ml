@@ -357,9 +357,9 @@ let serve_bonsai_index _request reqd =
 
 (** [GET /dashboard/b/api/keepers/summary] — projection consumed by
     Bonsai focus card / roster / swimlane / context pressure chart.
-    Currently returns a static 4-keeper mock that mirrors what the
-    logs_view renders statically. Will be wired to Keeper_status_bridge
-    + cycle trace in a follow-up PR. *)
+    This endpoint must stay scoped to the live server [base_path]; returning
+    static fixture rows here makes Bonsai look like an SSOT while showing a
+    different keeper universe than the operator dashboard. *)
 let iso8601_utc_now () =
   let open Unix in
   let t = gmtime (gettimeofday ()) in
@@ -367,83 +367,98 @@ let iso8601_utc_now () =
     (t.tm_year + 1900) (t.tm_mon + 1) t.tm_mday
     t.tm_hour t.tm_min t.tm_sec
 
-let keepers_summary_mock () : Masc_dashboard_api_types.Keepers.response =
+let bonsai_keeper_status_of_phase phase =
   let module K = Masc_dashboard_api_types.Keepers in
-  let frames xs =
-    List.map (fun (kind, left, width, label) ->
-      K.{ kind; left; width; label }) xs
+  let open Keeper_state_machine in
+  match phase with
+  | Running -> K.Live
+  | Failing | Overflowed | Compacting | HandingOff | Draining | Paused
+  | Restarting ->
+      Warn
+  | Offline | Stopped | Crashed | Dead -> Dead
+
+let bonsai_ctx_pct (meta : Keeper_types.keeper_meta) =
+  match meta.max_context_override with
+  | Some max_tokens when max_tokens > 0 && meta.runtime.usage.last_total_tokens > 0 ->
+      let pct =
+        (meta.runtime.usage.last_total_tokens * 100) / max_tokens
+      in
+      min 100 (max 0 pct)
+  | _ -> 0
+
+let latest_tool_name (entry : Keeper_registry.registry_entry) =
+  let latest =
+    Keeper_registry.StringMap.fold
+      (fun tool_name tool_entry acc ->
+        match acc with
+        | None -> Some (tool_name, tool_entry.Keeper_types.last_used_at)
+        | Some (_, ts) when tool_entry.Keeper_types.last_used_at > ts ->
+            Some (tool_name, tool_entry.Keeper_types.last_used_at)
+        | Some _ -> acc)
+      entry.tool_usage
+      None
   in
-  let ctx xs =
-    List.map (fun (t_minus_min, ctx_pct) ->
-      K.{ t_minus_min; ctx_pct }) xs
+  Option.map fst latest
+
+let keepers_summary_from_registry ~base_path
+    : Masc_dashboard_api_types.Keepers.response =
+  let module K = Masc_dashboard_api_types.Keepers in
+  let entries =
+    Keeper_registry.all ~base_path ()
+    |> List.sort (fun (a : Keeper_registry.registry_entry) b ->
+           String.compare a.name b.name)
   in
-  let luna = K.{
-    name = "luna";
-    stat = "reading";
-    status = Live;
-    ctx_pct = 38;
-    turn = 47;
-    turn_cap = 60;
-    mem_kb = 128;
-    latency_ms = 812;
-    last_tool = Some "llm";
-    lane_frames = frames [
-      ("llm",   5, 18, "llm");
-      ("tool", 28, 10, "read");
-      ("think",42,  8, "think");
-      ("llm",  54, 22, "llm");
-      ("tool", 80, 14, "edit");
-    ];
-    ctx_history = ctx [ (60, 38); (48, 40); (36, 37); (24, 40); (12, 42); (0, 38) ];
-  } in
-  let brass_owl = { luna with
-    K.name = "brass-owl"; stat = "retrying"; status = Warn;
-    ctx_pct = 67; turn = 39; mem_kb = 92; latency_ms = 1420;
-    last_tool = Some "fetch";
-    lane_frames = frames [
-      ("llm",   3, 20, "llm");
-      ("tool", 26, 12, "fetch");
-      ("wait", 40, 24, "wait");
-      ("tool", 66, 10, "fetch");
-    ];
-    ctx_history = ctx [ (60, 40); (48, 46); (36, 52); (24, 58); (12, 62); (0, 67) ];
-  } in
-  let moth = { luna with
-    K.name = "moth"; stat = "idle · listening"; status = Live;
-    ctx_pct = 12; turn = 8; mem_kb = 14; latency_ms = 220;
-    last_tool = Some "wait";
-    lane_frames = frames [
-      ("wait",  0, 40, "wait");
-      ("llm",  42, 14, "llm");
-      ("wait", 58, 40, "wait");
-    ];
-    ctx_history = ctx [ (60, 10); (48, 11); (36, 10); (24, 12); (12, 12); (0, 12) ];
-  } in
-  let ash_hound = { luna with
-    K.name = "ash-hound"; stat = "crashed t-34"; status = Dead;
-    ctx_pct = 95; turn = 22; mem_kb = 64; latency_ms = 0;
-    last_tool = Some "err";
-    lane_frames = frames [
-      ("llm",   2, 18, "llm");
-      ("tool", 22,  8, "exec");
-      ("err",  32,  6, "err");
-    ];
-    ctx_history = ctx [ (60, 45); (48, 65); (36, 85); (34, 95) ];
-  } in
+  let keepers =
+    List.map
+      (fun (entry : Keeper_registry.registry_entry) ->
+        let meta = entry.meta in
+        K.
+          { name = entry.name
+          ; stat = Keeper_state_machine.phase_to_string entry.phase
+          ; status = bonsai_keeper_status_of_phase entry.phase
+          ; ctx_pct = bonsai_ctx_pct meta
+          ; turn = meta.runtime.usage.total_turns
+          ; turn_cap = 60
+          ; mem_kb = 0
+          ; latency_ms = meta.runtime.usage.last_latency_ms
+          ; last_tool = latest_tool_name entry
+          ; lane_frames = []
+          ; ctx_history = []
+          })
+      entries
+  in
+  let cycle =
+    List.fold_left
+      (fun acc (entry : Keeper_registry.registry_entry) ->
+        max acc entry.meta.runtime.usage.total_turns)
+      0
+      entries
+  in
   K.{
-    keepers = [ luna; brass_owl; moth; ash_hound ];
-    cycle = 4;
-    room = Some "local";
+    keepers;
+    cycle;
+    room = Some (Filename.basename base_path);
     generated_at = iso8601_utc_now ();
   }
 
 let bonsai_api_keepers_summary request reqd =
-  let resp = keepers_summary_mock () in
-  let body =
-    Yojson.Safe.to_string
-      (Masc_dashboard_api_types.Keepers.response_to_yojson resp)
-  in
-  respond_public_read_json request reqd body
+  match !server_state with
+  | None ->
+      respond_public_read_json
+        ~status:`Internal_server_error
+        request
+        reqd
+        (Yojson.Safe.to_string
+           (`Assoc [ ("error", `String "server state not initialized") ]))
+  | Some state ->
+      let resp =
+        keepers_summary_from_registry ~base_path:state.room_config.base_path
+      in
+      let body =
+        Yojson.Safe.to_string
+          (Masc_dashboard_api_types.Keepers.response_to_yojson resp)
+      in
+      respond_public_read_json request reqd body
 
 let serve_bonsai_static name request reqd =
   let path = Filename.concat (bonsai_asset_root ()) name in

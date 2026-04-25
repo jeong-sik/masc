@@ -1,14 +1,13 @@
 (** Keepers view — fleet 전체 상태 대시보드.
 
     Phase 2.C 두 번째 탭. Phase 2.A에서 추출된 shell 모듈 4개를 조립:
-    - [Hud]       : KPI strip (total / live / warn / dead / synced)
+    - [Hud]       : KPI strip (total / live / warn / dead)
     - [Roster]    : sticky bottom keeper slot 그리드
     - [Swim]      : 60s per-keeper activity timeline
     - [Ctx_chart] : 60m per-keeper context pressure
 
-    기존 `Keepers_var` 폴링 재사용 — 새 endpoint 無. Keepers 탭은 Dead_keepers
-    처럼 derived view가 아니라 fleet 전체를 **확대 투영**. logs 탭에서 보이던
-    HUD/Swim/Ctx/Roster를 독립 페이지로 끄집어낸 형태. *)
+    Single-source: Keepers summary endpoint만 소비. execution/mission 투영은
+    제거됨 — SSOT 단일화. *)
 
 open! Core
 open! Bonsai_web
@@ -50,30 +49,17 @@ let view_hero (rows : Keepers_directory.row list) =
         counts.offline
   in
   Hero.view
-    ~eyebrow:"runtime + mission · keepers"
+    ~eyebrow:"summary · keepers"
     ~title:"fleet"
     ~tail:(tail, `Brass)
     ~sub:
-      "keepers summary에 execution + mission snapshot을 덧입혀 directory를 먼저 보여준다. 아래 섹션은 roster(축약) · swim(60s 활동) · pressure(60m ctx) 순으로 이어진다."
+      "keepers summary endpoint로 directory를 구성한다. 아래 섹션은 roster(축약) · swim(60s 활동) · pressure(60m ctx) 순으로 이어진다."
     ~sub_lang:"ko"
     ()
 ;;
 
-let view_hud_strip
-      ~(rows : Keepers_directory.row list)
-      ~(execution : Directory_execution_types.response)
-      ~(mission : Directory_mission_types.response)
-  =
-  let execution_generated_at =
-    let open Directory_execution_types in
-    execution.generated_at
-  in
-  let mission_generated_at =
-    let open Directory_mission_types in
-    mission.generated_at
-  in
+let view_hud_strip ~(rows : Keepers_directory.row list) =
   let counts = Keepers_directory.counts rows in
-  let coverage = Keepers_directory.coverage rows in
   Hud.strip ~label:"Fleet KPIs"
     [ Hud.cell ~k:"Fleet" ~v:(Printf.sprintf "%02d" counts.total) ()
     ; Hud.cell ~v_class:(if counts.active > 0 then `Ok else `Neutral)
@@ -91,34 +77,24 @@ let view_hud_strip
         ~v_class:(if counts.offline > 0 then `Bad else `Neutral)
         ~k:"Offline"
         ~v:(Printf.sprintf "%02d" counts.offline) ()
-    ; Hud.cell
-        ~k:"Shared"
-        ~v:
-          (if coverage.shared = 0 && String.is_empty execution_generated_at
-              && String.is_empty mission_generated_at
-           then "—"
-           else Printf.sprintf "%02d" coverage.shared)
-        ()
     ]
 ;;
 
 let render
       ~(shell : Overview_types.response)
       ~(keepers : Keepers_types.response)
-      ~(execution : Directory_execution_types.response)
-      ~(mission : Directory_mission_types.response)
       ~(selected_name : string option)
   : Node.t
   =
-  let rows = Keepers_directory.build_rows ~keepers execution mission in
+  let rows = Keepers_directory.build_rows ~keepers in
   let has_fleet = not (List.is_empty keepers.keepers) in
   let page_sections =
-    [ Sec.view ~title:"directory" ~sub:"runtime + mission"
-        ~right:(Printf.sprintf "%d merged" (List.length rows))
+    [ Sec.view ~title:"directory" ~sub:"summary"
+        ~right:(Printf.sprintf "%d keepers" (List.length rows))
         ()
     ; Node.div
         ~attrs:[ Keepers_directory.Style.meta_strip ]
-        [ Keepers_directory.view_summary_strip ~rows ~execution ~mission ]
+        [ Keepers_directory.view_summary_strip ~rows ]
     ; Keepers_directory.view ~rows ~selected_name
     ]
     @ if has_fleet
@@ -149,10 +125,10 @@ let render
   in
   Shell_view.view
     ~shell
-    ~aside:(Keepers_directory.aside ~rows ~selected_name ~execution ~mission)
+    ~aside:(Keepers_directory.aside ~rows ~selected_name)
     ~active:Keepers
     [ view_hero rows
-    ; view_hud_strip ~rows ~execution ~mission
+    ; view_hud_strip ~rows
     ; Node.div ~attrs:[] page_sections
     ]
 ;;
@@ -161,13 +137,9 @@ let component (_graph @ local) =
   Bonsai.map
     (Bonsai.both
        (Bonsai.both
-          (Bonsai.both
-             (Bonsai.Expert.Var.value Keepers_var.var)
-             (Bonsai.Expert.Var.value Overview_var.var))
-          (Bonsai.both
-             (Bonsai.Expert.Var.value Directory_execution_var.var)
-             (Bonsai.Expert.Var.value Directory_mission_var.var)))
+          (Bonsai.Expert.Var.value Keepers_var.var)
+          (Bonsai.Expert.Var.value Overview_var.var))
        (Bonsai.Expert.Var.value Keepers_directory.selected_name_var))
-    ~f:(fun (((keepers, shell), (execution, mission)), selected_name) ->
-      render ~shell ~keepers ~execution ~mission ~selected_name)
+    ~f:(fun ((keepers, shell), selected_name) ->
+      render ~shell ~keepers ~selected_name)
 ;;

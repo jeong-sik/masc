@@ -34,6 +34,51 @@ val hard_quota_cooldown_sec : float
 
     @since 0.161.0 *)
 
+(** {1 Phase 1 trust_score parameters}
+
+    Trust replaces the rolling [success_rate] as the {!effective_weight}
+    driver.  Defaults are calibrated from a 4040-record analysis of
+    keeper decisions.jsonl (2026-04-25): same-fingerprint failures
+    recur within 5 minutes 96% of the time, top-5 fingerprints account
+    for 74.5% of all errors, and max consecutive error streak observed
+    was 108.  See module docstring for the full derivation.
+
+    @since 0.175.0 *)
+
+val trust_reward_on_success : float
+(** Additive trust bump on every Success event.  Default 0.15.
+    Env: [MASC_CASCADE_TRUST_REWARD_ON_SUCCESS]. *)
+
+val trust_decay_transient : float
+(** Multiplicative trust decay on a transient (one-shot) failure.
+    Default 0.7.  Env: [MASC_CASCADE_TRUST_DECAY_TRANSIENT]. *)
+
+val trust_decay_persistent : float
+(** Multiplicative trust decay on a persistent failure (same fingerprint
+    recurring within {!trust_persistent_window_sec}).  Default 0.15 —
+    aggressively penalises rate-limit-style failures so the cascade
+    rotates away within a few attempts.
+    Env: [MASC_CASCADE_TRUST_DECAY_PERSISTENT]. *)
+
+val trust_ceiling : float
+(** Upper clamp for trust_score.  Default 2.0 — a healthy provider's
+    [config_weight] can grow up to 2x via repeated successes.
+    Env: [MASC_CASCADE_TRUST_CEILING]. *)
+
+val trust_persistent_threshold : int
+(** Number of same-fingerprint occurrences inside
+    {!trust_persistent_window_sec} required to classify a failure
+    persistent.  Default 2 (the very next recurrence triggers).
+    Env: [MASC_CASCADE_TRUST_PERSISTENT_THRESHOLD]. *)
+
+val trust_persistent_window_sec : float
+(** Time window inside which same-fingerprint failures are coalesced
+    for persistence classification.  Default 600.0 (10 min) — wider
+    than the 5-min recurrence cluster but tighter than the 30-min
+    plan default; chosen to catch rate-limit oscillations without
+    misclassifying genuinely transient errors as persistent.
+    Env: [MASC_CASCADE_TRUST_PERSISTENT_WINDOW_SEC]. *)
+
 (** Opaque health tracker state. *)
 type t
 
@@ -129,12 +174,18 @@ val success_rate : t -> provider_key:string -> float
 (** Whether the provider is currently in cooldown (should be skipped). *)
 val is_in_cooldown : t -> provider_key:string -> bool
 
+val trust_score : t -> provider_key:string -> float
+(** Phase 1 trust_score in [0, {!trust_ceiling}].  Returns [1.0] for
+    unknown providers (optimistic neutral).  Drives {!effective_weight}.
+    @since 0.175.0 *)
+
 (** Compute effective weight for weighted cascade selection.
 
-    [effective_weight = config_weight * success_rate]
+    Phase 1: [effective_weight = max 1 (config_weight * clamp(trust, 0, ceiling))]
 
-    Returns 0 for providers in cooldown.
-    Returns full [config_weight] for unknown providers. *)
+    Trust replaces [success_rate] as the weight driver — see module
+    documentation for the calibration rationale.  Cooldown still wins
+    (returns 0).  Unknown providers get full [config_weight] (trust=1.0). *)
 val effective_weight : t -> provider_key:string -> config_weight:int -> int
 
 (** Human-readable summary for debugging/telemetry. *)
@@ -161,6 +212,14 @@ type provider_info = {
   (** Unix timestamp of the most recent non-success event, or [None] if
       none.  Phase 0 observability anchor for "did this provider fail
       recently".  @since 0.174.0 *)
+  trust_score : float;
+  (** Phase 1 reputation in [0, {!trust_ceiling}].  See {!trust_score}
+      for semantics.  @since 0.175.0 *)
+  same_fingerprint_count : int;
+  (** Number of consecutive same-fingerprint failures inside the
+      persistence window.  Reset on Success or different fingerprint.
+      Surfaced for the dashboard to flag "stuck" providers before the
+      cascade gives up on them.  @since 0.175.0 *)
 }
 
 (** Structured info for a single provider. Returns [None] if untracked.

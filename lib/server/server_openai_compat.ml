@@ -102,7 +102,7 @@ let route_keeper ~config ~sw ~clock ~keeper_name ~message : (string, string) res
 let route_cascade ~message ~system_prompt ~max_tokens ~temperature
   : (string, string) result =
   match
-    Masc_oas_bridge.run_safe ~timeout_s:120.0 (fun () ->
+    Masc_oas_bridge.run_with_caller ~caller:"server_openai_compat" (fun () ->
       Oas_worker.run_named
         ~cascade_name:"default_models"
         ~goal:message

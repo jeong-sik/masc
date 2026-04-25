@@ -281,6 +281,19 @@ let metric_persistence_read_drops =
 let metric_codex_cli_mcp_tool_omission =
   "masc_codex_cli_mcp_tool_omission_total"
 
+(* #10094: per-caller counter for [Masc_oas_bridge.run_safe]
+   timeouts.  The [caller] string supplied at the run_safe entry
+   point lets the operator see WHICH caller is timing out at
+   WHICH configured budget without grepping warn-level log
+   lines.  Paired with per-caller env-overridable defaults in
+   [Env_config_oas_bridge] so 60s "fantasy" budgets in
+   [auto_responder] / [dashboard_provider_runs] no longer
+   silently masquerade as the same class of event as
+   intentional 120s/180s budgets in autoresearch / deep_review. *)
+let metric_oas_bridge_timeout =
+  "masc_oas_bridge_timeout_total"
+
+
 (* OAS SSE relay (oas_sse_bridge.ml). *)
 let metric_oas_sse_relay_retries =
   "masc_oas_sse_relay_retries_total"

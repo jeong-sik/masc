@@ -104,7 +104,7 @@ let handle_deep_review (config : Coord.config) args : bool * string =
         ]))
     | Ok prompt ->
         match
-          Masc_oas_bridge.run_safe ~timeout_s:180.0 (fun () ->
+          Masc_oas_bridge.run_with_caller ~caller:"tool_deep_review" (fun () ->
             Oas_worker.run_named
               ~cascade_name:"adversarial_reviewer"
               ~goal:prompt

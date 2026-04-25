@@ -64,6 +64,38 @@ val audit_token_uniqueness : string -> (string * string list) list
     [bearer-token-belongs-to-X] failure mode (#9786) BEFORE
     runtime requests start failing.  Empty list = healthy. *)
 
+(** Outcome of one shared-token rotation group.  [token_hash_prefix]
+    matches the corresponding entry from {!audit_token_uniqueness}.
+    [rotated_agents] reports each agent in declaration order: the
+    [Ok ()] case means a fresh per-agent credential was written,
+    [Error _] preserves the failure (typically I/O during
+    [save_credential]) without aborting the whole batch.  Callers
+    that want strict atomicity should retry on partial failure. *)
+type rotation_outcome = {
+  token_hash_prefix : string;
+  rotated_agents : (string * (unit, masc_error) result) list;
+}
+
+val rotate_shared_tokens : string -> rotation_outcome list
+(** #10304 follow-up to #9786: when {!audit_token_uniqueness} reports
+    a group of agents sharing one bearer token, generate a fresh
+    unique token for EACH agent in the group and persist the
+    credential.  Returns one [rotation_outcome] per group, in the
+    same order as the audit, so callers can attach a structured WARN
+    or counter to every rotation.
+
+    A single shared-token incident on the production fleet flips
+    14 keeper credentials at once (#10304 evidence: 3 distinct
+    [token_hash_prefix] each shared by 14 agents in a single day),
+    so this is intended as an opt-in escalation: detection
+    (audit_token_uniqueness) stays the default; explicit rotation
+    is what an operator or a guarded boot path drives.
+
+    Note: rotating an agent's token forces every running consumer
+    of that token to re-fetch credentials.  Callers should hold
+    rotation to boot-time or operator-driven contexts where the
+    re-auth burst is acceptable. *)
+
 val find_credential_by_token :
   string -> token:string -> (agent_credential, masc_error) result
 

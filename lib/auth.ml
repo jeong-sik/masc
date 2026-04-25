@@ -441,27 +441,51 @@ let list_credentials config : agent_credential list =
     [(token_hash_prefix, agent_names)] where [List.length
     agent_names >= 2].  Empty list means every credential's token
     hash is unique. *)
-let audit_token_uniqueness config : (string * string list) list =
+(** #10304: indexed credential view used by both
+    {!audit_token_uniqueness} (detection) and {!rotate_shared_tokens}
+    (prevention).  Returns [(token_hash, [(name, role) pairs])] so
+    rotation can look up each agent's role without re-walking the
+    credential store. *)
+let group_credentials_by_token config :
+    (string * (string * agent_role) list) list =
   let creds = list_credentials config in
-  let by_token : (string, string list) Hashtbl.t = Hashtbl.create 16 in
+  let by_token : (string, (string * agent_role) list) Hashtbl.t =
+    Hashtbl.create 16
+  in
   List.iter
     (fun (cred : agent_credential) ->
-      let prev = Hashtbl.find_opt by_token cred.token |> Option.value ~default:[] in
-      Hashtbl.replace by_token cred.token (cred.agent_name :: prev))
+      let prev =
+        Hashtbl.find_opt by_token cred.token |> Option.value ~default:[]
+      in
+      Hashtbl.replace by_token cred.token
+        ((cred.agent_name, cred.role) :: prev))
     creds;
   Hashtbl.fold
-    (fun token_hash agents acc ->
-      match agents with
-      | [] | [ _ ] -> acc
-      | xs ->
-        let prefix =
-          if String.length token_hash >= 12
-          then String.sub token_hash 0 12
-          else token_hash
-        in
-        (prefix, List.sort String.compare xs) :: acc)
+    (fun token_hash entries acc -> (token_hash, entries) :: acc)
     by_token []
+
+let token_hash_prefix_of token_hash =
+  if String.length token_hash >= 12 then String.sub token_hash 0 12
+  else token_hash
+
+let audit_token_uniqueness config : (string * string list) list =
+  group_credentials_by_token config
+  |> List.filter_map (fun (token_hash, entries) ->
+         match entries with
+         | [] | [ _ ] -> None
+         | xs ->
+             let names =
+               List.map (fun (name, _role) -> name) xs
+               |> List.sort String.compare
+             in
+             Some (token_hash_prefix_of token_hash, names))
   |> List.sort (fun (a, _) (b, _) -> String.compare a b)
+
+(* #10304: rotation_outcome type + rotate_shared_tokens defined
+   later in the file (after save_raw_token_credential).  This block
+   intentionally left as a forward-pointer comment so the audit and
+   rotation surfaces are co-located in the API but the
+   implementation respects definition order. *)
 
 (** Find credential by raw token (hash lookup + expiry check).
 
@@ -560,6 +584,49 @@ let create_token config ~agent_name ~role : (string * agent_credential, masc_err
   match save_raw_token_credential config ~agent_name ~role ~raw_token with
   | Ok cred -> Ok (raw_token, cred)
   | Error e -> Error e
+
+(** #10304: rotate shared bearer tokens detected by
+    {!audit_token_uniqueness} into per-agent unique tokens.  Each
+    agent in a shared group gets a fresh raw token so its persisted
+    credential carries an unambiguous bearer.  Returns one
+    [rotation_outcome] per group in audit order; per-agent results
+    are reported individually so a single I/O failure does not abort
+    the batch (the audit will still flag that agent on the next
+    run). *)
+type rotation_outcome = {
+  token_hash_prefix : string;
+  rotated_agents : (string * (unit, masc_error) result) list;
+}
+
+let rotate_shared_tokens config : rotation_outcome list =
+  group_credentials_by_token config
+  |> List.filter_map (fun (token_hash, entries) ->
+         match entries with
+         | [] | [ _ ] -> None
+         | xs ->
+             let prefix = token_hash_prefix_of token_hash in
+             (* Sort by name so rotation order is stable across runs —
+                operators diffing successive logs see no phantom
+                reorderings. *)
+             let sorted =
+               List.sort (fun (a, _) (b, _) -> String.compare a b) xs
+             in
+             Some (prefix, sorted))
+  |> List.sort (fun (a, _) (b, _) -> String.compare a b)
+  |> List.map (fun (token_hash_prefix, sorted_entries) ->
+         let rotated_agents =
+           List.map
+             (fun (agent_name, role) ->
+               let raw_token = generate_token () in
+               match
+                 save_raw_token_credential config ~agent_name ~role
+                   ~raw_token
+               with
+               | Ok _ -> (agent_name, Ok ())
+               | Error e -> (agent_name, Error e))
+             sorted_entries
+         in
+         { token_hash_prefix; rotated_agents })
 
 (* #9786: record bearer-token mismatch for observability.  Shared
    helper so both reject sites feed the same counter with the same

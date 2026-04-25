@@ -146,7 +146,7 @@ function renderOwnedTasks(
     return html`<div class="h-full min-h-30"><${EmptyState} message="할당된 작업이 없습니다" compact /></div>`
   }
   if (isFiltering && visibleTasks.length === 0) {
-    return html`<div class="py-4 text-center text-2xs text-[var(--text-dim)]">필터 결과 없음 (${allTasks.length} tasks)</div>`
+    return html`<div class="py-4 text-center text-2xs text-[var(--text-dim)]" role="status">필터 결과 없음 (${allTasks.length} tasks)</div>`
   }
   return html`<div class="flex flex-col gap-3">${visibleTasks.map(t => html`<${TaskSummary} key=${t.id} task=${t} />`)}</div>`
 }
@@ -160,7 +160,7 @@ function renderTaskHistories(
     return html`<${EmptyState} message="작업 이력이 없습니다" compact />`
   }
   if (isFiltering && visibleRows.length === 0) {
-    return html`<div class="py-4 text-center text-2xs text-[var(--text-dim)]">필터 결과 없음 (${allRows.length} rows)</div>`
+    return html`<div class="py-4 text-center text-2xs text-[var(--text-dim)]" role="status">필터 결과 없음 (${allRows.length} rows)</div>`
   }
   return html`<div class="flex flex-col gap-3">${visibleRows.map(row => html`<${TaskHistoryPanel} key=${row.taskId} row=${row} />`)}</div>`
 }
@@ -338,7 +338,7 @@ export function AgentDetailOverlay() {
           <div class="text-3xs uppercase tracking-wider text-[var(--text-dim)]">
             작업 필터
             ${isFilteringTasks
-              ? html`<span class="ml-2 normal-case tracking-normal text-text-muted">할당 ${visibleOwnedTasks.length}/${ownedTasks.length} · 이력 ${visibleHistories.length}/${historyRows.length}</span>`
+              ? html`<span class="ml-2 normal-case tracking-normal text-text-muted" role="status">할당 ${visibleOwnedTasks.length}/${ownedTasks.length} · 이력 ${visibleHistories.length}/${historyRows.length}</span>`
               : null}
           </div>
           <input

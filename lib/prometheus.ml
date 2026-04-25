@@ -547,6 +547,13 @@ let metric_fs_atomic_orphans_cleaned =
 let metric_auth_bearer_token_mismatch =
   "masc_auth_bearer_token_mismatch_total"
 
+(* #10183: strict Auth rejects unknown external tools.  Before this,
+   repeated "unknown non-masc tool" denials were only visible by
+   grepping logs.  Keep labels bounded: [agent_name] is fleet-sized
+   and [tool_class] is a small vocabulary, not the raw tool name. *)
+let metric_auth_strict_unknown_tool_denials =
+  "masc_auth_strict_unknown_tool_denials_total"
+
 (* #9786 follow-up: boot-time audit counter for credentials
    sharing the same token hash.  Distinct from
    [bearer_token_mismatch]: the mismatch counter fires per
@@ -880,6 +887,12 @@ let init () =
      requested agent_name (labels: expected_agent, actual_agent). Rate \
      advancing after a server restart indicates shared credential state \
      (connection pool / process fork) across agent identities."
+    Counter;
+  add metric_auth_strict_unknown_tool_denials
+    "Total strict Auth rejects for unknown external tools \
+     (labels: agent_name, tool_class=empty|external). This catches \
+     fleet-wide tool dispatch regressions without using raw tool names \
+     as metric labels."
     Counter;
   add metric_auth_credential_token_duplicate
     "Total boot-time credential token duplicate groups detected \

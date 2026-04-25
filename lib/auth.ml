@@ -708,7 +708,7 @@ let permission_for_tool tool_name =
 
 (** Strict tool auth mode:
     - 0/false: legacy fail-open for unknown tools
-    - 1/true: unknown masc_* tools require at least worker-level permission *)
+    - 1/true: unknown internal tools require at least worker-level permission *)
 let is_tool_auth_strict_enabled () =
   Env_config_core.tool_auth_strict ()
 
@@ -720,26 +720,22 @@ let is_protocol_canonical_tool_name tool_name =
   || String.starts_with ~prefix:"experiment." tool_name
   || String.starts_with ~prefix:"client." tool_name
 
-(* #10183: keeper-bound runtime tools ([keeper_shell], [keeper_bash],
-   [keeper_task_claim], …) are not [masc_*] but ARE first-class
-   internal tools dispatched by every keeper.  When
-   [permission_for_tool] does not have an entry for them, the
-   strict-mode gate below treats them as foreign and rejects with
-   [Forbidden "unknown non-masc tool"].  Production audit
-   (2026-04-25) caught the analyst keeper hitting this path 116
-   times — keeper_shell x22, keeper_bash x10, keeper_task_claim
-   x10, etc. — across 12+ tools.  The 13 other keepers were
-   unaffected because their token resolves through a credential
-   path whose tools [permission_for_tool] already maps; analyst's
-   token took the codex_cli path and fell through to the
-   unmapped branch.
+(* Keeper runtime tools are internal only when the catalog owns
+   them; a [keeper_*] prefix alone is not enough to cross auth. *)
+let is_unmapped_internal_tool_name tool_name =
+  is_masc_tool_name tool_name
+  || is_protocol_canonical_tool_name tool_name
+  || Tool_catalog.is_on_surface Tool_catalog.Keeper_internal tool_name
 
-   Until that token-routing regression
-   (#9786 / #10183 Option D) is addressed, broaden the prefix
-   gate so [keeper_*] tools survive the auth boundary regardless
-   of which credential path resolved them. *)
-let is_keeper_runtime_tool_name tool_name =
-  String.starts_with ~prefix:"keeper_" tool_name
+let unknown_tool_class tool_name =
+  if String.trim tool_name = "" then "empty" else "external"
+
+let record_strict_unknown_tool_denial ~agent_name ~tool_name =
+  Prometheus.inc_counter
+    Prometheus.metric_auth_strict_unknown_tool_denials
+    ~labels:
+      [ ("agent_name", agent_name); ("tool_class", unknown_tool_class tool_name) ]
+    ()
 
 (** Check permission for a tool call *)
 let authorize_tool config ~agent_name ~token ~tool_name : (unit, masc_error) result =
@@ -747,13 +743,17 @@ let authorize_tool config ~agent_name ~token ~tool_name : (unit, masc_error) res
   | None ->
       if not (is_tool_auth_strict_enabled ()) then
         Ok ()  (* Legacy fail-open *)
-      else if is_masc_tool_name tool_name
-              || is_protocol_canonical_tool_name tool_name
-              || is_keeper_runtime_tool_name tool_name then
+      else if is_unmapped_internal_tool_name tool_name then
         (* Conservative default in strict mode for unmapped internal tools. *)
         check_permission config ~agent_name ~token ~permission:CanBroadcast
       else
-        Error (Forbidden { agent = agent_name; action = "use unknown non-masc tool" })
+        let () = record_strict_unknown_tool_denial ~agent_name ~tool_name in
+        Error
+          (Forbidden
+             {
+               agent = agent_name;
+               action = "use unknown non-masc tool: " ^ tool_name;
+             })
   | Some perm -> check_permission config ~agent_name ~token ~permission:perm
 
 (* ============================================ *)
@@ -802,13 +802,12 @@ let authorize_tool_for_role ~agent_name ~role ~tool_name :
     match permission_for_tool tool_name with
     | Some _ -> Ok ()  (* Mapped tool — policy already checked *)
     | None ->
-        if is_masc_tool_name tool_name
-           || is_protocol_canonical_tool_name tool_name
-           || is_keeper_runtime_tool_name tool_name then
+        if is_unmapped_internal_tool_name tool_name then
           (* Unmapped internal tool: require at least Worker *)
           if has_permission role CanBroadcast then Ok ()
           else Error (Forbidden { agent = agent_name; action = tool_name })
         else
+          let () = record_strict_unknown_tool_denial ~agent_name ~tool_name in
           Error
             (Forbidden
                {
@@ -822,8 +821,8 @@ let authorize_tool_for_role ~agent_name ~role ~tool_name :
 
     Strict mode (MASC_TOOL_AUTH_STRICT, default=true):
     Tools not mapped by permission_for_tool are subject to additional
-    checks — unmapped masc_* tools require at least Worker, and
-    unmapped non-masc tools are forbidden. *)
+    checks — unmapped internal tools require at least Worker, and
+    unmapped external tools are forbidden. *)
 let authorize_tool_v2 config ~agent_name ~token ~tool_name : (unit, masc_error) result =
   match resolve_role config ~agent_name ~token with
   | Error e -> Error e

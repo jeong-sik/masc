@@ -374,32 +374,12 @@ let run_turn
   let tool_usage_before =
     Keeper_tool_disclosure.keeper_tool_usage_snapshot ~base_path:config.base_path ~keeper_name:meta.name
   in
-  (* Progressive tool disclosure via OAS Tool_selector.
-     Delegates BM25 retrieval, confidence gating, fallback, and optional
-     LLM reranking to Tool_selector.select instead of manual Tool_index
-     calls.  See OAS boundary violation #6.
-
-     Korean keyword aliases: Tool_selector.select uses Tool_index.of_tools
-     internally (aliases=[], group=None).  To preserve bilingual BM25
-     matching, we append Korean keywords directly into tool descriptions.
-     This gives equivalent BM25 term overlap.
-
-     Trade-off vs previous manual approach:
-     - Lost: group co-retrieval (e.g. matching keeper_board_post would
-       pull keeper_board_comment).  Mitigated by k=20 which already
-       retrieves enough related tools.
-     - Lost: pre-built index reuse across turns.  Tool_selector rebuilds
-       per call, but Tool_index construction is O(n) with n~30-60 for
-       preset-scoped tools — sub-millisecond on M3.
-     - Gained: single-point-of-truth for BM25+confidence+fallback+rerank
-       logic.  ~120 fewer lines of manual retrieval code.
-
-     TODO(OAS): Add Tool_selector.select_with_index that accepts a
-     pre-built Tool_index.t to support aliases, groups, and index reuse.
-     When that lands, this code can drop the description augmentation. *)
-  (* Tool index aliases and groups come from Keeper_agent_tool_surface, not a
-     second table in the run loop, so retrieval tests exercise the production
-     metadata. *)
+  (* Progressive tool disclosure.
+     Deterministic BM25 prefiltering uses a Tool_index built from
+     Keeper_agent_tool_surface.tool_index_entry_of_tool, so Korean aliases and
+     group metadata have one production SSOT.  Optional LLM rerank still calls
+     OAS Tool_selector.select_names on the raw OAS tool schemas, but the
+     deterministic prefilter remains part of the merged floor. *)
   (* Full-universe search index for keeper_tool_search.
      Separate from the preset-scoped Tool_selector used for progressive disclosure:
      search needs access to ALL tools so the keeper can discover beyond its preset.

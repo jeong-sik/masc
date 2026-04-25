@@ -400,7 +400,7 @@ export function PipelineStep({
 
   return html`
     <div class="flex items-center gap-0 flex-1 min-w-0" role="listitem" aria-label=${`${label}: ${displayState(value)}${limited ? ' (관찰 제한)' : ''}${heldFor ? `, ${heldFor}` : ''}`}
-      title=${`${label} (${shortLabel}): ${value} → ${displayState(value)}${heldFor ? ` · ${heldFor}` : ''}${limited ? '\n⚠ 관찰 제한: 일부 상태만 registry에서 파생 가능 (#7122)' : ''}\n${STATE_DESCRIPTIONS[value] ?? ''}`}
+      title=${`${label} (${shortLabel}): ${value} → ${displayState(value)}${heldFor ? ` · ${heldFor}` : ''}${limited ? '\n관찰 제한: 일부 상태만 registry에서 파생 가능 (#7122)' : ''}\n${STATE_DESCRIPTIONS[value] ?? ''}`}
     >
       <div class=${`flex-1 rounded border px-3 py-2 transition-all duration-500 ${borderCls} ${bgCls} ${limited && !isActive ? 'opacity-60' : ''}`}>
         <div class="flex items-center justify-between gap-1.5">

@@ -211,11 +211,11 @@ export function deriveRail(
   // a valid token (the bridge would have crashed at startup otherwise).
   // If it's down we can't know, so we suggest setting one.
   const tokenState: RailState = input.sidecarUp ? 'ok' : 'bad'
-  const tokenDetail = input.sidecarUp ? '설정됨 (sidecar 부팅 통과)' : '필요 — ⚙ Config 에서 입력'
+  const tokenDetail = input.sidecarUp ? '설정됨 (sidecar 부팅 통과)' : '필요 — Config 에서 입력'
 
   // Process
   const processState: RailState = input.sidecarUp ? 'ok' : 'bad'
-  const processDetail = input.sidecarUp ? '🟢 실행 중' : '⊘ 정지'
+  const processDetail = input.sidecarUp ? '실행 중' : '정지'
 
   // Gate
   let gateState: RailState

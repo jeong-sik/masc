@@ -211,7 +211,7 @@ function MatrixCellButton({ cell }: { cell: MatrixCell }) {
       data-matrix-state=${cell.state}
     >
       <span class=${`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${tone.dot}`} aria-hidden="true"></span>
-      <span>${CELL_GLYPH[cell.state]}</span>
+      <span aria-hidden="true">${CELL_GLYPH[cell.state]}</span>
       ${label ? html`<span class="hidden md:inline">${label}</span>` : null}
     </button>
   `

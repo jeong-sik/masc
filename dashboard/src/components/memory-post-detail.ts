@@ -351,11 +351,11 @@ export function PostDetail({ post }: { post: BoardPost }) {
             <button type="button"
               class="vote-btn upvote px-3 py-1.5 rounded text-xs font-medium border border-[var(--border-slate-16)] bg-transparent text-[var(--text-muted)] hover:text-[var(--warn-bright)] hover:border-[var(--warn-30)] hover:bg-[var(--warn-10)] transition-all cursor-pointer"
               onClick=${() => handleVote('up')}
-            >▲ 추천</button>
+            ><span aria-hidden="true">▲</span> 추천</button>
             <button type="button"
               class="vote-btn downvote px-3 py-1.5 rounded text-xs font-medium border border-[var(--border-slate-16)] bg-transparent text-[var(--text-muted)] hover:text-[var(--accent)] hover:border-[var(--accent-30)] hover:bg-[var(--accent-10)] transition-all cursor-pointer"
               onClick=${() => handleVote('down')}
-            >▼ 비추천</button>
+            ><span aria-hidden="true">▼</span> 비추천</button>
           </div>
         </div>
       <//>

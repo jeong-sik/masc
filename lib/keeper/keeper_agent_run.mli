@@ -91,6 +91,34 @@ type run_result =
   ; tool_surface : tool_surface_metrics
   }
 
+(** Result of pre-dispatch resume checkpoint hygiene.
+
+    [resume_checkpoint] is the only checkpoint passed to OAS resume.  It is
+    derived from the sanitized MASC working context, optionally after
+    pre-dispatch compaction, so run_turn does not reload a separate raw
+    checkpoint immediately before dispatch. *)
+type pre_dispatch_checkpoint_hygiene_result =
+  { context : Keeper_types.working_context
+  ; resume_checkpoint : Oas.Checkpoint.t option
+  ; compacted : bool
+  ; applied : bool
+  ; meaningful_reduction : bool
+  ; before_tokens : int
+  ; after_tokens : int
+  ; trigger : string option
+  ; decision : string
+  ; save_error : string option
+  }
+
+val prepare_resume_checkpoint_for_dispatch :
+     meta:Keeper_types.keeper_meta
+  -> now_ts:float
+  -> loaded_checkpoint_present:bool
+  -> save_checkpoint:
+       (Keeper_types.working_context -> (Oas.Checkpoint.t, string) result)
+  -> Keeper_types.working_context
+  -> pre_dispatch_checkpoint_hygiene_result
+
 val should_require_tools_for_initial_turn :
   max_turns:int -> turn_affordances:string list -> bool
 

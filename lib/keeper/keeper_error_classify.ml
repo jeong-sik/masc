@@ -314,8 +314,7 @@ let degraded_rotation_candidates
     match rotation_cascades with
     | None ->
         legacy_degraded_rotation_candidates ~base_cascade ~tool_requirement
-    | Some catalog ->
-        normalize_rotation_candidates (base_cascade :: catalog)
+    | Some catalog -> normalize_rotation_candidates catalog
   in
   let candidates =
     match fallback_hint with

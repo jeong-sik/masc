@@ -45,6 +45,35 @@ let messages_safe config =
 let assoc_upsert fields key value =
   (key, value) :: List.remove_assoc key fields
 
+(** #9766: per-render phase timing record used to surface a breakdown
+    in the [slow render] WARN.  Pure values so a unit test can pin
+    the formatting / per-keeper averaging without booting Eio. *)
+type render_phase_timings_ms = {
+  total_ms : float;
+  snapshot_ms : float;
+  operations_ms : float;
+  enrich_ms : float;
+  data_load_ms : float;
+  assemble_ms : float;
+  n_keepers : int;
+}
+
+let per_keeper_enrich_ms (t : render_phase_timings_ms) =
+  if t.n_keepers > 0 then t.enrich_ms /. float_of_int t.n_keepers else 0.0
+
+let format_slow_render_timings (t : render_phase_timings_ms) =
+  Printf.sprintf
+    "total=%.0fms (keepers=%d) snapshot=%.0fms operations=%.0fms \
+     enrich=%.0fms (per_keeper=%.0fms) data_load=%.0fms assemble=%.0fms"
+    t.total_ms
+    t.n_keepers
+    t.snapshot_ms
+    t.operations_ms
+    t.enrich_ms
+    (per_keeper_enrich_ms t)
+    t.data_load_ms
+    t.assemble_ms
+
 let enrich_keeper_with_diagnostic ~(config : Coord.config) (keeper_json : Yojson.Safe.t) =
   let open Yojson.Safe.Util in
   match keeper_json with
@@ -201,6 +230,7 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
               ~lightweight_summary:true
               ctx)
       in
+      let t_after_snapshot = Time_compat.now () in
       Eio.Fiber.yield ();
       (* Yield between heavy computation phases to prevent fiber starvation.
          Eio's cooperative scheduler needs explicit yields in CPU-bound paths
@@ -211,12 +241,14 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
       let execution_queue =
         build_execution_queue session_contexts operation_contexts
       in
+      let t_after_operations = Time_compat.now () in
       let keepers =
         member_assoc "keepers" snapshot_json |> member_assoc "items"
         |> function
         | `List items -> List.map (enrich_keeper_with_diagnostic ~config) items
         | _ -> []
       in
+      let t_after_enrich = Time_compat.now () in
       Eio.Fiber.yield ();
       (* Load tasks/agents/messages — needed for worker_support_briefs.
          In light mode, tasks and messages are NOT serialized in the
@@ -225,6 +257,7 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
       let tasks = tasks_safe config in
       let agents = agents_safe config in
       let messages = messages_safe config in
+      let t_after_data_load = Time_compat.now () in
       let now_ts = Time_compat.now () in
       let worker_rows =
         build_worker_support_briefs ~now_ts ~tasks ~agents ~messages session_contexts
@@ -299,16 +332,30 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
         ]);
       ] in
       let t_end = Time_compat.now () in
-      let total_ms = (t_end -. t_start) *. 1000.0 in
-      if total_ms > 10000.0 then
-        Log.Dashboard.warn
-          "[dashboard_execution] slow render: total=%.0fms (keepers=%d)"
-          total_ms
-          (List.length keepers)
+      let phase_ms a b = (b -. a) *. 1000.0 in
+      let timings : render_phase_timings_ms = {
+        total_ms = phase_ms t_start t_end;
+        snapshot_ms = phase_ms t_start t_after_snapshot;
+        operations_ms = phase_ms t_after_snapshot t_after_operations;
+        enrich_ms = phase_ms t_after_operations t_after_enrich;
+        data_load_ms = phase_ms t_after_enrich t_after_data_load;
+        assemble_ms = phase_ms t_after_data_load t_end;
+        n_keepers = List.length keepers;
+      } in
+      (* #9766: surface phase breakdown in the slow-render WARN so the
+         59.8s/9-keeper sample (~6.6s/keeper) can be attributed to a
+         specific phase without rebuilding the binary with extra
+         instrumentation.  enrich covers the per-keeper [List.map
+         enrich_keeper_with_diagnostic] which is the suspected hot path. *)
+      if timings.total_ms > 10000.0 then
+        Log.Dashboard.warn "[dashboard_execution] slow render: %s"
+          (format_slow_render_timings timings)
       else
         Log.Dashboard.debug
-          "[dashboard_execution] timing: total=%.0fms"
-          total_ms;
+          "[dashboard_execution] timing: total=%.0fms snapshot=%.0fms \
+           enrich=%.0fms data_load=%.0fms assemble=%.0fms"
+          timings.total_ms timings.snapshot_ms timings.enrich_ms
+          timings.data_load_ms timings.assemble_ms;
       if light then
         `Assoc (base_fields @ task_fields)
       else

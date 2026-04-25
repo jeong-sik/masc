@@ -407,6 +407,10 @@ let zero_provider_info (key : string) : Health.provider_info =
   ; cooldown_expires_at = None
   ; events_in_window = 0
   ; rejected_in_window = 0
+  ; top_fingerprints = []
+  ; last_failure_at = None
+  ; trust_score = 1.0
+  ; same_fingerprint_count = 0
   }
 
 (** [provider_entry_to_json ~declared info] serialises a provider_info
@@ -453,6 +457,14 @@ let provider_entry_to_json ~(declared : bool)
       ; ("request_count", `Int stats.ps_entry_count)
       ]
   in
+  let top_fingerprints_json =
+    `List
+      (List.map
+         (fun (fp, count) ->
+           `Assoc
+             [ ("fingerprint", `String fp); ("count", `Int count) ])
+         info.top_fingerprints)
+  in
   `Assoc ([
     ("provider_key", `String info.provider_key);
     ("success_rate", `Float info.success_rate);
@@ -468,6 +480,20 @@ let provider_entry_to_json ~(declared : bool)
        so dashboards can distinguish "provider down" from "provider
        returns unusable output". *)
     ("rejected_in_window", `Int info.rejected_in_window);
+    (* top_fingerprints / last_failure_at are Phase 0 trust observability
+       anchors (cumulative, not window-bounded).  Surfaced so dashboards
+       can show "which error keeps recurring" alongside the existing
+       success-rate snapshot. *)
+    ("top_fingerprints", top_fingerprints_json);
+    ("last_failure_at", opt_float info.last_failure_at);
+    (* Phase 1 trust_score (calibrated EWMA in [0, ceiling]) and the
+       persistence detector counter.  trust_score replaces success_rate
+       as the [effective_weight] driver but both are surfaced so the
+       dashboard can show the divergence (e.g. provider with
+       success_rate=0.5 across 5 events but trust=0.04 because all 5
+       failures share a fingerprint). *)
+    ("trust_score", `Float info.trust_score);
+    ("same_fingerprint_count", `Int info.same_fingerprint_count);
     ("declared", `Bool declared);
     ("status", `String (provider_status info));
   ] @ perf_fields)

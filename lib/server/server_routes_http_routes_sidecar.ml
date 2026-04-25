@@ -132,7 +132,9 @@ let today_yyyymmdd () =
     (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
 
 let legacy_status_rel id =
-  Printf.sprintf ".masc/connectors/%s/status.json" id
+  Filename.concat
+    Common.masc_dirname
+    (Printf.sprintf "connectors/%s/status.json" id)
 
 type sidecar_status_config = {
   env_names : string list;
@@ -284,8 +286,9 @@ let log_file_candidates ?sidecar_root ?project_root ~base_path id =
   let roots = sidecar_root_candidates ?sidecar_root ?project_root ~base_path () in
   roots
   |> List.map (fun root ->
-         Filename.concat root
-           (Printf.sprintf ".masc/logs/%s-sidecar-%s.log" id (today_yyyymmdd ())))
+         Filename.concat
+           (Common.masc_dir_from_base_path ~base_path:root)
+           (Printf.sprintf "logs/%s-sidecar-%s.log" id (today_yyyymmdd ())))
   |> dedupe_keep_order
 
 let today_log_file ?sidecar_root ?project_root ~base_path id =
@@ -293,8 +296,9 @@ let today_log_file ?sidecar_root ?project_root ~base_path id =
   |> first_existing_or_first
   |> Option.value
        ~default:
-         (Filename.concat base_path
-            (Printf.sprintf ".masc/logs/%s-sidecar-%s.log" id (today_yyyymmdd ())))
+         (Filename.concat
+            (Common.masc_dir_from_base_path ~base_path)
+            (Printf.sprintf "logs/%s-sidecar-%s.log" id (today_yyyymmdd ())))
 
 let runtime_sidecar_dir_result ?base_path id =
   let runtime_base_path = runtime_base_path ?base_path () in

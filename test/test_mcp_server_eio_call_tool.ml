@@ -88,6 +88,19 @@ let test_success_quality_has_no_issues () =
   check bool "passed" true (quality |> U.member "passed" |> U.to_bool);
   check int "issue count" 0 (quality |> U.member "issues" |> U.to_list |> List.length)
 
+let test_contains_casefold_keeps_semantics () =
+  let contains = Masc_mcp.Mcp_server_eio_call_tool.contains_casefold in
+  check bool "empty needle" true (contains "anything" "");
+  check bool "exact match" true (contains "auth required" "auth required");
+  check bool "ascii casefold" true
+    (contains "Auth REQUIRED by server" "auth required");
+  check bool "middle substring" true
+    (contains "prefix temporary network suffix" "TEMPORARY NETWORK");
+  check bool "numeric literal" true
+    (contains "HTTP 503 Service Unavailable" "503");
+  check bool "needle longer than haystack" false (contains "short" "shorter");
+  check bool "absent substring" false (contains "Invalid JSON" "timeout")
+
 let test_transition_has_no_fixed_timeout () =
   check bool "masc_transition has no fixed timeout"
     true
@@ -344,6 +357,8 @@ let () =
           test_case "timeout is error" `Quick test_timeout_quality_is_error;
           test_case "generic failure is error" `Quick test_generic_failure_quality_is_error;
           test_case "success has no issues" `Quick test_success_quality_has_no_issues;
+          test_case "contains casefold keeps semantics" `Quick
+            test_contains_casefold_keeps_semantics;
           test_case "transition has no fixed timeout" `Quick test_transition_has_no_fixed_timeout;
           test_case "persona generate timeout exceeds OAS budget" `Quick
             test_persona_generate_timeout_exceeds_oas_budget;

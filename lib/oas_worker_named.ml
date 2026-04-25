@@ -527,6 +527,7 @@ let config_for_label
     ?(max_cost_usd : float option)
     ~(temperature : float)
     ?(max_idle_turns = 3)
+    ?stream_idle_timeout_s
     ?guardrails
     ?hooks
     ?context_reducer
@@ -553,6 +554,7 @@ let config_for_label
       max_cost_usd;
       temperature;
       max_idle_turns;
+      stream_idle_timeout_s;
       guardrails;
       hooks;
       context_reducer;
@@ -995,6 +997,7 @@ let run_named
     ?(initial_messages = [])
     ?(max_turns = 20)
     ?(max_idle_turns = 3)
+    ?stream_idle_timeout_s
     ?(temperature = Oas_worker_cascade.default_temperature)
     ?(max_tokens = Oas_worker_cascade.default_max_tokens)
     ?max_input_tokens
@@ -1142,6 +1145,10 @@ let run_named
                  max_tokens;
                  max_input_tokens;
                  max_cost_usd;
+                 stream_idle_timeout_s =
+                   (match per_provider_timeout_s with
+                    | Some _ as timeout_s -> timeout_s
+                    | None -> stream_idle_timeout_s);
                  temperature;
                  max_idle_turns;
                  guardrails;
@@ -1350,7 +1357,9 @@ let run_named
            [record_rejected] behaves like a failure for cooldown /
            weight but keeps the [Rejected] tag so the dashboard can
            distinguish it from hard errors. *)
-        Cascade_health_tracker.(record_rejected global ~provider_key:provider_cfg.model_id);
+        Cascade_health_tracker.(
+          record_rejected global ~provider_key:provider_cfg.model_id
+            ~error_kind:"accept_rejected" ());
         (* FSM: Accept_rejected → decide *)
         let reason = Printf.sprintf "response rejected by accept (model=%s)" result.response.model in
         let outcome = Cascade_fsm.Accept_rejected
@@ -1418,10 +1427,15 @@ let run_named
            ([hard_quota_cooldown_sec], default 1h) so weighted_random
            re-selection doesn't waste cascade turns on a provider that
            is terminally unavailable. *)
+        let err_str = Oas.Error.to_string sdk_err in
         if sdk_error_is_hard_quota sdk_err then
-          Cascade_health_tracker.(record_hard_quota global ~provider_key:provider_cfg.model_id)
+          Cascade_health_tracker.(
+            record_hard_quota global ~provider_key:provider_cfg.model_id
+              ~error_kind:"hard_quota" ~error_reason:err_str ())
         else
-          Cascade_health_tracker.(record_failure global ~provider_key:provider_cfg.model_id);
+          Cascade_health_tracker.(
+            record_failure global ~provider_key:provider_cfg.model_id
+              ~error_kind:"failure" ~error_reason:err_str ());
         (* FSM: Call_err → decide *)
         (match sdk_error_to_cascade_outcome sdk_err with
          | Some outcome ->
@@ -1650,6 +1664,7 @@ let run_model_by_label
     ?(tools = [])
     ?(max_turns = 20)
     ?(max_idle_turns = 3)
+    ?stream_idle_timeout_s
     ?(temperature = Oas_worker_cascade.default_temperature)
     ?(max_tokens = Oas_worker_cascade.default_max_tokens)
     ?max_input_tokens
@@ -1673,7 +1688,7 @@ let run_model_by_label
   let* config =
     config_for_label ~name:"oas-label-model" ~model_label ~system_prompt
       ~tools ~max_turns ~max_tokens ?max_input_tokens ?max_cost_usd ~temperature
-      ~max_idle_turns ?guardrails ?hooks ?context_reducer ?memory
+      ~max_idle_turns ?stream_idle_timeout_s ?guardrails ?hooks ?context_reducer ?memory
       ?tool_retry_policy
       ?enable_thinking
       ?compact_ratio
@@ -1728,6 +1743,7 @@ let run_named_with_masc_tools
     ~(masc_tools : Types.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
     ?(max_turns = 20)
+    ?stream_idle_timeout_s
     ?(temperature = Oas_worker_cascade.default_temperature)
     ?(max_tokens = Oas_worker_cascade.default_max_tokens)
     ?max_input_tokens
@@ -1762,7 +1778,7 @@ let run_named_with_masc_tools
   run_named ~cascade_name ~goal ?priority ~system_prompt ~tools:oas_tools
     ~require_tool_support:(masc_tools <> [])
     ~max_turns ~temperature ~max_tokens ?max_input_tokens ?max_cost_usd
-    ?wait_timeout_sec ?guardrails ?hooks ?memory
+    ?stream_idle_timeout_s ?wait_timeout_sec ?guardrails ?hooks ?memory
     ?tool_retry_policy
     ~required_tool_satisfaction
     ?compact_ratio
@@ -1778,6 +1794,7 @@ let run_model_with_masc_tools
     ~(masc_tools : Types.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
     ?(max_turns = 20)
+    ?stream_idle_timeout_s
     ?(temperature = Oas_worker_cascade.default_temperature)
     ?(max_tokens = Oas_worker_cascade.default_max_tokens)
     ?max_input_tokens
@@ -1800,7 +1817,7 @@ let run_model_with_masc_tools
   let* config =
     config_for_label ~name:"oas-explicit-model" ~model_label ~system_prompt
       ~tools:[] ~max_turns ~max_tokens ?max_input_tokens ?max_cost_usd ~temperature
-      ?guardrails ?hooks ?memory ?tool_retry_policy ?enable_thinking
+      ?stream_idle_timeout_s ?guardrails ?hooks ?memory ?tool_retry_policy ?enable_thinking
       ?compact_ratio
       ~description:(Some (Printf.sprintf "model_label:%s" model_label))
       ()

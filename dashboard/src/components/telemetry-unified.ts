@@ -296,6 +296,11 @@ function entryPreview(e: TelemetryEntry): string {
       const reason = normalizeText(e.terminal_reason_code)
       return reason ? `${keeper} receipt ${outcome} (${reason})` : `${keeper} receipt ${outcome}`
     }
+    case 'goal_event': {
+      const goal = normalizeText(e.goal_id) ?? 'unknown-goal'
+      const eventType = normalizeText(e.event_type) ?? 'goal_event'
+      return `${goal} ${eventType}`
+    }
     case 'tool_metric': {
       const tool = normalizeText(e.tool_name) ?? ''
       const dur = typeof e.duration_ms === 'number' ? e.duration_ms : null
@@ -533,8 +538,19 @@ function EntryRow({ entry }: { entry: TelemetryEntry }) {
               ${scopeBadges.map(badge => html`<span class="rounded bg-[var(--white-4)] px-2 py-1 text-3xs text-[var(--text-dim)] font-mono">${badge}</span>`)}
             </div>
           ` : null}
-          <pre class="text-3xs font-mono text-[var(--text-muted)] bg-[rgba(0,0,0,0.3)] rounded p-2 overflow-x-auto max-h-75 overflow-y-auto whitespace-pre-wrap break-all">
+          <div class="rounded bg-[rgba(0,0,0,0.3)] p-2">
+            <div class="mb-1.5 flex items-center justify-between gap-2">
+              <span class="text-3xs font-medium text-[var(--text-dim)]">Raw JSON</span>
+              <${CopyIdButton}
+                value=${rawJson}
+                label="expanded telemetry entry JSON"
+                ariaLabel="Copy expanded telemetry entry JSON"
+                size=${13}
+              />
+            </div>
+            <pre class="m-0 text-3xs font-mono text-[var(--text-muted)] overflow-x-auto max-h-75 overflow-y-auto whitespace-pre-wrap break-all">
 ${rawJson}</pre>
+          </div>
         </div>
       ` : null}
     </div>
@@ -607,11 +623,21 @@ function GroupRow({ item }: { item: Extract<TelemetryDisplayItem, { kind: 'group
               </div>
             `
           })}
-          <details class="rounded bg-[var(--black-20)] px-2 py-1.5">
-            <summary class="cursor-pointer text-3xs text-[var(--text-dim)]">Raw JSON</summary>
-            <pre class="mt-2 text-3xs font-mono text-[var(--text-muted)] overflow-x-auto max-h-70 overflow-y-auto whitespace-pre-wrap break-all">
+          <div class="rounded bg-[var(--black-20)] px-2 py-1.5">
+            <div class="flex items-start justify-between gap-2">
+              <details class="min-w-0 flex-1">
+                <summary class="cursor-pointer text-3xs text-[var(--text-dim)]">Raw JSON</summary>
+                <pre class="mt-2 text-3xs font-mono text-[var(--text-muted)] overflow-x-auto max-h-70 overflow-y-auto whitespace-pre-wrap break-all">
 ${rawJson}</pre>
-          </details>
+              </details>
+              <${CopyIdButton}
+                value=${rawJson}
+                label="expanded telemetry group JSON"
+                ariaLabel="Copy expanded telemetry group JSON"
+                size=${13}
+              />
+            </div>
+          </div>
         ` : null}
       </div>
     </div>

@@ -49,8 +49,8 @@ type pre_compact_event = {
     that OAS will append from [~goal], matching the wire-level message
     list the LLM will receive.
 
-    [has_compact_happened] is reserved for future wake-time pre-reduction
-    (Option C PR4). Currently always false — compaction runs post-turn. *)
+    [has_compact_happened] marks whether MASC applied a pre-dispatch context
+    compaction before handing the resumed checkpoint to OAS. *)
 type wake_payload_event = {
   timestamp : float;
   keeper_name : string;

@@ -71,6 +71,23 @@ let test_parse_sse_dashboard_event_known_type () =
         (Some "execution") parsed.slice
   | None -> Alcotest.fail "expected parsed event"
 
+let test_parse_sse_dashboard_event_composite_change_maps_to_composite () =
+  let event_str =
+    Yojson.Safe.to_string
+      (`Assoc [
+        ("type", `String "keeper_composite_changed");
+        ("name", `String "qa-king");
+        ("ts_unix", `Float 1_774_000_000.0);
+      ])
+  in
+  match Ws.parse_sse_dashboard_event event_str with
+  | Some parsed ->
+      Alcotest.(check string) "event_type preserved"
+        "keeper_composite_changed" parsed.event_type;
+      Alcotest.(check (option string)) "composite change maps to composite"
+        (Some "composite") parsed.slice
+  | None -> Alcotest.fail "expected parsed composite event"
+
 let test_parse_sse_dashboard_event_unknown_type () =
   let event_str =
     Yojson.Safe.to_string
@@ -221,6 +238,27 @@ let test_bytes_of_shared_text_content_matches () =
     (Bytes.length bytes);
   Alcotest.(check string) "content round-trips" text
     (Bytes.to_string bytes)
+
+let contains_substring haystack needle =
+  let hlen = String.length haystack in
+  let nlen = String.length needle in
+  let rec loop i =
+    i + nlen <= hlen
+    && (String.sub haystack i nlen = needle || loop (i + 1))
+  in
+  nlen = 0 || loop 0
+
+let test_bytes_of_shared_text_repairs_invalid_utf8_for_text_frames () =
+  let text =
+    "id: 42\nevent: message\ndata: {\"type\":\"transport_health_snapshot\",\
+     \"payload\":\"bad\xC3\"}\n\n"
+  in
+  let bytes = Ws.bytes_of_shared_text text in
+  let wire = Bytes.to_string bytes in
+  Alcotest.(check bool) "wire payload is valid UTF-8"
+    true (String.is_valid_utf_8 wire);
+  Alcotest.(check bool) "invalid byte is replaced"
+    true (contains_substring wire "\xEF\xBF\xBD")
 
 let test_bytes_of_shared_text_invalidates_on_new_ref () =
   (* Force two distinct string allocations so physical equality differs
@@ -598,6 +636,8 @@ let () =
     ("parse_cache", [
       Alcotest.test_case "known type maps to slice" `Quick
         test_parse_sse_dashboard_event_known_type;
+      Alcotest.test_case "composite change maps to composite slice" `Quick
+        test_parse_sse_dashboard_event_composite_change_maps_to_composite;
       Alcotest.test_case "unknown type yields None slice" `Quick
         test_parse_sse_dashboard_event_unknown_type;
       Alcotest.test_case "malformed input returns None" `Quick
@@ -618,6 +658,8 @@ let () =
         test_bytes_of_shared_text_reuses_same_ref;
       Alcotest.test_case "content round-trips through cache" `Quick
         test_bytes_of_shared_text_content_matches;
+      Alcotest.test_case "invalid UTF-8 is repaired before text frames" `Quick
+        test_bytes_of_shared_text_repairs_invalid_utf8_for_text_frames;
       Alcotest.test_case "distinct refs force re-allocation" `Quick
         test_bytes_of_shared_text_invalidates_on_new_ref;
       Alcotest.test_case "hit/miss counters track reuse" `Quick

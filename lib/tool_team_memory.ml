@@ -104,8 +104,9 @@ let authorize_team_memory ~(config : Coord.config) ~(agent_name : string)
           validate_team_memory_room room)
 
 let team_memory_root ~(config : Coord.config) room =
-  Filename.concat config.base_path
-    (Printf.sprintf ".masc/shared/rooms/%s/memory" room)
+  Filename.concat
+    (Common.masc_dir_from_base_path ~base_path:config.base_path)
+    (Printf.sprintf "shared/rooms/%s/memory" room)
 
 let is_safe_subpath ~parent ~child =
   if child = parent then

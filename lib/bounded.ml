@@ -91,13 +91,12 @@ let calc_backoff_delay retry_config attempt =
   let jitter = (Random.State.float bounded_rng jitter_range) -. (jitter_range /. 2.0) in
   int_of_float (capped +. jitter)
 
-(** Check if error is retryable (transient failures) *)
-let is_retryable_error msg =
-  let msg_lower = String.lowercase_ascii msg in
-  List.exists (fun pattern ->
-    let pattern_lower = String.lowercase_ascii pattern in
-    Re.execp (Re.str pattern_lower |> Re.compile) msg_lower
-  ) [
+(* Static alternation of retryable-failure markers, hoisted to module
+   load.  Old form rebuilt 14 [Re.t] DFAs and 14 lowercase strings on
+   every error classification; the patterns are literals and
+   case-insensitive matching is delegated to [no_case]. *)
+let retryable_error_re =
+  let patterns = [
     "timeout";
     "timed out";
     "connection refused";
@@ -112,7 +111,12 @@ let is_retryable_error msg =
     "504";
     "overloaded";
     "temporarily unavailable";
-  ]
+  ] in
+  Re.(compile (no_case (alt (List.map str patterns))))
+
+(** Check if error is retryable (transient failures) *)
+let is_retryable_error msg =
+  Re.execp retryable_error_re msg
 
 (** Create new bounded state *)
 let create_state constraints =

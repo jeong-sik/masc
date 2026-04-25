@@ -4,8 +4,31 @@
     self-recover without human intervention.
     self-correct without human intervention. *)
 
+(* Byte-wise substring containment.
+
+   [recovery_hint] chains ~15 [contains] calls per error message; the
+   old form built a fresh [Re.t] per call (10-30 [Re.compile] per
+   tool failure once short-circuiting is accounted for).  The needles
+   are short literals and [s] is already lowercased by the caller, so
+   a naive byte scan is strictly cheaper than DFA construction. *)
 let contains s sub =
-  Re.execp (Re.str sub |> Re.compile) s
+  let nlen = String.length sub in
+  let hlen = String.length s in
+  if nlen = 0 then true
+  else if nlen > hlen then false
+  else
+    let rec match_at i j =
+      if j = nlen then true
+      else if String.unsafe_get s (i + j) <> String.unsafe_get sub j then false
+      else match_at i (j + 1)
+    in
+    let last = hlen - nlen in
+    let rec loop i =
+      if i > last then false
+      else if match_at i 0 then true
+      else loop (i + 1)
+    in
+    loop 0
 
 (** Given an error message, return a suggested recovery action or None. *)
 let recovery_hint (message : string) : string option =

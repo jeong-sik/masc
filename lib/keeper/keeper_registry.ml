@@ -377,6 +377,18 @@ let turn_phase_of_cascade_state = function
   | Cascade_trying -> Turn_executing
   | Cascade_done | Cascade_exhausted -> Turn_finalizing
 
+let broadcast_composite_changed ~name ~ts_unix =
+  try
+    Sse.broadcast
+      (`Assoc [
+         "type", `String "keeper_composite_changed";
+         "name", `String name;
+         "ts_unix", `Float ts_unix;
+       ])
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | _exn -> ()
+
 let completed_turn_outcome_of_observation
     (obs : turn_observation) : Keeper_transition_audit.completed_turn_outcome =
   match obs.decision_stage, obs.cascade_state with
@@ -393,11 +405,13 @@ let update_current_turn e f =
   { e with current_turn_observation }
 
 let mark_turn_started ~base_path name =
+  let changed = ref false in
+  let now = Time_compat.now () in
   update_entry ~base_path name (fun e ->
     let turn_id = e.meta.runtime.usage.total_turns + 1 in
     let obs = {
       turn_id;
-      started_at = Time_compat.now ();
+      started_at = now;
       turn_phase = Turn_prompting;
       decision_stage = Decision_undecided;
       cascade_state = Cascade_idle;
@@ -405,15 +419,20 @@ let mark_turn_started ~base_path name =
       measurement_bind_count = 0;
       selected_model = None;
     } in
+    changed := true;
     { e with
       current_turn_observation = Some obs;
       compaction_stage = Compaction_accumulating;
-    })
+    });
+  if !changed then broadcast_composite_changed ~name ~ts_unix:now
 
 let mark_turn_measurement ~base_path name =
+  let changed = ref false in
+  let now = Time_compat.now () in
   update_entry ~base_path name (fun e ->
     match e.current_turn_observation, e.pending_turn_measurement with
     | Some obs, Some measurement ->
+      changed := true;
       {
         e with
         current_turn_observation =
@@ -424,39 +443,63 @@ let mark_turn_measurement ~base_path name =
           };
         pending_turn_measurement = None;
       }
-    | _ -> e)
+    | _ -> e);
+  if !changed then broadcast_composite_changed ~name ~ts_unix:now
 
 let set_turn_decision_stage ~base_path name decision_stage =
-  update_entry ~base_path name (fun e ->
-    update_current_turn e (fun obs -> { obs with decision_stage }))
-
-let set_turn_cascade_state ~base_path name cascade_state =
+  let changed = ref false in
+  let now = Time_compat.now () in
   update_entry ~base_path name (fun e ->
     update_current_turn e (fun obs ->
+      changed := true;
+      { obs with decision_stage }));
+  if !changed then broadcast_composite_changed ~name ~ts_unix:now
+
+let set_turn_cascade_state ~base_path name cascade_state =
+  let changed = ref false in
+  let now = Time_compat.now () in
+  update_entry ~base_path name (fun e ->
+    update_current_turn e (fun obs ->
+      changed := true;
       {
         obs with
         cascade_state;
         turn_phase = turn_phase_of_cascade_state cascade_state;
-      }))
+      }));
+  if !changed then broadcast_composite_changed ~name ~ts_unix:now
 
 let set_turn_phase ~base_path name turn_phase =
-  update_entry ~base_path name (fun e ->
-    update_current_turn e (fun obs -> { obs with turn_phase }))
-
-let set_turn_selected_model ~base_path name selected_model =
-  update_entry ~base_path name (fun e ->
-    update_current_turn e (fun obs -> { obs with selected_model }))
-
-let prepare_turn_retry_after_compaction ~base_path name =
+  let changed = ref false in
+  let now = Time_compat.now () in
   update_entry ~base_path name (fun e ->
     update_current_turn e (fun obs ->
+      changed := true;
+      { obs with turn_phase }));
+  if !changed then broadcast_composite_changed ~name ~ts_unix:now
+
+let set_turn_selected_model ~base_path name selected_model =
+  let changed = ref false in
+  let now = Time_compat.now () in
+  update_entry ~base_path name (fun e ->
+    update_current_turn e (fun obs ->
+      changed := true;
+      { obs with selected_model }));
+  if !changed then broadcast_composite_changed ~name ~ts_unix:now
+
+let prepare_turn_retry_after_compaction ~base_path name =
+  let changed = ref false in
+  let now = Time_compat.now () in
+  update_entry ~base_path name (fun e ->
+    update_current_turn e (fun obs ->
+      changed := true;
       {
         obs with
         turn_phase = Turn_prompting;
         decision_stage = Decision_guard_ok;
         cascade_state = Cascade_idle;
         selected_model = None;
-      }))
+      }));
+  if !changed then broadcast_composite_changed ~name ~ts_unix:now
 
 let mark_turn_gate_rejected_by_name name =
   let target =
@@ -470,21 +513,28 @@ let mark_turn_gate_rejected_by_name name =
   match target with
   | None -> ()
   | Some entry ->
+      let changed = ref false in
+      let now = Time_compat.now () in
       update_entry ~base_path:entry.base_path name (fun e ->
         update_current_turn e (fun obs ->
+          changed := true;
           {
             obs with
             decision_stage = Decision_gate_rejected;
             turn_phase = Turn_finalizing;
-          }))
+          }));
+      if !changed then broadcast_composite_changed ~name ~ts_unix:now
 
 let mark_turn_finished ~base_path name =
   let completed_turn_to_record = ref None in
+  let changed = ref false in
+  let now = Time_compat.now () in
   update_entry ~base_path name (fun e ->
     let last_completed_turn =
       match e.current_turn_observation with
       | Some obs ->
-          let ended_at = Time_compat.now () in
+          let ended_at = now in
+          changed := true;
           completed_turn_to_record :=
             Some
               {
@@ -509,7 +559,8 @@ let mark_turn_finished ~base_path name =
       last_completed_turn });
   Option.iter
     (Keeper_transition_audit.record_completed_turn ~keeper_name:name)
-    !completed_turn_to_record
+    !completed_turn_to_record;
+  if !changed then broadcast_composite_changed ~name ~ts_unix:now
 
 let increment_turn_failures ~base_path name =
   update_entry ~base_path name (fun e ->
@@ -1006,7 +1057,7 @@ let rec dispatch_event_with_audit
        List.iter
          (fun followup_event ->
             ignore (dispatch_event_with_audit ~base_path name followup_event))
-         (List.filter_map
+       (List.filter_map
             (followup_event_of_entry_action ~phase:tr.new_phase)
             tr.entry_actions);
        (* Composite-lifecycle SSE envelope — RFC-0003 §6.
@@ -1014,16 +1065,7 @@ let rec dispatch_event_with_audit
           subscribers re-fetch [/api/v1/keepers/:name/composite] for the
           full snapshot so the spec's "single writer, pull observers"
           invariant is preserved. *)
-       (try
-          Sse.broadcast
-            (`Assoc [
-               "type", `String "keeper_composite_changed";
-               "name", `String name;
-               "ts_unix", `Float now;
-             ])
-        with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | _exn -> ());
+       broadcast_composite_changed ~name ~ts_unix:now;
        Ok tr
      | Ok tr ->
        (* No phase change — still update conditions *)
@@ -1043,16 +1085,7 @@ let rec dispatch_event_with_audit
          pending_turn_measurement;
          compaction_stage;
        };
-       (try
-          Sse.broadcast
-            (`Assoc [
-               "type", `String "keeper_composite_changed";
-               "name", `String name;
-               "ts_unix", `Float now;
-             ])
-        with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | _exn -> ());
+       broadcast_composite_changed ~name ~ts_unix:now;
        Ok tr
      | Error e ->
        Log.Keeper.warn "registry: dispatch_event rejected name=%s error=%s"
@@ -1061,6 +1094,15 @@ let rec dispatch_event_with_audit
 
 let dispatch_event ~base_path name event =
   dispatch_event_with_audit ~base_path name event
+
+let prepare_fiber_launch ~base_path name =
+  (match get ~base_path name with
+   | Some entry ->
+       Atomic.set entry.fiber_stop false;
+       Atomic.set entry.fiber_wakeup false;
+       Atomic.set entry.waiting_for_inference false
+   | None -> ());
+  dispatch_event ~base_path name Keeper_state_machine.Fiber_started
 
 let get_phase ~base_path name =
   match get ~base_path name with

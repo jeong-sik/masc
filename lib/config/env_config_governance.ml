@@ -34,7 +34,7 @@ module Inference = struct
     in
     let chosen =
       if dedicated > 0 then dedicated
-      else max 60 timeout_seconds_int
+      else max 180 timeout_seconds_int
     in
     max 5 chosen
 

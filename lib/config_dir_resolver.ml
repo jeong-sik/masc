@@ -208,7 +208,7 @@ let path_from_home_masc (inputs : inputs) =
   match trim_opt inputs.env_home with
   | None -> None
   | Some home ->
-      let candidate = Filename.concat home ".masc/config" in
+      let candidate = Filename.concat (Common.masc_dir_from_base_path ~base_path:home) "config" in
       if config_signature_exists candidate then Some candidate else None
 
 let path_from_local_masc (inputs : inputs) =
@@ -225,7 +225,7 @@ let path_from_local_masc (inputs : inputs) =
 
 let default_missing_root (inputs : inputs) =
   match trim_opt inputs.env_home with
-  | Some home -> Filename.concat home ".masc/config"
+  | Some home -> Filename.concat (Common.masc_dir_from_base_path ~base_path:home) "config"
   | None -> Filename.concat inputs.cwd "config" |> absolute_path_from ~cwd:inputs.cwd
 
 let config_root_resolution (inputs : inputs) =

@@ -67,7 +67,7 @@ let ensure_strict_http_token_auth ~endpoint auth_config =
 let bearer_token_from_header value =
   let prefix_len = 7 in (* String.length "Bearer " *)
   if String.length value > prefix_len
-     && String.lowercase_ascii (String.sub value 0 prefix_len) = "bearer "
+     && String_util.starts_with_ci ~prefix:"Bearer " value
   then Some (String.sub value prefix_len (String.length value - prefix_len))
   else None
 

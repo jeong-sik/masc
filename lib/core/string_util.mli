@@ -10,6 +10,12 @@ val contains_substring_ci : string -> string -> bool
     Returns [false] when [needle] is empty, matching the behavior
     of the original per-module [contains_ci] helpers. *)
 
+val starts_with_ci : prefix:string -> string -> bool
+(** [starts_with_ci ~prefix s] is the ASCII case-insensitive variant of
+    [String.starts_with]. Performs no allocation; lowercases each byte
+    of [prefix] and [s] inline during the compare. Returns [true] when
+    [prefix] is empty. *)
+
 val find_substring : ?pos:int -> string -> string -> int option
 (** [find_substring ?pos haystack needle] returns the byte index of the
     first occurrence of [needle] in [haystack] at or after [pos]

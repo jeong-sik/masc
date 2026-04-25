@@ -102,7 +102,7 @@ The response includes each goal's explicit lifecycle phase and verification poli
 For new goals, provide at least title; omitted horizon defaults to short. \
 After creation, link tasks into the tree with task.goal_id=<goal_id>; legacy [goal:<id>] title markers remain supported for compatibility. \
 Use this tool for goal metadata, parent linkage, and verifier-policy configuration. \
-Use masc_goal_transition / masc_goal_verify for lifecycle moves and votes.";
+Lifecycle status/phase fields are intentionally omitted here; use masc_goal_transition / masc_goal_verify for lifecycle moves.";
       input_schema =
         `Assoc
           [
@@ -117,8 +117,6 @@ Use masc_goal_transition / masc_goal_verify for lifecycle moves and votes.";
                   ("target_value", `Assoc [ ("type", `String "string") ]);
                   ("due_date", `Assoc [ ("type", `String "string") ]);
                   ("priority", `Assoc [ ("type", `String "integer") ]);
-                  ("status", enum_schema goal_status_enum);
-                  ("phase", enum_schema goal_phase_enum);
                   ("parent_goal_id", `Assoc [ ("type", `String "string") ]);
                   ("verifier_policy", goal_verifier_policy_schema);
                   ("require_completion_approval", `Assoc [ ("type", `String "boolean") ]);

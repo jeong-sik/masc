@@ -100,6 +100,12 @@ let parse_optional_goal_phase args field =
            ~expected:"string"
            ~received:(Yojson.Safe.to_string json))
 
+let goal_upsert_lifecycle_error field =
+  error_result_typed ~code:Validation_error
+    (Printf.sprintf
+       "masc_goal_upsert does not accept lifecycle field %s; use masc_goal_transition / masc_goal_verify for goal lifecycle moves"
+       field)
+
 let parse_optional_review_outcome args field =
   match Yojson.Safe.Util.member field args with
   | `Null -> Ok None
@@ -393,11 +399,9 @@ let handle_goal_upsert (ctx : context) args =
       let due_date = get_string_opt args "due_date" in
       let parent_goal_id = get_string_opt args "parent_goal_id" in
       begin
-        match phase with
-        | Some Goal_phase.Awaiting_verification
-        | Some Goal_phase.Awaiting_approval ->
-            error_result_typed ~code:Validation_error
-              "Use masc_goal_transition for verification and approval phases"
+        match phase, status with
+        | Some _, _ -> goal_upsert_lifecycle_error "phase"
+        | _, Some _ -> goal_upsert_lifecycle_error "status"
         | _ -> (
             match
               Goal_store.upsert_goal ctx.config ?id ?horizon ?title ?metric

@@ -139,18 +139,14 @@ let test_goal_upsert_and_list () =
 let test_goal_list_filters_by_phase () =
   with_room @@ fun config ->
   let create ~title ~phase =
-    let created =
-      Tool_coord.dispatch (coord_ctx config) ~name:"masc_goal_upsert"
-        ~args:
-          (`Assoc
-            [
-              ("title", `String title);
-              ("phase", `String phase);
-            ])
+    let phase =
+      match Goal_phase.parse phase with
+      | Some phase -> phase
+      | None -> fail ("invalid phase fixture: " ^ phase)
     in
-    match created with
-    | Some result -> ignore (parse_json_result result)
-    | None -> fail "masc_goal_upsert not handled"
+    match Goal_store.upsert_goal config ~title ~phase () with
+    | Ok _ -> ()
+    | Error msg -> fail msg
   in
   create ~title:"Executing goal" ~phase:"executing";
   create ~title:"Blocked goal" ~phase:"blocked";
@@ -170,6 +166,47 @@ let test_goal_list_filters_by_phase () =
       check string "phase filter honored" "blocked"
         (get_string_field goal_json "phase")
   | _ -> fail "expected one filtered goal"
+
+let test_goal_upsert_rejects_lifecycle_fields () =
+  with_room @@ fun config ->
+  let rejected_phase =
+    Tool_coord.dispatch (coord_ctx config) ~name:"masc_goal_upsert"
+      ~args:
+        (`Assoc
+          [
+            ("title", `String "Bypass block");
+            ("phase", `String "blocked");
+          ])
+  in
+  let phase_error = expect_error rejected_phase in
+  check string "phase blocked" "validation_error"
+    (get_string_field phase_error "error_code");
+  check bool "phase error points at transition" true
+    (contains_substring (Yojson.Safe.to_string phase_error) "masc_goal_transition");
+  let goal, _kind =
+    match Goal_store.upsert_goal config ~title:"Existing goal" () with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  let rejected_status =
+    Tool_coord.dispatch (coord_ctx config) ~name:"masc_goal_upsert"
+      ~args:
+        (`Assoc
+          [
+            ("id", `String goal.id);
+            ("status", `String "dropped");
+          ])
+  in
+  let status_error = expect_error rejected_status in
+  check string "terminal status blocked" "validation_error"
+    (get_string_field status_error "error_code");
+  let saved_goal =
+    match Goal_store.get_goal config ~goal_id:goal.id with
+    | Some goal -> goal
+    | None -> fail "goal missing after rejected upsert"
+  in
+  check string "phase unchanged after rejected status" "executing"
+    (Goal_phase.to_string saved_goal.phase)
 
 let test_goal_review_updates_status () =
   with_room @@ fun config ->
@@ -532,6 +569,8 @@ let () =
         [
           test_case "upsert and list" `Quick test_goal_upsert_and_list;
           test_case "list filters by phase" `Quick test_goal_list_filters_by_phase;
+          test_case "upsert rejects lifecycle fields" `Quick
+            test_goal_upsert_rejects_lifecycle_fields;
           test_case "review updates status" `Quick test_goal_review_updates_status;
           test_case "transition verify complete" `Quick
             test_goal_transition_verification_to_completion;

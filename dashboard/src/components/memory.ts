@@ -395,7 +395,7 @@ function PostCard({ post }: { post: BoardPost }) {
       <div class="flex items-start pt-1">
         <input type="checkbox"
           aria-label=${`게시글 선택: ${post.id}`}
-          class="w-3.5 h-3.5 rounded cursor-pointer accent-[var(--accent)]"
+          class="w-5 h-5 rounded cursor-pointer accent-[var(--accent)]"
           checked=${selectedPostIds.value.has(post.id)}
           onClick=${(e: Event) => togglePostSelection(post.id, e)}
         />

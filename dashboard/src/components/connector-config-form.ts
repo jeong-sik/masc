@@ -391,7 +391,7 @@ function FieldWidget({ id, field, value, revealed, describedById }: {
               class=${baseInput}
             />
             <button type="button"
-              class="shrink-0 cursor-pointer rounded border border-[var(--white-8)] p-1 text-[var(--text-dim)] hover:bg-[var(--white-8)] hover:text-[var(--text-body)]"
+              class="shrink-0 cursor-pointer rounded border border-[var(--white-8)] p-1.5 text-[var(--text-dim)] hover:bg-[var(--white-8)] hover:text-[var(--text-body)]"
               aria-label=${revealed ? 'Hide value' : 'Reveal value'}
               onClick=${toggleReveal}
             >

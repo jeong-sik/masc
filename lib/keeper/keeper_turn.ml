@@ -467,10 +467,29 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
               let updated_meta =
                 update_direct_turn_meta lifecycle.updated_meta ~latency_ms result
               in
-              (match write_meta ctx.config updated_meta with
+              (* #9733: keeper_msg turn-completion is the same race shape
+                 as the unified-turn failure path — heartbeat updates
+                 [last_seen]/[joined_room_ids] in parallel and bumps
+                 [meta_version], so a bare [write_meta] loses the CAS
+                 race and silently drops the turn payload (usage tokens,
+                 trace_history, generation).  Use the same merged-CAS
+                 retry as [keeper_unified_turn.ml:1683] so the cycle
+                 payload wins at the cycle-owned fields and heartbeat-
+                 owned fields are taken from disk. *)
+              (match
+                 write_meta_with_merge
+                   ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
+                   ctx.config updated_meta
+               with
                | Ok () -> ()
                | Error msg ->
-                   Log.Keeper.error "write_meta failed after keeper_msg turn: %s" msg);
+                   if is_version_conflict_error msg then
+                     Log.Keeper.warn
+                       "write_meta lost CAS race after retries (keeper_msg turn): %s"
+                       msg
+                   else
+                     Log.Keeper.error
+                       "write_meta failed after keeper_msg turn: %s" msg);
               (try
                  Keeper_unified_metrics.append_metrics_snapshot
                    ~config:ctx.config

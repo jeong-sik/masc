@@ -198,6 +198,13 @@ val metric_runtime_ollama_probe_generate_skips : string
     Labels: [size_class = empty | with_data]. *)
 val metric_fs_atomic_orphans_cleaned : string
 
+(** #9786: Auth rejects where bearer token owner does not match the
+    requested agent_name.  Labels: [expected_agent, actual_agent].
+    Dashboards alert on rate advancing after a server restart as a
+    signal of shared credential state (connection pool / fork). *)
+val metric_auth_bearer_token_mismatch : string
+
+
 (** {1 Transport metrics} *)
 
 val metric_sse_sessions : string

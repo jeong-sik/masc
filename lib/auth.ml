@@ -486,9 +486,24 @@ let create_token config ~agent_name ~role : (string * agent_credential, masc_err
   | Ok cred -> Ok (raw_token, cred)
   | Error e -> Error e
 
+(* #9786: record bearer-token mismatch for observability.  Shared
+   helper so both reject sites feed the same counter with the same
+   label shape.  Non-mismatch rejects (no owner found at all) are
+   NOT counted here — they have a different root cause. *)
+let record_bearer_token_mismatch ~expected_agent ~actual_agent =
+  Prometheus.inc_counter
+    Prometheus.metric_auth_bearer_token_mismatch
+    ~labels:[
+      ("expected_agent", expected_agent);
+      ("actual_agent", actual_agent);
+    ]
+    ()
+
 let missing_credential_error config ~agent_name ~token : masc_error =
   match find_credential_by_token config ~token with
   | Ok owner when owner.agent_name <> agent_name ->
+      record_bearer_token_mismatch
+        ~expected_agent:agent_name ~actual_agent:owner.agent_name;
       Unauthorized
         (Printf.sprintf
            "No credential found for %s (bearer token belongs to %s)"
@@ -512,6 +527,12 @@ let verify_token_owner_alias config ~agent_name ~token =
   | Ok owner when String.equal owner.agent_name (credential_agent_name agent_name) ->
       Ok owner
   | Ok owner ->
+      (* #9786: same mismatch counter as [missing_credential_error] —
+         this path fires when no credential file exists for the
+         requested agent but the presented token resolves to some
+         other agent.  Equivalent operator signal. *)
+      record_bearer_token_mismatch
+        ~expected_agent:agent_name ~actual_agent:owner.agent_name;
       Error
         (Unauthorized
            (Printf.sprintf

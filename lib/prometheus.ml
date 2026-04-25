@@ -462,6 +462,18 @@ let metric_runtime_ollama_probe_generate_skips =
 let metric_fs_atomic_orphans_cleaned =
   "masc_fs_atomic_orphans_cleaned_total"
 
+(* #9786: bearer token mismatch — agent [A] presents a token that
+   resolves to credential owner [B].  The Auth layer rejects with
+   [Unauthorized "No credential found for A (bearer token belongs to B)"],
+   but the failure was invisible to Prometheus: dashboards could
+   only see cascading downstream rejections (masc_claim_next
+   failures, keeper degraded proactive state) without the upstream
+   cause.  Labels [expected_agent, actual_agent] keep cardinality
+   bounded at the small cross-product of fleet identities. *)
+let metric_auth_bearer_token_mismatch =
+  "masc_auth_bearer_token_mismatch_total"
+
+
 (** {1 Built-in Metrics} *)
 
 let init () =
@@ -747,6 +759,14 @@ let init () =
      (labels: size_class=empty|with_data).  [with_data] rate > 0 \
      indicates silent atomic-save failures (SIGKILL / ENFILE) that \
      dropped payloads; moved to [<base_path>/.recovered/]."
+    Counter;
+  (* #9786: auth layer rejects a request whose bearer token resolves
+     to a credential owner different from the requested agent. *)
+  add metric_auth_bearer_token_mismatch
+    "Total Auth rejects where bearer token owner does not match the \
+     requested agent_name (labels: expected_agent, actual_agent). Rate \
+     advancing after a server restart indicates shared credential state \
+     (connection pool / process fork) across agent identities."
     Counter;
   (* Transport metrics — registered here so transport_metrics.ml can use
      module constants instead of string literals. *)

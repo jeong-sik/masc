@@ -78,15 +78,49 @@ Useful interpretations:
   - room auth may be enabled, but no usable admin bearer source was found
 - `dashboard_dev_token: available=yes`
   - the easiest local bootstrap path is `GET /api/v1/dashboard/dev-token`
+- `codex_mcp.token_status=unset` or `invalid_or_expired`
+  - Codex MCP is missing a live bearer token; this is not fixed by `codex mcp login`
 
 If you want structured output for automation:
 
 ```bash
 ./_build/default/bin/main_eio.exe doctor auth --base-path "$BASE_PATH" --json \
-  | jq '{status,warnings,next_actions}'
+  | jq '{status,codex_mcp,warnings,next_actions}'
 ```
 
-## 4. Supported Local Start
+## 4. Codex MCP Bearer Login
+
+`masc-mcp` uses bearer-token MCP auth. It does not expose an OAuth
+authorization endpoint, so `codex mcp login masc` is expected to fail with
+`No authorization support detected`.
+
+For the Codex MCP server, mint a worker bearer and export it as
+`MASC_MCP_TOKEN`:
+
+```bash
+BASE_PATH="${MASC_BASE_PATH:-$HOME}"
+./_build/default/bin/main_eio.exe login \
+  --base-path "$BASE_PATH" \
+  --agent codex-mcp-client \
+  --role worker \
+  --shell
+```
+
+Then use the printed `export MASC_MCP_TOKEN=...` in the shell that starts
+Codex. Confirm the Codex-side registration points at the bearer env var:
+
+```bash
+codex mcp get masc
+```
+
+Expected shape:
+
+```text
+URL: http://127.0.0.1:8935/mcp
+Bearer Token Env Var: MASC_MCP_TOKEN
+```
+
+## 5. Supported Local Start
 
 When running from a worktree but using a shared local coordination root, start the server with an explicit base path:
 
@@ -101,9 +135,22 @@ MASC_BASE_PATH="$BASE_PATH" \
 
 Then run `./_build/default/bin/main_eio.exe doctor --base-path "$BASE_PATH"` and re-check `/health` to confirm the effective base path is the path you intended.
 
-## 5. Bootstrap an Admin Bearer
+## 6. Bootstrap an Admin Bearer
 
-If you already have an admin bearer, skip to step 6.
+If you already have an admin bearer, skip to step 7.
+
+The shortest local CLI path is:
+
+```bash
+BASE_PATH="${MASC_BASE_PATH:-$HOME}"
+./_build/default/bin/main_eio.exe login \
+  --base-path "$BASE_PATH" \
+  --agent codex-local-admin \
+  --role admin
+```
+
+The command prints the raw bearer once, writes the matching private raw-token
+file under the live auth root, and includes a dashboard URL.
 
 If `doctor auth` says `dashboard_dev_token: available=yes`, the easiest local path is the dev-token bootstrap:
 
@@ -174,7 +221,7 @@ Notes:
 - keep the raw bearer outside the repo
 - this is for trusted local operator use, not a remote/public bootstrap path
 
-## 6. Open the Dashboard as Admin
+## 7. Open the Dashboard as Admin
 
 Pass the token once via query string. The dashboard moves it into `sessionStorage` and removes it from the URL.
 
@@ -199,7 +246,7 @@ Expected:
 - `effective_agent="codex-tool-matrix"`
 - `effective_role="admin"`
 
-## 7. Verify Admin-Only Routes
+## 8. Verify Admin-Only Routes
 
 Use a low-risk keeper first.
 
@@ -249,7 +296,7 @@ curl -sS http://127.0.0.1:8935/api/v1/dashboard/execution \
   | jq '.keepers[] | select(.name=="<keeper>") | {name,status,paused,trace_id,active_model}'
 ```
 
-## 8. Rollback
+## 9. Rollback
 
 If you need to go back to anonymous loopback behavior:
 
@@ -267,7 +314,7 @@ rm -f "$BASE_PATH/.masc/auth/agents/codex-tool-matrix.json"
 
 If you used only `dashboard-dev` dev-token bootstrap, there may be no auth files to roll back.
 
-## 9. Known Failure Modes
+## 10. Known Failure Modes
 
 - `effective_base_path` points somewhere else:
   you edited the wrong `.masc/auth` tree

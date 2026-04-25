@@ -23,6 +23,7 @@
    auto_responder
    auth
    auth_doctor
+   auth_login
    board
    board_core
    board_core_classify

@@ -567,6 +567,13 @@ let start_supervisor_sweep ctx =
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              Log.Keeper.error "TOML reconcile sweep failed: %s"
                (Printexc.to_string exn));
+          (* #10125: advance the supervisor liveness gauge after a
+             completed beat.  Stale gauge (now - last > 2 × interval)
+             tells operators the sweep stopped. *)
+          Prometheus.set_gauge
+            Prometheus.metric_keeper_supervisor_last_sweep_unixtime
+            ~labels:[ ("base_path", base_path) ]
+            (Unix.gettimeofday ());
           Ok ()
       end)
     in
@@ -583,8 +590,39 @@ let start_supervisor_sweep ctx =
     with_sweeps_rw (fun () ->
       Hashtbl.replace supervisor_sweeps base_path p);
     Pulse.run ~sw:ctx.sw p;
+    (* #10125: counter increments once per actual Pulse start.
+       After a server restart, if this stays at 0 the supervisor
+       never came up — operators alert on absence of advancement. *)
+    Prometheus.inc_counter
+      Prometheus.metric_keeper_supervisor_sweep_starts
+      ~labels:[ ("base_path", base_path) ]
+      ();
+    (* Initialize the liveness gauge to "now" so dashboards do not
+       start at unixtime=0 (which would look infinitely stale).  The
+       on_beat will overwrite this on every subsequent sweep. *)
+    Prometheus.set_gauge
+      Prometheus.metric_keeper_supervisor_last_sweep_unixtime
+      ~labels:[ ("base_path", base_path) ]
+      (Unix.gettimeofday ());
     Log.Keeper.info "keeper supervisor sweep started (interval %.0fs)" sweep_sec
   end
+
+(** #10125: supervisor sweep age helper.  Returns the wall-clock
+    seconds since the last successful sweep beat, or [None] if the
+    gauge was never set (i.e., the sweep never started in this
+    process).  Dashboards use this to render a [stale] badge when
+    the sweep stalls; tests use it to verify the gauge advances. *)
+let supervisor_sweep_age_seconds ~(base_path : string) : float option =
+  match
+    Prometheus.get_metric_value
+      Prometheus.metric_keeper_supervisor_last_sweep_unixtime
+      ~labels:[ ("base_path", base_path) ]
+      ()
+  with
+  | None -> None
+  | Some last ->
+    let now = Unix.gettimeofday () in
+    Some (now -. last)
 
 let existing_keepalive_bootstrap_done : (string, unit) Hashtbl.t =
   Hashtbl.create 4

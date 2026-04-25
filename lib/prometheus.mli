@@ -91,6 +91,13 @@ val metric_keeper_turn_latency_bucket : string
 (** #9943: per-keeper turn latency distribution.  Labels:
     [keeper, bucket].  Bucket vocabulary:
     [under_60s | 60-300s | 300-600s | 600-1200s | over_1200s]. *)
+
+(** #10125: supervisor sweep liveness counters.  See {!Prometheus.ml}
+    for the rationale.  Counter increments on each Pulse start;
+    gauge advances on every successful beat. *)
+val metric_keeper_supervisor_sweep_starts : string
+val metric_keeper_supervisor_last_sweep_unixtime : string
+
 val metric_keeper_compactions : string
 val metric_keeper_compaction_ratio_change : string
 val metric_keeper_compaction_saved_tokens : string

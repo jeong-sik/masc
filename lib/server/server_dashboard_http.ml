@@ -138,19 +138,12 @@ let dashboard_memory_subsystems_http_json ~(config : Coord_utils.config) request
     | _ -> []
   in
   let total = List.length all_episodes in
+  (* Empty filter [q] used to match all episodes; preserve that and
+     delegate non-empty matching to the SSOT helper, which scans byte by
+     byte without lowercasing the haystack or allocating per position. *)
   let contains_ci haystack needle =
-    let h = String.lowercase_ascii haystack in
-    let hlen = String.length h in
-    let nlen = String.length needle in
-    if nlen = 0 then true
-    else if nlen > hlen then false
-    else
-      let rec scan i =
-        if i + nlen > hlen then false
-        else if String.sub h i nlen = needle then true
-        else scan (i + 1)
-      in
-      scan 0
+    String.length needle = 0
+    || String_util.contains_substring_ci haystack needle
   in
   let filtered =
     all_episodes

@@ -285,7 +285,7 @@ function KeeperStrip({ keeperList }: { keeperList: readonly Keeper[] }) {
   return html`
     <section class=${CARD} aria-label="활성 keeper" data-testid="overview-keepers">
       <header class="text-xs font-semibold uppercase tracking-wider text-[var(--text-strong)] mb-2">활성 keeper</header>
-      <ul class="flex flex-col gap-2">
+      <ul class="flex flex-col gap-2" aria-label="keeper 목록">
         ${top.map(
           k => html`
             <li class="flex items-center gap-2 min-w-0">

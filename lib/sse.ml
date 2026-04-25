@@ -62,7 +62,6 @@ type client = {
   id: int;
   kind: session_kind;
   event_stream: string Eio.Stream.t;
-  push: string -> unit;  (** legacy direct-push callback (used by drain) *)
   last_event_id: int Atomic.t;
   created_at: float;
   last_seen_at: float Atomic.t;
@@ -267,7 +266,7 @@ let next_id () =
     capacity.  The client stream/id are allocated once; map installation
     is linearized via CAS over the immutable registry state.
     [kind] defaults to [Coordinator] for backward compatibility. *)
-let register ?(kind = Coordinator) session_id ~push ~last_event_id =
+let register ?(kind = Coordinator) session_id ~last_event_id =
   let client_id = Atomic.fetch_and_add client_id_counter 1 + 1 in
   let last_event_id = Atomic.make last_event_id in
   let event_stream = Eio.Stream.create stream_capacity in
@@ -275,7 +274,6 @@ let register ?(kind = Coordinator) session_id ~push ~last_event_id =
     id = client_id;
     kind;
     event_stream;
-    push;
     last_event_id;
     created_at = 0.0;
     last_seen_at = Atomic.make 0.0;

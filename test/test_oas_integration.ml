@@ -289,9 +289,9 @@ let test_oas_sse_bridge_broadcasts_lifecycle_to_observers () =
       try
         Eio.Switch.run (fun sw ->
             ignore (Masc_mcp.Sse.register ~kind:Masc_mcp.Sse.Observer
-                      "observer-lifecycle" ~push:(fun _ -> ()) ~last_event_id:0);
+                      "observer-lifecycle" ~last_event_id:0);
             ignore (Masc_mcp.Sse.register ~kind:Masc_mcp.Sse.Coordinator
-                      "coordinator-lifecycle" ~push:(fun _ -> ()) ~last_event_id:0);
+                      "coordinator-lifecycle" ~last_event_id:0);
             Oas_sse_bridge.start_with_interval ~drain_interval_s:0.1
               ~sw ~clock:(Eio.Stdenv.clock env) ~config ~bus;
             Oas_events.publish_keeper_lifecycle bus
@@ -328,7 +328,7 @@ let test_oas_sse_bridge_retries_append_failure_then_recovers () =
       try
         Eio.Switch.run (fun sw ->
             ignore (Masc_mcp.Sse.register ~kind:Masc_mcp.Sse.Observer
-                      "observer-retry" ~push:(fun _ -> ()) ~last_event_id:0);
+                      "observer-retry" ~last_event_id:0);
             Oas_sse_bridge.start_with_interval ~drain_interval_s:0.1
               ~sw ~clock:(Eio.Stdenv.clock env) ~config ~bus;
             Event_bus.publish bus
@@ -373,7 +373,7 @@ let test_oas_sse_bridge_drop_marker_on_exhausted_append_failure () =
       try
         Eio.Switch.run (fun sw ->
             ignore (Masc_mcp.Sse.register ~kind:Masc_mcp.Sse.Observer
-                      "observer-drop" ~push:(fun _ -> ()) ~last_event_id:0);
+                      "observer-drop" ~last_event_id:0);
             Oas_sse_bridge.start_with_interval ~drain_interval_s:0.1
               ~sw ~clock:(Eio.Stdenv.clock env) ~config ~bus;
             Event_bus.publish bus

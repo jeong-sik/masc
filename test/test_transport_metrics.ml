@@ -202,10 +202,10 @@ let test_transport_health_json () =
   ignore (Masc_mcp.Coord.init config ~agent_name:(Some "tester"));
   ignore
     (Masc_mcp.Sse.register ~kind:Masc_mcp.Sse.Observer "observer-session"
-       ~push:(fun _ -> ()) ~last_event_id:0);
+       ~last_event_id:0);
   ignore
     (Masc_mcp.Sse.register ~kind:Masc_mcp.Sse.Coordinator "coordinator-session"
-       ~push:(fun _ -> ()) ~last_event_id:0);
+       ~last_event_id:0);
   TM.set_grpc_active_streams 1;
   TM.set_grpc_subscribers 2;
   Prometheus.set_gauge Prometheus.metric_oas_sse_relay_queue_depth 4.0;

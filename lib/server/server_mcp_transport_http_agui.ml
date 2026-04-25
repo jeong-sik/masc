@@ -54,15 +54,8 @@ let handle_ag_ui_events ~deps request reqd =
       let writer = Httpun.Reqd.respond_with_streaming reqd response in
       let mutex = Eio.Mutex.create () in
       let info_ref : sse_conn_info option ref = ref None in
-      let push event =
-        match !info_ref with
-        | None -> ()
-        | Some info ->
-            if not (send_raw info (ag_ui_event_of_masc_event event)) then
-              Log.Server.debug "ag-ui push failed for session %s" info.session_id
-      in
       let client_id, event_stream, evicted =
-        Sse.register session_id ~push
+        Sse.register session_id
           ~last_event_id:(Option.value ~default:0 last_event_id)
       in
       (match evicted with

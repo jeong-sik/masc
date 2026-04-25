@@ -104,34 +104,40 @@ let take n xs =
 
 let sync_transport_snapshot () =
   let now = Time_compat.now () in
-  let snapshot =
-    SMap.fold
-      (fun sid client acc -> (sid, client) :: acc)
-      (Atomic.get clients).entries []
-  in
+  (* Single-pass aggregation: previously [SMap.fold] built a
+     [(sid, client)] tuple list, then [List.map] re-walked it to
+     produce [session_snapshot] records.  [SMap.iter] over the
+     immutable map snapshot folds both passes into one, dropping
+     the per-client tuple cons cell.  Counters and the [sessions]
+     accumulator share the iteration; [total_sessions] is also
+     counted in-line, avoiding a trailing [List.length].  Called
+     on every [broadcast_impl] invocation, so the saved allocation
+     compounds with the fan-out itself. *)
   let observer = ref 0 in
   let coordinator = ref 0 in
   let queue_sum = ref 0 in
   let max_queue_depth = ref 0 in
-  let sessions =
-    List.map
-      (fun (session_id, client) ->
-        let queue_depth = Eio.Stream.length client.event_stream in
-        queue_sum := !queue_sum + queue_depth;
-        max_queue_depth := max !max_queue_depth queue_depth;
-        (match client.kind with
-         | Observer -> incr observer
-         | Coordinator -> incr coordinator);
-        {
-          session_id;
-          kind = client.kind;
-          queue_depth;
-          last_event_id = Atomic.get client.last_event_id;
-          idle_seconds = max 0.0 (now -. Atomic.get client.last_seen_at);
-        })
-      snapshot
-  in
-  let total_sessions = List.length sessions in
+  let sessions_acc = ref [] in
+  let total_sessions_acc = ref 0 in
+  SMap.iter (fun session_id client ->
+    let queue_depth = Eio.Stream.length client.event_stream in
+    queue_sum := !queue_sum + queue_depth;
+    max_queue_depth := max !max_queue_depth queue_depth;
+    (match client.kind with
+     | Observer -> incr observer
+     | Coordinator -> incr coordinator);
+    incr total_sessions_acc;
+    sessions_acc :=
+      {
+        session_id;
+        kind = client.kind;
+        queue_depth;
+        last_event_id = Atomic.get client.last_event_id;
+        idle_seconds = max 0.0 (now -. Atomic.get client.last_seen_at);
+      } :: !sessions_acc
+  ) (Atomic.get clients).entries;
+  let sessions = !sessions_acc in
+  let total_sessions = !total_sessions_acc in
   let avg_depth =
     if total_sessions = 0 then 0.0
     else float_of_int !queue_sum /. float_of_int total_sessions

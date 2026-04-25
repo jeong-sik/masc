@@ -21,6 +21,7 @@ import { route } from '../router'
 import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
 import { TELEMETRY_SOURCE_META, telemetrySourceMeta } from '../config/telemetry-sources'
 import { formatTimeAgo } from '../lib/format-time'
+import { TimeAgo } from './common/time-ago'
 import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { isAbortError } from '../lib/async-state'
 import { OasHealthChip } from './oas-health-chip'
@@ -468,9 +469,7 @@ function EntryRow({ entry }: { entry: TelemetryEntry }) {
         aria-expanded=${expanded.value}
       >
         <span class="font-mono font-bold ${meta.color} w-4 text-center flex-shrink-0">${meta.icon}</span>
-        <span class="font-mono text-[var(--text-muted)] w-28 flex-shrink-0" title=${formatTs(ts)}>
-          ${timeAgoSafe(ts)}
-        </span>
+        <${TimeAgo} timestamp=${ts} class="font-mono text-[var(--text-muted)] w-28 flex-shrink-0" />
         ${success != null ? html`
           <span class="flex-shrink-0 w-4 ${success ? 'text-[var(--ok)]' : 'text-[var(--bad-light)]'}">
             ${success ? 'O' : 'X'}
@@ -550,7 +549,7 @@ function GroupRow({ item }: { item: Extract<TelemetryDisplayItem, { kind: 'group
             return html`
               <div class="flex items-center gap-2 rounded bg-[var(--black-20)] px-2 py-1.5 text-3xs" key=${`${item.key}:${index}`}>
                 <span class="font-mono font-bold ${entryMeta.color} w-4 text-center flex-shrink-0">${entryMeta.icon}</span>
-                <span class="font-mono text-[var(--text-dim)] w-24 flex-shrink-0" title=${formatTs(ts)}>${timeAgoSafe(ts)}</span>
+                <${TimeAgo} timestamp=${ts} class="font-mono text-[var(--text-dim)] w-24 flex-shrink-0" />
                 <span class="font-mono text-[var(--text-strong)] truncate flex-1" title=${entryPreview(entry)}>${entryPreview(entry)}</span>
               </div>
             `

@@ -350,7 +350,7 @@ function TrendCell({ name, metric, value, valueClass }: {
 
 function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (name: string) => void }) {
   if (rows.length === 0) {
-    return html`<div class="text-2xs text-[var(--text-dim)]">Keeper 데이터 없음.</div>`
+    return html`<div class="text-2xs text-[var(--text-dim)]" role="status">Keeper 데이터 없음.</div>`
   }
 
   return html`
@@ -489,7 +489,7 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
 
 function TelemetrySourcesPanel({ sources }: { sources: TelemetrySourceSummary[] }) {
   if (sources.length === 0) {
-    return html`<div class="text-2xs text-[var(--text-dim)]">Telemetry store summary is unavailable.</div>`
+    return html`<div class="text-2xs text-[var(--text-dim)]" role="status">Telemetry store summary is unavailable.</div>`
   }
 
   const sorted = [...sources].sort((a, b) => b.entry_count - a.entry_count)
@@ -512,7 +512,7 @@ function TelemetrySourcesPanel({ sources }: { sources: TelemetrySourceSummary[] 
 
 function FailureCategoryPanel({ toolQuality }: { toolQuality: ToolQualityResponse }) {
   if (toolQuality.failure_categories.length === 0) {
-    return html`<div class="text-2xs text-[var(--text-dim)]">최근 실패 카테고리 없음.</div>`
+    return html`<div class="text-2xs text-[var(--text-dim)]" role="status">최근 실패 카테고리 없음.</div>`
   }
 
   const top = toolQuality.failure_categories.slice(0, 8)
@@ -770,7 +770,7 @@ export function FleetTelemetryPanel() {
           />
         </div>
         ${isFiltering && visibleRows.length === 0 && value.rows.length > 0
-          ? html`<div class="py-4 text-center text-2xs text-[var(--text-dim)]">필터 결과 없음 (${value.rows.length} keepers)</div>`
+          ? html`<div class="py-4 text-center text-2xs text-[var(--text-dim)]" role="status">필터 결과 없음 (${value.rows.length} keepers)</div>`
           : html`<${FleetComparisonTable} rows=${visibleRows} onReset=${handleReset} />`}
       </div>
 

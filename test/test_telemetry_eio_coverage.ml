@@ -11,6 +11,7 @@ open Alcotest
 
 module Telemetry_eio = Masc_mcp.Telemetry_eio
 module Coord = Masc_mcp.Coord
+module Prometheus = Masc_mcp.Prometheus
 
 let temp_dir () =
   let dir = Filename.temp_file "test_telemetry_eio_" "" in
@@ -311,6 +312,31 @@ let test_event_json_roundtrip () =
        | _ -> fail "wrong event type")
   | Error e -> fail ("json decode failed: " ^ e)
 
+(* Drop observability: malformed payload increments
+   masc_persistence_read_drops_total{surface=telemetry_eio,reason=invalid_payload}.
+   Pairs with WARN log via Safe_ops.report_persistence_read_drop. *)
+let test_parse_event_records_drop_increments_counter () =
+  let metric = Prometheus.metric_persistence_read_drops in
+  let labels =
+    [
+      ("surface", "telemetry_eio");
+      ("reason", Safe_ops.persistence_read_drop_reason_invalid_payload);
+    ]
+  in
+  let before = Prometheus.metric_value_or_zero metric ~labels () in
+  let malformed =
+    `Assoc
+      [
+        ("timestamp", `Float 1.0);
+        ( "event",
+          `List [ `String "Unknown_variant"; `Assoc [ ("x", `Int 1) ] ] );
+      ]
+  in
+  let parsed = Telemetry_eio.parse_event_records [ malformed ] in
+  check int "malformed payload produces zero records" 0 (List.length parsed);
+  let after = Prometheus.metric_value_or_zero metric ~labels () in
+  check (float 0.001) "drop counter incremented by 1" 1.0 (after -. before)
+
 let test_metrics_json_roundtrip () =
   let original : Telemetry_eio.metrics = {
     active_agents = 10;
@@ -548,6 +574,8 @@ let () =
     "json_roundtrip", [
       test_case "event" `Quick test_event_json_roundtrip;
       test_case "metrics" `Quick test_metrics_json_roundtrip;
+      test_case "drop increments persistence_read_drops counter" `Quick
+        test_parse_event_records_drop_increments_counter;
     ];
     "event_to_json", [
       test_case "agent_joined" `Quick test_event_to_json_agent_joined;

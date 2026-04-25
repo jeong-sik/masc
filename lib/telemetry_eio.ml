@@ -110,30 +110,49 @@ let get_telemetry_store config : Dated_jsonl.t =
       Hashtbl.replace telemetry_store_cache base store;
       store)
 
+let telemetry_eio_surface = "telemetry_eio"
+
+let observe_telemetry_drop ~reason =
+  Prometheus.inc_counter Prometheus.metric_persistence_read_drops
+    ~labels:[ ("surface", telemetry_eio_surface); ("reason", reason) ]
+    ()
+
+let report_telemetry_drop ~reason ~path ~detail =
+  Safe_ops.report_persistence_read_drop
+    ~on_drop:(fun () -> observe_telemetry_drop ~reason)
+    ~surface:telemetry_eio_surface ~reason ~path ~detail
+
 let parse_event_records (jsons : Yojson.Safe.t list) : event_record list =
-  List.filter_map (fun json ->
-    match event_record_of_yojson json with
-    | Ok record -> Some record
-    | Error msg ->
-        Eio.traceln "[TelemetryEio] parse_event_records drop: %s" msg;
-        None
-  ) jsons
+  List.filter_map
+    (fun json ->
+      match event_record_of_yojson json with
+      | Ok record -> Some record
+      | Error msg ->
+          report_telemetry_drop
+            ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+            ~path:"<in-memory>" ~detail:msg;
+          None)
+    jsons
 
 let read_all_events_from_path (file : string) : event_record list =
-  if not (Sys.file_exists file) then
-    []
+  if not (Sys.file_exists file) then []
   else
     let content = Fs_compat.load_file file in
     String.split_on_char '\n' content
     |> List.filter (fun line -> String.trim line <> "")
     |> List.filter_map (fun line ->
-        try
-          match event_record_of_yojson (Yojson.Safe.from_string line) with
-          | Ok record -> Some record
-          | Error msg ->
-              Eio.traceln "[TelemetryEio] read_all_events_from_path drop: %s" msg;
-              None
-        with Yojson.Json_error _ -> None)
+           try
+             match event_record_of_yojson (Yojson.Safe.from_string line) with
+             | Ok record -> Some record
+             | Error msg ->
+                 report_telemetry_drop
+                   ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                   ~path:file ~detail:msg;
+                 None
+           with Yojson.Json_error msg ->
+             report_telemetry_drop ~reason:"json_syntax_error" ~path:file
+               ~detail:msg;
+             None)
 
 let event_to_json event =
   let record = {

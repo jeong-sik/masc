@@ -75,6 +75,7 @@ type cascade_exhaustion_reason =
   | No_providers_available
   | All_providers_failed
   | Candidates_filtered_after_cycles
+  | Max_turns_exceeded
   | Other_detail of string
 
 type blocker_class =
@@ -122,6 +123,8 @@ let cascade_exhaustion_summary = function
   | No_providers_available -> "Cascade exhausted; no providers were available."
   | All_providers_failed -> "Cascade exhausted after all configured providers failed."
   | Candidates_filtered_after_cycles -> "Cascade exhausted after provider failures."
+  | Max_turns_exceeded ->
+    "Cascade exhausted after a provider hit its per-call turn budget."
   | Other_detail _ -> "Cascade exhausted after provider failures."
 ;;
 
@@ -135,6 +138,7 @@ let cascade_exhaustion_reason_to_json = function
   | No_providers_available -> `String "no_providers_available"
   | All_providers_failed -> `String "all_providers_failed"
   | Candidates_filtered_after_cycles -> `String "candidates_filtered_after_cycles"
+  | Max_turns_exceeded -> `String "max_turns_exceeded"
   | Other_detail msg -> `Assoc [ "tag", `String "other_detail"; "message", `String msg ]
 ;;
 
@@ -143,6 +147,7 @@ let cascade_exhaustion_reason_of_json = function
   | `String "no_providers_available" -> Some No_providers_available
   | `String "all_providers_failed" -> Some All_providers_failed
   | `String "candidates_filtered_after_cycles" -> Some Candidates_filtered_after_cycles
+  | `String "max_turns_exceeded" -> Some Max_turns_exceeded
   | `Assoc fields ->
     (match List.assoc_opt "tag" fields with
      | Some (`String "other_detail") ->

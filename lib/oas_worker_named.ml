@@ -844,6 +844,21 @@ let message_looks_like_cli_wrapped_hard_quota (message : string) : bool =
    && contains "\"api_error_status\":429"
    && contains "you've hit your limit")
 
+let cli_wrapped_max_turns_indicators = [
+  "\"subtype\":\"error_max_turns\"";
+  "error_max_turns";
+  "\"terminal_reason\":\"max_turns\"";
+  "terminal_reason\":\"max_turns";
+  "reached maximum number of turns";
+  "max turns exceeded";
+]
+
+let message_looks_like_cli_wrapped_max_turns (message : string) : bool =
+  let contains needle =
+    String_util.contains_substring_ci message needle
+  in
+  List.exists contains cli_wrapped_max_turns_indicators
+
 let exit_code_of_message (message : string) : int option =
   let prefix = "exited with code " in
   match String.index_opt message ' ' with
@@ -914,6 +929,46 @@ let sdk_error_is_hard_quota (err : Oas.Error.sdk_error) : bool =
      | Llm_provider.Retry.Timeout _ ->
        false)
   | _ -> false
+
+let sdk_error_is_max_turns_exceeded (err : Oas.Error.sdk_error) : bool =
+  match classify_masc_internal_error err with
+  | Some
+      (Cascade_exhausted
+         { reason = Keeper_types.Max_turns_exceeded; _ }) ->
+      true
+  | Some
+      (Cascade_exhausted
+         { reason = Keeper_types.Other_detail detail; _ }) ->
+      message_looks_like_cli_wrapped_max_turns detail
+  | Some (Cascade_exhausted _)
+  | Some (Resumable_cli_session _)
+  | Some (No_tool_capable_provider _)
+  | Some (Accept_rejected _)
+  | Some (Admission_queue_timeout _)
+  | Some (Admission_queue_rejected _)
+  | Some (Turn_timeout _)
+  | Some (Oas_timeout_budget _)
+  | Some (Ambiguous_post_commit _) ->
+      false
+  | None -> (
+      match err with
+      | Oas.Error.Agent (Oas.Error.MaxTurnsExceeded _) -> true
+      | Oas.Error.Api
+          (Llm_provider.Retry.NetworkError { message; _ }
+          | Llm_provider.Retry.Overloaded { message }
+          | Llm_provider.Retry.ServerError { message; _ }
+          | Llm_provider.Retry.InvalidRequest { message }
+          | Llm_provider.Retry.Timeout { message }) ->
+          message_looks_like_cli_wrapped_max_turns message
+      | Oas.Error.Api
+          (Llm_provider.Retry.RateLimited _
+          | Llm_provider.Retry.AuthError _
+          | Llm_provider.Retry.NotFound _
+          | Llm_provider.Retry.ContextOverflow _) ->
+          false
+      | Oas.Error.Internal message ->
+          message_looks_like_cli_wrapped_max_turns message
+      | _ -> false)
 
 (** Run a single Agent.run() call with MASC-driven cascade model fallback.
 
@@ -1199,14 +1254,22 @@ let run_named
             if kind = Llm_provider.Http_client.Connection_refused
                || String_util.contains_substring_ci message "connection refused" then
               Keeper_types.Connection_refused
+            else if message_looks_like_cli_wrapped_max_turns message then
+              Keeper_types.Max_turns_exceeded
             else
               Keeper_types.Other_detail message
         | Some (Llm_provider.Http_client.HttpError { code; body }) ->
-            Keeper_types.Other_detail
-              (Printf.sprintf "HTTP %d: %s" code
-                (String_util.utf8_safe ~max_bytes:203 ~suffix:"..." body |> String_util.to_string))
+            if message_looks_like_cli_wrapped_max_turns body then
+              Keeper_types.Max_turns_exceeded
+            else
+              Keeper_types.Other_detail
+                (Printf.sprintf "HTTP %d: %s" code
+                  (String_util.utf8_safe ~max_bytes:203 ~suffix:"..." body |> String_util.to_string))
         | Some (Llm_provider.Http_client.AcceptRejected { reason = r }) ->
-            Keeper_types.Other_detail r
+            if message_looks_like_cli_wrapped_max_turns r then
+              Keeper_types.Max_turns_exceeded
+            else
+              Keeper_types.Other_detail r
         | Some (Llm_provider.Http_client.CliTransportRequired { kind }) ->
             Keeper_types.Other_detail
               (Printf.sprintf "%s provider requires a CLI transport" kind)

@@ -103,8 +103,13 @@ let is_auto_recoverable_cascade_exhausted_error (err : Oas.Error.sdk_error) : bo
       true
   | Some
       (Oas_worker_named.Cascade_exhausted
+         { reason = Keeper_types.Max_turns_exceeded; _ }) ->
+      true
+  | Some
+      (Oas_worker_named.Cascade_exhausted
          { reason = Keeper_types.Other_detail detail; _ }) ->
       Oas_worker_named.message_looks_like_cli_wrapped_hard_quota detail
+      || Oas_worker_named.message_looks_like_cli_wrapped_max_turns detail
   | Some (Oas_worker_named.Cascade_exhausted _) ->
       false
   | Some (Oas_worker_named.No_tool_capable_provider _)
@@ -135,6 +140,7 @@ let is_resumable_cli_session_error (err : Oas.Error.sdk_error) : bool =
 let is_auto_recoverable_cascade_fail_open_error
     (err : Oas.Error.sdk_error) : bool =
   Oas_worker_named.sdk_error_is_hard_quota err
+  || Oas_worker_named.sdk_error_is_max_turns_exceeded err
   || is_resumable_cli_session_error err
   || is_auto_recoverable_cascade_exhausted_error err
 
@@ -181,6 +187,8 @@ let degraded_retry_after_recoverable_error
   then None
   else if Oas_worker_named.sdk_error_is_hard_quota err then
     local_recovery_retry "hard_quota"
+  else if Oas_worker_named.sdk_error_is_max_turns_exceeded err then
+    local_recovery_retry "max_turns"
   else
     match Oas_worker_named.classify_masc_internal_error err with
     | Some (Oas_worker_named.Resumable_cli_session _) ->
@@ -195,6 +203,10 @@ let degraded_retry_after_recoverable_error
         (Oas_worker_named.Cascade_exhausted
            { reason = Keeper_types.Candidates_filtered_after_cycles; _ }) ->
         local_recovery_retry "cascade_candidates_filtered"
+    | Some
+        (Oas_worker_named.Cascade_exhausted
+           { reason = Keeper_types.Max_turns_exceeded; _ }) ->
+        local_recovery_retry "max_turns"
     | Some
         (Oas_worker_named.Cascade_exhausted
            { reason = Keeper_types.Other_detail detail; _ })
@@ -213,6 +225,8 @@ let recoverable_cascade_failure_reason (err : Oas.Error.sdk_error) =
     Some "required_tool_contract_violation"
   else if Oas_worker_named.sdk_error_is_hard_quota err then
     Some "hard_quota"
+  else if Oas_worker_named.sdk_error_is_max_turns_exceeded err then
+    Some "max_turns"
   else
     match Oas_worker_named.classify_masc_internal_error err with
     | Some (Oas_worker_named.Resumable_cli_session _) ->
@@ -227,6 +241,10 @@ let recoverable_cascade_failure_reason (err : Oas.Error.sdk_error) =
         (Oas_worker_named.Cascade_exhausted
            { reason = Keeper_types.Candidates_filtered_after_cycles; _ }) ->
         Some "cascade_candidates_filtered"
+    | Some
+        (Oas_worker_named.Cascade_exhausted
+           { reason = Keeper_types.Max_turns_exceeded; _ }) ->
+        Some "max_turns"
     | Some
         (Oas_worker_named.Cascade_exhausted
            { reason = Keeper_types.Other_detail detail; _ })
@@ -333,6 +351,7 @@ let degraded_rotation_after_recoverable_error
 let is_auto_recoverable_turn_error (err : Oas.Error.sdk_error) : bool =
   is_transient_network_error err
   || is_server_rejected_parse_error err
+  || Oas_worker_named.sdk_error_is_max_turns_exceeded err
   || is_resumable_cli_session_error err
   || is_auto_recoverable_cascade_exhausted_error err
 

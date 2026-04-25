@@ -4,6 +4,15 @@
 
 ---
 
+## SSOT documents
+
+- **[`SPEC.md`](SPEC.md)** — canonical design system specification covering both `dashboard/`(Preact) and `dashboard_bonsai/`(Bonsai/OCaml). Token taxonomy (Raw/Semantic/Role), canonical vocabulary, theme matrix, ARIA pattern catalog, governance.
+- **[`patterns/a11y/`](patterns/a11y/)** — ARIA pattern catalog: `region` · `list` · `tablist` · `radiogroup` · `log` · `dialog`. Each file has JSX + Bonsai examples, keyboard contracts, screen reader expectations.
+
+새 token / 컴포넌트 패턴 / 테마 추가는 SPEC.md 갱신이 선행되어야 합니다.
+
+---
+
 ## What MASC is
 
 MASC is a **single-pane-of-glass cockpit** where a human operator (or agent) can watch multiple AI keepers work in parallel across codebases, tasks, goals, and providers. It fuses two modes into one view:

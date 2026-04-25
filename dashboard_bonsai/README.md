@@ -6,6 +6,14 @@ Jane Street **Bonsai** (OCaml + js_of_ocaml) 기반 masc-mcp 대시보드 island
 - **Preact**: `/dashboard/*` (기존)
 - **Bonsai**: `/dashboard/b/*` (이 디렉토리)
 
+## Design system SSOT
+
+본 surface는 [`../dashboard/design-system/SPEC.md`](../dashboard/design-system/SPEC.md)의 canonical design system을 따릅니다.
+
+- Token vocabulary (raw/semantic/role) 및 5 named theme variants(`dark-fantasy`/`cyberpunk`/`terminal`/`parchment`/`paper`)는 SPEC §3, §4에 정의.
+- ARIA 패턴(region · list · tablist · radiogroup · log · dialog)은 [`../dashboard/design-system/patterns/a11y/`](../dashboard/design-system/patterns/a11y/)에 JSX + Bonsai 예시로 카탈로그화.
+- bonsai 자체 raw token은 점진적으로 SPEC canonical로 정렬 중. 새 token/패턴 추가는 SPEC PR 선행.
+
 ## 현재 상태 (Phase 0 ~ 1 진행)
 
 - `/dashboard/b/hello` — Bonsai 부트 확인용 (logs_view 전체 렌더)

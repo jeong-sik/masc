@@ -1494,7 +1494,8 @@ let run_named
               ~error_kind:"hard_quota" ~error_reason:err_str ())
         else if sdk_error_is_resumable_cli_session sdk_err then
           Cascade_health_tracker.(
-            record_terminal_failure global ~provider_key:provider_cfg.model_id)
+            record_terminal_failure global ~provider_key:provider_cfg.model_id
+              ~error_kind:"resumable_cli_session" ~error_reason:err_str ())
         else
           Cascade_health_tracker.(
             record_failure global ~provider_key:provider_cfg.model_id

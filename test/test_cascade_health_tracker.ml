@@ -303,13 +303,13 @@ let test_fingerprint_top_sorted_descending () =
 
 let test_terminal_failure_triggers_immediate_cooldown () =
   let t = H.create () in
-  H.record_terminal_failure t ~provider_key:"kimi-for-coding";
+  H.record_terminal_failure t ~provider_key:"kimi-for-coding" ();
   check bool "single terminal_failure event trips cooldown immediately"
     true (H.is_in_cooldown t ~provider_key:"kimi-for-coding")
 
 let test_terminal_failure_cooldown_is_long () =
   let t = H.create () in
-  H.record_terminal_failure t ~provider_key:"kimi-for-coding";
+  H.record_terminal_failure t ~provider_key:"kimi-for-coding" ();
   match H.provider_info t ~provider_key:"kimi-for-coding" with
   | None -> fail "provider_info returned None after record_terminal_failure"
   | Some info ->
@@ -324,26 +324,26 @@ let test_terminal_failure_cooldown_is_long () =
 
 let test_terminal_failure_effective_weight_zero () =
   let t = H.create () in
-  H.record_terminal_failure t ~provider_key:"kimi-for-coding";
+  H.record_terminal_failure t ~provider_key:"kimi-for-coding" ();
   check int "effective_weight = 0 during terminal_failure cooldown"
     0 (H.effective_weight t ~provider_key:"kimi-for-coding" ~config_weight:100)
 
 let test_terminal_failure_success_clears_cooldown () =
   let t = H.create () in
-  H.record_terminal_failure t ~provider_key:"kimi-for-coding";
+  H.record_terminal_failure t ~provider_key:"kimi-for-coding" ();
   H.record_success t ~provider_key:"kimi-for-coding";
   check bool "success after terminal_failure clears cooldown"
     false (H.is_in_cooldown t ~provider_key:"kimi-for-coding")
 
 let test_terminal_failure_preserves_longer_existing_cooldown () =
   let t = H.create () in
-  H.record_terminal_failure t ~provider_key:"kimi-for-coding";
+  H.record_terminal_failure t ~provider_key:"kimi-for-coding" ();
   let expires_after_first =
     match H.provider_info t ~provider_key:"kimi-for-coding" with
     | Some { cooldown_expires_at = Some x; _ } -> x
     | _ -> fail "no cooldown after first terminal_failure"
   in
-  H.record_terminal_failure t ~provider_key:"kimi-for-coding";
+  H.record_terminal_failure t ~provider_key:"kimi-for-coding" ();
   let expires_after_second =
     match H.provider_info t ~provider_key:"kimi-for-coding" with
     | Some { cooldown_expires_at = Some x; _ } -> x
@@ -351,6 +351,19 @@ let test_terminal_failure_preserves_longer_existing_cooldown () =
   in
   check bool "second terminal_failure does not shorten cooldown"
     true (expires_after_second >= expires_after_first)
+
+let test_terminal_failure_records_fingerprint () =
+  let t = H.create () in
+  H.record_terminal_failure t ~provider_key:"kimi-for-coding"
+    ~error_kind:"resumable_cli_session"
+    ~error_reason:"kimi exited with code 1: session conflict" ();
+  let info = info_or_fail t ~provider_key:"kimi-for-coding" in
+  match info.top_fingerprints with
+  | [ (fp, count) ] ->
+    check bool "terminal failure fingerprint keeps kind"
+      true (String.starts_with ~prefix:"resumable_cli_session" fp);
+    check int "terminal failure fingerprint count" 1 count
+  | _ -> failwith "expected exactly one terminal failure fingerprint"
 
 
 let () =
@@ -426,5 +439,7 @@ let () =
         test_terminal_failure_success_clears_cooldown;
       test_case "second terminal_failure does not shorten cooldown" `Quick
         test_terminal_failure_preserves_longer_existing_cooldown;
+      test_case "terminal_failure records fingerprint" `Quick
+        test_terminal_failure_records_fingerprint;
     ];
   ]

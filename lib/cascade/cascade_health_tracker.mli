@@ -127,8 +127,16 @@ val record_hard_quota :
 
     This uses immediate long cooldown semantics like {!record_hard_quota},
     but is kept distinct from quota exhaustion so the caller can classify
-    adapter/session failures without pretending the account is out of credit. *)
-val record_terminal_failure : t -> provider_key:string -> unit
+    adapter/session failures without pretending the account is out of credit.
+
+    See {!record_failure} for [error_kind] / [error_reason] semantics. *)
+val record_terminal_failure :
+  t ->
+  provider_key:string ->
+  ?error_kind:string ->
+  ?error_reason:string ->
+  unit ->
+  unit
 
 (** Drop tracker entries whose rolling window is empty AND whose cooldown
     has expired.  Intended as opportunistic maintenance — idle providers

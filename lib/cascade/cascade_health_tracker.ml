@@ -308,6 +308,8 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason ~now () =
          state and fail again.  Cool down immediately to keep fallback from
          becoming a hidden tax on every request. *)
       state.consecutive_failures <- state.consecutive_failures + 1;
+      let persistent = bump_failure_fp () in
+      apply_trust_failure_locked state ~persistent;
       let new_until = now +. terminal_failure_cooldown_sec in
       if new_until > state.cooldown_until then
         state.cooldown_until <- new_until)
@@ -327,8 +329,9 @@ let record_hard_quota t ~provider_key ?error_kind ?error_reason () =
   record t ~provider_key ~outcome:Hard_quota ?error_kind ?error_reason
     ~now:(Unix.gettimeofday ()) ()
 
-let record_terminal_failure t ~provider_key =
-  record t ~provider_key ~outcome:Terminal_failure ~now:(Unix.gettimeofday ())
+let record_terminal_failure t ~provider_key ?error_kind ?error_reason () =
+  record t ~provider_key ~outcome:Terminal_failure ?error_kind ?error_reason
+    ~now:(Unix.gettimeofday ()) ()
 
 (* ── Queries ──────────────────────────────────── *)
 

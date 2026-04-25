@@ -156,6 +156,7 @@ let send_frame_bytes session bytes ~len =
     try
       Httpun_ws.Wsd.send_bytes session.wsd
         ~kind:`Text bytes ~off:0 ~len;
+      Transport_metrics.inc_ws_bytes_sent ~bytes:len;
       true
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
@@ -522,15 +523,16 @@ let session_is_backpressured session =
     let limit = client_buffer_limit_bytes () in
     limit > 0 && session.dashboard_last_buffered_amount >= limit
 
-(** RFC #10119 Phase 2 gate.  When enabled, slice-scoped events skip the
-    raw-SSE-forward to authenticated sessions whose route does not
-    subscribe to the event's slice.  Default [false] — Phase 1
-    (#10155) only adds bookkeeping; Phase 2 flips behaviour, so the
-    rollout is staged via this flag.  The env var is read on every
-    fanout call so operators can flip without a restart; the read is
-    cheap (atomic hash lookup in [Env_config_core]). *)
+(** RFC #10119 Phase 2 gate.  When enabled (default since the bandwidth
+    burst hardening pass), slice-scoped events skip the raw-SSE-forward
+    to authenticated sessions whose route does not subscribe to the
+    event's slice.  Catch-all events (no slice mapping) still reach
+    every session.  Set [MASC_WS_SLICE_INDEX_ENABLED=false] only as an
+    emergency rollback.  The env var is read on every fanout call so
+    operators can flip without a restart; the read is cheap (atomic
+    hash lookup in [Env_config_core]). *)
 let slice_index_enabled () =
-  Env_config_core.get_bool ~default:false
+  Env_config_core.get_bool ~default:true
     "MASC_WS_SLICE_INDEX_ENABLED"
 
 let send_dashboard_or_raw_sse session sse_event =

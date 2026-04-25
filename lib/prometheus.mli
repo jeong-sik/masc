@@ -234,6 +234,8 @@ val metric_ws_client_buffered_bytes : string
 val metric_ws_client_acks : string
 val metric_ws_throttled_deliveries : string
 val metric_ws_slice_fanout_skipped : string
+val metric_ws_bytes_sent : string
+val metric_grpc_bytes_sent : string
 
 (** {1 Admission queue metrics} *)
 

@@ -86,6 +86,16 @@ let inc_ws_throttled_delivery () =
 let inc_ws_slice_fanout_skipped () =
   Prometheus.inc_counter Prometheus.metric_ws_slice_fanout_skipped ()
 
+let inc_ws_bytes_sent ~bytes =
+  if bytes > 0 then
+    Prometheus.inc_counter Prometheus.metric_ws_bytes_sent
+      ~delta:(float_of_int bytes) ()
+
+let inc_grpc_bytes_sent ~bytes =
+  if bytes > 0 then
+    Prometheus.inc_counter Prometheus.metric_grpc_bytes_sent
+      ~delta:(float_of_int bytes) ()
+
 (** {1 Environment-derived Transport Config} *)
 
 let grpc_runtime_listening : bool Atomic.t = Atomic.make false

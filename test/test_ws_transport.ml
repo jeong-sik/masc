@@ -515,11 +515,13 @@ let test_slice_fanout_skip_counter_metric_registered () =
   let v = read_skip_counter () in
   Alcotest.(check bool) "counter readable (>= 0)" true (v >= 0.0)
 
-let test_slice_fanout_flag_default_is_off () =
+let test_slice_fanout_flag_default_is_on () =
   Eio_main.run (fun _env ->
     with_env_var "MASC_WS_SLICE_INDEX_ENABLED" "" (fun () ->
-        Alcotest.(check bool) "default off"
-          false (Ws.slice_index_enabled ())))
+        (* Bandwidth-burst hardening flipped the default from false to
+           true.  Operators set false only as an emergency rollback. *)
+        Alcotest.(check bool) "default on"
+          true (Ws.slice_index_enabled ())))
 
 let test_slice_fanout_flag_reads_env () =
   Eio_main.run (fun _env ->
@@ -614,8 +616,8 @@ let () =
     ("slice_fanout_gate", [
       Alcotest.test_case "skip counter registered" `Quick
         test_slice_fanout_skip_counter_metric_registered;
-      Alcotest.test_case "flag default is off" `Quick
-        test_slice_fanout_flag_default_is_off;
+      Alcotest.test_case "flag default is on" `Quick
+        test_slice_fanout_flag_default_is_on;
       Alcotest.test_case "flag reads env var" `Quick
         test_slice_fanout_flag_reads_env;
     ]);

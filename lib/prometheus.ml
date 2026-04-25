@@ -375,6 +375,8 @@ let metric_ws_client_buffered_bytes = "masc_ws_client_buffered_bytes"
 let metric_ws_client_acks = "masc_ws_client_acks_total"
 let metric_ws_throttled_deliveries = "masc_ws_throttled_deliveries_total"
 let metric_ws_slice_fanout_skipped = "masc_ws_slice_fanout_skipped_total"
+let metric_ws_bytes_sent = "masc_ws_bytes_sent_total"
+let metric_grpc_bytes_sent = "masc_grpc_bytes_sent_total"
 
 (* Admission queue metrics — used in admission_queue_metrics.ml. *)
 let metric_inference_queue_depth = "masc_inference_queue_depth"
@@ -827,6 +829,16 @@ let init () =
     "WS sessions skipped during slice-scoped fanout because their route \
      does not subscribe to the event's slice (gated by \
      MASC_WS_SLICE_INDEX_ENABLED, RFC #10119 Phase 2)"
+    Counter;
+  add metric_ws_bytes_sent
+    "Bytes written to WebSocket clients (frame payload only, includes \
+     dashboard deltas and raw SSE forwards). Capacity-planning input \
+     for bandwidth-burst response."
+    Counter;
+  add metric_grpc_bytes_sent
+    "Bytes serialised into gRPC Subscribe stream events delivered to \
+     subscribers. Same purpose as masc_ws_bytes_sent_total but for the \
+     gRPC transport."
     Counter
 
 let start_time = Time_compat.now ()

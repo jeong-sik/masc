@@ -39,15 +39,20 @@ let raw_all_tool_schemas : Types.tool_schema list =
        @ Tool_compact.schemas
        @ Tool_agent_timeline.schemas
        @ Tool_shard.schemas
-       (* Base shard tools (keeper_stay_silent, keeper_time_now,
-          keeper_context_status, keeper_memory_search, keeper_tools_list)
-          are always-present for every keeper but were only declared in
-          [Tool_shard.base_tools] — a shard definition — and never reached
-          the authoritative registry consumed by [Tool_help_registry.find_entry].
-          Without them here, keepers that requested help on these tools
-          received "unknown tool" despite the dispatcher handling them.
-          See #9912. *)
-       @ Tool_shard.base_tools))
+       (* #9912 / #10101: every keeper-facing shard tool must reach the
+          authoritative registry consumed by
+          [Tool_help_registry.find_entry], or keepers that request
+          help on the tool receive "unknown tool" despite the
+          dispatcher handling it correctly.  #9912 plugged only
+          [Tool_shard.base_tools] (5 always-present tools); #10101
+          observed 11 other shard categories still missing
+          (keeper_task_claim, keeper_fs_edit, keeper_board_*, ...).
+          [Tool_shard.all_keeper_tool_schemas] is the SSOT that
+          pulls from [all_shards] plus the non-shard
+          [keeper_preflight_tools] / [keeper_pr_review_tools]
+          lists, so future shard categories flow through without
+          another patch-local fix. *)
+       @ Tool_shard.all_keeper_tool_schemas))
 
 (** Validate tool schemas at module initialization time.
     Logs warnings for: duplicate names, empty names/descriptions,

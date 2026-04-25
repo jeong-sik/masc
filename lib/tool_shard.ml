@@ -940,6 +940,30 @@ let all_read_only_keeper_tools () : string list =
   ) all_shards []
   |> List.sort_uniq String.compare
 
+(* #10101: single SSOT for every keeper-facing tool schema exposed
+   by this module.  Feeds [Config.raw_all_tool_schemas] so
+   [Tool_help_registry.find_entry] can resolve ANY shard tool,
+   not just the five base tools that the earlier #9912 patch
+   registered.
+
+   Built from [all_shards] (every shard category flows through
+   automatically — no future fix will regress the registry when
+   a new shard is added) plus the two non-shard tool lists
+   [keeper_preflight_tools] and [keeper_pr_review_tools] that
+   live in this module but are not owned by any shard definition.
+
+   Callers must still run [Config.dedupe_schemas] because a
+   single tool can appear under multiple shards (e.g. tools that
+   [shard_coding] composes from [shard_shell]) and the schema
+   list may overlap with other roots (Tools.raw_schemas). *)
+let all_keeper_tool_schemas : Types.tool_schema list =
+  let shard_schemas =
+    StringMap.fold
+      (fun _name (shard : shard) acc -> shard.tools @ acc)
+      all_shards []
+  in
+  shard_schemas @ keeper_preflight_tools @ keeper_pr_review_tools
+
 let recovery_minimum_shard_names () : string list =
   StringMap.fold (fun name shard acc ->
     if not shard.removable then name :: acc else acc

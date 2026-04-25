@@ -357,6 +357,14 @@ let rec wait_for_autonomous_queue_head ~(keeper_name : string) ~(ticket : int)
       Log.Keeper.info
         "semaphore_wait: autonomous fairness queue wait exceeded %.0fs (keeper=%s ahead=%d), skipping turn"
         semaphore_wait_timeout_sec keeper_name ahead;
+      (* #9771: surface the timeout as a fleet-wide metric so
+         operators can detect chronic slot starvation without
+         scraping the WARN log. *)
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_semaphore_wait_timeout
+        ~labels:[ ("keeper", keeper_name);
+                  ("channel", "autonomous_queue_head") ]
+        ();
       Error (`Semaphore_wait_timeout semaphore_wait_timeout_sec)
     else (
       (match Eio_context.get_clock_opt () with
@@ -419,6 +427,14 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
            skipping turn"
           label semaphore_wait_timeout_sec
           channel_label;
+        (* #9771: per-keeper × per-acquire-channel counter so
+           operators can attribute slot starvation to autonomous
+           vs turn semaphore pressure. *)
+        Prometheus.inc_counter
+          Prometheus.metric_keeper_semaphore_wait_timeout
+          ~labels:[ ("keeper", keeper_name);
+                    ("channel", label) ]
+          ();
         Error (`Semaphore_wait_timeout semaphore_wait_timeout_sec))
     | None ->
       (* No Eio clock available: we are running outside an Eio main loop

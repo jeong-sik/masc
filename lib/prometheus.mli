@@ -112,6 +112,11 @@ val metric_tool_join_required_guard : string
     [tool, agent_name, reason] with reason
     [room_uninitialized | agent_not_joined]. *)
 
+val metric_keeper_semaphore_wait_timeout : string
+(** #9771: counter for keeper turn-slot semaphore wait timeouts.
+    Labels: [keeper, channel] with channel in
+    [autonomous_queue_head | autonomous | turn]. *)
+
 val metric_keeper_compactions : string
 val metric_keeper_compaction_ratio_change : string
 val metric_keeper_compaction_saved_tokens : string

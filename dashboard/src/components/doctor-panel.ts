@@ -262,7 +262,7 @@ function DoctorEntryCard({ entry }: { entry: DoctorEntry }) {
   const expanded = useSignal(false)
   const onToggle = () => { expanded.value = !expanded.value }
   return html`
-    <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-3">
+    <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-3" role="group" aria-label=${`${doctorHeading(entry)}: ${label}`}>
       <button
         type="button"
         class="flex w-full items-baseline justify-between gap-2 text-left"
@@ -317,6 +317,7 @@ export function DoctorPanel() {
                   <button
                     type="button"
                     class="rounded border border-[var(--white-8)] px-2.5 py-1 text-2xs text-[var(--text-muted)] transition-colors hover:border-[var(--accent)] hover:text-[var(--text-body)]"
+                    aria-label="Doctor 결과 새로고침"
                     onClick=${() => { void refreshDoctor() }}
                   >새로고침</button>
                 </div>

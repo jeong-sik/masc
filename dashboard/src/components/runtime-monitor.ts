@@ -355,6 +355,7 @@ export function RuntimeMonitor() {
       <div class="flex items-center gap-3 flex-wrap">
         <select
           class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--text-strong)]"
+          aria-label="시간 범위"
           value=${String(windowMinutes.value)}
           onChange=${(e: Event) => { windowMinutes.value = Number((e.target as HTMLSelectElement).value) }}
         >
@@ -365,11 +366,12 @@ export function RuntimeMonitor() {
         </select>
         <button
           class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-3 py-1 text-xs text-[var(--text-strong)] hover:bg-[var(--bg-panel-hover)]"
+          aria-label="런타임 데이터 새로고침"
           onClick=${() => void load()}
         >
           새로고침
         </button>
-        ${current.loading ? html`<span class="text-xs text-[var(--text-muted)]">로딩 중...</span>` : null}
+        ${current.loading ? html`<span class="text-xs text-[var(--text-muted)]" role="status">로딩 중...</span>` : null}
       </div>
 
       ${current.error
@@ -396,7 +398,7 @@ export function RuntimeMonitor() {
         <div class="flex flex-col gap-3">
           ${(providers?.providers ?? []).length > 0
             ? providers?.providers.map(provider => html`
-                <article class="p-4 rounded border border-card-border bg-card/40 backdrop-blur-sm shadow-sm flex flex-col gap-2">
+                <article class="p-4 rounded border border-card-border bg-card/40 backdrop-blur-sm shadow-sm flex flex-col gap-2" role="group" aria-label=${`${provider.provider}: ${provider.available ? '가용' : '불가'}`}>
                   <div class="flex justify-between gap-3 items-start flex-wrap">
                     <div class="grid gap-1">
                       <strong class="text-sm text-text-strong">${provider.provider}</strong>
@@ -457,7 +459,7 @@ export function RuntimeMonitor() {
           />
         </div>
         ${(metrics?.models ?? []).length > 0 && filterModelMetrics(metrics?.models ?? [], modelSearch.value).length === 0
-          ? html`<div class="text-2xs text-[var(--text-muted)] mb-2">검색 결과 없음 (${metrics?.models.length ?? 0}개 중)</div>`
+          ? html`<div class="text-2xs text-[var(--text-muted)] mb-2" role="status">검색 결과 없음 (${metrics?.models.length ?? 0}개 중)</div>`
           : null}
         <div class="flex flex-col gap-3">
           ${(metrics?.models ?? []).length > 0
@@ -591,6 +593,7 @@ export function RuntimeMonitor() {
                     ? html`
                       <button
                         class="text-2xs text-[var(--text-muted)] hover:text-[var(--text-strong)] mt-1 text-left"
+                        aria-expanded=${expandedModel.value === metric.model_id}
                         onClick=${() => { expandedModel.value = expandedModel.value === metric.model_id ? null : metric.model_id }}
                       >
                         ${expandedModel.value === metric.model_id ? '▾' : '▸'} recent ${metric.recent_entries?.length ?? 0} turns

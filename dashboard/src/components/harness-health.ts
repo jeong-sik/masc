@@ -325,7 +325,7 @@ export function HarnessHealth() {
             />
 
             ${fallbackPct > 80 ? html`
-              <div class="rounded border border-[var(--warn-30)] bg-[var(--warn-12)] px-4 py-3">
+              <div class="rounded border border-[var(--warn-30)] bg-[var(--warn-12)] px-4 py-3" role="alert">
                 <div class="mb-1 text-sm font-medium text-[var(--warn)]">평가 모델 미연결</div>
                 <div class="text-xs text-[var(--warn)]">
                   전체 ${cal.total_verdicts}건 중 ${fallbackCount}건이 대체 처리됐습니다.

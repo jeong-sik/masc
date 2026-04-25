@@ -209,9 +209,9 @@ export function Ops() {
   ])
 
   return html`
-    <section class="flex flex-col gap-4">
-      ${operatorError.value ? html`<section class="ops-banner rounded py-3 px-3.5 border border-[var(--card-border)] error">${operatorError.value}</section>` : null}
-      ${operatorDigestError.value ? html`<section class="ops-banner rounded py-3 px-3.5 border border-[var(--card-border)] error">${operatorDigestError.value}</section>` : null}
+    <section class="flex flex-col gap-4" role="region" aria-label="운영 개입">
+      ${operatorError.value ? html`<section class="ops-banner rounded py-3 px-3.5 border border-[var(--card-border)] error" role="alert">${operatorError.value}</section>` : null}
+      ${operatorDigestError.value ? html`<section class="ops-banner rounded py-3 px-3.5 border border-[var(--card-border)] error" role="alert">${operatorDigestError.value}</section>` : null}
 
       ${workflowContext ? html`
         <section class="ops-banner rounded py-3 px-3.5 border border-[var(--card-border)] ${workflowReady ? 'info' : 'warn'} grid gap-2">

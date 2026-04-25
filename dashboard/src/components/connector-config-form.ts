@@ -438,7 +438,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
 
   if (entry.error !== null) {
     return html`
-      <div id=${`connector-config-${connectorId}`} class="mt-3 rounded border border-[var(--bad-20)] bg-[var(--bad-10)] p-3 text-2xs text-[var(--bad-light)]">
+      <div id=${`connector-config-${connectorId}`} role="alert" class="mt-3 rounded border border-[var(--bad-20)] bg-[var(--bad-10)] p-3 text-2xs text-[var(--bad-light)]">
         <div class="font-semibold">schema 가져오기 실패</div>
         <div class="mt-1 text-3xs opacity-80">${entry.error}</div>
         <button
@@ -462,7 +462,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
   const envBlock = buildEnvBlock(entry)
 
   return html`
-    <div id=${`connector-config-${connectorId}`} class="mt-3 rounded border border-[var(--white-8)] bg-[var(--color-bg-surface)] p-3">
+    <div id=${`connector-config-${connectorId}`} role="form" aria-label="${connectorId} 설정" class="mt-3 rounded border border-[var(--white-8)] bg-[var(--color-bg-surface)] p-3">
       <div class="mb-2 flex items-center justify-between">
         <div class="text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)]">
           ${entry.fields.length} fields · ${entry.fields.filter(f => f.required).length} required

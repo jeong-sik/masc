@@ -223,6 +223,30 @@ report_diff() {
   return 1
 }
 
+report_metadata_diff() {
+  local prev="$1" curr="$2"
+  local changed=0
+  local prev_sha curr_sha prev_ver curr_ver
+  prev_sha="$(jq -r '.pinned_sha // ""' <<<"${prev}")"
+  curr_sha="$(jq -r '.pinned_sha // ""' <<<"${curr}")"
+  prev_ver="$(jq -r '.pinned_version // ""' <<<"${prev}")"
+  curr_ver="$(jq -r '.pinned_version // ""' <<<"${curr}")"
+
+  if [[ "${prev_sha}" != "${curr_sha}" || "${prev_ver}" != "${curr_ver}" ]]; then
+    echo
+    echo "  [fingerprint_metadata]"
+  fi
+  if [[ "${prev_sha}" != "${curr_sha}" ]]; then
+    echo "      ~ pinned_sha: ${prev_sha:-<missing>} -> ${curr_sha:-<missing>}"
+    changed=1
+  fi
+  if [[ "${prev_ver}" != "${curr_ver}" ]]; then
+    echo "      ~ pinned_version: ${prev_ver:-<missing>} -> ${curr_ver:-<missing>}"
+    changed=1
+  fi
+  return "${changed}"
+}
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -251,6 +275,9 @@ case "${MODE}" in
     prev="$(cat "${FINGERPRINT_FILE}")"
 
     drift=0
+    if ! report_metadata_diff "${prev}" "${current}"; then
+      drift=1
+    fi
     for section in event_bus_payload_variants http_error_variants metrics_fields; do
       prev_arr="$(jq ".surfaces.${section}" <<<"${prev}")"
       curr_arr="$(jq ".surfaces.${section}" <<<"${current}")"

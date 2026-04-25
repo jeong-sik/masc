@@ -387,10 +387,16 @@ let test_http_write_auth_contracts () =
        {|with_tool_auth ~tool_name:"masc_board_vote"|});
   check bool "board vote route overwrites voter from auth identity" true
     (file_contains_pattern "lib/server/server_routes_http_routes_activity.ml"
-       {|json_upsert_string_field "voter" agent_name|});
+       {|let voter = board_actor_author_for_write agent_name|});
+  check bool "board vote route writes normalized voter" true
+    (file_contains_pattern "lib/server/server_routes_http_routes_activity.ml"
+       {|json_upsert_string_field "voter" voter|});
   check bool "board comment route overwrites author from auth identity" true
     (file_contains_pattern "lib/server/server_routes_http_routes_activity.ml"
-       {|json_upsert_string_field "author" agent_name|});
+       {|let author = board_actor_author_for_write agent_name|});
+  check bool "board comment route writes normalized author" true
+    (file_contains_pattern "lib/server/server_routes_http_routes_activity.ml"
+       {|json_upsert_string_field "author" author|});
   check bool "tool-host-failures route requires tool auth" true
     (file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
        {|with_tool_auth ~tool_name:"masc_broadcast"|});

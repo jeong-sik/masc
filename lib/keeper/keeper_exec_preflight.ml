@@ -1,11 +1,6 @@
 open Keeper_types
 
-let json_string_field name = function
-  | `Assoc fields -> (
-      match List.assoc_opt name fields with
-      | Some (`String value) -> Some value
-      | _ -> None)
-  | _ -> None
+let json_string_field name json = Json_util.get_string json name
 
 let handle_keeper_preflight_check
       ~(config : Coord.config)

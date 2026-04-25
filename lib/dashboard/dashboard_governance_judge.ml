@@ -375,9 +375,7 @@ let parse_string_list json key =
              | _ -> None)
   | _ -> []
 
-let normalize_text raw =
-  raw |> String.trim |> String.split_on_char '\n' |> List.map String.trim
-  |> List.filter (fun item -> item <> "") |> String.concat " " |> String.trim
+let normalize_text = Dashboard_http_helpers.normalize_text
 
 let normalize_allowed_tool_name value =
   value |> String.trim |> String.lowercase_ascii

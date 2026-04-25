@@ -1,5 +1,7 @@
 open Masc_mcp
 
+let () = Mirage_crypto_rng_unix.use_default ()
+
 let with_env name value f =
   let saved = Sys.getenv_opt name in
   (match value with
@@ -1705,11 +1707,15 @@ let test_sync_bootable_keeper_credentials_mints_keeper_alias_token () =
       in
       Server_runtime_bootstrap.bootstrap_server_state_blocking state;
       Server_runtime_bootstrap.sync_bootable_keeper_credentials state;
-      let raw_token =
+      let internal_raw_token =
         match Sys.getenv_opt "MASC_INTERNAL_MCP_TOKEN" with
         | Some raw when String.trim raw <> "" -> String.trim raw
         | _ -> Alcotest.fail "missing internal keeper token after startup sync"
       in
+      let raw_token_path =
+        Filename.concat (Auth.auth_dir dir) "keeper-masc-improver-agent.token"
+      in
+      let raw_token = String.trim (read_file raw_token_path) in
       let credential =
         match Auth.load_credential dir "keeper-masc-improver-agent" with
         | Some cred -> cred
@@ -1721,6 +1727,8 @@ let test_sync_bootable_keeper_credentials_mints_keeper_alias_token () =
         (Sys.file_exists (Auth.internal_keeper_token_hash_file dir));
       Alcotest.(check string) "raw token hashes to keeper credential"
         credential.token (Auth.sha256_hash raw_token);
+      Alcotest.(check bool) "keeper bearer separated from internal token" false
+        (String.equal raw_token internal_raw_token);
       match
         Auth.verify_token dir ~agent_name:"keeper-masc-improver-agent"
           ~token:raw_token
@@ -1731,6 +1739,74 @@ let test_sync_bootable_keeper_credentials_mints_keeper_alias_token () =
       | Error err ->
           Alcotest.failf "bootable keeper token should verify exactly: %s"
             (Types.masc_error_to_string err))
+
+let test_sync_bootable_keeper_credentials_rotates_shared_keeper_tokens () =
+  with_temp_dir "startup-keeper-credential-rotate" (fun dir ->
+      with_env "MASC_CONFIG_DIR" None @@ fun () ->
+      with_env "MASC_PERSONAS_DIR" None @@ fun () ->
+      with_cwd (project_root ()) @@ fun () ->
+      Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path:dir;
+      write_basepath_keeper_toml dir "analyst";
+      write_basepath_keeper_toml dir "executor";
+      let shared_raw_token = "shared-keeper-bootstrap-token" in
+      let seed agent_name =
+        match
+          Auth.save_raw_token_credential dir ~agent_name
+            ~role:Types.Worker ~raw_token:shared_raw_token
+        with
+        | Ok _ ->
+            Auth.save_private_text_file
+              (Filename.concat (Auth.auth_dir dir) (agent_name ^ ".token"))
+              shared_raw_token
+        | Error err ->
+            Alcotest.failf "failed to seed shared credential for %s: %s"
+              agent_name (Types.masc_error_to_string err)
+      in
+      seed "keeper-analyst-agent";
+      seed "keeper-executor-agent";
+      Alcotest.(check int) "seeded one duplicate group"
+        1 (List.length (Auth.audit_token_uniqueness dir));
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let clock, mono_clock, net, _domain_mgr, proc_mgr, fs =
+        Server_runtime_bootstrap.init_runtime_context env
+      in
+      Eio.Switch.run @@ fun sw ->
+      let state =
+        Server_runtime_bootstrap.create_server_state ~sw ~base_path:dir ~clock
+          ~mono_clock ~net ~proc_mgr ~fs
+      in
+      Server_runtime_bootstrap.bootstrap_server_state_blocking state;
+      Server_runtime_bootstrap.sync_bootable_keeper_credentials state;
+      let analyst =
+        match Auth.load_credential dir "keeper-analyst-agent" with
+        | Some cred -> cred
+        | None -> Alcotest.fail "missing keeper-analyst-agent credential"
+      in
+      let executor =
+        match Auth.load_credential dir "keeper-executor-agent" with
+        | Some cred -> cred
+        | None -> Alcotest.fail "missing keeper-executor-agent credential"
+      in
+      Alcotest.(check bool) "boot repair made keeper tokens unique" false
+        (String.equal analyst.token executor.token);
+      Alcotest.(check int) "audit clean after boot repair"
+        0 (List.length (Auth.audit_token_uniqueness dir));
+      [ "keeper-analyst-agent"; "keeper-executor-agent" ]
+      |> List.iter (fun agent_name ->
+             let raw_token_path =
+               Filename.concat (Auth.auth_dir dir) (agent_name ^ ".token")
+             in
+             let raw_token = String.trim (read_file raw_token_path) in
+             match Auth.verify_token dir ~agent_name ~token:raw_token with
+             | Ok cred ->
+                 Alcotest.(check string)
+                   (agent_name ^ " rotated raw token verifies")
+                   agent_name cred.agent_name
+             | Error err ->
+                 Alcotest.failf
+                   "%s rotated raw token should verify after boot repair: %s"
+                   agent_name (Types.masc_error_to_string err)))
 
 let test_main_eio_rejects_same_base_path_on_second_server () =
   with_temp_dir "startup-base-path-owner-lock" (fun dir ->
@@ -2239,6 +2315,10 @@ let () =
           Alcotest.test_case
             "startup sync mints bootable keeper credentials"
             `Quick test_sync_bootable_keeper_credentials_mints_keeper_alias_token;
+          Alcotest.test_case
+            "startup sync rotates shared bootable keeper tokens"
+            `Quick
+            test_sync_bootable_keeper_credentials_rotates_shared_keeper_tokens;
           Alcotest.test_case
             "main_eio rejects second server on same base path"
             `Slow test_main_eio_rejects_same_base_path_on_second_server;

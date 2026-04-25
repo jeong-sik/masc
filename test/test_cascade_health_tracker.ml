@@ -15,34 +15,34 @@ let test_record_success_keeps_rate_1 () =
 
 let test_single_failure_no_cooldown () =
   let t = H.create () in
-  H.record_failure t ~provider_key:"p";
+  H.record_failure t ~provider_key:"p" ();
   check bool "single failure does not trip cooldown"
     false (H.is_in_cooldown t ~provider_key:"p")
 
 let test_cooldown_after_threshold () =
   (* cooldown_threshold default = 3 *)
   let t = H.create () in
-  H.record_failure t ~provider_key:"p";
-  H.record_failure t ~provider_key:"p";
-  H.record_failure t ~provider_key:"p";
+  H.record_failure t ~provider_key:"p" ();
+  H.record_failure t ~provider_key:"p" ();
+  H.record_failure t ~provider_key:"p" ();
   check bool "cooldown trips after 3 consecutive failures"
     true (H.is_in_cooldown t ~provider_key:"p")
 
 let test_success_resets_streak () =
   let t = H.create () in
-  H.record_failure t ~provider_key:"p";
-  H.record_failure t ~provider_key:"p";
+  H.record_failure t ~provider_key:"p" ();
+  H.record_failure t ~provider_key:"p" ();
   H.record_success t ~provider_key:"p";
-  H.record_failure t ~provider_key:"p";
-  H.record_failure t ~provider_key:"p";
+  H.record_failure t ~provider_key:"p" ();
+  H.record_failure t ~provider_key:"p" ();
   check bool "success resets consecutive_failures"
     false (H.is_in_cooldown t ~provider_key:"p")
 
 let test_effective_weight_cooldown_zero () =
   let t = H.create () in
-  H.record_failure t ~provider_key:"p";
-  H.record_failure t ~provider_key:"p";
-  H.record_failure t ~provider_key:"p";
+  H.record_failure t ~provider_key:"p" ();
+  H.record_failure t ~provider_key:"p" ();
+  H.record_failure t ~provider_key:"p" ();
   check int "effective_weight = 0 during cooldown"
     0 (H.effective_weight t ~provider_key:"p" ~config_weight:100)
 
@@ -54,7 +54,7 @@ let test_effective_weight_unknown_full () =
 let test_provider_info_reflects_events () =
   let t = H.create () in
   H.record_success t ~provider_key:"p";
-  H.record_failure t ~provider_key:"p";
+  H.record_failure t ~provider_key:"p" ();
   match H.provider_info t ~provider_key:"p" with
   | None -> fail "provider_info returned None after record calls"
   | Some info ->
@@ -69,9 +69,9 @@ let test_rejected_counts_as_failure_for_cooldown () =
      same consecutive-failure streak as hard errors so a provider whose
      outputs are unusable eventually stops being retried. *)
   let t = H.create () in
-  H.record_rejected t ~provider_key:"p";
-  H.record_rejected t ~provider_key:"p";
-  H.record_rejected t ~provider_key:"p";
+  H.record_rejected t ~provider_key:"p" ();
+  H.record_rejected t ~provider_key:"p" ();
+  H.record_rejected t ~provider_key:"p" ();
   check bool "3 consecutive rejections trip cooldown"
     true (H.is_in_cooldown t ~provider_key:"p")
 
@@ -80,17 +80,17 @@ let test_rejected_counts_against_success_rate () =
      100% as it did before 0.160.0 when [Accept_rejected] called
      [record_success]. *)
   let t = H.create () in
-  H.record_rejected t ~provider_key:"p";
-  H.record_rejected t ~provider_key:"p";
+  H.record_rejected t ~provider_key:"p" ();
+  H.record_rejected t ~provider_key:"p" ();
   check (float 0.001) "success_rate = 0.0 after only rejections"
     0.0 (H.success_rate t ~provider_key:"p")
 
 let test_rejected_separately_counted_in_provider_info () =
   let t = H.create () in
   H.record_success t ~provider_key:"p";
-  H.record_rejected t ~provider_key:"p";
-  H.record_rejected t ~provider_key:"p";
-  H.record_failure t ~provider_key:"p";
+  H.record_rejected t ~provider_key:"p" ();
+  H.record_rejected t ~provider_key:"p" ();
+  H.record_failure t ~provider_key:"p" ();
   match H.provider_info t ~provider_key:"p" with
   | None -> fail "provider_info returned None"
   | Some info ->
@@ -100,11 +100,11 @@ let test_rejected_separately_counted_in_provider_info () =
 
 let test_success_after_rejected_clears_streak () =
   let t = H.create () in
-  H.record_rejected t ~provider_key:"p";
-  H.record_rejected t ~provider_key:"p";
+  H.record_rejected t ~provider_key:"p" ();
+  H.record_rejected t ~provider_key:"p" ();
   H.record_success t ~provider_key:"p";
-  H.record_rejected t ~provider_key:"p";
-  H.record_rejected t ~provider_key:"p";
+  H.record_rejected t ~provider_key:"p" ();
+  H.record_rejected t ~provider_key:"p" ();
   check bool "success resets rejected streak"
     false (H.is_in_cooldown t ~provider_key:"p")
 
@@ -137,7 +137,7 @@ let test_evict_idle_drops_no_event_providers () =
 let test_evict_idle_returns_zero_when_all_active () =
   let t = H.create () in
   H.record_success t ~provider_key:"a";
-  H.record_failure t ~provider_key:"b";
+  H.record_failure t ~provider_key:"b" ();
   check int "no eviction when all providers have recent events"
     0 (H.evict_idle t)
 
@@ -148,13 +148,13 @@ let test_hard_quota_triggers_immediate_cooldown () =
      events, a single hard_quota event must trip cooldown on its own —
      balance depletion will not recover within 60s. *)
   let t = H.create () in
-  H.record_hard_quota t ~provider_key:"p";
+  H.record_hard_quota t ~provider_key:"p" ();
   check bool "single hard_quota event trips cooldown immediately"
     true (H.is_in_cooldown t ~provider_key:"p")
 
 let test_hard_quota_cooldown_is_long () =
   let t = H.create () in
-  H.record_hard_quota t ~provider_key:"p";
+  H.record_hard_quota t ~provider_key:"p" ();
   match H.provider_info t ~provider_key:"p" with
   | None -> fail "provider_info returned None after record_hard_quota"
   | Some info ->
@@ -172,7 +172,7 @@ let test_hard_quota_cooldown_is_long () =
 
 let test_hard_quota_effective_weight_zero () =
   let t = H.create () in
-  H.record_hard_quota t ~provider_key:"p";
+  H.record_hard_quota t ~provider_key:"p" ();
   check int "effective_weight = 0 during hard_quota cooldown"
     0 (H.effective_weight t ~provider_key:"p" ~config_weight:100)
 
@@ -181,7 +181,7 @@ let test_hard_quota_success_clears_cooldown () =
      provider starts responding again, one successful call should
      let us re-select the provider on the next tick. *)
   let t = H.create () in
-  H.record_hard_quota t ~provider_key:"p";
+  H.record_hard_quota t ~provider_key:"p" ();
   H.record_success t ~provider_key:"p";
   check bool "success after hard_quota clears cooldown"
     false (H.is_in_cooldown t ~provider_key:"p")
@@ -193,13 +193,13 @@ let test_hard_quota_preserves_longer_existing_cooldown () =
      test focuses on the idempotent case: two hard_quota events should
      leave the cooldown no shorter than a single event. *)
   let t = H.create () in
-  H.record_hard_quota t ~provider_key:"p";
+  H.record_hard_quota t ~provider_key:"p" ();
   let expires_after_first =
     match H.provider_info t ~provider_key:"p" with
     | Some { cooldown_expires_at = Some x; _ } -> x
     | _ -> fail "no cooldown after first hard_quota"
   in
-  H.record_hard_quota t ~provider_key:"p";
+  H.record_hard_quota t ~provider_key:"p" ();
   let expires_after_second =
     match H.provider_info t ~provider_key:"p" with
     | Some { cooldown_expires_at = Some x; _ } -> x
@@ -207,6 +207,223 @@ let test_hard_quota_preserves_longer_existing_cooldown () =
   in
   check bool "second hard_quota does not shorten cooldown"
     true (expires_after_second >= expires_after_first)
+
+(* ── Fingerprint counter (Phase 0 trust observability) ──────────── *)
+
+let info_or_fail t ~provider_key =
+  match H.provider_info t ~provider_key with
+  | Some info -> info
+  | None -> failwith "expected provider_info to be present"
+
+let test_fingerprint_same_classification_accumulates () =
+  let t = H.create () in
+  H.record_failure t ~provider_key:"p"
+    ~error_kind:"timeout" ~error_reason:"deadline exceeded" ();
+  H.record_failure t ~provider_key:"p"
+    ~error_kind:"timeout" ~error_reason:"deadline exceeded" ();
+  H.record_failure t ~provider_key:"p"
+    ~error_kind:"timeout" ~error_reason:"deadline exceeded" ();
+  let info = info_or_fail t ~provider_key:"p" in
+  check int "exactly one fingerprint bucket"
+    1 (List.length info.top_fingerprints);
+  match info.top_fingerprints with
+  | [ (_, count) ] ->
+    check int "fingerprint count = 3" 3 count
+  | _ -> failwith "unreachable"
+
+let test_fingerprint_distinct_reasons_split () =
+  let t = H.create () in
+  H.record_failure t ~provider_key:"p"
+    ~error_kind:"failure" ~error_reason:"reason A" ();
+  H.record_failure t ~provider_key:"p"
+    ~error_kind:"failure" ~error_reason:"reason B" ();
+  let info = info_or_fail t ~provider_key:"p" in
+  check int "two distinct fingerprints"
+    2 (List.length info.top_fingerprints)
+
+let test_fingerprint_top_3_cap () =
+  let t = H.create () in
+  for i = 1 to 5 do
+    let r = Printf.sprintf "reason %d" i in
+    H.record_failure t ~provider_key:"p"
+      ~error_kind:"failure" ~error_reason:r ()
+  done;
+  let info = info_or_fail t ~provider_key:"p" in
+  check int "top_fingerprints capped at 3"
+    3 (List.length info.top_fingerprints)
+
+let test_fingerprint_unclassified_when_kind_missing () =
+  let t = H.create () in
+  H.record_failure t ~provider_key:"p" ();
+  let info = info_or_fail t ~provider_key:"p" in
+  match info.top_fingerprints with
+  | [ (fp, _) ] ->
+    check string "fingerprint defaults to unclassified"
+      "unclassified" fp
+  | _ -> failwith "expected 1 fingerprint"
+
+let test_last_failure_at_set_on_failure () =
+  let t = H.create () in
+  H.record_failure t ~provider_key:"p" ~error_kind:"failure" ();
+  let info_after = info_or_fail t ~provider_key:"p" in
+  check bool "last_failure_at populated after failure"
+    true (info_after.last_failure_at <> None)
+
+let test_last_failure_at_none_for_pure_success () =
+  let t = H.create () in
+  H.record_success t ~provider_key:"p";
+  H.record_success t ~provider_key:"p";
+  let info = info_or_fail t ~provider_key:"p" in
+  check bool "last_failure_at stays None after success-only events"
+    true (info.last_failure_at = None)
+
+(* ── Phase 1 trust_score tests ───────────────── *)
+
+(* All trust assertions use a tolerance of 1e-9 so floating-point
+   reordering in the EWMA arithmetic does not cause flakes. *)
+let approx ~tol expected actual =
+  Float.abs (expected -. actual) < tol
+
+let check_trust msg ~expected actual =
+  if not (approx ~tol:1e-9 expected actual) then
+    failwith
+      (Printf.sprintf "%s: expected %.6f got %.6f" msg expected actual)
+
+let test_trust_initial_unknown_is_one () =
+  let t = H.create () in
+  check_trust "unknown trust = 1.0"
+    ~expected:1.0 (H.trust_score t ~provider_key:"never_recorded")
+
+let test_trust_success_adds_reward_clipped () =
+  let t = H.create () in
+  H.record_success t ~provider_key:"p";
+  check_trust "trust after first success = 1.0 + reward"
+    ~expected:(1.0 +. H.trust_reward_on_success)
+    (H.trust_score t ~provider_key:"p");
+  (* Push enough successes that trust would exceed ceiling without clamp.
+     With reward=0.15 and ceiling=2.0, 8 successes from 1.0 → 2.2 → clamped *)
+  for _ = 1 to 20 do H.record_success t ~provider_key:"p" done;
+  check_trust "trust clamped at ceiling"
+    ~expected:H.trust_ceiling
+    (H.trust_score t ~provider_key:"p")
+
+let test_trust_transient_failure_decays_once () =
+  let t = H.create () in
+  H.record_failure t ~provider_key:"p"
+    ~error_kind:"timeout" ~error_reason:"first" ();
+  check_trust "trust after one failure = 1.0 * decay_transient"
+    ~expected:H.trust_decay_transient
+    (H.trust_score t ~provider_key:"p")
+
+let test_trust_persistent_after_repeat () =
+  let t = H.create () in
+  (* Same fingerprint twice within the persistence window.  With
+     threshold=2 the second event is persistent. *)
+  H.record_failure t ~provider_key:"p"
+    ~error_kind:"timeout" ~error_reason:"same" ();
+  H.record_failure t ~provider_key:"p"
+    ~error_kind:"timeout" ~error_reason:"same" ();
+  let expected =
+    1.0 *. H.trust_decay_transient *. H.trust_decay_persistent
+  in
+  check_trust "second same-fingerprint failure → persistent decay"
+    ~expected
+    (H.trust_score t ~provider_key:"p")
+
+let test_trust_distinct_fingerprints_stay_transient () =
+  let t = H.create () in
+  H.record_failure t ~provider_key:"p"
+    ~error_kind:"timeout" ~error_reason:"r1" ();
+  H.record_failure t ~provider_key:"p"
+    ~error_kind:"failure" ~error_reason:"r2" ();
+  let expected =
+    1.0 *. H.trust_decay_transient *. H.trust_decay_transient
+  in
+  check_trust "distinct fingerprints → both transient"
+    ~expected
+    (H.trust_score t ~provider_key:"p")
+
+let test_trust_success_resets_persistence () =
+  let t = H.create () in
+  H.record_failure t ~provider_key:"p"
+    ~error_kind:"timeout" ~error_reason:"same" ();
+  H.record_failure t ~provider_key:"p"
+    ~error_kind:"timeout" ~error_reason:"same" ();
+  H.record_success t ~provider_key:"p";
+  (* Next same-fingerprint failure should be transient again because
+     the success reset the persistence detector. *)
+  let trust_after_success = H.trust_score t ~provider_key:"p" in
+  H.record_failure t ~provider_key:"p"
+    ~error_kind:"timeout" ~error_reason:"same" ();
+  let expected = trust_after_success *. H.trust_decay_transient in
+  check_trust "post-success failure is transient"
+    ~expected
+    (H.trust_score t ~provider_key:"p");
+  let info = info_or_fail t ~provider_key:"p" in
+  check int "same_fingerprint_count after success-then-failure" 1
+    info.same_fingerprint_count
+
+let test_trust_hard_quota_zeroes_trust () =
+  let t = H.create () in
+  H.record_success t ~provider_key:"p";
+  H.record_success t ~provider_key:"p";
+  H.record_hard_quota t ~provider_key:"p"
+    ~error_kind:"hard_quota" ~error_reason:"balance_zero" ();
+  check_trust "hard_quota → trust = 0"
+    ~expected:0.0
+    (H.trust_score t ~provider_key:"p")
+
+let test_effective_weight_uses_trust () =
+  let t = H.create () in
+  H.record_failure t ~provider_key:"p"
+    ~error_kind:"timeout" ~error_reason:"same" ();
+  H.record_failure t ~provider_key:"p"
+    ~error_kind:"timeout" ~error_reason:"same" ();
+  (* Two persistent decays from 1.0:
+     1.0 * 0.7 * 0.15 = 0.105 → int(10 * 0.105) = 1, max 1 *)
+  let w = H.effective_weight t ~provider_key:"p" ~config_weight:10 in
+  check bool "effective_weight reflects low trust"
+    true (w <= 2);
+  (* A healthy provider with successes should exceed config_weight when
+     trust climbs above 1.0. *)
+  let t2 = H.create () in
+  for _ = 1 to 10 do H.record_success t2 ~provider_key:"q" done;
+  let w2 = H.effective_weight t2 ~provider_key:"q" ~config_weight:1 in
+  check bool "effective_weight grows above 1 when trust > 1"
+    true (w2 >= 2)
+
+let test_provider_info_exposes_trust_fields () =
+  let t = H.create () in
+  H.record_failure t ~provider_key:"p"
+    ~error_kind:"timeout" ~error_reason:"same" ();
+  H.record_failure t ~provider_key:"p"
+    ~error_kind:"timeout" ~error_reason:"same" ();
+  let info = info_or_fail t ~provider_key:"p" in
+  check bool "trust_score < 1.0 after failures"
+    true (info.trust_score < 1.0);
+  check int "same_fingerprint_count = 2" 2 info.same_fingerprint_count
+
+let test_fingerprint_top_sorted_descending () =
+  let t = H.create () in
+  (* low: 1, medium: 2, high: 3 *)
+  H.record_failure t ~provider_key:"p"
+    ~error_kind:"failure" ~error_reason:"low" ();
+  H.record_failure t ~provider_key:"p"
+    ~error_kind:"failure" ~error_reason:"medium" ();
+  H.record_failure t ~provider_key:"p"
+    ~error_kind:"failure" ~error_reason:"medium" ();
+  H.record_failure t ~provider_key:"p"
+    ~error_kind:"failure" ~error_reason:"high" ();
+  H.record_failure t ~provider_key:"p"
+    ~error_kind:"failure" ~error_reason:"high" ();
+  H.record_failure t ~provider_key:"p"
+    ~error_kind:"failure" ~error_reason:"high" ();
+  let info = info_or_fail t ~provider_key:"p" in
+  match info.top_fingerprints with
+  | (_, c1) :: (_, c2) :: (_, c3) :: _ ->
+    check bool "descending" true (c1 >= c2 && c2 >= c3);
+    check int "highest count" 3 c1
+  | _ -> failwith "expected at least 3 fingerprints"
 
 let () =
   run "cascade_health_tracker" [
@@ -253,5 +470,41 @@ let () =
         test_hard_quota_success_clears_cooldown;
       test_case "second hard_quota does not shorten cooldown" `Quick
         test_hard_quota_preserves_longer_existing_cooldown;
+    ];
+    "fingerprint", [
+      test_case "same classification accumulates" `Quick
+        test_fingerprint_same_classification_accumulates;
+      test_case "distinct reasons → distinct fingerprints" `Quick
+        test_fingerprint_distinct_reasons_split;
+      test_case "top_fingerprints capped at 3" `Quick
+        test_fingerprint_top_3_cap;
+      test_case "missing kind defaults to unclassified" `Quick
+        test_fingerprint_unclassified_when_kind_missing;
+      test_case "last_failure_at populated on failure" `Quick
+        test_last_failure_at_set_on_failure;
+      test_case "last_failure_at stays None on success-only" `Quick
+        test_last_failure_at_none_for_pure_success;
+      test_case "top_fingerprints sorted descending" `Quick
+        test_fingerprint_top_sorted_descending;
+    ];
+    "trust_score", [
+      test_case "unknown provider trust = 1.0" `Quick
+        test_trust_initial_unknown_is_one;
+      test_case "success rewards and clamps at ceiling" `Quick
+        test_trust_success_adds_reward_clipped;
+      test_case "transient failure decays once" `Quick
+        test_trust_transient_failure_decays_once;
+      test_case "persistent (same fingerprint repeats)" `Quick
+        test_trust_persistent_after_repeat;
+      test_case "distinct fingerprints stay transient" `Quick
+        test_trust_distinct_fingerprints_stay_transient;
+      test_case "success resets persistence detector" `Quick
+        test_trust_success_resets_persistence;
+      test_case "hard_quota zeroes trust" `Quick
+        test_trust_hard_quota_zeroes_trust;
+      test_case "effective_weight tracks trust" `Quick
+        test_effective_weight_uses_trust;
+      test_case "provider_info exposes trust fields" `Quick
+        test_provider_info_exposes_trust_fields;
     ];
   ]

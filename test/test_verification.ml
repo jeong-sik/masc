@@ -97,6 +97,16 @@ let test_evaluate_not_contains () =
     (match V.evaluate_criterion output (V.Not_contains "hello") with
      | V.Fail _ -> true | _ -> false)
 
+let test_evaluate_literal_and_empty_needles () =
+  let output = `String "literal .* needle" in
+  Alcotest.(check bool) "contains treats regex metacharacters literally" true
+    (V.evaluate_criterion output (V.Contains ".*") = V.Pass);
+  Alcotest.(check bool) "contains empty needle stays fail" true
+    (match V.evaluate_criterion output (V.Contains "") with
+     | V.Fail _ -> true | _ -> false);
+  Alcotest.(check bool) "not_contains empty needle stays pass" true
+    (V.evaluate_criterion output (V.Not_contains "") = V.Pass)
+
 let test_evaluate_schema_match () =
   let output = `Assoc [("key", `String "value")] in
   Alcotest.(check bool) "schema non-null pass" true
@@ -404,6 +414,8 @@ let () =
     "evaluation", [
       Alcotest.test_case "contains" `Quick test_evaluate_contains;
       Alcotest.test_case "not_contains" `Quick test_evaluate_not_contains;
+      Alcotest.test_case "literal and empty needles" `Quick
+        test_evaluate_literal_and_empty_needles;
       Alcotest.test_case "schema_match" `Quick test_evaluate_schema_match;
       Alcotest.test_case "custom" `Quick test_evaluate_custom;
       Alcotest.test_case "all pass" `Quick test_evaluate_all_pass;

@@ -584,6 +584,13 @@ let metric_auth_strict_unknown_tool_denials =
 let metric_auth_credential_token_duplicate =
   "masc_auth_credential_token_duplicate_total"
 
+(* #10304: prevention complement to the duplicate-token audit.
+   Boot-time keeper repair increments this once per successfully
+   rotated credential, labeled by the old shared token prefix and
+   bounded repair scope. *)
+let metric_auth_credential_token_rotated =
+  "masc_auth_credential_token_rotated_total"
+
 (* #9786 runtime complement: every [find_credential_by_token]
    lookup that hits N>=2 matches fires this counter.  The
    boot-time audit ({!metric_auth_credential_token_duplicate})
@@ -964,6 +971,11 @@ let init () =
     "Total boot-time credential token duplicate groups detected \
      (labels: token_hash_prefix). Any non-zero value means credential tokens \
      must be rotated."
+    Counter;
+  add metric_auth_credential_token_rotated
+    "Total credentials automatically rotated out of a shared bearer-token \
+     group (labels: token_hash_prefix, scope). Any positive value means \
+     boot-time prevention repaired ambiguous credential state."
     Counter;
   add metric_telemetry_coverage_gap
     "Total telemetry coverage gaps recorded before append to the durable \

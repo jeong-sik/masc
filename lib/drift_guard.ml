@@ -75,11 +75,15 @@ let factual_size_ratio_floor () =
 let structural_divergence_threshold () =
   Runtime_params.get Governance_registry.drift_structural_divergence_threshold
 
+(* Whitespace splitter for [tokenize] — pattern is a static character
+   class, hoist out of the per-call hot path. *)
+let whitespace_split_re = Re.Pcre.re "[ \t\r\n]+" |> Re.compile
+
 let tokenize (s : string) : string list =
   let trimmed = String.trim s in
   if trimmed = "" then []
   else
-    let tokens = Re.split (Re.Pcre.re "[ \t\r\n]+" |> Re.compile) trimmed in
+    let tokens = Re.split whitespace_split_re trimmed in
     let trim_punct token =
       let is_punct = function
         | '.'

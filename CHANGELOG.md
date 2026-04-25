@@ -1,5 +1,13 @@
 # Changelog
 
+
+## [0.16.0] - 2026-04-26
+
+### Changed
+- TBD
+
+### Deprecated
+- TBD
 ## [0.15.0] - 2026-04-25
 
 Aggregate of 185 commits since v0.14.0 (26 feat / 93 fix / 30 perf-refactor-obs-docs / 10 chore / 26 misc). No breaking API changes.

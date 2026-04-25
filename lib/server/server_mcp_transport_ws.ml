@@ -465,13 +465,12 @@ let parse_cache : (string * parsed_sse_event option) Atomic.t =
 
 (** Extract the JSON body from an SSE-formatted event string.
 
-    Sse.format_event always emits exactly four lines:
-    [{|id: <N>\nevent: <type>\ndata: <body>\n\n|}].  The body line
-    starts with [data: ] (6-char prefix) and is the JSON payload that
-    parse_sse_dashboard_event needs.  External subscribers receive the
-    full SSE-formatted string (gRPC stuffs it into payload_json verbatim
-    and lets the gRPC client re-parse), so the WS callback must peel
-    the SSE wrapper before feeding [Yojson.Safe.from_string].
+    [Sse.format_event] emits [data: <body>] today, but the parser should
+    not depend on that line staying in a fixed position.  External
+    subscribers receive the full SSE-formatted string (gRPC stuffs it
+    into payload_json verbatim and lets the gRPC client re-parse), so the
+    WS callback must peel the SSE wrapper before feeding
+    [Yojson.Safe.from_string].
 
     The earlier implementation skipped this step, so every production
     parse failed and dashboard_delta_for_sse always fell through to
@@ -479,16 +478,30 @@ let parse_cache : (string * parsed_sse_event option) Atomic.t =
     (Phase 2 of #10119), and delta-built counter.  Pure-JSON inputs
     (the unit-test path) still work via the [_ -> Some sse_event]
     fallback. *)
+let sse_data_prefix = "data:"
+
+let extract_sse_data_payload_line line =
+  let prefix_len = String.length sse_data_prefix in
+  if
+    String.length line >= prefix_len
+    && String.equal (String.sub line 0 prefix_len) sse_data_prefix
+  then
+    let raw = String.sub line prefix_len (String.length line - prefix_len) in
+    if String.length raw > 0 && Char.equal raw.[0] ' ' then
+      Some (String.sub raw 1 (String.length raw - 1))
+    else Some raw
+  else None
+
 let extract_sse_data_line sse_event =
-  match String.split_on_char '\n' sse_event with
-  | _id :: _event :: data_line :: _
-    when String.length data_line >= 6
-         && String.sub data_line 0 6 = "data: " ->
-      Some (String.sub data_line 6 (String.length data_line - 6))
-  | _ ->
-      (* Not the 4-line format we emit — pass through as-is so unit
-         tests that hand us pure JSON keep working. *)
+  match
+    String.split_on_char '\n' sse_event
+    |> List.filter_map extract_sse_data_payload_line
+  with
+  | [] ->
+      (* Not an SSE data event — pass through as-is so unit tests that
+         hand us pure JSON keep working. *)
       Some sse_event
+  | data_lines -> Some (String.concat "\n" data_lines)
 
 let parse_sse_dashboard_event sse_event =
   let cached_str, cached_val = Atomic.get parse_cache in

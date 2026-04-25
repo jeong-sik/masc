@@ -1417,6 +1417,11 @@
  (modules test_dated_jsonl)
  (libraries dated_jsonl fs_compat alcotest eio eio_main yojson unix))
 
+(test
+ (name test_goal_phase_awaiting_verification_10411)
+ (modules test_goal_phase_awaiting_verification_10411)
+ (libraries masc_mcp alcotest))
+
 ; ============================================================
 ; Special: Heartbeat/keeper minimal deps
 ; ============================================================

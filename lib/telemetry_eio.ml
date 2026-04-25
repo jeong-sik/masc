@@ -435,8 +435,31 @@ let track_handoff ?fs config ~from_agent ~to_agent ~reason =
 let track_error ?fs config ~code ~message ~context =
   track ?fs config (Error_occurred { code; message; context })
 
+(** #10358: when a [Tool_called] event marks [success=false] and the
+    caller has classified the failure mode (timeout / tool_failure /
+    custom kind), also emit a paired [Error_occurred] event so the
+    previously-dead ADT variant carries the diagnostic.
+
+    Pre-fix [Tool_called] only carried [success: bool] and the
+    callers that compute [error_kind] at the dispatch boundary
+    (e.g. mcp_server_eio_call_tool.ml line 755) dropped it before
+    reaching telemetry.  The [Error_occurred] variant existed in
+    the ADT but only one site (dashboard_tool_host_events) emitted
+    it, so 142 of 825 [Tool_called success=false] entries on
+    2026-04-25 had no classification trail in the JSONL.
+
+    Option B-light from #10358: extend [track_tool_called] to take
+    the error classification the caller already has and fan out a
+    paired [Error_occurred].  [Tool_called] payload itself is
+    unchanged so the JSONL schema stays additive — existing
+    consumers that only watch Tool_called see no new fields.
+
+    Both arguments default to [None], so callers that don't have
+    error info (worker_container, http_keeper_stream) keep their
+    current behaviour bit-for-bit. *)
 let track_tool_called ?fs config ~tool_name ~success ~duration_ms ?agent_id
-    ?source ?session_id ?operation_id ?worker_run_id () =
+    ?source ?session_id ?operation_id ?worker_run_id ?error_kind
+    ?error_message () =
   track ?fs config
     (Tool_called
        {
@@ -448,7 +471,39 @@ let track_tool_called ?fs config ~tool_name ~success ~duration_ms ?agent_id
          session_id;
          operation_id;
          worker_run_id;
-       })
+       });
+  if not success then
+    match error_kind with
+    | None -> ()
+    | Some kind ->
+        let trimmed_kind = String.trim kind in
+        if trimmed_kind = "" then ()
+        else
+          let message =
+            match error_message with
+            | Some m when String.trim m <> "" -> String.trim m
+            | _ ->
+                Printf.sprintf "tool %s failed (%s)" tool_name
+                  trimmed_kind
+          in
+          let context_parts =
+            List.filter_map
+              (fun (k, v) ->
+                match v with
+                | Some s when String.trim s <> "" ->
+                    Some (Printf.sprintf "%s=%s" k s)
+                | _ -> None)
+              [
+                ("tool", Some tool_name);
+                ("agent", agent_id);
+                ("source", source);
+                ("session", session_id);
+                ("op", operation_id);
+              ]
+          in
+          let context = String.concat " " context_parts in
+          track ?fs config
+            (Error_occurred { code = trimmed_kind; message; context })
 
 let track_tool_assigned ?fs config ~agent_id ~profile ?preset ~tool_count ~assignment_id () =
   track ?fs config (Tool_assigned { agent_id; profile; preset; tool_count; assignment_id })

@@ -709,6 +709,16 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
        Keeper_registry.flush_tool_usage ~base_path:entry.base_path entry.name
    | None -> ());
 
+  (* #10358: classify failure mode at the dispatch boundary so
+     telemetry carries the diagnostic.  Mirrors the vocabulary
+     [Tool_assignment_telemetry.emit_completed] uses below; hoisted
+     here so [track_tool_called] can fan out a paired
+     [Error_occurred] event for the previously-dead ADT variant. *)
+  let telemetry_error_kind =
+    if not success then
+      if !timeout_hit then Some "timeout" else Some "tool_failure"
+    else None
+  in
   (* Track tool call in telemetry (controlled by MASC_TELEMETRY_ENABLED) *)
   let telemetry_enabled = Env_config_core.telemetry_enabled () in
   if telemetry_enabled then
@@ -720,6 +730,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
                 ?session_id:telemetry_session_id
                 ?operation_id:telemetry_operation_id
                 ?worker_run_id:telemetry_worker_run_id
+                ?error_kind:telemetry_error_kind
                 ()
           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
             log_mcp_exn ~label:"telemetry tracking failed" exn)

@@ -112,6 +112,17 @@ val save_excuse_patterns : (string * string) list -> (unit, string) result
     Exposed for testing. *)
 val find_excuse_pattern : string -> (string * string) option
 
+(** Build the LLM evaluator prompt for a review request.
+    [excuse_advisory], when supplied, injects a
+    [<gate2_advisory>] section that surfaces a substring-detected
+    avoidance phrase to the LLM as a heuristic signal rather than
+    a verdict — see #10113.  Exposed so tests can pin the prompt
+    contract without standing up an OAS cascade. *)
+val build_prompt :
+  ?few_shot_block:string ->
+  ?excuse_advisory:string * string ->
+  review_request -> string
+
 (** Parse LLM text output into a verdict (lenient fallback path).
     "APPROVE" -> [Ok Approve], "REJECT: reason" -> [Ok (Reject reason)].
     Unrecognized format returns [Error] instead of silently approving (ADR D3).

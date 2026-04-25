@@ -158,6 +158,10 @@ val metric_llm_provider_http_status : string
 val metric_llm_provider_request_latency : string
 val metric_board_truncated_posts : string
 val metric_anti_rationalization_fallback : string
+val metric_anti_rationalization_excuse_pattern : string
+(** #10113: per-pattern + per-decision counter for the gate 2
+    excuse substring detector.  Decision label is
+    [advisory_to_llm | terminal_reject | advisory_safety_net_reject]. *)
 val metric_cascade_strategy_decisions : string
 val metric_cascade_capacity_events : string
 val metric_keeper_invariant_violations : string

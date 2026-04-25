@@ -149,8 +149,18 @@ let () = test "review_result_gate_field_length" (fun () ->
   assert (r.gate = Anti_rationalization.Length))
 
 let () = test "review_result_gate_field_excuse" (fun () ->
+  (* #10113: gate-2 substring excuse pattern is now an advisory by
+     default; the historical [Excuse] terminal Reject only fires
+     when [MASC_ANTI_RATIONALIZATION_GATE2_FAIL_CLOSED=true].  The
+     env var is captured at module-init time so this test cannot
+     flip it at runtime; instead we assert the new expected gate
+     ([Fallback], since the LLM evaluator is unavailable in the
+     test process and the advisory upgrades to a safety-net
+     Reject).  The [Excuse] gate value is still exercised
+     elsewhere ([gate_to_string]) and the [valid_verdict_strings]
+     contract; the field constructor remains valid. *)
   let r = Anti_rationalization.review (make_request "This is out of scope entirely") in
-  assert (r.gate = Anti_rationalization.Excuse))
+  assert (r.gate = Anti_rationalization.Fallback))
 
 let () = test "review_result_evaluator_cascade_default" (fun () ->
   let r = Anti_rationalization.review (make_request "") in

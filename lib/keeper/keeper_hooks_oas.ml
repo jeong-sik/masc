@@ -55,6 +55,11 @@ let usage_has_tokens (usage : Oas.Types.api_usage) =
   || usage.cache_creation_input_tokens > 0
   || usage.cache_read_input_tokens > 0
 
+let is_keeper_board_write_tool_name tool_name =
+  match Tool_name.Keeper.of_string tool_name with
+  | Some tool -> Tool_name.Keeper.is_board_write tool
+  | None -> false
+
 (* #9919: counter for post_tool_use_failure events.
 
    Replaces an earlier [Heuristic_metrics.record] emit that produced
@@ -535,9 +540,6 @@ let make_hooks
     ()
   : Oas.Hooks.hooks =
   let sse_turn_complete = "keeper_turn_complete" in
-  let board_write_tools =
-    [ "keeper_board_post"; "keeper_board_comment"; "keeper_board_vote" ]
-  in
   let tool_start_time = ref 0.0 in
   (* Per-turn tool call counter for SSE enrichment.
      Incremented in post_tool_use, reset in after_turn. *)
@@ -916,7 +918,7 @@ let make_hooks
             | exn ->
               Log.Keeper.error "keeper:%s on_tool_executed callback failed for %s: %s"
                 (!meta_ref).name tool_name (Printexc.to_string exn));
-        if List.mem tool_name board_write_tools then
+        if is_keeper_board_write_tool_name tool_name then
           Log.Keeper.debug "keeper:%s social_event tool=%s"
             (!meta_ref).name tool_name;
         Oas.Hooks.Continue

@@ -55,6 +55,10 @@ module Keeper : sig
 
   val to_string : t -> string
   val of_string : string -> t option
+  val board_write_tools : t list
+  val board_write_tool_names : string list
+  val is_board_write : t -> bool
+  val board_write_action_kind : t -> string option
   val pp : Format.formatter -> t -> unit
 end
 

@@ -431,9 +431,19 @@ let is_fixture_voter_target target =
   || has_prefix ~prefix:"test-voter-" voter
 
 let quarantine_enabled () =
+  (* #9886: production ledger observed 112/112 (100%) fixture-pattern
+     votes orphaning downstream ranking/scoring. Fixture voters
+     ([hot-voter-*], [synthetic-voter-*], [test-voter-*]) never appear
+     in legitimate production traffic, so default the quarantine ON.
+     Operators who intentionally want fixture votes loaded (e.g. a
+     benchmark replay against a live ledger) can set the env to [0],
+     [false], or [off].  #9921 still tracks the root-cause write path;
+     this change keeps downstream stats honest in the meantime. *)
   match Sys.getenv_opt "MASC_BOARD_VOTE_QUARANTINE" with
-  | Some v -> v = "1" || String.lowercase_ascii v = "true"
-  | None -> false
+  | Some v ->
+      let norm = String.lowercase_ascii (String.trim v) in
+      not (norm = "0" || norm = "false" || norm = "off" || norm = "")
+  | None -> true
 
 let load_persisted_votes store =
   let path = vote_log_path () in

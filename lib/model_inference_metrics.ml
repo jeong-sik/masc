@@ -496,9 +496,7 @@ let read_hw_decode_tok_per_sec (fields : (string * Yojson.Safe.t) list) =
   | Some _ as v -> v
   | None -> read "provider_tokens_per_second"
 
-let starts_with ~prefix s =
-  let plen = String.length prefix in
-  String.length s >= plen && String.sub s 0 plen = prefix
+let starts_with ~prefix s = String.starts_with ~prefix s
 
 let canonical_cost_model_id ~(provider : string option) model =
   match provider with

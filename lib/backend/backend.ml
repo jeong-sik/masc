@@ -283,10 +283,7 @@ module FileSystem = struct
     )
 
   (** List keys with prefix *)
-  let starts_with ~prefix value =
-    let prefix_len = String.length prefix in
-    String.length value >= prefix_len
-    && String.sub value 0 prefix_len = prefix
+  let starts_with ~prefix value = String.starts_with ~prefix value
 
 
   let rec collect_keys_under ~requested_prefix ~logical_prefix path acc =

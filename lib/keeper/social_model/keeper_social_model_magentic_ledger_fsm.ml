@@ -67,9 +67,7 @@ let event_of_string value =
 
 let model_name = Types.model_id_to_string Types.Magentic_ledger_v1
 
-let has_prefix s prefix =
-  let s_len = String.length s and prefix_len = String.length prefix in
-  s_len >= prefix_len && String.sub s 0 prefix_len = prefix
+let has_prefix s prefix = String.starts_with ~prefix s
 
 let belief_summary_field belief_summary field_name =
   let parts =

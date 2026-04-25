@@ -35,10 +35,7 @@ let validate_name = function
 let parse_name request =
   validate_name (Server_utils.query_param request "name")
 
-let starts_with ~prefix value =
-  let prefix_len = String.length prefix in
-  String.length value >= prefix_len
-  && String.equal (String.sub value 0 prefix_len) prefix
+let starts_with ~prefix value = String.starts_with ~prefix value
 
 let trim_opt = function
   | Some raw ->

@@ -352,7 +352,7 @@ type turn_request_result = {
 exception Timeout of string
 
 (** Safe string prefix check *)
-let starts_with ~prefix s = Base.String.is_prefix s ~prefix
+let starts_with ~prefix s = String.starts_with ~prefix s
 
 (** Check if an error is retryable (transient)
     Retryable errors: connection failures, timeouts, HTTP 5xx *)

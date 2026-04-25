@@ -599,6 +599,7 @@
         test_keeper_tool_exposure
         test_keeper_runtime_denylist
         test_keeper_runtime_config_ssot
+        test_dashboard_render_timing_9766
         test_keeper_task_dispatch
         test_keeper_tag_dispatch
         test_autoresearch_knowledge
@@ -775,6 +776,7 @@
         test_keeper_tool_exposure
         test_keeper_runtime_denylist
         test_keeper_runtime_config_ssot
+        test_dashboard_render_timing_9766
         test_keeper_task_dispatch
         test_keeper_tag_dispatch
         test_autoresearch_knowledge

@@ -54,6 +54,11 @@ val default_overshoot_slack_s : float
 (** Default grace window applied when distinguishing expected cleanup tail
     from a cooperative-cancel miss. Callers may override per site. *)
 
+val metric_overshoot_total : string
+(** #9662: canonical Prometheus metric name for overshoot events.
+    Labels: [layer, origin].  Internal series name is
+    [masc_timeout_policy_overshoot_total]. *)
+
 val overshoot_warn
   :  ?slack_s:float
   -> deadline:Deadline.t
@@ -61,5 +66,7 @@ val overshoot_warn
   -> unit
   -> bool
 (** Emit a warn-level log when [actual_wall_s] exceeds
-    [deadline.wall_cap_s] by more than [slack_s]. Returns [true] when a
-    warn was emitted so callers can increment a metric. *)
+    [deadline.wall_cap_s] by more than [slack_s].  Also increments
+    {!metric_overshoot_total} with [layer] and [origin] labels.
+    Returns [true] when an overshoot was detected (caller no
+    longer needs to emit a parallel counter). *)

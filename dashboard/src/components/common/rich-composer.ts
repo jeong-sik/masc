@@ -39,6 +39,7 @@ export function RichComposer({
               }`}
               onClick=${() => setMode(tab)}
               disabled=${disabled}
+              aria-pressed=${mode === tab}
             >
               ${tab === 'write' ? 'Write' : 'Preview'}
             </button>

@@ -403,6 +403,33 @@ let sleep_lock_retry ?clock delay =
   | Some clock -> Eio.Time.sleep clock delay
   | None -> Time_compat.sleep delay
 
+(* Per-domain RNG for backoff jitter.  [Random.State.t] is NOT
+   cross-domain safe, so each domain keeps its own seed.  Cf. the
+   [nickname_rng] precedent in [lib/coord/nickname.ml]; here we use
+   [Domain.DLS] instead of an Eio mutex because the lock-acquire path
+   may run from non-Eio contexts (Time_compat.sleep branch). *)
+let backoff_rng_key : Random.State.t Domain.DLS.key =
+  Domain.DLS.new_key Random.State.make_self_init
+
+(* "Full jitter" backoff (Marc Brooker, AWS Architecture Blog,
+   "Exponential Backoff And Jitter", 2015): sleep ∈ [0, delay]
+   while [delay] still doubles up to the cap on every miss.
+
+   Pre-fix, all 17 fleet actors (16 keepers + orchestrator GC) hit
+   the [tasks:.backlog] file lock with the SAME deterministic backoff
+   sequence (0.05, 0.1, 0.2, 0.4, 0.5, 0.5, …).  When they collided
+   they re-collided exactly one tick later, so 50 retries decayed
+   into 50 contention spikes instead of 50 independent attempts —
+   #9645 reports the orchestrator giving up after the budget was
+   exhausted.  Full jitter desynchronises the herd: two actors that
+   collide at attempt N pick different sleeps in [0, current_delay],
+   so attempt N+1 is staggered. *)
+let backoff_with_jitter delay =
+  if delay <= 0.0 then delay
+  else
+    let st = Domain.DLS.get backoff_rng_key in
+    Random.State.float st delay
+
 let with_distributed_lock ?clock config _path key f =
   let owner = config.backend_config.node_id in
   let ttl_seconds = config.lock_expiry_minutes * 60 in
@@ -412,7 +439,7 @@ let with_distributed_lock ?clock config _path key f =
       match backend_acquire_lock config ~key ~ttl_seconds ~owner with
       | Ok true -> true
       | _ ->
-          sleep_lock_retry ?clock delay;
+          sleep_lock_retry ?clock (backoff_with_jitter delay);
           acquire (attempts - 1) (Float.min 0.5 (delay *. 2.0))
   in
   if acquire 50 0.05 then
@@ -449,7 +476,7 @@ let with_distributed_lock_r ?clock config path key f : ('a, masc_error) result =
       match backend_acquire_lock config ~key ~ttl_seconds ~owner with
       | Ok true -> true
       | _ ->
-          sleep_lock_retry ?clock delay;
+          sleep_lock_retry ?clock (backoff_with_jitter delay);
           acquire (attempts - 1) (Float.min 0.5 (delay *. 2.0))
   in
   if acquire 50 0.05 then

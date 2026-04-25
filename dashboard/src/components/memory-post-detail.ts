@@ -209,7 +209,7 @@ export function CommentThread({ comments, postId }: { comments: BoardComment[]; 
   return html`
     <div class="flex flex-col gap-2">
       <div class="flex items-center gap-2 mb-1">
-        <div class="text-2xs text-[var(--text-muted)]">댓글 ${comments.length}개${isFiltering ? ` · 일치 ${filteredRoots.length}` : ''}</div>
+        <div class="text-2xs text-[var(--text-muted)]" aria-live="polite">댓글 ${comments.length}개${isFiltering ? ` · 일치 ${filteredRoots.length}` : ''}</div>
         <input
           type="search"
           value=${query.value}

@@ -180,7 +180,7 @@ export function PromptRegistryPanel() {
             <div class="text-2xs uppercase tracking-1 text-[var(--text-muted)]">
               등록된 프롬프트
               ${sourceFilter.value !== 'all' || searchQuery.value
-                ? html`<span class="ml-1 normal-case tracking-normal text-[var(--text-muted)]">${visiblePrompts.length} / ${prompts.length}</span>`
+                ? html`<span class="ml-1 normal-case tracking-normal text-[var(--text-muted)]" aria-live="polite">${visiblePrompts.length} / ${prompts.length}</span>`
                 : null}
             </div>
             <${ActionButton} variant="ghost" size="sm" disabled=${loading || saving} onClick=${() => { void loadPrompts(selectedPrompt?.key ?? null) }}>

@@ -466,6 +466,64 @@ let store_episode_from_snapshot
   in
   Oas.Memory.store_episode memory episode
 
+let store_failed_turn_episode
+    ~(memory : Oas.Memory.t)
+    ~(keeper_name : string)
+    ~(turn : int)
+    ~(trace_id : string)
+    ~(error_kind : string)
+    ~(error_message : string)
+    () : unit =
+  let error_preview =
+    String_util.utf8_safe ~max_bytes:403 ~suffix:"..." error_message
+    |> String_util.to_string
+  in
+  let error_context =
+    String_util.utf8_safe ~max_bytes:4099 ~suffix:"..." error_message
+    |> String_util.to_string
+  in
+  let summary =
+    Printf.sprintf "keeper turn %d failed (%s): %s" turn error_kind
+      error_preview
+  in
+  let ts = Time_compat.now () in
+  let episode_id =
+    Printf.sprintf "keeper-%s-t%d-failure-%d" keeper_name turn
+      (int_of_float (ts *. 1000.0) mod 1_000_000)
+  in
+  let episode : Oas.Memory.episode =
+    {
+      id = episode_id;
+      timestamp = ts;
+      participants = [ keeper_name ];
+      action = summary;
+      outcome = Oas.Memory.Failure error_context;
+      salience = 0.8;
+      metadata =
+        [
+          ("event_type", `String "keeper_turn");
+          ("institution_summary", `String summary);
+          ("institution_outcome", `String "failure");
+          ( "learnings",
+            `List
+              [
+                `String
+                  "persist failed keeper turns so future runs can learn from \
+                   failure patterns";
+              ] );
+          ( "context",
+            `Assoc
+              [
+                ("trace_id", `String trace_id);
+                ("turn", `String (string_of_int turn));
+                ("error_kind", `String error_kind);
+                ("error_message", `String error_context);
+              ] );
+        ];
+    }
+  in
+  Oas.Memory.store_episode memory episode
+
 let persisted_episode_ids () =
   (load_all_episodes_cached ()).ids
 
@@ -698,4 +756,3 @@ let flush_incremental ~(memory : Oas.Memory.t) ~(agent_name : string)
   let ep = flush_episodes ~memory ~agent_name in
   let pr = flush_procedures ~memory ~agent_name in
   (ep, pr)
-

@@ -2759,6 +2759,55 @@ let run_turn
              | Error e -> Error (Oas.Error.Internal e)
              | Ok response_text -> finalize_response_text response_text))
     in
+    (match turn_result with
+     | Ok _ -> ()
+     | Error err ->
+       (try
+          let turn =
+            match !receipt_turn_count_ref with
+            | Some turns -> turns
+            | None -> start_turn_count + 1
+          in
+          Memory_oas_bridge.store_failed_turn_episode
+            ~memory
+            ~keeper_name:meta.name
+            ~turn
+            ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+            ~error_kind:(sdk_error_kind err)
+            ~error_message:(Oas.Error.to_string err)
+            ();
+          let ep, pr =
+            Memory_oas_bridge.flush_incremental ~memory ~agent_name:meta.name
+          in
+          if ep > 0 || pr > 0 then begin
+            Log.Keeper.debug
+              "keeper:%s post-run failure flush episodes=%d procedures=%d"
+              meta.name ep pr;
+            (try
+               (Atomic.get Coord_hooks.activity_emit_fn) config
+                 ~actor:Coord_hooks.{ kind = "keeper"; id = meta.name }
+                 ~kind:"episode.flush"
+                 ~payload:
+                   (`Assoc
+                     [
+                       ("keeper", `String meta.name);
+                       ("episodes", `Int ep);
+                       ("procedures", `Int pr);
+                       ("turn", `Int turn);
+                       ("outcome", `String "failure");
+                     ])
+                 ~tags:[ "memory"; "episode"; "flush"; "failure" ]
+                 ()
+             with
+             | Eio.Cancel.Cancelled _ as e -> raise e
+             | _ -> ())
+          end
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+          Log.Keeper.error "keeper:%s failed_turn_episode_create failed: %s"
+            meta.name (Printexc.to_string exn)))
+    ;
     let receipt_ended_at = Types.now_iso () in
     let error_kind, error_message =
       match turn_result with

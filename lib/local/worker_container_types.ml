@@ -73,16 +73,16 @@ let inject_default_agent_name ~(worker_name : string)
   | _ -> args
 
 let extract_prompt_block ~start_marker ~end_marker (text : string) =
-  let start_re = Re.str start_marker |> Re.compile in
-  let end_re = Re.str end_marker |> Re.compile in
-  match Re.exec_opt start_re text with
+  (* Markers are caller-supplied so we can't hoist; but they're literal
+     bytes, so a byte-wise [find_substring] is cheaper than building a
+     fresh DFA per call. *)
+  match String_util.find_substring text start_marker with
   | None -> None
-  | Some g ->
-    let start_idx = Re.Group.stop g 0 in
-    (match Re.exec_opt ~pos:start_idx end_re text with
+  | Some marker_pos ->
+    let start_idx = marker_pos + String.length start_marker in
+    (match String_util.find_substring ~pos:start_idx text end_marker with
     | None -> None
-    | Some g2 ->
-      let end_idx = Re.Group.start g2 0 in
+    | Some end_idx ->
       let raw = String.sub text start_idx (end_idx - start_idx) |> String.trim in
       if raw = "" then None else Some raw)
 

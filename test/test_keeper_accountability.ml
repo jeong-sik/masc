@@ -93,6 +93,50 @@ let append_accountability_event base_dir ~created_at json =
 let string_member key json = Yojson.Safe.Util.(json |> member key |> to_string)
 let int_member key json = Yojson.Safe.Util.(json |> member key |> to_int)
 let float_member key json = Yojson.Safe.Util.(json |> member key |> to_float)
+let bool_member key json = Yojson.Safe.Util.(json |> member key |> to_bool)
+
+let string_member_opt key json =
+  match Yojson.Safe.Util.(json |> member key) with
+  | `String value -> Some value
+  | _ -> None
+
+let read_jsonl_file path =
+  if not (Sys.file_exists path) then []
+  else
+    let ic = open_in path in
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr ic)
+      (fun () ->
+        let rows = ref [] in
+        (try
+           while true do
+             let line = input_line ic in
+             if String.trim line <> "" then
+               try rows := Yojson.Safe.from_string line :: !rows
+               with Yojson.Json_error _ -> ()
+           done
+         with End_of_file -> ());
+        List.rev !rows)
+
+let read_accountability_events base_dir =
+  let root = Filename.concat base_dir ".masc/accountability" in
+  let rec gather path =
+    if not (Sys.file_exists path) then []
+    else if Sys.is_directory path then
+      Sys.readdir path
+      |> Array.to_list
+      |> List.concat_map (fun child -> gather (Filename.concat path child))
+    else if Filename.check_suffix path ".jsonl" then
+      read_jsonl_file path
+    else
+      []
+  in
+  gather root
+
+let append_decision_log_event config keeper_name json =
+  let path = Keeper_types.keeper_decision_log_path config keeper_name in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  append_jsonl path json
 
 let test_same_turn_evidence_marks_claim_supported () =
   with_room (fun config ->
@@ -355,6 +399,69 @@ let test_task_transition_normalizes_keeper_name_in_history () =
       check string "history keeper_name is canonical" "sangsu"
         (string_member "keeper_name" first))
 
+let test_task_transition_resolution_rows_include_identity () =
+  with_room ~agent_name:"keeper-sangsu-agent" (fun config ->
+      Keeper_accountability.record_task_transition config
+        ~agent_name:"keeper-sangsu-agent" ~task_id:"task-resolution"
+        ~transition:Types.Claim ~details:(`Assoc []);
+      Keeper_accountability.record_task_transition config
+        ~agent_name:"keeper-sangsu-agent" ~task_id:"task-resolution"
+        ~transition:Types.Done_action ~details:(`Assoc []);
+      let resolution =
+        read_accountability_events config.base_path
+        |> List.find_opt (fun json ->
+               string_member_opt "event_type" json = Some "claim_resolved")
+      in
+      match resolution with
+      | None -> Alcotest.fail "expected claim_resolved row"
+      | Some row ->
+          check string "resolution agent_name" "keeper-sangsu-agent"
+            (string_member "agent_name" row);
+          check string "resolution keeper_name" "sangsu"
+            (string_member "keeper_name" row);
+          check string "resolution task_id" "task-resolution"
+            (string_member "task_id" row);
+          check string "resolution kind" "task_commitment"
+            (string_member "kind" row);
+          check string "resolution subject" "task-resolution"
+            (string_member "subject" row))
+
+let test_recent_decision_without_claim_exposes_coverage_gap () =
+  with_room ~agent_name:"keeper-sangsu-agent" (fun config ->
+      let now = Unix.gettimeofday () in
+      append_decision_log_event config "sangsu"
+        (`Assoc
+           [
+             ("id", `String "decision-active-no-accountability");
+             ("ts", `String (iso_of_unix now));
+             ("ts_unix", `Float now);
+             ("keeper_name", `String "sangsu");
+             ("agent_name", `String "keeper-sangsu-agent");
+             ("outcome", `String "success");
+             ("tools_used", `List [ `String "keeper_task_claim" ]);
+           ]);
+      let summary =
+        Keeper_accountability.accountability_summary_json config
+          ~keeper_name:"sangsu" ~agent_name:"keeper-sangsu-agent"
+      in
+      check string "summary source still no accountability history" "none"
+        (string_member "source" summary);
+      check string "coverage health" "coverage_gap"
+        (string_member "coverage_health" summary);
+      check bool "coverage gap" true (bool_member "coverage_gap" summary);
+      check string "coverage reason"
+        "recent_decisions_without_accountability_claims"
+        (string_member "coverage_gap_reason" summary);
+      check string "routing hint" "accountability_coverage_gap_review"
+        (string_member "routing_hint" summary);
+      check string "source label mentions decision activity"
+        "No accountability history; recent decision activity exists"
+        (string_member "source_label" summary);
+      check int "decision signal count" 1
+        (int_member "decision_signal_count" summary);
+      check int "claim count" 0
+        (int_member "accountability_claim_count" summary))
+
 let test_unmapped_alias_exposes_no_history_source () =
   with_room ~agent_name:"orphan-eager-viper" (fun config ->
       let summary =
@@ -366,6 +473,10 @@ let test_unmapped_alias_exposes_no_history_source () =
       check string "unmapped alias source label"
         "No accountability history"
         (string_member "source_label" summary);
+      check string "unmapped alias coverage health" "no_recent_activity"
+        (string_member "coverage_health" summary);
+      check bool "unmapped alias coverage gap" false
+        (bool_member "coverage_gap" summary);
       check string "unmapped alias risk remains low" "low"
         (string_member "risk_band" summary);
       let rep =
@@ -703,6 +814,10 @@ let () =
             test_direct_agent_history_exposes_direct_source;
           test_case "task transition canonicalizes keeper name in history"
             `Quick test_task_transition_normalizes_keeper_name_in_history;
+          test_case "task transition resolution rows include identity"
+            `Quick test_task_transition_resolution_rows_include_identity;
+          test_case "recent decision without claim exposes coverage gap"
+            `Quick test_recent_decision_without_claim_exposes_coverage_gap;
           test_case "unmapped alias exposes no-history source" `Quick
             test_unmapped_alias_exposes_no_history_source;
           test_case "claim tool exposes routing warning for high risk keeper"

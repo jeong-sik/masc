@@ -9,6 +9,18 @@ let files_changed_re = Re.Pcre.re {|\b(\d+) file|} |> Re.compile
 let insertions_re = Re.Pcre.re {|\b(\d+) insertion|} |> Re.compile
 let deletions_re = Re.Pcre.re {|\b(\d+) deletion|} |> Re.compile
 
+(* --- pytest summary counters: prefix set is closed (passed/failed/error/
+   skipped), so build the four DFAs once at module init instead of per line.
+   Using exec_opt means the prior execp+exec double-compile is also gone. *)
+let pytest_passed_re = Re.Pcre.re {|(\d+) passed|} |> Re.compile
+let pytest_failed_re = Re.Pcre.re {|(\d+) failed|} |> Re.compile
+let pytest_error_re = Re.Pcre.re {|(\d+) error|} |> Re.compile
+let pytest_skipped_re = Re.Pcre.re {|(\d+) skipped|} |> Re.compile
+
+(* --- cargo test result line counters --- *)
+let cargo_passed_re = Re.Pcre.re {|(\d+) passed|} |> Re.compile
+let cargo_failed_re = Re.Pcre.re {|(\d+) failed|} |> Re.compile
+
 (* --- git status --porcelain --- *)
 
 let parse_git_status_porcelain output =
@@ -273,32 +285,22 @@ let parse_pytest output =
       if String.length l < 5 then ()
       else
         (* Summary line: "X passed, Y failed, Z errors, W skipped" *)
-        let extract_count prefix =
-          match Re.execp (Re.compile (Re.Pcre.re
-            (Printf.sprintf "(\\d+) %s" prefix))) l with
-          | true ->
-              (match Re.exec (Re.compile (Re.Pcre.re
-                (Printf.sprintf "(\\d+) %s" prefix))) l with
-               | exception _ -> ()
-               | m ->
-                   match int_of_string_opt (Re.Group.get m 1) with
-                   | Some n ->
-                       if prefix = "passed" then passed := n
-                       else if prefix = "failed" then failed := n
-                       else if prefix = "error" then errors := n
-                       else if prefix = "skipped" then skipped := n
-                       else ()
-                   | None -> ())
-          | false -> ()
+        let extract_count re slot =
+          match Re.exec_opt re l with
+          | None -> ()
+          | Some m ->
+              (match int_of_string_opt (Re.Group.get m 1) with
+               | Some n -> slot := n
+               | None -> ())
         in
         if String_util.contains_substring l "passed"
            || String_util.contains_substring l "failed"
            || String_util.contains_substring l "error"
         then begin
-          extract_count "passed";
-          extract_count "failed";
-          extract_count "error";
-          extract_count "skipped"
+          extract_count pytest_passed_re passed;
+          extract_count pytest_failed_re failed;
+          extract_count pytest_error_re errors;
+          extract_count pytest_skipped_re skipped
         end)
     lines;
   let total = !passed + !failed + !errors + !skipped in
@@ -321,15 +323,15 @@ let parse_cargo_test output =
       if String_util.contains_substring l "test result:" then begin
         (* "test result: ok. X passed; 0 failed; ..." *)
         let extract re =
-          match Re.exec (Re.compile (Re.Pcre.re re)) l with
-          | exception _ -> 0
-          | m ->
+          match Re.exec_opt re l with
+          | None -> 0
+          | Some m ->
               match int_of_string_opt (Re.Group.get m 1) with
               | Some n -> n
               | None -> 0
         in
-        passed := !passed + extract "(\\d+) passed";
-        failed := !failed + extract "(\\d+) failed"
+        passed := !passed + extract cargo_passed_re;
+        failed := !failed + extract cargo_failed_re
       end)
     lines;
   let total = !passed + !failed in

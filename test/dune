@@ -54,6 +54,7 @@
         test_keeper_hooks_oas_provider
         test_keeper_hooks_oas_pricing
         test_keeper_hooks_oas_telemetry
+        test_agent_stress
         test_keeper_tool_use_failure_counter
         test_keeper_compaction_outcome_counter
         test_keeper_usage_trust_counter
@@ -194,6 +195,7 @@
           test_keeper_hooks_oas_provider
           test_keeper_hooks_oas_pricing
           test_keeper_hooks_oas_telemetry
+          test_agent_stress
           test_keeper_tool_use_failure_counter
           test_keeper_compaction_outcome_counter
           test_keeper_usage_trust_counter
@@ -692,6 +694,7 @@
         test_eval_calibration
         test_goal_janitor
         test_goal_tools
+        test_goal_upsert_fsm_bypass_10247
         test_goal_store
         test_goal_verification
         test_string_util
@@ -868,6 +871,7 @@
         test_eval_calibration
         test_goal_janitor
         test_goal_tools
+        test_goal_upsert_fsm_bypass_10247
         test_goal_store
         test_goal_verification
         test_string_util

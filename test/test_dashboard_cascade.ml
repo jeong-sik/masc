@@ -485,7 +485,8 @@ let test_provider_status_transitions () =
   let info_cooldown : Masc_mcp.Cascade_health_tracker.provider_info =
     { provider_key = "x"; success_rate = 0.0; consecutive_failures = 3
     ; in_cooldown = true; cooldown_expires_at = Some 1.0
-    ; events_in_window = 5; rejected_in_window = 5 }
+    ; events_in_window = 5; rejected_in_window = 5
+    ; top_fingerprints = []; last_failure_at = None }
   in
   let info_active : Masc_mcp.Cascade_health_tracker.provider_info =
     { info_cooldown with in_cooldown = false; consecutive_failures = 0

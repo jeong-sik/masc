@@ -60,26 +60,38 @@ let with_cache_state preview cache_state =
   | `Assoc fields -> `Assoc (assoc_upsert fields "cache_state" (`String cache_state))
   | _ -> preview
 
+(* Static replacement table — both the entity needles and the
+   compiled regexes are fixed.  Old form rebuilt 7 [Re.t] DFAs per
+   [decode_html_entities] call; on a meta-rich page [normalize_text]
+   fires per [meta_content]/[link_href] hit, so a typical preview
+   parse paid dozens of unnecessary compilations. *)
+let html_entity_replacements =
+  [
+    ("&amp;", "&");
+    ("&quot;", "\"");
+    ("&#39;", "'");
+    ("&apos;", "'");
+    ("&lt;", "<");
+    ("&gt;", ">");
+    ("&nbsp;", " ");
+  ]
+  |> List.map (fun (needle, replacement) ->
+       (Re.compile (Re.str needle), replacement))
+
 let decode_html_entities value =
-  let replacements =
-    [
-      ("&amp;", "&");
-      ("&quot;", "\"");
-      ("&#39;", "'");
-      ("&apos;", "'");
-      ("&lt;", "<");
-      ("&gt;", ">");
-      ("&nbsp;", " ");
-    ]
-  in
   List.fold_left
-    (fun acc (needle, replacement) ->
-      Re.replace_string (Re.compile (Re.str needle)) ~all:true ~by:replacement acc)
-    value replacements
+    (fun acc (re, replacement) ->
+      Re.replace_string re ~all:true ~by:replacement acc)
+    value html_entity_replacements
+
+(* Static whitespace-collapse PCRE, hoisted out of the per-call hot
+   path that runs once per normalised meta value. *)
+let whitespace_collapse_re =
+  Re.Pcre.re "[ \t\r\n]+" |> Re.compile
 
 let collapse_whitespace value =
   value
-  |> Re.replace_string (Re.Pcre.re "[ \t\r\n]+" |> Re.compile) ~all:true ~by:" "
+  |> Re.replace_string whitespace_collapse_re ~all:true ~by:" "
   |> String.trim
 
 let normalize_text value =
@@ -178,21 +190,48 @@ let infer_image_url url =
   let lower = String.lowercase_ascii url in
   List.exists (fun ext -> Filename.check_suffix lower ext) image_extensions
 
+(* Static [<head>...</head>] extractor — every link-preview parse hit
+   the per-call [Re.compile] before this hoist. *)
+let head_fragment_re =
+  Re.Pcre.re ~flags:[ `CASELESS; `DOTALL ] "<head[^>]*>(.*?)</head>"
+  |> Re.compile
+
 let first_head_fragment body =
-  let re =
-    Re.Pcre.re ~flags:[ `CASELESS; `DOTALL ] "<head[^>]*>(.*?)</head>"
-    |> Re.compile
-  in
-  match Re.exec_opt re body with
-  | Some groups ->
-      Re.Group.get groups 1
+  match Re.exec_opt head_fragment_re body with
+  | Some groups -> Re.Group.get groups 1
+  | None -> String.sub body 0 (min (String.length body) max_html_chars)
+
+(* Pattern cache for [first_match].  Patterns are constructed dynamically
+   per call site (via [Printf.sprintf] inside [meta_content]/[link_href])
+   but the [attr]/[key]/[rel_value] inputs are drawn from a fixed
+   OG/Twitter/HTML vocabulary, so the unique-pattern set across a process
+   lifetime is ≤30.  Caching collapses repeat link-preview calls to a
+   single PCRE compile per distinct pattern.
+
+   [Stdlib.Mutex] (not [Eio.Mutex]) is correct here: the dashboard HTTP
+   handler may run across multiple Eio domains, and we never block
+   inside the critical section.  The compile itself happens outside the
+   lock — [Re.compile] is pure, so a racing duplicate compile is
+   harmless: both fibers produce structurally identical [Re.re] values
+   and last-writer-wins gives the same observable result. *)
+let pattern_cache : (string, Re.re) Hashtbl.t = Hashtbl.create 32
+let pattern_cache_mu = Mutex.create ()
+
+let get_or_compile_pattern pattern =
+  Mutex.lock pattern_cache_mu;
+  let cached = Hashtbl.find_opt pattern_cache pattern in
+  Mutex.unlock pattern_cache_mu;
+  match cached with
+  | Some re -> re
   | None ->
-      String.sub body 0 (min (String.length body) max_html_chars)
+    let re = Re.Pcre.re ~flags:[ `CASELESS; `DOTALL ] pattern |> Re.compile in
+    Mutex.lock pattern_cache_mu;
+    Hashtbl.replace pattern_cache pattern re;
+    Mutex.unlock pattern_cache_mu;
+    re
 
 let first_match body pattern =
-  let re =
-    Re.Pcre.re ~flags:[ `CASELESS; `DOTALL ] pattern |> Re.compile
-  in
+  let re = get_or_compile_pattern pattern in
   match Re.exec_opt re body with
   | Some groups -> normalize_text (Re.Group.get groups 1)
   | None -> None

@@ -1785,10 +1785,10 @@ let run_turn
         | None ->
             (* #10049 Option C: auto-construct from the keeper bearer
                token + server host/port when env is unset. Gated
-               behind MASC_AUTO_CONSTRUCT_CLAUDE_MCP (default false) so
-               the existing explicit-env path stays unchanged until
-               operators opt in. Returns [None] when the flag is off
-               or the token file is missing — the Log.Keeper.warn
+               behind MASC_AUTO_CONSTRUCT_CLAUDE_MCP (default true). The
+               existing explicit-env path still wins, and operators can opt
+               out by setting the flag false. Returns [None] when the flag
+               is off or the token file is missing — the Log.Keeper.warn
                above (iter 10052) still fires for visibility. *)
             Keeper_cli_mcp_config.try_construct_for_keeper
               ~base_path:config.base_path

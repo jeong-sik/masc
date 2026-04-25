@@ -712,19 +712,31 @@ let permission_for_tool tool_name =
 let is_tool_auth_strict_enabled () =
   Env_config_core.tool_auth_strict ()
 
-let is_masc_tool_name tool_name =
-  String.starts_with ~prefix:"masc_" tool_name
+(* #10205 finding 1: SSOT for the internal-tool prefix vocabulary.
+   Adding a new internal namespace (e.g. [foo.]) was previously a
+   two-predicate edit ([is_masc_tool_name] +
+   [is_protocol_canonical_tool_name]) glued by a [||] chain at the
+   call site.  Keep the prefixes in one list so the next addition
+   is a single edit; predicate identity does not matter to callers,
+   which only consume {!is_unmapped_internal_tool_name}.
 
-let is_protocol_canonical_tool_name tool_name =
-  String.starts_with ~prefix:"decision." tool_name
-  || String.starts_with ~prefix:"experiment." tool_name
-  || String.starts_with ~prefix:"client." tool_name
+   Keeper runtime tools are NOT a prefix: a [keeper_*] prefix
+   alone is not enough to cross auth — the catalog must own the
+   tool.  That check stays separate. *)
+let internal_tool_prefixes = [
+  "masc_";
+  "decision.";
+  "experiment.";
+  "client.";
+]
 
-(* Keeper runtime tools are internal only when the catalog owns
-   them; a [keeper_*] prefix alone is not enough to cross auth. *)
+let has_internal_tool_prefix tool_name =
+  List.exists
+    (fun pref -> String.starts_with ~prefix:pref tool_name)
+    internal_tool_prefixes
+
 let is_unmapped_internal_tool_name tool_name =
-  is_masc_tool_name tool_name
-  || is_protocol_canonical_tool_name tool_name
+  has_internal_tool_prefix tool_name
   || Tool_catalog.is_on_surface Tool_catalog.Keeper_internal tool_name
 
 let unknown_tool_class tool_name =

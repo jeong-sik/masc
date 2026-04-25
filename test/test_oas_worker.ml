@@ -2086,7 +2086,15 @@ let test_public_mcp_runtime_policy_binds_keeper_internal_headers () =
       | _ -> Alcotest.fail "expected single masc runtime server")
   | None -> Alcotest.fail "expected public MCP runtime policy"
 
-let test_runtime_mcp_policy_for_provider_skips_codex_cli_header_injection () =
+let test_runtime_mcp_policy_for_provider_codex_cli_preserves_identity_header () =
+  (* PR-F (Plan v3 Leak 2a): Codex CLI runtime MCP rejects most
+     per-request HTTP headers, but the masc HTTP server still needs the
+     keeper's identity to avoid collapsing to find_credential_by_token's
+     alphabetical first-match (#9786 root cause).  This regression test
+     pins the new behavior:
+     - x-masc-agent-name MUST be preserved (pre-PR-F was None).
+     - Authorization is still stripped for Codex CLI compatibility.
+     - openai-compat path is unchanged. *)
   let policy =
     {
       Llm_provider.Llm_transport.empty_runtime_mcp_policy with
@@ -2128,14 +2136,65 @@ let test_runtime_mcp_policy_for_provider_skips_codex_cli_header_injection () =
   in
   match codex_headers, openai_headers with
   | Some codex_headers, Some openai_headers ->
-      Alcotest.(check (option string)) "codex_cli skips agent header" None
+      Alcotest.(check (option string))
+        "codex_cli now preserves agent identity header (PR-F)"
+        (Some "keeper-sangsu-agent")
         (List.assoc_opt "x-masc-agent-name" codex_headers);
-      Alcotest.(check (option string)) "codex_cli strips bearer header" None
+      Alcotest.(check (option string))
+        "codex_cli also preserves keeper-name header (PR-F)"
+        (Some "sangsu")
+        (List.assoc_opt "x-masc-keeper-name" codex_headers);
+      Alcotest.(check (option string))
+        "codex_cli still strips bearer/auth header"
+        None
         (List.assoc_opt "Authorization" codex_headers);
       Alcotest.(check (option string)) "openai_compat still injects agent header"
         (Some "keeper-sangsu-agent")
         (List.assoc_opt "x-masc-agent-name" openai_headers)
   | _ -> Alcotest.fail "expected masc runtime server headers"
+
+let test_runtime_mcp_policy_for_provider_codex_cli_no_agent_strips_all () =
+  (* PR-F regression: when the caller has no agent_name to inject,
+     fall back to the legacy strip-all behavior so existing
+     ambient-env auth flows remain unaffected. *)
+  let policy =
+    {
+      Llm_provider.Llm_transport.empty_runtime_mcp_policy with
+      servers =
+        [
+          Llm_provider.Llm_transport.Http_server
+            { name = "masc"; url = "http://127.0.0.1:8947/mcp";
+              headers = [ ("Authorization", "Bearer xxx") ] };
+        ];
+      allowed_server_names = [ "masc" ];
+      allowed_tool_names = [ "masc_status" ];
+      strict = true;
+      disable_builtin_tools = true;
+    }
+  in
+  let find_masc_headers policy_opt =
+    match policy_opt with
+    | None -> Alcotest.fail "expected runtime MCP policy"
+    | Some (policy : Llm_provider.Llm_transport.runtime_mcp_policy) ->
+        List.find_map
+          (function
+            | Llm_provider.Llm_transport.Http_server server
+              when String.equal server.name "masc" -> Some server.headers
+            | _ -> None)
+          policy.servers
+  in
+  let result =
+    find_masc_headers
+      (Oas_worker_exec.runtime_mcp_policy_for_provider
+         ~provider_cfg:(make_codex_cli_provider_cfg ())
+         ~agent_name:""
+         (Some policy))
+  in
+  match result with
+  | Some headers ->
+      Alcotest.(check int) "no agent_name -> all headers stripped" 0
+        (List.length headers)
+  | None -> Alcotest.fail "expected masc runtime server headers"
 
 let test_kimi_cli_runtime_mcp_jsons_include_request_policy () =
   let policy =
@@ -3683,8 +3742,10 @@ let () =
         test_runtime_mcp_policy_with_masc_agent_name_prefers_internal_keeper_token;
       Alcotest.test_case "public MCP policy binds keeper internal headers" `Quick
         test_public_mcp_runtime_policy_binds_keeper_internal_headers;
-      Alcotest.test_case "provider-aware runtime MCP policy skips codex_cli agent header injection" `Quick
-        test_runtime_mcp_policy_for_provider_skips_codex_cli_header_injection;
+      Alcotest.test_case "provider-aware runtime MCP policy preserves codex_cli identity header (PR-F)" `Quick
+        test_runtime_mcp_policy_for_provider_codex_cli_preserves_identity_header;
+      Alcotest.test_case "provider-aware runtime MCP policy strips all when codex_cli has no agent_name" `Quick
+        test_runtime_mcp_policy_for_provider_codex_cli_no_agent_strips_all;
       Alcotest.test_case "kimi request runtime MCP config is merged" `Quick
         test_kimi_cli_runtime_mcp_jsons_include_request_policy;
       Alcotest.test_case "kimi argv includes request runtime MCP config" `Quick

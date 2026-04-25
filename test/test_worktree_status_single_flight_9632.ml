@@ -2,8 +2,8 @@
     a TTL cache but no single-flight gate, so N keepers + dashboard
     fibers hitting an expired cache simultaneously each fork+exec
     [git status --porcelain].  The resulting I/O contention pushed
-    individual git invocations past the 15s timeout budget on
-    [/Users/dancer/me] with 64 worktrees and a Second Brain working tree.
+    individual git invocations past the 15s timeout budget on a large
+    local workspace with many worktrees.
 
     These tests pin the per-repo single-flight contract:
 
@@ -23,9 +23,21 @@ module Wlc = Masc_mcp.Worktree_live_context
 (* Helpers ---------------------------------------------------------- *)
 
 let run_concurrent ~workers (f : int -> unit) =
+  let ready = Atomic.make 0 in
+  let go = Atomic.make false in
   let domains =
-    List.init workers (fun idx -> Domain.spawn (fun () -> f idx))
+    List.init workers (fun idx ->
+      Domain.spawn (fun () ->
+        ignore (Atomic.fetch_and_add ready 1);
+        while not (Atomic.get go) do
+          Domain.cpu_relax ()
+        done;
+        f idx))
   in
+  while Atomic.get ready < workers do
+    Domain.cpu_relax ()
+  done;
+  Atomic.set go true;
   List.iter Domain.join domains
 
 let with_hook ~hook k =
@@ -75,14 +87,32 @@ let test_concurrent_misses_same_repo_collapse_to_one_git_call () =
 
 let test_distinct_repos_do_not_serialise () =
   reset ();
-  (* Each repo's hook records its own call count.  A correct per-repo
-     gate lets the two captures execute concurrently; a single global
-     gate would force them sequentially.  We don't time the test (timing
-     is flaky on CI), we just assert each repo had exactly one capture. *)
+  (* Each repo's hook records its own call count and overlap. A correct
+     per-repo gate lets repo A and repo B execute concurrently; a single
+     global gate would keep [max_active] at 1. *)
   let calls_a = Atomic.make 0 in
   let calls_b = Atomic.make 0 in
+  let active = Atomic.make 0 in
+  let max_active = Atomic.make 0 in
+  let enter_capture () =
+    let now_active = Atomic.fetch_and_add active 1 + 1 in
+    let rec update_max () =
+      let current = Atomic.get max_active in
+      if now_active > current then
+        if not (Atomic.compare_and_set max_active current now_active) then
+          update_max ()
+    in
+    update_max ()
+  in
+  let leave_capture () =
+    ignore (Atomic.fetch_and_add active (-1))
+  in
   let hook ~workdir args =
     let _ = args in
+    enter_capture ();
+    Fun.protect
+      ~finally:leave_capture
+      (fun () ->
     if String.equal workdir "/tmp/repo-A" then begin
       Atomic.incr calls_a;
       Unix.sleepf 0.02;
@@ -91,7 +121,7 @@ let test_distinct_repos_do_not_serialise () =
       Atomic.incr calls_b;
       Unix.sleepf 0.02;
       Some [ " M b.ml" ]
-    end
+    end)
   in
   with_hook ~hook (fun () ->
     let workers = 8 in
@@ -100,7 +130,8 @@ let test_distinct_repos_do_not_serialise () =
       let _ = Wlc.current_status_lines ~repo_root:repo in
       ());
     check int "repo A captured once" 1 (Atomic.get calls_a);
-    check int "repo B captured once" 1 (Atomic.get calls_b))
+    check int "repo B captured once" 1 (Atomic.get calls_b);
+    check int "distinct repos captured concurrently" 2 (Atomic.get max_active))
 
 (* 3. Cache TTL still respected after single-flight returns --------- *)
 

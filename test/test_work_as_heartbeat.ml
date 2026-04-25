@@ -131,11 +131,11 @@ let test_oas_timeout_is_token_independent () =
 let test_oas_timeout_cap () =
   let v = adaptive ~estimated_input_tokens:1_000_000 in
   check (float 0.1)
-    "1M estimated input tokens → capped at turn timeout 1200"
+    "1M estimated input tokens → capped at turn_timeout_sec"
     turn_cap v
 
 let test_turn_timeout_default () =
-  check (float 0.1) "default turn timeout 1200s" 1200.0
+  check (float 0.1) "default turn timeout 3600s" 3600.0
     Cfg.KeeperKeepalive.turn_timeout_sec
 
 let test_max_turns_default () =
@@ -382,7 +382,7 @@ let () =
         test_oas_timeout_zero_uses_wall_clock;
       test_case "budget is token-count independent (#10008 fm2)" `Quick
         test_oas_timeout_is_token_independent;
-      test_case "turn timeout default is 1200" `Quick test_turn_timeout_default;
+      test_case "turn timeout default is 3600" `Quick test_turn_timeout_default;
       test_case "adaptive capped at turn timeout" `Quick test_oas_timeout_cap;
       test_case "max_turns default is 30" `Quick test_max_turns_default;
       test_case "scheduled autonomous max_turns default is 10" `Quick

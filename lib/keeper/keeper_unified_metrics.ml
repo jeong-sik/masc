@@ -223,6 +223,11 @@ let record_turn_latency_by_model_bucket
 
 let usage_trust_is_trusted = Keeper_usage_trust.is_trusted
 
+let estimate_trusted_usage_cost_usd ~usage_trusted ~model usage =
+  if usage_trusted then
+    Keeper_hooks_oas.estimate_usage_cost_usd ~model usage
+  else 0.0
+
 let usage_trust_to_string = Keeper_usage_trust.to_string
 
 let usage_trust_reasons = Keeper_usage_trust.reasons
@@ -958,12 +963,10 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
      L6 (strip_latest model ID parsing) boundary violations. See #5626. *)
   let used_model_id = surface_model_used in
   let turn_cost =
-    if usage_trusted then
-      let pricing = Llm_provider.Pricing.pricing_for_model used_model_id in
-      Llm_provider.Pricing.estimate_cost ~pricing
-        ~input_tokens:result.usage.input_tokens
-        ~output_tokens:result.usage.output_tokens ()
-    else 0.0
+    estimate_trusted_usage_cost_usd
+      ~usage_trusted
+      ~model:used_model_id
+      result.usage
   in
   let substantive_tool_call_count =
     result.tools_used

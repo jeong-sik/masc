@@ -81,6 +81,11 @@ val fairness_delay_sec_at : now:float -> keeper_name:string -> float
     ever running a turn. *)
 val smart_heartbeat_cycle_continues : Heartbeat_smart.decision -> bool
 
+val status_tick_usage_json : unit -> Yojson.Safe.t
+(** Usage payload for heartbeat/status metrics rows.  Status ticks are not
+    LLM calls, so all per-turn token counters are explicit zeroes while
+    preserving the same cache-token field shape as turn snapshots. *)
+
 (** Test-only: stamp a completion time directly (bypasses [Time_compat.now]).
     Use to set up deterministic fairness-cooldown scenarios. *)
 val record_autonomous_completion_at_for_test : keeper_name:string -> ts:float -> unit

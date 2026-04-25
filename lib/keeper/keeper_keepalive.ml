@@ -38,6 +38,16 @@ let board_reactive_debounce_sec = Env_config.KeeperKeepalive.board_debounce_sec
 let max_history_read_bytes = 256 * 1024
 let max_history_read_lines = 200
 
+let status_tick_usage_json () =
+  `Assoc
+    [
+      ("input_tokens", `Int 0);
+      ("output_tokens", `Int 0);
+      ("cache_creation_tokens", `Int 0);
+      ("cache_read_tokens", `Int 0);
+      ("total_tokens", `Int 0);
+    ]
+
 (* OAS Event_bus — delegated to Keeper_event_bus to avoid dependency cycles. *)
 let set_bus bus = Keeper_event_bus.set bus
 let get_bus () = Keeper_event_bus.get ()
@@ -988,13 +998,7 @@ let write_heartbeat_snapshot
              inflated by ~heartbeat-count per turn. Same "snapshot vs
              event" boundary fix as #9950 for compaction fields.
              [total_cost_usd] is a running total and remains emitted. *)
-          ( "usage"
-          , `Assoc
-              [ "input_tokens", `Int 0
-              ; "output_tokens", `Int 0
-              ; "total_tokens", `Int 0
-              ]
-          )
+          "usage", status_tick_usage_json ()
         ; "latency_ms", `Int 0
         ; "cost_usd", `Float meta_current.runtime.usage.total_cost_usd
         ; "context_ratio", `Float context_ratio_v

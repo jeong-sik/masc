@@ -58,12 +58,10 @@ let turn_cost_for_result ~(meta : keeper_meta)
       ~context_max:0
   in
   if Keeper_unified_metrics.usage_trust_is_trusted usage_trust then
-    let pricing =
-      Llm_provider.Pricing.pricing_for_model resolved_model_id
-    in
-    Llm_provider.Pricing.estimate_cost ~pricing
-      ~input_tokens:result.usage.input_tokens
-      ~output_tokens:result.usage.output_tokens ()
+    Keeper_unified_metrics.estimate_trusted_usage_cost_usd
+      ~usage_trusted:true
+      ~model:resolved_model_id
+      result.usage
   else 0.0
 
 let update_direct_turn_meta (meta : keeper_meta) ~(latency_ms : int)

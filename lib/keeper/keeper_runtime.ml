@@ -202,28 +202,63 @@ let ensure_keeper_meta config name =
     let target_cascade_name =
       effective_declarative_cascade_name defaults meta
     in
+    let cascade_field_and_value () =
+      let field =
+        match defaults.cascade_name, defaults.manifest_path with
+        | Some _, _ -> "profile.cascade_name"
+        | None, Some _ -> "manifest.default_cascade_name"
+        | None, None -> "meta.cascade_name"
+      in
+      let raw_value =
+        match defaults.cascade_name, defaults.manifest_path with
+        | Some cascade_name, _ -> cascade_name
+        | None, Some _ -> Keeper_config.default_cascade_name
+        | None, None -> meta.cascade_name
+      in
+      (field, raw_value)
+    in
     match
       Cascade_catalog_runtime.resolve_declared_name
         ~raw_name:target_cascade_name
         ()
     with
     | Error detail ->
-        let field =
-          match defaults.cascade_name, defaults.manifest_path with
-          | Some _, _ -> "profile.cascade_name"
-          | None, Some _ -> "manifest.default_cascade_name"
-          | None, None -> "meta.cascade_name"
-        in
-        let raw_value =
-          match defaults.cascade_name, defaults.manifest_path with
-          | Some cascade_name, _ -> cascade_name
-          | None, Some _ -> Keeper_config.default_cascade_name
-          | None, None -> meta.cascade_name
-        in
+        let field, raw_value = cascade_field_and_value () in
         let msg =
           Printf.sprintf
             "invalid %s %S for keeper %s: %s"
             field raw_value meta.name detail
+        in
+        Log.Keeper.error "%s" msg;
+        Error msg
+    | Ok resolved_target_cascade_name
+      when Keeper_cascade_profile.is_system_only_cascade
+             resolved_target_cascade_name ->
+        (* #10388: cascade.toml marks the profile as
+           [keeper_assignable=false] (system-only).  Pre-fix the
+           keeper would still bind to it and fail downstream
+           — visible as either a silent fall-through, a generic
+           "active cascade source could not be loaded" error, or
+           a 19-min ollama wall — depending on which layer
+           tripped first.  Reject up-front with an explicit
+           reason so config drift surfaces at bootstrap rather
+           than after a fleet-cycle worth of accumulated ERRORs. *)
+        let field, raw_value = cascade_field_and_value () in
+        Prometheus.inc_counter
+          Prometheus.metric_keeper_cascade_assignment_rejection
+          ~labels:
+            [ ("keeper", meta.name);
+              ("cascade", resolved_target_cascade_name);
+              ("reason", "system_only");
+            ]
+          ();
+        let msg =
+          Printf.sprintf
+            "invalid %s %S for keeper %s: cascade %S is marked \
+             keeper_assignable=false in cascade.toml \
+             (system-only — reserved for governance_judge / \
+             operator_judge style internal cascades)"
+            field raw_value meta.name resolved_target_cascade_name
         in
         Log.Keeper.error "%s" msg;
         Error msg

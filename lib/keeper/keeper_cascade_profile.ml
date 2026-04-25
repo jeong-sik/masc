@@ -168,9 +168,9 @@ let catalog_names_with_toml_fallback ?config_path () =
                     also failed: %s"
                    catalog_error toml_error)))
 
-let is_system_only_cascade raw =
+let is_system_only_cascade ?config_path raw =
   let name = String.trim raw in
-  match catalog_entries () with
+  match catalog_entries ?config_path () with
   | None -> false
   | Some entries ->
       List.exists

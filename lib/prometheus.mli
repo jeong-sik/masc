@@ -134,6 +134,12 @@ val metric_keeper_compaction_saved_tokens : string
     triggers rather than savings.  Labels: [keeper, trigger]. *)
 val metric_keeper_compaction_noop : string
 
+(** #10388: counter incremented when the keeper bootstrap
+    rejects [cascade_name] because the cascade.toml profile is
+    marked [keeper_assignable=false] (system-only).  Labels:
+    [keeper, cascade, reason="system_only"]. *)
+val metric_keeper_cascade_assignment_rejection : string
+
 val metric_keeper_operator_compact : string
 val metric_keeper_operator_clear : string
 val metric_keeper_heartbeat_successes : string

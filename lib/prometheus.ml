@@ -341,6 +341,22 @@ let metric_keeper_operator_clear = "masc_keeper_operator_clear_total"
 let metric_keeper_compaction_noop =
   "masc_keeper_compaction_noop_total"
 
+(* #10388: counter for keeper bootstrap rejections caused by
+   declarative cascade-config drift between [config/keepers/*.toml]
+   (which set [cascade_name]) and [config/cascade.toml] (which
+   marks profiles as [keeper_assignable=true|false]).  Pre-fix
+   four keepers (masc-improver, sangsu, ramarama, ollama-local)
+   pointed at system-only cascades and produced ~144 cascade-
+   related ERRORs/day (~33.7% of fleet ERROR) via mixed
+   downstream paths.  Surfacing as an explicit counter labelled
+   [keeper, cascade, reason] makes the config-drift class
+   observable and forces the bootstrap to fail-fast on next
+   run.  Reason vocabulary kept narrow so cardinality stays
+   bounded:
+   - [system_only] — cascade marked [keeper_assignable=false]. *)
+let metric_keeper_cascade_assignment_rejection =
+  "masc_keeper_cascade_assignment_rejection_total"
+
 (* Keeper keepalive (keeper_keepalive.ml). *)
 let metric_keeper_heartbeat_successes =
   "masc_keeper_heartbeat_successes_total"

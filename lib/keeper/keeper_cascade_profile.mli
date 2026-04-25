@@ -110,9 +110,11 @@ val fallback_cascade_for : ?config_path:string -> string -> string option
 
     @since 0.174.0 *)
 
-val is_system_only_cascade : string -> bool
+val is_system_only_cascade : ?config_path:string -> string -> bool
 (** Exact-name membership check against the active config's
-    {!system_catalog_names}. *)
+    {!system_catalog_names}.  [?config_path] overrides the
+    resolver-derived path so unit tests can pin the contract
+    against a fixture cascade.toml. *)
 
 val canonicalize_with_catalog : catalog:string list -> string -> string
 (** Resolves dynamic profiles against an explicit live catalog. *)

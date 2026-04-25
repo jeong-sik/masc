@@ -159,6 +159,8 @@ val metric_grpc_heartbeat_latency : string
 val metric_grpc_subscribers : string
 val metric_grpc_events_delivered : string
 val metric_ws_sessions : string
+val metric_ws_parse_cache_hits : string
+val metric_ws_parse_cache_misses : string
 
 (** {1 Admission queue metrics} *)
 

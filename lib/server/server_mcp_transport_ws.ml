@@ -280,33 +280,75 @@ let dashboard_ack ~session_id ~seq =
               ("ack", `Int seq);
             ])
 
-let dashboard_delta_for_sse session sse_event =
-  match Yojson.Safe.from_string sse_event with
-  | exception _ -> None
-  | `Assoc fields as event_json -> (
-      match List.assoc_opt "type" fields with
-      | Some (`String event_type) -> (
-          match dashboard_slice_for_sse_type event_type with
-          | Some slice when Hashtbl.mem session.dashboard_slices slice ->
+(** Shape of an SSE event after dashboard-oriented parsing.
+    [slice] is [None] when the event does not map to a dashboard slice,
+    in which case delivery falls through to raw SSE forwarding. *)
+type parsed_sse_event = {
+  event_type: string;
+  slice: string option;
+  payload: Yojson.Safe.t;
+}
+
+(** Per-broadcast parse cache.
+
+    [Sse.notify_external_subscribers] passes the same [event: string]
+    reference to each subscriber callback in sequence, so consecutive
+    WS sessions all see the identical pointer for one broadcast.  Caching
+    the parse result keyed by physical equality collapses O(sessions)
+    JSON parses per event down to 1.
+
+    Correctness: on miss we parse and replace; no torn state is possible
+    (Atomic write is atomic).  A concurrent broadcast at worst wastes one
+    parse — it never yields a wrong result for a different [sse_event].
+    Physical equality is safe here because the snapshot loop holds the
+    event string alive for the duration of fanout. *)
+let parse_cache : (string * parsed_sse_event option) Atomic.t =
+  Atomic.make ("", None)
+
+let parse_sse_dashboard_event sse_event =
+  let cached_str, cached_val = Atomic.get parse_cache in
+  if cached_str == sse_event then begin
+    Transport_metrics.inc_ws_parse_cache_hit ();
+    cached_val
+  end
+  else begin
+    Transport_metrics.inc_ws_parse_cache_miss ();
+    let result =
+      match Yojson.Safe.from_string sse_event with
+      | exception _ -> None
+      | `Assoc fields as event_json -> (
+          match List.assoc_opt "type" fields with
+          | Some (`String event_type) ->
               let payload =
                 match List.assoc_opt "payload" fields with
                 | Some payload -> payload
                 | None -> event_json
               in
-              Some
-                (jsonrpc_notification "dashboard/delta"
-                   (`Assoc
-                     [
-                       ("protocol", `String "dashboard-ws.v1");
-                       ("seq", `Int (next_dashboard_seq session));
-                       ("slice", `String slice);
-                       ("event_type", `String event_type);
-                       ("mode", `String "snapshot");
-                       ("payload", payload);
-                       ("ts_unix", `Float (Time_compat.now ()));
-                     ]))
+              let slice = dashboard_slice_for_sse_type event_type in
+              Some { event_type; slice; payload }
           | _ -> None)
-      | _ -> None)
+      | _ -> None
+    in
+    Atomic.set parse_cache (sse_event, result);
+    result
+  end
+
+let dashboard_delta_for_sse session sse_event =
+  match parse_sse_dashboard_event sse_event with
+  | Some { event_type; slice = Some slice; payload }
+    when Hashtbl.mem session.dashboard_slices slice ->
+      Some
+        (jsonrpc_notification "dashboard/delta"
+           (`Assoc
+             [
+               ("protocol", `String "dashboard-ws.v1");
+               ("seq", `Int (next_dashboard_seq session));
+               ("slice", `String slice);
+               ("event_type", `String event_type);
+               ("mode", `String "snapshot");
+               ("payload", payload);
+               ("ts_unix", `Float (Time_compat.now ()));
+             ]))
   | _ -> None
 
 let send_dashboard_or_raw_sse session sse_event =

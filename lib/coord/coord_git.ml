@@ -27,14 +27,17 @@ let run_argv_line (argv : string list) : string option =
   | [] -> None
   | h :: _ -> Some h
 
-(** Run argv and return exit code. *)
-let run_argv_exit (argv : string list) : int =
+(** Run argv and return exit code.
+    [timeout_sec] defaults to 30s for local-only operations.  Network-
+    bound commands (git fetch / push) should pass an explicit longer
+    budget — see {!Env_config_core.git_fetch_timeout_sec}. *)
+let run_argv_exit ?(timeout_sec = 30.0) (argv : string list) : int =
   match
     Masc_exec.Exec_gate.run_argv_with_status
       ~actor:"coord/git"
       ~raw_source:(exec_gate_raw_source argv)
       ~summary:"coord_git argv"
-      ~timeout_sec:30.0
+      ~timeout_sec
       argv
   with
   | Unix.WEXITED n, _ -> n
@@ -179,8 +182,15 @@ let create ~base_path ~agent_name ~task_id ~base_branch : string masc_result =
             (Printf.sprintf "✅ Worktree already exists:\n  Path: %s\n  Branch: %s\n\nNext: cd %s"
                worktree_path branch_name worktree_path)
         else (
-          (* Fetch origin first; never create from a silently stale remote ref. *)
-          let fetch_exit = run_argv_exit ["git"; "-C"; root; "fetch"; "origin"] in
+          (* Fetch origin first; never create from a silently stale remote ref.
+             Use the longer git_fetch_timeout_sec budget — the default
+             30s rejected legitimately slow Docker-bridge fetches and
+             cold fetches on large remotes (#9587). *)
+          let fetch_exit =
+            run_argv_exit
+              ~timeout_sec:(Env_config_core.git_fetch_timeout_sec ())
+              ["git"; "-C"; root; "fetch"; "origin"]
+          in
           if fetch_exit <> 0 then
             Error (IoError "Failed to fetch origin before worktree creation.")
           else match resolve_base_branch root base_branch with

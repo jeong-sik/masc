@@ -64,6 +64,7 @@
         test_oas_error_kind_counter
         test_fsm_drift_counter
         test_process_timeout_counter
+        test_git_fetch_timeout_9587
         test_keeper_wake_telemetry
         test_keeper_memory
         test_keeper_accountability
@@ -200,6 +201,7 @@
           test_oas_error_kind_counter
           test_fsm_drift_counter
           test_process_timeout_counter
+          test_git_fetch_timeout_9587
           test_keeper_wake_telemetry
           test_keeper_memory
           test_keeper_accountability

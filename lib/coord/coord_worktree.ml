@@ -23,18 +23,22 @@ let run_argv_lines argv =
   |> String.split_on_char '\n'
   |> List.filter (fun s -> s <> "")
 
-(** Run argv and get process status + combined output. *)
-let run_argv_with_status argv =
+(** Run argv and get process status + combined output.
+    [timeout_sec] defaults to the short 30s window appropriate for
+    local-only git operations (status, branch, rev-parse).  Network-
+    bound operations like [git fetch origin] should pass an explicit
+    longer budget — see {!Env_config.git_fetch_timeout_sec}. *)
+let run_argv_with_status ?(timeout_sec = 30.0) argv =
   Masc_exec.Exec_gate.run_argv_with_status
     ~actor:"coord/worktree"
     ~raw_source:(exec_gate_raw_source argv)
     ~summary:"coord_worktree argv"
-    ~timeout_sec:30.0
+    ~timeout_sec
     argv
 
 (** Run argv and get exit code (Eio-native, no shell) *)
-let run_argv_exit argv =
-  match run_argv_with_status argv with
+let run_argv_exit ?timeout_sec argv =
+  match run_argv_with_status ?timeout_sec argv with
   | Unix.WEXITED n, _ -> n
   | Unix.WSIGNALED _, _ -> 128
   | Unix.WSTOPPED _, _ -> 128
@@ -792,8 +796,15 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
                        usable git worktree. Remove or repair it before retrying."
                       worktree_path))
           end else begin
-            (* Fetch origin first; stale remotes must be explicit, not hidden. *)
-            let fetch_exit = run_argv_exit ["git"; "-C"; root; "fetch"; "origin"] in
+            (* Fetch origin first; stale remotes must be explicit, not hidden.
+               Use the longer git_fetch_timeout_sec budget — the default
+               30s rejected legitimately slow Docker-bridge fetches and
+               cold fetches on large remotes (#9587). *)
+            let fetch_exit =
+              run_argv_exit
+                ~timeout_sec:(Env_config_core.git_fetch_timeout_sec ())
+                ["git"; "-C"; root; "fetch"; "origin"]
+            in
             if fetch_exit <> 0 then
               Error
                 (IoError

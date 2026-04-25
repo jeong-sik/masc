@@ -24,6 +24,7 @@ import { formatTimeAgo } from '../lib/format-time'
 import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { isAbortError } from '../lib/async-state'
 import { OasHealthChip } from './oas-health-chip'
+import { CopyIdButton } from './common/copy-id-button'
 
 interface StoreSnapshot {
   keepers: number
@@ -456,37 +457,48 @@ function EntryRow({ entry }: { entry: TelemetryEntry }) {
   const ts = entryTimestamp(entry)
   const success = entry.success as boolean | undefined
   const scopeBadges = telemetryScopeBadges(entry)
+  const rawJson = JSON.stringify(entry, null, 2)
 
   return html`
     <div
       class="border-b border-[var(--card-border)] hover:bg-[var(--bg-panel-hover)] transition-colors"
       style="content-visibility:auto;contain-intrinsic-size:36px"
     >
-      <button
-        type="button"
-        class="w-full flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer select-none text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
-        onClick=${() => { expanded.value = !expanded.value }}
-        aria-expanded=${expanded.value}
-      >
-        <span class="font-mono font-bold ${meta.color} w-4 text-center flex-shrink-0">${meta.icon}</span>
-        <span class="font-mono text-[var(--text-muted)] w-28 flex-shrink-0" title=${formatTs(ts)}>
-          ${timeAgoSafe(ts)}
-        </span>
-        ${success != null ? html`
-          <span class="flex-shrink-0 w-4 ${success ? 'text-[var(--ok)]' : 'text-[var(--bad-light)]'}">
-            ${success ? 'O' : 'X'}
+      <div class="flex items-center gap-1">
+        <button
+          type="button"
+          class="min-w-0 flex-1 flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer select-none text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+          onClick=${() => { expanded.value = !expanded.value }}
+          aria-expanded=${expanded.value}
+        >
+          <span class="font-mono font-bold ${meta.color} w-4 text-center flex-shrink-0">${meta.icon}</span>
+          <span class="font-mono text-[var(--text-muted)] w-28 flex-shrink-0" title=${formatTs(ts)}>
+            ${timeAgoSafe(ts)}
           </span>
-        ` : html`<span class="w-4"></span>`}
-        <span class="font-mono text-[var(--text-strong)] truncate flex-1" title=${entryPreview(entry)}>
-          ${entryPreview(entry)}
-        </span>
-        ${scopeBadges.length > 0 ? html`
-          <span class="hidden xl:flex items-center gap-1 flex-shrink-0">
-            ${scopeBadges.map(badge => html`<span class="rounded bg-[var(--white-4)] px-1.5 py-0.5 text-3xs text-[var(--text-dim)] font-mono">${badge}</span>`)}
+          ${success != null ? html`
+            <span class="flex-shrink-0 w-4 ${success ? 'text-[var(--ok)]' : 'text-[var(--bad-light)]'}">
+              ${success ? 'O' : 'X'}
+            </span>
+          ` : html`<span class="w-4"></span>`}
+          <span class="font-mono text-[var(--text-strong)] truncate flex-1" title=${entryPreview(entry)}>
+            ${entryPreview(entry)}
           </span>
-        ` : null}
-        <span class="flex-shrink-0 w-4 text-[var(--text-muted)]">${expanded.value ? '-' : '+'}</span>
-      </button>
+          ${scopeBadges.length > 0 ? html`
+            <span class="hidden xl:flex items-center gap-1 flex-shrink-0">
+              ${scopeBadges.map(badge => html`<span class="rounded bg-[var(--white-4)] px-1.5 py-0.5 text-3xs text-[var(--text-dim)] font-mono">${badge}</span>`)}
+            </span>
+          ` : null}
+          <span class="flex-shrink-0 w-4 text-[var(--text-muted)]">${expanded.value ? '-' : '+'}</span>
+        </button>
+        <span class="mr-2 inline-flex flex-shrink-0">
+          <${CopyIdButton}
+            value=${rawJson}
+            label="telemetry entry JSON"
+            ariaLabel="Copy telemetry entry JSON"
+            size=${13}
+          />
+        </span>
+      </div>
       ${expanded.value ? html`
         <div class="px-3 pb-3 flex flex-col gap-2">
           ${scopeBadges.length > 0 ? html`
@@ -495,7 +507,7 @@ function EntryRow({ entry }: { entry: TelemetryEntry }) {
             </div>
           ` : null}
           <pre class="text-3xs font-mono text-[var(--text-muted)] bg-[rgba(0,0,0,0.3)] rounded p-2 overflow-x-auto max-h-75 overflow-y-auto whitespace-pre-wrap break-all">
-${JSON.stringify(entry, null, 2)}</pre>
+${rawJson}</pre>
         </div>
       ` : null}
     </div>
@@ -508,39 +520,50 @@ function GroupRow({ item }: { item: Extract<TelemetryDisplayItem, { kind: 'group
   const latestPreview = entryPreview(item.entries[0] as TelemetryEntry)
   const sourceIcons = uniqueStrings(item.sourceKeys.map(source => sourceMeta(source).icon))
   const contentId = `telemetry-group-${item.key.replace(/[^a-zA-Z0-9_-]/g, '-')}`
+  const rawJson = JSON.stringify(item.entries, null, 2)
 
   return html`
     <div
       class="border-b border-[var(--card-border)] bg-[rgba(255,255,255,0.015)] hover:bg-[var(--bg-panel-hover)] transition-colors"
       style="content-visibility:auto;contain-intrinsic-size:36px"
     >
-      <button
-        type="button"
-        class="w-full flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer select-none text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
-        aria-expanded=${expanded.value}
-        aria-controls=${contentId}
-        onClick=${() => { expanded.value = !expanded.value }}
-      >
-        <span class="font-mono font-bold ${meta.color} w-4 text-center flex-shrink-0">${meta.icon}</span>
-        <span class="font-mono text-[var(--text-muted)] w-28 flex-shrink-0" title=${`${formatTs(item.oldestTs)} → ${formatTs(item.latestTs)}`}>
-          ${timeAgoSafe(item.latestTs)}
-        </span>
-        <span class="flex-shrink-0 w-4 text-[var(--text-dim)]">~</span>
-        <span class="font-mono text-[var(--text-strong)] truncate flex-1" title=${`${meta.label} · ${item.label} · ${item.count} events`}>
-          ${meta.label} · ${item.label} · ${item.count} events
-        </span>
-        ${sourceIcons.length > 0 ? html`
-          <span class="hidden lg:flex items-center gap-1 flex-shrink-0 text-3xs text-[var(--text-dim)] font-mono">
-            ${sourceIcons.join('/')}
+      <div class="flex items-center gap-1">
+        <button
+          type="button"
+          class="min-w-0 flex-1 flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer select-none text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+          aria-expanded=${expanded.value}
+          aria-controls=${contentId}
+          onClick=${() => { expanded.value = !expanded.value }}
+        >
+          <span class="font-mono font-bold ${meta.color} w-4 text-center flex-shrink-0">${meta.icon}</span>
+          <span class="font-mono text-[var(--text-muted)] w-28 flex-shrink-0" title=${`${formatTs(item.oldestTs)} → ${formatTs(item.latestTs)}`}>
+            ${timeAgoSafe(item.latestTs)}
           </span>
-        ` : null}
-        ${item.scopeBadges.length > 0 ? html`
-          <span class="hidden xl:flex items-center gap-1 flex-shrink-0">
-            ${item.scopeBadges.map(badge => html`<span class="rounded bg-[var(--white-4)] px-1.5 py-0.5 text-3xs text-[var(--text-dim)] font-mono">${badge}</span>`)}
+          <span class="flex-shrink-0 w-4 text-[var(--text-dim)]">~</span>
+          <span class="font-mono text-[var(--text-strong)] truncate flex-1" title=${`${meta.label} · ${item.label} · ${item.count} events`}>
+            ${meta.label} · ${item.label} · ${item.count} events
           </span>
-        ` : null}
-        <span class="flex-shrink-0 w-4 text-[var(--text-muted)]">${expanded.value ? '-' : '+'}</span>
-      </button>
+          ${sourceIcons.length > 0 ? html`
+            <span class="hidden lg:flex items-center gap-1 flex-shrink-0 text-3xs text-[var(--text-dim)] font-mono">
+              ${sourceIcons.join('/')}
+            </span>
+          ` : null}
+          ${item.scopeBadges.length > 0 ? html`
+            <span class="hidden xl:flex items-center gap-1 flex-shrink-0">
+              ${item.scopeBadges.map(badge => html`<span class="rounded bg-[var(--white-4)] px-1.5 py-0.5 text-3xs text-[var(--text-dim)] font-mono">${badge}</span>`)}
+            </span>
+          ` : null}
+          <span class="flex-shrink-0 w-4 text-[var(--text-muted)]">${expanded.value ? '-' : '+'}</span>
+        </button>
+        <span class="mr-2 inline-flex flex-shrink-0">
+          <${CopyIdButton}
+            value=${rawJson}
+            label="telemetry group JSON"
+            ariaLabel="Copy telemetry group JSON"
+            size=${13}
+          />
+        </span>
+      </div>
       <div id=${contentId} class=${expanded.value ? 'px-3 pb-3 flex flex-col gap-2' : 'hidden'} role="region">
         ${expanded.value ? html`
           <div class="rounded bg-[var(--white-3)] px-2 py-1.5 text-2xs text-[var(--text-dim)]">
@@ -560,7 +583,7 @@ function GroupRow({ item }: { item: Extract<TelemetryDisplayItem, { kind: 'group
           <details class="rounded bg-[var(--black-20)] px-2 py-1.5">
             <summary class="cursor-pointer text-3xs text-[var(--text-dim)]">Raw JSON</summary>
             <pre class="mt-2 text-3xs font-mono text-[var(--text-muted)] overflow-x-auto max-h-70 overflow-y-auto whitespace-pre-wrap break-all">
-${JSON.stringify(item.entries, null, 2)}</pre>
+${rawJson}</pre>
           </details>
         ` : null}
       </div>

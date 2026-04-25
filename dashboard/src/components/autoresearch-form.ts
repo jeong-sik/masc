@@ -133,6 +133,7 @@ export function StartAutoresearchForm() {
           <span class="text-3xs uppercase tracking-wider text-[var(--text-muted)] font-medium">목표 *</span>
           <${TextArea}
             value=${formGoal.value}
+            ariaLabel="최적화 목표"
             placeholder="최적화 목표 (예: Reduce inference latency by optimizing hot path)"
             rows=${2}
             required

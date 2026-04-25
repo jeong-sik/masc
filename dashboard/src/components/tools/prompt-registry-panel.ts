@@ -280,6 +280,7 @@ export function PromptRegistryPanel() {
             <${TextArea}
               rows=${18}
               value=${draft}
+              ariaLabel="프롬프트 템플릿 편집"
               class="min-h-80 font-mono text-xs"
               onInput=${(event: Event) => {
                 setDraft((event.target as HTMLTextAreaElement).value)

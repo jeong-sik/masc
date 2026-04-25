@@ -207,6 +207,7 @@ function NewPostForm() {
       />
       <${RichComposer}
         value=${newPostContent.value}
+        ariaLabel="게시글 내용"
         onValueChange=${(next: string) => { newPostContent.value = next }}
         rows=${8}
         placeholder="내용을 입력하세요. Markdown, 코드 스니펫, URL, 이미지 링크를 그대로 붙일 수 있습니다."

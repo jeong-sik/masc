@@ -153,6 +153,7 @@ function CommentItem({
           <div class="mt-2">
             <${RichComposer}
               value=${commentText.value}
+              ariaLabel="답글 작성"
               placeholder="답글 작성..."
               rows=${4}
               disabled=${commentSubmitting.value}
@@ -244,6 +245,7 @@ function CommentForm({ postId }: { postId: string }) {
     <div class="mt-4">
       <${RichComposer}
         value=${commentText.value}
+        ariaLabel="댓글 추가"
         placeholder="댓글 추가..."
         rows=${5}
         disabled=${commentSubmitting.value}

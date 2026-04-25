@@ -86,6 +86,7 @@ export function TaskCreateForm(props: { goalId?: string | null; goalTitle?: stri
             <label class="text-2xs font-medium text-text-muted">설명</label>
             <${RichComposer}
               value=${description.value}
+              ariaLabel="설명"
               placeholder="배경, 재현 조건, 원하는 결과를 적으면 backlog 카드와 Task 상세에서 그대로 렌더링됩니다."
               rows=${4}
               onValueChange=${(next: string) => { description.value = next }}

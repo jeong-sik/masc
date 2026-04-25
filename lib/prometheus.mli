@@ -239,6 +239,11 @@ val metric_fs_atomic_orphans_cleaned : string
     signal of shared credential state (connection pool / fork). *)
 val metric_auth_bearer_token_mismatch : string
 
+val metric_auth_strict_unknown_tool_denials : string
+(** #10183: strict Auth rejects for unknown external tools.  Labels:
+    [agent_name, tool_class] where [tool_class] is bounded to
+    [empty | external]. *)
+
 val metric_auth_credential_token_duplicate : string
 (** #9786 follow-up: boot-time audit counter for credentials
     sharing the same token hash.  Increments once per boot per

@@ -83,6 +83,22 @@ let capture_stderr f =
   Unix.close pipe_read;
   Buffer.contents buf
 
+let strict_unknown_tool_denial_count ~agent_name ~tool_class =
+  Masc_mcp.Prometheus.metric_value_or_zero
+    Masc_mcp.Prometheus.metric_auth_strict_unknown_tool_denials
+    ~labels:[ ("agent_name", agent_name); ("tool_class", tool_class) ]
+    ()
+
+let keeper_strict_auth_regression_tools =
+  [
+    "keeper_shell";
+    "keeper_bash";
+    "keeper_task_claim";
+    "keeper_fs_read";
+    "keeper_board_search";
+    "keeper_tools_list";
+  ]
+
 (* ============================================ *)
 (* Token generation tests                       *)
 (* ============================================ *)
@@ -709,6 +725,10 @@ let test_authorize_unknown_non_masc_tool_strict_denied () =
   let dir = setup_test_room () in
   let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
   let create_result = Auth.create_token dir ~agent_name:"worker_agent" ~role:Types.Worker in
+  let before =
+    strict_unknown_tool_denial_count
+      ~agent_name:"worker_agent" ~tool_class:"external"
+  in
   let result =
     match create_result with
     | Ok (raw_token, _) ->
@@ -720,7 +740,11 @@ let test_authorize_unknown_non_masc_tool_strict_denied () =
   cleanup_test_room dir;
   match result with
   | Ok () -> fail "unknown non-masc tool should be denied in strict mode"
-  | Error (Types.Forbidden _) -> ()
+  | Error (Types.Forbidden _) ->
+      check (float 0.0001) "denial counter increments"
+        (before +. 1.0)
+        (strict_unknown_tool_denial_count
+           ~agent_name:"worker_agent" ~tool_class:"external")
   | Error e -> fail (Printf.sprintf "wrong error: %s" (Types.masc_error_to_string e))
 
 let test_authorize_unknown_canonical_tool_strict_worker_allowed () =
@@ -740,72 +764,57 @@ let test_authorize_unknown_canonical_tool_strict_worker_allowed () =
   | Ok () -> ()
   | Error e -> fail (Types.masc_error_to_string e)
 
-(* #10183: keeper-bound runtime tools (keeper_-prefixed) must
-   not be rejected at the strict-mode auth boundary even when
-   permission_for_tool has no entry for them.  The analyst
-   keeper regression hit this path 116 times across keeper_shell,
-   keeper_bash, keeper_task_claim, etc. *)
-let test_authorize_unknown_keeper_runtime_tool_strict_worker_allowed () =
+let test_authorize_known_keeper_tool_strict_worker_allowed () =
   let dir = setup_test_room () in
   let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
   let create_result =
-    Auth.create_token dir ~agent_name:"worker_agent" ~role:Types.Worker
-  in
-  let try_tool tool_name =
-    match create_result with
-    | Ok (raw_token, _) ->
-        with_env "MASC_TOOL_AUTH_STRICT" "1" (fun () ->
-            Auth.authorize_tool dir ~agent_name:"worker_agent"
-              ~token:(Some raw_token) ~tool_name)
-    | Error e -> Error e
-  in
-  let outcomes =
-    List.map
-      (fun tn -> (tn, try_tool tn))
-      [
-        "keeper_shell";
-        "keeper_bash";
-        "keeper_task_claim";
-        "keeper_tasks_list";
-        "keeper_board_search";
-      ]
-  in
-  cleanup_test_room dir;
-  List.iter
-    (fun (tn, r) ->
-      match r with
-      | Ok () -> ()
-      | Error e ->
-          fail
-            (Printf.sprintf "%s should be allowed in strict mode but got: %s"
-               tn (Types.masc_error_to_string e)))
-    outcomes
-
-(* Negative regression: a tool name that ONLY embeds "keeper_" as
-   a substring (not a prefix) must still be treated as foreign so
-   the gate cannot be bypassed by clever naming. *)
-let test_authorize_keeper_substring_not_prefix_still_denied () =
-  let dir = setup_test_room () in
-  let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
-  let create_result =
-    Auth.create_token dir ~agent_name:"worker_agent" ~role:Types.Worker
+    Auth.create_token dir ~agent_name:"keeper-analyst-agent" ~role:Types.Worker
   in
   let result =
     match create_result with
     | Ok (raw_token, _) ->
         with_env "MASC_TOOL_AUTH_STRICT" "1" (fun () ->
-            Auth.authorize_tool dir ~agent_name:"worker_agent"
-              ~token:(Some raw_token) ~tool_name:"evil_keeper_shell")
+            List.fold_left
+              (fun acc tool_name ->
+                 match acc with
+                 | Error _ as e -> e
+                 | Ok () ->
+                     Auth.authorize_tool dir ~agent_name:"keeper-analyst-agent"
+                       ~token:(Some raw_token) ~tool_name)
+              (Ok ()) keeper_strict_auth_regression_tools)
     | Error e -> Error e
   in
   cleanup_test_room dir;
   match result with
-  | Ok () ->
-      fail "tool name with keeper_ as substring (not prefix) should be denied"
+  | Ok () -> ()
+  | Error e -> fail (Types.masc_error_to_string e)
+
+let test_authorize_tool_v2_known_keeper_tool_strict_worker_allowed () =
+  let result =
+    with_env "MASC_TOOL_AUTH_STRICT" "1" (fun () ->
+        List.fold_left
+          (fun acc tool_name ->
+             match acc with
+             | Error _ as e -> e
+             | Ok () ->
+                 Auth.authorize_tool_for_role ~agent_name:"keeper-analyst-agent"
+                   ~role:Types.Worker ~tool_name)
+          (Ok ()) keeper_strict_auth_regression_tools)
+  in
+  match result with
+  | Ok () -> ()
+  | Error e -> fail (Types.masc_error_to_string e)
+
+let test_authorize_tool_v2_unknown_keeper_prefix_strict_denied () =
+  let result =
+    with_env "MASC_TOOL_AUTH_STRICT" "1" (fun () ->
+        Auth.authorize_tool_for_role ~agent_name:"keeper-analyst-agent"
+          ~role:Types.Worker ~tool_name:"keeper_totally_fake")
+  in
+  match result with
+  | Ok () -> fail "unknown keeper_* prefix should not bypass strict auth"
   | Error (Types.Forbidden _) -> ()
-  | Error e ->
-      fail
-        (Printf.sprintf "wrong error: %s" (Types.masc_error_to_string e))
+  | Error e -> fail (Printf.sprintf "wrong error: %s" (Types.masc_error_to_string e))
 
 let test_declared_tool_permission_from_tool_spec () =
   let name = "__test_declared_permission_tool" in
@@ -910,10 +919,12 @@ let () =
         `Quick test_authorize_unknown_non_masc_tool_strict_denied;
       test_case "strict unknown canonical tool allows worker"
         `Quick test_authorize_unknown_canonical_tool_strict_worker_allowed;
-      test_case "strict keeper_* runtime tool allows worker (#10183)"
-        `Quick test_authorize_unknown_keeper_runtime_tool_strict_worker_allowed;
-      test_case "keeper_ substring (not prefix) still denied (#10183)"
-        `Quick test_authorize_keeper_substring_not_prefix_still_denied;
+      test_case "strict known keeper tool allows worker"
+        `Quick test_authorize_known_keeper_tool_strict_worker_allowed;
+      test_case "strict v2 known keeper tool allows worker"
+        `Quick test_authorize_tool_v2_known_keeper_tool_strict_worker_allowed;
+      test_case "strict v2 fake keeper prefix denied"
+        `Quick test_authorize_tool_v2_unknown_keeper_prefix_strict_denied;
       test_case "declared tool permission from Tool_spec"
         `Quick test_declared_tool_permission_from_tool_spec;
     ];

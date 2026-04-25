@@ -72,7 +72,7 @@ export function SchemaField({ name, schema, value, required, onChange }: SchemaF
     return html`
       <div class="flex items-center gap-2 py-1">
         <${Checkbox} checked=${(value as boolean) ?? (schema.default as boolean) ?? false}
-          onChange=${(v: boolean) => onChange(name, v)} />
+          ariaLabel=${name} onChange=${(v: boolean) => onChange(name, v)} />
         <label class="text-xs text-[var(--text-body)]">${name}${requiredMark}</label>
         ${schema.description ? html`<span class="text-3xs text-[var(--text-muted)]">- ${schema.description}</span>` : null}
       </div>

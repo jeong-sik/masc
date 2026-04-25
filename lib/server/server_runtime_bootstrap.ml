@@ -631,21 +631,6 @@ type codex_mcp_config_sync_status =
   | Codex_mcp_config_server_missing
   | Codex_mcp_config_header_missing
 
-let escape_toml_basic_string value =
-  let buf = Buffer.create (String.length value) in
-  String.iter
-    (function
-      | '\\' -> Buffer.add_string buf "\\\\"
-      | '"' -> Buffer.add_string buf "\\\""
-      | '\b' -> Buffer.add_string buf "\\b"
-      | '\012' -> Buffer.add_string buf "\\f"
-      | '\n' -> Buffer.add_string buf "\\n"
-      | '\r' -> Buffer.add_string buf "\\r"
-      | '\t' -> Buffer.add_string buf "\\t"
-      | c -> Buffer.add_char buf c)
-    value;
-  Buffer.contents buf
-
 let split_lines_with_trailing_newline content =
   let has_trailing_newline =
     String.length content > 0 && content.[String.length content - 1] = '\n'
@@ -687,18 +672,57 @@ let is_http_headers_binding trimmed =
     | ' ' | '\t' | '=' -> true
     | _ -> false
 
-let sync_codex_mcp_auth_header_content ~raw_token content =
+let is_bearer_token_env_var_binding trimmed =
+  let key = "bearer_token_env_var" in
+  let key_len = String.length key in
+  if String.length trimmed < key_len then
+    false
+  else if not (String.equal (String.sub trimmed 0 key_len) key) then
+    false
+  else
+    match String.get trimmed key_len with
+    | exception Invalid_argument _ -> true
+    | ' ' | '\t' | '=' -> true
+    | _ -> false
+
+let codex_mcp_headers_line indent =
+  Printf.sprintf
+    "%shttp_headers = { \"Accept\" = \"application/json, text/event-stream\", \"X-MASC-Agent\" = \"codex-mcp-client\" }"
+    indent
+
+let codex_mcp_bearer_env_line indent =
+  Printf.sprintf "%sbearer_token_env_var = \"MASC_MCP_TOKEN\"" indent
+
+let sync_codex_mcp_auth_header_content ~raw_token:_ content =
   let lines, has_trailing_newline =
     split_lines_with_trailing_newline content
   in
-  let replacement_line line =
-    Printf.sprintf "%shttp_headers = { Authorization = \"Bearer %s\" }"
-      (leading_indent line)
-      (escape_toml_basic_string raw_token)
+  let add_missing_section_bindings ~seen_header ~seen_bearer_env ~changed acc =
+    let acc, seen_header, changed =
+      if seen_header then
+        (acc, seen_header, changed)
+      else
+        (codex_mcp_headers_line "" :: acc, true, true)
+    in
+    let acc, seen_bearer_env, changed =
+      if seen_bearer_env then
+        (acc, seen_bearer_env, changed)
+      else
+        (codex_mcp_bearer_env_line "" :: acc, true, true)
+    in
+    (acc, seen_header, seen_bearer_env, changed)
   in
-  let rec loop ~in_masc_section ~seen_masc_section ~seen_header ~changed acc =
+  let rec loop ~in_masc_section ~seen_masc_section ~seen_header
+      ~seen_bearer_env ~changed acc =
     function
     | [] ->
+        let acc, seen_header, _seen_bearer_env, changed =
+          if in_masc_section then
+            add_missing_section_bindings ~seen_header ~seen_bearer_env ~changed
+              acc
+          else
+            (acc, seen_header, seen_bearer_env, changed)
+        in
         let status =
           if not seen_masc_section then
             Codex_mcp_config_server_missing
@@ -724,27 +748,44 @@ let sync_codex_mcp_auth_header_content ~raw_token content =
           && is_toml_section_header trimmed
           && not entering_masc_section
         in
+        let acc, seen_header, seen_bearer_env, changed =
+          if leaving_masc_section then
+            add_missing_section_bindings ~seen_header ~seen_bearer_env ~changed
+              acc
+          else
+            (acc, seen_header, seen_bearer_env, changed)
+        in
         let in_masc_section =
           if entering_masc_section then true
           else if leaving_masc_section then false
           else in_masc_section
         in
         let seen_masc_section = seen_masc_section || entering_masc_section in
-        let should_replace =
-          in_masc_section && is_http_headers_binding trimmed
+        let seen_header, seen_bearer_env =
+          if entering_masc_section then (false, false)
+          else (seen_header, seen_bearer_env)
         in
-        let line, seen_header, changed =
-          if should_replace then
-            let next = replacement_line line in
-            (next, true, changed || not (String.equal next line))
+        let line, seen_header, seen_bearer_env, changed =
+          if in_masc_section && is_http_headers_binding trimmed then
+            let next = codex_mcp_headers_line (leading_indent line) in
+            ( next,
+              true,
+              seen_bearer_env,
+              changed || not (String.equal next line) )
+          else if in_masc_section && is_bearer_token_env_var_binding trimmed then
+            let next = codex_mcp_bearer_env_line (leading_indent line) in
+            ( next,
+              seen_header,
+              true,
+              changed || not (String.equal next line) )
           else
-            (line, seen_header, changed)
+            (line, seen_header, seen_bearer_env, changed)
         in
-        loop ~in_masc_section ~seen_masc_section ~seen_header ~changed
-          (line :: acc) rest
+        loop ~in_masc_section ~seen_masc_section ~seen_header
+          ~seen_bearer_env ~changed (line :: acc) rest
   in
   loop ~in_masc_section:false ~seen_masc_section:false ~seen_header:false
-    ~changed:false [] lines
+    ~seen_bearer_env:false ~changed:false [] lines
 
 let codex_config_path_opt () =
   match Sys.getenv_opt codex_config_path_env_key |> Env_config_core.trim_opt with
@@ -789,11 +830,11 @@ let sync_codex_mcp_config ~base_path ~agent_name =
                | Codex_mcp_config_updated ->
                    Auth.save_private_text_file config_path updated;
                    Log.Server.warn
-                     "startup synced Codex MCP bearer header for %s in %s"
+                     "startup synced Codex MCP bearer-token env config for %s in %s"
                      agent_name config_path
                | Codex_mcp_config_unchanged ->
                    Log.Server.info
-                     "startup Codex MCP bearer header already current for %s"
+                     "startup Codex MCP bearer-token env config already current for %s"
                      agent_name
                | Codex_mcp_config_server_missing ->
                    Log.Server.info

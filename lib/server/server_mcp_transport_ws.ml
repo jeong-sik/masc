@@ -489,11 +489,8 @@ let parse_cache : (string * parsed_sse_event option) Atomic.t =
 let sse_data_prefix = "data:"
 
 let extract_sse_data_payload_line line =
-  let prefix_len = String.length sse_data_prefix in
-  if
-    String.length line >= prefix_len
-    && String.equal (String.sub line 0 prefix_len) sse_data_prefix
-  then
+  if String.starts_with ~prefix:sse_data_prefix line then
+    let prefix_len = String.length sse_data_prefix in
     let raw = String.sub line prefix_len (String.length line - prefix_len) in
     if String.length raw > 0 && Char.equal raw.[0] ' ' then
       Some (String.sub raw 1 (String.length raw - 1))

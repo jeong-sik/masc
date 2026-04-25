@@ -239,7 +239,7 @@ function RowActions({
 
   if (state.kind === 'pending') {
     return html`
-      <span class="text-2xs text-[var(--text-muted)]">
+      <span class="text-2xs text-[var(--text-muted)]" role="status">
         ${state.decision === 'approve' ? '승인 중…' : '반려 중…'}
       </span>
     `
@@ -310,7 +310,7 @@ function RowActions({
         onClick=${() => setRowAction(requestId, { kind: 'compose-reject', reason: '' })}
       >반려</button>
       ${state.kind === 'error'
-        ? html`<span class="text-3xs text-[var(--text-bad)]" title=${state.message}>
+        ? html`<span class="text-3xs text-[var(--text-bad)]" title=${state.message} role="alert">
             실패 · 다시 시도
           </span>`
         : null}

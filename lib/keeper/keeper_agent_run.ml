@@ -1210,16 +1210,16 @@ let run_turn
           chunks
           @ (match guidance_section with Some s -> [s] | None -> [])
         in
-        let allowed_tool_names =
-          Keeper_exec_tools.keeper_allowed_tool_names meta
-        in
-        let preferred_tools =
-          Keeper_tool_guidance.render_preferred_tools ~allowed_tool_names
-        in
-        let gh_workflow =
-          Keeper_tool_guidance.render_gh_workflow ~allowed_tool_names
-          |> Option.map (Printf.sprintf "\n\n%s")
-          |> Option.value ~default:""
+        (* [discover_work_nudge] runs in [before_turn], before the
+           [before_turn_params] hook computes the final per-turn
+           [tool_filter_override].  That final surface can be narrower
+           than keeper policy metadata (for example on last-turn
+           safety narrowing), so this nudge must not advertise concrete
+           tool names derived from the broader static policy. *)
+        let active_schema_guard =
+          "Use only tool schemas currently shown by the runtime. If an \
+           execution tool is absent from the active schema list, do not name \
+           or call it; emit [STATE] or use a visible handoff/status tool."
         in
         let unknown_tool_guard =
           Keeper_tool_guidance.render_unknown_tool_guard ()
@@ -1230,12 +1230,12 @@ let run_turn
            Some (Printf.sprintf
              "## Discovered Work (auto, %ds interval)\n\n%s\n\n\
               ### Use the smallest real action now\n\
-              %s%s\n\n\
+              %s\n\n\
               %s\n\n\
               Do not print fenced pseudo-calls. Pick the smallest viable \
               action and emit one or more structured tool calls now."
-             interval (String.concat "\n\n" sections) preferred_tools
-             gh_workflow unknown_tool_guard))
+             interval (String.concat "\n\n" sections) active_schema_guard
+             unknown_tool_guard))
   in
   let base_hooks =
     (* Issue #8597 #3-5: dropped ~config / ~session / ~ctx_snapshot —
@@ -1394,8 +1394,10 @@ let run_turn
                       let nudge =
                         Printf.sprintf
                           "[CLAIMED TASK] You hold %s. Do NOT call claim_next again. \
-                           Use keeper_bash, keeper_shell, keeper_fs_read, or other \
-                           execution tools to start working on it now."
+                           Use an execution tool visible in your active runtime schema \
+                           to start working on it now. If no execution tool is visible, \
+                           emit [STATE] with the blocker instead of inventing a tool \
+                           name."
                           (Keeper_id.Task_id.to_string task_id)
                       in
                       (match ctx with

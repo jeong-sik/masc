@@ -81,6 +81,8 @@ export function MetricTrack({ points, windowStart, windowEnd }: Props) {
           <svg
             viewBox="0 0 ${viewBoxWidth} ${viewBoxHeight}"
             preserveAspectRatio="none"
+            role="img"
+            aria-label="시간별 트렌드 이상 징후"
             class="absolute inset-0 w-full h-full"
           >
             ${anomalyResults.filter(r => r.isAnomaly).map((r, i) => {

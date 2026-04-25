@@ -89,17 +89,34 @@ let json_nonempty_string_opt key json =
 
 type keeper_runtime_mcp_log_context = {
   keeper_name : string;
+  agent_name : string option;
   model : string;
   trace_id : string option;
   session_id : string option;
+  generation : int option;
   turn : int option;
   keeper_turn_id : int option;
   task_id : string option;
   goal_ids : string list option;
   sandbox_profile : string option;
+  sandbox_root : string option;
+  allowed_paths : string list option;
   network_mode : string option;
   shared_memory_scope : string option;
+  approval_mode : string option;
+  tool_surface_class : string option;
+  visible_tool_count : int option;
+  required_tools : string list option;
+  missing_required_tools : string list option;
+  cascade_profile : string option;
 }
+
+let runtime_mcp_tool_surface_class allowed_tool_names =
+  if allowed_tool_names = [] then "none"
+  else if List.for_all Tool_catalog.is_public_mcp allowed_tool_names then
+    "public_only"
+  else
+    "mixed"
 
 let runtime_mcp_keeper_log_context_of_entry
     ?mcp_session_id
@@ -131,23 +148,48 @@ let runtime_mcp_keeper_log_context_of_entry
     | [] -> None
     | ids -> Some ids
   in
+  let config = Coord.default_config entry.base_path in
+  let allowed_tool_names =
+    Keeper_tool_policy.keeper_allowed_tool_names
+      ~phase:entry.phase
+      entry.meta
+  in
+  let profile_defaults =
+    Keeper_types_profile.load_keeper_profile_defaults entry.meta.name
+  in
+  let keeper_oas_context =
+    Keeper_types_profile.keeper_oas_context_of_defaults profile_defaults
+  in
   {
     keeper_name = entry.name;
+    agent_name = Some entry.meta.agent_name;
     model;
     trace_id = Some trace_id;
     session_id;
+    generation = Some entry.meta.runtime.generation;
     turn;
     keeper_turn_id = turn;
     task_id = Option.map Keeper_id.Task_id.to_string entry.meta.current_task_id;
     goal_ids;
     sandbox_profile =
       Some (Keeper_types.sandbox_profile_to_string entry.meta.sandbox_profile);
+    sandbox_root =
+      Some (Keeper_sandbox.host_root_abs_of_meta ~config entry.meta);
+    allowed_paths =
+      Some (Keeper_alerting_path.effective_allowed_paths ~meta:entry.meta);
     network_mode =
       Some (Keeper_types.network_mode_to_string entry.meta.network_mode);
     shared_memory_scope =
       Some
         (Keeper_types.shared_memory_scope_to_string
            entry.meta.shared_memory_scope);
+    approval_mode = keeper_oas_context.gemini_approval_mode;
+    tool_surface_class =
+      Some (runtime_mcp_tool_surface_class allowed_tool_names);
+    visible_tool_count = Some (List.length allowed_tool_names);
+    required_tools = Some [];
+    missing_required_tools = Some [];
+    cascade_profile = Some entry.meta.cascade_name;
   }
 
 let runtime_mcp_keeper_error_preview message =
@@ -178,6 +220,38 @@ let runtime_mcp_keeper_tool_call_sse_payload
   in
   `Assoc (base_fields @ error_fields)
 
+let runtime_mcp_masc_root ~base_path =
+  match Keeper_tool_call_log.configured_masc_root () with
+  | Some masc_root -> masc_root
+  | None ->
+      let config = Coord.default_config base_path in
+      Coord.masc_root_dir config
+
+let record_runtime_mcp_trajectory_coverage_gap
+    ~(masc_root : string)
+    ~(keeper_name : string)
+    ~(trace_id : string)
+    ~(stale_reason : string)
+    (exn : exn) : unit =
+  try
+    Telemetry_coverage_gap.record
+      ~masc_root
+      ~source:"trajectory_tool_call"
+      ~producer:"mcp_server_eio_call_tool.runtime_mcp"
+      ~durable_store:(Trajectory.trajectory_path masc_root keeper_name trace_id)
+      ~dashboard_surface:"/api/v1/keepers/:name/tool-stats"
+      ~stale_reason
+      ~keeper_name
+      ~trace_id
+      ~error:(Printexc.to_string exn)
+      ()
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | gap_exn ->
+      log_mcp_exn
+        ~label:"runtime MCP trajectory coverage gap append failed"
+        gap_exn
+
 let record_runtime_mcp_keeper_trajectory
     (ctx : keeper_runtime_mcp_log_context)
     ~(base_path : string)
@@ -187,20 +261,27 @@ let record_runtime_mcp_keeper_trajectory
     ~(success : bool)
     ~(duration_ms : int) : unit =
   let trace_id = Option.value ~default:"runtime-mcp" ctx.trace_id in
-  let masc_root =
-    Coord_utils.masc_root_dir_from
-      ~base_path
-      ~cluster_name:(Env_config_core.cluster_name ())
-  in
+  let masc_root = runtime_mcp_masc_root ~base_path in
   let safe_input = Observability_redact.redact_json_value arguments in
   let safe_output =
     Observability_redact.redact_preview ~max_len:4000 message
   in
   let existing_entries =
-    Trajectory.read_entries
-      ~masc_root
-      ~keeper_name:ctx.keeper_name
-      ~trace_id
+    try
+      Trajectory.read_entries
+        ~masc_root
+        ~keeper_name:ctx.keeper_name
+        ~trace_id
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
+        record_runtime_mcp_trajectory_coverage_gap
+          ~masc_root
+          ~keeper_name:ctx.keeper_name
+          ~trace_id
+          ~stale_reason:"runtime_mcp_trajectory_read_failed"
+          exn;
+        []
   in
   let turn = Option.value ~default:0 ctx.turn in
   let round =
@@ -213,15 +294,25 @@ let record_runtime_mcp_keeper_trajectory
   let runtime_contract =
     Keeper_runtime_contract.runtime_contract_json_from_fields
       ~keeper_name:ctx.keeper_name
+      ?agent_name:ctx.agent_name
       ?trace_id:ctx.trace_id
       ?session_id:ctx.session_id
+      ?generation:ctx.generation
       ?keeper_turn_id:ctx.keeper_turn_id
       ?task_id:ctx.task_id
       ?goal_ids:ctx.goal_ids
       ?sandbox_profile:ctx.sandbox_profile
+      ?sandbox_root:ctx.sandbox_root
+      ?allowed_paths:ctx.allowed_paths
       ?network_mode:ctx.network_mode
       ?shared_memory_scope:ctx.shared_memory_scope
+      ?approval_mode:ctx.approval_mode
+      ?tool_surface_class:ctx.tool_surface_class
+      ?visible_tool_count:ctx.visible_tool_count
+      ?required_tools:ctx.required_tools
+      ?missing_required_tools:ctx.missing_required_tools
       ?model:(Some ctx.model)
+      ?cascade_profile:ctx.cascade_profile
       ()
   in
   let error = if success then None else Some safe_output in
@@ -262,25 +353,12 @@ let record_runtime_mcp_keeper_trajectory
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-      (try
-         Telemetry_coverage_gap.record
-           ~masc_root
-           ~source:"trajectory_tool_call"
-           ~producer:"mcp_server_eio_call_tool.runtime_mcp"
-           ~durable_store:
-             (Trajectory.trajectory_path masc_root ctx.keeper_name trace_id)
-           ~dashboard_surface:"/api/v1/keepers/:name/tool-stats"
-           ~stale_reason:"runtime_mcp_trajectory_append_failed"
-           ~keeper_name:ctx.keeper_name
-           ~trace_id
-           ~error:(Printexc.to_string exn)
-           ()
-       with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | gap_exn ->
-           log_mcp_exn
-             ~label:"runtime MCP trajectory coverage gap append failed"
-             gap_exn)
+      record_runtime_mcp_trajectory_coverage_gap
+        ~masc_root
+        ~keeper_name:ctx.keeper_name
+        ~trace_id
+        ~stale_reason:"runtime_mcp_trajectory_append_failed"
+        exn
 
 let record_runtime_mcp_keeper_tool_trace
     ?mcp_session_id
@@ -305,15 +383,25 @@ let record_runtime_mcp_keeper_tool_trace
     ~duration_ms:(float_of_int duration_ms)
     ~model:ctx.model
     ~lane:"runtime_mcp"
+    ?agent_name:ctx.agent_name
     ?trace_id:ctx.trace_id
     ?session_id:ctx.session_id
+    ?generation:ctx.generation
     ?turn:ctx.turn
     ?keeper_turn_id:ctx.keeper_turn_id
     ?task_id:ctx.task_id
     ?goal_ids:ctx.goal_ids
     ?sandbox_profile:ctx.sandbox_profile
+    ?sandbox_root:ctx.sandbox_root
+    ?allowed_paths:ctx.allowed_paths
     ?network_mode:ctx.network_mode
     ?shared_memory_scope:ctx.shared_memory_scope
+    ?approval_mode:ctx.approval_mode
+    ?tool_surface_class:ctx.tool_surface_class
+    ?visible_tool_count:ctx.visible_tool_count
+    ?required_tools:ctx.required_tools
+    ?missing_required_tools:ctx.missing_required_tools
+    ?cascade_profile:ctx.cascade_profile
     ~result_bytes:(String.length message)
     ();
   record_runtime_mcp_keeper_trajectory

@@ -147,9 +147,13 @@ let test_runtime_mcp_keeper_log_context_uses_keeper_trace_and_current_turn () =
       check (option string) "trace_id"
         (Some ("trace-test-" ^ keeper_name))
         ctx.trace_id;
+      check (option string) "agent_name"
+        (Some (Masc_mcp.Keeper_types.keeper_agent_name keeper_name))
+        ctx.agent_name;
       check (option string) "session_id"
         (Some "session-explicit")
         ctx.session_id;
+      check bool "generation present" true (Option.is_some ctx.generation);
       check (option int) "turn" (Some 1) ctx.turn;
       check (option int) "keeper_turn_id" (Some 1) ctx.keeper_turn_id;
       check (option string) "task_id" (Some "task-123") ctx.task_id;
@@ -158,9 +162,21 @@ let test_runtime_mcp_keeper_log_context_uses_keeper_trace_and_current_turn () =
         ctx.goal_ids;
       check bool "model populated" true (String.trim ctx.model <> "");
       check bool "sandbox profile present" true (Option.is_some ctx.sandbox_profile);
+      check bool "sandbox root present" true (Option.is_some ctx.sandbox_root);
+      check bool "allowed paths present" true (Option.is_some ctx.allowed_paths);
       check bool "network mode present" true (Option.is_some ctx.network_mode);
       check bool "shared memory scope present" true
-        (Option.is_some ctx.shared_memory_scope))
+        (Option.is_some ctx.shared_memory_scope);
+      check bool "tool surface class present" true
+        (Option.is_some ctx.tool_surface_class);
+      check bool "visible tool count present" true
+        (Option.is_some ctx.visible_tool_count);
+      check (option (list string)) "runtime mcp required tools empty"
+        (Some []) ctx.required_tools;
+      check (option (list string)) "runtime mcp missing required tools empty"
+        (Some []) ctx.missing_required_tools;
+      check (option string) "cascade profile" (Some meta.cascade_name)
+        ctx.cascade_profile)
 
 let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
   Eio_main.run @@ fun env ->
@@ -231,6 +247,33 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
         (row |> U.member "task_id" |> U.to_string);
       check int "goal id count" 1
         (row |> U.member "goal_ids" |> U.to_list |> List.length);
+      let runtime_contract = row |> U.member "runtime_contract" in
+      check string "runtime contract agent"
+        (Masc_mcp.Keeper_types.keeper_agent_name keeper_name)
+        (runtime_contract |> U.member "agent_name" |> U.to_string);
+      check bool "runtime contract has generation" true
+        (match runtime_contract |> U.member "generation" with
+         | `Int _ -> true
+         | _ -> false);
+      check string "runtime contract sandbox profile"
+        (row |> U.member "sandbox_profile" |> U.to_string)
+        (runtime_contract |> U.member "sandbox_profile" |> U.to_string);
+      check bool "runtime contract allowed paths present" true
+        (runtime_contract |> U.member "allowed_paths" |> U.to_list
+         |> List.length
+         > 0);
+      check bool "runtime contract visible tool count present" true
+        (match runtime_contract |> U.member "visible_tool_count" with
+         | `Int n -> n > 0
+         | _ -> false);
+      check int "runtime contract required tools empty" 0
+        (runtime_contract |> U.member "required_tools" |> U.to_list
+         |> List.length);
+      check int "runtime contract missing required tools empty" 0
+        (runtime_contract |> U.member "missing_required_tools" |> U.to_list
+         |> List.length);
+      check string "runtime contract cascade profile" meta.cascade_name
+        (runtime_contract |> U.member "cascade_profile" |> U.to_string);
       let masc_root =
         Filename.concat base_path Common.masc_dirname
       in
@@ -267,6 +310,13 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
       check string "trajectory runtime keeper" keeper_name
         (trajectory_json |> U.member "runtime_contract" |> U.member "keeper_name"
          |> U.to_string);
+      check string "trajectory runtime agent"
+        (Masc_mcp.Keeper_types.keeper_agent_name keeper_name)
+        (trajectory_json |> U.member "runtime_contract" |> U.member "agent_name"
+         |> U.to_string);
+      check string "trajectory runtime cascade profile" meta.cascade_name
+        (trajectory_json |> U.member "runtime_contract"
+         |> U.member "cascade_profile" |> U.to_string);
       check string "trajectory action tool" "keeper_bash"
         (trajectory_json |> U.member "action_radius" |> U.member "tool_name"
          |> U.to_string);

@@ -162,13 +162,15 @@ export function StartAutoresearchForm() {
 
         <button type="button"
           class="self-start text-2xs text-[var(--text-muted)] hover:text-[var(--text-body)] transition-colors"
+          aria-expanded=${formShowAdvanced.value}
+          aria-controls="autoresearch-advanced"
           onClick=${() => { formShowAdvanced.value = !formShowAdvanced.value }}
         >
           ${formShowAdvanced.value ? '고급 설정 접기 \u25B2' : '고급 설정 \u25BC'}
         </button>
 
         ${formShowAdvanced.value ? html`
-          <div class="grid grid-cols-2 gap-3 border-t border-card-border pt-3">
+          <div class="grid grid-cols-2 gap-3 border-t border-card-border pt-3" id="autoresearch-advanced">
             <label class="flex flex-col gap-1">
               <span class="text-3xs uppercase tracking-wider text-[var(--text-muted)]">작업 디렉토리</span>
               <${TextInput}
@@ -233,7 +235,7 @@ export function StartAutoresearchForm() {
         ` : null}
 
         ${startFormError.value ? html`
-          <div class="px-3 py-2 rounded bg-[var(--bad-10)] border border-[var(--bad-20)] text-[var(--bad)] text-xs">
+          <div class="px-3 py-2 rounded bg-[var(--bad-10)] border border-[var(--bad-20)] text-[var(--bad)] text-xs" role="alert">
             ${startFormError.value}
           </div>
         ` : null}

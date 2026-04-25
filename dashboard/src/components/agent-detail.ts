@@ -360,7 +360,7 @@ export function AgentDetailOverlay() {
           <${Card} title="최근 활동">
             ${lines.length === 0
               ? html`<div class="h-full min-h-30"><${EmptyState} message="최근 활동 메시지가 없습니다" compact /></div>`
-              : html`<div class="max-h-60 overflow-y-auto flex flex-col gap-2 pr-1 custom-scrollbar">${lines.map((line: string, idx: number) => html`<div key=${idx} class="border border-card-border bg-card/40 px-3 py-2.5 font-mono text-xs text-text-body leading-relaxed rounded shadow-sm hover:bg-card/60 transition-colors">${line}</div>`)}</div>`}
+              : html`<div role="log" aria-label="최근 활동 로그" class="max-h-60 overflow-y-auto flex flex-col gap-2 pr-1 custom-scrollbar">${lines.map((line: string, idx: number) => html`<div key=${idx} class="border border-card-border bg-card/40 px-3 py-2.5 font-mono text-xs text-text-body leading-relaxed rounded shadow-sm hover:bg-card/60 transition-colors">${line}</div>`)}</div>`}
           <//>
         </div>
 
@@ -370,7 +370,7 @@ export function AgentDetailOverlay() {
           <${AgentDetailMemory} agentName=${agentName} />
           <${AgentWorkerBrief} agentName=${agentName} />
           ${agentFitness.value ? html`
-            <${Card} title="적합도 (7일)">
+            <${Card} title="적합도 (7일)" role="region" ariaLabel="에이전트 적합도">
               <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 ${[
                   ['완료율', agentFitness.value.completion_rate],

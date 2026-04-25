@@ -89,7 +89,7 @@ export function AgentDetailMemory({ agentName }: Props) {
   const { loading, error, data } = state.value
   if (loading) return html`<${LoadingState} label="메모리 컨텍스트 로드 중..." />`
   if (error)
-    return html`<div class="text-sm text-[var(--warn)]">메모리 로드 실패: ${error}</div>`
+    return html`<div role="alert" class="text-sm text-[var(--warn)]">메모리 로드 실패: ${error}</div>`
   if (!data) return null
 
   // Filter hebbian synapses where this keeper is either endpoint
@@ -141,6 +141,10 @@ export function AgentDetailMemory({ agentName }: Props) {
                                     <span class="font-mono flex-1 truncate">${normalizeKeeperName(s.to_agent)}</span>
                                     <div class="w-16 bg-[var(--white-5)] rounded h-1.5">
                                       <div
+                                        role="progressbar"
+                                        aria-valuenow=${Math.round(s.weight * 100)}
+                                        aria-valuemin=${0}
+                                        aria-valuemax=${100}
                                         class="${s.weight >= 0.7 ? 'bg-[var(--ok-10)]' : s.weight >= 0.4 ? 'bg-[var(--warn-10)]' : 'bg-[var(--bad-10)]'} rounded h-1.5"
                                         style="width:${Math.round(s.weight * 100)}%"
                                       ></div>
@@ -166,6 +170,10 @@ export function AgentDetailMemory({ agentName }: Props) {
                                     <span class="font-mono flex-1 truncate">${normalizeKeeperName(s.from_agent)}</span>
                                     <div class="w-16 bg-[var(--white-5)] rounded h-1.5">
                                       <div
+                                        role="progressbar"
+                                        aria-valuenow=${Math.round(s.weight * 100)}
+                                        aria-valuemin=${0}
+                                        aria-valuemax=${100}
                                         class="${s.weight >= 0.7 ? 'bg-[var(--ok-10)]' : s.weight >= 0.4 ? 'bg-[var(--warn-10)]' : 'bg-[var(--bad-10)]'} rounded h-1.5"
                                         style="width:${Math.round(s.weight * 100)}%"
                                       ></div>
@@ -216,7 +224,7 @@ export function AgentDetailMemory({ agentName }: Props) {
                     필터 결과 없음 (${episodes.length}개 중 0)
                   </div>`
                 : html`
-                  <div class="space-y-1.5 max-h-60 overflow-y-auto pr-1 custom-scrollbar">
+                  <div role="log" aria-label="에피소드 목록" class="space-y-1.5 max-h-60 overflow-y-auto pr-1 custom-scrollbar">
                     ${visibleEpisodes
                       .slice()
                       .reverse()

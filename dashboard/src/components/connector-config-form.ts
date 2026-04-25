@@ -429,12 +429,13 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
 
   if (entry.error !== null) {
     return html`
-      <div id=${`connector-config-${connectorId}`} class="mt-3 rounded border border-[var(--bad-20)] bg-[var(--bad-10)] p-3 text-2xs text-[var(--bad-light)]">
+      <div id=${`connector-config-${connectorId}`} role="alert" class="mt-3 rounded border border-[var(--bad-20)] bg-[var(--bad-10)] p-3 text-2xs text-[var(--bad-light)]">
         <div class="font-semibold">schema 가져오기 실패</div>
         <div class="mt-1 text-3xs opacity-80">${entry.error}</div>
         <button
           type="button"
           class="mt-2 cursor-pointer rounded border border-[var(--bad-20)] px-2 py-1 text-3xs hover:bg-[var(--bad-10)]"
+          aria-label="schema 다시 불러오기"
           onClick=${() => fetchSchema(connectorId)}
         >다시 시도</button>
       </div>
@@ -452,7 +453,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
   const envBlock = buildEnvBlock(entry)
 
   return html`
-    <div id=${`connector-config-${connectorId}`} class="mt-3 rounded border border-[var(--white-8)] bg-[var(--bg-1)] p-3">
+    <div id=${`connector-config-${connectorId}`} role="form" aria-label="${connectorId} 설정" class="mt-3 rounded border border-[var(--white-8)] bg-[var(--bg-1)] p-3">
       <div class="mb-2 flex items-center justify-between">
         <div class="text-3xs uppercase tracking-4 text-[var(--text-dim)]">
           ${entry.fields.length} fields · ${entry.fields.filter(f => f.required).length} required
@@ -463,6 +464,8 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
                   type="button"
                   class="ml-2 cursor-pointer rounded border border-[var(--ok-20)] bg-[var(--ok-10)] px-1.5 py-0.5 text-3xs text-[var(--ok)] hover:bg-[var(--ok-10)] disabled:cursor-not-allowed disabled:opacity-50"
                   disabled=${entry.restarting}
+                  aria-label=${entry.restarting ? `${connectorId} 재시작 중` : `${connectorId} sidecar 재시작`}
+                  aria-busy=${entry.restarting ? 'true' : 'false'}
                   title="POST /sidecar/stop → 800ms → POST /sidecar/start"
                   onClick=${() => { void restartSidecar(connectorId) }}
                 >

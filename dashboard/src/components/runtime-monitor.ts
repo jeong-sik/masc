@@ -594,13 +594,14 @@ export function RuntimeMonitor() {
                       <button type="button"
                         class="text-2xs text-[var(--text-muted)] hover:text-[var(--text-strong)] mt-1 text-left"
                         aria-expanded=${expandedModel.value === metric.model_id}
+                        aria-controls=${`recent-entries-${metric.model_id}`}
                         onClick=${() => { expandedModel.value = expandedModel.value === metric.model_id ? null : metric.model_id }}
                       >
-                        ${expandedModel.value === metric.model_id ? '▾' : '▸'} recent ${metric.recent_entries?.length ?? 0} turns
+                        <span aria-hidden="true">${expandedModel.value === metric.model_id ? '▾' : '▸'}</span> recent ${metric.recent_entries?.length ?? 0} turns
                       </button>
                       ${expandedModel.value === metric.model_id
-                        ? html`<div class="mt-1 border-t border-card-border/50 pt-2">
-                            <div class="grid grid-cols-7 gap-1 text-3xs text-[var(--text-muted)] font-medium mb-1">
+                        ? html`<div id=${`recent-entries-${metric.model_id}`} role="region" aria-label="최근 요청 상세" class="mt-1 border-t border-card-border/50 pt-2">
+                            <div class="grid grid-cols-7 gap-1 text-3xs text-[var(--text-muted)] font-medium mb-1" aria-hidden="true">
                               <div>time</div><div>in tok</div><div>out tok</div><div>latency</div><div>prefill tok/s</div><div>cost</div><div>tools</div>
                             </div>
                             ${metric.recent_entries?.map(re => {

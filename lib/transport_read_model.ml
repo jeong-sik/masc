@@ -5,12 +5,17 @@ type http_context = {
   include_configured : bool;
 }
 
-let rec trim_trailing_slashes value =
+let trim_trailing_slashes value =
+  (* Single-pass scan + at-most-one [String.sub], instead of recursing
+     once per trailing '/'.  base_url normalization runs on every
+     binding/handshake so even the small-N case adds up. *)
   let len = String.length value in
-  if len > 0 && value.[len - 1] = '/' then
-    trim_trailing_slashes (String.sub value 0 (len - 1))
-  else
-    value
+  let rec last_non_slash i =
+    if i < 0 || value.[i] <> '/' then i else last_non_slash (i - 1)
+  in
+  let last = last_non_slash (len - 1) in
+  if last = len - 1 then value
+  else String.sub value 0 (last + 1)
 
 let trim_nonempty value =
   let trimmed = String.trim value in

@@ -203,7 +203,7 @@ export function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
               ` : null}
               <div class="space-y-1 ${crashShowAll.value ? 'max-h-64' : 'max-h-32'} overflow-y-auto custom-scrollbar">
                 ${visible.length === 0 ? html`
-                  <div class="py-2 px-2 text-2xs text-[var(--text-muted)] italic">선택된 카테고리에 해당하는 장애가 없습니다.</div>
+                  <div class="py-2 px-2 text-2xs text-[var(--text-muted)] italic" role="status">선택된 카테고리에 해당하는 장애가 없습니다.</div>
                 ` : visible.map((e) => html`
                   <div class="flex items-center justify-between py-1 px-2 rounded text-2xs bg-[var(--white-3)]">
                     <${TimeAgo} timestamp=${e.ts ?? 0} class="font-mono text-[var(--text-muted)]" />

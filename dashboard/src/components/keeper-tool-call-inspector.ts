@@ -142,7 +142,7 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
   const entries = allEntries
 
   if (entries.length === 0) {
-    return html`<div class="text-xs text-[var(--text-muted)] p-4">도구 호출 데이터 없음. 서버 재시작 후 기록됩니다.</div>`
+    return html`<div class="text-xs text-[var(--text-muted)] p-4" role="status">도구 호출 데이터 없음. 서버 재시작 후 기록됩니다.</div>`
   }
 
   // Summary stats

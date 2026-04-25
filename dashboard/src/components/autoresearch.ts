@@ -141,7 +141,7 @@ function LoopSelector() {
             </button>
           `
         })}
-        ${loops.length === 0 ? html`<div class="text-[var(--text-muted)] text-xs py-1.5">선택된 실행자의 루프가 없습니다.</div>` : null}
+        ${loops.length === 0 ? html`<div class="text-[var(--text-muted)] text-xs py-1.5" role="status">선택된 실행자의 루프가 없습니다.</div>` : null}
         ${hasMoreLoops.value ? html`
           <button type="button" 
             class="px-3 py-1.5 rounded text-xs font-medium border border-card-border bg-card/60 text-accent cursor-pointer hover:bg-[var(--accent-10)] hover:border-accent/40 transition-colors flex items-center gap-1" 
@@ -279,7 +279,7 @@ function CycleHistoryTable({ cycles }: { cycles: AutoresearchCycleRecord[] }) {
         />
       </div>
       ${isFiltering && visibleCycles.length === 0
-        ? html`<div class="py-4 text-center text-2xs text-[var(--text-dim)]">필터 결과 없음 (${cycles.length} cycles)</div>`
+        ? html`<div class="py-4 text-center text-2xs text-[var(--text-dim)]" role="status">필터 결과 없음 (${cycles.length} cycles)</div>`
         : html`
           <div class="overflow-x-auto overflow-y-auto max-h-100 custom-scrollbar rounded border border-[var(--white-6)] bg-[rgba(0,0,0,0.1)]">
             <table class="w-full text-xs" aria-label="자율 연구 사이클 이력">

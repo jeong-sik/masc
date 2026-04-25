@@ -527,7 +527,7 @@ export function Memory() {
         />
       </div>
       ${isFiltering && posts.length === 0 && rawPosts.length > 0
-        ? html`<div class="py-4 text-center text-xs text-[var(--text-dim)]">필터 결과 없음 (${rawPosts.length} items)</div>`
+        ? html`<div class="py-4 text-center text-xs text-[var(--text-dim)]" role="status">필터 결과 없음 (${rawPosts.length} items)</div>`
         : posts.length === 0 && boardLoading.value
           ? html`<${LoadingState}>메모리 피드 불러오는 중...<//>`
           : posts.length === 0

@@ -1,4 +1,14 @@
-import { describe, it, expect } from 'vitest'
+import { html } from 'htm/preact'
+import { act, cleanup, render, screen } from '@testing-library/preact'
+import { afterEach, describe, it, expect, vi } from 'vitest'
+
+const { fetchKeepersCompositeMock } = vi.hoisted(() => ({
+  fetchKeepersCompositeMock: vi.fn(),
+}))
+
+vi.mock('../api/keeper', () => ({
+  fetchKeepersComposite: fetchKeepersCompositeMock,
+}))
 
 import {
   chipClassFor,
@@ -12,8 +22,14 @@ import {
   tallyInvariantViolations,
   tallyRuntimeAttention,
   type KeeperFleetHistory,
+  FleetFsmMatrix,
 } from './fleet-fsm-matrix'
-import type { KeeperCompositeExecution, KeeperCompositeSnapshot } from '../api/keeper'
+import { fleetCompositeSnapshot } from '../composite-signals'
+import type {
+  FleetCompositeSnapshot,
+  KeeperCompositeExecution,
+  KeeperCompositeSnapshot,
+} from '../api/keeper'
 
 function snapshot(
   overrides: Partial<KeeperCompositeSnapshot> & {
@@ -67,6 +83,23 @@ function execution(
     ...overrides,
   }
 }
+
+function fleetSnapshot(
+  snapshots: KeeperCompositeSnapshot[] = [snapshot()],
+): FleetCompositeSnapshot {
+  return {
+    generated_at: 1_713_000_000,
+    count: snapshots.length,
+    snapshots,
+  }
+}
+
+afterEach(() => {
+  cleanup()
+  vi.useRealTimers()
+  fetchKeepersCompositeMock.mockReset()
+  fleetCompositeSnapshot.value = null
+})
 
 describe('chipClassFor', () => {
   it('maps known states to the right semantic tone', () => {
@@ -379,5 +412,39 @@ describe('filterKeeperSnapshots', () => {
     const out = filterKeeperSnapshots(rows, 'gen12')
     expect(out).not.toBe(rows)
     expect(out.length).toBe(2)
+  })
+})
+
+describe('FleetFsmMatrix streaming fallback', () => {
+  it('uses an existing streamed snapshot without starting fallback polling', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-25T00:00:00Z'))
+    fetchKeepersCompositeMock.mockResolvedValue(
+      fleetSnapshot([snapshot({ name: 'fallback' })]),
+    )
+    fleetCompositeSnapshot.value = fleetSnapshot([snapshot({ name: 'streamed' })])
+
+    render(html`<${FleetFsmMatrix} pollIntervalMs=${1000} />`)
+    await act(async () => {})
+
+    expect(screen.getByText('streamed')).toBeTruthy()
+    expect(fetchKeepersCompositeMock).not.toHaveBeenCalled()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000)
+    })
+
+    expect(fetchKeepersCompositeMock).not.toHaveBeenCalled()
+  })
+
+  it('falls back to fetching immediately when no streamed snapshot exists', async () => {
+    fetchKeepersCompositeMock.mockResolvedValue(
+      fleetSnapshot([snapshot({ name: 'fallback' })]),
+    )
+
+    render(html`<${FleetFsmMatrix} pollIntervalMs=${1000} />`)
+
+    expect(await screen.findByText('fallback')).toBeTruthy()
+    expect(fetchKeepersCompositeMock).toHaveBeenCalledTimes(1)
   })
 })

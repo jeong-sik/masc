@@ -704,10 +704,10 @@ export function ToolAllowlistEditor({
       </div>
 
       ${lastError.value
-        ? html`<span class="text-3xs text-[var(--bad)]">${lastError.value}</span>`
+        ? html`<span class="text-3xs text-[var(--bad)]" role="alert">${lastError.value}</span>`
         : null}
       ${lastSuccess.value
-        ? html`<span class="text-3xs text-[var(--ok)]">${lastSuccess.value}</span>`
+        ? html`<span class="text-3xs text-[var(--ok)]" role="status">${lastSuccess.value}</span>`
         : null}
     </div>
   `

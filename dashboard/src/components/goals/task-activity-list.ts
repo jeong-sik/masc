@@ -111,7 +111,7 @@ function ActivityEntry({ event }: { event: UnifiedTraceEvent }) {
               <${JsonViewerCard} data=${event.detail} title="Detail" />
             </div>
           ` : null}
-          ${event.error ? html`<div class="text-2xs text-[var(--bad-light)] mt-1">${event.error}</div>` : null}
+          ${event.error ? html`<div class="text-2xs text-[var(--bad-light)] mt-1" role="alert">${event.error}</div>` : null}
           ${event.cost_usd != null ? html`<div class="text-3xs text-text-dim mt-1">cost: $${event.cost_usd.toFixed(4)}</div>` : null}
         </div>
       ` : null}

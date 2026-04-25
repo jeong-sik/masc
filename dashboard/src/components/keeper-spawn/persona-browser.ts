@@ -79,7 +79,7 @@ export function PersonaBrowser() {
   if (personasLoading.value) return html`<p class="text-xs text-[var(--text-muted)] py-4">페르소나 로딩 중...</p>`
   if (personasError.value) return html`
     <div class="py-4">
-      <p class="text-xs text-[var(--bad)] mb-2">${personasError.value}</p>
+      <p class="text-xs text-[var(--bad)] mb-2" role="alert">${personasError.value}</p>
       <${ActionButton} variant="ghost" size="sm" onClick=${() => void loadPersonas()}>재시도<//>
     </div>`
   if (personas.value.length === 0) return html`<p class="text-xs text-[var(--text-muted)] py-4">등록된 페르소나가 없습니다.</p>`

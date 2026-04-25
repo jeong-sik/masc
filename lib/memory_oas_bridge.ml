@@ -466,6 +466,54 @@ let store_episode_from_snapshot
   in
   Oas.Memory.store_episode memory episode
 
+(** #10341: emit an [Agent_stress] event when an institution
+    failure carries a timeout-shaped [error_kind].
+
+    Pre-fix [Agent_stress] had a single emit site
+    ([keeper_keepalive.ml:1141]) that recorded only
+    [Failure_streak] for empty room presence — fleet-wide RFC-0001
+    Phase 0.2 stress detection saw 1 entry / 24h despite a 35%
+    keeper turn failure rate.  The [stress_kind] variant already
+    declared a [Timeout] case but no caller emitted it.
+
+    This adds the most direct wiring: when [store_failed_turn_episode]
+    receives an [error_kind] from the OAS internal-error vocabulary
+    that names a timeout-class failure, fan out one [Timeout]
+    stress event so dashboards reading [agent_stress.jsonl] see
+    fleet timeout pressure.
+
+    Bounded to three [error_kind] values that semantically ARE
+    timeouts.  Other failure modes (cascade_exhausted,
+    resumable_cli_session, accept_rejected, …) stay unmapped this
+    cycle — they need different stress kinds (Fallback_approval,
+    Parse_degraded, Task_released) whose semantics deserve their
+    own audit before being wired. *)
+let timeout_error_kinds =
+  [ "oas_timeout_budget"; "turn_timeout"; "admission_queue_timeout" ]
+
+let stress_kind_for_error_kind error_kind =
+  let trimmed = String.trim error_kind in
+  if List.exists (String.equal trimmed) timeout_error_kinds then
+    Some Agent_stress.Timeout
+  else None
+
+let emit_stress_for_failure ~keeper_name ~error_kind =
+  match stress_kind_for_error_kind error_kind with
+  | None -> ()
+  | Some stress_kind ->
+      Agent_stress.record
+        {
+          agent_name = keeper_name;
+          (* No room context inside institution-failure path — the
+             receiver tolerates an empty string (existing
+             [Agent_stress.record] callsite at
+             keeper_keepalive.ml:1143 falls back to "" when the
+             keeper has not joined any room yet). *)
+          room_id = "";
+          kind = stress_kind;
+          timestamp = Unix.gettimeofday ();
+        }
+
 let store_failed_turn_episode
     ~(memory : Oas.Memory.t)
     ~(keeper_name : string)
@@ -491,6 +539,7 @@ let store_failed_turn_episode
     Printf.sprintf "keeper-%s-t%d-failure-%d" keeper_name turn
       (int_of_float (ts *. 1000.0) mod 1_000_000)
   in
+  emit_stress_for_failure ~keeper_name ~error_kind;
   let episode : Oas.Memory.episode =
     {
       id = episode_id;

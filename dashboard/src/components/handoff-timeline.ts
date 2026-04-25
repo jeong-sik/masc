@@ -281,7 +281,7 @@ export function HandoffTimeline({
   const isFiltering = query.value.trim() !== ''
 
   return html`
-    <section class="rounded border border-card-border bg-card-bg p-4 flex flex-col gap-3">
+    <section role="region" aria-label="A2A 이벤트 타임라인" class="rounded border border-card-border bg-card-bg p-4 flex flex-col gap-3">
       <header class="flex items-baseline justify-between">
         <div>
           <h3 class="text-sm font-semibold text-text">A2A Event Timeline</h3>
@@ -318,7 +318,7 @@ export function HandoffTimeline({
         />
       </div>
       ${error !== null
-        ? html`<p class="text-2xs text-[var(--bad-light)]">오류: ${error}</p>`
+        ? html`<p role="alert" class="text-2xs text-[var(--bad-light)]">오류: ${error}</p>`
         : rows.length === 0
           ? html`<p class="text-2xs text-text-dim">이 시간 범위에 A2A 이벤트 없음.</p>`
           : isFiltering && visibleRows.length === 0
@@ -365,6 +365,7 @@ export function HandoffTimeline({
                           type="button"
                           class=${rowLabelCls}
                           title=${row.keeper}
+                          aria-label=${`${row.keeper} 이벤트 보기`}
                           onClick=${() => onSelectKeeper?.(row.keeper)}
                         >${row.keeper}</button>`
                       : html`<div class=${rowLabelCls} title=${row.keeper}>${row.keeper}</div>`}

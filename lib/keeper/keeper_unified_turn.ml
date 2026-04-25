@@ -252,8 +252,12 @@ let next_fail_open_cascade_for_turn
     ~(tool_requirement : string)
     ~(attempted_cascades : string list)
     (err : Oas.Error.sdk_error) : EC.degraded_retry option =
+  let fallback_hint =
+    Keeper_cascade_profile.fallback_cascade_for effective_cascade
+  in
   EC.degraded_rotation_after_recoverable_error
     ?rotation_cascades
+    ?fallback_hint
     ~base_cascade ~effective_cascade ~tool_requirement
     ~attempted_cascades err
 

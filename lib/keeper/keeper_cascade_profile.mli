@@ -61,6 +61,21 @@ val keeper_catalog_names : ?config_path:string -> unit -> string list
 val system_catalog_names : ?config_path:string -> unit -> string list
 (** Live system-only profile names present in [cascade.json]. *)
 
+val fallback_cascade_for : ?config_path:string -> string -> string option
+(** Declarative escalation hint for [name].
+
+    Returns [Some target] when:
+    - the profile [name] is present in the live catalog, AND
+    - it declares a non-empty [fallback_cascade], AND
+    - the [fallback_cascade] target is itself a live catalog entry.
+
+    Returns [None] otherwise (including when the target is missing
+    or self-referential). Unknown targets are logged as a single
+    WARN line per startup and treated as if absent — the runtime
+    must never crash because of a stale fallback hint.
+
+    @since 0.174.0 *)
+
 val is_system_only_cascade : string -> bool
 (** Exact-name membership check against the active config's
     {!system_catalog_names}. *)

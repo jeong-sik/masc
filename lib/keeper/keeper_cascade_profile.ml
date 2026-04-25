@@ -107,6 +107,51 @@ let system_catalog_names ?config_path () =
              if entry.keeper_assignable then None else Some entry.name)
   | None -> []
 
+(** Track which (cascade, target) pairs we have already logged as
+    invalid fallback_cascade hints so the WARN line fires once per
+    process — not once per keeper turn. *)
+let logged_invalid_fallback : (string * string, unit) Hashtbl.t =
+  Hashtbl.create 4
+
+let fallback_cascade_for ?config_path name =
+  let trimmed_name = String.trim name in
+  if String.equal trimmed_name "" then None
+  else
+    match catalog_entries ?config_path () with
+    | None -> None
+    | Some entries ->
+        let catalog_names =
+          List.map
+            (fun (entry : Cascade_config_loader.catalog_entry) -> entry.name)
+            entries
+        in
+        let entry_opt =
+          List.find_opt
+            (fun (entry : Cascade_config_loader.catalog_entry) ->
+              String.equal entry.name trimmed_name)
+            entries
+        in
+        (match entry_opt with
+         | None -> None
+         | Some entry ->
+             (match entry.fallback_cascade with
+              | None -> None
+              | Some target ->
+                  if String.equal target trimmed_name then None
+                  else if List.mem target catalog_names then Some target
+                  else begin
+                    let key = (trimmed_name, target) in
+                    if not (Hashtbl.mem logged_invalid_fallback key) then begin
+                      Hashtbl.add logged_invalid_fallback key ();
+                      Eio.traceln
+                        "[CascadeConfig] WARN profile %s declares \
+                         fallback_cascade=%s which is not in the live \
+                         catalog; ignoring hint"
+                        trimmed_name target
+                    end;
+                    None
+                  end))
+
 let canonicalize_with_catalog ~catalog raw =
   match String.trim raw with
   | "" -> default_name

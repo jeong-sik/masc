@@ -3234,6 +3234,49 @@ let test_degraded_rotation_after_recoverable_error_normalizes_catalog_directly (
   expect_degraded_retry "normalized catalog classifier rotation"
     "catalog_next" "hard_quota" degraded_retry
 
+let test_degraded_rotation_prefers_fallback_hint_over_catalog () =
+  let degraded_retry =
+    EC.degraded_rotation_after_recoverable_error
+      ~rotation_cascades:[ KC.local_recovery_cascade_name; "big_three" ]
+      ~fallback_hint:"local_with_kimi_coding_with_glm"
+      ~base_cascade:"ollama_only"
+      ~effective_cascade:"ollama_only"
+      ~tool_requirement:"optional"
+      ~attempted_cascades:[ "ollama_only" ]
+      (wrapped_claude_limit_error ())
+  in
+  expect_degraded_retry "fallback_hint takes priority"
+    "local_with_kimi_coding_with_glm" "hard_quota" degraded_retry
+
+let test_degraded_rotation_skips_already_attempted_fallback_hint () =
+  let degraded_retry =
+    EC.degraded_rotation_after_recoverable_error
+      ~rotation_cascades:[ KC.local_recovery_cascade_name; "big_three" ]
+      ~fallback_hint:"local_with_kimi_coding_with_glm"
+      ~base_cascade:"ollama_only"
+      ~effective_cascade:"ollama_only"
+      ~tool_requirement:"optional"
+      ~attempted_cascades:
+        [ "ollama_only"; "local_with_kimi_coding_with_glm" ]
+      (wrapped_claude_limit_error ())
+  in
+  expect_degraded_retry "exhausted hint falls through to catalog"
+    KC.local_recovery_cascade_name "hard_quota" degraded_retry
+
+let test_degraded_rotation_ignores_blank_fallback_hint () =
+  let degraded_retry =
+    EC.degraded_rotation_after_recoverable_error
+      ~rotation_cascades:[ KC.local_recovery_cascade_name; "big_three" ]
+      ~fallback_hint:"   "
+      ~base_cascade:"ollama_only"
+      ~effective_cascade:"ollama_only"
+      ~tool_requirement:"optional"
+      ~attempted_cascades:[ "ollama_only" ]
+      (wrapped_claude_limit_error ())
+  in
+  expect_degraded_retry "blank hint behaves like no hint"
+    KC.local_recovery_cascade_name "hard_quota" degraded_retry
+
 let test_fail_open_rotation_cascades_from_catalog_merges_reserved_and_assignable () =
   let rotation =
     UT.fail_open_rotation_cascades_from_catalog
@@ -5963,6 +6006,15 @@ let () =
           test_case "classifier normalizes catalog rotation"
             `Quick
             test_degraded_rotation_after_recoverable_error_normalizes_catalog_directly;
+          test_case "fallback_hint preempts catalog rotation"
+            `Quick
+            test_degraded_rotation_prefers_fallback_hint_over_catalog;
+          test_case "fallback_hint skipped when already attempted"
+            `Quick
+            test_degraded_rotation_skips_already_attempted_fallback_hint;
+          test_case "blank fallback_hint behaves like no hint"
+            `Quick
+            test_degraded_rotation_ignores_blank_fallback_hint;
           test_case "catalog rotation order merges reserved and assignable"
             `Quick
             test_fail_open_rotation_cascades_from_catalog_merges_reserved_and_assignable;

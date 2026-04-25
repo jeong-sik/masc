@@ -135,6 +135,7 @@ export function StartAutoresearchForm() {
             value=${formGoal.value}
             placeholder="최적화 목표 (예: Reduce inference latency by optimizing hot path)"
             rows=${2}
+            required
             onInput=${inputHandler(formGoal)}
           />
         </label>
@@ -144,6 +145,7 @@ export function StartAutoresearchForm() {
           <${TextInput}
             value=${formMetricFn.value}
             placeholder="마지막 줄에 float를 출력하는 명령어 (예: python eval.py --metric accuracy)"
+            required
             onInput=${inputHandler(formMetricFn)}
           />
         </label>
@@ -153,6 +155,7 @@ export function StartAutoresearchForm() {
           <${TextInput}
             value=${formTargetFile.value}
             placeholder="수정할 파일 경로 (예: lib/optimizer.ml)"
+            required
             onInput=${inputHandler(formTargetFile)}
           />
         </label>

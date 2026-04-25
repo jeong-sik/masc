@@ -17,6 +17,7 @@ interface TextInputProps {
   value?: string
   placeholder?: string
   disabled?: boolean
+  required?: boolean
   class?: string
   type?: string
   name?: string
@@ -31,6 +32,7 @@ export function TextInput({
   value,
   placeholder,
   disabled,
+  required,
   class: cx,
   type = 'text',
   name,
@@ -47,6 +49,7 @@ export function TextInput({
       value=${value}
       placeholder=${placeholder}
       disabled=${disabled}
+      required=${required}
       name=${name}
       aria-label=${ariaLabel}
       autocomplete=${autoComplete}
@@ -65,6 +68,7 @@ interface TextAreaProps {
   name?: string
   ariaLabel?: string
   disabled?: boolean
+  required?: boolean
   onInput?: (e: Event) => void
 }
 
@@ -77,6 +81,7 @@ export function TextArea({
   name,
   ariaLabel,
   disabled,
+  required,
   onInput,
 }: TextAreaProps) {
   return html`
@@ -88,6 +93,7 @@ export function TextArea({
       name=${name}
       aria-label=${ariaLabel}
       disabled=${disabled}
+      required=${required}
       value=${value}
       onInput=${onInput}
     ></textarea>

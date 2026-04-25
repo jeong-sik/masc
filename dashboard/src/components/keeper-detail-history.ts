@@ -84,7 +84,7 @@ function CheckpointSummaryCard({
         ? html`<div class="mt-2 text-xs leading-relaxed text-[var(--text-body)]">${summary.latest_preview}</div>`
         : null}
       ${summary.continuity_summary
-        ? html`<pre class="mt-2 whitespace-pre-wrap rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-2xs leading-relaxed text-[var(--text-muted)]">${summary.continuity_summary}</pre>`
+        ? html`<pre class="mt-2 whitespace-pre-wrap rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-2xs leading-relaxed text-[var(--text-muted)] max-h-40 overflow-y-auto">${summary.continuity_summary}</pre>`
         : html`<div class="mt-2 text-2xs text-[var(--text-dim)]">continuity snapshot 없음</div>`}
     </div>
   `
@@ -270,7 +270,7 @@ export function KeeperCheckpointPanel({
                           ? html`<div class="mt-2 text-xs leading-relaxed text-[var(--text-body)]">${item.latest_preview}</div>`
                           : null}
                         ${item.continuity_summary
-                          ? html`<pre class="mt-2 whitespace-pre-wrap rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-2xs leading-relaxed text-[var(--text-muted)]">${item.continuity_summary}</pre>`
+                          ? html`<pre class="mt-2 whitespace-pre-wrap rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-2xs leading-relaxed text-[var(--text-muted)] max-h-40 overflow-y-auto">${item.continuity_summary}</pre>`
                           : html`<div class="mt-2 text-2xs text-[var(--text-dim)]">continuity snapshot 없음</div>`}
                       </div>
                     </label>

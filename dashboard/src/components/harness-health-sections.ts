@@ -385,7 +385,7 @@ export function RecentVerdictsList({ items }: { items: HarnessVerdictItem[] }) {
                   ${item.agent_name || 'agent'} · ${item.gate || 'gate'} · ${item.evaluator_cascade || 'cascade'} · ${formatTimestamp(item.timestamp)}
                 </div>
               </div>
-              <${StatusDot} size="md" class=${verdictTone(item.verdict)} />
+              <${StatusDot} size="md" class=${verdictTone(item.verdict)} ariaLabel=${item.verdict.startsWith('approve') ? '승인' : '거절'} />
             </div>
             <div class="mt-2 text-sm text-[var(--text-body)]">${verdictSummary(item.verdict)}</div>
             ${item.fallback_reason ? html`

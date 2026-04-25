@@ -166,6 +166,12 @@ function statusDot(status: StatusTone): string {
   return 'bg-[var(--bad)]'
 }
 
+function statusLabel(status: StatusTone): string {
+  if (status === 'ok') return '정상'
+  if (status === 'warn') return '주의'
+  return '오류'
+}
+
 function toneClass(status: StatusTone): string {
   if (status === 'ok') return 'text-[var(--ok)]'
   if (status === 'warn') return 'text-[var(--warn)]'
@@ -294,7 +300,7 @@ function SectionCard({
     <div class="rounded border border-card-border bg-bg-1/60 p-4" role="group" aria-label=${`${title} 상태`}>
       <div class="flex items-center justify-between gap-3 mb-3">
         <div class="flex items-center gap-2 min-w-0">
-          <${StatusDot} size="sm" class=${statusDot(status)} />
+          <${StatusDot} size="sm" class=${statusDot(status)} ariaLabel=${statusLabel(status)} />
           <span class="text-xs font-semibold text-text-strong uppercase tracking-wider truncate" title=${title}>${title}</span>
         </div>
         ${eyebrow ? html`<span class=${`text-3xs uppercase tracking-wider ${toneClass(status)}`}>${eyebrow}</span>` : null}
@@ -404,11 +410,11 @@ export function TransportHealthPanel() {
         <summary class="flex items-center gap-3 px-4 py-3 cursor-pointer text-sm font-semibold text-text-strong bg-card/28 hover:bg-card/44 transition-colors">
           <span>트랜스포트 상세</span>
           <span class="ml-auto flex items-center gap-2 text-2xs font-normal text-text-muted">
-            <span class="inline-flex items-center gap-1"><${StatusDot} size="xs" class=${statusDot(sseStatus)} />SSE</span>
-            <span class="inline-flex items-center gap-1"><${StatusDot} size="xs" class=${statusDot(grpcStatus)} />gRPC</span>
-            <span class="inline-flex items-center gap-1"><${StatusDot} size="xs" class=${statusDot(wsStatus)} />WS</span>
-            <span class="inline-flex items-center gap-1"><${StatusDot} size="xs" class=${statusDot(webrtcStatus)} />RTC</span>
-            <span class="inline-flex items-center gap-1"><${StatusDot} size="xs" class=${statusDot(h2Status)} />HTTP</span>
+            <span class="inline-flex items-center gap-1"><${StatusDot} size="xs" class=${statusDot(sseStatus)} ariaLabel=${`SSE ${statusLabel(sseStatus)}`} />SSE</span>
+            <span class="inline-flex items-center gap-1"><${StatusDot} size="xs" class=${statusDot(grpcStatus)} ariaLabel=${`gRPC ${statusLabel(grpcStatus)}`} />gRPC</span>
+            <span class="inline-flex items-center gap-1"><${StatusDot} size="xs" class=${statusDot(wsStatus)} ariaLabel=${`WS ${statusLabel(wsStatus)}`} />WS</span>
+            <span class="inline-flex items-center gap-1"><${StatusDot} size="xs" class=${statusDot(webrtcStatus)} ariaLabel=${`RTC ${statusLabel(webrtcStatus)}`} />RTC</span>
+            <span class="inline-flex items-center gap-1"><${StatusDot} size="xs" class=${statusDot(h2Status)} ariaLabel=${`HTTP ${statusLabel(h2Status)}`} />HTTP</span>
           </span>
         </summary>
         <div class="p-4">

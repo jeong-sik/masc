@@ -260,6 +260,17 @@ function keeperStatusToneClass(status: string): string {
   }
 }
 
+function keeperStatusLabel(status: string): string {
+  switch (status.toLowerCase()) {
+    case 'active': return '활성'
+    case 'busy': return '작업 중'
+    case 'offline': return '오프라인'
+    case 'inactive': return '비활성'
+    case 'paused': return '일시정지'
+    default: return status
+  }
+}
+
 export function pickActiveKeepers(all: readonly Keeper[], max: number = 3): Keeper[] {
   const scored: { k: Keeper; score: number }[] = []
   for (const k of all) {
@@ -289,7 +300,7 @@ function KeeperStrip({ keeperList }: { keeperList: readonly Keeper[] }) {
         ${top.map(
           k => html`
             <li class="flex items-center gap-2 min-w-0">
-              <${StatusDot} size="sm" class=${keeperStatusToneClass(k.status)} />
+              <${StatusDot} size="sm" class=${keeperStatusToneClass(k.status)} ariaLabel=${keeperStatusLabel(k.status)} />
               <${RouteLink}
                 tab="monitoring"
                 params=${{ section: 'keepers', keeper: k.name }}

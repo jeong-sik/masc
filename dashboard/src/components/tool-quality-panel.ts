@@ -164,11 +164,11 @@ function ToolTable({
       <table class="w-full text-2xs" aria-label="도구 품질 지표">
         <thead>
           <tr class="text-[var(--text-dim)] border-b border-[var(--card-border)]">
-            <th scope="col" class="text-left py-1 font-normal">Tool</th>
-            <th scope="col" class="text-right py-1 font-normal">Calls</th>
-            <th scope="col" class="text-right py-1 font-normal">Success</th>
-            <th scope="col" class="text-right py-1 font-normal">Avg ms</th>
-            <th scope="col" class="text-right py-1 font-normal">Output</th>
+            <th scope="col" class="text-left py-1 font-normal">도구</th>
+            <th scope="col" class="text-right py-1 font-normal">호출</th>
+            <th scope="col" class="text-right py-1 font-normal">성공률</th>
+            <th scope="col" class="text-right py-1 font-normal">평균 ms</th>
+            <th scope="col" class="text-right py-1 font-normal">출력</th>
           </tr>
         </thead>
         <tbody>
@@ -340,23 +340,23 @@ export function ToolQualityPanel() {
         <div class="text-center">
           <div class="text-lg font-mono text-[var(--text)]">${d.total.toLocaleString()}</div>
           <div class="text-3xs text-[var(--text-dim)] uppercase">
-            ${d.sampling_mode === 'recent_n' ? 'Sampled Calls' : 'Window Calls'}
+            ${d.sampling_mode === 'recent_n' ? '표본 호출' : '윈도우 호출'}
           </div>
         </div>
         <div class="text-center">
           <div class="text-lg font-mono text-[var(--bad-light)]/80">${d.failure}</div>
-          <div class="text-3xs text-[var(--text-dim)] uppercase">Failures</div>
+          <div class="text-3xs text-[var(--text-dim)] uppercase">실패</div>
         </div>
       </div>
 
-      <${RateGauge} rate=${d.success_rate} label="Overall" />
+      <${RateGauge} rate=${d.success_rate} label="전체" />
 
       ${d.hourly_trend && d.hourly_trend.length >= 2 ? html`
         <${TrendSparkline} points=${d.hourly_trend} />
       ` : null}
 
       <div>
-        <div class="text-3xs text-[var(--text-dim)] uppercase tracking-wider mb-1">Per Keeper</div>
+        <div class="text-3xs text-[var(--text-dim)] uppercase tracking-wider mb-1">Keeper별</div>
         <${KeeperRateBars} keepers=${d.by_keeper} />
       </div>
 
@@ -381,7 +381,7 @@ export function ToolQualityPanel() {
       </div>
 
       <div>
-        <div class="text-3xs text-[var(--text-dim)] uppercase tracking-wider mb-1">Failure Categories</div>
+        <div class="text-3xs text-[var(--text-dim)] uppercase tracking-wider mb-1">실패 카테고리</div>
         <${FailureList} categories=${d.failure_categories} />
       </div>
     </div>

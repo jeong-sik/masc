@@ -250,12 +250,30 @@ let format_event ?id ?event_type data =
         (* Atomic fetch_and_add: returns old value, we want new value so +1 *)
         Atomic.fetch_and_add event_counter 1 + 1
   in
-  let id_line = Printf.sprintf "id: %d\n" effective_id in
-  let event_line = match event_type with
-    | Some e -> Printf.sprintf "event: %s\n" e
-    | None -> ""
-  in
-  Printf.sprintf "%s%sdata: %s\n\n" id_line event_line data
+  (* Hot path: every broadcast goes through here once.  The previous
+     three [Printf.sprintf] calls each ran the format interpreter and
+     allocated an intermediate string ([id_line], [event_line], the
+     concat), so a single broadcast paid for three string allocations
+     plus the [%d]/[%s] dispatch overhead before the result string was
+     produced.  A single [Buffer] accumulator with primitive
+     [string_of_int] sidesteps the format interpreter entirely and
+     emits exactly the bytes the SSE wire format requires (id-line +
+     optional event-line + data-line + blank).  The output string is
+     byte-for-byte identical to what [Printf.sprintf] produced. *)
+  let buf = Buffer.create 64 in
+  Buffer.add_string buf "id: ";
+  Buffer.add_string buf (string_of_int effective_id);
+  Buffer.add_char buf '\n';
+  (match event_type with
+   | Some e ->
+       Buffer.add_string buf "event: ";
+       Buffer.add_string buf e;
+       Buffer.add_char buf '\n'
+   | None -> ());
+  Buffer.add_string buf "data: ";
+  Buffer.add_string buf data;
+  Buffer.add_string buf "\n\n";
+  Buffer.contents buf
 
 (** Get current event ID *)
 let current_id () = Atomic.get event_counter

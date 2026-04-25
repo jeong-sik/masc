@@ -701,15 +701,18 @@ type cascade_source = Named | Default_fallback | Hardcoded_defaults
     3. Selected item becomes first; rest sorted by weight desc
 
     @since 0.137.0 *)
-(* Shared weighted-shuffle RNG.  Protect draws with Eio.Mutex because
-   [Random.State.int] mutates the state and this path can be hit from
-   concurrent server fibers on the same domain. *)
+(* Shared weighted-shuffle RNG.  Protect draws because [Random.State.int]
+   mutates the state and this path can be hit from concurrent server fibers.
+   Use [Stdlib.Mutex], not [Eio.Mutex]: selection-trace/dashboard helpers are
+   also exercised from non-Eio contexts where [Eio.Mutex] raises
+   [Effect.Unhandled(Cancel.Get_context)].  The critical section is a single
+   RNG draw, so blocking briefly is acceptable. *)
 let weighted_shuffle_rng = Random.State.make_self_init ()
-let weighted_shuffle_rng_mu = Eio.Mutex.create ()
+let weighted_shuffle_rng_mu = Stdlib.Mutex.create ()
 
 let weighted_random_int bound =
-  Eio.Mutex.use_rw ~protect:true weighted_shuffle_rng_mu (fun () ->
-    Random.State.int weighted_shuffle_rng bound)
+  Stdlib.Mutex.protect weighted_shuffle_rng_mu (fun () ->
+      Random.State.int weighted_shuffle_rng bound)
 
 let weighted_shuffle
     ?(rand_int = weighted_random_int)

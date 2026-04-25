@@ -961,6 +961,7 @@ let test_runtime_precondition_contracts () =
    the SSOT and this test catches it before merge. *)
 let test_masc_dirname_ssot_contracts () =
   let migrated_files = [
+    (* batch 1 (#10237) *)
     "lib/auth.ml";
     "lib/board_votes.ml";
     "lib/discovery_history.ml";
@@ -969,6 +970,11 @@ let test_masc_dirname_ssot_contracts () =
     "lib/institution_eio.ml";
     "lib/repo_synthesis_benchmark.ml";
     "lib/tool_blob_store/tool_blob_store.ml";
+    (* batch 2 (this PR) *)
+    "lib/config_dir_resolver.ml";
+    "lib/mcp_server_eio_resource.ml";
+    "lib/oas_worker_cascade.ml";
+    "lib/procedural_memory.ml";
   ] in
   List.iter
     (fun file ->

@@ -432,7 +432,11 @@ let get_cascade_audit_store () =
   | Some store -> Some store
   | None ->
       let base_path = Env_config_core.base_path () in
-      let dir = Filename.concat base_path ".masc/cascade_audit" in
+      let dir =
+        Filename.concat
+          (Common.masc_dir_from_base_path ~base_path)
+          "cascade_audit"
+      in
       (match Dated_jsonl.create ~base_dir:dir () with
       | store ->
           cascade_audit_store_ref := Some store;

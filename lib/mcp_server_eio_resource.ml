@@ -147,7 +147,9 @@ let handle_read_resource_eio state id params =
           | "schema.json" ->
               ("application/json", Some (Yojson.Safe.pretty_to_string Mcp_server.schema_json))
           | "institution" ->
-              let file = Filename.concat config.base_path ".masc/institution.json" in
+              let file = Filename.concat
+                (Common.masc_dir_from_base_path ~base_path:config.base_path)
+                "institution.json" in
               if Sys.file_exists file then
                 try
                   let json = Coord.read_json config file in
@@ -160,7 +162,9 @@ let handle_read_resource_eio state id params =
               else
                 ("text/markdown", Some "No institution memory found. Create one with masc_init.")
           | "institution.json" ->
-              let file = Filename.concat config.base_path ".masc/institution.json" in
+              let file = Filename.concat
+                (Common.masc_dir_from_base_path ~base_path:config.base_path)
+                "institution.json" in
               if Sys.file_exists file then
                 let content = Fs_compat.load_file file in
                 ("application/json", Some content)

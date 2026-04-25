@@ -242,7 +242,8 @@ let test_review_blocker_metrics_registered () =
   in
   check_registered Prometheus.metric_tool_join_required_guard;
   check_registered Prometheus.metric_timeout_policy_overshoot;
-  check_registered Prometheus.metric_auth_credential_token_duplicate
+  check_registered Prometheus.metric_auth_credential_token_duplicate;
+  check_registered Prometheus.metric_telemetry_coverage_gap
 
 let test_histogram_exported_as_summary () =
   let name = "test_hist_export_fmt" in

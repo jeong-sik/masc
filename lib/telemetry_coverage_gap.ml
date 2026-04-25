@@ -13,6 +13,13 @@ let string_opt_json = function
 
 let record ~masc_root ~source ~producer ~durable_store ~dashboard_surface
     ~stale_reason ?keeper_name ?trace_id ?error () =
+  Prometheus.inc_counter Prometheus.metric_telemetry_coverage_gap
+    ~labels:[
+      ("source", source);
+      ("producer", producer);
+      ("dashboard_surface", dashboard_surface);
+      ("stale_reason", stale_reason);
+    ] ();
   let store = Dated_jsonl.create ~base_dir:(store_dir masc_root) () in
   let now = Time_compat.now () in
   let json =

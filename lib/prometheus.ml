@@ -392,6 +392,14 @@ let metric_persistence_read_drops =
 let metric_codex_cli_mcp_tool_omission =
   "masc_codex_cli_mcp_tool_omission_total"
 
+(* #9520: durable coverage-gap records must also have an alertable
+   Prometheus surface.  The labels deliberately avoid raw paths and
+   error strings; [source], [producer], [dashboard_surface], and
+   [stale_reason] are bounded vocabularies owned by telemetry
+   producers. *)
+let metric_telemetry_coverage_gap =
+  "masc_telemetry_coverage_gap_total"
+
 (* #10094: per-caller counter for [Masc_oas_bridge.run_safe]
    timeouts.  The [caller] string supplied at the run_safe entry
    point lets the operator see WHICH caller is timing out at
@@ -913,6 +921,13 @@ let init () =
     "Total boot-time credential token duplicate groups detected \
      (labels: token_hash_prefix). Any non-zero value means credential tokens \
      must be rotated."
+    Counter;
+  add metric_telemetry_coverage_gap
+    "Total telemetry coverage gaps recorded before append to the durable \
+     coverage-gap store. Labels: source, producer, dashboard_surface, \
+     stale_reason. Any positive rate means a telemetry lane is missing, \
+     stale, or failed to append and dashboards should mark the source \
+     coverage_gap."
     Counter;
   (* Transport metrics — registered here so transport_metrics.ml can use
      module constants instead of string literals. *)

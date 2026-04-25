@@ -162,6 +162,13 @@ val metric_codex_cli_mcp_tool_omission : string
     MCP omissions.  Paired with a once-per-fingerprint WARN log
     so logs carry structural facts and Prometheus carries
     frequency. *)
+
+val metric_telemetry_coverage_gap : string
+(** #9520: total telemetry coverage gaps recorded. Labels:
+    [source, producer, dashboard_surface, stale_reason]. This is the
+    alertable pair to the durable
+    [.masc/telemetry-coverage-gaps/YYYY-MM/DD.jsonl] store. *)
+
 val metric_oas_bridge_timeout : string
 (** #10094: labelled [caller, timeout_s] so operators can
     distinguish fantasy 60s budgets from intentional 120/180s

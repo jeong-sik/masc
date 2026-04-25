@@ -698,6 +698,18 @@ let test_summary_surfaces_coverage_gaps () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_summary_gap" in
   let root = masc_root dir in
+  let labels =
+    [
+      ("source", "agent_event");
+      ("producer", "telemetry_eio");
+      ("dashboard_surface", "/api/v1/dashboard/telemetry");
+      ("stale_reason", "append_failed");
+    ]
+  in
+  let before =
+    Prometheus.metric_value_or_zero Prometheus.metric_telemetry_coverage_gap
+      ~labels ()
+  in
   Telemetry_coverage_gap.record
     ~masc_root:root
     ~source:"agent_event"
@@ -707,6 +719,10 @@ let test_summary_surfaces_coverage_gaps () =
     ~stale_reason:"append_failed"
     ~error:"disk full"
     ();
+  Alcotest.(check (float 0.001))
+    "coverage gap Prometheus counter increments" (before +. 1.0)
+    (Prometheus.metric_value_or_zero Prometheus.metric_telemetry_coverage_gap
+       ~labels ());
   let json = Telemetry_unified.summary_json ~base_path:dir ~masc_root:root () in
   match json with
   | `Assoc fields ->

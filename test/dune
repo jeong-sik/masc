@@ -1243,6 +1243,11 @@
  (modules test_keeper_fs)
  (libraries masc_mcp alcotest yojson unix eio eio_main))
 
+(test
+ (name test_keeper_meta_heartbeat_retain_9733)
+ (modules test_keeper_meta_heartbeat_retain_9733)
+ (libraries masc_mcp fs_compat alcotest eio eio_main unix))
+
 ; ============================================================
 ; Executables (benchmarks, distributed tests, tools)
 ; ============================================================

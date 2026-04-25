@@ -17,4 +17,4 @@
    masc_time_constants
    playground_paths)
  (wrapped false)
- (libraries masc_core masc_log yojson uri ipaddr))
+ (libraries masc_core masc_log yojson uri ipaddr unix))

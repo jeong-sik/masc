@@ -34,10 +34,14 @@ let ensure_cache_dir config =
   let dir = cache_dir config in
   Fs_compat.mkdir_p dir
 
+(* Pattern is a static character class — hoist out of [sanitize_key]
+   so we build the DFA once per process instead of per cache lookup. *)
+let unsafe_filename_char_re = Re.Pcre.re "[^a-zA-Z0-9_-]" |> Re.compile
+
 (** Sanitize key for filename *)
 let sanitize_key key =
   (* Replace unsafe chars with underscore, limit length *)
-  let safe = Re.replace_string (Re.Pcre.re "[^a-zA-Z0-9_-]" |> Re.compile) ~by:"_" key in
+  let safe = Re.replace_string unsafe_filename_char_re ~by:"_" key in
   if String.length safe > 64 then
     String.sub safe 0 64
   else safe

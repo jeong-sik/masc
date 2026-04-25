@@ -267,6 +267,18 @@ val metric_auth_credential_token_duplicate : string
     duplicate group.  Operator alert: any non-zero rate is a
     routing-ambiguity that must be rotated. *)
 
+val metric_auth_credential_token_rotated : string
+(** #10304 prevention counter.  Increments once per credential that
+    boot-time repair rotates out of a shared bearer-token group.
+    Labels: [token_hash_prefix, scope]. *)
+
+val metric_auth_credential_ambiguous_lookup : string
+(** #9786 runtime complement: every [find_credential_by_token]
+    lookup that hits N>=2 matches fires this counter.
+    Labels: [first_match] = the agent_name that won the
+    [List.find] race.  Distinguishes a stale audit warning
+    from active wrong-agent serving. *)
+
 
 (** {1 Transport metrics} *)
 

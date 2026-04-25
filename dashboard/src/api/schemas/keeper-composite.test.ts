@@ -34,6 +34,14 @@ describe('parseKeeperCompositeSnapshot', () => {
     expect(result.last_outcome).toBeNull()
   })
 
+  it('parses explicit keeper identity when emitted by the backend', () => {
+    const result = parseKeeperCompositeSnapshot({
+      ...VALID_SNAPSHOT,
+      keeper: 'analyst',
+    })
+    expect(result.keeper).toBe('analyst')
+  })
+
   it('parses all valid phase values', () => {
     for (const phase of ['Running', 'Failing', 'Overflowed', 'Compacting', 'HandingOff', 'Draining', 'Stable']) {
       const result = parseKeeperCompositeSnapshot({ ...VALID_SNAPSHOT, phase })
@@ -41,24 +49,24 @@ describe('parseKeeperCompositeSnapshot', () => {
     }
   })
 
-  it('falls back unknown phase to Stable', () => {
+  it('preserves unknown phase values for operator visibility', () => {
     const result = parseKeeperCompositeSnapshot({ ...VALID_SNAPSHOT, phase: 'UnknownPhase' })
-    expect(result.phase).toBe('Stable')
+    expect(result.phase).toBe('UnknownPhase')
   })
 
-  it('falls back unknown turn_phase to idle', () => {
+  it('preserves unknown turn_phase values for operator visibility', () => {
     const result = parseKeeperCompositeSnapshot({ ...VALID_SNAPSHOT, turn_phase: 'unknown' })
-    expect(result.turn_phase).toBe('idle')
+    expect(result.turn_phase).toBe('unknown')
   })
 
-  it('falls back unknown decision stage to undecided', () => {
+  it('preserves unknown decision stage values for operator visibility', () => {
     const result = parseKeeperCompositeSnapshot({ ...VALID_SNAPSHOT, decision: { stage: 'mystery' } })
-    expect(result.decision.stage).toBe('undecided')
+    expect(result.decision.stage).toBe('mystery')
   })
 
-  it('falls back unknown cascade state to idle', () => {
+  it('preserves unknown cascade state values for operator visibility', () => {
     const result = parseKeeperCompositeSnapshot({ ...VALID_SNAPSHOT, cascade: { state: 'wat' } })
-    expect(result.cascade.state).toBe('idle')
+    expect(result.cascade.state).toBe('wat')
   })
 
   it('parses snapshot with last_outcome present', () => {
@@ -181,12 +189,12 @@ describe('parseKeeperCompositeSnapshot', () => {
     expect(result.circuit_breaker!.state).toBe('warning')
   })
 
-  it('falls back unknown circuit_breaker.state to clean', () => {
+  it('preserves unknown circuit_breaker.state for operator visibility', () => {
     const result = parseKeeperCompositeSnapshot({
       ...VALID_SNAPSHOT,
       circuit_breaker: { state: 'completely-new-future-variant' },
     })
-    expect(result.circuit_breaker!.state).toBe('clean')
+    expect(result.circuit_breaker!.state).toBe('completely-new-future-variant')
   })
 
   it('tolerates missing circuit_breaker during Phase 2 → 3 rollout', () => {

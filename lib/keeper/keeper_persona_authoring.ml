@@ -55,49 +55,28 @@ let json_string_list_normalized key json =
   Safe_ops.json_string_list key json |> Keeper_types_profile.normalize_name_list
 ;;
 
-let allowed_keeper_fields =
-  [ "goal"
-  ; "short_goal"
-  ; "mid_goal"
-  ; "long_goal"
-  ; "will"
-  ; "needs"
-  ; "desires"
-  ; "instructions"
-  ; "policy_voice_enabled"
-  ; "mention_targets"
-  ; "proactive_enabled"
-  ; "proactive_idle_sec"
-  ; "proactive_cooldown_sec"
-  ; "room_signal_prompt_enabled"
-  ; "shards"
-  ; "tool_preset"
-  ; "tool_also_allow"
-  ; "tool_denylist"
-  ; "work_discovery_enabled"
-  ; "work_discovery_sources"
-  ; "work_discovery_interval_sec"
-  ; "work_discovery_guidance"
-  ; "telemetry_feedback_enabled"
-  ; "telemetry_feedback_window_hours"
-  ; "per_provider_timeout"
-  ; "always_approve"
-  ; "max_turns_per_call"
-  ; "max_turns_per_call_scheduled_autonomous"
-  ; "social_model"
-  ; "cascade_name"
-  ]
-;;
+type field_catalog_entry =
+  { path : string
+  ; typ : string
+  ; required : bool
+  ; default : Yojson.Safe.t option
+  ; choices : Yojson.Safe.t option
+  ; field_effect : string
+  }
 
 let field_catalog_entry ?default ?choices ?(required = false) ~path ~typ ~field_effect () =
+  { path; typ; required; default; choices; field_effect }
+;;
+
+let field_catalog_entry_to_json entry =
   `Assoc
-    ([ "path", `String path
-     ; "type", `String typ
-     ; "required", `Bool required
-     ; "effect", `String field_effect
+    ([ "path", `String entry.path
+     ; "type", `String entry.typ
+     ; "required", `Bool entry.required
+     ; "effect", `String entry.field_effect
      ]
-     @ option_field "default" default
-     @ option_field "choices" choices)
+     @ option_field "default" entry.default
+     @ option_field "choices" entry.choices)
 ;;
 
 let tool_preset_choices_json =
@@ -105,7 +84,7 @@ let tool_preset_choices_json =
 ;;
 
 let social_model_choices_json =
-  string_list_to_json [ "bdi_speech_v1"; "magentic_ledger_v1" ]
+  string_list_to_json Keeper_types_profile.valid_social_model_strings
 ;;
 
 let alignment_choices = Archetypes.alignment_choices
@@ -118,9 +97,8 @@ let choice_effect_fields = Archetypes.choice_effect_fields
 let choice_effect_for = Archetypes.choice_effect_for
 let archetype_axes_json = Archetypes.archetype_axes_json
 
-let field_catalog_json () =
-  `List
-    [ field_catalog_entry
+let field_catalog_entries =
+  [ field_catalog_entry
         ~path:"name"
         ~typ:"string"
         ~default:(`String "<handle>")
@@ -181,16 +159,21 @@ let field_catalog_json () =
         ~field_effect:
           "Self-model needs statement. Overrides the keeper environment default."
         ()
-    ; field_catalog_entry
-        ~path:"keeper.desires"
-        ~typ:"string"
-        ~field_effect:
-          "Self-model desires statement. Overrides the keeper environment default."
-        ()
-    ; field_catalog_entry
-        ~path:"keeper.mention_targets"
-        ~typ:"string[]"
-        ~default:(`String "[<handle>]")
+  ; field_catalog_entry
+      ~path:"keeper.desires"
+      ~typ:"string"
+      ~field_effect:
+        "Self-model desires statement. Overrides the keeper environment default."
+      ()
+  ; field_catalog_entry
+      ~path:"keeper.policy_voice_enabled"
+      ~typ:"boolean"
+      ~field_effect:"Whether persona-created keepers should surface voice tools."
+      ()
+  ; field_catalog_entry
+      ~path:"keeper.mention_targets"
+      ~typ:"string[]"
+      ~default:(`String "[<handle>]")
         ~field_effect:"Names that wake or target this persona-backed keeper."
         ()
     ; field_catalog_entry
@@ -299,7 +282,29 @@ let field_catalog_json () =
         ~field_effect:
           "Optional named cascade override. Must resolve to a known cascade at runtime."
         ()
-    ]
+  ]
+;;
+
+let field_catalog_json () =
+  `List (List.map field_catalog_entry_to_json field_catalog_entries)
+;;
+
+let keeper_field_prefix = "keeper."
+
+let keeper_field_name_of_catalog_path path =
+  if String.starts_with ~prefix:keeper_field_prefix path
+  then
+    Some
+      (String.sub
+         path
+         (String.length keeper_field_prefix)
+         (String.length path - String.length keeper_field_prefix))
+  else None
+;;
+
+let allowed_keeper_fields =
+  field_catalog_entries
+  |> List.filter_map (fun entry -> keeper_field_name_of_catalog_path entry.path)
 ;;
 
 let personas_root_candidate () =
@@ -418,8 +423,9 @@ let normalize_social_model raw =
   | None ->
     Error
       (Printf.sprintf
-         "invalid keeper.social_model '%s' (allowed: bdi_speech_v1, magentic_ledger_v1)"
-         raw)
+         "invalid keeper.social_model '%s' (allowed: %s)"
+         raw
+         (String.concat ", " Keeper_types_profile.valid_social_model_strings))
 ;;
 
 let normalize_cascade_name raw =

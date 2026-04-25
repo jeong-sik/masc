@@ -1,16 +1,37 @@
-import { describe, it, expect } from 'vitest'
+import { html } from 'htm/preact'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/preact'
+import { afterEach, describe, it, expect, vi } from 'vitest'
+
+const { fetchKeepersCompositeMock } = vi.hoisted(() => ({
+  fetchKeepersCompositeMock: vi.fn(),
+}))
+
+vi.mock('../api/keeper', () => ({
+  fetchKeepersComposite: fetchKeepersCompositeMock,
+}))
 
 import {
+  buildRuntimeAssistPrompt,
   chipClassFor,
   filterKeeperSnapshots,
+  fleetCellPresentation,
   FLEET_HISTORY_LEN,
   inferKeeperNameFrom,
+  latestRuntimeActivityEpoch,
   pushObservation,
+  runtimeAttentionForSnapshot,
   sparkClassFor,
   tallyInvariantViolations,
+  tallyRuntimeAttention,
   type KeeperFleetHistory,
+  FleetFsmMatrix,
 } from './fleet-fsm-matrix'
-import type { KeeperCompositeSnapshot } from '../api/keeper'
+import { fleetCompositeSnapshot } from '../composite-signals'
+import type {
+  FleetCompositeSnapshot,
+  KeeperCompositeExecution,
+  KeeperCompositeSnapshot,
+} from '../api/keeper'
 
 function snapshot(
   overrides: Partial<KeeperCompositeSnapshot> & {
@@ -22,6 +43,7 @@ function snapshot(
   const name = overrides.name ?? 'alpha'
   const allHold = overrides.allHold ?? true
   const base: KeeperCompositeSnapshot = {
+    keeper: name,
     correlation_id: `keeper:${name}:42`,
     run_id: `r-0-${name}`,
     ts: 1_713_000_000,
@@ -44,6 +66,44 @@ function snapshot(
   return { ...base, ...overrides }
 }
 
+function execution(
+  overrides: Partial<KeeperCompositeExecution> = {},
+): KeeperCompositeExecution {
+  return {
+    latest_receipt_present: true,
+    recorded_at: '2026-04-25T07:30:00Z',
+    outcome: 'ok',
+    terminal_reason_code: 'completed',
+    operator_disposition: 'pass',
+    operator_disposition_reason: 'healthy',
+    model_used: 'auto',
+    stop_reason: 'completed',
+    tool_contract_result: 'satisfied_execution',
+    duration_ms: 12_000,
+    error: null,
+    cascade: null,
+    tool_surface: null,
+    ...overrides,
+  }
+}
+
+function fleetSnapshot(
+  snapshots: KeeperCompositeSnapshot[] = [snapshot()],
+): FleetCompositeSnapshot {
+  return {
+    generated_at: 1_713_000_000,
+    count: snapshots.length,
+    snapshots,
+  }
+}
+
+afterEach(() => {
+  cleanup()
+  vi.useRealTimers()
+  fetchKeepersCompositeMock.mockReset()
+  fleetCompositeSnapshot.value = null
+})
+
 describe('chipClassFor', () => {
   it('maps known states to the right semantic tone', () => {
     // After the design-system migration the chip strings use semantic
@@ -65,13 +125,23 @@ describe('chipClassFor', () => {
 })
 
 describe('inferKeeperNameFrom', () => {
-  it('extracts the keeper name from a canonical correlation_id', () => {
+  it('uses the explicit keeper identity when present', () => {
+    const snap = snapshot({
+      keeper: 'analyst',
+      correlation_id: 'agent:analyst-session:42',
+    })
+    expect(inferKeeperNameFrom(snap)).toBe('analyst')
+  })
+
+  it('extracts the keeper name from a canonical correlation_id for old payloads', () => {
     const snap = snapshot({ name: 'gen12-payroll' })
+    delete snap.keeper
     expect(inferKeeperNameFrom(snap)).toBe('gen12-payroll')
   })
 
   it('falls back to the correlation_id verbatim on non-canonical ids', () => {
     const snap = snapshot({ correlation_id: 'not-a-keeper-id' })
+    delete snap.keeper
     expect(inferKeeperNameFrom(snap)).toBe('not-a-keeper-id')
   })
 })
@@ -107,6 +177,185 @@ describe('tallyInvariantViolations', () => {
       compaction_atomicity: 0,
       event_priority_monotone: 0,
     })
+  })
+})
+
+describe('runtimeAttentionForSnapshot', () => {
+  const generatedAt = Date.parse('2026-04-25T07:40:00Z') / 1000
+
+  it('flags a Running-but-not-live keeper with pause_human evidence as blocked', () => {
+    const snap = snapshot({
+      is_live: false,
+      execution: execution({
+        outcome: 'error',
+        terminal_reason_code: 'api_error',
+        operator_disposition: 'pause_human',
+        operator_disposition_reason: 'tool_required_unsatisfied',
+        tool_contract_result: 'unknown',
+        error: {
+          kind: 'api',
+          message_preview: 'Timeout after 1170s',
+          message_truncated: false,
+        },
+      }),
+    })
+
+    const attention = runtimeAttentionForSnapshot(snap, generatedAt)
+    expect(attention.level).toBe('blocked')
+    expect(attention.label).toBe('정체')
+    expect(attention.reason).toContain('is_live=false')
+    expect(attention.reason).toContain('operator=pause_human')
+    expect(attention.reason).toContain('reason=tool_required_unsatisfied')
+    expect(attention.title).toContain('latest activity 10m ago')
+  })
+
+  it('keeps raw lifecycle separate by flagging stale liveness without changing phase', () => {
+    const snap = snapshot({
+      is_live: false,
+      phase: 'Running',
+      execution: execution(),
+    })
+
+    const attention = runtimeAttentionForSnapshot(snap, generatedAt)
+    expect(snap.phase).toBe('Running')
+    expect(attention.level).toBe('stale')
+    expect(attention.reason).toContain('is_live=false')
+  })
+
+  it('flags a live idle composite after the operator threshold', () => {
+    const snap = snapshot({
+      is_live: true,
+      execution: execution({
+        recorded_at: '2026-04-25T07:20:00Z',
+      }),
+    })
+
+    const attention = runtimeAttentionForSnapshot(snap, generatedAt)
+    expect(attention.level).toBe('idle')
+    expect(attention.label).toBe('무전환')
+    expect(attention.reason).toContain('idle composite')
+  })
+
+  it('counts live, blocked, stale, and idle runtime truth separately', () => {
+    const live = snapshot({
+      name: 'live',
+      is_live: true,
+      turn_phase: 'executing',
+      execution: execution(),
+    })
+    const blocked = snapshot({
+      name: 'blocked',
+      is_live: false,
+      execution: execution({
+        outcome: 'error',
+        terminal_reason_code: 'api_error',
+        operator_disposition: 'pause_human',
+      }),
+    })
+    const stale = snapshot({
+      name: 'stale',
+      is_live: false,
+      execution: execution(),
+    })
+    const idle = snapshot({
+      name: 'idle',
+      is_live: true,
+      execution: execution({ recorded_at: '2026-04-25T07:20:00Z' }),
+    })
+
+    expect(tallyRuntimeAttention([live, blocked, stale, idle], generatedAt)).toEqual({
+      live: 2,
+      blocked: 1,
+      stale: 1,
+      idle: 1,
+      total: 4,
+    })
+  })
+
+  it('uses the newest receipt or last outcome timestamp as activity evidence', () => {
+    const snap = snapshot({
+      last_outcome: {
+        turn_id: 7,
+        ended_at: generatedAt - 300,
+        decision_stage: 'guard_ok',
+        cascade_state: 'done',
+        selected_model: 'custom:mock',
+      },
+      execution: execution({
+        recorded_at: '2026-04-25T07:20:00Z',
+      }),
+    })
+
+    expect(latestRuntimeActivityEpoch(snap)).toBe(generatedAt - 300)
+  })
+})
+
+describe('fleetCellPresentation', () => {
+  const generatedAt = Date.parse('2026-04-25T07:40:00Z') / 1000
+
+  it('overlays runtime blocker truth on the KSM chip without rewriting raw phase', () => {
+    const snap = snapshot({
+      phase: 'Running',
+      is_live: false,
+      execution: execution({
+        outcome: 'error',
+        terminal_reason_code: 'api_error',
+        operator_disposition: 'pause_human',
+        operator_disposition_reason: 'tool_required_unsatisfied',
+      }),
+    })
+    const attention = runtimeAttentionForSnapshot(snap, generatedAt)
+    const cell = fleetCellPresentation('phase', snap.phase, attention)
+
+    expect(snap.phase).toBe('Running')
+    expect(cell.runtimePhaseConflict).toBe(true)
+    expect(cell.label).toBe('가동 중 · 정체')
+    expect(cell.className).toContain('var(--bad-light)')
+    expect(cell.title).toContain('KSM Running')
+    expect(cell.title).toContain('runtime 정체')
+    expect(cell.title).toContain('operator pause: tool_required_unsatisfied')
+  })
+
+  it('keeps non-KSM lanes tied to their raw FSM state', () => {
+    const snap = snapshot({
+      is_live: false,
+      execution: execution(),
+    })
+    const attention = runtimeAttentionForSnapshot(snap, generatedAt)
+    const cell = fleetCellPresentation('turn', snap.turn_phase, attention)
+
+    expect(cell.runtimePhaseConflict).toBe(false)
+    expect(cell.label).toBe('대기')
+    expect(cell.className).toContain('var(--white-5)')
+  })
+})
+
+describe('buildRuntimeAssistPrompt', () => {
+  const generatedAt = Date.parse('2026-04-25T07:40:00Z') / 1000
+
+  it('carries cause, evidence, and supervised resolve instructions into the keeper prompt', () => {
+    const snap = snapshot({
+      name: 'blocked',
+      phase: 'Running',
+      is_live: false,
+      execution: execution({
+        outcome: 'error',
+        terminal_reason_code: 'api_error',
+        operator_disposition: 'pause_human',
+        operator_disposition_reason: 'tool_required_unsatisfied',
+      }),
+    })
+    const attention = runtimeAttentionForSnapshot(snap, generatedAt)
+    const prompt = buildRuntimeAssistPrompt('blocked', snap, attention)
+
+    expect(prompt).toContain('감독형 런타임 진단 요청: blocked')
+    expect(prompt).toContain('cause=')
+    expect(prompt).toContain('operator pause: tool_required_unsatisfied')
+    expect(prompt).toContain('evidence=')
+    expect(prompt).toContain('KSM=Running')
+    expect(prompt).toContain('resolve 후보')
+    expect(prompt).toContain('keeper_probe')
+    expect(prompt).toContain('keeper_recover')
   })
 })
 
@@ -245,5 +494,105 @@ describe('filterKeeperSnapshots', () => {
     const out = filterKeeperSnapshots(rows, 'gen12')
     expect(out).not.toBe(rows)
     expect(out.length).toBe(2)
+  })
+})
+
+describe('FleetFsmMatrix streaming fallback', () => {
+  it('uses an existing streamed snapshot without starting fallback polling', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-25T00:00:00Z'))
+    fetchKeepersCompositeMock.mockResolvedValue(
+      fleetSnapshot([snapshot({ name: 'fallback' })]),
+    )
+    fleetCompositeSnapshot.value = fleetSnapshot([snapshot({ name: 'streamed' })])
+
+    render(html`<${FleetFsmMatrix} pollIntervalMs=${1000} />`)
+    await act(async () => {})
+
+    expect(screen.getByText('streamed')).toBeTruthy()
+    expect(fetchKeepersCompositeMock).not.toHaveBeenCalled()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000)
+    })
+
+    expect(fetchKeepersCompositeMock).not.toHaveBeenCalled()
+  })
+
+  it('falls back to fetching immediately when no streamed snapshot exists', async () => {
+    fetchKeepersCompositeMock.mockResolvedValue(
+      fleetSnapshot([snapshot({ name: 'fallback' })]),
+    )
+
+    render(html`<${FleetFsmMatrix} pollIntervalMs=${1000} />`)
+
+    expect(await screen.findByText('fallback')).toBeTruthy()
+    expect(fetchKeepersCompositeMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('renders KSM runtime conflict directly in the lifecycle cell', async () => {
+    fetchKeepersCompositeMock.mockResolvedValue(
+      fleetSnapshot([
+        snapshot({
+          name: 'blocked',
+          phase: 'Running',
+          is_live: false,
+          execution: execution({
+            outcome: 'error',
+            terminal_reason_code: 'api_error',
+            operator_disposition: 'pause_human',
+          }),
+        }),
+      ]),
+    )
+
+    render(html`<${FleetFsmMatrix} pollIntervalMs=${1000} />`)
+
+    const cell = await screen.findByText('가동 중 · 정체')
+    expect(cell.getAttribute('data-axis')).toBe('phase')
+    expect(cell.getAttribute('data-runtime-phase-conflict')).toBe('true')
+  })
+
+  it('requests supervised AI diagnosis with the row cause and evidence', async () => {
+    const onRequestRuntimeAssist = vi.fn()
+    fetchKeepersCompositeMock.mockResolvedValue(
+      fleetSnapshot([
+        snapshot({
+          name: 'blocked',
+          phase: 'Running',
+          is_live: false,
+          execution: execution({
+            outcome: 'error',
+            terminal_reason_code: 'api_error',
+            operator_disposition: 'pause_human',
+            operator_disposition_reason: 'tool_required_unsatisfied',
+          }),
+        }),
+      ]),
+    )
+
+    render(html`
+      <${FleetFsmMatrix}
+        pollIntervalMs=${1000}
+        onRequestRuntimeAssist=${onRequestRuntimeAssist}
+      />
+    `)
+
+    const button = await screen.findByRole('button', { name: 'AI 진단' })
+    await act(async () => {
+      fireEvent.click(button)
+    })
+
+    expect(onRequestRuntimeAssist).toHaveBeenCalledTimes(1)
+    expect(onRequestRuntimeAssist).toHaveBeenCalledWith(
+      expect.objectContaining({
+        keeperName: 'blocked',
+        attention: expect.objectContaining({
+          level: 'blocked',
+          cause: expect.stringContaining('tool_required_unsatisfied'),
+        }),
+        message: expect.stringContaining('resolve 후보'),
+      }),
+    )
   })
 })

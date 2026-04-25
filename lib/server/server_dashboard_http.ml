@@ -311,10 +311,10 @@ let dashboard_governance_approval_rule_delete_http_json ~base_path
               ])
       | Error message -> Error message)
 
-(* Dashboard-initiated verification verdict. Mirrors the 2-step path that
-   tool_task uses for Approve_verification / Reject_verification: first
-   transition the task FSM (AwaitingVerification -> Done or InProgress),
-   then wire the protocol side effects (Verification store + Board + SSE).
+(* Dashboard-initiated verification verdict. Mirrors the tool_task path for
+   Approve_verification / Reject_verification: persist the Verification store
+   verdict before the task FSM transition, then publish Board + SSE
+   notifications only after the transition succeeds.
 
    [verifier] is a namespaced agent_id of the form "operator:<actor>".
    The colon form is permitted by Validation.Agent_id and keeps operator
@@ -355,9 +355,26 @@ let dashboard_verification_resolve_http_json
         Error (Printf.sprintf
           "decision must be 'approve' or 'reject' (got %s)" other)
   in
+  let prepare_verification_verdict ~task:_ ~verifier ~verification_id:state_vid
+      ~decision =
+    if state_vid <> verification_id then
+      Error
+        (Printf.sprintf
+           "verification_id mismatch for task %s: request=%s state=%s"
+           task_id verification_id state_vid)
+    else
+      match decision with
+      | `Approve notes ->
+          Verification_protocol.record_approve_verification
+            ~config ~task_id ~verifier ~verification_id:state_vid ~notes
+      | `Reject reason ->
+          Verification_protocol.record_reject_verification
+            ~config ~task_id ~verifier ~verification_id:state_vid ~reason
+  in
   let fsm_result =
     Coord.transition_task_r config
       ~agent_name:verifier ~task_id ~action
+      ~prepare_verification_verdict
       ~notes:reason ~reason ()
   in
   match fsm_result with
@@ -365,11 +382,11 @@ let dashboard_verification_resolve_http_json
   | Ok _ ->
       (match action with
        | Types.Approve_verification ->
-           Verification_protocol.on_approve_verification
-             ~config ~task_id ~verifier ~verification_id ~notes:reason
+           Verification_protocol.notify_approve_verification
+             ~task_id ~verifier ~verification_id ~notes:reason
        | Types.Reject_verification ->
-           Verification_protocol.on_reject_verification
-             ~config ~task_id ~verifier ~verification_id ~reason
+           Verification_protocol.notify_reject_verification
+             ~task_id ~verifier ~verification_id ~reason
        | Types.Claim | Types.Start | Types.Done_action | Types.Cancel
        | Types.Release | Types.Submit_for_verification -> ());
       Ok (`Assoc [
@@ -556,11 +573,15 @@ let enrich_composite_snapshot_json ~(config : Coord.config) ~keeper_name json =
   match json with
   | `Assoc fields ->
       let fields =
-        List.filter (fun (name, _) -> not (String.equal name "execution")) fields
+        List.filter
+          (fun (name, _) ->
+            not (String.equal name "keeper" || String.equal name "execution"))
+          fields
       in
       `Assoc
         (fields
          @ [
+             ("keeper", `String keeper_name);
              ( "execution",
                composite_execution_receipt_json ~config ~keeper_name );
            ])

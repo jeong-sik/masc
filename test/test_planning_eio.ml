@@ -122,6 +122,12 @@ let test_load_nonexistent () =
       (* Expected behavior *)
       ()
 
+let test_find_substring_from_preserves_empty_needle_bounds () =
+  check (option int) "empty needle at end" (Some 3)
+    (Planning_eio.find_substring_from "abc" ~needle:"" ~from:3);
+  check (option int) "empty needle past end" None
+    (Planning_eio.find_substring_from "abc" ~needle:"" ~from:4)
+
 let test_update_plan () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -412,6 +418,8 @@ let () =
       test_case "init" `Quick test_init;
       test_case "load" `Quick test_load;
       test_case "load_nonexistent" `Quick test_load_nonexistent;
+      test_case "find_substring_from_preserves_empty_needle_bounds" `Quick
+        test_find_substring_from_preserves_empty_needle_bounds;
       test_case "update_plan" `Quick test_update_plan;
       test_case "update_plan_full_context_syncs_deliverable" `Quick
         test_update_plan_full_context_syncs_deliverable;

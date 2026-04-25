@@ -1,0 +1,93 @@
+// cb-shared.jsx — shared primitives used across component artboards
+// Components published on window so other Babel scripts can use them.
+
+const { useState, useEffect, useMemo, useRef } = React;
+
+// Status dot
+function Dot({ kind = 'idle', size = 'md', beat = false, style }) {
+  return <span className={`cb-dot ${kind} ${size === 'sm' ? 'sm' : size === 'lg' ? 'lg' : ''} ${beat ? 'beat' : ''}`} style={style} />;
+}
+
+// Mini sparkline (random but seeded bars) — used in KPI + lifeline
+function Spark({ data, color = 'brass', bars = 14 }) {
+  const d = data || Array.from({ length: bars }, (_, i) => 30 + Math.sin(i * 0.7) * 20 + Math.random() * 30);
+  return (
+    <span className={`spark is-${color}`} style={{ height: 16 }}>
+      {d.map((h, i) => <i key={i} style={{ height: `${Math.max(5, Math.min(100, h))}%` }} />)}
+    </span>
+  );
+}
+
+// Lifeline-style sine+spike svg path
+function Heartbeat({ height = 32, width = 320, phase = 0 }) {
+  const points = [];
+  const segs = 60;
+  for (let i = 0; i <= segs; i++) {
+    const t = i / segs;
+    const x = t * width;
+    // mostly flat with a spike every ~12 samples
+    let y = height / 2 + Math.sin((t + phase) * 6) * 1.5;
+    const s = (i + Math.floor(phase * 60)) % 12;
+    if (s === 3) y -= height * 0.35;
+    if (s === 4) y += height * 0.4;
+    if (s === 5) y -= height * 0.15;
+    points.push(`${x.toFixed(1)},${y.toFixed(1)}`);
+  }
+  return (
+    <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
+      <polyline points={points.join(' ')} fill="none" stroke="var(--brass-1)" strokeWidth="1.2" />
+      <circle cx={width - 2} cy={height / 2} r="2" fill="var(--brass-1)">
+        <animate attributeName="r" values="2;3.5;2" dur="1.4s" repeatCount="indefinite" />
+      </circle>
+    </svg>
+  );
+}
+
+// Small chip using design-system class names
+function Chip({ kind, children, ...rest }) {
+  return <span className={`chip ${kind ? `is-${kind}` : ''}`} {...rest}>{children}</span>;
+}
+
+// Pill
+function Pill({ kind, children }) {
+  return <span className={`pill ${kind ? `is-${kind}` : ''}`}>{children}</span>;
+}
+
+// Variant caption that sits above an artboard
+function Vhead({ children }) { return <div className="cb-vhead">{children}</div>; }
+
+// Utility — get keeper color var name from id
+function kClass(id) {
+  return ({
+    'nick0cave': 'brass',
+    'masc-improver': 'ok',
+    'sangsu': 'info',
+    'qa-king': 'err',
+    'rama': 'stalled',
+  })[id] || 'idle';
+}
+
+// Typing hook — types a string into state, char by char, looping
+function useTyping(strings, cps = 18) {
+  const [text, setText] = useState('');
+  const [strIdx, setStrIdx] = useState(0);
+  useEffect(() => {
+    const cur = strings[strIdx];
+    let i = 0;
+    const t = setInterval(() => {
+      i++;
+      setText(cur.slice(0, i));
+      if (i >= cur.length) {
+        clearInterval(t);
+        setTimeout(() => {
+          setText('');
+          setStrIdx((s) => (s + 1) % strings.length);
+        }, 2200);
+      }
+    }, 1000 / cps);
+    return () => clearInterval(t);
+  }, [strIdx, strings, cps]);
+  return text;
+}
+
+Object.assign(window, { Dot, Spark, Heartbeat, Chip, Pill, Vhead, kClass, useTyping });

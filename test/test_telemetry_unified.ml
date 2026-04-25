@@ -181,6 +181,55 @@ let test_oas_event_source_and_scope_filter () =
     Alcotest.(check string) "event type preserved" "turn_completed" event_type
   | _ -> Alcotest.fail "expected Assoc"
 
+let test_agent_tool_called_scope_promoted_for_filters () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "telem_agent_tool_scope" in
+  let telemetry_dir = Filename.concat dir ".masc/telemetry" in
+  Fs_compat.mkdir_p telemetry_dir;
+  write_jsonl telemetry_dir
+    [
+      `Assoc
+        [
+          ("timestamp", `Float 1100.0);
+          ( "event",
+            `List
+              [
+                `String "Tool_called";
+                `Assoc
+                  [
+                    ("tool_name", `String "masc_claim_next");
+                    ("success", `Bool true);
+                    ("duration_ms", `Int 42);
+                    ("agent_id", `String "codex-mcp-client");
+                    ("session_id", `String "mcp-session-1");
+                    ("operation_id", `String "op-1");
+                    ("worker_run_id", `String "worker-1");
+                  ];
+              ] );
+        ];
+    ];
+  let result =
+    Telemetry_unified.read_unified_result ~base_path:dir
+      ~masc_root:(masc_root dir) ~sources:[ Telemetry_unified.Agent_event ]
+      ~session_id:"mcp-session-1" ~operation_id:"op-1"
+      ~worker_run_id:"worker-1" ()
+  in
+  Alcotest.(check int) "scoped agent tool event visible" 1
+    result.total_matching_entries;
+  match List.hd result.entries with
+  | `Assoc fields ->
+    let json = `Assoc fields in
+    Alcotest.(check string) "tool promoted" "masc_claim_next"
+      (json_string_field "tool_name" json);
+    Alcotest.(check string) "session promoted" "mcp-session-1"
+      (json_string_field "session_id" json);
+    Alcotest.(check string) "operation promoted" "op-1"
+      (json_string_field "operation_id" json);
+    Alcotest.(check string) "worker promoted" "worker-1"
+      (json_string_field "worker_run_id" json)
+  | _ -> Alcotest.fail "expected Assoc"
+
 let test_shadow_agent_tool_called_deduped_from_unified_view () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -693,6 +742,114 @@ let test_read_unified_reads_trajectory_and_execution_receipts () =
   Alcotest.(check string) "oldest source" "execution_receipt"
     (List.nth entries 1 |> json_string_field "source")
 
+let test_scope_filter_matches_runtime_contract_fields () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "telem_runtime_contract_scope" in
+  let root = masc_root dir in
+  let trajectory_dir = Filename.concat root "trajectories/alice" in
+  Fs_compat.mkdir_p trajectory_dir;
+  Fs_compat.append_file
+    (Filename.concat trajectory_dir "trace-1.jsonl")
+    (Yojson.Safe.to_string
+       (`Assoc
+          [
+            ("ts", `Float 3000.0);
+            ("ts_iso", `String "1970-01-01T00:50:00Z");
+            ("turn", `Int 1);
+            ("round", `Int 1);
+            ("tool_name", `String "keeper_bash");
+            ("args", `Assoc []);
+            ("gate", `Assoc [ ("status", `String "pass") ]);
+            ("result", `String "ok");
+            ("duration_ms", `Int 7);
+            ("error", `Null);
+            ("cost_usd", `Float 0.0);
+            ( "runtime_contract",
+              `Assoc
+                [
+                  ("keeper_name", `String "alice");
+                  ("session_id", `String "sess-nested");
+                  ("operation_id", `String "op-nested");
+                  ("trace_id", `String "run-nested");
+                ] );
+            ( "action_radius",
+              `Assoc [ ("tool_name", `String "keeper_bash") ] );
+          ])
+     ^ "\n");
+  let result =
+    Telemetry_unified.read_unified_result
+      ~base_path:dir
+      ~masc_root:root
+      ~sources:[ Telemetry_unified.Trajectory_tool_call ]
+      ~session_id:"sess-nested"
+      ~operation_id:"op-nested"
+      ~worker_run_id:"run-nested"
+      ~n:10
+      ()
+  in
+  Alcotest.(check int) "runtime contract scoped row visible" 1
+    result.total_matching_entries;
+  match result.entries with
+  | [ entry ] ->
+    Alcotest.(check string) "source" "trajectory_tool_call"
+      (json_string_field "source" entry);
+    Alcotest.(check string) "tool" "keeper_bash"
+      (json_string_field "tool_name" entry)
+  | _ -> Alcotest.fail "expected one scoped trajectory row"
+
+let test_goal_event_source_and_summary () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "telem_goal_event" in
+  let root = masc_root dir in
+  Fs_compat.mkdir_p root;
+  let newer_ts = Unix.gettimeofday () in
+  let older_ts = newer_ts -. 1.0 in
+  let path = Filename.concat root "goal_events.jsonl" in
+  Fs_compat.append_file path
+    (Yojson.Safe.to_string
+       (`Assoc
+          [
+            ("ts", `String (Types.iso8601_of_unix_seconds older_ts));
+            ("goal_id", `String "goal-1");
+            ("event_type", `String "transition_requested");
+            ("payload", `Assoc [ ("phase", `String "active") ]);
+          ])
+     ^ "\n");
+  Fs_compat.append_file path
+    (Yojson.Safe.to_string
+       (`Assoc
+          [
+            ("ts", `String (Types.iso8601_of_unix_seconds newer_ts));
+            ("goal_id", `String "goal-1");
+            ("event_type", `String "transition_completed");
+            ("payload", `Assoc [ ("phase", `String "done") ]);
+          ])
+     ^ "\n");
+  let entries =
+    Telemetry_unified.read_unified
+      ~base_path:dir
+      ~masc_root:root
+      ~sources:[ Telemetry_unified.Goal_event ]
+      ~n:10
+      ()
+  in
+  Alcotest.(check int) "two goal events" 2 (List.length entries);
+  Alcotest.(check string) "newest source" "goal_event"
+    (List.hd entries |> json_string_field "source");
+  Alcotest.(check string) "newest event" "transition_completed"
+    (List.hd entries |> json_string_field "event_type");
+  let summary = Telemetry_unified.summary_json ~base_path:dir ~masc_root:root () in
+  let goal_summary = source_summary "goal_event" summary in
+  Alcotest.(check int) "goal event count" 2
+    (json_int_field "entry_count" goal_summary);
+  Alcotest.(check string) "goal event health" "ok"
+    (json_string_field "health" goal_summary);
+  Alcotest.(check string) "goal dashboard surface"
+    "/api/v1/dashboard/goals"
+    (json_string_field "dashboard_surface" goal_summary)
+
 let test_summary_surfaces_coverage_gaps () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -822,6 +979,8 @@ let () =
           Alcotest.test_case "agent events" `Quick test_agent_event_source;
           Alcotest.test_case "oas events + scope filter" `Quick
             test_oas_event_source_and_scope_filter;
+          Alcotest.test_case "agent tool_called scope promotion" `Quick
+            test_agent_tool_called_scope_promoted_for_filters;
           Alcotest.test_case "dedupe shadow agent tool_called" `Quick
             test_shadow_agent_tool_called_deduped_from_unified_view;
           Alcotest.test_case "keeper metrics" `Quick test_keeper_metrics_per_keeper;
@@ -839,6 +998,10 @@ let () =
             test_time_window_n_zero_disables_truncation;
           Alcotest.test_case "trajectory and receipts" `Quick
             test_read_unified_reads_trajectory_and_execution_receipts;
+          Alcotest.test_case "runtime contract scope filter" `Quick
+            test_scope_filter_matches_runtime_contract_fields;
+          Alcotest.test_case "goal events" `Quick
+            test_goal_event_source_and_summary;
         ] );
       ( "summary",
         [

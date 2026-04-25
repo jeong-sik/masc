@@ -1,10 +1,11 @@
-comment = "Checked-in seed for cascade authoring. Keep repo defaults boring: one keeper-assignable bootstrap profile (big_three), system-only fallback/judge/phase-routing profiles (default, governance_judge, operator_judge, local_only, local_recovery, tool_rerank), and move personal/live experiments to $MASC_BASE_PATH/.masc/config/cascade.toml."
+comment = "Checked-in seed for cascade authoring. Keep repo defaults boring: bootstrap keeper profile big_three, local keeper profile ollama_only, system-only fallback/judge/phase-routing profiles (default, governance_judge, operator_judge, local_only, local_recovery, tool_rerank), and move personal/live experiments to $MASC_BASE_PATH/.masc/config/cascade.toml."
 
 [default]
 comment = "System-only fallback profile for unknown/missing cascade names. Mirrors big_three without Claude CLI so automatic recovery does not pull Claude by default."
 models = [
   { model = "codex_cli:auto", weight = 1 },
   { model = "gemini_cli:auto", weight = 1 },
+  { model = "codex_cli:gpt-5.3-codex-spark", weight = 1 },
 ]
 temperature = 0.2
 max_tokens = 16384
@@ -15,6 +16,7 @@ comment = "Canonical keeper bootstrap profile exposed by the checked-in seed. Au
 models = [
   { model = "codex_cli:auto", weight = 1 },
   { model = "gemini_cli:auto", weight = 1 },
+  { model = "codex_cli:gpt-5.3-codex-spark", weight = 1 },
 ]
 temperature = 0.2
 max_tokens = 16384

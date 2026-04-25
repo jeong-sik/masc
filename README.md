@@ -75,7 +75,7 @@ All protocols run concurrently from a single Eio fiber pool:
 ### Tech Stack
 
 - **OCaml 5.4+** with Eio structured concurrency (no Lwt)
-- **agent_sdk** >= 0.171.0 (OAS agent runtime; pinned floor in `masc_mcp.opam` and `dune-project`)
+- **agent_sdk** >= 0.174.0 (OAS agent runtime; pinned floor in `masc_mcp.opam` and `dune-project`)
 - **mcp_protocol** >= 1.3.0 (MCP JSON-RPC contract)
 - **h2-eio** (HTTP/2), **grpc-direct** (gRPC), **ocaml-webrtc** (WebRTC)
 - **caqti** + PostgreSQL (optional), **sqlite3** (fallback), **neo4j_bolt** (optional graph)

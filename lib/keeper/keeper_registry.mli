@@ -180,6 +180,13 @@ val register_offline : base_path:string -> string -> keeper_meta -> registry_ent
     replacement fiber launches. *)
 val register_restarting : base_path:string -> string -> keeper_meta -> registry_entry
 
+(** Prepare a registry entry for a newly launched keepalive fiber.
+    Clears stale per-fiber atomic latches before applying [Fiber_started] so
+    the runtime stop flag matches the state machine's restart semantics. *)
+val prepare_fiber_launch :
+  base_path:string -> string ->
+  (Keeper_state_machine.transition_result, Keeper_state_machine.transition_error) result
+
 (** Unregister a keeper (removes from registry). *)
 val unregister : base_path:string -> string -> unit
 

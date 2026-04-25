@@ -9,6 +9,28 @@ open Types
 let exec_gate_raw_source argv =
   String.concat " " (List.map Filename.quote argv)
 
+(* Substring check for the [.worktrees] sentinel without paying a
+   per-call [Re.compile] inside the JSON-shaping path. *)
+let path_is_masc_worktree path =
+  let needle = ".worktrees" in
+  let nlen = String.length needle in
+  let hlen = String.length path in
+  if nlen > hlen then false
+  else
+    let rec match_at i j =
+      if j = nlen then true
+      else if String.unsafe_get path (i + j) <> String.unsafe_get needle j
+      then false
+      else match_at i (j + 1)
+    in
+    let last = hlen - nlen in
+    let rec loop i =
+      if i > last then false
+      else if match_at i 0 then true
+      else loop (i + 1)
+    in
+    loop 0
+
 (* ============================================ *)
 (* argv-based process helpers                   *)
 (* ============================================ *)
@@ -291,8 +313,7 @@ let list ~base_path =
               [
                 ("path", `String !path);
                 ("branch", `String !branch);
-                (* Check if path contains .worktrees - stdlib compatible *)
-                ("is_masc", `Bool (Re.execp (Re.compile (Re.str ".worktrees")) !path));
+                ("is_masc", `Bool (path_is_masc_worktree !path));
               ])
         else None
       in

@@ -268,8 +268,17 @@ let test_event_serialization_roundtrip () =
     [ T.Agent_joined { agent_id = "test-agent"; capabilities = [] };
       T.Task_started { task_id = "task-1"; agent_id = "agent-1" };
       T.Task_completed { task_id = "task-1"; duration_ms = 100; success = true };
-      T.Tool_called { tool_name = "read_file"; success = true; duration_ms = 10;
-                      agent_id = None; source = None };
+      T.Tool_called
+        {
+          tool_name = "read_file";
+          success = true;
+          duration_ms = 10;
+          agent_id = None;
+          source = None;
+          session_id = None;
+          operation_id = None;
+          worker_run_id = None;
+        };
       T.Error_occurred { code = "E001"; message = "test"; context = "test" } ]
   in
   List.iter (fun event ->

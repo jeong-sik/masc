@@ -100,6 +100,10 @@ let model_id_to_string = function
   | Bdi_speech_v1 -> "bdi_speech_v1"
   | Magentic_ledger_v1 -> "magentic_ledger_v1"
 
+let all_model_ids = [ Bdi_speech_v1; Magentic_ledger_v1 ]
+
+let valid_model_id_strings = List.map model_id_to_string all_model_ids
+
 let model_id_of_string value =
   match String.lowercase_ascii (String.trim value) with
   | "bdi_speech_v1" -> Some Bdi_speech_v1

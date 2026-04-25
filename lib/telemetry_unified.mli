@@ -11,6 +11,7 @@
     - [<masc_root>/oas-events/]             — Durable OAS native/custom bus events
     - [<masc_root>/keepers/<name>/execution-receipts/]
                                               — Keeper execution receipts
+    - [<masc_root>/goal_events.jsonl]       — Goal FSM lifecycle events
     - [<base_path>/data/tool-metrics/]      — Tool duration/success metrics
 
     Each returned entry is tagged with a ["source"] field for discrimination.
@@ -27,6 +28,7 @@ type source =
   | Tool_usage     (** System_internal surface tool invocations *)
   | Oas_event      (** Durable OAS native/custom event bus relays *)
   | Execution_receipt  (** Keeper execution receipt rows *)
+  | Goal_event     (** Goal FSM lifecycle and verification events *)
   | Tool_metric    (** Tool duration and success metrics *)
 
 val source_to_string : source -> string

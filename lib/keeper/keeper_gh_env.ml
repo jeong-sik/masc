@@ -12,7 +12,7 @@
 
 (** Resolve legacy [$base_path/.masc/gh-auth/] if it exists. *)
 let config_dir (config : Coord.config) : string option =
-  let dir = Filename.concat config.Coord_utils.base_path ".masc/gh-auth" in
+  let dir = Filename.concat (Coord.masc_dir config) "gh-auth" in
   if Sys.file_exists dir && Sys.is_directory dir then Some dir else None
 
 type keeper_binding = {

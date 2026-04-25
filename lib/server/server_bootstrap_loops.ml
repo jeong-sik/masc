@@ -501,6 +501,13 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     result);
   Tool_metrics_persist.start_flush_fiber ~sw ~clock
     ~base_path:state.room_config.base_path;
+  (* Cascade trust JSONL snapshot fiber (Phase 0b observability).  Polls
+     [Cascade_health_tracker.global] every minute and appends one JSON
+     object per tick to base_path/cascade_trust/YYYY-MM/DD.jsonl.  Phase 1
+     (in-memory trust_score) consumes these snapshots offline to calibrate
+     reward / decay defaults instead of magic numbers. *)
+  Cascade_trust_persist.start_snapshot_fiber ~sw ~clock
+    ~base_path:state.room_config.base_path;
   (* #9876: Hebbian consolidation fiber. Prior to this, the graph was
      write-only — strengthen/weaken populated synapses but decay +
      pruning never ran (zero production callers of [consolidate]).
@@ -606,6 +613,23 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
           let sub_expired = A2a_tools.cleanup_stale_subscriptions () in
           if sub_expired > 0 then
             Log.Server.info "Expired %d stale A2A subscriptions" sub_expired;
+          (* Keeper sandbox: remove stale Docker containers when owner_pid is
+             dead, container age exceeds MASC_KEEPER_SANDBOX_CLEANUP_STALE_AFTER_SEC
+             (default 6h), or container is stopped. Internally throttled by
+             MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC (default 5min); janitor
+             ticks faster but the helper short-circuits when called too soon. *)
+          (match
+             Keeper_sandbox_runtime.maybe_cleanup_stale_containers
+               ~base_path:state.room_config.base_path
+               ~timeout_sec:30.0 ()
+           with
+           | None -> ()
+           | Some result ->
+               if result.removed > 0 || result.errors <> [] then
+                 Log.Server.info
+                   "Sandbox cleanup: scanned=%d removed=%d errors=%d"
+                   result.scanned result.removed
+                   (List.length result.errors));
           (* Periodic JSONL prune: every 24h, clean dated JSONL files *)
           let now = Unix.gettimeofday () in
           if now -. !last_prune >= Masc_time_constants.day then begin

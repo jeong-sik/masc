@@ -89,17 +89,47 @@ let truncate_text ~(max_len : int) (s : string) : string =
   if n <= max_len then s
   else utf8_safe_prefix_bytes s ~max_bytes:max_len ^ "..."
 
+(* ASCII case-insensitive substring containment, byte-wise.
+
+   Empty needle returns [false] here (differs from the
+   [contains_casefold] convention elsewhere — preserved). *)
 let contains_ci (haystack : string) (needle : string) : bool =
-  let h = String.lowercase_ascii haystack in
-  let n = String.lowercase_ascii needle in
-  if n = "" then false
-  else Re.execp (Re.str n |> Re.compile) h
+  let nlen = String.length needle in
+  let hlen = String.length haystack in
+  if nlen = 0 then false
+  else if nlen > hlen then false
+  else
+    let rec match_at i j =
+      if j = nlen then true
+      else if Char.lowercase_ascii (String.unsafe_get haystack (i + j))
+            <> Char.lowercase_ascii (String.unsafe_get needle j)
+      then false
+      else match_at i (j + 1)
+    in
+    let last = hlen - nlen in
+    let rec loop i =
+      if i > last then false
+      else if match_at i 0 then true
+      else loop (i + 1)
+    in
+    loop 0
+
+(* Static replacement patterns hoisted to module load.
+   [proactive_preview_similarity_stats] funnels into
+   [token_set_of_text] → [normalize_similarity_text], paying
+   2 [Re.compile] per text × 2 texts per pair × ~7 pairs per window =
+   ~28 DFA builds per similarity-stats call before this hoist. *)
+let normalize_non_word_re =
+  Re.Pcre.re {|[^0-9a-z가-힣]+|} |> Re.compile
+
+let normalize_collapse_spaces_re =
+  Re.Pcre.re {| +|} |> Re.compile
 
 let normalize_similarity_text (s : string) : string =
   s
   |> String.lowercase_ascii
-  |> Re.replace_string (Re.Pcre.re {|[^0-9a-z가-힣]+|} |> Re.compile) ~by:" "
-  |> Re.replace_string (Re.Pcre.re {| +|} |> Re.compile) ~by:" "
+  |> Re.replace_string normalize_non_word_re ~by:" "
+  |> Re.replace_string normalize_collapse_spaces_re ~by:" "
   |> String.trim
 
 let token_set_of_text (s : string) : (string, unit) Hashtbl.t =

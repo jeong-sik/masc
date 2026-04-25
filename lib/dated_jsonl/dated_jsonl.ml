@@ -122,11 +122,9 @@ let load_tail_lines path ~max_lines =
         let chunks = ref [] in
         let total_newlines = ref 0 in
         let pos = ref file_len in
-        let truncated_prefix = ref false in
         while !pos > 0 && !total_newlines <= target_newlines do
           let read_start = max 0 (!pos - chunk_size) in
           let read_len = !pos - read_start in
-          if read_start > 0 then truncated_prefix := true;
           seek_in ic read_start;
           let chunk = Bytes.create read_len in
           really_input ic chunk 0 read_len;
@@ -150,7 +148,7 @@ let load_tail_lines path ~max_lines =
           |> String.split_on_char '\n'
         in
         let raw_lines =
-          if !truncated_prefix then
+          if !pos > 0 then
             match raw_lines with
             | _partial :: rest -> rest
             | [] -> []

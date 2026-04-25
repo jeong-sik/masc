@@ -15,7 +15,8 @@ runtime materializes sibling `cascade.json` before loading.
 
 The repo seed should stay intentionally small.
 
-- Keep exactly one keeper-assignable bootstrap profile: `big_three`
+- Keep the checked-in keeper-assignable set explicit and boring:
+  `big_three` for normal bootstrap and `ollama_only` for local-only keepers.
 - Keep system-only plumbing profiles checked in only when runtime routing needs
   them: `default`, `governance_judge`, `operator_judge`, `local_only`, `local_recovery`, `tool_rerank`
 - Put personal experiments, vendor mixes, and machine-specific profiles in
@@ -36,6 +37,8 @@ graveyard of personal cascade variants.
   and handoff paths.
 - `local_recovery`: system-only local recovery lane used after provider/cloud
   failures.
+- `ollama_only`: keeper-assignable local-only profile for keepers that should
+  not enter cloud/provider rotation.
 - `tool_rerank`: system-only short-output override. It has no own model list
   and reuses the default cascade models.
 

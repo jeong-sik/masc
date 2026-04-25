@@ -10,6 +10,7 @@ const TARGET_FILES = [
   'src/components/common/feedback-state.ts',
   'src/components/common/markdown.ts',
   'src/components/connector-status.ts',
+  'src/components/fleet-fsm-matrix.ts',
   'src/components/harness-health-state.ts',
   'src/components/harness-health.ts',
   'src/components/keeper-tool-call-inspector.ts',
@@ -25,6 +26,7 @@ const TARGET_FILES = [
 const TEST_FILES = [
   'src/components/common/markdown.test.ts',
   'src/components/connector-status.test.ts',
+  'src/components/fleet-fsm-matrix.test.ts',
   'src/components/keeper-tool-call-inspector.test.ts',
   'src/components/transport-health.test.ts',
   'src/lib/async-state.test.ts',

@@ -28,10 +28,35 @@ let int_of_env_default name ~default ~min_v ~max_v =
       in
       max min_v (min max_v parsed)
 
+(* Substring containment, ASCII case-insensitive.
+
+   Old version compiled a fresh [Re.t] from the needle on every call —
+   ~20 hot call-sites, all string literals, mostly tool-error
+   classification on the per-call path.  The needles are short
+   (< 30 chars) and haystacks are bounded error messages, so a naive
+   byte-wise scan with inline [Char.lowercase_ascii] is strictly
+   cheaper than DFA construction and avoids the two
+   [String.lowercase_ascii] allocations the old form needed. *)
 let contains_casefold haystack needle =
-  let haystack = String.lowercase_ascii haystack in
-  let needle = String.lowercase_ascii needle in
-  Re.execp (Re.str needle |> Re.compile) haystack
+  let nlen = String.length needle in
+  let hlen = String.length haystack in
+  if nlen = 0 then true
+  else if nlen > hlen then false
+  else
+    let rec match_at i j =
+      if j = nlen then true
+      else if Char.lowercase_ascii (String.unsafe_get haystack (i + j))
+            <> Char.lowercase_ascii (String.unsafe_get needle j)
+      then false
+      else match_at i (j + 1)
+    in
+    let last = hlen - nlen in
+    let rec loop i =
+      if i > last then false
+      else if match_at i 0 then true
+      else loop (i + 1)
+    in
+    loop 0
 
 let parse_status_from_message ~success ~message =
   if not success then
@@ -623,6 +648,13 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
       let resolved = identity.Agent_identity.agent_name in
       if resolved <> "" then resolved else "unknown"
   in
+  let telemetry_session_id =
+    match json_nonempty_string_opt "session_id" arguments with
+    | Some _ as session_id -> session_id
+    | None -> nonempty_string_opt mcp_session_id
+  in
+  let telemetry_operation_id = json_nonempty_string_opt "operation_id" arguments in
+  let telemetry_worker_run_id = json_nonempty_string_opt "worker_run_id" arguments in
   let error_detail =
     if success then None
     else
@@ -684,7 +716,11 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
      | Some fs ->
          (try Telemetry_eio.track_tool_called ~fs state.Mcp_server.room_config
                 ~tool_name:name ~agent_id:agent_name ~success ~duration_ms
-                ~source:(Tool_registry.string_of_source source) ()
+                ~source:(Tool_registry.string_of_source source)
+                ?session_id:telemetry_session_id
+                ?operation_id:telemetry_operation_id
+                ?worker_run_id:telemetry_worker_run_id
+                ()
           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
             log_mcp_exn ~label:"telemetry tracking failed" exn)
      | None -> ());

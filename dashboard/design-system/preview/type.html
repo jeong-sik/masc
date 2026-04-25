@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>MASC · Type</title>
+<link rel="stylesheet" href="_preview.css">
+<style>
+  .type-row {
+    display: grid;
+    grid-template-columns: 160px 1fr 200px;
+    gap: 20px;
+    padding: 16px 18px;
+    border-bottom: 1px solid var(--line-1);
+    align-items: baseline;
+  }
+  .type-row:last-child { border-bottom: none; }
+  .type-role {
+    font: 600 10px/1.2 var(--font-mono);
+    letter-spacing: var(--track-caps);
+    text-transform: uppercase;
+    color: var(--fg-2);
+  }
+  .type-spec {
+    font: 9px/1.4 var(--font-mono);
+    color: var(--fg-3);
+    letter-spacing: var(--track-wide);
+  }
+  .type-sample-inline { color: var(--fg-1); }
+
+  .scale-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 10px;
+  }
+  .scale-cell {
+    background: var(--bg-1);
+    border: 1px solid var(--line-1);
+    border-radius: 3px;
+    padding: 18px 14px;
+    display: flex; flex-direction: column; gap: 10px;
+    min-height: 120px;
+  }
+  .scale-num {
+    font-family: var(--font-mono);
+    color: var(--fg-1);
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+  }
+  .scale-meta {
+    font: 9px/1.2 var(--font-mono);
+    color: var(--fg-3);
+    letter-spacing: var(--track-caps);
+    text-transform: uppercase;
+    margin-top: auto;
+  }
+
+  .family-card {
+    background: var(--bg-1);
+    border: 1px solid var(--line-1);
+    border-radius: 3px;
+    padding: 20px;
+    display: flex; flex-direction: column; gap: 14px;
+  }
+  .family-name {
+    font: 600 10px/1 var(--font-mono);
+    letter-spacing: var(--track-caps);
+    text-transform: uppercase;
+    color: var(--fg-3);
+  }
+  .family-demo { font-size: 40px; line-height: 1; color: var(--fg-1); }
+  .family-stack { font-family: var(--font-mono); font-size: 10px; color: var(--fg-3); word-break: break-all; }
+
+  .usage-row {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
+  }
+  .do, .dont {
+    background: var(--bg-1);
+    border: 1px solid var(--line-1);
+    border-radius: 3px;
+    padding: 14px 16px;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .do-h, .dont-h {
+    font: 600 10px/1 var(--font-mono);
+    letter-spacing: var(--track-caps);
+    text-transform: uppercase;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .do-h::before, .dont-h::before { content: ""; width: 6px; height: 6px; border-radius: 50%; }
+  .do-h { color: var(--ok-fg); } .do-h::before { background: var(--ok-fg); }
+  .dont-h { color: var(--err-fg); } .dont-h::before { background: var(--err-fg); }
+
+  .kpi-demo {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
+    background: var(--bg-1); border: 1px solid var(--line-1); border-radius: 3px;
+    padding: 14px 16px;
+  }
+  .kpi-cell { display: flex; flex-direction: column; gap: 4px; padding-right: 14px; border-right: 1px solid var(--line-1); }
+  .kpi-cell:last-child { border-right: none; }
+  .kpi-label { font: 600 9px/1.2 var(--font-mono); letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--fg-3); }
+  .kpi-val   { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 20px; color: var(--fg-1); }
+  .kpi-val .u { font-size: 9px; color: var(--fg-3); margin-left: 4px; letter-spacing: var(--track-caps); text-transform: uppercase; }
+  .kpi-val.brass { color: var(--brass-1); }
+  .kpi-val.ok    { color: var(--ok-fg); }
+  .kpi-val.err   { color: var(--err-fg); }
+
+  pre.voice {
+    background: var(--bg-0);
+    border: 1px solid var(--line-1);
+    border-radius: 3px;
+    padding: 14px 16px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.7;
+    color: var(--fg-2);
+    white-space: pre-wrap;
+  }
+  pre.voice .brass { color: var(--brass-1); }
+  pre.voice .dim { color: var(--fg-3); }
+  pre.voice .ok { color: var(--ok-fg); }
+  pre.voice .err { color: var(--err-fg); }
+  pre.voice .info { color: var(--info-fg); }
+</style>
+</head>
+<body class="masc-ds">
+<div class="pv-root">
+
+  <header class="pv-head">
+    <div class="pv-eyebrow">MASC Cockpit · Type</div>
+    <h1 class="pv-title">Mono-First, Tabular, Small</h1>
+    <p class="pv-sub">Mono for every number, ID, label, and KPI. Sans only for body and titles. Default body is 13px; labels are 11px uppercase. Tabular numerals everywhere data lives.</p>
+  </header>
+
+  <!-- FAMILIES -->
+  <section class="pv-sect">
+    <div class="pv-sect-h">
+      <h2>Families</h2>
+      <span class="sub">Two families, OS-native stacks</span>
+    </div>
+    <div class="pv-grid-2">
+      <div class="family-card">
+        <span class="family-name">Sans · --font-sans</span>
+        <div class="family-demo" style="font-family:ui-sans-serif,-apple-system,'SF Pro Text','Inter',system-ui,sans-serif">Aa Bb 0123</div>
+        <span class="family-stack">ui-sans-serif, -apple-system, "SF Pro Text", "Inter", system-ui, sans-serif</span>
+      </div>
+      <div class="family-card">
+        <span class="family-name">Mono · --font-mono</span>
+        <div class="family-demo" style="font-family:ui-monospace,'SF Mono','JetBrains Mono',Menlo,monospace">Aa Bb 0123</div>
+        <span class="family-stack">ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- SCALE -->
+  <section class="pv-sect">
+    <div class="pv-sect-h">
+      <h2>Raw Scale</h2>
+      <span class="sub">9 → 36px, tabular-nums, tight line-heights</span>
+    </div>
+    <div class="scale-grid">
+      <div class="scale-cell"><span class="scale-num" style="font-size:9px">1.24</span><span class="scale-meta">fs-9 · micro</span></div>
+      <div class="scale-cell"><span class="scale-num" style="font-size:10px">1.24</span><span class="scale-meta">fs-10 · caption</span></div>
+      <div class="scale-cell"><span class="scale-num" style="font-size:11px">1.24</span><span class="scale-meta">fs-11 · label</span></div>
+      <div class="scale-cell"><span class="scale-num" style="font-size:12px">1.24</span><span class="scale-meta">fs-12 · meta</span></div>
+      <div class="scale-cell"><span class="scale-num" style="font-size:13px">1.24</span><span class="scale-meta">fs-13 · body</span></div>
+      <div class="scale-cell"><span class="scale-num" style="font-size:14px">1.24</span><span class="scale-meta">fs-14 · title</span></div>
+      <div class="scale-cell"><span class="scale-num" style="font-size:16px">1.24</span><span class="scale-meta">fs-16 · kpi-m</span></div>
+      <div class="scale-cell"><span class="scale-num" style="font-size:20px">1.24</span><span class="scale-meta">fs-20 · kpi-l</span></div>
+      <div class="scale-cell"><span class="scale-num" style="font-size:28px">1.24</span><span class="scale-meta">fs-28 · hero</span></div>
+      <div class="scale-cell"><span class="scale-num" style="font-size:36px">1.24</span><span class="scale-meta">fs-36 · display</span></div>
+    </div>
+  </section>
+
+  <!-- ROLES -->
+  <section class="pv-sect">
+    <div class="pv-sect-h">
+      <h2>Role Tokens</h2>
+      <span class="sub">Applied in MASC elements</span>
+    </div>
+    <div class="pv-cell" style="padding:0">
+
+      <div class="type-row">
+        <span class="type-role">Display · h1</span>
+        <span class="type-sample-inline" style="font:600 36px/1.2 var(--font-mono); letter-spacing:-0.01em; font-variant-numeric:tabular-nums">1,247 EVENTS</span>
+        <span class="type-spec">mono 36 / 700 / -.01 / tabular</span>
+      </div>
+
+      <div class="type-row">
+        <span class="type-role">Hero · h2</span>
+        <span class="type-sample-inline" style="font:600 28px/1.2 var(--font-mono); letter-spacing:-0.01em; font-variant-numeric:tabular-nums">TPS 1.24<span style="font-size:12px; color:var(--fg-3); margin-left:4px">s</span></span>
+        <span class="type-spec">mono 28 / 600 / tabular</span>
+      </div>
+
+      <div class="type-row">
+        <span class="type-role">KPI-L · h3</span>
+        <span class="type-sample-inline" style="font:600 20px/1.2 var(--font-mono); font-variant-numeric:tabular-nums; color:var(--brass-1)">87<span style="font-size:10px; color:var(--fg-3); margin-left:3px">%</span> <span style="color:var(--ok-fg)">PASS</span></span>
+        <span class="type-spec">mono 20 / 600 / tabular</span>
+      </div>
+
+      <div class="type-row">
+        <span class="type-role">Title · h4</span>
+        <span class="type-sample-inline" style="font:600 14px/1.2 var(--font-sans); letter-spacing:-0.01em">goal-merge-blockers</span>
+        <span class="type-spec">sans 14 / 600 / -.01</span>
+      </div>
+
+      <div class="type-row">
+        <span class="type-role">Body · p</span>
+        <span class="type-sample-inline" style="font:13px/1.45 var(--font-sans)">nick0cave claimed t-9f2a and is running tool.write_file with +18 −4 line diff. CI still green.</span>
+        <span class="type-spec">sans 13 / 400 / 1.45</span>
+      </div>
+
+      <div class="type-row">
+        <span class="type-role">Label · .label</span>
+        <span class="type-sample-inline" style="font:600 11px/1.2 var(--font-sans); letter-spacing:.08em; text-transform:uppercase; color:var(--fg-3)">Tool Use</span>
+        <span class="type-spec">sans 11 / 600 / +.08 / UPPER</span>
+      </div>
+
+      <div class="type-row">
+        <span class="type-role">Meta · mono</span>
+        <span class="type-sample-inline" style="font:12px/1.2 var(--font-mono); color:var(--fg-2); font-variant-numeric:tabular-nums">t-9f2a · 2026-04-24 16:31:27Z · +18 −4</span>
+        <span class="type-spec">mono 12 / 400 / tabular</span>
+      </div>
+
+      <div class="type-row">
+        <span class="type-role">Caption · .caption</span>
+        <span class="type-sample-inline" style="font:10px/1.2 var(--font-mono); color:var(--fg-3); letter-spacing:.04em">CASCADE HIT @ STEP 2 · ANTHROPIC</span>
+        <span class="type-spec">mono 10 / 400 / +.04</span>
+      </div>
+
+      <div class="type-row">
+        <span class="type-role">Micro</span>
+        <span class="type-sample-inline" style="font:9px/1.2 var(--font-mono); color:var(--fg-3); letter-spacing:.04em">v 0.42.1 · BUILD 2847 · MAIN@e81a7f</span>
+        <span class="type-spec">mono 9 / 400 / +.04</span>
+      </div>
+
+      <div class="type-row">
+        <span class="type-role">Code</span>
+        <span class="type-sample-inline" style="font:12px/1.45 var(--font-mono); color:var(--fg-2)">await keeper.claim(<span style="color:var(--brass-1)">"t-9f2a"</span>)</span>
+        <span class="type-spec">mono 12 / 400 / 1.45</span>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- LIVE KPI DEMO -->
+  <section class="pv-sect">
+    <div class="pv-sect-h">
+      <h2>Applied — KPI Strip</h2>
+      <span class="sub">Mono + tabular + brass for live</span>
+    </div>
+    <div class="kpi-demo">
+      <div class="kpi-cell">
+        <span class="kpi-label">Tokens/sec</span>
+        <span class="kpi-val brass">1.24<span class="u">TPS</span></span>
+      </div>
+      <div class="kpi-cell">
+        <span class="kpi-label">Pass Rate</span>
+        <span class="kpi-val ok">87<span class="u">%</span></span>
+      </div>
+      <div class="kpi-cell">
+        <span class="kpi-label">Fails</span>
+        <span class="kpi-val err">3<span class="u">/ 47</span></span>
+      </div>
+      <div class="kpi-cell">
+        <span class="kpi-label">Cascade</span>
+        <span class="kpi-val">2<span class="u">hits</span></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- VOICE -->
+  <section class="pv-sect">
+    <div class="pv-sect-h">
+      <h2>Voice & Terminology</h2>
+      <span class="sub">How MASC talks — diagnostic, terse, mixed EN/KR</span>
+    </div>
+    <pre class="voice"><span class="dim">┌─ ACTIVITY FEED ──────────────────────────────────────────────┐</span>
+<span class="dim">16:31:27Z</span>  <span class="brass">nick0cave</span>    claimed <span class="dim">t-9f2a</span>    <span class="dim">(goal-merge-blockers)</span>
+<span class="dim">16:31:32Z</span>  <span class="brass">nick0cave</span>    tool.write_file  <span class="ok">+18</span> <span class="err">−4</span>
+<span class="dim">16:31:44Z</span>  <span style="color:var(--info-fg)">sangsu</span>       drift detected at L187 <span class="dim">(+2 replies)</span>
+<span class="dim">16:32:01Z</span>  <span style="color:var(--ok-fg)">masc-improver</span>  PR <span class="dim">#9712</span> keeper-clarity pipeline 개선
+<span class="dim">16:32:18Z</span>  <span class="err">qa-king</span>       3 FAIL / 47 PASS   <span class="err">FLAG</span>
+<span class="dim">16:32:45Z</span>  <span style="color:var(--stalled-fg)">rama</span>         <span style="color:var(--stalled-fg)">STALLED 12m</span>     waiting on analyst
+<span class="dim">└──────────────────────────────────────────────────────────────┘</span>
+
+<span class="dim">Labels:</span>     QUESTION · FLAG · NOTE · APPROVE · SUGGEST
+<span class="dim">Statuses:</span>   OK · FAIL · NOOP · ACTIVE · BLOCKED · STALLED · PENDING · DONE · RUNNING · IDLE
+<span class="dim">Times:</span>      3m ago · 2h ago · 2026-04-24 16:31:27Z
+<span class="dim">Keepers:</span>    nick0cave · masc-improver · sangsu · qa-king · rama</pre>
+  </section>
+
+  <!-- DO / DON'T -->
+  <section class="pv-sect">
+    <div class="pv-sect-h">
+      <h2>Rules</h2>
+      <span class="sub">Type discipline</span>
+    </div>
+    <div class="usage-row">
+      <div class="do">
+        <div class="do-h">Do</div>
+        <ul style="list-style:none; padding:0; display:flex; flex-direction:column; gap:6px; font: var(--type-body); color:var(--fg-2)">
+          <li>— Use <span class="mono">tabular-nums</span> on every data cell</li>
+          <li>— Keep labels ≤11px, UPPERCASE, .08em tracked</li>
+          <li>— Keeper names always lowercase mono: <span class="mono">nick0cave</span></li>
+          <li>— Lead KPIs with the number; unit follows small + dim</li>
+          <li>— Bilingual KR/EN where the codebase is bilingual</li>
+        </ul>
+      </div>
+      <div class="dont">
+        <div class="dont-h">Don't</div>
+        <ul style="list-style:none; padding:0; display:flex; flex-direction:column; gap:6px; font: var(--type-body); color:var(--fg-2)">
+          <li>— No emoji. No exclamation marks.</li>
+          <li>— No pure white text — warm cream only</li>
+          <li>— No sans for numbers or IDs</li>
+          <li>— No title-case button text — <span class="mono">CLAIM</span>, not <i>Claim</i></li>
+          <li>— No marketing adjectives (powerful, beautiful, simple)</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>

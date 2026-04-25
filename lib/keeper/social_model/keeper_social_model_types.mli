@@ -55,6 +55,8 @@ val default_delivery_surface_of_speech_act : speech_act -> delivery_surface
 val delivery_surface_of_string : string -> delivery_surface option
 val model_id_to_string : model_id -> string
 val model_id_of_string : string -> model_id option
+val all_model_ids : model_id list
+val valid_model_id_strings : string list
 val default_model_id : model_id
 val is_known_social_model : string -> bool
 val fallback_social_model : string -> string option

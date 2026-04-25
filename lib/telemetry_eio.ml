@@ -21,7 +21,16 @@ type event =
   | Task_completed of { task_id: string; duration_ms: int; success: bool }
   | Handoff_triggered of { from_agent: string; to_agent: string; reason: string }
   | Error_occurred of { code: string; message: string; context: string }
-  | Tool_called of { tool_name: string; success: bool; duration_ms: int; agent_id: string option; source: string option }
+  | Tool_called of {
+      tool_name: string;
+      success: bool;
+      duration_ms: int;
+      agent_id: string option;
+      source: string option;
+      session_id: string option;
+      operation_id: string option;
+      worker_run_id: string option;
+    }
   | Tool_assigned of { agent_id: string; profile: string; preset: string option; tool_count: int; assignment_id: string }
 [@@deriving yojson, show]
 
@@ -100,9 +109,90 @@ let get_telemetry_store config : Dated_jsonl.t =
       Hashtbl.replace telemetry_store_cache base store;
       store)
 
+let assoc_opt name fields = List.assoc_opt name fields
+
+let error_field context name = Error (context ^ "." ^ name)
+
+let json_string context name fields =
+  match assoc_opt name fields with
+  | Some (`String value) -> Ok value
+  | Some _ | None -> error_field context name
+
+let json_bool context name fields =
+  match assoc_opt name fields with
+  | Some (`Bool value) -> Ok value
+  | Some _ | None -> error_field context name
+
+let json_int context name fields =
+  match assoc_opt name fields with
+  | Some (`Int value) -> Ok value
+  | Some (`Intlit value) -> (
+      try Ok (int_of_string value) with Failure _ -> error_field context name)
+  | Some _ | None -> error_field context name
+
+let json_float context name fields =
+  match assoc_opt name fields with
+  | Some (`Float value) -> Ok value
+  | Some (`Int value) -> Ok (float_of_int value)
+  | Some (`Intlit value) -> (
+      try Ok (float_of_string value) with Failure _ -> error_field context name)
+  | Some _ | None -> error_field context name
+
+let json_string_opt context name fields =
+  match assoc_opt name fields with
+  | None | Some `Null -> Ok None
+  | Some (`String value) -> Ok (Some value)
+  | Some _ -> error_field context name
+
+let event_record_of_yojson_lenient json =
+  match event_record_of_yojson json with
+  | Ok record -> Ok record
+  | Error original_error -> (
+      match json with
+      | `Assoc fields -> (
+          match assoc_opt "event" fields with
+          | Some (`List [ `String "Tool_called"; `Assoc event_fields ]) ->
+              let context = "Telemetry_eio.event" in
+              let ( let* ) = Result.bind in
+              let* timestamp =
+                json_float "Telemetry_eio.event_record" "timestamp" fields
+              in
+              let* tool_name = json_string context "tool_name" event_fields in
+              let* success = json_bool context "success" event_fields in
+              let* duration_ms = json_int context "duration_ms" event_fields in
+              let* agent_id = json_string_opt context "agent_id" event_fields in
+              let* source = json_string_opt context "source" event_fields in
+              let* session_id =
+                json_string_opt context "session_id" event_fields
+              in
+              let* operation_id =
+                json_string_opt context "operation_id" event_fields
+              in
+              let* worker_run_id =
+                json_string_opt context "worker_run_id" event_fields
+              in
+              Ok
+                {
+                  timestamp;
+                  event =
+                    Tool_called
+                      {
+                        tool_name;
+                        success;
+                        duration_ms;
+                        agent_id;
+                        source;
+                        session_id;
+                        operation_id;
+                        worker_run_id;
+                      };
+                }
+          | _ -> Error original_error)
+      | _ -> Error original_error)
+
 let parse_event_records (jsons : Yojson.Safe.t list) : event_record list =
   List.filter_map (fun json ->
-    match event_record_of_yojson json with
+    match event_record_of_yojson_lenient json with
     | Ok record -> Some record
     | Error msg ->
         Eio.traceln "[TelemetryEio] parse_event_records drop: %s" msg;
@@ -118,7 +208,7 @@ let read_all_events_from_path (file : string) : event_record list =
     |> List.filter (fun line -> String.trim line <> "")
     |> List.filter_map (fun line ->
         try
-          match event_record_of_yojson (Yojson.Safe.from_string line) with
+          match event_record_of_yojson_lenient (Yojson.Safe.from_string line) with
           | Ok record -> Some record
           | Error msg ->
               Eio.traceln "[TelemetryEio] read_all_events_from_path drop: %s" msg;
@@ -345,8 +435,20 @@ let track_handoff ?fs config ~from_agent ~to_agent ~reason =
 let track_error ?fs config ~code ~message ~context =
   track ?fs config (Error_occurred { code; message; context })
 
-let track_tool_called ?fs config ~tool_name ~success ~duration_ms ?agent_id ?source () =
-  track ?fs config (Tool_called { tool_name; success; duration_ms; agent_id; source })
+let track_tool_called ?fs config ~tool_name ~success ~duration_ms ?agent_id
+    ?source ?session_id ?operation_id ?worker_run_id () =
+  track ?fs config
+    (Tool_called
+       {
+         tool_name;
+         success;
+         duration_ms;
+         agent_id;
+         source;
+         session_id;
+         operation_id;
+         worker_run_id;
+       })
 
 let track_tool_assigned ?fs config ~agent_id ~profile ?preset ~tool_count ~assignment_id () =
   track ?fs config (Tool_assigned { agent_id; profile; preset; tool_count; assignment_id })

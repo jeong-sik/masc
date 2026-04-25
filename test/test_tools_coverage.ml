@@ -228,7 +228,10 @@ let test_masc_goal_upsert_schema () =
           Alcotest.(check bool) "has id" true (List.mem_assoc "id" props);
           Alcotest.(check bool) "has title" true (List.mem_assoc "title" props);
           Alcotest.(check bool) "has horizon" true (List.mem_assoc "horizon" props);
-          Alcotest.(check bool) "has phase" true (List.mem_assoc "phase" props);
+          Alcotest.(check bool) "omits status lifecycle field" false
+            (List.mem_assoc "status" props);
+          Alcotest.(check bool) "omits phase lifecycle field" false
+            (List.mem_assoc "phase" props);
           Alcotest.(check bool) "has verifier_policy" true
             (List.mem_assoc "verifier_policy" props);
           Alcotest.(check bool) "has require_completion_approval" true

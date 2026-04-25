@@ -36,6 +36,7 @@ Aggregate of 185 commits since v0.14.0 (26 feat / 93 fix / 30 perf-refactor-obs-
 - Dedup of redundant code paths in oas-bridge, keeper-runtime, and telemetry-flow.
 
 ### Chore
+- OAS-pin refresh to `main@bbe5e6b0` (`v0.174.0`) for OAS usage accounting (#1186); dependency floor remains `agent_sdk >= 0.174.0`.
 - OAS-pin bump to agent_sdk v0.173.0 (#10149) with version-floor synchronisation.
 - RFC documentation: WS slice-indexed fanout design (#10119).
 

@@ -98,6 +98,29 @@ let extract_command_from_input (input : Yojson.Safe.t) : string =
 (* Telemetry                                                       *)
 (* -------------------------------------------------------------- *)
 
+type gate_decision_event = {
+  stage : string;
+  decision : string;
+  reason_code : string;
+  reason_text : string;
+  tool_name : string;
+  input : Yojson.Safe.t;
+  turn : int;
+  accumulated_cost_usd : float;
+  stage_latency_ms : float;
+}
+
+let ignore_gate_decision (_ : gate_decision_event) = ()
+
+let notify_gate_decision on_gate_decision (event : gate_decision_event) =
+  try on_gate_decision event
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+      Log.Keeper.warn
+        "keeper_guards: gate observer failed stage=%s tool=%s err=%s"
+        event.stage event.tool_name (Printexc.to_string exn)
+
 (** Emit a [masc:keeper_gate] Event_bus Custom event.
 
     Payload schema:
@@ -144,6 +167,17 @@ let emit_gate_event
       Log.Keeper.warn
         "keeper_guards: event emit failed stage=%s tool=%s err=%s"
         stage tool_name (Printexc.to_string exn))
+
+let report_gate_decision on_gate_decision
+    ~stage ~decision ~reason_code ~reason_text
+    ~tool_name ~keeper_name ~input ~turn
+    ~accumulated_cost_usd ~stage_latency_ms =
+  emit_gate_event ~stage ~decision ~reason_code ~tool_name
+    ~agent_name:keeper_name ~turn ~accumulated_cost_usd
+    ~stage_latency_ms ~reason_text;
+  notify_gate_decision on_gate_decision
+    { stage; decision; reason_code; reason_text; tool_name; input; turn;
+      accumulated_cost_usd; stage_latency_ms }
 
 (* -------------------------------------------------------------- *)
 (* Composition helpers                                             *)
@@ -197,6 +231,7 @@ let timing_guard ~(tool_start_time : float ref)
     the caller's callback returns [Some reason_text]. *)
 let custom_guard
     ~(meta_ref : Keeper_types.keeper_meta ref)
+    ~on_gate_decision
     ~(guard : tool_name:string -> input:Yojson.Safe.t -> string option)
   : Oas.Hooks.hooks =
   hooks_of_pre_tool_use (fun event ->
@@ -213,13 +248,11 @@ let custom_guard
            keeper_name tool_name;
          broadcast_tool_skipped
            ~keeper_name ~tool_name ~reason_code:"pre_tool_use_guard";
-         emit_gate_event
+         report_gate_decision on_gate_decision
            ~stage:"pre_tool_use_guard" ~decision:"override"
-           ~reason_code:"pre_tool_use_guard"
-           ~tool_name ~agent_name:keeper_name ~turn
-           ~accumulated_cost_usd
-           ~stage_latency_ms:latency_ms
-           ~reason_text:reason;
+           ~reason_code:"pre_tool_use_guard" ~reason_text:reason
+           ~tool_name ~keeper_name ~input ~turn ~accumulated_cost_usd
+           ~stage_latency_ms:latency_ms;
          Oas.Hooks.Override
            (render_inline_skip_reason
               ~tool_name ~reason_code:"pre_tool_use_guard"
@@ -234,13 +267,14 @@ let custom_guard
     board posts one by one). *)
 let streak_guard
     ~(meta_ref : Keeper_types.keeper_meta ref)
+    ~on_gate_decision
     ~(state : streak_state)
     ~(threshold : int)
   : Oas.Hooks.hooks =
   hooks_of_pre_tool_use (fun event ->
     match event with
     | Oas.Hooks.PreToolUse
-        { tool_name; accumulated_cost_usd; turn; _ } ->
+        { tool_name; input; accumulated_cost_usd; turn; _ } ->
       let t0 = Time_compat.now () in
       let keeper_name = (!meta_ref).Keeper_types.name in
       let prev_name, prev_count = state.entry in
@@ -260,13 +294,11 @@ let streak_guard
           keeper_name tool_name new_count;
         broadcast_tool_skipped
           ~keeper_name ~tool_name ~reason_code:"streak_gate";
-        emit_gate_event
+        report_gate_decision on_gate_decision
           ~stage:"streak_gate" ~decision:"override"
-          ~reason_code:"streak_gate"
-          ~tool_name ~agent_name:keeper_name ~turn
-          ~accumulated_cost_usd
-          ~stage_latency_ms:latency_ms
-          ~reason_text;
+          ~reason_code:"streak_gate" ~reason_text
+          ~tool_name ~keeper_name ~input ~turn ~accumulated_cost_usd
+          ~stage_latency_ms:latency_ms;
         Oas.Hooks.Override
           (render_inline_skip_reason
              ~tool_name ~reason_code:"streak_gate" ~reason_text)
@@ -278,12 +310,13 @@ let streak_guard
     should only be invoked by operators or controlled workflows. *)
 let deny_guard
     ~(meta_ref : Keeper_types.keeper_meta ref)
+    ~on_gate_decision
     ~(denied : string list)
   : Oas.Hooks.hooks =
   hooks_of_pre_tool_use (fun event ->
     match event with
     | Oas.Hooks.PreToolUse
-        { tool_name; accumulated_cost_usd; turn; _ } ->
+        { tool_name; input; accumulated_cost_usd; turn; _ } ->
       let t0 = Time_compat.now () in
       let keeper_name = (!meta_ref).Keeper_types.name in
       if List.mem tool_name denied then begin
@@ -293,13 +326,11 @@ let deny_guard
           keeper_name tool_name;
         broadcast_tool_skipped
           ~keeper_name ~tool_name ~reason_code:"keeper_deny";
-        emit_gate_event
+        report_gate_decision on_gate_decision
           ~stage:"keeper_deny" ~decision:"override"
-          ~reason_code:"keeper_deny"
-          ~tool_name ~agent_name:keeper_name ~turn
-          ~accumulated_cost_usd
-          ~stage_latency_ms:latency_ms
-          ~reason_text;
+          ~reason_code:"keeper_deny" ~reason_text
+          ~tool_name ~keeper_name ~input ~turn ~accumulated_cost_usd
+          ~stage_latency_ms:latency_ms;
         Oas.Hooks.Override
           (render_inline_skip_reason
              ~tool_name ~reason_code:"keeper_deny" ~reason_text)
@@ -311,12 +342,13 @@ let deny_guard
     [limit]. No-op when [max_cost_usd] is [None]. *)
 let cost_guard
     ~(meta_ref : Keeper_types.keeper_meta ref)
+    ~on_gate_decision
     ~(max_cost_usd : float option)
   : Oas.Hooks.hooks =
   hooks_of_pre_tool_use (fun event ->
     match event with
     | Oas.Hooks.PreToolUse
-        { tool_name; accumulated_cost_usd; turn; _ } ->
+        { tool_name; input; accumulated_cost_usd; turn; _ } ->
       let t0 = Time_compat.now () in
       let keeper_name = (!meta_ref).Keeper_types.name in
       (match max_cost_usd with
@@ -332,13 +364,11 @@ let cost_guard
            keeper_name accumulated_cost_usd limit tool_name;
          broadcast_tool_skipped
            ~keeper_name ~tool_name ~reason_code:"cost_gate";
-         emit_gate_event
+         report_gate_decision on_gate_decision
            ~stage:"cost_gate" ~decision:"override"
-           ~reason_code:"cost_gate"
-           ~tool_name ~agent_name:keeper_name ~turn
-           ~accumulated_cost_usd
-           ~stage_latency_ms:latency_ms
-           ~reason_text;
+           ~reason_code:"cost_gate" ~reason_text
+           ~tool_name ~keeper_name ~input ~turn ~accumulated_cost_usd
+           ~stage_latency_ms:latency_ms;
          Oas.Hooks.Override
            (render_inline_skip_reason
               ~tool_name ~reason_code:"cost_gate" ~reason_text)
@@ -350,6 +380,7 @@ let cost_guard
     [Tool_dispatch.is_destructive]. *)
 let destructive_guard
     ~(meta_ref : Keeper_types.keeper_meta ref)
+    ~on_gate_decision
     ~(enabled : bool)
   : Oas.Hooks.hooks =
   hooks_of_pre_tool_use (fun event ->
@@ -375,13 +406,11 @@ let destructive_guard
              keeper_name tool_name pattern desc;
            broadcast_tool_skipped
              ~keeper_name ~tool_name ~reason_code:"destructive_guard";
-           emit_gate_event
+           report_gate_decision on_gate_decision
              ~stage:"destructive_guard" ~decision:"override"
-             ~reason_code:"destructive_guard"
-             ~tool_name ~agent_name:keeper_name ~turn
-             ~accumulated_cost_usd
-             ~stage_latency_ms:latency_ms
-             ~reason_text;
+             ~reason_code:"destructive_guard" ~reason_text
+             ~tool_name ~keeper_name ~input ~turn ~accumulated_cost_usd
+             ~stage_latency_ms:latency_ms;
            Oas.Hooks.Override
              (render_inline_skip_reason
                 ~tool_name ~reason_code:"destructive_guard"
@@ -394,6 +423,7 @@ let destructive_guard
     agent Builder to resolve the decision. *)
 let governance_approval_guard
     ~(meta_ref : Keeper_types.keeper_meta ref)
+    ~on_gate_decision
   : Oas.Hooks.hooks =
   hooks_of_pre_tool_use (fun event ->
     match event with
@@ -412,13 +442,12 @@ let governance_approval_guard
       in
       if needs_approval then begin
         let latency_ms = (Time_compat.now () -. t0) *. 1000.0 in
-        emit_gate_event
+        report_gate_decision on_gate_decision
           ~stage:"governance_approval" ~decision:"approval_required"
           ~reason_code:"governance_approval"
-          ~tool_name ~agent_name:keeper_name ~turn
-          ~accumulated_cost_usd
-          ~stage_latency_ms:latency_ms
-          ~reason_text:"risk threshold reached; operator approval required";
+          ~reason_text:"risk threshold reached; operator approval required"
+          ~tool_name ~keeper_name ~input ~turn ~accumulated_cost_usd
+          ~stage_latency_ms:latency_ms;
         Oas.Hooks.ApprovalRequired
       end
       else Oas.Hooks.Continue
@@ -443,15 +472,16 @@ let build_chain
     ~(denied : string list)
     ~(max_cost_usd : float option)
     ~(destructive_check : bool)
+    ~on_gate_decision
     ~(pre_tool_use_guard :
         tool_name:string -> input:Yojson.Safe.t -> string option)
   : Oas.Hooks.hooks =
   compose_all [
     timing_guard ~tool_start_time;
-    custom_guard ~meta_ref ~guard:pre_tool_use_guard;
-    streak_guard ~meta_ref ~state:streak_state ~threshold:streak_threshold;
-    deny_guard ~meta_ref ~denied;
-    cost_guard ~meta_ref ~max_cost_usd;
-    destructive_guard ~meta_ref ~enabled:destructive_check;
-    governance_approval_guard ~meta_ref;
+    custom_guard ~meta_ref ~on_gate_decision ~guard:pre_tool_use_guard;
+    streak_guard ~meta_ref ~on_gate_decision ~state:streak_state ~threshold:streak_threshold;
+    deny_guard ~meta_ref ~on_gate_decision ~denied;
+    cost_guard ~meta_ref ~on_gate_decision ~max_cost_usd;
+    destructive_guard ~meta_ref ~on_gate_decision ~enabled:destructive_check;
+    governance_approval_guard ~meta_ref ~on_gate_decision;
   ]

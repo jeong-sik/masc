@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MASC — Overlays</title>
+  <link rel="stylesheet" href="../colors_and_type.css" />
+  <link rel="stylesheet" href="../source_styles/tokens.css" />
+  <link rel="stylesheet" href="../source_styles/primitives.css" />
+  <style>
+    html, body { margin:0; background: var(--bg-0); color: var(--fg-1); font-family: var(--font-sans); min-height: 100vh; }
+    .page { max-width: 1180px; margin:0 auto; padding: 32px 32px 96px; }
+    .back { font: var(--type-micro); color: var(--fg-4); text-decoration:none; letter-spacing: .08em; display:inline-block; margin-bottom:20px; }
+    .back:hover { color: var(--fg-2); }
+    h1 { font-family: var(--font-mono); font-size: 18px; font-weight: 600; margin: 0 0 4px; }
+    .sub { color: var(--fg-3); font-size: 12px; margin-bottom: 28px; }
+    h2 { font: var(--type-label); text-transform: uppercase; letter-spacing: .08em; color: var(--fg-3); font-weight: 600; font-size: 11px; margin: 28px 0 8px; padding-bottom: 6px; border-bottom: 1px solid var(--line-2); }
+    .stamp { position:fixed; top:12px; right:16px; font-family: var(--font-mono); font-size: 10px; color: var(--fg-4); }
+
+    /* static frame that hosts a "live" overlay demo */
+    .stage { position: relative; width: 100%; height: 320px; background: var(--bg-1); border: 1px solid var(--line-1); border-radius: var(--r-1); overflow: hidden; }
+    .stage .faux {
+      position: absolute; inset: 0;
+      background:
+        linear-gradient(var(--line-1) 1px, transparent 1px) 0 0 / 24px 24px,
+        var(--bg-0);
+      opacity: .45;
+    }
+    .stage-caption { position: absolute; top: 8px; left: 10px; font-family: var(--font-mono); font-size: 9px; color: var(--fg-4); letter-spacing: .08em; text-transform: uppercase; }
+    .stage-action { position: absolute; top: 8px; right: 10px; }
+    .btn-ghost { background: var(--bg-2); border: 1px solid var(--line-2); color: var(--fg-2); font-family: var(--font-mono); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; font-weight: 600; padding: 3px 8px; border-radius: var(--r-1); cursor: pointer; }
+    .btn-ghost:hover { border-color: var(--brass-2); color: var(--brass-1); }
+
+    /* ────── MODAL ────── */
+    .scrim { position: absolute; inset: 0; background: rgba(10, 10, 12, .68); backdrop-filter: blur(2px); display: grid; place-items: center; z-index: 2; }
+    .modal { width: min(440px, 84%); background: var(--bg-1); border: 1px solid var(--line-2); border-radius: var(--r-1); box-shadow: 0 20px 60px rgba(0,0,0,.5), 0 0 0 1px rgb(var(--brass-glow)/.08); overflow: hidden; }
+    .modal-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line-1); background: linear-gradient(180deg, var(--bg-2), var(--bg-1)); }
+    .modal-head .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--err); box-shadow: 0 0 4px var(--err-glow); }
+    .modal-head h3 { margin: 0; font-family: var(--font-mono); font-size: 12px; font-weight: 600; letter-spacing: .04em; color: var(--fg-1); }
+    .modal-head .close { margin-left: auto; font-family: var(--font-mono); font-size: 12px; color: var(--fg-4); cursor: pointer; background: none; border: none; }
+    .modal-body { padding: 14px; font-size: 12px; line-height: 1.55; color: var(--fg-2); }
+    .modal-body .mono { font-family: var(--font-mono); color: var(--fg-1); background: var(--bg-2); padding: 1px 5px; border-radius: 2px; border: 1px solid var(--line-1); font-size: 11px; }
+    .modal-foot { display: flex; justify-content: flex-end; gap: 6px; padding: 10px 14px; border-top: 1px solid var(--line-1); background: var(--bg-0); }
+    .btn { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; font-weight: 600; padding: 5px 12px; border-radius: var(--r-1); cursor: pointer; border: 1px solid var(--line-2); background: var(--bg-2); color: var(--fg-2); }
+    .btn:hover { border-color: var(--brass-2); color: var(--brass-1); }
+    .btn.is-danger { background: rgb(var(--err-glow)/.15); border-color: var(--err); color: var(--err-fg); }
+    .btn.is-danger:hover { background: rgb(var(--err-glow)/.25); }
+    .btn.is-primary { background: rgb(var(--brass-glow)/.12); border-color: var(--brass-1); color: var(--brass-1); box-shadow: 0 0 8px rgb(var(--brass-glow)/.25); }
+
+    /* ────── POPOVER ────── */
+    .anchor-btn { position: absolute; top: 120px; left: 60px; background: var(--bg-2); border: 1px dashed var(--line-2); color: var(--fg-2); font-family: var(--font-mono); font-size: 11px; padding: 5px 10px; border-radius: var(--r-1); cursor: pointer; }
+    .popover { position: absolute; background: var(--bg-2); border: 1px solid var(--line-2); border-radius: var(--r-1); box-shadow: 0 10px 30px rgba(0,0,0,.45), 0 0 0 1px rgb(var(--brass-glow)/.08); min-width: 220px; z-index: 2; }
+    .popover::before { content:''; position: absolute; top: -5px; left: 24px; width: 8px; height: 8px; background: var(--bg-2); border-left: 1px solid var(--line-2); border-top: 1px solid var(--line-2); transform: rotate(45deg); }
+    .popover-row { display: flex; align-items: center; gap: 8px; padding: 6px 10px; font-family: var(--font-mono); font-size: 11px; color: var(--fg-2); cursor: pointer; border-bottom: 1px solid var(--line-1); }
+    .popover-row:last-child { border-bottom: none; }
+    .popover-row:hover { background: var(--bg-3); color: var(--brass-1); }
+    .popover-row .kbd { margin-left: auto; font-size: 9px; padding: 1px 4px; border: 1px solid var(--line-2); border-radius: 2px; color: var(--fg-4); background: var(--bg-1); }
+    .popover-header { padding: 6px 10px 4px; font-family: var(--font-mono); font-size: 9px; letter-spacing: .08em; color: var(--fg-4); text-transform: uppercase; font-weight: 600; border-bottom: 1px solid var(--line-1); }
+
+    /* ────── TOOLTIP ────── */
+    .tt { position: absolute; background: var(--bg-3); color: var(--fg-1); font-family: var(--font-mono); font-size: 10px; padding: 4px 8px; border-radius: var(--r-1); border: 1px solid var(--line-2); box-shadow: 0 4px 12px rgba(0,0,0,.45); z-index: 2; max-width: 220px; }
+    .tt::before { content: ''; position: absolute; width: 6px; height: 6px; background: var(--bg-3); border-left: 1px solid var(--line-2); border-top: 1px solid var(--line-2); transform: rotate(45deg); }
+    .tt.tt-top::before { bottom: -4px; left: 12px; transform: rotate(225deg); }
+    .tt.tt-right::before { top: 10px; left: -4px; }
+
+    /* ────── TOAST STACK ────── */
+    .toast-stack { position: absolute; right: 14px; bottom: 14px; display: flex; flex-direction: column; gap: 6px; z-index: 2; min-width: 260px; }
+    .toast { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px 8px 8px; background: var(--bg-2); border: 1px solid var(--line-2); border-left: 2px solid var(--line-2); border-radius: var(--r-1); box-shadow: 0 6px 18px rgba(0,0,0,.5); font-size: 11px; color: var(--fg-1); }
+    .toast .icon { width: 14px; text-align: center; font-family: var(--font-mono); font-weight: 700; font-size: 11px; flex-shrink: 0; line-height: 1.4; }
+    .toast .body { flex: 1; line-height: 1.4; }
+    .toast .time { font-family: var(--font-mono); font-size: 9px; color: var(--fg-4); letter-spacing: .04em; margin-top: 1px; }
+    .toast .close { font-family: var(--font-mono); color: var(--fg-4); cursor: pointer; background: none; border: none; padding: 0 2px; }
+    .toast.is-ok { border-left-color: var(--ok); }
+    .toast.is-ok .icon { color: var(--ok); }
+    .toast.is-err { border-left-color: var(--err); }
+    .toast.is-err .icon { color: var(--err); }
+    .toast.is-brass { border-left-color: var(--brass-1); }
+    .toast.is-brass .icon { color: var(--brass-1); text-shadow: 0 0 4px rgb(var(--brass-glow)/.6); }
+    .toast.is-warn { border-left-color: var(--warn); }
+    .toast.is-warn .icon { color: var(--warn); }
+
+    /* ────── CONTEXT MENU ────── */
+    .ctxmenu { position: absolute; min-width: 200px; background: var(--bg-2); border: 1px solid var(--line-2); border-radius: var(--r-1); box-shadow: 0 10px 30px rgba(0,0,0,.5); z-index: 2; padding: 4px 0; }
+    .ctxmenu .item { display: flex; align-items: center; gap: 8px; padding: 4px 10px; font-family: var(--font-mono); font-size: 11px; color: var(--fg-2); cursor: pointer; }
+    .ctxmenu .item:hover { background: var(--bg-3); color: var(--brass-1); }
+    .ctxmenu .item .glyph { width: 12px; color: var(--fg-4); text-align: center; }
+    .ctxmenu .item:hover .glyph { color: var(--brass-1); }
+    .ctxmenu .item .kbd { margin-left: auto; font-size: 9px; padding: 1px 4px; border: 1px solid var(--line-2); border-radius: 2px; color: var(--fg-4); background: var(--bg-1); }
+    .ctxmenu .sep { height: 1px; background: var(--line-1); margin: 4px 0; }
+    .ctxmenu .item.is-danger { color: var(--err-fg); }
+
+    /* ────── CMD PALETTE ────── */
+    .cmdk-scrim { position: absolute; inset: 0; background: rgba(10,10,12,.7); backdrop-filter: blur(3px); display: flex; justify-content: center; padding-top: 40px; z-index: 2; }
+    .cmdk { width: min(520px, 86%); background: var(--bg-1); border: 1px solid var(--brass-2); box-shadow: 0 20px 60px rgba(0,0,0,.6), 0 0 40px rgb(var(--brass-glow)/.15); border-radius: var(--r-1); overflow: hidden; height: fit-content; }
+    .cmdk-input { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line-2); }
+    .cmdk-input .prompt { font-family: var(--font-mono); color: var(--brass-1); font-size: 13px; text-shadow: 0 0 6px rgb(var(--brass-glow)/.6); }
+    .cmdk-input input { flex: 1; background: transparent; border: none; outline: none; color: var(--fg-1); font-family: var(--font-mono); font-size: 13px; caret-color: var(--brass-1); }
+    .cmdk-input .hint { font-family: var(--font-mono); font-size: 9px; color: var(--fg-4); letter-spacing: .08em; text-transform: uppercase; }
+    .cmdk-results { max-height: 230px; overflow-y: auto; }
+    .cmdk-group-head { padding: 6px 14px 2px; font-family: var(--font-mono); font-size: 9px; letter-spacing: .08em; color: var(--fg-4); text-transform: uppercase; font-weight: 600; }
+    .cmdk-item { display: flex; align-items: center; gap: 10px; padding: 6px 14px; font-size: 12px; color: var(--fg-2); font-family: var(--font-mono); cursor: pointer; }
+    .cmdk-item .glyph { width: 16px; color: var(--fg-4); text-align: center; }
+    .cmdk-item .meta { margin-left: auto; font-size: 10px; color: var(--fg-4); }
+    .cmdk-item.is-sel { background: rgb(var(--brass-glow)/.1); color: var(--brass-1); box-shadow: inset 2px 0 0 var(--brass-1); }
+    .cmdk-item.is-sel .glyph { color: var(--brass-1); text-shadow: 0 0 4px rgb(var(--brass-glow)/.6); }
+    .cmdk-item.is-sel .meta { color: var(--brass-2); }
+    .cmdk-foot { display: flex; gap: 14px; padding: 6px 14px; border-top: 1px solid var(--line-2); background: var(--bg-0); font-family: var(--font-mono); font-size: 9px; color: var(--fg-4); letter-spacing: .06em; }
+    .cmdk-foot .k { padding: 1px 4px; border: 1px solid var(--line-2); border-radius: 2px; color: var(--fg-3); margin-right: 3px; }
+  </style>
+</head>
+<body>
+  <div class="stamp">overlays · 6 surfaces</div>
+  <div class="page">
+    <a class="back" href="index.html">← design system</a>
+    <h1>Overlays</h1>
+    <p class="sub">Stacked surfaces. Scrims darken by 68%, borders always single-pixel, brass-accented for primary affordance.</p>
+
+    <h2>Modal · confirm</h2>
+    <div class="stage">
+      <div class="faux"></div>
+      <div class="stage-caption">destructive confirm · z:100 · backdrop:blur(2px)</div>
+      <div class="scrim">
+        <div class="modal">
+          <div class="modal-head">
+            <span class="dot"></span>
+            <h3>Kill keeper <span class="mono">t-9f2a</span>?</h3>
+            <button class="close">×</button>
+          </div>
+          <div class="modal-body">
+            This will terminate <span class="mono">nick0cave</span> mid-cascade.
+            <span class="mono">3 threads</span> on keeper.ts will be abandoned and any in-flight emit() calls rolled back.
+          </div>
+          <div class="modal-foot">
+            <button class="btn">Cancel <span style="color:var(--fg-4); margin-left:4px">ESC</span></button>
+            <button class="btn is-danger">Kill &amp; abandon</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <h2>Popover · menu from anchor</h2>
+    <div class="stage">
+      <div class="faux"></div>
+      <div class="stage-caption">anchor below-start · arrow on top edge</div>
+      <button class="anchor-btn">▾ keeper actions</button>
+      <div class="popover" style="top:160px; left:60px">
+        <div class="popover-header">nick0cave · t-9f2a</div>
+        <div class="popover-row">◐ pause keeper <span class="kbd">⌘P</span></div>
+        <div class="popover-row">⟳ restart <span class="kbd">⌘R</span></div>
+        <div class="popover-row">✓ approve all <span class="kbd">⌘⇧A</span></div>
+        <div class="popover-row" style="color:var(--err-fg)">✕ kill &amp; abandon</div>
+      </div>
+    </div>
+
+    <h2>Tooltip</h2>
+    <div class="stage">
+      <div class="faux"></div>
+      <div class="stage-caption">single-line + multiline variants</div>
+      <span style="position:absolute; top:90px; left:80px; font-family:var(--font-mono); font-size:11px; color:var(--fg-3); padding: 3px 8px; border-bottom: 1px dotted var(--line-2);">cascade @ 1.24s</span>
+      <div class="tt tt-top" style="top:60px; left:66px">moonshot@2 · 847 tok · 1.24s</div>
+
+      <span style="position:absolute; top:170px; left:80px; font-family:var(--font-mono); font-size:11px; color:var(--fg-3); padding: 3px 8px; border-bottom: 1px dotted var(--line-2);">drift 0.42</span>
+      <div class="tt tt-right" style="top:160px; left:170px; width: 240px">Semantic drift from spec. Threshold 0.3 triggers review. Last measured 40s ago.</div>
+
+      <span style="position:absolute; top:240px; left:80px; font-family:var(--font-mono); font-size:11px; color:var(--brass-1);">t-9f2a</span>
+      <div class="tt tt-top" style="top:210px; left:66px">thread id · click to open rail</div>
+    </div>
+
+    <h2>Toast · stack</h2>
+    <div class="stage">
+      <div class="faux"></div>
+      <div class="stage-caption">bottom-right · auto-dismiss 6s · keeper-colored border</div>
+      <div class="toast-stack">
+        <div class="toast is-brass"><span class="icon">◈</span><div class="body">nick0cave committed <b>c99012</b><div class="time">just now</div></div><button class="close">×</button></div>
+        <div class="toast is-err"><span class="icon">!</span><div class="body">qa-king flagged <b>keeper.ts:10</b> — expected guard<div class="time">3s ago</div></div><button class="close">×</button></div>
+        <div class="toast is-ok"><span class="icon">✓</span><div class="body">All 5 keepers reached heartbeat<div class="time">12s ago</div></div><button class="close">×</button></div>
+        <div class="toast is-warn"><span class="icon">◑</span><div class="body">rama stalled 12m on <b>goal-3</b><div class="time">45s ago</div></div><button class="close">×</button></div>
+      </div>
+    </div>
+
+    <h2>Context menu · right-click</h2>
+    <div class="stage">
+      <div class="faux"></div>
+      <div class="stage-caption">on-thread context · 3 groups separated</div>
+      <span style="position:absolute; top:110px; left:180px; font-family:var(--font-mono); font-size:11px; color:var(--brass-1); padding: 3px 8px; background: rgb(var(--brass-glow)/.1); border-radius: 2px;">thread t-9f2a</span>
+      <div class="ctxmenu" style="top:140px; left:180px">
+        <div class="item"><span class="glyph">↗</span>open in rail <span class="kbd">↵</span></div>
+        <div class="item"><span class="glyph">#</span>jump to line</div>
+        <div class="sep"></div>
+        <div class="item"><span class="glyph">✓</span>resolve <span class="kbd">⌘↵</span></div>
+        <div class="item"><span class="glyph">◑</span>defer</div>
+        <div class="item"><span class="glyph">@</span>assign…</div>
+        <div class="sep"></div>
+        <div class="item"><span class="glyph">⎘</span>copy ref</div>
+        <div class="item is-danger"><span class="glyph">✕</span>delete thread</div>
+      </div>
+    </div>
+
+    <h2>⌘K · command palette</h2>
+    <div class="stage" style="height:380px">
+      <div class="faux"></div>
+      <div class="stage-caption">fuzzy find · grouped · arrow-navigable</div>
+      <div class="cmdk-scrim">
+        <div class="cmdk">
+          <div class="cmdk-input">
+            <span class="prompt">›</span>
+            <input value="fleet" readonly />
+            <span class="hint">5 results · ↑↓ ↵</span>
+          </div>
+          <div class="cmdk-results">
+            <div class="cmdk-group-head">Fleet</div>
+            <div class="cmdk-item is-sel"><span class="glyph">◈</span>Restart fleet…<span class="meta">command · ⌘⇧R</span></div>
+            <div class="cmdk-item"><span class="glyph">⌘</span>Fleet heartbeat report<span class="meta">command</span></div>
+            <div class="cmdk-item"><span class="glyph">≡</span>Fleet dashboard<span class="meta">view · ⌘1</span></div>
+            <div class="cmdk-group-head">Keepers</div>
+            <div class="cmdk-item"><span class="glyph">◉</span>nick0cave<span class="meta">t-9f2a · running</span></div>
+            <div class="cmdk-item"><span class="glyph">◉</span>sangsu<span class="meta">t-9f2c · running</span></div>
+          </div>
+          <div class="cmdk-foot">
+            <span><span class="k">↑</span><span class="k">↓</span> navigate</span>
+            <span><span class="k">↵</span> select</span>
+            <span><span class="k">⌘K</span> close</span>
+            <span style="margin-left:auto; color:var(--brass-1)">MASC › fleet</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

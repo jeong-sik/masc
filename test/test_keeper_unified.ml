@@ -1174,12 +1174,12 @@ let test_system_prompt_prefers_bash_and_gh_pr_lane () =
       ~instructions:""
       ()
   in
-  check bool "mentions git path via keeper_bash" true
+  check bool "mentions active schema guard" true
     (contains_substring sys
-       "keeper_bash (run commands inside your sandbox; use for git add/commit/push");
-  check bool "mentions gh create path" true
+       "Use only the tool schemas currently shown to you by the runtime");
+  check bool "mentions gh identity as conditional route" true
     (contains_substring sys
-       "keeper_shell op=gh (ALL GitHub CLI ops - gh pr create/view/review");
+       "when keeper_shell op=gh is present");
   check bool "does not advertise removed keeper_github" false
     (contains_substring sys "keeper_github");
   check bool "legacy pr workflow removed" false
@@ -1539,28 +1539,72 @@ let test_prompt_omits_claim_first_guidance_when_paused () =
     (contains_substring user "### Immediate Task Move")
 
 let test_work_discovery_nudge_uses_registered_keeper_tool_schemas () =
+  let module Guidance = Masc_mcp.Keeper_tool_guidance in
+  let social_meta =
+    {
+      minimal_meta with
+      tool_access = Preset { preset = Social; also_allow = [] };
+    }
+  in
+  let coding_meta =
+    {
+      minimal_meta with
+      tool_access = Preset { preset = Coding; also_allow = [] };
+    }
+  in
+  let social_allowed =
+    Masc_mcp.Keeper_exec_tools.keeper_allowed_tool_names social_meta
+  in
+  let coding_allowed =
+    Masc_mcp.Keeper_exec_tools.keeper_allowed_tool_names coding_meta
+  in
+  let social_guidance =
+    Guidance.render_preferred_tools ~allowed_tool_names:social_allowed
+  in
+  let coding_guidance =
+    Guidance.render_preferred_tools ~allowed_tool_names:coding_allowed
+  in
   check bool "obsolete claim alias removed" false
     (source_file_contains "lib/keeper/keeper_agent_run.ml" "keeper_claim_task");
-  check bool "claim tool uses registered no-arg schema" true
-    (source_file_contains "lib/keeper/keeper_agent_run.ml" "`keeper_task_claim` {}");
-  check bool "bash tool uses cmd field" true
-    (source_file_contains "lib/keeper/keeper_agent_run.ml" "`keeper_bash` { cmd:");
-  check bool "worktree tool uses task_id schema" true
-    (source_file_contains "lib/keeper/keeper_agent_run.ml"
-       "`masc_worktree_create` { task_id:");
+  check bool "social guidance includes claim schema when allowed" true
+    (contains_substring social_guidance "`keeper_task_claim` {}");
+  check bool "social guidance includes board post when allowed" true
+    (contains_substring social_guidance "`keeper_board_post` { content:");
+  check bool "social guidance omits bash outside preset" false
+    (contains_substring social_guidance "`keeper_bash` { cmd:");
+  check bool "social guidance omits worktree outside preset" false
+    (contains_substring social_guidance "`masc_worktree_create` { task_id:");
+  check bool "coding guidance includes bash schema" true
+    (contains_substring coding_guidance "`keeper_bash` { cmd:");
+  check bool "coding guidance includes worktree schema" true
+    (contains_substring coding_guidance "`masc_worktree_create` { task_id:");
   check bool "legacy worktree branch_name schema removed" false
     (source_file_contains "lib/keeper/keeper_agent_run.ml" "branch_name:");
   check bool "tool-less runtime escape hatch removed from nudge" false
     (source_file_contains "lib/keeper/keeper_agent_run.ml" "NO_TOOL_CHANNEL");
   check bool "work discovery nudge warns gh needs claimed task" true
-    (source_file_contains "lib/keeper/keeper_agent_run.ml"
+    (contains_substring
+       (Option.value ~default:""
+          (Guidance.render_gh_workflow ~allowed_tool_names:coding_allowed))
        "keeper_shell op=gh` derives repo context from the active task worktree/current_task_id");
+  check bool "unknown tool guard names server-managed public lifecycle tools" true
+    (contains_substring (Guidance.render_unknown_tool_guard ()) "masc_heartbeat");
   check bool "keeper_shell schema documents gh claim prerequisite" true
     (source_file_contains "lib/tool_shard.ml"
        "Requires an active claimed task/current_task_id");
   check bool "keeper_shell gh runtime allows sandbox fallback" true
     (source_file_contains "lib/keeper/keeper_shell_gh_context.ml"
-       "task_id = \"(sandbox)\"")
+       "task_id = \"(sandbox)\"");
+  check bool
+    "work discovery nudge avoids pre-filter policy tool names"
+    false
+    (source_file_contains "lib/keeper/keeper_agent_run.ml"
+       "render_preferred_tools ~allowed_tool_names");
+  check bool
+    "claimed-task nudge avoids hard-coded execution tool names"
+    false
+    (source_file_contains "lib/keeper/keeper_agent_run.ml"
+       "Use keeper_bash, keeper_shell, keeper_fs_read")
 
 (* ---------- Config tests ---------- *)
 
@@ -1639,6 +1683,8 @@ let sample_tool_surface_metrics () : Masc_mcp.Keeper_agent_run.tool_surface_metr
   }
 let make_run_result ~text ~tools ~model ~input_tok ~output_tok
     ?(usage_reported = true)
+    ?(cache_creation_tokens = 0)
+    ?(cache_read_tokens = 0)
     ?(tool_calls = [])
     ?proof
     ?trace_ref
@@ -1653,7 +1699,14 @@ let make_run_result ~text ~tools ~model ~input_tok ~output_tok
     cascade_observation;
     turn_count = 1;
     tool_calls_made = List.length tools;
-    usage = { input_tokens = input_tok; output_tokens = output_tok; cache_creation_input_tokens = 0; cache_read_input_tokens = 0; cost_usd = None };
+    usage =
+      {
+        input_tokens = input_tok;
+        output_tokens = output_tok;
+        cache_creation_input_tokens = cache_creation_tokens;
+        cache_read_input_tokens = cache_read_tokens;
+        cost_usd = None;
+      };
     usage_reported;
     tools_used = tools;
     tool_calls;
@@ -2584,8 +2637,75 @@ let test_append_metrics_snapshot_nulls_unreported_usage () =
         (match usage |> member "output_tokens" with `Null -> true | _ -> false);
       check bool "snapshot total_tokens null when usage unreported" true
         (match usage |> member "total_tokens" with `Null -> true | _ -> false);
+      check bool "snapshot cache_creation_tokens null when usage unreported" true
+        (match usage |> member "cache_creation_tokens" with `Null -> true | _ -> false);
+      check bool "snapshot cache_read_tokens null when usage unreported" true
+        (match usage |> member "cache_read_tokens" with `Null -> true | _ -> false);
       check bool "snapshot cost_usd null when usage unreported" true
         (match json |> member "cost_usd" with `Null -> true | _ -> false))
+
+let test_append_metrics_snapshot_persists_cache_usage () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      let result =
+        make_run_result
+          ~text:"Claude reported cache usage."
+          ~tools:[]
+          ~model:"claude:claude-sonnet-4-6"
+          ~input_tok:2000
+          ~output_tok:200
+          ~cache_creation_tokens:1500
+          ~cache_read_tokens:300
+          ()
+      in
+      UM.append_metrics_snapshot
+        ~config
+        ~meta:minimal_meta
+        ~observation:base_observation
+        ~result
+        ~latency_ms:321
+        ~turn_cost:0.42
+        ~turn_generation:1
+        ~channel:"turn"
+        ~snapshot_source:"test"
+        ~context_ratio:0.1
+        ~context_tokens:10
+        ~context_max:100_000
+        ~message_count:2
+        ~compaction:
+          {
+            Masc_mcp.Keeper_exec_context.applied = false;
+            attempted = false;
+            failure_reason = None;
+            trigger = None;
+            decision = "no_compaction";
+            before_tokens = 0;
+            after_tokens = 0;
+            saved_tokens = 0;
+          }
+        ~handoff_json:None
+        ();
+      let metrics_store =
+        Masc_mcp.Keeper_types.keeper_metrics_store config minimal_meta.name
+      in
+      let line =
+        match Dated_jsonl.read_recent_lines metrics_store 1 with
+        | [ line ] -> line
+        | _ -> fail "expected one metrics line"
+      in
+      let usage =
+        Yojson.Safe.Util.(Yojson.Safe.from_string line |> member "usage")
+      in
+      let open Yojson.Safe.Util in
+      check int "cache creation persisted"
+        1500 (usage |> member "cache_creation_tokens" |> to_int);
+      check int "cache read persisted"
+        300 (usage |> member "cache_read_tokens" |> to_int))
 
 let test_append_metrics_snapshot_marks_untrusted_usage () =
   Eio_main.run @@ fun env ->
@@ -2936,6 +3056,120 @@ let test_run_keeper_cycle_records_trajectory_source_contract () =
   check bool "livelock block has durable terminal reason" true
     (source_file_contains "lib/keeper/keeper_unified_turn.ml"
        "Printf.sprintf \"turn_livelock:%s\"")
+
+let test_pre_tool_gate_records_durable_attempt_telemetry () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      KTCL.reset_for_testing ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let keeper_name = "pre-tool-gate-keeper" in
+      let meta_ref = ref (make_meta keeper_name) in
+      let config = Masc_mcp.Coord.default_config base_dir in
+      let masc_root = Masc_mcp.Coord.masc_root_dir config in
+      let trace_id = "trace-pre-tool-gate" in
+      let acc =
+        Masc_mcp.Trajectory.create_accumulator
+          ~masc_root ~keeper_name ~trace_id ~generation:9
+      in
+      KTCL.reset_for_testing ();
+      KTCL.init ~base_path:base_dir ();
+      KTCL.set_turn_context
+        ~keeper_name
+        ~agent_name:"pre-tool-gate-agent"
+        ~trace_id
+        ~session_id:"session-pre-tool-gate"
+        ~generation:9
+        ~turn:3
+        ~keeper_turn_id:3
+        ~task_id:"task-pre-tool"
+        ~goal_ids:["goal-pre-tool"]
+        ~approval_mode:"manual"
+        ~tool_surface_class:"execution"
+        ~visible_tool_count:1
+        ~required_tools:["keeper_bash"]
+        ();
+      let hooks =
+        HK.make_hooks
+          ~meta_ref
+          ~generation:9
+          ~pre_tool_use_guard:(fun ~tool_name:_ ~input:_ ->
+            Some "operator approval required before dispatch")
+          ~trajectory_acc:acc
+          ()
+      in
+      let schedule : Agent_sdk.Hooks.tool_schedule =
+        {
+          planned_index = 0;
+          batch_index = 0;
+          batch_size = 1;
+          concurrency_class = "default";
+          batch_kind = "sequential";
+        }
+      in
+      let decision =
+        Agent_sdk.Hooks.invoke hooks.pre_tool_use
+          (Agent_sdk.Hooks.PreToolUse
+             {
+               tool_use_id = "toolu_pre_gate";
+               tool_name = "keeper_bash";
+               input = `Assoc [ ("cmd", `String "git status --short") ];
+               accumulated_cost_usd = 0.0;
+               turn = 3;
+               schedule;
+             })
+      in
+      check string "custom gate blocked"
+        "Override"
+        (Agent_sdk.Hooks.decision_kind_to_string
+           (Agent_sdk.Hooks.classify_decision decision));
+      let entries =
+        Masc_mcp.Trajectory.read_entries ~masc_root ~keeper_name ~trace_id
+      in
+      check int "trajectory entry count" 1 (List.length entries);
+      (match entries with
+       | [ entry ] ->
+         check string "trajectory tool" "keeper_bash" entry.tool_name;
+         check int "trajectory turn" 3 entry.turn;
+         (match entry.gate_decision with
+          | Masc_mcp.Trajectory.Reject reason ->
+            check bool "reject reason names pre-tool guard" true
+              (contains_substring reason "pre_tool_use_guard")
+          | Masc_mcp.Trajectory.Pass ->
+            fail "expected rejected gate decision");
+         check bool "trajectory error present" true
+           (Option.is_some entry.error)
+       | _ -> fail "expected one trajectory entry");
+      let raw_trajectory =
+        read_jsonl_line
+          (Masc_mcp.Trajectory.trajectory_path masc_root keeper_name trace_id)
+      in
+      let runtime_contract =
+        Yojson.Safe.Util.member "runtime_contract" raw_trajectory
+      in
+      check string "runtime contract keeper" keeper_name
+        Yojson.Safe.Util.(runtime_contract |> member "keeper_name" |> to_string);
+      check string "runtime contract trace" trace_id
+        Yojson.Safe.Util.(runtime_contract |> member "trace_id" |> to_string);
+      let action_radius =
+        Yojson.Safe.Util.member "action_radius" raw_trajectory
+      in
+      check string "action radius tool" "keeper_bash"
+        Yojson.Safe.Util.(action_radius |> member "tool_name" |> to_string);
+      check bool "action radius failed" false
+        Yojson.Safe.Util.(action_radius |> member "success" |> to_bool);
+      let tool_call_entries = KTCL.read_recent ~keeper_name ~n:1 () in
+      check int "tool-call log entry count" 1 (List.length tool_call_entries);
+      let tool_call = List.hd tool_call_entries in
+      check string "tool-call log tool" "keeper_bash"
+        (Safe_ops.json_string ~default:"" "tool" tool_call);
+      check bool "tool-call log failed" false
+        (Safe_ops.json_bool ~default:true "success" tool_call);
+      check string "tool-call trace" trace_id
+        (Safe_ops.json_string ~default:"" "trace_id" tool_call))
 
 let test_run_keeper_cycle_surfaces_side_effect_failures_source_contract () =
   check bool "keeper cycle records side-effect issues in registry" true
@@ -4533,6 +4767,17 @@ let test_max_context_resolution_separates_override_and_effective_budget () =
   check int "effective budget caps to primary budget"
     resolution.primary_budget resolution.effective_budget
 
+let test_resolved_max_context_for_turn_uses_effective_budget () =
+  let labels = [ "unknown:model" ] in
+  let meta = { minimal_meta with max_context_override = Some 1_000_000 } in
+  let resolution =
+    KEC.resolve_max_context_resolution
+      ~requested_override:meta.max_context_override labels
+  in
+  check int "turn dispatch budget is capped to effective budget"
+    resolution.effective_budget
+    (UT.resolved_max_context_for_turn ~meta labels)
+
 let test_side_effect_reclassification_ignores_keeper_read_only_tools () =
   let original =
     Agent_sdk.Error.Api
@@ -6065,6 +6310,8 @@ let () =
             test_append_metrics_snapshot_counts_only_mode_violation_refs;
           test_case "snapshot nulls unreported usage" `Quick
             test_append_metrics_snapshot_nulls_unreported_usage;
+          test_case "snapshot persists cache usage" `Quick
+            test_append_metrics_snapshot_persists_cache_usage;
           test_case "snapshot marks untrusted usage" `Quick
             test_append_metrics_snapshot_marks_untrusted_usage;
           test_case "decision record persists tool call details" `Quick
@@ -6331,6 +6578,8 @@ let () =
             test_resolved_max_context_for_turn_uses_primary_budget;
           test_case "max_context resolution separates override and effective budget" `Quick
             test_max_context_resolution_separates_override_and_effective_budget;
+          test_case "resolved max_context dispatch uses effective budget" `Quick
+            test_resolved_max_context_for_turn_uses_effective_budget;
           test_case "read-only keeper tools do not become ambiguous partial" `Quick
             test_side_effect_reclassification_ignores_keeper_read_only_tools;
           test_case "mixed tool sets only keep mutating keeper tools" `Quick
@@ -6357,6 +6606,8 @@ let () =
             test_run_keeper_cycle_skips_non_executable_phase;
           test_case "run_keeper_cycle records trajectory contract" `Quick
             test_run_keeper_cycle_records_trajectory_source_contract;
+          test_case "pre-tool gates record durable attempt telemetry" `Quick
+            test_pre_tool_gate_records_durable_attempt_telemetry;
           test_case "run_keeper_cycle surfaces side-effect failures contract"
             `Quick
             test_run_keeper_cycle_surfaces_side_effect_failures_source_contract;

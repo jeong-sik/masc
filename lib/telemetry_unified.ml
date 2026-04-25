@@ -26,6 +26,7 @@ type source =
   | Tool_usage     (** System_internal surface tool invocations *)
   | Oas_event      (** Durable OAS native/custom event bus relays *)
   | Execution_receipt  (** Keeper execution receipt rows *)
+  | Goal_event     (** Goal FSM lifecycle and verification events *)
   | Tool_metric    (** Tool duration and success metrics *)
 
 let source_to_string = function
@@ -36,6 +37,7 @@ let source_to_string = function
   | Tool_usage -> "tool_usage"
   | Oas_event -> "oas_event"
   | Execution_receipt -> "execution_receipt"
+  | Goal_event -> "goal_event"
   | Tool_metric -> "tool_metric"
 
 let source_of_string = function
@@ -46,6 +48,7 @@ let source_of_string = function
   | "tool_usage" -> Some Tool_usage
   | "oas_event" -> Some Oas_event
   | "execution_receipt" -> Some Execution_receipt
+  | "goal_event" -> Some Goal_event
   | "tool_metric" -> Some Tool_metric
   | _ -> None
 
@@ -57,6 +60,7 @@ let all_sources =
   ; Tool_usage
   ; Oas_event
   ; Execution_receipt
+  ; Goal_event
   ; Tool_metric
   ]
 
@@ -79,7 +83,8 @@ let fixed_store_dir ~masc_root ~base_path = function
   | Tool_usage   -> Some (Filename.concat masc_root "tool_usage")
   | Oas_event    -> Some (Filename.concat masc_root "oas-events")
   | Tool_metric  -> Some (Filename.concat base_path "data/tool-metrics")
-  | Keeper_metric | Trajectory_tool_call | Execution_receipt -> None
+  | Keeper_metric | Trajectory_tool_call | Execution_receipt | Goal_event ->
+      None
     (* handled separately *)
 
 let source_freshness_slo_s = function
@@ -90,6 +95,7 @@ let source_freshness_slo_s = function
   | Oas_event -> 300.0
   | Agent_event -> 900.0
   | Tool_usage -> 900.0
+  | Goal_event -> 604800.0
   | Tool_metric -> 900.0
 
 let source_producer = function
@@ -100,6 +106,7 @@ let source_producer = function
   | Tool_usage -> "tool_usage_log"
   | Oas_event -> "oas_event_bus"
   | Execution_receipt -> "keeper_agent_run.execution_receipt"
+  | Goal_event -> "goal_fsm"
   | Tool_metric -> "tool_metrics_persist"
 
 let source_dashboard_surface = function
@@ -110,12 +117,14 @@ let source_dashboard_surface = function
   | Tool_usage -> "/api/v1/dashboard/tools"
   | Oas_event -> "/api/v1/dashboard/telemetry"
   | Execution_receipt -> "/api/v1/dashboard/execution-trust"
+  | Goal_event -> "/api/v1/dashboard/goals"
   | Tool_metric -> "/api/v1/tool-metrics"
 
 let source_durable_store ~masc_root ~base_path = function
   | Keeper_metric -> Filename.concat masc_root "keepers/*/metrics"
   | Trajectory_tool_call -> Filename.concat masc_root "trajectories/*/*.jsonl"
   | Execution_receipt -> Filename.concat masc_root "keepers/*/execution-receipts"
+  | Goal_event -> Filename.concat masc_root "goal_events.jsonl"
   | source -> (
       match fixed_store_dir ~masc_root ~base_path source with
       | Some dir -> dir
@@ -205,7 +214,8 @@ let extract_ts (json : Yojson.Safe.t) : float =
     (match first_some try_numeric_field [ "ts_unix"; "ts"; "timestamp" ] with
      | Some ts -> ts
      | None ->
-       first_some try_iso_field [ "ts_iso"; "recorded_at"; "ended_at"; "started_at" ]
+       first_some try_iso_field
+         [ "ts_iso"; "ts"; "recorded_at"; "ended_at"; "started_at" ]
        |> Option.value ~default:0.0)
   | _ -> 0.0
 
@@ -381,13 +391,18 @@ let tool_call_io_signature json =
      | _ -> None)
   | _ -> None
 
-let tool_called_event_detail json =
-  match string_field "source" json, assoc_field "event" json with
-  | Some "agent_event", Some (`List (`String tag :: detail :: _))
+let tool_called_detail_from_fields fields =
+  match List.assoc_opt "event" fields with
+  | Some (`List (`String tag :: detail :: _))
     when tag = "Tool_called" || tag = "tool_called" -> (
       match detail with
       | `Assoc _ -> Some detail
       | _ -> None)
+  | _ -> None
+
+let tool_called_event_detail json =
+  match string_field "source" json, json with
+  | Some "agent_event", `Assoc fields -> tool_called_detail_from_fields fields
   | _ -> None
 
 let agent_tool_called_signature json =
@@ -425,9 +440,40 @@ let suppress_shadow_agent_tool_events entries =
 
 (* ── Entry tagging ──────────────────────────────────── *)
 
+let promote_detail_field_if_absent name detail_fields fields =
+  if List.mem_assoc name fields then fields
+  else
+    match List.assoc_opt name detail_fields with
+    | Some (`String value) when String.trim value <> "" ->
+        (name, `String value) :: fields
+    | Some (`Bool _ as value)
+    | Some (`Int _ as value)
+    | Some (`Float _ as value)
+    | Some (`Intlit _ as value) ->
+        (name, value) :: fields
+    | Some _ | None -> fields
+
+let promote_agent_tool_called_scope source fields =
+  match source, tool_called_detail_from_fields fields with
+  | Agent_event, Some (`Assoc detail_fields) ->
+      List.fold_left
+        (fun acc name -> promote_detail_field_if_absent name detail_fields acc)
+        fields
+        [
+          "agent_id";
+          "tool_name";
+          "success";
+          "duration_ms";
+          "session_id";
+          "operation_id";
+          "worker_run_id";
+        ]
+  | _ -> fields
+
 let tag_entry source (json : Yojson.Safe.t) : Yojson.Safe.t =
   match json with
   | `Assoc fields ->
+    let fields = promote_agent_tool_called_scope source fields in
     `Assoc (("source", `String (source_to_string source)) :: fields)
   | other ->
     `Assoc [("source", `String (source_to_string source)); ("data", other)]
@@ -461,23 +507,39 @@ let matches_keeper name (json : Yojson.Safe.t) : bool =
     || check_runtime_contract ()
   | _ -> false
 
-let matches_string_field field expected (json : Yojson.Safe.t) : bool =
-  match json with
-  | `Assoc fields -> (
-      match List.assoc_opt field fields with
-      | Some (`String value) -> String.equal value expected
-      | _ -> false)
+let matches_field fields field expected =
+  match List.assoc_opt field fields with
+  | Some (`String value) -> String.equal value expected
   | _ -> false
 
 let matches_scope ?session_id ?operation_id ?worker_run_id (json : Yojson.Safe.t) :
     bool =
-  let matches field = function
+  let matches ~top_fields ~runtime_contract_fields = function
     | None -> true
-    | Some expected -> matches_string_field field expected json
+    | Some expected -> (
+        match json with
+        | `Assoc fields ->
+          List.exists
+            (fun field -> matches_field fields field expected)
+            top_fields
+          ||
+          (match List.assoc_opt "runtime_contract" fields with
+           | Some (`Assoc runtime_fields) ->
+             List.exists
+               (fun field -> matches_field runtime_fields field expected)
+               runtime_contract_fields
+           | _ -> false)
+        | _ -> false)
   in
-  matches "session_id" session_id
-  && matches "operation_id" operation_id
-  && matches "worker_run_id" worker_run_id
+  matches ~top_fields:[ "session_id" ]
+    ~runtime_contract_fields:[ "session_id" ]
+    session_id
+  && matches ~top_fields:[ "operation_id" ]
+       ~runtime_contract_fields:[ "operation_id" ]
+       operation_id
+  && matches ~top_fields:[ "worker_run_id" ]
+       ~runtime_contract_fields:[ "worker_run_id"; "trace_id" ]
+       worker_run_id
 
 (* ── Read from a single fixed-path source ───────────── *)
 
@@ -629,6 +691,22 @@ let read_trajectory_tool_calls ~masc_root ?keeper_name ?since_ts ?until_ts ~n ()
   let entries = if n <= 0 then entries else take_first n entries in
   List.map (tag_entry Trajectory_tool_call) entries
 
+let goal_events_path ~masc_root =
+  Filename.concat masc_root "goal_events.jsonl"
+
+let read_goal_events ~masc_root ?since_ts ?until_ts ~n () : Yojson.Safe.t list =
+  let path = goal_events_path ~masc_root in
+  if not (Sys.file_exists path) then []
+  else
+    let entries =
+      Safe_ops.protect ~default:[] (fun () ->
+        Fs_compat.load_jsonl path
+        |> List.filter (within_requested_window ?since_ts ?until_ts))
+    in
+    let entries = sort_newest_first entries in
+    let entries = if n <= 0 then entries else take_first n entries in
+    List.map (tag_entry Goal_event) entries
+
 (* ── Unified read ───────────────────────────────────── *)
 
 let read_unified_result ~base_path ~masc_root ?(sources = all_sources)
@@ -660,6 +738,8 @@ let read_unified_result ~base_path ~masc_root ?(sources = all_sources)
       | Execution_receipt ->
         read_execution_receipts ~masc_root ?keeper_name ?since_ts ?until_ts
           ~n:per_source ()
+      | Goal_event ->
+        read_goal_events ~masc_root ?since_ts ?until_ts ~n:per_source ()
       | _ ->
         match fixed_store_dir ~masc_root ~base_path source with
         | Some dir ->
@@ -758,6 +838,15 @@ let trajectory_tool_call_summary_stats ~masc_root =
            | Some ts -> max_ts_opt latest_acc ts
            | None -> latest_acc ))
        (0, None)
+
+let goal_event_summary_stats ~masc_root =
+  let path = goal_events_path ~masc_root in
+  if not (Sys.file_exists path) then (0, None)
+  else
+    let entries =
+      Safe_ops.protect ~default:[] (fun () -> Fs_compat.load_jsonl path)
+    in
+    (List.length entries, latest_ts_of_entries entries)
 
 let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
   let now = Unix.gettimeofday () in
@@ -863,6 +952,25 @@ let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
              ("entry_count", `Int count);
            ]
           @ keeper_dir_fields dirs
+          @ metadata_fields
+          @ freshness_fields ~now latest_ts
+          @ source_health_fields ~now ~exists ~entry_count:count ~latest_ts
+              ~freshness_slo_s ?coverage_gap ()),
+        count )
+    | Goal_event ->
+      let path = goal_events_path ~masc_root in
+      let exists = Sys.file_exists path in
+      let count, latest_ts =
+        if exists then goal_event_summary_stats ~masc_root
+        else (0, None)
+      in
+      ( `Assoc
+          ([
+             ("source", `String (source_to_string source));
+             ("path", `String path);
+             ("exists", `Bool exists);
+             ("entry_count", `Int count);
+           ]
           @ metadata_fields
           @ freshness_fields ~now latest_ts
           @ source_health_fields ~now ~exists ~entry_count:count ~latest_ts

@@ -80,12 +80,15 @@ Useful interpretations:
   - the easiest local bootstrap path is `GET /api/v1/dashboard/dev-token`
 - `codex_mcp.token_status=unset` or `invalid_or_expired`
   - Codex MCP is missing a live bearer token; this is not fixed by `codex mcp login`
+- `codex_mcp.config.stages[]`
+  - Codex config pipeline checks for `[mcp_servers.masc]`, `bearer_token_env_var`,
+    missing hardcoded `Authorization`, and the Streamable HTTP `Accept` header
 
 If you want structured output for automation:
 
 ```bash
 ./_build/default/bin/main_eio.exe doctor auth --base-path "$BASE_PATH" --json \
-  | jq '{status,codex_mcp,warnings,next_actions}'
+  | jq '{status,codex_mcp:{token_status:.codex_mcp.token_status,config:.codex_mcp.config},warnings,next_actions}'
 ```
 
 ## 4. Codex MCP Bearer Login
@@ -119,6 +122,17 @@ Expected shape:
 URL: http://127.0.0.1:8935/mcp
 Bearer Token Env Var: MASC_MCP_TOKEN
 ```
+
+If Codex still reports that `masc` is not logged in, check the pipeline
+projection before retrying OAuth login:
+
+```bash
+./_build/default/bin/main_eio.exe doctor auth --base-path "$BASE_PATH" --json \
+  | jq '.codex_mcp.config.stages'
+```
+
+Every required config stage should be `pass`; `codex_oauth_login` is expected
+to be `skip` because MASC uses bearer-token auth.
 
 ## 5. Supported Local Start
 

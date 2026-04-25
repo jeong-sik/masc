@@ -250,12 +250,19 @@ let gc config ?(days=7) () =
     ) backlog.tasks
   in
 
-  (* Helper to check if content mentions an open task *)
-  let mentions_open_task content =
-    List.exists (fun task_id ->
-      let re = Re.(compile (str task_id)) in
-      Re.execp re content
-    ) open_task_ids
+  (* Substring check against any open task ID.
+
+     Old version compiled a fresh [Re.t] per (task_id × message), so a
+     GC pass over M old messages with N open tasks paid M × N compiles
+     before [execp] could even run.  The task ID set is fixed for the
+     entire pass, so collapse it into a single alternation DFA compiled
+     once outside the message loop. *)
+  let mentions_open_task =
+    match open_task_ids with
+    | [] -> fun _ -> false
+    | ids ->
+        let re = Re.(compile (alt (List.map str ids))) in
+        fun content -> Re.execp re content
   in
 
   if Sys.file_exists messages_path then begin

@@ -145,6 +145,25 @@ let test_parse_sse_dashboard_event_handles_sse_format () =
         (Some "execution") parsed.slice
   | None -> Alcotest.fail "expected parse to succeed on SSE-formatted input"
 
+let test_parse_sse_dashboard_event_finds_data_line () =
+  let body =
+    Yojson.Safe.to_string
+      (`Assoc [
+        ("type", `String "transport_health_snapshot");
+        ("payload", `Assoc [("ok", `Bool true)]);
+      ])
+  in
+  let sse_formatted =
+    Printf.sprintf "id: 42\n: keepalive\nevent: message\ndata:%s\n\n" body
+  in
+  match Ws.parse_sse_dashboard_event sse_formatted with
+  | Some parsed ->
+      Alcotest.(check string) "event_type extracted without positional match"
+        "transport_health_snapshot" parsed.event_type;
+      Alcotest.(check (option string)) "slice resolved from data line"
+        (Some "transport") parsed.slice
+  | None -> Alcotest.fail "expected parse to find data line"
+
 (* Counter observability: reuse of the same event string reference
    must register as a hit, distinct strings must register as misses.
    Read counter deltas because the global state is shared across tests. *)
@@ -584,6 +603,8 @@ let () =
         test_parse_sse_dashboard_event_invalidated_on_new_ref;
       Alcotest.test_case "handles production SSE wire format" `Quick
         test_parse_sse_dashboard_event_handles_sse_format;
+      Alcotest.test_case "finds SSE data line without fixed position" `Quick
+        test_parse_sse_dashboard_event_finds_data_line;
       Alcotest.test_case "hit/miss counters track reuse" `Quick
         test_parse_cache_counters;
     ]);

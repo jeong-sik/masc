@@ -658,6 +658,76 @@ let test_resolve_named_providers_canonical_labels_are_not_leaks () =
   check bool "canonicalized provider labels are not false leaks" false
     (contains_substring stderr_output "NOT in")
 
+(* #10087 regression: the live big_three cascade declares
+   [claude_code:auto, codex_cli:auto, gemini_cli:auto] — three
+   CLI providers all using [:auto].  The user-reported symptom is
+   "11 providers NOT in declared profile" warnings; #10004
+   already replaced the comparison baseline with the post-expansion
+   list, but the existing test only covers the case where the
+   first declared entry is a [custom:...@url] alias.  This test
+   pins the case where ALL three entries are bare CLI [:auto]
+   shorthands so that any future change to the expansion or
+   filter pipeline that breaks symmetry is caught immediately. *)
+let test_resolve_named_providers_three_cli_auto_not_leaks_10087 () =
+  with_temp_dir "cascade-catalog-three-cli-auto-10087" @@ fun dir ->
+  let config_dir = Filename.concat dir "config" in
+  init_config_root config_dir;
+  with_config_dir config_dir @@ fun () ->
+  ignore
+    (write_cascade_json config_dir
+       {|{
+  "big_three_models": ["claude_code:auto", "codex_cli:auto", "gemini_cli:auto"],
+  "governance_judge_models": ["kimi_cli:kimi-for-coding", "codex_cli:auto", "gemini_cli:auto"]
+}|});
+  Log.set_level Log.Info;
+  let big_three_stderr =
+    capture_stderr (fun () ->
+        let providers =
+          require_ok
+            (Cascade_catalog_runtime.resolve_named_providers
+               ~cascade_name:"big_three" ())
+        in
+        let kinds = provider_kinds providers in
+        check bool "big_three: claude_code present" true
+          (List.mem "claude_code" kinds);
+        check bool "big_three: codex_cli present" true
+          (List.mem "codex_cli" kinds);
+        check bool "big_three: gemini_cli present" true
+          (List.mem "gemini_cli" kinds))
+  in
+  check bool
+    "#10087 big_three: NO 'NOT in' leak warning fires for 3 CLI :auto"
+    false
+    (contains_substring big_three_stderr "NOT in");
+  (* The governance_judge case from the issue uses kimi_cli +
+     codex_cli + gemini_cli.  Don't require kimi to resolve in
+     this test (it needs an API key the test env does not
+     provide); just assert that the expanded codex/gemini path
+     does NOT emit a leak warning regardless of kimi's
+     resolution outcome. *)
+  let gov_stderr =
+    capture_stderr (fun () ->
+        match
+          Cascade_catalog_runtime.resolve_named_providers
+            ~cascade_name:"governance_judge" ()
+        with
+        | Ok providers ->
+          let kinds = provider_kinds providers in
+          check bool "governance_judge: codex_cli expanded" true
+            (List.mem "codex_cli" kinds);
+          check bool "governance_judge: gemini_cli expanded" true
+            (List.mem "gemini_cli" kinds)
+        | Error _ ->
+          (* If the cascade fails to resolve at all, the leak
+             warning code path is unreachable, so the invariant
+             is vacuously satisfied. *)
+          ())
+  in
+  check bool
+    "#10087 governance_judge: NO 'NOT in' leak warning fires"
+    false
+    (contains_substring gov_stderr "NOT in")
+
 let test_config_doctor_live_reports_catalog_validation () =
   with_temp_dir "cascade-doctor-live" @@ fun dir ->
   let base_path = Filename.concat dir "base" in
@@ -783,6 +853,10 @@ let () =
             "resolve_named_providers canonical labels are not leak warnings"
             `Quick
             test_resolve_named_providers_canonical_labels_are_not_leaks;
+          test_case
+            "resolve_named_providers 3 CLI :auto are not leak warnings (#10087)"
+            `Quick
+            test_resolve_named_providers_three_cli_auto_not_leaks_10087;
           test_case
             "config doctor live reports catalog validation"
             `Quick

@@ -26,8 +26,9 @@ type tool_access =
 let tool_names_include_board name_list =
   List.exists
     (fun name ->
-       String.starts_with ~prefix:"keeper_board_" name
-       || String.starts_with ~prefix:"masc_board_" name)
+       match Tool_name.of_string name with
+       | Some tool -> Tool_name.is_board tool
+       | None -> false)
     name_list
 ;;
 

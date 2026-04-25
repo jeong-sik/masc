@@ -57,6 +57,7 @@ module Keeper : sig
   val of_string : string -> t option
   val board_write_tools : t list
   val board_write_tool_names : string list
+  val is_board : t -> bool
   val is_board_write : t -> bool
   val board_write_action_kind : t -> string option
   val pp : Format.formatter -> t -> unit
@@ -172,6 +173,7 @@ module Masc : sig
 
   val to_string : t -> string
   val of_string : string -> t option
+  val is_board : t -> bool
   val pp : Format.formatter -> t -> unit
 end
 
@@ -206,3 +208,4 @@ val pp : Format.formatter -> t -> unit
 val is_keeper : t -> bool
 val is_masc : t -> bool
 val is_masc_keeper : t -> bool
+val is_board : t -> bool

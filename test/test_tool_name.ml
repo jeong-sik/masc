@@ -138,6 +138,21 @@ let test_unknown_returns_none () =
 
 let test_keeper_board_write_helpers () =
   let open Tool_name.Keeper in
+  List.iter
+    (fun tool ->
+       Alcotest.(check bool)
+         (Printf.sprintf "%s is board" (to_string tool))
+         true
+         (is_board tool))
+    [ Board_cleanup; Board_comment; Board_comment_vote; Board_delete; Board_get
+    ; Board_list; Board_post; Board_search; Board_stats; Board_vote ];
+  List.iter
+    (fun tool ->
+       Alcotest.(check bool)
+         (Printf.sprintf "%s is not board" (to_string tool))
+         false
+         (is_board tool))
+    [ Broadcast; Task_done; Write ];
   Alcotest.(check (list string)) "canonical board write names"
     [ "keeper_board_post"; "keeper_board_comment"; "keeper_board_vote" ]
     board_write_tool_names;
@@ -178,6 +193,21 @@ let test_keeper_board_write_facade_uses_typed_contract () =
   Alcotest.(check string) "non-board action kind is none" "none"
     (Keeper_exec_context.keeper_action_kind_of_tool_names
        [ "keeper_board_comment_vote"; "unknown" ])
+
+let test_board_predicate_facade_uses_typed_contract () =
+  let check_tool label expected name =
+    Alcotest.(check bool) label expected
+      (match Tool_name.of_string name with
+       | Some tool -> Tool_name.is_board tool
+       | None -> false)
+  in
+  check_tool "keeper board post is board" true "keeper_board_post";
+  check_tool "keeper comment vote is board" true "keeper_board_comment_vote";
+  check_tool "masc board post is board" true "masc_board_post";
+  check_tool "masc board profile is board" true "masc_board_profile";
+  check_tool "keeper fake board prefix fails closed" false "keeper_board_fake";
+  check_tool "masc fake board prefix fails closed" false "masc_board_fake";
+  check_tool "broadcast is not board" false "keeper_broadcast"
 
 (* ── Group predicates ──────────────────────────────────────── *)
 
@@ -239,6 +269,8 @@ let () =
         test_keeper_board_write_helpers;
       Alcotest.test_case "keeper board write facade" `Quick
         test_keeper_board_write_facade_uses_typed_contract;
+      Alcotest.test_case "board predicate facade" `Quick
+        test_board_predicate_facade_uses_typed_contract;
       Alcotest.test_case "is_keeper" `Quick test_is_keeper;
     ];
     "coverage", [

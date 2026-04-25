@@ -124,19 +124,19 @@ function StatusStandard() {
     <div className="cb-board">
       <div style={{flex:1, background:'var(--bg-0)'}} aria-hidden="true" />
       <div className="cb-statusbar" role="status" aria-live="polite" aria-label="System status: connected, build 2604, version 0.42.1, anthropic ok, moonshot ok, openai degraded, xai offline, TPS 1.24s, time 16:32:45 UTC">
-        <span className="seg"><span className="on" aria-hidden="true">●</span>CONNECTED</span>
+        <span className="seg" role="group" aria-label="Connection: connected"><span className="on" aria-hidden="true">●</span>CONNECTED</span>
         <span className="sep" aria-hidden="true" />
-        <span className="seg">BUILD <span className="brass">2604</span></span>
-        <span className="seg">v0.42.1</span>
+        <span className="seg" role="group" aria-label="Build 2604">BUILD <span className="brass">2604</span></span>
+        <span className="seg" role="group" aria-label="Version 0.42.1">v0.42.1</span>
         <span className="sep" aria-hidden="true" />
-        <span className="seg">PROVIDERS</span>
-        <span className="seg"><span className="on" aria-hidden="true">●</span>anthropic</span>
-        <span className="seg"><span className="on" aria-hidden="true">●</span>moonshot</span>
-        <span className="seg" style={{color:'var(--warn-fg)'}}><span aria-hidden="true">●</span>openai</span>
-        <span className="seg off"><span aria-hidden="true">●</span>xai</span>
-        <span className="seg push-right">TPS <span className="brass">1.24s</span></span>
+        <span className="seg" aria-hidden="true">PROVIDERS</span>
+        <span className="seg" role="group" aria-label="anthropic ok"><span className="on" aria-hidden="true">●</span>anthropic</span>
+        <span className="seg" role="group" aria-label="moonshot ok"><span className="on" aria-hidden="true">●</span>moonshot</span>
+        <span className="seg" role="group" aria-label="openai degraded" style={{color:'var(--warn-fg)'}}><span aria-hidden="true">●</span>openai</span>
+        <span className="seg off" role="group" aria-label="xai offline"><span aria-hidden="true">●</span>xai</span>
+        <span className="seg push-right" role="group" aria-label="TPS 1.24 seconds">TPS <span className="brass">1.24s</span></span>
         <span className="sep" aria-hidden="true" />
-        <span className="seg">16:32:45Z</span>
+        <span className="seg" role="group" aria-label="Clock 16:32:45 UTC">16:32:45Z</span>
       </div>
     </div>
   );
@@ -147,10 +147,10 @@ function StatusCompact() {
     <div className="cb-board">
       <div style={{flex:1, background:'var(--bg-0)'}} aria-hidden="true" />
       <div className="cb-statusbar" role="status" aria-live="polite" aria-label="MASC: 5 of 8 keepers active, 3 providers ok, TPS 1.24s">
-        <span className="seg"><span className="brass" aria-hidden="true">●</span>MASC</span>
-        <span className="seg">5/8 ACTIVE</span>
+        <span className="seg" role="group" aria-label="MASC"><span className="brass" aria-hidden="true">●</span>MASC</span>
+        <span className="seg" role="group" aria-label="5 of 8 keepers active">5/8 ACTIVE</span>
         <span className="seg push-right" aria-hidden="true"><span className="on">●●●</span><span className="off">●</span></span>
-        <span className="seg">1.24s</span>
+        <span className="seg" role="group" aria-label="TPS 1.24 seconds">1.24s</span>
       </div>
     </div>
   );
@@ -161,15 +161,15 @@ function StatusVerbose() {
     <div className="cb-board">
       <div style={{flex:1, background:'var(--bg-0)'}} aria-hidden="true" />
       <div className="cb-statusbar" role="status" aria-live="polite" aria-label="Connected · goal goal-merge-blockers, task t-9f2a, keeper nick0cave, cascade hit at step 2 in 1.24s, suite 3 fail of 47 pass" style={{height:28, flexWrap:'wrap'}}>
-        <span className="seg"><span className="on" aria-hidden="true">●</span>CONNECTED</span>
+        <span className="seg" role="group" aria-label="Connection: connected"><span className="on" aria-hidden="true">●</span>CONNECTED</span>
         <span className="sep" aria-hidden="true" />
-        <span className="seg">goal <span className="brass">goal-merge-blockers</span></span>
-        <span className="seg">task <span style={{color:'var(--fg-2)'}}>t-9f2a</span></span>
-        <span className="seg">keeper <span style={{color:'var(--brass-1)'}}>nick0cave</span></span>
+        <span className="seg" role="group" aria-label="Goal goal-merge-blockers">goal <span className="brass">goal-merge-blockers</span></span>
+        <span className="seg" role="group" aria-label="Task t-9f2a">task <span style={{color:'var(--fg-2)'}}>t-9f2a</span></span>
+        <span className="seg" role="group" aria-label="Keeper nick0cave">keeper <span style={{color:'var(--brass-1)'}}>nick0cave</span></span>
         <span className="sep" aria-hidden="true" />
-        <span className="seg">CASCADE hit@2 · <span className="brass">1.24s</span></span>
+        <span className="seg" role="group" aria-label="Cascade hit at step 2 in 1.24 seconds">CASCADE hit@2 · <span className="brass">1.24s</span></span>
         <span className="sep" aria-hidden="true" />
-        <span className="seg">SUITE <span style={{color:'var(--err-fg)'}}>3 FAIL</span> / 47 PASS</span>
+        <span className="seg" role="group" aria-label="Suite 3 fail of 47 pass">SUITE <span style={{color:'var(--err-fg)'}}>3 FAIL</span> / 47 PASS</span>
         <span className="seg push-right" aria-hidden="true">⌘K for commands</span>
       </div>
     </div>
@@ -188,7 +188,7 @@ function DrawerTask() {
           <button type="button" className="close" aria-label="Close drawer">×</button>
         </div>
         <div className="title" role="heading" aria-level={2}>Rebase PR #9712 + green CI</div>
-        <div className="meta">
+        <div className="meta" role="group" aria-label="Task metadata: running, P1, 2 minutes ago">
           <Chip kind="brass"><Dot kind="brass" size="sm" beat /> RUNNING</Chip>
           <Chip kind="ghost">P1</Chip>
           <Chip kind="ghost">2m ago</Chip>
@@ -257,7 +257,7 @@ function DrawerGoal() {
           <button type="button" className="close" aria-label="Close drawer">×</button>
         </div>
         <div className="title" role="heading" aria-level={2}>{g.title}</div>
-        <div className="meta">
+        <div className="meta" role="group" aria-label={`Goal metadata: active, ${g.progress} of ${g.total}`}>
           <Chip kind="brass">ACTIVE</Chip>
           <Chip kind="ghost">{g.progress}/{g.total}</Chip>
           <span className="bar" aria-hidden="true" style={{width:100, alignSelf:'center'}}><span className="fill" style={{width:`${100*g.progress/g.total}%`}} /></span>
@@ -316,7 +316,7 @@ function DrawerKeeper() {
           <Dot kind="brass" beat style={{marginRight:6, verticalAlign:'middle'}} />
           nick0cave
         </div>
-        <div className="meta">
+        <div className="meta" role="group" aria-label="Keeper metadata: running, 8 tool calls in 60 seconds, anthropic claude-haiku-4-5">
           <Chip kind="brass">RUNNING</Chip>
           <Chip kind="ghost">8 TOOL CALLS / 60s</Chip>
           <Chip kind="ghost">anthropic · claude-haiku-4-5</Chip>
@@ -344,7 +344,7 @@ function DrawerKeeper() {
           <div role="log" aria-live="polite" aria-label="Last 3 events from nick0cave" style={{display:'flex', flexDirection:'column', gap:4, fontSize:11}}>
             {D3.events.filter(e=>e.keeper==='nick0cave').slice(0,3).map((e,i)=>(
               <div key={i}
-                   role="listitem"
+                   role="article"
                    aria-label={`${e.t.slice(0,8)} · ${e.text}`}
                    style={{fontFamily:'var(--font-mono)', fontSize:10, color:'var(--fg-2)'}}>
                 <span aria-hidden="true" style={{color:'var(--fg-4)'}}>{e.t.slice(0,8)} </span>

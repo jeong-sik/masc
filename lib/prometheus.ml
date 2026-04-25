@@ -219,6 +219,18 @@ let metric_keeper_paused_state_persist_errors =
   "masc_keeper_paused_state_persist_errors_total"
 let metric_keeper_unexpected_tool_partial_tolerance =
   "masc_keeper_unexpected_tool_partial_tolerance_total"
+(* #10091: [require_tool_use] contract violations labelled by
+   [has_current_task] (true = #10091's active-task path that
+   [#10031] intentionally left strict, false = the no-task path
+   that [#10031] relaxed to [Auto]) and by fine-grained
+   [contract_status] ([passive_only], [needs_execution_progress],
+   [claim_only_after_owned_task], [tool_surface_mismatch],
+   [missing_required_tool_use]).  The fleet histogram of
+   (keeper, contract_status) pairs tells the operator which
+   keeper tool_presets need reshaping for the current task mix
+   without masking the strict gate. *)
+let metric_keeper_require_tool_use_violations =
+  "masc_keeper_require_tool_use_violations_total"
 let metric_keeper_tool_alias_canonicalizations =
   "masc_keeper_tool_alias_canonicalizations_total"
 let metric_keeper_profile_config_conflicts =

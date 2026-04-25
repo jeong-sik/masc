@@ -268,6 +268,27 @@ let is_execution_progress_tool_name name =
   | Execution | Completion -> true
   | Passive_status | Claim_context -> false
 
+(* #10091: record a [require_tool_use] contract violation with
+   the labels the operator needs to fix the underlying cause
+   (tool_preset mismatch vs. active-task refusal vs. cohort
+   misconfiguration).  Split out of [keeper_agent_run.ml] so the
+   counter emission is directly testable without standing up a
+   full OAS/Eio harness.  [contract_status] is the same string
+   already assigned to [receipt_tool_contract_result_ref] at the
+   call site, so receipt JSON and fleet metric share one
+   vocabulary. *)
+let record_require_tool_use_violation
+      ~(keeper_name : string)
+      ~(has_current_task : bool)
+      ~(contract_status : string) : unit =
+  Prometheus.inc_counter
+    Prometheus.metric_keeper_require_tool_use_violations
+    ~labels:[
+      ("keeper", keeper_name);
+      ("has_current_task", if has_current_task then "true" else "false");
+      ("contract_status", contract_status);
+    ] ()
+
 let actionable_tool_contract_violation_reason
       ~(claim_context_allowed : bool)
       ~(actionable_signal_context : bool)

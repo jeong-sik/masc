@@ -253,7 +253,7 @@ function OverviewTile({ id, connector, keeperCount, selected, onSelectConnector,
         >${channelIcon(id)}</span>
         <span class="min-w-0 flex-1">
           <span class="flex items-center gap-2">
-            <span class="block truncate text-sm font-semibold text-[var(--text-body)]">${displayName}</span>
+            <span class="block truncate text-sm font-semibold text-[var(--text-body)]" title=${displayName}>${displayName}</span>
             <span class=${`rounded-sm border px-2 py-0.5 text-3xs font-medium ${summary.badgeClass}`}>${summary.badge}</span>
             ${uptimeLabel !== null
               ? html`
@@ -441,7 +441,7 @@ function TileErrorNotice({ connector }: { connector: GateConnectorInfo | null })
     >
       <span aria-hidden="true" class="shrink-0">${glyph}</span>
       <span class="shrink-0 font-semibold uppercase tracking-2">${notice.label}</span>
-      <span class="min-w-0 truncate font-normal normal-case tracking-normal opacity-80">${notice.detail}</span>
+      <span class="min-w-0 truncate font-normal normal-case tracking-normal opacity-80" title=${notice.detail}>${notice.detail}</span>
     </div>
   `
 }

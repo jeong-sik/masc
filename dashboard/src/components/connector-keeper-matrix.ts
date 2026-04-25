@@ -356,7 +356,7 @@ function MatrixRowRender({ row }: { row: MatrixRow }) {
       aria-label=${row.known ? `${row.keeperName} keeper로 이동` : `${row.keeperName} — directory 밖 keeper`}
     >
       ${row.known ? null : html`<span class="text-[var(--warn)]" aria-hidden="true">⚠</span>`}
-      <span class="truncate">${row.keeperName}</span>
+      <span class="truncate" title=${row.keeperName}>${row.keeperName}</span>
     </button>
     ${row.cells.map(cell => html`<${MatrixCellButton} cell=${cell} />`)}
     <${RowCoverageChip} keeperName=${row.keeperName} counts=${counts} />

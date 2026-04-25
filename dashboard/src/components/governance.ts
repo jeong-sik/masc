@@ -169,7 +169,7 @@ function JudgeStatusBar() {
                 ? html`<span class="text-text-dim"><${TimeAgo} timestamp=${judge.generated_at} /></span>`
                 : null}
               ${judge.last_error
-                ? html`<span class="${errorTone} truncate max-w-75">${judge.last_error}</span>`
+                ? html`<span class="${errorTone} truncate max-w-75" title=${judge.last_error}>${judge.last_error}</span>`
                 : null}
             </span>
           `
@@ -249,7 +249,7 @@ function JudgmentsSection() {
               <div class="mt-2 flex items-center gap-1.5 text-2xs">
                 <span class="rounded border border-accent/20 bg-accent/8 px-1.5 py-0.5 font-medium text-accent">${j.recommended_action.action_kind ?? 'action'}</span>
                 ${j.recommended_action.resolved_tool ? html`<span class="text-text-dim font-mono">${j.recommended_action.resolved_tool}</span>` : null}
-                ${j.recommended_action.reason ? html`<span class="text-text-muted/80 truncate max-w-[250px]">${j.recommended_action.reason}</span>` : null}
+                ${j.recommended_action.reason ? html`<span class="text-text-muted/80 truncate max-w-[250px]" title=${j.recommended_action.reason}>${j.recommended_action.reason}</span>` : null}
               </div>
             ` : null}
             ${j.guardrail_state?.requires_human_gate ? html`

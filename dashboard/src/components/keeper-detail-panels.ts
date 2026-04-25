@@ -1202,15 +1202,15 @@ export function RawDataDebug({ keeper }: { keeper: Keeper }) {
       <div class="flex flex-col">
         ${filtered.map((f, i) => html`
           <div class="grid grid-cols-[100px_80px_1fr] gap-2 py-2 px-2 text-xs rounded ${i % 2 === 0 ? 'bg-[var(--white-2)]' : ''}">
-            <span class="font-semibold text-[var(--text-body)] truncate">${f.title}</span>
-            <span class="font-mono text-[var(--cyan)] text-2xs truncate">${f.key}</span>
-            <span class="text-right text-[var(--text-body)] truncate">${f.value}</span>
+            <span class="font-semibold text-[var(--text-body)] truncate" title=${f.title}>${f.title}</span>
+            <span class="font-mono text-[var(--cyan)] text-2xs truncate" title=${f.key}>${f.key}</span>
+            <span class="text-right text-[var(--text-body)] truncate" title=${f.value}>${f.value}</span>
           </div>
         `)}
         ${extras.map((f, i) => html`
           <div class="grid grid-cols-[100px_1fr] gap-2 py-2 px-2 text-xs rounded ${(filtered.length + i) % 2 === 0 ? 'bg-[var(--white-2)]' : ''}">
-            <span class="font-semibold text-[var(--text-body)] truncate">${f.title}</span>
-            <span class="text-right text-[var(--text-body)] truncate ${f.mono ? 'font-mono' : ''}">${f.value}</span>
+            <span class="font-semibold text-[var(--text-body)] truncate" title=${f.title}>${f.title}</span>
+            <span class="text-right text-[var(--text-body)] truncate ${f.mono ? 'font-mono' : ''}" title=${f.value}>${f.value}</span>
           </div>
         `)}
       </div>

@@ -427,7 +427,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
                     ${surface.icon}
                   </span>
                   <div class="flex-1 min-w-0">
-                    <div class="text-base font-medium truncate leading-none ${isSurfaceActive ? 'text-[var(--accent)]' : ''}">${surface.label}</div>
+                    <div class="text-base font-medium truncate leading-none ${isSurfaceActive ? 'text-[var(--accent)]' : ''}" title=${surface.label}>${surface.label}</div>
                   </div>
                 <//>
 
@@ -443,7 +443,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
                           class="w-full rounded border px-2 py-1 text-left cursor-pointer text-sm transition-[background-color,border-color,color,box-shadow] duration-200 ${isSectionActive ? 'bg-[var(--accent-soft)] text-[var(--accent)] font-medium shadow-[inset_0_1px_1px_var(--white-10)] border-[var(--accent-soft)]' : 'border-transparent text-[var(--text-muted)] hover:bg-[var(--white-5)] hover:text-[var(--text-body)]'}"
                           ariaCurrent=${isSectionActive ? 'page' : undefined}
                         >
-                          <div class="truncate">${item.label}</div>
+                          <div class="truncate" title=${item.label}>${item.label}</div>
                         <//>
                       `
                     })}

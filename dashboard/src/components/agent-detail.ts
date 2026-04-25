@@ -120,7 +120,7 @@ function TaskSummary({ task }: { task: Task }) {
   return html`
     <div class="flex items-center gap-3 border border-card-border bg-card/40 hover:bg-card/60 transition-colors px-3 py-2.5 rounded shadow-sm">
       <${IdPill}>${task.id}<//>
-      <span class="flex-1 text-sm text-text-strong font-medium truncate">${task.title}</span>
+      <span class="flex-1 text-sm text-text-strong font-medium truncate" title=${task.title}>${task.title}</span>
       <${StatusBadge} status=${task.status} />
     </div>
   `

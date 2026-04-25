@@ -162,6 +162,21 @@ let test_keeper_shell_force_op_does_not_match () =
        ~input:(`Assoc [ ("op", `String "force_push") ])
        ~risk_level:RL.Medium)
 
+let test_keeper_shell_op_takes_precedence_over_action () =
+  (* Shell semantics come from [op].  A stale or spoofed action field
+     must not hide a dangerous op and accidentally match git_clone. *)
+  Alcotest.(check bool)
+    "keeper_shell op=force_push wins over action=git_clone"
+    false
+    (RA.matches ~tool_name:"keeper_shell"
+       ~input:
+         (`Assoc
+           [
+             ("action", `String "git_clone");
+             ("op", `String "force_push");
+           ])
+       ~risk_level:RL.Medium)
+
 let test_keeper_shell_git_clone_above_max_risk_rejected () =
   (* Critical risk overrides routine — even a normally-allowlisted
      op must not auto-approve when risk has been escalated. *)
@@ -302,6 +317,8 @@ let () =
             test_keeper_shell_git_clone_matches;
           Alcotest.test_case "op=force_push rejected" `Quick
             test_keeper_shell_force_op_does_not_match;
+          Alcotest.test_case "op takes precedence over action" `Quick
+            test_keeper_shell_op_takes_precedence_over_action;
           Alcotest.test_case "Critical risk overrides routine" `Quick
             test_keeper_shell_git_clone_above_max_risk_rejected;
         ] );

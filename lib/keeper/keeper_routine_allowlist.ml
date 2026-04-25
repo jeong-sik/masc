@@ -7,13 +7,12 @@ module RL = Keeper_approval_queue
 
 (** Extract a routine action from a tool input JSON.
 
-    Tools in the allowlist use either an [action] key (masc_transition
-    family) or an [op] key (keeper_shell, keeper_bash); we accept both
-    so a single rule type can describe both surfaces.  PR-E
-    (Plan v3 Leak 3): added [op] fallback so the new keeper_shell
-    op=git_clone rule can match without inventing a parallel
-    op_of_input helper that the rule tester would have to wire
-    separately. *)
+    Tools in the allowlist use either an [op] key (keeper_shell,
+    keeper_bash) or an [action] key (masc_transition family); we
+    accept both so a single rule type can describe both surfaces.
+    Prefer [op] when it is present because shell execution semantics
+    come from [op], and an unrelated [action] key must not be able to
+    mask a dangerous shell op. *)
 let action_of_input (input : Yojson.Safe.t) : string option =
   let trimmed_lc raw =
     let s = String.trim raw in
@@ -27,9 +26,9 @@ let action_of_input (input : Yojson.Safe.t) : string option =
         | Some (`String s) -> trimmed_lc s
         | _ -> None
       in
-      (match read "action" with
+      (match read "op" with
        | Some _ as found -> found
-       | None -> read "op")
+       | None -> read "action")
   | _ -> None
 
 (* ── Static rule table ────────────────────────────────────── *)
@@ -37,9 +36,10 @@ let action_of_input (input : Yojson.Safe.t) : string option =
 (** Tool-specific allowlist rule. Each rule encodes:
     - which tool name it applies to;
     - the maximum risk level at which it auto-approves;
-    - an optional set of action strings (matched against the [action]
-      field in the input). [None] means "any input is allowed up to
-      [max_risk]" (no action discrimination needed);
+    - an optional set of routine action/op strings. For shell-like tools
+      [op] is authoritative; otherwise [action] is used. [None] means
+      "any input is allowed up to [max_risk]" (no action discrimination
+      needed);
     - a short human-readable label for audit logs. *)
 type rule = {
   tool : string;
@@ -54,7 +54,8 @@ type rule = {
     - destructive force_* actions (these are classified Critical via
       "force" pattern and stopped by [auto_approval_forbidden] anyway,
       but listing them here would be a defense-in-depth hole);
-    - shell or git tools (also blocked by [destructive_tool_or_op]);
+    - shell or git tools except exact, op-backed keeper routines such as
+      [keeper_shell op=git_clone];
     - high/critical-risk tools.
     *)
 let rules : rule list =

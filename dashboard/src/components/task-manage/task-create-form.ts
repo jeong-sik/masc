@@ -76,6 +76,7 @@ export function TaskCreateForm(props: { goalId?: string | null; goalTitle?: stri
           <${TextInput}
             value=${title.value}
             placeholder="예: runtime config introspection 정리"
+            ariaLabel="제목"
             onInput=${(e: Event) => { title.value = (e.target as HTMLInputElement).value }}
           />
         </div>
@@ -98,6 +99,7 @@ export function TaskCreateForm(props: { goalId?: string | null; goalTitle?: stri
             <${Select}
               value=${String(priority.value)}
               options=${PRIORITY_OPTIONS}
+              ariaLabel="우선순위"
               onInput=${(v: string) => { priority.value = Number(v) }}
             />
             <div class="rounded border border-card-border/60 bg-white/3 px-3 py-2 text-2xs leading-relaxed text-text-muted">

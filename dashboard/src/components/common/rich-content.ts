@@ -36,7 +36,7 @@ function previewCard(preview: LinkPreview) {
       <div class="min-w-0 flex-1 px-3 py-2.5">
         <div class="flex items-center gap-2 text-2xs text-[var(--text-muted)]">
           ${faviconUrl ? html`<img src=${faviconUrl} alt="" class="h-3.5 w-3.5 rounded-sm" loading="lazy" />` : null}
-          <span class="truncate">${preview.site_name || hostLabel}</span>
+          <span class="truncate" title=${preview.site_name || hostLabel}>${preview.site_name || hostLabel}</span>
         </div>
         <div class="mt-1 text-xs font-semibold leading-snug text-[var(--text-strong)] group-hover:text-[var(--accent)]">
           ${title}

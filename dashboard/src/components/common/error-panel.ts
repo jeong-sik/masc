@@ -87,9 +87,9 @@ export function ErrorPanel({ onClose }: ErrorPanelProps) {
             </span>
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-1.5 text-xs">
-                <span class="font-medium text-[var(--text-strong)] truncate">${e.agentName}</span>
+                <span class="font-medium text-[var(--text-strong)] truncate" title=${e.agentName}>${e.agentName}</span>
                 <span class="shrink-0 text-2xs px-1 py-px rounded ${badgeBg}">${label}</span>
-                ${e.taskId ? html`<span class="text-[var(--text-muted)] truncate max-w-20">${e.taskId}</span>` : null}
+                ${e.taskId ? html`<span class="text-[var(--text-muted)] truncate max-w-20" title=${e.taskId}>${e.taskId}</span>` : null}
                 ${e.count > 1 ? html`<span class="shrink-0 text-2xs text-[var(--warn)]">×${e.count}</span>` : null}
               </div>
               <p class="mt-0.5 text-xs text-[var(--text-body)] leading-[1.4] line-clamp-2">${e.message}</p>

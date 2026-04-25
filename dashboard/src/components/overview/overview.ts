@@ -155,7 +155,7 @@ function Highlight({ attention }: { attention: OperatorAttentionItem | null }) {
         <span class=${`text-2xs font-semibold uppercase tracking-wider shrink-0 ${severityToneClass(severity)}`}>
           ${severity.toUpperCase()}
         </span>
-        <span class="truncate text-sm text-[var(--text-strong)]">${attention.summary}</span>
+        <span class="truncate text-sm text-[var(--text-strong)]" title=${attention.summary}>${attention.summary}</span>
       </div>
     </section>
   `

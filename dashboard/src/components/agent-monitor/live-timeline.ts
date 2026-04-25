@@ -174,7 +174,7 @@ export function AgentLiveTimeline({ name }: { name: string }) {
                 <span class="agent-event-badge ${eventKindBadgeClass(entry)}">
                   ${eventKindLabel(entry.eventType)}
                 </span>
-                <span class="flex-1 text-[var(--text-body)] truncate">${compactText(entry.text)}</span>
+                <span class="flex-1 text-[var(--text-body)] truncate" title=${entry.text}>${compactText(entry.text)}</span>
                 ${entry.timestamp ? html`
                   <span class="text-[var(--text-dim)] text-2xs whitespace-nowrap"><${TimeAgo} timestamp=${entry.timestamp} /></span>
                 ` : null}

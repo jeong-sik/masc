@@ -148,7 +148,7 @@ function ChatMessageBubble({
             ${isMessenger
               ? html`
                   <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <span class="truncate text-xs font-semibold text-[var(--text-strong)]">
+                    <span class="truncate text-xs font-semibold text-[var(--text-strong)]" title=${avatarLabel(entry)}>
                       ${avatarLabel(entry)}
                     </span>
                     ${timestamp
@@ -191,7 +191,7 @@ function ChatMessageBubble({
                         `
                       : null}
                   </div>
-                  <div class="mt-2 truncate text-sm font-semibold text-[var(--text-strong)]">
+                  <div class="mt-2 truncate text-sm font-semibold text-[var(--text-strong)]" title=${avatarLabel(entry)}>
                     ${avatarLabel(entry)}
                   </div>
                 `}

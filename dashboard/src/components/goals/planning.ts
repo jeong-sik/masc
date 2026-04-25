@@ -176,7 +176,7 @@ function KeeperToolActivity() {
             <div class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-1.5">
               ${topTools.map(([name, count]) => html`
                 <div key=${name} class="flex items-center justify-between rounded bg-white/3 px-3 py-1.5 text-xs">
-                  <span class="font-mono text-text-body truncate">${name.replace(/^(keeper_|masc_)/, '')}</span>
+                  <span class="font-mono text-text-body truncate" title=${name}>${name.replace(/^(keeper_|masc_)/, '')}</span>
                   <span class="ml-2 flex-shrink-0 font-mono text-text-dim">${count}</span>
                 </div>
               `)}

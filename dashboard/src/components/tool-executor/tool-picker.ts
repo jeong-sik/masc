@@ -20,7 +20,7 @@ function ToolRow({ tool, isSelected }: { tool: McpToolSchema; isSelected: boolea
       ${isSelected ? 'bg-[var(--accent-12)] border border-[var(--accent-30)]' : 'hover:bg-[var(--white-6)] border border-transparent'}
       ${isDeprecated ? 'opacity-50' : ''}" onClick=${() => selectTool(tool)}>
       <div class="flex items-center gap-1.5">
-        <span class="text-xs text-[var(--text-strong)] font-mono truncate flex-1">${tool.name}</span>
+        <span class="text-xs text-[var(--text-strong)] font-mono truncate flex-1" title=${tool.name}>${tool.name}</span>
         ${isDestructive ? html`<${CountBadge} tone="bad">D<//>` : null}
         ${isReadOnly ? html`<${CountBadge} tone="ok">R<//>` : null}
       </div>

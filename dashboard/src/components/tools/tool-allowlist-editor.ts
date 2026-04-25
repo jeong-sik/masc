@@ -391,7 +391,7 @@ function ToolSearchPicker({
                     <span class="text-2xs text-[var(--text-body)] font-medium shrink-0">${name}</span>
                     ${usage ? html`<span class="text-3xs text-[var(--text-muted)] shrink-0 tabular-nums">${usage}x</span>` : null}
                     ${descMap.has(name)
-                      ? html`<span class="text-3xs text-[var(--text-muted)] truncate">${descMap.get(name)}</span>`
+                      ? html`<span class="text-3xs text-[var(--text-muted)] truncate" title=${descMap.get(name)}>${descMap.get(name)}</span>`
                       : null}
                   </li>
                 `

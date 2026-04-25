@@ -73,7 +73,7 @@ function ActivityEntry({ event }: { event: UnifiedTraceEvent }) {
     return html`
       <div class="flex items-center gap-3 py-1.5 px-3 rounded hover:bg-[var(--white-3)] transition-colors">
         <span class="text-sm ${kindColor(event.kind)}">${kindIcon(event.kind)}</span>
-        <span class="flex-1 text-xs text-text-body truncate">${event.summary}</span>
+        <span class="flex-1 text-xs text-text-body truncate" title=${event.summary}>${event.summary}</span>
         ${event.duration_ms != null ? html`<span class="text-3xs tabular-nums ${durationColor(event.duration_ms)}">${event.duration_ms}ms</span>` : null}
         ${event.ts_iso ? html`<${TimeAgo} timestamp=${event.ts_iso} class="text-3xs text-text-dim shrink-0" />` : null}
       </div>
@@ -89,7 +89,7 @@ function ActivityEntry({ event }: { event: UnifiedTraceEvent }) {
     >
       <summary class="flex items-center gap-3 py-1.5 px-3 cursor-pointer list-none [&::-webkit-details-marker]:hidden">
         <span class="text-sm ${kindColor(event.kind)}">${kindIcon(event.kind)}</span>
-        <span class="flex-1 text-xs text-text-body truncate">${event.summary}</span>
+        <span class="flex-1 text-xs text-text-body truncate" title=${event.summary}>${event.summary}</span>
         ${event.duration_ms != null ? html`<span class="text-3xs tabular-nums ${durationColor(event.duration_ms)}">${event.duration_ms}ms</span>` : null}
         ${event.ts_iso ? html`<${TimeAgo} timestamp=${event.ts_iso} class="text-3xs text-text-dim shrink-0" />` : null}
         <span class="text-3xs text-text-dim flex items-center justify-center"><${ChevronRight} size=${14} aria-hidden="true" focusable="false" /></span>

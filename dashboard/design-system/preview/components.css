@@ -1147,3 +1147,23 @@
   position:absolute; width:1px; height:1px; padding:0; margin:-1px;
   overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0;
 }
+
+/* ─────────── a11y · Phase 1/2 cockpit components ───────────
+   Same focus-ring + ARIA-driven active state pattern as Phase 3.5,
+   applied to .cb-* surfaces (topbar tabs/radios, kpi cells, lifeline). */
+.cb-topbar button:focus-visible,
+.cb-topbar [role="tab"]:focus-visible,
+.cb-topbar [role="radio"]:focus-visible,
+.cb-kpi [role="listitem"]:focus-visible,
+.cb-lifeline:focus-visible {
+  outline:2px solid var(--color-focus-ring);
+  outline-offset:1px;
+  z-index:1;
+}
+
+.cb-topbar .mode-tabs button[aria-selected="true"] {
+  color:var(--bg-0); background:var(--brass-2);
+}
+.cb-topbar .density button[aria-checked="true"] {
+  color:var(--brass-1); background:rgb(var(--brass-glow)/.1);
+}

@@ -3,16 +3,16 @@
 
 const { useState, useEffect, useMemo, useRef } = React;
 
-// Status dot
+// Status dot — decorative; meaning lives in the adjacent text.
 function Dot({ kind = 'idle', size = 'md', beat = false, style }) {
-  return <span className={`cb-dot ${kind} ${size === 'sm' ? 'sm' : size === 'lg' ? 'lg' : ''} ${beat ? 'beat' : ''}`} style={style} />;
+  return <span className={`cb-dot ${kind} ${size === 'sm' ? 'sm' : size === 'lg' ? 'lg' : ''} ${beat ? 'beat' : ''}`} style={style} aria-hidden="true" />;
 }
 
 // Mini sparkline (random but seeded bars) — used in KPI + lifeline
 function Spark({ data, color = 'brass', bars = 14 }) {
   const d = data || Array.from({ length: bars }, (_, i) => 30 + Math.sin(i * 0.7) * 20 + Math.random() * 30);
   return (
-    <span className={`spark is-${color}`} style={{ height: 16 }}>
+    <span className={`spark is-${color}`} style={{ height: 16 }} aria-hidden="true">
       {d.map((h, i) => <i key={i} style={{ height: `${Math.max(5, Math.min(100, h))}%` }} />)}
     </span>
   );
@@ -34,7 +34,7 @@ function Heartbeat({ height = 32, width = 320, phase = 0 }) {
     points.push(`${x.toFixed(1)},${y.toFixed(1)}`);
   }
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
+    <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" aria-hidden="true" focusable="false">
       <polyline points={points.join(' ')} fill="none" stroke="var(--brass-1)" strokeWidth="1.2" />
       <circle cx={width - 2} cy={height / 2} r="2" fill="var(--brass-1)">
         <animate attributeName="r" values="2;3.5;2" dur="1.4s" repeatCount="indefinite" />

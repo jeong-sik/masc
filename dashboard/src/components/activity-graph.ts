@@ -322,7 +322,7 @@ function NodeLeaderboard({ nodes }: { nodes: ActivityGraphNode[] }) {
 
 function EmptyActivityGraph() {
   return html`
-    <div class="flex flex-col gap-5" role="status">
+    <div class="flex flex-col gap-5">
       <${Card} title="활동 분석" class="section mb-4" testId="activity_graph.graph">
         <div class="mb-4">
           <h2 class="monitor-headline">활동 분석 데이터가 비어 있습니다</h2>

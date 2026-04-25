@@ -613,12 +613,14 @@ let broadcast_impl target json =
   let current_event_id = next_id () in
   let event = format_event ~id:current_event_id ~event_type:"message" data in
   buffer_event current_event_id event;
-  (* Snapshot under read-lock *)
-  let clients_snapshot =
-    SMap.fold (fun k v acc -> (k, v) :: acc) (Atomic.get clients).entries []
-  in
+  (* The [SMap.t] returned by [Atomic.get] is immutable
+     (Lockfree_atomic.update_with_commit replaces it wholesale on
+     subscribe/unsubscribe), so we iterate it directly with [SMap.iter].
+     Skipping the [(k, v) :: acc] fold trims one tuple + cons cell per
+     client per broadcast on this hot fan-out path. *)
+  let clients_entries = (Atomic.get clients).entries in
   let failed = ref [] in
-  List.iter (fun (session_id, client) ->
+  SMap.iter (fun session_id client ->
     if client_matches_target target client
        && current_event_id > Atomic.get client.last_event_id then begin
       (* Pre-check stream capacity to avoid blocking broadcast.
@@ -644,7 +646,7 @@ let broadcast_impl target json =
                session_id (Printexc.to_string e);
              failed := session_id :: !failed)
     end
-  ) clients_snapshot;
+  ) clients_entries;
   (* Remove failed connections *)
   List.iter (fun sid -> unregister sid) !failed;
   (* Record broadcast duration for transport observability *)

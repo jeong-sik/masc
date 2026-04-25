@@ -24,7 +24,11 @@
     "trajectory_post_tool_rows": true,
     "trajectory_gate_decode": true,
     "coverage_gap_store": true,
-    "unified_source_health": true
+    "unified_source_health": true,
+    "first_class_trajectory_and_receipt_sources": true,
+    "runtime_mcp_cluster_root_aligned": true,
+    "runtime_mcp_trajectory_read_gap": true,
+    "dashboard_keeper_detail_freshness": true
   },
   "surfaces": [
     {
@@ -49,7 +53,21 @@
       "surface": "/api/v1/dashboard/telemetry/summary",
       "producer": "Telemetry_unified.summary_json",
       "durable_store": "unified read side",
-      "status": "source_health_and_coverage_gaps_added"
+      "status": "source_health_coverage_gaps_trajectory_tool_call_and_execution_receipt_added"
+    }
+  ],
+  "root_cause_followup": [
+    {
+      "finding": "runtime_mcp_trajectory_used_ambient_cluster_name",
+      "fix": "derive runtime-MCP trajectory root from Keeper_tool_call_log.configured_masc_root"
+    },
+    {
+      "finding": "runtime_mcp_trajectory_read_before_append_could_abort_without_gap",
+      "fix": "protect trajectory read, record runtime_mcp_trajectory_read_failed, then still attempt append"
+    },
+    {
+      "finding": "unified_and_frontend_dropped_trajectory_tool_call_and_execution_receipt_sources",
+      "fix": "add first-class backend/frontend sources and preserve freshness metadata on tool-stats/tool-calls"
     }
   ],
   "oas_audit": {
@@ -76,16 +94,17 @@
       { "command": "_build/default/test/test_telemetry_eio_coverage.exe", "status": "passed" }
     ],
     "dashboard_tests": {
-      "command": "pnpm --dir dashboard exec vitest run --no-file-parallelism --maxWorkers=1 src/components/keeper-tool-telemetry.test.ts src/components/telemetry-unified.test.ts src/api/dashboard.test.ts",
+      "command": "pnpm --dir dashboard test -- keeper-tool-telemetry.test.ts telemetry-unified.test.ts api/dashboard.test.ts",
       "status": "passed",
-      "files": 3,
-      "tests": 49
+      "files": 241,
+      "tests": 4045,
+      "note": "package-script invocation completed full suite; emitted localstorage-file warnings and one transient ECONNREFUSED localhost:3000 probe log"
     },
     "dashboard_typecheck": {
       "command": "pnpm --dir dashboard typecheck",
       "status": "passed"
     },
-    "dashboard_full_suite_note": "A package-script invocation with an extra argument separator ran the full dashboard suite and failed in unrelated locale-sensitive TimeAgo tests where Korean absolute-time text contained the excluded character.",
+    "dashboard_full_suite_note": "full suite passed in the worktree after offline pnpm install",
     "live_keeper_turn_acceptance": "not_run",
     "live_runtime_mcp_delta": {
       "observed": "sangsu /tool-calls had runtime_mcp rows while /tool-stats was empty for the same keeper",

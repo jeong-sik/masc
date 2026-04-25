@@ -65,6 +65,16 @@ val scrub_legacy_degenerate_rows : string -> int
 val flush : unit -> unit
 (** Force flush pending writes (useful in tests). *)
 
+val set_flush_interval_for_test : float -> unit
+(** Override the time-based flush interval (default 30 s).  Exposed for
+    tests that need [record] to flush on every call without waiting for
+    [buffer_cap] (64) records or shutdown.  #10348. *)
+
+val reset_for_test : unit -> unit
+(** Clear the in-memory store reference, buffer and last-flush clock so
+    a subsequent [init] re-runs.  Tests only — production calls [init]
+    exactly once at boot.  #10348. *)
+
 val recent : int -> Yojson.Safe.t list
 (** Read the N most recent events as JSON objects. *)
 

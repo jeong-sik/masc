@@ -375,7 +375,10 @@ let handle_heartbeat
             pending_task_count = pending_count;
             directives;
           } in
-          Grpc_eio.Stream.add response_stream (T.HeartbeatAck.to_bytes ack);
+          let ack_bytes = T.HeartbeatAck.to_bytes ack in
+          Transport_metrics.inc_grpc_bytes_sent
+            ~bytes:(String.length ack_bytes);
+          Grpc_eio.Stream.add response_stream ack_bytes;
           (* Record heartbeat latency *)
           let latency = Unix.gettimeofday () -. t0 in
           Transport_metrics.observe_grpc_heartbeat_latency latency
@@ -442,7 +445,9 @@ let handle_subscribe
       (Yojson.Safe.to_string
         (`List (List.map (fun s -> `String s) req.event_types)));
   } in
-  Grpc_eio.Stream.add stream (T.Event.to_bytes init_event);
+  let init_bytes = T.Event.to_bytes init_event in
+  Transport_metrics.inc_grpc_bytes_sent ~bytes:(String.length init_bytes);
+  Grpc_eio.Stream.add stream init_bytes;
   incr events_count;
   (* Read recent messages and push as events *)
   let backlog_file =
@@ -465,7 +470,10 @@ let handle_subscribe
             timestamp_ms = now_ms ();
             payload_json = line;
           } in
-          Grpc_eio.Stream.add stream (T.Event.to_bytes event);
+          let event_bytes = T.Event.to_bytes event in
+          Transport_metrics.inc_grpc_bytes_sent
+            ~bytes:(String.length event_bytes);
+          Grpc_eio.Stream.add stream event_bytes;
           incr events_count
         end;
         seq := Int64.add !seq 1L
@@ -512,7 +520,11 @@ let handle_subscribe
         timestamp_ms = now_ms ();
         payload_json = sse_event;
       } in
-      try Grpc_eio.Stream.add stream (T.Event.to_bytes event)
+      try
+        let event_bytes = T.Event.to_bytes event in
+        Transport_metrics.inc_grpc_bytes_sent
+          ~bytes:(String.length event_bytes);
+        Grpc_eio.Stream.add stream event_bytes
       with
       | Eio.Cancel.Cancelled _ as e ->
         cleanup_subscriber ();

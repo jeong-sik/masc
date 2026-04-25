@@ -299,6 +299,73 @@ let test_fingerprint_top_sorted_descending () =
     check int "highest count" 3 c1
   | _ -> failwith "expected at least 3 fingerprints"
 
+(* ── Terminal_failure outcome (#10285) ───────────────── *)
+
+let test_terminal_failure_triggers_immediate_cooldown () =
+  let t = H.create () in
+  H.record_terminal_failure t ~provider_key:"kimi-for-coding" ();
+  check bool "single terminal_failure event trips cooldown immediately"
+    true (H.is_in_cooldown t ~provider_key:"kimi-for-coding")
+
+let test_terminal_failure_cooldown_is_long () =
+  let t = H.create () in
+  H.record_terminal_failure t ~provider_key:"kimi-for-coding" ();
+  match H.provider_info t ~provider_key:"kimi-for-coding" with
+  | None -> fail "provider_info returned None after record_terminal_failure"
+  | Some info ->
+    let now = Unix.gettimeofday () in
+    (match info.cooldown_expires_at with
+     | None -> fail "expected cooldown_expires_at = Some _, got None"
+     | Some expires ->
+       let remaining = expires -. now in
+       check bool
+         (Printf.sprintf "terminal_failure cooldown (%.0fs) >> regular cooldown (60s)" remaining)
+         true (remaining > 300.0))
+
+let test_terminal_failure_effective_weight_zero () =
+  let t = H.create () in
+  H.record_terminal_failure t ~provider_key:"kimi-for-coding" ();
+  check int "effective_weight = 0 during terminal_failure cooldown"
+    0 (H.effective_weight t ~provider_key:"kimi-for-coding" ~config_weight:100)
+
+let test_terminal_failure_success_clears_cooldown () =
+  let t = H.create () in
+  H.record_terminal_failure t ~provider_key:"kimi-for-coding" ();
+  H.record_success t ~provider_key:"kimi-for-coding";
+  check bool "success after terminal_failure clears cooldown"
+    false (H.is_in_cooldown t ~provider_key:"kimi-for-coding")
+
+let test_terminal_failure_preserves_longer_existing_cooldown () =
+  let t = H.create () in
+  H.record_terminal_failure t ~provider_key:"kimi-for-coding" ();
+  let expires_after_first =
+    match H.provider_info t ~provider_key:"kimi-for-coding" with
+    | Some { cooldown_expires_at = Some x; _ } -> x
+    | _ -> fail "no cooldown after first terminal_failure"
+  in
+  H.record_terminal_failure t ~provider_key:"kimi-for-coding" ();
+  let expires_after_second =
+    match H.provider_info t ~provider_key:"kimi-for-coding" with
+    | Some { cooldown_expires_at = Some x; _ } -> x
+    | _ -> fail "no cooldown after second terminal_failure"
+  in
+  check bool "second terminal_failure does not shorten cooldown"
+    true (expires_after_second >= expires_after_first)
+
+let test_terminal_failure_records_fingerprint () =
+  let t = H.create () in
+  H.record_terminal_failure t ~provider_key:"kimi-for-coding"
+    ~error_kind:"resumable_cli_session"
+    ~error_reason:"kimi exited with code 1: session conflict" ();
+  let info = info_or_fail t ~provider_key:"kimi-for-coding" in
+  match info.top_fingerprints with
+  | [ (fp, count) ] ->
+    check bool "terminal failure fingerprint keeps kind"
+      true (String.starts_with ~prefix:"resumable_cli_session" fp);
+    check int "terminal failure fingerprint count" 1 count
+  | _ -> failwith "expected exactly one terminal failure fingerprint"
+
+
 let () =
   run "cascade_health_tracker" [
     "record", [
@@ -360,5 +427,19 @@ let () =
         test_last_failure_at_none_for_pure_success;
       test_case "top_fingerprints sorted descending" `Quick
         test_fingerprint_top_sorted_descending;
+    ];
+    "terminal_failure", [
+      test_case "single event trips immediate cooldown" `Quick
+        test_terminal_failure_triggers_immediate_cooldown;
+      test_case "cooldown duration is long (≫ 60s)" `Quick
+        test_terminal_failure_cooldown_is_long;
+      test_case "effective_weight = 0 during terminal_failure cooldown" `Quick
+        test_terminal_failure_effective_weight_zero;
+      test_case "success after terminal_failure clears cooldown" `Quick
+        test_terminal_failure_success_clears_cooldown;
+      test_case "second terminal_failure does not shorten cooldown" `Quick
+        test_terminal_failure_preserves_longer_existing_cooldown;
+      test_case "terminal_failure records fingerprint" `Quick
+        test_terminal_failure_records_fingerprint;
     ];
   ]

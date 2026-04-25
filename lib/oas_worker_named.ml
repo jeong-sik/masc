@@ -327,9 +327,47 @@ let kind_of_masc_internal_error = function
   | Oas_timeout_budget _ -> "oas_timeout_budget"
   | Ambiguous_post_commit _ -> "ambiguous_post_commit"
 
+(** #10285: which cascade emitted this error.
+
+    Pre-fix [masc_oas_error_total] only carried a [kind] label, so the
+    97 [resumable_cli_session] events observed in 10000 logs flattened
+    into a single counter even though they were unevenly distributed
+    across 5 cascades (governance_judge=32, kimi_cli_keeper=8,
+    keeper_unified=6, tool_use_strict=5, local_with_kimi_coding_with_glm=1).
+    Operators couldn't tell which cascade was the dominant offender —
+    a critical signal because cascade demotion / model-order edits
+    are per-cascade actions, not global ones.
+
+    Variants that carry [cascade_name] in their payload return it
+    directly.  The five variants that don't ([Accept_rejected],
+    [Admission_queue_rejected], [Turn_timeout], [Oas_timeout_budget],
+    [Ambiguous_post_commit]) emit the ["unknown"] sentinel — they
+    fire outside cascade context so a synthetic value would be
+    misleading.  An empty-string [cascade_name] in a cascade-aware
+    variant also collapses to ["unknown"] so the label always carries
+    a non-empty value (Prometheus exporters reject empty labels in
+    some configurations and Grafana group-bys lose the row). *)
+let cascade_name_of_masc_internal_error = function
+  | Cascade_exhausted { cascade_name; _ }
+  | Resumable_cli_session { cascade_name; _ }
+  | No_tool_capable_provider { cascade_name; _ }
+  | Admission_queue_timeout { cascade_name; _ } ->
+      if String.equal (String.trim cascade_name) "" then "unknown"
+      else cascade_name
+  | Accept_rejected _
+  | Admission_queue_rejected _
+  | Turn_timeout _
+  | Oas_timeout_budget _
+  | Ambiguous_post_commit _ -> "unknown"
+
 let sdk_error_of_masc_internal_error err =
   Prometheus.inc_counter masc_oas_error_total_metric
-    ~labels:[ ("kind", kind_of_masc_internal_error err) ] ();
+    ~labels:
+      [
+        ("kind", kind_of_masc_internal_error err);
+        ("cascade_name", cascade_name_of_masc_internal_error err);
+      ]
+    ();
   Oas.Error.Internal
     (masc_internal_error_prefix ^ Yojson.Safe.to_string (masc_internal_error_to_json err))
 
@@ -913,6 +951,28 @@ let sdk_error_to_resumable_cli_session ~cascade_name
                 }))
       else None
 
+let sdk_error_is_resumable_cli_session (err : Oas.Error.sdk_error) : bool =
+  match classify_masc_internal_error err with
+  | Some (Resumable_cli_session _) -> true
+  | _ ->
+      let direct_api_message =
+        match err with
+        | Oas.Error.Api
+            (Llm_provider.Retry.NetworkError { message; _ }
+            | Llm_provider.Retry.Overloaded { message }
+            | Llm_provider.Retry.ServerError { message; _ }
+            | Llm_provider.Retry.InvalidRequest { message }
+            | Llm_provider.Retry.RateLimited { message; _ }
+            | Llm_provider.Retry.AuthError { message }
+            | Llm_provider.Retry.NotFound { message }
+            | Llm_provider.Retry.ContextOverflow { message; _ }
+            | Llm_provider.Retry.Timeout { message }) ->
+            message_looks_like_resumable_cli_session message
+        | _ -> false
+      in
+      direct_api_message
+      || message_looks_like_resumable_cli_session (Oas.Error.to_string err)
+
 let sdk_error_is_hard_quota (err : Oas.Error.sdk_error) : bool =
   match err with
   | Oas.Error.Api api_err ->
@@ -1420,18 +1480,22 @@ let run_named
           | Some err -> err
           | None -> sdk_err
         in
-        (* Classify hard-quota (account-level exhaustion) distinctly from
-           transient failures.  Hard quota (e.g. Anthropic multi-day usage
-           limit, ZAI balance 0) will not recover within the 60s
-           [cooldown_sec]; apply an immediate long cooldown
-           ([hard_quota_cooldown_sec], default 1h) so weighted_random
-           re-selection doesn't waste cascade turns on a provider that
-           is terminally unavailable. *)
+        (* Classify deterministic non-transient failures distinctly from
+           ordinary call errors.  Hard quota (e.g. Anthropic multi-day usage
+           limit, ZAI balance 0) and Kimi CLI resumable-session conflicts do
+           not recover within the 60s [cooldown_sec]; apply an immediate long
+           cooldown so weighted_random/failover selection does not waste later
+           cascade turns on a provider that is terminal for the current runtime
+           state. *)
         let err_str = Oas.Error.to_string sdk_err in
         if sdk_error_is_hard_quota sdk_err then
           Cascade_health_tracker.(
             record_hard_quota global ~provider_key:provider_cfg.model_id
               ~error_kind:"hard_quota" ~error_reason:err_str ())
+        else if sdk_error_is_resumable_cli_session sdk_err then
+          Cascade_health_tracker.(
+            record_terminal_failure global ~provider_key:provider_cfg.model_id
+              ~error_kind:"resumable_cli_session" ~error_reason:err_str ())
         else
           Cascade_health_tracker.(
             record_failure global ~provider_key:provider_cfg.model_id

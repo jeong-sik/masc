@@ -119,6 +119,24 @@ let hard_quota_cooldown_sec =
     ~deprecated:"OAS_CASCADE_HARD_QUOTA_COOLDOWN_SEC"
     ~default:3600.0
 
+(** Cooldown duration for provider calls classified as terminal structural
+    failures, where retrying the same provider on the next cascade tick is
+    expected to reproduce the same failure until operator/runtime state changes.
+    Examples: Kimi CLI reporting a resumable session conflict instead of
+    accepting a fresh non-interactive invocation.
+
+    This is separate from hard-quota so dashboards and future policy can
+    distinguish "account exhausted" from "adapter/session state is wedged",
+    while both use the same immediate long-cooldown behavior.
+
+    Default: 3600s (1h). *)
+let terminal_failure_cooldown_sec =
+  read_float_setting
+    ~primary:"MASC_CASCADE_TERMINAL_FAILURE_COOLDOWN_SEC"
+    ~deprecated:"OAS_CASCADE_TERMINAL_FAILURE_COOLDOWN_SEC"
+    ~default:3600.0
+
+
 (* ── Types ────────────────────────────────────── *)
 
 (* [Rejected] is the third outcome kind introduced in 0.160.0.  It
@@ -134,7 +152,12 @@ let hard_quota_cooldown_sec =
    triggers an immediate long cooldown ([hard_quota_cooldown_sec]); the
    [cooldown_threshold] does not apply because retry on the next cascade
    tick is pointless when the upstream account is out of credit. *)
-type outcome = Success | Failure | Rejected | Hard_quota
+(* [Terminal_failure] represents structural provider/adapter failures that are
+   deterministic for the current runtime state.  A Kimi CLI resumable-session
+   conflict is the motivating case: fallback is correct for the current call,
+   but repeatedly attempting Kimi first on every later call only adds latency
+   and silently degrades cascade diversity. *)
+type outcome = Success | Failure | Rejected | Hard_quota | Terminal_failure
 
 type event = {
   time: float;  (* Unix timestamp *)
@@ -278,6 +301,17 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason ~now () =
       bump_failure_fp ();
       let new_until = now +. hard_quota_cooldown_sec in
       if new_until > state.cooldown_until then
+        state.cooldown_until <- new_until
+    | Terminal_failure ->
+      (* Terminal structural errors are not quota exhaustion, but they have the
+         same retry shape: the next cascade tick will hit the same provider
+         state and fail again.  Cool down immediately to keep fallback from
+         becoming a hidden tax on every request. *)
+      state.consecutive_failures <- state.consecutive_failures + 1;
+      let persistent = bump_failure_fp () in
+      apply_trust_failure_locked state ~persistent;
+      let new_until = now +. terminal_failure_cooldown_sec in
+      if new_until > state.cooldown_until then
         state.cooldown_until <- new_until)
 
 let record_success t ~provider_key =
@@ -293,6 +327,10 @@ let record_rejected t ~provider_key ?error_kind ?error_reason () =
 
 let record_hard_quota t ~provider_key ?error_kind ?error_reason () =
   record t ~provider_key ~outcome:Hard_quota ?error_kind ?error_reason
+    ~now:(Unix.gettimeofday ()) ()
+
+let record_terminal_failure t ~provider_key ?error_kind ?error_reason () =
+  record t ~provider_key ~outcome:Terminal_failure ?error_kind ?error_reason
     ~now:(Unix.gettimeofday ()) ()
 
 (* ── Queries ──────────────────────────────────── *)

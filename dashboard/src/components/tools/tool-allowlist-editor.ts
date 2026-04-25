@@ -359,6 +359,7 @@ function ToolSearchPicker({
 
       <div class="relative">
         <input
+          aria-label="도구 검색"
           ...${getInputProps({
             placeholder,
             class: 'w-full px-3 py-1.5 rounded border border-[var(--card-border)] bg-[var(--white-3)] text-2xs text-[var(--text-body)] placeholder:text-[var(--text-muted)]',
@@ -590,6 +591,7 @@ export function ToolAllowlistEditor({
             ${textInputSection.value === 'also_allow'
               ? html`
                 <textarea
+                  aria-label="also allow 도구 입력"
                   class="min-h-18 w-full px-3 py-2 rounded border border-[var(--card-border)] bg-[var(--white-3)] text-2xs text-[var(--text-body)] placeholder:text-[var(--text-muted)]"
                   placeholder="쉼표 또는 줄바꿈으로 구분"
                   value=${textInputBuffer.value}
@@ -633,6 +635,7 @@ export function ToolAllowlistEditor({
             ${textInputSection.value === 'custom'
               ? html`
                 <textarea
+                  aria-label="custom 도구 입력"
                   class="min-h-[88px] w-full px-3 py-2 rounded border border-[var(--card-border)] bg-[var(--white-3)] text-2xs text-[var(--text-body)] placeholder:text-[var(--text-muted)]"
                   placeholder="쉼표 또는 줄바꿈으로 구분"
                   value=${textInputBuffer.value}
@@ -656,6 +659,7 @@ export function ToolAllowlistEditor({
         ${textInputSection.value === 'deny'
           ? html`
             <textarea
+              aria-label="denylist 도구 입력"
               class="min-h-18 w-full px-3 py-2 rounded border border-[var(--card-border)] bg-[var(--white-3)] text-2xs text-[var(--text-body)] placeholder:text-[var(--text-muted)]"
               placeholder="쉼표 또는 줄바꿈으로 구분"
               value=${textInputBuffer.value}

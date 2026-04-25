@@ -124,7 +124,7 @@ export function AgentDetailMemory({ agentName }: Props) {
           </div>
           ${
             myEdges.length === 0
-              ? html`<div class="text-sm text-[var(--text-dim)]">
+              ? html`<div class="text-sm text-[var(--text-dim)]" role="status">
                   아직 협업 데이터가 없습니다. task 완료 시 자동 학습됩니다.
                 </div>`
               : html`
@@ -217,11 +217,11 @@ export function AgentDetailMemory({ agentName }: Props) {
           </div>
           ${
             episodes.length === 0
-              ? html`<div class="text-sm text-[var(--text-dim)]">
+              ? html`<div class="text-sm text-[var(--text-dim)]" role="status">
                   이 키퍼의 에피소드 기록이 없습니다.
                 </div>`
               : visibleEpisodes.length === 0
-                ? html`<div class="py-4 text-center text-2xs text-[var(--text-dim)]">
+                ? html`<div class="py-4 text-center text-2xs text-[var(--text-dim)]" role="status">
                     필터 결과 없음 (${episodes.length}개 중 0)
                   </div>`
                 : html`

@@ -96,7 +96,7 @@ function ToolCallEventRow({ evt, idx }: { evt: AgentTimelineEvent; idx: number }
   const cat = toolCategory(toolName)
 
   return html`
-    <div class="flex flex-col py-1.5 px-2 rounded hover:bg-[var(--white-4)] transition-colors" key=${idx} style=${{ animation: 'activityFadeIn 0.25s ease-out' }}>
+    <div class="flex flex-col py-1.5 px-2 rounded hover:bg-[var(--white-4)] transition-colors animate-[activityFadeIn_0.25s_ease-out]" key=${idx}>
       <div class="flex items-center gap-2 text-sm">
         <div class="flex-shrink-0 size-6 rounded bg-[var(--white-5)] border border-[var(--white-8)] flex items-center justify-center text-3xs font-mono font-bold ${cat.color}">
           ${cat.icon}
@@ -177,7 +177,7 @@ export function AgentTimelineSection() {
                 onInput=${(e: Event) => { timelineSearchQuery.value = (e.target as HTMLInputElement).value }}
               />
               ${filterActive
-                ? html`<span class="text-3xs text-[var(--text-dim)] tabular-nums">${filtered.length} / ${events.length}</span>`
+                ? html`<span class="text-3xs text-[var(--text-dim)] tabular-nums" role="status">${filtered.length} / ${events.length}</span>`
                 : null}
             </div>
             ${filtered.length === 0

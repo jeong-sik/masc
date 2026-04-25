@@ -979,9 +979,12 @@ let test_masc_dirname_ssot_contracts () =
     "lib/tool_team_memory.ml";
     "lib/exec_core.ml";
     "lib/keeper/keeper_accountability.ml";
-    (* batch 4 (this PR — dashboard token paths and approval queue audit store) *)
+    (* batch 4 (#10262) *)
     "lib/server/server_routes_http_routes_dashboard.ml";
     "lib/keeper/keeper_approval_queue.ml";
+    (* batch 5 (this PR — sidecar relative paths and keeper_status_detail evidence dir) *)
+    "lib/server/server_routes_http_routes_sidecar.ml";
+    "lib/keeper/keeper_status_detail.ml";
   ] in
   let file_uses_masc_dir_helper file =
     file_contains_pattern file "Common.masc_dir_from_base_path"

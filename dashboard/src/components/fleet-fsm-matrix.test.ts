@@ -43,6 +43,7 @@ function snapshot(
   const name = overrides.name ?? 'alpha'
   const allHold = overrides.allHold ?? true
   const base: KeeperCompositeSnapshot = {
+    keeper: name,
     correlation_id: `keeper:${name}:42`,
     run_id: `r-0-${name}`,
     ts: 1_713_000_000,
@@ -124,13 +125,23 @@ describe('chipClassFor', () => {
 })
 
 describe('inferKeeperNameFrom', () => {
-  it('extracts the keeper name from a canonical correlation_id', () => {
+  it('uses the explicit keeper identity when present', () => {
+    const snap = snapshot({
+      keeper: 'analyst',
+      correlation_id: 'agent:analyst-session:42',
+    })
+    expect(inferKeeperNameFrom(snap)).toBe('analyst')
+  })
+
+  it('extracts the keeper name from a canonical correlation_id for old payloads', () => {
     const snap = snapshot({ name: 'gen12-payroll' })
+    delete snap.keeper
     expect(inferKeeperNameFrom(snap)).toBe('gen12-payroll')
   })
 
   it('falls back to the correlation_id verbatim on non-canonical ids', () => {
     const snap = snapshot({ correlation_id: 'not-a-keeper-id' })
+    delete snap.keeper
     expect(inferKeeperNameFrom(snap)).toBe('not-a-keeper-id')
   })
 })

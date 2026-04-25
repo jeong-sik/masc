@@ -103,6 +103,7 @@ type last_outcome = {
 }
 
 type snapshot = {
+  keeper_name : string;
   correlation_id : string;
   run_id : string;
   ts : float;
@@ -432,6 +433,7 @@ let observe
       ~keeper_name:entry.name
   in
   {
+    keeper_name = entry.name;
     correlation_id;
     run_id;
     ts;
@@ -491,6 +493,7 @@ let measurement_to_json (m : Keeper_state_machine.auto_rule_summary) : Yojson.Sa
 
 let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
   `Assoc [
+    "keeper", `String s.keeper_name;
     "correlation_id", `String s.correlation_id;
     "run_id", `String s.run_id;
     "ts", `Float s.ts;

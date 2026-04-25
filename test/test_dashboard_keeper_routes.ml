@@ -1231,6 +1231,8 @@ let test_composite_routes_surface_latest_execution_receipt () =
   require_status "per-keeper composite GET returns 200" 200 per_keeper;
   let open Yojson.Safe.Util in
   let per_keeper_json = Yojson.Safe.from_string per_keeper.body in
+  check string "per-keeper composite exposes keeper identity" keeper_name
+    (per_keeper_json |> member "keeper" |> to_string);
   let execution = per_keeper_json |> member "execution" in
   check bool "composite exposes latest receipt presence" true
     (execution |> member "latest_receipt_present" |> to_bool);
@@ -1252,6 +1254,8 @@ let test_composite_routes_surface_latest_execution_receipt () =
     | snapshot :: _ -> snapshot
     | [] -> fail "expected at least one fleet composite snapshot"
   in
+  check string "fleet composite exposes keeper identity" keeper_name
+    (fleet_snapshot |> member "keeper" |> to_string);
   let fleet_execution = fleet_snapshot |> member "execution" in
   check bool "fleet composite exposes latest receipt presence" true
     (fleet_execution |> member "latest_receipt_present" |> to_bool);

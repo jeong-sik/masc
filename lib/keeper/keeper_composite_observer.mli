@@ -131,6 +131,10 @@ type last_outcome = {
 }
 
 type snapshot = {
+  keeper_name : string;
+      (** Canonical keeper identity from the registry entry. This is separate
+          from [correlation_id], which may come from an external event envelope
+          and is not a stable row key for fleet dashboards. *)
   correlation_id : string;
   run_id : string;
   ts : float;

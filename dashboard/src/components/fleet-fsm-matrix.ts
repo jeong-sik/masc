@@ -522,8 +522,9 @@ export function pushObservation(
 /**
  * Pure filter for fleet keeper snapshots.
  *
- * Case-insensitive substring match on the keeper name (as derived
- * from the canonical correlation_id) and on the current value of
+ * Case-insensitive substring match on the keeper name (prefer the
+ * explicit backend identity, falling back to canonical correlation_id)
+ * and on the current value of
  * each of the six FSM axes so an operator can isolate a single
  * keeper by name, or every keeper currently in a specific state
  * (e.g. `trying`, `Overflowed`, `warning`).
@@ -932,12 +933,15 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
 }
 
 /**
- * Best-effort keeper name extraction from the snapshot correlation id.
- * Format: `keeper:<name>:<transition_seq>` (see keeper_composite_observer
- * .ml:stable_correlation_id). Falls back to correlation_id verbatim so
- * the UI never renders an empty cell.
+ * Keeper row identity for fleet views. New backends emit the registry
+ * keeper name explicitly as `keeper`; older payloads fall back to the
+ * canonical correlation_id format `keeper:<name>:<transition_seq>`.
+ * Non-canonical ids still render verbatim rather than collapsing to an
+ * empty row key.
  */
 export function inferKeeperNameFrom(snap: KeeperCompositeSnapshot): string {
+  const explicit = snap.keeper?.trim()
+  if (explicit) return explicit
   const m = /^keeper:([^:]+):/.exec(snap.correlation_id)
   return m?.[1] ?? snap.correlation_id
 }

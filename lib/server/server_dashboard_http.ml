@@ -556,11 +556,15 @@ let enrich_composite_snapshot_json ~(config : Coord.config) ~keeper_name json =
   match json with
   | `Assoc fields ->
       let fields =
-        List.filter (fun (name, _) -> not (String.equal name "execution")) fields
+        List.filter
+          (fun (name, _) ->
+            not (String.equal name "keeper" || String.equal name "execution"))
+          fields
       in
       `Assoc
         (fields
          @ [
+             ("keeper", `String keeper_name);
              ( "execution",
                composite_execution_receipt_json ~config ~keeper_name );
            ])

@@ -34,6 +34,14 @@ describe('parseKeeperCompositeSnapshot', () => {
     expect(result.last_outcome).toBeNull()
   })
 
+  it('parses explicit keeper identity when emitted by the backend', () => {
+    const result = parseKeeperCompositeSnapshot({
+      ...VALID_SNAPSHOT,
+      keeper: 'analyst',
+    })
+    expect(result.keeper).toBe('analyst')
+  })
+
   it('parses all valid phase values', () => {
     for (const phase of ['Running', 'Failing', 'Overflowed', 'Compacting', 'HandingOff', 'Draining', 'Stable']) {
       const result = parseKeeperCompositeSnapshot({ ...VALID_SNAPSHOT, phase })

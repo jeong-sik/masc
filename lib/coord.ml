@@ -162,16 +162,21 @@ let observe_task_transition_event config ~agent_name ~task_id
       ~details ~outcome:Audit_log.Success ();
     if telemetry_enabled () then
       match transition with
-      | Types.Start ->
+      | Types.Claim | Types.Start ->
           Telemetry_eio.track_task_started config ~task_id ~agent_id:agent_name
-      | Types.Done_action | Types.Cancel ->
+      | Types.Done_action | Types.Approve_verification ->
           let duration_ms =
             Safe_ops.json_int ~default:0 "duration_ms" details
           in
           Telemetry_eio.track_task_completed config ~task_id ~duration_ms
-            ~success:(transition = Types.Done_action)
-      | (Types.Claim | Types.Release
-        | Types.Submit_for_verification | Types.Approve_verification
+            ~success:true
+      | Types.Cancel ->
+          let duration_ms =
+            Safe_ops.json_int ~default:0 "duration_ms" details
+          in
+          Telemetry_eio.track_task_completed config ~task_id ~duration_ms
+            ~success:false
+      | (Types.Release | Types.Submit_for_verification
         | Types.Reject_verification) -> ()
   with Stdlib.Effect.Unhandled _ -> ());
   (try

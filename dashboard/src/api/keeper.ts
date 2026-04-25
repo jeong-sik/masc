@@ -28,6 +28,7 @@ export type {
   KeeperCompositeInvariants,
   KeeperCompositeMeasurement,
   KeeperLastOutcome,
+  KeeperCompositeExecution,
   KeeperCompositePhase,
   KeeperCompositeTurnPhase,
   KeeperCompositeDecisionStage,

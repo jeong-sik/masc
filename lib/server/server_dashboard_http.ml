@@ -424,15 +424,159 @@ let dashboard_goals_snapshot_json ~(config : Coord.config) : Yojson.Safe.t =
       ("tree", dashboard_goals_tree_http_json ~config);
     ]
 
-let dashboard_fleet_composite_json ~(base_path : string) () : Yojson.Safe.t =
-  let snapshots = Keeper_composite_observer.all_snapshots ~base_path () in
+let compact_preview ~max_chars text =
+  let text = String.trim text in
+  if String.length text <= max_chars then (text, false)
+  else (String.sub text 0 max_chars ^ "...", true)
+
+let json_member key = function
+  | `Assoc fields -> (match List.assoc_opt key fields with Some v -> v | None -> `Null)
+  | _ -> `Null
+
+let json_string key json = Json_util.get_string json key
+let json_int key json = Json_util.get_int json key
+let json_float key json = Json_util.get_float json key
+let json_bool key json = Json_util.get_bool json key
+
+let compact_receipt_error_json receipt =
+  match json_member "error" receipt with
+  | `Assoc _ as error ->
+      let kind = json_string "kind" error in
+      let message = json_string "message" error in
+      let message_preview, message_truncated =
+        match message with
+        | Some value -> compact_preview ~max_chars:900 value
+        | None -> ("", false)
+      in
+      `Assoc
+        [
+          ("kind", Json_util.string_opt_to_json kind);
+          ( "message_preview",
+            match message with
+            | Some _ -> `String message_preview
+            | None -> `Null );
+          ("message_truncated", `Bool message_truncated);
+        ]
+  | _ -> `Null
+
+let compact_receipt_cascade_json receipt =
+  match json_member "cascade" receipt with
+  | `Assoc _ as cascade ->
+      `Assoc
+        [
+          ("name", Json_util.string_opt_to_json (json_string "name" cascade));
+          ( "selected_model",
+            Json_util.string_opt_to_json (json_string "selected_model" cascade) );
+          ( "attempt_count",
+            Json_util.int_opt_to_json (json_int "attempt_count" cascade) );
+          ( "fallback_applied",
+            Json_util.bool_opt_to_json (json_bool "fallback_applied" cascade) );
+          ("outcome", Json_util.string_opt_to_json (json_string "outcome" cascade));
+          ( "degraded_retry_applied",
+            Json_util.bool_opt_to_json (json_bool "degraded_retry_applied" cascade) );
+          ( "degraded_retry_cascade",
+            Json_util.string_opt_to_json
+              (json_string "degraded_retry_cascade" cascade) );
+          ( "fallback_reason",
+            Json_util.string_opt_to_json (json_string "fallback_reason" cascade) );
+        ]
+  | _ -> `Null
+
+let compact_receipt_tool_surface_json receipt =
+  match json_member "tool_surface" receipt with
+  | `Assoc _ as surface ->
+      `Assoc
+        [
+          ( "tool_requirement",
+            Json_util.string_opt_to_json (json_string "tool_requirement" surface)
+          );
+          ( "tool_gate_enabled",
+            Json_util.bool_opt_to_json (json_bool "tool_gate_enabled" surface)
+          );
+          ( "missing_required_tools",
+            Json_util.json_string_list
+              (Json_util.get_string_list surface "missing_required_tools") );
+          ( "required_tools",
+            Json_util.json_string_list
+              (Json_util.get_string_list surface "required_tools") );
+        ]
+  | _ -> `Null
+
+let composite_execution_receipt_json ~(config : Coord.config) ~keeper_name =
+  match Keeper_execution_receipt.latest_json config keeper_name with
+  | None ->
+      `Assoc
+        [
+          ("latest_receipt_present", `Bool false);
+          ("recorded_at", `Null);
+          ("outcome", `Null);
+          ("terminal_reason_code", `Null);
+          ("operator_disposition", `Null);
+          ("operator_disposition_reason", `Null);
+          ("model_used", `Null);
+          ("stop_reason", `Null);
+          ("tool_contract_result", `Null);
+          ("duration_ms", `Null);
+          ("error", `Null);
+          ("cascade", `Null);
+          ("tool_surface", `Null);
+        ]
+  | Some receipt ->
+      let action_radius = json_member "action_radius" receipt in
+      `Assoc
+        [
+          ("latest_receipt_present", `Bool true);
+          ( "recorded_at",
+            Json_util.string_opt_to_json (json_string "recorded_at" receipt) );
+          ("outcome", Json_util.string_opt_to_json (json_string "outcome" receipt));
+          ( "terminal_reason_code",
+            Json_util.string_opt_to_json
+              (json_string "terminal_reason_code" receipt) );
+          ( "operator_disposition",
+            Json_util.string_opt_to_json
+              (json_string "operator_disposition" receipt) );
+          ( "operator_disposition_reason",
+            Json_util.string_opt_to_json
+              (json_string "operator_disposition_reason" receipt) );
+          ( "model_used",
+            Json_util.string_opt_to_json (json_string "model_used" receipt) );
+          ( "stop_reason",
+            Json_util.string_opt_to_json (json_string "stop_reason" receipt) );
+          ( "tool_contract_result",
+            Json_util.string_opt_to_json
+              (json_string "tool_contract_result" receipt) );
+          ( "duration_ms",
+            Json_util.float_opt_to_json (json_float "duration_ms" action_radius) );
+          ("error", compact_receipt_error_json receipt);
+          ("cascade", compact_receipt_cascade_json receipt);
+          ("tool_surface", compact_receipt_tool_surface_json receipt);
+        ]
+
+let enrich_composite_snapshot_json ~(config : Coord.config) ~keeper_name json =
+  match json with
+  | `Assoc fields ->
+      `Assoc
+        (fields
+         @ [
+             ( "execution",
+               composite_execution_receipt_json ~config ~keeper_name );
+           ])
+  | other -> other
+
+let dashboard_keeper_composite_json ~(config : Coord.config)
+    (entry : Keeper_registry.registry_entry) : Yojson.Safe.t =
+  Keeper_composite_observer.observe entry
+  |> Keeper_composite_observer.snapshot_to_json
+  |> enrich_composite_snapshot_json ~config ~keeper_name:entry.name
+
+let dashboard_fleet_composite_json ~(config : Coord.config) () : Yojson.Safe.t =
+  let entries = Keeper_registry.all ~base_path:config.base_path () in
+  let snapshots = List.map (dashboard_keeper_composite_json ~config) entries in
   `Assoc
     [
       ("generated_at", `Float (Unix.gettimeofday ()));
       ("count", `Int (List.length snapshots));
-      ( "snapshots",
-        `List (List.map Keeper_composite_observer.snapshot_to_json snapshots)
-      );
+      ("snapshots", `List snapshots);
     ]
 
 let dashboard_goal_detail_http_json ~(config : Coord.config) ~goal_id :

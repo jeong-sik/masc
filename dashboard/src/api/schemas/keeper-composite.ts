@@ -28,6 +28,7 @@ import {
   optional,
   picklist,
   string,
+  unknown,
   type BaseIssue,
   type InferOutput,
 } from 'valibot'
@@ -119,6 +120,46 @@ const KeeperLastOutcomeSchema = object({
   selected_model: nullable(string()),
 })
 
+const KeeperCompositeExecutionSchema = object({
+  latest_receipt_present: boolean(),
+  recorded_at: nullable(string()),
+  outcome: nullable(string()),
+  terminal_reason_code: nullable(string()),
+  operator_disposition: nullable(string()),
+  operator_disposition_reason: nullable(string()),
+  model_used: nullable(string()),
+  stop_reason: nullable(string()),
+  tool_contract_result: nullable(string()),
+  duration_ms: nullable(number()),
+  error: nullable(
+    object({
+      kind: nullable(string()),
+      message_preview: nullable(string()),
+      message_truncated: boolean(),
+    }),
+  ),
+  cascade: nullable(
+    object({
+      name: nullable(string()),
+      selected_model: nullable(string()),
+      attempt_count: nullable(number()),
+      fallback_applied: nullable(boolean()),
+      outcome: nullable(string()),
+      degraded_retry_applied: nullable(boolean()),
+      degraded_retry_cascade: nullable(string()),
+      fallback_reason: nullable(string()),
+    }),
+  ),
+  tool_surface: nullable(
+    object({
+      tool_requirement: nullable(string()),
+      tool_gate_enabled: nullable(boolean()),
+      missing_required_tools: array(string()),
+      required_tools: array(string()),
+    }),
+  ),
+})
+
 export const KeeperCompositeSnapshotSchema = object({
   correlation_id: string(),
   run_id: string(),
@@ -143,12 +184,16 @@ export const KeeperCompositeSnapshotSchema = object({
   invariants: KeeperCompositeInvariantsSchema,
   is_live: boolean(),
   last_outcome: nullable(KeeperLastOutcomeSchema),
+  execution: optional(KeeperCompositeExecutionSchema),
+  /** @deprecated kept only for old backend experiments; new payloads use `execution`. */
+  latest_receipt: optional(unknown()),
 })
 
 export type KeeperCompositeSnapshot = InferOutput<typeof KeeperCompositeSnapshotSchema>
 export type KeeperCompositeInvariants = InferOutput<typeof KeeperCompositeInvariantsSchema>
 export type KeeperCompositeMeasurement = InferOutput<typeof KeeperCompositeMeasurementSchema>
 export type KeeperLastOutcome = InferOutput<typeof KeeperLastOutcomeSchema>
+export type KeeperCompositeExecution = InferOutput<typeof KeeperCompositeExecutionSchema>
 export type KeeperCompositePhase = InferOutput<typeof KeeperCompositePhaseSchema>
 export type KeeperCompositeTurnPhase = InferOutput<typeof KeeperCompositeTurnPhaseSchema>
 export type KeeperCompositeDecisionStage = InferOutput<typeof KeeperCompositeDecisionStageSchema>

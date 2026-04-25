@@ -1556,9 +1556,9 @@ let handle_keeper_get_subroutes state req request reqd =
 
        Consumed by [dashboard/src/components/fleet-fsm-matrix.ts]
        (LT-16b, upcoming). *)
-    let base_path = state.Mcp_server.room_config.base_path in
     let json =
-      Server_dashboard_http.dashboard_fleet_composite_json ~base_path ()
+      Server_dashboard_http.dashboard_fleet_composite_json
+        ~config:state.Mcp_server.room_config ()
     in
     Http.Response.json ~compress:true ~request:req
       (Yojson.Safe.to_string json) reqd
@@ -1577,10 +1577,10 @@ let handle_keeper_get_subroutes state req request reqd =
          Http.Response.json ~status:`Not_found
            (Printf.sprintf {|{"error":"keeper %S not registered"}|} name) reqd
        | Some entry ->
-         let snapshot =
-           Keeper_composite_observer.observe entry
+         let json =
+           Server_dashboard_http.dashboard_keeper_composite_json
+             ~config:state.Mcp_server.room_config entry
          in
-         let json = Keeper_composite_observer.snapshot_to_json snapshot in
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd)
   else if req_path = prefix ^ "regime" then

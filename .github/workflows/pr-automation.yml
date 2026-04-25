@@ -55,6 +55,28 @@ jobs:
               .split(",")
               .map((s) => s.trim().toLowerCase())
               .filter(Boolean);
+
+            // The agent draft guard exists to keep *agent-authored* PRs draft-only
+            // until a human approves them. When the PR author is itself a verified
+            // human (repo owner or AGENT_DRAFT_GUARD_HUMAN_ACTORS), the policy
+            // does not apply: the human is the approver. Skipping here also
+            // breaks a deadlock where convertPullRequestToDraft returns
+            // "Resource not accessible by integration" on owner-authored PRs,
+            // failing this required check for every owner PR.
+            const prAuthorLogin = (pr.user?.login || "").toLowerCase();
+            const prAuthorType = pr.user?.type;
+            if (
+              prAuthorType === "User" &&
+              prAuthorLogin &&
+              humanActors.includes(prAuthorLogin)
+            ) {
+              core.info(
+                `PR author ${pr.user.login} is in AGENT_DRAFT_GUARD_HUMAN_ACTORS; ` +
+                  "agent draft guard does not apply."
+              );
+              return;
+            }
+
             const labels = (pr.labels || []).map((label) => label.name.toLowerCase());
             const ignoredBypassLabels = labels.filter((label) =>
               automationProneBypassLabels.has(label)

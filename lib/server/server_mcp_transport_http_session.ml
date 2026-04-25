@@ -165,10 +165,11 @@ let legacy_messages_endpoint_url (request : Httpun.Request.t) session_id =
         match Httpun.Headers.get request.headers "x-forwarded-proto" with
         | Some p -> p
         | None ->
-            if
-              String.length host >= 17
-              && String.sub host 0 17 = "masc.crying.pict"
-            then "https"
+            (* Length-mismatched [String.sub host 0 17 = "masc.crying.pict"]
+               (17-char substring vs 16-char literal) was always false, so
+               tunnel hosts silently advertised http://. starts_with also
+               drops a per-request allocation. *)
+            if String.starts_with ~prefix:"masc.crying.pict" host then "https"
             else "http"
       in
       Printf.sprintf "%s://%s/messages?session_id=%s" proto host session_id

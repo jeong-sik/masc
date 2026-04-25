@@ -111,23 +111,48 @@ let normalize_memory_text_key (s : string) : string =
   |> String.lowercase_ascii
   |> Re.replace_string normalize_punct_re ~by:""
 
-(* Consensus marker: env var is process-lifetime constant, so build the
-   compiled regex once and cache it.  Stdlib.Lazy is safe here: the thunk
-   is a pure regex compile (no effects, no I/O) and produces an
-   identical value on any racing force, so the OCaml 5 multi-domain
-   "double force" concern collapses to redundant computation. *)
+(* Consensus marker: cache the compiled regex without using [Lazy.force].
+   OCaml 5 documents Lazy as not concurrency-safe across fibers, systhreads,
+   or domains.  This path can be reached from runtime/dashboard domains, so
+   protect the tiny cache with a Stdlib mutex.  Keep the env-derived cache key
+   so tests and operators that change the pattern in-process get a fresh
+   compiled regex without paying the compile cost on every memory row. *)
 let consensus_default_re = Re.Pcre.re {|\d{6,}ep\+?|} |> Re.compile
 
-let consensus_re_cached = lazy (
+let consensus_re_mu = Stdlib.Mutex.create ()
+let consensus_re_cached : (string * Re.re) option ref = ref None
+
+let consensus_pattern_key () =
   match Sys.getenv_opt "MASC_KEEPER_MEMORY_CONSENSUS_PATTERN" with
-  | None -> consensus_default_re
-  | Some raw ->
-      let pat = String.trim raw in
-      if pat = "" then consensus_default_re
-      else Re.Pcre.re pat |> Re.compile)
+  | None -> ""
+  | Some raw -> String.trim raw
+
+let compile_consensus_re pattern =
+  if pattern = "" then consensus_default_re
+  else
+    try Re.Pcre.re pattern |> Re.compile
+    with exn ->
+      Log.Keeper.warn
+        "invalid MASC_KEEPER_MEMORY_CONSENSUS_PATTERN=%S: %s; using default"
+        pattern (Printexc.to_string exn);
+      consensus_default_re
+
+let consensus_re () =
+  let pattern = consensus_pattern_key () in
+  Stdlib.Mutex.lock consensus_re_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock consensus_re_mu)
+    (fun () ->
+      match !consensus_re_cached with
+      | Some (cached_pattern, re) when String.equal cached_pattern pattern ->
+          re
+      | _ ->
+          let re = compile_consensus_re pattern in
+          consensus_re_cached := Some (pattern, re);
+          re)
 
 let has_inflated_consensus_marker (s : string) : bool =
-  Re.execp (Lazy.force consensus_re_cached) s
+  Re.execp (consensus_re ()) s
 
 let memory_placeholders () =
   let base =

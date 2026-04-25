@@ -211,7 +211,7 @@ function ResultViewer({ text, hint, isError: isErr }: { text: string; hint: Cont
              style=${shouldCollapse ? `max-height: ${RESULT_COLLAPSED_MAX_HEIGHT}px` : ''}>
           ${hint === 'diff' ? html`<${DiffBlock} text=${text} />`
             : hint === 'json' ? html`<${JsonViewerCard} title=${titleLabel} data=${parseJsonLikeData(text)} />`
-            : html`<pre class="m-0 text-2xs font-mono ${isErr ? 'text-[var(--bad)]' : 'text-[var(--text-body)]'} p-3 overflow-x-auto whitespace-pre-wrap break-all leading-relaxed">${displayText}</pre>`}
+            : html`<pre class="m-0 text-2xs font-mono ${isErr ? 'text-[var(--bad)]' : 'text-[var(--text-body)]'} p-3 overflow-x-auto whitespace-pre-wrap break-all leading-relaxed" tabindex="0">${displayText}</pre>`}
           ${shouldCollapse ? html`
             <div class="absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t ${isErr ? 'from-[rgba(239,68,68,0.08)]' : 'from-[var(--white-3)]'} to-transparent pointer-events-none"></div>
           ` : null}

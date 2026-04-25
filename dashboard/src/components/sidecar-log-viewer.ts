@@ -257,7 +257,7 @@ export function SidecarLogViewer({ connectorId }: { connectorId: string }) {
                   </div>
                 `
               : html`
-                  <pre role="log" aria-label="${connectorId} 로그" class="max-h-[40vh] overflow-auto whitespace-pre-wrap break-words rounded bg-[var(--bg-0)] p-2 font-mono text-3xs leading-[1.4] text-[var(--text-body)]">${filtered.join('\n')}</pre>
+                  <pre role="log" aria-label="${connectorId} 로그" class="max-h-[40vh] overflow-auto whitespace-pre-wrap break-words rounded bg-[var(--bg-0)] p-2 font-mono text-3xs leading-[1.4] text-[var(--text-body)]" tabindex="0">${filtered.join('\n')}</pre>
                 `
             : html`
                 <div role="status" class="rounded border border-dashed border-[var(--white-8)] px-3 py-3 text-center text-2xs text-[var(--text-dim)]">

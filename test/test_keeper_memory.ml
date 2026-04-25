@@ -1067,8 +1067,35 @@ let test_quality_rejects_synthetic () =
   check bool "[SYNTHETIC] rejected" false
     (Keeper_memory_bank.is_meaningful_memory_text "some [SYNTHETIC] note")
 
+let with_env name value f =
+  let previous = Sys.getenv_opt name in
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some old -> Unix.putenv name old
+      | None -> Unix.putenv name "")
+    (fun () ->
+      Unix.putenv name value;
+      f ())
+
 let test_quality_rejects_consensus_spam () =
+  with_env "MASC_KEEPER_MEMORY_CONSENSUS_PATTERN" "" @@ fun () ->
   check bool "1234567ep rejected" false
+    (Keeper_memory_bank.is_meaningful_memory_text "1234567ep")
+
+let test_quality_consensus_pattern_follows_env_changes () =
+  with_env "MASC_KEEPER_MEMORY_CONSENSUS_PATTERN" "CUSTOMBLOCK" @@ fun () ->
+  check bool "custom pattern rejected" false
+    (Keeper_memory_bank.is_meaningful_memory_text "CUSTOMBLOCK");
+  with_env "MASC_KEEPER_MEMORY_CONSENSUS_PATTERN" "OTHERBLOCK" @@ fun () ->
+  check bool "new custom pattern rejected" false
+    (Keeper_memory_bank.is_meaningful_memory_text "OTHERBLOCK");
+  check bool "old custom pattern no longer rejected" true
+    (Keeper_memory_bank.is_meaningful_memory_text "CUSTOMBLOCK")
+
+let test_quality_invalid_consensus_pattern_falls_back () =
+  with_env "MASC_KEEPER_MEMORY_CONSENSUS_PATTERN" "(" @@ fun () ->
+  check bool "invalid pattern falls back to default" false
     (Keeper_memory_bank.is_meaningful_memory_text "1234567ep")
 
 let test_quality_rejects_long_text () =
@@ -1288,6 +1315,10 @@ let () =
           test_case "placeholder rejects korean 모르겠음" `Quick test_quality_rejects_korean_dont_know;
           test_case "synthetic marker rejected" `Quick test_quality_rejects_synthetic;
           test_case "consensus spam rejected" `Quick test_quality_rejects_consensus_spam;
+          test_case "consensus pattern follows env changes" `Quick
+            test_quality_consensus_pattern_follows_env_changes;
+          test_case "invalid consensus pattern falls back" `Quick
+            test_quality_invalid_consensus_pattern_falls_back;
           test_case "max text length gate rejects long text" `Quick test_quality_rejects_long_text;
           test_case "meaningful text accepted" `Quick test_quality_accepts_meaningful;
         ] );

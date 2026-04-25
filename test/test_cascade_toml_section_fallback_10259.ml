@@ -51,6 +51,17 @@ let write_file path content =
   output_string oc content;
   close_out oc
 
+let contains_substring s needle =
+  let s_len = String.length s in
+  let n_len = String.length needle in
+  let rec loop i =
+    if n_len = 0 then true
+    else if i + n_len > s_len then false
+    else if String.sub s i n_len = needle then true
+    else loop (i + 1)
+  in
+  loop 0
+
 (* --- toml_section_names_result core contract ----------------------- *)
 
 let test_section_names_basic () =
@@ -232,6 +243,22 @@ unknown_field_breaks_strict = "yes"
              true
              (String.length catalog_error > 0))
 
+let test_with_toml_fallback_empty_degraded_path_errors () =
+  (* Strict failure plus an empty fallback name list is not a degraded
+     success.  Without this guard the keeper-name validator can receive
+     [Ok []] and collapse the real catalog failure into a silent
+     accept-list bug. *)
+  with_temp_dir @@ fun dir ->
+  let json_path = Filename.concat dir "cascade.json" in
+  match K.catalog_names_with_toml_fallback ~config_path:json_path () with
+  | Ok (names, _) ->
+      fail
+        (Printf.sprintf "expected Error for empty fallback, got names: [%s]"
+           (String.concat ", " names))
+  | Error msg ->
+      check bool "error names empty fallback" true
+        (contains_substring msg "returned no cascade profile names")
+
 let () =
   run "cascade_toml_section_fallback_10259"
     [
@@ -254,5 +281,7 @@ let () =
             test_with_toml_fallback_live_path;
           test_case "degraded path uses Toml_section_fallback tag"
             `Quick test_with_toml_fallback_degraded_path;
+          test_case "empty degraded fallback errors" `Quick
+            test_with_toml_fallback_empty_degraded_path_errors;
         ] );
     ]

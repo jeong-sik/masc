@@ -153,6 +153,12 @@ let catalog_names_with_toml_fallback ?config_path () =
             Cascade_toml_materializer.toml_section_names_result
               ~config_path:path
           with
+          | Ok [] ->
+              Error
+                (Printf.sprintf
+                   "live catalog unavailable: %s; toml section fallback \
+                    returned no cascade profile names"
+                   catalog_error)
           | Ok names ->
               Ok (names, Toml_section_fallback { catalog_error })
           | Error toml_error ->

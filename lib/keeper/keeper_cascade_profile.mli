@@ -80,7 +80,8 @@ val catalog_names_with_toml_fallback :
     [Live_catalog].  On strict-load failure, falls back to enumerating
     [cascade.toml]'s top-level table sections (filtering meta-keys
     starting with ['_']) and tags the result [Toml_section_fallback].
-    Returns [Error _] only when neither source produces a name list.
+    Returns [Error _] when neither source produces a non-empty name list.
+    An empty degraded fallback is not a safe success for the validator.
 
     This decouples the validator's accept list from full strict
     materialization so a localized field-whitelist regression in the

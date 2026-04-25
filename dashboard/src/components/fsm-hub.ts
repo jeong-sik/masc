@@ -647,8 +647,8 @@ function StatusBar({
     && (now - (snapshot.last_outcome?.ended_at ?? snapshot.ts)) > 300
   const liveBadge = snapshot
     ? snapshot.is_live
-      ? html`<span class="px-2 py-0.5 rounded-sm border text-3xs font-mono text-[var(--ok)] border-[var(--ok-20)] bg-[var(--ok-10)] animate-pulse"><span aria-hidden="true">●</span> 실행 중</span>`
-      : html`<span class="px-2 py-0.5 rounded-sm border text-3xs font-mono ${idleIsLong ? 'text-[var(--text-muted)] border-[var(--warn-20)]' : 'text-[var(--text-dim)] border-white/10'}"><span aria-hidden="true">○</span> 대기 ${idleDuration}${snapshot.last_outcome ? html` <span class="text-4xs opacity-70">· 턴 #${snapshot.last_outcome.turn_id}</span>` : ''}</span>`
+      ? html`<span class="px-2 py-0.5 rounded-sm border text-3xs font-mono text-[var(--ok)] border-[var(--ok-20)] bg-[var(--ok-10)] animate-pulse" role="status"><span aria-hidden="true">●</span> 실행 중</span>`
+      : html`<span class="px-2 py-0.5 rounded-sm border text-3xs font-mono ${idleIsLong ? 'text-[var(--text-muted)] border-[var(--warn-20)]' : 'text-[var(--text-dim)] border-white/10'}" role="status"><span aria-hidden="true">○</span> 대기 ${idleDuration}${snapshot.last_outcome ? html` <span class="text-4xs opacity-70">· 턴 #${snapshot.last_outcome.turn_id}</span>` : ''}</span>`
     : null
 
   const staleSec = lastFetchAt > 0 ? Math.max(0, now - lastFetchAt) : 0
@@ -698,6 +698,7 @@ function StatusBar({
             <span
               class="px-1.5 py-0.5 rounded border text-3xs font-mono text-[var(--text-muted)] border-[var(--white-10)] bg-[var(--white-3)]"
               title="탭이 백그라운드 상태 — 폴링 중지됨. 탭으로 돌아오면 즉시 갱신됩니다."
+              role="status"
             >
               <span aria-hidden="true">⏸</span> 일시 중지
             </span>
@@ -780,6 +781,11 @@ function StatusBar({
                 ? 'border-[rgba(245,158,11,0.4)] text-[var(--amber-bright)]'
                 : 'border-[var(--white-8)] text-[var(--text-dim)]'
             }`}
+            role="progressbar"
+            aria-valuenow=${observationCount}
+            aria-valuemin="0"
+            aria-valuemax=${MAX_OBSERVATIONS}
+            aria-label=${`관측 버퍼 ${observationCount}/${MAX_OBSERVATIONS}`}
             title=${`관측 버퍼 ${observationCount}/${MAX_OBSERVATIONS} — 가득 차면 오래된 관측부터 순환 교체됩니다`}
           >
             <span

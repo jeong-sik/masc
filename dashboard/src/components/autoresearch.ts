@@ -133,7 +133,7 @@ function LoopSelector() {
             ? 'px-3 py-1.5 rounded text-xs font-medium border border-accent/60 bg-[var(--accent-10)] text-[var(--text-strong)] cursor-pointer'
             : 'px-3 py-1.5 rounded text-xs font-medium border border-card-border bg-card/60 text-[var(--text-muted)] cursor-pointer hover:border-accent/30 transition-colors'
           return html`
-            <button type="button" key=${loop.loop_id} class=${cls} onClick=${() => selectLoop(loop.loop_id)}>
+            <button type="button" key=${loop.loop_id} class=${cls} onClick=${() => selectLoop(loop.loop_id)} aria-pressed=${isSelected}>
               <span class="${statusColor(loop.status)} mr-1" aria-hidden="true">\u25CF</span>
               ${loop.loop_id.slice(0, 8)}
               <span class="ml-1 opacity-60">${statusLabel(loop.status)}</span>
@@ -341,9 +341,9 @@ function WarningsList({ warnings }: { warnings: string[] }) {
   if (warnings.length === 0) return null
 
   return html`
-    <div class="flex flex-col gap-1.5">
+    <div class="flex flex-col gap-1.5" role="list" aria-label="자율 연구 경고">
       ${warnings.map((w, i) => html`
-        <div key=${i} class="px-3 py-1.5 rounded bg-[var(--warn-10)] border border-[var(--warn-20)] text-[var(--warn)] text-xs">
+        <div key=${i} class="px-3 py-1.5 rounded bg-[var(--warn-10)] border border-[var(--warn-20)] text-[var(--warn)] text-xs" role="listitem">
           ${w}
         </div>
       `)}

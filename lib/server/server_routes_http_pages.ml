@@ -15,7 +15,7 @@ let graphql_playground_html ~nonce =
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="user-scalable=no,initial-scale=1,minimum-scale=1,maximum-scale=1" />
+    <meta name="viewport" content="initial-scale=1" />
     <title>MASC GraphQL Playground</title>
     <link rel="stylesheet" href="/static/css/middleware.css" />
   </head>
@@ -241,7 +241,7 @@ let serve_dashboard_index request reqd =
         ~request body reqd
   | Error _ ->
       Http.Response.html
-        "<html><body>Dashboard build not found. Run: cd dashboard &amp;&amp; pnpm run build</body></html>"
+        "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Dashboard not found</title><body><p>Dashboard build not found. Run: <code>cd dashboard &amp;&amp; pnpm run build</code></p></body></html>"
         reqd
 
 let is_compressible_asset name =

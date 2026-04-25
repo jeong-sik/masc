@@ -328,6 +328,7 @@ export function AttributionPanel() {
           : html`<div></div>`}
         <input
           type="search"
+          autoComplete="off"
           value=${query.value}
           placeholder="gate / origin / reason 필터"
           aria-label="Attribution 이벤트 필터"

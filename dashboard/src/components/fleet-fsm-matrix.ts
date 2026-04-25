@@ -360,6 +360,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
         </span>
         <input
           type="search"
+          autoComplete="off"
           value=${query}
           placeholder="name / 상태 필터 (예: gen12, trying)"
           aria-label="Keeper 필터"

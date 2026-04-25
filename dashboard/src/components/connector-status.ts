@@ -1102,6 +1102,7 @@ function ConnectorLivePanel({
               <div class="flex items-center justify-end">
                 <input
                   type="search"
+                  autoComplete="off"
                   value=${keeperQuery}
                   placeholder="keeper / model / runtime 필터"
                   aria-label="Keeper 필터"

@@ -75,6 +75,7 @@ function TaskEventsSection() {
       <div class="flex flex-wrap items-center gap-2">
         <${TextInput}
           type="search"
+          autoComplete="off"
           value=${query}
           placeholder="이벤트 검색 (label/agent/notes)"
           ariaLabel="이벤트 검색"
@@ -365,6 +366,7 @@ function GoalRelationSection({ goalIds }: { goalIds: string[] }) {
         ${goalIds.length > 1 ? html`
           <input
             type="search"
+            autoComplete="off"
             value=${query}
             placeholder="목표 검색 (title/status/metric)"
             aria-label="목표 검색"

@@ -717,6 +717,7 @@ function StatusBar({
           ${keeperNames.length > 0 ? html`
             <input
               type="search"
+              autoComplete="off"
               value=${keeperFilter}
               placeholder="keeper 이름 필터"
               aria-label="Keeper 이름 필터"

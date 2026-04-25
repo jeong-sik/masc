@@ -184,6 +184,7 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
           <${FilterChips} chips=${chips} active=${actionFilter} tone="accent" />
           <input
             type="search"
+            autoComplete="off"
             value=${query}
             placeholder="액션 필터 (title, actor, subject...)"
             aria-label="액션 타임라인 필터"

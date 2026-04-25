@@ -391,6 +391,7 @@ export function TransitionTrail({
         </div>
         <input
           type="search"
+          autoComplete="off"
           value=${query.value}
           placeholder="field / from / to 필터"
           aria-label="전이 이력 필터"

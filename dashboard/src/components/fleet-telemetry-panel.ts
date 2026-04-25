@@ -762,6 +762,7 @@ export function FleetTelemetryPanel() {
           <div class="text-3xs uppercase tracking-wider text-[var(--text-dim)]">Keeper 비교</div>
           <input
             type="search"
+            autoComplete="off"
             value=${query.value}
             placeholder="name / model / blocker 필터"
             aria-label="Keeper 필터"

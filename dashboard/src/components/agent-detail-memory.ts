@@ -205,6 +205,7 @@ export function AgentDetailMemory({ agentName }: Props) {
             ${episodes.length > 0
               ? html`<input
                   type="search"
+                  autoComplete="off"
                   value=${episodeQuery.value}
                   placeholder="summary / event / learning 필터"
                   aria-label="에피소드 필터"

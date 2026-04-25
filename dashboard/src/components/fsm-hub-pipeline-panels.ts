@@ -120,6 +120,7 @@ export function OperationalMeaningPanel({
         </div>
         <input
           type="search"
+          autoComplete="off"
           value=${query}
           placeholder="field / label / state / meaning 필터"
           aria-label="관찰 레인 필터"

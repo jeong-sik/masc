@@ -271,6 +271,7 @@ function CycleHistoryTable({ cycles }: { cycles: AutoresearchCycleRecord[] }) {
       <div class="flex items-center justify-end">
         <input
           type="search"
+          autoComplete="off"
           value=${query.value}
           placeholder="가설 / 판정 / # 필터"
           aria-label="사이클 필터"

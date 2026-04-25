@@ -1029,6 +1029,7 @@ export function GoalTree() {
             ${data && data.tree.length > 0 ? html`
               <input
                 type="search"
+                autoComplete="off"
                 value=${query}
                 placeholder="목표 / 태스크 제목 필터"
                 aria-label="목표 트리 필터"

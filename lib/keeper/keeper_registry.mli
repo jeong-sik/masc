@@ -207,8 +207,6 @@ val all : ?base_path:string -> unit -> registry_entry list
 (** Update the meta for a registered keeper. No-op if not found. *)
 val update_meta : base_path:string -> string -> keeper_meta -> unit
 
-(** @deprecated Use [dispatch_event]. No external callers remain. *)
-
 (** Record a restart. Increments restart_count and updates last_restart_ts. *)
 val record_restart : base_path:string -> string -> unit
 

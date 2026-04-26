@@ -272,7 +272,7 @@ export function ConnectorKeeperMatrix({ matrix }: { matrix: MatrixData }) {
                 `)}
                 <div
                   class="px-1 py-1 text-center text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)]"
-                  title="Per-keeper coverage totals (bound / unbound / n·a)"
+                  title="키퍼별 커버리지 총합 (연결 / 미연결 / 해당 없음)"
                   data-matrix-coverage-header
                 >커버리지</div>
 

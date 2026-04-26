@@ -248,7 +248,7 @@ function runtimeKindLabel(kind: string | null | undefined): string | null {
   switch (kind) {
     case 'cli_agent': return 'CLI(non-interactive)'
     case 'direct_api': return 'Direct API'
-    case 'local': return 'Local'
+    case 'local': return '로컬'
     default: return null
   }
 }
@@ -827,7 +827,7 @@ export function capacityKindLabel(kind: CascadeClientCapacityEntry['kind']): str
   switch (kind) {
     case 'cli': return 'CLI'
     case 'ollama': return 'Ollama'
-    case 'other': return 'Other'
+    case 'other': return '기타'
   }
 }
 
@@ -1331,19 +1331,19 @@ export function CascadeConfigPanel() {
           : null}
       <//>
 
-      <${Card} title="Client Capacity · 최근 이벤트">
+      <${Card} title="클라이언트 용량 · 최근 이벤트">
         ${history
           ? html`<${ClientCapacityHistoryTable} history=${history} />`
           : null}
       <//>
 
-      <${Card} title="SLO Status">
+      <${Card} title="SLO 상태">
         ${slo
           ? html`<${SloCard} slo=${slo} />`
           : html`<${EmptyState}>SLO 데이터를 불러오는 중입니다.<//>`}
       <//>
 
-      <${Card} title="Strategy Decisions · 사이클 추적">
+      <${Card} title="전략 결정 · 사이클 추적">
         ${trace
           ? html`
             <div class="flex items-center gap-3 mb-3">

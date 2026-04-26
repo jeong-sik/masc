@@ -773,7 +773,7 @@ function ConnectorLivePanel({
         label: 'Server → Sidecar',
         state: 'warn',
         detail: `stale · last heartbeat ${timeAgo(connector.updated_at)}`,
-        hint: 'Sidecar heartbeats stopped — tail its log',
+        hint: 'Sidecar heartbeat 중단 — 로그 확인',
       }
     }
     return {
@@ -806,14 +806,14 @@ function ConnectorLivePanel({
         label: `Sidecar → ${connectorName}`,
         state: 'warn',
         detail: 'stale heartbeat',
-        hint: 'Sidecar process may have stopped',
+        hint: 'Sidecar 프로세스 중단 가능성',
       }
     }
     return {
       label: `Sidecar → ${connectorName}`,
       state: 'warn',
       detail: 'gateway link not yet up',
-      hint: 'Check token and network reachability',
+      hint: '토큰 및 네트워크 도달성 확인',
     }
   })()
   const livenessDots: LivenessDot[] = [browserDot, serverDot, sidecarDot]

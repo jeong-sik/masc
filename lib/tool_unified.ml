@@ -36,12 +36,17 @@ let tool_info_to_json (info : tool_info) : Yojson.Safe.t =
   let stats_json = match info.call_stats with
     | None -> `Null
     | Some s ->
+      (* #10730 (Tool_registry Actor Model) made these fields
+         [int Atomic.t] / [float Atomic.t]; this serializer was not
+         migrated in the same PR, leaving the build broken.  Snapshot
+         each Atomic once into a primitive before wrapping in the
+         JSON variant. *)
       `Assoc [
-        ("call_count", `Int (s.call_count));
-        ("success_count", `Int (s.success_count));
-        ("failure_count", `Int (s.failure_count));
-        ("last_called_at", `Float (s.last_called_at));
-        ("total_duration_ms", `Int (s.total_duration_ms));
+        ("call_count", `Int (Atomic.get s.call_count));
+        ("success_count", `Int (Atomic.get s.success_count));
+        ("failure_count", `Int (Atomic.get s.failure_count));
+        ("last_called_at", `Float (Atomic.get s.last_called_at));
+        ("total_duration_ms", `Int (Atomic.get s.total_duration_ms));
       ]
   in
   `Assoc [
@@ -91,7 +96,9 @@ let summary_report () : Yojson.Safe.t =
        in
        `Assoc ([
          ("name", `String name);
-         ("call_count", `Int (stats.Tool_registry.call_count));
+         (* #10730 (Tool_registry Actor Model) made call_count an
+            [int Atomic.t]; snapshot it before JSON-wrapping. *)
+         ("call_count", `Int (Atomic.get stats.Tool_registry.call_count));
        ] @ latency)
      ) top_20));
     ("never_called_count", `Int (List.length never_called));

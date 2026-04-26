@@ -31,12 +31,12 @@ function KeeperBDIPanel() {
     <section aria-label="Keeper BDI panel · will, needs, desires" style={{display:'flex',flexDirection:'column',gap:'6px'}}>
       <KeeperTabs keepers={P2h.keepersFull} sel={sel} onSelect={setSel} label="Select keeper for BDI panel" />
       <div role="tabpanel" aria-label={`BDI panel for ${k.id}`}>
-        <div role="region" aria-label={`${k.id} · ${k.role} · social model ${k.social_model}`} style={{padding:'4px 8px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--line-2)',display:'flex',alignItems:'center',gap:'8px',fontFamily:'var(--font-mono)',fontSize:'var(--fs-10)',color:'var(--fg-3)'}}>
+        <div role="region" aria-label={`${k.id} · ${k.role} · social model ${k.social_model}`} style={{padding:'4px 8px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--line-2)',display:'flex',alignItems:'center',gap:'8px',fontFamily:'var(--font-mono)',fontSize:'var(--fs-10)',color:'var(--color-fg-muted)'}}>
           <Dot kind={kClass(k.id)} beat />
           <span aria-hidden="true" style={{color:'var(--brass-1)'}}>{k.id}</span>
           <span aria-hidden="true">·</span>
           <span aria-hidden="true">{k.role}</span>
-          <span aria-hidden="true" style={{marginLeft:'auto',color:'var(--fg-4)',fontSize:'var(--fs-9)'}}>social · {k.social_model}</span>
+          <span aria-hidden="true" style={{marginLeft:'auto',color:'var(--color-fg-disabled)',fontSize:'var(--fs-9)'}}>social · {k.social_model}</span>
         </div>
         <dl className="ki-bdi" aria-label="BDI attributes">
           {[['will', k.will], ['needs', k.needs], ['desires', k.desires]].map(([lbl, v]) => (
@@ -95,7 +95,7 @@ function KeeperTokenStats() {
   const maxIn  = Math.max(...keepers.map(k => k.tokens.in));
   return (
     <section aria-label={`Token usage across ${keepers.length} keepers · ${(keepers.reduce((s,k)=>s+k.tokens.in,0)/1e6).toFixed(2)}M total in`} style={{display:'flex',flexDirection:'column',gap:'6px'}}>
-      <div role="heading" aria-level={3} style={{padding:'4px 8px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--line-2)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--fg-4)',display:'flex',gap:'12px'}}>
+      <div role="heading" aria-level={3} style={{padding:'4px 8px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--line-2)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--color-fg-disabled)',display:'flex',gap:'12px'}}>
         <span>token usage · all keepers</span>
         <span style={{marginLeft:'auto',color:'var(--brass-1)'}}>
           {(keepers.reduce((s,k)=>s+k.tokens.in,0)/1e6).toFixed(2)}M in total
@@ -125,7 +125,7 @@ function KeeperTokenStats() {
           { lbl:'Keepers', v:keepers.length },
         ].map(c => (
           <div key={c.lbl} role="listitem" aria-label={`${c.lbl}: ${c.v}`} style={{background:'var(--color-bg-surface)',padding:'6px 10px',display:'flex',flexDirection:'column',gap:'2px'}}>
-            <span aria-hidden="true" style={{fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--fg-4)'}}>{c.lbl}</span>
+            <span aria-hidden="true" style={{fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--color-fg-disabled)'}}>{c.lbl}</span>
             <span aria-hidden="true" style={{fontFamily:'var(--font-mono)',fontSize:'var(--fs-14)',color:'var(--brass-1)',fontVariantNumeric:'tabular-nums'}}>{c.v}</span>
           </div>
         ))}
@@ -144,12 +144,12 @@ function DecisionsStream() {
   const rows = filter === 'all' ? P2h.decisions : P2h.decisions.filter(d => d.keeper === filter);
   return (
     <section aria-label={`Decisions stream · ${rows.length} entries${filter !== 'all' ? ` · filtered by ${filter}` : ''}`} style={{display:'flex',flexDirection:'column',gap:'6px'}}>
-      <div role="toolbar" aria-label="Decisions filter" style={{padding:'4px 8px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--line-2)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--fg-4)',display:'flex',alignItems:'center',gap:'6px'}}>
+      <div role="toolbar" aria-label="Decisions filter" style={{padding:'4px 8px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--line-2)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--color-fg-disabled)',display:'flex',alignItems:'center',gap:'6px'}}>
         <span aria-hidden="true">decisions.jsonl</span>
         <span role="radiogroup" aria-label="Filter by keeper" style={{marginLeft:'auto',display:'flex',gap:'2px'}}>
           {keepers.map(k => (
             <button key={k} type="button" role="radio" aria-checked={filter===k} onClick={() => setFilter(k)}
-              style={{padding:'1px 6px',background: filter===k ? 'var(--brass-3)' : 'var(--color-bg-surface)',border:'1px solid var(--line-2)',color: filter===k ? 'var(--brass-1)' : 'var(--fg-3)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-10)',cursor:'pointer'}}>
+              style={{padding:'1px 6px',background: filter===k ? 'var(--brass-3)' : 'var(--color-bg-surface)',border:'1px solid var(--line-2)',color: filter===k ? 'var(--brass-1)' : 'var(--color-fg-muted)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-10)',cursor:'pointer'}}>
               {k}
             </button>
           ))}
@@ -164,7 +164,7 @@ function DecisionsStream() {
             <div className="body" aria-hidden="true">
               <span className="act">
                 {d.speech_act} · {d.channel}
-                {d.intention && <span style={{color:'var(--fg-2)'}}> → {d.intention}</span>}
+                {d.intention && <span style={{color:'var(--color-fg-secondary)'}}> → {d.intention}</span>}
               </span>
               {d.blocker && <span className="blk">⚠ {d.blocker}</span>}
               {d.belief  && <span className="bel">↳ {d.belief}</span>}
@@ -183,12 +183,12 @@ function MemoryEntries() {
   const rows = tag === 'all' ? P2h.memoryEntries : P2h.memoryEntries.filter(m => m.tag === tag);
   return (
     <section aria-label={`Memory entries · ${rows.length} rows${tag !== 'all' ? ` · tag ${tag}` : ''}`} style={{display:'flex',flexDirection:'column',gap:'6px'}}>
-      <div role="toolbar" aria-label="Memory tag filter" style={{padding:'4px 8px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--line-2)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--fg-4)',display:'flex',alignItems:'center',gap:'6px'}}>
+      <div role="toolbar" aria-label="Memory tag filter" style={{padding:'4px 8px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--line-2)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--color-fg-disabled)',display:'flex',alignItems:'center',gap:'6px'}}>
         <span aria-hidden="true">memory.jsonl</span>
         <span role="radiogroup" aria-label="Filter by tag" style={{marginLeft:'auto',display:'flex',gap:'2px'}}>
           {tags.map(t => (
             <button key={t} type="button" role="radio" aria-checked={tag===t} onClick={() => setTag(t)}
-              style={{padding:'1px 6px',background: tag===t ? 'var(--brass-3)' : 'var(--color-bg-surface)',border:'1px solid var(--line-2)',color: tag===t ? 'var(--brass-1)' : 'var(--fg-3)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-10)',cursor:'pointer'}}>
+              style={{padding:'1px 6px',background: tag===t ? 'var(--brass-3)' : 'var(--color-bg-surface)',border:'1px solid var(--line-2)',color: tag===t ? 'var(--brass-1)' : 'var(--color-fg-muted)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-10)',cursor:'pointer'}}>
               {t}
             </button>
           ))}
@@ -203,7 +203,7 @@ function MemoryEntries() {
             <span className="body" aria-hidden="true">{m.body}</span>
           </div>
         )) : (
-          <div role="status" style={{padding:'12px 8px',fontFamily:'var(--font-mono)',fontSize:'var(--fs-11)',color:'var(--fg-4)',textAlign:'center'}}>
+          <div role="status" style={{padding:'12px 8px',fontFamily:'var(--font-mono)',fontSize:'var(--fs-11)',color:'var(--color-fg-disabled)',textAlign:'center'}}>
             no entries for tag "{tag}"
           </div>
         )}
@@ -220,7 +220,7 @@ function EpisodeCards() {
   const [open, setOpen] = useState('ep-tm-t5');
   return (
     <section aria-label={`Institution episodes · ${P2h.episodes.length} episodes`} style={{display:'flex',flexDirection:'column',gap:'0'}}>
-      <div role="heading" aria-level={3} style={{padding:'4px 8px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--line-2)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--fg-4)',display:'flex',gap:'8px',marginBottom:'4px'}}>
+      <div role="heading" aria-level={3} style={{padding:'4px 8px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--line-2)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--color-fg-disabled)',display:'flex',gap:'8px',marginBottom:'4px'}}>
         <span>institution_episodes.jsonl</span>
         <span style={{marginLeft:'auto',color:'var(--brass-1)'}}>{P2h.episodes.length} episodes</span>
       </div>
@@ -268,7 +268,7 @@ function EpisodeLearnings() {
         <div key={ep.id} className="grp" role="group" aria-label={`${ep.id} · ${ep.participants.join(' + ')} · ${ep.learnings.length} learnings`}>
           <div className="grp-h" role="heading" aria-level={4}>
             <span aria-hidden="true">{ep.id}</span>
-            <span aria-hidden="true" style={{color:'var(--fg-4)'}}>·</span>
+            <span aria-hidden="true" style={{color:'var(--color-fg-disabled)'}}>·</span>
             <span aria-hidden="true">{ep.participants.join(' + ')}</span>
             <span aria-hidden="true" style={{marginLeft:'auto',color:'var(--brass-1)'}}>{ep.learnings.length} learnings</span>
           </div>
@@ -291,7 +291,7 @@ function ARLoopList() {
   const confCls = (c) => c >= 0.8 ? 'hi' : c >= 0.5 ? '' : c >= 0.35 ? 'lo' : 'vlo';
   return (
     <section aria-label={`Autoresearch loops · ${P2h.arLoops.filter(l=>l.status==='open').length} open · ${P2h.arLoops.filter(l=>l.status==='closed').length} closed`} style={{display:'flex',flexDirection:'column',gap:'6px'}}>
-      <div role="heading" aria-level={3} style={{padding:'4px 8px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--line-2)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--fg-4)',display:'flex',gap:'8px'}}>
+      <div role="heading" aria-level={3} style={{padding:'4px 8px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--line-2)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--color-fg-disabled)',display:'flex',gap:'8px'}}>
         <span>autoresearch loops</span>
         <span style={{marginLeft:'auto',color:'var(--brass-1)'}}>{P2h.arLoops.filter(l=>l.status==='open').length} open · {P2h.arLoops.filter(l=>l.status==='closed').length} closed</span>
       </div>
@@ -301,9 +301,9 @@ function ARLoopList() {
             <span className="id" aria-hidden="true">{l.id.slice(0,11)}</span>
             <div aria-hidden="true" style={{display:'flex',flexDirection:'column',gap:'2px'}}>
               <span className="topic">{l.topic}</span>
-              <span style={{fontFamily:'var(--font-mono)',fontSize:'var(--fs-10)',color:'var(--fg-4)'}}>
+              <span style={{fontFamily:'var(--font-mono)',fontSize:'var(--fs-10)',color:'var(--color-fg-disabled)'}}>
                 owner · {l.owner}
-                {l.branch && <span style={{color:'var(--fg-3)'}}> · ⎇ {l.branch}</span>}
+                {l.branch && <span style={{color:'var(--color-fg-muted)'}}> · ⎇ {l.branch}</span>}
                 {' · '}{l.hypotheses}H · {l.evidences}E · {l.conclusions}C
               </span>
             </div>
@@ -324,7 +324,7 @@ function ARFindingCard() {
       <div role="tablist" aria-label="Select finding" style={{display:'flex',gap:'2px'}}>
         {P2h.findings.map(x => (
           <button key={x.id} type="button" role="tab" aria-selected={sel===x.id} aria-controls="ar-finding-panel" tabIndex={sel===x.id ? 0 : -1} onClick={() => setSel(x.id)}
-            style={{padding:'3px 10px',background: sel===x.id ? 'var(--brass-3)' : 'var(--color-bg-panel-alt)',border:'1px solid var(--line-2)',color: sel===x.id ? 'var(--brass-1)' : 'var(--fg-3)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-10)',cursor:'pointer'}}>
+            style={{padding:'3px 10px',background: sel===x.id ? 'var(--brass-3)' : 'var(--color-bg-panel-alt)',border:'1px solid var(--line-2)',color: sel===x.id ? 'var(--brass-1)' : 'var(--color-fg-muted)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-10)',cursor:'pointer'}}>
             {x.id}
           </button>
         ))}
@@ -333,7 +333,7 @@ function ARFindingCard() {
         <div className="hdr" aria-hidden="true">
           <span className="id">{f.id}</span>
           <span className="loop">loop · {f.loop}</span>
-          <span style={{fontFamily:'var(--font-mono)',fontSize:'var(--fs-10)',color:'var(--fg-4)'}}>{f.at.slice(11,19)}</span>
+          <span style={{fontFamily:'var(--font-mono)',fontSize:'var(--fs-10)',color:'var(--color-fg-disabled)'}}>{f.at.slice(11,19)}</span>
           <span className="conf">{(f.confidence*100).toFixed(0)}% confidence</span>
         </div>
         <section aria-labelledby={`ar-${f.id}-hyp`}>
@@ -360,9 +360,9 @@ function ARHypothesisFlow() {
   const finding = P2h.findings.find(f => f.loop === 'ar-78d41e9c');
   return (
     <section aria-label={`${loop.id} · ${loop.topic} · closed · ${(loop.confidence*100).toFixed(0)}% confidence`} style={{display:'flex',flexDirection:'column',gap:'6px'}}>
-      <div role="heading" aria-level={3} style={{padding:'4px 8px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--line-2)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--fg-4)',display:'flex',gap:'8px'}}>
+      <div role="heading" aria-level={3} style={{padding:'4px 8px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--line-2)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--color-fg-disabled)',display:'flex',gap:'8px'}}>
         <span>{loop.id}</span>
-        <span style={{color:'var(--fg-3)'}}>· {loop.topic}</span>
+        <span style={{color:'var(--color-fg-muted)'}}>· {loop.topic}</span>
         <span style={{marginLeft:'auto',color:'var(--ok-fg)'}}>closed · {(loop.confidence*100).toFixed(0)}% confidence</span>
       </div>
       <ol className="ar-flow" aria-label="Hypothesis to evidence to conclusion flow" style={{listStyle:'none', margin:0, padding:0}}>

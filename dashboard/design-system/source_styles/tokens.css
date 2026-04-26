@@ -384,6 +384,7 @@ body[data-density="comfortable"]  { --density: 1.15; }
   --color-fg-primary:     var(--fg-1);
   --color-fg-secondary:   var(--fg-2);
   --color-fg-muted:       var(--fg-3);
+  --color-fg-disabled:    var(--fg-4);
 
   --color-border-default: var(--line-1);
   --color-border-strong:  var(--line-2);
@@ -419,6 +420,7 @@ body[data-density="comfortable"]  { --density: 1.15; }
   --color-fg-primary:     #1a1612;
   --color-fg-secondary:   #4a423a;
   --color-fg-muted:       #7a7065;
+  --color-fg-disabled:    #b0a898;
 
   --color-border-default: #d8d2c4;
   --color-border-strong:  #b8b0a0;
@@ -447,6 +449,7 @@ body[data-density="comfortable"]  { --density: 1.15; }
     --color-fg-primary:     #1a1612;
     --color-fg-secondary:   #4a423a;
     --color-fg-muted:       #7a7065;
+    --color-fg-disabled:    #b0a898;
     --color-border-default: #d8d2c4;
     --color-border-strong:  #b8b0a0;
     --color-accent-fg:      var(--brass-3);

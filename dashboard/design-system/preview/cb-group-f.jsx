@@ -24,7 +24,7 @@ function CascadeCard({ c, hitModel, triedSet, showPool, compactModel = false }) 
       </div>
       {showPool && (
         <div className="csc-pool" role="list" aria-label={`Configured pool · ${c.configured.length} models`}>
-          <span aria-hidden="true" style={{fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',color:'var(--fg-4)',letterSpacing:'.08em',textTransform:'uppercase',marginRight:'4px'}}>configured pool ({c.configured.length}):</span>
+          <span aria-hidden="true" style={{fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',color:'var(--color-fg-disabled)',letterSpacing:'.08em',textTransform:'uppercase',marginRight:'4px'}}>configured pool ({c.configured.length}):</span>
           {c.configured.map(m => {
             const cls = m === hitModel ? 'hit' : triedSet.has(m) ? 'tried' : '';
             return <span key={m} role="listitem" aria-label={`${m}${cls === 'hit' ? ' (hit)' : cls === 'tried' ? ' (tried)' : ''}`} className={`mp ${cls}`}>{m}</span>;
@@ -94,7 +94,7 @@ function CascadeCompare() {
 
 function AuditLedgerHeader({ left, right }) {
   return (
-    <div role="heading" aria-level={3} style={{padding:'5px 8px',borderBottom:'1px solid var(--line-2)',display:'flex',gap:'8px',background:'var(--color-bg-panel-alt)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--fg-4)'}}>
+    <div role="heading" aria-level={3} style={{padding:'5px 8px',borderBottom:'1px solid var(--line-2)',display:'flex',gap:'8px',background:'var(--color-bg-panel-alt)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--color-fg-disabled)'}}>
       <span>{left}</span>
       <span style={{marginLeft:'auto',color:'var(--brass-1)'}}>{right}</span>
     </div>
@@ -152,7 +152,7 @@ function AuditSummary() {
   const total = P2f.auditEvents.length;
   return (
     <section aria-label={`Audit summary · ${sorted.length} kinds · ${total} events`} style={{display:'flex',flexDirection:'column',gap:'2px'}}>
-      <div role="heading" aria-level={3} style={{padding:'5px 8px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--line-2)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--fg-4)',display:'flex'}}>
+      <div role="heading" aria-level={3} style={{padding:'5px 8px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--line-2)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--color-fg-disabled)',display:'flex'}}>
         <span>summary · last 12 events</span>
         <span style={{marginLeft:'auto',color:'var(--brass-1)'}}>{total} total</span>
       </div>
@@ -207,7 +207,7 @@ function SafeAutoDashboard() {
     <section aria-label="Safe Autonomy dashboard · score and findings" style={{display:'flex',flexDirection:'column',gap:'8px'}}>
       <SafeAutoHero />
       <div style={{background:'var(--color-bg-surface)',border:'1px solid var(--line-2)'}}>
-        <div role="heading" aria-level={3} style={{padding:'5px 8px',borderBottom:'1px solid var(--line-2)',display:'flex',gap:'8px',background:'var(--color-bg-panel-alt)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--fg-4)'}}>
+        <div role="heading" aria-level={3} style={{padding:'5px 8px',borderBottom:'1px solid var(--line-2)',display:'flex',gap:'8px',background:'var(--color-bg-panel-alt)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--color-fg-disabled)'}}>
           <span>findings ({sa.findings.length})</span>
           <span style={{marginLeft:'auto'}}>severity ↓</span>
         </div>
@@ -237,7 +237,7 @@ function SafeAutoByKeeper() {
   const sorted = Object.entries(byKeeper).sort((a,b) => (b[1].high*9 + b[1].medium*3 + b[1].low) - (a[1].high*9 + a[1].medium*3 + a[1].low));
   return (
     <section aria-label={`Safe Autonomy findings · by keeper · ${sorted.length} keepers`} style={{display:'flex',flexDirection:'column',gap:'4px'}}>
-      <div role="heading" aria-level={3} style={{padding:'5px 8px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--line-2)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--fg-4)',display:'flex'}}>
+      <div role="heading" aria-level={3} style={{padding:'5px 8px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--line-2)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--color-fg-disabled)',display:'flex'}}>
         <span>findings by keeper</span>
         <span style={{marginLeft:'auto',color:'var(--brass-1)'}}>{sorted.length} keepers</span>
       </div>
@@ -248,7 +248,7 @@ function SafeAutoByKeeper() {
             <span className="sev high"   aria-hidden="true" style={{fontFamily:'var(--font-mono)',fontSize:'var(--fs-10)',padding:'1px 5px',textAlign:'center',opacity: v.high?1:0.15}}>{v.high}</span>
             <span className="sev medium" aria-hidden="true" style={{fontFamily:'var(--font-mono)',fontSize:'var(--fs-10)',padding:'1px 5px',textAlign:'center',opacity: v.medium?1:0.15}}>{v.medium}</span>
             <span className="sev low"    aria-hidden="true" style={{fontFamily:'var(--font-mono)',fontSize:'var(--fs-10)',padding:'1px 5px',textAlign:'center',opacity: v.low?1:0.15}}>{v.low}</span>
-            <span aria-hidden="true" style={{fontFamily:'var(--font-mono)',fontSize:'var(--fs-10)',color:'var(--fg-3)'}}>{v.items.map(i=>i.rule.split(' ')[0]).join(' · ')}</span>
+            <span aria-hidden="true" style={{fontFamily:'var(--font-mono)',fontSize:'var(--fs-10)',color:'var(--color-fg-muted)'}}>{v.items.map(i=>i.rule.split(' ')[0]).join(' · ')}</span>
           </div>
         ))}
       </div>
@@ -263,8 +263,8 @@ function SafeAutoTrend() {
   return (
     <section aria-label={`Safe Autonomy trend · last 15 runs · min ${min}, current ${sa.global_score}, max ${max}`} style={{background:'var(--color-bg-surface)',border:'1px solid var(--line-2)',padding:'12px'}}>
       <div role="heading" aria-level={3} style={{display:'flex',gap:'12px',alignItems:'baseline',marginBottom:'8px',fontFamily:'var(--font-mono)'}}>
-        <span style={{fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--fg-4)'}}>autonomy score · last 15 runs</span>
-        <span style={{marginLeft:'auto',fontSize:'var(--fs-10)',color:'var(--fg-3)'}}>min {min} · current <span style={{color:'var(--err-fg)'}}>{sa.global_score}</span> · max {max}</span>
+        <span style={{fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--color-fg-disabled)'}}>autonomy score · last 15 runs</span>
+        <span style={{marginLeft:'auto',fontSize:'var(--fs-10)',color:'var(--color-fg-muted)'}}>min {min} · current <span style={{color:'var(--err-fg)'}}>{sa.global_score}</span> · max {max}</span>
       </div>
       <div aria-hidden="true" style={{display:'flex',alignItems:'flex-end',height:'80px',gap:'3px'}}>
         {sa.history.map((v, i) => {
@@ -277,7 +277,7 @@ function SafeAutoTrend() {
           );
         })}
       </div>
-      <div aria-hidden="true" style={{display:'flex',justifyContent:'space-between',marginTop:'4px',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',color:'var(--fg-4)'}}>
+      <div aria-hidden="true" style={{display:'flex',justifyContent:'space-between',marginTop:'4px',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',color:'var(--color-fg-disabled)'}}>
         <span>−15</span><span>now</span>
       </div>
     </section>
@@ -307,12 +307,12 @@ function CostPerAgent() {
         </div>
         <div className="cell" role="listitem" aria-label={`p50 Latency: ${P2f.costs.p50}ms, global`}>
           <span className="lbl" aria-hidden="true">p50 Latency</span>
-          <span className="v" aria-hidden="true">{P2f.costs.p50}<span style={{fontSize:'12px',color:'var(--fg-3)'}}>ms</span></span>
+          <span className="v" aria-hidden="true">{P2f.costs.p50}<span style={{fontSize:'12px',color:'var(--color-fg-muted)'}}>ms</span></span>
           <span className="sub" aria-hidden="true">global</span>
         </div>
         <div className="cell" role="listitem" aria-label={`p95 Latency: ${P2f.costs.p95}ms, over budget`}>
           <span className="lbl" aria-hidden="true">p95 Latency</span>
-          <span className="v" aria-hidden="true" style={{color:'var(--err-fg)'}}>{P2f.costs.p95}<span style={{fontSize:'12px',color:'var(--fg-3)'}}>ms</span></span>
+          <span className="v" aria-hidden="true" style={{color:'var(--err-fg)'}}>{P2f.costs.p95}<span style={{fontSize:'12px',color:'var(--color-fg-muted)'}}>ms</span></span>
           <span className="sub" aria-hidden="true">over budget</span>
         </div>
       </div>
@@ -362,7 +362,7 @@ function CostMatrix() {
   };
   return (
     <section aria-label={`Cost matrix · provider × model · total $${P2f.costs.total_cost_usd.toFixed(2)} over 24h`} style={{display:'flex',flexDirection:'column',gap:'8px'}}>
-      <div role="heading" aria-level={3} style={{padding:'5px 8px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--line-2)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--fg-4)',display:'flex'}}>
+      <div role="heading" aria-level={3} style={{padding:'5px 8px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--line-2)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--color-fg-disabled)',display:'flex'}}>
         <span>provider × model · $ spent (24h)</span>
         <span style={{marginLeft:'auto',color:'var(--brass-1)'}}>${P2f.costs.total_cost_usd.toFixed(2)}</span>
       </div>
@@ -394,7 +394,7 @@ function CostLatency() {
   const total = buckets.reduce((s,b) => s+b.n, 0);
   return (
     <section aria-label={`Cost latency distribution · ${total} calls · p50 ${P2f.costs.p50}ms · p95 ${P2f.costs.p95}ms`} style={{display:'flex',flexDirection:'column',gap:'8px'}}>
-      <div role="heading" aria-level={3} style={{padding:'5px 8px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--line-2)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--fg-4)',display:'flex',gap:'12px'}}>
+      <div role="heading" aria-level={3} style={{padding:'5px 8px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--line-2)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--color-fg-disabled)',display:'flex',gap:'12px'}}>
         <span>latency distribution · {total} calls</span>
         <span style={{marginLeft:'auto'}}>p50 · <span style={{color:'var(--brass-1)'}}>{P2f.costs.p50}ms</span></span>
         <span>p95 · <span style={{color:'var(--err-fg)'}}>{P2f.costs.p95}ms</span></span>
@@ -419,8 +419,8 @@ function CostLatency() {
           { l:'> 16s', v: buckets.filter(b=>b.lo>=16000).reduce((s,b)=>s+b.n,0), c:'var(--err-fg)' },
         ].map(b => (
           <div key={b.l} role="listitem" aria-label={`${b.l}: ${b.v} calls (${(b.v/total*100).toFixed(0)}%)`} style={{background:'var(--color-bg-surface)',padding:'6px 10px',display:'flex',flexDirection:'column',gap:'2px'}}>
-            <span aria-hidden="true" style={{fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--fg-4)'}}>{b.l}</span>
-            <span aria-hidden="true" style={{fontFamily:'var(--font-mono)',fontSize:'var(--fs-13)',color:b.c,fontVariantNumeric:'tabular-nums'}}>{b.v}<span style={{fontSize:'var(--fs-10)',color:'var(--fg-4)',marginLeft:'4px'}}>· {(b.v/total*100).toFixed(0)}%</span></span>
+            <span aria-hidden="true" style={{fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--color-fg-disabled)'}}>{b.l}</span>
+            <span aria-hidden="true" style={{fontFamily:'var(--font-mono)',fontSize:'var(--fs-13)',color:b.c,fontVariantNumeric:'tabular-nums'}}>{b.v}<span style={{fontSize:'var(--fs-10)',color:'var(--color-fg-disabled)',marginLeft:'4px'}}>· {(b.v/total*100).toFixed(0)}%</span></span>
           </div>
         ))}
       </div>
@@ -435,7 +435,7 @@ function CostLatency() {
 function HeuristicLog() {
   return (
     <section aria-label={`Heuristic firing log · ${P2f.heuristics.filter(h=>h.triggered).length} fired of ${P2f.heuristics.length}`} style={{background:'var(--color-bg-surface)',border:'1px solid var(--line-2)'}}>
-      <div role="heading" aria-level={3} style={{padding:'5px 8px',borderBottom:'1px solid var(--line-2)',display:'flex',gap:'8px',background:'var(--color-bg-panel-alt)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--fg-4)'}}>
+      <div role="heading" aria-level={3} style={{padding:'5px 8px',borderBottom:'1px solid var(--line-2)',display:'flex',gap:'8px',background:'var(--color-bg-panel-alt)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--color-fg-disabled)'}}>
         <span>tail · keeper_hooks_oas.heuristics.jsonl</span>
         <span style={{marginLeft:'auto',color:'var(--err-fg)'}}>{P2f.heuristics.filter(h=>h.triggered).length}/{P2f.heuristics.length} fired</span>
       </div>
@@ -458,7 +458,7 @@ function HeuristicLog() {
 function StressBoard() {
   return (
     <section aria-label={`Agent stress board · ${P2f.stress.length} active stressors`} style={{display:'flex',flexDirection:'column',gap:'8px'}}>
-      <div role="heading" aria-level={3} style={{padding:'5px 8px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--line-2)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--fg-4)',display:'flex'}}>
+      <div role="heading" aria-level={3} style={{padding:'5px 8px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--line-2)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--color-fg-disabled)',display:'flex'}}>
         <span>agent stress · agent_stress.jsonl</span>
         <span style={{marginLeft:'auto',color:'var(--err-fg)'}}>{P2f.stress.length} active</span>
       </div>
@@ -489,7 +489,7 @@ function HeuristicByModule() {
   const rows = Object.entries(byMod).sort((a,b) => b[1].fired - a[1].fired);
   return (
     <section aria-label={`Heuristic firing rate by module · ${rows.length} modules`} style={{display:'flex',flexDirection:'column',gap:'4px'}}>
-      <div role="heading" aria-level={3} style={{padding:'5px 8px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--line-2)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--fg-4)',display:'flex'}}>
+      <div role="heading" aria-level={3} style={{padding:'5px 8px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--line-2)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--color-fg-disabled)',display:'flex'}}>
         <span>heuristic firing rate · by module</span>
       </div>
       <div role="list">
@@ -497,13 +497,13 @@ function HeuristicByModule() {
           const pct = v.total > 0 ? v.fired / v.total * 100 : 0;
           return (
             <div key={mod} role="listitem" aria-label={`${mod} · ${v.fired} of ${v.total} fired (${pct.toFixed(0)}%) · sites ${[...v.sites].join(', ')}`} style={{display:'grid',gridTemplateColumns:'160px 80px 1fr 60px',gap:'8px',alignItems:'center',padding:'5px 8px',background:'var(--color-bg-surface)',border:'1px solid var(--line-1)'}}>
-              <span aria-hidden="true" style={{fontFamily:'var(--font-mono)',fontSize:'var(--fs-11)',color:'var(--fg-1)'}}>{mod}</span>
-              <span aria-hidden="true" style={{fontFamily:'var(--font-mono)',fontSize:'var(--fs-10)',color:'var(--fg-3)'}}>{v.fired}/{v.total} fired</span>
+              <span aria-hidden="true" style={{fontFamily:'var(--font-mono)',fontSize:'var(--fs-11)',color:'var(--color-fg-primary)'}}>{mod}</span>
+              <span aria-hidden="true" style={{fontFamily:'var(--font-mono)',fontSize:'var(--fs-10)',color:'var(--color-fg-muted)'}}>{v.fired}/{v.total} fired</span>
               <div aria-hidden="true" style={{height:'10px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--line-1)'}}>
                 <div style={{height:'100%',width:`${pct}%`,background: pct > 50 ? 'linear-gradient(90deg, var(--warn), var(--err))' : 'linear-gradient(90deg, var(--brass-3), var(--brass-1))'}}></div>
               </div>
               <span aria-hidden="true" style={{fontFamily:'var(--font-mono)',fontSize:'var(--fs-11)',color: pct > 50 ? 'var(--err-fg)' : 'var(--brass-1)',fontVariantNumeric:'tabular-nums',textAlign:'right'}}>{pct.toFixed(0)}%</span>
-              <span aria-hidden="true" style={{gridColumn:'1 / -1',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',color:'var(--fg-4)',letterSpacing:'.04em'}}>sites · {[...v.sites].join(' · ')}</span>
+              <span aria-hidden="true" style={{gridColumn:'1 / -1',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',color:'var(--color-fg-disabled)',letterSpacing:'.04em'}}>sites · {[...v.sites].join(' · ')}</span>
             </div>
           );
         })}

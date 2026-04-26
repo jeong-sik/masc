@@ -499,9 +499,7 @@ let evidence_for_violation products violation =
 ;;
 
 let snapshot_to_yojson ?projection_error snapshot =
-  let evidence =
-    snapshot.products |> List.concat_map (fun product -> product.evidence)
-  in
+  let evidence = snapshot.products |> List.concat_map (fun product -> product.evidence) in
   let fields =
     [ "schema_version", `Int schema_version_current
     ; "mode", `String (snapshot_mode_to_string Advisory)
@@ -518,8 +516,8 @@ let snapshot_to_yojson ?projection_error snapshot =
       , `List
           (List.map
              (fun violation ->
-               let evidence = evidence_for_violation snapshot.products violation in
-               violation_to_yojson ~evidence violation)
+                let evidence = evidence_for_violation snapshot.products violation in
+                violation_to_yojson ~evidence violation)
              snapshot.violations) )
     ]
   in

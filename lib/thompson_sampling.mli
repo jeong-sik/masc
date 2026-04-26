@@ -24,46 +24,46 @@ val priority_trigger_selected_metric : string
 
 (** Agent statistics for Thompson Sampling.
     Alpha/beta are Beta distribution priors, updated by vote feedback. *)
-type agent_stats = {
-  name : string;
-  (* Thompson Sampling Beta distribution parameters *)
-  mutable alpha : float;  (** Beta prior: 1.0 + successes, min 0.1 *)
-  mutable beta : float;   (** Beta prior: 1.0 + failures, min 0.1 *)
-  (* Selection tracking *)
-  mutable selections : int;
-  mutable last_selected_at : float;  (** Unix timestamp for restart resilience *)
-  (* Quality metrics *)
-  mutable total_votes_up : int;
-  mutable total_votes_down : int;
-  mutable posts_created : int;
-  mutable comments_created : int;
-  mutable skips : int;
-  (* Guard penalty tracking (Phase B1: Guard → Thompson bridge).
+type agent_stats =
+  { name : string
+  ; (* Thompson Sampling Beta distribution parameters *)
+    mutable alpha : float (** Beta prior: 1.0 + successes, min 0.1 *)
+  ; mutable beta : float (** Beta prior: 1.0 + failures, min 0.1 *)
+  ; (* Selection tracking *)
+    mutable selections : int
+  ; mutable last_selected_at : float (** Unix timestamp for restart resilience *)
+  ; (* Quality metrics *)
+    mutable total_votes_up : int
+  ; mutable total_votes_down : int
+  ; mutable posts_created : int
+  ; mutable comments_created : int
+  ; mutable skips : int
+  ; (* Guard penalty tracking (Phase B1: Guard → Thompson bridge).
      Incremented on each [record_guard_penalty] call. The caller enforces
      the 1/cycle cap so this value approximates "cycles in which the
      guardrail fired" without a separate cycle-boundary state machine. *)
-  mutable guard_penalties_total : int;
-  (* Timestamp *)
-  mutable updated_at : float;
-}
+    mutable guard_penalties_total : int
+  ; (* Timestamp *)
+    mutable updated_at : float
+  }
 
 (** Selection trigger types *)
 type selection_trigger =
-  | Mentioned of string    (** Mentioned by another agent *)
+  | Mentioned of string (** Mentioned by another agent *)
   | ContentAlert of string (** Content requires attention *)
-  | Scheduled              (** Regular scheduled selection *)
-  | Starved                (** Forced selection due to long inactivity *)
-  | Thompson               (** Selected by Thompson Sampling *)
+  | Scheduled (** Regular scheduled selection *)
+  | Starved (** Forced selection due to long inactivity *)
+  | Thompson (** Selected by Thompson Sampling *)
 
 (** Selection result with reasoning *)
-type selection_result = {
-  agent_name : string;
-  trigger : selection_trigger;
-  thompson_score : float;     (** Raw Thompson sample (0-1) *)
-  starvation_bonus : float;   (** Logarithmic bonus for inactivity *)
-  final_score : float;        (** Combined weighted score *)
-  ticks_since_selection : int;
-}
+type selection_result =
+  { agent_name : string
+  ; trigger : selection_trigger
+  ; thompson_score : float (** Raw Thompson sample (0-1) *)
+  ; starvation_bonus : float (** Logarithmic bonus for inactivity *)
+  ; final_score : float (** Combined weighted score *)
+  ; ticks_since_selection : int
+  }
 
 (** {1 Configuration} *)
 
@@ -92,22 +92,19 @@ val init_agent : string -> unit
       Mentioned bypasses the health gate; ContentAlert does not.
     @param tick_interval_s Tick interval in seconds (for starvation calc)
     @return List of selection results, highest score first *)
-val select_with_feedback :
-  agents:string list ->
-  max_n:int ->
-  pending_triggers:(string * selection_trigger) list ->
-  tick_interval_s:float ->
-  selection_result list
+val select_with_feedback
+  :  agents:string list
+  -> max_n:int
+  -> pending_triggers:(string * selection_trigger) list
+  -> tick_interval_s:float
+  -> selection_result list
 
 (** {1 Feedback Updates} *)
 
 (** Record a vote on agent content.
     Called from Board.vote after successful vote.
     Updates are batched; call [flush_pending_votes] at tick end. *)
-val record_vote :
-  agent_name:string ->
-  direction:[`Up | `Down] ->
-  unit
+val record_vote : agent_name:string -> direction:[ `Up | `Down ] -> unit
 
 (** Flush pending votes to agent stats.
     Called at tick end for batch update with decay. *)
@@ -117,18 +114,12 @@ val flush_pending_votes : unit -> unit
 val record_selection : agent_name:string -> unit
 
 (** Record agent action (post/comment/skip) *)
-val record_action :
-  agent_name:string ->
-  action:[`Post | `Comment | `Skip] ->
-  unit
+val record_action : agent_name:string -> action:[ `Post | `Comment | `Skip ] -> unit
 
 (** Record a quality signal from Post_verifier into Thompson α/β.
     Called after every content verification to feed quality into selection.
     Pass → α +0.3 (reward), Warn → β +0.1 (mild penalty), Fail → β +0.5 (penalty). *)
-val record_quality_signal :
-  agent_name:string ->
-  verdict:Post_verifier.verdict ->
-  unit
+val record_quality_signal : agent_name:string -> verdict:Post_verifier.verdict -> unit
 
 (** Record a guard penalty into Thompson β.
     Called when Guardrail_stop fires during a heartbeat cycle.

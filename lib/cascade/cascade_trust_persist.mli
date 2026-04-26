@@ -19,22 +19,25 @@
 
     @since 0.174.0 *)
 
-val snapshot_interval_s : float
 (** Snapshot tick interval in seconds.  Default 60.0.
     Override via [MASC_CASCADE_TRUST_SNAPSHOT_SEC]. *)
+val snapshot_interval_s : float
 
-val snapshot_now : base_path:string -> unit
 (** Append one snapshot record immediately to today's day-file.  Reads
     {!Cascade_health_tracker.global} via {!Cascade_health_tracker.all_providers}.
     Used by the tick fiber and shutdown hook. *)
+val snapshot_now : base_path:string -> unit
 
-val start_snapshot_fiber :
-  sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> base_path:string -> unit
 (** Spawn a background fiber that calls {!snapshot_now} every
     [snapshot_interval_s].  Registers a shutdown hook for one final
     snapshot. *)
+val start_snapshot_fiber
+  :  sw:Eio.Switch.t
+  -> clock:_ Eio.Time.clock
+  -> base_path:string
+  -> unit
 
-val reset_for_testing : unit -> unit
 (** Clear cached store state.  Does not cancel any fiber started via
     {!start_snapshot_fiber}; call only when no fiber is active or after
     its switch has been cancelled. *)
+val reset_for_testing : unit -> unit

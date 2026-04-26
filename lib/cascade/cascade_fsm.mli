@@ -15,29 +15,30 @@
 type provider_outcome =
   | Call_ok of Llm_provider.Types.api_response
   | Call_err of Llm_provider.Http_client.http_error
-  | Accept_rejected of { response : Llm_provider.Types.api_response; reason : string }
+  | Accept_rejected of
+      { response : Llm_provider.Types.api_response
+      ; reason : string
+      }
   | Slot_full
 
 (** {1 Cascade decision — what to do next} *)
 
 type decision =
   | Accept of Llm_provider.Types.api_response
-      (** Provider succeeded and accept predicate passed. Done. *)
-  | Accept_on_exhaustion of { response : Llm_provider.Types.api_response; reason : string }
-      (** All providers rejected by accept, but [accept_on_exhaustion] is true.
+  (** Provider succeeded and accept predicate passed. Done. *)
+  | Accept_on_exhaustion of
+      { response : Llm_provider.Types.api_response
+      ; reason : string
+      }
+  (** All providers rejected by accept, but [accept_on_exhaustion] is true.
           Return the last valid response as graceful degradation. *)
   | Try_next of { last_err : Llm_provider.Http_client.http_error option }
-      (** Current provider failed or was rejected. Try the next one. *)
+  (** Current provider failed or was rejected. Try the next one. *)
   | Exhausted of { last_err : Llm_provider.Http_client.http_error option }
-      (** All providers exhausted. Final failure. *)
+  (** All providers exhausted. Final failure. *)
 
 (** {1 Decision function} *)
 
-val decide :
-  accept_on_exhaustion:bool ->
-  is_last:bool ->
-  provider_outcome ->
-  decision
 (** Pure decision: given the outcome of trying one provider and whether
     it was the last in the cascade, return the next action.
 
@@ -48,10 +49,11 @@ val decide :
     - [Call_err _] on cascadeable error → [Try_next]
     - [Call_err _] on non-cascadeable error → [Exhausted]
     - [Slot_full] → [Try_next] *)
+val decide : accept_on_exhaustion:bool -> is_last:bool -> provider_outcome -> decision
 
 (** {1 Error formatting} *)
 
-val format_exhausted_error :
-  Llm_provider.Http_client.http_error option ->
-  Llm_provider.Http_client.http_error
 (** Format the final error when all providers are exhausted. *)
+val format_exhausted_error
+  :  Llm_provider.Http_client.http_error option
+  -> Llm_provider.Http_client.http_error

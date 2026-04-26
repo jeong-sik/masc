@@ -11,38 +11,48 @@ module HM = Masc_mcp.Heuristic_metrics
 
 let tmp_base () =
   let p =
-    Filename.concat (Filename.get_temp_dir_name ())
+    Filename.concat
+      (Filename.get_temp_dir_name ())
       (Printf.sprintf "10348-flush-%06x" (Random.bits ()))
   in
   Unix.mkdir p 0o755;
   p
+;;
 
 let ledger_path base =
   Filename.concat base (Filename.concat ".masc" "heuristic_metrics.jsonl")
+;;
 
 let make_event ~site =
-  HM.{
-    module_name = "test_10348";
-    site;
-    raw_value = 0.5;
-    threshold = 0.5;
-    triggered = false;
-    provenance = Drift_guard "test";
-    timestamp = Unix.gettimeofday ();
-  }
+  HM.
+    { module_name = "test_10348"
+    ; site
+    ; raw_value = 0.5
+    ; threshold = 0.5
+    ; triggered = false
+    ; provenance = Drift_guard "test"
+    ; timestamp = Unix.gettimeofday ()
+    }
+;;
 
 let count_lines path =
-  if not (Sys.file_exists path) then 0
-  else
+  if not (Sys.file_exists path)
+  then 0
+  else (
     let ic = open_in path in
-    Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
-      let n = ref 0 in
-      try
-        while true do
-          let _ = input_line ic in
-          incr n
-        done; !n
-      with End_of_file -> !n)
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr ic)
+      (fun () ->
+         let n = ref 0 in
+         try
+           while true do
+             let _ = input_line ic in
+             incr n
+           done;
+           !n
+         with
+         | End_of_file -> !n))
+;;
 
 (* Pre-fix behavior: with default 30 s interval and no shutdown,
    a single [record] (well under buffer_cap=64) leaves the file empty.
@@ -54,8 +64,8 @@ let test_periodic_flush_below_cap () =
   HM.init ~base_path:base;
   HM.record (make_event ~site:"low_rate_emit");
   let path = ledger_path base in
-  Alcotest.(check int) "1 record flushed without hitting cap" 1
-    (count_lines path)
+  Alcotest.(check int) "1 record flushed without hitting cap" 1 (count_lines path)
+;;
 
 (* Multiple records below cap with the time-based flush enabled all
    land in the file.  Pre-fix this test would have shown 0 lines. *)
@@ -68,8 +78,8 @@ let test_multiple_records_below_cap () =
     HM.record (make_event ~site:(Printf.sprintf "site_%d" i))
   done;
   let path = ledger_path base in
-  Alcotest.(check int) "5 records flushed below cap" 5
-    (count_lines path)
+  Alcotest.(check int) "5 records flushed below cap" 5 (count_lines path)
+;;
 
 (* Sanity: with a large interval the time-based path is dormant, so the
    file remains empty until [flush] is called explicitly.  This pins the
@@ -84,16 +94,25 @@ let test_large_interval_still_batches () =
   Alcotest.(check int) "no premature flush" 0 (count_lines path);
   HM.flush ();
   Alcotest.(check int) "explicit flush still works" 1 (count_lines path)
+;;
 
 let () =
   Random.self_init ();
-  Alcotest.run "heuristic_metrics_periodic_flush_10348" [
-    "time_flush", [
-      Alcotest.test_case "single record flushes when interval=0"
-        `Quick test_periodic_flush_below_cap;
-      Alcotest.test_case "multiple records flush below buffer_cap"
-        `Quick test_multiple_records_below_cap;
-      Alcotest.test_case "large interval batches; explicit flush works"
-        `Quick test_large_interval_still_batches;
-    ];
-  ]
+  Alcotest.run
+    "heuristic_metrics_periodic_flush_10348"
+    [ ( "time_flush"
+      , [ Alcotest.test_case
+            "single record flushes when interval=0"
+            `Quick
+            test_periodic_flush_below_cap
+        ; Alcotest.test_case
+            "multiple records flush below buffer_cap"
+            `Quick
+            test_multiple_records_below_cap
+        ; Alcotest.test_case
+            "large interval batches; explicit flush works"
+            `Quick
+            test_large_interval_still_batches
+        ] )
+    ]
+;;

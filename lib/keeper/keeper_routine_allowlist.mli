@@ -45,19 +45,19 @@
 
     Returns [false] for any tool/action/op pair not on the allowlist;
     this preserves the human-loop for non-routine flows. *)
-val matches :
-  tool_name:string ->
-  input:Yojson.Safe.t ->
-  risk_level:Keeper_approval_queue.risk_level ->
-  bool
+val matches
+  :  tool_name:string
+  -> input:Yojson.Safe.t
+  -> risk_level:Keeper_approval_queue.risk_level
+  -> bool
 
 (** A short label describing which rule matched. Returns [None] when
     no rule matches. Useful for audit logs and dashboard observability. *)
-val rule_label :
-  tool_name:string ->
-  input:Yojson.Safe.t ->
-  risk_level:Keeper_approval_queue.risk_level ->
-  string option
+val rule_label
+  :  tool_name:string
+  -> input:Yojson.Safe.t
+  -> risk_level:Keeper_approval_queue.risk_level
+  -> string option
 
 (** Returns the static rule list as JSON for dashboard inspection.
     Shape: [[ { tool, allowed_actions, max_risk, label } ... ]]. *)

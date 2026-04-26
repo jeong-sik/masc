@@ -8,15 +8,15 @@
 
 (** {1 Types} *)
 
-type tool_info = {
-  name : string;
-  visibility : Tool_catalog.visibility;
-  lifecycle : Tool_catalog.lifecycle;
-  is_registered : bool;
-  is_read_only : bool;
-  is_join_required : bool;
-  call_stats : Tool_registry.call_stats option;
-}
+type tool_info =
+  { name : string
+  ; visibility : Tool_catalog.visibility
+  ; lifecycle : Tool_catalog.lifecycle
+  ; is_registered : bool
+  ; is_read_only : bool
+  ; is_join_required : bool
+  ; call_stats : Tool_registry.call_stats option
+  }
 
 (** {1 Per-tool lookup} *)
 

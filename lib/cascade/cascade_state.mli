@@ -28,49 +28,45 @@
 
 (** {1 Sticky state} *)
 
-val record_sticky_choice :
-  keeper:string ->
-  cascade:string ->
-  provider:string ->
-  ttl_ms:int ->
-  now:float ->
-  unit
 (** Record a successful provider for [(keeper, cascade)].  Overwrites
     any existing entry.  [now] is the wall-clock time used to compute
     [expires_at = now + ttl_ms / 1000].  No effect when [ttl_ms <= 0]
     (TTL disabled). *)
+val record_sticky_choice
+  :  keeper:string
+  -> cascade:string
+  -> provider:string
+  -> ttl_ms:int
+  -> now:float
+  -> unit
 
-val lookup_sticky :
-  keeper:string ->
-  cascade:string ->
-  now:float ->
-  string option
 (** [lookup_sticky ~keeper ~cascade ~now] returns the recorded provider
     when an entry exists and [now < expires_at]; [None] otherwise.
     Expired entries are not actively cleaned up here — the strategy's
     [record_sticky_choice] overwrites stale entries naturally on the
     next success.  Tests can call {!clear_sticky} for determinism. *)
+val lookup_sticky : keeper:string -> cascade:string -> now:float -> string option
 
-val clear_sticky : unit -> unit
 (** Remove every sticky entry.  Test helper. *)
+val clear_sticky : unit -> unit
 
 (** {1 Round-robin state} *)
 
-val rotate_round_robin : cascade:string -> bound:int -> int
 (** [rotate_round_robin ~cascade ~bound] returns the current cursor
     value modulo [bound] and atomically advances the cursor by 1.
     Returns [0] when [bound <= 0] (caller is responsible for
     treating the empty list as a no-op).  Atomic — safe under
     contention. *)
+val rotate_round_robin : cascade:string -> bound:int -> int
 
-val peek_round_robin : cascade:string -> int
 (** Return the current cursor value without advancing.  Test helper. *)
+val peek_round_robin : cascade:string -> int
 
-val clear_round_robin : unit -> unit
 (** Reset every cursor to 0.  Test helper. *)
+val clear_round_robin : unit -> unit
 
 (** {1 Bulk reset} *)
 
-val clear_all : unit -> unit
 (** Equivalent to {!clear_sticky} + {!clear_round_robin}.  Used by
     tests and by future hot-reload code paths. *)
+val clear_all : unit -> unit

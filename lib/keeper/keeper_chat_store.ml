@@ -8,29 +8,29 @@
 
     @since 2.145.0 *)
 
-let sanitize_name name =
-  Coord_utils_backend_setup.sanitize_namespace_segment name
+let sanitize_name name = Coord_utils_backend_setup.sanitize_namespace_segment name
 
 let chat_dir base_dir =
   Filename.concat (Common.masc_dir_from_base_path ~base_path:base_dir) "keeper_chat"
+;;
 
 let chat_path ~base_dir ~keeper_name =
   Filename.concat (chat_dir base_dir) (sanitize_name keeper_name ^ ".jsonl")
+;;
 
-let ensure_dir_once ~base_dir =
-  ignore (Keeper_fs.ensure_dir (chat_dir base_dir))
+let ensure_dir_once ~base_dir = ignore (Keeper_fs.ensure_dir (chat_dir base_dir))
 
 let encode_line ~role ~content ~ts : string =
   Yojson.Safe.to_string
-    (`Assoc
-       [
-         ("role", `String role);
-         ("content", `String content);
-         ("ts", `Float ts);
-       ])
+    (`Assoc [ "role", `String role; "content", `String content; "ts", `Float ts ])
+;;
 
-let append_pair ~base_dir ~keeper_name
-    ~(user_content : string) ~(assistant_content : string) =
+let append_pair
+      ~base_dir
+      ~keeper_name
+      ~(user_content : string)
+      ~(assistant_content : string)
+  =
   try
     ensure_dir_once ~base_dir;
     let path = chat_path ~base_dir ~keeper_name in
@@ -41,14 +41,17 @@ let append_pair ~base_dir ~keeper_name
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-    Log.Keeper.warn "keeper_chat_store: append failed for %s: %s"
-      (sanitize_name keeper_name) (Printexc.to_string exn)
+    Log.Keeper.warn
+      "keeper_chat_store: append failed for %s: %s"
+      (sanitize_name keeper_name)
+      (Printexc.to_string exn)
+;;
 
-type chat_message = {
-  role : string;
-  content : string;
-  ts : float option;
-}
+type chat_message =
+  { role : string
+  ; content : string
+  ; ts : float option
+  }
 
 let parse_line (line : string) : chat_message option =
   try
@@ -57,11 +60,14 @@ let parse_line (line : string) : chat_message option =
     let role = member "role" json |> to_string_option |> Option.value ~default:"" in
     let content = member "content" json |> to_string_option |> Option.value ~default:"" in
     let ts =
-      (try Some (member "ts" json |> to_float)
-       with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None) in
-    if role = "" || content = "" then None
-    else Some { role; content; ts }
-  with Yojson.Json_error _ -> None
+      try Some (member "ts" json |> to_float) with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | _ -> None
+    in
+    if role = "" || content = "" then None else Some { role; content; ts }
+  with
+  | Yojson.Json_error _ -> None
+;;
 
 let max_history = 100
 
@@ -74,30 +80,35 @@ let load ~base_dir ~keeper_name : chat_message list =
     let q = Queue.create () in
     List.iter
       (fun line ->
-        let trimmed = String.trim line in
-        if trimmed <> "" then
-          match parse_line trimmed with
-          | Some msg ->
-              Queue.push msg q;
-              if Queue.length q > max_history then ignore (Queue.pop q)
-          | None -> ())
+         let trimmed = String.trim line in
+         if trimmed <> ""
+         then (
+           match parse_line trimmed with
+           | Some msg ->
+             Queue.push msg q;
+             if Queue.length q > max_history then ignore (Queue.pop q)
+           | None -> ()))
       lines;
     Queue.fold (fun acc msg -> msg :: acc) [] q |> List.rev
   with
   | Sys_error _ -> []
   | exn ->
-      Log.Keeper.warn "keeper_chat_store: load failed for %s: %s"
-        (sanitize_name keeper_name) (Printexc.to_string exn);
-      []
+    Log.Keeper.warn
+      "keeper_chat_store: load failed for %s: %s"
+      (sanitize_name keeper_name)
+      (Printexc.to_string exn);
+    []
+;;
 
 let to_json_array (messages : chat_message list) : Yojson.Safe.t =
   `List
     (List.map
        (fun m ->
-         `Assoc
-           ([ ("role", `String m.role);
-              ("content", `String m.content);
-            ] @ (match m.ts with
-                 | Some t -> [("ts", `Float t)]
-                 | None -> [])))
+          `Assoc
+            ([ "role", `String m.role; "content", `String m.content ]
+             @
+             match m.ts with
+             | Some t -> [ "ts", `Float t ]
+             | None -> []))
        messages)
+;;

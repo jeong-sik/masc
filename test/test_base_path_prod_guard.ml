@@ -22,6 +22,7 @@ module EC = Env_config_core
 let clear_base_path () =
   Unix.putenv "MASC_BASE_PATH" "";
   Unix.putenv "MASC_BASE_PATH_INPUT" ""
+;;
 
 let test_guard_raises_on_home_fallback () =
   clear_base_path ();
@@ -33,30 +34,38 @@ let test_guard_raises_on_home_fallback () =
     let path = EC.base_path () in
     Alcotest.failf
       "expected Config_error, got path=%S (HOME=%S)"
-      path (Option.value ~default:"<unset>" (Sys.getenv_opt "HOME"))
-  with EC.Config_error msg ->
+      path
+      (Option.value ~default:"<unset>" (Sys.getenv_opt "HOME"))
+  with
+  | EC.Config_error msg ->
     let contains_9903 =
       let m = String.lowercase_ascii msg in
       let rec scan i =
-        if i + 5 > String.length m then false
-        else if String.sub m i 5 = "#9903" then true
+        if i + 5 > String.length m
+        then false
+        else if String.sub m i 5 = "#9903"
+        then true
         else scan (i + 1)
       in
-      scan 0 ||
+      scan 0
+      ||
       (* tolerate case where the phrase appears without the # *)
-      (let rec f i =
-         if i + 4 > String.length m then false
-         else if String.sub m i 4 = "9903" then true
-         else f (i + 1)
-       in f 0)
+      let rec f i =
+        if i + 4 > String.length m
+        then false
+        else if String.sub m i 4 = "9903"
+        then true
+        else f (i + 1)
+      in
+      f 0
     in
-    Alcotest.(check bool)
-      "Config_error message references #9903"
-      true contains_9903
+    Alcotest.(check bool) "Config_error message references #9903" true contains_9903
+;;
 
 let test_guard_honors_explicit_tmp_override () =
   (* A proper test-time override to /tmp must NOT trigger the guard. *)
-  Unix.putenv "MASC_BASE_PATH"
+  Unix.putenv
+    "MASC_BASE_PATH"
     (Filename.concat
        (Filename.get_temp_dir_name ())
        (Printf.sprintf "masc-test-base-path-guard-%d" (Unix.getpid ())));
@@ -64,12 +73,10 @@ let test_guard_honors_explicit_tmp_override () =
   let path = EC.base_path () in
   let is_tmp =
     let tmp = Filename.get_temp_dir_name () in
-    String.length path >= String.length tmp
-    && String.sub path 0 (String.length tmp) = tmp
+    String.length path >= String.length tmp && String.sub path 0 (String.length tmp) = tmp
   in
-  Alcotest.(check bool)
-    "tmp-override path returned unchanged"
-    true is_tmp
+  Alcotest.(check bool) "tmp-override path returned unchanged" true is_tmp
+;;
 
 let test_guard_bypass_escape_hatch () =
   clear_base_path ();
@@ -79,19 +86,27 @@ let test_guard_bypass_escape_hatch () =
   let path = EC.base_path () in
   Alcotest.(check bool)
     "escape hatch returns a non-empty path"
-    true (String.length path > 0);
+    true
+    (String.length path > 0);
   Unix.putenv "MASC_TEST_ALLOW_HOME_BASE_PATH" ""
+;;
 
 let () =
-  Alcotest.run "base_path_prod_guard"
-    [
-      ( "#9903 safeguard",
-        [
-          Alcotest.test_case "HOME fallback raises Config_error"
-            `Quick test_guard_raises_on_home_fallback;
-          Alcotest.test_case "explicit /tmp override is allowed"
-            `Quick test_guard_honors_explicit_tmp_override;
-          Alcotest.test_case "MASC_TEST_ALLOW_HOME_BASE_PATH=1 bypass"
-            `Quick test_guard_bypass_escape_hatch;
-        ] );
+  Alcotest.run
+    "base_path_prod_guard"
+    [ ( "#9903 safeguard"
+      , [ Alcotest.test_case
+            "HOME fallback raises Config_error"
+            `Quick
+            test_guard_raises_on_home_fallback
+        ; Alcotest.test_case
+            "explicit /tmp override is allowed"
+            `Quick
+            test_guard_honors_explicit_tmp_override
+        ; Alcotest.test_case
+            "MASC_TEST_ALLOW_HOME_BASE_PATH=1 bypass"
+            `Quick
+            test_guard_bypass_escape_hatch
+        ] )
     ]
+;;

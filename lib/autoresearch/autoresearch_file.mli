@@ -16,15 +16,13 @@ val has_path_traversal : string -> bool
     exist. Existing parent directories are resolved via [realpath];
     symlink escapes are rejected. Errors on empty / absolute /
     traversal-containing [target_file]. *)
-val resolve_target_file_path :
-  workdir:string -> string -> (string, string) result
+val resolve_target_file_path : workdir:string -> string -> (string, string) result
 
 (** [validate_target_file ~workdir target_file] resolves the path and
     additionally requires the file to exist, be a regular file, and
     stay inside [workdir] under [realpath]. Returns the resolved
     absolute path. *)
-val validate_target_file :
-  workdir:string -> string -> (string, string) result
+val validate_target_file : workdir:string -> string -> (string, string) result
 
 (** Load a file in full. *)
 val read_file : string -> string
@@ -34,8 +32,8 @@ val read_file : string -> string
     [target_file] with [new_content] via a same-directory temp file.
     Returns [Ok original_content] on success (for rollback reference)
     or [Error reason]. *)
-val apply_code_change :
-  workdir:string ->
-  target_file:string ->
-  new_content:string ->
-  (string, string) result
+val apply_code_change
+  :  workdir:string
+  -> target_file:string
+  -> new_content:string
+  -> (string, string) result

@@ -15,21 +15,22 @@
 
 type health_status =
   | Healthy
-  | Unhealthy of string  (** reason *)
-  | Recovering           (** half-open, testing *)
-  | Unknown of string    (** Issue #8607: unrecognised circuit-breaker
+  | Unhealthy of string (** reason *)
+  | Recovering (** half-open, testing *)
+  | Unknown of string
+  (** Issue #8607: unrecognised circuit-breaker
                              state_name (carries the raw value for
                              diagnostics). Previously [_ -> Healthy]
                              silently masked future state additions
                              (e.g. a 4th [Throttled]) and any wire-format
                              drift as a green health signal. *)
 
-type agent_health_summary = {
-  agent_name : string;
-  status : health_status;
-  recent_failures : int;
-  cooldown_remaining_sec : int;
-}
+type agent_health_summary =
+  { agent_name : string
+  ; status : health_status
+  ; recent_failures : int
+  ; cooldown_remaining_sec : int
+  }
 
 (** {1 Core API} *)
 
@@ -38,11 +39,10 @@ type agent_health_summary = {
 let check_health ~agent_name : health_status =
   match Circuit_breaker.check_global ~agent_id:agent_name with
   | Ok () ->
-      let status = Circuit_breaker.get_status_global ~agent_id:agent_name in
-      if status.state_name = "half_open" then Recovering
-      else Healthy
-  | Error reason ->
-      Unhealthy reason
+    let status = Circuit_breaker.get_status_global ~agent_id:agent_name in
+    if status.state_name = "half_open" then Recovering else Healthy
+  | Error reason -> Unhealthy reason
+;;
 
 (** Convenience predicate: can this agent participate?
     Issue #8607: [Unknown] is treated as not-healthy — a fail-closed
@@ -54,37 +54,43 @@ let is_healthy ~agent_name : bool =
   match check_health ~agent_name with
   | Healthy | Recovering -> true
   | Unhealthy _ | Unknown _ -> false
+;;
 
 (** Record a successful action — clears half-open state. *)
 let record_success ~agent_name =
   Circuit_breaker.record_success_global ~agent_id:agent_name
+;;
 
 (** Record a failed action — may open the breaker. *)
 let record_failure ~agent_name ~reason =
   Circuit_breaker.record_failure_global ~agent_id:agent_name ~reason
+;;
 
 (** {1 Batch Filtering} *)
 
 (** Filter a list of agent names to only healthy ones.
     Returns (healthy_agents, skipped_with_reasons). *)
-let filter_healthy (agents : (string * 'a) list) : (string * 'a) list * (string * string) list =
+let filter_healthy (agents : (string * 'a) list)
+  : (string * 'a) list * (string * string) list
+  =
   let healthy = ref [] in
   let skipped = ref [] in
-  List.iter (fun (name, data) ->
-    match check_health ~agent_name:name with
-    | Healthy | Recovering ->
-        healthy := (name, data) :: !healthy
-    | Unhealthy reason ->
-        skipped := (name, reason) :: !skipped;
-        Log.debug ~ctx:"agent_health" "Skipping %s: %s" name reason
-    | Unknown raw ->
-        (* Issue #8607: fail-closed for unrecognised breaker states.
+  List.iter
+    (fun (name, data) ->
+       match check_health ~agent_name:name with
+       | Healthy | Recovering -> healthy := (name, data) :: !healthy
+       | Unhealthy reason ->
+         skipped := (name, reason) :: !skipped;
+         Log.debug ~ctx:"agent_health" "Skipping %s: %s" name reason
+       | Unknown raw ->
+         (* Issue #8607: fail-closed for unrecognised breaker states.
            Surface the raw value so operators can investigate. *)
-        let reason = Printf.sprintf "unknown breaker state %S" raw in
-        skipped := (name, reason) :: !skipped;
-        Log.debug ~ctx:"agent_health" "Skipping %s: %s" name reason
-  ) agents;
-  (List.rev !healthy, List.rev !skipped)
+         let reason = Printf.sprintf "unknown breaker state %S" raw in
+         skipped := (name, reason) :: !skipped;
+         Log.debug ~ctx:"agent_health" "Skipping %s: %s" name reason)
+    agents;
+  List.rev !healthy, List.rev !skipped
+;;
 
 (** {1 Statistics} *)
 
@@ -93,50 +99,52 @@ let filter_healthy (agents : (string * 'a) list) : (string * 'a) list * (string 
    Healthy] as the catch-all, so an unknown state_name lied as
    Healthy. Unifying ensures one place to update; routing the
    catch-all through [Unknown name] makes drift operator-visible. *)
-let health_status_of_breaker
-    ~(state_name : string)
-    ~(open_reason : string option)
-    : health_status =
+let health_status_of_breaker ~(state_name : string) ~(open_reason : string option)
+  : health_status
+  =
   match state_name with
   | "closed" -> Healthy
   | "half_open" -> Recovering
   | "open" -> Unhealthy (Option.value ~default:"unknown" open_reason)
   | other -> Unknown other
+;;
 
 let cooldown_remaining_of (open_until : float option) : int =
   match open_until with
   | Some until ->
-      let remaining = until -. Time_compat.now () in
-      if remaining > 0.0 then int_of_float remaining else 0
+    let remaining = until -. Time_compat.now () in
+    if remaining > 0.0 then int_of_float remaining else 0
   | None -> 0
+;;
 
 (** Get health summary for a single agent. *)
 let get_summary ~agent_name : agent_health_summary =
   let status = Circuit_breaker.get_status_global ~agent_id:agent_name in
-  {
-    agent_name;
-    status =
+  { agent_name
+  ; status =
       health_status_of_breaker
         ~state_name:status.state_name
-        ~open_reason:status.open_reason;
-    recent_failures = status.recent_failures;
-    cooldown_remaining_sec = cooldown_remaining_of status.open_until;
+        ~open_reason:status.open_reason
+  ; recent_failures = status.recent_failures
+  ; cooldown_remaining_sec = cooldown_remaining_of status.open_until
   }
+;;
 
 (** Get health summaries for all known agents. *)
 let get_all_summaries () : agent_health_summary list =
-  let breakers = Circuit_breaker.list_all_breakers (Eio.Lazy.force Circuit_breaker.global) in
-  List.map (fun (s : Circuit_breaker.breaker_status) ->
-    {
-      agent_name = s.agent_id;
-      status =
-        health_status_of_breaker
-          ~state_name:s.state_name
-          ~open_reason:s.open_reason;
-      recent_failures = s.recent_failures;
-      cooldown_remaining_sec = cooldown_remaining_of s.open_until;
-    }
-  ) breakers
+  let breakers =
+    Circuit_breaker.list_all_breakers (Eio.Lazy.force Circuit_breaker.global)
+  in
+  List.map
+    (fun (s : Circuit_breaker.breaker_status) ->
+       { agent_name = s.agent_id
+       ; status =
+           health_status_of_breaker ~state_name:s.state_name ~open_reason:s.open_reason
+       ; recent_failures = s.recent_failures
+       ; cooldown_remaining_sec = cooldown_remaining_of s.open_until
+       })
+    breakers
+;;
 
 (** {1 JSON Serialization} *)
 
@@ -148,11 +156,13 @@ let health_status_to_string = function
      filter for unrecognised breaker states instead of mixing them
      with green ones. *)
   | Unknown _ -> "unknown"
+;;
 
 let summary_to_json (s : agent_health_summary) : Yojson.Safe.t =
-  `Assoc [
-    ("agent_name", `String s.agent_name);
-    ("status", `String (health_status_to_string s.status));
-    ("recent_failures", `Int s.recent_failures);
-    ("cooldown_remaining_sec", `Int s.cooldown_remaining_sec);
-  ]
+  `Assoc
+    [ "agent_name", `String s.agent_name
+    ; "status", `String (health_status_to_string s.status)
+    ; "recent_failures", `Int s.recent_failures
+    ; "cooldown_remaining_sec", `Int s.cooldown_remaining_sec
+    ]
+;;

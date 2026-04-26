@@ -9,22 +9,21 @@
 
 type t =
   | Inline of string
-  | Stored of {
-      sha256 : string;  (** lowercase hex, 64 chars *)
-      bytes : int;
-      preview : string;
-      mime : string;
-    }
+  | Stored of
+      { sha256 : string (** lowercase hex, 64 chars *)
+      ; bytes : int
+      ; preview : string
+      ; mime : string
+      }
 
-val sentinel_prefix : string
 (** ["[masc:blob "] — the 11-byte discriminator at offset 0 of an encoded
     [Stored] value. Distinct from the existing [tool:] mask prefix used by
     [Context_compact_oas]; real tool outputs do not start with this prefix. *)
+val sentinel_prefix : string
 
-val is_sentinel : string -> bool
 (** True iff [s] starts with [sentinel_prefix]. *)
+val is_sentinel : string -> bool
 
-val encode_for_oas : t -> string
 (** Encode for embedding in OAS [Agent_sdk.Types.ToolResult.content].
 
     [Inline s] -> [s].
@@ -32,10 +31,11 @@ val encode_for_oas : t -> string
       [["[masc:blob sha256=ab12... bytes=128934 mime=text/plain preview=\"...\"]"]].
 
     Round-trip property: [decode_from_oas (encode_for_oas x) = x]. *)
+val encode_for_oas : t -> string
 
-val decode_from_oas : string -> t
 (** Decode a string from OAS [ToolResult.content].
 
     Returns [Inline s] for any string not starting with [sentinel_prefix]
     (backward compatibility with old checkpoints) or for malformed sentinels
     (fail-safe — never raises). *)
+val decode_from_oas : string -> t

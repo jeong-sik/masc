@@ -7,15 +7,16 @@ let sidecar_dir = function
   | "imessage" -> Some "sidecars/imessage-bot"
   | "cli" -> Some "sidecars/cli-connector"
   | _ -> None
+;;
 
 let known_summary = String.concat "|" known_sidecars
 
 let aggregate_exit_code rcs =
   let normalise rc = if rc < 0 || rc > 2 then 2 else rc in
   List.fold_left (fun acc rc -> max acc (normalise rc)) 0 rcs
+;;
 
-let python_bin () =
-  Sys.getenv_opt "MASC_PYTHON" |> Option.value ~default:"python3"
+let python_bin () = Sys.getenv_opt "MASC_PYTHON" |> Option.value ~default:"python3"
 
 let capture_sidecar_json name =
   match sidecar_dir name with
@@ -28,7 +29,7 @@ let capture_sidecar_json name =
     in
     if not (Sys.file_exists abs_dir)
     then Error (Printf.sprintf "sidecar directory not found: %s" abs_dir)
-    else begin
+    else (
       let prev = Sys.getcwd () in
       Sys.chdir abs_dir;
       let result =
@@ -46,8 +47,9 @@ let capture_sidecar_json name =
             | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> 2
           in
           Ok (Buffer.contents buf, rc)
-        with e -> Error (Printexc.to_string e)
+        with
+        | e -> Error (Printexc.to_string e)
       in
       Sys.chdir prev;
-      result
-    end
+      result)
+;;

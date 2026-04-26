@@ -11,31 +11,27 @@ module C = Masc_mcp.Coord
 module T = Types
 
 let check_label expected status =
-  check string ("label of " ^ expected) expected
-    (C.task_status_label status)
+  check string ("label of " ^ expected) expected (C.task_status_label status)
+;;
 
 let now_iso = "2026-04-26T00:00:00Z"
-
 let claimed = T.Claimed { assignee = "k1"; claimed_at = now_iso }
-let in_progress =
-  T.InProgress { assignee = "k1"; started_at = now_iso }
+let in_progress = T.InProgress { assignee = "k1"; started_at = now_iso }
+
 let awaiting =
-  T.AwaitingVerification {
-    assignee = "k1";
-    submitted_at = now_iso;
-    verification_id = "req-1";
-    deadline = None;
-  }
-let done_ = T.Done {
-  assignee = "k1";
-  completed_at = now_iso;
-  notes = None;
-}
-let cancelled = T.Cancelled {
-  cancelled_at = now_iso;
-  cancelled_by = "operator";
-  reason = Some "test";
-}
+  T.AwaitingVerification
+    { assignee = "k1"
+    ; submitted_at = now_iso
+    ; verification_id = "req-1"
+    ; deadline = None
+    }
+;;
+
+let done_ = T.Done { assignee = "k1"; completed_at = now_iso; notes = None }
+
+let cancelled =
+  T.Cancelled { cancelled_at = now_iso; cancelled_by = "operator"; reason = Some "test" }
+;;
 
 let test_all_variants () =
   check_label "todo" T.Todo;
@@ -44,11 +40,16 @@ let test_all_variants () =
   check_label "awaiting_verification" awaiting;
   check_label "done" done_;
   check_label "cancelled" cancelled
+;;
 
 let () =
-  run "task_status_label_10421" [
-    ("status_label", [
-        test_case "every variant maps to canonical lowercase label"
-          `Quick test_all_variants;
-      ]);
-  ]
+  run
+    "task_status_label_10421"
+    [ ( "status_label"
+      , [ test_case
+            "every variant maps to canonical lowercase label"
+            `Quick
+            test_all_variants
+        ] )
+    ]
+;;

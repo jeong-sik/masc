@@ -22,42 +22,42 @@ type keeper_status =
 
 (** One tool-span in a keeper's cycle, positioned as a percentage of the
     last-60-min window. *)
-type keeper_lane_frame = {
-  kind : string;                (* "llm" | "tool" | "think" | "wait" | "err" *)
-  left : int;                   (* left %, 0..100 *)
-  width : int;                  (* width %, 0..100 *)
-  label : string;
-}
+type keeper_lane_frame =
+  { kind : string (* "llm" | "tool" | "think" | "wait" | "err" *)
+  ; left : int (* left %, 0..100 *)
+  ; width : int (* width %, 0..100 *)
+  ; label : string
+  }
 [@@deriving yojson { strict = false }]
 
 (** One sample on the 60-min context-pressure polyline. *)
-type keeper_ctx_sample = {
-  t_minus_min : int;            (* minutes ago, 0..60 *)
-  ctx_pct : int;                (* 0..100 *)
-}
+type keeper_ctx_sample =
+  { t_minus_min : int (* minutes ago, 0..60 *)
+  ; ctx_pct : int (* 0..100 *)
+  }
 [@@deriving yojson { strict = false }]
 
 (** Per-keeper summary. *)
-type keeper = {
-  name : string;
-  stat : string;                (* short human state: "reading", "retrying" *)
-  status : keeper_status;
-  ctx_pct : int;                (* current context utilization, 0..100 *)
-  turn : int;
-  turn_cap : int;
-  mem_kb : int;
-  latency_ms : int;
-  last_tool : string option;     [@default None]
-  lane_frames : keeper_lane_frame list;   [@default []]
-  ctx_history : keeper_ctx_sample list;   [@default []]
-}
+type keeper =
+  { name : string
+  ; stat : string (* short human state: "reading", "retrying" *)
+  ; status : keeper_status
+  ; ctx_pct : int (* current context utilization, 0..100 *)
+  ; turn : int
+  ; turn_cap : int
+  ; mem_kb : int
+  ; latency_ms : int
+  ; last_tool : string option [@default None]
+  ; lane_frames : keeper_lane_frame list [@default []]
+  ; ctx_history : keeper_ctx_sample list [@default []]
+  }
 [@@deriving yojson { strict = false }]
 
 (** Top-level response. *)
-type response = {
-  keepers : keeper list;
-  cycle : int;                  (* current cycle number *)
-  room : string option;          [@default None]
-  generated_at : string;        (* ISO-8601 UTC *)
-}
+type response =
+  { keepers : keeper list
+  ; cycle : int (* current cycle number *)
+  ; room : string option [@default None]
+  ; generated_at : string (* ISO-8601 UTC *)
+  }
 [@@deriving yojson { strict = false }]

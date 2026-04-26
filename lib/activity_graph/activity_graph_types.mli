@@ -9,20 +9,38 @@
     @since 7182 *)
 type node_status =
   (* Agent lifecycle *)
-  | Active | Offline | Spawned | Retired | Compacting | Handoff
-  | Autonomy | Guardrail
+  | Active
+  | Offline
+  | Spawned
+  | Retired
+  | Compacting
+  | Handoff
+  | Autonomy
+  | Guardrail
   (* Task lifecycle *)
-  | Todo | Claimed | In_progress | Done | Cancelled
+  | Todo
+  | Claimed
+  | In_progress
+  | Done
+  | Cancelled
   (* Board *)
-  | Posted | Discussed
+  | Posted
+  | Discussed
   (* Decision *)
-  | Open | Resolved
+  | Open
+  | Resolved
   (* Policy *)
-  | Approved | Denied
+  | Approved
+  | Denied
   (* Operation lifecycle *)
-  | Running | Paused | Stopped | Finalized
+  | Running
+  | Paused
+  | Stopped
+  | Finalized
   (* Generic / fallback *)
-  | Observed | Coord | Unset
+  | Observed
+  | Coord
+  | Unset
 
 val node_status_to_string : node_status -> string
 
@@ -41,8 +59,15 @@ val node_status_of_string : string -> node_status
 
     @since 7182 *)
 type span_status =
-  | Span_open | Span_completed | Span_released | Span_cancelled
-  | Span_left | Span_retired | Span_finalized | Span_stopped | Span_ended
+  | Span_open
+  | Span_completed
+  | Span_released
+  | Span_cancelled
+  | Span_left
+  | Span_retired
+  | Span_finalized
+  | Span_stopped
+  | Span_ended
 
 val span_status_to_string : span_status -> string
 
@@ -57,53 +82,53 @@ val span_status_of_string : string -> span_status
 
 (** {1 Graph entities} *)
 
-type entity_ref = {
-  kind : string;
-  id : string;
-}
+type entity_ref =
+  { kind : string
+  ; id : string
+  }
 
-type event = {
-  seq : int;
-  ts_ms : int;
-  ts_iso : string;
-  room_id : string;
-  kind : string;
-  actor : entity_ref option;
-  subject : entity_ref option;
-  payload : Yojson.Safe.t;
-  tags : string list;
-}
+type event =
+  { seq : int
+  ; ts_ms : int
+  ; ts_iso : string
+  ; room_id : string
+  ; kind : string
+  ; actor : entity_ref option
+  ; subject : entity_ref option
+  ; payload : Yojson.Safe.t
+  ; tags : string list
+  }
 
-type graph_node = {
-  id : string;
-  kind : string;
-  label : string;
-  status : node_status;
-  weight : int;
-  semantic_weight : float;
-  last_event_at : string;
-  meta : Yojson.Safe.t;
-}
+type graph_node =
+  { id : string
+  ; kind : string
+  ; label : string
+  ; status : node_status
+  ; weight : int
+  ; semantic_weight : float
+  ; last_event_at : string
+  ; meta : Yojson.Safe.t
+  }
 
-type graph_edge = {
-  id : string;
-  source : string;
-  target : string;
-  kind : string;
-  weight : int;
-  active : bool;
-  last_event_at : string;
-  meta : Yojson.Safe.t;
-}
+type graph_edge =
+  { id : string
+  ; source : string
+  ; target : string
+  ; kind : string
+  ; weight : int
+  ; active : bool
+  ; last_event_at : string
+  ; meta : Yojson.Safe.t
+  }
 
-type agent_span = {
-  agent : string;
-  start_ms : int;
-  end_ms : int;
-  span_kind : string;
-  label : string;
-  span_status : span_status;
-}
+type agent_span =
+  { agent : string
+  ; start_ms : int
+  ; end_ms : int
+  ; span_kind : string
+  ; label : string
+  ; span_status : span_status
+  }
 
 (** {1 Constructors and defaults} *)
 
@@ -118,17 +143,11 @@ val default_meta : Yojson.Safe.t
     missing required field. *)
 
 val entity_to_yojson : entity_ref -> Yojson.Safe.t
-
 val entity_of_yojson : Yojson.Safe.t -> entity_ref option
-
 val event_to_yojson : event -> Yojson.Safe.t
-
 val event_of_yojson : Yojson.Safe.t -> event option
-
 val graph_node_to_yojson : graph_node -> Yojson.Safe.t
-
 val graph_edge_to_yojson : graph_edge -> Yojson.Safe.t
-
 val agent_span_to_yojson : agent_span -> Yojson.Safe.t
 
 (** {1 Utilities} *)

@@ -103,12 +103,16 @@ val removed_keeper_meta_key_names : string list
 val present_json_keys : string list -> Yojson.Safe.t -> string list
 
 (** Reject removed keeper input keys.  Returns [Error msg] listing the offending fields. *)
-val reject_removed_keeper_input_keys :
-  tool_name:string -> Yojson.Safe.t -> (unit, string) result
+val reject_removed_keeper_input_keys
+  :  tool_name:string
+  -> Yojson.Safe.t
+  -> (unit, string) result
 
 (** Reject removed keeper message input keys. *)
-val reject_removed_keeper_msg_input_keys :
-  tool_name:string -> Yojson.Safe.t -> (unit, string) result
+val reject_removed_keeper_msg_input_keys
+  :  tool_name:string
+  -> Yojson.Safe.t
+  -> (unit, string) result
 
 (** {1 UTF-8 Safety} *)
 
@@ -124,24 +128,24 @@ val utf8_repair_string : string -> string
     on a UTF-8 character boundary. Caller MUST pass [max_bytes] explicitly so
     the unit (bytes, not chars) is visible at every call site. *)
 val normalize_self_model_text : max_bytes:int -> string -> string
+
 val normalize_goal_horizon_text : ?max_len:int -> string -> string
 val normalize_goal_horizon_opt : string option -> string option
 val parse_goal_horizon_opt : Yojson.Safe.t -> string -> string option
 
 (** Resolve short/mid/long goal horizons with fallback to [goal]. *)
-val resolve_goal_horizons :
-  goal:string ->
-  short_goal_opt:string option ->
-  mid_goal_opt:string option ->
-  long_goal_opt:string option ->
-  string * string * string
+val resolve_goal_horizons
+  :  goal:string
+  -> short_goal_opt:string option
+  -> mid_goal_opt:string option
+  -> long_goal_opt:string option
+  -> string * string * string
 
 val split_semicolon_clauses : string -> string list
 val take_last : int -> 'a list -> 'a list
 
 (** Compact self-model text: take last N clauses, truncate to [max_bytes]. *)
-val compact_self_model_text :
-  ?max_clauses:int -> max_bytes:int -> string -> string
+val compact_self_model_text : ?max_clauses:int -> max_bytes:int -> string -> string
 
 val parse_self_model_opt : Yojson.Safe.t -> string -> string option
 
@@ -149,29 +153,31 @@ val parse_self_model_opt : Yojson.Safe.t -> string -> string option
 
 val default_compaction_profile : string
 val canonical_compaction_profile : string -> string option
-val parse_compaction_profile_opt :
-  Yojson.Safe.t -> string -> (string option, string) result
+
+val parse_compaction_profile_opt
+  :  Yojson.Safe.t
+  -> string
+  -> (string option, string) result
 
 (** Return (ratio, message_gate, token_gate) for a named profile. *)
 val compaction_policy_of_profile : string -> float * int * int
 
 (** Resolve compaction policy from explicit overrides with profile-based fallbacks. *)
-val resolve_compaction_policy :
-  profile_opt:string option ->
-  ratio_opt:float option ->
-  message_opt:int option ->
-  token_opt:int option ->
-  fallback_profile:string ->
-  fallback_ratio:float ->
-  fallback_message:int ->
-  fallback_token:int ->
-  string * float * int * int
+val resolve_compaction_policy
+  :  profile_opt:string option
+  -> ratio_opt:float option
+  -> message_opt:int option
+  -> token_opt:int option
+  -> fallback_profile:string
+  -> fallback_ratio:float
+  -> fallback_message:int
+  -> fallback_token:int
+  -> string * float * int * int
 
 val normalize_compaction_ratio_gate : float -> float
 val normalize_compaction_message_gate : int -> int
 val normalize_compaction_token_gate : int -> int
 val normalize_continuity_compaction_cooldown_sec : int -> int
-
 val normalize_proactive_idle_sec : int -> int
 val normalize_proactive_cooldown_sec : int -> int
 
@@ -186,16 +192,13 @@ val keeper_compact_max_messages : unit -> int
 val keeper_compact_max_tokens : unit -> int
 val keeper_continuity_compaction_cooldown_sec : unit -> int
 val keeper_compaction_policy_from_env : unit -> float * int * int
-
 val keeper_bootstrap_proactive_warmup_sec : unit -> int
 val keeper_bootstrap_stagger_step_sec : unit -> int
 val keeper_bootstrap_retry_max : unit -> int
 val keeper_bootstrap_retry_interval_sec : unit -> int
-
 val keeper_proactive_min_cooldown_sec : unit -> int
 val keeper_proactive_task_cooldown_divisor : unit -> int
 val keeper_proactive_task_min_cooldown_sec : unit -> int
-
 val keeper_batch_limit : unit -> int
 val keeper_tool_cost_max_usd : unit -> float option
 val keeper_max_tools_per_turn : unit -> int
@@ -203,7 +206,6 @@ val keeper_retry_max_tools_per_turn : unit -> int
 val keeper_board_event_limit : unit -> int
 val keeper_llm_rerank_enabled : unit -> bool
 val keeper_llm_rerank_cascade : unit -> string
-
 val keeper_rule_reflect_repetition_threshold : unit -> float
 val keeper_rule_plan_goal_alignment_threshold : unit -> float
 val keeper_rule_plan_response_alignment_threshold : unit -> float
@@ -211,13 +213,10 @@ val keeper_rule_guardrail_repetition_threshold : unit -> float
 val keeper_rule_guardrail_goal_alignment_threshold : unit -> float
 val keeper_rule_guardrail_response_alignment_threshold : unit -> float
 val keeper_rule_guardrail_context_threshold : unit -> float
-
 val keeper_unified_temperature : unit -> float
 val keeper_unified_max_tokens : unit -> int
 val keeper_tool_search_top_k : unit -> int
-
 val keeper_status_fast_default : unit -> bool
-
 val keeper_llama_slots : unit -> int
 
 (** Compute a deterministic slot_id for a keeper name.

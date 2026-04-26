@@ -1,13 +1,16 @@
 (** See cascade_client_capacity_history.mli for documentation. *)
 
-type event_kind = Acquired | Released | Rejected_full
+type event_kind =
+  | Acquired
+  | Released
+  | Rejected_full
 
-type event = {
-  ts : float;
-  key : string;
-  kind : event_kind;
-  active_after : int;
-}
+type event =
+  { ts : float
+  ; key : string
+  ; kind : event_kind
+  ; active_after : int
+  }
 
 (* ── Classifier (shares {!Masc_network_defaults.is_cli_sentinel_url}
       and {!Masc_network_defaults.is_ollama_url} with
@@ -16,9 +19,12 @@ type event = {
       below and the existing [Dashboard_cascade] tests still cover the
       mapping. *)
 let classify_key url =
-  if Masc_network_defaults.is_cli_sentinel_url url then "cli"
-  else if Masc_network_defaults.is_ollama_url url then "ollama"
+  if Masc_network_defaults.is_cli_sentinel_url url
+  then "cli"
+  else if Masc_network_defaults.is_ollama_url url
+  then "ollama"
   else "other"
+;;
 
 (* ── Ring buffer configuration ─────────────────────────────── *)
 
@@ -36,6 +42,7 @@ let resolve_capacity () =
        | None -> default_capacity)
   in
   max min_capacity (min max_capacity from_env)
+;;
 
 (* ── Ring buffer state ──────────────────────────────────────
 
@@ -59,58 +66,66 @@ let mu = Stdlib.Mutex.create ()
 let with_lock f =
   Stdlib.Mutex.lock mu;
   Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock mu) f
+;;
 
 (* Lazy init: resolve capacity + allocate buffer on first use.  We
    do this outside [record] so [clear] / [capacity] can be called
    from tests before any event is recorded.  Guarded by [mu]. *)
 let ensure_initialised_locked () =
-  if !cap_ref = 0 then begin
+  if !cap_ref = 0
+  then (
     let cap = resolve_capacity () in
     cap_ref := cap;
     buf := Array.make cap None;
     head := 0;
-    count := 0
-  end
+    count := 0)
+;;
 
 let string_of_kind = function
   | Acquired -> "acquired"
   | Released -> "released"
   | Rejected_full -> "rejected_full"
+;;
 
 (* Prometheus counter increment happens *outside* the ring mutex so a slow
    metrics hashtable mutex never blocks cascade acquire paths.  The counter
    name + labels match the dashboard projection (classify_key) so Grafana
    queries can join on the same {kind, key_type} tuple. *)
 let bump_prometheus_counter (ev : event) =
-  Prometheus.inc_counter Prometheus.metric_cascade_capacity_events
-    ~labels:[
-      "kind", string_of_kind ev.kind;
-      "key_type", classify_key ev.key;
-    ] ()
+  Prometheus.inc_counter
+    Prometheus.metric_cascade_capacity_events
+    ~labels:[ "kind", string_of_kind ev.kind; "key_type", classify_key ev.key ]
+    ()
+;;
 
 let record ev =
   with_lock (fun () ->
-      ensure_initialised_locked ();
-      let cap = !cap_ref in
-      (!buf).(!head) <- Some ev;
-      head := (!head + 1) mod cap;
-      if !count < cap then incr count);
+    ensure_initialised_locked ();
+    let cap = !cap_ref in
+    !buf.(!head) <- Some ev;
+    head := (!head + 1) mod cap;
+    if !count < cap then incr count);
   bump_prometheus_counter ev
+;;
 
 let clear () =
   with_lock (fun () ->
-      ensure_initialised_locked ();
-      let cap = !cap_ref in
-      for i = 0 to cap - 1 do (!buf).(i) <- None done;
-      head := 0;
-      count := 0)
+    ensure_initialised_locked ();
+    let cap = !cap_ref in
+    for i = 0 to cap - 1 do
+      !buf.(i) <- None
+    done;
+    head := 0;
+    count := 0)
+;;
 
 let size () = with_lock (fun () -> !count)
 
 let capacity () =
   with_lock (fun () ->
-      ensure_initialised_locked ();
-      !cap_ref)
+    ensure_initialised_locked ();
+    !cap_ref)
+;;
 
 (* ── Snapshot ───────────────────────────────────────────────
 
@@ -134,17 +149,18 @@ let collect_newest_first_locked () =
      so the final list is newest-first without a [List.rev]. *)
   for i = n - 1 downto 0 do
     let idx = (!head - 1 - i + cap) mod cap in
-    match (!buf).(idx) with
+    match !buf.(idx) with
     | Some e -> acc := e :: !acc
     | None -> ()
   done;
   !acc
+;;
 
 let snapshot ?(limit = 100) ?kind ?since_ts () =
   let events =
     with_lock (fun () ->
-        ensure_initialised_locked ();
-        collect_newest_first_locked ())
+      ensure_initialised_locked ();
+      collect_newest_first_locked ())
   in
   let kind_match =
     match kind with
@@ -161,12 +177,11 @@ let snapshot ?(limit = 100) ?kind ?since_ts () =
     | None -> fun _ -> true
     | Some t -> fun e -> e.ts >= t
   in
-  let filtered =
-    List.filter (fun e -> kind_match e && ts_match e) events
-  in
+  let filtered = List.filter (fun e -> kind_match e && ts_match e) events in
   let n = max 0 limit in
-  if n = 0 then []
-  else
+  if n = 0
+  then []
+  else (
     (* [List.filteri] keeps the first [n] elements without building
        an intermediate list length. *)
     let rec take k = function
@@ -174,4 +189,5 @@ let snapshot ?(limit = 100) ?kind ?since_ts () =
       | _ when k = 0 -> []
       | x :: rest -> x :: take (k - 1) rest
     in
-    take n filtered
+    take n filtered)
+;;

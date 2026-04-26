@@ -26,7 +26,6 @@
 open Alcotest
 
 let target_file = "lib/server/server_dashboard_http_keeper_api.ml"
-
 let metric_name = "metric_keeper_paused_state_persist_errors"
 
 let load_source rel =
@@ -36,53 +35,61 @@ let load_source rel =
     | None -> Sys.getcwd ()
   in
   let path = Filename.concat source_root rel in
-  if not (Sys.file_exists path) then
-    failwith (Printf.sprintf "source file not found: %s" path)
-  else
+  if not (Sys.file_exists path)
+  then failwith (Printf.sprintf "source file not found: %s" path)
+  else (
     let ic = open_in path in
-    Fun.protect
-      ~finally:(fun () -> close_in_noerr ic)
-      (fun () -> In_channel.input_all ic)
+    Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () -> In_channel.input_all ic))
+;;
 
 let count_occurrences ~needle haystack =
   let nlen = String.length needle in
-  if nlen = 0 then 0
-  else
+  if nlen = 0
+  then 0
+  else (
     let re = Str.regexp_string needle in
     let rec loop pos acc =
       match Str.search_forward re haystack pos with
       | exception Not_found -> acc
       | _ ->
-          let m = Str.match_end () in
-          loop m (acc + 1)
+        let m = Str.match_end () in
+        loop m (acc + 1)
     in
-    loop 0 0
+    loop 0 0)
+;;
 
 let test_metric_registered () =
   let prom = load_source "lib/prometheus.ml" in
-  check bool "paused-state persist-errors metric declared" true
-    (count_occurrences
-       ~needle:"masc_keeper_paused_state_persist_errors_total"
-       prom
-     >= 1);
-  check bool "paused-state persist-errors metric registered with HELP"
+  check
+    bool
+    "paused-state persist-errors metric declared"
+    true
+    (count_occurrences ~needle:"masc_keeper_paused_state_persist_errors_total" prom >= 1);
+  check
+    bool
+    "paused-state persist-errors metric registered with HELP"
     true
     (count_occurrences ~needle:metric_name prom >= 2)
+;;
 
 let test_happy_path_preserved () =
   let src = load_source target_file in
   (* (a) The happy [Ok (Some meta)] arms must still be present in both
      closures so successful pause/resume keeps returning 200. *)
-  check bool "persist_keeper_paused_state happy arm present" true
+  check
+    bool
+    "persist_keeper_paused_state happy arm present"
+    true
     (count_occurrences
        ~needle:"Ok (Some meta) when Bool.equal meta.paused paused -> ()"
        src
      >= 1);
-  check bool "resume_booted_keeper_if_needed happy arm present" true
-    (count_occurrences
-       ~needle:"Ok (Some meta) when meta.paused"
-       src
-     >= 1)
+  check
+    bool
+    "resume_booted_keeper_if_needed happy arm present"
+    true
+    (count_occurrences ~needle:"Ok (Some meta) when meta.paused" src >= 1)
+;;
 
 let test_silent_fold_removed () =
   let src = load_source target_file in
@@ -92,51 +99,59 @@ let test_silent_fold_removed () =
      [resolve_keeper_agent_name] (line ~678) legitimately collapses
      both into [None] for a name lookup. *)
   let needle = "Ok None | Error _ -> ()" in
-  check int "silent fold returning unit removed" 0
-    (count_occurrences ~needle src)
+  check int "silent fold returning unit removed" 0 (count_occurrences ~needle src)
+;;
 
 let test_ok_none_branch_observable () =
   let src = load_source target_file in
   (* (b) The [Ok None] case must be observable: either logged + counter,
      or a distinct HTTP response. We assert the log marker. *)
-  check bool "Ok None warn log: persist phase" true
-    (count_occurrences
-       ~needle:"meta missing — skipping paused-state persist"
-       src
-     >= 1);
-  check bool "Ok None warn log: boot resume check phase" true
-    (count_occurrences
-       ~needle:"meta missing — skipping auto-resume check"
-       src
-     >= 1);
-  check bool "Ok None directive 404 response" true
-    (count_occurrences
-       ~needle:"keeper meta not found"
-       src
-     >= 1);
-  check bool "Ok None observability counter labelled meta_missing" true
+  check
+    bool
+    "Ok None warn log: persist phase"
+    true
+    (count_occurrences ~needle:"meta missing — skipping paused-state persist" src >= 1);
+  check
+    bool
+    "Ok None warn log: boot resume check phase"
+    true
+    (count_occurrences ~needle:"meta missing — skipping auto-resume check" src >= 1);
+  check
+    bool
+    "Ok None directive 404 response"
+    true
+    (count_occurrences ~needle:"keeper meta not found" src >= 1);
+  check
+    bool
+    "Ok None observability counter labelled meta_missing"
+    true
     (count_occurrences ~needle:"meta_missing" src >= 3)
+;;
 
 let test_error_branch_observable () =
   let src = load_source target_file in
   (* (c) The [Error err] case must surface the underlying reason. *)
-  check bool "Error err: persist phase logs reason" true
-    (count_occurrences
-       ~needle:": read_meta failed: %s"
-       src
-     >= 1);
-  check bool "Error err: boot check phase logs reason" true
-    (count_occurrences
-       ~needle:"read_meta failed during auto-resume check"
-       src
-     >= 1);
-  check bool "Error err: directive 500 response" true
-    (count_occurrences
-       ~needle:"\"read_meta failed: %s\"" src
-     >= 1);
-  check bool "Error err observability counter labelled read_meta_error"
+  check
+    bool
+    "Error err: persist phase logs reason"
+    true
+    (count_occurrences ~needle:": read_meta failed: %s" src >= 1);
+  check
+    bool
+    "Error err: boot check phase logs reason"
+    true
+    (count_occurrences ~needle:"read_meta failed during auto-resume check" src >= 1);
+  check
+    bool
+    "Error err: directive 500 response"
+    true
+    (count_occurrences ~needle:"\"read_meta failed: %s\"" src >= 1);
+  check
+    bool
+    "Error err observability counter labelled read_meta_error"
     true
     (count_occurrences ~needle:"read_meta_error" src >= 3)
+;;
 
 let test_counter_inc_calls () =
   let src = load_source target_file in
@@ -144,24 +159,24 @@ let test_counter_inc_calls () =
      [persist_keeper_paused_state] (Ok None / Error), 2 in
      [resume_booted_keeper_if_needed] (Ok None / Error), 2 in the
      directive endpoint (Ok None / Error) — total 6. *)
-  check bool "Prometheus.inc_counter called for new metric >= 6 times"
+  check
+    bool
+    "Prometheus.inc_counter called for new metric >= 6 times"
     true
-    (count_occurrences
-       ~needle:"Prometheus.metric_keeper_paused_state_persist_errors"
-       src
+    (count_occurrences ~needle:"Prometheus.metric_keeper_paused_state_persist_errors" src
      >= 6)
+;;
 
 let () =
-  run "keeper_pause_silent_failure_source"
+  run
+    "keeper_pause_silent_failure_source"
     [ ( "issue-8391-high-1"
       , [ test_case "metric registered" `Quick test_metric_registered
         ; test_case "happy path preserved" `Quick test_happy_path_preserved
         ; test_case "silent fold removed" `Quick test_silent_fold_removed
-        ; test_case "Ok None branch observable" `Quick
-            test_ok_none_branch_observable
-        ; test_case "Error _ branch observable" `Quick
-            test_error_branch_observable
-        ; test_case "counter inc calls present" `Quick
-            test_counter_inc_calls
+        ; test_case "Ok None branch observable" `Quick test_ok_none_branch_observable
+        ; test_case "Error _ branch observable" `Quick test_error_branch_observable
+        ; test_case "counter inc calls present" `Quick test_counter_inc_calls
         ] )
     ]
+;;

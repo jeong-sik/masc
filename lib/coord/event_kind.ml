@@ -22,6 +22,7 @@ module Task = struct
     | Approved -> "task.approved"
     | Rejected -> "task.rejected"
     | Linked -> "task.linked"
+  ;;
 
   let of_string = function
     | "task.created" -> Some Created
@@ -35,10 +36,21 @@ module Task = struct
     | "task.rejected" -> Some Rejected
     | "task.linked" -> Some Linked
     | _ -> None
+  ;;
 
   let all =
-    [ Created; Claimed; Started; Released; Done; Cancelled;
-      Submit_for_verification; Approved; Rejected; Linked ]
+    [ Created
+    ; Claimed
+    ; Started
+    ; Released
+    ; Done
+    ; Cancelled
+    ; Submit_for_verification
+    ; Approved
+    ; Rejected
+    ; Linked
+    ]
+  ;;
 end
 
 module Message = struct
@@ -49,11 +61,13 @@ module Message = struct
   let to_string = function
     | Broadcast -> "message.broadcast"
     | Mentioned -> "message.mentioned"
+  ;;
 
   let of_string = function
     | "message.broadcast" -> Some Broadcast
     | "message.mentioned" -> Some Mentioned
     | _ -> None
+  ;;
 
   let all = [ Broadcast; Mentioned ]
 end
@@ -70,6 +84,7 @@ module Board = struct
     | Commented -> "board.commented"
     | Voted -> "board.voted"
     | Deleted -> "board.deleted"
+  ;;
 
   let of_string = function
     | "board.posted" -> Some Posted
@@ -77,6 +92,7 @@ module Board = struct
     | "board.voted" -> Some Voted
     | "board.deleted" -> Some Deleted
     | _ -> None
+  ;;
 
   let all = [ Posted; Commented; Voted; Deleted ]
 end

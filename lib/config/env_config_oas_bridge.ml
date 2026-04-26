@@ -54,20 +54,21 @@ let caller_key = function
   | Governance_judge -> "governance_judge"
   | Operator_judge -> "operator_judge"
   | Unknown caller -> caller
+;;
 
 (** Exported for tests that pin the per-caller default table. *)
 let known_callers () =
-  [
-    Auto_responder;
-    Dashboard_provider_runs;
-    Autoresearch_codegen;
-    Keeper_persona_authoring;
-    Server_openai_compat;
-    Tool_deep_review;
-    Anti_rationalization;
-    Governance_judge;
-    Operator_judge;
+  [ Auto_responder
+  ; Dashboard_provider_runs
+  ; Autoresearch_codegen
+  ; Keeper_persona_authoring
+  ; Server_openai_compat
+  ; Tool_deep_review
+  ; Anti_rationalization
+  ; Governance_judge
+  ; Operator_judge
   ]
+;;
 
 let known_default_sec = function
   (* #10094: was hardcoded 60s, raised to global_default.  p50 of
@@ -76,9 +77,7 @@ let known_default_sec = function
   | Auto_responder | Dashboard_provider_runs -> Some global_default_sec
   (* Preserved at original literal — these were tuned for the
      specific compute pattern of the caller. *)
-  | Autoresearch_codegen
-  | Keeper_persona_authoring
-  | Server_openai_compat -> Some 120.0
+  | Autoresearch_codegen | Keeper_persona_authoring | Server_openai_compat -> Some 120.0
   | Tool_deep_review | Anti_rationalization -> Some 180.0
   (* #9629: Governance + Operator judges are LLM-via-OAS-worker calls
      with the same observed p50 latency as Auto_responder /
@@ -95,17 +94,21 @@ let known_default_sec = function
      300s for the same shape of LLM call. *)
   | Governance_judge | Operator_judge -> Some global_default_sec
   | Unknown _ -> None
+;;
 
 let upper_case s =
   s
   |> String.map (fun c ->
-       if c >= 'a' && c <= 'z' then
-         Char.chr (Char.code c - 32)
-       else if c = '-' then '_'
-       else c)
+    if c >= 'a' && c <= 'z'
+    then Char.chr (Char.code c - 32)
+    else if c = '-'
+    then '_'
+    else c)
+;;
 
 let per_caller_env_var ~caller =
   Printf.sprintf "MASC_OAS_BRIDGE_TIMEOUT_%s_SEC" (upper_case (caller_key caller))
+;;
 
 (** #9629: Each caller may also honour a legacy env var name from
     before the SSOT migration.  When present, the legacy name acts
@@ -117,6 +120,7 @@ let legacy_per_caller_env_var = function
   | Operator_judge -> Some "MASC_OPERATOR_JUDGE_TIMEOUT_SEC"
   | Governance_judge -> Some "MASC_DASHBOARD_GOVERNANCE_JUDGE_TIMEOUT_SEC"
   | _ -> None
+;;
 
 let global_env_var = "MASC_OAS_BRIDGE_TIMEOUT_DEFAULT_SEC"
 
@@ -129,6 +133,7 @@ let trimmed_value_opt name =
     let t = String.trim v in
     if t = "" then None else Some t
   | None -> None
+;;
 
 (** [timeout_sec ~caller ()] resolves the OAS bridge timeout for
     [caller].  Lookup order:
@@ -155,26 +160,21 @@ let trimmed_value_opt name =
 let timeout_sec ~caller () =
   let per_caller_env = per_caller_env_var ~caller in
   match trimmed_value_opt per_caller_env with
-  | Some v ->
-    Safe_ops.float_of_string_with_default
-      ~default:global_default_sec v
+  | Some v -> Safe_ops.float_of_string_with_default ~default:global_default_sec v
   | None ->
     let legacy_env_value =
       match legacy_per_caller_env_var caller with
       | Some name -> trimmed_value_opt name
       | None -> None
     in
-    match legacy_env_value with
-    | Some v ->
-      Safe_ops.float_of_string_with_default
-        ~default:global_default_sec v
-    | None ->
-      match known_default_sec caller with
-      | Some d -> d
-      | None ->
-        (* Unknown caller: fall to global env, then global default. *)
-        match trimmed_value_opt global_env_var with
-        | Some v ->
-          Safe_ops.float_of_string_with_default
-            ~default:global_default_sec v
-        | None -> global_default_sec
+    (match legacy_env_value with
+     | Some v -> Safe_ops.float_of_string_with_default ~default:global_default_sec v
+     | None ->
+       (match known_default_sec caller with
+        | Some d -> d
+        | None ->
+          (* Unknown caller: fall to global env, then global default. *)
+          (match trimmed_value_opt global_env_var with
+           | Some v -> Safe_ops.float_of_string_with_default ~default:global_default_sec v
+           | None -> global_default_sec)))
+;;

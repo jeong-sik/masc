@@ -9,37 +9,37 @@
 
 (** Grouping key for a set of blocked attempts sharing the same
     tool, violation kind, and effective mode. *)
-type blocked_attempt_key = {
-  tool_name : string;
-  violation_kind : string;
-  effective_mode : string;
-}
+type blocked_attempt_key =
+  { tool_name : string
+  ; violation_kind : string
+  ; effective_mode : string
+  }
 
 (** A group of blocked attempts with a shared key and occurrence count. *)
-type blocked_attempt_group = {
-  key : blocked_attempt_key;
-  count : int;
-}
+type blocked_attempt_group =
+  { key : blocked_attempt_key
+  ; count : int
+  }
 
 (** A group of evidence completeness gaps sharing the same artifact/impact. *)
-type evidence_gap_group = {
-  artifact : string;
-  reason : string;
-  impact : string;
-  count : int;
-}
+type evidence_gap_group =
+  { artifact : string
+  ; reason : string
+  ; impact : string
+  ; count : int
+  }
 
 (** Friction projection for a single run. *)
-type friction_projection = {
-  window : string;  (** Always ["single_run"]. *)
-  based_on_run_ids : string list;
-  basis_hash : string;
-  blocked_attempt_count : int;
-  blocked_tool_counts : (string * int) list;
-  blocked_attempt_groups : blocked_attempt_group list;
-  evidence_gap_groups : evidence_gap_group list;
-  review_tripwires : string list;
-}
+type friction_projection =
+  { window : string (** Always ["single_run"]. *)
+  ; based_on_run_ids : string list
+  ; basis_hash : string
+  ; blocked_attempt_count : int
+  ; blocked_tool_counts : (string * int) list
+  ; blocked_attempt_groups : blocked_attempt_group list
+  ; evidence_gap_groups : evidence_gap_group list
+  ; review_tripwires : string list
+  }
 
 (** [project_single_run ~store ?completeness_gaps ?tripwire_threshold proof]
     reads [mode_violations.json], parses v1 violation records, groups by
@@ -51,12 +51,12 @@ type friction_projection = {
     coordinators can route through their verification FSM.
 
     Returns [None] when no violations and no completeness gaps exist. *)
-val project_single_run :
-  store:Agent_sdk.Proof_store.config ->
-  ?completeness_gaps:Cdal_types.completeness_gap list ->
-  ?tripwire_threshold:int ->
-  Agent_sdk.Cdal_proof.t ->
-  friction_projection option
+val project_single_run
+  :  store:Agent_sdk.Proof_store.config
+  -> ?completeness_gaps:Cdal_types.completeness_gap list
+  -> ?tripwire_threshold:int
+  -> Agent_sdk.Cdal_proof.t
+  -> friction_projection option
 
 (** Canonical JSON serialization with sorted keys. *)
 val to_json : friction_projection -> Yojson.Safe.t
@@ -80,22 +80,19 @@ type run_window =
     manifests.
 
     @since CDAL Phase 3 *)
-val project_window :
-  store:Agent_sdk.Proof_store.config ->
-  window:run_window ->
-  ?completeness_gaps:Cdal_types.completeness_gap list ->
-  ?tripwire_threshold:int ->
-  Agent_sdk.Cdal_proof.t list ->
-  friction_projection option
+val project_window
+  :  store:Agent_sdk.Proof_store.config
+  -> window:run_window
+  -> ?completeness_gaps:Cdal_types.completeness_gap list
+  -> ?tripwire_threshold:int
+  -> Agent_sdk.Cdal_proof.t list
+  -> friction_projection option
 
 (** Compute deterministic basis hash for cross-run window.
     Includes window type, run IDs (sorted), and version.
 
     @since CDAL Phase 3 *)
-val compute_window_basis_hash :
-  window:run_window ->
-  run_ids:string list ->
-  string
+val compute_window_basis_hash : window:run_window -> run_ids:string list -> string
 
 (** String representation of a run window. *)
 val window_to_string : run_window -> string

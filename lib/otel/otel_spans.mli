@@ -14,8 +14,12 @@ val is_exporter_active : unit -> bool
 
 (** Setup OTLP exporter with a custom setup thunk.
     No-op when [enabled=false]. Sets [is_exporter_active] accordingly. *)
-val setup_exporter_with :
-  ?enabled:bool -> endpoint:string -> setup:(unit -> unit) -> unit -> unit
+val setup_exporter_with
+  :  ?enabled:bool
+  -> endpoint:string
+  -> setup:(unit -> unit)
+  -> unit
+  -> unit
 
 (** Setup OTLP exporter using the cohttp-eio HTTP/protobuf backend.
     Forks a 500ms tick fiber under [sw] for periodic batch flush.
@@ -30,11 +34,11 @@ val shutdown : ?enabled:bool -> unit -> unit
     When disabled, calls [f] with a no-op trace-id extractor.
     [f] receives a thunk that returns [Some trace_id_hex] inside a span,
     [None] otherwise. *)
-val with_span :
-  name:string ->
-  ?attrs:Opentelemetry.key_value list ->
-  ((unit -> string option) -> 'a) ->
-  'a
+val with_span
+  :  name:string
+  -> ?attrs:Opentelemetry.key_value list
+  -> ((unit -> string option) -> 'a)
+  -> 'a
 
 (** [current_trace_id ()] returns the active OTel trace ID as hex, or [None]. *)
 val current_trace_id : unit -> string option

@@ -13,25 +13,30 @@ let long n = String.make n 'x'
 
 let test_truncate_long () =
   let result = T.truncate_string ~max_chars:100 (long 1000) in
-  Alcotest.(check bool) "within budget + ellipsis"
-    true (String.length result <= 103);
-  Alcotest.(check bool) "grew beyond raw cap by ellipsis only"
-    true (String.length result > 100)
+  Alcotest.(check bool) "within budget + ellipsis" true (String.length result <= 103);
+  Alcotest.(check bool)
+    "grew beyond raw cap by ellipsis only"
+    true
+    (String.length result > 100)
+;;
 
 let test_truncate_short_unchanged () =
   let result = T.truncate_string ~max_chars:100 "ok" in
   Alcotest.(check string) "short passes through" "ok" result
+;;
 
 let test_truncate_at_exact_boundary () =
   let s = long 100 in
   let result = T.truncate_string ~max_chars:100 s in
   Alcotest.(check string) "exactly at cap passes through" s result
+;;
 
 let test_truncate_idempotent () =
   let s = long 1000 in
   let once = T.truncate_string ~max_chars:100 s in
   let twice = T.truncate_string ~max_chars:100 once in
   Alcotest.(check string) "second application is noop" once twice
+;;
 
 let test_truncate_matches_default_option_budget () =
   (* Gen12 load path uses T.default_option_field_max_chars. If Gen8
@@ -39,21 +44,30 @@ let test_truncate_matches_default_option_budget () =
   let cap = T.default_option_field_max_chars in
   let s = long (cap * 10) in
   let result = T.truncate_string ~max_chars:cap s in
-  Alcotest.(check bool) "load-path default budget honoured"
-    true (String.length result <= cap + 3)
+  Alcotest.(check bool)
+    "load-path default budget honoured"
+    true
+    (String.length result <= cap + 3)
+;;
 
 let () =
-  Alcotest.run "social_state_cap_on_load"
-    [ ( "truncate_string",
-        [ Alcotest.test_case "truncates long string with ellipsis" `Quick
-            test_truncate_long;
-          Alcotest.test_case "short string unchanged" `Quick
-            test_truncate_short_unchanged;
-          Alcotest.test_case "exact boundary unchanged" `Quick
-            test_truncate_at_exact_boundary;
-          Alcotest.test_case "truncation is idempotent" `Quick
-            test_truncate_idempotent;
-          Alcotest.test_case "matches Gen8 default option budget" `Quick
-            test_truncate_matches_default_option_budget;
-        ] );
+  Alcotest.run
+    "social_state_cap_on_load"
+    [ ( "truncate_string"
+      , [ Alcotest.test_case
+            "truncates long string with ellipsis"
+            `Quick
+            test_truncate_long
+        ; Alcotest.test_case "short string unchanged" `Quick test_truncate_short_unchanged
+        ; Alcotest.test_case
+            "exact boundary unchanged"
+            `Quick
+            test_truncate_at_exact_boundary
+        ; Alcotest.test_case "truncation is idempotent" `Quick test_truncate_idempotent
+        ; Alcotest.test_case
+            "matches Gen8 default option budget"
+            `Quick
+            test_truncate_matches_default_option_budget
+        ] )
     ]
+;;

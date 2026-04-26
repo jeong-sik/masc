@@ -9,7 +9,7 @@
       [Eio.Cancel.Cancelled] so the caller exits immediately without retrying.
 
     @raises Eio.Cancel.Cancelled when the parent fiber/switch is cancelled. *)
-val run_with_timeout_and_fallback :
-  timeout_s:float ->
-  (unit -> ('a, Oas.Error.sdk_error) result) ->
-  ('a, Oas.Error.sdk_error) result
+val run_with_timeout_and_fallback
+  :  timeout_s:float
+  -> (unit -> ('a, Oas.Error.sdk_error) result)
+  -> ('a, Oas.Error.sdk_error) result

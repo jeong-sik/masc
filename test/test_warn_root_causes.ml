@@ -14,6 +14,7 @@ let init_registry () =
   match Keeper_tool_policy.init_policy_config ~base_path with
   | Ok () -> ()
   | Error e -> failwith (Printf.sprintf "init_policy_config failed: %s" e)
+;;
 
 let file_contains_pattern file_rel pattern =
   let source_root =
@@ -22,40 +23,56 @@ let file_contains_pattern file_rel pattern =
     | None -> Sys.getcwd ()
   in
   let path = Filename.concat source_root file_rel in
-  if not (Sys.file_exists path) then false
-  else
+  if not (Sys.file_exists path)
+  then false
+  else (
     let ic = open_in path in
     Fun.protect
       ~finally:(fun () -> close_in_noerr ic)
       (fun () ->
-        let content = In_channel.input_all ic in
-        if String.length pattern = 0 then true
-        else
-          let re = Str.regexp_string pattern in
-          (try ignore (Str.search_forward re content 0); true
-           with Not_found -> false))
+         let content = In_channel.input_all ic in
+         if String.length pattern = 0
+         then true
+         else (
+           let re = Str.regexp_string pattern in
+           try
+             ignore (Str.search_forward re content 0);
+             true
+           with
+           | Not_found -> false)))
+;;
 
 let file_not_contains_pattern file_rel pattern =
   not (file_contains_pattern file_rel pattern)
+;;
 
 let require_write_ok label = function
   | Ok () -> ()
   | Error msg -> failf "%s: %s" label msg
+;;
 
 let make_meta ?(name = "test-keeper") () : Keeper_types.keeper_meta =
-  match Keeper_types.meta_of_json
-    (`Assoc [("name", `String name); ("agent_name", `String name);
-             ("trace_id", `String "test-trace-warn")]) with
+  match
+    Keeper_types.meta_of_json
+      (`Assoc
+          [ "name", `String name
+          ; "agent_name", `String name
+          ; "trace_id", `String "test-trace-warn"
+          ])
+  with
   | Ok meta -> meta
   | Error e -> failwith (Printf.sprintf "make_meta failed: %s" e)
+;;
 
 (** Build the allowed_exec_set exactly as keeper_agent_run.ml does:
     preset-allowed names + core_always_tools. *)
 let build_allowed_exec_set (meta : Keeper_types.keeper_meta) =
   let allowed_names = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let base = Keeper_tool_policy.tool_name_set allowed_names in
-  Keeper_tool_policy.StringSet.union base
+  Keeper_tool_policy.StringSet.union
+    base
     (Keeper_tool_policy.tool_name_set Keeper_tool_registry.core_always_tools)
+;;
 
 (** Filter core_discovery_tools by preset (the fix). *)
 let filter_core_by_preset (meta : Keeper_types.keeper_meta) =
@@ -63,6 +80,7 @@ let filter_core_by_preset (meta : Keeper_types.keeper_meta) =
   List.filter
     (fun name -> Keeper_tool_policy.StringSet.mem name allowed_set)
     Keeper_tool_registry.core_discovery_tools
+;;
 
 (* Direct write tools require coding/delivery/full presets. *)
 let write_only_tools = [ "keeper_fs_edit" ]
@@ -70,34 +88,45 @@ let write_only_tools = [ "keeper_fs_edit" ]
 (* keeper_bash stays visible across presets for read-only shell usage.
    Mutating shell commands are gated separately by privileged presets. *)
 let shell_bridge_tools = [ "keeper_bash" ]
-
-let privileged_presets =
-  [ Keeper_types.Coding; Keeper_types.Delivery; Keeper_types.Full ]
+let privileged_presets = [ Keeper_types.Coding; Keeper_types.Delivery; Keeper_types.Full ]
 
 let unprivileged_presets =
-  [
-    Keeper_types.Minimal;
-    Keeper_types.Social;
-    Keeper_types.Messaging;
-    Keeper_types.Dispatch;
-    Keeper_types.Research;
+  [ Keeper_types.Minimal
+  ; Keeper_types.Social
+  ; Keeper_types.Messaging
+  ; Keeper_types.Dispatch
+  ; Keeper_types.Research
   ]
+;;
 
 let test_privileged_preset_write_gates () =
   List.iter
     (fun preset ->
-      check bool "privileged preset allows shell write" true
-        (Keeper_tool_policy.allows_shell_write_for_preset preset);
-      check bool "privileged preset allows workflow" true
-        (Keeper_tool_policy.allows_workflow_for_preset preset))
+       check
+         bool
+         "privileged preset allows shell write"
+         true
+         (Keeper_tool_policy.allows_shell_write_for_preset preset);
+       check
+         bool
+         "privileged preset allows workflow"
+         true
+         (Keeper_tool_policy.allows_workflow_for_preset preset))
     privileged_presets;
   List.iter
     (fun preset ->
-      check bool "unprivileged preset blocks shell write" false
-        (Keeper_tool_policy.allows_shell_write_for_preset preset);
-      check bool "unprivileged preset blocks workflow" false
-        (Keeper_tool_policy.allows_workflow_for_preset preset))
+       check
+         bool
+         "unprivileged preset blocks shell write"
+         false
+         (Keeper_tool_policy.allows_shell_write_for_preset preset);
+       check
+         bool
+         "unprivileged preset blocks workflow"
+         false
+         (Keeper_tool_policy.allows_workflow_for_preset preset))
     unprivileged_presets
+;;
 
 (* ── Test 1: Core discovery tools respect preset ──────────────── *)
 
@@ -105,99 +134,122 @@ let test_core_tools_filtered_by_research_preset () =
   ignore (init_registry ());
   let meta =
     { (make_meta ~name:"test-research" ()) with
-      tool_access = Preset { preset = Research; also_allow = [] };
-      tool_denylist = [] }
+      tool_access = Preset { preset = Research; also_allow = [] }
+    ; tool_denylist = []
+    }
   in
   (* Precondition: direct write tools ARE in unfiltered core *)
-  List.iter (fun t ->
-    if not (List.mem t Keeper_tool_registry.core_discovery_tools) then
-      fail (Printf.sprintf "precondition: %s missing from core_discovery_tools" t)
-  ) write_only_tools;
+  List.iter
+    (fun t ->
+       if not (List.mem t Keeper_tool_registry.core_discovery_tools)
+       then fail (Printf.sprintf "precondition: %s missing from core_discovery_tools" t))
+    write_only_tools;
   let filtered = filter_core_by_preset meta in
   (* Direct write tools must NOT survive preset filter. *)
-  List.iter (fun t ->
-    if List.mem t filtered then
-      fail (Printf.sprintf "%s should be excluded for research preset" t)
-  ) write_only_tools;
-  List.iter (fun t ->
-    if not (List.mem t filtered) then
-      fail (Printf.sprintf "%s should stay visible for read-only shell use" t)
-  ) shell_bridge_tools;
+  List.iter
+    (fun t ->
+       if List.mem t filtered
+       then fail (Printf.sprintf "%s should be excluded for research preset" t))
+    write_only_tools;
+  List.iter
+    (fun t ->
+       if not (List.mem t filtered)
+       then fail (Printf.sprintf "%s should stay visible for read-only shell use" t))
+    shell_bridge_tools;
   (* Core always-tools must survive *)
-  List.iter (fun t ->
-    if not (List.mem t filtered) then
-      fail (Printf.sprintf "core_always %s must survive preset filter" t)
-  ) Keeper_tool_registry.core_always_tools
+  List.iter
+    (fun t ->
+       if not (List.mem t filtered)
+       then fail (Printf.sprintf "core_always %s must survive preset filter" t))
+    Keeper_tool_registry.core_always_tools
+;;
 
 let test_core_tools_filtered_by_social_preset () =
   ignore (init_registry ());
   let meta =
     { (make_meta ~name:"test-social" ()) with
-      tool_access = Preset { preset = Social; also_allow = [] };
-      tool_denylist = [] }
+      tool_access = Preset { preset = Social; also_allow = [] }
+    ; tool_denylist = []
+    }
   in
   let filtered = filter_core_by_preset meta in
-  if List.mem "keeper_fs_edit" filtered then
-    fail "keeper_fs_edit should be excluded for social preset"
+  if List.mem "keeper_fs_edit" filtered
+  then fail "keeper_fs_edit should be excluded for social preset"
+;;
 
 let test_core_tools_include_write_for_coding_preset () =
   ignore (init_registry ());
   let meta =
     { (make_meta ~name:"test-coding" ()) with
-      tool_access = Preset { preset = Coding; also_allow = [] };
-      tool_denylist = [] }
+      tool_access = Preset { preset = Coding; also_allow = [] }
+    ; tool_denylist = []
+    }
   in
   let filtered = filter_core_by_preset meta in
-  List.iter (fun t ->
-    if not (List.mem t filtered) then
-      fail (Printf.sprintf "%s should be included for coding preset" t)
-  ) (write_only_tools @ shell_bridge_tools)
+  List.iter
+    (fun t ->
+       if not (List.mem t filtered)
+       then fail (Printf.sprintf "%s should be included for coding preset" t))
+    (write_only_tools @ shell_bridge_tools)
+;;
 
 (* ── Test 2: Atomic agent JSON writes ─────────────────────────── *)
 
 let test_atomic_write_not_empty () =
-  Eio_main.run @@ fun env ->
+  Eio_main.run
+  @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = Filename.concat (Filename.get_temp_dir_name ())
-    (Printf.sprintf "masc_test_atomic_%d" (Random.int 1_000_000)) in
-  (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
-  let path = Filename.concat dir "test_agent.json" in
-  let json =
-    `Assoc [ ("name", `String "test"); ("status", `String "ok") ]
+  let dir =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc_test_atomic_%d" (Random.int 1_000_000))
   in
+  (try Unix.mkdir dir 0o755 with
+   | Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  let path = Filename.concat dir "test_agent.json" in
+  let json = `Assoc [ "name", `String "test"; "status", `String "ok" ] in
   require_write_ok "atomic write" (Coord_utils.write_json_local path json);
   let content = Fs_compat.load_file path in
-  check bool "file not empty after atomic write" true
-    (String.length content > 0);
+  check bool "file not empty after atomic write" true (String.length content > 0);
   let parsed = Yojson.Safe.from_string content in
-  check string "name field" "test"
+  check
+    string
+    "name field"
+    "test"
     (Yojson.Safe.Util.member "name" parsed |> Yojson.Safe.Util.to_string);
   (* Verify .tmp is cleaned up *)
   check bool "no leftover .tmp" false (Sys.file_exists (path ^ ".tmp"));
-  (try Unix.unlink path with _ -> ());
-  (try Unix.rmdir dir with _ -> ())
+  (try Unix.unlink path with
+   | _ -> ());
+  try Unix.rmdir dir with
+  | _ -> ()
+;;
 
 (** Concurrent writes via atomic pattern must never produce empty reads. *)
 let test_concurrent_atomic_writes_never_empty () =
-  Eio_main.run @@ fun env ->
+  Eio_main.run
+  @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = Filename.concat (Filename.get_temp_dir_name ())
-    (Printf.sprintf "masc_test_concurrent_%d" (Random.int 1_000_000)) in
-  (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  let dir =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc_test_concurrent_%d" (Random.int 1_000_000))
+  in
+  (try Unix.mkdir dir 0o755 with
+   | Unix.Unix_error (Unix.EEXIST, _, _) -> ());
   let path = Filename.concat dir "agent.json" in
   (* Seed with initial content *)
-  require_write_ok "seed write"
-    (Coord_utils.write_json_local path
-       (`Assoc [ ("name", `String "init") ]));
+  require_write_ok
+    "seed write"
+    (Coord_utils.write_json_local path (`Assoc [ "name", `String "init" ]));
   let empty_seen = ref false in
   let iterations = 200 in
-  Eio.Switch.run @@ fun sw ->
+  Eio.Switch.run
+  @@ fun sw ->
   (* Writer fiber: rapidly update the file *)
   Eio.Fiber.fork ~sw (fun () ->
     for i = 1 to iterations do
-      let json =
-        `Assoc [ ("name", `String (Printf.sprintf "v%d" i)) ]
-      in
+      let json = `Assoc [ "name", `String (Printf.sprintf "v%d" i) ] in
       require_write_ok "concurrent write" (Coord_utils.write_json_local path json);
       Eio.Fiber.yield ()
     done);
@@ -207,78 +259,138 @@ let test_concurrent_atomic_writes_never_empty () =
       (try
          let content = Fs_compat.load_file path in
          if String.trim content = "" then empty_seen := true
-       with _ -> ());
+       with
+       | _ -> ());
       Eio.Fiber.yield ()
     done);
   check bool "concurrent reads never see empty file" false !empty_seen;
-  (try Unix.unlink path with _ -> ());
-  (try Unix.rmdir dir with _ -> ())
+  (try Unix.unlink path with
+   | _ -> ());
+  try Unix.rmdir dir with
+  | _ -> ()
+;;
 
 (* ── Test 3: Keeper/OAS failure severities on main path ─────────────── *)
 
 let test_keeper_mainline_failures_log_at_error () =
-  check bool "missing checkpoint after run logs at ERROR" true
-    (file_contains_pattern "lib/keeper/keeper_agent_run.ml"
+  check
+    bool
+    "missing checkpoint after run logs at ERROR"
+    true
+    (file_contains_pattern
+       "lib/keeper/keeper_agent_run.ml"
        {|Log.Keeper.error "keeper:%s missing OAS checkpoint after run"|});
-  check bool "memory write failures log at ERROR" true
-    (file_contains_pattern "lib/keeper/keeper_agent_run.ml"
+  check
+    bool
+    "memory write failures log at ERROR"
+    true
+    (file_contains_pattern
+       "lib/keeper/keeper_agent_run.ml"
        {|"keeper:%s memory_write failed: %s"|});
-  check bool "memory write failures are no longer WARN" true
-    (file_not_contains_pattern "lib/keeper/keeper_agent_run.ml"
+  check
+    bool
+    "memory write failures are no longer WARN"
+    true
+    (file_not_contains_pattern
+       "lib/keeper/keeper_agent_run.ml"
        {|Log.Keeper.warn
                "keeper:%s memory_write failed: %s"|});
-  check bool "episode creation failures log at ERROR" true
-    (file_contains_pattern "lib/keeper/keeper_agent_run.ml"
+  check
+    bool
+    "episode creation failures log at ERROR"
+    true
+    (file_contains_pattern
+       "lib/keeper/keeper_agent_run.ml"
        {|"keeper:%s episode_create failed: %s"|});
-  check bool "episode creation failures are no longer WARN" true
-    (file_not_contains_pattern "lib/keeper/keeper_agent_run.ml"
+  check
+    bool
+    "episode creation failures are no longer WARN"
+    true
+    (file_not_contains_pattern
+       "lib/keeper/keeper_agent_run.ml"
        {|Log.Keeper.warn "keeper:%s episode_create failed: %s"|});
-  check bool "post-failure read_meta None logs at ERROR" true
-    (file_contains_pattern "lib/keeper/keeper_keepalive.ml"
+  check
+    bool
+    "post-failure read_meta None logs at ERROR"
+    true
+    (file_contains_pattern
+       "lib/keeper/keeper_keepalive.ml"
        {|Log.Keeper.error "keeper:%s read_meta returned None after turn failure, using stale meta"|});
-  check bool "post-failure read_meta Error logs at ERROR" true
-    (file_contains_pattern "lib/keeper/keeper_keepalive.ml"
+  check
+    bool
+    "post-failure read_meta Error logs at ERROR"
+    true
+    (file_contains_pattern
+       "lib/keeper/keeper_keepalive.ml"
        {|Log.Keeper.error "keeper:%s read_meta failed after turn failure (%s), using stale meta"|})
+;;
 
 let test_oas_mainline_warns_are_promoted_in_bridge () =
-  check bool "bridge promotes MCP server failure" true
-    (file_contains_pattern "lib/oas_log_bridge.ml"
+  check
+    bool
+    "bridge promotes MCP server failure"
+    true
+    (file_contains_pattern
+       "lib/oas_log_bridge.ml"
        {|Warn, "agent_config", "MCP server failed" -> true|});
-  check bool "bridge promotes context injector failure" true
-    (file_contains_pattern "lib/oas_log_bridge.ml"
+  check
+    bool
+    "bridge promotes context injector failure"
+    true
+    (file_contains_pattern
+       "lib/oas_log_bridge.ml"
        {|Warn, "agent_turn", "context_injector raised" -> true|});
-  check bool "bridge promotes approval callback gap" true
-    (file_contains_pattern "lib/oas_log_bridge.ml"
+  check
+    bool
+    "bridge promotes approval callback gap"
+    true
+    (file_contains_pattern
+       "lib/oas_log_bridge.ml"
        {|Warn, "agent_tools", "ApprovalRequired but no approval callback — executing"|})
+;;
 
 (* ── Runner ───────────────────────────────────────────────────── *)
 
 let () =
-  run "Warn_root_causes"
-    [
-      ( "allowlist_preset_filter",
-        [
-          test_case "research preset excludes direct write tools" `Quick
-            test_core_tools_filtered_by_research_preset;
-          test_case "social preset excludes direct write tools" `Quick
-            test_core_tools_filtered_by_social_preset;
-          test_case "coding preset includes shell + write tools" `Quick
-            test_core_tools_include_write_for_coding_preset;
-          test_case "privileged presets gate shell write and workflow" `Quick
-            test_privileged_preset_write_gates;
-        ] );
-      ( "atomic_agent_json",
-        [
-          test_case "atomic write produces non-empty file" `Quick
-            test_atomic_write_not_empty;
-          test_case "concurrent writes never produce empty reads" `Quick
-            test_concurrent_atomic_writes_never_empty;
-        ] );
-      ( "mainline_failure_levels",
-        [
-          test_case "keeper mainline failures log at error" `Quick
-            test_keeper_mainline_failures_log_at_error;
-          test_case "oas mainline warns are promoted in bridge" `Quick
-            test_oas_mainline_warns_are_promoted_in_bridge;
-        ] );
+  run
+    "Warn_root_causes"
+    [ ( "allowlist_preset_filter"
+      , [ test_case
+            "research preset excludes direct write tools"
+            `Quick
+            test_core_tools_filtered_by_research_preset
+        ; test_case
+            "social preset excludes direct write tools"
+            `Quick
+            test_core_tools_filtered_by_social_preset
+        ; test_case
+            "coding preset includes shell + write tools"
+            `Quick
+            test_core_tools_include_write_for_coding_preset
+        ; test_case
+            "privileged presets gate shell write and workflow"
+            `Quick
+            test_privileged_preset_write_gates
+        ] )
+    ; ( "atomic_agent_json"
+      , [ test_case
+            "atomic write produces non-empty file"
+            `Quick
+            test_atomic_write_not_empty
+        ; test_case
+            "concurrent writes never produce empty reads"
+            `Quick
+            test_concurrent_atomic_writes_never_empty
+        ] )
+    ; ( "mainline_failure_levels"
+      , [ test_case
+            "keeper mainline failures log at error"
+            `Quick
+            test_keeper_mainline_failures_log_at_error
+        ; test_case
+            "oas mainline warns are promoted in bridge"
+            `Quick
+            test_oas_mainline_warns_are_promoted_in_bridge
+        ] )
     ]
+;;

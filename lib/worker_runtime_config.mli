@@ -13,19 +13,17 @@
 
 (** {1 Types} *)
 
-type docker_config = {
-  image : string;
-  host_mcp_base_url : string option;
-}
+type docker_config =
+  { image : string
+  ; host_mcp_base_url : string option
+  }
 
-type worker_spawn = {
-  backend : Worker_execution_backend.t;
-  docker : docker_config;
-}
+type worker_spawn =
+  { backend : Worker_execution_backend.t
+  ; docker : docker_config
+  }
 
-type t = {
-  worker_spawn : worker_spawn;
-}
+type t = { worker_spawn : worker_spawn }
 
 (** {1 Public API} *)
 

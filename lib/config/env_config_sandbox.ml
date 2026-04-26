@@ -24,42 +24,32 @@ open Env_config_core
 (* --------------------------------------------------------------- *)
 
 module Hardening = struct
-  let hard_mode () =
-    get_bool ~default:false "MASC_KEEPER_SANDBOX_HARD_MODE"
-
-  let pids_limit () =
-    max 32 (get_int ~default:128 "MASC_KEEPER_SANDBOX_PIDS_LIMIT")
+  let hard_mode () = get_bool ~default:false "MASC_KEEPER_SANDBOX_HARD_MODE"
+  let pids_limit () = max 32 (get_int ~default:128 "MASC_KEEPER_SANDBOX_PIDS_LIMIT")
 
   let nofile_limit () =
     max 1024 (get_int ~default:245_760 "MASC_KEEPER_SANDBOX_NOFILE_LIMIT")
+  ;;
 
-  let memory () =
-    get_string ~default:"2g" "MASC_KEEPER_SANDBOX_MEMORY"
-
-  let tmpfs_size () =
-    get_string ~default:"256m" "MASC_KEEPER_SANDBOX_TMPFS_SIZE"
-
-  let relax_fs () =
-    get_bool ~default:false "MASC_KEEPER_SANDBOX_RELAX_FS"
-
-  let read_only_rootfs_args () =
-    if relax_fs () then [] else [ "--read-only" ]
+  let memory () = get_string ~default:"2g" "MASC_KEEPER_SANDBOX_MEMORY"
+  let tmpfs_size () = get_string ~default:"256m" "MASC_KEEPER_SANDBOX_TMPFS_SIZE"
+  let relax_fs () = get_bool ~default:false "MASC_KEEPER_SANDBOX_RELAX_FS"
+  let read_only_rootfs_args () = if relax_fs () then [] else [ "--read-only" ]
 
   let tmpfs_mount () =
     let exec_suffix = if relax_fs () then "" else ",noexec" in
-    Printf.sprintf "/tmp:rw,nosuid,nodev%s,size=%s"
-      exec_suffix (tmpfs_size ())
+    Printf.sprintf "/tmp:rw,nosuid,nodev%s,size=%s" exec_suffix (tmpfs_size ())
+  ;;
 
-  let seccomp_profile () =
-    get_string ~default:"" "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE"
+  let seccomp_profile () = get_string ~default:"" "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE"
 
   let require_rootless () =
-    hard_mode ()
-    || get_bool ~default:false "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS"
+    hard_mode () || get_bool ~default:false "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS"
+  ;;
 
   let require_userns () =
-    hard_mode ()
-    || get_bool ~default:false "MASC_KEEPER_SANDBOX_REQUIRE_USERNS"
+    hard_mode () || get_bool ~default:false "MASC_KEEPER_SANDBOX_REQUIRE_USERNS"
+  ;;
 end
 
 (* --------------------------------------------------------------- *)
@@ -67,18 +57,17 @@ end
 (* --------------------------------------------------------------- *)
 
 module Cleanup = struct
-  let enabled () =
-    get_bool ~default:true "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED"
+  let enabled () = get_bool ~default:true "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED"
 
   let stale_after_sec () =
     float_of_int
-      (max 60
-         (get_int ~default:21_600 "MASC_KEEPER_SANDBOX_CLEANUP_STALE_AFTER_SEC"))
+      (max 60 (get_int ~default:21_600 "MASC_KEEPER_SANDBOX_CLEANUP_STALE_AFTER_SEC"))
+  ;;
 
   let interval_sec () =
     float_of_int
-      (max 10
-         (get_int ~default:300 "MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC"))
+      (max 10 (get_int ~default:300 "MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC"))
+  ;;
 
   (* P2c will optionally wire an env var; today the literal stands. *)
   let managed_sleep_sec () = 3600
@@ -90,15 +79,17 @@ end
 
 module Runtime = struct
   let docker_image () =
-    get_string ~default:"masc-keeper-sandbox:local"
-      "MASC_KEEPER_SANDBOX_DOCKER_IMAGE"
+    get_string ~default:"masc-keeper-sandbox:local" "MASC_KEEPER_SANDBOX_DOCKER_IMAGE"
+  ;;
 
   let git_dispatch () =
     (not (Hardening.hard_mode ()))
     && get_bool ~default:true "MASC_KEEPER_SANDBOX_GIT_DISPATCH"
+  ;;
 
   let docker_playground_enabled () =
     get_bool ~default:false "MASC_KEEPER_DOCKER_PLAYGROUND"
+  ;;
 end
 
 (* --------------------------------------------------------------- *)
@@ -107,32 +98,40 @@ end
 
 module Auth_paths = struct
   let gh_creds () =
-    if Hardening.hard_mode () then ""
-    else
+    if Hardening.hard_mode ()
+    then ""
+    else (
       let default =
         match Sys.getenv_opt "HOME" with
         | Some home -> Filename.concat home ".config/gh"
         | None -> ""
       in
-      get_string ~default "MASC_KEEPER_SANDBOX_GH_CREDS"
+      get_string ~default "MASC_KEEPER_SANDBOX_GH_CREDS")
+  ;;
 
   let gitconfig () =
-    if Hardening.hard_mode () then ""
-    else
+    if Hardening.hard_mode ()
+    then ""
+    else (
       let default =
         match Sys.getenv_opt "HOME" with
         | Some home -> Filename.concat home ".gitconfig"
         | None -> ""
       in
-      get_string ~default "MASC_KEEPER_SANDBOX_GITCONFIG"
+      get_string ~default "MASC_KEEPER_SANDBOX_GITCONFIG")
+  ;;
 
   let ssh_dir () =
-    if Hardening.hard_mode () then ""
+    if Hardening.hard_mode ()
+    then ""
     else get_string ~default:"" "MASC_KEEPER_SANDBOX_SSH_DIR"
+  ;;
 
   let gh_token_probe_timeout_sec () =
     get_float ~default:2.0 "MASC_KEEPER_SANDBOX_GH_TOKEN_PROBE_TIMEOUT_SEC"
-    |> max 0.1 |> min 10.0
+    |> max 0.1
+    |> min 10.0
+  ;;
 end
 
 (* --------------------------------------------------------------- *)
@@ -140,8 +139,7 @@ end
 (* --------------------------------------------------------------- *)
 
 module Preflight = struct
-  let enabled () =
-    get_bool ~default:true "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED"
+  let enabled () = get_bool ~default:true "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED"
 
   (* P2c will optionally env-wire these; today they are literal-pinned
      so callers in keeper_sandbox_runtime stay unchanged in P2a. *)
@@ -150,10 +148,27 @@ module Preflight = struct
 
   (* Read-only canonical list — see .mli for the why-not-env note. *)
   let required_commands () =
-    [ "sh"; "bash"; "cat"; "find"; "head"; "tail"; "wc"
-    ; "git"; "gh"; "rg"; "tree"; "jq"
-    ; "python3"; "node"; "npm"; "make"; "opam"; "dune"; "ssh"
+    [ "sh"
+    ; "bash"
+    ; "cat"
+    ; "find"
+    ; "head"
+    ; "tail"
+    ; "wc"
+    ; "git"
+    ; "gh"
+    ; "rg"
+    ; "tree"
+    ; "jq"
+    ; "python3"
+    ; "node"
+    ; "npm"
+    ; "make"
+    ; "opam"
+    ; "dune"
+    ; "ssh"
     ]
+  ;;
 end
 
 (* --------------------------------------------------------------- *)
@@ -182,9 +197,9 @@ module Shell_timeout = struct
     | Token_probe -> "token_probe"
     | Cleanup_rm -> "cleanup_rm"
     | Unknown s -> s
+  ;;
 
-  let known_buckets () =
-    [ Io; Read; Git_meta; Gh_min; User_max; Token_probe; Cleanup_rm ]
+  let known_buckets () = [ Io; Read; Git_meta; Gh_min; User_max; Token_probe; Cleanup_rm ]
 
   let known_default_sec = function
     | Io -> Some 30.0
@@ -195,18 +210,21 @@ module Shell_timeout = struct
     | Token_probe -> Some 2.0
     | Cleanup_rm -> Some 5.0
     | Unknown _ -> None
+  ;;
 
   let upper_case s =
     s
     |> String.map (fun c ->
-         if c >= 'a' && c <= 'z' then
-           Char.chr (Char.code c - 32)
-         else if c = '-' then '_'
-         else c)
+      if c >= 'a' && c <= 'z'
+      then Char.chr (Char.code c - 32)
+      else if c = '-'
+      then '_'
+      else c)
+  ;;
 
   let per_bucket_env_var ~bucket =
-    Printf.sprintf "MASC_KEEPER_SHELL_TIMEOUT_%s_SEC"
-      (upper_case (bucket_key bucket))
+    Printf.sprintf "MASC_KEEPER_SHELL_TIMEOUT_%s_SEC" (upper_case (bucket_key bucket))
+  ;;
 
   let global_env_var = "MASC_KEEPER_SHELL_TIMEOUT_DEFAULT_SEC"
 
@@ -218,6 +236,7 @@ module Shell_timeout = struct
       let t = String.trim v in
       if t = "" then None else Some t
     | None -> None
+  ;;
 
   let timeout_sec ~bucket () =
     match bucket with
@@ -227,19 +246,17 @@ module Shell_timeout = struct
       15.0
     | _ ->
       let per_bucket_env = per_bucket_env_var ~bucket in
-      match trimmed_value_opt per_bucket_env with
-      | Some v ->
-        Safe_ops.float_of_string_with_default
-          ~default:global_default_sec v
-      | None ->
-        match known_default_sec bucket with
-        | Some d -> d
-        | None ->
-          match trimmed_value_opt global_env_var with
-          | Some v ->
-            Safe_ops.float_of_string_with_default
-              ~default:global_default_sec v
-          | None -> global_default_sec
+      (match trimmed_value_opt per_bucket_env with
+       | Some v -> Safe_ops.float_of_string_with_default ~default:global_default_sec v
+       | None ->
+         (match known_default_sec bucket with
+          | Some d -> d
+          | None ->
+            (match trimmed_value_opt global_env_var with
+             | Some v ->
+               Safe_ops.float_of_string_with_default ~default:global_default_sec v
+             | None -> global_default_sec)))
+  ;;
 end
 
 (* --------------------------------------------------------------- *)
@@ -251,29 +268,21 @@ let env_is_set name =
   match Env_config_core.raw_value_opt name with
   | Some v -> String.trim v <> ""
   | None -> false
+;;
 
 (* Convenience builders for [{ value, source, env_var }] entries. *)
 let entry_env_overridable ~env_var (value : Yojson.Safe.t) : Yojson.Safe.t =
   let source = if env_is_set env_var then "env" else "default" in
-  `Assoc
-    [ "value", value
-    ; "source", `String source
-    ; "env_var", `String env_var
-    ]
+  `Assoc [ "value", value; "source", `String source; "env_var", `String env_var ]
+;;
 
 let entry_floor (value : Yojson.Safe.t) : Yojson.Safe.t =
-  `Assoc
-    [ "value", value
-    ; "source", `String "load_bearing_floor"
-    ; "env_var", `Null
-    ]
+  `Assoc [ "value", value; "source", `String "load_bearing_floor"; "env_var", `Null ]
+;;
 
 let entry_hardcoded (value : Yojson.Safe.t) : Yojson.Safe.t =
-  `Assoc
-    [ "value", value
-    ; "source", `String "hardcoded"
-    ; "env_var", `Null
-    ]
+  `Assoc [ "value", value; "source", `String "hardcoded"; "env_var", `Null ]
+;;
 
 let bool_v b : Yojson.Safe.t = `Bool b
 let int_v i : Yojson.Safe.t = `Int i
@@ -282,97 +291,114 @@ let string_v s : Yojson.Safe.t = `String s
 
 let raw_hardening () : Yojson.Safe.t =
   `Assoc
-    [ "hard_mode",
-      entry_env_overridable ~env_var:"MASC_KEEPER_SANDBOX_HARD_MODE"
-        (bool_v (Hardening.hard_mode ()))
-    ; "pids_limit",
-      entry_env_overridable ~env_var:"MASC_KEEPER_SANDBOX_PIDS_LIMIT"
-        (int_v (Hardening.pids_limit ()))
-    ; "nofile_limit",
-      entry_env_overridable ~env_var:"MASC_KEEPER_SANDBOX_NOFILE_LIMIT"
-        (int_v (Hardening.nofile_limit ()))
-    ; "memory",
-      entry_env_overridable ~env_var:"MASC_KEEPER_SANDBOX_MEMORY"
-        (string_v (Hardening.memory ()))
-    ; "tmpfs_size",
-      entry_env_overridable ~env_var:"MASC_KEEPER_SANDBOX_TMPFS_SIZE"
-        (string_v (Hardening.tmpfs_size ()))
-    ; "relax_fs",
-      entry_env_overridable ~env_var:"MASC_KEEPER_SANDBOX_RELAX_FS"
-        (bool_v (Hardening.relax_fs ()))
-    ; "seccomp_profile",
-      entry_env_overridable ~env_var:"MASC_KEEPER_SANDBOX_SECCOMP_PROFILE"
-        (string_v (Hardening.seccomp_profile ()))
-    ; "require_rootless",
-      entry_env_overridable ~env_var:"MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS"
-        (bool_v (Hardening.require_rootless ()))
-    ; "require_userns",
-      entry_env_overridable ~env_var:"MASC_KEEPER_SANDBOX_REQUIRE_USERNS"
-        (bool_v (Hardening.require_userns ()))
+    [ ( "hard_mode"
+      , entry_env_overridable
+          ~env_var:"MASC_KEEPER_SANDBOX_HARD_MODE"
+          (bool_v (Hardening.hard_mode ())) )
+    ; ( "pids_limit"
+      , entry_env_overridable
+          ~env_var:"MASC_KEEPER_SANDBOX_PIDS_LIMIT"
+          (int_v (Hardening.pids_limit ())) )
+    ; ( "nofile_limit"
+      , entry_env_overridable
+          ~env_var:"MASC_KEEPER_SANDBOX_NOFILE_LIMIT"
+          (int_v (Hardening.nofile_limit ())) )
+    ; ( "memory"
+      , entry_env_overridable
+          ~env_var:"MASC_KEEPER_SANDBOX_MEMORY"
+          (string_v (Hardening.memory ())) )
+    ; ( "tmpfs_size"
+      , entry_env_overridable
+          ~env_var:"MASC_KEEPER_SANDBOX_TMPFS_SIZE"
+          (string_v (Hardening.tmpfs_size ())) )
+    ; ( "relax_fs"
+      , entry_env_overridable
+          ~env_var:"MASC_KEEPER_SANDBOX_RELAX_FS"
+          (bool_v (Hardening.relax_fs ())) )
+    ; ( "seccomp_profile"
+      , entry_env_overridable
+          ~env_var:"MASC_KEEPER_SANDBOX_SECCOMP_PROFILE"
+          (string_v (Hardening.seccomp_profile ())) )
+    ; ( "require_rootless"
+      , entry_env_overridable
+          ~env_var:"MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS"
+          (bool_v (Hardening.require_rootless ())) )
+    ; ( "require_userns"
+      , entry_env_overridable
+          ~env_var:"MASC_KEEPER_SANDBOX_REQUIRE_USERNS"
+          (bool_v (Hardening.require_userns ())) )
     ]
+;;
 
 let raw_cleanup () : Yojson.Safe.t =
   `Assoc
-    [ "enabled",
-      entry_env_overridable ~env_var:"MASC_KEEPER_SANDBOX_CLEANUP_ENABLED"
-        (bool_v (Cleanup.enabled ()))
-    ; "stale_after_sec",
-      entry_env_overridable
-        ~env_var:"MASC_KEEPER_SANDBOX_CLEANUP_STALE_AFTER_SEC"
-        (float_v (Cleanup.stale_after_sec ()))
-    ; "interval_sec",
-      entry_env_overridable
-        ~env_var:"MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC"
-        (float_v (Cleanup.interval_sec ()))
-    ; "managed_sleep_sec",
-      entry_hardcoded (int_v (Cleanup.managed_sleep_sec ()))
+    [ ( "enabled"
+      , entry_env_overridable
+          ~env_var:"MASC_KEEPER_SANDBOX_CLEANUP_ENABLED"
+          (bool_v (Cleanup.enabled ())) )
+    ; ( "stale_after_sec"
+      , entry_env_overridable
+          ~env_var:"MASC_KEEPER_SANDBOX_CLEANUP_STALE_AFTER_SEC"
+          (float_v (Cleanup.stale_after_sec ())) )
+    ; ( "interval_sec"
+      , entry_env_overridable
+          ~env_var:"MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC"
+          (float_v (Cleanup.interval_sec ())) )
+    ; "managed_sleep_sec", entry_hardcoded (int_v (Cleanup.managed_sleep_sec ()))
     ]
+;;
 
 let raw_runtime () : Yojson.Safe.t =
   `Assoc
-    [ "docker_image",
-      entry_env_overridable ~env_var:"MASC_KEEPER_SANDBOX_DOCKER_IMAGE"
-        (string_v (Runtime.docker_image ()))
-    ; "git_dispatch",
-      entry_env_overridable ~env_var:"MASC_KEEPER_SANDBOX_GIT_DISPATCH"
-        (bool_v (Runtime.git_dispatch ()))
-    ; "docker_playground_enabled",
-      entry_env_overridable ~env_var:"MASC_KEEPER_DOCKER_PLAYGROUND"
-        (bool_v (Runtime.docker_playground_enabled ()))
+    [ ( "docker_image"
+      , entry_env_overridable
+          ~env_var:"MASC_KEEPER_SANDBOX_DOCKER_IMAGE"
+          (string_v (Runtime.docker_image ())) )
+    ; ( "git_dispatch"
+      , entry_env_overridable
+          ~env_var:"MASC_KEEPER_SANDBOX_GIT_DISPATCH"
+          (bool_v (Runtime.git_dispatch ())) )
+    ; ( "docker_playground_enabled"
+      , entry_env_overridable
+          ~env_var:"MASC_KEEPER_DOCKER_PLAYGROUND"
+          (bool_v (Runtime.docker_playground_enabled ())) )
     ]
+;;
 
 let raw_auth_paths () : Yojson.Safe.t =
   `Assoc
-    [ "gh_creds",
-      entry_env_overridable ~env_var:"MASC_KEEPER_SANDBOX_GH_CREDS"
-        (string_v (Auth_paths.gh_creds ()))
-    ; "gitconfig",
-      entry_env_overridable ~env_var:"MASC_KEEPER_SANDBOX_GITCONFIG"
-        (string_v (Auth_paths.gitconfig ()))
-    ; "ssh_dir",
-      entry_env_overridable ~env_var:"MASC_KEEPER_SANDBOX_SSH_DIR"
-        (string_v (Auth_paths.ssh_dir ()))
-    ; "gh_token_probe_timeout_sec",
-      entry_env_overridable
-        ~env_var:"MASC_KEEPER_SANDBOX_GH_TOKEN_PROBE_TIMEOUT_SEC"
-        (float_v (Auth_paths.gh_token_probe_timeout_sec ()))
+    [ ( "gh_creds"
+      , entry_env_overridable
+          ~env_var:"MASC_KEEPER_SANDBOX_GH_CREDS"
+          (string_v (Auth_paths.gh_creds ())) )
+    ; ( "gitconfig"
+      , entry_env_overridable
+          ~env_var:"MASC_KEEPER_SANDBOX_GITCONFIG"
+          (string_v (Auth_paths.gitconfig ())) )
+    ; ( "ssh_dir"
+      , entry_env_overridable
+          ~env_var:"MASC_KEEPER_SANDBOX_SSH_DIR"
+          (string_v (Auth_paths.ssh_dir ())) )
+    ; ( "gh_token_probe_timeout_sec"
+      , entry_env_overridable
+          ~env_var:"MASC_KEEPER_SANDBOX_GH_TOKEN_PROBE_TIMEOUT_SEC"
+          (float_v (Auth_paths.gh_token_probe_timeout_sec ())) )
     ]
+;;
 
 let raw_preflight () : Yojson.Safe.t =
   `Assoc
-    [ "enabled",
-      entry_env_overridable
-        ~env_var:"MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED"
-        (bool_v (Preflight.enabled ()))
-    ; "min_timeout_sec",
-      entry_hardcoded (float_v (Preflight.min_timeout_sec ()))
-    ; "max_timeout_sec",
-      entry_hardcoded (float_v (Preflight.max_timeout_sec ()))
-    ; "required_commands",
-      entry_floor
-        (`List (List.map (fun s -> `String s)
-                  (Preflight.required_commands ())))
+    [ ( "enabled"
+      , entry_env_overridable
+          ~env_var:"MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED"
+          (bool_v (Preflight.enabled ())) )
+    ; "min_timeout_sec", entry_hardcoded (float_v (Preflight.min_timeout_sec ()))
+    ; "max_timeout_sec", entry_hardcoded (float_v (Preflight.max_timeout_sec ()))
+    ; ( "required_commands"
+      , entry_floor
+          (`List (List.map (fun s -> `String s) (Preflight.required_commands ()))) )
     ]
+;;
 
 let raw_shell_timeout () : Yojson.Safe.t =
   let bucket_entry b =
@@ -382,13 +408,12 @@ let raw_shell_timeout () : Yojson.Safe.t =
       match b with
       | Gh_min -> entry_floor value
       | _ ->
-        entry_env_overridable
-          ~env_var:(Shell_timeout.per_bucket_env_var ~bucket:b)
-          value
+        entry_env_overridable ~env_var:(Shell_timeout.per_bucket_env_var ~bucket:b) value
     in
     key, entry
   in
   `Assoc (List.map bucket_entry (Shell_timeout.known_buckets ()))
+;;
 
 let raw_section () : Yojson.Safe.t =
   `Assoc
@@ -399,23 +424,19 @@ let raw_section () : Yojson.Safe.t =
     ; "preflight", raw_preflight ()
     ; "shell_timeout", raw_shell_timeout ()
     ]
+;;
 
 let derived_section () : Yojson.Safe.t =
   `Assoc
-    [ "read_only_rootfs_args",
-      `List (List.map (fun s -> `String s)
-               (Hardening.read_only_rootfs_args ()))
+    [ ( "read_only_rootfs_args"
+      , `List (List.map (fun s -> `String s) (Hardening.read_only_rootfs_args ())) )
     ; "tmpfs_mount", `String (Hardening.tmpfs_mount ())
-    ; "effective_gh_creds_path",
-      `String (Auth_paths.gh_creds ())
-    ; "effective_gitconfig_path",
-      `String (Auth_paths.gitconfig ())
-    ; "effective_ssh_dir_path",
-      `String (Auth_paths.ssh_dir ())
+    ; "effective_gh_creds_path", `String (Auth_paths.gh_creds ())
+    ; "effective_gitconfig_path", `String (Auth_paths.gitconfig ())
+    ; "effective_ssh_dir_path", `String (Auth_paths.ssh_dir ())
     ]
+;;
 
 let effective_config_json () : Yojson.Safe.t =
-  `Assoc
-    [ "raw", raw_section ()
-    ; "derived", derived_section ()
-    ]
+  `Assoc [ "raw", raw_section (); "derived", derived_section () ]
+;;

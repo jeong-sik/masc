@@ -21,39 +21,26 @@
 
 (** Telemetry source discriminator. *)
 type source =
-  | Keeper_metric  (** Per-keeper turn/heartbeat metrics *)
-  | Agent_event    (** Agent lifecycle, task, handoff events *)
-  | Tool_call_io   (** Keeper tool calls with full input/output *)
-  | Trajectory_tool_call  (** Trajectory-backed keeper tool call rows *)
-  | Tool_usage     (** System_internal surface tool invocations *)
-  | Oas_event      (** Durable OAS native/custom event bus relays *)
-  | Execution_receipt  (** Keeper execution receipt rows *)
-  | Goal_event     (** Goal FSM lifecycle and verification events *)
-  | Tool_metric    (** Tool duration and success metrics *)
+  | Keeper_metric (** Per-keeper turn/heartbeat metrics *)
+  | Agent_event (** Agent lifecycle, task, handoff events *)
+  | Tool_call_io (** Keeper tool calls with full input/output *)
+  | Trajectory_tool_call (** Trajectory-backed keeper tool call rows *)
+  | Tool_usage (** System_internal surface tool invocations *)
+  | Oas_event (** Durable OAS native/custom event bus relays *)
+  | Execution_receipt (** Keeper execution receipt rows *)
+  | Goal_event (** Goal FSM lifecycle and verification events *)
+  | Tool_metric (** Tool duration and success metrics *)
 
 val source_to_string : source -> string
 val source_of_string : string -> source option
 val all_sources : source list
 
-type read_result = {
-  entries : Yojson.Safe.t list;
-  total_matching_entries : int;
-  truncated : bool;
-}
+type read_result =
+  { entries : Yojson.Safe.t list
+  ; total_matching_entries : int
+  ; truncated : bool
+  }
 
-val read_unified :
-  base_path:string ->
-  masc_root:string ->
-  ?sources:source list ->
-  ?keeper_name:string ->
-  ?session_id:string ->
-  ?operation_id:string ->
-  ?worker_run_id:string ->
-  ?since_ts:float ->
-  ?until_ts:float ->
-  ?n:int ->
-  unit ->
-  Yojson.Safe.t list
 (** [read_unified ~base_path ~masc_root ?sources ?keeper_name ?session_id
       ?operation_id ?worker_run_id ?since_ts ?until_ts ?n ()]
     reads entries from [sources] (default: all sources), optionally filtered
@@ -66,29 +53,38 @@ val read_unified :
     project root, used only for [data/] paths.
 
     Each entry is a JSON object with an added ["source"] field. *)
+val read_unified
+  :  base_path:string
+  -> masc_root:string
+  -> ?sources:source list
+  -> ?keeper_name:string
+  -> ?session_id:string
+  -> ?operation_id:string
+  -> ?worker_run_id:string
+  -> ?since_ts:float
+  -> ?until_ts:float
+  -> ?n:int
+  -> unit
+  -> Yojson.Safe.t list
 
-val read_unified_result :
-  base_path:string ->
-  masc_root:string ->
-  ?sources:source list ->
-  ?keeper_name:string ->
-  ?session_id:string ->
-  ?operation_id:string ->
-  ?worker_run_id:string ->
-  ?since_ts:float ->
-  ?until_ts:float ->
-  ?n:int ->
-  unit ->
-  read_result
 (** Like {!read_unified}, but also returns the total number of matching
     entries before truncation plus whether truncation occurred. *)
+val read_unified_result
+  :  base_path:string
+  -> masc_root:string
+  -> ?sources:source list
+  -> ?keeper_name:string
+  -> ?session_id:string
+  -> ?operation_id:string
+  -> ?worker_run_id:string
+  -> ?since_ts:float
+  -> ?until_ts:float
+  -> ?n:int
+  -> unit
+  -> read_result
 
-val summary_json :
-  base_path:string ->
-  masc_root:string ->
-  unit ->
-  Yojson.Safe.t
 (** [summary_json ~base_path ~masc_root ()] returns a JSON overview of
     each source: path, entry count, whether the store directory exists,
     and freshness metadata ([latest_ts_unix], [latest_ts_iso],
     [latest_age_s]).  [masc_root] is the cluster-aware .masc directory. *)
+val summary_json : base_path:string -> masc_root:string -> unit -> Yojson.Safe.t

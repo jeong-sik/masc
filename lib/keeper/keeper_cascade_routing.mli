@@ -9,10 +9,10 @@
     @since Core Triad (State x Decision x Cascade) *)
 
 (** Result of cascade routing decision. *)
-type routing_decision = {
-  effective_cascade : string;
-  reason : string;
-}
+type routing_decision =
+  { effective_cascade : string
+  ; reason : string
+  }
 
 (** Select the effective cascade profile for the current turn.
 
@@ -28,16 +28,16 @@ type routing_decision = {
     This helper is total: even phases that are blocked upstream still return
     a routing decision so dashboards/tests can inspect the same contract.
     The keeper cycle gate remains the owner of "can this phase execute a turn?" *)
-val select_cascade :
-  base_cascade:string ->
-  phase:Keeper_state_machine.phase ->
-  routing_decision
+val select_cascade
+  :  base_cascade:string
+  -> phase:Keeper_state_machine.phase
+  -> routing_decision
 
 (** Preserve an already-routed cascade while carrying the tool requirement
     forward to provider capability filtering. Tool-required turns must not
     rewrite profile names such as ["tool_use_strict"]; the cascade resolver
     and provider capability gate own the concrete candidate set. *)
-val route_effective_cascade_for_tool_requirement :
-  effective_cascade:string ->
-  tool_requirement:string ->
-  routing_decision
+val route_effective_cascade_for_tool_requirement
+  :  effective_cascade:string
+  -> tool_requirement:string
+  -> routing_decision

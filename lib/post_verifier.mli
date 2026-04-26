@@ -16,25 +16,25 @@ type verdict =
 
 (** Verification dimension. *)
 type dimension =
-  | Relevance  (** Content has substance — minimum length, not filler. *)
-  | Quality    (** Well-formed — no character/token repetition, coherent. *)
-  | Safety     (** No shouting / spam indicators. *)
+  | Relevance (** Content has substance — minimum length, not filler. *)
+  | Quality (** Well-formed — no character/token repetition, coherent. *)
+  | Safety (** No shouting / spam indicators. *)
 
 (** Per-dimension result pair (used by {!to_dimension_results}). *)
-type dimension_result = {
-  dimension : dimension;
-  verdict : verdict;
-}
+type dimension_result =
+  { dimension : dimension
+  ; verdict : verdict
+  }
 
 (** Aggregate result across all three dimensions.
     [overall] is [Fail] if any dimension failed, else [Warn] if any warned,
     else [Pass]. *)
-type verification_result = {
-  relevance : verdict;
-  quality : verdict;
-  safety : verdict;
-  overall : verdict;
-}
+type verification_result =
+  { relevance : verdict
+  ; quality : verdict
+  ; safety : verdict
+  ; overall : verdict
+  }
 
 (** {1 Verification} *)
 

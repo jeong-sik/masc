@@ -10,8 +10,7 @@
 
 (** {1 Internal helpers} *)
 
-let log_err tag msg =
-  Log.Misc.error "relation-materializer %s failed: %s" tag msg
+let log_err tag msg = Log.Misc.error "relation-materializer %s failed: %s" tag msg
 
 (** Build a single batched GraphQL mutation using aliases.
     20 peers → 1 HTTP request with 20 aliased fields.
@@ -30,12 +29,20 @@ let build_batch_mutation ~agent ~peers ~context =
     let parts = String.split_on_char '"' s in
     String.concat "\\\"" parts
   in
-  let fields = List.mapi (fun i peer ->
-    Printf.sprintf
-      "c%d: recordCollaborationByName(agent1Name: \"%s\", agent2Name: \"%s\", context: \"%s\") { success }"
-      i (escape agent) (escape peer) (escape context)
-  ) peers in
+  let fields =
+    List.mapi
+      (fun i peer ->
+         Printf.sprintf
+           "c%d: recordCollaborationByName(agent1Name: \"%s\", agent2Name: \"%s\", \
+            context: \"%s\") { success }"
+           i
+           (escape agent)
+           (escape peer)
+           (escape context))
+      peers
+  in
   "mutation { " ^ String.concat " " fields ^ " }"
+;;
 
 (** Send all collaboration pairs in one batched HTTP request.
     Detaches to an Eio fiber when runtime is available. *)
@@ -54,8 +61,8 @@ let record_collaborations_async ~tag ~context ~agent ~peers =
     (* Detach into an Eio fiber — returns immediately *)
     Eio.Fiber.fork_daemon ~sw (fun () ->
       do_batch ();
-      `Stop_daemon
-    )
+      `Stop_daemon)
+;;
 
 (** {1 Collaboration — agent leave} *)
 
@@ -65,11 +72,14 @@ let record_collaborations_async ~tag ~context ~agent ~peers =
     20 peers = 1 HTTP request (alias batching). *)
 let on_agent_leave ~leaving_agent ~active_agents =
   let peers = List.filter (fun name -> name <> leaving_agent) active_agents in
-  if peers <> [] then
+  if peers <> []
+  then
     record_collaborations_async
       ~tag:"collab"
       ~context:(Printf.sprintf "co-present in MASC room at %s" (Types.now_iso ()))
-      ~agent:leaving_agent ~peers
+      ~agent:leaving_agent
+      ~peers
+;;
 
 (** {1 Task completion} *)
 
@@ -78,8 +88,11 @@ let on_agent_leave ~leaving_agent ~active_agents =
     20 peers = 1 HTTP request (alias batching). *)
 let on_task_done ~assignee ~active_agents =
   let peers = List.filter (fun name -> name <> assignee) active_agents in
-  if peers <> [] then
+  if peers <> []
+  then
     record_collaborations_async
       ~tag:"task-collab"
       ~context:(Printf.sprintf "task collaboration at %s" (Types.now_iso ()))
-      ~agent:assignee ~peers
+      ~agent:assignee
+      ~peers
+;;

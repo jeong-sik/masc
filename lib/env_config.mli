@@ -11,8 +11,8 @@ include module type of Env_config_runtime
 include module type of Env_config_governance
 include module type of Env_config_keeper
 
-val print_summary : unit -> unit
 (** Print configuration summary for debugging. *)
+val print_summary : unit -> unit
 
-val to_json : unit -> Yojson.Safe.t
 (** Serialize all known configuration as JSON for dashboard introspection. *)
+val to_json : unit -> Yojson.Safe.t

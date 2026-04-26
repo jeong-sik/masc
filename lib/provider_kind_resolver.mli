@@ -16,21 +16,24 @@
     Related: #7600 (master inventory of stringly-typed provider sites). *)
 
 type resolution =
-  | Registered of {
-      provider_name : string;
-      model_id : string;
-      kind : Llm_provider.Provider_config.provider_kind;
-    }
-      (** The provider prefix is known either in {!Provider_registry} or
+  | Registered of
+      { provider_name : string
+      ; model_id : string
+      ; kind : Llm_provider.Provider_config.provider_kind
+      }
+  (** The provider prefix is known either in {!Provider_registry} or
           via a repo-local compatibility provider, and the returned
           [kind] is the authoritative classification. *)
-  | Custom_url of { model_id : string; base_url : string }
-      (** The spec uses the ["custom:model\@url"] form; kind is
+  | Custom_url of
+      { model_id : string
+      ; base_url : string
+      }
+  (** The spec uses the ["custom:model\@url"] form; kind is
           {i by contract} [OpenAI_compat] because that is the protocol
           the custom runtime must speak. Callers do not substitute a
           different kind. *)
   | Unknown of string
-      (** The spec is malformed (missing colon, empty half) or the
+  (** The spec is malformed (missing colon, empty half) or the
           provider name is not registered. The string carries a short
           reason for logging. Callers must not default this to any
           concrete kind. *)
@@ -51,5 +54,4 @@ val resolve : string -> resolution
 (** Extract just the {!Provider_config.provider_kind} for a spec, if
     known. Returns [None] for [Unknown]. Useful for call sites that
     only need the kind and not the split model id. *)
-val kind_of_spec :
-  string -> Llm_provider.Provider_config.provider_kind option
+val kind_of_spec : string -> Llm_provider.Provider_config.provider_kind option

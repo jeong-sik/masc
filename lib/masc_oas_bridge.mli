@@ -8,11 +8,11 @@
     [caller] (#10094) labels the Prometheus timeout counter so the
     operator can attribute timeouts to specific call sites; defaults
     to ["unknown"] for backwards compatibility with legacy callers. *)
-val run_safe :
-  ?caller:string ->
-  timeout_s:float ->
-  (unit -> ('a, Oas.Error.sdk_error) result) ->
-  ('a, Oas.Error.sdk_error) result
+val run_safe
+  :  ?caller:string
+  -> timeout_s:float
+  -> (unit -> ('a, Oas.Error.sdk_error) result)
+  -> ('a, Oas.Error.sdk_error) result
 
 (** Single entry point that resolves the per-caller timeout from
     [Env_config_oas_bridge] and labels the resulting Prometheus
@@ -20,7 +20,7 @@ val run_safe :
     timeout is no longer a hardcoded literal but an
     env-overridable per-caller budget.  See [Env_config_oas_bridge]
     for the per-caller default table and env-var layout. *)
-val run_with_caller :
-  caller:Env_config_oas_bridge.caller ->
-  (unit -> ('a, Oas.Error.sdk_error) result) ->
-  ('a, Oas.Error.sdk_error) result
+val run_with_caller
+  :  caller:Env_config_oas_bridge.caller
+  -> (unit -> ('a, Oas.Error.sdk_error) result)
+  -> ('a, Oas.Error.sdk_error) result

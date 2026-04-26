@@ -5,38 +5,40 @@
 
     Closed set — exhaustive matching catches new levels at compile time. *)
 
-type operator_severity = Sev_critical | Sev_bad | Sev_warn
+type operator_severity =
+  | Sev_critical
+  | Sev_bad
+  | Sev_warn
 
 val operator_severity_to_string : operator_severity -> string
 
 (** Safe reverse: [None] on unknown input. *)
 val operator_severity_of_string_opt : string -> operator_severity option
 
-val operator_severity_of_failure_envelope :
-  Failure_envelope.severity -> operator_severity
+val operator_severity_of_failure_envelope : Failure_envelope.severity -> operator_severity
 
 (** {1 Attention item} *)
 
-type attention_item = {
-  kind : string;
-  severity : operator_severity;
-  summary : string;
-  target_type : string;
-  target_id : string option;
-  actor : string option;
-  evidence : Yojson.Safe.t;
-}
+type attention_item =
+  { kind : string
+  ; severity : operator_severity
+  ; summary : string
+  ; target_type : string
+  ; target_id : string option
+  ; actor : string option
+  ; evidence : Yojson.Safe.t
+  }
 
 (** {1 Recommended action} *)
 
-type recommended_action = {
-  action_type : string;
-  target_type : string;
-  target_id : string option;
-  severity : operator_severity;
-  reason : string;
-  suggested_payload : Yojson.Safe.t;
-}
+type recommended_action =
+  { action_type : string
+  ; target_type : string
+  ; target_id : string option
+  ; severity : operator_severity
+  ; reason : string
+  ; suggested_payload : Yojson.Safe.t
+  }
 
 (** {1 Thresholds and ranking} *)
 
@@ -67,8 +69,7 @@ val recommended_confirm_required : string -> bool
 
 (** Emit with preview envelope, [provenance = "fallback"],
     [authoritative = false]. *)
-val recommended_action_to_yojson :
-  actor:string -> recommended_action -> Yojson.Safe.t
+val recommended_action_to_yojson : actor:string -> recommended_action -> Yojson.Safe.t
 
 (** {1 Summary builders} *)
 
@@ -79,8 +80,7 @@ val summary_of_attention_items : attention_item list -> Yojson.Safe.t
     keeping the highest-severity representative. *)
 val dedup_recommendations : recommended_action list -> recommended_action list
 
-val summary_of_recommendations :
-  actor:string -> recommended_action list -> Yojson.Safe.t
+val summary_of_recommendations : actor:string -> recommended_action list -> Yojson.Safe.t
 
 (** {1 Target type normalisation} *)
 

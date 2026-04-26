@@ -17,11 +17,11 @@ val is_enabled : unit -> bool
 
 (** Build a gRPC server preloaded with reflection, health, and coordination
     services. Exposed for tests and local transport wiring checks. *)
-val create_server :
-  port:int ->
-  room_config:Coord_utils_backend_setup.config ->
-  tool_dispatcher:(string -> string -> (string, string) result) ->
-  Grpc_eio.Server.t
+val create_server
+  :  port:int
+  -> room_config:Coord_utils_backend_setup.config
+  -> tool_dispatcher:(string -> string -> (string, string) result)
+  -> Grpc_eio.Server.t
 
 (** Start the gRPC coordination server in a forked fiber.
 
@@ -31,9 +31,9 @@ val create_server :
     @param env Eio environment.
     @param room_config The MASC room configuration.
     @param tool_dispatcher Function that dispatches tool calls. *)
-val start :
-  sw:Eio.Switch.t ->
-  env:Eio_unix.Stdenv.base ->
-  room_config:Coord_utils_backend_setup.config ->
-  tool_dispatcher:(string -> string -> (string, string) result) ->
-  unit
+val start
+  :  sw:Eio.Switch.t
+  -> env:Eio_unix.Stdenv.base
+  -> room_config:Coord_utils_backend_setup.config
+  -> tool_dispatcher:(string -> string -> (string, string) result)
+  -> unit

@@ -26,17 +26,17 @@
     - [target] does NOT resolve under the keeper's playground bundle root
 
     A no-op (always [Ok ()]) for local keepers. *)
-val check_read_target :
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
-  target:string ->
-  (unit, string) result
+val check_read_target
+  :  config:Coord.config
+  -> meta:Keeper_types.keeper_meta
+  -> target:string
+  -> (unit, string) result
 
 (** [check_write_target] is the write-side counterpart to
     [check_read_target]. A no-op for local keepers; for Docker keepers,
     host writes are limited to the keeper playground bundle. *)
-val check_write_target :
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
-  target:string ->
-  (unit, string) result
+val check_write_target
+  :  config:Coord.config
+  -> meta:Keeper_types.keeper_meta
+  -> target:string
+  -> (unit, string) result

@@ -10,14 +10,14 @@
     These break circular dependency between Dashboard subsystems. *)
 
 (** Coord snapshot shared between Dashboard and Dashboard_attention. *)
-type room_snapshot = {
-  room_id : string;
-  is_current : bool;
-  agents : Types.agent list;
-  tasks : Types.task list;
-  messages : Types.message list;
-  locks : int;
-}
+type room_snapshot =
+  { room_id : string
+  ; is_current : bool
+  ; agents : Types.agent list
+  ; tasks : Types.task list
+  ; messages : Types.message list
+  ; locks : int
+  }
 
 (** {1 Timestamp parsing}
 
@@ -40,15 +40,18 @@ val format_elapsed : float -> string -> string -> string
 
 (** Translate agent status + [last_seen_iso] into operator-readable text
     like ["working"], ["quiet (Nm)"], ["STUCK (Nm, needs check)"], etc. *)
-val translate_agent_status :
-  now:float -> Types.agent_status -> string -> string
+val translate_agent_status : now:float -> Types.agent_status -> string -> string
 
 (** Agent grouping for capacity / operator views.
 
     [Offline] (Inactive) is distinct from [Idle] (Listening) so
     downstream capacity logic does not treat offline agents as
     available. *)
-type agent_group = Working | Stuck | Idle | Offline
+type agent_group =
+  | Working
+  | Stuck
+  | Idle
+  | Offline
 [@@deriving eq]
 
 (** Classify an agent using wall-clock [now] and the stuck threshold.

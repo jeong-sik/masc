@@ -32,6 +32,7 @@ let scrub_text_blocks (msg : Oas.Types.message) : Oas.Types.message =
       msg.content
   in
   { msg with content = content' }
+;;
 
 (** Scrub [STATE] blocks from each message's Text before summarization,
     then delegate to OAS's exported default summarizer. Callers pass
@@ -39,3 +40,4 @@ let scrub_text_blocks (msg : Oas.Types.message) : Oas.Types.message =
 let keeper_summarizer (messages : Oas.Types.message list) : string =
   let scrubbed = List.map scrub_text_blocks messages in
   Oas.Budget_strategy.default_summarizer scrubbed
+;;

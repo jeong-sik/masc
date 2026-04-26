@@ -3,30 +3,34 @@ open Alcotest
 let provider_kinds providers =
   List.map
     (fun (cfg : Llm_provider.Provider_config.t) ->
-      Llm_provider.Provider_config.string_of_provider_kind cfg.kind)
+       Llm_provider.Provider_config.string_of_provider_kind cfg.kind)
     providers
+;;
 
 let provider_kind_models providers =
   List.map
     (fun (cfg : Llm_provider.Provider_config.t) ->
-      Printf.sprintf "%s:%s"
-        (Llm_provider.Provider_config.string_of_provider_kind cfg.kind)
-        cfg.model_id)
+       Printf.sprintf
+         "%s:%s"
+         (Llm_provider.Provider_config.string_of_provider_kind cfg.kind)
+         cfg.model_id)
     providers
+;;
 
 let provider_supports_required_tool_use (cfg : Llm_provider.Provider_config.t) =
   let caps = Masc_mcp.Oas_worker_exec.provider_caps_of_config cfg in
   caps.supports_tools && caps.supports_tool_choice
+;;
 
 let provider_supports_callable_tool_use (cfg : Llm_provider.Provider_config.t) =
   let caps = Masc_mcp.Oas_worker_exec.provider_caps_of_config cfg in
   caps.supports_tools
   || (caps.supports_runtime_mcp_tools && caps.supports_runtime_tool_events)
+;;
 
 let direct_model_strings =
-  [ "ollama:local-model"
-  ; "custom:remote-model@http://127.0.0.1:18080/v1"
-  ]
+  [ "ollama:local-model"; "custom:remote-model@http://127.0.0.1:18080/v1" ]
+;;
 
 let test_provider_filter_is_applied_to_direct_model_strings () =
   let providers =
@@ -34,8 +38,12 @@ let test_provider_filter_is_applied_to_direct_model_strings () =
       ~provider_filter:[ "openai_compat" ]
       direct_model_strings
   in
-  check (list string) "filtered to requested provider kind"
-    [ "openai_compat" ] (provider_kinds providers)
+  check
+    (list string)
+    "filtered to requested provider kind"
+    [ "openai_compat" ]
+    (provider_kinds providers)
+;;
 
 let test_provider_filter_falls_back_to_unfiltered_when_no_match () =
   let providers =
@@ -43,8 +51,12 @@ let test_provider_filter_falls_back_to_unfiltered_when_no_match () =
       ~provider_filter:[ "gemini" ]
       direct_model_strings
   in
-  check (list string) "no-match filter falls back to unfiltered providers"
-    [ "ollama"; "openai_compat" ] (provider_kinds providers)
+  check
+    (list string)
+    "no-match filter falls back to unfiltered providers"
+    [ "ollama"; "openai_compat" ]
+    (provider_kinds providers)
+;;
 
 let tool_required_model_strings =
   [ "custom:remote-model@http://127.0.0.1:18080/v1"
@@ -52,6 +64,7 @@ let tool_required_model_strings =
   ; "gemini_cli:auto"
   ; "ollama:local-model"
   ]
+;;
 
 let callable_tool_required_model_strings =
   [ "custom:remote-model@http://127.0.0.1:18080/v1"
@@ -61,24 +74,23 @@ let callable_tool_required_model_strings =
   ; "gemini_cli:auto"
   ; "ollama:local-model"
   ]
+;;
 
 let runtime_mcp_policy_with_headers =
-  {
-    Llm_provider.Llm_transport.empty_runtime_mcp_policy with
+  { Llm_provider.Llm_transport.empty_runtime_mcp_policy with
     servers =
-      [
-        Llm_provider.Llm_transport.Http_server
-          {
-            name = "masc";
-            url = "http://127.0.0.1:8935/mcp";
-            headers = [ ("x-masc-agent-name", "keeper-sangsu-agent") ];
-          };
-      ];
-    allowed_server_names = [ "masc" ];
-    allowed_tool_names = [ "masc_status" ];
-    strict = true;
-    disable_builtin_tools = true;
+      [ Llm_provider.Llm_transport.Http_server
+          { name = "masc"
+          ; url = "http://127.0.0.1:8935/mcp"
+          ; headers = [ "x-masc-agent-name", "keeper-sangsu-agent" ]
+          }
+      ]
+  ; allowed_server_names = [ "masc" ]
+  ; allowed_tool_names = [ "masc_status" ]
+  ; strict = true
+  ; disable_builtin_tools = true
   }
+;;
 
 let test_required_tool_choice_filter_keeps_only_supported_providers () =
   let providers =
@@ -86,12 +98,22 @@ let test_required_tool_choice_filter_keeps_only_supported_providers () =
       ~require_tool_choice_support:true
       tool_required_model_strings
   in
-  check bool "every surviving provider satisfies required tool-use capabilities" true
+  check
+    bool
+    "every surviving provider satisfies required tool-use capabilities"
+    true
     (List.for_all provider_supports_required_tool_use providers);
-  check bool "drops codex_cli without inline tool choice" false
+  check
+    bool
+    "drops codex_cli without inline tool choice"
+    false
     (List.mem "codex_cli" (provider_kinds providers));
-  check bool "drops gemini_cli without inline tool choice" false
+  check
+    bool
+    "drops gemini_cli without inline tool choice"
+    false
     (List.mem "gemini_cli" (provider_kinds providers))
+;;
 
 let test_required_tool_choice_filter_can_exhaust_candidates () =
   let providers =
@@ -99,8 +121,12 @@ let test_required_tool_choice_filter_can_exhaust_candidates () =
       ~require_tool_choice_support:true
       [ "ollama:local-model" ]
   in
-  check (list string) "unsupported-only candidate set becomes empty" []
+  check
+    (list string)
+    "unsupported-only candidate set becomes empty"
+    []
     (provider_kind_models providers)
+;;
 
 let test_required_tool_support_filter_keeps_inline_or_runtime_capable_providers () =
   let providers =
@@ -108,12 +134,22 @@ let test_required_tool_support_filter_keeps_inline_or_runtime_capable_providers 
       ~require_tool_support:true
       callable_tool_required_model_strings
   in
-  check bool "tool-support path keeps at least one callable provider" true
+  check
+    bool
+    "tool-support path keeps at least one callable provider"
+    true
     (providers <> []);
-  check bool "every surviving provider supports inline or runtime MCP tools" true
+  check
+    bool
+    "every surviving provider supports inline or runtime MCP tools"
+    true
     (List.for_all provider_supports_callable_tool_use providers);
-  check bool "drops gemini_cli without runtime MCP lane" false
+  check
+    bool
+    "drops gemini_cli without runtime MCP lane"
+    false
     (List.mem "gemini_cli" (provider_kinds providers))
+;;
 
 let test_required_tool_gate_filter_keeps_runtime_mcp_capable_cli_providers () =
   let providers =
@@ -122,26 +158,44 @@ let test_required_tool_gate_filter_keeps_runtime_mcp_capable_cli_providers () =
       ~require_tool_support:true
       callable_tool_required_model_strings
   in
-  check bool "tool gate keeps at least one callable provider" true
-    (providers <> []);
-  check bool "keeps kimi_cli via runtime MCP lane" true
+  check bool "tool gate keeps at least one callable provider" true (providers <> []);
+  check
+    bool
+    "keeps kimi_cli via runtime MCP lane"
+    true
     (List.mem "kimi_cli" (provider_kinds providers));
-  check bool "drops gemini_cli without runtime MCP lane" false
+  check
+    bool
+    "drops gemini_cli without runtime MCP lane"
+    false
     (List.mem "gemini_cli" (provider_kinds providers))
+;;
 
-let test_required_tool_support_filter_drops_runtime_mcp_providers_without_header_support () =
+let test_required_tool_support_filter_drops_runtime_mcp_providers_without_header_support
+      ()
+  =
   let providers =
     Masc_mcp.Cascade_runtime.resolve_providers_from_model_strings
       ~require_tool_support:true
       ~runtime_mcp_policy:runtime_mcp_policy_with_headers
       callable_tool_required_model_strings
   in
-  check bool "drops codex_cli when runtime MCP headers are required" false
+  check
+    bool
+    "drops codex_cli when runtime MCP headers are required"
+    false
     (List.mem "codex_cli" (provider_kinds providers));
-  check bool "keeps kimi_cli with runtime MCP header support" true
+  check
+    bool
+    "keeps kimi_cli with runtime MCP header support"
+    true
     (List.mem "kimi_cli" (provider_kinds providers));
-  check bool "keeps claude_code with runtime MCP header support" true
+  check
+    bool
+    "keeps claude_code with runtime MCP header support"
+    true
     (List.mem "claude_code" (provider_kinds providers))
+;;
 
 let test_oas_http_error_classification_is_typed () =
   let module H = Masc_mcp.Cascade_health_filter in
@@ -150,84 +204,116 @@ let test_oas_http_error_classification_is_typed () =
       { code = 400; body = "maximum context length exceeded" }
   in
   let provider_parse =
-    Llm_provider.Http_client.HttpError
-      { code = 400; body = "can't find closing '}'" }
+    Llm_provider.Http_client.HttpError { code = 400; body = "can't find closing '}'" }
   in
   let capability_mismatch =
     Llm_provider.Http_client.AcceptRejected
       { reason = "openai_compat:model does not support inline tools" }
   in
-  check bool "context overflow class cascades" true
+  check
+    bool
+    "context overflow class cascades"
+    true
     (match H.classify_failure context_overflow with
-    | H.Context_overflow -> H.should_cascade_to_next context_overflow
-    | _ -> false);
-  check bool "provider parse class cascades" true
+     | H.Context_overflow -> H.should_cascade_to_next context_overflow
+     | _ -> false);
+  check
+    bool
+    "provider parse class cascades"
+    true
     (match H.classify_failure provider_parse with
-    | H.Provider_parse_error -> H.should_cascade_to_next provider_parse
-    | _ -> false);
-  check bool "capability mismatch class cascades" true
+     | H.Provider_parse_error -> H.should_cascade_to_next provider_parse
+     | _ -> false);
+  check
+    bool
+    "capability mismatch class cascades"
+    true
     (match H.classify_failure capability_mismatch with
-    | H.Accept_rejected_capability_mismatch ->
-        H.should_cascade_to_next capability_mismatch
-    | _ -> false)
+     | H.Accept_rejected_capability_mismatch ->
+       H.should_cascade_to_next capability_mismatch
+     | _ -> false)
+;;
 
 let test_oas_failure_classification_keeps_terminal_branches_non_cascading () =
   let module H = Masc_mcp.Cascade_health_filter in
   let terminal_http =
-    Llm_provider.Http_client.HttpError
-      { code = 418; body = "terminal provider refusal" }
+    Llm_provider.Http_client.HttpError { code = 418; body = "terminal provider refusal" }
   in
   let accept_terminal =
-    Llm_provider.Http_client.AcceptRejected
-      { reason = "provider authentication failed" }
+    Llm_provider.Http_client.AcceptRejected { reason = "provider authentication failed" }
   in
   let local_resource =
     Llm_provider.Http_client.NetworkError
-      {
-        message = "too many open files";
-        kind = Llm_provider.Http_client.Local_resource_exhaustion;
+      { message = "too many open files"
+      ; kind = Llm_provider.Http_client.Local_resource_exhaustion
       }
   in
   (match H.classify_failure terminal_http with
-  | H.Terminal_http 418 ->
-      check bool "terminal HTTP class does not cascade" false
-        (H.should_cascade_to_next terminal_http)
-  | _ -> fail "expected terminal HTTP classification");
+   | H.Terminal_http 418 ->
+     check
+       bool
+       "terminal HTTP class does not cascade"
+       false
+       (H.should_cascade_to_next terminal_http)
+   | _ -> fail "expected terminal HTTP classification");
   (match H.classify_failure accept_terminal with
-  | H.Accept_rejected_terminal ->
-      check bool "terminal accept rejection does not cascade" false
-        (H.should_cascade_to_next accept_terminal)
-  | _ -> fail "expected terminal accept rejection classification");
+   | H.Accept_rejected_terminal ->
+     check
+       bool
+       "terminal accept rejection does not cascade"
+       false
+       (H.should_cascade_to_next accept_terminal)
+   | _ -> fail "expected terminal accept rejection classification");
   match H.classify_failure local_resource with
   | H.Local_resource_exhaustion ->
-      check bool "local resource exhaustion does not cascade" false
-        (H.should_cascade_to_next local_resource)
+    check
+      bool
+      "local resource exhaustion does not cascade"
+      false
+      (H.should_cascade_to_next local_resource)
   | _ -> fail "expected local resource exhaustion classification"
+;;
 
 let () =
-  run "Cascade_runtime"
-    [
-      ( "provider_filter",
-        [
-          test_case "applies direct model string filter" `Quick
-            test_provider_filter_is_applied_to_direct_model_strings;
-          test_case "falls back when filter matches nothing" `Quick
-            test_provider_filter_falls_back_to_unfiltered_when_no_match;
-          test_case "required tool choice keeps only supported providers" `Quick
-            test_required_tool_choice_filter_keeps_only_supported_providers;
-          test_case "required tool choice can exhaust candidates" `Quick
-            test_required_tool_choice_filter_can_exhaust_candidates;
-          test_case "required tool support keeps inline or runtime-capable providers"
+  run
+    "Cascade_runtime"
+    [ ( "provider_filter"
+      , [ test_case
+            "applies direct model string filter"
             `Quick
-            test_required_tool_support_filter_keeps_inline_or_runtime_capable_providers;
-          test_case "tool gate keeps runtime MCP-capable CLI providers" `Quick
-            test_required_tool_gate_filter_keeps_runtime_mcp_capable_cli_providers;
-          test_case "runtime MCP header requirement drops unsupported providers"
+            test_provider_filter_is_applied_to_direct_model_strings
+        ; test_case
+            "falls back when filter matches nothing"
             `Quick
-            test_required_tool_support_filter_drops_runtime_mcp_providers_without_header_support;
-          test_case "OAS HTTP errors classify before cascade boolean" `Quick
-            test_oas_http_error_classification_is_typed;
-          test_case "OAS terminal classes stay non-cascading" `Quick
-            test_oas_failure_classification_keeps_terminal_branches_non_cascading;
-        ] );
+            test_provider_filter_falls_back_to_unfiltered_when_no_match
+        ; test_case
+            "required tool choice keeps only supported providers"
+            `Quick
+            test_required_tool_choice_filter_keeps_only_supported_providers
+        ; test_case
+            "required tool choice can exhaust candidates"
+            `Quick
+            test_required_tool_choice_filter_can_exhaust_candidates
+        ; test_case
+            "required tool support keeps inline or runtime-capable providers"
+            `Quick
+            test_required_tool_support_filter_keeps_inline_or_runtime_capable_providers
+        ; test_case
+            "tool gate keeps runtime MCP-capable CLI providers"
+            `Quick
+            test_required_tool_gate_filter_keeps_runtime_mcp_capable_cli_providers
+        ; test_case
+            "runtime MCP header requirement drops unsupported providers"
+            `Quick
+            test_required_tool_support_filter_drops_runtime_mcp_providers_without_header_support
+        ; test_case
+            "OAS HTTP errors classify before cascade boolean"
+            `Quick
+            test_oas_http_error_classification_is_typed
+        ; test_case
+            "OAS terminal classes stay non-cascading"
+            `Quick
+            test_oas_failure_classification_keeps_terminal_branches_non_cascading
+        ] )
     ]
+;;

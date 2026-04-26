@@ -3,26 +3,27 @@ module Stress = Masc_mcp.Agent_stress
 let assoc_field name = function
   | `Assoc fields -> List.assoc_opt name fields
   | _ -> None
+;;
 
 let nested_assoc_field outer inner json =
   match assoc_field outer json with
   | Some (`Assoc fields) -> List.assoc_opt inner fields
   | _ -> None
+;;
 
 let test_turn_failure_json_contract () =
   let event : Stress.event =
-    {
-      agent_name = "sangsu";
-      room_id = "default";
-      kind =
-        Stress.Turn_failure {
-          consecutive = 2;
-          threshold = 3;
-          counted_toward_crash = true;
-          recoverable = false;
-          error_kind = Some "api";
-        };
-      timestamp = 1_777_120_045.0;
+    { agent_name = "sangsu"
+    ; room_id = "default"
+    ; kind =
+        Stress.Turn_failure
+          { consecutive = 2
+          ; threshold = 3
+          ; counted_toward_crash = true
+          ; recoverable = false
+          ; error_kind = Some "api"
+          }
+    ; timestamp = 1_777_120_045.0
     }
   in
   let json = Stress.event_to_json event in
@@ -68,21 +69,21 @@ let test_turn_failure_json_contract () =
     (match nested_assoc_field "kind" "error_kind" json with
      | Some (`String s) -> Some s
      | _ -> None)
+;;
 
 let test_turn_failure_omits_absent_error_kind () =
   let event : Stress.event =
-    {
-      agent_name = "janitor";
-      room_id = "";
-      kind =
-        Stress.Turn_failure {
-          consecutive = 0;
-          threshold = 3;
-          counted_toward_crash = false;
-          recoverable = true;
-          error_kind = None;
-        };
-      timestamp = 1.0;
+    { agent_name = "janitor"
+    ; room_id = ""
+    ; kind =
+        Stress.Turn_failure
+          { consecutive = 0
+          ; threshold = 3
+          ; counted_toward_crash = false
+          ; recoverable = true
+          ; error_kind = None
+          }
+    ; timestamp = 1.0
     }
   in
   let json = Stress.event_to_json event in
@@ -96,18 +97,20 @@ let test_turn_failure_omits_absent_error_kind () =
     "no raw/absent error field"
     true
     (Option.is_none (nested_assoc_field "kind" "error_kind" json))
+;;
 
 let () =
   Alcotest.run
     "Agent_stress"
-    [
-      ( "turn failure"
-      , [
-          Alcotest.test_case
-            "serializes typed turn failure stress" `Quick
-            test_turn_failure_json_contract;
-          Alcotest.test_case
-            "omits absent error kind" `Quick
-            test_turn_failure_omits_absent_error_kind;
-        ] );
+    [ ( "turn failure"
+      , [ Alcotest.test_case
+            "serializes typed turn failure stress"
+            `Quick
+            test_turn_failure_json_contract
+        ; Alcotest.test_case
+            "omits absent error kind"
+            `Quick
+            test_turn_failure_omits_absent_error_kind
+        ] )
     ]
+;;

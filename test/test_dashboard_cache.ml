@@ -4,13 +4,14 @@
     [Eio.Condition] are fully operational. *)
 
 open Masc_mcp
-
 module Dashboard_projection_cache = Dashboard_projection_cache
 
 let check_json msg expected actual =
-  Alcotest.(check string) msg
+  Alcotest.(check string)
+    msg
     (Yojson.Safe.to_string expected)
     (Yojson.Safe.to_string actual)
+;;
 
 (* -- 1. Nested get_or_compute must not deadlock ----------------------------- *)
 
@@ -19,14 +20,12 @@ let test_nested_no_deadlock () =
   let result =
     Dashboard_cache.get_or_compute "outer" ~ttl:5.0 (fun () ->
       let inner =
-        Dashboard_cache.get_or_compute "inner" ~ttl:5.0 (fun () ->
-          `String "inner_ok")
+        Dashboard_cache.get_or_compute "inner" ~ttl:5.0 (fun () -> `String "inner_ok")
       in
-      `Assoc [("inner", inner)])
+      `Assoc [ "inner", inner ])
   in
-  check_json "nested no deadlock"
-    (`Assoc [("inner", `String "inner_ok")])
-    result
+  check_json "nested no deadlock" (`Assoc [ "inner", `String "inner_ok" ]) result
+;;
 
 (* -- 2. Triple nesting (mirrors namespace-truth -> execution -> snapshot) --- *)
 
@@ -37,57 +36,56 @@ let test_triple_nesting () =
       let l2 =
         Dashboard_cache.get_or_compute "level2" ~ttl:5.0 (fun () ->
           let l3 =
-            Dashboard_cache.get_or_compute "level3" ~ttl:5.0 (fun () ->
-              `String "deep")
+            Dashboard_cache.get_or_compute "level3" ~ttl:5.0 (fun () -> `String "deep")
           in
-          `Assoc [("l3", l3)])
+          `Assoc [ "l3", l3 ])
       in
-      `Assoc [("l2", l2)])
+      `Assoc [ "l2", l2 ])
   in
-  check_json "triple nesting"
-    (`Assoc [("l2", `Assoc [("l3", `String "deep")])])
-    result
+  check_json "triple nesting" (`Assoc [ "l2", `Assoc [ "l3", `String "deep" ] ]) result
+;;
 
 (* -- 3. Cache hit: second call skips compute -------------------------------- *)
 
 let test_cache_hit () =
   Dashboard_cache.invalidate_all ();
   let counter = ref 0 in
-  let compute () = incr counter; `Int !counter in
+  let compute () =
+    incr counter;
+    `Int !counter
+  in
   let v1 = Dashboard_cache.get_or_compute "hit" ~ttl:5.0 compute in
   let v2 = Dashboard_cache.get_or_compute "hit" ~ttl:5.0 compute in
   check_json "same value" v1 v2;
   Alcotest.(check int) "compute once" 1 !counter
+;;
 
 let test_peek_returns_cached_value () =
   Dashboard_cache.invalidate_all ();
   let seeded =
-    Dashboard_cache.get_or_compute "peek-hit" ~ttl:5.0 (fun () ->
-        `String "cached")
+    Dashboard_cache.get_or_compute "peek-hit" ~ttl:5.0 (fun () -> `String "cached")
   in
   let peeked = Dashboard_cache.peek "peek-hit" in
   Alcotest.(check bool) "peek returns some" true (Option.is_some peeked);
-  check_json "peeked value" seeded
-    (Option.value ~default:`Null peeked)
+  check_json "peeked value" seeded (Option.value ~default:`Null peeked)
+;;
 
 let test_seed_stale_if_missing_refreshes_in_background ~clock () =
   Dashboard_cache.invalidate_all ();
-  Dashboard_cache.seed_stale_if_missing "seeded" ~stale_for:30.0
-    (`String "fallback");
+  Dashboard_cache.seed_stale_if_missing "seeded" ~stale_for:30.0 (`String "fallback");
   let immediate =
     Dashboard_cache.get_or_compute "seeded" ~ttl:1.0 (fun () ->
-        Eio.Time.sleep clock 0.05;
-        `String "fresh")
+      Eio.Time.sleep clock 0.05;
+      `String "fresh")
   in
-  check_json "seeded cache returns fallback immediately"
-    (`String "fallback") immediate;
+  check_json "seeded cache returns fallback immediately" (`String "fallback") immediate;
   Eio.Time.sleep clock 0.1;
   let refreshed =
     Dashboard_cache.get_or_compute "seeded" ~ttl:1.0 (fun () ->
-        `String "unexpected_recompute")
+      `String "unexpected_recompute")
   in
-  check_json "background refresh stores fresh value"
-    (`String "fresh") refreshed
+  check_json "background refresh stores fresh value" (`String "fresh") refreshed
+;;
 
 let test_projection_snapshot_cache_reuses_actor_key () =
   Dashboard_cache.invalidate_all ();
@@ -95,18 +93,23 @@ let test_projection_snapshot_cache_reuses_actor_key () =
   let counter = ref 0 in
   let compute actor_name =
     incr counter;
-    `Assoc [("actor", `String actor_name); ("count", `Int !counter)]
+    `Assoc [ "actor", `String actor_name; "count", `Int !counter ]
   in
   let v1 =
     Dashboard_projection_cache.get_or_compute_snapshot_json
-      ~config ~actor:(Some "dashboard") compute
+      ~config
+      ~actor:(Some "dashboard")
+      compute
   in
   let v2 =
     Dashboard_projection_cache.get_or_compute_snapshot_json
-      ~config ~actor:(Some "dashboard") compute
+      ~config
+      ~actor:(Some "dashboard")
+      compute
   in
   check_json "snapshot helper reuses cached actor entry" v1 v2;
   Alcotest.(check int) "snapshot compute once per actor" 1 !counter
+;;
 
 let test_projection_digest_cache_separates_actors () =
   Dashboard_cache.invalidate_all ();
@@ -114,65 +117,69 @@ let test_projection_digest_cache_separates_actors () =
   let counter = ref 0 in
   let compute actor_name =
     incr counter;
-    `Assoc [("actor", `String actor_name); ("count", `Int !counter)]
+    `Assoc [ "actor", `String actor_name; "count", `Int !counter ]
   in
   ignore
     (Dashboard_projection_cache.get_or_compute_digest_json
-       ~config ~actor:(Some "dashboard") compute);
+       ~config
+       ~actor:(Some "dashboard")
+       compute);
   ignore
     (Dashboard_projection_cache.get_or_compute_digest_json
-       ~config ~actor:(Some "operator") compute);
+       ~config
+       ~actor:(Some "operator")
+       compute);
   Alcotest.(check int) "digest compute once per actor key" 2 !counter
+;;
 
 (* -- 4. Invalidate removes entry -------------------------------------------- *)
 
 let test_invalidate () =
   Dashboard_cache.invalidate_all ();
   let counter = ref 0 in
-  let compute () = incr counter; `Int !counter in
+  let compute () =
+    incr counter;
+    `Int !counter
+  in
   ignore (Dashboard_cache.get_or_compute "inv" ~ttl:5.0 compute);
   Dashboard_cache.invalidate "inv";
   let v = Dashboard_cache.get_or_compute "inv" ~ttl:5.0 compute in
   Alcotest.(check int) "recompute after invalidate" 2 !counter;
   check_json "new value" (`Int 2) v
+;;
 
 let test_invalidate_prefix () =
   Dashboard_cache.invalidate_all ();
   let proof_counter = ref 0 in
   let mission_counter = ref 0 in
   ignore
-    (Dashboard_cache.get_or_compute "proof:room-a:default:one" ~ttl:5.0
-       (fun () ->
-         incr proof_counter;
-         `Int !proof_counter));
+    (Dashboard_cache.get_or_compute "proof:room-a:default:one" ~ttl:5.0 (fun () ->
+       incr proof_counter;
+       `Int !proof_counter));
   ignore
-    (Dashboard_cache.get_or_compute "proof:room-a:default:two" ~ttl:5.0
-       (fun () ->
-         incr proof_counter;
-         `Int !proof_counter));
+    (Dashboard_cache.get_or_compute "proof:room-a:default:two" ~ttl:5.0 (fun () ->
+       incr proof_counter;
+       `Int !proof_counter));
   ignore
-    (Dashboard_cache.get_or_compute "mission:room-a:default:one" ~ttl:5.0
-       (fun () ->
-         incr mission_counter;
-         `Int !mission_counter));
+    (Dashboard_cache.get_or_compute "mission:room-a:default:one" ~ttl:5.0 (fun () ->
+       incr mission_counter;
+       `Int !mission_counter));
   Dashboard_cache.invalidate_prefix "proof:room-a:default:";
   ignore
-    (Dashboard_cache.get_or_compute "proof:room-a:default:one" ~ttl:5.0
-       (fun () ->
-         incr proof_counter;
-         `Int !proof_counter));
+    (Dashboard_cache.get_or_compute "proof:room-a:default:one" ~ttl:5.0 (fun () ->
+       incr proof_counter;
+       `Int !proof_counter));
   ignore
-    (Dashboard_cache.get_or_compute "proof:room-a:default:two" ~ttl:5.0
-       (fun () ->
-         incr proof_counter;
-         `Int !proof_counter));
+    (Dashboard_cache.get_or_compute "proof:room-a:default:two" ~ttl:5.0 (fun () ->
+       incr proof_counter;
+       `Int !proof_counter));
   ignore
-    (Dashboard_cache.get_or_compute "mission:room-a:default:one" ~ttl:5.0
-       (fun () ->
-         incr mission_counter;
-         `Int !mission_counter));
+    (Dashboard_cache.get_or_compute "mission:room-a:default:one" ~ttl:5.0 (fun () ->
+       incr mission_counter;
+       `Int !mission_counter));
   Alcotest.(check int) "proof entries recomputed" 4 !proof_counter;
   Alcotest.(check int) "non-matching prefix preserved" 1 !mission_counter
+;;
 
 (* -- 5. Stats reports active + computing ------------------------------------ *)
 
@@ -183,6 +190,7 @@ let test_stats () =
   let stats = Dashboard_cache.stats () in
   let fresh = Yojson.Safe.Util.(member "ready_fresh" stats |> to_int) in
   Alcotest.(check int) "2 fresh entries" 2 fresh
+;;
 
 (* -- 6. Stampede: N fibers, same key -> compute runs once ------------------- *)
 
@@ -195,32 +203,32 @@ let test_stampede () =
     Eio.Fiber.yield ();
     `String "computed"
   in
-  Eio.Fiber.all [
-    (fun () -> ignore (Dashboard_cache.get_or_compute "stmp" ~ttl:5.0 slow_compute));
-    (fun () -> ignore (Dashboard_cache.get_or_compute "stmp" ~ttl:5.0 slow_compute));
-    (fun () -> ignore (Dashboard_cache.get_or_compute "stmp" ~ttl:5.0 slow_compute));
-  ];
+  Eio.Fiber.all
+    [ (fun () -> ignore (Dashboard_cache.get_or_compute "stmp" ~ttl:5.0 slow_compute))
+    ; (fun () -> ignore (Dashboard_cache.get_or_compute "stmp" ~ttl:5.0 slow_compute))
+    ; (fun () -> ignore (Dashboard_cache.get_or_compute "stmp" ~ttl:5.0 slow_compute))
+    ];
   Alcotest.(check int) "stampede: compute once" 1 (Atomic.get compute_count)
+;;
 
 (* -- 7. Exception during compute: key cleaned up, next call retries --------- *)
 
 let test_exception_recovery () =
   Dashboard_cache.invalidate_all ();
   let raised =
-    (try
-       ignore
-         (Dashboard_cache.get_or_compute "fail" ~ttl:5.0 (fun () ->
-            failwith "boom"));
-       false
-     with Failure _ -> true)
+    try
+      ignore (Dashboard_cache.get_or_compute "fail" ~ttl:5.0 (fun () -> failwith "boom"));
+      false
+    with
+    | Failure _ -> true
   in
   Alcotest.(check bool) "exception propagated" true raised;
   (* Key should be removed -- next call recomputes *)
   let v =
-    Dashboard_cache.get_or_compute "fail" ~ttl:5.0 (fun () ->
-      `String "recovered")
+    Dashboard_cache.get_or_compute "fail" ~ttl:5.0 (fun () -> `String "recovered")
   in
   check_json "recovered after exception" (`String "recovered") v
+;;
 
 (* -- 8. Invalidate_all wakes Computing waiters ------------------------------ *)
 
@@ -245,6 +253,7 @@ let test_invalidate_all_wakes_waiters () =
        Dashboard_cache.invalidate_all ();
        Atomic.set finished true);
   Alcotest.(check bool) "both fibers finished" true (Atomic.get finished)
+;;
 
 (* -- 9. Timeout during stale-while-revalidate preserves stale value -------- *)
 
@@ -259,20 +268,22 @@ let test_stale_preserved_on_timeout ~clock ~sw () =
   Eio_context.set_switch sw;
   let original = `String "original_data" in
   (* 1. Seed the cache with a short-lived entry (TTL 0.1s, stale grace 0.3s) *)
-  let v0 =
-    Dashboard_cache.get_or_compute "stale_timeout" ~ttl:0.1 (fun () -> original)
-  in
+  let v0 = Dashboard_cache.get_or_compute "stale_timeout" ~ttl:0.1 (fun () -> original) in
   check_json "seed" original v0;
   (* 2. Wait for expiry but stay within stale grace *)
   Eio.Time.sleep clock 0.15;
   (* 3. Call with timeout shorter than compute time — compute will time out.
      The function should return the stale value immediately. *)
   let result =
-    Dashboard_cache.get_or_compute_with_timeout "stale_timeout" ~ttl:0.1
-      ~clock ~timeout_sec:0.05 (fun () ->
-        (* Simulate slow computation that exceeds timeout *)
-        Eio.Time.sleep clock 1.0;
-        `String "never_reached")
+    Dashboard_cache.get_or_compute_with_timeout
+      "stale_timeout"
+      ~ttl:0.1
+      ~clock
+      ~timeout_sec:0.05
+      (fun () ->
+         (* Simulate slow computation that exceeds timeout *)
+         Eio.Time.sleep clock 1.0;
+         `String "never_reached")
   in
   check_json "stale value returned on timeout" original result;
   (* 4. Let the background fiber finish (it will timeout + restore stale) *)
@@ -292,6 +303,7 @@ let test_stale_preserved_on_timeout ~clock ~sw () =
     | _ -> false
   in
   Alcotest.(check bool) "no timeout error cached" false is_timeout_error
+;;
 
 (* -- 10. Expired stale falls back to last-good on timeout ------------------- *)
 
@@ -299,16 +311,19 @@ let test_expired_stale_restored_on_timeout ~clock () =
   Dashboard_cache.invalidate_all ();
   let original = `String "expired_but_last_good" in
   let seeded =
-    Dashboard_cache.get_or_compute "expired_stale_timeout" ~ttl:0.05 (fun () ->
-      original)
+    Dashboard_cache.get_or_compute "expired_stale_timeout" ~ttl:0.05 (fun () -> original)
   in
   check_json "seed expired-stale value" original seeded;
   Eio.Time.sleep clock 0.25;
   let result =
-    Dashboard_cache.get_or_compute_with_timeout "expired_stale_timeout" ~ttl:0.05
-      ~clock ~timeout_sec:0.05 (fun () ->
-        Eio.Time.sleep clock 1.0;
-        `String "never_reached")
+    Dashboard_cache.get_or_compute_with_timeout
+      "expired_stale_timeout"
+      ~ttl:0.05
+      ~clock
+      ~timeout_sec:0.05
+      (fun () ->
+         Eio.Time.sleep clock 1.0;
+         `String "never_reached")
   in
   check_json "expired stale restored on timeout" original result;
   let after =
@@ -323,8 +338,11 @@ let test_expired_stale_restored_on_timeout ~clock () =
        | _ -> false)
     | _ -> false
   in
-  Alcotest.(check bool) "expired stale restore avoids timeout poison" false
+  Alcotest.(check bool)
+    "expired stale restore avoids timeout poison"
+    false
     is_timeout_error
+;;
 
 (* -- 11. Timeout with no stale data returns error JSON (not cached) -------- *)
 
@@ -334,10 +352,14 @@ let test_expired_stale_restored_on_timeout ~clock () =
 let test_timeout_no_stale_returns_error ~clock () =
   Dashboard_cache.invalidate_all ();
   let result =
-    Dashboard_cache.get_or_compute_with_timeout "no_stale_timeout" ~ttl:1.0
-      ~clock ~timeout_sec:0.05 (fun () ->
-        Eio.Time.sleep clock 1.0;
-        `String "never_reached")
+    Dashboard_cache.get_or_compute_with_timeout
+      "no_stale_timeout"
+      ~ttl:1.0
+      ~clock
+      ~timeout_sec:0.05
+      (fun () ->
+         Eio.Time.sleep clock 1.0;
+         `String "never_reached")
   in
   (* Should get timeout error JSON *)
   let is_timeout_error =
@@ -355,6 +377,7 @@ let test_timeout_no_stale_returns_error ~clock () =
       `String "recovered")
   in
   check_json "recompute after timeout" (`String "recovered") v2
+;;
 
 (* -- 12. Waiter timeout returns fast error without poisoning cache --------- *)
 
@@ -366,19 +389,27 @@ let test_waiter_timeout_returns_error_not_cached ~clock () =
   Dashboard_cache.invalidate_all ();
   let owner_finished, resolve_owner_finished = Eio.Promise.create () in
   let waiter_result = ref `Null in
-  Eio.Switch.run @@ fun sw ->
+  Eio.Switch.run
+  @@ fun sw ->
   Eio.Fiber.fork ~sw (fun () ->
     ignore
-      (Dashboard_cache.get_or_compute_with_timeout "waiter_timeout" ~ttl:1.0
-         ~clock ~timeout_sec:1.0 (fun () ->
-           Eio.Time.sleep clock 0.4;
-           `String "owner_done"));
+      (Dashboard_cache.get_or_compute_with_timeout
+         "waiter_timeout"
+         ~ttl:1.0
+         ~clock
+         ~timeout_sec:1.0
+         (fun () ->
+            Eio.Time.sleep clock 0.4;
+            `String "owner_done"));
     Eio.Promise.resolve resolve_owner_finished ());
   Eio.Time.sleep clock 0.05;
-  waiter_result :=
-    Dashboard_cache.get_or_compute_with_timeout "waiter_timeout" ~ttl:1.0
-      ~clock ~timeout_sec:0.15 (fun () ->
-        `String "waiter_should_not_compute");
+  waiter_result
+  := Dashboard_cache.get_or_compute_with_timeout
+       "waiter_timeout"
+       ~ttl:1.0
+       ~clock
+       ~timeout_sec:0.15
+       (fun () -> `String "waiter_should_not_compute");
   Eio.Promise.await owner_finished;
   let timeout_kind =
     Yojson.Safe.Util.(member "timeout_kind" !waiter_result |> to_string)
@@ -389,38 +420,44 @@ let test_waiter_timeout_returns_error_not_cached ~clock () =
       `String "unexpected_recompute")
   in
   check_json "owner result survives waiter timeout" (`String "owner_done") final
+;;
 
 let with_temp_dir prefix f =
   let dir = Filename.temp_file prefix "" in
   Sys.remove dir;
   Unix.mkdir dir 0o755;
   Fun.protect ~finally:(fun () -> Unix.rmdir dir) (fun () -> f dir)
+;;
 
 let test_runtime_git_cache_returns_stale_and_refreshes ~clock () =
   let module Runtime = Server_dashboard_http_runtime_info in
   Runtime.clear_git_rev_parse_short_cache_for_tests ();
   with_temp_dir "runtime-git-cache" (fun dir ->
-      Runtime.seed_git_rev_parse_short_cache_for_tests dir (Some "old")
-        ~refreshed_at:(Time_compat.now () -. 120.0);
-      let probes = Atomic.make 0 in
-      Runtime.set_git_rev_parse_short_probe_hook_for_tests (fun _ ->
-          Atomic.incr probes;
-          Eio.Time.sleep clock 0.05;
-          Some "new");
-      Fun.protect
-        ~finally:(fun () ->
-          Runtime.clear_git_rev_parse_short_probe_hook_for_tests ();
-          Runtime.clear_git_rev_parse_short_cache_for_tests ())
-        (fun () ->
-          Alcotest.(check (option string))
-            "expired cache returns stale immediately"
-            (Some "old") (Runtime.git_rev_parse_short dir);
-          Eio.Time.sleep clock 0.15;
-          Alcotest.(check (option string))
-            "background refresh stores fresh value"
-            (Some "new") (Runtime.git_rev_parse_short dir);
-          Alcotest.(check int) "single background probe" 1
-            (Atomic.get probes)))
+    Runtime.seed_git_rev_parse_short_cache_for_tests
+      dir
+      (Some "old")
+      ~refreshed_at:(Time_compat.now () -. 120.0);
+    let probes = Atomic.make 0 in
+    Runtime.set_git_rev_parse_short_probe_hook_for_tests (fun _ ->
+      Atomic.incr probes;
+      Eio.Time.sleep clock 0.05;
+      Some "new");
+    Fun.protect
+      ~finally:(fun () ->
+        Runtime.clear_git_rev_parse_short_probe_hook_for_tests ();
+        Runtime.clear_git_rev_parse_short_cache_for_tests ())
+      (fun () ->
+         Alcotest.(check (option string))
+           "expired cache returns stale immediately"
+           (Some "old")
+           (Runtime.git_rev_parse_short dir);
+         Eio.Time.sleep clock 0.15;
+         Alcotest.(check (option string))
+           "background refresh stores fresh value"
+           (Some "new")
+           (Runtime.git_rev_parse_short dir);
+         Alcotest.(check int) "single background probe" 1 (Atomic.get probes)))
+;;
 
 let test_runtime_git_probe_argv_disables_optional_locks () =
   let module Runtime = Server_dashboard_http_runtime_info in
@@ -428,60 +465,76 @@ let test_runtime_git_probe_argv_disables_optional_locks () =
     "runtime git probe argv uses no-optional-locks"
     [ "git"; "-C"; "/tmp/demo"; "--no-optional-locks"; "rev-parse"; "--short"; "HEAD" ]
     (Runtime.git_rev_parse_short_probe_argv "/tmp/demo")
+;;
 
 (* -- Harness ---------------------------------------------------------------- *)
 
 let () =
-  Eio_main.run @@ fun env ->
+  Eio_main.run
+  @@ fun env ->
   let clock = Eio.Stdenv.clock env in
   Eio_guard.enable ();
-  Eio.Switch.run @@ fun sw ->
+  Eio.Switch.run
+  @@ fun sw ->
   Masc_test_deps.init_eio_clock ~sw env;
   let open Alcotest in
-  run ~and_exit:false "Dashboard_cache"
-    [
-      ( "deadlock",
-        [
-          test_case "nested get_or_compute" `Quick test_nested_no_deadlock;
-          test_case "triple nesting" `Quick test_triple_nesting;
-        ] );
-      ( "correctness",
-        [
-          test_case "cache hit" `Quick test_cache_hit;
-          test_case "seed stale if missing refreshes in background" `Quick
-            (test_seed_stale_if_missing_refreshes_in_background ~clock);
-          test_case "peek returns cached value" `Quick
-            test_peek_returns_cached_value;
-          test_case "projection snapshot helper reuses actor cache" `Quick
-            test_projection_snapshot_cache_reuses_actor_key;
-          test_case "projection digest helper separates actors" `Quick
-            test_projection_digest_cache_separates_actors;
-          test_case "invalidate" `Quick test_invalidate;
-          test_case "invalidate_prefix" `Quick test_invalidate_prefix;
-          test_case "stats" `Quick test_stats;
-          test_case "exception recovery" `Quick test_exception_recovery;
-          test_case "invalidate_all wakes waiters" `Quick
-            test_invalidate_all_wakes_waiters;
-        ] );
-      ( "concurrency",
-        [
-          test_case "stampede protection" `Quick test_stampede;
-          test_case "runtime git cache stale-first refresh" `Quick
-            (test_runtime_git_cache_returns_stale_and_refreshes ~clock);
-          test_case "runtime git probe disables optional locks" `Quick
-            test_runtime_git_probe_argv_disables_optional_locks;
-        ] );
-      ( "timeout",
-        [
-          test_case "stale preserved on timeout" `Quick
-            (fun () ->
-               Eio.Switch.run @@ fun sw ->
-               test_stale_preserved_on_timeout ~clock ~sw ());
-          test_case "expired stale restored on timeout" `Quick
-            (test_expired_stale_restored_on_timeout ~clock);
-          test_case "no-stale timeout returns error, not cached" `Quick
-            (test_timeout_no_stale_returns_error ~clock);
-          test_case "waiter timeout returns error, not cached" `Quick
-            (test_waiter_timeout_returns_error_not_cached ~clock);
-        ] );
+  run
+    ~and_exit:false
+    "Dashboard_cache"
+    [ ( "deadlock"
+      , [ test_case "nested get_or_compute" `Quick test_nested_no_deadlock
+        ; test_case "triple nesting" `Quick test_triple_nesting
+        ] )
+    ; ( "correctness"
+      , [ test_case "cache hit" `Quick test_cache_hit
+        ; test_case
+            "seed stale if missing refreshes in background"
+            `Quick
+            (test_seed_stale_if_missing_refreshes_in_background ~clock)
+        ; test_case "peek returns cached value" `Quick test_peek_returns_cached_value
+        ; test_case
+            "projection snapshot helper reuses actor cache"
+            `Quick
+            test_projection_snapshot_cache_reuses_actor_key
+        ; test_case
+            "projection digest helper separates actors"
+            `Quick
+            test_projection_digest_cache_separates_actors
+        ; test_case "invalidate" `Quick test_invalidate
+        ; test_case "invalidate_prefix" `Quick test_invalidate_prefix
+        ; test_case "stats" `Quick test_stats
+        ; test_case "exception recovery" `Quick test_exception_recovery
+        ; test_case
+            "invalidate_all wakes waiters"
+            `Quick
+            test_invalidate_all_wakes_waiters
+        ] )
+    ; ( "concurrency"
+      , [ test_case "stampede protection" `Quick test_stampede
+        ; test_case
+            "runtime git cache stale-first refresh"
+            `Quick
+            (test_runtime_git_cache_returns_stale_and_refreshes ~clock)
+        ; test_case
+            "runtime git probe disables optional locks"
+            `Quick
+            test_runtime_git_probe_argv_disables_optional_locks
+        ] )
+    ; ( "timeout"
+      , [ test_case "stale preserved on timeout" `Quick (fun () ->
+            Eio.Switch.run @@ fun sw -> test_stale_preserved_on_timeout ~clock ~sw ())
+        ; test_case
+            "expired stale restored on timeout"
+            `Quick
+            (test_expired_stale_restored_on_timeout ~clock)
+        ; test_case
+            "no-stale timeout returns error, not cached"
+            `Quick
+            (test_timeout_no_stale_returns_error ~clock)
+        ; test_case
+            "waiter timeout returns error, not cached"
+            `Quick
+            (test_waiter_timeout_returns_error_not_cached ~clock)
+        ] )
     ]
+;;

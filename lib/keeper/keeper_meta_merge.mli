@@ -18,16 +18,19 @@
     explicit field ownership per writer, or a minimal CRDT with
     per-field LWW where the "W" is the declared owner. *)
 
-type t = latest:Keeper_types.keeper_meta -> caller:Keeper_types.keeper_meta -> Keeper_types.keeper_meta
+type t =
+  latest:Keeper_types.keeper_meta
+  -> caller:Keeper_types.keeper_meta
+  -> Keeper_types.keeper_meta
 
-val caller_wins : t
 (** Take every field from the caller except [meta_version], which
     follows the disk version. This is the historical behaviour of
     [write_meta_with_retry]. *)
+val caller_wins : t
 
-val heartbeat_fields_from_disk : t
 (** Take heartbeat-owned fields ([joined_room_ids],
     [last_seen_seq_by_room]) from [latest]; everything else from
     [caller]. Use this from turn-completion and turn-failure paths
     where the caller never touches heartbeat fields but concurrent
     heartbeat writes keep winning the CAS race. *)
+val heartbeat_fields_from_disk : t

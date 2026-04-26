@@ -2,10 +2,10 @@
     All tool handlers removed (poll_events, heartbeat_result pruned).
     Module retained for dispatch interface compatibility. *)
 
-type context = {
-  config: Coord.config;
-  agent_name: string;
-}
+type context =
+  { config : Coord.config
+  ; agent_name : string
+  }
 
 type tool_result = bool * string
 

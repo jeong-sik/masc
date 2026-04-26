@@ -18,23 +18,25 @@
     [Draining], [Restarting]) are observable intermediaries between
     stable states. *)
 type phase =
-  | Offline       (** Registered but no heartbeat fiber started *)
-  | Running       (** Healthy heartbeat loop executing *)
-  | Failing       (** Consecutive failures detected, probing recovery *)
-  | Overflowed    (** Prompt exceeded provider max context; auto-compact
+  | Offline (** Registered but no heartbeat fiber started *)
+  | Running (** Healthy heartbeat loop executing *)
+  | Failing (** Consecutive failures detected, probing recovery *)
+  | Overflowed
+  (** Prompt exceeded provider max context; auto-compact
                       pending. Transient: [entry_actions_for] emits
                       [Start_compaction] so the next event-loop iteration
                       derives [Compacting]. Distinguishes "context overflow"
                       from generic [Failing] for operator observability. *)
-  | Compacting    (** Context compaction in progress *)
-  | HandingOff    (** Generation rollover in progress *)
-  | Draining      (** Graceful shutdown: completing current turn *)
-  | Paused        (** Operator-paused or auto-compact-retry-exhausted,
+  | Compacting (** Context compaction in progress *)
+  | HandingOff (** Generation rollover in progress *)
+  | Draining (** Graceful shutdown: completing current turn *)
+  | Paused
+  (** Operator-paused or auto-compact-retry-exhausted,
                       fiber sleeping *)
-  | Stopped       (** Clean exit, terminal *)
-  | Crashed       (** Unrecoverable error, restart candidate *)
-  | Restarting    (** Supervisor backoff wait before re-launch *)
-  | Dead          (** Restart budget exhausted, tombstone, terminal *)
+  | Stopped (** Clean exit, terminal *)
+  | Crashed (** Unrecoverable error, restart candidate *)
+  | Restarting (** Supervisor backoff wait before re-launch *)
+  | Dead (** Restart budget exhausted, tombstone, terminal *)
 
 val phase_to_string : phase -> string
 val phase_of_string : string -> phase option
@@ -45,37 +47,25 @@ val all_phases : phase list
 (** Observable boolean conditions computed from keeper state.
     Phase is DERIVED from conditions via [derive_phase].
     Conditions are the primitive; phase is the projection. *)
-type conditions = {
-  launch_pending : bool;
-  (** Fresh registration exists, but the keepalive fiber has not started yet. *)
-  fiber_alive : bool;
-  (** [done_p] unresolved AND [fiber_stop] not set *)
-  heartbeat_healthy : bool;
-  (** [consecutive_failures < max_hb_failures] *)
-  turn_healthy : bool;
-  (** [turn_consecutive_failures < max_turn_failures] *)
-  context_within_budget : bool;
-  (** [context_ratio < compaction.ratio_gate] *)
-  context_handoff_needed : bool;
-  (** [auto_handoff AND context_ratio >= handoff_threshold] *)
-  compaction_active : bool;
-  (** Set true on compaction entry, false on exit *)
-  handoff_active : bool;
-  (** Set true on handoff entry, false on exit *)
-  operator_paused : bool;
-  (** [meta.paused = true] *)
-  stop_requested : bool;
-  (** [Atomic.get fiber_stop = true] *)
-  restart_budget_remaining : bool;
-  (** [restart_count < max_restarts] *)
-  backoff_elapsed : bool;
-  (** [now - last_restart_ts >= backoff_delay(restart_count)] *)
-  guardrail_triggered : bool;
-  (** [auto_rules.guardrail_stop = true] *)
-  drain_complete : bool;
-  (** Current turn finished, no pending work *)
-  context_overflow : bool;
-  (** Provider rejected the most recent prompt for exceeding its max
+type conditions =
+  { launch_pending : bool
+    (** Fresh registration exists, but the keepalive fiber has not started yet. *)
+  ; fiber_alive : bool (** [done_p] unresolved AND [fiber_stop] not set *)
+  ; heartbeat_healthy : bool (** [consecutive_failures < max_hb_failures] *)
+  ; turn_healthy : bool (** [turn_consecutive_failures < max_turn_failures] *)
+  ; context_within_budget : bool (** [context_ratio < compaction.ratio_gate] *)
+  ; context_handoff_needed : bool
+    (** [auto_handoff AND context_ratio >= handoff_threshold] *)
+  ; compaction_active : bool (** Set true on compaction entry, false on exit *)
+  ; handoff_active : bool (** Set true on handoff entry, false on exit *)
+  ; operator_paused : bool (** [meta.paused = true] *)
+  ; stop_requested : bool (** [Atomic.get fiber_stop = true] *)
+  ; restart_budget_remaining : bool (** [restart_count < max_restarts] *)
+  ; backoff_elapsed : bool (** [now - last_restart_ts >= backoff_delay(restart_count)] *)
+  ; guardrail_triggered : bool (** [auto_rules.guardrail_stop = true] *)
+  ; drain_complete : bool (** Current turn finished, no pending work *)
+  ; context_overflow : bool
+    (** Provider rejected the most recent prompt for exceeding its max
       context window. Distinct from [context_within_budget] (soft,
       ratio-based warning): [context_overflow] is a hard failure reported
       by the provider. Cleared by a [Compaction_completed] whose payload
@@ -83,29 +73,29 @@ type conditions = {
       an operator clear action. A noop compaction ([before = after])
       leaves this flag set so the overflow can be escalated instead of
       re-entering an infinite compact→clear→overflow loop (#9988). *)
-  compact_retry_exhausted : bool;
-  (** Consecutive auto-compact attempts failed to resolve the overflow.
+  ; compact_retry_exhausted : bool
+    (** Consecutive auto-compact attempts failed to resolve the overflow.
       While set, the next [Context_overflow_detected] derives [Paused]
       instead of [Overflowed] so operator intervention is required.
       Reset by a [Compaction_completed] with real savings or by
       [Fiber_started]; a noop compaction does not reset this latch. *)
-}
+  }
 
-val default_conditions : conditions
 (** All false — the "zero state" for initialization. *)
+val default_conditions : conditions
 
 (** {1 Events (Det/NonDet Boundary Output)} *)
 
 (** Auto-rule evaluation summary, captured at the boundary. *)
-type auto_rule_summary = {
-  reflect : bool;
-  plan : bool;
-  compact : bool;
-  handoff : bool;
-  guardrail_stop : bool;
-  guardrail_reason : string option;
-  goal_drift : float;
-}
+type auto_rule_summary =
+  { reflect : bool
+  ; plan : bool
+  ; compact : bool
+  ; handoff : bool
+  ; guardrail_stop : bool
+  ; guardrail_reason : string option
+  ; goal_drift : float
+  }
 
 (** Typed events that trigger condition re-evaluation.
     These are the ONLY inputs to the deterministic state machine.
@@ -142,29 +132,39 @@ type auto_rule_summary = {
     the TLA+ spec against the new code path. *)
 type event =
   | Heartbeat_ok
-  | Heartbeat_failed of { consecutive : int; max_allowed : int }
+  | Heartbeat_failed of
+      { consecutive : int
+      ; max_allowed : int
+      }
   | Turn_succeeded
-  | Turn_failed of { consecutive : int; max_allowed : int }
-  | Context_measured of {
-      context_ratio : float;
-      message_count : int;
-      token_count : int;
-      auto_rules : auto_rule_summary;
-    }
+  | Turn_failed of
+      { consecutive : int
+      ; max_allowed : int
+      }
+  | Context_measured of
+      { context_ratio : float
+      ; message_count : int
+      ; token_count : int
+      ; auto_rules : auto_rule_summary
+      }
   | Compaction_started
-    (** Emit ONLY from {!Keeper_post_turn.apply_post_turn_lifecycle}.
+  (** Emit ONLY from {!Keeper_post_turn.apply_post_turn_lifecycle}.
         See the post-turn lifecycle contract above. *)
-  | Compaction_completed of { before_tokens : int; after_tokens : int }
-    (** Must fire in the same turn as the matching [Compaction_started]. *)
+  | Compaction_completed of
+      { before_tokens : int
+      ; after_tokens : int
+      } (** Must fire in the same turn as the matching [Compaction_started]. *)
   | Compaction_failed of { reason : string }
-    (** Must fire in the same turn as the matching [Compaction_started]. *)
+  (** Must fire in the same turn as the matching [Compaction_started]. *)
   | Handoff_started
-    (** Emit ONLY from {!Keeper_post_turn.apply_post_turn_lifecycle}.
+  (** Emit ONLY from {!Keeper_post_turn.apply_post_turn_lifecycle}.
         See the post-turn lifecycle contract above. *)
-  | Handoff_completed of { new_trace_id : string; generation : int }
-    (** Must fire in the same turn as the matching [Handoff_started]. *)
+  | Handoff_completed of
+      { new_trace_id : string
+      ; generation : int
+      } (** Must fire in the same turn as the matching [Handoff_started]. *)
   | Handoff_failed of { reason : string }
-    (** Must fire in the same turn as the matching [Handoff_started]. *)
+  (** Must fire in the same turn as the matching [Handoff_started]. *)
   | Operator_pause
   | Operator_resume
   | Operator_stop of { remove_meta : bool }
@@ -175,23 +175,23 @@ type event =
   | Supervisor_restart_attempt of { attempt : int }
   | Restart_budget_exhausted
   | Guardrail_stop of { reason : string }
-  | Context_overflow_detected of {
-      source : [`Prompt_rejected | `Oas_signal];
-      token_count : int;
-      limit_tokens : int option;
-    }
-    (** Provider rejected prompt for exceeding max context.
+  | Context_overflow_detected of
+      { source : [ `Prompt_rejected | `Oas_signal ]
+      ; token_count : int
+      ; limit_tokens : int option
+      }
+  (** Provider rejected prompt for exceeding max context.
         [`Prompt_rejected] is sourced from a failed unified turn
         (see [Keeper_error_classify.is_context_overflow]);
         [`Oas_signal] is sourced either from structured OAS overflow
         diagnostics or from the drained OAS [Event_bus]
         [ContextOverflowImminent] signal for the same turn. *)
   | Auto_compact_triggered
-    (** Emitted as part of [Overflowed] entry actions to mark the
+  (** Emitted as part of [Overflowed] entry actions to mark the
         start of auto-recovery. Sets [compaction_active] so the next
         [derive_phase] returns [Compacting]. *)
   | Compact_retry_exhausted
-    (** Issue #8581: latches [compact_retry_exhausted]. Mirrors the
+  (** Issue #8581: latches [compact_retry_exhausted]. Mirrors the
         TLA+ [CompactRetryExhausted] action. Dispatchers fire this
         before [Operator_pause] so the Paused phase carries the real
         reason ("auto-compact retry budget exhausted") for operator
@@ -200,11 +200,14 @@ type event =
         but never set in OCaml — the right disjunct of the Paused
         promotion was dead code. *)
   | Operator_compact_requested
-    (** Operator invoked [masc_keeper_compact] MCP tool. Behaves like
+  (** Operator invoked [masc_keeper_compact] MCP tool. Behaves like
         [Auto_compact_triggered] but also clears [compact_retry_exhausted]
         so a subsequent compaction failure restarts the retry counter. *)
-  | Operator_clear_requested of { preserve_system : bool; reason : string }
-    (** Operator invoked [masc_keeper_clear]. Last-resort: drops
+  | Operator_clear_requested of
+      { preserve_system : bool
+      ; reason : string
+      }
+  (** Operator invoked [masc_keeper_clear]. Last-resort: drops
         conversation context entirely. Bypasses [Compacting] buffer
         state — conditions reset in-place. [reason] is required for
         audit trail. *)
@@ -227,24 +230,34 @@ type entry_action =
   | Start_handoff
   | Start_drain
   | Schedule_restart of { delay_sec : float }
-  | Publish_lifecycle of { event_name : string; detail : string }
+  | Publish_lifecycle of
+      { event_name : string
+      ; detail : string
+      }
   | Mark_dead_tombstone
   | Cleanup_and_unregister
 
 (** Result of applying an event. *)
-type transition_result = {
-  prev_phase : phase;
-  new_phase : phase;
-  updated_conditions : conditions;
-  entry_actions : entry_action list;
-  event_applied : event;
-  timestamp : float;
-}
+type transition_result =
+  { prev_phase : phase
+  ; new_phase : phase
+  ; updated_conditions : conditions
+  ; entry_actions : entry_action list
+  ; event_applied : event
+  ; timestamp : float
+  }
 
 (** Transition errors. *)
 type transition_error =
-  | Terminal_state of { current : phase; attempted_event : string }
-  | Invalid_transition of { from_phase : phase; to_phase : phase; reason : string }
+  | Terminal_state of
+      { current : phase
+      ; attempted_event : string
+      }
+  | Invalid_transition of
+      { from_phase : phase
+      ; to_phase : phase
+      ; reason : string
+      }
 
 val transition_error_to_string : transition_error -> string
 
@@ -289,12 +302,12 @@ val update_conditions : conditions -> event -> conditions
 (** Apply an event to the current state: update conditions, derive new phase.
     Returns [Error] for events on terminal states (Stopped, Dead).
     Pure function — no I/O, no clock. [now] is passed as argument. *)
-val apply_event :
-  current_phase:phase ->
-  conditions:conditions ->
-  event:event ->
-  now:float ->
-  (transition_result, transition_error) result
+val apply_event
+  :  current_phase:phase
+  -> conditions:conditions
+  -> event:event
+  -> now:float
+  -> (transition_result, transition_error) result
 
 (** Check if a direct transition from one phase to another is valid. *)
 val can_transition : from_phase:phase -> to_phase:phase -> bool
@@ -335,10 +348,6 @@ val phase_to_mermaid : current:phase -> string
     be translated into typed events at the boundary before reaching the
     state machine. *)
 
-val attribution_of_transition :
-  event:event ->
-  (transition_result, transition_error) result ->
-  Attribution.t
 (** Mapping:
     - [Ok result]                       → [Attribution.Passed]
                                           evidence: [{event, from_phase,
@@ -351,3 +360,7 @@ val attribution_of_transition :
                                           reason is formatted from the
                                           [current] phase and attempted
                                           event. Evidence adds the phase. *)
+val attribution_of_transition
+  :  event:event
+  -> (transition_result, transition_error) result
+  -> Attribution.t

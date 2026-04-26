@@ -93,8 +93,7 @@ val raw_config_json : unit -> Yojson.Safe.t
     directories are created on demand under the active config root.
 
     @since 0.160.1 *)
-val save_raw_config_json :
-  string -> (Yojson.Safe.t, string) result
+val save_raw_config_json : string -> (Yojson.Safe.t, string) result
 
 (** Build the per-keeper row of [keeper_profiles] without a full
     {!Keeper_registry.registry_entry}. Exposed so the raw-vs-canonical
@@ -106,8 +105,10 @@ val save_raw_config_json :
     canonical column.
 
     @since 0.9.9 *)
-val keeper_profile_fields :
-  keeper:string -> cascade_name:string -> (string * Yojson.Safe.t) list
+val keeper_profile_fields
+  :  keeper:string
+  -> cascade_name:string
+  -> (string * Yojson.Safe.t) list
 
 (** JSON snapshot of the cascade health tracker, merged with
     [cascade.json]'s declared candidate list.
@@ -171,10 +172,7 @@ val keeper_profile_fields :
                    now merges declared-but-untracked candidates.
     @since 0.173.1 [?base_path] + [?window_minutes] added; per-provider
                    perf fields are now part of the shape. *)
-val health_json :
-  ?window_minutes:int ->
-  ?base_path:string ->
-  unit -> Yojson.Safe.t
+val health_json : ?window_minutes:int -> ?base_path:string -> unit -> Yojson.Safe.t
 
 (** Classify a provider's operational state from tracker fields.  See
     the [status] enum in {!health_json}. *)
@@ -194,11 +192,11 @@ val zero_provider_info : string -> Cascade_health_tracker.provider_info
     *_latency_ms, request_count) from
     {!Model_inference_metrics.provider_rollup}; otherwise those fields
     are [null]. *)
-val provider_entry_to_json :
-  declared:bool ->
-  ?perf:Model_inference_metrics.provider_stats ->
-  Cascade_health_tracker.provider_info ->
-  Yojson.Safe.t
+val provider_entry_to_json
+  :  declared:bool
+  -> ?perf:Model_inference_metrics.provider_stats
+  -> Cascade_health_tracker.provider_info
+  -> Yojson.Safe.t
 
 (** {1 Phase 2a operator recommendations}
 
@@ -211,46 +209,48 @@ val provider_entry_to_json :
 (** Recommended operator action for a low-trust provider. *)
 type recommendation_action =
   | Reduce_weight
-      (** Trust ∈ [0.1, 0.3): partially working but unreliable.
+  (** Trust ∈ [0.1, 0.3): partially working but unreliable.
           Suggested response: halve the cascade.toml weight. *)
   | Disable
-      (** Trust < 0.1 with no stuck-fingerprint streak: provider has
+  (** Trust < 0.1 with no stuck-fingerprint streak: provider has
           decayed across multiple persistent failures. *)
   | Investigate
-      (** Stuck on the same fingerprint ≥ 5 times, OR trust < 0.1 with
+  (** Stuck on the same fingerprint ≥ 5 times, OR trust < 0.1 with
           high-volume failures: likely a config / auth issue, not a
           provider quality problem.  Operator should inspect
           [cascade_audit] before reducing weight. *)
 
 val recommendation_action_to_string : recommendation_action -> string
 
-type recommendation = {
-  rec_provider_key : string;
-  rec_trust_score : float;
-  rec_same_fingerprint_count : int;
-  rec_events_in_window : int;
-  rec_top_fingerprint : string option;
-  rec_action : recommendation_action;
-  rec_rationale : string;
-}
+type recommendation =
+  { rec_provider_key : string
+  ; rec_trust_score : float
+  ; rec_same_fingerprint_count : int
+  ; rec_events_in_window : int
+  ; rec_top_fingerprint : string option
+  ; rec_action : recommendation_action
+  ; rec_rationale : string
+  }
 
-val classify_recommendation :
-  Cascade_health_tracker.provider_info -> recommendation option
 (** Classify a single provider snapshot.  Returns [None] for healthy
     providers (no operator action recommended). *)
+val classify_recommendation
+  :  Cascade_health_tracker.provider_info
+  -> recommendation option
 
-val low_trust_recommendations :
-  Cascade_health_tracker.provider_info list -> recommendation list
 (** Apply {!classify_recommendation} to each provider, drop the
     healthy ones, and sort ascending by [trust_score] so the most
     urgent items render first. *)
+val low_trust_recommendations
+  :  Cascade_health_tracker.provider_info list
+  -> recommendation list
 
 val recommendation_to_json : recommendation -> Yojson.Safe.t
 
-val recommendations_json : unit -> Yojson.Safe.t
 (** Standalone endpoint — reads {!Cascade_health_tracker.global},
     runs {!low_trust_recommendations}, returns a JSON array.
     Also embedded under ["recommendations"] in {!health_json}. *)
+val recommendations_json : unit -> Yojson.Safe.t
 
 (** [provider_scheme_of_model_string s] returns the scheme prefix of a
     [cascade.json] model spec (the text before the first [:]), or [s]
@@ -267,8 +267,7 @@ val provider_scheme_of_model_string : string -> string
     cannot be loaded — a failure here must not take the health
     endpoint offline.  Used by {!health_json} to augment the tracker's
     provider list with zero-traffic candidates. *)
-val declared_provider_schemes_of_config :
-  ?config_path:string -> unit -> string list
+val declared_provider_schemes_of_config : ?config_path:string -> unit -> string list
 
 (** JSON snapshot of the {!Cascade_client_capacity} registry —
     the per-URL/sentinel slot table used for ollama HTTP and CLI
@@ -341,11 +340,12 @@ val client_capacity_json : unit -> Yojson.Safe.t
     @param since_ts  keep only events with [ts >= since_ts].
 
     @since 0.9.9 *)
-val client_capacity_history_json :
-  ?limit:int ->
-  ?kind:string ->
-  ?since_ts:float ->
-  unit -> Yojson.Safe.t
+val client_capacity_history_json
+  :  ?limit:int
+  -> ?kind:string
+  -> ?since_ts:float
+  -> unit
+  -> Yojson.Safe.t
 
 (** JSON projection of {!Cascade_strategy_trace} — recent per-cycle
     strategy decisions (candidate in/out counts, backoff, kind).
@@ -374,10 +374,7 @@ val client_capacity_history_json :
     @param cascade  filter by [cascade_name]; omit to include every cascade.
 
     @since 0.9.10 *)
-val strategy_trace_json :
-  ?limit:int ->
-  ?cascade:string ->
-  unit -> Yojson.Safe.t
+val strategy_trace_json : ?limit:int -> ?cascade:string -> unit -> Yojson.Safe.t
 
 (** Instantaneous SLO snapshot computed from the live
     {!Cascade_strategy_trace} ring buffer.

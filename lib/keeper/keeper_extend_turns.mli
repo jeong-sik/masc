@@ -10,9 +10,9 @@
                       The tool mutates the agent's [max_turns] on grant.
     @param max_turns  Initial turn budget.
     @param ceiling    Absolute upper bound on turns (default: [max max_turns 200]). *)
-val make :
-  agent_ref:Oas.Agent.t option ref ->
-  max_turns:int ->
-  ?ceiling:int ->
-  unit ->
-  Oas.Tool.t
+val make
+  :  agent_ref:Oas.Agent.t option ref
+  -> max_turns:int
+  -> ?ceiling:int
+  -> unit
+  -> Oas.Tool.t

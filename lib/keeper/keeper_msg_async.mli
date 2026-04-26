@@ -10,15 +10,18 @@
 type request_status =
   | Queued
   | Running
-  | Done of { ok : bool; body : string }
+  | Done of
+      { ok : bool
+      ; body : string
+      }
 
-type entry = {
-  request_id : string;
-  keeper_name : string;
-  status : request_status;
-  submitted_at : float;
-  completed_at : float option;
-}
+type entry =
+  { request_id : string
+  ; keeper_name : string
+  ; status : request_status
+  ; submitted_at : float
+  ; completed_at : float option
+  }
 
 (** {1 Submit and poll} *)
 
@@ -26,11 +29,11 @@ type entry = {
     [sw] that runs [f] and stores the result. Returns the fresh
     [request_id] synchronously. Cancellation of [sw] cancels the
     fiber. *)
-val submit :
-  sw:Eio.Switch.t ->
-  f:(unit -> Keeper_types.tool_result) ->
-  keeper_name:string ->
-  string
+val submit
+  :  sw:Eio.Switch.t
+  -> f:(unit -> Keeper_types.tool_result)
+  -> keeper_name:string
+  -> string
 
 (** [poll request_id] returns the current entry, or [None] when the
     id is unknown or has expired. *)

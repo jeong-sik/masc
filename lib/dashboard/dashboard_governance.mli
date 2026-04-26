@@ -9,9 +9,9 @@
 (** Full dashboard payload with [summary], [judge], [judgments],
     [approval_queue], and empty [items] / [activity] / [cases] /
     [pending_actions] slots. *)
-val dashboard_json :
-  base_path:string ->
-  limit:int ->
-  offset:int ->
-  status_filter:'a ->
-  Yojson.Safe.t
+val dashboard_json
+  :  base_path:string
+  -> limit:int
+  -> offset:int
+  -> status_filter:'a
+  -> Yojson.Safe.t

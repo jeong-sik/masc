@@ -28,14 +28,14 @@ val check_verdict : Cdal_types.contract_verdict -> gate_result
     labels are published so advisory vs. strict-enforced verdicts can
     be counted separately in the dashboard. *)
 
-val strict_gate_label : string
 (** ["cdal_verdict"]. Used when a rejection actually blocks
     completion. *)
+val strict_gate_label : string
 
-val advisory_gate_label : string
 (** ["cdal_verdict_advisory"]. Used when [contract.strict = false]
     and the rejection is dropped — the audit trail is kept but the
     task is allowed through. *)
+val advisory_gate_label : string
 
 (** {1 Task completion gate} *)
 
@@ -51,12 +51,12 @@ val advisory_gate_label : string
     should pass [~gate_label:advisory_gate_label] so the dashboard can
     distinguish the two buckets. The return value is unaffected by
     the label. *)
-val gate_check :
-  ?base_dir:string ->
-  ?gate_label:string ->
-  task_id:string ->
-  unit ->
-  string option
+val gate_check
+  :  ?base_dir:string
+  -> ?gate_label:string
+  -> task_id:string
+  -> unit
+  -> string option
 
 (** {1 Attribution wiring} *)
 
@@ -68,8 +68,11 @@ val to_attribution : ?gate_label:string -> Cdal_types.contract_verdict -> Attrib
 (** Attribution used when no verdict exists for a task.
     [gate_label] defaults to {!strict_gate_label}. Trailing [unit]
     is required so the optional argument can be erased. *)
-val attribution_for_missing_verdict :
-  ?gate_label:string -> task_id:string -> unit -> Attribution.t
+val attribution_for_missing_verdict
+  :  ?gate_label:string
+  -> task_id:string
+  -> unit
+  -> Attribution.t
 
 (** {1 Ledger health (#10115)}
 
@@ -83,32 +86,33 @@ val attribution_for_missing_verdict :
     state so a boot-time check (or a [sb] introspection tool)
     can detect dormancy at the source. *)
 
-type ledger_health = {
-  base_dir : string;          (** Directory the report was taken from. *)
-  total_files : int;          (** Count of [DD.jsonl] files found. *)
-  latest_mtime : float option;
+type ledger_health =
+  { base_dir : string (** Directory the report was taken from. *)
+  ; total_files : int (** Count of [DD.jsonl] files found. *)
+  ; latest_mtime : float option
     (** Newest [DD.jsonl] mtime in Unix seconds, or [None] when no
         files exist. *)
-  age_seconds : float option;
+  ; age_seconds : float option
     (** [now - latest_mtime] when [latest_mtime] is set; [None]
         otherwise. *)
-}
+  }
 
-val ledger_health_report : ?base_dir:string -> unit -> ledger_health
 (** Snapshot the on-disk state of the verdict ledger.  No I/O on
     the verdict contents themselves; only readdir + stat.  Pure
     introspection — does not log. *)
+val ledger_health_report : ?base_dir:string -> unit -> ledger_health
 
-val stale_age_seconds_default : float
 (** Default staleness threshold (7 days) used by
     {!log_ledger_health_warn_if_stale}. *)
+val stale_age_seconds_default : float
 
-val log_ledger_health_warn_if_stale :
-  ?base_dir:string ->
-  ?stale_age_seconds:float ->
-  unit -> ledger_health
 (** Combines {!ledger_health_report} with a structured WARN line
     when the ledger is empty or older than [stale_age_seconds].
     Returns the same report so the caller can also publish it on
     a metrics surface.  Intended for boot-time wiring or a
     dedicated [sb cdal health] command. *)
+val log_ledger_health_warn_if_stale
+  :  ?base_dir:string
+  -> ?stale_age_seconds:float
+  -> unit
+  -> ledger_health

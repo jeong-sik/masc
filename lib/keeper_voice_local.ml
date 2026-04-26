@@ -8,19 +8,22 @@
 
 let trim_opt = function
   | Some raw ->
-      let trimmed = String.trim raw in
-      if trimmed = "" then None else Some trimmed
+    let trimmed = String.trim raw in
+    if trimmed = "" then None else Some trimmed
   | None -> None
+;;
 
 let resolved_base_path_opt () =
   match Env_config_core.base_path_opt () with
   | Some path -> Some path
   | None -> Coord_utils_backend_setup.find_git_root (Sys.getcwd ())
+;;
 
 let masc_base_dir () =
   match resolved_base_path_opt () with
   | Some base_path -> Coord_utils.masc_dir_from_base_path ~base_path
   | None -> Common.masc_dirname
+;;
 
 (** Singleton session manager, lazily initialized.
     Thread-safety: safe under single Eio domain — all fibers share one
@@ -39,3 +42,4 @@ let get_session_manager () =
     Voice_session_manager.restore mgr;
     session_manager_ref := Some mgr;
     mgr
+;;

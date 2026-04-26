@@ -2,55 +2,53 @@
 
 (** {1 Types} *)
 
-type prompt_metrics = {
-  usage_count: int;
-  avg_score: float;
-  last_used: float;
-}
+type prompt_metrics =
+  { usage_count : int
+  ; avg_score : float
+  ; last_used : float
+  }
 
 val prompt_metrics_to_yojson : prompt_metrics -> Yojson.Safe.t
-val prompt_metrics_of_yojson :
-  Yojson.Safe.t -> (prompt_metrics, string) result
+val prompt_metrics_of_yojson : Yojson.Safe.t -> (prompt_metrics, string) result
 
-type prompt_entry = {
-  id: string;
-  template: string;
-  version: string;
-  variables: string list;
-  metrics: prompt_metrics option;
-  created_at: float;
-  deprecated: bool;
-}
+type prompt_entry =
+  { id : string
+  ; template : string
+  ; version : string
+  ; variables : string list
+  ; metrics : prompt_metrics option
+  ; created_at : float
+  ; deprecated : bool
+  }
 
 val prompt_entry_to_yojson : prompt_entry -> Yojson.Safe.t
-val prompt_entry_of_yojson :
-  Yojson.Safe.t -> (prompt_entry, string) result
+val prompt_entry_of_yojson : Yojson.Safe.t -> (prompt_entry, string) result
 
-type registry_stats = {
-  total_prompts: int;
-  active_prompts: int;
-  deprecated_prompts: int;
-  most_used: string option;
-  avg_usage: float;
-}
+type registry_stats =
+  { total_prompts : int
+  ; active_prompts : int
+  ; deprecated_prompts : int
+  ; most_used : string option
+  ; avg_usage : float
+  }
 
-type prompt_meta = {
-  description: string;
-  category: string;
-  required_file: bool;
-  template_variables: string list;
-}
+type prompt_meta =
+  { description : string
+  ; category : string
+  ; required_file : bool
+  ; template_variables : string list
+  }
 
-type prompt_resolution = {
-  effective: string;
-  source: string;
-  file_value: string option;
-  override_value: string option;
-  default_value: string option;
-  file_path: string option;
-  file_exists: bool;
-  has_override: bool;
-}
+type prompt_resolution =
+  { effective : string
+  ; source : string
+  ; file_value : string option
+  ; override_value : string option
+  ; default_value : string option
+  ; file_path : string option
+  ; file_exists : bool
+  ; has_override : bool
+  }
 
 (** {1 Variable Extraction} *)
 
@@ -79,18 +77,20 @@ val update_metrics : id:string -> version:string -> score:float -> unit -> unit
 
 (** {1 Template Rendering} *)
 
-val render_template :
-  template:string -> vars:(string * string) list -> unit -> (string, string) result
+val render_template
+  :  template:string
+  -> vars:(string * string) list
+  -> unit
+  -> (string, string) result
 
-val render :
-  id:string ->
-  ?version:string ->
-  vars:(string * string) list ->
-  unit ->
-  (string, string) result
+val render
+  :  id:string
+  -> ?version:string
+  -> vars:(string * string) list
+  -> unit
+  -> (string, string) result
 
-val render_prompt_template :
-  string -> (string * string) list -> (string, string) result
+val render_prompt_template : string -> (string * string) list -> (string, string) result
 
 (** {1 Statistics} *)
 
@@ -106,38 +106,35 @@ val of_json : Yojson.Safe.t -> (int, string) result
 
 (** {1 Override API} *)
 
-val register_prompt :
-  key:string ->
-  description:string ->
-  ?category:string ->
-  ?required_file:bool ->
-  ?template_variables:string list ->
-  unit ->
-  unit
+val register_prompt
+  :  key:string
+  -> description:string
+  -> ?category:string
+  -> ?required_file:bool
+  -> ?template_variables:string list
+  -> unit
+  -> unit
 
-val load_prompts_from_directory : string -> unit
 (** Auto-discover and register prompts from markdown files with frontmatter.
     Files without frontmatter are skipped. Key is derived from filename. *)
+val load_prompts_from_directory : string -> unit
 
-val register_default :
-  key:string ->
-  default:string ->
-  description:string ->
-  ?category:string ->
-  unit ->
-  unit
+val register_default
+  :  key:string
+  -> default:string
+  -> description:string
+  -> ?category:string
+  -> unit
+  -> unit
 
 val resolve_prompt : string -> prompt_resolution
 val get_prompt : string -> string
 val set_override : string -> string -> (unit, string) result
 val clear_prompt_override : string -> unit
 val prompt_source : string -> string
-
 val restore_overrides : string -> unit
 val persist_overrides : string -> unit
-
 val validate_required_prompt_files : unit -> (string * string) list
 val validate_prompt_templates : unit -> (string * string) list
-
 val list_prompts : unit -> Yojson.Safe.t list
 val prompts_json : unit -> Yojson.Safe.t

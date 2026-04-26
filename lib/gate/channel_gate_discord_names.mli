@@ -9,12 +9,12 @@
 
 (** {1 Types} *)
 
-type name_map = {
-  guild_names : (string * string) list;
-  channel_names : (string * string) list;
-  channel_to_guild : (string * string) list;
-  updated_at : string;
-}
+type name_map =
+  { guild_names : (string * string) list
+  ; channel_names : (string * string) list
+  ; channel_to_guild : (string * string) list
+  ; updated_at : string
+  }
 
 (** {1 Path configuration} *)
 
@@ -26,8 +26,7 @@ val configured_write_path : string -> default:string -> string
 
 (** [configured_read_path env_name ~default ~legacy] — env override,
     else [default], else [legacy] fallback (for pre-v0.9.0 layout). *)
-val configured_read_path :
-  string -> default:string -> legacy:string -> string
+val configured_read_path : string -> default:string -> legacy:string -> string
 
 (** Default write path (env [MASC_DISCORD_NAMES_PATH] →
     {!default_names_path}). *)
@@ -46,7 +45,6 @@ val empty : name_map
 val read : unit -> name_map
 
 val save : name_map -> unit
-
 val to_json : name_map -> Yojson.Safe.t
 
 (** {1 Lookups} *)
@@ -54,5 +52,4 @@ val to_json : name_map -> Yojson.Safe.t
 (** Return the guild id that owns [channel_id], using the cached
     [channel_to_guild] map from {!read}. [None] when [channel_id]
     is empty/whitespace or unknown. *)
-val resolve_guild_id_for_channel :
-  channel_id:string -> string option
+val resolve_guild_id_for_channel : channel_id:string -> string option

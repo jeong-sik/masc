@@ -3,20 +3,18 @@
 (library
  (name masc_prompt_registry)
  (public_name masc_mcp.prompt_registry)
- (modules
-   prompt_registry_types
-   prompt_registry_store
-   prompt_registry)
+ (modules prompt_registry_types prompt_registry_store prompt_registry)
  (wrapped false)
  (libraries
-   masc_core
-   masc_log
-   masc_coord
-   fs_compat
-   yojson
-   unix
-   eio
-   re
-   re.str
-   re.pcre)
- (preprocess (pps ppx_deriving_yojson)))
+  masc_core
+  masc_log
+  masc_coord
+  fs_compat
+  yojson
+  unix
+  eio
+  re
+  re.str
+  re.pcre)
+ (preprocess
+  (pps ppx_deriving_yojson)))

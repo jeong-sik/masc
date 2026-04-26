@@ -37,16 +37,16 @@ type transition_reason =
   | Protocol_violation_no_tools_no_social_headers
   | Failure_run_error
 
-type social_state = {
-  social_model : string;
-  belief_summary : string;
-  active_desire : string option;
-  current_intention : string option;
-  blocker : string option;
-  need : string option;
-  speech_act : speech_act;
-  delivery_surface : delivery_surface;
-}
+type social_state =
+  { social_model : string
+  ; belief_summary : string
+  ; active_desire : string option
+  ; current_intention : string option
+  ; blocker : string option
+  ; need : string option
+  ; speech_act : speech_act
+  ; delivery_surface : delivery_surface
+  }
 
 let speech_act_to_string = function
   | Stay_silent -> "stay_silent"
@@ -57,6 +57,7 @@ let speech_act_to_string = function
   | Post_board -> "post_board"
   | Broadcast -> "broadcast"
   | Defer -> "defer"
+;;
 
 let speech_act_of_string value =
   match String.lowercase_ascii (String.trim value) with
@@ -69,6 +70,7 @@ let speech_act_of_string value =
   | "broadcast" -> Some Broadcast
   | "defer" -> Some Defer
   | _ -> None
+;;
 
 let delivery_surface_to_string = function
   | Silent -> "silent"
@@ -77,6 +79,7 @@ let delivery_surface_to_string = function
   | Board_comment -> "board_comment"
   | Task_claim_surface -> "task_claim"
   | Broadcast_surface -> "broadcast"
+;;
 
 let default_delivery_surface_of_speech_act = function
   | Stay_silent | Defer -> Silent
@@ -85,6 +88,7 @@ let default_delivery_surface_of_speech_act = function
   | Comment_board -> Board_comment
   | Claim_task -> Task_claim_surface
   | Broadcast -> Broadcast_surface
+;;
 
 let delivery_surface_of_string value =
   match String.lowercase_ascii (String.trim value) with
@@ -95,13 +99,14 @@ let delivery_surface_of_string value =
   | "task_claim" -> Some Task_claim_surface
   | "broadcast" -> Some Broadcast_surface
   | _ -> None
+;;
 
 let model_id_to_string = function
   | Bdi_speech_v1 -> "bdi_speech_v1"
   | Magentic_ledger_v1 -> "magentic_ledger_v1"
+;;
 
 let all_model_ids = [ Bdi_speech_v1; Magentic_ledger_v1 ]
-
 let valid_model_id_strings = List.map model_id_to_string all_model_ids
 
 let model_id_of_string value =
@@ -109,6 +114,7 @@ let model_id_of_string value =
   | "bdi_speech_v1" -> Some Bdi_speech_v1
   | "magentic_ledger_v1" -> Some Magentic_ledger_v1
   | _ -> None
+;;
 
 let default_model_id = Bdi_speech_v1
 
@@ -116,18 +122,20 @@ let is_known_social_model value =
   match model_id_of_string value with
   | Some _ -> true
   | None -> false
+;;
 
 let fallback_social_model value =
-  if is_known_social_model value then None
-  else Some (model_id_to_string default_model_id)
+  if is_known_social_model value then None else Some (model_id_to_string default_model_id)
+;;
 
 let normalize_social_model value =
   match fallback_social_model value with
   | Some fallback -> fallback
   | None ->
-      match model_id_of_string value with
-      | Some model_id -> model_id_to_string model_id
-      | None -> model_id_to_string default_model_id
+    (match model_id_of_string value with
+     | Some model_id -> model_id_to_string model_id
+     | None -> model_id_to_string default_model_id)
+;;
 
 let transition_reason_to_string = function
   | Tool_only_stay_silent -> "tool_only:stay_silent"
@@ -138,18 +146,17 @@ let transition_reason_to_string = function
   | Tool_only_visible_reply -> "tool_only:visible_reply"
   | Tool_only_progress_ledger -> "tool_only:progress_ledger"
   | Explicit_social_headers -> "headers:explicit_social_headers"
-  | Missing_headers_fallback_visible_reply ->
-      "headers_missing:fallback_visible_reply"
-  | Invalid_headers_fallback_visible_reply ->
-      "headers_invalid:fallback_visible_reply"
+  | Missing_headers_fallback_visible_reply -> "headers_missing:fallback_visible_reply"
+  | Invalid_headers_fallback_visible_reply -> "headers_invalid:fallback_visible_reply"
   | Inferred_visible_reply -> "text_reply:inferred_visible_reply"
   | Protocol_violation_missing_social_headers ->
-      "protocol_violation:missing_social_headers"
+    "protocol_violation:missing_social_headers"
   | Protocol_violation_invalid_social_headers ->
-      "protocol_violation:invalid_social_headers"
+    "protocol_violation:invalid_social_headers"
   | Protocol_violation_no_tools_no_social_headers ->
-      "protocol_violation:no_tool_calls_and_no_social_headers"
+    "protocol_violation:no_tool_calls_and_no_social_headers"
   | Failure_run_error -> "failure:run_error"
+;;
 
 (* Gen8 persistence-layer cap for social_state narrative fields.
 
@@ -188,54 +195,57 @@ let masc_oas_error_max_chars = 2000
 
 let truncate_string ~max_chars s =
   String_util.utf8_safe ~max_bytes:(max_chars + 3) ~suffix:"…" s |> String_util.to_string
+;;
 
 let truncate_option ~max_chars = function
   | None -> None
   | Some s ->
-      Some (String_util.utf8_safe ~max_bytes:(max_chars + 3) ~suffix:"…" s
-            |> String_util.to_string)
+    Some
+      (String_util.utf8_safe ~max_bytes:(max_chars + 3) ~suffix:"…" s
+       |> String_util.to_string)
+;;
 
 let has_masc_oas_error_prefix (s : string) : bool =
   let has_prefix prefix =
     let pl = String.length prefix in
     String.length s >= pl && String.sub s 0 pl = prefix
   in
-  has_prefix masc_oas_error_prefix
-  || has_prefix masc_oas_error_wrapped_prefix
+  has_prefix masc_oas_error_prefix || has_prefix masc_oas_error_wrapped_prefix
+;;
 
 (** [cap_blocker s] returns [s] unchanged when it is a structured
     [masc_oas_error] payload that fits inside [masc_oas_error_max_chars].
     Narrative strings fall through to the normal option-field cap so
     dashboards / logs still see bounded text. This is the #9933 fix
     for budget-underscore truncation. Idempotent. *)
-let cap_blocker
-    ?(option_max_chars = default_option_field_max_chars)
-    (s : string) : string =
+let cap_blocker ?(option_max_chars = default_option_field_max_chars) (s : string) : string
+  =
   let trimmed = String.trim s in
   let has_prefix = has_masc_oas_error_prefix trimmed in
-  if has_prefix && String.length s <= masc_oas_error_max_chars then s
-  else if has_prefix then
-    truncate_string ~max_chars:masc_oas_error_max_chars s
-  else
-    truncate_string ~max_chars:option_max_chars s
+  if has_prefix && String.length s <= masc_oas_error_max_chars
+  then s
+  else if has_prefix
+  then truncate_string ~max_chars:masc_oas_error_max_chars s
+  else truncate_string ~max_chars:option_max_chars s
+;;
 
 let cap_blocker_option ?option_max_chars = function
   | None -> None
   | Some s -> Some (cap_blocker ?option_max_chars s)
+;;
 
 let cap_social_state
-    ?(belief_max_chars = default_belief_summary_max_chars)
-    ?(option_max_chars = default_option_field_max_chars)
-    (state : social_state) : social_state =
-  {
-    state with
-    belief_summary =
-      truncate_string ~max_chars:belief_max_chars state.belief_summary;
-    active_desire =
-      truncate_option ~max_chars:option_max_chars state.active_desire;
-    current_intention =
-      truncate_option ~max_chars:option_max_chars state.current_intention;
-    blocker =
-      cap_blocker_option ~option_max_chars state.blocker;
-    need = truncate_option ~max_chars:option_max_chars state.need;
+      ?(belief_max_chars = default_belief_summary_max_chars)
+      ?(option_max_chars = default_option_field_max_chars)
+      (state : social_state)
+  : social_state
+  =
+  { state with
+    belief_summary = truncate_string ~max_chars:belief_max_chars state.belief_summary
+  ; active_desire = truncate_option ~max_chars:option_max_chars state.active_desire
+  ; current_intention =
+      truncate_option ~max_chars:option_max_chars state.current_intention
+  ; blocker = cap_blocker_option ~option_max_chars state.blocker
+  ; need = truncate_option ~max_chars:option_max_chars state.need
   }
+;;

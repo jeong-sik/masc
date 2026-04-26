@@ -11,17 +11,9 @@
     [emit_turn_end] as a pair (see the [Fun.protect] usage at the
     call sites in [worker_oas] and [keeper_agent_run]). *)
 
-type Runtime_events.User.tag +=
-  | Turn
+type Runtime_events.User.tag += Turn
 
-let ev_turn =
-  Runtime_events.User.register "masc.turn"
-    Turn Runtime_events.Type.span
-
-let emit_turn_start () =
-  Runtime_events.User.write ev_turn Runtime_events.Type.Begin
-
-let emit_turn_end () =
-  Runtime_events.User.write ev_turn Runtime_events.Type.End
-
+let ev_turn = Runtime_events.User.register "masc.turn" Turn Runtime_events.Type.span
+let emit_turn_start () = Runtime_events.User.write ev_turn Runtime_events.Type.Begin
+let emit_turn_end () = Runtime_events.User.write ev_turn Runtime_events.Type.End
 let start_listener () = Runtime_events.start ()

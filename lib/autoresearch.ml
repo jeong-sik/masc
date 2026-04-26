@@ -44,11 +44,21 @@ let with_loops_ro f = Eio.Mutex.use_ro loops_mu (fun () -> f ())
 
 let generate_loop_id () =
   let rnd = Mirage_crypto_rng.generate 4 in
-  let hex = List.fold_left (fun acc s -> acc ^ s) "" (List.init (String.length rnd) (fun i -> Printf.sprintf "%02x" (Char.code (String.get rnd i)))) in
+  let hex =
+    List.fold_left
+      (fun acc s -> acc ^ s)
+      ""
+      (List.init (String.length rnd) (fun i ->
+         Printf.sprintf "%02x" (Char.code (String.get rnd i))))
+  in
   "ar-" ^ hex
+;;
 
 let option_first_some left right =
-  match left with Some _ -> left | None -> right
+  match left with
+  | Some _ -> left
+  | None -> right
+;;
 
 (* ================================================================ *)
 (* Re-exports: Serde                                                 *)
@@ -81,8 +91,15 @@ let save_state = Autoresearch_storage.save_state
 let save_execution_link = Autoresearch_storage.save_execution_link
 let load_execution_link_by_loop = Autoresearch_storage.load_execution_link_by_loop
 let load_execution_link_by_session = Autoresearch_storage.load_execution_link_by_session
-let load_execution_link_by_loop_result = Autoresearch_storage.load_execution_link_by_loop_result
-let load_execution_link_by_session_result = Autoresearch_storage.load_execution_link_by_session_result
+
+let load_execution_link_by_loop_result =
+  Autoresearch_storage.load_execution_link_by_loop_result
+;;
+
+let load_execution_link_by_session_result =
+  Autoresearch_storage.load_execution_link_by_session_result
+;;
+
 let load_state = Autoresearch_storage.load_state
 let load_state_result = Autoresearch_storage.load_state_result
 let latest_cycle_record = Autoresearch_storage.latest_cycle_record
@@ -138,50 +155,66 @@ let generate_code_change = Autoresearch_codegen.generate_code_change
 (* Loop State Management                                             *)
 (* ================================================================ *)
 
-let create_state ~goal ~metric_fn ?model_model ?author ~target_file ?target_score
-    ~cycle_timeout_s ~max_cycles ?patience ?build_verify_fn
-    ?(lower_is_better = false) ~workdir () =
-  let model_model = match model_model with
+let create_state
+      ~goal
+      ~metric_fn
+      ?model_model
+      ?author
+      ~target_file
+      ?target_score
+      ~cycle_timeout_s
+      ~max_cycles
+      ?patience
+      ?build_verify_fn
+      ?(lower_is_better = false)
+      ~workdir
+      ()
+  =
+  let model_model =
+    match model_model with
     | Some m -> m
-    | None -> Provider_adapter.default_model_provider_prefix_result () |> Result.value ~default:"auto"
+    | None ->
+      Provider_adapter.default_model_provider_prefix_result ()
+      |> Result.value ~default:"auto"
   in
   let now = Time_compat.now () in
-  let patience = match patience with
+  let patience =
+    match patience with
     | Some p -> p
     | None -> max 3 (max_cycles / 3)
   in
-  {
-    loop_id = generate_loop_id ();
-    author;
-    goal;
-    metric_fn;
-    model_model;
-    target_file;
-    target_score;
-    status = Running;
-    error_message = None;
-    current_cycle = 0;
-    baseline = 0.0;
-    best_score = 0.0;
-    best_cycle = 0;
-    queued_hypothesis = None;
-    history = [];
-    total_keeps = 0;
-    total_discards = 0;
-    insights = [];
-    start_time = now;
-    updated_at = now;
-    cycle_timeout_s;
-    max_cycles;
-    workdir;
-    source_workdir = workdir;
-    program_note = None;
-    warnings = [];
-    patience;
-    consecutive_discards = 0;
-    build_verify_fn;
-    lower_is_better;
+  { loop_id = generate_loop_id ()
+  ; author
+  ; goal
+  ; metric_fn
+  ; model_model
+  ; target_file
+  ; target_score
+  ; status = Running
+  ; error_message = None
+  ; current_cycle = 0
+  ; baseline = 0.0
+  ; best_score = 0.0
+  ; best_cycle = 0
+  ; queued_hypothesis = None
+  ; history = []
+  ; total_keeps = 0
+  ; total_discards = 0
+  ; insights = []
+  ; start_time = now
+  ; updated_at = now
+  ; cycle_timeout_s
+  ; max_cycles
+  ; workdir
+  ; source_workdir = workdir
+  ; program_note = None
+  ; warnings = []
+  ; patience
+  ; consecutive_discards = 0
+  ; build_verify_fn
+  ; lower_is_better
   }
+;;
 
 (** Append an insight, maintaining FIFO max 10 entries.
     Returns updated state. *)
@@ -189,108 +222,140 @@ let add_insight (state : loop_state) msg =
   let max_insights = 10 in
   let insights = msg :: state.insights in
   let insights =
-    if List.length insights > max_insights then
-      List.filteri (fun i _ -> i < max_insights) insights
+    if List.length insights > max_insights
+    then List.filteri (fun i _ -> i < max_insights) insights
     else insights
   in
   { state with insights }
+;;
 
 (** Record one completed experiment cycle.
     Returns [(state, record)] with the updated state. *)
-let record_cycle (state : loop_state) ~hypothesis ~score_before ~score_after
-    ~commit_hash ~elapsed_ms ~model_used =
+let record_cycle
+      (state : loop_state)
+      ~hypothesis
+      ~score_before
+      ~score_after
+      ~commit_hash
+      ~elapsed_ms
+      ~model_used
+  =
   let delta = score_after -. score_before in
   (* Compare against the maintained baseline, not score_before which can dip
      below baseline due to metric noise -- preventing ratchet-down regressions.
      Polarity: lower_is_better inverts the comparison direction. *)
   let is_improvement =
-    if state.lower_is_better then score_after < state.baseline
+    if state.lower_is_better
+    then score_after < state.baseline
     else score_after > state.baseline
   in
   let decision = if is_improvement then Keep else Discard in
   let now = Time_compat.now () in
-  let record = {
-    cycle = state.current_cycle;
-    hypothesis;
-    score_before;
-    score_after;
-    delta;
-    decision;
-    commit_hash;
-    elapsed_ms;
-    model_used;
-    timestamp = now;
-  } in
+  let record =
+    { cycle = state.current_cycle
+    ; hypothesis
+    ; score_before
+    ; score_after
+    ; delta
+    ; decision
+    ; commit_hash
+    ; elapsed_ms
+    ; model_used
+    ; timestamp = now
+    }
+  in
   let state = { state with history = record :: state.history; updated_at = now } in
   let state =
     match decision with
     | Keep ->
-      let state = { state with
-        total_keeps = state.total_keeps + 1;
-        baseline = score_after } in
+      let state =
+        { state with total_keeps = state.total_keeps + 1; baseline = score_after }
+      in
       let is_new_best =
-        if state.lower_is_better then score_after < state.best_score
+        if state.lower_is_better
+        then score_after < state.best_score
         else score_after > state.best_score
       in
       let state =
-        if is_new_best then
-          { state with best_score = score_after; best_cycle = state.current_cycle }
+        if is_new_best
+        then { state with best_score = score_after; best_cycle = state.current_cycle }
         else state
       in
-      add_insight state
-        (Printf.sprintf "Cycle %d: %s improved +%.4f" state.current_cycle hypothesis delta)
+      add_insight
+        state
+        (Printf.sprintf
+           "Cycle %d: %s improved +%.4f"
+           state.current_cycle
+           hypothesis
+           delta)
     | Discard ->
       let state = { state with total_discards = state.total_discards + 1 } in
-      add_insight state
-        (Printf.sprintf "Cycle %d: %s no improvement (%.4f)" state.current_cycle hypothesis delta)
+      add_insight
+        state
+        (Printf.sprintf
+           "Cycle %d: %s no improvement (%.4f)"
+           state.current_cycle
+           hypothesis
+           delta)
   in
-  (state, record)
+  state, record
+;;
 
 let target_reached (state : loop_state) =
   match state.target_score with
   | None -> false
   | Some target ->
-      if state.lower_is_better then state.best_score <= target
-      else state.best_score >= target
+    if state.lower_is_better
+    then state.best_score <= target
+    else state.best_score >= target
+;;
 
 let completion_reason (state : loop_state) =
-  if target_reached state then
-    Some "target_score reached"
-  else if state.current_cycle >= state.max_cycles then
-    Some "max_cycles reached"
-  else
-    None
+  if target_reached state
+  then Some "target_score reached"
+  else if state.current_cycle >= state.max_cycles
+  then Some "max_cycles reached"
+  else None
+;;
 
 let complete_if_finished (state : loop_state) =
   match state.status, completion_reason state with
   | Running, Some "target_score reached" ->
-      let target =
-        match state.target_score with
-        | Some value -> Printf.sprintf "%.4f" value
-        | None -> "n/a"
-      in
-      add_insight
-        { state with status = Completed; updated_at = Time_compat.now () }
-        (Printf.sprintf "Target reached at cycle %d (target=%s, best=%.4f)"
-           state.current_cycle target state.best_score)
+    let target =
+      match state.target_score with
+      | Some value -> Printf.sprintf "%.4f" value
+      | None -> "n/a"
+    in
+    add_insight
+      { state with status = Completed; updated_at = Time_compat.now () }
+      (Printf.sprintf
+         "Target reached at cycle %d (target=%s, best=%.4f)"
+         state.current_cycle
+         target
+         state.best_score)
   | Running, Some reason ->
-      add_insight
-        { state with status = Completed; updated_at = Time_compat.now () }
-        (Printf.sprintf "Autoresearch completed: %s" reason)
+    add_insight
+      { state with status = Completed; updated_at = Time_compat.now () }
+      (Printf.sprintf "Autoresearch completed: %s" reason)
   | _ -> state
+;;
 
 (** Check if the loop should continue. *)
 let should_continue (state : loop_state) =
   state.status = Running && Option.is_none (completion_reason state)
+;;
 
 (** Stop a running or persisted loop.
     Acquires [loops_mu] write lock internally. *)
 let stop_loop ~base_path ?reason loop_id =
   let stop_state (state : loop_state) =
-    let state = { state with
-      status = Stopped;
-      error_message = reason;
-      updated_at = Time_compat.now () } in
+    let state =
+      { state with
+        status = Stopped
+      ; error_message = reason
+      ; updated_at = Time_compat.now ()
+      }
+    in
     save_state ~base_path state;
     Hashtbl.replace active_loops loop_id state;
     state
@@ -298,93 +363,102 @@ let stop_loop ~base_path ?reason loop_id =
   with_loops_rw (fun () ->
     match Hashtbl.find_opt active_loops loop_id with
     | Some state -> Some (stop_state state)
-    | None -> (
-        match load_state ~base_path loop_id with
-        | None -> None
-        | Some persisted ->
-            let now = Time_compat.now () in
-            let state =
-              {
-                loop_id = persisted.loop_id;
-                author = persisted.author;
-                goal = persisted.goal;
-                metric_fn = persisted.metric_fn;
-                model_model = persisted.model_model;
-                target_file = persisted.target_file;
-                target_score = persisted.target_score;
-                status = persisted.status;
-                error_message = persisted.error_message;
-                current_cycle = persisted.current_cycle;
-                baseline = persisted.baseline;
-                best_score = persisted.best_score;
-                best_cycle = persisted.best_cycle;
-                queued_hypothesis = persisted.queued_hypothesis;
-                history = [];
-                total_keeps = persisted.total_keeps;
-                total_discards = persisted.total_discards;
-                insights = [];
-                start_time = now -. max 0.0 persisted.elapsed_s;
-                updated_at = now;
-                cycle_timeout_s = persisted.cycle_timeout_s;
-                max_cycles = persisted.max_cycles;
-                workdir = persisted.workdir;
-                source_workdir = persisted.source_workdir;
-                program_note = persisted.program_note;
-                warnings = persisted.warnings;
-                patience = persisted.patience;
-                consecutive_discards = persisted.consecutive_discards;
-                build_verify_fn = persisted.build_verify_fn;
-                lower_is_better = persisted.lower_is_better;
-              }
-            in
-            Some (stop_state state)))
+    | None ->
+      (match load_state ~base_path loop_id with
+       | None -> None
+       | Some persisted ->
+         let now = Time_compat.now () in
+         let state =
+           { loop_id = persisted.loop_id
+           ; author = persisted.author
+           ; goal = persisted.goal
+           ; metric_fn = persisted.metric_fn
+           ; model_model = persisted.model_model
+           ; target_file = persisted.target_file
+           ; target_score = persisted.target_score
+           ; status = persisted.status
+           ; error_message = persisted.error_message
+           ; current_cycle = persisted.current_cycle
+           ; baseline = persisted.baseline
+           ; best_score = persisted.best_score
+           ; best_cycle = persisted.best_cycle
+           ; queued_hypothesis = persisted.queued_hypothesis
+           ; history = []
+           ; total_keeps = persisted.total_keeps
+           ; total_discards = persisted.total_discards
+           ; insights = []
+           ; start_time = now -. max 0.0 persisted.elapsed_s
+           ; updated_at = now
+           ; cycle_timeout_s = persisted.cycle_timeout_s
+           ; max_cycles = persisted.max_cycles
+           ; workdir = persisted.workdir
+           ; source_workdir = persisted.source_workdir
+           ; program_note = persisted.program_note
+           ; warnings = persisted.warnings
+           ; patience = persisted.patience
+           ; consecutive_discards = persisted.consecutive_discards
+           ; build_verify_fn = persisted.build_verify_fn
+           ; lower_is_better = persisted.lower_is_better
+           }
+         in
+         Some (stop_state state)))
+;;
 
 (** Linked loop status JSON for execution-session integration.
     Acquires [loops_mu] read lock internally. *)
 let linked_status_json ~base_path (link : execution_link) =
-  let current_cycle, status, best_score, target_score, error_message, workdir,
-      lower_is_better, source_workdir, program_note, warnings,
-      queued_hypothesis =
+  let ( current_cycle
+      , status
+      , best_score
+      , target_score
+      , error_message
+      , workdir
+      , lower_is_better
+      , source_workdir
+      , program_note
+      , warnings
+      , queued_hypothesis )
+    =
     with_loops_ro (fun () ->
       match Hashtbl.find_opt active_loops link.loop_id with
       | Some state ->
-          ( state.current_cycle,
-            status_to_string state.status,
-            state.best_score,
-            state.target_score,
-            state.error_message,
-            state.workdir,
-            state.lower_is_better,
-            state.source_workdir,
-            state.program_note,
-            state.warnings,
-            state.queued_hypothesis )
-      | None -> (
-          match load_state ~base_path link.loop_id with
-          | Some persisted ->
-              ( persisted.current_cycle,
-                status_to_string persisted.status,
-                persisted.best_score,
-                persisted.target_score,
-                persisted.error_message,
-                persisted.workdir,
-                persisted.lower_is_better,
-                persisted.source_workdir,
-                persisted.program_note,
-                persisted.warnings,
-                persisted.queued_hypothesis )
-          | None ->
-              ( 0,
-                "missing",
-                0.0,
-                None,
-                Some "state file missing",
-                managed_worktree_dir ~base_path link.loop_id,
-                false,
-                "",
-                link.program_note,
-                [],
-                None )))
+        ( state.current_cycle
+        , status_to_string state.status
+        , state.best_score
+        , state.target_score
+        , state.error_message
+        , state.workdir
+        , state.lower_is_better
+        , state.source_workdir
+        , state.program_note
+        , state.warnings
+        , state.queued_hypothesis )
+      | None ->
+        (match load_state ~base_path link.loop_id with
+         | Some persisted ->
+           ( persisted.current_cycle
+           , status_to_string persisted.status
+           , persisted.best_score
+           , persisted.target_score
+           , persisted.error_message
+           , persisted.workdir
+           , persisted.lower_is_better
+           , persisted.source_workdir
+           , persisted.program_note
+           , persisted.warnings
+           , persisted.queued_hypothesis )
+         | None ->
+           ( 0
+           , "missing"
+           , 0.0
+           , None
+           , Some "state file missing"
+           , managed_worktree_dir ~base_path link.loop_id
+           , false
+           , ""
+           , link.program_note
+           , []
+           , None )))
   in
   let last_decision =
     match latest_cycle_record ~base_path link.loop_id with
@@ -392,35 +466,31 @@ let linked_status_json ~base_path (link : execution_link) =
     | None -> None
   in
   `Assoc
-    [
-      ("loop_id", `String link.loop_id);
-      ("session_id", `String link.session_id);
-      ("task_id", Json_util.string_opt_to_json link.task_id);
-      ("status", `String status);
-      ("current_cycle", `Int current_cycle);
-      ("best_score", `Float best_score);
-      ("target_score", Json_util.float_opt_to_json target_score);
-      ( "target_reached",
-        `Bool
+    [ "loop_id", `String link.loop_id
+    ; "session_id", `String link.session_id
+    ; "task_id", Json_util.string_opt_to_json link.task_id
+    ; "status", `String status
+    ; "current_cycle", `Int current_cycle
+    ; "best_score", `Float best_score
+    ; "target_score", Json_util.float_opt_to_json target_score
+    ; ( "target_reached"
+      , `Bool
           (match target_score with
            | None -> false
            | Some target ->
-               if lower_is_better then best_score <= target
-               else best_score >= target) );
-      ( "last_decision",
-        Json_util.string_opt_to_json last_decision );
-      ("target_file", `String link.target_file);
-      ( "program_note",
-        Json_util.string_opt_to_json (option_first_some program_note link.program_note) );
-      ( "operation_id",
-        Json_util.string_opt_to_json link.operation_id );
-      ("workdir", `String workdir);
-      ("source_workdir", `String source_workdir);
-      ("warnings", `List (List.map (fun value -> `String value) warnings));
-      ( "queued_hypothesis",
-        Json_util.string_opt_to_json queued_hypothesis );
-      ("error", Json_util.string_opt_to_json error_message);
+             if lower_is_better then best_score <= target else best_score >= target) )
+    ; "last_decision", Json_util.string_opt_to_json last_decision
+    ; "target_file", `String link.target_file
+    ; ( "program_note"
+      , Json_util.string_opt_to_json (option_first_some program_note link.program_note) )
+    ; "operation_id", Json_util.string_opt_to_json link.operation_id
+    ; "workdir", `String workdir
+    ; "source_workdir", `String source_workdir
+    ; "warnings", `List (List.map (fun value -> `String value) warnings)
+    ; "queued_hypothesis", Json_util.string_opt_to_json queued_hypothesis
+    ; "error", Json_util.string_opt_to_json error_message
     ]
+;;
 
 (** Summary for status reporting. *)
 let summary (state : loop_state) =
@@ -428,6 +498,6 @@ let summary (state : loop_state) =
   let recent_json = `List (List.map cycle_to_yojson recent) in
   let base = state_to_yojson state in
   match base with
-  | `Assoc fields ->
-    `Assoc (fields @ [("recent_cycles", recent_json)])
+  | `Assoc fields -> `Assoc (fields @ [ "recent_cycles", recent_json ])
   | other -> other
+;;

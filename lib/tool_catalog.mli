@@ -6,8 +6,13 @@
 
 (** {1 Types} *)
 
-type visibility = Default | Hidden
-type lifecycle = Active | Deprecated
+type visibility =
+  | Default
+  | Hidden
+
+type lifecycle =
+  | Active
+  | Deprecated
 
 type implementation_status =
   | Real
@@ -36,49 +41,55 @@ type tool_group =
   | Masc_agent
   | Masc_core
 
-type metadata = {
-  visibility : visibility;
-  lifecycle : lifecycle;
-  implementation_status : implementation_status;
-  canonical_name : string option;
-  replacement : string option;
-  reason : string option;
-  allow_direct_call_when_hidden : bool;
-  readonly : bool option;
-  destructive : bool option;
-  idempotent : bool option;
-  required_permission : Types.permission option;
-  effect_domain : effect_domain option;
-  requires_actor_binding : bool option;
-}
+type metadata =
+  { visibility : visibility
+  ; lifecycle : lifecycle
+  ; implementation_status : implementation_status
+  ; canonical_name : string option
+  ; replacement : string option
+  ; reason : string option
+  ; allow_direct_call_when_hidden : bool
+  ; readonly : bool option
+  ; destructive : bool option
+  ; idempotent : bool option
+  ; required_permission : Types.permission option
+  ; effect_domain : effect_domain option
+  ; requires_actor_binding : bool option
+  }
 
 (** {1 Configuration} *)
 
 val default_metadata : metadata
 
-val deprecated :
-  ?canonical_name:string -> ?replacement:string ->
-  ?allow_direct_call_when_hidden:bool ->
-  ?implementation_status:implementation_status -> string -> metadata
+val deprecated
+  :  ?canonical_name:string
+  -> ?replacement:string
+  -> ?allow_direct_call_when_hidden:bool
+  -> ?implementation_status:implementation_status
+  -> string
+  -> metadata
 
-val hidden_active :
-  ?canonical_name:string -> ?replacement:string ->
-  ?allow_direct_call_when_hidden:bool ->
-  ?implementation_status:implementation_status -> string -> metadata
+val hidden_active
+  :  ?canonical_name:string
+  -> ?replacement:string
+  -> ?allow_direct_call_when_hidden:bool
+  -> ?implementation_status:implementation_status
+  -> string
+  -> metadata
 
 val placeholder_tools_enabled : unit -> bool
 
 (** {1 Public tool surface} *)
 
-val public_mcp_tools : string list
 (** Alias for [Tool_catalog_surfaces.public_mcp_surface_tools].
     Prefer the surfaces module directly for new code. *)
+val public_mcp_tools : string list
 
-val is_public_mcp : string -> bool
 (** O(1) membership check against the public surface. *)
+val is_public_mcp : string -> bool
 
-val full_surface_override : unit -> bool
 (** [true] when MASC_FULL_SURFACE=1 is set. *)
+val full_surface_override : unit -> bool
 
 (** {1 Metadata lookup} *)
 
@@ -103,25 +114,25 @@ val tool_group_to_string : tool_group -> string
 
 (** {1 JSON metadata} *)
 
-val metadata_to_fields : string -> (string * Yojson.Safe.t) list
 (** Full metadata as JSON key-value pairs. *)
+val metadata_to_fields : string -> (string * Yojson.Safe.t) list
 
-val public_contract_fields : string -> (string * Yojson.Safe.t) list
 (** Minimal metadata for public contract responses. *)
+val public_contract_fields : string -> (string * Yojson.Safe.t) list
 
-val register_metadata : string -> metadata -> unit
 (** Register runtime metadata for a tool. Called by [Tool_spec.register].
     Overwrites any previous entry for the same name. *)
+val register_metadata : string -> metadata -> unit
 
-val registered_metadata : string -> metadata option
 (** Explicit or [Tool_spec]-registered metadata, without surface-derived
     fallback metadata. *)
+val registered_metadata : string -> metadata option
 
-val explicit_metadata : (string * metadata) list
 (** Explicitly configured tool metadata entries (for test verification). *)
+val explicit_metadata : (string * metadata) list
 
-val deprecated_tool_entries : (string * metadata) list
 (** Precomputed subset of [explicit_metadata] where lifecycle = Deprecated. *)
+val deprecated_tool_entries : (string * metadata) list
 
 (** {1 Tool Surface System}
 
@@ -139,14 +150,14 @@ type surface =
   | Keeper_denied
   | System_internal
 
-val tools_for_surface : surface -> string list
 (** Canonical tool name list for [surface]. *)
+val tools_for_surface : surface -> string list
 
-val is_on_surface : surface -> string -> bool
 (** O(1) check: is [name] a member of [surface]? *)
+val is_on_surface : surface -> string -> bool
 
-val all_surfaces : surface list
 (** All defined surface variants for iteration. *)
+val all_surfaces : surface list
 
-val surface_to_string : surface -> string
 (** Machine-readable surface label. *)
+val surface_to_string : surface -> string

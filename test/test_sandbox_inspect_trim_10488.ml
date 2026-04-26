@@ -15,21 +15,23 @@ module R = Masc_mcp.Keeper_sandbox_runtime.For_testing
 let test_nonempty_lines_preserves_trailing_tab () =
   let raw = "f1\tf2\tf3\t\n" in
   match R.nonempty_lines raw with
-  | [ line ] ->
-      check string "trailing tab preserved" "f1\tf2\tf3\t" line
+  | [ line ] -> check string "trailing tab preserved" "f1\tf2\tf3\t" line
   | other ->
-      failf "expected single line, got %d: [%s]"
-        (List.length other) (String.concat " | " other)
+    failf
+      "expected single line, got %d: [%s]"
+      (List.length other)
+      (String.concat " | " other)
+;;
 
 let test_nonempty_lines_strips_cr () =
   let raw = "abc\r\ndef\r\n" in
-  check (list string) "CR stripped, LF split"
-    [ "abc"; "def" ] (R.nonempty_lines raw)
+  check (list string) "CR stripped, LF split" [ "abc"; "def" ] (R.nonempty_lines raw)
+;;
 
 let test_nonempty_lines_drops_blank () =
   let raw = "\n\nabc\n\n" in
-  check (list string) "blank lines dropped"
-    [ "abc" ] (R.nonempty_lines raw)
+  check (list string) "blank lines dropped" [ "abc" ] (R.nonempty_lines raw)
+;;
 
 (* The docker template is 4 fields; legacy containers without the
    [sandbox_ttl_sec] label produce a 4-field line whose 4th is
@@ -39,23 +41,23 @@ let test_parse_4field_with_empty_ttl () =
   let line = "87799\t1777149306.102\ttrue\t" in
   match R.parse_inspect_line line with
   | Ok (owner_pid, started_at, running, ttl_sec) ->
-      check (option int) "owner_pid" (Some 87799) owner_pid;
-      check (option (float 0.001)) "started_at"
-        (Some 1777149306.102) started_at;
-      check (option bool) "running" (Some true) running;
-      check (option (float 0.001)) "ttl_sec=None" None ttl_sec
+    check (option int) "owner_pid" (Some 87799) owner_pid;
+    check (option (float 0.001)) "started_at" (Some 1777149306.102) started_at;
+    check (option bool) "running" (Some true) running;
+    check (option (float 0.001)) "ttl_sec=None" None ttl_sec
   | Error msg -> failf "expected Ok, got Error: %s" msg
+;;
 
 let test_parse_4field_full () =
   let line = "12345\t1777149000.0\tfalse\t3600.0" in
   match R.parse_inspect_line line with
   | Ok (owner_pid, started_at, running, ttl_sec) ->
-      check (option int) "owner_pid" (Some 12345) owner_pid;
-      check (option bool) "running=false" (Some false) running;
-      check (option (float 0.001)) "ttl_sec=3600"
-        (Some 3600.0) ttl_sec;
-      ignore started_at
+    check (option int) "owner_pid" (Some 12345) owner_pid;
+    check (option bool) "running=false" (Some false) running;
+    check (option (float 0.001)) "ttl_sec=3600" (Some 3600.0) ttl_sec;
+    ignore started_at
   | Error msg -> failf "expected Ok, got Error: %s" msg
+;;
 
 (* Legacy 3-field fallback: docker emit may be flat [f1\tf2\tf3]
    when the label-template references a label key that does not
@@ -66,19 +68,17 @@ let test_parse_3field_legacy () =
   let line = "999\t1777149999.5\ttrue" in
   match R.parse_inspect_line line with
   | Ok (owner_pid, _, running, ttl_sec) ->
-      check (option int) "owner_pid" (Some 999) owner_pid;
-      check (option bool) "running" (Some true) running;
-      check (option (float 0.001)) "ttl_sec=None on legacy"
-        None ttl_sec
+    check (option int) "owner_pid" (Some 999) owner_pid;
+    check (option bool) "running" (Some true) running;
+    check (option (float 0.001)) "ttl_sec=None on legacy" None ttl_sec
   | Error msg -> failf "expected legacy 3-field Ok, got: %s" msg
+;;
 
 let test_parse_unexpected_arity () =
   match R.parse_inspect_line "only-one-field" with
-  | Error msg ->
-      check bool "error message mentions payload"
-        true
-        (String.length msg > 0)
+  | Error msg -> check bool "error message mentions payload" true (String.length msg > 0)
   | Ok _ -> fail "expected Error on 1-field payload"
+;;
 
 (* Combined regression: the historical incident was
    [String.trim → 3 fields → exact-match 4-field parser fails],
@@ -88,38 +88,37 @@ let test_end_to_end_legacy_payload () =
   let raw = "87799\t1777149306.102\ttrue\t\n" in
   match R.nonempty_lines raw with
   | [ line ] ->
-      (match R.parse_inspect_line line with
-       | Ok (owner_pid, _, running, ttl_sec) ->
-           check (option int) "owner_pid" (Some 87799) owner_pid;
-           check (option bool) "running" (Some true) running;
-           check (option (float 0.001)) "ttl_sec=None"
-             None ttl_sec
-       | Error msg -> failf "parse failed: %s" msg)
-  | other ->
-      failf "expected single line, got %d" (List.length other)
+    (match R.parse_inspect_line line with
+     | Ok (owner_pid, _, running, ttl_sec) ->
+       check (option int) "owner_pid" (Some 87799) owner_pid;
+       check (option bool) "running" (Some true) running;
+       check (option (float 0.001)) "ttl_sec=None" None ttl_sec
+     | Error msg -> failf "parse failed: %s" msg)
+  | other -> failf "expected single line, got %d" (List.length other)
+;;
 
 let () =
-  run "sandbox_inspect_trim_10488" [
-    ("nonempty_lines", [
-        test_case "preserves trailing tab (4-field docker output)"
-          `Quick test_nonempty_lines_preserves_trailing_tab;
-        test_case "strips CR but keeps content" `Quick
-          test_nonempty_lines_strips_cr;
-        test_case "drops blank-only lines" `Quick
-          test_nonempty_lines_drops_blank;
-      ]);
-    ("parse_inspect_line", [
-        test_case "4-field with empty ttl_sec" `Quick
-          test_parse_4field_with_empty_ttl;
-        test_case "4-field full payload" `Quick
-          test_parse_4field_full;
-        test_case "3-field legacy fallback (#10488)" `Quick
-          test_parse_3field_legacy;
-        test_case "unexpected arity errors out" `Quick
-          test_parse_unexpected_arity;
-      ]);
-    ("regression", [
-        test_case "raw bytes → nonempty_lines → parse, end-to-end"
-          `Quick test_end_to_end_legacy_payload;
-      ]);
-  ]
+  run
+    "sandbox_inspect_trim_10488"
+    [ ( "nonempty_lines"
+      , [ test_case
+            "preserves trailing tab (4-field docker output)"
+            `Quick
+            test_nonempty_lines_preserves_trailing_tab
+        ; test_case "strips CR but keeps content" `Quick test_nonempty_lines_strips_cr
+        ; test_case "drops blank-only lines" `Quick test_nonempty_lines_drops_blank
+        ] )
+    ; ( "parse_inspect_line"
+      , [ test_case "4-field with empty ttl_sec" `Quick test_parse_4field_with_empty_ttl
+        ; test_case "4-field full payload" `Quick test_parse_4field_full
+        ; test_case "3-field legacy fallback (#10488)" `Quick test_parse_3field_legacy
+        ; test_case "unexpected arity errors out" `Quick test_parse_unexpected_arity
+        ] )
+    ; ( "regression"
+      , [ test_case
+            "raw bytes → nonempty_lines → parse, end-to-end"
+            `Quick
+            test_end_to_end_legacy_payload
+        ] )
+    ]
+;;

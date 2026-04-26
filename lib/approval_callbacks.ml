@@ -14,6 +14,7 @@
     where the trust decision is made at the call site. *)
 let auto_approve : Oas.Hooks.approval_callback =
   Oas.Approval.(create [ always_approve ] |> as_callback)
+;;
 
 (** Fail-closed default for OAS Agent builder sites without an explicit
     HITL or trusted-system decision source. Rejects every
@@ -24,10 +25,11 @@ let auto_approve : Oas.Hooks.approval_callback =
     templating. *)
 let reject_by_default : Oas.Hooks.approval_callback =
   fun ~tool_name ~input:_ ->
-    Oas.Hooks.Reject
-      (Printf.sprintf
-         "MASC approval fail-closed: tool %s requires approval but no \
-          approval_callback was wired at this Agent builder site. Install \
-          Governance_pipeline.to_oas_approval_callback (keeper HITL) or \
-          Approval_callbacks.auto_approve (trusted system run). See #7883."
-         tool_name)
+  Oas.Hooks.Reject
+    (Printf.sprintf
+       "MASC approval fail-closed: tool %s requires approval but no approval_callback \
+        was wired at this Agent builder site. Install \
+        Governance_pipeline.to_oas_approval_callback (keeper HITL) or \
+        Approval_callbacks.auto_approve (trusted system run). See #7883."
+       tool_name)
+;;

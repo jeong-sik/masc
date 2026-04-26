@@ -204,7 +204,6 @@ type t =
 val to_string : t -> string
 val of_string : string -> t option
 val pp : Format.formatter -> t -> unit
-
 val is_keeper : t -> bool
 val is_masc : t -> bool
 val is_masc_keeper : t -> bool

@@ -1,7 +1,6 @@
 (** Shared JSON helpers for Agent SDK tool input parsing. *)
 
-let json_to_string json =
-  Yojson.Safe.pretty_to_string json
+let json_to_string json = Yojson.Safe.pretty_to_string json
 
 let extract_string key json =
   match json with
@@ -11,6 +10,7 @@ let extract_string key json =
      | Some _ -> Error (Printf.sprintf "%s must be a string" key)
      | None -> Error (Printf.sprintf "missing required field: %s" key))
   | _ -> Error "input must be a JSON object"
+;;
 
 let extract_optional_string key json =
   match json with
@@ -20,6 +20,7 @@ let extract_optional_string key json =
      | Some `Null | None -> Ok None
      | Some _ -> Error (Printf.sprintf "%s must be a string" key))
   | _ -> Error "input must be a JSON object"
+;;
 
 let extract_tasks_array json =
   match json with
@@ -34,15 +35,16 @@ let extract_tasks_array json =
        in
        let rec collect acc = function
          | [] -> Ok (List.rev acc)
-         | item :: rest -> (
-             match parse_item item with
-             | Ok pair -> collect (pair :: acc) rest
-             | Error e -> Error e)
+         | item :: rest ->
+           (match parse_item item with
+            | Ok pair -> collect (pair :: acc) rest
+            | Error e -> Error e)
        in
        collect [] items
      | Some _ -> Error "tasks must be a JSON array"
      | None -> Error "missing required field: tasks")
   | _ -> Error "input must be a JSON object"
+;;
 
 let extract_float key json =
   match json with
@@ -52,3 +54,4 @@ let extract_float key json =
      | Some (`Int i) -> Some (Float.of_int i)
      | _ -> None)
   | _ -> None
+;;

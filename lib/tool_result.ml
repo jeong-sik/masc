@@ -1,45 +1,46 @@
 (** Structured tool result type for MASC *)
 
-type t = {
-  success : bool;
-  data : Yojson.Safe.t;
-  tool_name : string;
-  duration_ms : float;
-}
+type t =
+  { success : bool
+  ; data : Yojson.Safe.t
+  ; tool_name : string
+  ; duration_ms : float
+  }
 
 let structured_payload_of_message (message : string) : Yojson.Safe.t option =
   let parse_json raw =
-    try Some (Yojson.Safe.from_string raw)
-    with Yojson.Json_error _ -> None
+    try Some (Yojson.Safe.from_string raw) with
+    | Yojson.Json_error _ -> None
   in
   let trimmed = String.trim message in
   let ensure_object = function
     | `Assoc _ as obj -> Some obj
-    | `List _ as arr -> Some (`Assoc [ ("items", arr) ])
+    | `List _ as arr -> Some (`Assoc [ "items", arr ])
     | _ -> None
   in
   match parse_json trimmed with
   | Some json -> ensure_object json
   | None ->
-      let len = String.length message in
-      let rec loop from =
-        match String.index_from_opt message from '\n' with
-        | None -> None
-        | Some newline_idx ->
-            let suffix =
-              String.sub message (newline_idx + 1) (len - newline_idx - 1)
-              |> String.trim
-            in
-            if suffix = "" then loop (newline_idx + 1)
-            else
-              match suffix.[0] with
-              | '{' | '[' -> (
-                  match parse_json suffix with
-                  | Some json -> ensure_object json
-                  | None -> loop (newline_idx + 1))
-              | _ -> loop (newline_idx + 1)
-      in
-      loop 0
+    let len = String.length message in
+    let rec loop from =
+      match String.index_from_opt message from '\n' with
+      | None -> None
+      | Some newline_idx ->
+        let suffix =
+          String.sub message (newline_idx + 1) (len - newline_idx - 1) |> String.trim
+        in
+        if suffix = ""
+        then loop (newline_idx + 1)
+        else (
+          match suffix.[0] with
+          | '{' | '[' ->
+            (match parse_json suffix with
+             | Some json -> ensure_object json
+             | None -> loop (newline_idx + 1))
+          | _ -> loop (newline_idx + 1))
+    in
+    loop 0
+;;
 
 let wrap ~tool_name ~start_time (success, message) =
   let end_time = Time_compat.now () in
@@ -50,14 +51,16 @@ let wrap ~tool_name ~start_time (success, message) =
     | None -> `String message
   in
   { success; data; tool_name; duration_ms }
+;;
 
 let to_json t =
   `Assoc
-    [ ("success", `Bool t.success)
-    ; ("data", t.data)
-    ; ("tool_name", `String t.tool_name)
-    ; ("duration_ms", `Float t.duration_ms)
+    [ "success", `Bool t.success
+    ; "data", t.data
+    ; "tool_name", `String t.tool_name
+    ; "duration_ms", `Float t.duration_ms
     ]
+;;
 
 let to_legacy t =
   let message =
@@ -65,4 +68,5 @@ let to_legacy t =
     | `String s -> s
     | json -> Yojson.Safe.to_string json
   in
-  (t.success, message)
+  t.success, message
+;;

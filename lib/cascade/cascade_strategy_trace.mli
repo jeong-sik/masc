@@ -32,7 +32,10 @@
       provider in cooldown or slot-full); caller will backoff + retry.
     - [Exhausted]: [Filtered_empty] on the last cycle, so the cascade
       gave up and returned the exhaustion error. *)
-type event_kind = Ordered | Filtered_empty | Exhausted
+type event_kind =
+  | Ordered
+  | Filtered_empty
+  | Exhausted
 
 (** One decision event.
 
@@ -45,23 +48,22 @@ type event_kind = Ordered | Filtered_empty | Exhausted
     for this cycle (same as [candidates_in] for pure [Failover]).
     [backoff_ms] is the backoff about to be applied for [Filtered_empty];
     [0] for [Ordered] and [Exhausted]. *)
-type event = {
-  ts : float;
-  cascade_name : string;
-  strategy : string;
-  cycle : int;
-  candidates_in : int;
-  candidates_out : int;
-  backoff_ms : int;
-  kind : event_kind;
-}
+type event =
+  { ts : float
+  ; cascade_name : string
+  ; strategy : string
+  ; cycle : int
+  ; candidates_in : int
+  ; candidates_out : int
+  ; backoff_ms : int
+  ; kind : event_kind
+  }
 
-val record : event -> unit
 (** Append [event] to the ring.  Drops the oldest entry if the ring
     is full.  Safe to call from multiple fibers/domains; serialised
     via a stdlib [Mutex]. *)
+val record : event -> unit
 
-val snapshot : ?limit:int -> ?cascade:string -> unit -> event list
 (** Newest-first snapshot of recorded events.
 
     @param limit  maximum number of events returned (default 100,
@@ -71,17 +73,18 @@ val snapshot : ?limit:int -> ?cascade:string -> unit -> event list
 
     Filters compose: both [limit] and [cascade] apply together, with
     [limit] applied after filtering. *)
+val snapshot : ?limit:int -> ?cascade:string -> unit -> event list
 
-val clear : unit -> unit
 (** Test helper: drop every recorded event and reset the write head. *)
+val clear : unit -> unit
 
-val size : unit -> int
 (** Test helper: current number of recorded events (≤ ring capacity). *)
+val size : unit -> int
 
-val capacity : unit -> int
 (** Test helper: the ring's fixed capacity as resolved from
     [MASC_STRATEGY_TRACE_SIZE]. *)
+val capacity : unit -> int
 
-val kind_to_string : event_kind -> string
 (** Serialise [event_kind] as the dashboard-facing label: ["ordered"],
     ["filtered_empty"], ["exhausted"]. *)
+val kind_to_string : event_kind -> string

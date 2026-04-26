@@ -16,19 +16,19 @@ val log_keeper_exn : label:string -> exn -> unit
 (** {1 Context and Checkpoint} *)
 
 (** Load keeper context from checkpoint for resumption. *)
-val load_context_from_checkpoint :
-  max_checkpoint_messages:int ->
-  trace_id:string ->
-  primary_model_max_tokens:int ->
-  base_dir:string ->
-  Keeper_exec_context.session_context * Keeper_exec_context.working_context option
+val load_context_from_checkpoint
+  :  max_checkpoint_messages:int
+  -> trace_id:string
+  -> primary_model_max_tokens:int
+  -> base_dir:string
+  -> Keeper_exec_context.session_context * Keeper_exec_context.working_context option
 
 (** Save a checkpoint for the current context. *)
-val save_checkpoint :
-  Keeper_exec_context.session_context ->
-  Keeper_exec_context.working_context ->
-  generation:int ->
-  Keeper_exec_context.checkpoint
+val save_checkpoint
+  :  Keeper_exec_context.session_context
+  -> Keeper_exec_context.working_context
+  -> generation:int
+  -> Keeper_exec_context.checkpoint
 
 (** Ensure keeper is joined to all configured rooms. *)
 val ensure_keeper_room_presence : Coord.config -> keeper_meta -> keeper_meta
@@ -48,11 +48,11 @@ val compaction_policy_of_keeper : keeper_meta -> float * int * int
 
 (** Compact context if thresholds are exceeded.
     Returns updated context, optional summary, and compaction label. *)
-val compact_if_needed :
-  meta:keeper_meta ->
-  now_ts:float ->
-  Keeper_exec_context.working_context ->
-  Keeper_exec_context.working_context * string option * string
+val compact_if_needed
+  :  meta:keeper_meta
+  -> now_ts:float
+  -> Keeper_exec_context.working_context
+  -> Keeper_exec_context.working_context * string option * string
 
 (** {1 Trace and Model} *)
 
@@ -78,22 +78,22 @@ val exact_direct_mention_present : targets:string list -> string -> bool
 (** {1 System Prompt and Identity} *)
 
 (** Build system prompt for keeper agent. *)
-val build_keeper_system_prompt :
-  goal:string ->
-  short_goal:string ->
-  mid_goal:string ->
-  long_goal:string ->
-  will:string ->
-  needs:string ->
-  desires:string ->
-  instructions:string ->
-  ?persona_extended:string ->
-  ?keeper_name:string ->
-  ?allowed_orgs:string list ->
-  ?denied_repos:string list ->
-  ?active_goals:(string * string * string) list ->
-  unit ->
-  string
+val build_keeper_system_prompt
+  :  goal:string
+  -> short_goal:string
+  -> mid_goal:string
+  -> long_goal:string
+  -> will:string
+  -> needs:string
+  -> desires:string
+  -> instructions:string
+  -> ?persona_extended:string
+  -> ?keeper_name:string
+  -> ?allowed_orgs:string list
+  -> ?denied_repos:string list
+  -> ?active_goals:(string * string * string) list
+  -> unit
+  -> string
 
 (** Append trait clause to existing trait string. *)
 val append_trait_clause : base:string -> clause:string -> string
@@ -108,4 +108,3 @@ val user_visible_reply_text : ?fallback:string -> string -> string
 
 (** Check if text appears fragmentary (incomplete sentence fragments). *)
 val looks_fragmentary_history_text : string -> bool
-

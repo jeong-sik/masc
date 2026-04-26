@@ -1,8 +1,6 @@
 (** Tool-surface gating, selection constants, and backlog task reconciliation. *)
 
-let unexpected_tool_partial_warned : (string, unit) Hashtbl.t =
-  Hashtbl.create 32
-
+let unexpected_tool_partial_warned : (string, unit) Hashtbl.t = Hashtbl.create 32
 let unexpected_tool_partial_warn_mu = Eio.Mutex.create ()
 
 let should_log_unexpected_tool_partial_once ~keeper_name ~unexpected_tool_names =
@@ -10,11 +8,12 @@ let should_log_unexpected_tool_partial_once ~keeper_name ~unexpected_tool_names 
     String.concat "\000" (keeper_name :: List.sort String.compare unexpected_tool_names)
   in
   Eio_guard.with_mutex unexpected_tool_partial_warn_mu (fun () ->
-      if Hashtbl.mem unexpected_tool_partial_warned key then
-        false
-      else (
-        Hashtbl.replace unexpected_tool_partial_warned key ();
-        true))
+    if Hashtbl.mem unexpected_tool_partial_warned key
+    then false
+    else (
+      Hashtbl.replace unexpected_tool_partial_warned key ();
+      true))
+;;
 
 type tool_surface_metrics =
   { turn_lane : string
@@ -75,6 +74,7 @@ let turn_affordance_of_string = function
   | "work_discovery" -> Some Work_discovery
   | "inspect_worktree_delta" -> Some Inspect_worktree_delta
   | _ -> None
+;;
 
 let should_tool_gate_affordance = function
   | Board_post_or_comment
@@ -85,6 +85,7 @@ let should_tool_gate_affordance = function
   | Task_verify
   | Work_discovery
   | Inspect_worktree_delta -> true
+;;
 
 let turn_affordances_require_tool_gate turn_affordances =
   List.exists
@@ -92,6 +93,7 @@ let turn_affordances_require_tool_gate turn_affordances =
       | Some affordance -> should_tool_gate_affordance affordance
       | None -> false)
     (List.map turn_affordance_of_string turn_affordances)
+;;
 
 (* Affordance -> minimum viable tools that can satisfy that affordance.
    The list is intentionally narrow ("at least one of these is enough").
@@ -103,23 +105,26 @@ let tools_for_gated_affordance = function
     [ "keeper_board_post"; "keeper_board_comment"; "masc_broadcast" ]
   | Message_sweep -> [ "masc_messages"; "masc_keeper_msg" ]
   | Reply_in_room ->
-    [ "keeper_board_post"; "keeper_board_comment";
-      "masc_keeper_msg"; "masc_broadcast" ]
-  | Task_claim ->
-    [ "keeper_task_claim"; "masc_claim_next"; "masc_claim_task" ]
-  | Task_audit ->
-    [ "keeper_tasks_audit"; "keeper_tasks_list"; "masc_tasks" ]
+    [ "keeper_board_post"; "keeper_board_comment"; "masc_keeper_msg"; "masc_broadcast" ]
+  | Task_claim -> [ "keeper_task_claim"; "masc_claim_next"; "masc_claim_task" ]
+  | Task_audit -> [ "keeper_tasks_audit"; "keeper_tasks_list"; "masc_tasks" ]
   | Task_verify ->
-    [ "keeper_tasks_list"; "keeper_tasks_audit";
-      "keeper_task_done"; "keeper_task_submit_for_verification";
-      "masc_transition" ]
+    [ "keeper_tasks_list"
+    ; "keeper_tasks_audit"
+    ; "keeper_task_done"
+    ; "keeper_task_submit_for_verification"
+    ; "masc_transition"
+    ]
   | Work_discovery ->
-    [ "keeper_task_claim"; "masc_claim_next";
-      "keeper_board_post"; "masc_add_task";
-      "keeper_tasks_audit" ]
+    [ "keeper_task_claim"
+    ; "masc_claim_next"
+    ; "keeper_board_post"
+    ; "masc_add_task"
+    ; "keeper_tasks_audit"
+    ]
   | Inspect_worktree_delta ->
-    [ "keeper_shell"; "keeper_bash"; "masc_code_git";
-      "keeper_fs_read" ]
+    [ "keeper_shell"; "keeper_bash"; "masc_code_git"; "keeper_fs_read" ]
+;;
 
 (* Filtered variant of [turn_affordances_require_tool_gate]:  a gated
    affordance only counts when the keeper actually has a tool that can
@@ -128,7 +133,10 @@ let tools_for_gated_affordance = function
    them whenever the board lists unclaimed tasks, leading to repeated
    [Failure_run_error] turns the keeper cannot resolve. *)
 let turn_affordances_require_tool_gate_with_allowed
-    ~(allowed_tool_names : string list) turn_affordances : bool =
+      ~(allowed_tool_names : string list)
+      turn_affordances
+  : bool
+  =
   let has_matching_tool affordance =
     List.exists
       (fun tool -> List.mem tool allowed_tool_names)
@@ -137,18 +145,21 @@ let turn_affordances_require_tool_gate_with_allowed
   List.exists
     (function
       | Some affordance ->
-        should_tool_gate_affordance affordance
-        && has_matching_tool affordance
+        should_tool_gate_affordance affordance && has_matching_tool affordance
       | None -> false)
     (List.map turn_affordance_of_string turn_affordances)
+;;
 
-let should_require_tools_for_initial_turn ~(max_turns : int)
-    ~(turn_affordances : string list) =
+let should_require_tools_for_initial_turn
+      ~(max_turns : int)
+      ~(turn_affordances : string list)
+  =
   let initial_per_call_turn = 1 in
   let initial_turn_is_last = initial_per_call_turn >= max_turns in
   max_turns > 1
-  && not initial_turn_is_last
+  && (not initial_turn_is_last)
   && turn_affordances_require_tool_gate turn_affordances
+;;
 
 let has_turn_affordance expected turn_affordances =
   List.exists
@@ -157,22 +168,30 @@ let has_turn_affordance expected turn_affordances =
        | Some affordance -> affordance = expected
        | None -> false)
     turn_affordances
+;;
 
 let has_task_claim_affordance = has_turn_affordance Task_claim
 
-let preferred_tool_choice_for_required_turn ~(has_current_task : bool)
-    ~(turn_affordances : string list) ~(allowed_tool_names : string list) =
-  if (not has_current_task)
-     && has_task_claim_affordance turn_affordances
-     && List.mem "keeper_task_claim" allowed_tool_names
+let preferred_tool_choice_for_required_turn
+      ~(has_current_task : bool)
+      ~(turn_affordances : string list)
+      ~(allowed_tool_names : string list)
+  =
+  if
+    (not has_current_task)
+    && has_task_claim_affordance turn_affordances
+    && List.mem "keeper_task_claim" allowed_tool_names
   then Oas.Types.Tool "keeper_task_claim"
-  else if has_turn_affordance Task_audit turn_affordances
-          && List.mem "keeper_tasks_audit" allowed_tool_names
+  else if
+    has_turn_affordance Task_audit turn_affordances
+    && List.mem "keeper_tasks_audit" allowed_tool_names
   then Oas.Types.Tool "keeper_tasks_audit"
-  else if has_turn_affordance Task_verify turn_affordances
-          && List.mem "keeper_tasks_list" allowed_tool_names
+  else if
+    has_turn_affordance Task_verify turn_affordances
+    && List.mem "keeper_tasks_list" allowed_tool_names
   then Oas.Types.Tool "keeper_tasks_list"
-  else if not has_current_task then
+  else if not has_current_task
+  then
     (* #10008: no active task and no applicable specific claim tool
        to force.  Fall back to [Auto] instead of [Any] so the model
        can respond with an honest refusal ("no eligible task to
@@ -189,20 +208,23 @@ let preferred_tool_choice_for_required_turn ~(has_current_task : bool)
        expected to make progress via some tool call (board update,
        task_update, task_done, etc.). *)
     Oas.Types.Any
+;;
 
-let owned_active_task_id_for_meta ~(config : Coord.config)
-    ~(meta : Keeper_types.keeper_meta) =
+let owned_active_task_id_for_meta
+      ~(config : Coord.config)
+      ~(meta : Keeper_types.keeper_meta)
+  =
   match meta.current_task_id with
   | Some task_id -> Some task_id
   | None ->
     let actual_name =
-      try Coord.resolve_agent_name config meta.agent_name
-      with
+      try Coord.resolve_agent_name config meta.agent_name with
       | Sys_error _ | Yojson.Json_error _ -> meta.agent_name
       | exn ->
         Log.Keeper.warn
           "keeper:%s resolve_agent_name failed while reconciling current task: %s"
-          meta.name (Printexc.to_string exn);
+          meta.name
+          (Printexc.to_string exn);
         meta.agent_name
     in
     let matches assignee =
@@ -211,94 +233,99 @@ let owned_active_task_id_for_meta ~(config : Coord.config)
     (try
        Coord.get_tasks_raw config
        |> List.find_map (fun (task : Types.task) ->
-            match task.task_status with
-            | Types.Claimed { assignee; _ }
-            | Types.InProgress { assignee; _ }
-            | Types.AwaitingVerification { assignee; _ }
-              when matches assignee -> (
-                match Keeper_id.Task_id.of_string task.id with
-                | Ok task_id -> Some task_id
-                | Error msg ->
-                  Log.Keeper.warn
-                    "keeper:%s owned task %s could not be parsed: %s"
-                    meta.name task.id msg;
-                  None)
-            | Types.Claimed _
-            | Types.InProgress _
-            | Types.AwaitingVerification _
-            | Types.Todo
-            | Types.Done _
-            | Types.Cancelled _ -> None)
+         match task.task_status with
+         | Types.Claimed { assignee; _ }
+         | Types.InProgress { assignee; _ }
+         | Types.AwaitingVerification { assignee; _ }
+           when matches assignee ->
+           (match Keeper_id.Task_id.of_string task.id with
+            | Ok task_id -> Some task_id
+            | Error msg ->
+              Log.Keeper.warn
+                "keeper:%s owned task %s could not be parsed: %s"
+                meta.name
+                task.id
+                msg;
+              None)
+         | Types.Claimed _
+         | Types.InProgress _
+         | Types.AwaitingVerification _
+         | Types.Todo
+         | Types.Done _
+         | Types.Cancelled _ -> None)
      with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->
        Log.Keeper.warn
          "keeper:%s owned task reconciliation failed: %s"
-         meta.name (Printexc.to_string exn);
+         meta.name
+         (Printexc.to_string exn);
        None)
 ;;
 
-let merge_current_task_id ~(latest : Keeper_types.keeper_meta)
-    ~(caller : Keeper_types.keeper_meta) =
-  {
-    latest with
-    current_task_id = caller.current_task_id;
-    updated_at = caller.updated_at;
-  }
+let merge_current_task_id
+      ~(latest : Keeper_types.keeper_meta)
+      ~(caller : Keeper_types.keeper_meta)
+  =
+  { latest with current_task_id = caller.current_task_id; updated_at = caller.updated_at }
 ;;
 
-let sync_current_task_id_from_backlog ~(config : Coord.config)
-    (meta : Keeper_types.keeper_meta) =
+let sync_current_task_id_from_backlog
+      ~(config : Coord.config)
+      (meta : Keeper_types.keeper_meta)
+  =
   match meta.current_task_id with
   | Some _ -> meta
-  | None -> (
-    match owned_active_task_id_for_meta ~config ~meta with
-    | None -> meta
-    | Some task_id ->
-      let updated_meta =
-        {
-          meta with
-          current_task_id = Some task_id;
-          updated_at = Types.now_iso ();
-        }
-      in
-      Keeper_registry.update_meta ~base_path:config.base_path meta.name updated_meta;
-      (match
-         Keeper_types.write_meta_with_merge
-           ~merge:merge_current_task_id config updated_meta
-       with
-       | Ok () -> ()
-       | Error msg ->
-         Log.Keeper.warn
-           "keeper:%s failed to persist reconciled current_task_id=%s: %s"
-           meta.name (Keeper_id.Task_id.to_string task_id) msg);
-      Log.Keeper.info
-        "keeper:%s reconciled current_task_id=%s from backlog ownership"
-        meta.name (Keeper_id.Task_id.to_string task_id);
-      updated_meta)
+  | None ->
+    (match owned_active_task_id_for_meta ~config ~meta with
+     | None -> meta
+     | Some task_id ->
+       let updated_meta =
+         { meta with current_task_id = Some task_id; updated_at = Types.now_iso () }
+       in
+       Keeper_registry.update_meta ~base_path:config.base_path meta.name updated_meta;
+       (match
+          Keeper_types.write_meta_with_merge
+            ~merge:merge_current_task_id
+            config
+            updated_meta
+        with
+        | Ok () -> ()
+        | Error msg ->
+          Log.Keeper.warn
+            "keeper:%s failed to persist reconciled current_task_id=%s: %s"
+            meta.name
+            (Keeper_id.Task_id.to_string task_id)
+            msg);
+       Log.Keeper.info
+         "keeper:%s reconciled current_task_id=%s from backlog ownership"
+         meta.name
+         (Keeper_id.Task_id.to_string task_id);
+       updated_meta)
 ;;
 
-let tool_names =
-  List.map Tool_name.to_string
+let tool_names = List.map Tool_name.to_string
 
 let fallback_floor_tool_names =
   tool_names
-    Tool_name.[
-      Keeper Context_status;
-      Keeper Task_claim;
-      Keeper Tasks_list;
-      Keeper Board_list;
-      Keeper Board_get;
-    ]
+    Tool_name.
+      [ Keeper Context_status
+      ; Keeper Task_claim
+      ; Keeper Tasks_list
+      ; Keeper Board_list
+      ; Keeper Board_get
+      ]
+;;
 
 let fallback_repo_probe_tool_names =
   tool_names Tool_name.[ Keeper Fs_read; Keeper Shell; Keeper Bash ]
+;;
 
-let is_claim_tool_name name =
-  Keeper_tool_disclosure.is_claim_tool_name name
+let is_claim_tool_name name = Keeper_tool_disclosure.is_claim_tool_name name
 
 let is_claim_context_tool_name name =
   Keeper_tool_disclosure.is_claim_context_tool_name name
+;;
 
 (* Tool selection & disclosure — extracted to Keeper_tool_disclosure (#5732) *)
 
@@ -384,22 +411,23 @@ let tool_search_alias_entries =
   ; "masc_web_search", "웹 검색 인터넷 온라인 구글"
   ; "masc_claim_next", "다음태스크 가져오기 할당"
   ]
+;;
 
 let tool_search_aliases name =
   match List.assoc_opt name tool_search_alias_entries with
   | Some aliases ->
-      aliases
-      |> String.split_on_char ' '
-      |> List.filter (fun alias -> alias <> "")
+    aliases |> String.split_on_char ' ' |> List.filter (fun alias -> alias <> "")
   | None -> []
+;;
 
 let tool_index_entry ~name ~description : Oas.Tool_index.entry =
   let group =
-    Tool_catalog.tool_group name
-    |> Option.map Tool_catalog.tool_group_to_string
+    Tool_catalog.tool_group name |> Option.map Tool_catalog.tool_group_to_string
   in
   let aliases = tool_search_aliases name in
   Oas.Tool_index.{ name; description; group; aliases }
+;;
 
 let tool_index_entry_of_tool (t : Oas.Tool.t) : Oas.Tool_index.entry =
   tool_index_entry ~name:t.schema.name ~description:t.schema.description
+;;

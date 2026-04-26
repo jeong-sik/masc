@@ -15,9 +15,9 @@
 
     @param meta Keeper metadata (identity, soul, goals, instructions)
     @param observation Current world snapshot *)
-val build_prompt :
-  meta:Keeper_types.keeper_meta ->
-  base_path:string ->
-  observation:Keeper_world_observation.world_observation ->
-  unit ->
-  string * string
+val build_prompt
+  :  meta:Keeper_types.keeper_meta
+  -> base_path:string
+  -> observation:Keeper_world_observation.world_observation
+  -> unit
+  -> string * string

@@ -14,143 +14,133 @@ type candidate_probe_status =
   | Probe_skipped of string
   | Probe_error of string
 
-type candidate_probe = {
-  model_string : string;
-  provider_kind : string;
-  model_id : string;
-  base_url : string;
-  status : candidate_probe_status;
-}
+type candidate_probe =
+  { model_string : string
+  ; provider_kind : string
+  ; model_id : string
+  ; base_url : string
+  ; status : candidate_probe_status
+  }
 
 type snapshot
 type rejection
 
 type state =
   | Validated of snapshot
-  | Validated_with_rejections of {
-      snapshot : snapshot;
-      rejected_update : rejection;
-    }
-  | Serving_last_known_good of {
-      snapshot : snapshot;
-      rejected_update : rejection;
-    }
+  | Validated_with_rejections of
+      { snapshot : snapshot
+      ; rejected_update : rejection
+      }
+  | Serving_last_known_good of
+      { snapshot : snapshot
+      ; rejected_update : rejection
+      }
 
-val inspect_active :
-  ?sw:Eio.Switch.t ->
-  ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
-  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  unit ->
-  (state, rejection) result
+val inspect_active
+  :  ?sw:Eio.Switch.t
+  -> ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> unit
+  -> (state, rejection) result
 
-val validate_path :
-  ?sw:Eio.Switch.t ->
-  ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
-  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  config_path:string ->
-  unit ->
-  (snapshot, rejection) result
 (** Returns the validated subset of profiles when the catalog is partly
     usable but some presets are rejected at runtime. Inspect
     {!inspect_active} when the caller needs the rejected-profile detail. *)
+val validate_path
+  :  ?sw:Eio.Switch.t
+  -> ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> config_path:string
+  -> unit
+  -> (snapshot, rejection) result
 
-val resolve_declared_name :
-  ?sw:Eio.Switch.t ->
-  ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
-  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  raw_name:string ->
-  unit ->
-  (string, string) result
+val resolve_declared_name
+  :  ?sw:Eio.Switch.t
+  -> ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> raw_name:string
+  -> unit
+  -> (string, string) result
 
-val models_of_cascade_name :
-  ?sw:Eio.Switch.t ->
-  ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
-  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  string ->
-  (string list, string) result
+val models_of_cascade_name
+  :  ?sw:Eio.Switch.t
+  -> ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> string
+  -> (string list, string) result
 
-val resolve_named_providers :
-  ?sw:Eio.Switch.t ->
-  ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
-  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  ?provider_filter:string list ->
-  ?require_tool_choice_support:bool ->
-  ?require_tool_support:bool ->
-  ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy ->
-  cascade_name:string ->
-  unit ->
-  (Llm_provider.Provider_config.t list, string) result
+val resolve_named_providers
+  :  ?sw:Eio.Switch.t
+  -> ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> ?provider_filter:string list
+  -> ?require_tool_choice_support:bool
+  -> ?require_tool_support:bool
+  -> ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy
+  -> cascade_name:string
+  -> unit
+  -> (Llm_provider.Provider_config.t list, string) result
 
-val resolve_inference_params :
-  ?sw:Eio.Switch.t ->
-  ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
-  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  name:string ->
-  unit ->
-  (Cascade_config_loader.inference_params, string) result
+val resolve_inference_params
+  :  ?sw:Eio.Switch.t
+  -> ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> name:string
+  -> unit
+  -> (Cascade_config_loader.inference_params, string) result
 
-val resolve_strategy :
-  ?sw:Eio.Switch.t ->
-  ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
-  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  name:string ->
-  unit ->
-  (Cascade_strategy.t, string) result
+val resolve_strategy
+  :  ?sw:Eio.Switch.t
+  -> ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> name:string
+  -> unit
+  -> (Cascade_strategy.t, string) result
 
-val resolve_ollama_max_concurrent :
-  ?sw:Eio.Switch.t ->
-  ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
-  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  name:string ->
-  unit ->
-  (int option, string) result
+val resolve_ollama_max_concurrent
+  :  ?sw:Eio.Switch.t
+  -> ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> name:string
+  -> unit
+  -> (int option, string) result
 
-val resolve_cli_max_concurrent :
-  ?sw:Eio.Switch.t ->
-  ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
-  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  name:string ->
-  unit ->
-  (int option, string) result
+val resolve_cli_max_concurrent
+  :  ?sw:Eio.Switch.t
+  -> ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> name:string
+  -> unit
+  -> (int option, string) result
 
-val known_profile_names :
-  ?sw:Eio.Switch.t ->
-  ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
-  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  unit ->
-  (string list, string) result
+val known_profile_names
+  :  ?sw:Eio.Switch.t
+  -> ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> unit
+  -> (string list, string) result
 
-val invalid_profile_errors :
-  ?sw:Eio.Switch.t ->
-  ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
-  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  unit ->
-  (string * string list) list
 (** Profile-scoped validation errors from the active runtime catalog
     view. Returns [[]] when the catalog is fully validated. *)
+val invalid_profile_errors
+  :  ?sw:Eio.Switch.t
+  -> ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> unit
+  -> (string * string list) list
 
-val resolve_selection_trace :
-  ?sw:Eio.Switch.t ->
-  ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
-  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  name:string ->
-  unit ->
-  (Cascade_config.selection_trace, string) result
+val resolve_selection_trace
+  :  ?sw:Eio.Switch.t
+  -> ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> name:string
+  -> unit
+  -> (Cascade_config.selection_trace, string) result
 
 val snapshot_to_yojson : snapshot -> Yojson.Safe.t
 val rejection_to_yojson : rejection -> Yojson.Safe.t
 val state_to_yojson : state -> Yojson.Safe.t
-
 val invalidate_path : string -> unit
-
-val runtime_required_profile_names :
-  ?config_path:string ->
-  unit ->
-  string list
-
-val install_snapshot_for_tests :
-  source_path:string ->
-  profile_names:string list ->
-  unit
-
+val runtime_required_profile_names : ?config_path:string -> unit -> string list
+val install_snapshot_for_tests : source_path:string -> profile_names:string list -> unit
 val reset_cache_for_tests : unit -> unit

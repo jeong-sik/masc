@@ -8,26 +8,29 @@
 
     @since 2.108.0 — Issue #3280 *)
 
-val enqueue : Tool_result.t -> unit
 (** [enqueue result] buffers a tool invocation record for eventual disk flush.
     Safe to call from any fiber. Records are batched and written periodically. *)
+val enqueue : Tool_result.t -> unit
 
-val start_flush_fiber : sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> base_path:string -> unit
 (** [start_flush_fiber ~sw ~clock ~base_path] spawns a background fiber that
     drains buffered records to JSONL every 5 minutes.  Also registers a
     shutdown hook to flush remaining records.
     [base_path] is the workspace root (e.g. [state.room_config.base_path]). *)
+val start_flush_fiber
+  :  sw:Eio.Switch.t
+  -> clock:_ Eio.Time.clock
+  -> base_path:string
+  -> unit
 
-val restore : base_path:string -> int
 (** [restore ~base_path] reads all existing JSONL day-files under
     [base_path/data/tool-metrics/] and replays them into {!Tool_metrics}.
     Returns the number of records restored. *)
+val restore : base_path:string -> int
 
-val flush_now : unit -> unit
 (** [flush_now ()] immediately drains the write queue to disk.
     Intended for shutdown hooks and testing. *)
+val flush_now : unit -> unit
 
-val reset_for_testing : unit -> unit
 (** Clear cached store state and drop any queued records held in memory.
 
     This does not cancel or modify any background flush fiber or shutdown
@@ -38,3 +41,4 @@ val reset_for_testing : unit -> unit
     [start_flush_fiber] is invoked, or only after the [Eio.Switch.t]
     passed to [start_flush_fiber] has been cancelled so that no flush
     fiber is active. *)
+val reset_for_testing : unit -> unit

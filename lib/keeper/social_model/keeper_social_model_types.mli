@@ -37,16 +37,16 @@ type transition_reason =
   | Protocol_violation_no_tools_no_social_headers
   | Failure_run_error
 
-type social_state = {
-  social_model : string;
-  belief_summary : string;
-  active_desire : string option;
-  current_intention : string option;
-  blocker : string option;
-  need : string option;
-  speech_act : speech_act;
-  delivery_surface : delivery_surface;
-}
+type social_state =
+  { social_model : string
+  ; belief_summary : string
+  ; active_desire : string option
+  ; current_intention : string option
+  ; blocker : string option
+  ; need : string option
+  ; speech_act : speech_act
+  ; delivery_surface : delivery_surface
+  }
 
 val speech_act_to_string : speech_act -> string
 val speech_act_of_string : string -> speech_act option
@@ -62,7 +62,6 @@ val is_known_social_model : string -> bool
 val fallback_social_model : string -> string option
 val normalize_social_model : string -> string
 val transition_reason_to_string : transition_reason -> string
-
 val default_belief_summary_max_chars : int
 val default_option_field_max_chars : int
 
@@ -96,7 +95,8 @@ val cap_blocker_option : ?option_max_chars:int -> string option -> string option
     is special-cased via {!cap_blocker} so structured
     [masc_oas_error] payloads are preserved intact (#9933).
     Idempotent. *)
-val cap_social_state :
-  ?belief_max_chars:int ->
-  ?option_max_chars:int ->
-  social_state -> social_state
+val cap_social_state
+  :  ?belief_max_chars:int
+  -> ?option_max_chars:int
+  -> social_state
+  -> social_state

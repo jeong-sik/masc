@@ -10,23 +10,27 @@
 module KC = Masc_mcp.Keeper_config
 
 let test_min_matches_64k () =
-  Alcotest.(check int) "min keeper context tokens" 64_000
-    KC.min_keeper_context_tokens
+  Alcotest.(check int) "min keeper context tokens" 64_000 KC.min_keeper_context_tokens
+;;
 
 let test_max_matches_1m () =
-  Alcotest.(check int) "max keeper context tokens" 1_000_000
-    KC.max_keeper_context_tokens
+  Alcotest.(check int) "max keeper context tokens" 1_000_000 KC.max_keeper_context_tokens
+;;
 
 let test_min_below_max () =
   Alcotest.(check bool)
     "min < max (otherwise the override band collapses)"
-    true (KC.min_keeper_context_tokens < KC.max_keeper_context_tokens)
+    true
+    (KC.min_keeper_context_tokens < KC.max_keeper_context_tokens)
+;;
 
 let () =
-  Alcotest.run "keeper_context_bounds_ssot" [
-    "bounds", [
-      Alcotest.test_case "min is 64k" `Quick test_min_matches_64k;
-      Alcotest.test_case "max is 1M" `Quick test_max_matches_1m;
-      Alcotest.test_case "min < max" `Quick test_min_below_max;
-    ];
-  ]
+  Alcotest.run
+    "keeper_context_bounds_ssot"
+    [ ( "bounds"
+      , [ Alcotest.test_case "min is 64k" `Quick test_min_matches_64k
+        ; Alcotest.test_case "max is 1M" `Quick test_max_matches_1m
+        ; Alcotest.test_case "min < max" `Quick test_min_below_max
+        ] )
+    ]
+;;

@@ -10,10 +10,10 @@
 (** {1 Types} *)
 
 type phase =
-  | Blocking    (** Bootstrapping — HTTP not serving yet *)
-  | Lazy        (** Serving, but some background tasks still pending *)
-  | Ready       (** Fully ready *)
-  | Degraded    (** A lazy task failed; serving with [last_error] set *)
+  | Blocking (** Bootstrapping — HTTP not serving yet *)
+  | Lazy (** Serving, but some background tasks still pending *)
+  | Ready (** Fully ready *)
+  | Degraded (** A lazy task failed; serving with [last_error] set *)
 
 (** Wire string: ["blocking" | "lazy" | "ready" | "degraded"]. *)
 val phase_to_string : phase -> string
@@ -22,17 +22,17 @@ val phase_to_string : phase -> string
     [Server_startup_state.((!state).state_ready)] etc. instead of
     going through a getter. Prefer {!is_live} / {!to_yojson} /
     {!elapsed_since_start} for new code. *)
-type t = {
-  phase : phase;
-  state_ready : bool;
-  backend_mode : string;
-  pending_lazy_tasks : string list;
-  last_error : string option;
-  fallback_reason : string option;
-  path_diagnostics : Yojson.Safe.t option;
-  config_resolution : Yojson.Safe.t option;
-  started_at : float;
-}
+type t =
+  { phase : phase
+  ; state_ready : bool
+  ; backend_mode : string
+  ; pending_lazy_tasks : string list
+  ; last_error : string option
+  ; fallback_reason : string option
+  ; path_diagnostics : Yojson.Safe.t option
+  ; config_resolution : Yojson.Safe.t option
+  ; started_at : float
+  }
 
 (** Process-global state reference. Observers should prefer the
     typed accessors above; [state] is exposed only to preserve the
@@ -73,7 +73,6 @@ val to_yojson : unit -> Yojson.Safe.t
 val reset : ?backend_mode:string -> unit -> unit
 
 val mark_blocking : backend_mode:string -> unit
-
 val mark_state_ready : backend_mode:string -> unit
 
 (** Transition to [Lazy] with [tasks] pending (or directly to
@@ -96,7 +95,7 @@ val note_fallback : string -> unit
 
 (** Persist path-diagnostics and config-resolution JSON snapshots
     for the next {!to_yojson} call. *)
-val note_runtime_resolution :
-  path_diagnostics:Yojson.Safe.t ->
-  config_resolution:Yojson.Safe.t ->
-  unit
+val note_runtime_resolution
+  :  path_diagnostics:Yojson.Safe.t
+  -> config_resolution:Yojson.Safe.t
+  -> unit

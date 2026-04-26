@@ -5,68 +5,97 @@ open Alcotest
 let test_int_of_string_safe_valid () =
   let open Safe_ops in
   check (option int) "parses valid int" (Some 42) (int_of_string_safe "42")
+;;
 
 let test_int_of_string_safe_invalid () =
   let open Safe_ops in
   check (option int) "None on invalid" None (int_of_string_safe "abc")
+;;
 
 let test_int_of_string_with_default () =
   let open Safe_ops in
   check int "default on invalid" 0 (int_of_string_with_default ~default:0 "abc")
+;;
 
 let test_float_of_string_safe_valid () =
   let open Safe_ops in
-  check (option (float 0.001)) "parses valid float" (Some 3.14) (float_of_string_safe "3.14")
+  check
+    (option (float 0.001))
+    "parses valid float"
+    (Some 3.14)
+    (float_of_string_safe "3.14")
+;;
 
 let test_float_of_string_safe_invalid () =
   let open Safe_ops in
   check (option (float 0.001)) "None on invalid" None (float_of_string_safe "abc")
+;;
 
 let test_parse_json_safe_valid () =
   let open Safe_ops in
   let result = parse_json_safe ~context:"test" {|{"foo": "bar"}|} in
   check bool "Ok on valid JSON" true (Result.is_ok result)
+;;
 
 let test_parse_json_safe_invalid () =
   let open Safe_ops in
   let result = parse_json_safe ~context:"test" "not json" in
   check bool "Error on invalid JSON" true (Result.is_error result)
+;;
 
 let test_read_file_safe_not_found () =
   let open Safe_ops in
   let result = read_file_safe "/nonexistent/path/file.txt" in
   check bool "Error on missing file" true (Result.is_error result)
+;;
 
 (* JSON extraction tests *)
-let sample_json = Yojson.Safe.from_string {|{"name": "test", "count": 42, "rate": 3.14, "active": true}|}
+let sample_json =
+  Yojson.Safe.from_string {|{"name": "test", "count": 42, "rate": 3.14, "active": true}|}
+;;
 
 let test_json_string () =
   let open Safe_ops in
   check string "extracts string" "test" (json_string "name" sample_json)
+;;
 
 let test_json_string_missing () =
   let open Safe_ops in
-  check string "default on missing" "default" (json_string ~default:"default" "missing" sample_json)
+  check
+    string
+    "default on missing"
+    "default"
+    (json_string ~default:"default" "missing" sample_json)
+;;
 
 let test_json_int () =
   let open Safe_ops in
   check int "extracts int" 42 (json_int "count" sample_json)
+;;
 
 let test_json_float () =
   let open Safe_ops in
   check (float 0.001) "extracts float" 3.14 (json_float "rate" sample_json)
+;;
 
 let test_json_bool () =
   let open Safe_ops in
   check bool "extracts bool" true (json_bool "active" sample_json)
+;;
 
 let test_json_string_opt_present () =
   let open Safe_ops in
-  check (option string) "Some on present" (Some "test") (json_string_opt "name" sample_json)
+  check
+    (option string)
+    "Some on present"
+    (Some "test")
+    (json_string_opt "name" sample_json)
+;;
 
 let test_json_string_opt_missing () =
   let open Safe_ops in
   check (option string) "None on missing" None (json_string_opt "missing" sample_json)
+;;
 
 (* ================================================================
    Additional coverage tests for uncovered functions
@@ -77,56 +106,72 @@ let test_try_with_log_success () =
   let open Safe_ops in
   let result = try_with_log "test" (fun () -> 42) in
   check (option int) "Some on success" (Some 42) result
+;;
 
 let test_try_with_log_failure () =
   let open Safe_ops in
   let result = try_with_log "test" (fun () -> failwith "boom") in
   check (option int) "None on failure" None result
+;;
 
 (* try_with_default *)
 let test_try_with_default_success () =
   let open Safe_ops in
   let result = try_with_default ~default:0 "test" (fun () -> 42) in
   check int "returns value" 42 result
+;;
 
 let test_try_with_default_failure () =
   let open Safe_ops in
   let result = try_with_default ~default:0 "test" (fun () -> failwith "boom") in
   check int "returns default" 0 result
+;;
 
 (* float_of_string_with_default *)
 let test_float_of_string_with_default_valid () =
   let open Safe_ops in
-  check (float 0.001) "parses valid" 2.718
+  check
+    (float 0.001)
+    "parses valid"
+    2.718
     (float_of_string_with_default ~default:0.0 "2.718")
+;;
 
 let test_float_of_string_with_default_invalid () =
   let open Safe_ops in
-  check (float 0.001) "default on invalid" 0.0
+  check
+    (float 0.001)
+    "default on invalid"
+    0.0
     (float_of_string_with_default ~default:0.0 "xyz")
+;;
 
 (* list_dir_safe *)
 let test_list_dir_safe_nonexistent () =
   let open Safe_ops in
   let result = list_dir_safe "/nonexistent/directory/path" in
   check bool "Error on nonexistent" true (Result.is_error result)
+;;
 
 let test_list_dir_safe_not_a_dir () =
   let open Safe_ops in
   (* /dev/null exists but is not a directory *)
   let result = list_dir_safe "/dev/null" in
   check bool "Error on non-dir" true (Result.is_error result)
+;;
 
 let test_list_dir_safe_valid () =
   let open Safe_ops in
   let result = list_dir_safe "/tmp" in
   check bool "Ok on valid dir" true (Result.is_ok result)
+;;
 
 (* read_json_file_safe *)
 let test_read_json_file_safe_nonexistent () =
   let open Safe_ops in
   let result = read_json_file_safe "/nonexistent/file.json" in
   check bool "Error on missing" true (Result.is_error result)
+;;
 
 let test_read_json_file_safe_valid () =
   let open Safe_ops in
@@ -138,6 +183,7 @@ let test_read_json_file_safe_valid () =
   let result = read_json_file_safe path in
   Sys.remove path;
   check bool "Ok on valid json file" true (Result.is_ok result)
+;;
 
 let test_read_json_file_safe_invalid_json () =
   let open Safe_ops in
@@ -148,6 +194,7 @@ let test_read_json_file_safe_invalid_json () =
   let result = read_json_file_safe path in
   Sys.remove path;
   check bool "Error on invalid json" true (Result.is_error result)
+;;
 
 (* read_file_safe with existing file *)
 let test_read_file_safe_valid () =
@@ -161,6 +208,7 @@ let test_read_file_safe_valid () =
   match result with
   | Ok content -> check string "reads content" "hello world" content
   | Error e -> fail (Printf.sprintf "unexpected error: %s" e)
+;;
 
 (* remove_file_logged *)
 let test_remove_file_logged_existing () =
@@ -168,17 +216,20 @@ let test_remove_file_logged_existing () =
   let path = Filename.temp_file "test_safe_ops_" ".tmp" in
   remove_file_logged path;
   check bool "file removed" false (Sys.file_exists path)
+;;
 
 let test_remove_file_logged_nonexistent () =
   let open Safe_ops in
   (* Should not raise, just log *)
   remove_file_logged "/nonexistent/file.tmp";
   ()
+;;
 
 let test_remove_file_logged_custom_context () =
   let open Safe_ops in
   remove_file_logged ~context:"custom" "/nonexistent/file.tmp";
   ()
+;;
 
 (* close_in_logged *)
 let test_close_in_logged_valid () =
@@ -191,82 +242,110 @@ let test_close_in_logged_valid () =
   close_in_logged ic;
   Sys.remove path;
   ()
+;;
 
 (* get_env_int_logged *)
 let test_get_env_int_logged_missing () =
   let open Safe_ops in
   let result = get_env_int_logged "MASC_TEST_NONEXISTENT_VAR_12345" ~default:99 in
   check int "default on missing" 99 result
+;;
 
 let test_get_env_int_logged_valid () =
   let open Safe_ops in
   Unix.putenv "MASC_TEST_INT_VAR" "42";
   let result = get_env_int_logged "MASC_TEST_INT_VAR" ~default:0 in
   check int "parses env var" 42 result
+;;
 
 let test_get_env_int_logged_invalid () =
   let open Safe_ops in
   Unix.putenv "MASC_TEST_INT_VAR_BAD" "not_int";
   let result = get_env_int_logged "MASC_TEST_INT_VAR_BAD" ~default:99 in
   check int "default on invalid" 99 result
+;;
 
 (* get_env_float_logged *)
 let test_get_env_float_logged_missing () =
   let open Safe_ops in
   let result = get_env_float_logged "MASC_TEST_NONEXISTENT_FLOAT_12345" ~default:1.5 in
   check (float 0.001) "default on missing" 1.5 result
+;;
 
 let test_get_env_float_logged_valid () =
   let open Safe_ops in
   Unix.putenv "MASC_TEST_FLOAT_VAR" "2.718";
   let result = get_env_float_logged "MASC_TEST_FLOAT_VAR" ~default:0.0 in
   check (float 0.001) "parses env var" 2.718 result
+;;
 
 let test_get_env_float_logged_invalid () =
   let open Safe_ops in
   Unix.putenv "MASC_TEST_FLOAT_VAR_BAD" "not_float";
   let result = get_env_float_logged "MASC_TEST_FLOAT_VAR_BAD" ~default:1.5 in
   check (float 0.001) "default on invalid" 1.5 result
+;;
 
 (* json_int_opt *)
 let test_json_int_opt_present () =
   let open Safe_ops in
   check (option int) "Some on present" (Some 42) (json_int_opt "count" sample_json)
+;;
 
 let test_json_int_opt_missing () =
   let open Safe_ops in
   check (option int) "None on missing" None (json_int_opt "missing" sample_json)
+;;
 
 let test_json_int_opt_null () =
   let open Safe_ops in
   let j = Yojson.Safe.from_string {|{"val": null}|} in
   check (option int) "None on null" None (json_int_opt "val" j)
+;;
 
 let test_json_int_opt_wrong_type () =
   let open Safe_ops in
   check (option int) "None on string" None (json_int_opt "name" sample_json)
+;;
 
 (* json_float_opt *)
 let test_json_float_opt_present () =
   let open Safe_ops in
-  check (option (float 0.001)) "Some on float" (Some 3.14) (json_float_opt "rate" sample_json)
+  check
+    (option (float 0.001))
+    "Some on float"
+    (Some 3.14)
+    (json_float_opt "rate" sample_json)
+;;
 
 let test_json_float_opt_from_int () =
   let open Safe_ops in
-  check (option (float 0.001)) "Some from int" (Some 42.0) (json_float_opt "count" sample_json)
+  check
+    (option (float 0.001))
+    "Some from int"
+    (Some 42.0)
+    (json_float_opt "count" sample_json)
+;;
 
 let test_json_float_opt_missing () =
   let open Safe_ops in
-  check (option (float 0.001)) "None on missing" None (json_float_opt "missing" sample_json)
+  check
+    (option (float 0.001))
+    "None on missing"
+    None
+    (json_float_opt "missing" sample_json)
+;;
 
 let test_json_float_opt_null () =
   let open Safe_ops in
   let j = Yojson.Safe.from_string {|{"val": null}|} in
   check (option (float 0.001)) "None on null" None (json_float_opt "val" j)
+;;
 
 let test_json_float_opt_wrong_type () =
   let open Safe_ops in
   check (option (float 0.001)) "None on string" None (json_float_opt "name" sample_json)
+;;
 
 (* Small-LLM coercion: stringified numerics parse into numeric getters.
    Field evidence 2026-04-17/18: keepers routinely send max_results:"0.0",
@@ -276,77 +355,91 @@ let test_json_int_coerces_stringified_int () =
   let open Safe_ops in
   let j = Yojson.Safe.from_string {|{"limit": "42"}|} in
   check int "parses stringified int" 42 (json_int ~default:0 "limit" j)
+;;
 
 let test_json_int_coerces_stringified_float () =
   let open Safe_ops in
   let j = Yojson.Safe.from_string {|{"limit": "100.0"}|} in
   check int "parses stringified float by truncation" 100 (json_int ~default:0 "limit" j)
+;;
 
 let test_json_int_falls_back_on_garbage_string () =
   let open Safe_ops in
   let j = Yojson.Safe.from_string {|{"limit": "abc"}|} in
   check int "default on unparseable string" 7 (json_int ~default:7 "limit" j)
+;;
 
 let test_json_float_coerces_stringified_number () =
   let open Safe_ops in
   let j = Yojson.Safe.from_string {|{"rate": "0.25"}|} in
-  check (float 0.001) "parses stringified float"
-    0.25 (json_float ~default:0.0 "rate" j)
+  check (float 0.001) "parses stringified float" 0.25 (json_float ~default:0.0 "rate" j)
+;;
 
 let test_json_bool_coerces_stringified_bool () =
   let open Safe_ops in
   let j = Yojson.Safe.from_string {|{"flag": "true", "off": "0"}|} in
   check bool "parses 'true'" true (json_bool ~default:false "flag" j);
   check bool "parses '0' as false" false (json_bool ~default:true "off" j)
+;;
 
 let test_json_int_opt_coerces_stringified () =
   let open Safe_ops in
   let j = Yojson.Safe.from_string {|{"n": "13", "bad": "not a number"}|} in
   check (option int) "Some from string int" (Some 13) (json_int_opt "n" j);
   check (option int) "None from garbage" None (json_int_opt "bad" j)
+;;
 
 (* json_string_list (Safe_ops version) *)
 let test_json_string_list_present () =
   let open Safe_ops in
   let j = Yojson.Safe.from_string {|{"tags": ["a", "b", "c"]}|} in
-  check (list string) "extracts list" ["a"; "b"; "c"] (json_string_list "tags" j)
+  check (list string) "extracts list" [ "a"; "b"; "c" ] (json_string_list "tags" j)
+;;
 
 let test_json_string_list_missing () =
   let open Safe_ops in
   check (list string) "empty on missing" [] (json_string_list "missing" sample_json)
+;;
 
 let test_json_string_list_wrong_type () =
   let open Safe_ops in
   check (list string) "empty on non-list" [] (json_string_list "name" sample_json)
+;;
 
 (* json_string_opt with null *)
 let test_json_string_opt_null () =
   let open Safe_ops in
   let j = Yojson.Safe.from_string {|{"val": null}|} in
   check (option string) "None on null" None (json_string_opt "val" j)
+;;
 
 (* json_bool with defaults *)
 let test_json_bool_default () =
   let open Safe_ops in
   check bool "default on missing" false (json_bool "missing" sample_json)
+;;
 
 let test_json_bool_custom_default () =
   let open Safe_ops in
   check bool "custom default" true (json_bool ~default:true "missing" sample_json)
+;;
 
 (* json_int with default *)
 let test_json_int_default () =
   let open Safe_ops in
   check int "default on missing" 0 (json_int "missing" sample_json)
+;;
 
 let test_json_int_custom_default () =
   let open Safe_ops in
   check int "custom default" 99 (json_int ~default:99 "missing" sample_json)
+;;
 
 (* json_float with default *)
 let test_json_float_default () =
   let open Safe_ops in
   check (float 0.001) "default on missing" 0.0 (json_float "missing" sample_json)
+;;
 
 (* parse_json_safe long input preview *)
 let test_parse_json_safe_long_invalid () =
@@ -354,106 +447,125 @@ let test_parse_json_safe_long_invalid () =
   let long_str = String.make 100 'x' in
   let result = parse_json_safe ~context:"test" long_str in
   check bool "Error on long invalid" true (Result.is_error result)
+;;
 
 let () =
-  run "Safe_ops" [
-    "int_of_string_safe", [
-      test_case "valid" `Quick test_int_of_string_safe_valid;
-      test_case "invalid" `Quick test_int_of_string_safe_invalid;
-      test_case "with default" `Quick test_int_of_string_with_default;
-    ];
-    "float_of_string_safe", [
-      test_case "valid" `Quick test_float_of_string_safe_valid;
-      test_case "invalid" `Quick test_float_of_string_safe_invalid;
-    ];
-    "float_of_string_with_default", [
-      test_case "valid" `Quick test_float_of_string_with_default_valid;
-      test_case "invalid" `Quick test_float_of_string_with_default_invalid;
-    ];
-    "parse_json_safe", [
-      test_case "valid json" `Quick test_parse_json_safe_valid;
-      test_case "invalid json" `Quick test_parse_json_safe_invalid;
-      test_case "long invalid" `Quick test_parse_json_safe_long_invalid;
-    ];
-    "read_file_safe", [
-      test_case "not found" `Quick test_read_file_safe_not_found;
-      test_case "valid file" `Quick test_read_file_safe_valid;
-    ];
-    "read_json_file_safe", [
-      test_case "nonexistent" `Quick test_read_json_file_safe_nonexistent;
-      test_case "valid json file" `Quick test_read_json_file_safe_valid;
-      test_case "invalid json file" `Quick test_read_json_file_safe_invalid_json;
-    ];
-    "list_dir_safe", [
-      test_case "nonexistent" `Quick test_list_dir_safe_nonexistent;
-      test_case "not a dir" `Quick test_list_dir_safe_not_a_dir;
-      test_case "valid dir" `Quick test_list_dir_safe_valid;
-    ];
-    "remove_file_logged", [
-      test_case "existing" `Quick test_remove_file_logged_existing;
-      test_case "nonexistent" `Quick test_remove_file_logged_nonexistent;
-      test_case "custom context" `Quick test_remove_file_logged_custom_context;
-    ];
-    "close_in_logged", [
-      test_case "valid" `Quick test_close_in_logged_valid;
-    ];
-    "try_with_log", [
-      test_case "success" `Quick test_try_with_log_success;
-      test_case "failure" `Quick test_try_with_log_failure;
-    ];
-    "try_with_default", [
-      test_case "success" `Quick test_try_with_default_success;
-      test_case "failure" `Quick test_try_with_default_failure;
-    ];
-    "get_env_int_logged", [
-      test_case "missing" `Quick test_get_env_int_logged_missing;
-      test_case "valid" `Quick test_get_env_int_logged_valid;
-      test_case "invalid" `Quick test_get_env_int_logged_invalid;
-    ];
-    "get_env_float_logged", [
-      test_case "missing" `Quick test_get_env_float_logged_missing;
-      test_case "valid" `Quick test_get_env_float_logged_valid;
-      test_case "invalid" `Quick test_get_env_float_logged_invalid;
-    ];
-    "json_extraction", [
-      test_case "string" `Quick test_json_string;
-      test_case "string missing" `Quick test_json_string_missing;
-      test_case "int" `Quick test_json_int;
-      test_case "int default" `Quick test_json_int_default;
-      test_case "int custom default" `Quick test_json_int_custom_default;
-      test_case "float" `Quick test_json_float;
-      test_case "float default" `Quick test_json_float_default;
-      test_case "bool" `Quick test_json_bool;
-      test_case "bool default" `Quick test_json_bool_default;
-      test_case "bool custom default" `Quick test_json_bool_custom_default;
-      test_case "string_opt present" `Quick test_json_string_opt_present;
-      test_case "string_opt missing" `Quick test_json_string_opt_missing;
-      test_case "string_opt null" `Quick test_json_string_opt_null;
-    ];
-    "json_int_opt", [
-      test_case "present" `Quick test_json_int_opt_present;
-      test_case "missing" `Quick test_json_int_opt_missing;
-      test_case "null" `Quick test_json_int_opt_null;
-      test_case "wrong type" `Quick test_json_int_opt_wrong_type;
-    ];
-    "json_float_opt", [
-      test_case "present" `Quick test_json_float_opt_present;
-      test_case "from int" `Quick test_json_float_opt_from_int;
-      test_case "missing" `Quick test_json_float_opt_missing;
-      test_case "null" `Quick test_json_float_opt_null;
-      test_case "wrong type" `Quick test_json_float_opt_wrong_type;
-    ];
-    "json_string_list", [
-      test_case "present" `Quick test_json_string_list_present;
-      test_case "missing" `Quick test_json_string_list_missing;
-      test_case "wrong type" `Quick test_json_string_list_wrong_type;
-    ];
-    "json_stringified_coercion", [
-      test_case "int from stringified int" `Quick test_json_int_coerces_stringified_int;
-      test_case "int from stringified float" `Quick test_json_int_coerces_stringified_float;
-      test_case "int falls back on garbage" `Quick test_json_int_falls_back_on_garbage_string;
-      test_case "float from stringified number" `Quick test_json_float_coerces_stringified_number;
-      test_case "bool from stringified bool" `Quick test_json_bool_coerces_stringified_bool;
-      test_case "int_opt from stringified" `Quick test_json_int_opt_coerces_stringified;
-    ];
-  ]
+  run
+    "Safe_ops"
+    [ ( "int_of_string_safe"
+      , [ test_case "valid" `Quick test_int_of_string_safe_valid
+        ; test_case "invalid" `Quick test_int_of_string_safe_invalid
+        ; test_case "with default" `Quick test_int_of_string_with_default
+        ] )
+    ; ( "float_of_string_safe"
+      , [ test_case "valid" `Quick test_float_of_string_safe_valid
+        ; test_case "invalid" `Quick test_float_of_string_safe_invalid
+        ] )
+    ; ( "float_of_string_with_default"
+      , [ test_case "valid" `Quick test_float_of_string_with_default_valid
+        ; test_case "invalid" `Quick test_float_of_string_with_default_invalid
+        ] )
+    ; ( "parse_json_safe"
+      , [ test_case "valid json" `Quick test_parse_json_safe_valid
+        ; test_case "invalid json" `Quick test_parse_json_safe_invalid
+        ; test_case "long invalid" `Quick test_parse_json_safe_long_invalid
+        ] )
+    ; ( "read_file_safe"
+      , [ test_case "not found" `Quick test_read_file_safe_not_found
+        ; test_case "valid file" `Quick test_read_file_safe_valid
+        ] )
+    ; ( "read_json_file_safe"
+      , [ test_case "nonexistent" `Quick test_read_json_file_safe_nonexistent
+        ; test_case "valid json file" `Quick test_read_json_file_safe_valid
+        ; test_case "invalid json file" `Quick test_read_json_file_safe_invalid_json
+        ] )
+    ; ( "list_dir_safe"
+      , [ test_case "nonexistent" `Quick test_list_dir_safe_nonexistent
+        ; test_case "not a dir" `Quick test_list_dir_safe_not_a_dir
+        ; test_case "valid dir" `Quick test_list_dir_safe_valid
+        ] )
+    ; ( "remove_file_logged"
+      , [ test_case "existing" `Quick test_remove_file_logged_existing
+        ; test_case "nonexistent" `Quick test_remove_file_logged_nonexistent
+        ; test_case "custom context" `Quick test_remove_file_logged_custom_context
+        ] )
+    ; "close_in_logged", [ test_case "valid" `Quick test_close_in_logged_valid ]
+    ; ( "try_with_log"
+      , [ test_case "success" `Quick test_try_with_log_success
+        ; test_case "failure" `Quick test_try_with_log_failure
+        ] )
+    ; ( "try_with_default"
+      , [ test_case "success" `Quick test_try_with_default_success
+        ; test_case "failure" `Quick test_try_with_default_failure
+        ] )
+    ; ( "get_env_int_logged"
+      , [ test_case "missing" `Quick test_get_env_int_logged_missing
+        ; test_case "valid" `Quick test_get_env_int_logged_valid
+        ; test_case "invalid" `Quick test_get_env_int_logged_invalid
+        ] )
+    ; ( "get_env_float_logged"
+      , [ test_case "missing" `Quick test_get_env_float_logged_missing
+        ; test_case "valid" `Quick test_get_env_float_logged_valid
+        ; test_case "invalid" `Quick test_get_env_float_logged_invalid
+        ] )
+    ; ( "json_extraction"
+      , [ test_case "string" `Quick test_json_string
+        ; test_case "string missing" `Quick test_json_string_missing
+        ; test_case "int" `Quick test_json_int
+        ; test_case "int default" `Quick test_json_int_default
+        ; test_case "int custom default" `Quick test_json_int_custom_default
+        ; test_case "float" `Quick test_json_float
+        ; test_case "float default" `Quick test_json_float_default
+        ; test_case "bool" `Quick test_json_bool
+        ; test_case "bool default" `Quick test_json_bool_default
+        ; test_case "bool custom default" `Quick test_json_bool_custom_default
+        ; test_case "string_opt present" `Quick test_json_string_opt_present
+        ; test_case "string_opt missing" `Quick test_json_string_opt_missing
+        ; test_case "string_opt null" `Quick test_json_string_opt_null
+        ] )
+    ; ( "json_int_opt"
+      , [ test_case "present" `Quick test_json_int_opt_present
+        ; test_case "missing" `Quick test_json_int_opt_missing
+        ; test_case "null" `Quick test_json_int_opt_null
+        ; test_case "wrong type" `Quick test_json_int_opt_wrong_type
+        ] )
+    ; ( "json_float_opt"
+      , [ test_case "present" `Quick test_json_float_opt_present
+        ; test_case "from int" `Quick test_json_float_opt_from_int
+        ; test_case "missing" `Quick test_json_float_opt_missing
+        ; test_case "null" `Quick test_json_float_opt_null
+        ; test_case "wrong type" `Quick test_json_float_opt_wrong_type
+        ] )
+    ; ( "json_string_list"
+      , [ test_case "present" `Quick test_json_string_list_present
+        ; test_case "missing" `Quick test_json_string_list_missing
+        ; test_case "wrong type" `Quick test_json_string_list_wrong_type
+        ] )
+    ; ( "json_stringified_coercion"
+      , [ test_case
+            "int from stringified int"
+            `Quick
+            test_json_int_coerces_stringified_int
+        ; test_case
+            "int from stringified float"
+            `Quick
+            test_json_int_coerces_stringified_float
+        ; test_case
+            "int falls back on garbage"
+            `Quick
+            test_json_int_falls_back_on_garbage_string
+        ; test_case
+            "float from stringified number"
+            `Quick
+            test_json_float_coerces_stringified_number
+        ; test_case
+            "bool from stringified bool"
+            `Quick
+            test_json_bool_coerces_stringified_bool
+        ; test_case
+            "int_opt from stringified"
+            `Quick
+            test_json_int_opt_coerces_stringified
+        ] )
+    ]
+;;

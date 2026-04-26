@@ -24,10 +24,10 @@ val update_with_result : 'a Atomic.t -> ('a -> 'a * 'b) -> 'b
 (** Record-labelled commit describing the next state and a derived value.
     Equivalent to the tuple form used by [update_with_result]; provided for
     call sites where positional tuples hurt readability. *)
-type ('state, 'result) commit = {
-  next_state : 'state;
-  result : 'result;
-}
+type ('state, 'result) commit =
+  { next_state : 'state
+  ; result : 'result
+  }
 
 (** [update_with_commit atomic f] is [update_with_result] but [f] returns
     a labelled [commit] record instead of a tuple. *)

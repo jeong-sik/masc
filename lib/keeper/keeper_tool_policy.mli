@@ -7,19 +7,16 @@
     @since v2.200.0 *)
 
 open Keeper_types
-
 module StringSet : Set.S with type elt = string
 
 (** {1 Policy Initialization} *)
 
 (** Load tool policy configuration from [config/tool_policy.toml].
     Must be called once at server startup before any preset resolution. *)
-val init_policy_config :
-  base_path:string -> (unit, string) result
+val init_policy_config : base_path:string -> (unit, string) result
 
 (** Return the loaded policy config, if any.  Used for validation. *)
-val policy_config_for_validation :
-  unit -> Keeper_tool_policy_config.t option
+val policy_config_for_validation : unit -> Keeper_tool_policy_config.t option
 
 (** {1 Preset Names and Mapping} *)
 
@@ -30,8 +27,7 @@ val preset_name_of_tool_preset : tool_preset -> string
 val configured_preset_names : unit -> string list
 
 (** Check if [agent_preset] subsumes [required_preset] per the config hierarchy. *)
-val preset_can_satisfy :
-  agent_preset:string -> required_preset:string -> bool
+val preset_can_satisfy : agent_preset:string -> required_preset:string -> bool
 
 (** {1 Workflow and Shell Permissions} *)
 
@@ -62,12 +58,10 @@ val gh_cache_max_output_bytes : unit -> int
 val inject_masc_schemas : Types.tool_schema list -> unit
 
 (** Filter raw schemas down to the masc_* subset a keeper can actually see. *)
-val keeper_supported_masc_schemas :
-  Types.tool_schema list -> Types.tool_schema list
+val keeper_supported_masc_schemas : Types.tool_schema list -> Types.tool_schema list
 
 (** Return names from [keeper_supported_masc_schemas]. *)
-val keeper_supported_masc_tool_names_from_schemas :
-  Types.tool_schema list -> string list
+val keeper_supported_masc_tool_names_from_schemas : Types.tool_schema list -> string list
 
 (** Filter names to only those present in the injected MASC set. *)
 val select_existing_masc_tool_names : string list -> string list
@@ -76,12 +70,12 @@ val select_existing_masc_tool_names : string list -> string list
 
     Per-tool access checks using immutable StringSet. *)
 
-type tool_access_lookup = {
-  candidate_names : string list;
-  candidate_set : StringSet.t;
-  allow_set : StringSet.t;
-  deny_set : StringSet.t;
-}
+type tool_access_lookup =
+  { candidate_names : string list
+  ; candidate_set : StringSet.t
+  ; allow_set : StringSet.t
+  ; deny_set : StringSet.t
+  }
 
 (** Build a StringSet from a list of tool names. *)
 val tool_name_set : string list -> StringSet.t
@@ -133,10 +127,11 @@ val failing_minimum_tool_names : unit -> string list
     Returns empty list when [write_done] is true.
     When [phase] is [Failing] and decision layer level >= 2,
     returns [failing_minimum_tool_names] instead (recovery floor). *)
-val keeper_allowed_tool_names :
-  ?write_done:bool ->
-  ?phase:Keeper_state_machine.phase ->
-  keeper_meta -> string list
+val keeper_allowed_tool_names
+  :  ?write_done:bool
+  -> ?phase:Keeper_state_machine.phase
+  -> keeper_meta
+  -> string list
 
 (** Universe tool names: candidates minus denied, no policy filter. *)
 val keeper_universe_tool_names : keeper_meta -> string list
@@ -150,8 +145,7 @@ val last_turn_safe_tool_names : unit -> string list
 (** {1 Tool Schema Assembly} *)
 
 (** Policy-filtered model tool schemas. *)
-val keeper_allowed_model_tools :
-  ?write_done:bool -> keeper_meta -> Types.tool_schema list
+val keeper_allowed_model_tools : ?write_done:bool -> keeper_meta -> Types.tool_schema list
 
 (** Universe model tool schemas for Agent.run(). *)
 val keeper_universe_model_tools : keeper_meta -> Types.tool_schema list
@@ -160,12 +154,13 @@ val keeper_universe_model_tools : keeper_meta -> Types.tool_schema list
 val keeper_preset_universe_model_tools : keeper_meta -> Types.tool_schema list
 
 (** Filter schemas by a set of allowed names.  O(1) per schema. *)
-val filter_schemas_by_names :
-  string list -> Types.tool_schema list -> Types.tool_schema list
+val filter_schemas_by_names
+  :  string list
+  -> Types.tool_schema list
+  -> Types.tool_schema list
 
 (** Deduplicate tool schemas by name. *)
-val dedupe_tool_schemas :
-  Types.tool_schema list -> Types.tool_schema list
+val dedupe_tool_schemas : Types.tool_schema list -> Types.tool_schema list
 
 (** {1 Tool Description Lookup} *)
 

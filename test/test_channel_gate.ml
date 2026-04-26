@@ -1,180 +1,232 @@
 open Alcotest
 
-let make_message ?(content = "hello") ?(keeper_name = "luna")
-    ?(channel_user_id = "user-1") ?(idempotency_key = "key-1") () =
-  {
-    Channel_gate.channel = "discord";
-    channel_user_id;
-    channel_user_name = "user";
-    channel_room_id = "room-1";
-    keeper_name;
-    content;
-    idempotency_key;
-    metadata = [];
+let make_message
+      ?(content = "hello")
+      ?(keeper_name = "luna")
+      ?(channel_user_id = "user-1")
+      ?(idempotency_key = "key-1")
+      ()
+  =
+  { Channel_gate.channel = "discord"
+  ; channel_user_id
+  ; channel_user_name = "user"
+  ; channel_room_id = "room-1"
+  ; keeper_name
+  ; content
+  ; idempotency_key
+  ; metadata = []
   }
+;;
 
 let reset_dedup () =
   Channel_gate.dedup_cleanup
     ~now:(Unix.gettimeofday () +. Channel_gate.dedup_ttl_sec () +. 1.0)
+;;
 
 let unique_key prefix =
-  Printf.sprintf "%s-%d-%.0f" prefix (Unix.getpid ())
-    (Unix.gettimeofday () *. 1_000_000.)
+  Printf.sprintf "%s-%d-%.0f" prefix (Unix.getpid ()) (Unix.gettimeofday () *. 1_000_000.)
+;;
 
 let test_validate_accepts_valid_message () =
   reset_dedup ();
   match Channel_gate.validate (make_message ~idempotency_key:(unique_key "ok") ()) with
   | Ok () -> ()
   | Error _ -> fail "expected valid message to pass validation"
+;;
 
 let test_validate_rejects_empty_keeper_name () =
   reset_dedup ();
-  match Channel_gate.validate (make_message ~keeper_name:"   " ~idempotency_key:"empty-keeper" ()) with
+  match
+    Channel_gate.validate
+      (make_message ~keeper_name:"   " ~idempotency_key:"empty-keeper" ())
+  with
   | Error Channel_gate.Empty_keeper_name -> ()
   | Ok () -> fail "expected Empty_keeper_name"
   | Error _ -> fail "expected Empty_keeper_name"
+;;
 
 let test_validate_rejects_empty_content () =
   reset_dedup ();
-  match Channel_gate.validate (make_message ~content:"   " ~idempotency_key:"empty-content" ()) with
+  match
+    Channel_gate.validate
+      (make_message ~content:"   " ~idempotency_key:"empty-content" ())
+  with
   | Error Channel_gate.Empty_content -> ()
   | Ok () -> fail "expected Empty_content"
   | Error _ -> fail "expected Empty_content"
+;;
 
 let test_validate_rejects_duplicate_message () =
   reset_dedup ();
   let key = unique_key "dup" in
   let message = make_message ~idempotency_key:key () in
   (match Channel_gate.validate message with
-  | Ok () -> ()
-  | Error _ -> fail "first validate should accept fresh idempotency key");
+   | Ok () -> ()
+   | Error _ -> fail "first validate should accept fresh idempotency key");
   match Channel_gate.validate message with
   | Error (Channel_gate.Duplicate_message dup_key) ->
-      check string "duplicate key" key dup_key
+    check string "duplicate key" key dup_key
   | Ok () -> fail "expected duplicate validation failure"
   | Error _ -> fail "expected Duplicate_message"
+;;
 
 let test_validate_allows_key_after_cleanup () =
   reset_dedup ();
   let key = unique_key "cleanup" in
   let message = make_message ~idempotency_key:key () in
   (match Channel_gate.validate message with
-  | Ok () -> ()
-  | Error _ -> fail "first validate should accept fresh idempotency key");
+   | Ok () -> ()
+   | Error _ -> fail "first validate should accept fresh idempotency key");
   reset_dedup ();
   match Channel_gate.validate message with
   | Ok () -> ()
   | Error _ -> fail "cleanup should evict expired idempotency key"
+;;
 
 let test_failed_validation_does_not_consume_idempotency_key () =
   reset_dedup ();
   let key = unique_key "retryable" in
-  (match
-     Channel_gate.validate
-       (make_message ~content:"   " ~idempotency_key:key ())
-   with
-  | Error Channel_gate.Empty_content -> ()
-  | Ok () -> fail "expected invalid message to fail"
-  | Error _ -> fail "expected Empty_content");
+  (match Channel_gate.validate (make_message ~content:"   " ~idempotency_key:key ()) with
+   | Error Channel_gate.Empty_content -> ()
+   | Ok () -> fail "expected invalid message to fail"
+   | Error _ -> fail "expected Empty_content");
   match Channel_gate.validate (make_message ~idempotency_key:key ()) with
   | Ok () -> ()
   | Error _ -> fail "failed validation should not consume idempotency key"
+;;
 
 let test_validate_serializes_duplicate_race_under_eio () =
   reset_dedup ();
   let key = unique_key "concurrent" in
   let with_eio f =
-    Eio_main.run @@ fun _env ->
+    Eio_main.run
+    @@ fun _env ->
     Eio_guard.enable ();
     Fun.protect ~finally:Eio_guard.disable f
   in
   with_eio (fun () ->
     let results = Array.make 16 (Error Channel_gate.Empty_content) in
     Eio.Fiber.all
-      (List.init 16 (fun i -> fun () ->
-         results.(i) <- Channel_gate.validate (make_message ~idempotency_key:key ())
-      ));
+      (List.init 16 (fun i ->
+         fun () ->
+         results.(i) <- Channel_gate.validate (make_message ~idempotency_key:key ())));
     let ok_count, duplicate_count =
       Array.fold_left
         (fun (oks, dups) -> function
-          | Ok () -> (oks + 1, dups)
-          | Error (Channel_gate.Duplicate_message dup_key) ->
-              check string "duplicate key is preserved" key dup_key;
-              (oks, dups + 1)
-          | Error err ->
-              fail
-                (Printf.sprintf "unexpected validation result: %s"
-                   (Channel_gate.validation_error_to_string err)))
-        (0, 0) results
+           | Ok () -> oks + 1, dups
+           | Error (Channel_gate.Duplicate_message dup_key) ->
+             check string "duplicate key is preserved" key dup_key;
+             oks, dups + 1
+           | Error err ->
+             fail
+               (Printf.sprintf
+                  "unexpected validation result: %s"
+                  (Channel_gate.validation_error_to_string err)))
+        (0, 0)
+        results
     in
     check int "exactly one fresh message wins" 1 ok_count;
     check int "all other fibers see duplicate" 15 duplicate_count)
+;;
 
 let test_validation_error_to_string () =
-  check string "empty content" "content is required"
+  check
+    string
+    "empty content"
+    "content is required"
     (Channel_gate.validation_error_to_string Channel_gate.Empty_content);
-  check string "empty keeper name" "keeper_name is required"
+  check
+    string
+    "empty keeper name"
+    "keeper_name is required"
     (Channel_gate.validation_error_to_string Channel_gate.Empty_keeper_name);
-  check string "duplicate message"
+  check
+    string
+    "duplicate message"
     "duplicate message (idempotency_key=dup)"
-    (Channel_gate.validation_error_to_string
-       (Channel_gate.Duplicate_message "dup"))
+    (Channel_gate.validation_error_to_string (Channel_gate.Duplicate_message "dup"))
+;;
 
 let test_inbound_of_json_normalizes_channel_label () =
   let json =
-    `Assoc [
-      ("channel", `String "  DisCord  ");
-      ("channel_user_id", `String "user-1");
-      ("channel_user_name", `String "user");
-      ("channel_room_id", `String "room-1");
-      ("keeper_name", `String "luna");
-      ("content", `String "hello");
-      ("idempotency_key", `String (unique_key "json"));
-    ]
+    `Assoc
+      [ "channel", `String "  DisCord  "
+      ; "channel_user_id", `String "user-1"
+      ; "channel_user_name", `String "user"
+      ; "channel_room_id", `String "room-1"
+      ; "keeper_name", `String "luna"
+      ; "content", `String "hello"
+      ; "idempotency_key", `String (unique_key "json")
+      ]
   in
   match Channel_gate.inbound_of_json json with
-  | Ok msg ->
-      check string "channel normalized" "discord" msg.channel
+  | Ok msg -> check string "channel normalized" "discord" msg.channel
   | Error err -> fail ("expected inbound json to parse: " ^ err)
+;;
 
 (* ── Mock dispatch for handle_inbound tests ──────────────────── *)
 
-let mock_dispatch_ok ~channel:_ ~channel_user_id:_ ~channel_user_name:_
-    ~channel_room_id:_ ~keeper_name:_ ~content:_ =
-  Gate_protocol.Reply {
-    content = "mock reply";
-    structured = None;
-    stats = Some { Gate_protocol.model_used = "test-model"; duration_ms = 42; tokens_used = 10 };
-  }
+let mock_dispatch_ok
+      ~channel:_
+      ~channel_user_id:_
+      ~channel_user_name:_
+      ~channel_room_id:_
+      ~keeper_name:_
+      ~content:_
+  =
+  Gate_protocol.Reply
+    { content = "mock reply"
+    ; structured = None
+    ; stats =
+        Some
+          { Gate_protocol.model_used = "test-model"; duration_ms = 42; tokens_used = 10 }
+    }
+;;
 
-let mock_dispatch_error ~channel:_ ~channel_user_id:_ ~channel_user_name:_
-    ~channel_room_id:_ ~keeper_name:_ ~content:_ =
+let mock_dispatch_error
+      ~channel:_
+      ~channel_user_id:_
+      ~channel_user_name:_
+      ~channel_room_id:_
+      ~keeper_name:_
+      ~content:_
+  =
   Gate_protocol.Keeper_error_result "mock keeper error"
+;;
 
-let mock_dispatch_unavailable ~channel:_ ~channel_user_id:_ ~channel_user_name:_
-    ~channel_room_id:_ ~keeper_name:_ ~content:_ =
+let mock_dispatch_unavailable
+      ~channel:_
+      ~channel_user_id:_
+      ~channel_user_name:_
+      ~channel_room_id:_
+      ~keeper_name:_
+      ~content:_
+  =
   Gate_protocol.Unavailable_result
+;;
 
 let test_handle_inbound_success () =
   reset_dedup ();
   let msg = make_message ~idempotency_key:(unique_key "dispatch-ok") () in
   match Channel_gate.handle_inbound ~dispatch:mock_dispatch_ok msg with
   | Ok out ->
-      check string "reply content" "mock reply" out.content;
-      check string "keeper name" "luna" out.keeper_name;
-      (match out.turn_stats with
-       | Some s -> check string "model" "test-model" s.model_used
-       | None -> fail "expected turn_stats")
+    check string "reply content" "mock reply" out.content;
+    check string "keeper name" "luna" out.keeper_name;
+    (match out.turn_stats with
+     | Some s -> check string "model" "test-model" s.model_used
+     | None -> fail "expected turn_stats")
   | Error e -> fail (Channel_gate.gate_error_to_string e)
+;;
 
 let test_handle_inbound_keeper_error () =
   reset_dedup ();
   let msg = make_message ~idempotency_key:(unique_key "dispatch-err") () in
   match Channel_gate.handle_inbound ~dispatch:mock_dispatch_error msg with
   | Error (Channel_gate.Keeper_error err) ->
-      check string "error message" "mock keeper error" err
+    check string "error message" "mock keeper error" err
   | Error _ -> fail "expected Keeper_error"
   | Ok _ -> fail "expected error"
+;;
 
 let test_handle_inbound_unavailable () =
   reset_dedup ();
@@ -183,6 +235,7 @@ let test_handle_inbound_unavailable () =
   | Error Channel_gate.Dispatch_unavailable -> ()
   | Error _ -> fail "expected Dispatch_unavailable"
   | Ok _ -> fail "expected error"
+;;
 
 let test_handle_inbound_validation_blocks_dispatch () =
   reset_dedup ();
@@ -191,73 +244,84 @@ let test_handle_inbound_validation_blocks_dispatch () =
   | Error (Channel_gate.Validation Channel_gate.Empty_content) -> ()
   | Error _ -> fail "expected Validation(Empty_content)"
   | Ok _ -> fail "expected validation to block dispatch"
+;;
 
 let test_handle_inbound_passes_channel_context_to_dispatch () =
   reset_dedup ();
   let seen = ref None in
-  let dispatch ~channel ~channel_user_id ~channel_user_name ~channel_room_id
-      ~keeper_name:_ ~content:_ =
-    seen :=
-      Some (channel, channel_user_id, channel_user_name, channel_room_id);
-    Gate_protocol.Reply {
-      content = "ok";
-      structured = None;
-      stats = None;
-    }
+  let dispatch
+        ~channel
+        ~channel_user_id
+        ~channel_user_name
+        ~channel_room_id
+        ~keeper_name:_
+        ~content:_
+    =
+    seen := Some (channel, channel_user_id, channel_user_name, channel_room_id);
+    Gate_protocol.Reply { content = "ok"; structured = None; stats = None }
   in
   let msg =
-    {
-      (make_message ~idempotency_key:(unique_key "dispatch-context") ()) with
-      channel_user_name = "Alice";
-      channel_room_id = "thread-7";
+    { (make_message ~idempotency_key:(unique_key "dispatch-context") ()) with
+      channel_user_name = "Alice"
+    ; channel_room_id = "thread-7"
     }
   in
   match Channel_gate.handle_inbound ~dispatch msg with
-  | Ok _ -> (
-      match !seen with
-      | Some (channel, user_id, user_name, room_id) ->
-          check string "channel" "discord" channel;
-          check string "user id" "user-1" user_id;
-          check string "user name" "Alice" user_name;
-          check string "room id" "thread-7" room_id
-      | None -> fail "dispatch should receive connector context" )
+  | Ok _ ->
+    (match !seen with
+     | Some (channel, user_id, user_name, room_id) ->
+       check string "channel" "discord" channel;
+       check string "user id" "user-1" user_id;
+       check string "user name" "Alice" user_name;
+       check string "room id" "thread-7" room_id
+     | None -> fail "dispatch should receive connector context")
   | Error e -> fail (Channel_gate.gate_error_to_string e)
+;;
 
 let () =
-  Alcotest.run "Channel_gate"
-    [
-      ( "validate",
-        [
-          test_case "accepts valid message" `Quick
-            test_validate_accepts_valid_message;
-          test_case "rejects empty content" `Quick
-            test_validate_rejects_empty_content;
-          test_case "rejects empty keeper name" `Quick
-            test_validate_rejects_empty_keeper_name;
-          test_case "rejects duplicate message" `Quick
-            test_validate_rejects_duplicate_message;
-          test_case "allows key after cleanup" `Quick
-            test_validate_allows_key_after_cleanup;
-          test_case "failed validation does not consume key" `Quick
-            test_failed_validation_does_not_consume_idempotency_key;
-          test_case "serializes duplicate race under eio" `Quick
-            test_validate_serializes_duplicate_race_under_eio;
-          test_case "stringifies validation errors" `Quick
-            test_validation_error_to_string;
-          test_case "normalizes inbound channel labels" `Quick
-            test_inbound_of_json_normalizes_channel_label;
-        ] );
-      ( "handle_inbound",
-        [
-          test_case "dispatches and returns reply" `Quick
-            test_handle_inbound_success;
-          test_case "passes channel context to dispatch" `Quick
-            test_handle_inbound_passes_channel_context_to_dispatch;
-          test_case "returns keeper error" `Quick
-            test_handle_inbound_keeper_error;
-          test_case "returns unavailable" `Quick
-            test_handle_inbound_unavailable;
-          test_case "validation blocks dispatch" `Quick
-            test_handle_inbound_validation_blocks_dispatch;
-        ] );
+  Alcotest.run
+    "Channel_gate"
+    [ ( "validate"
+      , [ test_case "accepts valid message" `Quick test_validate_accepts_valid_message
+        ; test_case "rejects empty content" `Quick test_validate_rejects_empty_content
+        ; test_case
+            "rejects empty keeper name"
+            `Quick
+            test_validate_rejects_empty_keeper_name
+        ; test_case
+            "rejects duplicate message"
+            `Quick
+            test_validate_rejects_duplicate_message
+        ; test_case
+            "allows key after cleanup"
+            `Quick
+            test_validate_allows_key_after_cleanup
+        ; test_case
+            "failed validation does not consume key"
+            `Quick
+            test_failed_validation_does_not_consume_idempotency_key
+        ; test_case
+            "serializes duplicate race under eio"
+            `Quick
+            test_validate_serializes_duplicate_race_under_eio
+        ; test_case "stringifies validation errors" `Quick test_validation_error_to_string
+        ; test_case
+            "normalizes inbound channel labels"
+            `Quick
+            test_inbound_of_json_normalizes_channel_label
+        ] )
+    ; ( "handle_inbound"
+      , [ test_case "dispatches and returns reply" `Quick test_handle_inbound_success
+        ; test_case
+            "passes channel context to dispatch"
+            `Quick
+            test_handle_inbound_passes_channel_context_to_dispatch
+        ; test_case "returns keeper error" `Quick test_handle_inbound_keeper_error
+        ; test_case "returns unavailable" `Quick test_handle_inbound_unavailable
+        ; test_case
+            "validation blocks dispatch"
+            `Quick
+            test_handle_inbound_validation_blocks_dispatch
+        ] )
     ]
+;;

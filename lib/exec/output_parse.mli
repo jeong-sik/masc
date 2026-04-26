@@ -9,13 +9,16 @@
     layer turns common outputs into typed JSON that the agent can
     consume directly. *)
 
-val try_parse :
-  cmd:string -> status:Unix.process_status -> output:string -> Yojson.Safe.t option
 (** Top-level dispatcher.  Examines [cmd] to select a parser, then
     feeds [output] through it.  Returns [None] when no parser matches
     or when the output does not conform to the expected format. *)
+val try_parse
+  :  cmd:string
+  -> status:Unix.process_status
+  -> output:string
+  -> Yojson.Safe.t option
 
-val utf8_truncate : string -> int -> string
 (** [utf8_truncate s max_bytes] truncates [s] at a UTF-8 character
     boundary.  Exported for consumers that need safe truncation
     outside of [Exec_buffer.render]. *)
+val utf8_truncate : string -> int -> string

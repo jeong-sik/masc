@@ -46,8 +46,12 @@ val remaining_global : key:string -> int
 
 (** {1 Automatic Cleanup Loop} *)
 
-val start_cleanup_loop :
-  sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> ?interval:float -> t -> unit
+val start_cleanup_loop
+  :  sw:Eio.Switch.t
+  -> clock:_ Eio.Time.clock
+  -> ?interval:float
+  -> t
+  -> unit
 
 (** {1 HTTP Helpers} *)
 

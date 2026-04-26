@@ -32,18 +32,18 @@
    gate calls base_path at init time — #9903 prod-guard). *)
 let () =
   let dir =
-    Filename.concat (Filename.get_temp_dir_name ())
+    Filename.concat
+      (Filename.get_temp_dir_name ())
       (Printf.sprintf "masc-test-codex-omission-10097-%06x" (Random.bits ()))
   in
   Unix.putenv "MASC_BASE_PATH" dir
+;;
 
 module T = Masc_mcp.Oas_worker_exec_transport
 module Prom = Masc_mcp.Prometheus
 
 let metric = Prom.metric_codex_cli_mcp_tool_omission
-
-let counter_for ~tool =
-  Prom.metric_value_or_zero metric ~labels:[ ("tool", tool) ] ()
+let counter_for ~tool = Prom.metric_value_or_zero metric ~labels:[ "tool", tool ] ()
 
 (* Counter must increment on every invocation, even when the
    fingerprint has been seen before (the WARN dedup is about log
@@ -59,6 +59,7 @@ let test_counter_increments_on_every_call () =
     "counter +3 across three calls with same fingerprint"
     (before +. 3.0)
     (counter_for ~tool)
+;;
 
 (* Fingerprint is the sorted list, so [a; b] and [b; a] are one
    set — reordering must not bypass dedup. *)
@@ -69,6 +70,7 @@ let test_fingerprint_is_order_insensitive () =
     "sorted [b;a] and sorted [a;b] yield same fingerprint"
     (T.codex_cli_omission_fingerprint [ a; b ])
     (T.codex_cli_omission_fingerprint [ b; a ])
+;;
 
 (* Different tool sets must NOT be silenced by each other.
    Regression guard for over-eager dedup (a single global flag
@@ -76,9 +78,7 @@ let test_fingerprint_is_order_insensitive () =
    evolves). *)
 let test_new_fingerprint_reprints_warn () =
   T.reset_codex_cli_omission_dedup_for_tests ();
-  let fp1 =
-    T.codex_cli_omission_fingerprint [ "keeper_shell_t3_10097" ]
-  in
+  let fp1 = T.codex_cli_omission_fingerprint [ "keeper_shell_t3_10097" ] in
   let fp2 =
     T.codex_cli_omission_fingerprint
       [ "keeper_shell_t3_10097"; "keeper_fs_edit_t3_10097" ]
@@ -99,6 +99,7 @@ let test_new_fingerprint_reprints_warn () =
     "fp2 is seen on second encounter"
     true
     (T.codex_cli_omission_fingerprint_seen fp2)
+;;
 
 (* Per-tool labels must stay isolated — a call with tool X must
    not leak into tool Y's bucket.  Same anti-pattern guard as
@@ -113,10 +114,8 @@ let test_per_tool_label_isolation () =
     "tool Y bucket unchanged when X is omitted"
     before_y
     (counter_for ~tool:y);
-  Alcotest.(check bool)
-    "tool X bucket grew"
-    true
-    (counter_for ~tool:x >= 1.0)
+  Alcotest.(check bool) "tool X bucket grew" true (counter_for ~tool:x >= 1.0)
+;;
 
 (* Empty list must be a pure no-op: no counter, no WARN.  The
    call site checks [if codex_keeper_bound_actor_tools <> []]
@@ -142,27 +141,29 @@ let test_empty_tools_is_noop () =
   (* Clean up the slot we just opened so other tests are not
      affected by the side-effect check above. *)
   T.reset_codex_cli_omission_dedup_for_tests ()
+;;
 
 let () =
-  Alcotest.run "codex_cli_omission_dedup_10097"
-    [
-      ( "counter",
-        [
-          Alcotest.test_case "increments on every call" `Quick
-            test_counter_increments_on_every_call;
-          Alcotest.test_case "per-tool label isolation" `Quick
-            test_per_tool_label_isolation;
-        ] );
-      ( "fingerprint",
-        [
-          Alcotest.test_case "order-insensitive" `Quick
-            test_fingerprint_is_order_insensitive;
-          Alcotest.test_case "new set reprints" `Quick
-            test_new_fingerprint_reprints_warn;
-        ] );
-      ( "empty",
-        [
-          Alcotest.test_case "empty tools is no-op" `Quick
-            test_empty_tools_is_noop;
-        ] );
+  Alcotest.run
+    "codex_cli_omission_dedup_10097"
+    [ ( "counter"
+      , [ Alcotest.test_case
+            "increments on every call"
+            `Quick
+            test_counter_increments_on_every_call
+        ; Alcotest.test_case
+            "per-tool label isolation"
+            `Quick
+            test_per_tool_label_isolation
+        ] )
+    ; ( "fingerprint"
+      , [ Alcotest.test_case
+            "order-insensitive"
+            `Quick
+            test_fingerprint_is_order_insensitive
+        ; Alcotest.test_case "new set reprints" `Quick test_new_fingerprint_reprints_warn
+        ] )
+    ; ( "empty"
+      , [ Alcotest.test_case "empty tools is no-op" `Quick test_empty_tools_is_noop ] )
     ]
+;;

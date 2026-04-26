@@ -25,10 +25,10 @@
     [Some (false, "keeper dispatch error …")] with the exception type
     stripped of internal paths to avoid leaking server internals.
     [Eio.Cancel.Cancelled] is re-raised. *)
-val dispatch :
-  config:Coord.config ->
-  agent_name:string ->
-  tag:Tool_dispatch.module_tag ->
-  name:string ->
-  args:Yojson.Safe.t ->
-  (bool * string) option
+val dispatch
+  :  config:Coord.config
+  -> agent_name:string
+  -> tag:Tool_dispatch.module_tag
+  -> name:string
+  -> args:Yojson.Safe.t
+  -> (bool * string) option

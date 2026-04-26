@@ -99,66 +99,65 @@ let archetype_axes_json = Archetypes.archetype_axes_json
 
 let field_catalog_entries =
   [ field_catalog_entry
-        ~path:"name"
-        ~typ:"string"
-        ~default:(`String "<handle>")
-        ~field_effect:
-          "Display label in persona lists. It does not change keeper execution by itself."
-        ()
-    ; field_catalog_entry
-        ~path:"role"
-        ~typ:"string"
-        ~field_effect:"Human-readable role metadata shown in discovery surfaces."
-        ()
-    ; field_catalog_entry
-        ~path:"trait"
-        ~typ:"string"
-        ~field_effect:
-          "Short personality or operating-style metadata shown in discovery surfaces."
-        ()
-    ; field_catalog_entry
-        ~path:"keeper.goal"
-        ~typ:"string"
-        ~required:true
-        ~field_effect:
-          "Required keeper purpose. masc_keeper_create_from_persona refuses \
-           materialization when this is empty."
-        ()
-    ; field_catalog_entry
-        ~path:"keeper.short_goal"
-        ~typ:"string"
-        ~default:(`String "<keeper.goal>")
-        ~field_effect:"Near-term goal horizon used when the keeper is created."
-        ()
-    ; field_catalog_entry
-        ~path:"keeper.mid_goal"
-        ~typ:"string"
-        ~default:(`String "<keeper.goal>")
-        ~field_effect:"Medium-term goal horizon used when the keeper is created."
-        ()
-    ; field_catalog_entry
-        ~path:"keeper.long_goal"
-        ~typ:"string"
-        ~default:(`String "<keeper.goal>")
-        ~field_effect:"Long-term goal horizon used when the keeper is created."
-        ()
-    ; field_catalog_entry
-        ~path:"keeper.instructions"
-        ~typ:"string"
-        ~field_effect:"Additional instructions copied into the keeper creation args."
-        ()
-    ; field_catalog_entry
-        ~path:"keeper.will"
-        ~typ:"string"
-        ~field_effect:
-          "Self-model will statement. Overrides the keeper environment default."
-        ()
-    ; field_catalog_entry
-        ~path:"keeper.needs"
-        ~typ:"string"
-        ~field_effect:
-          "Self-model needs statement. Overrides the keeper environment default."
-        ()
+      ~path:"name"
+      ~typ:"string"
+      ~default:(`String "<handle>")
+      ~field_effect:
+        "Display label in persona lists. It does not change keeper execution by itself."
+      ()
+  ; field_catalog_entry
+      ~path:"role"
+      ~typ:"string"
+      ~field_effect:"Human-readable role metadata shown in discovery surfaces."
+      ()
+  ; field_catalog_entry
+      ~path:"trait"
+      ~typ:"string"
+      ~field_effect:
+        "Short personality or operating-style metadata shown in discovery surfaces."
+      ()
+  ; field_catalog_entry
+      ~path:"keeper.goal"
+      ~typ:"string"
+      ~required:true
+      ~field_effect:
+        "Required keeper purpose. masc_keeper_create_from_persona refuses \
+         materialization when this is empty."
+      ()
+  ; field_catalog_entry
+      ~path:"keeper.short_goal"
+      ~typ:"string"
+      ~default:(`String "<keeper.goal>")
+      ~field_effect:"Near-term goal horizon used when the keeper is created."
+      ()
+  ; field_catalog_entry
+      ~path:"keeper.mid_goal"
+      ~typ:"string"
+      ~default:(`String "<keeper.goal>")
+      ~field_effect:"Medium-term goal horizon used when the keeper is created."
+      ()
+  ; field_catalog_entry
+      ~path:"keeper.long_goal"
+      ~typ:"string"
+      ~default:(`String "<keeper.goal>")
+      ~field_effect:"Long-term goal horizon used when the keeper is created."
+      ()
+  ; field_catalog_entry
+      ~path:"keeper.instructions"
+      ~typ:"string"
+      ~field_effect:"Additional instructions copied into the keeper creation args."
+      ()
+  ; field_catalog_entry
+      ~path:"keeper.will"
+      ~typ:"string"
+      ~field_effect:"Self-model will statement. Overrides the keeper environment default."
+      ()
+  ; field_catalog_entry
+      ~path:"keeper.needs"
+      ~typ:"string"
+      ~field_effect:
+        "Self-model needs statement. Overrides the keeper environment default."
+      ()
   ; field_catalog_entry
       ~path:"keeper.desires"
       ~typ:"string"
@@ -174,114 +173,114 @@ let field_catalog_entries =
       ~path:"keeper.mention_targets"
       ~typ:"string[]"
       ~default:(`String "[<handle>]")
-        ~field_effect:"Names that wake or target this persona-backed keeper."
-        ()
-    ; field_catalog_entry
-        ~path:"keeper.tool_preset"
-        ~typ:"enum"
-        ~default:(`String Archetypes.default_tool_preset)
-        ~choices:tool_preset_choices_json
-        ~field_effect:"Preset used to derive the keeper tool policy during creation."
-        ()
-    ; field_catalog_entry
-        ~path:"keeper.tool_also_allow"
-        ~typ:"string[]"
-        ~field_effect:"Extra tools added on top of keeper.tool_preset."
-        ()
-    ; field_catalog_entry
-        ~path:"keeper.tool_denylist"
-        ~typ:"string[]"
-        ~field_effect:"Tools removed from the derived keeper tool policy."
-        ()
-    ; field_catalog_entry
-        ~path:"keeper.proactive_enabled"
-        ~typ:"boolean"
-        ~default:(`Bool false)
-        ~field_effect:"Whether the created keeper should run proactive turns."
-        ()
-    ; field_catalog_entry
-        ~path:"keeper.proactive_idle_sec"
-        ~typ:"integer"
-        ~field_effect:"Idle delay before proactive work becomes eligible."
-        ()
-    ; field_catalog_entry
-        ~path:"keeper.proactive_cooldown_sec"
-        ~typ:"integer"
-        ~field_effect:"Cooldown between proactive turns."
-        ()
-    ; field_catalog_entry
-        ~path:"keeper.room_signal_prompt_enabled"
-        ~typ:"boolean"
-        ~field_effect:"Whether room signal context is injected into keeper prompts."
-        ()
-    ; field_catalog_entry
-        ~path:"keeper.shards"
-        ~typ:"string[]"
-        ~field_effect:"Persona-specific prompt shards applied after keeper creation."
-        ()
-    ; field_catalog_entry
-        ~path:"keeper.work_discovery_enabled"
-        ~typ:"boolean"
-        ~field_effect:"Enables config-driven proactive work scanning for the keeper."
-        ()
-    ; field_catalog_entry
-        ~path:"keeper.work_discovery_sources"
-        ~typ:"string[]"
-        ~field_effect:"Named work discovery sources considered by proactive scanning."
-        ()
-    ; field_catalog_entry
-        ~path:"keeper.work_discovery_interval_sec"
-        ~typ:"integer"
-        ~field_effect:"Interval for proactive work discovery checks."
-        ()
-    ; field_catalog_entry
-        ~path:"keeper.work_discovery_guidance"
-        ~typ:"string"
-        ~field_effect:"Additional guidance used during proactive work discovery."
-        ()
-    ; field_catalog_entry
-        ~path:"keeper.telemetry_feedback_enabled"
-        ~typ:"boolean"
-        ~field_effect:"Injects recent keeper telemetry into future turns."
-        ()
-    ; field_catalog_entry
-        ~path:"keeper.telemetry_feedback_window_hours"
-        ~typ:"integer"
-        ~field_effect:"Lookback window for telemetry feedback."
-        ()
-    ; field_catalog_entry
-        ~path:"keeper.per_provider_timeout"
-        ~typ:"number"
-        ~field_effect:"Per-provider cascade timeout override for this keeper."
-        ()
-    ; field_catalog_entry
-        ~path:"keeper.always_approve"
-        ~typ:"boolean"
-        ~field_effect:
-          "Allows eligible keeper actions to auto-approve according to runtime policy."
-        ()
-    ; field_catalog_entry
-        ~path:"keeper.max_turns_per_call"
-        ~typ:"integer"
-        ~field_effect:"Turn budget for direct keeper calls."
-        ()
-    ; field_catalog_entry
-        ~path:"keeper.max_turns_per_call_scheduled_autonomous"
-        ~typ:"integer"
-        ~field_effect:"Turn budget for scheduled autonomous turns."
-        ()
-    ; field_catalog_entry
-        ~path:"keeper.social_model"
-        ~typ:"enum"
-        ~choices:social_model_choices_json
-        ~field_effect:"Optional social-model runtime for speech or ledger behavior."
-        ()
-    ; field_catalog_entry
-        ~path:"keeper.cascade_name"
-        ~typ:"string"
-        ~field_effect:
-          "Optional named cascade override. Must resolve to a known cascade at runtime."
-        ()
+      ~field_effect:"Names that wake or target this persona-backed keeper."
+      ()
+  ; field_catalog_entry
+      ~path:"keeper.tool_preset"
+      ~typ:"enum"
+      ~default:(`String Archetypes.default_tool_preset)
+      ~choices:tool_preset_choices_json
+      ~field_effect:"Preset used to derive the keeper tool policy during creation."
+      ()
+  ; field_catalog_entry
+      ~path:"keeper.tool_also_allow"
+      ~typ:"string[]"
+      ~field_effect:"Extra tools added on top of keeper.tool_preset."
+      ()
+  ; field_catalog_entry
+      ~path:"keeper.tool_denylist"
+      ~typ:"string[]"
+      ~field_effect:"Tools removed from the derived keeper tool policy."
+      ()
+  ; field_catalog_entry
+      ~path:"keeper.proactive_enabled"
+      ~typ:"boolean"
+      ~default:(`Bool false)
+      ~field_effect:"Whether the created keeper should run proactive turns."
+      ()
+  ; field_catalog_entry
+      ~path:"keeper.proactive_idle_sec"
+      ~typ:"integer"
+      ~field_effect:"Idle delay before proactive work becomes eligible."
+      ()
+  ; field_catalog_entry
+      ~path:"keeper.proactive_cooldown_sec"
+      ~typ:"integer"
+      ~field_effect:"Cooldown between proactive turns."
+      ()
+  ; field_catalog_entry
+      ~path:"keeper.room_signal_prompt_enabled"
+      ~typ:"boolean"
+      ~field_effect:"Whether room signal context is injected into keeper prompts."
+      ()
+  ; field_catalog_entry
+      ~path:"keeper.shards"
+      ~typ:"string[]"
+      ~field_effect:"Persona-specific prompt shards applied after keeper creation."
+      ()
+  ; field_catalog_entry
+      ~path:"keeper.work_discovery_enabled"
+      ~typ:"boolean"
+      ~field_effect:"Enables config-driven proactive work scanning for the keeper."
+      ()
+  ; field_catalog_entry
+      ~path:"keeper.work_discovery_sources"
+      ~typ:"string[]"
+      ~field_effect:"Named work discovery sources considered by proactive scanning."
+      ()
+  ; field_catalog_entry
+      ~path:"keeper.work_discovery_interval_sec"
+      ~typ:"integer"
+      ~field_effect:"Interval for proactive work discovery checks."
+      ()
+  ; field_catalog_entry
+      ~path:"keeper.work_discovery_guidance"
+      ~typ:"string"
+      ~field_effect:"Additional guidance used during proactive work discovery."
+      ()
+  ; field_catalog_entry
+      ~path:"keeper.telemetry_feedback_enabled"
+      ~typ:"boolean"
+      ~field_effect:"Injects recent keeper telemetry into future turns."
+      ()
+  ; field_catalog_entry
+      ~path:"keeper.telemetry_feedback_window_hours"
+      ~typ:"integer"
+      ~field_effect:"Lookback window for telemetry feedback."
+      ()
+  ; field_catalog_entry
+      ~path:"keeper.per_provider_timeout"
+      ~typ:"number"
+      ~field_effect:"Per-provider cascade timeout override for this keeper."
+      ()
+  ; field_catalog_entry
+      ~path:"keeper.always_approve"
+      ~typ:"boolean"
+      ~field_effect:
+        "Allows eligible keeper actions to auto-approve according to runtime policy."
+      ()
+  ; field_catalog_entry
+      ~path:"keeper.max_turns_per_call"
+      ~typ:"integer"
+      ~field_effect:"Turn budget for direct keeper calls."
+      ()
+  ; field_catalog_entry
+      ~path:"keeper.max_turns_per_call_scheduled_autonomous"
+      ~typ:"integer"
+      ~field_effect:"Turn budget for scheduled autonomous turns."
+      ()
+  ; field_catalog_entry
+      ~path:"keeper.social_model"
+      ~typ:"enum"
+      ~choices:social_model_choices_json
+      ~field_effect:"Optional social-model runtime for speech or ledger behavior."
+      ()
+  ; field_catalog_entry
+      ~path:"keeper.cascade_name"
+      ~typ:"string"
+      ~field_effect:
+        "Optional named cascade override. Must resolve to a known cascade at runtime."
+      ()
   ]
 ;;
 
@@ -818,27 +817,18 @@ let selected_axis_effect_to_json ~axis value effects =
 
 let selected_archetype_effects_to_json axes =
   let selected =
-    [ Option.bind
-        axes.alignment
-        (fun value ->
-           selected_axis_effect_to_json
-             ~axis:"alignment"
-             value
-             alignment_choice_effects)
-    ; Option.bind
-        axes.operating_style
-        (fun value ->
-           selected_axis_effect_to_json
-             ~axis:"operating_style"
-             value
-             operating_style_choice_effects)
-    ; Option.bind
-        axes.risk_posture
-        (fun value ->
-           selected_axis_effect_to_json
-             ~axis:"risk_posture"
-             value
-             risk_posture_choice_effects)
+    [ Option.bind axes.alignment (fun value ->
+        selected_axis_effect_to_json ~axis:"alignment" value alignment_choice_effects)
+    ; Option.bind axes.operating_style (fun value ->
+        selected_axis_effect_to_json
+          ~axis:"operating_style"
+          value
+          operating_style_choice_effects)
+    ; Option.bind axes.risk_posture (fun value ->
+        selected_axis_effect_to_json
+          ~axis:"risk_posture"
+          value
+          risk_posture_choice_effects)
     ]
     |> List.filter_map (fun x -> x)
   in
@@ -1024,66 +1014,67 @@ let handle_persona_generate ctx args =
                ~proactive_enabled
                ~language
            in
-           match
-             Masc_oas_bridge.run_with_caller
-               ~caller:Env_config_oas_bridge.Keeper_persona_authoring
-               (fun () ->
-                 Oas_worker.run_named
-                   ~cascade_name
-                   ~goal:prompt
-                   ~max_turns:1
-                   ~temperature
-                   ~max_tokens
-                   ~approval:Approval_callbacks.auto_approve
-                   ~sw:ctx.Keeper_types.sw
-                   ?net:ctx.Keeper_types.net
-                   ())
-           with
-           | Error err ->
-             ( false
-             , error_response_typed
-                 ~code:Internal_error
-                 (Printf.sprintf
-                    "persona generation failed: %s"
-                    (Oas.Error.to_string err)) )
-           | Ok result ->
-             let raw_text = Oas_response.text_of_response result.Oas_worker.response in
-             (try
-                let parsed = Llm_provider.Lenient_json.parse raw_text in
-                let handle = parsed_handle_payload fallback_handle parsed in
-                let profile = parsed_profile_payload parsed in
-                match normalize_profile ~handle profile with
-                | Error msg ->
-                  ( false
-                  , error_response_typed
-                      ~code:Validation_error
-                      (Printf.sprintf "generated profile is invalid: %s" msg) )
-                | Ok normalized ->
-                  let json =
-                    `Assoc
-                      [ "handle", `String handle
-                      ; "selected_archetype_axes", archetype_axes_to_json archetype_axes
-                      ; ( "selected_archetype_effects"
-                        , selected_archetype_effects_to_json archetype_axes )
-                      ; "profile", normalized
-                      ; "field_explanations", field_explanations_payload parsed
-                      ; "raw_model", `String raw_text
-                      ; ( "save_args"
-                        , `Assoc
-                            [ "handle", `String handle
-                            ; "profile", normalized
-                            ; "overwrite", `Bool false
-                            ; "dry_run", `Bool false
-                            ] )
-                      ; ( "keeper_create_preview_args"
-                        , `Assoc [ "persona_name", `String handle; "dry_run", `Bool true ] )
-                      ]
-                  in
-                  true, Yojson.Safe.to_string json
-              with
-              | Yojson.Json_error msg ->
-                ( false
-                , error_response_typed
-                    ~code:Validation_error
-                    (Printf.sprintf "generation did not return parseable JSON: %s" msg) ))))
+           (match
+              Masc_oas_bridge.run_with_caller
+                ~caller:Env_config_oas_bridge.Keeper_persona_authoring
+                (fun () ->
+                   Oas_worker.run_named
+                     ~cascade_name
+                     ~goal:prompt
+                     ~max_turns:1
+                     ~temperature
+                     ~max_tokens
+                     ~approval:Approval_callbacks.auto_approve
+                     ~sw:ctx.Keeper_types.sw
+                     ?net:ctx.Keeper_types.net
+                     ())
+            with
+            | Error err ->
+              ( false
+              , error_response_typed
+                  ~code:Internal_error
+                  (Printf.sprintf
+                     "persona generation failed: %s"
+                     (Oas.Error.to_string err)) )
+            | Ok result ->
+              let raw_text = Oas_response.text_of_response result.Oas_worker.response in
+              (try
+                 let parsed = Llm_provider.Lenient_json.parse raw_text in
+                 let handle = parsed_handle_payload fallback_handle parsed in
+                 let profile = parsed_profile_payload parsed in
+                 match normalize_profile ~handle profile with
+                 | Error msg ->
+                   ( false
+                   , error_response_typed
+                       ~code:Validation_error
+                       (Printf.sprintf "generated profile is invalid: %s" msg) )
+                 | Ok normalized ->
+                   let json =
+                     `Assoc
+                       [ "handle", `String handle
+                       ; "selected_archetype_axes", archetype_axes_to_json archetype_axes
+                       ; ( "selected_archetype_effects"
+                         , selected_archetype_effects_to_json archetype_axes )
+                       ; "profile", normalized
+                       ; "field_explanations", field_explanations_payload parsed
+                       ; "raw_model", `String raw_text
+                       ; ( "save_args"
+                         , `Assoc
+                             [ "handle", `String handle
+                             ; "profile", normalized
+                             ; "overwrite", `Bool false
+                             ; "dry_run", `Bool false
+                             ] )
+                       ; ( "keeper_create_preview_args"
+                         , `Assoc
+                             [ "persona_name", `String handle; "dry_run", `Bool true ] )
+                       ]
+                   in
+                   true, Yojson.Safe.to_string json
+               with
+               | Yojson.Json_error msg ->
+                 ( false
+                 , error_response_typed
+                     ~code:Validation_error
+                     (Printf.sprintf "generation did not return parseable JSON: %s" msg) )))))
 ;;

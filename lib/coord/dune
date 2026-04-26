@@ -1,4 +1,5 @@
 (include_subdirs no)
+
 (library
  (name masc_coord)
  (public_name masc_mcp.masc_coord)
@@ -57,4 +58,5 @@
   digestif
   masc_random_id
   base)
- (preprocess (pps ppx_deriving.show ppx_deriving.eq ppx_deriving_yojson)))
+ (preprocess
+  (pps ppx_deriving.show ppx_deriving.eq ppx_deriving_yojson)))

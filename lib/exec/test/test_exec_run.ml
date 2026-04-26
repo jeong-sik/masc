@@ -33,14 +33,22 @@ let clean_bg_dir ~base_path =
          (Filename.concat "keeper" keeper))
       "bg"
   in
-  if Sys.file_exists bg_dir then
-    let files = try Sys.readdir bg_dir with _ -> [||] in
-    Array.iter (fun f ->
-      try Sys.remove (Filename.concat bg_dir f) with _ -> ())
-      files
+  if Sys.file_exists bg_dir
+  then (
+    let files =
+      try Sys.readdir bg_dir with
+      | _ -> [||]
+    in
+    Array.iter
+      (fun f ->
+         try Sys.remove (Filename.concat bg_dir f) with
+         | _ -> ())
+      files)
+;;
 
 let test_fast_command_completes () =
-  Eio_main.run @@ fun env ->
+  Eio_main.run
+  @@ fun env ->
   let clock = Eio.Stdenv.clock env in
   let base_path = Filename.get_temp_dir_name () in
   clean_bg_dir ~base_path;
@@ -65,9 +73,11 @@ let test_fast_command_completes () =
      | _ -> fail "expected WEXITED 0")
   | Exec_run.Promoted _ -> fail "fast command should not promote"
   | Exec_run.Spawn_error _ -> fail "spawn failed"
+;;
 
 let test_slow_command_promotes () =
-  Eio_main.run @@ fun env ->
+  Eio_main.run
+  @@ fun env ->
   let clock = Eio.Stdenv.clock env in
   let base_path = Filename.get_temp_dir_name () in
   clean_bg_dir ~base_path;
@@ -85,42 +95,40 @@ let test_slow_command_promotes () =
       ()
   in
   match out with
-  | Exec_run.Completed _ ->
-    fail "slow command should have hit the budget"
+  | Exec_run.Completed _ -> fail "slow command should have hit the budget"
   | Exec_run.Spawn_error _ -> fail "spawn failed"
   | Exec_run.Promoted p ->
     (* We saw "early" but not "late" — budget fires before sleep 5
        resolves.  Killing cleans up the long sleep. *)
-    let saw_early =
-      Base.String.is_substring p.partial_stdout ~substring:"early"
-    in
+    let saw_early = Base.String.is_substring p.partial_stdout ~substring:"early" in
     check bool "saw early output" true saw_early;
-    let saw_late =
-      Base.String.is_substring p.partial_stdout ~substring:"late"
-    in
+    let saw_late = Base.String.is_substring p.partial_stdout ~substring:"late" in
     check bool "did not see late output" false saw_late;
     let _ = Bg_task.kill p.task_id ~signal:Sys.sigterm ~grace_sec:0.2 in
     ()
+;;
 
 let test_default_budget_env () =
   let prior = Sys.getenv_opt "MASC_BLOCKING_BUDGET_MS" in
   Unix.putenv "MASC_BLOCKING_BUDGET_MS" "777";
   let v = Exec_run.default_budget_ms () in
   check int "env honoured" 777 v;
-  (match prior with
-   | None -> Unix.putenv "MASC_BLOCKING_BUDGET_MS" ""
-   | Some v -> Unix.putenv "MASC_BLOCKING_BUDGET_MS" v)
+  match prior with
+  | None -> Unix.putenv "MASC_BLOCKING_BUDGET_MS" ""
+  | Some v -> Unix.putenv "MASC_BLOCKING_BUDGET_MS" v
+;;
 
 let () =
-  run "exec_run" [
-    ("race", [
-      test_case "fast command completes inside budget" `Quick
-        test_fast_command_completes;
-      test_case "slow command promotes to bg" `Slow
-        test_slow_command_promotes;
-    ]);
-    ("config", [
-      test_case "default_budget_ms honours env" `Quick
-        test_default_budget_env;
-    ]);
-  ]
+  run
+    "exec_run"
+    [ ( "race"
+      , [ test_case
+            "fast command completes inside budget"
+            `Quick
+            test_fast_command_completes
+        ; test_case "slow command promotes to bg" `Slow test_slow_command_promotes
+        ] )
+    ; ( "config"
+      , [ test_case "default_budget_ms honours env" `Quick test_default_budget_env ] )
+    ]
+;;

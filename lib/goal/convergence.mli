@@ -5,8 +5,15 @@
 
 (** Signal emitted when convergence is detected or progress has stalled. *)
 type convergence_signal =
-  | MetricMet of { metric : string; value : float; threshold : float }
-  | AllSubTasksDone of { completed : int; total : int }
+  | MetricMet of
+      { metric : string
+      ; value : float
+      ; threshold : float
+      }
+  | AllSubTasksDone of
+      { completed : int
+      ; total : int
+      }
   | StagnationDetected of { iterations_without_progress : int }
 
 (** Serialize a convergence signal to JSON. *)
@@ -39,10 +46,10 @@ val task_has_goal_id : goal_id:string -> Types.task -> bool
     @param iterations_without_progress  Current count of iterations with no task
                                         completions. Caller is responsible for
                                         tracking this across invocations. *)
-val check_convergence :
-  goal_id:string ->
-  tasks:Types.task list ->
-  ?stagnation_threshold:int ->
-  iterations_without_progress:int ->
-  unit ->
-  convergence_signal option
+val check_convergence
+  :  goal_id:string
+  -> tasks:Types.task list
+  -> ?stagnation_threshold:int
+  -> iterations_without_progress:int
+  -> unit
+  -> convergence_signal option

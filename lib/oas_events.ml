@@ -25,25 +25,32 @@ let masc_publish event =
   match Masc_event_bus.get () with
   | Some mb -> Oas_bus_instrument.publish mb event
   | None -> ()
+;;
 
 (** Publish a broadcast event to the shared Event_bus. *)
 let publish_broadcast (_bus : Oas.Event_bus.t) ~agent_name ~content =
-  let payload = `Assoc [
-    ("agent_name", `String agent_name);
-    ("content", `String content);
-    ("timestamp", `Float (Time_compat.now ()));
-  ] in
+  let payload =
+    `Assoc
+      [ "agent_name", `String agent_name
+      ; "content", `String content
+      ; "timestamp", `Float (Time_compat.now ())
+      ]
+  in
   masc_publish (Oas.Event_bus.mk_event (Custom ("masc.broadcast", payload)))
+;;
 
 (** Publish a heartbeat event to the shared Event_bus. *)
 let publish_heartbeat (_bus : Oas.Event_bus.t) ~agent_name ~turn ~context_pct =
-  let payload = `Assoc [
-    ("agent_name", `String agent_name);
-    ("turn", `Int turn);
-    ("context_pct", `Float context_pct);
-    ("timestamp", `Float (Time_compat.now ()));
-  ] in
+  let payload =
+    `Assoc
+      [ "agent_name", `String agent_name
+      ; "turn", `Int turn
+      ; "context_pct", `Float context_pct
+      ; "timestamp", `Float (Time_compat.now ())
+      ]
+  in
   masc_publish (Oas.Event_bus.mk_event (Custom ("masc.heartbeat", payload)))
+;;
 
 (** Publish a task state change event to the shared Event_bus.
     #8605 family: [transition] is the canonical [Types.task_action]
@@ -51,15 +58,22 @@ let publish_heartbeat (_bus : Oas.Event_bus.t) ~agent_name ~turn ~context_pct =
     ("claim" / "start" / "done" / ...) is preserved via
     [Types.task_action_to_string]. Sibling refactor of #8846 (the
     Coord-side hook for the same transition vocabulary). *)
-let publish_task_transition (_bus : Oas.Event_bus.t) ~agent_name ~task_id
-    ~(transition : Types.task_action) =
-  let payload = `Assoc [
-    ("agent_name", `String agent_name);
-    ("task_id", `String task_id);
-    ("transition", `String (Types.task_action_to_string transition));
-    ("timestamp", `Float (Time_compat.now ()));
-  ] in
+let publish_task_transition
+      (_bus : Oas.Event_bus.t)
+      ~agent_name
+      ~task_id
+      ~(transition : Types.task_action)
+  =
+  let payload =
+    `Assoc
+      [ "agent_name", `String agent_name
+      ; "task_id", `String task_id
+      ; "transition", `String (Types.task_action_to_string transition)
+      ; "timestamp", `Float (Time_compat.now ())
+      ]
+  in
   masc_publish (Oas.Event_bus.mk_event (Custom ("masc.task_transition", payload)))
+;;
 
 (** {1 Autonomy Agent Lifecycle Events}
 
@@ -77,67 +91,94 @@ let publish_task_transition (_bus : Oas.Event_bus.t) ~agent_name ~task_id
     @deprecated Unused since #1060 (no producer wired). Tracked as
     [mark scaffolding] tier of #8857; planned wiring in Thompson
     autonomy RFC (open). *)
-let publish_agent_selected (_bus : Oas.Event_bus.t) ~agent_name ~trigger
-    ~thompson_score ~final_score =
-  let payload = `Assoc [
-    ("agent_name", `String agent_name);
-    ("trigger", `String trigger);
-    ("thompson_score", `Float thompson_score);
-    ("final_score", `Float final_score);
-    ("timestamp", `Float (Time_compat.now ()));
-  ] in
-  masc_publish
-    (Oas.Event_bus.mk_event (Custom ("masc.autonomy.agent_selected", payload)))
+let publish_agent_selected
+      (_bus : Oas.Event_bus.t)
+      ~agent_name
+      ~trigger
+      ~thompson_score
+      ~final_score
+  =
+  let payload =
+    `Assoc
+      [ "agent_name", `String agent_name
+      ; "trigger", `String trigger
+      ; "thompson_score", `Float thompson_score
+      ; "final_score", `Float final_score
+      ; "timestamp", `Float (Time_compat.now ())
+      ]
+  in
+  masc_publish (Oas.Event_bus.mk_event (Custom ("masc.autonomy.agent_selected", payload)))
+;;
 
 (** Publish an agent action decision event (MODEL decision result).
     Emitted after MODEL decides post/comment/upvote/skip.
     @deprecated Unused since #1060 (no producer wired). Tracked as
     [mark scaffolding] tier of #8857; planned wiring in Thompson
     autonomy RFC (open). *)
-let publish_agent_decision (_bus : Oas.Event_bus.t) ~agent_name ~action
-    ~trigger_reason =
-  let payload = `Assoc [
-    ("agent_name", `String agent_name);
-    ("action", `String action);
-    ("trigger_reason", `String trigger_reason);
-    ("timestamp", `Float (Time_compat.now ()));
-  ] in
-  masc_publish
-    (Oas.Event_bus.mk_event (Custom ("masc.autonomy.agent_decision", payload)))
+let publish_agent_decision (_bus : Oas.Event_bus.t) ~agent_name ~action ~trigger_reason =
+  let payload =
+    `Assoc
+      [ "agent_name", `String agent_name
+      ; "action", `String action
+      ; "trigger_reason", `String trigger_reason
+      ; "timestamp", `Float (Time_compat.now ())
+      ]
+  in
+  masc_publish (Oas.Event_bus.mk_event (Custom ("masc.autonomy.agent_decision", payload)))
+;;
 
 (** Publish an action execution result event.
     Emitted after an agent's action (post/comment/upvote) completes.
     @deprecated Unused since #1060 (no producer wired). Tracked as
     [mark scaffolding] tier of #8857; planned wiring in Thompson
     autonomy RFC (open). *)
-let publish_agent_action_executed (_bus : Oas.Event_bus.t) ~agent_name
-    ~action ~success =
-  let payload = `Assoc [
-    ("agent_name", `String agent_name);
-    ("action", `String action);
-    ("success", `Bool success);
-    ("timestamp", `Float (Time_compat.now ()));
-  ] in
+let publish_agent_action_executed (_bus : Oas.Event_bus.t) ~agent_name ~action ~success =
+  let payload =
+    `Assoc
+      [ "agent_name", `String agent_name
+      ; "action", `String action
+      ; "success", `Bool success
+      ; "timestamp", `Float (Time_compat.now ())
+      ]
+  in
   masc_publish
     (Oas.Event_bus.mk_event (Custom ("masc.autonomy.agent_action_executed", payload)))
+;;
 
 (** {1 Keeper Snapshot Events} *)
 
 (** Publish a keeper snapshot event to the OAS Event_bus.
     Emitted alongside SSE broadcast in keeper_keepalive. *)
-let publish_keeper_snapshot (_bus : Oas.Event_bus.t) ~keeper_name
-    ~generation ~context_ratio ~message_count =
-  let payload = `Assoc [
-    ("keeper_name", `String keeper_name);
-    ("generation", `Int generation);
-    ("context_ratio", `Float context_ratio);
-    ("message_count", `Int message_count);
-    ("timestamp", `Float (Time_compat.now ()));
-  ] in
-  masc_publish
-    (Oas.Event_bus.mk_event (Custom ("masc.keeper.snapshot", payload)))
+let publish_keeper_snapshot
+      (_bus : Oas.Event_bus.t)
+      ~keeper_name
+      ~generation
+      ~context_ratio
+      ~message_count
+  =
+  let payload =
+    `Assoc
+      [ "keeper_name", `String keeper_name
+      ; "generation", `Int generation
+      ; "context_ratio", `Float context_ratio
+      ; "message_count", `Int message_count
+      ; "timestamp", `Float (Time_compat.now ())
+      ]
+  in
+  masc_publish (Oas.Event_bus.mk_event (Custom ("masc.keeper.snapshot", payload)))
+;;
 
 (** {1 Keeper Lifecycle Events} *)
+
+(* #8856 / #8605 family: [event] is now the unified
+   [Keeper_lifecycle_events.lifecycle_event] variant -- typos at the
+   16 supervisor/keepalive call sites fail to compile. JSON wire
+   format ("event" + optional "phase" field) is preserved
+   bit-identically:
+     - Custom_event { verb; phase = None }  -> event=verb, phase=null
+     - Custom_event { verb; phase = Some p } -> event=verb, phase=p
+     - Phase_event p                          -> event=p, phase=p
+   The legacy ?phase optional argument is folded into the variant. *)
 
 (** Publish a keeper keepalive lifecycle event.
 
@@ -157,34 +198,30 @@ let publish_keeper_snapshot (_bus : Oas.Event_bus.t) ~keeper_name
     stream; the sync test in [test_types.ml ::
     lifecycle_events_ssot] asserts every literal still emitted by
     [Keeper_supervisor] / [Keeper_keepalive] lives in the SSOT. *)
-(* #8856 / #8605 family: [event] is now the unified
-   [Keeper_lifecycle_events.lifecycle_event] variant -- typos at the
-   16 supervisor/keepalive call sites fail to compile. JSON wire
-   format ("event" + optional "phase" field) is preserved
-   bit-identically:
-     - Custom_event { verb; phase = None }  -> event=verb, phase=null
-     - Custom_event { verb; phase = Some p } -> event=verb, phase=p
-     - Phase_event p                          -> event=p, phase=p
-   The legacy ?phase optional argument is folded into the variant. *)
-let publish_keeper_lifecycle (_bus : Oas.Event_bus.t)
-    ~(event : Keeper_lifecycle_events.lifecycle_event)
-    ~keeper_name ~detail () =
+let publish_keeper_lifecycle
+      (_bus : Oas.Event_bus.t)
+      ~(event : Keeper_lifecycle_events.lifecycle_event)
+      ~keeper_name
+      ~detail
+      ()
+  =
   let phase_json =
     match Keeper_lifecycle_events.lifecycle_event_phase event with
-    | Some phase ->
-      `String (Keeper_state_machine.phase_to_string phase)
+    | Some phase -> `String (Keeper_state_machine.phase_to_string phase)
     | None -> `Null
   in
   let event_str = Keeper_lifecycle_events.lifecycle_event_to_string event in
-  let payload = `Assoc [
-    ("event", `String event_str);
-    ("keeper_name", `String keeper_name);
-    ("phase", phase_json);
-    ("detail", `String detail);
-    ("timestamp", `Float (Time_compat.now ()));
-  ] in
-  masc_publish
-    (Oas.Event_bus.mk_event (Custom ("masc.keeper.lifecycle", payload)))
+  let payload =
+    `Assoc
+      [ "event", `String event_str
+      ; "keeper_name", `String keeper_name
+      ; "phase", phase_json
+      ; "detail", `String detail
+      ; "timestamp", `Float (Time_compat.now ())
+      ]
+  in
+  masc_publish (Oas.Event_bus.mk_event (Custom ("masc.keeper.lifecycle", payload)))
+;;
 
 (** Publish a structured keeper-Dead event.
 
@@ -194,22 +231,30 @@ let publish_keeper_lifecycle (_bus : Oas.Event_bus.t)
     the [event="dead"] entry on [masc.keeper.lifecycle] (which is unstructured
     free-form [detail]) so subscribers can filter on a stable topic and pull
     the structured fields directly. Topic: [masc.keeper.dead]. *)
-let publish_keeper_dead (_bus : Oas.Event_bus.t)
-    ~keeper_name ~reason ~restart_count ~last_failure_reason () =
+let publish_keeper_dead
+      (_bus : Oas.Event_bus.t)
+      ~keeper_name
+      ~reason
+      ~restart_count
+      ~last_failure_reason
+      ()
+  =
   let last_failure_json =
     match last_failure_reason with
     | Some s -> `String s
     | None -> `Null
   in
-  let payload = `Assoc [
-    ("keeper_name", `String keeper_name);
-    ("reason", `String reason);
-    ("restart_count", `Int restart_count);
-    ("last_failure_reason", last_failure_json);
-    ("timestamp", `Float (Time_compat.now ()));
-  ] in
-  masc_publish
-    (Oas.Event_bus.mk_event (Custom ("masc.keeper.dead", payload)))
+  let payload =
+    `Assoc
+      [ "keeper_name", `String keeper_name
+      ; "reason", `String reason
+      ; "restart_count", `Int restart_count
+      ; "last_failure_reason", last_failure_json
+      ; "timestamp", `Float (Time_compat.now ())
+      ]
+  in
+  masc_publish (Oas.Event_bus.mk_event (Custom ("masc.keeper.dead", payload)))
+;;
 
 (** {1 Phase 4: Social Events}
 
@@ -226,24 +271,36 @@ let publish_keeper_dead (_bus : Oas.Event_bus.t)
     [mark scaffolding] tier of #8857; planned wiring with Phase 4
     social network feature (open). *)
 let publish_trust_updated (_bus : Oas.Event_bus.t) ~agent_a ~agent_b ~trust_score =
-  let payload = `Assoc [
-    ("agent_a", `String agent_a);
-    ("agent_b", `String agent_b);
-    ("trust_score", `Float trust_score);
-    ("timestamp", `Float (Time_compat.now ()));
-  ] in
+  let payload =
+    `Assoc
+      [ "agent_a", `String agent_a
+      ; "agent_b", `String agent_b
+      ; "trust_score", `Float trust_score
+      ; "timestamp", `Float (Time_compat.now ())
+      ]
+  in
   masc_publish (Oas.Event_bus.mk_event (Custom ("masc.trust_updated", payload)))
+;;
 
 (** Publish a reputation change event.
     @deprecated Unused since #1060 (no producer wired). Tracked as
     [mark scaffolding] tier of #8857; planned wiring with Phase 4
     social network feature (open). *)
-let publish_reputation_changed (_bus : Oas.Event_bus.t) ~agent_name ~old_score ~new_score ~trend =
-  let payload = `Assoc [
-    ("agent_name", `String agent_name);
-    ("old_score", `Float old_score);
-    ("new_score", `Float new_score);
-    ("trend", `String trend);
-    ("timestamp", `Float (Time_compat.now ()));
-  ] in
+let publish_reputation_changed
+      (_bus : Oas.Event_bus.t)
+      ~agent_name
+      ~old_score
+      ~new_score
+      ~trend
+  =
+  let payload =
+    `Assoc
+      [ "agent_name", `String agent_name
+      ; "old_score", `Float old_score
+      ; "new_score", `Float new_score
+      ; "trend", `String trend
+      ; "timestamp", `Float (Time_compat.now ())
+      ]
+  in
   masc_publish (Oas.Event_bus.mk_event (Custom ("masc.reputation_changed", payload)))
+;;

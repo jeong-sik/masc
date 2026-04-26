@@ -21,17 +21,17 @@ val audit_enabled : unit -> bool
 type decision_record
 
 (** Construct a decision record from pipeline outputs. *)
-val make :
-  cycle_id:string ->
-  keeper_name:string ->
-  generation:int ->
-  ?snapshot:Keeper_measurement.measurement_snapshot ->
-  heartbeat_verdict:Heartbeat_smart.decision ->
-  turn_verdict:Keeper_world_observation.turn_verdict ->
-  wall_clock:float ->
-  ?tool_diversity_entropy:float ->
-  unit ->
-  decision_record
+val make
+  :  cycle_id:string
+  -> keeper_name:string
+  -> generation:int
+  -> ?snapshot:Keeper_measurement.measurement_snapshot
+  -> heartbeat_verdict:Heartbeat_smart.decision
+  -> turn_verdict:Keeper_world_observation.turn_verdict
+  -> wall_clock:float
+  -> ?tool_diversity_entropy:float
+  -> unit
+  -> decision_record
 
 (** Append a decision record to the in-memory ring buffer.
     If MASC_DECISION_LAYER_LEVEL < 1, this is a no-op. *)
@@ -61,27 +61,27 @@ val ring_capacity : unit -> int
     [guard_penalty_total] is the cumulative count of heartbeat cycles
     in which the guardrail fired (1/cycle cap enforced by the caller).
     When omitted, the note block shows "n/a". *)
-val decision_pipeline_to_mermaid :
-  ?guard_penalty_total:int ->
-  ?tool_policy_mode:[`Preset of string | `Custom] ->
-  ?turn_outcome:[`Ok | `Failed] ->
-  phase:Keeper_state_machine.phase ->
-  thompson_alpha:float ->
-  thompson_beta:float ->
-  tool_count:int ->
-  recovery_floor_count:int ->
-  unit ->
-  string
+val decision_pipeline_to_mermaid
+  :  ?guard_penalty_total:int
+  -> ?tool_policy_mode:[ `Preset of string | `Custom ]
+  -> ?turn_outcome:[ `Ok | `Failed ]
+  -> phase:Keeper_state_machine.phase
+  -> thompson_alpha:float
+  -> thompson_beta:float
+  -> tool_count:int
+  -> recovery_floor_count:int
+  -> unit
+  -> string
 
 (** Reasons a provider may be [Unhealthy].
     Each constructor corresponds to a distinguishable failure signal
     the runtime can record against a provider entry. Keep this list
     closed — new reasons require dashboard+spec updates. *)
 type unhealthy_reason =
-  [ `Saturated       (** slot pool full, no capacity left *)
-  | `Unreachable     (** connect/DNS failure, provider not responding *)
-  | `Rate_limited    (** 429 / quota exhausted *)
-  | `Timeout         (** request did not complete within deadline *)
+  [ `Saturated (** slot pool full, no capacity left *)
+  | `Unreachable (** connect/DNS failure, provider not responding *)
+  | `Rate_limited (** 429 / quota exhausted *)
+  | `Timeout (** request did not complete within deadline *)
   | `Other of string (** free-form reason for signals we do not yet categorise *)
   ]
 
@@ -113,11 +113,11 @@ type provider_health =
     UnblockWaiting/RespondOk/CascadableError/LastProviderFail/Timeout)
     rather than HTTP status literals, so the diagram stays valid even
     when the underlying provider protocol changes. *)
-val cascade_fsm_to_mermaid :
-  ?provider_health:(string * provider_health) list ->
-  ?slot_state:(int * int) ->
-  ?effective_cascade_reason:string ->
-  models:string list ->
-  last_provider_result:string option ->
-  unit ->
-  string
+val cascade_fsm_to_mermaid
+  :  ?provider_health:(string * provider_health) list
+  -> ?slot_state:int * int
+  -> ?effective_cascade_reason:string
+  -> models:string list
+  -> last_provider_result:string option
+  -> unit
+  -> string

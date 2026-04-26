@@ -17,65 +17,62 @@ type provenance =
   | Board_classify of string
   | Reversibility of string
 
-type event = {
-  module_name : string;
-  site : string;
-  raw_value : float;
-  threshold : float;
-  triggered : bool;
-  provenance : provenance;
-  timestamp : float;
-}
+type event =
+  { module_name : string
+  ; site : string
+  ; raw_value : float
+  ; threshold : float
+  ; triggered : bool
+  ; provenance : provenance
+  ; timestamp : float
+  }
 
-type coverage_site = {
-  module_name : string;
-  site : string;
-  count : int;
-  triggered_count : int;
-}
+type coverage_site =
+  { module_name : string
+  ; site : string
+  ; count : int
+  ; triggered_count : int
+  }
 
-type coverage_report = {
-  total_events : int;
-  sites : coverage_site list;
-  unique_decision_tuples : int;
-}
+type coverage_report =
+  { total_events : int
+  ; sites : coverage_site list
+  ; unique_decision_tuples : int
+  }
 
 (* ================================================================ *)
 (* Serialization                                                    *)
 (* ================================================================ *)
 
 let provenance_to_json = function
-  | Post_verifier dim ->
-    `Assoc [("type", `String "post_verifier"); ("detail", `String dim)]
-  | Thompson kind ->
-    `Assoc [("type", `String "thompson"); ("detail", `String kind)]
-  | Drift_guard kind ->
-    `Assoc [("type", `String "drift_guard"); ("detail", `String kind)]
+  | Post_verifier dim -> `Assoc [ "type", `String "post_verifier"; "detail", `String dim ]
+  | Thompson kind -> `Assoc [ "type", `String "thompson"; "detail", `String kind ]
+  | Drift_guard kind -> `Assoc [ "type", `String "drift_guard"; "detail", `String kind ]
   | Anti_rationalization gate ->
-    `Assoc [("type", `String "anti_rationalization"); ("detail", `String gate)]
+    `Assoc [ "type", `String "anti_rationalization"; "detail", `String gate ]
   | Agent_reputation metric ->
-    `Assoc [("type", `String "agent_reputation"); ("detail", `String metric)]
-  | Relay site ->
-    `Assoc [("type", `String "relay"); ("detail", `String site)]
+    `Assoc [ "type", `String "agent_reputation"; "detail", `String metric ]
+  | Relay site -> `Assoc [ "type", `String "relay"; "detail", `String site ]
   | Alert_scoring signal ->
-    `Assoc [("type", `String "alert_scoring"); ("detail", `String signal)]
+    `Assoc [ "type", `String "alert_scoring"; "detail", `String signal ]
   | Pipeline_stage stage ->
-    `Assoc [("type", `String "pipeline_stage"); ("detail", `String stage)]
+    `Assoc [ "type", `String "pipeline_stage"; "detail", `String stage ]
   | Board_classify kind ->
-    `Assoc [("type", `String "board_classify"); ("detail", `String kind)]
-  | Reversibility est ->
-    `Assoc [("type", `String "reversibility"); ("detail", `String est)]
+    `Assoc [ "type", `String "board_classify"; "detail", `String kind ]
+  | Reversibility est -> `Assoc [ "type", `String "reversibility"; "detail", `String est ]
+;;
 
 let event_to_json (e : event) : Yojson.Safe.t =
-  `Assoc [
-    ("module", `String e.module_name);
-    ("site", `String e.site);
-    ("raw_value", `Float e.raw_value);
-    ("threshold", `Float e.threshold);
-    ("triggered", `Bool e.triggered);
-    ("provenance", provenance_to_json e.provenance);
-    ("timestamp", `Float e.timestamp);
-  ]
+  `Assoc
+    [ "module", `String e.module_name
+    ; "site", `String e.site
+    ; "raw_value", `Float e.raw_value
+    ; "threshold", `Float e.threshold
+    ; "triggered", `Bool e.triggered
+    ; "provenance", provenance_to_json e.provenance
+    ; "timestamp", `Float e.timestamp
+    ]
+;;
 
 (* ================================================================ *)
 (* Storage                                                          *)
@@ -90,6 +87,7 @@ let mu = Stdlib.Mutex.create ()
 
 (** In-memory buffer to batch writes.  Flushed periodically or on [flush]. *)
 let buffer : Yojson.Safe.t Queue.t = Queue.create ()
+
 let buffer_cap = 64
 
 (* #10348: time-based flush so sub-cap emit rates produce visible ledger output.
@@ -100,7 +98,6 @@ let buffer_cap = 64
    30 s default stand. *)
 let flush_interval_sec_ref = ref 30.0
 let last_flush_ref = ref 0.0
-
 let set_flush_interval_for_test sec = flush_interval_sec_ref := sec
 
 (* #10348: tests need to re-[init] against fresh tmp paths.  Production
@@ -113,42 +110,50 @@ let reset_for_test () =
        large flush interval can verify batching without the [now -.
        last_flush] term swamping it on the first record. *)
     last_flush_ref := Unix.gettimeofday ())
+;;
 
 let ensure_dir path =
   let dir = Filename.dirname path in
-  if not (Sys.file_exists dir) then
+  if not (Sys.file_exists dir)
+  then (
     try Sys.mkdir dir 0o755 with
     | Sys_error msg when String_util.contains_substring msg "exists" -> ()
-    | Sys_error msg ->
-      Log.warn ~ctx:"heuristic_metrics" "cannot mkdir %s: %s" dir msg
+    | Sys_error msg -> Log.warn ~ctx:"heuristic_metrics" "cannot mkdir %s: %s" dir msg)
+;;
 
 let do_flush () =
   (match !store_path_ref with
    | None -> ()
    | Some path ->
-     if Queue.is_empty buffer then ()
-     else begin
+     if Queue.is_empty buffer
+     then ()
+     else (
        ensure_dir path;
        match
-         try Ok (open_out_gen [Open_append; Open_creat; Open_text] 0o644 path)
-         with Sys_error msg ->
+         try Ok (open_out_gen [ Open_append; Open_creat; Open_text ] 0o644 path) with
+         | Sys_error msg ->
            Log.warn ~ctx:"heuristic_metrics" "cannot open %s: %s" path msg;
            Error msg
        with
        | Error _ ->
-           Log.warn ~ctx:"heuristic_metrics" "flush skipped: %d records remain buffered"
-             (Queue.length buffer)
+         Log.warn
+           ~ctx:"heuristic_metrics"
+           "flush skipped: %d records remain buffered"
+           (Queue.length buffer)
        | Ok oc ->
-           Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
-             Queue.iter (fun json ->
-               output_string oc (Yojson.Safe.to_string json);
-               output_char oc '\n'
-             ) buffer);
-           Queue.clear buffer
-     end);
+         Fun.protect
+           ~finally:(fun () -> close_out_noerr oc)
+           (fun () ->
+              Queue.iter
+                (fun json ->
+                   output_string oc (Yojson.Safe.to_string json);
+                   output_char oc '\n')
+                buffer);
+         Queue.clear buffer));
   (* #10348: bump last_flush even on no-op / failed open so the time-based
      re-evaluation in [record] doesn't hammer this path on every event. *)
   last_flush_ref := Unix.gettimeofday ()
+;;
 
 (* #9919: the pre-fix emit at [keeper_hooks_oas.post_tool_use_failure]
    produced an exact tuple [(site="post_tool_use_failure", raw=1.0,
@@ -161,80 +166,88 @@ let do_flush () =
 let is_known_degenerate (json : Yojson.Safe.t) : bool =
   match json with
   | `Assoc fields ->
-      let get k =
-        match List.assoc_opt k fields with Some v -> Some v | None -> None
-      in
-      (match get "site", get "raw_value", get "threshold", get "triggered" with
-       | Some (`String "post_tool_use_failure"),
-         Some (`Float 1.0 | `Int 1),
-         Some (`Float 0.0 | `Int 0),
-         Some (`Bool true) -> true
-       | _ -> false)
+    let get k =
+      match List.assoc_opt k fields with
+      | Some v -> Some v
+      | None -> None
+    in
+    (match get "site", get "raw_value", get "threshold", get "triggered" with
+     | ( Some (`String "post_tool_use_failure")
+       , Some (`Float 1.0 | `Int 1)
+       , Some (`Float 0.0 | `Int 0)
+       , Some (`Bool true) ) -> true
+     | _ -> false)
   | _ -> false
+;;
 
 let scrub_legacy_degenerate_rows path =
-  if not (Sys.file_exists path) then 0
-  else
+  if not (Sys.file_exists path)
+  then 0
+  else (
     match Safe_ops.read_file_safe path with
     | Error msg ->
-        Log.warn ~ctx:"heuristic_metrics"
-          "#9919 scrub skipped — read failed: %s" msg;
-        0
+      Log.warn ~ctx:"heuristic_metrics" "#9919 scrub skipped — read failed: %s" msg;
+      0
     | Ok content ->
-        let lines =
-          String.split_on_char '\n' content
-          |> List.filter (fun l -> String.length (String.trim l) > 0)
-        in
-        let kept, dropped =
-          List.partition
-            (fun line ->
-              match Yojson.Safe.from_string line with
-              | json -> not (is_known_degenerate json)
-              | exception Yojson.Json_error _ ->
-                  (* Keep malformed lines — let the existing
+      let lines =
+        String.split_on_char '\n' content
+        |> List.filter (fun l -> String.length (String.trim l) > 0)
+      in
+      let kept, dropped =
+        List.partition
+          (fun line ->
+             match Yojson.Safe.from_string line with
+             | json -> not (is_known_degenerate json)
+             | exception Yojson.Json_error _ ->
+               (* Keep malformed lines — let the existing
                      diagnostics path log them. *)
-                  true)
-            lines
-        in
-        let ndrop = List.length dropped in
-        if ndrop = 0 then 0
-        else begin
-          (* Rewrite the file with the kept rows only.  Use atomic
+               true)
+          lines
+      in
+      let ndrop = List.length dropped in
+      if ndrop = 0
+      then 0
+      else (
+        (* Rewrite the file with the kept rows only.  Use atomic
              rename to avoid tearing the file if the process is
              interrupted during init. *)
-          let tmp = path ^ ".9919-scrub.tmp" in
-          (try
-             let oc =
-               open_out_gen [Open_wronly; Open_creat; Open_trunc] 0o644 tmp
-             in
-             Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
-               List.iter (fun line ->
-                 output_string oc line;
-                 output_char oc '\n') kept);
-             Sys.rename tmp path;
-             Log.Server.info
-               "#9919 scrubbed %d legacy degenerate rows from %s \
-                (pattern: post_tool_use_failure raw=1.0 threshold=0.0 \
-                triggered=true) — emitter has migrated to Prometheus \
-                counter [masc_keeper_tool_use_failure_total]"
-               ndrop path;
-             ndrop
-           with Sys_error msg ->
-             Log.warn ~ctx:"heuristic_metrics"
-               "#9919 scrub skipped — write failed: %s" msg;
-             (try Sys.remove tmp with Sys_error _ -> ());
-             0)
-        end
+        let tmp = path ^ ".9919-scrub.tmp" in
+        try
+          let oc = open_out_gen [ Open_wronly; Open_creat; Open_trunc ] 0o644 tmp in
+          Fun.protect
+            ~finally:(fun () -> close_out_noerr oc)
+            (fun () ->
+               List.iter
+                 (fun line ->
+                    output_string oc line;
+                    output_char oc '\n')
+                 kept);
+          Sys.rename tmp path;
+          Log.Server.info
+            "#9919 scrubbed %d legacy degenerate rows from %s (pattern: \
+             post_tool_use_failure raw=1.0 threshold=0.0 triggered=true) — emitter has \
+             migrated to Prometheus counter [masc_keeper_tool_use_failure_total]"
+            ndrop
+            path;
+          ndrop
+        with
+        | Sys_error msg ->
+          Log.warn ~ctx:"heuristic_metrics" "#9919 scrub skipped — write failed: %s" msg;
+          (try Sys.remove tmp with
+           | Sys_error _ -> ());
+          0))
+;;
 
 let init ~base_path =
   Stdlib.Mutex.protect mu (fun () ->
     match !store_path_ref with
-    | Some _ -> ()  (* idempotent *)
+    | Some _ -> () (* idempotent *)
     | None ->
       let masc_dir = Coord_utils.masc_dir_from_base_path ~base_path in
       let path = Filename.concat masc_dir "heuristic_metrics.jsonl" in
       let _ = scrub_legacy_degenerate_rows path in
       store_path_ref := Some path)
+;;
 
 let record (e : event) =
   Stdlib.Mutex.protect mu (fun () ->
@@ -242,24 +255,23 @@ let record (e : event) =
     Queue.add json buffer;
     let now = Unix.gettimeofday () in
     let elapsed = now -. !last_flush_ref in
-    if Queue.length buffer >= buffer_cap
-       || elapsed >= !flush_interval_sec_ref
+    if Queue.length buffer >= buffer_cap || elapsed >= !flush_interval_sec_ref
     then do_flush ())
+;;
 
-let flush () =
-  Stdlib.Mutex.protect mu (fun () ->
-    do_flush ())
+let flush () = Stdlib.Mutex.protect mu (fun () -> do_flush ())
 
 let recent n =
   match !store_path_ref with
   | None -> []
   | Some path ->
-    if not (Sys.file_exists path) then []
-    else
+    if not (Sys.file_exists path)
+    then []
+    else (
       match Safe_ops.read_file_safe path with
       | Error msg ->
-          Eio.traceln "[HeuristicMetrics] recent read_file_safe failed: %s" msg;
-          []
+        Eio.traceln "[HeuristicMetrics] recent read_file_safe failed: %s" msg;
+        []
       | Ok content ->
         let lines =
           String.split_on_char '\n' content
@@ -274,15 +286,14 @@ let recent n =
         in
         drop to_skip lines
         |> List.filter_map (fun line ->
-          try Some (Yojson.Safe.from_string line)
-          with Yojson.Json_error msg ->
+          try Some (Yojson.Safe.from_string line) with
+          | Yojson.Json_error msg ->
             Log.warn ~ctx:"heuristic_metrics" "dropping malformed line: %s" msg;
-            None)
+            None))
+;;
 
 let coverage_report_of_events events =
-  let site_counts : ((string * string), (int * int) ref) Hashtbl.t =
-    Hashtbl.create 16
-  in
+  let site_counts : (string * string, (int * int) ref) Hashtbl.t = Hashtbl.create 16 in
   let unique_tuples : (string, unit) Hashtbl.t = Hashtbl.create 16 in
   let json_string_field name json = Json_util.get_string json name in
   let json_float_field name json = Json_util.get_float json name in
@@ -291,32 +302,28 @@ let coverage_report_of_events events =
     (fun json ->
        match json_string_field "module" json, json_string_field "site" json with
        | Some module_name, Some site ->
-           let triggered =
-             Option.value ~default:false (json_bool_field "triggered" json)
-           in
-           let key = (module_name, site) in
-           let slot =
-             match Hashtbl.find_opt site_counts key with
-             | Some slot -> slot
-             | None ->
-                 let slot = ref (0, 0) in
-                 Hashtbl.add site_counts key slot;
-                 slot
-           in
-           let count, triggered_count = !slot in
-           slot :=
-             (count + 1, triggered_count + if triggered then 1 else 0);
-           let tuple_key =
-             Printf.sprintf "%s\000%s\000%.12g\000%.12g\000%b"
-               module_name
-               site
-               (Option.value ~default:Float.nan
-                  (json_float_field "raw_value" json))
-               (Option.value ~default:Float.nan
-                  (json_float_field "threshold" json))
-               triggered
-           in
-           Hashtbl.replace unique_tuples tuple_key ()
+         let triggered = Option.value ~default:false (json_bool_field "triggered" json) in
+         let key = module_name, site in
+         let slot =
+           match Hashtbl.find_opt site_counts key with
+           | Some slot -> slot
+           | None ->
+             let slot = ref (0, 0) in
+             Hashtbl.add site_counts key slot;
+             slot
+         in
+         let count, triggered_count = !slot in
+         slot := count + 1, triggered_count + if triggered then 1 else 0;
+         let tuple_key =
+           Printf.sprintf
+             "%s\000%s\000%.12g\000%.12g\000%b"
+             module_name
+             site
+             (Option.value ~default:Float.nan (json_float_field "raw_value" json))
+             (Option.value ~default:Float.nan (json_float_field "threshold" json))
+             triggered
+         in
+         Hashtbl.replace unique_tuples tuple_key ()
        | _ -> ())
     events;
   let sites =
@@ -324,34 +331,33 @@ let coverage_report_of_events events =
     |> Hashtbl.to_seq
     |> List.of_seq
     |> List.map (fun ((module_name, site), counts) ->
-           let count, triggered_count = !counts in
-           { module_name; site; count; triggered_count })
+      let count, triggered_count = !counts in
+      { module_name; site; count; triggered_count })
     |> List.sort (fun a b ->
-           let c = String.compare a.module_name b.module_name in
-           if c <> 0 then c else String.compare a.site b.site)
+      let c = String.compare a.module_name b.module_name in
+      if c <> 0 then c else String.compare a.site b.site)
   in
-  {
-    total_events = List.length events;
-    sites;
-    unique_decision_tuples = Hashtbl.length unique_tuples;
+  { total_events = List.length events
+  ; sites
+  ; unique_decision_tuples = Hashtbl.length unique_tuples
   }
+;;
 
-let recent_coverage n =
-  recent n |> coverage_report_of_events
+let recent_coverage n = recent n |> coverage_report_of_events
 
 let coverage_site_to_json site =
   `Assoc
-    [
-      ("module", `String site.module_name);
-      ("site", `String site.site);
-      ("count", `Int site.count);
-      ("triggered_count", `Int site.triggered_count);
+    [ "module", `String site.module_name
+    ; "site", `String site.site
+    ; "count", `Int site.count
+    ; "triggered_count", `Int site.triggered_count
     ]
+;;
 
 let coverage_report_to_json report =
   `Assoc
-    [
-      ("total_events", `Int report.total_events);
-      ("unique_decision_tuples", `Int report.unique_decision_tuples);
-      ("sites", `List (List.map coverage_site_to_json report.sites));
+    [ "total_events", `Int report.total_events
+    ; "unique_decision_tuples", `Int report.unique_decision_tuples
+    ; "sites", `List (List.map coverage_site_to_json report.sites)
     ]
+;;

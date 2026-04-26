@@ -17,12 +17,12 @@ open Printf
 (* Types                                                            *)
 (* ================================================================ *)
 
-type review_request = {
-  task_title : string;
-  task_description : string;
-  completion_notes : string;
-  agent_name : string;
-}
+type review_request =
+  { task_title : string
+  ; task_description : string
+  ; completion_notes : string
+  ; agent_name : string
+  }
 
 type verdict =
   | Approve
@@ -36,6 +36,7 @@ type verdict =
 let verdict_constructor_name = function
   | Approve -> "APPROVE"
   | Reject _ -> "REJECT"
+;;
 
 let valid_verdict_strings = [ "APPROVE"; "REJECT" ]
 
@@ -56,14 +57,15 @@ let gate_to_string = function
   | Llm_text_fallback -> "llm_text_fallback"
   | Format_reject -> "format_reject"
   | Fallback -> "fallback"
+;;
 
-type review_result = {
-  verdict : verdict;
-  evaluator_cascade : string;
-  generator_cascade : string option;
-  gate : gate;
-  fallback_reason : string option;
-}
+type review_result =
+  { verdict : verdict
+  ; evaluator_cascade : string
+  ; generator_cascade : string option
+  ; gate : gate
+  ; fallback_reason : string option
+  }
 
 (* ================================================================ *)
 (* Excuse pattern detection (local, no LLM)                         *)
@@ -82,62 +84,67 @@ type review_result = {
    like "나중에", "범위 밖", "재현 안됨".  English false-positives
    remain (substring has no word boundary) and are tracked under
    the same issue's option C/D follow-up. *)
-let legacy_english_excuse_patterns = [
-  ("pre-existing",        "claiming the problem already existed");
-  ("out of scope",        "declaring work out of scope");
-  ("beyond the scope",    "declaring work beyond scope");
-  ("will do later",       "deferring work to later");
-  ("will fix later",      "deferring fix to later");
-  ("will address later",  "deferring to later");
-  ("follow-up",           "deferring to a follow-up");
-  ("follow up",           "deferring to a follow-up");
-  ("works on my end",     "unverifiable claim");
-  ("works on my machine", "unverifiable claim");
-  ("not reproducible",    "dismissing without investigation");
-  ("not my responsibility", "responsibility deflection");
-  ("cannot reproduce",    "dismissing without investigation");
-]
+let legacy_english_excuse_patterns =
+  [ "pre-existing", "claiming the problem already existed"
+  ; "out of scope", "declaring work out of scope"
+  ; "beyond the scope", "declaring work beyond scope"
+  ; "will do later", "deferring work to later"
+  ; "will fix later", "deferring fix to later"
+  ; "will address later", "deferring to later"
+  ; "follow-up", "deferring to a follow-up"
+  ; "follow up", "deferring to a follow-up"
+  ; "works on my end", "unverifiable claim"
+  ; "works on my machine", "unverifiable claim"
+  ; "not reproducible", "dismissing without investigation"
+  ; "not my responsibility", "responsibility deflection"
+  ; "cannot reproduce", "dismissing without investigation"
+  ]
+;;
 
-let korean_excuse_patterns = [
-  (* Korean rationalization markers — same semantic classes as
+let korean_excuse_patterns =
+  [ (* Korean rationalization markers — same semantic classes as
      the English entries above.  See issue #10385 for the
      institution_episodes evidence. *)
-  ("나중에",              "deferring work to later (ko)");
-  ("범위 밖",             "declaring work out of scope (ko)");
-  ("의도 외",             "declaring work outside intent (ko)");
-  ("재현 안",             "dismissing without investigation (ko)");
-  ("재현되지 않",         "dismissing without investigation (ko)");
-  ("기존 문제",           "claiming the problem already existed (ko)");
-  ("내 환경에선",         "unverifiable claim (ko)");
-  ("내 환경에서는",       "unverifiable claim (ko)");
-  (* Patterns are matched against [String.lowercase_ascii notes],
+    "나중에", "deferring work to later (ko)"
+  ; "범위 밖", "declaring work out of scope (ko)"
+  ; "의도 외", "declaring work outside intent (ko)"
+  ; "재현 안", "dismissing without investigation (ko)"
+  ; "재현되지 않", "dismissing without investigation (ko)"
+  ; "기존 문제", "claiming the problem already existed (ko)"
+  ; "내 환경에선", "unverifiable claim (ko)"
+  ; "내 환경에서는", "unverifiable claim (ko)"
+  ; (* Patterns are matched against [String.lowercase_ascii notes],
      so the ASCII portion of any needle must be pre-lowercased.
      Korean characters pass through unchanged (high-bit bytes
      are not affected by [lowercase_ascii]). *)
-  ("후속 pr",             "deferring to a follow-up (ko)");
-  ("다음 pr",             "deferring to a follow-up (ko)");
-]
+    "후속 pr", "deferring to a follow-up (ko)"
+  ; "다음 pr", "deferring to a follow-up (ko)"
+  ]
+;;
 
-let default_excuse_patterns =
-  legacy_english_excuse_patterns @ korean_excuse_patterns
+let default_excuse_patterns = legacy_english_excuse_patterns @ korean_excuse_patterns
 
 let same_pattern_list a b =
   try
     List.length a = List.length b
     && List.for_all2
          (fun (apat, areason) (bpat, breason) ->
-           String.equal apat bpat && String.equal areason breason)
-         a b
-  with Invalid_argument _ -> false
+            String.equal apat bpat && String.equal areason breason)
+         a
+         b
+  with
+  | Invalid_argument _ -> false
+;;
 
 let migrate_loaded_excuse_patterns patterns =
-  if same_pattern_list patterns legacy_english_excuse_patterns then (
+  if same_pattern_list patterns legacy_english_excuse_patterns
+  then (
     Log.Misc.info
-      "excuse_patterns: legacy default config detected; applying current \
-       built-in defaults at runtime";
-    default_excuse_patterns
-  ) else
-    patterns
+      "excuse_patterns: legacy default config detected; applying current built-in \
+       defaults at runtime";
+    default_excuse_patterns)
+  else patterns
+;;
 
 (** Cached patterns. Loaded once from disk; invalidated by [save_excuse_patterns]. *)
 let cached_patterns : (string * string) list option ref = ref None
@@ -145,35 +152,43 @@ let cached_patterns : (string * string) list option ref = ref None
 let excuse_patterns_path () =
   let config_dir = (Config_dir_resolver.resolve ()).config_root.path in
   Filename.concat config_dir "excuse_patterns.json"
+;;
 
 (** Parse a JSON value into a validated pattern list.
     Returns [Error msg] if any item is malformed (no silent drops). *)
 let max_excuse_pattern_len = 500
+
 let max_excuse_entries = 100
 
-let parse_excuse_patterns_json (json : Yojson.Safe.t) : ((string * string) list, string) result =
+let parse_excuse_patterns_json (json : Yojson.Safe.t)
+  : ((string * string) list, string) result
+  =
   match json with
   | `List items ->
     let n = List.length items in
-    if n > max_excuse_entries then
-      Error (Printf.sprintf "Too many entries: %d (max %d)" n max_excuse_entries)
-    else
+    if n > max_excuse_entries
+    then Error (Printf.sprintf "Too many entries: %d (max %d)" n max_excuse_entries)
+    else (
       let rec validate acc = function
         | [] -> Ok (List.rev acc)
-        | `List [`String pat; `String reason] :: rest ->
-          if pat = "" || reason = "" then
-            Error "Pattern and reason must be non-empty strings"
-          else if String.length pat > max_excuse_pattern_len
-               || String.length reason > max_excuse_pattern_len then
+        | `List [ `String pat; `String reason ] :: rest ->
+          if pat = "" || reason = ""
+          then Error "Pattern and reason must be non-empty strings"
+          else if
+            String.length pat > max_excuse_pattern_len
+            || String.length reason > max_excuse_pattern_len
+          then
             Error (Printf.sprintf "String too long (max %d chars)" max_excuse_pattern_len)
-          else
-            validate ((pat, reason) :: acc) rest
+          else validate ((pat, reason) :: acc) rest
         | item :: _ ->
-          Error (Printf.sprintf "Invalid pattern entry: expected [string, string], got %s"
-            (Yojson.Safe.to_string item))
+          Error
+            (Printf.sprintf
+               "Invalid pattern entry: expected [string, string], got %s"
+               (Yojson.Safe.to_string item))
       in
-      validate [] items
+      validate [] items)
   | _ -> Error "Expected JSON array of [pattern, reason] pairs"
+;;
 
 (** Load excuse patterns from config/excuse_patterns.json.
     Returns cached value if available. Falls back to defaults on missing file. *)
@@ -186,14 +201,15 @@ let load_excuse_patterns () : (string * string) list =
       match Safe_ops.read_json_file_safe path with
       | Error _ -> default_excuse_patterns
       | Ok json ->
-        match parse_excuse_patterns_json json with
-        | Ok p -> migrate_loaded_excuse_patterns p
-        | Error msg ->
-          Log.Misc.warn "excuse_patterns: parse error, using defaults: %s" msg;
-          default_excuse_patterns
+        (match parse_excuse_patterns_json json with
+         | Ok p -> migrate_loaded_excuse_patterns p
+         | Error msg ->
+           Log.Misc.warn "excuse_patterns: parse error, using defaults: %s" msg;
+           default_excuse_patterns)
     in
     cached_patterns := Some patterns;
     patterns
+;;
 
 (** Save excuse patterns to config/excuse_patterns.json.
     Uses atomic write (write-to-temp + rename) to prevent corruption.
@@ -201,7 +217,9 @@ let load_excuse_patterns () : (string * string) list =
 let save_excuse_patterns (patterns : (string * string) list) : (unit, string) result =
   try
     let path = excuse_patterns_path () in
-    let json_items = List.map (fun (pat, reason) -> `List [`String pat; `String reason]) patterns in
+    let json_items =
+      List.map (fun (pat, reason) -> `List [ `String pat; `String reason ]) patterns
+    in
     let json = `List json_items in
     let content = Yojson.Safe.pretty_to_string json in
     match Fs_compat.save_file_atomic path content with
@@ -211,7 +229,9 @@ let save_excuse_patterns (patterns : (string * string) list) : (unit, string) re
     | Error msg -> Error msg
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn -> Error (Printf.sprintf "Failed to save excuse patterns: %s" (Printexc.to_string exn))
+  | exn ->
+    Error (Printf.sprintf "Failed to save excuse patterns: %s" (Printexc.to_string exn))
+;;
 
 let min_notes_length = 10
 
@@ -220,16 +240,14 @@ let min_notes_length = 10
 let find_excuse_pattern (notes : string) : (string * string) option =
   let patterns = load_excuse_patterns () in
   let lower = String.lowercase_ascii notes in
-  List.find_opt (fun (pat, _reason) ->
-    String_util.contains_substring lower pat
-  ) patterns
+  List.find_opt (fun (pat, _reason) -> String_util.contains_substring lower pat) patterns
+;;
 
 (* ================================================================ *)
 (* LLM verification prompt                                          *)
 (* ================================================================ *)
 
-let build_prompt ?(few_shot_block = "") ?excuse_advisory
-    (req : review_request) : string =
+let build_prompt ?(few_shot_block = "") ?excuse_advisory (req : review_request) : string =
   let desc = req.task_description in
   let desc_truncated =
     String_util.utf8_safe ~max_bytes:303 ~suffix:"..." desc |> String_util.to_string
@@ -239,8 +257,7 @@ let build_prompt ?(few_shot_block = "") ?excuse_advisory
     |> String_util.to_string
   in
   let calibration_section =
-    if few_shot_block = "" then ""
-    else "\n" ^ few_shot_block ^ "\n"
+    if few_shot_block = "" then "" else "\n" ^ few_shot_block ^ "\n"
   in
   (* #10113: when the local substring detector at gate 2 flags
      an avoidance phrase, surface it to the LLM as an explicit
@@ -254,20 +271,20 @@ let build_prompt ?(few_shot_block = "") ?excuse_advisory
     | None -> ""
     | Some (pattern, reason) ->
       sprintf
-        "\n<gate2_advisory>\n\
-         A local substring detector flagged the phrase %S in the notes \
-         (%s).  This is a heuristic signal, not a verdict.  Engineering \
-         notes legitimately reference pre-existing issues, follow-up \
-         tickets, and out-of-scope work without being avoidant.  Approve \
-         if the notes describe substantive completed work and the flagged \
-         phrase is used in a normal engineering context; reject only if \
-         the phrase indicates the agent is genuinely deferring or \
-         dismissing the actual task.\n\
+        "\n\
+         <gate2_advisory>\n\
+         A local substring detector flagged the phrase %S in the notes (%s).  This is a \
+         heuristic signal, not a verdict.  Engineering notes legitimately reference \
+         pre-existing issues, follow-up tickets, and out-of-scope work without being \
+         avoidant.  Approve if the notes describe substantive completed work and the \
+         flagged phrase is used in a normal engineering context; reject only if the \
+         phrase indicates the agent is genuinely deferring or dismissing the actual task.\n\
          </gate2_advisory>\n"
-        pattern reason
+        pattern
+        reason
   in
   sprintf
-{|You are a task completion reviewer. Evaluate whether the agent's notes describe actual completed work.
+    {|You are a task completion reviewer. Evaluate whether the agent's notes describe actual completed work.
 
 <task_title>%s</task_title>
 <task_description>%s</task_description>
@@ -289,6 +306,7 @@ REJECT: <reason> - if the notes are vague, avoidant, or do not address the task|
     notes_truncated
     advisory_section
     calibration_section
+;;
 
 (* ================================================================ *)
 (* Structured Review Verdict: Tool Schema + JSON Parsing (ADR D3)   *)
@@ -298,52 +316,58 @@ REJECT: <reason> - if the notes are vague, avoidant, or do not address the task|
     Forces the LLM to call a tool with typed parameters.
     verdict is constrained to APPROVE/REJECT by enum. *)
 let report_review_verdict_schema : Types.tool_schema =
-  { name = "report_review_verdict";
-    description =
-      "Report your review verdict. You MUST call this tool with your assessment. \
-       verdict must be exactly APPROVE or REJECT.";
-    input_schema = `Assoc [
-      "type", `String "object";
-      "properties", `Assoc [
-        "verdict", `Assoc [
-          "type", `String "string";
-          (* Issue #8436: derived from Variant SSOT. Hand-rolled enum
+  { name = "report_review_verdict"
+  ; description =
+      "Report your review verdict. You MUST call this tool with your assessment. verdict \
+       must be exactly APPROVE or REJECT."
+  ; input_schema =
+      `Assoc
+        [ "type", `String "object"
+        ; ( "properties"
+          , `Assoc
+              [ ( "verdict"
+                , `Assoc
+                    [ "type", `String "string"
+                    ; (* Issue #8436: derived from Variant SSOT. Hand-rolled enum
              risks dropping a constructor on extension. *)
-          "enum", `List (List.map (fun s -> `String s) valid_verdict_strings);
-          "description", `String "APPROVE if notes describe real work, REJECT if vague or avoidant";
-        ];
-        "reason", `Assoc [
-          "type", `String "string";
-          "description", `String "Brief explanation (required for REJECT)";
-        ];
-      ];
-      "required", `List [`String "verdict"];
-    ];
+                      "enum", `List (List.map (fun s -> `String s) valid_verdict_strings)
+                    ; ( "description"
+                      , `String
+                          "APPROVE if notes describe real work, REJECT if vague or \
+                           avoidant" )
+                    ] )
+              ; ( "reason"
+                , `Assoc
+                    [ "type", `String "string"
+                    ; "description", `String "Brief explanation (required for REJECT)"
+                    ] )
+              ] )
+        ; "required", `List [ `String "verdict" ]
+        ]
   }
+;;
 
 (** Parse review verdict from tool call JSON arguments (deterministic). *)
 let parse_review_verdict_from_json (args : Yojson.Safe.t) : (verdict, string) result =
   let open Yojson.Safe.Util in
   try
-    let verdict_str =
-      args |> member "verdict" |> to_string |> String.uppercase_ascii
-    in
+    let verdict_str = args |> member "verdict" |> to_string |> String.uppercase_ascii in
     let reason =
-      try args |> member "reason" |> to_string
-      with Type_error _ -> ""
+      try args |> member "reason" |> to_string with
+      | Type_error _ -> ""
     in
     match verdict_str with
     | "APPROVE" -> Ok Approve
     | "REJECT" ->
-      let r = if reason = "" then "completion notes did not address the task" else reason in
+      let r =
+        if reason = "" then "completion notes did not address the task" else reason
+      in
       Ok (Reject r)
-    | other ->
-      Error (sprintf "unexpected review verdict value: %s" other)
+    | other -> Error (sprintf "unexpected review verdict value: %s" other)
   with
-  | Type_error (msg, _) ->
-    Error (sprintf "review verdict JSON type error: %s" msg)
-  | exn ->
-    Error (sprintf "review verdict JSON parse error: %s" (Printexc.to_string exn))
+  | Type_error (msg, _) -> Error (sprintf "review verdict JSON type error: %s" msg)
+  | exn -> Error (sprintf "review verdict JSON parse error: %s" (Printexc.to_string exn))
+;;
 
 (* ================================================================ *)
 (* Verdict parsing (text fallback — Samchon Rank 1: lenient)        *)
@@ -359,38 +383,45 @@ let parse_verdict (text : string) : (verdict, string) result =
     let plen = String.length prefix in
     String.length upper = plen
     || (String.length upper > plen
-        && let c = upper.[plen] in
-           c = ' ' || c = ':' || c = '-')
+        &&
+        let c = upper.[plen] in
+        c = ' ' || c = ':' || c = '-')
   in
-  if String.length upper >= 7
-     && String.starts_with ~prefix:"APPROVE" upper
-     && has_boundary "APPROVE"
-  then
-    Ok Approve
-  else if String.length upper >= 6
-          && String.starts_with ~prefix:"REJECT" upper
-          && has_boundary "REJECT"
-  then
+  if
+    String.length upper >= 7
+    && String.starts_with ~prefix:"APPROVE" upper
+    && has_boundary "APPROVE"
+  then Ok Approve
+  else if
+    String.length upper >= 6
+    && String.starts_with ~prefix:"REJECT" upper
+    && has_boundary "REJECT"
+  then (
     let rest =
-      if String.length trimmed > 6 then
-        String.trim (String.sub trimmed 6 (String.length trimmed - 6))
+      if String.length trimmed > 6
+      then String.trim (String.sub trimmed 6 (String.length trimmed - 6))
       else ""
     in
     let reason =
-      if String.length rest > 0 && (rest.[0] = ':' || rest.[0] = '-') then
-        String.trim (String.sub rest 1 (String.length rest - 1))
+      if String.length rest > 0 && (rest.[0] = ':' || rest.[0] = '-')
+      then String.trim (String.sub rest 1 (String.length rest - 1))
       else rest
     in
-    if reason = "" then Ok (Reject "completion notes did not address the task")
-    else Ok (Reject reason)
-  else if String.length trimmed = 0 then
-    Error "empty review output"
+    if reason = ""
+    then Ok (Reject "completion notes did not address the task")
+    else Ok (Reject reason))
+  else if String.length trimmed = 0
+  then Error "empty review output"
   else
     (* ADR D3: unknown format is NOT silently approved.
        Previous behavior defaulted to Approve here — this was a
        D3 + Unknown→Permissive double violation. *)
-    Error (sprintf "unrecognized review format: %s"
-      (String_util.utf8_safe ~max_bytes:83 ~suffix:"..." trimmed |> String_util.to_string))
+    Error
+      (sprintf
+         "unrecognized review format: %s"
+         (String_util.utf8_safe ~max_bytes:83 ~suffix:"..." trimmed
+          |> String_util.to_string))
+;;
 
 (* ================================================================ *)
 (* Cross-model cascade selection (#3067)                             *)
@@ -428,30 +459,45 @@ let default_evaluator_cascade = "cross_verifier"
     pre-declaration, not a formal specification language. *)
 let check_contract ~(notes : string) ~(contract : string list) : string list =
   let lower_notes = String.lowercase_ascii notes in
-  List.filter (fun item ->
-    not (String_util.contains_substring_ci lower_notes item)
-  ) contract
+  List.filter
+    (fun item -> not (String_util.contains_substring_ci lower_notes item))
+    contract
+;;
 
 let review
-    ?(evaluator_cascade = default_evaluator_cascade)
-    ?generator_cascade
-    ?(completion_contract : string list option)
-    ?(on_verdict : (review_result -> unit) option)
-    ?(few_shot_block = "")
-    ?sw
-    (req : review_request) : review_result =
+      ?(evaluator_cascade = default_evaluator_cascade)
+      ?generator_cascade
+      ?(completion_contract : string list option)
+      ?(on_verdict : (review_result -> unit) option)
+      ?(few_shot_block = "")
+      ?sw
+      (req : review_request)
+  : review_result
+  =
   let emit result =
-    (match on_verdict with Some f -> f result | None -> ());
+    (match on_verdict with
+     | Some f -> f result
+     | None -> ());
     result
   in
   (* Gate 1: empty or trivially short notes *)
   let notes_trimmed = String.trim req.completion_notes in
-  if String.length notes_trimmed < min_notes_length then
-    emit { verdict = Reject (sprintf "completion notes too short (%d chars, minimum %d)"
-                          (String.length notes_trimmed) min_notes_length);
-      evaluator_cascade; generator_cascade; gate = Length; fallback_reason = None }
-  else
-  (* Gate 2: local excuse pattern detection.  #10113 demoted the
+  if String.length notes_trimmed < min_notes_length
+  then
+    emit
+      { verdict =
+          Reject
+            (sprintf
+               "completion notes too short (%d chars, minimum %d)"
+               (String.length notes_trimmed)
+               min_notes_length)
+      ; evaluator_cascade
+      ; generator_cascade
+      ; gate = Length
+      ; fallback_reason = None
+      }
+  else (
+    (* Gate 2: local excuse pattern detection.  #10113 demoted the
      historical terminal Reject to an advisory hint by default —
      [find_excuse_pattern] is a substring matcher with no
      word-boundary or context awareness, so it false-positives on
@@ -463,152 +509,192 @@ let review
      reliable LLM evaluator) flip
      [MASC_ANTI_RATIONALIZATION_GATE2_FAIL_CLOSED=true] to
      restore the historical terminal Reject. *)
-  let excuse_match = find_excuse_pattern notes_trimmed in
-  match excuse_match with
-  | Some (pattern, reason)
-    when Env_config.AntiRationalization.gate2_fail_closed ->
-    Prometheus.inc_counter
-      Prometheus.metric_anti_rationalization_excuse_pattern
-      ~labels:[ ("pattern", pattern); ("decision", "terminal_reject") ]
-      ();
-    Log.Task.info
-      "[anti-rationalization] agent=%s task=%s excuse_pattern=%s \
-       gate2_fail_closed=true → terminal reject"
-      req.agent_name req.task_title pattern;
-    emit
-      { verdict = Reject
-          (sprintf "avoidance pattern detected: \"%s\" (%s). Revise \
-                    your notes to describe actual completed work."
-             pattern reason);
-        evaluator_cascade;
-        generator_cascade;
-        gate = Excuse;
-        fallback_reason = None }
-  | _ ->
-  let excuse_advisory =
+    let excuse_match = find_excuse_pattern notes_trimmed in
     match excuse_match with
-    | None -> None
-    | Some (pattern, reason) ->
+    | Some (pattern, reason) when Env_config.AntiRationalization.gate2_fail_closed ->
       Prometheus.inc_counter
         Prometheus.metric_anti_rationalization_excuse_pattern
-        ~labels:[ ("pattern", pattern); ("decision", "advisory_to_llm") ]
+        ~labels:[ "pattern", pattern; "decision", "terminal_reject" ]
         ();
       Log.Task.info
         "[anti-rationalization] agent=%s task=%s excuse_pattern=%s \
-         (advisory; deferring to LLM evaluator with context)"
-        req.agent_name req.task_title pattern;
-      Some (pattern, reason)
-  in
-  (* Gate 2.5: contract verification — bypassed when verification FSM is
+         gate2_fail_closed=true → terminal reject"
+        req.agent_name
+        req.task_title
+        pattern;
+      emit
+        { verdict =
+            Reject
+              (sprintf
+                 "avoidance pattern detected: \"%s\" (%s). Revise your notes to describe \
+                  actual completed work."
+                 pattern
+                 reason)
+        ; evaluator_cascade
+        ; generator_cascade
+        ; gate = Excuse
+        ; fallback_reason = None
+        }
+    | _ ->
+      let excuse_advisory =
+        match excuse_match with
+        | None -> None
+        | Some (pattern, reason) ->
+          Prometheus.inc_counter
+            Prometheus.metric_anti_rationalization_excuse_pattern
+            ~labels:[ "pattern", pattern; "decision", "advisory_to_llm" ]
+            ();
+          Log.Task.info
+            "[anti-rationalization] agent=%s task=%s excuse_pattern=%s (advisory; \
+             deferring to LLM evaluator with context)"
+            req.agent_name
+            req.task_title
+            pattern;
+          Some (pattern, reason)
+      in
+      (* Gate 2.5: contract verification — bypassed when verification FSM is
      enabled (issue #7598). The verifier keeper performs independent
      measurement instead of substring matching. When FSM is disabled,
      the legacy substring check is retained as a minimal safety net. *)
-  let contract_rejection =
-    if Env_config_runtime.Verification.fsm_enabled () then
-      None
-    else
-      match completion_contract with
-      | None | Some [] -> None
-      | Some contract ->
-        let unmet = check_contract ~notes:notes_trimmed ~contract in
-        if unmet = [] then None
-        else begin
-          Log.Task.info "[anti-rationalization] contract unmet (legacy): agent=%s task=%s unmet=[%s]"
-            req.agent_name req.task_title (String.concat "; " unmet);
-          Some (sprintf "completion contract not satisfied. Unmet items: %s"
-                  (String.concat ", " (List.map (fun s -> "\"" ^ s ^ "\"") unmet)))
-        end
-  in
-  match contract_rejection with
-  | Some reason ->
-    emit { verdict = Reject reason;
-      evaluator_cascade; generator_cascade; gate = Contract; fallback_reason = None }
-  | None ->
-    (* Gate 3: LLM review via evaluator cascade (structured tool output, ADR D3) *)
-    let prompt = build_prompt ~few_shot_block ?excuse_advisory req in
-    (match generator_cascade with
-     | Some gc when gc = evaluator_cascade ->
-       Log.Task.warn "[anti-rationalization] same cascade for generator (%s) and evaluator (%s) — cross-model separation not active"
-         gc evaluator_cascade
-     | None | Some _ -> ());
-    let verdict_ref = ref None in
-    let dispatch ~name:_ ~args =
-      match parse_review_verdict_from_json args with
-      | Ok v ->
-        verdict_ref := Some v;
-        (false, match v with Approve -> "Approved" | Reject r -> "Rejected: " ^ r)
-      | Error msg ->
-        Log.Task.warn "[anti-rationalization] structured verdict parse failed: %s" msg;
-        (false, sprintf "Invalid verdict format: %s" msg)
-    in
-    (match
-       Masc_oas_bridge.run_with_caller
-         ~caller:Env_config_oas_bridge.Anti_rationalization (fun () ->
-         Oas_worker.run_named_with_masc_tools
-           ~cascade_name:evaluator_cascade
-           ~goal:prompt
-           ~masc_tools:[report_review_verdict_schema]
-           ~dispatch
-           ~max_turns:1
-           ~temperature:Oas_worker_cascade.deterministic_temperature
-           ~max_tokens:200
-           ~approval:Approval_callbacks.auto_approve
-           ?sw
-           ()
-       )
-     with
-     | Ok result ->
-       let (v, gate, fallback_reason) = match !verdict_ref with
-         | Some v ->
-           Log.Task.info "[anti-rationalization] verdict via structured tool call";
-           (v, Structured_tool, None)
-         | None ->
-           (* LLM responded with text — lenient fallback *)
-           let text = Oas_response.text_of_response result.response in
-           Log.Task.info "[anti-rationalization] verdict via text fallback";
-           (match parse_verdict text with
-            | Ok v -> (v, Llm_text_fallback, None)
-            | Error "empty review output" ->
-              (* An evaluator that returns empty text is not producing
+      let contract_rejection =
+        if Env_config_runtime.Verification.fsm_enabled ()
+        then None
+        else (
+          match completion_contract with
+          | None | Some [] -> None
+          | Some contract ->
+            let unmet = check_contract ~notes:notes_trimmed ~contract in
+            if unmet = []
+            then None
+            else (
+              Log.Task.info
+                "[anti-rationalization] contract unmet (legacy): agent=%s task=%s \
+                 unmet=[%s]"
+                req.agent_name
+                req.task_title
+                (String.concat "; " unmet);
+              Some
+                (sprintf
+                   "completion contract not satisfied. Unmet items: %s"
+                   (String.concat ", " (List.map (fun s -> "\"" ^ s ^ "\"") unmet)))))
+      in
+      (match contract_rejection with
+       | Some reason ->
+         emit
+           { verdict = Reject reason
+           ; evaluator_cascade
+           ; generator_cascade
+           ; gate = Contract
+           ; fallback_reason = None
+           }
+       | None ->
+         (* Gate 3: LLM review via evaluator cascade (structured tool output, ADR D3) *)
+         let prompt = build_prompt ~few_shot_block ?excuse_advisory req in
+         (match generator_cascade with
+          | Some gc when gc = evaluator_cascade ->
+            Log.Task.warn
+              "[anti-rationalization] same cascade for generator (%s) and evaluator (%s) \
+               — cross-model separation not active"
+              gc
+              evaluator_cascade
+          | None | Some _ -> ());
+         let verdict_ref = ref None in
+         let dispatch ~name:_ ~args =
+           match parse_review_verdict_from_json args with
+           | Ok v ->
+             verdict_ref := Some v;
+             ( false
+             , (match v with
+                | Approve -> "Approved"
+                | Reject r -> "Rejected: " ^ r) )
+           | Error msg ->
+             Log.Task.warn
+               "[anti-rationalization] structured verdict parse failed: %s"
+               msg;
+             false, sprintf "Invalid verdict format: %s" msg
+         in
+         (match
+            Masc_oas_bridge.run_with_caller
+              ~caller:Env_config_oas_bridge.Anti_rationalization
+              (fun () ->
+                 Oas_worker.run_named_with_masc_tools
+                   ~cascade_name:evaluator_cascade
+                   ~goal:prompt
+                   ~masc_tools:[ report_review_verdict_schema ]
+                   ~dispatch
+                   ~max_turns:1
+                   ~temperature:Oas_worker_cascade.deterministic_temperature
+                   ~max_tokens:200
+                   ~approval:Approval_callbacks.auto_approve
+                   ?sw
+                   ())
+          with
+          | Ok result ->
+            let v, gate, fallback_reason =
+              match !verdict_ref with
+              | Some v ->
+                Log.Task.info "[anti-rationalization] verdict via structured tool call";
+                v, Structured_tool, None
+              | None ->
+                (* LLM responded with text — lenient fallback *)
+                let text = Oas_response.text_of_response result.response in
+                Log.Task.info "[anti-rationalization] verdict via text fallback";
+                (match parse_verdict text with
+                 | Ok v -> v, Llm_text_fallback, None
+                 | Error "empty review output" ->
+                   (* An evaluator that returns empty text is not producing
                  unknown-format output (ADR D3 target); it is producing
                  no signal, indistinguishable from an unavailable
                  evaluator. Approve by liveness — same policy as the
                  [Error err] branch below — instead of blaming the
                  completing keeper for an evaluator-side gap. Observed
                  35 rejects in 2 days (#8688, ~/me/.masc/tool_calls). *)
-              Log.Task.warn "[anti-rationalization] evaluator returned empty text (approving by liveness)";
-              ( Approve, Fallback, Some "evaluator returned empty response" )
-            | Error parse_err ->
-              (* ADR D3: parse failure is NOT silently approved.
+                   Log.Task.warn
+                     "[anti-rationalization] evaluator returned empty text (approving by \
+                      liveness)";
+                   Approve, Fallback, Some "evaluator returned empty response"
+                 | Error parse_err ->
+                   (* ADR D3: parse failure is NOT silently approved.
                  Use Reject instead of Approve for unknown format. *)
-              Log.Task.warn "[anti-rationalization] verdict parse failed: %s (rejecting)" parse_err;
-              ( Reject (sprintf "review format unrecognized: %s" parse_err),
-                Format_reject,
-                Some parse_err ))
-       in
-       (match v with
-        | Reject reason ->
-          Log.Task.info "[anti-rationalization] LLM rejected: agent=%s task=%s cascade=%s reason=%s"
-            req.agent_name req.task_title evaluator_cascade reason
-        | Approve ->
-          Log.Task.info "[anti-rationalization] LLM approved: agent=%s task=%s cascade=%s"
-            req.agent_name req.task_title evaluator_cascade);
-       emit { verdict = v; evaluator_cascade; generator_cascade; gate; fallback_reason }
-     | Error err ->
-       (* #9794: when the verifier LLM is unavailable, the operator picks
+                   Log.Task.warn
+                     "[anti-rationalization] verdict parse failed: %s (rejecting)"
+                     parse_err;
+                   ( Reject (sprintf "review format unrecognized: %s" parse_err)
+                   , Format_reject
+                   , Some parse_err ))
+            in
+            (match v with
+             | Reject reason ->
+               Log.Task.info
+                 "[anti-rationalization] LLM rejected: agent=%s task=%s cascade=%s \
+                  reason=%s"
+                 req.agent_name
+                 req.task_title
+                 evaluator_cascade
+                 reason
+             | Approve ->
+               Log.Task.info
+                 "[anti-rationalization] LLM approved: agent=%s task=%s cascade=%s"
+                 req.agent_name
+                 req.task_title
+                 evaluator_cascade);
+            emit
+              { verdict = v; evaluator_cascade; generator_cascade; gate; fallback_reason }
+          | Error err ->
+            (* #9794: when the verifier LLM is unavailable, the operator picks
           between liveness (Open: approve, original behavior) and safety
           (Closed: reject so the action stays gated). The choice is config-
           driven; see Env_config.AntiRationalization. Both paths emit the
           same Prometheus counter so monitoring sees the fallback rate
           regardless of the chosen policy. *)
-       let msg = Oas.Error.to_string err in
-       let mode = Env_config.AntiRationalization.fail_mode in
-       let mode_str = Env_config.AntiRationalization.fail_mode_to_string mode in
-       Prometheus.inc_counter
-         Prometheus.metric_anti_rationalization_fallback
-         ~labels:[ ("mode", mode_str); ("cascade", evaluator_cascade) ]
-         ();
-       (* #10113: when an excuse pattern was detected at gate 2 AND
+            let msg = Oas.Error.to_string err in
+            let mode = Env_config.AntiRationalization.fail_mode in
+            let mode_str = Env_config.AntiRationalization.fail_mode_to_string mode in
+            Prometheus.inc_counter
+              Prometheus.metric_anti_rationalization_fallback
+              ~labels:[ "mode", mode_str; "cascade", evaluator_cascade ]
+              ();
+            (* #10113: when an excuse pattern was detected at gate 2 AND
           the LLM evaluator is unavailable, the advisory is upgraded
           to a Reject regardless of [fail_mode].  The advisory mode
           relies on the LLM to decide in context; if the LLM cannot
@@ -618,67 +704,96 @@ let review
           that gate 2 used to be — but only fires when the LLM is
           actually down, not when its decision happens to disagree
           with the substring detector. *)
-       (match excuse_advisory, mode with
-        | Some (pattern, reason), _ ->
-          Prometheus.inc_counter
-            Prometheus.metric_anti_rationalization_excuse_pattern
-            ~labels:[
-              ("pattern", pattern);
-              ("decision", "advisory_safety_net_reject");
-            ] ();
-          Log.Task.warn
-            "[anti-rationalization] LLM unavailable + gate-2 advisory \
-             pattern=%s active: rejecting (safety net) (cascade=%s err=%s)"
-            pattern evaluator_cascade msg;
-          emit
-            { verdict = Reject
-                (sprintf
-                   "verifier unavailable AND avoidance pattern \"%s\" \
-                    detected (%s); rejecting as fail-closed safety net. \
-                    Revise notes or wait for evaluator availability."
-                   pattern reason)
-            ; evaluator_cascade
-            ; generator_cascade
-            ; gate = Fallback
-            ; fallback_reason = Some msg
-            }
-        | None, Env_config.AntiRationalization.Open ->
-          Log.Task.warn
-            "[anti-rationalization] LLM unavailable: %s (approving by default; mode=open MASC_ANTI_RATIONALIZATION_FAIL_MODE=open)"
-            msg;
-          emit
-            { verdict = Approve
-            ; evaluator_cascade
-            ; generator_cascade
-            ; gate = Fallback
-            ; fallback_reason = Some msg
-            }
-        | None, Env_config.AntiRationalization.Closed ->
-          Log.Task.warn
-            "[anti-rationalization] LLM unavailable: %s (rejecting by default; mode=closed MASC_ANTI_RATIONALIZATION_FAIL_MODE=closed)"
-            msg;
-          emit
-            { verdict = Reject (sprintf "verifier unavailable (fail-closed): %s" msg)
-            ; evaluator_cascade
-            ; generator_cascade
-            ; gate = Fallback
-            ; fallback_reason = Some msg
-            }))
+            (match excuse_advisory, mode with
+             | Some (pattern, reason), _ ->
+               Prometheus.inc_counter
+                 Prometheus.metric_anti_rationalization_excuse_pattern
+                 ~labels:[ "pattern", pattern; "decision", "advisory_safety_net_reject" ]
+                 ();
+               Log.Task.warn
+                 "[anti-rationalization] LLM unavailable + gate-2 advisory pattern=%s \
+                  active: rejecting (safety net) (cascade=%s err=%s)"
+                 pattern
+                 evaluator_cascade
+                 msg;
+               emit
+                 { verdict =
+                     Reject
+                       (sprintf
+                          "verifier unavailable AND avoidance pattern \"%s\" detected \
+                           (%s); rejecting as fail-closed safety net. Revise notes or \
+                           wait for evaluator availability."
+                          pattern
+                          reason)
+                 ; evaluator_cascade
+                 ; generator_cascade
+                 ; gate = Fallback
+                 ; fallback_reason = Some msg
+                 }
+             | None, Env_config.AntiRationalization.Open ->
+               Log.Task.warn
+                 "[anti-rationalization] LLM unavailable: %s (approving by default; \
+                  mode=open MASC_ANTI_RATIONALIZATION_FAIL_MODE=open)"
+                 msg;
+               emit
+                 { verdict = Approve
+                 ; evaluator_cascade
+                 ; generator_cascade
+                 ; gate = Fallback
+                 ; fallback_reason = Some msg
+                 }
+             | None, Env_config.AntiRationalization.Closed ->
+               Log.Task.warn
+                 "[anti-rationalization] LLM unavailable: %s (rejecting by default; \
+                  mode=closed MASC_ANTI_RATIONALIZATION_FAIL_MODE=closed)"
+                 msg;
+               emit
+                 { verdict = Reject (sprintf "verifier unavailable (fail-closed): %s" msg)
+                 ; evaluator_cascade
+                 ; generator_cascade
+                 ; gate = Fallback
+                 ; fallback_reason = Some msg
+                 }))))
+;;
 
 (** Backward-compatible wrapper that returns only the verdict.
     Use [review] directly for structured results with audit metadata. *)
-let review_verdict ?evaluator_cascade ?generator_cascade ?completion_contract ?on_verdict ?few_shot_block ?sw req =
-  (review ?evaluator_cascade ?generator_cascade ?completion_contract ?on_verdict ?few_shot_block ?sw req).verdict
+let review_verdict
+      ?evaluator_cascade
+      ?generator_cascade
+      ?completion_contract
+      ?on_verdict
+      ?few_shot_block
+      ?sw
+      req
+  =
+  (review
+     ?evaluator_cascade
+     ?generator_cascade
+     ?completion_contract
+     ?on_verdict
+     ?few_shot_block
+     ?sw
+     req)
+    .verdict
+;;
 
 let review_result_to_json (r : review_result) : Yojson.Safe.t =
-  let base = [
-    ("verdict", `String (match r.verdict with Approve -> "approve" | Reject s -> "reject:" ^ s));
-    ("evaluator_cascade", `String r.evaluator_cascade);
-    ("generator_cascade", Json_util.string_opt_to_json r.generator_cascade);
-    ("gate", `String (gate_to_string r.gate));
-  ] in
-  let extra = match r.fallback_reason with
-    | Some reason -> [("fallback_reason", `String reason)]
+  let base =
+    [ ( "verdict"
+      , `String
+          (match r.verdict with
+           | Approve -> "approve"
+           | Reject s -> "reject:" ^ s) )
+    ; "evaluator_cascade", `String r.evaluator_cascade
+    ; "generator_cascade", Json_util.string_opt_to_json r.generator_cascade
+    ; "gate", `String (gate_to_string r.gate)
+    ]
+  in
+  let extra =
+    match r.fallback_reason with
+    | Some reason -> [ "fallback_reason", `String reason ]
     | None -> []
   in
   `Assoc (base @ extra)
+;;

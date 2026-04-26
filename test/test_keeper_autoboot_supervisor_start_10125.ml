@@ -18,11 +18,12 @@
 
 let () =
   let dir =
-    Filename.concat (Filename.get_temp_dir_name ())
-      (Printf.sprintf "masc-test-keeper-autoboot-sup-10125-%06x"
-         (Random.bits ()))
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-test-keeper-autoboot-sup-10125-%06x" (Random.bits ()))
   in
   Unix.putenv "MASC_BASE_PATH" dir
+;;
 
 module R = Masc_mcp.Keeper_runtime
 
@@ -39,6 +40,7 @@ let test_running_predicate_false_on_fresh_base_path () =
     "supervisor_sweep_running on never-touched base_path is false"
     false
     (R.supervisor_sweep_running bp)
+;;
 
 (* [stop_supervisor_sweep] must be a noop on a base_path
    that never started a sweep.  The autoboot fix calls
@@ -54,18 +56,22 @@ let test_stop_is_noop_on_fresh_base_path () =
     "after stop on never-started: still not running"
     false
     (R.supervisor_sweep_running bp)
+;;
 
 let () =
-  Alcotest.run "keeper_autoboot_supervisor_start_10125"
-    [
-      ( "running-predicate",
-        [
-          Alcotest.test_case "false on fresh base_path" `Quick
-            test_running_predicate_false_on_fresh_base_path;
-        ] );
-      ( "stop-helper",
-        [
-          Alcotest.test_case "noop on fresh base_path" `Quick
-            test_stop_is_noop_on_fresh_base_path;
-        ] );
+  Alcotest.run
+    "keeper_autoboot_supervisor_start_10125"
+    [ ( "running-predicate"
+      , [ Alcotest.test_case
+            "false on fresh base_path"
+            `Quick
+            test_running_predicate_false_on_fresh_base_path
+        ] )
+    ; ( "stop-helper"
+      , [ Alcotest.test_case
+            "noop on fresh base_path"
+            `Quick
+            test_stop_is_noop_on_fresh_base_path
+        ] )
     ]
+;;

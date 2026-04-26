@@ -18,33 +18,37 @@ val startup_config_resolution : base_path:string -> Config_dir_resolver.resoluti
     Extracts Eio resources from the standard environment.
     Returns (clock, mono_clock, net, domain_mgr, proc_mgr, fs). *)
 
-val init_runtime_context :
-  < clock : ([> float Eio.Time.clock_ty] as 'a) Eio.Resource.t;
-    mono_clock : ([> Eio.Time.Mono.ty] as 'b) Eio.Resource.t;
-    net : ([> [> `Generic] Eio.Net.ty] as 'c) Eio.Resource.t;
-    domain_mgr : ([> Eio.Domain_manager.ty] as 'd) Eio.Resource.t;
-    process_mgr : ([> [> `Generic] Eio.Process.mgr_ty] as 'e) Eio.Resource.t;
-    fs : ([> Eio.Fs.dir_ty] as 'f) Eio.Path.t;
-    .. > ->
-  'a Eio.Resource.t * 'b Eio.Resource.t * 'c Eio.Resource.t *
-  'd Eio.Resource.t * 'e Eio.Resource.t * 'f Eio.Path.t
+val init_runtime_context
+  :  < clock : ([> float Eio.Time.clock_ty ] as 'a) Eio.Resource.t
+     ; mono_clock : ([> Eio.Time.Mono.ty ] as 'b) Eio.Resource.t
+     ; net : ([> [> `Generic ] Eio.Net.ty ] as 'c) Eio.Resource.t
+     ; domain_mgr : ([> Eio.Domain_manager.ty ] as 'd) Eio.Resource.t
+     ; process_mgr : ([> [> `Generic ] Eio.Process.mgr_ty ] as 'e) Eio.Resource.t
+     ; fs : ([> Eio.Fs.dir_ty ] as 'f) Eio.Path.t
+     ; .. >
+  -> 'a Eio.Resource.t
+     * 'b Eio.Resource.t
+     * 'c Eio.Resource.t
+     * 'd Eio.Resource.t
+     * 'e Eio.Resource.t
+     * 'f Eio.Path.t
 
 (** {1 Server State Lifecycle} *)
 
-val create_server_state :
-  sw:Eio.Switch.t ->
-  base_path:string ->
-  clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  mono_clock:Eio.Time.Mono.ty Eio.Resource.t ->
-  net:[> `Generic | `Unix] Eio.Net.ty Eio.Resource.t ->
-  proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t ->
-  fs:Eio.Fs.dir_ty Eio.Path.t ->
-  Mcp_server.server_state
+val create_server_state
+  :  sw:Eio.Switch.t
+  -> base_path:string
+  -> clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> mono_clock:Eio.Time.Mono.ty Eio.Resource.t
+  -> net:[> `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t
+  -> fs:Eio.Fs.dir_ty Eio.Path.t
+  -> Mcp_server.server_state
 
-val runtime_path_diagnostics :
-  ?input_base_path:string ->
-  Mcp_server.server_state ->
-  Server_base_path_diagnostics.t
+val runtime_path_diagnostics
+  :  ?input_base_path:string
+  -> Mcp_server.server_state
+  -> Server_base_path_diagnostics.t
 
 val restore_persisted_sessions : Mcp_server.server_state -> unit
 val reconcile_active_agents_gauge : Mcp_server.server_state -> unit
@@ -68,28 +72,34 @@ type codex_mcp_config_sync_status =
   | Codex_mcp_config_server_missing
   | Codex_mcp_config_header_missing
 
-val sync_codex_mcp_auth_header_content :
-  raw_token:string -> string -> string * codex_mcp_config_sync_status
+val sync_codex_mcp_auth_header_content
+  :  raw_token:string
+  -> string
+  -> string * codex_mcp_config_sync_status
 
 (** {1 Main Entry Point} *)
 
-val run :
-  sw:Eio.Switch.t ->
-  env:Eio_unix.Stdenv.base ->
-  host:string ->
-  port:int ->
-  base_path:string ->
-  make_routes:(port:int -> host:string -> sw:Eio.Switch.t ->
-               clock:float Eio.Time.clock_ty Eio.Resource.t -> 'a) ->
-  make_request_handler:('a ->
-                        Eio.Net.Sockaddr.stream ->
-                        Httpun.Reqd.t Gluten.Reqd.t -> unit) ->
-  make_h2_request_handler:(sw:Eio.Switch.t ->
-                           clock:float Eio.Time.clock_ty Eio.Resource.t ->
-                           server_start_time:float ->
-                           Eio.Net.Sockaddr.stream ->
-                           H2.Reqd.t -> unit) ->
-  make_h2_error_handler:(unit ->
-                         Eio.Net.Sockaddr.stream ->
-                         H2.Server_connection.error_handler) ->
-  unit
+val run
+  :  sw:Eio.Switch.t
+  -> env:Eio_unix.Stdenv.base
+  -> host:string
+  -> port:int
+  -> base_path:string
+  -> make_routes:
+       (port:int
+        -> host:string
+        -> sw:Eio.Switch.t
+        -> clock:float Eio.Time.clock_ty Eio.Resource.t
+        -> 'a)
+  -> make_request_handler:
+       ('a -> Eio.Net.Sockaddr.stream -> Httpun.Reqd.t Gluten.Reqd.t -> unit)
+  -> make_h2_request_handler:
+       (sw:Eio.Switch.t
+        -> clock:float Eio.Time.clock_ty Eio.Resource.t
+        -> server_start_time:float
+        -> Eio.Net.Sockaddr.stream
+        -> H2.Reqd.t
+        -> unit)
+  -> make_h2_error_handler:
+       (unit -> Eio.Net.Sockaddr.stream -> H2.Server_connection.error_handler)
+  -> unit

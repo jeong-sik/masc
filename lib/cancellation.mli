@@ -7,13 +7,13 @@
 
 (** {1 Types} *)
 
-type token = {
-  id : string;
-  cancelled : bool Atomic.t;
-  mutable reason : string option;
-  mutable callbacks : (unit -> unit) list;
-  created_at : float;
-}
+type token =
+  { id : string
+  ; cancelled : bool Atomic.t
+  ; mutable reason : string option
+  ; mutable callbacks : (unit -> unit) list
+  ; created_at : float
+  }
 
 (** {1 Token Store} *)
 
@@ -40,4 +40,4 @@ val token_to_json : token -> Yojson.Safe.t
 
 (** {1 MCP Tool Handler} *)
 
-val handle_cancellation_tool : Yojson.Safe.t -> (bool * string)
+val handle_cancellation_tool : Yojson.Safe.t -> bool * string

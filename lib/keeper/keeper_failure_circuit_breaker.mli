@@ -35,11 +35,11 @@ val maybe_enrich_error : keeper_name:string -> error_msg:string -> string
     names the buffer contents, and downstream observers (dashboard,
     snapshot JSON) can read them via [recent_failures_of]. *)
 
-type failure_signature = {
-  ts : float;
-  cls : error_class;
-  fingerprint : string;
-}
+type failure_signature =
+  { ts : float
+  ; cls : error_class
+  ; fingerprint : string
+  }
 
 (** Collapse an error message into a single-line, size-bounded
     fingerprint suitable for logs and JSON payloads. Default
@@ -89,10 +89,7 @@ type display_state =
     Does not care about [threshold] — [consecutive_count] above threshold
     cannot occur in a well-formed record (the mutator resets on trip),
     so any non-zero count is classified as [Warning]. *)
-val derive_display_state :
-  consecutive_count:int ->
-  total_tripped:int ->
-  display_state
+val derive_display_state : consecutive_count:int -> total_tripped:int -> display_state
 
 (** Lower-case string rendering ([clean | warning | cooling]). *)
 val display_state_to_string : display_state -> string
@@ -104,9 +101,7 @@ val display_state_to_string : display_state -> string
 
     Single-keeper alternative to classifying a whole snapshot — used by
     the composite observer so fleet snapshotting stays O(fleet). *)
-val display_state_of :
-  keeper_name:string ->
-  display_state
+val display_state_of : keeper_name:string -> display_state
 
 (** Walk the JSON produced by {!snapshot_json} and return an association
     list from [keeper_name] to its display state. Returns [Error msg] if
@@ -116,6 +111,6 @@ val display_state_of :
     Unknown / missing fields on a per-entry basis are skipped silently
     rather than failing the whole walk, so one malformed record does not
     hide the rest. *)
-val classify_snapshot_json :
-  Yojson.Safe.t ->
-  ((string * display_state) list, string) result
+val classify_snapshot_json
+  :  Yojson.Safe.t
+  -> ((string * display_state) list, string) result

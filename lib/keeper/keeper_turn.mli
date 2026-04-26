@@ -20,9 +20,11 @@ val handle_keeper_up : _ Keeper_types.context -> Yojson.Safe.t -> tool_result
     If streaming fails, the function falls back to batch automatically.
 
     @since 2.110.0 *)
-val handle_keeper_msg :
-  ?on_text_delta:(string -> unit) ->
-  _ Keeper_types.context -> Yojson.Safe.t -> tool_result
+val handle_keeper_msg
+  :  ?on_text_delta:(string -> unit)
+  -> _ Keeper_types.context
+  -> Yojson.Safe.t
+  -> tool_result
 
 (** Stop a running keeper agent. *)
 val handle_keeper_down : _ Keeper_types.context -> Yojson.Safe.t -> tool_result

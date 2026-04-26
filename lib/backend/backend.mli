@@ -6,7 +6,9 @@ module Compression = Backend_compression
 
 (** {1 Types (from Backend_types)} *)
 
-include module type of struct include Backend_types end
+include module type of struct
+  include Backend_types
+end
 
 (** {1 FileSystem Backend (Eio)} *)
 
@@ -18,6 +20,7 @@ module FileSystem : sig
 
   (** Core operations *)
   val get : t -> string -> string result
+
   val set : t -> string -> string -> unit result
   val exists : t -> string -> bool
   val delete : t -> string -> unit result
@@ -25,11 +28,11 @@ module FileSystem : sig
   val set_if_not_exists : t -> string -> string -> bool result
 
   (** Lock operations *)
-  type lock_info = {
-    owner: string;
-    acquired_at: float;
-    expires_at: float;
-  }
+  type lock_info =
+    { owner : string
+    ; acquired_at : float
+    ; expires_at : float
+    }
 
   val lock_info_to_json : lock_info -> string
   val lock_info_of_json : string -> lock_info option
@@ -39,6 +42,7 @@ module FileSystem : sig
 
   (** Atomic operations *)
   val atomic_increment : t -> string -> int result
+
   val atomic_get : t -> string -> int result
   val atomic_update : t -> string -> f:(string option -> string) -> string result
 

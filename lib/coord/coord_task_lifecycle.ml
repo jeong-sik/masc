@@ -45,23 +45,21 @@ let decide
   | Types.Claim, Types.Todo ->
     ok ~set_current:task_id (Types.Claimed { assignee = agent_name; claimed_at = now })
   | Types.Claim, (Types.Claimed { assignee; _ } | Types.InProgress { assignee; _ }) ->
-    if same_agent assignee then ok task_status
-    else Error Invalid_transition
-  | Types.Claim, Types.Done _ ->
-    ok task_status
+    if same_agent assignee then ok task_status else Error Invalid_transition
+  | Types.Claim, Types.Done _ -> ok task_status
   | Types.Claim, (Types.AwaitingVerification _ | Types.Cancelled _) ->
     Error Invalid_transition
   (* ── Start ────────────────────────────────────── *)
   | Types.Start, Types.Claimed { assignee; _ } ->
     if same_agent assignee || force
-    then ok ~set_current:task_id
-           (Types.InProgress { assignee = agent_name; started_at = now })
+    then
+      ok
+        ~set_current:task_id
+        (Types.InProgress { assignee = agent_name; started_at = now })
     else Error Invalid_transition
   | Types.Start, Types.InProgress { assignee; _ } ->
-    if same_agent assignee then ok task_status
-    else Error Invalid_transition
-  | Types.Start, Types.Done _ ->
-    ok task_status
+    if same_agent assignee then ok task_status else Error Invalid_transition
+  | Types.Start, Types.Done _ -> ok task_status
   | Types.Start, (Types.Todo | Types.AwaitingVerification _ | Types.Cancelled _) ->
     Error Invalid_transition
   (* ── Done ─────────────────────────────────────── *)
@@ -73,15 +71,12 @@ let decide
     if same_agent assignee || force
     then ok (done_status ~agent_name ~now ~notes)
     else Error Invalid_transition
-  | Types.Done_action, Types.Done _ ->
-    ok task_status
+  | Types.Done_action, Types.Done _ -> ok task_status
   | Types.Done_action, (Types.Todo | Types.AwaitingVerification _ | Types.Cancelled _) ->
     Error Invalid_transition
   (* ── Cancel ───────────────────────────────────── *)
-  | Types.Cancel, Types.Cancelled _ ->
-    ok task_status
-  | Types.Cancel, Types.Todo ->
-    ok (cancelled_status ~agent_name ~now ~reason)
+  | Types.Cancel, Types.Cancelled _ -> ok task_status
+  | Types.Cancel, Types.Todo -> ok (cancelled_status ~agent_name ~now ~reason)
   | Types.Cancel, (Types.Claimed { assignee; _ } | Types.InProgress { assignee; _ }) ->
     if same_agent assignee || force
     then ok (cancelled_status ~agent_name ~now ~reason)
@@ -90,60 +85,67 @@ let decide
     Error Invalid_transition
   (* ── Release ──────────────────────────────────── *)
   | Types.Release, (Types.Claimed { assignee; _ } | Types.InProgress { assignee; _ }) ->
-    if same_agent assignee || force then ok Types.Todo
-    else Error Invalid_transition
-  | Types.Release, Types.Todo ->
-    ok task_status
+    if same_agent assignee || force then ok Types.Todo else Error Invalid_transition
+  | Types.Release, Types.Todo -> ok task_status
   | Types.Release, (Types.AwaitingVerification _ | Types.Done _ | Types.Cancelled _) ->
     Error Invalid_transition
   (* ── Submit for verification ──────────────────── *)
-  | Types.Submit_for_verification,
-    (Types.Claimed { assignee; _ } | Types.InProgress { assignee; _ }) ->
-    if not verification_enabled then Error Verification_disabled
+  | ( Types.Submit_for_verification
+    , (Types.Claimed { assignee; _ } | Types.InProgress { assignee; _ }) ) ->
+    if not verification_enabled
+    then Error Verification_disabled
     else if same_agent assignee
-    then ok
-           (Types.AwaitingVerification
-              { assignee
-              ; submitted_at = now
-              ; verification_id = new_verification_id ()
-              ; deadline = None
-              })
+    then
+      ok
+        (Types.AwaitingVerification
+           { assignee
+           ; submitted_at = now
+           ; verification_id = new_verification_id ()
+           ; deadline = None
+           })
     else Error Invalid_transition
-  | Types.Submit_for_verification,
-    (Types.Todo | Types.AwaitingVerification _ | Types.Done _ | Types.Cancelled _) ->
-    if verification_enabled then Error Invalid_transition
-    else Error Verification_disabled
+  | ( Types.Submit_for_verification
+    , (Types.Todo | Types.AwaitingVerification _ | Types.Done _ | Types.Cancelled _) ) ->
+    if verification_enabled then Error Invalid_transition else Error Verification_disabled
   (* ── Approve verification ─────────────────────── *)
-  | Types.Approve_verification,
-    Types.AwaitingVerification { assignee; verification_id; _ } ->
-    if same_agent assignee then Error Self_approval
+  | ( Types.Approve_verification
+    , Types.AwaitingVerification { assignee; verification_id; _ } ) ->
+    if same_agent assignee
+    then Error Self_approval
     else if verification_enabled
-    then ok
-           (Types.Done
-              { assignee
-              ; completed_at = now
-              ; notes =
-                  Some
-                    (Printf.sprintf
-                       "Approved by %s (vrf:%s)%s"
-                       agent_name
-                       verification_id
-                       (if String.equal notes "" then "" else " — " ^ notes))
-              })
+    then
+      ok
+        (Types.Done
+           { assignee
+           ; completed_at = now
+           ; notes =
+               Some
+                 (Printf.sprintf
+                    "Approved by %s (vrf:%s)%s"
+                    agent_name
+                    verification_id
+                    (if String.equal notes "" then "" else " — " ^ notes))
+           })
     else Error Verification_disabled
-  | Types.Approve_verification,
-    (Types.Todo | Types.Claimed _ | Types.InProgress _ | Types.Done _ | Types.Cancelled _) ->
-    if verification_enabled then Error Invalid_transition
-    else Error Verification_disabled
+  | ( Types.Approve_verification
+    , ( Types.Todo
+      | Types.Claimed _
+      | Types.InProgress _
+      | Types.Done _
+      | Types.Cancelled _ ) ) ->
+    if verification_enabled then Error Invalid_transition else Error Verification_disabled
   (* ── Reject verification ──────────────────────── *)
-  | Types.Reject_verification,
-    Types.AwaitingVerification { assignee; _ } ->
-    if same_agent assignee then Error Self_rejection
+  | Types.Reject_verification, Types.AwaitingVerification { assignee; _ } ->
+    if same_agent assignee
+    then Error Self_rejection
     else if verification_enabled
     then ok (Types.InProgress { assignee; started_at = now })
     else Error Verification_disabled
-  | Types.Reject_verification,
-    (Types.Todo | Types.Claimed _ | Types.InProgress _ | Types.Done _ | Types.Cancelled _) ->
-    if verification_enabled then Error Invalid_transition
-    else Error Verification_disabled
+  | ( Types.Reject_verification
+    , ( Types.Todo
+      | Types.Claimed _
+      | Types.InProgress _
+      | Types.Done _
+      | Types.Cancelled _ ) ) ->
+    if verification_enabled then Error Invalid_transition else Error Verification_disabled
 ;;

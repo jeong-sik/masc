@@ -7,16 +7,16 @@
 *)
 
 (** Metrics snapshot for a single tool. *)
-type tool_stats = {
-  tool_name : string;
-  call_count : int;
-  success_count : int;
-  failure_count : int;
-  p50_ms : float;
-  p95_ms : float;
-  p99_ms : float;
-  mean_ms : float;
-}
+type tool_stats =
+  { tool_name : string
+  ; call_count : int
+  ; success_count : int
+  ; failure_count : int
+  ; p50_ms : float
+  ; p95_ms : float
+  ; p99_ms : float
+  ; mean_ms : float
+  }
 
 (** [record result] records a tool invocation from a {!Tool_result.t}. *)
 val record : Tool_result.t -> unit

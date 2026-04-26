@@ -6,15 +6,18 @@
     @since 2.113.0
 *)
 
-let collaborators_query = {|
+let collaborators_query =
+  {|
   query($name: String!) {
     agentCollaborationNetworkByName(name: $name) {
       hash name collaborations lastCollab
     }
   }
 |}
+;;
 
-let trusts_query = {|
+let trusts_query =
+  {|
   query($name: String!) {
     agent(name: $name) {
       name
@@ -30,70 +33,82 @@ let trusts_query = {|
     }
   }
 |}
+;;
 
 (** Build the JSON response for agent relations.
     Combines collaboration network + trust edges + generic relations. *)
 let json ~agent_name () : Yojson.Safe.t =
   let collaborators =
-    let variables = `Assoc [("name", `String agent_name)] in
-    match Graphql_client.query ~timeout_sec:8.0 ~query:collaborators_query ~variables () with
+    let variables = `Assoc [ "name", `String agent_name ] in
+    match
+      Graphql_client.query ~timeout_sec:8.0 ~query:collaborators_query ~variables ()
+    with
     | Ok data ->
       let open Yojson.Safe.Util in
-      data |> member "agentCollaborationNetworkByName" |> to_list
+      data
+      |> member "agentCollaborationNetworkByName"
+      |> to_list
       |> List.map (fun edge ->
-        `Assoc [
-          ("name", member "name" edge);
-          ("collaborations", member "collaborations" edge);
-          ("last_collab", member "lastCollab" edge);
-        ])
+        `Assoc
+          [ "name", member "name" edge
+          ; "collaborations", member "collaborations" edge
+          ; "last_collab", member "lastCollab" edge
+          ])
     | Error _ -> []
   in
   let agent_data =
-    let variables = `Assoc [("name", `String agent_name)] in
+    let variables = `Assoc [ "name", `String agent_name ] in
     match Graphql_client.query ~timeout_sec:8.0 ~query:trusts_query ~variables () with
     | Ok data ->
       let open Yojson.Safe.Util in
       let agent = data |> member "agent" in
-      if agent = `Null then None
-      else Some agent
+      if agent = `Null then None else Some agent
     | Error _ -> None
   in
-  let interests = match agent_data with
+  let interests =
+    match agent_data with
     | Some agent ->
       let open Yojson.Safe.Util in
-      Safe_ops.protect ~default:[] (fun () ->
-        agent |> member "interests" |> to_list)
+      Safe_ops.protect ~default:[] (fun () -> agent |> member "interests" |> to_list)
     | None -> []
   in
-  let relations = match agent_data with
+  let relations =
+    match agent_data with
     | Some agent ->
       let open Yojson.Safe.Util in
       Safe_ops.protect ~default:[] (fun () ->
-        agent |> member "relations" |> member "edges" |> to_list
+        agent
+        |> member "relations"
+        |> member "edges"
+        |> to_list
         |> List.map (fun edge ->
           let node = edge |> member "node" in
           let participants =
-            node |> member "participants" |> member "edges" |> to_list
+            node
+            |> member "participants"
+            |> member "edges"
+            |> to_list
             |> List.map (fun p ->
               let pn = p |> member "node" in
-              `Assoc [
-                ("kind", member "kind" pn);
-                ("display_name", member "displayName" pn);
-                ("role", member "role" pn);
-              ])
+              `Assoc
+                [ "kind", member "kind" pn
+                ; "display_name", member "displayName" pn
+                ; "role", member "role" pn
+                ])
           in
-          `Assoc [
-            ("type", member "type" node);
-            ("category", member "category" node);
-            ("confidence", member "confidence" node);
-            ("note", member "note" node);
-            ("participants", `List participants);
-          ]))
+          `Assoc
+            [ "type", member "type" node
+            ; "category", member "category" node
+            ; "confidence", member "confidence" node
+            ; "note", member "note" node
+            ; "participants", `List participants
+            ]))
     | None -> []
   in
-  `Assoc [
-    ("agent_name", `String agent_name);
-    ("collaborators", `List collaborators);
-    ("interests", `List interests);
-    ("relations", `List relations);
-  ]
+  `Assoc
+    [ "agent_name", `String agent_name
+    ; "collaborators", `List collaborators
+    ; "interests", `List interests
+    ; "relations", `List relations
+    ]
+;;

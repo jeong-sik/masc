@@ -15,40 +15,45 @@
 
 (** MAGI: Validation rejection counters for observability *)
 let rejection_count = Atomic.make 0
+
 let last_rejection_time = ref 0.0
 
 (** Get validation statistics *)
-let get_rejection_stats () =
-  (Atomic.get rejection_count, !last_rejection_time)
+let get_rejection_stats () = Atomic.get rejection_count, !last_rejection_time
 
 (** Reset validation statistics *)
 let reset_rejection_stats () =
   Atomic.set rejection_count 0;
   last_rejection_time := 0.0
+;;
 
 (** Internal: Log validation rejection at WARN level *)
 let log_rejection ~validator ~input ~reason =
   Atomic.incr rejection_count;
   last_rejection_time := Time_compat.now ();
   (* Truncate input for log safety *)
-  let safe_input = String_util.utf8_safe ~max_bytes:35 ~suffix:"..." input |> String_util.to_string in
-  Log.Misc.warn "%s rejected input '%s': %s"
-    validator safe_input reason
+  let safe_input =
+    String_util.utf8_safe ~max_bytes:35 ~suffix:"..." input |> String_util.to_string
+  in
+  Log.Misc.warn "%s rejected input '%s': %s" validator safe_input reason
+;;
 
 (* #9787: LLMs emit ids wrapped in stray ASCII quotes ('task-031'). Caller
    re-runs strict validation on the inner; smart quotes left untouched. *)
 let try_strip_outer_quotes s =
   let len = String.length s in
-  if len >= 2 && s.[0] = s.[len - 1] && (s.[0] = '\'' || s.[0] = '"') then
-    Some (String.sub s 1 (len - 2))
+  if len >= 2 && s.[0] = s.[len - 1] && (s.[0] = '\'' || s.[0] = '"')
+  then Some (String.sub s 1 (len - 2))
   else None
+;;
 
 (** Agent ID validation *)
 module Agent_id : sig
   type t
+
   val validate : string -> (t, string) result
   val to_string : t -> string
-  val of_string_unsafe : string -> t  (* For internal use only *)
+  val of_string_unsafe : string -> t (* For internal use only *)
 end = struct
   type t = string
 
@@ -58,18 +63,23 @@ end = struct
   let valid_pattern = Re.Pcre.re {|^[a-zA-Z0-9_-]+(:[a-zA-Z0-9_-]+)?$|} |> Re.compile
 
   let strict s =
-    if String.length s = 0 then
-      Error "agent_id cannot be empty"
-    else if String.length s > 64 then
-      Error (Printf.sprintf "agent_id too long: %d chars (max 64)" (String.length s))
-    else if String.contains s '/' || String.contains s '\\' then
-      Error "agent_id cannot contain path separators"
-    else if String.contains s '.' && Base.String.is_prefix s ~prefix:".." then
-      Error "agent_id cannot contain path traversal"
-    else if not (Re.execp valid_pattern s) then
-      Error (Printf.sprintf "agent_id contains invalid characters: %s (only a-z, A-Z, 0-9, _, -, : allowed)" s)
-    else
-      Ok s
+    if String.length s = 0
+    then Error "agent_id cannot be empty"
+    else if String.length s > 64
+    then Error (Printf.sprintf "agent_id too long: %d chars (max 64)" (String.length s))
+    else if String.contains s '/' || String.contains s '\\'
+    then Error "agent_id cannot contain path separators"
+    else if String.contains s '.' && Base.String.is_prefix s ~prefix:".."
+    then Error "agent_id cannot contain path traversal"
+    else if not (Re.execp valid_pattern s)
+    then
+      Error
+        (Printf.sprintf
+           "agent_id contains invalid characters: %s (only a-z, A-Z, 0-9, _, -, : \
+            allowed)"
+           s)
+    else Ok s
+  ;;
 
   let validate s =
     let log_and_err reason =
@@ -79,18 +89,21 @@ end = struct
     match strict s with
     | Ok t -> Ok t
     | Error orig_reason ->
-        match try_strip_outer_quotes s with
-        | Some inner ->
-            (match strict inner with
-             | Ok t ->
-                 Log.Misc.info
-                   "Agent_id: stripped surrounding quotes (#9787): '%s' -> '%s'"
-                   s inner;
-                 Ok t
-             | Error _ ->
-                 log_and_err
-                   "agent_id appears wrapped in surrounding quotes; supply the bare id without quotes")
-        | None -> log_and_err orig_reason
+      (match try_strip_outer_quotes s with
+       | Some inner ->
+         (match strict inner with
+          | Ok t ->
+            Log.Misc.info
+              "Agent_id: stripped surrounding quotes (#9787): '%s' -> '%s'"
+              s
+              inner;
+            Ok t
+          | Error _ ->
+            log_and_err
+              "agent_id appears wrapped in surrounding quotes; supply the bare id \
+               without quotes")
+       | None -> log_and_err orig_reason)
+  ;;
 
   let to_string t = t
   let of_string_unsafe s = s
@@ -99,9 +112,10 @@ end
 (** Task ID validation *)
 module Task_id : sig
   type t
+
   val validate : string -> (t, string) result
   val to_string : t -> string
-  val of_string_unsafe : string -> t  (* For internal use only *)
+  val of_string_unsafe : string -> t (* For internal use only *)
 end = struct
   type t = string
 
@@ -109,18 +123,22 @@ end = struct
   let valid_pattern = Re.Pcre.re {|^[a-zA-Z0-9_:-]+$|} |> Re.compile
 
   let strict s =
-    if String.length s = 0 then
-      Error "task_id cannot be empty"
-    else if String.length s > 128 then
-      Error (Printf.sprintf "task_id too long: %d chars (max 128)" (String.length s))
-    else if String.contains s '/' || String.contains s '\\' then
-      Error "task_id cannot contain path separators"
-    else if String.contains s '.' && Base.String.is_prefix s ~prefix:".." then
-      Error "task_id cannot contain path traversal"
-    else if not (Re.execp valid_pattern s) then
-      Error (Printf.sprintf "task_id contains invalid characters: %s (only a-z, A-Z, 0-9, _, -, : allowed)" s)
-    else
-      Ok s
+    if String.length s = 0
+    then Error "task_id cannot be empty"
+    else if String.length s > 128
+    then Error (Printf.sprintf "task_id too long: %d chars (max 128)" (String.length s))
+    else if String.contains s '/' || String.contains s '\\'
+    then Error "task_id cannot contain path separators"
+    else if String.contains s '.' && Base.String.is_prefix s ~prefix:".."
+    then Error "task_id cannot contain path traversal"
+    else if not (Re.execp valid_pattern s)
+    then
+      Error
+        (Printf.sprintf
+           "task_id contains invalid characters: %s (only a-z, A-Z, 0-9, _, -, : allowed)"
+           s)
+    else Ok s
+  ;;
 
   let validate s =
     let log_and_err reason =
@@ -130,18 +148,21 @@ end = struct
     match strict s with
     | Ok t -> Ok t
     | Error orig_reason ->
-        match try_strip_outer_quotes s with
-        | Some inner ->
-            (match strict inner with
-             | Ok t ->
-                 Log.Misc.info
-                   "Task_id: stripped surrounding quotes (#9787): '%s' -> '%s'"
-                   s inner;
-                 Ok t
-             | Error _ ->
-                 log_and_err
-                   "task_id appears wrapped in surrounding quotes; supply the bare id without quotes")
-        | None -> log_and_err orig_reason
+      (match try_strip_outer_quotes s with
+       | Some inner ->
+         (match strict inner with
+          | Ok t ->
+            Log.Misc.info
+              "Task_id: stripped surrounding quotes (#9787): '%s' -> '%s'"
+              s
+              inner;
+            Ok t
+          | Error _ ->
+            log_and_err
+              "task_id appears wrapped in surrounding quotes; supply the bare id without \
+               quotes")
+       | None -> log_and_err orig_reason)
+  ;;
 
   let to_string t = t
   let of_string_unsafe s = s
@@ -156,11 +177,8 @@ end = struct
      MCP tool argument-validation path, so the prior per-call form
      paid 4 [Re.compile] for every parameter check. *)
   let traversal_re = Re.Pcre.re {|\.\./|} |> Re.compile
-
   let path_separator_re = Re.Pcre.re {|[/\\]|} |> Re.compile
-
   let dotdot_re = Re.Pcre.re {|\.\.|} |> Re.compile
-
   let unsafe_char_re = Re.Pcre.re {|[^a-zA-Z0-9_.\-]|} |> Re.compile
 
   let validate_relative path =
@@ -168,22 +186,23 @@ end = struct
       log_rejection ~validator:"Safe_path" ~input:path ~reason;
       Error reason
     in
-    if String.length path = 0 then
-      reject "path cannot be empty"
-    else if path.[0] = '/' then
-      reject "absolute paths not allowed"
-    else if Base.String.is_prefix path ~prefix:".." then
-      reject "path traversal not allowed"
-    else if Re.execp traversal_re path then
-      reject "path traversal not allowed"
-    else
-      Ok path
+    if String.length path = 0
+    then reject "path cannot be empty"
+    else if path.[0] = '/'
+    then reject "absolute paths not allowed"
+    else if Base.String.is_prefix path ~prefix:".."
+    then reject "path traversal not allowed"
+    else if Re.execp traversal_re path
+    then reject "path traversal not allowed"
+    else Ok path
+  ;;
 
   let sanitize_filename name =
     name
     |> Re.replace_string path_separator_re ~by:"_"
     |> Re.replace_string dotdot_re ~by:"_"
     |> Re.replace_string unsafe_char_re ~by:"_"
+  ;;
 end
 
 (** Numeric validation *)
@@ -192,17 +211,16 @@ module Safe_float : sig
   val clamp : float -> min:float -> max:float -> float
 end = struct
   let validate f ~name =
-    if Float.is_nan f then begin
+    if Float.is_nan f
+    then (
       Log.Misc.warn "NaN detected for %s, using 0.0" name;
-      0.0
-    end else if Float.is_infinite f then begin
+      0.0)
+    else if Float.is_infinite f
+    then (
       Log.Misc.warn "Inf detected for %s, using 0.0" name;
-      0.0
-    end else
-      f
-
-  let clamp f ~min ~max =
-    if f < min then min
-    else if f > max then max
+      0.0)
     else f
+  ;;
+
+  let clamp f ~min ~max = if f < min then min else if f > max then max else f
 end

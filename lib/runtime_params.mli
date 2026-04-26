@@ -11,12 +11,12 @@
 (** {1 Metadata} *)
 
 (** Optional metadata for UI display and validation hints. *)
-type param_meta = {
-  description : string;
-  value_type : string;
-  min_value : Yojson.Safe.t option;
-  max_value : Yojson.Safe.t option;
-}
+type param_meta =
+  { description : string
+  ; value_type : string
+  ; min_value : Yojson.Safe.t option
+  ; max_value : Yojson.Safe.t option
+  }
 
 (** {1 Parameter Handle} *)
 
@@ -29,15 +29,15 @@ type 'a param
     Optional [meta] provides UI hints (description, type, bounds).
     [?meta] is placed before [~deserialize] so existing callers need no change.
     Raises [Invalid_argument] if [key] is already registered. *)
-val register :
-  key:string ->
-  default:(unit -> 'a) ->
-  validate:('a -> (unit, string) result) ->
-  serialize:('a -> Yojson.Safe.t) ->
-  deserialize:(Yojson.Safe.t -> ('a, string) result) ->
-  ?meta:param_meta ->
-  unit ->
-  'a param
+val register
+  :  key:string
+  -> default:(unit -> 'a)
+  -> validate:('a -> (unit, string) result)
+  -> serialize:('a -> Yojson.Safe.t)
+  -> deserialize:(Yojson.Safe.t -> ('a, string) result)
+  -> ?meta:param_meta
+  -> unit
+  -> 'a param
 
 (** {1 Read / Write} *)
 
@@ -59,7 +59,9 @@ val clear_by_key : string -> (unit, string) result
 (** {1 Introspection} *)
 
 (** [(key, current_json, default_json, has_override, meta)] for every registered param. *)
-val registry : unit -> (string * Yojson.Safe.t * Yojson.Safe.t * bool * param_meta option) list
+val registry
+  :  unit
+  -> (string * Yojson.Safe.t * Yojson.Safe.t * bool * param_meta option) list
 
 (** {1 Persistence} *)
 
@@ -74,15 +76,15 @@ val restore : base_path:string -> unit
 (** {1 Audit} *)
 
 (** Record a change to the audit log with optional governance case_id. *)
-val record_audit :
-  base_path:string ->
-  key:string ->
-  old_value:Yojson.Safe.t ->
-  new_value:Yojson.Safe.t ->
-  ?case_id:string ->
-  actor:string ->
-  unit ->
-  unit
+val record_audit
+  :  base_path:string
+  -> key:string
+  -> old_value:Yojson.Safe.t
+  -> new_value:Yojson.Safe.t
+  -> ?case_id:string
+  -> actor:string
+  -> unit
+  -> unit
 
 (** Read the most recent [n] audit entries. *)
 val recent_audit : base_path:string -> int -> Yojson.Safe.t list

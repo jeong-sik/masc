@@ -12,10 +12,11 @@
     Gating lives in [Keeper_config.keeper_adaptive_thinking_mode ()]; when
     that flag is false, classification is not consulted. *)
 
-type t = Mechanical | Cognitive
+type t =
+  | Mechanical
+  | Cognitive
 
 val equal : t -> t -> bool
-
 val to_string : t -> string
 
 (** [classify ~last_tool_calls ~last_user_message ~retry_count] returns
@@ -31,11 +32,11 @@ val to_string : t -> string
     The mechanical set is a v1 hardcoded list covering the high-frequency
     read-only and CRUD tools; see implementation. A future enhancement can
     move this attribute onto [Tool_dispatch] registry entries. *)
-val classify :
-  last_tool_calls:string list ->
-  last_user_message:string option ->
-  retry_count:int ->
-  t
+val classify
+  :  last_tool_calls:string list
+  -> last_user_message:string option
+  -> retry_count:int
+  -> t
 
 (** Set of tool names considered "mechanical" for classification.
     Exposed so tests can assert coverage and keeper operators can audit

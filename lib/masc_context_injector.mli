@@ -18,29 +18,29 @@
 
     @since context_injector integration *)
 
-type config = {
-  start_time : float;
-  (** [Unix.gettimeofday ()] at agent creation.
+type config =
+  { start_time : float
+    (** [Unix.gettimeofday ()] at agent creation.
       Used to compute elapsed seconds. *)
-}
+  }
 
-val default_config : unit -> config
 (** Create a config with [start_time = Unix.gettimeofday ()]. *)
+val default_config : unit -> config
 
-val make : config:config -> unit -> Agent_sdk.Hooks.context_injector
 (** Build an OAS [context_injector] function.
 
     Thread-safe: uses {!Atomic} counters internally.
     Returns [Some injection] for every tool call (never [None]). *)
+val make : config:config -> unit -> Agent_sdk.Hooks.context_injector
 
-val render_temporal_summary : Agent_sdk.Context.t -> string option
 (** Read temporal keys from [Context.t] and render a one-line summary.
 
     Returns [None] when no tool has executed yet (turn 0).
     Format: [[Temporal] time=<ISO8601> elapsed=<N>s tools=<N> last=<name>(<outcome>)] *)
+val render_temporal_summary : Agent_sdk.Context.t -> string option
 
-val iso8601_of_float : float -> string
 (** Format a Unix timestamp as ISO 8601 UTC string. *)
+val iso8601_of_float : float -> string
 
 (** {2 Context keys}
 

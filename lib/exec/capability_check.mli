@@ -9,12 +9,12 @@
     (possibly [Exec_bin] on the unknown-bin path) or the parser should
     have rejected it upstream as [Parsed.Too_complex _]. *)
 
-val of_simple : Shell_ir.simple -> Capability.t list
 (** Walk a single command.  Order of emitted caps:
     1. [Env_set] for every [FOO=bar] prefix, in source order.
     2. [Exec_bin] or [Git] for the command itself.
     3. [Read_path]/[Write_path] for every redirect, in source order. *)
+val of_simple : Shell_ir.simple -> Capability.t list
 
-val of_ir : Shell_ir.t -> Capability.t list
 (** Walk a full [Shell_ir.t].  For [Pipeline], emits a single
     [Pipeline_fold] wrapping the concatenated per-stage caps. *)
+val of_ir : Shell_ir.t -> Capability.t list

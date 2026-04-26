@@ -9,29 +9,29 @@ type gate_decision =
   | Pass
   | Reject of string
 
-type tool_call_entry = {
-  ts : float;
-  ts_iso : string;
-  turn : int;
-  round : int;
-  tool_name : string;
-  args_json : string;
-  gate_decision : gate_decision;
-  result : string option;
-  duration_ms : int;
-  error : string option;
-  cost_usd : float;
-}
+type tool_call_entry =
+  { ts : float
+  ; ts_iso : string
+  ; turn : int
+  ; round : int
+  ; tool_name : string
+  ; args_json : string
+  ; gate_decision : gate_decision
+  ; result : string option
+  ; duration_ms : int
+  ; error : string option
+  ; cost_usd : float
+  }
 
-type gate_decode_summary = {
-  parsed_gate_count : int;
-  legacy_default_count : int;
-}
+type gate_decode_summary =
+  { parsed_gate_count : int
+  ; legacy_default_count : int
+  }
 
-type entries_read_result = {
-  entries : tool_call_entry list;
-  gate_decode : gate_decode_summary;
-}
+type entries_read_result =
+  { entries : tool_call_entry list
+  ; gate_decode : gate_decode_summary
+  }
 
 type trajectory_outcome =
   | Completed
@@ -40,34 +40,34 @@ type trajectory_outcome =
   | CostExceeded
   | Gated of string
 
-type trajectory = {
-  scenario_id : string option;
-  keeper_name : string;
-  trace_id : string;
-  generation : int;
-  started_at : float;
-  ended_at : float;
-  entries : tool_call_entry list;
-  total_cost_usd : float;
-  total_turns : int;
-  total_tool_calls : int;
-  outcome : trajectory_outcome;
-  task_id : string option;
-}
+type trajectory =
+  { scenario_id : string option
+  ; keeper_name : string
+  ; trace_id : string
+  ; generation : int
+  ; started_at : float
+  ; ended_at : float
+  ; entries : tool_call_entry list
+  ; total_cost_usd : float
+  ; total_turns : int
+  ; total_tool_calls : int
+  ; outcome : trajectory_outcome
+  ; task_id : string option
+  }
 
 (** {1 Thinking entries}
 
     Thinking blocks from LLM responses, persisted alongside tool call entries
     in the same JSONL file with [type = "thinking"]. *)
 
-type thinking_entry = {
-  ts : float;
-  ts_iso : string;
-  turn : int;
-  content : string;
-  content_length : int;
-  redacted : bool;
-}
+type thinking_entry =
+  { ts : float
+  ; ts_iso : string
+  ; turn : int
+  ; content : string
+  ; content_length : int
+  ; redacted : bool
+  }
 
 (** Tagged union for reading mixed JSONL (tool calls + thinking). *)
 type trajectory_line =
@@ -76,8 +76,8 @@ type trajectory_line =
 
 (** {1 Cost estimation} *)
 
-val tool_cost_estimate : string -> float
 (** Rough per-call cost estimate for keeper tools. *)
+val tool_cost_estimate : string -> float
 
 (** {1 JSON serialization} *)
 
@@ -86,14 +86,22 @@ val outcome_to_json : trajectory_outcome -> Yojson.Safe.t
 val outcome_to_string : trajectory_outcome -> string
 val default_result_truncation : int
 val default_thinking_truncation : int
-val entry_to_json :
-  ?result_max_len:int ->
-  ?runtime_contract:Yojson.Safe.t ->
-  ?action_radius:Yojson.Safe.t ->
-  tool_call_entry ->
-  Yojson.Safe.t
+
+val entry_to_json
+  :  ?result_max_len:int
+  -> ?runtime_contract:Yojson.Safe.t
+  -> ?action_radius:Yojson.Safe.t
+  -> tool_call_entry
+  -> Yojson.Safe.t
+
 val thinking_entry_to_json : ?content_max_len:int -> thinking_entry -> Yojson.Safe.t
-val trajectory_line_to_json : ?result_max_len:int -> ?content_max_len:int -> trajectory_line -> Yojson.Safe.t
+
+val trajectory_line_to_json
+  :  ?result_max_len:int
+  -> ?content_max_len:int
+  -> trajectory_line
+  -> Yojson.Safe.t
+
 val trajectory_to_json : trajectory -> Yojson.Safe.t
 
 (** {1 Persistence} *)
@@ -101,66 +109,88 @@ val trajectory_to_json : trajectory -> Yojson.Safe.t
 val trajectories_dir : string -> string -> string
 val trajectory_path : string -> string -> string -> string
 
-val append_entry :
-  ?runtime_contract:Yojson.Safe.t ->
-  ?action_radius:Yojson.Safe.t ->
-  masc_root:string -> keeper_name:string -> trace_id:string ->
-  tool_call_entry -> unit
+val append_entry
+  :  ?runtime_contract:Yojson.Safe.t
+  -> ?action_radius:Yojson.Safe.t
+  -> masc_root:string
+  -> keeper_name:string
+  -> trace_id:string
+  -> tool_call_entry
+  -> unit
 
-val append_summary :
-  masc_root:string -> keeper_name:string -> trace_id:string ->
-  trajectory -> unit
+val append_summary
+  :  masc_root:string
+  -> keeper_name:string
+  -> trace_id:string
+  -> trajectory
+  -> unit
 
-val append_thinking :
-  masc_root:string -> keeper_name:string -> trace_id:string ->
-  thinking_entry -> unit
+val append_thinking
+  :  masc_root:string
+  -> keeper_name:string
+  -> trace_id:string
+  -> thinking_entry
+  -> unit
 
-val read_entries :
-  masc_root:string -> keeper_name:string -> trace_id:string ->
-  tool_call_entry list
+val read_entries
+  :  masc_root:string
+  -> keeper_name:string
+  -> trace_id:string
+  -> tool_call_entry list
 
-val read_all_lines :
-  masc_root:string -> keeper_name:string -> trace_id:string ->
-  trajectory_line list
 (** Read all entries (tool calls + thinking) from JSONL. *)
+val read_all_lines
+  :  masc_root:string
+  -> keeper_name:string
+  -> trace_id:string
+  -> trajectory_line list
 
 (** {1 Accumulator}
 
     Mutable session-scoped state for tracking tool calls in progress. *)
 
-type accumulator = {
-  mutable entries : tool_call_entry list;
-  mutable total_cost : float;
-  mutable total_calls : int;
-  mutable turn : int;
-  keeper_name : string;
-  trace_id : string;
-  generation : int;
-  started_at : float;
-  masc_root : string;
-  mutable task_id : string option;
-}
+type accumulator =
+  { mutable entries : tool_call_entry list
+  ; mutable total_cost : float
+  ; mutable total_calls : int
+  ; mutable turn : int
+  ; keeper_name : string
+  ; trace_id : string
+  ; generation : int
+  ; started_at : float
+  ; masc_root : string
+  ; mutable task_id : string option
+  }
 
-val create_accumulator :
-  masc_root:string -> keeper_name:string -> trace_id:string ->
-  generation:int -> accumulator
+val create_accumulator
+  :  masc_root:string
+  -> keeper_name:string
+  -> trace_id:string
+  -> generation:int
+  -> accumulator
 
 val set_task_id : accumulator -> string -> unit
 val clear_task_id : accumulator -> unit
 val increment_turn : accumulator -> unit
-val record_entry :
-  ?runtime_contract:Yojson.Safe.t ->
-  ?action_radius:Yojson.Safe.t ->
-  ?on_persist_error:(exn -> unit) ->
-  accumulator ->
-  tool_call_entry ->
-  unit
+
+val record_entry
+  :  ?runtime_contract:Yojson.Safe.t
+  -> ?action_radius:Yojson.Safe.t
+  -> ?on_persist_error:(exn -> unit)
+  -> accumulator
+  -> tool_call_entry
+  -> unit
+
 val finalize : accumulator -> trajectory_outcome -> trajectory
 
-val detect_entropy :
-  ?threshold:int -> ?args_json:string -> accumulator -> string -> (string * int) option
 (** Detect if [tool_name] has been called [threshold]+ times consecutively.
     If [args_json] is provided, only consecutive IDENTICAL calls (same tool and same args) are counted. *)
+val detect_entropy
+  :  ?threshold:int
+  -> ?args_json:string
+  -> accumulator
+  -> string
+  -> (string * int) option
 
 val calls_in_current_turn : accumulator -> int
 
@@ -170,42 +200,46 @@ val calls_in_current_turn : accumulator -> int
     Computes per-tool call counts, latency percentiles, cost, and
     hourly activity buckets from raw trajectory entries. *)
 
-type tool_stat = {
-  name : string;
-  call_count : int;
-  success_count : int;
-  failure_count : int;
-  avg_duration_ms : int;
-  p95_duration_ms : int;
-  max_duration_ms : int;
-  total_cost_usd : float;
-  last_used_at : string;
-}
+type tool_stat =
+  { name : string
+  ; call_count : int
+  ; success_count : int
+  ; failure_count : int
+  ; avg_duration_ms : int
+  ; p95_duration_ms : int
+  ; max_duration_ms : int
+  ; total_cost_usd : float
+  ; last_used_at : string
+  }
 
-type hourly_bucket = {
-  hour : string;  (** ISO8601 hour start, e.g. "2026-04-06T10:00:00Z" *)
-  call_count : int;
-  error_count : int;
-}
+type hourly_bucket =
+  { hour : string (** ISO8601 hour start, e.g. "2026-04-06T10:00:00Z" *)
+  ; call_count : int
+  ; error_count : int
+  }
 
-val aggregate_tool_stats : tool_call_entry list -> tool_stat list
 (** Aggregate per-tool statistics from a list of entries.
     Results sorted by call_count descending. *)
+val aggregate_tool_stats : tool_call_entry list -> tool_stat list
 
-val hourly_timeline : tool_call_entry list -> hourly_bucket list
 (** Bucket entries by hour. Results sorted chronologically. *)
+val hourly_timeline : tool_call_entry list -> hourly_bucket list
 
 val tool_stat_to_json : tool_stat -> Yojson.Safe.t
 val hourly_bucket_to_json : hourly_bucket -> Yojson.Safe.t
 
-val read_entries_since :
-  masc_root:string -> keeper_name:string -> since:float ->
-  tool_call_entry list
 (** Read entries from all trace files for a keeper with ts >= [since].
     Results sorted chronologically. *)
+val read_entries_since
+  :  masc_root:string
+  -> keeper_name:string
+  -> since:float
+  -> tool_call_entry list
 
-val read_entries_since_result :
-  masc_root:string -> keeper_name:string -> since:float ->
-  entries_read_result
 (** Like {!read_entries_since}, plus whether the persisted gate object was
     parsed or defaulted for legacy rows that had no readable gate payload. *)
+val read_entries_since_result
+  :  masc_root:string
+  -> keeper_name:string
+  -> since:float
+  -> entries_read_result

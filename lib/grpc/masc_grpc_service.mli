@@ -19,7 +19,7 @@ val stream_max_buffer : unit -> int
     @param room_config The MASC room configuration.
     @param tool_dispatcher Function that dispatches tool calls:
       [tool_name -> arguments_json -> (result_json, error_message) result]. *)
-val create_service :
-  room_config:Coord_utils_backend_setup.config ->
-  tool_dispatcher:(string -> string -> (string, string) result) ->
-  Grpc_eio.Service.t
+val create_service
+  :  room_config:Coord_utils_backend_setup.config
+  -> tool_dispatcher:(string -> string -> (string, string) result)
+  -> Grpc_eio.Service.t

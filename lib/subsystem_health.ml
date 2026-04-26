@@ -15,30 +15,31 @@ let registry_mu = Stdlib.Mutex.create ()
 
 let with_lock f =
   Stdlib.Mutex.lock registry_mu;
-  Fun.protect
-    ~finally:(fun () -> Stdlib.Mutex.unlock registry_mu)
-    f
+  Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock registry_mu) f
+;;
 
-let register name =
-  with_lock (fun () ->
-    Hashtbl.replace registry name (true, None))
+let register name = with_lock (fun () -> Hashtbl.replace registry name (true, None))
 
 let mark_dead name =
-  with_lock (fun () ->
-    Hashtbl.replace registry name (false, Some (Time_compat.now ())))
+  with_lock (fun () -> Hashtbl.replace registry name (false, Some (Time_compat.now ())))
+;;
 
 let to_yojson () : Yojson.Safe.t =
   let entries =
     with_lock (fun () ->
-      Hashtbl.fold (fun name (alive, crash_time) acc ->
-        let status = if alive then "alive" else "dead" in
-        let fields = [
-          ("status", `String status);
-        ] @ (match crash_time with
-          | Some t -> [("crashed_at", `Float t)]
-          | None -> [])
-        in
-        (name, `Assoc fields) :: acc
-      ) registry [])
+      Hashtbl.fold
+        (fun name (alive, crash_time) acc ->
+           let status = if alive then "alive" else "dead" in
+           let fields =
+             [ "status", `String status ]
+             @
+             match crash_time with
+             | Some t -> [ "crashed_at", `Float t ]
+             | None -> []
+           in
+           (name, `Assoc fields) :: acc)
+        registry
+        [])
   in
   `Assoc (List.sort (fun (a, _) (b, _) -> String.compare a b) entries)
+;;

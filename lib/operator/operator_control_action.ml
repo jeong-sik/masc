@@ -1,10 +1,8 @@
 open Tool_args
 include Operator_control_snapshot
-
 open Result.Syntax
 
-let judgment_surface_enums =
-  [ "command.namespace"; "intervene" ]
+let judgment_surface_enums = [ "command.namespace"; "intervene" ]
 
 let normalize_judgment_surface value =
   let normalized = String.trim value |> String.lowercase_ascii in
@@ -12,18 +10,21 @@ let normalize_judgment_surface value =
   | "command.namespace" -> Ok "command.namespace"
   | "intervene" -> Ok normalized
   | _ -> Error "surface must be one of command.namespace, intervene"
+;;
 
 let normalize_judgment_target_type value =
   let normalized = String.trim value |> String.lowercase_ascii in
-  if Operator_digest_types.is_root_alias normalized then
-    Ok ("root", Operator_judgment.Coord)
+  if Operator_digest_types.is_root_alias normalized
+  then Ok ("root", Operator_judgment.Coord)
   else Error "target_type must be root"
+;;
 
 let default_fresh_ttl_sec surface =
   match surface with
   | "command.namespace" -> 60
   | "intervene" -> 300
   | _ -> 120
+;;
 
 let judgment_write_json (ctx : 'a context) args =
   let* surface = normalize_judgment_surface (get_string args "surface" "") in
@@ -32,8 +33,9 @@ let judgment_write_json (ctx : 'a context) args =
   in
   let target_id = get_string_opt args "target_id" in
   let summary = get_string args "summary" "" |> String.trim in
-  if summary = "" then Error "summary is required"
-  else
+  if summary = ""
+  then Error "summary is required"
+  else (
     let now_unix = Unix.gettimeofday () in
     let generated_at = iso_of_unix now_unix in
     let fresh_ttl_sec =
@@ -59,23 +61,29 @@ let judgment_write_json (ctx : 'a context) args =
       | _ -> None
     in
     let judgment =
-      Operator_judgment.record ctx.config ~surface
-        ~target_type:judgment_target_type ~target_id ~summary ~confidence
+      Operator_judgment.record
+        ctx.config
+        ~surface
+        ~target_type:judgment_target_type
+        ~target_id
+        ~summary
+        ~confidence
         ?model_name:(get_string_opt args "model_name")
         ?runtime_name:(get_string_opt args "runtime_name")
-        ?recommended_action ~evidence_refs
+        ?recommended_action
+        ~evidence_refs
         ~fallback_used:(get_bool args "fallback_used" false)
-        ~disagreement_with_truth:
-          (get_bool args "disagreement_with_truth" false)
-        ~generated_at ~generated_at_unix:now_unix ~fresh_until ~fresh_until_unix
-        ~keeper_name ()
+        ~disagreement_with_truth:(get_bool args "disagreement_with_truth" false)
+        ~generated_at
+        ~generated_at_unix:now_unix
+        ~fresh_until
+        ~fresh_until_unix
+        ~keeper_name
+        ()
     in
     Ok
-      (`Assoc
-        [
-          ("status", `String "ok");
-          ("judgment", Operator_judgment.to_yojson judgment);
-        ])
+      (`Assoc [ "status", `String "ok"; "judgment", Operator_judgment.to_yojson judgment ]))
+;;
 
 let judgment_latest_json (_ctx : 'a context) args =
   let* surface = normalize_judgment_surface (get_string args "surface" "") in
@@ -86,30 +94,33 @@ let judgment_latest_json (_ctx : 'a context) args =
   let require_fresh = get_bool args "require_fresh" true in
   let judgment =
     match
-      Operator_judgment.latest_active _ctx.config ~surface
-        ~target_type:judgment_target_type ~target_id
+      Operator_judgment.latest_active
+        _ctx.config
+        ~surface
+        ~target_type:judgment_target_type
+        ~target_id
     with
     | Some value when (not require_fresh) || Operator_judgment.is_fresh value ->
-        Some value
+      Some value
     | _ -> None
   in
   Ok
     (`Assoc
-      [
-        ("status", `String "ok");
-        ( "judgment",
-          match judgment with
-          | Some value -> Operator_judgment.to_yojson value
-          | None -> `Null );
-      ])
+        [ "status", `String "ok"
+        ; ( "judgment"
+          , match judgment with
+            | Some value -> Operator_judgment.to_yojson value
+            | None -> `Null )
+        ])
+;;
 
-type action_request = {
-  actor : string;
-  action_type : string;
-  target_type : string;
-  target_id : string option;
-  payload : Yojson.Safe.t;
-}
+type action_request =
+  { actor : string
+  ; action_type : string
+  ; target_type : string
+  ; target_id : string option
+  ; payload : Yojson.Safe.t
+  }
 
 let canonical_action_type action_type =
   match action_type with
@@ -124,58 +135,75 @@ let canonical_action_type action_type =
   | "keeper_github_identity_login_prepare" -> "keeper_github_identity_login_prepare"
   | "keeper_github_identity_status" -> "keeper_github_identity_status"
   | other -> other
+;;
 
 let normalize_action_target_type target_type =
   let normalized = String.trim target_type |> String.lowercase_ascii in
-  if Operator_digest_types.is_root_alias normalized then Ok "root"
-  else match normalized with
-  | "keeper" as value -> Ok value
-  | "" -> Ok ""
-  | _ -> Error "target_type must be root or keeper"
+  if Operator_digest_types.is_root_alias normalized
+  then Ok "root"
+  else (
+    match normalized with
+    | "keeper" as value -> Ok value
+    | "" -> Ok ""
+    | _ -> Error "target_type must be root or keeper")
+;;
 
 let default_target_type_for action_type =
   match action_type with
-  | "broadcast" | "namespace_pause" | "namespace_resume" | "task_inject" | "social_sweep" -> "root"
-  | "keeper_message" | "keeper_probe" | "keeper_recover"
-  | "keeper_github_identity_login_prepare" | "keeper_github_identity_status" -> "keeper"
+  | "broadcast" | "namespace_pause" | "namespace_resume" | "task_inject" | "social_sweep"
+    -> "root"
+  | "keeper_message"
+  | "keeper_probe"
+  | "keeper_recover"
+  | "keeper_github_identity_login_prepare"
+  | "keeper_github_identity_status" -> "keeper"
   | _ -> ""
+;;
 
 let generate_confirm_token ~(clock : _ Eio.Time.clock) config =
   let max_attempts = 10 in
   let rec loop attempts =
-    if attempts >= max_attempts then
-      Error (Printf.sprintf
-        "failed to generate unique confirm token after %d attempts \
-         (token space may be exhausted; %d pending confirms)"
-        max_attempts
-        (List.length (raw_pending_confirms config)))
-    else
+    if attempts >= max_attempts
+    then
+      Error
+        (Printf.sprintf
+           "failed to generate unique confirm token after %d attempts (token space may \
+            be exhausted; %d pending confirms)"
+           max_attempts
+           (List.length (raw_pending_confirms config)))
+    else (
       let token = "opc_" ^ String.sub (Auth.generate_token ()) 0 32 in
       let exists =
         raw_pending_confirms config
         |> List.exists (fun entry -> String.equal entry.token token)
       in
-      if exists then begin
+      if exists
+      then (
         (* Exponential backoff: 1ms, 2ms, 4ms, ... up to ~512ms *)
-        let backoff_s = float_of_int (1000 * (1 lsl (min attempts 9))) /. 1_000_000.0 in
+        let backoff_s = float_of_int (1000 * (1 lsl min attempts 9)) /. 1_000_000.0 in
         Eio.Time.sleep clock backoff_s;
-        loop (attempts + 1)
-      end else Ok token
+        loop (attempts + 1))
+      else Ok token)
   in
   loop 0
+;;
 
 let resolved_actor_for_args ?actor_hint ctx args =
   let payload_actor = get_string_opt args "actor" |> Option.map String.trim in
   let hinted_actor = actor_hint |> Option.map String.trim in
   Ok
-    (normalized_actor ~context_actor:ctx.agent_name
+    (normalized_actor
+       ~context_actor:ctx.agent_name
        (match hinted_actor with
-       | Some actor when actor <> "" -> Some actor
-       | _ -> payload_actor))
+        | Some actor when actor <> "" -> Some actor
+        | _ -> payload_actor))
+;;
 
 let action_request_of_args ?actor_hint ctx args =
   let action_type =
-    get_string args "action_type" "" |> String.trim |> String.lowercase_ascii
+    get_string args "action_type" ""
+    |> String.trim
+    |> String.lowercase_ascii
     |> canonical_action_type
   in
   let raw_target_type =
@@ -183,22 +211,25 @@ let action_request_of_args ?actor_hint ctx args =
   in
   let* actor = resolved_actor_for_args ?actor_hint ctx args in
   Ok
-    {
-      actor;
-      action_type;
-      target_type =
-        if raw_target_type <> "" then raw_target_type
-        else default_target_type_for action_type;
-      target_id = get_string_opt args "target_id";
-      payload = get_payload args;
+    { actor
+    ; action_type
+    ; target_type =
+        (if raw_target_type <> ""
+         then raw_target_type
+         else default_target_type_for action_type)
+    ; target_id = get_string_opt args "target_id"
+    ; payload = get_payload args
     }
+;;
 
 let normalize_request_target_type (request : action_request) =
   let* target_type =
-    if request.target_type <> "" then normalize_action_target_type request.target_type
+    if request.target_type <> ""
+    then normalize_action_target_type request.target_type
     else Ok (default_target_type_for request.action_type)
   in
   Ok { request with target_type }
+;;
 
 (** Resolve tool name for an action_type. Looks up available_actions first,
     falls back to legacy mapping for unlisted actions. *)
@@ -206,21 +237,21 @@ let delegated_tool_for action_type =
   match
     List.find_opt
       (fun (a : Operator_pending_confirm.available_action) ->
-        String.equal a.action_type action_type)
+         String.equal a.action_type action_type)
       Operator_pending_confirm.available_actions
   with
   | Some action -> action.tool_name
   | None -> "unknown"
+;;
 
 let confirm_required = Operator_approval.confirm_required
 
 let preview_of_action (request : action_request) =
   let base =
-    [
-      ("actor", `String request.actor);
-      ("action_type", `String request.action_type);
-      ("target_type", `String request.target_type);
-      ("target_id", string_option_to_json request.target_id);
+    [ "actor", `String request.actor
+    ; "action_type", `String request.action_type
+    ; "target_type", `String request.target_type
+    ; "target_id", string_option_to_json request.target_id
     ]
   in
   let payload_fields =
@@ -228,23 +259,30 @@ let preview_of_action (request : action_request) =
     | `Assoc fields -> fields
     | _ -> []
   in
-  `Assoc (base @ [ ("payload", `Assoc payload_fields) ])
+  `Assoc (base @ [ "payload", `Assoc payload_fields ])
+;;
 
 let validate_target_type expected request =
-  if String.equal request.target_type expected then Ok ()
+  if String.equal request.target_type expected
+  then Ok ()
   else
     Error
-      (Printf.sprintf "invalid target_type for %s (expected %s)"
-         request.action_type expected)
+      (Printf.sprintf
+         "invalid target_type for %s (expected %s)"
+         request.action_type
+         expected)
+;;
 
 let require_target_id request =
   match request.target_id with
   | Some target_id -> Ok target_id
   | None -> Error "target_id is required"
+;;
 
 let require_payload_field payload key error_message =
   match get_string_opt payload key with
   | Some value -> Ok value
   | None -> Error error_message
+;;
 
 (* parse_turn_kind removed — team session turn types deleted. *)

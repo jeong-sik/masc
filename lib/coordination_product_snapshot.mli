@@ -9,6 +9,11 @@ type severity_counts =
   ; error : int
   }
 
+(** Captured non-deterministic inputs for the coordination projection.
+
+    Store reads, clock reads, feature flags, and global counters belong before
+    this boundary. Consumers can pass a fixed value to {!project} for
+    repeatable tests and diagnostics. *)
 type observed_state =
   { goals : Goal_store.goal list
   ; tasks : Types.task list
@@ -18,34 +23,29 @@ type observed_state =
   ; persist_errors : int
   ; economy_enabled : bool
   }
-(** Captured non-deterministic inputs for the coordination projection.
 
-    Store reads, clock reads, feature flags, and global counters belong before
-    this boundary. Consumers can pass a fixed value to {!project} for
-    repeatable tests and diagnostics. *)
-
-val capture : Coord.config -> observed_state
 (** Capture live runtime inputs from the existing stores. *)
+val capture : Coord.config -> observed_state
 
-val project : observed_state -> Coordination_product.snapshot
 (** Deterministically project captured inputs into the pure product FSM view. *)
+val project : observed_state -> Coordination_product.snapshot
 
-val build : Coord.config -> Coordination_product.snapshot
 (** Build a live coordination product snapshot from existing runtime stores.
 
     Equivalent to [capture config |> project]. *)
+val build : Coord.config -> Coordination_product.snapshot
 
-val severity_counts : Coordination_product.snapshot -> severity_counts
 (** Count snapshot violations by severity. *)
+val severity_counts : Coordination_product.snapshot -> severity_counts
 
-val to_yojson : Coordination_product.snapshot -> Yojson.Safe.t
 (** Serialize a snapshot using the stable dashboard/MCP JSON shape. *)
+val to_yojson : Coordination_product.snapshot -> Yojson.Safe.t
 
-val build_yojson : Coord.config -> Yojson.Safe.t
 (** Build and serialize a snapshot. *)
+val build_yojson : Coord.config -> Yojson.Safe.t
 
-val safe_build_yojson : Coord.config -> Yojson.Safe.t
 (** Build and serialize a snapshot without raising.
 
     On projection failure the result keeps the normal snapshot shape with empty
     products/violations and a [projection_error] field. *)
+val safe_build_yojson : Coord.config -> Yojson.Safe.t

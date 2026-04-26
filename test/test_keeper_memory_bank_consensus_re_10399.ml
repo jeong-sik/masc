@@ -32,36 +32,51 @@
     Operators verify env override at process boot only. *)
 
 open Alcotest
-
 module M = Masc_mcp.Keeper_memory_bank
 
 (* --- 1. default pattern: detect inflated markers --------- *)
 
 let test_inflated_marker_detected () =
-  check bool "1234567ep flagged" true
+  check
+    bool
+    "1234567ep flagged"
+    true
     (M.has_inflated_consensus_marker "round 1234567ep complete");
-  check bool "654321ep+ flagged" true
+  check
+    bool
+    "654321ep+ flagged"
+    true
     (M.has_inflated_consensus_marker "phase 654321ep+ done")
+;;
 
 let test_clean_prose_rejected () =
-  check bool "plain prose not flagged" false
+  check
+    bool
+    "plain prose not flagged"
+    false
     (M.has_inflated_consensus_marker "this is a normal summary");
-  check bool "small numbers not flagged" false
+  check
+    bool
+    "small numbers not flagged"
+    false
     (M.has_inflated_consensus_marker "12345ep is below the threshold");
-  check bool "unrelated digits not flagged" false
+  check
+    bool
+    "unrelated digits not flagged"
+    false
     (M.has_inflated_consensus_marker "version 1234567 alpha")
+;;
 
 (* --- 2. idempotence: 100 calls all consistent ----------- *)
 
 let test_repeated_calls_consistent () =
   for _ = 1 to 100 do
-    check bool "consistent flag" true
-      (M.has_inflated_consensus_marker "9999999ep")
+    check bool "consistent flag" true (M.has_inflated_consensus_marker "9999999ep")
   done;
   for _ = 1 to 100 do
-    check bool "consistent miss" false
-      (M.has_inflated_consensus_marker "ordinary text")
+    check bool "consistent miss" false (M.has_inflated_consensus_marker "ordinary text")
   done
+;;
 
 (* --- 3. concurrent first forcing does not raise --------- *)
 
@@ -77,35 +92,34 @@ let test_concurrent_first_forcing_no_raise () =
         while not (Atomic.get start) do
           Domain.cpu_relax ()
         done;
-        let needle =
-          if i mod 2 = 0 then "8888888ep run" else "no marker here"
-        in
+        let needle = if i mod 2 = 0 then "8888888ep run" else "no marker here" in
         M.has_inflated_consensus_marker needle))
   in
   Atomic.set start true;
   let results = List.map Domain.join domains in
   check int "all domains completed without raising" n (List.length results);
-  check int "half of probes matched the marker" (n / 2)
+  check
+    int
+    "half of probes matched the marker"
+    (n / 2)
     (List.length (List.filter Fun.id results))
+;;
 
 let () =
-  run "keeper_memory_bank_consensus_re_10399"
-    [
-      ( "domain-safety",
-        [
-          test_case "concurrent first forcing does not raise" `Quick
-            test_concurrent_first_forcing_no_raise;
-        ] );
-      ( "default-pattern",
-        [
-          test_case "inflated markers detected" `Quick
-            test_inflated_marker_detected;
-          test_case "clean prose rejected" `Quick
-            test_clean_prose_rejected;
-        ] );
-      ( "memoisation",
-        [
-          test_case "repeated calls stay consistent" `Quick
-            test_repeated_calls_consistent;
-        ] );
+  run
+    "keeper_memory_bank_consensus_re_10399"
+    [ ( "domain-safety"
+      , [ test_case
+            "concurrent first forcing does not raise"
+            `Quick
+            test_concurrent_first_forcing_no_raise
+        ] )
+    ; ( "default-pattern"
+      , [ test_case "inflated markers detected" `Quick test_inflated_marker_detected
+        ; test_case "clean prose rejected" `Quick test_clean_prose_rejected
+        ] )
+    ; ( "memoisation"
+      , [ test_case "repeated calls stay consistent" `Quick test_repeated_calls_consistent
+        ] )
     ]
+;;

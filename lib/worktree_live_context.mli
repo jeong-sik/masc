@@ -17,8 +17,7 @@
       call for [actor_key].
     - [None] — when the repo cannot be located, when no changes are
       present, or when the hash matches the previous call. *)
-val capture_change_block :
-  base_path:string -> actor_key:string -> string option
+val capture_change_block : base_path:string -> actor_key:string -> string option
 
 (** {1 Test hooks}
 
@@ -26,8 +25,7 @@ val capture_change_block :
 
 (** Capture hook signature: [~workdir args] → optional stdout lines
     from the stubbed [git] invocation. *)
-type git_capture_hook =
-  workdir:string -> string list -> string list option
+type git_capture_hook = workdir:string -> string list -> string list option
 
 (** Install a deterministic git capture used instead of spawning
     [git] via {!Masc_exec.Exec_gate}. *)

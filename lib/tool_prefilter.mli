@@ -10,27 +10,27 @@
 
     @since 2.170.0 — #4574 *)
 
-val filter :
-  tools:Types.tool_schema list ->
-  query:string ->
-  k:int ->
-  Types.tool_schema list
 (** Return top-[k] tools from [tools] most relevant to [query].
     Returns [[]] on zero overlap. *)
+val filter
+  :  tools:Types.tool_schema list
+  -> query:string
+  -> k:int
+  -> Types.tool_schema list
 
-val synonym_keys : string list
 (** All tool names registered in the synonym dictionary.
     Test helper: verify every key maps to a known [Tool_name.t]. *)
+val synonym_keys : string list
 
-val filter_with_scores :
-  tools:Types.tool_schema list ->
-  query:string ->
-  k:int ->
-  (Types.tool_schema * float) list
 (** Return top-[k] tools with their cosine similarity scores.
     Returns [[]] on zero overlap. Useful for logging/debugging. *)
+val filter_with_scores
+  :  tools:Types.tool_schema list
+  -> query:string
+  -> k:int
+  -> (Types.tool_schema * float) list
 
-val synonym_text : string -> string
 (** Return space-separated synonym keywords for a tool [name].
     Returns [""] if no synonyms are defined.
     Useful for enriching BM25 index descriptions with user-facing vocabulary. *)
+val synonym_text : string -> string

@@ -11,7 +11,6 @@ type tool_result = bool * string
 (** {1 Transport status} *)
 
 val handle_transport_status : Yojson.Safe.t -> tool_result
-
 val handle_websocket_discovery : Yojson.Safe.t -> tool_result
 
 (** {1 WebRTC handshake} *)

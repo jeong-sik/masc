@@ -4,3 +4,4 @@
 
 let contains_substring haystack needle =
   Base.String.is_substring haystack ~substring:needle
+;;

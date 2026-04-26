@@ -107,16 +107,16 @@ let parse_keeper_identity (json : Yojson.Safe.t) : (parsed_keeper_identity, stri
        Decision Resolution: write raw, compare normalize, render
        truncate. *)
     let personality_defaults : Keeper_personality_io.raw_personality =
-      {
-        will = Env_config_core.keeper_will ();
-        needs = Env_config_core.keeper_needs ();
-        desires = Env_config_core.keeper_desires ();
-        instructions = "";
+      { will = Env_config_core.keeper_will ()
+      ; needs = Env_config_core.keeper_needs ()
+      ; desires = Env_config_core.keeper_desires ()
+      ; instructions = ""
       }
     in
     let personality =
       Keeper_personality_io.parse ~defaults:personality_defaults json
-      |> Keeper_personality_io.coerce |> Keeper_personality_io.to_raw
+      |> Keeper_personality_io.coerce
+      |> Keeper_personality_io.to_raw
     in
     let pk_will = personality.will in
     let pk_needs = personality.needs in

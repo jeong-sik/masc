@@ -3,19 +3,16 @@
     Module retained for dispatch interface compatibility. *)
 
 (* Context required by a2a tools *)
-type context = {
-  config: Coord.config;
-  agent_name: string;
-}
+type context =
+  { config : Coord.config
+  ; agent_name : string
+  }
 
 type tool_result = bool * string
 
 (* Dispatch function - returns None if tool not handled *)
-let dispatch _ctx ~name:_ ~args:_ : tool_result option =
-  None
-
+let dispatch _ctx ~name:_ ~args:_ : tool_result option = None
 let schemas : Types.tool_schema list = []
-
 let tool_required_permission _name = None
 
 (* ================================================================ *)
@@ -25,13 +22,14 @@ let tool_required_permission _name = None
 let () =
   List.iter
     (fun (s : Types.tool_schema) ->
-      Tool_spec.register
-        (Tool_spec.create
-           ~name:s.name
-           ~description:s.description
-           ~module_tag:Tool_dispatch.Mod_a2a
-           ~input_schema:s.input_schema
-           ~handler_binding:Tag_dispatch
-           ?required_permission:(tool_required_permission s.name)
-           ()))
+       Tool_spec.register
+         (Tool_spec.create
+            ~name:s.name
+            ~description:s.description
+            ~module_tag:Tool_dispatch.Mod_a2a
+            ~input_schema:s.input_schema
+            ~handler_binding:Tag_dispatch
+            ?required_permission:(tool_required_permission s.name)
+            ()))
     schemas
+;;

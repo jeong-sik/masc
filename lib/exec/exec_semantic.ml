@@ -7,12 +7,14 @@ type t =
   | `Oom_killed
   | `Policy_denied of string
   | `Tool_missing of string
-  | `Permission_denied of string ]
+  | `Permission_denied of string
+  ]
 
 let is_git_argv = function
   | "git" :: _ -> true
   | bin :: _ when Filename.basename bin = "git" -> true
   | _ -> false
+;;
 
 let stderr_hints_oom stderr =
   let lower = String.lowercase_ascii stderr in
@@ -20,63 +22,72 @@ let stderr_hints_oom stderr =
   || String_util.contains_substring lower "oom-killer"
   || String_util.contains_substring lower "killed (oom)"
   || String_util.contains_substring lower "cannot allocate memory"
+;;
 
 let first_token s =
   let len = String.length s in
   let rec skip_ws i =
-    if i >= len then i
-    else match s.[i] with ' ' | '\t' | '\n' -> skip_ws (i + 1) | _ -> i
+    if i >= len
+    then i
+    else (
+      match s.[i] with
+      | ' ' | '\t' | '\n' -> skip_ws (i + 1)
+      | _ -> i)
   in
   let rec take_nonws i =
-    if i >= len then i
-    else match s.[i] with ' ' | '\t' | '\n' -> i | _ -> take_nonws (i + 1)
+    if i >= len
+    then i
+    else (
+      match s.[i] with
+      | ' ' | '\t' | '\n' -> i
+      | _ -> take_nonws (i + 1))
   in
   let start = skip_ws 0 in
   let stop = take_nonws start in
   if start = stop then "" else String.sub s start (stop - start)
+;;
 
 let interpret ~argv ~status ~stdout:_ ~stderr =
   match status with
   | Unix.WEXITED 0 -> `Ok
   | Unix.WEXITED 127 ->
-      let tool = match argv with
-        | x :: _ -> Filename.basename x
-        | [] -> ""
-      in
-      `Tool_missing tool
+    let tool =
+      match argv with
+      | x :: _ -> Filename.basename x
+      | [] -> ""
+    in
+    `Tool_missing tool
   | Unix.WEXITED 126 ->
-      let path = match argv with
-        | x :: _ -> x
-        | [] -> ""
-      in
-      `Permission_denied path
+    let path =
+      match argv with
+      | x :: _ -> x
+      | [] -> ""
+    in
+    `Permission_denied path
   | Unix.WEXITED 128 when is_git_argv argv -> `Git_not_a_repo
   | Unix.WEXITED code -> `Fail code
-  | Unix.WSIGNALED n when n = Sys.sigkill && stderr_hints_oom stderr ->
-      `Oom_killed
+  | Unix.WSIGNALED n when n = Sys.sigkill && stderr_hints_oom stderr -> `Oom_killed
   | Unix.WSIGNALED n -> `Signaled n
   | Unix.WSTOPPED n -> `Signaled n
+;;
 
 let interpret_cmd ~cmd ~status ~output =
   let head = first_token cmd in
   let argv = if head = "" then [] else [ head ] in
   interpret ~argv ~status ~stdout:"" ~stderr:output
+;;
 
 let to_hint = function
   | `Ok -> None
   | `Fail n -> Some (Printf.sprintf "command exited with code %d" n)
   | `Timeout s -> Some (Printf.sprintf "timed out after %.1fs" s)
   | `Signaled n -> Some (Printf.sprintf "process terminated by signal %d" n)
-  | `Git_not_a_repo ->
-      Some "git exit 128 — cwd is not inside a git repository"
-  | `Oom_killed ->
-      Some "process was OOM-killed — try a smaller input or higher mem limit"
-  | `Policy_denied rule ->
-      Some (Printf.sprintf "policy denied: %s" rule)
-  | `Tool_missing tool ->
-      Some (Printf.sprintf "tool not found on PATH: %s" tool)
-  | `Permission_denied path ->
-      Some (Printf.sprintf "EACCES: cannot execute %s" path)
+  | `Git_not_a_repo -> Some "git exit 128 — cwd is not inside a git repository"
+  | `Oom_killed -> Some "process was OOM-killed — try a smaller input or higher mem limit"
+  | `Policy_denied rule -> Some (Printf.sprintf "policy denied: %s" rule)
+  | `Tool_missing tool -> Some (Printf.sprintf "tool not found on PATH: %s" tool)
+  | `Permission_denied path -> Some (Printf.sprintf "EACCES: cannot execute %s" path)
+;;
 
 (** Structured self-correction alternatives for each semantic exit kind.
     Empty list = no auto-correction possible (operator required).
@@ -86,32 +97,41 @@ let to_alternatives = function
   | `Ok -> []
   | `Fail _ -> []
   | `Timeout _ ->
-      [ "Split the command into smaller steps that each complete faster."
-      ; "Pipe intermediate results to a file instead of holding in memory."
-      ]
+    [ "Split the command into smaller steps that each complete faster."
+    ; "Pipe intermediate results to a file instead of holding in memory."
+    ]
   | `Signaled _ -> []
   | `Git_not_a_repo ->
-      [ "Run `pwd` to check current directory."
-      ; "Clone the repository first: `git clone <url> <dir>` then cd into it."
-      ]
+    [ "Run `pwd` to check current directory."
+    ; "Clone the repository first: `git clone <url> <dir>` then cd into it."
+    ]
   | `Oom_killed ->
-      [ "Reduce input size: process fewer files or rows at once."
-      ; "Stream output line-by-line instead of buffering everything."
-      ]
+    [ "Reduce input size: process fewer files or rows at once."
+    ; "Stream output line-by-line instead of buffering everything."
+    ]
   | `Policy_denied _ -> []
   | `Tool_missing tool ->
-      [ Printf.sprintf "Install the missing tool: `opam install %s` or `brew install %s`." tool tool
-      ; Printf.sprintf "Check if %s is installed but not on PATH: `which %s` or `command -v %s`." tool tool tool
-      ]
+    [ Printf.sprintf
+        "Install the missing tool: `opam install %s` or `brew install %s`."
+        tool
+        tool
+    ; Printf.sprintf
+        "Check if %s is installed but not on PATH: `which %s` or `command -v %s`."
+        tool
+        tool
+        tool
+    ]
   | `Permission_denied _ ->
-      [ "Check file permissions: `ls -la <path>`."
-      ; "The binary may need execute permission: `chmod +x <path>` (if you own it)."
-      ]
+    [ "Check file permissions: `ls -la <path>`."
+    ; "The binary may need execute permission: `chmod +x <path>` (if you own it)."
+    ]
+;;
 
 type payload_value =
   [ `String of string
   | `Int of int
-  | `Float of float ]
+  | `Float of float
+  ]
 
 let to_kind = function
   | `Ok -> "ok"
@@ -123,6 +143,7 @@ let to_kind = function
   | `Policy_denied _ -> "policy_denied"
   | `Tool_missing _ -> "tool_missing"
   | `Permission_denied _ -> "permission_denied"
+;;
 
 let to_payload : t -> (string * payload_value) list = function
   | `Ok -> []
@@ -134,6 +155,7 @@ let to_payload : t -> (string * payload_value) list = function
   | `Policy_denied rule -> [ "rule", `String rule ]
   | `Tool_missing tool -> [ "tool", `String tool ]
   | `Permission_denied path -> [ "path", `String path ]
+;;
 
 let enabled () =
   (* Plan decision point 5: after P1 merge the semantic fields flip
@@ -147,3 +169,4 @@ let enabled () =
   match Sys.getenv_opt "MASC_BASH_SEMANTIC_EXIT" with
   | Some ("0" | "false" | "FALSE" | "no" | "off") -> false
   | _ -> true
+;;

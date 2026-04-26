@@ -18,20 +18,20 @@
 
 type health_status =
   | Healthy
-  | Unhealthy of string  (** reason *)
-  | Recovering           (** half-open, testing *)
+  | Unhealthy of string (** reason *)
+  | Recovering (** half-open, testing *)
   | Unknown of string
-      (** Issue #8607: unrecognised circuit-breaker state_name (carries
+  (** Issue #8607: unrecognised circuit-breaker state_name (carries
           the raw value for diagnostics). Previously [_ -> Healthy]
           silently masked future state additions and wire-format drift
           as a green health signal. *)
 
-type agent_health_summary = {
-  agent_name : string;
-  status : health_status;
-  recent_failures : int;
-  cooldown_remaining_sec : int;
-}
+type agent_health_summary =
+  { agent_name : string
+  ; status : health_status
+  ; recent_failures : int
+  ; cooldown_remaining_sec : int
+  }
 
 (** {1 Core API} *)
 
@@ -55,14 +55,11 @@ val record_failure : agent_name:string -> reason:string -> unit
 
 (** [filter_healthy agents] splits into [(healthy, skipped_with_reasons)].
     [Unknown raw] is reported as ["unknown breaker state <raw>"]. *)
-val filter_healthy :
-  (string * 'a) list ->
-  (string * 'a) list * (string * string) list
+val filter_healthy : (string * 'a) list -> (string * 'a) list * (string * string) list
 
 (** {1 Statistics} *)
 
 val get_summary : agent_name:string -> agent_health_summary
-
 val get_all_summaries : unit -> agent_health_summary list
 
 (** {1 JSON Serialization} *)

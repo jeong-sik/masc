@@ -15,6 +15,7 @@ let to_string = function
   | Paused -> "paused"
   | Completed -> "completed"
   | Dropped -> "dropped"
+;;
 
 let of_string = function
   | "executing" -> Some Executing
@@ -25,20 +26,18 @@ let of_string = function
   | "completed" -> Some Completed
   | "dropped" -> Some Dropped
   | _ -> None
+;;
 
-let parse s =
-  String.trim s |> String.lowercase_ascii |> of_string
-
-let to_yojson t =
-  `String (to_string t)
+let parse s = String.trim s |> String.lowercase_ascii |> of_string
+let to_yojson t = `String (to_string t)
 
 let of_yojson = function
-  | `String raw -> (
-      match parse raw with
-      | Some phase -> Ok phase
-      | None -> Error ("goal_phase_of_yojson: " ^ raw))
-  | json ->
-      Error ("goal_phase_of_yojson: " ^ Yojson.Safe.to_string json)
+  | `String raw ->
+    (match parse raw with
+     | Some phase -> Ok phase
+     | None -> Error ("goal_phase_of_yojson: " ^ raw))
+  | json -> Error ("goal_phase_of_yojson: " ^ Yojson.Safe.to_string json)
+;;
 
 type action =
   | Request_complete
@@ -61,6 +60,7 @@ let action_to_string = function
   | Operator_unblock -> "operator_unblock"
   | Drop -> "drop"
   | Reopen -> "reopen"
+;;
 
 let action_of_string = function
   | "request_complete" -> Some Request_complete
@@ -73,9 +73,9 @@ let action_of_string = function
   | "drop" -> Some Drop
   | "reopen" -> Some Reopen
   | _ -> None
+;;
 
-let parse_action s =
-  String.trim s |> String.lowercase_ascii |> action_of_string
+let parse_action s = String.trim s |> String.lowercase_ascii |> action_of_string
 
 type transition_outcome =
   | Move_to of t
@@ -83,16 +83,19 @@ type transition_outcome =
   | Open_approval
   | Complete
 
-let decide_transition ~phase ~(action : action) ~has_effective_verifier_policy
-    ~require_completion_approval =
+let decide_transition
+      ~phase
+      ~(action : action)
+      ~has_effective_verifier_policy
+      ~require_completion_approval
+  =
   match phase, action with
   | Executing, Request_complete ->
-      if has_effective_verifier_policy then
-        Ok Open_verification
-      else if require_completion_approval then
-        Ok Open_approval
-      else
-        Ok Complete
+    if has_effective_verifier_policy
+    then Ok Open_verification
+    else if require_completion_approval
+    then Ok Open_approval
+    else Ok Complete
   | Executing, Pause -> Ok (Move_to Paused)
   | Executing, Operator_block -> Ok (Move_to Blocked)
   | Executing, Drop -> Ok (Move_to Dropped)
@@ -120,6 +123,9 @@ let decide_transition ~phase ~(action : action) ~has_effective_verifier_policy
   | Completed, Drop -> Ok (Move_to Dropped)
   | Dropped, Reopen -> Ok (Move_to Executing)
   | _ ->
-      Error
-        (Printf.sprintf "invalid goal transition: %s -> %s"
-           (to_string phase) (action_to_string action))
+    Error
+      (Printf.sprintf
+         "invalid goal transition: %s -> %s"
+         (to_string phase)
+         (action_to_string action))
+;;

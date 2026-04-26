@@ -13,35 +13,35 @@ type label =
   | Drift
 
 (** A human-labeled verdict. *)
-type labeled_verdict = {
-  verdict : Cdal_types.contract_verdict;
-  label : label;
-  labeler : string;
-  note : string option;
-  labeled_at : string;
-}
+type labeled_verdict =
+  { verdict : Cdal_types.contract_verdict
+  ; label : label
+  ; labeler : string
+  ; note : string option
+  ; labeled_at : string
+  }
 
 (** Confusion matrix counts per protocol Section 7. *)
-type confusion_summary = {
-  supported : int;
-  unsupported : int;
-  ambiguous : int;
-  drift : int;
-}
+type confusion_summary =
+  { supported : int
+  ; unsupported : int
+  ; ambiguous : int
+  ; drift : int
+  }
 
 (** Output contract per protocol Section 7. *)
-type output_contract = {
-  workload_name : string;
-  protocol_version : string;
-  judge_protocol_version : string;
-  label_owner : string;
-  metric_owner : string;
-  confusion : confusion_summary;
-  claim_coverage : float;
-  precision_strict : float;
-  precision_lenient : float;
-  drift_note : string;
-}
+type output_contract =
+  { workload_name : string
+  ; protocol_version : string
+  ; judge_protocol_version : string
+  ; label_owner : string
+  ; metric_owner : string
+  ; confusion : confusion_summary
+  ; claim_coverage : float
+  ; precision_strict : float
+  ; precision_lenient : float
+  ; drift_note : string
+  }
 
 (** {2 String conversions} *)
 
@@ -72,16 +72,16 @@ val compute_claim_coverage : labeled:int -> total:int -> float
         This is the denominator: [claim_coverage = labeled_non_drift / total_claims].
     @param drift_note Free-text note about observed drift, or empty string.
     @param labeled_verdict list The labeled verdicts to aggregate. *)
-val build_output_contract :
-  workload_name:string ->
-  protocol_version:string ->
-  judge_protocol_version:string ->
-  label_owner:string ->
-  metric_owner:string ->
-  total_claims:int ->
-  drift_note:string ->
-  labeled_verdict list ->
-  output_contract
+val build_output_contract
+  :  workload_name:string
+  -> protocol_version:string
+  -> judge_protocol_version:string
+  -> label_owner:string
+  -> metric_owner:string
+  -> total_claims:int
+  -> drift_note:string
+  -> labeled_verdict list
+  -> output_contract
 
 (** {2 JSON serialization} *)
 

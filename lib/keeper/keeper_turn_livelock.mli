@@ -11,29 +11,32 @@
     State is process-local; a server restart resets the
     bookkeeping. *)
 
-type attempt_state = {
-  turn_id : int;
-  attempts : int;
-  first_started_at : float;  (** Unix seconds. *)
-}
+type attempt_state =
+  { turn_id : int
+  ; attempts : int
+  ; first_started_at : float (** Unix seconds. *)
+  }
 
 type start_outcome =
   | Fresh
-  | Reattempt of { previous_attempts : int; first_started_at : float }
+  | Reattempt of
+      { previous_attempts : int
+      ; first_started_at : float
+      }
   | Regression of { previous_turn_id : int }
 
 type gate_reason =
-  | Attempts_exhausted of {
-      attempts : int;
-      max_attempts : int;
-      first_started_at : float;
-    }
-  | Stuck_age_exceeded of {
-      attempts : int;
-      age_sec : float;
-      threshold_sec : float;
-      first_started_at : float;
-    }
+  | Attempts_exhausted of
+      { attempts : int
+      ; max_attempts : int
+      ; first_started_at : float
+      }
+  | Stuck_age_exceeded of
+      { attempts : int
+      ; age_sec : float
+      ; threshold_sec : float
+      ; first_started_at : float
+      }
 
 type guarded_start_outcome =
   | Started of start_outcome
@@ -46,18 +49,18 @@ type guarded_start_outcome =
     Thread-safe across keeper fibers / domains. *)
 val record_turn_start : keeper:string -> turn_id:int -> start_outcome
 
-val guard_and_record_turn_start :
-  ?now:(unit -> float) ->
-  keeper:string ->
-  turn_id:int ->
-  max_attempts:int ->
-  stuck_after_sec:float ->
-  unit ->
-  guarded_start_outcome
 (** Atomically enforce a per-turn retry/age budget before recording a start.
     With [max_attempts = 3], attempts 1, 2, and 3 are started; the fourth
     start for the same [(keeper, turn_id)] is [Blocked].  Blocked starts do
     not increment [metric_keeper_turn_starts], because no dispatch occurs. *)
+val guard_and_record_turn_start
+  :  ?now:(unit -> float)
+  -> keeper:string
+  -> turn_id:int
+  -> max_attempts:int
+  -> stuck_after_sec:float
+  -> unit
+  -> guarded_start_outcome
 
 val gate_reason_kind : gate_reason -> string
 val gate_reason_to_string : gate_reason -> string

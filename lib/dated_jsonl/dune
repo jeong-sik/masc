@@ -1,7 +1,10 @@
 (include_subdirs no)
+
 (library
  (name dated_jsonl)
  (public_name masc_mcp.dated_jsonl)
- (ocamlopt_flags (:standard -w -32))
- (ocamlc_flags (:standard -w -32))
+ (ocamlopt_flags
+  (:standard -w -32))
+ (ocamlc_flags
+  (:standard -w -32))
  (libraries fs_compat eio unix yojson))

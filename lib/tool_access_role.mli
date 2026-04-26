@@ -9,13 +9,12 @@
 
     @since 2.204.0 — Phase 0 of Tool Gate architecture (#4381) *)
 
-val admin_only_tools : unit -> string list
 (** Tools requiring Admin role. Derived from [Tool_permission_map.permission_for_tool]. *)
+val admin_only_tools : unit -> string list
 
-val worker_only_tools : unit -> string list
 (** Tools requiring at least Worker role. Derived from [Tool_permission_map.permission_for_tool]. *)
+val worker_only_tools : unit -> string list
 
-val policy_for_role : Types.agent_role -> Tool_access_policy.t
 (** Build the access policy for a role.
     - Admin: all tools allowed
     - Worker: all except admin-only tools
@@ -23,3 +22,4 @@ val policy_for_role : Types.agent_role -> Tool_access_policy.t
     Note: Keeper_denied and Keeper_internal filtering is handled separately
     by keeper_exec_tools and the mode gate (allow_direct_call), not by
     role policies. *)
+val policy_for_role : Types.agent_role -> Tool_access_policy.t

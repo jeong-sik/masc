@@ -5,7 +5,10 @@
     observation window (e.g. "Cmd_subst > 30% -> promote in Phase B"). *)
 
 type reason_aborted =
-  [ `Timeout_50ms | `Depth_limit | `Token_limit_50k ]
+  [ `Timeout_50ms
+  | `Depth_limit
+  | `Token_limit_50k
+  ]
 
 type reason_too_complex =
   [ `Heredoc
@@ -23,11 +26,11 @@ type reason_too_complex =
   | `Unknown_construct of string
   ]
 
-type parse_error = {
-  pos : Lexing.position;
-  token : string;
-  expected : string list;
-}
+type parse_error =
+  { pos : Lexing.position
+  ; token : string
+  ; expected : string list
+  }
 
 type 'a t =
   | Parsed of 'a

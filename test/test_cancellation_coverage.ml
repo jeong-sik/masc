@@ -10,7 +10,6 @@
 *)
 
 open Alcotest
-
 module Cancellation = Masc_mcp.Cancellation
 
 (* ============================================================
@@ -23,6 +22,7 @@ let test_create_with_id_creates () =
   let found = Cancellation.TokenStore.get id in
   Cancellation.TokenStore.remove id;
   check bool "token created" true (Option.is_some found)
+;;
 
 let test_create_with_id_not_cancelled () =
   let id = "test_notcancelled_" ^ string_of_int (Random.int 100000) in
@@ -30,13 +30,16 @@ let test_create_with_id_not_cancelled () =
   let cancelled = Cancellation.TokenStore.is_cancelled id in
   Cancellation.TokenStore.remove id;
   check bool "not cancelled" false cancelled
+;;
 
 let test_create_with_id_idempotent () =
   let id = "test_idempotent_" ^ string_of_int (Random.int 100000) in
   Cancellation.TokenStore.create_with_id id;
-  Cancellation.TokenStore.create_with_id id;  (* Should not fail *)
+  Cancellation.TokenStore.create_with_id id;
+  (* Should not fail *)
   Cancellation.TokenStore.remove id;
   ()
+;;
 
 (* ============================================================
    TokenStore.get Tests
@@ -45,6 +48,7 @@ let test_create_with_id_idempotent () =
 let test_get_nonexistent () =
   let result = Cancellation.TokenStore.get "nonexistent_xyz_12345" in
   check bool "None for nonexistent" true (Option.is_none result)
+;;
 
 let test_get_existing () =
   let id = "test_get_" ^ string_of_int (Random.int 100000) in
@@ -52,6 +56,7 @@ let test_get_existing () =
   let result = Cancellation.TokenStore.get id in
   Cancellation.TokenStore.remove id;
   check bool "Some for existing" true (Option.is_some result)
+;;
 
 (* ============================================================
    TokenStore.remove Tests
@@ -63,10 +68,12 @@ let test_remove_existing () =
   Cancellation.TokenStore.remove id;
   let result = Cancellation.TokenStore.get id in
   check bool "removed" true (Option.is_none result)
+;;
 
 let test_remove_nonexistent () =
   Cancellation.TokenStore.remove "nonexistent_remove_xyz";
   ()
+;;
 
 (* ============================================================
    TokenStore.list_all Tests
@@ -75,6 +82,7 @@ let test_remove_nonexistent () =
 let test_list_all_returns_list () =
   let tokens = Cancellation.TokenStore.list_all () in
   check bool "returns list" true (List.length tokens >= 0)
+;;
 
 (* ============================================================
    TokenStore.is_cancelled Tests
@@ -86,10 +94,12 @@ let test_is_cancelled_false_initially () =
   let cancelled = Cancellation.TokenStore.is_cancelled id in
   Cancellation.TokenStore.remove id;
   check bool "not cancelled initially" false cancelled
+;;
 
 let test_is_cancelled_nonexistent () =
   let cancelled = Cancellation.TokenStore.is_cancelled "nonexistent_xyz_999" in
   check bool "false for nonexistent" false cancelled
+;;
 
 (* ============================================================
    TokenStore.cancel Tests
@@ -102,39 +112,41 @@ let test_cancel_sets_cancelled () =
   let cancelled = Cancellation.TokenStore.is_cancelled id in
   Cancellation.TokenStore.remove id;
   check bool "cancelled after cancel" true cancelled
+;;
 
 let test_cancel_nonexistent () =
   Cancellation.TokenStore.cancel "nonexistent_cancel_xyz";
   ()
+;;
 
 (* ============================================================
    Test Runners
    ============================================================ *)
 
 let () =
-  run "Cancellation Coverage" [
-    "create_with_id", [
-      test_case "creates" `Quick test_create_with_id_creates;
-      test_case "not cancelled" `Quick test_create_with_id_not_cancelled;
-      test_case "idempotent" `Quick test_create_with_id_idempotent;
-    ];
-    "get", [
-      test_case "nonexistent" `Quick test_get_nonexistent;
-      test_case "existing" `Quick test_get_existing;
-    ];
-    "remove", [
-      test_case "existing" `Quick test_remove_existing;
-      test_case "nonexistent" `Quick test_remove_nonexistent;
-    ];
-    "list_all", [
-      test_case "returns list" `Quick test_list_all_returns_list;
-    ];
-    "is_cancelled", [
-      test_case "false initially" `Quick test_is_cancelled_false_initially;
-      test_case "nonexistent" `Quick test_is_cancelled_nonexistent;
-    ];
-    "cancel", [
-      test_case "sets cancelled" `Quick test_cancel_sets_cancelled;
-      test_case "nonexistent" `Quick test_cancel_nonexistent;
-    ];
-  ]
+  run
+    "Cancellation Coverage"
+    [ ( "create_with_id"
+      , [ test_case "creates" `Quick test_create_with_id_creates
+        ; test_case "not cancelled" `Quick test_create_with_id_not_cancelled
+        ; test_case "idempotent" `Quick test_create_with_id_idempotent
+        ] )
+    ; ( "get"
+      , [ test_case "nonexistent" `Quick test_get_nonexistent
+        ; test_case "existing" `Quick test_get_existing
+        ] )
+    ; ( "remove"
+      , [ test_case "existing" `Quick test_remove_existing
+        ; test_case "nonexistent" `Quick test_remove_nonexistent
+        ] )
+    ; "list_all", [ test_case "returns list" `Quick test_list_all_returns_list ]
+    ; ( "is_cancelled"
+      , [ test_case "false initially" `Quick test_is_cancelled_false_initially
+        ; test_case "nonexistent" `Quick test_is_cancelled_nonexistent
+        ] )
+    ; ( "cancel"
+      , [ test_case "sets cancelled" `Quick test_cancel_sets_cancelled
+        ; test_case "nonexistent" `Quick test_cancel_nonexistent
+        ] )
+    ]
+;;

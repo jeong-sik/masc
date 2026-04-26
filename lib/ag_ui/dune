@@ -6,4 +6,5 @@
  (modules ag_ui)
  (wrapped false)
  (libraries time_compat yojson masc_core)
- (preprocess (pps ppx_deriving.show ppx_deriving.eq)))
+ (preprocess
+  (pps ppx_deriving.show ppx_deriving.eq)))

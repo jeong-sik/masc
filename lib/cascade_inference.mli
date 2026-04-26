@@ -12,10 +12,10 @@
     @since v2.149.0 — delegated to MASC Cascade_config *)
 
 (** Inference parameters resolved from cascade config. *)
-type t = {
-  temperature : float option;
-  max_tokens : int option;
-}
+type t =
+  { temperature : float option
+  ; max_tokens : int option
+  }
 
 (** No inference parameters specified. *)
 val empty : t

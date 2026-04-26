@@ -31,38 +31,38 @@ val stale_lock_seconds : float
     file descriptor holding the lock. On timeout closes the fd and
     raises [Failure]. [clock] is accepted but ignored in this variant
     (systhread-friendly). *)
-val acquire_flock_retry :
-  ?clock:'a option ->
-  lock_path:string ->
-  mode:Unix.open_flag list ->
-  perm:int ->
-  ?max_attempts:int ->
-  ?sleep_sec:float ->
-  caller:string ->
-  unit ->
-  Unix.file_descr
+val acquire_flock_retry
+  :  ?clock:'a option
+  -> lock_path:string
+  -> mode:Unix.open_flag list
+  -> perm:int
+  -> ?max_attempts:int
+  -> ?sleep_sec:float
+  -> caller:string
+  -> unit
+  -> Unix.file_descr
 
 (** Fiber-friendly wrapper around {!acquire_flock_retry}. Systhread
     is used for [openfile], [F_TLOCK], and retry sleeps (unless a
     clock is supplied, in which case [Eio.Time.sleep] yields to the
     Eio scheduler). *)
-val acquire_flock_retry_cooperative :
-  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  lock_path:string ->
-  mode:Unix.open_flag list ->
-  perm:int ->
-  ?max_attempts:int ->
-  ?sleep_sec:float ->
-  caller:string ->
-  unit ->
-  Unix.file_descr
+val acquire_flock_retry_cooperative
+  :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> lock_path:string
+  -> mode:Unix.open_flag list
+  -> perm:int
+  -> ?max_attempts:int
+  -> ?sleep_sec:float
+  -> caller:string
+  -> unit
+  -> Unix.file_descr
 
 (** Convenience wrapper using [O_CREAT;O_WRONLY], mode [0o644],
     caller tag ["File_lock_eio"]. *)
-val acquire_flock_fd :
-  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  string ->
-  Unix.file_descr
+val acquire_flock_fd
+  :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> string
+  -> Unix.file_descr
 
 (** [release_flock_fd fd] unlocks (best-effort) and closes [fd]. *)
 val release_flock_fd : Unix.file_descr -> unit
@@ -79,11 +79,11 @@ val with_mutex : string -> (unit -> 'a) -> 'a
     cooperative Eio.Mutex and an OS-level flock on [path ^ ".lock"].
     The flock uses non-blocking F_TLOCK retries — max 200 attempts,
     ~2s total with default sleeps. *)
-val with_lock :
-  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  string ->
-  (unit -> 'a) ->
-  'a
+val with_lock
+  :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> string
+  -> (unit -> 'a)
+  -> 'a
 
 (** {1 Diagnostics} *)
 

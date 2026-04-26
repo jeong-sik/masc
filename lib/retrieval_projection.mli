@@ -12,8 +12,7 @@
     ["search"] / ["result"] / ["(no content)"]. [location] collapses
     whitespace and truncates to 120 bytes; [content] collapses
     whitespace and truncates to 300 bytes. *)
-val grep_like_line :
-  source:string -> location:string -> content:string -> string
+val grep_like_line : source:string -> location:string -> content:string -> string
 
 (** [lines_of_search_output ?max_lines input] splits [input] on
     ["\n---\n"], parses each chunk as either a labelled payload

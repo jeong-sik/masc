@@ -21,35 +21,41 @@ module Prom = Masc_mcp.Prometheus
 let imminent_count k =
   Prom.metric_value_or_zero
     "masc_context_overflow_imminent_total"
-    ~labels:[ ("keeper", k) ] ()
+    ~labels:[ "keeper", k ]
+    ()
+;;
 
 let action_count k =
   Prom.metric_value_or_zero
     "masc_context_overflow_action_taken_total"
-    ~labels:[ ("keeper", k) ] ()
+    ~labels:[ "keeper", k ]
+    ()
+;;
 
 let no_action_count k =
   Prom.metric_value_or_zero
     "masc_context_overflow_no_action_total"
-    ~labels:[ ("keeper", k) ] ()
+    ~labels:[ "keeper", k ]
+    ()
+;;
 
 let set_grace sec =
   Unix.putenv "MASC_CONTEXT_OVERFLOW_GRACE_SEC" (Printf.sprintf "%.3f" sec)
+;;
 
-let clear_grace () =
-  Unix.putenv "MASC_CONTEXT_OVERFLOW_GRACE_SEC" ""
+let clear_grace () = Unix.putenv "MASC_CONTEXT_OVERFLOW_GRACE_SEC" ""
 
 let test_imminent_increments_counter () =
   T.reset_all_for_test ();
   let k = "test-keeper-increments" in
   let before = imminent_count k in
   T.record_imminent ~keeper_name:k ~ts:100.0;
-  Alcotest.(check (float 0.0001))
-    "imminent counter +1"
-    (before +. 1.0) (imminent_count k);
+  Alcotest.(check (float 0.0001)) "imminent counter +1" (before +. 1.0) (imminent_count k);
   Alcotest.(check (option (float 0.0001)))
     "pending_since set"
-    (Some 100.0) (T.current_pending_since ~keeper_name:k)
+    (Some 100.0)
+    (T.current_pending_since ~keeper_name:k)
+;;
 
 let test_action_within_grace_clears_pending () =
   T.reset_all_for_test ();
@@ -59,10 +65,13 @@ let test_action_within_grace_clears_pending () =
   T.record_action ~keeper_name:k;
   Alcotest.(check (option (float 0.0001)))
     "pending cleared"
-    None (T.current_pending_since ~keeper_name:k);
+    None
+    (T.current_pending_since ~keeper_name:k);
   Alcotest.(check (float 0.0001))
     "action counter +1"
-    (action_before +. 1.0) (action_count k)
+    (action_before +. 1.0)
+    (action_count k)
+;;
 
 let test_action_with_no_pending_is_silent () =
   T.reset_all_for_test ();
@@ -71,7 +80,9 @@ let test_action_with_no_pending_is_silent () =
   T.record_action ~keeper_name:k;
   Alcotest.(check (float 0.0001))
     "action counter unchanged (no pending)"
-    before (action_count k)
+    before
+    (action_count k)
+;;
 
 let test_no_action_past_grace_fires_latched () =
   T.reset_all_for_test ();
@@ -82,18 +93,22 @@ let test_no_action_past_grace_fires_latched () =
   T.record_imminent ~keeper_name:k ~ts:100.0;
   Alcotest.(check (float 0.0001))
     "no no-action fire yet (no new imminent arrived)"
-    before (no_action_count k);
+    before
+    (no_action_count k);
   (* Second imminent at t=115, grace=10 → prior is 15s old *)
   T.record_imminent ~keeper_name:k ~ts:115.0;
   Alcotest.(check (float 0.0001))
     "no-action counter +1"
-    (before +. 1.0) (no_action_count k);
+    (before +. 1.0)
+    (no_action_count k);
   (* Third imminent at t=130, still same unanswered episode *)
   T.record_imminent ~keeper_name:k ~ts:130.0;
   Alcotest.(check (float 0.0001))
     "latched: no-action does NOT re-fire"
-    (before +. 1.0) (no_action_count k);
+    (before +. 1.0)
+    (no_action_count k);
   clear_grace ()
+;;
 
 let test_latch_releases_on_action () =
   T.reset_all_for_test ();
@@ -103,9 +118,7 @@ let test_latch_releases_on_action () =
   (* Episode 1: imminent -> no action -> late imminent fires counter *)
   T.record_imminent ~keeper_name:k ~ts:100.0;
   T.record_imminent ~keeper_name:k ~ts:115.0;
-  Alcotest.(check (float 0.0001))
-    "episode 1 fired"
-    (before +. 1.0) (no_action_count k);
+  Alcotest.(check (float 0.0001)) "episode 1 fired" (before +. 1.0) (no_action_count k);
   (* Action arrives — latch should release *)
   T.record_action ~keeper_name:k;
   (* Episode 2: imminent, then another past-grace imminent *)
@@ -113,8 +126,10 @@ let test_latch_releases_on_action () =
   T.record_imminent ~keeper_name:k ~ts:215.0;
   Alcotest.(check (float 0.0001))
     "episode 2 fires once more"
-    (before +. 2.0) (no_action_count k);
+    (before +. 2.0)
+    (no_action_count k);
   clear_grace ()
+;;
 
 let test_action_within_grace_does_not_fire_no_action () =
   T.reset_all_for_test ();
@@ -127,8 +142,10 @@ let test_action_within_grace_does_not_fire_no_action () =
   T.record_imminent ~keeper_name:k ~ts:300.0;
   Alcotest.(check (float 0.0001))
     "no_action NOT fired (prior was cleared)"
-    before (no_action_count k);
+    before
+    (no_action_count k);
   clear_grace ()
+;;
 
 let test_per_keeper_isolation () =
   T.reset_all_for_test ();
@@ -139,62 +156,66 @@ let test_per_keeper_isolation () =
   T.record_imminent ~keeper_name:b ~ts:100.0;
   T.record_action ~keeper_name:a;
   Alcotest.(check (option (float 0.0001)))
-    "A cleared" None (T.current_pending_since ~keeper_name:a);
+    "A cleared"
+    None
+    (T.current_pending_since ~keeper_name:a);
   Alcotest.(check (option (float 0.0001)))
     "B still pending"
-    (Some 100.0) (T.current_pending_since ~keeper_name:b);
+    (Some 100.0)
+    (T.current_pending_since ~keeper_name:b);
   clear_grace ()
+;;
 
 let test_grace_default () =
   clear_grace ();
-  Alcotest.(check (float 0.01)) "default 60s" 60.0
-    (T.grace_window_seconds ())
+  Alcotest.(check (float 0.01)) "default 60s" 60.0 (T.grace_window_seconds ())
+;;
 
 let test_grace_custom () =
   set_grace 15.0;
-  Alcotest.(check (float 0.01)) "custom 15s" 15.0
-    (T.grace_window_seconds ());
+  Alcotest.(check (float 0.01)) "custom 15s" 15.0 (T.grace_window_seconds ());
   Unix.putenv "MASC_CONTEXT_OVERFLOW_GRACE_SEC" "bogus";
-  Alcotest.(check (float 0.01))
-    "invalid → default" 60.0 (T.grace_window_seconds ());
+  Alcotest.(check (float 0.01)) "invalid → default" 60.0 (T.grace_window_seconds ());
   Unix.putenv "MASC_CONTEXT_OVERFLOW_GRACE_SEC" "-5";
-  Alcotest.(check (float 0.01))
-    "negative → default" 60.0 (T.grace_window_seconds ());
+  Alcotest.(check (float 0.01)) "negative → default" 60.0 (T.grace_window_seconds ());
   clear_grace ()
+;;
 
 let () =
-  Alcotest.run "context_overflow_action_tracker"
-    [
-      ( "imminent",
-        [
-          Alcotest.test_case "increments counter" `Quick
-            test_imminent_increments_counter;
-        ] );
-      ( "action pairing",
-        [
-          Alcotest.test_case "within grace clears pending" `Quick
-            test_action_within_grace_clears_pending;
-          Alcotest.test_case "no pending → silent" `Quick
-            test_action_with_no_pending_is_silent;
-          Alcotest.test_case "action within grace does NOT fire no-action"
-            `Quick test_action_within_grace_does_not_fire_no_action;
-        ] );
-      ( "no-action latch",
-        [
-          Alcotest.test_case "past grace fires once" `Quick
-            test_no_action_past_grace_fires_latched;
-          Alcotest.test_case "latch releases on action" `Quick
-            test_latch_releases_on_action;
-        ] );
-      ( "per-keeper isolation",
-        [
-          Alcotest.test_case "A and B independent" `Quick
-            test_per_keeper_isolation;
-        ] );
-      ( "grace env var",
-        [
-          Alcotest.test_case "default 60s" `Quick test_grace_default;
-          Alcotest.test_case "custom + invalid fallback" `Quick
-            test_grace_custom;
-        ] );
+  Alcotest.run
+    "context_overflow_action_tracker"
+    [ ( "imminent"
+      , [ Alcotest.test_case "increments counter" `Quick test_imminent_increments_counter
+        ] )
+    ; ( "action pairing"
+      , [ Alcotest.test_case
+            "within grace clears pending"
+            `Quick
+            test_action_within_grace_clears_pending
+        ; Alcotest.test_case
+            "no pending → silent"
+            `Quick
+            test_action_with_no_pending_is_silent
+        ; Alcotest.test_case
+            "action within grace does NOT fire no-action"
+            `Quick
+            test_action_within_grace_does_not_fire_no_action
+        ] )
+    ; ( "no-action latch"
+      , [ Alcotest.test_case
+            "past grace fires once"
+            `Quick
+            test_no_action_past_grace_fires_latched
+        ; Alcotest.test_case
+            "latch releases on action"
+            `Quick
+            test_latch_releases_on_action
+        ] )
+    ; ( "per-keeper isolation"
+      , [ Alcotest.test_case "A and B independent" `Quick test_per_keeper_isolation ] )
+    ; ( "grace env var"
+      , [ Alcotest.test_case "default 60s" `Quick test_grace_default
+        ; Alcotest.test_case "custom + invalid fallback" `Quick test_grace_custom
+        ] )
     ]
+;;

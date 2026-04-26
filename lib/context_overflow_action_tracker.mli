@@ -32,26 +32,26 @@
     - A [Log.Server.warn] tagged [#9935] fires on first
       unanswered episode only. *)
 
-val grace_window_seconds : unit -> float
 (** Time window after [ContextOverflowImminent] during which a
     compaction/reduction action must land to count as "action
     taken". Read from [MASC_CONTEXT_OVERFLOW_GRACE_SEC] (default
     60.0). Re-read on each call; safe for test-time [putenv]. *)
+val grace_window_seconds : unit -> float
 
-val record_imminent : keeper_name:string -> ts:float -> unit
 (** Call on [ContextOverflowImminent]. Increments the imminent
     counter and starts the grace timer. If a prior imminent was
     still pending past the grace window at [ts], fires the
     no-action counter + warn log (latched so repeated imminent
     spam does not flood alerts). *)
+val record_imminent : keeper_name:string -> ts:float -> unit
 
-val record_action : keeper_name:string -> unit
 (** Call on [ContextCompactStarted] or [ContextCompacted]. Clears
     the pending imminent and increments the action-taken
     counter. Calls with no pending imminent are silent. *)
+val record_action : keeper_name:string -> unit
 
-val current_pending_since : keeper_name:string -> float option
 (** [Some ts] if there is an unanswered imminent for this keeper;
     [None] otherwise. Used by tests. *)
+val current_pending_since : keeper_name:string -> float option
 
 val reset_all_for_test : unit -> unit

@@ -15,23 +15,26 @@
 
 include Credential_provider.S
 
-val cred_root : string
 (** [/tmp/keeper-creds] — in-container path under which credentials
     are projected.  Exposed so callers that compose paths relative to
     it (currently only the [SSH_AUTH_SOCK] mount, which depends on
     the host SSH agent and is therefore composed outside this trait)
     stay in sync with the [HOME=<cred_root>] env entry that the
     binding already carries. *)
+val cred_root : string
 
 (**/**)
 
 (** Pure helpers exposed for white-box tests.  Not part of the stable
     API; do not call from production code. *)
 module For_testing : sig
-  val compose_env :
-    git_author_name:string -> git_author_email:string ->
-    (string * string) list
+  val compose_env
+    :  git_author_name:string
+    -> git_author_email:string
+    -> (string * string) list
 
-  val mount_if_present :
-    host:string -> container:string -> Credential_provider.ro_mount list
+  val mount_if_present
+    :  host:string
+    -> container:string
+    -> Credential_provider.ro_mount list
 end

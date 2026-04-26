@@ -32,41 +32,35 @@ module Layer : sig
 end
 
 module Deadline : sig
-  type t = private {
-    layer : Layer.t;
-    origin : string;
-    wall_cap_s : float;
-    set_at : float;
-  }
+  type t = private
+    { layer : Layer.t
+    ; origin : string
+    ; wall_cap_s : float
+    ; set_at : float
+    }
 
-  val make
-    :  layer:Layer.t
-    -> origin:string
-    -> wall_cap_s:float
-    -> now:float
-    -> t
-
+  val make : layer:Layer.t -> origin:string -> wall_cap_s:float -> now:float -> t
   val elapsed : t -> now:float -> float
   val remaining : t -> now:float -> float
 end
 
-val default_overshoot_slack_s : float
 (** Default grace window applied when distinguishing expected cleanup tail
     from a cooperative-cancel miss. Callers may override per site. *)
+val default_overshoot_slack_s : float
 
-val metric_overshoot_total : string
 (** #9662: canonical Prometheus metric name for overshoot events.
     Labels: [layer, origin].  Internal series name is
     [masc_timeout_policy_overshoot_total]. *)
+val metric_overshoot_total : string
 
+(** Emit a warn-level log when [actual_wall_s] exceeds
+    [deadline.wall_cap_s] by more than [slack_s].  Also increments
+    {!metric_overshoot_total} with [layer] and [origin] labels.
+    Returns [true] when an overshoot was detected (caller no
+    longer needs to emit a parallel counter). *)
 val overshoot_warn
   :  ?slack_s:float
   -> deadline:Deadline.t
   -> actual_wall_s:float
   -> unit
   -> bool
-(** Emit a warn-level log when [actual_wall_s] exceeds
-    [deadline.wall_cap_s] by more than [slack_s].  Also increments
-    {!metric_overshoot_total} with [layer] and [origin] labels.
-    Returns [true] when an overshoot was detected (caller no
-    longer needs to emit a parallel counter). *)

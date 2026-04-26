@@ -11,22 +11,22 @@ type handler = name:string -> args:Yojson.Safe.t -> (bool * string) option
 
 (** {1 Registration} *)
 
-val register : tool_name:string -> handler:handler -> unit
 (** Register a single tool name to handler mapping. *)
+val register : tool_name:string -> handler:handler -> unit
 
-val register_module : schemas:Types.tool_schema list -> handler:handler -> unit
 (** Bulk-register every tool name from a schema list to the same handler. *)
+val register_module : schemas:Types.tool_schema list -> handler:handler -> unit
 
 (** {1 Dispatch} *)
 
-val dispatch : token:Tool_token.t -> args:Yojson.Safe.t -> (bool * string) option
 (** O(1) dispatch using a validated token. Returns [Some (success, message)]
     when a handler is found, [None] when the tool name is unknown.
     The token guarantees the name was validated at the I/O boundary. *)
+val dispatch : token:Tool_token.t -> args:Yojson.Safe.t -> (bool * string) option
 
-val mint_token : name:string -> (Tool_token.t, string) result
 (** Mint a [Tool_token.t] validated against both tag and handler registries.
     Thread-safe (protected by dispatch_mu). *)
+val mint_token : name:string -> (Tool_token.t, string) result
 
 (** {2 Dispatch Hooks}
 
@@ -42,49 +42,51 @@ type pre_hook_action =
   | Proceed of Yojson.Safe.t
   | Reject of Tool_result.t
 
-type pre_hook = name:string -> args:Yojson.Safe.t -> pre_hook_action
 (** Pre-hook: receives tool name and args before handler runs. *)
+type pre_hook = name:string -> args:Yojson.Safe.t -> pre_hook_action
 
-type post_hook = Tool_result.t -> Tool_result.t
 (** Post-hook: receives result after handler completes.
     Return the (possibly transformed) result. *)
+type post_hook = Tool_result.t -> Tool_result.t
 
-val pre_hooks : pre_hook list ref
 (** Mutable list of registered pre-hooks. *)
+val pre_hooks : pre_hook list ref
 
-val post_hooks : post_hook list ref
 (** Mutable list of registered post-hooks. *)
+val post_hooks : post_hook list ref
 
 val register_pre_hook : pre_hook -> unit
 val register_post_hook : post_hook -> unit
 val clear_hooks : unit -> unit
 
-val run_pre_hooks :
-  name:string -> args:Yojson.Safe.t -> Tool_result.t option * Yojson.Safe.t
 (** Execute registered pre-hooks in order, threading coerced args.
     Returns [(Some rejection, _)] on short-circuit,
     or [(None, final_args)] when all hooks pass. *)
+val run_pre_hooks
+  :  name:string
+  -> args:Yojson.Safe.t
+  -> Tool_result.t option * Yojson.Safe.t
 
-val run_post_hooks : Tool_result.t -> Tool_result.t
 (** Execute registered post-hooks in order, threading the result.
     Used by keeper dispatch to feed metrics/usage hooks for tools
     that bypass [dispatch]. *)
+val run_post_hooks : Tool_result.t -> Tool_result.t
 
-val dispatch_structured : token:Tool_token.t -> args:Yojson.Safe.t -> Tool_result.t option
 (** Structured dispatch with hook support.
     Execution order: pre-hooks -> handler -> post-hooks.
     Requires a validated [Tool_token.t]. *)
+val dispatch_structured : token:Tool_token.t -> args:Yojson.Safe.t -> Tool_result.t option
 
 (** {1 Feature Flag and Introspection} *)
 
-val v2_enabled : bool
 (** Feature flag: use the new dispatch path (default ON since v2.102). *)
+val v2_enabled : bool
 
-val registered_count : unit -> int
 (** Number of registered tool names. *)
+val registered_count : unit -> int
 
-val is_registered : string -> bool
 (** Check whether a tool name is registered. *)
+val is_registered : string -> bool
 
 (** {1 Read-only and Join-required Sets} *)
 
@@ -106,48 +108,60 @@ val is_idempotent : string -> bool
     to create lazily. *)
 
 type module_tag =
-  | Mod_plan | Mod_operator
+  | Mod_plan
+  | Mod_operator
   | Mod_local_runtime
   | Mod_worktree
-  | Mod_code | Mod_code_write
+  | Mod_code
+  | Mod_code_write
   | Mod_a2a
   | Mod_run
   | Mod_compact
-  | Mod_agent | Mod_task | Mod_room
-  | Mod_control | Mod_agent_timeline | Mod_misc | Mod_suspend
-  | Mod_library | Mod_keeper
+  | Mod_agent
+  | Mod_task
+  | Mod_room
+  | Mod_control
+  | Mod_agent_timeline
+  | Mod_misc
+  | Mod_suspend
+  | Mod_library
+  | Mod_keeper
   | Mod_inline
   | Mod_autoresearch
   | Mod_shard
 
-val register_module_tag : schemas:Types.tool_schema list -> tag:module_tag -> unit
 (** Register tool names from a schema list with a module tag. *)
+val register_module_tag : schemas:Types.tool_schema list -> tag:module_tag -> unit
 
-val register_name_tag : tool_name:string -> tag:module_tag -> unit
 (** Register a single tool name with a tag. *)
+val register_name_tag : tool_name:string -> tag:module_tag -> unit
 
-val lookup_tag : string -> module_tag option
 (** Look up the module tag for a tool name. *)
+val lookup_tag : string -> module_tag option
 
-val lookup_schema : string -> Yojson.Safe.t option
 (** Look up the input_schema JSON for a tool name.
     Used by Tool_input_validation pre-hook for argument validation. *)
+val lookup_schema : string -> Yojson.Safe.t option
 
-val tag_registry_count : unit -> int
 (** Number of entries in the tag registry. *)
+val tag_registry_count : unit -> int
 
 val mark_tag_registry_initialized : unit -> unit
 val is_tag_registry_initialized : unit -> bool
 
 (** {1 Did-you-mean Suggestions (#9784)} *)
 
-val all_registered_names : unit -> string list
 (** Every tool name registered in either the tag_registry or the
     handler registry, deduplicated. Iteration order is unspecified. *)
+val all_registered_names : unit -> string list
 
-val find_similar_names :
-  ?limit:int -> ?min_score:float -> query:string -> unit -> string list
 (** Return up to [limit] (default 3) tool names from the registries with
     [Text_similarity.jaccard_similarity] to [query] >= [min_score]
     (default 0.4), sorted by similarity descending. Used to enrich
     Unknown tool errors with self-correction hints for LLM clients. *)
+val find_similar_names
+  :  ?limit:int
+  -> ?min_score:float
+  -> query:string
+  -> unit
+  -> string list

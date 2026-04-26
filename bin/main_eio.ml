@@ -5,12 +5,13 @@
     HTTP/2 multiplexing eliminates browser's 6-connection-per-domain limit.
 *)
 
-[@@@warning "-32-69"]  (* Suppress unused values/fields during migration *)
+[@@@warning "-32-69"] (* Suppress unused values/fields during migration *)
 
 open Cmdliner
 
 (** Module aliases *)
 module Http = Masc_mcp.Http_server_eio
+
 module Http_h2 = Masc_mcp.Http_server_h2
 module Mcp_server = Masc_mcp.Mcp_server
 module Mcp_eio = Masc_mcp.Mcp_server_eio
@@ -25,6 +26,7 @@ module Tool_operator = Masc_mcp.Tool_operator
 module Operator_control = Masc_mcp.Operator_control
 module Dashboard_execution = Masc_mcp.Dashboard_execution
 module Dashboard_mission = Masc_mcp.Dashboard_mission
+
 (* module Dashboard_proof removed *)
 module Dashboard_mission_briefing = Masc_mcp.Dashboard_mission_briefing
 module Build_identity = Masc_mcp.Build_identity
@@ -45,7 +47,6 @@ module Safe_ops = Safe_ops
 module Tool_board = Masc_mcp.Tool_board
 module Server_mcp_transport_http = Masc_mcp.Server_mcp_transport_http
 
-
 (* ============================================ *)
 (* Extracted modules (lib/)                      *)
 (* ============================================ *)
@@ -60,93 +61,78 @@ module Server_openai_compat = Masc_mcp.Server_openai_compat
 module Server_startup_takeover = Masc_mcp.Server_startup_takeover
 
 let mcp_protocol_versions = Server_mcp_transport_http.mcp_protocol_versions
-
-let mcp_protocol_version_default =
-  Server_mcp_transport_http.mcp_protocol_version_default
-
+let mcp_protocol_version_default = Server_mcp_transport_http.mcp_protocol_version_default
 let default_base_path = Server_mcp_transport_http.default_base_path
 
 let implicit_base_path_resolution_source () =
   match Env_config.home_dir_opt () with
   | Some home ->
-      let normalized_home =
-        Env_config.normalize_masc_base_path_input home
-      in
-      let normalized_default =
-        Env_config.normalize_masc_base_path_input (default_base_path ())
-      in
-      if String.equal normalized_home normalized_default then
-        "implicit_home"
-      else
-        "implicit_repo_root"
+    let normalized_home = Env_config.normalize_masc_base_path_input home in
+    let normalized_default =
+      Env_config.normalize_masc_base_path_input (default_base_path ())
+    in
+    if String.equal normalized_home normalized_default
+    then "implicit_home"
+    else "implicit_repo_root"
   | None -> "implicit_repo_root"
+;;
 
-let is_valid_protocol_version =
-  Server_mcp_transport_http.is_valid_protocol_version
-
-let remember_protocol_version =
-  Server_mcp_transport_http.remember_protocol_version
-
+let is_valid_protocol_version = Server_mcp_transport_http.is_valid_protocol_version
+let remember_protocol_version = Server_mcp_transport_http.remember_protocol_version
 let remember_mcp_profile = Server_mcp_transport_http.remember_mcp_profile
-
 let forget_mcp_session = Server_mcp_transport_http.forget_mcp_session
-
-let validate_mcp_session_profile =
-  Server_mcp_transport_http.validate_mcp_session_profile
+let validate_mcp_session_profile = Server_mcp_transport_http.validate_mcp_session_profile
 
 let validate_mcp_session_delete_profile =
   Server_mcp_transport_http.validate_mcp_session_delete_profile
+;;
 
-let protocol_version_from_body =
-  Server_mcp_transport_http.protocol_version_from_body
-
+let protocol_version_from_body = Server_mcp_transport_http.protocol_version_from_body
 let get_session_id_query = Server_mcp_transport_http.get_session_id_query
-
 let get_header_any_case = Server_mcp_transport_http.get_header_any_case
-
 let get_cookie_value = Server_mcp_transport_http.get_cookie_value
-
 let get_session_id_any = Server_mcp_transport_http.get_session_id_any
-
-let legacy_messages_endpoint_url =
-  Server_mcp_transport_http.legacy_messages_endpoint_url
-
+let legacy_messages_endpoint_url = Server_mcp_transport_http.legacy_messages_endpoint_url
 let get_protocol_version = Server_mcp_transport_http.get_protocol_version
 
 let get_protocol_version_for_session =
   Server_mcp_transport_http.get_protocol_version_for_session
+;;
 
 module Server_routes_http = Masc_mcp.Server_routes_http
-
 open Server_routes_http
 
 (** Extended router to handle OPTIONS *)
 let make_extended_handler routes =
   fun client_addr gluten_reqd ->
-    let reqd = gluten_reqd.Gluten.Reqd.reqd in
-    let request = Httpun.Reqd.request reqd in
-    (* Rate limiting: enforce before any auth or routing.
+  let reqd = gluten_reqd.Gluten.Reqd.reqd in
+  let request = Httpun.Reqd.request reqd in
+  (* Rate limiting: enforce before any auth or routing.
        Health-check endpoints are exempt so load-balancer probes never block. *)
-    let path = Http.Request.path request in
-    let skip_rate_limit =
-      String.equal path "/health"
-      (* Issue #8403: derive probe exemptions from Server_health_paths SSOT
+  let path = Http.Request.path request in
+  let skip_rate_limit =
+    String.equal path "/health"
+    (* Issue #8403: derive probe exemptions from Server_health_paths SSOT
          so a renamed probe stays exempt from rate limits without a
          separate manual edit here. *)
-      || Masc_mcp.Server_health_paths.is_public path
+    || Masc_mcp.Server_health_paths.is_public path
+  in
+  let rl_key = Masc_mcp.Rate_limit.key_of_sockaddr client_addr in
+  if (not skip_rate_limit) && not (Masc_mcp.Rate_limit.check_global ~key:rl_key)
+  then (
+    let body = Masc_mcp.Rate_limit.too_many_requests_body () in
+    let rl_headers = Masc_mcp.Rate_limit.headers_global ~key:rl_key in
+    let headers =
+      Httpun.Headers.of_list
+        (("content-type", "application/json")
+         :: ("content-length", string_of_int (String.length body))
+         :: rl_headers)
     in
-    let rl_key = Masc_mcp.Rate_limit.key_of_sockaddr client_addr in
-    if (not skip_rate_limit) && not (Masc_mcp.Rate_limit.check_global ~key:rl_key) then
-      let body = Masc_mcp.Rate_limit.too_many_requests_body () in
-      let rl_headers = Masc_mcp.Rate_limit.headers_global ~key:rl_key in
-      let headers = Httpun.Headers.of_list (
-        ("content-type", "application/json") ::
-        ("content-length", string_of_int (String.length body)) ::
-        rl_headers
-      ) in
-      Httpun.Reqd.respond_with_string reqd
-        (Httpun.Response.create ~headers `Too_many_requests) body
-    else
+    Httpun.Reqd.respond_with_string
+      reqd
+      (Httpun.Response.create ~headers `Too_many_requests)
+      body)
+  else (
     try
       let is_mcp_like =
         String.equal path "/mcp"
@@ -160,24 +146,30 @@ let make_extended_handler routes =
         get_protocol_version_for_session ?session_id:session_id_for_version request
       in
       let origin = get_origin request in
-      if is_mcp_like && not (validate_origin request) then
+      if is_mcp_like && not (validate_origin request)
+      then (
         let body = json_rpc_error (-32600) "Invalid origin" in
-        let headers = Httpun.Headers.of_list (
-          ("content-length", string_of_int (String.length body))
-          :: json_headers "-" protocol_version origin
-        ) in
+        let headers =
+          Httpun.Headers.of_list
+            (("content-length", string_of_int (String.length body))
+             :: json_headers "-" protocol_version origin)
+        in
         let response = Httpun.Response.create ~headers `Forbidden in
-        Httpun.Reqd.respond_with_string reqd response body
-      else if is_mcp_like && request.meth <> `OPTIONS &&
-              not (is_valid_protocol_version protocol_version) then
+        Httpun.Reqd.respond_with_string reqd response body)
+      else if
+        is_mcp_like
+        && request.meth <> `OPTIONS
+        && not (is_valid_protocol_version protocol_version)
+      then (
         let body = json_rpc_error (-32600) "Unsupported protocol version" in
-        let headers = Httpun.Headers.of_list (
-          ("content-length", string_of_int (String.length body))
-          :: json_headers "-" protocol_version origin
-        ) in
+        let headers =
+          Httpun.Headers.of_list
+            (("content-length", string_of_int (String.length body))
+             :: json_headers "-" protocol_version origin)
+        in
         let response = Httpun.Response.create ~headers `Bad_request in
-        Httpun.Reqd.respond_with_string reqd response body
-      else
+        Httpun.Reqd.respond_with_string reqd response body)
+      else (
         match request.meth, path with
         | `OPTIONS, _ -> options_handler request reqd
         | `GET, "/ws" ->
@@ -185,10 +177,12 @@ let make_extended_handler routes =
             Server_routes_http_runtime.websocket_discovery_json request
             |> Yojson.Safe.to_string
           in
-          let headers = Httpun.Headers.of_list [
-            ("content-type", "application/json");
-            ("content-length", string_of_int (String.length body));
-          ] in
+          let headers =
+            Httpun.Headers.of_list
+              [ "content-type", "application/json"
+              ; "content-length", string_of_int (String.length body)
+              ]
+          in
           let response = Httpun.Response.create ~headers `OK in
           Httpun.Reqd.respond_with_string reqd response body
         | `POST, "/webrtc/offer" when Masc_mcp.Server_webrtc_transport.is_enabled () ->
@@ -196,73 +190,89 @@ let make_extended_handler routes =
             match Masc_mcp.Server_webrtc_transport.handle_offer_request body with
             | Ok json -> Http.Response.json json reqd
             | Error msg ->
-              Http.Response.json ~status:`Bad_request
-                (Printf.sprintf {|{"error":"%s"}|} msg) reqd)
+              Http.Response.json
+                ~status:`Bad_request
+                (Printf.sprintf {|{"error":"%s"}|} msg)
+                reqd)
         | `POST, "/webrtc/answer" when Masc_mcp.Server_webrtc_transport.is_enabled () ->
           Http.Request.read_body_async reqd (fun body ->
             match Masc_mcp.Server_webrtc_transport.handle_answer_request body with
             | Ok json -> Http.Response.json json reqd
             | Error msg ->
-              Http.Response.json ~status:`Bad_request
-                (Printf.sprintf {|{"error":"%s"}|} msg) reqd)
+              Http.Response.json
+                ~status:`Bad_request
+                (Printf.sprintf {|{"error":"%s"}|} msg)
+                reqd)
         | `POST, "/v1/chat/completions" when Server_openai_compat.is_enabled () ->
           Http.Request.read_body_async reqd (fun body ->
             match !server_state with
             | None ->
               let origin = get_origin request in
-              Http.Response.json ~status:`Internal_server_error
+              Http.Response.json
+                ~status:`Internal_server_error
                 ~extra_headers:(cors_headers origin)
                 (Server_openai_compat.error_response
-                   ~status:"server_error" ~message:"Server not initialized")
+                   ~status:"server_error"
+                   ~message:"Server not initialized")
                 reqd
             | Some state ->
               let config = state.Mcp_server.room_config in
               (match state.Mcp_server.sw, state.Mcp_server.clock with
-              | Some sw, Some clock ->
-                  let (status, resp_body) =
-                    Server_openai_compat.handle_chat_completions
-                      ~config ~sw ~clock body
-                  in
-                  let origin = get_origin request in
-                  Http.Response.json ~status
-                    ~extra_headers:(cors_headers origin)
-                    resp_body reqd
-              | _ ->
-                  let origin = get_origin request in
-                  Http.Response.json ~status:`Internal_server_error
-                    ~extra_headers:(cors_headers origin)
-                    (Server_openai_compat.error_response
-                       ~status:"server_error"
-                       ~message:"Server runtime not fully initialized")
-                    reqd))
+               | Some sw, Some clock ->
+                 let status, resp_body =
+                   Server_openai_compat.handle_chat_completions ~config ~sw ~clock body
+                 in
+                 let origin = get_origin request in
+                 Http.Response.json
+                   ~status
+                   ~extra_headers:(cors_headers origin)
+                   resp_body
+                   reqd
+               | _ ->
+                 let origin = get_origin request in
+                 Http.Response.json
+                   ~status:`Internal_server_error
+                   ~extra_headers:(cors_headers origin)
+                   (Server_openai_compat.error_response
+                      ~status:"server_error"
+                      ~message:"Server runtime not fully initialized")
+                   reqd))
         | `DELETE, "/mcp" -> handle_delete_mcp request reqd
         | `DELETE, "/mcp/managed" ->
-            handle_delete_mcp
-              ~profile:Server_mcp_transport_http.Managed_agent request reqd
+          handle_delete_mcp ~profile:Server_mcp_transport_http.Managed_agent request reqd
         | `DELETE, "/mcp/operator" ->
-            handle_delete_mcp
-              ~profile:Server_mcp_transport_http.Operator_remote request reqd
+          handle_delete_mcp
+            ~profile:Server_mcp_transport_http.Operator_remote
+            request
+            reqd
         | `GET, "/api/v1/board/flairs" ->
-            let flairs = List.map Board.flair_to_yojson Board.available_flairs in
-            let json = `Assoc [("flairs", `List flairs)] in
-            Http.Response.json (Yojson.Safe.to_string json) reqd
+          let flairs = List.map Board.flair_to_yojson Board.available_flairs in
+          let json = `Assoc [ "flairs", `List flairs ] in
+          Http.Response.json (Yojson.Safe.to_string json) reqd
         | `GET, "/api/v1/board/hearths" ->
-            let hearths = Board_dispatch.list_hearths () in
-            let json = `Assoc [
-              ("hearths", `List (List.map (fun (name, count) ->
-                `Assoc [("name", `String name); ("count", `Int count)]
-              ) hearths));
-            ] in
-            Http.Response.json (Yojson.Safe.to_string json) reqd
+          let hearths = Board_dispatch.list_hearths () in
+          let json =
+            `Assoc
+              [ ( "hearths"
+                , `List
+                    (List.map
+                       (fun (name, count) ->
+                          `Assoc [ "name", `String name; "count", `Int count ])
+                       hearths) )
+              ]
+          in
+          Http.Response.json (Yojson.Safe.to_string json) reqd
         | `GET, p when String.length p > 14 && String.sub p 0 14 = "/api/v1/board/" ->
-            let post_id = String.sub p 14 (String.length p - 14) in
-            let format = Option.value ~default:"nested" (query_param request "format") in
-            let (status, body) = board_post_detail_json ~response_format:format ~post_id in
-            Http.Response.json ~status body reqd
-        | _ -> Http.Router.dispatch routes request reqd
-    with exn ->
+          let post_id = String.sub p 14 (String.length p - 14) in
+          let format = Option.value ~default:"nested" (query_param request "format") in
+          let status, body = board_post_detail_json ~response_format:format ~post_id in
+          Http.Response.json ~status body reqd
+        | _ -> Http.Router.dispatch routes request reqd)
+    with
+    | exn ->
       let msg = Printexc.to_string exn in
-      Http.Response.internal_error msg reqd
+      Http.Response.internal_error msg reqd)
+;;
 
 (** Main server loop *)
 let run_server ~sw:_ ~env ~host ~port ~base_path =
@@ -272,41 +282,60 @@ let run_server ~sw:_ ~env ~host ~port ~base_path =
      Eio.Fiber.first cancels the run_server fiber on SIGTERM, the
      sub-switch is cancelled too, which propagates Cancel to every
      child fiber — preventing the 10s force-exit timeout. *)
-  Eio.Switch.run @@ fun server_sw ->
+  Eio.Switch.run
+  @@ fun server_sw ->
   try
-    Server_runtime_bootstrap.run ~sw:server_sw ~env ~host ~port ~base_path ~make_routes
+    Server_runtime_bootstrap.run
+      ~sw:server_sw
+      ~env
+      ~host
+      ~port
+      ~base_path
+      ~make_routes
       ~make_request_handler:make_extended_handler
       ~make_h2_request_handler:Server_h2_gateway.make_request_handler
       ~make_h2_error_handler:Server_h2_gateway.make_error_handler
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
-    Log.Server.error "[main] keeper bootstrap failed (continuing without keepers): %s" (Printexc.to_string exn)
+    Log.Server.error
+      "[main] keeper bootstrap failed (continuing without keepers): %s"
+      (Printexc.to_string exn)
+;;
 
 (** CLI options *)
 let port =
   let doc = "Port to listen on" in
-  Arg.(value & opt int (Env_config_core.masc_http_port_int ()) & info ["p"; "port"] ~docv:"PORT" ~doc)
+  Arg.(
+    value
+    & opt int (Env_config_core.masc_http_port_int ())
+    & info [ "p"; "port" ] ~docv:"PORT" ~doc)
+;;
 
 let host =
   let default = Env_config.masc_host () in
   let doc =
-    "Host/IP to bind. Defaults to loopback (`127.0.0.1`). Use `0.0.0.0` or `::` only when you also enable room auth with `require_token=true`."
+    "Host/IP to bind. Defaults to loopback (`127.0.0.1`). Use `0.0.0.0` or `::` only \
+     when you also enable room auth with `require_token=true`."
   in
-  Arg.(value & opt string default & info ["host"] ~docv:"HOST" ~doc)
+  Arg.(value & opt string default & info [ "host" ] ~docv:"HOST" ~doc)
+;;
 
 let base_path =
   let doc = "Base path for MASC data (.masc folder location)" in
-  Arg.(value & opt string (default_base_path ()) & info ["base-path"] ~docv:"PATH" ~doc)
+  Arg.(value & opt string (default_base_path ()) & info [ "base-path" ] ~docv:"PATH" ~doc)
+;;
 
 let doctor_json =
   let doc = "Emit machine-readable JSON instead of text output" in
-  Arg.(value & flag & info ["json"] ~doc)
+  Arg.(value & flag & info [ "json" ] ~doc)
+;;
 
 let parse_login_role value =
   match Types.agent_role_of_string (String.lowercase_ascii value) with
   | Ok role -> Ok role
   | Error msg -> Error (`Msg msg)
+;;
 
 let login_role =
   let doc = "Role for the minted bearer token: admin or worker" in
@@ -314,18 +343,18 @@ let login_role =
     Format.pp_print_string fmt (Types.agent_role_to_string role)
   in
   let role_conv = Arg.conv (parse_login_role, role_printer) in
-  Arg.(value & opt role_conv Types.Admin & info ["role"] ~docv:"ROLE" ~doc)
+  Arg.(value & opt role_conv Types.Admin & info [ "role" ] ~docv:"ROLE" ~doc)
+;;
 
 let login_agent =
   let doc = "Agent identity bound to the minted bearer token" in
-  Arg.(
-    value
-    & opt string "codex-local-admin"
-    & info ["agent"] ~docv:"AGENT" ~doc)
+  Arg.(value & opt string "codex-local-admin" & info [ "agent" ] ~docv:"AGENT" ~doc)
+;;
 
 let login_shell =
   let doc = "Emit shell export commands only" in
-  Arg.(value & flag & info ["shell"] ~doc)
+  Arg.(value & flag & info [ "shell" ] ~doc)
+;;
 
 (** Graceful shutdown exception *)
 (* Shutdown exception removed: graceful shutdown returns normally from
@@ -335,21 +364,33 @@ let acquire_pid_lock port =
   match Server_startup_takeover.acquire_pid_lock port with
   | Server_startup_takeover.Acquired -> ()
   | Server_startup_takeover.Already_running { pid } ->
-      Log.legacy_stderr ~level:Log.Error ~module_name:"Server"
-        (Printf.sprintf
-           "[FATAL] Another MASC server (PID %d) is already running on port %d. Kill it first: kill %d"
-           pid port pid);
-      exit 1
+    Log.legacy_stderr
+      ~level:Log.Error
+      ~module_name:"Server"
+      (Printf.sprintf
+         "[FATAL] Another MASC server (PID %d) is already running on port %d. Kill it \
+          first: kill %d"
+         pid
+         port
+         pid);
+    exit 1
+;;
 
 let acquire_base_path_lock base_path =
   match Server_startup_takeover.acquire_base_path_lock base_path with
   | Server_startup_takeover.Acquired -> ()
   | Server_startup_takeover.Already_running { pid } ->
-      Log.legacy_stderr ~level:Log.Error ~module_name:"Server"
-        (Printf.sprintf
-           "[FATAL] Another MASC server (PID %d) already owns base path %s. Kill it first: kill %d"
-           pid base_path pid);
-      exit 1
+    Log.legacy_stderr
+      ~level:Log.Error
+      ~module_name:"Server"
+      (Printf.sprintf
+         "[FATAL] Another MASC server (PID %d) already owns base path %s. Kill it first: \
+          kill %d"
+         pid
+         base_path
+         pid);
+    exit 1
+;;
 
 (** Reject base_path that points to the server's own source repo.
     Detects by checking if the running executable lives under base_path/_build/.
@@ -357,10 +398,12 @@ let acquire_base_path_lock base_path =
 let guard_self_repo_base_path base_path =
   let base_path = Env_config.normalize_masc_base_path_input base_path in
   let abs_base =
-    try Unix.realpath base_path with Unix.Unix_error _ -> base_path
+    try Unix.realpath base_path with
+    | Unix.Unix_error _ -> base_path
   in
   let abs_exe =
-    try Unix.realpath Sys.executable_name with Unix.Unix_error _ -> ""
+    try Unix.realpath Sys.executable_name with
+    | Unix.Unix_error _ -> ""
   in
   let build_prefix = abs_base ^ "/_build/" in
   let is_self_repo =
@@ -368,76 +411,79 @@ let guard_self_repo_base_path base_path =
     && String.length abs_exe > String.length build_prefix
     && String.sub abs_exe 0 (String.length build_prefix) = build_prefix
   in
-  if is_self_repo then begin
+  if is_self_repo
+  then (
     Printf.eprintf
-       "[FATAL] --base-path points to the server's own source repo: %s\n\
+      "[FATAL] --base-path points to the server's own source repo: %s\n\
        (executable: %s)\n\
        Runtime state would pollute the repo. Use a workspace root instead:\n\
-       \  --base-path $MASC_BASE_PATH    (recommended)\n\
-       \  --base-path $HOME              (home-scoped runtime)\n\
+      \  --base-path $MASC_BASE_PATH    (recommended)\n\
+      \  --base-path $HOME              (home-scoped runtime)\n\
        Or start via: sb mcp masc start\n"
-      base_path abs_exe;
-    exit 1
-  end
+      base_path
+      abs_exe;
+    exit 1)
+;;
 
 let run_cmd host port base_path =
   Printexc.record_backtrace true;
   let raw_base_path = String.trim base_path in
-  let normalized_base_path =
-    Env_config.normalize_masc_base_path_input base_path
-  in
+  let normalized_base_path = Env_config.normalize_masc_base_path_input base_path in
   let resolution_source =
     match Sys.getenv_opt "MASC_BASE_PATH_RESOLUTION_SOURCE" with
     | Some source when String.trim source <> "" -> String.trim source
     | _ ->
-        let inherited_env_matches =
-          match Sys.getenv_opt "MASC_BASE_PATH" with
-          | Some existing ->
-              String.equal
-                (Env_config.normalize_masc_base_path_input existing)
-                normalized_base_path
-          | None -> false
+      let inherited_env_matches =
+        match Sys.getenv_opt "MASC_BASE_PATH" with
+        | Some existing ->
+          String.equal
+            (Env_config.normalize_masc_base_path_input existing)
+            normalized_base_path
+        | None -> false
+      in
+      if inherited_env_matches
+      then "explicit_env"
+      else (
+        let default_path =
+          Env_config.normalize_masc_base_path_input (default_base_path ())
         in
-        if inherited_env_matches then
-          "explicit_env"
-        else
-          let default_path =
-            Env_config.normalize_masc_base_path_input (default_base_path ())
-          in
-          if String.equal default_path normalized_base_path then
-            implicit_base_path_resolution_source ()
-          else
-            "explicit_cli"
+        if String.equal default_path normalized_base_path
+        then implicit_base_path_resolution_source ()
+        else "explicit_cli")
   in
   let stripped_base_path =
     Env_config.strip_path_trailing_slashes (String.trim base_path)
   in
   guard_self_repo_base_path normalized_base_path;
-  if String.equal resolution_source "implicit_home"
-     || String.equal resolution_source "implicit_repo_root"
-  then begin
+  if
+    String.equal resolution_source "implicit_home"
+    || String.equal resolution_source "implicit_repo_root"
+  then (
     Printf.eprintf
       "[FATAL] Server refused to start with an implicit base path.\n\
        Resolution source: %s\n\
        Resolved path: %s\n\n\
        Start the server with an explicit base path:\n\
-       \  --base-path /path/to/workspace     (CLI flag)\n\
-       \  MASC_BASE_PATH=/path/to/workspace  (environment variable)\n\n\
+      \  --base-path /path/to/workspace     (CLI flag)\n\
+      \  MASC_BASE_PATH=/path/to/workspace  (environment variable)\n\n\
        Use a workspace root, not the repository checkout or $HOME directly.\n"
-      resolution_source normalized_base_path;
-    exit 1
-  end;
+      resolution_source
+      normalized_base_path;
+    exit 1);
   let masc_dir = Filename.concat normalized_base_path Common.masc_dirname in
   Fs_compat.mkdir_p masc_dir;
   acquire_pid_lock port;
   acquire_base_path_lock normalized_base_path;
   Log.init_from_env ();
-  if stripped_base_path <> ""
-     && String.equal (Filename.basename stripped_base_path) Common.masc_dirname
+  if
+    stripped_base_path <> ""
+    && String.equal (Filename.basename stripped_base_path) Common.masc_dirname
   then
     Log.Server.warn
-      "Normalizing --base-path from %s to %s because runtime base paths must point at the workspace root, not the .masc directory."
-      base_path normalized_base_path;
+      "Normalizing --base-path from %s to %s because runtime base paths must point at \
+       the workspace root, not the .masc directory."
+      base_path
+      normalized_base_path;
   Unix.putenv "MASC_BASE_PATH_INPUT" raw_base_path;
   Unix.putenv "MASC_BASE_PATH" normalized_base_path;
   Unix.putenv "MASC_BASE_PATH_RESOLUTION_SOURCE" resolution_source;
@@ -448,192 +494,216 @@ let run_cmd host port base_path =
   Fs_compat.mkdir_p log_dir;
   (* Migration: move .jsonl files from old base_path/logs/ if they exist *)
   let old_log_dir = Filename.concat normalized_base_path "logs" in
-  (if Sys.file_exists old_log_dir && Sys.is_directory old_log_dir then
-     let files = try Sys.readdir old_log_dir with Sys_error _ -> [||] in
-     Array.iter (fun fname ->
-       if Filename.check_suffix fname ".jsonl" then begin
-         let src = Filename.concat old_log_dir fname in
-         let dst = Filename.concat log_dir fname in
-         if not (Sys.file_exists dst) then
-           (try Sys.rename src dst;
-                Log.info "log migration: moved %s -> .masc/logs/" fname
-            with Sys_error _ -> ())
-          end) files);
+  if Sys.file_exists old_log_dir && Sys.is_directory old_log_dir
+  then (
+    let files =
+      try Sys.readdir old_log_dir with
+      | Sys_error _ -> [||]
+    in
+    Array.iter
+      (fun fname ->
+         if Filename.check_suffix fname ".jsonl"
+         then (
+           let src = Filename.concat old_log_dir fname in
+           let dst = Filename.concat log_dir fname in
+           if not (Sys.file_exists dst)
+           then (
+             try
+               Sys.rename src dst;
+               Log.info "log migration: moved %s -> .masc/logs/" fname
+             with
+             | Sys_error _ -> ())))
+      files);
   Log.Ring.init_file_sink log_dir;
   Log.Ring.cleanup_old_files log_dir;
-  Eio_main.run @@ fun env ->
+  Eio_main.run
+  @@ fun env ->
   (* Initialize Mirage_crypto RNG - MUST be inside Eio_main.run for thread-local state *)
   Mirage_crypto_rng_unix.use_default ();
-
   (* Enable Eio-aware locking globally (single call replaces per-module enable_eio) *)
   Eio_guard.enable ();
-
   (* Set global clock for Time_compat (Eio-native timestamps).
      Dashboard_cache.now() reads from Time_compat directly. *)
   Time_compat.set_clock (Eio.Stdenv.clock env);
-
   (* Initialize thread-safe token store for cancellation support *)
   Masc_mcp.Cancellation.TokenStore.init ();
-
   (* Signal handlers stay side-effect free. The Eio watcher fiber performs
      all shutdown work inside the event loop. *)
   let pending_shutdown_signal = Atomic.make None in
   let request_shutdown signal_name =
-    if Option.is_none (Atomic.get pending_shutdown_signal) then
-      Atomic.set pending_shutdown_signal (Some signal_name)
+    if Option.is_none (Atomic.get pending_shutdown_signal)
+    then Atomic.set pending_shutdown_signal (Some signal_name)
   in
   Sys.set_signal Sys.sigterm (Sys.Signal_handle (fun _ -> request_shutdown "SIGTERM"));
   Sys.set_signal Sys.sigint (Sys.Signal_handle (fun _ -> request_shutdown "SIGINT"));
-
   let max_bind_retries = 5 in
   let rec try_start attempt =
-    (try
-      Eio.Switch.run @@ fun sw ->
+    try
+      Eio.Switch.run
+      @@ fun sw ->
       let clock = Eio.Stdenv.clock env in
       let rec await_shutdown_signal () =
         match Atomic.exchange pending_shutdown_signal None with
         | None ->
-            Eio.Time.sleep clock 0.05;
-            await_shutdown_signal ()
+          Eio.Time.sleep clock 0.05;
+          await_shutdown_signal ()
         | Some signal_name ->
-            let shutdown_cfg = Masc_mcp.Shutdown.config_from_env () in
-            let force_timeout = shutdown_cfg.force_timeout_s in
-            let t_shutdown_start = Unix.gettimeofday () in
-            Log.Server.info
-              "[MASC] Received %s, shutting down gracefully (timeout=%.0fs)..."
-              signal_name force_timeout;
-            Eio.Fiber.fork_daemon ~sw (fun () ->
-                Eio.Time.sleep clock force_timeout;
-                let elapsed = Unix.gettimeofday () -. t_shutdown_start in
-                Log.Server.error
-                  "[MASC] Graceful shutdown timed out after %.1fs (limit=%.0fs), forcing exit."
-                  elapsed force_timeout;
-                exit 1);
-            (* Phase 1: Notify SSE clients *)
-            let t_phase = Unix.gettimeofday () in
-            let shutdown_data =
-              Printf.sprintf
-                {|{"jsonrpc":"2.0","method":"notifications/shutdown","params":{"reason":"%s","message":"Server is shutting down, please reconnect"}}|}
-                signal_name
-            in
-            Sse.broadcast (Yojson.Safe.from_string shutdown_data);
-            Log.Server.info
-              "[Shutdown] Phase 1/4 NOTIFY: sent to %d SSE clients (%.2fs) [active conn: %d, ws: %d]"
-              (Sse.client_count ())
-              (Unix.gettimeofday () -. t_phase)
-              (Masc_mcp.Server_mcp_transport_http_sse.active_session_count ())
-              (Masc_mcp.Server_mcp_transport_ws.session_count ());
-
-            Eio.Time.sleep clock shutdown_cfg.notify_delay_s;
-            (* Phase 2: Run shutdown hooks with cleanup timeout *)
-            let t_phase = Unix.gettimeofday () in
-            Log.Server.info "[Shutdown] Phase 2/4 HOOKS: starting (timeout=%.1fs)"
-              shutdown_cfg.cleanup_timeout_s;
-            (try
-              Eio.Time.with_timeout_exn clock shutdown_cfg.cleanup_timeout_s
-                (fun () -> Masc_mcp.Shutdown_hooks.run_all ())
-            with
-            | Eio.Time.Timeout ->
-                Log.Server.warn
-                  "[Shutdown] Phase 2/4 HOOKS: timeout after %.1fs, proceeding (total=%.1fs)"
-                  shutdown_cfg.cleanup_timeout_s
-                  (Unix.gettimeofday () -. t_shutdown_start)
-            | Eio.Cancel.Cancelled _ as e -> raise e
-            | exn ->
-                Log.Server.warn
-                  "[Shutdown] Phase 2/4 HOOKS: failed after %.2fs: %s"
-                  (Unix.gettimeofday () -. t_phase)
-                  (Printexc.to_string exn));
-            let now = Unix.gettimeofday () in
-            Log.Server.info "[Shutdown] Phase 2/4 HOOKS: done (%.2fs, total=%.1fs) [active conn: %d, ws: %d]"
-              (now -. t_phase)
-              (now -. t_shutdown_start)
-              (Masc_mcp.Server_mcp_transport_http_sse.active_session_count ())
-              (Masc_mcp.Server_mcp_transport_ws.session_count ());
-            (* Phase 3: Board flush with 2s timeout *)
-            let t_phase = Unix.gettimeofday () in
-            Log.Server.info "[Shutdown] Phase 3/4 BOARD: flush starting (timeout=2.0s)";
-            (try
-              Eio.Time.with_timeout_exn clock 2.0
-                (fun () -> Board_dispatch.flush ())
-            with
-            | Eio.Time.Timeout ->
-                Log.Server.warn
-                  "[Shutdown] Phase 3/4 BOARD: timeout after 2.0s (total=%.1fs)"
-                  (Unix.gettimeofday () -. t_shutdown_start)
-            | Eio.Cancel.Cancelled _ as e -> raise e
-            | exn ->
-                Log.Server.warn
-                  "[Shutdown] Phase 3/4 BOARD: skipped after %.2fs: %s"
-                  (Unix.gettimeofday () -. t_phase)
-                  (Printexc.to_string exn));
-            let now = Unix.gettimeofday () in
-            Log.Server.info "[Shutdown] Phase 3/4 BOARD: done (%.2fs, total=%.1fs) [active conn: %d, ws: %d]"
-              (now -. t_phase)
-              (now -. t_shutdown_start)
-              (Masc_mcp.Server_mcp_transport_http_sse.active_session_count ())
-              (Masc_mcp.Server_mcp_transport_ws.session_count ());
-
-            (* Phase 4: Return normally — Eio.Fiber.first will cancel
-               run_server cleanly via Eio.Cancel.Cancelled. *)
-            Log.Server.info
-              "[Shutdown] Phase 4/4 CANCEL: server cancel (total=%.1fs) [active conn: %d, ws: %d]"
-              (Unix.gettimeofday () -. t_shutdown_start)
-              (Masc_mcp.Server_mcp_transport_http_sse.active_session_count ())
-              (Masc_mcp.Server_mcp_transport_ws.session_count ());
-            ()
-            in
-            Eio.Fiber.first
-            (fun () -> run_server ~sw ~env ~host ~port ~base_path)
-            await_shutdown_signal;
-            (* Server stopped; close SSE connections after server is down. *)
-            (try close_all_sse_connections ()
-            with
-            | Eio.Cancel.Cancelled _ as e -> raise e
-            | _ -> ());
-            Log.Server.info "MASC MCP: Server stopped, waiting for background fibers... [active conn: %d, ws: %d]"
+          let shutdown_cfg = Masc_mcp.Shutdown.config_from_env () in
+          let force_timeout = shutdown_cfg.force_timeout_s in
+          let t_shutdown_start = Unix.gettimeofday () in
+          Log.Server.info
+            "[MASC] Received %s, shutting down gracefully (timeout=%.0fs)..."
+            signal_name
+            force_timeout;
+          Eio.Fiber.fork_daemon ~sw (fun () ->
+            Eio.Time.sleep clock force_timeout;
+            let elapsed = Unix.gettimeofday () -. t_shutdown_start in
+            Log.Server.error
+              "[MASC] Graceful shutdown timed out after %.1fs (limit=%.0fs), forcing \
+               exit."
+              elapsed
+              force_timeout;
+            exit 1);
+          (* Phase 1: Notify SSE clients *)
+          let t_phase = Unix.gettimeofday () in
+          let shutdown_data =
+            Printf.sprintf
+              {|{"jsonrpc":"2.0","method":"notifications/shutdown","params":{"reason":"%s","message":"Server is shutting down, please reconnect"}}|}
+              signal_name
+          in
+          Sse.broadcast (Yojson.Safe.from_string shutdown_data);
+          Log.Server.info
+            "[Shutdown] Phase 1/4 NOTIFY: sent to %d SSE clients (%.2fs) [active conn: \
+             %d, ws: %d]"
+            (Sse.client_count ())
+            (Unix.gettimeofday () -. t_phase)
             (Masc_mcp.Server_mcp_transport_http_sse.active_session_count ())
-            (Masc_mcp.Server_mcp_transport_ws.session_count ())
-
+            (Masc_mcp.Server_mcp_transport_ws.session_count ());
+          Eio.Time.sleep clock shutdown_cfg.notify_delay_s;
+          (* Phase 2: Run shutdown hooks with cleanup timeout *)
+          let t_phase = Unix.gettimeofday () in
+          Log.Server.info
+            "[Shutdown] Phase 2/4 HOOKS: starting (timeout=%.1fs)"
+            shutdown_cfg.cleanup_timeout_s;
+          (try
+             Eio.Time.with_timeout_exn clock shutdown_cfg.cleanup_timeout_s (fun () ->
+               Masc_mcp.Shutdown_hooks.run_all ())
+           with
+           | Eio.Time.Timeout ->
+             Log.Server.warn
+               "[Shutdown] Phase 2/4 HOOKS: timeout after %.1fs, proceeding (total=%.1fs)"
+               shutdown_cfg.cleanup_timeout_s
+               (Unix.gettimeofday () -. t_shutdown_start)
+           | Eio.Cancel.Cancelled _ as e -> raise e
+           | exn ->
+             Log.Server.warn
+               "[Shutdown] Phase 2/4 HOOKS: failed after %.2fs: %s"
+               (Unix.gettimeofday () -. t_phase)
+               (Printexc.to_string exn));
+          let now = Unix.gettimeofday () in
+          Log.Server.info
+            "[Shutdown] Phase 2/4 HOOKS: done (%.2fs, total=%.1fs) [active conn: %d, ws: \
+             %d]"
+            (now -. t_phase)
+            (now -. t_shutdown_start)
+            (Masc_mcp.Server_mcp_transport_http_sse.active_session_count ())
+            (Masc_mcp.Server_mcp_transport_ws.session_count ());
+          (* Phase 3: Board flush with 2s timeout *)
+          let t_phase = Unix.gettimeofday () in
+          Log.Server.info "[Shutdown] Phase 3/4 BOARD: flush starting (timeout=2.0s)";
+          (try
+             Eio.Time.with_timeout_exn clock 2.0 (fun () -> Board_dispatch.flush ())
+           with
+           | Eio.Time.Timeout ->
+             Log.Server.warn
+               "[Shutdown] Phase 3/4 BOARD: timeout after 2.0s (total=%.1fs)"
+               (Unix.gettimeofday () -. t_shutdown_start)
+           | Eio.Cancel.Cancelled _ as e -> raise e
+           | exn ->
+             Log.Server.warn
+               "[Shutdown] Phase 3/4 BOARD: skipped after %.2fs: %s"
+               (Unix.gettimeofday () -. t_phase)
+               (Printexc.to_string exn));
+          let now = Unix.gettimeofday () in
+          Log.Server.info
+            "[Shutdown] Phase 3/4 BOARD: done (%.2fs, total=%.1fs) [active conn: %d, ws: \
+             %d]"
+            (now -. t_phase)
+            (now -. t_shutdown_start)
+            (Masc_mcp.Server_mcp_transport_http_sse.active_session_count ())
+            (Masc_mcp.Server_mcp_transport_ws.session_count ());
+          (* Phase 4: Return normally — Eio.Fiber.first will cancel
+               run_server cleanly via Eio.Cancel.Cancelled. *)
+          Log.Server.info
+            "[Shutdown] Phase 4/4 CANCEL: server cancel (total=%.1fs) [active conn: %d, \
+             ws: %d]"
+            (Unix.gettimeofday () -. t_shutdown_start)
+            (Masc_mcp.Server_mcp_transport_http_sse.active_session_count ())
+            (Masc_mcp.Server_mcp_transport_ws.session_count ());
+          ()
+      in
+      Eio.Fiber.first
+        (fun () -> run_server ~sw ~env ~host ~port ~base_path)
+        await_shutdown_signal;
+      (* Server stopped; close SSE connections after server is down. *)
+      (try close_all_sse_connections () with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | _ -> ());
+      Log.Server.info
+        "MASC MCP: Server stopped, waiting for background fibers... [active conn: %d, \
+         ws: %d]"
+        (Masc_mcp.Server_mcp_transport_http_sse.active_session_count ())
+        (Masc_mcp.Server_mcp_transport_ws.session_count ())
     with
     | Eio.Cancel.Cancelled _ ->
-        Log.Server.info "MASC MCP: Server cancelled, waiting for background fibers..."
+      Log.Server.info "MASC MCP: Server cancelled, waiting for background fibers..."
     | Unix.Unix_error (Unix.EADDRINUSE, _, _) when attempt < max_bind_retries ->
-        let delay = Float.min 30.0 (2.0 ** Float.of_int attempt) in
-        Log.Server.warn "Port %d in use, retrying in %.0fs (attempt %d/%d)"
-          port delay (attempt + 1) max_bind_retries;
-        Time_compat.sleep delay;
-        try_start (attempt + 1)
+      let delay = Float.min 30.0 (2.0 ** Float.of_int attempt) in
+      Log.Server.warn
+        "Port %d in use, retrying in %.0fs (attempt %d/%d)"
+        port
+        delay
+        (attempt + 1)
+        max_bind_retries;
+      Time_compat.sleep delay;
+      try_start (attempt + 1)
     | Unix.Unix_error (Unix.EADDRINUSE, _, _) ->
-        Log.Server.error "[FATAL] Port %d is still in use after %d retries. Try: lsof -i :%d | grep LISTEN"
-          port max_bind_retries port;
-        exit 1
+      Log.Server.error
+        "[FATAL] Port %d is still in use after %d retries. Try: lsof -i :%d | grep LISTEN"
+        port
+        max_bind_retries
+        port;
+      exit 1
     | Unix.Unix_error (Unix.EACCES, _, _) ->
-        Log.Server.error "[FATAL] Permission denied binding to port %d" port;
-        exit 1
+      Log.Server.error "[FATAL] Permission denied binding to port %d" port;
+      exit 1
     | Out_of_memory ->
-        Printf.eprintf "[FATAL] Out_of_memory\n%!";
-        exit 1
+      Printf.eprintf "[FATAL] Out_of_memory\n%!";
+      exit 1
     | Stack_overflow ->
-        Printf.eprintf "[FATAL] Stack_overflow\n%!";
-        exit 1
+      Printf.eprintf "[FATAL] Stack_overflow\n%!";
+      exit 1
     | exn ->
-        let bt = Printexc.get_backtrace () in
-        Log.Server.error "[FATAL] Unhandled exception: %s" (Printexc.to_string exn);
-        if bt <> "" then Log.Server.error "[FATAL] Backtrace:\n%s" bt;
-        exit 1)
+      let bt = Printexc.get_backtrace () in
+      Log.Server.error "[FATAL] Unhandled exception: %s" (Printexc.to_string exn);
+      if bt <> "" then Log.Server.error "[FATAL] Backtrace:\n%s" bt;
+      exit 1
   in
   try_start 0;
   Log.Server.info "MASC MCP: Shutdown complete."
+;;
 
 let run_cmd_exit host port base_path =
   run_cmd host port base_path;
   Cmd.Exit.ok
+;;
 
 let doctor_cmd_exit base_path as_json =
   let report =
-    Eio_main.run @@ fun env ->
-    Eio.Switch.run @@ fun sw ->
+    Eio_main.run
+    @@ fun env ->
+    Eio.Switch.run
+    @@ fun sw ->
     Config_doctor.analyze_live
       ~sw
       ~net:(Eio.Stdenv.net env)
@@ -645,13 +715,13 @@ let doctor_cmd_exit base_path as_json =
       ()
   in
   let output =
-    if as_json then
-      Config_doctor.to_yojson report |> Yojson.Safe.pretty_to_string
-    else
-      Config_doctor.render_text report
+    if as_json
+    then Config_doctor.to_yojson report |> Yojson.Safe.pretty_to_string
+    else Config_doctor.render_text report
   in
   print_endline output;
   Config_doctor.exit_code report
+;;
 
 let doctor_auth_cmd_exit base_path as_json =
   let report =
@@ -661,13 +731,13 @@ let doctor_auth_cmd_exit base_path as_json =
       ()
   in
   let output =
-    if as_json then
-      Auth_doctor.to_yojson report |> Yojson.Safe.pretty_to_string
-    else
-      Auth_doctor.render_text report
+    if as_json
+    then Auth_doctor.to_yojson report |> Yojson.Safe.pretty_to_string
+    else Auth_doctor.render_text report
   in
   print_endline output;
   Auth_doctor.exit_code report
+;;
 
 let doctor_sidecar_exit name as_json =
   match Masc_mcp.Doctor_dispatch.sidecar_dir name with
@@ -680,21 +750,16 @@ let doctor_sidecar_exit name as_json =
   | Some rel_dir ->
     let repo_root = Sys.getcwd () in
     let abs_dir =
-      if Filename.is_relative rel_dir
-      then Filename.concat repo_root rel_dir
-      else rel_dir
+      if Filename.is_relative rel_dir then Filename.concat repo_root rel_dir else rel_dir
     in
     if not (Sys.file_exists abs_dir)
-    then begin
+    then (
       Printf.eprintf
         "sidecar directory not found: %s\nhint: run from repository root\n"
         abs_dir;
-      2
-    end
-    else begin
-      let python =
-        Option.value (Sys.getenv_opt "MASC_PYTHON") ~default:"python3"
-      in
+      2)
+    else (
+      let python = Option.value (Sys.getenv_opt "MASC_PYTHON") ~default:"python3" in
       let args =
         if as_json
         then [| python; "-m"; "src"; "doctor"; "--json" |]
@@ -703,15 +768,8 @@ let doctor_sidecar_exit name as_json =
       let prev = Sys.getcwd () in
       Sys.chdir abs_dir;
       let pid =
-        try
-          Some
-            (Unix.create_process
-               python
-               args
-               Unix.stdin
-               Unix.stdout
-               Unix.stderr)
-        with Unix.Unix_error (err, _, _) ->
+        try Some (Unix.create_process python args Unix.stdin Unix.stdout Unix.stderr) with
+        | Unix.Unix_error (err, _, _) ->
           Printf.eprintf
             "failed to exec %s: %s\nhint: set MASC_PYTHON to a valid interpreter\n"
             python
@@ -726,16 +784,13 @@ let doctor_sidecar_exit name as_json =
         (match status with
          | Unix.WEXITED n -> n
          | Unix.WSIGNALED s -> 128 + s
-         | Unix.WSTOPPED s -> 128 + s)
-    end
+         | Unix.WSTOPPED s -> 128 + s))
+;;
 
 let sidecar_name_arg =
-  let doc =
-    Printf.sprintf
-      "Sidecar name (%s)"
-      Masc_mcp.Doctor_dispatch.known_summary
-  in
+  let doc = Printf.sprintf "Sidecar name (%s)" Masc_mcp.Doctor_dispatch.known_summary in
   Arg.(required & pos 0 (some string) None & info [] ~docv:"SIDECAR" ~doc)
+;;
 
 let doctor_config_cmd =
   let doc =
@@ -743,13 +798,13 @@ let doctor_config_cmd =
   in
   let info = Cmd.info "config" ~doc in
   Cmd.v info Term.(const doctor_cmd_exit $ base_path $ doctor_json)
+;;
 
 let doctor_auth_cmd =
-  let doc =
-    "Diagnose auth mode, bearer readiness, and role/permission mismatches"
-  in
+  let doc = "Diagnose auth mode, bearer readiness, and role/permission mismatches" in
   let info = Cmd.info "auth" ~doc in
   Cmd.v info Term.(const doctor_auth_cmd_exit $ base_path $ doctor_json)
+;;
 
 let doctor_sidecar_cmd =
   let doc =
@@ -757,26 +812,30 @@ let doctor_sidecar_cmd =
   in
   let info = Cmd.info "sidecar" ~doc in
   Cmd.v info Term.(const doctor_sidecar_exit $ sidecar_name_arg $ doctor_json)
+;;
 
-let doctor_all_divider () =
-  print_endline "========================================"
+let doctor_all_divider () = print_endline "========================================"
 
 let doctor_all_section title =
   print_newline ();
   doctor_all_divider ();
   print_endline title;
   doctor_all_divider ()
+;;
 
 let label_for_rc = function
   | 0 -> "정상"
   | 1 -> "경고"
   | 2 -> "오류"
   | _ -> "오류"
+;;
 
 let doctor_all_json_exit base_path =
   let config_report =
-    Eio_main.run @@ fun env ->
-    Eio.Switch.run @@ fun sw ->
+    Eio_main.run
+    @@ fun env ->
+    Eio.Switch.run
+    @@ fun sw ->
     Config_doctor.analyze_live
       ~sw
       ~net:(Eio.Stdenv.net env)
@@ -792,25 +851,23 @@ let doctor_all_json_exit base_path =
   let sidecar_entries =
     List.map
       (fun name ->
-        match Masc_mcp.Doctor_dispatch.capture_sidecar_json name with
-        | Ok (body, rc) ->
-          let payload : Yojson.Safe.t =
-            try Yojson.Safe.from_string body with
-            | _ ->
-              `Assoc
-                [ "raw", `String body
-                ; "parse_error", `String "invalid JSON from sidecar"
-                ]
-          in
-          (name, rc, payload)
-        | Error msg -> (name, 2, `Assoc [ "error", `String msg ]))
+         match Masc_mcp.Doctor_dispatch.capture_sidecar_json name with
+         | Ok (body, rc) ->
+           let payload : Yojson.Safe.t =
+             try Yojson.Safe.from_string body with
+             | _ ->
+               `Assoc
+                 [ "raw", `String body
+                 ; "parse_error", `String "invalid JSON from sidecar"
+                 ]
+           in
+           name, rc, payload
+         | Error msg -> name, 2, `Assoc [ "error", `String msg ])
       Masc_mcp.Doctor_dispatch.known_sidecars
   in
   let all_entries =
     ("config", "config", config_rc, config_payload)
-    :: List.map
-         (fun (name, rc, payload) -> (name, "sidecar", rc, payload))
-         sidecar_entries
+    :: List.map (fun (name, rc, payload) -> name, "sidecar", rc, payload) sidecar_entries
   in
   let all_rcs = List.map (fun (_, _, rc, _) -> rc) all_entries in
   let total = List.length all_rcs in
@@ -822,17 +879,15 @@ let doctor_all_json_exit base_path =
     `List
       (List.map
          (fun (name, kind, rc, payload) ->
-           `Assoc
-             [ "name", `String name
-             ; "kind", `String kind
-             ; "exit_code", `Int rc
-             ; "payload", payload
-             ])
+            `Assoc
+              [ "name", `String name
+              ; "kind", `String kind
+              ; "exit_code", `Int rc
+              ; "payload", payload
+              ])
          all_entries)
   in
-  let aggregate =
-    Masc_mcp.Doctor_dispatch.aggregate_exit_code all_rcs
-  in
+  let aggregate = Masc_mcp.Doctor_dispatch.aggregate_exit_code all_rcs in
   let result : Yojson.Safe.t =
     `Assoc
       [ "title", `String "MASC Doctor (전 계층)"
@@ -849,22 +904,21 @@ let doctor_all_json_exit base_path =
   in
   print_endline (Yojson.Safe.pretty_to_string result);
   aggregate
+;;
 
 let doctor_all_exit base_path as_json =
   if as_json
   then doctor_all_json_exit base_path
-  else begin
+  else (
     doctor_all_section "Config Doctor";
     let config_rc = doctor_cmd_exit base_path false in
     let sidecar_rcs =
       List.map
         (fun name ->
-          doctor_all_section
-            (Printf.sprintf
-               "%s Sidecar Doctor"
-               (String.capitalize_ascii name));
-          let rc = doctor_sidecar_exit name false in
-          (name, rc))
+           doctor_all_section
+             (Printf.sprintf "%s Sidecar Doctor" (String.capitalize_ascii name));
+           let rc = doctor_sidecar_exit name false in
+           name, rc)
         Masc_mcp.Doctor_dispatch.known_sidecars
     in
     let all_rcs = config_rc :: List.map snd sidecar_rcs in
@@ -883,22 +937,21 @@ let doctor_all_exit base_path as_json =
       err_count;
     let breakdown =
       ("config", config_rc) :: sidecar_rcs
-      |> List.map (fun (name, rc) ->
-             Printf.sprintf "%s=%s" name (label_for_rc rc))
+      |> List.map (fun (name, rc) -> Printf.sprintf "%s=%s" name (label_for_rc rc))
       |> String.concat " · "
     in
     print_endline breakdown;
     doctor_all_divider ();
-    Masc_mcp.Doctor_dispatch.aggregate_exit_code all_rcs
-  end
+    Masc_mcp.Doctor_dispatch.aggregate_exit_code all_rcs)
+;;
 
 let doctor_all_cmd =
   let doc =
-    "Run config + every registered sidecar doctor and show an aggregate \
-     summary"
+    "Run config + every registered sidecar doctor and show an aggregate summary"
   in
   let info = Cmd.info "all" ~doc in
   Cmd.v info Term.(const doctor_all_exit $ base_path $ doctor_json)
+;;
 
 let doctor_cmd =
   let doc = "Doctor: diagnose MASC server and sidecars" in
@@ -907,42 +960,54 @@ let doctor_cmd =
     ~default:Term.(const doctor_cmd_exit $ base_path $ doctor_json)
     info
     [ doctor_config_cmd; doctor_auth_cmd; doctor_sidecar_cmd; doctor_all_cmd ]
+;;
 
 let login_cmd_exit base_path host port agent role as_json as_shell =
-  match
-    Auth_login.mint ~base_path ~host ~port ~agent_name:agent ~role ()
-  with
+  match Auth_login.mint ~base_path ~host ~port ~agent_name:agent ~role () with
   | Error err ->
-      Printf.eprintf "login failed: %s\n" (Types.masc_error_to_string err);
-      1
+    Printf.eprintf "login failed: %s\n" (Types.masc_error_to_string err);
+    1
   | Ok report ->
-      let output =
-        if as_shell then
-          Auth_login.render_shell report
-        else if as_json then
-          Auth_login.to_yojson report |> Yojson.Safe.pretty_to_string
-        else
-          Auth_login.render_text report
-      in
-      print_endline output;
-      0
+    let output =
+      if as_shell
+      then Auth_login.render_shell report
+      else if as_json
+      then Auth_login.to_yojson report |> Yojson.Safe.pretty_to_string
+      else Auth_login.render_text report
+    in
+    print_endline output;
+    0
+;;
 
 let login_cmd =
   let doc =
-    "Mint a local bearer token, persist its raw token file, and print \
-     dashboard/Codex MCP auth exports"
+    "Mint a local bearer token, persist its raw token file, and print dashboard/Codex \
+     MCP auth exports"
   in
   let info = Cmd.info "login" ~doc in
-  Cmd.v info
+  Cmd.v
+    info
     Term.(
-      const login_cmd_exit $ base_path $ host $ port $ login_agent
-      $ login_role $ doctor_json $ login_shell)
+      const login_cmd_exit
+      $ base_path
+      $ host
+      $ port
+      $ login_agent
+      $ login_role
+      $ doctor_json
+      $ login_shell)
+;;
 
 let init_force =
   let doc = "Overwrite existing config files instead of skipping them" in
-  Arg.(value & flag & info ["force"] ~doc)
+  Arg.(value & flag & info [ "force" ] ~doc)
+;;
 
-type init_tally = { written : int; skipped : int; failed : int }
+type init_tally =
+  { written : int
+  ; skipped : int
+  ; failed : int
+  }
 
 let seed_one ~target_root ~force tally rel =
   match Embedded_config.read rel with
@@ -952,17 +1017,20 @@ let seed_one ~target_root ~force tally rel =
   | Some content ->
     let dest = Filename.concat target_root rel in
     Fs_compat.mkdir_p (Filename.dirname dest);
-    if Fs_compat.file_exists dest && not force then begin
+    if Fs_compat.file_exists dest && not force
+    then (
       Printf.printf "skip   %s (exists, --force to overwrite)\n" dest;
-      { tally with skipped = tally.skipped + 1 }
-    end else
+      { tally with skipped = tally.skipped + 1 })
+    else (
       try
         Fs_compat.save_file dest content;
         Printf.printf "wrote  %s (%d bytes)\n" dest (String.length content);
         { tally with written = tally.written + 1 }
-      with Sys_error msg ->
+      with
+      | Sys_error msg ->
         Printf.eprintf "init: %s: %s\n" dest msg;
-        { tally with failed = tally.failed + 1 }
+        { tally with failed = tally.failed + 1 })
+;;
 
 let init_cmd_exit base_path force =
   let base_path = Env_config.normalize_masc_base_path_input base_path in
@@ -974,19 +1042,28 @@ let init_cmd_exit base_path force =
       { written = 0; skipped = 0; failed = 0 }
       Embedded_config.file_list
   in
-  Printf.printf "init: %d written, %d skipped, %d failed (root=%s)\n"
-    result.written result.skipped result.failed target_root;
+  Printf.printf
+    "init: %d written, %d skipped, %d failed (root=%s)\n"
+    result.written
+    result.skipped
+    result.failed
+    target_root;
   if result.failed > 0 then 1 else 0
+;;
 
 let init_cmd =
   let doc = "Seed default .masc/config/ from binary-embedded assets" in
   let info = Cmd.info "init" ~doc in
   Cmd.v info Term.(const init_cmd_exit $ base_path $ init_force)
+;;
 
 let cmd =
   let doc = "MASC MCP Server and operator diagnostics" in
   let info = Cmd.info "masc-mcp" ~version:Masc_mcp.Version.version ~doc in
-  Cmd.group ~default:Term.(const run_cmd_exit $ host $ port $ base_path)
-    info [ doctor_cmd; init_cmd; login_cmd ]
+  Cmd.group
+    ~default:Term.(const run_cmd_exit $ host $ port $ base_path)
+    info
+    [ doctor_cmd; init_cmd; login_cmd ]
+;;
 
 let () = exit (Cmd.eval' cmd)

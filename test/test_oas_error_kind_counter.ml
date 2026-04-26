@@ -16,14 +16,16 @@ module Prom = Masc_mcp.Prometheus
 let counter_for ?(cascade_name = "unknown") kind =
   Prom.metric_value_or_zero
     OWN.masc_oas_error_total_metric
-    ~labels:[ ("kind", kind); ("cascade_name", cascade_name) ]
+    ~labels:[ "kind", kind; "cascade_name", cascade_name ]
     ()
+;;
 
 let test_metric_name_stable () =
   Alcotest.(check string)
     "canonical oas error total metric name"
     "masc_oas_error_total"
     OWN.masc_oas_error_total_metric
+;;
 
 let test_oas_timeout_budget_kind () =
   let kind = "oas_timeout_budget" in
@@ -31,29 +33,29 @@ let test_oas_timeout_budget_kind () =
   let _ =
     OWN.sdk_error_of_masc_internal_error
       (OWN.Oas_timeout_budget
-         {
-           budget_sec = 423.8;
-           keeper_turn_timeout_sec = 1200.0;
-           estimated_input_tokens = 2519;
-           source = "adaptive_estimated_input_tokens";
+         { budget_sec = 423.8
+         ; keeper_turn_timeout_sec = 1200.0
+         ; estimated_input_tokens = 2519
+         ; source = "adaptive_estimated_input_tokens"
          })
   in
   Alcotest.(check (float 0.0001))
     "oas_timeout_budget counter +1"
     (before +. 1.0)
     (counter_for kind)
+;;
 
 let test_turn_timeout_kind () =
   let kind = "turn_timeout" in
   let before = counter_for kind in
   let _ =
-    OWN.sdk_error_of_masc_internal_error
-      (OWN.Turn_timeout { elapsed_sec = 1201.0 })
+    OWN.sdk_error_of_masc_internal_error (OWN.Turn_timeout { elapsed_sec = 1201.0 })
   in
   Alcotest.(check (float 0.0001))
     "turn_timeout counter +1"
     (before +. 1.0)
     (counter_for kind)
+;;
 
 let test_cascade_exhausted_kind () =
   let kind = "cascade_exhausted" in
@@ -62,16 +64,15 @@ let test_cascade_exhausted_kind () =
   let _ =
     OWN.sdk_error_of_masc_internal_error
       (OWN.Cascade_exhausted
-         {
-           cascade_name;
-           reason =
-             Masc_mcp.Keeper_types.Other_detail "all providers tried";
+         { cascade_name
+         ; reason = Masc_mcp.Keeper_types.Other_detail "all providers tried"
          })
   in
   Alcotest.(check (float 0.0001))
     "cascade_exhausted{cascade_name=big_three} counter +1"
     (before +. 1.0)
     (counter_for ~cascade_name kind)
+;;
 
 let test_resumable_cli_session_kind () =
   let kind = "resumable_cli_session" in
@@ -80,16 +81,13 @@ let test_resumable_cli_session_kind () =
   let _ =
     OWN.sdk_error_of_masc_internal_error
       (OWN.Resumable_cli_session
-         {
-           cascade_name;
-           detail = "session resumable";
-           exit_code = Some 130;
-         })
+         { cascade_name; detail = "session resumable"; exit_code = Some 130 })
   in
   Alcotest.(check (float 0.0001))
     "resumable_cli_session{cascade_name=big_three} counter +1"
     (before +. 1.0)
     (counter_for ~cascade_name kind)
+;;
 
 let test_no_tool_capable_provider_kind () =
   let kind = "no_tool_capable_provider" in
@@ -98,15 +96,13 @@ let test_no_tool_capable_provider_kind () =
   let _ =
     OWN.sdk_error_of_masc_internal_error
       (OWN.No_tool_capable_provider
-         {
-           cascade_name;
-           configured_labels = [ "openai"; "anthropic" ];
-         })
+         { cascade_name; configured_labels = [ "openai"; "anthropic" ] })
   in
   Alcotest.(check (float 0.0001))
     "no_tool_capable_provider{cascade_name=tool_required} counter +1"
     (before +. 1.0)
     (counter_for ~cascade_name kind)
+;;
 
 let test_accept_rejected_kind () =
   let kind = "accept_rejected" in
@@ -114,16 +110,13 @@ let test_accept_rejected_kind () =
   let _ =
     OWN.sdk_error_of_masc_internal_error
       (OWN.Accept_rejected
-         {
-           scope = "keeper_turn";
-           model = Some "codex";
-           reason = "accept=false";
-         })
+         { scope = "keeper_turn"; model = Some "codex"; reason = "accept=false" })
   in
   Alcotest.(check (float 0.0001))
     "accept_rejected counter +1"
     (before +. 1.0)
     (counter_for kind)
+;;
 
 let test_admission_queue_timeout_kind () =
   let kind = "admission_queue_timeout" in
@@ -138,6 +131,7 @@ let test_admission_queue_timeout_kind () =
     "admission_queue_timeout{cascade_name=big_three} counter +1"
     (before +. 1.0)
     (counter_for ~cascade_name kind)
+;;
 
 let test_admission_queue_rejected_kind () =
   let kind = "admission_queue_rejected" in
@@ -151,6 +145,7 @@ let test_admission_queue_rejected_kind () =
     "admission_queue_rejected counter +1"
     (before +. 1.0)
     (counter_for kind)
+;;
 
 let test_ambiguous_post_commit_kind () =
   let kind = "ambiguous_post_commit" in
@@ -158,16 +153,16 @@ let test_ambiguous_post_commit_kind () =
   let _ =
     OWN.sdk_error_of_masc_internal_error
       (OWN.Ambiguous_post_commit
-         {
-           is_timeout = true;
-           tools = [ "keeper_board_post" ];
-           original_error = "provider timeout";
+         { is_timeout = true
+         ; tools = [ "keeper_board_post" ]
+         ; original_error = "provider timeout"
          })
   in
   Alcotest.(check (float 0.0001))
     "ambiguous_post_commit counter +1"
     (before +. 1.0)
     (counter_for kind)
+;;
 
 let test_kind_isolation () =
   (* Bumping one kind must not move the counter for a different
@@ -177,13 +172,14 @@ let test_kind_isolation () =
   let b = "oas_timeout_budget" in
   let b_before = counter_for b in
   let _ =
-    OWN.sdk_error_of_masc_internal_error
-      (OWN.Turn_timeout { elapsed_sec = 42.0 })
+    OWN.sdk_error_of_masc_internal_error (OWN.Turn_timeout { elapsed_sec = 42.0 })
   in
   Alcotest.(check (float 0.0001))
     "different kind counter unchanged"
-    b_before (counter_for b);
+    b_before
+    (counter_for b);
   ignore a
+;;
 
 (* #10285: cascade_name label separation -------------------------- *)
 
@@ -210,6 +206,7 @@ let test_resumable_cli_session_per_cascade_isolation () =
     "kimi_cli_keeper counter unchanged by governance_judge bump"
     b_before
     (counter_for ~cascade_name:cascade_b kind)
+;;
 
 let test_empty_cascade_name_collapses_to_unknown () =
   (* Defensive: a cascade-aware variant whose payload happens to
@@ -228,6 +225,7 @@ let test_empty_cascade_name_collapses_to_unknown () =
     "blank cascade_name routes to 'unknown'"
     (unknown_before +. 1.0)
     (counter_for ~cascade_name:"unknown" kind)
+;;
 
 let test_non_cascade_aware_variant_uses_unknown () =
   (* [Turn_timeout] has no cascade_name in its payload; the label
@@ -235,58 +233,60 @@ let test_non_cascade_aware_variant_uses_unknown () =
   let kind = "turn_timeout" in
   let before = counter_for ~cascade_name:"unknown" kind in
   let _ =
-    OWN.sdk_error_of_masc_internal_error
-      (OWN.Turn_timeout { elapsed_sec = 99.0 })
+    OWN.sdk_error_of_masc_internal_error (OWN.Turn_timeout { elapsed_sec = 99.0 })
   in
   Alcotest.(check (float 0.0001))
     "non-cascade-aware variant labels cascade_name=unknown"
     (before +. 1.0)
     (counter_for ~cascade_name:"unknown" kind)
+;;
 
 let () =
-  Alcotest.run "oas_error_kind_counter_9933"
-    [
-      ( "metric_name",
-        [
-          Alcotest.test_case "canonical name stable" `Quick
-            test_metric_name_stable;
-        ] );
-      ( "per_kind_increment",
-        [
-          Alcotest.test_case "oas_timeout_budget" `Quick
-            test_oas_timeout_budget_kind;
-          Alcotest.test_case "turn_timeout" `Quick
-            test_turn_timeout_kind;
-          Alcotest.test_case "cascade_exhausted" `Quick
-            test_cascade_exhausted_kind;
-          Alcotest.test_case "resumable_cli_session" `Quick
-            test_resumable_cli_session_kind;
-          Alcotest.test_case "no_tool_capable_provider" `Quick
-            test_no_tool_capable_provider_kind;
-          Alcotest.test_case "accept_rejected" `Quick
-            test_accept_rejected_kind;
-          Alcotest.test_case "admission_queue_timeout" `Quick
-            test_admission_queue_timeout_kind;
-          Alcotest.test_case "admission_queue_rejected" `Quick
-            test_admission_queue_rejected_kind;
-          Alcotest.test_case "ambiguous_post_commit" `Quick
-            test_ambiguous_post_commit_kind;
-        ] );
-      ( "isolation",
-        [
-          Alcotest.test_case "kind labels separate" `Quick
-            test_kind_isolation;
-        ] );
-      ( "cascade_name_label_10285",
-        [
-          Alcotest.test_case
-            "resumable_cli_session per-cascade isolation" `Quick
-            test_resumable_cli_session_per_cascade_isolation;
-          Alcotest.test_case
-            "blank cascade_name collapses to unknown" `Quick
-            test_empty_cascade_name_collapses_to_unknown;
-          Alcotest.test_case
-            "non-cascade-aware variant uses unknown" `Quick
-            test_non_cascade_aware_variant_uses_unknown;
-        ] );
+  Alcotest.run
+    "oas_error_kind_counter_9933"
+    [ ( "metric_name"
+      , [ Alcotest.test_case "canonical name stable" `Quick test_metric_name_stable ] )
+    ; ( "per_kind_increment"
+      , [ Alcotest.test_case "oas_timeout_budget" `Quick test_oas_timeout_budget_kind
+        ; Alcotest.test_case "turn_timeout" `Quick test_turn_timeout_kind
+        ; Alcotest.test_case "cascade_exhausted" `Quick test_cascade_exhausted_kind
+        ; Alcotest.test_case
+            "resumable_cli_session"
+            `Quick
+            test_resumable_cli_session_kind
+        ; Alcotest.test_case
+            "no_tool_capable_provider"
+            `Quick
+            test_no_tool_capable_provider_kind
+        ; Alcotest.test_case "accept_rejected" `Quick test_accept_rejected_kind
+        ; Alcotest.test_case
+            "admission_queue_timeout"
+            `Quick
+            test_admission_queue_timeout_kind
+        ; Alcotest.test_case
+            "admission_queue_rejected"
+            `Quick
+            test_admission_queue_rejected_kind
+        ; Alcotest.test_case
+            "ambiguous_post_commit"
+            `Quick
+            test_ambiguous_post_commit_kind
+        ] )
+    ; ( "isolation"
+      , [ Alcotest.test_case "kind labels separate" `Quick test_kind_isolation ] )
+    ; ( "cascade_name_label_10285"
+      , [ Alcotest.test_case
+            "resumable_cli_session per-cascade isolation"
+            `Quick
+            test_resumable_cli_session_per_cascade_isolation
+        ; Alcotest.test_case
+            "blank cascade_name collapses to unknown"
+            `Quick
+            test_empty_cascade_name_collapses_to_unknown
+        ; Alcotest.test_case
+            "non-cascade-aware variant uses unknown"
+            `Quick
+            test_non_cascade_aware_variant_uses_unknown
+        ] )
     ]
+;;

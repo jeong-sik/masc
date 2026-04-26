@@ -28,8 +28,7 @@ val tool_capabilities : string -> capability_class list
 
     [class_count] is the number of capability classes present (0–3).
     The trifecta is active when [class_count = 3]. *)
-val assess_trifecta :
-  active_tool_names:string list -> int * bool * bool * bool
+val assess_trifecta : active_tool_names:string list -> int * bool * bool * bool
 
 (** [combinatorial_risk_escalation ~trifecta_active ~tool_name ~base_risk
     ~input] lifts [base_risk] to at least [High] when the trifecta is
@@ -37,12 +36,12 @@ val assess_trifecta :
 
     [keeper_shell] read-only github ops are exempt (checked via
     [Keeper_tool_registry.is_read_only_with_input]). *)
-val combinatorial_risk_escalation :
-  trifecta_active:bool ->
-  tool_name:string ->
-  base_risk:risk_level ->
-  input:Yojson.Safe.t ->
-  risk_level
+val combinatorial_risk_escalation
+  :  trifecta_active:bool
+  -> tool_name:string
+  -> base_risk:risk_level
+  -> input:Yojson.Safe.t
+  -> risk_level
 
 (** {1 Risk assessment} *)
 
@@ -58,5 +57,4 @@ val combinatorial_risk_escalation :
     {- substring pattern matching over [tool_name]}
     {- keeper mutation floor ([High] minimum for
        [keeper_fs_edit] / [keeper_write] / non-read-only [keeper_shell])}} *)
-val assess_risk :
-  tool_name:string -> input:Yojson.Safe.t -> risk_level
+val assess_risk : tool_name:string -> input:Yojson.Safe.t -> risk_level

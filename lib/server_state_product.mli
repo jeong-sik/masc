@@ -16,10 +16,10 @@
 
 module Lifecycle : sig
   type phase =
-    | Booting       (** Server is starting, HTTP not serving yet *)
-    | Serving       (** HTTP accept loop active, processing requests *)
-    | Draining      (** Graceful shutdown in progress, no new work *)
-    | Stopped       (** Server has shut down *)
+    | Booting (** Server is starting, HTTP not serving yet *)
+    | Serving (** HTTP accept loop active, processing requests *)
+    | Draining (** Graceful shutdown in progress, no new work *)
+    | Stopped (** Server has shut down *)
 
   val phase_to_string : phase -> string
   val all_phases : phase list
@@ -31,7 +31,12 @@ module Lifecycle : sig
 
   val event_to_string : event -> string
 
-  type transition = Applied of phase | Ignored of { phase: phase; event: event }
+  type transition =
+    | Applied of phase
+    | Ignored of
+        { phase : phase
+        ; event : event
+        }
 
   val apply_event : current:phase -> event -> transition
   val apply_event_lossy : current:phase -> event -> phase
@@ -43,8 +48,8 @@ end
 module Backend : sig
   type phase =
     | Uninitialized (** Backend not yet resolved *)
-    | Filesystem    (** Fallback to filesystem backend *)
-    | Degraded      (** Backend connection failed *)
+    | Filesystem (** Fallback to filesystem backend *)
+    | Degraded (** Backend connection failed *)
 
   val phase_to_string : phase -> string
   val all_phases : phase list
@@ -56,7 +61,12 @@ module Backend : sig
 
   val event_to_string : event -> string
 
-  type transition = Applied of phase | Ignored of { phase: phase; event: event }
+  type transition =
+    | Applied of phase
+    | Ignored of
+        { phase : phase
+        ; event : event
+        }
 
   val apply_event : current:phase -> event -> transition
   val apply_event_lossy : current:phase -> event -> phase
@@ -67,8 +77,8 @@ end
 
 module Lazy_task_queue : sig
   type t =
-    | Complete      (** All lazy tasks finished *)
-    | Pending of string list  (** Tasks still pending *)
+    | Complete (** All lazy tasks finished *)
+    | Pending of string list (** Tasks still pending *)
 
   val to_string : t -> string
   val all_states : t list
@@ -76,10 +86,12 @@ module Lazy_task_queue : sig
   type event =
     | Tasks_appear of string list
     | Task_finish of string
-    | Task_fail of { task: string; error: string }
+    | Task_fail of
+        { task : string
+        ; error : string
+        }
 
   val event_to_string : event -> string
-
   val apply_event : current:t -> event -> t
   val pp : Format.formatter -> t -> unit
 end
@@ -88,8 +100,8 @@ end
 
 module Readiness : sig
   type phase =
-    | NotReady      (** Not accepting traffic *)
-    | Ready         (** Accepting traffic *)
+    | NotReady (** Not accepting traffic *)
+    | Ready (** Accepting traffic *)
 
   val phase_to_string : phase -> string
   val all_phases : phase list
@@ -100,7 +112,12 @@ module Readiness : sig
 
   val event_to_string : event -> string
 
-  type transition = Applied of phase | Ignored of { phase: phase; event: event }
+  type transition =
+    | Applied of phase
+    | Ignored of
+        { phase : phase
+        ; event : event
+        }
 
   val apply_event : current:phase -> event -> transition
   val apply_event_lossy : current:phase -> event -> phase
@@ -109,14 +126,14 @@ end
 
 (** {5 Product State} *)
 
-type product = {
-  lifecycle : Lifecycle.phase;
-  backend : Backend.phase;
-  lazy_tasks : Lazy_task_queue.t;
-  readiness : Readiness.phase;
-  last_error : string option;
-  fallback_reason : string option;
-}
+type product =
+  { lifecycle : Lifecycle.phase
+  ; backend : Backend.phase
+  ; lazy_tasks : Lazy_task_queue.t
+  ; readiness : Readiness.phase
+  ; last_error : string option
+  ; fallback_reason : string option
+  }
 
 val initial : product
 
@@ -126,17 +143,10 @@ val check_invariants : product -> (unit, string) result
 
 (** {7 Per-Dimension Event Application} *)
 
-val apply_lifecycle_event :
-  product -> Lifecycle.event -> (product, string) result
-
-val apply_backend_event :
-  product -> Backend.event -> (product, string) result
-
-val apply_lazy_event :
-  product -> Lazy_task_queue.event -> (product, string) result
-
-val apply_readiness_event :
-  product -> Readiness.event -> (product, string) result
+val apply_lifecycle_event : product -> Lifecycle.event -> (product, string) result
+val apply_backend_event : product -> Backend.event -> (product, string) result
+val apply_lazy_event : product -> Lazy_task_queue.event -> (product, string) result
+val apply_readiness_event : product -> Readiness.event -> (product, string) result
 
 (** {8 Derived Flat Phase (backward compatibility)} *)
 

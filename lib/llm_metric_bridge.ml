@@ -37,14 +37,11 @@ let http_status_metric = "masc_llm_provider_http_status_total"
     same counter without duplicating the label shape.  This is the
     single source of truth for the label key names. *)
 let emit_http_status ~provider ~model_id ~status =
-  Prometheus.inc_counter http_status_metric
-    ~labels:
-      [
-        ("provider", provider);
-        ("model", model_id);
-        ("status", string_of_int status);
-      ]
+  Prometheus.inc_counter
+    http_status_metric
+    ~labels:[ "provider", provider; "model", model_id; "status", string_of_int status ]
     ()
+;;
 
 (** Per-HTTP-request latency histogram.  Distinct from
     [masc_llm_inference_duration_seconds] (turn-scope, populated by the
@@ -65,8 +62,11 @@ let request_latency_metric = "masc_llm_provider_request_latency_seconds"
     single source of truth for the label key names. *)
 let emit_request_latency ~model_id ~latency_ms =
   let seconds = Float.of_int latency_ms /. 1000.0 in
-  Prometheus.observe_histogram request_latency_metric
-    ~labels:[("model", model_id)] seconds
+  Prometheus.observe_histogram
+    request_latency_metric
+    ~labels:[ "model", model_id ]
+    seconds
+;;
 
 (** Build the OAS Metrics.t sink.
 
@@ -80,20 +80,17 @@ let emit_request_latency ~model_id ~latency_ms =
     consuming dashboards land. *)
 let make_sink () : Llm_provider.Metrics.t =
   let open Llm_provider.Metrics in
-  {
-    noop with
+  { noop with
     on_http_status =
-      (fun ~provider ~model_id ~status ->
-        emit_http_status ~provider ~model_id ~status);
-    on_request_end =
-      (fun ~model_id ~latency_ms ->
-        emit_request_latency ~model_id ~latency_ms);
+      (fun ~provider ~model_id ~status -> emit_http_status ~provider ~model_id ~status)
+  ; on_request_end =
+      (fun ~model_id ~latency_ms -> emit_request_latency ~model_id ~latency_ms)
   }
+;;
 
 (** Install the sink as the process-wide default.  Idempotent — calling
     [install ()] multiple times overwrites the previous sink with a
     freshly-constructed one pointing at the same counter.  Intended to
     be called once during server bootstrap, before the first keeper
     turn fires an LLM call. *)
-let install () : unit =
-  Llm_provider.Metrics.set_global (make_sink ())
+let install () : unit = Llm_provider.Metrics.set_global (make_sink ())

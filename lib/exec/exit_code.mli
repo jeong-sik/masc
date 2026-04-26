@@ -16,13 +16,13 @@ type category =
   | Signal of int
   | Unknown of int
 
-type t = {
-  raw : Unix.process_status;
-  code : int;
-  category : category;
-  label : string;
-  hint : string;
-}
+type t =
+  { raw : Unix.process_status
+  ; code : int
+  ; category : category
+  ; label : string
+  ; hint : string
+  }
 
 val of_process_status : Unix.process_status -> t
 val is_success : t -> bool

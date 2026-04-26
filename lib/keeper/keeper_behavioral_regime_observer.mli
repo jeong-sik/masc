@@ -17,8 +17,7 @@ type snapshot = Keeper_behavioral_regime.snapshot
 (** Derive a behavioral-regime snapshot from a live registry entry.
     [now] is injected so the observer stays deterministic; defaults
     to [Unix.gettimeofday ()] when omitted. *)
-val observe :
-  ?now:float -> Keeper_registry.registry_entry -> snapshot
+val observe : ?now:float -> Keeper_registry.registry_entry -> snapshot
 
 (** Observe every registered keeper under [base_path] once. Used by
     the fleet-wide regime endpoint. Preserves registry iteration order. *)

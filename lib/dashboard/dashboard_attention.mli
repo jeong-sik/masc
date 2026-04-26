@@ -7,19 +7,21 @@
 
 (** {1 Types} *)
 
-type severity = Critical | Warning | Info
+type severity =
+  | Critical
+  | Warning
+  | Info
 
-type attention_item = {
-  severity : severity;
-  category : string;
-  summary : string;
-  suggested_tool : string;
-}
+type attention_item =
+  { severity : severity
+  ; category : string
+  ; summary : string
+  ; suggested_tool : string
+  }
 
 (** {1 Severity helpers} *)
 
 val severity_to_string : severity -> string
-
 val severity_icon : severity -> string
 
 (** Coerce to canonical {!Severity.t} for cross-module communication. *)
@@ -30,10 +32,7 @@ val to_severity : severity -> Severity.t
 (** [collect ~now snapshots] scans for stuck agents and idle-with-
     pending-work situations, returning the items sorted by severity
     (Critical first). *)
-val collect :
-  now:float ->
-  Dashboard_labels.room_snapshot list ->
-  attention_item list
+val collect : now:float -> Dashboard_labels.room_snapshot list -> attention_item list
 
 (** {1 Presentation} *)
 

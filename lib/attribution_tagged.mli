@@ -39,63 +39,60 @@ type 'origin t
 (** {1 Det smart constructors} *)
 
 val det_passed : gate:string -> evidence:Yojson.Safe.t -> det t
+val det_policy_failed : gate:string -> evidence:Yojson.Safe.t -> reason:string -> det t
 
-val det_policy_failed :
-  gate:string -> evidence:Yojson.Safe.t -> reason:string -> det t
+val det_transition_blocked
+  :  gate:string
+  -> evidence:Yojson.Safe.t
+  -> from_state:string
+  -> to_state:string
+  -> reason:string
+  -> det t
 
-val det_transition_blocked :
-  gate:string ->
-  evidence:Yojson.Safe.t ->
-  from_state:string ->
-  to_state:string ->
-  reason:string ->
-  det t
-
-val det_partial_pass :
-  gate:string ->
-  evidence:Yojson.Safe.t ->
-  score:float ->
-  rationale:string ->
-  det t
 (** Score-based rule (e.g. coverage threshold). Deterministic because the
     score is a pure function of the input, not a model judgment. *)
+val det_partial_pass
+  :  gate:string
+  -> evidence:Yojson.Safe.t
+  -> score:float
+  -> rationale:string
+  -> det t
 
 (** {1 NonDet smart constructors} *)
 
-val nondet_passed :
-  gate:string -> evidence:Yojson.Safe.t -> rationale:string -> nondet t
 (** NonDet [Passed] requires a [rationale] because the judge's reasoning
     is not derivable from the gate logic. Stored inside the underlying
     [Attribution.evidence] as [{"rationale": ...}] so the serialization
     round-trips through the erased [Attribution.t]. *)
+val nondet_passed : gate:string -> evidence:Yojson.Safe.t -> rationale:string -> nondet t
 
-val nondet_policy_failed :
-  gate:string ->
-  evidence:Yojson.Safe.t ->
-  reason:string ->
-  rationale:string ->
-  nondet t
 (** NonDet [Policy_failed] carries both [reason] (serialized to outcome)
     and [rationale] (embedded in evidence), because the model's reasoning
     is an additional signal beyond the one-line reason. *)
+val nondet_policy_failed
+  :  gate:string
+  -> evidence:Yojson.Safe.t
+  -> reason:string
+  -> rationale:string
+  -> nondet t
 
-val nondet_partial_pass :
-  gate:string ->
-  evidence:Yojson.Safe.t ->
-  score:float ->
-  rationale:string ->
-  nondet t
+val nondet_partial_pass
+  :  gate:string
+  -> evidence:Yojson.Safe.t
+  -> score:float
+  -> rationale:string
+  -> nondet t
 
 (** {1 Erasure} *)
 
-val to_attribution : 'a t -> Attribution.t
 (** Erase the phantom tag, producing the runtime [Attribution.t] for SSE
     emission. After erasure, downstream code sees only [origin: Det |
     NonDet] as a runtime field. *)
+val to_attribution : 'a t -> Attribution.t
 
 (** {1 Origin witness} *)
 
-val origin_of : 'a t -> Attribution.origin
 (** Runtime introspection for logging/metrics. Prefer the phantom tag in
     function signatures; use this only when dispatching on origin at run
     time (e.g. in a registry that handles both Det and NonDet gates). *)
+val origin_of : 'a t -> Attribution.origin

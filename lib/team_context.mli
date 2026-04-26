@@ -12,25 +12,24 @@
     @since 3.0.0 *)
 
 (** Summary of a single task. *)
-type task_summary = {
-  task_id : string;
-  title : string;
-  status : string;
-  assignee : string option;
-}
+type task_summary =
+  { task_id : string
+  ; title : string
+  ; status : string
+  ; assignee : string option
+  }
 
 (** Team context shared across workers. *)
-type team_context = {
-  team_goal : string;
-  prior_decisions : string list;
-  shared_findings : string list;
-  active_workers : string list;
-  task_tree : task_summary list;
-}
+type team_context =
+  { team_goal : string
+  ; prior_decisions : string list
+  ; shared_findings : string list
+  ; active_workers : string list
+  ; task_tree : task_summary list
+  }
 
 (** Build a team context from the current shared findings. *)
-val build :
-  base_path:string -> team_context
+val build : base_path:string -> team_context
 
 (** Render the team context as a prompt section string.
     Output is capped to stay within ~500 tokens. *)
@@ -38,16 +37,11 @@ val to_prompt_section : team_context -> string
 
 (** Record a shared finding from a completed worker.
     [finding] should be 1-2 sentences summarizing the key result. *)
-val add_finding :
-  base_path:string ->
-  worker_name:string ->
-  finding:string ->
-  unit
+val add_finding : base_path:string -> worker_name:string -> finding:string -> unit
 
 (** Load shared findings recorded by prior workers.
     Returns a list of formatted strings: "[worker_name] finding". *)
-val load_findings :
-  base_path:string -> string list
+val load_findings : base_path:string -> string list
 
 (** Empty context for when no active coordination. *)
 val empty : team_context

@@ -9,13 +9,13 @@
 
     @since 0.9.5 *)
 
-val hex : bytes:int -> string
 (** [hex ~bytes:n] returns [2 * n] hex characters sourced from
     [Mirage_crypto_rng.generate n]. Call-sites that need a prefix
     concatenate it themselves — keeping this helper prefix-agnostic
     means the "what kind of id" decision stays at the call-site,
     not here. *)
+val hex : bytes:int -> string
 
-val prefixed : prefix:string -> bytes:int -> string
 (** [prefixed ~prefix ~bytes:n] is [prefix ^ hex ~bytes:n].
     Convenience for the common ["kind-" ^ hex] shape. *)
+val prefixed : prefix:string -> bytes:int -> string

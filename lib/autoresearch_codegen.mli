@@ -5,19 +5,21 @@
 
     @since 2.80.0 *)
 
-include module type of struct include Autoresearch_types end
+include module type of struct
+  include Autoresearch_types
+end
 
 (** {1 Prompt construction (exposed for testing)} *)
 
-val build_code_change_prompt :
-  goal:string ->
-  baseline:float ->
-  lower_is_better:bool ->
-  history:cycle_record list ->
-  insights:string list ->
-  file_content:string ->
-  target_file:string ->
-  string
+val build_code_change_prompt
+  :  goal:string
+  -> baseline:float
+  -> lower_is_better:bool
+  -> history:cycle_record list
+  -> insights:string list
+  -> file_content:string
+  -> target_file:string
+  -> string
 
 (** {1 Response parsing} *)
 
@@ -26,8 +28,7 @@ val build_code_change_prompt :
     otherwise. Uses [Llm_provider.Lenient_json] for deterministic
     recovery (strip markdown fences, unwrap double-stringify,
     trailing commas, close brackets) before JSON parse. *)
-val parse_model_code_response :
-  string -> (string * string, string) result
+val parse_model_code_response : string -> (string * string, string) result
 
 (** {1 Entry point} *)
 
@@ -36,12 +37,12 @@ val parse_model_code_response :
     [autoresearch] cascade and returns [Ok (hypothesis, new_code)]
     or [Error reason]. Backs off when local runtime slots are
     saturated. *)
-val generate_code_change :
-  goal:string ->
-  baseline:float ->
-  lower_is_better:bool ->
-  history:cycle_record list ->
-  insights:string list ->
-  target_file:string ->
-  file_content:string ->
-  (string * string, string) result
+val generate_code_change
+  :  goal:string
+  -> baseline:float
+  -> lower_is_better:bool
+  -> history:cycle_record list
+  -> insights:string list
+  -> target_file:string
+  -> file_content:string
+  -> (string * string, string) result

@@ -11,9 +11,9 @@
 
     @since 2.353.0 *)
 
-val set : Agent_sdk.Event_bus.t -> unit
 (** Install the MASC Event_bus instance. Called once at server bootstrap. *)
+val set : Agent_sdk.Event_bus.t -> unit
 
-val get : unit -> Agent_sdk.Event_bus.t option
 (** [get ()] returns the installed MASC Event_bus, or [None] before
     bootstrap (e.g. in unit tests that skip server bringup). *)
+val get : unit -> Agent_sdk.Event_bus.t option

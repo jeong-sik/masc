@@ -1,15 +1,10 @@
 (include_subdirs no)
+
 (library
  (name masc_board)
  (public_name masc_mcp.masc_board)
  (wrapped false)
  (modules board_types)
- (libraries
-   yojson
-   re
-   re.str
-   re.pcre
-   eio
-   masc_random_id
-   masc_mcp.config)
- (preprocess (pps ppx_deriving.show ppx_deriving.eq)))
+ (libraries yojson re re.str re.pcre eio masc_random_id masc_mcp.config)
+ (preprocess
+  (pps ppx_deriving.show ppx_deriving.eq)))

@@ -6,7 +6,9 @@
 
 module Keeper = struct
   type t =
-    | Bash | Bash_kill | Bash_output
+    | Bash
+    | Bash_kill
+    | Bash_output
     | Board_cleanup
     | Board_comment
     | Board_comment_vote
@@ -51,6 +53,7 @@ module Keeper = struct
     | Voice_sessions
     | Voice_speak
     | Write
+
   let to_string = function
     | Bash -> "keeper_bash"
     | Bash_kill -> "keeper_bash_kill"
@@ -99,6 +102,8 @@ module Keeper = struct
     | Voice_sessions -> "keeper_voice_sessions"
     | Voice_speak -> "keeper_voice_speak"
     | Write -> "keeper_write"
+  ;;
+
   let of_string = function
     | "keeper_bash" -> Some Bash
     | "keeper_bash_kill" -> Some Bash_kill
@@ -148,9 +153,9 @@ module Keeper = struct
     | "keeper_voice_speak" -> Some Voice_speak
     | "keeper_write" -> Some Write
     | _ -> None
+  ;;
 
   let board_write_tools = [ Board_post; Board_comment; Board_vote ]
-
   let board_write_tool_names = List.map to_string board_write_tools
 
   let is_board = function
@@ -165,16 +170,19 @@ module Keeper = struct
     | Board_stats
     | Board_vote -> true
     | _ -> false
+  ;;
 
   let is_board_write = function
     | Board_post | Board_comment | Board_vote -> true
     | _ -> false
+  ;;
 
   let board_write_action_kind = function
     | Board_post -> Some "post"
     | Board_comment -> Some "comment"
     | Board_vote -> Some "vote"
     | _ -> None
+  ;;
 
   let pp fmt t = Format.pp_print_string fmt (to_string t)
 end
@@ -393,6 +401,7 @@ module Masc = struct
     | Tool_stats -> "masc_tool_stats"
     | Webrtc_answer -> "masc_webrtc_answer"
     | Webrtc_offer -> "masc_webrtc_offer"
+  ;;
 
   let of_string = function
     | "masc_a2a_delegate" -> Some A2a_delegate
@@ -501,6 +510,7 @@ module Masc = struct
     | "masc_webrtc_answer" -> Some Webrtc_answer
     | "masc_webrtc_offer" -> Some Webrtc_offer
     | _ -> None
+  ;;
 
   let is_board = function
     | Board_cleanup
@@ -516,6 +526,7 @@ module Masc = struct
     | Board_stats
     | Board_vote -> true
     | _ -> false
+  ;;
 
   let pp fmt t = Format.pp_print_string fmt (to_string t)
 end
@@ -546,6 +557,7 @@ module Masc_keeper = struct
     | Reset -> "masc_keeper_reset"
     | Status -> "masc_keeper_status"
     | Up -> "masc_keeper_up"
+  ;;
 
   let of_string = function
     | "masc_keeper_clear" -> Some Clear
@@ -560,6 +572,7 @@ module Masc_keeper = struct
     | "masc_keeper_status" -> Some Status
     | "masc_keeper_up" -> Some Up
     | _ -> None
+  ;;
 
   let pp fmt t = Format.pp_print_string fmt (to_string t)
 end
@@ -573,25 +586,39 @@ let to_string = function
   | Keeper k -> Keeper.to_string k
   | Masc m -> Masc.to_string m
   | Masc_keeper mk -> Masc_keeper.to_string mk
+;;
 
 let of_string s =
   match Keeper.of_string s with
   | Some k -> Some (Keeper k)
   | None ->
-    match Masc_keeper.of_string s with
-    | Some mk -> Some (Masc_keeper mk)
-    | None ->
-      match Masc.of_string s with
-      | Some m -> Some (Masc m)
-      | None -> None
+    (match Masc_keeper.of_string s with
+     | Some mk -> Some (Masc_keeper mk)
+     | None ->
+       (match Masc.of_string s with
+        | Some m -> Some (Masc m)
+        | None -> None))
+;;
 
 let pp fmt t = Format.pp_print_string fmt (to_string t)
 
-let is_keeper = function Keeper _ -> true | _ -> false
-let is_masc = function Masc _ -> true | _ -> false
-let is_masc_keeper = function Masc_keeper _ -> true | _ -> false
+let is_keeper = function
+  | Keeper _ -> true
+  | _ -> false
+;;
+
+let is_masc = function
+  | Masc _ -> true
+  | _ -> false
+;;
+
+let is_masc_keeper = function
+  | Masc_keeper _ -> true
+  | _ -> false
+;;
 
 let is_board = function
   | Keeper k -> Keeper.is_board k
   | Masc m -> Masc.is_board m
   | Masc_keeper _ -> false
+;;

@@ -5,19 +5,19 @@
     (docker/container runners, tests) can reconstruct a worker run
     from stored state. *)
 
-type t = {
-  base_path : string;
-  worker_name : string;
-  model_label : string;
-  working_dir : string option;
-  runtime_backend : Worker_execution_backend.t;
-  thinking_enabled : bool option;
-  worker_run_id : string option;
-  role : string option;
-  selection_note : string option;
-  prompt : string;
-  timeout_sec : int;
-}
+type t =
+  { base_path : string
+  ; worker_name : string
+  ; model_label : string
+  ; working_dir : string option
+  ; runtime_backend : Worker_execution_backend.t
+  ; thinking_enabled : bool option
+  ; worker_run_id : string option
+  ; role : string option
+  ; selection_note : string option
+  ; prompt : string
+  ; timeout_sec : int
+  }
 
 val to_yojson : t -> Yojson.Safe.t
 

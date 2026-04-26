@@ -157,18 +157,10 @@ let test_task_axis_projection () =
 ;;
 
 let test_goal_linkage_prefers_structured_goal_id () =
-  let explicit =
-    task ~id:"task-1" ~title:"Implement product FSM" ~goal_id:"goal-1" ()
-  in
-  let legacy =
-    task ~id:"task-2" ~title:"[goal:goal-1] legacy marker" ()
-  in
+  let explicit = task ~id:"task-1" ~title:"Implement product FSM" ~goal_id:"goal-1" () in
+  let legacy = task ~id:"task-2" ~title:"[goal:goal-1] legacy marker" () in
   let explicit_other_with_legacy_marker =
-    task
-      ~id:"task-3"
-      ~title:"[goal:goal-1] stale legacy marker"
-      ~goal_id:"goal-2"
-      ()
+    task ~id:"task-3" ~title:"[goal:goal-1] stale legacy marker" ~goal_id:"goal-2" ()
   in
   Alcotest.(check bool)
     "explicit goal_id matches"
@@ -322,7 +314,12 @@ let test_snapshot_json () =
   Alcotest.(check string)
     "evidence source"
     "telemetry"
-    (json |> member "products" |> index 0 |> member "evidence" |> index 0 |> member "source"
+    (json
+     |> member "products"
+     |> index 0
+     |> member "evidence"
+     |> index 0
+     |> member "source"
      |> to_string)
 ;;
 
@@ -363,12 +360,12 @@ let test_projection_is_deterministic_from_captured_state () =
     }
   in
   let left_json = left |> CPS.project |> CP.snapshot_to_yojson |> Yojson.Safe.to_string in
-  let right_json = right |> CPS.project |> CP.snapshot_to_yojson |> Yojson.Safe.to_string in
+  let right_json =
+    right |> CPS.project |> CP.snapshot_to_yojson |> Yojson.Safe.to_string
+  in
   Alcotest.(check string) "projection ignores capture order" left_json right_json;
   let disabled =
-    { left with economy_enabled = false }
-    |> CPS.project
-    |> CP.snapshot_to_yojson
+    { left with economy_enabled = false } |> CPS.project |> CP.snapshot_to_yojson
   in
   let open Yojson.Safe.Util in
   Alcotest.(check string)

@@ -21,9 +21,7 @@ let run_safe ?(caller = "unknown") ~timeout_s fn =
     | Some { clock = Some clock; _ } -> Eio.Time.with_timeout_exn clock timeout_s fn
     | Some { clock = None; _ } | None -> fn ()
   in
-  try
-    do_timeout fn
-  with
+  try do_timeout fn with
   | Eio.Time.Timeout ->
     (* #10094: per-caller timeout counter so the operator can see
        WHICH caller is timing out at WHICH configured budget — log
@@ -32,23 +30,28 @@ let run_safe ?(caller = "unknown") ~timeout_s fn =
        "after N.Ns" string. *)
     Prometheus.inc_counter
       Prometheus.metric_oas_bridge_timeout
-      ~labels:[
-        ("caller", caller);
-        ("timeout_s", Printf.sprintf "%.1f" timeout_s);
-      ] ();
+      ~labels:[ "caller", caller; "timeout_s", Printf.sprintf "%.1f" timeout_s ]
+      ();
     Log.Misc.warn
       "masc_oas_bridge: OAS execution timed out after %.1fs (caller=%s)"
-      timeout_s caller;
-    Error (Oas.Error.Api (Timeout { message = Printf.sprintf "Execution timed out after %.1fs" timeout_s }))
+      timeout_s
+      caller;
+    Error
+      (Oas.Error.Api
+         (Timeout { message = Printf.sprintf "Execution timed out after %.1fs" timeout_s }))
   | Eio.Cancel.Cancelled _ as exn ->
     let bt = Printexc.get_raw_backtrace () in
     Log.Misc.warn "masc_oas_bridge: OAS execution cancelled (caller=%s)" caller;
     Printexc.raise_with_backtrace exn bt
   | exn ->
     let bt = Printexc.get_backtrace () in
-    Log.Misc.error "masc_oas_bridge: OAS execution error (caller=%s): %s\n%s"
-      caller (Printexc.to_string exn) bt;
+    Log.Misc.error
+      "masc_oas_bridge: OAS execution error (caller=%s): %s\n%s"
+      caller
+      (Printexc.to_string exn)
+      bt;
     Error (Oas.Error.Internal (Printexc.to_string exn))
+;;
 
 (** [run_with_caller ~caller fn] — single entry point that resolves
     the per-caller timeout from [Env_config_oas_bridge] and labels
@@ -64,3 +67,4 @@ let run_safe ?(caller = "unknown") ~timeout_s fn =
 let run_with_caller ~caller fn =
   let timeout_s = Env_config_oas_bridge.timeout_sec ~caller () in
   run_safe ~caller:(Env_config_oas_bridge.caller_key caller) ~timeout_s fn
+;;

@@ -15,24 +15,24 @@ val min_border_length : unit -> int
 
 (** {1 Types} *)
 
-type section = {
-  title : string;
-  content : string list;
-  empty_msg : string;
-}
+type section =
+  { title : string
+  ; content : string list
+  ; empty_msg : string
+  }
 
 type scope =
   | All
   | Current
 
-type room_snapshot = Dashboard_labels.room_snapshot = {
-  room_id : string;
-  is_current : bool;
-  agents : Types.agent list;
-  tasks : Types.task list;
-  messages : Types.message list;
-  locks : int;
-}
+type room_snapshot = Dashboard_labels.room_snapshot =
+  { room_id : string
+  ; is_current : bool
+  ; agents : Types.agent list
+  ; tasks : Types.task list
+  ; messages : Types.message list
+  ; locks : int
+  }
 
 (** {1 Scope Helpers} *)
 

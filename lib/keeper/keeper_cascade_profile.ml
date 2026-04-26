@@ -19,6 +19,7 @@ type t =
 let to_string = function
   | Big_three -> "big_three"
   | Tool_rerank -> "tool_rerank"
+;;
 
 let all = [ Big_three; Tool_rerank ]
 
@@ -40,24 +41,35 @@ let of_string_opt (raw : string) : t option =
   | "oas-keeper_unified"
   | "coding_first"
   | "oas-coding_first"
-  | "keeper_turn" | "keeper_reply"
-  | "sangsu" | "local_mlx_vlm_qwen36"
-  | "nick0cave" | "capacity_queue_trio" | "vendor_mix_balanced"
-  | "cost_tier_ladder" | "oauth_cli_rotate" | "quality_sticky_glm51"
-  | "underdog" | "local"
-    -> Some Big_three
+  | "keeper_turn"
+  | "keeper_reply"
+  | "sangsu"
+  | "local_mlx_vlm_qwen36"
+  | "nick0cave"
+  | "capacity_queue_trio"
+  | "vendor_mix_balanced"
+  | "cost_tier_ladder"
+  | "oauth_cli_rotate"
+  | "quality_sticky_glm51"
+  | "underdog"
+  | "local" -> Some Big_three
   (* Catalog-routed names: NOT variants.  Returning None lets
      [canonicalize_with_catalog] preserve them as catalog names so
      keeper phase-routing and tool-routing code continues to resolve
      cascade.json keys correctly. *)
-  | "keeper_unified" | "tool_use_strict" | "resilient_breaker"
-  | "local_only" | "local_recovery" -> None
+  | "keeper_unified"
+  | "tool_use_strict"
+  | "resilient_breaker"
+  | "local_only"
+  | "local_recovery" -> None
   | _ -> None
+;;
 
 let canonical (raw : string) : t =
   match of_string_opt raw with
   | Some t -> t
   | None -> default
+;;
 
 let catalog_entries ?config_path () =
   let path_opt =
@@ -67,10 +79,11 @@ let catalog_entries ?config_path () =
   in
   match path_opt with
   | None -> None
-  | Some path -> (
-      match Cascade_config_loader.load_catalog ~config_path:path with
-      | Ok entries -> Some entries
-      | Error _ -> None)
+  | Some path ->
+    (match Cascade_config_loader.load_catalog ~config_path:path with
+     | Ok entries -> Some entries
+     | Error _ -> None)
+;;
 
 let catalog_entries_result ?config_path () =
   let path_opt =
@@ -80,24 +93,23 @@ let catalog_entries_result ?config_path () =
   in
   match path_opt with
   | None -> Error "cascade catalog path is not resolved"
-  | Some path ->
-      Cascade_config_loader.load_catalog ~config_path:path
+  | Some path -> Cascade_config_loader.load_catalog ~config_path:path
+;;
 
 let catalog_names ?config_path () =
   match catalog_entries ?config_path () with
   | Some entries ->
-      List.map (fun (entry : Cascade_config_loader.catalog_entry) -> entry.name)
-        entries
+    List.map (fun (entry : Cascade_config_loader.catalog_entry) -> entry.name) entries
   | None -> []
+;;
 
 let catalog_names_result ?config_path () =
   match catalog_entries_result ?config_path () with
   | Error _ as err -> err
   | Ok entries ->
-      Ok
-        (List.map
-           (fun (entry : Cascade_config_loader.catalog_entry) -> entry.name)
-           entries)
+    Ok
+      (List.map (fun (entry : Cascade_config_loader.catalog_entry) -> entry.name) entries)
+;;
 
 (** #10259 — degraded fallback for the keeper cascade-name validator.
 
@@ -139,116 +151,114 @@ let catalog_names_with_toml_fallback ?config_path () =
   in
   match path_opt with
   | None -> Error "cascade catalog path is not resolved"
-  | Some path -> (
-      match Cascade_config_loader.load_catalog ~config_path:path with
-      | Ok entries ->
-          let names =
-            List.map
-              (fun (entry : Cascade_config_loader.catalog_entry) -> entry.name)
-              entries
-          in
-          Ok (names, Live_catalog)
-      | Error catalog_error -> (
-          match
-            Cascade_toml_materializer.toml_section_names_result
-              ~config_path:path
-          with
-          | Ok [] ->
-              Error
-                (Printf.sprintf
-                   "live catalog unavailable: %s; toml section fallback \
-                    returned no cascade profile names"
-                   catalog_error)
-          | Ok names ->
-              Ok (names, Toml_section_fallback { catalog_error })
-          | Error toml_error ->
-              Error
-                (Printf.sprintf
-                   "live catalog unavailable: %s; toml section fallback \
-                    also failed: %s"
-                   catalog_error toml_error)))
+  | Some path ->
+    (match Cascade_config_loader.load_catalog ~config_path:path with
+     | Ok entries ->
+       let names =
+         List.map
+           (fun (entry : Cascade_config_loader.catalog_entry) -> entry.name)
+           entries
+       in
+       Ok (names, Live_catalog)
+     | Error catalog_error ->
+       (match Cascade_toml_materializer.toml_section_names_result ~config_path:path with
+        | Ok [] ->
+          Error
+            (Printf.sprintf
+               "live catalog unavailable: %s; toml section fallback returned no cascade \
+                profile names"
+               catalog_error)
+        | Ok names -> Ok (names, Toml_section_fallback { catalog_error })
+        | Error toml_error ->
+          Error
+            (Printf.sprintf
+               "live catalog unavailable: %s; toml section fallback also failed: %s"
+               catalog_error
+               toml_error)))
+;;
 
 let is_system_only_cascade raw =
   let name = String.trim raw in
   match catalog_entries () with
   | None -> false
   | Some entries ->
-      List.exists
-        (fun (entry : Cascade_config_loader.catalog_entry) ->
-          String.equal entry.name name && not entry.keeper_assignable)
-        entries
+    List.exists
+      (fun (entry : Cascade_config_loader.catalog_entry) ->
+         String.equal entry.name name && not entry.keeper_assignable)
+      entries
+;;
 
 let keeper_catalog_names ?config_path () =
   match catalog_entries ?config_path () with
   | Some entries ->
-      entries
-      |> List.filter_map
-           (fun (entry : Cascade_config_loader.catalog_entry) ->
-             if entry.keeper_assignable then Some entry.name else None)
+    entries
+    |> List.filter_map (fun (entry : Cascade_config_loader.catalog_entry) ->
+      if entry.keeper_assignable then Some entry.name else None)
   | None -> []
+;;
 
 let system_catalog_names ?config_path () =
   match catalog_entries ?config_path () with
   | Some entries ->
-      entries
-      |> List.filter_map
-           (fun (entry : Cascade_config_loader.catalog_entry) ->
-             if entry.keeper_assignable then None else Some entry.name)
+    entries
+    |> List.filter_map (fun (entry : Cascade_config_loader.catalog_entry) ->
+      if entry.keeper_assignable then None else Some entry.name)
   | None -> []
+;;
 
 (** Track which (cascade, target) pairs we have already logged as
     invalid fallback_cascade hints so the WARN line fires once per
     process — not once per keeper turn. *)
-let logged_invalid_fallback : (string * string, unit) Hashtbl.t =
-  Hashtbl.create 4
+let logged_invalid_fallback : (string * string, unit) Hashtbl.t = Hashtbl.create 4
 
 let fallback_cascade_for ?config_path name =
   let trimmed_name = String.trim name in
-  if String.equal trimmed_name "" then None
-  else
+  if String.equal trimmed_name ""
+  then None
+  else (
     match catalog_entries ?config_path () with
     | None -> None
     | Some entries ->
-        let catalog_names =
-          List.map
-            (fun (entry : Cascade_config_loader.catalog_entry) -> entry.name)
-            entries
-        in
-        let entry_opt =
-          List.find_opt
-            (fun (entry : Cascade_config_loader.catalog_entry) ->
-              String.equal entry.name trimmed_name)
-            entries
-        in
-        (match entry_opt with
-         | None -> None
-         | Some entry ->
-             (match entry.fallback_cascade with
-              | None -> None
-              | Some target ->
-                  if String.equal target trimmed_name then None
-                  else if List.mem target catalog_names then Some target
-                  else begin
-                    let key = (trimmed_name, target) in
-                    if not (Hashtbl.mem logged_invalid_fallback key) then begin
-                      Hashtbl.add logged_invalid_fallback key ();
-                      Eio.traceln
-                        "[CascadeConfig] WARN profile %s declares \
-                         fallback_cascade=%s which is not in the live \
-                         catalog; ignoring hint"
-                        trimmed_name target
-                    end;
-                    None
-                  end))
+      let catalog_names =
+        List.map (fun (entry : Cascade_config_loader.catalog_entry) -> entry.name) entries
+      in
+      let entry_opt =
+        List.find_opt
+          (fun (entry : Cascade_config_loader.catalog_entry) ->
+             String.equal entry.name trimmed_name)
+          entries
+      in
+      (match entry_opt with
+       | None -> None
+       | Some entry ->
+         (match entry.fallback_cascade with
+          | None -> None
+          | Some target ->
+            if String.equal target trimmed_name
+            then None
+            else if List.mem target catalog_names
+            then Some target
+            else (
+              let key = trimmed_name, target in
+              if not (Hashtbl.mem logged_invalid_fallback key)
+              then (
+                Hashtbl.add logged_invalid_fallback key ();
+                Eio.traceln
+                  "[CascadeConfig] WARN profile %s declares fallback_cascade=%s which is \
+                   not in the live catalog; ignoring hint"
+                  trimmed_name
+                  target);
+              None))))
+;;
 
 let canonicalize_with_catalog ~catalog raw =
   match String.trim raw with
   | "" -> default_name
-  | trimmed -> (
-      match of_string_opt trimmed with
-      | Some profile -> to_string profile
-      | None ->
-          if List.mem trimmed catalog then trimmed else default_name)
+  | trimmed ->
+    (match of_string_opt trimmed with
+     | Some profile -> to_string profile
+     | None -> if List.mem trimmed catalog then trimmed else default_name)
+;;
 
 let normalize_declared_name (raw : string) : string =
   let trimmed = String.trim raw in
@@ -256,21 +266,24 @@ let normalize_declared_name (raw : string) : string =
   | Some t -> to_string t
   | None when trimmed = "" -> default_name
   | None -> trimmed
+;;
 
 let resolve_live_with_catalog ~catalog raw =
   let normalized = normalize_declared_name raw in
   if List.mem normalized catalog then normalized else default_name
+;;
 
 let resolve_live ?config_path raw =
   resolve_live_with_catalog ~catalog:(catalog_names ?config_path ()) raw
+;;
 
 let canonicalize (raw : string) : string =
   canonicalize_with_catalog ~catalog:(catalog_names ()) raw
+;;
 
 let models_key_t t = to_string t ^ "_models"
 let temperature_key_t t = to_string t ^ "_temperature"
 let max_tokens_key_t t = to_string t ^ "_max_tokens"
-
 let models_key name = canonicalize name ^ "_models"
 let temperature_key name = canonicalize name ^ "_temperature"
 let max_tokens_key name = canonicalize name ^ "_max_tokens"

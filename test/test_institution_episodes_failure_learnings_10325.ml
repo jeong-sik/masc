@@ -33,7 +33,6 @@
        split per failure mode. *)
 
 open Alcotest
-
 module M = Masc_mcp.Memory_oas_bridge
 module Prom = Masc_mcp.Prometheus
 
@@ -41,57 +40,57 @@ module Prom = Masc_mcp.Prometheus
 
 let test_learnings_carries_error_kind_first () =
   let learnings =
-    M.failure_learnings ~error_kind:"oas_timeout_budget"
+    M.failure_learnings
+      ~error_kind:"oas_timeout_budget"
       ~error_preview:"Adaptive estimated input tokens exceeded budget"
   in
-  check (list string)
+  check
+    (list string)
     "[failure_kind; error_preview] in order"
-    [
-      "failure_kind: oas_timeout_budget";
-      "error_preview: Adaptive estimated input tokens exceeded budget";
+    [ "failure_kind: oas_timeout_budget"
+    ; "error_preview: Adaptive estimated input tokens exceeded budget"
     ]
     learnings
+;;
 
 let test_learnings_omits_empty_preview () =
   let learnings =
-    M.failure_learnings ~error_kind:"resumable_cli_session"
-      ~error_preview:""
+    M.failure_learnings ~error_kind:"resumable_cli_session" ~error_preview:""
   in
-  check (list string)
+  check
+    (list string)
     "single-element list when preview is empty"
     [ "failure_kind: resumable_cli_session" ]
     learnings;
   let learnings_ws =
-    M.failure_learnings ~error_kind:"resumable_cli_session"
-      ~error_preview:"   \n  "
+    M.failure_learnings ~error_kind:"resumable_cli_session" ~error_preview:"   \n  "
   in
-  check (list string)
+  check
+    (list string)
     "single-element list when preview is whitespace-only"
     [ "failure_kind: resumable_cli_session" ]
     learnings_ws
+;;
 
 (* --- error_kind normalisation ------------------------------------ *)
 
 let test_empty_error_kind_normalises_to_unspecified () =
-  let learnings =
-    M.failure_learnings ~error_kind:"" ~error_preview:"some preview"
-  in
-  check (list string)
+  let learnings = M.failure_learnings ~error_kind:"" ~error_preview:"some preview" in
+  check
+    (list string)
     "empty error_kind becomes unspecified sentinel"
-    [
-      "failure_kind: unspecified";
-      "error_preview: some preview";
-    ]
+    [ "failure_kind: unspecified"; "error_preview: some preview" ]
     learnings
+;;
 
 let test_whitespace_error_kind_normalises_to_unspecified () =
-  let learnings =
-    M.failure_learnings ~error_kind:"  \t " ~error_preview:""
-  in
-  check (list string)
+  let learnings = M.failure_learnings ~error_kind:"  \t " ~error_preview:"" in
+  check
+    (list string)
     "whitespace-only error_kind becomes unspecified"
     [ "failure_kind: unspecified" ]
     learnings
+;;
 
 (* --- counter name + label shape (pure asserts) ------------------ *)
 
@@ -105,9 +104,12 @@ let test_whitespace_error_kind_normalises_to_unspecified () =
    the label value). *)
 
 let test_metric_name_stable () =
-  check string "canonical metric name"
+  check
+    string
+    "canonical metric name"
     "masc_institution_episode_failure_kind_total"
     M.institution_episode_failure_kind_metric
+;;
 
 let test_metric_value_for_unknown_label_starts_zero () =
   (* A never-seen label pair must read zero — this anchors the
@@ -116,35 +118,44 @@ let test_metric_value_for_unknown_label_starts_zero () =
   let v =
     Prom.metric_value_or_zero
       M.institution_episode_failure_kind_metric
-      ~labels:[ ("error_kind", "never-seen-kind-10325") ]
+      ~labels:[ "error_kind", "never-seen-kind-10325" ]
       ()
   in
   check (float 0.0001) "unseen label reads 0.0" 0.0 v
+;;
 
 (* Avoid 'Prom is unused' warnings from minified test files. *)
 let _ = Prom.metric_value_or_zero
 
 let () =
-  run "institution_episodes_failure_learnings_10325"
-    [
-      ( "learnings-shape",
-        [
-          test_case "error_kind first, preview second" `Quick
-            test_learnings_carries_error_kind_first;
-          test_case "empty/whitespace preview omitted" `Quick
-            test_learnings_omits_empty_preview;
-        ] );
-      ( "error_kind-normalise",
-        [
-          test_case "empty error_kind -> unspecified" `Quick
-            test_empty_error_kind_normalises_to_unspecified;
-          test_case "whitespace error_kind -> unspecified" `Quick
-            test_whitespace_error_kind_normalises_to_unspecified;
-        ] );
-      ( "counter-surface",
-        [
-          test_case "metric name stable" `Quick test_metric_name_stable;
-          test_case "unseen label reads 0.0" `Quick
-            test_metric_value_for_unknown_label_starts_zero;
-        ] );
+  run
+    "institution_episodes_failure_learnings_10325"
+    [ ( "learnings-shape"
+      , [ test_case
+            "error_kind first, preview second"
+            `Quick
+            test_learnings_carries_error_kind_first
+        ; test_case
+            "empty/whitespace preview omitted"
+            `Quick
+            test_learnings_omits_empty_preview
+        ] )
+    ; ( "error_kind-normalise"
+      , [ test_case
+            "empty error_kind -> unspecified"
+            `Quick
+            test_empty_error_kind_normalises_to_unspecified
+        ; test_case
+            "whitespace error_kind -> unspecified"
+            `Quick
+            test_whitespace_error_kind_normalises_to_unspecified
+        ] )
+    ; ( "counter-surface"
+      , [ test_case "metric name stable" `Quick test_metric_name_stable
+        ; test_case
+            "unseen label reads 0.0"
+            `Quick
+            test_metric_value_for_unknown_label_starts_zero
+        ] )
     ]
+;;

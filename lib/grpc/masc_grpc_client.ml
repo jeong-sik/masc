@@ -9,14 +9,13 @@ let service = Masc_grpc_service.service_name
 
 (** {1 Connection} *)
 
-type t = {
-  client : Grpc_eio.Client.t;
-}
+type t = { client : Grpc_eio.Client.t }
 
 let create ~sw ~env target =
   let config = Grpc_eio.Client.default_config ~target in
   let client = Grpc_eio.Client.connect ~config ~sw ~env target in
   { client }
+;;
 
 let create_from_env ~sw ~env =
   let target =
@@ -27,66 +26,87 @@ let create_from_env ~sw ~env =
       Printf.sprintf "http://127.0.0.1:%d" port
   in
   create ~sw ~env target
+;;
 
-let close t =
-  Grpc_eio.Client.close t.client
+let close t = Grpc_eio.Client.close t.client
 
 (** {1 Internal helpers} *)
 
 (** Wrap a unary call with error handling. *)
 let call_unary_safe t ~sw ~env ~method_ ~request ~decode =
-  match
-    Grpc_eio.Client.call_unary ~sw ~env t.client
-      ~service ~method_ ~request
-  with
-  | Ok bytes -> (
-    try Ok (decode bytes)
-    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-      Error (Printf.sprintf "decode error for %s: %s" method_
-        (Printexc.to_string exn)))
+  match Grpc_eio.Client.call_unary ~sw ~env t.client ~service ~method_ ~request with
+  | Ok bytes ->
+    (try Ok (decode bytes) with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | exn ->
+       Error (Printf.sprintf "decode error for %s: %s" method_ (Printexc.to_string exn)))
   | Error status ->
-    Error (Printf.sprintf "gRPC %s failed: %s" method_
-      (Grpc_core.Status.to_string status))
+    Error
+      (Printf.sprintf "gRPC %s failed: %s" method_ (Grpc_core.Status.to_string status))
+;;
 
 (** {1 Unary RPCs} *)
 
 let join t ~sw ~env ~agent_name ~capabilities ~metadata =
-  let request = T.JoinRequest.to_bytes
-    { agent_name; capabilities; metadata } in
-  call_unary_safe t ~sw ~env ~method_:"Join" ~request
-    ~decode:T.JoinResponse.of_bytes
+  let request = T.JoinRequest.to_bytes { agent_name; capabilities; metadata } in
+  call_unary_safe t ~sw ~env ~method_:"Join" ~request ~decode:T.JoinResponse.of_bytes
+;;
 
 let leave t ~sw ~env ~agent_name ~session_id =
-  let request = T.LeaveRequest.to_bytes
-    { agent_name; session_id } in
-  call_unary_safe t ~sw ~env ~method_:"Leave" ~request
-    ~decode:T.LeaveResponse.of_bytes
+  let request = T.LeaveRequest.to_bytes { agent_name; session_id } in
+  call_unary_safe t ~sw ~env ~method_:"Leave" ~request ~decode:T.LeaveResponse.of_bytes
+;;
 
 let get_status t ~sw ~env =
   (* StatusRequest is an empty protobuf message: 0 bytes on the wire. *)
   let request = "" in
-  call_unary_safe t ~sw ~env ~method_:"GetStatus" ~request
+  call_unary_safe
+    t
+    ~sw
+    ~env
+    ~method_:"GetStatus"
+    ~request
     ~decode:T.StatusResponse.of_bytes
+;;
 
 let tool_call t ~sw ~env ~agent_name ~session_id ~tool_name ~arguments_json =
-  let request = T.ToolCallRequest.to_bytes
-    { agent_name; session_id; tool_name; arguments_json } in
-  call_unary_safe t ~sw ~env ~method_:"ToolCall" ~request
+  let request =
+    T.ToolCallRequest.to_bytes { agent_name; session_id; tool_name; arguments_json }
+  in
+  call_unary_safe
+    t
+    ~sw
+    ~env
+    ~method_:"ToolCall"
+    ~request
     ~decode:T.ToolCallResponse.of_bytes
+;;
 
 let broadcast t ~sw ~env ~agent_name ~message ~mentions =
   let request = T.BroadcastRequest.(to_bytes { agent_name; message; mentions }) in
-  call_unary_safe t ~sw ~env ~method_:"Broadcast" ~request
+  call_unary_safe
+    t
+    ~sw
+    ~env
+    ~method_:"Broadcast"
+    ~request
     ~decode:T.BroadcastResponse.of_bytes
+;;
 
 (** {1 Streaming RPCs} *)
 
 let subscribe t ~sw ~env ~agent_name ~session_id ~event_types ~since_seq =
-  let request = T.SubscribeRequest_serde.to_bytes
-    { agent_name; session_id; event_types; since_seq } in
+  let request =
+    T.SubscribeRequest_serde.to_bytes { agent_name; session_id; event_types; since_seq }
+  in
   let raw_stream =
-    Grpc_eio.Client.call_server_streaming ~sw ~env t.client
-      ~service ~method_:"Subscribe" ~request
+    Grpc_eio.Client.call_server_streaming
+      ~sw
+      ~env
+      t.client
+      ~service
+      ~method_:"Subscribe"
+      ~request
   in
   (* Transform raw stream items to typed events *)
   let typed_stream = Grpc_eio.Stream.create 64 in
@@ -95,76 +115,81 @@ let subscribe t ~sw ~env ~agent_name ~session_id ~event_types ~since_seq =
     let push_typed item =
       if Grpc_eio.Stream.is_closed typed_stream
       then push_closed
-      else
+      else (
         try
           Grpc_eio.Stream.add typed_stream item;
           `Added
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->
-          if Grpc_eio.Stream.is_closed typed_stream then push_closed else `Failed exn
+          if Grpc_eio.Stream.is_closed typed_stream then push_closed else `Failed exn)
     in
-    let push_error message =
-      push_typed (Error message)
-    in
+    let push_error message = push_typed (Error message) in
     let close_typed () =
       (* [with _ -> ()] would swallow [Eio.Cancel.Cancelled]. This helper is
          called from the [Error status] and [End_of_file] branches of [loop]
          (outside any cancel handler); if [Stream.close] raises [Cancelled]
          on those paths, the outer [try loop () with Cancelled _] at line 136
          would never see it and the cancel would be silently absorbed. *)
-      try Grpc_eio.Stream.close typed_stream
-      with
+      try Grpc_eio.Stream.close typed_stream with
       | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn -> Log.Misc.warn "masc_grpc_client: stream close failed: %s" (Printexc.to_string exn)
+      | exn ->
+        Log.Misc.warn "masc_grpc_client: stream close failed: %s" (Printexc.to_string exn)
     in
     let rec loop () =
       match Grpc_eio.Stream.take raw_stream with
       | Ok bytes ->
         (try
-          match push_typed (Ok (T.Event.of_bytes bytes)) with
-          | `Added -> ()
-          | `Closed ->
+           match push_typed (Ok (T.Event.of_bytes bytes)) with
+           | `Added -> ()
+           | `Closed ->
              Log.Transport.debug "gRPC subscribe: typed stream closed, skipping event"
-          | `Failed exn ->
-             Log.Transport.error "gRPC subscribe: push_typed failed: %s"
+           | `Failed exn ->
+             Log.Transport.error
+               "gRPC subscribe: push_typed failed: %s"
                (Printexc.to_string exn)
-        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-          match push_error
-            (Printf.sprintf "event decode error: %s"
-               (Printexc.to_string exn)) with
-          | `Added -> ()
-          | `Closed | `Failed _ -> ());
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
+           (match
+              push_error
+                (Printf.sprintf "event decode error: %s" (Printexc.to_string exn))
+            with
+            | `Added -> ()
+            | `Closed | `Failed _ -> ()));
         loop ()
       | Error status ->
-        if not (Grpc_core.Status.is_ok status) then
-          (match push_error
-             (Printf.sprintf "subscribe stream error: %s"
-                (Grpc_core.Status.to_string status)) with
-           | `Added -> ()
-           | `Closed -> ()
-           | `Failed exn ->
-             Log.Transport.error "gRPC subscribe: push_error failed: %s"
-               (Printexc.to_string exn));
+        if not (Grpc_core.Status.is_ok status)
+        then (
+          match
+            push_error
+              (Printf.sprintf
+                 "subscribe stream error: %s"
+                 (Grpc_core.Status.to_string status))
+          with
+          | `Added -> ()
+          | `Closed -> ()
+          | `Failed exn ->
+            Log.Transport.error
+              "gRPC subscribe: push_error failed: %s"
+              (Printexc.to_string exn));
         close_typed ()
-      | exception End_of_file ->
-        close_typed ()
+      | exception End_of_file -> close_typed ()
     in
-    try loop ()
-    with
+    try loop () with
     | Eio.Cancel.Cancelled _ as e ->
       close_typed ();
       raise e
     | exn ->
       let message =
-        Printf.sprintf "gRPC subscribe fiber died outside iteration: %s"
+        Printf.sprintf
+          "gRPC subscribe fiber died outside iteration: %s"
           (Printexc.to_string exn)
       in
       let delivery = push_error message in
       close_typed ();
       (match delivery with
-       | `Added ->
-         Log.Transport.error "%s" message
+       | `Added -> Log.Transport.error "%s" message
        | `Closed ->
          Log.Transport.debug
            "gRPC subscribe fiber exit after typed stream closed: %s"
@@ -175,6 +200,7 @@ let subscribe t ~sw ~env ~agent_name ~session_id ~event_types ~since_seq =
            message
            (Printexc.to_string push_exn)));
   typed_stream
+;;
 
 let heartbeat_stream t ~sw ~env =
   let request_stream = Grpc_eio.Stream.create 16 in
@@ -187,23 +213,19 @@ let heartbeat_stream t ~sw ~env =
        [with _ -> ()] would swallow a cancel racing with [Stream.close],
        leaving the fork fiber alive past the cancel boundary. *)
     let close_request_stream () =
-      Safe_ops.protect ~default:() (fun () ->
-        Grpc_eio.Stream.close request_stream)
+      Safe_ops.protect ~default:() (fun () -> Grpc_eio.Stream.close request_stream)
     in
     let close_raw_requests () =
-      Safe_ops.protect ~default:() (fun () ->
-        Grpc_eio.Stream.close raw_requests)
+      Safe_ops.protect ~default:() (fun () -> Grpc_eio.Stream.close raw_requests)
     in
     let rec loop () =
       match Grpc_eio.Stream.take request_stream with
       | bytes ->
         Grpc_eio.Stream.add raw_requests bytes;
         loop ()
-      | exception End_of_file ->
-        close_raw_requests ()
+      | exception End_of_file -> close_raw_requests ()
     in
-    try loop ()
-    with
+    try loop () with
     | Eio.Cancel.Cancelled _ as e ->
       (* Close both sides so senders and downstream receivers unblock. *)
       close_request_stream ();
@@ -216,8 +238,13 @@ let heartbeat_stream t ~sw ~env =
       close_request_stream ();
       close_raw_requests ());
   let raw_responses =
-    Grpc_eio.Client.call_bidi ~sw ~env t.client
-      ~service ~method_:"Heartbeat" ~requests:raw_requests
+    Grpc_eio.Client.call_bidi
+      ~sw
+      ~env
+      t.client
+      ~service
+      ~method_:"Heartbeat"
+      ~requests:raw_requests
   in
   let send (ping : T.HeartbeatPing.t) =
     Grpc_eio.Stream.add request_stream (T.HeartbeatPing.to_bytes ping)
@@ -225,15 +252,13 @@ let heartbeat_stream t ~sw ~env =
   let recv () =
     match Grpc_eio.Stream.take raw_responses with
     | Ok bytes ->
-      (try Ok (T.HeartbeatAck.of_bytes bytes)
-       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-         Error (Printf.sprintf "ack decode error: %s"
-           (Printexc.to_string exn)))
+      (try Ok (T.HeartbeatAck.of_bytes bytes) with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn -> Error (Printf.sprintf "ack decode error: %s" (Printexc.to_string exn)))
     | Error status ->
-      Error (Printf.sprintf "heartbeat stream error: %s"
-        (Grpc_core.Status.to_string status))
+      Error
+        (Printf.sprintf "heartbeat stream error: %s" (Grpc_core.Status.to_string status))
   in
-  let close_stream () =
-    Grpc_eio.Stream.close request_stream
-  in
-  (send, recv, close_stream)
+  let close_stream () = Grpc_eio.Stream.close request_stream in
+  send, recv, close_stream
+;;

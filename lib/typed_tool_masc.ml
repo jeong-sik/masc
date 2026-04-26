@@ -2,34 +2,56 @@
 
     @since 2.260.0 *)
 
-type ('input, 'output) t = {
-  oas_tool : ('input, 'output) Oas.Typed_tool.t;
-  module_tag : Tool_dispatch.module_tag;
-  is_read_only : bool;
-  is_destructive : bool;
-  is_idempotent : bool;
-  visibility : Tool_catalog.visibility;
-  requires_join : bool;
-  effect_domain : Tool_catalog.effect_domain option;
-}
+type ('input, 'output) t =
+  { oas_tool : ('input, 'output) Oas.Typed_tool.t
+  ; module_tag : Tool_dispatch.module_tag
+  ; is_read_only : bool
+  ; is_destructive : bool
+  ; is_idempotent : bool
+  ; visibility : Tool_catalog.visibility
+  ; requires_join : bool
+  ; effect_domain : Tool_catalog.effect_domain option
+  }
 
-let create ~name ~description ~module_tag ~params ~parse ~handler ~encode
-    ?(is_read_only = false) ?(is_destructive = false) ?(is_idempotent = false)
-    ?(visibility = Tool_catalog.Default) ?(requires_join = false)
-    ?effect_domain () =
-  let oas_tool = Oas.Typed_tool.create
-    ~name ~description ~params ~parse ~handler ~encode () in
-  { oas_tool; module_tag; is_read_only; is_destructive;
-    is_idempotent; visibility; requires_join; effect_domain }
+let create
+      ~name
+      ~description
+      ~module_tag
+      ~params
+      ~parse
+      ~handler
+      ~encode
+      ?(is_read_only = false)
+      ?(is_destructive = false)
+      ?(is_idempotent = false)
+      ?(visibility = Tool_catalog.Default)
+      ?(requires_join = false)
+      ?effect_domain
+      ()
+  =
+  let oas_tool =
+    Oas.Typed_tool.create ~name ~description ~params ~parse ~handler ~encode ()
+  in
+  { oas_tool
+  ; module_tag
+  ; is_read_only
+  ; is_destructive
+  ; is_idempotent
+  ; visibility
+  ; requires_join
+  ; effect_domain
+  }
+;;
 
 (** Build a dispatch handler for the typed tool.
     The handler is registered via [Tool_spec.Direct] for a specific tool name,
     so the [name] parameter will always match — no guard needed. *)
 let make_dispatch_handler (tool : (_, _) t) : Tool_dispatch.handler =
   fun ~name:_ ~args ->
-    match Oas.Typed_tool.execute tool.oas_tool args with
-    | Ok { content } -> Some (true, content)
-    | Error { message; _ } -> Some (false, message)
+  match Oas.Typed_tool.execute tool.oas_tool args with
+  | Ok { content } -> Some (true, content)
+  | Error { message; _ } -> Some (false, message)
+;;
 
 let to_spec tool =
   let schema = Oas.Typed_tool.schema tool.oas_tool in
@@ -47,10 +69,12 @@ let to_spec tool =
     ~requires_join:tool.requires_join
     ?effect_domain:tool.effect_domain
     ()
+;;
 
 let register tool =
   let spec = to_spec tool in
   Tool_spec.register spec
+;;
 
 let to_oas tool = tool.oas_tool
 let name tool = Oas.Typed_tool.name tool.oas_tool

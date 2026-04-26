@@ -1,5 +1,4 @@
 open Alcotest
-
 module R = Masc_mcp.Keeper_registry
 module Keeper_types = Masc_mcp.Keeper_types
 module KSM = Masc_mcp.Keeper_state_machine
@@ -19,33 +18,41 @@ let with_env name value f =
       | Some v -> Unix.putenv name v
       | None -> Unix.putenv name "")
     f
+;;
 
 let rec rm_rf path =
-  if Sys.file_exists path then
-    if Sys.is_directory path then (
+  if Sys.file_exists path
+  then
+    if Sys.is_directory path
+    then (
       Array.iter (fun name -> rm_rf (Filename.concat path name)) (Sys.readdir path);
       Unix.rmdir path)
-    else
-      Unix.unlink path
+    else Unix.unlink path
+;;
 
 let temp_base_path label =
   let base =
-    Filename.concat (Filename.get_temp_dir_name ())
+    Filename.concat
+      (Filename.get_temp_dir_name ())
       (Printf.sprintf "masc-test-%s-%06x" label (Random.bits ()))
   in
   Unix.mkdir base 0o755;
   base
+;;
 
 let make_meta name =
-  let json = `Assoc [
-    ("name", `String name);
-    ("agent_name", `String ("agent-" ^ name));
-    ("trace_id", `String ("trace-test-" ^ name));
-    ("goal", `String "test goal");
-  ] in
+  let json =
+    `Assoc
+      [ "name", `String name
+      ; "agent_name", `String ("agent-" ^ name)
+      ; "trace_id", `String ("trace-test-" ^ name)
+      ; "goal", `String "test goal"
+      ]
+  in
   match Keeper_types.meta_of_json json with
   | Ok meta -> meta
   | Error err -> Alcotest.fail ("make_meta failed: " ^ err)
+;;
 
 let test_bonsai_keepers_summary_uses_scoped_registry () =
   let base_path = temp_base_path "bonsai-summary" in
@@ -57,53 +64,53 @@ let test_bonsai_keepers_summary_uses_scoped_registry () =
       rm_rf base_path;
       rm_rf other_base_path)
     (fun () ->
-      let base_meta = make_meta "live-keeper" in
-      let meta =
-        { base_meta with
-          max_context_override = Some 1000;
-          runtime =
-            { base_meta.runtime with
-              usage =
-                { base_meta.runtime.usage with
-                  total_turns = 7;
-                  last_total_tokens = 250;
-                  last_latency_ms = 1234;
-                };
-            };
-        }
-      in
-      ignore (R.register ~base_path "live-keeper" meta);
-      ignore
-        (R.register
-           ~base_path:other_base_path
-           "foreign-keeper"
-           (make_meta "foreign-keeper"));
-      R.record_tool_use
-        ~base_path
-        "live-keeper"
-        ~tool_name:"keeper_tasks_list"
-        ~success:true;
-      let summary = Pages.keepers_summary_from_registry ~base_path in
-      check int "scoped keeper count" 1 (List.length summary.keepers);
-      match summary.keepers with
-      | [ keeper ] ->
-          check string "live name" "live-keeper" keeper.name;
-          check int "turns from runtime usage" 7 keeper.turn;
-          check int "ctx pct from runtime usage" 25 keeper.ctx_pct;
-          check int "latency from runtime usage" 1234 keeper.latency_ms;
-          check
-            (option string)
-            "latest tool"
-            (Some "keeper_tasks_list")
-            keeper.last_tool;
-          check bool "mock keeper omitted" true
-            (not (String.equal keeper.name "luna"))
-      | _ -> fail "expected exactly one scoped keeper")
+       let base_meta = make_meta "live-keeper" in
+       let meta =
+         { base_meta with
+           max_context_override = Some 1000
+         ; runtime =
+             { base_meta.runtime with
+               usage =
+                 { base_meta.runtime.usage with
+                   total_turns = 7
+                 ; last_total_tokens = 250
+                 ; last_latency_ms = 1234
+                 }
+             }
+         }
+       in
+       ignore (R.register ~base_path "live-keeper" meta);
+       ignore
+         (R.register
+            ~base_path:other_base_path
+            "foreign-keeper"
+            (make_meta "foreign-keeper"));
+       R.record_tool_use
+         ~base_path
+         "live-keeper"
+         ~tool_name:"keeper_tasks_list"
+         ~success:true;
+       let summary = Pages.keepers_summary_from_registry ~base_path in
+       check int "scoped keeper count" 1 (List.length summary.keepers);
+       match summary.keepers with
+       | [ keeper ] ->
+         check string "live name" "live-keeper" keeper.name;
+         check int "turns from runtime usage" 7 keeper.turn;
+         check int "ctx pct from runtime usage" 25 keeper.ctx_pct;
+         check int "latency from runtime usage" 1234 keeper.latency_ms;
+         check (option string) "latest tool" (Some "keeper_tasks_list") keeper.last_tool;
+         check bool "mock keeper omitted" true (not (String.equal keeper.name "luna"))
+       | _ -> fail "expected exactly one scoped keeper")
+;;
 
 (** Wrap each test body in Eio_main.run for Eio.Mutex support. *)
 let eio_test name fn =
-  test_case name `Quick (fun () -> Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env); fn ())
+  test_case name `Quick (fun () ->
+    Eio_main.run
+    @@ fun env ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    fn ())
+;;
 
 let sse_payload_json (event : string) : Yojson.Safe.t =
   let prefix = "data: " in
@@ -111,24 +118,24 @@ let sse_payload_json (event : string) : Yojson.Safe.t =
   let rec find_data_line = function
     | [] -> fail "expected SSE data line"
     | line :: rest ->
-        if String.length line >= prefix_len
-           && String.sub line 0 prefix_len = prefix
-        then
-          Yojson.Safe.from_string
-            (String.sub line prefix_len (String.length line - prefix_len))
-        else
-          find_data_line rest
+      if String.length line >= prefix_len && String.sub line 0 prefix_len = prefix
+      then
+        Yojson.Safe.from_string
+          (String.sub line prefix_len (String.length line - prefix_len))
+      else find_data_line rest
   in
   find_data_line (String.split_on_char '\n' event)
+;;
 
 let sse_events_of_type event_type received_events =
   received_events
   |> List.rev
   |> List.filter_map (fun raw_event ->
-         let payload = sse_payload_json raw_event in
-         match Json.member "type" payload |> Json.to_string_option with
-         | Some kind when kind = event_type -> Some payload
-         | _ -> None)
+    let payload = sse_payload_json raw_event in
+    match Json.member "type" payload |> Json.to_string_option with
+    | Some kind when kind = event_type -> Some payload
+    | _ -> None)
+;;
 
 (* ── Basic registry operations ─────────────────────────── *)
 
@@ -141,6 +148,7 @@ let test_register_and_get () =
   match R.get ~base_path:bp "k1" with
   | None -> fail "expected entry for k1"
   | Some e -> check string "get name" "k1" e.name
+;;
 
 let test_register_offline_and_start () =
   R.clear ();
@@ -149,16 +157,22 @@ let test_register_offline_and_start () =
   check bool "not running yet" false (R.is_running ~base_path:bp "k1-offline");
   (* #7889: register_offline must make is_registered true synchronously even
      before the keepalive fiber has transitioned the entry to running. *)
-  check bool "registered synchronously after register_offline" true
+  check
+    bool
+    "registered synchronously after register_offline"
+    true
     (R.is_registered ~base_path:bp "k1-offline");
   ignore (R.dispatch_event ~base_path:bp "k1-offline" KSM.Fiber_started);
   match R.get ~base_path:bp "k1-offline" with
   | None -> fail "expected k1-offline"
   | Some e ->
-      check string "running after Fiber_started" "running"
-        (KSM.phase_to_string e.phase);
-      check bool "running after Fiber_started" true
-        (R.is_running ~base_path:bp "k1-offline")
+    check string "running after Fiber_started" "running" (KSM.phase_to_string e.phase);
+    check
+      bool
+      "running after Fiber_started"
+      true
+      (R.is_running ~base_path:bp "k1-offline")
+;;
 
 let test_register_restarting_and_start () =
   R.clear ();
@@ -169,10 +183,13 @@ let test_register_restarting_and_start () =
   match R.get ~base_path:bp "k1-restart" with
   | None -> fail "expected k1-restart"
   | Some e ->
-      check string "running after Fiber_started" "running"
-        (KSM.phase_to_string e.phase);
-      check bool "running after Fiber_started" true
-        (R.is_running ~base_path:bp "k1-restart")
+    check string "running after Fiber_started" "running" (KSM.phase_to_string e.phase);
+    check
+      bool
+      "running after Fiber_started"
+      true
+      (R.is_running ~base_path:bp "k1-restart")
+;;
 
 let test_prepare_fiber_launch_resets_stale_runtime_latches () =
   R.clear ();
@@ -187,15 +204,20 @@ let test_prepare_fiber_launch_resets_stale_runtime_latches () =
   match R.get ~base_path:bp name with
   | None -> fail "expected k1-stale-stop"
   | Some updated ->
-      check bool "fiber_stop reset before launch" false
-        (Atomic.get updated.fiber_stop);
-      check bool "fiber_wakeup reset before launch" false
-        (Atomic.get updated.fiber_wakeup);
-      check bool "waiting_for_inference reset before launch" false
-        (Atomic.get updated.waiting_for_inference);
-      check string "running after prepare launch" "running"
-        (KSM.phase_to_string updated.phase);
-      check bool "fsm stop_requested reset" false updated.conditions.stop_requested
+    check bool "fiber_stop reset before launch" false (Atomic.get updated.fiber_stop);
+    check bool "fiber_wakeup reset before launch" false (Atomic.get updated.fiber_wakeup);
+    check
+      bool
+      "waiting_for_inference reset before launch"
+      false
+      (Atomic.get updated.waiting_for_inference);
+    check
+      string
+      "running after prepare launch"
+      "running"
+      (KSM.phase_to_string updated.phase);
+    check bool "fsm stop_requested reset" false updated.conditions.stop_requested
+;;
 
 let test_dispatch_event_with_audit_preserves_snapshot () =
   R.clear ();
@@ -245,77 +267,75 @@ let test_dispatch_event_with_audit_preserves_snapshot () =
         ; since_last_handoff_sec = 120.0
         ; proactive_warmup_elapsed = true
         }
-    ; failures =
-        { consecutive_hb_failures = 0
-        ; consecutive_turn_failures = 0
-        }
+    ; failures = { consecutive_hb_failures = 0; consecutive_turn_failures = 0 }
     }
   in
   let context_event =
-    KSM.Context_measured {
-      context_ratio = measurement.context.context_ratio;
-      message_count = measurement.context.message_count;
-      token_count = measurement.context.token_count;
-      auto_rules =
-        { reflect = true
-        ; plan = true
-        ; compact = true
-        ; handoff = true
-        ; guardrail_stop = true
-        ; guardrail_reason = Some "guardrail fired"
-        ; goal_drift = 0.9
-        };
-    }
+    KSM.Context_measured
+      { context_ratio = measurement.context.context_ratio
+      ; message_count = measurement.context.message_count
+      ; token_count = measurement.context.token_count
+      ; auto_rules =
+          { reflect = true
+          ; plan = true
+          ; compact = true
+          ; handoff = true
+          ; guardrail_stop = true
+          ; guardrail_reason = Some "guardrail fired"
+          ; goal_drift = 0.9
+          }
+      }
   in
-  let events =
-    [ KSM.Guardrail_stop { reason = "guardrail fired" }
-    ; context_event
-    ]
-  in
-  ignore (R.dispatch_event_with_audit
-    ~base_path:bp
-    ~snapshot:measurement
-    ~events_fired:events
-    ~selected_event:(List.hd events)
-    keeper_name
-    context_event);
+  let events = [ KSM.Guardrail_stop { reason = "guardrail fired" }; context_event ] in
+  ignore
+    (R.dispatch_event_with_audit
+       ~base_path:bp
+       ~snapshot:measurement
+       ~events_fired:events
+       ~selected_event:(List.hd events)
+       keeper_name
+       context_event);
   match Audit.recent_transitions ~keeper_name ~limit:1 with
   | [] -> fail "expected transition audit"
   | [ audit ] ->
-      check string "selected event"
-        "guardrail_stop(guardrail fired)"
-        (KSM.event_to_string audit.selected_event);
-      check int "events_fired preserved" 2 (List.length audit.events_fired);
-      (match audit.snapshot with
-       | None -> fail "expected measurement snapshot"
-       | Some snapshot ->
-           check string "snapshot id" "msnap-test" snapshot.snapshot_id);
-      check string "new phase" "failing" (KSM.phase_to_string audit.new_phase)
+    check
+      string
+      "selected event"
+      "guardrail_stop(guardrail fired)"
+      (KSM.event_to_string audit.selected_event);
+    check int "events_fired preserved" 2 (List.length audit.events_fired);
+    (match audit.snapshot with
+     | None -> fail "expected measurement snapshot"
+     | Some snapshot -> check string "snapshot id" "msnap-test" snapshot.snapshot_id);
+    check string "new phase" "failing" (KSM.phase_to_string audit.new_phase)
   | _ -> fail "expected exactly one transition audit entry"
+;;
 
 let test_mark_turn_finished_records_completed_turn_outcome_once () =
   R.clear ();
   let keeper_name = "k-completed-turn-audit" in
   ignore (R.register ~base_path:bp keeper_name (make_meta keeper_name));
   R.mark_turn_started ~base_path:bp keeper_name;
-  R.set_turn_decision_stage
-    ~base_path:bp keeper_name R.Decision_tool_policy_selected;
+  R.set_turn_decision_stage ~base_path:bp keeper_name R.Decision_tool_policy_selected;
   R.mark_turn_gate_rejected_by_name keeper_name;
   R.mark_turn_finished ~base_path:bp keeper_name;
   R.mark_turn_finished ~base_path:bp keeper_name;
   match Audit.recent_completed_turns ~keeper_name ~limit:5 with
   | [ turn ] ->
-      check int "turn_id recorded" 1 turn.turn_id;
-      check bool "started_at recorded" true (turn.started_at > 0.0);
-      check bool "ended_at recorded" true (turn.ended_at >= turn.started_at);
-      check bool "gate_rejected outcome recorded" true
-        (match turn.outcome with
-         | Audit.Turn_gate_rejected -> true
-         | _ -> false)
+    check int "turn_id recorded" 1 turn.turn_id;
+    check bool "started_at recorded" true (turn.started_at > 0.0);
+    check bool "ended_at recorded" true (turn.ended_at >= turn.started_at);
+    check
+      bool
+      "gate_rejected outcome recorded"
+      true
+      (match turn.outcome with
+       | Audit.Turn_gate_rejected -> true
+       | _ -> false)
   | turns ->
-      fail
-        (Printf.sprintf "expected exactly one completed turn, got %d"
-           (List.length turns))
+    fail
+      (Printf.sprintf "expected exactly one completed turn, got %d" (List.length turns))
+;;
 
 let test_completed_turns_replay_from_default_store () =
   let base_path = temp_base_path "completed-turn-replay" in
@@ -324,29 +344,33 @@ let test_completed_turns_replay_from_default_store () =
       Audit.For_testing.reset_state ();
       rm_rf base_path)
     (fun () ->
-      with_env "MASC_BASE_PATH" base_path (fun () ->
-          Audit.For_testing.reset_state ();
-          let keeper_name = "k-completed-turn-replay" in
-          Audit.record_completed_turn ~keeper_name
-            {
-              Audit.turn_id = 42;
-              started_at = 100.0;
-              ended_at = 120.0;
-              outcome = Audit.Turn_substantive;
-            };
-          Audit.For_testing.clear_completed_turn_ring ~keeper_name;
-          match Audit.recent_completed_turns ~keeper_name ~limit:5 with
-          | [ turn ] ->
-              check int "turn_id replayed" 42 turn.turn_id;
-              check bool "substantive outcome replayed" true
-                (match turn.outcome with
-                 | Audit.Turn_substantive -> true
-                 | _ -> false)
-          | turns ->
-              fail
-                (Printf.sprintf
-                   "expected one replayed completed turn, got %d"
-                   (List.length turns))))
+       with_env "MASC_BASE_PATH" base_path (fun () ->
+         Audit.For_testing.reset_state ();
+         let keeper_name = "k-completed-turn-replay" in
+         Audit.record_completed_turn
+           ~keeper_name
+           { Audit.turn_id = 42
+           ; started_at = 100.0
+           ; ended_at = 120.0
+           ; outcome = Audit.Turn_substantive
+           };
+         Audit.For_testing.clear_completed_turn_ring ~keeper_name;
+         match Audit.recent_completed_turns ~keeper_name ~limit:5 with
+         | [ turn ] ->
+           check int "turn_id replayed" 42 turn.turn_id;
+           check
+             bool
+             "substantive outcome replayed"
+             true
+             (match turn.outcome with
+              | Audit.Turn_substantive -> true
+              | _ -> false)
+         | turns ->
+           fail
+             (Printf.sprintf
+                "expected one replayed completed turn, got %d"
+                (List.length turns))))
+;;
 
 let test_unregister () =
   R.clear ();
@@ -354,6 +378,7 @@ let test_unregister () =
   check bool "exists before" true (Option.is_some (R.get ~base_path:bp "k2"));
   R.unregister ~base_path:bp "k2";
   check bool "gone after" true (Option.is_none (R.get ~base_path:bp "k2"))
+;;
 
 let test_all () =
   R.clear ();
@@ -362,6 +387,7 @@ let test_all () =
   let _e3 = R.register ~base_path:bp "c" (make_meta "c") in
   let all = R.all () in
   check int "count" 3 (List.length all)
+;;
 
 let test_update_meta () =
   R.clear ();
@@ -371,6 +397,7 @@ let test_update_meta () =
   match R.get ~base_path:bp "k3" with
   | None -> fail "expected k3"
   | Some e -> check string "goal updated" "updated goal" e.meta.goal
+;;
 
 let test_set_state () =
   R.clear ();
@@ -381,37 +408,55 @@ let test_set_state () =
   match R.get ~base_path:bp "k4" with
   | None -> fail "expected k4"
   | Some e -> check string "state" "paused" (KSM.phase_to_string e.phase)
+;;
 
 let test_dispatch_event_emits_phase_sse () =
   R.clear ();
   let received_events = ref [] in
-  Masc_mcp.Sse.subscribe_external ~id:"keeper-registry-phase"
-    ~callback:(fun event -> received_events := event :: !received_events) ();
+  Masc_mcp.Sse.subscribe_external
+    ~id:"keeper-registry-phase"
+    ~callback:(fun event -> received_events := event :: !received_events)
+    ();
   Fun.protect
-    ~finally:(fun () ->
-      Masc_mcp.Sse.unsubscribe_external "keeper-registry-phase")
+    ~finally:(fun () -> Masc_mcp.Sse.unsubscribe_external "keeper-registry-phase")
     (fun () ->
-      ignore (R.register ~base_path:bp "k4-lifecycle" (make_meta "k4-lifecycle"));
-      ignore (R.dispatch_event ~base_path:bp "k4-lifecycle" KSM.Operator_pause);
-      match sse_events_of_type "keeper_phase_changed" !received_events with
-      | [] -> fail "expected keeper_phase_changed SSE event"
-      | payload :: _ ->
-          check string "phase type" "keeper_phase_changed"
-            (Json.member "type" payload |> Json.to_string);
-          check string "keeper name" "k4-lifecycle"
-            (Json.member "name" payload |> Json.to_string);
-          check string "prev phase" "running"
-            (Json.member "prev_phase" payload |> Json.to_string);
-          check string "new phase" "paused"
-            (Json.member "new_phase" payload |> Json.to_string);
-          check string "event" "operator_pause"
-            (Json.member "event" payload |> Json.to_string))
+       ignore (R.register ~base_path:bp "k4-lifecycle" (make_meta "k4-lifecycle"));
+       ignore (R.dispatch_event ~base_path:bp "k4-lifecycle" KSM.Operator_pause);
+       match sse_events_of_type "keeper_phase_changed" !received_events with
+       | [] -> fail "expected keeper_phase_changed SSE event"
+       | payload :: _ ->
+         check
+           string
+           "phase type"
+           "keeper_phase_changed"
+           (Json.member "type" payload |> Json.to_string);
+         check
+           string
+           "keeper name"
+           "k4-lifecycle"
+           (Json.member "name" payload |> Json.to_string);
+         check
+           string
+           "prev phase"
+           "running"
+           (Json.member "prev_phase" payload |> Json.to_string);
+         check
+           string
+           "new phase"
+           "paused"
+           (Json.member "new_phase" payload |> Json.to_string);
+         check
+           string
+           "event"
+           "operator_pause"
+           (Json.member "event" payload |> Json.to_string))
+;;
 
 let test_extended_states () =
   R.clear ();
   let _entry = R.register ~base_path:bp "k4x" (make_meta "k4x") in
-  ignore (R.dispatch_event ~base_path:bp "k4x"
-    (KSM.Fiber_terminated { outcome = "test" }));
+  ignore
+    (R.dispatch_event ~base_path:bp "k4x" (KSM.Fiber_terminated { outcome = "test" }));
   (match R.get ~base_path:bp "k4x" with
    | None -> fail "expected k4x"
    | Some e -> check string "crashed string" "crashed" (KSM.phase_to_string e.phase));
@@ -419,57 +464,65 @@ let test_extended_states () =
   match R.get ~base_path:bp "k4x" with
   | None -> fail "expected k4x"
   | Some e ->
-      check string "dead string" "dead" (KSM.phase_to_string e.phase);
-      check (option (float 0.01)) "dead_since set" (Some 123.0) e.dead_since_ts
+    check string "dead string" "dead" (KSM.phase_to_string e.phase);
+    check (option (float 0.01)) "dead_since set" (Some 123.0) e.dead_since_ts
+;;
 
 let test_stopped_entry_action_is_observability_only () =
   R.clear ();
   let received_events = ref [] in
-  Masc_mcp.Sse.subscribe_external ~id:"keeper-registry-stopped"
-    ~callback:(fun event -> received_events := event :: !received_events) ();
+  Masc_mcp.Sse.subscribe_external
+    ~id:"keeper-registry-stopped"
+    ~callback:(fun event -> received_events := event :: !received_events)
+    ();
   Fun.protect
-    ~finally:(fun () ->
-      Masc_mcp.Sse.unsubscribe_external "keeper-registry-stopped")
+    ~finally:(fun () -> Masc_mcp.Sse.unsubscribe_external "keeper-registry-stopped")
     (fun () ->
-      ignore (R.register ~base_path:bp "k4-stop" (make_meta "k4-stop"));
-      ignore (R.dispatch_event ~base_path:bp "k4-stop" KSM.Stop_requested);
-      ignore (R.dispatch_event ~base_path:bp "k4-stop" KSM.Drain_complete);
-      match R.get ~base_path:bp "k4-stop" with
-      | None -> fail "expected stopped keeper to remain registered"
-      | Some entry ->
-          check string "stopped phase" "stopped"
-            (KSM.phase_to_string entry.phase);
-          let stopped_payload =
-            sse_events_of_type "keeper_phase_changed" !received_events
-            |> List.find_opt (fun payload ->
-                   Json.member "new_phase" payload |> Json.to_string = "stopped")
-          in
-          (match stopped_payload with
-           | None -> fail "expected stopped phase SSE event"
-           | Some payload ->
-               check string "stop event" "drain_complete"
-                 (Json.member "event" payload |> Json.to_string)))
+       ignore (R.register ~base_path:bp "k4-stop" (make_meta "k4-stop"));
+       ignore (R.dispatch_event ~base_path:bp "k4-stop" KSM.Stop_requested);
+       ignore (R.dispatch_event ~base_path:bp "k4-stop" KSM.Drain_complete);
+       match R.get ~base_path:bp "k4-stop" with
+       | None -> fail "expected stopped keeper to remain registered"
+       | Some entry ->
+         check string "stopped phase" "stopped" (KSM.phase_to_string entry.phase);
+         let stopped_payload =
+           sse_events_of_type "keeper_phase_changed" !received_events
+           |> List.find_opt (fun payload ->
+             Json.member "new_phase" payload |> Json.to_string = "stopped")
+         in
+         (match stopped_payload with
+          | None -> fail "expected stopped phase SSE event"
+          | Some payload ->
+            check
+              string
+              "stop event"
+              "drain_complete"
+              (Json.member "event" payload |> Json.to_string)))
+;;
 
 let test_overflow_entry_action_promotes_to_compacting () =
   R.clear ();
   ignore (R.register ~base_path:bp "k-overflow" (make_meta "k-overflow"));
   ignore
-    (R.dispatch_event ~base_path:bp "k-overflow"
+    (R.dispatch_event
+       ~base_path:bp
+       "k-overflow"
        (KSM.Context_overflow_detected
-          {
-            source = `Prompt_rejected;
-            token_count = 205_000;
-            limit_tokens = Some 200_000;
+          { source = `Prompt_rejected
+          ; token_count = 205_000
+          ; limit_tokens = Some 200_000
           }));
   match R.get ~base_path:bp "k-overflow" with
   | None -> fail "expected k-overflow"
   | Some entry ->
-      check string "registry auto-promotes overflow to compacting" "compacting"
-        (KSM.phase_to_string entry.phase);
-      check bool "compaction_active latched" true
-        entry.conditions.compaction_active;
-      check bool "context_overflow remains latched" true
-        entry.conditions.context_overflow
+    check
+      string
+      "registry auto-promotes overflow to compacting"
+      "compacting"
+      (KSM.phase_to_string entry.phase);
+    check bool "compaction_active latched" true entry.conditions.compaction_active;
+    check bool "context_overflow remains latched" true entry.conditions.context_overflow
+;;
 
 let test_count_running () =
   R.clear ();
@@ -481,6 +534,7 @@ let test_count_running () =
   check int "2 running" 2 (R.count_running ());
   R.unregister ~base_path:bp "r1";
   check int "1 running" 1 (R.count_running ())
+;;
 
 let test_count_running_atomic_transitions () =
   let bp2 = "/tmp/test-2" in
@@ -497,6 +551,7 @@ let test_count_running_atomic_transitions () =
   check int "unregister decrements global fast-path" 0 (R.count_running ());
   R.clear ();
   check int "clear resets global fast-path" 0 (R.count_running ())
+;;
 
 let test_record_restart () =
   R.clear ();
@@ -506,30 +561,32 @@ let test_record_restart () =
   match R.get ~base_path:bp "k5" with
   | None -> fail "expected k5"
   | Some e ->
-      check int "restart count" 2 e.restart_count;
-      check bool "last_restart_ts set" true (e.last_restart_ts > 0.0)
+    check int "restart count" 2 e.restart_count;
+    check bool "last_restart_ts set" true (e.last_restart_ts > 0.0)
+;;
 
 let test_is_registered () =
   R.clear ();
-  check bool "not registered before" false
-    (R.is_registered ~base_path:bp "k5x");
+  check bool "not registered before" false (R.is_registered ~base_path:bp "k5x");
   let _entry = R.register ~base_path:bp "k5x" (make_meta "k5x") in
-  check bool "registered after add" true
-    (R.is_registered ~base_path:bp "k5x");
+  check bool "registered after add" true (R.is_registered ~base_path:bp "k5x");
   R.unregister ~base_path:bp "k5x";
-  check bool "not registered after remove" false
-    (R.is_registered ~base_path:bp "k5x")
+  check bool "not registered after remove" false (R.is_registered ~base_path:bp "k5x")
+;;
 
 let test_record_error () =
   R.clear ();
   let _entry = R.register ~base_path:bp "k6" (make_meta "k6") in
-  check bool "no error initially" true
+  check
+    bool
+    "no error initially"
+    true
     (Option.is_none (Option.bind (R.get ~base_path:bp "k6") (fun e -> e.last_error)));
   R.record_error ~base_path:bp "k6" "something broke";
   match R.get ~base_path:bp "k6" with
   | None -> fail "expected k6"
-  | Some e ->
-    check (option string) "error recorded" (Some "something broke") e.last_error
+  | Some e -> check (option string) "error recorded" (Some "something broke") e.last_error
+;;
 
 let test_clear_error () =
   R.clear ();
@@ -538,13 +595,17 @@ let test_clear_error () =
   R.clear_error ~base_path:bp "k6-clear";
   match R.get ~base_path:bp "k6-clear" with
   | None -> fail "expected k6-clear"
-  | Some e ->
-      check (option string) "error cleared" None e.last_error
+  | Some e -> check (option string) "error cleared" None e.last_error
+;;
 
 let test_get_returns_none_for_missing () =
   R.clear ();
-  check (option reject) "nonexistent returns None" None
+  check
+    (option reject)
+    "nonexistent returns None"
+    None
     (R.get ~base_path:bp "nonexistent")
+;;
 
 let test_noop_on_missing () =
   R.clear ();
@@ -557,8 +618,12 @@ let test_noop_on_missing () =
   R.set_grpc_close ~base_path:bp "ghost" None;
   R.wakeup ~base_path:bp "ghost";
   R.unregister ~base_path:bp "ghost";
-  check bool "ghost never materialized via no-op ops" true
+  check
+    bool
+    "ghost never materialized via no-op ops"
+    true
     (Option.is_none (R.get ~base_path:bp "ghost"))
+;;
 
 let test_register_replaces () =
   R.clear ();
@@ -567,8 +632,8 @@ let test_register_replaces () =
   let _e2 = R.register ~base_path:bp "dup" (make_meta "dup") in
   match R.get ~base_path:bp "dup" with
   | None -> fail "expected dup"
-  | Some e ->
-    check int "restart count reset" 0 e.restart_count
+  | Some e -> check int "restart count reset" 0 e.restart_count
+;;
 
 (* ── New fields: grpc_close, crash_log, wakeup, fiber_health ── *)
 
@@ -579,14 +644,18 @@ let test_grpc_close () =
   R.set_grpc_close ~base_path:bp "g1" (Some (fun () -> called := true));
   (match R.get ~base_path:bp "g1" with
    | Some e ->
-       (match Atomic.get e.grpc_close with
-        | Some f -> f (); check bool "grpc_close called" true !called
-        | None -> fail "expected grpc_close")
+     (match Atomic.get e.grpc_close with
+      | Some f ->
+        f ();
+        check bool "grpc_close called" true !called
+      | None -> fail "expected grpc_close")
    | None -> fail "expected g1");
   R.set_grpc_close ~base_path:bp "g1" None;
   match R.get ~base_path:bp "g1" with
-  | Some e -> check bool "grpc_close cleared" true (Option.is_none (Atomic.get e.grpc_close))
+  | Some e ->
+    check bool "grpc_close cleared" true (Option.is_none (Atomic.get e.grpc_close))
   | None -> fail "expected g1"
+;;
 
 let test_crash_log () =
   R.clear ();
@@ -602,12 +671,14 @@ let test_crash_log () =
   R.record_crash ~base_path:bp "c1" 6.0 "crash-6";
   let log2 = R.crash_log_of ~base_path:bp "c1" in
   check int "capped at 5" 5 (List.length log2)
+;;
 
 let test_started_at () =
   R.clear ();
   check bool "none for missing" true (Option.is_none (R.started_at ~base_path:bp "nope"));
   let _entry = R.register ~base_path:bp "s1" (make_meta "s1") in
   check bool "some for existing" true (Option.is_some (R.started_at ~base_path:bp "s1"))
+;;
 
 let test_wakeup () =
   R.clear ();
@@ -615,6 +686,7 @@ let test_wakeup () =
   check bool "wakeup initially false" false (Atomic.get entry.fiber_wakeup);
   R.wakeup ~base_path:bp "w1";
   check bool "wakeup set" true (Atomic.get entry.fiber_wakeup)
+;;
 
 let test_wakeup_all () =
   R.clear ();
@@ -630,6 +702,7 @@ let test_wakeup_all () =
   check bool "wa2 woken" true (Atomic.get e2.fiber_wakeup);
   check bool "wa3 not woken (stopped)" false (Atomic.get e3.fiber_wakeup);
   check bool "wa4 not woken (paused)" false (Atomic.get e4.fiber_wakeup)
+;;
 
 let test_fiber_health_alive () =
   R.clear ();
@@ -637,12 +710,14 @@ let test_fiber_health_alive () =
   match R.fiber_health_of ~base_path:bp "fh1" with
   | Keeper_types.Fiber_alive -> ()
   | _ -> fail "expected Fiber_alive"
+;;
 
 let test_fiber_health_unknown () =
   R.clear ();
   match R.fiber_health_of ~base_path:bp "nonexistent" with
   | Keeper_types.Fiber_unknown -> ()
   | _ -> fail "expected Fiber_unknown"
+;;
 
 let test_fiber_health_stopped () =
   R.clear ();
@@ -651,6 +726,7 @@ let test_fiber_health_stopped () =
   match R.fiber_health_of ~base_path:bp "fh2" with
   | Keeper_types.Fiber_unknown -> ()
   | _ -> fail "expected Fiber_unknown for stopped"
+;;
 
 let test_fiber_health_crashed () =
   R.clear ();
@@ -659,15 +735,20 @@ let test_fiber_health_crashed () =
   match R.fiber_health_of ~base_path:bp "fh3" with
   | Keeper_types.Fiber_zombie -> ()
   | _ -> fail "expected Fiber_zombie for crashed"
+;;
 
 let test_fiber_health_crashed_state_without_done_signal () =
   R.clear ();
   let _entry = R.register ~base_path:bp "fh3-state" (make_meta "fh3-state") in
-  ignore (R.dispatch_event ~base_path:bp "fh3-state"
-    (KSM.Fiber_terminated { outcome = "test" }));
+  ignore
+    (R.dispatch_event
+       ~base_path:bp
+       "fh3-state"
+       (KSM.Fiber_terminated { outcome = "test" }));
   match R.fiber_health_of ~base_path:bp "fh3-state" with
   | Keeper_types.Fiber_zombie -> ()
   | _ -> fail "expected Fiber_zombie for explicit crashed state"
+;;
 
 let test_fiber_health_dead_state () =
   R.clear ();
@@ -676,47 +757,66 @@ let test_fiber_health_dead_state () =
   match R.fiber_health_of ~base_path:bp "fh4" with
   | Keeper_types.Fiber_dead -> ()
   | _ -> fail "expected Fiber_dead for dead state"
+;;
 
 let test_shared_refs () =
   R.clear ();
   let entry = R.register ~base_path:bp "ref1" (make_meta "ref1") in
-  let entry_via_get = match R.get ~base_path:bp "ref1" with Some e -> e | None -> fail "expected ref1" in
+  let entry_via_get =
+    match R.get ~base_path:bp "ref1" with
+    | Some e -> e
+    | None -> fail "expected ref1"
+  in
   Atomic.set entry.fiber_wakeup true;
   check bool "shared wakeup atomic" true (Atomic.get entry_via_get.fiber_wakeup);
   Atomic.set entry_via_get.fiber_stop true;
   check bool "shared stop atomic" true (Atomic.get entry.fiber_stop)
+;;
 
 let test_spawn_slots () =
   R.clear ();
   check bool "slots available" true (R.spawn_slots_available ())
+;;
 
 (* ── Board tracking tests ─────────────────────────────── *)
 
 let test_last_agent_count_default () =
   R.clear ();
   check int "0 for unknown" 0 (R.get_last_agent_count ~base_path:bp "none")
+;;
 
 let test_last_agent_count_set_get () =
   R.clear ();
   ignore (R.register ~base_path:bp "ac1" (make_meta "ac1"));
   R.set_last_agent_count ~base_path:bp "ac1" 42;
   check int "set then get" 42 (R.get_last_agent_count ~base_path:bp "ac1")
+;;
 
 let test_board_wakeup_debounce () =
   R.clear ();
   ignore (R.register ~base_path:bp "bw1" (make_meta "bw1"));
-  let first = R.board_wakeup_allowed ~base_path:bp "bw1" ~post_id:"p1" ~debounce_sec:60.0 in
-  let second = R.board_wakeup_allowed ~base_path:bp "bw1" ~post_id:"p1" ~debounce_sec:60.0 in
+  let first =
+    R.board_wakeup_allowed ~base_path:bp "bw1" ~post_id:"p1" ~debounce_sec:60.0
+  in
+  let second =
+    R.board_wakeup_allowed ~base_path:bp "bw1" ~post_id:"p1" ~debounce_sec:60.0
+  in
   check bool "first allowed" true first;
   check bool "second blocked" false second
+;;
 
 let test_board_wakeup_different_post () =
   R.clear ();
   ignore (R.register ~base_path:bp "bw2" (make_meta "bw2"));
-  let first = R.board_wakeup_allowed ~base_path:bp "bw2" ~post_id:"p1" ~debounce_sec:60.0 in
-  let second = R.board_wakeup_allowed ~base_path:bp "bw2" ~post_id:"p2" ~debounce_sec:60.0 in
+  let first =
+    R.board_wakeup_allowed ~base_path:bp "bw2" ~post_id:"p1" ~debounce_sec:60.0
+  in
+  let second =
+    R.board_wakeup_allowed ~base_path:bp "bw2" ~post_id:"p2" ~debounce_sec:60.0
+  in
   check bool "p1 allowed" true first;
   check bool "p2 allowed" true second
+;;
 
 let test_cleanup_tracking () =
   R.clear ();
@@ -725,8 +825,11 @@ let test_cleanup_tracking () =
   ignore (R.board_wakeup_allowed ~base_path:bp "ct1" ~post_id:"x" ~debounce_sec:60.0);
   R.cleanup_tracking ~base_path:bp "ct1";
   check int "agent count reset" 0 (R.get_last_agent_count ~base_path:bp "ct1");
-  let allowed = R.board_wakeup_allowed ~base_path:bp "ct1" ~post_id:"x" ~debounce_sec:60.0 in
+  let allowed =
+    R.board_wakeup_allowed ~base_path:bp "ct1" ~post_id:"x" ~debounce_sec:60.0
+  in
   check bool "wakeup allowed after cleanup" true allowed
+;;
 
 let test_find_by_agent_name () =
   R.clear ();
@@ -735,8 +838,12 @@ let test_find_by_agent_name () =
   (match R.find_by_agent_name "agent-fn2" with
    | Some e -> check string "found by agent_name" "fn2" e.name
    | None -> fail "expected fn2 via agent_name");
-  check bool "not found returns None" true
+  check
+    bool
+    "not found returns None"
+    true
     (Option.is_none (R.find_by_agent_name "agent-nonexistent"))
+;;
 
 (* ── resolve_config tests ────────────────────────────────── *)
 
@@ -745,20 +852,21 @@ module Coord_setup = Coord_utils_backend_setup
 (** Minimal in-memory config for testing resolve_config.
     Only base_path matters; backend is a throwaway Memory instance. *)
 let make_test_config base_path : Coord_setup.config =
-  let backend_config : Backend_types.config = {
-    backend_type = Backend_types.Memory;
-    base_path;
-    node_id = "test";
-    cluster_name = "test";
-    pubsub_max_messages = 100;
-  } in
-  {
-    base_path;
-    workspace_path = base_path;
-    lock_expiry_minutes = 2;
-    backend_config;
-    backend = Coord_setup.Memory (Backend.Memory.create ());
+  let backend_config : Backend_types.config =
+    { backend_type = Backend_types.Memory
+    ; base_path
+    ; node_id = "test"
+    ; cluster_name = "test"
+    ; pubsub_max_messages = 100
+    }
+  in
+  { base_path
+  ; workspace_path = base_path
+  ; lock_expiry_minutes = 2
+  ; backend_config
+  ; backend = Coord_setup.Memory (Backend.Memory.create ())
   }
+;;
 
 let test_resolve_config_scoped_hit () =
   R.clear ();
@@ -766,6 +874,7 @@ let test_resolve_config_scoped_hit () =
   let config = make_test_config bp in
   let resolved = R.resolve_config config "rc1" in
   check string "scoped hit keeps base_path" bp resolved.base_path
+;;
 
 let test_resolve_config_cross_base_path () =
   R.clear ();
@@ -774,18 +883,21 @@ let test_resolve_config_cross_base_path () =
   let config = make_test_config bp in
   let resolved = R.resolve_config config "rc2" in
   check string "cross-base_path keeps original scope" bp resolved.base_path
+;;
 
 let test_resolve_config_not_found () =
   R.clear ();
   let config = make_test_config bp in
   let resolved = R.resolve_config config "nonexistent" in
   check string "unknown keeper keeps original" bp resolved.base_path
+;;
 
 let test_resolve_config_empty_name () =
   R.clear ();
   let config = make_test_config bp in
   let resolved = R.resolve_config config "" in
   check string "empty name keeps original" bp resolved.base_path
+;;
 
 (* ── Directive processing tests ─────────────────────────── *)
 
@@ -798,6 +910,7 @@ let test_directive_pause () =
   match R.get ~base_path:bp "dp1" with
   | Some e -> check bool "paused after directive" true e.meta.paused
   | None -> fail "expected dp1"
+;;
 
 let test_directive_resume () =
   R.clear ();
@@ -807,6 +920,7 @@ let test_directive_resume () =
   match R.get ~base_path:bp "dr1" with
   | Some e -> check bool "resumed after directive" false e.meta.paused
   | None -> fail "expected dr1"
+;;
 
 let test_directive_keeper_name_alias () =
   R.clear ();
@@ -819,6 +933,7 @@ let test_directive_keeper_name_alias () =
   match R.get ~base_path:bp "dra1" with
   | Some e -> check bool "resumed via keeper name alias" false e.meta.paused
   | None -> fail "expected dra1"
+;;
 
 let test_directive_claim () =
   R.clear ();
@@ -827,9 +942,11 @@ let test_directive_claim () =
   match R.get ~base_path:bp "dc1" with
   | Some e ->
     (match e.meta.current_task_id with
-     | Some tid -> check string "task assigned" "T-42" (Masc_mcp.Keeper_id.Task_id.to_string tid)
+     | Some tid ->
+       check string "task assigned" "T-42" (Masc_mcp.Keeper_id.Task_id.to_string tid)
      | None -> fail "expected current_task_id set")
   | None -> fail "expected dc1"
+;;
 
 let test_directive_pause_persists_meta () =
   R.clear ();
@@ -837,18 +954,18 @@ let test_directive_pause_persists_meta () =
   Fun.protect
     ~finally:(fun () -> rm_rf base_dir)
     (fun () ->
-      let config = make_test_config base_dir in
-      let meta = make_meta "dpersist" in
-      (match Keeper_types.write_meta ~force:true config meta with
-       | Ok () -> ()
-       | Error err -> fail ("write_meta failed: " ^ err));
-      ignore (R.register ~base_path:base_dir "dpersist" meta);
-      KK.process_directive ~agent_name:"agent-dpersist" "pause";
-      match Keeper_types.read_meta config "dpersist" with
-      | Ok (Some persisted) ->
-          check bool "paused persisted" true persisted.paused
-      | Ok None -> fail "expected persisted meta"
-      | Error err -> fail ("read_meta failed: " ^ err))
+       let config = make_test_config base_dir in
+       let meta = make_meta "dpersist" in
+       (match Keeper_types.write_meta ~force:true config meta with
+        | Ok () -> ()
+        | Error err -> fail ("write_meta failed: " ^ err));
+       ignore (R.register ~base_path:base_dir "dpersist" meta);
+       KK.process_directive ~agent_name:"agent-dpersist" "pause";
+       match Keeper_types.read_meta config "dpersist" with
+       | Ok (Some persisted) -> check bool "paused persisted" true persisted.paused
+       | Ok None -> fail "expected persisted meta"
+       | Error err -> fail ("read_meta failed: " ^ err))
+;;
 
 let test_directive_claim_persists_meta () =
   R.clear ();
@@ -856,77 +973,91 @@ let test_directive_claim_persists_meta () =
   Fun.protect
     ~finally:(fun () -> rm_rf base_dir)
     (fun () ->
-      let config = make_test_config base_dir in
-      let meta = make_meta "dclaimpersist" in
-      (match Keeper_types.write_meta ~force:true config meta with
-       | Ok () -> ()
-       | Error err -> fail ("write_meta failed: " ^ err));
-      ignore (R.register ~base_path:base_dir "dclaimpersist" meta);
-      KK.process_directive ~agent_name:"agent-dclaimpersist" "claim:T-77";
-      match Keeper_types.read_meta config "dclaimpersist" with
-      | Ok (Some persisted) ->
-          (match persisted.current_task_id with
-           | Some task_id ->
-               check string "claimed task persisted" "T-77"
-                 (Masc_mcp.Keeper_id.Task_id.to_string task_id)
-           | None -> fail "expected persisted current_task_id")
-      | Ok None -> fail "expected persisted meta"
-      | Error err -> fail ("read_meta failed: " ^ err))
+       let config = make_test_config base_dir in
+       let meta = make_meta "dclaimpersist" in
+       (match Keeper_types.write_meta ~force:true config meta with
+        | Ok () -> ()
+        | Error err -> fail ("write_meta failed: " ^ err));
+       ignore (R.register ~base_path:base_dir "dclaimpersist" meta);
+       KK.process_directive ~agent_name:"agent-dclaimpersist" "claim:T-77";
+       match Keeper_types.read_meta config "dclaimpersist" with
+       | Ok (Some persisted) ->
+         (match persisted.current_task_id with
+          | Some task_id ->
+            check
+              string
+              "claimed task persisted"
+              "T-77"
+              (Masc_mcp.Keeper_id.Task_id.to_string task_id)
+          | None -> fail "expected persisted current_task_id")
+       | Ok None -> fail "expected persisted meta"
+       | Error err -> fail ("read_meta failed: " ^ err))
+;;
 
 let test_directive_unknown_no_crash () =
   R.clear ();
   let _entry = R.register ~base_path:bp "du1" (make_meta "du1") in
   KK.process_directive ~agent_name:"agent-du1" "unknown-directive";
-  check bool "still running after unknown directive" true
+  check
+    bool
+    "still running after unknown directive"
+    true
     (R.is_running ~base_path:bp "du1")
+;;
 
 let test_directive_nonexistent_agent () =
   R.clear ();
   KK.process_directive ~agent_name:"ghost-agent" "pause";
-  check bool "directive on ghost agent leaves registry empty" true
+  check
+    bool
+    "directive on ghost agent leaves registry empty"
+    true
     (Option.is_none (R.get ~base_path:bp "ghost-agent"))
+;;
 
 let test_stop_keepalive_scoped_to_base_path () =
   R.clear ();
   let bp2 = "/tmp/stop-other" in
   let entry_a = R.register ~base_path:bp "shared-stop" (make_meta "shared-stop") in
   let entry_b = R.register ~base_path:bp2 "shared-stop" (make_meta "shared-stop") in
-  check bool "base path A stop initially false" false
-    (Atomic.get entry_a.fiber_stop);
-  check bool "base path B stop initially false" false
-    (Atomic.get entry_b.fiber_stop);
+  check bool "base path A stop initially false" false (Atomic.get entry_a.fiber_stop);
+  check bool "base path B stop initially false" false (Atomic.get entry_b.fiber_stop);
   KK.stop_keepalive ~base_path:bp "shared-stop";
   check bool "base path A stop set" true (Atomic.get entry_a.fiber_stop);
-  check bool "base path B stop stays unset" false
-    (Atomic.get entry_b.fiber_stop)
+  check bool "base path B stop stays unset" false (Atomic.get entry_b.fiber_stop)
+;;
 
 let test_wakeup_keeper_scoped_to_base_path () =
   R.clear ();
   let bp2 = "/tmp/wakeup-other" in
   let entry_a = R.register ~base_path:bp "shared" (make_meta "shared") in
   let entry_b = R.register ~base_path:bp2 "shared" (make_meta "shared") in
-  check bool "base path A wakeup initially false" false
-    (Atomic.get entry_a.fiber_wakeup);
-  check bool "base path B wakeup initially false" false
-    (Atomic.get entry_b.fiber_wakeup);
+  check bool "base path A wakeup initially false" false (Atomic.get entry_a.fiber_wakeup);
+  check bool "base path B wakeup initially false" false (Atomic.get entry_b.fiber_wakeup);
   KK.wakeup_keeper ~base_path:bp "shared";
   check bool "base path A wakeup set" true (Atomic.get entry_a.fiber_wakeup);
-  check bool "base path B wakeup stays unset" false
-    (Atomic.get entry_b.fiber_wakeup)
+  check bool "base path B wakeup stays unset" false (Atomic.get entry_b.fiber_wakeup)
+;;
 
 let test_wakeup_all_scoped_to_base_path () =
   R.clear ();
   let bp2 = "/tmp/wakeup-all-other" in
   let entry_a = R.register ~base_path:bp "all-a" (make_meta "all-a") in
   let entry_b = R.register ~base_path:bp2 "all-b" (make_meta "all-b") in
-  check bool "base path A all wakeup initially false" false
+  check
+    bool
+    "base path A all wakeup initially false"
+    false
     (Atomic.get entry_a.fiber_wakeup);
-  check bool "base path B all wakeup initially false" false
+  check
+    bool
+    "base path B all wakeup initially false"
+    false
     (Atomic.get entry_b.fiber_wakeup);
   KK.wakeup_all_keepers ~base_path:bp ();
   check bool "base path A all wakeup set" true (Atomic.get entry_a.fiber_wakeup);
-  check bool "base path B all wakeup stays unset" false
-    (Atomic.get entry_b.fiber_wakeup)
+  check bool "base path B all wakeup stays unset" false (Atomic.get entry_b.fiber_wakeup)
+;;
 
 let test_board_signal_wakeup_ignores_unmatched_posts_without_opt_in () =
   R.clear ();
@@ -937,40 +1068,42 @@ let test_board_signal_wakeup_ignores_unmatched_posts_without_opt_in () =
       Masc_mcp.Board_dispatch.reset_for_test ();
       rm_rf base_dir)
     (fun () ->
-      with_env "MASC_BASE_PATH" base_dir (fun () ->
-        Masc_mcp.Board.reset_global_for_test ();
-        Masc_mcp.Board_dispatch.reset_for_test ();
-        Masc_mcp.Board_dispatch.init_jsonl ();
-        let config = make_test_config base_dir in
-        let alpha = make_meta "alpha" in
-        let beta = make_meta "beta" in
-        ignore (Keeper_types.write_meta ~force:true config alpha);
-        ignore (Keeper_types.write_meta ~force:true config beta);
-        let entry_a = R.register ~base_path:base_dir "alpha" alpha in
-        let entry_b = R.register ~base_path:base_dir "beta" beta in
-        let post =
-          match
-            Masc_mcp.Board_dispatch.create_post ~author:"alice"
-              ~title:"General update"
-              ~content:"No direct mention here"
-              ~post_kind:Masc_mcp.Board.Human_post ()
-          with
-          | Ok post -> post
-          | Error err -> fail (Masc_mcp.Board.show_board_error err)
-        in
-        let signal : Masc_mcp.Board_dispatch.keeper_board_signal =
-          {
-            kind = Masc_mcp.Board_dispatch.Board_post_created;
-            post_id = Masc_mcp.Board.Post_id.to_string post.id;
-            author = "alice";
-            title = post.title;
-            content = post.content;
-            hearth = post.hearth;
-          }
-        in
-        KK.wakeup_relevant_keeper_for_board_signal ~config signal;
-        check bool "alpha not woken" false (Atomic.get entry_a.fiber_wakeup);
-        check bool "beta not woken" false (Atomic.get entry_b.fiber_wakeup)))
+       with_env "MASC_BASE_PATH" base_dir (fun () ->
+         Masc_mcp.Board.reset_global_for_test ();
+         Masc_mcp.Board_dispatch.reset_for_test ();
+         Masc_mcp.Board_dispatch.init_jsonl ();
+         let config = make_test_config base_dir in
+         let alpha = make_meta "alpha" in
+         let beta = make_meta "beta" in
+         ignore (Keeper_types.write_meta ~force:true config alpha);
+         ignore (Keeper_types.write_meta ~force:true config beta);
+         let entry_a = R.register ~base_path:base_dir "alpha" alpha in
+         let entry_b = R.register ~base_path:base_dir "beta" beta in
+         let post =
+           match
+             Masc_mcp.Board_dispatch.create_post
+               ~author:"alice"
+               ~title:"General update"
+               ~content:"No direct mention here"
+               ~post_kind:Masc_mcp.Board.Human_post
+               ()
+           with
+           | Ok post -> post
+           | Error err -> fail (Masc_mcp.Board.show_board_error err)
+         in
+         let signal : Masc_mcp.Board_dispatch.keeper_board_signal =
+           { kind = Masc_mcp.Board_dispatch.Board_post_created
+           ; post_id = Masc_mcp.Board.Post_id.to_string post.id
+           ; author = "alice"
+           ; title = post.title
+           ; content = post.content
+           ; hearth = post.hearth
+           }
+         in
+         KK.wakeup_relevant_keeper_for_board_signal ~config signal;
+         check bool "alpha not woken" false (Atomic.get entry_a.fiber_wakeup);
+         check bool "beta not woken" false (Atomic.get entry_b.fiber_wakeup)))
+;;
 
 let test_board_signal_wakeup_only_wakes_opted_in_scope_keeper () =
   R.clear ();
@@ -981,42 +1114,47 @@ let test_board_signal_wakeup_only_wakes_opted_in_scope_keeper () =
       Masc_mcp.Board_dispatch.reset_for_test ();
       rm_rf base_dir)
     (fun () ->
-      with_env "MASC_BASE_PATH" base_dir (fun () ->
-        Masc_mcp.Board.reset_global_for_test ();
-        Masc_mcp.Board_dispatch.reset_for_test ();
-        Masc_mcp.Board_dispatch.init_jsonl ();
-        let config = make_test_config base_dir in
-        let opted_in_base = make_meta "opted-in" in
-        let opted_in = { opted_in_base with room_signal_prompt_enabled = true } in
-        let defaulted = make_meta "defaulted" in
-        ignore (Keeper_types.write_meta ~force:true config opted_in);
-        ignore (Keeper_types.write_meta ~force:true config defaulted);
-        let entry_a = R.register ~base_path:base_dir "opted-in" opted_in in
-        let entry_b = R.register ~base_path:base_dir "defaulted" defaulted in
-        let post =
-          match
-            Masc_mcp.Board_dispatch.create_post ~author:"alice"
-              ~title:"General update"
-              ~content:"No direct mention here"
-              ~post_kind:Masc_mcp.Board.Human_post ()
-          with
-          | Ok post -> post
-          | Error err -> fail (Masc_mcp.Board.show_board_error err)
-        in
-        let signal : Masc_mcp.Board_dispatch.keeper_board_signal =
-          {
-            kind = Masc_mcp.Board_dispatch.Board_post_created;
-            post_id = Masc_mcp.Board.Post_id.to_string post.id;
-            author = "alice";
-            title = post.title;
-            content = post.content;
-            hearth = post.hearth;
-          }
-        in
-        KK.wakeup_relevant_keeper_for_board_signal ~config signal;
-        check bool "opted-in keeper woken" true (Atomic.get entry_a.fiber_wakeup);
-        check bool "defaulted keeper stays asleep" false
-          (Atomic.get entry_b.fiber_wakeup)))
+       with_env "MASC_BASE_PATH" base_dir (fun () ->
+         Masc_mcp.Board.reset_global_for_test ();
+         Masc_mcp.Board_dispatch.reset_for_test ();
+         Masc_mcp.Board_dispatch.init_jsonl ();
+         let config = make_test_config base_dir in
+         let opted_in_base = make_meta "opted-in" in
+         let opted_in = { opted_in_base with room_signal_prompt_enabled = true } in
+         let defaulted = make_meta "defaulted" in
+         ignore (Keeper_types.write_meta ~force:true config opted_in);
+         ignore (Keeper_types.write_meta ~force:true config defaulted);
+         let entry_a = R.register ~base_path:base_dir "opted-in" opted_in in
+         let entry_b = R.register ~base_path:base_dir "defaulted" defaulted in
+         let post =
+           match
+             Masc_mcp.Board_dispatch.create_post
+               ~author:"alice"
+               ~title:"General update"
+               ~content:"No direct mention here"
+               ~post_kind:Masc_mcp.Board.Human_post
+               ()
+           with
+           | Ok post -> post
+           | Error err -> fail (Masc_mcp.Board.show_board_error err)
+         in
+         let signal : Masc_mcp.Board_dispatch.keeper_board_signal =
+           { kind = Masc_mcp.Board_dispatch.Board_post_created
+           ; post_id = Masc_mcp.Board.Post_id.to_string post.id
+           ; author = "alice"
+           ; title = post.title
+           ; content = post.content
+           ; hearth = post.hearth
+           }
+         in
+         KK.wakeup_relevant_keeper_for_board_signal ~config signal;
+         check bool "opted-in keeper woken" true (Atomic.get entry_a.fiber_wakeup);
+         check
+           bool
+           "defaulted keeper stays asleep"
+           false
+           (Atomic.get entry_b.fiber_wakeup)))
+;;
 
 let test_board_signal_wakeup_keeps_thread_reply_after_self_comment () =
   R.clear ();
@@ -1027,108 +1165,104 @@ let test_board_signal_wakeup_keeps_thread_reply_after_self_comment () =
       Masc_mcp.Board_dispatch.reset_for_test ();
       rm_rf base_dir)
     (fun () ->
-      with_env "MASC_BASE_PATH" base_dir (fun () ->
-        Masc_mcp.Board.reset_global_for_test ();
-        Masc_mcp.Board_dispatch.reset_for_test ();
-        Masc_mcp.Board_dispatch.init_jsonl ();
-        let config = make_test_config base_dir in
-        let participant = make_meta "participant" in
-        let bystander = make_meta "bystander" in
-        ignore (Keeper_types.write_meta ~force:true config participant);
-        ignore (Keeper_types.write_meta ~force:true config bystander);
-        let entry_a = R.register ~base_path:base_dir "participant" participant in
-        let entry_b = R.register ~base_path:base_dir "bystander" bystander in
-        let post =
-          match
-            Masc_mcp.Board_dispatch.create_post ~author:"alice"
-              ~title:"General update"
-              ~content:"No direct mention here"
-              ~post_kind:Masc_mcp.Board.Human_post ()
+       with_env "MASC_BASE_PATH" base_dir (fun () ->
+         Masc_mcp.Board.reset_global_for_test ();
+         Masc_mcp.Board_dispatch.reset_for_test ();
+         Masc_mcp.Board_dispatch.init_jsonl ();
+         let config = make_test_config base_dir in
+         let participant = make_meta "participant" in
+         let bystander = make_meta "bystander" in
+         ignore (Keeper_types.write_meta ~force:true config participant);
+         ignore (Keeper_types.write_meta ~force:true config bystander);
+         let entry_a = R.register ~base_path:base_dir "participant" participant in
+         let entry_b = R.register ~base_path:base_dir "bystander" bystander in
+         let post =
+           match
+             Masc_mcp.Board_dispatch.create_post
+               ~author:"alice"
+               ~title:"General update"
+               ~content:"No direct mention here"
+               ~post_kind:Masc_mcp.Board.Human_post
+               ()
+           with
+           | Ok post -> post
+           | Error err -> fail (Masc_mcp.Board.show_board_error err)
+         in
+         let post_id = Masc_mcp.Board.Post_id.to_string post.id in
+         (match
+            Masc_mcp.Board_dispatch.add_comment
+              ~post_id
+              ~author:"participant"
+              ~content:"I am following this thread."
+              ()
           with
-          | Ok post -> post
-          | Error err -> fail (Masc_mcp.Board.show_board_error err)
-        in
-        let post_id = Masc_mcp.Board.Post_id.to_string post.id in
-        (match
-           Masc_mcp.Board_dispatch.add_comment ~post_id ~author:"participant"
-             ~content:"I am following this thread."
-             ()
-         with
-        | Ok _ -> ()
-        | Error err -> fail (Masc_mcp.Board.show_board_error err));
-        Unix.sleepf 0.02;
-        (match
-           Masc_mcp.Board_dispatch.add_comment ~post_id ~author:"bob"
-             ~content:"There is a new question for you."
-             ()
-         with
-        | Ok _ -> ()
-        | Error err -> fail (Masc_mcp.Board.show_board_error err));
-        let signal : Masc_mcp.Board_dispatch.keeper_board_signal =
-          {
-            kind = Masc_mcp.Board_dispatch.Board_comment_added;
-            post_id;
-            author = "bob";
-            title = post.title;
-            content = "There is a new question for you.";
-            hearth = post.hearth;
-          }
-        in
-        KK.wakeup_relevant_keeper_for_board_signal ~config signal;
-        check bool "participant keeper woken" true
-          (Atomic.get entry_a.fiber_wakeup);
-        check bool "bystander keeper stays asleep" false
-          (Atomic.get entry_b.fiber_wakeup)))
+          | Ok _ -> ()
+          | Error err -> fail (Masc_mcp.Board.show_board_error err));
+         Unix.sleepf 0.02;
+         (match
+            Masc_mcp.Board_dispatch.add_comment
+              ~post_id
+              ~author:"bob"
+              ~content:"There is a new question for you."
+              ()
+          with
+          | Ok _ -> ()
+          | Error err -> fail (Masc_mcp.Board.show_board_error err));
+         let signal : Masc_mcp.Board_dispatch.keeper_board_signal =
+           { kind = Masc_mcp.Board_dispatch.Board_comment_added
+           ; post_id
+           ; author = "bob"
+           ; title = post.title
+           ; content = "There is a new question for you."
+           ; hearth = post.hearth
+           }
+         in
+         KK.wakeup_relevant_keeper_for_board_signal ~config signal;
+         check bool "participant keeper woken" true (Atomic.get entry_a.fiber_wakeup);
+         check
+           bool
+           "bystander keeper stays asleep"
+           false
+           (Atomic.get entry_b.fiber_wakeup)))
+;;
 
 let test_effective_keepalive_meta_prefers_registry_when_disk_unchanged () =
   R.clear ();
   let stale = make_meta "loop-meta" in
   let fresh =
-    {
-      stale with
-      continuity_summary = "fresh continuity";
-      runtime =
-        {
-          stale.runtime with
-          usage = { stale.runtime.usage with total_turns = 9 };
-        };
+    { stale with
+      continuity_summary = "fresh continuity"
+    ; runtime =
+        { stale.runtime with usage = { stale.runtime.usage with total_turns = 9 } }
     }
   in
   ignore (R.register ~base_path:bp "loop-meta" fresh);
   let chosen =
-    KK.effective_keepalive_meta
-      ~base_path:bp
-      ~fallback:stale
-      ~disk_meta_opt:None
+    KK.effective_keepalive_meta ~base_path:bp ~fallback:stale ~disk_meta_opt:None
   in
-  check string "continuity comes from registry" "fresh continuity"
+  check
+    string
+    "continuity comes from registry"
+    "fresh continuity"
     chosen.continuity_summary;
-  check int "turn count comes from registry" 9
-    chosen.runtime.usage.total_turns
+  check int "turn count comes from registry" 9 chosen.runtime.usage.total_turns
+;;
 
 let test_effective_keepalive_meta_prefers_disk_when_present () =
   R.clear ();
   let stale = make_meta "loop-meta-disk" in
   let registry_meta =
-    {
-      stale with
-      continuity_summary = "registry continuity";
-      runtime =
-        {
-          stale.runtime with
-          usage = { stale.runtime.usage with total_turns = 3 };
-        };
+    { stale with
+      continuity_summary = "registry continuity"
+    ; runtime =
+        { stale.runtime with usage = { stale.runtime.usage with total_turns = 3 } }
     }
   in
   let disk_meta =
-    {
-      stale with
-      continuity_summary = "disk continuity";
-      runtime =
-        {
-          stale.runtime with
-          usage = { stale.runtime.usage with total_turns = 11 };
-        };
+    { stale with
+      continuity_summary = "disk continuity"
+    ; runtime =
+        { stale.runtime with usage = { stale.runtime.usage with total_turns = 11 } }
     }
   in
   ignore (R.register ~base_path:bp "loop-meta-disk" registry_meta);
@@ -1138,110 +1272,118 @@ let test_effective_keepalive_meta_prefers_disk_when_present () =
       ~fallback:stale
       ~disk_meta_opt:(Some disk_meta)
   in
-  check string "continuity comes from disk" "disk continuity"
-    chosen.continuity_summary;
-  check int "turn count comes from disk" 11
-    chosen.runtime.usage.total_turns
+  check string "continuity comes from disk" "disk continuity" chosen.continuity_summary;
+  check int "turn count comes from disk" 11 chosen.runtime.usage.total_turns
+;;
 
 let () =
-  run "Keeper_registry"
-    [
-      ( "basic",
-        [
-          eio_test "bonsai summary uses scoped registry"
-            test_bonsai_keepers_summary_uses_scoped_registry;
-          eio_test "register and get" test_register_and_get;
-          eio_test "register offline and start" test_register_offline_and_start;
-          eio_test "register restarting and start" test_register_restarting_and_start;
-          eio_test "prepare fiber launch resets stale latches"
-            test_prepare_fiber_launch_resets_stale_runtime_latches;
-          eio_test "dispatch event with audit preserves snapshot"
-            test_dispatch_event_with_audit_preserves_snapshot;
-          eio_test "mark_turn_finished records completed turn outcome once"
-            test_mark_turn_finished_records_completed_turn_outcome_once;
-          eio_test "completed turns replay from default store"
-            test_completed_turns_replay_from_default_store;
-          eio_test "unregister" test_unregister;
-          eio_test "all" test_all;
-          eio_test "update meta" test_update_meta;
-          eio_test "set state" test_set_state;
-          eio_test "dispatch event emits phase SSE"
-            test_dispatch_event_emits_phase_sse;
-          eio_test "extended states" test_extended_states;
-          eio_test "stopped entry action is observability-only"
-            test_stopped_entry_action_is_observability_only;
-          eio_test "overflow entry action promotes to compacting"
-            test_overflow_entry_action_promotes_to_compacting;
-          eio_test "count running" test_count_running;
-          eio_test "count running atomic transitions" test_count_running_atomic_transitions;
-          eio_test "record restart" test_record_restart;
-          eio_test "is_registered" test_is_registered;
-          eio_test "record error" test_record_error;
-          eio_test "clear error" test_clear_error;
-          eio_test "get returns None for missing" test_get_returns_none_for_missing;
-          eio_test "noop on missing keys" test_noop_on_missing;
-          eio_test "register replaces existing" test_register_replaces;
-        ] );
-      ( "extended",
-        [
-          eio_test "grpc_close" test_grpc_close;
-          eio_test "crash log" test_crash_log;
-          eio_test "started_at" test_started_at;
-          eio_test "wakeup" test_wakeup;
-          eio_test "wakeup_all" test_wakeup_all;
-          eio_test "fiber_health alive" test_fiber_health_alive;
-          eio_test "fiber_health unknown" test_fiber_health_unknown;
-          eio_test "fiber_health stopped" test_fiber_health_stopped;
-          eio_test "fiber_health crashed" test_fiber_health_crashed;
-          eio_test "fiber_health explicit crashed state" test_fiber_health_crashed_state_without_done_signal;
-          eio_test "fiber_health dead state" test_fiber_health_dead_state;
-          eio_test "shared refs" test_shared_refs;
-          eio_test "spawn slots" test_spawn_slots;
-        ] );
-      ( "board_tracking",
-        [
-          eio_test "last_agent_count default 0" test_last_agent_count_default;
-          eio_test "last_agent_count set/get" test_last_agent_count_set_get;
-          eio_test "board wakeup debounce" test_board_wakeup_debounce;
-          eio_test "board wakeup different post" test_board_wakeup_different_post;
-          eio_test "cleanup_tracking resets" test_cleanup_tracking;
-        ] );
-      ( "agent_name_lookup",
-        [
-          eio_test "find_by_agent_name" test_find_by_agent_name;
-        ] );
-      ( "resolve_config",
-        [
-          eio_test "scoped hit" test_resolve_config_scoped_hit;
-          eio_test "cross base_path" test_resolve_config_cross_base_path;
-          eio_test "not found" test_resolve_config_not_found;
-          eio_test "empty name" test_resolve_config_empty_name;
-        ] );
-      ( "directives",
-        [
-          eio_test "pause directive" test_directive_pause;
-          eio_test "resume directive" test_directive_resume;
-          eio_test "keeper-name directive alias" test_directive_keeper_name_alias;
-          eio_test "claim directive" test_directive_claim;
-          eio_test "pause directive persists meta" test_directive_pause_persists_meta;
-          eio_test "claim directive persists meta" test_directive_claim_persists_meta;
-          eio_test "unknown directive no crash" test_directive_unknown_no_crash;
-          eio_test "nonexistent agent no crash" test_directive_nonexistent_agent;
-          eio_test "stop keepalive scoped to base_path"
-            test_stop_keepalive_scoped_to_base_path;
-          eio_test "wakeup keeper scoped to base_path"
-            test_wakeup_keeper_scoped_to_base_path;
-          eio_test "wakeup all scoped to base_path"
-            test_wakeup_all_scoped_to_base_path;
-          eio_test "board wakeup ignores unmatched posts without opt-in"
-            test_board_signal_wakeup_ignores_unmatched_posts_without_opt_in;
-          eio_test "board wakeup only wakes opted-in scope keeper"
-            test_board_signal_wakeup_only_wakes_opted_in_scope_keeper;
-          eio_test "board wakeup keeps thread reply after self comment"
-            test_board_signal_wakeup_keeps_thread_reply_after_self_comment;
-          eio_test "effective keepalive meta prefers registry when disk unchanged"
-            test_effective_keepalive_meta_prefers_registry_when_disk_unchanged;
-          eio_test "effective keepalive meta prefers disk when present"
-            test_effective_keepalive_meta_prefers_disk_when_present;
-        ] );
+  run
+    "Keeper_registry"
+    [ ( "basic"
+      , [ eio_test
+            "bonsai summary uses scoped registry"
+            test_bonsai_keepers_summary_uses_scoped_registry
+        ; eio_test "register and get" test_register_and_get
+        ; eio_test "register offline and start" test_register_offline_and_start
+        ; eio_test "register restarting and start" test_register_restarting_and_start
+        ; eio_test
+            "prepare fiber launch resets stale latches"
+            test_prepare_fiber_launch_resets_stale_runtime_latches
+        ; eio_test
+            "dispatch event with audit preserves snapshot"
+            test_dispatch_event_with_audit_preserves_snapshot
+        ; eio_test
+            "mark_turn_finished records completed turn outcome once"
+            test_mark_turn_finished_records_completed_turn_outcome_once
+        ; eio_test
+            "completed turns replay from default store"
+            test_completed_turns_replay_from_default_store
+        ; eio_test "unregister" test_unregister
+        ; eio_test "all" test_all
+        ; eio_test "update meta" test_update_meta
+        ; eio_test "set state" test_set_state
+        ; eio_test "dispatch event emits phase SSE" test_dispatch_event_emits_phase_sse
+        ; eio_test "extended states" test_extended_states
+        ; eio_test
+            "stopped entry action is observability-only"
+            test_stopped_entry_action_is_observability_only
+        ; eio_test
+            "overflow entry action promotes to compacting"
+            test_overflow_entry_action_promotes_to_compacting
+        ; eio_test "count running" test_count_running
+        ; eio_test
+            "count running atomic transitions"
+            test_count_running_atomic_transitions
+        ; eio_test "record restart" test_record_restart
+        ; eio_test "is_registered" test_is_registered
+        ; eio_test "record error" test_record_error
+        ; eio_test "clear error" test_clear_error
+        ; eio_test "get returns None for missing" test_get_returns_none_for_missing
+        ; eio_test "noop on missing keys" test_noop_on_missing
+        ; eio_test "register replaces existing" test_register_replaces
+        ] )
+    ; ( "extended"
+      , [ eio_test "grpc_close" test_grpc_close
+        ; eio_test "crash log" test_crash_log
+        ; eio_test "started_at" test_started_at
+        ; eio_test "wakeup" test_wakeup
+        ; eio_test "wakeup_all" test_wakeup_all
+        ; eio_test "fiber_health alive" test_fiber_health_alive
+        ; eio_test "fiber_health unknown" test_fiber_health_unknown
+        ; eio_test "fiber_health stopped" test_fiber_health_stopped
+        ; eio_test "fiber_health crashed" test_fiber_health_crashed
+        ; eio_test
+            "fiber_health explicit crashed state"
+            test_fiber_health_crashed_state_without_done_signal
+        ; eio_test "fiber_health dead state" test_fiber_health_dead_state
+        ; eio_test "shared refs" test_shared_refs
+        ; eio_test "spawn slots" test_spawn_slots
+        ] )
+    ; ( "board_tracking"
+      , [ eio_test "last_agent_count default 0" test_last_agent_count_default
+        ; eio_test "last_agent_count set/get" test_last_agent_count_set_get
+        ; eio_test "board wakeup debounce" test_board_wakeup_debounce
+        ; eio_test "board wakeup different post" test_board_wakeup_different_post
+        ; eio_test "cleanup_tracking resets" test_cleanup_tracking
+        ] )
+    ; "agent_name_lookup", [ eio_test "find_by_agent_name" test_find_by_agent_name ]
+    ; ( "resolve_config"
+      , [ eio_test "scoped hit" test_resolve_config_scoped_hit
+        ; eio_test "cross base_path" test_resolve_config_cross_base_path
+        ; eio_test "not found" test_resolve_config_not_found
+        ; eio_test "empty name" test_resolve_config_empty_name
+        ] )
+    ; ( "directives"
+      , [ eio_test "pause directive" test_directive_pause
+        ; eio_test "resume directive" test_directive_resume
+        ; eio_test "keeper-name directive alias" test_directive_keeper_name_alias
+        ; eio_test "claim directive" test_directive_claim
+        ; eio_test "pause directive persists meta" test_directive_pause_persists_meta
+        ; eio_test "claim directive persists meta" test_directive_claim_persists_meta
+        ; eio_test "unknown directive no crash" test_directive_unknown_no_crash
+        ; eio_test "nonexistent agent no crash" test_directive_nonexistent_agent
+        ; eio_test
+            "stop keepalive scoped to base_path"
+            test_stop_keepalive_scoped_to_base_path
+        ; eio_test
+            "wakeup keeper scoped to base_path"
+            test_wakeup_keeper_scoped_to_base_path
+        ; eio_test "wakeup all scoped to base_path" test_wakeup_all_scoped_to_base_path
+        ; eio_test
+            "board wakeup ignores unmatched posts without opt-in"
+            test_board_signal_wakeup_ignores_unmatched_posts_without_opt_in
+        ; eio_test
+            "board wakeup only wakes opted-in scope keeper"
+            test_board_signal_wakeup_only_wakes_opted_in_scope_keeper
+        ; eio_test
+            "board wakeup keeps thread reply after self comment"
+            test_board_signal_wakeup_keeps_thread_reply_after_self_comment
+        ; eio_test
+            "effective keepalive meta prefers registry when disk unchanged"
+            test_effective_keepalive_meta_prefers_registry_when_disk_unchanged
+        ; eio_test
+            "effective keepalive meta prefers disk when present"
+            test_effective_keepalive_meta_prefers_disk_when_present
+        ] )
     ]
+;;

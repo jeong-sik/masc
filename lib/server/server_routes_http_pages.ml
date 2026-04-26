@@ -1,16 +1,13 @@
-
 open Server_auth
-
 module Http = Http_server_eio
 
-let graphql_headers origin =
-  [("content-type", "application/json")]
-  @ cors_headers origin
+let graphql_headers origin = [ "content-type", "application/json" ] @ cors_headers origin
 
 (** GraphQL Playground HTML (GET /graphql) *)
 let graphql_playground_html ~nonce =
-  String.concat "" [
-    {|
+  String.concat
+    ""
+    [ {|
 <!doctype html>
 <html lang="en">
   <head>
@@ -114,9 +111,9 @@ let graphql_playground_html ~nonce =
       <div class="text">Loading <strong>GraphQL Playground</strong></div>
     </div>
     <div id="root"></div>
-    <script nonce="|};
-    nonce;
-    {|">
+    <script nonce="|}
+    ; nonce
+    ; {|">
       window.addEventListener("load", function () {
         var loading = document.getElementById("loading-wrapper");
         if (loading) {
@@ -136,113 +133,107 @@ let graphql_playground_html ~nonce =
     <script src="/static/js/middleware.js"></script>
   </body>
 </html>
-|};
-  ]
+|}
+    ]
+;;
 
 let graphql_csp_header nonce =
   Printf.sprintf
     "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; \
-     connect-src 'self'; img-src 'self' data:; \
-     script-src 'self' 'nonce-%s' 'unsafe-eval'; \
-     style-src 'self' 'unsafe-inline'; \
-     font-src 'self' data:; \
-     worker-src 'self' blob:"
+     connect-src 'self'; img-src 'self' data:; script-src 'self' 'nonce-%s' \
+     'unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; worker-src \
+     'self' blob:"
     nonce
+;;
 
 let assets_root = Web_dashboard.assets_root
 
 (** Local GraphiQL assets *)
-let graphiql_asset_root () =
-  Filename.concat (assets_root ()) "graphiql"
+let graphiql_asset_root () = Filename.concat (assets_root ()) "graphiql"
 
-let graphiql_asset_path name =
-  Filename.concat (graphiql_asset_root ()) name
+let graphiql_asset_path name = Filename.concat (graphiql_asset_root ()) name
 
 let asset_content_type name =
-  if Filename.check_suffix name ".css" then
-    "text/css; charset=utf-8"
-  else if Filename.check_suffix name ".js" then
-    "application/javascript; charset=utf-8"
-  else if Filename.check_suffix name ".html" then
-    "text/html; charset=utf-8"
-  else if Filename.check_suffix name ".svg" then
-    "image/svg+xml"
-  else if Filename.check_suffix name ".png" then
-    "image/png"
-  else if Filename.check_suffix name ".jpg" || Filename.check_suffix name ".jpeg" then
-    "image/jpeg"
-  else if Filename.check_suffix name ".webp" then
-    "image/webp"
-  else if Filename.check_suffix name ".json" then
-    "application/json"
-  else if Filename.check_suffix name ".woff2" then
-    "font/woff2"
-  else if Filename.check_suffix name ".map" then
-    "application/json"
-  else
-    "application/octet-stream"
+  if Filename.check_suffix name ".css"
+  then "text/css; charset=utf-8"
+  else if Filename.check_suffix name ".js"
+  then "application/javascript; charset=utf-8"
+  else if Filename.check_suffix name ".html"
+  then "text/html; charset=utf-8"
+  else if Filename.check_suffix name ".svg"
+  then "image/svg+xml"
+  else if Filename.check_suffix name ".png"
+  then "image/png"
+  else if Filename.check_suffix name ".jpg" || Filename.check_suffix name ".jpeg"
+  then "image/jpeg"
+  else if Filename.check_suffix name ".webp"
+  then "image/webp"
+  else if Filename.check_suffix name ".json"
+  then "application/json"
+  else if Filename.check_suffix name ".woff2"
+  then "font/woff2"
+  else if Filename.check_suffix name ".map"
+  then "application/json"
+  else "application/octet-stream"
+;;
 
 let read_file path =
-  try Ok (In_channel.with_open_bin path In_channel.input_all)
-  with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Error (Printexc.to_string exn)
+  try Ok (In_channel.with_open_bin path In_channel.input_all) with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn -> Error (Printexc.to_string exn)
+;;
 
 let serve_graphiql_asset name _request reqd =
   let path = graphiql_asset_path name in
   match read_file path with
-  | Ok body ->
-      Http.Response.bytes ~content_type:(asset_content_type name) body reqd
-  | Error _ ->
-      Http.Response.not_found reqd
+  | Ok body -> Http.Response.bytes ~content_type:(asset_content_type name) body reqd
+  | Error _ -> Http.Response.not_found reqd
+;;
 
 (** Local GraphQL Playground assets *)
-let playground_asset_root () =
-  Filename.concat (assets_root ()) "playground"
+let playground_asset_root () = Filename.concat (assets_root ()) "playground"
 
-let playground_asset_path name =
-  Filename.concat (playground_asset_root ()) name
+let playground_asset_path name = Filename.concat (playground_asset_root ()) name
 
 let serve_playground_asset name _request reqd =
   let path = playground_asset_path name in
   match read_file path with
-  | Ok body ->
-      Http.Response.bytes ~content_type:(asset_content_type name) body reqd
-  | Error _ ->
-      Http.Response.not_found reqd
+  | Ok body -> Http.Response.bytes ~content_type:(asset_content_type name) body reqd
+  | Error _ -> Http.Response.not_found reqd
+;;
 
 (** Dashboard SPA assets (Preact + HTM, built by Vite) *)
-let dashboard_asset_root () =
-  Filename.concat (assets_root ()) "dashboard"
+let dashboard_asset_root () = Filename.concat (assets_root ()) "dashboard"
 
-let dashboard_index_path () =
-  Filename.concat (dashboard_asset_root ()) "index.html"
+let dashboard_index_path () = Filename.concat (dashboard_asset_root ()) "index.html"
 
 let dashboard_etag () =
   try
     let st = Unix.stat (dashboard_index_path ()) in
-    let hash =
-      Digest.string (string_of_float st.Unix.st_mtime) |> Digest.to_hex
-    in
+    let hash = Digest.string (string_of_float st.Unix.st_mtime) |> Digest.to_hex in
     String.sub hash 0 12
   with
   | Unix.Unix_error (err, _, _) ->
-      Log.Pages.warn "dashboard_etag stat failed: %s" (Unix.error_message err);
-      "none"
+    Log.Pages.warn "dashboard_etag stat failed: %s" (Unix.error_message err);
+    "none"
   | exn ->
-      Log.Pages.warn "dashboard_etag unexpected: %s" (Printexc.to_string exn);
-      "none"
+    Log.Pages.warn "dashboard_etag unexpected: %s" (Printexc.to_string exn);
+    "none"
+;;
 
 let dashboard_index_cache_control = "no-store, max-age=0, must-revalidate"
 
 let serve_dashboard_index request reqd =
   match read_file (dashboard_index_path ()) with
-  | Ok body ->
-      Http.Response.html_cached
-        ~etag:(dashboard_etag ())
-        ~request body reqd
+  | Ok body -> Http.Response.html_cached ~etag:(dashboard_etag ()) ~request body reqd
   | Error _ ->
-      Http.Response.html
-        "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Dashboard not found</title><body><p>Dashboard build not found. Run: <code>cd dashboard &amp;&amp; pnpm run build</code></p></body></html>"
-        reqd
+    Http.Response.html
+      "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><meta name=\"viewport\" \
+       content=\"width=device-width,initial-scale=1\"><title>Dashboard not \
+       found</title><body><p>Dashboard build not found. Run: <code>cd dashboard \
+       &amp;&amp; pnpm run build</code></p></body></html>"
+      reqd
+;;
 
 let is_compressible_asset name =
   Filename.check_suffix name ".js"
@@ -251,39 +242,37 @@ let is_compressible_asset name =
   || Filename.check_suffix name ".html"
   || Filename.check_suffix name ".json"
   || Filename.check_suffix name ".map"
+;;
 
 let serve_dashboard_static name request reqd =
   let path = Filename.concat (dashboard_asset_root ()) name in
   match read_file path with
   | Ok body ->
-      let content_type = asset_content_type name in
-      (* Vite hashed assets are immutable; index.html is not *)
-      let cache_control =
-        if Filename.check_suffix name ".html" then
-          dashboard_index_cache_control
-        else
-          "public, max-age=31536000, immutable"
-      in
-      let final_body, encoding_headers =
-        if is_compressible_asset name && Http.Compression.accepts_zstd request then
-          let (compressed, did_compress) = Http.Compression.compress_zstd ~level:3 body in
-          if did_compress then
-            (compressed, [("content-encoding", "zstd"); ("vary", "Accept-Encoding")])
-          else
-            (body, [])
-        else
-          (body, [])
-      in
-      let headers = ("cache-control", cache_control) :: encoding_headers in
-      Http.Response.bytes ~headers ~content_type final_body reqd
-  | Error _ ->
-      Http.Response.not_found reqd
+    let content_type = asset_content_type name in
+    (* Vite hashed assets are immutable; index.html is not *)
+    let cache_control =
+      if Filename.check_suffix name ".html"
+      then dashboard_index_cache_control
+      else "public, max-age=31536000, immutable"
+    in
+    let final_body, encoding_headers =
+      if is_compressible_asset name && Http.Compression.accepts_zstd request
+      then (
+        let compressed, did_compress = Http.Compression.compress_zstd ~level:3 body in
+        if did_compress
+        then compressed, [ "content-encoding", "zstd"; "vary", "Accept-Encoding" ]
+        else body, [])
+      else body, []
+    in
+    let headers = ("cache-control", cache_control) :: encoding_headers in
+    Http.Response.bytes ~headers ~content_type final_body reqd
+  | Error _ -> Http.Response.not_found reqd
+;;
 
 (** Dashboard Bonsai island (Jane Street Bonsai + js_of_ocaml).
     Coexists with the Preact SPA under [/dashboard/b/*] until the migration is
     complete. See planning/claude-plans/masc-mcp-eventual-parrot.md. *)
-let bonsai_asset_root () =
-  Filename.concat (assets_root ()) "dashboard_bonsai"
+let bonsai_asset_root () = Filename.concat (assets_root ()) "dashboard_bonsai"
 
 (* Bundle version — mtime of main.bc.js, appended to the script src as a
    query string so the browser refetches whenever the bundle is rebuilt.
@@ -297,6 +286,7 @@ let bonsai_asset_mtime filename =
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | _ -> "0"
+;;
 
 let bonsai_bundle_version () = bonsai_asset_mtime "main.bc.js"
 let bonsai_tokens_version () = bonsai_asset_mtime "colors_and_type.css"
@@ -351,9 +341,9 @@ let bonsai_index_html () =
 |}
     (bonsai_tokens_version ())
     (bonsai_bundle_version ())
+;;
 
-let serve_bonsai_index _request reqd =
-  Http.Response.html (bonsai_index_html ()) reqd
+let serve_bonsai_index _request reqd = Http.Response.html (bonsai_index_html ()) reqd
 
 (** [GET /dashboard/b/api/keepers/summary] — projection consumed by
     Bonsai focus card / roster / swimlane / context pressure chart.
@@ -363,152 +353,159 @@ let serve_bonsai_index _request reqd =
 let iso8601_utc_now () =
   let open Unix in
   let t = gmtime (gettimeofday ()) in
-  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (t.tm_year + 1900) (t.tm_mon + 1) t.tm_mday
-    t.tm_hour t.tm_min t.tm_sec
+  Printf.sprintf
+    "%04d-%02d-%02dT%02d:%02d:%02dZ"
+    (t.tm_year + 1900)
+    (t.tm_mon + 1)
+    t.tm_mday
+    t.tm_hour
+    t.tm_min
+    t.tm_sec
+;;
 
 let bonsai_keeper_status_of_phase phase =
   let module K = Masc_dashboard_api_types.Keepers in
   let open Keeper_state_machine in
   match phase with
   | Running -> K.Live
-  | Failing | Overflowed | Compacting | HandingOff | Draining | Paused
-  | Restarting ->
-      Warn
+  | Failing | Overflowed | Compacting | HandingOff | Draining | Paused | Restarting ->
+    Warn
   | Offline | Stopped | Crashed | Dead -> Dead
+;;
 
 let bonsai_ctx_pct (meta : Keeper_types.keeper_meta) =
   match meta.max_context_override with
   | Some max_tokens when max_tokens > 0 && meta.runtime.usage.last_total_tokens > 0 ->
-      let pct =
-        (meta.runtime.usage.last_total_tokens * 100) / max_tokens
-      in
-      min 100 (max 0 pct)
+    let pct = meta.runtime.usage.last_total_tokens * 100 / max_tokens in
+    min 100 (max 0 pct)
   | _ -> 0
+;;
 
 let latest_tool_name (entry : Keeper_registry.registry_entry) =
   let latest =
     Keeper_registry.StringMap.fold
       (fun tool_name tool_entry acc ->
-        match acc with
-        | None -> Some (tool_name, tool_entry.Keeper_types.last_used_at)
-        | Some (_, ts) when tool_entry.Keeper_types.last_used_at > ts ->
-            Some (tool_name, tool_entry.Keeper_types.last_used_at)
-        | Some _ -> acc)
+         match acc with
+         | None -> Some (tool_name, tool_entry.Keeper_types.last_used_at)
+         | Some (_, ts) when tool_entry.Keeper_types.last_used_at > ts ->
+           Some (tool_name, tool_entry.Keeper_types.last_used_at)
+         | Some _ -> acc)
       entry.tool_usage
       None
   in
   Option.map fst latest
+;;
 
-let keepers_summary_from_registry ~base_path
-    : Masc_dashboard_api_types.Keepers.response =
+let keepers_summary_from_registry ~base_path : Masc_dashboard_api_types.Keepers.response =
   let module K = Masc_dashboard_api_types.Keepers in
   let entries =
     Keeper_registry.all ~base_path ()
     |> List.sort (fun (a : Keeper_registry.registry_entry) b ->
-           String.compare a.name b.name)
+      String.compare a.name b.name)
   in
   let keepers =
     List.map
       (fun (entry : Keeper_registry.registry_entry) ->
-        let meta = entry.meta in
-        K.
-          { name = entry.name
-          ; stat = Keeper_state_machine.phase_to_string entry.phase
-          ; status = bonsai_keeper_status_of_phase entry.phase
-          ; ctx_pct = bonsai_ctx_pct meta
-          ; turn = meta.runtime.usage.total_turns
-          ; turn_cap = 60
-          ; mem_kb = 0
-          ; latency_ms = meta.runtime.usage.last_latency_ms
-          ; last_tool = latest_tool_name entry
-          ; lane_frames = []
-          ; ctx_history = []
-          })
+         let meta = entry.meta in
+         K.
+           { name = entry.name
+           ; stat = Keeper_state_machine.phase_to_string entry.phase
+           ; status = bonsai_keeper_status_of_phase entry.phase
+           ; ctx_pct = bonsai_ctx_pct meta
+           ; turn = meta.runtime.usage.total_turns
+           ; turn_cap = 60
+           ; mem_kb = 0
+           ; latency_ms = meta.runtime.usage.last_latency_ms
+           ; last_tool = latest_tool_name entry
+           ; lane_frames = []
+           ; ctx_history = []
+           })
       entries
   in
   let cycle =
     List.fold_left
       (fun acc (entry : Keeper_registry.registry_entry) ->
-        max acc entry.meta.runtime.usage.total_turns)
+         max acc entry.meta.runtime.usage.total_turns)
       0
       entries
   in
-  K.{
-    keepers;
-    cycle;
-    room = Some (Filename.basename base_path);
-    generated_at = iso8601_utc_now ();
-  }
+  K.
+    { keepers
+    ; cycle
+    ; room = Some (Filename.basename base_path)
+    ; generated_at = iso8601_utc_now ()
+    }
+;;
 
 let bonsai_api_keepers_summary request reqd =
   match !server_state with
   | None ->
-      respond_public_read_json
-        ~status:`Internal_server_error
-        request
-        reqd
-        (Yojson.Safe.to_string
-           (`Assoc [ ("error", `String "server state not initialized") ]))
+    respond_public_read_json
+      ~status:`Internal_server_error
+      request
+      reqd
+      (Yojson.Safe.to_string (`Assoc [ "error", `String "server state not initialized" ]))
   | Some state ->
-      let resp =
-        keepers_summary_from_registry ~base_path:state.room_config.base_path
-      in
-      let body =
-        Yojson.Safe.to_string
-          (Masc_dashboard_api_types.Keepers.response_to_yojson resp)
-      in
-      respond_public_read_json request reqd body
+    let resp = keepers_summary_from_registry ~base_path:state.room_config.base_path in
+    let body =
+      Yojson.Safe.to_string (Masc_dashboard_api_types.Keepers.response_to_yojson resp)
+    in
+    respond_public_read_json request reqd body
+;;
 
 let serve_bonsai_static name request reqd =
   let path = Filename.concat (bonsai_asset_root ()) name in
   match read_file path with
   | Ok body ->
-      let content_type = asset_content_type name in
-      let cache_control =
-        if Filename.check_suffix name ".html" then
-          dashboard_index_cache_control
-        else
-          "public, max-age=31536000, immutable"
-      in
-      let final_body, encoding_headers =
-        if is_compressible_asset name && Http.Compression.accepts_zstd request then
-          let (compressed, did_compress) = Http.Compression.compress_zstd ~level:3 body in
-          if did_compress then
-            (compressed, [("content-encoding", "zstd"); ("vary", "Accept-Encoding")])
-          else
-            (body, [])
-        else
-          (body, [])
-      in
-      let headers = ("cache-control", cache_control) :: encoding_headers in
-      Http.Response.bytes ~headers ~content_type final_body reqd
-  | Error _ ->
-      Http.Response.not_found reqd
+    let content_type = asset_content_type name in
+    let cache_control =
+      if Filename.check_suffix name ".html"
+      then dashboard_index_cache_control
+      else "public, max-age=31536000, immutable"
+    in
+    let final_body, encoding_headers =
+      if is_compressible_asset name && Http.Compression.accepts_zstd request
+      then (
+        let compressed, did_compress = Http.Compression.compress_zstd ~level:3 body in
+        if did_compress
+        then compressed, [ "content-encoding", "zstd"; "vary", "Accept-Encoding" ]
+        else body, [])
+      else body, []
+    in
+    let headers = ("cache-control", cache_control) :: encoding_headers in
+    Http.Response.bytes ~headers ~content_type final_body reqd
+  | Error _ -> Http.Response.not_found reqd
+;;
 
-let favicon_svg = {|
+let favicon_svg =
+  {|
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <rect width="64" height="64" rx="12" fill="#0f172a"/>
   <circle cx="32" cy="32" r="18" fill="#1d4ed8"/>
   <path d="M22 42 L32 18 L42 42 Z" fill="#93c5fd"/>
 </svg>
 |}
+;;
 
 let serve_favicon _request reqd =
   Http.Response.bytes ~content_type:"image/svg+xml" favicon_svg reqd
+;;
 
 let http_status_of_graphql = function
   | `OK -> `OK
   | `Bad_request -> `Bad_request
+;;
 
 (** Shared by HTTP/2 gateway handlers that require initialized server state. *)
 let get_server_state_result () =
   match !server_state with
   | Some s -> Ok s
   | None -> Error "server state not initialized"
+;;
 
 let server_state_error_json message =
-  Yojson.Safe.to_string (`Assoc [ ("error", `String message) ])
+  Yojson.Safe.to_string (`Assoc [ "error", `String message ])
+;;
 
 let handle_get_graphql _request reqd =
   let nonce =
@@ -516,32 +513,36 @@ let handle_get_graphql _request reqd =
     let bytes = Bytes.init 16 (fun _ -> Char.chr (Random.State.int rng 256)) in
     Base64.encode_string (Bytes.to_string bytes)
   in
-  let headers = [
-    ("content-security-policy", graphql_csp_header nonce);
-  ] in
+  let headers = [ "content-security-policy", graphql_csp_header nonce ] in
   let body = graphql_playground_html ~nonce in
   Http.Response.html ~headers body reqd
+;;
 
 let handle_post_graphql request reqd =
   let origin = get_origin request in
   Http.Request.read_body_async reqd (fun body_str ->
     match get_server_state_result () with
     | Error message ->
-        respond_json_with_cors ~status:`Internal_server_error request reqd
-          (server_state_error_json message)
+      respond_json_with_cors
+        ~status:`Internal_server_error
+        request
+        reqd
+        (server_state_error_json message)
     | Ok state ->
-        let response = Graphql_api.handle_request ~config:state.room_config body_str in
-        let status = http_status_of_graphql response.status in
-        let headers = Httpun.Headers.of_list (
-          ("content-length", string_of_int (String.length response.body))
-          :: graphql_headers origin
-        ) in
-        let http_response = Httpun.Response.create ~headers status in
-        Httpun.Reqd.respond_with_string reqd http_response response.body
-  )
+      let response = Graphql_api.handle_request ~config:state.room_config body_str in
+      let status = http_status_of_graphql response.status in
+      let headers =
+        Httpun.Headers.of_list
+          (("content-length", string_of_int (String.length response.body))
+           :: graphql_headers origin)
+      in
+      let http_response = Httpun.Response.create ~headers status in
+      Httpun.Reqd.respond_with_string reqd http_response response.body)
+;;
 
 let handle_graphql request reqd =
   match Http.Request.method_ request with
   | `GET -> handle_get_graphql request reqd
   | `POST -> handle_post_graphql request reqd
   | _ -> Http.Response.method_not_allowed reqd
+;;

@@ -33,15 +33,14 @@
     vector of independent flags. *)
 type regime =
   | Crashing
-      (** Lifecycle instability — restart count elevated in a recent
+  (** Lifecycle instability — restart count elevated in a recent
           window. Highest precedence because a crashing keeper cannot
           meaningfully thrash. *)
   | Thrashing
-      (** Repeated failure without recovery — turn failures or per-tool
+  (** Repeated failure without recovery — turn failures or per-tool
           failure saturation. Analog of Fowler circuit-breaker pre-trip
           at the turn level rather than per-call. *)
-  | Healthy
-      (** None of the above. Default. *)
+  | Healthy (** None of the above. Default. *)
 
 val all_regimes : regime list
 val regime_of_string : string -> regime option
@@ -50,49 +49,46 @@ val string_of_regime : regime -> string
 (** A single tool's aggregate usage. Mirrors the shape of
     [Keeper_types.tool_call_entry] but is declared here so the
     deriver does not depend on that module directly. *)
-type tool_aggregate = {
-  count : int;
-  failures : int;
-}
+type tool_aggregate =
+  { count : int
+  ; failures : int
+  }
 
 (** Minimal input the deriver needs. All fields are the caller's
     responsibility to project from whatever stateful source
     (registry entry, replay log, test fixture). *)
-type input = {
-  turn_consecutive_failures : int;
-  restart_count : int;
-  last_restart_ts : float;
-      (** Unix seconds; 0.0 when the keeper has never restarted. *)
-  tool_aggregates : (string * tool_aggregate) list;
-      (** One entry per tool the keeper has invoked. Empty list when
+type input =
+  { turn_consecutive_failures : int
+  ; restart_count : int
+  ; last_restart_ts : float (** Unix seconds; 0.0 when the keeper has never restarted. *)
+  ; tool_aggregates : (string * tool_aggregate) list
+    (** One entry per tool the keeper has invoked. Empty list when
           no tool has been used yet. *)
-}
+  }
 
 (** Reason carries {b why} the deriver picked this regime. The dashboard
     hub panel surfaces it verbatim so an operator can see which rule
     fired and on what values — no guesswork. *)
-type reason = {
-  rule_id : string;
-      (** Short stable identifier (e.g. ["turn_fail_streak"]). *)
-  evidence : string list;
-      (** Concrete values that made the rule fire — already
+type reason =
+  { rule_id : string (** Short stable identifier (e.g. ["turn_fail_streak"]). *)
+  ; evidence : string list
+    (** Concrete values that made the rule fire — already
           human-readable. *)
-}
+  }
 
-type snapshot = {
-  regime : regime;
-  reason : reason;
-      (** Empty evidence + [rule_id = "default_healthy"] when
+type snapshot =
+  { regime : regime
+  ; reason : reason
+    (** Empty evidence + [rule_id = "default_healthy"] when
           [regime = Healthy]. *)
-  updated_at : float;
-}
+  ; updated_at : float
+  }
 
-val derive : now:float -> input -> snapshot
 (** Apply the regime rules in precedence order and return the first
     match (or [Healthy] when none match). [now] is injected so the
     deriver stays pure and deterministic. *)
+val derive : now:float -> input -> snapshot
 
-val snapshot_to_json : snapshot -> Yojson.Safe.t
 (** Stable wire format. Shape:
 
     {[
@@ -104,6 +100,7 @@ val snapshot_to_json : snapshot -> Yojson.Safe.t
       }
     ]}
 *)
+val snapshot_to_json : snapshot -> Yojson.Safe.t
 
 (** {1 Thresholds}
 

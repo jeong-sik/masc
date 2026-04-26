@@ -8,14 +8,14 @@
 
 (** {1 Types} *)
 
-type parsed_output = {
-  text : string;
-  input_tokens : int option;
-  output_tokens : int option;
-  cache_creation_tokens : int option;
-  cache_read_tokens : int option;
-  cost_usd : float option;
-}
+type parsed_output =
+  { text : string
+  ; input_tokens : int option
+  ; output_tokens : int option
+  ; cache_creation_tokens : int option
+  ; cache_read_tokens : int option
+  ; cost_usd : float option
+  }
 
 type mcp_flag =
   | Mcp_joined of string
@@ -26,29 +26,29 @@ type prompt_flag =
   | Prompt_flag of string
   | Prompt_stdin
 
-type spawn_config = {
-  agent_name : string;
-  command : string;
-  timeout_seconds : int;
-  working_dir : string option;
-  mcp_tools : string list;
-  parse_output : string -> parsed_output;
-  stdin_prompt : bool;
-  mcp_mode : mcp_flag;
-  prompt_mode : prompt_flag;
-}
+type spawn_config =
+  { agent_name : string
+  ; command : string
+  ; timeout_seconds : int
+  ; working_dir : string option
+  ; mcp_tools : string list
+  ; parse_output : string -> parsed_output
+  ; stdin_prompt : bool
+  ; mcp_mode : mcp_flag
+  ; prompt_mode : prompt_flag
+  }
 
-type spawn_result = {
-  success : bool;
-  output : string;
-  exit_code : int;
-  elapsed_ms : int;
-  input_tokens : int option;
-  output_tokens : int option;
-  cache_creation_tokens : int option;
-  cache_read_tokens : int option;
-  cost_usd : float option;
-}
+type spawn_result =
+  { success : bool
+  ; output : string
+  ; exit_code : int
+  ; elapsed_ms : int
+  ; input_tokens : int option
+  ; output_tokens : int option
+  ; cache_creation_tokens : int option
+  ; cache_read_tokens : int option
+  ; cost_usd : float option
+  }
 
 (** {1 Configuration} *)
 
@@ -72,16 +72,22 @@ val parse_command : string -> string list
 
 (** {1 Spawning} *)
 
-val spawn :
-  agent_name:string -> prompt:string ->
-  ?timeout_seconds:int -> ?working_dir:string -> unit ->
-  spawn_result
+val spawn
+  :  agent_name:string
+  -> prompt:string
+  -> ?timeout_seconds:int
+  -> ?working_dir:string
+  -> unit
+  -> spawn_result
 
 (** Deprecated alias for {!spawn}. *)
-val spawn_sync :
-  agent_name:string -> prompt:string ->
-  ?timeout_seconds:int -> ?working_dir:string -> unit ->
-  spawn_result
+val spawn_sync
+  :  agent_name:string
+  -> prompt:string
+  -> ?timeout_seconds:int
+  -> ?working_dir:string
+  -> unit
+  -> spawn_result
 
 (** {1 Result Formatting} *)
 
@@ -93,7 +99,11 @@ val result_to_string : spawn_result -> string
 
 (** {1 Helpers} *)
 
-val output_for_status :
-  status:Unix.process_status -> stdout:string -> stderr:string -> string
+val output_for_status
+  :  status:Unix.process_status
+  -> stdout:string
+  -> stderr:string
+  -> string
+
 val fallback_spawn_failure_output : exit_code:int -> string
 val add_default_model_arg : string -> string list -> string list

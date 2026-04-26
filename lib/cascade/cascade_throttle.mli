@@ -29,19 +29,16 @@ val length : unit -> int
     All [process_*] counts reflect this OAS process only —
     other clients sharing the same server are not visible.
     @since 0.97.0 *)
-type capacity_info = {
-  total : int;
-  (** Server slot count from discovery. *)
-  process_active : int;
-  (** Slots held by this process. *)
-  process_available : int;
-  (** [total - process_active]. May overestimate if other consumers exist. *)
-  process_queue_length : int;
-  (** Fibers waiting for a slot in this process. *)
-  source : Llm_provider.Provider_throttle.capacity_source;
-  (** How the slot count was determined. *)
-}
+type capacity_info =
+  { total : int (** Server slot count from discovery. *)
+  ; process_active : int (** Slots held by this process. *)
+  ; process_available : int
+    (** [total - process_active]. May overestimate if other consumers exist. *)
+  ; process_queue_length : int (** Fibers waiting for a slot in this process. *)
+  ; source : Llm_provider.Provider_throttle.capacity_source
+    (** How the slot count was determined. *)
+  }
 
-val capacity : string -> capacity_info option
 (** Capacity for a given endpoint URL. Returns [None] if not in throttle table.
     @since 0.97.0 *)
+val capacity : string -> capacity_info option

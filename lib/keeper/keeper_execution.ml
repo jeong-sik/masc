@@ -8,7 +8,6 @@
     Proactive emission and autonomous goal turns are now handled by
     Keeper_unified_turn via the unified keeper loop. *)
 
-
 include Keeper_coordination
 include Keeper_prompt
 

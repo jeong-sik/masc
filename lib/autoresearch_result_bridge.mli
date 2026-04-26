@@ -23,10 +23,6 @@
 
     @since 2.263.0 *)
 
-val verdict_of_cycle :
-  Autoresearch.loop_state ->
-  Autoresearch.cycle_record ->
-  Verification.verdict
 (** Convert an autoresearch cycle outcome to a verification verdict.
 
     Mapping:
@@ -40,11 +36,11 @@ val verdict_of_cycle :
     Orientation is handled: when [lower_is_better] is set, the score
     normalization inverts so that lower raw scores map to higher
     verification scores. *)
+val verdict_of_cycle
+  :  Autoresearch.loop_state
+  -> Autoresearch.cycle_record
+  -> Verification.verdict
 
-val attribution_of_cycle :
-  Autoresearch.loop_state ->
-  Autoresearch.cycle_record ->
-  Attribution.t
 (** Produce the attribution envelope with [origin = NonDet] and
     [gate = "autoresearch"]. Evidence includes [loop_id], [cycle],
     [hypothesis], [score_before], [score_after], [delta], [model_used],
@@ -59,3 +55,7 @@ val attribution_of_cycle :
     - Discard                    → [Policy_failed] (not a transition — a
                                    hypothesis was rejected, not a state
                                    change) *)
+val attribution_of_cycle
+  :  Autoresearch.loop_state
+  -> Autoresearch.cycle_record
+  -> Attribution.t

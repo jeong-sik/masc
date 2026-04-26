@@ -1,114 +1,125 @@
 module U = Yojson.Safe.Util
 
-type 'a context = {
-  config : Coord.config;
-  agent_name : string;
-  sw : Eio.Switch.t;
-  clock : 'a Eio.Time.clock;
-  proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option;
-  net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option;
-  mcp_session_id : string option;
-}
+type 'a context =
+  { config : Coord.config
+  ; agent_name : string
+  ; sw : Eio.Switch.t
+  ; clock : 'a Eio.Time.clock
+  ; proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option
+  ; net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option
+  ; mcp_session_id : string option
+  }
 
 let option_to_json f = function
   | Some value -> f value
   | None -> `Null
+;;
 
 let string_option_to_json = option_to_json (fun value -> `String value)
-
-let operator_dir config =
-  Filename.concat (Coord.masc_dir config) "operator"
+let operator_dir config = Filename.concat (Coord.masc_dir config) "operator"
 
 let pending_confirms_path config =
   Filename.concat (operator_dir config) "pending_confirms.json"
+;;
 
 let trace_id prefix =
   let entropy =
-    Printf.sprintf "%s|%d|%.6f|%d"
-      prefix (Unix.getpid ()) (Unix.gettimeofday ()) (Random.bits ())
+    Printf.sprintf
+      "%s|%d|%.6f|%d"
+      prefix
+      (Unix.getpid ())
+      (Unix.gettimeofday ())
+      (Random.bits ())
   in
   let digest = Digestif.SHA256.(digest_string entropy |> to_hex) in
   prefix ^ "_" ^ String.sub digest 0 16
+;;
 
 let normalized_actor ~context_actor = function
   | Some raw when String.trim raw <> "" -> String.trim raw
   | _ ->
-      let trimmed = String.trim context_actor in
-      if trimmed = "" || String.equal trimmed "unknown" then "unknown" else trimmed
+    let trimmed = String.trim context_actor in
+    if trimmed = "" || String.equal trimmed "unknown" then "unknown" else trimmed
+;;
 
 let operator_judge_runtime_json (config : Coord.config) =
   let runtime = Dashboard_operator_judge.runtime_status config.base_path in
   `Assoc
-    [
-      ("enabled", `Bool runtime.enabled);
-      ("judge_online", `Bool runtime.judge_online);
-      ("refreshing", `Bool runtime.refreshing);
-      ("generated_at", string_option_to_json runtime.generated_at);
-      ("expires_at", string_option_to_json runtime.expires_at);
-      ("model_used", string_option_to_json runtime.model_used);
-      ("keeper_name", `String runtime.keeper_name);
-      ("last_error", string_option_to_json runtime.last_error);
+    [ "enabled", `Bool runtime.enabled
+    ; "judge_online", `Bool runtime.judge_online
+    ; "refreshing", `Bool runtime.refreshing
+    ; "generated_at", string_option_to_json runtime.generated_at
+    ; "expires_at", string_option_to_json runtime.expires_at
+    ; "model_used", string_option_to_json runtime.model_used
+    ; "keeper_name", `String runtime.keeper_name
+    ; "last_error", string_option_to_json runtime.last_error
     ]
+;;
 
-type pending_confirm = {
-  token : string;
-  trace_id : string;
-  actor : string;
-  action_type : string;
-  target_type : string;
-  target_id : string option;
-  payload : Yojson.Safe.t;
-  delegated_tool : string;
-  created_at : string;
-  expires_at : string option;
-}
+type pending_confirm =
+  { token : string
+  ; trace_id : string
+  ; actor : string
+  ; action_type : string
+  ; target_type : string
+  ; target_id : string option
+  ; payload : Yojson.Safe.t
+  ; delegated_tool : string
+  ; created_at : string
+  ; expires_at : string option
+  }
 
-type pending_confirm_scope = {
-  actor_filter : string option;
-  all_entries : pending_confirm list;
-  visible_entries : pending_confirm list;
-  hidden_entries : pending_confirm list;
-}
+type pending_confirm_scope =
+  { actor_filter : string option
+  ; all_entries : pending_confirm list
+  ; visible_entries : pending_confirm list
+  ; hidden_entries : pending_confirm list
+  }
 
-type available_action = {
-  action_type : string;
-  tool_name : string;
-  target_type : string;
-  description : string;
-  confirm_required : bool;
-}
+type available_action =
+  { action_type : string
+  ; tool_name : string
+  ; target_type : string
+  ; description : string
+  ; confirm_required : bool
+  }
 
 let make_available_action ~action_type ~tool_name ~target_type ~description =
-  { action_type; tool_name; target_type; description;
-    confirm_required = Operator_approval.confirm_required action_type }
+  { action_type
+  ; tool_name
+  ; target_type
+  ; description
+  ; confirm_required = Operator_approval.confirm_required action_type
+  }
+;;
 
 let preview_of_pending_confirm (entry : pending_confirm) =
   `Assoc
-    [
-      ("trace_id", `String entry.trace_id);
-      ("actor", `String entry.actor);
-      ("action_type", `String entry.action_type);
-      ("target_type", `String entry.target_type);
-      ("target_id", string_option_to_json entry.target_id);
-      ("payload", entry.payload);
+    [ "trace_id", `String entry.trace_id
+    ; "actor", `String entry.actor
+    ; "action_type", `String entry.action_type
+    ; "target_type", `String entry.target_type
+    ; "target_id", string_option_to_json entry.target_id
+    ; "payload", entry.payload
     ]
+;;
 
 let pending_confirm_to_yojson (entry : pending_confirm) =
   `Assoc
-    [
-      ("token", `String entry.token);
-      ("confirm_token", `String entry.token);
-      ("trace_id", `String entry.trace_id);
-      ("actor", `String entry.actor);
-      ("action_type", `String entry.action_type);
-      ("target_type", `String entry.target_type);
-      ("target_id", string_option_to_json entry.target_id);
-      ("payload", entry.payload);
-      ("delegated_tool", `String entry.delegated_tool);
-      ("created_at", `String entry.created_at);
-      ("expires_at", string_option_to_json entry.expires_at);
-      ("preview", preview_of_pending_confirm entry);
+    [ "token", `String entry.token
+    ; "confirm_token", `String entry.token
+    ; "trace_id", `String entry.trace_id
+    ; "actor", `String entry.actor
+    ; "action_type", `String entry.action_type
+    ; "target_type", `String entry.target_type
+    ; "target_id", string_option_to_json entry.target_id
+    ; "payload", entry.payload
+    ; "delegated_tool", `String entry.delegated_tool
+    ; "created_at", `String entry.created_at
+    ; "expires_at", string_option_to_json entry.expires_at
+    ; "preview", preview_of_pending_confirm entry
     ]
+;;
 
 let pending_confirm_of_yojson json =
   try
@@ -131,46 +142,53 @@ let pending_confirm_of_yojson json =
     let created_at = json |> U.member "created_at" |> U.to_string in
     let expires_at = json |> U.member "expires_at" |> U.to_string_option in
     Ok
-      {
-        token;
-        trace_id;
-        actor;
-        action_type;
-        target_type;
-        target_id;
-        payload;
-        delegated_tool;
-        created_at;
-        expires_at;
+      { token
+      ; trace_id
+      ; actor
+      ; action_type
+      ; target_type
+      ; target_id
+      ; payload
+      ; delegated_tool
+      ; created_at
+      ; expires_at
       }
-  with U.Type_error (msg, _) | Failure msg -> Error msg
+  with
+  | U.Type_error (msg, _) | Failure msg -> Error msg
+;;
 
 let raw_pending_confirms config : pending_confirm list =
   match Coord_utils.read_json_opt config (pending_confirms_path config) with
   | None -> []
   | Some (`List entries) ->
-      List.filter_map
-        (fun json ->
-          match pending_confirm_of_yojson json with
-          | Ok entry -> Some entry
-          | Error _ -> None)
-        entries
+    List.filter_map
+      (fun json ->
+         match pending_confirm_of_yojson json with
+         | Ok entry -> Some entry
+         | Error _ -> None)
+      entries
   | Some _ -> []
+;;
 
 let write_pending_confirms config (entries : pending_confirm list) =
-  Coord_utils.write_json config (pending_confirms_path config)
+  Coord_utils.write_json
+    config
+    (pending_confirms_path config)
     (`List (List.map pending_confirm_to_yojson entries))
+;;
 
 let pending_confirm_expired (entry : pending_confirm) =
   match entry.expires_at with
   | Some exp -> Types.now_iso () > exp
   | None -> false
+;;
 
 let read_pending_confirms config : pending_confirm list =
   let entries = raw_pending_confirms config in
   let active = List.filter (fun entry -> not (pending_confirm_expired entry)) entries in
   if List.length active <> List.length entries then write_pending_confirms config active;
   active
+;;
 
 let upsert_pending_confirm config entry =
   let remaining =
@@ -178,6 +196,7 @@ let upsert_pending_confirm config entry =
     |> List.filter (fun existing -> not (String.equal existing.token entry.token))
   in
   write_pending_confirms config (entry :: remaining)
+;;
 
 let remove_pending_confirm config token =
   let remaining =
@@ -185,107 +204,129 @@ let remove_pending_confirm config token =
     |> List.filter (fun existing -> not (String.equal existing.token token))
   in
   write_pending_confirms config remaining
+;;
 
 let remove_pending_confirms_by_target config ~target_type ~target_id =
   let all = raw_pending_confirms config in
   let remaining =
     List.filter
       (fun (entry : pending_confirm) ->
-        not
-          (String.equal entry.target_type target_type
-          && entry.target_id = target_id))
+         not (String.equal entry.target_type target_type && entry.target_id = target_id))
       all
   in
   let removed = List.length all - List.length remaining in
   if removed > 0 then write_pending_confirms config remaining;
   removed
+;;
 
 let normalize_pending_confirm_actor_filter = function
   | Some raw ->
-      let trimmed = String.trim raw in
-      if trimmed = "" then None else Some trimmed
+    let trimmed = String.trim raw in
+    if trimmed = "" then None else Some trimmed
   | None -> None
+;;
 
 let pending_confirm_scope_of_entries ?actor entries =
-  let actor_filter =
-    normalize_pending_confirm_actor_filter actor
-  in
+  let actor_filter = normalize_pending_confirm_actor_filter actor in
   let all_entries =
     entries
     |> List.sort (fun (a : pending_confirm) (b : pending_confirm) ->
-           String.compare b.created_at a.created_at)
+      String.compare b.created_at a.created_at)
   in
   let visible_entries =
     match actor_filter with
     | None -> all_entries
     | Some value ->
-        List.filter (fun (entry : pending_confirm) -> String.equal value entry.actor) all_entries
+      List.filter
+        (fun (entry : pending_confirm) -> String.equal value entry.actor)
+        all_entries
   in
   let hidden_entries =
     match actor_filter with
     | None -> []
     | Some value ->
-        List.filter (fun (entry : pending_confirm) -> not (String.equal value entry.actor)) all_entries
+      List.filter
+        (fun (entry : pending_confirm) -> not (String.equal value entry.actor))
+        all_entries
   in
   { actor_filter; all_entries; visible_entries; hidden_entries }
+;;
 
 let pending_confirm_scope ?actor config =
   pending_confirm_scope_of_entries ?actor (read_pending_confirms config)
+;;
 
 let pending_confirms_json ?actor config =
   let scope = pending_confirm_scope ?actor config in
   `List (List.map pending_confirm_to_yojson scope.visible_entries)
+;;
 
 let available_actions : available_action list =
-  [
-    make_available_action ~action_type:"broadcast" ~tool_name:"masc_broadcast"
+  [ make_available_action
+      ~action_type:"broadcast"
+      ~tool_name:"masc_broadcast"
       ~target_type:"root"
-      ~description:"Namespace-wide operator broadcast.";
-    make_available_action ~action_type:"namespace_pause" ~tool_name:"masc_pause"
+      ~description:"Namespace-wide operator broadcast."
+  ; make_available_action
+      ~action_type:"namespace_pause"
+      ~tool_name:"masc_pause"
       ~target_type:"root"
-      ~description:"Pause namespace automation and spawning.";
-    make_available_action ~action_type:"namespace_resume" ~tool_name:"masc_resume"
+      ~description:"Pause namespace automation and spawning."
+  ; make_available_action
+      ~action_type:"namespace_resume"
+      ~tool_name:"masc_resume"
       ~target_type:"root"
-      ~description:"Resume a paused namespace.";
-    make_available_action ~action_type:"social_sweep" ~tool_name:"social_sweep"
+      ~description:"Resume a paused namespace."
+  ; make_available_action
+      ~action_type:"social_sweep"
+      ~tool_name:"social_sweep"
       ~target_type:"root"
-      ~description:"Run one immediate social sweep across keepers.";
-    make_available_action ~action_type:"task_inject" ~tool_name:"masc_add_task"
+      ~description:"Run one immediate social sweep across keepers."
+  ; make_available_action
+      ~action_type:"task_inject"
+      ~tool_name:"masc_add_task"
       ~target_type:"root"
-      ~description:"Inject a backlog task into the namespace.";
-    make_available_action ~action_type:"keeper_message" ~tool_name:"masc_keeper_msg"
+      ~description:"Inject a backlog task into the namespace."
+  ; make_available_action
+      ~action_type:"keeper_message"
+      ~tool_name:"masc_keeper_msg"
       ~target_type:"keeper"
-      ~description:"Send a direct operator message to a keeper.";
-    make_available_action ~action_type:"keeper_probe" ~tool_name:"masc_keeper_status"
+      ~description:"Send a direct operator message to a keeper."
+  ; make_available_action
+      ~action_type:"keeper_probe"
+      ~tool_name:"masc_keeper_status"
       ~target_type:"keeper"
-      ~description:"Immediate keeper diagnostic snapshot.";
-    make_available_action ~action_type:"keeper_recover" ~tool_name:"masc_keeper_recover"
+      ~description:"Immediate keeper diagnostic snapshot."
+  ; make_available_action
+      ~action_type:"keeper_recover"
+      ~tool_name:"masc_keeper_recover"
       ~target_type:"keeper"
-      ~description:"Safe down/up recovery for stale/degraded keeper.";
-    make_available_action
+      ~description:"Safe down/up recovery for stale/degraded keeper."
+  ; make_available_action
       ~action_type:"keeper_github_identity_login_prepare"
       ~tool_name:"masc_keeper_github_identity_login_prepare"
       ~target_type:"keeper"
-      ~description:"Prepare a keeper-bound GitHub CLI login command under operator confirmation.";
-    make_available_action
+      ~description:
+        "Prepare a keeper-bound GitHub CLI login command under operator confirmation."
+  ; make_available_action
       ~action_type:"keeper_github_identity_status"
       ~tool_name:"masc_keeper_github_identity_status"
       ~target_type:"keeper"
-      ~description:"Inspect keeper-bound GitHub identity bundle and gh auth status.";
+      ~description:"Inspect keeper-bound GitHub identity bundle and gh auth status."
   ]
+;;
 
 let available_action_to_yojson (entry : available_action) =
   `Assoc
-    [
-      ("action_type", `String entry.action_type);
-      ("tool_name", `String entry.tool_name);
-      ("target_type", `String entry.target_type);
-      ("description", `String entry.description);
-      ("confirm_required", `Bool entry.confirm_required);
+    [ "action_type", `String entry.action_type
+    ; "tool_name", `String entry.tool_name
+    ; "target_type", `String entry.target_type
+    ; "description", `String entry.description
+    ; "confirm_required", `Bool entry.confirm_required
     ]
+;;
 
-let available_actions_json =
-  `List (List.map available_action_to_yojson available_actions)
+let available_actions_json = `List (List.map available_action_to_yojson available_actions)
 
 let pending_confirm_summary_json_of_scope scope =
   let hidden_actors =
@@ -300,23 +341,24 @@ let pending_confirm_summary_json_of_scope scope =
     |> List.map available_action_to_yojson
   in
   `Assoc
-    [
-      ("actor_filter", string_option_to_json scope.actor_filter);
-      ("filter_active", `Bool (Option.is_some scope.actor_filter));
-      ("visible_count", `Int (List.length scope.visible_entries));
-      ("total_count", `Int (List.length scope.all_entries));
-      ("hidden_count", `Int (List.length scope.hidden_entries));
-      ("hidden_actors", `List hidden_actors);
-      ("confirm_required_actions", `List confirm_required_actions);
+    [ "actor_filter", string_option_to_json scope.actor_filter
+    ; "filter_active", `Bool (Option.is_some scope.actor_filter)
+    ; "visible_count", `Int (List.length scope.visible_entries)
+    ; "total_count", `Int (List.length scope.all_entries)
+    ; "hidden_count", `Int (List.length scope.hidden_entries)
+    ; "hidden_actors", `List hidden_actors
+    ; "confirm_required_actions", `List confirm_required_actions
     ]
+;;
 
 let pending_confirm_summary_json ?actor config =
   pending_confirm_summary_json_of_scope (pending_confirm_scope ?actor config)
+;;
 
 let pending_confirm_envelope_json ?actor config =
   let scope = pending_confirm_scope ?actor config in
   `Assoc
-    [
-      ("items", `List (List.map pending_confirm_to_yojson scope.visible_entries));
-      ("summary", pending_confirm_summary_json_of_scope scope);
+    [ "items", `List (List.map pending_confirm_to_yojson scope.visible_entries)
+    ; "summary", pending_confirm_summary_json_of_scope scope
     ]
+;;

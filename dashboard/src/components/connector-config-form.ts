@@ -336,9 +336,8 @@ function FieldWidget({ id, field, value, revealed }: {
     const target = ev.target as HTMLInputElement
     setEntry(id, { values: { ...getEntry(id).values, [field.name]: target.value } })
   }
-  const onCheckbox = (ev: Event) => {
-    const target = ev.target as HTMLInputElement
-    setEntry(id, { values: { ...getEntry(id).values, [field.name]: target.checked ? 'true' : 'false' } })
+  const onCheckbox = (checked: boolean) => {
+    setEntry(id, { values: { ...getEntry(id).values, [field.name]: checked ? 'true' : 'false' } })
   }
   const toggleReveal = () => {
     setEntry(id, { reveal: { ...getEntry(id).reveal, [field.name]: !revealed } })
@@ -358,11 +357,10 @@ function FieldWidget({ id, field, value, revealed }: {
     case 'boolean':
       return html`
         <label class="flex items-center gap-2 text-2xs text-[var(--color-fg-primary)]">
-          <input
-            type="checkbox"
+          <${Checkbox}
             checked=${value === 'true'}
-            onInput=${onCheckbox}
-            class="cursor-pointer"
+            ariaLabel=${field.name}
+            onChange=${onCheckbox}
           />
           <span>${value === 'true' ? 'enabled' : 'disabled'}</span>
         </label>

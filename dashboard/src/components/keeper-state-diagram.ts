@@ -46,10 +46,10 @@ const PHASE_ID_MAP: Record<string, string> = {
 }
 
 const INVARIANT_LABELS: Array<[keyof KeeperCompositeSnapshot['invariants'], string]> = [
-  ['phase_turn_alignment', 'Phase ⇔ Turn'],
-  ['no_cascade_before_measurement', 'Cascade ordering'],
-  ['compaction_atomicity', 'Compaction atomic'],
-  ['event_priority_monotone', 'Event priority'],
+  ['phase_turn_alignment', '단계 ⇔ 턴'],
+  ['no_cascade_before_measurement', 'Cascade 순서'],
+  ['compaction_atomicity', '압축 원자성'],
+  ['event_priority_monotone', '이벤트 우선순위'],
 ]
 
 function normalizePhase(phase: string | null | undefined): string | null {

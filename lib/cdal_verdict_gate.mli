@@ -58,6 +58,22 @@ val gate_check :
   unit ->
   string option
 
+(** [lookup_latest_verdict ?base_dir ?limit ~task_id ()] — the
+    primitive that {!gate_check} composes with attribution recording.
+    Exposed so diagnostic tools and tests can call it without
+    importing the attribution side effect.
+
+    On miss with a saturated starting [limit], the lookup auto-widens
+    once to [limit * 16] before returning [None] — operators no longer
+    need to guess [MASC_CDAL_VERDICT_LOOKUP_LIMIT] in normal-fleet
+    cases (#10731). *)
+val lookup_latest_verdict :
+  ?base_dir:string ->
+  ?limit:int ->
+  task_id:string ->
+  unit ->
+  Cdal_types.contract_verdict option
+
 (** {1 Attribution wiring} *)
 
 (** [to_attribution ?gate_label v] maps [check_verdict v] to the

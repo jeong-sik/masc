@@ -49,9 +49,9 @@ export function ErrorPanel({ onClose }: ErrorPanelProps) {
       <div class="absolute right-0 top-full mt-1.5 z-[var(--z-overlay-dropdown,3050)] w-96 max-h-80 overflow-hidden rounded-lg border border-[var(--color-border-default)] bg-[rgba(10,18,34,0.98)] shadow-xl backdrop-blur-xl">
         <div class="flex items-center justify-between px-3 py-2 border-b border-[var(--white-5)]">
           <span class="text-xs font-medium text-[var(--color-fg-muted)]">에러 없음</span>
-          <button type="button" class="text-[var(--color-fg-muted)] hover:text-[var(--color-fg-primary)] cursor-pointer p-0.5" onClick=${onClose}>
+          <${ActionButton} variant="subtle" size="sm" class="p-0.5" ariaLabel="에러 패널 닫기" onClick=${onClose}>
             <${X} size=${14} />
-          </button>
+          <//>
         </div>
         <div class="flex items-center justify-center py-6 text-xs text-[var(--color-fg-muted)]">
           모든 에러를 확인했습니다.
@@ -71,9 +71,9 @@ export function ErrorPanel({ onClose }: ErrorPanelProps) {
             class="text-2xs"
             onClick=${() => { clearAllErrors(); onClose() }}
           >모두 확인<//>
-          <button type="button" class="text-[var(--color-fg-muted)] hover:text-[var(--color-fg-primary)] cursor-pointer p-0.5" onClick=${onClose}>
+          <${ActionButton} variant="subtle" size="sm" class="p-0.5" ariaLabel="에러 패널 닫기" onClick=${onClose}>
             <${X} size=${14} />
-          </button>
+          <//>
         </div>
       </div>
 
@@ -98,11 +98,14 @@ export function ErrorPanel({ onClose }: ErrorPanelProps) {
               <p class="mt-0.5 text-xs text-[var(--color-fg-primary)] leading-[1.4] line-clamp-2">${e.message}</p>
               <span class="mt-0.5 block text-2xs text-[var(--color-fg-muted)]">${formatElapsedCompact((Date.now() - e.timestamp) / 1000)} 전</span>
             </div>
-            <button type="button"
-              class="shrink-0 mt-0.5 p-1 rounded opacity-0 group-hover:opacity-100 text-[var(--color-fg-muted)] hover:text-[var(--color-status-ok)] hover:bg-[var(--white-8)] cursor-pointer transition-all"
+            <${ActionButton}
+              variant="subtle"
+              size="sm"
+              class="shrink-0 mt-0.5 p-1 opacity-0 group-hover:opacity-100 hover:text-[var(--color-status-ok)] hover:bg-[var(--white-8)]"
               title="확인"
+              ariaLabel="에러 확인"
               onClick=${() => acknowledgeError(e.id)}
-            ><${Check} size=${14} /></button>
+            ><${Check} size=${14} /><//>
           </div>
         `})}
       </div>

@@ -69,7 +69,7 @@ export function JsonViewer({ data, label, initialCollapsed = false, level = 0, a
         class="flex items-center gap-1.5 cursor-pointer hover:bg-[var(--white-4)] rounded px-1 -mx-1 select-none w-max max-w-full text-left bg-transparent border-0"
         onClick=${() => setCollapsed(!collapsed)}
         aria-expanded=${!collapsed}
-        aria-label=${`${collapsed ? 'Expand' : 'Collapse'} ${toggleLabel}`}
+        aria-label=${`${collapsed ? '펼치기' : '접기'} ${toggleLabel}`}
       >
         <span aria-hidden="true" class="text-[var(--text-muted)] shrink-0 w-4 inline-flex justify-center transition-transform duration-150 ${collapsed ? '-rotate-90' : ''}">▼</span>
         ${label ? html`<span class="text-[var(--text-body)] font-medium truncate" title=${label}>${label}</span>` : null}

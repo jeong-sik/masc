@@ -886,7 +886,7 @@ export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
             autoComplete="off"
             value=${ctxCompositionSearch.value}
             placeholder="세그먼트 필터 (예: history, memory)"
-            aria-label="context composition 세그먼트 필터"
+            aria-label="컨텍스트 구성 세그먼트 필터"
             onInput=${(e: Event) => { ctxCompositionSearch.value = (e.target as HTMLInputElement).value }}
             class="mb-2 w-full rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)] focus-visible:ring-2 focus-visible:ring-[var(--accent)]/50"
           />

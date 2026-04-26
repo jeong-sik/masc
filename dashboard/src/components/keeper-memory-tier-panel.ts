@@ -166,7 +166,7 @@ export function KeeperMemoryTierPanel({
           autoComplete="off"
           value=${query}
           placeholder="kind 필터"
-          aria-label="memory kind 필터"
+          aria-label="메모리 종류 필터"
           onInput=${(e: Event) => setQuery((e.target as HTMLInputElement).value)}
           class="min-w-30 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)] focus-visible:ring-2 focus-visible:ring-[var(--accent)]/50"
         />

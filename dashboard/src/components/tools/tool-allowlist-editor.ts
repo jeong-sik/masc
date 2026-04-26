@@ -230,7 +230,7 @@ export function ResolvedPreview({ tools, catMap }: { tools: string[]; catMap: Ma
           value=${query}
           placeholder="도구/카테고리 필터"
           aria-label="도구 검색 필터"
-          aria-label="resolved allowlist 필터"
+          aria-label="해석된 허용 목록 필터"
           onInput=${(e: Event) => setQuery((e.target as HTMLInputElement).value)}
           class="min-w-35 max-w-55 flex-1 rounded border border-[var(--card-border)] bg-[var(--white-3)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent)] focus-visible:ring-2 focus-visible:ring-[var(--accent)]/50"
         />
@@ -593,7 +593,7 @@ export function ToolAllowlistEditor({
             ${textInputSection.value === 'also_allow'
               ? html`
                 <textarea autoComplete="off"
-                  aria-label="also allow 도구 입력"
+                  aria-label="추가 허용 도구 입력"
                   class="min-h-18 w-full px-3 py-2 rounded border border-[var(--card-border)] bg-[var(--white-3)] text-2xs text-[var(--text-body)] placeholder:text-[var(--text-muted)]"
                   placeholder="쉼표 또는 줄바꿈으로 구분"
                   value=${textInputBuffer.value}
@@ -637,7 +637,7 @@ export function ToolAllowlistEditor({
             ${textInputSection.value === 'custom'
               ? html`
                 <textarea autoComplete="off"
-                  aria-label="custom 도구 입력"
+                  aria-label="커스텀 도구 입력"
                   class="min-h-[88px] w-full px-3 py-2 rounded border border-[var(--card-border)] bg-[var(--white-3)] text-2xs text-[var(--text-body)] placeholder:text-[var(--text-muted)]"
                   placeholder="쉼표 또는 줄바꿈으로 구분"
                   value=${textInputBuffer.value}
@@ -661,7 +661,7 @@ export function ToolAllowlistEditor({
         ${textInputSection.value === 'deny'
           ? html`
             <textarea autoComplete="off"
-              aria-label="denylist 도구 입력"
+              aria-label="차단 목록 도구 입력"
               class="min-h-18 w-full px-3 py-2 rounded border border-[var(--card-border)] bg-[var(--white-3)] text-2xs text-[var(--text-body)] placeholder:text-[var(--text-muted)]"
               placeholder="쉼표 또는 줄바꿈으로 구분"
               value=${textInputBuffer.value}

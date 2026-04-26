@@ -27,6 +27,8 @@ type caller =
   | Status_detail             (** keeper_status_detail health probes (5/10s) *)
   | Turn_sandbox              (** keeper_turn_sandbox_runtime (2/5s) *)
   | Turn_up                   (** keeper_turn_up_create / _update sandbox (15s) *)
+  | Git_meta                  (** local git metadata (rev-parse, remote get-url) (5s) *)
+  | Shell_probe               (** PATH probes via [command -v] (2s) *)
   | Unknown of string
 
 (** Hardcoded default seconds for each known caller.  Preserves
@@ -47,6 +49,8 @@ let caller_key = function
   | Status_detail -> "status_detail"
   | Turn_sandbox -> "turn_sandbox"
   | Turn_up -> "turn_up"
+  | Git_meta -> "git_meta"
+  | Shell_probe -> "shell_probe"
   | Unknown caller -> caller
 
 (** Exported for tests that pin the per-caller default table. *)
@@ -65,17 +69,20 @@ let known_callers () =
     Status_detail;
     Turn_sandbox;
     Turn_up;
+    Git_meta;
+    Shell_probe;
   ]
 
 let known_default_sec = function
   | Shell -> Some 60.0
   | Fs -> Some 30.0
   | Preflight | Repo_readiness | Gh_shared | Status_detail -> Some 10.0
-  | Sandbox | Turn_sandbox -> Some 2.0
+  | Sandbox | Turn_sandbox | Shell_probe -> Some 2.0
   | Pr_review | Turn_up -> Some 15.0
   | Alerting -> Some 20.0
   | Dispatch -> Some 120.0
   | Memory_audit -> Some 3.0
+  | Git_meta -> Some 5.0
   | Unknown _ -> None
 
 let upper_case s =

@@ -19,6 +19,16 @@ type caller =
   | Status_detail
   | Turn_sandbox
   | Turn_up
+  | Git_meta
+      (** Local git metadata commands (e.g. [git remote get-url],
+          [git rev-parse]).  Default 5.0s — these are local disk
+          operations that should complete in <1s; a 5s ceiling
+          surfaces NFS hangs or repository corruption without
+          masking them. *)
+  | Shell_probe
+      (** PATH availability probes (e.g. [command -v <name>]).
+          Default 2.0s — pure OS lookup; longer timeouts mask
+          shell-startup misconfiguration rather than helping. *)
   | Unknown of string
 
 (** [caller_key c] is the lowercase identifier embedded in env var

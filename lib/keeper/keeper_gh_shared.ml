@@ -648,7 +648,9 @@ let repo_slug_of_git_root ~git_root =
   | Some slug -> Some slug
   | None ->
     (match
-       Process_eio.run_argv_with_status ~cwd:git_root ~timeout_sec:5.0
+       Process_eio.run_argv_with_status
+         ~cwd:git_root
+         ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Git_meta ())
          [ "git"; "remote"; "get-url"; "origin" ]
      with
      | Unix.WEXITED 0, url -> repo_slug_of_remote_url url

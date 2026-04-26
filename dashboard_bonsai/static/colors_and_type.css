@@ -93,6 +93,32 @@
   /* Scrollbar */
   --scrollbar-thumb:       #2a1f1a;
   --scrollbar-thumb-hover: #3d2e22;
+
+  /* SPEC v0.1 §3.1-3.5 — Semantic vocabulary alias to bonsai raw tier.
+     See dashboard/design-system/SPEC.md. Defined in :root only — the
+     raw tier (--bg-*, --text-*, --border-*, --accent-*, --status-*)
+     is overridden per [data-theme=*] block, so these aliases inherit
+     each theme's value automatically through the cascade. */
+  --color-bg-page:        var(--bg-deep);
+  --color-bg-surface:     var(--bg-panel);
+  --color-bg-panel-alt:   var(--bg-panel-alt);
+  --color-bg-elevated:    var(--bg-card);
+  --color-bg-hover:       var(--bg-card-hover);
+
+  --color-fg-primary:     var(--text-primary);
+  --color-fg-muted:       var(--text-dim);
+
+  --color-border-default: var(--border-main);
+  --color-border-strong:  var(--border-highlight);
+
+  --color-accent-fg:      var(--accent-brass);
+  --color-accent-fg-dim:  var(--accent-brass-dim);
+  --color-accent-glow:    var(--accent-glow);
+
+  --color-status-ok:      var(--status-ok);
+  --color-status-warn:    var(--status-warn);
+  --color-status-err:     var(--status-bad);
+  --color-status-idle:    var(--status-idle);
 }
 
 /* ── Cyberpunk ─────────────────────────────────────────── */

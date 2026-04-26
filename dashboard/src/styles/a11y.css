@@ -25,6 +25,30 @@
   border-width: 0;
 }
 
+/* WCAG 2.4.1 Skip nav — visible on focus only. */
+.skip-link:focus {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 9999;
+  width: auto;
+  height: auto;
+  padding: 8px 16px;
+  margin: 0;
+  overflow: visible;
+  clip: auto;
+  white-space: normal;
+  border-width: 1px;
+  background: var(--color-bg-page, #0a0f1a);
+  color: var(--color-fg-primary, #e2e8f0);
+  border-color: var(--accent-45, rgba(71, 184, 255, 0.7));
+  border-radius: 6px;
+  font-size: 14px;
+  text-decoration: none;
+  outline: 2px solid var(--accent-45, rgba(71, 184, 255, 0.7));
+  outline-offset: 2px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .pixel-avatar[data-status] { animation: none; }
   .pixel-avatar--has-blocker {

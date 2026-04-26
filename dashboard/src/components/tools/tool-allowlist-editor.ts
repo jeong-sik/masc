@@ -3,6 +3,7 @@ import { signal, computed } from '@preact/signals'
 import { useEffect, useState, useMemo } from 'preact/hooks'
 import { useCombobox } from 'downshift'
 import { editKeeperTools, type ToolEditResponse } from '../../api/keeper'
+import { Select } from '../common/select'
 import { toolsData } from './tool-state'
 
 // ── State signals ────────────────────────────
@@ -572,15 +573,16 @@ export function ToolAllowlistEditor({
         ? html`
           <label class="flex flex-col gap-1">
             <span class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">preset</span>
-            <select
-              class="w-full px-3 py-2 rounded border border-[var(--color-border-default)] bg-[var(--white-3)] text-2xs text-[var(--color-fg-primary)]"
+            <${Select}
+              class="px-3 py-2 text-2xs"
+              ariaLabel="preset"
               value=${preset.value}
-              onChange=${(e: Event) => { preset.value = (e.target as HTMLSelectElement).value as typeof preset.value }}
-            >
-              ${Object.entries(PRESET_DESCRIPTIONS).map(([key, desc]) => html`
-                <option value=${key}>${key} \u2014 ${desc}</option>
-              `)}
-            </select>
+              options=${Object.entries(PRESET_DESCRIPTIONS).map(([key, desc]) => ({
+                value: key,
+                label: `${key} \u2014 ${desc}`,
+              }))}
+              onInput=${(v: string) => { preset.value = v as typeof preset.value }}
+            />
           </label>
 
           <div class="flex flex-col gap-1">

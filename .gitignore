@@ -86,6 +86,10 @@ specs/**/TraceData.tla
 .env
 .env.*
 !.env.example
+# Vite mode-specific defaults (NOT secrets — tracked so devs get sane
+# defaults).  Use .env.<mode>.local for local secret overrides; those
+# remain ignored by the .env.* rule above.
+!dashboard/.env.development
 
 # Infrastructure secrets (launchd plist contains env vars with tokens)
 infrastructure/launchd/*.plist

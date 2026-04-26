@@ -27,6 +27,7 @@ import {
   SideRail,
 } from './components/dashboard-shell'
 import { ThemeSwitch } from './components/theme-switch'
+import { TransportBeacon } from './components/transport-beacon'
 import { selectedAgentName } from './components/agent-detail-selection'
 import { selectedTask } from './components/goals/task-detail-selection'
 import { ToastContainer } from './components/common/toast'
@@ -211,6 +212,7 @@ export function App() {
               <${LazyAuthStatus} />
             <//>
             <${ConnectionStatus} />
+            <${TransportBeacon} />
             <${ErrorCounterBadge} />
             <${ThemeSwitch} />
             <${BuildIdentityBadge} />

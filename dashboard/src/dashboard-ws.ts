@@ -6,6 +6,7 @@ import {
   dashboardWsLastError,
   dashboardWsLastSeq,
   dashboardWsReady,
+  noteDashboardWsEvent,
 } from './dashboard-ws-state'
 
 type JsonObject = Record<string, unknown>
@@ -217,6 +218,7 @@ function applyDelta(raw: unknown): void {
       bufferedAmount: socket?.bufferedAmount ?? 0,
     })
   }
+  noteDashboardWsEvent()
   if (typeof delta.slice !== 'string') return
   hydrateRouteDashboardSlice(
     delta.slice,

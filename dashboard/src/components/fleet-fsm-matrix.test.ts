@@ -1,13 +1,23 @@
 import { html } from 'htm/preact'
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/preact'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact'
 import { afterEach, describe, it, expect, vi } from 'vitest'
 
-const { fetchKeepersCompositeMock } = vi.hoisted(() => ({
+const { fetchKeepersCompositeMock, dispatchOperatorActionMock, showToastMock } = vi.hoisted(() => ({
   fetchKeepersCompositeMock: vi.fn(),
+  dispatchOperatorActionMock: vi.fn(),
+  showToastMock: vi.fn(),
 }))
 
 vi.mock('../api/keeper', () => ({
   fetchKeepersComposite: fetchKeepersCompositeMock,
+}))
+
+vi.mock('../operator-store', () => ({
+  dispatchOperatorAction: dispatchOperatorActionMock,
+}))
+
+vi.mock('./common/toast', () => ({
+  showToast: showToastMock,
 }))
 
 import {
@@ -62,6 +72,7 @@ function snapshot(
     },
     is_live: false,
     last_outcome: null,
+    recommended_actions: [],
   }
   return { ...base, ...overrides }
 }
@@ -101,6 +112,8 @@ afterEach(() => {
   cleanup()
   vi.useRealTimers()
   fetchKeepersCompositeMock.mockReset()
+  dispatchOperatorActionMock.mockReset()
+  showToastMock.mockReset()
   fleetCompositeSnapshot.value = null
 })
 
@@ -593,6 +606,115 @@ describe('FleetFsmMatrix streaming fallback', () => {
         }),
         message: expect.stringContaining('resolve 후보'),
       }),
+    )
+  })
+
+  it('runs backend-recommended probe actions through the operator action path', async () => {
+    dispatchOperatorActionMock.mockResolvedValue({
+      status: 'ok',
+      confirm_required: false,
+    })
+    fetchKeepersCompositeMock.mockResolvedValue(
+      fleetSnapshot([
+        snapshot({
+          name: 'blocked',
+          phase: 'Running',
+          is_live: false,
+          execution: execution({
+            outcome: 'error',
+            terminal_reason_code: 'api_error',
+            operator_disposition: 'pause_human',
+            operator_disposition_reason: 'tool_required_unsatisfied',
+          }),
+          recommended_actions: [
+            {
+              action_type: 'keeper_probe',
+              target_type: 'keeper',
+              target_id: 'blocked',
+              severity: 'warn',
+              reason: 'Inspect tool-contract blocker: tool_required_unsatisfied',
+              confirm_required: false,
+              suggested_payload: {
+                source: 'fleet_fsm',
+                keeper: 'blocked',
+              },
+            },
+          ],
+        }),
+      ]),
+    )
+
+    render(html`<${FleetFsmMatrix} pollIntervalMs=${1000} />`)
+
+    const button = await screen.findByRole('button', { name: '상태 확인' })
+    await act(async () => {
+      fireEvent.click(button)
+    })
+
+    await waitFor(() => {
+      expect(dispatchOperatorActionMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action_type: 'keeper_probe',
+          target_type: 'keeper',
+          target_id: 'blocked',
+          payload: expect.objectContaining({
+            source: 'fleet_fsm',
+            keeper: 'blocked',
+          }),
+        }),
+      )
+    })
+    expect(fetchKeepersCompositeMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('surfaces recover as a supervised preview instead of auto-confirming it', async () => {
+    dispatchOperatorActionMock.mockResolvedValue({
+      status: 'ok',
+      confirm_required: true,
+      confirm_token: 'confirm-1',
+    })
+    fetchKeepersCompositeMock.mockResolvedValue(
+      fleetSnapshot([
+        snapshot({
+          name: 'blocked',
+          phase: 'Running',
+          is_live: false,
+          execution: execution({
+            outcome: 'error',
+            terminal_reason_code: 'api_error',
+            operator_disposition: 'unknown',
+          }),
+          recommended_actions: [
+            {
+              action_type: 'keeper_recover',
+              target_type: 'keeper',
+              target_id: 'blocked',
+              severity: 'bad',
+              reason: 'Controlled keeper recovery for runtime stall: api_error',
+              confirm_required: true,
+              suggested_payload: {
+                source: 'fleet_fsm',
+                keeper: 'blocked',
+              },
+            },
+          ],
+        }),
+      ]),
+    )
+
+    render(html`<${FleetFsmMatrix} pollIntervalMs=${1000} />`)
+
+    const button = await screen.findByRole('button', { name: '복구 요청' })
+    await act(async () => {
+      fireEvent.click(button)
+    })
+
+    await waitFor(() => {
+      expect(dispatchOperatorActionMock).toHaveBeenCalledTimes(1)
+    })
+    expect(showToastMock).toHaveBeenCalledWith(
+      expect.stringContaining('승인 대기 중'),
+      'success',
     )
   })
 })

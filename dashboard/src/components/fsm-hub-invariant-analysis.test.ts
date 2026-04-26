@@ -22,6 +22,7 @@ function makeSnapshot(overrides: Partial<KeeperCompositeSnapshot> = {}): KeeperC
     },
     is_live: true,
     last_outcome: null,
+    recommended_actions: [],
     ...overrides,
   }
 }

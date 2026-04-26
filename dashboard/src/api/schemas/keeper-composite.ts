@@ -21,6 +21,7 @@
 import {
   array,
   boolean,
+  fallback,
   nullable,
   number,
   object,
@@ -124,6 +125,17 @@ const KeeperCompositeExecutionSchema = object({
   ),
 })
 
+const OperatorRecommendedActionSchema = object({
+  action_type: string(),
+  target_type: string(),
+  target_id: optional(nullable(string())),
+  severity: fallback(string(), 'unknown'),
+  reason: string(),
+  confirm_required: optional(boolean()),
+  suggested_payload: optional(unknown()),
+  preview: optional(unknown()),
+})
+
 export const KeeperCompositeSnapshotSchema = object({
   // Explicit registry identity from new backends. Optional so pinned older
   // backends keep rendering; UI falls back to canonical correlation_id parsing.
@@ -152,6 +164,7 @@ export const KeeperCompositeSnapshotSchema = object({
   is_live: boolean(),
   last_outcome: nullable(KeeperLastOutcomeSchema),
   execution: optional(KeeperCompositeExecutionSchema),
+  recommended_actions: fallback(array(OperatorRecommendedActionSchema), []),
   /** @deprecated kept only for old backend experiments; new payloads use `execution`. */
   latest_receipt: optional(unknown()),
 })

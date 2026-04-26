@@ -512,6 +512,12 @@ let compact_receipt_tool_surface_json receipt =
         ]
   | _ -> `Null
 
+let json_number key json =
+  match json_member key json with
+  | `Float value -> Some value
+  | `Int value -> Some (float_of_int value)
+  | _ -> None
+
 let composite_execution_receipt_json ~(config : Coord.config) ~keeper_name =
   match Keeper_execution_receipt.latest_json config keeper_name with
   | None ->
@@ -562,21 +568,224 @@ let composite_execution_receipt_json ~(config : Coord.config) ~keeper_name =
           ("tool_surface", compact_receipt_tool_surface_json receipt);
         ]
 
+let lower_string_opt = Option.map (fun value -> String.lowercase_ascii (String.trim value))
+
+let string_opt_is_any value candidates =
+  match lower_string_opt value with
+  | Some value -> List.mem value candidates
+  | None -> false
+
+let string_opt_present value =
+  match Option.map String.trim value with
+  | Some value -> value <> ""
+  | None -> false
+
+let json_string_eq key json expected =
+  match json_string key json with
+  | Some value -> String.equal value expected
+  | None -> false
+
+let composite_latest_activity_epoch snapshot execution =
+  let last_outcome_epoch =
+    match json_member "last_outcome" snapshot with
+    | `Assoc _ as last_outcome -> json_number "ended_at" last_outcome
+    | _ -> None
+  in
+  let receipt_epoch =
+    match json_string "recorded_at" execution with
+    | Some raw -> Types.parse_iso8601_opt raw
+    | None -> None
+  in
+  match last_outcome_epoch, receipt_epoch with
+  | Some a, Some b -> Some (max a b)
+  | Some value, None | None, Some value -> Some value
+  | None, None -> None
+
+let composite_snapshot_is_idle snapshot =
+  let decision = json_member "decision" snapshot in
+  let cascade = json_member "cascade" snapshot in
+  let compaction = json_member "compaction" snapshot in
+  let breaker_state =
+    match json_member "circuit_breaker" snapshot with
+    | `Assoc _ as breaker -> json_string "state" breaker
+    | _ -> Some "clean"
+  in
+  json_string_eq "turn_phase" snapshot "idle"
+  && json_string_eq "stage" decision "undecided"
+  && json_string_eq "state" cascade "idle"
+  && json_string_eq "stage" compaction "accumulating"
+  && Option.value ~default:"clean" breaker_state = "clean"
+
+let composite_execution_tool_required execution =
+  string_opt_is_any
+    (json_string "tool_contract_result" execution)
+    [
+      "violated";
+      "unknown";
+      "needs_execution_progress";
+      "missing_required_tool_use";
+      "passive_only";
+      "claim_only_after_owned_task";
+      "tool_surface_mismatch";
+      "no_tool_capable_provider";
+    ]
+  || string_opt_is_any
+       (json_string "operator_disposition_reason" execution)
+       [ "tool_required_unsatisfied" ]
+
+let composite_execution_config_blocked execution =
+  string_opt_is_any
+    (json_string "operator_disposition_reason" execution)
+    [ "preflight_config_error" ]
+
+let composite_execution_saturated execution =
+  string_opt_is_any
+    (json_string "terminal_reason_code" execution)
+    [ "ollama_saturated" ]
+  || string_opt_is_any
+       (json_string "operator_disposition_reason" execution)
+       [ "ollama_saturated" ]
+
+let composite_execution_blocked execution =
+  composite_execution_tool_required execution
+  || string_opt_is_any (json_string "operator_disposition" execution) [ "pause_human" ]
+  || (match lower_string_opt (json_string "terminal_reason_code" execution) with
+      | Some terminal -> terminal <> "" && terminal <> "completed"
+      | None -> false)
+  || (match json_member "error" execution with
+      | `Assoc _ as error -> string_opt_present (json_string "kind" error)
+      | _ -> false)
+
+let fleet_fsm_action_payload ~keeper_name ~kind ~reason ~snapshot ~execution =
+  `Assoc
+    [
+      ("source", `String "fleet_fsm");
+      ("kind", `String kind);
+      ("keeper", `String keeper_name);
+      ("reason", `String reason);
+      ("phase", Json_util.string_opt_to_json (json_string "phase" snapshot));
+      ("turn_phase", Json_util.string_opt_to_json (json_string "turn_phase" snapshot));
+      ("execution", execution);
+    ]
+
+let fleet_fsm_message_payload ~keeper_name ~reason ~snapshot ~execution =
+  let message =
+    Printf.sprintf
+      "Fleet FSM supervised resolve request for %s.\nReason: %s.\nInspect the latest runtime evidence, distinguish configuration/tool-contract blockers from restartable runtime stalls, and reply with the safest next operator action. Do not self-restart."
+      keeper_name reason
+  in
+  match fleet_fsm_action_payload ~keeper_name ~kind:"diagnose" ~reason ~snapshot ~execution with
+  | `Assoc fields ->
+      `Assoc
+        (fields
+         @ [
+             ("direct_reply", `Bool true);
+             ("message", `String message);
+           ])
+  | other -> other
+
+let composite_recommended_actions_json ~keeper_name ~snapshot ~execution =
+  let is_live = Option.value ~default:false (json_bool "is_live" snapshot) in
+  let latest = composite_latest_activity_epoch snapshot execution in
+  let now = Unix.gettimeofday () in
+  let stale_long_enough =
+    match latest with
+    | Some ts -> now -. ts >= 600.0
+    | None -> not is_live
+  in
+  let idle_attention =
+    is_live && composite_snapshot_is_idle snapshot && stale_long_enough
+  in
+  let blocked = composite_execution_blocked execution in
+  let needs_attention = blocked || (not is_live) || idle_attention in
+  let reason =
+    match json_string "operator_disposition_reason" execution with
+    | Some value when String.trim value <> "" -> value
+    | _ -> (
+        match json_string "terminal_reason_code" execution with
+        | Some value when String.trim value <> "" -> value
+        | _ when idle_attention -> "idle_composite"
+        | _ when not is_live -> "not_live"
+        | _ -> "runtime_attention" )
+  in
+  let make action_type severity reason suggested_payload =
+    let action : Operator_digest_types.recommended_action =
+      {
+        action_type;
+        target_type = "keeper";
+        target_id = Some keeper_name;
+        severity;
+        reason;
+        suggested_payload;
+      }
+    in
+    action
+  in
+  let probe action_reason =
+    make "keeper_probe" Operator_digest_types.Sev_warn action_reason
+      (fleet_fsm_action_payload ~keeper_name ~kind:"probe" ~reason ~snapshot ~execution)
+  in
+  let message action_reason =
+    make "keeper_message" Operator_digest_types.Sev_warn action_reason
+      (fleet_fsm_message_payload ~keeper_name ~reason:action_reason ~snapshot ~execution)
+  in
+  let recover action_reason =
+    make "keeper_recover" Operator_digest_types.Sev_bad action_reason
+      (fleet_fsm_action_payload ~keeper_name ~kind:"recover" ~reason:action_reason
+         ~snapshot ~execution)
+  in
+  let actions =
+    if not needs_attention then []
+    else if composite_execution_tool_required execution then
+      [
+        probe ("Inspect tool-contract blocker: " ^ reason);
+        message ("Resolve tool-contract blocker: " ^ reason);
+      ]
+    else if composite_execution_config_blocked execution then
+      [
+        probe ("Inspect configuration/auth blocker: " ^ reason);
+        message ("Resolve configuration/auth blocker: " ^ reason);
+      ]
+    else if composite_execution_saturated execution && not stale_long_enough then
+      [ probe ("Inspect local runtime saturation: " ^ reason) ]
+    else if idle_attention then
+      [
+        probe ("Inspect idle composite: " ^ reason);
+        message ("Diagnose idle composite trigger gap: " ^ reason);
+      ]
+    else
+      [
+        probe ("Refresh stale runtime evidence: " ^ reason);
+        recover ("Controlled keeper recovery for runtime stall: " ^ reason);
+      ]
+  in
+  `List
+    (actions
+     |> Operator_digest_types.dedup_recommendations
+     |> List.map (Operator_digest_types.recommended_action_to_yojson ~actor:"fleet_fsm"))
+
 let enrich_composite_snapshot_json ~(config : Coord.config) ~keeper_name json =
   match json with
   | `Assoc fields ->
       let fields =
         List.filter
           (fun (name, _) ->
-            not (String.equal name "keeper" || String.equal name "execution"))
+            not
+              (String.equal name "keeper"
+               || String.equal name "execution"
+               || String.equal name "recommended_actions"))
           fields
+      in
+      let execution = composite_execution_receipt_json ~config ~keeper_name in
+      let recommended_actions =
+        composite_recommended_actions_json ~keeper_name ~snapshot:json ~execution
       in
       `Assoc
         (fields
          @ [
              ("keeper", `String keeper_name);
-             ( "execution",
-               composite_execution_receipt_json ~config ~keeper_name );
+             ("execution", execution);
+             ("recommended_actions", recommended_actions);
            ])
   | other -> other
 

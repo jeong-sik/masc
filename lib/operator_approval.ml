@@ -7,7 +7,8 @@
 
 let high_risk_actions =
   [ "namespace_pause"; "room_pause"; "team_stop"; "team_task_inject";
-    "team_worker_spawn_batch"; "keeper_github_identity_login_prepare" ]
+    "team_worker_spawn_batch"; "keeper_recover";
+    "keeper_github_identity_login_prepare" ]
 
 let allowed_actions =
   [ "broadcast"; "namespace_pause"; "room_pause"; "namespace_resume"; "room_resume"; "social_sweep";

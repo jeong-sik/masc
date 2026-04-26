@@ -62,6 +62,7 @@ const REAL_COMPOSITE_SHAPE: KeeperCompositeSnapshot = {
     cascade_state: 'done',
     selected_model: 'glm-4.5',
   },
+  recommended_actions: [],
 }
 
 /** Real-world payload observed from `keeper_composite_observer.ml`

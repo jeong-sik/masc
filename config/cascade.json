@@ -17,18 +17,18 @@
   ],
   "big_three_temperature": 0.2,
   "big_three_max_tokens": 16384,
-  "_comment_governance_judge": "System-only dashboard governance judge profile. Explicitly defined so background judge loops do not inherit fallback providers such as Claude CLI.",
+  "_comment_governance_judge": "System-only dashboard governance judge profile. Explicitly defined so background judge loops do not inherit fallback providers such as Claude CLI. Gemini listed first because [codex_cli:auto] internally rotates 5 models (30s timeout each = 150s wasted wall-clock when codex auth is broken); Gemini-first attempts the cheap success path first while codex remains a fallback that auto-rejoins on recovery (#10554 disabled codex_cli for 4 seed cascades; this profile keeps codex as fallback rather than removing it).",
   "governance_judge_models": [
-    { "model": "codex_cli:auto", "weight": 1 },
-    { "model": "gemini_cli:auto", "weight": 1 }
+    { "model": "gemini_cli:auto", "weight": 1 },
+    { "model": "codex_cli:auto", "weight": 1 }
   ],
   "governance_judge_temperature": 0.2,
   "governance_judge_max_tokens": 16384,
   "governance_judge_keeper_assignable": false,
-  "_comment_operator_judge": "System-only dashboard operator judge profile. Mirrors governance_judge so background control loops stay off Claude CLI by default.",
+  "_comment_operator_judge": "System-only dashboard operator judge profile. Mirrors governance_judge so background control loops stay off Claude CLI by default. Gemini-first ordering: see governance_judge for rationale.",
   "operator_judge_models": [
-    { "model": "codex_cli:auto", "weight": 1 },
-    { "model": "gemini_cli:auto", "weight": 1 }
+    { "model": "gemini_cli:auto", "weight": 1 },
+    { "model": "codex_cli:auto", "weight": 1 }
   ],
   "operator_judge_temperature": 0.2,
   "operator_judge_max_tokens": 16384,

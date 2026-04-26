@@ -156,11 +156,11 @@ export function GovernanceMonitor() {
         ? html`<${LoadingState}>governance metrics 불러오는 중...<//>`
         : null}
 
-      <${Card} title="Approval Queue">
+      <${Card} title="승인 대기열">
         ${data ? html`
           <div class="grid grid-cols-4 gap-3">
             <${StatCell}
-              label="Queue Depth"
+              label="대기열 깊이"
               value=${data.approval_queue.depth}
             />
             <${StatCell}

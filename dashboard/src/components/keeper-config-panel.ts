@@ -994,7 +994,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         </div>
         ${c.sandbox_last_error ? html`
           <${Callout}
-            title="Sandbox Error"
+            title="샌드박스 오류"
             body=${c.sandbox_last_error}
             tone="warn"
           />

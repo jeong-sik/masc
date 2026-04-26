@@ -452,7 +452,7 @@ export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
 
   return html`
     <div class="md:col-span-2">
-      <${KeeperDetailSectionCard} title="Generation Lineage">
+      <${KeeperDetailSectionCard} title="생성 계보">
         <div class="text-2xs text-[var(--text-muted)] mb-3">
           Track keeper state transfer across successful handoffs. Lineage telemetry is append-only, shows the latest rollover first, and helps explain whether the same keeper identity carried into the new trace.
         </div>

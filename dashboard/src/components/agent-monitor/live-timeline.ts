@@ -158,7 +158,7 @@ export function AgentLiveTimeline({ name }: { name: string }) {
               ? 'border-[rgba(34,197,94,0.4)] text-[var(--color-status-ok)] bg-[var(--white-4)]'
               : 'border-[var(--white-10)] text-[var(--color-fg-disabled)] bg-[var(--white-4)]'}"
             onClick=${() => { autoScroll.value = !autoScroll.value }}
-            title=${autoScroll.value ? 'Auto-scroll ON' : 'Auto-scroll OFF'}
+            title=${autoScroll.value ? '자동 스크롤 ON' : '자동 스크롤 OFF'}
           >
             ${autoScroll.value ? 'AUTO' : 'MANUAL'}
           </button>

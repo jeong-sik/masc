@@ -122,12 +122,12 @@ function GovernanceSummaryStrip() {
       <${KpiCard}
         label="Judge 상태"
         value=${liveJudgeState}
-        hint=${judge?.keeper_name?.trim() || 'live judge'}
+        hint=${judge?.keeper_name?.trim() || '실시간 judge'}
         tone=${judgeUnhealthy ? 'text-warn' : (judgeHealthy ? 'text-ok' : undefined)}
         class=${judgeUnhealthy ? 'border-warn/40 bg-warn/5 ring-1 ring-warn/25' : (judgeHealthy ? 'border-ok/30 bg-ok/5' : '')}
       />
-      <${KpiCard} label="Judge 모델" value=${liveJudgeModel} hint=${judge?.model_used?.trim() ? 'runtime reported' : 'unknown'} />
-      <${KpiCard} label="최근 판단" value=${judgmentCount} hint="live" />
+      <${KpiCard} label="Judge 모델" value=${liveJudgeModel} hint=${judge?.model_used?.trim() ? '런타임 보고' : '알 수 없음'} />
+      <${KpiCard} label="최근 판단" value=${judgmentCount} hint="실시간" />
       <${KpiCard}
         label="관리자 승인 대기"
         value=${approvalCount}

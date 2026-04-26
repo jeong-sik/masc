@@ -51,16 +51,40 @@ let run_with_timeout_and_fallback ~timeout_s fn =
       "keeper_llm_bridge: OAS execution timed out after %.1fs (budget=%.0fs; OAS context rollback only; external tool side effects are not reverted)"
       wall timeout_s;
     Error (Oas.Error.Api (Timeout { message = Printf.sprintf "Timeout after %.1fs (budget=%.0fs)" wall timeout_s }))
-  | Eio.Cancel.Cancelled _ as exn ->
+  | Eio.Cancel.Cancelled inner_exn as exn ->
     (* TLA+: FiberHandlesCancellation -> Rollback context.
        Cancelled means a parent fiber (server shutdown, global stop) requested
        cancellation — NOT a timeout. Re-raise so the keeper exits immediately
-       instead of entering the retry loop. *)
+       instead of entering the retry loop.
+
+       #10716: bimodal distribution observed in production — 21 events in
+       [60, 300)s (short-tail, routine cancel: supervisor pause / cascade
+       rotation) plus 8 events ≥1800s (long-tail, LLM provider hung). Same
+       opaque message for both made root-cause attribution impossible.
+       Categorize wall duration into a discrete bucket and surface the
+       inner cancel exception so operators can split short_tail / mid_tail
+       / long_tail in PromQL and the inner reason ([Eio.Cancel.Cancel_hook]
+       payload, parent-fiber Cancelled, etc.) appears in the log. *)
     let bt = Printexc.get_raw_backtrace () in
     let wall = elapsed () in
+    let bucket =
+      if wall < 60.0 then "fast"
+      else if wall < 300.0 then "short_tail"
+      else if wall < 600.0 then "mid_tail"
+      else if wall < 1800.0 then "long_mid"
+      else "long_tail"
+    in
+    let inner_str =
+      match inner_exn with
+      | Failure msg -> "Failure(" ^ msg ^ ")"
+      | _ -> Printexc.to_string inner_exn
+    in
     Log.Keeper.warn
-      "keeper_llm_bridge: OAS execution cancelled after %.1fs (re-raising; OAS context rollback only; external tool side effects are not reverted)"
-      wall;
+      "keeper_llm_bridge: OAS execution cancelled after %.1fs bucket=%s inner=%s (re-raising; OAS context rollback only; external tool side effects are not reverted)"
+      wall bucket inner_str;
+    Prometheus.inc_counter "masc_keeper_oas_cancel_total"
+      ~labels:[ ("bucket", bucket) ]
+      ();
     Printexc.raise_with_backtrace exn bt
   | exn ->
     (* TLA+: HandleError -> Rollback context *)

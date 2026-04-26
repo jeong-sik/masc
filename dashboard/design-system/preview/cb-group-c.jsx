@@ -275,7 +275,7 @@ function DrawerGoal() {
                    role="listitem"
                    aria-label={`${t.id} · ${t.title} · ${t.keeper} · ${t.status}`}
                    style={{display:'flex', alignItems:'center', gap:7, padding:'4px 7px', background:'var(--color-bg-surface)', border:'1px solid var(--color-border-default)', borderRadius:3, fontSize:11}}>
-                <Dot kind={kClass(t.keeper)} size="sm" />
+                <KeeperBadge id={t.keeper} variant="sigil" size="sm" />
                 <span className="cb-mono" aria-hidden="true" style={{color:'var(--color-fg-disabled)'}}>{t.id}</span>
                 <span aria-hidden="true" style={{color:'var(--color-fg-primary)', flex:1}}>{t.title}</span>
                 <Pill kind={t.status==='running'?'running':t.status==='fail'?'err':t.status==='stalled'?'stalled':'paused'}>{t.status}</Pill>

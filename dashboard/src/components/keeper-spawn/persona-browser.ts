@@ -3,6 +3,7 @@ import { useEffect } from 'preact/hooks'
 import { signal } from '@preact/signals'
 import { SurfaceCard } from '../common/card'
 import { ActionButton } from '../common/button'
+import { TextInput } from '../common/input'
 import { shellAuthSummary } from '../../store'
 import { dashboardAuthAccess } from '../../lib/dashboard-auth-access'
 import { personas, personasLoading, personasError, loadPersonas, spawnKeeperFromPersona, spawning, spawnResult, type PersonaSummary } from './keeper-spawn-state'
@@ -92,13 +93,13 @@ export function PersonaBrowser() {
         </p>
       `}
       <div class="flex flex-wrap items-center gap-2 mb-3">
-        <input
+        <${TextInput}
           type="search"
+          class="min-w-45 flex-1 !px-2 !py-1 !text-2xs"
           value=${searchQuery.value}
           placeholder="페르소나 검색 (이름/역할/모드/설명)"
-          aria-label="페르소나 검색"
+          ariaLabel="페르소나 검색"
           onInput=${(e: Event) => { searchQuery.value = (e.target as HTMLInputElement).value }}
-          class="min-w-45 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
         />
         <span class="text-3xs text-[var(--color-fg-muted)] tabular-nums">
           ${searchQuery.value.trim()

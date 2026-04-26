@@ -55,6 +55,9 @@ if (typeof document !== 'undefined' && !document.getElementById('dc-styles')) {
 }
 
 const DCCtx = React.createContext(null);
+// Exposed so external integrations (e.g. cb-root's hash → setFocus bridge)
+// can read the canvas API from a child component without modifying core.
+if (typeof window !== 'undefined') window.DCCtx = DCCtx;
 
 // ─────────────────────────────────────────────────────────────
 // DesignCanvas — stateful wrapper around the pan/zoom viewport.

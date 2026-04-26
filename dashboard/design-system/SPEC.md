@@ -89,21 +89,75 @@ masc-mcp 레포는 두 dashboard surface가 같은 서버에서 병존 서빙된
 
 **4-slot 패턴**: dashboard는 status마다 4 slot(`--ok-soft`, `--ok-fg`, `--ok-border`, `--ok-ring`)을 정의한다. bonsai는 단일 slot. SPEC v0.1에서는 **dashboard 4-slot이 canonical**, bonsai는 단일 slot을 fallback로 유지(컴포넌트가 4 slot을 요구하면 bonsai에서 동일 raw를 4번 참조).
 
-### 3.6 Attribution (dashboard only — Phase 0)
+### 3.6 Attribution (dashboard only — Phase 0, **v0.3 revised**)
 
-| Canonical | dashboard raw | bonsai | 의미 |
-|-----------|---------------|--------|------|
-| `--color-keeper-1` | `--k-nick` | (없음) | keeper attribution dot 1 |
-| `--color-keeper-2` | `--k-masc` | (없음) | keeper 2 |
-| `--color-keeper-3` | `--k-sangsu` | (없음) | keeper 3 |
-| `--color-keeper-4` | `--k-qa` | (없음) | keeper 4 |
-| `--color-keeper-5` | `--k-rama` | (없음) | keeper 5 |
-| `--p-anthropic` | `--p-anthropic` | (없음) | provider cascade chip |
-| `--p-moonshot` | `--p-moonshot` | (없음) | provider cascade chip |
-| `--p-openai` | `--p-openai` | (없음) | provider cascade chip |
-| `--p-xai` | `--p-xai` | (없음) | provider cascade chip |
+#### 3.6.1 Palette — 12-slot OkLCH spectrum
 
-bonsai는 현재 keeper attribution을 색이 아닌 텍스트(`@nick0cave` 등)로 표현. SPEC v0.1에서는 attribution을 **dashboard-only canonical**로 두고, bonsai에서 도입 시 raw 그대로 참조하도록 허용.
+| Canonical | dashboard raw | 의미 |
+|-----------|---------------|------|
+| `--color-keeper-1`  | `--k-1`  | slot 01 · H=000° · rose |
+| `--color-keeper-2`  | `--k-2`  | slot 02 · H=030° · clay |
+| `--color-keeper-3`  | `--k-3`  | slot 03 · H=060° · amber |
+| `--color-keeper-4`  | `--k-4`  | slot 04 · H=090° · olive |
+| `--color-keeper-5`  | `--k-5`  | slot 05 · H=120° · moss |
+| `--color-keeper-6`  | `--k-6`  | slot 06 · H=150° · jade |
+| `--color-keeper-7`  | `--k-7`  | slot 07 · H=180° · teal |
+| `--color-keeper-8`  | `--k-8`  | slot 08 · H=210° · cyan |
+| `--color-keeper-9`  | `--k-9`  | slot 09 · H=240° · azure |
+| `--color-keeper-10` | `--k-10` | slot 10 · H=270° · iris |
+| `--color-keeper-11` | `--k-11` | slot 11 · H=300° · violet |
+| `--color-keeper-12` | `--k-12` | slot 12 · H=330° · magenta |
+
+OkLCH parameters fixed at L=68%, C=0.09, hue stride 30° — all slots ≥4.5:1
+contrast on `--bg-0`, all adjacent ΔE ≥ 25. Each slot also exposes
+`-soft`, `-border`, `-ring`, `-glow` companions (4-slot semantics).
+
+Old named tokens (`--k-nick`, `--k-masc`, `--k-sangsu`, `--k-qa`, `--k-rama`)
+were removed in v0.4. New code MUST use `--k-N` (1..12) or, preferably,
+the canonical façade `--color-keeper-N`. Or — best — the `<KeeperBadge>`
+primitive, which resolves slot + sigil from a keeper id automatically.
+
+#### 3.6.2 Mapping — keeper id → slot
+
+`kSlot(id)` (cb-shared.jsx) is canonical. Five anchor IDs are pinned in
+`KEEPER_REGISTRY`; everything else is FNV-1a hashed mod 12. This avoids
+re-mapping when the roster grows.
+
+#### 3.6.3 Attribution rule — color is not enough
+
+Color alone MUST NOT identify a keeper. Every attribution carries a
+**second channel**: a 2-letter sigil (`kSigil(id)`). Concretely:
+
+- ✅ `<KeeperBadge id="...">` — the canonical primitive (sigil + colored name)
+- ✅ Code-gutter sigil column ≥ 22px wide
+- ✅ Activity blocks containing the sigil glyph
+- ❌ Bare colored stripe / dot as the *only* attribution carrier
+- ❌ Stacked >4 raw sigils — collapse to `+N` via `<KeeperStack cap={4}>`
+
+Rationale: a 12-hue ring at C=0.09 cannot remain pairwise distinguishable
+under (a) ≥7 simultaneously-active keepers, (b) deuteranopia/protanopia,
+(c) low-gamut external displays. The sigil is the recovery channel.
+
+#### 3.6.4 Status × keeper non-collision
+
+Keeper hues sit at C=0.09 (muted ring). Status hues use higher chroma
+(C ≥ 0.13) and a different shape vocabulary (pill vs sigil-square). No
+keeper hex coincides with any status hex. Components MUST NOT reuse
+`--color-status-*` tokens for attribution, and vice-versa.
+
+#### 3.6.5 Provider cascade (unchanged)
+
+| Canonical | dashboard raw | 의미 |
+|-----------|---------------|------|
+| `--p-anthropic` | `--p-anthropic` | provider cascade chip |
+| `--p-moonshot`  | `--p-moonshot`  | provider cascade chip |
+| `--p-openai`    | `--p-openai`    | provider cascade chip |
+| `--p-xai`       | `--p-xai`       | provider cascade chip |
+
+bonsai는 현재 keeper attribution을 색이 아닌 텍스트(`@nick0cave` 등)로
+표현 — SPEC v0.3에서도 텍스트-only 가 valid attribution 으로 인정된다
+(sigil 의 degenerate case). bonsai 가 색을 도입할 경우 dashboard
+의 12-slot canonical 을 그대로 참조한다.
 
 ### 3.7 Trace frame (bonsai only — Phase 0)
 
@@ -262,7 +316,6 @@ bonsai의 5 테마는 production user에게 URL hash로 공유 가능한 자산.
 
 | 예외 | 위치 | 사유 |
 |------|------|------|
-| `keeperColor()` 헬퍼 | `dashboard/design-system/preview/cb-group-i.jsx` | 12 keeper persona를 attribution token 5종으로 환원 불가 — hex extension 의도적 |
 | `rgba(... / .NN)` alpha 조합 | 어느 곳이든 | `rgb(var(--token-glow) / .12)` 형태로 raw token alpha 조합은 허용 |
 | 폰트 fallback chain | `--font-*` 정의 내 | system font name (e.g., `Inter`, `JetBrains Mono`) |
 | 4-slot status pattern | `tokens.css`의 `--{ok\|warn\|err\|info\|idle\|stalled}-{soft\|fg\|border\|ring}` | 컴포넌트별 정교한 surface/text/border/ring 4 slot 조합. single-slot semantic alias로 환원 불가. 컴포넌트는 raw 참조 허용 (PR-M5 결정). |
@@ -297,7 +350,7 @@ bonsai의 5 테마는 production user에게 URL hash로 공유 가능한 자산.
 1. **PR #10427** (이미 진행 중): `tokens.css`에 19 semantic alias 등재. 본 SPEC §3.1~3.8과 1:1 일치.
 2. **PR #10437** (이미 진행 중): preview cb-group-a~i에 ARIA 281건 추가. 본 SPEC §5와 1:1 일치.
 3. (후속 plan) `source_styles/components.css` 등 component CSS의 raw token 직접 참조를 Semantic으로 점진 치환.
-4. (후속 plan) `colors_and_type.css` (159줄 별개 파일) 정합화 또는 폐기.
+4. ✅ **완료** `colors_and_type.css` 정합화 — 토큰 정의를 `tokens.css` SSOT로 단일화하고, `.masc-ds` 스코프 element/utility 정의는 `type_layer.css`로 분리. 기존 파일은 두 파일을 `@import`만 하는 façade로 축소(외부 참조 호환).
 
 ### 7.2 dashboard_bonsai/ 마이그레이션 우선순위
 

@@ -1053,10 +1053,10 @@ function ConnectorLivePanel({
                 </div>
                 <div class="text-2xs text-[var(--color-status-warn)]/80">
                   <div>
-                    <span class="font-medium">원인: </span> sidecar status 파일이 <code class="rounded bg-[var(--white-4)] px-1">${connector?.status_path || `sidecars/${connectorId}-bot/status.json`}</code> 에서 관찰되지 않았습니다.
+                    <span class="font-medium">원인: </span> 사이드카 status 파일이 <code class="rounded bg-[var(--white-4)] px-1">${connector?.status_path || `sidecars/${connectorId}-bot/status.json`}</code> 에서 관찰되지 않았습니다.
                   </div>
                   <div class="mt-1">
-                    <span class="font-medium">다음: </span> <strong>Start</strong> 버튼으로 backend 를 통해 spawn 하거나, 아래 명령을 복사해 터미널에서 실행하세요. 오프라인이 지속되면 <strong>status</strong> 와 <strong>tail logs</strong> 를 사용하세요.
+                    <span class="font-medium">다음: </span> <strong>Start</strong> 버튼으로 백엔드를 통해 실행하거나, 아래 명령을 복사해 터미널에서 실행하세요. 오프라인이 지속되면 <strong>status</strong> 와 <strong>tail logs</strong> 를 사용하세요.
                   </div>
                 </div>
                 <div class="mt-2 grid grid-cols-1 gap-1.5">

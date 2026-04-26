@@ -99,6 +99,16 @@ describe('TextInput', () => {
     render(html`<${TextInput} class="extra-hook" />`, container)
     expect(container.querySelector('input')!.className).toContain('extra-hook')
   })
+
+  it('testId renders as data-testid (E2E target without coupling to placeholder text)', () => {
+    render(html`<${TextInput} testId="search-filter" />`, container)
+    expect(container.querySelector('input')!.getAttribute('data-testid')).toBe('search-filter')
+  })
+
+  it('autoFocus=true sets the autofocus attribute', () => {
+    render(html`<${TextInput} autoFocus=${true} />`, container)
+    expect(container.querySelector('input')!.hasAttribute('autofocus')).toBe(true)
+  })
 })
 
 describe('TextArea', () => {

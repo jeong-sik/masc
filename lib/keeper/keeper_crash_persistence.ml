@@ -122,7 +122,8 @@ let write_sp_event (ev : sp_event) =
 let start_drain_fiber ~sw ~clock =
   Eio.Fiber.fork_daemon ~sw (fun () ->
     while true do
-      Eio.Time.sleep clock 2.0;
+      Eio.Time.sleep clock
+        Env_config_keeper.KeeperPollIntervals.crash_persistence_drain_sec;
       let batch = drain_batch () in
       List.iter (fun ev ->
         (try write_event ev

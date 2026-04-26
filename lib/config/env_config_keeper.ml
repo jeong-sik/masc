@@ -180,6 +180,45 @@ module KeeperWatchdog = struct
     Float.max 0.0 (get_float ~default:360.0 "MASC_KEEPER_WATCHDOG_GRACE_SEC")
 end
 
+(** {1 Keeper Poll Intervals}
+
+    Drain / poll cadences for keeper background fibers that have no
+    natural event signal — they have to wake up periodically and check.
+    Previously hardcoded as inline literals in the fiber loop body,
+    making them invisible to the operator and impossible to tune
+    without a rebuild. Same fragmentation class as the watchdog
+    thresholds extracted in {!KeeperWatchdog} (#10740): operator-tunable
+    cadence is a load-bearing config knob in production, not an
+    implementation detail.
+
+    Precedence: process env > hardcoded default below. *)
+
+module KeeperPollIntervals = struct
+  (** Crash persistence drain fiber wake interval in seconds.
+
+      Drain fiber batches in-memory crash events and persists them
+      to the dated jsonl store. Lower values reduce write batching
+      (more, smaller writes); higher values risk losing the
+      in-memory tail on a hard kill. Must be >= 0.1.
+      Default: 2.0 — used at {!Keeper_crash_persistence}. *)
+  let crash_persistence_drain_sec =
+    Float.max 0.1
+      (get_float ~default:2.0
+         "MASC_KEEPER_CRASH_PERSIST_DRAIN_INTERVAL_SEC")
+
+  (** Autonomous-turn semaphore queue poll interval in seconds.
+
+      Polled inside the autonomous-turn admission loop in
+      {!Keeper_keepalive}. Lower values reduce ticket-grant latency
+      under contention; higher values lower idle CPU.
+      Must be >= 0.001 (1ms floor — anything tighter is busy-loop).
+      Default: 0.05. *)
+  let autonomous_queue_poll_sec =
+    Float.max 0.001
+      (get_float ~default:0.05
+         "MASC_KEEPER_AUTONOMOUS_QUEUE_POLL_SEC")
+end
+
 (** {1 Keeper Runtime Configuration} *)
 
 module KeeperRuntime = struct

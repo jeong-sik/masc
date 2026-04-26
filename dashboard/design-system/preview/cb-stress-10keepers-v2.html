@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Stress test v2 · 10 keepers · 12-slot palette + sigil</title>
+  <link rel="stylesheet" href="../source_styles/tokens.css" />
+  <link rel="stylesheet" href="../colors_and_type.css" />
+  <link rel="stylesheet" href="../type_layer.css" />
+  <link rel="stylesheet" href="_preview.css" />
+  <style>
+    .pv-root { max-width: 1400px; margin: 0 auto; }
+
+    /* ── 10 keepers, hash-mapped to 12-slot ──
+       Slot assignments are non-adjacent in hue (skip pattern of +3 mod 12)
+       to maximize visual distance for the 10-active worst case. */
+    .k1  { --kc: var(--k-1);  --kg: var(--k-1-glow);  } /* rose    H=000 */
+    .k2  { --kc: var(--k-4);  --kg: var(--k-4-glow);  } /* olive   H=090 */
+    .k3  { --kc: var(--k-7);  --kg: var(--k-7-glow);  } /* teal    H=180 */
+    .k4  { --kc: var(--k-10); --kg: var(--k-10-glow); } /* iris    H=270 */
+    .k5  { --kc: var(--k-2);  --kg: var(--k-2-glow);  } /* clay    H=030 */
+    .k6  { --kc: var(--k-5);  --kg: var(--k-5-glow);  } /* moss    H=120 */
+    .k7  { --kc: var(--k-8);  --kg: var(--k-8-glow);  } /* cyan    H=210 */
+    .k8  { --kc: var(--k-11); --kg: var(--k-11-glow); } /* violet  H=300 */
+    .k9  { --kc: var(--k-3);  --kg: var(--k-3-glow);  } /* amber   H=060 */
+    .k10 { --kc: var(--k-6);  --kg: var(--k-6-glow);  } /* jade    H=150 */
+
+    /* ═══ KeeperBadge — the canonical attribution unit ═══
+       Always emits color + 2-letter sigil. NEVER use color alone. */
+    .kb {
+      display: inline-flex; align-items: center; gap: 0;
+      font-family: var(--font-mono); font-weight: 600;
+      vertical-align: middle;
+    }
+    .kb-sigil {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 18px; height: 18px;
+      background: var(--kc);
+      color: var(--bg-0);
+      border-radius: 2px;
+      font-size: 9px;
+      letter-spacing: 0;
+      flex: none;
+    }
+    .kb-sigil.lg { width: 24px; height: 24px; font-size: 11px; border-radius: 3px; }
+    .kb-sigil.sm { width: 14px; height: 14px; font-size: 8px; border-radius: 2px; }
+    .kb-name {
+      padding: 0 8px;
+      color: var(--kc);
+      font-size: 11px;
+    }
+
+    /* Roster */
+    .roster { display: grid; grid-template-columns: repeat(10, 1fr); gap: 6px; padding: 12px; background: var(--color-bg-surface); border: 1px solid var(--color-border-default); border-radius: 3px; }
+    .roster-cell { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px 4px; }
+    .roster-cell .kb { flex-direction: column; gap: 4px; }
+    .roster-cell .kb-name { padding: 0; font-family: var(--font-sans); font-weight: 500; color: var(--color-fg-secondary); white-space: nowrap; }
+    .roster-cell .slot-tag { font-family: var(--font-mono); font-size: 9px; color: var(--color-fg-muted); }
+
+    /* Pattern 1: Swimlane */
+    .swim { display: flex; flex-direction: column; gap: 2px; padding: 12px; background: var(--color-bg-surface); border: 1px solid var(--color-border-default); border-radius: 3px; }
+    .lane { display: grid; grid-template-columns: 160px 1fr; align-items: center; gap: 12px; height: 28px; }
+    .lane-label { display: flex; align-items: center; gap: 8px; }
+    .lane-label .kb-name { padding: 0; font-family: var(--font-sans); font-weight: 500; color: var(--color-fg-secondary); font-size: 11px; }
+    .lane-track { position: relative; height: 18px; background: rgb(255 255 255 / .02); border-radius: 2px; }
+    .lane-block { position: absolute; top: 2px; bottom: 2px; background: var(--kc); border-radius: 1px; opacity: .85; display: flex; align-items: center; padding: 0 4px; color: var(--bg-0); font-family: var(--font-mono); font-size: 9px; font-weight: 700; overflow: hidden; }
+
+    /* Pattern 2: Code gutter — sigil REPLACES bare stripe */
+    .codeblock { font-family: var(--font-mono); font-size: 12px; line-height: 1.7; background: var(--color-bg-surface); border: 1px solid var(--color-border-default); border-radius: 3px; overflow: hidden; }
+    .code-row { display: grid; grid-template-columns: 22px 38px 1fr; align-items: center; }
+    .code-row .gutter-sigil {
+      display: flex; align-items: center; justify-content: center;
+      background: var(--kc);
+      color: var(--bg-0);
+      font-size: 8px; font-weight: 700;
+      height: 100%; min-height: 22px;
+      letter-spacing: 0;
+    }
+    .code-row .gutter-num { color: var(--color-fg-muted); font-size: 10px; padding-left: 8px; text-align: right; padding-right: 8px; }
+    .code-row .code-line { color: var(--color-fg-secondary); padding: 1px 12px; white-space: pre; overflow-x: hidden; }
+    .code-row .kw { color: var(--color-accent-fg); }
+    .code-row .str { color: var(--ok); }
+    .code-row .com { color: var(--color-fg-muted); font-style: italic; }
+
+    /* Pattern 3: Presence — collapse > 4 */
+    .presence-row { display: flex; align-items: center; gap: 12px; padding: 14px; background: var(--color-bg-surface); border: 1px solid var(--color-border-default); border-radius: 3px; }
+    .presence-stack { display: flex; }
+    .presence-stack .kb-sigil { margin-left: -4px; border: 2px solid var(--color-bg-surface); }
+    .presence-stack .kb-sigil:first-child { margin-left: 0; }
+    .presence-overflow {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 24px; height: 24px;
+      background: var(--color-bg-surface-2);
+      color: var(--color-fg-secondary);
+      border: 2px solid var(--color-bg-surface);
+      border-radius: 3px;
+      font-family: var(--font-mono); font-size: 10px; font-weight: 600;
+      margin-left: -4px;
+    }
+    .presence-tiny .kb-sigil { width: 10px; height: 10px; font-size: 0; border-radius: 50%; border-width: 1px; margin-left: -3px; }
+    .presence-label { font: var(--type-caption); color: var(--color-fg-muted); }
+
+    /* Pattern 4: Activity feed */
+    .feed { display: flex; flex-direction: column; gap: 1px; background: var(--color-border-default); border: 1px solid var(--color-border-default); border-radius: 3px; overflow: hidden; }
+    .feed-row { display: grid; grid-template-columns: auto 130px 1fr 80px; align-items: center; gap: 10px; padding: 8px 12px; background: var(--color-bg-surface); font: var(--type-caption); }
+    .feed-msg { color: var(--color-fg-secondary); }
+    .feed-time { color: var(--color-fg-muted); font-family: var(--font-mono); font-size: 10px; text-align: right; }
+
+    /* Verdicts */
+    .verdict.pass { background: rgb(108 173 125 / .08); border: 1px solid rgb(108 173 125 / .35); border-left: 3px solid var(--ok); border-radius: 2px; padding: 14px 16px; font: var(--type-caption); color: var(--color-fg-secondary); }
+    .verdict.pass strong { color: var(--ok-fg); font-weight: 600; }
+
+    /* Status × keeper non-collision (now with deliberately different L+C) */
+    .mixup { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+    .mixup-card { padding: 14px; background: var(--color-bg-surface); border: 1px solid var(--color-border-default); border-radius: 3px; }
+    .mixup-card h4 { font: 600 var(--type-label); letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--color-fg-muted); margin-bottom: 12px; }
+    .mixup-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
+    .status-badge { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 2px; font: var(--type-caption); font-family: var(--font-mono); font-size: 10px; }
+    .s-ok    { background: var(--ok-soft);    color: var(--ok-fg);    border: 1px solid var(--ok-border); }
+    .s-warn  { background: var(--warn-soft);  color: var(--warn-fg);  border: 1px solid var(--warn-border); }
+    .s-err   { background: var(--err-soft);   color: var(--err-fg);   border: 1px solid var(--err-border); }
+    .s-info  { background: var(--info-soft);  color: var(--info-fg);  border: 1px solid var(--info-border); }
+    .s-stall { background: var(--stalled-soft); color: var(--stalled-fg); border: 1px solid var(--stalled-border); }
+
+    /* 12-slot palette swatch row */
+    .swatch-row { display: grid; grid-template-columns: repeat(12, 1fr); gap: 4px; padding: 12px; background: var(--color-bg-surface); border: 1px solid var(--color-border-default); border-radius: 3px; }
+    .swatch { aspect-ratio: 1; border-radius: 2px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; font-family: var(--font-mono); font-size: 9px; color: var(--bg-0); font-weight: 700; }
+    .swatch-meta { font-size: 8px; opacity: .8; }
+  </style>
+</head>
+<body>
+  <main class="pv-root">
+    <header class="pv-head">
+      <div class="pv-eyebrow">stress test v2 · 12-slot OkLCH spectrum + sigil channel</div>
+      <h1 class="pv-title">Verifying the 10-keeper case is now legible</h1>
+      <p class="pv-sub">
+        Same 10-active scenario as v1, run against the new <code>--k-1..--k-12</code> palette
+        (OkLCH 68% L, 0.09 C, 30° hue steps — adjacent ΔE &gt; 25, all ≥ 4.5:1 contrast).
+        Sigil now travels with every dot. Watch the verdict callouts flip from <strong>FAIL</strong>
+        to <strong>PASS</strong>.
+      </p>
+    </header>
+
+    <!-- 12-slot reference -->
+    <section class="pv-sect">
+      <div class="pv-sect-h"><h2>12-slot OkLCH palette</h2><span class="sub">L=68 · C=0.09 · H=0,30,60…330</span></div>
+      <div class="swatch-row">
+        <div class="swatch k1"  style="background:var(--k-1)"> 01<span class="swatch-meta">000°</span></div>
+        <div class="swatch k5"  style="background:var(--k-2)"> 02<span class="swatch-meta">030°</span></div>
+        <div class="swatch k9"  style="background:var(--k-3)"> 03<span class="swatch-meta">060°</span></div>
+        <div class="swatch k2"  style="background:var(--k-4)"> 04<span class="swatch-meta">090°</span></div>
+        <div class="swatch k6"  style="background:var(--k-5)"> 05<span class="swatch-meta">120°</span></div>
+        <div class="swatch k10" style="background:var(--k-6)"> 06<span class="swatch-meta">150°</span></div>
+        <div class="swatch k3"  style="background:var(--k-7)"> 07<span class="swatch-meta">180°</span></div>
+        <div class="swatch k7"  style="background:var(--k-8)"> 08<span class="swatch-meta">210°</span></div>
+        <div class="swatch"     style="background:var(--k-9)"> 09<span class="swatch-meta">240°</span></div>
+        <div class="swatch k4"  style="background:var(--k-10)">10<span class="swatch-meta">270°</span></div>
+        <div class="swatch k8"  style="background:var(--k-11)">11<span class="swatch-meta">300°</span></div>
+        <div class="swatch"     style="background:var(--k-12)">12<span class="swatch-meta">330°</span></div>
+      </div>
+    </section>
+
+    <!-- Roster — KeeperBadge demo -->
+    <section class="pv-sect">
+      <div class="pv-sect-h"><h2>Roster · 10 active keepers</h2><span class="sub">slot mapping spreads across hue space (skip-3 stride)</span></div>
+      <div class="roster">
+        <div class="roster-cell k1"><span class="kb"><span class="kb-sigil lg">NK</span></span><span class="kb-name">nick0cave</span><span class="slot-tag">slot 01</span></div>
+        <div class="roster-cell k2"><span class="kb"><span class="kb-sigil lg">MS</span></span><span class="kb-name">masc-imp</span><span class="slot-tag">slot 04</span></div>
+        <div class="roster-cell k3"><span class="kb"><span class="kb-sigil lg">SS</span></span><span class="kb-name">sangsu</span><span class="slot-tag">slot 07</span></div>
+        <div class="roster-cell k4"><span class="kb"><span class="kb-sigil lg">QA</span></span><span class="kb-name">qa-king</span><span class="slot-tag">slot 10</span></div>
+        <div class="roster-cell k5"><span class="kb"><span class="kb-sigil lg">RM</span></span><span class="kb-name">rama</span><span class="slot-tag">slot 02</span></div>
+        <div class="roster-cell k6"><span class="kb"><span class="kb-sigil lg">TN</span></span><span class="kb-name">tan-ops</span><span class="slot-tag">slot 05</span></div>
+        <div class="roster-cell k7"><span class="kb"><span class="kb-sigil lg">SX</span></span><span class="kb-name">sea-ix</span><span class="slot-tag">slot 08</span></div>
+        <div class="roster-cell k8"><span class="kb"><span class="kb-sigil lg">SK</span></span><span class="kb-name">sky-net</span><span class="slot-tag">slot 11</span></div>
+        <div class="roster-cell k9"><span class="kb"><span class="kb-sigil lg">PE</span></span><span class="kb-name">peach</span><span class="slot-tag">slot 03</span></div>
+        <div class="roster-cell k10"><span class="kb"><span class="kb-sigil lg">LL</span></span><span class="kb-name">lilac-fmt</span><span class="slot-tag">slot 06</span></div>
+      </div>
+    </section>
+
+    <!-- Pattern 1: Swimlane -->
+    <section class="pv-sect">
+      <div class="pv-sect-h"><h2>① Swimlane · sigil-in-block</h2><span class="sub">activity blocks now carry the sigil; even at narrow widths the keeper is identifiable</span></div>
+      <div class="swim">
+        <div class="lane k1"><div class="lane-label"><span class="kb-sigil sm">NK</span><span class="kb-name">nick0cave</span></div><div class="lane-track"><div class="lane-block" style="left:5%;width:30%">NK</div><div class="lane-block" style="left:50%;width:18%">NK</div></div></div>
+        <div class="lane k2"><div class="lane-label"><span class="kb-sigil sm">MS</span><span class="kb-name">masc-imp</span></div>  <div class="lane-track"><div class="lane-block" style="left:8%;width:22%">MS</div><div class="lane-block" style="left:60%;width:30%">MS</div></div></div>
+        <div class="lane k3"><div class="lane-label"><span class="kb-sigil sm">SS</span><span class="kb-name">sangsu</span></div>    <div class="lane-track"><div class="lane-block" style="left:0%;width:45%">SS</div></div></div>
+        <div class="lane k4"><div class="lane-label"><span class="kb-sigil sm">QA</span><span class="kb-name">qa-king</span></div>   <div class="lane-track"><div class="lane-block" style="left:35%;width:50%">QA</div></div></div>
+        <div class="lane k5"><div class="lane-label"><span class="kb-sigil sm">RM</span><span class="kb-name">rama</span></div>      <div class="lane-track"><div class="lane-block" style="left:12%;width:28%">RM</div><div class="lane-block" style="left:55%;width:25%">RM</div></div></div>
+        <div class="lane k6"><div class="lane-label"><span class="kb-sigil sm">TN</span><span class="kb-name">tan-ops</span></div>   <div class="lane-track"><div class="lane-block" style="left:20%;width:40%">TN</div></div></div>
+        <div class="lane k7"><div class="lane-label"><span class="kb-sigil sm">SX</span><span class="kb-name">sea-ix</span></div>    <div class="lane-track"><div class="lane-block" style="left:10%;width:35%">SX</div><div class="lane-block" style="left:70%;width:20%">SX</div></div></div>
+        <div class="lane k8"><div class="lane-label"><span class="kb-sigil sm">SK</span><span class="kb-name">sky-net</span></div>   <div class="lane-track"><div class="lane-block" style="left:0%;width:60%">SK</div></div></div>
+        <div class="lane k9"><div class="lane-label"><span class="kb-sigil sm">PE</span><span class="kb-name">peach</span></div>     <div class="lane-track"><div class="lane-block" style="left:40%;width:30%">PE</div></div></div>
+        <div class="lane k10"><div class="lane-label"><span class="kb-sigil sm">LL</span><span class="kb-name">lilac-fmt</span></div><div class="lane-track"><div class="lane-block" style="left:5%;width:25%">LL</div><div class="lane-block" style="left:65%;width:30%">LL</div></div></div>
+      </div>
+      <div class="verdict pass"><strong>PASS · </strong>Adjacent slots span ≥90° hue (skip-3 stride) and every block carries its sigil. No collisions even when blocks are 18% wide.</div>
+    </section>
+
+    <!-- Pattern 2: Code gutter -->
+    <section class="pv-sect">
+      <div class="pv-sect-h"><h2>② Code gutter · sigil-as-attribution</h2><span class="sub">22px sigil column replaces the 8px color stripe — color reinforces, sigil decides</span></div>
+      <div class="codeblock">
+        <div class="code-row k1"><div class="gutter-sigil">NK</div><div class="gutter-num">42</div><div class="code-line"><span class="kw">async fn</span> spawn_keeper(id: KeeperId) -&gt; Result&lt;Handle&gt; {</div></div>
+        <div class="code-row k1"><div class="gutter-sigil">NK</div><div class="gutter-num">43</div><div class="code-line">    <span class="kw">let</span> cfg = Config::load(&amp;id).await?;</div></div>
+        <div class="code-row k6"><div class="gutter-sigil">TN</div><div class="gutter-num">44</div><div class="code-line">    <span class="com">// tan-ops: race condition on cold start, gate with mutex</span></div></div>
+        <div class="code-row k6"><div class="gutter-sigil">TN</div><div class="gutter-num">45</div><div class="code-line">    <span class="kw">let</span> _lock = SPAWN_MUTEX.lock().await;</div></div>
+        <div class="code-row k2"><div class="gutter-sigil">MS</div><div class="gutter-num">46</div><div class="code-line">    <span class="kw">let</span> lane = ProbeLane::allocate(&amp;cfg)?;</div></div>
+        <div class="code-row k7"><div class="gutter-sigil">SX</div><div class="gutter-num">47</div><div class="code-line">    lane.attach_metrics(<span class="str">"keeper.spawn"</span>);</div></div>
+        <div class="code-row k3"><div class="gutter-sigil">SS</div><div class="gutter-num">48</div><div class="code-line">    <span class="kw">let</span> handle = Runtime::current().spawn(<span class="kw">async move</span> {</div></div>
+        <div class="code-row k8"><div class="gutter-sigil">SK</div><div class="gutter-num">49</div><div class="code-line">        <span class="com">// sky-net: backpressure tokens</span></div></div>
+        <div class="code-row k8"><div class="gutter-sigil">SK</div><div class="gutter-num">50</div><div class="code-line">        TokenBucket::new(cfg.tps).await</div></div>
+        <div class="code-row k4"><div class="gutter-sigil">QA</div><div class="gutter-num">51</div><div class="code-line">            .with_recovery(RecoveryPolicy::Restart)</div></div>
+        <div class="code-row k9"><div class="gutter-sigil">PE</div><div class="gutter-num">52</div><div class="code-line">            .with_timeout(Duration::from_secs(<span class="str">30</span>))</div></div>
+        <div class="code-row k5"><div class="gutter-sigil">RM</div><div class="gutter-num">53</div><div class="code-line">            .run(lane).await</div></div>
+        <div class="code-row k10"><div class="gutter-sigil">LL</div><div class="gutter-num">54</div><div class="code-line">    });</div></div>
+        <div class="code-row k1"><div class="gutter-sigil">NK</div><div class="gutter-num">55</div><div class="code-line">    Ok(handle)</div></div>
+        <div class="code-row k1"><div class="gutter-sigil">NK</div><div class="gutter-num">56</div><div class="code-line">}</div></div>
+      </div>
+      <div class="verdict pass"><strong>PASS · </strong>Line 43→44 (NK→TN) and 46→47 (MS→SX) are now unambiguous. Even on a monochrome printer, the gutter still carries author identity.</div>
+    </section>
+
+    <!-- Pattern 3: Presence -->
+    <section class="pv-sect">
+      <div class="pv-sect-h"><h2>③ Presence · cap at 4, +N overflow</h2><span class="sub">"approx. 10 dots" anti-pattern eliminated</span></div>
+      <div class="presence-row">
+        <div class="presence-stack">
+          <span class="kb-sigil k1">NK</span>
+          <span class="kb-sigil k2">MS</span>
+          <span class="kb-sigil k3">SS</span>
+          <span class="kb-sigil k4">QA</span>
+          <span class="presence-overflow">+6</span>
+        </div>
+        <span class="presence-label">10 active · code-mode/keeper.rs · (hover +6 to expand)</span>
+      </div>
+      <div class="presence-row">
+        <div class="presence-stack presence-tiny">
+          <span class="kb-sigil k1"></span><span class="kb-sigil k2"></span><span class="kb-sigil k3"></span>
+          <span class="kb-sigil k4"></span><span class="kb-sigil k5"></span><span class="kb-sigil k6"></span>
+          <span class="kb-sigil k7"></span><span class="kb-sigil k8"></span><span class="kb-sigil k9"></span>
+          <span class="kb-sigil k10"></span>
+        </div>
+        <span class="presence-label">10px count-only mode · color is decorative; the digit "10" carries meaning. Tooltip lists names.</span>
+      </div>
+      <div class="verdict pass"><strong>PASS · </strong>Information density resolved by capping. At 10px we acknowledge color cannot disambiguate — fall back to count + tooltip. Honest design.</div>
+    </section>
+
+    <!-- Pattern 4: Activity feed -->
+    <section class="pv-sect">
+      <div class="pv-sect-h"><h2>④ Activity feed · KeeperBadge inline</h2><span class="sub">sigil + name composed into a single component</span></div>
+      <div class="feed">
+        <div class="feed-row"><span class="kb k1"><span class="kb-sigil">NK</span><span class="kb-name">nick0cave</span></span><span></span><div class="feed-msg">opened PR #2847 · refactor probe lane allocator</div><div class="feed-time">14:02:18</div></div>
+        <div class="feed-row"><span class="kb k7"><span class="kb-sigil">SX</span><span class="kb-name">sea-ix</span></span>   <span></span><div class="feed-msg">approved diff (12 hunks, +84 −31)</div><div class="feed-time">14:02:51</div></div>
+        <div class="feed-row"><span class="kb k2"><span class="kb-sigil">MS</span><span class="kb-name">masc-imp</span></span><span></span><div class="feed-msg">spawned 3 sub-tasks on probe lane β</div><div class="feed-time">14:03:09</div></div>
+        <div class="feed-row"><span class="kb k4"><span class="kb-sigil">QA</span><span class="kb-name">qa-king</span></span> <span></span><div class="feed-msg">test failure: token_bucket::race_cold_start (line 44)</div><div class="feed-time">14:03:22</div></div>
+        <div class="feed-row"><span class="kb k9"><span class="kb-sigil">PE</span><span class="kb-name">peach</span></span>   <span></span><div class="feed-msg">reverted commit a2f1c8 due to qa-king finding</div><div class="feed-time">14:03:48</div></div>
+        <div class="feed-row"><span class="kb k3"><span class="kb-sigil">SS</span><span class="kb-name">sangsu</span></span>  <span></span><div class="feed-msg">routed traffic to fallback provider (anthropic→moonshot)</div><div class="feed-time">14:04:01</div></div>
+        <div class="feed-row"><span class="kb k8"><span class="kb-sigil">SK</span><span class="kb-name">sky-net</span></span> <span></span><div class="feed-msg">tps drop detected: 247→189 · backpressure engaged</div><div class="feed-time">14:04:15</div></div>
+        <div class="feed-row"><span class="kb k5"><span class="kb-sigil">RM</span><span class="kb-name">rama</span></span>    <span></span><div class="feed-msg">style sweep · 18 files · ran rustfmt</div><div class="feed-time">14:04:33</div></div>
+        <div class="feed-row"><span class="kb k10"><span class="kb-sigil">LL</span><span class="kb-name">lilac-fmt</span></span><span></span><div class="feed-msg">linted 4 modules · 0 violations</div><div class="feed-time">14:04:41</div></div>
+        <div class="feed-row"><span class="kb k6"><span class="kb-sigil">TN</span><span class="kb-name">tan-ops</span></span> <span></span><div class="feed-msg">paged on-call · capacity 87% · scaling lane pool +2</div><div class="feed-time">14:05:02</div></div>
+      </div>
+      <div class="verdict pass"><strong>PASS · </strong>Sigil + colored name is double-encoded. Even with monitor color shift or partial color blindness, the 2-letter sigil resolves the author.</div>
+    </section>
+
+    <!-- Pattern 5: status × keeper non-collision -->
+    <section class="pv-sect">
+      <div class="pv-sect-h"><h2>⑤ Status × Keeper · semantic separation</h2><span class="sub">keeper hues now structurally distinct from status</span></div>
+      <div class="mixup">
+        <div class="mixup-card">
+          <h4>Keeper sigils (12-slot OkLCH 68% L)</h4>
+          <div class="mixup-row k1"><span class="kb-sigil">NK</span><span class="presence-label">slot 01 · rose · #c8869b</span></div>
+          <div class="mixup-row k2"><span class="kb-sigil">MS</span><span class="presence-label">slot 04 · olive · #b09c4d</span></div>
+          <div class="mixup-row k3"><span class="kb-sigil">SS</span><span class="presence-label">slot 07 · teal · #45b09a</span></div>
+          <div class="mixup-row k4"><span class="kb-sigil">QA</span><span class="presence-label">slot 10 · iris · #8b96cf</span></div>
+          <div class="mixup-row k5"><span class="kb-sigil">RM</span><span class="presence-label">slot 02 · clay · #cc8a7b</span></div>
+        </div>
+        <div class="mixup-card">
+          <h4>Status badges (status family · saturated)</h4>
+          <div class="mixup-row"><span class="status-badge" style="background:rgb(212 161 74 / .10);color:#d4a14a;border:1px solid rgb(212 161 74 / .35)">ACTIVE</span><span class="presence-label">accent-fg · brass</span></div>
+          <div class="mixup-row"><span class="status-badge s-ok">OK</span><span class="presence-label">status-ok · #6b9e6b</span></div>
+          <div class="mixup-row"><span class="status-badge s-info">PENDING</span><span class="presence-label">status-info · #6a8eb0</span></div>
+          <div class="mixup-row"><span class="status-badge s-err">FAIL</span><span class="presence-label">status-err · #c46a5a</span></div>
+          <div class="mixup-row"><span class="status-badge s-stall">STALLED</span><span class="presence-label">status-stalled · #8a6aa0</span></div>
+        </div>
+      </div>
+      <div class="verdict pass"><strong>PASS · </strong>No keeper hex matches a status hex. The shape (rounded square sigil vs pill badge) reinforces the semantic split: <em>"who" is a sigil, "what state" is a pill</em>.</div>
+    </section>
+
+    <!-- v0.3 summary -->
+    <section class="pv-sect">
+      <div class="pv-sect-h"><h2>✦ v0.3 deliverables</h2></div>
+      <div class="mixup-card" style="grid-column: span 2;">
+        <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 8px; font: var(--type-body); color: var(--color-fg-secondary);">
+          <li><strong>tokens.css</strong> — 12 new <code>--k-1..12</code> + 36 4-slot tokens (soft/border/ring) + 12 glow triplets. Old 5 named keepers aliased to slots 3/6/9/2/11.</li>
+          <li><strong>colors_and_type.css façade</strong> — <code>--color-keeper-1..12</code> exposed at canonical tier.</li>
+          <li><strong>.dot-k-1..12</strong> classes added; <code>.dot-k-nick</code> etc deprecated but functional.</li>
+          <li><strong>SPEC §3.6 v0.3</strong> — color-only attribution forbidden; <code>&lt;KeeperBadge&gt;</code> canonical.</li>
+          <li><strong>This page</strong> — proves all 5 patterns render correctly with 10 keepers active.</li>
+        </ul>
+      </div>
+    </section>
+
+  </main>
+</body>
+</html>

@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { useSignal } from '@preact/signals'
 import { useEffect, useMemo, useRef } from 'preact/hooks'
 import { DashedNotice } from './common/dashed-notice'
+import { TextInput } from './common/input'
 
 import {
   type CompositeObservation,
@@ -389,13 +390,13 @@ export function TransitionTrail({
         <div class="text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">
           Transition History (${isFiltering ? `${visibleHistory.length}/${history.length}` : history.length})
         </div>
-        <input
+        <${TextInput}
           type="search"
+          class="min-w-30 max-w-50 flex-1 !px-2 !py-0.5 !text-3xs"
           value=${query.value}
           placeholder="field / from / to 필터"
-          aria-label="전이 이력 필터"
+          ariaLabel="전이 이력 필터"
           onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
-          class="min-w-30 max-w-50 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-0.5 text-3xs text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
         />
       </div>
       ${isFiltering && visibleHistory.length === 0

@@ -462,6 +462,15 @@
     (run %{test}))))
  (libraries masc_test_deps))
 
+(test
+ (name test_keeper_personality_round_trip)
+ (modules test_keeper_personality_round_trip)
+ (action
+  (setenv MASC_BASE_PATH /tmp/test-keeper-personality-round-trip
+   (setenv MASC_BASE_PATH_INPUT /tmp/test-keeper-personality-round-trip
+    (run %{test}))))
+ (libraries masc_test_deps))
+
 
 ; #10091: dedicated stanza so MASC_BASE_PATH is set BEFORE the
 ; test executable loads — the top-level Masc_mcp init includes

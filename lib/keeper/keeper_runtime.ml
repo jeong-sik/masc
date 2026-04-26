@@ -7,8 +7,27 @@ open Keeper_types
     whitespace.  The TOML heredoc parser drops the newline before the
     closing triple-quote; the state JSON writer preserves the in-
     memory value.  That 1-byte drift drives a re-sync storm on every
-    hot-reload tick unless the compare normalizes whitespace. *)
-let personality_text_equal a b = String.equal (String.trim a) (String.trim b)
+    hot-reload tick unless the compare normalizes whitespace.
+
+    Layer 1 (personality SSOT unification, see
+    [planning/2026-04-25-keeper-identity-canonicalization-rfc.md]):
+    [String.trim] alone is insufficient — when the persisted text
+    exceeds [Keeper_config.prompt_render_max_bytes] (e.g. nick0cave's
+    357-byte will), the read path normalises to ~319 bytes via
+    [normalize_self_model_text], while [target_will] computed from
+    [apply_default defaults.will meta.will] keeps the raw 357-byte
+    value.  trim-only compare flagged that 38-byte gap as drift on
+    every reconcile tick (~2880 redundant writes/day for nick0cave).
+    Apply the same byte-cap normalisation on both sides so write
+    preserves disk-of-record (raw bytes), but compare uses the
+    capped form that the prompt actually renders.  Disk data is
+    preserved; loop terminates. *)
+let personality_text_equal a b =
+  String.equal
+    (Keeper_config.normalize_self_model_text
+       ~max_bytes:Keeper_config.prompt_render_max_bytes a)
+    (Keeper_config.normalize_self_model_text
+       ~max_bytes:Keeper_config.prompt_render_max_bytes b)
 
 (** #10269: when [personality_text_equal] reports a mismatch, the
     operator needs to know WHICH personality field differs and HOW
@@ -43,13 +62,20 @@ let first_byte_diff a b =
 let personality_field_diff_entry name current target =
   if personality_text_equal current target then None
   else
-    let cur_t = String.trim current and tgt_t = String.trim target in
-    let pos = first_byte_diff cur_t tgt_t in
+    let cur_n =
+      Keeper_config.normalize_self_model_text
+        ~max_bytes:Keeper_config.prompt_render_max_bytes current
+    in
+    let tgt_n =
+      Keeper_config.normalize_self_model_text
+        ~max_bytes:Keeper_config.prompt_render_max_bytes target
+    in
+    let pos = first_byte_diff cur_n tgt_n in
     Some
       (Printf.sprintf "%s(cur=%d,tgt=%d,diff@%d)"
          name
-         (String.length cur_t)
-         (String.length tgt_t)
+         (String.length cur_n)
+         (String.length tgt_n)
          pos)
 
 let personality_diff_summary fields =

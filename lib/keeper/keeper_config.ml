@@ -111,7 +111,13 @@ let default_proactive_cooldown_sec = 300
 let default_room_signal_prompt_enabled = false
 let default_goal_horizon_max_chars = 480
 let default_drift_max_clauses = 6
-let default_drift_max_chars = 320
+let prompt_render_max_bytes = 320
+
+(* DEPRECATED: name lied — value is bytes (drives utf8_safe_prefix_bytes),
+   not chars. Kept as alias for one release to avoid mass call-site churn;
+   removed in Layer 2 follow-up of personality SSOT unification. *)
+let default_drift_max_chars = prompt_render_max_bytes
+  [@@warning "-32"]
 
 let keeper_room_signal_prompt_enabled_override () =
   bool_of_env_opt "MASC_KEEPER_ROOM_SIGNAL_PROMPT_ENABLED"
@@ -253,10 +259,10 @@ let utf8_repair_string (s : string) : string =
   loop 0;
   Buffer.contents buf
 
-let normalize_self_model_text ?(max_len = default_drift_max_chars) (raw : string) : string =
+let normalize_self_model_text ~(max_bytes : int) (raw : string) : string =
   let s = String.trim raw in
   if s = "" then ""
-  else utf8_safe_prefix_bytes s ~max_bytes:max_len
+  else utf8_safe_prefix_bytes s ~max_bytes
 
 let normalize_goal_horizon_text ?(max_len = default_goal_horizon_max_chars) (raw : string) : string =
   let s = String.trim raw in
@@ -315,18 +321,19 @@ let take_last n xs =
 
 let compact_self_model_text
     ?(max_clauses = default_drift_max_clauses)
-    ?(max_chars = default_drift_max_chars)
+    ~(max_bytes : int)
     (raw : string) : string =
   raw
   |> split_semicolon_clauses
   |> take_last max_clauses
   |> String.concat "; "
-  |> normalize_self_model_text ~max_len:max_chars
+  |> normalize_self_model_text ~max_bytes
 
 let parse_self_model_opt args key : string option =
   match get_string_opt args key with
   | None -> None
-  | Some raw -> Some (normalize_self_model_text raw)
+  | Some raw ->
+    Some (normalize_self_model_text ~max_bytes:prompt_render_max_bytes raw)
 
 let clamp_int v ~min_v ~max_v =
   max min_v (min max_v v)

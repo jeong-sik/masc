@@ -157,6 +157,43 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
       ~preferred:p.tool_denylist_opt
       ~fallback:profile_or_old
   in
+  let new_will =
+    Option.value
+      ~default:
+        (if String.trim old.will <> "" then old.will
+         else Option.value ~default:(Env_config_core.keeper_will ()) p.profile_defaults.will)
+      p.will_opt
+  in
+  let new_needs =
+    Option.value
+      ~default:
+        (if String.trim old.needs <> "" then old.needs
+         else Option.value ~default:(Env_config_core.keeper_needs ()) p.profile_defaults.needs)
+      p.needs_opt
+  in
+  let new_desires =
+    Option.value
+      ~default:
+        (if String.trim old.desires <> "" then old.desires
+         else Option.value ~default:(Env_config_core.keeper_desires ()) p.profile_defaults.desires)
+      p.desires_opt
+  in
+  (* Layer 1 boundary check: warn (not truncate) when an update brings a
+     persona field above the prompt-render cap.  Skip when the value
+     equals [old.*] — a silent read-back must not spam logs.  Disk
+     preserves the raw value; only prompt rendering applies the cap. *)
+  let warn_personality_cap field old_value new_value =
+    if not (String.equal old_value new_value) then
+      let len = String.length new_value in
+      if len > Keeper_config.prompt_render_max_bytes then
+        Log.Keeper.warn
+          "update_keeper personality.%s for %s exceeds prompt cap \
+           (%d bytes > %d). Stored as-is; truncated only at prompt rendering."
+          field old.name len Keeper_config.prompt_render_max_bytes
+  in
+  warn_personality_cap "will" old.will new_will;
+  warn_personality_cap "needs" old.needs new_needs;
+  warn_personality_cap "desires" old.desires new_desires;
   let updated = { old with
     goal;
     short_goal;
@@ -179,24 +216,9 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
          if String.trim old.cascade_name <> "" then
            old.cascade_name
          else Keeper_config.default_cascade_name);
-    will =
-      Option.value
-        ~default:
-          (if String.trim old.will <> "" then old.will
-           else Option.value ~default:(Env_config_core.keeper_will ()) p.profile_defaults.will)
-        p.will_opt;
-    needs =
-      Option.value
-        ~default:
-          (if String.trim old.needs <> "" then old.needs
-           else Option.value ~default:(Env_config_core.keeper_needs ()) p.profile_defaults.needs)
-        p.needs_opt;
-    desires =
-      Option.value
-        ~default:
-          (if String.trim old.desires <> "" then old.desires
-           else Option.value ~default:(Env_config_core.keeper_desires ()) p.profile_defaults.desires)
-        p.desires_opt;
+    will = new_will;
+    needs = new_needs;
+    desires = new_desires;
     instructions =
       Option.value
         ~default:

@@ -61,17 +61,26 @@ let build_keeper_system_prompt
   in
   let profile_policy = "Maintain high standard of reasoning, factual grounding, and clear communication." in
   let will =
-    let s = normalize_self_model_text will in
+    let s =
+      normalize_self_model_text
+        ~max_bytes:Keeper_config.prompt_render_max_bytes will
+    in
     if s = "" then "Maintain coherent identity and goal continuity." else s
   in
   let needs =
-    let s = normalize_self_model_text needs in
+    let s =
+      normalize_self_model_text
+        ~max_bytes:Keeper_config.prompt_render_max_bytes needs
+    in
     if s = "" then
       "Reliable context continuity, factual grounding, and explicit next steps."
     else s
   in
   let desires =
-    let s = normalize_self_model_text desires in
+    let s =
+      normalize_self_model_text
+        ~max_bytes:Keeper_config.prompt_render_max_bytes desires
+    in
     if s = "" then "Make progress that is observable and useful to the user."
     else s
   in

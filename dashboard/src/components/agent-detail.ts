@@ -286,6 +286,7 @@ export function AgentDetailOverlay() {
                             class="text-text-strong font-semibold hover:text-accent underline underline-offset-2 decoration-dotted transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 rounded"
                             onClick=${() => { closeAgentDetail(); openKeeperDetail(keeper) }}
                             title="키퍼 상세 페이지 열기"
+                            aria-label="${keeper.name} 키퍼 상세 보기"
                           >${keeper.name}</button>
                           <${KeeperPhaseBadge} phase=${keeper.phase} compact=${true} />
                           ${keeperIdentity ? html`<span class="text-text-dim text-xs">· ${keeperIdentity}</span>` : ''}

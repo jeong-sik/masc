@@ -365,6 +365,7 @@ export function HandoffTimeline({
                           type="button"
                           class=${rowLabelCls}
                           title=${row.keeper}
+                          aria-label=${`${row.keeper} 상세 보기`}
                           onClick=${() => onSelectKeeper?.(row.keeper)}
                         >${row.keeper}</button>`
                       : html`<div class=${rowLabelCls} title=${row.keeper}>${row.keeper}</div>`}

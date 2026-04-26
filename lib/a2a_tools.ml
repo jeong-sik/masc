@@ -458,7 +458,7 @@ let delegate config ~agent_name ~target ~message
           ("portal_message", `String msg);
           ("timeout_ms", `Int timeout_ms);
           ("deadline", `Float deadline);
-          ("stream_endpoint", `String "/sse/portal");
+          ("note", `String "Use masc_portal_status to poll for streamed responses");
         ])
 
 (** Subscribe to agent events
@@ -502,8 +502,7 @@ let subscribe ?(agent_filter : string option) ~(events : string list) ()
         | Some a -> `String a);
       ("events", `List (List.map (fun e -> `String (show_event_type e)) event_types));
       ("created_at", `String sub.created_at);
-      ("sse_endpoint", `String "/sse/subscriptions");
-      ("note", `String "Connect to SSE endpoint to receive events");
+      ("note", `String "Buffered events accumulate server-side; retrieval API not yet exposed via MCP. See masc-mcp issue tracker.");
     ])
 
 (** Unsubscribe from events

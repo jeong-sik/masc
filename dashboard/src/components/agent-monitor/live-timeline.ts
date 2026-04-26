@@ -17,13 +17,13 @@ const activeFilter = signal<FilterKind>('all')
 const autoScroll = signal(true)
 
 const FILTER_CHIPS: { key: FilterKind; label: string }[] = [
-  { key: 'all', label: 'All' },
-  { key: 'heartbeat', label: 'Heartbeat' },
-  { key: 'message', label: 'Message/Board' },
-  { key: 'oas_turn', label: 'OAS Turn' },
-  { key: 'tool', label: 'Tool' },
-  { key: 'error', label: 'Error' },
-  { key: 'lifecycle', label: 'Lifecycle' },
+  { key: 'all', label: '전체' },
+  { key: 'heartbeat', label: '하트비트' },
+  { key: 'message', label: '메시지/보드' },
+  { key: 'oas_turn', label: 'OAS 턴' },
+  { key: 'tool', label: '도구' },
+  { key: 'error', label: '오류' },
+  { key: 'lifecycle', label: '라이프사이클' },
 ]
 
 export function eventMatchesFilter(entry: JournalEntry, filter: FilterKind): boolean {

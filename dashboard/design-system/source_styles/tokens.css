@@ -828,3 +828,63 @@ button.is-active, .btn.is-active { background: var(--bg-4); color: var(--brass-1
   --radius-sm: 0;
   --radius-md: 0;
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   BONSAI STRUCTURAL TOKENS (shadow primitives)
+   ───────────────────────────────────────────────────────────────────
+   4 tokens with theme-specific overrides. `--shadow-inset` is NOT
+   absorbed here — dashboard tokens.css already defines it with a
+   different semantic (top-edge highlight vs bonsai's full ring).
+   Resolution deferred to a later PR.
+   ═══════════════════════════════════════════════════════════════════ */
+
+:root {
+  --shadow-card:   0 1px 4px rgba(0, 0, 0, 0.5);
+  --shadow-panel:  0 2px 12px rgba(0, 0, 0, 0.6);
+  --shadow-glow:   0 0 20px var(--accent-glow);
+  --shadow-raised: 0 8px 24px rgba(0, 0, 0, 0.55), 0 0 0 1px var(--border-highlight);
+}
+
+[data-theme="cyberpunk"] {
+  --shadow-panel: 0 0 16px rgba(106, 47, 214, 0.3);
+  --shadow-glow:  0 0 24px rgba(0, 255, 204, 0.2), 0 0 48px rgba(0, 255, 204, 0.05);
+}
+
+[data-theme="terminal"] {
+  --shadow-panel: 0 0 8px rgba(0, 255, 0, 0.1);
+  --shadow-glow:  0 0 16px rgba(0, 255, 0, 0.15);
+}
+
+[data-theme="parchment"] {
+  --shadow-panel: 0 1px 2px rgba(0,0,0,0.06), 0 0 0 1px rgba(0,0,0,0.06);
+  --shadow-card:  0 1px 0 rgba(0,0,0,0.04);
+  --shadow-glow:  none;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   BONSAI STRUCTURAL TOKENS (font stacks)
+   ───────────────────────────────────────────────────────────────────
+   bonsai's display/body/ui font stacks. dashboard already defines
+   `--font-mono` separately (line ~152) — not duplicated here.
+
+   cyberpunk + terminal collapse all stacks to monospace for
+   intentional aesthetic. parchment + paper inherit :root.
+   ═══════════════════════════════════════════════════════════════════ */
+
+:root {
+  --font-display: 'Cinzel', 'Noto Sans KR', 'EB Garamond', serif;
+  --font-body:    'EB Garamond', 'Noto Sans KR', Georgia, serif;
+  --font-ui:      'Noto Sans KR', 'IBM Plex Sans KR', -apple-system, sans-serif;
+}
+
+[data-theme="cyberpunk"] {
+  --font-display: 'Share Tech Mono', 'Noto Sans KR', monospace;
+  --font-body:    'Noto Sans KR', sans-serif;
+  --font-ui:      'Share Tech Mono', 'Noto Sans KR', monospace;
+}
+
+[data-theme="terminal"] {
+  --font-display: 'JetBrains Mono', 'Noto Sans KR', monospace;
+  --font-body:    'JetBrains Mono', 'Noto Sans KR', monospace;
+  --font-ui:      'JetBrains Mono', 'Noto Sans KR', monospace;
+}

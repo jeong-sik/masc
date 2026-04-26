@@ -71,6 +71,7 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
       <button type="button"
         class="w-full flex items-center gap-2 px-3 py-2 text-xs cursor-pointer text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
         aria-expanded=${expanded.value}
+        aria-controls=${`tc-${entry.tool}-${entry.ts}`}
         aria-label=${`${entry.tool} 도구 호출${expanded.value ? ' 접기' : ' 펼치기'}`}
         onClick=${() => { expanded.value = !expanded.value }}
       >
@@ -89,7 +90,7 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
       </button>
 
       ${expanded.value ? html`
-        <div class="px-3 pb-3 space-y-2">
+        <div id=${`tc-${entry.tool}-${entry.ts}`} class="px-3 pb-3 space-y-2">
           ${entry.model ? html`
             <div class="text-3xs text-[var(--text-muted)]">model: <span class="text-[var(--text-strong)] font-mono">${entry.model}</span></div>
           ` : null}

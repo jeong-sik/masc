@@ -204,6 +204,7 @@ function ChatMessageBubble({
                   isMessenger ? 'rounded px-2.5 py-1' : 'rounded-sm px-3 py-1'
                 }`}
                 aria-expanded=${expanded}
+                aria-controls=${`chat-detail-${entry.id}`}
                 onClick=${() => { setExpandedRaw(!expandedRaw) }}
               >
                 ${expanded ? '상세 숨기기' : '상세 보기'}
@@ -235,7 +236,7 @@ function ChatMessageBubble({
 
       ${expanded && entry.details
         ? html`
-            <div class="chat-detail-panel rounded-card border border-[var(--slate-gray-14)] px-3 py-3">
+            <div id=${`chat-detail-${entry.id}`} class="chat-detail-panel rounded-card border border-[var(--slate-gray-14)] px-3 py-3">
               ${overview.length > 0
                 ? html`
                     <div class="grid grid-cols-[repeat(auto-fit,minmax(116px,1fr))] gap-2">
@@ -280,12 +281,13 @@ function ChatMessageBubble({
                       <button type="button"
                         class="self-start rounded-sm border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-1 text-2xs font-medium text-[var(--text-muted)] transition-colors hover:bg-[var(--white-10)] hover:text-[var(--text-body)]"
                         aria-expanded=${rawExpanded}
+                        aria-controls=${`chat-raw-${entry.id}`}
                         onClick=${() => { setRawExpandedRaw(!rawExpandedRaw) }}
                       >
                         ${rawExpanded ? '원본 숨기기' : '원본 보기'}
                       </button>
                       ${rawExpanded
-                        ? html`<div class="mt-2"><${JsonViewerCard} data=${entry.details.rawPayload} /></div>`
+                        ? html`<div id=${`chat-raw-${entry.id}`} class="mt-2"><${JsonViewerCard} data=${entry.details.rawPayload} /></div>`
                         : null}
                     </div>
                   `

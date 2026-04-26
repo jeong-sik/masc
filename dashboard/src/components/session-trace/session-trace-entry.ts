@@ -199,7 +199,7 @@ function ResultViewer({ text, hint, isError: isErr }: { text: string; hint: Cont
   const displayText = isTruncatedPlain ? text.slice(0, MAX_TEXT_LEN) + '\n\n... (Output truncated for performance) ...' : text
 
   return html`
-    <div role="group" aria-label=${titleLabel}>
+    <div role="group" aria-label=${titleLabel} id=${`rv-${titleLabel}-${text.length}`}>
       <div class="flex items-center justify-between mb-1">
         <span class="text-3xs font-semibold uppercase tracking-wider ${titleColor}">${titleLabel}</span>
         ${hint !== 'plain' ? html`
@@ -220,6 +220,7 @@ function ResultViewer({ text, hint, isError: isErr }: { text: string; hint: Cont
           <button type="button"
             class="w-full py-1.5 text-3xs font-medium text-[var(--accent)] hover:text-[var(--text-strong)] hover:bg-[var(--white-5)] transition-colors cursor-pointer border-t border-[var(--white-6)] bg-transparent"
             aria-expanded=${expanded.value}
+            aria-controls=${`rv-${titleLabel}-${text.length}`}
             onClick=${() => { expanded.value = !expanded.value }}
           >
             ${expanded.value ? '접기' : `전체 보기 (${text.split('\n').length}줄)`}

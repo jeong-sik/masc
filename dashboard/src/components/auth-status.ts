@@ -145,6 +145,7 @@ export function AuthStatus() {
       <button type="button"
         class="flex items-center gap-1.5 text-2xs py-1 px-2 rounded border border-solid border-[var(--card-border)] bg-[var(--white-4)] cursor-pointer font-[inherit] transition-colors duration-150 hover:bg-[var(--white-8)] text-[var(--text-muted)]"
         aria-expanded=${popoverOpen.value}
+        aria-controls="auth-popover"
         aria-haspopup="true"
         onClick=${() => { popoverOpen.value ? (popoverOpen.value = false) : openPopover() }}
         title="인증 상태"
@@ -170,7 +171,7 @@ function AuthPopover() {
   const actorOverrideLocked = authenticated
 
   return html`
-    <div class="absolute right-0 top-full mt-1.5 w-80 rounded border border-[var(--card-border)] bg-[rgba(10,18,34,0.97)] shadow-sm backdrop-blur-sm p-3 z-50">
+    <div id="auth-popover" class="absolute right-0 top-full mt-1.5 w-80 rounded border border-[var(--card-border)] bg-[rgba(10,18,34,0.97)] shadow-sm backdrop-blur-sm p-3 z-50">
       <div class="flex flex-col gap-3">
         <div class="grid grid-cols-[auto,1fr] gap-x-2 gap-y-1 text-2xs">
           <${AuthRow} label="stored actor" value=${storedActor ? `@${storedActor}` : '-'} />

@@ -23,6 +23,7 @@ import { Eye, EyeOff } from 'lucide-preact'
 import { ActionButton } from './common/button'
 import { CopyableCode } from './common/copyable-code'
 import { LoadingState } from './common/feedback-state'
+import { TextInput } from './common/input'
 import { showToast } from './common/toast'
 
 type FieldType = 'string' | 'integer' | 'number' | 'boolean' | 'unknown'
@@ -342,7 +343,15 @@ function FieldWidget({ id, field, value, revealed }: {
     setEntry(id, { reveal: { ...getEntry(id).reveal, [field.name]: !revealed } })
   }
 
+  // baseInput — preserved for the type=number branch which still uses
+  // a raw <input type="number"> until NumberInput migration handles
+  // signal-typed numeric values across the form.
   const baseInput = 'w-full rounded border border-[var(--white-8)] bg-[var(--color-bg-page)] px-2 py-1 font-mono text-2xs text-[var(--color-fg-primary)] focus:border-[var(--accent-1)] focus:outline-none'
+  // tightMonoOverride — TextInput class extension. INPUT_BASE owns
+  // border/text/placeholder/focus-visible. Only the size/font/bg need
+  // overrides to match the compact mono-style of the connector form
+  // (INPUT_BASE defaults to text-sm + py-2 + bg-white-4).
+  const tightMonoOverride = '!border-[var(--white-8)] !bg-[var(--color-bg-page)] !px-2 !py-1 !text-2xs font-mono'
 
   switch (field.type) {
     case 'boolean':
@@ -373,12 +382,12 @@ function FieldWidget({ id, field, value, revealed }: {
       if (isSensitive(field.name)) {
         return html`
           <div class="flex items-center gap-1">
-            <input
+            <${TextInput}
               type=${revealed ? 'text' : 'password'}
               value=${value}
               onInput=${onInput}
               placeholder=${field.required ? '필수 — 토큰을 붙여넣으세요' : ''}
-              class=${baseInput}
+              class=${tightMonoOverride}
             />
             <button
               type="button"
@@ -392,12 +401,12 @@ function FieldWidget({ id, field, value, revealed }: {
         `
       }
       return html`
-        <input
+        <${TextInput}
           type="text"
           value=${value}
           onInput=${onInput}
           placeholder=${defaultToString(field.default)}
-          class=${baseInput}
+          class=${tightMonoOverride}
         />
       `
     default:

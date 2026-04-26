@@ -14,10 +14,10 @@ import { EmptyState, ErrorState } from '../common/feedback-state'
 import { formatTimeAgo } from '../common/time-ago'
 
 const FILTER_OPTIONS: { kind: LiveFilterKind; label: string; cssClass: string }[] = [
-  { kind: 'broadcast', label: 'Broadcast', cssClass: 'live-event-broadcast' },
-  { kind: 'tasks', label: 'Task', cssClass: 'live-event-task' },
+  { kind: 'broadcast', label: '브로드캐스트', cssClass: 'live-event-broadcast' },
+  { kind: 'tasks', label: '작업', cssClass: 'live-event-task' },
   { kind: 'keepers', label: 'Keeper', cssClass: 'live-event-keeper' },
-  { kind: 'system', label: 'System', cssClass: 'live-event-system' },
+  { kind: 'system', label: '시스템', cssClass: 'live-event-system' },
 ]
 
 function FilterBar() {

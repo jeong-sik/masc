@@ -12,6 +12,38 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
   Sse.set_clock clock;
   (* Wire stop_keeper hook so zombie GC can terminate keeper fibers *)
   Atomic.set Coord_hooks.stop_keeper_fn Keeper_keepalive.stop_keepalive;
+  (* task-103: auto-provision a per-task sandbox worktree on successful
+     claim for keepers running with sandbox_profile=Docker. Best-effort —
+     failures are logged and the claim succeeds regardless, keeping claim
+     semantics decoupled from sandbox state. Local-profile keepers work on
+     the project root directly and do not need provisioning. *)
+  Atomic.set Coord_hooks.claim_post_provision_fn
+    (fun config ~agent_name ~task_id ->
+      let outcome =
+        match Keeper_identity.keeper_name_from_agent_name agent_name with
+        | None -> "skip_not_keeper"
+        | Some keeper_name ->
+          (match Keeper_meta_store.read_meta config keeper_name with
+           | Error _ | Ok None -> "skip_no_meta"
+           | Ok (Some meta) ->
+             (match meta.Keeper_meta_contract.sandbox_profile with
+              | Keeper_types.Local -> "skip_local"
+              | Keeper_types.Docker ->
+                (match Task_sandbox.create ~config ~task_id ~agent_name () with
+                 | Ok _sandbox ->
+                   Log.Misc.info
+                     "[claim_auto_provision] keeper=%s task=%s worktree provisioned"
+                     keeper_name task_id;
+                   "created"
+                 | Error msg ->
+                   Log.Misc.warn
+                     "[claim_auto_provision] keeper=%s task=%s worktree provisioning failed: %s"
+                     keeper_name task_id msg;
+                   "error")))
+      in
+      Prometheus.inc_counter "masc_keeper_claim_auto_provision_total"
+        ~labels:[ ("outcome", outcome); ("agent_name", agent_name) ]
+        ());
   (* Shared Agent_sdk Event_bus used as the runtime transport between subsystems. *)
   let event_bus = Oas.Event_bus.create () in
   (* Eio fiber isolation: each subsystem runs in its own fiber.

@@ -385,14 +385,14 @@ export function RuntimeMonitor() {
       <${Card} title="공급자 런타임">
         <div class="grid grid-cols-2 gap-3 mb-4">
           <${StatCell}
-            label="Providers"
+            label="공급자"
             value=${providers?.summary?.providers ?? providers?.providers.length ?? 0}
             detail=${providers?.updated_at ?? 'updated_at 없음'}
           />
           <${StatCell}
-            label="Local Models"
+            label="로컬 모델"
             value=${providers?.summary?.local_models ?? 0}
-            detail=${`Cloud ${providers?.summary?.cloud_models ?? 0} · CLI ${providers?.summary?.cli_models ?? 0}`}
+            detail=${`클라우드 ${providers?.summary?.cloud_models ?? 0} · CLI ${providers?.summary?.cli_models ?? 0}`}
           />
         </div>
         <div class="flex flex-col gap-3">
@@ -433,17 +433,17 @@ export function RuntimeMonitor() {
       <${Card} title="모델 메트릭">
         <div class="grid grid-cols-3 gap-3 mb-4">
           <${StatCell}
-            label="Telemetry Window"
+            label="텔레메트리 윈도우"
             value=${`${metrics?.window_minutes ?? windowMinutes.value}m`}
-            detail=${`entries ${fmtNumber(metrics?.total_entries ?? 0)}`}
+            detail=${`항목 ${fmtNumber(metrics?.total_entries ?? 0)}`}
           />
           <${StatCell}
-            label="Tracked Models"
+            label="추적 모델"
             value=${metrics?.models.length ?? 0}
-            detail=${`errors ${fmtNumber(metrics?.total_error_entries ?? 0)}`}
+            detail=${`오류 ${fmtNumber(metrics?.total_error_entries ?? 0)}`}
           />
           <${StatCell}
-            label="Total Cost"
+            label="총 비용"
             value=${fmtCost(sumNullable((metrics?.models ?? []).map(m => m.total_cost_usd)))}
             detail=${`${fmtNumber(metrics?.models.reduce((sum, m) => sum + (m.total_tool_calls ?? 0), 0))} tool calls`}
           />

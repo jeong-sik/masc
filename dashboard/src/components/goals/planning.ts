@@ -245,7 +245,7 @@ export function Planning() {
             </div>
             <${TaskCreateForm} />
             <div class="mt-3 flex items-center gap-2">
-              <${ExternalDocLink} href=${QUICK_START_DOC_URL} label="Quick Start" />
+              <${ExternalDocLink} href=${QUICK_START_DOC_URL} label="빠른 시작" />
             </div>
           </section>
 

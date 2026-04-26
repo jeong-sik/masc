@@ -820,13 +820,13 @@ function GoalDetailPanel({
         ` : null}
 
         <div class="grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-3">
-          <${DetailMetric} label="Task" value=${`${selectedNode.task_done_count}/${selectedNode.task_count}`} tone=${selectedNode.task_done_count === selectedNode.task_count && selectedNode.task_count > 0 ? 'ok' : 'default'} />
-          <${DetailMetric} label="Linked Keepers" value=${selectedNode.linked_keeper_names.length} />
-          <${DetailMetric} label="Approval" value=${selectedNode.pending_approval_count} tone=${selectedNode.pending_approval_count > 0 ? 'warn' : 'default'} />
-          <${DetailMetric} label="Goal Verification" value=${selectedNode.pending_verification_count} tone=${selectedNode.pending_verification_count > 0 ? 'warn' : 'default'} />
-          <${DetailMetric} label="Infra Risk" value=${selectedNode.infra_risk_count} tone=${selectedNode.infra_risk_count > 0 ? 'bad' : 'default'} />
-          <${DetailMetric} label="Linkage" value=${selectedNode.linkage_source} tone=${selectedNode.linkage_warning_count > 0 ? 'warn' : 'default'} />
-          <${DetailMetric} label="Last Activity" value=${selectedNode.stagnation_seconds > 0 ? `${Math.floor(selectedNode.stagnation_seconds / 3600)}h idle` : 'now'} tone=${selectedNode.badges.includes('stalled') ? 'warn' : 'default'} />
+          <${DetailMetric} label="태스크" value=${`${selectedNode.task_done_count}/${selectedNode.task_count}`} tone=${selectedNode.task_done_count === selectedNode.task_count && selectedNode.task_count > 0 ? 'ok' : 'default'} />
+          <${DetailMetric} label="연결된 키퍼" value=${selectedNode.linked_keeper_names.length} />
+          <${DetailMetric} label="승인" value=${selectedNode.pending_approval_count} tone=${selectedNode.pending_approval_count > 0 ? 'warn' : 'default'} />
+          <${DetailMetric} label="목표 검증" value=${selectedNode.pending_verification_count} tone=${selectedNode.pending_verification_count > 0 ? 'warn' : 'default'} />
+          <${DetailMetric} label="인프라 리스크" value=${selectedNode.infra_risk_count} tone=${selectedNode.infra_risk_count > 0 ? 'bad' : 'default'} />
+          <${DetailMetric} label="연결" value=${selectedNode.linkage_source} tone=${selectedNode.linkage_warning_count > 0 ? 'warn' : 'default'} />
+          <${DetailMetric} label="최근 활동" value=${selectedNode.stagnation_seconds > 0 ? `${Math.floor(selectedNode.stagnation_seconds / 3600)}h 대기` : '현재'} tone=${selectedNode.badges.includes('stalled') ? 'warn' : 'default'} />
         </div>
 
         ${verificationSummary.effective_policy ? html`

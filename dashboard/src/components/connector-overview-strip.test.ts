@@ -745,7 +745,7 @@ describe('TileErrorNotice component (rendered inside ConnectorOverviewStrip)', (
     )
     const notice = container.querySelector('[data-tile-notice="error"]') as HTMLElement
     expect(notice).toBeTruthy()
-    expect(notice.textContent).toContain('Error')
+    expect(notice.textContent).toContain('오류')
     expect(notice.textContent).toContain('WebSocket closed 4004')
     expect(notice.className).toContain('var(--bad-light)')
     expect(notice.getAttribute('role')).toBe('alert')
@@ -766,7 +766,7 @@ describe('TileErrorNotice component (rendered inside ConnectorOverviewStrip)', (
       container,
     )
     const notice = container.querySelector('[data-tile-notice="stale"]') as HTMLElement
-    expect(notice.textContent).toContain('Stale')
+    expect(notice.textContent).toContain('오래됨')
     expect(notice.className).toContain('var(--color-status-warn)')
   })
 

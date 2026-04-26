@@ -306,6 +306,16 @@ val metric_silent_dashboard_actor_fallback : string
     token resolved to no agent ([Ok None]) or an error.
     Labels: [outcome] = "none" | "error". *)
 
+val metric_coord_join_normalize_outcome : string
+(** RFC P3-a (2026-04-26): Coord.join preflighted by
+    [Keeper_identity.normalize_all_names] in logging-only mode.
+    Labels: [outcome] = "ok" | "empty_input" | "persona_not_found"
+    | "credential_missing" | "name_ambiguous" | "ephemeral_suffix_rejected".
+    Non-ok outcomes still proceed with the original agent_name; the
+    counter classifies bootstrap-window silent-fallback patterns
+    (cross-reference [metric_silent_auth_token_resolve_error]) before
+    the mode is promoted to hard-error in a follow-up PR. *)
+
 
 (** {1 Transport metrics} *)
 

@@ -189,6 +189,16 @@ let show_validation_error err =
   Format.pp_print_flush fmt ();
   Buffer.contents buf
 
+(* Stable snake_case label for Prometheus metric outcome labels. Keep
+   exhaustive — adding a new variant must require updating this match
+   so no telemetry path silently aggregates to a generic bucket. *)
+let validation_error_outcome_label = function
+  | Empty_input -> "empty_input"
+  | Persona_not_found _ -> "persona_not_found"
+  | Credential_missing _ -> "credential_missing"
+  | Name_ambiguous _ -> "name_ambiguous"
+  | Ephemeral_suffix_rejected _ -> "ephemeral_suffix_rejected"
+
 (* Strip a generated nickname suffix (adj-animal[-hex4]) once if present.
    Returns the canonical agent prefix when applicable, else the input. *)
 let strip_nickname_once name =

@@ -31,6 +31,10 @@ module Http_client : sig
     | Accept_rejected_terminal
     | Cli_transport_required
     | Network_error
+    | Provider_terminal
+        (** Provider returned a structured terminal signal (e.g. max_turns
+            exhausted). The next provider would hit the same conceptual
+            limit, so cascading is not useful. *)
 
   val classify : Llm_provider.Http_client.http_error -> cascade_failure_class
   (** Classify an OAS HTTP/client failure into MASC's typed cascade boundary.

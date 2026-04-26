@@ -5,6 +5,7 @@ import { fetchLogs } from '../api/dashboard.js'
 import type { LogEntry } from '../api/dashboard.js'
 import { VirtualList } from './common/virtual-list'
 import { TextInput } from './common/input'
+import { Select } from './common/select'
 import { createAsyncResource, loaded } from '../lib/async-state'
 import { toolCategory } from './tool-call-shared'
 
@@ -365,20 +366,19 @@ export function LogViewer() {
       <section class="flex min-h-0 flex-1 flex-col overflow-hidden rounded border border-[rgba(138,163,211,0.16)] bg-[rgba(7,13,24,0.86)]">
         <div class="logs-toolbar flex shrink-0 flex-wrap items-center justify-between gap-4 border-b border-[var(--white-5)] px-4 py-4">
           <div class="logs-filters flex flex-wrap gap-2 items-center">
-            <select
+            <${Select}
+              class="logs-select px-3 py-2 text-xs"
               name="log-level"
-              aria-label="로그 레벨"
-              class="logs-select rounded border border-[var(--white-10)] bg-[var(--white-3)] px-3 py-2 text-xs text-[var(--color-fg-primary)]"
+              ariaLabel="로그 레벨"
               value=${levelFilter.value}
-              onChange=${(e: Event) => {
-                levelFilter.value = (e.target as HTMLSelectElement).value
-              }}
-            >
-              <option value="DEBUG">DEBUG+</option>
-              <option value="INFO">INFO+</option>
-              <option value="WARN">WARN+</option>
-              <option value="ERROR">ERROR</option>
-            </select>
+              options=${[
+                { value: 'DEBUG', label: 'DEBUG+' },
+                { value: 'INFO', label: 'INFO+' },
+                { value: 'WARN', label: 'WARN+' },
+                { value: 'ERROR', label: 'ERROR' },
+              ]}
+              onInput=${(v: string) => { levelFilter.value = v }}
+            />
 
             <${TextInput}
               class="min-w-55"
@@ -402,21 +402,14 @@ export function LogViewer() {
               }}
             />
 
-            <select
+            <${Select}
+              class="logs-select px-3 py-2 text-xs"
               name="log-limit"
-              aria-label="로그 개수"
-              class="logs-select rounded border border-[var(--white-10)] bg-[var(--white-3)] px-3 py-2 text-xs text-[var(--color-fg-primary)]"
+              ariaLabel="로그 개수"
               value=${String(logLimit.value)}
-              onChange=${(e: Event) => {
-                logLimit.value = parseInt((e.target as HTMLSelectElement).value, 10)
-              }}
-            >
-              <option value="100">100</option>
-              <option value="200">200</option>
-              <option value="500">500</option>
-              <option value="1000">1000</option>
-              <option value="3000">3000</option>
-            </select>
+              options=${['100', '200', '500', '1000', '3000']}
+              onInput=${(v: string) => { logLimit.value = parseInt(v, 10) }}
+            />
           </div>
 
           <div class="logs-actions flex flex-wrap gap-3 items-center text-2xs text-[color:var(--color-fg-muted)]">

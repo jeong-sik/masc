@@ -332,7 +332,11 @@ let shell_command_available name =
   let probe =
     Printf.sprintf "command -v %s >/dev/null 2>&1" (Filename.quote name)
   in
-  match run_argv_with_status_retry_eintr ~timeout_sec:2.0 [ "/bin/sh"; "-c"; probe ] with
+  match
+    run_argv_with_status_retry_eintr
+      ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Shell_probe ())
+      [ "/bin/sh"; "-c"; probe ]
+  with
   | Unix.WEXITED 0, _ -> true
   | _ -> false
 (** Write playground repo state cache after successful clone/pull.

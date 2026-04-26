@@ -33,6 +33,8 @@ let cases =
     E.Status_detail, 10.0;
     E.Turn_sandbox, 2.0;
     E.Turn_up, 15.0;
+    E.Git_meta, 5.0;
+    E.Shell_probe, 2.0;
   ]
 
 let test_known_default_pin () =

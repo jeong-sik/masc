@@ -455,7 +455,7 @@ export function LogViewer() {
 
         ${logEntries.length === 0
           ? html`
-              <div class="flex flex-1 items-center justify-center px-6 text-sm text-[var(--color-fg-muted)]">
+              <div class="flex flex-1 items-center justify-center px-6 text-sm text-[var(--color-fg-muted)]" role="status">
                 ${logLoading ? '로그를 불러오는 중...' : '조건에 맞는 로그가 없습니다.'}
               </div>
             `

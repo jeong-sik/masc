@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { signal } from '@preact/signals'
 import { ActionButton } from '../common/button'
+import { Select } from '../common/select'
 import { showToast } from '../common/toast'
 import {
   generatePersonaDraft,
@@ -139,13 +140,13 @@ export function PersonaGenerator() {
           </label>
           <label class="grid gap-1 text-3xs text-[var(--color-fg-muted)]">
             preset
-            <select
+            <${Select}
+              class="px-2 py-1.5 text-2xs"
+              ariaLabel="tool preset"
               value=${toolPreset.value}
-              onChange=${(e: Event) => { toolPreset.value = (e.target as HTMLSelectElement).value }}
-              class="rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1.5 text-2xs text-[var(--color-fg-primary)] focus:outline-none focus:border-[var(--color-accent-fg)]"
-            >
-              ${presetChoices.map(choice => html`<option key=${choice} value=${choice}>${choice}</option>`)}
-            </select>
+              options=${presetChoices.map(choice => choice)}
+              onInput=${(v: string) => { toolPreset.value = v }}
+            />
           </label>
           <label class="flex items-center gap-2 pt-5 text-2xs text-[var(--color-fg-primary)]">
             <input

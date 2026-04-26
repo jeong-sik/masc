@@ -317,7 +317,7 @@ type post_eval_result = {
   cost_usd : float;
   should_warn : bool;      (** true if result is suspicious but not fatal *)
   warning : string option;
-} [@@deriving yojson { strict = false }]
+} [@@deriving to_yojson]
 
 (** Evaluate a tool call result after execution.
     Returns evaluation metadata for trajectory recording. *)

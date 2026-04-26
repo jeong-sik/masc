@@ -63,7 +63,6 @@ val same_agent : t -> t -> bool
 val channel_to_yojson : channel -> Yojson.Safe.t
 val channel_of_yojson : Yojson.Safe.t -> (channel, string) result
 val to_yojson : t -> Yojson.Safe.t
-val of_yojson : Yojson.Safe.t -> (t, string) result
 
 (** {1 MAGI Archetype System} *)
 

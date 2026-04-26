@@ -61,7 +61,6 @@ type post_eval_result = {
 }
 
 val post_eval_result_to_yojson : post_eval_result -> Yojson.Safe.t
-val post_eval_result_of_yojson : Yojson.Safe.t -> (post_eval_result, string) result
 
 val post_eval :
   config:gate_config ->

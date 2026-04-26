@@ -143,7 +143,7 @@ export function AuthStatus() {
   return html`
     <div class="relative">
       <button type="button"
-        class="flex items-center gap-1.5 text-2xs py-1 px-2 rounded border border-solid border-[var(--card-border)] bg-[var(--white-4)] cursor-pointer font-[inherit] transition-colors duration-150 hover:bg-[var(--white-8)] text-[var(--text-muted)]"
+        class="flex items-center gap-1.5 text-2xs py-1 px-2 rounded border border-solid border-[var(--card-border)] bg-[var(--white-4)] cursor-pointer font-[inherit] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] duration-150 hover:bg-[var(--white-8)] text-[var(--text-muted)]"
         aria-expanded=${popoverOpen.value}
         aria-controls="auth-popover"
         aria-haspopup="true"
@@ -204,7 +204,7 @@ function AuthPopover() {
               }}
             />
             <button type="button"
-              class="shrink-0 py-1.5 px-3 rounded text-2xs border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--accent)] hover:bg-[var(--accent-15)] cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              class="shrink-0 py-1.5 px-3 rounded text-2xs border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--accent)] hover:bg-[var(--accent-15)] cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] disabled:opacity-50 disabled:cursor-not-allowed"
               disabled=${actorOverrideLocked}
               onClick=${() => { void handleApplyActor() }}
             >적용</button>
@@ -219,7 +219,7 @@ function AuthPopover() {
           </div>
           ${authenticated ? html`
             <button type="button"
-              class="w-full py-1.5 px-3 rounded text-2xs border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--rose-light)] hover:bg-[var(--bad-soft)] cursor-pointer transition-colors"
+              class="w-full py-1.5 px-3 rounded text-2xs border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--rose-light)] hover:bg-[var(--bad-soft)] cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
               onClick=${() => { void handleClearToken() }}
             >토큰 제거</button>
           ` : html`
@@ -234,7 +234,7 @@ function AuthPopover() {
                 onKeyDown=${(e: KeyboardEvent) => { if (e.key === 'Enter') void handleSetToken() }}
               />
               <button type="button"
-                class="w-full py-1.5 px-3 rounded text-2xs border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--accent)] hover:bg-[var(--accent-15)] cursor-pointer transition-colors"
+                class="w-full py-1.5 px-3 rounded text-2xs border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--accent)] hover:bg-[var(--accent-15)] cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
                 onClick=${() => { void handleSetToken() }}
               >토큰 설정</button>
             </div>
@@ -261,12 +261,12 @@ export function RemoteWarningBanner() {
       <span>${message}</span>
       <div class="flex items-center gap-2 shrink-0">
         <button type="button"
-          class="px-2 py-0.5 rounded text-2xs border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--accent)] hover:bg-[var(--accent-15)] cursor-pointer transition-colors"
+          class="px-2 py-0.5 rounded text-2xs border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--accent)] hover:bg-[var(--accent-15)] cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
           aria-label="인증 패널 열기"
           onClick=${openPopover}
         >인증 열기</button>
         <button type="button"
-          class="text-[var(--text-muted)] hover:text-[var(--text-body)] cursor-pointer text-2xs transition-colors"
+          class="text-[var(--text-muted)] hover:text-[var(--text-body)] cursor-pointer text-2xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
           aria-label="\uacbd\uace0 \ub2eb\uae30"
           onClick=${() => { bannerDismissed.value = true }}
         >\u2715</button>

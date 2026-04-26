@@ -86,8 +86,12 @@ type docker_preflight =
     next_actions : string list;
   }
 
-let docker_preflight_min_sec = 5.0
-let docker_preflight_max_sec = 20.0
+(* P2c: literals lifted to Env_config_sandbox.Preflight (#10426 P2c).
+   Today the SSOT getters return the same hardcoded values; future env
+   wiring (per Env_config_sandbox.Preflight doc) tunes these without
+   touching this file. *)
+let docker_preflight_min_sec = Env_config_sandbox.Preflight.min_timeout_sec ()
+let docker_preflight_max_sec = Env_config_sandbox.Preflight.max_timeout_sec ()
 
 let docker_preflight_timeout ~timeout_sec =
   min docker_preflight_max_sec (max docker_preflight_min_sec timeout_sec)

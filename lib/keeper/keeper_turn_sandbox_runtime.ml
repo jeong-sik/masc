@@ -325,5 +325,10 @@ let cleanup (t : t) =
         Keeper_sandbox_runtime.docker_command_argv ()
         @ [ "rm"; "-f"; container_name ]
       in
-      let _st, _out = run_argv_with_status_retry_eintr ~timeout_sec:5.0 argv in
+      let _st, _out =
+        run_argv_with_status_retry_eintr
+          ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec
+                          ~bucket:Cleanup_rm ())
+          argv
+      in
       ()

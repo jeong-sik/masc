@@ -1181,12 +1181,13 @@ function ConnectorLivePanel({
                               class="cursor-pointer text-2xs text-[var(--text-dim)] hover:text-[var(--text-body)]"
                               aria-label=${`${group.name}에 채널 추가`}
                               aria-expanded=${expanded}
+                              aria-controls=${`add-channel-${group.name}`}
                               onClick=${toggleExpand}
                             >${expanded ? '− close' : '+ add channel'}</button>
                           </div>
                           ${expanded
                             ? html`
-                                <div class="mt-2 rounded border border-dashed border-[var(--card-border)] bg-[var(--white-3)] p-2">
+                                <div id=${`add-channel-${group.name}`} class="mt-2 rounded border border-dashed border-[var(--card-border)] bg-[var(--white-3)] p-2">
                                   <${TextInput}
                                     value=${ui.channelDraft}
                                     placeholder=${`Paste ${connectorName} channel ID — right-click a channel → Copy ID`}

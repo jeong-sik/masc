@@ -115,7 +115,7 @@ export function AllowlistPreview({
     : resolveAllowlistPreview(tools, previewLimit)
 
   return html`
-    <div class="flex flex-col gap-2">
+    <div class="flex flex-col gap-2" id="tool-preview-list">
       <div class="flex flex-wrap gap-1.5">
         ${visibleTools.map(tool => html`<${ToolChip} name=${tool} />`)}
         ${!expanded && hiddenCount > 0
@@ -131,6 +131,7 @@ export function AllowlistPreview({
             <button type="button"
               class="self-start text-3xs text-[var(--text-muted)] hover:text-[var(--text-body)] cursor-pointer transition-colors"
               aria-expanded=${expanded}
+              aria-controls="tool-preview-list"
               aria-label=${expanded ? '허용된 도구 접기' : `허용된 도구 나머지 ${hiddenCount}개 보기`}
               onClick=${() => setExpanded(value => !value)}
             >

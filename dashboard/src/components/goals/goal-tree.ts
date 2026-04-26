@@ -447,6 +447,7 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
           if (hasContent) toggleNode(node.id)
         }}
         aria-expanded=${hasContent ? isExpanded : undefined}
+        aria-controls=${hasContent ? `goal-children-${node.id}` : undefined}
       >
         ${hasContent ? html`
           <span class="mt-0.5 shrink-0 text-xs text-text-dim transition-transform ${isExpanded ? 'rotate-90' : ''}">\u25B6</span>
@@ -567,7 +568,7 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
             </div>
           ` : null}
           ${node.tasks.length > 0 ? html`
-            <div class="ml-6 flex flex-col gap-1 rounded border border-card-border/40 bg-[rgba(5,9,16,0.6)] p-2">
+            <div id=${`goal-children-${node.id}`} class="ml-6 flex flex-col gap-1 rounded border border-card-border/40 bg-[rgba(5,9,16,0.6)] p-2">
               <div class="mb-1 text-3xs font-semibold uppercase tracking-widest text-text-dim">연결된 태스크</div>
               ${node.tasks.map(task => html`<${TreeTask} key=${task.id} task=${task} />`)}
             </div>

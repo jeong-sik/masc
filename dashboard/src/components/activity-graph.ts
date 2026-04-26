@@ -249,13 +249,14 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
                       class="rounded border border-[var(--white-10)] bg-[var(--white-4)] px-3 py-1.5 text-2xs text-[var(--text-body)] transition-all duration-150 hover:bg-[var(--white-8)]"
                       onClick=${() => toggleExpandedGroup(group.id)}
                       aria-expanded=${expanded}
+                      aria-controls=${`ag-raw-${group.id}`}
                     >
                       ${expanded ? '원본 접기' : '원본 보기'}
                     </button>
                   </div>
                 </div>
                 ${expanded ? html`
-                  <div class="mt-3 flex flex-col gap-2 rounded border border-[var(--white-8)] bg-[rgba(15,23,42,0.42)] p-3">
+                  <div id=${`ag-raw-${group.id}`} class="mt-3 flex flex-col gap-2 rounded border border-[var(--white-8)] bg-[rgba(15,23,42,0.42)] p-3">
                     ${group.rawEvents.map(event => html`
                       <div class="flex items-start gap-3 rounded border border-[var(--white-6)] bg-[var(--white-3)] px-3 py-2" key=${event.seq}>
                         <span class="inline-flex min-w-18 items-center rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-0.5 text-3xs text-[var(--text-muted)]">

@@ -348,6 +348,7 @@ export function PrometheusMetrics() {
             <button type="button"
               class="flex w-full items-center justify-between text-left"
               aria-expanded=${expanded}
+              aria-controls=${`pm-cat-${cat}`}
               onClick=${() => toggleCategory(cat)}
             >
               <div class="flex items-center gap-2">
@@ -368,7 +369,7 @@ export function PrometheusMetrics() {
             </button>
 
             ${expanded && html`
-              <div class="mt-3 overflow-x-auto">
+              <div id=${`pm-cat-${cat}`} class="mt-3 overflow-x-auto">
                 <table class="w-full text-xs" aria-label="Prometheus 메트릭 시계열">
                   <thead>
                     <tr class="border-b border-[var(--card-border)] text-[var(--text-muted)]">

@@ -635,6 +635,7 @@ function JourneyCard({ record }: { record: JourneyRecord }) {
           <button type="button"
             class="inline-flex items-center rounded px-3 py-1.5 text-xs font-medium text-[var(--text-muted)] transition hover:text-[var(--text-body)] hover:bg-[var(--white-5)]"
             aria-expanded=${showExtended.value}
+            aria-controls="journey-extended"
             aria-label="추가 정보 펼치기"
             onClick=${() => { showExtended.value = !showExtended.value }}
           >
@@ -647,7 +648,7 @@ function JourneyCard({ record }: { record: JourneyRecord }) {
 
         ${showExtended.value
           ? html`
-              <div class="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+              <div id="journey-extended" class="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
                 <${JourneyTile} label="사고">
                   ${keeper?.pipeline_stage
                     ? html`<${StatusChip} tone=${pipelineTone(keeper.pipeline_stage)}>${keeper.pipeline_stage}<//>`

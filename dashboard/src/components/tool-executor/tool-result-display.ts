@@ -77,13 +77,14 @@ function StoredBlobView({
           <div class="flex items-center justify-between px-3 py-1.5 border-b border-[var(--card-border)]">
             <button type="button" class="text-3xs py-1 text-[var(--text-muted)] cursor-pointer hover:text-[var(--text-body)]"
               aria-expanded="true"
+              aria-controls="tool-result-full"
               onClick=${() => { expanded.value = false }}>
               접기 (${marker.bytes.toLocaleString()}B)
             </button>
             <${ActionButton} variant="subtle" size="sm"
               onClick=${() => void navigator.clipboard.writeText(fullText.value ?? '')}>복사<//>
           </div>
-          <div class="px-3 py-2 overflow-x-auto max-h-100 overflow-y-auto custom-scrollbar" tabindex="0" aria-label="도구 실행 결과">
+          <div id="tool-result-full" class="px-3 py-2 overflow-x-auto max-h-100 overflow-y-auto custom-scrollbar" tabindex="0" aria-label="도구 실행 결과">
             ${(() => {
               const { isJson, parsed } = tryParseJson(fullText.value ?? '')
               return isJson
@@ -157,13 +158,14 @@ export function ToolResultDisplay({ success, text, toolName, timestamp }: ToolRe
         <div class="flex items-center justify-between px-3 py-1.5 border-b border-[var(--card-border)]">
           <button type="button" class="text-3xs text-[var(--text-muted)] cursor-pointer hover:text-[var(--text-body)]"
             aria-expanded=${expanded.value}
+            aria-controls="tool-result-preview"
             onClick=${() => { expanded.value = !expanded.value }}>
             ${expanded.value ? '접기' : '펼치기'} (${lines}줄)
           </button>
           <${ActionButton} variant="subtle" size="sm" onClick=${() => void navigator.clipboard.writeText(text)}>복사<//>
         </div>
         ${expanded.value ? html`
-          <div class="px-3 py-2 overflow-x-auto max-h-100 overflow-y-auto custom-scrollbar" tabindex="0" aria-label="도구 실행 결과">
+          <div id="tool-result-preview" class="px-3 py-2 overflow-x-auto max-h-100 overflow-y-auto custom-scrollbar" tabindex="0" aria-label="도구 실행 결과">
             ${isJson
               ? html`<${JsonViewer} data=${parsed} />`
               : html`<pre class="text-xs font-mono ${success ? 'text-[var(--text-body)]' : 'text-[var(--bad-light)]'} leading-[1.4]">${text}</pre>`

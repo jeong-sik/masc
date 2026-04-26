@@ -238,7 +238,7 @@ export function ResolvedPreview({ tools, catMap }: { tools: string[]; catMap: Ma
       ${isFiltering && visibleTools.length === 0
         ? html`<div class="py-3 text-center text-2xs text-[var(--text-muted)]" role="status">필터 결과 없음 (${tools.length}개 도구)</div>`
         : html`
-          <div class="flex flex-col gap-2">
+          <div class="flex flex-col gap-2" id="allowlist-expanded">
             ${visibleGroups.map(group => {
               const visibleNames = expanded ? group.names : group.names.slice(0, RESOLVED_TOOLS_PER_CATEGORY_LIMIT)
               const hiddenToolCount = Math.max(0, group.names.length - visibleNames.length)
@@ -264,6 +264,7 @@ export function ResolvedPreview({ tools, catMap }: { tools: string[]; catMap: Ma
                 <button type="button"
                   class="self-start text-3xs text-[var(--text-muted)] hover:text-[var(--text-body)] cursor-pointer transition-colors"
                   aria-expanded=${expanded}
+                  aria-controls="allowlist-expanded"
                   aria-label=${expanded ? 'resolved allowlist 접기' : `resolved allowlist 전체 ${tools.length}개 보기`}
                   onClick=${() => setExpanded(value => !value)}
                 >

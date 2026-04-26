@@ -569,6 +569,7 @@ export function MemorySubsystems() {
         <button type="button"
           onClick=${() => (showArch.value = !showArch.value)}
           aria-expanded=${showArch.value}
+          aria-controls="arch-flow"
           aria-label="아키텍처 데이터 흐름도 토글"
           class="w-full flex items-center justify-between p-2 bg-[var(--white-5)] rounded hover:bg-[var(--white-5)] transition-colors"
         >
@@ -583,7 +584,7 @@ export function MemorySubsystems() {
         ${
           showArch.value
             ? html`
-                <div class="mt-2 bg-[var(--white-5)] rounded p-3">
+                <div class="mt-2 bg-[var(--white-5)] rounded p-3" id="arch-flow">
                   <${MermaidGraph}
                     source=${ARCHITECTURE_FLOW}
                     prefix="memory-arch"

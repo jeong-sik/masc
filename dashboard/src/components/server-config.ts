@@ -105,6 +105,7 @@ function CategoryPanel({ name, entries }: { name: string; entries: ConfigEntry[]
       <button type="button"
         class="w-full flex items-center justify-between px-4 py-2.5 bg-[var(--bg-surface)] hover:bg-[var(--bg-panel-hover)] transition-colors text-left"
         aria-expanded=${isExpanded}
+        aria-controls="config-cat-${name}"
         onClick=${() => toggleCategory(name)}
       >
         <div class="flex items-center gap-2">
@@ -119,7 +120,7 @@ function CategoryPanel({ name, entries }: { name: string; entries: ConfigEntry[]
         ` : null}
       </button>
       ${isExpanded ? html`
-        <div class="divide-y divide-[var(--border-subtle)]">
+        <div class="divide-y divide-[var(--border-subtle)]" id="config-cat-${name}">
           ${filtered.map(entry => html`<${EntryRow} entry=${entry} />`)}
         </div>
       ` : null}

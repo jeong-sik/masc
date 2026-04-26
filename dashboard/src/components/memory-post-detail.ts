@@ -142,12 +142,13 @@ function CommentItem({
             onClick=${() => { replyingTo.value = isReplying ? null : comment.id; commentText.value = '' }}
           >${isReplying ? '취소' : '답글'}</button>
         </div>
-        <div class="text-sm text-[var(--text-body)] leading-paragraph"><${RichContent} text=${displayText} previewLimit=${1} /></div>
+        <div class="text-sm text-[var(--text-body)] leading-paragraph" id="comment-content-${comment.id}"><${RichContent} text=${displayText} previewLimit=${1} /></div>
         ${needsTruncation ? html`
           <button type="button"
             class="mt-1 text-2xs text-[var(--accent)] hover:underline cursor-pointer bg-transparent border-0"
             onClick=${() => setExpanded(!expanded)}
             aria-expanded=${expanded}
+            aria-controls="comment-content-${comment.id}"
           >${expanded ? '접기' : '더 보기...'}</button>
         ` : null}
         ${isReplying ? html`

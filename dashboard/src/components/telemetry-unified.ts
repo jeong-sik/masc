@@ -829,7 +829,7 @@ export function TelemetryUnified() {
 
       <div class="flex flex-wrap gap-3">
         <${DiagnosisCard}
-          title="Keeper 현황 (live)"
+          title="키퍼 현황 (실시간)"
           value=${String(store.keepers)}
           detail=${[
             `${store.activeOperations} 활성 작업`,
@@ -841,13 +841,13 @@ export function TelemetryUnified() {
           tone=${store.continuityAlerts > 0 ? 'warn' : store.keepers > 0 ? 'ok' : 'neutral'}
         />
         <${DiagnosisCard}
-          title="Tool 등록 현황 (live)"
+          title="도구 등록 현황 (실시간)"
           value=${String(store.toolsRegistered)}
           detail=${`${store.toolsPublic} public · ${store.toolsTotalCalls.toLocaleString()} 총 호출 · ${store.toolsNeverCalled} 미사용`}
           tone=${store.toolsRegistered > 0 ? 'ok' : 'warn'}
         />
         <${DiagnosisCard}
-          title="Agent 현황 (live)"
+          title="에이전트 현황 (실시간)"
           value=${String(store.agents)}
           detail=${`${store.tasks} 태스크 · ${store.activeOperations} 활성 작전`}
           tone=${store.agents > 0 ? 'ok' : 'neutral'}

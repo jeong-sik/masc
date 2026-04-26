@@ -207,9 +207,9 @@ describe('TelemetryUnified', () => {
     expect(container.textContent).toContain('mcp__masc__masc_status')
 
     // MASC Store Diagnosis cards (live state)
-    expect(container.textContent).toContain('Keeper 현황 (live)')
-    expect(container.textContent).toContain('Tool 등록 현황 (live)')
-    expect(container.textContent).toContain('Agent 현황 (live)')
+    expect(container.textContent).toContain('키퍼 현황 (실시간)')
+    expect(container.textContent).toContain('도구 등록 현황 (실시간)')
+    expect(container.textContent).toContain('에이전트 현황 (실시간)')
     expect(container.textContent).toContain('3 활성 작업')
     expect(container.textContent).toContain('1 차단 작업')
     expect(container.textContent).not.toContain('활성 세션')

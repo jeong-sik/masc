@@ -988,7 +988,7 @@ export function KeeperDetailPage() {
 
           <${KeeperDetailSection}
             id="keeper-comms"
-            eyebrow="Conversation & Session"
+            eyebrow="대화 & 세션"
             title="대화 / 활동 흐름"
             description="운영자가 keeper와 바로 대화하고, 같은 화면에서 세션 이벤트를 대조할 수 있도록 묶었습니다."
           >
@@ -1042,7 +1042,7 @@ export function KeeperDetailPage() {
 
           <${KeeperDetailSection}
             id="keeper-identity"
-            eyebrow="Identity & Lineage"
+            eyebrow="신원 & 계보"
             title="정체성 / 세대"
             description="프로필, 관계, 장비, generation lineage, checkpoints를 하나의 맥락으로 보고 continuity를 해석합니다."
           >

@@ -3,6 +3,7 @@ import { signal, useSignal } from '@preact/signals'
 import { useEffect, useMemo } from 'preact/hooks'
 import { LoadingState } from './common/feedback-state'
 import { MermaidGraph } from './common/mermaid-graph'
+import { Select } from './common/select'
 import {
   fetchMemorySubsystems,
   type MemorySubsystemsResponse,
@@ -695,26 +696,26 @@ export function MemorySubsystems() {
             onInput=${onSearchInput}
             class="flex-1 min-w-50 bg-[var(--white-5)] border border-[var(--white-10)] rounded px-2 py-1 text-sm text-[var(--color-fg-muted)] placeholder:text-[var(--color-fg-muted)] focus:border-[var(--white-10)]0 focus:outline-none"
           />
-          <select
+          <${Select}
+            class="px-2 py-1 text-sm"
+            ariaLabel="키퍼 필터"
             value=${keeperFilter.value}
-            onChange=${(e: Event) => (keeperFilter.value = (e.target as HTMLSelectElement).value)}
-            class="bg-[var(--white-5)] border border-[var(--white-10)] rounded px-2 py-1 text-sm text-[var(--color-fg-muted)] focus:border-[var(--white-10)]0 focus:outline-none"
-          >
-            <option value="">모든 키퍼</option>
-            ${knownKeepers.map(
-              (k: string) => html`<option value=${k}>${k}</option>`,
-            )}
-          </select>
-          <select
+            options=${[
+              { value: '', label: '모든 키퍼' },
+              ...knownKeepers.map((k: string) => ({ value: k, label: k })),
+            ]}
+            onInput=${(v: string) => { keeperFilter.value = v }}
+          />
+          <${Select}
+            class="px-2 py-1 text-sm"
+            ariaLabel="결과 필터"
             value=${outcomeFilter.value}
-            onChange=${(e: Event) => (outcomeFilter.value = (e.target as HTMLSelectElement).value)}
-            class="bg-[var(--white-5)] border border-[var(--white-10)] rounded px-2 py-1 text-sm text-[var(--color-fg-muted)] focus:border-[var(--white-10)]0 focus:outline-none"
-          >
-            <option value="">모든 결과</option>
-            ${knownOutcomes.map(
-              (o: string) => html`<option value=${o}>${o}</option>`,
-            )}
-          </select>
+            options=${[
+              { value: '', label: '모든 결과' },
+              ...knownOutcomes.map((o: string) => ({ value: o, label: o })),
+            ]}
+            onInput=${(v: string) => { outcomeFilter.value = v }}
+          />
           ${
             hasFilter
               ? html`<button

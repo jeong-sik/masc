@@ -5,9 +5,33 @@ const D = window.MASC_DATA;
 const DENSITY_LABEL = { c: 'Compact', n: 'Normal', l: 'Loose' };
 
 // ─── TOPBAR variants ───────────────────────────────────────────────
-function TopbarStandard() {
-  const [mode, setMode] = useState('dash');
-  const [density, setDensity] = useState('n');
+// Variant API contract (mirrors Ix* family in cb-group-j/k):
+// - variant-specific props with sensible defaults so cb-root can omit
+// - props that a variant does not visually use are still accepted to
+//   keep the call surface uniform (e.g., TopbarStandard receives
+//   branch/keepers but doesn't render them — passing from cb-root is
+//   a no-op)
+
+const TOPBAR_DEFAULT_KEEPERS = ["nick0cave","masc-improver","sangsu","qa-king","rama"];
+const TOPBAR_KEEPER_COLOR = {
+  "nick0cave": "var(--k-nick)",
+  "masc-improver": "var(--k-masc)",
+  "sangsu": "var(--k-sangsu)",
+  "qa-king": "var(--k-qa)",
+  "rama": "var(--k-rama)",
+};
+
+function TopbarStandard({
+  branch = "main",
+  keepers = TOPBAR_DEFAULT_KEEPERS,
+  goal = "goal-merge-blockers",
+  build = "BUILD 2604 · 16:32:45Z",
+  buildLabel = "Build 2604, 16:32:45 UTC",
+  initialMode = "dash",
+  initialDensity = "n",
+} = {}) {
+  const [mode, setMode] = useState(initialMode);
+  const [density, setDensity] = useState(initialDensity);
   return (
     <div className="cb-board">
       <header className="cb-topbar" role="banner" aria-label="MASC topbar">
@@ -17,9 +41,9 @@ function TopbarStandard() {
           <span className="ver" aria-label="Build version 0.42.1">v0.42.1</span>
         </div>
         <div className="sep" aria-hidden="true" />
-        <button type="button" className="goal-switch" aria-haspopup="menu" aria-label="Switch goal: goal-merge-blockers">
+        <button type="button" className="goal-switch" aria-haspopup="menu" aria-label={`Switch goal: ${goal}`}>
           <Dot kind="brass" size="sm" />
-          <span>goal-merge-blockers</span>
+          <span>{goal}</span>
           <span className="caret" aria-hidden="true">▾</span>
         </button>
         <div className="mode-tabs" role="tablist" aria-label="View mode">
@@ -33,7 +57,7 @@ function TopbarStandard() {
               <button key={d} type="button" role="radio" aria-checked={density===d} aria-label={DENSITY_LABEL[d]} className={density===d?'on':''} onClick={()=>setDensity(d)}>{d}</button>
             ))}
           </div>
-          <span className="stamp" aria-label="Build 2604, 16:32:45 UTC">BUILD 2604 · 16:32:45Z</span>
+          <span className="stamp" aria-label={buildLabel}>{build}</span>
         </div>
       </header>
       <div style={{flex:1, background:'var(--bg-0)'}} aria-hidden="true" />
@@ -41,8 +65,19 @@ function TopbarStandard() {
   );
 }
 
-function TopbarExpanded() {
-  const [mode, setMode] = useState('split');
+function TopbarExpanded({
+  branch = "release-0.42",
+  branchLabel,
+  keepers = TOPBAR_DEFAULT_KEEPERS,
+  keeperColor = TOPBAR_KEEPER_COLOR,
+  goal = "goal-merge-blockers",
+  fleetSummary = "5 ACTIVE · 2 IDLE",
+  fleetLabel = "5 active keepers, 2 idle",
+  initialMode = "split",
+} = {}) {
+  const [mode, setMode] = useState(initialMode);
+  const computedBranchLabel = branchLabel ?? `Active branch: ${branch}`;
+  const keeperListLabel = `Active keepers: ${keepers.join(", ")}`;
   return (
     <div className="cb-board">
       <header className="cb-topbar" role="banner" aria-label="MASC topbar with branch and fleet">
@@ -52,12 +87,12 @@ function TopbarExpanded() {
           <span className="ver" aria-label="Build version 0.42.1">v0.42.1</span>
         </div>
         <div className="sep" aria-hidden="true" />
-        <button type="button" className="goal-switch" aria-haspopup="menu" aria-label="Switch goal: goal-merge-blockers">
+        <button type="button" className="goal-switch" aria-haspopup="menu" aria-label={`Switch goal: ${goal}`}>
           <Dot kind="brass" size="sm" />
-          <span>goal-merge-blockers</span>
+          <span>{goal}</span>
           <span className="caret" aria-hidden="true">▾</span>
         </button>
-        <span className="branch" aria-label="Active branch: release-0.42">release-0.42</span>
+        <span className="branch" aria-label={computedBranchLabel}>{branch}</span>
         <div className="sep" aria-hidden="true" />
         <div className="mode-tabs" role="tablist" aria-label="View mode">
           {[['dash','Dash'],['code','Code'],['split','Split']].map(([k,l]) => (
@@ -65,14 +100,12 @@ function TopbarExpanded() {
           ))}
         </div>
         <div className="right">
-          <div className="avatars" role="list" aria-label="Active keepers: nick0cave, masc-improver, sangsu, qa-king, rama">
-            <span className="av" role="listitem" aria-label="nick0cave" style={{background:'var(--k-nick)'}} />
-            <span className="av" role="listitem" aria-label="masc-improver" style={{background:'var(--k-masc)'}} />
-            <span className="av" role="listitem" aria-label="sangsu" style={{background:'var(--k-sangsu)'}} />
-            <span className="av" role="listitem" aria-label="qa-king" style={{background:'var(--k-qa)'}} />
-            <span className="av" role="listitem" aria-label="rama" style={{background:'var(--k-rama)'}} />
+          <div className="avatars" role="list" aria-label={keeperListLabel}>
+            {keepers.map(k => (
+              <span key={k} className="av" role="listitem" aria-label={k} style={{background: keeperColor[k] || "var(--brass-2)"}} />
+            ))}
           </div>
-          <span className="stamp" aria-label="5 active keepers, 2 idle">5 ACTIVE · 2 IDLE</span>
+          <span className="stamp" aria-label={fleetLabel}>{fleetSummary}</span>
         </div>
       </header>
       <div style={{flex:1, background:'var(--bg-0)'}} aria-hidden="true" />
@@ -80,7 +113,13 @@ function TopbarExpanded() {
   );
 }
 
-function TopbarMinimal() {
+function TopbarMinimal({
+  branch = "main",
+  keepers = TOPBAR_DEFAULT_KEEPERS,
+  time = "16:32:45Z",
+  timeLabel = "16:32:45 UTC",
+  initialMode = "dash",
+} = {}) {
   return (
     <div className="cb-board">
       <header className="cb-topbar minimal" role="banner" aria-label="MASC topbar (minimal)">
@@ -89,11 +128,11 @@ function TopbarMinimal() {
           <span className="brand-name">MASC</span>
         </div>
         <div className="mode-tabs" role="tablist" aria-label="View mode">
-          <button type="button" role="tab" aria-selected="true" tabIndex={0} className="on">Dash</button>
-          <button type="button" role="tab" aria-selected="false" tabIndex={-1}>Code</button>
+          <button type="button" role="tab" aria-selected={initialMode==='dash'} tabIndex={initialMode==='dash'?0:-1} className={initialMode==='dash'?'on':''}>Dash</button>
+          <button type="button" role="tab" aria-selected={initialMode==='code'} tabIndex={initialMode==='code'?0:-1} className={initialMode==='code'?'on':''}>Code</button>
         </div>
         <div className="right">
-          <span className="stamp" aria-label="16:32:45 UTC">16:32:45Z</span>
+          <span className="stamp" aria-label={timeLabel}>{time}</span>
         </div>
       </header>
       <div style={{flex:1, background:'var(--bg-0)'}} aria-hidden="true" />

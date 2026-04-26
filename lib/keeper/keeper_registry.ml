@@ -35,6 +35,7 @@ type ambiguous_partial_commit = {
 type failure_reason =
   | Heartbeat_consecutive_failures of int
   | Turn_consecutive_failures of int
+  | Stale_turn_timeout of float
   | Ambiguous_partial_commit of ambiguous_partial_commit
   | Fiber_unresolved
   | Exception of string
@@ -48,6 +49,8 @@ let failure_reason_to_string = function
       Printf.sprintf "heartbeat_consecutive_failures(%d)" n
   | Turn_consecutive_failures n ->
       Printf.sprintf "turn_consecutive_failures(%d)" n
+  | Stale_turn_timeout sec ->
+      Printf.sprintf "stale_turn_timeout(%.0fs)" sec
   | Ambiguous_partial_commit { kind; detail } ->
       Printf.sprintf "ambiguous_partial_commit(%s:%s)"
         (ambiguous_partial_commit_kind_to_string kind)

@@ -25,6 +25,7 @@ type ambiguous_partial_commit = {
 type failure_reason =
   | Heartbeat_consecutive_failures of int
   | Turn_consecutive_failures of int
+  | Stale_turn_timeout of float
   | Ambiguous_partial_commit of ambiguous_partial_commit
   | Fiber_unresolved
   | Exception of string

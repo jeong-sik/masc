@@ -201,7 +201,7 @@ export function PersonaGenerator() {
               ${schema.personasRoot ?? ''} · ${schema.handleRules ?? ''}
             </div>
             <div class="max-h-56 overflow-auto">
-              <table class="w-full text-left text-3xs">
+              <table class="w-full text-left text-3xs" aria-label="페르소나 스키마 규칙">
                 <tbody>
                   ${schema.fieldCatalog.map(field => html`
                     <tr key=${field.path} class="border-b border-[var(--white-6)] align-top">

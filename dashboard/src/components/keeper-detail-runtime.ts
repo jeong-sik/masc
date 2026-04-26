@@ -70,6 +70,7 @@ function ToolChip({ name }: { name: string }) {
     <button type="button"
       class="inline-flex items-center gap-1 py-0.5 px-2 rounded-sm text-3xs font-medium bg-[var(--accent-12)] text-[var(--color-accent-fg)] border border-[var(--accent-30)] hover:bg-[var(--accent-20)] cursor-pointer transition-colors"
       title=${`${cat.label}: ${name}`}
+      aria-label=${`${cat.label}: ${name}`}
       onClick=${() => openToolsInventory(name)}
     >
       <span class="font-mono font-bold ${cat.color}">${cat.icon}</span>

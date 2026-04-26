@@ -355,20 +355,20 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
 
   return html`
     <div class="overflow-x-auto">
-      <table class="w-full text-2xs">
+      <table class="w-full text-2xs" aria-label="키퍼 텔레메트리 현황">
         <thead>
           <tr class="border-b border-[var(--color-border-default)] text-[var(--color-fg-disabled)]">
-            <th class="py-1 text-left font-normal">키퍼</th>
-            <th class="py-1 text-right font-normal">상태</th>
-            <th class="py-1 text-right font-normal">활동</th>
-            <th class="py-1 text-right font-normal">측정</th>
-            <th class="py-1 text-right font-normal">도구</th>
-            <th class="py-1 text-right font-normal">성공</th>
-            <th class="py-1 text-right font-normal">Ctx</th>
-            <th class="py-1 text-right font-normal">지연</th>
-            <th class="py-1 text-right font-normal">모델</th>
-            <th class="py-1 text-center font-normal">예산</th>
-            <th class="w-8 py-1"></th>
+            <th scope="col" class="py-1 text-left font-normal">키퍼</th>
+            <th scope="col" class="py-1 text-right font-normal">상태</th>
+            <th scope="col" class="py-1 text-right font-normal">활동</th>
+            <th scope="col" class="py-1 text-right font-normal">측정</th>
+            <th scope="col" class="py-1 text-right font-normal">도구</th>
+            <th scope="col" class="py-1 text-right font-normal">성공</th>
+            <th scope="col" class="py-1 text-right font-normal">Ctx</th>
+            <th scope="col" class="py-1 text-right font-normal">지연</th>
+            <th scope="col" class="py-1 text-right font-normal">모델</th>
+            <th scope="col" class="py-1 text-center font-normal">예산</th>
+            <th scope="col" class="w-8 py-1"></th>
           </tr>
         </thead>
         <tbody>
@@ -471,7 +471,7 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
               </td>
               <td class="py-1.5 text-center">
                 <button
-                  class="rounded p-0.5 text-[var(--color-fg-disabled)] hover:text-[var(--bad-light)] hover:bg-[var(--bad-10)] transition-colors"
+                  class="rounded min-w-6 min-h-6 p-1.5 text-[var(--color-fg-disabled)] hover:text-[var(--bad-light)] hover:bg-[var(--bad-10)] transition-colors inline-flex items-center justify-center"
                   onClick=${() => onReset(row.name)}
                   title="초기화"
                   aria-label=${`${row.name} 초기화`}

@@ -591,7 +591,7 @@ describe('FleetFsmMatrix streaming fallback', () => {
       />
     `)
 
-    const button = await screen.findByRole('button', { name: 'AI 진단' })
+    const button = await screen.findByRole('button', { name: '감독형 진단 요청' })
     await act(async () => {
       fireEvent.click(button)
     })
@@ -646,7 +646,7 @@ describe('FleetFsmMatrix streaming fallback', () => {
 
     render(html`<${FleetFsmMatrix} pollIntervalMs=${1000} />`)
 
-    const button = await screen.findByRole('button', { name: '상태 확인' })
+    const button = await screen.findByRole('button', { name: 'Inspect tool-contract blocker: tool_required_unsatisfied' })
     await act(async () => {
       fireEvent.click(button)
     })
@@ -704,7 +704,7 @@ describe('FleetFsmMatrix streaming fallback', () => {
 
     render(html`<${FleetFsmMatrix} pollIntervalMs=${1000} />`)
 
-    const button = await screen.findByRole('button', { name: '복구 요청' })
+    const button = await screen.findByRole('button', { name: 'Controlled keeper recovery for runtime stall: api_error' })
     await act(async () => {
       fireEvent.click(button)
     })

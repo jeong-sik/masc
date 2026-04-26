@@ -22,7 +22,7 @@ interface SectionHeaderProps {
 
 /** Uppercase tracked section label — the dashboard's standard heading pattern */
 export function SectionHeader({
-  size = 'xs',
+  size = 'sm',
   class: cx,
   right,
   children,

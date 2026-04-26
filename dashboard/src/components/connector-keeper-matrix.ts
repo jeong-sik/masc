@@ -207,6 +207,7 @@ function MatrixCellButton({ cell }: { cell: MatrixCell }) {
       onClick=${onClick}
       disabled=${disabled}
       title=${title}
+      aria-label=${title}
       data-matrix-cell=${`${cell.keeperName}:${cell.connectorId}`}
       data-matrix-state=${cell.state}
     >
@@ -226,7 +227,7 @@ export function ConnectorKeeperMatrix({ matrix }: { matrix: MatrixData }) {
   const gridCols = `grid-template-columns: minmax(160px, 1fr) repeat(${matrix.columns.length}, minmax(80px, 1fr)) minmax(90px, auto);`
 
   return html`
-    <section class="mb-4 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3" data-panel="connector-keeper-matrix">
+    <section class="mb-4 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3" data-panel="connector-keeper-matrix" aria-label="Keeper × Connector 매트릭스">
       <header class="mb-2 flex items-baseline justify-between gap-3">
         <div>
           <h4 class="text-xs font-semibold uppercase tracking-4 text-[var(--color-fg-primary)]">
@@ -265,6 +266,7 @@ export function ConnectorKeeperMatrix({ matrix }: { matrix: MatrixData }) {
                     class="flex cursor-pointer items-center justify-center gap-1 rounded px-1 py-1 text-3xs uppercase tracking-3 text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)]"
                     onClick=${() => scrollToConnectorRow(colId)}
                     title=${`${CONNECTOR_DISPLAY_NAMES[colId] ?? colId} — 행으로 이동`}
+                    aria-label=${`${CONNECTOR_DISPLAY_NAMES[colId] ?? colId} — 행으로 이동`}
                   >
                     <span aria-hidden="true">${channelIcon(colId)}</span>
                     <span>${CONNECTOR_DISPLAY_NAMES[colId] ?? colId}</span>
@@ -354,6 +356,7 @@ function MatrixRowRender({ row }: { row: MatrixRow }) {
       class=${`flex cursor-pointer items-center gap-2 truncate rounded px-2 py-1 text-left text-xs hover:bg-[var(--white-4)] ${row.known ? 'text-[var(--color-fg-primary)]' : 'text-[var(--color-status-warn)]'}`}
       onClick=${() => scrollToKeeper(row.keeperName)}
       title=${row.known ? row.keeperName : `${row.keeperName} — directory 밖 keeper`}
+      aria-label=${row.known ? row.keeperName : `${row.keeperName} — directory 밖 keeper`}
     >
       ${row.known ? null : html`<span class="text-[var(--color-status-warn)]" aria-hidden="true">⚠</span>`}
       <span class="truncate">${row.keeperName}</span>

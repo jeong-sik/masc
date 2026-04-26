@@ -1,4 +1,53 @@
-/* Accessibility — prefers-reduced-motion overrides. Extracted from global.css for #3915. */
+/* Accessibility — focus-visible, prefers-reduced-motion overrides. Extracted from global.css for #3915. */
+
+/* WCAG 2.4.7 Focus Visible — global keyboard focus ring for all interactive elements.
+   Uses box-shadow so it follows border-radius and never clips. */
+:focus-visible {
+  outline: 2px solid var(--accent-45, rgba(71, 184, 255, 0.7));
+  outline-offset: 2px;
+}
+
+/* Remove default browser outline for mouse clicks (:focus without :focus-visible). */
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* Screen-reader only utility — visually hidden but accessible to assistive tech. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+/* WCAG 2.4.1 Skip nav — visible on focus only. */
+.skip-link:focus {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 9999;
+  width: auto;
+  height: auto;
+  padding: 8px 16px;
+  margin: 0;
+  overflow: visible;
+  clip: auto;
+  white-space: normal;
+  border-width: 1px;
+  background: var(--color-bg-page, #0a0f1a);
+  color: var(--color-fg-primary, #e2e8f0);
+  border-color: var(--accent-45, rgba(71, 184, 255, 0.7));
+  border-radius: 6px;
+  font-size: 14px;
+  text-decoration: none;
+  outline: 2px solid var(--accent-45, rgba(71, 184, 255, 0.7));
+  outline-offset: 2px;
+}
 
 @media (prefers-reduced-motion: reduce) {
   .pixel-avatar[data-status] { animation: none; }
@@ -14,4 +63,16 @@
   [style*="workingPulse"] { animation: none; }
   [style*="keeperPulse"] { animation: none; }
   [style*="activityFadeIn"] { animation: none; }
+
+  /* Tailwind animation utilities */
+  .animate-pulse { animation: none; }
+  .animate-ping { animation: none; }
+  .animate-spin { animation: none; }
+  .animate-bounce { animation: none; }
+
+  /* Custom keyframe animations via animate-[...] */
+  [class*="animate-["] { animation: none; }
+
+  /* Transition duration — reduce to instant for motion-sensitive users */
+  * { transition-duration: 0s !important; animation-duration: 0s !important; }
 }

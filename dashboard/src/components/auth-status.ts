@@ -147,6 +147,7 @@ export function AuthStatus() {
         class="flex items-center gap-1.5 text-2xs py-1 px-2 rounded border border-solid border-[var(--color-border-default)] bg-[var(--white-4)] cursor-pointer font-[inherit] transition-colors duration-150 hover:bg-[var(--white-8)] text-[var(--color-fg-muted)]"
         onClick=${() => { popoverOpen.value ? (popoverOpen.value = false) : openPopover() }}
         title="인증 상태"
+        aria-label="인증 상태"
       >
         <span class="size-[7px] rounded-sm inline-block ${dotColor}"></span>
         <span>${label}</span>
@@ -263,6 +264,7 @@ export function RemoteWarningBanner() {
         >인증 열기</button>
         <button type="button"
           class="text-[var(--color-fg-muted)] hover:text-[var(--color-fg-primary)] cursor-pointer text-2xs transition-colors"
+          aria-label="\uc778\uc99d \ubc30\ub108 \ub2eb\uae30"
           onClick=${() => { bannerDismissed.value = true }}
         >\u2715</button>
       </div>

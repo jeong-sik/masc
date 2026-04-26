@@ -116,7 +116,7 @@ export function KeeperMemoryTierPanel({
 
   if (loading) {
     return html`
-      <div class="flex items-center justify-center gap-2 py-6 text-2xs text-[var(--color-fg-disabled)]">
+      <div class="flex items-center justify-center gap-2 py-6 text-2xs text-[var(--color-fg-disabled)]" role="status">
         <${InlineSpinner} />
         메모리 티어 로딩중
       </div>

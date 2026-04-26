@@ -154,7 +154,7 @@ export function GovernanceMonitor() {
           onClick=${() => void load()}
         >새로고침<//>
         <span class="text-xs text-[var(--color-fg-muted)]">${formatAutoRefreshLabel(TELEMETRY_AUTO_REFRESH_MS)}</span>
-        ${current.loading ? html`<span class="text-xs text-[var(--color-fg-muted)]">로딩 중...</span>` : null}
+        ${current.loading ? html`<span class="text-xs text-[var(--color-fg-muted)]" role="status">로딩 중...</span>` : null}
       </div>
 
       ${current.error ? html`<${ErrorState} message=${current.error} />` : null}
@@ -208,12 +208,12 @@ export function GovernanceMonitor() {
               ? html`<div class="py-4 text-center text-2xs text-[var(--color-fg-muted)]">필터 결과 없음 (${allRejections.length} items)</div>`
               : html`
                 <div class="overflow-x-auto">
-                  <table class="w-full text-xs">
+                  <table class="w-full text-xs" aria-label="도구 거부 현황">
                     <thead>
                       <tr class="text-left text-[var(--color-fg-muted)] border-b border-[var(--color-border-default)]">
-                        <th class="py-1.5 pr-4 font-medium">도구</th>
-                        <th class="py-1.5 pr-4 font-medium">사유</th>
-                        <th class="py-1.5 font-medium text-right">횟수</th>
+                        <th scope="col" class="py-1.5 pr-4 font-medium">도구</th>
+                        <th scope="col" class="py-1.5 pr-4 font-medium">사유</th>
+                        <th scope="col" class="py-1.5 font-medium text-right">횟수</th>
                       </tr>
                     </thead>
                     <tbody>

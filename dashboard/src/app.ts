@@ -173,6 +173,7 @@ export function App() {
 
   return html`
     <div class="flex min-h-screen h-screen flex-col overflow-hidden bg-[var(--color-bg-page)] bg-[radial-gradient(ellipse_at_top,rgba(25,40,70,0.3)_0%,rgba(11,18,32,1)_80%)] text-[var(--text-body)]">
+      <a href="#main-content" class="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-[100] focus:rounded-md focus:bg-[var(--color-bg-page)] focus:px-4 focus:py-2 focus:text-sm focus:text-[var(--text-strong)] focus:shadow-lg focus:ring-2 focus:ring-[var(--accent-45)]">메인 콘텐츠로 건너뛰기</a>
       <header class="relative z-10 shrink-0 border-b border-[var(--white-5)] bg-[rgba(8,14,26,0.36)] px-4 py-1.5 backdrop-blur-xl">
         <div class="absolute inset-x-0 bottom-0 h-[1px] bg-gradient-to-r from-transparent via-[var(--accent-15)] to-transparent"></div>
         <div class="flex w-full items-center justify-between gap-3 max-[900px]:flex-col max-[900px]:items-stretch">
@@ -225,11 +226,11 @@ export function App() {
       <//>
 
       <div class="flex flex-1 gap-2 overflow-hidden p-2 max-[1100px]:flex-col">
-        <aside id="dashboard-side-rail" class="${sidebarCollapsed.value ? 'w-14' : 'w-55'} shrink-0 overflow-y-auto overflow-x-hidden rounded-xl border border-[var(--white-5)] bg-[rgba(15,22,36,0.6)] backdrop-blur-xl transition-[width] duration-300 ease-[cubic-bezier(0.2,0.8,0.2,1)] max-[1100px]:w-full max-[1100px]:max-h-75 ${mobileMenuOpen.value ? '' : 'max-[768px]:hidden'}">
+        <aside id="dashboard-side-rail" aria-label="사이드바 탐색" class="${sidebarCollapsed.value ? 'w-14' : 'w-55'} shrink-0 overflow-y-auto overflow-x-hidden rounded-xl border border-[var(--white-5)] bg-[rgba(15,22,36,0.6)] backdrop-blur-xl transition-[width] duration-300 ease-[cubic-bezier(0.2,0.8,0.2,1)] max-[1100px]:w-full max-[1100px]:max-h-75 ${mobileMenuOpen.value ? '' : 'max-[768px]:hidden'}">
           <${SideRail} collapsed=${sidebarCollapsed.value} onToggle=${() => { sidebarCollapsed.value = !sidebarCollapsed.value }} />
         </aside>
 
-        <main class="min-w-0 flex-1 overflow-hidden rounded-xl border border-[var(--white-5)] bg-[rgba(10,15,26,0.68)] backdrop-blur-lg max-[1100px]:min-h-0">
+        <main id="main-content" tabindex=${-1} class="min-w-0 flex-1 overflow-hidden rounded-xl border border-[var(--white-5)] bg-[rgba(10,15,26,0.68)] backdrop-blur-lg max-[1100px]:min-h-0">
           <div class="h-full overflow-y-auto p-4">
             <${DashboardMain} />
           </div>

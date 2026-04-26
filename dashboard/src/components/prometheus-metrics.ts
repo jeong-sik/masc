@@ -167,6 +167,7 @@ function labelPills(labels: Record<string, string>): ReturnType<typeof html> | n
       return html`<button
         class="rounded bg-[var(--accent-10)] px-1 py-0.5 text-3xs text-[var(--accent)] font-mono hover:bg-[var(--accent-10)] hover:text-[var(--accent)] transition-colors cursor-pointer"
         title="키퍼 상세 보기"
+        aria-label="키퍼 상세 보기"
         onClick=${(e: Event) => {
           e.stopPropagation()
           navigate('monitoring', { section: 'agents', keeper: v })
@@ -177,6 +178,7 @@ function labelPills(labels: Record<string, string>): ReturnType<typeof html> | n
       return html`<button
         class="rounded bg-[var(--warn-10)] px-1 py-0.5 text-3xs text-[var(--warn)] font-mono hover:bg-[var(--warn-10)] hover:text-[var(--warn)] transition-colors cursor-pointer"
         title="도구 품질 보기"
+        aria-label="도구 품질 보기"
         onClick=${(e: Event) => {
           e.stopPropagation()
           navigate('monitoring', { section: 'fleet-health', view: 'tool-quality', tool: v })
@@ -345,6 +347,7 @@ export function PrometheusMetrics() {
           <${Card}>
             <button
               class="flex w-full items-center justify-between text-left"
+              aria-expanded=${expanded ? 'true' : 'false'}
               onClick=${() => toggleCategory(cat)}
             >
               <div class="flex items-center gap-2">
@@ -366,12 +369,12 @@ export function PrometheusMetrics() {
 
             ${expanded && html`
               <div class="mt-3 overflow-x-auto">
-                <table class="w-full text-xs">
+                <table class="w-full text-xs" aria-label="Prometheus 메트릭 시계열">
                   <thead>
                     <tr class="border-b border-[var(--card-border)] text-[var(--text-muted)]">
-                      <th class="pb-2 text-left font-normal">메트릭</th>
-                      <th class="pb-2 text-left font-normal w-16">유형</th>
-                      <th class="pb-2 text-right font-normal w-24">값</th>
+                      <th scope="col" class="pb-2 text-left font-normal">메트릭</th>
+                      <th scope="col" class="pb-2 text-left font-normal w-16">유형</th>
+                      <th scope="col" class="pb-2 text-right font-normal w-24">값</th>
                     </tr>
                   </thead>
                   <tbody>

@@ -17,7 +17,7 @@ type ButtonSize = 'sm' | 'md' | 'lg'
 type ButtonType = 'button' | 'submit' | 'reset'
 
 const SIZE_CLASSES: Record<ButtonSize, string> = {
-  sm: 'py-1 px-2 text-3xs',
+  sm: 'py-1 px-2 text-2xs',
   md: 'py-1.5 px-2.5 text-2xs',
   lg: 'py-2 px-4 text-sm',
 }

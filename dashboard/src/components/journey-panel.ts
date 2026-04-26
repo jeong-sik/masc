@@ -468,7 +468,7 @@ function JourneyTile({
   children: preact.ComponentChildren
 }) {
   return html`
-    <section class="rounded-xl border border-[var(--color-border-default)] bg-[var(--white-3)] p-4 flex flex-col gap-3 min-h-[150px]">
+    <section class="rounded-xl border border-[var(--color-border-default)] bg-[var(--white-3)] p-4 flex flex-col gap-3 min-h-[150px]" aria-label=${label}>
       <div class="text-3xs font-semibold uppercase tracking-4 text-[var(--color-fg-disabled)]">${label}</div>
       <div class="flex flex-col gap-2 text-sm text-[var(--color-fg-primary)]">
         ${children}
@@ -634,6 +634,7 @@ function JourneyCard({ record }: { record: JourneyRecord }) {
         <div class="flex items-center gap-3 border-t border-[var(--white-8)] pt-3">
           <button
             class="inline-flex items-center rounded px-3 py-1.5 text-xs font-medium text-[var(--color-fg-muted)] transition hover:text-[var(--color-fg-primary)] hover:bg-[var(--white-5)]"
+            aria-expanded=${showExtended.value ? 'true' : 'false'}
             onClick=${() => { showExtended.value = !showExtended.value }}
           >
             ${showExtended.value ? '▼' : '▶'} 추가 정보

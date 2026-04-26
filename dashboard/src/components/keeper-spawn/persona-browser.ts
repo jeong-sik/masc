@@ -77,7 +77,7 @@ function PersonaCard({ persona }: { persona: PersonaSummary }) {
 export function PersonaBrowser() {
   useEffect(() => { if (personas.value.length === 0 && !personasLoading.value) void loadPersonas() }, [])
   const spawnAccess = dashboardAuthAccess(shellAuthSummary.value, 'worker')
-  if (personasLoading.value) return html`<p class="text-xs text-[var(--color-fg-muted)] py-4">페르소나 로딩 중...</p>`
+  if (personasLoading.value) return html`<p class="text-xs text-[var(--color-fg-muted)] py-4" role="status">페르소나 로딩 중...</p>`
   if (personasError.value) return html`
     <div class="py-4">
       <p class="text-xs text-[var(--color-status-err)] mb-2">${personasError.value}</p>

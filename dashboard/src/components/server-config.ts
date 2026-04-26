@@ -104,6 +104,7 @@ function CategoryPanel({ name, entries }: { name: string; entries: ConfigEntry[]
     <div class="border border-[var(--color-border-divider)] rounded overflow-hidden mb-3">
       <button
         class="w-full flex items-center justify-between px-4 py-2.5 bg-[var(--bg-surface)] hover:bg-[var(--color-bg-hover)] transition-colors text-left"
+        aria-expanded=${isExpanded ? 'true' : 'false'}
         onClick=${() => toggleCategory(name)}
       >
         <div class="flex items-center gap-2">
@@ -185,7 +186,7 @@ export function ServerConfig() {
       </div>
 
       ${error ? html`
-        <div class="text-sm text-[var(--color-status-err)] mb-3">${error}</div>
+        <div class="text-sm text-[var(--color-status-err)] mb-3" role="alert">${error}</div>
       ` : null}
 
       ${loading && !data ? html`

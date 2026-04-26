@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useReducer, useRef, useState } from 'preact/hooks'
 import { InlineSpinner } from './common/inline-spinner'
+import { DialogOverlay } from './common/dialog'
 import { TextInput } from './common/input'
 
 import {
@@ -633,39 +634,33 @@ function ShortcutsOverlay({
     { keys: 'Home / End', desc: '첫 / 마지막 키퍼 (탭 포커스 시)' },
   ]
   return html`
-    <div
-      class="fixed inset-0 z-50 flex items-center justify-center bg-[var(--white-5)]/60 backdrop-blur-sm"
-      onClick=${onClose}
-      role="dialog"
-      aria-modal="true"
-      aria-label="키보드 단축키"
+    <${DialogOverlay}
+      labelledBy="shortcuts-title"
+      onClose=${onClose}
+      overlayClass="fixed inset-0 z-50 flex items-center justify-center"
+      panelClass="rounded border border-[var(--white-10)] bg-[var(--color-bg-page)] p-5 min-w-70 shadow-sm"
     >
-      <div
-        class="rounded border border-[var(--white-10)] bg-[var(--color-bg-page)] p-5 min-w-70 shadow-sm"
-        onClick=${(e: MouseEvent) => e.stopPropagation()}
-      >
-        <div class="flex items-center justify-between mb-3">
-          <div class="text-2xs font-semibold uppercase tracking-2 text-[var(--color-fg-muted)]">
-            키보드 단축키
-          </div>
-          <button
-            class="text-3xs text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)] cursor-pointer"
-            onClick=${onClose}
-            aria-label="닫기"
-          >Esc</button>
-        </div>
-        <div class="flex flex-col gap-1.5">
-          ${rows.map(r => html`
-            <div class="flex items-center gap-3 text-2xs">
-              <kbd class="font-mono px-1.5 py-0.5 rounded border border-[var(--white-10)] bg-[var(--white-3)] text-[var(--color-fg-primary)] min-w-16 text-center">
-                ${r.keys}
-              </kbd>
-              <span class="text-[var(--color-fg-primary)]">${r.desc}</span>
-            </div>
-          `)}
-        </div>
+      <div class="flex items-center justify-between mb-3">
+        <h2 id="shortcuts-title" class="m-0 text-2xs font-semibold uppercase tracking-2 text-[var(--color-fg-muted)]">
+          키보드 단축키
+        </h2>
+        <button
+          class="text-3xs text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)] cursor-pointer"
+          onClick=${onClose}
+          aria-label="닫기"
+        >Esc</button>
       </div>
-    </div>
+      <div class="flex flex-col gap-1.5">
+        ${rows.map(r => html`
+          <div class="flex items-center gap-3 text-2xs">
+            <kbd class="font-mono px-1.5 py-0.5 rounded border border-[var(--white-10)] bg-[var(--white-3)] text-[var(--color-fg-primary)] min-w-16 text-center">
+              ${r.keys}
+            </kbd>
+            <span class="text-[var(--color-fg-primary)]">${r.desc}</span>
+          </div>
+        `)}
+      </div>
+    <//>
   `
 }
 

@@ -67,6 +67,7 @@ function InspectorTabButton({
           ? 'border-accent/30 bg-[var(--accent-10)] text-[var(--color-accent-fg)]'
           : 'border-card-border bg-[var(--white-3)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg-primary)] hover:bg-[var(--white-6)]',
       ].join(' ')}
+      aria-pressed=${active ? 'true' : 'false'}
       onClick=${() => {
         inspectorSection.value = id
       }}

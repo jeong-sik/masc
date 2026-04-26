@@ -79,6 +79,7 @@ function KeeperCascadeSelector({ keeper }: { keeper: Keeper }) {
   return html`
     <div class="flex items-center gap-1.5">
       <select
+        aria-label="Cascade 프로필 선택"
         class="py-0.5 px-1 rounded text-3xs font-mono bg-[var(--white-5)] text-[var(--text-muted)] border border-[var(--white-8)] cursor-pointer"
         title=${invalidProfiles.length > 0
           ? `Cascade 프로필\n\n비활성화된 잘못된 preset:\n${invalidSummary}`
@@ -285,7 +286,7 @@ export function KeeperDetailOverviewSidebar({
   activity: KeeperActivityDisplay
 }) {
   return html`
-    <aside class="order-2 xl:order-1 xl:sticky xl:top-[104px] xl:self-start">
+    <aside class="order-2 xl:order-1 xl:sticky xl:top-[104px] xl:self-start" aria-label="키퍼 프로필 요약">
       <div class="flex flex-col gap-4 rounded-[28px] border border-[var(--card-border)] bg-[rgba(9,14,24,0.84)] p-4 shadow-[0_20px_48px_rgba(0,0,0,0.18)]">
         <div>
           <div class="text-3xs font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">개요</div>
@@ -340,6 +341,7 @@ export function KeeperDetailSection({
     <section
       id=${id}
       class="scroll-mt-24 rounded-[28px] border border-[var(--card-border)] bg-[linear-gradient(180deg,rgba(12,19,34,0.94),rgba(8,13,24,0.98))] shadow-[0_24px_48px_rgba(0,0,0,0.22)]"
+      aria-label=${title}
     >
       <div class="border-b border-[var(--white-8)] px-5 py-4 sm:px-6">
         <div class="text-3xs font-semibold uppercase tracking-[0.22em] text-[var(--text-muted)]">${eyebrow}</div>

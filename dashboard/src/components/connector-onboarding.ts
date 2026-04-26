@@ -57,6 +57,7 @@ function OnboardingCard({ connectorId }: { connectorId: KnownConnectorId }) {
           disabled=${starting}
           ariaBusy=${starting}
           testId=${`onboarding-start-${connectorId}`}
+          aria-label=${`${CONNECTOR_DISPLAY_NAMES[connectorId]} 시작`}
           onClick=${() => { void onStart() }}
         >${onboardingStartLabel(starting)}<//>
       </div>

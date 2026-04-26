@@ -128,7 +128,7 @@ function Sparkline({ buckets, height = 32 }: { buckets: HourlyBucket[]; height?:
   })
 
   return html`
-    <svg width=${width} height=${height + 14} class="overflow-visible">
+    <svg width=${width} height=${height + 14} class="overflow-visible" role="img" aria-label="시간대별 도구 호출 차트">
       ${bars}
       ${labels}
     </svg>
@@ -212,7 +212,7 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
   // operators can distinguish no calls from a broken trajectory lane.
   if (asyncState.loading) return null
   if (asyncState.error) {
-    return html`<div class="text-xs text-[var(--color-status-err)] py-2 px-3">텔레메트리 로드 실패: ${asyncState.error}</div>`
+    return html`<div class="text-xs text-[var(--color-status-err)] py-2 px-3" role="alert">텔레메트리 로드 실패: ${asyncState.error}</div>`
   }
 
   if (s.tools.length === 0) {

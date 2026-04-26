@@ -67,7 +67,7 @@ function ToolDetail() {
 export function ToolExecutor() {
   useEffect(() => { void loadToolSchemas() }, [])
   if (schemasLoading.value && !selectedTool.value) {
-    return html`<${SurfaceCard}><p class="text-xs text-[var(--color-fg-muted)] py-8 text-center">도구 스키마 로딩 중...</p><//>`
+    return html`<${SurfaceCard}><p class="text-xs text-[var(--color-fg-muted)] py-8 text-center" role="status">도구 스키마 로딩 중...</p><//>`
   }
   if (schemasError.value) {
     return html`<${SurfaceCard}><div class="py-4 text-center">

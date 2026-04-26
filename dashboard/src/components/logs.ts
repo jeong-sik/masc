@@ -364,7 +364,7 @@ export function LogViewer() {
 
   return html`
     <div class="logs-viewer flex h-full min-h-0 flex-col gap-4">
-      <section class="flex min-h-0 flex-1 flex-col overflow-hidden rounded border border-[rgba(138,163,211,0.16)] bg-[rgba(7,13,24,0.86)]">
+      <section class="flex min-h-0 flex-1 flex-col overflow-hidden rounded border border-[rgba(138,163,211,0.16)] bg-[rgba(7,13,24,0.86)]" aria-label="로그 뷰어">
         <div class="logs-toolbar flex shrink-0 flex-wrap items-center justify-between gap-4 border-b border-[var(--white-5)] px-4 py-4">
           <div class="logs-filters flex flex-wrap gap-2 items-center">
             <${Select}
@@ -455,7 +455,7 @@ export function LogViewer() {
 
         ${logEntries.length === 0
           ? html`
-              <div class="flex flex-1 items-center justify-center px-6 text-sm text-[var(--color-fg-muted)]">
+              <div class="flex flex-1 items-center justify-center px-6 text-sm text-[var(--color-fg-muted)]" role="status">
                 ${logLoading ? '로그를 불러오는 중...' : '조건에 맞는 로그가 없습니다.'}
               </div>
             `

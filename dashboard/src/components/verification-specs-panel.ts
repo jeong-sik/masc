@@ -76,14 +76,14 @@ export function shortMtime(iso: string): string {
 function SpecsTable({ entries }: { entries: TlaSpecEntry[] }) {
   return html`
     <div class="overflow-x-auto">
-      <table class="w-full text-xs tabular-nums">
+      <table class="w-full text-xs tabular-nums" aria-label="TLA+ 스펙 목록">
         <thead class="text-left text-slate-400">
           <tr>
-            <th class="py-1 pr-4">사양</th>
-            <th class="py-1 pr-4">분류</th>
-            <th class="py-1 pr-4">Cfg</th>
-            <th class="py-1 pr-4">경로</th>
-            <th class="py-1">수정일</th>
+            <th scope="col" class="py-1 pr-4">사양</th>
+            <th scope="col" class="py-1 pr-4">분류</th>
+            <th scope="col" class="py-1 pr-4">Cfg</th>
+            <th scope="col" class="py-1 pr-4">경로</th>
+            <th scope="col" class="py-1">수정일</th>
           </tr>
         </thead>
         <tbody>
@@ -145,7 +145,7 @@ export function VerificationSpecsPanel() {
         >
           새로고침
         </button>
-        ${current.loading ? html`<span class="text-xs text-[var(--color-fg-muted)]">로딩 중...</span>` : null}
+        ${current.loading ? html`<span class="text-xs text-[var(--color-fg-muted)]" role="status">로딩 중...</span>` : null}
         ${data?.updated_at
           ? html`<span class="text-xs text-[var(--color-fg-muted)]">specs · ${data.updated_at}</span>`
           : null}

@@ -413,6 +413,7 @@ function ProfileCard({
               ? html`
                 <div class="flex items-center gap-2 flex-wrap">
                   <select
+                    aria-label="키퍼 선택"
                     class="min-w-44 rounded border border-[var(--card-border)] bg-[var(--color-bg-page)] px-2 py-1 text-xs text-[var(--text-strong)]"
                     value=${selectedKeeper.value}
                     disabled=${assigning.value}
@@ -711,35 +712,40 @@ function HealthTable({
     ${isFiltering && filtered.length === 0
       ? html`<div class="py-4 text-center text-2xs text-[var(--text-muted)]">필터 결과 없음 (${health.providers.length} providers)</div>`
       : html`
-        <table class="w-full text-xs">
+        <table class="w-full text-xs" aria-label="cascade provider 상태">
           <thead>
             <tr class="text-[var(--text-muted)] border-b border-[var(--card-border)]">
-              <th class="text-left py-1 w-4"></th>
-              <th class="text-left py-1">제공자</th>
+              <th scope="col" class="text-left py-1 w-4"></th>
+              <th scope="col" class="text-left py-1">제공자</th>
               <th
+                scope="col"
                 class="text-left py-1"
                 title="운영 상태: 활성 (최근 이벤트), 쿨다운 (차단), 설정됨 (선언만 됨)"
               >상태</th>
-              <th class="text-right py-1">성공률</th>
-              <th class="text-right py-1">연속 실패</th>
-              <th class="text-right py-1">이벤트</th>
+              <th scope="col" class="text-right py-1">성공률</th>
+              <th scope="col" class="text-right py-1">연속 실패</th>
+              <th scope="col" class="text-right py-1">이벤트</th>
               <th
+                scope="col"
                 class="text-right py-1"
                 title="응답은 왔지만 accept 게이트에서 거부된 이벤트 수"
               >거부</th>
               <th
+                scope="col"
                 class="text-right py-1"
                 title="프롬프트 prefill 처리량 (이 provider 의 모델 entry-가중 평균)"
               >Prefill tok/s</th>
               <th
+                scope="col"
                 class="text-right py-1"
                 title="Decode 처리량 (예측 토큰 / 초, entry-가중)"
               >Decode tok/s</th>
               <th
+                scope="col"
                 class="text-right py-1"
                 title="Latency p50 / p95 (밀리초, 모델별 퍼센타일의 가중 평균 근사)"
               >Latency p50/p95</th>
-              <th class="text-right py-1">쿨다운</th>
+              <th scope="col" class="text-right py-1">쿨다운</th>
             </tr>
           </thead>
           <tbody>
@@ -929,16 +935,16 @@ function StrategyTraceTable({
     : trace.events
   return html`
     ${query ? html`<div class="text-xs text-[var(--text-muted)] mb-2">${filtered.length}/${trace.events.length}건</div>` : null}
-    <table class="w-full text-xs">
+    <table class="w-full text-xs" aria-label="strategy trace 이벤트">
       <thead>
         <tr class="text-[var(--text-muted)] border-b border-[var(--card-border)]">
-          <th class="text-left py-1 w-20">시간</th>
-          <th class="text-left py-1">캐스케이드</th>
-          <th class="text-left py-1">전략</th>
-          <th class="text-right py-1">사이클</th>
-          <th class="text-right py-1">입/출</th>
-          <th class="text-right py-1">백오프(ms)</th>
-          <th class="text-left py-1">결과</th>
+          <th scope="col" class="text-left py-1 w-20">시간</th>
+          <th scope="col" class="text-left py-1">캐스케이드</th>
+          <th scope="col" class="text-left py-1">전략</th>
+          <th scope="col" class="text-right py-1">사이클</th>
+          <th scope="col" class="text-right py-1">입/출</th>
+          <th scope="col" class="text-right py-1">백오프(ms)</th>
+          <th scope="col" class="text-left py-1">결과</th>
         </tr>
       </thead>
       <tbody>
@@ -967,13 +973,13 @@ function ClientCapacityHistoryTable({
     return html`<${EmptyState}>최근 capacity 이벤트가 없습니다. (acquire/release가 아직 발생하지 않음)<//>`
   }
   return html`
-    <table class="w-full text-xs">
+    <table class="w-full text-xs" aria-label="capacity 이벤트 이력">
       <thead>
         <tr class="text-[var(--text-muted)] border-b border-[var(--card-border)]">
-          <th class="text-left py-1 w-20">시간</th>
-          <th class="text-left py-1">종류</th>
-          <th class="text-left py-1">키</th>
-          <th class="text-right py-1">활성</th>
+          <th scope="col" class="text-left py-1 w-20">시간</th>
+          <th scope="col" class="text-left py-1">종류</th>
+          <th scope="col" class="text-left py-1">키</th>
+          <th scope="col" class="text-right py-1">활성</th>
         </tr>
       </thead>
       <tbody>
@@ -997,15 +1003,15 @@ function ClientCapacityTable({ capacity }: { capacity: CascadeClientCapacityResp
     return html`<${EmptyState}>등록된 client-capacity 슬롯이 없습니다. (cascade가 한 번도 호출되지 않았거나 CLI/ollama provider 미사용)<//>`
   }
   return html`
-    <table class="w-full text-xs">
+    <table class="w-full text-xs" aria-label="client capacity 슬롯">
       <thead>
         <tr class="text-[var(--text-muted)] border-b border-[var(--card-border)]">
-          <th class="text-left py-1 w-4"></th>
-          <th class="text-left py-1">종류</th>
-          <th class="text-left py-1">키</th>
-          <th class="text-right py-1">활성</th>
-          <th class="text-right py-1">가용</th>
-          <th class="text-right py-1">전체</th>
+          <th scope="col" class="text-left py-1 w-4"></th>
+          <th scope="col" class="text-left py-1">종류</th>
+          <th scope="col" class="text-left py-1">키</th>
+          <th scope="col" class="text-right py-1">활성</th>
+          <th scope="col" class="text-right py-1">가용</th>
+          <th scope="col" class="text-right py-1">전체</th>
         </tr>
       </thead>
       <tbody>
@@ -1228,7 +1234,7 @@ export function CascadeConfigPanel() {
         >
           새로고침
         </button>
-        ${current.loading ? html`<span class="text-xs text-[var(--text-muted)]">로딩 중...</span>` : null}
+        ${current.loading ? html`<span class="text-xs text-[var(--text-muted)]" role="status">로딩 중...</span>` : null}
         ${config?.updated_at
           ? html`<span class="text-xs text-[var(--text-muted)]">config · ${config.updated_at}</span>`
           : null}

@@ -840,6 +840,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
     <section
       data-testid="fleet-fsm-matrix"
       class="rounded border border-[var(--white-10)] bg-[var(--white-5)]"
+      aria-label="Fleet FSM 통합 상태"
     >
       <header class="flex flex-wrap items-baseline gap-3 border-b border-[var(--white-10)] p-3">
         <h2 class="text-sm font-semibold text-[var(--color-fg-muted)]">Fleet 통합 (KSM × KTC × KDP × KCL × KMC × KCB)</h2>
@@ -915,13 +916,13 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
           `
         : null}
       <div class="overflow-x-auto">
-        <table class="min-w-full text-xs">
+        <table class="min-w-full text-xs" aria-label="키퍼 FSM 상태 행렬">
           <thead class="bg-[var(--white-5)] text-[var(--color-fg-muted)]">
             <tr>
-              <th class="px-3 py-2 text-left font-semibold">키퍼</th>
-              <th class="px-3 py-2 text-left font-semibold">런타임</th>
+              <th scope="col" class="px-3 py-2 text-left font-semibold">키퍼</th>
+              <th scope="col" class="px-3 py-2 text-left font-semibold">런타임</th>
               ${AXES.map(a => html`
-                <th class="px-3 py-2 text-left font-semibold" title=${a.label}>
+                <th scope="col" class="px-3 py-2 text-left font-semibold" title=${a.label}>
                   ${a.acronym} <span class="text-[var(--color-fg-muted)]0">${a.label}</span>
                 </th>
               `)}
@@ -984,6 +985,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
                                     data-runtime-action-type=${action.action_type}
                                     class="self-start rounded border border-[var(--white-10)] bg-[var(--white-5)] px-2 py-0.5 text-3xs font-semibold ${runtimeActionTone(action)} hover:bg-[var(--white-10)] disabled:cursor-not-allowed disabled:opacity-50"
                                     title=${action.reason}
+                                    aria-label=${action.reason}
                                     disabled=${busy}
                                     onClick=${(event: MouseEvent) => {
                                       event.stopPropagation()
@@ -1004,6 +1006,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
                               data-runtime-assist
                               class="self-start rounded border border-[var(--white-10)] bg-[var(--white-5)] px-2 py-0.5 text-3xs font-semibold text-[var(--color-accent-fg)] hover:bg-[var(--white-10)] disabled:cursor-not-allowed disabled:opacity-50"
                               title="현재 원인/증거를 keeper LLM에 보내 감독형 진단을 요청합니다"
+                              aria-label="감독형 진단 요청"
                               disabled=${assisting}
                               onClick=${(event: MouseEvent) => {
                                 event.stopPropagation()

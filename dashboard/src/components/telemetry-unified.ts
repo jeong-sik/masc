@@ -607,7 +607,7 @@ function GroupRow({ item }: { item: Extract<TelemetryDisplayItem, { kind: 'group
           />
         </span>
       </div>
-      <div id=${contentId} class=${expanded.value ? 'px-3 pb-3 flex flex-col gap-2' : 'hidden'} role="region">
+      <div id=${contentId} class=${expanded.value ? 'px-3 pb-3 flex flex-col gap-2' : 'hidden'}>
         ${expanded.value ? html`
           <div class="rounded bg-[var(--white-3)] px-2 py-1.5 text-2xs text-[var(--text-dim)]">
             Latest: <span class="font-mono text-[var(--text-strong)]">${latestPreview}</span>
@@ -922,11 +922,11 @@ export function TelemetryUnified() {
           Refresh
         </button>
         <span class="text-xs text-[var(--text-muted)]">${formatAutoRefreshLabel(TELEMETRY_AUTO_REFRESH_MS)}</span>
-        ${loading ? html`<span class="text-xs text-[var(--text-muted)]">로딩 중...</span>` : null}
+        ${loading ? html`<span class="text-xs text-[var(--text-muted)]" role="status">로딩 중...</span>` : null}
       </div>
 
       ${error ? html`
-        <div class="rounded border border-[var(--bad-20)] bg-[var(--bad-10)] px-3 py-2 text-xs text-[var(--bad-light)]">
+        <div class="rounded border border-[var(--bad-20)] bg-[var(--bad-10)] px-3 py-2 text-xs text-[var(--bad-light)]" role="alert">
           ${error}
         </div>
       ` : null}

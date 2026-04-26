@@ -80,6 +80,8 @@ export function MetricTrack({ points, windowStart, windowEnd }: Props) {
             viewBox="0 0 ${viewBoxWidth} ${viewBoxHeight}"
             preserveAspectRatio="none"
             class="absolute inset-0 w-full h-full"
+            role="img"
+            aria-label="시간대별 메트릭 트렌드 차트"
           >
             ${anomalyResults.filter(r => r.isAnomaly).map((r, i) => {
               const x = ((r.ts - windowStart) / span) * viewBoxWidth

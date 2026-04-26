@@ -384,11 +384,11 @@ export function TransportHealthPanel() {
   const { data, loading, error } = transportHealthResource.state.value
 
   if (loading && !data) {
-    return html`<div class="p-6 text-center text-text-muted text-sm">트랜스포트 상태 로딩 중...</div>`
+    return html`<div class="p-6 text-center text-text-muted text-sm" role="status">트랜스포트 상태 로딩 중...</div>`
   }
 
   if (error && !data) {
-    return html`<div class="p-6 text-center text-[var(--color-status-err)] text-sm">${error}</div>`
+    return html`<div class="p-6 text-center text-[var(--color-status-err)] text-sm" role="alert">${error}</div>`
   }
 
   if (!data) return null

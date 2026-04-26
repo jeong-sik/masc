@@ -5,7 +5,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 source "${ROOT_DIR}/scripts/harness/lib/server_bootstrap.sh"
 
-SERVER_EXE="$(harness_find_server_exe "$ROOT_DIR" "${SERVER_EXE:-}")"
+SERVER_EXE_HINT="${SERVER_EXE:-}"
+if ! SERVER_EXE="$(harness_find_server_exe "$ROOT_DIR" "${SERVER_EXE_HINT}")"; then
+  SERVER_EXE=""
+fi
 PORT="${PORT:-$(harness_pick_free_port)}"
 BASE_PATH="${BASE_PATH:-$(harness_mktemp_dir "masc-contract-room")}"
 LOG_FILE="${LOG_FILE:-$(harness_mktemp_file "masc-contract-server" ".log")}"
@@ -32,6 +35,26 @@ cleanup() {
   fi
 }
 trap cleanup EXIT
+
+build_server_exe() {
+  if [[ -x "$SERVER_EXE" ]]; then
+    return 0
+  fi
+  echo "[bootstrap] server executable missing; building"
+  (
+    cd "$ROOT_DIR"
+    if command -v opam >/dev/null 2>&1; then
+      opam exec -- dune build --root . ./bin/main_eio.exe
+    else
+      dune build --root . ./bin/main_eio.exe
+    fi
+  )
+  if ! SERVER_EXE="$(harness_find_server_exe "$ROOT_DIR" "${SERVER_EXE_HINT}")"; then
+    echo "FAIL: server executable still not found after build step" >&2
+    return 1
+  fi
+  return 0
+}
 
 wait_for_mcp_initialize_ready() {
   local mcp_url="$1"
@@ -74,6 +97,11 @@ echo "[bootstrap] port=${PORT}"
 echo "[bootstrap] base_path=${BASE_PATH}"
 echo "[bootstrap] log_file=${LOG_FILE}"
 echo "[bootstrap] mcp_url=${MCP_URL}"
+
+if ! build_server_exe; then
+  exit 1
+fi
+echo "[bootstrap] server_exe=${SERVER_EXE}"
 
 SERVER_PID="$(harness_start_server "$SERVER_EXE" "$PORT" "$BASE_PATH" "$LOG_FILE")"
 if ! harness_wait_for_health "$PORT" 25; then

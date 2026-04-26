@@ -448,13 +448,13 @@ export function AgentProfile({ name }: { name: string }) {
                 const isFiltering = activityQuery.value.trim() !== ''
                 return html`
                   <div class="flex flex-col gap-1.5">
-                    <input
+                    <${TextInput}
                       type="search"
                       value=${activityQuery.value}
                       placeholder="활동 필터 (메시지 본문)"
-                      aria-label="프로젝트 활동 필터"
+                      ariaLabel="프로젝트 활동 필터"
                       onInput=${(e: Event) => { activityQuery.value = (e.target as HTMLInputElement).value }}
-                      class="w-full rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
+                      class="w-full !px-2 !py-1 !text-2xs"
                     />
                     ${isFiltering && visible.length === 0
                       ? html`<div class="py-4 text-center text-2xs text-[var(--color-fg-disabled)]">필터 결과 없음 (${lines.length} items)</div>`

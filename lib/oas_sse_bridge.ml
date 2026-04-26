@@ -355,12 +355,6 @@ let native_event_to_json (evt : Oas.Event_bus.event) : Yojson.Safe.t option =
            ?turn:(payload_int_opt "turn" payload)
            ?tool_name:(payload_string_opt "tool_name" payload)
            ())
-  | Oas.Event_bus.InferenceTelemetry _ ->
-      (* Per-token telemetry from OAS#1202; not surfaced over SSE — the
-         dashboard receives token usage via the existing AgentCompleted
-         payload aggregate. Skip the relay to avoid flooding SSE
-         consumers with high-frequency low-value events. *)
-      None
 
 let relay_max_attempts = 3
 let relay_max_queue_depth = 256

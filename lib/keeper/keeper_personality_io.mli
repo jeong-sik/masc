@@ -95,3 +95,33 @@ val check_byte_caps :
     Always pure — no logging, no Prometheus, no transformation. The
     caller chooses what to do with the warnings (soft-warn at create/
     update boundaries; structured-feedback in Layer 4 retry). *)
+
+(** {1 Compare} *)
+
+(** Per-field drift report when two coerced personalities differ.
+    [diff_offset] is the byte index of the first differing character
+    in the trimmed values, useful for log strings like
+    [will(cur=319,tgt=357,diff@319)] (the format Layer 1
+    [Keeper_runtime.personality_field_diff_entry] emits). *)
+type field_diff = {
+  field : field;
+  current_bytes : int;
+  target_bytes : int;
+  diff_offset : int;
+}
+
+val compare_normalized :
+  coerced_personality ->
+  coerced_personality ->
+  [ `Equal | `Drift of field_diff list ]
+(** [compare_normalized current target] returns [`Equal] when every
+    field matches byte-for-byte after coerce, or [`Drift diffs] with
+    one entry per differing field (in canonical order:
+    will, needs, desires, instructions).
+
+    Replacement for [Keeper_runtime.personality_text_equal] /
+    [personality_diff_summary] / [personality_field_diff_entry]
+    introduced in Layer 1. Because both inputs are already
+    [coerced_personality], there is no way to compare a raw value
+    against a trimmed one — the type system enforces the symmetry
+    Layer 1 had to enforce at runtime. *)

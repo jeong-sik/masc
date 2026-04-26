@@ -89,3 +89,46 @@ let check_byte_caps ?max_bytes (c : coerced_personality) =
   |> check Desires c.desires
   |> check Needs c.needs
   |> check Will c.will
+
+type field_diff = {
+  field : field;
+  current_bytes : int;
+  target_bytes : int;
+  diff_offset : int;
+}
+
+let first_byte_diff a b =
+  let la = String.length a in
+  let lb = String.length b in
+  let n = min la lb in
+  let rec scan i =
+    if i = n then n
+    else if a.[i] <> b.[i] then i
+    else scan (i + 1)
+  in
+  scan 0
+
+let field_diff_of_strings ~field ~current ~target =
+  if String.equal current target then None
+  else
+    Some
+      {
+        field;
+        current_bytes = String.length current;
+        target_bytes = String.length target;
+        diff_offset = first_byte_diff current target;
+      }
+
+let compare_normalized (current : coerced_personality)
+    (target : coerced_personality) =
+  let diffs =
+    List.filter_map
+      (fun (field, c, t) -> field_diff_of_strings ~field ~current:c ~target:t)
+      [
+        (Will, current.will, target.will);
+        (Needs, current.needs, target.needs);
+        (Desires, current.desires, target.desires);
+        (Instructions, current.instructions, target.instructions);
+      ]
+  in
+  match diffs with [] -> `Equal | _ :: _ -> `Drift diffs

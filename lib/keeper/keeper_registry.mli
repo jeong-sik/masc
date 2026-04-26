@@ -35,6 +35,13 @@ val ambiguous_partial_commit_kind_to_string :
 
 val failure_reason_to_string : failure_reason -> string
 
+(** #10584: cohort key for grouping failures by variant (ignores
+    parameters). [None] returns ["unknown"]. New variants added to
+    [failure_reason] force a same-PR update of this function via
+    OCaml's exhaustive-match check — Option B mitigation for the
+    recurring P0 pattern (#10490, #10574). *)
+val failure_reason_cohort_key : failure_reason option -> string
+
 (** Pure control-flow signal for immediate fiber termination (RFC-0002).
     Carries no state — failure reason must be pre-stored via
     [set_failure_reason] before raising. *)

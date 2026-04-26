@@ -24,9 +24,13 @@ let set_sse_sessions ~kind count =
   Prometheus.set_gauge Prometheus.metric_sse_sessions
     ~labels:[("kind", kind)] (float_of_int count)
 
-let observe_broadcast_duration seconds =
+let observe_broadcast_duration ?target seconds =
   Prometheus.observe_histogram Prometheus.metric_sse_broadcast_duration seconds;
-  Prometheus.inc_counter Prometheus.metric_sse_broadcast_events ()
+  let labels = match target with
+    | None -> []
+    | Some t -> [("target", t)]
+  in
+  Prometheus.inc_counter Prometheus.metric_sse_broadcast_events ~labels ()
 
 let set_sse_queue_depth ~session_id depth =
   Prometheus.set_gauge Prometheus.metric_sse_stream_queue_depth

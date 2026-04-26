@@ -182,11 +182,12 @@ export function KeeperCheckpointPanel({
     return html`
       <div class="rounded border border-[var(--bad-30)] bg-[var(--bad-10)] px-3 py-3 text-xs text-[#fda4af]">
         ${error}
-        <button
-          type="button"
-          class="ml-2 rounded border border-[var(--color-border-default)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--color-fg-primary)] hover:bg-[var(--white-8)] cursor-pointer"
+        <${ActionButton}
+          variant="ghost"
+          size="md"
+          class="ml-2 !px-2 !py-1"
           onClick=${loadInventory}
-        >다시 로드</button>
+        >다시 로드<//>
       </div>
     `
   }

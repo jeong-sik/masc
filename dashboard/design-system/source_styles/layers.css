@@ -7,14 +7,14 @@
   display: flex; align-items: center; gap: var(--sp-2);
   padding: 0 var(--sp-3);
   height: 28px;
-  background: var(--bg-1);
-  border-bottom: 1px solid var(--line-1);
+  background: var(--color-bg-surface);
+  border-bottom: 1px solid var(--color-border-default);
   font-size: var(--fs-10);
   flex-shrink: 0;
   overflow-x: auto;
 }
 .layer-bar-label {
-  color: var(--fg-3);
+  color: var(--color-fg-muted);
   letter-spacing: .08em;
   text-transform: uppercase;
   font-weight: 600;
@@ -25,10 +25,10 @@
   display: inline-flex; align-items: center; gap: 5px;
   padding: 2px 8px;
   height: 20px;
-  border: 1px solid var(--line-2);
+  border: 1px solid var(--color-border-strong);
   border-radius: var(--r-1);
-  background: var(--bg-2);
-  color: var(--fg-3);
+  background: var(--color-bg-panel-alt);
+  color: var(--color-fg-muted);
   font-size: var(--fs-10);
   cursor: pointer;
   font-family: var(--font-mono);
@@ -36,7 +36,7 @@
   flex-shrink: 0;
   transition: all var(--t-fast) var(--ease);
 }
-.layer-toggle:hover { color: var(--fg-1); background: var(--bg-3); }
+.layer-toggle:hover { color: var(--color-fg-primary); background: var(--color-bg-elevated); }
 .layer-toggle .glyph {
   width: 10px; height: 10px; border-radius: 50%;
   background: var(--fg-4);
@@ -47,8 +47,8 @@
 .layer-toggle.is-on[data-layer="time"]     .glyph { background: var(--warn); box-shadow: 0 0 5px rgb(var(--warn-glow) / .6); }
 .layer-toggle.is-on[data-layer="parallel"] { color: var(--info);   border-color: rgb(var(--info-glow) / .4); background: rgb(var(--info-glow) / .06); }
 .layer-toggle.is-on[data-layer="parallel"] .glyph { background: var(--info); box-shadow: 0 0 5px rgb(var(--info-glow) / .6); }
-.layer-toggle.is-on[data-layer="tools"]    { color: var(--brass-1); border-color: var(--brass-3); background: rgb(var(--brass-glow) / .08); }
-.layer-toggle.is-on[data-layer="tools"]    .glyph { background: var(--brass-1); box-shadow: 0 0 5px rgb(var(--brass-glow) / .6); }
+.layer-toggle.is-on[data-layer="tools"]    { color: var(--color-accent-fg); border-color: var(--brass-3); background: rgb(var(--brass-glow) / .08); }
+.layer-toggle.is-on[data-layer="tools"]    .glyph { background: var(--color-accent-fg); box-shadow: 0 0 5px rgb(var(--brass-glow) / .6); }
 .layer-toggle.is-on[data-layer="approve"]  { color: var(--ok);     border-color: rgb(var(--ok-glow) / .4); background: rgb(var(--ok-glow) / .06); }
 .layer-toggle.is-on[data-layer="approve"]  .glyph { background: var(--ok); box-shadow: 0 0 5px rgb(var(--ok-glow) / .6); }
 .layer-toggle.is-on[data-layer="notes"]    { color: var(--stalled); border-color: rgb(var(--stalled-glow) / .4); background: rgb(var(--stalled-glow) / .06); }
@@ -63,30 +63,30 @@
 .layer-opacity.is-show { display: inline-flex; }
 .layer-opacity label {
   font-size: var(--fs-9);
-  color: var(--fg-3);
+  color: var(--color-fg-muted);
   text-transform: uppercase;
   letter-spacing: .08em;
 }
 .layer-opacity input[type="range"] {
   width: 80px; height: 4px;
   -webkit-appearance: none; appearance: none;
-  background: var(--bg-3);
+  background: var(--color-bg-elevated);
   border-radius: 2px; outline: none;
 }
 .layer-opacity input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none; appearance: none;
   width: 10px; height: 10px; border-radius: 50%;
-  background: var(--brass-1); cursor: pointer;
+  background: var(--color-accent-fg); cursor: pointer;
   box-shadow: 0 0 4px rgb(var(--brass-glow) / .6);
 }
 
 .layer-explode {
   display: inline-flex; align-items: center; gap: 4px;
   height: 20px; padding: 0 8px;
-  border: 1px solid var(--line-2);
+  border: 1px solid var(--color-border-strong);
   border-radius: var(--r-1);
-  background: var(--bg-2);
-  color: var(--fg-2);
+  background: var(--color-bg-panel-alt);
+  color: var(--color-fg-secondary);
   font-size: var(--fs-10);
   letter-spacing: .08em;
   text-transform: uppercase;
@@ -94,10 +94,10 @@
   font-weight: 600;
   flex-shrink: 0;
 }
-.layer-explode:hover { background: var(--bg-3); color: var(--fg-1); }
+.layer-explode:hover { background: var(--color-bg-elevated); color: var(--color-fg-primary); }
 .layer-explode.is-on {
   background: rgb(var(--brass-glow) / .12);
-  color: var(--brass-1);
+  color: var(--color-accent-fg);
   border-color: var(--brass-3);
 }
 
@@ -109,7 +109,7 @@
     radial-gradient(circle at center, rgb(var(--brass-glow) / var(--dot-op)) 0.7px, transparent 1.2px);
   background-size: var(--dot-size) var(--dot-size);
   background-position: 0 0;
-  background-color: var(--bg-0);
+  background-color: var(--color-bg-page);
 }
 
 /* ════════ LAYER STACK — z-axis arrangement ════════ */
@@ -168,14 +168,14 @@ body[data-explode="1"] .lyr::before {
 }
 .time-stripe.age-recent   { opacity: 1;   background: var(--warn);   box-shadow: 0 0 8px rgb(var(--warn-glow) / .6); }
 .time-stripe.age-near     { opacity: .7;  background: var(--warn); }
-.time-stripe.age-mid      { opacity: .4;  background: var(--fg-3); }
+.time-stripe.age-mid      { opacity: .4;  background: var(--color-fg-muted); }
 .time-stripe.age-far      { opacity: .2;  background: var(--fg-4); }
 .time-stripe .time-label {
   position: absolute; left: 6px; top: 0;
   font-family: var(--font-mono); font-size: var(--fs-9);
-  color: var(--fg-3);
+  color: var(--color-fg-muted);
   white-space: nowrap; padding: 1px 4px;
-  background: var(--bg-1); border-radius: 2px;
+  background: var(--color-bg-surface); border-radius: 2px;
   opacity: 0; transition: opacity var(--t-fast);
 }
 .time-stripe:hover .time-label { opacity: 1; }
@@ -226,13 +226,13 @@ body[data-explode="1"] .lyr::before {
 }
 .tool-mark .tool-icon {
   font-size: 10px;
-  color: var(--brass-1);
+  color: var(--color-accent-fg);
   text-shadow: 0 0 4px rgb(var(--brass-glow) / .6);
   line-height: 1;
 }
 .tool-mark .tool-bar {
   width: 16px; height: 2px;
-  background: linear-gradient(90deg, var(--brass-1), transparent);
+  background: linear-gradient(90deg, var(--color-accent-fg), transparent);
   border-radius: 1px;
   box-shadow: 0 0 3px rgb(var(--brass-glow) / .4);
 }
@@ -300,7 +300,7 @@ body[data-explode="1"] .lyr::before {
   padding: 6px 8px 8px;
   box-shadow: 0 4px 16px rgb(0 0 0 / .5), 0 0 0 1px rgb(var(--stalled-glow) / .15), inset 0 1px 0 rgb(255 255 255 / .04);
   font-size: var(--fs-10);
-  color: var(--fg-2);
+  color: var(--color-fg-secondary);
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
   transition: top var(--t-slow) var(--ease-out), transform var(--t-fast) var(--ease);
@@ -327,9 +327,9 @@ body[data-explode="1"] .lyr::before {
   color: var(--stalled);
   letter-spacing: .06em; text-transform: uppercase;
 }
-.note-pin .np-head .np-author { color: var(--fg-3); text-transform: none; letter-spacing: 0; }
+.note-pin .np-head .np-author { color: var(--color-fg-muted); text-transform: none; letter-spacing: 0; }
 .note-pin .np-head .np-ts { margin-left: auto; color: var(--fg-4); }
-.note-pin .np-body { line-height: 1.4; color: var(--fg-1); font-size: var(--fs-11); }
+.note-pin .np-body { line-height: 1.4; color: var(--color-fg-primary); font-size: var(--fs-11); }
 .note-pin .np-actions {
   display: flex; gap: 4px; margin-top: 6px;
   font-size: var(--fs-9);
@@ -338,7 +338,7 @@ body[data-explode="1"] .lyr::before {
 }
 .note-pin .np-actions button {
   background: transparent; border: none; padding: 0;
-  color: var(--fg-3); cursor: pointer; font-size: var(--fs-9);
+  color: var(--color-fg-muted); cursor: pointer; font-size: var(--fs-9);
   letter-spacing: .06em; text-transform: uppercase;
 }
 .note-pin .np-actions button:hover { color: var(--stalled); }
@@ -366,7 +366,7 @@ body[data-explode="1"] .lyr::before {
 .note-append-btn:hover {
   background: rgb(var(--stalled-glow) / .12);
   border-style: solid;
-  color: var(--fg-1);
+  color: var(--color-fg-primary);
 }
 
 /* ════════ Depth-of-field when hovering a specific block ════════ */

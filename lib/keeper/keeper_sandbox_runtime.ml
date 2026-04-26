@@ -234,10 +234,23 @@ type stop_result =
     errors : string list;
   }
 
+(* #10488: previously used [String.trim] which strips ALL trailing
+   whitespace including [\t]. Docker inspect templates emit tab-
+   separated fields and a trailing-empty-field shows up as [...\t].
+   [String.trim] silently dropped the trailing tab, collapsing 4
+   tab-separated fields into 3 and breaking the exact-match parser
+   below. Strip only the line-terminator [\r] so trailing-empty
+   tab-separated fields survive. *)
+let strip_cr line =
+  let n = String.length line in
+  if n > 0 && line.[n - 1] = '\r'
+  then String.sub line 0 (n - 1)
+  else line
+
 let nonempty_lines out =
   out
   |> String.split_on_char '\n'
-  |> List.map String.trim
+  |> List.map strip_cr
   |> List.filter (fun line -> line <> "")
 
 let int_opt text =
@@ -266,6 +279,16 @@ let strip_leading_slash text =
   else
     text
 
+(* #10488: accept both 4-field (current schema, with [ttl_sec]
+   label) and 3-field (legacy containers spawned before the
+   [sandbox_ttl_sec] label was introduced) payloads.  Without this
+   fallback, a single legacy container in the fleet produces a
+   sustained 4.6%-of-events log spam loop because the 5-minute
+   cleanup pass keeps re-attempting [parse_inspect_line] and
+   keeps failing with [Error].  Treating [ttl_sec=None] is
+   equivalent to "no TTL configured" — cleanup then falls back to
+   the running-state / owner-pid heuristics, which is the correct
+   semantics for a label-less container. *)
 let parse_inspect_line line =
   match String.split_on_char '\t' line with
   | [ owner_pid; started_at; running; ttl_sec ] ->
@@ -275,6 +298,14 @@ let parse_inspect_line line =
           started_at = float_opt started_at;
           running = bool_opt running;
           ttl_sec = float_opt ttl_sec;
+        }
+  | [ owner_pid; started_at; running ] ->
+      Ok
+        {
+          owner_pid = int_opt owner_pid;
+          started_at = float_opt started_at;
+          running = bool_opt running;
+          ttl_sec = None;
         }
   | _ ->
       Error
@@ -889,3 +920,15 @@ let ensure_keeper_startup_preflight ~timeout_sec ~sandbox_profile =
        | Some preflight ->
            if preflight.ok then Ok ()
            else Error (docker_preflight_failure_message preflight))
+
+module For_testing = struct
+  let nonempty_lines = nonempty_lines
+
+  (* Project the internal [inspected_container] record onto a tuple so
+     the test does not need a re-exported type. Order:
+     (owner_pid, started_at, running, ttl_sec). *)
+  let parse_inspect_line line =
+    parse_inspect_line line
+    |> Result.map (fun (ic : inspected_container) ->
+           (ic.owner_pid, ic.started_at, ic.running, ic.ttl_sec))
+end

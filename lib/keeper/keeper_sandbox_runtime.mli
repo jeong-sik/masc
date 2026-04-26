@@ -158,3 +158,17 @@ val ensure_keeper_sandbox_runtime :
 
     The fragment is empty when the env config has no seccomp profile
     set; the caller should still concat it into the docker argv. *)
+
+(** Internals exposed for unit testing the docker inspect output
+    parser (#10488 regression coverage).  The parser result is
+    projected onto a tuple
+    [(owner_pid, started_at, running, ttl_sec)] so the test does
+    not need a re-exported record type. *)
+module For_testing : sig
+  val nonempty_lines : string -> string list
+
+  val parse_inspect_line :
+    string ->
+    (int option * float option * bool option * float option, string)
+    result
+end

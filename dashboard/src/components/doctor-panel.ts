@@ -78,11 +78,11 @@ export function doctorHeading(entry: DoctorEntry): string {
   return entry.name.charAt(0).toUpperCase() + entry.name.slice(1)
 }
 
-// Aggregate breakdown string, e.g. "6 Doctor · 정상 3 · 경고 2 · 오류 1".
+// Aggregate breakdown string, e.g. "6건 진단 · 정상 3 · 경고 2 · 오류 1".
 // Korean separator (` · `) matches the CLI footer in `doctor all`.
 export function summaryLine(summary: DoctorSummary): string {
   return (
-    `${summary.total} Doctor · ` +
+    `${summary.total}건 진단 · ` +
     `정상 ${summary.ok} · 경고 ${summary.warn} · 오류 ${summary.error}`
   )
 }
@@ -278,7 +278,7 @@ function DoctorEntryCard({ entry }: { entry: DoctorEntry }) {
         </span>
       </button>
       <div class="mt-1 text-xs text-[var(--color-fg-muted)]">
-        ${entry.kind === 'config' ? 'Config Doctor' : `${entry.name} sidecar`} · exit ${entry.exit_code}
+        ${entry.kind === 'config' ? '설정 진단' : `${entry.name} sidecar`} · exit ${entry.exit_code}
       </div>
       ${expanded.value
         ? entry.kind === 'sidecar'
@@ -296,11 +296,11 @@ export function DoctorPanel() {
 
   return html`
     <div class="space-y-4">
-      <${Card} title="Doctor" class="section">
+      <${Card} title="진단" class="section">
         <${AsyncContainer}
           state=${doctorEnvelope.state}
-          loadingMessage="Doctor 데이터를 불러오는 중..."
-          emptyMessage="Doctor 데이터가 없습니다."
+          loadingMessage="진단 데이터를 불러오는 중..."
+          emptyMessage="진단 데이터가 없습니다."
           render=${(data: DoctorEnvelope) => html`
             <div class="space-y-4">
               <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-4">

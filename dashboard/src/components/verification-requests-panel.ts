@@ -577,7 +577,7 @@ export function VerificationRequestsPanel() {
           새로고침
         </button>
         ${current.loading
-          ? html`<span class="text-xs text-[var(--color-fg-muted)]">로딩 중...</span>`
+          ? html`<span class="text-xs text-[var(--color-fg-muted)]" role="status">로딩 중...</span>`
           : null}
         ${data?.updated_at
           ? html`<span class="text-xs text-[var(--color-fg-muted)]">

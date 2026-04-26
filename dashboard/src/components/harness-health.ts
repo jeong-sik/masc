@@ -236,9 +236,9 @@ export function HarnessHealth() {
   let overviewContent = html`<${EmptySignal} text="안전 감시 데이터가 없습니다." />`
 
   if (isLoading) {
-    overviewContent = html`<div class="text-sm text-[var(--color-fg-disabled)]">로딩 중...</div>`
+    overviewContent = html`<div class="text-sm text-[var(--color-fg-disabled)]" role="status">로딩 중...</div>`
   } else if (isError) {
-    overviewContent = html`<div class="text-sm text-[var(--color-status-err)]">${s.message}</div>`
+    overviewContent = html`<div class="text-sm text-[var(--color-status-err)]" role="alert">${s.message}</div>`
   } else if (data) {
     overviewContent = html`
       <div class="space-y-4">

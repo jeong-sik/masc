@@ -373,7 +373,7 @@ export function RuntimeMonitor() {
           ariaLabel="runtime snapshot 새로고침"
           onClick=${() => void load()}
         >새로고침<//>
-        ${current.loading ? html`<span class="text-xs text-[var(--color-fg-muted)]">로딩 중...</span>` : null}
+        ${current.loading ? html`<span class="text-xs text-[var(--color-fg-muted)]" role="status">로딩 중...</span>` : null}
       </div>
 
       ${current.error

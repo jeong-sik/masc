@@ -1048,7 +1048,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
           <span class="text-3xs text-[var(--text-muted)]">${selectedActiveGoalIds.length}개 선택</span>
         </div>
         ${goalState.status === 'loading' ? html`
-          <div class="text-2xs text-[var(--text-muted)]">목표 목록 로딩 중...</div>
+          <div class="text-2xs text-[var(--text-muted)]" role="status">목표 목록 로딩 중...</div>
         ` : goalState.status === 'error' ? html`
           <div class="text-2xs text-[var(--bad)]">${goalState.message}</div>
         ` : goalOptions.length > 0 && rd ? html`

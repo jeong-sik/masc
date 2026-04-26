@@ -154,7 +154,7 @@ export function GovernanceMonitor() {
           onClick=${() => void load()}
         >새로고침<//>
         <span class="text-xs text-[var(--color-fg-muted)]">${formatAutoRefreshLabel(TELEMETRY_AUTO_REFRESH_MS)}</span>
-        ${current.loading ? html`<span class="text-xs text-[var(--color-fg-muted)]">로딩 중...</span>` : null}
+        ${current.loading ? html`<span class="text-xs text-[var(--color-fg-muted)]" role="status">로딩 중...</span>` : null}
       </div>
 
       ${current.error ? html`<${ErrorState} message=${current.error} />` : null}

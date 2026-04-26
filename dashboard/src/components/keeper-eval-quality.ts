@@ -135,7 +135,7 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
     return html`
       <div class="p-4 rounded border border-[var(--color-border-default)] bg-[var(--white-2)]">
         <div class="text-3xs font-semibold tracking-1 uppercase text-[var(--color-fg-muted)] mb-2">평가 품질</div>
-        <div class="text-2xs text-[var(--color-fg-disabled)] animate-pulse">데이터 로딩 중...</div>
+        <div class="text-2xs text-[var(--color-fg-disabled)] animate-pulse" role="status">데이터 로딩 중...</div>
       </div>
     `
   }

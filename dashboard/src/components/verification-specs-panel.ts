@@ -145,7 +145,7 @@ export function VerificationSpecsPanel() {
         >
           새로고침
         </button>
-        ${current.loading ? html`<span class="text-xs text-[var(--color-fg-muted)]">로딩 중...</span>` : null}
+        ${current.loading ? html`<span class="text-xs text-[var(--color-fg-muted)]" role="status">로딩 중...</span>` : null}
         ${data?.updated_at
           ? html`<span class="text-xs text-[var(--color-fg-muted)]">specs · ${data.updated_at}</span>`
           : null}

@@ -244,25 +244,25 @@ function ControlRoomPanel({ state }: { state: FleetTelemetryState }) {
         <${SummaryCard}
           title="준비도"
           value=${readiness.score.toFixed(2)}
-          detail=${`${readiness.blocking_count} blockers · ${readiness.decision_required_count} decisions required.`}
+          detail=${`${readiness.blocking_count}개 차단 · ${readiness.decision_required_count}개 결정 필요`}
           tone=${readinessTone(readiness.status)}
         />
         <${SummaryCard}
           title="승인"
           value=${pendingApprovals.toString()}
-          detail=${pendingApprovals > 0 ? 'Operator approval queue is non-empty.' : 'No pending approvals are visible.'}
+          detail=${pendingApprovals > 0 ? '운영자 승인 대기열이 비어있지 않습니다.' : '대기 중인 승인이 없습니다.'}
           tone=${pendingApprovals > 0 ? 'warn' : 'ok'}
         />
         <${SummaryCard}
           title="주의"
           value=${attentionEvents.length.toString()}
-          detail=${attentionEvents.length > 0 ? 'Critical blockers and pause-worthy states are surfaced here.' : 'No active attention events are reported.'}
+          detail=${attentionEvents.length > 0 ? '중요 차단 및 일시정지 상태가 여기에 표시됩니다.' : '활성 주의 이벤트가 없습니다.'}
           tone=${attentionEvents.length > 0 ? 'warn' : 'ok'}
         />
         <${SummaryCard}
           title="목표 범위"
           value=${state.rows.length > 0 ? `${state.rows.filter(row => row.goal_linked).length}/${state.rows.length}` : '0/0'}
-          detail=${state.rows.some(row => !row.goal_linked) ? 'Some keepers are active without a visible goal link.' : 'All surfaced keepers have a goal anchor.'}
+          detail=${state.rows.some(row => !row.goal_linked) ? '일부 키퍼가 목표 연결 없이 활성 상태입니다.' : '모든 키퍼가 목표에 연결되어 있습니다.'}
           tone=${state.rows.length === 0 || state.rows.every(row => row.goal_linked) ? 'ok' : 'warn'}
         />
       </div>
@@ -297,7 +297,7 @@ function PressureWatchlist({ rows }: { rows: FleetRow[] }) {
   if (watchlist.length === 0) {
     return html`
       <div class="rounded border border-[var(--card-border)] bg-[var(--white-1)] p-3 text-2xs text-[var(--text-dim)]">
-        No keepers are near context pressure or stale activity thresholds.
+        컨텍스트 부하나 오래된 활동 임계값에 근접한 키퍼가 없습니다.
       </div>
     `
   }
@@ -720,29 +720,29 @@ export function FleetTelemetryPanel() {
         <${SummaryCard}
           title="Keeper 가동률"
           value=${`${counts.live}/${value.rows.length || 0}`}
-          detail=${`${counts.toolCovered}/${value.rows.length || 0} keepers surfaced recent tool activity.`}
+          detail=${`${counts.toolCovered}/${value.rows.length || 0} 키퍼가 최근 도구 활동을 보고했습니다.`}
           tone=${liveTone}
         />
         <${SummaryCard}
           title="런타임 부하"
           value=${`${counts.hot} hot / ${counts.warn} warn`}
-          detail=${counts.stale > 0 ? `${counts.stale} keepers are stale beyond ${Math.round(STALE_ACTIVITY_SEC / 60)}m.` : 'No stale keepers crossed the activity threshold.'}
+          detail=${counts.stale > 0 ? `${counts.stale}개 키퍼가 ${Math.round(STALE_ACTIVITY_SEC / 60)}분 이상 비활성입니다.` : '비활성 임계값을 넘은 키퍼가 없습니다.'}
           tone=${toneForPressure(counts.hot, counts.warn)}
         />
         <${SummaryCard}
           title="도구 성공률"
           value=${value.tool_quality.total > 0 ? formatPercent(value.tool_quality.success_rate, 1) : 'n/a'}
           detail=${value.tool_quality.total > 0
-            ? `${value.tool_quality.failure.toLocaleString()} failures across ${value.tool_quality.total.toLocaleString()}${value.tool_quality.sampling_mode === 'window_hours' && value.tool_quality.window_hours != null ? ` calls in the last ${value.tool_quality.window_hours}h.` : ' recent calls.'}`
+            ? `총 ${value.tool_quality.total.toLocaleString()}건 중 ${value.tool_quality.failure.toLocaleString()}건 실패${value.tool_quality.sampling_mode === 'window_hours' && value.tool_quality.window_hours != null ? ` (최근 ${value.tool_quality.window_hours}시간)` : ' (최근)'}`
             : value.tool_quality.sampling_mode === 'window_hours' && value.tool_quality.window_hours != null
-              ? `No tool quality samples were recorded in the last ${value.tool_quality.window_hours}h.`
-              : 'No recent tool quality samples were recorded.'}
+              ? `최근 ${value.tool_quality.window_hours}시간 내 도구 품질 샘플이 없습니다.`
+              : '최근 도구 품질 샘플이 없습니다.'}
           tone=${value.tool_quality.total > 0 ? toneForToolSuccess(value.tool_quality.success_rate) : 'neutral'}
         />
         <${SummaryCard}
           title="원격 측정 스토어"
           value=${value.total_telemetry_entries.toLocaleString()}
-          detail=${`${sourcesWithData}/${value.telemetry_sources.length || 0} stores currently have data.`}
+          detail=${`${sourcesWithData}/${value.telemetry_sources.length || 0}개 스토어에 현재 데이터가 있습니다.`}
           tone=${sourcesWithData > 0 ? 'ok' : 'warn'}
         />
       </div>

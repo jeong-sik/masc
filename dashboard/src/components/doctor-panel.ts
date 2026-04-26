@@ -301,8 +301,8 @@ export function DoctorPanel() {
       <${Card} title="진단" class="section">
         <${AsyncContainer}
           state=${doctorEnvelope.state}
-          loadingMessage="Doctor 데이터를 불러오는 중..."
-          emptyMessage="Doctor 데이터가 없습니다."
+          loadingMessage="진단 데이터를 불러오는 중..."
+          emptyMessage="진단 데이터가 없습니다."
           render=${(data: DoctorEnvelope) => html`
             <div class="space-y-4">
               <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-4">

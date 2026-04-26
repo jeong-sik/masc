@@ -98,7 +98,7 @@ export function PersonaGenerator() {
             id="persona-concept"
             rows=${5}
             value=${concept.value}
-            placeholder="good evil chaos research keeper"
+            placeholder="예: good evil chaos research keeper"
             onInput=${(e: Event) => { concept.value = (e.target as HTMLTextAreaElement).value }}
             class="w-full rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-2 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)] focus-visible:ring-2 focus-visible:ring-[var(--accent)]/50"
           />

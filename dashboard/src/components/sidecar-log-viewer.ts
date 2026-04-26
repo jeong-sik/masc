@@ -215,7 +215,7 @@ export function SidecarLogViewer({ connectorId }: { connectorId: string }) {
               <input
                 type="search"
                 value=${entry.keyword}
-                placeholder="keyword 필터 (case-insensitive)"
+                placeholder="키워드 필터 (대소문자 무관)"
                 aria-label="로그 키워드 필터"
                 autoComplete="off"
                 class="min-w-0 flex-1 rounded border border-[var(--white-8)] bg-[var(--bg-0)] px-2 py-0.5 text-2xs text-[var(--text-body)] focus:border-[var(--accent-1)] focus:outline-none"

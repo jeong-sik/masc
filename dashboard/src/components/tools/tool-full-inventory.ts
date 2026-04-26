@@ -2,6 +2,7 @@
 
 import { html } from 'htm/preact'
 import { useEffect, useRef, useCallback } from 'preact/hooks'
+import { ActionButton } from '../common/button'
 import { VirtualList } from '../common/virtual-list'
 import { EmptyState } from '../common/empty-state'
 import { ErrorState } from '../common/feedback-state'
@@ -178,13 +179,16 @@ export function FullInventoryView({
           />
           <span>지원 중단 표시</span>
         </label>
-        <button type="button"
-          class="px-3 py-1.5 rounded text-sm font-medium border border-[var(--color-border-default)] bg-[var(--white-4)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-[var(--color-fg-primary)]"
+        <${ActionButton}
+          variant="ghost"
+          size="md"
+          class="!px-3 !text-sm"
           onClick=${() => { void loadTools() }}
           disabled=${loading}
+          ariaBusy=${loading}
         >
           ${loading ? '새로고침 중...' : '새로고침'}
-        </button>
+        <//>
       </div>
     </div>
 

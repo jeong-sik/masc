@@ -249,10 +249,6 @@ let handle_get_mcp ?legacy_messages_endpoint
   Server_mcp_transport_http.handle_get_mcp ~deps:(mcp_transport_http_deps ())
     ?legacy_messages_endpoint ~profile ?sse_kind request reqd
 
-let sse_simple_handler request reqd =
-  Server_mcp_transport_http.sse_simple_handler ~deps:(mcp_transport_http_deps ())
-    request reqd
-
 let handle_get_operator_mcp request reqd =
   Server_mcp_transport_http.handle_get_operator_mcp
     ~deps:(mcp_transport_http_deps ()) request reqd

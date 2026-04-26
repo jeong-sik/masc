@@ -52,7 +52,11 @@ let make_websocket_handler ~on_message _client_addr (wsd : Ws.Wsd.t) :
       then
         Server_mcp_transport_ws.cleanup_session session_id)
     ();
-  Log.Server.info "WebSocket session %s connected (standalone port)" session_id;
+  (* #10875: WS storm (#10701) emits ~190k connect/close lines/day at INFO,
+     drowning real signal in noise. Per-session lifecycle is DEBUG; aggregate
+     state surfaces via Transport_metrics.set_ws_sessions and shutdown_hooks
+     summary INFO. *)
+  Log.Server.debug "WebSocket session %s connected (standalone port)" session_id;
   { Ws.Websocket_connection.
     frame = (fun ~opcode ~is_fin ~len payload ->
       match opcode with

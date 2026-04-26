@@ -12,6 +12,7 @@ import {
 import { formatTimeAgo } from '../lib/format-time'
 import { isAbortError } from '../lib/async-state'
 import { highlightMatch } from '../lib/highlight-match'
+import { TextInput } from './common/input'
 
 interface Props {
   agentName: string
@@ -194,15 +195,15 @@ export function AgentDetailMemory({ agentName }: Props) {
               }개)
             </div>
             ${episodes.length > 0
-              ? html`<input
+              ? html`<${TextInput}
                   type="search"
                   value=${episodeQuery.value}
                   placeholder="summary / event / learning 필터"
-                  aria-label="에피소드 필터"
+                  ariaLabel="에피소드 필터"
                   onInput=${(e: Event) => {
                     episodeQuery.value = (e.target as HTMLInputElement).value
                   }}
-                  class="min-w-40 max-w-60 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
+                  class="min-w-40 max-w-60 flex-1 !px-2 !py-1 !text-2xs"
                 />`
               : null}
           </div>

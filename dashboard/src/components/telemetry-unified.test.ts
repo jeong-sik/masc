@@ -320,12 +320,12 @@ describe('TelemetryUnified', () => {
     await flushUi()
 
     expect(container.textContent).toContain('반복 그룹 1개 · 원본 3건')
-    expect(container.textContent).toContain('Polling / no-op')
-    expect(container.textContent).toContain('Polling / no-op · masc_status · 3 events')
+    expect(container.textContent).toContain('폴링 / 무동작')
+    expect(container.textContent).toContain('폴링 / 무동작 · masc_status · 3 events')
     expect(container.textContent).toContain('task_claimed: keeper-alpha')
 
     const groupToggle = Array.from(container.querySelectorAll('button[aria-expanded="false"]'))
-      .find(button => button.textContent?.includes('Polling / no-op')) as HTMLButtonElement | undefined
+      .find(button => button.textContent?.includes('폴링 / 무동작')) as HTMLButtonElement | undefined
     expect(groupToggle).toBeTruthy()
     await act(async () => {
       groupToggle?.click()
@@ -397,7 +397,7 @@ describe('TelemetryUnified', () => {
     })
     await flushUi()
 
-    expect(container.textContent).toContain('Heartbeat · keeper-heart heartbeat · 2 events')
+    expect(container.textContent).toContain('하트비트 · keeper-heart heartbeat · 2 events')
   })
 
   it('uses trajectory and execution receipt fields for telemetry previews', async () => {
@@ -491,7 +491,7 @@ describe('TelemetryUnified', () => {
     await flushUi()
 
     const groupRow = Array.from(container.querySelectorAll('button'))
-      .find(node => node.textContent?.includes('Polling / no-op · masc_status · 3 events'))
+      .find(node => node.textContent?.includes('폴링 / 무동작 · masc_status · 3 events'))
     expect(groupRow).toBeTruthy()
     expect(groupRow?.getAttribute('aria-expanded')).toBe('false')
 

@@ -756,6 +756,22 @@ button.is-active, .btn.is-active { background: var(--bg-4); color: var(--brass-1
   --ink-2:   #2E2E2C;
   --ink-3:   #515049;
   --ink-4:   #656358;
+  --ink-5:   #9A978D;
+  --ink-6:   #BCB8AC;
+
+  /* Named hue tokens (paper-only) — color/fill pairs from bonsai
+     vocabulary. Used for keeper attribution accents, swimlane categories,
+     and t-* trace frames in the light-on-paper theme. */
+  --forest:  #2D5F4E;  --forest-fill: #CFDFD7;
+  --brass:   #8C6A1E;  --brass-fill:  #E9DDB8;
+  --brick:   #8B3A3A;  --brick-fill:  #E8CFCB;
+  --ember:   #B35A1F;  --ember-fill:  #ECD5BD;
+  --slate:   #3E4A5C;  --slate-fill:  #D6DBE2;
+  --plum:    #5C3E56;  --plum-fill:   #E0D4DE;
+  --teal:    #236874;  --teal-fill:   #CEDEE2;
+
+  --status-idle: var(--ink-5);
+
   --bg-deep:      var(--paper);
   --bg-panel:     var(--paper-2);
   --bg-panel-alt: var(--paper-3);

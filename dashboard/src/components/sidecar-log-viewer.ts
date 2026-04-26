@@ -201,13 +201,13 @@ export function SidecarLogViewer({ connectorId }: { connectorId: string }) {
               ? hasFilter
                 ? `${filtered.length} / ${entry.lines.length} lines`
                 : `${entry.lines.length} / ${entry.requestedLines} lines`
-              : 'no log yet'}
+              : '로그 없음'}
           </span>
           ${showMore
             ? html`<${ActionButton} variant="ghost" size="sm" disabled=${entry.loading} onClick=${onShowMore}>1000개 더 보기<//>`
             : null}
           <${ActionButton} variant="ghost" size="sm" disabled=${entry.loading} onClick=${onRefresh}>
-            ${entry.loading ? '...' : 'Refresh'}
+            ${entry.loading ? '...' : '새로고침'}
           <//>
         </div>
       </div>

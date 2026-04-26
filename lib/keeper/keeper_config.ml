@@ -259,10 +259,24 @@ let utf8_repair_string (s : string) : string =
   loop 0;
   Buffer.contents buf
 
+(* #10552: trim BOTH before and after [utf8_safe_prefix_bytes].  The
+   pre-fix sequence was [trim → prefix], but [utf8_safe_prefix_bytes]
+   can cut at a position that leaves trailing ASCII whitespace
+   (e.g. nick0cave's 322-byte desires field ends with [...는 것.] —
+   the prefix at max_bytes=320 backs up to byte 318, ending at the
+   space before [것]).  That makes [normalize_self_model_text]
+   non-idempotent: applying it once produces a 318-byte string ending
+   in a space; applying it AGAIN trims the space to 317 bytes.
+   [personality_text_equal] then sees [normalize meta_318 = 317] and
+   [normalize raw_322 = 318] — unequal — and re-sync fires every
+   reconcile tick.  Trimming after prefix makes the function
+   idempotent: [normalize(normalize(x)) = normalize(x)]. *)
 let normalize_self_model_text ~(max_bytes : int) (raw : string) : string =
   let s = String.trim raw in
   if s = "" then ""
-  else utf8_safe_prefix_bytes s ~max_bytes
+  else
+    let cut = utf8_safe_prefix_bytes s ~max_bytes in
+    String.trim cut
 
 let normalize_goal_horizon_text ?(max_len = default_goal_horizon_max_chars) (raw : string) : string =
   let s = String.trim raw in

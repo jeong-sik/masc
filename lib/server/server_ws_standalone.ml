@@ -117,12 +117,30 @@ let start
               try
                 let flow, client_addr = Eio.Net.accept ~sw socket in
                 Eio.Fiber.fork ~sw (fun () ->
-                  try connection_handler client_addr flow
-                  with
-                  | Eio.Cancel.Cancelled _ as e -> raise e
-                  | exn ->
-                    Log.Server.warn "WS standalone handler error: %s"
-                      (Printexc.to_string exn));
+                  (* Per-connection switch so the accepted [flow] is
+                     released the moment the WS handler exits, not when
+                     the long-lived server [sw] closes. Without this
+                     each connection's FD lingers in the kernel [CLOSED]
+                     state until shutdown — a 1Hz dashboard reconnect
+                     (claude-in-chrome's playwright Chrome polls
+                     [ws://127.0.0.1:8937/]) accumulates ~3 600 FDs/h,
+                     tripping [admission_queue_rejected: fd count >= 90%]
+                     and starving every keeper subprocess. Pattern
+                     matches [http_server_h2.ml]'s accept loop. *)
+                  Eio.Switch.run (fun conn_sw ->
+                    Eio.Switch.on_release conn_sw (fun () ->
+                      try Eio.Flow.close flow with
+                      | Eio.Cancel.Cancelled _ as e -> raise e
+                      | exn ->
+                        Log.Server.warn
+                          "[ws-standalone] flow close failed: %s"
+                          (Printexc.to_string exn));
+                    try connection_handler client_addr flow
+                    with
+                    | Eio.Cancel.Cancelled _ as e -> raise e
+                    | exn ->
+                      Log.Server.warn "WS standalone handler error: %s"
+                        (Printexc.to_string exn)));
                 accept_loop 0.05
               with
               | Eio.Cancel.Cancelled _ as e -> raise e

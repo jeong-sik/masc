@@ -151,7 +151,7 @@ let handle_chat_completions ~config ~sw ~clock (body : string)
       (* Check if this is a keeper route *)
       let is_keeper_prefix =
         String.length model > 7
-        && String.sub model 0 7 = "keeper:"
+        && String.starts_with ~prefix:"keeper:" model
       in
       if is_keeper_prefix then begin
         let keeper_name = String.sub model 7 (String.length model - 7) in

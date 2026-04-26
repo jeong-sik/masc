@@ -274,7 +274,7 @@ let tool_title_of_name name =
   | Some title -> title
   | None ->
     let trimmed =
-      if String.length name > 5 && String.sub name 0 5 = "masc_" then
+      if String.length name > 5 && String.starts_with ~prefix:"masc_" name then
         String.sub name 5 (String.length name - 5)
       else
         name

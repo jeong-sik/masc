@@ -322,7 +322,7 @@ let native_event_to_json (evt : Oas.Event_bus.event) : Yojson.Safe.t option =
          Translate EVERY dot to colon for [masc.*] events so existing
          SSE consumers continue to decode the full multi-segment name. *)
       let event_type =
-        if String.length name > 5 && String.sub name 0 5 = "masc."
+        if String.length name > 5 && String.starts_with ~prefix:"masc." name
         then String.map (fun c -> if c = '.' then ':' else c) name
         else name
       in

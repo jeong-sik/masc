@@ -11,7 +11,7 @@ let ag_ui_event_of_masc_event event =
     let lines = String.split_on_char '\n' event in
     let data_line =
       List.find_opt
-        (fun l -> String.length l > 6 && String.sub l 0 6 = "data: ")
+        (fun l -> String.length l > 6 && String.starts_with ~prefix:"data: " l)
         lines
     in
     match data_line with

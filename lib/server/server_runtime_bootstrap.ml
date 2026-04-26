@@ -1100,8 +1100,8 @@ let startup_prune_keeper_checkpoints (state : Mcp_server.server_state) =
              files
              |> List.filter (fun f ->
                let len = String.length f in
-               len > 5 && String.sub f 0 5 = "ckpt-"
-               && String.sub f (len - 5) 5 = ".json")
+               len > 5 && String.starts_with ~prefix:"ckpt-" f
+               && String.ends_with ~suffix:".json" f)
              |> List.sort (fun a b -> compare b a)
            in
            if List.length ckpt_files > 3 then

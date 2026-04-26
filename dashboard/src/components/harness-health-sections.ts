@@ -114,14 +114,14 @@ export function railStatusLabel(status: RailStatus): string {
 export function statusChipClass(status: RailStatus): string {
   switch (status) {
     case 'healthy':
-      return 'border-[var(--ok-30)] bg-[var(--ok-12)] text-[var(--ok)]'
+      return 'border-[var(--ok-30)] bg-[var(--ok-12)] text-[var(--color-status-ok)]'
     case 'warning':
-      return 'border-[var(--warn-30)] bg-[var(--warn-12)] text-[var(--warn)]'
+      return 'border-[var(--warn-30)] bg-[var(--warn-12)] text-[var(--color-status-warn)]'
     case 'stale':
-      return 'border-[var(--white-12)] bg-[var(--white-4)] text-[var(--text-muted)]'
+      return 'border-[var(--white-12)] bg-[var(--white-4)] text-[var(--color-fg-muted)]'
     case 'idle':
     default:
-      return 'border-[var(--white-8)] bg-[var(--white-4)] text-[var(--text-dim)]'
+      return 'border-[var(--white-8)] bg-[var(--white-4)] text-[var(--color-fg-disabled)]'
   }
 }
 
@@ -160,8 +160,8 @@ export function emptyReasonText(reason?: string | null): string {
 
 export function verdictTone(verdict: string): string {
   return verdict.startsWith('approve')
-    ? 'bg-[var(--ok)]'
-    : 'bg-[var(--bad)]'
+    ? 'bg-[var(--color-status-ok)]'
+    : 'bg-[var(--color-status-err)]'
 }
 
 export function verdictSummary(verdict: string): string {
@@ -235,7 +235,7 @@ export { StatCard } from './common/stat-card'
 
 export function EmptySignal({ text }: { text: string }) {
   return html`
-    <div class="rounded border border-dashed border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-sm text-[var(--text-dim)]">
+    <div class="rounded border border-dashed border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-sm text-[var(--color-fg-disabled)]">
       ${text}
     </div>
   `
@@ -251,14 +251,14 @@ export function GateChart({ distribution }: { distribution: GateDistribution }) 
     <div class="space-y-2">
       ${entries.map(([gate, count]) => html`
         <div class="flex items-center gap-2">
-          <span class="w-20 text-right font-mono text-xs text-[var(--text-muted)]">${gate}</span>
+          <span class="w-20 text-right font-mono text-xs text-[var(--color-fg-muted)]">${gate}</span>
           <div class="h-4 flex-1 overflow-hidden rounded bg-[var(--white-6)]">
             <div
               class="h-full rounded opacity-80 transition-all"
-              style=${{ width: `${(count / max) * 100}%`, background: 'var(--accent)' }}
+              style=${{ width: `${(count / max) * 100}%`, background: 'var(--color-accent-fg)' }}
             />
           </div>
-          <span class="w-8 text-right text-xs text-[var(--text-body)]">${count}</span>
+          <span class="w-8 text-right text-xs text-[var(--color-fg-primary)]">${count}</span>
         </div>
       `)}
     </div>
@@ -279,11 +279,11 @@ export function HeroRailCard({
   return html`
     <div class=${`rounded border p-3 ${statusCardClass(status)}`}>
       <div class="flex items-start justify-between gap-3">
-        <div class="text-sm font-medium text-[var(--text-strong)]">${label}</div>
+        <div class="text-sm font-medium text-[var(--color-fg-secondary)]">${label}</div>
         <${StatusPill} status=${status} />
       </div>
-      <div class="mt-3 text-lg font-semibold text-[var(--text-body)]">${detail}</div>
-      <div class="mt-1 text-xs text-[var(--text-dim)]">최근 신호 ${freshness}</div>
+      <div class="mt-3 text-lg font-semibold text-[var(--color-fg-primary)]">${detail}</div>
+      <div class="mt-1 text-xs text-[var(--color-fg-disabled)]">최근 신호 ${freshness}</div>
     </div>
   `
 }
@@ -296,15 +296,15 @@ export function ScopePairing() {
           <div class="flex items-center justify-between gap-3">
             <div>
               <${SectionCap}>실험 루프<//>
-              <div class="mt-1 text-sm font-medium text-[var(--text-strong)]">오토리서치가 답하는 것</div>
+              <div class="mt-1 text-sm font-medium text-[var(--color-fg-secondary)]">오토리서치가 답하는 것</div>
             </div>
             <button
               type="button"
-              class="rounded border border-[var(--white-8)] px-2.5 py-1 text-2xs text-[var(--text-muted)] transition-colors hover:border-[var(--ok-30)] hover:text-[var(--text-body)]"
+              class="rounded border border-[var(--white-8)] px-2.5 py-1 text-2xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--ok-30)] hover:text-[var(--color-fg-primary)]"
               onClick=${() => navigate('lab', { section: 'autoresearch' })}
             >오토리서치 열기</button>
           </div>
-          <div class="text-sm leading-loose text-[var(--text-body)]">
+          <div class="text-sm leading-loose text-[var(--color-fg-primary)]">
             어떤 파일을 어떻게 바꿔 어떤 metric을 밀어 올리려는지, 그리고 cycle별 keep/discard가 어땠는지 봅니다.
           </div>
         </div>
@@ -313,8 +313,8 @@ export function ScopePairing() {
       <${SurfaceCard} variant="compact">
         <div class="flex flex-col gap-2">
           <${SectionCap}>안전 감시<//>
-          <div class="text-sm font-medium text-[var(--text-strong)]">하네스가 답하는 것</div>
-          <div class="text-sm leading-loose text-[var(--text-body)]">
+          <div class="text-sm font-medium text-[var(--color-fg-secondary)]">하네스가 답하는 것</div>
+          <div class="text-sm leading-loose text-[var(--color-fg-primary)]">
             평가 모델이 건강한지, 장기 실행 중 압축이 정상인지, 세대 교체가 안전한지 봅니다.
           </div>
         </div>
@@ -338,12 +338,12 @@ export function RailHeader({
     <div class="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
       <div>
         <div class="flex items-center gap-2">
-          <div class="text-sm font-medium text-[var(--text-strong)]">${title}</div>
+          <div class="text-sm font-medium text-[var(--color-fg-secondary)]">${title}</div>
           <${StatusPill} status=${status} />
         </div>
-        <div class="mt-1 text-sm leading-loose text-[var(--text-muted)]">${description}</div>
+        <div class="mt-1 text-sm leading-loose text-[var(--color-fg-muted)]">${description}</div>
       </div>
-      <div class="text-xs text-[var(--text-dim)]">최근 신호 ${freshnessLabel(lastEventAt)}</div>
+      <div class="text-xs text-[var(--color-fg-disabled)]">최근 신호 ${freshnessLabel(lastEventAt)}</div>
     </div>
   `
 }
@@ -371,25 +371,25 @@ export function RecentVerdictsList({ items }: { items: HarnessVerdictItem[] }) {
           placeholder="task / agent / gate / cascade 필터"
           aria-label="판정 필터"
           onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
-          class="min-w-40 max-w-65 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+          class="min-w-40 max-w-65 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
         />
       </div>
       ${isFiltering && visibleItems.length === 0
-        ? html`<div class="py-4 text-center text-2xs text-[var(--text-dim)]">필터 결과 없음 (${items.length} items)</div>`
+        ? html`<div class="py-4 text-center text-2xs text-[var(--color-fg-disabled)]">필터 결과 없음 (${items.length} items)</div>`
         : visibleItems.map(item => html`
           <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-3">
             <div class="flex items-start justify-between gap-3">
               <div>
-                <div class="text-sm font-medium text-[var(--text-strong)]">${item.task_title || item.task_id}</div>
-                <div class="mt-1 text-xs text-[var(--text-muted)]">
+                <div class="text-sm font-medium text-[var(--color-fg-secondary)]">${item.task_title || item.task_id}</div>
+                <div class="mt-1 text-xs text-[var(--color-fg-muted)]">
                   ${item.agent_name || 'agent'} · ${item.gate || 'gate'} · ${item.evaluator_cascade || 'cascade'} · ${formatTimestamp(item.timestamp)}
                 </div>
               </div>
               <${StatusDot} size="md" class=${verdictTone(item.verdict)} />
             </div>
-            <div class="mt-2 text-sm text-[var(--text-body)]">${verdictSummary(item.verdict)}</div>
+            <div class="mt-2 text-sm text-[var(--color-fg-primary)]">${verdictSummary(item.verdict)}</div>
             ${item.fallback_reason ? html`
-              <div class="mt-2 break-all text-xs text-[var(--warn)]">${item.fallback_reason}</div>
+              <div class="mt-2 break-all text-xs text-[var(--color-status-warn)]">${item.fallback_reason}</div>
             ` : null}
           </div>
         `)}
@@ -418,28 +418,28 @@ export function PreCompactList({ section }: { section: HarnessSignalSection<PreC
           placeholder="keeper / trigger / model / strategy 필터"
           aria-label="압축 이벤트 필터"
           onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
-          class="min-w-40 max-w-65 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+          class="min-w-40 max-w-65 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
         />
       </div>
       ${isFiltering && visibleItems.length === 0
-        ? html`<div class="py-4 text-center text-2xs text-[var(--text-dim)]">필터 결과 없음 (${section.recent_events.length} items)</div>`
+        ? html`<div class="py-4 text-center text-2xs text-[var(--color-fg-disabled)]">필터 결과 없음 (${section.recent_events.length} items)</div>`
         : visibleItems.map(item => html`
           <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-3">
             <div class="flex items-start justify-between gap-3">
-              <div class="text-sm font-medium text-[var(--text-strong)]">${item.keeper_name}</div>
-              <div class="text-xs text-[var(--text-muted)]">${formatTimestamp(item.timestamp)}</div>
+              <div class="text-sm font-medium text-[var(--color-fg-secondary)]">${item.keeper_name}</div>
+              <div class="text-xs text-[var(--color-fg-muted)]">${formatTimestamp(item.timestamp)}</div>
             </div>
-            <div class="mt-2 grid grid-cols-2 gap-2 text-xs text-[var(--text-body)]">
+            <div class="mt-2 grid grid-cols-2 gap-2 text-xs text-[var(--color-fg-primary)]">
               <span>컨텍스트 ${Math.round(item.context_ratio * 100)}%</span>
               <span>메시지 ${item.message_count}건</span>
               <span>토큰 ${item.token_count.toLocaleString()}</span>
               <span>${item.model_family || '모델 미확인'}</span>
             </div>
-            <div class="mt-2 text-xs text-[var(--text-muted)]">${item.trigger}</div>
+            <div class="mt-2 text-xs text-[var(--color-fg-muted)]">${item.trigger}</div>
             ${item.strategies.length > 0 ? html`
               <div class="mt-2 flex flex-wrap gap-1">
                 ${item.strategies.map(strategy => html`
-                  <span class="rounded-sm border border-[var(--white-8)] px-2 py-0.5 text-3xs text-[var(--text-muted)]">${strategy}</span>
+                  <span class="rounded-sm border border-[var(--white-8)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]">${strategy}</span>
                 `)}
               </div>
             ` : null}
@@ -470,18 +470,18 @@ export function HandoffList({ section }: { section: HarnessSignalSection<Handoff
           placeholder="keeper / model / trace_id 필터"
           aria-label="세대 교체 필터"
           onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
-          class="min-w-40 max-w-65 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+          class="min-w-40 max-w-65 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
         />
       </div>
       ${isFiltering && visibleItems.length === 0
-        ? html`<div class="py-4 text-center text-2xs text-[var(--text-dim)]">필터 결과 없음 (${section.recent_events.length} items)</div>`
+        ? html`<div class="py-4 text-center text-2xs text-[var(--color-fg-disabled)]">필터 결과 없음 (${section.recent_events.length} items)</div>`
         : visibleItems.map(item => html`
           <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-3">
             <div class="flex items-start justify-between gap-3">
-              <div class="text-sm font-medium text-[var(--text-strong)]">${item.keeper_name}</div>
-              <div class="text-xs text-[var(--text-muted)]">${formatTimestamp(item.timestamp)}</div>
+              <div class="text-sm font-medium text-[var(--color-fg-secondary)]">${item.keeper_name}</div>
+              <div class="text-xs text-[var(--color-fg-muted)]">${formatTimestamp(item.timestamp)}</div>
             </div>
-            <div class="mt-2 grid grid-cols-2 gap-2 text-xs text-[var(--text-body)]">
+            <div class="mt-2 grid grid-cols-2 gap-2 text-xs text-[var(--color-fg-primary)]">
               <span>${item.generation}세대</span>
               <span>다음 ${item.next_generation ?? '-'}세대</span>
               <span class="inline-flex items-center gap-1">
@@ -491,7 +491,7 @@ export function HandoffList({ section }: { section: HarnessSignalSection<Handoff
               <span>${item.to_model ?? '모델 미확인'}</span>
             </div>
             ${item.prev_trace_id ? html`
-              <div class="mt-2 text-xs text-[var(--text-muted)]">이전 ${item.prev_trace_id.slice(0, 8)} → 새 ${item.new_trace_id?.slice(0, 8) ?? '-'}</div>
+              <div class="mt-2 text-xs text-[var(--color-fg-muted)]">이전 ${item.prev_trace_id.slice(0, 8)} → 새 ${item.new_trace_id?.slice(0, 8) ?? '-'}</div>
             ` : null}
           </div>
         `)}

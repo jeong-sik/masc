@@ -148,7 +148,7 @@ describe('CopyableCode', () => {
     expect(wrap.className).toContain('border-[var(--accent-30)]')
     expect(wrap.className).toContain('bg-[var(--accent-12)]')
     const label = wrap.querySelector('span')!
-    expect(label.className).toContain('text-[var(--accent)]')
+    expect(label.className).toContain('text-[var(--color-accent-fg)]')
     expect(label.className).toContain('font-semibold')
   })
 
@@ -185,13 +185,13 @@ describe('copyableWrapperClasses (pure)', () => {
 describe('copyableLabelClasses (pure)', () => {
   it('primary label uses accent color + font-semibold', () => {
     const cls = copyableLabelClasses('primary')
-    expect(cls).toContain('text-[var(--accent)]')
+    expect(cls).toContain('text-[var(--color-accent-fg)]')
     expect(cls).toContain('font-semibold')
   })
 
   it('secondary label uses muted text-dim + no bold', () => {
     const cls = copyableLabelClasses('secondary')
-    expect(cls).toContain('text-[var(--text-dim)]')
+    expect(cls).toContain('text-[var(--color-fg-disabled)]')
     expect(cls).not.toContain('font-semibold')
   })
 })

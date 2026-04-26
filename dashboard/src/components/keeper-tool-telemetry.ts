@@ -23,15 +23,15 @@ interface TelemetryState extends TelemetryFreshnessMetadata {
 function sourceHealthClass(health?: string | null): string {
   switch ((health ?? '').toLowerCase()) {
     case 'ok':
-      return 'text-[var(--ok)]'
+      return 'text-[var(--color-status-ok)]'
     case 'stale':
     case 'coverage_gap':
     case 'empty':
-      return 'text-[var(--warn)]'
+      return 'text-[var(--color-status-warn)]'
     case 'missing':
       return 'text-[var(--bad-light)]'
     default:
-      return 'text-[var(--text-dim)]'
+      return 'text-[var(--color-fg-disabled)]'
   }
 }
 
@@ -45,7 +45,7 @@ function freshnessText(d: TelemetryFreshnessMetadata): string {
 
 function FreshnessLine({ data }: { data: TelemetryFreshnessMetadata }) {
   return html`
-    <div class="text-3xs text-[var(--text-dim)]">
+    <div class="text-3xs text-[var(--color-fg-disabled)]">
       <span class="font-mono">${data.source ?? 'trajectory_tool_call'}</span>
       <span class="mx-1">·</span>
       <span class="font-mono ${sourceHealthClass(data.health)}">${data.health ?? 'unknown'}</span>
@@ -101,10 +101,10 @@ function Sparkline({ buckets, height = 32 }: { buckets: HourlyBucket[]; height?:
     return html`
       <g key=${i}>
         <rect x=${x} y=${y} width=${barW} height=${barH} rx="1.5"
-          fill="var(--accent)" opacity="0.5" />
+          fill="var(--color-accent-fg)" opacity="0.5" />
         ${errH > 0 ? html`
           <rect x=${x} y=${height - errH} width=${barW} height=${errH} rx="1.5"
-            fill="var(--bad)" opacity="0.7" />
+            fill="var(--color-status-err)" opacity="0.7" />
         ` : null}
       </g>
     `
@@ -120,7 +120,7 @@ function Sparkline({ buckets, height = 32 }: { buckets: HourlyBucket[]; height?:
     const x = i * (barW + gap) + barW / 2
     return html`
       <text key=${'lbl' + i} x=${x} y=${height + 10} text-anchor="middle"
-        fill="var(--text-dim)" font-size="8" font-family="monospace">
+        fill="var(--color-fg-disabled)" font-size="8" font-family="monospace">
         ${label}
       </text>
     `
@@ -138,11 +138,11 @@ function Sparkline({ buckets, height = 32 }: { buckets: HourlyBucket[]; height?:
 
 function SuccessRateBar({ stat }: { stat: ToolStat }) {
   const successPct = stat.call_count > 0 ? (stat.success_count / stat.call_count) * 100 : 100
-  let barColor = 'var(--bad)'
+  let barColor = 'var(--color-status-err)'
   if (successPct >= 95) {
-    barColor = 'var(--ok)'
+    barColor = 'var(--color-status-ok)'
   } else if (successPct >= 80) {
-    barColor = 'var(--warn)'
+    barColor = 'var(--color-status-warn)'
   }
 
   return html`
@@ -211,13 +211,13 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
   // operators can distinguish no calls from a broken trajectory lane.
   if (asyncState.loading) return null
   if (asyncState.error) {
-    return html`<div class="text-xs text-[var(--bad)] py-2 px-3">텔레메트리 로드 실패: ${asyncState.error}</div>`
+    return html`<div class="text-xs text-[var(--color-status-err)] py-2 px-3">텔레메트리 로드 실패: ${asyncState.error}</div>`
   }
 
   if (s.tools.length === 0) {
     return html`
-      <div class="p-4 rounded border border-[var(--card-border)] bg-card/30">
-        <div class="text-xs text-[var(--text-muted)]">도구 텔레메트리 데이터 없음</div>
+      <div class="p-4 rounded border border-[var(--color-border-default)] bg-card/30">
+        <div class="text-xs text-[var(--color-fg-muted)]">도구 텔레메트리 데이터 없음</div>
         <${FreshnessLine} data=${s} />
       </div>
     `
@@ -244,18 +244,18 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
 
       ${'' /* Summary row */}
       <div class="flex gap-3 flex-wrap text-2xs">
-        <span class="inline-flex items-center gap-1 px-2 py-1 rounded bg-[var(--white-4)] border border-[var(--white-6)] text-[var(--text-muted)]">
-          <span class="font-mono font-medium text-[var(--text-strong)]">${s.tools.length}</span> 도구
+        <span class="inline-flex items-center gap-1 px-2 py-1 rounded bg-[var(--white-4)] border border-[var(--white-6)] text-[var(--color-fg-muted)]">
+          <span class="font-mono font-medium text-[var(--color-fg-secondary)]">${s.tools.length}</span> 도구
         </span>
-        <span class="inline-flex items-center gap-1 px-2 py-1 rounded bg-[var(--white-4)] border border-[var(--white-6)] text-[var(--text-muted)]">
-          <span class="font-mono font-medium text-[var(--text-strong)]">${s.totalEntries}</span> 호출
+        <span class="inline-flex items-center gap-1 px-2 py-1 rounded bg-[var(--white-4)] border border-[var(--white-6)] text-[var(--color-fg-muted)]">
+          <span class="font-mono font-medium text-[var(--color-fg-secondary)]">${s.totalEntries}</span> 호출
         </span>
         ${totalCost > 0 ? html`
-          <span class="inline-flex items-center gap-1 px-2 py-1 rounded bg-[var(--accent-12)] border border-[var(--accent-15)] text-[var(--text-muted)]">
-            <span class="font-mono font-medium text-[var(--accent)]">$${totalCost.toFixed(3)}</span>
+          <span class="inline-flex items-center gap-1 px-2 py-1 rounded bg-[var(--accent-12)] border border-[var(--accent-15)] text-[var(--color-fg-muted)]">
+            <span class="font-mono font-medium text-[var(--color-accent-fg)]">$${totalCost.toFixed(3)}</span>
           </span>
         ` : null}
-        <span class="inline-flex items-center gap-1 px-2 py-1 rounded bg-[var(--white-4)] border border-[var(--white-6)] text-[var(--text-dim)]">
+        <span class="inline-flex items-center gap-1 px-2 py-1 rounded bg-[var(--white-4)] border border-[var(--white-6)] text-[var(--color-fg-disabled)]">
           ${s.windowHours}h 기간
         </span>
       </div>
@@ -282,9 +282,9 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
               placeholder="도구 검색 (이름/카테고리)"
               aria-label="도구 텔레메트리 검색"
               onInput=${(e: Event) => { setQuery((e.target as HTMLInputElement).value) }}
-              class="min-w-40 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+              class="min-w-40 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
             />
-            <span class="text-3xs text-[var(--text-muted)] tabular-nums">
+            <span class="text-3xs text-[var(--color-fg-muted)] tabular-nums">
               ${trimmedQuery
                 ? `${visibleTools.length} / ${s.tools.length}`
                 : `${s.tools.length}개`}
@@ -292,7 +292,7 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
           </div>
         </div>
         ${visibleTools.length === 0 ? html`
-          <div class="text-2xs text-[var(--text-muted)] py-2 px-2">
+          <div class="text-2xs text-[var(--color-fg-muted)] py-2 px-2">
             필터 결과 없음 (${s.tools.length} items)
           </div>
         ` : visibleTools.slice(0, 15).map(stat => {
@@ -303,15 +303,15 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
               <div class="size-5 rounded flex-shrink-0 bg-[var(--white-5)] flex items-center justify-center text-3xs font-mono font-bold ${cat.color}">
                 ${cat.icon}
               </div>
-              <div class="w-28 flex-shrink-0 text-2xs font-mono text-[var(--text-muted)] truncate" title=${stat.name}>
+              <div class="w-28 flex-shrink-0 text-2xs font-mono text-[var(--color-fg-muted)] truncate" title=${stat.name}>
                 ${stat.name.replace(/^(keeper_|masc_)/, '')}
               </div>
               <div class="flex-1 h-3 rounded bg-[var(--white-5)] overflow-hidden">
                 <div class="h-full rounded transition-all duration-300"
-                  style="width: ${barWidth}%; background: ${stat.failure_count > 0 ? 'var(--warn)' : 'var(--accent)'}; opacity: 0.7">
+                  style="width: ${barWidth}%; background: ${stat.failure_count > 0 ? 'var(--color-status-warn)' : 'var(--color-accent-fg)'}; opacity: 0.7">
                 </div>
               </div>
-              <span class="w-8 text-right text-2xs font-mono text-[var(--text-muted)]">${stat.call_count}</span>
+              <span class="w-8 text-right text-2xs font-mono text-[var(--color-fg-muted)]">${stat.call_count}</span>
               <span class="w-14 text-right text-3xs font-mono ${durationColor(stat.avg_duration_ms)}">
                 ${formatDuration(stat.avg_duration_ms)}
               </span>
@@ -326,11 +326,11 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
           <${SectionCap} tone="dim" weight="semibold" class="mb-1">성공률<//>
           ${s.tools.filter(st => st.failure_count > 0).map(stat => html`
             <div class="flex items-center gap-2">
-              <span class="w-28 flex-shrink-0 text-2xs font-mono text-[var(--text-muted)] truncate">
+              <span class="w-28 flex-shrink-0 text-2xs font-mono text-[var(--color-fg-muted)] truncate">
                 ${stat.name.replace(/^(keeper_|masc_)/, '')}
               </span>
               <${SuccessRateBar} stat=${stat} />
-              <span class="text-3xs text-[var(--bad)] w-10 text-right">${stat.failure_count}err</span>
+              <span class="text-3xs text-[var(--color-status-err)] w-10 text-right">${stat.failure_count}err</span>
             </div>
           `)}
         </div>
@@ -342,9 +342,9 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
           <${SectionCap} tone="dim" weight="semibold" class="mb-1">P95 지연 시간<//>
           ${slowest.map(stat => html`
             <div class="flex items-center justify-between py-1 px-2 rounded bg-[var(--white-3)]">
-              <span class="text-2xs font-mono text-[var(--text-muted)]">${stat.name.replace(/^(keeper_|masc_)/, '')}</span>
+              <span class="text-2xs font-mono text-[var(--color-fg-muted)]">${stat.name.replace(/^(keeper_|masc_)/, '')}</span>
               <div class="flex items-center gap-3">
-                <span class="text-3xs text-[var(--text-dim)]">avg ${formatDuration(stat.avg_duration_ms)}</span>
+                <span class="text-3xs text-[var(--color-fg-disabled)]">avg ${formatDuration(stat.avg_duration_ms)}</span>
                 <span class="text-2xs font-mono font-medium ${durationColor(stat.p95_duration_ms)}">p95 ${formatDuration(stat.p95_duration_ms)}</span>
               </div>
             </div>

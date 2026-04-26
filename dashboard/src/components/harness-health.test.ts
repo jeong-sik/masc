@@ -254,7 +254,7 @@ describe('HarnessHealth', () => {
     expect(mermaidSource(container)).toContain('debounced reload')
 
     const markup = container.innerHTML
-    expect(markup).toContain('text-[var(--accent)]')
+    expect(markup).toContain('text-[var(--color-accent-fg)]')
     expect(markup).toContain('bg-[var(--ok-12)]')
     expect(markup).not.toContain('bg-slate-800')
     expect(markup).not.toContain('bg-slate-700')

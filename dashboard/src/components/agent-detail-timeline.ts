@@ -102,23 +102,23 @@ function ToolCallEventRow({ evt, idx }: { evt: AgentTimelineEvent; idx: number }
           ${cat.icon}
         </div>
         <span class="text-xs font-mono font-medium ${cat.color} truncate max-w-50" title=${toolName}>${toolName}</span>
-        <span class="text-3xs px-1 py-0.5 rounded bg-[var(--white-5)] text-[var(--text-dim)]">${cat.label}</span>
+        <span class="text-3xs px-1 py-0.5 rounded bg-[var(--white-5)] text-[var(--color-fg-disabled)]">${cat.label}</span>
         ${durationMs != null
           ? html`<span class="text-2xs font-mono ${durationColor(durationMs)}">${formatDuration(durationMs)}</span>`
           : null}
         ${success
-          ? html`<span class="text-3xs px-1 py-0.5 rounded bg-[rgba(52,211,153,0.1)] text-[var(--ok)]">ok</span>`
-          : html`<span class="text-3xs px-1 py-0.5 rounded bg-[var(--bad-10)] text-[var(--bad)]">err</span>`}
+          ? html`<span class="text-3xs px-1 py-0.5 rounded bg-[rgba(52,211,153,0.1)] text-[var(--color-status-ok)]">ok</span>`
+          : html`<span class="text-3xs px-1 py-0.5 rounded bg-[var(--bad-10)] text-[var(--color-status-err)]">err</span>`}
         <span class="flex-1"></span>
         ${evt.ts ? html`<${TimeAgo} timestamp=${evt.ts} />` : null}
       </div>
       ${args ? html`
-        <div class="ml-8 mt-0.5 text-3xs text-[var(--text-dim)] font-mono truncate">
+        <div class="ml-8 mt-0.5 text-3xs text-[var(--color-fg-disabled)] font-mono truncate">
           ${typeof args === 'string' ? trimText(args, 60) : formatArgs(args)}
         </div>
       ` : null}
       ${errorMsg ? html`
-        <div class="ml-8 mt-0.5 text-3xs text-[var(--bad)] font-mono truncate" title=${errorMsg}>
+        <div class="ml-8 mt-0.5 text-3xs text-[var(--color-status-err)] font-mono truncate" title=${errorMsg}>
           ${trimText(errorMsg, 60)}
         </div>
       ` : null}
@@ -142,11 +142,11 @@ export function AgentTimelineSection() {
     <${Card} title="활동 타임라인 (${summary?.total_events ?? 0}건)">
       ${summary ? html`
         <div class="flex gap-1.5 flex-wrap mb-2">
-          ${summary.tasks_completed > 0 ? html`<span class="text-3xs py-0.5 px-2 border border-solid border-[var(--accent-36)] bg-[var(--accent-12)] text-[var(--accent)] whitespace-nowrap rounded-sm">완료 ${summary.tasks_completed}</span>` : null}
-          ${summary.tasks_claimed > 0 ? html`<span class="text-3xs py-0.5 px-2 border border-solid border-[var(--accent-36)] bg-[var(--accent-12)] text-[var(--accent)] whitespace-nowrap rounded-sm">수임 ${summary.tasks_claimed}</span>` : null}
-          ${summary.messages_sent > 0 ? html`<span class="text-3xs py-0.5 px-2 border border-solid border-[var(--accent-36)] bg-[var(--accent-12)] text-[var(--accent)] whitespace-nowrap rounded-sm">메시지 ${summary.messages_sent}</span>` : null}
-          ${(summary.tool_calls ?? 0) > 0 ? html`<span class="text-3xs py-0.5 px-2 border border-solid border-[var(--accent-36)] bg-[var(--accent-12)] text-[var(--accent)] whitespace-nowrap rounded-sm">도구 ${summary.tool_calls}</span>` : null}
-          ${summary.active_duration_minutes > 0 ? html`<span class="text-3xs py-0.5 px-2 border border-solid border-[var(--accent-36)] bg-[var(--accent-12)] text-[var(--accent)] whitespace-nowrap rounded-sm">${Math.round(summary.active_duration_minutes)}분 활동</span>` : null}
+          ${summary.tasks_completed > 0 ? html`<span class="text-3xs py-0.5 px-2 border border-solid border-[var(--accent-36)] bg-[var(--accent-12)] text-[var(--color-accent-fg)] whitespace-nowrap rounded-sm">완료 ${summary.tasks_completed}</span>` : null}
+          ${summary.tasks_claimed > 0 ? html`<span class="text-3xs py-0.5 px-2 border border-solid border-[var(--accent-36)] bg-[var(--accent-12)] text-[var(--color-accent-fg)] whitespace-nowrap rounded-sm">수임 ${summary.tasks_claimed}</span>` : null}
+          ${summary.messages_sent > 0 ? html`<span class="text-3xs py-0.5 px-2 border border-solid border-[var(--accent-36)] bg-[var(--accent-12)] text-[var(--color-accent-fg)] whitespace-nowrap rounded-sm">메시지 ${summary.messages_sent}</span>` : null}
+          ${(summary.tool_calls ?? 0) > 0 ? html`<span class="text-3xs py-0.5 px-2 border border-solid border-[var(--accent-36)] bg-[var(--accent-12)] text-[var(--color-accent-fg)] whitespace-nowrap rounded-sm">도구 ${summary.tool_calls}</span>` : null}
+          ${summary.active_duration_minutes > 0 ? html`<span class="text-3xs py-0.5 px-2 border border-solid border-[var(--accent-36)] bg-[var(--accent-12)] text-[var(--color-accent-fg)] whitespace-nowrap rounded-sm">${Math.round(summary.active_duration_minutes)}분 활동</span>` : null}
         </div>
       ` : null}
       ${events.length === 0
@@ -176,7 +176,7 @@ export function AgentTimelineSection() {
                 onInput=${(e: Event) => { timelineSearchQuery.value = (e.target as HTMLInputElement).value }}
               />
               ${filterActive
-                ? html`<span class="text-3xs text-[var(--text-dim)] tabular-nums">${filtered.length} / ${events.length}</span>`
+                ? html`<span class="text-3xs text-[var(--color-fg-disabled)] tabular-nums">${filtered.length} / ${events.length}</span>`
                 : null}
             </div>
             ${filtered.length === 0

@@ -39,8 +39,8 @@ module Style =
 stylesheet
   {|
   .directory {
-    border: 1px solid var(--border-main);
-    background: color-mix(in oklab, var(--bg-deep) 48%, transparent);
+    border: 1px solid var(--color-border-default);
+    background: color-mix(in oklab, var(--color-bg-page) 48%, transparent);
     box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--text-bright) 3%, transparent);
     overflow-x: auto;
   }
@@ -51,13 +51,13 @@ stylesheet
     gap: 14px;
     align-items: center;
     padding: 10px 16px;
-    border-bottom: 1px solid color-mix(in oklab, var(--border-highlight) 16%, transparent);
-    background: linear-gradient(180deg, color-mix(in oklab, var(--bg-panel) 80%, var(--bg-deep)), var(--bg-deep));
+    border-bottom: 1px solid color-mix(in oklab, var(--color-border-strong) 16%, transparent);
+    background: linear-gradient(180deg, color-mix(in oklab, var(--color-bg-surface) 80%, var(--color-bg-page)), var(--color-bg-page));
     font-family: var(--font-ui, 'Noto Sans KR', sans-serif);
     font-size: 11px;
     letter-spacing: 0.28em;
     text-transform: uppercase;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
   }
 
   .row {
@@ -67,7 +67,7 @@ stylesheet
     gap: 14px;
     align-items: center;
     padding: 12px 16px;
-    border-bottom: 1px solid color-mix(in oklab, var(--border-highlight) 12%, transparent);
+    border-bottom: 1px solid color-mix(in oklab, var(--color-border-strong) 12%, transparent);
     cursor: pointer;
     transition: background 120ms ease;
   }
@@ -76,16 +76,16 @@ stylesheet
 
   .row:hover,
   .row:focus-visible {
-    background: color-mix(in oklab, var(--accent-brass) 4%, transparent);
+    background: color-mix(in oklab, var(--color-accent-fg) 4%, transparent);
   }
 
   .row:focus-visible {
-    outline: 1px solid var(--accent-brass);
+    outline: 1px solid var(--color-accent-fg);
     outline-offset: -1px;
   }
 
   .row_selected {
-    background: linear-gradient(90deg, color-mix(in oklab, var(--accent-brass) 8%, transparent), transparent 72%);
+    background: linear-gradient(90deg, color-mix(in oklab, var(--color-accent-fg) 8%, transparent), transparent 72%);
   }
 
   .row_selected::before {
@@ -95,17 +95,17 @@ stylesheet
     top: 0;
     bottom: 0;
     width: 2px;
-    background: var(--accent-brass);
-    box-shadow: 0 0 12px var(--accent-brass);
+    background: var(--color-accent-fg);
+    box-shadow: 0 0 12px var(--color-accent-fg);
   }
 
   .sigil {
     width: 40px;
     height: 40px;
-    border: 1px solid var(--accent-brass-dim);
+    border: 1px solid var(--color-accent-fg-dim);
     background:
       radial-gradient(circle at 35% 30%, color-mix(in oklab, var(--text-bright) 16%, transparent), transparent 58%),
-      var(--bg-panel-alt, #1b140f);
+      var(--color-bg-panel-alt, #1b140f);
     display: grid;
     place-items: center;
     font-family: var(--font-display, 'Cinzel', serif);
@@ -138,7 +138,7 @@ stylesheet
     font-family: var(--font-mono, 'JetBrains Mono', monospace);
     font-size: 11px;
     line-height: 1.35;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
     overflow: hidden;
@@ -150,13 +150,13 @@ stylesheet
     font-size: 11px;
     letter-spacing: 0.2em;
     text-transform: uppercase;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
   }
 
   .summary_v {
     font-family: var(--font-ui, 'Noto Sans KR', sans-serif);
     font-size: 12px;
-    color: var(--text-primary);
+    color: var(--color-fg-primary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -187,14 +187,14 @@ stylesheet
     font-variant-numeric: tabular-nums;
   }
 
-  .metric_v_warn { color: var(--accent-brass); }
+  .metric_v_warn { color: var(--color-accent-fg); }
   .metric_v_bad { color: var(--accent-blood); }
 
   .metric_sub {
     margin-top: 3px;
     font-family: var(--font-mono, 'JetBrains Mono', monospace);
     font-size: 11px;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
     overflow: hidden;
@@ -202,8 +202,8 @@ stylesheet
   }
 
   .vial_fill_warn {
-    background: linear-gradient(90deg, var(--accent-brass-dim), var(--accent-brass));
-    box-shadow: 0 0 6px color-mix(in oklab, var(--accent-brass) 35%, transparent);
+    background: linear-gradient(90deg, var(--color-accent-fg-dim), var(--color-accent-fg));
+    box-shadow: 0 0 6px color-mix(in oklab, var(--color-accent-fg) 35%, transparent);
   }
 
   .vial_fill_bad {
@@ -216,8 +216,8 @@ stylesheet
   }
 
   .note_box {
-    border: 1px solid var(--border-main);
-    background: color-mix(in oklab, var(--bg-deep) 40%, transparent);
+    border: 1px solid var(--color-border-default);
+    background: color-mix(in oklab, var(--color-bg-page) 40%, transparent);
     padding: 12px 14px;
     display: flex;
     flex-direction: column;
@@ -229,14 +229,14 @@ stylesheet
     font-size: 11px;
     letter-spacing: 0.22em;
     text-transform: uppercase;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
   }
 
   .note_v {
     font-family: var(--font-ui, 'Noto Sans KR', sans-serif);
     font-size: 12px;
     line-height: 1.55;
-    color: var(--text-primary);
+    color: var(--color-fg-primary);
   }
 
   .list {
@@ -257,7 +257,7 @@ stylesheet
     font-size: 11px;
     letter-spacing: 0.22em;
     text-transform: uppercase;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
   }
 
   .list_v {
@@ -271,11 +271,11 @@ stylesheet
 
   .quiet {
     padding: 24px 18px;
-    border: 1px dashed var(--border-main);
+    border: 1px dashed var(--color-border-default);
     font-family: var(--font-body, 'EB Garamond', serif);
     font-size: 15px;
     font-style: italic;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
     text-align: center;
   }
 

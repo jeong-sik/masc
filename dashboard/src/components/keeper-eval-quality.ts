@@ -51,9 +51,9 @@ async function loadEvalData(name: string): Promise<void> {
 // ── Coverage bar ────────────────────────────────────────
 
 function coverageColor(coverage: number): string {
-  if (coverage >= 0.9) return 'var(--ok)'
-  if (coverage >= 0.6) return 'var(--warn)'
-  return 'var(--bad)'
+  if (coverage >= 0.9) return 'var(--color-status-ok)'
+  if (coverage >= 0.6) return 'var(--color-status-warn)'
+  return 'var(--color-status-err)'
 }
 
 function coverageTone(coverage: number): string {
@@ -66,13 +66,13 @@ function baselineLabel(status: string | null): { text: string; cls: string } | n
   if (!status) return null
   switch (status) {
     case 'Improved':
-      return { text: 'Improved', cls: 'text-[var(--ok)]' }
+      return { text: 'Improved', cls: 'text-[var(--color-status-ok)]' }
     case 'Regressed':
-      return { text: 'Regressed', cls: 'text-[var(--bad)]' }
+      return { text: 'Regressed', cls: 'text-[var(--color-status-err)]' }
     case 'Unchanged':
-      return { text: 'Unchanged', cls: 'text-[var(--text-muted)]' }
+      return { text: 'Unchanged', cls: 'text-[var(--color-fg-muted)]' }
     default:
-      return { text: status, cls: 'text-[var(--text-muted)]' }
+      return { text: status, cls: 'text-[var(--color-fg-muted)]' }
   }
 }
 
@@ -81,17 +81,17 @@ function baselineLabel(status: string | null): { text: string; cls: string } | n
 function LayerResultRow({ layer }: { layer: EvalLayerResult }) {
   const icon = layer.passed ? '\u2713' : '\u2717'
   const iconCls = layer.passed
-    ? 'text-[var(--ok)]'
-    : 'text-[var(--bad)]'
+    ? 'text-[var(--color-status-ok)]'
+    : 'text-[var(--color-status-err)]'
   const scoreText = layer.score != null ? layer.score.toFixed(2) : '-'
   const detail = layer.detail ?? layer.evidence[0] ?? ''
 
   return html`
     <div class="flex items-center gap-3 py-1.5 px-2 rounded hover:bg-[var(--white-3)] transition-colors">
       <span class="flex-shrink-0 w-4 text-center font-bold text-sm ${iconCls}">${icon}</span>
-      <span class="flex-shrink-0 w-30 text-2xs font-mono text-[var(--accent)] truncate" title=${layer.layer_name}>${layer.layer_name}</span>
-      <span class="flex-shrink-0 w-10 text-right text-2xs font-mono tabular-nums text-[var(--text-strong)]">${scoreText}</span>
-      <span class="flex-1 text-3xs text-[var(--text-muted)] truncate" title=${detail}>${detail}</span>
+      <span class="flex-shrink-0 w-30 text-2xs font-mono text-[var(--color-accent-fg)] truncate" title=${layer.layer_name}>${layer.layer_name}</span>
+      <span class="flex-shrink-0 w-10 text-right text-2xs font-mono tabular-nums text-[var(--color-fg-secondary)]">${scoreText}</span>
+      <span class="flex-1 text-3xs text-[var(--color-fg-muted)] truncate" title=${detail}>${detail}</span>
     </div>
   `
 }
@@ -133,27 +133,27 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
 
   if (loading && !data) {
     return html`
-      <div class="p-4 rounded border border-[var(--card-border)] bg-[var(--white-2)]">
-        <div class="text-3xs font-semibold tracking-1 uppercase text-[var(--text-muted)] mb-2">평가 품질</div>
-        <div class="text-2xs text-[var(--text-dim)] animate-pulse">데이터 로딩 중...</div>
+      <div class="p-4 rounded border border-[var(--color-border-default)] bg-[var(--white-2)]">
+        <div class="text-3xs font-semibold tracking-1 uppercase text-[var(--color-fg-muted)] mb-2">평가 품질</div>
+        <div class="text-2xs text-[var(--color-fg-disabled)] animate-pulse">데이터 로딩 중...</div>
       </div>
     `
   }
 
   if (error && !data) {
     return html`
-      <div class="p-4 rounded border border-[var(--card-border)] bg-[var(--white-2)]">
-        <div class="text-3xs font-semibold tracking-1 uppercase text-[var(--text-muted)] mb-2">평가 품질</div>
-        <div class="text-2xs text-[var(--text-dim)]">eval 데이터 없음</div>
+      <div class="p-4 rounded border border-[var(--color-border-default)] bg-[var(--white-2)]">
+        <div class="text-3xs font-semibold tracking-1 uppercase text-[var(--color-fg-muted)] mb-2">평가 품질</div>
+        <div class="text-2xs text-[var(--color-fg-disabled)]">eval 데이터 없음</div>
       </div>
     `
   }
 
   if (!data || data.count === 0) {
     return html`
-      <div class="p-4 rounded border border-[var(--card-border)] bg-[var(--white-2)]">
-        <div class="text-3xs font-semibold tracking-1 uppercase text-[var(--text-muted)] mb-2">평가 품질</div>
-        <div class="text-2xs text-[var(--text-dim)]">eval 결과 없음. OAS harness가 verdict를 생성하면 여기에 표시됩니다.</div>
+      <div class="p-4 rounded border border-[var(--color-border-default)] bg-[var(--white-2)]">
+        <div class="text-3xs font-semibold tracking-1 uppercase text-[var(--color-fg-muted)] mb-2">평가 품질</div>
+        <div class="text-2xs text-[var(--color-fg-disabled)]">eval 결과 없음. OAS harness가 verdict를 생성하면 여기에 표시됩니다.</div>
       </div>
     `
   }
@@ -173,16 +173,16 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
       ${'' /* Header */}
       <div class="flex items-center justify-between mb-3">
         <div class="flex items-center gap-2">
-          <span class="text-3xs font-semibold tracking-1 uppercase text-[var(--text-muted)]">평가 품질</span>
+          <span class="text-3xs font-semibold tracking-1 uppercase text-[var(--color-fg-muted)]">평가 품질</span>
           ${allPassed
-            ? html`<span class="inline-flex items-center py-0.5 px-1.5 rounded text-3xs font-semibold bg-[rgba(74,222,128,0.12)] text-[var(--ok)]">ALL PASS</span>`
-            : html`<span class="inline-flex items-center py-0.5 px-1.5 rounded text-3xs font-semibold bg-[var(--bad-12)] text-[var(--bad)]">FAIL</span>`
+            ? html`<span class="inline-flex items-center py-0.5 px-1.5 rounded text-3xs font-semibold bg-[rgba(74,222,128,0.12)] text-[var(--color-status-ok)]">ALL PASS</span>`
+            : html`<span class="inline-flex items-center py-0.5 px-1.5 rounded text-3xs font-semibold bg-[var(--bad-12)] text-[var(--color-status-err)]">FAIL</span>`
           }
           ${baseline ? html`<span class="text-3xs font-medium ${baseline.cls}">${baseline.text}</span>` : null}
         </div>
         <button
           type="button"
-          class="text-3xs text-[var(--text-dim)] hover:text-[var(--text-muted)] cursor-pointer bg-transparent border-0 p-0"
+          class="text-3xs text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-muted)] cursor-pointer bg-transparent border-0 p-0"
           onClick=${() => void loadEvalData(keeperName)}
           title="새로고침"
         >${loading ? '...' : '\u21bb'}</button>
@@ -190,7 +190,7 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
 
       ${'' /* Coverage bar */}
       <div class="flex items-center gap-3 mb-3">
-        <span class="text-3xs text-[var(--text-muted)] flex-shrink-0 w-16">Coverage</span>
+        <span class="text-3xs text-[var(--color-fg-muted)] flex-shrink-0 w-16">Coverage</span>
         <div class="flex-1 h-2 bg-[var(--white-6)] rounded-sm overflow-hidden">
           <div
             class="h-full rounded-sm transition-all duration-500"
@@ -203,7 +203,7 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
       ${'' /* Layer Results */}
       ${layers.length > 0 ? html`
         <div class="mb-3">
-          <div class="text-3xs uppercase tracking-wider text-[var(--text-dim)] mb-1.5">레이어 결과</div>
+          <div class="text-3xs uppercase tracking-wider text-[var(--color-fg-disabled)] mb-1.5">레이어 결과</div>
           <div class="flex flex-col gap-0.5">
             ${layers.map((layer: EvalLayerResult) => html`<${LayerResultRow} layer=${layer} />`)}
           </div>
@@ -213,18 +213,18 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
       ${'' /* 24h Trend */}
       ${trend ? html`
         <div class="flex items-center gap-2 pt-2 border-t border-[var(--white-8)]">
-          <span class="text-3xs uppercase tracking-wider text-[var(--text-dim)]">Trend (24h)</span>
-          <span class="text-2xs font-mono tabular-nums text-[var(--text-muted)]">
+          <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-disabled)]">Trend (24h)</span>
+          <span class="text-2xs font-mono tabular-nums text-[var(--color-fg-muted)]">
             ${trend.oldCoverage.toFixed(2)} \u2192 ${trend.newCoverage.toFixed(2)}
           </span>
-          <span class="text-2xs font-mono tabular-nums font-semibold ${trend.deltaPercent >= 0 ? 'text-[var(--ok)]' : 'text-[var(--bad)]'}">
+          <span class="text-2xs font-mono tabular-nums font-semibold ${trend.deltaPercent >= 0 ? 'text-[var(--color-status-ok)]' : 'text-[var(--color-status-err)]'}">
             (${trend.deltaPercent >= 0 ? '+' : ''}${trend.deltaPercent.toFixed(1)}%)
           </span>
         </div>
       ` : null}
 
       ${'' /* Snapshot count */}
-      <div class="mt-2 text-3xs text-[var(--text-dim)]">${data.count} eval snapshot${data.count !== 1 ? 's' : ''}</div>
+      <div class="mt-2 text-3xs text-[var(--color-fg-disabled)]">${data.count} eval snapshot${data.count !== 1 ? 's' : ''}</div>
     </div>
   `
 }

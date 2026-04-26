@@ -156,7 +156,7 @@ export function summarizeOverviewTile(
   if (connector === null || connector.available !== true) {
     return {
       badge: '설정 필요',
-      badgeClass: 'border-[var(--warn-20)] bg-[var(--warn-10)] text-[var(--warn)]',
+      badgeClass: 'border-[var(--warn-20)] bg-[var(--warn-10)] text-[var(--color-status-warn)]',
       detail: keeperCount > 0
         ? '아직 시작되지 않음 · 시작 후 keeper를 바인딩하세요'
         : '아직 시작되지 않음 · 먼저 Config와 Start가 필요합니다',
@@ -180,7 +180,7 @@ export function summarizeOverviewTile(
   if (bindingCount === 0) {
     return {
       badge: '바인딩 필요',
-      badgeClass: 'border-[var(--warn-20)] bg-[var(--warn-10)] text-[var(--warn)]',
+      badgeClass: 'border-[var(--warn-20)] bg-[var(--warn-10)] text-[var(--color-status-warn)]',
       detail: keeperCount > 0
         ? '실행 중 · 아직 channel binding이 없습니다'
         : '실행 중 · keeper 디렉토리가 비어 있습니다',
@@ -189,7 +189,7 @@ export function summarizeOverviewTile(
 
   return {
     badge: '정상',
-    badgeClass: 'border-[var(--ok-20)] bg-[var(--ok-10)] text-[var(--ok)]',
+    badgeClass: 'border-[var(--ok-20)] bg-[var(--ok-10)] text-[var(--color-status-ok)]',
     detail: `실행 중 · ${bindingCount} ${bindingCount === 1 ? 'binding' : 'bindings'} active`,
   }
 }
@@ -235,7 +235,7 @@ function OverviewTile({ id, connector, keeperCount, selected, onSelectConnector,
     <div
       class=${`flex min-w-0 flex-col gap-3 rounded border bg-[var(--bg-1)] p-3 transition-colors ${
         selected
-          ? 'border-[var(--accent)] shadow-[0_0_0_1px_var(--accent-18)]'
+          ? 'border-[var(--color-accent-fg)] shadow-[0_0_0_1px_var(--accent-18)]'
           : 'border-[var(--white-8)] hover:border-[var(--white-10)]'
       }`}
       data-overview-tile=${id}
@@ -254,24 +254,24 @@ function OverviewTile({ id, connector, keeperCount, selected, onSelectConnector,
         >${channelIcon(id)}</span>
         <span class="min-w-0 flex-1">
           <span class="flex items-center gap-2">
-            <span class="block truncate text-sm font-semibold text-[var(--text-body)]">${displayName}</span>
+            <span class="block truncate text-sm font-semibold text-[var(--color-fg-primary)]">${displayName}</span>
             <span class=${`rounded-sm border px-2 py-0.5 text-3xs font-medium ${summary.badgeClass}`}>${summary.badge}</span>
             ${uptimeLabel !== null
               ? html`
                   <span
-                    class="rounded-sm border border-[var(--ok-20)] bg-[var(--ok-10)] px-1.5 py-px text-3xs font-normal text-[var(--ok)]/80"
+                    class="rounded-sm border border-[var(--ok-20)] bg-[var(--ok-10)] px-1.5 py-px text-3xs font-normal text-[var(--color-status-ok)]/80"
                     data-uptime-chip
                     title="last_ready_at 기준 경과 시간"
                   >${uptimeLabel}</span>
                 `
               : null}
           </span>
-          <span class="mt-1 block text-2xs leading-5 text-[var(--text-dim)]" data-overview-summary>${summary.detail}</span>
+          <span class="mt-1 block text-2xs leading-5 text-[var(--color-fg-disabled)]" data-overview-summary>${summary.detail}</span>
           ${(() => {
             const identity = formatTileIdentityLine(connector)
             return identity !== null
               ? html`<span
-                  class="mt-1 block truncate text-3xs text-[var(--text-dim)]"
+                  class="mt-1 block truncate text-3xs text-[var(--color-fg-disabled)]"
                   data-tile-identity=${id}
                   title=${identity}
                 >${identity}</span>`
@@ -280,7 +280,7 @@ function OverviewTile({ id, connector, keeperCount, selected, onSelectConnector,
         </span>
       </button>
       <${ConnectorReadinessRail} pills=${pills} />
-      <span class=${`text-3xs uppercase tracking-4 ${selected ? 'text-[var(--accent-1)]' : 'text-[var(--text-dim)]'}`}>
+      <span class=${`text-3xs uppercase tracking-4 ${selected ? 'text-[var(--accent-1)]' : 'text-[var(--color-fg-disabled)]'}`}>
         ${selected ? 'Selected' : 'View Details'}
       </span>
       <${TilePrimaryAction} id=${id} sidecarUp=${sidecarUp} />
@@ -344,7 +344,7 @@ const TILE_ACTION_TONE_CLASS: Record<'start' | 'stop', string> = {
   // across per-tile + bulk controls. The per-tile button is deliberately
   // block-width and text-xs so it reads as the primary action of the
   // tile, distinct from the smaller pill row above.
-  start: 'border-[var(--ok-20)] bg-[var(--ok-10)] text-[var(--ok)] hover:bg-[var(--ok-10)]',
+  start: 'border-[var(--ok-20)] bg-[var(--ok-10)] text-[var(--color-status-ok)] hover:bg-[var(--ok-10)]',
   stop: 'border-[var(--bad-20)] bg-[var(--bad-10)] text-[var(--bad-light)] hover:bg-[var(--bad-10)]',
 }
 
@@ -416,7 +416,7 @@ const TILE_NOTICE_TONE_CLASS: Record<'error' | 'stale', string> = {
   // amber for stale (data hasn't refreshed but no explicit error).
   // Matches Sentry \"issue\" rose + Vercel \"warning\" amber convention.
   error: 'border-[var(--bad-20)] bg-[var(--bad-10)] text-[var(--bad-light)]',
-  stale: 'border-[var(--warn-20)] bg-[var(--warn-10)] text-[var(--warn)]',
+  stale: 'border-[var(--warn-20)] bg-[var(--warn-10)] text-[var(--color-status-warn)]',
 }
 
 const TILE_NOTICE_GLYPH: Record<'error' | 'stale', string> = {
@@ -505,7 +505,7 @@ function deriveTrendColor(series: readonly number[]): string {
   // Tailwind emerald-400 / amber-400 / rose-400 hex codes — matches
   // the border-*-400 tones used on HeartbeatUptimeChip.
   if (last >= 99) return '#34d399'
-  if (last >= 95) return 'var(--warn)'
+  if (last >= 95) return 'var(--color-status-warn)'
   return 'var(--rose-light)'
 }
 
@@ -522,10 +522,10 @@ function BulkActions({ connectors }: { connectors: GateConnectorInfo[] }) {
   const startBusy = bulkInflight.value.start
   const stopBusy = bulkInflight.value.stop
   return html`
-    <div class="flex items-center gap-2 text-2xs text-[var(--text-dim)]">
+    <div class="flex items-center gap-2 text-2xs text-[var(--color-fg-disabled)]">
       <button
         type="button"
-        class="cursor-pointer rounded border border-[var(--ok-20)] bg-[var(--ok-10)] px-2 py-1 text-2xs text-[var(--ok)] hover:bg-[var(--ok-10)] disabled:cursor-not-allowed disabled:opacity-40"
+        class="cursor-pointer rounded border border-[var(--ok-20)] bg-[var(--ok-10)] px-2 py-1 text-2xs text-[var(--color-status-ok)] hover:bg-[var(--ok-10)] disabled:cursor-not-allowed disabled:opacity-40"
         disabled=${startBusy || downCount === 0}
         title=${downCount === 0 ? '모두 이미 실행 중' : `${downCount} 개 sidecar 시작`}
         onClick=${() => { void runBulk('start', c => c?.available !== true, connectors) }}
@@ -635,7 +635,7 @@ function StatusSummaryLine({ summary, connectors }: { summary: ConnectorStripSum
   const offlineLabel = formatOfflineConnectorLabel(offlineConnectorNames(connectors))
   return html`
     <div
-      class="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-2xs text-[var(--text-dim)]"
+      class="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-2xs text-[var(--color-fg-disabled)]"
       data-strip-summary
     >
       <${LivePulseDot}
@@ -645,7 +645,7 @@ function StatusSummaryLine({ summary, connectors }: { summary: ConnectorStripSum
         testId="overview-strip-live"
       />
       <span>
-        <span class="font-semibold text-[var(--text-body)]" data-strip-summary-running>${summary.runningCount}/${summary.connectorTotal}</span>
+        <span class="font-semibold text-[var(--color-fg-primary)]" data-strip-summary-running>${summary.runningCount}/${summary.connectorTotal}</span>
         <span> running</span>
         ${offlineLabel !== null
           ? html`<span
@@ -657,12 +657,12 @@ function StatusSummaryLine({ summary, connectors }: { summary: ConnectorStripSum
       </span>
       <span aria-hidden="true" class="text-[var(--white-10)]">·</span>
       <span>
-        <span class="font-semibold text-[var(--text-body)]" data-strip-summary-healthy>${summary.healthyCount}/${summary.connectorTotal}</span>
+        <span class="font-semibold text-[var(--color-fg-primary)]" data-strip-summary-healthy>${summary.healthyCount}/${summary.connectorTotal}</span>
         <span> healthy</span>
       </span>
       <span aria-hidden="true" class="text-[var(--white-10)]">·</span>
       <span>
-        <span class="font-semibold text-[var(--text-body)]" data-strip-summary-bindings>${summary.bindingCount}</span>
+        <span class="font-semibold text-[var(--color-fg-primary)]" data-strip-summary-bindings>${summary.bindingCount}</span>
         <span> ${summary.bindingCount === 1 ? 'binding' : 'bindings'}</span>
       </span>
     </div>
@@ -718,7 +718,7 @@ export function ConnectorOverviewStrip({
   const summary = summarizeConnectorStrip(connectors, keeperCount)
   return html`
     <div
-      class="mb-4 rounded border border-[var(--card-border)] bg-[var(--bg-1)] p-3"
+      class="mb-4 rounded border border-[var(--color-border-default)] bg-[var(--bg-1)] p-3"
       data-overview-strip-root
     >
       <${IncidentBanner} droppedIds=${droppedIds} />

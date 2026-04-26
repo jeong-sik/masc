@@ -221,10 +221,10 @@ async function submitResolve(
 // ── Row actions (approve/reject UI) ───────────────────
 
 const BTN_PRIMARY =
-  'rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 text-2xs text-[var(--text-strong)] hover:bg-[var(--bg-panel-hover)] disabled:opacity-50 disabled:cursor-not-allowed'
+  'rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] px-2 py-1 text-2xs text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)] disabled:opacity-50 disabled:cursor-not-allowed'
 
 const BTN_SECONDARY =
-  'rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 text-2xs text-[var(--text-body)] hover:bg-[var(--bg-panel-hover)] disabled:opacity-50 disabled:cursor-not-allowed'
+  'rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] px-2 py-1 text-2xs text-[var(--color-fg-primary)] hover:bg-[var(--color-bg-hover)] disabled:opacity-50 disabled:cursor-not-allowed'
 
 function RowActions({
   row,
@@ -239,7 +239,7 @@ function RowActions({
 
   if (state.kind === 'pending') {
     return html`
-      <span class="text-2xs text-[var(--text-muted)]">
+      <span class="text-2xs text-[var(--color-fg-muted)]">
         ${state.decision === 'approve' ? '승인 중…' : '반려 중…'}
       </span>
     `
@@ -248,7 +248,7 @@ function RowActions({
   if (state.kind === 'confirm-approve') {
     return html`
       <div class="flex items-center gap-1 flex-wrap">
-        <span class="text-2xs text-[var(--text-strong)]">승인 확정?</span>
+        <span class="text-2xs text-[var(--color-fg-secondary)]">승인 확정?</span>
         <button
           class=${BTN_PRIMARY}
           onClick=${() => void submitResolve(row, 'approve', '', refresh)}
@@ -268,7 +268,7 @@ function RowActions({
       <div class="flex items-center gap-1 flex-wrap">
         <input
           type="text"
-          class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 text-2xs text-[var(--text-body)] w-50"
+          class="rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] px-2 py-1 text-2xs text-[var(--color-fg-primary)] w-50"
           placeholder="반려 사유 (필수)"
           value=${reason}
           autofocus
@@ -338,29 +338,29 @@ function VerificationRow({
   const actionState = rowActions.value.get(row.request_id) ?? { kind: 'idle' as const }
 
   return html`
-    <tr class="border-b border-[var(--card-border)] last:border-b-0 align-top">
+    <tr class="border-b border-[var(--color-border-default)] last:border-b-0 align-top">
       <td class="py-2 pr-2">
         <${StatusChip} tone=${statusToneForRow(row)}>
           ${statusLabel(row)}
         <//>
       </td>
       <td class="py-2 pr-2">
-        <code class="text-[var(--text-strong)]" title=${row.request_id}>
+        <code class="text-[var(--color-fg-secondary)]" title=${row.request_id}>
           ${truncate(row.request_id, 14)}
         </code>
       </td>
       <td class="py-2 pr-2">
-        <code class="text-[var(--text-body)]" title=${row.task_id}>
+        <code class="text-[var(--color-fg-primary)]" title=${row.task_id}>
           ${truncate(row.task_id, 20)}
         </code>
       </td>
-      <td class="py-2 pr-2 text-[var(--text-body)]">${row.submitted_by}</td>
+      <td class="py-2 pr-2 text-[var(--color-fg-primary)]">${row.submitted_by}</td>
       <td class="py-2 pr-2">
         ${row.approved_by
-          ? html`<span class="text-[var(--text-body)]">${row.approved_by}</span>`
-          : html`<span class="text-[var(--text-muted)]">—</span>`}
+          ? html`<span class="text-[var(--color-fg-primary)]">${row.approved_by}</span>`
+          : html`<span class="text-[var(--color-fg-muted)]">—</span>`}
       </td>
-      <td class="py-2 pr-2 text-[var(--text-muted)] tabular-nums whitespace-nowrap"
+      <td class="py-2 pr-2 text-[var(--color-fg-muted)] tabular-nums whitespace-nowrap"
           title=${row.created_at}>
         ${relativeTime(row.created_at)}
       </td>
@@ -369,7 +369,7 @@ function VerificationRow({
           ? html`<${StatusChip} tone=${verdictTone(row.verdict)}>
               ${VERDICT_LABEL[row.verdict]}
             <//>`
-          : html`<span class="text-[var(--text-muted)]">—</span>`}
+          : html`<span class="text-[var(--color-fg-muted)]">—</span>`}
       </td>
       <td class="py-2 pr-2">
         ${row.status === 'pending'
@@ -383,53 +383,53 @@ function VerificationRow({
                 : null}
               <${RowActions} row=${row} state=${actionState} refresh=${refresh} />
             `
-          : html`<span class="text-[var(--text-muted)]">—</span>`}
+          : html`<span class="text-[var(--color-fg-muted)]">—</span>`}
       </td>
       <td class="py-2">
         ${hasDetails
           ? html`
               <details class="text-2xs">
-                <summary class="cursor-pointer text-[var(--text-muted)] hover:text-[var(--text-body)]">
+                <summary class="cursor-pointer text-[var(--color-fg-muted)] hover:text-[var(--color-fg-primary)]">
                   자세히
                 </summary>
-                <div class="flex flex-col gap-2 mt-2 p-2 rounded border border-[var(--card-border)] bg-[var(--bg-0)]">
+                <div class="flex flex-col gap-2 mt-2 p-2 rounded border border-[var(--color-border-default)] bg-[var(--bg-0)]">
                   ${hasTaskTitle
                     ? html`
                         <div>
-                          <div class="text-3xs font-semibold uppercase tracking-4 text-[var(--text-muted)] mb-1">
+                          <div class="text-3xs font-semibold uppercase tracking-4 text-[var(--color-fg-muted)] mb-1">
                             Task Title
                           </div>
-                          <div class="text-[var(--text-body)]">${row.task_title}</div>
+                          <div class="text-[var(--color-fg-primary)]">${row.task_title}</div>
                         </div>
                       `
                     : null}
                   ${hasRequestSummary
                     ? html`
                         <div>
-                          <div class="text-3xs font-semibold uppercase tracking-4 text-[var(--text-muted)] mb-1">
+                          <div class="text-3xs font-semibold uppercase tracking-4 text-[var(--color-fg-muted)] mb-1">
                             Verification Summary
                           </div>
-                          <div class="text-[var(--text-body)]">${row.request_summary}</div>
+                          <div class="text-[var(--color-fg-primary)]">${row.request_summary}</div>
                         </div>
                       `
                     : null}
                   ${hasNextAction
                     ? html`
                         <div>
-                          <div class="text-3xs font-semibold uppercase tracking-4 text-[var(--text-muted)] mb-1">
+                          <div class="text-3xs font-semibold uppercase tracking-4 text-[var(--color-fg-muted)] mb-1">
                             Next Action
                           </div>
-                          <div class="text-[var(--text-body)]">${row.next_action}</div>
+                          <div class="text-[var(--color-fg-primary)]">${row.next_action}</div>
                         </div>
                       `
                     : null}
                   ${hasContract
                     ? html`
                         <div>
-                          <div class="text-3xs font-semibold uppercase tracking-4 text-[var(--text-muted)] mb-1">
+                          <div class="text-3xs font-semibold uppercase tracking-4 text-[var(--color-fg-muted)] mb-1">
                             Completion Contract
                           </div>
-                          <ul class="list-disc list-inside flex flex-col gap-1 text-[var(--text-body)]">
+                          <ul class="list-disc list-inside flex flex-col gap-1 text-[var(--color-fg-primary)]">
                             ${row.completion_contract.map((c) => html`<li>${c}</li>`)}
                           </ul>
                         </div>
@@ -438,10 +438,10 @@ function VerificationRow({
                   ${hasEvidence
                     ? html`
                         <div>
-                          <div class="text-3xs font-semibold uppercase tracking-4 text-[var(--text-muted)] mb-1">
+                          <div class="text-3xs font-semibold uppercase tracking-4 text-[var(--color-fg-muted)] mb-1">
                             Required Evidence
                           </div>
-                          <ul class="list-disc list-inside flex flex-col gap-1 text-[var(--text-body)]">
+                          <ul class="list-disc list-inside flex flex-col gap-1 text-[var(--color-fg-primary)]">
                             ${row.required_evidence.map((e) => html`<li><code>${e}</code></li>`)}
                           </ul>
                         </div>
@@ -450,17 +450,17 @@ function VerificationRow({
                   ${row.verdict_reason !== ''
                     ? html`
                         <div>
-                          <div class="text-3xs font-semibold uppercase tracking-4 text-[var(--text-muted)] mb-1">
+                          <div class="text-3xs font-semibold uppercase tracking-4 text-[var(--color-fg-muted)] mb-1">
                             Verdict Reason
                           </div>
-                          <div class="text-[var(--text-body)]">${row.verdict_reason}</div>
+                          <div class="text-[var(--color-fg-primary)]">${row.verdict_reason}</div>
                         </div>
                       `
                     : null}
                 </div>
               </details>
             `
-          : html`<span class="text-[var(--text-muted)]">—</span>`}
+          : html`<span class="text-[var(--color-fg-muted)]">—</span>`}
       </td>
     </tr>
   `
@@ -496,7 +496,7 @@ function RequestsTable({
     <div class="overflow-x-auto">
       <table class="w-full text-xs">
         <thead>
-          <tr class="text-[var(--text-muted)] border-b border-[var(--card-border)]">
+          <tr class="text-[var(--color-fg-muted)] border-b border-[var(--color-border-default)]">
             <th class="text-left py-1 pr-2">상태</th>
             <th class="text-left py-1 pr-2">요청</th>
             <th class="text-left py-1 pr-2">작업</th>
@@ -570,21 +570,21 @@ export function VerificationRequestsPanel() {
     <div class="flex flex-col gap-4">
       <div class="flex items-center gap-3 flex-wrap">
         <button
-          class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-3 py-1 text-xs text-[var(--text-strong)] hover:bg-[var(--bg-panel-hover)]"
+          class="rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] px-3 py-1 text-xs text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)]"
           onClick=${() => void loadData(resource)}
         >
           새로고침
         </button>
         ${current.loading
-          ? html`<span class="text-xs text-[var(--text-muted)]">로딩 중...</span>`
+          ? html`<span class="text-xs text-[var(--color-fg-muted)]">로딩 중...</span>`
           : null}
         ${data?.updated_at
-          ? html`<span class="text-xs text-[var(--text-muted)]">
+          ? html`<span class="text-xs text-[var(--color-fg-muted)]">
               updated · ${relativeTime(data.updated_at)}
             </span>`
           : null}
         ${data
-          ? html`<span class="text-xs text-[var(--text-muted)]">
+          ? html`<span class="text-xs text-[var(--color-fg-muted)]">
               ${statusFilter.value === 'all' && !searchQuery.value
                 ? `총 ${data.total}건`
                 : `${filtered.length} / ${data.total}건`}
@@ -624,10 +624,10 @@ export function VerificationRequestsPanel() {
         ? html`
             <div
               role="note"
-              class="rounded border border-[var(--card-border)] bg-[var(--bg-panel)] px-3 py-2 text-2xs text-[var(--text-muted)]"
+              class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-2xs text-[var(--color-fg-muted)]"
             >
               검증 대기(pending) 요청이 없어 액션 컬럼이 비어 있습니다. 승인/반려 버튼은
-              <code class="text-[var(--text-strong)]">pending</code> 상태에서만 표시됩니다.
+              <code class="text-[var(--color-fg-secondary)]">pending</code> 상태에서만 표시됩니다.
             </div>
           `
         : null}

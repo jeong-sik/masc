@@ -44,17 +44,17 @@ stylesheet
     display: grid;
     grid-template-columns: repeat(4, 1fr);
     gap: 1px;
-    background: var(--border-main);
-    border: 1px solid var(--border-main);
+    background: var(--color-border-default);
+    border: 1px solid var(--color-border-default);
     border-radius: 2px;
     box-shadow:
-      inset 0 0 0 1px color-mix(in oklab, var(--accent-brass) 6%, transparent),
-      0 -8px 24px -12px color-mix(in oklab, var(--bg-deep) 85%, transparent);
+      inset 0 0 0 1px color-mix(in oklab, var(--color-accent-fg) 6%, transparent),
+      0 -8px 24px -12px color-mix(in oklab, var(--color-bg-page) 85%, transparent);
     backdrop-filter: blur(2px);
   }
 
   .slot {
-    background: var(--bg-panel);
+    background: var(--color-bg-surface);
     padding: 10px 14px;
     display: flex;
     align-items: center;
@@ -65,15 +65,15 @@ stylesheet
     width: 26px;
     height: 26px;
     border-radius: 50%;
-    border: 1px solid var(--accent-brass);
-    background: radial-gradient(circle at 35% 30%, color-mix(in oklab, var(--text-bright) 22%, transparent), transparent 55%), var(--bg-panel);
+    border: 1px solid var(--color-accent-fg);
+    background: radial-gradient(circle at 35% 30%, color-mix(in oklab, var(--text-bright) 22%, transparent), transparent 55%), var(--color-bg-surface);
     display: grid;
     place-items: center;
     font-family: 'Cinzel', serif;
     font-size: 11px;
     color: var(--text-bright);
     text-transform: uppercase;
-    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--text-bright) 8%, transparent), 0 0 8px color-mix(in oklab, var(--accent-brass) 22%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--text-bright) 8%, transparent), 0 0 8px color-mix(in oklab, var(--color-accent-fg) 22%, transparent);
     flex-shrink: 0;
   }
 
@@ -103,19 +103,19 @@ stylesheet
     font-size: 11px;
     letter-spacing: 0.22em;
     text-transform: uppercase;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
   }
 
   .dot {
     width: 5px;
     height: 5px;
     border-radius: 50%;
-    background: var(--text-dim);
+    background: var(--color-fg-muted);
   }
 
-  .dot_live     { background: var(--status-ok); box-shadow: 0 0 6px var(--status-ok); animation: roster_pulse 1.8s ease-in-out infinite; }
-  .dot_thinking { background: var(--accent-brass); box-shadow: 0 0 6px var(--accent-brass); animation: roster_pulse 1.2s ease-in-out infinite; }
-  .dot_idle     { background: var(--text-dim); }
+  .dot_live     { background: var(--color-status-ok); box-shadow: 0 0 6px var(--color-status-ok); animation: roster_pulse 1.8s ease-in-out infinite; }
+  .dot_thinking { background: var(--color-accent-fg); box-shadow: 0 0 6px var(--color-accent-fg); animation: roster_pulse 1.2s ease-in-out infinite; }
+  .dot_idle     { background: var(--color-fg-muted); }
   .dot_failed   { background: var(--accent-blood); box-shadow: 0 0 8px var(--accent-blood); }
 
   .when_ {
@@ -123,7 +123,7 @@ stylesheet
     font-family: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
     font-variant-numeric: tabular-nums;
     font-size: 11px;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
     flex-shrink: 0;
   }
 

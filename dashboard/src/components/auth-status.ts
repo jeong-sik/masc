@@ -44,24 +44,24 @@ function authBadgeSummary(): {
 
   if (validated) {
     return {
-      dotColor: 'bg-[var(--ok)] shadow-[0_0_6px_rgba(74,222,128,0.6)]',
+      dotColor: 'bg-[var(--color-status-ok)] shadow-[0_0_6px_rgba(74,222,128,0.6)]',
       label: `검증됨 @${actor} · ${role}`,
     }
   }
   if (hasError) {
     return {
-      dotColor: 'bg-[var(--bad)] shadow-[0_0_6px_rgba(244,63,94,0.45)]',
+      dotColor: 'bg-[var(--color-status-err)] shadow-[0_0_6px_rgba(244,63,94,0.45)]',
       label: '인증 오류',
     }
   }
   if (remote) {
     return {
-      dotColor: 'bg-[var(--bad)]',
+      dotColor: 'bg-[var(--color-status-err)]',
       label: '미인증',
     }
   }
   return {
-    dotColor: 'bg-[var(--warn)]',
+    dotColor: 'bg-[var(--color-status-warn)]',
     label: '로컬',
   }
 }
@@ -131,8 +131,8 @@ function openPopover(): void {
 function AuthRow({ label, value }: { label: string; value: string }) {
   return html`
     <div class="contents">
-      <div class="text-[var(--text-muted)]">${label}</div>
-      <div class="text-[var(--text-body)] break-all">${value}</div>
+      <div class="text-[var(--color-fg-muted)]">${label}</div>
+      <div class="text-[var(--color-fg-primary)] break-all">${value}</div>
     </div>
   `
 }
@@ -143,7 +143,7 @@ export function AuthStatus() {
   return html`
     <div class="relative">
       <button type="button"
-        class="flex items-center gap-1.5 text-2xs py-1 px-2 rounded border border-solid border-[var(--card-border)] bg-[var(--white-4)] cursor-pointer font-[inherit] transition-colors duration-150 hover:bg-[var(--white-8)] text-[var(--text-muted)]"
+        class="flex items-center gap-1.5 text-2xs py-1 px-2 rounded border border-solid border-[var(--color-border-default)] bg-[var(--white-4)] cursor-pointer font-[inherit] transition-colors duration-150 hover:bg-[var(--white-8)] text-[var(--color-fg-muted)]"
         onClick=${() => { popoverOpen.value ? (popoverOpen.value = false) : openPopover() }}
         title="인증 상태"
       >
@@ -168,7 +168,7 @@ function AuthPopover() {
   const actorOverrideLocked = authenticated
 
   return html`
-    <div class="absolute right-0 top-full mt-1.5 w-80 rounded border border-[var(--card-border)] bg-[rgba(10,18,34,0.97)] shadow-sm backdrop-blur-sm p-3 z-50">
+    <div class="absolute right-0 top-full mt-1.5 w-80 rounded border border-[var(--color-border-default)] bg-[rgba(10,18,34,0.97)] shadow-sm backdrop-blur-sm p-3 z-50">
       <div class="flex flex-col gap-3">
         <div class="grid grid-cols-[auto,1fr] gap-x-2 gap-y-1 text-2xs">
           <${AuthRow} label="stored actor" value=${storedActor ? `@${storedActor}` : '-'} />
@@ -180,9 +180,9 @@ function AuthPopover() {
         </div>
 
         <div class="flex flex-col gap-2">
-          <div class="text-2xs text-[var(--text-muted)]">행위자 재정의</div>
+          <div class="text-2xs text-[var(--color-fg-muted)]">행위자 재정의</div>
           ${actorOverrideLocked ? html`
-            <div class="text-2xs text-[var(--text-muted)]">
+            <div class="text-2xs text-[var(--color-fg-muted)]">
               검증된 세션은 token owner를 단일 actor로 사용합니다. 로컬 actor override는 저장되더라도 요청 actor로 쓰이지 않습니다.
             </div>
           ` : null}
@@ -191,7 +191,7 @@ function AuthPopover() {
               type="text"
               placeholder="dashboard actor"
               aria-label="Dashboard actor"
-              class="min-w-0 flex-1 py-1.5 px-2 rounded text-2xs border border-[var(--card-border)] bg-[var(--white-4)] text-[var(--text-body)] placeholder-[var(--text-muted)] outline-none focus:border-[rgba(71,184,255,0.5)]"
+              class="min-w-0 flex-1 py-1.5 px-2 rounded text-2xs border border-[var(--color-border-default)] bg-[var(--white-4)] text-[var(--color-fg-primary)] placeholder-[var(--color-fg-muted)] outline-none focus:border-[rgba(71,184,255,0.5)]"
               value=${actorInput.value}
               disabled=${actorOverrideLocked}
               onInput=${(e: Event) => { actorInput.value = (e.target as HTMLInputElement).value }}
@@ -200,7 +200,7 @@ function AuthPopover() {
               }}
             />
             <button type="button"
-              class="shrink-0 py-1.5 px-3 rounded text-2xs border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--accent)] hover:bg-[var(--accent-15)] cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              class="shrink-0 py-1.5 px-3 rounded text-2xs border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--color-accent-fg)] hover:bg-[var(--accent-15)] cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               disabled=${actorOverrideLocked}
               onClick=${() => { void handleApplyActor() }}
             >적용</button>
@@ -208,7 +208,7 @@ function AuthPopover() {
         </div>
 
         <div class="flex flex-col gap-2">
-          <div class="text-2xs text-[var(--text-muted)]">
+          <div class="text-2xs text-[var(--color-fg-muted)]">
             ${authenticated
               ? 'Bearer token이 서버에서 검증되었습니다.'
               : 'Bearer token을 입력하면 원격 환경에서 mutation 작업을 검증할 수 있습니다.'}
@@ -224,13 +224,13 @@ function AuthPopover() {
                 type="password"
                 placeholder="Bearer token"
                 aria-label="Bearer token"
-                class="w-full py-1.5 px-2 rounded text-2xs border border-[var(--card-border)] bg-[var(--white-4)] text-[var(--text-body)] placeholder-[var(--text-muted)] outline-none focus:border-[rgba(71,184,255,0.5)]"
+                class="w-full py-1.5 px-2 rounded text-2xs border border-[var(--color-border-default)] bg-[var(--white-4)] text-[var(--color-fg-primary)] placeholder-[var(--color-fg-muted)] outline-none focus:border-[rgba(71,184,255,0.5)]"
                 value=${tokenInput.value}
                 onInput=${(e: Event) => { tokenInput.value = (e.target as HTMLInputElement).value }}
                 onKeyDown=${(e: KeyboardEvent) => { if (e.key === 'Enter') void handleSetToken() }}
               />
               <button type="button"
-                class="w-full py-1.5 px-3 rounded text-2xs border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--accent)] hover:bg-[var(--accent-15)] cursor-pointer transition-colors"
+                class="w-full py-1.5 px-3 rounded text-2xs border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--color-accent-fg)] hover:bg-[var(--accent-15)] cursor-pointer transition-colors"
                 onClick=${() => { void handleSetToken() }}
               >토큰 설정</button>
             </div>
@@ -253,15 +253,15 @@ export function RemoteWarningBanner() {
         : '원격 접속이 감지되었습니다. Mutation 작업을 위해 검증된 Bearer token을 설정하세요.'
 
   return html`
-    <div class="shrink-0 flex items-center justify-between gap-3 px-4 py-2 bg-[var(--warn-10)] border-b border-[var(--warn-20)] text-xs text-[var(--warn)]">
+    <div class="shrink-0 flex items-center justify-between gap-3 px-4 py-2 bg-[var(--warn-10)] border-b border-[var(--warn-20)] text-xs text-[var(--color-status-warn)]">
       <span>${message}</span>
       <div class="flex items-center gap-2 shrink-0">
         <button type="button"
-          class="px-2 py-0.5 rounded text-2xs border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--accent)] hover:bg-[var(--accent-15)] cursor-pointer transition-colors"
+          class="px-2 py-0.5 rounded text-2xs border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--color-accent-fg)] hover:bg-[var(--accent-15)] cursor-pointer transition-colors"
           onClick=${openPopover}
         >인증 열기</button>
         <button type="button"
-          class="text-[var(--text-muted)] hover:text-[var(--text-body)] cursor-pointer text-2xs transition-colors"
+          class="text-[var(--color-fg-muted)] hover:text-[var(--color-fg-primary)] cursor-pointer text-2xs transition-colors"
           onClick=${() => { bannerDismissed.value = true }}
         >\u2715</button>
       </div>

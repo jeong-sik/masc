@@ -89,7 +89,7 @@ export function AgentDetailMemory({ agentName }: Props) {
   const { loading, error, data } = state.value
   if (loading) return html`<${LoadingState} label="메모리 컨텍스트 로드 중..." />`
   if (error)
-    return html`<div class="text-sm text-[var(--warn)]">메모리 로드 실패: ${error}</div>`
+    return html`<div class="text-sm text-[var(--color-status-warn)]">메모리 로드 실패: ${error}</div>`
   if (!data) return null
 
   // Filter hebbian synapses where this keeper is either endpoint
@@ -118,12 +118,12 @@ export function AgentDetailMemory({ agentName }: Props) {
       <div class="space-y-4">
         <!-- Hebbian collaboration -->
         <div>
-          <div class="text-xs text-[var(--text-dim)] uppercase tracking-wide mb-2">
+          <div class="text-xs text-[var(--color-fg-disabled)] uppercase tracking-wide mb-2">
             협업 시냅스 (나에게 연결된 ${myEdges.length}개)
           </div>
           ${
             myEdges.length === 0
-              ? html`<div class="text-sm text-[var(--text-dim)]">
+              ? html`<div class="text-sm text-[var(--color-fg-disabled)]">
                   아직 협업 데이터가 없습니다. task 완료 시 자동 학습됩니다.
                 </div>`
               : html`
@@ -131,7 +131,7 @@ export function AgentDetailMemory({ agentName }: Props) {
                     ${outgoing.length > 0
                       ? html`
                           <div>
-                            <div class="text-2xs text-[var(--text-muted)] mb-1">
+                            <div class="text-2xs text-[var(--color-fg-muted)] mb-1">
                               내가 강화한 파트너 (out, ${outgoing.length})
                             </div>
                             <div class="space-y-1">
@@ -145,7 +145,7 @@ export function AgentDetailMemory({ agentName }: Props) {
                                         style="width:${Math.round(s.weight * 100)}%"
                                       ></div>
                                     </div>
-                                    <span class="text-[var(--text-muted)] w-10 text-right">${Math.round(s.weight * 100)}%</span>
+                                    <span class="text-[var(--color-fg-muted)] w-10 text-right">${Math.round(s.weight * 100)}%</span>
                                   </div>
                                 `,
                               )}
@@ -156,7 +156,7 @@ export function AgentDetailMemory({ agentName }: Props) {
                     ${incoming.length > 0
                       ? html`
                           <div>
-                            <div class="text-2xs text-[var(--text-muted)] mb-1">
+                            <div class="text-2xs text-[var(--color-fg-muted)] mb-1">
                               나를 강화한 파트너 (in, ${incoming.length})
                             </div>
                             <div class="space-y-1">
@@ -170,7 +170,7 @@ export function AgentDetailMemory({ agentName }: Props) {
                                         style="width:${Math.round(s.weight * 100)}%"
                                       ></div>
                                     </div>
-                                    <span class="text-[var(--text-muted)] w-10 text-right">${Math.round(s.weight * 100)}%</span>
+                                    <span class="text-[var(--color-fg-muted)] w-10 text-right">${Math.round(s.weight * 100)}%</span>
                                   </div>
                                 `,
                               )}
@@ -186,7 +186,7 @@ export function AgentDetailMemory({ agentName }: Props) {
         <!-- Recent episodes for this keeper -->
         <div>
           <div class="mb-2 flex items-center justify-between gap-2">
-            <div class="text-xs text-[var(--text-dim)] uppercase tracking-wide">
+            <div class="text-xs text-[var(--color-fg-disabled)] uppercase tracking-wide">
               최근 에피소드 (${
                 isFilteringEpisodes
                   ? `${visibleEpisodes.length}/${episodes.length}`
@@ -202,17 +202,17 @@ export function AgentDetailMemory({ agentName }: Props) {
                   onInput=${(e: Event) => {
                     episodeQuery.value = (e.target as HTMLInputElement).value
                   }}
-                  class="min-w-40 max-w-60 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+                  class="min-w-40 max-w-60 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
                 />`
               : null}
           </div>
           ${
             episodes.length === 0
-              ? html`<div class="text-sm text-[var(--text-dim)]">
+              ? html`<div class="text-sm text-[var(--color-fg-disabled)]">
                   이 키퍼의 에피소드 기록이 없습니다.
                 </div>`
               : visibleEpisodes.length === 0
-                ? html`<div class="py-4 text-center text-2xs text-[var(--text-dim)]">
+                ? html`<div class="py-4 text-center text-2xs text-[var(--color-fg-disabled)]">
                     필터 결과 없음 (${episodes.length}개 중 0)
                   </div>`
                 : html`
@@ -229,21 +229,21 @@ export function AgentDetailMemory({ agentName }: Props) {
                               : '○'
                         const outcomeColor =
                           ep.outcome === 'success'
-                            ? 'text-[var(--ok)]'
+                            ? 'text-[var(--color-status-ok)]'
                             : ep.outcome === 'partial'
-                              ? 'text-[var(--warn)]'
+                              ? 'text-[var(--color-status-warn)]'
                               : 'text-[var(--bad-light)]'
                         return html`
                           <div class="border border-[var(--white-10)] rounded px-2 py-1.5 text-xs">
                             <div class="flex items-center justify-between gap-2">
                               <div class="flex items-center gap-2 min-w-0">
                                 <span class="${outcomeColor}">${outcomeIcon}</span>
-                                <span class="truncate text-[var(--text-muted)]">${highlightMatch(ep.summary, episodeQuery.value)}</span>
+                                <span class="truncate text-[var(--color-fg-muted)]">${highlightMatch(ep.summary, episodeQuery.value)}</span>
                               </div>
-                              <span class="text-3xs text-[var(--text-muted)]0 shrink-0">${formatTimeAgo(ep.timestamp * 1000)}</span>
+                              <span class="text-3xs text-[var(--color-fg-muted)]0 shrink-0">${formatTimeAgo(ep.timestamp * 1000)}</span>
                             </div>
                             ${ep.learnings.length > 0
-                              ? html`<div class="mt-1 text-2xs text-[var(--text-muted)] pl-3 border-l border-[var(--white-10)]">${highlightMatch(ep.learnings[0]!, episodeQuery.value)}</div>`
+                              ? html`<div class="mt-1 text-2xs text-[var(--color-fg-muted)] pl-3 border-l border-[var(--white-10)]">${highlightMatch(ep.learnings[0]!, episodeQuery.value)}</div>`
                               : null}
                           </div>
                         `

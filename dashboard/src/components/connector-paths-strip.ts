@@ -67,7 +67,7 @@ function PathRow({ label, value, hint }: { label: string; value: string; hint: s
   return html`
     <div class="flex items-center gap-2" data-paths-row=${label}>
       <span
-        class="w-25 shrink-0 text-3xs uppercase tracking-4 text-[var(--text-dim)]"
+        class="w-25 shrink-0 text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)]"
         title=${hint}
       >${label}</span>
       <div class="min-w-0 flex-1">
@@ -82,12 +82,12 @@ export function ConnectorPathsStrip({ connectors }: { connectors: GateConnectorI
   const open = pathsExpanded.value
   return html`
     <div
-      class="mb-3 rounded border border-[var(--card-border)] bg-[var(--bg-1)]"
+      class="mb-3 rounded border border-[var(--color-border-default)] bg-[var(--bg-1)]"
       data-panel="connector-paths-strip"
     >
       <button
         type="button"
-        class="flex w-full cursor-pointer items-center justify-between gap-3 px-3 py-2 text-left text-2xs text-[var(--text-dim)] hover:text-[var(--text-body)]"
+        class="flex w-full cursor-pointer items-center justify-between gap-3 px-3 py-2 text-left text-2xs text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)]"
         onClick=${() => { pathsExpanded.value = !open }}
         aria-expanded=${open}
         aria-controls="connector-paths-body"
@@ -95,13 +95,13 @@ export function ConnectorPathsStrip({ connectors }: { connectors: GateConnectorI
         <span>
           <span class="mr-2 text-3xs uppercase tracking-4">Paths</span>
           <span class="font-mono">${paths.connectorsDir ?? paths.sidecarsDir}</span>
-          <span class="ml-2 text-[var(--text-dim)]">${paths.connectorsDir ? '' : '(런타임 미관찰 · sidecar 경로만 표시)'}</span>
+          <span class="ml-2 text-[var(--color-fg-disabled)]">${paths.connectorsDir ? '' : '(런타임 미관찰 · sidecar 경로만 표시)'}</span>
         </span>
         <span>${open ? '▴' : '▾'}</span>
       </button>
       ${open
         ? html`
-            <div id="connector-paths-body" class="space-y-1.5 border-t border-[var(--card-border)] px-3 py-2">
+            <div id="connector-paths-body" class="space-y-1.5 border-t border-[var(--color-border-default)] px-3 py-2">
               ${paths.connectorsDir
                 ? html`<${PathRow} label="Connectors" value=${paths.connectorsDir} hint="sidecar names.json / status.json 위치" />`
                 : null}

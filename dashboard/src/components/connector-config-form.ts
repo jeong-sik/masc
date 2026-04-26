@@ -316,7 +316,7 @@ export function ConnectorConfigToggle({ connectorId }: { connectorId: string }) 
   return html`
     <button
       type="button"
-      class="cursor-pointer rounded border border-[var(--white-8)] px-2 py-0.5 text-3xs uppercase tracking-4 text-[var(--text-dim)] hover:bg-[var(--white-8)] hover:text-[var(--text-body)]"
+      class="cursor-pointer rounded border border-[var(--white-8)] px-2 py-0.5 text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)] hover:bg-[var(--white-8)] hover:text-[var(--color-fg-primary)]"
       aria-expanded=${entry.open}
       aria-controls=${`connector-config-${connectorId}`}
       onClick=${onClick}
@@ -342,12 +342,12 @@ function FieldWidget({ id, field, value, revealed }: {
     setEntry(id, { reveal: { ...getEntry(id).reveal, [field.name]: !revealed } })
   }
 
-  const baseInput = 'w-full rounded border border-[var(--white-8)] bg-[var(--bg-0)] px-2 py-1 font-mono text-2xs text-[var(--text-body)] focus:border-[var(--accent-1)] focus:outline-none'
+  const baseInput = 'w-full rounded border border-[var(--white-8)] bg-[var(--bg-0)] px-2 py-1 font-mono text-2xs text-[var(--color-fg-primary)] focus:border-[var(--accent-1)] focus:outline-none'
 
   switch (field.type) {
     case 'boolean':
       return html`
-        <label class="flex items-center gap-2 text-2xs text-[var(--text-body)]">
+        <label class="flex items-center gap-2 text-2xs text-[var(--color-fg-primary)]">
           <input
             type="checkbox"
             checked=${value === 'true'}
@@ -382,7 +382,7 @@ function FieldWidget({ id, field, value, revealed }: {
             />
             <button
               type="button"
-              class="shrink-0 cursor-pointer rounded border border-[var(--white-8)] p-1 text-[var(--text-dim)] hover:bg-[var(--white-8)] hover:text-[var(--text-body)]"
+              class="shrink-0 cursor-pointer rounded border border-[var(--white-8)] p-1 text-[var(--color-fg-disabled)] hover:bg-[var(--white-8)] hover:text-[var(--color-fg-primary)]"
               aria-label=${revealed ? 'Hide value' : 'Reveal value'}
               onClick=${toggleReveal}
             >
@@ -402,7 +402,7 @@ function FieldWidget({ id, field, value, revealed }: {
       `
     default:
       return html`
-        <div class="rounded border border-[var(--warn-20)] bg-[var(--warn-10)] px-2 py-1 text-3xs text-[var(--warn)]">
+        <div class="rounded border border-[var(--warn-20)] bg-[var(--warn-10)] px-2 py-1 text-3xs text-[var(--color-status-warn)]">
           unsupported type — refactor BotConfig?
         </div>
       `
@@ -443,7 +443,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
 
   if (entry.fields.length === 0) {
     return html`
-      <div id=${`connector-config-${connectorId}`} class="mt-3 rounded border border-[var(--white-8)] bg-[var(--bg-1)] p-3 text-2xs text-[var(--text-dim)]">
+      <div id=${`connector-config-${connectorId}`} class="mt-3 rounded border border-[var(--white-8)] bg-[var(--bg-1)] p-3 text-2xs text-[var(--color-fg-disabled)]">
         schema가 비어있습니다. backend가 sidecar venv를 못 찾았을 수 있어요.
       </div>
     `
@@ -454,14 +454,14 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
   return html`
     <div id=${`connector-config-${connectorId}`} class="mt-3 rounded border border-[var(--white-8)] bg-[var(--bg-1)] p-3">
       <div class="mb-2 flex items-center justify-between">
-        <div class="text-3xs uppercase tracking-4 text-[var(--text-dim)]">
+        <div class="text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)]">
           ${entry.fields.length} fields · ${entry.fields.filter(f => f.required).length} required
           ${entry.lastSavedAt
             ? html`
-                <span class="ml-2 text-[var(--ok)]">· 저장됨 ${new Date(entry.lastSavedAt).toLocaleTimeString()}</span>
+                <span class="ml-2 text-[var(--color-status-ok)]">· 저장됨 ${new Date(entry.lastSavedAt).toLocaleTimeString()}</span>
                 <button
                   type="button"
-                  class="ml-2 cursor-pointer rounded border border-[var(--ok-20)] bg-[var(--ok-10)] px-1.5 py-0.5 text-3xs text-[var(--ok)] hover:bg-[var(--ok-10)] disabled:cursor-not-allowed disabled:opacity-50"
+                  class="ml-2 cursor-pointer rounded border border-[var(--ok-20)] bg-[var(--ok-10)] px-1.5 py-0.5 text-3xs text-[var(--color-status-ok)] hover:bg-[var(--ok-10)] disabled:cursor-not-allowed disabled:opacity-50"
                   disabled=${entry.restarting}
                   title="POST /sidecar/stop → 800ms → POST /sidecar/start"
                   onClick=${() => { void restartSidecar(connectorId) }}
@@ -473,7 +473,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
         </div>
         <div class="flex items-center gap-2">
           <label
-            class="flex cursor-pointer items-center gap-1 text-3xs uppercase tracking-4 text-[var(--text-dim)] hover:text-[var(--text-body)]"
+            class="flex cursor-pointer items-center gap-1 text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)]"
             title="저장 직후 자동으로 sidecar 재시작 (stop → 800ms → start)"
           >
             <input
@@ -512,10 +512,10 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
       <div class="space-y-2.5">
         ${entry.fields.map(field => html`
           <div class="flex flex-col gap-1">
-            <label class="flex items-center gap-1.5 text-2xs font-medium text-[var(--text-body)]" for=${`field-${connectorId}-${field.name}`}>
+            <label class="flex items-center gap-1.5 text-2xs font-medium text-[var(--color-fg-primary)]" for=${`field-${connectorId}-${field.name}`}>
               <span>${field.name}</span>
               ${field.required ? html`<span class="text-[var(--bad-light)]" aria-label="required">*</span>` : null}
-              <span class="text-3xs uppercase tracking-4 text-[var(--text-dim)]">${field.type}</span>
+              <span class="text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)]">${field.type}</span>
             </label>
             <${FieldWidget}
               id=${connectorId}
@@ -524,13 +524,13 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
               revealed=${entry.reveal[field.name] === true}
             />
             ${field.description
-              ? html`<div class="text-3xs text-[var(--text-dim)]">${field.description}</div>`
+              ? html`<div class="text-3xs text-[var(--color-fg-disabled)]">${field.description}</div>`
               : null}
             ${(() => {
               const hint = getFieldHint(field.name)
               if (hint === null) return null
               return html`
-                <div class="rounded border border-[var(--accent-20)] bg-[var(--accent-10)]0/5 px-2 py-1 text-3xs text-[var(--accent)]" data-field-hint=${field.name}>
+                <div class="rounded border border-[var(--accent-20)] bg-[var(--accent-10)]0/5 px-2 py-1 text-3xs text-[var(--color-accent-fg)]" data-field-hint=${field.name}>
                   <span class="mr-1" aria-hidden="true">📍</span>
                   <span>${hint.where}</span>
                   ${hint.url
@@ -539,7 +539,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
                           href=${hint.url}
                           target="_blank"
                           rel="noopener noreferrer"
-                          class="ml-1 underline hover:text-[var(--accent)]"
+                          class="ml-1 underline hover:text-[var(--color-accent-fg)]"
                         >열기 ↗</a>
                       `
                     : null}
@@ -551,11 +551,11 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
       </div>
 
       <div class="mt-3 border-t border-[var(--white-8)] pt-2.5">
-        <div class="mb-1 text-3xs uppercase tracking-4 text-[var(--text-dim)]">
+        <div class="mb-1 text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)]">
           .env 블록 (현재 입력값)
         </div>
         ${envBlock === ''
-          ? html`<div class="text-3xs text-[var(--text-dim)]">(필수 필드를 채우면 여기에 표시됩니다)</div>`
+          ? html`<div class="text-3xs text-[var(--color-fg-disabled)]">(필수 필드를 채우면 여기에 표시됩니다)</div>`
           : html`<${CopyableCode} command=${envBlock} ariaLabel=${`Copy ${connectorId} .env block`} />`}
       </div>
     </div>

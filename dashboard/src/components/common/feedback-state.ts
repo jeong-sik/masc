@@ -24,7 +24,7 @@ export function EmptyState({
   const content = children ?? message
 
   return html`
-    <div class="flex flex-col items-center justify-center gap-2 text-center ${compact ? 'py-4' : 'py-8'} text-sm text-[var(--text-muted)] ${cx ?? ''}" role="status">
+    <div class="flex flex-col items-center justify-center gap-2 text-center ${compact ? 'py-4' : 'py-8'} text-sm text-[var(--color-fg-muted)] ${cx ?? ''}" role="status">
       ${icon ? html`<span class="text-2xl opacity-40" aria-hidden="true">${icon}</span>` : null}
       ${content ? html`<span class="leading-relaxed">${content}</span>` : null}
       ${action ?? null}

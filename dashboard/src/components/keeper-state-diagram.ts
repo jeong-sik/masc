@@ -75,25 +75,25 @@ function signalTone(severity: string | null | undefined): string {
   // here explicitly before it is allowed to show as healthy.
   switch (severity) {
     case 'bad':
-      return 'border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--bad)]'
+      return 'border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--color-status-err)]'
     case 'warn':
-      return 'border-[var(--warn-24)] bg-[var(--warn-8)] text-[var(--warn)]'
+      return 'border-[var(--warn-24)] bg-[var(--warn-8)] text-[var(--color-status-warn)]'
     case 'ok':
-      return 'border-[rgba(34,197,94,0.24)] bg-[var(--emerald-8)] text-[var(--ok)]'
+      return 'border-[rgba(34,197,94,0.24)] bg-[var(--emerald-8)] text-[var(--color-status-ok)]'
     default:
       // Client-side observability: record unexpected severities so future
       // backend additions are noticed before they regress to silent-OK.
       if (typeof console !== 'undefined' && severity != null && severity !== '') {
         console.warn('[signalTone] unknown severity; rendering as warn', { severity })
       }
-      return 'border-[var(--warn-24)] bg-[var(--warn-8)] text-[var(--warn)]'
+      return 'border-[var(--warn-24)] bg-[var(--warn-8)] text-[var(--color-status-warn)]'
   }
 }
 
 function badgeTone(ok: boolean): string {
   return ok
-    ? 'border-[rgba(34,197,94,0.24)] bg-[var(--emerald-8)] text-[var(--ok)]'
-    : 'border-[rgba(239,68,68,0.24)] bg-[var(--bad-10)] text-[var(--bad)]'
+    ? 'border-[rgba(34,197,94,0.24)] bg-[var(--emerald-8)] text-[var(--color-status-ok)]'
+    : 'border-[rgba(239,68,68,0.24)] bg-[var(--bad-10)] text-[var(--color-status-err)]'
 }
 
 export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStateDiagramProps) {
@@ -157,7 +157,7 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
 
   if (loading) {
     return html`
-      <div class="flex items-center justify-center gap-2 py-6 text-2xs text-[var(--text-dim)]">
+      <div class="flex items-center justify-center gap-2 py-6 text-2xs text-[var(--color-fg-disabled)]">
         <${InlineSpinner} />
         composite lifecycle 로딩중
       </div>
@@ -170,8 +170,8 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
 
   return html`
     <div class="flex flex-col gap-3">
-      <div class="flex flex-wrap items-center gap-2 text-3xs text-[var(--text-dim)]">
-        <span class="inline-flex items-center rounded-sm border border-[var(--accent-30)] bg-[var(--accent-10)] px-2 py-0.5 text-[var(--accent)]">
+      <div class="flex flex-wrap items-center gap-2 text-3xs text-[var(--color-fg-disabled)]">
+        <span class="inline-flex items-center rounded-sm border border-[var(--accent-30)] bg-[var(--accent-10)] px-2 py-0.5 text-[var(--color-accent-fg)]">
           composite ${snapshot.phase}
         </span>
         ${keeperPhase ? html`
@@ -199,13 +199,13 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
       </div>
 
       ${phaseMismatch ? html`
-        <div class="rounded border border-[var(--warn-24)] bg-[var(--warn-8)] px-3 py-2 text-2xs leading-normal text-[var(--text-body)]">
+        <div class="rounded border border-[var(--warn-24)] bg-[var(--warn-8)] px-3 py-2 text-2xs leading-normal text-[var(--color-fg-primary)]">
           keeper row phase와 composite snapshot phase가 다릅니다. composite snapshot을 authoritative runtime-truth로 사용합니다.
         </div>
       ` : null}
 
       <div>
-        <div class="text-3xs font-semibold uppercase tracking-1 text-[var(--text-muted)] mb-2">Composite Lifecycle (KSM · KTC · KDP · KCL · KMC)</div>
+        <div class="text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)] mb-2">Composite Lifecycle (KSM · KTC · KDP · KCL · KMC)</div>
         <${CytoscapeFsm} spec=${compositeSpec} height="320px" />
       </div>
 
@@ -223,14 +223,14 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
 
       ${transitions.length > 0 ? html`
         <div class="grid gap-2">
-          <div class="text-3xs font-semibold uppercase tracking-1 text-[var(--text-muted)]">관측된 전이</div>
+          <div class="text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">관측된 전이</div>
           ${transitions.map(transition => html`
-            <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-2xs leading-normal text-[var(--text-body)]">
+            <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-2xs leading-normal text-[var(--color-fg-primary)]">
               <div class="flex flex-wrap items-center gap-2">
-                <span class="font-mono text-[var(--text-strong)]">${normalizePhase(transition.prev_phase) ?? transition.prev_phase}</span>
-                <span class="text-[var(--text-dim)]">→</span>
-                <span class="font-mono text-[var(--accent)]">${normalizePhase(transition.new_phase) ?? transition.new_phase}</span>
-                <span class="rounded-sm border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5 text-3xs text-[var(--text-muted)]">
+                <span class="font-mono text-[var(--color-fg-secondary)]">${normalizePhase(transition.prev_phase) ?? transition.prev_phase}</span>
+                <span class="text-[var(--color-fg-disabled)]">→</span>
+                <span class="font-mono text-[var(--color-accent-fg)]">${normalizePhase(transition.new_phase) ?? transition.new_phase}</span>
+                <span class="rounded-sm border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]">
                   ${transition.event_type ?? transitionType(transition.selected_event)}
                 </span>
                 ${transition.operator_signal ? html`
@@ -240,10 +240,10 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
                 ` : null}
               </div>
               ${transition.operator_signal ? html`
-                <div class="mt-1 text-[var(--text-muted)]">
+                <div class="mt-1 text-[var(--color-fg-muted)]">
                   ${transition.operator_signal.summary}
                   ${transition.operator_signal.next_human_action
-                    ? html`<span class="text-[var(--warn)]"> · ${transition.operator_signal.next_human_action}</span>`
+                    ? html`<span class="text-[var(--color-status-warn)]"> · ${transition.operator_signal.next_human_action}</span>`
                     : null}
                 </div>
               ` : null}

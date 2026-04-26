@@ -5,10 +5,10 @@ import { keeperHealthSummary, type KeeperPressure } from '../../live-store'
 import { CONTEXT_RATIO_CRITICAL, CONTEXT_RATIO_WARN, CONTEXT_RATIO_COMPACTING } from '../../config/constants'
 
 function pressureColor(ratio: number): string {
-  if (ratio > CONTEXT_RATIO_CRITICAL) return 'bg-[var(--bad)]'
-  if (ratio > CONTEXT_RATIO_WARN) return 'bg-[var(--warn)]'
-  if (ratio > CONTEXT_RATIO_COMPACTING) return 'bg-[var(--warn)]'
-  return 'bg-[var(--ok)]'
+  if (ratio > CONTEXT_RATIO_CRITICAL) return 'bg-[var(--color-status-err)]'
+  if (ratio > CONTEXT_RATIO_WARN) return 'bg-[var(--color-status-warn)]'
+  if (ratio > CONTEXT_RATIO_COMPACTING) return 'bg-[var(--color-status-warn)]'
+  return 'bg-[var(--color-status-ok)]'
 }
 
 function stageIndicator(stage: string): string {
@@ -36,12 +36,12 @@ export function KeeperHealthStrip() {
   return html`
     <div class="flex items-center gap-4 rounded border border-[var(--border-slate-12)] bg-[var(--white-3)] px-4 py-2.5">
       <div class="flex items-center gap-2 min-w-0">
-        <span class="text-sm font-medium text-[var(--text-strong)] whitespace-nowrap">
+        <span class="text-sm font-medium text-[var(--color-fg-secondary)] whitespace-nowrap">
           Keeper
         </span>
-        <span class="text-sm text-[var(--text-body)] whitespace-nowrap">
+        <span class="text-sm text-[var(--color-fg-primary)] whitespace-nowrap">
           ${summary.activeCount} 활성
-          <span class="text-[var(--text-muted)]">/ ${summary.totalCount}</span>
+          <span class="text-[var(--color-fg-muted)]">/ ${summary.totalCount}</span>
         </span>
       </div>
 
@@ -53,11 +53,11 @@ export function KeeperHealthStrip() {
 
       <div class="flex items-center gap-2 ml-auto whitespace-nowrap">
         ${alertCount > 0
-          ? html`<span class="text-xs font-medium text-[var(--warn)]">${alertCount} 주의</span>`
-          : html`<span class="text-xs text-[var(--text-muted)]">정상</span>`
+          ? html`<span class="text-xs font-medium text-[var(--color-status-warn)]">${alertCount} 주의</span>`
+          : html`<span class="text-xs text-[var(--color-fg-muted)]">정상</span>`
         }
         ${summary.criticalCount > 0 && html`
-          <span class="text-xs font-medium text-[var(--bad)]">${summary.criticalCount} 위험</span>
+          <span class="text-xs font-medium text-[var(--color-status-err)]">${summary.criticalCount} 위험</span>
         `}
       </div>
     </div>

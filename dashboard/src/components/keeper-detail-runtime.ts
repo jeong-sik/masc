@@ -55,8 +55,8 @@ export function resolveKeeperCurrentTaskLabel(
 function SignalRow({ label, value }: { label: string; value: string | number }) {
   return html`
     <div class="flex items-center justify-between py-2 px-3 rounded bg-[var(--white-3)]">
-      <span class="text-xs text-[var(--text-muted)]">${label}</span>
-      <span class="text-xs font-medium text-[var(--text-strong)]">${value}</span>
+      <span class="text-xs text-[var(--color-fg-muted)]">${label}</span>
+      <span class="text-xs font-medium text-[var(--color-fg-secondary)]">${value}</span>
     </div>
   `
 }
@@ -67,7 +67,7 @@ function ToolChip({ name }: { name: string }) {
   const cat = toolCategory(name)
   return html`
     <button type="button"
-      class="inline-flex items-center gap-1 py-0.5 px-2 rounded-sm text-3xs font-medium bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-30)] hover:bg-[var(--accent-20)] cursor-pointer transition-colors"
+      class="inline-flex items-center gap-1 py-0.5 px-2 rounded-sm text-3xs font-medium bg-[var(--accent-12)] text-[var(--color-accent-fg)] border border-[var(--accent-30)] hover:bg-[var(--accent-20)] cursor-pointer transition-colors"
       title=${`${cat.label}: ${name}`}
       onClick=${() => openToolsInventory(name)}
     >
@@ -107,7 +107,7 @@ export function AllowlistPreview({
   }, [tools.length, firstTool, lastTool, previewLimit])
 
   if (tools.length === 0) {
-    return html`<span class="text-2xs text-[var(--text-muted)] italic">${emptyLabel}</span>`
+    return html`<span class="text-2xs text-[var(--color-fg-muted)] italic">${emptyLabel}</span>`
   }
 
   const { visibleTools, hiddenCount } = expanded
@@ -120,7 +120,7 @@ export function AllowlistPreview({
         ${visibleTools.map(tool => html`<${ToolChip} name=${tool} />`)}
         ${!expanded && hiddenCount > 0
           ? html`
-              <span class="inline-flex items-center py-0.5 px-2 rounded-sm text-3xs font-medium border border-dashed border-[var(--card-border)] text-[var(--text-muted)]">
+              <span class="inline-flex items-center py-0.5 px-2 rounded-sm text-3xs font-medium border border-dashed border-[var(--color-border-default)] text-[var(--color-fg-muted)]">
                 +${hiddenCount}
               </span>
             `
@@ -129,7 +129,7 @@ export function AllowlistPreview({
       ${tools.length > previewLimit
         ? html`
             <button type="button"
-              class="self-start text-3xs text-[var(--text-muted)] hover:text-[var(--text-body)] cursor-pointer transition-colors"
+              class="self-start text-3xs text-[var(--color-fg-muted)] hover:text-[var(--color-fg-primary)] cursor-pointer transition-colors"
               aria-expanded=${expanded}
               aria-label=${expanded ? '허용된 도구 접기' : `허용된 도구 나머지 ${hiddenCount}개 보기`}
               onClick=${() => setExpanded(value => !value)}
@@ -147,12 +147,12 @@ export function AllowlistPreview({
 function ToolSection({ title, description, tools, fallback }: { title: string; description?: string; tools: string[]; fallback: string }) {
   return html`
     <div class="flex flex-col gap-1.5 mt-3">
-      <span class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">${title}</span>
-      ${description ? html`<span class="text-2xs text-[var(--text-muted)] leading-snug">${description}</span>` : null}
+      <span class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">${title}</span>
+      ${description ? html`<span class="text-2xs text-[var(--color-fg-muted)] leading-snug">${description}</span>` : null}
       <div class="flex flex-wrap gap-1.5">
         ${tools.length > 0
           ? tools.map(tool => html`<${ToolChip} name=${tool} />`)
-          : html`<span class="text-2xs text-[var(--text-muted)] italic">${fallback}</span>`}
+          : html`<span class="text-2xs text-[var(--color-fg-muted)] italic">${fallback}</span>`}
       </div>
     </div>
   `
@@ -222,19 +222,19 @@ function BudgetRow({ label, slot, manifest, clamp }: {
     valueClass = 'text-[var(--bad-light)] underline decoration-wavy decoration-red-400 underline-offset-4 cursor-help'
     pill = html`<span class="rounded bg-[var(--bad-10)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-wider text-[var(--bad-light)]">invalid</span>`
   } else if (isOverride) {
-    valueClass = 'text-[var(--text-strong)] underline decoration-dotted decoration-amber-300/60 underline-offset-4 cursor-help'
-    pill = html`<span class="rounded bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-wider text-[var(--warn)]">override</span>`
+    valueClass = 'text-[var(--color-fg-secondary)] underline decoration-dotted decoration-amber-300/60 underline-offset-4 cursor-help'
+    pill = html`<span class="rounded bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-wider text-[var(--color-status-warn)]">override</span>`
   } else {
-    valueClass = 'text-[var(--text-muted)] cursor-help'
-    pill = html`<span class="rounded bg-[var(--white-6)] px-1.5 py-0.5 text-3xs font-medium uppercase tracking-wider text-[var(--text-muted)]">env</span>`
+    valueClass = 'text-[var(--color-fg-muted)] cursor-help'
+    pill = html`<span class="rounded bg-[var(--white-6)] px-1.5 py-0.5 text-3xs font-medium uppercase tracking-wider text-[var(--color-fg-muted)]">env</span>`
   }
 
   return html`
     <div class="flex items-center justify-between py-2 px-3 rounded bg-[var(--white-3)]">
-      <span class="text-xs text-[var(--text-muted)]">${label}</span>
+      <span class="text-xs text-[var(--color-fg-muted)]">${label}</span>
       <div class="flex items-center gap-2">
         ${isOverride && deltaText
-          ? html`<span class="text-3xs text-[var(--text-muted)] tabular-nums">${deltaText}</span>`
+          ? html`<span class="text-3xs text-[var(--color-fg-muted)] tabular-nums">${deltaText}</span>`
           : null}
         <span
           class="text-xs font-medium tabular-nums ${valueClass}"
@@ -250,7 +250,7 @@ function TurnBudgetPanel({ keeper }: { keeper: Keeper }) {
   const budget = keeper.turn_budget
   if (!budget) {
     return html`
-      <div class="text-2xs text-[var(--text-muted)] italic">
+      <div class="text-2xs text-[var(--color-fg-muted)] italic">
         턴 예산 정보를 아직 수신하지 못했습니다. 서버 재시작 후 확인해주세요.
       </div>
     `
@@ -267,14 +267,14 @@ function TurnBudgetPanel({ keeper }: { keeper: Keeper }) {
   return html`
     <div class="flex flex-col gap-1.5">
       <div class="flex items-center gap-2 mb-1">
-        <span class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+        <span class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">
           턴 예산 (OAS 호출당)
         </span>
         ${hasInvalid
           ? html`<span class="rounded-sm bg-[var(--bad-10)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-wider text-[var(--bad-light)]">invalid override</span>`
           : hasOverride
-            ? html`<span class="rounded-sm bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-wider text-[var(--warn)]">override</span>`
-            : html`<span class="rounded-sm bg-[var(--ok-10)] px-1.5 py-0.5 text-3xs font-medium uppercase tracking-wider text-[var(--ok)]">inherited</span>`}
+            ? html`<span class="rounded-sm bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-wider text-[var(--color-status-warn)]">override</span>`
+            : html`<span class="rounded-sm bg-[var(--ok-10)] px-1.5 py-0.5 text-3xs font-medium uppercase tracking-wider text-[var(--color-status-ok)]">inherited</span>`}
       </div>
       <${BudgetRow}
         label="반응형"
@@ -288,7 +288,7 @@ function TurnBudgetPanel({ keeper }: { keeper: Keeper }) {
         manifest=${budget.manifest_path}
         clamp=${clamp}
       />
-      <span class="text-2xs text-[var(--text-muted)] leading-snug mt-1">
+      <span class="text-2xs text-[var(--color-fg-muted)] leading-snug mt-1">
         반응형 = 보드/멘션 반응 턴 예산, 예약 자율 = 자율 주기 턴 예산.
         값에 마우스를 올리면 설정 출처와 기본값 비교를 확인할 수 있습니다.
       </span>
@@ -303,7 +303,7 @@ export function TurnBudgetSection({ keeper }: { keeper: Keeper }) {
       <summary class="cursor-pointer text-2xs font-semibold uppercase tracking-widest text-text-muted list-none select-none flex items-center gap-2">
         <span class="w-1.5 h-1.5 rounded-full ${diverges ? 'bg-[var(--warn-10)]' : 'bg-accent/50'}"></span>
         턴 예산
-        ${diverges ? html`<span class="text-3xs text-[var(--warn)] font-normal normal-case tracking-normal">(재정의됨)</span>` : null}
+        ${diverges ? html`<span class="text-3xs text-[var(--color-status-warn)] font-normal normal-case tracking-normal">(재정의됨)</span>` : null}
       </summary>
       <div class="mt-3">
         <${TurnBudgetPanel} keeper=${keeper} />
@@ -453,7 +453,7 @@ export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
             <div class="flex items-center gap-2">
               <input
                 type="search"
-                class="flex-1 min-w-0 py-1.5 px-2 rounded border border-[var(--card-border)] bg-[var(--white-3)] text-2xs text-[var(--text-body)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-30)]"
+                class="flex-1 min-w-0 py-1.5 px-2 rounded border border-[var(--color-border-default)] bg-[var(--white-3)] text-2xs text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-muted)] focus:outline-none focus:border-[var(--accent-30)]"
                 placeholder="신호 지표 필터 (예: 폴백, 메모리, 컴팩션)"
                 aria-label="런타임 신호 지표 필터"
                 value=${signalQuery}
@@ -463,21 +463,21 @@ export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
                 }}
               />
               ${isFiltering
-                ? html`<span class="text-3xs text-[var(--text-muted)] tabular-nums whitespace-nowrap">${matchedRows}/${totalRows}</span>`
+                ? html`<span class="text-3xs text-[var(--color-fg-muted)] tabular-nums whitespace-nowrap">${matchedRows}/${totalRows}</span>`
                 : null}
             </div>
           `
         : null}
       ${showEmptyState
         ? html`
-            <div class="py-3 px-3 rounded border border-dashed border-[var(--card-border)] text-2xs text-[var(--text-muted)] italic">
+            <div class="py-3 px-3 rounded border border-dashed border-[var(--color-border-default)] text-2xs text-[var(--color-fg-muted)] italic">
               필터 결과 없음 (${totalRows} items)
             </div>
           `
         : null}
       ${filteredGroups.map(g => html`
         <div class="flex flex-col gap-1">
-          <span class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] px-1">${g.title}</span>
+          <span class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] px-1">${g.title}</span>
           <div class="flex flex-col gap-1">
             ${g.rows.map(r => html`<${SignalRow} label=${r.label} value=${r.value} />`)}
           </div>
@@ -606,7 +606,7 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
 
       <div class="flex justify-end mt-1">
         <button type="button"
-          class="py-1.5 px-3 rounded border border-[var(--card-border)] bg-[var(--white-3)] text-2xs text-[var(--text-muted)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-default"
+          class="py-1.5 px-3 rounded border border-[var(--color-border-default)] bg-[var(--white-3)] text-2xs text-[var(--color-fg-muted)] hover:bg-[var(--white-6)] hover:text-[var(--color-fg-primary)] transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-default"
           disabled=${!openToolsQuery}
           onClick=${() => { openToolsInventory(openToolsQuery) }}
         >
@@ -615,9 +615,9 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
       </div>
 
       <div class="flex items-center justify-between mt-3">
-        <span class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">허용된 도구</span>
+        <span class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">허용된 도구</span>
         <button type="button"
-          class="text-3xs text-[var(--text-muted)] hover:text-[var(--text-body)] cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-default"
+          class="text-3xs text-[var(--color-fg-muted)] hover:text-[var(--color-fg-primary)] cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-default"
           disabled=${!policyEditable}
           onClick=${() => {
             showAllowlistEditor.value = !showAllowlistEditor.value
@@ -642,7 +642,7 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
             }}
           />`
         : html`
-          <span class="text-2xs text-[var(--text-muted)] leading-snug">
+          <span class="text-2xs text-[var(--color-fg-muted)] leading-snug">
             ${policyLoading
               ? '정적 도구 정책을 불러오는 중입니다.'
               : policyEditable
@@ -666,8 +666,8 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
 
       <${SignalRow} label="도구 호출" value=${typeof toolCallCount === 'number' ? toolCallCount : observedFallback === 'none_recent' ? 0 : metadataFallback} />
       <div class="flex items-center justify-between py-2 px-3 rounded bg-[var(--white-3)]">
-        <span class="text-xs text-[var(--text-muted)]">감사</span>
-        <span class="text-xs font-medium text-[var(--text-strong)]">${auditSource ?? metadataFallback}${auditAt ? html` · <${TimeAgo} timestamp=${auditAt} />` : ''}</span>
+        <span class="text-xs text-[var(--color-fg-muted)]">감사</span>
+        <span class="text-xs font-medium text-[var(--color-fg-secondary)]">${auditSource ?? metadataFallback}${auditAt ? html` · <${TimeAgo} timestamp=${auditAt} />` : ''}</span>
       </div>
 
     </div>

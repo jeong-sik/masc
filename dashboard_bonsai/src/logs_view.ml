@@ -10,7 +10,7 @@
     Tokens are inlined as literals because ppx_css has no access to the
     design system's [:root] variables yet. When [colors_and_type.css] is
     served from [assets/dashboard_bonsai/], the inline values become
-    [var(--bg-deep)] etc. *)
+    [var(--color-bg-page)] etc. *)
 
 open! Core
 open! Bonsai_web
@@ -25,10 +25,10 @@ stylesheet
     position: relative;
     min-height: 100vh;
     background:
-      radial-gradient(circle at 88% 14%, color-mix(in oklab, var(--accent-brass) 10%, transparent), transparent 22%),
+      radial-gradient(circle at 88% 14%, color-mix(in oklab, var(--color-accent-fg) 10%, transparent), transparent 22%),
       radial-gradient(circle at 8% 88%, color-mix(in oklab, var(--accent-blood) 5%, transparent), transparent 28%),
-      var(--bg-deep);
-    color: var(--text-primary);
+      var(--color-bg-page);
+    color: var(--color-fg-primary);
     font-family: 'EB Garamond', 'Noto Sans KR', Georgia, serif;
     font-size: 15px;
     padding: 1.5rem calc(340px + 24px) 4rem 244px;
@@ -48,9 +48,9 @@ stylesheet
     font-family: 'Noto Sans KR', sans-serif;
     font-size: 13px;
     padding: 8px 16px;
-    background: var(--bg-panel);
-    color: var(--accent-brass);
-    border: 2px solid var(--accent-brass);
+    background: var(--color-bg-surface);
+    color: var(--color-accent-fg);
+    border: 2px solid var(--color-accent-fg);
     text-decoration: none;
   }
   .skip_nav:focus {
@@ -86,16 +86,16 @@ stylesheet
     align-items: center;
     gap: 14px;
     padding-bottom: 1rem;
-    border-bottom: 1px solid var(--border-main);
+    border-bottom: 1px solid var(--color-border-default);
   }
 
   .rune {
     width: 22px;
     height: 22px;
-    border: 1px solid var(--accent-brass);
+    border: 1px solid var(--color-accent-fg);
     display: grid;
     place-items: center;
-    color: var(--accent-brass);
+    color: var(--color-accent-fg);
     font-family: 'Cinzel', serif;
     font-size: 11px;
     transform: rotate(45deg);
@@ -109,7 +109,7 @@ stylesheet
     font-family: 'Cinzel', serif;
     font-size: 13px;
     letter-spacing: 0.22em;
-    color: var(--accent-brass);
+    color: var(--color-accent-fg);
     text-transform: uppercase;
   }
 
@@ -118,17 +118,17 @@ stylesheet
     display: flex;
     align-items: center;
     gap: 10px;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
     font-family: 'Noto Sans KR', -apple-system, sans-serif;
     font-size: 11px;
     letter-spacing: 0.12em;
     text-transform: uppercase;
   }
 
-  .crumbs_sep { color: var(--border-highlight); }
+  .crumbs_sep { color: var(--color-border-strong); }
   .crumbs_cur { color: var(--text-bright); letter-spacing: 0.14em; }
   .crumbs_room {
-    color: var(--accent-brass);
+    color: var(--color-accent-fg);
     letter-spacing: 0.14em;
     font-variant-numeric: tabular-nums;
   }
@@ -139,8 +139,8 @@ stylesheet
     width: 6px;
     height: 6px;
     border-radius: 50%;
-    background: var(--accent-brass);
-    box-shadow: 0 0 8px color-mix(in oklab, var(--accent-brass) 55%, transparent);
+    background: var(--color-accent-fg);
+    box-shadow: 0 0 8px color-mix(in oklab, var(--color-accent-fg) 55%, transparent);
     animation: pulse-beat 2.4s ease-in-out infinite;
   }
 
@@ -154,7 +154,7 @@ stylesheet
     font-size: 11px;
     letter-spacing: 0.25em;
     text-transform: uppercase;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
   }
 
   .heartbeat {
@@ -163,10 +163,10 @@ stylesheet
     gap: 6px;
     padding: 10px 14px 12px;
     background:
-      linear-gradient(180deg, var(--bg-panel) 0%, var(--bg-deep) 100%);
-    border: 1px solid var(--border-main);
+      linear-gradient(180deg, var(--color-bg-surface) 0%, var(--color-bg-page) 100%);
+    border: 1px solid var(--color-border-default);
     border-radius: 2px;
-    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent-brass) 4%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--color-accent-fg) 4%, transparent);
   }
 
   .heartbeat_head {
@@ -180,14 +180,14 @@ stylesheet
     font-size: 11px;
     letter-spacing: 0.25em;
     text-transform: uppercase;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
   }
 
   .heartbeat_scale {
     font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace;
     font-size: 11px;
     letter-spacing: 0.12em;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
   }
 
   .heartbeat_track {
@@ -198,7 +198,7 @@ stylesheet
     height: 36px;
     align-items: end;
     padding: 0 1px;
-    border-bottom: 1px solid var(--border-main);
+    border-bottom: 1px solid var(--color-border-default);
   }
 
   .heartbeat_bar {
@@ -208,9 +208,9 @@ stylesheet
     opacity: 0.82;
   }
 
-  .heartbeat_bar_warn  { background: linear-gradient(180deg, var(--status-warn) 0%, color-mix(in oklab, var(--status-warn) 40%, var(--bg-deep)) 100%); }
+  .heartbeat_bar_warn  { background: linear-gradient(180deg, var(--color-status-warn) 0%, color-mix(in oklab, var(--color-status-warn) 40%, var(--color-bg-page)) 100%); }
   .heartbeat_bar_error { background: linear-gradient(180deg, var(--accent-blood) 0%, var(--accent-blood-dim) 100%); box-shadow: 0 0 6px color-mix(in oklab, var(--accent-blood) 45%, transparent); }
-  .heartbeat_bar_idle  { background: var(--border-main); opacity: 0.6; }
+  .heartbeat_bar_idle  { background: var(--color-border-default); opacity: 0.6; }
 
   /* hud CSS → Hud 모듈로 이관 (shell 추출 Phase 2.A) */
 
@@ -224,24 +224,24 @@ stylesheet
     padding: 8px 14px;
     background:
       linear-gradient(90deg,
-        color-mix(in oklab, var(--accent-brass) 10%, transparent) 0%,
+        color-mix(in oklab, var(--color-accent-fg) 10%, transparent) 0%,
         transparent 45%,
         color-mix(in oklab, var(--accent-blood) 6%, transparent) 100%),
-      var(--bg-deep);
-    border: 1px solid var(--border-main);
+      var(--color-bg-page);
+    border: 1px solid var(--color-border-default);
     border-radius: 2px;
     font-family: 'EB Garamond', 'Noto Sans KR', Georgia, serif;
     font-variant: small-caps;
     letter-spacing: 0.08em;
     font-size: 12px;
-    color: var(--text-primary);
+    color: var(--color-fg-primary);
   }
 
   .moon_glyph {
     width: 14px;
     height: 14px;
     border-radius: 50%;
-    background: radial-gradient(circle at 28% 28%, var(--text-bright) 0%, var(--accent-brass) 55%, var(--border-highlight) 100%);
+    background: radial-gradient(circle at 28% 28%, var(--text-bright) 0%, var(--color-accent-fg) 55%, var(--color-border-strong) 100%);
     box-shadow:
       0 0 10px color-mix(in oklab, var(--text-bright) 22%, transparent),
       inset 0 0 0 1px color-mix(in oklab, var(--text-bright) 12%, transparent);
@@ -258,7 +258,7 @@ stylesheet
   }
 
   .moon_sep {
-    color: var(--border-highlight);
+    color: var(--color-border-strong);
     font-variant: normal;
   }
 
@@ -267,12 +267,12 @@ stylesheet
     font-size: 11px;
     font-variant: normal;
     letter-spacing: 0.04em;
-    color: var(--accent-brass);
+    color: var(--color-accent-fg);
   }
 
   .moon_tail {
     margin-left: auto;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
     font-variant: normal;
     font-size: 11px;
     letter-spacing: 0.2em;
@@ -284,8 +284,8 @@ stylesheet
     align-items: center;
     gap: 12px;
     padding: 8px 12px;
-    background: var(--bg-panel);
-    border: 1px solid var(--border-main);
+    background: var(--color-bg-surface);
+    border: 1px solid var(--color-border-default);
     border-radius: 2px;
     flex-wrap: wrap;
   }
@@ -294,9 +294,9 @@ stylesheet
     display: inline-flex;
     gap: 4px;
     padding: 2px;
-    border: 1px solid var(--border-main);
+    border: 1px solid var(--color-border-default);
     border-radius: 999px;
-    background: var(--bg-deep);
+    background: var(--color-bg-page);
   }
 
   .chip {
@@ -306,17 +306,17 @@ stylesheet
     text-transform: uppercase;
     padding: 7px 12px;
     border-radius: 999px;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
     cursor: pointer;
     transition: background 0.18s, color 0.18s;
   }
 
-  .chip:hover { color: var(--text-primary); }
-  .chip:focus-visible { outline: 2px solid var(--accent-brass); outline-offset: 1px; }
+  .chip:hover { color: var(--color-fg-primary); }
+  .chip:focus-visible { outline: 2px solid var(--color-accent-fg); outline-offset: 1px; }
   .chip_active {
     color: var(--text-bright);
-    background: color-mix(in oklab, var(--accent-brass) 14%, transparent);
-    box-shadow: inset 0 0 0 1px var(--accent-brass);
+    background: color-mix(in oklab, var(--color-accent-fg) 14%, transparent);
+    box-shadow: inset 0 0 0 1px var(--color-accent-fg);
   }
 
   /* Declarative active state for filter chips — theme chip 패턴과 동일.
@@ -328,8 +328,8 @@ stylesheet
   html[data-log-level="error"] .chip[data-filter-level="error"],
   html:not([data-log-level])   .chip[data-filter-level="info"] {
     color: var(--text-bright);
-    background: color-mix(in oklab, var(--accent-brass) 14%, transparent);
-    box-shadow: inset 0 0 0 1px var(--accent-brass);
+    background: color-mix(in oklab, var(--color-accent-fg) 14%, transparent);
+    box-shadow: inset 0 0 0 1px var(--color-accent-fg);
   }
 
   .input_shell {
@@ -337,16 +337,16 @@ stylesheet
     align-items: center;
     gap: 6px;
     padding: 4px 10px;
-    border: 1px solid var(--border-main);
+    border: 1px solid var(--color-border-default);
     border-radius: 2px;
-    background: var(--bg-deep);
+    background: var(--color-bg-page);
     font-family: 'Noto Sans KR', -apple-system, sans-serif;
     font-size: 11px;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
   }
 
-  .input_shell_label { letter-spacing: 0.2em; text-transform: uppercase; color: var(--text-dim); font-size: 11px; }
-  .input_shell_value { font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 11px; color: var(--text-primary); }
+  .input_shell_label { letter-spacing: 0.2em; text-transform: uppercase; color: var(--color-fg-muted); font-size: 11px; }
+  .input_shell_value { font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 11px; color: var(--color-fg-primary); }
 
   .toolbar_spacer { flex: 1; }
 
@@ -356,21 +356,21 @@ stylesheet
     letter-spacing: 0.2em;
     text-transform: uppercase;
     padding: 7px 12px;
-    border: 1px solid var(--border-main);
+    border: 1px solid var(--color-border-default);
     border-radius: 2px;
     background: transparent;
-    color: var(--text-primary);
+    color: var(--color-fg-primary);
     cursor: pointer;
     transition: color 0.18s, border-color 0.18s;
   }
-  .btn_ghost:hover { color: var(--accent-brass); border-color: var(--border-highlight); }
-  .btn_ghost:focus-visible { outline: 2px solid var(--accent-brass); outline-offset: -2px; }
+  .btn_ghost:hover { color: var(--color-accent-fg); border-color: var(--color-border-strong); }
+  .btn_ghost:focus-visible { outline: 2px solid var(--color-accent-fg); outline-offset: -2px; }
 
   .header {
     display: flex;
     justify-content: space-between;
     align-items: flex-end;
-    border-bottom: 1px solid var(--border-main);
+    border-bottom: 1px solid var(--color-border-default);
     padding-bottom: 0.75rem;
     gap: 1rem;
   }
@@ -382,7 +382,7 @@ stylesheet
     font-size: 11px;
     letter-spacing: 0.25em;
     text-transform: uppercase;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
     margin: 0 0 0.25rem 0;
   }
 
@@ -406,11 +406,11 @@ stylesheet
     font-weight: 600;
     letter-spacing: 0;
     text-transform: uppercase;
-    background: linear-gradient(180deg, var(--text-bright) 0%, var(--accent-brass) 55%, var(--border-highlight) 100%);
+    background: linear-gradient(180deg, var(--text-bright) 0%, var(--color-accent-fg) 55%, var(--color-border-strong) 100%);
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
-    text-shadow: 0 0 18px color-mix(in oklab, var(--accent-brass) 28%, transparent);
+    text-shadow: 0 0 18px color-mix(in oklab, var(--color-accent-fg) 28%, transparent);
     margin-right: 4px;
     align-self: flex-start;
     padding-top: 6px;
@@ -421,14 +421,14 @@ stylesheet
     font-weight: 400;
     font-size: 1rem;
     letter-spacing: 0.3em;
-    color: var(--text-primary);
+    color: var(--color-fg-primary);
     text-transform: uppercase;
   }
 
   .title_rule {
     flex: 1;
     height: 1px;
-    background: linear-gradient(90deg, var(--border-highlight) 0%, transparent 100%);
+    background: linear-gradient(90deg, var(--color-border-strong) 0%, transparent 100%);
     margin-left: 10px;
     margin-right: 10px;
     align-self: center;
@@ -439,7 +439,7 @@ stylesheet
     font-variant-numeric: tabular-nums;
     font-size: 11px;
     letter-spacing: 0.08em;
-    color: var(--border-highlight);
+    color: var(--color-border-strong);
     text-transform: none;
   }
 
@@ -448,7 +448,7 @@ stylesheet
     font-variant-numeric: tabular-nums;
     font-size: 11px;
     letter-spacing: 0.1em;
-    color: var(--accent-brass);
+    color: var(--color-accent-fg);
   }
 
   .tape {
@@ -470,8 +470,8 @@ stylesheet
     width: 1px;
     background: linear-gradient(180deg,
       transparent 0%,
-      var(--border-highlight) 6%,
-      var(--border-main) 92%,
+      var(--color-border-strong) 6%,
+      var(--color-border-default) 92%,
       transparent 100%);
     pointer-events: none;
     z-index: 0;
@@ -485,7 +485,7 @@ stylesheet
     right: 0;
     top: 0;
     height: 28px;
-    background: linear-gradient(180deg, var(--bg-deep) 0%, transparent 100%);
+    background: linear-gradient(180deg, var(--color-bg-page) 0%, transparent 100%);
     pointer-events: none;
     z-index: 2;
   }
@@ -496,7 +496,7 @@ stylesheet
   .tape_end {
     position: relative;
     height: 32px;
-    background: linear-gradient(180deg, transparent 0%, var(--bg-deep) 100%);
+    background: linear-gradient(180deg, transparent 0%, var(--color-bg-page) 100%);
     margin-top: -8px;
     pointer-events: none;
   }
@@ -506,8 +506,8 @@ stylesheet
     grid-template-columns: 1.75rem 10rem 5rem 9rem 7.5rem minmax(0, 1fr);
     gap: 1rem;
     padding: 0.625rem 0.75rem;
-    border-bottom: 1px dashed var(--border-main);
-    border-left: 2px solid var(--border-main);
+    border-bottom: 1px dashed var(--color-border-default);
+    border-left: 2px solid var(--color-border-default);
     align-items: baseline;
     transition: background 0.18s ease, box-shadow 0.18s ease, border-left-color 0.18s ease;
   }
@@ -516,25 +516,25 @@ stylesheet
     width: 22px;
     height: 22px;
     border-radius: 50%;
-    border: 1px solid var(--accent-brass);
+    border: 1px solid var(--color-accent-fg);
     background:
       radial-gradient(circle at 35% 30%, color-mix(in oklab, var(--text-bright) 18%, transparent), transparent 55%),
-      var(--bg-panel);
+      var(--color-bg-surface);
     display: grid;
     place-items: center;
     font-family: 'Cinzel', serif;
     font-size: 11px;
     letter-spacing: 0;
-    color: var(--accent-brass);
+    color: var(--color-accent-fg);
     text-transform: uppercase;
     box-shadow:
       inset 0 0 0 1px color-mix(in oklab, var(--text-bright) 6%, transparent),
-      0 0 6px color-mix(in oklab, var(--accent-brass) 18%, transparent);
+      0 0 6px color-mix(in oklab, var(--color-accent-fg) 18%, transparent);
     align-self: center;
   }
 
-  .sigil_warn  { color: var(--status-warn); border-color: var(--status-warn); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--text-bright) 6%, transparent), 0 0 8px color-mix(in oklab, var(--accent-brass) 35%, transparent); }
-  .sigil_error { color: var(--text-bright); border-color: var(--accent-blood); background: radial-gradient(circle at 35% 30%, color-mix(in oklab, var(--text-bright) 28%, transparent), transparent 55%), color-mix(in oklab, var(--accent-blood) 25%, var(--bg-deep)); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--text-bright) 8%, transparent), 0 0 10px color-mix(in oklab, var(--accent-blood) 45%, transparent); }
+  .sigil_warn  { color: var(--color-status-warn); border-color: var(--color-status-warn); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--text-bright) 6%, transparent), 0 0 8px color-mix(in oklab, var(--color-accent-fg) 35%, transparent); }
+  .sigil_error { color: var(--text-bright); border-color: var(--accent-blood); background: radial-gradient(circle at 35% 30%, color-mix(in oklab, var(--text-bright) 28%, transparent), transparent 55%), color-mix(in oklab, var(--accent-blood) 25%, var(--color-bg-page)); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--text-bright) 8%, transparent), 0 0 10px color-mix(in oklab, var(--accent-blood) 45%, transparent); }
 
   .message_lead::first-letter {
     font-family: 'Cinzel', 'EB Garamond', serif;
@@ -544,20 +544,20 @@ stylesheet
     float: left;
     padding: 2px 8px 0 0;
     margin-top: 2px;
-    background: linear-gradient(180deg, var(--text-bright) 0%, var(--accent-brass) 55%, var(--border-highlight) 100%);
+    background: linear-gradient(180deg, var(--text-bright) 0%, var(--color-accent-fg) 55%, var(--color-border-strong) 100%);
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
-    text-shadow: 0 0 14px color-mix(in oklab, var(--accent-brass) 25%, transparent);
+    text-shadow: 0 0 14px color-mix(in oklab, var(--color-accent-fg) 25%, transparent);
   }
 
-  .row_debug { border-left-color: var(--status-idle); }
+  .row_debug { border-left-color: var(--color-status-idle); }
   .row_info  { border-left-color: var(--accent-mold); }
 
   .row:hover {
-    background: linear-gradient(90deg, color-mix(in oklab, var(--accent-brass) 8%, transparent), transparent 70%);
-    box-shadow: inset 1px 0 0 0 color-mix(in oklab, var(--accent-brass) 35%, transparent);
-    border-left-color: var(--accent-brass);
+    background: linear-gradient(90deg, color-mix(in oklab, var(--color-accent-fg) 8%, transparent), transparent 70%);
+    box-shadow: inset 1px 0 0 0 color-mix(in oklab, var(--color-accent-fg) 35%, transparent);
+    border-left-color: var(--color-accent-fg);
   }
 
   .row_error {
@@ -572,13 +572,13 @@ stylesheet
   }
 
   .row_warn {
-    background: linear-gradient(90deg, color-mix(in oklab, var(--accent-brass) 6%, transparent) 0%, transparent 60%);
-    border-left-color: var(--status-warn);
+    background: linear-gradient(90deg, color-mix(in oklab, var(--color-accent-fg) 6%, transparent) 0%, transparent 60%);
+    border-left-color: var(--color-status-warn);
   }
 
   .row_warn:hover {
-    background: linear-gradient(90deg, color-mix(in oklab, var(--accent-brass) 15%, transparent) 0%, transparent 65%);
-    box-shadow: inset 1px 0 0 0 color-mix(in oklab, var(--accent-brass) 50%, transparent);
+    background: linear-gradient(90deg, color-mix(in oklab, var(--color-accent-fg) 15%, transparent) 0%, transparent 65%);
+    box-shadow: inset 1px 0 0 0 color-mix(in oklab, var(--color-accent-fg) 50%, transparent);
     border-left-color: var(--accent-ember);
   }
 
@@ -589,7 +589,7 @@ stylesheet
     font-family: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
     font-variant-numeric: tabular-nums;
     font-size: 11px;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
   }
 
   .ts_rel {
@@ -597,7 +597,7 @@ stylesheet
     font-size: 11px;
     letter-spacing: 0.18em;
     text-transform: uppercase;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
   }
 
   .level {
@@ -608,15 +608,15 @@ stylesheet
     font-weight: 500;
   }
 
-  .level_debug { color: var(--text-dim); }
-  .level_info  { color: var(--text-primary); }
-  .level_warn  { color: var(--status-warn); }
+  .level_debug { color: var(--color-fg-muted); }
+  .level_info  { color: var(--color-fg-primary); }
+  .level_warn  { color: var(--color-status-warn); }
   .level_error { color: var(--accent-blood); text-shadow: 0 0 12px color-mix(in oklab, var(--accent-blood) 32%, transparent); }
 
   .mod_col {
     font-family: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
     font-size: 11px;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
   }
 
   .source_badge {
@@ -628,10 +628,10 @@ stylesheet
     letter-spacing: 0.2em;
     text-transform: uppercase;
     padding: 3px 8px;
-    border: 1px solid var(--border-main);
+    border: 1px solid var(--color-border-default);
     border-radius: 999px;
-    background: var(--bg-panel-alt);
-    color: var(--text-dim);
+    background: var(--color-bg-panel-alt);
+    color: var(--color-fg-muted);
     width: fit-content;
     height: fit-content;
   }
@@ -640,16 +640,16 @@ stylesheet
     width: 6px;
     height: 6px;
     border-radius: 50%;
-    background: var(--text-dim);
+    background: var(--color-fg-muted);
     display: inline-block;
   }
 
-  .dot_ok    { background: var(--status-ok); box-shadow: 0 0 6px var(--status-ok); }
-  .dot_warn  { background: var(--status-warn); box-shadow: 0 0 6px var(--status-warn); }
+  .dot_ok    { background: var(--color-status-ok); box-shadow: 0 0 6px var(--color-status-ok); }
+  .dot_warn  { background: var(--color-status-warn); box-shadow: 0 0 6px var(--color-status-warn); }
   .dot_bad   { background: var(--accent-blood); box-shadow: 0 0 6px var(--accent-blood); }
 
   .message {
-    color: var(--text-primary);
+    color: var(--color-fg-primary);
     font-family: 'EB Garamond', 'Noto Sans KR', Georgia, serif;
     font-size: 14px;
     line-height: 1.5;
@@ -657,7 +657,7 @@ stylesheet
   }
 
   .details {
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
     font-family: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
     font-size: 11px;
     line-height: 1.45;
@@ -666,7 +666,7 @@ stylesheet
   }
 
   .empty {
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
     font-family: 'EB Garamond', Georgia, serif;
     font-style: italic;
     padding: 3rem 0 4rem;
@@ -683,7 +683,7 @@ stylesheet
     text-transform: uppercase;
     font-family: 'Noto Sans KR', -apple-system, sans-serif;
     font-style: normal;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
   }
 
   /* Wrapper kept for backward compatibility with the existing render
@@ -702,14 +702,14 @@ stylesheet
     width: 56px;
     height: 56px;
     border-radius: 50%;
-    background: radial-gradient(circle at 32% 28%, var(--accent-viscera) 0%, var(--accent-blood) 40%, color-mix(in oklab, var(--accent-blood) 50%, var(--bg-deep)) 80%, color-mix(in oklab, var(--accent-blood) 20%, var(--bg-deep)) 100%);
-    border: 2px solid var(--accent-brass);
+    background: radial-gradient(circle at 32% 28%, var(--accent-viscera) 0%, var(--accent-blood) 40%, color-mix(in oklab, var(--accent-blood) 50%, var(--color-bg-page)) 80%, color-mix(in oklab, var(--accent-blood) 20%, var(--color-bg-page)) 100%);
+    border: 2px solid var(--color-accent-fg);
     box-shadow:
       inset 0 0 0 1px color-mix(in oklab, var(--text-bright) 18%, transparent),
-      inset -6px -8px 14px color-mix(in oklab, var(--bg-deep) 55%, transparent),
+      inset -6px -8px 14px color-mix(in oklab, var(--color-bg-page) 55%, transparent),
       inset 5px 4px 10px color-mix(in oklab, var(--text-bright) 15%, transparent),
       0 6px 14px color-mix(in oklab, var(--accent-blood) 35%, transparent),
-      0 0 22px color-mix(in oklab, var(--accent-brass) 22%, transparent);
+      0 0 22px color-mix(in oklab, var(--color-accent-fg) 22%, transparent);
     transform: rotate(-14deg);
     z-index: 4;
     pointer-events: none;
@@ -720,7 +720,7 @@ stylesheet
     color: var(--text-bright);
     font-size: 22px;
     letter-spacing: 0.04em;
-    text-shadow: 0 1px 0 color-mix(in oklab, var(--bg-deep) 60%, transparent), 0 0 8px color-mix(in oklab, var(--text-bright) 35%, transparent);
+    text-shadow: 0 1px 0 color-mix(in oklab, var(--color-bg-page) 60%, transparent), 0 0 8px color-mix(in oklab, var(--text-bright) 35%, transparent);
   }
 
   .signet::before {
@@ -742,7 +742,7 @@ stylesheet
     font-size: 11px;
     letter-spacing: 0.3em;
     text-transform: uppercase;
-    color: var(--border-highlight);
+    color: var(--color-border-strong);
     white-space: nowrap;
   }
 
@@ -756,9 +756,9 @@ stylesheet
     width: 220px;
     height: 100vh;
     padding: 18px 0 24px;
-    background: linear-gradient(180deg, var(--bg-panel) 0%, var(--bg-deep) 100%);
-    border-right: 1px solid var(--border-main);
-    box-shadow: inset -1px 0 0 color-mix(in oklab, var(--accent-brass) 8%, transparent);
+    background: linear-gradient(180deg, var(--color-bg-surface) 0%, var(--color-bg-page) 100%);
+    border-right: 1px solid var(--color-border-default);
+    box-shadow: inset -1px 0 0 color-mix(in oklab, var(--color-accent-fg) 8%, transparent);
     display: flex;
     flex-direction: column;
     overflow-y: auto;
@@ -770,14 +770,14 @@ stylesheet
     align-items: center;
     gap: 10px;
     padding: 4px 18px 18px;
-    border-bottom: 1px solid var(--border-main);
+    border-bottom: 1px solid var(--color-border-default);
     margin-bottom: 12px;
   }
   .nav_brand_rune {
     width: 18px;
     height: 18px;
-    border: 1px solid var(--accent-brass);
-    color: var(--accent-brass);
+    border: 1px solid var(--color-accent-fg);
+    color: var(--color-accent-fg);
     display: grid;
     place-items: center;
     font-family: 'Cinzel', serif;
@@ -800,7 +800,7 @@ stylesheet
     font-size: 11px;
     letter-spacing: 0.25em;
     text-transform: uppercase;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
     display: flex;
     align-items: center;
     gap: 10px;
@@ -809,7 +809,7 @@ stylesheet
     content: "";
     flex: 1;
     height: 1px;
-    background: linear-gradient(90deg, var(--border-highlight), transparent);
+    background: linear-gradient(90deg, var(--color-border-strong), transparent);
   }
 
   .nav_link {
@@ -817,7 +817,7 @@ stylesheet
     align-items: center;
     gap: 11px;
     padding: 14px 18px;
-    color: var(--text-primary);
+    color: var(--color-fg-primary);
     font-family: 'Noto Sans KR', sans-serif;
     font-size: 11px;
     letter-spacing: 0.1em;
@@ -827,31 +827,31 @@ stylesheet
     user-select: none;
   }
   .nav_link:hover {
-    color: var(--accent-brass);
-    background: color-mix(in oklab, var(--accent-brass) 5%, transparent);
+    color: var(--color-accent-fg);
+    background: color-mix(in oklab, var(--color-accent-fg) 5%, transparent);
   }
   .nav_link:focus-visible {
-    outline: 2px solid var(--accent-brass);
+    outline: 2px solid var(--color-accent-fg);
     outline-offset: -2px;
   }
   .nav_link_active {
-    color: var(--accent-brass);
-    border-left-color: var(--accent-brass);
-    background: linear-gradient(90deg, color-mix(in oklab, var(--accent-brass) 10%, transparent), transparent 70%);
+    color: var(--color-accent-fg);
+    border-left-color: var(--color-accent-fg);
+    background: linear-gradient(90deg, color-mix(in oklab, var(--color-accent-fg) 10%, transparent), transparent 70%);
   }
   .nav_link_glyph {
     width: 6px;
     height: 6px;
     border-radius: 50%;
-    background: var(--border-highlight);
+    background: var(--color-border-strong);
     flex-shrink: 0;
   }
   .nav_link_active .nav_link_glyph {
-    background: var(--accent-brass);
-    box-shadow: 0 0 6px var(--accent-brass);
+    background: var(--color-accent-fg);
+    box-shadow: 0 0 6px var(--color-accent-fg);
   }
   .nav_link_soon {
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
     font-style: italic;
   }
   .nav_link_tail {
@@ -865,14 +865,14 @@ stylesheet
   .nav_foot {
     margin-top: auto;
     padding: 14px 18px 0;
-    border-top: 1px solid var(--border-main);
+    border-top: 1px solid var(--color-border-default);
     font-family: 'JetBrains Mono', ui-monospace, monospace;
     font-size: 11px;
     letter-spacing: 0.16em;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
     text-transform: uppercase;
   }
-  .nav_foot_v { color: var(--text-dim); }
+  .nav_foot_v { color: var(--color-fg-muted); }
 
   /* ─── theme chips ───
      클릭 시 location.hash 를 바꾸면 bin/main.ml 의 hashchange listener가
@@ -892,23 +892,23 @@ stylesheet
     letter-spacing: 0.22em;
     text-transform: uppercase;
     padding: 7px 8px;
-    background: var(--bg-panel);
-    border: 1px solid var(--border-main);
-    color: var(--text-dim);
+    background: var(--color-bg-surface);
+    border: 1px solid var(--color-border-default);
+    color: var(--color-fg-muted);
     cursor: pointer;
     user-select: none;
     border-radius: 1px;
   }
   .theme_chip:hover {
-    border-color: var(--accent-brass-dim);
-    color: var(--accent-brass);
+    border-color: var(--color-accent-fg-dim);
+    color: var(--color-accent-fg);
   }
-  .theme_chip:focus-visible { outline: 2px solid var(--accent-brass); outline-offset: 1px; }
+  .theme_chip:focus-visible { outline: 2px solid var(--color-accent-fg); outline-offset: 1px; }
   .theme_chip_active {
-    border-color: var(--accent-brass);
-    color: var(--accent-brass);
-    background: linear-gradient(180deg, var(--bg-panel), var(--bg-deep));
-    box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent-brass) 25%, transparent) inset;
+    border-color: var(--color-accent-fg);
+    color: var(--color-accent-fg);
+    background: linear-gradient(180deg, var(--color-bg-surface), var(--color-bg-page));
+    box-shadow: 0 0 0 1px color-mix(in oklab, var(--color-accent-fg) 25%, transparent) inset;
   }
 
   /* active chip via declarative CSS only — listener가 <html data-theme>
@@ -919,10 +919,10 @@ stylesheet
   html[data-theme="terminal"]     .theme_chip[data-chip-theme="term"],
   html[data-theme="parchment"]    .theme_chip[data-chip-theme="parchment"],
   html[data-theme="paper"]        .theme_chip[data-chip-theme="paper"] {
-    border-color: var(--accent-brass);
-    color: var(--accent-brass);
-    background: linear-gradient(180deg, var(--bg-panel), var(--bg-deep));
-    box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent-brass) 25%, transparent) inset;
+    border-color: var(--color-accent-fg);
+    color: var(--color-accent-fg);
+    background: linear-gradient(180deg, var(--color-bg-surface), var(--color-bg-page));
+    box-shadow: 0 0 0 1px color-mix(in oklab, var(--color-accent-fg) 25%, transparent) inset;
   }
 
   /* ─── right aside (340px, fixed) ───
@@ -935,9 +935,9 @@ stylesheet
     width: 340px;
     height: 100vh;
     padding: 22px 18px 28px;
-    background: linear-gradient(180deg, var(--bg-panel) 0%, var(--bg-deep) 100%);
-    border-left: 1px solid var(--border-main);
-    box-shadow: inset 1px 0 0 color-mix(in oklab, var(--accent-brass) 6%, transparent);
+    background: linear-gradient(180deg, var(--color-bg-surface) 0%, var(--color-bg-page) 100%);
+    border-left: 1px solid var(--color-border-default);
+    box-shadow: inset 1px 0 0 color-mix(in oklab, var(--color-accent-fg) 6%, transparent);
     display: flex;
     flex-direction: column;
     gap: 22px;
@@ -949,7 +949,7 @@ stylesheet
     font-family: 'Cinzel', serif;
     font-size: 11px;
     letter-spacing: 0.28em;
-    color: var(--accent-brass);
+    color: var(--color-accent-fg);
     text-transform: uppercase;
     margin: 0 0 10px;
     display: flex;
@@ -960,12 +960,12 @@ stylesheet
     content: "";
     flex: 1;
     height: 1px;
-    background: linear-gradient(90deg, var(--border-highlight), transparent);
+    background: linear-gradient(90deg, var(--color-border-strong), transparent);
   }
   .aside_h_tail {
     font-family: 'JetBrains Mono', ui-monospace, monospace;
     font-size: 11px;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
     margin-left: auto;
     font-variant-numeric: tabular-nums;
     letter-spacing: 0.04em;
@@ -976,14 +976,14 @@ stylesheet
   .focus {
     position: relative;
     padding: 16px 16px 14px;
-    background: linear-gradient(180deg, var(--bg-panel-alt) 0%, var(--bg-panel) 100%);
-    border: 1px solid var(--accent-brass-dim);
+    background: linear-gradient(180deg, var(--color-bg-panel-alt) 0%, var(--color-bg-surface) 100%);
+    border: 1px solid var(--color-accent-fg-dim);
   }
   .focus::before {
     content: "";
     position: absolute;
     inset: 3px;
-    border: 1px solid var(--border-highlight);
+    border: 1px solid var(--color-border-strong);
     pointer-events: none;
   }
   .focus_who {
@@ -995,20 +995,20 @@ stylesheet
   .focus_portrait {
     width: 46px;
     height: 46px;
-    border: 1px solid var(--accent-brass);
-    background: linear-gradient(135deg, var(--bg-panel-alt), var(--bg-deep));
+    border: 1px solid var(--color-accent-fg);
+    background: linear-gradient(135deg, var(--color-bg-panel-alt), var(--color-bg-page));
     display: grid;
     place-items: center;
     font-family: 'Cinzel', serif;
     font-size: 18px;
-    color: var(--accent-brass);
+    color: var(--color-accent-fg);
     flex-shrink: 0;
   }
   .focus_name_col { flex: 1; }
   .focus_name {
     font-family: 'Cinzel', serif;
     font-size: 16px;
-    color: var(--accent-brass);
+    color: var(--color-accent-fg);
     letter-spacing: 0.16em;
     text-transform: uppercase;
   }
@@ -1016,7 +1016,7 @@ stylesheet
     font-family: 'EB Garamond', Georgia, serif;
     font-style: italic;
     font-size: 11px;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
     margin-top: 2px;
   }
 
@@ -1026,15 +1026,15 @@ stylesheet
     justify-content: space-between;
     font-family: 'JetBrains Mono', ui-monospace, monospace;
     font-size: 11px;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
     margin-bottom: 4px;
     font-variant-numeric: tabular-nums;
   }
   .ctx_lbl_v { color: var(--text-bright); }
   .vial {
     height: 8px;
-    background: var(--bg-deep);
-    border: 1px solid var(--border-main);
+    background: var(--color-bg-page);
+    border: 1px solid var(--color-border-default);
     position: relative;
     overflow: hidden;
   }
@@ -1042,14 +1042,14 @@ stylesheet
     display: block;
     height: 100%;
     width: 64%;
-    background: linear-gradient(90deg, var(--accent-brass-dim), var(--accent-brass));
-    box-shadow: 0 0 6px color-mix(in oklab, var(--accent-brass) 45%, transparent);
+    background: linear-gradient(90deg, var(--color-accent-fg-dim), var(--color-accent-fg));
+    box-shadow: 0 0 6px color-mix(in oklab, var(--color-accent-fg) 45%, transparent);
   }
   .vial::after {
     content: "";
     position: absolute;
     inset: 0;
-    background-image: repeating-linear-gradient(90deg, transparent 0 19px, color-mix(in oklab, var(--bg-deep) 50%, transparent) 19px 20px);
+    background-image: repeating-linear-gradient(90deg, transparent 0 19px, color-mix(in oklab, var(--color-bg-page) 50%, transparent) 19px 20px);
     pointer-events: none;
   }
 
@@ -1064,7 +1064,7 @@ stylesheet
     font-family: 'Noto Sans KR', sans-serif;
     font-size: 11px;
     letter-spacing: 0.18em;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
     text-transform: uppercase;
   }
   .focus_stat_v {
@@ -1082,14 +1082,14 @@ stylesheet
     grid-template-columns: 52px 12px 1fr;
     gap: 10px;
     padding: 8px 0;
-    border-bottom: 1px dashed var(--border-main);
+    border-bottom: 1px dashed var(--color-border-default);
     align-items: baseline;
   }
   .evrow:last-child { border-bottom: 0; }
   .evrow_t {
     font-family: 'JetBrains Mono', ui-monospace, monospace;
     font-size: 11px;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
     font-variant-numeric: tabular-nums;
   }
   .evrow_mk {
@@ -1098,25 +1098,25 @@ stylesheet
     border-radius: 50%;
     align-self: center;
     justify-self: center;
-    background: var(--accent-brass-dim);
+    background: var(--color-accent-fg-dim);
   }
-  .evrow_ok  .evrow_mk { background: var(--status-ok); box-shadow: 0 0 6px var(--status-ok); }
-  .evrow_warn .evrow_mk { background: var(--accent-brass); box-shadow: 0 0 6px var(--accent-brass); }
+  .evrow_ok  .evrow_mk { background: var(--color-status-ok); box-shadow: 0 0 6px var(--color-status-ok); }
+  .evrow_warn .evrow_mk { background: var(--color-accent-fg); box-shadow: 0 0 6px var(--color-accent-fg); }
   .evrow_bad  .evrow_mk { background: var(--accent-blood); box-shadow: 0 0 6px var(--accent-blood); }
   .evrow_b {
     font-family: 'EB Garamond', Georgia, serif;
     font-size: 12px;
-    color: var(--text-primary);
+    color: var(--color-fg-primary);
     line-height: 1.45;
   }
   .evrow_b_em { color: var(--text-bright); font-style: italic; }
   .evrow_b_code {
     font-family: 'JetBrains Mono', ui-monospace, monospace;
     font-size: 11px;
-    color: var(--accent-brass);
-    background: color-mix(in oklab, var(--accent-brass) 8%, transparent);
+    color: var(--color-accent-fg);
+    background: color-mix(in oklab, var(--color-accent-fg) 8%, transparent);
     padding: 0 5px;
-    border: 1px solid var(--border-main);
+    border: 1px solid var(--color-border-default);
   }
   .evrow_bad .evrow_b_code {
     color: var(--accent-blood);
@@ -1145,7 +1145,7 @@ stylesheet
     font-size: 11px;
     letter-spacing: 0.3em;
     text-transform: uppercase;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
     display: flex;
     align-items: center;
     gap: 10px;
@@ -1154,7 +1154,7 @@ stylesheet
     content: "";
     flex: 0 0 40px;
     height: 1px;
-    background: var(--border-highlight);
+    background: var(--color-border-strong);
   }
   .page_h1 {
     font-family: 'Cinzel', 'Noto Sans KR', serif;
@@ -1170,17 +1170,17 @@ stylesheet
     text-shadow: 0 0 18px color-mix(in oklab, var(--accent-blood) 32%, transparent);
   }
   .page_h1_brass {
-    color: var(--accent-brass);
-    text-shadow: 0 0 18px color-mix(in oklab, var(--accent-brass) 32%, transparent);
+    color: var(--color-accent-fg);
+    text-shadow: 0 0 18px color-mix(in oklab, var(--color-accent-fg) 32%, transparent);
   }
   .page_h1_bright {
     color: var(--text-bright);
-    text-shadow: 0 0 18px color-mix(in oklab, var(--text-primary) 24%, transparent);
+    text-shadow: 0 0 18px color-mix(in oklab, var(--color-fg-primary) 24%, transparent);
   }
   .page_sub {
     font-family: 'EB Garamond', 'Noto Sans KR', Georgia, serif;
     font-style: italic;
-    color: var(--text-primary);
+    color: var(--color-fg-primary);
     margin-top: 6px;
     font-size: 14px;
     max-width: 540px;
@@ -1197,9 +1197,9 @@ stylesheet
     letter-spacing: 0.24em;
     text-transform: uppercase;
     padding: 7px 12px;
-    background: linear-gradient(180deg, var(--bg-panel-alt) 0%, var(--bg-panel) 100%);
-    border: 1px solid var(--accent-brass-dim);
-    color: var(--text-primary);
+    background: linear-gradient(180deg, var(--color-bg-panel-alt) 0%, var(--color-bg-surface) 100%);
+    border: 1px solid var(--color-accent-fg-dim);
+    color: var(--color-fg-primary);
     cursor: default;
     user-select: none;
     display: inline-flex;
@@ -1207,17 +1207,17 @@ stylesheet
     gap: 6px;
   }
   .pbtn:hover {
-    border-color: var(--accent-brass);
-    color: var(--accent-brass);
+    border-color: var(--color-accent-fg);
+    color: var(--color-accent-fg);
   }
-  .pbtn:focus-visible { outline: 2px solid var(--accent-brass); outline-offset: -2px; }
+  .pbtn:focus-visible { outline: 2px solid var(--color-accent-fg); outline-offset: -2px; }
   .pbtn_primary {
-    background: linear-gradient(180deg, color-mix(in oklab, var(--accent-brass) 20%, var(--bg-panel)) 0%, color-mix(in oklab, var(--accent-brass) 10%, var(--bg-deep)) 100%);
-    border-color: var(--accent-brass);
-    color: var(--accent-brass);
+    background: linear-gradient(180deg, color-mix(in oklab, var(--color-accent-fg) 20%, var(--color-bg-surface)) 0%, color-mix(in oklab, var(--color-accent-fg) 10%, var(--color-bg-page)) 100%);
+    border-color: var(--color-accent-fg);
+    color: var(--color-accent-fg);
   }
   .pbtn_primary:hover {
-    background: color-mix(in oklab, var(--accent-brass) 12%, transparent);
+    background: color-mix(in oklab, var(--color-accent-fg) 12%, transparent);
     color: var(--text-bright);
   }
   .pbtn_glyph {
@@ -1242,22 +1242,22 @@ stylesheet
     width: 6px;
     height: 6px;
     border-radius: 50%;
-    background: var(--accent-brass);
-    box-shadow: 0 0 6px color-mix(in oklab, var(--accent-brass) 35%, transparent);
+    background: var(--color-accent-fg);
+    box-shadow: 0 0 6px color-mix(in oklab, var(--color-accent-fg) 35%, transparent);
     align-self: center;
   }
   .sec_h {
     font-family: 'Cinzel', serif;
     font-size: 12px;
     letter-spacing: 0.26em;
-    color: var(--accent-brass);
+    color: var(--color-accent-fg);
     text-transform: uppercase;
     margin: 0;
   }
   .sec_sub {
     font-family: 'EB Garamond', Georgia, serif;
     font-style: italic;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
     font-size: 12px;
   }
   .sec_hr {
@@ -1265,15 +1265,15 @@ stylesheet
     height: 1px;
     background: linear-gradient(
       90deg,
-      var(--border-highlight) 0%,
-      var(--border-main) 60%,
+      var(--color-border-strong) 0%,
+      var(--color-border-default) 60%,
       transparent 100%
     );
   }
   .sec_r {
     font-family: 'JetBrains Mono', ui-monospace, monospace;
     font-size: 11px;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
     font-variant-numeric: tabular-nums;
     letter-spacing: 0.04em;
   }
@@ -1301,21 +1301,21 @@ stylesheet
     font-size: 11px;
     letter-spacing: 0.16em;
     text-transform: uppercase;
-    color: var(--text-dim);
-    border: 1px solid var(--border-main);
-    background: var(--bg-panel-alt);
+    color: var(--color-fg-muted);
+    border: 1px solid var(--color-border-default);
+    background: var(--color-bg-panel-alt);
   }
   .tomb_active {
-    color: var(--accent-brass);
-    border-color: var(--accent-brass);
-    background: linear-gradient(180deg, var(--bg-panel-alt), var(--bg-panel));
+    color: var(--color-accent-fg);
+    border-color: var(--color-accent-fg);
+    background: linear-gradient(180deg, var(--color-bg-panel-alt), var(--color-bg-surface));
   }
   .tomb_danger {
     color: var(--accent-blood);
     border-color: color-mix(in oklab, var(--accent-blood) 50%, transparent);
   }
   .tomb_dead {
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
     text-decoration: line-through;
     text-decoration-color: var(--accent-blood);
   }
@@ -1340,10 +1340,10 @@ stylesheet
   }
 
   @media (prefers-contrast: more) {
-    .row { border-bottom-width: 1px; border-bottom-color: var(--text-dim); }
+    .row { border-bottom-width: 1px; border-bottom-color: var(--color-fg-muted); }
     .level, .source_badge { border-width: 2px; }
     .level_error { border-color: var(--accent-blood); }
-    .level_warn  { border-color: var(--status-warn); }
+    .level_warn  { border-color: var(--color-status-warn); }
     .filter_bar { border-width: 2px; border-color: var(--text-bright); }
     .search_input { border-width: 2px; border-color: var(--text-bright); }
     .chip, .btn_ghost { border-width: 2px; border-color: var(--text-bright); }

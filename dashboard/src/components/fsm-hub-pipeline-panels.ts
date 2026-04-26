@@ -49,9 +49,9 @@ export function filterObservedLanes(
 
 const INSIGHT_BADGE_CLS: Record<InsightTone, string> = {
   ok: 'text-[var(--emerald)] border-[var(--emerald-30)] bg-[var(--emerald-8)]',
-  info: 'text-[var(--accent)] border-[var(--accent-30)] bg-[var(--accent-10)]',
+  info: 'text-[var(--color-accent-fg)] border-[var(--accent-30)] bg-[var(--accent-10)]',
   warn: 'text-[var(--amber-bright)] border-[rgba(245,158,11,0.3)] bg-[rgba(245,158,11,0.08)]',
-  error: 'text-[var(--bad)] border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.08)]',
+  error: 'text-[var(--color-status-err)] border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.08)]',
 }
 
 /** Panel-level accent -- border + subtle tinted overlay -- so that the
@@ -93,29 +93,29 @@ export function OperationalMeaningPanel({
     >
       <div class="flex items-start justify-between gap-3 flex-wrap">
         <div class="min-w-0">
-          <div class="text-3xs font-semibold uppercase tracking-2 text-[var(--text-muted)]">오퍼레이터 의미</div>
-          <div class="mt-1 text-xl font-semibold text-[var(--text-strong)]">${insight.headline}</div>
-          <div class="mt-1 text-2xs text-[var(--text-dim)] leading-relaxed">${insight.detail}</div>
+          <div class="text-3xs font-semibold uppercase tracking-2 text-[var(--color-fg-muted)]">오퍼레이터 의미</div>
+          <div class="mt-1 text-xl font-semibold text-[var(--color-fg-secondary)]">${insight.headline}</div>
+          <div class="mt-1 text-2xs text-[var(--color-fg-disabled)] leading-relaxed">${insight.detail}</div>
         </div>
         <span class=${`rounded-sm border px-2.5 py-0.5 text-3xs font-mono ${INSIGHT_BADGE_CLS[insight.tone]}`}>
           ${insight.tone}
         </span>
       </div>
 
-      <div class="mt-2 text-3xs text-[var(--text-body)]">
-        <span class="font-semibold text-[var(--text-muted)]">Next:</span> ${insight.nextStep}
+      <div class="mt-2 text-3xs text-[var(--color-fg-primary)]">
+        <span class="font-semibold text-[var(--color-fg-muted)]">Next:</span> ${insight.nextStep}
       </div>
 
       <div class="mt-2 flex flex-wrap gap-1.5">
         ${insight.evidence.map(item => html`
-          <span class="rounded-sm border border-[var(--white-8)] px-2 py-0.5 text-3xs font-mono text-[var(--text-dim)]">
+          <span class="rounded-sm border border-[var(--white-8)] px-2 py-0.5 text-3xs font-mono text-[var(--color-fg-disabled)]">
             ${item}
           </span>
         `)}
       </div>
 
       <div class="mt-4 flex items-center justify-between gap-2">
-        <div class="text-3xs font-semibold uppercase tracking-1 text-[var(--text-muted)]">
+        <div class="text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">
           관찰 레인
         </div>
         <input
@@ -124,26 +124,26 @@ export function OperationalMeaningPanel({
           placeholder="field / label / state / meaning 필터"
           aria-label="관찰 레인 필터"
           onInput=${(e: Event) => setQuery((e.target as HTMLInputElement).value)}
-          class="min-w-40 max-w-65 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+          class="min-w-40 max-w-65 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
         />
       </div>
 
       ${isFiltering && visibleLanes.length === 0 && lanes.length > 0
-        ? html`<div class="mt-2 py-4 text-center text-2xs text-[var(--text-dim)]">필터 결과 없음 (${lanes.length} lanes)</div>`
+        ? html`<div class="mt-2 py-4 text-center text-2xs text-[var(--color-fg-disabled)]">필터 결과 없음 (${lanes.length} lanes)</div>`
         : html`
           <div class="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-5">
             ${visibleLanes.map(lane => html`
               <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2">
                 <div class="flex items-center justify-between gap-2">
-                  <span class="text-3xs font-semibold uppercase tracking-1 text-[var(--text-muted)]">${lane.field}</span>
+                  <span class="text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">${lane.field}</span>
                   <span class=${`rounded-sm border px-1.5 py-0.5 text-4xs font-mono ${INSIGHT_BADGE_CLS[lane.tone]}`}>
                     ${fmtDuration(lane.observedForSec)}
                   </span>
                 </div>
-                <div class="mt-1 font-mono text-sm font-semibold text-[var(--text-strong)]">${lane.value}</div>
-                <div class="mt-0.5 text-3xs text-[var(--text-dim)]">${lane.label}</div>
-                <div class="mt-1.5 text-3xs leading-relaxed text-[var(--text-body)]">${lane.meaning}</div>
-                <div class="mt-1 text-4xs font-mono text-[var(--text-dim)]">
+                <div class="mt-1 font-mono text-sm font-semibold text-[var(--color-fg-secondary)]">${lane.value}</div>
+                <div class="mt-0.5 text-3xs text-[var(--color-fg-disabled)]">${lane.label}</div>
+                <div class="mt-1.5 text-3xs leading-relaxed text-[var(--color-fg-primary)]">${lane.meaning}</div>
+                <div class="mt-1 text-4xs font-mono text-[var(--color-fg-disabled)]">
                   ${lane.transitionCount} observed edge${lane.transitionCount === 1 ? '' : 's'}
                 </div>
               </div>
@@ -159,8 +159,8 @@ const PHASE_BAR_FILL: Record<string, string> = {
   Overflowed: 'var(--amber-bright)',
   Compacting: 'var(--amber-bright)',
   HandingOff: 'var(--purple)',
-  Failing: 'var(--bad)',
-  Draining: 'var(--warn)',
+  Failing: 'var(--color-status-err)',
+  Draining: 'var(--color-status-warn)',
   Stable: '#71717a',
 }
 
@@ -187,7 +187,7 @@ function PhaseSparkline({
   const bars = segments.map((seg, i) => {
     const dur = Math.max(0, seg.to - seg.from)
     const w = Math.max(1, (dur / totalDuration) * (W - (segments.length - 1) * gap))
-    const fill = PHASE_BAR_FILL[seg.value] ?? 'var(--accent)'
+    const fill = PHASE_BAR_FILL[seg.value] ?? 'var(--color-accent-fg)'
     const barX = x
     x += w + gap
     const isLast = i === segments.length - 1
@@ -196,7 +196,7 @@ function PhaseSparkline({
 
   return html`
     <div class="mt-2 flex items-center gap-2">
-      <span class="text-4xs text-[var(--text-dim)]">phase</span>
+      <span class="text-4xs text-[var(--color-fg-disabled)]">phase</span>
       <svg
         width=${W} height=${H}
         viewBox=${`0 0 ${W} ${H}`}
@@ -286,14 +286,14 @@ export function HeroPhase({
   }, [snapshot.phase])
 
   const phaseColor: Record<string, string> = {
-    Running: 'text-[var(--ok)]',
-    Overflowed: 'text-[var(--warn)]',
-    Compacting: 'text-[var(--warn)]',
-    HandingOff: 'text-[var(--accent)]',
+    Running: 'text-[var(--color-status-ok)]',
+    Overflowed: 'text-[var(--color-status-warn)]',
+    Compacting: 'text-[var(--color-status-warn)]',
+    HandingOff: 'text-[var(--color-accent-fg)]',
     Failing: 'text-[var(--bad-light)]',
-    Stable: 'text-[var(--text-dim)]',
+    Stable: 'text-[var(--color-fg-disabled)]',
   }
-  const color = phaseColor[snapshot.phase] ?? 'text-[var(--accent)]'
+  const color = phaseColor[snapshot.phase] ?? 'text-[var(--color-accent-fg)]'
   const heldFor = phaseSince != null ? fmtDuration(Math.max(0, now - phaseSince)) : null
   const collapsedSource = snapshot.phase === 'Stable' ? snapshot.collapsed_from : null
   const collapsedSourceLabel = collapsedSource
@@ -309,29 +309,29 @@ export function HeroPhase({
   ].filter(Boolean).join(', ')
 
   return html`
-    <div class=${`rounded border p-5 transition-all duration-700 ${flash ? 'border-[var(--accent)] bg-[rgba(71,184,255,0.06)] shadow-[0_0_16px_var(--accent-20)]' : 'border-[var(--white-8)] bg-[var(--white-2)]'}`}
+    <div class=${`rounded border p-5 transition-all duration-700 ${flash ? 'border-[var(--color-accent-fg)] bg-[rgba(71,184,255,0.06)] shadow-[0_0_16px_var(--accent-20)]' : 'border-[var(--white-8)] bg-[var(--white-2)]'}`}
       role="status" aria-live="polite" aria-label=${ariaLabel}
       title=${title}
     >
       <div class="flex items-baseline justify-between">
         <div>
-          <div class="text-3xs font-semibold tracking-[0.06em] text-[var(--text-muted)]" id="ksm-label">Keeper 생명주기 <span class="font-mono text-4xs text-[var(--text-dim)]">KSM</span></div>
+          <div class="text-3xs font-semibold tracking-[0.06em] text-[var(--color-fg-muted)]" id="ksm-label">Keeper 생명주기 <span class="font-mono text-4xs text-[var(--color-fg-disabled)]">KSM</span></div>
           <div class=${`mt-1 font-mono text-[32px] font-bold tracking-tight ${color}`} aria-labelledby="ksm-label">
             ${displayState(snapshot.phase)}
           </div>
-          <div class="mt-0.5 text-3xs font-mono text-[var(--text-dim)]">${snapshot.phase}</div>
+          <div class="mt-0.5 text-3xs font-mono text-[var(--color-fg-disabled)]">${snapshot.phase}</div>
           ${collapsedSourceLabel ? html`
-            <div class="mt-1 text-3xs font-mono text-[var(--text-dim)]">
-              collapsed from <span class="text-[var(--text-body)]">${collapsedSourceLabel}</span>
+            <div class="mt-1 text-3xs font-mono text-[var(--color-fg-disabled)]">
+              collapsed from <span class="text-[var(--color-fg-primary)]">${collapsedSourceLabel}</span>
             </div>
           ` : null}
           ${heldFor ? html`
-            <div class="mt-1 text-3xs font-mono text-[var(--text-dim)]" aria-hidden="true">
-              유지 <span class="text-[var(--text-body)]">${heldFor}</span>
+            <div class="mt-1 text-3xs font-mono text-[var(--color-fg-disabled)]" aria-hidden="true">
+              유지 <span class="text-[var(--color-fg-primary)]">${heldFor}</span>
             </div>
           ` : null}
         </div>
-        ${flash ? html`<span class="text-3xs text-[var(--accent)] animate-pulse font-mono" aria-live="assertive">상태 변경</span>` : null}
+        ${flash ? html`<span class="text-3xs text-[var(--color-accent-fg)] animate-pulse font-mono" aria-live="assertive">상태 변경</span>` : null}
       </div>
       <${PhaseSparkline} observations=${observations} now=${now} />
     </div>
@@ -371,7 +371,7 @@ export function PipelineStep({
 
   const isActive = value !== 'idle' && value !== 'undecided' && value !== 'accumulating'
   const borderCls = flash
-    ? 'border-[var(--accent)] shadow-[0_0_8px_rgba(71,184,255,0.35)]'
+    ? 'border-[var(--color-accent-fg)] shadow-[0_0_8px_rgba(71,184,255,0.35)]'
     : isActive
       ? 'border-[var(--indigo-50)] shadow-[0_0_6px_rgba(129,140,248,0.15)]'
       : 'border-[var(--white-8)]'
@@ -386,12 +386,12 @@ export function PipelineStep({
 
   const heldFor = sinceTs != null ? fmtDuration(Math.max(0, now - sinceTs)) : null
   const stalenessCls = (() => {
-    if (!heldFor || sinceTs == null) return 'text-[var(--text-dim)]'
+    if (!heldFor || sinceTs == null) return 'text-[var(--color-fg-disabled)]'
     const ageSec = now - sinceTs
     if (!isActive) {
       // idle 상태에서도 장기 대기를 시각적으로 구분
-      if (ageSec > 600) return 'text-[var(--text-muted)]'
-      return 'text-[var(--text-dim)]'
+      if (ageSec > 600) return 'text-[var(--color-fg-muted)]'
+      return 'text-[var(--color-fg-disabled)]'
     }
     if (ageSec > 60) return 'text-[var(--amber-bright)]'
     if (ageSec > 20) return 'text-[var(--yellow-bright)]'
@@ -406,17 +406,17 @@ export function PipelineStep({
         <div class="flex items-center justify-between gap-1.5">
           <div class="flex items-center gap-1.5 min-w-0">
             ${isActive ? html`<span class="h-1.5 w-1.5 rounded-full bg-[var(--indigo)] ${activePulse} shrink-0"></span>` : null}
-            <span class="text-3xs font-semibold tracking-[0.04em] text-[var(--text-muted)]">${label}</span>
-            ${limited ? html`<span class="text-[7px] font-mono text-[var(--text-dim)] border border-[var(--white-10)] rounded px-1" title="Event_bus 구독 미구현으로 일부 상태만 관찰 가능">제한</span>` : null}
+            <span class="text-3xs font-semibold tracking-[0.04em] text-[var(--color-fg-muted)]">${label}</span>
+            ${limited ? html`<span class="text-[7px] font-mono text-[var(--color-fg-disabled)] border border-[var(--white-10)] rounded px-1" title="Event_bus 구독 미구현으로 일부 상태만 관찰 가능">제한</span>` : null}
           </div>
           ${heldFor ? html`
             <span class=${`text-3xs font-mono tabular-nums ${stalenessCls}`} aria-hidden="true">${heldFor}</span>
           ` : null}
         </div>
-        <div class=${`mt-0.5 font-mono text-sm font-semibold ${isActive ? 'text-[var(--text-strong)]' : 'text-[var(--text-muted)]'} ${flash ? 'animate-pulse' : ''}`}>
+        <div class=${`mt-0.5 font-mono text-sm font-semibold ${isActive ? 'text-[var(--color-fg-secondary)]' : 'text-[var(--color-fg-muted)]'} ${flash ? 'animate-pulse' : ''}`}>
           ${displayState(value)}
         </div>
-        <div class="text-4xs font-mono text-[var(--text-dim)] mt-0.5">${shortLabel} · ${value}</div>
+        <div class="text-4xs font-mono text-[var(--color-fg-disabled)] mt-0.5">${shortLabel} · ${value}</div>
       </div>
       ${!isLast ? html`<div class=${`hidden md:block w-5 shrink-0 ${connectorCls}`}></div>` : null}
     </div>
@@ -434,7 +434,7 @@ export function TurnPipelineStrip({
 }) {
   return html`
     <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] p-3">
-      <div class="mb-2 text-3xs font-semibold uppercase tracking-1 text-[var(--text-muted)]">
+      <div class="mb-2 text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">
         턴 파이프라인
       </div>
       <div class="flex flex-col gap-1 md:flex-row md:gap-0 md:items-stretch" role="list" aria-label="턴 파이프라인 단계">

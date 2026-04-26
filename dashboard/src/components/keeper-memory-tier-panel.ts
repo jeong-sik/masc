@@ -115,7 +115,7 @@ export function KeeperMemoryTierPanel({
 
   if (loading) {
     return html`
-      <div class="flex items-center justify-center gap-2 py-6 text-2xs text-[var(--text-dim)]">
+      <div class="flex items-center justify-center gap-2 py-6 text-2xs text-[var(--color-fg-disabled)]">
         <${InlineSpinner} />
         메모리 티어 로딩중
       </div>
@@ -143,7 +143,7 @@ export function KeeperMemoryTierPanel({
 
   return html`
     <div class="flex flex-col gap-3">
-      <div class="flex flex-wrap items-center gap-2 text-3xs text-[var(--text-dim)]">
+      <div class="flex flex-wrap items-center gap-2 text-3xs text-[var(--color-fg-disabled)]">
         <span class="inline-flex items-center rounded-sm border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">
           total ${totalUsed} / ${totalCap}
         </span>
@@ -167,7 +167,7 @@ export function KeeperMemoryTierPanel({
           placeholder="kind 필터"
           aria-label="memory kind 필터"
           onInput=${(e: Event) => setQuery((e.target as HTMLInputElement).value)}
-          class="min-w-30 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+          class="min-w-30 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
         />
         <${FilterChips}
           chips=${[
@@ -180,7 +180,7 @@ export function KeeperMemoryTierPanel({
       </div>
 
       ${visible.length === 0 ? html`
-        <div class="py-4 text-center text-2xs text-[var(--text-dim)]">
+        <div class="py-4 text-center text-2xs text-[var(--color-fg-disabled)]">
           필터 결과 없음
         </div>
       ` : null}
@@ -196,16 +196,16 @@ export function KeeperMemoryTierPanel({
               : 'bg-[rgba(99,102,241,0.6)]'
           return html`
             <div class="flex items-center gap-2 text-2xs">
-              <div class="w-24 truncate text-[var(--text-body)] font-mono" title=${row.kind}>
+              <div class="w-24 truncate text-[var(--color-fg-primary)] font-mono" title=${row.kind}>
                 ${row.kind}
               </div>
               <div class="relative flex-1 h-4 rounded-sm bg-[var(--white-4)] border border-[var(--white-8)] overflow-hidden">
                 <div class=${`absolute inset-y-0 left-0 ${barColor}`} style=${`width: ${pct}%`}></div>
               </div>
-              <div class="w-16 text-right text-[var(--text-muted)] tabular-nums">
+              <div class="w-16 text-right text-[var(--color-fg-muted)] tabular-nums">
                 ${row.used}/${row.cap}
               </div>
-              <div class="w-10 text-right text-3xs text-[var(--text-dim)] tabular-nums">
+              <div class="w-10 text-right text-3xs text-[var(--color-fg-disabled)] tabular-nums">
                 p${row.priority}
               </div>
             </div>
@@ -214,7 +214,7 @@ export function KeeperMemoryTierPanel({
       </div>
 
       <div class="mt-2">
-        <div class="text-3xs font-semibold uppercase tracking-1 text-[var(--text-muted)] mb-2">
+        <div class="text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)] mb-2">
           Compaction sub-FSM (KeeperCompactionLifecycle.tla)
         </div>
         <${CytoscapeFsm} spec=${compactionSpec} height="200px" />

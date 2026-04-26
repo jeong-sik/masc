@@ -148,16 +148,16 @@ function ChatMessageBubble({
             ${isMessenger
               ? html`
                   <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <span class="truncate text-xs font-semibold text-[var(--text-strong)]">
+                    <span class="truncate text-xs font-semibold text-[var(--color-fg-secondary)]">
                       ${avatarLabel(entry)}
                     </span>
                     ${timestamp
-                      ? html`<span class="text-2xs tabular-nums text-[var(--text-muted)]">${timestamp}</span>`
+                      ? html`<span class="text-2xs tabular-nums text-[var(--color-fg-muted)]">${timestamp}</span>`
                       : null}
                     ${showDeliveryBadge(entry, variant)
                       ? html`
                           <span
-                            class="inline-flex items-center rounded-sm border border-[var(--card-border)] bg-[var(--white-3)] px-2 py-0.5 text-3xs font-medium uppercase tracking-1 text-[var(--text-muted)]"
+                            class="inline-flex items-center rounded-sm border border-[var(--color-border-default)] bg-[var(--white-3)] px-2 py-0.5 text-3xs font-medium uppercase tracking-1 text-[var(--color-fg-muted)]"
                             data-chat-delivery=${delivery}
                           >
                             ${delivery}
@@ -176,7 +176,7 @@ function ChatMessageBubble({
                     ${showDeliveryBadge(entry, variant)
                       ? html`
                           <span
-                            class="inline-flex items-center rounded-sm border border-[var(--card-border)] bg-[var(--white-3)] px-2.5 py-1 text-3xs font-medium uppercase tracking-2 text-[var(--text-muted)]"
+                            class="inline-flex items-center rounded-sm border border-[var(--color-border-default)] bg-[var(--white-3)] px-2.5 py-1 text-3xs font-medium uppercase tracking-2 text-[var(--color-fg-muted)]"
                             data-chat-delivery=${delivery}
                           >
                             ${delivery}
@@ -185,13 +185,13 @@ function ChatMessageBubble({
                       : null}
                     ${timestamp
                       ? html`
-                          <span class="inline-flex items-center rounded-sm border border-[var(--slate-gray-16)] bg-[var(--slate-gray-8)] px-2.5 py-1 text-3xs font-medium tabular-nums text-[var(--text-muted)]">
+                          <span class="inline-flex items-center rounded-sm border border-[var(--slate-gray-16)] bg-[var(--slate-gray-8)] px-2.5 py-1 text-3xs font-medium tabular-nums text-[var(--color-fg-muted)]">
                             ${timestamp}
                           </span>
                         `
                       : null}
                   </div>
-                  <div class="mt-2 truncate text-sm font-semibold text-[var(--text-strong)]">
+                  <div class="mt-2 truncate text-sm font-semibold text-[var(--color-fg-secondary)]">
                     ${avatarLabel(entry)}
                   </div>
                 `}
@@ -201,7 +201,7 @@ function ChatMessageBubble({
           ? html`
               <button
                 type="button"
-                class=${`border border-[var(--card-border)] bg-[var(--white-3)] text-2xs font-medium text-[var(--text-muted)] transition-colors hover:bg-[var(--white-10)] hover:text-[var(--text-body)] ${
+                class=${`border border-[var(--color-border-default)] bg-[var(--white-3)] text-2xs font-medium text-[var(--color-fg-muted)] transition-colors hover:bg-[var(--white-10)] hover:text-[var(--color-fg-primary)] ${
                   isMessenger ? 'rounded px-2.5 py-1' : 'rounded-sm px-3 py-1'
                 }`}
                 onClick=${() => { setExpandedRaw(!expandedRaw) }}
@@ -215,14 +215,14 @@ function ChatMessageBubble({
       ${showMetadata && detailItems.length > 0
         ? html`<div class=${`flex flex-wrap gap-1.5 ${isMessenger ? 'pt-0.5' : ''}`}>
             ${detailItems.map(item => html`
-              <span class="inline-flex items-center rounded-sm border border-[var(--accent-soft)] bg-[var(--accent-10)] px-2.5 py-1 text-3xs font-medium text-[var(--text-strong)]">
+              <span class="inline-flex items-center rounded-sm border border-[var(--accent-soft)] bg-[var(--accent-10)] px-2.5 py-1 text-3xs font-medium text-[var(--color-fg-secondary)]">
                 ${item}
               </span>
             `)}
           </div>`
         : null}
 
-      <div class="whitespace-pre-wrap break-words text-base leading-airy text-[var(--text-body)]">
+      <div class="whitespace-pre-wrap break-words text-base leading-airy text-[var(--color-fg-primary)]">
         ${entry.text || (entry.delivery === 'streaming' ? '' : '(empty reply)')}
       </div>
       ${entry.error
@@ -241,8 +241,8 @@ function ChatMessageBubble({
                     <div class="grid grid-cols-[repeat(auto-fit,minmax(116px,1fr))] gap-2">
                       ${overview.map(item => html`
                         <div class="rounded border border-[var(--slate-gray-12)] bg-[var(--white-3)] px-3 py-2.5">
-                          <div class="text-3xs font-semibold uppercase tracking-3 text-[var(--text-muted)]">${item.label}</div>
-                          <div class="mt-1 text-sm font-semibold text-[var(--text-strong)]">${item.value}</div>
+                          <div class="text-3xs font-semibold uppercase tracking-3 text-[var(--color-fg-muted)]">${item.label}</div>
+                          <div class="mt-1 text-sm font-semibold text-[var(--color-fg-secondary)]">${item.value}</div>
                         </div>
                       `)}
                     </div>
@@ -262,12 +262,12 @@ function ChatMessageBubble({
               ${state.length > 0
                 ? html`
                     <div class="flex flex-col gap-2">
-                      <div class="text-3xs font-semibold uppercase tracking-3 text-[var(--text-muted)]">상태 스냅샷</div>
+                      <div class="text-3xs font-semibold uppercase tracking-3 text-[var(--color-fg-muted)]">상태 스냅샷</div>
                       <div class="grid grid-cols-[repeat(auto-fit,minmax(116px,1fr))] gap-2">
                         ${state.map(item => html`
                           <div class="rounded border border-[var(--accent-soft)] bg-[rgba(71,184,255,0.06)] px-3 py-2.5">
-                            <div class="text-3xs font-semibold uppercase tracking-2 text-[var(--accent)]">${item.label}</div>
-                            <div class="mt-1 text-xs leading-paragraph text-[var(--text-body)]">${item.value}</div>
+                            <div class="text-3xs font-semibold uppercase tracking-2 text-[var(--color-accent-fg)]">${item.label}</div>
+                            <div class="mt-1 text-xs leading-paragraph text-[var(--color-fg-primary)]">${item.value}</div>
                           </div>
                         `)}
                       </div>
@@ -279,7 +279,7 @@ function ChatMessageBubble({
                     <div class="flex flex-col gap-2">
                       <button
                         type="button"
-                        class="self-start rounded-sm border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-1 text-2xs font-medium text-[var(--text-muted)] transition-colors hover:bg-[var(--white-10)] hover:text-[var(--text-body)]"
+                        class="self-start rounded-sm border border-[var(--color-border-default)] bg-[var(--white-3)] px-3 py-1 text-2xs font-medium text-[var(--color-fg-muted)] transition-colors hover:bg-[var(--white-10)] hover:text-[var(--color-fg-primary)]"
                         onClick=${() => { setRawExpandedRaw(!rawExpandedRaw) }}
                       >
                         ${rawExpanded ? '원본 숨기기' : '원본 보기'}
@@ -333,7 +333,7 @@ export function ChatTranscript({
       ${entries.length === 0
         ? html`
             <div class="flex min-h-55 flex-col items-center justify-center rounded-card border border-dashed border-[rgba(148,163,184,0.18)] bg-[var(--white-3)] px-6 text-center">
-              <div class="text-2xs font-semibold uppercase tracking-5 text-[var(--text-muted)]">직접 메시지 없음</div>
+              <div class="text-2xs font-semibold uppercase tracking-5 text-[var(--color-fg-muted)]">직접 메시지 없음</div>
               <div class="mt-3 max-w-[34rem] text-sm leading-airy text-[var(--text-secondary)]">${emptyText}</div>
             </div>
           `
@@ -382,8 +382,8 @@ export function ChatComposer({
   return html`
     <div class="chat-composer flex flex-col gap-3">
       <div class="flex flex-wrap items-center justify-between gap-2">
-        <div class="text-2xs font-semibold uppercase tracking-4 text-[var(--text-muted)]">메시지</div>
-        <div class="text-2xs text-[var(--text-muted)]">Enter로 전송, Shift+Enter로 줄바꿈</div>
+        <div class="text-2xs font-semibold uppercase tracking-4 text-[var(--color-fg-muted)]">메시지</div>
+        <div class="text-2xs text-[var(--color-fg-muted)]">Enter로 전송, Shift+Enter로 줄바꿈</div>
       </div>
       <textarea
         class="control-textarea min-h-24 rounded-card border border-[var(--slate-gray-16)] bg-[var(--white-3)] px-3 py-3 text-base leading-loose"
@@ -401,7 +401,7 @@ export function ChatComposer({
         disabled=${disabled}
       ></textarea>
       <div class="flex flex-wrap items-center justify-between gap-2">
-        <div class="text-2xs leading-paragraph text-[var(--text-muted)]">
+        <div class="text-2xs leading-paragraph text-[var(--color-fg-muted)]">
           ${streaming
             ? '키퍼 응답 스트림이 활성 상태입니다. 멈춘 것 같으면 중지할 수 있습니다.'
             : '직접 메시지만 이 레인에 표시됩니다. 내부 키퍼 프롬프트는 숨겨집니다.'}

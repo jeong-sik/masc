@@ -40,15 +40,15 @@ function enqueueToast(toast: Toast) {
 }
 
 const BORDER_COLOR: Record<ToastType, string> = {
-  success: 'border-l-[var(--ok)]',
-  warning: 'border-l-[var(--warn)]',
-  error: 'border-l-[var(--bad)]'
+  success: 'border-l-[var(--color-status-ok)]',
+  warning: 'border-l-[var(--color-status-warn)]',
+  error: 'border-l-[var(--color-status-err)]'
 }
 
 const ICON_COLOR: Record<ToastType, string> = {
-  success: 'text-[var(--ok)]',
-  warning: 'text-[var(--warn)]',
-  error: 'text-[var(--bad)]'
+  success: 'text-[var(--color-status-ok)]',
+  warning: 'text-[var(--color-status-warn)]',
+  error: 'text-[var(--color-status-err)]'
 }
 
 const ICON: Record<ToastType, () => ComponentChildren> = {
@@ -173,7 +173,7 @@ export function ToastContainer() {
         <div
           key=${t.id}
           role=${t.type === 'error' ? 'alert' : 'status'}
-          class="pointer-events-auto flex items-center gap-2.5 py-2 px-3 min-w-55 max-w-90 rounded border-l-[3px] border-l-solid border border-solid border-[var(--card-border)] bg-[rgba(10,18,34,0.96)] shadow-sm animate-[slideInRight_0.2s_ease-out] ${BORDER_COLOR[t.type]}"
+          class="pointer-events-auto flex items-center gap-2.5 py-2 px-3 min-w-55 max-w-90 rounded border-l-[3px] border-l-solid border border-solid border-[var(--color-border-default)] bg-[rgba(10,18,34,0.96)] shadow-sm animate-[slideInRight_0.2s_ease-out] ${BORDER_COLOR[t.type]}"
           onMouseEnter=${() => pauseToastTimer(t.id)}
           onMouseLeave=${() => resumeToastTimer(t.id)}
           onFocusIn=${() => pauseToastTimer(t.id)}
@@ -181,11 +181,11 @@ export function ToastContainer() {
           data-toast-id=${t.id}
         >
           <span class="shrink-0 flex items-center ${ICON_COLOR[t.type]}">${ICON[t.type]()}</span>
-          <span class="flex-1 text-sm text-[var(--text-body)] leading-[1.4]">${t.message}</span>
+          <span class="flex-1 text-sm text-[var(--color-fg-primary)] leading-[1.4]">${t.message}</span>
           ${t.action ? html`
             <button
               type="button"
-              class="shrink-0 text-2xs px-2 py-1 rounded border border-[var(--card-border)] bg-[var(--white-5)] text-[var(--accent)] hover:bg-[var(--white-10)] cursor-pointer transition-colors duration-150"
+              class="shrink-0 text-2xs px-2 py-1 rounded border border-[var(--color-border-default)] bg-[var(--white-5)] text-[var(--color-accent-fg)] hover:bg-[var(--white-10)] cursor-pointer transition-colors duration-150"
               onClick=${(e: Event) => {
                 e.stopPropagation()
                 t.action!.onClick()
@@ -197,7 +197,7 @@ export function ToastContainer() {
           ` : null}
           <button
             type="button"
-            class="shrink-0 text-[var(--text-muted)] hover:text-[var(--text-body)] cursor-pointer p-1 rounded hover:bg-[var(--white-5)] transition-colors duration-150 flex items-center justify-center"
+            class="shrink-0 text-[var(--color-fg-muted)] hover:text-[var(--color-fg-primary)] cursor-pointer p-1 rounded hover:bg-[var(--white-5)] transition-colors duration-150 flex items-center justify-center"
             aria-label="닫기"
             title="닫기"
             onClick=${(e: Event) => {

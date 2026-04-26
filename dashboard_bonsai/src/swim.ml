@@ -33,36 +33,36 @@ module Style =
 stylesheet
   {|
   .swim {
-    border: 1px solid var(--border-main);
-    background: color-mix(in oklab, var(--bg-deep) 40%, transparent);
+    border: 1px solid var(--color-border-default);
+    background: color-mix(in oklab, var(--color-bg-page) 40%, transparent);
     margin-top: 6px;
   }
   .axis {
     display: grid;
     grid-template-columns: 140px 1fr;
-    border-bottom: 1px solid var(--border-main);
+    border-bottom: 1px solid var(--color-border-default);
   }
   .axis_sp {
-    border-right: 1px solid var(--border-main);
+    border-right: 1px solid var(--color-border-default);
     padding: 6px 14px;
     font-family: 'Noto Sans KR', sans-serif;
     font-size: 11px;
     letter-spacing: 0.24em;
     text-transform: uppercase;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
   }
   .axis_ax {
     position: relative;
     height: 24px;
     font-family: 'JetBrains Mono', ui-monospace, monospace;
     font-size: 11px;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
   }
   .tick {
     position: absolute;
     top: 0;
     bottom: 0;
-    border-left: 1px solid var(--border-main);
+    border-left: 1px solid var(--color-border-default);
   }
   .tick_lbl {
     position: absolute;
@@ -74,11 +74,11 @@ stylesheet
   .lane {
     display: grid;
     grid-template-columns: 140px 1fr;
-    border-bottom: 1px solid var(--border-main);
+    border-bottom: 1px solid var(--color-border-default);
   }
   .lane:last-child { border-bottom: 0; }
   .lane_meta {
-    border-right: 1px solid var(--border-main);
+    border-right: 1px solid var(--color-border-default);
     padding: 8px 14px;
     display: flex;
     align-items: center;
@@ -88,11 +88,11 @@ stylesheet
     width: 6px;
     height: 6px;
     border-radius: 50%;
-    background: var(--status-ok);
+    background: var(--color-status-ok);
     flex-shrink: 0;
-    box-shadow: 0 0 6px var(--status-ok);
+    box-shadow: 0 0 6px var(--color-status-ok);
   }
-  .dot_warn { background: var(--status-warn); box-shadow: 0 0 6px var(--status-warn); }
+  .dot_warn { background: var(--color-status-warn); box-shadow: 0 0 6px var(--color-status-warn); }
   .dot_bad { background: var(--accent-blood); box-shadow: 0 0 6px var(--accent-blood); }
   .nm {
     font-family: 'JetBrains Mono', ui-monospace, monospace;
@@ -102,7 +102,7 @@ stylesheet
     flex: 1;
   }
   .nm_dead {
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
     text-decoration: line-through;
     text-decoration-color: var(--accent-blood);
   }
@@ -110,13 +110,13 @@ stylesheet
     font-family: 'Noto Sans KR', sans-serif;
     font-size: 11px;
     letter-spacing: 0.18em;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
     text-transform: uppercase;
   }
   .track {
     position: relative;
     height: 32px;
-    background: repeating-linear-gradient(to right, transparent 0 99px, color-mix(in oklab, var(--border-highlight) 5%, transparent) 99px 100px);
+    background: repeating-linear-gradient(to right, transparent 0 99px, color-mix(in oklab, var(--color-border-strong) 5%, transparent) 99px 100px);
   }
   .frame {
     position: absolute;
@@ -124,7 +124,7 @@ stylesheet
     height: 14px;
     font-family: 'JetBrains Mono', ui-monospace, monospace;
     font-size: 11px;
-    color: var(--bg-deep);
+    color: var(--color-bg-page);
     padding: 0 4px;
     line-height: 14px;
     overflow: hidden;
@@ -138,8 +138,8 @@ stylesheet
   .frame_llm  { background: var(--t-llm); }
   .frame_tool { background: var(--t-tool); }
   .frame_err  { background: var(--t-err); color: var(--text-bright); }
-  .frame_wait { background: var(--t-wait); color: var(--text-dim); }
-  .frame_think { background: var(--t-think); color: var(--text-primary); }
+  .frame_wait { background: var(--t-wait); color: var(--color-fg-muted); }
+  .frame_think { background: var(--t-think); color: var(--color-fg-primary); }
 
   @media (prefers-contrast: more) {
     .track { outline: 1px solid var(--text-bright); }

@@ -28,9 +28,9 @@ const STATE_LABEL: Record<HeartbeatState, string> = {
 }
 
 const STATE_TONE: Record<HeartbeatState, string> = {
-  up: 'text-[var(--ok)] border-[var(--ok-20)] bg-[var(--ok-10)]',
+  up: 'text-[var(--color-status-ok)] border-[var(--ok-20)] bg-[var(--ok-10)]',
   down: 'text-[var(--bad-light)] border-[var(--bad-20)] bg-[var(--bad-10)]',
-  unknown: 'text-[var(--text-dim)] border-[var(--white-8)] bg-[var(--white-2)]',
+  unknown: 'text-[var(--color-fg-disabled)] border-[var(--white-8)] bg-[var(--white-2)]',
 }
 
 /** Pure: render a streak as narrator-friendly text. Exposed so the
@@ -73,7 +73,7 @@ export function HeartbeatStreakChip({
   >
     <span aria-hidden="true">${STATE_GLYPH[streak.state]}</span>
     <span>${STATE_LABEL[streak.state]}</span>
-    <span class="text-[var(--text-dim)]">×</span>
+    <span class="text-[var(--color-fg-disabled)]">×</span>
     <span>${streak.samples}</span>
   </span>`
 }

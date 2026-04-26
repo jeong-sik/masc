@@ -36,11 +36,11 @@ export function FlowControlPanel() {
   return html`
     <${SurfaceCard} variant="compact" class="mb-4">
       <div class="flex items-center gap-3 mb-3">
-        <h3 class="text-sm text-[var(--text-strong)] font-medium">흐름 제어</h3>
+        <h3 class="text-sm text-[var(--color-fg-secondary)] font-medium">흐름 제어</h3>
         <${CountBadge} tone=${stateTone(state)}>${stateLabel(state)}<//>
       </div>
       ${mutationAccess.allowed ? null : html`
-        <p class="mb-3 text-2xs text-[var(--warn)]">
+        <p class="mb-3 text-2xs text-[var(--color-status-warn)]">
           제어 차단: ${mutationAccess.reason ?? 'worker 권한이 필요합니다.'}
         </p>
       `}
@@ -55,7 +55,7 @@ export function FlowControlPanel() {
     ${'' /* ── Maintenance ── */}
     <${SurfaceCard} variant="compact">
       <details>
-        <summary class="cursor-pointer text-sm text-[var(--text-strong)] font-medium select-none py-1">유지보수</summary>
+        <summary class="cursor-pointer text-sm text-[var(--color-fg-secondary)] font-medium select-none py-1">유지보수</summary>
         <div class="mt-3 flex flex-wrap gap-2">
           <${ActionButton} variant="ghost" size="md" disabled=${maintenanceLoading.value || !mutationAccess.allowed}
             onClick=${async () => {

@@ -102,7 +102,7 @@ describe('HeartbeatStreakChip component', () => {
   it('tone class reflects state — ok for up, bad for down, muted for unknown', () => {
     render(html`<${HeartbeatStreakChip} history=${['up', 'up']} />`, container)
     let el = container.querySelector('[data-heartbeat-streak-chip]')!
-    expect(el.className).toContain('var(--ok)')
+    expect(el.className).toContain('var(--color-status-ok)')
     render(null, container)
 
     render(html`<${HeartbeatStreakChip} history=${['down']} />`, container)
@@ -112,7 +112,7 @@ describe('HeartbeatStreakChip component', () => {
 
     render(html`<${HeartbeatStreakChip} history=${['unknown']} />`, container)
     el = container.querySelector('[data-heartbeat-streak-chip]')!
-    expect(el.className).toContain('text-[var(--text-dim)]')
+    expect(el.className).toContain('text-[var(--color-fg-disabled)]')
   })
 
   it('data attrs pin state + samples for E2E selectors', () => {

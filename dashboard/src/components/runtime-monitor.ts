@@ -354,7 +354,7 @@ export function RuntimeMonitor() {
     <div class="flex flex-col gap-4">
       <div class="flex items-center gap-3 flex-wrap">
         <select
-          class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--text-strong)]"
+          class="rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--color-fg-secondary)]"
           value=${String(windowMinutes.value)}
           onChange=${(e: Event) => { windowMinutes.value = Number((e.target as HTMLSelectElement).value) }}
         >
@@ -364,12 +364,12 @@ export function RuntimeMonitor() {
           <option value="180">180분</option>
         </select>
         <button
-          class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-3 py-1 text-xs text-[var(--text-strong)] hover:bg-[var(--bg-panel-hover)]"
+          class="rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] px-3 py-1 text-xs text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)]"
           onClick=${() => void load()}
         >
           새로고침
         </button>
-        ${current.loading ? html`<span class="text-xs text-[var(--text-muted)]">로딩 중...</span>` : null}
+        ${current.loading ? html`<span class="text-xs text-[var(--color-fg-muted)]">로딩 중...</span>` : null}
       </div>
 
       ${current.error
@@ -457,7 +457,7 @@ export function RuntimeMonitor() {
           />
         </div>
         ${(metrics?.models ?? []).length > 0 && filterModelMetrics(metrics?.models ?? [], modelSearch.value).length === 0
-          ? html`<div class="text-2xs text-[var(--text-muted)] mb-2">검색 결과 없음 (${metrics?.models.length ?? 0}개 중)</div>`
+          ? html`<div class="text-2xs text-[var(--color-fg-muted)] mb-2">검색 결과 없음 (${metrics?.models.length ?? 0}개 중)</div>`
           : null}
         <div class="flex flex-col gap-3">
           ${(metrics?.models ?? []).length > 0
@@ -488,7 +488,7 @@ export function RuntimeMonitor() {
                       <strong class="text-sm text-text-strong">${metric.model_id}</strong>
                       <span class="text-xs text-text-muted">entries ${fmtNumber(metric.entry_count)} · fallback ${fmtNumber(metric.fallback_count)}</span>
                       ${metricCoverageText(metric)
-                        ? html`<span class="text-2xs ${hasCoverageGap ? 'text-[var(--status-warn)]' : 'text-[var(--text-muted)]'}">${metricCoverageText(metric)}</span>`
+                        ? html`<span class="text-2xs ${hasCoverageGap ? 'text-[var(--status-warn)]' : 'text-[var(--color-fg-muted)]'}">${metricCoverageText(metric)}</span>`
                         : null}
                     </div>
                     <div class="flex gap-2 items-center">
@@ -550,7 +550,7 @@ export function RuntimeMonitor() {
                       .map(b => b.error_rate)
                       .filter((value): value is number => typeof value === 'number' && !Number.isNaN(value))
                     if (latencySeries.length < 2 || errorSeries.length < 2) return null
-                    return html`<div class="flex items-center gap-4 mt-1 text-2xs text-[var(--text-muted)]">
+                    return html`<div class="flex items-center gap-4 mt-1 text-2xs text-[var(--color-fg-muted)]">
                         <span>p95 latency</span>
                         <span dangerouslySetInnerHTML=${{ __html: sparklineSvg(latencySeries, 'var(--status-warn)', 80, 18) }}></span>
                         <span>error rate</span>
@@ -571,7 +571,7 @@ export function RuntimeMonitor() {
                       hasCacheNumbers
                         ? cacheRead + inputTokens
                         : null
-                    return html`<div class="text-2xs text-[var(--text-muted)] mt-1">
+                    return html`<div class="text-2xs text-[var(--color-fg-muted)] mt-1">
                       cost ${fmtCoverageAwareCost(metric, metric.total_cost_usd)} · cache savings ${fmtPct(cacheRatio)} (${fmtCoverageAwareNumber(metric, cacheRead)} / ${fmtCoverageAwareNumber(metric, totalIn)} tokens)
                     </div>`
                   })()}
@@ -581,8 +581,8 @@ export function RuntimeMonitor() {
                   ${(metric.top_tools ?? []).length > 0
                     ? html`<div class="flex flex-wrap gap-1 mt-1">
                         ${metric.top_tools?.slice(0, 5).map(t => html`
-                          <span class="inline-flex items-center px-1.5 py-0.5 rounded text-3xs bg-[var(--bg-panel-hover)] text-[var(--text-muted)]">
-                            ${t.tool} <span class="ml-0.5 text-[var(--text-strong)]">${t.count}</span>
+                          <span class="inline-flex items-center px-1.5 py-0.5 rounded text-3xs bg-[var(--color-bg-hover)] text-[var(--color-fg-muted)]">
+                            ${t.tool} <span class="ml-0.5 text-[var(--color-fg-secondary)]">${t.count}</span>
                           </span>
                         `)}
                       </div>`
@@ -590,21 +590,21 @@ export function RuntimeMonitor() {
                   ${(metric.recent_entries ?? []).length > 0
                     ? html`
                       <button
-                        class="text-2xs text-[var(--text-muted)] hover:text-[var(--text-strong)] mt-1 text-left"
+                        class="text-2xs text-[var(--color-fg-muted)] hover:text-[var(--color-fg-secondary)] mt-1 text-left"
                         onClick=${() => { expandedModel.value = expandedModel.value === metric.model_id ? null : metric.model_id }}
                       >
                         ${expandedModel.value === metric.model_id ? '▾' : '▸'} recent ${metric.recent_entries?.length ?? 0} turns
                       </button>
                       ${expandedModel.value === metric.model_id
                         ? html`<div class="mt-1 border-t border-card-border/50 pt-2">
-                            <div class="grid grid-cols-7 gap-1 text-3xs text-[var(--text-muted)] font-medium mb-1">
+                            <div class="grid grid-cols-7 gap-1 text-3xs text-[var(--color-fg-muted)] font-medium mb-1">
                               <div>time</div><div>in tok</div><div>out tok</div><div>latency</div><div>prefill tok/s</div><div>cost</div><div>tools</div>
                             </div>
                             ${metric.recent_entries?.map(re => {
                               const detail = recentEntryDetail(re)
                               return html`
                                 <div class="mb-1">
-                                  <div class="grid grid-cols-7 gap-1 text-2xs text-[var(--text-body)]">
+                                  <div class="grid grid-cols-7 gap-1 text-2xs text-[var(--color-fg-primary)]">
                                     <div>${fmtTime(re.ts_unix)}</div>
                                     <div>${fmtRecentEntryNumber(re, re.input_tokens)}</div>
                                     <div>${fmtRecentEntryNumber(re, re.output_tokens)}</div>
@@ -614,7 +614,7 @@ export function RuntimeMonitor() {
                                     <div>${re.tools_count}</div>
                                   </div>
                                   ${detail
-                                    ? html`<div class="text-3xs text-[var(--text-muted)]">${detail}</div>`
+                                    ? html`<div class="text-3xs text-[var(--color-fg-muted)]">${detail}</div>`
                                     : null}
                                 </div>
                               `

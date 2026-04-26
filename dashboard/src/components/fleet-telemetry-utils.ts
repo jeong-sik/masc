@@ -147,9 +147,9 @@ function keeperLastLatencyMs(keeper: Keeper): number {
 }
 
 export function successClass(rate: number | null): string {
-  if (rate == null || !Number.isFinite(rate)) return 'text-[var(--text-dim)]'
-  if (rate >= 97) return 'text-[var(--ok)]'
-  if (rate >= 90) return 'text-[var(--warn)]'
+  if (rate == null || !Number.isFinite(rate)) return 'text-[var(--color-fg-disabled)]'
+  if (rate >= 97) return 'text-[var(--color-status-ok)]'
+  if (rate >= 90) return 'text-[var(--color-status-warn)]'
   return 'text-[var(--bad-light)]'
 }
 
@@ -415,8 +415,8 @@ export function toneForPressure(hot: number, warn: number): 'neutral' | 'ok' | '
 
 export function pressureClass(ratio: number): string {
   if (ratio >= PRESSURE_HOT_RATIO) return 'text-[var(--bad-light)]'
-  if (ratio >= PRESSURE_WARN_RATIO) return 'text-[var(--warn)]'
-  return 'text-[var(--ok)]'
+  if (ratio >= PRESSURE_WARN_RATIO) return 'text-[var(--color-status-warn)]'
+  return 'text-[var(--color-status-ok)]'
 }
 
 export function statusClass(row: FleetRow): string {
@@ -438,10 +438,10 @@ export function statusClass(row: FleetRow): string {
     || normalizedStatus === 'inactive'
     || row.runtime_blocker_class != null
   ) {
-    return 'text-[var(--warn)]'
+    return 'text-[var(--color-status-warn)]'
   }
-  if (row.context_ratio >= PRESSURE_HOT_RATIO) return 'text-[var(--warn)]'
-  return 'text-[var(--ok)]'
+  if (row.context_ratio >= PRESSURE_HOT_RATIO) return 'text-[var(--color-status-warn)]'
+  return 'text-[var(--color-status-ok)]'
 }
 
 export function formatPercent(value: number | null, digits = 0): string {
@@ -483,15 +483,15 @@ export function sourceCountClass(source: TelemetrySourceSummary): string {
       return 'text-[var(--bad-light)]'
     case 'stale':
     case 'coverage_gap':
-      return 'text-[var(--warn)]'
+      return 'text-[var(--color-status-warn)]'
     case 'ok':
-      return 'text-[var(--ok)]'
+      return 'text-[var(--color-status-ok)]'
   }
   if (source.exists === false) return 'text-[var(--bad-light)]'
-  if (source.entry_count <= 0) return 'text-[var(--text-dim)]'
+  if (source.entry_count <= 0) return 'text-[var(--color-fg-disabled)]'
   const age = numericAge(source.latest_age_s)
-  if (age != null && age >= TELEMETRY_SOURCE_STALE_SEC) return 'text-[var(--warn)]'
-  return 'text-[var(--ok)]'
+  if (age != null && age >= TELEMETRY_SOURCE_STALE_SEC) return 'text-[var(--color-status-warn)]'
+  return 'text-[var(--color-status-ok)]'
 }
 
 export function sourceDetail(source: TelemetrySourceSummary): string {

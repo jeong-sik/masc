@@ -70,7 +70,7 @@ export function TaskCreateForm(props: { goalId?: string | null; goalTitle?: stri
 
         <div class="flex flex-col gap-1.5">
           <label class="text-2xs font-medium text-text-muted">
-            제목<span class="ml-0.5 text-[var(--bad)]">*</span>
+            제목<span class="ml-0.5 text-[var(--color-status-err)]">*</span>
           </label>
           <${TextInput}
             value=${title.value}

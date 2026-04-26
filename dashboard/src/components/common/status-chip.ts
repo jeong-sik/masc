@@ -11,12 +11,12 @@
 // with `rg cmd-chip`: zero hits outside this file). The tone param
 // was a bare string passed straight into `class=`, which meant
 // calls like `<StatusChip tone="warn">` rendered with no styling
-// at all, while calls like `<StatusChip tone="bg-[var(--ok)]">`
+// at all, while calls like `<StatusChip tone="bg-[var(--color-status-ok)]">`
 // (verdictTone helper) rendered correctly. This rewrite closes the
 // gap without breaking either caller shape:
 //   - Semantic tones ('ok'|'warn'|'bad'|'info'|'neutral'|'') map
 //     to Tailwind classes inside the primitive.
-//   - Raw Tailwind class strings (e.g. "bg-[var(--ok)]") pass
+//   - Raw Tailwind class strings (e.g. "bg-[var(--color-status-ok)]") pass
 //     through unchanged as extra classes.
 // Caller helpers continue to work without audit.
 //
@@ -54,14 +54,14 @@ const BASE_SHAPE =
 const UPPERCASE_CLASS = 'uppercase tracking-wider'
 
 const SEMANTIC_TONE: Record<StatusChipTone, string> = {
-  ok: 'border-[var(--ok-20)] bg-[var(--ok-10)] text-[var(--ok)]',
-  warn: 'border-[var(--warn-20)] bg-[var(--warn-10)] text-[var(--warn)]',
+  ok: 'border-[var(--ok-20)] bg-[var(--ok-10)] text-[var(--color-status-ok)]',
+  warn: 'border-[var(--warn-20)] bg-[var(--warn-10)] text-[var(--color-status-warn)]',
   bad: 'border-[var(--bad-20)] bg-[var(--bad-10)] text-[var(--bad-light)]',
-  info: 'border-[var(--accent-20)] bg-[var(--accent-10)] text-[var(--accent)]',
-  neutral: 'border-[var(--white-10)] bg-[var(--white-5)] text-[var(--text-muted)]',
+  info: 'border-[var(--accent-20)] bg-[var(--accent-10)] text-[var(--color-accent-fg)]',
+  neutral: 'border-[var(--white-10)] bg-[var(--white-5)] text-[var(--color-fg-muted)]',
   paused: 'border-[var(--paused-20)] bg-[var(--paused-10)] text-[var(--paused)]',
   select: 'border-[var(--select-20)] bg-[var(--select-10)] text-[var(--select)]',
-  '': 'border-[var(--white-10)] bg-[var(--white-5)] text-[var(--text-muted)]',
+  '': 'border-[var(--white-10)] bg-[var(--white-5)] text-[var(--color-fg-muted)]',
 }
 
 /** Keeper lifecycle state → StatusChip tone.
@@ -124,7 +124,7 @@ export function keeperStateTone(state: string): StatusChipTone {
 }
 
 /** Pure: true when `tone` is one of the semantic enum members. Raw
-    Tailwind class strings (`bg-[var(--ok)]`) fall through and are
+    Tailwind class strings (`bg-[var(--color-status-ok)]`) fall through and are
     composed as-is. Exposed so higher-level helpers can branch. */
 export function isSemanticTone(tone: string): tone is StatusChipTone {
   return tone in SEMANTIC_TONE

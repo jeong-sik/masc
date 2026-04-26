@@ -34,8 +34,8 @@ describe('ctxColor', () => {
   })
 
   it('returns critical color above 85', () => {
-    expect(ctxColor(86)).toBe('var(--bad)')
-    expect(ctxColor(100)).toBe('var(--bad)')
+    expect(ctxColor(86)).toBe('var(--color-status-err)')
+    expect(ctxColor(100)).toBe('var(--color-status-err)')
   })
 
   it('boundary at exactly 70', () => {

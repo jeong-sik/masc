@@ -51,12 +51,12 @@ describe('truncateLabel', () => {
 describe('spanStyle', () => {
   it('returns task style', () => {
     const style = spanStyle('task')
-    expect(style).toEqual({ bg: 'var(--warn)', text: 'var(--panel-dark)' })
+    expect(style).toEqual({ bg: 'var(--color-status-warn)', text: 'var(--panel-dark)' })
   })
 
   it('returns operation style', () => {
     const style = spanStyle('operation')
-    expect(style).toEqual({ bg: 'var(--ok)', text: 'var(--panel-dark)' })
+    expect(style).toEqual({ bg: 'var(--color-status-ok)', text: 'var(--panel-dark)' })
   })
 
   it('returns autonomy style', () => {

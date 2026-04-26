@@ -38,35 +38,35 @@ export function AgentRuntimeStrip({ name }: { name: string }) {
 
       ${ctxPct != null ? html`
         <div class="flex items-center gap-1.5 text-sm">
-          <span class="text-3xs text-[var(--text-muted)] uppercase tracking-wider">CTX</span>
+          <span class="text-3xs text-[var(--color-fg-muted)] uppercase tracking-wider">CTX</span>
           <div class="w-16 h-1.5 bg-[#1a1a2e] rounded-sm overflow-hidden">
             <div
               class="agent-runtime-ctx-fill rounded-sm ${ctxBarClass(ctxRatio)}"
               style=${{ width: `${ctxPct}%` }}
             ></div>
           </div>
-          <span class="text-sm text-[var(--text-body)] tabular-nums">${ctxPct}%</span>
+          <span class="text-sm text-[var(--color-fg-primary)] tabular-nums">${ctxPct}%</span>
         </div>
       ` : null}
 
       ${generation != null ? html`
         <div class="flex items-center gap-1.5 text-sm">
-          <span class="text-3xs text-[var(--text-muted)] uppercase tracking-wider">GEN</span>
-          <span class="text-sm text-[var(--text-body)] tabular-nums">${generation}</span>
+          <span class="text-3xs text-[var(--color-fg-muted)] uppercase tracking-wider">GEN</span>
+          <span class="text-sm text-[var(--color-fg-primary)] tabular-nums">${generation}</span>
         </div>
       ` : null}
 
       ${model ? html`
         <div class="flex items-center gap-1.5 text-sm">
-          <span class="text-3xs text-[var(--text-muted)] uppercase tracking-wider">${model.label}</span>
-          <span class="text-sm text-[var(--text-body)] font-mono truncate max-w-50">${model.value}</span>
+          <span class="text-3xs text-[var(--color-fg-muted)] uppercase tracking-wider">${model.label}</span>
+          <span class="text-sm text-[var(--color-fg-primary)] font-mono truncate max-w-50">${model.value}</span>
         </div>
       ` : null}
 
       ${activity.ageSeconds != null ? html`
         <div class="flex items-center gap-1.5 text-sm">
-          <span class="text-3xs text-[var(--text-muted)] uppercase tracking-wider">ACTIVITY</span>
-          <span class="text-sm text-[var(--text-body)] tabular-nums">${activity.label} ${formatDuration(activity.ageSeconds)} 전</span>
+          <span class="text-3xs text-[var(--color-fg-muted)] uppercase tracking-wider">ACTIVITY</span>
+          <span class="text-sm text-[var(--color-fg-primary)] tabular-nums">${activity.label} ${formatDuration(activity.ageSeconds)} 전</span>
         </div>
       ` : null}
     </div>

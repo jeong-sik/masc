@@ -26,7 +26,7 @@ stylesheet
     font-family: var(--font-display, 'Cinzel', serif);
     font-size: 13px;
     letter-spacing: 0.26em;
-    color: var(--accent-brass, #968228);
+    color: var(--color-accent-fg, #968228);
     text-transform: uppercase;
     margin: 0;
     flex-shrink: 0;
@@ -34,7 +34,7 @@ stylesheet
   .sec_sub {
     font-family: var(--font-body, 'EB Garamond', serif);
     font-style: italic;
-    color: var(--text-dim, #9a846e);
+    color: var(--color-fg-muted, #9a846e);
     font-size: 13px;
     flex-shrink: 0;
   }
@@ -43,15 +43,15 @@ stylesheet
     height: 1px;
     background: linear-gradient(
       90deg,
-      var(--border-highlight, #5a3028) 0%,
-      var(--border-main, #2a1a14) 60%,
+      var(--color-border-strong, #5a3028) 0%,
+      var(--color-border-default, #2a1a14) 60%,
       transparent 100%
     );
   }
   .sec_right {
     font-family: var(--font-mono, 'JetBrains Mono', monospace);
     font-size: 11px;
-    color: var(--text-dim, #9a846e);
+    color: var(--color-fg-muted, #9a846e);
     font-variant-numeric: tabular-nums;
     flex-shrink: 0;
   }

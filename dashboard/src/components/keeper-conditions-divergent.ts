@@ -116,22 +116,22 @@ export function KeeperConditionsDivergent({ keeper }: { keeper: Keeper }) {
   return html`
     <section class="rounded border border-[var(--warn-24)] bg-[rgba(251,191,36,0.05)] p-3 mb-3">
       <header class="mb-2 flex items-baseline justify-between gap-2">
-        <h3 class="text-2xs font-semibold tracking-1 uppercase text-[var(--warn)]">
+        <h3 class="text-2xs font-semibold tracking-1 uppercase text-[var(--color-status-warn)]">
           ⚠️ 조건-Phase 불일치
         </h3>
-        <span class="text-3xs text-[var(--text-dim)]">phase가 아직 반응하지 않은 관측 신호</span>
+        <span class="text-3xs text-[var(--color-fg-disabled)]">phase가 아직 반응하지 않은 관측 신호</span>
       </header>
       <div class="flex flex-wrap gap-1.5">
         ${divs.map(d => html`
           <span
-            class="px-2 py-0.5 rounded-sm border border-[rgba(251,191,36,0.3)] bg-[var(--warn-8)] text-[var(--warn)] text-2xs font-mono tabular-nums"
+            class="px-2 py-0.5 rounded-sm border border-[rgba(251,191,36,0.3)] bg-[var(--warn-8)] text-[var(--color-status-warn)] text-2xs font-mono tabular-nums"
             title=${d.reason}
           >
             ${d.field}=${String(d.value)}
           </span>
         `)}
       </div>
-      <div class="mt-2 text-3xs text-[var(--text-dim)] leading-snug">
+      <div class="mt-2 text-3xs text-[var(--color-fg-disabled)] leading-snug">
         ${first.reason}${rest.length > 0 ? ` (외 ${rest.length}건, 칩 hover로 확인)` : ''}
       </div>
     </section>

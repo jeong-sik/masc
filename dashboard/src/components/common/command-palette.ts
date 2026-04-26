@@ -168,16 +168,16 @@ export function CommandPalette() {
       placeholder="명령어 또는 에이전트/세션 검색... (⌘/Ctrl+K)"
       hideBreadcrumbs
       style="
-        --ninja-modal-background: var(--bg-panel);
+        --ninja-modal-background: var(--color-bg-surface);
         --ninja-modal-shadow: 0 24px 64px rgba(0,0,0,0.6);
-        --ninja-text-color: var(--text-body);
+        --ninja-text-color: var(--color-fg-primary);
         --ninja-secondary-background-color: var(--white-5);
-        --ninja-secondary-text-color: var(--text-muted);
+        --ninja-secondary-text-color: var(--color-fg-muted);
         --ninja-selected-background: var(--white-10);
-        --ninja-icon-color: var(--text-muted);
+        --ninja-icon-color: var(--color-fg-muted);
         --ninja-key-background: var(--white-10);
-        --ninja-key-text-color: var(--text-strong);
-        --ninja-border-bottom: 1px solid var(--border-base);
+        --ninja-key-text-color: var(--color-fg-secondary);
+        --ninja-border-bottom: 1px solid var(--color-border-default);
       "
     ></ninja-keys>
   `

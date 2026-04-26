@@ -257,39 +257,39 @@ function CharacterPlate({ name }: { name: string }) {
             ${agentEmoji ? html`<span class="text-[1.4em]">${agentEmoji}</span>` : ''}
             ${displayName}
           </h2>
-          ${koreanName ? html`<span class="text-base text-[var(--text-muted)]">(${koreanName})</span>` : ''}
-          ${generation != null ? html`<span class="text-sm font-bold text-[var(--accent)] bg-[var(--accent-10)] border border-[var(--accent-30)] px-1.5 py-px tabular-nums rounded" title="세대 번호 — 핸드오프마다 증가 (레벨/등급 아님)">Gen.${generation}</span>` : null}
+          ${koreanName ? html`<span class="text-base text-[var(--color-fg-muted)]">(${koreanName})</span>` : ''}
+          ${generation != null ? html`<span class="text-sm font-bold text-[var(--color-accent-fg)] bg-[var(--accent-10)] border border-[var(--accent-30)] px-1.5 py-px tabular-nums rounded" title="세대 번호 — 핸드오프마다 증가 (레벨/등급 아님)">Gen.${generation}</span>` : null}
         </div>
 
         <div class="flex items-center gap-1.5 flex-wrap">
           <${StatusBadge} status=${headerStatus} />
-          ${model ? html`<span class="font-[family-name:'IBM_Plex_Mono',monospace] text-2xs text-[var(--text-muted)] bg-[var(--accent-8)] border border-[var(--accent-10)] px-[5px] py-px rounded">${model}</span>` : null}
+          ${model ? html`<span class="font-[family-name:'IBM_Plex_Mono',monospace] text-2xs text-[var(--color-fg-muted)] bg-[var(--accent-8)] border border-[var(--accent-10)] px-[5px] py-px rounded">${model}</span>` : null}
         </div>
 
         ${ctxPct != null ? html`
           <div class="flex items-center gap-2 mt-0.5">
             <span class="text-2xs font-bold text-[var(--ff-gold)] tracking-[1px] w-7">CTX</span>
             <div class="h-1.5 mt-1.5 rounded-sm overflow-hidden bg-[var(--white-10)]" style="flex:1">
-              <div class="h-full rounded-sm transition-[width] duration-[250ms] ease-[ease] motion-reduce:transition-none ${ctxBarClass(ctxRatio) === 'warn' ? 'bg-linear-to-r from-[var(--warn)] to-[var(--warn-bright)]' : ctxBarClass(ctxRatio) === 'bad' ? 'bg-linear-to-r from-[var(--bad)] to-[var(--warn-bright)]' : 'bg-linear-to-r from-[var(--accent)] to-[var(--ok)]'}" style=${{ width: `${ctxPct}%` }}></div>
+              <div class="h-full rounded-sm transition-[width] duration-[250ms] ease-[ease] motion-reduce:transition-none ${ctxBarClass(ctxRatio) === 'warn' ? 'bg-linear-to-r from-[var(--color-status-warn)] to-[var(--warn-bright)]' : ctxBarClass(ctxRatio) === 'bad' ? 'bg-linear-to-r from-[var(--color-status-err)] to-[var(--warn-bright)]' : 'bg-linear-to-r from-[var(--color-accent-fg)] to-[var(--color-status-ok)]'}" style=${{ width: `${ctxPct}%` }}></div>
             </div>
-            <span class="text-sm tabular-nums text-[var(--text-strong)] min-w-9 text-right">${ctxPct}%</span>
+            <span class="text-sm tabular-nums text-[var(--color-fg-secondary)] min-w-9 text-right">${ctxPct}%</span>
             ${keeper?.context_tokens != null && keeper?.context_max != null
-              ? html`<span class="text-2xs tabular-nums text-[var(--text-muted)] font-mono ml-1">${formatTokens(keeper.context_tokens)} / ${formatTokens(keeper.context_max)}</span>`
+              ? html`<span class="text-2xs tabular-nums text-[var(--color-fg-muted)] font-mono ml-1">${formatTokens(keeper.context_tokens)} / ${formatTokens(keeper.context_max)}</span>`
               : null}
           </div>
         ` : null}
 
         <div class="flex gap-2 items-center flex-wrap">
           ${currentWork
-            ? html`<span class="text-base text-[var(--text-body)]">${currentWork}</span>`
-            : html`<span class="text-base text-[var(--text-dim)] italic">대기 중</span>`
+            ? html`<span class="text-base text-[var(--color-fg-primary)]">${currentWork}</span>`
+            : html`<span class="text-base text-[var(--color-fg-disabled)] italic">대기 중</span>`
           }
-          ${workerState ? html`<span class="text-2xs text-[var(--accent)] bg-[var(--accent-8)] px-[5px] py-px rounded-xs">${workerState}</span>` : null}
-          ${workerFocus ? html`<span class="text-2xs text-[var(--text-muted)]">${workerFocus}</span>` : null}
+          ${workerState ? html`<span class="text-2xs text-[var(--color-accent-fg)] bg-[var(--accent-8)] px-[5px] py-px rounded-xs">${workerState}</span>` : null}
+          ${workerFocus ? html`<span class="text-2xs text-[var(--color-fg-muted)]">${workerFocus}</span>` : null}
         </div>
 
         ${lastSeenAt || lastActivity != null ? html`
-          <div class="flex gap-3 flex-wrap text-sm text-[var(--text-muted)]">
+          <div class="flex gap-3 flex-wrap text-sm text-[var(--color-fg-muted)]">
             ${lastSeenAt ? html`<span>${activityLabel}: <${TimeAgo} timestamp=${lastSeenAt} /></span>` : null}
             ${lastActivity != null && (!keeperActivity || !lastSeenAt)
               ? html`<span>${activityLabel} ${formatDuration(lastActivity)} 전</span>`
@@ -298,7 +298,7 @@ function CharacterPlate({ name }: { name: string }) {
         ` : null}
 
         ${keeperIdent || continuitySummary || brief?.related_session_id ? html`
-          <div class="flex gap-3 flex-wrap text-sm text-[var(--text-muted)]">
+          <div class="flex gap-3 flex-wrap text-sm text-[var(--color-fg-muted)]">
             ${keeperIdent ? html`<span>${keeperIdent}</span>` : null}
             ${brief?.related_session_id ? html`<span>세션 ${brief.related_session_id}</span>` : null}
             ${continuitySummary ? html`<span>${continuitySummary}</span>` : null}
@@ -371,9 +371,9 @@ export function AgentProfile({ name }: { name: string }) {
           ${owned.length === 0
             ? html`<${EmptyState} message="할당된 태스크 없음" compact />`
             : html`<div class="flex flex-col gap-2">${owned.map(t => html`
-                <div class="flex items-center gap-2 border border-[var(--card-border)] bg-[var(--white-3)] px-2.5 py-2 rounded" key=${t.id}>
-                  <span class="text-3xs py-0.5 px-2 border border-solid border-[var(--accent-36)] bg-[var(--accent-12)] text-[var(--accent)] whitespace-nowrap rounded-sm">${t.id}</span>
-                  <span class="flex-1 text-[var(--text-strong)]">${t.title}</span>
+                <div class="flex items-center gap-2 border border-[var(--color-border-default)] bg-[var(--white-3)] px-2.5 py-2 rounded" key=${t.id}>
+                  <span class="text-3xs py-0.5 px-2 border border-solid border-[var(--accent-36)] bg-[var(--accent-12)] text-[var(--color-accent-fg)] whitespace-nowrap rounded-sm">${t.id}</span>
+                  <span class="flex-1 text-[var(--color-fg-secondary)]">${t.title}</span>
                   <${StatusBadge} status=${t.status} />
                 </div>
               `)}</div>`}
@@ -424,7 +424,7 @@ export function AgentProfile({ name }: { name: string }) {
                 return html`
                   <div class="agent-timeline-event flex items-baseline gap-1.5 py-1 px-2 text-sm transition-[background] duration-100 rounded hover:bg-[var(--white-4)]" key=${idx}>
                     <span class="text-2xs font-semibold text-[var(--ff-gold)] min-w-8">${timelineEventLabel(evt.type)}</span>
-                    ${title ? html`<span class="flex-1 text-sm text-[var(--text-body)]">${trimText(title, 80)}</span>` : null}
+                    ${title ? html`<span class="flex-1 text-sm text-[var(--color-fg-primary)]">${trimText(title, 80)}</span>` : null}
                     ${evt.ts ? html`<${TimeAgo} timestamp=${evt.ts} />` : null}
                   </div>
                 `
@@ -449,12 +449,12 @@ export function AgentProfile({ name }: { name: string }) {
                       placeholder="활동 필터 (메시지 본문)"
                       aria-label="프로젝트 활동 필터"
                       onInput=${(e: Event) => { activityQuery.value = (e.target as HTMLInputElement).value }}
-                      class="w-full rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+                      class="w-full rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
                     />
                     ${isFiltering && visible.length === 0
-                      ? html`<div class="py-4 text-center text-2xs text-[var(--text-dim)]">필터 결과 없음 (${lines.length} items)</div>`
+                      ? html`<div class="py-4 text-center text-2xs text-[var(--color-fg-disabled)]">필터 결과 없음 (${lines.length} items)</div>`
                       : html`<div class="max-h-[210px] overflow-y-auto flex flex-col gap-1.5">${visible.map((line: string, idx: number) =>
-                          html`<div key=${idx} class="border border-[var(--card-border)] bg-[var(--white-3)] px-2.5 py-2 font-[family-name:'IBM_Plex_Mono','Fira_Code',monospace] text-sm text-[var(--text-body)] leading-[1.4] rounded">${line}</div>`)}</div>`}
+                          html`<div key=${idx} class="border border-[var(--color-border-default)] bg-[var(--white-3)] px-2.5 py-2 font-[family-name:'IBM_Plex_Mono','Fira_Code',monospace] text-sm text-[var(--color-fg-primary)] leading-[1.4] rounded">${line}</div>`)}</div>`}
                   </div>
                 `
               })()}
@@ -463,9 +463,9 @@ export function AgentProfile({ name }: { name: string }) {
         ${(profileData?.taskHistories ?? []).length > 0 ? html`
           <${Card} title="태스크 이력" class="ff-card rounded col-span-full">
             <div class="agent-history-list">${(profileData?.taskHistories ?? []).map((row: TaskHistoryRow) => html`
-              <div class="border border-[var(--card-border)] rounded-[10px] bg-[var(--white-2)] p-2.5" key=${row.taskId}>
-                <div class="mb-2"><span class="text-3xs py-0.5 px-2 border border-solid border-[var(--accent-36)] bg-[var(--accent-12)] text-[var(--accent)] whitespace-nowrap rounded-sm">${row.taskId}</span></div>
-                <pre class="m-0 whitespace-pre-wrap text-sm leading-normal text-[var(--text-strong)] font-[family-name:'IBM_Plex_Mono','Fira_Code',monospace]">${row.text || '이력 없음'}</pre>
+              <div class="border border-[var(--color-border-default)] rounded-[10px] bg-[var(--white-2)] p-2.5" key=${row.taskId}>
+                <div class="mb-2"><span class="text-3xs py-0.5 px-2 border border-solid border-[var(--accent-36)] bg-[var(--accent-12)] text-[var(--color-accent-fg)] whitespace-nowrap rounded-sm">${row.taskId}</span></div>
+                <pre class="m-0 whitespace-pre-wrap text-sm leading-normal text-[var(--color-fg-secondary)] font-[family-name:'IBM_Plex_Mono','Fira_Code',monospace]">${row.text || '이력 없음'}</pre>
               </div>
             `)}</div>
           <//>

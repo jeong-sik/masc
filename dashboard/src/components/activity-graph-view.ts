@@ -14,11 +14,11 @@ const hoveredNodeId = signal<string | null>(null)
 function nodeColor(kind: string, status: string): string {
   if (status === 'offline' || status === 'retired') return 'var(--slate-500)'
   switch (kind) {
-    case 'keeper': return 'var(--ok)'
+    case 'keeper': return 'var(--color-status-ok)'
     case 'agent': return 'var(--cyan)'
-    case 'task': return 'var(--warn)'
+    case 'task': return 'var(--color-status-warn)'
     case 'decision': return 'var(--purple)'
-    case 'operation': return 'var(--ok)'
+    case 'operation': return 'var(--color-status-ok)'
     case 'debate': return '#fb923c'
     case 'post': return '#f472b6'
     default: return 'var(--slate-400)'
@@ -102,7 +102,7 @@ export function GraphView({ data }: GraphViewProps) {
           border: (n.status === 'offline' || n.status === 'retired') ? 'var(--slate-600)' : color,
           highlight: {
             background: color,
-            border: 'var(--warn)'
+            border: 'var(--color-status-warn)'
           },
           hover: {
             background: color,
@@ -242,19 +242,19 @@ export function GraphView({ data }: GraphViewProps) {
   }
 
   return html`
-    <div class="relative w-full my-3 rounded border border-[var(--card-border)] bg-[#0f1117]">
+    <div class="relative w-full my-3 rounded border border-[var(--color-border-default)] bg-[#0f1117]">
       <div ref=${containerRef} class="w-full h-90" role="img" aria-label="에이전트 활동 네트워크 그래프"></div>
     </div>
     <div class="flex flex-wrap gap-x-4 gap-y-1 mt-1 px-1">
       ${[
-        { label: '키퍼', color: 'var(--ok)' },
+        { label: '키퍼', color: 'var(--color-status-ok)' },
         { label: '에이전트', color: 'var(--cyan)' },
-        { label: '작업', color: 'var(--warn)' },
+        { label: '작업', color: 'var(--color-status-warn)' },
         { label: '결정', color: 'var(--purple)' },
-        { label: '작전', color: 'var(--ok)' },
+        { label: '작전', color: 'var(--color-status-ok)' },
         { label: '게시글', color: '#f472b6' },
       ].map(({ label, color }) => html`
-        <div class="flex items-center gap-1.5 text-2xs text-[var(--text-muted)]" key=${label}>
+        <div class="flex items-center gap-1.5 text-2xs text-[var(--color-fg-muted)]" key=${label}>
           <span class="w-2.5 h-2.5 rounded-full inline-block" style="background:${color}"></span>
           ${label}
         </div>
@@ -262,36 +262,36 @@ export function GraphView({ data }: GraphViewProps) {
     </div>
 
     ${selectedNode ? html`
-      <div class="rounded border border-[var(--card-border)] bg-[var(--card)] p-4 mt-2">
+      <div class="rounded border border-[var(--color-border-default)] bg-[var(--card)] p-4 mt-2">
         <div class="flex items-center gap-3 mb-3">
           <strong class="text-lg text-[var(--text-near-white)]">${selectedNode.label}</strong>
           <span class="py-0.5 px-2 bg-[var(--slate-gray-15)] text-2xs text-[var(--text-slate)] rounded">${kindLabel(selectedNode.kind)}</span>
-          <span class="py-0.5 px-2 rounded text-2xs ${selectedNode.status === 'active' || selectedNode.status === 'done' ? 'text-[var(--ok)] bg-[var(--ok-10)]' : selectedNode.status === 'offline' || selectedNode.status === 'retired' ? 'text-[var(--text-slate)] bg-[var(--slate-gray-10)]' : 'text-[var(--text-slate-light)] bg-[var(--slate-gray-10)]'}">${statusLabel(selectedNode.status)}</span>
-          <button type="button" class="ml-auto text-[var(--text-muted)] hover:text-[var(--text-slate-light)] text-sm cursor-pointer bg-transparent border-none" onClick=${() => { selectedNodeId.value = null }}>닫기</button>
+          <span class="py-0.5 px-2 rounded text-2xs ${selectedNode.status === 'active' || selectedNode.status === 'done' ? 'text-[var(--color-status-ok)] bg-[var(--ok-10)]' : selectedNode.status === 'offline' || selectedNode.status === 'retired' ? 'text-[var(--text-slate)] bg-[var(--slate-gray-10)]' : 'text-[var(--text-slate-light)] bg-[var(--slate-gray-10)]'}">${statusLabel(selectedNode.status)}</span>
+          <button type="button" class="ml-auto text-[var(--color-fg-muted)] hover:text-[var(--text-slate-light)] text-sm cursor-pointer bg-transparent border-none" onClick=${() => { selectedNodeId.value = null }}>닫기</button>
         </div>
         <div class="grid grid-cols-3 gap-3 mb-3">
           <div class="text-center">
-            <div class="text-3xs text-[var(--text-muted)] uppercase tracking-1">중요도</div>
+            <div class="text-3xs text-[var(--color-fg-muted)] uppercase tracking-1">중요도</div>
             <div class="text-xl font-bold text-[var(--text-near-white)] tabular-nums">${(selectedNode.semantic_weight ?? selectedNode.weight).toFixed(1)}</div>
           </div>
           <div class="text-center">
-            <div class="text-3xs text-[var(--text-muted)] uppercase tracking-1">빈도</div>
+            <div class="text-3xs text-[var(--color-fg-muted)] uppercase tracking-1">빈도</div>
             <div class="text-xl font-bold text-[var(--text-slate-light)] tabular-nums">${selectedNode.weight}</div>
           </div>
           <div class="text-center">
-            <div class="text-3xs text-[var(--text-muted)] uppercase tracking-1">연결</div>
+            <div class="text-3xs text-[var(--color-fg-muted)] uppercase tracking-1">연결</div>
             <div class="text-xl font-bold text-[var(--text-slate-light)] tabular-nums">${connectedEdges.length}</div>
           </div>
         </div>
         ${connectedEdges.length > 0 ? html`
           <div class="border-t border-[var(--slate-gray-10)] pt-3">
-            <div class="text-3xs text-[var(--text-muted)] uppercase tracking-1 mb-2">연결된 관계</div>
+            <div class="text-3xs text-[var(--color-fg-muted)] uppercase tracking-1 mb-2">연결된 관계</div>
             <div class="flex flex-col gap-1.5 max-h-40 overflow-y-auto">
               ${connectedEdges.slice(0, 20).map(({ edge, otherLabel }) => html`
                 <div class="flex items-center gap-2 text-sm py-1 px-2 rounded bg-[rgba(15,23,42,0.4)]" key=${edge.id ?? `${edge.source}-${edge.kind}-${edge.target}`}>
                   <span class="text-[var(--text-slate-light)]">${otherLabel}</span>
-                  <span class="text-2xs text-[var(--text-muted)]">${edgeKindLabel(edge.kind)}</span>
-                  ${edge.active ? html`<span class="w-1.5 h-1.5 rounded-full bg-[var(--ok)]"></span>` : null}
+                  <span class="text-2xs text-[var(--color-fg-muted)]">${edgeKindLabel(edge.kind)}</span>
+                  ${edge.active ? html`<span class="w-1.5 h-1.5 rounded-full bg-[var(--color-status-ok)]"></span>` : null}
                 </div>
               `)}
             </div>

@@ -140,17 +140,17 @@ export function VerificationSpecsPanel() {
     <div class="flex flex-col gap-4">
       <div class="flex items-center gap-3 flex-wrap">
         <button
-          class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-3 py-1 text-xs text-[var(--text-strong)] hover:bg-[var(--bg-panel-hover)]"
+          class="rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] px-3 py-1 text-xs text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)]"
           onClick=${() => void loadSpecs(resource)}
         >
           새로고침
         </button>
-        ${current.loading ? html`<span class="text-xs text-[var(--text-muted)]">로딩 중...</span>` : null}
+        ${current.loading ? html`<span class="text-xs text-[var(--color-fg-muted)]">로딩 중...</span>` : null}
         ${data?.updated_at
-          ? html`<span class="text-xs text-[var(--text-muted)]">specs · ${data.updated_at}</span>`
+          ? html`<span class="text-xs text-[var(--color-fg-muted)]">specs · ${data.updated_at}</span>`
           : null}
         ${data
-          ? html`<span class="text-xs text-[var(--text-muted)]">
+          ? html`<span class="text-xs text-[var(--color-fg-muted)]">
               ${categoryFilter.value === 'all' && !searchQuery.value
                 ? `총 ${data.count}건`
                 : `${filtered.length} / ${data.count}건`}

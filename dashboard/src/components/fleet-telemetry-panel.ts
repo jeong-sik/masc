@@ -90,9 +90,9 @@ function trendArrow(direction: TrendDirection): string {
 }
 
 function trendColorClass(direction: TrendDirection, metric: MetricKey): string {
-  if (direction === 'flat') return 'text-[var(--text-dim)]'
+  if (direction === 'flat') return 'text-[var(--color-fg-disabled)]'
   const bad = (direction === 'up' && isUpBad(metric)) || (direction === 'down' && !isUpBad(metric))
-  return bad ? 'text-[var(--bad-light)]' : 'text-[var(--ok)]'
+  return bad ? 'text-[var(--bad-light)]' : 'text-[var(--color-status-ok)]'
 }
 
 function sparklineColor(metric: MetricKey, direction: TrendDirection): string {
@@ -102,11 +102,11 @@ function sparklineColor(metric: MetricKey, direction: TrendDirection): string {
 }
 
 function auditFreshnessClass(isoTimestamp: string | null): string {
-  if (!isoTimestamp) return 'text-[var(--text-dim)]'
+  if (!isoTimestamp) return 'text-[var(--color-fg-disabled)]'
   const ageMs = Date.now() - new Date(isoTimestamp).getTime()
   if (ageMs < 5 * 60 * 1000) return 'text-[var(--text)]'
-  if (ageMs < 15 * 60 * 1000) return 'text-[var(--text-dim)]'
-  return 'text-[var(--warn)]'
+  if (ageMs < 15 * 60 * 1000) return 'text-[var(--color-fg-disabled)]'
+  return 'text-[var(--color-status-warn)]'
 }
 
 function SummaryCard({
@@ -125,13 +125,13 @@ function SummaryCard({
       ? 'border-[var(--ok-20)] bg-[var(--ok-10)]'
       : tone === 'warn'
         ? 'border-[var(--warn-20)] bg-[var(--warn-10)]'
-        : 'border-[var(--card-border)] bg-[var(--white-1)]'
+        : 'border-[var(--color-border-default)] bg-[var(--white-1)]'
 
   return html`
     <div class="rounded border ${toneClass} p-3">
-      <div class="text-3xs uppercase tracking-wider text-[var(--text-dim)]">${title}</div>
+      <div class="text-3xs uppercase tracking-wider text-[var(--color-fg-disabled)]">${title}</div>
       <div class="mt-1 text-xl font-semibold text-[var(--text)]">${value}</div>
-      <div class="mt-1 text-2xs leading-relaxed text-[var(--text-dim)]">${detail}</div>
+      <div class="mt-1 text-2xs leading-relaxed text-[var(--color-fg-disabled)]">${detail}</div>
     </div>
   `
 }
@@ -139,8 +139,8 @@ function SummaryCard({
 function WarningBanner({ warnings }: { warnings: string[] }) {
   if (warnings.length === 0) return null
   return html`
-    <div class="rounded border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs text-[var(--warn)]">
-      <div class="font-medium text-[var(--warn)]">부분 텔레메트리</div>
+    <div class="rounded border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs text-[var(--color-status-warn)]">
+      <div class="font-medium text-[var(--color-status-warn)]">부분 텔레메트리</div>
       <div class="mt-1 flex flex-col gap-1">
         ${warnings.map(warning => html`<div>${warning}</div>`)}
       </div>
@@ -155,21 +155,21 @@ function readinessTone(status: string | null | undefined): 'neutral' | 'ok' | 'w
 }
 
 function readinessStatusClass(status: string | null | undefined): string {
-  if (status === 'ok') return 'text-[var(--ok)]'
-  if (status === 'warn') return 'text-[var(--warn)]'
+  if (status === 'ok') return 'text-[var(--color-status-ok)]'
+  if (status === 'warn') return 'text-[var(--color-status-warn)]'
   if (status === 'bad') return 'text-[var(--bad-light)]'
-  return 'text-[var(--text-dim)]'
+  return 'text-[var(--color-fg-disabled)]'
 }
 
 function attentionSeverityClass(severity: string | null | undefined): string {
   if (severity === 'bad') return 'border-[var(--bad-20)] bg-[var(--bad-10)] text-[var(--bad-light)]'
-  if (severity === 'warn') return 'border-[var(--warn-20)] bg-[var(--warn-10)] text-[var(--warn)]'
-  return 'border-[var(--card-border)] bg-[var(--white-1)] text-[var(--text-dim)]'
+  if (severity === 'warn') return 'border-[var(--warn-20)] bg-[var(--warn-10)] text-[var(--color-status-warn)]'
+  return 'border-[var(--color-border-default)] bg-[var(--white-1)] text-[var(--color-fg-disabled)]'
 }
 
 function ReadinessPillarCard({ pillar }: { pillar: DashboardReadinessPillar }) {
   return html`
-    <div class="rounded border border-[var(--card-border)] bg-[var(--white-1)] p-3">
+    <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-1)] p-3">
       <div class="flex items-center justify-between gap-3">
         <div class="text-2xs font-medium text-[var(--text)]">${pillar.label}</div>
         <div class="font-mono text-2xs ${readinessStatusClass(pillar.status)}">
@@ -179,7 +179,7 @@ function ReadinessPillarCard({ pillar }: { pillar: DashboardReadinessPillar }) {
       <div class="mt-1 text-3xs ${readinessStatusClass(pillar.status)}">${pillar.summary}</div>
       ${pillar.blocking_reasons.length > 0
         ? html`
-          <div class="mt-2 flex flex-col gap-1 text-3xs text-[var(--text-dim)]">
+          <div class="mt-2 flex flex-col gap-1 text-3xs text-[var(--color-fg-disabled)]">
             ${pillar.blocking_reasons.slice(0, 2).map(reason => html`<div>${reason}</div>`)}
           </div>
         `
@@ -191,7 +191,7 @@ function ReadinessPillarCard({ pillar }: { pillar: DashboardReadinessPillar }) {
 function AttentionEventList({ events }: { events: DashboardAttentionEvent[] }) {
   if (events.length === 0) {
     return html`
-      <div class="rounded border border-[var(--card-border)] bg-[var(--white-1)] p-3 text-2xs text-[var(--text-dim)]">
+      <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-1)] p-3 text-2xs text-[var(--color-fg-disabled)]">
         No decision-needed or blocker events are active.
       </div>
     `
@@ -213,7 +213,7 @@ function AttentionEventList({ events }: { events: DashboardAttentionEvent[] }) {
               : null}
           </div>
           ${event.recommended_action
-            ? html`<div class="mt-1 text-3xs text-[var(--text-dim)]">Next: ${event.recommended_action}</div>`
+            ? html`<div class="mt-1 text-3xs text-[var(--color-fg-disabled)]">Next: ${event.recommended_action}</div>`
             : null}
         </div>
       `)}
@@ -231,7 +231,7 @@ function ControlRoomPanel({ state }: { state: FleetTelemetryState }) {
 
   if (!truth || !readiness) {
     return html`
-      <div class="rounded border border-[var(--card-border)] bg-[var(--white-1)] p-3 text-2xs text-[var(--text-dim)]">
+      <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-1)] p-3 text-2xs text-[var(--color-fg-disabled)]">
         Control room readiness is unavailable for this refresh.
       </div>
     `
@@ -268,13 +268,13 @@ function ControlRoomPanel({ state }: { state: FleetTelemetryState }) {
 
       <div class="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,2fr)_minmax(0,1.3fr)]">
         <div>
-          <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--text-dim)]">준비 상태 항목</div>
+          <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--color-fg-disabled)]">준비 상태 항목</div>
           <div class="grid grid-cols-1 gap-2 md:grid-cols-2">
             ${readiness.pillars.map(pillar => html`<${ReadinessPillarCard} pillar=${pillar} />`)}
           </div>
         </div>
         <div>
-          <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--text-dim)]">주의 대기열</div>
+          <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--color-fg-disabled)]">주의 대기열</div>
           <${AttentionEventList} events=${attentionEvents} />
         </div>
       </div>
@@ -295,19 +295,19 @@ function PressureWatchlist({ rows }: { rows: FleetRow[] }) {
 
   if (watchlist.length === 0) {
     return html`
-      <div class="rounded border border-[var(--card-border)] bg-[var(--white-1)] p-3 text-2xs text-[var(--text-dim)]">
+      <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-1)] p-3 text-2xs text-[var(--color-fg-disabled)]">
         No keepers are near context pressure or stale activity thresholds.
       </div>
     `
   }
 
   return html`
-    <div class="rounded border border-[var(--card-border)] bg-[var(--white-1)]">
+    <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-1)]">
       ${watchlist.map(row => html`
-        <div class="flex items-center justify-between gap-3 border-b border-[var(--card-border)] px-3 py-2 text-2xs last:border-b-0">
+        <div class="flex items-center justify-between gap-3 border-b border-[var(--color-border-default)] px-3 py-2 text-2xs last:border-b-0">
           <div class="min-w-0">
             <div class="font-mono text-[var(--text)]">${row.name}</div>
-            <div class="text-[var(--text-dim)]">
+            <div class="text-[var(--color-fg-disabled)]">
               ${row.last_activity_ago_s != null && row.last_activity_ago_s >= STALE_ACTIVITY_SEC
                 ? `stale ${formatActivitySignal(row)}`
                 : `ctx ${formatPercent(row.context_ratio * 100, 1)}`}
@@ -315,7 +315,7 @@ function PressureWatchlist({ rows }: { rows: FleetRow[] }) {
           </div>
           <div class="text-right">
             <div class="font-mono ${pressureClass(row.context_ratio)}">${formatPercent(row.context_ratio * 100, 1)}</div>
-            <div class="text-[var(--text-dim)]">${formatActivitySignal(row)}</div>
+            <div class="text-[var(--color-fg-disabled)]">${formatActivitySignal(row)}</div>
           </div>
         </div>
       `)}
@@ -349,14 +349,14 @@ function TrendCell({ name, metric, value, valueClass }: {
 
 function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (name: string) => void }) {
   if (rows.length === 0) {
-    return html`<div class="text-2xs text-[var(--text-dim)]">Keeper 데이터 없음.</div>`
+    return html`<div class="text-2xs text-[var(--color-fg-disabled)]">Keeper 데이터 없음.</div>`
   }
 
   return html`
     <div class="overflow-x-auto">
       <table class="w-full text-2xs">
         <thead>
-          <tr class="border-b border-[var(--card-border)] text-[var(--text-dim)]">
+          <tr class="border-b border-[var(--color-border-default)] text-[var(--color-fg-disabled)]">
             <th class="py-1 text-left font-normal">Keeper</th>
             <th class="py-1 text-right font-normal">Status</th>
             <th class="py-1 text-right font-normal">Activity</th>
@@ -386,9 +386,9 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
             const rowHintClass =
               diagnosticState === 'offline' || diagnosticState === 'dead'
                 ? 'text-[var(--bad-light)]'
-                : 'text-[var(--warn)]'
+                : 'text-[var(--color-status-warn)]'
             return html`
-            <tr class="border-b border-[var(--card-border)] border-opacity-30 align-top">
+            <tr class="border-b border-[var(--color-border-default)] border-opacity-30 align-top">
               <td class="py-1.5">
                 <div class="font-mono text-[var(--text)]">${row.name}</div>
                 ${rowHint
@@ -398,14 +398,14 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
                     </div>
                   `
                   : null}
-                <div class="max-w-60 truncate text-3xs text-[var(--text-dim)]" title=${toolInfo.title}>
+                <div class="max-w-60 truncate text-3xs text-[var(--color-fg-disabled)]" title=${toolInfo.title}>
                   ${toolInfo.label}
                 </div>
                 <div class="mt-1 flex max-w-60 flex-wrap gap-1">
                   <span
                     class=${row.goal_linked
-                      ? 'rounded bg-[var(--ok-10)] px-1.5 py-0.5 text-3xs text-[var(--ok)]'
-                      : 'rounded bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs text-[var(--warn)]'}
+                      ? 'rounded bg-[var(--ok-10)] px-1.5 py-0.5 text-3xs text-[var(--color-status-ok)]'
+                      : 'rounded bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs text-[var(--color-status-warn)]'}
                     title=${row.goal_label ?? '이 키퍼에 연결된 활성 목표가 없습니다.'}
                   >
                     ${row.goal_label
@@ -414,8 +414,8 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
                   </span>
                   <span
                     class=${row.sandbox_profile
-                      ? 'rounded bg-[var(--white-8)] px-1.5 py-0.5 text-3xs text-[var(--text-dim)]'
-                      : 'rounded bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs text-[var(--warn)]'}
+                      ? 'rounded bg-[var(--white-8)] px-1.5 py-0.5 text-3xs text-[var(--color-fg-disabled)]'
+                      : 'rounded bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs text-[var(--color-status-warn)]'}
                     title=${row.effective_sandbox_image ?? row.sandbox_profile ?? '샌드박스 프로필 정보 없음.'}
                   >
                     ${row.sandbox_profile ? `sandbox ${row.sandbox_profile}` : 'sandbox unknown'}
@@ -425,7 +425,7 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
                     : null}
                 </div>
                 ${row.goal_label
-                  ? html`<div class="max-w-60 truncate text-3xs text-[var(--text-dim)]" title=${row.goal_label}>${row.goal_label}</div>`
+                  ? html`<div class="max-w-60 truncate text-3xs text-[var(--color-fg-disabled)]" title=${row.goal_label}>${row.goal_label}</div>`
                   : null}
                 ${row.sandbox_last_error
                   ? html`
@@ -436,7 +436,7 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
                   : null}
               </td>
               <td class="py-1.5 text-right font-mono ${statusClass(row)}">${row.status}</td>
-              <td class="py-1.5 text-right text-[var(--text-dim)]">${formatActivitySignal(row)}</td>
+              <td class="py-1.5 text-right text-[var(--color-fg-disabled)]">${formatActivitySignal(row)}</td>
               <td class="py-1.5 text-right text-3xs ${auditFreshnessClass(row.tool_audit_at)}" title=${row.tool_audit_at ?? ''}>
                 ${row.tool_audit_at ? formatTimeAgo(row.tool_audit_at) : '-'}
               </td>
@@ -458,19 +458,19 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
               <${TrendCell}
                 name=${row.name} metric="last_latency_ms"
                 value=${formatLatency(row.last_latency_ms)}
-                valueClass="text-[var(--text-dim)]"
+                valueClass="text-[var(--color-fg-disabled)]"
               />
-              <td class="py-1.5 text-right text-3xs text-[var(--text-dim)]">${row.model}</td>
+              <td class="py-1.5 text-right text-3xs text-[var(--color-fg-disabled)]">${row.model}</td>
               <td class="py-1.5 text-center">
                 ${row.budget_source === 'override_invalid'
                   ? html`<span class="rounded bg-[var(--bad-10)] px-1.5 py-0.5 text-3xs font-semibold text-[var(--bad-light)]" title="TOML override가 범위를 벗어남">ERR</span>`
                   : row.budget_source === 'override'
-                    ? html`<span class="rounded bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs font-semibold text-[var(--warn)]" title="TOML override 적용됨">OVR</span>`
-                    : html`<span class="text-3xs text-[var(--text-dim)]">\u2014</span>`}
+                    ? html`<span class="rounded bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs font-semibold text-[var(--color-status-warn)]" title="TOML override 적용됨">OVR</span>`
+                    : html`<span class="text-3xs text-[var(--color-fg-disabled)]">\u2014</span>`}
               </td>
               <td class="py-1.5 text-center">
                 <button
-                  class="rounded p-0.5 text-[var(--text-dim)] hover:text-[var(--bad-light)] hover:bg-[var(--bad-10)] transition-colors"
+                  class="rounded p-0.5 text-[var(--color-fg-disabled)] hover:text-[var(--bad-light)] hover:bg-[var(--bad-10)] transition-colors"
                   onClick=${() => onReset(row.name)}
                   title="초기화"
                   aria-label=${`${row.name} 초기화`}
@@ -488,21 +488,21 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
 
 function TelemetrySourcesPanel({ sources }: { sources: TelemetrySourceSummary[] }) {
   if (sources.length === 0) {
-    return html`<div class="text-2xs text-[var(--text-dim)]">Telemetry store summary is unavailable.</div>`
+    return html`<div class="text-2xs text-[var(--color-fg-disabled)]">Telemetry store summary is unavailable.</div>`
   }
 
   const sorted = [...sources].sort((a, b) => b.entry_count - a.entry_count)
   return html`
     <div class="grid grid-cols-1 gap-2 md:grid-cols-2">
       ${sorted.map(source => html`
-        <div class="rounded border border-[var(--card-border)] bg-[var(--white-1)] p-3">
+        <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-1)] p-3">
           <div class="flex items-center justify-between gap-3">
             <div class="text-2xs font-medium text-[var(--text)]">${sourceLabel(source.source)}</div>
             <div class="font-mono text-2xs ${sourceCountClass(source)}">
               ${source.entry_count.toLocaleString()}
             </div>
           </div>
-          <div class="mt-1 text-3xs text-[var(--text-dim)]">${sourceDetail(source)}</div>
+          <div class="mt-1 text-3xs text-[var(--color-fg-disabled)]">${sourceDetail(source)}</div>
         </div>
       `)}
     </div>
@@ -511,7 +511,7 @@ function TelemetrySourcesPanel({ sources }: { sources: TelemetrySourceSummary[] 
 
 function FailureCategoryPanel({ toolQuality }: { toolQuality: ToolQualityResponse }) {
   if (toolQuality.failure_categories.length === 0) {
-    return html`<div class="text-2xs text-[var(--text-dim)]">최근 실패 카테고리 없음.</div>`
+    return html`<div class="text-2xs text-[var(--color-fg-disabled)]">최근 실패 카테고리 없음.</div>`
   }
 
   const top = toolQuality.failure_categories.slice(0, 8)
@@ -528,7 +528,7 @@ function FailureCategoryPanel({ toolQuality }: { toolQuality: ToolQualityRespons
             ></div>
             <span class="truncate font-mono text-[var(--bad-light)]" title=${category.category}>${category.category}</span>
           </div>
-          <span class="text-[var(--text-dim)]">${category.count}</span>
+          <span class="text-[var(--color-fg-disabled)]">${category.count}</span>
         </div>
       `)}
     </div>
@@ -689,22 +689,22 @@ export function FleetTelemetryPanel() {
         <div class="flex items-center gap-3">
           <h2 class="text-sm font-medium">Keeper 텔레메트리</h2>
           <div class="flex items-center gap-2 text-3xs">
-            ${activeCount > 0 ? html`<span class="rounded-sm bg-[var(--ok-10)] px-1.5 py-0.5 text-[var(--ok)]">${activeCount} 가동</span>` : null}
-            ${attentionCount > 0 ? html`<span class="rounded-sm bg-[var(--warn-10)] px-1.5 py-0.5 text-[var(--warn)]">${attentionCount} 주의</span>` : null}
-            ${offlineCount > 0 ? html`<span class="rounded-sm bg-[var(--white-8)] px-1.5 py-0.5 text-[var(--text-dim)]">${offlineCount} 오프라인</span>` : null}
-            ${budgetOverrideCount > 0 ? html`<span class="rounded-sm bg-[var(--warn-10)] px-1.5 py-0.5 text-[var(--warn)]">${budgetOverrideCount} 예산 재정의</span>` : null}
+            ${activeCount > 0 ? html`<span class="rounded-sm bg-[var(--ok-10)] px-1.5 py-0.5 text-[var(--color-status-ok)]">${activeCount} 가동</span>` : null}
+            ${attentionCount > 0 ? html`<span class="rounded-sm bg-[var(--warn-10)] px-1.5 py-0.5 text-[var(--color-status-warn)]">${attentionCount} 주의</span>` : null}
+            ${offlineCount > 0 ? html`<span class="rounded-sm bg-[var(--white-8)] px-1.5 py-0.5 text-[var(--color-fg-disabled)]">${offlineCount} 오프라인</span>` : null}
+            ${budgetOverrideCount > 0 ? html`<span class="rounded-sm bg-[var(--warn-10)] px-1.5 py-0.5 text-[var(--color-status-warn)]">${budgetOverrideCount} 예산 재정의</span>` : null}
           </div>
         </div>
         <div class="flex items-center gap-2">
-          <span class="text-3xs text-[var(--text-dim)]">
+          <span class="text-3xs text-[var(--color-fg-disabled)]">
             ${value.updated_at ? `${formatTimeAgo(value.updated_at)} 갱신` : ''}
           </span>
           <button
-            class="rounded bg-[var(--bg-subtle)] px-2 py-0.5 text-3xs text-[var(--text-dim)] hover:text-[var(--text)]"
+            class="rounded bg-[var(--bg-subtle)] px-2 py-0.5 text-3xs text-[var(--color-fg-disabled)] hover:text-[var(--text)]"
             onClick=${() => { void loadFleetTelemetry() }}
             aria-label="Keeper 텔레메트리 새로고침"
           >새로고침</button>
-          <span class="text-3xs text-[var(--text-dim)]">${formatAutoRefreshLabel(TELEMETRY_AUTO_REFRESH_MS)}</span>
+          <span class="text-3xs text-[var(--color-fg-disabled)]">${formatAutoRefreshLabel(TELEMETRY_AUTO_REFRESH_MS)}</span>
         </div>
       </div>
 
@@ -742,39 +742,39 @@ export function FleetTelemetryPanel() {
       </div>
 
       <div>
-        <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--text-dim)]">함대 통제실</div>
+        <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--color-fg-disabled)]">함대 통제실</div>
         <${ControlRoomPanel} state=${value} />
       </div>
 
       <div>
-        <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--text-dim)]">압박 감시 목록</div>
+        <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--color-fg-disabled)]">압박 감시 목록</div>
         <${PressureWatchlist} rows=${value.rows} />
       </div>
 
       <div>
         <div class="mb-1 flex items-center justify-between gap-2">
-          <div class="text-3xs uppercase tracking-wider text-[var(--text-dim)]">Keeper 비교</div>
+          <div class="text-3xs uppercase tracking-wider text-[var(--color-fg-disabled)]">Keeper 비교</div>
           <input
             type="search"
             value=${query.value}
             placeholder="name / model / blocker 필터"
             aria-label="Keeper 필터"
             onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
-            class="min-w-40 max-w-60 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+            class="min-w-40 max-w-60 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
           />
         </div>
         ${isFiltering && visibleRows.length === 0 && value.rows.length > 0
-          ? html`<div class="py-4 text-center text-2xs text-[var(--text-dim)]">필터 결과 없음 (${value.rows.length} keepers)</div>`
+          ? html`<div class="py-4 text-center text-2xs text-[var(--color-fg-disabled)]">필터 결과 없음 (${value.rows.length} keepers)</div>`
           : html`<${FleetComparisonTable} rows=${visibleRows} onReset=${handleReset} />`}
       </div>
 
       <div>
-        <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--text-dim)]">텔레메트리 출처</div>
+        <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--color-fg-disabled)]">텔레메트리 출처</div>
         <${TelemetrySourcesPanel} sources=${value.telemetry_sources} />
       </div>
 
       <div>
-        <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--text-dim)]">실패 분류</div>
+        <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--color-fg-disabled)]">실패 분류</div>
         <${FailureCategoryPanel} toolQuality=${value.tool_quality} />
       </div>
     </div>

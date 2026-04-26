@@ -28,8 +28,8 @@ let moduleDebounceTimer: ReturnType<typeof setTimeout> | null = null
 let latestRequestId = 0
 
 const LEVEL_COLORS: Record<string, string> = {
-  DEBUG: 'var(--text-muted)',
-  INFO: 'var(--text-body)',
+  DEBUG: 'var(--color-fg-muted)',
+  INFO: 'var(--color-fg-primary)',
   WARN: '#e6a700',
   ERROR: '#e05050',
 }
@@ -178,7 +178,7 @@ function sourceTone(source: string): string {
     case 'legacy_traceln':
       return 'text-[#ffd88a] bg-[rgba(230,167,0,0.12)] border-[rgba(230,167,0,0.18)]'
     default:
-      return 'text-[var(--text-muted)] bg-[var(--white-3)] border-[var(--white-10)]'
+      return 'text-[var(--color-fg-muted)] bg-[var(--white-3)] border-[var(--white-10)]'
   }
 }
 
@@ -247,13 +247,13 @@ function renderLogRow(entry: LogEntry) {
       key=${entry.seq}
       class="logs-row grid grid-cols-[11rem_5rem_10rem_8rem_minmax(0,1fr)] gap-3 rounded-card border border-[rgba(255,255,255,0.05)] px-3 py-3 ${backgroundClass}"
     >
-      <div class="font-mono text-2xs whitespace-nowrap text-[color:var(--text-muted)]">
+      <div class="font-mono text-2xs whitespace-nowrap text-[color:var(--color-fg-muted)]">
         ${entry.ts.replace('T', ' ').replace('Z', '')}
       </div>
       <div class="font-mono text-2xs font-semibold whitespace-nowrap" style="color: ${LEVEL_COLORS[level] ?? 'inherit'}">
         ${level}
       </div>
-      <div class="min-w-0 font-mono text-2xs text-[color:var(--accent)] truncate" title=${entry.module || '(root)'}>
+      <div class="min-w-0 font-mono text-2xs text-[color:var(--color-accent-fg)] truncate" title=${entry.module || '(root)'}>
         ${entry.module || '(root)'}
       </div>
       <div class="flex flex-wrap items-start gap-1">
@@ -261,41 +261,41 @@ function renderLogRow(entry: LogEntry) {
           ${sourceLabel(source)}
         </span>
         ${entry.legacy_classified
-          ? html`<span class="rounded-sm border border-[var(--white-10)] px-2 py-0.5 text-3xs text-[var(--text-muted)]">classified</span>`
+          ? html`<span class="rounded-sm border border-[var(--white-10)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]">classified</span>`
           : null}
         ${rawLevelChanged
-          ? html`<span class="rounded-sm border border-[var(--white-10)] px-2 py-0.5 text-3xs text-[var(--text-muted)]">${entry.raw_level}</span>`
+          ? html`<span class="rounded-sm border border-[var(--white-10)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]">${entry.raw_level}</span>`
           : null}
         ${clientName
           ? html`<span class="rounded-sm border border-[var(--accent-soft)] px-2 py-0.5 text-3xs text-[#dff3ff]">${clientName}</span>`
           : null}
         ${toolName
-          ? html`<span class="inline-flex items-center gap-1 rounded-sm border border-[var(--white-10)] px-2 py-0.5 text-3xs"><span class="font-mono font-bold ${toolCategory(toolName).color}">${toolCategory(toolName).icon}</span><span class="text-[var(--text-muted)]">${toolName}</span></span>`
+          ? html`<span class="inline-flex items-center gap-1 rounded-sm border border-[var(--white-10)] px-2 py-0.5 text-3xs"><span class="font-mono font-bold ${toolCategory(toolName).color}">${toolCategory(toolName).icon}</span><span class="text-[var(--color-fg-muted)]">${toolName}</span></span>`
           : null}
         ${fixes
-          ? html`<span class="rounded-sm border border-[var(--white-10)] px-2 py-0.5 text-3xs text-[var(--text-muted)]">fixes ${fixes}</span>`
+          ? html`<span class="rounded-sm border border-[var(--white-10)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]">fixes ${fixes}</span>`
           : null}
         ${phase
-          ? html`<span class="rounded-sm border border-[var(--white-10)] px-2 py-0.5 text-3xs text-[var(--text-muted)]">${phase}</span>`
+          ? html`<span class="rounded-sm border border-[var(--white-10)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]">${phase}</span>`
           : null}
         ${requestId
-          ? html`<span class="rounded-sm border border-[var(--white-10)] px-2 py-0.5 text-3xs text-[var(--text-muted)]">req ${requestId}</span>`
+          ? html`<span class="rounded-sm border border-[var(--white-10)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]">req ${requestId}</span>`
           : null}
         ${sessionId
-          ? html`<span class="rounded-sm border border-[var(--white-10)] px-2 py-0.5 text-3xs text-[var(--text-muted)]">session ${sessionId}</span>`
+          ? html`<span class="rounded-sm border border-[var(--white-10)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]">session ${sessionId}</span>`
           : null}
         ${failure
           ? html`<span class="rounded-sm border border-[rgba(224,80,80,0.24)] bg-[var(--brick-soft)] px-2 py-0.5 text-3xs text-[var(--bad-light)]">${failure.cause_code}</span>`
           : null}
         ${failure
-          ? html`<span class="rounded-sm border border-[var(--white-10)] px-2 py-0.5 text-3xs text-[var(--text-muted)]">${failure.recoverability}</span>`
+          ? html`<span class="rounded-sm border border-[var(--white-10)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]">${failure.recoverability}</span>`
           : null}
         ${failure?.operator_action
           ? html`<span class="rounded-sm border border-[var(--accent-20)] bg-[var(--accent-10)] px-2 py-0.5 text-3xs text-[#dff3ff]">next ${failure.operator_action}</span>`
           : null}
       </div>
       <div
-        class="text-xs leading-relaxed text-[var(--text-body)]"
+        class="text-xs leading-relaxed text-[var(--color-fg-primary)]"
         title=${failure ? `${renderedMessage}\n${failure.summary}` : renderedMessage}
         style=${{
           display: '-webkit-box',
@@ -368,7 +368,7 @@ export function LogViewer() {
             <select
               name="log-level"
               aria-label="로그 레벨"
-              class="logs-select rounded border border-[var(--white-10)] bg-[var(--white-3)] px-3 py-2 text-xs text-[var(--text-body)]"
+              class="logs-select rounded border border-[var(--white-10)] bg-[var(--white-3)] px-3 py-2 text-xs text-[var(--color-fg-primary)]"
               value=${levelFilter.value}
               onChange=${(e: Event) => {
                 levelFilter.value = (e.target as HTMLSelectElement).value
@@ -405,7 +405,7 @@ export function LogViewer() {
             <select
               name="log-limit"
               aria-label="로그 개수"
-              class="logs-select rounded border border-[var(--white-10)] bg-[var(--white-3)] px-3 py-2 text-xs text-[var(--text-body)]"
+              class="logs-select rounded border border-[var(--white-10)] bg-[var(--white-3)] px-3 py-2 text-xs text-[var(--color-fg-primary)]"
               value=${String(logLimit.value)}
               onChange=${(e: Event) => {
                 logLimit.value = parseInt((e.target as HTMLSelectElement).value, 10)
@@ -419,7 +419,7 @@ export function LogViewer() {
             </select>
           </div>
 
-          <div class="logs-actions flex flex-wrap gap-3 items-center text-2xs text-[color:var(--text-muted)]">
+          <div class="logs-actions flex flex-wrap gap-3 items-center text-2xs text-[color:var(--color-fg-muted)]">
             <span class="rounded-sm border border-[var(--white-10)] bg-[var(--white-3)] px-2.5 py-1 tabular-nums">${logEntries.length.toLocaleString()} / ${logTotal.toLocaleString()}</span>
             <label class="logs-auto-label flex items-center gap-1.5 cursor-pointer">
               <input
@@ -451,7 +451,7 @@ export function LogViewer() {
         ` : null}
 
         <div class="px-3 pt-3">
-          <div class="grid grid-cols-[11rem_5rem_10rem_8rem_minmax(0,1fr)] gap-3 px-3 py-2 text-left text-3xs font-semibold uppercase tracking-4 text-[var(--text-muted)]">
+          <div class="grid grid-cols-[11rem_5rem_10rem_8rem_minmax(0,1fr)] gap-3 px-3 py-2 text-left text-3xs font-semibold uppercase tracking-4 text-[var(--color-fg-muted)]">
             <div>timestamp</div>
             <div>level</div>
             <div>module</div>
@@ -462,7 +462,7 @@ export function LogViewer() {
 
         ${logEntries.length === 0
           ? html`
-              <div class="flex flex-1 items-center justify-center px-6 text-sm text-[var(--text-muted)]">
+              <div class="flex flex-1 items-center justify-center px-6 text-sm text-[var(--color-fg-muted)]">
                 ${logLoading ? '로그를 불러오는 중...' : '조건에 맞는 로그가 없습니다.'}
               </div>
             `

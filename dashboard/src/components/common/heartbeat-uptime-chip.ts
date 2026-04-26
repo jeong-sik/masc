@@ -38,8 +38,8 @@ export function formatUptimeChip(summary: HeartbeatSummary): UptimeChipView | nu
 }
 
 const TONE_CLASS: Record<UptimeTone, string> = {
-  operational: 'text-[var(--ok)] border-[var(--ok-20)] bg-[var(--ok-10)]',
-  degraded: 'text-[var(--warn)] border-[var(--warn-20)] bg-[var(--warn-10)]',
+  operational: 'text-[var(--color-status-ok)] border-[var(--ok-20)] bg-[var(--ok-10)]',
+  degraded: 'text-[var(--color-status-warn)] border-[var(--warn-20)] bg-[var(--warn-10)]',
   unhealthy: 'text-[var(--bad-light)] border-[var(--bad-20)] bg-[var(--bad-10)]',
 }
 

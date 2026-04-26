@@ -70,24 +70,24 @@ export function ConfirmDialogOverlay() {
 
   let iconColor = 'text-warn'
   let iconBg = 'bg-warn/10 border-warn/20'
-  let confirmBtnClass = 'bg-[var(--warn)] text-[var(--bg-0)] hover:bg-[var(--warn)]/90'
+  let confirmBtnClass = 'bg-[var(--color-status-warn)] text-[var(--bg-0)] hover:bg-[var(--color-status-warn)]/90'
   let IconComponent = AlertTriangle
 
   if (state.tone === 'danger') {
     iconColor = 'text-bad'
     iconBg = 'bg-bad/10 border-bad/20'
-    confirmBtnClass = 'bg-[var(--bad)] text-white hover:bg-[var(--bad)]/90'
+    confirmBtnClass = 'bg-[var(--color-status-err)] text-white hover:bg-[var(--color-status-err)]/90'
     IconComponent = AlertCircle
   } else if (state.tone === 'info') {
     iconColor = 'text-accent'
     iconBg = 'bg-[var(--accent-10)] border-accent/20'
-    confirmBtnClass = 'bg-[var(--accent)] text-[var(--bg-0)] hover:bg-[var(--accent)]/90'
+    confirmBtnClass = 'bg-[var(--color-accent-fg)] text-[var(--bg-0)] hover:bg-[var(--color-accent-fg)]/90'
     IconComponent = Info
   }
 
   return html`
     <div class="fixed inset-0 z-[100] bg-[var(--white-5)]/60 backdrop-blur-sm isolate flex items-center justify-center p-4 animate-in fade-in duration-200" onClick=${handleClose}>
-      <div class="w-full max-w-100 bg-[rgba(13,21,38,0.98)] rounded-md border border-[var(--card-border)] shadow-[0_24px_64px_rgba(0,0,0,0.6)] overflow-hidden" onClick=${stopPropagation} role="dialog" aria-modal="true" aria-labelledby="confirm-dialog-title">
+      <div class="w-full max-w-100 bg-[rgba(13,21,38,0.98)] rounded-md border border-[var(--color-border-default)] shadow-[0_24px_64px_rgba(0,0,0,0.6)] overflow-hidden" onClick=${stopPropagation} role="dialog" aria-modal="true" aria-labelledby="confirm-dialog-title">
         <div class="p-5">
           <div class="flex items-start gap-4">
             <div class="shrink-0 size-10 rounded-sm border flex items-center justify-center ${iconBg} ${iconColor}">
@@ -100,7 +100,7 @@ export function ConfirmDialogOverlay() {
           </div>
           <div class="mt-6 flex items-center justify-end gap-2">
             <button type="button"
-              class="px-4 py-2 rounded text-sm font-medium border border-[var(--card-border)] bg-[var(--white-4)] text-text-body hover:bg-[var(--white-8)] transition-colors cursor-pointer"
+              class="px-4 py-2 rounded text-sm font-medium border border-[var(--color-border-default)] bg-[var(--white-4)] text-text-body hover:bg-[var(--white-8)] transition-colors cursor-pointer"
               onClick=${state.onCancel}
             >${state.cancelText}</button>
             <button type="button"

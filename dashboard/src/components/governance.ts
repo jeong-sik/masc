@@ -216,7 +216,7 @@ function JudgmentsSection() {
     const meta = [judge?.keeper_name, judge?.model_used].filter((value): value is string => typeof value === 'string' && value.length > 0).join(' · ')
     const chipClass = tone === 'warn'
       ? 'border-warn/30 bg-warn/10 text-warn'
-      : 'border-[var(--card-border)] bg-[var(--white-3)] text-text-muted'
+      : 'border-[var(--color-border-default)] bg-[var(--white-3)] text-text-muted'
     return html`
       <div data-testid="live-judge-empty">
         <${Card} title=${title} class="section mb-5" variant="compact">
@@ -498,7 +498,7 @@ function KeeperApprovalQueueSection() {
             aria-label="Keeper HITL 승인 필터"
             data-testid="keeper-hitl-approval-filter"
             onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
-            class="min-w-40 max-w-70 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+            class="min-w-40 max-w-70 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
           />
         </div>
       ` : null}
@@ -506,7 +506,7 @@ function KeeperApprovalQueueSection() {
         ? html`<${KeeperApprovalEmptyState} />`
         : isFiltering && visibleItems.length === 0
           ? html`
-              <div class="py-4 text-center text-2xs text-[var(--text-dim)]" data-testid="keeper-hitl-approval-empty-filter">
+              <div class="py-4 text-center text-2xs text-[var(--color-fg-disabled)]" data-testid="keeper-hitl-approval-empty-filter">
                 필터 결과 없음 (${items.length} items)
               </div>
             `

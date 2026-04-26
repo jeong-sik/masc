@@ -182,15 +182,15 @@ export function formatAvgBufferedBytes(sum: number, count: number): string {
 }
 
 function statusDot(status: StatusTone): string {
-  if (status === 'ok') return 'bg-[var(--ok)]'
-  if (status === 'warn') return 'bg-[var(--warn)]'
-  return 'bg-[var(--bad)]'
+  if (status === 'ok') return 'bg-[var(--color-status-ok)]'
+  if (status === 'warn') return 'bg-[var(--color-status-warn)]'
+  return 'bg-[var(--color-status-err)]'
 }
 
 function toneClass(status: StatusTone): string {
-  if (status === 'ok') return 'text-[var(--ok)]'
-  if (status === 'warn') return 'text-[var(--warn)]'
-  return 'text-[var(--bad)]'
+  if (status === 'ok') return 'text-[var(--color-status-ok)]'
+  if (status === 'warn') return 'text-[var(--color-status-warn)]'
+  return 'text-[var(--color-status-err)]'
 }
 
 function queuePressureTone(pressure: string): StatusTone {
@@ -351,7 +351,7 @@ function CaseCard({ item, data }: { item: PracticalCase; data: TransportHealthDa
       </div>
       <div class="text-2xs text-text-muted mb-2 font-mono break-all">${item.endpoint(data)}</div>
       <div class="text-xs text-text-body leading-relaxed">${item.description}</div>
-      <div class="mt-3 text-2xs text-[var(--accent)]">${item.live(data)}</div>
+      <div class="mt-3 text-2xs text-[var(--color-accent-fg)]">${item.live(data)}</div>
     </div>
   `
 }
@@ -387,7 +387,7 @@ export function TransportHealthPanel() {
   }
 
   if (error && !data) {
-    return html`<div class="p-6 text-center text-[var(--bad)] text-sm">${error}</div>`
+    return html`<div class="p-6 text-center text-[var(--color-status-err)] text-sm">${error}</div>`
   }
 
   if (!data) return null

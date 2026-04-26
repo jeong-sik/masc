@@ -20,10 +20,10 @@ stylesheet
   .quiet {
     padding: 28px 20px;
     text-align: center;
-    border: 1px dashed var(--border-main);
+    border: 1px dashed var(--color-border-default);
     font-family: 'EB Garamond', serif;
     font-style: italic;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
   }
 
   @media (prefers-contrast: more) {

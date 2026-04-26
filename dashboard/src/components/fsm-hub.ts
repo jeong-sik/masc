@@ -162,13 +162,13 @@ function executionReceiptTitle(execution: KeeperCompositeExecution | undefined):
 function executionReceiptClass(execution: KeeperCompositeExecution | undefined): string {
   switch (executionReceiptTone(execution)) {
     case 'ok':
-      return 'border-[var(--ok-20)] text-[var(--ok)] bg-[var(--ok-10)]'
+      return 'border-[var(--ok-20)] text-[var(--color-status-ok)] bg-[var(--ok-10)]'
     case 'bad':
       return 'border-[rgba(248,113,113,0.36)] text-[var(--bad-light)] bg-[rgba(248,113,113,0.08)]'
     case 'warn':
-      return 'border-[var(--warn-20)] text-[var(--warn)] bg-[var(--warn-10)]'
+      return 'border-[var(--warn-20)] text-[var(--color-status-warn)] bg-[var(--warn-10)]'
     case 'muted':
-      return 'border-[var(--white-8)] text-[var(--text-dim)] bg-[var(--white-3)]'
+      return 'border-[var(--white-8)] text-[var(--color-fg-disabled)] bg-[var(--white-3)]'
   }
 }
 
@@ -592,7 +592,7 @@ export function FsmHub(props: FsmHubProps = {}) {
           open=${graphOpen}
           onToggle=${(e: Event) => setGraphOpen((e.target as HTMLDetailsElement).open)}
         >
-          <summary class="cursor-pointer select-none px-4 py-2.5 text-3xs font-semibold uppercase tracking-1 text-[var(--text-muted)] hover:text-[var(--text-body)]">
+          <summary class="cursor-pointer select-none px-4 py-2.5 text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)] hover:text-[var(--color-fg-primary)]">
             Compound Graph — 5 sub-FSMs (Cytoscape)
           </summary>
           <div class="px-3 pb-3">
@@ -636,11 +636,11 @@ function ShortcutsOverlay({
         onClick=${(e: MouseEvent) => e.stopPropagation()}
       >
         <div class="flex items-center justify-between mb-3">
-          <div class="text-2xs font-semibold uppercase tracking-2 text-[var(--text-muted)]">
+          <div class="text-2xs font-semibold uppercase tracking-2 text-[var(--color-fg-muted)]">
             키보드 단축키
           </div>
           <button
-            class="text-3xs text-[var(--text-dim)] hover:text-[var(--text-body)] cursor-pointer"
+            class="text-3xs text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)] cursor-pointer"
             onClick=${onClose}
             aria-label="닫기"
           >Esc</button>
@@ -648,10 +648,10 @@ function ShortcutsOverlay({
         <div class="flex flex-col gap-1.5">
           ${rows.map(r => html`
             <div class="flex items-center gap-3 text-2xs">
-              <kbd class="font-mono px-1.5 py-0.5 rounded border border-[var(--white-10)] bg-[var(--white-3)] text-[var(--text-body)] min-w-16 text-center">
+              <kbd class="font-mono px-1.5 py-0.5 rounded border border-[var(--white-10)] bg-[var(--white-3)] text-[var(--color-fg-primary)] min-w-16 text-center">
                 ${r.keys}
               </kbd>
-              <span class="text-[var(--text-body)]">${r.desc}</span>
+              <span class="text-[var(--color-fg-primary)]">${r.desc}</span>
             </div>
           `)}
         </div>
@@ -709,8 +709,8 @@ function StatusBar({
     && (now - (snapshot.last_outcome?.ended_at ?? snapshot.ts)) > 300
   const liveBadge = snapshot
     ? snapshot.is_live
-      ? html`<span class="px-2 py-0.5 rounded-sm border text-3xs font-mono text-[var(--ok)] border-[var(--ok-20)] bg-[var(--ok-10)] animate-pulse">● 실행 중</span>`
-      : html`<span class="px-2 py-0.5 rounded-sm border text-3xs font-mono ${idleIsLong ? 'text-[var(--text-muted)] border-[var(--warn-20)]' : 'text-[var(--text-dim)] border-white/10'}">○ 대기 ${idleDuration}${snapshot.last_outcome ? html` <span class="text-4xs opacity-70">· 턴 #${snapshot.last_outcome.turn_id}</span>` : ''}</span>`
+      ? html`<span class="px-2 py-0.5 rounded-sm border text-3xs font-mono text-[var(--color-status-ok)] border-[var(--ok-20)] bg-[var(--ok-10)] animate-pulse">● 실행 중</span>`
+      : html`<span class="px-2 py-0.5 rounded-sm border text-3xs font-mono ${idleIsLong ? 'text-[var(--color-fg-muted)] border-[var(--warn-20)]' : 'text-[var(--color-fg-disabled)] border-white/10'}">○ 대기 ${idleDuration}${snapshot.last_outcome ? html` <span class="text-4xs opacity-70">· 턴 #${snapshot.last_outcome.turn_id}</span>` : ''}</span>`
     : null
   const receiptLabel = snapshot ? executionReceiptLabel(snapshot.execution) : null
 
@@ -733,13 +733,13 @@ function StatusBar({
     <div class=${`sticky top-0 z-20 rounded border border-[var(--white-8)] bg-[var(--panel-dark-60)] backdrop-blur-sm shadow-[0_4px_12px_rgba(0,0,0,0.25)] ${containerPadding}`}>
       <div class="flex items-center justify-between gap-3 flex-wrap">
         <div class="flex items-center gap-3">
-          <span class="text-3xs font-semibold uppercase tracking-3 text-[var(--text-muted)]">FSM Hub</span>
+          <span class="text-3xs font-semibold uppercase tracking-3 text-[var(--color-fg-muted)]">FSM Hub</span>
           <${Kbd} size="sm" class="hidden md:inline-flex" title="단축키 목록 (?)">?<//>
           <button
             class=${`text-3xs font-mono px-1.5 py-0.5 rounded border cursor-pointer transition-all ${
               refreshFlash
-                ? 'border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--accent)]'
-                : 'border-[var(--white-10)] bg-[var(--white-3)] text-[var(--text-dim)] hover:text-[var(--text-body)] hover:border-[var(--accent-30)]'
+                ? 'border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--color-accent-fg)]'
+                : 'border-[var(--white-10)] bg-[var(--white-3)] text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)] hover:border-[var(--accent-30)]'
             }`}
             onClick=${onRefresh}
             aria-label="강제 새로고침"
@@ -748,7 +748,7 @@ function StatusBar({
             ${refreshFlash ? '✓' : '↻'}
           </button>
           <button
-            class="text-3xs font-mono px-1.5 py-0.5 rounded border border-[var(--white-10)] bg-[var(--white-3)] text-[var(--text-dim)] hover:text-[var(--text-body)] hover:border-[var(--accent-30)] cursor-pointer"
+            class="text-3xs font-mono px-1.5 py-0.5 rounded border border-[var(--white-10)] bg-[var(--white-3)] text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)] hover:border-[var(--accent-30)] cursor-pointer"
             onClick=${onDensityToggle}
             title=${`현재 밀도: ${density === 'compact' ? '조밀' : '여유'} (단축키 d)`}
             aria-label=${`밀도 토글: 현재 ${density === 'compact' ? '조밀' : '여유'}`}
@@ -767,7 +767,7 @@ function StatusBar({
           ${loading ? html`<${InlineSpinner} size="xs" />` : null}
           ${paused ? html`
             <span
-              class="px-1.5 py-0.5 rounded border text-3xs font-mono text-[var(--text-muted)] border-[var(--white-10)] bg-[var(--white-3)]"
+              class="px-1.5 py-0.5 rounded border text-3xs font-mono text-[var(--color-fg-muted)] border-[var(--white-10)] bg-[var(--white-3)]"
               title="탭이 백그라운드 상태 — 폴링 중지됨. 탭으로 돌아오면 즉시 갱신됩니다."
             >
               ⏸ 일시 중지
@@ -778,7 +778,7 @@ function StatusBar({
               ${fmtDuration(staleSec)} 전 갱신
             </span>
           ` : staleSec > 60 ? html`
-            <span class="text-3xs font-mono text-[var(--warn)]" title="마지막 관측이 1분 이상 경과">
+            <span class="text-3xs font-mono text-[var(--color-status-warn)]" title="마지막 관측이 1분 이상 경과">
               ${fmtDuration(staleSec)} 전 갱신
             </span>
           ` : null}
@@ -791,24 +791,24 @@ function StatusBar({
               placeholder="keeper 이름 필터"
               aria-label="Keeper 이름 필터"
               onInput=${(e: Event) => onKeeperFilterChange((e.target as HTMLInputElement).value)}
-              class="min-w-30 max-w-45 rounded-sm border border-[var(--white-10)] bg-[var(--white-3)] px-2.5 py-0.5 text-3xs font-mono text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent-30)]"
+              class="min-w-30 max-w-45 rounded-sm border border-[var(--white-10)] bg-[var(--white-3)] px-2.5 py-0.5 text-3xs font-mono text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--accent-30)]"
             />
           ` : null}
           ${keeperFilterHasNoMatch ? html`
-            <span class="text-3xs font-mono text-[var(--text-dim)]">
+            <span class="text-3xs font-mono text-[var(--color-fg-disabled)]">
               필터 결과 없음 (${keeperNames.length} keepers)
             </span>
           ` : visibleKeeperNames.map((name, i) => {
             const active = name === selected
             const cls = active
-              ? 'bg-[var(--accent-10)] border-[var(--accent-30)] text-[var(--accent)]'
-              : 'bg-[var(--white-3)] border-[var(--white-8)] text-[var(--text-dim)] hover:text-[var(--text-body)] hover:border-[var(--accent-30)]'
+              ? 'bg-[var(--accent-10)] border-[var(--accent-30)] text-[var(--color-accent-fg)]'
+              : 'bg-[var(--white-3)] border-[var(--white-8)] text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)] hover:border-[var(--accent-30)]'
             return html`
               <button
                 role="tab"
                 aria-selected=${active}
                 tabindex=${active ? 0 : -1}
-                class=${`rounded-sm border px-2.5 py-0.5 text-3xs font-mono transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--bg-0)] ${cls}`}
+                class=${`rounded-sm border px-2.5 py-0.5 text-3xs font-mono transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-fg)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--bg-0)] ${cls}`}
                 onClick=${() => onSelect(name)}
                 title=${i < 9 ? `${name} — 단축키 ${i + 1}` : name}
                 onKeyDown=${(e: KeyboardEvent) => {
@@ -838,17 +838,17 @@ function StatusBar({
       ${snapshot ? html`
         <div class="mt-1.5 flex items-center gap-2 text-3xs font-mono flex-wrap">
           ${/* KPI micro-metrics */ ''}
-          <span class="px-1.5 py-0.5 rounded border border-[var(--white-8)] text-[var(--text-body)]">
+          <span class="px-1.5 py-0.5 rounded border border-[var(--white-8)] text-[var(--color-fg-primary)]">
             턴 ${snapshot.last_outcome ? `#${snapshot.last_outcome.turn_id}` : '—'}
           </span>
-          <span class=${`px-1.5 py-0.5 rounded border ${transitionCount > 0 ? 'border-[rgba(129,140,248,0.3)] text-[var(--indigo)]' : 'border-[var(--white-8)] text-[var(--text-dim)]'}`}>
+          <span class=${`px-1.5 py-0.5 rounded border ${transitionCount > 0 ? 'border-[rgba(129,140,248,0.3)] text-[var(--indigo)]' : 'border-[var(--white-8)] text-[var(--color-fg-disabled)]'}`}>
             ${transitionCount} 전환
           </span>
           <span
             class=${`relative px-1.5 py-0.5 rounded border overflow-hidden ${
               observationCount >= MAX_OBSERVATIONS
                 ? 'border-[rgba(245,158,11,0.4)] text-[var(--amber-bright)]'
-                : 'border-[var(--white-8)] text-[var(--text-dim)]'
+                : 'border-[var(--white-8)] text-[var(--color-fg-disabled)]'
             }`}
             title=${`관측 버퍼 ${observationCount}/${MAX_OBSERVATIONS} — 가득 차면 오래된 관측부터 순환 교체됩니다`}
           >
@@ -863,8 +863,8 @@ function StatusBar({
             <span class="relative">${observationCount}/${MAX_OBSERVATIONS} 관측</span>
           </span>
           ${/* Meta IDs */ ''}
-          <span class="text-[var(--text-dim)] opacity-60">corr ${snapshot.correlation_id?.slice(-8) ?? '?'}</span>
-          <span class="text-[var(--text-dim)] opacity-60">run ${snapshot.run_id?.slice(-8) ?? '?'}</span>
+          <span class="text-[var(--color-fg-disabled)] opacity-60">corr ${snapshot.correlation_id?.slice(-8) ?? '?'}</span>
+          <span class="text-[var(--color-fg-disabled)] opacity-60">run ${snapshot.run_id?.slice(-8) ?? '?'}</span>
         </div>
       ` : null}
     </div>
@@ -1002,8 +1002,8 @@ function CollapsibleZone({
         aria-expanded=${!collapsed}
         aria-controls=${`zone-${id}`}
       >
-        <span class="text-3xs font-semibold uppercase tracking-1 text-[var(--text-muted)]">${zoneTitle}</span>
-        <span class=${`text-3xs text-[var(--text-dim)] transition-transform duration-200 ${collapsed ? '' : 'rotate-180'}`}>▾</span>
+        <span class="text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">${zoneTitle}</span>
+        <span class=${`text-3xs text-[var(--color-fg-disabled)] transition-transform duration-200 ${collapsed ? '' : 'rotate-180'}`}>▾</span>
       </button>
       ${!collapsed ? html`<div id=${`zone-${id}`} class="px-4 pb-3">${children}</div>` : null}
     </div>

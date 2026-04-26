@@ -136,9 +136,9 @@ function conversationStateClass(sending: boolean, hydrating: boolean): string {
     return 'border-[var(--ok-20)] bg-[var(--ok-10)] text-[var(--ok-20)]'
   }
   if (hydrating) {
-    return 'border-[var(--accent-20)] bg-[var(--accent-10)] text-[var(--text-strong)]'
+    return 'border-[var(--accent-20)] bg-[var(--accent-10)] text-[var(--color-fg-secondary)]'
   }
-  return 'border-[rgba(148,163,184,0.18)] bg-[var(--slate-gray-8)] text-[var(--text-body)]'
+  return 'border-[rgba(148,163,184,0.18)] bg-[var(--slate-gray-8)] text-[var(--color-fg-primary)]'
 }
 
 function effectiveDiagnostic(keeper: Keeper | null | undefined): KeeperDiagnostic | null {
@@ -151,7 +151,7 @@ function effectiveDiagnostic(keeper: Keeper | null | undefined): KeeperDiagnosti
 
 function DiagChip({ label }: { label: string }) {
   return html`
-    <span class="inline-flex items-center py-0.5 px-2 rounded-sm text-3xs font-medium bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-30)]">${label}</span>
+    <span class="inline-flex items-center py-0.5 px-2 rounded-sm text-3xs font-medium bg-[var(--accent-12)] text-[var(--color-accent-fg)] border border-[var(--accent-30)]">${label}</span>
   `
 }
 
@@ -165,7 +165,7 @@ export function KeeperDiagnosticSummary({
   showRawStatus?: boolean
 }) {
   if (!keeper) {
-    return html`<div class="text-xs text-[var(--text-muted)] leading-relaxed py-2">키퍼를 선택하여 직접 응답 상태를 확인하세요.</div>`
+    return html`<div class="text-xs text-[var(--color-fg-muted)] leading-relaxed py-2">키퍼를 선택하여 직접 응답 상태를 확인하세요.</div>`
   }
 
   const detail = keeperStatusDetails.value[keeper.name]
@@ -181,12 +181,12 @@ export function KeeperDiagnosticSummary({
   }
 
   return html`
-    <div class="py-3 px-4 rounded border border-[var(--card-border)] bg-[rgba(5,14,31,0.55)]">
+    <div class="py-3 px-4 rounded border border-[var(--color-border-default)] bg-[rgba(5,14,31,0.55)]">
       <div class="mb-3 flex items-center justify-between gap-3">
-        <div class="text-2xs font-semibold uppercase tracking-4 text-[var(--text-muted)]">명시적 상태 조회</div>
+        <div class="text-2xs font-semibold uppercase tracking-4 text-[var(--color-fg-muted)]">명시적 상태 조회</div>
         <button
           type="button"
-          class="rounded border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-1.5 text-2xs text-[var(--text-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--text-body)]"
+          class="rounded border border-[var(--color-border-default)] bg-[var(--white-3)] px-3 py-1.5 text-2xs text-[var(--color-fg-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--color-fg-primary)]"
           disabled=${busy}
           onClick=${() => { void refreshStatus() }}
         >
@@ -208,12 +208,12 @@ export function KeeperDiagnosticSummary({
           : null}
         ${busy ? html`<${DiagChip} label="refreshing" />` : null}
       </div>
-      <div class="text-xs text-[var(--text-body)] leading-relaxed">
+      <div class="text-xs text-[var(--color-fg-primary)] leading-relaxed">
         ${diagnostic?.continuity_summary
           ?? diagnostic?.summary
           ?? '자동 판단 필드는 기본으로 채우지 않습니다. 필요할 때만 상태를 불러오세요.'}
       </div>
-      <div class="text-xs text-[var(--text-body)] leading-relaxed mt-1">
+      <div class="text-xs text-[var(--color-fg-primary)] leading-relaxed mt-1">
         응답: ${diagnostic?.last_reply_status ?? '미조회'}
         ${diagnostic?.last_reply_at ? html` -- ${formatTime(diagnostic.last_reply_at)}` : null}
         ${diagnostic?.next_eligible_at_s ? html` -- 다음 응답 가능 ${formatEligible(diagnostic.next_eligible_at_s)}` : null}
@@ -222,7 +222,7 @@ export function KeeperDiagnosticSummary({
         ? html`<div class="text-xs text-[var(--bad-light)] leading-relaxed mt-1">${diagnostic.last_error}</div>`
         : null}
       ${showRawStatus
-        ? html`<div class="mt-3 max-h-60 overflow-auto rounded border border-[var(--card-border)] bg-[var(--bg-0)] custom-scrollbar"><${Markdown} text=${'```text\n' + (detail?.rawText ?? '키퍼 상태를 아직 불러오지 않았습니다.') + '\n```'} /></div>`
+        ? html`<div class="mt-3 max-h-60 overflow-auto rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] custom-scrollbar"><${Markdown} text=${'```text\n' + (detail?.rawText ?? '키퍼 상태를 아직 불러오지 않았습니다.') + '\n```'} /></div>`
         : null}
     </div>
   `
@@ -290,12 +290,12 @@ export function KeeperConversationPanel({
 
   return html`
     <div class="flex flex-col gap-3">
-      <div class="overflow-hidden rounded-[var(--radius-xl)] border border-[var(--card-border)] bg-[linear-gradient(180deg,rgba(9,15,28,0.96),rgba(5,10,20,0.94))] shadow-[0_24px_56px_rgba(0,0,0,0.28)]">
+      <div class="overflow-hidden rounded-[var(--radius-xl)] border border-[var(--color-border-default)] bg-[linear-gradient(180deg,rgba(9,15,28,0.96),rgba(5,10,20,0.94))] shadow-[0_24px_56px_rgba(0,0,0,0.28)]">
         <div class="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--slate-gray-12)] px-4 py-4">
           <div class="min-w-55 flex-1">
-            <div class="text-2xs font-semibold uppercase tracking-5 text-[var(--text-muted)]">직접 대화</div>
+            <div class="text-2xs font-semibold uppercase tracking-5 text-[var(--color-fg-muted)]">직접 대화</div>
             <div class="mt-2 flex flex-wrap items-center gap-2">
-              <div class="text-md font-semibold text-[var(--text-strong)]">@${keeperName}</div>
+              <div class="text-md font-semibold text-[var(--color-fg-secondary)]">@${keeperName}</div>
               <span class=${`inline-flex items-center rounded-sm border px-2.5 py-1 text-3xs font-medium uppercase tracking-2 ${conversationStateClass(sending, hydrating)}`}>
                 ${conversationStateLabel(sending, hydrating)}
               </span>
@@ -307,14 +307,14 @@ export function KeeperConversationPanel({
           <div class="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              class="rounded border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-1.5 text-2xs text-[var(--text-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--text-body)]"
+              class="rounded border border-[var(--color-border-default)] bg-[var(--white-3)] px-3 py-1.5 text-2xs text-[var(--color-fg-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--color-fg-primary)]"
               onClick=${toggleMetadata}
             >
               ${showMetadata ? '메타데이터 숨김' : '메타데이터 표시'}
             </button>
             <button
               type="button"
-              class="rounded border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-1.5 text-2xs text-[var(--text-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--text-body)] ${showInternal ? 'border-[rgba(167,139,250,0.3)] text-[var(--purple)]' : ''}"
+              class="rounded border border-[var(--color-border-default)] bg-[var(--white-3)] px-3 py-1.5 text-2xs text-[var(--color-fg-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--color-fg-primary)] ${showInternal ? 'border-[rgba(167,139,250,0.3)] text-[var(--purple)]' : ''}"
               onClick=${toggleInternal}
             >
               ${showInternal ? '내부 메시지 숨김' : '내부 메시지 표시'}
@@ -323,7 +323,7 @@ export function KeeperConversationPanel({
               ? html`
                   <button
                     type="button"
-                    class="rounded border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-1.5 text-2xs text-[var(--text-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--text-body)]"
+                    class="rounded border border-[var(--color-border-default)] bg-[var(--white-3)] px-3 py-1.5 text-2xs text-[var(--color-fg-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--color-fg-primary)]"
                     disabled=${hydrating}
                     onClick=${() => { void expandHistory() }}
                   >
@@ -400,10 +400,10 @@ export function KeeperRuntimeActions({
   const canRecover = diagnostic?.recoverable === true
 
   const btnBase = 'py-1.5 px-4 rounded text-xs font-medium cursor-pointer transition-colors border'
-  const ghostBtn = `${btnBase} border-[var(--card-border)] bg-[var(--white-3)] text-[var(--text-muted)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)]`
-  const activeGhostBtn = `${btnBase} border-[rgba(71,184,255,0.4)] bg-[var(--accent-12)] text-[var(--accent)] hover:bg-[var(--accent-20)]`
-  const secondaryBtn = `${btnBase} border-[rgba(251,191,36,0.3)] bg-[var(--warn-10)] text-[var(--warn)] hover:bg-[var(--warn-soft)]`
-  const activeSecondaryBtn = `${btnBase} border-[rgba(251,191,36,0.5)] bg-[var(--warn-soft)] text-[var(--warn)] hover:bg-[var(--warn-20)]`
+  const ghostBtn = `${btnBase} border-[var(--color-border-default)] bg-[var(--white-3)] text-[var(--color-fg-muted)] hover:bg-[var(--white-6)] hover:text-[var(--color-fg-primary)]`
+  const activeGhostBtn = `${btnBase} border-[rgba(71,184,255,0.4)] bg-[var(--accent-12)] text-[var(--color-accent-fg)] hover:bg-[var(--accent-20)]`
+  const secondaryBtn = `${btnBase} border-[rgba(251,191,36,0.3)] bg-[var(--warn-10)] text-[var(--color-status-warn)] hover:bg-[var(--warn-soft)]`
+  const activeSecondaryBtn = `${btnBase} border-[rgba(251,191,36,0.5)] bg-[var(--warn-soft)] text-[var(--color-status-warn)] hover:bg-[var(--warn-20)]`
 
   return html`
     <div class="flex flex-wrap gap-2">

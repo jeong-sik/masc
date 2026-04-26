@@ -75,7 +75,7 @@ describe('getPhaseStyle', () => {
   it('returns correct style for Running (ok group)', () => {
     const s = getPhaseStyle('Running')
     expect(s.label).toBe('실행중')
-    expect(s.color).toBe('var(--ok)')
+    expect(s.color).toBe('var(--color-status-ok)')
     expect(s.bg).toBe('var(--ok-10)')
   })
 
@@ -97,7 +97,7 @@ describe('getPhaseStyle', () => {
       (p) => getPhaseStyle(p).color,
     )
     expect(new Set(tones).size).toBe(1)
-    expect(tones[0]).toBe('var(--accent)')
+    expect(tones[0]).toBe('var(--color-accent-fg)')
   })
 
   it('returns Offline for unknown phase string', () => {

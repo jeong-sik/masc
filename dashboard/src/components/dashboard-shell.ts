@@ -105,12 +105,12 @@ export function ConnectionStatus() {
       class="flex items-center gap-1.5 whitespace-nowrap text-xs ${isConnected ? 'text-[#9af3ba]' : 'text-[#f7b7b7]'}"
       title=${titleAttr || undefined}
     >
-      <span class="inline-block size-[8px] rounded-sm ${isConnected ? 'bg-[var(--ok)] shadow-[0_0_7px_rgba(74,222,128,0.75)]' : 'bg-[var(--bad)]'}"></span>
+      <span class="inline-block size-[8px] rounded-sm ${isConnected ? 'bg-[var(--color-status-ok)] shadow-[0_0_7px_rgba(74,222,128,0.75)]' : 'bg-[var(--color-status-err)]'}"></span>
       <span class="status-text">${statusLabel}</span>
       ${attentionCount > 0 ? html`
         <${RouteLink}
           tab="overview"
-          class="inline-flex items-center justify-center rounded-sm border border-[var(--card-border)] bg-[var(--white-4)] px-2 py-0.5 tabular-nums attention-badge"
+          class="inline-flex items-center justify-center rounded-sm border border-[var(--color-border-default)] bg-[var(--white-4)] px-2 py-0.5 tabular-nums attention-badge"
         >주의 ${attentionCount}건<//>
       ` : null}
     </div>
@@ -127,7 +127,7 @@ export function ErrorCounterBadge() {
     <div class="relative" role="status">
       <button
         type="button"
-        class="flex items-center gap-1.5 cursor-pointer rounded px-1 py-0.5 transition-colors hover:bg-[var(--white-5)] ${count > 0 ? 'text-[var(--bad)]' : 'text-[var(--text-muted)]'}"
+        class="flex items-center gap-1.5 cursor-pointer rounded px-1 py-0.5 transition-colors hover:bg-[var(--white-5)] ${count > 0 ? 'text-[var(--color-status-err)]' : 'text-[var(--color-fg-muted)]'}"
         title=${count > 0 ? `미확인 에러 ${count}건` : '에러 없음'}
         onClick=${() => { errorPanelOpen.value = !errorPanelOpen.value }}
         aria-expanded=${open}
@@ -135,7 +135,7 @@ export function ErrorCounterBadge() {
       >
         <${Bell} size=${14} />
         ${count > 0 ? html`
-          <span class="inline-flex items-center justify-center min-w-4 h-4 px-1 rounded-full bg-[var(--bad)] text-2xs font-semibold text-white tabular-nums">${count > 99 ? '99+' : count}</span>
+          <span class="inline-flex items-center justify-center min-w-4 h-4 px-1 rounded-full bg-[var(--color-status-err)] text-2xs font-semibold text-white tabular-nums">${count > 99 ? '99+' : count}</span>
         ` : null}
       </button>
       ${open ? html`<${ErrorPanel} onClose=${() => { errorPanelOpen.value = false }} />` : null}
@@ -226,7 +226,7 @@ export function BuildIdentityBadge() {
   return html`
     <div class="relative">
       <button type="button"
-        class="cursor-pointer rounded-sm border border-[var(--white-10)] bg-[var(--white-4)] px-2.5 py-[5px] text-3xs text-[var(--text-muted)] transition-colors duration-150 hover:border-[var(--accent-20)] hover:text-[var(--text-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-0)]"
+        class="cursor-pointer rounded-sm border border-[var(--white-10)] bg-[var(--white-4)] px-2.5 py-[5px] text-3xs text-[var(--color-fg-muted)] transition-colors duration-150 hover:border-[var(--accent-20)] hover:text-[var(--color-fg-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-0)]"
         aria-expanded=${buildIdentityOpen.value}
         aria-label=${`서버 빌드 정보 ${label}`}
         title=${hoverTitle}
@@ -238,12 +238,12 @@ export function BuildIdentityBadge() {
       </button>
       ${buildIdentityOpen.value
         ? html`
-            <div class="absolute top-[calc(100%+8px)] right-0 min-w-70 rounded border border-solid border-[var(--card-border)] bg-[var(--bg-panel)] px-3 py-2.5 shadow-[0_10px_24px_rgba(0,0,0,0.22)] grid gap-1.5">
-              <div class="flex justify-between gap-3 text-xs text-[color:var(--text-muted)]">
+            <div class="absolute top-[calc(100%+8px)] right-0 min-w-70 rounded border border-solid border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2.5 shadow-[0_10px_24px_rgba(0,0,0,0.22)] grid gap-1.5">
+              <div class="flex justify-between gap-3 text-xs text-[color:var(--color-fg-muted)]">
                 <span>릴리즈</span>
-                <strong class="text-[color:var(--text-strong)] text-right">${build?.release_version ?? status?.version ?? 'unknown'}</strong>
+                <strong class="text-[color:var(--color-fg-secondary)] text-right">${build?.release_version ?? status?.version ?? 'unknown'}</strong>
               </div>
-              <div class="flex justify-between gap-3 text-xs text-[color:var(--text-muted)]">
+              <div class="flex justify-between gap-3 text-xs text-[color:var(--color-fg-muted)]">
                 <span>커밋</span>
                 ${(() => {
                   const url = githubCommitUrl(build?.commit)
@@ -253,27 +253,27 @@ export function BuildIdentityBadge() {
                         href=${url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        class="text-right font-bold text-[color:var(--text-strong)] underline decoration-dotted underline-offset-2 decoration-[color:var(--text-dim)] hover:decoration-[color:var(--accent)] hover:text-[color:var(--accent)]"
+                        class="text-right font-bold text-[color:var(--color-fg-secondary)] underline decoration-dotted underline-offset-2 decoration-[color:var(--color-fg-disabled)] hover:decoration-[color:var(--color-accent-fg)] hover:text-[color:var(--color-accent-fg)]"
                         data-build-commit-link
                         title="GitHub에서 이 커밋 보기"
                       >${text} ↗</a>`
-                    : html`<strong class="text-[color:var(--text-strong)] text-right">${text}</strong>`
+                    : html`<strong class="text-[color:var(--color-fg-secondary)] text-right">${text}</strong>`
                 })()}
               </div>
-              <div class="flex justify-between gap-3 text-xs text-[color:var(--text-muted)]">
+              <div class="flex justify-between gap-3 text-xs text-[color:var(--color-fg-muted)]">
                 <span>서버 시작</span>
-                <strong class="text-[color:var(--text-strong)] text-right">${build?.started_at ? html`<${TimeAgo} timestamp=${build.started_at} />` : '알 수 없음'}</strong>
+                <strong class="text-[color:var(--color-fg-secondary)] text-right">${build?.started_at ? html`<${TimeAgo} timestamp=${build.started_at} />` : '알 수 없음'}</strong>
               </div>
-              <div class="flex justify-between gap-3 text-xs text-[color:var(--text-muted)]">
+              <div class="flex justify-between gap-3 text-xs text-[color:var(--color-fg-muted)]">
                 <span>업타임</span>
                 <strong
-                  class="text-[color:var(--text-strong)] text-right tabular-nums"
+                  class="text-[color:var(--color-fg-secondary)] text-right tabular-nums"
                   title=${typeof build?.uptime_seconds === 'number' ? `${build.uptime_seconds}s raw` : undefined}
                 >${formatUptimeSecondsHuman(build?.uptime_seconds)}</strong>
               </div>
-              <div class="flex justify-between gap-3 text-xs text-[color:var(--text-muted)]">
+              <div class="flex justify-between gap-3 text-xs text-[color:var(--color-fg-muted)]">
                 <span>쉘 스냅샷</span>
-                <strong class="text-[color:var(--text-strong)] text-right">${status?.generated_at ? html`<${TimeAgo} timestamp=${status.generated_at} />` : '알 수 없음'}</strong>
+                <strong class="text-[color:var(--color-fg-secondary)] text-right">${status?.generated_at ? html`<${TimeAgo} timestamp=${status.generated_at} />` : '알 수 없음'}</strong>
               </div>
             </div>
           `
@@ -339,17 +339,17 @@ function HealthIndicator({ collapsed }: { collapsed?: boolean }) {
   let label: string
 
   if (!live) {
-    dotClass = 'bg-[var(--bad)]'
+    dotClass = 'bg-[var(--color-status-err)]'
     label = '신호 없음'
   } else if (!snap) {
-    dotClass = 'bg-[var(--text-muted)]'
+    dotClass = 'bg-[var(--color-fg-muted)]'
     label = missionLoading.value ? '로딩 중' : '대기 중'
   } else if (blockers > 0 || attentionCount > 0) {
-    dotClass = 'bg-[var(--warn)]'
+    dotClass = 'bg-[var(--color-status-warn)]'
     const total = blockers + attentionCount
     label = `주의 ${total}건`
   } else {
-    dotClass = 'bg-[var(--ok)]'
+    dotClass = 'bg-[var(--color-status-ok)]'
     label = '정상'
   }
 
@@ -365,7 +365,7 @@ function HealthIndicator({ collapsed }: { collapsed?: boolean }) {
   return html`
     <div class="flex items-center gap-2 px-1" role="status" aria-label=${label} title=${titleText}>
       ${dot}
-      <span class="text-2xs text-[var(--text-muted)] truncate">${label}</span>
+      <span class="text-2xs text-[var(--color-fg-muted)] truncate">${label}</span>
     </div>
   `
 }
@@ -380,12 +380,12 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
       <div class="flex items-center ${collapsed ? 'justify-center' : 'justify-between'} px-2 pt-2 pb-1">
         ${!collapsed ? html`
           <div class="px-1">
-            <div class="text-3xs font-bold uppercase tracking-[0.2em] text-[var(--text-muted)]">내비게이션</div>
-            <div class="mt-0.5 text-sm font-semibold tracking-[-0.02em] text-[var(--text-strong)]">MASC Core</div>
+            <div class="text-3xs font-bold uppercase tracking-[0.2em] text-[var(--color-fg-muted)]">내비게이션</div>
+            <div class="mt-0.5 text-sm font-semibold tracking-[-0.02em] text-[var(--color-fg-secondary)]">MASC Core</div>
           </div>
         ` : null}
         <button type="button"
-          class="flex size-7 items-center justify-center rounded text-[var(--text-muted)] cursor-pointer transition-colors duration-200 hover:bg-[var(--white-10)] hover:text-[var(--text-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-1)]"
+          class="flex size-7 items-center justify-center rounded text-[var(--color-fg-muted)] cursor-pointer transition-colors duration-200 hover:bg-[var(--white-10)] hover:text-[var(--color-fg-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-1)]"
           aria-label=${collapsed ? '사이드바 펼치기' : '사이드바 접기'}
           onClick=${onToggle}
           title=${collapsed ? '사이드바 펼치기' : '사이드바 접기'}
@@ -405,7 +405,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
                 <${RouteLink}
                   tab=${surface.defaultTab}
                   params=${surface.defaultParams}
-                  class="flex items-center justify-center w-full rounded border p-2 cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-200 ${isSurfaceActive ? 'bg-[var(--accent-soft)] text-[var(--text-strong)] shadow-[inset_0_1px_1px_var(--white-10)] border-[var(--accent-20)]' : 'border-transparent text-[var(--text-muted)] hover:bg-[var(--white-5)]'}"
+                  class="flex items-center justify-center w-full rounded border p-2 cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-200 ${isSurfaceActive ? 'bg-[var(--accent-soft)] text-[var(--color-fg-secondary)] shadow-[inset_0_1px_1px_var(--white-10)] border-[var(--accent-20)]' : 'border-transparent text-[var(--color-fg-muted)] hover:bg-[var(--white-5)]'}"
                   title=${surface.label}
                   aria-label=${surface.label}
                   ariaCurrent=${isSurfaceActive ? 'page' : undefined}
@@ -420,19 +420,19 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
                 <${RouteLink}
                   tab=${surface.defaultTab}
                   params=${surface.defaultParams}
-                  class="flex items-center gap-2 w-full rounded border px-2 py-1.5 text-left cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-200 ${isSurfaceActive && sections.length === 0 ? 'bg-[linear-gradient(135deg,rgba(71,184,255,0.14),rgba(71,184,255,0.04))] text-[var(--text-strong)] shadow-[inset_0_1px_1px_var(--white-10)] border-[var(--accent-20)]' : 'bg-transparent border-transparent text-[var(--text-strong)] hover:bg-[var(--white-5)]'}"
+                  class="flex items-center gap-2 w-full rounded border px-2 py-1.5 text-left cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-200 ${isSurfaceActive && sections.length === 0 ? 'bg-[linear-gradient(135deg,rgba(71,184,255,0.14),rgba(71,184,255,0.04))] text-[var(--color-fg-secondary)] shadow-[inset_0_1px_1px_var(--white-10)] border-[var(--accent-20)]' : 'bg-transparent border-transparent text-[var(--color-fg-secondary)] hover:bg-[var(--white-5)]'}"
                   ariaCurrent=${isSurfaceActive && sections.length === 0 ? 'page' : undefined}
                 >
                   <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded border border-[var(--white-10)] bg-[var(--white-3)] text-base" aria-hidden="true">
                     ${surface.icon}
                   </span>
                   <div class="flex-1 min-w-0">
-                    <div class="text-base font-medium truncate leading-none ${isSurfaceActive ? 'text-[var(--accent)]' : ''}">${surface.label}</div>
+                    <div class="text-base font-medium truncate leading-none ${isSurfaceActive ? 'text-[var(--color-accent-fg)]' : ''}">${surface.label}</div>
                   </div>
                 <//>
 
                 ${sections.length > 0 ? html`
-                  <div class="ml-7 flex flex-col gap-0.5 border-l border-[var(--border-subtle)] pl-3" role="list">
+                  <div class="ml-7 flex flex-col gap-0.5 border-l border-[var(--color-border-divider)] pl-3" role="list">
                     ${sections.map(item => {
                       const isSectionActive = isSurfaceActive && currentSection?.id === item.id
                       return html`
@@ -440,7 +440,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
                           role="listitem"
                           tab=${surface.id}
                           params=${item.params}
-                          class="w-full rounded border px-2 py-1 text-left cursor-pointer text-sm transition-[background-color,border-color,color,box-shadow] duration-200 ${isSectionActive ? 'bg-[var(--accent-soft)] text-[var(--accent)] font-medium shadow-[inset_0_1px_1px_var(--white-10)] border-[var(--accent-soft)]' : 'border-transparent text-[var(--text-muted)] hover:bg-[var(--white-5)] hover:text-[var(--text-body)]'}"
+                          class="w-full rounded border px-2 py-1 text-left cursor-pointer text-sm transition-[background-color,border-color,color,box-shadow] duration-200 ${isSectionActive ? 'bg-[var(--accent-soft)] text-[var(--color-accent-fg)] font-medium shadow-[inset_0_1px_1px_var(--white-10)] border-[var(--accent-soft)]' : 'border-transparent text-[var(--color-fg-muted)] hover:bg-[var(--white-5)] hover:text-[var(--color-fg-primary)]'}"
                           ariaCurrent=${isSectionActive ? 'page' : undefined}
                         >
                           <div class="truncate">${item.label}</div>
@@ -614,7 +614,7 @@ function SurfaceLead() {
     <div class="mb-3 flex flex-col gap-1.5">
       ${trail.length > 0
         ? html`<nav
-            class="flex items-center gap-1 text-2xs text-[var(--text-dim)]"
+            class="flex items-center gap-1 text-2xs text-[var(--color-fg-disabled)]"
             aria-label="페이지 경로"
             data-surface-breadcrumb
           >
@@ -626,10 +626,10 @@ function SurfaceLead() {
               const crumbEl = crumb.navigableTab !== null && !isLast
                 ? html`<${RouteLink}
                     tab=${crumb.navigableTab}
-                    class="cursor-pointer rounded px-1 py-0.5 hover:bg-[var(--white-5)] hover:text-[var(--text-body)]"
+                    class="cursor-pointer rounded px-1 py-0.5 hover:bg-[var(--white-5)] hover:text-[var(--color-fg-primary)]"
                   >${crumb.label}<//>`
                 : html`<span
-                    class="px-1 py-0.5 ${isLast ? 'text-[var(--text-body)]' : ''}"
+                    class="px-1 py-0.5 ${isLast ? 'text-[var(--color-fg-primary)]' : ''}"
                     aria-current=${isLast ? 'page' : undefined}
                   >${crumb.label}</span>`
               return html`${sep}${crumbEl}`
@@ -637,7 +637,7 @@ function SurfaceLead() {
           </nav>`
         : null}
       <div class="flex items-center gap-2">
-        <h2 class="text-[22px] font-bold tracking-tight text-[var(--text-strong)]">
+        <h2 class="text-[22px] font-bold tracking-tight text-[var(--color-fg-secondary)]">
           ${title}
         </h2>
         ${shareUrl !== ''
@@ -649,7 +649,7 @@ function SurfaceLead() {
             />`
           : null}
       </div>
-      ${description ? html`<p class="m-0 text-sm leading-normal text-[var(--text-dim)]">${description}</p>` : null}
+      ${description ? html`<p class="m-0 text-sm leading-normal text-[var(--color-fg-disabled)]">${description}</p>` : null}
     </div>
   `
 }

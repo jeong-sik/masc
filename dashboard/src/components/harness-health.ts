@@ -137,8 +137,8 @@ export function buildHarnessFlowMermaid(data: HarnessHealthData): string {
     'flowchart LR',
     '  classDef source fill:var(--panel-dark),stroke:var(--slate-600),color:#cbd5e1;',
     '  classDef hub fill:#111827,stroke:var(--sky-400),color:#e0f2fe;',
-    '  classDef healthyRail fill:#082f1d,stroke:var(--ok),color:#dcfce7;',
-    '  classDef warningRail fill:#3b2a07,stroke:var(--warn),color:var(--yellow-100);',
+    '  classDef healthyRail fill:#082f1d,stroke:var(--color-status-ok),color:#dcfce7;',
+    '  classDef warningRail fill:#3b2a07,stroke:var(--color-status-warn),color:var(--yellow-100);',
     '  classDef staleRail fill:#1f2937,stroke:var(--slate-400),color:var(--frost-100),stroke-dasharray: 5 3;',
     '  classDef idleRail fill:#111827,stroke:var(--slate-600),color:var(--slate-400),stroke-dasharray: 3 4;',
     '  classDef activeRail stroke:#7dd3fc,stroke-width:3px;',
@@ -179,20 +179,20 @@ function HarnessFlowCard({ data }: { data: HarnessHealthData }) {
     <div class="space-y-3">
       <div class="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
         <div>
-          <div class="text-sm font-medium text-[var(--text-strong)]">실시간 상태 그래프</div>
-          <div class="mt-1 text-sm leading-loose text-[var(--text-muted)]">
+          <div class="text-sm font-medium text-[var(--color-fg-secondary)]">실시간 상태 그래프</div>
+          <div class="mt-1 text-sm leading-loose text-[var(--color-fg-muted)]">
             작업 완료, 컨텍스트 압축, 세대 교체 신호가 하네스로 모이는 구조입니다.
           </div>
         </div>
-        <div class="text-xs text-[var(--text-dim)]">
+        <div class="text-xs text-[var(--color-fg-disabled)]">
           가장 최근 채널: ${active ? railTitle(active) : '없음'}
         </div>
       </div>
 
-      <div class="flex flex-wrap gap-2 text-2xs text-[var(--text-dim)]">
+      <div class="flex flex-wrap gap-2 text-2xs text-[var(--color-fg-disabled)]">
         <span class="rounded-sm border border-[var(--white-8)] px-2 py-1">실선: 실시간 신호</span>
         <span class="rounded-sm border border-[var(--white-8)] px-2 py-1">점선: 스냅샷 갱신</span>
-        <span class="rounded-sm border border-[var(--accent)] px-2 py-1 text-[var(--text-body)]">강조: 가장 최근 채널</span>
+        <span class="rounded-sm border border-[var(--color-accent-fg)] px-2 py-1 text-[var(--color-fg-primary)]">강조: 가장 최근 채널</span>
       </div>
 
       <${MermaidGraph}
@@ -236,9 +236,9 @@ export function HarnessHealth() {
   let overviewContent = html`<${EmptySignal} text="안전 감시 데이터가 없습니다." />`
 
   if (isLoading) {
-    overviewContent = html`<div class="text-sm text-[var(--text-dim)]">로딩 중...</div>`
+    overviewContent = html`<div class="text-sm text-[var(--color-fg-disabled)]">로딩 중...</div>`
   } else if (isError) {
-    overviewContent = html`<div class="text-sm text-[var(--bad)]">${s.message}</div>`
+    overviewContent = html`<div class="text-sm text-[var(--color-status-err)]">${s.message}</div>`
   } else if (data) {
     overviewContent = html`
       <div class="space-y-4">
@@ -246,18 +246,18 @@ export function HarnessHealth() {
           <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
             <div class="max-w-3xl">
               <${SectionCap}>keeper 장기 실행 중 평가/압축/교체가 정상인지 감시합니다<//>
-              <div class="mt-2 text-2xl font-semibold text-[var(--text-strong)]">${heroTitle(data)}</div>
-              <div class="mt-2 text-sm leading-airy text-[var(--text-body)]">${heroBody(data)}</div>
+              <div class="mt-2 text-2xl font-semibold text-[var(--color-fg-secondary)]">${heroTitle(data)}</div>
+              <div class="mt-2 text-sm leading-airy text-[var(--color-fg-primary)]">${heroBody(data)}</div>
             </div>
             <div class="flex items-center gap-2">
               <button
                 type="button"
-                class="rounded border border-[var(--white-8)] px-2.5 py-1 text-2xs text-[var(--text-muted)] transition-colors hover:border-[var(--accent)] hover:text-[var(--text-body)]"
+                class="rounded border border-[var(--white-8)] px-2.5 py-1 text-2xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-accent-fg)] hover:text-[var(--color-fg-primary)]"
                 onClick=${() => { void loadHarnessHealth() }}
               >새로고침</button>
               <button
                 type="button"
-                class="rounded border border-[var(--white-8)] px-2.5 py-1 text-2xs text-[var(--text-muted)] transition-colors hover:border-[var(--ok-30)] hover:text-[var(--text-body)]"
+                class="rounded border border-[var(--white-8)] px-2.5 py-1 text-2xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--ok-30)] hover:text-[var(--color-fg-primary)]"
                 onClick=${() => navigate('lab', { section: 'autoresearch' })}
               >오토리서치 보기</button>
             </div>
@@ -284,12 +284,12 @@ export function HarnessHealth() {
             />
           </div>
 
-          <div class="mt-4 text-xs text-[var(--text-dim)]">
+          <div class="mt-4 text-xs text-[var(--color-fg-disabled)]">
             generated ${formatTimestamp(data.generated_at)} · 마지막 안전 신호 ${freshnessLabel(data.overview.last_signal_at)}
           </div>
         </div>
 
-        <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] px-4 py-3 text-sm leading-airy text-[var(--text-body)]">
+        <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] px-4 py-3 text-sm leading-airy text-[var(--color-fg-primary)]">
           ${data.scope_note}
         </div>
 
@@ -326,17 +326,17 @@ export function HarnessHealth() {
 
             ${fallbackPct > 80 ? html`
               <div class="rounded border border-[var(--warn-30)] bg-[var(--warn-12)] px-4 py-3">
-                <div class="mb-1 text-sm font-medium text-[var(--warn)]">평가 모델 미연결</div>
-                <div class="text-xs text-[var(--warn)]">
+                <div class="mb-1 text-sm font-medium text-[var(--color-status-warn)]">평가 모델 미연결</div>
+                <div class="text-xs text-[var(--color-status-warn)]">
                   전체 ${cal.total_verdicts}건 중 ${fallbackCount}건이 대체 처리됐습니다.
                   지금은 평가 모델보다 기본 규칙이 더 많이 작동합니다.
                 </div>
                 ${fallbackReasons.length > 0 ? html`
                   <details class="mt-2">
-                    <summary class="cursor-pointer text-xs text-[var(--warn)] opacity-70">최근 에러 (${fallbackReasons.length}건)</summary>
+                    <summary class="cursor-pointer text-xs text-[var(--color-status-warn)] opacity-70">최근 에러 (${fallbackReasons.length}건)</summary>
                     <div class="mt-1 space-y-1">
                       ${fallbackReasons.map(reason => html`
-                        <div class="break-all font-mono text-xs text-[var(--warn)] opacity-70">${reason}</div>
+                        <div class="break-all font-mono text-xs text-[var(--color-status-warn)] opacity-70">${reason}</div>
                       `)}
                     </div>
                   </details>
@@ -355,17 +355,17 @@ export function HarnessHealth() {
               />
             </div>
 
-            <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] p-3 text-xs leading-loose text-[var(--text-muted)]">
+            <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] p-3 text-xs leading-loose text-[var(--color-fg-muted)]">
               인간 라벨 ${cal.labeled_count}건이 calibration ground truth입니다. 값이 0이면 runtime health는 볼 수 있어도 evaluator accuracy는 아직 검증되지 않았습니다.
             </div>
 
             <div>
-              <div class="mb-2 text-xs uppercase tracking-wider text-[var(--text-dim)]">게이트 분포</div>
+              <div class="mb-2 text-xs uppercase tracking-wider text-[var(--color-fg-disabled)]">게이트 분포</div>
               <${GateChart} distribution=${cal.gate_distribution} />
             </div>
 
             <div>
-              <div class="mb-2 text-xs uppercase tracking-wider text-[var(--text-dim)]">최근 판정</div>
+              <div class="mb-2 text-xs uppercase tracking-wider text-[var(--color-fg-disabled)]">최근 판정</div>
               <${RecentVerdictsList} items=${data.recent_verdicts} />
             </div>
           </div>

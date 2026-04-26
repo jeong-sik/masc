@@ -20,15 +20,15 @@ const formatTimestamp = formatTimeHms
 function sourceHealthClass(health?: string | null): string {
   switch ((health ?? '').toLowerCase()) {
     case 'ok':
-      return 'text-[var(--ok)]'
+      return 'text-[var(--color-status-ok)]'
     case 'stale':
     case 'coverage_gap':
     case 'empty':
-      return 'text-[var(--warn)]'
+      return 'text-[var(--color-status-warn)]'
     case 'missing':
       return 'text-[var(--bad-light)]'
     default:
-      return 'text-[var(--text-dim)]'
+      return 'text-[var(--color-fg-disabled)]'
   }
 }
 
@@ -42,7 +42,7 @@ function freshnessText(d: TelemetryFreshnessMetadata): string {
 
 function FreshnessLine({ data }: { data: TelemetryFreshnessMetadata }) {
   return html`
-    <div class="text-3xs text-[var(--text-dim)]">
+    <div class="text-3xs text-[var(--color-fg-disabled)]">
       <span class="font-mono">${data.source ?? 'tool_call_io'}</span>
       <span class="mx-1">·</span>
       <span class="font-mono ${sourceHealthClass(data.health)}">${data.health ?? 'unknown'}</span>
@@ -122,7 +122,7 @@ function CopyableToolCallBlock({
           size=${12}
         />
       </div>
-      <pre class=${`text-xs font-mono bg-[var(--bg-deep)] rounded p-2 overflow-x-auto ${maxHeightClass} whitespace-pre-wrap text-[var(--text-strong)]`}>${value}</pre>
+      <pre class=${`text-xs font-mono bg-[var(--bg-deep)] rounded p-2 overflow-x-auto ${maxHeightClass} whitespace-pre-wrap text-[var(--color-fg-secondary)]`}>${value}</pre>
     </div>
   `
 }
@@ -135,7 +135,7 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
 
   return html`
     <div
-      class="border-b border-[var(--card-border)] hover:bg-[var(--bg-panel-hover)] transition-colors"
+      class="border-b border-[var(--color-border-default)] hover:bg-[var(--color-bg-hover)] transition-colors"
     >
       <button
         type="button"
@@ -144,15 +144,15 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
         onClick=${() => { expanded.value = !expanded.value }}
       >
         <span class="font-mono ${cat.color} w-4 text-center flex-shrink-0">${cat.icon}</span>
-        <span class="font-mono text-[var(--text-strong)] flex-shrink-0 w-16">${formatTimestamp(entry.ts)}</span>
-        <span class="font-mono font-medium text-[var(--text-strong)] truncate flex-1" title=${entry.tool}>${entry.tool}</span>
+        <span class="font-mono text-[var(--color-fg-secondary)] flex-shrink-0 w-16">${formatTimestamp(entry.ts)}</span>
+        <span class="font-mono font-medium text-[var(--color-fg-secondary)] truncate flex-1" title=${entry.tool}>${entry.tool}</span>
         <span class=${`font-mono flex-shrink-0 w-16 text-right ${durationColor(entry.duration_ms)}`}>
           ${formatDuration(entry.duration_ms)}
         </span>
-        <span class=${`flex-shrink-0 w-5 text-center ${entry.success ? 'text-[var(--ok)]' : 'text-[var(--bad)]'}`}>
+        <span class=${`flex-shrink-0 w-5 text-center ${entry.success ? 'text-[var(--color-status-ok)]' : 'text-[var(--color-status-err)]'}`}>
           ${entry.success ? 'O' : 'X'}
         </span>
-        <span class="flex-shrink-0 w-4 text-[var(--text-muted)] text-center">
+        <span class="flex-shrink-0 w-4 text-[var(--color-fg-muted)] text-center">
           ${expanded.value ? '-' : '+'}
         </span>
       </button>
@@ -160,7 +160,7 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
       ${expanded.value ? html`
         <div class="px-3 pb-3 space-y-2">
           ${entry.model ? html`
-            <div class="text-3xs text-[var(--text-muted)]">model: <span class="text-[var(--text-strong)] font-mono">${entry.model}</span></div>
+            <div class="text-3xs text-[var(--color-fg-muted)]">model: <span class="text-[var(--color-fg-secondary)] font-mono">${entry.model}</span></div>
           ` : null}
           <${CopyableToolCallBlock}
             title="Input"
@@ -210,7 +210,7 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
   }
 
   if (resource.state.value.error) {
-    return html`<div class="text-xs text-[var(--bad)] p-4">${resource.state.value.error}</div>`
+    return html`<div class="text-xs text-[var(--color-status-err)] p-4">${resource.state.value.error}</div>`
   }
 
   const entries = allEntries
@@ -218,7 +218,7 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
   if (entries.length === 0) {
     return html`
       <div class="p-4">
-        <div class="text-xs text-[var(--text-muted)]">도구 호출 데이터 없음</div>
+        <div class="text-xs text-[var(--color-fg-muted)]">도구 호출 데이터 없음</div>
         <${FreshnessLine} data=${response ?? { source: 'tool_call_io' }} />
       </div>
     `
@@ -234,23 +234,23 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
   return html`
     <div class="space-y-3">
       <div class="flex items-center justify-between gap-3 flex-wrap">
-        <div class="flex gap-4 text-xs text-[var(--text-muted)]">
+        <div class="flex gap-4 text-xs text-[var(--color-fg-muted)]">
           <span>${totalCalls} calls</span>
           <span>${uniqueTools} tools</span>
-          <span class=${successRate < 80 ? 'text-[var(--warn)]' : ''}>${successRate}% ok</span>
+          <span class=${successRate < 80 ? 'text-[var(--color-status-warn)]' : ''}>${successRate}% ok</span>
         </div>
         <${FreshnessLine} data=${response ?? { source: 'tool_call_io' }} />
         <input
           type="text"
           placeholder="Filter tool..."
-          class="text-xs font-mono bg-[var(--bg-deep)] border border-[var(--card-border)] rounded px-2 py-1 w-40 text-[var(--text-strong)]"
+          class="text-xs font-mono bg-[var(--bg-deep)] border border-[var(--color-border-default)] rounded px-2 py-1 w-40 text-[var(--color-fg-secondary)]"
           value=${filterTool.value}
           onInput=${(e: Event) => { filterTool.value = (e.target as HTMLInputElement).value }}
         />
       </div>
 
-      <div class="border border-[var(--card-border)] rounded overflow-hidden max-h-[500px] overflow-y-auto">
-        <${SectionCap} class="flex items-center gap-2 px-3 py-1.5 bg-[var(--bg-deep)] border-b border-[var(--card-border)]">
+      <div class="border border-[var(--color-border-default)] rounded overflow-hidden max-h-[500px] overflow-y-auto">
+        <${SectionCap} class="flex items-center gap-2 px-3 py-1.5 bg-[var(--bg-deep)] border-b border-[var(--color-border-default)]">
           <span class="w-4"></span>
           <span class="w-16">시간</span>
           <span class="flex-1">도구</span>

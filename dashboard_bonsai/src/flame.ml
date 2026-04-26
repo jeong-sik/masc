@@ -30,13 +30,13 @@ stylesheet
   .flame_bar {
     display: flex;
     height: 14px;
-    border: 1px solid var(--border-main);
-    background: var(--bg-deep);
+    border: 1px solid var(--color-border-default);
+    background: var(--color-bg-page);
     overflow: hidden;
   }
   .flame_seg {
     height: 100%;
-    border-right: 1px solid color-mix(in oklab, var(--bg-deep) 35%, transparent);
+    border-right: 1px solid color-mix(in oklab, var(--color-bg-page) 35%, transparent);
   }
   .flame_seg:last-child { border-right: 0; }
   .flame_seg_llm   { background: var(--t-llm); }
@@ -51,7 +51,7 @@ stylesheet
     margin-top: 10px;
     font-family: 'JetBrains Mono', ui-monospace, monospace;
     font-size: 11px;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
     letter-spacing: 0.04em;
   }
   .flame_item { display: inline-flex; align-items: center; gap: 6px; }
@@ -59,9 +59,9 @@ stylesheet
     width: 10px;
     height: 10px;
     display: inline-block;
-    border: 1px solid color-mix(in oklab, var(--bg-deep) 45%, transparent);
+    border: 1px solid color-mix(in oklab, var(--color-bg-page) 45%, transparent);
   }
-  .flame_lbl { color: var(--text-primary); }
+  .flame_lbl { color: var(--color-fg-primary); }
   .flame_pct {
     color: var(--text-bright);
     font-variant-numeric: tabular-nums;

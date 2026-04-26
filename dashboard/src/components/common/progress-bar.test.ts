@@ -56,10 +56,10 @@ describe('progressBarTrackToneClass (pure)', () => {
 
 describe('progressBarToneClass (pure)', () => {
   it('semantic tokens route to the dashboard CSS vars', () => {
-    expect(progressBarToneClass('accent')).toBe('bg-[var(--accent)]')
-    expect(progressBarToneClass('ok')).toBe('bg-[var(--ok)]')
-    expect(progressBarToneClass('warn')).toBe('bg-[var(--warn)]')
-    expect(progressBarToneClass('bad')).toBe('bg-[var(--bad)]')
+    expect(progressBarToneClass('accent')).toBe('bg-[var(--color-accent-fg)]')
+    expect(progressBarToneClass('ok')).toBe('bg-[var(--color-status-ok)]')
+    expect(progressBarToneClass('warn')).toBe('bg-[var(--color-status-warn)]')
+    expect(progressBarToneClass('bad')).toBe('bg-[var(--color-status-err)]')
   })
 
   it('raw Tailwind tones route to their bg-500 class', () => {
@@ -118,7 +118,7 @@ describe('ProgressBar component', () => {
   it('tone prop maps to the fill bg class', () => {
     render(html`<${ProgressBar} pct=${50} tone="ok" />`, container)
     const fill = container.querySelector('[data-progress-bar] > div') as HTMLElement
-    expect(fill.className).toContain('bg-[var(--ok)]')
+    expect(fill.className).toContain('bg-[var(--color-status-ok)]')
   })
 
   it('class prop overrides tone (threshold-varying colors)', () => {
@@ -129,7 +129,7 @@ describe('ProgressBar component', () => {
     const fill = container.querySelector('[data-progress-bar] > div') as HTMLElement
     expect(fill.className).toContain('bg-[var(--sky-400)]')
     // Tone fallback must NOT also be present when class is given.
-    expect(fill.className).not.toContain('bg-[var(--accent)]')
+    expect(fill.className).not.toContain('bg-[var(--color-accent-fg)]')
   })
 
   it('title attribute propagates to the track', () => {

@@ -75,13 +75,13 @@ export function KeeperUtilitiesPanel() {
     <section class="${CARD_STANDARD} flex flex-col gap-3" data-testid="keeper-utilities-panel">
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0">
-          <h3 class="text-sm font-semibold text-[var(--text-strong)]">키퍼 유틸리티</h3>
-          <p class="mt-1 text-xs leading-[1.45] text-[var(--text-muted)]">
+          <h3 class="text-sm font-semibold text-[var(--color-fg-secondary)]">키퍼 유틸리티</h3>
+          <p class="mt-1 text-xs leading-[1.45] text-[var(--color-fg-muted)]">
             서버 available_actions catalog 기준으로 노출합니다.
           </p>
         </div>
         <select
-          class="shrink-0 rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-xs text-[var(--text-body)] transition-colors cursor-pointer min-w-36 focus-visible:outline-none focus-visible:border-[rgba(71,184,255,0.5)] focus-visible:ring-1 focus-visible:ring-[rgba(71,184,255,0.35)]"
+          class="shrink-0 rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-xs text-[var(--color-fg-primary)] transition-colors cursor-pointer min-w-36 focus-visible:outline-none focus-visible:border-[rgba(71,184,255,0.5)] focus-visible:ring-1 focus-visible:ring-[rgba(71,184,255,0.35)]"
           aria-label="키퍼 유틸리티 대상"
           value=${selectedName}
           disabled=${busy || onlineKeepers.length === 0}
@@ -107,8 +107,8 @@ export function KeeperUtilitiesPanel() {
             >
               <div class="flex items-start justify-between gap-3">
                 <div class="min-w-0">
-                  <div class="text-xs font-semibold text-[var(--text-strong)]">${actionTypeLabel(action.action_type)}</div>
-                  <div class="mt-1 text-2xs leading-[1.45] text-[var(--text-muted)]">${actionDescription(action)}</div>
+                  <div class="text-xs font-semibold text-[var(--color-fg-secondary)]">${actionTypeLabel(action.action_type)}</div>
+                  <div class="mt-1 text-2xs leading-[1.45] text-[var(--color-fg-muted)]">${actionDescription(action)}</div>
                   ${adapted
                     ? null
                     : html`<div class="mt-1 text-2xs font-medium text-warn">UI adapter pending</div>`}

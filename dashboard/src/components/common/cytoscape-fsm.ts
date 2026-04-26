@@ -34,18 +34,18 @@ const NODE_COLORS: Record<FsmNode['type'], { bg: string; border: string; text: s
   state:    { bg: 'var(--slate-800)', border: 'var(--slate-600)', text: 'var(--frost-100)' },
   active:   { bg: '#065f46', border: 'var(--emerald)', text: 'var(--white-pure)' },
   buffer:   { bg: '#78350f', border: 'var(--amber-bright)', text: 'var(--white-pure)' },
-  terminal: { bg: '#7f1d1d', border: 'var(--bad)', text: 'var(--white-pure)' },
+  terminal: { bg: '#7f1d1d', border: 'var(--color-status-err)', text: 'var(--white-pure)' },
   start:    { bg: 'var(--slate-800)', border: '#6366f1', text: '#c7d2fe' },
   end:      { bg: 'var(--slate-800)', border: '#6b7280', text: '#9ca3af' },
   ok:       { bg: '#065f46', border: 'var(--emerald)', text: 'var(--white-pure)' },
   warn:     { bg: '#78350f', border: 'var(--amber-bright)', text: 'var(--white-pure)' },
-  err:      { bg: '#7f1d1d', border: 'var(--bad)', text: 'var(--white-pure)' },
+  err:      { bg: '#7f1d1d', border: 'var(--color-status-err)', text: 'var(--white-pure)' },
   dim:      { bg: 'var(--slate-800)', border: '#374151', text: '#6b7280' },
 }
 
 const EDGE_COLORS: Record<string, string> = {
   normal: 'var(--slate-500)',
-  error: 'var(--bad)',
+  error: 'var(--color-status-err)',
   recovery: 'var(--emerald)',
   cascade: 'var(--amber-bright)',
 }
@@ -283,13 +283,13 @@ export function CytoscapeFsm({ spec, height = '280px', class: className = '' }: 
   }, [spec, loading])
 
   if (error) {
-    return html`<div class="text-2xs text-[var(--text-dim)]">${error}</div>`
+    return html`<div class="text-2xs text-[var(--color-fg-disabled)]">${error}</div>`
   }
 
   return html`
     <div class=${`relative rounded border border-[var(--white-8)] bg-[rgba(9,12,20,0.7)] overflow-hidden ${className}`.trim()}>
       ${loading ? html`
-        <div class="absolute inset-0 flex items-center justify-center text-2xs text-[var(--text-dim)]">
+        <div class="absolute inset-0 flex items-center justify-center text-2xs text-[var(--color-fg-disabled)]">
           <${InlineSpinner} class="mr-2" />
           그래프 로딩중
         </div>

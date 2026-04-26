@@ -10,7 +10,7 @@ interface SchemaFormProps {
 
 export function SchemaForm({ schema, values, onChange }: SchemaFormProps) {
   if (!schema.properties || Object.keys(schema.properties).length === 0) {
-    return html`<p class="text-[var(--text-muted)] text-xs py-2">이 도구는 파라미터가 없습니다.</p>`
+    return html`<p class="text-[var(--color-fg-muted)] text-xs py-2">이 도구는 파라미터가 없습니다.</p>`
   }
 
   const required = new Set(schema.required ?? [])

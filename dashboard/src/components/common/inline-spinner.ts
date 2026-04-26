@@ -11,7 +11,7 @@
 // Pre-change the dashboard had 5+ call sites with near-identical
 // Tailwind strings:
 //   inline-block h-3 w-3 rounded-full border-2
-//     border-[var(--accent)] border-t-transparent animate-spin
+//     border-[var(--color-accent-fg)] border-t-transparent animate-spin
 // This primitive pins the canonical 3 sizes + 2 tones.
 
 import { html } from 'htm/preact'
@@ -35,8 +35,8 @@ export function inlineSpinnerSizeClass(size: InlineSpinnerSize = 'sm'): string {
     variant for when the spinner is secondary to the row it lives in. */
 export function inlineSpinnerToneClass(tone: InlineSpinnerTone = 'accent'): string {
   return tone === 'accent'
-    ? 'border-[var(--accent)] border-t-transparent'
-    : 'border-[var(--text-dim)] border-t-transparent'
+    ? 'border-[var(--color-accent-fg)] border-t-transparent'
+    : 'border-[var(--color-fg-disabled)] border-t-transparent'
 }
 
 const BASE = 'inline-block rounded-full animate-spin shrink-0'

@@ -47,17 +47,17 @@ function outcomeLabel(a: Attribution): string {
 
 function outcomeToneClass(kind: Attribution['outcome']['kind']): string {
   switch (kind) {
-    case 'passed': return 'text-[var(--ok)]'
+    case 'passed': return 'text-[var(--color-status-ok)]'
     case 'policy_failed': return 'text-[var(--bad-light)]'
     case 'transition_blocked': return 'text-[var(--bad-light)]'
-    case 'partial_pass': return 'text-[var(--warn)]'
+    case 'partial_pass': return 'text-[var(--color-status-warn)]'
   }
 }
 
 function originBadgeClass(origin: Attribution['origin']): string {
   return origin === 'det'
-    ? 'bg-[var(--accent-10)]0/20 text-[var(--accent)] border border-[var(--accent-20)]0/40'
-    : 'bg-[var(--accent-10)]0/20 text-[var(--accent)] border border-[var(--accent-20)]0/40'
+    ? 'bg-[var(--accent-10)]0/20 text-[var(--color-accent-fg)] border border-[var(--accent-20)]0/40'
+    : 'bg-[var(--accent-10)]0/20 text-[var(--color-accent-fg)] border border-[var(--accent-20)]0/40'
 }
 
 function formatTs(recordedAt: number): string {
@@ -140,11 +140,11 @@ function GateCard({
         <div class="flex flex-col gap-2">
           <div class="flex items-baseline justify-between">
             <span class="text-xs font-semibold tracking-tight">${gate}</span>
-            <span class="text-3xs text-[var(--text-muted)]">${total}건</span>
+            <span class="text-3xs text-[var(--color-fg-muted)]">${total}건</span>
           </div>
           <div class="grid grid-cols-2 gap-1 text-2xs">
-            <span class="text-[var(--ok)]">✓ ${passed}</span>
-            <span class="text-[var(--warn)]">◐ ${partial}</span>
+            <span class="text-[var(--color-status-ok)]">✓ ${passed}</span>
+            <span class="text-[var(--color-status-warn)]">◐ ${partial}</span>
             <span class="text-[var(--bad-light)]">✗ ${policyFailed}</span>
             <span class="text-[var(--bad-light)]">⊘ ${blocked}</span>
           </div>
@@ -170,10 +170,10 @@ function EventRow({
   return html`
     <button
       type="button"
-      class="w-full text-left px-3 py-2 border-b border-[var(--card-border)] flex items-center gap-3 text-xs ${rowBg}"
+      class="w-full text-left px-3 py-2 border-b border-[var(--color-border-default)] flex items-center gap-3 text-xs ${rowBg}"
       onClick=${onSelect}
     >
-      <span class="text-2xs font-mono text-[var(--text-muted)] w-20 shrink-0">
+      <span class="text-2xs font-mono text-[var(--color-fg-muted)] w-20 shrink-0">
         ${formatTs(event.recorded_at)}
       </span>
       <span class="text-3xs px-1.5 py-0.5 rounded ${originBadgeClass(a.origin)} shrink-0">
@@ -183,7 +183,7 @@ function EventRow({
       <span class="${outcomeToneClass(a.outcome.kind)} shrink-0 w-20">
         ${outcomeLabel(a)}
       </span>
-      <span class="text-[var(--text-muted)] truncate grow min-w-0">
+      <span class="text-[var(--color-fg-muted)] truncate grow min-w-0">
         ${reasonText ? highlightMatch(reasonText, query) : '—'}
       </span>
     </button>
@@ -204,7 +204,7 @@ function EvidenceDetail({ event }: { event: AttributionEvent | null }) {
     <${SurfaceCard} variant="compact">
       <div class="flex flex-col gap-3">
         <div class="flex items-baseline gap-3 flex-wrap">
-          <span class="text-2xs text-[var(--text-muted)]">${formatTs(event.recorded_at)}</span>
+          <span class="text-2xs text-[var(--color-fg-muted)]">${formatTs(event.recorded_at)}</span>
           <span class="font-mono text-sm font-semibold">${a.gate}</span>
           <span class="text-3xs px-1.5 py-0.5 rounded ${originBadgeClass(a.origin)}">
             ${a.origin}
@@ -214,7 +214,7 @@ function EvidenceDetail({ event }: { event: AttributionEvent | null }) {
           </span>
         </div>
         ${reasonOf(a)
-          ? html`<div class="text-xs text-[var(--text-muted)]">${reasonOf(a)}</div>`
+          ? html`<div class="text-xs text-[var(--color-fg-muted)]">${reasonOf(a)}</div>`
           : null}
         <pre class="text-2xs font-mono bg-[var(--white-5)]/30 rounded p-3 overflow-x-auto max-h-64 whitespace-pre-wrap">${evidenceJson}</pre>
       </div>
@@ -294,10 +294,10 @@ export function AttributionPanel() {
   return html`
     <div class="flex flex-col gap-4">
       <div class="flex flex-col gap-1">
-        <div class="text-2xs font-semibold uppercase tracking-1 text-[var(--text-muted)]">
+        <div class="text-2xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">
           Attribution — gate chain 관찰
         </div>
-        <p class="m-0 text-xs leading-paragraph text-[var(--text-muted)]">
+        <p class="m-0 text-xs leading-paragraph text-[var(--color-fg-muted)]">
           각 gate의 결과 카운트 + 최근 ${RECENT_LIMIT}건 이벤트. 5초마다 자동 갱신.
         </p>
       </div>
@@ -318,7 +318,7 @@ export function AttributionPanel() {
       <div class="flex items-center justify-between gap-2 flex-wrap">
         ${filterGate.value
           ? html`
-            <div class="text-2xs text-[var(--text-muted)]">
+            <div class="text-2xs text-[var(--color-fg-muted)]">
               필터: <span class="font-mono text-[var(--text-primary)]">${filterGate.value}</span>
               <button
                 class="ml-2 underline"
@@ -337,14 +337,14 @@ export function AttributionPanel() {
             query.value = (e.target as HTMLInputElement).value
             selectedEventIdx.value = null
           }}
-          class="min-w-40 max-w-60 flex-1 rounded border border-[var(--card-border)] bg-[var(--white-5)]/20 px-2 py-1 text-2xs text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-20)]0/50"
+          class="min-w-40 max-w-60 flex-1 rounded border border-[var(--color-border-default)] bg-[var(--white-5)]/20 px-2 py-1 text-2xs text-[var(--text-primary)] placeholder:text-[var(--color-fg-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-20)]0/50"
         />
       </div>
 
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <${SurfaceCard} variant="light">
           <div class="flex flex-col">
-            <div class="px-3 py-2 border-b border-[var(--card-border)] text-2xs font-semibold uppercase tracking-1 text-[var(--text-muted)]">
+            <div class="px-3 py-2 border-b border-[var(--color-border-default)] text-2xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">
               최근 이벤트 (${isFiltering
                 ? `${visibleEvents.length}/${gateFiltered.length}`
                 : gateFiltered.length})

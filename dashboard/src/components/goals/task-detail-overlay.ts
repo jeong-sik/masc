@@ -252,7 +252,7 @@ function ContractSection({ task }: { task: Task }) {
       ${isAwaitingVerification ? html`
         <div class="rounded border border-accent/30 bg-[var(--accent-5)] px-4 py-3">
           <div class="flex items-center justify-between gap-3 flex-wrap">
-            <div class="text-xs font-medium text-accent">Verifier Keeper 검증 중</div>
+            <div class="text-xs font-medium text-accent">검증 키퍼 검증 중</div>
             <a
               href=${`#workspace?section=verification&task=${encodeURIComponent(task.id)}`}
               class="rounded border border-accent/50 bg-[var(--accent-10)] px-2.5 py-1 text-3xs font-semibold uppercase tracking-1 text-accent hover:bg-[var(--accent-20)]"

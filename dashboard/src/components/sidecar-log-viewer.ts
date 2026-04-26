@@ -201,7 +201,7 @@ export function SidecarLogViewer({ connectorId }: { connectorId: string }) {
               : 'no log yet'}
           </span>
           ${showMore
-            ? html`<${ActionButton} variant="ghost" size="sm" disabled=${entry.loading} onClick=${onShowMore}>Show 1000<//>`
+            ? html`<${ActionButton} variant="ghost" size="sm" disabled=${entry.loading} onClick=${onShowMore}>1000개 표시<//>`
             : null}
           <${ActionButton} variant="ghost" size="sm" disabled=${entry.loading} onClick=${onRefresh}>
             ${entry.loading ? '...' : 'Refresh'}

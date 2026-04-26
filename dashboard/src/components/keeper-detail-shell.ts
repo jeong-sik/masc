@@ -137,7 +137,7 @@ export function KeeperDetailMissingState({
   return html`
     <div class="mx-auto flex w-full max-w-[1100px] flex-col gap-4">
       <div class="rounded-[28px] border border-[var(--card-border)] bg-[rgba(9,14,24,0.92)] px-6 py-6 shadow-[0_24px_48px_rgba(0,0,0,0.24)]">
-        <div class="text-3xs font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">Keeper 상세</div>
+        <div class="text-3xs font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">키퍼 상세</div>
         <h2 class="m-0 mt-2 text-xl font-semibold text-[var(--text-strong)]">${keeperName}</h2>
         <p class="m-0 mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">
           현재 스냅샷에서 keeper를 찾지 못했습니다. 목록으로 돌아가서 다시 선택하거나, 최신 dashboard refresh 이후 다시 열어 보세요.

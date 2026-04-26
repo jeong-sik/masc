@@ -347,19 +347,19 @@ function TreeSummary({
       </div>
       <div class="rounded border border-ok/25 bg-ok/10 p-3 text-center">
         <div class="text-2xl font-bold text-ok tabular-nums">${summary.active_goals}</div>
-        <div class="mt-1 text-3xs font-semibold uppercase tracking-widest text-ok/80">On Track</div>
+        <div class="mt-1 text-3xs font-semibold uppercase tracking-widest text-ok/80">정상</div>
       </div>
       <div class="rounded border border-warn/25 bg-warn/10 p-3 text-center">
         <div class="text-2xl font-bold text-warn tabular-nums">${summary.at_risk_goals}</div>
-        <div class="mt-1 text-3xs font-semibold uppercase tracking-widest text-warn/80">At Risk</div>
+        <div class="mt-1 text-3xs font-semibold uppercase tracking-widest text-warn/80">위험</div>
       </div>
       <div class="rounded border border-bad/25 bg-bad/10 p-3 text-center">
         <div class="text-2xl font-bold text-bad tabular-nums">${summary.blocked_goals}</div>
-        <div class="mt-1 text-3xs font-semibold uppercase tracking-widest text-bad/80">Blocked</div>
+        <div class="mt-1 text-3xs font-semibold uppercase tracking-widest text-bad/80">차단</div>
       </div>
       <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-3 text-center">
         <div class="text-2xl font-bold text-text-strong tabular-nums">${summary.pending_approvals}</div>
-        <div class="mt-1 text-3xs font-semibold uppercase tracking-widest text-text-muted">Approval</div>
+        <div class="mt-1 text-3xs font-semibold uppercase tracking-widest text-text-muted">승인</div>
       </div>
       ${goalVerificationCount > 0 ? html`
         <div class="rounded border border-amber-400/30 bg-amber-400/10 p-3 text-center">
@@ -557,7 +557,7 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
         <div class="mt-1.5 flex flex-col gap-1.5">
           ${verificationSummary.open_request ? html`
             <div class="ml-6 rounded border border-amber-400/20 bg-amber-400/8 p-2 text-xs text-amber-100">
-              <div class="mb-1 text-3xs font-semibold uppercase tracking-widest text-amber-200/80">Goal Verification</div>
+              <div class="mb-1 text-3xs font-semibold uppercase tracking-widest text-amber-200/80">목표 검증</div>
               <div>request ${verificationSummary.open_request.id}</div>
               <div>
                 quorum ${verificationSummary.approve_count}/${verificationSummary.open_request.policy_snapshot.required_verdicts},
@@ -689,7 +689,7 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
       ${latestEvent ? html`
         <div class="mt-3 rounded border border-card-border/50 bg-white/3 p-3">
           <div class="flex flex-wrap items-center justify-between gap-2">
-            <div class="text-3xs font-semibold uppercase tracking-widest text-text-muted">Latest Keeper Event</div>
+            <div class="text-3xs font-semibold uppercase tracking-widest text-text-muted">최신 키퍼 이벤트</div>
             <div class="text-3xs text-text-dim">
               <${TimeAgo} timestamp=${latestEvent.ts} />
             </div>
@@ -831,7 +831,7 @@ function GoalDetailPanel({
 
         ${verificationSummary.effective_policy ? html`
           <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
-            <div class="mb-2 text-2xs font-semibold uppercase tracking-widest text-text-muted">Goal Verification</div>
+            <div class="mb-2 text-2xs font-semibold uppercase tracking-widest text-text-muted">목표 검증</div>
             <div class="flex flex-wrap items-center gap-2 text-xs text-text-body">
               <span class="rounded border border-amber-400/20 bg-amber-400/8 px-2 py-1 text-amber-100">
                 quorum ${verificationSummary.approve_count}/${verificationSummary.effective_policy.required_verdicts}
@@ -889,7 +889,7 @@ function GoalDetailPanel({
         <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
           <div class="flex flex-col gap-4">
             <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
-              <div class="mb-3 text-2xs font-semibold uppercase tracking-widest text-text-muted">Keeper Readiness</div>
+              <div class="mb-3 text-2xs font-semibold uppercase tracking-widest text-text-muted">키퍼 준비도</div>
               ${detail ? (
                 detail.linked_keepers.length > 0
                   ? html`
@@ -902,7 +902,7 @@ function GoalDetailPanel({
             </div>
 
             <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
-              <div class="mb-3 text-2xs font-semibold uppercase tracking-widest text-text-muted">Pending Approvals</div>
+              <div class="mb-3 text-2xs font-semibold uppercase tracking-widest text-text-muted">대기 중인 승인</div>
               ${detail ? (
                 detail.approvals.length > 0
                   ? html`
@@ -924,7 +924,7 @@ function GoalDetailPanel({
           </div>
 
           <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
-            <div class="mb-3 text-2xs font-semibold uppercase tracking-widest text-text-muted">Unified Timeline</div>
+            <div class="mb-3 text-2xs font-semibold uppercase tracking-widest text-text-muted">통합 타임라인</div>
             ${detail ? html`<${GoalTimeline} events=${detail.timeline} />` : null}
           </div>
         </div>

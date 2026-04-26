@@ -141,7 +141,7 @@ function WarningBanner({ warnings }: { warnings: string[] }) {
   if (warnings.length === 0) return null
   return html`
     <div class="rounded border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs text-[var(--warn)]">
-      <div class="font-medium text-[var(--warn)]">Partial telemetry</div>
+      <div class="font-medium text-[var(--warn)]">부분 텔레메트리</div>
       <div class="mt-1 flex flex-col gap-1">
         ${warnings.map(warning => html`<div>${warning}</div>`)}
       </div>
@@ -350,7 +350,7 @@ function TrendCell({ name, metric, value, valueClass }: {
 
 function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (name: string) => void }) {
   if (rows.length === 0) {
-    return html`<div class="text-2xs text-[var(--text-dim)]" role="status">Keeper 데이터 없음.</div>`
+    return html`<div class="text-2xs text-[var(--text-dim)]" role="status">키퍼 데이터 없음.</div>`
   }
 
   return html`
@@ -358,9 +358,9 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
       <table class="w-full text-2xs" aria-label="플릿 텔레메트리">
         <thead>
           <tr class="border-b border-[var(--card-border)] text-[var(--text-dim)]">
-            <th scope="col" class="py-1 text-left font-normal">Keeper</th>
-            <th scope="col" class="py-1 text-right font-normal">Status</th>
-            <th scope="col" class="py-1 text-right font-normal">Activity</th>
+            <th scope="col" class="py-1 text-left font-normal">키퍼</th>
+            <th scope="col" class="py-1 text-right font-normal">상태</th>
+            <th scope="col" class="py-1 text-right font-normal">활동</th>
             <th scope="col" class="py-1 text-right font-normal">측정</th>
             <th scope="col" class="py-1 text-right font-normal">Tools</th>
             <th scope="col" class="py-1 text-right font-normal">Success</th>
@@ -663,7 +663,7 @@ export function FleetTelemetryPanel() {
   const budgetOverrideCount = value.rows.filter(r => r.budget_source === 'override' || r.budget_source === 'override_invalid').length
 
   if (value.loading && value.rows.length === 0) {
-    return html`<${LoadingState}>Keeper 텔레메트리 불러오는 중...<//>`
+    return html`<${LoadingState}>키퍼 텔레메트리 불러오는 중...<//>`
   }
 
   if (value.error) {
@@ -693,7 +693,7 @@ export function FleetTelemetryPanel() {
     <div class="flex flex-col gap-4 p-4" role="region" aria-label="Keeper 텔레메트리">
       <div class="flex items-start justify-between gap-3">
         <div class="flex items-center gap-3">
-          <h2 class="text-sm font-medium">Keeper 텔레메트리</h2>
+          <h2 class="text-sm font-medium">키퍼 텔레메트리</h2>
           <div class="flex items-center gap-2 text-3xs">
             ${activeCount > 0 ? html`<span class="rounded-sm bg-[var(--ok-10)] px-1.5 py-0.5 text-[var(--ok)]">${activeCount} 가동</span>` : null}
             ${attentionCount > 0 ? html`<span class="rounded-sm bg-[var(--warn-10)] px-1.5 py-0.5 text-[var(--warn)]">${attentionCount} 주의</span>` : null}
@@ -759,7 +759,7 @@ export function FleetTelemetryPanel() {
 
       <div>
         <div class="mb-1 flex items-center justify-between gap-2">
-          <div class="text-3xs uppercase tracking-wider text-[var(--text-dim)]">Keeper 비교</div>
+          <div class="text-3xs uppercase tracking-wider text-[var(--text-dim)]">키퍼 비교</div>
           <input
             type="search"
             autoComplete="off"
@@ -776,7 +776,7 @@ export function FleetTelemetryPanel() {
       </div>
 
       <div>
-        <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--text-dim)]">Telemetry 소스</div>
+        <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--text-dim)]">텔레메트리 소스</div>
         <${TelemetrySourcesPanel} sources=${value.telemetry_sources} />
       </div>
 

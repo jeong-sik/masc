@@ -137,7 +137,7 @@ function CoordinationHealthPanel() {
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div>
           <div class="text-sm font-semibold text-text-strong">조정 건전성</div>
-          <div class="text-2xs text-text-dim">Goal x Task x Board x Reward · ${snapshot.mode ?? 'advisory'}</div>
+          <div class="text-2xs text-text-dim">목표 × 태스크 × 보드 × 보상 · ${snapshot.mode ?? 'advisory'}</div>
         </div>
         <div class="flex flex-wrap items-center gap-2 text-3xs font-medium">
           <span class="rounded border border-card-border/60 bg-white/4 px-2 py-1 text-text-body">

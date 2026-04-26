@@ -405,7 +405,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
         <table class="min-w-full text-xs" aria-label="플릿 FSM 상태 매트릭스">
           <thead class="bg-[var(--white-5)] text-[var(--text-muted)]">
             <tr>
-              <th scope="col" class="px-3 py-2 text-left font-semibold">Keeper</th>
+              <th scope="col" class="px-3 py-2 text-left font-semibold">키퍼</th>
               ${AXES.map(a => html`
                 <th scope="col" class="px-3 py-2 text-left font-semibold" title=${a.label}>
                   ${a.acronym} <span class="text-[var(--text-muted)]">${a.label}</span>

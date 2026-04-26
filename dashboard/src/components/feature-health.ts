@@ -212,7 +212,7 @@ export function FeatureHealth() {
                 <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-4">
                   <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                     <div class="max-w-3xl">
-                      <${SectionCap}>Feature Flags Health<//>
+                      <${SectionCap}>기능 플래그 건전성<//>
                       <div class="mt-2 text-2xl font-semibold text-[var(--text-strong)]">
                         ${overview.enabled_count} / ${overview.total_features} 기능 활성화
                       </div>

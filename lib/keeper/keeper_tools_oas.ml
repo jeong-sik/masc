@@ -335,11 +335,29 @@ let make_keeper_tool_handler
           (true, truncated_result)
         end
       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+        (* #10682: capture backtrace BEFORE any other operation that might
+           raise/handle exceptions and clobber the raw_backtrace.  Used
+           below to attach a stack to mutex EDEADLK ("Resource deadlock
+           avoided") errors so the exact Stdlib.Mutex site can be
+           identified — without this, the issue body for #10682 had to
+           speculate across 5 candidate sites because no caller wrote
+           the backtrace anywhere. *)
+        let raw_bt = Printexc.get_raw_backtrace () in
         let ts = Time_compat.now () in
         let duration_ms =
           int_of_float ((ts -. t0) *. 1000.0) in
         let count = prior_fails + 1 in
         let error_text = Printexc.to_string exn in
+        let edeadlk_backtrace =
+          (* Mutex EDEADLK signature on macOS / Linux pthread errorcheck
+             mutexes is exactly this Sys_error message; targeting it
+             keeps backtrace dump narrow (rare event) instead of
+             spamming every routine tool error. *)
+          if String_util.contains_substring error_text
+               "Resource deadlock avoided"
+          then Some (Printexc.raw_backtrace_to_string raw_bt)
+          else None
+        in
         Hashtbl.replace failure_counts key count;
         Keeper_registry.record_tool_use ~base_path:config.base_path meta.name ~tool_name:name ~success:false;
         !Keeper_exec_tools.on_keeper_tool_call ~tool_name:name ~success:false ~duration_ms;
@@ -359,6 +377,11 @@ let make_keeper_tool_handler
           name count max_consecutive_failures
           (Printexc.to_string exn) in
         Log.Keeper.error "%s" msg;
+        (match edeadlk_backtrace with
+         | Some bt ->
+             Log.Keeper.error
+               "tool %s EDEADLK backtrace (#10682):\n%s" name bt
+         | None -> ());
         let normalized_exn = normalize_tool_result ~success:false msg in
         (try
           Keeper_types_support.append_jsonl_line

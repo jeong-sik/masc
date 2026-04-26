@@ -1203,15 +1203,16 @@ function ConnectorLivePanel({
                                           ${observedRooms.slice(0, 8).map(roomId => {
                                             const humanized = humanizeChannel(names, roomId)
                                             return html`
-                                              <button
-                                                type="button"
-                                                class="cursor-pointer rounded-sm border border-[var(--color-border-default)] bg-[var(--white-4)] px-2 py-0.5 text-3xs text-[var(--color-fg-primary)] hover:bg-[var(--white-8)]"
+                                              <${ActionButton}
+                                                variant="ghost"
+                                                size="sm"
+                                                class="!rounded-sm !py-0.5"
                                                 title=${roomId}
-                                                aria-label=${humanized ? `select ${humanized}` : `select ${truncateMiddle(roomId, 22)}`}
+                                                ariaLabel=${humanized ? `select ${humanized}` : `select ${truncateMiddle(roomId, 22)}`}
                                                 onClick=${() => { patchConnectorUiState(connectorId, { channelDraft: roomId }) }}
                                               >${humanized
                                                 ? html`<span>${humanized}</span><span class="ml-1 text-[var(--color-fg-disabled)]">· ${truncateMiddle(roomId, 10)}</span>`
-                                                : truncateMiddle(roomId, 22)}</button>
+                                                : truncateMiddle(roomId, 22)}<//>
                                             `
                                           })}
                                         </div>

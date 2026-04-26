@@ -241,10 +241,11 @@ module Compat = struct
       headers = H2.Headers.to_list h2_req.headers;
     }
 
-  (** Get header value from compat request *)
+  (** Get header value from compat request — byte-wise CI equality so
+      every HTTP request avoids 2 allocations per header inspected. *)
   let header_get headers name =
     List.find_map (fun (k, v) ->
-      if String.lowercase_ascii k = String.lowercase_ascii name then Some v else None
+      if String_util.equals_ci k name then Some v else None
     ) headers
 
   (** Compat helpers mimicking Httpun.Headers *)

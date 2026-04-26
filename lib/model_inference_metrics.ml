@@ -1332,7 +1332,9 @@ let provider_rollup (agg : aggregate) : provider_stats list =
       | None -> ()
       | Some p ->
         let existing =
-          try Hashtbl.find by_provider p with Not_found -> []
+          match Hashtbl.find_opt by_provider p with
+          | Some v -> v
+          | None -> []
         in
         Hashtbl.replace by_provider p (m :: existing))
     agg.models;

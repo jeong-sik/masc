@@ -24,6 +24,7 @@ import {
   sendKeeperMessageDetailed,
   shutdownKeeper,
   streamKeeperMessage,
+  wakeKeeper,
 } from './keeper'
 
 afterEach(() => {
@@ -277,6 +278,39 @@ describe('keeper lifecycle', () => {
     const [url, init] = fetchMock.mock.calls[0]!
     expect(url).toBe('/api/v1/keepers/janitor/directive')
     expect(JSON.parse(init.body)).toEqual({ action: 'resume' })
+  })
+
+  it('sends POST with action=wakeup via directive endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true, action: 'wakeup', name: 'sangsu' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await wakeKeeper('sangsu')
+
+    expect(result.ok).toBe(true)
+    const [url, init] = fetchMock.mock.calls[0]!
+    expect(url).toBe('/api/v1/keepers/sangsu/directive')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body)).toEqual({ action: 'wakeup' })
+  })
+
+  it('returns error when wakeup directive fails', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: false, error: 'Keeper not found' }), {
+        status: 404,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await wakeKeeper('nonexistent')
+
+    expect(result.ok).toBe(false)
+    expect(result.error).toBe('Keeper not found')
   })
 
   it('returns error when pause directive fails', async () => {

@@ -155,7 +155,7 @@ export function CompositeFsmFlowchart(props: CompositeFsmFlowchartProps = {}) {
           source=${MERMAID_COMPOSITE}
           prefix="composite-fsm"
           minHeightClass="min-h-80"
-          fallbackText="Flowchart render failed — see browser console."
+          fallbackText="플로우차트 렌더 실패 — 브라우저 콘솔을 확인하세요."
         />
       </div>
     </section>

@@ -246,7 +246,7 @@ export function PrometheusMetrics() {
   }
 
   if (metrics.value.length === 0) {
-    return html`<${EmptyState} message="No metrics available" />`
+    return html`<${EmptyState} message="사용 가능한 메트릭이 없습니다" />`
   }
 
   // Group by category (filtered if search active)

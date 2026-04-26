@@ -205,7 +205,7 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
       ` : null}
 
       <div>
-        <div class="text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)] mb-2">Composite Lifecycle (KSM · KTC · KDP · KCL · KMC)</div>
+        <div class="text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)] mb-2">통합 라이프사이클 (KSM · KTC · KDP · KCL · KMC)</div>
         <${CytoscapeFsm} spec=${compositeSpec} height="320px" />
       </div>
 

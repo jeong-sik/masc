@@ -21,10 +21,10 @@ function handleSave(event: Event) {
   const jsonStr = formData.get('patterns') as string
   try {
     const parsed = JSON.parse(jsonStr) as ExcusePattern[]
-    if (!Array.isArray(parsed)) throw new Error('Root must be an array')
+    if (!Array.isArray(parsed)) throw new Error('루트는 배열이어야 합니다')
     for (const item of parsed) {
       if (!Array.isArray(item) || item.length !== 2 || typeof item[0] !== 'string' || typeof item[1] !== 'string') {
-        throw new Error('Items must be an array of exactly two strings: [pattern, reason]')
+        throw new Error('각 항목은 정확히 두 문자열의 배열이어야 합니다: [pattern, reason]')
       }
     }
     saving.value = true

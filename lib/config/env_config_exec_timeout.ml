@@ -73,6 +73,11 @@ let known_default_sec = function
   | Preflight | Repo_readiness | Gh_shared | Status_detail -> Some 10.0
   | Sandbox | Turn_sandbox -> Some 2.0
   | Pr_review | Turn_up -> Some 15.0
+  (* #10594 site 1: bumped 15.0 → 20.0 because gh issue create + Slack
+     POST + webhook fanout share this caller and the gh path can hit
+     ~18s under GitHub API load.  Operators can env-override down via
+     MASC_EXEC_TIMEOUT_ALERTING_SEC if the wider budget masks a real
+     stuck call. *)
   | Alerting -> Some 20.0
   | Dispatch -> Some 120.0
   | Memory_audit -> Some 3.0

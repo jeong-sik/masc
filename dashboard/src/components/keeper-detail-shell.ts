@@ -81,8 +81,8 @@ function KeeperCascadeSelector({ keeper }: { keeper: Keeper }) {
       <select
         class="py-0.5 px-1 rounded text-3xs font-mono bg-[var(--white-5)] text-[var(--text-muted)] border border-[var(--white-8)] cursor-pointer"
         title=${invalidProfiles.length > 0
-          ? `Cascade profile\n\nDisabled invalid presets:\n${invalidSummary}`
-          : 'Cascade profile'}
+          ? `Cascade 프로필\n\n비활성화된 잘못된 preset:\n${invalidSummary}`
+          : 'Cascade 프로필'}
         value=${currentCascade}
         onChange=${(e: Event) => {
           const val = (e.target as HTMLSelectElement).value

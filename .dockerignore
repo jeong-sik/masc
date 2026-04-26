@@ -8,6 +8,11 @@ logs
 .masc
 .env
 .env.*
+# Tracked Vite mode-specific env files (not secrets).  Required by the
+# dashboard-builder stage in the Dockerfile so `vite build` picks up
+# VITE_DASHBOARD_WS_ONLY (and any future tracked defaults).
+!dashboard/.env.development
+!dashboard/.env.production
 *.exe
 masc-mcp-linux-x64
 .github/

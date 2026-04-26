@@ -38,14 +38,12 @@ The flag is build-time: `vite build` reads `.env.production` (and `.env`,
 A rebuild is required to flip the tracked default; for a single browser
 tab without a rebuild, use the runtime injection below.
 
-> Dashboard production deployment caveat: as of this PR, the dashboard
-> SPA is built locally by an operator (`make build` triggers
-> `scripts/build-dashboard-if-needed.sh` → `vite build`).  Neither
-> `release.yml` nor `deploy-railway.yml` rebuilds the SPA, and the
-> Dockerfile does not COPY `assets/dashboard/`.  The cutover flag
-> therefore only takes effect on builds an operator produces locally
-> before deploying.  Wiring a real production dashboard build into CI
-> is tracked separately.
+The Dockerfile rebuilds the SPA in a Node 20 stage every Railway deploy,
+so the cutover flag in `dashboard/.env.production` is applied to every
+production image automatically.  See `Dockerfile` (`dashboard-builder`
+stage) and `.dockerignore` (whitelist for `dashboard/.env.production`).
+Operators who run `make build` locally still get the same default
+because both paths read the same env file.
 
 ## Reading the beacon
 

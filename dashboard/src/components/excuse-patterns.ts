@@ -51,7 +51,7 @@ export function ExcusePatterns() {
 
   if (s.status === 'loading') {
     return html`
-      <${Card} title="Anti-Rationalization Excuse Patterns">
+      <${Card} title="Anti-Rationalization 핑계 패턴">
         <${LoadingState}>핑계 패턴 불러오는 중...<//>
       </Card>
     `
@@ -59,8 +59,8 @@ export function ExcusePatterns() {
 
   if (s.status === 'error') {
     return html`
-      <${Card} title="Anti-Rationalization Excuse Patterns">
-        <div class="p-4 text-[var(--bad-light)]">Failed to load patterns: ${s.message}</div>
+      <${Card} title="Anti-Rationalization 핑계 패턴">
+        <div class="p-4 text-[var(--bad-light)]">패턴 로드 실패: ${s.message}</div>
       </Card>
     `
   }

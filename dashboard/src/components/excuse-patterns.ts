@@ -30,15 +30,15 @@ function handleSave(event: Event) {
     saving.value = true
     saveMessage.value = ''
     updateExcusePatterns(parsed).then(() => {
-      saveMessage.value = 'Saved successfully.'
+      saveMessage.value = '저장 완료.'
       refreshExcusePatterns()
     }).catch(err => {
-      saveMessage.value = `Failed to save: ${err.message}`
+      saveMessage.value = `저장 실패: ${err.message}`
     }).finally(() => {
       saving.value = false
     })
   } catch (err: any) {
-    saveMessage.value = `Invalid format: ${err.message}`
+    saveMessage.value = `잘못된 형식: ${err.message}`
   }
 }
 

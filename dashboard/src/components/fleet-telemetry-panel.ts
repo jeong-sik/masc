@@ -579,7 +579,7 @@ export function FleetTelemetryPanel() {
           ? toolQualityResult.value
           : EMPTY_TOOL_QUALITY
       if (toolQualityResult.status === 'rejected' && !isAbortError(toolQualityResult.reason)) {
-        warnings.push(`Tool quality unavailable: ${errorMessage(toolQualityResult.reason)}`)
+        warnings.push(`도구 품질 데이터 사용 불가: ${errorMessage(toolQualityResult.reason)}`)
       }
 
       const telemetrySummary =
@@ -587,7 +587,7 @@ export function FleetTelemetryPanel() {
           ? telemetrySummaryResult.value
           : { generated_at: '', sources: [], total_entries: 0 }
       if (telemetrySummaryResult.status === 'rejected' && !isAbortError(telemetrySummaryResult.reason)) {
-        warnings.push(`Telemetry store summary unavailable: ${errorMessage(telemetrySummaryResult.reason)}`)
+        warnings.push(`텔레메트리 저장소 요약 사용 불가: ${errorMessage(telemetrySummaryResult.reason)}`)
       }
       warnings.push(...buildTelemetryWarnings(telemetrySummary.sources))
 
@@ -596,7 +596,7 @@ export function FleetTelemetryPanel() {
           ? normalizeNamespaceTruth(namespaceTruthResult.value)
           : null
       if (namespaceTruthResult.status === 'rejected' && !isAbortError(namespaceTruthResult.reason)) {
-        warnings.push(`Control room unavailable: ${errorMessage(namespaceTruthResult.reason)}`)
+        warnings.push(`Control room 사용 불가: ${errorMessage(namespaceTruthResult.reason)}`)
       }
 
       const rows = buildFleetRows(keepers, toolQuality)

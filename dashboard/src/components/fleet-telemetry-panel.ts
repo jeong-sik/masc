@@ -362,12 +362,12 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
             <th scope="col" class="py-1 text-right font-normal">상태</th>
             <th scope="col" class="py-1 text-right font-normal">활동</th>
             <th scope="col" class="py-1 text-right font-normal">측정</th>
-            <th scope="col" class="py-1 text-right font-normal">Tools</th>
-            <th scope="col" class="py-1 text-right font-normal">Success</th>
+            <th scope="col" class="py-1 text-right font-normal">도구</th>
+            <th scope="col" class="py-1 text-right font-normal">성공</th>
             <th scope="col" class="py-1 text-right font-normal">Ctx</th>
-            <th scope="col" class="py-1 text-right font-normal">Latency</th>
-            <th scope="col" class="py-1 text-right font-normal">Model</th>
-            <th scope="col" class="py-1 text-center font-normal">Budget</th>
+            <th scope="col" class="py-1 text-right font-normal">지연</th>
+            <th scope="col" class="py-1 text-right font-normal">모델</th>
+            <th scope="col" class="py-1 text-center font-normal">예산</th>
             <th scope="col" class="w-8 py-1"><span class="sr-only">확장</span></th>
           </tr>
         </thead>

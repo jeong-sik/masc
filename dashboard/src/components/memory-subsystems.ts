@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { signal, useSignal } from '@preact/signals'
 import { useEffect, useMemo } from 'preact/hooks'
 import { LoadingState } from './common/feedback-state'
+import { TextInput } from './common/input'
 import { MermaidGraph } from './common/mermaid-graph'
 import { Select } from './common/select'
 import {
@@ -618,15 +619,15 @@ export function MemorySubsystems() {
               </div>`
             : html`
                 <div class="flex items-center gap-2 mb-2 flex-wrap">
-                  <input
+                  <${TextInput}
                     type="search"
+                    class="flex-1 min-w-50 !px-2 !py-1 !text-sm"
                     value=${synapseQueryValue}
                     placeholder="시냅스 검색 (from/to 에이전트 이름)"
-                    aria-label="시냅스 필터"
+                    ariaLabel="시냅스 필터"
                     onInput=${(e: Event) => {
                       synapseQuery.value = (e.target as HTMLInputElement).value
                     }}
-                    class="flex-1 min-w-50 bg-[var(--white-5)] border border-[var(--white-10)] rounded px-2 py-1 text-sm text-[var(--color-fg-muted)] placeholder:text-[var(--color-fg-muted)] focus:border-[var(--white-10)]0 focus:outline-none"
                   />
                   ${
                     isSynapseFiltering
@@ -689,12 +690,13 @@ export function MemorySubsystems() {
 
         <!-- Filter Bar -->
         <div class="flex items-center gap-2 mb-3 flex-wrap">
-          <input
+          <${TextInput}
             type="text"
+            class="flex-1 min-w-50 !px-2 !py-1 !text-sm"
             placeholder="검색 (summary, learnings, event_type...)"
+            ariaLabel="에피소드 검색"
             value=${searchQuery.value}
             onInput=${onSearchInput}
-            class="flex-1 min-w-50 bg-[var(--white-5)] border border-[var(--white-10)] rounded px-2 py-1 text-sm text-[var(--color-fg-muted)] placeholder:text-[var(--color-fg-muted)] focus:border-[var(--white-10)]0 focus:outline-none"
           />
           <${Select}
             class="px-2 py-1 text-sm"

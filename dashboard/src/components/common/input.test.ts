@@ -109,6 +109,13 @@ describe('TextInput', () => {
     render(html`<${TextInput} autoFocus=${true} />`, container)
     expect(container.querySelector('input')!.hasAttribute('autofocus')).toBe(true)
   })
+
+  it('inputRef.current points to the inner <input> after mount', () => {
+    const ref: { current: HTMLInputElement | null } = { current: null }
+    render(html`<${TextInput} inputRef=${ref} />`, container)
+    const input = container.querySelector('input') as HTMLInputElement
+    expect(ref.current).toBe(input)
+  })
 })
 
 describe('TextArea', () => {
@@ -148,5 +155,12 @@ describe('TextArea', () => {
     ta.dispatchEvent(new Event('input', { bubbles: true }))
     await flushUi()
     expect(spy).toHaveBeenCalledOnce()
+  })
+
+  it('inputRef.current points to the inner <textarea> after mount', () => {
+    const ref: { current: HTMLTextAreaElement | null } = { current: null }
+    render(html`<${TextArea} inputRef=${ref} />`, container)
+    const ta = container.querySelector('textarea') as HTMLTextAreaElement
+    expect(ref.current).toBe(ta)
   })
 })

@@ -314,6 +314,25 @@ let native_event_to_json (evt : Oas.Event_bus.event) : Yojson.Safe.t option =
         ]
       in
       Some (wrap ~event_type:"slot_scheduler_observed" ~payload ())
+  | Oas.Event_bus.InferenceTelemetry
+      { agent_name; turn; provider; model; prompt_tokens; completion_tokens;
+        prompt_ms; decode_ms; decode_tok_s } ->
+      let opt_int = function Some v -> `Int v | None -> `Null in
+      let opt_float = function Some v -> `Float v | None -> `Null in
+      let payload =
+        `Assoc [
+          ("agent_name", `String agent_name);
+          ("turn", `Int turn);
+          ("provider", `String provider);
+          ("model", `String model);
+          ("prompt_tokens", opt_int prompt_tokens);
+          ("completion_tokens", opt_int completion_tokens);
+          ("prompt_ms", opt_float prompt_ms);
+          ("decode_ms", opt_float decode_ms);
+          ("decode_tok_s", opt_float decode_tok_s);
+        ]
+      in
+      Some (wrap ~event_type:"inference_telemetry" ~payload ~agent_name ())
   | Oas.Event_bus.Custom (name, payload) ->
       (* Wire compatibility: dashboard consumers historically decoded
          [masc:broadcast] / [masc:keeper:snapshot] (all colons).

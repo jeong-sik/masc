@@ -350,11 +350,11 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
   return html`
     <section
       data-testid="fleet-fsm-matrix"
-      aria-label="Fleet FSM 매트릭스"
+      aria-label="플릿 FSM 매트릭스"
       class="rounded border border-[var(--white-10)] bg-[var(--white-5)]"
     >
       <header class="flex flex-wrap items-baseline gap-3 border-b border-[var(--white-10)] p-3">
-        <h2 class="text-sm font-semibold text-[var(--text-muted)]">Fleet composite (KSM × KTC × KDP × KCL × KMC)</h2>
+        <h2 class="text-sm font-semibold text-[var(--text-muted)]">플릿 복합 (KSM × KTC × KDP × KCL × KMC)</h2>
         <span class="text-xs text-[var(--text-muted)]">
           ${data.count} 키퍼 · <${TimeAgo} timestamp=${data.generated_at} mode="both" />
         </span>
@@ -402,7 +402,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
           `
         : null}
       <div class="overflow-x-auto">
-        <table class="min-w-full text-xs" aria-label="Fleet FSM 상태 매트릭스">
+        <table class="min-w-full text-xs" aria-label="플릿 FSM 상태 매트릭스">
           <thead class="bg-[var(--white-5)] text-[var(--text-muted)]">
             <tr>
               <th scope="col" class="px-3 py-2 text-left font-semibold">Keeper</th>

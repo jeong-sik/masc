@@ -355,7 +355,7 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
 
   return html`
     <div class="overflow-x-auto">
-      <table class="w-full text-2xs" aria-label="Fleet 텔레메트리">
+      <table class="w-full text-2xs" aria-label="플릿 텔레메트리">
         <thead>
           <tr class="border-b border-[var(--card-border)] text-[var(--text-dim)]">
             <th scope="col" class="py-1 text-left font-normal">Keeper</th>
@@ -748,7 +748,7 @@ export function FleetTelemetryPanel() {
       </div>
 
       <div>
-        <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--text-dim)]">Fleet 제어반</div>
+        <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--text-dim)]">플릿 제어반</div>
         <${ControlRoomPanel} state=${value} />
       </div>
 

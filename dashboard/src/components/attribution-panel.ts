@@ -330,8 +330,8 @@ export function AttributionPanel() {
           type="search"
           autoComplete="off"
           value=${query.value}
-          placeholder="gate / origin / reason 필터"
-          aria-label="Attribution 이벤트 필터"
+          placeholder="게이트 / 출처 / 사유 필터"
+          aria-label="속성 이벤트 필터"
           onInput=${(e: Event) => {
             query.value = (e.target as HTMLInputElement).value
             selectedEventIdx.value = null

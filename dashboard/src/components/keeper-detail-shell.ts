@@ -101,7 +101,7 @@ function KeeperCascadeSelector({ keeper }: { keeper: Keeper }) {
         }}
       >
         ${!knownValues.has(currentCascade) && currentCascade
-          ? html`<option value=${currentCascade}>${currentCascade} (current)</option>`
+          ? html`<option value=${currentCascade}>${currentCascade} (현재)</option>`
           : null}
         ${profiles.map((profile) => html`<option value=${profile}>${profile}</option>`)}
         ${invalidProfiles.length > 0

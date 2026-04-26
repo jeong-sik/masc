@@ -461,7 +461,7 @@ function ProfileCard({
       ${profile.candidates.length === 0
         ? html`<div class="text-xs text-[var(--text-muted)]">no candidates resolved</div>`
         : html`
-          <ol class="flex flex-col gap-1 text-xs" aria-label="Cascade 후보 순서">
+          <ol class="flex flex-col gap-1 text-xs" aria-label="캐스케이드 후보 순서">
             ${profile.candidates.map((c, idx) => {
               const expanded = c.expanded_models ?? []
               const displayModel = c.display_model ?? c.model
@@ -715,7 +715,7 @@ function HealthTable({
     ${isFiltering && filtered.length === 0
       ? html`<div class="py-4 text-center text-2xs text-[var(--text-muted)]" role="status">필터 결과 없음 (${health.providers.length} providers)</div>`
       : html`
-        <table class="w-full text-xs" aria-label="Cascade 공급자 상태">
+        <table class="w-full text-xs" aria-label="캐스케이드 공급자 상태">
           <thead>
             <tr class="text-[var(--text-muted)] border-b border-[var(--card-border)]">
               <th scope="col" class="text-left py-1 w-4"></th>
@@ -938,15 +938,15 @@ function StrategyTraceTable({
     : trace.events
   return html`
     ${query ? html`<div class="text-xs text-[var(--text-muted)] mb-2">${filtered.length}/${trace.events.length}건</div>` : null}
-    <table class="w-full text-xs" aria-label="Cascade 전략 추적 이벤트">
+    <table class="w-full text-xs" aria-label="캐스케이드 전략 추적 이벤트">
       <thead>
         <tr class="text-[var(--text-muted)] border-b border-[var(--card-border)]">
           <th scope="col" class="text-left py-1 w-20">시간</th>
-          <th scope="col" class="text-left py-1">Cascade</th>
-          <th scope="col" class="text-left py-1">Strategy</th>
-          <th scope="col" class="text-right py-1">Cycle</th>
-          <th scope="col" class="text-right py-1">In/Out</th>
-          <th scope="col" class="text-right py-1">Backoff(ms)</th>
+          <th scope="col" class="text-left py-1">캐스케이드</th>
+          <th scope="col" class="text-left py-1">전략</th>
+          <th scope="col" class="text-right py-1">사이클</th>
+          <th scope="col" class="text-right py-1">입/출력</th>
+          <th scope="col" class="text-right py-1">백오프(ms)</th>
           <th scope="col" class="text-left py-1">결과</th>
         </tr>
       </thead>
@@ -1234,7 +1234,7 @@ export function CascadeConfigPanel() {
       <div class="flex items-center gap-3 flex-wrap">
         <button type="button"
           class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-3 py-1 text-xs text-[var(--text-strong)] hover:bg-[var(--bg-panel-hover)]"
-          aria-label="Cascade 데이터 새로고침"
+          aria-label="캐스케이드 데이터 새로고침"
           onClick=${() => void loadCascadeData(resource)}
         >
           새로고침

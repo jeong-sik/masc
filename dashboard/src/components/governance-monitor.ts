@@ -130,7 +130,7 @@ export function GovernanceMonitor() {
   const isFiltering = query.value.trim() !== ''
 
   return html`
-    <div class="flex flex-col gap-4" role="region" aria-label="Governance 모니터">
+    <div class="flex flex-col gap-4" role="region" aria-label="거버넌스 모니터">
       <div class="flex items-center gap-3 flex-wrap">
         <select
           class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--text-strong)]"
@@ -145,7 +145,7 @@ export function GovernanceMonitor() {
         </select>
         <button type="button"
           class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-3 py-1 text-xs text-[var(--text-strong)] hover:bg-[var(--bg-panel-hover)]"
-          aria-label="governance 데이터 새로고침"
+          aria-label="거버넌스 데이터 새로고침"
           onClick=${() => void load()}
         >새로고침</button>
         <span class="text-xs text-[var(--text-muted)]">${formatAutoRefreshLabel(TELEMETRY_AUTO_REFRESH_MS)}</span>

@@ -1126,7 +1126,7 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
       ${fallbackCount > 0 ? html`
         <div class="md:col-span-2 p-3 rounded border border-[var(--bad-20)] bg-[var(--bad-6)]">
           <div class="flex items-center justify-between mb-1.5">
-            <span class="text-3xs uppercase tracking-wider text-[var(--text-muted)]">Cascade 폴백</span>
+            <span class="text-3xs uppercase tracking-wider text-[var(--text-muted)]">캐스케이드 폴백</span>
             <span class="text-3xs text-[var(--bad)]">${fallbackCount}회</span>
           </div>
           <div class="flex flex-wrap gap-1.5">

@@ -862,7 +862,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         <${LongText} text=${c.sources.default_manifest_path} />
       ` : null}
       ${c.sources.cascade_catalog_source_path ? html`
-        <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">Cascade 카탈로그 소스</div>
+        <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">캐스케이드 카탈로그 소스</div>
         <${LongText} text=${c.sources.cascade_catalog_source_path} />
       ` : null}
       ${c.sources.cascade_runtime_json_path ? html`

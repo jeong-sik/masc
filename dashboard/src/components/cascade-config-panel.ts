@@ -718,6 +718,7 @@ function HealthTable({
               <th scope="col" class="text-left py-1 w-4"></th>
               <th scope="col" class="text-left py-1">제공자</th>
               <th
+                scope="col"
                 class="text-left py-1"
                 title="운영 상태: 활성 (최근 이벤트), 쿨다운 (차단), 설정됨 (선언만 됨)"
               >상태</th>
@@ -725,18 +726,22 @@ function HealthTable({
               <th scope="col" class="text-right py-1">연속 실패</th>
               <th scope="col" class="text-right py-1">이벤트</th>
               <th
+                scope="col"
                 class="text-right py-1"
                 title="응답은 왔지만 accept 게이트에서 거부된 이벤트 수"
               >거부</th>
               <th
+                scope="col"
                 class="text-right py-1"
                 title="프롬프트 prefill 처리량 (이 provider 의 모델 entry-가중 평균)"
               >Prefill tok/s</th>
               <th
+                scope="col"
                 class="text-right py-1"
                 title="Decode 처리량 (예측 토큰 / 초, entry-가중)"
               >Decode tok/s</th>
               <th
+                scope="col"
                 class="text-right py-1"
                 title="Latency p50 / p95 (밀리초, 모델별 퍼센타일의 가중 평균 근사)"
               >Latency p50/p95</th>

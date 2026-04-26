@@ -184,6 +184,11 @@ type snapshot = {
       (** Wall-clock seconds since the keeper last did something the
           metrics layer treated as substantive. Compared against
           [proactive.idle_sec] to gate scheduled-autonomous turns. *)
+  last_turn_ts : float;
+      (** Raw [runtime.usage.last_turn_ts] from the registry entry.
+          Exposed for watchdog staleness diagnosis — the stale watchdog
+          in [Keeper_supervisor] reads this exact field. A value of [0.0]
+          means the registry never recorded a completed turn. *)
 }
 
 (** Derive a composite snapshot from a live registry entry.

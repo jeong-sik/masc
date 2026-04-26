@@ -119,10 +119,24 @@ let is_repetitive_tokens s =
 (** Filler phrases that indicate low-substance content.
     Removed Korean informal expressions (ㅋㅋ, ㅎㅎ, ㅠㅠ) — these are valid
     social communication in agent broadcasts, not filler. Penalizing them
-    via Thompson Sampling suppresses agent autonomy for legitimate expression. *)
+    via Thompson Sampling suppresses agent autonomy for legitimate expression.
+
+    #10882: the original list was English-only — masc-mcp keeper personas
+    output predominantly Korean, so 0 filler events fired across a 2-day
+    window even for genuine low-substance posts.  This biases Thompson
+    sampling Pass→[alpha boost] for Korean keepers regardless of actual
+    quality.  Add a small, conservative Korean filler set: only phrases
+    whose meaning is unambiguously "no content".  Deliberately exclude
+    common-but-ambiguous expressions ("확인 필요", "좀 봐주세요", "왜
+    이래요") that may appear in legitimate posts; promoting those would
+    swap a false-negative bias for a false-positive bias. *)
 let filler_phrases = [
+  (* English *)
   "nothing to say"; "no comment"; "test post";
   "hello world"; "asdf"; "qwerty"; "lorem ipsum";
+  (* Korean — limited to phrases that mean "nothing to say" / placeholder *)
+  "할 말 없음"; "할말 없음"; "내용 없음"; "그냥 테스트"; "테스트 메시지";
+  "tbd"; "n/a";
 ]
 
 let contains_filler s =

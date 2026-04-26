@@ -45,6 +45,16 @@ val masc_dir_from_base_path : base_path:string -> string
     [Filename.concat base_path masc_dirname]. Canonical way to spell
     [<base_path>/.masc]. *)
 
+val auth_dir_from_base_path : base_path:string -> string
+(** [<base_path>/.masc/auth]. SSOT path so {!Auth} and
+    {!Keeper_identity} can both compute it without depending on each
+    other (RFC P2 cycle-break prep). *)
+
+val agents_dir_from_base_path : base_path:string -> string
+(** [<base_path>/.masc/auth/agents]. Same SSOT motivation as
+    {!auth_dir_from_base_path}; this is where keeper credential JSON
+    files live ([<agent_name>.json]). *)
+
 val max_tool_output_bytes : int
 (** SSOT 64KB cap for MCP tool response bodies. *)
 

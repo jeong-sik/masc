@@ -251,7 +251,9 @@ let normalize_all_names ~input_agent_name ?(base_path = "")
           if not check_credential then Ok ()
           else
             let path =
-              Filename.concat (Auth.agents_dir base_path) (credential_stem ^ ".json")
+              Filename.concat
+                (Common.agents_dir_from_base_path ~base_path)
+                (credential_stem ^ ".json")
             in
             if Sys.file_exists path then Ok ()
             else

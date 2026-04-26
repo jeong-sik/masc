@@ -18,12 +18,12 @@ type task_metric = {
   agent_id: string;         (* Agent name: claude, gemini, codex *)
   task_id: string;          (* Task being measured *)
   started_at: float;        (* Unix timestamp *)
-  completed_at: float option;  (* None if still in progress *)
+  completed_at: float option [@default None];  (* None if still in progress *)
   success: bool;            (* Task succeeded? *)
-  error_message: string option;  (* Error if failed *)
+  error_message: string option [@default None];  (* Error if failed *)
   collaborators: string list;  (* Other agents involved - for Hebbian *)
-  handoff_from: string option;  (* Previous agent if handoff *)
-  handoff_to: string option;    (* Next agent if handoff out *)
+  handoff_from: string option [@default None];  (* Previous agent if handoff *)
+  handoff_to: string option [@default None];    (* Next agent if handoff out *)
 } [@@deriving yojson, show]
 
 (** Aggregated metrics for fitness calculation *)

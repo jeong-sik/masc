@@ -9,9 +9,3 @@ lib/agent_card.ml:46: security_scheme.bearer_format
 lib/agent_card.ml:47: security_scheme.api_key_name
 lib/agent_card.ml:48: security_scheme.api_key_in
 lib/build_identity.ml:5: t.commit
-lib/metrics_store_eio.ml:21: task_metric.completed_at
-lib/metrics_store_eio.ml:23: task_metric.error_message
-lib/metrics_store_eio.ml:25: task_metric.handoff_from
-lib/metrics_store_eio.ml:26: task_metric.handoff_to
-lib/prompt_registry/prompt_registry_types.ml:13: prompt_entry.metrics
-lib/prompt_registry/prompt_registry_types.mli:15: prompt_entry.metrics

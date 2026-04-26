@@ -25,8 +25,8 @@ stylesheet
   }
 
   .panel {
-    border: 1px solid var(--border-main);
-    background: linear-gradient(180deg, color-mix(in oklab, var(--bg-panel) 70%, transparent), color-mix(in oklab, var(--bg-deep) 85%, transparent));
+    border: 1px solid var(--color-border-default);
+    background: linear-gradient(180deg, color-mix(in oklab, var(--color-bg-surface) 70%, transparent), color-mix(in oklab, var(--color-bg-page) 85%, transparent));
     padding: 18px 20px;
     display: flex;
     flex-direction: column;
@@ -37,7 +37,7 @@ stylesheet
     font-size: 11px;
     letter-spacing: 0.25em;
     text-transform: uppercase;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
     margin: 0;
   }
 
@@ -57,7 +57,7 @@ stylesheet
     font-size: 11px;
     letter-spacing: 0.2em;
     text-transform: uppercase;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
   }
   .v {
     font-family: 'JetBrains Mono', ui-monospace, monospace;
@@ -68,10 +68,10 @@ stylesheet
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .v_dim { color: var(--text-dim); }
-  .v_brass { color: var(--accent-brass); }
-  .v_ok { color: var(--status-ok); }
-  .v_warn { color: var(--status-warn); }
+  .v_dim { color: var(--color-fg-muted); }
+  .v_brass { color: var(--color-accent-fg); }
+  .v_ok { color: var(--color-status-ok); }
+  .v_warn { color: var(--color-status-warn); }
   .v_bad { color: var(--accent-blood); }
 
   .counts {
@@ -84,8 +84,8 @@ stylesheet
     flex-direction: column;
     gap: 6px;
     padding: 14px;
-    background: color-mix(in oklab, var(--bg-deep) 40%, transparent);
-    border: 1px solid var(--border-main);
+    background: color-mix(in oklab, var(--color-bg-page) 40%, transparent);
+    border: 1px solid var(--color-border-default);
     text-align: center;
   }
   .count_k {
@@ -93,7 +93,7 @@ stylesheet
     font-size: 11px;
     letter-spacing: 0.22em;
     text-transform: uppercase;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
   }
   .count_v {
     font-family: 'Cinzel', serif;
@@ -105,24 +105,24 @@ stylesheet
 
   .stag_bar {
     height: 6px;
-    background: color-mix(in oklab, var(--accent-brass) 15%, transparent);
+    background: color-mix(in oklab, var(--color-accent-fg) 15%, transparent);
     position: relative;
     margin-top: 6px;
   }
   .stag_fill {
     position: absolute;
     left: 0; top: 0; bottom: 0;
-    background: var(--accent-brass);
+    background: var(--color-accent-fg);
   }
-  .stag_fill_warn { background: var(--status-warn); }
+  .stag_fill_warn { background: var(--color-status-warn); }
   .stag_fill_bad { background: var(--accent-blood); }
 
   .belief {
     padding: 12px 14px;
-    border: 1px dashed var(--border-main);
+    border: 1px dashed var(--color-border-default);
     font-family: 'EB Garamond', serif;
     font-size: 14px;
-    color: var(--text-primary);
+    color: var(--color-fg-primary);
     font-style: italic;
   }
   .belief_tag {
@@ -130,7 +130,7 @@ stylesheet
     font-size: 11px;
     letter-spacing: 0.18em;
     text-transform: uppercase;
-    color: var(--accent-brass);
+    color: var(--color-accent-fg);
     margin-right: 10px;
   }
 
@@ -139,8 +139,8 @@ stylesheet
     text-align: center;
     font-family: 'EB Garamond', serif;
     font-style: italic;
-    color: var(--text-dim);
-    border: 1px dashed var(--border-main);
+    color: var(--color-fg-muted);
+    border: 1px dashed var(--color-border-default);
   }
 
   @media (max-width: 920px) {
@@ -158,8 +158,8 @@ stylesheet
     .k { color: var(--text-bright); }
     .count_k { color: var(--text-bright); }
     .count_cell { border-width: 2px; border-color: var(--text-bright); }
-    .belief { border-width: 2px; border-style: solid; border-color: var(--text-bright); color: var(--text-primary); }
-    .empty { border-width: 2px; border-style: solid; border-color: var(--text-bright); color: var(--text-primary); }
+    .belief { border-width: 2px; border-style: solid; border-color: var(--text-bright); color: var(--color-fg-primary); }
+    .empty { border-width: 2px; border-style: solid; border-color: var(--text-bright); color: var(--color-fg-primary); }
     .stag_bar { outline: 1px solid var(--text-bright); }
   }
 

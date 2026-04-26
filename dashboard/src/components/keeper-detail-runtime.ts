@@ -6,6 +6,7 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect, useState } from 'preact/hooks'
 import { DistributionBars, type DistributionItem } from './common/distribution-bars'
+import { TextInput } from './common/input'
 import { TimeAgo } from './common/time-ago'
 import { toolCategory } from './tool-call-shared'
 import type { Keeper } from '../types'
@@ -451,11 +452,11 @@ export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
       ${totalRows > 0
         ? html`
             <div class="flex items-center gap-2">
-              <input
+              <${TextInput}
                 type="search"
-                class="flex-1 min-w-0 py-1.5 px-2 rounded border border-[var(--color-border-default)] bg-[var(--white-3)] text-2xs text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-muted)] focus:outline-none focus:border-[var(--accent-30)]"
+                class="flex-1 min-w-0 !py-1.5 !px-2 !text-2xs"
                 placeholder="신호 지표 필터 (예: 폴백, 메모리, 컴팩션)"
-                aria-label="런타임 신호 지표 필터"
+                ariaLabel="런타임 신호 지표 필터"
                 value=${signalQuery}
                 onInput=${(event: Event) => {
                   const target = event.currentTarget as HTMLInputElement | null

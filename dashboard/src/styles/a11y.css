@@ -53,9 +53,8 @@ input[type="checkbox"] {
   .pipeline-stage-node.active.stage-thinking .pipeline-stage-dot { animation: none; }
   .pipeline-stage-badge.stage-thinking { animation: none; }
   [class*="avatar-pulse-glow"] { animation: none; }
-  [style*="workingPulse"] { animation: none; }
-  [style*="keeperPulse"] { animation: none; }
-  [style*="activityFadeIn"] { animation: none; }
+  [class*="activityFadeIn"] { animation: none; }
+  [class*="marching-ants"] { animation: none; }
   /* Tailwind animation utilities — disable spin/pulse/bounce for motion-sensitive users. */
   .animate-spin { animation: none; }
   .animate-pulse { animation: none; }
@@ -64,6 +63,8 @@ input[type="checkbox"] {
   /* Phase indicator loading pulse + toast entrance animation. */
   .animate-loading-pulse { animation: none; }
   [class*="slideInRight"] { animation: none; }
+  /* tailwindcss-animate entrance/exit — dialog, overlay, slide-in. */
+  .animate-in, .animate-out { animation: none; }
 }
 
 /* Windows High Contrast Mode — ensure borders and focus rings remain visible

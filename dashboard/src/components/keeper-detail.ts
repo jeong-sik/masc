@@ -276,13 +276,13 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
           ? html`<span class="inline-flex items-center rounded-sm px-2 py-0.5 text-2xs font-semibold bg-[var(--warn-14)] text-[var(--warn)]">일시정지</span>
             ${hasActivitySignal ? html`<span class="text-[var(--text-muted)]">${renderActivitySignal()}</span>` : null}
             <button type="button"
-              class="inline-flex items-center rounded px-2 py-0.5 text-2xs font-medium bg-[var(--white-6)] hover:bg-[var(--white-8)] text-[var(--text-strong)] transition-colors disabled:opacity-50"
+              class="inline-flex items-center rounded px-2 py-0.5 text-2xs font-medium bg-[var(--white-6)] hover:bg-[var(--white-8)] text-[var(--text-strong)] transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]-colors disabled:opacity-50"
               aria-label="키퍼 재개"
               disabled=${directiveLoading.value}
               onClick=${() => handleDirective('resume')}
             >재개</button>`
           : html`<button type="button"
-              class="inline-flex items-center rounded px-2 py-0.5 text-2xs font-medium bg-[var(--white-6)] hover:bg-[var(--white-8)] text-[var(--text-strong)] transition-colors disabled:opacity-50"
+              class="inline-flex items-center rounded px-2 py-0.5 text-2xs font-medium bg-[var(--white-6)] hover:bg-[var(--white-8)] text-[var(--text-strong)] transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]-colors disabled:opacity-50"
               aria-label="키퍼 일시정지"
               disabled=${directiveLoading.value}
               onClick=${() => handleDirective('pause')}
@@ -403,7 +403,7 @@ function KeeperLifecycleButtons({ keeper, effectiveStatus }: { keeper: Keeper; e
   if (isOffline) return html`
     <button type="button"
       aria-label="${keeper.name} 기동"
-      class="py-1 px-3 rounded text-2xs font-semibold cursor-pointer border border-[rgba(34,197,94,0.4)] bg-[var(--emerald-8)] text-[var(--ok)] hover:bg-[rgba(34,197,94,0.15)] transition-colors"
+      class="py-1 px-3 rounded text-2xs font-semibold cursor-pointer border border-[rgba(34,197,94,0.4)] bg-[var(--emerald-8)] text-[var(--ok)] hover:bg-[rgba(34,197,94,0.15)] transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]-colors"
       onClick=${() => {
         void (async () => {
           try {
@@ -424,7 +424,7 @@ function KeeperLifecycleButtons({ keeper, effectiveStatus }: { keeper: Keeper; e
   if (isRunning) return html`
     <button type="button"
       aria-label="${keeper.name} 종료"
-      class="py-1 px-3 rounded text-2xs font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--rose-light)] hover:bg-[var(--bad-soft)] transition-colors"
+      class="py-1 px-3 rounded text-2xs font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--rose-light)] hover:bg-[var(--bad-soft)] transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]-colors"
       onClick=${() => {
         void (async () => {
           const confirmed = await requestConfirm({
@@ -528,12 +528,12 @@ function KeeperClearContextDialog({
 
         <div class="flex items-center justify-end gap-2">
           <button type="button"
-            class="px-4 py-2 rounded text-sm font-medium border border-[var(--card-border)] bg-[var(--white-4)] text-[var(--text-body)] hover:bg-[var(--white-8)] transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+            class="px-4 py-2 rounded text-sm font-medium border border-[var(--card-border)] bg-[var(--white-4)] text-[var(--text-body)] hover:bg-[var(--white-8)] transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
             disabled=${pending}
             onClick=${onClose}
           >취소</button>
           <button type="button"
-            class="px-4 py-2 rounded text-sm font-medium border border-transparent bg-[var(--bad)] text-white hover:bg-[rgba(239,68,68,0.88)] transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+            class="px-4 py-2 rounded text-sm font-medium border border-transparent bg-[var(--bad)] text-white hover:bg-[rgba(239,68,68,0.88)] transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
             disabled=${pending || reason.trim() === ''}
             onClick=${onSubmit}
           >${pending ? '비우는 중...' : '비우기'}</button>
@@ -837,13 +837,13 @@ export function KeeperDetailPage() {
           <div class="flex items-center gap-2">
             <button type="button"
               aria-label="${keeper.name} 컨텍스트 비우기"
-              class="py-1 px-3 rounded text-2xs font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--rose-light)] hover:bg-[var(--bad-soft)] transition-colors"
+              class="py-1 px-3 rounded text-2xs font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--rose-light)] hover:bg-[var(--bad-soft)] transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]-colors"
               onClick=${() => setClearDialogOpen(true)}
             >비우기</button>
             <button type="button"
               disabled=${purgePending}
               aria-label="${keeper.name} 완전 삭제"
-              class="py-1 px-3 rounded text-2xs font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--rose-light)] hover:bg-[var(--bad-soft)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              class="py-1 px-3 rounded text-2xs font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--rose-light)] hover:bg-[var(--bad-soft)] transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]-colors disabled:opacity-50 disabled:cursor-not-allowed"
               onClick=${submitPurgeKeeper}
             >${purgePending ? '삭제 중...' : '완전 삭제'}</button>
             <${KeeperLifecycleButtons} keeper=${keeper} effectiveStatus=${effectiveStatus} />

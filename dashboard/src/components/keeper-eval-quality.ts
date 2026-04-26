@@ -182,7 +182,7 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
         </div>
         <button
           type="button"
-          class="text-3xs text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-muted)] cursor-pointer bg-transparent border-0 p-0"
+          class="text-3xs text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-muted)] cursor-pointer bg-transparent border-0 min-w-6 min-h-6 inline-flex items-center justify-center rounded"
           onClick=${() => void loadEvalData(keeperName)}
           title="새로고침"
           aria-label="평가 결과 새로고침"

@@ -471,7 +471,7 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
               </td>
               <td class="py-1.5 text-center">
                 <button
-                  class="rounded p-0.5 text-[var(--color-fg-disabled)] hover:text-[var(--bad-light)] hover:bg-[var(--bad-10)] transition-colors"
+                  class="rounded min-w-6 min-h-6 p-1.5 text-[var(--color-fg-disabled)] hover:text-[var(--bad-light)] hover:bg-[var(--bad-10)] transition-colors inline-flex items-center justify-center"
                   onClick=${() => onReset(row.name)}
                   title="초기화"
                   aria-label=${`${row.name} 초기화`}

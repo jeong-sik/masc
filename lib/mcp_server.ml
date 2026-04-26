@@ -529,6 +529,15 @@ let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
       base_path
   in
   let registry = Session.create () in
+  (* PR #10664 introduced an actor-model mailbox loop in Session but
+     forgot to start it from this Eio boot path. Without the loop,
+     every Session.* helper that performs `Stream.add` then awaits
+     a Promise (restore_from_disk, register, push_notification_to_active_agents,
+     check_rate_limit, get_session, ...) blocks forever. The most
+     visible symptom is `lazy_task: starting restore_sessions` never
+     reaching `finished`, which freezes the entire keeper autoboot
+     gate behind an indefinite "waiting for lazy startup tasks" log. *)
+  Session.start_loop registry ~sw;
   (* Wire notification harness: subscription events → session queues *)
   Subscriptions.set_session_push_fn (fun event ->
     Session.push_notification_to_active_agents registry ~event

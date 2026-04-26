@@ -136,7 +136,7 @@ function CoordinationHealthPanel() {
     <section class="rounded border border-card-border/70 bg-[rgba(8,13,22,0.74)] p-3">
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <div class="text-sm font-semibold text-text-strong">Coordination Health</div>
+          <div class="text-sm font-semibold text-text-strong">협력 상태</div>
           <div class="text-2xs text-text-dim">Goal x Task x Board x Reward · ${snapshot.mode ?? 'advisory'}</div>
         </div>
         <div class="flex flex-wrap items-center gap-2 text-3xs font-medium">

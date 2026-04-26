@@ -333,7 +333,7 @@ describe('FleetTelemetryPanel', () => {
     expect(container.textContent).toContain('keeper-alpha')
     expect(container.textContent).toContain('keeper-beta')
     expect(container.textContent).toContain('Keeper 턴 로그')
-    expect(container.textContent).toContain('Failure Categories')
+    expect(container.textContent).toContain('실패 분류')
     expect(container.textContent).toContain('함대 통제실')
   }, 60_000)
 
@@ -368,7 +368,7 @@ describe('FleetTelemetryPanel', () => {
 
     expect(container.textContent).toContain('준비 상태')
     expect(container.textContent).toContain('승인 대기')
-    expect(container.textContent).toContain('Attention Queue')
+    expect(container.textContent).toContain('주의 대기열')
     expect(container.textContent).toContain('keeper-alpha is blocked on a continue decision.')
     expect(container.textContent).toContain('goal linked')
     expect(container.textContent).toContain('sandbox docker')

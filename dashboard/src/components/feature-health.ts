@@ -199,7 +199,7 @@ export function FeatureHealth() {
 
   return html`
     <div class="space-y-4">
-      <${Card} title="Feature Health" class="section">
+      <${Card} title="기능 상태" class="section">
         <${AsyncContainer}
           state=${featureHealth.state}
           loadingMessage="Feature health 데이터를 불러오는 중..."

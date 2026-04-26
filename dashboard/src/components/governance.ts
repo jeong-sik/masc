@@ -552,7 +552,7 @@ function KeeperApprovalQueueSection() {
                         : null}
                     </div>
                     <div class="mt-3 grid gap-3 min-[1100px]:grid-cols-[minmax(0,1fr)_auto]">
-                      <${JsonViewerCard} data=${item.input ?? {}} title="Approval Input" />
+                      <${JsonViewerCard} data=${item.input ?? {}} title="승인 입력" />
                       <div class="flex min-[1100px]:flex-col gap-2 min-[1100px]:justify-start">
                         <${ActionButton}
                           variant="primary"

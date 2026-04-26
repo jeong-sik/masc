@@ -187,7 +187,7 @@ export function VerificationSpecsPanel() {
         ? html`<${LoadingState}>TLA+ 스펙 목록 불러오는 중...<//>`
         : null}
 
-      <${Card} title="Formal Specs">
+      <${Card} title="형식 명세">
         <div class="mb-2 text-xs text-slate-400">
           <span class="font-mono">${dirLabel}</span>
         </div>

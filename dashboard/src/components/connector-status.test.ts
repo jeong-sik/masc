@@ -410,7 +410,7 @@ describe('ConnectorStatusPanel', () => {
     expect(text).toContain('Discord')
     expect(text).toContain('stale')
     expect(text).toContain('Gate metrics unavailable')
-    expect(text).toContain('Gate-advertised connector runtime is visible')
+    expect(text).toContain('게이트가 광고하는 connector runtime 은 보이지만')
     expect(text).toContain('keeper directory unavailable, manual entry only')
     expect(text).toContain('Next: continue with manual entry now')
     expect(text).toContain('config/keepers/')

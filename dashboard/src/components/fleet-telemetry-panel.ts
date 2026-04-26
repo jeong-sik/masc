@@ -274,7 +274,7 @@ function ControlRoomPanel({ state }: { state: FleetTelemetryState }) {
           </div>
         </div>
         <div>
-          <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--text-dim)]">Attention Queue</div>
+          <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--text-dim)]">주의 대기열</div>
           <${AttentionEventList} events=${attentionEvents} />
         </div>
       </div>
@@ -747,7 +747,7 @@ export function FleetTelemetryPanel() {
       </div>
 
       <div>
-        <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--text-dim)]">Pressure Watchlist</div>
+        <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--text-dim)]">압박 감시 목록</div>
         <${PressureWatchlist} rows=${value.rows} />
       </div>
 
@@ -769,12 +769,12 @@ export function FleetTelemetryPanel() {
       </div>
 
       <div>
-        <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--text-dim)]">Telemetry Sources</div>
+        <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--text-dim)]">텔레메트리 출처</div>
         <${TelemetrySourcesPanel} sources=${value.telemetry_sources} />
       </div>
 
       <div>
-        <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--text-dim)]">Failure Categories</div>
+        <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--text-dim)]">실패 분류</div>
         <${FailureCategoryPanel} toolQuality=${value.tool_quality} />
       </div>
     </div>

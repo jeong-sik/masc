@@ -372,38 +372,38 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
           ? html`<span><strong class="text-[var(--text-strong)]">사용 도구</strong> · ${usedTools.join(', ')}</span>`
           : null}
         ${missingRequiredTools.length > 0
-          ? html`<span class="text-[var(--bad)]"><strong>Missing</strong> · ${missingRequiredTools.join(', ')}</span>`
+          ? html`<span class="text-[var(--bad)]"><strong>누락</strong> · ${missingRequiredTools.join(', ')}</span>`
           : null}
         ${providerSelectedModel || cascadeOutcome || typeof providerAttempts === 'number'
           ? html`
               <span>
-                <strong class="text-[var(--text-strong)]">Provider</strong>
+                <strong class="text-[var(--text-strong)]">프로바이더</strong>
                 · ${providerSelectedModel ?? cascadeOutcome ?? 'observed'}
-                ${typeof providerAttempts === 'number' ? ` · ${providerAttempts} tries` : ''}
-                ${providerFallback === true ? ' · fallback' : ''}
+                ${typeof providerAttempts === 'number' ? ` · ${providerAttempts}회 시도` : ''}
+                ${providerFallback === true ? ' · 폴백' : ''}
               </span>
             `
           : null}
         ${trustLatestEvent
           ? html`
               <span>
-                <strong class="text-[var(--text-strong)]">최근 trust event</strong>
+                <strong class="text-[var(--text-strong)]">최근 검증 이벤트</strong>
                 · ${trustLatestEvent.title}
                 · <${TimeAgo} timestamp=${trustLatestEvent.ts} />
               </span>
             `
           : null}
         ${sandboxTarget
-          ? html`<span><strong class="text-[var(--text-strong)]">Sandbox</strong> · ${sandboxTarget}</span>`
+          ? html`<span><strong class="text-[var(--text-strong)]">샌드박스</strong> · ${sandboxTarget}</span>`
           : null}
         ${typeof persistedPolicyCount === 'number'
-          ? html`<span><strong class="text-[var(--text-strong)]">Always</strong> · ${persistedPolicyCount} rules</span>`
+          ? html`<span><strong class="text-[var(--text-strong)]">상시 규칙</strong> · ${persistedPolicyCount}건</span>`
           : null}
         ${typeof goalLinkedTasks === 'number'
-          ? html`<span><strong class="text-[var(--text-strong)]">Goal Tasks</strong> · ${goalLinkedTasks}</span>`
+          ? html`<span><strong class="text-[var(--text-strong)]">목표 작업</strong> · ${goalLinkedTasks}</span>`
           : null}
         ${typeof goalConvergence === 'number'
-          ? html`<span><strong class="text-[var(--text-strong)]">Goal Progress</strong> · ${Math.round(goalConvergence * 100)}%</span>`
+          ? html`<span><strong class="text-[var(--text-strong)]">목표 진행률</strong> · ${Math.round(goalConvergence * 100)}%</span>`
           : null}
         ${hasActivitySignal
           ? html`<span><strong class="text-[var(--text-strong)]">최근 신호</strong> · ${renderActivitySignal()}</span>`
@@ -891,7 +891,7 @@ export function KeeperDetailPage() {
 
           <${KeeperDetailSection}
             id="keeper-summary"
-            eyebrow="State Overview"
+            eyebrow="상태 개요"
             title="운영 상태 개요"
             description="상태 기계, 메모리 티어, KPI, 추론/컨텍스트 계측을 먼저 훑어 keeper의 현재 건강도를 빠르게 판단합니다."
           >
@@ -1001,7 +1001,7 @@ export function KeeperDetailPage() {
 
           <${KeeperDetailSection}
             id="keeper-runtime"
-            eyebrow="Runtime Diagnostics"
+            eyebrow="런타임 진단"
             title="진단 / 운영"
             description="eval, supervisor, 복구 액션, tool audit, 품질 시그널을 한 군데로 모아 원인 파악과 개입을 빠르게 합니다."
           >

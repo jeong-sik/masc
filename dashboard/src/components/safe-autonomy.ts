@@ -333,7 +333,7 @@ export function SafeAutonomyPanel() {
 
   return html`
     <div class="space-y-4">
-      <${Card} title="Safe Autonomy" class="section">
+      <${Card} title="안전 자율성" class="section">
         <${AsyncContainer}
           state=${safeAutonomy.state}
           loadingMessage="세이프 오토노미 scorecard를 불러오는 중..."
@@ -374,7 +374,7 @@ export function SafeAutonomyPanel() {
                 ${data.domains.map(item => html`<${DomainCard} key=${item.id} item=${item} />`)}
               </div>
 
-              <${Card} title="Keeper Matrix" class="section">
+              <${Card} title="키퍼 매트릭스" class="section">
                 <div class="space-y-3">
                   ${data.per_keeper.length === 0
                     ? html`<${EmptyState} message="표시할 keeper snapshot이 없습니다." compact />`

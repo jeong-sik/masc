@@ -274,7 +274,7 @@ export function ConnectorKeeperMatrix({ matrix }: { matrix: MatrixData }) {
                   class="px-1 py-1 text-center text-3xs uppercase tracking-4 text-[var(--text-dim)]"
                   title="Per-keeper coverage totals (bound / unbound / n·a)"
                   data-matrix-coverage-header
-                >Coverage</div>
+                >커버리지</div>
 
                 ${matrix.rows.map(row => html`
                   <${MatrixRowRender} row=${row} />

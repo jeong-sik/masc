@@ -143,9 +143,9 @@ describe('Autoresearch surface refresh', () => {
     await refreshAutoresearchSurface()
     await flushUi()
 
-    expect(container.textContent).toContain('Experiment Outcomes')
+    expect(container.textContent).toContain('실험 결과')
     expect(container.textContent).toContain('하네스 열기')
-    expect(container.textContent).toContain('Research Brief')
+    expect(container.textContent).toContain('연구 브리프')
     expect(container.textContent).toContain('이 화면은 generator loop 자체를 설명합니다.')
     expect(container.textContent).toContain('1 / 5')
     expect(container.textContent).toContain('사이클 이력 (1건)')

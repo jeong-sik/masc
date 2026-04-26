@@ -1505,23 +1505,23 @@ function GateAnalyticsSection({
 
   return html`
     <${DisclosurePanel}
-      title="Gate Analytics"
+      title="게이트 분석"
       subtitle=${subtitle}
       testId="connector-gate-analytics"
     >
       ${gate === null
         ? html`
             <div class="rounded border border-dashed border-[var(--card-border)] px-3 py-4 text-xs text-[var(--text-dim)]">
-              Gate-advertised connector runtime is visible, but Gate-observed traffic is not available yet.
+              게이트가 광고하는 connector runtime 은 보이지만, 게이트가 관찰한 트래픽 은 아직 없습니다.
             </div>
           `
         : html`
             <div>
               <div class="mb-3 grid grid-cols-4 gap-2 max-[720px]:grid-cols-2">
-                <${StatCard} label="Messages" value=${gate.total_messages} />
-                <${StatCard} label="Success" value=${gate.total_success} />
-                <${StatCard} label="Errors" value=${gate.total_errors} />
-                <${StatCard} label="Dedup Keys" value=${gate.dedup_table_size} />
+                <${StatCard} label="메시지" value=${gate.total_messages} />
+                <${StatCard} label="성공" value=${gate.total_success} />
+                <${StatCard} label="오류" value=${gate.total_errors} />
+                <${StatCard} label="중복 제거 키" value=${gate.dedup_table_size} />
               </div>
 
               <div class="mb-4 grid grid-cols-2 gap-2 text-2xs text-[var(--text-dim)] max-[720px]:grid-cols-1">
@@ -1715,7 +1715,7 @@ export function ConnectorStatusPanel() {
       ${!filterId
         ? html`
             <${DisclosurePanel}
-              title="Keeper Matrix"
+              title="키퍼 매트릭스"
               subtitle="cross-connector binding 현황은 필요할 때만 펼쳐 봅니다."
               testId="connector-matrix-disclosure"
             >

@@ -952,7 +952,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
           <${SetupGuideCard} connectorId="sandbox_hardened" />
         ` : null}
         <${Callout}
-          title="Base Path Anchor"
+          title="기본 경로 앵커"
           body=${sandboxAnchorText(c)}
         />
         ${rd.sandbox_profile === 'docker' ? html`
@@ -994,7 +994,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         </div>
         ${c.sandbox_last_error ? html`
           <${Callout}
-            title="Sandbox Error"
+            title="샌드박스 오류"
             body=${c.sandbox_last_error}
             tone="warn"
           />
@@ -1084,7 +1084,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       </div>
       ${isVerifierRoleKeeper(c.coordination.mention_targets) ? html`
       <div class="mb-2 flex items-center gap-2 rounded border border-accent/30 bg-[var(--accent-10)] px-3 py-2">
-        <span class="rounded border border-accent/40 bg-[var(--accent-5)] px-2 py-0.5 text-3xs font-semibold uppercase tracking-1 text-accent">Verifier</span>
+        <span class="rounded border border-accent/40 bg-[var(--accent-5)] px-2 py-0.5 text-3xs font-semibold uppercase tracking-1 text-accent">검증자</span>
         <span class="text-2xs text-text-body">이 keeper는 task completion_contract를 독립 실측하는 검증자 역할입니다.</span>
       </div>
       ` : null}

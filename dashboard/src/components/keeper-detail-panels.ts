@@ -169,7 +169,7 @@ function OperationalHealth({ keeper }: { keeper: Keeper }) {
       <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
         ${hb ? html`
           <div class="p-2 rounded border ${KPI_TONE[hbTone]} flex flex-col gap-0.5">
-            <span class="text-3xs uppercase tracking-wider text-[var(--text-muted)]">Heartbeat</span>
+            <span class="text-3xs uppercase tracking-wider text-[var(--text-muted)]">하트비트</span>
             <span class="text-xs font-mono ${KPI_VALUE_TONE[hbTone]}">${hb.replace('T', ' ').slice(0, 19)}</span>
           </div>
         ` : null}
@@ -595,7 +595,7 @@ export function TokenTrendChart({ keeper }: { keeper: Keeper }) {
   return html`
     <div class="mb-5">
       <div class="flex items-center gap-2 mb-2">
-        <span class="text-2xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Turn Token Trend</span>
+        <span class="text-2xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">턴 토큰 추세</span>
         <span class="text-3xs text-[var(--text-dim)]">${points.length} turns</span>
       </div>
       <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -676,8 +676,8 @@ export function PromptTelemetryPanel({ keeper }: { keeper: Keeper }) {
   return html`
     <div class="mb-5">
       <div class="flex items-center gap-2 mb-2">
-        <span class="text-2xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Prompt Fingerprint</span>
-        <span class="text-3xs text-[var(--text-dim)]">${promptPoints.length} snapshots</span>
+        <span class="text-2xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">프롬프트 핑거프린트</span>
+        <span class="text-3xs text-[var(--text-dim)]">${promptPoints.length}개 스냅샷</span>
         ${latest?.prompt_fingerprint
           ? html`<span class="inline-flex items-center gap-1">
               <span class="text-3xs px-1.5 py-0.5 rounded bg-[var(--white-5)] text-[var(--text-dim)] font-mono" title=${latest.prompt_fingerprint}>${formatFingerprint(latest.prompt_fingerprint)}</span>
@@ -984,8 +984,8 @@ export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
   return html`
     <div class="mb-5">
       <div class="flex items-center gap-2 mb-2">
-        <span class="text-2xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Inference Telemetry</span>
-        <span class="text-3xs text-[var(--text-dim)]">${telemetryPoints.length} points</span>
+        <span class="text-2xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">추론 텔레메트리</span>
+        <span class="text-3xs text-[var(--text-dim)]">${telemetryPoints.length}개 지점</span>
         ${lastFp ? html`<span class="text-3xs px-1.5 py-0.5 rounded bg-[var(--white-5)] text-[var(--text-dim)] font-mono">${lastFp}</span>` : null}
       </div>
       <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
@@ -1124,7 +1124,7 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
       ${fallbackCount > 0 ? html`
         <div class="md:col-span-2 p-3 rounded border border-[var(--bad-20)] bg-[var(--bad-6)]">
           <div class="flex items-center justify-between mb-1.5">
-            <span class="text-3xs uppercase tracking-wider text-[var(--text-muted)]">Cascade Fallback</span>
+            <span class="text-3xs uppercase tracking-wider text-[var(--text-muted)]">캐스케이드 폴백</span>
             <span class="text-3xs text-[var(--bad)]">${fallbackCount}회</span>
           </div>
           <div class="flex flex-wrap gap-1.5">

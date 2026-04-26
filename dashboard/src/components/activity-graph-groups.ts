@@ -49,13 +49,13 @@ export function categoryForActivityKind(kind: string): ActivityCategory {
 
 export function categoryLabel(category: ActivityCategory): string {
   switch (category) {
-    case 'task': return 'Task'
-    case 'session': return 'Session'
-    case 'message': return 'Message'
-    case 'board': return 'Board'
-    case 'governance': return 'Governance'
-    case 'lifecycle': return 'Lifecycle'
-    default: return 'Other'
+    case 'task': return '태스크'
+    case 'session': return '세션'
+    case 'message': return '메시지'
+    case 'board': return '보드'
+    case 'governance': return '거버넌스'
+    case 'lifecycle': return '라이프사이클'
+    default: return '기타'
   }
 }
 

@@ -71,7 +71,7 @@ const TONE: Record<RailState, { bg: string; border: string; text: string; dot: s
   ok: {
     bg: 'bg-[var(--ok-10)]',
     border: 'border-[var(--ok-20)]',
-    text: 'text-[var(--ok)]',
+    text: 'text-[var(--color-status-ok)]',
     dot: 'bg-[var(--ok-10)]',
     icon: '✓',
     // Grafana Stat panel "Background Gradient" mode — subtle vertical
@@ -82,7 +82,7 @@ const TONE: Record<RailState, { bg: string; border: string; text: string; dot: s
   warn: {
     bg: 'bg-[var(--warn-10)]',
     border: 'border-[var(--warn-20)]',
-    text: 'text-[var(--warn)]',
+    text: 'text-[var(--color-status-warn)]',
     dot: 'bg-[var(--warn-10)]',
     icon: '!',
     gradient: 'bg-gradient-to-b from-amber-500/15 to-amber-500/0',
@@ -98,7 +98,7 @@ const TONE: Record<RailState, { bg: string; border: string; text: string; dot: s
   idle: {
     bg: 'bg-[var(--white-3)]',
     border: 'border-[var(--white-8)]',
-    text: 'text-[var(--text-dim)]',
+    text: 'text-[var(--color-fg-disabled)]',
     dot: 'bg-[var(--white-10)]',
     icon: '·',
     gradient: 'bg-gradient-to-b from-[var(--white-4)] to-[var(--white-2)]',

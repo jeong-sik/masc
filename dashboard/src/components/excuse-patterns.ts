@@ -71,7 +71,7 @@ export function ExcusePatterns() {
   return html`
     <${Card} title="Anti-Rationalization Excuse Patterns">
       <div class="p-4">
-        <p class="text-sm text-[var(--text-muted)] mb-4">
+        <p class="text-sm text-[var(--color-fg-muted)] mb-4">
           These patterns are matched against agent completion notes. If matched, the task is rejected.
           Changes here are saved to <code>config/excuse_patterns.json</code> and applied immediately without restarting.
           The format must be a JSON array of arrays, each containing two strings: <code>["pattern", "reason"]</code>.
@@ -80,7 +80,7 @@ export function ExcusePatterns() {
         <form onSubmit=${handleSave}>
           <textarea
             name="patterns"
-            class="w-full h-96 p-3 bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded font-mono text-sm mb-4 text-[var(--text-primary)]"
+            class="w-full h-96 p-3 bg-[var(--bg-card)] border border-[var(--color-border-divider)] rounded font-mono text-sm mb-4 text-[var(--text-primary)]"
             spellcheck="false"
           >${jsonStr}</textarea>
           
@@ -93,7 +93,7 @@ export function ExcusePatterns() {
               ${saving.value ? 'Saving...' : 'Save Patterns'}
             </button>
             ${saveMessage.value ? html`
-              <span class="text-sm ${saveMessage.value.startsWith('Failed') || saveMessage.value.startsWith('Invalid') ? 'text-[var(--bad-light)]' : 'text-[var(--ok)]'}">
+              <span class="text-sm ${saveMessage.value.startsWith('Failed') || saveMessage.value.startsWith('Invalid') ? 'text-[var(--bad-light)]' : 'text-[var(--color-status-ok)]'}">
                 ${saveMessage.value}
               </span>
             ` : null}

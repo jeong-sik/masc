@@ -151,12 +151,12 @@ export function AgentLiveTimeline({ name }: { name: string }) {
       <div class="flex items-center justify-between gap-2 flex-wrap">
         <${FilterChips} chips=${FILTER_CHIPS} active=${activeFilter} />
         <div class="flex items-center gap-2 text-2xs">
-          <span class="px-2 py-0.5 rounded bg-[var(--white-4)] border border-[var(--white-8)] text-[var(--text-muted)] text-3xs">${eventsPerMin}/min</span>
-          <span class="text-[var(--text-muted)]">${filtered.length} events</span>
+          <span class="px-2 py-0.5 rounded bg-[var(--white-4)] border border-[var(--white-8)] text-[var(--color-fg-muted)] text-3xs">${eventsPerMin}/min</span>
+          <span class="text-[var(--color-fg-muted)]">${filtered.length} events</span>
           <button type="button"
             class="px-2 py-0.5 rounded text-3xs border cursor-pointer transition-all duration-150 ${autoScroll.value
-              ? 'border-[rgba(34,197,94,0.4)] text-[var(--ok)] bg-[var(--white-4)]'
-              : 'border-[var(--white-10)] text-[var(--text-dim)] bg-[var(--white-4)]'}"
+              ? 'border-[rgba(34,197,94,0.4)] text-[var(--color-status-ok)] bg-[var(--white-4)]'
+              : 'border-[var(--white-10)] text-[var(--color-fg-disabled)] bg-[var(--white-4)]'}"
             onClick=${() => { autoScroll.value = !autoScroll.value }}
             title=${autoScroll.value ? 'Auto-scroll ON' : 'Auto-scroll OFF'}
           >
@@ -173,9 +173,9 @@ export function AgentLiveTimeline({ name }: { name: string }) {
                 <span class="agent-event-badge ${eventKindBadgeClass(entry)}">
                   ${eventKindLabel(entry.eventType)}
                 </span>
-                <span class="flex-1 text-[var(--text-body)] truncate">${compactText(entry.text)}</span>
+                <span class="flex-1 text-[var(--color-fg-primary)] truncate">${compactText(entry.text)}</span>
                 ${entry.timestamp ? html`
-                  <span class="text-[var(--text-dim)] text-2xs whitespace-nowrap"><${TimeAgo} timestamp=${entry.timestamp} /></span>
+                  <span class="text-[var(--color-fg-disabled)] text-2xs whitespace-nowrap"><${TimeAgo} timestamp=${entry.timestamp} /></span>
                 ` : null}
               </div>
             `)}

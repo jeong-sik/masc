@@ -160,7 +160,7 @@ describe('liveStateClass', () => {
 
 describe('dotStateBg', () => {
   it('returns warn bg for idle state', () => {
-    expect(dotStateBg('mission-state-idle')).toBe('bg-[var(--warn)]')
+    expect(dotStateBg('mission-state-idle')).toBe('bg-[var(--color-status-warn)]')
   })
 
   it('returns gray bg for offline state', () => {

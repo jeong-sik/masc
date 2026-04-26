@@ -3,23 +3,23 @@ import { statusDotColor } from './status-badge'
 
 describe('statusDotColor', () => {
   it('returns warn for in_progress', () => {
-    expect(statusDotColor('in_progress')).toBe('bg-[var(--warn)]')
+    expect(statusDotColor('in_progress')).toBe('bg-[var(--color-status-warn)]')
   })
 
   it('returns warn for running', () => {
-    expect(statusDotColor('running')).toBe('bg-[var(--warn)]')
+    expect(statusDotColor('running')).toBe('bg-[var(--color-status-warn)]')
   })
 
   it('returns accent for awaiting_verification', () => {
-    expect(statusDotColor('awaiting_verification')).toBe('bg-[var(--accent)]')
+    expect(statusDotColor('awaiting_verification')).toBe('bg-[var(--color-accent-fg)]')
   })
 
   it('returns accent for interrupted', () => {
-    expect(statusDotColor('interrupted')).toBe('bg-[var(--accent)]')
+    expect(statusDotColor('interrupted')).toBe('bg-[var(--color-accent-fg)]')
   })
 
   it('returns accent for listening', () => {
-    expect(statusDotColor('listening')).toBe('bg-[var(--accent)]')
+    expect(statusDotColor('listening')).toBe('bg-[var(--color-accent-fg)]')
   })
 
   it('returns slate for inactive', () => {
@@ -31,7 +31,7 @@ describe('statusDotColor', () => {
   })
 
   it('returns ok for active', () => {
-    expect(statusDotColor('active')).toBe('bg-[var(--ok)]')
+    expect(statusDotColor('active')).toBe('bg-[var(--color-status-ok)]')
   })
 
   it('returns text-slate for busy', () => {
@@ -43,11 +43,11 @@ describe('statusDotColor', () => {
   })
 
   it('returns bad for error', () => {
-    expect(statusDotColor('error')).toBe('bg-[var(--bad)]')
+    expect(statusDotColor('error')).toBe('bg-[var(--color-status-err)]')
   })
 
   it('returns muted for unknown status', () => {
-    expect(statusDotColor('unknown')).toBe('bg-[var(--text-muted)]')
-    expect(statusDotColor('')).toBe('bg-[var(--text-muted)]')
+    expect(statusDotColor('unknown')).toBe('bg-[var(--color-fg-muted)]')
+    expect(statusDotColor('')).toBe('bg-[var(--color-fg-muted)]')
   })
 })

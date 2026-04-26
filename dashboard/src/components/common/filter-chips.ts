@@ -36,11 +36,11 @@ export function FilterChips<T extends string>({
     ? 'inline-flex min-h-9 items-center gap-1.5 rounded border px-3 py-2 text-2xs font-medium'
     : 'inline-flex items-center gap-1.5 rounded border px-2 py-1 text-[length:var(--fs-xs)]'
   const activeToneClass = tone === 'accent'
-    ? 'border-[var(--border-slate-22)] bg-[var(--accent-soft)] text-[var(--text-strong)]'
+    ? 'border-[var(--border-slate-22)] bg-[var(--accent-soft)] text-[var(--color-fg-secondary)]'
     : 'border-[var(--warn-20)] bg-[var(--warn-10)] text-[var(--warn-bright)]'
   const idleToneClass = tone === 'accent'
-    ? 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--text-dim)] hover:bg-[var(--white-8)] hover:border-[var(--border-slate-22)] hover:text-[var(--text-body)]'
-    : 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--text-dim)] hover:bg-[var(--white-8)] hover:border-[rgba(200,168,78,0.4)]'
+    ? 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--color-fg-disabled)] hover:bg-[var(--white-8)] hover:border-[var(--border-slate-22)] hover:text-[var(--color-fg-primary)]'
+    : 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--color-fg-disabled)] hover:bg-[var(--white-8)] hover:border-[rgba(200,168,78,0.4)]'
 
   return html`
     <div class="flex flex-wrap gap-1.5 ${cx ?? ''}" role="tablist">

@@ -46,11 +46,11 @@ async function flushUi(): Promise<void> {
 
 describe('runtimeBadgeClass', () => {
   it('returns green classes for active', () => {
-    expect(runtimeBadgeClass('active')).toContain('text-[var(--ok)]')
+    expect(runtimeBadgeClass('active')).toContain('text-[var(--color-status-ok)]')
   })
 
   it('returns yellow classes for attention', () => {
-    expect(runtimeBadgeClass('attention')).toContain('text-[var(--warn)]')
+    expect(runtimeBadgeClass('attention')).toContain('text-[var(--color-status-warn)]')
   })
 
   it('returns purple classes for paused', () => {
@@ -58,21 +58,21 @@ describe('runtimeBadgeClass', () => {
   })
 
   it('returns dim classes for unknown band', () => {
-    expect(runtimeBadgeClass('offline')).toContain('text-[var(--text-dim)]')
+    expect(runtimeBadgeClass('offline')).toContain('text-[var(--color-fg-disabled)]')
   })
 })
 
 describe('stageBadgeClass', () => {
   it('returns accent classes for tool_use', () => {
-    expect(stageBadgeClass('tool_use')).toContain('text-[var(--accent)]')
+    expect(stageBadgeClass('tool_use')).toContain('text-[var(--color-accent-fg)]')
   })
 
   it('returns ok classes for thinking', () => {
-    expect(stageBadgeClass('thinking')).toContain('text-[var(--ok)]')
+    expect(stageBadgeClass('thinking')).toContain('text-[var(--color-status-ok)]')
   })
 
   it('returns ok classes for scheduled_autonomous', () => {
-    expect(stageBadgeClass('scheduled_autonomous')).toContain('text-[var(--ok)]')
+    expect(stageBadgeClass('scheduled_autonomous')).toContain('text-[var(--color-status-ok)]')
   })
 
   it('returns purple classes for handoff', () => {
@@ -84,11 +84,11 @@ describe('stageBadgeClass', () => {
   })
 
   it('returns bad classes for failing', () => {
-    expect(stageBadgeClass('failing')).toContain('text-[var(--bad)]')
+    expect(stageBadgeClass('failing')).toContain('text-[var(--color-status-err)]')
   })
 
   it('returns bad classes for crashed', () => {
-    expect(stageBadgeClass('crashed')).toContain('text-[var(--bad)]')
+    expect(stageBadgeClass('crashed')).toContain('text-[var(--color-status-err)]')
   })
 
   it('returns purple classes for paused stage', () => {
@@ -96,7 +96,7 @@ describe('stageBadgeClass', () => {
   })
 
   it('returns muted classes for unknown stage', () => {
-    expect(stageBadgeClass('idle')).toContain('text-[var(--text-muted)]')
+    expect(stageBadgeClass('idle')).toContain('text-[var(--color-fg-muted)]')
   })
 })
 

@@ -75,48 +75,48 @@ const INVARIANT_KEYS = Object.keys(INVARIANT_LABELS) as Array<
 // recommendation: stable=gray, in-motion=amber/blue, terminal=red.
 const CHIP_CLASS_BY_STATE: Record<string, string> = {
   // KSM
-  Running:      'bg-[var(--ok-10)] text-[var(--ok)] border-[var(--ok-20)]',
+  Running:      'bg-[var(--ok-10)] text-[var(--color-status-ok)] border-[var(--ok-20)]',
   Failing:      'bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-20)]',
-  Overflowed:   'bg-[var(--warn-10)] text-[var(--warn)] border-[var(--warn-20)]',
-  Compacting:   'bg-[var(--warn-10)] text-[var(--warn)] border-[var(--warn-20)]',
-  HandingOff:   'bg-[var(--accent-10)] text-[var(--accent)] border-[var(--accent-20)]',
-  Draining:     'bg-[var(--accent-10)] text-[var(--accent)] border-[var(--accent-20)]',
-  Paused:       'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--white-10)]',
-  Stopped:      'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--white-10)]',
+  Overflowed:   'bg-[var(--warn-10)] text-[var(--color-status-warn)] border-[var(--warn-20)]',
+  Compacting:   'bg-[var(--warn-10)] text-[var(--color-status-warn)] border-[var(--warn-20)]',
+  HandingOff:   'bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]',
+  Draining:     'bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]',
+  Paused:       'bg-[var(--white-5)] text-[var(--color-fg-muted)] border-[var(--white-10)]',
+  Stopped:      'bg-[var(--white-5)] text-[var(--color-fg-muted)] border-[var(--white-10)]',
   Crashed:      'bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-20)]',
-  Restarting:   'bg-[var(--accent-10)] text-[var(--accent)] border-[var(--accent-20)]',
+  Restarting:   'bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]',
   Dead:         'bg-[var(--white-5)] text-[var(--bad-light)] border-[var(--bad-20)]',
-  Offline:      'bg-[var(--white-5)] text-[var(--text-muted)]0 border-[var(--white-10)]',
+  Offline:      'bg-[var(--white-5)] text-[var(--color-fg-muted)]0 border-[var(--white-10)]',
   // KTC
-  idle:         'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--white-10)]',
-  prompting:    'bg-[var(--accent-10)] text-[var(--accent)] border-[var(--accent-20)]',
-  executing:    'bg-[var(--ok-10)] text-[var(--ok)] border-[var(--ok-20)]',
-  compacting:   'bg-[var(--warn-10)] text-[var(--warn)] border-[var(--warn-20)]',
-  finalizing:   'bg-[var(--accent-10)] text-[var(--accent)] border-[var(--accent-20)]',
+  idle:         'bg-[var(--white-5)] text-[var(--color-fg-muted)] border-[var(--white-10)]',
+  prompting:    'bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]',
+  executing:    'bg-[var(--ok-10)] text-[var(--color-status-ok)] border-[var(--ok-20)]',
+  compacting:   'bg-[var(--warn-10)] text-[var(--color-status-warn)] border-[var(--warn-20)]',
+  finalizing:   'bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]',
   // KDP
-  undecided:          'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--white-10)]',
-  guard_ok:           'bg-[var(--ok-10)] text-[var(--ok)] border-[var(--ok-20)]',
+  undecided:          'bg-[var(--white-5)] text-[var(--color-fg-muted)] border-[var(--white-10)]',
+  guard_ok:           'bg-[var(--ok-10)] text-[var(--color-status-ok)] border-[var(--ok-20)]',
   gate_rejected:      'bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-20)]',
-  tool_policy_selected: 'bg-[var(--accent-10)] text-[var(--accent)] border-[var(--accent-20)]',
+  tool_policy_selected: 'bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]',
   // KCL
-  selecting:    'bg-[var(--accent-10)] text-[var(--accent)] border-[var(--accent-20)]',
-  trying:       'bg-[var(--warn-10)] text-[var(--warn)] border-[var(--warn-20)]',
-  done:         'bg-[var(--ok-10)] text-[var(--ok)] border-[var(--ok-20)]',
+  selecting:    'bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]',
+  trying:       'bg-[var(--warn-10)] text-[var(--color-status-warn)] border-[var(--warn-20)]',
+  done:         'bg-[var(--ok-10)] text-[var(--color-status-ok)] border-[var(--ok-20)]',
   exhausted:    'bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-20)]',
   // KMC
-  accumulating: 'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--white-10)]',
+  accumulating: 'bg-[var(--white-5)] text-[var(--color-fg-muted)] border-[var(--white-10)]',
   // KCB (LT-16-KCB Phase 3). Clean = baseline grey same as any other
   // "nothing happening" state; warning = amber (partial failure
   // streak); cooling = blue (at least one past trip, currently
   // recovered). "tripped" is unobservable at snapshot time and has no
   // chip colour by design — the mutator resets the count before any
   // observer can see it.
-  clean:   'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--white-10)]',
-  warning: 'bg-[var(--warn-10)] text-[var(--warn)] border-[var(--warn-20)]',
-  cooling: 'bg-[var(--accent-10)] text-[var(--accent)] border-[var(--accent-20)]',
+  clean:   'bg-[var(--white-5)] text-[var(--color-fg-muted)] border-[var(--white-10)]',
+  warning: 'bg-[var(--warn-10)] text-[var(--color-status-warn)] border-[var(--warn-20)]',
+  cooling: 'bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]',
 }
 
-const DEFAULT_CHIP = 'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--white-10)]'
+const DEFAULT_CHIP = 'bg-[var(--white-5)] text-[var(--color-fg-muted)] border-[var(--white-10)]'
 
 export function chipClassFor(value: string): string {
   return CHIP_CLASS_BY_STATE[value] ?? DEFAULT_CHIP
@@ -172,9 +172,9 @@ export type FleetRuntimeAssistHandler =
   (request: FleetRuntimeAssistRequest) => Promise<void> | void
 
 const RUNTIME_ATTENTION_CLASS: Record<FleetRuntimeAttentionLevel, string> = {
-  ok: 'bg-[var(--ok-10)] text-[var(--ok)] border-[var(--ok-20)]',
-  stale: 'bg-[var(--warn-10)] text-[var(--warn)] border-[var(--warn-20)]',
-  idle: 'bg-[var(--warn-10)] text-[var(--warn)] border-[var(--warn-20)]',
+  ok: 'bg-[var(--ok-10)] text-[var(--color-status-ok)] border-[var(--ok-20)]',
+  stale: 'bg-[var(--warn-10)] text-[var(--color-status-warn)] border-[var(--warn-20)]',
+  idle: 'bg-[var(--warn-10)] text-[var(--color-status-warn)] border-[var(--warn-20)]',
   blocked: 'bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-20)]',
 }
 
@@ -708,7 +708,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
     return html`
       <div
         data-testid="fleet-fsm-matrix"
-        class="rounded border border-[var(--white-10)] bg-[var(--white-5)] p-4 text-sm text-[var(--text-muted)]"
+        class="rounded border border-[var(--white-10)] bg-[var(--white-5)] p-4 text-sm text-[var(--color-fg-muted)]"
       >
         Loading fleet composite snapshot…
       </div>
@@ -730,7 +730,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
     return html`
       <div
         data-testid="fleet-fsm-matrix"
-        class="rounded border border-[var(--white-10)] bg-[var(--white-5)] p-4 text-sm text-[var(--text-muted)]"
+        class="rounded border border-[var(--white-10)] bg-[var(--white-5)] p-4 text-sm text-[var(--color-fg-muted)]"
       >
         No keepers registered.
       </div>
@@ -743,8 +743,8 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
       class="rounded border border-[var(--white-10)] bg-[var(--white-5)]"
     >
       <header class="flex flex-wrap items-baseline gap-3 border-b border-[var(--white-10)] p-3">
-        <h2 class="text-sm font-semibold text-[var(--text-muted)]">Fleet composite (KSM × KTC × KDP × KCL × KMC × KCB)</h2>
-        <span class="text-xs text-[var(--text-muted)]0">
+        <h2 class="text-sm font-semibold text-[var(--color-fg-muted)]">Fleet composite (KSM × KTC × KDP × KCL × KMC × KCB)</h2>
+        <span class="text-xs text-[var(--color-fg-muted)]0">
           ${data.count} keepers · updated ${new Date(data.generated_at * 1000).toLocaleTimeString()}
         </span>
         <input
@@ -754,7 +754,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
           aria-label="Keeper 필터"
           data-testid="fleet-fsm-matrix-filter"
           onInput=${(e: Event) => setQuery((e.target as HTMLInputElement).value)}
-          class="min-w-40 max-w-65 rounded border border-[var(--white-10)] bg-[var(--white-5)] px-2 py-0.5 text-xs text-[var(--text-muted)] placeholder:text-[var(--text-muted)]0 focus:border-[var(--white-10)]0 focus:outline-none"
+          class="min-w-40 max-w-65 rounded border border-[var(--white-10)] bg-[var(--white-5)] px-2 py-0.5 text-xs text-[var(--color-fg-muted)] placeholder:text-[var(--color-fg-muted)]0 focus:border-[var(--white-10)]0 focus:outline-none"
         />
         ${runtimeTallies
           ? html`
@@ -789,7 +789,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
                 ${INVARIANT_KEYS.map(k => {
                   const count = tallies[k]
                   const tone = count === 0
-                    ? 'bg-[var(--ok-10)] text-[var(--ok)] border-[var(--ok-20)]'
+                    ? 'bg-[var(--ok-10)] text-[var(--color-status-ok)] border-[var(--ok-20)]'
                     : 'bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-20)]'
                   return html`
                     <span
@@ -809,7 +809,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
         ? html`
             <div
               data-testid="fleet-fsm-matrix-empty"
-              class="p-4 text-center text-xs text-[var(--text-muted)]0"
+              class="p-4 text-center text-xs text-[var(--color-fg-muted)]0"
             >
               필터 결과 없음 (${data.snapshots.length} keepers)
             </div>
@@ -817,13 +817,13 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
         : null}
       <div class="overflow-x-auto">
         <table class="min-w-full text-xs">
-          <thead class="bg-[var(--white-5)] text-[var(--text-muted)]">
+          <thead class="bg-[var(--white-5)] text-[var(--color-fg-muted)]">
             <tr>
               <th class="px-3 py-2 text-left font-semibold">Keeper</th>
               <th class="px-3 py-2 text-left font-semibold">Runtime</th>
               ${AXES.map(a => html`
                 <th class="px-3 py-2 text-left font-semibold" title=${a.label}>
-                  ${a.acronym} <span class="text-[var(--text-muted)]0">${a.label}</span>
+                  ${a.acronym} <span class="text-[var(--color-fg-muted)]0">${a.label}</span>
                 </th>
               `)}
             </tr>
@@ -846,7 +846,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
                   class="border-t border-[var(--white-10)] hover:bg-[var(--white-5)] ${rowTone}"
                   onClick=${props.onSelectKeeper ? () => props.onSelectKeeper?.(name) : undefined}
                 >
-                  <td class="px-3 py-2 font-mono text-[var(--text-muted)]">${name}</td>
+                  <td class="px-3 py-2 font-mono text-[var(--color-fg-muted)]">${name}</td>
                   <td class="px-3 py-2 align-top">
                     <div class="flex max-w-72 flex-col gap-1">
                       <span
@@ -858,14 +858,14 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
                       <span
                         data-runtime-evidence
                         data-runtime-cause
-                        class="text-3xs leading-snug text-[var(--text-muted)]0"
+                        class="text-3xs leading-snug text-[var(--color-fg-muted)]0"
                         title=${attention.title}
                       >
                         원인: ${attention.cause}
                       </span>
                       <span
                         data-runtime-next
-                        class="text-3xs leading-snug text-[var(--text-muted)]0"
+                        class="text-3xs leading-snug text-[var(--color-fg-muted)]0"
                         title=${attention.title}
                       >
                         다음: ${attention.nextStep}
@@ -875,7 +875,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
                             <button
                               type="button"
                               data-runtime-assist
-                              class="self-start rounded border border-[var(--white-10)] bg-[var(--white-5)] px-2 py-0.5 text-3xs font-semibold text-[var(--accent)] hover:bg-[var(--white-10)] disabled:cursor-not-allowed disabled:opacity-50"
+                              class="self-start rounded border border-[var(--white-10)] bg-[var(--white-5)] px-2 py-0.5 text-3xs font-semibold text-[var(--color-accent-fg)] hover:bg-[var(--white-10)] disabled:cursor-not-allowed disabled:opacity-50"
                               title="현재 원인/증거를 keeper LLM에 보내 감독형 진단을 요청합니다"
                               disabled=${assisting}
                               onClick=${(event: MouseEvent) => {

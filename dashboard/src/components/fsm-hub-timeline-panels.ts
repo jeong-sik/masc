@@ -20,7 +20,7 @@ import {
 } from './fsm-hub-derivations'
 
 const FIELD_COLOR: Record<string, string> = {
-  KSM: 'text-[var(--accent)]',
+  KSM: 'text-[var(--color-accent-fg)]',
   KTC: 'text-[var(--indigo)]',
   KDP: 'text-[var(--indigo)]',
   KCL: 'text-[var(--indigo)]',
@@ -163,7 +163,7 @@ export function SwimlaneTimeline({
   return html`
     <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] p-3" data-fsm-swimlane-root="true">
       <div class="mb-2 flex items-baseline justify-between gap-3 flex-wrap">
-        <div class="text-3xs font-semibold uppercase tracking-1 text-[var(--text-muted)]">
+        <div class="text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">
           상태 타임라인
         </div>
         <div class="flex items-center gap-1 flex-wrap">
@@ -174,22 +174,22 @@ export function SwimlaneTimeline({
               <span
                 class=${`rounded-sm border px-1.5 py-0.5 text-3xs font-mono tabular-nums ${
                   count === 0
-                    ? 'text-[var(--text-dim)] border-[var(--white-8)]'
+                    ? 'text-[var(--color-fg-disabled)] border-[var(--white-8)]'
                     : isBusiest
                       ? 'text-[var(--indigo)] border-[var(--indigo-40)] bg-[rgba(129,140,248,0.08)]'
-                      : 'text-[var(--text-body)] border-[var(--white-10)]'
+                      : 'text-[var(--color-fg-primary)] border-[var(--white-10)]'
                 }`}
                 title=${`${lane.label} · ${count} transition${count === 1 ? '' : 's'} in this window`}
               >${lane.short} ${count}</span>
             `
           })}
         </div>
-        <div class="text-3xs font-mono text-[var(--text-dim)]">
+        <div class="text-3xs font-mono text-[var(--color-fg-disabled)]">
           <span>${fmtAbs(spanStart)}</span>
-          <span class="mx-1 text-[var(--text-muted)]">→</span>
+          <span class="mx-1 text-[var(--color-fg-muted)]">→</span>
           <span>${fmtAbs(spanEnd)}</span>
-          · window <span class="text-[var(--text-body)]">${windowDuration}</span>
-          · <span class="text-[var(--text-body)]">${observations.length}</span> obs
+          · window <span class="text-[var(--color-fg-primary)]">${windowDuration}</span>
+          · <span class="text-[var(--color-fg-primary)]">${observations.length}</span> obs
         </div>
       </div>
       <div class="flex flex-col gap-1.5">
@@ -197,7 +197,7 @@ export function SwimlaneTimeline({
           const segments = deriveSwimlaneSegments(observations, lane.key, spanEnd)
           return html`
             <div class="flex items-center gap-2">
-              <div class="w-11 shrink-0 text-3xs font-mono font-semibold text-[var(--text-muted)]">
+              <div class="w-11 shrink-0 text-3xs font-mono font-semibold text-[var(--color-fg-muted)]">
                 ${lane.short}
               </div>
               <div class="flex h-4 flex-1 overflow-hidden rounded border border-[var(--white-8)]" role="group" aria-label=${`${lane.label} swimlane with ${segments.length} segments`}>
@@ -218,7 +218,7 @@ export function SwimlaneTimeline({
                       data-lane-key=${lane.key}
                       data-lane-index=${laneIndex}
                       data-seg-index=${segIndex}
-                      class=${`${swimlaneSegmentColor(seg.value)} h-full transition-all duration-200 border-r border-[rgba(0,0,0,0.25)] last:border-r-0 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-inset ${isHovered ? 'ring-1 ring-[var(--accent)] brightness-125' : ''} ${dimmed ? 'opacity-40' : ''}`}
+                      class=${`${swimlaneSegmentColor(seg.value)} h-full transition-all duration-200 border-r border-[rgba(0,0,0,0.25)] last:border-r-0 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-fg)] focus-visible:ring-inset ${isHovered ? 'ring-1 ring-[var(--color-accent-fg)] brightness-125' : ''} ${dimmed ? 'opacity-40' : ''}`}
                       style=${`width: ${pct.toFixed(2)}%`}
                       title=${`${lane.label} (${lane.short}) · ${displayState(seg.value)} (${seg.value})\n${fmtAbs(seg.from)} → ${fmtAbs(seg.to)} · ${holdFor}`}
                       aria-label=${ariaLabel}
@@ -243,7 +243,7 @@ export function SwimlaneTimeline({
               const leftPct = ((tick.ts - spanStart) / spanWidth) * 100
               return html`
                 <div
-                  class="absolute top-0 flex flex-col items-center text-[var(--text-dim)]"
+                  class="absolute top-0 flex flex-col items-center text-[var(--color-fg-disabled)]"
                   style=${`left: ${leftPct.toFixed(2)}%; transform: translateX(-50%)`}
                 >
                   <div class="h-1 w-px bg-[var(--white-10)]"></div>
@@ -256,7 +256,7 @@ export function SwimlaneTimeline({
       ` : null}
       ${observations.length > 1 ? html`
         <div class="mt-0.5 flex items-center gap-2" aria-hidden="true">
-          <div class="w-11 shrink-0 text-4xs text-[var(--text-dim)] text-right">obs</div>
+          <div class="w-11 shrink-0 text-4xs text-[var(--color-fg-disabled)] text-right">obs</div>
           <div class="relative flex-1 h-2.5">
             ${observations.map((obs, obsIndex) => {
               const leftPct = ((obs.ts - spanStart) / spanWidth) * 100
@@ -290,7 +290,7 @@ export function SwimlaneTimeline({
           </div>
         </div>
       ` : null}
-      <div class="mt-2 flex flex-wrap items-center gap-2 text-3xs text-[var(--text-dim)]">
+      <div class="mt-2 flex flex-wrap items-center gap-2 text-3xs text-[var(--color-fg-disabled)]">
         <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm bg-[var(--indigo-45)]"></span>active</span>
         <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm bg-[var(--amber-bright-45)]"></span>compact</span>
         <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm bg-[var(--purple-50)]"></span>handoff</span>
@@ -386,7 +386,7 @@ export function TransitionTrail({
   return html`
     <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] px-3 py-2">
       <div class="mb-1.5 flex items-center justify-between gap-2">
-        <div class="text-3xs font-semibold uppercase tracking-1 text-[var(--text-muted)]">
+        <div class="text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">
           Transition History (${isFiltering ? `${visibleHistory.length}/${history.length}` : history.length})
         </div>
         <input
@@ -395,16 +395,16 @@ export function TransitionTrail({
           placeholder="field / from / to 필터"
           aria-label="전이 이력 필터"
           onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
-          class="min-w-30 max-w-50 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-0.5 text-3xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+          class="min-w-30 max-w-50 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-0.5 text-3xs text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
         />
       </div>
       ${isFiltering && visibleHistory.length === 0
-        ? html`<div class="py-3 text-center text-3xs text-[var(--text-dim)]">필터 결과 없음 (${history.length} items)</div>`
+        ? html`<div class="py-3 text-center text-3xs text-[var(--color-fg-disabled)]">필터 결과 없음 (${history.length} items)</div>`
         : html`
       <div ref=${scrollRef} class="flex flex-col gap-0.5 max-h-30 overflow-y-auto">
         ${visibleHistory.map((entry, trailIndex) => {
           const ago = fmtDuration(Math.max(0, now - entry.ts))
-          const color = FIELD_COLOR[entry.field] ?? 'text-[var(--text-body)]'
+          const color = FIELD_COLOR[entry.field] ?? 'text-[var(--color-fg-primary)]'
           const inSegment = isTransitionInSegment(entry, hoveredSegment)
           const dimmed = hoveredSegment != null && !inSegment
           const rowCls = inSegment
@@ -420,12 +420,12 @@ export function TransitionTrail({
               title=${tooltip}
               class=${`flex items-center gap-2 text-3xs font-mono leading-tight transition-opacity duration-150 cursor-help ${dimmed ? 'opacity-40' : ''} ${rowCls}`}
             >
-              <span class="w-[52px] shrink-0 text-right text-[var(--text-dim)]">${ago} ago</span>
+              <span class="w-[52px] shrink-0 text-right text-[var(--color-fg-disabled)]">${ago} ago</span>
               <span class=${`w-[28px] shrink-0 font-semibold ${color}`}>${entry.field}</span>
-              <span class="text-[var(--text-dim)]">${entry.from}</span>
-              <span class="text-[var(--text-muted)]">→</span>
-              <span class="text-[var(--text-strong)]">${entry.to}</span>
-              ${reason ? html`<span class="ml-1 text-4xs text-[var(--text-dim)] opacity-50">ⓘ</span>` : null}
+              <span class="text-[var(--color-fg-disabled)]">${entry.from}</span>
+              <span class="text-[var(--color-fg-muted)]">→</span>
+              <span class="text-[var(--color-fg-secondary)]">${entry.to}</span>
+              ${reason ? html`<span class="ml-1 text-4xs text-[var(--color-fg-disabled)] opacity-50">ⓘ</span>` : null}
             </div>
           `
         })}
@@ -458,12 +458,12 @@ export function TopTransitionsPanel({
 
   return html`
     <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] px-3 py-2">
-      <div class="mb-1.5 text-3xs font-semibold uppercase tracking-1 text-[var(--text-muted)]">
+      <div class="mb-1.5 text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">
         Top Transitions (${transitions.length})
       </div>
       <div class="flex flex-col gap-0.5">
         ${transitions.map((entry) => {
-          const color = FIELD_COLOR[entry.field] ?? 'text-[var(--text-body)]'
+          const color = FIELD_COLOR[entry.field] ?? 'text-[var(--color-fg-primary)]'
           const matchesHover =
             hoveredSegment != null && hoveredSegment.field === entry.field
           const dimmed = hoveredSegment != null && !matchesHover
@@ -477,17 +477,17 @@ export function TopTransitionsPanel({
               title=${`${entry.field}: ${entry.from} → ${entry.to} (관측 ${entry.count}회)`}
             >
               <span class=${`w-[28px] shrink-0 font-semibold ${color}`}>${entry.field}</span>
-              <span class="text-[var(--text-dim)]">${displayState(entry.from)}</span>
-              <span class="text-[var(--text-muted)]">→</span>
-              <span class="text-[var(--text-strong)]">${displayState(entry.to)}</span>
+              <span class="text-[var(--color-fg-disabled)]">${displayState(entry.from)}</span>
+              <span class="text-[var(--color-fg-muted)]">→</span>
+              <span class="text-[var(--color-fg-secondary)]">${displayState(entry.to)}</span>
               <span class="ml-auto flex items-center gap-1.5 shrink-0">
                 <span class="h-1 w-12 rounded-sm bg-[var(--white-8)] overflow-hidden">
                   <span
-                    class="block h-full bg-[var(--accent)]"
+                    class="block h-full bg-[var(--color-accent-fg)]"
                     style=${`width: ${widthPct}%`}
                   ></span>
                 </span>
-                <span class="w-[18px] text-right text-[var(--text-dim)]">${entry.count}</span>
+                <span class="w-[18px] text-right text-[var(--color-fg-disabled)]">${entry.count}</span>
               </span>
             </div>
           `
@@ -498,7 +498,7 @@ export function TopTransitionsPanel({
 }
 
 const BAR_COLOR: Record<string, string> = {
-  KSM: 'bg-[var(--accent)]',
+  KSM: 'bg-[var(--color-accent-fg)]',
   KTC: 'bg-[var(--indigo)]',
   KDP: 'bg-[var(--indigo)]',
   KCL: 'bg-[var(--indigo)]',
@@ -522,20 +522,20 @@ export function DwellHistogramPanel({
 
   return html`
     <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] px-3 py-2">
-      <div class="mb-1.5 text-3xs font-semibold uppercase tracking-1 text-[var(--text-muted)]">
+      <div class="mb-1.5 text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">
         State Dwell Time
       </div>
       <div class="flex flex-col gap-2">
         ${histograms.map((lane) => {
           const matchesHover = hoveredSegment != null && hoveredSegment.field === lane.field
           const dimmed = hoveredSegment != null && !matchesHover
-          const color = FIELD_COLOR[lane.field] ?? 'text-[var(--text-body)]'
-          const barColor = BAR_COLOR[lane.field] ?? 'bg-[var(--accent)]'
+          const color = FIELD_COLOR[lane.field] ?? 'text-[var(--color-fg-primary)]'
+          const barColor = BAR_COLOR[lane.field] ?? 'bg-[var(--color-accent-fg)]'
           return html`
             <div class=${`transition-opacity duration-150 ${dimmed ? 'opacity-40' : ''}`}>
               <div class="flex items-center gap-1.5 mb-0.5">
                 <span class=${`text-3xs font-semibold ${color}`}>${lane.field}</span>
-                <span class="text-3xs text-[var(--text-dim)]">${fmtDuration(lane.totalSeconds)}</span>
+                <span class="text-3xs text-[var(--color-fg-disabled)]">${fmtDuration(lane.totalSeconds)}</span>
               </div>
               <div class="flex flex-col gap-px">
                 ${lane.entries.map((entry) => {
@@ -550,14 +550,14 @@ export function DwellHistogramPanel({
                       class=${`flex items-center gap-1.5 text-3xs font-mono leading-tight ${rowCls}`}
                       title=${`${displayState(entry.value)}: ${fmtDuration(entry.seconds)} (${entry.pct.toFixed(1)}%)`}
                     >
-                      <span class="w-15 shrink-0 text-[var(--text-body)] truncate">${displayState(entry.value)}</span>
+                      <span class="w-15 shrink-0 text-[var(--color-fg-primary)] truncate">${displayState(entry.value)}</span>
                       <span class="flex-1 h-1.5 rounded-sm bg-[var(--white-8)] overflow-hidden">
                         <span
                           class=${`block h-full ${barColor}`}
                           style=${`width: ${Math.max(2, entry.pct)}%`}
                         ></span>
                       </span>
-                      <span class="w-9 shrink-0 text-right text-3xs text-[var(--text-dim)]">${entry.pct.toFixed(0)}%</span>
+                      <span class="w-9 shrink-0 text-right text-3xs text-[var(--color-fg-disabled)]">${entry.pct.toFixed(0)}%</span>
                     </div>
                   `
                 })}

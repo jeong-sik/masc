@@ -70,7 +70,7 @@ describe('horizonLabel', () => {
 
 describe('horizonColor', () => {
   it('returns green for short', () => {
-    expect(horizonColor('short')).toBe('var(--ok)')
+    expect(horizonColor('short')).toBe('var(--color-status-ok)')
   })
 
   it('returns amber for mid', () => {

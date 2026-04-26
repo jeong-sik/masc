@@ -133,7 +133,7 @@ export function GovernanceMonitor() {
     <div class="flex flex-col gap-4">
       <div class="flex items-center gap-3 flex-wrap">
         <select
-          class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--text-strong)]"
+          class="rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--color-fg-secondary)]"
           value=${String(windowMinutes.value)}
           onChange=${(e: Event) => { windowMinutes.value = Number((e.target as HTMLSelectElement).value) }}
         >
@@ -143,11 +143,11 @@ export function GovernanceMonitor() {
           <option value="720">12h</option>
         </select>
         <button
-          class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-3 py-1 text-xs text-[var(--text-strong)] hover:bg-[var(--bg-panel-hover)]"
+          class="rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] px-3 py-1 text-xs text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)]"
           onClick=${() => void load()}
         >새로고침</button>
-        <span class="text-xs text-[var(--text-muted)]">${formatAutoRefreshLabel(TELEMETRY_AUTO_REFRESH_MS)}</span>
-        ${current.loading ? html`<span class="text-xs text-[var(--text-muted)]">로딩 중...</span>` : null}
+        <span class="text-xs text-[var(--color-fg-muted)]">${formatAutoRefreshLabel(TELEMETRY_AUTO_REFRESH_MS)}</span>
+        ${current.loading ? html`<span class="text-xs text-[var(--color-fg-muted)]">로딩 중...</span>` : null}
       </div>
 
       ${current.error ? html`<${ErrorState} message=${current.error} />` : null}
@@ -193,17 +193,17 @@ export function GovernanceMonitor() {
             placeholder="tool / reason 필터"
             aria-label="Tool rejection 필터"
             onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
-            class="min-w-40 max-w-60 rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--text-strong)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent)]"
+            class="min-w-40 max-w-60 rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--color-fg-secondary)] placeholder:text-[var(--color-fg-muted)] focus:outline-none focus:border-[var(--color-accent-fg)]"
           />
           ${allRejections.length === 0
             ? html`<${EmptyState} message="선택한 시간 범위에 tool rejection이 없습니다." compact />`
             : isFiltering && visibleRejections.length === 0
-              ? html`<div class="py-4 text-center text-2xs text-[var(--text-muted)]">필터 결과 없음 (${allRejections.length} items)</div>`
+              ? html`<div class="py-4 text-center text-2xs text-[var(--color-fg-muted)]">필터 결과 없음 (${allRejections.length} items)</div>`
               : html`
                 <div class="overflow-x-auto">
                   <table class="w-full text-xs">
                     <thead>
-                      <tr class="text-left text-[var(--text-muted)] border-b border-[var(--card-border)]">
+                      <tr class="text-left text-[var(--color-fg-muted)] border-b border-[var(--color-border-default)]">
                         <th class="py-1.5 pr-4 font-medium">도구</th>
                         <th class="py-1.5 pr-4 font-medium">사유</th>
                         <th class="py-1.5 font-medium text-right">횟수</th>
@@ -211,12 +211,12 @@ export function GovernanceMonitor() {
                     </thead>
                     <tbody>
                       ${visibleRejections.map(r => html`
-                        <tr class="border-b border-[var(--card-border)]/30 text-[var(--text-body)]">
+                        <tr class="border-b border-[var(--color-border-default)]/30 text-[var(--color-fg-primary)]">
                           <td class="py-1.5 pr-4 font-mono text-2xs">${r.tool}</td>
                           <td class="py-1.5 pr-4">
-                            <span class="inline-flex items-center px-1.5 py-0.5 rounded text-3xs bg-[var(--bg-panel-hover)]">${r.reason}</span>
+                            <span class="inline-flex items-center px-1.5 py-0.5 rounded text-3xs bg-[var(--color-bg-hover)]">${r.reason}</span>
                           </td>
-                          <td class="py-1.5 text-right font-medium text-[var(--text-strong)]">${r.count}</td>
+                          <td class="py-1.5 text-right font-medium text-[var(--color-fg-secondary)]">${r.count}</td>
                         </tr>
                       `)}
                     </tbody>

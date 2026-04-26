@@ -13,8 +13,8 @@ stylesheet
   {|
   .root {
     min-height: 100vh;
-    background: var(--bg-deep);
-    color: var(--text-primary);
+    background: var(--color-bg-page);
+    color: var(--color-fg-primary);
     font-family: 'EB Garamond', 'Noto Sans KR', Georgia, serif;
     padding: 3rem 4rem;
     display: flex;
@@ -32,9 +32,9 @@ stylesheet
     font-family: 'Noto Sans KR', sans-serif;
     font-size: 13px;
     padding: 8px 16px;
-    background: var(--bg-panel);
-    color: var(--accent-brass);
-    border: 2px solid var(--accent-brass);
+    background: var(--color-bg-surface);
+    color: var(--color-accent-fg);
+    border: 2px solid var(--color-accent-fg);
     text-decoration: none;
   }
   .skip_nav:focus {
@@ -50,7 +50,7 @@ stylesheet
     font-size: 11px;
     letter-spacing: 0.3em;
     text-transform: uppercase;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
     margin: 0;
   }
 
@@ -68,7 +68,7 @@ stylesheet
   .sub {
     font-family: 'EB Garamond', Georgia, serif;
     font-size: 1rem;
-    color: var(--text-primary);
+    color: var(--color-fg-primary);
     margin: 0;
     max-width: 38rem;
     line-height: 1.55;
@@ -76,7 +76,7 @@ stylesheet
 
   .divider {
     border: 0;
-    border-top: 1px solid var(--border-main);
+    border-top: 1px solid var(--color-border-default);
     margin: 1rem 0;
   }
 
@@ -84,7 +84,7 @@ stylesheet
     font-family: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
     font-variant-numeric: tabular-nums;
     font-size: 0.75rem;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
   }
 
   @media (prefers-contrast: more) {

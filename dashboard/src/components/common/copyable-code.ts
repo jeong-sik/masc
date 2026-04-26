@@ -69,8 +69,8 @@ export function copyableWrapperClasses(variant: CopyableVariant): string {
     at the left edge and starts leading the reader's eye into the command. */
 export function copyableLabelClasses(variant: CopyableVariant): string {
   return variant === 'primary'
-    ? 'shrink-0 text-3xs font-semibold uppercase tracking-4 text-[var(--accent)]'
-    : 'shrink-0 text-3xs uppercase tracking-4 text-[var(--text-dim)]'
+    ? 'shrink-0 text-3xs font-semibold uppercase tracking-4 text-[var(--color-accent-fg)]'
+    : 'shrink-0 text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)]'
 }
 
 export function CopyableCode({
@@ -108,13 +108,13 @@ export function CopyableCode({
       ${label
         ? html`<span class=${labelTone}>${label}</span>`
         : null}
-      <code class="min-w-0 flex-1 overflow-x-auto whitespace-nowrap font-mono text-2xs text-[var(--text-body)]">${command}</code>
+      <code class="min-w-0 flex-1 overflow-x-auto whitespace-nowrap font-mono text-2xs text-[var(--color-fg-primary)]">${command}</code>
       ${justCopied
-        ? html`<span class="shrink-0 text-3xs font-semibold text-[var(--ok)]" data-copied-badge aria-live="polite">✓ Copied</span>`
+        ? html`<span class="shrink-0 text-3xs font-semibold text-[var(--color-status-ok)]" data-copied-badge aria-live="polite">✓ Copied</span>`
         : null}
       <button
         type="button"
-        class="shrink-0 cursor-pointer rounded border border-transparent p-1 text-[var(--text-dim)] opacity-60 transition-opacity hover:bg-[var(--white-8)] hover:text-[var(--text-body)] focus-visible:opacity-100 group-hover:opacity-100"
+        class="shrink-0 cursor-pointer rounded border border-transparent p-1 text-[var(--color-fg-disabled)] opacity-60 transition-opacity hover:bg-[var(--white-8)] hover:text-[var(--color-fg-primary)] focus-visible:opacity-100 group-hover:opacity-100"
         aria-label=${ariaLabel || (label ? `Copy ${label}` : 'Copy command')}
         data-copy-button
         onClick=${onCopy}

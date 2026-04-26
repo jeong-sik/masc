@@ -99,11 +99,11 @@ export function QuickBindForm({ connectorId, keepers }: {
 
   return html`
     <div
-      class="mt-3 flex flex-wrap items-end gap-2 rounded border border-dashed border-[var(--card-border)] bg-[var(--white-2)] px-3 py-2.5"
+      class="mt-3 flex flex-wrap items-end gap-2 rounded border border-dashed border-[var(--color-border-default)] bg-[var(--white-2)] px-3 py-2.5"
       data-quick-bind=${connectorId}
     >
       <div class="min-w-0 flex-1 basis-[160px]">
-        <label class="mb-1 block text-3xs uppercase tracking-4 text-[var(--text-dim)]" for=${`qb-channel-${connectorId}`}>
+        <label class="mb-1 block text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)]" for=${`qb-channel-${connectorId}`}>
           채널 ID
         </label>
         <${TextInput}
@@ -125,12 +125,12 @@ export function QuickBindForm({ connectorId, keepers }: {
         />
       </div>
       <div class="min-w-0 basis-[140px]">
-        <label class="mb-1 block text-3xs uppercase tracking-4 text-[var(--text-dim)]" for=${`qb-keeper-${connectorId}`}>
+        <label class="mb-1 block text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)]" for=${`qb-keeper-${connectorId}`}>
           Keeper
         </label>
         <select
           id=${`qb-keeper-${connectorId}`}
-          class="w-full rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 font-mono text-2xs text-[var(--text-body)] focus:border-[var(--accent-1)] focus:outline-none"
+          class="w-full rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] px-2 py-1 font-mono text-2xs text-[var(--color-fg-primary)] focus:border-[var(--accent-1)] focus:outline-none"
           onChange=${(ev: Event) => {
             const target = ev.currentTarget as HTMLSelectElement
             setEntry(connectorId, { keeperName: target.value })

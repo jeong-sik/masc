@@ -25,12 +25,12 @@ describe('inlineSpinnerSizeClass (pure)', () => {
 
 describe('inlineSpinnerToneClass (pure)', () => {
   it('accent tone uses the --accent CSS var (the dashboard brand hue)', () => {
-    expect(inlineSpinnerToneClass('accent')).toContain('var(--accent)')
+    expect(inlineSpinnerToneClass('accent')).toContain('var(--color-accent-fg)')
     expect(inlineSpinnerToneClass('accent')).toContain('border-t-transparent')
   })
 
   it('muted tone uses --text-dim for background-sync contexts', () => {
-    expect(inlineSpinnerToneClass('muted')).toContain('var(--text-dim)')
+    expect(inlineSpinnerToneClass('muted')).toContain('var(--color-fg-disabled)')
     expect(inlineSpinnerToneClass('muted')).toContain('border-t-transparent')
   })
 })

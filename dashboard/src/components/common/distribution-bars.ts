@@ -18,32 +18,32 @@ interface TonePalette {
 
 const TONE_PALETTES: Record<DistributionTone, TonePalette> = {
   accent: {
-    fill: 'var(--accent)',
-    text: 'var(--accent)',
+    fill: 'var(--color-accent-fg)',
+    text: 'var(--color-accent-fg)',
     chipBg: 'var(--accent-12)',
     chipBorder: 'rgba(71,184,255,0.24)',
   },
   ok: {
-    fill: 'var(--ok)',
-    text: 'var(--ok)',
+    fill: 'var(--color-status-ok)',
+    text: 'var(--color-status-ok)',
     chipBg: 'var(--emerald-12)',
     chipBorder: 'rgba(34,197,94,0.24)',
   },
   warn: {
-    fill: 'var(--warn)',
-    text: 'var(--warn)',
+    fill: 'var(--color-status-warn)',
+    text: 'var(--color-status-warn)',
     chipBg: 'rgba(250,204,21,0.12)',
     chipBorder: 'rgba(250,204,21,0.24)',
   },
   bad: {
-    fill: 'var(--bad)',
-    text: 'var(--bad)',
+    fill: 'var(--color-status-err)',
+    text: 'var(--color-status-err)',
     chipBg: 'rgba(248,113,113,0.12)',
     chipBorder: 'rgba(248,113,113,0.24)',
   },
   muted: {
     fill: 'rgba(148,163,184,0.85)',
-    text: 'var(--text-muted)',
+    text: 'var(--color-fg-muted)',
     chipBg: 'var(--slate-gray-12)',
     chipBorder: 'rgba(148,163,184,0.24)',
   },
@@ -77,12 +77,12 @@ export function DistributionBars({
     <div class="rounded border border-card-border/35 bg-[var(--white-5)]/10 px-3 py-3">
       ${title
         ? html`
-            <div class="text-3xs font-semibold uppercase tracking-5 text-[var(--text-muted)]">${title}</div>
-            ${subtitle ? html`<div class="mt-1 text-2xs text-[var(--text-muted)]">${subtitle}</div>` : null}
+            <div class="text-3xs font-semibold uppercase tracking-5 text-[var(--color-fg-muted)]">${title}</div>
+            ${subtitle ? html`<div class="mt-1 text-2xs text-[var(--color-fg-muted)]">${subtitle}</div>` : null}
           `
         : null}
       ${visibleItems.length === 0
-        ? html`<div class="${title ? 'mt-3 ' : ''}text-2xs italic text-[var(--text-muted)]">${emptyLabel}</div>`
+        ? html`<div class="${title ? 'mt-3 ' : ''}text-2xs italic text-[var(--color-fg-muted)]">${emptyLabel}</div>`
         : html`
             <div class="${title ? 'mt-3 ' : ''}flex flex-col gap-2.5">
               ${visibleItems.map(item => {
@@ -92,8 +92,8 @@ export function DistributionBars({
                   <div class="flex flex-col gap-1">
                     <div class="flex items-center justify-between gap-2">
                       <div class="min-w-0">
-                        <div class="truncate text-xs font-semibold text-[var(--text-strong)]">${item.label}</div>
-                        ${item.detail ? html`<div class="truncate text-3xs text-[var(--text-muted)]">${item.detail}</div>` : null}
+                        <div class="truncate text-xs font-semibold text-[var(--color-fg-secondary)]">${item.label}</div>
+                        ${item.detail ? html`<div class="truncate text-3xs text-[var(--color-fg-muted)]">${item.detail}</div>` : null}
                       </div>
                       <span
                         class="shrink-0 rounded-sm border px-2 py-0.5 text-3xs font-semibold"
@@ -135,12 +135,12 @@ export function SegmentedBar({
     <div class="rounded border border-card-border/35 bg-[var(--white-5)]/10 px-3 py-3">
       ${title
         ? html`
-            <div class="text-3xs font-semibold uppercase tracking-5 text-[var(--text-muted)]">${title}</div>
-            ${subtitle ? html`<div class="mt-1 text-2xs text-[var(--text-muted)]">${subtitle}</div>` : null}
+            <div class="text-3xs font-semibold uppercase tracking-5 text-[var(--color-fg-muted)]">${title}</div>
+            ${subtitle ? html`<div class="mt-1 text-2xs text-[var(--color-fg-muted)]">${subtitle}</div>` : null}
           `
         : null}
       ${total === 0
-        ? html`<div class="${title ? 'mt-3 ' : ''}text-2xs italic text-[var(--text-muted)]">표시할 데이터가 없습니다.</div>`
+        ? html`<div class="${title ? 'mt-3 ' : ''}text-2xs italic text-[var(--color-fg-muted)]">표시할 데이터가 없습니다.</div>`
         : html`
             <div class="${title ? 'mt-3 ' : ''}flex flex-col gap-2.5">
               <div class="flex h-3 overflow-hidden rounded-sm bg-[var(--white-5)]">

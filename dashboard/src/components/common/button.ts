@@ -23,10 +23,10 @@ const SIZE_CLASSES: Record<ButtonSize, string> = {
 }
 
 const VARIANT_CLASSES: Record<ButtonVariant, string> = {
-  primary: 'border border-solid border-[var(--accent-30)] bg-[var(--accent-12)] text-[var(--text-strong)] hover:bg-[var(--accent-20)]',
-  ghost: 'border border-solid border-[var(--card-border)] bg-[var(--white-4)] text-[var(--text-body)] hover:bg-[var(--white-8)]',
+  primary: 'border border-solid border-[var(--accent-30)] bg-[var(--accent-12)] text-[var(--color-fg-secondary)] hover:bg-[var(--accent-20)]',
+  ghost: 'border border-solid border-[var(--color-border-default)] bg-[var(--white-4)] text-[var(--color-fg-primary)] hover:bg-[var(--white-8)]',
   danger: 'border border-solid border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--bad-light)] hover:bg-[var(--bad-20)]',
-  subtle: 'border-none bg-transparent text-[var(--text-muted)] hover:text-[var(--text-body)] hover:bg-[var(--white-6)]',
+  subtle: 'border-none bg-transparent text-[var(--color-fg-muted)] hover:text-[var(--color-fg-primary)] hover:bg-[var(--white-6)]',
 }
 
 const BASE = 'rounded cursor-pointer transition-all duration-200 font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-1)] active:scale-[0.97] active:opacity-90'

@@ -46,7 +46,7 @@ export function MetricTrack({ points, windowStart, windowEnd }: Props) {
   const lastRate = windowed[windowed.length - 1]?.point.success_rate ?? null
   const lastRateColor =
     lastRate == null ? 'text-text-dim'
-      : lastRate >= 97 ? 'text-[var(--ok)]'
+      : lastRate >= 97 ? 'text-[var(--color-status-ok)]'
       : lastRate >= 90 ? 'text-text-strong'
       : 'text-[var(--bad-light)]'
 
@@ -97,8 +97,8 @@ export function MetricTrack({ points, windowStart, windowEnd }: Props) {
                 </rect>
               `
             })}
-            <line x1="0" y1="${viewBoxHeight * 0.03}" x2="${viewBoxWidth}" y2="${viewBoxHeight * 0.03}" stroke="currentColor" stroke-dasharray="2 4" class="text-[var(--ok)]/30" stroke-width="0.5" />
-            <line x1="0" y1="${viewBoxHeight * 0.1}" x2="${viewBoxWidth}" y2="${viewBoxHeight * 0.1}" stroke="currentColor" stroke-dasharray="2 4" class="text-[var(--warn)]/30" stroke-width="0.5" />
+            <line x1="0" y1="${viewBoxHeight * 0.03}" x2="${viewBoxWidth}" y2="${viewBoxHeight * 0.03}" stroke="currentColor" stroke-dasharray="2 4" class="text-[var(--color-status-ok)]/30" stroke-width="0.5" />
+            <line x1="0" y1="${viewBoxHeight * 0.1}" x2="${viewBoxWidth}" y2="${viewBoxHeight * 0.1}" stroke="currentColor" stroke-dasharray="2 4" class="text-[var(--color-status-warn)]/30" stroke-width="0.5" />
             <polyline
               points=${polyline}
               fill="none"
@@ -116,7 +116,7 @@ export function MetricTrack({ points, windowStart, windowEnd }: Props) {
                   cy="${y.toFixed(1)}"
                   r=${r.isAnomaly ? '3' : '1.5'}
                   fill="currentColor"
-                  class=${r.isAnomaly ? (r.zScore < 0 ? 'text-[var(--bad-light)]' : 'text-[var(--warn)]') : 'text-accent'}
+                  class=${r.isAnomaly ? (r.zScore < 0 ? 'text-[var(--bad-light)]' : 'text-[var(--color-status-warn)]') : 'text-accent'}
                   stroke=${r.isAnomaly ? 'currentColor' : 'none'}
                   stroke-width=${r.isAnomaly ? '0.5' : '0'}
                 >

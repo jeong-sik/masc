@@ -40,7 +40,7 @@ function loadingClasses(className?: string): string {
     'inline-flex',
     'items-center',
     'text-2xs',
-    'text-[var(--text-dim)]',
+    'text-[var(--color-fg-disabled)]',
     className,
   ].filter(Boolean).join(' ')
 }

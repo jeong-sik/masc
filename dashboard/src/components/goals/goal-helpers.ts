@@ -102,7 +102,7 @@ export function horizonLabel(h: string): string {
 
 export function horizonColor(h: string): string {
   switch (h) {
-    case 'short': return 'var(--ok)'
+    case 'short': return 'var(--color-status-ok)'
     case 'mid': return 'var(--amber-bright)'
     case 'long': return 'var(--indigo)'
     default: return '#888'

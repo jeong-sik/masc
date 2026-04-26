@@ -57,35 +57,35 @@ function CheckpointSummaryCard({
 }) {
   if (!summary) {
     return html`
-      <div class="rounded border border-[var(--card-border)] bg-[var(--white-2)] px-3 py-3 text-xs text-[var(--text-muted)]">
+      <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-2)] px-3 py-3 text-xs text-[var(--color-fg-muted)]">
         ${title}: 저장된 checkpoint 없음
       </div>
     `
   }
 
   return html`
-    <div class="rounded border border-[var(--card-border)] bg-[var(--white-2)] px-3 py-3">
+    <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-2)] px-3 py-3">
       <div class="flex flex-wrap items-center gap-2">
-        <span class="text-xs font-semibold text-[var(--text-strong)]">${title}</span>
-        <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-3xs font-semibold bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-18)]">
+        <span class="text-xs font-semibold text-[var(--color-fg-secondary)]">${title}</span>
+        <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-3xs font-semibold bg-[var(--accent-12)] text-[var(--color-accent-fg)] border border-[var(--accent-18)]">
           gen ${summary.generation}
         </span>
-        <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-3xs font-semibold border border-[var(--white-8)] bg-[var(--white-3)] text-[var(--text-muted)]">
+        <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-3xs font-semibold border border-[var(--white-8)] bg-[var(--white-3)] text-[var(--color-fg-muted)]">
           ${summary.message_count} msgs
         </span>
         ${summary.system_prompt_present
-          ? html`<span class="inline-flex items-center rounded-sm px-2 py-0.5 text-3xs font-semibold border border-[var(--ok-20)] bg-[var(--ok-10)] text-[var(--ok)]">system kept</span>`
+          ? html`<span class="inline-flex items-center rounded-sm px-2 py-0.5 text-3xs font-semibold border border-[var(--ok-20)] bg-[var(--ok-10)] text-[var(--color-status-ok)]">system kept</span>`
           : null}
       </div>
-      <div class="mt-2 text-2xs text-[var(--text-muted)]">
+      <div class="mt-2 text-2xs text-[var(--color-fg-muted)]">
         ${formatCheckpointTime(summary.created_at)}
       </div>
       ${summary.latest_preview
-        ? html`<div class="mt-2 text-xs leading-relaxed text-[var(--text-body)]">${summary.latest_preview}</div>`
+        ? html`<div class="mt-2 text-xs leading-relaxed text-[var(--color-fg-primary)]">${summary.latest_preview}</div>`
         : null}
       ${summary.continuity_summary
-        ? html`<pre class="mt-2 whitespace-pre-wrap rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-2xs leading-relaxed text-[var(--text-muted)]">${summary.continuity_summary}</pre>`
-        : html`<div class="mt-2 text-2xs text-[var(--text-dim)]">continuity snapshot 없음</div>`}
+        ? html`<pre class="mt-2 whitespace-pre-wrap rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-2xs leading-relaxed text-[var(--color-fg-muted)]">${summary.continuity_summary}</pre>`
+        : html`<div class="mt-2 text-2xs text-[var(--color-fg-disabled)]">continuity snapshot 없음</div>`}
     </div>
   `
 }
@@ -169,7 +169,7 @@ export function KeeperCheckpointPanel({
 
   if (loading) {
     return html`
-      <div class="rounded border border-[var(--card-border)] bg-[var(--white-2)] px-3 py-3 text-xs text-[var(--text-muted)]">
+      <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-2)] px-3 py-3 text-xs text-[var(--color-fg-muted)]">
         checkpoint inventory 로딩 중...
       </div>
     `
@@ -181,7 +181,7 @@ export function KeeperCheckpointPanel({
         ${error}
         <button
           type="button"
-          class="ml-2 rounded border border-[var(--card-border)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] hover:bg-[var(--white-8)] cursor-pointer"
+          class="ml-2 rounded border border-[var(--color-border-default)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--color-fg-primary)] hover:bg-[var(--white-8)] cursor-pointer"
           onClick=${loadInventory}
         >다시 로드</button>
       </div>
@@ -191,16 +191,16 @@ export function KeeperCheckpointPanel({
   return html`
     <div class="flex flex-col gap-3">
       <div class="flex items-center justify-between gap-3">
-        <div class="text-2xs text-[var(--text-muted)]">
+        <div class="text-2xs text-[var(--color-fg-muted)]">
           current OAS checkpoint와 OAS snapshot history만 노출합니다.
           ${inventory && inventory.legacy_shadow_count > 0
-            ? html`<span class="block mt-1 text-[var(--warn)]">legacy shadow ${inventory.legacy_shadow_count}개는 picker에서 제외됩니다.</span>`
+            ? html`<span class="block mt-1 text-[var(--color-status-warn)]">legacy shadow ${inventory.legacy_shadow_count}개는 picker에서 제외됩니다.</span>`
             : null}
         </div>
         <div class="flex items-center gap-2">
           <button
             type="button"
-            class="rounded border border-[var(--card-border)] bg-[var(--white-4)] px-3 py-1.5 text-2xs font-semibold text-[var(--text-body)] hover:bg-[var(--white-8)] cursor-pointer"
+            class="rounded border border-[var(--color-border-default)] bg-[var(--white-4)] px-3 py-1.5 text-2xs font-semibold text-[var(--color-fg-primary)] hover:bg-[var(--white-8)] cursor-pointer"
             onClick=${loadInventory}
           >새로고침</button>
           <button
@@ -217,12 +217,12 @@ export function KeeperCheckpointPanel({
         summary=${inventory?.current ?? null}
       />
 
-      <div class="rounded border border-[var(--card-border)] bg-[var(--white-2)]">
-        <div class="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--card-border)] px-3 py-2">
-          <div class="text-2xs font-semibold uppercase tracking-1 text-[var(--text-muted)]">
+      <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-2)]">
+        <div class="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--color-border-default)] px-3 py-2">
+          <div class="text-2xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">
             OAS Snapshot History
             ${inventory && inventory.history.length > 0 && historyQuery.trim() !== ''
-              ? html`<span class="ml-2 text-3xs font-normal normal-case tracking-normal text-[var(--text-dim)]">${filterCheckpointHistory(inventory.history, historyQuery).length}/${inventory.history.length}</span>`
+              ? html`<span class="ml-2 text-3xs font-normal normal-case tracking-normal text-[var(--color-fg-disabled)]">${filterCheckpointHistory(inventory.history, historyQuery).length}/${inventory.history.length}</span>`
               : null}
           </div>
           <input
@@ -231,21 +231,21 @@ export function KeeperCheckpointPanel({
             placeholder="snapshot id / preview / 요약 필터"
             aria-label="OAS snapshot history 필터"
             onInput=${(e: Event) => { setHistoryQuery((e.target as HTMLInputElement).value) }}
-            class="min-w-40 max-w-65 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+            class="min-w-40 max-w-65 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
           />
         </div>
         ${!inventory || inventory.history.length === 0
-          ? html`<div class="px-3 py-3 text-xs text-[var(--text-muted)]">저장된 OAS history snapshot이 아직 없습니다.</div>`
+          ? html`<div class="px-3 py-3 text-xs text-[var(--color-fg-muted)]">저장된 OAS history snapshot이 아직 없습니다.</div>`
           : (() => {
               const visibleHistory = filterCheckpointHistory(inventory.history, historyQuery)
               const isFiltering = historyQuery.trim() !== ''
               if (isFiltering && visibleHistory.length === 0) {
-                return html`<div class="px-3 py-4 text-center text-2xs text-[var(--text-dim)]">필터 결과 없음 (${inventory.history.length} items)</div>`
+                return html`<div class="px-3 py-4 text-center text-2xs text-[var(--color-fg-disabled)]">필터 결과 없음 (${inventory.history.length} items)</div>`
               }
               return html`
                 <div class="flex flex-col">
                   ${visibleHistory.map(item => html`
-                    <label class="flex gap-3 border-b border-[var(--card-border)] px-3 py-3 text-xs last:border-b-0">
+                    <label class="flex gap-3 border-b border-[var(--color-border-default)] px-3 py-3 text-xs last:border-b-0">
                       <input
                         type="checkbox"
                         class="mt-1"
@@ -254,27 +254,27 @@ export function KeeperCheckpointPanel({
                       />
                       <div class="min-w-0 flex-1">
                         <div class="flex flex-wrap items-center gap-2">
-                          <span class="font-mono text-[var(--text-strong)]">${item.snapshot_id}</span>
-                          <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-3xs font-semibold bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-18)]">
+                          <span class="font-mono text-[var(--color-fg-secondary)]">${item.snapshot_id}</span>
+                          <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-3xs font-semibold bg-[var(--accent-12)] text-[var(--color-accent-fg)] border border-[var(--accent-18)]">
                             gen ${item.generation}
                           </span>
-                          <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-3xs font-semibold border border-[var(--white-8)] bg-[var(--white-3)] text-[var(--text-muted)]">
+                          <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-3xs font-semibold border border-[var(--white-8)] bg-[var(--white-3)] text-[var(--color-fg-muted)]">
                             ${item.message_count} msgs
                           </span>
                           ${item.system_prompt_present
-                            ? html`<span class="inline-flex items-center rounded-sm px-2 py-0.5 text-3xs font-semibold border border-[var(--ok-20)] bg-[var(--ok-10)] text-[var(--ok)]">system kept</span>`
+                            ? html`<span class="inline-flex items-center rounded-sm px-2 py-0.5 text-3xs font-semibold border border-[var(--ok-20)] bg-[var(--ok-10)] text-[var(--color-status-ok)]">system kept</span>`
                             : null}
                         </div>
-                        <div class="mt-1 text-2xs text-[var(--text-muted)]">
+                        <div class="mt-1 text-2xs text-[var(--color-fg-muted)]">
                           ${formatCheckpointTime(item.created_at)}
                           ${item.file_stat?.size_bytes ? html` · ${(item.file_stat.size_bytes / 1024).toFixed(1)} KB` : null}
                         </div>
                         ${item.latest_preview
-                          ? html`<div class="mt-2 text-xs leading-relaxed text-[var(--text-body)]">${item.latest_preview}</div>`
+                          ? html`<div class="mt-2 text-xs leading-relaxed text-[var(--color-fg-primary)]">${item.latest_preview}</div>`
                           : null}
                         ${item.continuity_summary
-                          ? html`<pre class="mt-2 whitespace-pre-wrap rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-2xs leading-relaxed text-[var(--text-muted)]">${item.continuity_summary}</pre>`
-                          : html`<div class="mt-2 text-2xs text-[var(--text-dim)]">continuity snapshot 없음</div>`}
+                          ? html`<pre class="mt-2 whitespace-pre-wrap rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-2xs leading-relaxed text-[var(--color-fg-muted)]">${item.continuity_summary}</pre>`
+                          : html`<div class="mt-2 text-2xs text-[var(--color-fg-disabled)]">continuity snapshot 없음</div>`}
                       </div>
                     </label>
                   `)}
@@ -416,13 +416,13 @@ export function lineageTransitionLabel(parentGeneration: number | null | undefin
 function verdictBadgeClass(verdict: string | undefined): string {
   switch (verdict) {
     case 'verified':
-      return 'bg-[var(--ok-10)] text-[var(--ok)] border border-[var(--ok-20)]'
+      return 'bg-[var(--ok-10)] text-[var(--color-status-ok)] border border-[var(--ok-20)]'
     case 'drift_detected':
-      return 'bg-[var(--warn-10)] text-[var(--warn)] border border-[var(--warn-20)]'
+      return 'bg-[var(--warn-10)] text-[var(--color-status-warn)] border border-[var(--warn-20)]'
     case 'unavailable':
-      return 'bg-[var(--white-5)] text-[var(--text-muted)] border border-[var(--white-8)]'
+      return 'bg-[var(--white-5)] text-[var(--color-fg-muted)] border border-[var(--white-8)]'
     default:
-      return 'bg-[var(--white-5)] text-[var(--text-muted)] border border-[var(--white-8)]'
+      return 'bg-[var(--white-5)] text-[var(--color-fg-muted)] border border-[var(--white-8)]'
   }
 }
 
@@ -453,7 +453,7 @@ export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
   return html`
     <div class="md:col-span-2">
       <${KeeperDetailSectionCard} title="생성 계보">
-        <div class="text-2xs text-[var(--text-muted)] mb-3">
+        <div class="text-2xs text-[var(--color-fg-muted)] mb-3">
           Track keeper state transfer across successful handoffs. Lineage telemetry is append-only, shows the latest rollover first, and helps explain whether the same keeper identity carried into the new trace.
         </div>
 
@@ -461,21 +461,21 @@ export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
           ? html`
             <div class="rounded border border-[var(--accent-20)] bg-[var(--accent-8)] p-3 mb-3">
               <div class="flex flex-wrap items-center gap-2 mb-1">
-                <span class="text-3xs font-semibold uppercase tracking-wider text-[var(--accent)]">최신 핸드오프</span>
-                <span class="text-3xs font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-15)]">
+                <span class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-accent-fg)]">최신 핸드오프</span>
+                <span class="text-3xs font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--color-accent-fg)] border border-[var(--accent-15)]">
                   ${lineageTransitionLabel(latestEntry.parent_generation, latestEntry.generation)}
                 </span>
                 <span class="text-3xs px-1.5 py-0.5 rounded ${verdictBadgeClass(latestEntry.continuity_verdict)}">
                   ${latestEntryMeta?.badgeLabel}
                 </span>
                 ${latestEntry.created_at
-                  ? html`<span class="text-3xs text-[var(--text-dim)]">recorded <${TimeAgo} timestamp=${latestEntry.created_at} /></span>`
+                  ? html`<span class="text-3xs text-[var(--color-fg-disabled)]">recorded <${TimeAgo} timestamp=${latestEntry.created_at} /></span>`
                   : null}
               </div>
-              <div class="text-2xs text-[var(--text-body)]">
+              <div class="text-2xs text-[var(--color-fg-primary)]">
                 ${latestEntry.trigger_reason ? `trigger ${latestEntry.trigger_reason} · ` : ''}context ratio ${formatLineageRatio(latestEntry.context_ratio)}
               </div>
-              <div class="mt-1 text-2xs text-[var(--text-dim)]">
+              <div class="mt-1 text-2xs text-[var(--color-fg-disabled)]">
                 ${latestEntryMeta?.detail}
               </div>
             </div>
@@ -484,19 +484,19 @@ export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
 
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
           <div class="px-3 py-2 rounded border border-[var(--white-8)] bg-[var(--white-2)]">
-            <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">현재 세대</div>
-            <div class="mt-1 text-lg font-semibold text-[var(--text-strong)]">${currentGeneration ?? '-'}</div>
-            ${generationId ? html`<div class="text-3xs text-[var(--text-dim)] font-mono truncate" title=${generationId}>${generationId}</div>` : null}
+            <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">현재 세대</div>
+            <div class="mt-1 text-lg font-semibold text-[var(--color-fg-secondary)]">${currentGeneration ?? '-'}</div>
+            ${generationId ? html`<div class="text-3xs text-[var(--color-fg-disabled)] font-mono truncate" title=${generationId}>${generationId}</div>` : null}
           </div>
           <div class="px-3 py-2 rounded border border-[var(--white-8)] bg-[var(--white-2)]">
-            <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">추적 계보</div>
-            <div class="mt-1 text-lg font-semibold text-[var(--text-strong)]">${traceHistoryCount}</div>
-            <div class="text-3xs text-[var(--text-dim)]">historical traces retained in meta.trace_history</div>
+            <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">추적 계보</div>
+            <div class="mt-1 text-lg font-semibold text-[var(--color-fg-secondary)]">${traceHistoryCount}</div>
+            <div class="text-3xs text-[var(--color-fg-disabled)]">historical traces retained in meta.trace_history</div>
           </div>
           <div class="px-3 py-2 rounded border border-[var(--white-8)] bg-[var(--white-2)]">
-            <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">현재 추적</div>
-            <div class="mt-1 text-sm font-mono text-[var(--text-strong)] truncate" title=${currentTraceId ?? ''}>${currentTraceId ? compactTraceId(currentTraceId) : '-'}</div>
-            <div class="text-3xs text-[var(--text-dim)]">artifact appears after the first successful handoff</div>
+            <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">현재 추적</div>
+            <div class="mt-1 text-sm font-mono text-[var(--color-fg-secondary)] truncate" title=${currentTraceId ?? ''}>${currentTraceId ? compactTraceId(currentTraceId) : '-'}</div>
+            <div class="text-3xs text-[var(--color-fg-disabled)]">artifact appears after the first successful handoff</div>
           </div>
         </div>
 
@@ -504,64 +504,64 @@ export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
           ? html`
             <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] p-3 mb-3">
               <div class="flex flex-wrap items-center gap-2 mb-2">
-                <span class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">현재 매니페스트</span>
-                <span class="text-3xs font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-15)]">gen ${manifest.generation}</span>
+                <span class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">현재 매니페스트</span>
+                <span class="text-3xs font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--color-accent-fg)] border border-[var(--accent-15)]">gen ${manifest.generation}</span>
                 ${continuity?.verdict
                   ? html`<span class="text-3xs px-1.5 py-0.5 rounded ${verdictBadgeClass(continuity.verdict)}">${continuityMeta.badgeLabel}</span>`
                   : null}
                 ${manifest.created_at
-                  ? html`<span class="text-3xs text-[var(--text-dim)]">created <${TimeAgo} timestamp=${manifest.created_at} /></span>`
+                  ? html`<span class="text-3xs text-[var(--color-fg-disabled)]">created <${TimeAgo} timestamp=${manifest.created_at} /></span>`
                   : null}
               </div>
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-2xs">
                 <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] px-3 py-2">
-                  <div class="text-3xs text-[var(--text-muted)] uppercase tracking-wider mb-1">부모</div>
-                  <div class="text-[var(--text-strong)]">${manifest.parent_generation != null ? `gen ${manifest.parent_generation}` : 'root generation'}</div>
+                  <div class="text-3xs text-[var(--color-fg-muted)] uppercase tracking-wider mb-1">부모</div>
+                  <div class="text-[var(--color-fg-secondary)]">${manifest.parent_generation != null ? `gen ${manifest.parent_generation}` : 'root generation'}</div>
                   ${manifest.parent_trace_id
-                    ? html`<div class="font-mono text-[var(--text-dim)] truncate" title=${manifest.parent_trace_id}>${compactTraceId(manifest.parent_trace_id)}</div>`
+                    ? html`<div class="font-mono text-[var(--color-fg-disabled)] truncate" title=${manifest.parent_trace_id}>${compactTraceId(manifest.parent_trace_id)}</div>`
                     : null}
                 </div>
                 <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] px-3 py-2">
-                  <div class="text-3xs text-[var(--text-muted)] uppercase tracking-wider mb-1">트리거</div>
-                  <div class="text-[var(--text-strong)]">${manifest.trigger_reason ?? '-'}</div>
-                  <div class="text-[var(--text-dim)]">context ratio ${formatLineageRatio(manifest.context_ratio)}</div>
+                  <div class="text-3xs text-[var(--color-fg-muted)] uppercase tracking-wider mb-1">트리거</div>
+                  <div class="text-[var(--color-fg-secondary)]">${manifest.trigger_reason ?? '-'}</div>
+                  <div class="text-[var(--color-fg-disabled)]">context ratio ${formatLineageRatio(manifest.context_ratio)}</div>
                 </div>
               </div>
               <div class="mt-3 flex flex-wrap gap-2">
                 ${delta
                   ? html`
-                    <span class="text-3xs px-2 py-1 rounded border border-[var(--white-8)] bg-[var(--white-2)] text-[var(--text-muted)]">
+                    <span class="text-3xs px-2 py-1 rounded border border-[var(--white-8)] bg-[var(--white-2)] text-[var(--color-fg-muted)]">
                       inherited ${delta.inherited_fields.length}
                     </span>
-                    <span class="text-3xs px-2 py-1 rounded border border-[var(--white-8)] bg-[var(--white-2)] text-[var(--text-muted)]">
+                    <span class="text-3xs px-2 py-1 rounded border border-[var(--white-8)] bg-[var(--white-2)] text-[var(--color-fg-muted)]">
                       changed ${delta.changed_fields.length}
                     </span>
-                    <span class="text-3xs px-2 py-1 rounded border border-[var(--white-8)] bg-[var(--white-2)] text-[var(--text-muted)]">
+                    <span class="text-3xs px-2 py-1 rounded border border-[var(--white-8)] bg-[var(--white-2)] text-[var(--color-fg-muted)]">
                       dropped ${delta.dropped_fields.length}
                     </span>
                   `
                   : null}
                 ${continuity?.similarity != null
-                  ? html`<span class="text-3xs px-2 py-1 rounded border border-[var(--white-8)] bg-[var(--white-2)] text-[var(--text-muted)]">similarity ${(continuity.similarity * 100).toFixed(1)}%</span>`
+                  ? html`<span class="text-3xs px-2 py-1 rounded border border-[var(--white-8)] bg-[var(--white-2)] text-[var(--color-fg-muted)]">similarity ${(continuity.similarity * 100).toFixed(1)}%</span>`
                   : null}
               </div>
               ${continuity?.verdict
-                ? html`<div class="mt-2 text-2xs text-[var(--text-dim)]">${continuityMeta.detail}</div>`
+                ? html`<div class="mt-2 text-2xs text-[var(--color-fg-disabled)]">${continuityMeta.detail}</div>`
                 : null}
               ${delta && delta.changed_fields.length === 0 && delta.dropped_fields.length === 0
-                ? html`<div class="mt-2 text-2xs text-[var(--text-dim)]">identity-only inheritance stayed intact across the rollover.</div>`
+                ? html`<div class="mt-2 text-2xs text-[var(--color-fg-disabled)]">identity-only inheritance stayed intact across the rollover.</div>`
                 : null}
             </div>
           `
           : html`
-            <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] p-3 mb-3 text-2xs text-[var(--text-muted)]">
+            <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] p-3 mb-3 text-2xs text-[var(--color-fg-muted)]">
               아직 handoff lineage manifest가 없습니다. generation 0에서는 현재 trace만 유지되고, 첫 successful handoff 이후부터 manifest/index가 생깁니다.
             </div>
           `}
 
         <div>
-          <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">최근 핸드오프</div>
-          <div class="text-2xs text-[var(--text-dim)] mb-2">Latest recorded rollover appears first so operators can compare the current trace against recent history.</div>
+          <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mb-1">최근 핸드오프</div>
+          <div class="text-2xs text-[var(--color-fg-disabled)] mb-2">Latest recorded rollover appears first so operators can compare the current trace against recent history.</div>
           ${recent.length > 0
             ? html`
               <div class="flex flex-col gap-2">
@@ -571,31 +571,31 @@ export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
                   return html`
                     <div class=${`px-3 py-2 rounded border ${isLatest ? 'border-[var(--accent-22)] bg-[var(--accent-8)]' : 'border-[var(--white-8)] bg-[var(--white-2)]'}`}>
                       <div class="flex flex-wrap items-center gap-2">
-                        <span class="text-3xs font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-15)]">gen ${entry.generation}</span>
+                        <span class="text-3xs font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--color-accent-fg)] border border-[var(--accent-15)]">gen ${entry.generation}</span>
                         ${isLatest
-                          ? html`<span class="text-3xs px-1.5 py-0.5 rounded border border-[var(--accent-18)] bg-[var(--accent-12)] text-[var(--accent)]">latest</span>`
+                          ? html`<span class="text-3xs px-1.5 py-0.5 rounded border border-[var(--accent-18)] bg-[var(--accent-12)] text-[var(--color-accent-fg)]">latest</span>`
                           : null}
                         ${entry.continuity_verdict
                           ? html`<span class="text-3xs px-1.5 py-0.5 rounded ${verdictBadgeClass(entry.continuity_verdict)}">${entryMeta.badgeLabel}</span>`
                           : null}
                         ${entry.created_at
-                          ? html`<span class="text-3xs text-[var(--text-dim)]"><${TimeAgo} timestamp=${entry.created_at} /></span>`
+                          ? html`<span class="text-3xs text-[var(--color-fg-disabled)]"><${TimeAgo} timestamp=${entry.created_at} /></span>`
                           : null}
                       </div>
-                      <div class="mt-1 text-2xs text-[var(--text-body)]">
+                      <div class="mt-1 text-2xs text-[var(--color-fg-primary)]">
                         ${lineageTransitionLabel(entry.parent_generation, entry.generation)}
                         ${entry.trigger_reason ? ` · ${entry.trigger_reason}` : ''}
                         ${entry.context_ratio != null ? ` · ratio ${formatLineageRatio(entry.context_ratio)}` : ''}
                       </div>
-                      <div class="mt-1 text-3xs font-mono text-[var(--text-dim)] truncate" title=${entry.trace_id}>
+                      <div class="mt-1 text-3xs font-mono text-[var(--color-fg-disabled)] truncate" title=${entry.trace_id}>
                         ${compactTraceId(entry.trace_id)}
                       </div>
                       ${entry.continuity_verdict
-                        ? html`<div class="mt-1 text-3xs text-[var(--text-dim)]">${entryMeta.detail}</div>`
+                        ? html`<div class="mt-1 text-3xs text-[var(--color-fg-disabled)]">${entryMeta.detail}</div>`
                         : null}
                       ${(entry.identity_changed_fields?.length ?? 0) > 0 || (entry.identity_dropped_fields?.length ?? 0) > 0
                         ? html`
-                          <div class="mt-1 text-3xs text-[var(--text-dim)]">
+                          <div class="mt-1 text-3xs text-[var(--color-fg-disabled)]">
                             ${entry.identity_changed_fields && entry.identity_changed_fields.length > 0 ? `changed: ${entry.identity_changed_fields.join(', ')}` : ''}
                             ${entry.identity_changed_fields && entry.identity_changed_fields.length > 0 && entry.identity_dropped_fields && entry.identity_dropped_fields.length > 0 ? ' · ' : ''}
                             ${entry.identity_dropped_fields && entry.identity_dropped_fields.length > 0 ? `dropped: ${entry.identity_dropped_fields.join(', ')}` : ''}
@@ -607,12 +607,12 @@ export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
                 })}
               </div>
             `
-            : html`<div class="text-2xs text-[var(--text-muted)]">No recorded handoff entries yet.</div>`}
+            : html`<div class="text-2xs text-[var(--color-fg-muted)]">No recorded handoff entries yet.</div>`}
         </div>
 
         ${manifestPath || indexPath
           ? html`
-            <div class="mt-3 flex flex-col gap-1 text-3xs text-[var(--text-dim)]">
+            <div class="mt-3 flex flex-col gap-1 text-3xs text-[var(--color-fg-disabled)]">
               ${manifestPath ? html`<div class="font-mono truncate" title=${manifestPath}>manifest ${manifestPath}</div>` : null}
               ${indexPath ? html`<div class="font-mono truncate" title=${indexPath}>index ${indexPath}</div>` : null}
             </div>

@@ -139,7 +139,7 @@ describe('SetupGuideCard', () => {
     expect(wrapper.getAttribute('data-setup-guide-tone')).toBe('in-progress')
     // Count chip carries an accent tone (not text-dim muted)
     const progress = container.querySelector('[data-setup-progress="discord"]')!
-    expect(progress.className).toContain('text-[var(--accent)]')
+    expect(progress.className).toContain('text-[var(--color-accent-fg)]')
   })
 
   it('renders numbered step circles (Plane step-wizard pattern)', async () => {

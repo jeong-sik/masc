@@ -63,11 +63,11 @@ export function severityLabel(code: number): string {
 export function severityChipClass(code: number): string {
   switch (severityForExitCode(code)) {
     case 'ok':
-      return 'border-[var(--ok-30)] bg-[var(--ok-12)] text-[var(--ok)]'
+      return 'border-[var(--ok-30)] bg-[var(--ok-12)] text-[var(--color-status-ok)]'
     case 'warn':
-      return 'border-[var(--warn-30)] bg-[var(--warn-12)] text-[var(--warn)]'
+      return 'border-[var(--warn-30)] bg-[var(--warn-12)] text-[var(--color-status-warn)]'
     case 'error':
-      return 'border-[var(--bad-30)] bg-[var(--bad-12)] text-[var(--bad)]'
+      return 'border-[var(--bad-30)] bg-[var(--bad-12)] text-[var(--color-status-err)]'
   }
 }
 
@@ -184,7 +184,7 @@ function chipClassForSidecarSeverity(severity: string): string {
 
 function SidecarChecksList({ checks }: { checks: SidecarCheckView[] }) {
   if (checks.length === 0) {
-    return html`<div class="text-xs text-[var(--text-muted)]">세부 검사 없음.</div>`
+    return html`<div class="text-xs text-[var(--color-fg-muted)]">세부 검사 없음.</div>`
   }
   return html`
     <ul class="mt-3 space-y-2">
@@ -193,12 +193,12 @@ function SidecarChecksList({ checks }: { checks: SidecarCheckView[] }) {
         return html`
           <li class="rounded border border-[var(--white-8)] bg-[var(--white-3)] p-2">
             <div class="flex items-baseline justify-between gap-2">
-              <div class="text-xs font-medium text-[var(--text-strong)]">${c.name}</div>
+              <div class="text-xs font-medium text-[var(--color-fg-secondary)]">${c.name}</div>
               <div class="flex items-center gap-1">
                 ${c.autofix_available
                   ? html`
                       <span
-                        class="rounded-full border border-[var(--accent)]/40 bg-[var(--accent)]/10 px-1.5 py-0.5 text-[10px] text-[var(--accent)]"
+                        class="rounded-full border border-[var(--color-accent-fg)]/40 bg-[var(--color-accent-fg)]/10 px-1.5 py-0.5 text-[10px] text-[var(--color-accent-fg)]"
                         title=${c.autofix_description
                           ? `자동 치유 시도: ${c.autofix_description} (CLI: masc-mcp doctor --fix)`
                           : '자동 치유 가능 (CLI: masc-mcp doctor --fix)'}
@@ -212,11 +212,11 @@ function SidecarChecksList({ checks }: { checks: SidecarCheckView[] }) {
                 </span>
               </div>
             </div>
-            ${c.detail ? html`<div class="mt-1 text-[11px] text-[var(--text-muted)]">${c.detail}</div>` : ''}
-            ${c.message ? html`<div class="mt-1 text-[11px] text-[var(--text-body)]">↳ ${c.message}</div>` : ''}
-            ${c.hint ? html`<div class="mt-1 text-[11px] text-[var(--text-muted)]">hint: ${c.hint}</div>` : ''}
+            ${c.detail ? html`<div class="mt-1 text-[11px] text-[var(--color-fg-muted)]">${c.detail}</div>` : ''}
+            ${c.message ? html`<div class="mt-1 text-[11px] text-[var(--color-fg-primary)]">↳ ${c.message}</div>` : ''}
+            ${c.hint ? html`<div class="mt-1 text-[11px] text-[var(--color-fg-muted)]">hint: ${c.hint}</div>` : ''}
             ${c.autofix_available && c.autofix_description
-              ? html`<div class="mt-1 text-[11px] text-[var(--accent)]">fix: ${c.autofix_description}</div>`
+              ? html`<div class="mt-1 text-[11px] text-[var(--color-accent-fg)]">fix: ${c.autofix_description}</div>`
               : ''}
           </li>
         `
@@ -228,15 +228,15 @@ function SidecarChecksList({ checks }: { checks: SidecarCheckView[] }) {
 function ConfigNotesList({ notes }: { notes: ConfigNotesView }) {
   const { warnings, next_actions } = notes
   if (warnings.length === 0 && next_actions.length === 0) {
-    return html`<div class="text-xs text-[var(--text-muted)]">추가 메모 없음.</div>`
+    return html`<div class="text-xs text-[var(--color-fg-muted)]">추가 메모 없음.</div>`
   }
   return html`
     <div class="mt-3 space-y-3">
       ${warnings.length > 0
         ? html`
             <div>
-              <div class="text-[11px] uppercase tracking-wider text-[var(--text-muted)]">경고</div>
-              <ul class="mt-1 list-disc space-y-1 pl-5 text-[11px] text-[var(--text-body)]">
+              <div class="text-[11px] uppercase tracking-wider text-[var(--color-fg-muted)]">경고</div>
+              <ul class="mt-1 list-disc space-y-1 pl-5 text-[11px] text-[var(--color-fg-primary)]">
                 ${warnings.map((w) => html`<li>${w}</li>`)}
               </ul>
             </div>
@@ -245,8 +245,8 @@ function ConfigNotesList({ notes }: { notes: ConfigNotesView }) {
       ${next_actions.length > 0
         ? html`
             <div>
-              <div class="text-[11px] uppercase tracking-wider text-[var(--text-muted)]">다음 조치</div>
-              <ul class="mt-1 list-disc space-y-1 pl-5 text-[11px] text-[var(--text-body)]">
+              <div class="text-[11px] uppercase tracking-wider text-[var(--color-fg-muted)]">다음 조치</div>
+              <ul class="mt-1 list-disc space-y-1 pl-5 text-[11px] text-[var(--color-fg-primary)]">
                 ${next_actions.map((a) => html`<li>${a}</li>`)}
               </ul>
             </div>
@@ -269,15 +269,15 @@ function DoctorEntryCard({ entry }: { entry: DoctorEntry }) {
         aria-expanded=${expanded.value}
         onClick=${onToggle}
       >
-        <div class="text-sm font-semibold text-[var(--text-strong)]">
+        <div class="text-sm font-semibold text-[var(--color-fg-secondary)]">
           ${doctorHeading(entry)}
-          <span class="ml-2 text-[10px] text-[var(--text-muted)]">${expanded.value ? '▾' : '▸'}</span>
+          <span class="ml-2 text-[10px] text-[var(--color-fg-muted)]">${expanded.value ? '▾' : '▸'}</span>
         </div>
         <span class="rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wider ${chip}">
           ${label}
         </span>
       </button>
-      <div class="mt-1 text-xs text-[var(--text-muted)]">
+      <div class="mt-1 text-xs text-[var(--color-fg-muted)]">
         ${entry.kind === 'config' ? 'Config Doctor' : `${entry.name} sidecar`} · exit ${entry.exit_code}
       </div>
       ${expanded.value
@@ -307,16 +307,16 @@ export function DoctorPanel() {
                 <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                   <div>
                     <${SectionCap}>시스템 전반 Doctor<//>
-                    <div class="mt-2 text-2xl font-semibold text-[var(--text-strong)]">
+                    <div class="mt-2 text-2xl font-semibold text-[var(--color-fg-secondary)]">
                       ${summaryLine(data.summary)}
                     </div>
-                    <div class="mt-2 text-sm leading-airy text-[var(--text-body)]">
-                      ${data.title} · <code class="text-[var(--text-muted)]">masc-mcp doctor all</code> 과 동일 결과.
+                    <div class="mt-2 text-sm leading-airy text-[var(--color-fg-primary)]">
+                      ${data.title} · <code class="text-[var(--color-fg-muted)]">masc-mcp doctor all</code> 과 동일 결과.
                     </div>
                   </div>
                   <button
                     type="button"
-                    class="rounded border border-[var(--white-8)] px-2.5 py-1 text-2xs text-[var(--text-muted)] transition-colors hover:border-[var(--accent)] hover:text-[var(--text-body)]"
+                    class="rounded border border-[var(--white-8)] px-2.5 py-1 text-2xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-accent-fg)] hover:text-[var(--color-fg-primary)]"
                     onClick=${() => { void refreshDoctor() }}
                   >새로고침</button>
                 </div>

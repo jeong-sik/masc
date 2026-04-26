@@ -26,7 +26,7 @@ function ConfirmDialog({ toolName, onConfirm, onCancel }: { toolName: string; on
 function ToolDetail() {
   const showConfirm = useSignal(false)
   const tool = selectedTool.value
-  if (!tool) return html`<div class="flex items-center justify-center h-full text-[var(--text-muted)] text-sm">좌측에서 도구를 선택하세요.</div>`
+  if (!tool) return html`<div class="flex items-center justify-center h-full text-[var(--color-fg-muted)] text-sm">좌측에서 도구를 선택하세요.</div>`
 
   const isDestructive = tool.annotations?.destructiveHint === true
   const missing = validationErrors.value
@@ -37,20 +37,20 @@ function ToolDetail() {
   return html`
     <div class="flex flex-col gap-3 h-full overflow-y-auto">
       <div>
-        <h3 class="text-base text-[var(--text-strong)] font-mono font-medium">${tool.name}</h3>
-        <p class="text-xs text-[var(--text-muted)] mt-1">${tool.description}</p>
-        ${tool.annotations?.readOnlyHint === true ? html`<span class="text-3xs text-[var(--ok)] mt-1">읽기 전용</span>` : null}
-        ${isDestructive ? html`<span class="text-3xs text-[var(--bad)] mt-1 ml-2">파괴적</span>` : null}
+        <h3 class="text-base text-[var(--color-fg-secondary)] font-mono font-medium">${tool.name}</h3>
+        <p class="text-xs text-[var(--color-fg-muted)] mt-1">${tool.description}</p>
+        ${tool.annotations?.readOnlyHint === true ? html`<span class="text-3xs text-[var(--color-status-ok)] mt-1">읽기 전용</span>` : null}
+        ${isDestructive ? html`<span class="text-3xs text-[var(--color-status-err)] mt-1 ml-2">파괴적</span>` : null}
       </div>
-      <div class="border-t border-[var(--card-border)] pt-3">
+      <div class="border-t border-[var(--color-border-default)] pt-3">
         <${SchemaForm} schema=${tool.inputSchema} values=${formValues.value} onChange=${updateFormValues} />
       </div>
       ${toolAccess.allowed ? null : html`
-        <p class="text-2xs text-[var(--warn)]">
+        <p class="text-2xs text-[var(--color-status-warn)]">
           실행 차단: ${toolAccess.reason ?? `${toolAccess.required_role} 권한이 필요합니다.`}
         </p>
       `}
-      ${missing.length > 0 ? html`<p class="text-2xs text-[var(--bad)]">필수 필드 누락: ${missing.join(', ')}</p>` : null}
+      ${missing.length > 0 ? html`<p class="text-2xs text-[var(--color-status-err)]">필수 필드 누락: ${missing.join(', ')}</p>` : null}
       ${showConfirm.value
         ? html`<${ConfirmDialog} toolName=${tool.name} onConfirm=${handleConfirmedExecute} onCancel=${() => { showConfirm.value = false }} />`
         : html`
@@ -67,18 +67,18 @@ function ToolDetail() {
 export function ToolExecutor() {
   useEffect(() => { void loadToolSchemas() }, [])
   if (schemasLoading.value && !selectedTool.value) {
-    return html`<${SurfaceCard}><p class="text-xs text-[var(--text-muted)] py-8 text-center">도구 스키마 로딩 중...</p><//>`
+    return html`<${SurfaceCard}><p class="text-xs text-[var(--color-fg-muted)] py-8 text-center">도구 스키마 로딩 중...</p><//>`
   }
   if (schemasError.value) {
     return html`<${SurfaceCard}><div class="py-4 text-center">
-      <p class="text-xs text-[var(--bad)] mb-2">${schemasError.value}</p>
+      <p class="text-xs text-[var(--color-status-err)] mb-2">${schemasError.value}</p>
       <${ActionButton} variant="ghost" size="sm" onClick=${() => void loadToolSchemas(true)}>재시도<//>
     </div><//>`
   }
   return html`
     <${SurfaceCard} class="h-[calc(100vh-240px)] min-h-100">
       <div class="flex gap-4 h-full">
-        <div class="w-70 flex-shrink-0 border-r border-[var(--card-border)] pr-4"><${ToolPicker} /></div>
+        <div class="w-70 flex-shrink-0 border-r border-[var(--color-border-default)] pr-4"><${ToolPicker} /></div>
         <div class="flex-1 min-w-0"><${ToolDetail} /></div>
       </div>
     <//>

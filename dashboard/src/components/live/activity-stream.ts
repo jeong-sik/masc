@@ -29,8 +29,8 @@ function FilterBar() {
         <button type="button"
           key=${opt.kind}
           class="px-3 py-1.5 text-2xs rounded-sm border cursor-pointer transition-all duration-150 ${active.has(opt.kind)
-            ? 'border-[var(--border-slate-22)] bg-[var(--accent-soft)] text-[var(--text-strong)]'
-            : 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--text-dim)] hover:bg-[var(--white-8)] hover:border-[var(--border-slate-22)] hover:text-[var(--text-body)]'}"
+            ? 'border-[var(--border-slate-22)] bg-[var(--accent-soft)] text-[var(--color-fg-secondary)]'
+            : 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--color-fg-disabled)] hover:bg-[var(--white-8)] hover:border-[var(--border-slate-22)] hover:text-[var(--color-fg-primary)]'}"
           onClick=${() => toggleLiveFilter(opt.kind)}
         >
           ${opt.label}
@@ -46,8 +46,8 @@ export function ActivityStream() {
   return html`
     <div class="grid gap-3 grid-rows-[auto_auto_1fr] min-h-0">
       <div class="activity-stream-head flex items-center justify-between gap-3 border-b border-[var(--border-slate-12)] pb-3">
-        <h3 class="m-0 text-[0.95rem] font-semibold text-[var(--text-strong)]">활동 스트림</h3>
-        <span class="text-xs text-[var(--text-muted)]">${totalEvents.value} 수신 · ${entries.length} 표시</span>
+        <h3 class="m-0 text-[0.95rem] font-semibold text-[var(--color-fg-secondary)]">활동 스트림</h3>
+        <span class="text-xs text-[var(--color-fg-muted)]">${totalEvents.value} 수신 · ${entries.length} 표시</span>
       </div>
       <${FilterBar} />
       <div class="activity-stream-list grid max-h-[52vh] min-h-0 content-start gap-2 overflow-y-auto pr-1">
@@ -64,10 +64,10 @@ export function ActivityStream() {
             >
               <div class="activity-item-head flex items-center gap-2">
                 <span class="activity-kind-chip rounded px-2 py-0.5 text-3xs font-medium uppercase tracking-[0.04em] ${eventKindColor(entry)}">${eventKindLabel(entry)}</span>
-                <span class="text-[0.75rem] text-[var(--text-body)] font-medium">${entry.agent}</span>
-                <span class="text-[0.7rem] text-[var(--text-muted)] ml-auto">${formatTimeAgo(entry.timestamp)}</span>
+                <span class="text-[0.75rem] text-[var(--color-fg-primary)] font-medium">${entry.agent}</span>
+                <span class="text-[0.7rem] text-[var(--color-fg-muted)] ml-auto">${formatTimeAgo(entry.timestamp)}</span>
               </div>
-              <div class="text-sm text-[var(--text-body)] leading-normal break-words">${entry.text}</div>
+              <div class="text-sm text-[var(--color-fg-primary)] leading-normal break-words">${entry.text}</div>
             </div>
           `)}
       </div>

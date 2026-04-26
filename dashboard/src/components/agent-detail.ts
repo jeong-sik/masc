@@ -146,7 +146,7 @@ function renderOwnedTasks(
     return html`<div class="h-full min-h-30"><${EmptyState} message="할당된 작업이 없습니다" compact /></div>`
   }
   if (isFiltering && visibleTasks.length === 0) {
-    return html`<div class="py-4 text-center text-2xs text-[var(--text-dim)]">필터 결과 없음 (${allTasks.length} tasks)</div>`
+    return html`<div class="py-4 text-center text-2xs text-[var(--color-fg-disabled)]">필터 결과 없음 (${allTasks.length} tasks)</div>`
   }
   return html`<div class="flex flex-col gap-3">${visibleTasks.map(t => html`<${TaskSummary} key=${t.id} task=${t} />`)}</div>`
 }
@@ -160,7 +160,7 @@ function renderTaskHistories(
     return html`<${EmptyState} message="작업 이력이 없습니다" compact />`
   }
   if (isFiltering && visibleRows.length === 0) {
-    return html`<div class="py-4 text-center text-2xs text-[var(--text-dim)]">필터 결과 없음 (${allRows.length} rows)</div>`
+    return html`<div class="py-4 text-center text-2xs text-[var(--color-fg-disabled)]">필터 결과 없음 (${allRows.length} rows)</div>`
   }
   return html`<div class="flex flex-col gap-3">${visibleRows.map(row => html`<${TaskHistoryPanel} key=${row.taskId} row=${row} />`)}</div>`
 }
@@ -331,12 +331,12 @@ export function AgentDetailOverlay() {
 
         <${AgentSessionReport} agentName=${agentName} />
 
-        <${CollapsibleSection} title="활동 추적" badge=${html`<span class="text-3xs text-[var(--text-dim)] font-normal ml-1">통합 타임라인</span>`}>
+        <${CollapsibleSection} title="활동 추적" badge=${html`<span class="text-3xs text-[var(--color-fg-disabled)] font-normal ml-1">통합 타임라인</span>`}>
           <${SessionTraceView} agentName=${agentName} isKeeper=${!!keeper} />
         <//>
 
         <div class="flex items-center justify-between gap-2">
-          <div class="text-3xs uppercase tracking-wider text-[var(--text-dim)]">
+          <div class="text-3xs uppercase tracking-wider text-[var(--color-fg-disabled)]">
             작업 필터
             ${isFilteringTasks
               ? html`<span class="ml-2 normal-case tracking-normal text-text-muted">할당 ${visibleOwnedTasks.length}/${ownedTasks.length} · 이력 ${visibleHistories.length}/${historyRows.length}</span>`
@@ -348,7 +348,7 @@ export function AgentDetailOverlay() {
             placeholder="id / title / status 필터"
             aria-label="작업 필터"
             onInput=${(e: Event) => { taskQuery.value = (e.target as HTMLInputElement).value }}
-            class="min-w-40 max-w-70 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+            class="min-w-40 max-w-70 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
           />
         </div>
 
@@ -380,7 +380,7 @@ export function AgentDetailOverlay() {
                 ].map(([label, val]) => html`
                   <div class="rounded border border-card-border/50 bg-card/30 p-3 text-center">
                     <div class="text-3xs font-semibold uppercase tracking-wider text-text-muted mb-1">${label}</div>
-                    <div class="text-lg font-bold ${(val as number) >= 0.7 ? 'text-ok' : (val as number) >= 0.4 ? 'text-[var(--warn)]' : 'text-bad'}">${val != null ? ((val as number) * 100).toFixed(0) + '%' : '-'}</div>
+                    <div class="text-lg font-bold ${(val as number) >= 0.7 ? 'text-ok' : (val as number) >= 0.4 ? 'text-[var(--color-status-warn)]' : 'text-bad'}">${val != null ? ((val as number) * 100).toFixed(0) + '%' : '-'}</div>
                   </div>
                 `)}
               </div>

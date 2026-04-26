@@ -54,7 +54,7 @@ function TraceSummaryBar({ summary }: { summary: TraceSummary }) {
   if (s.total_cost_usd > 0) items.push(`$${s.total_cost_usd.toFixed(3)}`)
 
   return html`
-    <div class="flex flex-wrap gap-2 text-3xs text-[var(--text-muted)]">
+    <div class="flex flex-wrap gap-2 text-3xs text-[var(--color-fg-muted)]">
       ${items.map(item => html`
         <span class="inline-flex items-center bg-[var(--white-4)] border border-[var(--white-6)] px-2 py-1 rounded font-medium">
           ${item}
@@ -75,10 +75,10 @@ function LiveIndicator({ events }: { events: readonly { ts: number }[] }) {
   if (!isRecent) return null
 
   return html`
-    <div class="flex items-center gap-2 px-3 py-2 text-2xs text-[var(--text-muted)]">
+    <div class="flex items-center gap-2 px-3 py-2 text-2xs text-[var(--color-fg-muted)]">
       <span class="relative flex size-2">
-        <span class="animate-ping absolute inline-flex h-full w-full rounded-sm bg-[var(--ok)] opacity-75"></span>
-        <span class="relative inline-flex size-2 rounded-sm bg-[var(--ok)]"></span>
+        <span class="animate-ping absolute inline-flex h-full w-full rounded-sm bg-[var(--color-status-ok)] opacity-75"></span>
+        <span class="relative inline-flex size-2 rounded-sm bg-[var(--color-status-ok)]"></span>
       </span>
       에이전트 작업 중...
     </div>
@@ -183,14 +183,14 @@ export function SessionTraceView({ agentName, isKeeper, keeperStatus, keeperGene
       ${'' /* Event list */}
       <div
         ref=${listRef}
-        class="flex flex-col gap-0.5 max-h-[500px] overflow-y-auto rounded border border-[var(--card-border)] bg-[var(--white-2)]"
+        class="flex flex-col gap-0.5 max-h-[500px] overflow-y-auto rounded border border-[var(--color-border-default)] bg-[var(--white-2)]"
       >
         ${events.map(evt => html`<${SessionTraceEntry} key=${evt.id} event=${evt} searchQuery=${searchQuery} />`)}
         <${LiveIndicator} events=${events} />
       </div>
 
       ${'' /* Footer: event count */}
-      <div class="text-3xs text-[var(--text-dim)] text-right">
+      <div class="text-3xs text-[var(--color-fg-disabled)] text-right">
         ${events.length}건 표시
       </div>
     </div>

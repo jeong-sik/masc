@@ -97,7 +97,7 @@ describe('HeartbeatUptimeChip component', () => {
     const el = container.querySelector('[data-heartbeat-uptime-chip]') as HTMLElement
     expect(el).toBeTruthy()
     expect(el.textContent).toContain('100%')
-    expect(el.className).toContain('var(--ok)')
+    expect(el.className).toContain('var(--color-status-ok)')
     expect(el.getAttribute('data-heartbeat-uptime-tone')).toBe('operational')
     expect(el.getAttribute('data-heartbeat-uptime-pct')).toBe('100')
   })
@@ -109,7 +109,7 @@ describe('HeartbeatUptimeChip component', () => {
       container,
     )
     const el = container.querySelector('[data-heartbeat-uptime-chip]')!
-    expect(el.className).toContain('var(--warn)')
+    expect(el.className).toContain('var(--color-status-warn)')
     expect(el.getAttribute('data-heartbeat-uptime-tone')).toBe('degraded')
   })
 

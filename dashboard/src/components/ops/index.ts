@@ -166,15 +166,15 @@ function renderActivityTimeline() {
           key=${entry.key}
           data-testid="ops-activity-item"
           data-activity-kind=${entry.kind}
-          class="rounded border border-[var(--card-border)] bg-[var(--white-3)] p-3"
+          class="rounded border border-[var(--color-border-default)] bg-[var(--white-3)] p-3"
         >
-          <div class="flex flex-wrap items-center gap-2 text-2xs text-[var(--text-muted)]">
+          <div class="flex flex-wrap items-center gap-2 text-2xs text-[var(--color-fg-muted)]">
             <${CountBadge} tone=${entry.tone}>${entry.label}<//>
             <span>${entry.target}</span>
             <span>${entry.actor}</span>
             <span><${TimeAgo} timestamp=${entry.at} /></span>
           </div>
-          <div class="mt-2 text-sm leading-paragraph text-[var(--text-body)]">${entry.detail}</div>
+          <div class="mt-2 text-sm leading-paragraph text-[var(--color-fg-primary)]">${entry.detail}</div>
         </article>
       `)}
     </div>
@@ -210,19 +210,19 @@ export function Ops() {
 
   return html`
     <section class="flex flex-col gap-4">
-      ${operatorError.value ? html`<section class="ops-banner rounded py-3 px-3.5 border border-[var(--card-border)] error">${operatorError.value}</section>` : null}
-      ${operatorDigestError.value ? html`<section class="ops-banner rounded py-3 px-3.5 border border-[var(--card-border)] error">${operatorDigestError.value}</section>` : null}
+      ${operatorError.value ? html`<section class="ops-banner rounded py-3 px-3.5 border border-[var(--color-border-default)] error">${operatorError.value}</section>` : null}
+      ${operatorDigestError.value ? html`<section class="ops-banner rounded py-3 px-3.5 border border-[var(--color-border-default)] error">${operatorDigestError.value}</section>` : null}
 
       ${workflowContext ? html`
-        <section class="ops-banner rounded py-3 px-3.5 border border-[var(--card-border)] ${workflowReady ? 'info' : 'warn'} grid gap-2">
-          <div class="flex gap-2 flex-wrap items-center text-[var(--text-body)]">
+        <section class="ops-banner rounded py-3 px-3.5 border border-[var(--color-border-default)] ${workflowReady ? 'info' : 'warn'} grid gap-2">
+          <div class="flex gap-2 flex-wrap items-center text-[var(--color-fg-primary)]">
             <strong class="font-semibold">${workflowContext.source_label}</strong>
             <span>${workflowActionLabel(workflowContext.action_type)}</span>
             <span>${workflowTargetLabel(workflowContext)}</span>
           </div>
-          <div class="text-[var(--text-strong)] leading-relaxed">${workflowContext.summary}</div>
+          <div class="text-[var(--color-fg-secondary)] leading-relaxed">${workflowContext.summary}</div>
           ${workflowContext.payload_preview ? html`<div class="mt-1 p-2 rounded bg-[var(--white-3)] text-xs font-mono">${workflowContext.payload_preview}</div>` : null}
-          <div class="text-[var(--text-muted)] text-xs">
+          <div class="text-[var(--color-fg-muted)] text-xs">
             ${workflowReady
               ? '추천 액션 기준으로 대상 선택과 입력값을 미리 맞춰 두었습니다.'
               : '대상이 현재 snapshot에 없습니다. 일반 개입 화면으로 열렸고, 실제 대상 선택은 수동으로 해야 합니다.'}
@@ -239,8 +239,8 @@ export function Ops() {
 
         <section class="${CARD_STANDARD} grid gap-3 order-2 max-[1200px]:order-1">
           <div>
-            <h2 class="text-sm font-semibold text-[var(--text-strong)]">최근 운영 활동</h2>
-            <p class="mt-1 text-xs text-[var(--text-muted)]">최근 처리와 직접 개입을 시간순으로 함께 보여줍니다. 검토 큐와 Live Judge 판단은 거버넌스 페이지에서 처리합니다.</p>
+            <h2 class="text-sm font-semibold text-[var(--color-fg-secondary)]">최근 운영 활동</h2>
+            <p class="mt-1 text-xs text-[var(--color-fg-muted)]">최근 처리와 직접 개입을 시간순으로 함께 보여줍니다. 검토 큐와 Live Judge 판단은 거버넌스 페이지에서 처리합니다.</p>
           </div>
           <${renderActivityTimeline} />
         </section>

@@ -16,11 +16,11 @@ stylesheet
   .quiet {
     padding: 40px 20px;
     text-align: center;
-    border: 1px dashed var(--border-main);
+    border: 1px dashed var(--color-border-default);
     font-family: 'EB Garamond', serif;
     font-style: italic;
     font-size: 14px;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
   }
 
   .loop_list {
@@ -34,14 +34,14 @@ stylesheet
     grid-template-columns: 90px 1fr 120px 140px 90px;
     gap: 14px;
     padding: 12px 16px;
-    border: 1px solid var(--border-main);
-    background: linear-gradient(180deg, color-mix(in oklab, var(--bg-panel) 70%, transparent), color-mix(in oklab, var(--bg-deep) 85%, transparent));
+    border: 1px solid var(--color-border-default);
+    background: linear-gradient(180deg, color-mix(in oklab, var(--color-bg-surface) 70%, transparent), color-mix(in oklab, var(--color-bg-page) 85%, transparent));
     align-items: center;
     transition: border-color 120ms ease, background 120ms ease;
   }
   .loop:hover {
-    border-color: var(--border-highlight);
-    background: linear-gradient(180deg, color-mix(in oklab, var(--bg-card) 80%, transparent), color-mix(in oklab, var(--bg-deep) 90%, transparent));
+    border-color: var(--color-border-strong);
+    background: linear-gradient(180deg, color-mix(in oklab, var(--color-bg-elevated) 80%, transparent), color-mix(in oklab, var(--color-bg-page) 90%, transparent));
   }
 
   .pill {
@@ -51,18 +51,18 @@ stylesheet
     text-transform: uppercase;
     padding: 4px 8px;
     text-align: center;
-    border: 1px solid var(--border-main);
+    border: 1px solid var(--color-border-default);
     font-variant-numeric: tabular-nums;
   }
   .pill_running {
-    color: var(--status-ok);
-    border-color: var(--status-ok);
-    background: color-mix(in oklab, var(--status-ok) 12%, transparent);
+    color: var(--color-status-ok);
+    border-color: var(--color-status-ok);
+    background: color-mix(in oklab, var(--color-status-ok) 12%, transparent);
   }
   .pill_completed {
-    color: var(--accent-brass);
-    border-color: var(--accent-brass);
-    background: color-mix(in oklab, var(--accent-brass) 12%, transparent);
+    color: var(--color-accent-fg);
+    border-color: var(--color-accent-fg);
+    background: color-mix(in oklab, var(--color-accent-fg) 12%, transparent);
   }
   .pill_failed {
     color: var(--accent-blood);
@@ -70,23 +70,23 @@ stylesheet
     background: color-mix(in oklab, var(--accent-blood) 14%, transparent);
   }
   .pill_stopped {
-    color: var(--text-dim);
-    border-color: var(--border-main);
+    color: var(--color-fg-muted);
+    border-color: var(--color-border-default);
   }
   .pill_paused {
-    color: var(--status-warn);
-    border-color: var(--status-warn);
-    background: color-mix(in oklab, var(--accent-brass) 10%, transparent);
+    color: var(--color-status-warn);
+    border-color: var(--color-status-warn);
+    background: color-mix(in oklab, var(--color-accent-fg) 10%, transparent);
   }
   .pill_unknown {
-    color: var(--text-dim);
-    border-color: var(--border-main);
+    color: var(--color-fg-muted);
+    border-color: var(--color-border-default);
   }
 
   .goal {
     font-family: 'EB Garamond', serif;
     font-size: 14px;
-    color: var(--text-primary);
+    color: var(--color-fg-primary);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -95,7 +95,7 @@ stylesheet
   .goal_id {
     font-family: 'JetBrains Mono', ui-monospace, monospace;
     font-size: 11px;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
     letter-spacing: 0.06em;
     margin-right: 10px;
   }
@@ -114,24 +114,24 @@ stylesheet
     font-variant-numeric: tabular-nums;
     text-align: right;
   }
-  .cycle_dim { color: var(--text-dim); font-size: 11px; }
+  .cycle_dim { color: var(--color-fg-muted); font-size: 11px; }
 
   .kd {
     font-family: 'JetBrains Mono', ui-monospace, monospace;
     font-size: 11px;
     font-variant-numeric: tabular-nums;
-    color: var(--text-primary);
+    color: var(--color-fg-primary);
     text-align: right;
   }
-  .kd_keep { color: var(--status-ok); }
-  .kd_slash { color: var(--text-dim); margin: 0 4px; }
+  .kd_keep { color: var(--color-status-ok); }
+  .kd_slash { color: var(--color-fg-muted); margin: 0 4px; }
   .kd_disc { color: var(--accent-viscera); }
 
   .elapsed {
     font-family: 'JetBrains Mono', ui-monospace, monospace;
     font-size: 11px;
     font-variant-numeric: tabular-nums;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
     text-align: right;
   }
 

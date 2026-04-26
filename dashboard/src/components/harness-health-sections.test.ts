@@ -326,19 +326,19 @@ describe('emptyReasonText', () => {
 
 describe('verdictTone', () => {
   it('returns ok for approve', () => {
-    expect(verdictTone('approve')).toBe('bg-[var(--ok)]')
+    expect(verdictTone('approve')).toBe('bg-[var(--color-status-ok)]')
   })
 
   it('returns ok for approve:conditional', () => {
-    expect(verdictTone('approve:conditional')).toBe('bg-[var(--ok)]')
+    expect(verdictTone('approve:conditional')).toBe('bg-[var(--color-status-ok)]')
   })
 
   it('returns bad for reject', () => {
-    expect(verdictTone('reject')).toBe('bg-[var(--bad)]')
+    expect(verdictTone('reject')).toBe('bg-[var(--color-status-err)]')
   })
 
   it('returns bad for reject:vague notes', () => {
-    expect(verdictTone('reject:vague notes')).toBe('bg-[var(--bad)]')
+    expect(verdictTone('reject:vague notes')).toBe('bg-[var(--color-status-err)]')
   })
 })
 

@@ -35,11 +35,11 @@ export function MeasurementCard({ snapshot }: { snapshot: KeeperCompositeSnapsho
   const m = snapshot.measurement
   return html`
     <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] p-3">
-      <div class="text-3xs font-semibold uppercase tracking-1 text-[var(--text-muted)] mb-2">
+      <div class="text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)] mb-2">
         Measurement
       </div>
       ${m.captured && m.auto_rules ? html`
-        <div class="flex flex-col gap-1.5 text-2xs text-[var(--text-body)]">
+        <div class="flex flex-col gap-1.5 text-2xs text-[var(--color-fg-primary)]">
           <div class="flex flex-wrap gap-1.5 font-mono">
             <${Flag} label="reflect" on=${m.auto_rules.reflect} />
             <${Flag} label="plan" on=${m.auto_rules.plan} />
@@ -49,7 +49,7 @@ export function MeasurementCard({ snapshot }: { snapshot: KeeperCompositeSnapsho
           <div class="flex items-center gap-2 font-mono">
             <${Flag} label="guardrail" on=${m.auto_rules.guardrail_stop} tone="warn" />
             <span
-              class="text-3xs text-[var(--text-dim)] cursor-help"
+              class="text-3xs text-[var(--color-fg-disabled)] cursor-help"
               title="Goal drift: 0 = keeper is on-target; higher = keeper output is diverging from its declared goal. Values above ~0.5 typically trigger the guardrail."
             >drift ${m.auto_rules.goal_drift.toFixed(2)}</span>
           </div>
@@ -58,7 +58,7 @@ export function MeasurementCard({ snapshot }: { snapshot: KeeperCompositeSnapsho
           ` : null}
         </div>
       ` : html`
-        <div class="text-3xs text-[var(--text-dim)]">키퍼가 첫 턴을 완료하면 auto-rules가 여기 표시됩니다</div>
+        <div class="text-3xs text-[var(--color-fg-disabled)]">키퍼가 첫 턴을 완료하면 auto-rules가 여기 표시됩니다</div>
       `}
     </div>
   `
@@ -71,7 +71,7 @@ export function flagTooltip(label: string, on: boolean): string {
 }
 
 function Flag({ label, on, tone = 'ok' }: { label: string; on: boolean; tone?: 'ok' | 'warn' }) {
-  const offCls = 'text-[var(--text-dim)] border-[var(--white-8)]'
+  const offCls = 'text-[var(--color-fg-disabled)] border-[var(--white-8)]'
   const onCls =
     tone === 'warn'
       ? 'text-[var(--amber-bright)] border-[rgba(251,191,36,0.3)] bg-[var(--warn-8)]'
@@ -119,14 +119,14 @@ export function InvariantsPanel({
   return html`
     <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] p-3">
       <div class="flex items-center justify-between mb-2">
-        <div class="text-3xs font-semibold uppercase tracking-1 text-[var(--text-muted)]">
+        <div class="text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">
           Safety
         </div>
         <span
           class=${`rounded-sm border px-2 py-0.5 text-3xs font-mono tabular-nums ${
             allOk
               ? 'text-[var(--emerald)] border-[var(--emerald-30)] bg-[var(--emerald-8)]'
-              : 'text-[var(--bad)] border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.08)]'
+              : 'text-[var(--color-status-err)] border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.08)]'
           }`}
           title=${allOk
             ? `All ${total} keeper composite invariants hold.`
@@ -145,10 +145,10 @@ export function InvariantsPanel({
           const tooltip = `${entry.label} — ${entry.ok ? 'holds' : 'BROKEN'}\n${desc}${rate ? `\n누적: ${rate}` : ''}`
           return html`
             <li class="flex gap-2 text-3xs cursor-help" title=${tooltip}>
-              <span class=${`mt-[5px] h-1.5 w-1.5 rounded-full shrink-0 ${entry.ok ? 'bg-[var(--emerald)]' : 'bg-[var(--bad)]'}`}></span>
+              <span class=${`mt-[5px] h-1.5 w-1.5 rounded-full shrink-0 ${entry.ok ? 'bg-[var(--emerald)]' : 'bg-[var(--color-status-err)]'}`}></span>
               <div class="min-w-0 flex-1">
                 <div class="flex items-center gap-1.5">
-                  <span class=${entry.ok ? 'text-[var(--text-body)]' : 'text-[var(--bad-light)] font-semibold'}>
+                  <span class=${entry.ok ? 'text-[var(--color-fg-primary)]' : 'text-[var(--bad-light)] font-semibold'}>
                     ${entry.label}
                   </span>
                   ${vCount > 0 ? html`
@@ -157,7 +157,7 @@ export function InvariantsPanel({
                     </span>
                   ` : null}
                 </div>
-                <div class="text-4xs leading-relaxed text-[var(--text-dim)]">
+                <div class="text-4xs leading-relaxed text-[var(--color-fg-disabled)]">
                   ${entry.detail}
                 </div>
               </div>

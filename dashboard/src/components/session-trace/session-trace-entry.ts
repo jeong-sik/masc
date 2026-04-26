@@ -51,7 +51,7 @@ function HighlightedText({ text, query }: { text: string; query: string }) {
   return html`
     <span>${segments.map(seg =>
       seg.match
-        ? html`<mark class="bg-[rgba(99,102,241,0.25)] text-[var(--text-strong)] px-0.5 rounded">${seg.text}</mark>`
+        ? html`<mark class="bg-[rgba(99,102,241,0.25)] text-[var(--color-fg-secondary)] px-0.5 rounded">${seg.text}</mark>`
         : seg.text
     )}</span>
   `
@@ -69,10 +69,10 @@ interface KindStyle {
 
 const KIND_STYLES: Record<TraceEventKind, KindStyle> = {
   broadcast:  { icon: 'M', color: 'text-[var(--blue-400)]', label: '브로드캐스트' },
-  task:       { icon: 'T', color: 'text-[var(--accent)]', label: '태스크' },
-  tool_call:  { icon: '>', color: 'text-[var(--ok)]', label: '도구 호출' },
+  task:       { icon: 'T', color: 'text-[var(--color-accent-fg)]', label: '태스크' },
+  tool_call:  { icon: '>', color: 'text-[var(--color-status-ok)]', label: '도구 호출' },
   heartbeat:  { icon: 'H', color: 'text-[var(--slate-400)]', label: '하트비트' },
-  lifecycle:  { icon: 'L', color: 'text-[var(--warn)]', label: '생명주기' },
+  lifecycle:  { icon: 'L', color: 'text-[var(--color-status-warn)]', label: '생명주기' },
   thinking:   { icon: '\u{1F4AD}', color: 'text-[#c084fc]', label: '내부 사고' },
   oas_tool:   { icon: 'O', color: 'text-[var(--amber-bright)]', label: 'OAS 도구' },
   oas_turn:   { icon: 'R', color: 'text-[var(--rose-light)]', label: 'OAS 턴' },
@@ -91,12 +91,12 @@ function durableStyle(kind: unknown): { icon: string; color: string } | null {
   switch (kind) {
     case 'llm_request':      return { icon: '>', color: 'text-[var(--sky-400)]' }
     case 'llm_response':     return { icon: '<', color: 'text-[var(--cyan)]' }
-    case 'error_occurred':   return { icon: '!', color: 'text-[var(--bad)]' }
-    case 'tool_called':      return { icon: 't', color: 'text-[var(--ok)]' }
-    case 'tool_completed':   return { icon: 'x', color: 'text-[var(--ok)]' }
-    case 'state_transition': return { icon: '>', color: 'text-[var(--accent)]' }
+    case 'error_occurred':   return { icon: '!', color: 'text-[var(--color-status-err)]' }
+    case 'tool_called':      return { icon: 't', color: 'text-[var(--color-status-ok)]' }
+    case 'tool_completed':   return { icon: 'x', color: 'text-[var(--color-status-ok)]' }
+    case 'state_transition': return { icon: '>', color: 'text-[var(--color-accent-fg)]' }
     case 'checkpoint_saved': return { icon: '*', color: 'text-[var(--slate-400)]' }
-    case 'turn_started':     return { icon: 'r', color: 'text-[var(--warn)]' }
+    case 'turn_started':     return { icon: 'r', color: 'text-[var(--color-status-warn)]' }
     default: return null
   }
 }
@@ -122,9 +122,9 @@ function taskIcon(type: string): string {
 
 function taskColor(type: string): string {
   switch (type) {
-    case 'task_completed':  return 'text-[var(--ok)]'
-    case 'task_cancelled':  return 'text-[var(--bad)]'
-    default: return 'text-[var(--accent)]'
+    case 'task_completed':  return 'text-[var(--color-status-ok)]'
+    case 'task_cancelled':  return 'text-[var(--color-status-err)]'
+    default: return 'text-[var(--color-accent-fg)]'
   }
 }
 
@@ -167,14 +167,14 @@ function DiffBlock({ text }: { text: string }) {
     <div class="font-mono text-2xs leading-loose overflow-x-auto">
       ${lines.map((line: string) => {
         const cls =
-          line.startsWith('+') && !line.startsWith('+++') ? 'text-[var(--ok)] bg-[var(--ok-6)]'
-          : line.startsWith('-') && !line.startsWith('---') ? 'text-[var(--bad)] bg-[var(--bad-6)]'
-          : line.startsWith('@@') ? 'text-[var(--accent)] font-semibold'
-          : 'text-[var(--text-body)]'
+          line.startsWith('+') && !line.startsWith('+++') ? 'text-[var(--color-status-ok)] bg-[var(--ok-6)]'
+          : line.startsWith('-') && !line.startsWith('---') ? 'text-[var(--color-status-err)] bg-[var(--bad-6)]'
+          : line.startsWith('@@') ? 'text-[var(--color-accent-fg)] font-semibold'
+          : 'text-[var(--color-fg-primary)]'
         return html`<div class="${cls} px-2 min-h-[1.6em]">${line || ' '}</div>`
       })}
       ${truncatedCount > 0 ? html`
-        <div class="px-2 py-2 text-[var(--text-muted)] italic text-center border-t border-[var(--white-6)]">
+        <div class="px-2 py-2 text-[var(--color-fg-muted)] italic text-center border-t border-[var(--white-6)]">
           ... ${truncatedCount} lines truncated for performance ...
         </div>
       ` : null}
@@ -190,7 +190,7 @@ function ResultViewer({ text, hint, isError: isErr }: { text: string; hint: Cont
   const shouldCollapse = needsCollapse && !expanded.value
 
   const titleLabel = isErr ? 'Error' : 'Result'
-  const titleColor = isErr ? 'text-[var(--bad)]' : 'text-[var(--text-muted)]'
+  const titleColor = isErr ? 'text-[var(--color-status-err)]' : 'text-[var(--color-fg-muted)]'
   const borderColor = isErr ? 'border-[var(--bad-20)]' : 'border-[var(--white-8)]'
   const bgColor = isErr ? 'bg-[var(--bad-6)]' : 'bg-[var(--white-3)]'
 
@@ -203,7 +203,7 @@ function ResultViewer({ text, hint, isError: isErr }: { text: string; hint: Cont
       <div class="flex items-center justify-between mb-1">
         <span class="text-3xs font-semibold uppercase tracking-wider ${titleColor}">${titleLabel}</span>
         ${hint !== 'plain' ? html`
-          <span class="text-3xs px-1.5 py-0.5 rounded bg-[var(--white-5)] text-[var(--text-dim)] uppercase">${hint}</span>
+          <span class="text-3xs px-1.5 py-0.5 rounded bg-[var(--white-5)] text-[var(--color-fg-disabled)] uppercase">${hint}</span>
         ` : null}
       </div>
       <div class="rounded border ${borderColor} ${bgColor} overflow-hidden">
@@ -211,7 +211,7 @@ function ResultViewer({ text, hint, isError: isErr }: { text: string; hint: Cont
              style=${shouldCollapse ? `max-height: ${RESULT_COLLAPSED_MAX_HEIGHT}px` : ''}>
           ${hint === 'diff' ? html`<${DiffBlock} text=${text} />`
             : hint === 'json' ? html`<${JsonViewerCard} title=${titleLabel} data=${parseJsonLikeData(text)} />`
-            : html`<pre class="m-0 text-2xs font-mono ${isErr ? 'text-[var(--bad)]' : 'text-[var(--text-body)]'} p-3 overflow-x-auto whitespace-pre-wrap break-all leading-relaxed">${displayText}</pre>`}
+            : html`<pre class="m-0 text-2xs font-mono ${isErr ? 'text-[var(--color-status-err)]' : 'text-[var(--color-fg-primary)]'} p-3 overflow-x-auto whitespace-pre-wrap break-all leading-relaxed">${displayText}</pre>`}
           ${shouldCollapse ? html`
             <div class="absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t ${isErr ? 'from-[rgba(239,68,68,0.08)]' : 'from-[var(--white-3)]'} to-transparent pointer-events-none"></div>
           ` : null}
@@ -219,7 +219,7 @@ function ResultViewer({ text, hint, isError: isErr }: { text: string; hint: Cont
         ${needsCollapse ? html`
           <button
             type="button"
-            class="w-full py-1.5 text-3xs font-medium text-[var(--accent)] hover:text-[var(--text-strong)] hover:bg-[var(--white-5)] transition-colors cursor-pointer border-t border-[var(--white-6)] bg-transparent"
+            class="w-full py-1.5 text-3xs font-medium text-[var(--color-accent-fg)] hover:text-[var(--color-fg-secondary)] hover:bg-[var(--white-5)] transition-colors cursor-pointer border-t border-[var(--white-6)] bg-transparent"
             onClick=${() => { expanded.value = !expanded.value }}
           >
             ${expanded.value ? '접기' : `전체 보기 (${text.split('\n').length}줄)`}
@@ -241,7 +241,7 @@ function ToolCallDetail({ event }: { event: UnifiedTraceEvent }) {
     <div class="mt-2 space-y-2">
       ${event.toolArgs ? html`
         <div>
-          <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">Args</div>
+          <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mb-1">Args</div>
           <${JsonViewerCard} title="Args" data=${parseJsonLikeData(event.toolArgs)} />
         </div>
       ` : null}
@@ -249,19 +249,19 @@ function ToolCallDetail({ event }: { event: UnifiedTraceEvent }) {
         <${ResultViewer} text=${resultText} hint=${hint} isError=${Boolean(event.error)} />
       ` : null}
       ${gateRejected ? html`
-        <div class="text-3xs px-2 py-1 rounded bg-[var(--bad-10)] text-[var(--bad)] inline-block">
+        <div class="text-3xs px-2 py-1 rounded bg-[var(--bad-10)] text-[var(--color-status-err)] inline-block">
           거부: ${event.gate?.reason ?? ''}
         </div>
       ` : null}
       ${!event.toolArgs && !resultText && !gateRejected ? html`
-        <div class="text-3xs text-[var(--text-dim)] italic px-2 py-1">
+        <div class="text-3xs text-[var(--color-fg-disabled)] italic px-2 py-1">
           세부 정보가 기록되지 않았습니다.
         </div>
       ` : null}
       ${'' /* Metadata row */}
       ${event.cost_usd != null && event.cost_usd > 0 ? html`
-        <div class="flex gap-3 text-3xs text-[var(--text-dim)]">
-          <span>비용: <span class="font-mono text-[var(--accent)]">$${event.cost_usd.toFixed(4)}</span></span>
+        <div class="flex gap-3 text-3xs text-[var(--color-fg-disabled)]">
+          <span>비용: <span class="font-mono text-[var(--color-accent-fg)]">$${event.cost_usd.toFixed(4)}</span></span>
           ${event.duration_ms != null ? html`<span>소요: <span class="font-mono ${durationColor(event.duration_ms)}">${formatDuration(event.duration_ms)}</span></span>` : null}
         </div>
       ` : null}
@@ -285,10 +285,10 @@ function TaskDetail({ event }: { event: UnifiedTraceEvent }) {
   const title = typeof d.title === 'string' ? d.title : null
   const notes = typeof d.completion_notes === 'string' ? d.completion_notes : null
   return html`
-    <div class="mt-2 text-xs text-[var(--text-body)] space-y-1 px-3 py-2 bg-[var(--white-3)] rounded">
-      ${taskId ? html`<div><span class="text-[var(--text-dim)]">ID:</span> <span class="font-mono">${taskId}</span></div>` : null}
-      ${title ? html`<div><span class="text-[var(--text-dim)]">제목:</span> ${title}</div>` : null}
-      ${notes ? html`<div><span class="text-[var(--text-dim)]">노트:</span> ${notes}</div>` : null}
+    <div class="mt-2 text-xs text-[var(--color-fg-primary)] space-y-1 px-3 py-2 bg-[var(--white-3)] rounded">
+      ${taskId ? html`<div><span class="text-[var(--color-fg-disabled)]">ID:</span> <span class="font-mono">${taskId}</span></div>` : null}
+      ${title ? html`<div><span class="text-[var(--color-fg-disabled)]">제목:</span> ${title}</div>` : null}
+      ${notes ? html`<div><span class="text-[var(--color-fg-disabled)]">노트:</span> ${notes}</div>` : null}
     </div>
   `
 }
@@ -305,7 +305,7 @@ function ThinkingDetail({ event }: { event: UnifiedTraceEvent }) {
   if (!content) return null
   return html`
     <div class="mt-2 px-3 py-2 rounded bg-[rgba(192,132,252,0.04)] border border-[rgba(192,132,252,0.12)]">
-      <div class="text-sm leading-relaxed text-[var(--text-body)]">
+      <div class="text-sm leading-relaxed text-[var(--color-fg-primary)]">
         <${Markdown} text=${content} />
       </div>
     </div>
@@ -320,16 +320,16 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
     const phase = typeof d.phase === 'string' ? d.phase : ''
     const toolName = typeof d.tool_name === 'string' ? d.tool_name : 'unknown'
     const phaseLabel = phase === 'called' ? '호출' : phase === 'completed' ? '완료' : phase
-    const phaseColor = phase === 'called' ? 'text-[var(--accent)]' : 'text-[var(--ok)]'
+    const phaseColor = phase === 'called' ? 'text-[var(--color-accent-fg)]' : 'text-[var(--color-status-ok)]'
     return html`
       <div class="mt-2 px-3 py-2 rounded bg-[var(--white-3)] border border-[var(--white-6)] space-y-1">
         <div class="flex items-center gap-2 text-xs">
-          <span class="text-[var(--text-dim)]">단계:</span>
+          <span class="text-[var(--color-fg-disabled)]">단계:</span>
           <span class="font-mono font-semibold ${phaseColor}">${phaseLabel}</span>
         </div>
         <div class="flex items-center gap-2 text-xs">
-          <span class="text-[var(--text-dim)]">도구:</span>
-          <span class="font-mono text-[var(--text-body)]">${toolName}</span>
+          <span class="text-[var(--color-fg-disabled)]">도구:</span>
+          <span class="font-mono text-[var(--color-fg-primary)]">${toolName}</span>
         </div>
       </div>
     `
@@ -343,8 +343,8 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
     return html`
       <div class="mt-2 px-3 py-2 rounded bg-[var(--white-3)] border border-[var(--white-6)]">
         <div class="flex items-center gap-2 text-xs">
-          <span class="text-[var(--text-dim)]">턴 ${turn != null ? String(turn) : '-'}:</span>
-          <span class="font-mono font-semibold text-[var(--text-body)]">${phaseLabel}</span>
+          <span class="text-[var(--color-fg-disabled)]">턴 ${turn != null ? String(turn) : '-'}:</span>
+          <span class="font-mono font-semibold text-[var(--color-fg-primary)]">${phaseLabel}</span>
         </div>
       </div>
     `
@@ -360,9 +360,9 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
     return html`
       <div class="mt-2 px-3 py-2 rounded bg-[var(--sky-4)] border border-[rgba(56,189,248,0.15)] space-y-2">
         <div class="flex items-center gap-3 text-xs">
-          ${before != null ? html`<span><span class="text-[var(--text-dim)]">Before:</span> <span class="font-mono">${before.toLocaleString()}</span></span>` : null}
-          <span class="text-[var(--text-dim)]">→</span>
-          ${after != null ? html`<span><span class="text-[var(--text-dim)]">After:</span> <span class="font-mono">${after.toLocaleString()}</span></span>` : null}
+          ${before != null ? html`<span><span class="text-[var(--color-fg-disabled)]">Before:</span> <span class="font-mono">${before.toLocaleString()}</span></span>` : null}
+          <span class="text-[var(--color-fg-disabled)]">→</span>
+          ${after != null ? html`<span><span class="text-[var(--color-fg-disabled)]">After:</span> <span class="font-mono">${after.toLocaleString()}</span></span>` : null}
         </div>
         ${saved != null && saved > 0 ? html`
           <div class="flex items-center gap-2">
@@ -376,7 +376,7 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
             <span class="text-3xs font-mono text-[var(--sky-400)]">-${saved.toLocaleString()}tok (${(ratio ?? 0).toFixed(0)}%)</span>
           </div>
         ` : null}
-        ${compactPhase ? html`<div class="text-3xs text-[var(--text-dim)]">단계: ${compactPhase}</div>` : null}
+        ${compactPhase ? html`<div class="text-3xs text-[var(--color-fg-disabled)]">단계: ${compactPhase}</div>` : null}
       </div>
     `
   }
@@ -391,9 +391,9 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
     return html`
       <div class="mt-2 px-3 py-2 rounded bg-[var(--sky-4)] border border-[rgba(56,189,248,0.12)] space-y-1">
         <div class="flex items-center gap-3 text-xs">
-          <span><span class="text-[var(--text-dim)]">모델:</span> <span class="font-mono">${model}</span></span>
-          <span><span class="text-[var(--text-dim)]">입력:</span> <span class="font-mono">${inputTokens.toLocaleString()}tok</span></span>
-          ${turn != null ? html`<span><span class="text-[var(--text-dim)]">턴:</span> <span class="font-mono">${String(turn)}</span></span>` : null}
+          <span><span class="text-[var(--color-fg-disabled)]">모델:</span> <span class="font-mono">${model}</span></span>
+          <span><span class="text-[var(--color-fg-disabled)]">입력:</span> <span class="font-mono">${inputTokens.toLocaleString()}tok</span></span>
+          ${turn != null ? html`<span><span class="text-[var(--color-fg-disabled)]">턴:</span> <span class="font-mono">${String(turn)}</span></span>` : null}
         </div>
       </div>
     `
@@ -405,19 +405,19 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
     const durationMs = typeof d.duration_ms === 'number' ? d.duration_ms : null
     const turn = d.turn
     const responseText = typeof d.response_text === 'string' ? d.response_text : ''
-    const stopColor = stopReason === 'end_turn' || stopReason === 'stop' ? 'text-[var(--ok)]' : 'text-[var(--warn)]'
+    const stopColor = stopReason === 'end_turn' || stopReason === 'stop' ? 'text-[var(--color-status-ok)]' : 'text-[var(--color-status-warn)]'
     return html`
       <div class="mt-2 px-3 py-2 rounded bg-[rgba(34,211,238,0.04)] border border-[var(--cyan-12)] space-y-1">
         <div class="flex items-center gap-3 text-xs flex-wrap">
-          <span><span class="text-[var(--text-dim)]">출력:</span> <span class="font-mono">${outputTokens.toLocaleString()}tok</span></span>
-          <span><span class="text-[var(--text-dim)]">종료:</span> <span class="font-mono ${stopColor}">${stopReason}</span></span>
-          ${durationMs != null ? html`<span><span class="text-[var(--text-dim)]">소요:</span> <span class="font-mono ${durationColor(durationMs)}">${formatDuration(durationMs)}</span></span>` : null}
-          ${turn != null ? html`<span><span class="text-[var(--text-dim)]">턴:</span> <span class="font-mono">${String(turn)}</span></span>` : null}
+          <span><span class="text-[var(--color-fg-disabled)]">출력:</span> <span class="font-mono">${outputTokens.toLocaleString()}tok</span></span>
+          <span><span class="text-[var(--color-fg-disabled)]">종료:</span> <span class="font-mono ${stopColor}">${stopReason}</span></span>
+          ${durationMs != null ? html`<span><span class="text-[var(--color-fg-disabled)]">소요:</span> <span class="font-mono ${durationColor(durationMs)}">${formatDuration(durationMs)}</span></span>` : null}
+          ${turn != null ? html`<span><span class="text-[var(--color-fg-disabled)]">턴:</span> <span class="font-mono">${String(turn)}</span></span>` : null}
         </div>
         ${responseText ? html`
           <details class="mt-1">
-            <summary class="text-3xs text-[var(--text-dim)] cursor-pointer hover:text-[var(--text-body)]">응답 텍스트</summary>
-            <pre class="mt-1 p-2 rounded bg-[var(--white-3)] text-2xs font-mono text-[var(--text-body)] whitespace-pre-wrap break-all max-h-75 overflow-auto">${responseText}</pre>
+            <summary class="text-3xs text-[var(--color-fg-disabled)] cursor-pointer hover:text-[var(--color-fg-primary)]">응답 텍스트</summary>
+            <pre class="mt-1 p-2 rounded bg-[var(--white-3)] text-2xs font-mono text-[var(--color-fg-primary)] whitespace-pre-wrap break-all max-h-75 overflow-auto">${responseText}</pre>
           </details>
         ` : null}
       </div>
@@ -429,8 +429,8 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
     const errorDetail = typeof d.detail === 'string' ? d.detail : ''
     return html`
       <div class="mt-2 px-3 py-2 rounded bg-[var(--bad-6)] border border-[var(--bad-soft)] space-y-1">
-        <div class="text-xs"><span class="text-[var(--text-dim)]">도메인:</span> <span class="font-mono text-[var(--bad)]">${domain}</span></div>
-        ${errorDetail ? html`<div class="text-2xs font-mono text-[var(--text-body)] break-all">${errorDetail}</div>` : null}
+        <div class="text-xs"><span class="text-[var(--color-fg-disabled)]">도메인:</span> <span class="font-mono text-[var(--color-status-err)]">${domain}</span></div>
+        ${errorDetail ? html`<div class="text-2xs font-mono text-[var(--color-fg-primary)] break-all">${errorDetail}</div>` : null}
       </div>
     `
   }
@@ -444,8 +444,8 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
     <div class="mt-2 grid gap-1.5 px-3 py-2 rounded bg-[var(--white-3)] border border-[var(--white-6)]">
       ${detailRows.map(row => html`
         <div class="flex items-start gap-2 text-xs leading-relaxed">
-          <span class="min-w-[92px] text-[var(--text-dim)] font-mono">${row.label}</span>
-          <span class="text-[var(--text-body)] font-mono break-all">${row.value}</span>
+          <span class="min-w-[92px] text-[var(--color-fg-disabled)] font-mono">${row.label}</span>
+          <span class="text-[var(--color-fg-primary)] font-mono break-all">${row.value}</span>
         </div>
       `)}
     </div>
@@ -497,31 +497,31 @@ export function SessionTraceEntry({ event, searchQuery }: { event: UnifiedTraceE
           ${event.kind === 'tool_call' && event.toolName
             ? html`<span class="text-xs font-mono font-medium ${style.color}">${event.toolName}</span>`
             : html`<span class="text-3xs font-medium uppercase tracking-wider ${kindStyle.color}">${kindStyle.label}</span>`}
-          <span class="text-3xs px-1.5 py-0.5 rounded bg-[var(--white-5)] text-[var(--text-dim)] uppercase tracking-wider">
+          <span class="text-3xs px-1.5 py-0.5 rounded bg-[var(--white-5)] text-[var(--color-fg-disabled)] uppercase tracking-wider">
             ${event.sourceLane === 'oas' ? 'OAS' : 'MASC'}
           </span>
           ${event.turn != null ? html`
-            <span class="text-3xs text-[var(--text-dim)]">
+            <span class="text-3xs text-[var(--color-fg-disabled)]">
               T${event.turn}${event.round != null ? `R${event.round}` : ''}
             </span>
           ` : null}
-          ${event.sessionId ? html`<span class="text-3xs text-[var(--text-dim)] font-mono">S ${event.sessionId}</span>` : null}
-          ${event.operationId ? html`<span class="text-3xs text-[var(--text-dim)] font-mono">OP ${event.operationId}</span>` : null}
-          ${event.workerRunId ? html`<span class="text-3xs text-[var(--text-dim)] font-mono">WR ${event.workerRunId}</span>` : null}
+          ${event.sessionId ? html`<span class="text-3xs text-[var(--color-fg-disabled)] font-mono">S ${event.sessionId}</span>` : null}
+          ${event.operationId ? html`<span class="text-3xs text-[var(--color-fg-disabled)] font-mono">OP ${event.operationId}</span>` : null}
+          ${event.workerRunId ? html`<span class="text-3xs text-[var(--color-fg-disabled)] font-mono">WR ${event.workerRunId}</span>` : null}
           ${event.kind === 'task' ? html`
             <span class="text-3xs font-bold uppercase tracking-wider ${taskColor(String(event.detail.type))} bg-[var(--white-5)] px-1.5 py-0.5 rounded">
               ${taskIcon(String(event.detail.type))}
             </span>
           ` : null}
           ${event.error
-            ? html`<span class="text-3xs px-1.5 py-0.5 rounded bg-[var(--bad-10)] text-[var(--bad)]">오류</span>`
+            ? html`<span class="text-3xs px-1.5 py-0.5 rounded bg-[var(--bad-10)] text-[var(--color-status-err)]">오류</span>`
             : gateRejected
-              ? html`<span class="text-3xs px-1.5 py-0.5 rounded bg-[var(--bad-10)] text-[var(--bad)]">거부</span>`
+              ? html`<span class="text-3xs px-1.5 py-0.5 rounded bg-[var(--bad-10)] text-[var(--color-status-err)]">거부</span>`
               : event.kind === 'tool_call'
-                ? html`<span class="text-3xs px-1.5 py-0.5 rounded bg-[rgba(52,211,153,0.1)] text-[var(--ok)]">완료</span>`
+                ? html`<span class="text-3xs px-1.5 py-0.5 rounded bg-[rgba(52,211,153,0.1)] text-[var(--color-status-ok)]">완료</span>`
                 : null}
         </div>
-        <div class="mt-0.5 text-2xs text-[var(--text-muted)] font-mono truncate max-w-full" title=${event.summary}>
+        <div class="mt-0.5 text-2xs text-[var(--color-fg-muted)] font-mono truncate max-w-full" title=${event.summary}>
           <${HighlightedText} text=${summaryText} query=${searchQuery ?? ''} />
         </div>
       </div>
@@ -531,7 +531,7 @@ export function SessionTraceEntry({ event, searchQuery }: { event: UnifiedTraceE
         ${event.duration_ms != null ? html`
           <span class="text-2xs font-mono ${durationColor(event.duration_ms)}">${formatDuration(event.duration_ms)}</span>
         ` : null}
-        <${TimeAgo} timestamp=${event.ts_iso} class="text-3xs text-[var(--text-dim)]" />
+        <${TimeAgo} timestamp=${event.ts_iso} class="text-3xs text-[var(--color-fg-disabled)]" />
       </div>
     </div>
   `
@@ -543,7 +543,7 @@ export function SessionTraceEntry({ event, searchQuery }: { event: UnifiedTraceE
       <summary class="list-none cursor-pointer relative pr-8">
         ${row}
         <div class="absolute right-3 top-1/2 -translate-y-1/2 opacity-40 group-hover:opacity-100 transition-opacity">
-          <svg class="w-4 h-4 text-[var(--text-muted)] group-open:rotate-90 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg class="w-4 h-4 text-[var(--color-fg-muted)] group-open:rotate-90 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
           </svg>
         </div>

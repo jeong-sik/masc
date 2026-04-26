@@ -109,6 +109,6 @@ describe('Checkbox', () => {
     const cn = container.querySelector('input')!.className
     // Accent + rounded are part of CHECKBOX_BASE; regression would strip them.
     expect(cn).toContain('rounded')
-    expect(cn).toContain('accent-[var(--accent)]')
+    expect(cn).toContain('accent-[var(--color-accent-fg)]')
   })
 })

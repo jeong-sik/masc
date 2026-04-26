@@ -293,7 +293,7 @@ export function Observatory() {
               type="button"
               class="inline-flex items-center gap-1.5 rounded border px-2.5 py-1 text-2xs font-medium transition-colors ${
                 liveMode.value
-                  ? 'border-[var(--ok-20)] bg-[var(--ok-10)] text-[var(--ok)]'
+                  ? 'border-[var(--ok-20)] bg-[var(--ok-10)] text-[var(--color-status-ok)]'
                   : 'border-card-border text-text-muted hover:text-text-strong hover:bg-white/5'
               }"
               onClick=${() => {
@@ -315,7 +315,7 @@ export function Observatory() {
       </div>
 
       ${activeView.value === 'timeline' && data.error ? html`
-        <div class="rounded border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs text-[var(--warn)]">
+        <div class="rounded border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs text-[var(--color-status-warn)]">
           일부 데이터 불러오기 실패: ${data.error}
         </div>
       ` : null}

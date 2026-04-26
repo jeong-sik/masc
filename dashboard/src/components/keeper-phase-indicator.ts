@@ -46,17 +46,17 @@ const SOFT_GLOW = '0 0 8px color-mix(in srgb, currentColor 25%, transparent)'
 const STRONG_GLOW = '0 0 10px color-mix(in srgb, currentColor 32%, transparent)'
 
 const PHASE_STYLES: Record<KeeperPhase, PhaseStyle> = {
-  Offline:    { label: '오프라인',     color: 'var(--text-muted)', bg: 'var(--white-5)',   border: 'var(--white-10)',   glow: 'none',        icon: '○' },
-  Running:    { label: '실행중',       color: 'var(--ok)',         bg: 'var(--ok-10)',     border: 'var(--ok-20)',      glow: SOFT_GLOW,     icon: '●' },
-  Failing:    { label: '오류중',       color: 'var(--warn)',       bg: 'var(--warn-10)',   border: 'var(--warn-20)',    glow: SOFT_GLOW,     icon: '▲' },
-  Overflowed: { label: '컨텍스트초과', color: 'var(--warn)',       bg: 'var(--warn-10)',   border: 'var(--warn-20)',    glow: SOFT_GLOW,     icon: '⚠' },
-  Compacting: { label: '압축중',       color: 'var(--accent)',     bg: 'var(--accent-10)', border: 'var(--accent-20)',  glow: SOFT_GLOW,     icon: '◆' },
-  HandingOff: { label: '승계중',       color: 'var(--accent)',     bg: 'var(--accent-10)', border: 'var(--accent-20)',  glow: SOFT_GLOW,     icon: '⟳' },
-  Draining:   { label: '종료중',       color: 'var(--accent)',     bg: 'var(--accent-10)', border: 'var(--accent-20)',  glow: SOFT_GLOW,     icon: '▽' },
+  Offline:    { label: '오프라인',     color: 'var(--color-fg-muted)', bg: 'var(--white-5)',   border: 'var(--white-10)',   glow: 'none',        icon: '○' },
+  Running:    { label: '실행중',       color: 'var(--color-status-ok)',         bg: 'var(--ok-10)',     border: 'var(--ok-20)',      glow: SOFT_GLOW,     icon: '●' },
+  Failing:    { label: '오류중',       color: 'var(--color-status-warn)',       bg: 'var(--warn-10)',   border: 'var(--warn-20)',    glow: SOFT_GLOW,     icon: '▲' },
+  Overflowed: { label: '컨텍스트초과', color: 'var(--color-status-warn)',       bg: 'var(--warn-10)',   border: 'var(--warn-20)',    glow: SOFT_GLOW,     icon: '⚠' },
+  Compacting: { label: '압축중',       color: 'var(--color-accent-fg)',     bg: 'var(--accent-10)', border: 'var(--accent-20)',  glow: SOFT_GLOW,     icon: '◆' },
+  HandingOff: { label: '승계중',       color: 'var(--color-accent-fg)',     bg: 'var(--accent-10)', border: 'var(--accent-20)',  glow: SOFT_GLOW,     icon: '⟳' },
+  Draining:   { label: '종료중',       color: 'var(--color-accent-fg)',     bg: 'var(--accent-10)', border: 'var(--accent-20)',  glow: SOFT_GLOW,     icon: '▽' },
   Paused:     { label: '일시정지',     color: 'var(--paused)',     bg: 'var(--paused-10)', border: 'var(--paused-20)',  glow: 'none',        icon: '⏸' },
-  Stopped:    { label: '정지',         color: 'var(--text-muted)', bg: 'var(--white-5)',   border: 'var(--white-10)',   glow: 'none',        icon: '■' },
+  Stopped:    { label: '정지',         color: 'var(--color-fg-muted)', bg: 'var(--white-5)',   border: 'var(--white-10)',   glow: 'none',        icon: '■' },
   Crashed:    { label: '비정상종료',   color: 'var(--bad-light)',  bg: 'var(--bad-10)',    border: 'var(--bad-20)',     glow: STRONG_GLOW,   icon: '✕' },
-  Restarting: { label: '재시작중',     color: 'var(--accent)',     bg: 'var(--accent-10)', border: 'var(--accent-20)',  glow: SOFT_GLOW,     icon: '↺' },
+  Restarting: { label: '재시작중',     color: 'var(--color-accent-fg)',     bg: 'var(--accent-10)', border: 'var(--accent-20)',  glow: SOFT_GLOW,     icon: '↺' },
   Dead:       { label: '종료',         color: 'var(--bad-light)',  bg: 'var(--bad-10)',    border: 'var(--bad-20)',     glow: 'none',        icon: '✦' },
 }
 
@@ -117,10 +117,10 @@ export function KeeperPhaseAndStage({
     <div class="flex items-center gap-2">
       <${KeeperPhaseBadge} phase=${phase} />
       ${dwellText ? html`
-        <span class="text-3xs text-[var(--text-muted)] font-mono tracking-tight" title="현재 phase에 머문 시간">· ${dwellText}</span>
+        <span class="text-3xs text-[var(--color-fg-muted)] font-mono tracking-tight" title="현재 phase에 머문 시간">· ${dwellText}</span>
       ` : null}
       ${stageLabel ? html`
-        <span class="text-3xs text-[var(--text-dim)] font-mono tracking-tight opacity-80">${stageLabel}</span>
+        <span class="text-3xs text-[var(--color-fg-disabled)] font-mono tracking-tight opacity-80">${stageLabel}</span>
       ` : null}
     </div>
   `

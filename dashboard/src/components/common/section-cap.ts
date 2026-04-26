@@ -20,9 +20,9 @@
 // Tone tokens resolve through the Tailwind v4 `@theme` (tokens.css):
 //   text-text-muted → var(--color-text-muted)
 //   text-text-dim   → var(--color-text-dim)
-// Using the generated utility instead of `text-[var(--text-muted)]`
+// Using the generated utility instead of `text-[var(--color-fg-muted)]`
 // keeps purge predictable, autocomplete honest, and fixes the
-// `text-text-muted` / `text-[var(--text-muted)]` / `text-[var(--text-muted)]`
+// `text-text-muted` / `text-[var(--color-fg-muted)]` / `text-[var(--color-fg-muted)]`
 // trident drift the audit surfaced.
 //
 // NOT a replacement for:

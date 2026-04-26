@@ -26,7 +26,7 @@ stylesheet
   {|
   .chart { display: grid; grid-template-columns: 140px 1fr; }
   .meta {
-    border-right: 1px solid var(--border-main);
+    border-right: 1px solid var(--color-border-default);
     padding: 10px 14px;
     display: flex;
     flex-direction: column;
@@ -36,14 +36,14 @@ stylesheet
     font-size: 11px;
     letter-spacing: 0.22em;
     text-transform: uppercase;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
   }
   .meta_v {
     font-family: 'JetBrains Mono', ui-monospace, monospace;
     font-size: 11px;
     letter-spacing: 0.08em;
     text-transform: none;
-    color: var(--text-primary);
+    color: var(--color-fg-primary);
   }
   .track {
     position: relative;
@@ -60,11 +60,11 @@ stylesheet
     right: 8px;
     font-family: 'JetBrains Mono', ui-monospace, monospace;
     font-size: 11px;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
     pointer-events: none;
   }
-  .lbl_warn { top: 22px; color: color-mix(in oklab, var(--accent-brass) 80%, var(--text-dim)); }
-  .lbl_dang { top: 6px;  color: color-mix(in oklab, var(--accent-blood) 80%, var(--text-dim)); }
+  .lbl_warn { top: 22px; color: color-mix(in oklab, var(--color-accent-fg) 80%, var(--color-fg-muted)); }
+  .lbl_dang { top: 6px;  color: color-mix(in oklab, var(--accent-blood) 80%, var(--color-fg-muted)); }
 
   @media (prefers-contrast: more) {
     .meta { border-right-width: 2px; border-right-color: var(--text-bright); color: var(--text-bright); }
@@ -126,7 +126,7 @@ let hairline ~x =
       ; svg_a "y1" "0"
       ; svg_a "x2" (Printf.sprintf "%d" x)
       ; svg_a "y2" "100"
-      ; svg_a "stroke" "var(--border-main)"
+      ; svg_a "stroke" "var(--color-border-default)"
       ; svg_a "stroke-width" "1"
       ; svg_a "opacity" "0.5"
       ; svg_a "vector-effect" "non-scaling-stroke"
@@ -208,7 +208,7 @@ let meta_lines_of (ks : Keepers_types.keeper list) : string list =
 let view ?(keepers : Keepers_types.response = Keepers_types.fixture) () =
   let hairlines = List.init 7 ~f:(fun i -> hairline ~x:(i * 100)) in
   let guides =
-    [ guide ~y:25 ~stroke_var:"var(--accent-brass-dim)" (* 75% warn  *)
+    [ guide ~y:25 ~stroke_var:"var(--color-accent-fg-dim)" (* 75% warn  *)
     ; guide ~y:10 ~stroke_var:"var(--accent-blood)"     (* 90% danger *)
     ]
   in

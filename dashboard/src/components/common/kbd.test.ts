@@ -13,14 +13,14 @@ describe('kbdClasses (pure)', () => {
     const cls = kbdClasses('md')
     expect(cls).toContain('text-3xs')
     expect(cls).toContain('px-1.5')
-    expect(cls).toContain('text-[var(--text-body)]')
+    expect(cls).toContain('text-[var(--color-fg-primary)]')
   })
 
   it('sm variant: 10px text + tight padding (px-1 py-0) + dimmed color', () => {
     const cls = kbdClasses('sm')
     expect(cls).toContain('text-3xs')
     expect(cls).toContain('px-1')
-    expect(cls).toContain('text-[var(--text-dim)]')
+    expect(cls).toContain('text-[var(--color-fg-disabled)]')
   })
 
   it('extra class is appended (caller composition)', () => {

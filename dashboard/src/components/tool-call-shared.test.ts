@@ -145,27 +145,27 @@ describe('summarizeEntries', () => {
 
 describe('durationColor', () => {
   it('returns ok for fast (< 500ms)', () => {
-    expect(durationColor(100)).toBe('text-[var(--ok)]')
+    expect(durationColor(100)).toBe('text-[var(--color-status-ok)]')
   })
 
   it('returns ok for just under threshold', () => {
-    expect(durationColor(499)).toBe('text-[var(--ok)]')
+    expect(durationColor(499)).toBe('text-[var(--color-status-ok)]')
   })
 
   it('returns warn for medium (500-1999ms)', () => {
-    expect(durationColor(500)).toBe('text-[var(--warn)]')
+    expect(durationColor(500)).toBe('text-[var(--color-status-warn)]')
   })
 
   it('returns warn for just under slow threshold', () => {
-    expect(durationColor(1999)).toBe('text-[var(--warn)]')
+    expect(durationColor(1999)).toBe('text-[var(--color-status-warn)]')
   })
 
   it('returns bad for slow (>= 2000ms)', () => {
-    expect(durationColor(2000)).toBe('text-[var(--bad)]')
+    expect(durationColor(2000)).toBe('text-[var(--color-status-err)]')
   })
 
   it('returns bad for very slow', () => {
-    expect(durationColor(10000)).toBe('text-[var(--bad)]')
+    expect(durationColor(10000)).toBe('text-[var(--color-status-err)]')
   })
 })
 

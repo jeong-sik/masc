@@ -93,14 +93,14 @@ export function PersonaGenerator() {
     <div class="grid gap-4 lg:grid-cols-[minmax(260px,0.9fr)_minmax(360px,1.2fr)]">
       <div class="space-y-3">
         <div class="grid gap-2">
-          <label class="text-3xs text-[var(--text-muted)]" for="persona-concept">컨셉</label>
+          <label class="text-3xs text-[var(--color-fg-muted)]" for="persona-concept">컨셉</label>
           <textarea
             id="persona-concept"
             rows=${5}
             value=${concept.value}
             placeholder="good evil chaos research keeper"
             onInput=${(e: Event) => { concept.value = (e.target as HTMLTextAreaElement).value }}
-            class="w-full rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-2 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+            class="w-full rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-2 text-2xs text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
           />
         </div>
 
@@ -119,35 +119,35 @@ export function PersonaGenerator() {
         ` : null}
 
         <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          <label class="grid gap-1 text-3xs text-[var(--text-muted)]">
+          <label class="grid gap-1 text-3xs text-[var(--color-fg-muted)]">
             handle
             <input
               value=${handle.value}
               placeholder="auto"
               onInput=${(e: Event) => { handle.value = (e.target as HTMLInputElement).value }}
-              class="rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1.5 text-2xs text-[var(--text-body)] focus:outline-none focus:border-[var(--accent)]"
+              class="rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1.5 text-2xs text-[var(--color-fg-primary)] focus:outline-none focus:border-[var(--color-accent-fg)]"
             />
           </label>
-          <label class="grid gap-1 text-3xs text-[var(--text-muted)]">
+          <label class="grid gap-1 text-3xs text-[var(--color-fg-muted)]">
             display
             <input
               value=${displayName.value}
               placeholder="auto"
               onInput=${(e: Event) => { displayName.value = (e.target as HTMLInputElement).value }}
-              class="rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1.5 text-2xs text-[var(--text-body)] focus:outline-none focus:border-[var(--accent)]"
+              class="rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1.5 text-2xs text-[var(--color-fg-primary)] focus:outline-none focus:border-[var(--color-accent-fg)]"
             />
           </label>
-          <label class="grid gap-1 text-3xs text-[var(--text-muted)]">
+          <label class="grid gap-1 text-3xs text-[var(--color-fg-muted)]">
             preset
             <select
               value=${toolPreset.value}
               onChange=${(e: Event) => { toolPreset.value = (e.target as HTMLSelectElement).value }}
-              class="rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1.5 text-2xs text-[var(--text-body)] focus:outline-none focus:border-[var(--accent)]"
+              class="rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1.5 text-2xs text-[var(--color-fg-primary)] focus:outline-none focus:border-[var(--color-accent-fg)]"
             >
               ${presetChoices.map(choice => html`<option key=${choice} value=${choice}>${choice}</option>`)}
             </select>
           </label>
-          <label class="flex items-center gap-2 pt-5 text-2xs text-[var(--text-body)]">
+          <label class="flex items-center gap-2 pt-5 text-2xs text-[var(--color-fg-primary)]">
             <input
               type="checkbox"
               checked=${proactiveEnabled.value}
@@ -178,7 +178,7 @@ export function PersonaGenerator() {
             ariaBusy=${personaSaving.value}
             onClick=${() => void saveDraft(false)}
           >${personaSaving.value ? '저장 중...' : '저장'}<//>
-          <label class="flex items-center gap-1.5 text-3xs text-[var(--text-muted)]">
+          <label class="flex items-center gap-1.5 text-3xs text-[var(--color-fg-muted)]">
             <input
               type="checkbox"
               checked=${overwrite.value}
@@ -190,7 +190,7 @@ export function PersonaGenerator() {
 
         ${schema ? html`
           <div class="rounded border border-[var(--white-10)] bg-[var(--white-4)]">
-            <div class="border-b border-[var(--white-10)] px-2 py-1.5 text-3xs text-[var(--text-muted)]">
+            <div class="border-b border-[var(--white-10)] px-2 py-1.5 text-3xs text-[var(--color-fg-muted)]">
               ${schema.personasRoot ?? ''} · ${schema.handleRules ?? ''}
             </div>
             <div class="max-h-56 overflow-auto">
@@ -198,9 +198,9 @@ export function PersonaGenerator() {
                 <tbody>
                   ${schema.fieldCatalog.map(field => html`
                     <tr key=${field.path} class="border-b border-[var(--white-6)] align-top">
-                      <td class="px-2 py-1.5 font-mono text-[var(--accent)] whitespace-nowrap">${field.path}</td>
-                      <td class="px-2 py-1.5 text-[var(--text-muted)]">${field.type ?? ''}${field.required ? ' *' : ''}</td>
-                      <td class="px-2 py-1.5 text-[var(--text-body)]">${field.effect ?? ''}</td>
+                      <td class="px-2 py-1.5 font-mono text-[var(--color-accent-fg)] whitespace-nowrap">${field.path}</td>
+                      <td class="px-2 py-1.5 text-[var(--color-fg-muted)]">${field.type ?? ''}${field.required ? ' *' : ''}</td>
+                      <td class="px-2 py-1.5 text-[var(--color-fg-primary)]">${field.effect ?? ''}</td>
                     </tr>
                   `)}
                 </tbody>
@@ -213,8 +213,8 @@ export function PersonaGenerator() {
       <div class="space-y-3">
         <div class="grid gap-2">
           <div class="flex items-center justify-between">
-            <label class="text-3xs text-[var(--text-muted)]" for="persona-profile-json">profile.json</label>
-            ${draft ? html`<span class="text-3xs text-[var(--text-muted)]">${draft.handle}</span>` : null}
+            <label class="text-3xs text-[var(--color-fg-muted)]" for="persona-profile-json">profile.json</label>
+            ${draft ? html`<span class="text-3xs text-[var(--color-fg-muted)]">${draft.handle}</span>` : null}
           </div>
           <textarea
             id="persona-profile-json"
@@ -222,7 +222,7 @@ export function PersonaGenerator() {
             value=${profileText.value}
             placeholder="초안을 생성하면 profile.json이 표시됩니다"
             onInput=${(e: Event) => { profileText.value = (e.target as HTMLTextAreaElement).value }}
-            class="w-full rounded border border-[var(--white-10)] bg-[var(--bg-0)] px-2 py-2 font-mono text-3xs leading-5 text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+            class="w-full rounded border border-[var(--white-10)] bg-[var(--bg-0)] px-2 py-2 font-mono text-3xs leading-5 text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
           />
         </div>
 
@@ -230,8 +230,8 @@ export function PersonaGenerator() {
           <div class="rounded border border-[var(--white-10)] bg-[var(--white-4)]">
             ${draft.fieldExplanations.map(item => html`
               <div key=${item.path} class="grid grid-cols-[minmax(120px,0.35fr)_1fr] gap-2 border-b border-[var(--white-6)] px-2 py-1.5 text-3xs">
-                <span class="font-mono text-[var(--accent)]">${item.path}</span>
-                <span class="text-[var(--text-body)]">${item.effect ?? prettyValue(item.value)}</span>
+                <span class="font-mono text-[var(--color-accent-fg)]">${item.path}</span>
+                <span class="text-[var(--color-fg-primary)]">${item.effect ?? prettyValue(item.value)}</span>
               </div>
             `)}
           </div>
@@ -251,12 +251,12 @@ export function PersonaGenerator() {
             onClick=${() => draft && void spawnKeeperFromPersona(draft.handle)}
           >키퍼 시작<//>
           ${saveResult?.profilePath ? html`
-            <span class="self-center text-3xs text-[var(--text-muted)]">${saveResult.profilePath}</span>
+            <span class="self-center text-3xs text-[var(--color-fg-muted)]">${saveResult.profilePath}</span>
           ` : null}
         </div>
 
         ${personaAuthoringResult.value ? html`
-          <pre class="max-h-48 overflow-auto rounded border border-[var(--white-10)] bg-[var(--white-4)] p-2 text-3xs ${personaAuthoringResult.value.success ? 'text-[var(--text-body)]' : 'text-[var(--bad)]'}">${personaAuthoringResult.value.message}</pre>
+          <pre class="max-h-48 overflow-auto rounded border border-[var(--white-10)] bg-[var(--white-4)] p-2 text-3xs ${personaAuthoringResult.value.success ? 'text-[var(--color-fg-primary)]' : 'text-[var(--color-status-err)]'}">${personaAuthoringResult.value.message}</pre>
         ` : null}
       </div>
     </div>

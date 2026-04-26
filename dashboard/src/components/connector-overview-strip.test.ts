@@ -413,7 +413,7 @@ describe('TilePrimaryAction component (rendered inside ConnectorOverviewStrip)',
     expect(btn).toBeTruthy()
     expect(btn.getAttribute('data-tile-primary-action-tone')).toBe('start')
     expect(btn.textContent?.trim()).toBe('▶ Start')
-    expect(btn.className).toContain('var(--ok)')
+    expect(btn.className).toContain('var(--color-status-ok)')
   })
 
   it('renders a Stop button (bad) for an up sidecar', () => {
@@ -767,7 +767,7 @@ describe('TileErrorNotice component (rendered inside ConnectorOverviewStrip)', (
     )
     const notice = container.querySelector('[data-tile-notice="stale"]') as HTMLElement
     expect(notice.textContent).toContain('Stale')
-    expect(notice.className).toContain('var(--warn)')
+    expect(notice.className).toContain('var(--color-status-warn)')
   })
 
   it('renders nothing when connector is clean (no ribbon clutter)', () => {

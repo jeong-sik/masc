@@ -90,12 +90,12 @@ const safeAutonomy: AsyncResource<SafeAutonomyData> = createAsyncResource()
 function statusTone(status: DomainStatus): string {
   switch (status) {
     case 'pass':
-      return 'border-[var(--ok-30)] bg-[var(--ok-12)] text-[var(--ok)]'
+      return 'border-[var(--ok-30)] bg-[var(--ok-12)] text-[var(--color-status-ok)]'
     case 'warn':
-      return 'border-[var(--warn-30)] bg-[var(--warn-12)] text-[var(--warn)]'
+      return 'border-[var(--warn-30)] bg-[var(--warn-12)] text-[var(--color-status-warn)]'
     case 'fail':
     default:
-      return 'border-[var(--bad-30)] bg-[var(--bad-12)] text-[var(--bad)]'
+      return 'border-[var(--bad-30)] bg-[var(--bad-12)] text-[var(--color-status-err)]'
   }
 }
 
@@ -214,14 +214,14 @@ function DomainCard({ item }: { item: ScorecardItem }) {
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0">
           <div class="flex items-center gap-2">
-            <div class="text-sm font-semibold text-[var(--text-strong)]">${item.label}</div>
+            <div class="text-sm font-semibold text-[var(--color-fg-secondary)]">${item.label}</div>
             <${StatusPill} status=${item.status} />
           </div>
-          <div class="mt-1 text-xs text-[var(--text-muted)]">${item.summary}</div>
+          <div class="mt-1 text-xs text-[var(--color-fg-muted)]">${item.summary}</div>
         </div>
         <div class="text-right">
-          <div class="text-lg font-semibold text-[var(--text-strong)]">${item.score.toFixed(1)}</div>
-          <div class="text-3xs uppercase tracking-wide text-[var(--text-muted)]">
+          <div class="text-lg font-semibold text-[var(--color-fg-secondary)]">${item.score.toFixed(1)}</div>
+          <div class="text-3xs uppercase tracking-wide text-[var(--color-fg-muted)]">
             weight ${item.weight ?? 0}
           </div>
         </div>
@@ -236,21 +236,21 @@ function KeeperCard({ item }: { item: KeeperItem }) {
       <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div class="min-w-0">
           <div class="flex items-center gap-2">
-            <div class="text-sm font-semibold text-[var(--text-strong)]">${item.name}</div>
+            <div class="text-sm font-semibold text-[var(--color-fg-secondary)]">${item.name}</div>
             <${StatusPill} status=${item.status} />
           </div>
-          <div class="mt-1 text-xs text-[var(--text-muted)]">
+          <div class="mt-1 text-xs text-[var(--color-fg-muted)]">
             ${item.agent_name} · ${item.sandbox_profile}/${item.sandbox_backend} · ${item.network_mode}
           </div>
-          <div class="mt-2 text-sm text-[var(--text-body)]">${item.goal || 'goal 없음'}</div>
-          <div class="mt-2 flex flex-wrap gap-2 text-3xs text-[var(--text-muted)]">
+          <div class="mt-2 text-sm text-[var(--color-fg-primary)]">${item.goal || 'goal 없음'}</div>
+          <div class="mt-2 flex flex-wrap gap-2 text-3xs text-[var(--color-fg-muted)]">
             ${item.active_goal_ids.map(goalId => html`
               <span class="rounded border border-[var(--white-10)] bg-[var(--white-6)] px-2 py-0.5">${goalId}</span>
             `)}
           </div>
           ${item.last_blocker
             ? html`
-              <div class="mt-3 rounded border border-[var(--warn-30)] bg-[var(--warn-12)] px-3 py-2 text-xs text-[var(--warn)]">
+              <div class="mt-3 rounded border border-[var(--warn-30)] bg-[var(--warn-12)] px-3 py-2 text-xs text-[var(--color-status-warn)]">
                 blocker: ${item.last_blocker}
               </div>
             `
@@ -280,16 +280,16 @@ function FindingsList({ findings }: { findings: FindingItem[] }) {
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
               <div class="flex flex-wrap items-center gap-2">
-                <code class="text-3xs text-[var(--text-muted)]">${item.reason_code}</code>
+                <code class="text-3xs text-[var(--color-fg-muted)]">${item.reason_code}</code>
                 <${StatusPill} status=${item.severity} />
-                ${item.keeper_name ? html`<span class="text-3xs text-[var(--text-muted)]">${item.keeper_name}</span>` : null}
+                ${item.keeper_name ? html`<span class="text-3xs text-[var(--color-fg-muted)]">${item.keeper_name}</span>` : null}
               </div>
-              <div class="mt-1 text-sm text-[var(--text-strong)]">${item.summary}</div>
-              <div class="mt-1 text-xs text-[var(--text-muted)]">${item.suggested_next_action}</div>
+              <div class="mt-1 text-sm text-[var(--color-fg-secondary)]">${item.summary}</div>
+              <div class="mt-1 text-xs text-[var(--color-fg-muted)]">${item.suggested_next_action}</div>
             </div>
             ${item.human_action_required
               ? html`
-                <span class="rounded border border-[var(--bad-30)] bg-[var(--bad-12)] px-2 py-1 text-3xs font-semibold uppercase tracking-wide text-[var(--bad)]">
+                <span class="rounded border border-[var(--bad-30)] bg-[var(--bad-12)] px-2 py-1 text-3xs font-semibold uppercase tracking-wide text-[var(--color-status-err)]">
                   human
                 </span>
               `
@@ -311,12 +311,12 @@ function TimelineList({ timeline }: { timeline: TimelineItem[] }) {
         <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2">
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
-              <div class="text-xs text-[var(--text-strong)]">${item.summary}</div>
-              <div class="mt-1 text-3xs text-[var(--text-muted)]">
+              <div class="text-xs text-[var(--color-fg-secondary)]">${item.summary}</div>
+              <div class="mt-1 text-3xs text-[var(--color-fg-muted)]">
                 ${item.kind}${item.keeper_name ? ` · ${item.keeper_name}` : ''}
               </div>
             </div>
-            <div class="shrink-0 text-3xs text-[var(--text-muted)]">
+            <div class="shrink-0 text-3xs text-[var(--color-fg-muted)]">
               ${item.ts_iso ? formatTimeAgo(item.ts_iso) : '정보 없음'}
             </div>
           </div>
@@ -342,20 +342,20 @@ export function SafeAutonomyPanel() {
               <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-4">
                 <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                   <div class="max-w-3xl">
-                    <div class="text-2xs font-semibold uppercase tracking-1 text-[var(--text-muted)]">
+                    <div class="text-2xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">
                       Advisory Truth Layer
                     </div>
                     <div class="mt-2 flex items-center gap-2">
-                      <div class="text-2xl font-semibold text-[var(--text-strong)]">
+                      <div class="text-2xl font-semibold text-[var(--color-fg-secondary)]">
                         ${data.summary.global_score.toFixed(1)}
                       </div>
                       <${StatusPill} status=${data.summary.status} />
                     </div>
-                    <div class="mt-2 text-sm leading-paragraph text-[var(--text-body)]">
+                    <div class="mt-2 text-sm leading-paragraph text-[var(--color-fg-primary)]">
                       Tool correctness, sandbox truth, approval gates, cascade/FSM gracefulness,
                       audit trail completeness를 keeper별로 한 번에 보여줍니다.
                     </div>
-                    <div class="mt-2 text-3xs text-[var(--text-muted)]">
+                    <div class="mt-2 text-3xs text-[var(--color-fg-muted)]">
                       generated ${data.generated_at ? formatTimeAgo(data.generated_at) : '정보 없음'}
                     </div>
                   </div>

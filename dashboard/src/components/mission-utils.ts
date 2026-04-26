@@ -51,7 +51,7 @@ export function liveStateClass(status?: string | null, health?: string | null): 
 
 /** Tailwind bg override for the status dot based on live state */
 export function dotStateBg(stateClass: string): string {
-  if (stateClass === 'mission-state-idle') return 'bg-[var(--warn)]'
+  if (stateClass === 'mission-state-idle') return 'bg-[var(--color-status-warn)]'
   if (stateClass === 'mission-state-offline') return 'bg-[#555]'
   return ''
 }

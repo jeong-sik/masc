@@ -25,13 +25,13 @@ type ToolCategoryEntry = {
 const TOOL_CATEGORIES: ToolCategoryEntry[] = [
   // Shell / Bash — execution tools
   { match: n => n.includes('bash') || n.includes('shell'),
-    icon: '>', color: 'text-[var(--ok)]', label: 'shell' },
+    icon: '>', color: 'text-[var(--color-status-ok)]', label: 'shell' },
   // Git / GitHub / Worktree — version control
   { match: n => n.includes('github') || n.includes('git') || n.includes('worktree'),
-    icon: 'G', color: 'text-[var(--accent)]', label: 'git' },
+    icon: 'G', color: 'text-[var(--color-accent-fg)]', label: 'git' },
   // File write / edit — mutations
   { match: n => n.includes('edit') || n.includes('write') || n.includes('delete'),
-    icon: 'E', color: 'text-[var(--warn)]', label: 'edit' },
+    icon: 'E', color: 'text-[var(--color-status-warn)]', label: 'edit' },
   // File read / filesystem
   { match: n => n.includes('fs_read') || n.includes('code_read'),
     icon: 'F', color: 'text-[var(--purple)]', label: 'file' },
@@ -49,7 +49,7 @@ const TOOL_CATEGORIES: ToolCategoryEntry[] = [
     icon: 'W', color: 'text-[var(--sky-400)]', label: 'web' },
   // Coordination — tasks, transitions, heartbeat
   { match: n => n.includes('task') || n.includes('transition') || n.includes('claim') || n.includes('heartbeat') || n.includes('broadcast'),
-    icon: 'C', color: 'text-[var(--warn)]', label: 'coord' },
+    icon: 'C', color: 'text-[var(--color-status-warn)]', label: 'coord' },
   // Memory — recall, context, memory search
   { match: n => n.includes('memory') || n.includes('recall') || n.includes('context'),
     icon: 'M', color: 'text-[#34d399]', label: 'memory' },
@@ -98,9 +98,9 @@ export function summarizeEntries(entries: Array<{ duration_ms?: number; error?: 
 }
 
 export function durationColor(ms: number): string {
-  if (ms < DURATION_FAST_MS) return 'text-[var(--ok)]'
-  if (ms < DURATION_SLOW_MS) return 'text-[var(--warn)]'
-  return 'text-[var(--bad)]'
+  if (ms < DURATION_FAST_MS) return 'text-[var(--color-status-ok)]'
+  if (ms < DURATION_SLOW_MS) return 'text-[var(--color-status-warn)]'
+  return 'text-[var(--color-status-err)]'
 }
 
 export function formatArgs(args: Record<string, unknown> | string): string {

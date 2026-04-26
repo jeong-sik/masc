@@ -315,8 +315,8 @@ export function keepersWithUnknownCanonical(
 function KeeperChip({ row }: { row: KeeperCascadeRow }) {
   const base = 'rounded border px-2 py-0.5 text-xs flex items-center gap-1'
   const borderTone = row.drift
-    ? 'border-[var(--warn)] text-[var(--text-strong)]'
-    : 'border-[var(--card-border)] text-[var(--text-strong)]'
+    ? 'border-[var(--color-status-warn)] text-[var(--color-fg-secondary)]'
+    : 'border-[var(--color-border-default)] text-[var(--color-fg-secondary)]'
   return html`
     <span
       class=${`${base} ${borderTone}`}
@@ -326,7 +326,7 @@ function KeeperChip({ row }: { row: KeeperCascadeRow }) {
     >
       <span class="font-semibold">${row.keeper}</span>
       ${row.drift
-        ? html`<code class="text-3xs text-[var(--text-muted)]">${row.raw_cascade_name}</code>`
+        ? html`<code class="text-3xs text-[var(--color-fg-muted)]">${row.raw_cascade_name}</code>`
         : null}
     </span>
   `
@@ -371,16 +371,16 @@ function ProfileCard({
   }
 
   return html`
-    <article class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] p-3">
+    <article class="rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] p-3">
       <header class="flex items-center gap-2 mb-2 flex-wrap">
-        <span class="font-semibold text-[var(--text-strong)]">${profile.name}</span>
+        <span class="font-semibold text-[var(--color-fg-secondary)]">${profile.name}</span>
         <${StatusChip} tone=${sourceTone(profile.source)}>
           ${sourceLabel(profile.source)}
         <//>
         ${!profile.keeper_assignable
           ? html`<${StatusChip} tone="neutral" uppercase=${false}>manual/system-only<//>`
           : null}
-        <span class="text-xs text-[var(--text-muted)]">
+        <span class="text-xs text-[var(--color-fg-muted)]">
           ${profileSummaryText(profile, keepers)}
         </span>
         ${driftCount > 0
@@ -388,7 +388,7 @@ function ProfileCard({
           : null}
       </header>
       ${assignmentNote
-        ? html`<div class="text-xs text-[var(--text-muted)] mb-2">${assignmentNote}</div>`
+        ? html`<div class="text-xs text-[var(--color-fg-muted)] mb-2">${assignmentNote}</div>`
         : null}
       ${keepers.length > 0
         ? html`
@@ -400,12 +400,12 @@ function ProfileCard({
       ${profile.keeper_assignable
         ? html`
           <form
-            class="rounded border border-[var(--card-border)] bg-[var(--bg-panel)] p-2 mb-3"
+            class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-2 mb-3"
             onSubmit=${handleAssignKeeper}
           >
             <div class="flex items-center gap-2 flex-wrap mb-2">
-              <span class="text-xs font-medium text-[var(--text-strong)]">Keeper assignment</span>
-              <span class="text-xs text-[var(--text-muted)]">
+              <span class="text-xs font-medium text-[var(--color-fg-secondary)]">Keeper assignment</span>
+              <span class="text-xs text-[var(--color-fg-muted)]">
                 current profile로 keeper를 이동합니다.
               </span>
             </div>
@@ -413,7 +413,7 @@ function ProfileCard({
               ? html`
                 <div class="flex items-center gap-2 flex-wrap">
                   <select
-                    class="min-w-44 rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--text-strong)]"
+                    class="min-w-44 rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--color-fg-secondary)]"
                     value=${selectedKeeper.value}
                     disabled=${assigning.value}
                     onChange=${(event: Event) => {
@@ -435,7 +435,7 @@ function ProfileCard({
                 </div>
               `
               : html`
-                <div class="text-xs text-[var(--text-muted)]">
+                <div class="text-xs text-[var(--color-fg-muted)]">
                   currently known keepers are already assigned to this profile.
                 </div>
               `}
@@ -445,7 +445,7 @@ function ProfileCard({
                   class=${`mt-2 text-xs ${
                     assignmentMessage.value.startsWith('Failed')
                       ? 'text-[var(--bad-light)]'
-                      : 'text-[var(--text-muted)]'
+                      : 'text-[var(--color-fg-muted)]'
                   }`}
                 >
                   ${assignmentMessage.value}
@@ -456,7 +456,7 @@ function ProfileCard({
         `
         : null}
       ${profile.candidates.length === 0
-        ? html`<div class="text-xs text-[var(--text-muted)]">no candidates resolved</div>`
+        ? html`<div class="text-xs text-[var(--color-fg-muted)]">no candidates resolved</div>`
         : html`
           <ol class="flex flex-col gap-1 text-xs">
             ${profile.candidates.map((c, idx) => {
@@ -465,27 +465,27 @@ function ProfileCard({
               const displayProvider = c.display_provider_name ?? c.provider_name ?? null
               const runtimeLabel = runtimeKindLabel(c.runtime_kind)
               return html`
-              <li class="flex items-start gap-2 py-1 border-b border-[var(--card-border)] last:border-b-0">
-                <span class="tabular-nums text-[var(--text-muted)] w-5">${idx + 1}.</span>
+              <li class="flex items-start gap-2 py-1 border-b border-[var(--color-border-default)] last:border-b-0">
+                <span class="tabular-nums text-[var(--color-fg-muted)] w-5">${idx + 1}.</span>
                 <${StatusChip} tone=${candidateTone(c)}>
                   ${c.in_cooldown ? 'cooldown' : fmtPct(c.success_rate)}
                 <//>
                 <div class="flex-1 min-w-0">
                   <div class="flex items-center gap-2 flex-wrap">
-                    <code class="text-[var(--text-strong)]">${displayModel}</code>
+                    <code class="text-[var(--color-fg-secondary)]">${displayModel}</code>
                     ${displayProvider
-                      ? html`<span class="text-[var(--text-muted)]">${displayProvider}</span>`
+                      ? html`<span class="text-[var(--color-fg-muted)]">${displayProvider}</span>`
                       : null}
                     ${runtimeLabel
-                      ? html`<span class="text-[var(--text-muted)]">${runtimeLabel}</span>`
+                      ? html`<span class="text-[var(--color-fg-muted)]">${runtimeLabel}</span>`
                       : null}
                   </div>
                   ${c.model !== displayModel
-                    ? html`<div class="text-[11px] text-[var(--text-muted)] mt-0.5">config: <code>${c.model}</code></div>`
+                    ? html`<div class="text-[11px] text-[var(--color-fg-muted)] mt-0.5">config: <code>${c.model}</code></div>`
                     : null}
                   ${expanded.length > 1
                     ? html`
-                      <ol class="mt-1 flex flex-col gap-0.5 text-[11px] text-[var(--text-muted)]">
+                      <ol class="mt-1 flex flex-col gap-0.5 text-[11px] text-[var(--color-fg-muted)]">
                         ${expanded.map((model, expandedIdx) => html`
                           <li><span class="tabular-nums">${expandedIdx + 1}.</span> <code>${model}</code></li>
                         `)}
@@ -493,7 +493,7 @@ function ProfileCard({
                     `
                     : null}
                 </div>
-                <span class="tabular-nums text-[var(--text-muted)]">
+                <span class="tabular-nums text-[var(--color-fg-muted)]">
                   w ${c.config_weight}${c.effective_weight === c.config_weight ? '' : ` → ${c.effective_weight}`}
                 </span>
               </li>
@@ -507,20 +507,20 @@ function ProfileCard({
 function OrphanKeeperList({ orphans }: { orphans: readonly CascadeKeeperProfile[] }) {
   if (orphans.length === 0) return null
   return html`
-    <div class="rounded border border-[var(--warn)] bg-[var(--bg-0)] p-3 text-xs">
-      <div class="font-semibold text-[var(--text-strong)] mb-1">
+    <div class="rounded border border-[var(--color-status-warn)] bg-[var(--bg-0)] p-3 text-xs">
+      <div class="font-semibold text-[var(--color-fg-secondary)] mb-1">
         등록된 프로필 없음 (${orphans.length})
       </div>
-      <div class="text-[var(--text-muted)] mb-2">
+      <div class="text-[var(--color-fg-muted)] mb-2">
         아래 keeper 는 canonical cascade 가 현재 profile 목록에 없어 해당 cascade 로 라우팅할 수 없습니다.
       </div>
       <ul class="flex flex-col gap-1">
         ${orphans.map(o => html`
           <li class="flex gap-2">
-            <span class="font-semibold text-[var(--text-strong)]">${o.keeper}</span>
+            <span class="font-semibold text-[var(--color-fg-secondary)]">${o.keeper}</span>
             <code>${o.cascade_name}</code>
-            <span class="text-[var(--text-muted)]">→</span>
-            <code class="text-[var(--warn)]">${o.canonical}</code>
+            <span class="text-[var(--color-fg-muted)]">→</span>
+            <code class="text-[var(--color-status-warn)]">${o.canonical}</code>
           </li>
         `)}
       </ul>
@@ -535,10 +535,10 @@ function InvalidProfileSummary({
   const extraErrors = Math.max(0, invalidProfile.errors.length - 1)
   return html`
     <li class="flex flex-wrap items-start gap-2">
-      <code class="text-[var(--text-strong)]">${invalidProfile.name}</code>
-      <span class="text-[var(--text-muted)]">${firstError}</span>
+      <code class="text-[var(--color-fg-secondary)]">${invalidProfile.name}</code>
+      <span class="text-[var(--color-fg-muted)]">${firstError}</span>
       ${extraErrors > 0
-        ? html`<span class="text-[var(--text-muted)]">+${extraErrors} more</span>`
+        ? html`<span class="text-[var(--color-fg-muted)]">+${extraErrors} more</span>`
         : null}
     </li>
   `
@@ -548,33 +548,33 @@ function CascadeValidationBanner({ config }: { config: CascadeConfigResponse }) 
   if (config.validation_status === 'validated') return null
   const tone = validationTone(config.validation_status)
   const boxTone = tone === 'bad'
-    ? 'border-[var(--bad)]/40 bg-[var(--bad)]/10'
-    : 'border-[var(--warn)]/40 bg-[var(--warn)]/10'
+    ? 'border-[var(--color-status-err)]/40 bg-[var(--color-status-err)]/10'
+    : 'border-[var(--color-status-warn)]/40 bg-[var(--color-status-warn)]/10'
   const visibleErrors = config.validation_errors.slice(0, 3)
   const visibleProfiles = config.invalid_profiles.slice(0, 4)
   return html`
     <div class=${`rounded border ${boxTone} p-3 text-xs mb-3`}>
       <div class="flex items-center gap-2 flex-wrap mb-2">
         <${StatusChip} tone=${tone}>${validationLabel(config.validation_status)}<//>
-        <span class="text-[var(--text-muted)]">
+        <span class="text-[var(--color-fg-muted)]">
           ${config.invalid_profiles.length} invalid profile${config.invalid_profiles.length === 1 ? '' : 's'}
           · ${config.validation_errors.length} error${config.validation_errors.length === 1 ? '' : 's'}
         </span>
       </div>
-      <div class="text-[var(--text-strong)] mb-2">
+      <div class="text-[var(--color-fg-secondary)] mb-2">
         ${validationDescription(config.validation_status)}
       </div>
       ${visibleErrors.length > 0
         ? html`
-          <ul class="flex flex-col gap-1 mb-2 text-[var(--text-muted)]">
+          <ul class="flex flex-col gap-1 mb-2 text-[var(--color-fg-muted)]">
             ${visibleErrors.map(error => html`<li>${error}</li>`)}
           </ul>
         `
         : null}
       ${visibleProfiles.length > 0
         ? html`
-          <div class="text-[var(--text-strong)] mb-1">거부된 프로파일</div>
-          <ul class="flex flex-col gap-1 text-[var(--text-muted)]">
+          <div class="text-[var(--color-fg-secondary)] mb-1">거부된 프로파일</div>
+          <ul class="flex flex-col gap-1 text-[var(--color-fg-muted)]">
             ${visibleProfiles.map(invalidProfile => html`
               <${InvalidProfileSummary} invalidProfile=${invalidProfile} />
             `)}
@@ -583,7 +583,7 @@ function CascadeValidationBanner({ config }: { config: CascadeConfigResponse }) 
         : null}
       ${config.invalid_profiles.length > visibleProfiles.length
         ? html`
-          <div class="mt-2 text-[var(--text-muted)]">
+          <div class="mt-2 text-[var(--color-fg-muted)]">
             + ${config.invalid_profiles.length - visibleProfiles.length} more invalid profiles
           </div>
         `
@@ -680,9 +680,9 @@ export function filterHealthProviders(
 }
 
 const TONE_DOT: Record<string, string> = {
-  ok: 'bg-[var(--ok)]',
-  warn: 'bg-[var(--warn)]',
-  bad: 'bg-[var(--bad)]',
+  ok: 'bg-[var(--color-status-ok)]',
+  warn: 'bg-[var(--color-status-warn)]',
+  bad: 'bg-[var(--color-status-err)]',
 }
 
 function HealthTable({
@@ -705,15 +705,15 @@ function HealthTable({
         onInput=${(e: Event) => { searchQuery.value = (e.target as HTMLInputElement).value }}
       />
       ${isFiltering
-        ? html`<span class="text-xs text-[var(--text-muted)]">${filtered.length}/${health.providers.length}건</span>`
+        ? html`<span class="text-xs text-[var(--color-fg-muted)]">${filtered.length}/${health.providers.length}건</span>`
         : null}
     </div>
     ${isFiltering && filtered.length === 0
-      ? html`<div class="py-4 text-center text-2xs text-[var(--text-muted)]">필터 결과 없음 (${health.providers.length} providers)</div>`
+      ? html`<div class="py-4 text-center text-2xs text-[var(--color-fg-muted)]">필터 결과 없음 (${health.providers.length} providers)</div>`
       : html`
         <table class="w-full text-xs">
           <thead>
-            <tr class="text-[var(--text-muted)] border-b border-[var(--card-border)]">
+            <tr class="text-[var(--color-fg-muted)] border-b border-[var(--color-border-default)]">
               <th class="text-left py-1 w-4"></th>
               <th class="text-left py-1">제공자</th>
               <th
@@ -754,26 +754,26 @@ function HealthTable({
               // too old to carry the field — don't decorate in that case.
               const orphaned = p.declared === false
               return html`
-              <tr class="border-b border-[var(--card-border)] last:border-b-0">
+              <tr class="border-b border-[var(--color-border-default)] last:border-b-0">
                 <td class="py-1"><span class=${`inline-block w-2 h-2 rounded-full ${TONE_DOT[tone]}`}></span></td>
                 <td class="py-1">
-                  <code class="text-[var(--text-strong)]">${p.provider_key}</code>
+                  <code class="text-[var(--color-fg-secondary)]">${p.provider_key}</code>
                   ${orphaned
-                    ? html`<span class="ml-1 text-2xs text-[var(--warn)]" title="Provider was tracked but is no longer declared in cascade.json">orphan</span>`
+                    ? html`<span class="ml-1 text-2xs text-[var(--color-status-warn)]" title="Provider was tracked but is no longer declared in cascade.json">orphan</span>`
                     : null}
                 </td>
                 <td class="py-1">
                   ${status
                     ? html`<${StatusChip} tone=${providerStatusTone(status)} uppercase=${false}>${status}<//>`
-                    : html`<span class="text-[var(--text-muted)]">—</span>`}
+                    : html`<span class="text-[var(--color-fg-muted)]">—</span>`}
                 </td>
                 <td class="py-1 text-right tabular-nums">${fmtPct(p.success_rate)}</td>
                 <td class="py-1 text-right tabular-nums">${p.consecutive_failures}</td>
                 <td class="py-1 text-right tabular-nums">${p.events_in_window}</td>
                 <td class="py-1 text-right tabular-nums">
                   ${rejected > 0
-                    ? html`<span class="text-[var(--warn)]">${rejected}</span>`
-                    : html`<span class="text-[var(--text-muted)]">—</span>`}
+                    ? html`<span class="text-[var(--color-status-warn)]">${rejected}</span>`
+                    : html`<span class="text-[var(--color-fg-muted)]">—</span>`}
                 </td>
                 <td class="py-1 text-right tabular-nums">${fmtPerfTokPerSec(p.avg_prompt_tok_per_sec)}</td>
                 <td class="py-1 text-right tabular-nums">${fmtPerfTokPerSec(p.avg_decode_tok_per_sec)}</td>
@@ -781,7 +781,7 @@ function HealthTable({
                 <td class="py-1 text-right">
                   ${p.in_cooldown
                     ? html`<${StatusChip} tone="bad">${fmtCooldownExpiry(p.cooldown_expires_at)}<//>`
-                    : html`<span class="text-[var(--text-muted)]">—</span>`}
+                    : html`<span class="text-[var(--color-fg-muted)]">—</span>`}
                 </td>
               </tr>
             `})}
@@ -890,7 +890,7 @@ function SloCard({ slo }: { slo: CascadeSloResponse }) {
     <div class="flex flex-col gap-3">
       <div class="flex items-center gap-2 flex-wrap">
         <${StatusChip} tone=${tone}>${sloStatusLabel(slo.status)}<//>
-        <span class="text-xs text-[var(--text-muted)]">sample ${totalEvents}/${slo.window_sample_size}</span>
+        <span class="text-xs text-[var(--color-fg-muted)]">sample ${totalEvents}/${slo.window_sample_size}</span>
         ${slo.violations.length > 0
           ? html`<span class="text-xs text-[var(--bad-light)]">violating: ${slo.violations.join(', ')}</span>`
           : null}
@@ -928,10 +928,10 @@ function StrategyTraceTable({
     ? trace.events.filter(e => traceEventMatchesSearch(e, query))
     : trace.events
   return html`
-    ${query ? html`<div class="text-xs text-[var(--text-muted)] mb-2">${filtered.length}/${trace.events.length}건</div>` : null}
+    ${query ? html`<div class="text-xs text-[var(--color-fg-muted)] mb-2">${filtered.length}/${trace.events.length}건</div>` : null}
     <table class="w-full text-xs">
       <thead>
-        <tr class="text-[var(--text-muted)] border-b border-[var(--card-border)]">
+        <tr class="text-[var(--color-fg-muted)] border-b border-[var(--color-border-default)]">
           <th class="text-left py-1 w-20">시간</th>
           <th class="text-left py-1">캐스케이드</th>
           <th class="text-left py-1">전략</th>
@@ -945,10 +945,10 @@ function StrategyTraceTable({
         ${filtered.map((e: CascadeStrategyTraceEvent) => {
           const tone = traceKindTone(e.kind)
           return html`
-          <tr class="border-b border-[var(--card-border)] last:border-b-0">
-            <td class="py-1 text-[var(--text-muted)] tabular-nums">${fmtRelativeTime(e.ts)}</td>
-            <td class="py-1"><code class="text-[var(--text-strong)]">${e.cascade_name}</code></td>
-            <td class="py-1 text-[var(--text-muted)]">${e.strategy}</td>
+          <tr class="border-b border-[var(--color-border-default)] last:border-b-0">
+            <td class="py-1 text-[var(--color-fg-muted)] tabular-nums">${fmtRelativeTime(e.ts)}</td>
+            <td class="py-1"><code class="text-[var(--color-fg-secondary)]">${e.cascade_name}</code></td>
+            <td class="py-1 text-[var(--color-fg-muted)]">${e.strategy}</td>
             <td class="py-1 text-right tabular-nums">${e.cycle}</td>
             <td class="py-1 text-right tabular-nums">${e.candidates_in}/${e.candidates_out}</td>
             <td class="py-1 text-right tabular-nums">${e.backoff_ms > 0 ? e.backoff_ms : '–'}</td>
@@ -969,7 +969,7 @@ function ClientCapacityHistoryTable({
   return html`
     <table class="w-full text-xs">
       <thead>
-        <tr class="text-[var(--text-muted)] border-b border-[var(--card-border)]">
+        <tr class="text-[var(--color-fg-muted)] border-b border-[var(--color-border-default)]">
           <th class="text-left py-1 w-20">시간</th>
           <th class="text-left py-1">종류</th>
           <th class="text-left py-1">키</th>
@@ -980,10 +980,10 @@ function ClientCapacityHistoryTable({
         ${history.events.map((e: CascadeClientCapacityHistoryEvent) => {
           const tone = eventKindTone(e.kind)
           return html`
-          <tr class="border-b border-[var(--card-border)] last:border-b-0">
-            <td class="py-1 text-[var(--text-muted)] tabular-nums">${fmtRelativeTime(e.ts)}</td>
+          <tr class="border-b border-[var(--color-border-default)] last:border-b-0">
+            <td class="py-1 text-[var(--color-fg-muted)] tabular-nums">${fmtRelativeTime(e.ts)}</td>
             <td class="py-1"><${StatusChip} tone=${tone}>${eventKindLabel(e.kind)}<//></td>
-            <td class="py-1"><code class="text-[var(--text-strong)]">${e.key}</code></td>
+            <td class="py-1"><code class="text-[var(--color-fg-secondary)]">${e.key}</code></td>
             <td class="py-1 text-right tabular-nums">${e.active_after}</td>
           </tr>
         `})}
@@ -999,7 +999,7 @@ function ClientCapacityTable({ capacity }: { capacity: CascadeClientCapacityResp
   return html`
     <table class="w-full text-xs">
       <thead>
-        <tr class="text-[var(--text-muted)] border-b border-[var(--card-border)]">
+        <tr class="text-[var(--color-fg-muted)] border-b border-[var(--color-border-default)]">
           <th class="text-left py-1 w-4"></th>
           <th class="text-left py-1">종류</th>
           <th class="text-left py-1">키</th>
@@ -1012,10 +1012,10 @@ function ClientCapacityTable({ capacity }: { capacity: CascadeClientCapacityResp
         ${capacity.entries.map((e: CascadeClientCapacityEntry) => {
           const tone = capacityTone(e)
           return html`
-          <tr class="border-b border-[var(--card-border)] last:border-b-0">
+          <tr class="border-b border-[var(--color-border-default)] last:border-b-0">
             <td class="py-1"><span class=${`inline-block w-2 h-2 rounded-full ${TONE_DOT[tone]}`}></span></td>
             <td class="py-1"><${StatusChip} tone=${tone === 'ok' ? 'neutral' : tone}>${capacityKindLabel(e.kind)}<//></td>
-            <td class="py-1"><code class="text-[var(--text-strong)]">${e.key}</code></td>
+            <td class="py-1"><code class="text-[var(--color-fg-secondary)]">${e.key}</code></td>
             <td class="py-1 text-right tabular-nums">${e.active}</td>
             <td class="py-1 text-right tabular-nums">${e.available}</td>
             <td class="py-1 text-right tabular-nums">${e.total}</td>
@@ -1108,14 +1108,14 @@ function CascadeRawConfigEditor({
   return html`
     <${Card} title=${mode.title}>
       <div class="flex flex-col gap-3 p-4">
-        <p class="text-sm text-[var(--text-muted)]">${mode.primary}</p>
-        <p class="text-xs text-[var(--text-muted)]">
+        <p class="text-sm text-[var(--color-fg-muted)]">${mode.primary}</p>
+        <p class="text-xs text-[var(--color-fg-muted)]">
           ${mode.secondary}
         </p>
 
         <form class="flex flex-col gap-3" onSubmit=${handleSave}>
           <textarea
-            class="h-96 w-full rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-3 py-2 font-mono text-xs text-[var(--text-strong)]"
+            class="h-96 w-full rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] px-3 py-2 font-mono text-xs text-[var(--color-fg-secondary)]"
             spellcheck="false"
             readonly=${!sourceEditable}
             value=${editorText.value}
@@ -1127,13 +1127,13 @@ function CascadeRawConfigEditor({
           />
 
           <div class="flex items-center gap-3 flex-wrap text-xs">
-            <span class=${editorDirty.value ? 'text-[var(--warn)]' : 'text-[var(--text-muted)]'}>
+            <span class=${editorDirty.value ? 'text-[var(--color-status-warn)]' : 'text-[var(--color-fg-muted)]'}>
               ${editorDirty.value ? 'unsaved changes' : 'in sync with disk'}
             </span>
             ${syntaxError
               ? html`<span class="text-[var(--bad-light)]">syntax: ${syntaxError}</span>`
               : html`
-                <span class="text-[var(--ok)]">
+                <span class="text-[var(--color-status-ok)]">
                   ${raw?.source_kind === 'toml' ? 'syntax: validated on save (TOML)' : 'syntax: valid JSON'}
                 </span>
               `}
@@ -1141,7 +1141,7 @@ function CascadeRawConfigEditor({
               ? html`
                 <span class=${saveMessage.value.startsWith('Failed') || saveMessage.value.startsWith('Invalid')
                   ? 'text-[var(--bad-light)]'
-                  : 'text-[var(--text-muted)]'}
+                  : 'text-[var(--color-fg-muted)]'}
                 >
                   ${saveMessage.value}
                 </span>
@@ -1159,7 +1159,7 @@ function CascadeRawConfigEditor({
             </button>
             <button
               type="button"
-              class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-3 py-1 text-xs text-[var(--text-strong)] hover:bg-[var(--bg-panel-hover)] disabled:opacity-50"
+              class="rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] px-3 py-1 text-xs text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)] disabled:opacity-50"
               onClick=${handleReset}
               disabled=${saving.value || !editorDirty.value}
             >
@@ -1167,7 +1167,7 @@ function CascadeRawConfigEditor({
             </button>
             <button
               type="button"
-              class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-3 py-1 text-xs text-[var(--text-strong)] hover:bg-[var(--bg-panel-hover)] disabled:opacity-50"
+              class="rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] px-3 py-1 text-xs text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)] disabled:opacity-50"
               onClick=${() => void onRefresh()}
               disabled=${saving.value}
             >
@@ -1178,14 +1178,14 @@ function CascadeRawConfigEditor({
         ${mode.previewTitle
           ? html`
             <div class="flex flex-col gap-2">
-              <div class="text-xs font-medium text-[var(--text-strong)]">
+              <div class="text-xs font-medium text-[var(--color-fg-secondary)]">
                 ${mode.previewTitle}
               </div>
-              <div class="text-xs text-[var(--text-muted)]">
+              <div class="text-xs text-[var(--color-fg-muted)]">
                 ${raw?.config_path ?? 'unresolved'}
               </div>
               <textarea
-                class="h-72 w-full rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-3 py-2 font-mono text-xs text-[var(--text-strong)]"
+                class="h-72 w-full rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] px-3 py-2 font-mono text-xs text-[var(--color-fg-secondary)]"
                 spellcheck="false"
                 readonly
                 value=${raw?.raw_json ?? ''}
@@ -1223,14 +1223,14 @@ export function CascadeConfigPanel() {
     <div class="flex flex-col gap-4">
       <div class="flex items-center gap-3 flex-wrap">
         <button
-          class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-3 py-1 text-xs text-[var(--text-strong)] hover:bg-[var(--bg-panel-hover)]"
+          class="rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] px-3 py-1 text-xs text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)]"
           onClick=${() => void loadCascadeData(resource)}
         >
           새로고침
         </button>
-        ${current.loading ? html`<span class="text-xs text-[var(--text-muted)]">로딩 중...</span>` : null}
+        ${current.loading ? html`<span class="text-xs text-[var(--color-fg-muted)]">로딩 중...</span>` : null}
         ${config?.updated_at
-          ? html`<span class="text-xs text-[var(--text-muted)]">config · ${config.updated_at}</span>`
+          ? html`<span class="text-xs text-[var(--color-fg-muted)]">config · ${config.updated_at}</span>`
           : null}
       </div>
 

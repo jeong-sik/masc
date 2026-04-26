@@ -54,8 +54,8 @@ function Row({
   tone?: 'neutral' | 'ok' | 'warn' | 'bad'
 }) {
   const toneClass =
-    tone === 'ok' ? 'text-[var(--ok)]'
-      : tone === 'warn' ? 'text-[var(--warn)]'
+    tone === 'ok' ? 'text-[var(--color-status-ok)]'
+      : tone === 'warn' ? 'text-[var(--color-status-warn)]'
       : tone === 'bad' ? 'text-[var(--bad-light)]'
       : 'text-text-strong'
   return html`

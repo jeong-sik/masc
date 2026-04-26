@@ -82,46 +82,46 @@ export function FullInventoryView({
   const directCallCount = inventory.filter(item => item.direct_call_allowed).length
 
   return html`
-    <div class="sticky top-[var(--header-h)] z-[var(--z-tab-sticky)] bg-[var(--backdrop-modal)] backdrop-blur-[8px] py-3 border-b border-[var(--card-border)]">
+    <div class="sticky top-[var(--header-h)] z-[var(--z-tab-sticky)] bg-[var(--backdrop-modal)] backdrop-blur-[8px] py-3 border-b border-[var(--color-border-default)]">
       <div class="grid grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-3 my-4">
-        <div class="p-4 rounded border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col gap-1.5">
-          <span class="text-[var(--text-strong)] text-3xl font-bold leading-none tabular-nums">${totalCount}</span>
-          <span class="text-2xs text-[var(--text-muted)] uppercase tracking-wider font-medium">전체 도구</span>
+        <div class="p-4 rounded border border-[var(--color-border-default)] bg-[var(--white-3)] flex flex-col gap-1.5">
+          <span class="text-[var(--color-fg-secondary)] text-3xl font-bold leading-none tabular-nums">${totalCount}</span>
+          <span class="text-2xs text-[var(--color-fg-muted)] uppercase tracking-wider font-medium">전체 도구</span>
         </div>
-        <div class="p-4 rounded border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col gap-1.5">
-          <span class="text-[var(--text-strong)] text-3xl font-bold leading-none tabular-nums">${publicCount}</span>
-          <span class="text-2xs text-[var(--text-muted)] uppercase tracking-wider font-medium">MCP 공개</span>
+        <div class="p-4 rounded border border-[var(--color-border-default)] bg-[var(--white-3)] flex flex-col gap-1.5">
+          <span class="text-[var(--color-fg-secondary)] text-3xl font-bold leading-none tabular-nums">${publicCount}</span>
+          <span class="text-2xs text-[var(--color-fg-muted)] uppercase tracking-wider font-medium">MCP 공개</span>
         </div>
-        <div class="p-4 rounded border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col gap-1.5">
-          <span class="text-[var(--text-strong)] text-3xl font-bold leading-none tabular-nums">${hiddenCount}</span>
-          <span class="text-2xs text-[var(--text-muted)] uppercase tracking-wider font-medium">숨김</span>
+        <div class="p-4 rounded border border-[var(--color-border-default)] bg-[var(--white-3)] flex flex-col gap-1.5">
+          <span class="text-[var(--color-fg-secondary)] text-3xl font-bold leading-none tabular-nums">${hiddenCount}</span>
+          <span class="text-2xs text-[var(--color-fg-muted)] uppercase tracking-wider font-medium">숨김</span>
         </div>
-        <div class="p-4 rounded border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col gap-1.5">
-          <span class="text-[var(--text-strong)] text-3xl font-bold leading-none tabular-nums">${deprecatedCount}</span>
-          <span class="text-2xs text-[var(--text-muted)] uppercase tracking-wider font-medium">지원 중단</span>
+        <div class="p-4 rounded border border-[var(--color-border-default)] bg-[var(--white-3)] flex flex-col gap-1.5">
+          <span class="text-[var(--color-fg-secondary)] text-3xl font-bold leading-none tabular-nums">${deprecatedCount}</span>
+          <span class="text-2xs text-[var(--color-fg-muted)] uppercase tracking-wider font-medium">지원 중단</span>
         </div>
-        <div class="p-4 rounded border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col gap-1.5">
-          <span class="text-[var(--text-strong)] text-3xl font-bold leading-none tabular-nums">${directCallCount}</span>
-          <span class="text-2xs text-[var(--text-muted)] uppercase tracking-wider font-medium">직접 호출</span>
+        <div class="p-4 rounded border border-[var(--color-border-default)] bg-[var(--white-3)] flex flex-col gap-1.5">
+          <span class="text-[var(--color-fg-secondary)] text-3xl font-bold leading-none tabular-nums">${directCallCount}</span>
+          <span class="text-2xs text-[var(--color-fg-muted)] uppercase tracking-wider font-medium">직접 호출</span>
         </div>
-        <div class="p-4 rounded border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col gap-1.5">
-          <span class="text-[var(--text-strong)] text-3xl font-bold leading-none tabular-nums">${filtered.length}</span>
-          <span class="text-2xs text-[var(--text-muted)] uppercase tracking-wider font-medium">필터 결과</span>
+        <div class="p-4 rounded border border-[var(--color-border-default)] bg-[var(--white-3)] flex flex-col gap-1.5">
+          <span class="text-[var(--color-fg-secondary)] text-3xl font-bold leading-none tabular-nums">${filtered.length}</span>
+          <span class="text-2xs text-[var(--color-fg-muted)] uppercase tracking-wider font-medium">필터 결과</span>
         </div>
       </div>
 
-      <div class="text-xs text-[var(--text-muted)] mb-4">
+      <div class="text-xs text-[var(--color-fg-muted)] mb-4">
         카드 숫자는 서로 다른 축이다. MCP 공개는 surface, 숨김은 visibility, 직접 호출은 hidden direct-call policy 기준이다.
       </div>
 
       <div class="flex flex-wrap gap-2 mb-4">
         ${(Object.keys(SURFACE_LABELS) as SurfaceFilter[]).map(key => html`
           <button type="button"
-            class=${`px-3 py-1.5 rounded text-sm font-medium border transition-colors cursor-pointer ${surfaceFilter.value === key ? 'border-[var(--accent)]/40 text-[var(--accent)] bg-[var(--accent-8)]' : 'border-[var(--card-border)] bg-[var(--white-4)] hover:bg-[var(--white-8)] text-[var(--text-body)]'}`}
+            class=${`px-3 py-1.5 rounded text-sm font-medium border transition-colors cursor-pointer ${surfaceFilter.value === key ? 'border-[var(--color-accent-fg)]/40 text-[var(--color-accent-fg)] bg-[var(--accent-8)]' : 'border-[var(--color-border-default)] bg-[var(--white-4)] hover:bg-[var(--white-8)] text-[var(--color-fg-primary)]'}`}
             onClick=${() => { surfaceFilter.value = key }}
           >
             ${SURFACE_LABELS[key]}
-            <span class="inline-flex items-center justify-center min-w-5 h-[18px] px-[5px] text-3xs font-semibold bg-[var(--white-8)] text-[var(--text-muted)] rounded-sm ml-1">${surfaceCountForFilter(inventory, key)}</span>
+            <span class="inline-flex items-center justify-center min-w-5 h-[18px] px-[5px] text-3xs font-semibold bg-[var(--white-8)] text-[var(--color-fg-muted)] rounded-sm ml-1">${surfaceCountForFilter(inventory, key)}</span>
           </button>
         `)}
       </div>
@@ -139,7 +139,7 @@ export function FullInventoryView({
           }}
         />
         <select
-          class="px-3 py-2 rounded bg-[var(--white-3)] border border-[var(--card-border)] text-[var(--text-body)] text-sm focus:border-[var(--accent)]/50 outline-none"
+          class="px-3 py-2 rounded bg-[var(--white-3)] border border-[var(--color-border-default)] text-[var(--color-fg-primary)] text-sm focus:border-[var(--color-accent-fg)]/50 outline-none"
           name="tool_inventory_category"
           aria-label="도구 카테고리 필터"
           value=${categoryFilter.value}
@@ -152,7 +152,7 @@ export function FullInventoryView({
             <option value=${category}>${category === 'uncategorized' ? '미분류' : category}</option>
           `)}
         </select>
-        <label class="inline-flex items-center gap-2 text-xs text-[var(--text-body)]">
+        <label class="inline-flex items-center gap-2 text-xs text-[var(--color-fg-primary)]">
           <input
             type="checkbox"
             checked=${directOnly.value}
@@ -162,7 +162,7 @@ export function FullInventoryView({
           />
           <span>직접 호출만</span>
         </label>
-        <label class="inline-flex items-center gap-2 text-xs text-[var(--text-body)]">
+        <label class="inline-flex items-center gap-2 text-xs text-[var(--color-fg-primary)]">
           <input
             type="checkbox"
             checked=${showHidden.value}
@@ -172,7 +172,7 @@ export function FullInventoryView({
           />
           <span>숨김 표시</span>
         </label>
-        <label class="inline-flex items-center gap-2 text-xs text-[var(--text-body)]">
+        <label class="inline-flex items-center gap-2 text-xs text-[var(--color-fg-primary)]">
           <input
             type="checkbox"
             checked=${showDeprecated.value}
@@ -183,7 +183,7 @@ export function FullInventoryView({
           <span>지원 중단 표시</span>
         </label>
         <button type="button"
-          class="px-3 py-1.5 rounded text-sm font-medium border border-[var(--card-border)] bg-[var(--white-4)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-[var(--text-body)]"
+          class="px-3 py-1.5 rounded text-sm font-medium border border-[var(--color-border-default)] bg-[var(--white-4)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-[var(--color-fg-primary)]"
           onClick=${() => { void loadTools() }}
           disabled=${loading}
         >

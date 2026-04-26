@@ -55,7 +55,7 @@ function loadMetrics() {
 /** Map category color CSS class (text-[...]) to a usable bar background color. */
 function categoryBarColor(colorClass: string): string {
   const match = colorClass.match(/text-\[(.*)\]/)
-  if (!match) return 'var(--accent)'
+  if (!match) return 'var(--color-accent-fg)'
   const val = match[1]!
   // CSS variable references
   if (val.startsWith('var(')) return val
@@ -75,13 +75,13 @@ function BarChart({ items, maxCount }: { items: ToolMetricsTopEntry[]; maxCount:
           <div class="tool-bar-row" key=${item.name}>
             <div class="flex items-center gap-1.5 overflow-hidden">
               <span class="flex-shrink-0 size-4 rounded text-3xs font-mono font-bold flex items-center justify-center bg-[var(--white-5)] ${cat.color}">${cat.icon}</span>
-              <span class="text-[var(--text-body)] overflow-hidden text-ellipsis whitespace-nowrap font-mono text-2xs" title=${item.name}>${item.name}</span>
+              <span class="text-[var(--color-fg-primary)] overflow-hidden text-ellipsis whitespace-nowrap font-mono text-2xs" title=${item.name}>${item.name}</span>
             </div>
-            <span class="px-1.5 py-px rounded-xs text-3xs font-medium text-center text-[var(--text-dim)] bg-[var(--white-4)]">${cat.label}</span>
+            <span class="px-1.5 py-px rounded-xs text-3xs font-medium text-center text-[var(--color-fg-disabled)] bg-[var(--white-4)]">${cat.label}</span>
             <div class="h-3.5 rounded-xs bg-[var(--white-6)] overflow-hidden">
               <div class="h-full rounded-xs min-w-0.5 transition-[width] duration-300 ease-in-out" style=${{ width: `${pct}%`, backgroundColor: barBg }} />
             </div>
-            <span class="text-[var(--text-muted)] text-2xs text-right font-mono">${item.call_count}</span>
+            <span class="text-[var(--color-fg-muted)] text-2xs text-right font-mono">${item.call_count}</span>
           </div>
         `
       })}
@@ -90,7 +90,7 @@ function BarChart({ items, maxCount }: { items: ToolMetricsTopEntry[]; maxCount:
 }
 
 function ToolDistribution({ dist }: { dist: { total: number; public: number; visible: number; hidden: number } | null | undefined }) {
-  if (!dist) return html`<div class="text-2xs text-[var(--text-muted)] italic">도구 분포 데이터가 없습니다.</div>`
+  if (!dist) return html`<div class="text-2xs text-[var(--color-fg-muted)] italic">도구 분포 데이터가 없습니다.</div>`
   // Mutually exclusive segments: public ⊂ visible, hidden = total - visible
   const visibleExclusive = Math.max(0, dist.visible - dist.public)
   const pct = (n: number) => dist.total > 0 ? ((n / dist.total) * 100).toFixed(1) : '0'
@@ -98,20 +98,20 @@ function ToolDistribution({ dist }: { dist: { total: number; public: number; vis
     <div class="flex flex-col gap-2">
       <div class="flex items-center gap-3">
         <span class="inline-block min-w-18 px-2 py-0.5 text-2xs font-semibold text-center rounded badge-essential">공개 MCP</span>
-        <span class="text-[var(--text-strong)] text-sm font-semibold min-w-9 text-right">${dist.public}</span>
-        <span class="text-[var(--text-muted)] text-sm min-w-12 text-right">${pct(dist.public)}%</span>
+        <span class="text-[var(--color-fg-secondary)] text-sm font-semibold min-w-9 text-right">${dist.public}</span>
+        <span class="text-[var(--color-fg-muted)] text-sm min-w-12 text-right">${pct(dist.public)}%</span>
       </div>
       <div class="flex items-center gap-3">
         <span class="inline-block min-w-18 px-2 py-0.5 text-2xs font-semibold text-center rounded badge-standard">내부 전용</span>
-        <span class="text-[var(--text-strong)] text-sm font-semibold min-w-9 text-right">${visibleExclusive}</span>
-        <span class="text-[var(--text-muted)] text-sm min-w-12 text-right">${pct(visibleExclusive)}%</span>
+        <span class="text-[var(--color-fg-secondary)] text-sm font-semibold min-w-9 text-right">${visibleExclusive}</span>
+        <span class="text-[var(--color-fg-muted)] text-sm min-w-12 text-right">${pct(visibleExclusive)}%</span>
       </div>
       <div class="flex items-center gap-3">
         <span class="inline-block min-w-18 px-2 py-0.5 text-2xs font-semibold text-center rounded badge-full">숨김</span>
-        <span class="text-[var(--text-strong)] text-sm font-semibold min-w-9 text-right">${dist.hidden}</span>
-        <span class="text-[var(--text-muted)] text-sm min-w-12 text-right">${pct(dist.hidden)}%</span>
+        <span class="text-[var(--color-fg-secondary)] text-sm font-semibold min-w-9 text-right">${dist.hidden}</span>
+        <span class="text-[var(--color-fg-muted)] text-sm min-w-12 text-right">${pct(dist.hidden)}%</span>
       </div>
-      <div class="text-3xs text-[var(--text-dim)] mt-1">전체 ${dist.total}개 (공개 ${dist.public} + 내부 ${visibleExclusive} + 숨김 ${dist.hidden})</div>
+      <div class="text-3xs text-[var(--color-fg-disabled)] mt-1">전체 ${dist.total}개 (공개 ${dist.public} + 내부 ${visibleExclusive} + 숨김 ${dist.hidden})</div>
     </div>
   `
 }
@@ -131,7 +131,7 @@ export function ToolMetrics() {
   return html`
     <div class="flex flex-col gap-4">
       <div class="flex justify-between items-center">
-        <h3 class="text-[var(--text-strong)] text-lg font-semibold m-0">도구 사용 현황</h3>
+        <h3 class="text-[var(--color-fg-secondary)] text-lg font-semibold m-0">도구 사용 현황</h3>
         <${ActionButton}
           variant="ghost"
           onClick=${() => void loadMetrics()}
@@ -144,39 +144,39 @@ export function ToolMetrics() {
       ${error ? html`<${ErrorState} message=${error} />` : null}
 
       ${data ? html`
-        <div class="text-2xs text-[var(--text-muted)] mb-3">
+        <div class="text-2xs text-[var(--color-fg-muted)] mb-3">
           서버 시작 이후 메모리 기반 집계. 재시작 시 초기화됩니다.
         </div>
         <div class="grid grid-cols-[repeat(5,minmax(0,1fr))] gap-3 max-[880px]:grid-cols-[repeat(2,minmax(0,1fr))]">
-          <div class="flex flex-col items-center gap-1 rounded border border-[var(--card-border)] bg-[var(--card)] p-3">
-            <span class="mt-1.5 text-[var(--text-strong)] text-3xl font-bold leading-none tabular-nums">${data.total_calls}</span>
-            <span class="text-2xs text-[var(--text-muted)] font-medium">총 호출 수</span>
+          <div class="flex flex-col items-center gap-1 rounded border border-[var(--color-border-default)] bg-[var(--card)] p-3">
+            <span class="mt-1.5 text-[var(--color-fg-secondary)] text-3xl font-bold leading-none tabular-nums">${data.total_calls}</span>
+            <span class="text-2xs text-[var(--color-fg-muted)] font-medium">총 호출 수</span>
           </div>
-          <div class="flex flex-col items-center gap-1 rounded border border-[var(--card-border)] bg-[var(--card)] p-3">
-            <span class="mt-1.5 text-[var(--text-strong)] text-3xl font-bold leading-none tabular-nums">${data.distinct_tools_called}</span>
-            <span class="text-2xs text-[var(--text-muted)] font-medium">사용된 도구</span>
+          <div class="flex flex-col items-center gap-1 rounded border border-[var(--color-border-default)] bg-[var(--card)] p-3">
+            <span class="mt-1.5 text-[var(--color-fg-secondary)] text-3xl font-bold leading-none tabular-nums">${data.distinct_tools_called}</span>
+            <span class="text-2xs text-[var(--color-fg-muted)] font-medium">사용된 도구</span>
           </div>
-          <div class="flex flex-col items-center gap-1 rounded border border-[var(--card-border)] bg-[var(--card)] p-3">
-            <span class="mt-1.5 text-[var(--text-strong)] text-3xl font-bold leading-none tabular-nums">${data.never_called_count}</span>
-            <span class="text-2xs text-[var(--text-muted)] font-medium">미사용 도구</span>
+          <div class="flex flex-col items-center gap-1 rounded border border-[var(--color-border-default)] bg-[var(--card)] p-3">
+            <span class="mt-1.5 text-[var(--color-fg-secondary)] text-3xl font-bold leading-none tabular-nums">${data.never_called_count}</span>
+            <span class="text-2xs text-[var(--color-fg-muted)] font-medium">미사용 도구</span>
           </div>
-          <div class="flex flex-col items-center gap-1 rounded border border-[var(--card-border)] bg-[var(--card)] p-3">
-            <span class="mt-1.5 text-[var(--text-strong)] text-3xl font-bold leading-none tabular-nums">${data.registered_count}</span>
-            <span class="text-2xs text-[var(--text-muted)] font-medium">등록됨 (v2)</span>
+          <div class="flex flex-col items-center gap-1 rounded border border-[var(--color-border-default)] bg-[var(--card)] p-3">
+            <span class="mt-1.5 text-[var(--color-fg-secondary)] text-3xl font-bold leading-none tabular-nums">${data.registered_count}</span>
+            <span class="text-2xs text-[var(--color-fg-muted)] font-medium">등록됨 (v2)</span>
           </div>
-          <div class="flex flex-col items-center gap-1 rounded border border-[var(--card-border)] bg-[var(--card)] p-3">
-            <span class="mt-1.5 text-[var(--text-strong)] text-3xl font-bold leading-none tabular-nums">${data.dispatch_v2_enabled ? 'ON' : 'OFF'}</span>
-            <span class="text-2xs text-[var(--text-muted)] font-medium">Dispatch v2</span>
+          <div class="flex flex-col items-center gap-1 rounded border border-[var(--color-border-default)] bg-[var(--card)] p-3">
+            <span class="mt-1.5 text-[var(--color-fg-secondary)] text-3xl font-bold leading-none tabular-nums">${data.dispatch_v2_enabled ? 'ON' : 'OFF'}</span>
+            <span class="text-2xs text-[var(--color-fg-muted)] font-medium">Dispatch v2</span>
           </div>
         </div>
 
         <div class="tool-metrics-sections">
           <div>
-            <h4 class="text-[var(--text-muted)] text-2xs uppercase tracking-[0.05em] mb-2.5 mt-0">도구 분포</h4>
+            <h4 class="text-[var(--color-fg-muted)] text-2xs uppercase tracking-[0.05em] mb-2.5 mt-0">도구 분포</h4>
             <${ToolDistribution} dist=${data.tool_distribution} />
           </div>
           <div>
-            <h4 class="text-[var(--text-muted)] text-2xs uppercase tracking-[0.05em] mb-2.5 mt-0">상위 20 도구</h4>
+            <h4 class="text-[var(--color-fg-muted)] text-2xs uppercase tracking-[0.05em] mb-2.5 mt-0">상위 20 도구</h4>
             ${(() => {
               // Build category chips from labels actually present in top_20.
               const labelCounts = new Map<string, number>()
@@ -211,7 +211,7 @@ export function ToolMetrics() {
                   />
                 </div>
                 ${(categoryFilter.value !== 'all' || searchQuery.value.trim() !== '') ? html`
-                  <div class="mb-2 text-2xs text-[var(--text-muted)]">
+                  <div class="mb-2 text-2xs text-[var(--color-fg-muted)]">
                     ${filtered.length} / ${data.top_20.length}개 도구
                   </div>
                 ` : null}

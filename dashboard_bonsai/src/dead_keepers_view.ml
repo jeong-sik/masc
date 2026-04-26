@@ -23,11 +23,11 @@ stylesheet
   .quiet {
     padding: 40px 20px;
     text-align: center;
-    border: 1px dashed var(--border-main);
+    border: 1px dashed var(--color-border-default);
     font-family: 'EB Garamond', serif;
     font-style: italic;
     font-size: 14px;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
   }
 
   @media (prefers-contrast: more) {

@@ -33,9 +33,9 @@ stylesheet
     text-transform: uppercase;
     padding: 4px 8px;
     text-align: center;
-    border: 1px solid var(--border-main, #3a2e20);
+    border: 1px solid var(--color-border-default, #3a2e20);
     font-variant-numeric: tabular-nums;
-    color: var(--text-dim, #9a846e);
+    color: var(--color-fg-muted, #9a846e);
   }
 
   .pill_sm {
@@ -44,29 +44,29 @@ stylesheet
     letter-spacing: 0.16em;
     text-transform: uppercase;
     padding: 2px 6px;
-    border: 1px solid var(--border-main, #3a2e20);
+    border: 1px solid var(--color-border-default, #3a2e20);
     text-align: center;
-    color: var(--text-dim, #9a846e);
+    color: var(--color-fg-muted, #9a846e);
   }
 
-  .c_ok      { color: var(--status-ok, #6a9a4a); border-color: var(--status-ok, #6a9a4a); }
-  .c_warn    { color: var(--status-warn, #b87828); border-color: var(--status-warn, #b87828); }
+  .c_ok      { color: var(--color-status-ok, #6a9a4a); border-color: var(--color-status-ok, #6a9a4a); }
+  .c_warn    { color: var(--color-status-warn, #b87828); border-color: var(--color-status-warn, #b87828); }
   .c_bad     { color: var(--accent-blood, #e85050); border-color: var(--accent-blood, #e85050); }
-  .c_brass   { color: var(--accent-brass, #968228); border-color: var(--accent-brass, #968228); }
-  .c_paused  { color: var(--text-dim, #9a846e); border-color: var(--border-main, #3a2e20); }
-  .c_neutral { color: var(--text-dim, #9a846e); border-color: var(--border-main, #3a2e20); }
+  .c_brass   { color: var(--color-accent-fg, #968228); border-color: var(--color-accent-fg, #968228); }
+  .c_paused  { color: var(--color-fg-muted, #9a846e); border-color: var(--color-border-default, #3a2e20); }
+  .c_neutral { color: var(--color-fg-muted, #9a846e); border-color: var(--color-border-default, #3a2e20); }
 
   @media (prefers-contrast: more) {
     .pill_md, .pill_sm {
       border-width: 2px;
       border-color: var(--text-bright);
     }
-    .c_ok      { border-color: var(--status-ok); }
-    .c_warn    { border-color: var(--status-warn); }
+    .c_ok      { border-color: var(--color-status-ok); }
+    .c_warn    { border-color: var(--color-status-warn); }
     .c_bad     { border-color: var(--accent-blood); }
-    .c_brass   { border-color: var(--accent-brass); }
-    .c_paused  { border-color: var(--text-dim); }
-    .c_neutral { border-color: var(--text-dim); }
+    .c_brass   { border-color: var(--color-accent-fg); }
+    .c_paused  { border-color: var(--color-fg-muted); }
+    .c_neutral { border-color: var(--color-fg-muted); }
   }
 
   @media (forced-colors: active) {

@@ -321,10 +321,10 @@ async function refreshGoalDetail(goalId: string) {
 function ConvergenceBar({ pct, size = 'md' }: { pct: number; size?: 'sm' | 'md' }) {
   const clamped = Math.max(0, Math.min(100, pct))
   const barColor =
-    clamped >= 80 ? 'var(--ok)'
+    clamped >= 80 ? 'var(--color-status-ok)'
     : clamped >= 50 ? 'var(--amber-bright)'
     : clamped >= 20 ? '#fb923c'
-    : 'var(--bad)'
+    : 'var(--color-status-err)'
 
   const h = size === 'sm' ? 'h-1.5' : 'h-2.5'
   return html`

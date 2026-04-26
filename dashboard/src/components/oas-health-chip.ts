@@ -132,7 +132,7 @@ export function OasHealthChip() {
           label="에러"
           value=${summary.value.totalErrors}
           detail=${sampleWindow ? `${errorDetail} · ${sampleWindow}` : errorDetail}
-          tone=${summary.value.totalErrors > 0 ? 'text-[var(--bad)]' : undefined}
+          tone=${summary.value.totalErrors > 0 ? 'text-[var(--color-status-err)]' : undefined}
         />
         <${StatCell}
           label="에이전트 이벤트"
@@ -148,25 +148,25 @@ export function OasHealthChip() {
           label="최근 tick"
           value=${formatLastTick(summary.value.lastKeeperTick)}
           detail=${isStale.value ? '신호 끊김' : '수신 중'}
-          tone=${isStale.value ? 'text-[var(--warn)]' : 'text-[var(--ok)]'}
+          tone=${isStale.value ? 'text-[var(--color-status-warn)]' : 'text-[var(--color-status-ok)]'}
         />
       </div>
       ${recentEvents.value.length > 0 || recentKeepers.value.length > 0 ? html`
         <div class="mt-3 pt-3 border-t border-[var(--white-6)] grid md:grid-cols-2 gap-4">
           ${recentEvents.value.length > 0 ? html`
             <div>
-              <div class="text-3xs text-[var(--text-muted)] tracking-wider uppercase font-medium mb-2">
+              <div class="text-3xs text-[var(--color-fg-muted)] tracking-wider uppercase font-medium mb-2">
                 최근 자율성 이벤트
               </div>
               <ul class="space-y-1">
                 ${recentEvents.value.map(evt => html`
                   <li class="flex items-baseline justify-between gap-2 text-2xs">
-                    <span class="text-[var(--text-body)] truncate">
-                      <span class="font-mono text-[var(--text-dim)]">${evt.agent_name}</span>
-                      <span class="text-[var(--text-muted)]"> · </span>
+                    <span class="text-[var(--color-fg-primary)] truncate">
+                      <span class="font-mono text-[var(--color-fg-disabled)]">${evt.agent_name}</span>
+                      <span class="text-[var(--color-fg-muted)]"> · </span>
                       ${describeAgentEvent(evt)}
                     </span>
-                    <span class="text-[var(--text-muted)] tabular-nums shrink-0">
+                    <span class="text-[var(--color-fg-muted)] tabular-nums shrink-0">
                       ${formatLastTick(evt.timestamp * 1000)}
                     </span>
                   </li>
@@ -176,17 +176,17 @@ export function OasHealthChip() {
           ` : null}
           ${recentKeepers.value.length > 0 ? html`
             <div>
-              <div class="text-3xs text-[var(--text-muted)] tracking-wider uppercase font-medium mb-2">
+              <div class="text-3xs text-[var(--color-fg-muted)] tracking-wider uppercase font-medium mb-2">
                 활성 Keeper
               </div>
               <ul class="space-y-1">
                 ${recentKeepers.value.map(snap => html`
                   <li class="flex items-baseline justify-between gap-2 text-2xs">
-                    <span class="text-[var(--text-body)] truncate">
-                      <span class="font-mono text-[var(--text-dim)]">${snap.keeper_name}</span>
-                      <span class="text-[var(--text-muted)]"> · gen ${snap.generation} · ${Math.round(snap.context_ratio * 100)}%</span>
+                    <span class="text-[var(--color-fg-primary)] truncate">
+                      <span class="font-mono text-[var(--color-fg-disabled)]">${snap.keeper_name}</span>
+                      <span class="text-[var(--color-fg-muted)]"> · gen ${snap.generation} · ${Math.round(snap.context_ratio * 100)}%</span>
                     </span>
-                    <span class="text-[var(--text-muted)] tabular-nums shrink-0">
+                    <span class="text-[var(--color-fg-muted)] tabular-nums shrink-0">
                       ${formatLastTick(snap.timestamp * 1000)}
                     </span>
                   </li>

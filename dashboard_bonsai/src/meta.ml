@@ -20,15 +20,15 @@ stylesheet
     flex-wrap: wrap;
     gap: 24px;
     padding: 12px 16px;
-    border: 1px solid var(--border-main, #3a2e20);
+    border: 1px solid var(--color-border-default, #3a2e20);
     background: linear-gradient(
       180deg,
-      color-mix(in oklab, var(--bg-card) 35%, transparent),
-      color-mix(in oklab, var(--bg-deep) 65%, transparent)
+      color-mix(in oklab, var(--color-bg-elevated) 35%, transparent),
+      color-mix(in oklab, var(--color-bg-page) 65%, transparent)
     );
     font-family: 'JetBrains Mono', ui-monospace, monospace;
     font-size: 11px;
-    color: var(--text-dim, #9a846e);
+    color: var(--color-fg-muted, #9a846e);
   }
 
   .item { display: flex; align-items: baseline; gap: 8px; }
@@ -38,7 +38,7 @@ stylesheet
     font-size: 11px;
     letter-spacing: 0.2em;
     text-transform: uppercase;
-    color: var(--text-dim, #9a846e);
+    color: var(--color-fg-muted, #9a846e);
   }
 
   .v {
@@ -46,8 +46,8 @@ stylesheet
     color: var(--text-bright, #e8d9b0);
   }
 
-  .v_ok    { color: var(--status-ok, #6a9a4a); font-variant-numeric: tabular-nums; }
-  .v_brass { color: var(--accent-brass, #968228); font-variant-numeric: tabular-nums; }
+  .v_ok    { color: var(--color-status-ok, #6a9a4a); font-variant-numeric: tabular-nums; }
+  .v_brass { color: var(--color-accent-fg, #968228); font-variant-numeric: tabular-nums; }
   .v_blood { color: var(--accent-blood, #e85050); font-variant-numeric: tabular-nums; }
 
   @media (prefers-contrast: more) {

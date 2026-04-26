@@ -24,7 +24,7 @@ function previewCard(preview: LinkPreview) {
       href=${href}
       target="_blank"
       rel="noreferrer"
-      class="group flex overflow-hidden rounded border border-[var(--card-border)] bg-[var(--white-3)] text-inherit no-underline transition-colors hover:border-[var(--accent-20)] hover:bg-[var(--white-5)]"
+      class="group flex overflow-hidden rounded border border-[var(--color-border-default)] bg-[var(--white-3)] text-inherit no-underline transition-colors hover:border-[var(--accent-20)] hover:bg-[var(--white-5)]"
     >
       ${imageUrl
         ? html`
@@ -34,15 +34,15 @@ function previewCard(preview: LinkPreview) {
           `
         : null}
       <div class="min-w-0 flex-1 px-3 py-2.5">
-        <div class="flex items-center gap-2 text-2xs text-[var(--text-muted)]">
+        <div class="flex items-center gap-2 text-2xs text-[var(--color-fg-muted)]">
           ${faviconUrl ? html`<img src=${faviconUrl} alt="" class="h-3.5 w-3.5 rounded-sm" loading="lazy" />` : null}
           <span class="truncate">${preview.site_name || hostLabel}</span>
         </div>
-        <div class="mt-1 text-xs font-semibold leading-snug text-[var(--text-strong)] group-hover:text-[var(--accent)]">
+        <div class="mt-1 text-xs font-semibold leading-snug text-[var(--color-fg-secondary)] group-hover:text-[var(--color-accent-fg)]">
           ${title}
         </div>
         ${description
-          ? html`<div class="mt-1 line-clamp-3 text-2xs leading-relaxed text-[var(--text-muted)]">${description}</div>`
+          ? html`<div class="mt-1 line-clamp-3 text-2xs leading-relaxed text-[var(--color-fg-muted)]">${description}</div>`
           : null}
       </div>
     </a>

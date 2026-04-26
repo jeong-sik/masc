@@ -17,11 +17,11 @@ stylesheet
   .quiet {
     padding: 40px 20px;
     text-align: center;
-    border: 1px dashed var(--border-main);
+    border: 1px dashed var(--color-border-default);
     font-family: 'EB Garamond', serif;
     font-style: italic;
     font-size: 14px;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
   }
 
   .tree {
@@ -31,14 +31,14 @@ stylesheet
   }
 
   .goal {
-    border: 1px solid var(--border-main);
-    background: linear-gradient(180deg, color-mix(in oklab, var(--bg-panel) 70%, transparent), color-mix(in oklab, var(--bg-deep) 85%, transparent));
+    border: 1px solid var(--color-border-default);
+    background: linear-gradient(180deg, color-mix(in oklab, var(--color-bg-surface) 70%, transparent), color-mix(in oklab, var(--color-bg-page) 85%, transparent));
     padding: 14px 16px;
     display: flex;
     flex-direction: column;
     gap: 10px;
   }
-  .goal_indent { margin-left: 24px; border-left: 1px dashed var(--border-main); padding-left: 16px; }
+  .goal_indent { margin-left: 24px; border-left: 1px dashed var(--color-border-default); padding-left: 16px; }
 
   .goal_head {
     display: grid;
@@ -63,7 +63,7 @@ stylesheet
   .goal_horizon {
     font-family: 'JetBrains Mono', ui-monospace, monospace;
     font-size: 11px;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
     letter-spacing: 0.14em;
     text-transform: uppercase;
   }
@@ -74,22 +74,22 @@ stylesheet
     gap: 18px;
     font-family: 'JetBrains Mono', ui-monospace, monospace;
     font-size: 11px;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
   }
   .goal_meta_v { color: var(--text-bright); font-variant-numeric: tabular-nums; }
-  .goal_meta_v_ok { color: var(--status-ok); font-variant-numeric: tabular-nums; }
+  .goal_meta_v_ok { color: var(--color-status-ok); font-variant-numeric: tabular-nums; }
 
   .conv_bar_wrap {
     text-align: right;
     font-family: 'JetBrains Mono', ui-monospace, monospace;
     font-size: 11px;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
     font-variant-numeric: tabular-nums;
   }
   .conv_bar {
     margin-top: 4px;
     height: 4px;
-    background: color-mix(in oklab, var(--status-ok) 12%, transparent);
+    background: color-mix(in oklab, var(--color-status-ok) 12%, transparent);
     position: relative;
   }
   .conv_bar_fill {
@@ -97,14 +97,14 @@ stylesheet
     left: 0;
     top: 0;
     bottom: 0;
-    background: var(--status-ok);
+    background: var(--color-status-ok);
   }
 
 
   .tasks {
     font-family: 'JetBrains Mono', ui-monospace, monospace;
     font-size: 11px;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
     display: flex;
     flex-wrap: wrap;
     gap: 12px;
@@ -114,14 +114,14 @@ stylesheet
     align-items: baseline;
     gap: 6px;
   }
-  .task_dot { color: var(--text-dim); }
-  .task_dot_done { color: var(--status-ok); }
-  .task_dot_run { color: var(--status-warn); }
-  .task_title { color: var(--text-primary); }
+  .task_dot { color: var(--color-fg-muted); }
+  .task_dot_done { color: var(--color-status-ok); }
+  .task_dot_run { color: var(--color-status-warn); }
+  .task_title { color: var(--color-fg-primary); }
 
   .blocker {
-    border: 1px solid color-mix(in oklab, var(--accent-brass) 28%, transparent);
-    background: color-mix(in oklab, var(--accent-brass) 8%, transparent);
+    border: 1px solid color-mix(in oklab, var(--color-accent-fg) 28%, transparent);
+    background: color-mix(in oklab, var(--color-accent-fg) 8%, transparent);
     padding: 8px 10px;
     display: flex;
     flex-direction: column;
@@ -133,20 +133,20 @@ stylesheet
     font-size: 11px;
     letter-spacing: 0.16em;
     text-transform: uppercase;
-    color: var(--status-warn);
+    color: var(--color-status-warn);
   }
 
   .blocker_v {
     font-family: 'Noto Sans KR', sans-serif;
     font-size: 12px;
     line-height: 1.45;
-    color: var(--text-primary);
+    color: var(--color-fg-primary);
   }
 
   .blocker_meta {
     font-family: 'JetBrains Mono', ui-monospace, monospace;
     font-size: 11px;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
   }
 
   @media (max-width: 760px) {

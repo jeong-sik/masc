@@ -81,7 +81,7 @@ function TaskEventsSection() {
           onInput=${(e: Event) => { taskEventsSearchQuery.value = (e.target as HTMLInputElement).value }}
           class="min-w-45 flex-1 !py-1 !text-2xs"
         />
-        <span class="text-3xs text-[var(--text-muted)] tabular-nums">
+        <span class="text-3xs text-[var(--color-fg-muted)] tabular-nums">
           ${trimmed
             ? `${visible.length} / ${events.length}`
             : `${events.length}개`}
@@ -369,9 +369,9 @@ function GoalRelationSection({ goalIds }: { goalIds: string[] }) {
             placeholder="목표 검색 (title/status/metric)"
             aria-label="목표 검색"
             onInput=${(e: Event) => { goalRelationSearchQuery.value = (e.target as HTMLInputElement).value }}
-            class="min-w-40 max-w-60 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+            class="min-w-40 max-w-60 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
           />
-          <span class="text-3xs text-[var(--text-muted)] tabular-nums">
+          <span class="text-3xs text-[var(--color-fg-muted)] tabular-nums">
             ${isFiltering
               ? `${visibleIds.length} / ${goalIds.length}`
               : `${goalIds.length}개`}
@@ -379,7 +379,7 @@ function GoalRelationSection({ goalIds }: { goalIds: string[] }) {
         ` : null}
       </div>
       ${isFiltering && visibleIds.length === 0
-        ? html`<div class="py-3 text-center text-2xs text-[var(--text-dim)]">필터 결과 없음 (${goalIds.length} goals)</div>`
+        ? html`<div class="py-3 text-center text-2xs text-[var(--color-fg-disabled)]">필터 결과 없음 (${goalIds.length} goals)</div>`
         : html`
       <div class="flex flex-col gap-1">
         ${visibleIds.map(id => {
@@ -416,10 +416,10 @@ export function TaskDetailOverlay() {
       onClose=${closeTaskDetail}
       initialFocusRef=${closeButtonRef}
       overlayClass="fixed inset-0 z-[60] bg-[var(--white-5)]/60 backdrop-blur-sm isolate flex items-center justify-center p-6 animate-in fade-in duration-200"
-      panelClass="w-full max-w-[900px] max-h-[90vh] overflow-y-auto bg-[#0d1526] rounded border border-[var(--card-border)] shadow-[0_24px_64px_var(--black-50)]"
+      panelClass="w-full max-w-[900px] max-h-[90vh] overflow-y-auto bg-[#0d1526] rounded border border-[var(--color-border-default)] shadow-[0_24px_64px_var(--black-50)]"
     >
       ${'' /* Sticky Header */}
-      <div class="sticky top-0 z-10 flex items-center justify-between gap-4 px-6 py-4 border-b border-[var(--card-border)] bg-[rgba(13,21,38,0.97)] backdrop-blur-sm rounded-t-2xl">
+      <div class="sticky top-0 z-10 flex items-center justify-between gap-4 px-6 py-4 border-b border-[var(--color-border-default)] bg-[rgba(13,21,38,0.97)] backdrop-blur-sm rounded-t-2xl">
         <div class="flex-1 min-w-0">
           <h2 id=${titleId} class="text-lg font-semibold text-text-strong break-words">${task.title}</h2>
           <div class="mt-1.5 flex flex-wrap items-center gap-2">
@@ -446,7 +446,7 @@ export function TaskDetailOverlay() {
               type="button"
               class="px-3 py-1.5 rounded text-xs font-medium border cursor-pointer transition-colors ${
                 activeTab.value === tab
-                  ? 'border-accent/40 bg-accent/12 text-[var(--accent)]'
+                  ? 'border-accent/40 bg-accent/12 text-[var(--color-accent-fg)]'
                   : 'border-transparent text-text-muted hover:bg-[var(--white-8)]'
               }"
               onClick=${() => tab === 'activity' ? switchToActivityTab(task) : (activeTab.value = 'overview')}
@@ -483,7 +483,7 @@ export function TaskDetailOverlay() {
           </div>
 
           ${'' /* Metadata */}
-          <div class="flex flex-wrap items-center gap-3 text-2xs text-text-dim border-t border-[var(--card-border)] pt-4">
+          <div class="flex flex-wrap items-center gap-3 text-2xs text-text-dim border-t border-[var(--color-border-default)] pt-4">
             ${task.created_at ? html`<span>생성: <${TimeAgo} timestamp=${task.created_at} /></span>` : null}
             <span class="font-mono">${task.id}</span>
           </div>

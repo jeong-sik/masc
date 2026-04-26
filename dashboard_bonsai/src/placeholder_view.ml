@@ -21,9 +21,9 @@ stylesheet
 
   .panel {
     min-height: 148px;
-    border: 1px solid var(--border-main);
+    border: 1px solid var(--color-border-default);
     background:
-      linear-gradient(180deg, color-mix(in oklab, var(--bg-panel) 68%, transparent), color-mix(in oklab, var(--bg-deep) 86%, transparent));
+      linear-gradient(180deg, color-mix(in oklab, var(--color-bg-surface) 68%, transparent), color-mix(in oklab, var(--color-bg-page) 86%, transparent));
     padding: 15px 16px;
     display: flex;
     flex-direction: column;
@@ -35,7 +35,7 @@ stylesheet
     font-size: 11px;
     letter-spacing: 0.28em;
     text-transform: uppercase;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
     margin: 0;
   }
 
@@ -43,7 +43,7 @@ stylesheet
     font-family: var(--font-body, 'EB Garamond', serif);
     font-size: 15px;
     line-height: 1.55;
-    color: var(--text-primary);
+    color: var(--color-fg-primary);
     margin: 0;
   }
 
@@ -52,7 +52,7 @@ stylesheet
     font-family: var(--font-mono, 'JetBrains Mono', monospace);
     font-size: 11px;
     line-height: 1.45;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
     overflow-wrap: anywhere;
   }
 
@@ -62,9 +62,9 @@ stylesheet
     gap: 8px;
     align-items: center;
     padding: 14px 16px;
-    border: 1px solid var(--border-highlight);
+    border: 1px solid var(--color-border-strong);
     background:
-      linear-gradient(180deg, color-mix(in oklab, var(--bg-card) 40%, transparent), color-mix(in oklab, var(--bg-deep) 70%, transparent));
+      linear-gradient(180deg, color-mix(in oklab, var(--color-bg-elevated) 40%, transparent), color-mix(in oklab, var(--color-bg-page) 70%, transparent));
   }
 
   .btn {
@@ -73,9 +73,9 @@ stylesheet
     gap: 6px;
     min-height: 30px;
     padding: 7px 12px;
-    border: 1px solid var(--accent-brass-dim);
-    background: linear-gradient(180deg, color-mix(in oklab, var(--bg-panel) 80%, var(--bg-deep)), var(--bg-deep));
-    color: var(--text-primary);
+    border: 1px solid var(--color-accent-fg-dim);
+    background: linear-gradient(180deg, color-mix(in oklab, var(--color-bg-surface) 80%, var(--color-bg-page)), var(--color-bg-page));
+    color: var(--color-fg-primary);
     font-family: var(--font-ui, 'Noto Sans KR', sans-serif);
     font-size: 11px;
     letter-spacing: 0.24em;
@@ -84,22 +84,22 @@ stylesheet
   }
 
   .btn:hover {
-    color: var(--accent-brass);
-    border-color: var(--accent-brass);
+    color: var(--color-accent-fg);
+    border-color: var(--color-accent-fg);
   }
-  .btn:focus-visible { outline: 2px solid var(--accent-brass); outline-offset: -2px; }
+  .btn:focus-visible { outline: 2px solid var(--color-accent-fg); outline-offset: -2px; }
 
   .btn_primary {
-    color: var(--accent-brass);
-    border-color: var(--accent-brass);
-    background: linear-gradient(180deg, color-mix(in oklab, var(--accent-brass) 20%, var(--bg-panel)), var(--bg-deep));
+    color: var(--color-accent-fg);
+    border-color: var(--color-accent-fg);
+    background: linear-gradient(180deg, color-mix(in oklab, var(--color-accent-fg) 20%, var(--color-bg-surface)), var(--color-bg-page));
   }
 
   .cta_note {
     margin-left: auto;
     font-family: var(--font-mono, 'JetBrains Mono', monospace);
     font-size: 11px;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
     font-variant-numeric: tabular-nums;
   }
 

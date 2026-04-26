@@ -42,10 +42,10 @@ export function progressBarHeightClass(size: ProgressBarSize = 'sm'): string {
     bespoke brand color pass `class` instead. */
 export function progressBarToneClass(tone: ProgressBarTone): string {
   switch (tone) {
-    case 'accent': return 'bg-[var(--accent)]'
-    case 'ok': return 'bg-[var(--ok)]'
-    case 'warn': return 'bg-[var(--warn)]'
-    case 'bad': return 'bg-[var(--bad)]'
+    case 'accent': return 'bg-[var(--color-accent-fg)]'
+    case 'ok': return 'bg-[var(--color-status-ok)]'
+    case 'warn': return 'bg-[var(--color-status-warn)]'
+    case 'bad': return 'bg-[var(--color-status-err)]'
     case 'emerald': return 'bg-[var(--ok-10)]'
     case 'amber': return 'bg-[var(--warn-10)]'
     case 'rose': return 'bg-[var(--bad-10)]'

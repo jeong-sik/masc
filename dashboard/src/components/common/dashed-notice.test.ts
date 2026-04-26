@@ -16,7 +16,7 @@ describe('dashedNoticeClasses (pure)', () => {
     const cls = dashedNoticeClasses()
     expect(cls).toContain('border-dashed')
     expect(cls).toContain('text-center')
-    expect(cls).toContain('text-[var(--text-dim)]')
+    expect(cls).toContain('text-[var(--color-fg-disabled)]')
   })
 
   it('sm size: 10px text + rounded + tight padding (matches fsm-hub timeline panels)', () => {
@@ -36,7 +36,7 @@ describe('dashedNoticeClasses (pure)', () => {
   })
 
   it('card border tone uses --card-border', () => {
-    expect(dashedNoticeClasses('sm', 'card')).toContain('border-[var(--card-border)]')
+    expect(dashedNoticeClasses('sm', 'card')).toContain('border-[var(--color-border-default)]')
   })
 
   it('subtle border tone uses --white-8 (dimmer)', () => {

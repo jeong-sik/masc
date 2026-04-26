@@ -254,7 +254,7 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
 
   const toneClass = keeper.paused || socialFallbackActive || runtimeBlocker || blocker || hbStale
     ? 'border-[var(--warn-24)] bg-[var(--warn-8)]'
-    : 'border-[var(--card-border)] bg-[var(--white-3)]'
+    : 'border-[var(--color-border-default)] bg-[var(--white-3)]'
   const runtimeBlockerLabel = runtimeBlockerClass
     ? {
         ambiguous_post_commit_timeout: '커밋 후 응답 없음',
@@ -270,12 +270,12 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
     : null
   const trustToneClass =
     trustDisposition === 'Alert'
-      ? 'bg-[var(--bad-soft)] text-[var(--bad)]'
+      ? 'bg-[var(--bad-soft)] text-[var(--color-status-err)]'
       : trustDisposition === 'Pause' || keeper.trust?.needs_attention
-        ? 'bg-[var(--warn-14)] text-[var(--warn)]'
+        ? 'bg-[var(--warn-14)] text-[var(--color-status-warn)]'
         : trustDisposition === 'Pass'
-          ? 'bg-[var(--ok-10)] text-[var(--ok)]'
-          : 'bg-[var(--white-6)] text-[var(--text-strong)]'
+          ? 'bg-[var(--ok-10)] text-[var(--color-status-ok)]'
+          : 'bg-[var(--white-6)] text-[var(--color-fg-secondary)]'
   const trustDispositionLabel = trustDisposition
     ? ({ Alert: '경보', Pause: '정지', Pass: '통과' } as Record<string, string>)[
         trustDisposition
@@ -284,23 +284,23 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
 
   return html`
     <div class="px-6 pt-4">
-      <div class="rounded border ${toneClass} px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-[var(--text-body)]">
+      <div class="rounded border ${toneClass} px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-[var(--color-fg-primary)]">
         ${keeper.paused
-          ? html`<span class="inline-flex items-center rounded-sm px-2 py-0.5 text-2xs font-semibold bg-[var(--warn-14)] text-[var(--warn)]">일시정지</span>
-            ${hasActivitySignal ? html`<span class="text-[var(--text-muted)]">${renderActivitySignal()}</span>` : null}
+          ? html`<span class="inline-flex items-center rounded-sm px-2 py-0.5 text-2xs font-semibold bg-[var(--warn-14)] text-[var(--color-status-warn)]">일시정지</span>
+            ${hasActivitySignal ? html`<span class="text-[var(--color-fg-muted)]">${renderActivitySignal()}</span>` : null}
             <button
-              class="inline-flex items-center rounded px-2 py-0.5 text-2xs font-medium bg-[var(--white-6)] hover:bg-[var(--white-8)] text-[var(--text-strong)] transition-colors disabled:opacity-50"
+              class="inline-flex items-center rounded px-2 py-0.5 text-2xs font-medium bg-[var(--white-6)] hover:bg-[var(--white-8)] text-[var(--color-fg-secondary)] transition-colors disabled:opacity-50"
               disabled=${directiveLoading.value}
               onClick=${() => handleDirective('resume')}
             >재개</button>`
           : html`<button
-              class="inline-flex items-center rounded px-2 py-0.5 text-2xs font-medium bg-[var(--white-6)] hover:bg-[var(--white-8)] text-[var(--text-strong)] transition-colors disabled:opacity-50"
+              class="inline-flex items-center rounded px-2 py-0.5 text-2xs font-medium bg-[var(--white-6)] hover:bg-[var(--white-8)] text-[var(--color-fg-secondary)] transition-colors disabled:opacity-50"
               disabled=${directiveLoading.value}
               onClick=${() => handleDirective('pause')}
             >일시정지</button>
             ${(hbStale || runtimeBlockerClass === 'oas_timeout_budget' || runtimeBlockerClass === 'cascade_exhausted' || runtimeBlockerClass === 'turn_timeout')
               ? html`<button
-                  class="inline-flex items-center rounded px-2 py-0.5 text-2xs font-medium bg-[var(--warn-14)] hover:bg-[var(--warn-24)] text-[var(--warn)] transition-colors disabled:opacity-50"
+                  class="inline-flex items-center rounded px-2 py-0.5 text-2xs font-medium bg-[var(--warn-14)] hover:bg-[var(--warn-24)] text-[var(--color-status-warn)] transition-colors disabled:opacity-50"
                   disabled=${directiveLoading.value}
                   onClick=${() => handleDirective('wakeup')}
                   title="자고 있는 keeper의 sleep을 깨워 다음 turn을 시도합니다. fiber가 살아 있을 때만 효과가 있습니다."
@@ -312,45 +312,45 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
             ? html`<span>하트비트는 유지되지만 자율 행동은 멈춰 있습니다.</span>`
           : null}
         ${hbStale
-          ? html`<span class="inline-flex items-center rounded-sm px-2 py-0.5 text-2xs font-semibold bg-[var(--bad-soft)] text-[var(--bad)]">하트비트 끊김</span>
+          ? html`<span class="inline-flex items-center rounded-sm px-2 py-0.5 text-2xs font-semibold bg-[var(--bad-soft)] text-[var(--color-status-err)]">하트비트 끊김</span>
             <span>마지막 하트비트: <${TimeAgo} timestamp=${keeper.last_heartbeat} /></span>`
           : null}
         ${continueGate
           ? html`
-              <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-2xs font-semibold bg-[var(--warn-14)] text-[var(--warn)]">
+              <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-2xs font-semibold bg-[var(--warn-14)] text-[var(--color-status-warn)]">
                 계속 진행 승인 대기
               </span>
-              ${hasActivitySignal ? html`<span class="text-[var(--text-muted)]">${renderActivitySignal()}</span>` : null}
+              ${hasActivitySignal ? html`<span class="text-[var(--color-fg-muted)]">${renderActivitySignal()}</span>` : null}
             `
           : socialFallbackActive
           ? html`
-              <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-2xs font-semibold bg-[var(--warn-14)] text-[var(--warn)]">
+              <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-2xs font-semibold bg-[var(--warn-14)] text-[var(--color-status-warn)]">
                 소셜 폴백
               </span>
-              ${hasActivitySignal ? html`<span class="text-[var(--text-muted)]">${renderActivitySignal()}</span>` : null}
+              ${hasActivitySignal ? html`<span class="text-[var(--color-fg-muted)]">${renderActivitySignal()}</span>` : null}
             `
           : runtimeBlockerClass
           ? html`
-              <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-2xs font-semibold bg-[var(--bad-soft)] text-[var(--bad)]">
+              <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-2xs font-semibold bg-[var(--bad-soft)] text-[var(--color-status-err)]">
                 ${runtimeBlockerLabel ?? '런타임 차단'}
               </span>
-              ${hasActivitySignal ? html`<span class="text-[var(--text-muted)]">${renderActivitySignal()}</span>` : null}
+              ${hasActivitySignal ? html`<span class="text-[var(--color-fg-muted)]">${renderActivitySignal()}</span>` : null}
             `
           : null}
         ${runtimeBlocker
-          ? html`<span><strong class="text-[var(--text-strong)]">런타임 차단</strong> · ${runtimeBlocker}</span>`
+          ? html`<span><strong class="text-[var(--color-fg-secondary)]">런타임 차단</strong> · ${runtimeBlocker}</span>`
           : null}
         ${blocker
-          ? html`<span><strong class="text-[var(--text-strong)]">차단 요인</strong> · ${blocker}</span>`
+          ? html`<span><strong class="text-[var(--color-fg-secondary)]">차단 요인</strong> · ${blocker}</span>`
           : null}
         ${keeper.last_need
-          ? html`<span><strong class="text-[var(--text-strong)]">최근 필요</strong> · ${keeper.last_need}</span>`
+          ? html`<span><strong class="text-[var(--color-fg-secondary)]">최근 필요</strong> · ${keeper.last_need}</span>`
           : null}
         ${attentionReason
-          ? html`<span><strong class="text-[var(--text-strong)]">주의 사유</strong> · ${attentionReason}</span>`
+          ? html`<span><strong class="text-[var(--color-fg-secondary)]">주의 사유</strong> · ${attentionReason}</span>`
           : null}
         ${nextHumanAction
-          ? html`<span><strong class="text-[var(--text-strong)]">다음 액션</strong> · ${nextHumanAction}</span>`
+          ? html`<span><strong class="text-[var(--color-fg-secondary)]">다음 액션</strong> · ${nextHumanAction}</span>`
           : null}
         ${trustDisposition
           ? html`
@@ -360,24 +360,24 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
             `
           : null}
         ${trustSummary
-          ? html`<span><strong class="text-[var(--text-strong)]">검증</strong> · ${trustSummary}</span>`
+          ? html`<span><strong class="text-[var(--color-fg-secondary)]">검증</strong> · ${trustSummary}</span>`
           : null}
         ${runtimeProofStatus
-          ? html`<span><strong class="text-[var(--text-strong)]">증명</strong> · ${runtimeProofStatus}</span>`
+          ? html`<span><strong class="text-[var(--color-fg-secondary)]">증명</strong> · ${runtimeProofStatus}</span>`
           : null}
         ${requiredTools.length > 0
-          ? html`<span><strong class="text-[var(--text-strong)]">필요 도구</strong> · ${requiredTools.join(', ')}</span>`
+          ? html`<span><strong class="text-[var(--color-fg-secondary)]">필요 도구</strong> · ${requiredTools.join(', ')}</span>`
           : null}
         ${usedTools.length > 0
-          ? html`<span><strong class="text-[var(--text-strong)]">사용 도구</strong> · ${usedTools.join(', ')}</span>`
+          ? html`<span><strong class="text-[var(--color-fg-secondary)]">사용 도구</strong> · ${usedTools.join(', ')}</span>`
           : null}
         ${missingRequiredTools.length > 0
-          ? html`<span class="text-[var(--bad)]"><strong>누락</strong> · ${missingRequiredTools.join(', ')}</span>`
+          ? html`<span class="text-[var(--color-status-err)]"><strong>누락</strong> · ${missingRequiredTools.join(', ')}</span>`
           : null}
         ${providerSelectedModel || cascadeOutcome || typeof providerAttempts === 'number'
           ? html`
               <span>
-                <strong class="text-[var(--text-strong)]">프로바이더</strong>
+                <strong class="text-[var(--color-fg-secondary)]">프로바이더</strong>
                 · ${providerSelectedModel ?? cascadeOutcome ?? 'observed'}
                 ${typeof providerAttempts === 'number' ? ` · ${providerAttempts}회 시도` : ''}
                 ${providerFallback === true ? ' · 폴백' : ''}
@@ -387,26 +387,26 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
         ${trustLatestEvent
           ? html`
               <span>
-                <strong class="text-[var(--text-strong)]">최근 검증 이벤트</strong>
+                <strong class="text-[var(--color-fg-secondary)]">최근 검증 이벤트</strong>
                 · ${trustLatestEvent.title}
                 · <${TimeAgo} timestamp=${trustLatestEvent.ts} />
               </span>
             `
           : null}
         ${sandboxTarget
-          ? html`<span><strong class="text-[var(--text-strong)]">샌드박스</strong> · ${sandboxTarget}</span>`
+          ? html`<span><strong class="text-[var(--color-fg-secondary)]">샌드박스</strong> · ${sandboxTarget}</span>`
           : null}
         ${typeof persistedPolicyCount === 'number'
-          ? html`<span><strong class="text-[var(--text-strong)]">상시 규칙</strong> · ${persistedPolicyCount}건</span>`
+          ? html`<span><strong class="text-[var(--color-fg-secondary)]">상시 규칙</strong> · ${persistedPolicyCount}건</span>`
           : null}
         ${typeof goalLinkedTasks === 'number'
-          ? html`<span><strong class="text-[var(--text-strong)]">목표 작업</strong> · ${goalLinkedTasks}</span>`
+          ? html`<span><strong class="text-[var(--color-fg-secondary)]">목표 작업</strong> · ${goalLinkedTasks}</span>`
           : null}
         ${typeof goalConvergence === 'number'
-          ? html`<span><strong class="text-[var(--text-strong)]">목표 진행률</strong> · ${Math.round(goalConvergence * 100)}%</span>`
+          ? html`<span><strong class="text-[var(--color-fg-secondary)]">목표 진행률</strong> · ${Math.round(goalConvergence * 100)}%</span>`
           : null}
         ${hasActivitySignal
-          ? html`<span><strong class="text-[var(--text-strong)]">최근 신호</strong> · ${renderActivitySignal()}</span>`
+          ? html`<span><strong class="text-[var(--color-fg-secondary)]">최근 신호</strong> · ${renderActivitySignal()}</span>`
           : null}
       </div>
     </div>
@@ -421,7 +421,7 @@ function KeeperLifecycleButtons({ keeper, effectiveStatus }: { keeper: Keeper; e
 
   if (isOffline) return html`
     <button type="button"
-      class="py-1 px-3 rounded text-2xs font-semibold cursor-pointer border border-[rgba(34,197,94,0.4)] bg-[var(--emerald-8)] text-[var(--ok)] hover:bg-[rgba(34,197,94,0.15)] transition-colors"
+      class="py-1 px-3 rounded text-2xs font-semibold cursor-pointer border border-[rgba(34,197,94,0.4)] bg-[var(--emerald-8)] text-[var(--color-status-ok)] hover:bg-[rgba(34,197,94,0.15)] transition-colors"
       onClick=${() => {
         void (async () => {
           try {
@@ -506,17 +506,17 @@ function KeeperClearContextDialog({
     >
       <div class="p-5 flex flex-col gap-4">
         <div class="flex flex-col gap-1">
-          <h3 id=${titleId} class="m-0 text-[17px] font-semibold text-[var(--text-strong)]">키퍼 컨텍스트 비우기</h3>
-          <p id=${descId} class="m-0 text-sm leading-relaxed text-[var(--text-muted)]">
+          <h3 id=${titleId} class="m-0 text-[17px] font-semibold text-[var(--color-fg-secondary)]">키퍼 컨텍스트 비우기</h3>
+          <p id=${descId} class="m-0 text-sm leading-relaxed text-[var(--color-fg-muted)]">
             ${keeperName}의 checkpoint 대화와 continuity summary를 비웁니다. 사유는 감사 로그에 남습니다.
           </p>
         </div>
 
         <label class="flex flex-col gap-2">
-          <span class="text-2xs font-semibold uppercase tracking-1 text-[var(--text-muted)]">사유</span>
+          <span class="text-2xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">사유</span>
           <textarea
             ref=${reasonRef}
-            class="min-h-[112px] resize-y rounded border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-2 text-sm leading-paragraph text-[var(--text-body)] outline-none focus:border-[var(--accent-45)] focus:ring-2 focus:ring-[var(--accent-18)]"
+            class="min-h-[112px] resize-y rounded border border-[var(--color-border-default)] bg-[var(--white-3)] px-3 py-2 text-sm leading-paragraph text-[var(--color-fg-primary)] outline-none focus:border-[var(--accent-45)] focus:ring-2 focus:ring-[var(--accent-18)]"
             placeholder="예: stale continuity replay 제거"
             disabled=${pending}
             value=${reason}
@@ -524,7 +524,7 @@ function KeeperClearContextDialog({
           ></textarea>
         </label>
 
-        <label class="flex items-start gap-3 rounded border border-[var(--card-border)] bg-[var(--white-2)] px-3 py-3 text-xs text-[var(--text-body)]">
+        <label class="flex items-start gap-3 rounded border border-[var(--color-border-default)] bg-[var(--white-2)] px-3 py-3 text-xs text-[var(--color-fg-primary)]">
           <input
             type="checkbox"
             class="mt-0.5"
@@ -534,24 +534,24 @@ function KeeperClearContextDialog({
           />
           <span>
             system prompt는 보존하고 나머지 메시지만 비웁니다.
-            <span class="block mt-1 text-[var(--text-muted)]">끄면 system prompt까지 같이 제거합니다.</span>
+            <span class="block mt-1 text-[var(--color-fg-muted)]">끄면 system prompt까지 같이 제거합니다.</span>
           </span>
         </label>
 
-        <div class="rounded border border-[var(--warn-24)] bg-[var(--warn-8)] px-3 py-2 text-2xs leading-relaxed text-[var(--text-muted)]">
+        <div class="rounded border border-[var(--warn-24)] bg-[var(--warn-8)] px-3 py-2 text-2xs leading-relaxed text-[var(--color-fg-muted)]">
           마지막 수단용 액션입니다. 잘못된 continuity가 재주입될 때만 쓰고, 실행 후 즉시 상태를 다시 확인하세요.
         </div>
 
         <div class="flex items-center justify-end gap-2">
           <button
             type="button"
-            class="px-4 py-2 rounded text-sm font-medium border border-[var(--card-border)] bg-[var(--white-4)] text-[var(--text-body)] hover:bg-[var(--white-8)] transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+            class="px-4 py-2 rounded text-sm font-medium border border-[var(--color-border-default)] bg-[var(--white-4)] text-[var(--color-fg-primary)] hover:bg-[var(--white-8)] transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
             disabled=${pending}
             onClick=${onClose}
           >취소</button>
           <button
             type="button"
-            class="px-4 py-2 rounded text-sm font-medium border border-transparent bg-[var(--bad)] text-white hover:bg-[rgba(239,68,68,0.88)] transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+            class="px-4 py-2 rounded text-sm font-medium border border-transparent bg-[var(--color-status-err)] text-white hover:bg-[rgba(239,68,68,0.88)] transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
             disabled=${pending || reason.trim() === ''}
             onClick=${onSubmit}
           >${pending ? '비우는 중...' : '비우기'}</button>
@@ -568,10 +568,10 @@ function KeeperCommsPanel({ keeper }: { keeper: Keeper }) {
 
   return html`
     <div class="border-t border-[var(--border-slate-12)] pt-5">
-      <h3 class="m-0 mb-3 text-sm font-semibold text-[var(--text-strong)] uppercase tracking-[0.06em]">직접 통신</h3>
+      <h3 class="m-0 mb-3 text-sm font-semibold text-[var(--color-fg-secondary)] uppercase tracking-[0.06em]">직접 통신</h3>
 
       ${isOffline ? html`
-        <div class="px-4 py-3 rounded border border-[var(--card-border)] bg-[rgba(90,100,120,0.08)] text-sm text-[var(--text-muted)]">
+        <div class="px-4 py-3 rounded border border-[var(--color-border-default)] bg-[rgba(90,100,120,0.08)] text-sm text-[var(--color-fg-muted)]">
           이 키퍼는 현재 비활동 상태입니다. 기동 후 메시지를 보낼 수 있습니다.
         </div>
       ` : html`
@@ -590,7 +590,7 @@ function KeeperCommsPanel({ keeper }: { keeper: Keeper }) {
 
 function ProfileField({ label, value, color }: { label: string; value: string; color: string }) {
   return html`
-    <div class="flex items-start gap-2 text-xs text-[var(--text-muted)]">
+    <div class="flex items-start gap-2 text-xs text-[var(--color-fg-muted)]">
       <span class="flex-shrink-0">${label}:</span>
       <span class="font-medium leading-relaxed" style="color: ${color}">${value}</span>
     </div>
@@ -661,19 +661,19 @@ function PlaygroundReposPanel({ keeperName }: { keeperName: string }) {
       <div class="flex flex-col gap-3">
         ${repos.length > 0 ? html`
           <div>
-            <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1.5">Repos (${repos.length})</div>
+            <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mb-1.5">Repos (${repos.length})</div>
             <div class="flex flex-col gap-1.5">
               ${repos.map(r => html`
                 <div class="flex items-center gap-3 px-3 py-2 rounded border border-[var(--white-8)] bg-[var(--white-2)]">
                   <div class="flex-1 min-w-0">
                     <div class="flex items-center gap-2">
-                      <span class="text-xs font-medium text-[var(--text-strong)] truncate">${r.name}</span>
-                      <span class="text-3xs font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-15)]">${r.branch}</span>
-                      ${r.shallow ? html`<span class="text-3xs px-1 py-0.5 rounded bg-[var(--warn-10)] text-[var(--warn)] border border-[var(--warn-20)]">shallow</span>` : null}
+                      <span class="text-xs font-medium text-[var(--color-fg-secondary)] truncate">${r.name}</span>
+                      <span class="text-3xs font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--color-accent-fg)] border border-[var(--accent-15)]">${r.branch}</span>
+                      ${r.shallow ? html`<span class="text-3xs px-1 py-0.5 rounded bg-[var(--warn-10)] text-[var(--color-status-warn)] border border-[var(--warn-20)]">shallow</span>` : null}
                     </div>
-                    <div class="text-3xs text-[var(--text-muted)] font-mono mt-0.5 truncate">${r.latest_commit}</div>
+                    <div class="text-3xs text-[var(--color-fg-muted)] font-mono mt-0.5 truncate">${r.latest_commit}</div>
                   </div>
-                  <span class="text-3xs text-[var(--text-dim)] flex-shrink-0">${r.last_action}</span>
+                  <span class="text-3xs text-[var(--color-fg-disabled)] flex-shrink-0">${r.last_action}</span>
                 </div>
               `)}
             </div>
@@ -682,14 +682,14 @@ function PlaygroundReposPanel({ keeperName }: { keeperName: string }) {
 
         ${prs.length > 0 ? html`
           <div>
-            <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1.5">PRs (${prs.length})</div>
+            <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mb-1.5">PRs (${prs.length})</div>
             <div class="flex flex-col gap-1.5">
               ${prs.map(pr => html`
                 <div class="flex items-center gap-2 px-3 py-1.5 rounded border border-[var(--white-8)] bg-[var(--white-2)]">
-                  <span class="text-xs text-[var(--text-strong)] truncate flex-1">${pr.title}</span>
-                  <span class="text-3xs font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-15)]">${pr.branch}</span>
-                  ${pr.draft ? html`<span class="text-3xs px-1 py-0.5 rounded bg-[var(--warn-10)] text-[var(--warn)] border border-[var(--warn-20)]">draft</span>` : null}
-                  <a href=${pr.pr_url} target="_blank" rel="noopener" class="text-3xs text-[var(--accent)] hover:underline flex-shrink-0">PR</a>
+                  <span class="text-xs text-[var(--color-fg-secondary)] truncate flex-1">${pr.title}</span>
+                  <span class="text-3xs font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--color-accent-fg)] border border-[var(--accent-15)]">${pr.branch}</span>
+                  ${pr.draft ? html`<span class="text-3xs px-1 py-0.5 rounded bg-[var(--warn-10)] text-[var(--color-status-warn)] border border-[var(--warn-20)]">draft</span>` : null}
+                  <a href=${pr.pr_url} target="_blank" rel="noopener" class="text-3xs text-[var(--color-accent-fg)] hover:underline flex-shrink-0">PR</a>
                 </div>
               `)}
             </div>
@@ -698,10 +698,10 @@ function PlaygroundReposPanel({ keeperName }: { keeperName: string }) {
 
         ${worktrees.length > 0 ? html`
           <div>
-            <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1.5">Worktrees (${worktrees.length})</div>
+            <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mb-1.5">Worktrees (${worktrees.length})</div>
             <div class="flex flex-wrap gap-1.5">
               ${worktrees.map(w => html`
-                <span class="text-3xs font-mono px-2 py-1 rounded border border-[var(--white-8)] bg-[var(--white-2)] text-[var(--text-muted)]" title=${w.path}>${w.name}</span>
+                <span class="text-3xs font-mono px-2 py-1 rounded border border-[var(--white-8)] bg-[var(--white-2)] text-[var(--color-fg-muted)]" title=${w.path}>${w.name}</span>
               `)}
             </div>
           </div>
@@ -844,8 +844,8 @@ export function KeeperDetailPage() {
 
   return html`
     <div class="mx-auto flex w-full max-w-[1600px] flex-col gap-5 pb-8">
-      <div class="sticky top-0 z-20 overflow-hidden rounded-[28px] border border-[var(--card-border)] bg-[rgba(13,21,38,0.96)] shadow-[0_24px_64px_rgba(0,0,0,0.22)] backdrop-blur-xl">
-        <div class="flex items-center justify-between gap-4 border-b border-[var(--card-border)] px-5 py-4 sm:px-6">
+      <div class="sticky top-0 z-20 overflow-hidden rounded-[28px] border border-[var(--color-border-default)] bg-[rgba(13,21,38,0.96)] shadow-[0_24px_64px_rgba(0,0,0,0.22)] backdrop-blur-xl">
+        <div class="flex items-center justify-between gap-4 border-b border-[var(--color-border-default)] px-5 py-4 sm:px-6">
           <${KeeperDetailHeaderInfo}
             keeper=${keeper}
             titleId=${titleId}
@@ -868,7 +868,7 @@ export function KeeperDetailPage() {
             <button
               type="button"
               onClick=${() => closeKeeperDetail()}
-              class="flex items-center justify-center size-8 rounded border border-[var(--card-border)] bg-[var(--white-3)] text-[var(--text-muted)] hover:text-[var(--text-strong)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[#0d1526]"
+              class="flex items-center justify-center size-8 rounded border border-[var(--color-border-default)] bg-[var(--white-3)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg-secondary)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[#0d1526]"
               aria-label="키퍼 상세 종료"
             >
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="2" y1="2" x2="12" y2="12"/><line x1="12" y1="2" x2="2" y2="12"/></svg>
@@ -897,7 +897,7 @@ export function KeeperDetailPage() {
           >
         <${PipelineStageBar} stage=${keeper.pipeline_stage} />
         <details class="rounded border border-[var(--white-8)] bg-[var(--white-2)]">
-          <summary class="cursor-pointer py-2 px-4 text-3xs font-semibold uppercase tracking-widest text-[var(--text-muted)] list-none select-none flex items-center gap-2">
+          <summary class="cursor-pointer py-2 px-4 text-3xs font-semibold uppercase tracking-widest text-[var(--color-fg-muted)] list-none select-none flex items-center gap-2">
             <span class="w-1.5 h-1.5 rounded-full bg-[rgba(71,184,255,0.5)]"></span>
             Phase State Machine
           </summary>
@@ -907,7 +907,7 @@ export function KeeperDetailPage() {
         </details>
 
         <details class="rounded border border-[var(--white-8)] bg-[var(--white-2)]">
-          <summary class="cursor-pointer py-2 px-4 text-3xs font-semibold uppercase tracking-widest text-[var(--text-muted)] list-none select-none flex items-center gap-2">
+          <summary class="cursor-pointer py-2 px-4 text-3xs font-semibold uppercase tracking-widest text-[var(--color-fg-muted)] list-none select-none flex items-center gap-2">
             <span class="w-1.5 h-1.5 rounded-full bg-[rgba(99,102,241,0.5)]"></span>
             Memory Tier & Compaction
           </summary>
@@ -933,40 +933,40 @@ export function KeeperDetailPage() {
           ? html`
             <div class="flex flex-wrap items-start gap-3 px-1">
               ${keeper.last_heartbeat
-                ? html`<span class="inline-flex items-center gap-1.5 text-2xs text-[var(--text-muted)] px-2.5 py-1 rounded border border-[var(--white-8)] bg-[var(--white-2)]">
+                ? html`<span class="inline-flex items-center gap-1.5 text-2xs text-[var(--color-fg-muted)] px-2.5 py-1 rounded border border-[var(--white-8)] bg-[var(--white-2)]">
                     하트비트 <${TimeAgo} timestamp=${keeper.last_heartbeat} />
                   </span>`
                 : null}
               ${keeper.last_speech_act
-                ? html`<span class="inline-flex items-center gap-1.5 text-2xs text-[var(--text-muted)] px-2.5 py-1 rounded border border-[var(--white-8)] bg-[var(--white-2)]">
-                    최근 <span class="font-mono text-[var(--text-body)]">${keeper.last_speech_act}</span>
+                ? html`<span class="inline-flex items-center gap-1.5 text-2xs text-[var(--color-fg-muted)] px-2.5 py-1 rounded border border-[var(--white-8)] bg-[var(--white-2)]">
+                    최근 <span class="font-mono text-[var(--color-fg-primary)]">${keeper.last_speech_act}</span>
                   </span>`
                 : null}
               ${keeper.social_model_recognized === false
-                ? html`<span class="inline-flex items-center gap-1.5 text-2xs text-[var(--warn)] px-2.5 py-1 rounded border border-[var(--warn-24)] bg-[var(--warn-8)]">
+                ? html`<span class="inline-flex items-center gap-1.5 text-2xs text-[var(--color-status-warn)] px-2.5 py-1 rounded border border-[var(--warn-24)] bg-[var(--warn-8)]">
                     소셜 모델
                     ${keeper.configured_social_model
-                      ? html`<span class="font-mono text-[var(--text-body)]">${keeper.configured_social_model}</span>`
+                      ? html`<span class="font-mono text-[var(--color-fg-primary)]">${keeper.configured_social_model}</span>`
                       : null}
                     ${keeper.configured_social_model && keeper.social_model_fallback
                       ? html`<span>→</span>`
                       : null}
                     ${keeper.social_model_fallback
-                      ? html`<span class="font-mono text-[var(--text-body)]">${keeper.social_model_fallback}</span>`
+                      ? html`<span class="font-mono text-[var(--color-fg-primary)]">${keeper.social_model_fallback}</span>`
                       : null}
                   </span>`
                 : null}
               ${(keeper.k2k_count ?? 0) > 0
-                ? html`<span class="inline-flex items-center gap-1 text-2xs px-2.5 py-1 rounded bg-[rgba(167,139,250,0.08)] border border-[rgba(167,139,250,0.15)] text-[var(--text-muted)]">
+                ? html`<span class="inline-flex items-center gap-1 text-2xs px-2.5 py-1 rounded bg-[rgba(167,139,250,0.08)] border border-[rgba(167,139,250,0.15)] text-[var(--color-fg-muted)]">
                     K2K <span class="font-mono font-medium text-[var(--purple)]">${keeper.k2k_count}</span>
                   </span>`
                 : null}
               ${keeper.memory_recent_note
-                ? html`<span class="text-2xs text-[var(--text-muted)] px-2.5 py-1 rounded border border-[var(--white-8)] bg-[var(--white-2)] truncate max-w-90" title=${keeper.memory_recent_note}>${keeper.memory_recent_note}</span>`
+                ? html`<span class="text-2xs text-[var(--color-fg-muted)] px-2.5 py-1 rounded border border-[var(--white-8)] bg-[var(--white-2)] truncate max-w-90" title=${keeper.memory_recent_note}>${keeper.memory_recent_note}</span>`
                 : null}
             </div>
             ${keeper.recent_output_preview
-              ? html`<div class="py-2 px-3 rounded bg-[rgba(71,184,255,0.06)] border border-[var(--accent-12)] text-xs text-[var(--text-body)] leading-relaxed">
+              ? html`<div class="py-2 px-3 rounded bg-[rgba(71,184,255,0.06)] border border-[var(--accent-12)] text-xs text-[var(--color-fg-primary)] leading-relaxed">
                   <div class="line-clamp-2">${keeper.recent_output_preview}</div>
                 </div>`
               : null}
@@ -994,7 +994,7 @@ export function KeeperDetailPage() {
           >
             <${KeeperCommsPanel} keeper=${keeper} />
             <${SectionCard} title="세션 활동 로그">
-              <div class="text-2xs text-[var(--text-muted)] mb-3">현재 세션의 도구 호출, 태스크 완료, 메시지 등 이벤트 기록</div>
+              <div class="text-2xs text-[var(--color-fg-muted)] mb-3">현재 세션의 도구 호출, 태스크 완료, 메시지 등 이벤트 기록</div>
               <${SessionTraceView} agentName=${keeper.name} isKeeper=${true} keeperStatus=${keeper.status} keeperGeneration=${keeper.generation} />
             <//>
           </${KeeperDetailSection}>
@@ -1025,7 +1025,7 @@ export function KeeperDetailPage() {
               onSocialSweep=${() => { void runSocialSweep() }}
             />
             <div class="pt-3 border-t border-[var(--border-slate-12)]">
-              <h4 class="m-0 mb-3 text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">호출 검사기</h4>
+              <h4 class="m-0 mb-3 text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">호출 검사기</h4>
               ${diagOpen ? html`<${KeeperToolCallInspector} keeperName=${keeper.name} />` : null}
             </div>
           </div>
@@ -1035,7 +1035,7 @@ export function KeeperDetailPage() {
                 <span class="w-1.5 h-1.5 rounded-full bg-accent/50"></span>
                 품질 시그널 (고급 지표)
               </summary>
-              <div class="mt-3 text-2xs text-[var(--text-muted)] mb-3">폴백 비율, 정렬 품질, 자율 행동 비율 등 metrics_window 기반 런타임 품질 지표</div>
+              <div class="mt-3 text-2xs text-[var(--color-fg-muted)] mb-3">폴백 비율, 정렬 품질, 자율 행동 비율 등 metrics_window 기반 런타임 품질 지표</div>
               <${RuntimeSignals} keeper=${keeper} />
             </details>
           </${KeeperDetailSection}>
@@ -1051,19 +1051,19 @@ export function KeeperDetailPage() {
             <${TraitsList} traits=${keeper.traits ?? []} label="특성" />
             <${TraitsList} traits=${keeper.interests ?? []} label="관심사" />
             ${keeper.primaryValue
-              ? html`<div class="flex items-center gap-2 mt-3 text-xs text-[var(--text-muted)]">
-                  <span class="text-[var(--text-muted)]">핵심 가치:</span>
-                  <span class="font-medium text-[var(--ok)]">${keeper.primaryValue}</span>
+              ? html`<div class="flex items-center gap-2 mt-3 text-xs text-[var(--color-fg-muted)]">
+                  <span class="text-[var(--color-fg-muted)]">핵심 가치:</span>
+                  <span class="font-medium text-[var(--color-status-ok)]">${keeper.primaryValue}</span>
                 </div>`
               : null}
             ${keeper.skill_primary
-              ? html`<div class="flex items-center gap-2 mt-2 text-xs text-[var(--text-muted)]">
+              ? html`<div class="flex items-center gap-2 mt-2 text-xs text-[var(--color-fg-muted)]">
                   <span>스킬 경로:</span>
                   <span class="font-medium text-[var(--cyan)]">${keeper.skill_primary}</span>
                 </div>`
               : null}
             ${keeper.skill_reason
-              ? html`<div class="text-2xs text-[var(--text-muted)] mt-1 leading-relaxed">${keeper.skill_reason}</div>`
+              ? html`<div class="text-2xs text-[var(--color-fg-muted)] mt-1 leading-relaxed">${keeper.skill_reason}</div>`
               : null}
 
             ${'' /* ── Identity: will / needs / desires ── */}
@@ -1071,7 +1071,7 @@ export function KeeperDetailPage() {
               ? html`
                 <div class="mt-3 flex flex-col gap-1.5">
                   ${keeper.will ? html`<${ProfileField} label="의지" value=${keeper.will} color="var(--cyan)" />` : null}
-                  ${keeper.needs ? html`<${ProfileField} label="필요" value=${keeper.needs} color="var(--warn)" />` : null}
+                  ${keeper.needs ? html`<${ProfileField} label="필요" value=${keeper.needs} color="var(--color-status-warn)" />` : null}
                   ${keeper.desires ? html`<${ProfileField} label="열망" value=${keeper.desires} color="var(--purple)" />` : null}
                 </div>
               `
@@ -1146,17 +1146,17 @@ export function KeeperDetailPage() {
             description="운영 중에는 덜 자주 보지만, 문제를 깊게 파고들 때 필요한 raw surface를 마지막에 모았습니다."
           >
             <details class="mt-0">
-          <summary class="cursor-pointer py-3 px-4 text-2xs font-semibold uppercase tracking-widest text-[var(--text-muted)] list-none select-none rounded border border-[var(--card-border)] bg-[var(--white-3)] hover:bg-[var(--white-6)] transition-colors flex items-center gap-2">
-            <span class="w-1.5 h-1.5 rounded-full bg-[var(--text-dim)]"></span>
+          <summary class="cursor-pointer py-3 px-4 text-2xs font-semibold uppercase tracking-widest text-[var(--color-fg-muted)] list-none select-none rounded border border-[var(--color-border-default)] bg-[var(--white-3)] hover:bg-[var(--white-6)] transition-colors flex items-center gap-2">
+            <span class="w-1.5 h-1.5 rounded-full bg-[var(--color-fg-disabled)]"></span>
             디버그
           </summary>
           <div class="mt-2 flex flex-col gap-4">
             <div class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-sm">
-              <h4 class="m-0 mb-3 text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">저널</h4>
+              <h4 class="m-0 mb-3 text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">저널</h4>
               <${AgentJournalStream} agentName=${keeper.name} />
             </div>
             <div class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-sm">
-              <h4 class="m-0 mb-3 text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">원시 데이터</h4>
+              <h4 class="m-0 mb-3 text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">원시 데이터</h4>
               <${RawDataDebug} keeper=${keeper} />
             </div>
           </div>

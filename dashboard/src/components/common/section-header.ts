@@ -1,5 +1,5 @@
 // SectionHeader — consistent section labels across dashboard
-// Replaces 34+ inline patterns: `text-3xs uppercase tracking-1 text-[var(--text-muted)] font-medium`
+// Replaces 34+ inline patterns: `text-3xs uppercase tracking-1 text-[var(--color-fg-muted)] font-medium`
 
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
@@ -29,7 +29,7 @@ export function SectionHeader({
 }: SectionHeaderProps) {
   return html`
     <div class="flex items-center justify-between gap-2 ${cx ?? ''}">
-      <h4 class="m-0 ${SIZE_CLASSES[size]} uppercase tracking-[0.06em] text-[var(--text-muted)] font-medium">${children}</h4>
+      <h4 class="m-0 ${SIZE_CLASSES[size]} uppercase tracking-[0.06em] text-[var(--color-fg-muted)] font-medium">${children}</h4>
       ${right ?? null}
     </div>
   `

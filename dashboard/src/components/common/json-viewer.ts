@@ -21,8 +21,8 @@ export function JsonViewer({ data, label, initialCollapsed = false, level = 0, a
   if (isObject && ancestors.includes(data as object)) {
     return html`
       <div class="font-mono text-sm leading-relaxed flex items-start gap-1.5 py-0.5 min-w-0 max-w-full">
-        ${label ? html`<span class="text-[var(--text-body)] shrink-0 font-medium whitespace-nowrap">${label}:</span>` : null}
-        <span class="text-[var(--text-muted)] italic">[Circular]</span>
+        ${label ? html`<span class="text-[var(--color-fg-primary)] shrink-0 font-medium whitespace-nowrap">${label}:</span>` : null}
+        <span class="text-[var(--color-fg-muted)] italic">[Circular]</span>
       </div>
     `
   }
@@ -30,20 +30,20 @@ export function JsonViewer({ data, label, initialCollapsed = false, level = 0, a
   if (!isObject) {
     let valueNode
     if (typeof data === 'string') {
-      valueNode = html`<span class="text-[var(--ok)] whitespace-pre-wrap break-words">"${data}"</span>`
+      valueNode = html`<span class="text-[var(--color-status-ok)] whitespace-pre-wrap break-words">"${data}"</span>`
     } else if (typeof data === 'number') {
-      valueNode = html`<span class="text-[var(--warn)]">${data}</span>`
+      valueNode = html`<span class="text-[var(--color-status-warn)]">${data}</span>`
     } else if (typeof data === 'boolean') {
       valueNode = html`<span class="text-[#e27e8d]">${data ? 'true' : 'false'}</span>`
     } else if (data === null) {
-      valueNode = html`<span class="text-[var(--text-muted)] italic">null</span>`
+      valueNode = html`<span class="text-[var(--color-fg-muted)] italic">null</span>`
     } else {
-      valueNode = html`<span class="text-[var(--text-muted)]">${String(data)}</span>`
+      valueNode = html`<span class="text-[var(--color-fg-muted)]">${String(data)}</span>`
     }
 
     return html`
       <div class="font-mono text-sm leading-relaxed flex items-start gap-1.5 py-0.5 min-w-0 max-w-full">
-        ${label ? html`<span class="text-[var(--text-body)] shrink-0 font-medium whitespace-nowrap">${label}:</span>` : null}
+        ${label ? html`<span class="text-[var(--color-fg-primary)] shrink-0 font-medium whitespace-nowrap">${label}:</span>` : null}
         <div class="min-w-0 break-words">${valueNode}</div>
       </div>
     `
@@ -57,8 +57,8 @@ export function JsonViewer({ data, label, initialCollapsed = false, level = 0, a
   if (isEmpty) {
     return html`
       <div class="font-mono text-sm leading-relaxed flex items-start gap-1.5 py-0.5">
-        ${label ? html`<span class="text-[var(--text-body)] shrink-0 font-medium whitespace-nowrap">${label}:</span>` : null}
-        <span class="text-[var(--text-muted)]">${isArray ? '[]' : '{}'}</span>
+        ${label ? html`<span class="text-[var(--color-fg-primary)] shrink-0 font-medium whitespace-nowrap">${label}:</span>` : null}
+        <span class="text-[var(--color-fg-muted)]">${isArray ? '[]' : '{}'}</span>
       </div>
     `
   }
@@ -72,9 +72,9 @@ export function JsonViewer({ data, label, initialCollapsed = false, level = 0, a
         aria-expanded=${!collapsed}
         aria-label=${`${collapsed ? 'Expand' : 'Collapse'} ${toggleLabel}`}
       >
-        <span aria-hidden="true" class="text-[var(--text-muted)] shrink-0 w-4 inline-flex justify-center transition-transform duration-150 ${collapsed ? '-rotate-90' : ''}">▼</span>
-        ${label ? html`<span class="text-[var(--text-body)] font-medium truncate">${label}</span>` : null}
-        <span class="text-[var(--text-muted)] text-2xs ml-1 shrink-0">
+        <span aria-hidden="true" class="text-[var(--color-fg-muted)] shrink-0 w-4 inline-flex justify-center transition-transform duration-150 ${collapsed ? '-rotate-90' : ''}">▼</span>
+        ${label ? html`<span class="text-[var(--color-fg-primary)] font-medium truncate">${label}</span>` : null}
+        <span class="text-[var(--color-fg-muted)] text-2xs ml-1 shrink-0">
           ${isArray ? `[${(data as unknown[]).length}]` : `{${entries.length}}`}
         </span>
       </button>
@@ -93,8 +93,8 @@ export function JsonViewer({ data, label, initialCollapsed = false, level = 0, a
 
 export function JsonViewerCard({ data, title }: { data: unknown; title?: string }) {
   return html`
-    <div class="bg-[var(--bg-0)] border border-[var(--card-border)] rounded overflow-hidden flex flex-col max-h-100" data-testid="json-viewer-card" data-title=${title ?? ''}>
-      ${title ? html`<div class="px-3 py-2 border-b border-[var(--card-border)] bg-[var(--white-3)] text-2xs uppercase tracking-wider font-semibold text-[var(--text-muted)]">${title}</div>` : null}
+    <div class="bg-[var(--bg-0)] border border-[var(--color-border-default)] rounded overflow-hidden flex flex-col max-h-100" data-testid="json-viewer-card" data-title=${title ?? ''}>
+      ${title ? html`<div class="px-3 py-2 border-b border-[var(--color-border-default)] bg-[var(--white-3)] text-2xs uppercase tracking-wider font-semibold text-[var(--color-fg-muted)]">${title}</div>` : null}
       <div class="p-3 overflow-y-auto min-h-0 w-full">
         <${JsonViewer} data=${data} />
       </div>

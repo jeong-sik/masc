@@ -138,13 +138,13 @@ describe('uniqueStrings', () => {
 
 describe('successClass', () => {
   it('returns ok for >=97', () => {
-    expect(successClass(97)).toContain('var(--ok)')
-    expect(successClass(100)).toContain('var(--ok)')
+    expect(successClass(97)).toContain('var(--color-status-ok)')
+    expect(successClass(100)).toContain('var(--color-status-ok)')
   })
 
   it('returns warn for 90-96', () => {
-    expect(successClass(90)).toContain('var(--warn)')
-    expect(successClass(96)).toContain('var(--warn)')
+    expect(successClass(90)).toContain('var(--color-status-warn)')
+    expect(successClass(96)).toContain('var(--color-status-warn)')
   })
 
   it('returns bad-light for <90', () => {
@@ -253,11 +253,11 @@ describe('pressureClass', () => {
   })
 
   it('returns warn for warn ratio', () => {
-    expect(pressureClass(PRESSURE_WARN_RATIO)).toContain('var(--warn)')
+    expect(pressureClass(PRESSURE_WARN_RATIO)).toContain('var(--color-status-warn)')
   })
 
   it('returns ok for low ratio', () => {
-    expect(pressureClass(0.1)).toContain('var(--ok)')
+    expect(pressureClass(0.1)).toContain('var(--color-status-ok)')
   })
 })
 
@@ -268,11 +268,11 @@ describe('statusClass', () => {
   })
 
   it('returns warn for runtime blocker', () => {
-    expect(statusClass(makeRow({ runtime_blocker_class: 'turn_timeout' }))).toContain('var(--warn)')
+    expect(statusClass(makeRow({ runtime_blocker_class: 'turn_timeout' }))).toContain('var(--color-status-warn)')
   })
 
   it('returns warn for stale diagnostic health state', () => {
-    expect(statusClass(makeRow({ status: 'inactive', diagnostic_health_state: 'stale' }))).toContain('var(--warn)')
+    expect(statusClass(makeRow({ status: 'inactive', diagnostic_health_state: 'stale' }))).toContain('var(--color-status-warn)')
   })
 
   it('returns bad-light for offline diagnostic health state', () => {
@@ -280,7 +280,7 @@ describe('statusClass', () => {
   })
 
   it('returns ok for healthy', () => {
-    expect(statusClass(makeRow())).toContain('var(--ok)')
+    expect(statusClass(makeRow())).toContain('var(--color-status-ok)')
   })
 })
 
